@@ -35,7 +35,7 @@ Shape -> {
   -> square:
 }
 
-None->{->}
+None->{}
 maybe -> {
   T -> None
   -> None:

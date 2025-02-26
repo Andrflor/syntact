@@ -1,0 +1,394 @@
+package arm64_assembler
+
+// ARM64 Register Enumeration
+Register64 :: enum u8 {
+    X0 = 0, X1, X2, X3, X4, X5, X6, X7,
+    X8, X9, X10, X11, X12, X13, X14, X15,
+    X16, X17, X18, X19, X20, X21, X22, X23,
+    X24, X25, X26, X27, X28, X29, X30, SP
+}
+
+VectorRegister :: enum u8 {
+    V0 = 0, V1, V2, V3, V4, V5, V6, V7,
+    V8, V9, V10, V11, V12, V13, V14, V15,
+    V16, V17, V18, V19, V20, V21, V22, V23,
+    V24, V25, V26, V27, V28, V29, V30, V31
+}
+
+ConditionCode :: enum u8 {
+    EQ, NE, CS, CC, MI, PL, VS, VC,
+    HI, LS, GE, LT, GT, LE
+}
+
+// === DATA MOVEMENT ===
+mov_x64_imm64 :: proc(reg: Register64, imm: u64) {}
+mov_x64_x64 :: proc(dst: Register64, src: Register64) {}
+movk_x64_imm16 :: proc(reg: Register64, imm: u16, shift: u8) {}
+movz_x64_imm16 :: proc(reg: Register64, imm: u16, shift: u8) {}
+movn_x64_imm16 :: proc(reg: Register64, imm: u16, shift: u8) {}
+movabs_x64_imm64 :: proc(reg: Register64, imm: u64) {}
+movbe_x64_x64 :: proc(dst: Register64, src: Register64) {}
+
+// Advanced data movement
+adr_x64 :: proc(dst: Register64, offset: i32) {}
+adrp_x64 :: proc(dst: Register64, offset: i32) {}
+
+// === ADDRESS MANIPULATION ===
+lea_x64 :: proc(dst: Register64, addr: u64) {}
+lea_x64_offset :: proc(dst: Register64, base: Register64, offset: i16) {}
+
+// === ARITHMETIC ===
+add_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+add_x64_imm :: proc(dst: Register64, src: Register64, imm: u16) {}
+sub_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+sub_x64_imm :: proc(dst: Register64, src: Register64, imm: u16) {}
+mul_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+udiv_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+sdiv_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+
+// Advanced arithmetic
+madd_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, src3: Register64) {}
+msub_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, src3: Register64) {}
+smaddl_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, src3: Register64) {}
+smsubl_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, src3: Register64) {}
+smulh_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+sqrshl_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {} // Signed saturating rounding shift left
+uqrshl_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {} // Unsigned saturating rounding shift left
+sqrshrn_x64_x64 :: proc(dst: Register64, src: Register64, shift: u8) {} // Signed saturating rounding shift right narrow
+uqrshrn_x64_x64 :: proc(dst: Register64, src: Register64, shift: u8) {} // Unsigned saturating rounding shift right narrow
+
+// === BITWISE ===
+and_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+orr_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+eor_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+bic_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+
+// Advanced bit manipulation
+bfm_x64 :: proc(dst: Register64, src: Register64, immr: u8, imms: u8) {}
+sbfm_x64 :: proc(dst: Register64, src: Register64, immr: u8, imms: u8) {}
+ubfm_x64 :: proc(dst: Register64, src: Register64, immr: u8, imms: u8) {}
+bfxil_x64 :: proc(dst: Register64, src: Register64, lsb: u8, width: u8) {}
+sbfiz_x64 :: proc(dst: Register64, src: Register64, lsb: u8, width: u8) {}
+ubfiz_x64 :: proc(dst: Register64, src: Register64, lsb: u8, width: u8) {}
+cinc_x64_x64 :: proc(dst: Register64, src: Register64, cond: ConditionCode) {} // Conditional increment
+cset_x64 :: proc(dst: Register64, cond: ConditionCode) {} // Conditional set
+cneg_x64_x64 :: proc(dst: Register64, src: Register64, cond: ConditionCode) {} // Conditional negate
+
+// Shift operations
+lsl_x64_x64 :: proc(dst: Register64, src: Register64, shift: u8) {}
+lsr_x64_x64 :: proc(dst: Register64, src: Register64, shift: u8) {}
+asr_x64_x64 :: proc(dst: Register64, src: Register64, shift: u8) {}
+ror_x64_x64 :: proc(dst: Register64, src: Register64, shift: u8) {}
+shl_x64_x64_imm :: proc(dst: Register64, src: Register64, imm: u8) {}
+shr_x64_x64_imm :: proc(dst: Register64, src: Register64, imm: u8) {}
+ror_x64_x64_imm :: proc(dst: Register64, src: Register64, imm: u8) {}
+
+// Bit count and manipulation
+clz_x64 :: proc(dst: Register64, src: Register64) {}
+cls_x64 :: proc(dst: Register64, src: Register64) {}
+rbit_x64 :: proc(dst: Register64, src: Register64) {}
+rev_x64 :: proc(dst: Register64, src: Register64) {}
+rev16_x64 :: proc(dst: Register64, src: Register64) {}
+rev32_x64 :: proc(dst: Register64, src: Register64) {}
+
+// === COMPARISON ===
+cmp_x64_x64 :: proc(src1: Register64, src2: Register64) {}
+cmp_x64_imm :: proc(src: Register64, imm: u16) {}
+tst_x64_x64 :: proc(src1: Register64, src2: Register64) {}
+
+// === CONDITIONAL OPERATIONS ===
+csel_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, cond: ConditionCode) {}
+csinc_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, cond: ConditionCode) {}
+csneg_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, cond: ConditionCode) {}
+csinv_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, cond: ConditionCode) {}
+csgei_x64_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, cond: ConditionCode) {}
+
+// === CONTROL FLOW ===
+b_rel26 :: proc(offset: i32) {}
+bl_rel26 :: proc(offset: i32) {}
+blr_x64 :: proc(reg: Register64) {}
+blr_m64 :: proc(mem_addr: u64) {} // Indirect branch with link
+br_m64 :: proc(mem_addr: u64) {} // Indirect branch
+ret :: proc(buf: ^ARM64_Buffer) {}
+ret_x64 :: proc(reg: Register64) {}
+setcc_x64 :: proc(dst: Register64, cond: ConditionCode) {}
+endbr_x64 :: proc(buf: ^ARM64_Buffer) {}
+
+// Conditional branches
+b_cond :: proc(offset: i32, cond: ConditionCode) {}
+cbz_x64 :: proc(reg: Register64, offset: i32) {}
+cbnz_x64 :: proc(reg: Register64, offset: i32) {}
+tbz_x64 :: proc(reg: Register64, bit: u8, offset: i32) {}
+tbnz_x64 :: proc(reg: Register64, bit: u8, offset: i32) {}
+
+// === LOAD/STORE ===
+ldr_x64_mem :: proc(dst: Register64, addr: Register64, offset: i16) {}
+str_x64_mem :: proc(src: Register64, addr: Register64, offset: i16) {}
+ldp_x64_mem :: proc(dst1: Register64, dst2: Register64, addr: Register64, offset: i16) {}
+stp_x64_mem :: proc(src1: Register64, src2: Register64, addr: Register64, offset: i16) {}
+
+// Load/Store variants
+ldrb_x64_mem :: proc(dst: Register64, addr: Register64, offset: i16) {}
+strb_x64_mem :: proc(src: Register64, addr: Register64, offset: i16) {}
+ldrh_x64_mem :: proc(dst: Register64, addr: Register64, offset: i16) {}
+strh_x64_mem :: proc(src: Register64, addr: Register64, offset: i16) {}
+ldrsw_x64_mem :: proc(dst: Register64, addr: Register64, offset: i16) {}
+
+// === STACK OPERATIONS ===
+stp_pre_x64_sp :: proc(src1: Register64, src2: Register64, offset: i16) {}
+ldp_post_x64_sp :: proc(dst1: Register64, dst2: Register64, offset: i16) {}
+push_x64 :: proc(reg: Register64) {}
+pop_x64 :: proc(reg: Register64) {}
+
+// === SYSTEM INSTRUCTIONS ===
+mrs_x64 :: proc(dst: Register64, sys_reg: u16) {}
+msr_x64 :: proc(sys_reg: u16, src: Register64) {}
+svc :: proc(imm: u16) {}
+hvc :: proc(imm: u16) {}
+smc :: proc(imm: u16) {}
+eret :: proc(buf: ^ARM64_Buffer) {}
+hint_yield :: proc(buf: ^ARM64_Buffer) {}
+hint_wfe :: proc(buf: ^ARM64_Buffer) {}
+hint_wfi :: proc(buf: ^ARM64_Buffer) {}
+
+// === ATOMIC OPERATIONS ===
+ldadd_x64 :: proc(dst: Register64, src: Register64, addr: Register64) {}
+ldclr_x64 :: proc(dst: Register64, src: Register64, addr: Register64) {}
+ldeor_x64 :: proc(dst: Register64, src: Register64, addr: Register64) {}
+ldset_x64 :: proc(dst: Register64, src: Register64, addr: Register64) {}
+cas_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, addr: Register64) {}
+casal_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, addr: Register64) {}
+
+// === MEMORY BARRIER ===
+dmb :: proc(option: u8) {}
+dsb :: proc(option: u8) {}
+isb :: proc(buf: ^ARM64_Buffer) {}
+
+// === SIMD AND VECTOR ===
+// Basic vector arithmetic
+add_v8b_v8b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sub_v8b_v8b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+mul_v8b_v8b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+div_v8b_v8b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+cmpeq_v_x64_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+cmpne_v_x64_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+uzp1_v_x64_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+zip1_v_x64_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+trn1_v_x64_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+
+// Advanced vector operations
+ext_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister, imm: u8) {}
+uzp1_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+zip1_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+trn1_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+
+// Dot product and machine learning
+sdot_v4s_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+udot_v4s_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+
+// Cryptography Instructions
+// SHA instructions
+sha1c_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha1p_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha1m_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha1su0_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha1su1_v4s :: proc(dst: VectorRegister, src: VectorRegister) {}
+sha256h_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha256h2_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha256su0_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha256su1_v4s :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sm3partw1_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {} // SM3 hashing part 1
+sm3partw2_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {} // SM3 hashing part 2
+sm4e_x64 :: proc(dst: VectorRegister, src: VectorRegister) {} // SM4 encryption
+sm4ekey_x64 :: proc(dst: VectorRegister, src: VectorRegister) {} // SM4 key schedule
+
+// === Pointer AUthentication ==
+pacia_x64 :: proc(dst: Register64, src: Register64) {} // Authenticate instruction pointer with A key
+pacib_x64 :: proc(dst: Register64, src: Register64) {} // Authenticate instruction pointer with B key
+autia_x64 :: proc(dst: Register64, src: Register64) {} // Authenticate and return with A key
+autib_x64 :: proc(dst: Register64, src: Register64) {} // Authenticate and return with B key
+xpaclri_x64 :: proc(buf: ^ARM64_Buffer) {} // Clear pointer authentication
+
+// AES instructions
+aese_v16b :: proc(dst: VectorRegister, src: VectorRegister) {}
+aesd_v16b :: proc(dst: VectorRegister, src: VectorRegister) {}
+aesmc_v16b :: proc(dst: VectorRegister, src: VectorRegister) {}
+aesimc_v16b :: proc(dst: VectorRegister, src: VectorRegister) {}
+
+// Polynomial multiplication
+pmull_v8h :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+
+// === ADDITIONAL VECTOR PERMUTE INSTRUCTIONS ===
+tbl_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+tbx_v16b :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+
+// === ADVANCED SYSTEM INSTRUCTIONS ===
+mrs_current_el :: proc(dst: Register64) {}
+mrs_midr_el1 :: proc(dst: Register64) {}
+mrs_mpidr_el1 :: proc(dst: Register64) {}
+
+// === ADVANCED LOAD/STORE INSTRUCTIONS ===
+ldapr_x64_mem :: proc(dst: Register64, addr: Register64) {}
+ldapur_x64_mem :: proc(dst: Register64, addr: Register64, offset: i16) {}
+stlur_x64_mem :: proc(src: Register64, addr: Register64, offset: i16) {}
+
+// === ADVANCED BIT MANIPULATION ===
+bitcount_x64 :: proc(dst: Register64, src: Register64) {}
+bitfield_insert_x64 :: proc(dst: Register64, src1: Register64, src2: Register64, lsb: u8, width: u8) {}
+
+// === HALF-PRECISION FLOATING POINT ===
+fcvt_h_d :: proc(dst: VectorRegister, src: VectorRegister) {}
+fcvt_d_h :: proc(dst: VectorRegister, src: VectorRegister) {}
+fcvtzs_x64_h :: proc(dst: Register64, src: VectorRegister) {}
+fcvtzu_x64_h :: proc(dst: Register64, src: VectorRegister) {}
+
+// === TRANSACTIONAL MEMORY INSTRUCTIONS ===
+stxr_x64_mem :: proc(status: Register64, src: Register64, addr: Register64) {}
+ldxr_x64_mem :: proc(dst: Register64, addr: Register64) {}
+stlxr_x64_mem :: proc(status: Register64, src: Register64, addr: Register64) {}
+
+// === ADVANCED SYNCHRONIZATION PRIMITIVES ===
+sevl :: proc(buf: ^ARM64_Buffer) {}
+wfet :: proc(buf: ^ARM64_Buffer) {}
+wfit :: proc(buf: ^ARM64_Buffer) {}
+
+// === PREDICATION INSTRUCTIONS ===
+pf_mem_predict_load :: proc(addr: Register64, hint: u8) {}
+pf_mem_predict_store :: proc(addr: Register64, hint: u8) {}
+
+// === MEMORY TAGGING EXTENSIONS ===
+addpt_x64 :: proc(dst: Register64, src: Register64, offset: Register64) {}
+subpt_x64 :: proc(dst: Register64, src: Register64, offset: Register64) {}
+
+// === ADVANCED MACHINE LEARNING VECTOR INSTRUCTIONS ===
+sdot_v4s_v16b_indexed :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister, index: u8) {}
+udot_v4s_v16b_indexed :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister, index: u8) {}
+
+// === ADDITIONAL CRYPTO INSTRUCTIONS ===
+crypto_sm3_msg1 :: proc(dst: VectorRegister, src: VectorRegister) {}
+crypto_sm3_msg2 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+crypto_sm4_aese :: proc(dst: VectorRegister, src: VectorRegister) {}
+
+// === VIRTUALIZATION EXTENSIONS ===
+at_s1e1r_x64 :: proc(addr: Register64) {}
+at_s1e1w_x64 :: proc(addr: Register64) {}
+tlbi_vmalle1 :: proc(buf: ^ARM64_Buffer) {}
+
+// === FLOATING POINT ===
+// Floating point arithmetic
+fadd_d :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fsub_d :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fmul_d :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fdiv_d :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fneg_d :: proc(dst: VectorRegister, src: VectorRegister) {}
+fabs_d :: proc(dst: VectorRegister, src: VectorRegister) {}
+
+// Floating point conversions
+fcvt_s_d :: proc(dst: VectorRegister, src: VectorRegister) {}
+fcvt_d_s :: proc(dst: VectorRegister, src: VectorRegister) {}
+fcvtzs_x64_d :: proc(dst: Register64, src: VectorRegister) {}
+fcvtzu_x64_d :: proc(dst: Register64, src: VectorRegister) {}
+scvtf_d_x64 :: proc(dst: VectorRegister, src: Register64) {}
+ucvtf_d_x64 :: proc(dst: VectorRegister, src: Register64) {}
+
+// === MEMORY MANAGEMENT ===
+clflush_x64 :: proc(mem: u64) {}
+clwb_x64 :: proc(mem: u64) {}
+
+// === SYSTEM & POWER MANAGEMENT ===
+monitor_x64 :: proc(reg: Register64) {}
+mwait_x64 :: proc(reg: Register64) {}
+swapgs_x64 :: proc(buf: ^ARM64_Buffer) {}
+
+// === TRANSACTIONAL MEMORY (TSX) ===
+xtest_x64 :: proc(buf: ^ARM64_Buffer) {}
+
+// === DEBUGGING & EXCEPTION HANDLING ===
+bound_x64 :: proc(reg: Register64, mem: u64) {}
+
+// === CRYPTOGRAPHY ===
+aese_x64 :: proc(dst: VectorRegister, src: VectorRegister) {}
+aesd_x64 :: proc(dst: VectorRegister, src: VectorRegister) {}
+sha256h_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+sha256su1_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+
+// === VIRTUALIZATION ===
+vmcall_x64 :: proc(buf: ^ARM64_Buffer) {}
+vmlaunch_x64 :: proc(buf: ^ARM64_Buffer) {}
+vmresume_x64 :: proc(buf: ^ARM64_Buffer) {}
+vmxoff_x64 :: proc(buf: ^ARM64_Buffer) {}
+
+// === FLOATING POINT ===
+fadd_d_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fsub_d_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fmul_d_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fdiv_d_x64 :: proc(dst: VectorRegister, src1: VectorRegister, src2: VectorRegister) {}
+fneg_d_x64 :: proc(dst: VectorRegister, src: VectorRegister) {}
+
+// === PREFETCH INSTRUCTIONS ===
+prefetch_x64 :: proc(mem: u64) {}
+prefetchw_x64 :: proc(mem: u64) {}
+prfm_x64 :: proc(addr: Register64, hint: u8) {} // Prefetch memory
+prfum_x64 :: proc(addr: Register64, hint: u8) {} // Prefetch memory with user-level access
+
+// === RANDOM NUMBER GENERATION ===
+rdrand_x64 :: proc(reg: Register64) {}
+rdseed_x64 :: proc(reg: Register64) {}
+
+// === MEMORY BARRIERS ===
+dmb_x64 :: proc(option: u8) {}
+dsb_x64 :: proc(option: u8) {}
+isb_x64 :: proc(buf: ^ARM64_Buffer) {}
+
+// === PERFORMANCE MONITORING ===
+paci_x64 :: proc(reg: Register64) {}
+pacda_x64 :: proc(reg: Register64) {}
+
+// === DEBUG AND TRAP ===
+brk_x64 :: proc(imm: u16) {}
+hlt_x64 :: proc(imm: u16) {}
+
+// === DEBUG AND TRAP ===
+brk :: proc(imm: u16) {}
+hlt :: proc(imm: u16) {}
+smdmb :: proc(buf: ^ARM64_Buffer) {}
+csdb :: proc(buf: ^ARM64_Buffer) {}
+
+// === PERFORMANCE MONITORING ===
+paci_x64 :: proc(reg: Register64) {}
+pacda_x64 :: proc(reg: Register64) {}
+autia_x64 :: proc(reg: Register64) {}
+xpaclri_x64 :: proc(buf: ^ARM64_Buffer) {}
+pmswinc_x64 :: proc(event: u8) {} // Performance Monitor Software Increment
+
+// === MEMORY TAGGING EXTENSIONS ===
+irg_x64 :: proc(dst: Register64, src: Register64, offset: Register64) {}
+gmi_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+addg_x64 :: proc(dst: Register64, src: Register64, offset: u16, imm: u8) {}
+subg_x64 :: proc(dst: Register64, src: Register64, offset: u16, tag: u8) {}
+irg_x64 :: proc(dst: Register64, src: Register64, mod: Register64) {}
+
+// === RANDOM NUMBER GENERATION ===
+gmi_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+setf_x64 :: proc(src: Register64) {}
+
+// === ADVANCED COMPARISON ===
+ccmn_x64 :: proc(src1: Register64, src2: Register64, nzcv: u8, cond: ConditionCode) {}
+ccmp_x64 :: proc(src1: Register64, src2: Register64, nzcv: u8, cond: ConditionCode) {}
+
+// === MISCELLANEOUS ===
+// Hint instructions
+hint_nop :: proc(buf: ^ARM64_Buffer) {}
+hint_sevl :: proc(buf: ^ARM64_Buffer) {}
+hint_esb :: proc(buf: ^ARM64_Buffer) {}
+hint_psb :: proc(buf: ^ARM64_Buffer) {}
+
+// CRC Instructions
+crc32b_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32h_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32w_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32x_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32cb_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32ch_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32cw_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
+crc32cx_x64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
