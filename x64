@@ -1,6 +1,6 @@
 package x64_assembler
 
-// x64 Register Enumeration
+// ===== REGISTER DEFINITIONS =====
 Register64 :: enum u8 {
     RAX = 0, RCX = 1, RDX = 2, RBX = 3,
     RSP = 4, RBP = 5, RSI = 6, RDI = 7,
@@ -19,51 +19,75 @@ x87Register :: enum u8 {
     ST0 = 0, ST1, ST2, ST3, ST4, ST5, ST6, ST7
 }
 
-// === DATA MOVEMENT ===
+// ===== DATA MOVEMENT INSTRUCTIONS =====
+// --- General Purpose Register Movement ---
 mov_r64_imm64 :: proc(reg: Register64, imm: u64) {}
 mov_r64_r64 :: proc(dst: Register64, src: Register64) {}
 mov_r64_m64 :: proc(dst: Register64, mem_addr: u64) {}
 mov_m64_r64 :: proc(mem_addr: u64, src: Register64) {}
+movabs_r64_imm64 :: proc(reg: Register64, imm: u64) {}
+xchg_r64_r64 :: proc(dst: Register64, src: Register64) {}
+
+// --- Sign and Zero Extensions ---
 movsx_r64_r32 :: proc(dst: Register64, src: Register64) {}
 movzx_r64_r32 :: proc(dst: Register64, src: Register64) {}
+
+// --- Byte Order Control ---
 movbe_r64_m64 :: proc(dst: Register64, mem_addr: u64) {}
 movbe_m64_r64 :: proc(mem_addr: u64, src: Register64) {}
+bswap_r64 :: proc(reg: Register64) {}  // Byte swap
 
-// Additional data movement
-xchg_r64_r64 :: proc(dst: Register64, src: Register64) {}
-movabs_r64_imm64 :: proc(reg: Register64, imm: u64) {}
+// --- Special Registers ---
 mov_cr_r64 :: proc(cr: u8, reg: Register64) {}
 mov_r64_cr :: proc(reg: Register64, cr: u8) {}
+mov_cr0_r64 :: proc(reg: Register64) {}
+mov_cr2_r64 :: proc(reg: Register64) {}
+mov_cr3_r64 :: proc(reg: Register64) {}
+mov_cr4_r64 :: proc(reg: Register64) {}
 
-// === ADDRESS MANIPULATION ===
+// --- Debug Registers ---
+mov_dr0_r64 :: proc(reg: Register64) {}
+mov_dr1_r64 :: proc(reg: Register64) {}
+mov_dr2_r64 :: proc(reg: Register64) {}
+mov_dr3_r64 :: proc(reg: Register64) {}
+mov_dr6_r64 :: proc(reg: Register64) {}
+mov_dr7_r64 :: proc(reg: Register64) {}
+
+// --- Address Manipulation ---
 lea_r64_m64 :: proc(dst: Register64, mem_addr: u64) {}
 lea_r64_m :: proc(dst: Register64, mem: u64) {}
 
-// === ARITHMETIC ===
+// ===== ARITHMETIC INSTRUCTIONS =====
+// --- Basic Arithmetic ---
 add_r64_imm32 :: proc(reg: Register64, imm: u32) {}
 add_r64_r64 :: proc(dst: Register64, src: Register64) {}
 sub_r64_imm32 :: proc(reg: Register64, imm: u32) {}
 sub_r64_r64 :: proc(dst: Register64, src: Register64) {}
-mul_r64 :: proc(reg: Register64) {}
-imul_r64_r64 :: proc(dst: Register64, src: Register64) {}
-imul_r64_r64_imm32 :: proc(dst: Register64, src: Register64, imm: u32) {}
-div_r64 :: proc(reg: Register64) {}
-idiv_r64 :: proc(reg: Register64) {}
 inc_r64 :: proc(reg: Register64) {}
 dec_r64 :: proc(reg: Register64) {}
 neg_r64 :: proc(reg: Register64) {}
 
-// Additional arithmetic
-xadd_r64_r64 :: proc(dst: Register64, src: Register64) {}
-adc_r64_r64 :: proc(dst: Register64, src: Register64) {}
-sbb_r64_r64 :: proc(dst: Register64, src: Register64) {}
-imul_r64_imm32 :: proc(reg: Register64, imm: u32) {}
+// --- Advanced Arithmetic ---
+adc_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Add with carry
+sbb_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Subtract with borrow
+xadd_r64_r64 :: proc(dst: Register64, src: Register64) {} // Exchange and add
 
-// === BITWISE ===
+// --- Multiplication and Division ---
+mul_r64 :: proc(reg: Register64) {}     // Unsigned multiply
+imul_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Signed multiply
+imul_r64_r64_imm32 :: proc(dst: Register64, src: Register64, imm: u32) {}
+imul_r64_imm32 :: proc(reg: Register64, imm: u32) {}
+div_r64 :: proc(reg: Register64) {}     // Unsigned divide
+idiv_r64 :: proc(reg: Register64) {}    // Signed divide
+
+// ===== BITWISE INSTRUCTIONS =====
+// --- Basic Bitwise Operations ---
 and_r64_r64 :: proc(dst: Register64, src: Register64) {}
 or_r64_r64 :: proc(dst: Register64, src: Register64) {}
 xor_r64_r64 :: proc(dst: Register64, src: Register64) {}
 not_r64 :: proc(reg: Register64) {}
+
+// --- Shifts and Rotates ---
 shl_r64_imm8 :: proc(reg: Register64, imm: u8) {
     assert(imm <= 63, "Shift amount must be 0-63")
 }
@@ -78,84 +102,96 @@ ror_r64_imm8 :: proc(reg: Register64, imm: u8) {
 }
 shld_r64_r64_imm8 :: proc(dst: Register64, src: Register64, imm: u8) {}
 shrd_r64_r64_imm8 :: proc(dst: Register64, src: Register64, imm: u8) {}
-bt_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}
-bts_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}
-btr_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}
-btc_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}
-bsf_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Bit Scan Forward
-bsr_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Bit Scan Reverse
-popcnt_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Population Count
-bswap_r64 :: proc(reg: Register64) {}  // Byte swap
-lzcnt_r64_r64 :: proc(dst: Register64, src: Register64) {}
-tzcnt_r64_r64 :: proc(dst: Register64, src: Register64) {}
-pext_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
-pdep_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}
 
-// === CONTROL FLOW ===
-jmp_rel32 :: proc(offset: i32) {}
-call_rel32 :: proc(offset: i32) {}
-setcc_r8 :: proc(dst: u8) {}
-endbr64 :: proc(buf: ^X64_Buffer) {}
-ret :: proc(buf: ^X64_Buffer) {}
-jmp_r64 :: proc(reg: Register64) {}
-call_r64 :: proc(reg: Register64) {}
-jmp_m64 :: proc(mem_addr: u64) {}
-call_m64 :: proc(mem_addr: u64) {}
-sysret :: proc(buf: ^X64_Buffer) {}
-swapgs :: proc(buf: ^X64_Buffer) {}
-hlt :: proc(buf: ^X64_Buffer) {}
+// --- Bit Manipulation ---
+bt_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}   // Bit test
+bts_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}  // Bit test and set
+btr_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}  // Bit test and reset
+btc_r64_r64 :: proc(reg: Register64, bit_index: Register64) {}  // Bit test and complement
+bsf_r64_r64 :: proc(dst: Register64, src: Register64) {}        // Bit scan forward
+bsr_r64_r64 :: proc(dst: Register64, src: Register64) {}        // Bit scan reverse
+popcnt_r64_r64 :: proc(dst: Register64, src: Register64) {}     // Population count
+lzcnt_r64_r64 :: proc(dst: Register64, src: Register64) {}      // Leading zero count
+tzcnt_r64_r64 :: proc(dst: Register64, src: Register64) {}      // Trailing zero count
+pext_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}  // Parallel bits extract
+pdep_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {}  // Parallel bits deposit
 
-// Conditional jumps
-je_rel32 :: proc(offset: i32) {}
-jne_rel32 :: proc(offset: i32) {}
-jg_rel32 :: proc(offset: i32) {}
-jl_rel32 :: proc(offset: i32) {}
-jge_rel32 :: proc(offset: i32) {}
-jle_rel32 :: proc(offset: i32) {}
-
-// Additional control flow
-ja_rel32 :: proc(offset: i32) {}   // Jump if above
-jae_rel32 :: proc(offset: i32) {}  // Jump if above or equal
-jb_rel32 :: proc(offset: i32) {}   // Jump if below
-jbe_rel32 :: proc(offset: i32) {}  // Jump if below or equal
-loop_rel8 :: proc(offset: i8) {}
-loope_rel8 :: proc(offset: i8) {}
-loopne_rel8 :: proc(offset: i8) {}
-jecxz_rel8 :: proc(offset: i8) {}
-
-// === STACK MANIPULATION ===
-push_r64 :: proc(reg: Register64) {}
-pop_r64 :: proc(reg: Register64) {}
-pushfq :: proc(buf: ^X64_Buffer) {}
-popfq :: proc(buf: ^X64_Buffer) {}
-
-// === COMPARISON & CONDITIONAL JUMPS ===
+// ===== COMPARISON INSTRUCTIONS =====
 cmp_r64_r64 :: proc(reg1: Register64, reg2: Register64) {}
 cmp_r64_imm32 :: proc(reg: Register64, imm: u32) {}
 test_r64_r64 :: proc(reg1: Register64, reg2: Register64) {}
 test_r64_imm32 :: proc(reg: Register64, imm: u32) {}
 
-// Conditional moves
-cmove_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Move if equal
-cmovne_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Move if not equal
-cmova_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Move if above
-cmovae_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Move if above or equal
-cmovb_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Move if below
-cmovbe_r64_r64 :: proc(dst: Register64, src: Register64) {}  // Move if below or equal
+// --- Conditional Moves ---
+cmove_r64_r64 :: proc(dst: Register64, src: Register64) {}    // Move if equal
+cmovne_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Move if not equal
+cmova_r64_r64 :: proc(dst: Register64, src: Register64) {}    // Move if above
+cmovae_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Move if above or equal
+cmovb_r64_r64 :: proc(dst: Register64, src: Register64) {}    // Move if below
+cmovbe_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Move if below or equal
 
-// === SIMD (SSE/AVX) ===
+// ===== CONTROL FLOW INSTRUCTIONS =====
+// --- Unconditional Jumps & Calls ---
+jmp_rel32 :: proc(offset: i32) {}
+jmp_r64 :: proc(reg: Register64) {}
+jmp_m64 :: proc(mem_addr: u64) {}
+call_rel32 :: proc(offset: i32) {}
+call_r64 :: proc(reg: Register64) {}
+call_m64 :: proc(mem_addr: u64) {}
+ret :: proc(buf: ^X64_Buffer) {}
+
+// --- Conditional Jumps ---
+je_rel32 :: proc(offset: i32) {}     // Jump if equal
+jne_rel32 :: proc(offset: i32) {}    // Jump if not equal
+jg_rel32 :: proc(offset: i32) {}     // Jump if greater
+jl_rel32 :: proc(offset: i32) {}     // Jump if less
+jge_rel32 :: proc(offset: i32) {}    // Jump if greater or equal
+jle_rel32 :: proc(offset: i32) {}    // Jump if less or equal
+ja_rel32 :: proc(offset: i32) {}     // Jump if above
+jae_rel32 :: proc(offset: i32) {}    // Jump if above or equal
+jb_rel32 :: proc(offset: i32) {}     // Jump if below
+jbe_rel32 :: proc(offset: i32) {}    // Jump if below or equal
+
+// --- Loop Control ---
+loop_rel8 :: proc(offset: i8) {}     // Decrement ECX/RCX; jump if not zero
+loope_rel8 :: proc(offset: i8) {}    // Loop while equal
+loopne_rel8 :: proc(offset: i8) {}   // Loop while not equal
+jecxz_rel8 :: proc(offset: i8) {}    // Jump if ECX/RCX is zero
+
+// --- Miscellaneous Control Flow ---
+setcc_r8 :: proc(dst: u8) {}
+endbr64 :: proc(buf: ^X64_Buffer) {} // End branch (for Control-flow Enforcement Technology)
+
+// ===== STACK MANIPULATION =====
+push_r64 :: proc(reg: Register64) {}
+pop_r64 :: proc(reg: Register64) {}
+pushfq :: proc(buf: ^X64_Buffer) {}  // Push RFLAGS
+popfq :: proc(buf: ^X64_Buffer) {}   // Pop RFLAGS
+
+// ===== SIMD INSTRUCTIONS =====
+// --- SSE/AVX Data Movement ---
 movd_xmm_r64 :: proc(xmm: XMMRegister, reg: Register64) {}
 movd_r64_xmm :: proc(reg: Register64, xmm: XMMRegister) {}
+movups_xmm_m128 :: proc(dst: XMMRegister, mem: u64) {}
+movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: u64) {}
+
+// --- SSE/AVX Arithmetic ---
 addps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
 mulps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
 divps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
 sqrtps_xmm :: proc(xmm: XMMRegister) {}
+
+// --- SSE/AVX Comparison ---
+cmpps_xmm_xmm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {}
+cmpeqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
+cmpneqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
+
+// --- AVX FMA (Fused Multiply-Add) ---
 vfmadd132ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vfmadd213ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vfmadd231ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
-vpternlogd_ymm_ymm_ymm_imm8 :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm: u8) {}
 
-// Advanced SIMD Instructions
+// --- AVX Advanced Operations ---
 vaddps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vmulps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vdivps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
@@ -163,18 +199,16 @@ vblendps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm
 vpand_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vpor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vpxor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
-cmpps_xmm_xmm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {}
-cmpeqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
-cmpneqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
+vpternlogd_ymm_ymm_ymm_imm8 :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm: u8) {}
+vextracti128_ymm_ymm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {}
+
+// --- SIMD Integer Operations ---
 pavgb_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
 pavgb_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister) {}
 pmaddwd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
 pmulhuw_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {}
-vextracti128_ymm_ymm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {}
-movups_xmm_m128 :: proc(dst: XMMRegister, mem: u64) {}
-movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: u64) {}
 
-// === AVX-512 ===
+// --- AVX-512 Operations ---
 vaddpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vsubpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
 vmulpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {}
@@ -189,128 +223,106 @@ vpscatterqd_ymm_m :: proc(src: XMMRegister, mem: u64) {}
 vpcompressd_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister) {}
 vpcompressq_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister) {}
 
-// Crypto and AES Instructions
-aesenc :: proc(dst: XMMRegister, src: XMMRegister) {}
-aesdec :: proc(dst: XMMRegister, src: XMMRegister) {}
-pclmulqdq :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {}
+// ===== CRYPTOGRAPHY INSTRUCTIONS =====
+aesenc :: proc(dst: XMMRegister, src: XMMRegister) {}        // AES encryption round
+aesdec :: proc(dst: XMMRegister, src: XMMRegister) {}        // AES decryption round
+pclmulqdq :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {}  // Carryless multiplication
+crc32_r64_r64 :: proc(dst: Register64, src: Register64) {}  // CRC-32 computation
 
-// === X87 FLOATING POINT INSTRUCTIONS ===
-fadd_st0_st :: proc(src: x87Register) {}
-fsub_st0_st :: proc(src: x87Register) {}
-fmul_st0_st :: proc(src: x87Register) {}
-fdiv_st0_st :: proc(src: x87Register) {}
-fcom_st :: proc(src: x87Register) {}
-fcomp_st :: proc(src: x87Register) {}
-fucom_st :: proc(src: x87Register) {}
-fucomp_st :: proc(src: x87Register) {}
-fldcw :: proc(mem: u64) {}
-fstcw :: proc(mem: u64) {}
-fnstcw :: proc(mem: u64) {}
-fninit :: proc(buf: ^X64_Buffer) {}
-fwait :: proc(buf: ^X64_Buffer) {}
+// ===== X87 FLOATING POINT INSTRUCTIONS =====
+fadd_st0_st :: proc(src: x87Register) {}       // Add
+fsub_st0_st :: proc(src: x87Register) {}       // Subtract
+fmul_st0_st :: proc(src: x87Register) {}       // Multiply
+fdiv_st0_st :: proc(src: x87Register) {}       // Divide
+fcom_st :: proc(src: x87Register) {}           // Compare floating point
+fcomp_st :: proc(src: x87Register) {}          // Compare floating point and pop
+fucom_st :: proc(src: x87Register) {}          // Unordered compare floating point
+fucomp_st :: proc(src: x87Register) {}         // Unordered compare floating point and pop
+fldcw :: proc(mem: u64) {}                     // Load x87 FPU control word
+fstcw :: proc(mem: u64) {}                     // Store x87 FPU control word
+fnstcw :: proc(mem: u64) {}                    // Store x87 FPU control word without checking exceptions
+fninit :: proc(buf: ^X64_Buffer) {}            // Initialize x87 FPU
+fwait :: proc(buf: ^X64_Buffer) {}             // Wait for x87 FPU to complete current instruction
 
-// === MEMORY AND STRING OPERATIONS ===
-movs_m64_m64 :: proc(buf: ^X64_Buffer) {}
-stos_m64 :: proc(buf: ^X64_Buffer) {}
-cmps_m64_m64 :: proc(buf: ^X64_Buffer) {}
-rep_movs :: proc(buf: ^X64_Buffer) {}
-rep_stos :: proc(buf: ^X64_Buffer) {}
-rep_cmps :: proc(buf: ^X64_Buffer) {}
+// ===== MEMORY AND STRING OPERATIONS =====
+movs_m64_m64 :: proc(buf: ^X64_Buffer) {}      // Move string
+stos_m64 :: proc(buf: ^X64_Buffer) {}          // Store string
+cmps_m64_m64 :: proc(buf: ^X64_Buffer) {}      // Compare string
+rep_movs :: proc(buf: ^X64_Buffer) {}          // Repeat move string
+rep_stos :: proc(buf: ^X64_Buffer) {}          // Repeat store string
+rep_cmps :: proc(buf: ^X64_Buffer) {}          // Repeat compare string
 
-// === SYSTEM INSTRUCTIONS ===
-syscall :: proc(buf: ^X64_Buffer) {}
-int_imm8 :: proc(imm: u8) {}
-cpuid :: proc(buf: ^X64_Buffer) {}
-rdtsc :: proc(buf: ^X64_Buffer) {}
-rdmsr :: proc(buf: ^X64_Buffer) {}    // Read Model Specific Register
-wrmsr :: proc(buf: ^X64_Buffer) {}    // Write Model Specific Register
-rdpmc :: proc(buf: ^X64_Buffer) {}    // Read Performance Monitoring Counter
-rdtscp :: proc(buf: ^X64_Buffer) {}   // Read Timestamp and Process Counter
+// ===== SYSTEM INSTRUCTIONS =====
+// --- Interrupts and System Calls ---
+syscall :: proc(buf: ^X64_Buffer) {}           // Fast system call
+sysret :: proc(buf: ^X64_Buffer) {}            // Return from system call
+int_imm8 :: proc(imm: u8) {}                   // Generate software interrupt
+int3 :: proc(buf: ^X64_Buffer) {}              // Breakpoint
+into :: proc(buf: ^X64_Buffer) {}              // Interrupt on overflow
+iret :: proc(buf: ^X64_Buffer) {}              // Interrupt return
 
-// === ATOMIC OPERATIONS ===
-lock_xadd_r64_r64 :: proc(dst: Register64, src: Register64) {}
-lock_cmpxchg_r64_r64 :: proc(dst: Register64, src: Register64) {}
-lock_inc_r64 :: proc(reg: Register64) {}
-lock_dec_r64 :: proc(reg: Register64) {}
-lock_xchg_r64_r64 :: proc(dst: Register64, src: Register64) {}
-atomic_load_r64 :: proc(dst: Register64, src: u64) {}
-atomic_store_r64 :: proc(dst: u64, src: Register64) {}
+// --- Processor Control ---
+cpuid :: proc(buf: ^X64_Buffer) {}             // CPU identification
+rdtsc :: proc(buf: ^X64_Buffer) {}             // Read time-stamp counter
+rdtscp :: proc(buf: ^X64_Buffer) {}            // Read time-stamp counter and processor ID
+rdmsr :: proc(buf: ^X64_Buffer) {}             // Read model-specific register
+wrmsr :: proc(buf: ^X64_Buffer) {}             // Write model-specific register
+rdpmc :: proc(buf: ^X64_Buffer) {}             // Read performance-monitoring counter
+hlt :: proc(buf: ^X64_Buffer) {}               // Halt processor
 
-// === VIRTUALIZATION AND SYSTEM MANAGEMENT ===
-vmcall :: proc(buf: ^X64_Buffer) {}     // VMX guest system call
-vmlaunch :: proc(buf: ^X64_Buffer) {}   // Launch VMX non-root operation
-vmresume :: proc(buf: ^X64_Buffer) {}   // Resume VMX non-root operation
-vmxoff :: proc(buf: ^X64_Buffer) {}     // Exit VMX non-root operation
+// --- Process & Memory Management ---
+swapgs :: proc(buf: ^X64_Buffer) {}            // Swap GS base register
+wrpkru :: proc(buf: ^X64_Buffer) {}            // Write PKRU register
+rdpkru :: proc(buf: ^X64_Buffer) {}            // Read PKRU register
+clac :: proc(buf: ^X64_Buffer) {}              // Clear AC flag (prevents SMAP violations)
+stac :: proc(buf: ^X64_Buffer) {}              // Set AC flag (allows supervisor mode access)
+ud2 :: proc(buf: ^X64_Buffer) {}               // Undefined instruction (for debugging)
 
-// === TRANSACTIONAL MEMORY INSTRUCTIONS ===
-xbegin :: proc(offset: i32) {}
-xend :: proc(buf: ^X64_Buffer) {}
-xabort :: proc(imm: u8) {}
+// --- Virtualization Instructions ---
+vmcall :: proc(buf: ^X64_Buffer) {}            // VMX guest system call
+vmlaunch :: proc(buf: ^X64_Buffer) {}          // Launch VMX non-root operation
+vmresume :: proc(buf: ^X64_Buffer) {}          // Resume VMX non-root operation
+vmxoff :: proc(buf: ^X64_Buffer) {}            // Exit VMX non-root operation
 
-// === SECURITY FEATURES ===
-clac :: proc(buf: ^X64_Buffer) {} // Clear AC flag (prevents SMAP violations)
-stac :: proc(buf: ^X64_Buffer) {} // Set AC flag (allows supervisor mode access)
-rdtscp :: proc(buf: ^X64_Buffer) {} // Read time-stamp counter with processor ID
+// ===== ATOMIC OPERATIONS =====
+lock_xadd_r64_r64 :: proc(dst: Register64, src: Register64) {}      // Locked exchange and add
+lock_cmpxchg_r64_r64 :: proc(dst: Register64, src: Register64) {}   // Locked compare and exchange
+lock_inc_r64 :: proc(reg: Register64) {}                            // Locked increment
+lock_dec_r64 :: proc(reg: Register64) {}                            // Locked decrement
+lock_xchg_r64_r64 :: proc(dst: Register64, src: Register64) {}      // Locked exchange
+atomic_load_r64 :: proc(dst: Register64, src: u64) {}               // Atomic load
+atomic_store_r64 :: proc(dst: u64, src: Register64) {}              // Atomic store
 
-// === RANDOM NUMBER GENERATION ===
-rdrand_r64 :: proc(reg: Register64) {}
-rdseed_r64 :: proc(reg: Register64) {}
+// ===== TRANSACTIONAL MEMORY INSTRUCTIONS =====
+xbegin :: proc(offset: i32) {}                 // Begin transaction
+xend :: proc(buf: ^X64_Buffer) {}              // End transaction
+xabort :: proc(imm: u8) {}                     // Abort transaction
+xtest :: proc(buf: ^X64_Buffer) {}             // Test if executing in a transaction
 
-// === PREFETCH INSTRUCTIONS ===
-prefetcht0 :: proc(mem: u64) {}   // Prefetch to all cache levels
-prefetcht1 :: proc(mem: u64) {}   // Prefetch to L2 cache
-prefetcht2 :: proc(mem: u64) {}   // Prefetch to L3 cache
-prefetchnta :: proc(mem: u64) {}  // Prefetch with minimal cache pollution
+// ===== RANDOM NUMBER GENERATION =====
+rdrand_r64 :: proc(reg: Register64) {}         // Read random number
+rdseed_r64 :: proc(reg: Register64) {}         // Read random seed
 
-// === MEMORY MANAGEMENT ===
-clflush_m64 :: proc(mem: u64) {}
-clflushopt_m64 :: proc(mem: u64) {}
-clwb_m64 :: proc(mem: u64) {}
+// ===== PREFETCH INSTRUCTIONS =====
+prefetcht0 :: proc(mem: u64) {}                // Prefetch to all cache levels
+prefetcht1 :: proc(mem: u64) {}                // Prefetch to L2 cache
+prefetcht2 :: proc(mem: u64) {}                // Prefetch to L3 cache
+prefetchnta :: proc(mem: u64) {}               // Prefetch with minimal cache pollution
 
-// === SYSTEM & POWER MANAGEMENT ===
-monitor_r64_r64_r64 :: proc(reg1: Register64, reg2: Register64, reg3: Register64) {}
-mwait_r64_r64 :: proc(reg1: Register64, reg2: Register64) {}
-swapgs :: proc(buf: ^X64_Buffer) {}
+// ===== MEMORY MANAGEMENT AND OPTIMIZATION =====
+clflush_m64 :: proc(mem: u64) {}               // Flush cache line
+clflushopt_m64 :: proc(mem: u64) {}            // Optimized flush cache line
+clwb_m64 :: proc(mem: u64) {}                  // Cache line write back
+bound_r64_m128 :: proc(reg: Register64, mem: u64) {}  // Check array bounds
 
-// === SMEP / CONTROL FLOW ENFORCEMENT ===
-wrpkru :: proc(buf: ^X64_Buffer) {}
-rdpkru :: proc(buf: ^X64_Buffer) {}
+// ===== POWER MANAGEMENT =====
+monitor_r64_r64_r64 :: proc(reg1: Register64, reg2: Register64, reg3: Register64) {}  // Set up monitor address
+mwait_r64_r64 :: proc(reg1: Register64, reg2: Register64) {}  // Monitor wait
 
-// === TRANSACTIONAL MEMORY (TSX) ===
-xtest :: proc(buf: ^X64_Buffer) {}
+// ===== MEMORY FENCES =====
+mfence :: proc(buf: ^X64_Buffer) {}            // Memory fence
+lfence :: proc(buf: ^X64_Buffer) {}            // Load fence
+sfence :: proc(buf: ^X64_Buffer) {}            // Store fence
 
-// === DEBUGGING & EXCEPTION HANDLING ===
-bound_r64_m128 :: proc(reg: Register64, mem: u64) {}
-
-// === DEBUG INSTRUCTIONS ===
-int3 :: proc(buf: ^X64_Buffer) {}  // Breakpoint
-ud2 :: proc(buf: ^X64_Buffer) {}   // Undefined instruction (generates an invalid opcode exception)
-
-// === INTERRUPT AND EXCEPTION HANDLING ===
-iret :: proc(buf: ^X64_Buffer) {}  // Interrupt return
-into :: proc(buf: ^X64_Buffer) {}  // Interrupt on overflow
-
-// === CONTROL REGISTER INSTRUCTIONS ===
-mov_cr0_r64 :: proc(reg: Register64) {}
-mov_cr2_r64 :: proc(reg: Register64) {}
-mov_cr3_r64 :: proc(reg: Register64) {}
-mov_cr4_r64 :: proc(reg: Register64) {}
-
-// === DEBUG REGISTER INSTRUCTIONS ===
-mov_dr0_r64 :: proc(reg: Register64) {}
-mov_dr1_r64 :: proc(reg: Register64) {}
-mov_dr2_r64 :: proc(reg: Register64) {}
-mov_dr3_r64 :: proc(reg: Register64) {}
-mov_dr6_r64 :: proc(reg: Register64) {}
-mov_dr7_r64 :: proc(reg: Register64) {}
-
-// === PERFORMANCE MONITORING ===
+// ===== PERFORMANCE MONITORING =====
 perfmon_instructions :: proc(buf: ^X64_Buffer) {}  // Placeholder for various performance monitoring instructions
-
-// === CrC32  ===
-crc32_r64_r64 :: proc(dst: Register64, src: Register64) {}
-
-// === Fencing ===
-mfence :: proc(buf: ^X64_Buffer) {}  // Full memory barrier
-lfence :: proc(buf: ^X64_Buffer) {}  // Load memory barrier
-sfence :: proc(buf: ^X64_Buffer) {}  // Store memory barrier
