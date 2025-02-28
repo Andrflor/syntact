@@ -1,5 +1,7 @@
 package x64_assembler
 
+import "core:fmt"
+
 // ===== REGISTER DEFINITIONS =====
 Register64 :: enum u8 {
 	RAX = 0,
@@ -162,9 +164,9 @@ movzx_r64_r32 :: proc(dst: Register64, src: Register64) -> [3]u8 {
 }
 
 // --- Byte Order Control ---
-movbe_r64_m64 :: proc(dst: Register64, mem_addr: u64) -> [8]u8 {
+movbe_r64_m64 :: proc(dst: Register64, mem_addr: u64) -> [10]u8 {
 	// REX.W + 0F 38 F0 /r (48 0F 38 F0 /r)
-	return [8]u8 {
+	return [10]u8 {
 		0x48 + ((u8(dst) & 0x8) >> 1), // REX.W + register extension
 		0x0F, // Two-byte opcode prefix
 		0x38, // Three-byte opcode prefix
@@ -175,12 +177,14 @@ movbe_r64_m64 :: proc(dst: Register64, mem_addr: u64) -> [8]u8 {
 		// Store address (little-endian, 32-bit)
 		u8(mem_addr & 0xFF),
 		u8((mem_addr >> 8) & 0xFF),
+		u8((mem_addr >> 16) & 0xFF),
+		u8((mem_addr >> 24) & 0xFF),
 	}
 }
 
-movbe_m64_r64 :: proc(mem_addr: u64, src: Register64) -> [8]u8 {
+movbe_m64_r64 :: proc(mem_addr: u64, src: Register64) -> [10]u8 {
 	// REX.W + 0F 38 F1 /r (48 0F 38 F1 /r)
-	return [8]u8 {
+	return [10]u8 {
 		0x48 + ((u8(src) & 0x8) >> 1), // REX.W + register extension
 		0x0F, // Two-byte opcode prefix
 		0x38, // Three-byte opcode prefix
@@ -191,6 +195,8 @@ movbe_m64_r64 :: proc(mem_addr: u64, src: Register64) -> [8]u8 {
 		// Store address (little-endian, 32-bit)
 		u8(mem_addr & 0xFF),
 		u8((mem_addr >> 8) & 0xFF),
+		u8((mem_addr >> 16) & 0xFF),
+		u8((mem_addr >> 24) & 0xFF),
 	}
 }
 
@@ -312,34 +318,40 @@ lea_r64_m :: proc(dst: Register64, mem: u64) -> [8]u8 {
 
 // ===== ARITHMETIC INSTRUCTIONS =====
 // --- Basic Arithmetic ---
-add_r64_imm32 :: proc(reg: Register64, imm: u32) -> [4]u8 {
+add_r64_imm32 :: proc(reg: Register64, imm: u32) -> [7]u8 {
 	// REX.W + 81 /0 id (48 81 /0 id)
-	return [4]u8 {
+	return [7]u8 {
 		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
 		0x81, // Opcode
 		0xC0 + (u8(reg) & 0x7), // ModR/M byte (/0 = opcode extension 0 for ADD)
-		// Copy 4 bytes of immediate value
-		mem_copy(&result[3], &imm, 4),
+		// Immediate (little-endian)
+		u8(imm & 0xFF),
+		u8((imm >> 8) & 0xFF),
+		u8((imm >> 16) & 0xFF),
+		u8((imm >> 24) & 0xFF),
 	}
 }
 
-add_r64_r64 :: proc(dst: Register64, src: Register64) -> [4]u8 {
+add_r64_r64 :: proc(dst: Register64, src: Register64) -> [3]u8 {
 	// REX.W + 01 /r (48 01 /r)
-	return [4]u8 {
+	return [3]u8 {
 		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3), // REX.W + register extensions
 		0x01, // Opcode
 		0xC0 + ((u8(src) & 0x7) << 3) + (u8(dst) & 0x7), // ModR/M byte
 	}
 }
 
-sub_r64_imm32 :: proc(reg: Register64, imm: u32) -> [4]u8 {
+sub_r64_imm32 :: proc(reg: Register64, imm: u32) -> [7]u8 {
 	// REX.W + 81 /5 id (48 81 /5 id)
-	return [4]u8 {
+	return [7]u8 {
 		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
 		0x81, // Opcode
 		0xE8 + (u8(reg) & 0x7), // ModR/M byte (/5 = opcode extension 5 for SUB)
-		// Copy 4 bytes of immediate value
-		mem_copy(&result[3], &imm, 4),
+		// Immediate (little-endian)
+		u8(imm & 0xFF),
+		u8((imm >> 8) & 0xFF),
+		u8((imm >> 16) & 0xFF),
+		u8((imm >> 24) & 0xFF),
 	}
 }
 
@@ -363,27 +375,19 @@ inc_r64 :: proc(reg: Register64) -> [3]u8 {
 
 dec_r64 :: proc(reg: Register64) -> [3]u8 {
 	// REX.W + FF /1 (48 FF /1)
-	return [3]u8 {
-		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
-		0xFF, // Opcode
-		0xC8 + (u8(reg) & 0x7), // ModR/M byte (/1 = opcode extension 1 for DEC)
-	}
+	return [3]u8{0x48 + ((u8(reg) & 0x8) >> 3), 0xFF, 0xC8 + (u8(reg) & 0x7)}
 }
 
 neg_r64 :: proc(reg: Register64) -> [3]u8 {
 	// REX.W + F7 /3 (48 F7 /3)
-	return [3]u8 {
-		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
-		0xF7, // Opcode
-		0xD8 + (u8(reg) & 0x7), // ModR/M byte (/3 = opcode extension 3 for NEG)
-	}
+	return [3]u8{0x48 + ((u8(reg) & 0x8) >> 3), 0xF7, 0xD8 + (u8(reg) & 0x7)}
 }
 
 // --- Advanced Arithmetic ---
 adc_r64_r64 :: proc(dst: Register64, src: Register64) -> [3]u8 { 	// Add with carry
 	// REX.W + 11 /r (48 11 /r)
 	return [3]u8 {
-		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3), // REX.W + register extensions
+		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3),
 		0x11, // Opcode
 		0xC0 + ((u8(src) & 0x7) << 3) + (u8(dst) & 0x7), // ModR/M byte
 	}
@@ -392,16 +396,16 @@ adc_r64_r64 :: proc(dst: Register64, src: Register64) -> [3]u8 { 	// Add with ca
 sbb_r64_r64 :: proc(dst: Register64, src: Register64) -> [3]u8 { 	// Subtract with borrow
 	// REX.W + 19 /r (48 19 /r)
 	return [3]u8 {
-		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3), // REX.W + register extensions
+		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3),
 		0x19, // Opcode
-		0xC0 + ((u8(src) & 0x7) << 3) + (u8(dst) & 0x7), // ModR/M byte
+		0xC0 + ((u8(src) & 0x7) << 3) + (u8(dst) & 0x7),
 	}
 }
 
 xadd_r64_r64 :: proc(dst: Register64, src: Register64) -> [4]u8 { 	// Exchange and add
 	// REX.W + 0F C1 /r (48 0F C1 /r)
 	return [4]u8 {
-		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3), // REX.W + register extensions
+		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3),
 		0x0F, // Two-byte opcode prefix
 		0xC1, // Opcode
 		0xC0 + ((u8(src) & 0x7) << 3) + (u8(dst) & 0x7), // ModR/M byte
@@ -411,54 +415,50 @@ xadd_r64_r64 :: proc(dst: Register64, src: Register64) -> [4]u8 { 	// Exchange a
 // --- Multiplication and Division ---
 mul_r64 :: proc(reg: Register64) -> [3]u8 { 	// Unsigned multiply
 	// REX.W + F7 /4 (48 F7 /4)
-	return [3]u8 {
-		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
-		0xF7, // Opcode
-		0xE0 + (u8(reg) & 0x7), // ModR/M byte (/4 = opcode extension 4 for MUL)
-	}
+	return [3]u8{0x48 + ((u8(reg) & 0x8) >> 3), 0xF7, 0xE0 + (u8(reg) & 0x7)}
 }
 
 imul_r64_r64 :: proc(dst: Register64, src: Register64) -> [4]u8 { 	// Signed multiply
 	// REX.W + 0F AF /r (48 0F AF /r)
+	// Corrected: destination is in the reg field and source in r/m field.
 	return [4]u8 {
-		0x48 + ((u8(dst) & 0x8) >> 1) + ((u8(src) & 0x8) >> 3), // REX.W + register extensions
+		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3),
 		0x0F, // Two-byte opcode prefix
 		0xAF, // Opcode
 		0xC0 + ((u8(dst) & 0x7) << 3) + (u8(src) & 0x7), // ModR/M byte
 	}
 }
 
-imul_r64_r64_imm32 :: proc(dst: Register64, src: Register64, imm: u32) -> [4]u8 {
+imul_r64_r64_imm32 :: proc(dst: Register64, src: Register64, imm: u32) -> [7]u8 {
 	// REX.W + 69 /r id (48 69 /r id)
-	return [4]u8 {
-		0x48 + ((u8(dst) & 0x8) >> 1) + ((u8(src) & 0x8) >> 3), // REX.W + register extensions
+	// Corrected REX prefix order (same as mov_r64_r64) and immediate encoding.
+	return [7]u8 {
+		0x48 + ((u8(src) & 0x8) >> 1) + ((u8(dst) & 0x8) >> 3),
 		0x69, // Opcode
-		0xC0 + ((u8(dst) & 0x7) << 3) + (u8(src) & 0x7), // ModR/M byte
-		// Copy 4 bytes of immediate value
-		mem_copy(&result[3], &imm, 4),
+		0xC0 + ((u8(dst) & 0x7) << 3) + (u8(src) & 0x7),
+		u8(imm & 0xFF),
+		u8((imm >> 8) & 0xFF),
+		u8((imm >> 16) & 0xFF),
+		u8((imm >> 24) & 0xFF),
 	}
 }
 
-imul_r64_imm32 :: proc(reg: Register64, imm: u32) -> []u8 {
+imul_r64_imm32 :: proc(reg: Register64, imm: u32) -> [7]u8 {
 	// This is the same as imul_r64_r64_imm32 where dst and src are the same
 	return imul_r64_r64_imm32(reg, reg, imm)
 }
 
 div_r64 :: proc(reg: Register64) -> [3]u8 { 	// Unsigned divide
 	// REX.W + F7 /6 (48 F7 /6)
-	return [3]u8 {
-		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
-		0xF7, // Opcode
-		0xF0 + (u8(reg) & 0x7), // ModR/M byte (/6 = opcode extension 6 for DIV)
-	}
+	return [3]u8{0x48 + ((u8(reg) & 0x8) >> 3), 0xF7, 0xF0 + (u8(reg) & 0x7)}
 }
 
 idiv_r64 :: proc(reg: Register64) -> [3]u8 { 	// Signed divide
 	// REX.W + F7 /7 (48 F7 /7)
 	return [3]u8 {
-		0x48 + ((u8(reg) & 0x8) >> 3), // REX.W + register extension
-		0xF7, // Opcode
-		0xF8 + (u8(reg) & 0x7), // ModR ,// Signed divide
+		0x48 + ((u8(reg) & 0x8) >> 3),
+		0xF7,
+		0xF8 + (u8(reg) & 0x7), // ModR/M byte for signed divide
 	}
 }
 
@@ -713,3 +713,211 @@ sfence :: proc() {} 	// Store fence
 
 // ===== PERFORMANCE MONITORING =====
 perfmon_instructions :: proc() {} 	// Placeholder for various performance monitoring instructions
+
+// Helper: automated test equality function.
+test_equal :: proc(test_name: string, expected: []u8, actual: []u8) {
+	if len(expected) != len(actual) {
+		fmt.printf("FAIL: %s: expected length %d, got %d\n", test_name, len(expected), len(actual))
+		return
+	}
+	for v, i in expected {
+		if v != actual[i] {
+			fmt.printf(
+				"FAIL: %s: at index %d, expected 0x%X, got 0x%X\n",
+				test_name,
+				i,
+				v,
+				actual[i],
+			)
+			return
+		}
+	}
+	fmt.printf("PASS: %s\n", test_name)
+}
+
+main :: proc() {
+	// mov_r64_imm64: mov rax, 0x123456789ABCDEF0
+	t1: [10]u8 = mov_r64_imm64(Register64.RAX, 0x123456789ABCDEF0)
+	expected1: [10]u8 = [10]u8{0x48, 0xB8, 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12}
+	test_equal("mov_r64_imm64", expected1[:], t1[:])
+
+	// mov_r64_r64: mov rbx, rax
+	t2: [3]u8 = mov_r64_r64(Register64.RBX, Register64.RAX)
+	expected2: [3]u8 = [3]u8{0x48, 0x89, 0xC3}
+	test_equal("mov_r64_r64", expected2[:], t2[:])
+
+	// mov_r64_m64: mov rcx, [0x00400000]
+	t3: [8]u8 = mov_r64_m64(Register64.RCX, 0x00400000)
+	expected3: [8]u8 = [8]u8{0x48, 0x8B, 0x0C, 0x25, 0x00, 0x00, 0x40, 0x00}
+	test_equal("mov_r64_m64", expected3[:], t3[:])
+
+	// mov_m64_r64: mov [0x00400000], rdx
+	t4: [8]u8 = mov_m64_r64(0x00400000, Register64.RDX)
+	expected4: [8]u8 = [8]u8{0x48, 0x89, 0x14, 0x25, 0x00, 0x00, 0x40, 0x00}
+	test_equal("mov_m64_r64", expected4[:], t4[:])
+
+	// movabs_r64_imm64: movabs rsi, 0xDEADBEEFCAFEBABE
+	t5: [10]u8 = movabs_r64_imm64(Register64.RSI, 0xDEADBEEFCAFEBABE)
+	expected5: [10]u8 = [10]u8{0x48, 0xBE, 0xBE, 0xBA, 0xFE, 0xCA, 0xEF, 0xBE, 0xAD, 0xDE}
+	test_equal("movabs_r64_imm64", expected5[:], t5[:])
+
+	// xchg_r64_r64: xchg rdi, rbx
+	t6: [3]u8 = xchg_r64_r64(Register64.RDI, Register64.RBX)
+	expected6: [3]u8 = [3]u8{0x48, 0x87, 0xDF}
+	test_equal("xchg_r64_r64", expected6[:], t6[:])
+
+	// movsx_r64_r32: movsx rax, ecx
+	t7: [3]u8 = movsx_r64_r32(Register64.RAX, Register64.RCX)
+	expected7: [3]u8 = [3]u8{0x48, 0x63, 0xC1}
+	test_equal("movsx_r64_r32", expected7[:], t7[:])
+
+	// movzx_r64_r32: movzx rdx, ebx
+	t8: [3]u8 = movzx_r64_r32(Register64.RDX, Register64.RBX)
+	expected8: [3]u8 = [3]u8{0x40, 0x89, 0xDA}
+	test_equal("movzx_r64_r32", expected8[:], t8[:])
+
+	// movbe_r64_m64: movbe rsi, [0x00400000]
+	t9: [10]u8 = movbe_r64_m64(Register64.RSI, 0x00400000)
+	expected9: [10]u8 = [10]u8{0x48, 0x0F, 0x38, 0xF0, 0x34, 0x25, 0x00, 0x00, 0x40, 0x00}
+	test_equal("movbe_r64_m64", expected9[:], t9[:])
+
+	// movbe_m64_r64: movbe [0x00400000], rdi
+	t10: [10]u8 = movbe_m64_r64(0x00400000, Register64.RDI)
+	expected10: [10]u8 = [10]u8{0x48, 0x0F, 0x38, 0xF1, 0x3C, 0x25, 0x00, 0x00, 0x40, 0x00}
+	test_equal("movbe_m64_r64", expected10[:], t10[:])
+
+	// bswap_r64: bswap rcx
+	t11: [3]u8 = bswap_r64(Register64.RCX)
+	expected11: [3]u8 = [3]u8{0x48, 0x0F, 0xC9}
+	test_equal("bswap_r64", expected11[:], t11[:])
+
+	// mov_cr_r64: mov cr3, rbx
+	t12: [3]u8 = mov_cr_r64(3, Register64.RBX)
+	expected12: [3]u8 = [3]u8{0x0F, 0x22, 0xDB}
+	test_equal("mov_cr_r64", expected12[:], t12[:])
+
+	// mov_r64_cr: mov rax, cr0
+	t13: [3]u8 = mov_r64_cr(Register64.RAX, 0)
+	expected13: [3]u8 = [3]u8{0x0F, 0x20, 0xC0}
+	test_equal("mov_r64_cr", expected13[:], t13[:])
+
+	// mov_cr0_r64: mov cr0, rdx
+	t14: [3]u8 = mov_cr0_r64(Register64.RDX)
+	expected14: [3]u8 = [3]u8{0x0F, 0x22, 0xC2}
+	test_equal("mov_cr0_r64", expected14[:], t14[:])
+
+	// mov_dr0_r64: mov dr0, rbx
+	t15: [3]u8 = mov_dr0_r64(Register64.RBX)
+	expected15: [3]u8 = [3]u8{0x0F, 0x23, 0xC3}
+	test_equal("mov_dr0_r64", expected15[:], t15[:])
+
+	// mov_dr1_r64: mov dr1, rcx
+	t16: [3]u8 = mov_dr1_r64(Register64.RCX)
+	expected16: [3]u8 = [3]u8{0x0F, 0x23, 0xC9}
+	test_equal("mov_dr1_r64", expected16[:], t16[:])
+
+	// mov_dr2_r64: mov dr2, rdx
+	t17: [3]u8 = mov_dr2_r64(Register64.RDX)
+	expected17: [3]u8 = [3]u8{0x0F, 0x23, 0xD2}
+	test_equal("mov_dr2_r64", expected17[:], t17[:])
+
+	// mov_dr3_r64: mov dr3, rdi
+	t18: [3]u8 = mov_dr3_r64(Register64.RDI)
+	expected18: [3]u8 = [3]u8{0x0F, 0x23, 0xDF}
+	test_equal("mov_dr3_r64", expected18[:], t18[:])
+
+	// mov_dr6_r64: mov dr6, rax
+	t19: [3]u8 = mov_dr6_r64(Register64.RAX)
+	expected19: [3]u8 = [3]u8{0x0F, 0x23, 0xF0}
+	test_equal("mov_dr6_r64", expected19[:], t19[:])
+
+	// mov_dr7_r64: mov dr7, rbx
+	t20: [3]u8 = mov_dr7_r64(Register64.RBX)
+	expected20: [3]u8 = [3]u8{0x0F, 0x23, 0xFB}
+	test_equal("mov_dr7_r64", expected20[:], t20[:])
+
+	// lea_r64_m64: lea rsi, [0x00400000]
+	t21: [8]u8 = lea_r64_m64(Register64.RSI, 0x00400000)
+	expected21: [8]u8 = [8]u8{0x48, 0x8D, 0x34, 0x25, 0x00, 0x00, 0x40, 0x00}
+	test_equal("lea_r64_m64", expected21[:], t21[:])
+
+	// add_r64_imm32: add rbx, 0x12345678
+	t22: [7]u8 = add_r64_imm32(Register64.RBX, 0x12345678)
+	expected22: [7]u8 = [7]u8{0x48, 0x81, 0xC3, 0x78, 0x56, 0x34, 0x12}
+	test_equal("add_r64_imm32", expected22[:], t22[:])
+
+	// add_r64_r64: add rax, rcx
+	t23: [3]u8 = add_r64_r64(Register64.RAX, Register64.RCX)
+	expected23: [3]u8 = [3]u8{0x48, 0x01, 0xC8}
+	test_equal("add_r64_r64", expected23[:], t23[:])
+
+	// sub_r64_imm32: sub rdx, 0x87654321
+	t24: [7]u8 = sub_r64_imm32(Register64.RDX, 0x87654321)
+	expected24: [7]u8 = [7]u8{0x48, 0x81, 0xEA, 0x21, 0x43, 0x65, 0x87}
+	test_equal("sub_r64_imm32", expected24[:], t24[:])
+
+	// sub_r64_r64: sub rbx, rsi
+	t25: [3]u8 = sub_r64_r64(Register64.RBX, Register64.RSI)
+	expected25: [3]u8 = [3]u8{0x48, 0x29, 0xF3}
+	test_equal("sub_r64_r64", expected25[:], t25[:])
+
+	// inc_r64: inc rax
+	t26: [3]u8 = inc_r64(Register64.RAX)
+	expected26: [3]u8 = [3]u8{0x48, 0xFF, 0xC0}
+	test_equal("inc_r64", expected26[:], t26[:])
+
+	// dec_r64: dec rcx
+	t27: [3]u8 = dec_r64(Register64.RCX)
+	expected27: [3]u8 = [3]u8{0x48, 0xFF, 0xC9}
+	test_equal("dec_r64", expected27[:], t27[:])
+
+	// neg_r64: neg rdx
+	t28: [3]u8 = neg_r64(Register64.RDX)
+	expected28: [3]u8 = [3]u8{0x48, 0xF7, 0xDA}
+	test_equal("neg_r64", expected28[:], t28[:])
+
+	// adc_r64_r64: adc rbx, rsi
+	t29: [3]u8 = adc_r64_r64(Register64.RBX, Register64.RSI)
+	expected29: [3]u8 = [3]u8{0x48, 0x11, 0xF3}
+	test_equal("adc_r64_r64", expected29[:], t29[:])
+
+	// sbb_r64_r64: sbb rdi, rbx
+	t30: [3]u8 = sbb_r64_r64(Register64.RDI, Register64.RBX)
+	expected30: [3]u8 = [3]u8{0x48, 0x19, 0xDF}
+	test_equal("sbb_r64_r64", expected30[:], t30[:])
+
+	// xadd_r64_r64: xadd rdx, rbx
+	t31: [4]u8 = xadd_r64_r64(Register64.RDX, Register64.RBX)
+	expected31: [4]u8 = [4]u8{0x48, 0x0F, 0xC1, 0xDA}
+	test_equal("xadd_r64_r64", expected31[:], t31[:])
+
+	// mul_r64: mul rsi
+	t32: [3]u8 = mul_r64(Register64.RSI)
+	expected32: [3]u8 = [3]u8{0x48, 0xF7, 0xE6}
+	test_equal("mul_r64", expected32[:], t32[:])
+
+	// imul_r64_r64: imul rax, rdi
+	t33: [4]u8 = imul_r64_r64(Register64.RAX, Register64.RDI)
+	expected33: [4]u8 = [4]u8{0x48, 0x0F, 0xAF, 0xC7}
+	test_equal("imul_r64_r64", expected33[:], t33[:])
+
+	// imul_r64_r64_imm32: imul rbx, rcx, 0x11223344
+	t34: [7]u8 = imul_r64_r64_imm32(Register64.RBX, Register64.RCX, 0x11223344)
+	expected34: [7]u8 = [7]u8{0x48, 0x69, 0xD9, 0x44, 0x33, 0x22, 0x11}
+	test_equal("imul_r64_r64_imm32", expected34[:], t34[:])
+
+	// imul_r64_imm32: imul rdx, 0x55667788
+	t35: [7]u8 = imul_r64_imm32(Register64.RDX, 0x55667788)
+	expected35: []u8 = []u8{0x48, 0x69, 0xD2, 0x88, 0x77, 0x66, 0x55}
+	test_equal("imul_r64_imm32", expected35, t35[:])
+
+	// div_r64: div rsi
+	t36: [3]u8 = div_r64(Register64.RSI)
+	expected36: [3]u8 = [3]u8{0x48, 0xF7, 0xF6}
+	test_equal("div_r64", expected36[:], t36[:])
+
+	// idiv_r64: idiv rdi
+	t37: [3]u8 = idiv_r64(Register64.RDI)
+	expected37: [3]u8 = [3]u8{0x48, 0xF7, 0xFF}
+	test_equal("idiv_r64", expected37[:], t37[:])
+}
