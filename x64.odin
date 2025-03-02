@@ -738,8 +738,8 @@ test_equal :: proc(test_name: string, expected: []u8, actual: []u8) {
 main :: proc() {
 	// mov_r64_imm64: mov rax, 0x123456789ABCDEF0
 	t1: [10]u8 = mov_r64_imm64(Register64.RAX, 0x123456789ABCDEF0)
-	expected1: [10]u8 = [10]u8{0x48, 0xB8, 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12}
-	test_equal("mov_r64_imm64", expected1[:], t1[:])
+	expected1: []u8 = asm_to_bytes("mov rax 0x123456789ABCDEF0")
+	test_equal("mov_r64_imm64", expected1, t1[:])
 
 	// mov_r64_r64: mov rbx, rax
 	t2: [3]u8 = mov_r64_r64(Register64.RBX, Register64.RAX)
