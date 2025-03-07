@@ -1,0 +1,646 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+// x86-64 Assembly Instruction Set Interface
+//
+// This file contains procedure signatures for x86-64 assembly instructions
+// organized by instruction type and register size.
+//
+// Author: Florian Andrieu <andrieu.florian@mail.com>
+///////////////////////////////////////////////////////////////////////////////
+
+// ==================================
+// DATA MOVEMENT INSTRUCTIONS
+// ==================================
+
+// 64-bit Data Movement Instructions
+// These instructions move data between registers or between registers and memory
+
+// Move value between 64-bit registers or load immediate value
+mov_r64_imm64 :: proc(reg: Register64, imm: u64)  // Move immediate value to 64-bit register
+mov_r64_r64 :: proc(dst: Register64, src: Register64)  // Move value from source to destination register
+mov_r64_m64 :: proc(dst: Register64, mem_addr: u64)  // Load 64-bit value from memory into register
+mov_m64_r64 :: proc(mem_addr: u64, src: Register64)  // Store 64-bit register value to memory
+
+// Specialized move instructions
+movabs_r64_imm64 :: proc(reg: Register64, imm: u64)  // Move 64-bit immediate to register (full 64-bit immediate)
+movsx_r64_r32 :: proc(dst: Register64, src: Register32)  // Move with sign extension from 32-bit to 64-bit
+movsxd_r64_r32 :: proc(dst: Register64, src: Register32)  // Move with sign extension from 32-bit to 64-bit register
+movzx_r64_r8 :: proc(dst: Register64, src: Register8)  // Move with zero extension from 8-bit to 64-bit
+movzx_r64_r16 :: proc(dst: Register64, src: Register16)  // Move with zero extension from 16-bit to 64-bit
+movsx_r64_r8 :: proc(dst: Register64, src: Register8)  // Move with sign extension from 8-bit to 64-bit
+movsx_r64_r16 :: proc(dst: Register64, src: Register16)  // Move with sign extension from 16-bit to 64-bit
+
+// Byte-swapping and endianness management
+movbe_r64_m64 :: proc(dst: Register64, mem_addr: u64)  // Move big-endian value from memory to register
+movbe_m64_r64 :: proc(mem_addr: u64, src: Register64)  // Move big-endian value from register to memory
+bswap_r64 :: proc(reg: Register64)  // Byte swap (reverse byte order) in a 64-bit register
+
+// Exchange instructions
+xchg_r64_r64 :: proc(dst: Register64, src: Register64)  // Exchange values between two 64-bit registers
+
+// Load effective address
+lea_r64_m64 :: proc(dst: Register64, mem_addr: u64)  // Load effective address into 64-bit register
+
+// Control register operations
+mov_r64_cr :: proc(reg: Register64, cr: u8)  // Move from control register to 64-bit register
+mov_cr_r64 :: proc(cr: u8, reg: Register64)  // Move from 64-bit register to control register
+mov_cr0_r64 :: proc(reg: Register64)  // Move from 64-bit register to CR0
+mov_cr2_r64 :: proc(reg: Register64)  // Move from 64-bit register to CR2
+mov_cr3_r64 :: proc(reg: Register64)  // Move from 64-bit register to CR3
+mov_cr4_r64 :: proc(reg: Register64)  // Move from 64-bit register to CR4
+
+// Debug register operations
+mov_r64_dr :: proc(reg: Register64, dr: u8)  // Move from debug register to 64-bit register
+mov_dr_r64 :: proc(dr: u8, reg: Register64)  // Move from 64-bit register to debug register
+mov_dr0_r64 :: proc(reg: Register64)  // Move from 64-bit register to DR0
+mov_dr1_r64 :: proc(reg: Register64)  // Move from 64-bit register to DR1
+mov_dr2_r64 :: proc(reg: Register64)  // Move from 64-bit register to DR2
+mov_dr3_r64 :: proc(reg: Register64)  // Move from 64-bit register to DR3
+mov_dr6_r64 :: proc(reg: Register64)  // Move from 64-bit register to DR6
+mov_dr7_r64 :: proc(reg: Register64)  // Move from 64-bit register to DR7
+
+// 32-bit Data Movement Instructions
+mov_r32_imm32 :: proc(reg: Register32, imm: u32)  // Move immediate value to 32-bit register
+mov_r32_r32 :: proc(dst: Register32, src: Register32)  // Move value between 32-bit registers
+mov_r32_m32 :: proc(dst: Register32, mem_addr: u64)  // Load 32-bit value from memory
+mov_m32_r32 :: proc(mem_addr: u64, src: Register32)  // Store 32-bit register value to memory
+movzx_r32_r8 :: proc(dst: Register32, src: Register8)  // Move with zero extension from 8-bit to 32-bit
+movzx_r32_r16 :: proc(dst: Register32, src: Register16)  // Move with zero extension from 16-bit to 32-bit
+movsx_r32_r8 :: proc(dst: Register32, src: Register8)  // Move with sign extension from 8-bit to 32-bit
+movsx_r32_r16 :: proc(dst: Register32, src: Register16)  // Move with sign extension from 16-bit to 32-bit
+xchg_r32_r32 :: proc(dst: Register32, src: Register32)  // Exchange values between two 32-bit registers
+lea_r32_m :: proc(dst: Register32, mem_addr: u64)  // Load effective address into 32-bit register
+
+// 16-bit Data Movement Instructions
+mov_r16_imm16 :: proc(reg: Register16, imm: u16)  // Move immediate value to 16-bit register
+mov_r16_r16 :: proc(dst: Register16, src: Register16)  // Move value between 16-bit registers
+mov_r16_m16 :: proc(dst: Register16, mem_addr: u64)  // Load 16-bit value from memory
+mov_m16_r16 :: proc(mem_addr: u64, src: Register16)  // Store 16-bit register value to memory
+movzx_r16_r8 :: proc(dst: Register16, src: Register8)  // Move with zero extension from 8-bit to 16-bit
+movsx_r16_r8 :: proc(dst: Register16, src: Register8)  // Move with sign extension from 8-bit to 16-bit
+xchg_r16_r16 :: proc(dst: Register16, src: Register16)  // Exchange values between two 16-bit registers
+lea_r16_m :: proc(dst: Register16, mem_addr: u64)  // Load effective address into 16-bit register
+
+// 8-bit Data Movement Instructions
+mov_r8_imm8 :: proc(reg: Register8, imm: u8)  // Move immediate value to 8-bit register
+mov_r8_r8 :: proc(dst: Register8, src: Register8)  // Move value between 8-bit registers
+mov_r8_m8 :: proc(dst: Register8, mem_addr: u64)  // Load 8-bit value from memory
+mov_m8_r8 :: proc(mem_addr: u64, src: Register8)  // Store 8-bit register value to memory
+xchg_r8_r8 :: proc(dst: Register8, src: Register8)  // Exchange values between two 8-bit registers
+
+// Segment Register Operations
+mov_sreg_r16 :: proc(dst: SegmentRegister, src: Register16)  // Move 16-bit register to segment register
+mov_r16_sreg :: proc(dst: Register16, src: SegmentRegister)  // Move segment register to 16-bit register
+mov_sreg_m16 :: proc(dst: SegmentRegister, mem: u64)  // Load segment register from memory
+mov_m16_sreg :: proc(mem: u64, src: SegmentRegister)  // Store segment register to memory
+
+// ==================================
+// ARITHMETIC INSTRUCTIONS
+// ==================================
+
+// 64-bit Arithmetic Operations
+add_r64_imm32 :: proc(reg: Register64, imm: u32)  // Add immediate to 64-bit register
+add_r64_r64 :: proc(dst: Register64, src: Register64)  // Add source register to destination register
+sub_r64_imm32 :: proc(reg: Register64, imm: u32)  // Subtract immediate from 64-bit register
+sub_r64_r64 :: proc(dst: Register64, src: Register64)  // Subtract source register from destination register
+inc_r64 :: proc(reg: Register64)  // Increment 64-bit register
+dec_r64 :: proc(reg: Register64)  // Decrement 64-bit register
+neg_r64 :: proc(reg: Register64)  // Negate 64-bit register (two's complement)
+adc_r64_r64 :: proc(dst: Register64, src: Register64)  // Add with carry
+sbb_r64_r64 :: proc(dst: Register64, src: Register64)  // Subtract with borrow
+
+// Multiplication and Division
+mul_r64 :: proc(reg: Register64)  // Unsigned multiply (RDX:RAX = RAX * reg)
+imul_r64_r64 :: proc(dst: Register64, src: Register64)  // Signed multiply (dst = dst * src)
+imul_r64_r64_imm32 :: proc(dst: Register64, src: Register64, imm: u32)  // Signed multiply with immediate
+imul_r64_imm32 :: proc(reg: Register64, imm: u32)  // Signed multiply register by immediate
+div_r64 :: proc(reg: Register64)  // Unsigned divide RDX:RAX by reg
+idiv_r64 :: proc(reg: Register64)  // Signed divide RDX:RAX by reg
+
+// Exchange and Add
+xadd_r64_r64 :: proc(dst: Register64, src: Register64)  // Exchange and add
+
+// 32-bit Arithmetic Operations
+add_r32_imm32 :: proc(reg: Register32, imm: u32)  // Add immediate to 32-bit register
+add_r32_r32 :: proc(dst: Register32, src: Register32)  // Add source register to destination register
+sub_r32_imm32 :: proc(reg: Register32, imm: u32)  // Subtract immediate from 32-bit register
+sub_r32_r32 :: proc(dst: Register32, src: Register32)  // Subtract source register from destination register
+inc_r32 :: proc(reg: Register32)  // Increment 32-bit register
+dec_r32 :: proc(reg: Register32)  // Decrement 32-bit register
+neg_r32 :: proc(reg: Register32)  // Negate 32-bit register
+adc_r32_r32 :: proc(dst: Register32, src: Register32)  // Add with carry
+sbb_r32_r32 :: proc(dst: Register32, src: Register32)  // Subtract with borrow
+mul_r32 :: proc(reg: Register32)  // Unsigned multiply (EDX:EAX = EAX * reg)
+imul_r32 :: proc(reg: Register32)  // Signed multiply (EDX:EAX = EAX * reg)
+imul_r32_r32 :: proc(dst: Register32, src: Register32)  // Signed multiply (dst = dst * src)
+imul_r32_imm32 :: proc(reg: Register32, imm: u32)  // Signed multiply register by immediate
+div_r32 :: proc(reg: Register32)  // Unsigned divide EDX:EAX by reg
+idiv_r32 :: proc(reg: Register32)  // Signed divide EDX:EAX by reg
+cdq :: proc()  // Convert doubleword to quadword (sign-extend EAX into EDX:EAX)
+
+// 16-bit Arithmetic Operations
+add_r16_imm16 :: proc(reg: Register16, imm: u16)  // Add immediate to 16-bit register
+add_r16_r16 :: proc(dst: Register16, src: Register16)  // Add source register to destination register
+sub_r16_imm16 :: proc(reg: Register16, imm: u16)  // Subtract immediate from 16-bit register
+sub_r16_r16 :: proc(dst: Register16, src: Register16)  // Subtract source register from destination register
+inc_r16 :: proc(reg: Register16)  // Increment 16-bit register
+dec_r16 :: proc(reg: Register16)  // Decrement 16-bit register
+neg_r16 :: proc(reg: Register16)  // Negate 16-bit register
+adc_r16_r16 :: proc(dst: Register16, src: Register16)  // Add with carry
+sbb_r16_r16 :: proc(dst: Register16, src: Register16)  // Subtract with borrow
+mul_r16 :: proc(reg: Register16)  // Unsigned multiply (DX:AX = AX * reg)
+imul_r16 :: proc(reg: Register16)  // Signed multiply (DX:AX = AX * reg)
+imul_r16_r16 :: proc(dst: Register16, src: Register16)  // Signed multiply (dst = dst * src)
+imul_r16_imm16 :: proc(reg: Register16, imm: u16)  // Signed multiply register by immediate
+div_r16 :: proc(reg: Register16)  // Unsigned divide DX:AX by reg
+idiv_r16 :: proc(reg: Register16)  // Signed divide DX:AX by reg
+
+// 8-bit Arithmetic Operations
+add_r8_imm8 :: proc(reg: Register8, imm: u8)  // Add immediate to 8-bit register
+add_r8_r8 :: proc(dst: Register8, src: Register8)  // Add source register to destination register
+sub_r8_imm8 :: proc(reg: Register8, imm: u8)  // Subtract immediate from 8-bit register
+sub_r8_r8 :: proc(dst: Register8, src: Register8)  // Subtract source register from destination register
+inc_r8 :: proc(reg: Register8)  // Increment 8-bit register
+dec_r8 :: proc(reg: Register8)  // Decrement 8-bit register
+neg_r8 :: proc(reg: Register8)  // Negate 8-bit register
+adc_r8_r8 :: proc(dst: Register8, src: Register8)  // Add with carry
+sbb_r8_r8 :: proc(dst: Register8, src: Register8)  // Subtract with borrow
+mul_r8 :: proc(reg: Register8)  // Unsigned multiply (AX = AL * reg)
+imul_r8 :: proc(reg: Register8)  // Signed multiply (AX = AL * reg)
+div_r8 :: proc(reg: Register8)  // Unsigned divide AX by reg
+idiv_r8 :: proc(reg: Register8)  // Signed divide AX by reg
+
+// ==================================
+// LOGICAL INSTRUCTIONS
+// ==================================
+
+// 64-bit Logical Operations
+and_r64_r64 :: proc(dst: Register64, src: Register64)  // Bitwise AND of source and destination
+or_r64_r64 :: proc(dst: Register64, src: Register64)  // Bitwise OR of source and destination
+xor_r64_r64 :: proc(dst: Register64, src: Register64)  // Bitwise XOR of source and destination
+not_r64 :: proc(reg: Register64)  // Bitwise NOT (one's complement) of register
+
+// 32-bit Logical Operations
+and_r32_r32 :: proc(dst: Register32, src: Register32)  // Bitwise AND of source and destination
+and_r32_imm32 :: proc(reg: Register32, imm: u32)  // Bitwise AND register with immediate
+or_r32_r32 :: proc(dst: Register32, src: Register32)  // Bitwise OR of source and destination
+or_r32_imm32 :: proc(reg: Register32, imm: u32)  // Bitwise OR register with immediate
+xor_r32_r32 :: proc(dst: Register32, src: Register32)  // Bitwise XOR of source and destination
+xor_r32_imm32 :: proc(reg: Register32, imm: u32)  // Bitwise XOR register with immediate
+not_r32 :: proc(reg: Register32)  // Bitwise NOT of register
+
+// 16-bit Logical Operations
+and_r16_r16 :: proc(dst: Register16, src: Register16)  // Bitwise AND of source and destination
+and_r16_imm16 :: proc(reg: Register16, imm: u16)  // Bitwise AND register with immediate
+or_r16_r16 :: proc(dst: Register16, src: Register16)  // Bitwise OR of source and destination
+or_r16_imm16 :: proc(reg: Register16, imm: u16)  // Bitwise OR register with immediate
+xor_r16_r16 :: proc(dst: Register16, src: Register16)  // Bitwise XOR of source and destination
+xor_r16_imm16 :: proc(reg: Register16, imm: u16)  // Bitwise XOR register with immediate
+not_r16 :: proc(reg: Register16)  // Bitwise NOT of register
+
+// 8-bit Logical Operations
+and_r8_r8 :: proc(dst: Register8, src: Register8)  // Bitwise AND of source and destination
+and_r8_imm8 :: proc(reg: Register8, imm: u8)  // Bitwise AND register with immediate
+or_r8_r8 :: proc(dst: Register8, src: Register8)  // Bitwise OR of source and destination
+or_r8_imm8 :: proc(reg: Register8, imm: u8)  // Bitwise OR register with immediate
+xor_r8_r8 :: proc(dst: Register8, src: Register8)  // Bitwise XOR of source and destination
+xor_r8_imm8 :: proc(reg: Register8, imm: u8)  // Bitwise XOR register with immediate
+not_r8 :: proc(reg: Register8)  // Bitwise NOT of register
+
+// ==================================
+// SHIFT AND ROTATE INSTRUCTIONS
+// ==================================
+
+// 64-bit Shift and Rotate Operations
+shl_r64_imm8 :: proc(reg: Register64, imm: u8)  // Shift left logical by immediate count
+shr_r64_imm8 :: proc(reg: Register64, imm: u8)  // Shift right logical by immediate count
+rol_r64_imm8 :: proc(reg: Register64, imm: u8)  // Rotate left by immediate count
+ror_r64_imm8 :: proc(reg: Register64, imm: u8)  // Rotate right by immediate count
+shld_r64_r64_imm8 :: proc(dst: Register64, src: Register64, imm: u8)  // Double precision shift left
+shrd_r64_r64_imm8 :: proc(dst: Register64, src: Register64, imm: u8)  // Double precision shift right
+
+// 32-bit Shift and Rotate Operations
+shl_r32_imm8 :: proc(reg: Register32, imm: u8)  // Shift left logical by immediate count
+shl_r32_cl :: proc(reg: Register32)  // Shift left logical by CL register count
+shr_r32_imm8 :: proc(reg: Register32, imm: u8)  // Shift right logical by immediate count
+shr_r32_cl :: proc(reg: Register32)  // Shift right logical by CL register count
+sar_r32_imm8 :: proc(reg: Register32, imm: u8)  // Shift arithmetic right by immediate count
+sar_r32_cl :: proc(reg: Register32)  // Shift arithmetic right by CL register count
+rol_r32_imm8 :: proc(reg: Register32, imm: u8)  // Rotate left by immediate count
+rol_r32_cl :: proc(reg: Register32)  // Rotate left by CL register count
+ror_r32_imm8 :: proc(reg: Register32, imm: u8)  // Rotate right by immediate count
+ror_r32_cl :: proc(reg: Register32)  // Rotate right by CL register count
+
+// 16-bit Shift and Rotate Operations
+shl_r16_imm8 :: proc(reg: Register16, imm: u8)  // Shift left logical by immediate count
+shl_r16_cl :: proc(reg: Register16)  // Shift left logical by CL register count
+shr_r16_imm8 :: proc(reg: Register16, imm: u8)  // Shift right logical by immediate count
+shr_r16_cl :: proc(reg: Register16)  // Shift right logical by CL register count
+sar_r16_imm8 :: proc(reg: Register16, imm: u8)  // Shift arithmetic right by immediate count
+sar_r16_cl :: proc(reg: Register16)  // Shift arithmetic right by CL register count
+rol_r16_imm8 :: proc(reg: Register16, imm: u8)  // Rotate left by immediate count
+rol_r16_cl :: proc(reg: Register16)  // Rotate left by CL register count
+ror_r16_imm8 :: proc(reg: Register16, imm: u8)  // Rotate right by immediate count
+ror_r16_cl :: proc(reg: Register16)  // Rotate right by CL register count
+
+// 8-bit Shift and Rotate Operations
+shl_r8_imm8 :: proc(reg: Register8, imm: u8)  // Shift left logical by immediate count
+shl_r8_cl :: proc(reg: Register8)  // Shift left logical by CL register count
+shr_r8_imm8 :: proc(reg: Register8, imm: u8)  // Shift right logical by immediate count
+shr_r8_cl :: proc(reg: Register8)  // Shift right logical by CL register count
+sar_r8_imm8 :: proc(reg: Register8, imm: u8)  // Shift arithmetic right by immediate count
+sar_r8_cl :: proc(reg: Register8)  // Shift arithmetic right by CL register count
+rol_r8_imm8 :: proc(reg: Register8, imm: u8)  // Rotate left by immediate count
+rol_r8_cl :: proc(reg: Register8)  // Rotate left by CL register count
+ror_r8_imm8 :: proc(reg: Register8, imm: u8)  // Rotate right by immediate count
+ror_r8_cl :: proc(reg: Register8)  // Rotate right by CL register count
+
+// ==================================
+// BIT MANIPULATION INSTRUCTIONS
+// ==================================
+
+// 64-bit Bit Operations
+bt_r64_r64 :: proc(reg: Register64, bit_index: Register64)  // Bit test
+bts_r64_r64 :: proc(reg: Register64, bit_index: Register64)  // Bit test and set
+btr_r64_r64 :: proc(reg: Register64, bit_index: Register64)  // Bit test and reset
+btc_r64_r64 :: proc(reg: Register64, bit_index: Register64)  // Bit test and complement
+bsf_r64_r64 :: proc(dst: Register64, src: Register64)  // Bit scan forward
+bsr_r64_r64 :: proc(dst: Register64, src: Register64)  // Bit scan reverse
+popcnt_r64_r64 :: proc(dst: Register64, src: Register64)  // Count number of bits set to 1
+lzcnt_r64_r64 :: proc(dst: Register64, src: Register64)  // Count leading zeros
+tzcnt_r64_r64 :: proc(dst: Register64, src: Register64)  // Count trailing zeros
+pext_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64)  // Parallel bits extract
+pdep_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64)  // Parallel bits deposit
+
+// ==================================
+// COMPARISON INSTRUCTIONS
+// ==================================
+
+// 64-bit Comparison Operations
+cmp_r64_r64 :: proc(reg1: Register64, reg2: Register64)  // Compare reg1 with reg2
+cmp_r64_imm32 :: proc(reg: Register64, imm: u32)  // Compare register with immediate
+test_r64_r64 :: proc(reg1: Register64, reg2: Register64)  // Logical compare (AND) of reg1 and reg2
+test_r64_imm32 :: proc(reg: Register64, imm: u32)  // Logical compare (AND) of register and immediate
+
+// Conditional Move Instructions (64-bit)
+cmove_r64_r64 :: proc(dst: Register64, src: Register64)  // Move if equal (ZF=1)
+cmovne_r64_r64 :: proc(dst: Register64, src: Register64)  // Move if not equal (ZF=0)
+cmova_r64_r64 :: proc(dst: Register64, src: Register64)  // Move if above (CF=0 and ZF=0)
+cmovae_r64_r64 :: proc(dst: Register64, src: Register64)  // Move if above or equal (CF=0)
+cmovb_r64_r64 :: proc(dst: Register64, src: Register64)  // Move if below (CF=1)
+cmovbe_r64_r64 :: proc(dst: Register64, src: Register64)  // Move if below or equal (CF=1 or ZF=1)
+
+// 32-bit Comparison Operations
+cmp_r32_r32 :: proc(reg1: Register32, reg2: Register32)  // Compare reg1 with reg2
+cmp_r32_imm32 :: proc(reg: Register32, imm: u32)  // Compare register with immediate
+test_r32_r32 :: proc(reg1: Register32, reg2: Register32)  // Logical compare (AND) of reg1 and reg2
+test_r32_imm32 :: proc(reg: Register32, imm: u32)  // Logical compare (AND) of register and immediate
+
+// Conditional Move Instructions (32-bit)
+cmove_r32_r32 :: proc(dst: Register32, src: Register32)  // Move if equal (ZF=1)
+cmovne_r32_r32 :: proc(dst: Register32, src: Register32)  // Move if not equal (ZF=0)
+cmova_r32_r32 :: proc(dst: Register32, src: Register32)  // Move if above (CF=0 and ZF=0)
+cmovae_r32_r32 :: proc(dst: Register32, src: Register32)  // Move if above or equal (CF=0)
+cmovb_r32_r32 :: proc(dst: Register32, src: Register32)  // Move if below (CF=1)
+cmovbe_r32_r32 :: proc(dst: Register32, src: Register32)  // Move if below or equal (CF=1 or ZF=1)
+
+// 16-bit Comparison Operations
+cmp_r16_r16 :: proc(reg1: Register16, reg2: Register16)  // Compare reg1 with reg2
+cmp_r16_imm16 :: proc(reg: Register16, imm: u16)  // Compare register with immediate
+test_r16_r16 :: proc(reg1: Register16, reg2: Register16)  // Logical compare (AND) of reg1 and reg2
+test_r16_imm16 :: proc(reg: Register16, imm: u16)  // Logical compare (AND) of register and immediate
+
+// Conditional Move Instructions (16-bit)
+cmove_r16_r16 :: proc(dst: Register16, src: Register16)  // Move if equal (ZF=1)
+cmovne_r16_r16 :: proc(dst: Register16, src: Register16)  // Move if not equal (ZF=0)
+cmova_r16_r16 :: proc(dst: Register16, src: Register16)  // Move if above (CF=0 and ZF=0)
+cmovae_r16_r16 :: proc(dst: Register16, src: Register16)  // Move if above or equal (CF=0)
+cmovb_r16_r16 :: proc(dst: Register16, src: Register16)  // Move if below (CF=1)
+cmovbe_r16_r16 :: proc(dst: Register16, src: Register16)  // Move if below or equal (CF=1 or ZF=1)
+
+// 8-bit Comparison Operations
+cmp_r8_r8 :: proc(reg1: Register8, reg2: Register8)  // Compare reg1 with reg2
+cmp_r8_imm8 :: proc(reg: Register8, imm: u8)  // Compare register with immediate
+test_r8_r8 :: proc(reg1: Register8, reg2: Register8)  // Logical compare (AND) of reg1 and reg2
+test_r8_imm8 :: proc(reg: Register8, imm: u8)  // Logical compare (AND) of register and immediate
+
+// ==================================
+// CONTROL FLOW INSTRUCTIONS
+// ==================================
+
+// Jump and Call Instructions
+jmp_rel32 :: proc(offset: i32)  // Jump near, relative, displacement relative to next instruction
+jmp_r64 :: proc(reg: Register64)  // Jump near, absolute indirect, address in register
+jmp_m64 :: proc(mem_addr: u64)  // Jump near, absolute indirect, address in memory
+jmp_rel8 :: proc(offset: i8)  // Jump short, relative, displacement relative to next instruction
+call_rel32 :: proc(offset: i32)  // Call near, relative, displacement relative to next instruction
+call_r64 :: proc(reg: Register64)  // Call near, absolute indirect, address in register
+call_m64 :: proc(mem_addr: u64)  // Call near, absolute indirect, address in memory
+ret :: proc()  // Return from procedure
+
+// Conditional Jump Instructions (32-bit displacement)
+je_rel32 :: proc(offset: i32)  // Jump if equal (ZF=1)
+jne_rel32 :: proc(offset: i32)  // Jump if not equal (ZF=0)
+jg_rel32 :: proc(offset: i32)  // Jump if greater (signed, ZF=0 and SF=OF)
+jl_rel32 :: proc(offset: i32)  // Jump if less (signed, SF!=OF)
+jge_rel32 :: proc(offset: i32)  // Jump if greater or equal (signed, SF=OF)
+jle_rel32 :: proc(offset: i32)  // Jump if less or equal (signed, SF!=OF or ZF=1)
+ja_rel32 :: proc(offset: i32)  // Jump if above (unsigned, CF=0 and ZF=0)
+jae_rel32 :: proc(offset: i32)  // Jump if above or equal (unsigned, CF=0)
+jb_rel32 :: proc(offset: i32)  // Jump if below (unsigned, CF=1)
+jbe_rel32 :: proc(offset: i32)  // Jump if below or equal (unsigned, CF=1 or ZF=1)
+jo_rel32 :: proc(offset: i32)  // Jump if overflow (OF=1)
+jno_rel32 :: proc(offset: i32)  // Jump if not overflow (OF=0)
+js_rel32 :: proc(offset: i32)  // Jump if sign (SF=1)
+jns_rel32 :: proc(offset: i32)  // Jump if not sign (SF=0)
+jp_rel32 :: proc(offset: i32)  // Jump if parity (PF=1)
+jnp_rel32 :: proc(offset: i32)  // Jump if not parity (PF=0)
+
+// Conditional Jump Instructions (8-bit displacement)
+je_rel8 :: proc(offset: i8)  // Jump if equal (ZF=1)
+jne_rel8 :: proc(offset: i8)  // Jump if not equal (ZF=0)
+jg_rel8 :: proc(offset: i8)  // Jump if greater (signed, ZF=0 and SF=OF)
+jl_rel8 :: proc(offset: i8)  // Jump if less (signed, SF!=OF)
+jge_rel8 :: proc(offset: i8)  // Jump if greater or equal (signed, SF=OF)
+jle_rel8 :: proc(offset: i8)  // Jump if less or equal (signed, SF!=OF or ZF=1)
+ja_rel8 :: proc(offset: i8)  // Jump if above (unsigned, CF=0 and ZF=0)
+jae_rel8 :: proc(offset: i8)  // Jump if above or equal (unsigned, CF=0)
+jb_rel8 :: proc(offset: i8)  // Jump if below (unsigned, CF=1)
+jbe_rel8 :: proc(offset: i8)  // Jump if below or equal (unsigned, CF=1 or ZF=1)
+jo_rel8 :: proc(offset: i8)  // Jump if overflow (OF=1)
+jno_rel8 :: proc(offset: i8)  // Jump if not overflow (OF=0)
+js_rel8 :: proc(offset: i8)  // Jump if sign (SF=1)
+jns_rel8 :: proc(offset: i8)  // Jump if not sign (SF=0)
+jp_rel8 :: proc(offset: i8)  // Jump if parity (PF=1)
+jnp_rel8 :: proc(offset: i8)  // Jump if not parity (PF=0)
+
+// Loop and String Instructions
+loop_rel8 :: proc(offset: i8)  // Decrement count; jump if count != 0
+loope_rel8 :: proc(offset: i8)  // Decrement count; jump if count != 0 and ZF=1
+loopne_rel8 :: proc(offset: i8)  // Decrement count; jump if count != 0 and ZF=0
+jecxz_rel8 :: proc(offset: i8)  // Jump if ECX register is 0
+setcc_r8 :: proc(dst: u8, condition_code: u8)  // Set byte if condition is met
+endbr64 :: proc()  // End branch (CET instruction)
+
+// ==================================
+// STACK OPERATIONS
+// ==================================
+
+// Stack Management Instructions
+push_r64 :: proc(reg: Register64)  // Push 64-bit register onto stack
+pop_r64 :: proc(reg: Register64)  // Pop 64-bit value from stack into register
+push_r32 :: proc(reg: Register32)  // Push 32-bit register onto stack
+pop_r32 :: proc(reg: Register32)  // Pop 32-bit value from stack into register
+push_r16 :: proc(reg: Register16)  // Push 16-bit register onto stack
+pop_r16 :: proc(reg: Register16)  // Pop 16-bit value from stack into register
+pushfq :: proc()  // Push RFLAGS register onto stack
+popfq :: proc()  // Pop value from stack to RFLAGS register
+pushf :: proc()  // Push FLAGS register onto stack (16-bit)
+popf :: proc()  // Pop value from stack to FLAGS register (16-bit)
+pushfd :: proc()  // Push EFLAGS register onto stack (32-bit)
+popfd :: proc()  // Pop value from stack to EFLAGS register (32-bit)
+pushad :: proc()  // Push all 32-bit general purpose registers
+popad :: proc()  // Pop values from stack into all 32-bit general purpose registers
+enter :: proc(size: u16, nesting: u8)  // Create stack frame
+leave :: proc()  // High-level procedure exit (restores frame)
+
+// ==================================
+// SIMD AND FLOATING-POINT INSTRUCTIONS
+// ==================================
+
+// SSE/SSE2 Register Transfer Instructions
+movd_xmm_r64 :: proc(xmm: XMMRegister, reg: Register64)  // Move 64-bit register to low quadword of XMM
+movd_r64_xmm :: proc(reg: Register64, xmm: XMMRegister)  // Move low quadword of XMM to 64-bit register
+movd_xmm_r32 :: proc(xmm: XMMRegister, reg: Register32)  // Move 32-bit register to low dword of XMM
+movd_r32_xmm :: proc(reg: Register32, xmm: XMMRegister)  // Move low dword of XMM to 32-bit register
+movq_xmm_r64 :: proc(xmm: XMMRegister, reg: Register64)  // Move 64-bit register to XMM
+movq_r64_xmm :: proc(reg: Register64, xmm: XMMRegister)  // Move XMM to 64-bit register
+movq_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Move quadword from XMM to XMM
+movq_xmm_m64 :: proc(dst: XMMRegister, mem: u64)  // Move quadword from memory to XMM
+movq_m64_xmm :: proc(mem: u64, src: XMMRegister)  // Move quadword from XMM to memory
+
+// SSE/SSE2 Data Movement
+movdqa_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Move aligned double quadword
+movdqa_xmm_m128 :: proc(dst: XMMRegister, mem: u64)  // Move aligned double quadword from memory
+movdqa_m128_xmm :: proc(mem: u64, src: XMMRegister)  // Move aligned double quadword to memory
+movdqu_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Move unaligned double quadword
+movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: u64)  // Move unaligned double quadword from memory
+movdqu_m128_xmm :: proc(mem: u64, src: XMMRegister)  // Move unaligned double quadword to memory
+movaps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Move aligned packed single-precision
+movaps_xmm_m128 :: proc(dst: XMMRegister, mem: u64)  // Move aligned packed single-precision from memory
+movaps_m128_xmm :: proc(mem: u64, src: XMMRegister)  // Move aligned packed single-precision to memory
+movapd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Move aligned packed double-precision
+movapd_xmm_m128 :: proc(dst: XMMRegister, mem: u64)  // Move aligned packed double-precision from memory
+movapd_m128_xmm :: proc(mem: u64, src: XMMRegister)  // Move aligned packed double-precision to memory
+movups_xmm_m128 :: proc(dst: XMMRegister, mem: u64)  // Move unaligned packed single-precision from memory
+
+// SSE Arithmetic Instructions
+addps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Add packed single-precision
+mulps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Multiply packed single-precision
+divps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Divide packed single-precision
+sqrtps_xmm :: proc(xmm: XMMRegister)  // Square root of packed single-precision values
+cmpps_xmm_xmm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8)  // Compare packed single-precision
+cmpeqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Compare equal packed single-precision
+cmpneqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Compare not equal packed single-precision
+
+// AVX and FMA Instructions
+vfmadd132ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Fused multiply-add of packed single-precision
+vfmadd213ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Fused multiply-add of packed single-precision
+vfmadd231ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Fused multiply-add of packed single-precision
+vaddps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Add packed single-precision (YMM registers)
+vmulps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Multiply packed single-precision (YMM registers)
+vdivps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Divide packed single-precision (YMM registers)
+vblendps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm: u8)  // Blend packed single-precision
+
+// YMM Register Operations
+vmovdqa_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister)  // Move aligned double quadword
+vmovdqa_ymm_m256 :: proc(dst: YMMRegister, mem: u64)  // Move aligned double quadword from memory
+vmovdqa_m256_ymm :: proc(mem: u64, src: YMMRegister)  // Move aligned double quadword to memory
+vmovdqu_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister)  // Move unaligned double quadword
+vmovdqu_ymm_m256 :: proc(dst: YMMRegister, mem: u64)  // Move unaligned double quadword from memory
+vmovdqu_m256_ymm :: proc(mem: u64, src: YMMRegister)  // Move unaligned double quadword to memory
+vmovaps_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister)  // Move aligned packed single-precision
+vmovaps_ymm_m256 :: proc(dst: YMMRegister, mem: u64)  // Move aligned packed single-precision from memory
+vmovaps_m256_ymm :: proc(mem: u64, src: YMMRegister)  // Move aligned packed single-precision to memory
+vmovapd_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister)  // Move aligned packed double-precision
+vmovapd_ymm_m256 :: proc(dst: YMMRegister, mem: u64)  // Move aligned packed double-precision from memory
+vmovapd_m256_ymm :: proc(mem: u64, src: YMMRegister)  // Move aligned packed double-precision to memory
+
+// AVX Logical Operations
+vpand_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Bitwise AND of YMM registers
+vpor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Bitwise OR of YMM registers
+vpxor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Bitwise XOR of YMM registers
+vpternlogd_ymm_ymm_ymm_imm8 :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm: u8)  // Bitwise ternary logic
+vextracti128_ymm_ymm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8)  // Extract 128 bits from YMM
+
+// SSE2 SIMD Integer Instructions
+pavgb_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Average packed unsigned byte integers
+pavgb_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister)  // Average packed unsigned byte integers (YMM)
+pmaddwd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Multiply and add packed integers
+pmulhuw_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister)  // Multiply packed unsigned integers and store high result
+
+// AVX-512 Instructions
+vaddpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Add packed double-precision (ZMM)
+vsubpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Subtract packed double-precision (ZMM)
+vmulpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Multiply packed double-precision (ZMM)
+vdivpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Divide packed double-precision (ZMM)
+vgatherdps_xmm :: proc(dst: XMMRegister)  // Gather packed single-precision with signed dword indices
+vscatterdps_xmm :: proc(dst: XMMRegister)  // Scatter packed single-precision with signed dword indices
+kmovq_k_k :: proc(dst: u8, src: u8)  // Move from mask register to mask register
+vpxordq_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister)  // Bitwise XOR of ZMM registers
+vpscatterdd_ymm_m :: proc(src: XMMRegister, mem: u64)  // Scatter dword values with dword indices
+vpscatterdq_ymm_m :: proc(src: XMMRegister, mem: u64)  // Scatter qword values with dword indices
+vpscatterqd_ymm_m :: proc(src: XMMRegister, mem: u64)  // Scatter dword values with qword indices
+vpcompressd_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister)  // Compress packed dwords from source
+vpcompressq_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister)  // Compress packed qwords from source
+
+// ZMM Register Operations
+vmovdqa32_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister)  // Move aligned dwords
+vmovdqa32_zmm_m512 :: proc(dst: ZMMRegister, mem: u64)  // Move aligned dwords from memory
+vmovdqa32_m512_zmm :: proc(mem: u64, src: ZMMRegister)  // Move aligned dwords to memory
+vmovdqa64_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister)  // Move aligned qwords
+vmovdqa64_zmm_m512 :: proc(dst: ZMMRegister, mem: u64)  // Move aligned qwords from memory
+vmovdqa64_m512_zmm :: proc(mem: u64, src: ZMMRegister)  // Move aligned qwords to memory
+vmovdqu32_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister)  // Move unaligned dwords
+vmovdqu32_zmm_m512 :: proc(dst: ZMMRegister, mem: u64)  // Move unaligned dwords from memory
+vmovdqu32_m512_zmm :: proc(mem: u64, src: ZMMRegister)  // Move unaligned dwords to memory
+vmovdqu64_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister)  // Move unaligned qwords
+vmovdqu64_zmm_m512 :: proc(dst: ZMMRegister, mem: u64)  // Move unaligned qwords from memory
+vmovdqu64_m512_zmm :: proc(mem: u64, src: ZMMRegister)  // Move unaligned qwords to memory
+vmovaps_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister)  // Move aligned packed single-precision (ZMM)
+vmovaps_zmm_m512 :: proc(dst: ZMMRegister, mem: u64)  // Move aligned packed single-precision from memory (ZMM)
+vmovaps_m512_zmm :: proc(mem: u64, src: ZMMRegister)  // Move aligned packed single-precision to memory (ZMM)
+vmovapd_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister)  // Move aligned packed double-precision (ZMM)
+vmovapd_zmm_m512 :: proc(dst: ZMMRegister, mem: u64)  // Move aligned packed double-precision from memory (ZMM)
+vmovapd_m512_zmm :: proc(mem: u64, src: ZMMRegister)  // Move aligned packed double-precision to memory (ZMM)
+
+// AVX-512 Mask Register Operations
+kmovw :: proc(dst: MaskRegister, src: MaskRegister)  // Move mask register
+kmovw_k_r32 :: proc(dst: MaskRegister, src: Register32)  // Move 32-bit register to mask register
+kmovw_r32_k :: proc(dst: Register32, src: MaskRegister)  // Move mask register to 32-bit register
+kmovw_k_m16 :: proc(dst: MaskRegister, mem: u64)  // Move 16 bits from memory to mask register
+kmovw_m16_k :: proc(mem: u64, src: MaskRegister)  // Move 16 bits from mask register to memory
+korw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister)  // Bitwise OR of mask registers
+kandw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister)  // Bitwise AND of mask registers
+kxorw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister)  // Bitwise XOR of mask registers
+knotw :: proc(dst: MaskRegister, src: MaskRegister)  // Bitwise NOT of mask register
+
+// AES and Cryptographic Instructions
+aesenc :: proc(dst: XMMRegister, src: XMMRegister)  // Perform one round of AES encryption
+aesdec :: proc(dst: XMMRegister, src: XMMRegister)  // Perform one round of AES decryption
+pclmulqdq :: proc(dst: XMMRegister, src: XMMRegister, imm: u8)  // Carry-less multiplication quadword
+crc32_r64_r64 :: proc(dst: Register64, src: Register64)  // Accumulate CRC32 value
+
+// ==================================
+// STRING OPERATIONS
+// ==================================
+
+// String Operations
+movs_m8_m8 :: proc()  // Move byte from string to string
+movs_m16_m16 :: proc()  // Move word from string to string
+movs_m32_m32 :: proc()  // Move doubleword from string to string
+movs_m64_m64 :: proc()  // Move quadword from string to string
+stos_m8 :: proc()  // Store AL at address RDI
+stos_m16 :: proc()  // Store AX at address RDI
+stos_m32 :: proc()  // Store EAX at address RDI
+stos_m64 :: proc()  // Store RAX at address RDI
+scas_m8 :: proc()  // Compare AL with byte at RDI
+scas_m16 :: proc()  // Compare AX with word at RDI
+scas_m32 :: proc()  // Compare EAX with doubleword at RDI
+scas_m64 :: proc()  // Compare RAX with quadword at RDI
+cmps_m8_m8 :: proc()  // Compare byte at RSI with byte at RDI
+cmps_m16_m16 :: proc()  // Compare word at RSI with word at RDI
+cmps_m32_m32 :: proc()  // Compare doubleword at RSI with doubleword at RDI
+cmps_m64_m64 :: proc()  // Compare quadword at RSI with quadword at RDI
+lods_m8 :: proc()  // Load byte at RSI into AL
+lods_m16 :: proc()  // Load word at RSI into AX
+lods_m32 :: proc()  // Load doubleword at RSI into EAX
+lods_m64 :: proc()  // Load quadword at RSI into RAX
+rep_movs :: proc()  // Repeat movs instruction RCX times
+rep_stos :: proc()  // Repeat stos instruction RCX times
+rep_cmps :: proc()  // Repeat cmps instruction RCX times
+
+// ==================================
+// SYSTEM INSTRUCTIONS
+// ==================================
+
+// System Control Instructions
+syscall :: proc()  // Fast system call
+sysret :: proc()  // Return from fast system call
+int_imm8 :: proc(imm: u8)  // Generate software interrupt
+int3 :: proc()  // Generate breakpoint
+iret :: proc()  // Return from interrupt
+cpuid :: proc()  // CPU identification
+rdtsc :: proc()  // Read time-stamp counter
+rdtscp :: proc()  // Read time-stamp counter and processor ID
+rdmsr :: proc()  // Read from model-specific register
+wrmsr :: proc()  // Write to model-specific register
+rdpmc :: proc()  // Read performance-monitoring counter
+hlt :: proc()  // Halt processor
+swapgs :: proc()  // Swap GS base register
+wrpkru :: proc()  // Write user-mode protection keys register
+rdpkru :: proc()  // Read user-mode protection keys register
+clac :: proc()  // Clear alignment check flag
+stac :: proc()  // Set alignment check flag
+ud2 :: proc()  // Generate undefined instruction
+bound_r16_m32 :: proc(reg: Register16, mem: u64)  // Check if register is within bounds
+bound_r32_m64 :: proc(reg: Register32, mem: u64)  // Check if register is within bounds
+arpl_r16_r16 :: proc(dst: Register16, src: Register16)  // Adjust RPL field of segment selector
+arpl_m16_r16 :: proc(mem: u64, src: Register16)  // Adjust RPL field of segment selector in memory
+
+// Virtualization Instructions
+vmcall :: proc()  // Call to hypervisor
+vmlaunch :: proc()  // Launch virtual machine
+vmresume :: proc()  // Resume virtual machine
+vmxoff :: proc()  // Leave VMX operation
+
+// ==================================
+// ATOMIC OPERATIONS
+// ==================================
+
+// Atomic Operations
+lock_xadd_r64_r64 :: proc(dst: Register64, src: Register64)  // Atomic exchange and add
+lock_cmpxchg_r64_r64 :: proc(dst: Register64, src: Register64)  // Atomic compare and exchange
+lock_inc_r64 :: proc(reg: Register64)  // Atomic increment
+lock_dec_r64 :: proc(reg: Register64)  // Atomic decrement
+lock_xchg_r64_r64 :: proc(dst: Register64, src: Register64)  // Atomic exchange
+atomic_load_r64 :: proc(dst: Register64, src: u64)  // Atomic load
+atomic_store_r64 :: proc(dst: u64, src: Register64)  // Atomic store
+
+// Hardware Transactional Memory
+xbegin :: proc(offset: i32)  // Begin hardware transaction
+xend :: proc()  // End hardware transaction
+xabort :: proc(imm: u8)  // Abort hardware transaction
+xtest :: proc()  // Test if executing in a transaction
+
+// ==================================
+// HARDWARE SECURITY INSTRUCTIONS
+// ==================================
+
+// Random Number Generation
+rdrand_r64 :: proc(reg: Register64)  // Read random number into 64-bit register
+rdseed_r64 :: proc(reg: Register64)  // Read random seed into 64-bit register
+
+// ==================================
+// MEMORY MANAGEMENT INSTRUCTIONS
+// ==================================
+
+// Prefetch Instructions
+prefetcht0 :: proc(mem: u64)  // Prefetch data into all levels of cache
+prefetcht1 :: proc(mem: u64)  // Prefetch data into level 2 cache and higher
+prefetcht2 :: proc(mem: u64)  // Prefetch data into level 3 cache and higher
+prefetchnta :: proc(mem: u64)  // Prefetch data into non-temporal cache structure
+
+// Cache Management
+clflush_m64 :: proc(mem: u64)  // Flush cache line containing address
+clflushopt_m64 :: proc(mem: u64)  // Flush cache line optimized
+clwb_m64 :: proc(mem: u64)  // Cache line write back
+
+// Monitor/MWAIT
+monitor_r64_r64_r64 :: proc(reg1: Register64, reg2: Register64, reg3: Register64)  // Setup monitor address range
+mwait_r64_r64 :: proc(reg1: Register64, reg2: Register64)  // Monitor wait
+
+// Memory Barriers
+mfence :: proc()  // Memory fence (serializing all memory operations)
+lfence :: proc()  // Load fence (serializing load operations)
+sfence :: proc()  // Store fence (serializing store operations)
