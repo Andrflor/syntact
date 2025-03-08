@@ -318,149 +318,1390 @@ test_mov_r64_r64_extended_registers :: proc(t: ^testing.T) {
 @(test)
 test_mov_r64_m64_basic :: proc(t: ^testing.T) {
 	// Test memory-to-register operations
-
 	// Standard registers with memory
 	compare_bytecode(
 		t,
 		"mov rax, [0x1000]",
 		asm_to_bytes("mov rax, qword ptr [rip+0x1000]"),
-		proc() {mov_r64_m64(Register64.RAX, 0x1000)},
+		proc() {
+			addr: MemoryAddress = 0x1000
+			mov_r64_m64(Register64.RAX, addr)
+		},
 	)
-
 	// Extended registers with memory
 	compare_bytecode(
 		t,
 		"mov r8, [0x7FFF]",
 		asm_to_bytes("mov r8, qword ptr [rip+0x7FFF]"),
-		proc() {mov_r64_m64(Register64.R8, 0x7FFF)},
+		proc() {
+			addr: MemoryAddress = 0x7FFF
+			mov_r64_m64(Register64.R8, addr)
+		},
 	)
-
 	// Special registers with memory
 	compare_bytecode(
 		t,
 		"mov rsp, [0x8000]",
 		asm_to_bytes("mov rsp, qword ptr [rip+0x8000]"),
-		proc() {mov_r64_m64(Register64.RSP, 0x8000)},
+		proc() {
+			addr: MemoryAddress = 0x8000
+			mov_r64_m64(Register64.RSP, addr)
+		},
 	)
 }
 
 @(test)
 test_mov_r64_m64_address_variations :: proc(t: ^testing.T) {
 	// Test memory-to-register operations with different address patterns
-
 	// Small offset
 	compare_bytecode(
 		t,
 		"mov rax, [0xFFF]",
 		asm_to_bytes("mov rax, qword ptr [rip+0xFFF]"),
-		proc() {mov_r64_m64(Register64.RAX, 0xFFF)},
+		proc() {
+			addr: MemoryAddress = 0xFFF
+			mov_r64_m64(Register64.RAX, addr)
+		},
 	)
-
 	// Typical offset
 	compare_bytecode(
 		t,
 		"mov rbx, [0x7FFF]",
 		asm_to_bytes("mov rbx, qword ptr [rip+0x7FFF]"),
-		proc() {mov_r64_m64(Register64.RBX, 0x7FFF)},
+		proc() {
+			addr: MemoryAddress = 0x7FFF
+			mov_r64_m64(Register64.RBX, addr)
+		},
 	)
-
 	// Larger offset
 	compare_bytecode(
 		t,
 		"mov rcx, [0x12345]",
 		asm_to_bytes("mov rcx, qword ptr [rip+0x12345]"),
-		proc() {mov_r64_m64(Register64.RCX, 0x12345)},
+		proc() {
+			addr: MemoryAddress = 0x12345
+			mov_r64_m64(Register64.RCX, addr)
+		},
 	)
-
 	// Page boundary offset
 	compare_bytecode(
 		t,
 		"mov rdx, [0x1000]",
 		asm_to_bytes("mov rdx, qword ptr [rip+0x1000]"),
-		proc() {mov_r64_m64(Register64.RDX, 0x1000)},
+		proc() {
+			addr: MemoryAddress = 0x1000
+			mov_r64_m64(Register64.RDX, addr)
+		},
 	)
-
 	// Special encoding register
 	compare_bytecode(
 		t,
 		"mov r12, [0x1234]",
 		asm_to_bytes("mov r12, qword ptr [rip+0x1234]"),
-		proc() {mov_r64_m64(Register64.R12, 0x1234)},
+		proc() {
+			addr: MemoryAddress = 0x1234
+			mov_r64_m64(Register64.R12, addr)
+		},
 	)
 }
 
 @(test)
 test_mov_m64_r64_basic :: proc(t: ^testing.T) {
 	// Test register-to-memory operations
-
 	// Standard registers with memory
 	compare_bytecode(
 		t,
 		"mov [0x1000], rax",
 		asm_to_bytes("mov qword ptr [rip+0x1000], rax"),
-		proc() {mov_m64_r64(0x1000, Register64.RAX)},
+		proc() {
+			addr: MemoryAddress = 0x1000
+			mov_m64_r64(addr, Register64.RAX)
+		},
 	)
-
 	// Extended registers with memory
 	compare_bytecode(
 		t,
 		"mov [0x7FFF], r8",
 		asm_to_bytes("mov qword ptr [rip+0x7FFF], r8"),
-		proc() {mov_m64_r64(0x7FFF, Register64.R8)},
+		proc() {
+			addr: MemoryAddress = 0x7FFF
+			mov_m64_r64(addr, Register64.R8)
+		},
 	)
-
 	// Special registers with memory
 	compare_bytecode(
 		t,
 		"mov [0x8000], rsp",
 		asm_to_bytes("mov qword ptr [rip+0x8000], rsp"),
-		proc() {mov_m64_r64(0x8000, Register64.RSP)},
+		proc() {
+			addr: MemoryAddress = 0x8000
+			mov_m64_r64(addr, Register64.RSP)
+		},
 	)
 }
 
 @(test)
 test_mov_m64_r64_address_variations :: proc(t: ^testing.T) {
 	// Test register-to-memory operations with different address patterns
-
 	// Small offset
 	compare_bytecode(
 		t,
 		"mov [0xFFF], rax",
 		asm_to_bytes("mov qword ptr [rip+0xFFF], rax"),
-		proc() {mov_m64_r64(0xFFF, Register64.RAX)},
+		proc() {
+			addr: MemoryAddress = 0xFFF
+			mov_m64_r64(addr, Register64.RAX)
+		},
 	)
-
 	// Typical offset
 	compare_bytecode(
 		t,
 		"mov [0x7FFF], rbx",
 		asm_to_bytes("mov qword ptr [rip+0x7FFF], rbx"),
-		proc() {mov_m64_r64(0x7FFF, Register64.RBX)},
+		proc() {
+			addr: MemoryAddress = 0x7FFF
+			mov_m64_r64(addr, Register64.RBX)
+		},
 	)
-
 	// Larger offset
 	compare_bytecode(
 		t,
 		"mov [0x12345], rcx",
 		asm_to_bytes("mov qword ptr [rip+0x12345], rcx"),
-		proc() {mov_m64_r64(0x12345, Register64.RCX)},
+		proc() {
+			addr: MemoryAddress = 0x12345
+			mov_m64_r64(addr, Register64.RCX)
+		},
 	)
-
 	// Page boundary offset
 	compare_bytecode(
 		t,
 		"mov [0x1000], rdx",
 		asm_to_bytes("mov qword ptr [rip+0x1000], rdx"),
-		proc() {mov_m64_r64(0x1000, Register64.RDX)},
+		proc() {
+			addr: MemoryAddress = 0x1000
+			mov_m64_r64(addr, Register64.RDX)
+		},
 	)
-
 	// Special encoding register
 	compare_bytecode(
 		t,
 		"mov [0x1234], r12",
 		asm_to_bytes("mov qword ptr [rip+0x1234], r12"),
-		proc() {mov_m64_r64(0x1234, Register64.R12)},
+		proc() {
+			addr: MemoryAddress = 0x1234
+			mov_m64_r64(addr, Register64.R12)
+		},
 	)
+}
+
+@(test)
+test_mov_with_comprehensive_addressing :: proc(t: ^testing.T) {
+	// 1. Simple register indirect addressing
+	compare_bytecode(t, "mov rax, [rbx]", asm_to_bytes("mov rax, qword ptr [rbx]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 2. Register + 8-bit displacement
+	compare_bytecode(
+		t,
+		"mov rcx, [rdx+0x7F]",
+		asm_to_bytes("mov rcx, qword ptr [rdx+0x7F]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RDX
+			disp: Maybe(i32) = 0x7F
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RCX, addr)
+		},
+	)
+
+	// 3. Register + 32-bit displacement
+	compare_bytecode(
+		t,
+		"mov r8, [rdi+0x12345678]",
+		asm_to_bytes("mov r8, qword ptr [rdi+0x12345678]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RDI
+			disp: Maybe(i32) = 0x12345678
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R8, addr)
+		},
+	)
+
+	// 4. SIB - Base + Index
+	compare_bytecode(t, "mov r9, [rax+rcx]", asm_to_bytes("mov r9, qword ptr [rax+rcx]"), proc() {
+		base: Maybe(Register64) = Register64.RAX
+		index: Maybe(Register64) = Register64.RCX
+		scale: Maybe(u8) = 1
+		components := AddressComponents {
+			base  = base,
+			index = index,
+			scale = scale,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.R9, addr)
+	})
+
+	// 5. SIB - Base + Index*2
+	compare_bytecode(
+		t,
+		"mov r10, [rbx+rdx*2]",
+		asm_to_bytes("mov r10, qword ptr [rbx+rdx*2]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			index: Maybe(Register64) = Register64.RDX
+			scale: Maybe(u8) = 2
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R10, addr)
+		},
+	)
+
+	// 6. SIB - Base + Index*4
+	compare_bytecode(
+		t,
+		"mov r11, [rcx+r8*4]",
+		asm_to_bytes("mov r11, qword ptr [rcx+r8*4]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RCX
+			index: Maybe(Register64) = Register64.R8
+			scale: Maybe(u8) = 4
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R11, addr)
+		},
+	)
+
+	// 7. SIB - Base + Index*8
+	compare_bytecode(
+		t,
+		"mov r12, [rdx+r9*8]",
+		asm_to_bytes("mov r12, qword ptr [rdx+r9*8]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RDX
+			index: Maybe(Register64) = Register64.R9
+			scale: Maybe(u8) = 8
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R12, addr)
+		},
+	)
+
+	// 8. SIB - Base + Index + Displacement
+	compare_bytecode(
+		t,
+		"mov r13, [rsi+rdi+0x12]",
+		asm_to_bytes("mov r13, qword ptr [rsi+rdi+0x12]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RSI
+			index: Maybe(Register64) = Register64.RDI
+			scale: Maybe(u8) = 1
+			disp: Maybe(i32) = 0x12
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R13, addr)
+		},
+	)
+
+	// 9. SIB - Base + Index*4 + Displacement
+	compare_bytecode(
+		t,
+		"mov r14, [rbp+r10*4+0x1234]",
+		asm_to_bytes("mov r14, qword ptr [rbp+r10*4+0x1234]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBP
+			index: Maybe(Register64) = Register64.R10
+			scale: Maybe(u8) = 4
+			disp: Maybe(i32) = 0x1234
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R14, addr)
+		},
+	)
+
+	// 10. Special Cases
+
+	// 10a. RSP as base (requires SIB)
+	compare_bytecode(
+		t,
+		"mov r15, [rsp+0x42]",
+		asm_to_bytes("mov r15, qword ptr [rsp+0x42]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RSP
+			disp: Maybe(i32) = 0x42
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R15, addr)
+		},
+	)
+
+	// 10b. R12 as base (requires SIB)
+	compare_bytecode(t, "mov rax, [r12]", asm_to_bytes("mov rax, qword ptr [r12]"), proc() {
+		base: Maybe(Register64) = Register64.R12
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 10c. RBP as base (requires displacement)
+	compare_bytecode(t, "mov rbx, [rbp]", asm_to_bytes("mov rbx, qword ptr [rbp+0]"), proc() {
+		base: Maybe(Register64) = Register64.RBP
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RBX, addr)
+	})
+
+	// 10d. R13 as base (requires displacement)
+	compare_bytecode(t, "mov rcx, [r13]", asm_to_bytes("mov rcx, qword ptr [r13+0]"), proc() {
+		base: Maybe(Register64) = Register64.R13
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RCX, addr)
+	})
+
+	// 11. Index only (no base) with scale
+	compare_bytecode(
+		t,
+		"mov rdx, [r14*8+0x1000]",
+		asm_to_bytes("mov rdx, qword ptr [r14*8+0x1000]"),
+		proc() {
+			index: Maybe(Register64) = Register64.R14
+			scale: Maybe(u8) = 8
+			disp: Maybe(i32) = 0x1000
+			components := AddressComponents {
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RDX, addr)
+		},
+	)
+
+	// 12. No base or index, just displacement (absolute addressing)
+	compare_bytecode(
+		t,
+		"mov rsi, [0x12345678]",
+		asm_to_bytes("mov rsi, qword ptr [rip+0x12345678]"),
+		proc() {
+			addr: MemoryAddress = 0x12345678
+			mov_r64_m64(Register64.RSI, addr)
+		},
+	)
+}
+
+@(test)
+test_mov_m64_r64_comprehensive :: proc(t: ^testing.T) {
+	// 1. Simple register indirect addressing
+	compare_bytecode(t, "mov [rbx], rax", asm_to_bytes("mov qword ptr [rbx], rax"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_m64_r64(addr, Register64.RAX)
+	})
+
+	// 2. Register + 8-bit displacement
+	compare_bytecode(
+		t,
+		"mov [rdx+0x7F], rcx",
+		asm_to_bytes("mov qword ptr [rdx+0x7F], rcx"),
+		proc() {
+			base: Maybe(Register64) = Register64.RDX
+			disp: Maybe(i32) = 0x7F
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_m64_r64(addr, Register64.RCX)
+		},
+	)
+
+	// 3. Register + 32-bit displacement
+	compare_bytecode(
+		t,
+		"mov [rdi+0x12345678], r8",
+		asm_to_bytes("mov qword ptr [rdi+0x12345678], r8"),
+		proc() {
+			base: Maybe(Register64) = Register64.RDI
+			disp: Maybe(i32) = 0x12345678
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_m64_r64(addr, Register64.R8)
+		},
+	)
+
+	// 4. SIB - Base + Index
+	compare_bytecode(t, "mov [rax+rcx], r9", asm_to_bytes("mov qword ptr [rax+rcx], r9"), proc() {
+		base: Maybe(Register64) = Register64.RAX
+		index: Maybe(Register64) = Register64.RCX
+		scale: Maybe(u8) = 1
+		components := AddressComponents {
+			base  = base,
+			index = index,
+			scale = scale,
+		}
+		addr: MemoryAddress = components
+		mov_m64_r64(addr, Register64.R9)
+	})
+
+	// 5. SIB - Base + Index*2
+	compare_bytecode(
+		t,
+		"mov [rbx+rdx*2], r10",
+		asm_to_bytes("mov qword ptr [rbx+rdx*2], r10"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			index: Maybe(Register64) = Register64.RDX
+			scale: Maybe(u8) = 2
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_m64_r64(addr, Register64.R10)
+		},
+	)
+
+	// More complex cases with special registers
+
+	// 6. RSP as base
+	compare_bytecode(
+		t,
+		"mov [rsp+0x20], r11",
+		asm_to_bytes("mov qword ptr [rsp+0x20], r11"),
+		proc() {
+			base: Maybe(Register64) = Register64.RSP
+			disp: Maybe(i32) = 0x20
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_m64_r64(addr, Register64.R11)
+		},
+	)
+
+	// 7. RBP as base (requires displacement)
+	compare_bytecode(t, "mov [rbp], r12", asm_to_bytes("mov qword ptr [rbp+0], r12"), proc() {
+		base: Maybe(Register64) = Register64.RBP
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_m64_r64(addr, Register64.R12)
+	})
+
+	// 8. SIB with scale and displacement
+	compare_bytecode(
+		t,
+		"mov [rsi+r15*8+0x100], r13",
+		asm_to_bytes("mov qword ptr [rsi+r15*8+0x100], r13"),
+		proc() {
+			base: Maybe(Register64) = Register64.RSI
+			index: Maybe(Register64) = Register64.R15
+			scale: Maybe(u8) = 8
+			disp: Maybe(i32) = 0x100
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_m64_r64(addr, Register64.R13)
+		},
+	)
+
+	// 9. Absolute address
+	compare_bytecode(
+		t,
+		"mov [0x12345678], r14",
+		asm_to_bytes("mov qword ptr [rip+0x12345678], r14"),
+		proc() {
+			addr: MemoryAddress = 0x12345678
+			mov_m64_r64(addr, Register64.R14)
+		},
+	)
+}
+
+@(test)
+test_mov_with_edge_cases :: proc(t: ^testing.T) {
+	// 1. Negative 8-bit displacement
+	compare_bytecode(
+		t,
+		"mov rbx, [rax-0x10]",
+		asm_to_bytes("mov rbx, qword ptr [rax-0x10]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RAX
+			disp: Maybe(i32) = -0x10
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RBX, addr)
+		},
+	)
+
+	// 2. Negative 32-bit displacement
+	compare_bytecode(
+		t,
+		"mov rsi, [rdx-0x12345]",
+		asm_to_bytes("mov rsi, qword ptr [rdx-0x12345]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RDX
+			disp: Maybe(i32) = -0x12345
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RSI, addr)
+		},
+	)
+
+	// 3. 8-bit displacement boundary (127)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+0x7F]",
+		asm_to_bytes("mov rax, qword ptr [rbx+0x7F]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = 0x7F
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 4. 8-bit displacement boundary (128 - should switch to 32-bit encoding)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+0x80]",
+		asm_to_bytes("mov rax, qword ptr [rbx+0x80]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = 0x80
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 5. 8-bit negative displacement boundary (-128)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx-0x80]",
+		asm_to_bytes("mov rax, qword ptr [rbx-0x80]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = -0x80
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 6. 8-bit negative displacement boundary (-129 - should switch to 32-bit encoding)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx-0x81]",
+		asm_to_bytes("mov rax, qword ptr [rbx-0x81]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = -0x81
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 7. Extended registers (R8-R15) as base/index
+	compare_bytecode(
+		t,
+		"mov rax, [r8+r9*4+0x10]",
+		asm_to_bytes("mov rax, qword ptr [r8+r9*4+0x10]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R8
+			index: Maybe(Register64) = Register64.R9
+			scale: Maybe(u8) = 4
+			disp: Maybe(i32) = 0x10
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 8. Explicit zero displacement with RBP
+	compare_bytecode(t, "mov rax, [rbp+0]", asm_to_bytes("mov rax, qword ptr [rbp+0]"), proc() {
+		base: Maybe(Register64) = Register64.RBP
+		disp: Maybe(i32) = 0
+		components := AddressComponents {
+			base         = base,
+			displacement = disp,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 9. Index-only addressing (with scale=1)
+	compare_bytecode(
+		t,
+		"mov rdx, [rcx*1+0x1000]",
+		asm_to_bytes("mov rdx, qword ptr [rcx+0x1000]"),
+		proc() {
+			index: Maybe(Register64) = Register64.RCX
+			scale: Maybe(u8) = 1
+			disp: Maybe(i32) = 0x1000
+			components := AddressComponents {
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RDX, addr)
+		},
+	)
+
+	// 10. Maximum 32-bit displacement
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+0x7FFFFFFF]",
+		asm_to_bytes("mov rax, qword ptr [rbx+0x7FFFFFFF]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = 0x7FFFFFFF
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 11. Minimum 32-bit displacement
+	compare_bytecode(
+		t,
+		"mov rax, [rbx-0x80000000]",
+		asm_to_bytes("mov rax, qword ptr [rbx-0x80000000]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = -0x80000000
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+}
+
+// Comprehensive testing of rip-relative addressing and memory operand formats
+@(test)
+test_mov_rip_relative_addressing :: proc(t: ^testing.T) {
+	// 1. Basic RIP-relative addressing
+	compare_bytecode(
+		t,
+		"mov rax, [rip+0x1000]",
+		asm_to_bytes("mov rax, qword ptr [rip+0x1000]"),
+		proc() {
+			addr: MemoryAddress = 0x1000
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// // 2. RIP-relative with negative offset
+	// compare_bytecode(
+	// 	t,
+	// 	"mov rbx, [rip-0x1000]",
+	// 	asm_to_bytes("mov rbx, qword ptr [rip-0x1000]"),
+	// 	proc() {
+	// 		addr: MemoryAddress = -0x1000
+	// 		mov_r64_m64(Register64.RBX, addr)
+	// 	},
+	// )
+
+	// 3. RIP-relative with larger offset
+	compare_bytecode(
+		t,
+		"mov rcx, [rip+0x12345678]",
+		asm_to_bytes("mov rcx, qword ptr [rip+0x12345678]"),
+		proc() {
+			addr: MemoryAddress = 0x12345678
+			mov_r64_m64(Register64.RCX, addr)
+		},
+	)
+}
+
+// Testing different REX prefix combinations
+@(test)
+test_rex_prefix_combinations :: proc(t: ^testing.T) {
+	// 1. REX.W (64-bit operand) with base registers
+	compare_bytecode(t, "mov rax, [rbx]", asm_to_bytes("mov rax, qword ptr [rbx]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 2. REX.R (extended register in reg field)
+	compare_bytecode(t, "mov r8, [rax]", asm_to_bytes("mov r8, qword ptr [rax]"), proc() {
+		base: Maybe(Register64) = Register64.RAX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.R8, addr)
+	})
+
+	// 3. REX.B (extended register in r/m field)
+	compare_bytecode(t, "mov rax, [r8]", asm_to_bytes("mov rax, qword ptr [r8]"), proc() {
+		base: Maybe(Register64) = Register64.R8
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 4. REX.X (extended register in index field)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+r8*4]",
+		asm_to_bytes("mov rax, qword ptr [rbx+r8*4]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			index: Maybe(Register64) = Register64.R8
+			scale: Maybe(u8) = 4
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 5. Combined REX.W + REX.R + REX.X + REX.B
+	compare_bytecode(
+		t,
+		"mov r15, [r14+r13*8+0x42]",
+		asm_to_bytes("mov r15, qword ptr [r14+r13*8+0x42]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R14
+			index: Maybe(Register64) = Register64.R13
+			scale: Maybe(u8) = 8
+			disp: Maybe(i32) = 0x42
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R15, addr)
+		},
+	)
+}
+
+// Special case addressing modes
+@(test)
+test_special_case_addressing :: proc(t: ^testing.T) {
+	// 1. RBP/R13 requiring displacement even when disp=0
+	compare_bytecode(t, "mov rax, [rbp]", asm_to_bytes("mov rax, qword ptr [rbp+0]"), proc() {
+		base: Maybe(Register64) = Register64.RBP
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	compare_bytecode(t, "mov rax, [r13]", asm_to_bytes("mov rax, qword ptr [r13+0]"), proc() {
+		base: Maybe(Register64) = Register64.R13
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 2. RSP/R12 requiring SIB byte
+	compare_bytecode(t, "mov rax, [rsp]", asm_to_bytes("mov rax, qword ptr [rsp]"), proc() {
+		base: Maybe(Register64) = Register64.RSP
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	compare_bytecode(t, "mov rax, [r12]", asm_to_bytes("mov rax, qword ptr [r12]"), proc() {
+		base: Maybe(Register64) = Register64.R12
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 3. No base but with SIB (index * scale + displacement)
+	compare_bytecode(
+		t,
+		"mov rax, [rcx*4+0x1000]",
+		asm_to_bytes("mov rax, qword ptr [rcx*4+0x1000]"),
+		proc() {
+			index: Maybe(Register64) = Register64.RCX
+			scale: Maybe(u8) = 4
+			disp: Maybe(i32) = 0x1000
+			components := AddressComponents {
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 4. SIB byte with no index (encoded as RSP)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+0x10]",
+		asm_to_bytes("mov rax, qword ptr [rbx+0x10]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = 0x10
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+}
+
+// Testing with reversed operand ordering for mov instructions
+@(test)
+test_mov_operand_ordering :: proc(t: ^testing.T) {
+	// 1. Register to memory
+	compare_bytecode(t, "mov [rbx], rax", asm_to_bytes("mov qword ptr [rbx], rax"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_m64_r64(addr, Register64.RAX)
+	})
+
+	// 2. Memory to register
+	compare_bytecode(t, "mov rax, [rbx]", asm_to_bytes("mov rax, qword ptr [rbx]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+}
+
+// Test registers that need specific handling in SIB
+@(test)
+test_sib_special_registers :: proc(t: ^testing.T) {
+	// 1. RSP cannot be an index register (assembler would reject this)
+	// Instead, test RBP as index
+	compare_bytecode(
+		t,
+		"mov rax, [rcx+rbp*2]",
+		asm_to_bytes("mov rax, qword ptr [rcx+rbp*2]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RCX
+			index: Maybe(Register64) = Register64.RBP
+			scale: Maybe(u8) = 2
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 2. R12 as base (requires SIB with no index)
+	compare_bytecode(
+		t,
+		"mov rax, [r12+0x42]",
+		asm_to_bytes("mov rax, qword ptr [r12+0x42]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R12
+			disp: Maybe(i32) = 0x42
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 3. R13 as base with no displacement (needs an explicit zero displacement)
+	compare_bytecode(t, "mov rax, [r13]", asm_to_bytes("mov rax, qword ptr [r13+0]"), proc() {
+		base: Maybe(Register64) = Register64.R13
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+}
+
+// Test complex combinations
+@(test)
+test_complex_addressing_combinations :: proc(t: ^testing.T) {
+	// 1. Complex SIB with extended registers and displacement
+	compare_bytecode(
+		t,
+		"mov r15, [r14+r13*8+0x12345678]",
+		asm_to_bytes("mov r15, qword ptr [r14+r13*8+0x12345678]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R14
+			index: Maybe(Register64) = Register64.R13
+			scale: Maybe(u8) = 8
+			disp: Maybe(i32) = 0x12345678
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R15, addr)
+		},
+	)
+
+	// 2. SIB with RSP as base and extended register as index
+	compare_bytecode(
+		t,
+		"mov rax, [rsp+r9*4]",
+		asm_to_bytes("mov rax, qword ptr [rsp+r9*4]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RSP
+			index: Maybe(Register64) = Register64.R9
+			scale: Maybe(u8) = 4
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 3. RBP as base with index and displacement
+	compare_bytecode(
+		t,
+		"mov rbx, [rbp+rcx*2+0x42]",
+		asm_to_bytes("mov rbx, qword ptr [rbp+rcx*2+0x42]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBP
+			index: Maybe(Register64) = Register64.RCX
+			scale: Maybe(u8) = 2
+			disp: Maybe(i32) = 0x42
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RBX, addr)
+		},
+	)
+
+	// 4. Extended registers for base, index, and reg field
+	compare_bytecode(
+		t,
+		"mov r10, [r11+r12*4+0x100]",
+		asm_to_bytes("mov r10, qword ptr [r11+r12*4+0x100]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R11
+			index: Maybe(Register64) = Register64.R12
+			scale: Maybe(u8) = 4
+			disp: Maybe(i32) = 0x100
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R10, addr)
+		},
+	)
+}
+
+// Test the boundary conditions for displacement values
+@(test)
+test_displacement_boundaries :: proc(t: ^testing.T) {
+	// 1. Displacement 0 (no displacement in encoding except for special cases)
+	compare_bytecode(t, "mov rax, [rbx+0]", asm_to_bytes("mov rax, qword ptr [rbx]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		disp: Maybe(i32) = 0
+		components := AddressComponents {
+			base         = base,
+			displacement = disp,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 2. Smallest 8-bit displacement (1)
+	compare_bytecode(t, "mov rax, [rbx+1]", asm_to_bytes("mov rax, qword ptr [rbx+1]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		disp: Maybe(i32) = 1
+		components := AddressComponents {
+			base         = base,
+			displacement = disp,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 3. Largest 8-bit displacement (127)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+127]",
+		asm_to_bytes("mov rax, qword ptr [rbx+127]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = 127
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 4. Smallest 32-bit displacement (128)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx+128]",
+		asm_to_bytes("mov rax, qword ptr [rbx+128]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = 128
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 5. Smallest negative 8-bit displacement (-1)
+	compare_bytecode(t, "mov rax, [rbx-1]", asm_to_bytes("mov rax, qword ptr [rbx-1]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		disp: Maybe(i32) = -1
+		components := AddressComponents {
+			base         = base,
+			displacement = disp,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 6. Largest negative 8-bit displacement (-128)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx-128]",
+		asm_to_bytes("mov rax, qword ptr [rbx-128]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = -128
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 7. Smallest negative 32-bit displacement (-129)
+	compare_bytecode(
+		t,
+		"mov rax, [rbx-129]",
+		asm_to_bytes("mov rax, qword ptr [rbx-129]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RBX
+			disp: Maybe(i32) = -129
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+}
+
+// Additional tests for REX prefixes ensuring they're generated correctly
+@(test)
+test_comprehensive_rex_prefixes :: proc(t: ^testing.T) {
+	// 1. REX.W only (64-bit operand)
+	compare_bytecode(t, "mov rax, [rbx]", asm_to_bytes("mov rax, qword ptr [rbx]"), proc() {
+		base: Maybe(Register64) = Register64.RBX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 2. REX.W + REX.R (64-bit + extended register in reg field)
+	compare_bytecode(t, "mov r8, [rcx]", asm_to_bytes("mov r8, qword ptr [rcx]"), proc() {
+		base: Maybe(Register64) = Register64.RCX
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.R8, addr)
+	})
+
+	// 3. REX.W + REX.B (64-bit + extended register in r/m field)
+	compare_bytecode(t, "mov rax, [r8]", asm_to_bytes("mov rax, qword ptr [r8]"), proc() {
+		base: Maybe(Register64) = Register64.R8
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.RAX, addr)
+	})
+
+	// 4. REX.W + REX.X (64-bit + extended register in SIB.index)
+	compare_bytecode(
+		t,
+		"mov rax, [rcx+r8*4]",
+		asm_to_bytes("mov rax, qword ptr [rcx+r8*4]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RCX
+			index: Maybe(Register64) = Register64.R8
+			scale: Maybe(u8) = 4
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 5. REX.W + REX.R + REX.B (64-bit + extended reg + extended r/m)
+	compare_bytecode(t, "mov r8, [r9]", asm_to_bytes("mov r8, qword ptr [r9]"), proc() {
+		base: Maybe(Register64) = Register64.R9
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.R8, addr)
+	})
+
+	// 6. REX.W + REX.R + REX.X (64-bit + extended reg + extended index)
+	compare_bytecode(
+		t,
+		"mov r8, [rcx+r9*4]",
+		asm_to_bytes("mov r8, qword ptr [rcx+r9*4]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RCX
+			index: Maybe(Register64) = Register64.R9
+			scale: Maybe(u8) = 4
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R8, addr)
+		},
+	)
+
+	// 7. REX.W + REX.X + REX.B (64-bit + extended index + extended base)
+	compare_bytecode(
+		t,
+		"mov rax, [r10+r11*4]",
+		asm_to_bytes("mov rax, qword ptr [r10+r11*4]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R10
+			index: Maybe(Register64) = Register64.R11
+			scale: Maybe(u8) = 4
+			components := AddressComponents {
+				base  = base,
+				index = index,
+				scale = scale,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.RAX, addr)
+		},
+	)
+
+	// 8. Full REX prefix (REX.W + REX.R + REX.X + REX.B)
+	compare_bytecode(
+		t,
+		"mov r12, [r13+r14*8+0x42]",
+		asm_to_bytes("mov r12, qword ptr [r13+r14*8+0x42]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R13
+			index: Maybe(Register64) = Register64.R14
+			scale: Maybe(u8) = 8
+			disp: Maybe(i32) = 0x42
+			components := AddressComponents {
+				base         = base,
+				index        = index,
+				scale        = scale,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R12, addr)
+		},
+	)
+}
+
+// Tests specifically for the special encoding requirements of different registers
+@(test)
+test_register_special_encodings :: proc(t: ^testing.T) {
+	// 1. RSP as base (requires SIB byte) with extended register
+	compare_bytecode(
+		t,
+		"mov r10, [rsp+0x10]",
+		asm_to_bytes("mov r10, qword ptr [rsp+0x10]"),
+		proc() {
+			base: Maybe(Register64) = Register64.RSP
+			disp: Maybe(i32) = 0x10
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R10, addr)
+		},
+	)
+
+	// 2. R12 as base (requires SIB byte) with extended register
+	compare_bytecode(
+		t,
+		"mov r11, [r12+0x20]",
+		asm_to_bytes("mov r11, qword ptr [r12+0x20]"),
+		proc() {
+			base: Maybe(Register64) = Register64.R12
+			disp: Maybe(i32) = 0x20
+			components := AddressComponents {
+				base         = base,
+				displacement = disp,
+			}
+			addr: MemoryAddress = components
+			mov_r64_m64(Register64.R11, addr)
+		},
+	)
+
+	// 3. RBP as base (requires displacement) with extended register
+	compare_bytecode(t, "mov r9, [rbp]", asm_to_bytes("mov r9, qword ptr [rbp+0]"), proc() {
+		base: Maybe(Register64) = Register64.RBP
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.R9, addr)
+	})
+
+	// 4. R13 as base (requires displacement) with extended register
+	compare_bytecode(t, "mov r8, [r13]", asm_to_bytes("mov r8, qword ptr [r13+0]"), proc() {
+		base: Maybe(Register64) = Register64.R13
+		components := AddressComponents {
+			base = base,
+		}
+		addr: MemoryAddress = components
+		mov_r64_m64(Register64.R8, addr)
+	})
 }
 
 // --------------------------------

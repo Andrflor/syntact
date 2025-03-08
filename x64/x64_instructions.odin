@@ -277,6 +277,7 @@ SegmentRegister :: enum u8 {
 
 // AddressComponents represents the individual components of a memory address
 // in x86-64 using the SIB (Scale-Index-Base) + displacement format.
+// If only displacement assun RIP
 AddressComponents :: struct {
 	base:         Maybe(Register64), // Base register (none for absolute addressing)
 	index:        Maybe(Register64), // Index register (none if not using index)
@@ -292,157 +293,133 @@ MemoryAddress :: union {
 	AddressComponents, // Complex addressing mode with optional components
 }
 
-// encode_memory_operand encodes a MemoryAddress into the ModR/M, SIB bytes
-// and displacement needed for x86-64 instructions that reference memory.
-//
-// Parameters:
-//   reg:    The register field for ModR/M byte (usually the destination register)
-//   memory: The memory address to encode
-//
-// Returns:
-//   modrm:      The ModR/M byte
-//   sib:        The SIB byte (if needed)
-//   has_sib:    Whether the SIB byte is present
-//   disp_size:  Size of displacement (0, 1, or 4 bytes)
-//   disp:       The displacement value
-//   rex_b:      Whether REX.B bit should be set (for base register extension)
-//   rex_x:      Whether REX.X bit should be set (for index register extension)
-encode_memory_operand :: proc(
-	reg: u8,
-	memory: MemoryAddress,
-) -> (
-	modrm: u8,
-	sib: u8,
-	has_sib: bool,
-	disp_size: u8,
-	disp: i32,
-	rex_b: bool,
-	rex_x: bool,
-) {
-	// Handle direct absolute address
-	if addr, is_absolute := memory.(u64); is_absolute {
-		// Encode as mod=00, r/m=100 (SIB) with special SIB encoding
-		modrm = encode_modrm(0, reg, 4) // mod=00, r/m=100 (SIB follows)
-		sib = 0x25 // Scale=00, Index=100 (no index), Base=101 (disp32 only)
-		has_sib = true
-		disp_size = 4 // Always 32-bit displacement
-		disp = i32(addr & 0xFFFFFFFF) // Use low 32 bits
+// Special write function for the complex memory adress system of x64
+write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field: u8) {
+	switch a in addr {
+	case u64:
+		// Direct absolute addressing
+		// Use RIP-relative encoding (mod=00, rm=101)
+		modrm := encode_modrm(0, reg_field & 0x7, 5)
+		write(buffer, []u8{modrm})
 
-		// Check for truncation warning
-		if addr > 0xFFFFFFFF {
-			fmt.eprintln("Warning: 64-bit absolute address truncated to 32 bits")
-		}
+		// Write 32-bit displacement
+		disp := i32(a)
+		disp_bytes: [4]u8
+		disp_bytes[0] = u8(disp)
+		disp_bytes[1] = u8(disp >> 8)
+		disp_bytes[2] = u8(disp >> 16)
+		disp_bytes[3] = u8(disp >> 24)
+		write(buffer, disp_bytes[:])
 
-		return
-	}
+	case AddressComponents:
+		// Determine ModRM components
+		mod: u8 = 0
+		rm: u8 = 0
+		need_sib := false
 
-	// Handle complex addressing mode
-	components := memory.(AddressComponents)
+		// Set base register (rm field)
+		if a.base != nil {
+			rm = u8(a.base.(Register64))
 
-	// Extract components, with defaults
-	base_reg, has_base := components.base.?
-	index_reg, has_index := components.index.?
-	scale_val, has_scale := components.scale.?
-	disp_val, has_disp := components.displacement.?
-
-	// Set default values
-	scale := has_scale ? scale_val : 1
-	disp = has_disp ? disp_val : 0
-
-	// Set REX bits for register extensions
-	rex_b = has_base && (u8(base_reg) & 0x8) != 0
-	rex_x = has_index && (u8(index_reg) & 0x8) != 0
-
-	// Default register values (lower 3 bits only)
-	base := has_base ? u8(base_reg) & 0x7 : 0
-	index := has_index ? u8(index_reg) & 0x7 : 0
-
-	// Determine if we need a SIB byte
-	has_sib =
-		has_index ||
-		has_scale && scale > 1 ||
-		(has_base && (base_reg == .RSP || base_reg == .R12)) ||
-		!has_base && has_index // [index*scale+disp] requires SIB
-
-	// Determine ModR/M mod field based on displacement
-	mod: u8
-	if !has_disp || disp == 0 {
-		if !has_base || (has_base && base_reg != .RBP && base_reg != .R13) {
-			mod = 0 // No displacement needed
-			disp_size = 0
+			// Check if we need SIB byte (RSP/R12 as base)
+			if (rm & 0x7) == 4 {
+				need_sib = true
+			}
 		} else {
-			// [rbp] or [r13] needs at least 8-bit displacement
+			// No base means we need SIB with special encoding
+			need_sib = true
+			rm = 4 // Use SIB
+		}
+
+		// Force SIB if index is present
+		if a.index != nil {
+			need_sib = true
+		}
+
+		// Determine mod field based on displacement
+		if a.displacement != nil {
+			disp := a.displacement.(i32)
+			if disp == 0 && (a.base == nil || (rm & 0x7) != 5) {
+				mod = 0
+			} else if disp >= -128 && disp <= 127 {
+				mod = 1 // 8-bit displacement
+			} else {
+				mod = 2 // 32-bit displacement
+			}
+		} else if a.base == nil || (rm & 0x7) == 5 {
+			// RBP/R13 as base with no displacement needs mod=1, disp=0
 			mod = 1
-			disp_size = 1
-			disp = 0 // Zero displacement
-		}
-	} else if disp >= -128 && disp <= 127 {
-		mod = 1 // 8-bit displacement
-		disp_size = 1
-	} else {
-		mod = 2 // 32-bit displacement
-		disp_size = 4
-	}
-
-	// Special case: [disp32] (displacement only, no base/index)
-	if !has_base && !has_index {
-		mod = 0
-		disp_size = 4
-		has_sib = true
-		sib = 0x25 // Same as absolute address
-	}
-
-	// Special case: [index*scale+disp32] (no base)
-	if !has_base && has_index {
-		mod = 0
-		disp_size = 4
-	}
-
-	// Encode ModR/M byte
-	rm: u8 = has_sib ? 4 : base
-	modrm = encode_modrm(mod, reg, rm)
-
-	// Encode SIB byte if needed
-	if has_sib {
-		// Convert scale to 2-bit field
-		scale_bits: u8
-		switch scale {
-		case 1:
-			scale_bits = 0
-		case 2:
-			scale_bits = 1
-		case 4:
-			scale_bits = 2
-		case 8:
-			scale_bits = 3
 		}
 
-		// Special case when no index register is used
-		idx := !has_index ? 4 : index
+		// Write REX prefix if needed for registers ≥ R8
+		has_extended_reg := (reg_field & 0x8) != 0
+		has_extended_base := a.base != nil && (u8(a.base.(Register64)) & 0x8) != 0
+		has_extended_index := a.index != nil && (u8(a.index.(Register64)) & 0x8) != 0
 
-		// Special case when no base register is used
-		base_bits := base
-		if !has_base {
-			base_bits = 5 // disp32 only
+		// Generate proper REX prefix (this was missing the X bit and possibly had other issues)
+		rex := get_rex_prefix(true, has_extended_reg, has_extended_index, has_extended_base)
+
+		// Only write non-trivial REX
+		if rex != 0x40 {
+			write(buffer, []u8{rex})
 		}
 
-		sib = (scale_bits << 6) | (idx << 3) | base_bits
-	}
+		// Write ModRM byte
+		modrm := encode_modrm(mod, reg_field & 0x7, need_sib ? 4 : rm & 0x7)
+		write(buffer, []u8{modrm})
 
-	return
+		// Write SIB byte if needed
+		if need_sib {
+			scale := a.scale != nil ? a.scale.(u8) : 1
+			scale_bits: u8
+			switch scale {
+			case 1:
+				scale_bits = 0
+			case 2:
+				scale_bits = 1
+			case 4:
+				scale_bits = 2
+			case 8:
+				scale_bits = 3
+			}
+
+			index := a.index != nil ? u8(a.index.(Register64)) & 0x7 : 4 // 4 = no index
+			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5 // 5 = no base
+
+			sib := encode_sib(scale_bits, index, base)
+			write(buffer, []u8{sib})
+		}
+
+		// Write displacement if needed
+		if a.displacement != nil || (a.base == nil || (rm & 0x7) == 5 && mod != 0) {
+			disp := a.displacement != nil ? a.displacement.(i32) : 0
+
+			if mod == 1 {
+				// 8-bit displacement
+				write(buffer, []u8{u8(disp)})
+			} else if mod == 2 || (a.base == nil && mod == 0) {
+				// 32-bit displacement
+				disp_bytes: [4]u8
+				disp_bytes[0] = u8(disp)
+				disp_bytes[1] = u8(disp >> 8)
+				disp_bytes[2] = u8(disp >> 16)
+				disp_bytes[3] = u8(disp >> 24)
+				write(buffer, disp_bytes[:])
+			}
+		}
+	}
 }
-
 // ==================================
 // Helper Functions
 // ==================================
 
-// Generates the REX prefix byte used in x86-64 instructions.
+// generates the rex prefix byte used in x86-64 instructions.
 get_rex_prefix :: proc(w: bool, r: bool, x: bool, b: bool) -> u8 {
-	// REX prefix format: 0100WRXB
-	// W: 64-bit operand size
-	// R: Extension for ModR/M.reg
-	// X: Extension for SIB.index
-	// B: Extension for ModR/M.rm or SIB.base
+	// rex prefix format: 0100wrxb
+	// w: 64-bit operand size
+	// r: extension for modr/m.reg
+	// x: extension for sib.index
+	// b: extension for modr/m.rm or sib.base
 	rex: u8 = 0x40
 	if w do rex |= 0x08
 	if r do rex |= 0x04
@@ -451,22 +428,22 @@ get_rex_prefix :: proc(w: bool, r: bool, x: bool, b: bool) -> u8 {
 	return rex
 }
 
-// Encodes the ModR/M byte, which specifies addressing modes and registers.
+// encodes the modr/m byte, which specifies addressing modes and registers.
 encode_modrm :: proc(mod: u8, reg: u8, rm: u8) -> u8 {
-	// ModR/M byte format: [7:6] mod | [5:3] reg | [2:0] r/m
+	// modr/m byte format: [7:6] mod | [5:3] reg | [2:0] r/m
 	return (mod << 6) | ((reg & 0x7) << 3) | (rm & 0x7)
 }
 
-// Encodes the SIB (Scale-Index-Base) byte for complex memory addressing.
+// encodes the sib (scale-index-base) byte for complex memory addressing.
 encode_sib :: proc(scale: u8, index: u8, base: u8) -> u8 {
-	// SIB byte format: [7:6] scale | [5:3] index | [2:0] base
-	// scale: Scaling factor (0=1, 1=2, 2=4, 3=8)
+	// sib byte format: [7:6] scale | [5:3] index | [2:0] base
+	// scale: scaling factor (0=1, 1=2, 2=4, 3=8)
 	return (scale << 6) | ((index & 0x7) << 3) | (base & 0x7)
 }
 
-// Generates a REX prefix when encoding an instruction with an r/m operand.
+// generates a rex prefix when encoding an instruction with an r/m operand.
 rex_rb :: proc(w: bool, reg, rm: u8) -> u8 {
-	// REX prefix for r/m operands (modifies reg and rm fields)
+	// rex prefix for r/m operands (modifies reg and rm fields)
 	return get_rex_prefix(w, (reg & 0x8) != 0, false, (rm & 0x8) != 0)
 }
 
@@ -476,6 +453,14 @@ rex_rb :: proc(w: bool, reg, rm: u8) -> u8 {
 
 // 64-bit Data Movement Instructions
 // These instructions move data between registers or between registers and memory
+
+
+// Move value from source to destination register
+mov_r64_r64 :: proc(dst: Register64, src: Register64) {
+	rex: u8 = rex_rb(true, u8(src), u8(dst))
+	modrm := encode_modrm(3, u8(src), u8(dst))
+	write(&_buffer, []u8{rex, 0x89, modrm}) // REX.W + 89 /r
+}
 
 // Move immediate value to 64-bit register
 mov_r64_imm64 :: proc(reg: Register64, imm: u64) {
@@ -522,51 +507,18 @@ mov_r64_imm64 :: proc(reg: Register64, imm: u64) {
 	}
 }
 
-// Move value from source to destination register
-mov_r64_r64 :: proc(dst: Register64, src: Register64) {
-	rex: u8 = rex_rb(true, u8(src), u8(dst))
-	modrm := encode_modrm(3, u8(src), u8(dst))
-	write(&_buffer, []u8{rex, 0x89, modrm}) // REX.W + 89 /r
-}
-
 // Load 64-bit value from memory into register
-mov_r64_m64 :: proc(dst: Register64, mem_addr: u64) {
-	rex: u8 = get_rex_prefix(true, (u8(dst) & 0x8) != 0, false, false)
-	modrm := encode_modrm(0, u8(dst) & 0x7, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-	write(&_buffer, []u8{rex, 0x8B, modrm}) // REX.W + 8B /r
-
-	// Encode displacement as 32-bit immediate (relative to next instruction)
-	disp: u32 = u32(mem_addr) // Simplified; actual implementation would compute RIP-relative offset
-	write(
-		&_buffer,
-		[]u8 {
-			u8(disp & 0xFF),
-			u8((disp >> 8) & 0xFF),
-			u8((disp >> 16) & 0xFF),
-			u8((disp >> 24) & 0xFF),
-		},
-	)
+mov_r64_m64 :: proc(dst: Register64, mem_addr: MemoryAddress) {
+	rex := get_rex_prefix(true, (u8(dst) & 0x8) != 0, false, false)
+	write(&_buffer, []u8{rex, 0x8B}) // REX.W + 8B /r
+	write_memory_address(&_buffer, mem_addr, u8(dst) & 0x7)
 }
 
 // Store 64-bit register value to memory
-mov_m64_r64 :: proc(mem_addr: u64, src: Register64) {
-	rex: u8 = get_rex_prefix(true, (u8(src) & 0x8) != 0, false, false)
-	modrm := encode_modrm(0, u8(src) & 0x7, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-	write(&_buffer, []u8{rex, 0x89, modrm}) // REX.W + 89 /r
-
-	// Encode displacement as 32-bit immediate (relative to next instruction)
-	disp: u32 = u32(mem_addr) // Simplified; actual implementation would compute RIP-relative offset
-	write(
-		&_buffer,
-		[]u8 {
-			u8(disp & 0xFF),
-			u8((disp >> 8) & 0xFF),
-			u8((disp >> 16) & 0xFF),
-			u8((disp >> 24) & 0xFF),
-		},
-	)
+mov_m64_r64 :: proc(mem_addr: MemoryAddress, src: Register64) {
+	rex := get_rex_prefix(true, (u8(src) & 0x8) != 0, false, false)
+	write(&_buffer, []u8{rex, 0x89}) // REX.W + 89 /r
+	write_memory_address(&_buffer, mem_addr, u8(src) & 0x7)
 }
 
 // Move 64-bit immediate to register (full 64-bit immediate)
