@@ -9,6 +9,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 package x64_assembler
 
+import "core:fmt"
+
 // ByteBuffer is a simple growable buffer for bytecode
 ByteBuffer :: struct {
 	data: []u8,
@@ -272,6 +274,164 @@ SegmentRegister :: enum u8 {
 	GS = 5,
 }
 
+
+// AddressComponents represents the individual components of a memory address
+// in x86-64 using the SIB (Scale-Index-Base) + displacement format.
+AddressComponents :: struct {
+	base:         Maybe(Register64), // Base register (none for absolute addressing)
+	index:        Maybe(Register64), // Index register (none if not using index)
+	scale:        Maybe(u8), // Scale factor: 1, 2, 4, or 8 (none if not using scale)
+	displacement: Maybe(i32), // Signed displacement/offset (none if no displacement)
+}
+
+// MemoryAddress represents all possible memory addressing modes in x86-64:
+// - Direct absolute addressing: u64 value (limited to 32 bits in practice)
+// - Register indirect + scale + displacement: using AddressComponents
+MemoryAddress :: union {
+	u64, // Direct absolute address (effective only for first 4GB)
+	AddressComponents, // Complex addressing mode with optional components
+}
+
+// encode_memory_operand encodes a MemoryAddress into the ModR/M, SIB bytes
+// and displacement needed for x86-64 instructions that reference memory.
+//
+// Parameters:
+//   reg:    The register field for ModR/M byte (usually the destination register)
+//   memory: The memory address to encode
+//
+// Returns:
+//   modrm:      The ModR/M byte
+//   sib:        The SIB byte (if needed)
+//   has_sib:    Whether the SIB byte is present
+//   disp_size:  Size of displacement (0, 1, or 4 bytes)
+//   disp:       The displacement value
+//   rex_b:      Whether REX.B bit should be set (for base register extension)
+//   rex_x:      Whether REX.X bit should be set (for index register extension)
+encode_memory_operand :: proc(
+	reg: u8,
+	memory: MemoryAddress,
+) -> (
+	modrm: u8,
+	sib: u8,
+	has_sib: bool,
+	disp_size: u8,
+	disp: i32,
+	rex_b: bool,
+	rex_x: bool,
+) {
+	// Handle direct absolute address
+	if addr, is_absolute := memory.(u64); is_absolute {
+		// Encode as mod=00, r/m=100 (SIB) with special SIB encoding
+		modrm = encode_modrm(0, reg, 4) // mod=00, r/m=100 (SIB follows)
+		sib = 0x25 // Scale=00, Index=100 (no index), Base=101 (disp32 only)
+		has_sib = true
+		disp_size = 4 // Always 32-bit displacement
+		disp = i32(addr & 0xFFFFFFFF) // Use low 32 bits
+
+		// Check for truncation warning
+		if addr > 0xFFFFFFFF {
+			fmt.eprintln("Warning: 64-bit absolute address truncated to 32 bits")
+		}
+
+		return
+	}
+
+	// Handle complex addressing mode
+	components := memory.(AddressComponents)
+
+	// Extract components, with defaults
+	base_reg, has_base := components.base.?
+	index_reg, has_index := components.index.?
+	scale_val, has_scale := components.scale.?
+	disp_val, has_disp := components.displacement.?
+
+	// Set default values
+	scale := has_scale ? scale_val : 1
+	disp = has_disp ? disp_val : 0
+
+	// Set REX bits for register extensions
+	rex_b = has_base && (u8(base_reg) & 0x8) != 0
+	rex_x = has_index && (u8(index_reg) & 0x8) != 0
+
+	// Default register values (lower 3 bits only)
+	base := has_base ? u8(base_reg) & 0x7 : 0
+	index := has_index ? u8(index_reg) & 0x7 : 0
+
+	// Determine if we need a SIB byte
+	has_sib =
+		has_index ||
+		has_scale && scale > 1 ||
+		(has_base && (base_reg == .RSP || base_reg == .R12)) ||
+		!has_base && has_index // [index*scale+disp] requires SIB
+
+	// Determine ModR/M mod field based on displacement
+	mod: u8
+	if !has_disp || disp == 0 {
+		if !has_base || (has_base && base_reg != .RBP && base_reg != .R13) {
+			mod = 0 // No displacement needed
+			disp_size = 0
+		} else {
+			// [rbp] or [r13] needs at least 8-bit displacement
+			mod = 1
+			disp_size = 1
+			disp = 0 // Zero displacement
+		}
+	} else if disp >= -128 && disp <= 127 {
+		mod = 1 // 8-bit displacement
+		disp_size = 1
+	} else {
+		mod = 2 // 32-bit displacement
+		disp_size = 4
+	}
+
+	// Special case: [disp32] (displacement only, no base/index)
+	if !has_base && !has_index {
+		mod = 0
+		disp_size = 4
+		has_sib = true
+		sib = 0x25 // Same as absolute address
+	}
+
+	// Special case: [index*scale+disp32] (no base)
+	if !has_base && has_index {
+		mod = 0
+		disp_size = 4
+	}
+
+	// Encode ModR/M byte
+	rm: u8 = has_sib ? 4 : base
+	modrm = encode_modrm(mod, reg, rm)
+
+	// Encode SIB byte if needed
+	if has_sib {
+		// Convert scale to 2-bit field
+		scale_bits: u8
+		switch scale {
+		case 1:
+			scale_bits = 0
+		case 2:
+			scale_bits = 1
+		case 4:
+			scale_bits = 2
+		case 8:
+			scale_bits = 3
+		}
+
+		// Special case when no index register is used
+		idx := !has_index ? 4 : index
+
+		// Special case when no base register is used
+		base_bits := base
+		if !has_base {
+			base_bits = 5 // disp32 only
+		}
+
+		sib = (scale_bits << 6) | (idx << 3) | base_bits
+	}
+
+	return
+}
+
 // ==================================
 // Helper Functions
 // ==================================
@@ -319,25 +479,47 @@ rex_rb :: proc(w: bool, reg, rm: u8) -> u8 {
 
 // Move immediate value to 64-bit register
 mov_r64_imm64 :: proc(reg: Register64, imm: u64) {
-	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
-	opcode := 0xB8 + (u8(reg) & 0x7) // Opcode + register
+	// Check if the immediate value fits in 32 bits (sign-extended)
+	fits_in_32bit := (imm <= 0x7FFFFFFF) || (imm >= 0xFFFFFFFF80000000)
 
-	write(&_buffer, []u8{rex, opcode})
+	if fits_in_32bit {
+		// Use C7 /0 encoding with 32-bit immediate
+		rex := get_rex_prefix(true, false, false, (u8(reg) & 0x8) != 0)
+		modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0, r/m=reg
+		write(&_buffer, []u8{rex, 0xC7, modrm})
 
-	// Store immediate value (little-endian)
-	write(
-		&_buffer,
-		[]u8 {
-			u8(imm & 0xFF),
-			u8((imm >> 8) & 0xFF),
-			u8((imm >> 16) & 0xFF),
-			u8((imm >> 24) & 0xFF),
-			u8((imm >> 32) & 0xFF),
-			u8((imm >> 40) & 0xFF),
-			u8((imm >> 48) & 0xFF),
-			u8((imm >> 56) & 0xFF),
-		},
-	)
+		// Write 32-bit immediate
+		imm32 := u32(imm)
+		write(
+			&_buffer,
+			[]u8 {
+				u8(imm32 & 0xFF),
+				u8((imm32 >> 8) & 0xFF),
+				u8((imm32 >> 16) & 0xFF),
+				u8((imm32 >> 24) & 0xFF),
+			},
+		)
+	} else {
+		// Use B8+r encoding with 64-bit immediate
+		rex := get_rex_prefix(true, false, false, (u8(reg) & 0x8) != 0)
+		opcode := 0xB8 + (u8(reg) & 0x7)
+		write(&_buffer, []u8{rex, opcode})
+
+		// Write 64-bit immediate
+		write(
+			&_buffer,
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+				u8((imm >> 32) & 0xFF),
+				u8((imm >> 40) & 0xFF),
+				u8((imm >> 48) & 0xFF),
+				u8((imm >> 56) & 0xFF),
+			},
+		)
+	}
 }
 
 // Move value from source to destination register
