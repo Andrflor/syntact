@@ -294,11 +294,30 @@ MemoryAddress :: union {
 }
 
 // Special write function for the complex memory adress system of x64
-write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field: u8) {
+write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field: u8, opcode: u8) {
+	// Initialize extension flags
+	has_extended_reg := (reg_field & 0x8) != 0
+	has_extended_base := false
+	has_extended_index := false
+
+	// Check for extended registers in memory address
+	#partial switch a in addr {
+	case AddressComponents:
+		if a.base != nil {
+			has_extended_base = (u8(a.base.(Register64)) & 0x8) != 0
+		}
+		if a.index != nil {
+			has_extended_index = (u8(a.index.(Register64)) & 0x8) != 0
+		}
+	}
+
+	// Generate REX prefix
+	rex := get_rex_prefix(true, has_extended_reg, has_extended_index, has_extended_base)
+	write(buffer, []u8{rex, opcode}) // REX.W + opcode
+
 	switch a in addr {
 	case u64:
 		// Direct absolute addressing
-		// Use RIP-relative encoding (mod=00, rm=101)
 		modrm := encode_modrm(0, reg_field & 0x7, 5)
 		write(buffer, []u8{modrm})
 
@@ -351,18 +370,18 @@ write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field
 			mod = 1
 		}
 
-		// Write REX prefix if needed for registers ≥ R8
-		has_extended_reg := (reg_field & 0x8) != 0
-		has_extended_base := a.base != nil && (u8(a.base.(Register64)) & 0x8) != 0
-		has_extended_index := a.index != nil && (u8(a.index.(Register64)) & 0x8) != 0
-
-		// Generate proper REX prefix (this was missing the X bit and possibly had other issues)
-		rex := get_rex_prefix(true, has_extended_reg, has_extended_index, has_extended_base)
-
-		// Only write non-trivial REX
-		if rex != 0x40 {
-			write(buffer, []u8{rex})
+		// Special case for [reg*1+disp] (scalar indexing)
+		if a.base == nil &&
+		   a.index != nil &&
+		   a.scale != nil &&
+		   a.scale.(u8) == 1 &&
+		   (u8(a.index.(Register64)) & 0x7) != 4 {
+			// Use index register as base, unless it's RSP/R12
+			rm = u8(a.index.(Register64)) & 0x7
+			need_sib = false
+			has_extended_base = (u8(a.index.(Register64)) & 0x8) != 0
 		}
+
 
 		// Write ModRM byte
 		modrm := encode_modrm(mod, reg_field & 0x7, need_sib ? 4 : rm & 0x7)
@@ -384,9 +403,9 @@ write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field
 			}
 
 			index := a.index != nil ? u8(a.index.(Register64)) & 0x7 : 4 // 4 = no index
-			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5 // 5 = no base
+			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5 // 5 = no base (RBP/R13 with disp32)
 
-			sib := encode_sib(scale_bits, index, base)
+			sib := (scale_bits << 6) | ((index & 0x7) << 3) | base
 			write(buffer, []u8{sib})
 		}
 
@@ -409,6 +428,7 @@ write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field
 		}
 	}
 }
+
 // ==================================
 // Helper Functions
 // ==================================
@@ -509,16 +529,12 @@ mov_r64_imm64 :: proc(reg: Register64, imm: u64) {
 
 // Load 64-bit value from memory into register
 mov_r64_m64 :: proc(dst: Register64, mem_addr: MemoryAddress) {
-	rex := get_rex_prefix(true, (u8(dst) & 0x8) != 0, false, false)
-	write(&_buffer, []u8{rex, 0x8B}) // REX.W + 8B /r
-	write_memory_address(&_buffer, mem_addr, u8(dst) & 0x7)
+	write_memory_address(&_buffer, mem_addr, u8(dst), 0x8B) // 8B is MOV r64, r/m64 opcode
 }
 
 // Store 64-bit register value to memory
 mov_m64_r64 :: proc(mem_addr: MemoryAddress, src: Register64) {
-	rex := get_rex_prefix(true, (u8(src) & 0x8) != 0, false, false)
-	write(&_buffer, []u8{rex, 0x89}) // REX.W + 89 /r
-	write_memory_address(&_buffer, mem_addr, u8(src) & 0x7)
+	write_memory_address(&_buffer, mem_addr, u8(src), 0x89) // 89 is MOV r/m64, r64 opcode
 }
 
 // Move 64-bit immediate to register (full 64-bit immediate)
