@@ -425,46 +425,17 @@ mov_r64_r64 :: proc(dst: Register64, src: Register64) {
 
 // Move immediate value to 64-bit register
 mov_r64_imm64 :: proc(reg: Register64, imm: u64) {
-	// Check if the immediate value fits in 32 bits (sign-extended)
-	fits_in_32bit := (imm <= 0x7FFFFFFF) || (imm >= 0xFFFFFFFF80000000)
-
-	if fits_in_32bit {
-		// Use C7 /0 encoding with 32-bit immediate
+	if (imm <= 0x7FFFFFFF) || (imm >= 0xFFFFFFFF80000000) {
 		rex := get_rex_prefix(true, false, false, (u8(reg) & 0x8) != 0)
-		modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0, r/m=reg
+		modrm := encode_modrm(3, 0, u8(reg) & 0x7)
 		write(&_buffer, []u8{rex, 0xC7, modrm})
-
-		// Write 32-bit immediate
-		imm32 := u32(imm)
-		write(
-			&_buffer,
-			[]u8 {
-				u8(imm32 & 0xFF),
-				u8((imm32 >> 8) & 0xFF),
-				u8((imm32 >> 16) & 0xFF),
-				u8((imm32 >> 24) & 0xFF),
-			},
-		)
+		bytes := (transmute([4]u8)u32(imm))
+		write(&_buffer, bytes[:])
 	} else {
-		// Use B8+r encoding with 64-bit immediate
 		rex := get_rex_prefix(true, false, false, (u8(reg) & 0x8) != 0)
-		opcode := 0xB8 + (u8(reg) & 0x7)
-		write(&_buffer, []u8{rex, opcode})
-
-		// Write 64-bit immediate
-		write(
-			&_buffer,
-			[]u8 {
-				u8(imm & 0xFF),
-				u8((imm >> 8) & 0xFF),
-				u8((imm >> 16) & 0xFF),
-				u8((imm >> 24) & 0xFF),
-				u8((imm >> 32) & 0xFF),
-				u8((imm >> 40) & 0xFF),
-				u8((imm >> 48) & 0xFF),
-				u8((imm >> 56) & 0xFF),
-			},
-		)
+		write(&_buffer, []u8{rex, 0xB8 + (u8(reg) & 0x7)})
+		bytes := (transmute([8]u8)imm)
+		write(&_buffer, bytes[:])
 	}
 }
 
