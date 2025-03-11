@@ -45,11 +45,11 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8, writer: Vo
 	for i in 0 ..< len(expected) {
 		if expected[i] != _buffer.data[i] {
 			log.infof(
-				"%s: Byte mismatch at position %d. Expected 0x%02X, got 0x%02X.\n",
+				"%s: Byte mismatch at position %d. Expected %i, got %i.\n",
 				desc,
 				i,
-				expected[i],
-				_buffer.data[i],
+				expected,
+				_buffer.data[:_buffer.len],
 			)
 			resetBuffer()
 			testing.fail(t)
@@ -1016,7 +1016,7 @@ test_mov_with_edge_cases :: proc(t: ^testing.T) {
 	compare_bytecode(
 		t,
 		"mov rdx, [rcx*1+0x1000]",
-		asm_to_bytes("mov rdx, qword ptr [rcx+0x1000]"),
+		asm_to_bytes("mov rdx, qword ptr [rcx*1+0x1000]"),
 		proc() {
 			index: Maybe(Register64) = Register64.RCX
 			scale: Maybe(u8) = 1

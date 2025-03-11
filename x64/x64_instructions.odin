@@ -295,103 +295,58 @@ MemoryAddress :: union {
 
 // Special write function for the complex memory adress system of x64
 write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field: u8, opcode: u8) {
-	// Initialize extension flags
-	has_extended_reg := (reg_field & 0x8) != 0
-	has_extended_base := false
-	has_extended_index := false
+	has_ext_reg := (reg_field & 0x8) != 0
+	has_ext_base := false
+	has_ext_idx := false
 
-	// Check for extended registers in memory address
 	#partial switch a in addr {
 	case AddressComponents:
-		if a.base != nil {
-			has_extended_base = (u8(a.base.(Register64)) & 0x8) != 0
-		}
-		if a.index != nil {
-			has_extended_index = (u8(a.index.(Register64)) & 0x8) != 0
-		}
+		if a.base != nil do has_ext_base = (u8(a.base.(Register64)) & 0x8) != 0
+		if a.index != nil do has_ext_idx = (u8(a.index.(Register64)) & 0x8) != 0
 	}
 
-	// Generate REX prefix
-	rex := get_rex_prefix(true, has_extended_reg, has_extended_index, has_extended_base)
-	write(buffer, []u8{rex, opcode}) // REX.W + opcode
+	write(buffer, []u8{get_rex_prefix(true, has_ext_reg, has_ext_idx, has_ext_base), opcode})
 
 	switch a in addr {
 	case u64:
-		// Direct absolute addressing
-		modrm := encode_modrm(0, reg_field & 0x7, 5)
-		write(buffer, []u8{modrm})
-
-		// Write 32-bit displacement
-		disp := i32(a)
-		disp_bytes: [4]u8
-		disp_bytes[0] = u8(disp)
-		disp_bytes[1] = u8(disp >> 8)
-		disp_bytes[2] = u8(disp >> 16)
-		disp_bytes[3] = u8(disp >> 24)
-		write(buffer, disp_bytes[:])
+		write(buffer, []u8{encode_modrm(0, reg_field & 0x7, 5)})
+		bytes := transmute([4]u8)i32(a)
+		write(buffer, bytes[:])
 
 	case AddressComponents:
-		// Determine ModRM components
 		mod: u8 = 0
 		rm: u8 = 0
-		need_sib := false
+		need_sib :=
+			a.index != nil ||
+			a.base == nil ||
+			(a.base != nil && (u8(a.base.(Register64)) & 0x7) == 4)
 
-		// Set base register (rm field)
 		if a.base != nil {
-			rm = u8(a.base.(Register64))
-
-			// Check if we need SIB byte (RSP/R12 as base)
-			if (rm & 0x7) == 4 {
-				need_sib = true
-			}
+			rm = u8(a.base.(Register64)) & 0x7
 		} else {
-			// No base means we need SIB with special encoding
-			need_sib = true
-			rm = 4 // Use SIB
+			rm = 4
 		}
 
-		// Force SIB if index is present
-		if a.index != nil {
-			need_sib = true
-		}
+		disp := a.displacement != nil ? a.displacement.(i32) : 0
 
-		// Determine mod field based on displacement
-		if a.displacement != nil {
-			disp := a.displacement.(i32)
-			if disp == 0 && (a.base == nil || (rm & 0x7) != 5) {
-				mod = 0
-			} else if disp >= -128 && disp <= 127 {
-				mod = 1 // 8-bit displacement
-			} else {
-				mod = 2 // 32-bit displacement
-			}
-		} else if a.base == nil || (rm & 0x7) == 5 {
-			// RBP/R13 as base with no displacement needs mod=1, disp=0
+		// Determine mod field
+		if a.base == nil {
+			mod = 0 // base=none → SIB.base=5 + disp32 required
+		} else if disp == 0 && rm != 5 {
+			mod = 0
+		} else if disp >= -128 && disp <= 127 {
 			mod = 1
+		} else {
+			mod = 2
 		}
 
-		// Special case for [reg*1+disp] (scalar indexing)
-		if a.base == nil &&
-		   a.index != nil &&
-		   a.scale != nil &&
-		   a.scale.(u8) == 1 &&
-		   (u8(a.index.(Register64)) & 0x7) != 4 {
-			// Use index register as base, unless it's RSP/R12
-			rm = u8(a.index.(Register64)) & 0x7
-			need_sib = false
-			has_extended_base = (u8(a.index.(Register64)) & 0x8) != 0
-		}
+		if need_sib do rm = 4
+		write(buffer, []u8{encode_modrm(mod, reg_field & 0x7, rm)})
 
-
-		// Write ModRM byte
-		modrm := encode_modrm(mod, reg_field & 0x7, need_sib ? 4 : rm & 0x7)
-		write(buffer, []u8{modrm})
-
-		// Write SIB byte if needed
 		if need_sib {
-			scale := a.scale != nil ? a.scale.(u8) : 1
 			scale_bits: u8
-			switch scale {
+
+			switch a.scale != nil ? a.scale.(u8) : 1 {
 			case 1:
 				scale_bits = 0
 			case 2:
@@ -401,34 +356,20 @@ write_memory_address :: proc(buffer: ^ByteBuffer, addr: MemoryAddress, reg_field
 			case 8:
 				scale_bits = 3
 			}
-
-			index := a.index != nil ? u8(a.index.(Register64)) & 0x7 : 4 // 4 = no index
-			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5 // 5 = no base (RBP/R13 with disp32)
-
-			sib := (scale_bits << 6) | ((index & 0x7) << 3) | base
-			write(buffer, []u8{sib})
+			index := a.index != nil ? u8(a.index.(Register64)) & 0x7 : 4
+			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5
+			write(buffer, []u8{encode_sib(scale_bits, index, base)})
 		}
 
-		// Write displacement if needed
-		if a.displacement != nil || (a.base == nil || (rm & 0x7) == 5 && mod != 0) {
-			disp := a.displacement != nil ? a.displacement.(i32) : 0
-
-			if mod == 1 {
-				// 8-bit displacement
-				write(buffer, []u8{u8(disp)})
-			} else if mod == 2 || (a.base == nil && mod == 0) {
-				// 32-bit displacement
-				disp_bytes: [4]u8
-				disp_bytes[0] = u8(disp)
-				disp_bytes[1] = u8(disp >> 8)
-				disp_bytes[2] = u8(disp >> 16)
-				disp_bytes[3] = u8(disp >> 24)
-				write(buffer, disp_bytes[:])
-			}
+		// Displacement write
+		if mod == 1 {
+			write(buffer, []u8{u8(disp)})
+		} else if mod == 2 || (need_sib && a.base == nil) {
+			bytes := transmute([4]u8)disp
+			write(buffer, bytes[:])
 		}
 	}
 }
-
 // ==================================
 // Helper Functions
 // ==================================
