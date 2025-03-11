@@ -275,22 +275,21 @@ SegmentRegister :: enum u8 {
 }
 
 
-// AddressComponents represents the individual components of a memory address
-// in x86-64 using the SIB (Scale-Index-Base) + displacement format.
-// If only displacement assun RIP
+// AddressComponents represents SIB-style addressing in x86-64.
+// If only displacement is set (base/index absent), it implies RIP-relative.
 AddressComponents :: struct {
-	base:         Maybe(Register64), // Base register (none for absolute addressing)
-	index:        Maybe(Register64), // Index register (none if not using index)
-	scale:        Maybe(u8), // Scale factor: 1, 2, 4, or 8 (none if not using scale)
-	displacement: Maybe(i32), // Signed displacement/offset (none if no displacement)
+	base:         Maybe(Register64), // Base register (none means RIP if index is also none)
+	index:        Maybe(Register64), // Index register (must be none if base is none)
+	scale:        Maybe(u8), // 1, 2, 4, 8 (must be none if index is none)
+	displacement: Maybe(i32), // Signed offset
 }
 
-// MemoryAddress represents all possible memory addressing modes in x86-64:
-// - Direct absolute addressing: u64 value (limited to 32 bits in practice)
-// - Register indirect + scale + displacement: using AddressComponents
+// MemoryAddress represents all x86-64 memory operand forms:
+// - Absolute address (u64, encoded via relocation or reg indirection)
+// - Register-relative addressing with optional index/scale/displacement
 MemoryAddress :: union {
-	u64, // Direct absolute address (effective only for first 4GB)
-	AddressComponents, // Complex addressing mode with optional components
+	u64, // Absolute memory address (semantically full u64)
+	AddressComponents, // SIB-based addressing (base/index/scale/disp)
 }
 
 // Special write function for the complex memory adress system of x64
