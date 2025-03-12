@@ -37,39 +37,60 @@ string_hash :: proc(s: string) -> u64 {
 
 // Converts an assembly instruction string into machine code bytes
 asm_to_bytes :: proc(asm_str: string, allocator := context.allocator) -> []byte {
-	// Create unique identifier based on the assembly string
 	uuid := string_hash(asm_str)
 
 	// Create temporary filenames
 	asm_file := fmt.tprintf("temp_instruction_%x.s", uuid)
 	obj_file := fmt.tprintf("temp_instruction_%x.o", uuid)
 
-	// Add Intel syntax prefix if not present
+	// Add Intel syntax prefix
 	final_asm := fmt.tprintf(".intel_syntax noprefix\n%s\n", asm_str)
 
-	// Write assembly to temp file
-	success := os.write_entire_file(asm_file, transmute([]byte)final_asm)
-	if !success {
-		panic("Error writing assembly file")
+	// IMPORTANT: Use explicit file handles rather than higher-level functions
+	asm_handle, err := os.open(asm_file, os.O_CREATE | os.O_WRONLY | os.O_TRUNC, 0644)
+	if err != 0 {
+		return nil
 	}
-	defer os.remove(asm_file)
+	defer os.close(asm_handle) // Explicitly close the file handle
 
-	// Assemble the file
+
+	bytes_to_write := (transmute([]byte)final_asm)
+	bytes_written, write_err := os.write(asm_handle, bytes_to_write)
+
+	// Close the file handle regardless of write success
+	os.close(asm_handle)
+
+	if write_err != 0 || bytes_written != len(bytes_to_write) {
+		log.infof("Error writing to assembly file: %v\n", write_err)
+		log.infof("Bytes written: %d, expected: %d\n", bytes_written, len(bytes_to_write))
+		os.remove(asm_file) // Clean up partial file
+		return nil
+	}
+
+	// Set up cleanup for temporary files
+	defer {
+		os.remove(asm_file)
+		os.remove(obj_file)
+	}
+
+	// Assemble the file with explicit error handling
 	{
 		as_desc := os2.Process_Desc {
 			command = []string{"as", "--64", "-o", obj_file, asm_file},
 		}
 
 		as_state, as_stdout, as_stderr, as_err := os2.process_exec(as_desc, allocator)
-		defer if len(as_stdout) > 0 do delete(as_stdout)
-		defer if len(as_stderr) > 0 do delete(as_stderr)
+
+		// Immediately clean up process resources
+		defer {
+			if len(as_stdout) > 0 do delete(as_stdout)
+			if len(as_stderr) > 0 do delete(as_stderr)
+		}
 
 		if as_err != os2.ERROR_NONE || !as_state.success {
-			panic(fmt.tprintf("Error assembling: %s, %s", asm_str, string(as_stderr)))
-
+			return nil
 		}
 	}
-	defer os.remove(obj_file)
 
 	// Extract machine code using objdump
 	{
@@ -77,26 +98,27 @@ asm_to_bytes :: proc(asm_str: string, allocator := context.allocator) -> []byte 
 			command = []string{"objdump", "-d", obj_file},
 		}
 
-
 		objdump_state, objdump_stdout, objdump_stderr, objdump_err := os2.process_exec(
 			objdump_desc,
 			allocator,
 		)
-		defer if len(objdump_stderr) > 0 do delete(objdump_stderr)
-		defer delete(objdump_stdout)
+
+		// Immediately clean up process resources
+		bytes: []byte
+		defer {
+			if len(objdump_stdout) > 0 && bytes == nil do delete(objdump_stdout)
+			if len(objdump_stderr) > 0 do delete(objdump_stderr)
+		}
 
 		if objdump_err != os2.ERROR_NONE || !objdump_state.success {
-			log.error("STDOUT:", objdump_err)
-			fmt.println("STDOUT:", string(objdump_stdout))
-			fmt.println("STDERR:", string(objdump_stderr))
-			panic(fmt.tprintf("Error in objdump: %s, %s", asm_str, string(objdump_stderr)))
+			return nil
 		}
 
 		// Parse objdump output to extract bytes
-		return parse_objdump_output(string(objdump_stdout), allocator)
+		bytes = parse_objdump_output(string(objdump_stdout), allocator)
+		return bytes
 	}
 }
-
 // ==================================
 // OBJECT DUMP PARSING
 // ==================================
