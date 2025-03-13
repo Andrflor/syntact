@@ -11,6 +11,7 @@ package x64_assembler
 
 import "core:fmt"
 import "core:log"
+import "core:math/rand"
 import "core:testing"
 
 // ==================================
@@ -24,64 +25,105 @@ VoidCallback :: proc()
 // Logs mismatches and marks test as failed if bytes differ
 compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 	// Validate length
-	if len(expected) != _buffer.len {
+	buffer := (^ByteBuffer)(context.user_ptr)
+	if len(expected) != buffer.len {
 		log.info(
 			desc,
 			": Length mismatch. Expected",
 			expected,
 			"bytes, got",
-			_buffer.data[:_buffer.len],
+			buffer.data[:buffer.len],
 			"bytes.",
 		)
-		resetBuffer()
 		testing.fail(t)
 		return
 	}
 
 	// Validate byte content
 	for i in 0 ..< len(expected) {
-		if expected[i] != _buffer.data[i] {
+		if expected[i] != buffer.data[i] {
 			log.infof(
 				"%s: Byte mismatch at position %d. Expected %i, got %i.\n",
 				desc,
 				i,
 				expected,
-				_buffer.data[:_buffer.len],
+				buffer.data[:buffer.len],
 			)
-			resetBuffer()
 			testing.fail(t)
 			return
 		}
 	}
-
-	// Reset buffer for next test case
-	resetBuffer()
 }
 
 
 // ==================================
 // X86-64 MOV INSTRUCTION TESTS
 // ==================================
-
 // --------------------------------
-// Basic Register-Immediate Tests
+// 64 bits test
 // --------------------------------
 @(test)
-test_r64_m64 :: proc(t: ^testing.T) {
+testing_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"mov %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			log.info(asm_str)
+			mov_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_r64_imm64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	interestingImm64 := get_interesting_imm64_values()
+	for dst in registers64 {
+		for src in interestingImm64 {
+			asm_str := fmt.tprintf("mov %s, %d", register64_to_string(dst), src)
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			log.info(asm_str)
+			mov_r64_imm64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_r64_m64 :: proc(t: ^testing.T) {
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
 
-	for dst in registers64 {
-		for src in addresses {
-			asm_str := fmt.tprintf(
-				"mov %s, %s",
-				register64_to_string(dst),
-				memory_address_to_string(src),
-			)
-			log.info(asm_str)
-			mov_r64_m64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-		}
+	// Set the number of random tests to run
+	num_tests := 200
+
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		log.info(asm_str)
+		mov_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }

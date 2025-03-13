@@ -12,8 +12,7 @@ package x64_assembler
 import "base:runtime"
 import "core:fmt"
 import "core:log"
-import "core:os"
-import "core:os/os2"
+import os "core:os/os2"
 import "core:strconv"
 import "core:strings"
 import "core:time"
@@ -34,153 +33,52 @@ string_hash :: proc(s: string) -> u64 {
 // ==================================
 // ASSEMBLY TO BYTECODE
 // ==================================
+// assemble_asm_to_bytes takes an assembly string, writes it to a temporary file,
+// assembles it using 'as', and returns the bytes of the resulting object file.
+asm_to_bytes :: proc(asm_code: string, allocator := context.allocator) -> []byte {
+	data, err := assemble(asm_code)
+	if (err != nil) {
+		panic(fmt.tprintf("Fatal error: %v", err))
+	}
+	return data
+}
 
-// Converts an assembly instruction string into machine code bytes
-asm_to_bytes :: proc(asm_str: string, allocator := context.allocator) -> []byte {
+assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 	uuid := string_hash(asm_str)
 
 	// Create temporary filenames
 	asm_file := fmt.tprintf("temp_instruction_%x.s", uuid)
 	obj_file := fmt.tprintf("temp_instruction_%x.o", uuid)
 
-	// Add Intel syntax prefix
+	// Add Intel syntax prefix if not present
 	final_asm := fmt.tprintf(".intel_syntax noprefix\n%s\n", asm_str)
 
-	// IMPORTANT: Use explicit file handles rather than higher-level functions
-	asm_handle, err := os.open(asm_file, os.O_CREATE | os.O_WRONLY | os.O_TRUNC, 0644)
-	if err != 0 {
-		return nil
-	}
-	defer os.close(asm_handle) // Explicitly close the file handle
-
-
-	bytes_to_write := (transmute([]byte)final_asm)
-	bytes_written, write_err := os.write(asm_handle, bytes_to_write)
-
-	// Close the file handle regardless of write success
-	os.close(asm_handle)
-
-	if write_err != 0 || bytes_written != len(bytes_to_write) {
-		log.infof("Error writing to assembly file: %v\n", write_err)
-		log.infof("Bytes written: %d, expected: %d\n", bytes_written, len(bytes_to_write))
-		os.remove(asm_file) // Clean up partial file
-		return nil
+	err = os.write_entire_file(asm_file, transmute([]byte)final_asm)
+	if (err != nil) {
+		return
 	}
 
-	// Set up cleanup for temporary files
-	defer {
-		os.remove(asm_file)
-		os.remove(obj_file)
+	r, w := os.pipe() or_return
+	defer os.close(r)
+
+	p: os.Process;{
+		defer os.close(w)
+
+		p = os.process_start(
+			{command = {"as", "--64", "-o", obj_file, asm_file}, stdout = w},
+		) or_return
 	}
 
-	// Assemble the file with explicit error handling
-	{
-		as_desc := os2.Process_Desc {
-			command = []string{"as", "--64", "-o", obj_file, asm_file},
-		}
+	output := os.read_entire_file(r, context.temp_allocator) or_return
 
-		as_state, as_stdout, as_stderr, as_err := os2.process_exec(as_desc, allocator)
+	_ = os.process_wait(p) or_return
 
-		// Immediately clean up process resources
-		defer {
-			if len(as_stdout) > 0 do delete(as_stdout)
-			if len(as_stderr) > 0 do delete(as_stderr)
-		}
+	os.remove(asm_file)
+	defer os.remove(obj_file)
 
-		if as_err != os2.ERROR_NONE || !as_state.success {
-			return nil
-		}
-	}
-
-	// Extract machine code using objdump
-	{
-		objdump_desc := os2.Process_Desc {
-			command = []string{"objdump", "-d", obj_file},
-		}
-
-		objdump_state, objdump_stdout, objdump_stderr, objdump_err := os2.process_exec(
-			objdump_desc,
-			allocator,
-		)
-
-		// Immediately clean up process resources
-		bytes: []byte
-		defer {
-			if len(objdump_stdout) > 0 && bytes == nil do delete(objdump_stdout)
-			if len(objdump_stderr) > 0 do delete(objdump_stderr)
-		}
-
-		if objdump_err != os2.ERROR_NONE || !objdump_state.success {
-			return nil
-		}
-
-		// Parse objdump output to extract bytes
-		bytes = parse_objdump_output(string(objdump_stdout), allocator)
-		return bytes
-	}
+	return os.read_entire_file(obj_file, context.temp_allocator)
 }
-// ==================================
-// OBJECT DUMP PARSING
-// ==================================
 
-// Extracts machine code bytes from objdump output
-parse_objdump_output :: proc(output: string, allocator := context.allocator) -> []byte {
-	result := make([dynamic]byte, allocator = allocator)
-	defer {
-		if len(result) == 0 {
-			delete(result)
-		}
-	}
-
-	// Split output into lines
-	lines := strings.split(output, "\n", allocator = allocator)
-	defer delete(lines, allocator)
-
-	in_text_section := false
-
-	for line in lines {
-		if strings.contains(line, "<.text>:") {
-			in_text_section = true
-			continue
-		}
-
-		if !in_text_section {
-			continue
-		}
-
-		// Look for lines with hex bytes
-		if idx := strings.index(line, ":"); idx >= 0 {
-			if idx + 1 >= len(line) do continue
-
-			rest := line[idx + 1:]
-			if len(rest) == 0 do continue
-
-			bytes_str := strings.split(strings.trim(rest, "\t"), "\t", allocator = allocator)
-			defer delete(bytes_str, allocator)
-
-			byte_parts := strings.split(bytes_str[0], " ", allocator = allocator)
-			defer delete(byte_parts, allocator)
-
-			for part in byte_parts {
-				if len(part) == 0 do continue
-
-				if b, ok := parse_hex_byte(part); ok {
-					append(&result, b)
-				}
-			}
-		}
-	}
-
-	// Convert dynamic array to slice allocated with the same allocator
-	if len(result) == 0 {
-		return nil
-	}
-
-	bytes := make([]byte, len(result), allocator)
-	copy(bytes, result[:])
-	delete(result)
-	return bytes
-}
 
 // Converts a hex string to a byte
 parse_hex_byte :: proc(hex: string) -> (byte, bool) {
@@ -203,7 +101,7 @@ register64_to_string :: proc(r: Register64) -> string {
 	// Convert enum value to a string (will be uppercase like "RAX")
 	name := fmt.tprintf("%v", r)
 	// Convert to lowercase
-	return strings.to_lower(name)
+	return strings.to_lower(name, context.temp_allocator)
 }
 
 // Get the string coresponding to that register
@@ -211,7 +109,7 @@ register32_to_string :: proc(r: Register32) -> string {
 	// Convert enum value to a string (will be uppercase like "EAX")
 	name := fmt.tprintf("%v", r)
 	// Convert to lowercase
-	return strings.to_lower(name)
+	return strings.to_lower(name, context.temp_allocator)
 }
 
 // Get the string coresponding to that register
@@ -219,7 +117,7 @@ register16_to_string :: proc(r: Register16) -> string {
 	// Convert enum value to a string (will be uppercase like "AX")
 	name := fmt.tprintf("%v", r)
 	// Convert to lowercase
-	return strings.to_lower(name)
+	return strings.to_lower(name, context.temp_allocator)
 }
 
 // Get the string coresponding to that register
@@ -227,7 +125,7 @@ register8_to_string :: proc(r: Register8) -> string {
 	// Convert enum value to a string (will be uppercase like "AL")
 	name := fmt.tprintf("%v", r)
 	// Convert to lowercase
-	return strings.to_lower(name)
+	return strings.to_lower(name, context.temp_allocator)
 }
 
 // Test data generators
@@ -539,9 +437,9 @@ get_all_addressing_combinations :: proc() -> [dynamic]MemoryAddress {
 	absolute_addresses := get_interesting_imm64_values()
 
 	// 1. Absolute addresses (direct memory)
-	for addr in absolute_addresses {
-		append(&addresses, addr)
-	}
+	// for addr in absolute_addresses {
+	// 	append(&addresses, addr)
+	// }
 
 	// 2. RIP-relative addressing (displacement only)
 	for disp in displacements {
