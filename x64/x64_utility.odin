@@ -45,55 +45,131 @@ asm_to_bytes :: proc(asm_code: string, allocator := context.allocator) -> []byte
 
 assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 	uuid := string_hash(asm_str)
-
 	// Create temporary filenames
 	asm_file := fmt.tprintf("temp_instruction_%x.s", uuid)
 	obj_file := fmt.tprintf("temp_instruction_%x.o", uuid)
-
 	// Add Intel syntax prefix if not present
 	final_asm := fmt.tprintf(".intel_syntax noprefix\n%s\n", asm_str)
-
 	err = os.write_entire_file(asm_file, transmute([]byte)final_asm)
 	if (err != nil) {
 		return
 	}
-
 	r, w := os.pipe() or_return
 	defer os.close(r)
-
 	p: os.Process;{
 		defer os.close(w)
-
 		p = os.process_start(
 			{command = {"as", "--64", "-o", obj_file, asm_file}, stdout = w},
 		) or_return
 	}
-
-	output := os.read_entire_file(r, context.temp_allocator) or_return
-
 	_ = os.process_wait(p) or_return
-
+	output := os.read_entire_file(r, context.temp_allocator) or_return
 	os.remove(asm_file)
+
+	r2, w2 := os.pipe() or_return
+	defer os.close(r2)
+	p2: os.Process;{
+		defer os.close(w2)
+		p2 = os.process_start(
+			{command = {"objdump", "-d", "-M", "intel", obj_file}, stdout = w2},
+		) or_return
+	}
+
+	_ = os.process_wait(p2) or_return
+	objdump_output := os.read_entire_file(r2, context.temp_allocator) or_return
 	defer os.remove(obj_file)
 
+	// Parse the objdump output
+	parsed_bytes := parse_objdump(string(objdump_output))
+	if len(parsed_bytes) > 0 {
+		// If we successfully parsed bytes, return those
+		return parsed_bytes, nil
+	}
+
+	// // Fallback to reading the object file directly
 	return os.read_entire_file(obj_file, context.temp_allocator)
 }
 
+parse_objdump :: proc(dump_output: string) -> []byte {
+	lines := strings.split_lines(dump_output)
+	defer delete(lines)
 
-// Converts a hex string to a byte
-parse_hex_byte :: proc(hex: string) -> (byte, bool) {
-	if len(hex) != 2 {
-		return 0, false
+	byte_data := make([dynamic]byte)
+	defer delete(byte_data)
+
+	// Look for lines with hex byte patterns
+	// Typical objdump disassembly line format:
+	// 0:   48 89 e5                mov    rbp,rsp
+	in_text_section := false
+
+	for line in lines {
+		line := strings.trim_space(line)
+
+		// Check if we've entered the .text section
+		if strings.contains(line, "Disassembly of section .text:") {
+			in_text_section = true
+			continue
+		}
+
+		if !in_text_section {
+			continue
+		}
+
+		// Skip lines that don't have instruction bytes
+		if !strings.contains(line, ":") {
+			continue
+		}
+
+		// Split on colon to separate address from instruction bytes
+		parts := strings.split(line, ":")
+		defer delete(parts)
+
+		if len(parts) < 2 {
+			continue
+		}
+
+		// Get the part with the hex bytes
+		hex_part := strings.trim_space(parts[1])
+
+		// Find where the instruction mnemonic starts
+		tab_pos := strings.index_byte(hex_part, '\t')
+		if tab_pos < 0 {
+			// Try with multiple spaces as delimiter
+			for i := 0; i < len(hex_part); i += 1 {
+				if i > 0 && hex_part[i - 1] == ' ' && hex_part[i] == ' ' {
+					tab_pos = i
+					break
+				}
+			}
+		}
+
+		if tab_pos > 0 {
+			hex_part = hex_part[:tab_pos]
+		}
+
+		// Split the hex bytes and convert them
+		hex_bytes := strings.fields(hex_part)
+		defer delete(hex_bytes)
+
+		for hex in hex_bytes {
+			if len(hex) == 2 {
+				// Convert hex string to byte
+				value, ok := strconv.parse_int(hex, 16)
+				if ok {
+					append(&byte_data, byte(value))
+				}
+			}
+		}
 	}
 
-	val: int
-	ok: bool
-	val, ok = strconv.parse_int(hex, 16)
-	if !ok {
-		return 0, false
+	// Return a copy of the dynamic array
+	if len(byte_data) > 0 {
+		result := make([]byte, len(byte_data))
+		copy(result, byte_data[:])
+		return result
 	}
 
-	return byte(val), true
+	return nil
 }
 
 // Get the string coresponding to that register
