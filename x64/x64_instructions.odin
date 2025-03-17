@@ -27,7 +27,7 @@ grow :: proc(buffer: ^ByteBuffer, min_size: int) {
 			new_cap = 16
 		}
 	}
-	new_data := make([]u8, new_cap)
+	new_data := make([]u8, new_cap, context.temp_allocator)
 	copy(new_data, buffer.data)
 	buffer.data = new_data
 	buffer.cap = new_cap

@@ -103,13 +103,13 @@ assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 }
 
 parse_objdump :: proc(dump_output: string) -> []byte {
-	byte_data := make([dynamic]byte, context.allocator)
+	byte_data := make([dynamic]byte, context.temp_allocator)
 	defer delete(byte_data)
 
 	in_text_section := false
 
 	// Process the objdump output line by line
-	for line in strings.split_lines(dump_output) {
+	for line in strings.split_lines(dump_output, allocator=context.temp_allocator) {
 		if strings.contains(line, "Disassembly of section .text:") {
 			in_text_section = true
 			continue
@@ -125,7 +125,7 @@ parse_objdump :: proc(dump_output: string) -> []byte {
 		}
 
 		// Split by colon to separate address from bytes
-		parts := strings.split(line, ":")
+    parts := strings.split(line, ":", allocator=context.temp_allocator)
 		if len(parts) < 2 {
 			continue
 		}
@@ -152,7 +152,7 @@ parse_objdump :: proc(dump_output: string) -> []byte {
 		}
 
 		// Process each hex byte
-		for hex in strings.fields(hex_part) {
+		for hex in strings.fields(hex_part, context.temp_allocator) {
 			if len(hex) == 2 {
 				// Convert hex string to byte
 				value, ok := strconv.parse_int(hex, 16)
@@ -165,7 +165,7 @@ parse_objdump :: proc(dump_output: string) -> []byte {
 
 	// Return a copy of the extracted bytes
 	if len(byte_data) > 0 {
-		result := make([]byte, len(byte_data))
+		result := make([]byte, len(byte_data), context.temp_allocator)
 		copy(result, byte_data[:])
 		return result
 	}
@@ -512,6 +512,11 @@ get_all_addressing_combinations :: proc() -> [dynamic]MemoryAddress {
 	scales := get_scales()
 	displacements := get_interesting_signed_imm32_values()
 	absolute_addresses := get_interesting_imm64_values()
+
+	// Absolute addresses (direct memory)
+	for addr in absolute_addresses {
+		append(&addresses, addr)
+	}
 
 
 	// RIP-relative addressing (displacement only)

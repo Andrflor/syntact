@@ -27,7 +27,7 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 	// Validate length
 	buffer := (^ByteBuffer)(context.user_ptr)
 	if len(expected) != buffer.len {
-		log.info(
+		log.error(
 			desc,
 			": Length mismatch. Expected",
 			expected,
@@ -42,7 +42,7 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 	// Validate byte content
 	for i in 0 ..< len(expected) {
 		if expected[i] != buffer.data[i] {
-			log.infof(
+			log.errorf(
 				"%s: Byte mismatch at position %d. Expected %i, got %i.\n",
 				desc,
 				i,
@@ -74,10 +74,8 @@ testing_r64_r64 :: proc(t: ^testing.T) {
 			)
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
-			log.info(asm_str)
 			mov_r64_r64(dst, src)
 			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-			free(&buffer)
 		}
 	}
 }
@@ -91,10 +89,8 @@ testing_r64_imm64 :: proc(t: ^testing.T) {
 			asm_str := fmt.tprintf("mov %s, %d", register64_to_string(dst), src)
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
-			log.info(asm_str)
 			mov_r64_imm64(dst, src)
 			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-			free(&buffer)
 		}
 	}
 }
@@ -124,9 +120,7 @@ testing_r64_m64 :: proc(t: ^testing.T) {
 		)
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		log.info(asm_str)
 		mov_r64_m64(dst, src)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-		free(&buffer)
 	}
 }
