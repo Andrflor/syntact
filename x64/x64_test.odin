@@ -77,6 +77,7 @@ testing_r64_r64 :: proc(t: ^testing.T) {
 			log.info(asm_str)
 			mov_r64_r64(dst, src)
 			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			free(&buffer)
 		}
 	}
 }
@@ -93,6 +94,7 @@ testing_r64_imm64 :: proc(t: ^testing.T) {
 			log.info(asm_str)
 			mov_r64_imm64(dst, src)
 			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			free(&buffer)
 		}
 	}
 }
@@ -104,7 +106,7 @@ testing_r64_m64 :: proc(t: ^testing.T) {
 	registers64 := get_all_registers64()
 
 	// Set the number of random tests to run
-	num_tests := 200
+	num_tests := 400
 
 	for i := 0; i < num_tests; i += 1 {
 		// Select a random register
@@ -125,5 +127,6 @@ testing_r64_m64 :: proc(t: ^testing.T) {
 		log.info(asm_str)
 		mov_r64_m64(dst, src)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		free(&buffer)
 	}
 }
