@@ -28,14 +28,16 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 	// Validate length
 	buffer := (^ByteBuffer)(context.user_ptr)
 	if len(expected) != buffer.len {
-		log.error(
-			desc,
-			": Length mismatch. Expected",
-			expected,
-			"bytes, got",
-			buffer.data[:buffer.len],
-			"bytes.",
-		)
+		if (t.error_count == 0) {
+			log.error(
+				desc,
+				": Length mismatch. Expected",
+				expected,
+				"bytes, got",
+				buffer.data[:buffer.len],
+				"bytes.",
+			)
+		}
 		testing.fail(t)
 		return
 	}
@@ -43,13 +45,15 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 	// Validate byte content
 	for i in 0 ..< len(expected) {
 		if expected[i] != buffer.data[i] {
-			log.errorf(
-				"%s: Byte mismatch at position %d. Expected %i, got %i.\n",
-				desc,
-				i,
-				expected,
-				buffer.data[:buffer.len],
-			)
+			if (t.error_count == 0) {
+				log.errorf(
+					"%s: Byte mismatch at position %d. Expected %i, got %i.\n",
+					desc,
+					i,
+					expected,
+					buffer.data[:buffer.len],
+				)
+			}
 			testing.fail(t)
 			return
 		}
@@ -3267,47 +3271,6 @@ testing_popf :: proc(t: ^testing.T) {
 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
-@(test)
-testing_pushfd :: proc(t: ^testing.T) {
-	asm_str := "pushfd"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	pushfd()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_popfd :: proc(t: ^testing.T) {
-	asm_str := "popfd"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	popfd()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-// Multiple register push/pop (IA-32 only, for compatibility)
-@(test)
-testing_pushad :: proc(t: ^testing.T) {
-	asm_str := "pushad"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	pushad()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_popad :: proc(t: ^testing.T) {
-	asm_str := "popad"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	popad()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
 // Stack frame operations
 @(test)
 testing_enter :: proc(t: ^testing.T) {
@@ -3781,117 +3744,6 @@ testing_ud2 :: proc(t: ^testing.T) {
 	context.user_ptr = &buffer
 	ud2()
 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_bound_r16_m32 :: proc(t: ^testing.T) {
-	registers16 := get_all_registers16()
-	addresses := get_all_addressing_combinations()
-	defer delete(addresses)
-
-	// Test with a subset to avoid explosion
-	num_tests := 50
-	for i := 0; i < num_tests; i += 1 {
-		// Select a random register
-		reg_idx := rand.int_max(len(registers16))
-		reg := registers16[reg_idx]
-
-		// Select a random memory addressing mode
-		mem_idx := rand.int_max(len(addresses))
-		mem := addresses[mem_idx]
-
-		asm_str := fmt.tprintf(
-			"bound %s, %s",
-			register16_to_string(reg),
-			memory_address_to_string(mem)[10:], // Remove "qword ptr " prefix
-		)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		bound_r16_m32(reg, mem)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
-}
-
-@(test)
-testing_bound_r32_m64 :: proc(t: ^testing.T) {
-	registers32 := get_all_registers32()
-	addresses := get_all_addressing_combinations()
-	defer delete(addresses)
-
-	// Test with a subset to avoid explosion
-	num_tests := 50
-	for i := 0; i < num_tests; i += 1 {
-		// Select a random register
-		reg_idx := rand.int_max(len(registers32))
-		reg := registers32[reg_idx]
-
-		// Select a random memory addressing mode
-		mem_idx := rand.int_max(len(addresses))
-		mem := addresses[mem_idx]
-
-		asm_str := fmt.tprintf(
-			"bound %s, %s",
-			register32_to_string(reg),
-			memory_address_to_string(mem)[10:], // Remove "qword ptr " prefix
-		)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		bound_r32_m64(reg, mem)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
-}
-
-// ARPL (Adjust RPL Field of Selector)
-@(test)
-testing_arpl_r16_r16 :: proc(t: ^testing.T) {
-	registers16 := get_all_registers16()
-
-	for dst in registers16 {
-		for src in registers16 {
-			asm_str := fmt.tprintf(
-				"arpl %s, %s",
-				register16_to_string(dst),
-				register16_to_string(src),
-			)
-
-			buffer := ByteBuffer{}
-			context.user_ptr = &buffer
-			arpl_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-		}
-	}
-}
-
-@(test)
-testing_arpl_m16_r16 :: proc(t: ^testing.T) {
-	registers16 := get_all_registers16()
-	addresses := get_all_addressing_combinations()
-	defer delete(addresses)
-
-	// Test with a subset to avoid explosion
-	num_tests := 50
-	for i := 0; i < num_tests; i += 1 {
-		// Select a random memory addressing mode
-		mem_idx := rand.int_max(len(addresses))
-		mem := addresses[mem_idx]
-
-		// Select a random register
-		src_idx := rand.int_max(len(registers16))
-		src := registers16[src_idx]
-
-		asm_str := fmt.tprintf(
-			"arpl word ptr %s, %s",
-			memory_address_to_string(mem)[10:], // Remove "qword ptr " prefix
-			register16_to_string(src),
-		)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		arpl_m16_r16(mem, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
 }
 
 // Virtualization instructions

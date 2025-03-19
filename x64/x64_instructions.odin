@@ -5075,26 +5075,6 @@ popf :: proc() {
 	write([]u8{0x66, 0x9D}) // 66 9D
 }
 
-// Push EFLAGS register onto stack (32-bit)
-pushfd :: proc() {
-	write([]u8{0x9C}) // 9C (no prefix for 32-bit mode)
-}
-
-// Pop value from stack to EFLAGS register (32-bit)
-popfd :: proc() {
-	write([]u8{0x9D}) // 9D (no prefix for 32-bit mode)
-}
-
-// Push all 32-bit general purpose registers
-pushad :: proc() {
-	write([]u8{0x60}) // 60 (This is only valid in 32-bit mode, deprecated in 64-bit mode)
-}
-
-// Pop values from stack into all 32-bit general purpose registers
-popad :: proc() {
-	write([]u8{0x61}) // 61 (This is only valid in 32-bit mode, deprecated in 64-bit mode)
-}
-
 // Create stack frame
 enter :: proc(size: u16, nesting: u8) {
 	write([]u8{0xC8, u8(size & 0xFF), u8((size >> 8) & 0xFF), nesting}) // C8 iw ib
@@ -7642,43 +7622,6 @@ ud2 :: proc() {
 	write([]u8{0x0F, 0x0B}) // 0F 0B
 }
 
-// Check if register is within bounds (16-bit register, 32-bit bounds)
-bound_r16_m32 :: proc(reg: Register16, mem: MemoryAddress) {
-	write([]u8{0x66})
-
-	// reg goes in ModRM.reg field
-	write_memory_address(mem, u8(reg), 0x62, false)
-}
-
-// Check if register is within bounds (32-bit register, 64-bit bounds)
-bound_r32_m64 :: proc(reg: Register32, mem: MemoryAddress) {
-	// No 66h prefix for 32-bit variant
-
-	// reg goes in ModRM.reg field
-	write_memory_address(mem, u8(reg), 0x62, false)
-}
-// Adjust RPL field of segment selector
-arpl_r16_r16 :: proc(dst: Register16, src: Register16) {
-	need_rex := (u8(dst) & 0x8) != 0 || (u8(src) & 0x8) != 0
-	rex: u8 = rex_rb(false, u8(src), u8(dst)) if need_rex else 0
-	modrm := encode_modrm(3, u8(src) & 0x7, u8(dst) & 0x7)
-
-	if need_rex {
-		write([]u8{0x66, rex, 0x63, modrm}) // 66 REX 63 /r
-	} else {
-		write([]u8{0x66, 0x63, modrm}) // 66 63 /r
-	}
-}
-
-
-// Adjust RPL field of segment selector in memory
-arpl_m16_r16 :: proc(mem: MemoryAddress, src: Register16) {
-	write([]u8{0x66})
-
-	// REX prefix and ModRM will be handled by write_memory_address
-	// src register goes in ModRM.reg field
-	write_memory_address(mem, u8(src), 0x63, false)
-}
 
 // Virtualization Instructions
 // Call to hypervisor
