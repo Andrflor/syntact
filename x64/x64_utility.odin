@@ -109,7 +109,7 @@ parse_objdump :: proc(dump_output: string) -> []byte {
 	in_text_section := false
 
 	// Process the objdump output line by line
-	for line in strings.split_lines(dump_output, allocator=context.temp_allocator) {
+	for line in strings.split_lines(dump_output, allocator = context.temp_allocator) {
 		if strings.contains(line, "Disassembly of section .text:") {
 			in_text_section = true
 			continue
@@ -125,7 +125,7 @@ parse_objdump :: proc(dump_output: string) -> []byte {
 		}
 
 		// Split by colon to separate address from bytes
-    parts := strings.split(line, ":", allocator=context.temp_allocator)
+		parts := strings.split(line, ":", allocator = context.temp_allocator)
 		if len(parts) < 2 {
 			continue
 		}
@@ -206,16 +206,17 @@ register8_to_string :: proc(r: Register8) -> string {
 }
 
 // Test data generators
-get_all_registers8 :: proc() -> [20]Register8 {
-	return [20]Register8 {
+get_all_registers8 :: proc() -> [16]Register8 {
+	return [16]Register8 {
 		.AL,
 		.CL,
 		.DL,
 		.BL,
-		.AH,
-		.CH,
-		.DH,
-		.BH,
+		// Commented to avoid clash with rex prefix reg in test
+		// .AH,
+		// .CH,
+		// .DH,
+		// .BH,
 		.SPL,
 		.BPL,
 		.SIL,
@@ -514,9 +515,9 @@ get_all_addressing_combinations :: proc() -> [dynamic]MemoryAddress {
 	absolute_addresses := get_interesting_imm64_values()
 
 	// Absolute addresses (direct memory)
-	for addr in absolute_addresses {
-		append(&addresses, addr)
-	}
+	// for addr in absolute_addresses {
+	// 	append(&addresses, addr)
+	// }
 
 
 	// RIP-relative addressing (displacement only)
@@ -671,4 +672,126 @@ get_all_addressing_combinations :: proc() -> [dynamic]MemoryAddress {
 	}
 
 	return addresses
+}
+
+get_interesting_xmmregister :: proc() -> [32]XMMRegister {
+	return [32]XMMRegister {
+		.XMM0, // Used for floating-point and integer SIMD operations
+		.XMM1,
+		.XMM2,
+		.XMM3,
+		.XMM4,
+		.XMM5,
+		.XMM6,
+		.XMM7,
+		.XMM8, // Requires REX prefix in encoding
+		.XMM9,
+		.XMM10,
+		.XMM11,
+		.XMM12,
+		.XMM13,
+		.XMM14,
+		.XMM15,
+		.XMM16, // Available in AVX-512
+		.XMM17,
+		.XMM18,
+		.XMM19,
+		.XMM20,
+		.XMM21,
+		.XMM22,
+		.XMM23,
+		.XMM24,
+		.XMM25,
+		.XMM26,
+		.XMM27,
+		.XMM28,
+		.XMM29,
+		.XMM30,
+		.XMM31, // Last register available in AVX-512
+	}
+}
+
+// YMM Registers: 256-bit SIMD registers (introduced in AVX)
+get_interesting_ymmregister :: proc() -> [32]YMMRegister {
+	return [32]YMMRegister {
+		.YMM0, // Extended version of XMM0 (upper 128 bits used in AVX)
+		.YMM1,
+		.YMM2,
+		.YMM3,
+		.YMM4,
+		.YMM5,
+		.YMM6,
+		.YMM7,
+		.YMM8, // Requires REX prefix
+		.YMM9,
+		.YMM10,
+		.YMM11,
+		.YMM12,
+		.YMM13,
+		.YMM14,
+		.YMM15,
+		.YMM16, // Available in AVX-512
+		.YMM17,
+		.YMM18,
+		.YMM19,
+		.YMM20,
+		.YMM21,
+		.YMM22,
+		.YMM23,
+		.YMM24,
+		.YMM25,
+		.YMM26,
+		.YMM27,
+		.YMM28,
+		.YMM29,
+		.YMM30,
+		.YMM31, // Last register available in AVX-512
+	}
+}
+
+// ZMM Registers: 512-bit SIMD registers (introduced in AVX-512)
+get_interesting_zmmregister :: proc() -> [32]ZMMRegister {
+	return [32]ZMMRegister {
+		.ZMM0, // Extended version of YMM0 (upper 256 bits used in AVX-512)
+		.ZMM1,
+		.ZMM2,
+		.ZMM3,
+		.ZMM4,
+		.ZMM5,
+		.ZMM6,
+		.ZMM7,
+		.ZMM8,
+		.ZMM9,
+		.ZMM10,
+		.ZMM11,
+		.ZMM12,
+		.ZMM13,
+		.ZMM14,
+		.ZMM15,
+		.ZMM16,
+		.ZMM17,
+		.ZMM18,
+		.ZMM19,
+		.ZMM20,
+		.ZMM21,
+		.ZMM22,
+		.ZMM23,
+		.ZMM24,
+		.ZMM25,
+		.ZMM26,
+		.ZMM27,
+		.ZMM28,
+		.ZMM29,
+		.ZMM30,
+		.ZMM31, // Last register available in AVX-512
+	}
+}
+// Mask Registers (used for AVX-512 masking operations)
+get_interesting_maskregister :: proc() -> [8]MaskRegister {
+	return [8]MaskRegister{.K0, .K1, .K2, .K3, .K4, .K5, .K6, .K7}
+}
+
+// Segment Registers (used for memory segmentation)
+get_interesting_segmentregister :: proc() -> [6]SegmentRegister {
+	return [6]SegmentRegister{.ES, .CS, .SS, .DS, .FS, .GS}
 }

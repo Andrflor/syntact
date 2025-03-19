@@ -12,6 +12,7 @@ package x64_assembler
 import "core:fmt"
 import "core:log"
 import "core:math/rand"
+import "core:strings"
 import "core:testing"
 
 // ==================================
@@ -122,5 +123,3835 @@ testing_r64_m64 :: proc(t: ^testing.T) {
 		context.user_ptr = &buffer
 		mov_r64_m64(dst, src)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Memory operand tests
+@(test)
+testing_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// MOVABS instruction test
+@(test)
+testing_movabs_r64_imm64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	interestingImm64 := get_interesting_imm64_values()
+
+	for dst in registers64 {
+		for src in interestingImm64 {
+			asm_str := fmt.tprintf("movabs %s, %d", register64_to_string(dst), src)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movabs_r64_imm64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Sign extension from 32-bit to 64-bit
+@(test)
+testing_movsx_r64_r32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	registers32 := get_all_registers32()
+
+	for dst in registers64 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"movsx %s, %s",
+				register64_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsx_r64_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Double-word to quadword sign extension
+@(test)
+testing_movsxd_r64_r32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	registers32 := get_all_registers32()
+
+	for dst in registers64 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"movsxd %s, %s",
+				register64_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsxd_r64_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Zero extension tests
+@(test)
+testing_movzx_r64_r8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	registers8 := get_all_registers8()
+
+	for dst in registers64 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"movzx %s, %s",
+				register64_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movzx_r64_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_movzx_r64_r16 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	registers16 := get_all_registers16()
+
+	for dst in registers64 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"movzx %s, %s",
+				register64_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movzx_r64_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Sign extension tests
+@(test)
+testing_movsx_r64_r8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	registers8 := get_all_registers8()
+
+	for dst in registers64 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"movsx %s, %s",
+				register64_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsx_r64_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_movsx_r64_r16 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	registers16 := get_all_registers16()
+
+	for dst in registers64 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"movsx %s, %s",
+				register64_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsx_r64_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Byte swapping tests
+@(test)
+testing_movbe_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"movbe %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		movbe_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_movbe_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"movbe %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		movbe_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Byte swap test
+@(test)
+testing_bswap_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("bswap %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		bswap_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Exchange test
+@(test)
+testing_xchg_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"xchg %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			xchg_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Load effective address test
+@(test)
+testing_lea_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"lea %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		lea_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 32-bit register tests
+@(test)
+testing_mov_r32_imm32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers32 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("mov %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r32_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"mov %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r32_m32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers32))
+		dst := registers32[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, dword ptr %s",
+			register32_to_string(dst),
+			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_r32_m32(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_mov_m32_r32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers32))
+		src := registers32[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov dword ptr %s, %s",
+			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			register32_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_m32_r32(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Zero extension 32-bit tests
+@(test)
+testing_movzx_r32_r8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	registers8 := get_all_registers8()
+
+	for dst in registers32 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"movzx %s, %s",
+				register32_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movzx_r32_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_movzx_r32_r16 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	registers16 := get_all_registers16()
+
+	for dst in registers32 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"movzx %s, %s",
+				register32_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movzx_r32_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Sign extension 32-bit tests
+@(test)
+testing_movsx_r32_r8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	registers8 := get_all_registers8()
+
+	for dst in registers32 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"movsx %s, %s",
+				register32_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsx_r32_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_movsx_r32_r16 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	registers16 := get_all_registers16()
+
+	for dst in registers32 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"movsx %s, %s",
+				register32_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsx_r32_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 32-bit register exchange
+@(test)
+testing_xchg_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"xchg %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			xchg_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Load effective address 32-bit
+@(test)
+testing_lea_r32_m :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers32))
+		dst := registers32[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"lea %s, %s",
+			register32_to_string(dst),
+			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		lea_r32_m(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 16-bit register tests
+@(test)
+testing_mov_r16_imm16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	imm16Values := get_interesting_imm16_values()
+
+	for reg in registers16 {
+		for imm in imm16Values {
+			asm_str := fmt.tprintf("mov %s, %d", register16_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r16_imm16(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"mov %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r16_m16 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers16 := get_all_registers16()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers16))
+		dst := registers16[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, word ptr %s",
+			register16_to_string(dst),
+			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_r16_m16(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_mov_m16_r16 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers16 := get_all_registers16()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers16))
+		src := registers16[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov word ptr %s, %s",
+			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			register16_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_m16_r16(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Zero extension 16-bit test
+@(test)
+testing_movzx_r16_r8 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	registers8 := get_all_registers8()
+
+	for dst in registers16 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"movzx %s, %s",
+				register16_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movzx_r16_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Sign extension 16-bit tests
+@(test)
+testing_movsx_r16_r8 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	registers8 := get_all_registers8()
+
+	for dst in registers16 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"movsx %s, %s",
+				register16_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			movsx_r16_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 16-bit register exchange
+@(test)
+testing_xchg_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"xchg %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			xchg_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Load effective address 16-bit
+@(test)
+testing_lea_r16_m :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers16 := get_all_registers16()
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers16))
+		dst := registers16[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"lea %s, %s",
+			register16_to_string(dst),
+			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		lea_r16_m(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 8-bit register tests
+@(test)
+testing_mov_r8_imm8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers8 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("mov %s, %d", register8_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r8_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r8_r8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	for dst in registers8 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"mov %s, %s",
+				register8_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r8_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// @(test)
+// testing_mov_r8_m8 :: proc(t: ^testing.T) {
+// 	addresses := get_all_addressing_combinations()
+// 	defer delete(addresses)
+// 	registers8 := get_all_registers8()
+
+// 	// Set the number of random tests to run
+// 	num_tests := 100
+// 	for i := 0; i < num_tests; i += 1 {
+// 		// Select a random register
+// 		dst_idx := rand.int_max(len(registers8))
+// 		dst := registers8[dst_idx]
+
+// 		// Select a random memory addressing mode
+// 		src_idx := rand.int_max(len(addresses))
+// 		src := addresses[src_idx]
+
+// 		asm_str := fmt.tprintf(
+// 			"mov %s, byte ptr %s",
+// 			register8_to_string(dst),
+// 			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+// 		)
+
+// 		buffer := ByteBuffer{}
+// 		context.user_ptr = &buffer
+// 		mov_r8_m8(dst, src)
+// 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+// 	}
+// }
+
+// @(test)
+// testing_mov_m8_r8 :: proc(t: ^testing.T) {
+// 	addresses := get_all_addressing_combinations()
+// 	defer delete(addresses)
+// 	registers8 := get_all_registers8()
+
+// 	// Set the number of random tests to run
+// 	num_tests := 100
+// 	for i := 0; i < num_tests; i += 1 {
+// 		// Select a random memory addressing mode
+// 		dst_idx := rand.int_max(len(addresses))
+// 		dst := addresses[dst_idx]
+
+// 		// Select a random register
+// 		src_idx := rand.int_max(len(registers8))
+// 		src := registers8[src_idx]
+
+// 		asm_str := fmt.tprintf(
+// 			"mov byte ptr %s, %s",
+// 			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+// 			register8_to_string(src),
+// 		)
+
+// 		buffer := ByteBuffer{}
+// 		context.user_ptr = &buffer
+// 		mov_m8_r8(dst, src)
+// 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+// 	}
+// }
+
+// 8-bit register exchange
+@(test)
+testing_xchg_r8_r8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	for dst in registers8 {
+		for src in registers8 {
+			asm_str := fmt.tprintf(
+				"xchg %s, %s",
+				register8_to_string(dst),
+				register8_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			xchg_r8_r8(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Segment register tests
+@(test)
+testing_mov_sreg_r16 :: proc(t: ^testing.T) {
+	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
+	registers16 := get_all_registers16()
+
+	for dst in segment_regs {
+		for src in registers16 {
+			// Convert segment register enum to string (assuming there's a helper function)
+			// If not available, manually handle the conversion
+			segment_name := fmt.tprintf("%v", dst)
+			segment_name = strings.to_lower(segment_name, context.temp_allocator)
+
+			asm_str := fmt.tprintf("mov %s, %s", segment_name, register16_to_string(src))
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_sreg_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r16_sreg :: proc(t: ^testing.T) {
+	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in segment_regs {
+			// Convert segment register enum to string
+			segment_name := fmt.tprintf("%v", src)
+			segment_name = strings.to_lower(segment_name, context.temp_allocator)
+
+			asm_str := fmt.tprintf("mov %s, %s", register16_to_string(dst), segment_name)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r16_sreg(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_sreg_m16 :: proc(t: ^testing.T) {
+	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random segment register
+		dst_idx := rand.int_max(len(segment_regs))
+		dst := segment_regs[dst_idx]
+
+		// Convert segment register enum to string
+		segment_name := fmt.tprintf("%v", dst)
+		segment_name = strings.to_lower(segment_name, context.temp_allocator)
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, word ptr %s",
+			segment_name,
+			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_sreg_m16(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_mov_m16_sreg :: proc(t: ^testing.T) {
+	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random segment register
+		src_idx := rand.int_max(len(segment_regs))
+		src := segment_regs[src_idx]
+
+		// Convert segment register enum to string
+		segment_name := fmt.tprintf("%v", src)
+		segment_name = strings.to_lower(segment_name, context.temp_allocator)
+
+		asm_str := fmt.tprintf(
+			"mov word ptr %s, %s",
+			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			segment_name,
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_m16_sreg(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 64-bit arithmetic operations
+@(test)
+testing_add_r64_imm32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers64 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("add %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			add_r64_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_add_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"add %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			add_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_sub_r64_imm32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers64 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("sub %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			sub_r64_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_sub_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"sub %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			sub_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_inc_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("inc %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		inc_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_dec_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("dec %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		dec_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_neg_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("neg %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		neg_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_adc_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"adc %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			adc_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_sbb_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"sbb %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			sbb_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Multiplication and division tests
+@(test)
+testing_mul_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("mul %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mul_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_imul_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"imul %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			imul_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_imul_r64_r64_imm32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm32Values := get_interesting_imm32_values()
+
+	// Only test a few values to avoid explosion
+	num_tests := 50
+	for i := 0; i < num_tests; i += 1 {
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf(
+			"imul %s, %s, %d",
+			register64_to_string(dst),
+			register64_to_string(src),
+			imm,
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		imul_r64_r64_imm32(dst, src, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_imul_r64_imm32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers64 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("imul %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			imul_r64_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_div_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("div %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		div_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_idiv_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("idiv %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		idiv_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_xadd_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"xadd %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			xadd_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Logical operations
+@(test)
+testing_and_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"and %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			and_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_or_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"or %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			or_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_xor_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"xor %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			xor_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_not_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("not %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		not_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Shift operations
+@(test)
+testing_shl_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers64 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("shl %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			shl_r64_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_shr_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers64 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("shr %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			shr_r64_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_rol_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers64 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("rol %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			rol_r64_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_ror_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers64 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("ror %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			ror_r64_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Double-precision shift operations tests
+@(test)
+testing_shld_r64_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few values to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		// Pick a small shift count (0-63 is valid range)
+		imm := u8(rand.int_max(64))
+
+		asm_str := fmt.tprintf(
+			"shld %s, %s, %d",
+			register64_to_string(dst),
+			register64_to_string(src),
+			imm,
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		shld_r64_r64_imm8(dst, src, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_shrd_r64_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few values to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		// Pick a small shift count (0-63 is valid range)
+		imm := u8(rand.int_max(64))
+
+		asm_str := fmt.tprintf(
+			"shrd %s, %s, %d",
+			register64_to_string(dst),
+			register64_to_string(src),
+			imm,
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		shrd_r64_r64_imm8(dst, src, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 32-bit shift operations with immediate
+@(test)
+testing_shl_r32_imm8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		// Test with a few shift values
+		for imm: u8 = 0; imm < 32; imm += 7 {
+			asm_str := fmt.tprintf("shl %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			shl_r32_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 32-bit shift operations with CL register
+@(test)
+testing_shl_r32_cl :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("shl %s, cl", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		shl_r32_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_shr_r32_imm8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		// Test with a few shift values
+		for imm: u8 = 0; imm < 32; imm += 7 {
+			asm_str := fmt.tprintf("shr %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			shr_r32_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_shr_r32_cl :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("shr %s, cl", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		shr_r32_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sar_r32_imm8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		// Test with a few shift values
+		for imm: u8 = 0; imm < 32; imm += 7 {
+			asm_str := fmt.tprintf("sar %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			sar_r32_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_sar_r32_cl :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("sar %s, cl", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sar_r32_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_rol_r32_imm8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		// Test with a few rotation values
+		for imm: u8 = 0; imm < 32; imm += 7 {
+			asm_str := fmt.tprintf("rol %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			rol_r32_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_rol_r32_cl :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("rol %s, cl", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		rol_r32_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_ror_r32_imm8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		// Test with a few rotation values
+		for imm: u8 = 0; imm < 32; imm += 7 {
+			asm_str := fmt.tprintf("ror %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			ror_r32_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_ror_r32_cl :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("ror %s, cl", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		ror_r32_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 16-bit shift operations with immediate
+@(test)
+testing_shl_r16_imm8 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for reg in registers16 {
+		// Test with a few shift values
+		for imm: u8 = 0; imm < 16; imm += 5 {
+			asm_str := fmt.tprintf("shl %s, %d", register16_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			shl_r16_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_shl_r16_cl :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for reg in registers16 {
+		asm_str := fmt.tprintf("shl %s, cl", register16_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		shl_r16_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// 8-bit shift operations
+@(test)
+testing_shl_r8_imm8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	for reg in registers8 {
+		// Test with a few shift values
+		for imm: u8 = 0; imm < 8; imm += 2 {
+			asm_str := fmt.tprintf("shl %s, %d", register8_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			shl_r8_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_shl_r8_cl :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	for reg in registers8 {
+		asm_str := fmt.tprintf("shl %s, cl", register8_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		shl_r8_cl(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Bit test operations
+@(test)
+testing_bt_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few combinations to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		reg_idx := rand.int_max(len(registers64))
+		reg := registers64[reg_idx]
+
+		bit_idx_idx := rand.int_max(len(registers64))
+		bit_idx := registers64[bit_idx_idx]
+
+		asm_str := fmt.tprintf(
+			"bt %s, %s",
+			register64_to_string(reg),
+			register64_to_string(bit_idx),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		bt_r64_r64(reg, bit_idx)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_bts_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few combinations to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		reg_idx := rand.int_max(len(registers64))
+		reg := registers64[reg_idx]
+
+		bit_idx_idx := rand.int_max(len(registers64))
+		bit_idx := registers64[bit_idx_idx]
+
+		asm_str := fmt.tprintf(
+			"bts %s, %s",
+			register64_to_string(reg),
+			register64_to_string(bit_idx),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		bts_r64_r64(reg, bit_idx)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_btr_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few combinations to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		reg_idx := rand.int_max(len(registers64))
+		reg := registers64[reg_idx]
+
+		bit_idx_idx := rand.int_max(len(registers64))
+		bit_idx := registers64[bit_idx_idx]
+
+		asm_str := fmt.tprintf(
+			"btr %s, %s",
+			register64_to_string(reg),
+			register64_to_string(bit_idx),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		btr_r64_r64(reg, bit_idx)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_btc_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few combinations to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		reg_idx := rand.int_max(len(registers64))
+		reg := registers64[reg_idx]
+
+		bit_idx_idx := rand.int_max(len(registers64))
+		bit_idx := registers64[bit_idx_idx]
+
+		asm_str := fmt.tprintf(
+			"btc %s, %s",
+			register64_to_string(reg),
+			register64_to_string(bit_idx),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		btc_r64_r64(reg, bit_idx)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Bit scan operations
+@(test)
+testing_bsf_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"bsf %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			bsf_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_bsr_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"bsr %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			bsr_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Population count and bit manipulation
+@(test)
+testing_popcnt_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"popcnt %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			popcnt_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_lzcnt_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"lzcnt %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			lzcnt_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_tzcnt_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"tzcnt %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			tzcnt_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// BMI2 instructions
+@(test)
+testing_pext_r64_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few combinations to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		src1_idx := rand.int_max(len(registers64))
+		src1 := registers64[src1_idx]
+
+		src2_idx := rand.int_max(len(registers64))
+		src2 := registers64[src2_idx]
+
+		asm_str := fmt.tprintf(
+			"pext %s, %s, %s",
+			register64_to_string(dst),
+			register64_to_string(src1),
+			register64_to_string(src2),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pext_r64_r64_r64(dst, src1, src2)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_pdep_r64_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	// Only test a few combinations to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		src1_idx := rand.int_max(len(registers64))
+		src1 := registers64[src1_idx]
+
+		src2_idx := rand.int_max(len(registers64))
+		src2 := registers64[src2_idx]
+
+		asm_str := fmt.tprintf(
+			"pdep %s, %s, %s",
+			register64_to_string(dst),
+			register64_to_string(src1),
+			register64_to_string(src2),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pdep_r64_r64_r64(dst, src1, src2)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+
+// 64-bit comparison operations
+@(test)
+testing_cmp_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg1 in registers64 {
+		for reg2 in registers64 {
+			asm_str := fmt.tprintf(
+				"cmp %s, %s",
+				register64_to_string(reg1),
+				register64_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r64_r64(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmp_r64_imm32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers64 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("cmp %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r64_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg1 in registers64 {
+		for reg2 in registers64 {
+			asm_str := fmt.tprintf(
+				"test %s, %s",
+				register64_to_string(reg1),
+				register64_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r64_r64(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r64_imm32 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers64 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("test %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r64_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Conditional move operations
+@(test)
+testing_cmove_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"cmove %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmove_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovne_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"cmovne %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovne_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmova_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"cmova %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmova_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovae_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"cmovae %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovae_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovb_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"cmovb %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovb_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovbe_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"cmovbe %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovbe_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 32-bit comparison operations
+@(test)
+testing_cmp_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg1 in registers32 {
+		for reg2 in registers32 {
+			asm_str := fmt.tprintf(
+				"cmp %s, %s",
+				register32_to_string(reg1),
+				register32_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r32_r32(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmp_r32_imm32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers32 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("cmp %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r32_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg1 in registers32 {
+		for reg2 in registers32 {
+			asm_str := fmt.tprintf(
+				"test %s, %s",
+				register32_to_string(reg1),
+				register32_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r32_r32(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r32_imm32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	imm32Values := get_interesting_imm32_values()
+
+	for reg in registers32 {
+		for imm in imm32Values {
+			asm_str := fmt.tprintf("test %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r32_imm32(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 32-bit conditional move operations
+@(test)
+testing_cmove_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"cmove %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmove_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovne_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"cmovne %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovne_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmova_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"cmova %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmova_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovae_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"cmovae %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovae_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovb_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"cmovb %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovb_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovbe_r32_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for dst in registers32 {
+		for src in registers32 {
+			asm_str := fmt.tprintf(
+				"cmovbe %s, %s",
+				register32_to_string(dst),
+				register32_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovbe_r32_r32(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 16-bit comparison operations
+@(test)
+testing_cmp_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for reg1 in registers16 {
+		for reg2 in registers16 {
+			asm_str := fmt.tprintf(
+				"cmp %s, %s",
+				register16_to_string(reg1),
+				register16_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r16_r16(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmp_r16_imm16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	imm16Values := get_interesting_imm16_values()
+
+	for reg in registers16 {
+		for imm in imm16Values {
+			asm_str := fmt.tprintf("cmp %s, %d", register16_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r16_imm16(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for reg1 in registers16 {
+		for reg2 in registers16 {
+			asm_str := fmt.tprintf(
+				"test %s, %s",
+				register16_to_string(reg1),
+				register16_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r16_r16(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r16_imm16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	imm16Values := get_interesting_imm16_values()
+
+	for reg in registers16 {
+		for imm in imm16Values {
+			asm_str := fmt.tprintf("test %s, %d", register16_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r16_imm16(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 16-bit conditional move operations
+@(test)
+testing_cmove_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"cmove %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmove_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovne_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"cmovne %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovne_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmova_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"cmova %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmova_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovae_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"cmovae %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovae_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovb_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"cmovb %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovb_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmovbe_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"cmovbe %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmovbe_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// 8-bit comparison operations
+@(test)
+testing_cmp_r8_r8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	for reg1 in registers8 {
+		for reg2 in registers8 {
+			asm_str := fmt.tprintf(
+				"cmp %s, %s",
+				register8_to_string(reg1),
+				register8_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r8_r8(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_cmp_r8_imm8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers8 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("cmp %s, %d", register8_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			cmp_r8_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r8_r8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	for reg1 in registers8 {
+		for reg2 in registers8 {
+			asm_str := fmt.tprintf(
+				"test %s, %s",
+				register8_to_string(reg1),
+				register8_to_string(reg2),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r8_r8(reg1, reg2)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_test_r8_imm8 :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers8 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("test %s, %d", register8_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			test_r8_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Unconditional jump tests
+@(test)
+testing_jmp_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jmp %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jmp_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jmp_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("jmp %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jmp_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jmp_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Test a subset to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		addr_idx := rand.int_max(len(addresses))
+		addr := addresses[addr_idx]
+
+		asm_str := fmt.tprintf("jmp %s", memory_address_to_string(addr))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jmp_m64(addr)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jmp_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jmp short %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jmp_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Call instruction tests
+@(test)
+testing_call_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("call %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		call_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_call_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("call %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		call_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_call_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Test a subset to avoid explosion
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		addr_idx := rand.int_max(len(addresses))
+		addr := addresses[addr_idx]
+
+		asm_str := fmt.tprintf("call %s", memory_address_to_string(addr))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		call_m64(addr)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Return instruction test
+@(test)
+testing_ret :: proc(t: ^testing.T) {
+	asm_str := "ret"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	ret()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Conditional jumps with 32-bit displacement
+@(test)
+testing_je_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("je %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		je_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jne_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jne %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jne_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jg_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jg %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jg_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jl_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jl %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jl_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jge_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jge %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jge_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jle_rel32 :: proc(t: ^testing.T) {
+	// Test a few representative offsets
+	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jle %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jle_rel32(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Short conditional jumps (8-bit displacement)
+@(test)
+testing_je_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("je short %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		je_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jne_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jne short %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jne_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Loop instructions
+@(test)
+testing_loop_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("loop %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		loop_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_loope_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("loope %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		loope_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_loopne_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("loopne %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		loopne_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jecxz_rel8 :: proc(t: ^testing.T) {
+	// Test a few representative 8-bit offsets
+	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jecxz %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jecxz_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Continuation of the setcc_r8 test
+@(test)
+testing_setcc_r8 :: proc(t: ^testing.T) {
+	// Common condition codes
+	condition_codes := [?]u8 {
+		0x40, // equal/zero (e/z)
+		0x41, // not equal/not zero (ne/nz)
+		0x42, // below/carry (b/c)
+		0x43, // not below/not carry (nb/nc)
+		0x44, // equal or below (be)
+		0x45, // not equal and not below (nbe)
+		0x4C, // less (l)
+		0x4D, // not less (nl)
+		0x4E, // less or equal (le)
+		0x4F, // not less or equal (nle)
+	}
+
+	// We need to pass in the register as u8 value
+	// Typically this would use the low byte registers (al, cl, dl, bl, etc.)
+	registers := [?]u8{0, 1, 2, 3, 4, 5, 6, 7}
+
+	for dst in registers {
+		for cc in condition_codes {
+			// Generate appropriate condition string based on condition code
+			condition_str := ""
+			switch cc {
+			case 0x40:
+				condition_str = "sete"
+			case 0x41:
+				condition_str = "setne"
+			case 0x42:
+				condition_str = "setb"
+			case 0x43:
+				condition_str = "setae"
+			case 0x44:
+				condition_str = "setbe"
+			case 0x45:
+				condition_str = "seta"
+			case 0x4C:
+				condition_str = "setl"
+			case 0x4D:
+				condition_str = "setge"
+			case 0x4E:
+				condition_str = "setle"
+			case 0x4F:
+				condition_str = "setg"
+			}
+
+			// Map register number to register name
+			reg_name := ""
+			switch dst {
+			case 0:
+				reg_name = "al"
+			case 1:
+				reg_name = "cl"
+			case 2:
+				reg_name = "dl"
+			case 3:
+				reg_name = "bl"
+			case 4:
+				reg_name = "ah"
+			case 5:
+				reg_name = "ch"
+			case 6:
+				reg_name = "dh"
+			case 7:
+				reg_name = "bh"
+			}
+
+			asm_str := fmt.tprintf("%s %s", condition_str, reg_name)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			setcc_r8(dst, cc)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Branch prediction hint
+@(test)
+testing_endbr64 :: proc(t: ^testing.T) {
+	asm_str := "endbr64"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	endbr64()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Stack operations - 64-bit push/pop
+@(test)
+testing_push_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("push %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		push_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_pop_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for reg in registers64 {
+		asm_str := fmt.tprintf("pop %s", register64_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pop_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Stack operations - 32-bit push/pop
+@(test)
+testing_push_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("push %s", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		push_r32(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_pop_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("pop %s", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pop_r32(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Stack operations - 16-bit push/pop
+@(test)
+testing_push_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for reg in registers16 {
+		asm_str := fmt.tprintf("push %s", register16_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		push_r16(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_pop_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for reg in registers16 {
+		asm_str := fmt.tprintf("pop %s", register16_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pop_r16(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Flag register operations
+@(test)
+testing_pushfq :: proc(t: ^testing.T) {
+	asm_str := "pushfq"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	pushfq()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_popfq :: proc(t: ^testing.T) {
+	asm_str := "popfq"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	popfq()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_pushf :: proc(t: ^testing.T) {
+	asm_str := "pushf"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	pushf()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_popf :: proc(t: ^testing.T) {
+	asm_str := "popf"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	popf()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_pushfd :: proc(t: ^testing.T) {
+	asm_str := "pushfd"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	pushfd()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_popfd :: proc(t: ^testing.T) {
+	asm_str := "popfd"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	popfd()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Multiple register push/pop (IA-32 only, for compatibility)
+@(test)
+testing_pushad :: proc(t: ^testing.T) {
+	asm_str := "pushad"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	pushad()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_popad :: proc(t: ^testing.T) {
+	asm_str := "popad"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	popad()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Stack frame operations
+@(test)
+testing_enter :: proc(t: ^testing.T) {
+	// Test various stack frame sizes and nesting levels
+	sizes := [?]u16{0, 4, 8, 16, 32, 64, 128, 256}
+	nesting_levels := [?]u8{0, 1, 2, 3}
+
+	for size in sizes {
+		for level in nesting_levels {
+			asm_str := fmt.tprintf("enter %d, %d", size, level)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			enter(size, level)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_leave :: proc(t: ^testing.T) {
+	asm_str := "leave"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	leave()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+
+// CRC32 instruction
+@(test)
+testing_crc32_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"crc32 %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			crc32_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// String operations
+@(test)
+testing_movs_m8_m8 :: proc(t: ^testing.T) {
+	asm_str := "movs byte ptr [rdi], byte ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	movs_m8_m8()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_movs_m16_m16 :: proc(t: ^testing.T) {
+	asm_str := "movs word ptr [rdi], word ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	movs_m16_m16()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_movs_m32_m32 :: proc(t: ^testing.T) {
+	asm_str := "movs dword ptr [rdi], dword ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	movs_m32_m32()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_movs_m64_m64 :: proc(t: ^testing.T) {
+	asm_str := "movs qword ptr [rdi], qword ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	movs_m64_m64()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Store string operations
+@(test)
+testing_stos_m8 :: proc(t: ^testing.T) {
+	asm_str := "stos byte ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	stos_m8()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_stos_m16 :: proc(t: ^testing.T) {
+	asm_str := "stos word ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	stos_m16()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_stos_m32 :: proc(t: ^testing.T) {
+	asm_str := "stos dword ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	stos_m32()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_stos_m64 :: proc(t: ^testing.T) {
+	asm_str := "stos qword ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	stos_m64()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Scan string operations
+@(test)
+testing_scas_m8 :: proc(t: ^testing.T) {
+	asm_str := "scas byte ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	scas_m8()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_scas_m16 :: proc(t: ^testing.T) {
+	asm_str := "scas word ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	scas_m16()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_scas_m32 :: proc(t: ^testing.T) {
+	asm_str := "scas dword ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	scas_m32()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_scas_m64 :: proc(t: ^testing.T) {
+	asm_str := "scas qword ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	scas_m64()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Compare string operations
+@(test)
+testing_cmps_m8_m8 :: proc(t: ^testing.T) {
+	asm_str := "cmps byte ptr [rsi], byte ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	cmps_m8_m8()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_cmps_m16_m16 :: proc(t: ^testing.T) {
+	asm_str := "cmps word ptr [rsi], word ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	cmps_m16_m16()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_cmps_m32_m32 :: proc(t: ^testing.T) {
+	asm_str := "cmps dword ptr [rsi], dword ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	cmps_m32_m32()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_cmps_m64_m64 :: proc(t: ^testing.T) {
+	asm_str := "cmps qword ptr [rsi], qword ptr [rdi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	cmps_m64_m64()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+
+@(test)
+testing_lods_m8 :: proc(t: ^testing.T) {
+	asm_str := "lods byte ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	lods_m8()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_lods_m16 :: proc(t: ^testing.T) {
+	asm_str := "lods word ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	lods_m16()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_lods_m32 :: proc(t: ^testing.T) {
+	asm_str := "lods dword ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	lods_m32()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_lods_m64 :: proc(t: ^testing.T) {
+	asm_str := "lods qword ptr [rsi]"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	lods_m64()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// String operations with REP prefix
+@(test)
+testing_rep_movs :: proc(t: ^testing.T) {
+	asm_str := "rep movs"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rep_movs()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rep_stos :: proc(t: ^testing.T) {
+	asm_str := "rep stos"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rep_stos()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rep_cmps :: proc(t: ^testing.T) {
+	asm_str := "rep cmps"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rep_cmps()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// System call instructions
+@(test)
+testing_syscall :: proc(t: ^testing.T) {
+	asm_str := "syscall"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	syscall()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_sysret :: proc(t: ^testing.T) {
+	asm_str := "sysret"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	sysret()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Interrupt instructions
+@(test)
+testing_int_imm8 :: proc(t: ^testing.T) {
+	// Test a few interrupt numbers
+	for imm: u8 = 0; imm <= 255; imm += 50 {
+		asm_str := fmt.tprintf("int %d", imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		int_imm8(imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_int3 :: proc(t: ^testing.T) {
+	asm_str := "int3"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	int3()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_iret :: proc(t: ^testing.T) {
+	asm_str := "iretq"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	iret()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Processor information and model-specific registers
+@(test)
+testing_cpuid :: proc(t: ^testing.T) {
+	asm_str := "cpuid"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	cpuid()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rdtsc :: proc(t: ^testing.T) {
+	asm_str := "rdtsc"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rdtsc()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rdtscp :: proc(t: ^testing.T) {
+	asm_str := "rdtscp"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rdtscp()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rdmsr :: proc(t: ^testing.T) {
+	asm_str := "rdmsr"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rdmsr()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_wrmsr :: proc(t: ^testing.T) {
+	asm_str := "wrmsr"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	wrmsr()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rdpmc :: proc(t: ^testing.T) {
+	asm_str := "rdpmc"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rdpmc()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Privileged and system instructions
+@(test)
+testing_hlt :: proc(t: ^testing.T) {
+	asm_str := "hlt"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	hlt()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_swapgs :: proc(t: ^testing.T) {
+	asm_str := "swapgs"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	swapgs()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_wrpkru :: proc(t: ^testing.T) {
+	asm_str := "wrpkru"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	wrpkru()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_rdpkru :: proc(t: ^testing.T) {
+	asm_str := "rdpkru"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	rdpkru()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_clac :: proc(t: ^testing.T) {
+	asm_str := "clac"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	clac()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_stac :: proc(t: ^testing.T) {
+	asm_str := "stac"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	stac()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Bound checking and undefined instruction
+@(test)
+testing_ud2 :: proc(t: ^testing.T) {
+	asm_str := "ud2"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	ud2()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_bound_r16_m32 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Test with a subset to avoid explosion
+	num_tests := 50
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		reg_idx := rand.int_max(len(registers16))
+		reg := registers16[reg_idx]
+
+		// Select a random memory addressing mode
+		mem_idx := rand.int_max(len(addresses))
+		mem := addresses[mem_idx]
+
+		asm_str := fmt.tprintf(
+			"bound %s, %s",
+			register16_to_string(reg),
+			memory_address_to_string(mem)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		bound_r16_m32(reg, mem)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_bound_r32_m64 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Test with a subset to avoid explosion
+	num_tests := 50
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		reg_idx := rand.int_max(len(registers32))
+		reg := registers32[reg_idx]
+
+		// Select a random memory addressing mode
+		mem_idx := rand.int_max(len(addresses))
+		mem := addresses[mem_idx]
+
+		asm_str := fmt.tprintf(
+			"bound %s, %s",
+			register32_to_string(reg),
+			memory_address_to_string(mem)[10:], // Remove "qword ptr " prefix
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		bound_r32_m64(reg, mem)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// ARPL (Adjust RPL Field of Selector)
+@(test)
+testing_arpl_r16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+
+	for dst in registers16 {
+		for src in registers16 {
+			asm_str := fmt.tprintf(
+				"arpl %s, %s",
+				register16_to_string(dst),
+				register16_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			arpl_r16_r16(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_arpl_m16_r16 :: proc(t: ^testing.T) {
+	registers16 := get_all_registers16()
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Test with a subset to avoid explosion
+	num_tests := 50
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		mem_idx := rand.int_max(len(addresses))
+		mem := addresses[mem_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers16))
+		src := registers16[src_idx]
+
+		asm_str := fmt.tprintf(
+			"arpl word ptr %s, %s",
+			memory_address_to_string(mem)[10:], // Remove "qword ptr " prefix
+			register16_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		arpl_m16_r16(mem, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Virtualization instructions
+@(test)
+testing_vmcall :: proc(t: ^testing.T) {
+	asm_str := "vmcall"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	vmcall()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_vmlaunch :: proc(t: ^testing.T) {
+	asm_str := "vmlaunch"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	vmlaunch()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_vmresume :: proc(t: ^testing.T) {
+	asm_str := "vmresume"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	vmresume()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_vmxoff :: proc(t: ^testing.T) {
+	asm_str := "vmxoff"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	vmxoff()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+// Atomic operations
+@(test)
+testing_lock_xadd_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"lock xadd %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			lock_xadd_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
 	}
 }
