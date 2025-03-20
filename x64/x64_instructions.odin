@@ -287,7 +287,13 @@ MemoryAddress :: union {
 
 
 // Special write function for the complex memory adress system of x64
-write_memory_address :: proc(mem: MemoryAddress, reg_field: u8, opcode: u8, set_w: bool = true) {
+write_memory_address :: proc(
+	mem: MemoryAddress,
+	reg_field: u8,
+	opcode: u8,
+	set_w: bool = true,
+	force_rex: bool = false,
+) {
 	has_ext_reg := (reg_field & 0x8) != 0
 	has_ext_base := false
 	has_ext_idx := false
@@ -298,20 +304,43 @@ write_memory_address :: proc(mem: MemoryAddress, reg_field: u8, opcode: u8, set_
 		if a.index != nil do has_ext_idx = (u8(a.index.(Register64)) & 0x8) != 0
 	}
 
-	// Only generate and write REX prefix if it's needed
-	need_rex := set_w || has_ext_reg || has_ext_idx || has_ext_base
+	// For 8-, 16-, and 64-bit instructions, a REX prefix is needed if:
+	//   - The operation requires a size override (set_w true),
+	//   - OR any register (reg, base, index) is an extended register,
+	//   - OR force_rex is true (e.g. for special low-byte registers).
+	need_rex := set_w || force_rex || has_ext_reg || has_ext_idx || has_ext_base
 
-	// If opcode is provided (not 0), write it with REX if needed
+	// Handle special MOVBE opcodes:
+	//   opcode == 0x8F → MOVBE r64, m64 (memory read)
+	//   opcode == 0x8E → MOVBE m64, r64 (memory write)
+	is_movbe := opcode == 0x8F || opcode == 0x8E
 	if opcode != 0 {
-		if need_rex {
-			rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
-			write([]u8{rex, opcode})
+		if is_movbe {
+			if need_rex {
+				rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
+				if opcode == 0x8E {
+					// MOVBE m64, r64
+					write([]u8{rex, 0x0F, 0x38, 0xF1})
+				} else {
+					// MOVBE r64, m64
+					write([]u8{rex, 0x0F, 0x38, 0xF0})
+				}
+			} else {
+				if opcode == 0x8E {
+					write([]u8{0x0F, 0x38, 0xF1})
+				} else {
+					write([]u8{0x0F, 0x38, 0xF0})
+				}
+			}
 		} else {
-			write([]u8{opcode})
+			if need_rex {
+				rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
+				write([]u8{rex, opcode})
+			} else {
+				write([]u8{opcode})
+			}
 		}
 	} else {
-		// Otherwise just write REX if needed (for segment register instructions
-		// where we've already written the opcode)
 		if need_rex {
 			rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
 			write([]u8{rex})
@@ -320,39 +349,33 @@ write_memory_address :: proc(mem: MemoryAddress, reg_field: u8, opcode: u8, set_
 
 	switch a in mem {
 	case u64:
-		// Direct address with displacement
+		// Direct addressing: mod=0, r/m=5, then a 32-bit displacement.
 		write([]u8{encode_modrm(0, reg_field & 0x7, 5)})
 		bytes := transmute([4]u8)i32(a)
 		write(bytes[:])
-
 	case AddressComponents:
 		if a.base == nil && a.index == nil {
-			// RIP-relative addressing
+			// RIP-relative addressing.
 			write([]u8{encode_modrm(0, reg_field & 0x7, 5)})
 			disp := a.displacement != nil ? a.displacement.(i32) : 0
 			bytes := transmute([4]u8)disp
 			write(bytes[:])
 			return
 		}
-
 		mod: u8 = 0
 		rm: u8 = 0
 		need_sib :=
 			a.index != nil ||
 			a.base == nil ||
 			(a.base != nil && (u8(a.base.(Register64)) & 0x7) == 4)
-
 		if a.base != nil {
 			rm = u8(a.base.(Register64)) & 0x7
 		} else {
-			rm = 4 // SIB with no base
+			rm = 4 // Use SIB byte with no base.
 		}
-
 		disp := a.displacement != nil ? a.displacement.(i32) : 0
-
-		// Determine mod field
 		if a.base == nil {
-			mod = 0 // base=none → SIB.base=5 + disp32 required
+			mod = 0 // No base: force disp32.
 		} else if disp == 0 && rm != 5 {
 			mod = 0
 		} else if disp >= -128 && disp <= 127 {
@@ -360,10 +383,8 @@ write_memory_address :: proc(mem: MemoryAddress, reg_field: u8, opcode: u8, set_
 		} else {
 			mod = 2
 		}
-
 		if need_sib do rm = 4
 		write([]u8{encode_modrm(mod, reg_field & 0x7, rm)})
-
 		if need_sib {
 			scale_bits: u8
 			switch a.scale != nil ? a.scale.(u8) : 1 {
@@ -376,13 +397,10 @@ write_memory_address :: proc(mem: MemoryAddress, reg_field: u8, opcode: u8, set_
 			case 8:
 				scale_bits = 3
 			}
-
 			index := a.index != nil ? u8(a.index.(Register64)) & 0x7 : 4
 			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5
 			write([]u8{encode_sib(scale_bits, index, base)})
 		}
-
-		// Displacement write
 		if mod == 1 {
 			write([]u8{u8(disp)})
 		} else if mod == 2 || (need_sib && a.base == nil) {
@@ -551,19 +569,16 @@ movsx_r64_r16 :: proc(dst: Register64, src: Register16) {
 
 // Move big-endian value from memory to register
 movbe_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
-	// 0F 38 F0 /r
-	rex: u8 = get_rex_prefix(true, (u8(dst) & 0x8) != 0, false, false)
-	write([]u8{rex, 0x0F, 0x38, 0xF0})
-	write_memory_address(mem, u8(dst), 0x0F) // Using 0x0F as a placeholder since we've already written the opcode
+	// Write REX + opcode + ModR/M bytes
+	write_memory_address(mem, u8(dst), 0x8F, true) // Using 0x8F as a special "MOVBE read" flag
 }
 
 // Move big-endian value from register to memory
 movbe_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
-	// 0F 38 F1 /r
-	rex: u8 = get_rex_prefix(true, (u8(src) & 0x8) != 0, false, false)
-	write([]u8{rex, 0x0F, 0x38, 0xF1})
-	write_memory_address(mem, u8(src), 0x0F) // Using 0x0F as a placeholder since we've already written the opcode
+	// Write REX + opcode + ModR/M bytes
+	write_memory_address(mem, u8(src), 0x8E, true) // Using 0x8E as a special "MOVBE write" flag
 }
+
 // Byte swap (reverse byte order) in a 64-bit register
 bswap_r64 :: proc(reg: Register64) {
 	// REX.W + 0F C8+rd
@@ -745,15 +760,24 @@ movzx_r32_r8 :: proc(dst: Register32, src: Register8) {
 	has_high_byte := u8(src) >= 16
 	rm := u8(src) & 0xF
 
+	// Special handling for SPL, BPL, SIL, DIL (the low byte of RSP, RBP, RSI, RDI)
+	is_spl_bpl_sil_dil := (rm >= 4 && rm <= 7) && !has_high_byte
+
+	need_rex := (u8(dst) & 0x8) != 0 || (!has_high_byte && (rm & 0x8) != 0) || is_spl_bpl_sil_dil
+
 	if has_high_byte {
 		// No REX prefix for high byte registers
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm)
 		write([]u8{0x0F, 0xB6, modrm}) // 0F B6 /r
 	} else {
-		rex: u8 = rex_rb(false, u8(dst), rm) if ((u8(dst) & 0x8) != 0 || (rm & 0x8) != 0) else 0
+		// Always need REX.R to access SPL, BPL, SIL, DIL
+		rex: u8 = 0x40
+		if (u8(dst) & 0x8) != 0 {rex |= 0x44}
+		if (rm & 0x8) != 0 {rex |= 0x41}
+
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm & 0x7)
 
-		if rex != 0 {
+		if need_rex {
 			write([]u8{rex, 0x0F, 0xB6, modrm}) // REX + 0F B6 /r
 		} else {
 			write([]u8{0x0F, 0xB6, modrm}) // 0F B6 /r
@@ -779,15 +803,24 @@ movsx_r32_r8 :: proc(dst: Register32, src: Register8) {
 	has_high_byte := u8(src) >= 16
 	rm := u8(src) & 0xF
 
+	// Special handling for SPL, BPL, SIL, DIL (the low byte of RSP, RBP, RSI, RDI)
+	is_spl_bpl_sil_dil := (rm >= 4 && rm <= 7) && !has_high_byte
+
+	need_rex := (u8(dst) & 0x8) != 0 || (!has_high_byte && (rm & 0x8) != 0) || is_spl_bpl_sil_dil
+
 	if has_high_byte {
 		// No REX prefix for high byte registers
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm)
 		write([]u8{0x0F, 0xBE, modrm}) // 0F BE /r
 	} else {
-		rex: u8 = rex_rb(false, u8(dst), rm) if ((u8(dst) & 0x8) != 0 || (rm & 0x8) != 0) else 0
+		// Always need REX.R to access SPL, BPL, SIL, DIL
+		rex: u8 = 0x40
+		if (u8(dst) & 0x8) != 0 {rex |= 0x44}
+		if (rm & 0x8) != 0 {rex |= 0x41}
+
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm & 0x7)
 
-		if rex != 0 {
+		if need_rex {
 			write([]u8{rex, 0x0F, 0xBE, modrm}) // REX + 0F BE /r
 		} else {
 			write([]u8{0x0F, 0xBE, modrm}) // 0F BE /r
@@ -911,14 +944,22 @@ mov_m16_r16 :: proc(mem: MemoryAddress, src: Register16) {
 movzx_r16_r8 :: proc(dst: Register16, src: Register8) {
 	has_high_byte := u8(src) >= 16
 	rm := u8(src) & 0xF
-	need_rex := (u8(dst) & 0x8) != 0 || (!has_high_byte && (rm & 0x8) != 0)
+
+	// Special handling for SPL, BPL, SIL, DIL (the low byte of RSP, RBP, RSI, RDI)
+	is_spl_bpl_sil_dil := (rm >= 4 && rm <= 7) && !has_high_byte
+
+	need_rex := (u8(dst) & 0x8) != 0 || (!has_high_byte && (rm & 0x8) != 0) || is_spl_bpl_sil_dil
 
 	if has_high_byte {
 		// No REX prefix for high byte registers
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm)
 		write([]u8{0x66, 0x0F, 0xB6, modrm}) // 66 0F B6 /r
 	} else {
-		rex: u8 = rex_rb(false, u8(dst), rm) if need_rex else 0
+		// Always need REX.R to access SPL, BPL, SIL, DIL
+		rex: u8 = 0x40
+		if (u8(dst) & 0x8) != 0 {rex |= 0x44}
+		if (rm & 0x8) != 0 {rex |= 0x41}
+
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm & 0x7)
 
 		if need_rex {
@@ -933,14 +974,22 @@ movzx_r16_r8 :: proc(dst: Register16, src: Register8) {
 movsx_r16_r8 :: proc(dst: Register16, src: Register8) {
 	has_high_byte := u8(src) >= 16
 	rm := u8(src) & 0xF
-	need_rex := (u8(dst) & 0x8) != 0 || (!has_high_byte && (rm & 0x8) != 0)
+
+	// Special handling for SPL, BPL, SIL, DIL (the low byte of RSP, RBP, RSI, RDI)
+	is_spl_bpl_sil_dil := (rm >= 4 && rm <= 7) && !has_high_byte
+
+	need_rex := (u8(dst) & 0x8) != 0 || (!has_high_byte && (rm & 0x8) != 0) || is_spl_bpl_sil_dil
 
 	if has_high_byte {
 		// No REX prefix for high byte registers
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm)
 		write([]u8{0x66, 0x0F, 0xBE, modrm}) // 66 0F BE /r
 	} else {
-		rex: u8 = rex_rb(false, u8(dst), rm) if need_rex else 0
+		// Always need REX.R to access SPL, BPL, SIL, DIL
+		rex: u8 = 0x40
+		if (u8(dst) & 0x8) != 0 {rex |= 0x44}
+		if (rm & 0x8) != 0 {rex |= 0x41}
+
 		modrm := encode_modrm(3, u8(dst) & 0x7, rm & 0x7)
 
 		if need_rex {
@@ -1014,106 +1063,97 @@ mov_r8_imm8 :: proc(reg: Register8, imm: u8) {
 	}
 }
 
-// Move value between 8-bit registers
+// Move value between 8-bit registers with special handling for SPL/BPL/SIL/DIL
 mov_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_has_high_byte := u8(dst) >= 16
 	src_has_high_byte := u8(src) >= 16
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
+	dst_is_special := u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL)
+	src_is_special := u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL)
 
 	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
+		// Both are high byte registers (AH, CH, DH, BH)
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x88, modrm}) // 88 /r
+		write([]u8{0x88, modrm})
 	} else if dst_has_high_byte {
 		// Destination is high byte
-		need_rex := src_rm >= 8
+		need_rex := (src_rm & 0x8) != 0
 		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
 		if need_rex {
-			write([]u8{rex, 0x88, modrm}) // REX 88 /r
+			write([]u8{rex, 0x88, modrm})
 		} else {
-			write([]u8{0x88, modrm}) // 88 /r
+			write([]u8{0x88, modrm})
 		}
 	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
+		// Source is high byte (AH, CH, DH, BH)
+		need_rex := ((dst_rm & 0x8) != 0) || dst_is_special
 		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
+		if (dst_rm & 0x8) != 0 {
 			rex |= 0x01 // REX.B
 		}
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
 		if need_rex {
-			write([]u8{rex, 0x88, modrm}) // REX 88 /r
+			write([]u8{rex, 0x88, modrm})
 		} else {
-			write([]u8{0x88, modrm}) // 88 /r
+			write([]u8{0x88, modrm})
 		}
 	} else {
 		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
+		need_rex :=
+			((dst_rm & 0x8) != 0) || ((src_rm & 0x8) != 0) || dst_is_special || src_is_special
 		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
+		if (dst_rm & 0x8) != 0 {
 			rex |= 0x01 // REX.B
 		}
-		if src_rm >= 8 {
+		if (src_rm & 0x8) != 0 {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
-
 		if need_rex {
-			write([]u8{rex, 0x88, modrm}) // REX 88 /r
+			write([]u8{rex, 0x88, modrm})
 		} else {
-			write([]u8{0x88, modrm}) // 88 /r
+			write([]u8{0x88, modrm})
 		}
 	}
 }
 
 // Load 8-bit value from memory
 mov_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
-	// Calculate the register encoding
 	reg_field: u8
 	if u8(dst) <= u8(Register8.BH) {
-		// AL, CL, DL, BL, AH, CH, DH, BH use standard encoding
+		// AL, CL, DL, BL, AH, CH, DH, BH
 		reg_field = u8(dst)
 	} else if u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL) {
-		// SPL, BPL, SIL, DIL are encodings 4-7 with REX prefix
+		// SPL, BPL, SIL, DIL → encodings 4-7 (special; force REX)
 		reg_field = u8(dst) - u8(Register8.SPL) + 4
 	} else {
-		// R8B-R15B are extended registers (high bit set)
+		// R8B-R15B → extended registers
 		reg_field = u8(dst) - u8(Register8.R8B) + 8
 	}
 
-	// Force REX prefix for the low byte registers that need it
-	force_rex := u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL)
-
-	// MOV r8, m8 uses opcode 0x8A with ModR/M
-	// Pass force_rex=true to ensure REX prefix is written correctly
-	write_memory_address(mem, reg_field, 0x8A, force_rex)
+	// For 8-bit moves, the operand-size is fixed so set_w must be false.
+	// But special registers (SPL/BPL/SIL/DIL) need a REX prefix even though W remains 0.
+	force_rex: bool = u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL)
+	write_memory_address(mem, reg_field, 0x8A, false, force_rex)
 }
 
-// Store 8-bit register value to memory
 mov_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
-	// Calculate the register encoding
 	reg_field: u8
 	if u8(src) <= u8(Register8.BH) {
-		// AL, CL, DL, BL, AH, CH, DH, BH use standard encoding
+		// AL, CL, DL, BL, AH, CH, DH, BH
 		reg_field = u8(src)
 	} else if u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL) {
-		// SPL, BPL, SIL, DIL are encodings 4-7 with REX prefix
+		// SPL, BPL, SIL, DIL → encodings 4-7 (special; force REX)
 		reg_field = u8(src) - u8(Register8.SPL) + 4
 	} else {
-		// R8B-R15B are extended registers (high bit set)
+		// R8B-R15B → extended registers
 		reg_field = u8(src) - u8(Register8.R8B) + 8
 	}
 
-	// Force REX prefix for the low byte registers that need it
-	force_rex := u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL)
-
-	// MOV m8, r8 uses opcode 0x88 with ModR/M
-	// Pass force_rex=true to ensure REX prefix is written correctly
-	write_memory_address(mem, reg_field, 0x88, force_rex)
+	force_rex: bool = u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL)
+	write_memory_address(mem, reg_field, 0x88, false, force_rex)
 }
 
 // Exchange values between two 8-bit registers
@@ -1182,18 +1222,17 @@ mov_sreg_r16 :: proc(dst: SegmentRegister, src: Register16) {
 	}
 }
 
-// Move segment register to 16-bit register
+// Move from segment register to 16-bit register
 mov_r16_sreg :: proc(dst: Register16, src: SegmentRegister) {
-	need_rex := (u8(dst) & 0x8) != 0
-	rex: u8 = 0x41 if need_rex else 0 // REX.B if needed
-	modrm := encode_modrm(3, u8(src), u8(dst) & 0x7)
-
-	if need_rex {
-		write([]u8{rex, 0x8C, modrm}) // REX 8C /r
+	// 0x66: operand‐size override for 16‐bit
+	// If dst is extended (e.g. R8W–R15W), add REX with B set.
+	if u8(dst) >= 8 {
+		write([]u8{0x66, 0x41, 0x8C, encode_modrm(3, u8(src), u8(dst) & 0x7)})
 	} else {
-		write([]u8{0x8C, modrm}) // 8C /r
+		write([]u8{0x66, 0x8C, encode_modrm(3, u8(src), u8(dst) & 0x7)})
 	}
 }
+
 
 // Load 16-bit value from memory into segment register
 mov_sreg_m16 :: proc(dst: SegmentRegister, mem: MemoryAddress) {
@@ -3836,40 +3875,31 @@ tzcnt_r64_r64 :: proc(dst: Register64, src: Register64) {
 	write([]u8{0xF3, rex, 0x0F, 0xBC, modrm}) // F3 REX.W 0F BC /r
 }
 
-// Parallel bits extract
-pext_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {
-	vex_r: u8 = 1 - ((u8(dst) >> 3) & 1) // VEX.R = ~dst[3]
-	vex_x: u8 = 1 // VEX.X = 1 (unused)
-	vex_b: u8 = 1 - ((u8(src2) >> 3) & 1) // VEX.B = ~src2[3]
-	vex_w: u8 = 1 // VEX.W = 1 (64-bit operand size)
-
-	// VEX prefix calculation (C4 encoding)
-	vex_byte1: u8 = 0xC4
-	vex_byte2: u8 = (vex_r << 7) | (vex_x << 6) | (vex_b << 5) | 0x03 // 0x03 is for 0F 3A escape
-	vex_byte3: u8 = (vex_w << 7) | 0x0F // 0x0F is the mmmm field for PEXT
-
-	// ModR/M byte
-	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src2) & 0x7)
-
-	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0xF5, modrm, u8(src1) & 0x1F})
-}
 
 // Parallel bits deposit
 pdep_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {
-	vex_r: u8 = 1 - ((u8(dst) >> 3) & 1) // VEX.R = ~dst[3]
-	vex_x: u8 = 1 // VEX.X = 1 (unused)
-	vex_b: u8 = 1 - ((u8(src2) >> 3) & 1) // VEX.B = ~src2[3]
-	vex_w: u8 = 1 // VEX.W = 1 (64-bit operand size)
-
-	// VEX prefix calculation (C4 encoding)
+	vex_r: u8 = 1 - ((u8(dst) >> 3) & 1)
+	vex_x: u8 = 1
+	vex_b: u8 = 1 - ((u8(src2) >> 3) & 1)
+	vvvv: u8 = (~u8(src1)) & 0x0F
 	vex_byte1: u8 = 0xC4
-	vex_byte2: u8 = (vex_r << 7) | (vex_x << 6) | (vex_b << 5) | 0x03 // 0x03 is for 0F 3A escape
-	vex_byte3: u8 = (vex_w << 7) | 0x0E // 0x0E is the mmmm field for PDEP
-
-	// ModR/M byte
+	vex_byte2: u8 = (vex_r << 7) | (vex_x << 6) | (vex_b << 5) | 0x02 // m-mmmm = 0F 38
+	vex_byte3: u8 = (1 << 7) | (vvvv << 3) | 0x03 // W=1, vvvv in bits 6:3, L=0, pp=03
 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src2) & 0x7)
+	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0xF5, modrm})
+}
 
-	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0xF5, modrm, u8(src1) & 0x1F})
+// Parallel bits extract
+pext_r64_r64_r64 :: proc(dst: Register64, src1: Register64, src2: Register64) {
+	vex_r: u8 = 1 - ((u8(dst) >> 3) & 1)
+	vex_x: u8 = 1
+	vex_b: u8 = 1 - ((u8(src2) >> 3) & 1)
+	vvvv: u8 = (~u8(src1)) & 0x0F
+	vex_byte1: u8 = 0xC4
+	vex_byte2: u8 = (vex_r << 7) | (vex_x << 6) | (vex_b << 5) | 0x02 // m-mmmm = 0F 38
+	vex_byte3: u8 = (1 << 7) | (vvvv << 3) | 0x02 // W=1, vvvv in bits 6:3, L=0, pp=02
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src2) & 0x7)
+	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0xF5, modrm})
 }
 
 // ==================================
@@ -4330,52 +4360,33 @@ cmp_r8_r8 :: proc(reg1: Register8, reg2: Register8) {
 	dst_rm := u8(reg1) & 0xF
 	src_rm := u8(reg2) & 0xF
 
-	// Similar logic to add_r8_r8
+	// === FIX: Always check if any reg is in REX-required class
+	rex_needed := false
+	rex: u8 = 0x40
+
+	if dst_rm >= 4 || dst_rm >= 8 {
+		rex_needed = true
+	}
+	if src_rm >= 4 || src_rm >= 8 {
+		rex_needed = true
+	}
+
+	if dst_rm >= 8 {
+		rex |= 0x01 // REX.B
+	}
+	if src_rm >= 8 {
+		rex |= 0x04 // REX.R
+	}
+
 	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x38, modrm}) // 38 /r
-	} else if dst_has_high_byte {
-		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
-		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
-		if need_rex {
-			write([]u8{rex, 0x38, modrm}) // REX 38 /r
-		} else {
-			write([]u8{0x38, modrm}) // 38 /r
-		}
-	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x38, modrm}) // REX 38 /r
-		} else {
-			write([]u8{0x38, modrm}) // 38 /r
-		}
+		write([]u8{0x38, modrm})
 	} else {
-		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		if src_rm >= 8 {
-			rex |= 0x04 // REX.R
-		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x38, modrm}) // REX 38 /r
+		if rex_needed {
+			write([]u8{rex, 0x38, modrm})
 		} else {
-			write([]u8{0x38, modrm}) // 38 /r
+			write([]u8{0x38, modrm})
 		}
 	}
 }
@@ -4417,52 +4428,31 @@ test_r8_r8 :: proc(reg1: Register8, reg2: Register8) {
 	dst_rm := u8(reg1) & 0xF
 	src_rm := u8(reg2) & 0xF
 
-	// Similar logic to cmp_r8_r8 but with opcode 0x84
+	rex_needed := false
+	rex: u8 = 0x40
+
+	if dst_rm >= 4 || dst_rm >= 8 {
+		rex_needed = true
+	}
+	if src_rm >= 4 || src_rm >= 8 {
+		rex_needed = true
+	}
+	if dst_rm >= 8 {
+		rex |= 0x01 // REX.B
+	}
+	if src_rm >= 8 {
+		rex |= 0x04 // REX.R
+	}
+
 	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x84, modrm}) // 84 /r
-	} else if dst_has_high_byte {
-		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
-		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
-		if need_rex {
-			write([]u8{rex, 0x84, modrm}) // REX 84 /r
-		} else {
-			write([]u8{0x84, modrm}) // 84 /r
-		}
-	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x84, modrm}) // REX 84 /r
-		} else {
-			write([]u8{0x84, modrm}) // 84 /r
-		}
+		write([]u8{0x84, modrm})
 	} else {
-		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		if src_rm >= 8 {
-			rex |= 0x04 // REX.R
-		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x84, modrm}) // REX 84 /r
+		if rex_needed {
+			write([]u8{rex, 0x84, modrm})
 		} else {
-			write([]u8{0x84, modrm}) // 84 /r
+			write([]u8{0x84, modrm})
 		}
 	}
 }
@@ -4937,8 +4927,9 @@ loopne_rel8 :: proc(offset: i8) {
 
 // Jump if ECX register is 0
 jecxz_rel8 :: proc(offset: i8) {
-	write([]u8{0xE3, transmute(u8)offset}) // E3 cb
+	write([]u8{0x67, 0xE3, transmute(u8)offset}) // 67 E3 cb
 }
+
 
 // Set byte if equal/zero
 sete_r8 :: proc(reg: Register8) {
@@ -7246,21 +7237,20 @@ lods_m64 :: proc() {
 	write([]u8{0x48, 0xAD}) // REX.W AD
 }
 
-// Repeat movs instruction RCX times
+// Repeat movsb instruction RCX times
 rep_movs :: proc() {
-	write([]u8{0xF3, 0xA5}) // F3 A5
+	write([]u8{0xF3, 0xA4}) // F3 A4
 }
 
-// Repeat stos instruction RCX times
+// Repeat stosb instruction RCX times
 rep_stos :: proc() {
-	write([]u8{0xF3, 0xAB}) // F3 AB
+	write([]u8{0xF3, 0xAA}) // F3 AA
 }
 
-// Repeat cmps instruction RCX times
+// Repeat cmpsb instruction RCX times
 rep_cmps :: proc() {
-	write([]u8{0xF3, 0xA7}) // F3 A7
+	write([]u8{0xF3, 0xA6}) // F3 A6
 }
-
 // ==================================
 // SYSTEM INSTRUCTIONS
 // ==================================
@@ -7272,7 +7262,7 @@ syscall :: proc() {
 
 // Return from fast system call
 sysret :: proc() {
-	write([]u8{0x0F, 0x07}) // 0F 07
+	write([]u8{0x48, 0x0F, 0x07}) // REX.W 0F 07
 }
 
 // Generate software interrupt
@@ -7524,6 +7514,7 @@ clwb_m64 :: proc(mem: MemoryAddress) {
 	write_memory_address(mem, 6, 0x0F, false)
 	write([]u8{0xAE})
 }
+
 // Monitor/MWAIT
 // Setup monitor address range
 monitor_r64_r64_r64 :: proc(reg1: Register64, reg2: Register64, reg3: Register64) {

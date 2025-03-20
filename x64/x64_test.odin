@@ -3763,7 +3763,9 @@ testing_vmxoff :: proc(t: ^testing.T) {
 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
-// Atomic operations
+// =====================
+// Atomic instructions
+// =====================
 @(test)
 testing_lock_xadd_r64_r64 :: proc(t: ^testing.T) {
 	registers64 := get_all_registers64()
@@ -3782,4 +3784,100 @@ testing_lock_xadd_r64_r64 :: proc(t: ^testing.T) {
 			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 		}
 	}
+}
+
+
+@(test)
+testing_lock_cmpxchg_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"lock cmpxchg %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			lock_cmpxchg_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_lock_inc_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	for reg in registers64 {
+		asm_str := fmt.tprintf("lock inc %s", register64_to_string(reg))
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		lock_inc_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_lock_dec_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	for reg in registers64 {
+		asm_str := fmt.tprintf("lock dec %s", register64_to_string(reg))
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		lock_dec_r64(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// =====================
+// Monitor/MWait
+// =====================
+
+// @(test)
+// testing_monitor :: proc(t: ^testing.T) {
+// 	asm_str := "monitor"
+// 	buffer := ByteBuffer{}
+// 	context.user_ptr = &buffer
+// 	monitor_r64_r64_r64(rax, rcx, rdx)
+// 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+// }
+
+// @(test)
+// testing_mwait :: proc(t: ^testing.T) {
+// 	asm_str := "mwait"
+// 	buffer := ByteBuffer{}
+// 	context.user_ptr = &buffer
+// 	mwait_r64_r64(rax, rcx)
+// 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+// }
+
+// =====================
+// Memory barriers
+// =====================
+
+@(test)
+testing_mfence :: proc(t: ^testing.T) {
+	asm_str := "mfence"
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	mfence()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_lfence :: proc(t: ^testing.T) {
+	asm_str := "lfence"
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	lfence()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_sfence :: proc(t: ^testing.T) {
+	asm_str := "sfence"
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	sfence()
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
