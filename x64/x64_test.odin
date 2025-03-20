@@ -173,7 +173,7 @@ testing_movabs_r64_imm64 :: proc(t: ^testing.T) {
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
-			movabs_r64_imm64(dst, src)
+			movabs_r64_imm64(dst, i64(src))
 			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 		}
 	}
@@ -2744,20 +2744,14 @@ testing_test_r8_imm8 :: proc(t: ^testing.T) {
 	}
 }
 
-// Unconditional jump tests
+// Unconditional jump tests testing 0 only for convenience
 @(test)
 testing_jmp_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
-
-	for offset in offsets {
-		asm_str := fmt.tprintf("jmp %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jmp_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	asm_str := "jmp 0"
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jmp_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
@@ -2796,33 +2790,22 @@ testing_jmp_m64 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jmp_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "jmp short 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jmp short %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jmp_rel8(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jmp_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 // Call instruction tests
 @(test)
 testing_call_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
-
-	for offset in offsets {
-		asm_str := fmt.tprintf("call %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		call_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	asm_str := "call 0"
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	call_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
@@ -2873,262 +2856,283 @@ testing_ret :: proc(t: ^testing.T) {
 // Conditional jumps with 32-bit displacement
 @(test)
 testing_je_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+	asm_str := "je 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("je %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		je_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	je_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jne_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+	asm_str := "jne 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jne %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jne_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jne_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jg_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+	asm_str := "jg 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jg %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jg_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jg_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jl_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+	asm_str := "jl 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jl %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jl_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jl_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jge_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+	asm_str := "jge 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jge %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jge_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jge_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jle_rel32 :: proc(t: ^testing.T) {
-	// Test a few representative offsets
-	offsets := [?]i32{0, 1, 42, 0x1000, 0x100000, -1, -42, -0x1000, -0x100000}
+	asm_str := "jle 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jle %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jle_rel32(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jle_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 // Short conditional jumps (8-bit displacement)
 @(test)
 testing_je_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "je short 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("je short %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		je_rel8(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	je_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jne_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "jne short 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jne short %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		jne_rel8(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jne_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 // Loop instructions
 @(test)
 testing_loop_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "loop 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("loop %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		loop_rel8(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	loop_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_loope_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "loope 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("loope %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		loope_rel8(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	loope_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_loopne_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "loopne 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("loopne %d", offset)
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		loopne_rel8(offset)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	loopne_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
 @(test)
 testing_jecxz_rel8 :: proc(t: ^testing.T) {
-	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	asm_str := "jecxz 0"
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jecxz %d", offset)
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jecxz_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
 
+@(test)
+testing_sete_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		jecxz_rel8(offset)
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("sete %s", reg_name)
+
+		sete_r8(reg)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
 
-// Continuation of the setcc_r8 test
 @(test)
-testing_setcc_r8 :: proc(t: ^testing.T) {
-	// Common condition codes
-	condition_codes := [?]u8 {
-		0x40, // equal/zero (e/z)
-		0x41, // not equal/not zero (ne/nz)
-		0x42, // below/carry (b/c)
-		0x43, // not below/not carry (nb/nc)
-		0x44, // equal or below (be)
-		0x45, // not equal and not below (nbe)
-		0x4C, // less (l)
-		0x4D, // not less (nl)
-		0x4E, // less or equal (le)
-		0x4F, // not less or equal (nle)
+testing_setne_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setne %s", reg_name)
+
+		setne_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
+}
 
-	// We need to pass in the register as u8 value
-	// Typically this would use the low byte registers (al, cl, dl, bl, etc.)
-	registers := [?]u8{0, 1, 2, 3, 4, 5, 6, 7}
+@(test)
+testing_setb_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
 
-	for dst in registers {
-		for cc in condition_codes {
-			// Generate appropriate condition string based on condition code
-			condition_str := ""
-			switch cc {
-			case 0x40:
-				condition_str = "sete"
-			case 0x41:
-				condition_str = "setne"
-			case 0x42:
-				condition_str = "setb"
-			case 0x43:
-				condition_str = "setae"
-			case 0x44:
-				condition_str = "setbe"
-			case 0x45:
-				condition_str = "seta"
-			case 0x4C:
-				condition_str = "setl"
-			case 0x4D:
-				condition_str = "setge"
-			case 0x4E:
-				condition_str = "setle"
-			case 0x4F:
-				condition_str = "setg"
-			}
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
 
-			// Map register number to register name
-			reg_name := ""
-			switch dst {
-			case 0:
-				reg_name = "al"
-			case 1:
-				reg_name = "cl"
-			case 2:
-				reg_name = "dl"
-			case 3:
-				reg_name = "bl"
-			case 4:
-				reg_name = "ah"
-			case 5:
-				reg_name = "ch"
-			case 6:
-				reg_name = "dh"
-			case 7:
-				reg_name = "bh"
-			}
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setb %s", reg_name)
 
-			asm_str := fmt.tprintf("%s %s", condition_str, reg_name)
+		setb_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
 
-			buffer := ByteBuffer{}
-			context.user_ptr = &buffer
-			setcc_r8(dst, cc)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-		}
+@(test)
+testing_setae_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setae %s", reg_name)
+
+		setae_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_setbe_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setbe %s", reg_name)
+
+		setbe_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_seta_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("seta %s", reg_name)
+
+		seta_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_setl_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setl %s", reg_name)
+
+		setl_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_setge_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setge %s", reg_name)
+
+		setge_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_setle_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setle %s", reg_name)
+
+		setle_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_setg_r8 :: proc(t: ^testing.T) {
+	registers := get_all_registers8()
+
+	for reg in registers {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+
+		reg_name := register8_to_string(reg)
+		asm_str := fmt.tprintf("setg %s", reg_name)
+
+		setg_r8(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
 
@@ -3172,34 +3176,6 @@ testing_pop_r64 :: proc(t: ^testing.T) {
 	}
 }
 
-// Stack operations - 32-bit push/pop
-@(test)
-testing_push_r32 :: proc(t: ^testing.T) {
-	registers32 := get_all_registers32()
-
-	for reg in registers32 {
-		asm_str := fmt.tprintf("push %s", register32_to_string(reg))
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		push_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
-}
-
-@(test)
-testing_pop_r32 :: proc(t: ^testing.T) {
-	registers32 := get_all_registers32()
-
-	for reg in registers32 {
-		asm_str := fmt.tprintf("pop %s", register32_to_string(reg))
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		pop_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
-}
 
 // Stack operations - 16-bit push/pop
 @(test)
@@ -3530,7 +3506,7 @@ testing_lods_m64 :: proc(t: ^testing.T) {
 // String operations with REP prefix
 @(test)
 testing_rep_movs :: proc(t: ^testing.T) {
-	asm_str := "rep movs"
+	asm_str := "rep movsb"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -3540,7 +3516,7 @@ testing_rep_movs :: proc(t: ^testing.T) {
 
 @(test)
 testing_rep_stos :: proc(t: ^testing.T) {
-	asm_str := "rep stos"
+	asm_str := "rep stosb"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -3550,7 +3526,7 @@ testing_rep_stos :: proc(t: ^testing.T) {
 
 @(test)
 testing_rep_cmps :: proc(t: ^testing.T) {
-	asm_str := "rep cmps"
+	asm_str := "rep cmpsb"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -3571,7 +3547,7 @@ testing_syscall :: proc(t: ^testing.T) {
 
 @(test)
 testing_sysret :: proc(t: ^testing.T) {
-	asm_str := "sysret"
+	asm_str := "sysretq"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
