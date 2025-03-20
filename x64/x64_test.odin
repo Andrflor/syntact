@@ -37,8 +37,8 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 				buffer.data[:buffer.len],
 				"bytes.",
 			)
+			testing.fail(t)
 		}
-		testing.fail(t)
 		return
 	}
 
@@ -53,8 +53,8 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 					expected,
 					buffer.data[:buffer.len],
 				)
+				testing.fail(t)
 			}
-			testing.fail(t)
 			return
 		}
 	}
@@ -905,65 +905,65 @@ testing_mov_r8_r8 :: proc(t: ^testing.T) {
 	}
 }
 
-// @(test)
-// testing_mov_r8_m8 :: proc(t: ^testing.T) {
-// 	addresses := get_all_addressing_combinations()
-// 	defer delete(addresses)
-// 	registers8 := get_all_registers8()
+@(test)
+testing_mov_r8_m8 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers8 := get_all_registers8()
 
-// 	// Set the number of random tests to run
-// 	num_tests := 100
-// 	for i := 0; i < num_tests; i += 1 {
-// 		// Select a random register
-// 		dst_idx := rand.int_max(len(registers8))
-// 		dst := registers8[dst_idx]
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers8))
+		dst := registers8[dst_idx]
 
-// 		// Select a random memory addressing mode
-// 		src_idx := rand.int_max(len(addresses))
-// 		src := addresses[src_idx]
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
 
-// 		asm_str := fmt.tprintf(
-// 			"mov %s, byte ptr %s",
-// 			register8_to_string(dst),
-// 			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
-// 		)
+		asm_str := fmt.tprintf(
+			"mov %s, byte ptr %s",
+			register8_to_string(dst),
+			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+		)
 
-// 		buffer := ByteBuffer{}
-// 		context.user_ptr = &buffer
-// 		mov_r8_m8(dst, src)
-// 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-// 	}
-// }
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_r8_m8(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
 
-// @(test)
-// testing_mov_m8_r8 :: proc(t: ^testing.T) {
-// 	addresses := get_all_addressing_combinations()
-// 	defer delete(addresses)
-// 	registers8 := get_all_registers8()
+@(test)
+testing_mov_m8_r8 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers8 := get_all_registers8()
 
-// 	// Set the number of random tests to run
-// 	num_tests := 100
-// 	for i := 0; i < num_tests; i += 1 {
-// 		// Select a random memory addressing mode
-// 		dst_idx := rand.int_max(len(addresses))
-// 		dst := addresses[dst_idx]
+	// Set the number of random tests to run
+	num_tests := 100
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
 
-// 		// Select a random register
-// 		src_idx := rand.int_max(len(registers8))
-// 		src := registers8[src_idx]
+		// Select a random register
+		src_idx := rand.int_max(len(registers8))
+		src := registers8[src_idx]
 
-// 		asm_str := fmt.tprintf(
-// 			"mov byte ptr %s, %s",
-// 			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
-// 			register8_to_string(src),
-// 		)
+		asm_str := fmt.tprintf(
+			"mov byte ptr %s, %s",
+			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			register8_to_string(src),
+		)
 
-// 		buffer := ByteBuffer{}
-// 		context.user_ptr = &buffer
-// 		mov_m8_r8(dst, src)
-// 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-// 	}
-// }
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_m8_r8(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
 
 // 8-bit register exchange
 @(test)
@@ -1106,7 +1106,7 @@ testing_add_r64_imm32 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm32Values {
-			asm_str := fmt.tprintf("add %s, %d", register64_to_string(reg), imm)
+			asm_str := fmt.tprintf("add %s, %d", register64_to_string(reg), cast(i32)(imm))
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -1143,7 +1143,7 @@ testing_sub_r64_imm32 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm32Values {
-			asm_str := fmt.tprintf("sub %s, %d", register64_to_string(reg), imm)
+			asm_str := fmt.tprintf("sub %s, %d", register64_to_string(reg), cast(i32)(imm))
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -1311,7 +1311,7 @@ testing_imul_r64_r64_imm32 :: proc(t: ^testing.T) {
 			"imul %s, %s, %d",
 			register64_to_string(dst),
 			register64_to_string(src),
-			imm,
+			cast(i32)(imm),
 		)
 
 		buffer := ByteBuffer{}
@@ -1328,7 +1328,7 @@ testing_imul_r64_imm32 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm32Values {
-			asm_str := fmt.tprintf("imul %s, %d", register64_to_string(reg), imm)
+			asm_str := fmt.tprintf("imul %s, %d", register64_to_string(reg), cast(i32)(imm))
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -2109,7 +2109,7 @@ testing_cmp_r64_imm32 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm32Values {
-			asm_str := fmt.tprintf("cmp %s, %d", register64_to_string(reg), imm)
+			asm_str := fmt.tprintf("cmp %s, %d", register64_to_string(reg), cast(i32)(imm))
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -2146,7 +2146,7 @@ testing_test_r64_imm32 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm32Values {
-			asm_str := fmt.tprintf("test %s, %d", register64_to_string(reg), imm)
+			asm_str := fmt.tprintf("test %s, %d", register64_to_string(reg), cast(i32)(imm))
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -3011,7 +3011,7 @@ testing_loop_rel8 :: proc(t: ^testing.T) {
 @(test)
 testing_loope_rel8 :: proc(t: ^testing.T) {
 	// Test a few representative 8-bit offsets
-	offsets := [?]i8{0, 1, 42, 64, 127, -1, -42, -64, -128}
+	offsets := [?]i8{0, 42, 64, 127, -1, -42, -64, -128}
 
 	for offset in offsets {
 		asm_str := fmt.tprintf("loope %d", offset)

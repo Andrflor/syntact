@@ -58,17 +58,27 @@ assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 		r, w := os.pipe() or_return
 		proc_opts := os.Process_Desc {
 			command = {"as", "--64", "-o", obj_file, asm_file},
-			stdout  = w,
+			stderr  = w,
 		}
 
 		p := os.process_start(proc_opts) or_return
 		os.close(w) // Close write end after starting process
 
 		output := os.read_entire_file(r, context.temp_allocator) or_return
+
 		os.close(r)
 		_ = os.process_wait(p) or_return
 		os.remove(asm_file)
 		os.process_close(p) or_return
+		if (len(output) != 0) {
+			panic(
+				fmt.tprintf(
+					"Gnu as failed to assemble .intel_syntax noprefix for \"%s\" with the output: %s",
+					asm_str,
+					string(output),
+				),
+			)
+		}
 	}
 
 

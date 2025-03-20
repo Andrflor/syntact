@@ -272,7 +272,12 @@ SegmentRegister :: enum u8 {
 // If only displacement is set (base/index absent), it implies RIP-relative.
 AddressComponents :: struct {
 	base:         Maybe(Register64), // Base register (none means RIP if index is also none)
-	index:        Maybe(Register64), // Index register (must be none if base is none)
+	index:        Maybe(union {
+			Register64,
+			XMMRegister,
+			YMMRegister,
+			ZMMRegister,
+		}),
 	scale:        Maybe(u8), // 1, 2, 4, 8 (must be none if index is none)
 	displacement: Maybe(i32), // Signed offset
 }
@@ -1034,74 +1039,51 @@ mov_r8_r8 :: proc(dst: Register8, src: Register8) {
 	}
 }
 
-// // Load 8-bit value from memory
-// mov_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
-// 	has_high_byte := u8(dst) >= 16
-// 	rm := u8(dst) & 0xF
+// Load 8-bit value from memory
+mov_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
+	// Calculate the register encoding
+	reg_field: u8
+	if u8(dst) <= u8(Register8.BH) {
+		// AL, CL, DL, BL, AH, CH, DH, BH use standard encoding
+		reg_field = u8(dst)
+	} else if u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL) {
+		// SPL, BPL, SIL, DIL are encodings 4-7 with REX prefix
+		reg_field = u8(dst) - u8(Register8.SPL) + 4
+	} else {
+		// R8B-R15B are extended registers (high bit set)
+		reg_field = u8(dst) - u8(Register8.R8B) + 8
+	}
 
-// 	if has_high_byte {
-// 		// No REX prefix for high byte registers
-// 		modrm := encode_modrm(0, rm & 0x3, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-// 		write([]u8{0x8A, modrm}) // 8A /r
-// 	} else {
-// 		need_rex := rm >= 4 || rm >= 8
-// 		rex: u8 = 0x40 if need_rex else 0
-// 		if rm >= 8 {
-// 			rex |= 0x01 // REX.B
-// 		}
-// 		modrm := encode_modrm(0, rm & 0x7, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
+	// Force REX prefix for the low byte registers that need it
+	force_rex := u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL)
 
-// 		if need_rex {
-// 			write([]u8{rex, 0x8A, modrm}) // REX 8A /r
-// 		} else {
-// 			write([]u8{0x8A, modrm}) // 8A /r
-// 		}
-// 	}
+	// MOV r8, m8 uses opcode 0x8A with ModR/M
+	// Pass force_rex=true to ensure REX prefix is written correctly
+	write_memory_address(mem, reg_field, 0x8A, force_rex)
+}
 
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
+// Store 8-bit register value to memory
+mov_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
+	// Calculate the register encoding
+	reg_field: u8
+	if u8(src) <= u8(Register8.BH) {
+		// AL, CL, DL, BL, AH, CH, DH, BH use standard encoding
+		reg_field = u8(src)
+	} else if u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL) {
+		// SPL, BPL, SIL, DIL are encodings 4-7 with REX prefix
+		reg_field = u8(src) - u8(Register8.SPL) + 4
+	} else {
+		// R8B-R15B are extended registers (high bit set)
+		reg_field = u8(src) - u8(Register8.R8B) + 8
+	}
 
-// // Store 8-bit register value to memory
-// mov_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
-// 	has_high_byte := u8(src) >= 16
-// 	rm := u8(src) & 0xF
+	// Force REX prefix for the low byte registers that need it
+	force_rex := u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL)
 
-// 	if has_high_byte {
-// 		// No REX prefix for high byte registers
-// 		modrm := encode_modrm(0, rm & 0x3, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-// 		write([]u8{0x88, modrm}) // 88 /r
-// 	} else {
-// 		need_rex := rm >= 8
-// 		rex: u8 = 0x41 if need_rex else 0 // REX.R if needed
-// 		modrm := encode_modrm(0, rm & 0x7, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 		if need_rex {
-// 			write([]u8{rex, 0x88, modrm}) // REX 88 /r
-// 		} else {
-// 			write([]u8{0x88, modrm}) // 88 /r
-// 		}
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
+	// MOV m8, r8 uses opcode 0x88 with ModR/M
+	// Pass force_rex=true to ensure REX prefix is written correctly
+	write_memory_address(mem, reg_field, 0x88, force_rex)
+}
 
 // Exchange values between two 8-bit registers
 xchg_r8_r8 :: proc(dst: Register8, src: Register8) {
@@ -1191,29 +1173,14 @@ mov_r16_sreg :: proc(dst: Register16, src: SegmentRegister) {
 mov_sreg_m16 :: proc(dst: SegmentRegister, mem: MemoryAddress) {
 	// Segment registers don't need REX prefix and are always 16-bit
 	// MOV sreg, r/m16 uses 8E /r opcode
-
-	// This is a special case of write_memory_address where we don't need REX
-	// But we'll still handle all the addressing modes properly
-
-	// First handle the simple case of the opcode
-	write([]u8{0x8E})
-
-	// Then handle memory addressing (with reg field = segment register)
-	// We pass false for set_w because segment registers don't use W bit
-	write_memory_address(mem, u8(dst), 0, false)
+	write_memory_address(mem, u8(dst), 0x8E, false)
 }
 
 // Store segment register to memory
 mov_m16_sreg :: proc(mem: MemoryAddress, src: SegmentRegister) {
 	// Segment registers don't need REX prefix and are always 16-bit
 	// MOV r/m16, sreg uses 8C /r opcode
-
-	// First write the opcode
-	write([]u8{0x8C})
-
-	// Then handle memory addressing (with reg field = segment register)
-	// We pass false for set_w because segment registers don't use W bit
-	write_memory_address(mem, u8(src), 0, false)
+	write_memory_address(mem, u8(src), 0x8C, false)
 }
 
 // ==================================
@@ -4542,12 +4509,7 @@ jmp_r64 :: proc(reg: Register64) {
 jmp_m64 :: proc(mem: MemoryAddress) {
 	// For JMP, reg field in ModR/M byte is the opcode extension (4 for JMP)
 	// FF /4 is the encoding for indirect JMP through memory
-
-	// First write the opcode
-	write([]u8{0xFF})
-	// Then handle memory addressing with reg field = 4 (opcode extension for JMP)
-	// We pass false for set_w because JMP doesn't use REX.W
-	write_memory_address(mem, 4, 0, false)
+	write_memory_address(mem, 4, 0xFF, false)
 }
 
 // Jump short, relative, displacement relative to next instruction
@@ -4586,15 +4548,7 @@ call_r64 :: proc(reg: Register64) {
 
 // Call near, absolute indirect, address in memory
 call_m64 :: proc(mem: MemoryAddress) {
-	// For CALL, reg field in ModR/M byte is the opcode extension (2 for CALL)
-	// FF /2 is the encoding for indirect CALL through memory
-
-	// First write the opcode
-	write([]u8{0xFF})
-
-	// Then handle memory addressing with reg field = 2 (opcode extension for CALL)
-	// We pass false for set_w because CALL doesn't use REX.W
-	write_memory_address(mem, 2, 0, false)
+	write_memory_address(mem, 2, 0xFF, false)
 }
 
 // Return from procedure
@@ -5085,6 +5039,7 @@ leave :: proc() {
 	write([]u8{0xC9}) // C9
 }
 
+
 // ==================================
 // SIMD AND FLOATING-POINT INSTRUCTIONS
 // ==================================
@@ -5171,2236 +5126,1862 @@ movq_r64_xmm :: proc(reg: Register64, xmm: XMMRegister) {
 	movd_r64_xmm(reg, xmm)
 }
 
-// // Move quadword from XMM to XMM
-// movq_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0xF3, rex, 0x0F, 0x7E, modrm}) // F3 REX 0F 7E /r
-// 	} else {
-// 		write([]u8{0xF3, 0x0F, 0x7E, modrm}) // F3 0F 7E /r
-// 	}
-// }
-
-// // Move quadword from memory to XMM
-// movq_xmm_m64 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0xF3, rex, 0x0F, 0x7E, modrm}) // F3 REX 0F 7E /r
-// 	} else {
-// 		write([]u8{0xF3, 0x0F, 0x7E, modrm}) // F3 0F 7E /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move quadword from XMM to memory
-// movq_m64_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-// 	rex_r, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0xD6, modrm}) // 66 REX 0F D6 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0xD6, modrm}) // 66 0F D6 /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // SSE/SSE2 Data Movement
-// // Move aligned double quadword
-// movdqa_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x6F, modrm}) // 66 REX 0F 6F /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x6F, modrm}) // 66 0F 6F /r
-// 	}
-// }
-
-// // Move aligned double quadword from memory
-// movdqa_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x6F, modrm}) // 66 REX 0F 6F /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x6F, modrm}) // 66 0F 6F /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned double quadword to memory
-// movdqa_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-// 	rex_r, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x7F, modrm}) // 66 REX 0F 7F /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x7F, modrm}) // 66 0F 7F /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned double quadword
-// movdqu_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0xF3, rex, 0x0F, 0x6F, modrm}) // F3 REX 0F 6F /r
-// 	} else {
-// 		write([]u8{0xF3, 0x0F, 0x6F, modrm}) // F3 0F 6F /r
-// 	}
-// }
-
-// // Move unaligned double quadword from memory
-// movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0xF3, rex, 0x0F, 0x6F, modrm}) // F3 REX 0F 6F /r
-// 	} else {
-// 		write([]u8{0xF3, 0x0F, 0x6F, modrm}) // F3 0F 6F /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned double quadword to memory
-// movdqu_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-// 	rex_r, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0xF3, rex, 0x0F, 0x7F, modrm}) // F3 REX 0F 7F /r
-// 	} else {
-// 		write([]u8{0xF3, 0x0F, 0x7F, modrm}) // F3 0F 7F /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed single-precision
-// movaps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x28, modrm}) // REX 0F 28 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x28, modrm}) // 0F 28 /r
-// 	}
-// }
-
-// // Move aligned packed single-precision from memory
-// movaps_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x28, modrm}) // REX 0F 28 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x28, modrm}) // 0F 28 /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed single-precision to memory
-// movaps_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-// 	rex_r, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x29, modrm}) // REX 0F 29 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x29, modrm}) // 0F 29 /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed double-precision
-// movapd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x28, modrm}) // 66 REX 0F 28 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x28, modrm}) // 66 0F 28 /r
-// 	}
-// }
-
-// // Move aligned packed double-precision from memory
-// movapd_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x28, modrm}) // 66 REX 0F 28 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x28, modrm}) // 66 0F 28 /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed double-precision to memory
-// movapd_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-// 	rex_r, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x29, modrm}) // 66 REX 0F 29 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x29, modrm}) // 66 0F 29 /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned packed single-precision from memory
-// movups_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x10, modrm}) // REX 0F 10 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x10, modrm}) // 0F 10 /r
-// 	}
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // SSE Arithmetic Instructions
-// // Add packed single-precision
-// addps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x58, modrm}) // REX 0F 58 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x58, modrm}) // 0F 58 /r
-// 	}
-// }
-
-// // Multiply packed single-precision
-// mulps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x59, modrm}) // REX 0F 59 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x59, modrm}) // 0F 59 /r
-// 	}
-// }
-
-// // Divide packed single-precision
-// divps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x5E, modrm}) // REX 0F 5E /r
-// 	} else {
-// 		write([]u8{0x0F, 0x5E, modrm}) // 0F 5E /r
-// 	}
-// }
-
-// // Square root of packed single-precision values
-// sqrtps_xmm :: proc(xmm: XMMRegister) {
-// 	rex_r, xmm_reg := encode_xmm(xmm)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-
-// 	modrm := encode_modrm(3, xmm_reg, xmm_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0x51, modrm}) // REX 0F 51 /r
-// 	} else {
-// 		write([]u8{0x0F, 0x51, modrm}) // 0F 51 /r
-// 	}
-// }
-
-// // Compare packed single-precision
-// cmpps_xmm_xmm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{rex, 0x0F, 0xC2, modrm, imm}) // REX 0F C2 /r ib
-// 	} else {
-// 		write([]u8{0x0F, 0xC2, modrm, imm}) // 0F C2 /r ib
-// 	}
-// }
-
-// // Compare equal packed single-precision
-// cmpeqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	cmpps_xmm_xmm_imm8(dst, src, 0x00) // Immediate 0 = Equal
-// }
-
-// // Compare not equal packed single-precision
-// cmpneqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	cmpps_xmm_xmm_imm8(dst, src, 0x04) // Immediate 4 = Not Equal
-// }
-
-// // AVX and FMA Instructions
-// // Helper function for VEX 3-byte prefix encoding
-// encode_vex3 :: proc(r: bool, x: bool, b: bool, m: u8, w: bool, vvvv: u8, l: bool, pp: u8) -> []u8 {
-// 	vex := make([]u8, 3)
-// 	vex[0] = 0xC4
-// 	vex[1] = ((~u8(r) & 1) << 7) | ((~u8(x) & 1) << 6) | ((~u8(b) & 1) << 5) | m
-// 	vex[2] = (u8(w) << 7) | ((~vvvv & 0xF) << 3) | (u8(l) << 2) | pp
-// 	return vex
-// }
-
-// // Fused multiply-add of packed single-precision
-// vfmadd132ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.128.66.0F38.W0
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x02, false, u8(src2), false, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x98, modrm}) // 98 /r
-// }
-
-// // Fused multiply-add of packed single-precision
-// vfmadd213ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.128.66.0F38.W0
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x02, false, u8(src2), false, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0xA8, modrm}) // A8 /r
-// }
-
-// // Fused multiply-add of packed single-precision
-// vfmadd231ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.128.66.0F38.W0
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x02, false, u8(src2), false, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0xB8, modrm}) // B8 /r
-// }
-
-// // Add packed single-precision (YMM registers)
-// vaddps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, u8(src2), true, 0x00)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x58, modrm}) // 58 /r
-// }
-
-// // Multiply packed single-precision (YMM registers)
-// vmulps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, u8(src2), true, 0x00)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x59, modrm}) // 59 /r
-// }
-
-// // Divide packed single-precision (YMM registers)
-// vdivps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, u8(src2), true, 0x00)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x5E, modrm}) // 5E /r
-// }
-
-// // Blend packed single-precision
-// vblendps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm: u8) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.66.0F3A.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x03, false, u8(src2), true, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x0C, modrm, imm}) // 0C /r ib
-// }
-
-// // YMM Register Operations
-// // Helper function for YMM register encodings
-// encode_ymm :: proc(ymm: YMMRegister) -> (rex_r: bool, reg: u8) {
-// 	reg = u8(ymm) & 0x7
-// 	rex_r = (u8(ymm) & 0x8) != 0
-// 	return rex_r, reg
-// }
-
-// // Move aligned double quadword
-// vmovdqa_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-// 	src_b, src_reg := encode_ymm(src)
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(vex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-// }
-
-// // Move aligned double quadword from memory
-// vmovdqa_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned double quadword to memory
-// vmovdqa_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
-// 	src_r, src_reg := encode_ymm(src)
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x7F, modrm}) // 7F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-
-// // Move unaligned double quadword
-// vmovdqu_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-// 	src_b, src_reg := encode_ymm(src)
-
-// 	// VEX.256.F3.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x02)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(vex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-// }
-
-// // Move unaligned double quadword from memory
-// vmovdqu_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-
-// 	// VEX.256.F3.0F.WIG
-// 	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x02)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned double quadword to memory
-// vmovdqu_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
-// 	src_r, src_reg := encode_ymm(src)
-
-// 	// VEX.256.F3.0F.WIG
-// 	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x02)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x7F, modrm}) // 7F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed single-precision
-// vmovaps_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-// 	src_b, src_reg := encode_ymm(src)
-
-// 	// VEX.256.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x00)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(vex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-// }
-
-// // Move aligned packed single-precision from memory
-// vmovaps_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-
-// 	// VEX.256.0F.WIG
-// 	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x00)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed single-precision to memory
-// vmovaps_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
-// 	src_r, src_reg := encode_ymm(src)
-
-// 	// VEX.256.0F.WIG
-// 	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x00)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x29, modrm}) // 29 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed double-precision
-// vmovapd_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-// 	src_b, src_reg := encode_ymm(src)
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(vex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-// }
-
-// // Move aligned packed double-precision from memory
-// vmovapd_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_reg := encode_ymm(dst)
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed double-precision to memory
-// vmovapd_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
-// 	src_r, src_reg := encode_ymm(src)
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{0x29, modrm}) // 29 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // AVX Logical Operations
-// // Bitwise AND of YMM registers
-// vpand_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, u8(src2), true, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0xDB, modrm}) // DB /r
-// }
-
-// // Bitwise OR of YMM registers
-// vpor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, u8(src2), true, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0xEB, modrm}) // EB /r
-// }
-
-// // Bitwise XOR of YMM registers
-// vpxor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, u8(src2), true, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0xEF, modrm}) // EF /r
-// }
-
-// // Bitwise ternary logic
-// vpternlogd_ymm_ymm_ymm_imm8 :: proc(
-// 	dst: XMMRegister,
-// 	src1: XMMRegister,
-// 	src2: XMMRegister,
-// 	imm: u8,
-// ) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src1_b := (u8(src1) & 0x8) != 0
-// 	src2_r := (u8(src2) & 0x8) != 0
-
-// 	// VEX.256.66.0F3A.W0
-// 	vex := encode_vex3(dst_r, false, src1_b, 0x03, false, u8(src2), true, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x25, modrm, imm}) // 25 /r ib
-// }
-
-// // Extract 128 bits from YMM
-// vextracti128_ymm_ymm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {
-// 	dst_b := (u8(dst) & 0x8) != 0
-// 	src_r := (u8(src) & 0x8) != 0
-
-// 	// VEX.256.66.0F3A.W0
-// 	vex := encode_vex3(src_r, false, dst_b, 0x03, false, 0, true, 0x01)
-// 	modrm := encode_modrm(3, u8(src) & 0x7, u8(dst) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0x39, modrm, imm}) // 39 /r ib
-// }
-
-// // SSE2 SIMD Integer Instructions
-// // Average packed unsigned byte integers
-// pavgb_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0xE0, modrm}) // 66 REX 0F E0 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0xE0, modrm}) // 66 0F E0 /r
-// 	}
-// }
-
-// // Average packed unsigned byte integers (YMM)
-// pavgb_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	src_b := (u8(src) & 0x8) != 0
-
-// 	// VEX.256.66.0F.WIG
-// 	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x01)
-// 	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src) & 0x7)
-
-// 	write(vex)
-// 	write([]u8{0xE0, modrm}) // E0 /r
-// }
-
-// // Multiply and add packed integers
-// pmaddwd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0xF5, modrm}) // 66 REX 0F F5 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0xF5, modrm}) // 66 0F F5 /r
-// 	}
-// }
-
-// // Multiply packed unsigned integers and store high result
-// pmulhuw_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0xE4, modrm}) // 66 REX 0F E4 /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0xE4, modrm}) // 66 0F E4 /r
-// 	}
-// }
-
-// // AVX-512 Instructions
-// // Helper function for EVEX prefix encoding
-// encode_evex :: proc(
-// 	r: bool,
-// 	x: bool,
-// 	b: bool,
-// 	r_prime: bool,
-// 	mm: u8,
-// 	w: bool,
-// 	vvvv: u8,
-// 	pp: u8,
-// 	z: bool,
-// 	ll: u8,
-// 	b_prime: bool,
-// 	v_prime: bool,
-// 	aaa: u8,
-// ) -> []u8 {
-// 	evex := make([]u8, 4)
-// 	evex[0] = 0x62
-// 	evex[1] =
-// 		((~u8(r) & 1) << 7) |
-// 		((~u8(x) & 1) << 6) |
-// 		((~u8(b) & 1) << 5) |
-// 		((~u8(r_prime) & 1) << 4) |
-// 		mm
-// 	evex[2] = (u8(w) << 7) | ((~vvvv & 0xF) << 3) | (pp & 0x3)
-// 	evex[3] =
-// 		(u8(z) << 7) |
-// 		((ll & 0x3) << 5) |
-// 		((~u8(b_prime) & 1) << 4) |
-// 		((~u8(v_prime) & 1) << 3) |
-// 		(aaa & 0x7)
-// 	return evex
-// }
-
-// // Helper function for ZMM register encodings
-// encode_zmm :: proc(zmm: ZMMRegister) -> (r: bool, r_prime: bool, reg: u8) {
-// 	zmm_val := u8(zmm)
-// 	reg = zmm_val & 0x7
-// 	r = (zmm_val & 0x8) != 0
-// 	r_prime = (zmm_val & 0x10) != 0
-// 	return r, r_prime, reg
-// }
-
-// // Add packed double-precision (ZMM)
-// vaddpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
-// 	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
-// 	src2_v_prime, _, src2_vvvv := encode_zmm(ZMMRegister(src2))
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src1_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		src2_vvvv,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src1_b_prime,
-// 		src2_v_prime,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src1_reg)
-
-// 	write(evex)
-// 	write([]u8{0x58, modrm}) // 58 /r
-// }
-
-// // Subtract packed double-precision (ZMM)
-// vsubpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
-// 	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
-// 	src2_v_prime, _, src2_vvvv := encode_zmm(ZMMRegister(src2))
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src1_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		src2_vvvv,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src1_b_prime,
-// 		src2_v_prime,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src1_reg)
-
-// 	write(evex)
-// 	write([]u8{0x5C, modrm}) // 5C /r
-// }
-
-// // Multiply packed double-precision (ZMM)
-// vmulpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
-// 	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
-// 	src2_v_prime, _, src2_vvvv := encode_zmm(ZMMRegister(src2))
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src1_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		src2_vvvv,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src1_b_prime,
-// 		src2_v_prime,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src1_reg)
-
-// 	write(evex)
-// 	write([]u8{0x59, modrm}) // 59 /r
-// }
-
-// // Divide packed double-precision (ZMM)
-// vdivpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
-// 	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
-// 	src2_v_prime, _, src2_vvvv := encode_zmm(ZMMRegister(src2))
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src1_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		src2_vvvv,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src1_b_prime,
-// 		src2_v_prime,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src1_reg)
-
-// 	write(evex)
-// 	write([]u8{0x5E, modrm}) // 5E /r
-// }
-
-// // Gather packed single-precision with signed dword indices
-// // This is a proper implementation using VEX prefix
-// vgatherdps_xmm :: proc(dst: XMMRegister, index: XMMRegister, base: Register64, scale: u8) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	index_x := (u8(index) & 0x8) != 0
-// 	base_b := (u8(base) & 0x8) != 0
-
-// 	// VEX.128.66.0F38.W0
-// 	vex_byte1: u8 = 0xC4
-// 	vex_byte2 :=
-// 		((~u8(dst_r) & 1) << 7) | ((~u8(index_x) & 1) << 6) | ((~u8(base_b) & 1) << 5) | 0x02 // 0x02 for 0F38 escape
-// 	vex_byte3: u8 = (0 << 7) | ((~u8(dst) & 0xF) << 3) | (0 << 2) | 0x01 // 66 prefix, L=0 (128-bit)
-
-// 	// Construct ModR/M and SIB bytes
-// 	modrm := encode_modrm(0, u8(dst) & 0x7, 4) // mod=00, reg=dst, r/m=100 (SIB follows)
-// 	sib := encode_sib(scale, u8(index) & 0x7, u8(base) & 0x7) // scale, index, base
-
-// 	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x92, modrm, sib}) // VEX 92 /r
-// }
-
-// // Scatter packed single-precision with signed dword indices
-// // This is a proper implementation using EVEX prefix for AVX-512
-// vscatterdps_xmm :: proc(
-// 	index: XMMRegister,
-// 	base: Register64,
-// 	scale: u8,
-// 	src: XMMRegister,
-// 	mask: MaskRegister,
-// ) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(ZMMRegister(src))
-// 	index_v_prime := (u8(index) & 0x10) != 0
-// 	index_reg := u8(index) & 0x7
-// 	base_b := (u8(base) & 0x8) != 0
-// 	base_b_prime := (u8(base) & 0x10) != 0
-// 	mask_reg := u8(mask) & 0x7
-
-// 	// EVEX.128.66.0F38.W0
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		base_b,
-// 		src_r_prime,
-// 		0x02, // 0F 38 escape
-// 		false, // W=0 (32-bit)
-// 		0xF, // vvvv = 1111b (unused)
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x00, // L'L=00 (128-bit)
-// 		base_b_prime,
-// 		index_v_prime,
-// 		mask_reg,
-// 	)
-
-// 	// Construct ModR/M and SIB bytes
-// 	modrm := encode_modrm(0, src_reg, 4) // mod=00, reg=src, r/m=100 (SIB follows)
-// 	sib := encode_sib(scale, index_reg, u8(base) & 0x7) // scale, index, base
-
-// 	write(evex)
-// 	write([]u8{0xA2, modrm, sib}) // EVEX A2 /r
-// }
-
-// // Move from mask register to mask register
-// kmovq_k_k :: proc(dst: MaskRegister, src: MaskRegister) {
-// 	// C4 E1 FB 90 /r (VEX.L1.F3.0F.W1)
-// 	vex_byte1: u8 = 0xC4
-// 	vex_byte2: u8 = 0xE1 // R=1, X=1, B=1, map=0x1 (0F)
-// 	vex_byte3: u8 = 0xFB // W=1, vvvv=1111b, L=0, pp=11 (F3)
-
-// 	modrm := encode_modrm(3, u8(dst), u8(src))
-
-// 	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x90, modrm})
-// }
-
-// // Bitwise XOR of ZMM registers
-// vpxordq_zmm_zmm_zmm :: proc(dst: ZMMRegister, src1: ZMMRegister, src2: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src1_b, src1_b_prime, src1_reg := encode_zmm(src1)
-// 	src2_v_prime := (u8(src2) & 0x10) != 0
-// 	src2_vvvv := u8(src2) & 0xF
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src1_b,
-// 		dst_r_prime,
-// 		0x01, // 0F escape
-// 		true, // W=1 (64-bit)
-// 		src2_vvvv,
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x02, // L'L=10 (512-bit)
-// 		src1_b_prime,
-// 		src2_v_prime,
-// 		0, // No masking
-// 	)
-
-// 	modrm := encode_modrm(3, dst_reg, src1_reg)
-
-// 	write(evex)
-// 	write([]u8{0xEF, modrm}) // EF /r
-// }
-
-// // Scatter dword values with dword indices
-// vpscatterdd_ymm_m :: proc(
-// 	index: YMMRegister,
-// 	base: Register64,
-// 	scale: u8,
-// 	src: YMMRegister,
-// 	mask: MaskRegister,
-// ) {
-// 	src_r := (u8(src) & 0x8) != 0
-// 	src_r_prime := (u8(src) & 0x10) != 0
-// 	src_reg := u8(src) & 0x7
-
-// 	index_v_prime := (u8(index) & 0x10) != 0
-// 	index_reg := u8(index) & 0x7
-
-// 	base_b := (u8(base) & 0x8) != 0
-// 	base_b_prime := (u8(base) & 0x10) != 0
-
-// 	mask_reg := u8(mask) & 0x7
-
-// 	// EVEX.256.66.0F38.W0
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		base_b,
-// 		src_r_prime,
-// 		0x02, // 0F 38 escape
-// 		false, // W=0 (32-bit)
-// 		0xF, // vvvv = 1111b (unused)
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x01, // L'L=01 (256-bit)
-// 		base_b_prime,
-// 		index_v_prime,
-// 		mask_reg,
-// 	)
-
-// 	// Construct ModR/M and SIB bytes
-// 	modrm := encode_modrm(0, src_reg, 4) // mod=00, reg=src, r/m=100 (SIB follows)
-// 	sib := encode_sib(scale, index_reg, u8(base) & 0x7) // scale, index, base
-
-// 	write(evex)
-// 	write([]u8{0xA0, modrm, sib}) // EVEX A0 /r
-// }
-
-// // Scatter qword values with dword indices
-// vpscatterdq_ymm_m :: proc(
-// 	index: XMMRegister,
-// 	base: Register64,
-// 	scale: u8,
-// 	src: YMMRegister,
-// 	mask: MaskRegister,
-// ) {
-// 	src_r := (u8(src) & 0x8) != 0
-// 	src_r_prime := (u8(src) & 0x10) != 0
-// 	src_reg := u8(src) & 0x7
-
-// 	index_v_prime := (u8(index) & 0x10) != 0
-// 	index_reg := u8(index) & 0x7
-
-// 	base_b := (u8(base) & 0x8) != 0
-// 	base_b_prime := (u8(base) & 0x10) != 0
-
-// 	mask_reg := u8(mask) & 0x7
-
-// 	// EVEX.256.66.0F38.W1
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		base_b,
-// 		src_r_prime,
-// 		0x02, // 0F 38 escape
-// 		true, // W=1 (64-bit)
-// 		0xF, // vvvv = 1111b (unused)
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x01, // L'L=01 (256-bit)
-// 		base_b_prime,
-// 		index_v_prime,
-// 		mask_reg,
-// 	)
-
-// 	// Construct ModR/M and SIB bytes
-// 	modrm := encode_modrm(0, src_reg, 4) // mod=00, reg=src, r/m=100 (SIB follows)
-// 	sib := encode_sib(scale, index_reg, u8(base) & 0x7) // scale, index, base
-
-// 	write(evex)
-// 	write([]u8{0xA0, modrm, sib}) // EVEX A0 /r
-// }
-
-// // Scatter dword values with qword indices
-// vpscatterqd_ymm_m :: proc(
-// 	index: YMMRegister,
-// 	base: Register64,
-// 	scale: u8,
-// 	src: XMMRegister,
-// 	mask: MaskRegister,
-// ) {
-// 	src_r := (u8(src) & 0x8) != 0
-// 	src_r_prime := (u8(src) & 0x10) != 0
-// 	src_reg := u8(src) & 0x7
-
-// 	index_v_prime := (u8(index) & 0x10) != 0
-// 	index_reg := u8(index) & 0x7
-
-// 	base_b := (u8(base) & 0x8) != 0
-// 	base_b_prime := (u8(base) & 0x10) != 0
-
-// 	mask_reg := u8(mask) & 0x7
-
-// 	// EVEX.256.66.0F38.W0
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		base_b,
-// 		src_r_prime,
-// 		0x02, // 0F 38 escape
-// 		false, // W=0 (32-bit)
-// 		0xF, // vvvv = 1111b (unused)
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x01, // L'L=01 (256-bit)
-// 		base_b_prime,
-// 		index_v_prime,
-// 		mask_reg,
-// 	)
-
-// 	// Construct ModR/M and SIB bytes
-// 	modrm := encode_modrm(0, src_reg, 4) // mod=00, reg=src, r/m=100 (SIB follows)
-// 	sib := encode_sib(scale, index_reg, u8(base) & 0x7) // scale, index, base
-
-// 	write(evex)
-// 	write([]u8{0xA1, modrm, sib}) // EVEX A1 /r
-// }
-
-// // Compress packed dwords from source to destination
-// vpcompressd_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister, mask: MaskRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	dst_r_prime := (u8(dst) & 0x10) != 0
-// 	dst_reg := u8(dst) & 0x7
-
-// 	src_b := (u8(src) & 0x8) != 0
-// 	src_b_prime := (u8(src) & 0x10) != 0
-// 	src_reg := u8(src) & 0x7
-
-// 	mask_reg := u8(mask) & 0x7
-
-// 	// EVEX.256.66.0F38.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x02, // 0F 38 escape
-// 		false, // W=0 (32-bit)
-// 		0xF, // vvvv = 1111b (unused)
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x01, // L'L=01 (256-bit)
-// 		src_b_prime,
-// 		false, // v' = 0 (unused)
-// 		mask_reg,
-// 	)
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x8B, modrm}) // EVEX 8B /r
-// }
-
-// // Compress packed qwords from source to destination
-// vpcompressq_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister, mask: MaskRegister) {
-// 	dst_r := (u8(dst) & 0x8) != 0
-// 	dst_r_prime := (u8(dst) & 0x10) != 0
-// 	dst_reg := u8(dst) & 0x7
-
-// 	src_b := (u8(src) & 0x8) != 0
-// 	src_b_prime := (u8(src) & 0x10) != 0
-// 	src_reg := u8(src) & 0x7
-
-// 	mask_reg := u8(mask) & 0x7
-
-// 	// EVEX.256.66.0F38.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x02, // 0F 38 escape
-// 		true, // W=1 (64-bit)
-// 		0xF, // vvvv = 1111b (unused)
-// 		0x01, // pp=01 (66 prefix)
-// 		false, // z=0 (no zeroing)
-// 		0x01, // L'L=01 (256-bit)
-// 		src_b_prime,
-// 		false, // v' = 0 (unused)
-// 		mask_reg,
-// 	)
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x8B, modrm}) // EVEX 8B /r
-// }
-
-// // Compress packed dwords from source
-
-// // ZMM Register Operations
-// // Move aligned dwords
-// vmovdqa32_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src_b, src_b_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.66.0F.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src_b_prime,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-// }
-
-// // Move aligned dwords from memory
-// vmovdqa32_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-
-// 	// EVEX.512.66.0F.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		false,
-// 		dst_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned dwords to memory
-// vmovdqa32_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.66.0F.W0
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		false,
-// 		src_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x7F, modrm}) // 7F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned qwords
-// vmovdqa64_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src_b, src_b_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src_b_prime,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-// }
-
-// // Move aligned qwords from memory
-// vmovdqa64_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		false,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned qwords to memory
-// vmovdqa64_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		false,
-// 		src_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x7F, modrm}) // 7F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned dwords
-// vmovdqu32_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src_b, src_b_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.F3.0F.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x02,
-// 		false,
-// 		0x02,
-// 		src_b_prime,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-// }
-
-// // Move unaligned dwords from memory
-// vmovdqu32_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-
-// 	// EVEX.512.F3.0F.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		false,
-// 		dst_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x02,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned dwords to memory
-// vmovdqu32_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.F3.0F.W0
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		false,
-// 		src_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x02,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x7F, modrm}) // 7F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned qwords
-// vmovdqu64_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src_b, src_b_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.F3.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x02,
-// 		false,
-// 		0x02,
-// 		src_b_prime,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-// }
-
-// // Move unaligned qwords from memory
-// vmovdqu64_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-
-// 	// EVEX.512.F3.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		false,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x02,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x6F, modrm}) // 6F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move unaligned qwords to memory
-// vmovdqu64_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.F3.0F.W1
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		false,
-// 		src_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x02,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x7F, modrm}) // 7F /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed single-precision (ZMM)
-// vmovaps_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src_b, src_b_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.0F.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x00,
-// 		false,
-// 		0x02,
-// 		src_b_prime,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-// }
-
-// // Move aligned packed single-precision from memory (ZMM)
-// vmovaps_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-
-// 	// EVEX.512.0F.W0
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		false,
-// 		dst_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x00,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed single-precision to memory (ZMM)
-// vmovaps_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.0F.W0
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		false,
-// 		src_r_prime,
-// 		0x01,
-// 		false,
-// 		0,
-// 		0x00,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x29, modrm}) // 29 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed double-precision (ZMM)
-// vmovapd_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-// 	src_b, src_b_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		src_b,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		src_b_prime,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	write(evex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-// }
-
-// // Move aligned packed double-precision from memory (ZMM)
-// vmovapd_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
-// 	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		dst_r,
-// 		false,
-// 		false,
-// 		dst_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, dst_reg, 5) // mod=00, reg=dst_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x28, modrm}) // 28 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move aligned packed double-precision to memory (ZMM)
-// vmovapd_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
-// 	src_r, src_r_prime, src_reg := encode_zmm(src)
-
-// 	// EVEX.512.66.0F.W1
-// 	evex := encode_evex(
-// 		src_r,
-// 		false,
-// 		false,
-// 		src_r_prime,
-// 		0x01,
-// 		true,
-// 		0,
-// 		0x01,
-// 		false,
-// 		0x02,
-// 		false,
-// 		false,
-// 		0,
-// 	)
-// 	modrm := encode_modrm(0, src_reg, 5) // mod=00, reg=src_reg, r/m=101 (RIP-relative)
-
-// 	write(evex)
-// 	write([]u8{0x29, modrm}) // 29 /r
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // AVX-512 Mask Register Operations
-// // Move mask register
-// kmovw :: proc(dst: MaskRegister, src: MaskRegister) {
-// 	// VEX.L0.F3.0F
-// 	vex := []u8{0xC4, 0xE1, 0x32, 0x90}
-// 	modrm := encode_modrm(3, u8(dst), u8(src))
-
-// 	write(vex)
-// 	write([]u8{modrm})
-// }
-
-// // Move 32-bit register to mask register
-// kmovw_k_r32 :: proc(dst: MaskRegister, src: Register32) {
-// 	src_b := (u8(src) & 0x8) != 0
-
-// 	// VEX.L0.F3.0F.W0
-// 	vex_byte1: u8 = 0xC4
-// 	vex_byte2: u8 = ((~u8(0) & 1) << 7) | ((~u8(0) & 1) << 6) | ((~u8(src_b) & 1) << 5) | 0x01
-// 	vex_byte3: u8 = 0x32 // F3 0F
-
-// 	modrm := encode_modrm(3, u8(dst), u8(src) & 0x7)
-
-// 	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x93, modrm})
-// }
-
-// // Move mask register to 32-bit register
-// kmovw_r32_k :: proc(dst: Register32, src: MaskRegister) {
-// 	dst_b := (u8(dst) & 0x8) != 0
-
-// 	// VEX.L0.F3.0F.W0
-// 	vex_byte1: u8 = 0xC4
-// 	vex_byte2: u8 = ((~u8(0) & 1) << 7) | ((~u8(0) & 1) << 6) | ((~u8(dst_b) & 1) << 5) | 0x01
-// 	vex_byte3: u8 = 0x32 // F3 0F
-
-// 	modrm := encode_modrm(3, u8(src), u8(dst) & 0x7)
-
-// 	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x92, modrm})
-// }
-
-// // Move 16 bits from memory to mask register
-// kmovw_k_m16 :: proc(dst: MaskRegister, mem: MemoryAddress) {
-// 	// VEX.L0.F3.0F
-// 	vex := []u8{0xC4, 0xE1, 0x32, 0x90}
-// 	modrm := encode_modrm(0, u8(dst), 5) // mod=00, reg=dst, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{modrm})
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Move 16 bits from mask register to memory
-// kmovw_m16_k :: proc(mem: MemoryAddress, src: MaskRegister) {
-// 	// VEX.L0.F3.0F
-// 	vex := []u8{0xC4, 0xE1, 0x32, 0x91}
-// 	modrm := encode_modrm(0, u8(src), 5) // mod=00, reg=src, r/m=101 (RIP-relative)
-
-// 	write(vex)
-// 	write([]u8{modrm})
-
-// 	// Encode displacement as 32-bit immediate (relative to next instruction)
-// 	disp: u32 = u32(mem) // Simplified; actual implementation would compute RIP-relative offset
-// 	write(
-// 		[]u8 {
-// 			u8(disp & 0xFF),
-// 			u8((disp >> 8) & 0xFF),
-// 			u8((disp >> 16) & 0xFF),
-// 			u8((disp >> 24) & 0xFF),
-// 		},
-// 	)
-// }
-
-// // Bitwise OR of mask registers
-// korw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister) {
-// 	// VEX.L0.66.0F
-// 	vex := []u8{0xC4, 0xE1, 0x72, 0x45}
-// 	modrm := encode_modrm(3, u8(dst), u8(src2))
-
-// 	write(vex)
-// 	write([]u8{modrm, u8(src1) & 0x7}) // VEX.vvvv = src1
-// }
-
-// // Bitwise AND of mask registers
-// kandw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister) {
-// 	// VEX.L0.66.0F
-// 	vex := []u8{0xC4, 0xE1, 0x72, 0x41}
-// 	modrm := encode_modrm(3, u8(dst), u8(src2))
-
-// 	write(vex)
-// 	write([]u8{modrm, u8(src1) & 0x7}) // VEX.vvvv = src1
-// }
-
-// // Bitwise XOR of mask registers
-// kxorw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister) {
-// 	// VEX.L0.66.0F
-// 	vex := []u8{0xC4, 0xE1, 0x72, 0x47}
-// 	modrm := encode_modrm(3, u8(dst), u8(src2))
-
-// 	write(vex)
-// 	write([]u8{modrm, u8(src1) & 0x7}) // VEX.vvvv = src1
-// }
-
-// // Bitwise NOT of mask register
-// knotw :: proc(dst: MaskRegister, src: MaskRegister) {
-// 	// VEX.L0.F2.0F
-// 	vex := []u8{0xC4, 0xE1, 0x74, 0x44}
-// 	modrm := encode_modrm(3, u8(dst), u8(src))
-
-// 	write(vex)
-// 	write([]u8{modrm})
-// }
-
-// // Perform one round of AES encryption
-// aesenc :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x38, 0xDC, modrm}) // 66 REX 0F 38 DC /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x38, 0xDC, modrm}) // 66 0F 38 DC /r
-// 	}
-// }
-
-// // Perform one round of AES decryption
-// aesdec :: proc(dst: XMMRegister, src: XMMRegister) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x38, 0xDE, modrm}) // 66 REX 0F 38 DE /r
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x38, 0xDE, modrm}) // 66 0F 38 DE /r
-// 	}
-// }
-
-// // Carry-less multiplication quadword
-// pclmulqdq :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {
-// 	rex_r, dst_reg := encode_xmm(dst)
-// 	rex_b, src_reg := encode_xmm(src)
-
-// 	rex: u8 = 0x40 // REX
-// 	if rex_r do rex |= 0x04 // REX.R
-// 	if rex_b do rex |= 0x01 // REX.B
-
-// 	modrm := encode_modrm(3, dst_reg, src_reg)
-
-// 	if rex != 0x40 {
-// 		write([]u8{0x66, rex, 0x0F, 0x3A, 0x44, modrm, imm}) // 66 REX 0F 3A 44 /r ib
-// 	} else {
-// 		write([]u8{0x66, 0x0F, 0x3A, 0x44, modrm, imm}) // 66 0F 3A 44 /r ib
-// 	}
-// }
+// Move quadword from XMM to XMM
+movq_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0xF3, rex, 0x0F, 0x7E, modrm}) // F3 REX 0F 7E /r
+	} else {
+		write([]u8{0xF3, 0x0F, 0x7E, modrm}) // F3 0F 7E /r
+	}
+}
+
+// Move quadword from memory to XMM
+movq_xmm_m64 :: proc(dst: XMMRegister, mem: MemoryAddress) {
+	rex_r, dst_reg := encode_xmm(dst)
+
+	// F3 REX 0F 7E /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0xF3})
+	write_memory_address(mem, dst_reg, 0x0F, false)
+	write([]u8{0x7E})
+}
+
+// Move quadword from XMM to memory
+movq_m64_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
+	rex_r, src_reg := encode_xmm(src)
+
+	// 66 REX 0F D6 /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0x66})
+	write_memory_address(mem, src_reg, 0x0F, false)
+	write([]u8{0xD6})
+}
+
+// SSE/SSE2 Data Movement
+// Move aligned double quadword
+movdqa_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0x6F, modrm}) // 66 REX 0F 6F /r
+	} else {
+		write([]u8{0x66, 0x0F, 0x6F, modrm}) // 66 0F 6F /r
+	}
+}
+
+// Move aligned double quadword from memory
+movdqa_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
+	rex_r, dst_reg := encode_xmm(dst)
+
+	// 66 REX 0F 6F /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0x66})
+	write_memory_address(mem, dst_reg, 0x0F, false)
+	write([]u8{0x6F})
+}
+
+// Move aligned double quadword to memory
+movdqa_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
+	rex_r, src_reg := encode_xmm(src)
+
+	// 66 REX 0F 7F /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0x66})
+	write_memory_address(mem, src_reg, 0x0F, false)
+	write([]u8{0x7F})
+}
+
+// Move unaligned double quadword
+movdqu_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0xF3, rex, 0x0F, 0x6F, modrm}) // F3 REX 0F 6F /r
+	} else {
+		write([]u8{0xF3, 0x0F, 0x6F, modrm}) // F3 0F 6F /r
+	}
+}
+
+// Move unaligned double quadword from memory
+movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
+	rex_r, dst_reg := encode_xmm(dst)
+
+	// F3 REX 0F 6F /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0xF3})
+	write_memory_address(mem, dst_reg, 0x0F, false)
+	write([]u8{0x6F})
+}
+
+// Move unaligned double quadword to memory
+movdqu_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
+	rex_r, src_reg := encode_xmm(src)
+
+	// F3 REX 0F 7F /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0xF3})
+	write_memory_address(mem, src_reg, 0x0F, false)
+	write([]u8{0x7F})
+}
+
+// Move aligned packed single-precision
+movaps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{rex, 0x0F, 0x28, modrm}) // REX 0F 28 /r
+	} else {
+		write([]u8{0x0F, 0x28, modrm}) // 0F 28 /r
+	}
+}
+
+// Move aligned packed single-precision from memory
+movaps_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
+	rex_r, dst_reg := encode_xmm(dst)
+
+	// REX 0F 28 /r - Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0x0F, false)
+	write([]u8{0x28})
+}
+
+// Move aligned packed single-precision to memory
+movaps_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
+	rex_r, src_reg := encode_xmm(src)
+
+	// REX 0F 29 /r - Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0x0F, false)
+	write([]u8{0x29})
+}
+
+// Move aligned packed double-precision
+movapd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0x28, modrm}) // 66 REX 0F 28 /r
+	} else {
+		write([]u8{0x66, 0x0F, 0x28, modrm}) // 66 0F 28 /r
+	}
+}
+
+// Move aligned packed double-precision from memory
+movapd_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
+	rex_r, dst_reg := encode_xmm(dst)
+
+	// 66 REX 0F 28 /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0x66})
+	write_memory_address(mem, dst_reg, 0x0F, false)
+	write([]u8{0x28})
+}
+
+// Move aligned packed double-precision to memory
+movapd_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
+	rex_r, src_reg := encode_xmm(src)
+
+	// 66 REX 0F 29 /r - Use write_memory_address for proper memory operand handling
+	write([]u8{0x66})
+	write_memory_address(mem, src_reg, 0x0F, false)
+	write([]u8{0x29})
+}
+
+// Move unaligned packed single-precision from memory
+movups_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
+	rex_r, dst_reg := encode_xmm(dst)
+
+	// REX 0F 10 /r - Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0x0F, false)
+	write([]u8{0x10})
+}
+
+// SSE Arithmetic Instructions
+// Add packed single-precision
+addps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{rex, 0x0F, 0x58, modrm}) // REX 0F 58 /r
+	} else {
+		write([]u8{0x0F, 0x58, modrm}) // 0F 58 /r
+	}
+}
+
+// Multiply packed single-precision
+mulps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{rex, 0x0F, 0x59, modrm}) // REX 0F 59 /r
+	} else {
+		write([]u8{0x0F, 0x59, modrm}) // 0F 59 /r
+	}
+}
+
+// Divide packed single-precision
+divps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{rex, 0x0F, 0x5E, modrm}) // REX 0F 5E /r
+	} else {
+		write([]u8{0x0F, 0x5E, modrm}) // 0F 5E /r
+	}
+}
+
+// Square root of packed single-precision values
+sqrtps_xmm :: proc(xmm: XMMRegister) {
+	rex_r, xmm_reg := encode_xmm(xmm)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+
+	modrm := encode_modrm(3, xmm_reg, xmm_reg)
+
+	if rex != 0x40 {
+		write([]u8{rex, 0x0F, 0x51, modrm}) // REX 0F 51 /r
+	} else {
+		write([]u8{0x0F, 0x51, modrm}) // 0F 51 /r
+	}
+}
+
+// Compare packed single-precision
+cmpps_xmm_xmm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{rex, 0x0F, 0xC2, modrm, imm}) // REX 0F C2 /r ib
+	} else {
+		write([]u8{0x0F, 0xC2, modrm, imm}) // 0F C2 /r ib
+	}
+}
+
+// Compare equal packed single-precision
+cmpeqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	cmpps_xmm_xmm_imm8(dst, src, 0x00) // Immediate 0 = Equal
+}
+
+// Compare not equal packed single-precision
+cmpneqps_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	cmpps_xmm_xmm_imm8(dst, src, 0x04) // Immediate 4 = Not Equal
+}
+
+// AVX and FMA Instructions
+// Helper function for VEX 3-byte prefix encoding
+encode_vex3 :: proc(r: bool, x: bool, b: bool, m: u8, w: bool, vvvv: u8, l: bool, pp: u8) -> []u8 {
+	vex := make([]u8, 3)
+	vex[0] = 0xC4
+	vex[1] = ((~u8(r) & 1) << 7) | ((~u8(x) & 1) << 6) | ((~u8(b) & 1) << 5) | m
+	vex[2] = (u8(w) << 7) | ((~vvvv & 0xF) << 3) | (u8(l) << 2) | pp
+	return vex
+}
+
+// Fused multiply-add of packed single-precision
+vfmadd132ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.128.66.0F38.W0
+	vex := encode_vex3(dst_r, false, src1_b, 0x02, false, src2_vvvv, false, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0x98, modrm}) // 98 /r
+}
+
+// Fused multiply-add of packed single-precision
+vfmadd213ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.128.66.0F38.W0
+	vex := encode_vex3(dst_r, false, src1_b, 0x02, false, src2_vvvv, false, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0xA8, modrm}) // A8 /r
+}
+
+// Fused multiply-add of packed single-precision
+vfmadd231ps_xmm_xmm_xmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.128.66.0F38.W0
+	vex := encode_vex3(dst_r, false, src1_b, 0x02, false, src2_vvvv, false, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0xB8, modrm}) // B8 /r
+}
+
+// Add packed single-precision (YMM registers)
+vaddps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.0F.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, src2_vvvv, true, 0x00)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0x58, modrm}) // 58 /r
+}
+
+// Multiply packed single-precision (YMM registers)
+vmulps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.0F.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, src2_vvvv, true, 0x00)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0x59, modrm}) // 59 /r
+}
+
+// Divide packed single-precision (YMM registers)
+vdivps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.0F.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, src2_vvvv, true, 0x00)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0x5E, modrm}) // 5E /r
+}
+
+// Blend packed single-precision
+vblendps_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister, imm: u8) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.66.0F3A.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x03, false, src2_vvvv, true, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0x0C, modrm, imm}) // 0C /r ib
+}
+
+// YMM Register Operations
+// Helper function for YMM register encodings
+encode_ymm :: proc(ymm: YMMRegister) -> (rex_r: bool, reg: u8) {
+	reg = u8(ymm) & 0x7
+	rex_r = (u8(ymm) & 0x8) != 0
+	return rex_r, reg
+}
+
+// Move aligned double quadword
+vmovdqa_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
+	dst_r, dst_reg := encode_ymm(dst)
+	src_b, src_reg := encode_ymm(src)
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x01)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(vex)
+	write([]u8{0x6F, modrm}) // 6F /r
+}
+
+// Move aligned double quadword from memory
+vmovdqa_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
+	dst_r, dst_reg := encode_ymm(dst)
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x01)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x6F})
+}
+
+// Move aligned double quadword to memory
+vmovdqa_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
+	src_r, src_reg := encode_ymm(src)
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x01)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x7F})
+}
+
+// Move unaligned double quadword
+vmovdqu_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
+	dst_r, dst_reg := encode_ymm(dst)
+	src_b, src_reg := encode_ymm(src)
+
+	// VEX.256.F3.0F.WIG
+	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x02)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(vex)
+	write([]u8{0x6F, modrm}) // 6F /r
+}
+
+// Move unaligned double quadword from memory
+vmovdqu_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
+	dst_r, dst_reg := encode_ymm(dst)
+
+	// VEX.256.F3.0F.WIG
+	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x02)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x6F})
+}
+
+// Move unaligned double quadword to memory
+vmovdqu_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
+	src_r, src_reg := encode_ymm(src)
+
+	// VEX.256.F3.0F.WIG
+	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x02)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x7F})
+}
+
+// Move aligned packed single-precision
+vmovaps_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
+	dst_r, dst_reg := encode_ymm(dst)
+	src_b, src_reg := encode_ymm(src)
+
+	// VEX.256.0F.WIG
+	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x00)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(vex)
+	write([]u8{0x28, modrm}) // 28 /r
+}
+
+// Move aligned packed single-precision from memory
+vmovaps_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
+	dst_r, dst_reg := encode_ymm(dst)
+
+	// VEX.256.0F.WIG
+	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x00)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x28})
+}
+
+// Move aligned packed single-precision to memory
+vmovaps_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
+	src_r, src_reg := encode_ymm(src)
+
+	// VEX.256.0F.WIG
+	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x00)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x29})
+}
+
+// Move aligned packed double-precision
+vmovapd_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister) {
+	dst_r, dst_reg := encode_ymm(dst)
+	src_b, src_reg := encode_ymm(src)
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x01)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(vex)
+	write([]u8{0x28, modrm}) // 28 /r
+}
+
+// Move aligned packed double-precision from memory
+vmovapd_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
+	dst_r, dst_reg := encode_ymm(dst)
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, false, 0x01, false, 0, true, 0x01)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x28})
+}
+
+// Move aligned packed double-precision to memory
+vmovapd_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
+	src_r, src_reg := encode_ymm(src)
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(src_r, false, false, 0x01, false, 0, true, 0x01)
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x29})
+}
+
+// AVX Logical Operations
+// Bitwise AND of YMM registers
+vpand_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, src2_vvvv, true, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0xDB, modrm}) // DB /r
+}
+
+// Bitwise OR of YMM registers
+vpor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, src2_vvvv, true, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0xEB, modrm}) // EB /r
+}
+
+// Bitwise XOR of YMM registers
+vpxor_ymm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, src1_b, 0x01, false, src2_vvvv, true, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0xEF, modrm}) // EF /r
+}
+
+// Bitwise ternary logic
+vpternlogd_ymm_ymm_ymm_imm8 :: proc(
+	dst: XMMRegister,
+	src1: XMMRegister,
+	src2: XMMRegister,
+	imm: u8,
+) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src1_b := (u8(src1) & 0x8) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// VEX.256.66.0F3A.W0
+	vex := encode_vex3(dst_r, false, src1_b, 0x03, false, src2_vvvv, true, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src1) & 0x7)
+
+	write(vex)
+	write([]u8{0x25, modrm, imm}) // 25 /r ib
+}
+
+// Extract 128 bits from YMM
+vextracti128_ymm_ymm_imm8 :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {
+	dst_b := (u8(dst) & 0x8) != 0
+	src_r := (u8(src) & 0x8) != 0
+
+	// VEX.256.66.0F3A.W0
+	vex := encode_vex3(src_r, false, dst_b, 0x03, false, 0, true, 0x01)
+	modrm := encode_modrm(3, u8(src) & 0x7, u8(dst) & 0x7)
+
+	write(vex)
+	write([]u8{0x39, modrm, imm}) // 39 /r ib
+}
+
+// SSE2 SIMD Integer Instructions
+// Average packed unsigned byte integers
+pavgb_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0xE0, modrm}) // 66 REX 0F E0 /r
+	} else {
+		write([]u8{0x66, 0x0F, 0xE0, modrm}) // 66 0F E0 /r
+	}
+}
+
+// Average packed unsigned byte integers (YMM)
+pavgb_ymm_ymm :: proc(dst: XMMRegister, src: XMMRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	src_b := (u8(src) & 0x8) != 0
+
+	// VEX.256.66.0F.WIG
+	vex := encode_vex3(dst_r, false, src_b, 0x01, false, 0, true, 0x01)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src) & 0x7)
+
+	write(vex)
+	write([]u8{0xE0, modrm}) // E0 /r
+}
+
+// Multiply and add packed integers
+pmaddwd_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0xF5, modrm}) // 66 REX 0F F5 /r
+	} else {
+		write([]u8{0x66, 0x0F, 0xF5, modrm}) // 66 0F F5 /r
+	}
+}
+
+// Multiply packed unsigned integers and store high result
+pmulhuw_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0xE4, modrm}) // 66 REX 0F E4 /r
+	} else {
+		write([]u8{0x66, 0x0F, 0xE4, modrm}) // 66 0F E4 /r
+	}
+}
+
+// AVX-512 Instructions
+// Helper function for EVEX prefix encoding
+encode_evex :: proc(
+	r: bool,
+	x: bool,
+	b: bool,
+	r_prime: bool,
+	mm: u8,
+	w: bool,
+	vvvv: u8,
+	pp: u8,
+	z: bool,
+	ll: u8,
+	b_prime: bool,
+	v_prime: bool,
+	aaa: u8,
+) -> []u8 {
+	evex := make([]u8, 4)
+	evex[0] = 0x62
+	evex[1] =
+		((~u8(r) & 1) << 7) |
+		((~u8(x) & 1) << 6) |
+		((~u8(b) & 1) << 5) |
+		((~u8(r_prime) & 1) << 4) |
+		mm
+	evex[2] = (u8(w) << 7) | ((~vvvv & 0xF) << 3) | (pp & 0x3)
+	evex[3] =
+		(u8(z) << 7) |
+		((ll & 0x3) << 5) |
+		((~u8(b_prime) & 1) << 4) |
+		((~u8(v_prime) & 1) << 3) |
+		(aaa & 0x7)
+	return evex
+}
+
+// Helper function for ZMM register encodings
+encode_zmm :: proc(zmm: ZMMRegister) -> (r: bool, r_prime: bool, reg: u8) {
+	zmm_val := u8(zmm)
+	reg = zmm_val & 0x7
+	r = (zmm_val & 0x8) != 0
+	r_prime = (zmm_val & 0x10) != 0
+	return r, r_prime, reg
+}
+
+// Add packed double-precision (ZMM)
+vaddpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
+	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
+	src2_v_prime := (u8(src2) & 0x10) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src1_b,
+		dst_r_prime,
+		0x01,
+		true,
+		src2_vvvv,
+		0x01,
+		false,
+		0x02,
+		src1_b_prime,
+		src2_v_prime,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src1_reg)
+
+	write(evex)
+	write([]u8{0x58, modrm}) // 58 /r
+}
+
+// Subtract packed double-precision (ZMM)
+vsubpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
+	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
+	src2_v_prime := (u8(src2) & 0x10) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src1_b,
+		dst_r_prime,
+		0x01,
+		true,
+		src2_vvvv,
+		0x01,
+		false,
+		0x02,
+		src1_b_prime,
+		src2_v_prime,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src1_reg)
+
+	write(evex)
+	write([]u8{0x5C, modrm}) // 5C /r
+}
+
+// Multiply packed double-precision (ZMM)
+vmulpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
+	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
+	src2_v_prime := (u8(src2) & 0x10) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src1_b,
+		dst_r_prime,
+		0x01,
+		true,
+		src2_vvvv,
+		0x01,
+		false,
+		0x02,
+		src1_b_prime,
+		src2_v_prime,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src1_reg)
+
+	write(evex)
+	write([]u8{0x59, modrm}) // 59 /r
+}
+
+// Divide packed double-precision (ZMM)
+vdivpd_zmm_zmm_zmm :: proc(dst: XMMRegister, src1: XMMRegister, src2: XMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(ZMMRegister(dst))
+	src1_b, src1_b_prime, src1_reg := encode_zmm(ZMMRegister(src1))
+	src2_v_prime := (u8(src2) & 0x10) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src1_b,
+		dst_r_prime,
+		0x01,
+		true,
+		src2_vvvv,
+		0x01,
+		false,
+		0x02,
+		src1_b_prime,
+		src2_v_prime,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src1_reg)
+
+	write(evex)
+	write([]u8{0x5E, modrm}) // 5E /r
+}
+
+// Gather packed single-precision with signed dword indices
+// This is a proper implementation using VEX prefix
+vgatherdps_xmm :: proc(dst: XMMRegister, index: XMMRegister, base: Register64, scale: u8) {
+	dst_r := (u8(dst) & 0x8) != 0
+	index_x := (u8(index) & 0x8) != 0
+	base_b := (u8(base) & 0x8) != 0
+	dst_vvvv := u8(dst) & 0xF
+
+	// VEX.128.66.0F38.W0
+	vex := encode_vex3(dst_r, index_x, base_b, 0x02, false, dst_vvvv, false, 0x01)
+
+	// Use write_memory_address for proper SIB encoding
+	write(vex)
+	write([]u8{0x92})
+
+	// For instructions with SIB byte, we need special memory addressing
+	// Create appropriate AddressComponents structure
+	addr := AddressComponents {
+		base         = base,
+		index        = index,
+		scale        = scale,
+		displacement = 0,
+	}
+
+	// Let the write_memory_address handle the ModR/M + SIB
+	write_memory_address(addr, u8(dst) & 0x7, 0, false)
+}
+
+// Scatter packed single-precision with signed dword indices
+// This is a proper implementation using EVEX prefix for AVX-512
+vscatterdps_xmm :: proc(
+	index: XMMRegister,
+	base: Register64,
+	scale: u8,
+	src: XMMRegister,
+	mask: MaskRegister,
+) {
+	src_r := (u8(src) & 0x8) != 0
+	src_r_prime := (u8(src) & 0x10) != 0
+	src_reg := u8(src) & 0x7
+
+	index_v_prime := (u8(index) & 0x10) != 0
+	index_reg := u8(index) & 0x7
+
+	base_b := (u8(base) & 0x8) != 0
+	base_b_prime := (u8(base) & 0x10) != 0
+
+	mask_reg := u8(mask) & 0x7
+
+	// EVEX.128.66.0F38.W0
+	evex := encode_evex(
+		src_r,
+		false,
+		base_b,
+		src_r_prime,
+		0x02, // 0F 38 escape
+		false, // W=0 (32-bit)
+		0xF, // vvvv = 1111b (unused)
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x00, // L'L=00 (128-bit)
+		base_b_prime,
+		index_v_prime,
+		mask_reg,
+	)
+	write(evex)
+	write([]u8{0xA2})
+
+	// Create appropriate AddressComponents structure
+	addr := AddressComponents {
+		base         = base,
+		index        = index,
+		scale        = scale,
+		displacement = 0,
+	}
+
+	// Let the write_memory_address handle the ModR/M + SIB
+	write_memory_address(addr, src_reg, 0, false)
+}
+
+// Move from mask register to mask register
+kmovq_k_k :: proc(dst: MaskRegister, src: MaskRegister) {
+	// C4 E1 FB 90 /r (VEX.L1.F3.0F.W1)
+	vex_byte1: u8 = 0xC4
+	vex_byte2: u8 = 0xE1 // R=1, X=1, B=1, map=0x1 (0F)
+	vex_byte3: u8 = 0xFB // W=1, vvvv=1111b, L=0, pp=11 (F3)
+
+	modrm := encode_modrm(3, u8(dst), u8(src))
+
+	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x90, modrm})
+}
+
+// Bitwise XOR of ZMM registers
+vpxordq_zmm_zmm_zmm :: proc(dst: ZMMRegister, src1: ZMMRegister, src2: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src1_b, src1_b_prime, src1_reg := encode_zmm(src1)
+	src2_v_prime := (u8(src2) & 0x10) != 0
+	src2_vvvv := u8(src2) & 0xF
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src1_b,
+		dst_r_prime,
+		0x01, // 0F escape
+		true, // W=1 (64-bit)
+		src2_vvvv,
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x02, // L'L=10 (512-bit)
+		src1_b_prime,
+		src2_v_prime,
+		0, // No masking
+	)
+
+	modrm := encode_modrm(3, dst_reg, src1_reg)
+
+	write(evex)
+	write([]u8{0xEF, modrm}) // EF /r
+}
+
+// Scatter dword values with dword indices
+vpscatterdd_ymm_m :: proc(
+	index: YMMRegister,
+	base: Register64,
+	scale: u8,
+	src: YMMRegister,
+	mask: MaskRegister,
+) {
+	src_r := (u8(src) & 0x8) != 0
+	src_r_prime := (u8(src) & 0x10) != 0
+	src_reg := u8(src) & 0x7
+
+	index_v_prime := (u8(index) & 0x10) != 0
+	index_reg := u8(index) & 0x7
+
+	base_b := (u8(base) & 0x8) != 0
+	base_b_prime := (u8(base) & 0x10) != 0
+
+	mask_reg := u8(mask) & 0x7
+
+	// EVEX.256.66.0F38.W0
+	evex := encode_evex(
+		src_r,
+		false,
+		base_b,
+		src_r_prime,
+		0x02, // 0F 38 escape
+		false, // W=0 (32-bit)
+		0xF, // vvvv = 1111b (unused)
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x01, // L'L=01 (256-bit)
+		base_b_prime,
+		index_v_prime,
+		mask_reg,
+	)
+	write(evex)
+	write([]u8{0xA0})
+
+	// Create appropriate AddressComponents structure
+	addr := AddressComponents {
+		base         = base,
+		index        = index,
+		scale        = scale,
+		displacement = 0,
+	}
+
+	// Let the write_memory_address handle the ModR/M + SIB
+	write_memory_address(addr, src_reg, 0, false)
+}
+
+// Scatter qword values with dword indices
+vpscatterdq_ymm_m :: proc(
+	index: XMMRegister,
+	base: Register64,
+	scale: u8,
+	src: YMMRegister,
+	mask: MaskRegister,
+) {
+	src_r := (u8(src) & 0x8) != 0
+	src_r_prime := (u8(src) & 0x10) != 0
+	src_reg := u8(src) & 0x7
+
+	index_v_prime := (u8(index) & 0x10) != 0
+	index_reg := u8(index) & 0x7
+
+	base_b := (u8(base) & 0x8) != 0
+	base_b_prime := (u8(base) & 0x10) != 0
+
+	mask_reg := u8(mask) & 0x7
+
+	// EVEX.256.66.0F38.W1
+	evex := encode_evex(
+		src_r,
+		false,
+		base_b,
+		src_r_prime,
+		0x02, // 0F 38 escape
+		true, // W=1 (64-bit)
+		0xF, // vvvv = 1111b (unused)
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x01, // L'L=01 (256-bit)
+		base_b_prime,
+		index_v_prime,
+		mask_reg,
+	)
+	write(evex)
+	write([]u8{0xA0})
+
+	// Create appropriate AddressComponents structure
+	addr := AddressComponents {
+		base         = base,
+		index        = index,
+		scale        = scale,
+		displacement = 0,
+	}
+
+	// Let the write_memory_address handle the ModR/M + SIB
+	write_memory_address(addr, src_reg, 0, false)
+}
+
+// Scatter dword values with qword indices (continued)
+vpscatterqd_ymm_m :: proc(
+	index: YMMRegister,
+	base: Register64,
+	scale: u8,
+	src: XMMRegister,
+	mask: MaskRegister,
+) {
+	src_r := (u8(src) & 0x8) != 0
+	src_r_prime := (u8(src) & 0x10) != 0
+	src_reg := u8(src) & 0x7
+
+	index_v_prime := (u8(index) & 0x10) != 0
+	index_reg := u8(index) & 0x7
+
+	base_b := (u8(base) & 0x8) != 0
+	base_b_prime := (u8(base) & 0x10) != 0
+
+	mask_reg := u8(mask) & 0x7
+
+	// EVEX.256.66.0F38.W0
+	evex := encode_evex(
+		src_r,
+		false,
+		base_b,
+		src_r_prime,
+		0x02, // 0F 38 escape
+		false, // W=0 (32-bit)
+		0xF, // vvvv = 1111b (unused)
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x01, // L'L=01 (256-bit)
+		base_b_prime,
+		index_v_prime,
+		mask_reg,
+	)
+	write(evex)
+	write([]u8{0xA1})
+
+	// Create appropriate AddressComponents structure
+	addr := AddressComponents {
+		base         = base,
+		index        = index,
+		scale        = scale,
+		displacement = 0,
+	}
+
+	// Let the write_memory_address handle the ModR/M + SIB
+	write_memory_address(addr, src_reg, 0, false)
+}
+
+// Compress packed dwords from source to destination
+vpcompressd_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister, mask: MaskRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	dst_r_prime := (u8(dst) & 0x10) != 0
+	dst_reg := u8(dst) & 0x7
+
+	src_b := (u8(src) & 0x8) != 0
+	src_b_prime := (u8(src) & 0x10) != 0
+	src_reg := u8(src) & 0x7
+
+	mask_reg := u8(mask) & 0x7
+
+	// EVEX.256.66.0F38.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x02, // 0F 38 escape
+		false, // W=0 (32-bit)
+		0xF, // vvvv = 1111b (unused)
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x01, // L'L=01 (256-bit)
+		src_b_prime,
+		false, // v' = 0 (unused)
+		mask_reg,
+	)
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x8B, modrm}) // EVEX 8B /r
+}
+
+// Compress packed qwords from source to destination
+vpcompressq_ymm_ymm :: proc(dst: YMMRegister, src: YMMRegister, mask: MaskRegister) {
+	dst_r := (u8(dst) & 0x8) != 0
+	dst_r_prime := (u8(dst) & 0x10) != 0
+	dst_reg := u8(dst) & 0x7
+
+	src_b := (u8(src) & 0x8) != 0
+	src_b_prime := (u8(src) & 0x10) != 0
+	src_reg := u8(src) & 0x7
+
+	mask_reg := u8(mask) & 0x7
+
+	// EVEX.256.66.0F38.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x02, // 0F 38 escape
+		true, // W=1 (64-bit)
+		0xF, // vvvv = 1111b (unused)
+		0x01, // pp=01 (66 prefix)
+		false, // z=0 (no zeroing)
+		0x01, // L'L=01 (256-bit)
+		src_b_prime,
+		false, // v' = 0 (unused)
+		mask_reg,
+	)
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x8B, modrm}) // EVEX 8B /r
+}
+
+// ZMM Register Operations
+// Move aligned dwords
+vmovdqa32_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src_b, src_b_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.66.0F.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x01,
+		false,
+		0,
+		0x01,
+		false,
+		0x02,
+		src_b_prime,
+		false,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x6F, modrm}) // 6F /r
+}
+
+// Move aligned dwords from memory
+vmovdqa32_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+
+	// EVEX.512.66.0F.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		false,
+		dst_r_prime,
+		0x01,
+		false,
+		0,
+		0x01,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x6F})
+}
+
+// Move aligned dwords to memory
+vmovdqa32_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
+	src_r, src_r_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.66.0F.W0
+	evex := encode_evex(
+		src_r,
+		false,
+		false,
+		src_r_prime,
+		0x01,
+		false,
+		0,
+		0x01,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x7F})
+}
+
+// Move aligned qwords
+vmovdqa64_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src_b, src_b_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x01,
+		true,
+		0,
+		0x01,
+		false,
+		0x02,
+		src_b_prime,
+		false,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x6F, modrm}) // 6F /r
+}
+
+// Move aligned qwords from memory
+vmovdqa64_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		false,
+		dst_r_prime,
+		0x01,
+		true,
+		0,
+		0x01,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x6F})
+}
+
+// Move aligned qwords to memory
+vmovdqa64_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
+	src_r, src_r_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		src_r,
+		false,
+		false,
+		src_r_prime,
+		0x01,
+		true,
+		0,
+		0x01,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x7F})
+}
+
+// Move unaligned dwords
+vmovdqu32_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src_b, src_b_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.F3.0F.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x01,
+		false,
+		0,
+		0x02,
+		false,
+		0x02,
+		src_b_prime,
+		false,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x6F, modrm}) // 6F /r
+}
+
+// Move unaligned dwords from memory
+vmovdqu32_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+
+	// EVEX.512.F3.0F.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		false,
+		dst_r_prime,
+		0x01,
+		false,
+		0,
+		0x02,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x6F})
+}
+
+// Move unaligned dwords to memory
+vmovdqu32_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
+	src_r, src_r_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.F3.0F.W0
+	evex := encode_evex(
+		src_r,
+		false,
+		false,
+		src_r_prime,
+		0x01,
+		false,
+		0,
+		0x02,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x7F})
+}
+
+// Move unaligned qwords
+vmovdqu64_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src_b, src_b_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.F3.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x01,
+		true,
+		0,
+		0x02,
+		false,
+		0x02,
+		src_b_prime,
+		false,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x6F, modrm}) // 6F /r
+}
+
+// Move unaligned qwords from memory
+vmovdqu64_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+
+	// EVEX.512.F3.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		false,
+		dst_r_prime,
+		0x01,
+		true,
+		0,
+		0x02,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x6F})
+}
+
+// Move unaligned qwords to memory
+vmovdqu64_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
+	src_r, src_r_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.F3.0F.W1
+	evex := encode_evex(
+		src_r,
+		false,
+		false,
+		src_r_prime,
+		0x01,
+		true,
+		0,
+		0x02,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x7F})
+}
+
+// Move aligned packed single-precision (ZMM)
+vmovaps_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src_b, src_b_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.0F.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x01,
+		false,
+		0,
+		0x00,
+		false,
+		0x02,
+		src_b_prime,
+		false,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x28, modrm}) // 28 /r
+}
+
+// Move aligned packed single-precision from memory (ZMM)
+vmovaps_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+
+	// EVEX.512.0F.W0
+	evex := encode_evex(
+		dst_r,
+		false,
+		false,
+		dst_r_prime,
+		0x01,
+		false,
+		0,
+		0x00,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x28})
+}
+
+// Move aligned packed single-precision to memory (ZMM)
+vmovaps_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
+	src_r, src_r_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.0F.W0
+	evex := encode_evex(
+		src_r,
+		false,
+		false,
+		src_r_prime,
+		0x01,
+		false,
+		0,
+		0x00,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x29})
+}
+
+// Move aligned packed double-precision (ZMM)
+vmovapd_zmm_zmm :: proc(dst: ZMMRegister, src: ZMMRegister) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+	src_b, src_b_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		src_b,
+		dst_r_prime,
+		0x01,
+		true,
+		0,
+		0x01,
+		false,
+		0x02,
+		src_b_prime,
+		false,
+		0,
+	)
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	write(evex)
+	write([]u8{0x28, modrm}) // 28 /r
+}
+
+// Move aligned packed double-precision from memory (ZMM)
+vmovapd_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
+	dst_r, dst_r_prime, dst_reg := encode_zmm(dst)
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		dst_r,
+		false,
+		false,
+		dst_r_prime,
+		0x01,
+		true,
+		0,
+		0x01,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, dst_reg, 0, false)
+	write([]u8{0x28})
+}
+
+// Move aligned packed double-precision to memory (ZMM)
+vmovapd_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
+	src_r, src_r_prime, src_reg := encode_zmm(src)
+
+	// EVEX.512.66.0F.W1
+	evex := encode_evex(
+		src_r,
+		false,
+		false,
+		src_r_prime,
+		0x01,
+		true,
+		0,
+		0x01,
+		false,
+		0x02,
+		false,
+		false,
+		0,
+	)
+	write(evex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, src_reg, 0, false)
+	write([]u8{0x29})
+}
+
+// AVX-512 Mask Register Operations
+// Move mask register
+kmovw :: proc(dst: MaskRegister, src: MaskRegister) {
+	// VEX.L0.F3.0F
+	vex := []u8{0xC4, 0xE1, 0x32, 0x90}
+	modrm := encode_modrm(3, u8(dst), u8(src))
+
+	write(vex)
+	write([]u8{modrm})
+}
+
+// Move 32-bit register to mask register
+kmovw_k_r32 :: proc(dst: MaskRegister, src: Register32) {
+	src_b := (u8(src) & 0x8) != 0
+
+	// VEX.L0.F3.0F.W0
+	vex_byte1: u8 = 0xC4
+	vex_byte2: u8 = ((~u8(0) & 1) << 7) | ((~u8(0) & 1) << 6) | ((~u8(src_b) & 1) << 5) | 0x01
+	vex_byte3: u8 = 0x32 // F3 0F
+
+	modrm := encode_modrm(3, u8(dst), u8(src) & 0x7)
+
+	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x93, modrm})
+}
+
+// Move mask register to 32-bit register
+kmovw_r32_k :: proc(dst: Register32, src: MaskRegister) {
+	dst_b := (u8(dst) & 0x8) != 0
+
+	// VEX.L0.F3.0F.W0
+	vex_byte1: u8 = 0xC4
+	vex_byte2: u8 = ((~u8(0) & 1) << 7) | ((~u8(0) & 1) << 6) | ((~u8(dst_b) & 1) << 5) | 0x01
+	vex_byte3: u8 = 0x32 // F3 0F
+
+	modrm := encode_modrm(3, u8(src), u8(dst) & 0x7)
+
+	write([]u8{vex_byte1, vex_byte2, vex_byte3, 0x92, modrm})
+}
+
+// Move 16 bits from memory to mask register
+kmovw_k_m16 :: proc(dst: MaskRegister, mem: MemoryAddress) {
+	// VEX.L0.F3.0F
+	vex := []u8{0xC4, 0xE1, 0x32, 0x90}
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, u8(dst), 0, false)
+}
+
+// Move 16 bits from mask register to memory
+kmovw_m16_k :: proc(mem: MemoryAddress, src: MaskRegister) {
+	// VEX.L0.F3.0F
+	vex := []u8{0xC4, 0xE1, 0x32, 0x91}
+	write(vex)
+
+	// Use write_memory_address for proper memory operand handling
+	write_memory_address(mem, u8(src), 0, false)
+}
+
+// Bitwise OR of mask registers
+korw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister) {
+	// VEX.L0.66.0F
+	vex := []u8{0xC4, 0xE1, 0x72, 0x45}
+	modrm := encode_modrm(3, u8(dst), u8(src2))
+
+	write(vex)
+	write([]u8{modrm, u8(src1) & 0x7}) // VEX.vvvv = src1
+}
+
+// Bitwise AND of mask registers
+kandw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister) {
+	// VEX.L0.66.0F
+	vex := []u8{0xC4, 0xE1, 0x72, 0x41}
+	modrm := encode_modrm(3, u8(dst), u8(src2))
+
+	write(vex)
+	write([]u8{modrm, u8(src1) & 0x7}) // VEX.vvvv = src1
+}
+
+// Bitwise XOR of mask registers
+kxorw :: proc(dst: MaskRegister, src1: MaskRegister, src2: MaskRegister) {
+	// VEX.L0.66.0F
+	vex := []u8{0xC4, 0xE1, 0x72, 0x47}
+	modrm := encode_modrm(3, u8(dst), u8(src2))
+
+	write(vex)
+	write([]u8{modrm, u8(src1) & 0x7}) // VEX.vvvv = src1
+}
+
+// Bitwise NOT of mask register
+knotw :: proc(dst: MaskRegister, src: MaskRegister) {
+	// VEX.L0.F2.0F
+	vex := []u8{0xC4, 0xE1, 0x74, 0x44}
+	modrm := encode_modrm(3, u8(dst), u8(src))
+
+	write(vex)
+	write([]u8{modrm})
+}
+
+// Perform one round of AES encryption
+aesenc :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0x38, 0xDC, modrm}) // 66 REX 0F 38 DC /r
+	} else {
+		write([]u8{0x66, 0x0F, 0x38, 0xDC, modrm}) // 66 0F 38 DC /r
+	}
+}
+
+// Perform one round of AES decryption
+aesdec :: proc(dst: XMMRegister, src: XMMRegister) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0x38, 0xDE, modrm}) // 66 REX 0F 38 DE /r
+	} else {
+		write([]u8{0x66, 0x0F, 0x38, 0xDE, modrm}) // 66 0F 38 DE /r
+	}
+}
+
+// Carry-less multiplication quadword
+pclmulqdq :: proc(dst: XMMRegister, src: XMMRegister, imm: u8) {
+	rex_r, dst_reg := encode_xmm(dst)
+	rex_b, src_reg := encode_xmm(src)
+
+	rex: u8 = 0x40 // REX
+	if rex_r do rex |= 0x04 // REX.R
+	if rex_b do rex |= 0x01 // REX.B
+
+	modrm := encode_modrm(3, dst_reg, src_reg)
+
+	if rex != 0x40 {
+		write([]u8{0x66, rex, 0x0F, 0x3A, 0x44, modrm, imm}) // 66 REX 0F 3A 44 /r ib
+	} else {
+		write([]u8{0x66, 0x0F, 0x3A, 0x44, modrm, imm}) // 66 0F 3A 44 /r ib
+	}
+}
 
 // Accumulate CRC32 value
 crc32_r64_r64 :: proc(dst: Register64, src: Register64) {
