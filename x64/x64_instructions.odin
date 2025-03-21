@@ -7470,29 +7470,33 @@ rdseed_r64 :: proc(reg: Register64) {
 // ==================================
 // MEMORY MANAGEMENT INSTRUCTIONS
 // ==================================
-
-// Prefetch data into all levels of cache
-prefetcht0 :: proc(mem: MemoryAddress) {
-	write_memory_address(mem, 1, 0x0F, false)
-	write([]u8{0x18})
+// Prefetch data into non-temporal cache structure
+prefetchnta :: proc(mem: MemoryAddress) {
+	// 0x0F 0x18 is the two-byte opcode for prefetch instructions
+	// The reg field (0) specifies the prefetch variant (NTA)
+	write_memory_address(mem, 0, 0, false)
+	write([]u8{0x0F, 0x18})
 }
 
 // Prefetch data into level 1 cache and higher
+prefetcht0 :: proc(mem: MemoryAddress) {
+	// The reg field (1) specifies the prefetch variant (T0)
+	write_memory_address(mem, 1, 0, false)
+	write([]u8{0x0F, 0x18})
+}
+
+// Prefetch data into level 2 cache and higher
 prefetcht1 :: proc(mem: MemoryAddress) {
-	write_memory_address(mem, 2, 0x0F, false)
-	write([]u8{0x18})
+	// The reg field (2) specifies the prefetch variant (T1)
+	write_memory_address(mem, 2, 0, false)
+	write([]u8{0x0F, 0x18})
 }
 
 // Prefetch data into level 3 cache and higher
 prefetcht2 :: proc(mem: MemoryAddress) {
-	write_memory_address(mem, 3, 0x0F, false)
-	write([]u8{0x18})
-}
-
-// Prefetch data into non-temporal cache structure
-prefetchnta :: proc(mem: MemoryAddress) {
-	write_memory_address(mem, 0, 0x0F, false)
-	write([]u8{0x18})
+	// The reg field (3) specifies the prefetch variant (T2)
+	write_memory_address(mem, 3, 0, false)
+	write([]u8{0x0F, 0x18})
 }
 
 // Flush cache line containing address
@@ -7516,20 +7520,13 @@ clwb_m64 :: proc(mem: MemoryAddress) {
 }
 
 // Monitor/MWAIT
-// Setup monitor address range
-monitor_r64_r64_r64 :: proc(reg1: Register64, reg2: Register64, reg3: Register64) {
-	// MONITOR uses fixed registers: EAX (address), ECX (extensions), EDX (hints)
-	// reg1, reg2, reg3 are ignored in this simplified implementation
+monitor :: proc() {
 	write([]u8{0x0F, 0x01, 0xC8}) // 0F 01 C8
 }
 
-// Monitor wait
-mwait_r64_r64 :: proc(reg1: Register64, reg2: Register64) {
-	// MWAIT uses fixed registers: EAX (hints), ECX (extensions)
-	// reg1, reg2 are ignored in this simplified implementation
+mwait :: proc() {
 	write([]u8{0x0F, 0x01, 0xC9}) // 0F 01 C9
 }
-
 // Memory Barriers
 // Memory fence (serializing all memory operations)
 mfence :: proc() {
