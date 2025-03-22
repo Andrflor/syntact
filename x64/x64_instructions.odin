@@ -2375,6 +2375,507 @@ idiv_r8 :: proc(reg: Register8) {
 	}
 }
 
+// 64-bit Memory Operand Arithmetic Operations
+
+// ADD variants
+// Add memory to register
+add_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x03}, true) // REX.W + 03 /r
+}
+
+// Add register to memory
+add_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x01}, true) // REX.W + 01 /r
+}
+
+// Add immediate to memory
+add_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 0, [1]u8{0x83}, true) // REX.W + 83 /0 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 0, [1]u8{0x81}, true) // REX.W + 81 /0 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// Add sign-extended 8-bit immediate to 64-bit register
+add_r64_imm8 :: proc(reg: Register64, imm: u8) {
+	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
+	modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0 (ADD opcode extension), r/m=reg
+	write([]u8{rex, 0x83, modrm, imm}) // REX.W 83 /0 ib
+}
+
+// SUB variants
+// Subtract memory from register
+sub_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x2B}, true) // REX.W + 2B /r
+}
+
+// Subtract register from memory
+sub_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x29}, true) // REX.W + 29 /r
+}
+
+// Subtract immediate from memory
+sub_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 5, [1]u8{0x83}, true) // REX.W + 83 /5 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 5, [1]u8{0x81}, true) // REX.W + 81 /5 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// Subtract sign-extended 8-bit immediate from 64-bit register
+sub_r64_imm8 :: proc(reg: Register64, imm: u8) {
+	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
+	modrm := encode_modrm(3, 5, u8(reg) & 0x7) // mod=11, reg=5 (SUB opcode extension), r/m=reg
+	write([]u8{rex, 0x83, modrm, imm}) // REX.W 83 /5 ib
+}
+
+// MUL/IMUL variants
+// Multiply register by memory (unsigned)
+mul_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 4, [1]u8{0xF7}, true) // REX.W + F7 /4
+}
+
+// Multiply register by memory (signed)
+imul_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 5, [1]u8{0xF7}, true) // REX.W + F7 /5
+}
+
+// Signed multiply register by memory
+imul_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [2]u8{0x0F, 0xAF}, true) // REX.W + 0F AF /r
+}
+
+// DIV/IDIV variants
+// Divide RDX:RAX by memory (unsigned)
+div_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 6, [1]u8{0xF7}, true) // REX.W + F7 /6
+}
+
+// Divide RDX:RAX by memory (signed)
+idiv_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 7, [1]u8{0xF7}, true) // REX.W + F7 /7
+}
+
+// INC/DEC/NEG variants
+// Increment memory
+inc_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 0, [1]u8{0xFF}, true) // REX.W + FF /0
+}
+
+// Decrement memory
+dec_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 1, [1]u8{0xFF}, true) // REX.W + FF /1
+}
+
+// Negate memory
+neg_m64 :: proc(mem: MemoryAddress) {
+	write_memory_address(mem, 3, [1]u8{0xF7}, true) // REX.W + F7 /3
+}
+
+// ADC/SBB variants
+// Add with carry memory to register
+adc_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x13}, true) // REX.W + 13 /r
+}
+
+// Add with carry register to memory
+adc_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x11}, true) // REX.W + 11 /r
+}
+
+// Add with carry immediate to memory
+adc_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 2, [1]u8{0x83}, true) // REX.W + 83 /2 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 2, [1]u8{0x81}, true) // REX.W + 81 /2 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// Subtract with borrow memory from register
+sbb_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x1B}, true) // REX.W + 1B /r
+}
+
+// Subtract with borrow register from memory
+sbb_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x19}, true) // REX.W + 19 /r
+}
+
+// Subtract with borrow immediate from memory
+sbb_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 3, [1]u8{0x83}, true) // REX.W + 83 /3 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 3, [1]u8{0x81}, true) // REX.W + 81 /3 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// 32-bit Memory Operand Arithmetic Operations
+
+// ADD variants
+// Add memory to register
+add_r32_m32 :: proc(dst: Register32, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x03}, false) // 03 /r
+}
+
+// Add register to memory
+add_m32_r32 :: proc(mem: MemoryAddress, src: Register32) {
+	write_memory_address(mem, u8(src), [1]u8{0x01}, false) // 01 /r
+}
+
+// Add immediate to memory
+add_m32_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 0, [1]u8{0x83}, false) // 83 /0 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 0, [1]u8{0x81}, false) // 81 /0 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// Add sign-extended 8-bit immediate to 32-bit register
+add_r32_imm8 :: proc(reg: Register32, imm: u8) {
+	need_rex := (u8(reg) & 0x8) != 0
+	rex: u8 = 0x41 if need_rex else 0 // REX.B if needed
+	modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0 (ADD opcode extension), r/m=reg
+
+	if need_rex {
+		write([]u8{rex, 0x83, modrm, imm}) // REX 83 /0 ib
+	} else {
+		write([]u8{0x83, modrm, imm}) // 83 /0 ib
+	}
+}
+
+// SUB variants
+// Subtract memory from register
+sub_r32_m32 :: proc(dst: Register32, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x2B}, false) // 2B /r
+}
+
+// Subtract register from memory
+sub_m32_r32 :: proc(mem: MemoryAddress, src: Register32) {
+	write_memory_address(mem, u8(src), [1]u8{0x29}, false) // 29 /r
+}
+
+// Subtract immediate from memory
+sub_m32_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 5, [1]u8{0x83}, false) // 83 /5 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 5, [1]u8{0x81}, false) // 81 /5 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// 16-bit Memory Operand Arithmetic Operations
+
+// ADD variants
+// Add memory to register
+add_r16_m16 :: proc(dst: Register16, mem: MemoryAddress) {
+	// Use 66h prefix for 16-bit operations
+	write([]u8{0x66})
+	write_memory_address(mem, u8(dst), [1]u8{0x03}, false) // 66 03 /r
+}
+
+// Add register to memory
+add_m16_r16 :: proc(mem: MemoryAddress, src: Register16) {
+	// Use 66h prefix for 16-bit operations
+	write([]u8{0x66})
+	write_memory_address(mem, u8(src), [1]u8{0x01}, false) // 66 01 /r
+}
+
+// Add immediate to memory
+add_m16_imm16 :: proc(mem: MemoryAddress, imm: u16) {
+	// Use 66h prefix for 16-bit operations
+	write([]u8{0x66})
+
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 0, [1]u8{0x83}, false) // 66 83 /0 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 0, [1]u8{0x81}, false) // 66 81 /0 iw
+
+		// Encode immediate value
+		write([]u8{u8(imm & 0xFF), u8((imm >> 8) & 0xFF)})
+	}
+}
+
+// 8-bit Memory Operand Arithmetic Operations
+
+// ADD variants
+// Add memory to register
+add_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
+	has_high_byte := u8(dst) >= 16
+	rm := u8(dst) & 0xF
+
+	if has_high_byte {
+		// High byte registers can't be used with memory operands in 64-bit mode with REX prefix
+		// This is an architecture limitation
+		assert(
+			false,
+			"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
+		)
+	} else {
+		need_rex := rm >= 4 || rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if rm >= 8 {
+			rex |= 0x01 // REX.B
+		}
+
+		if need_rex {
+			write([]u8{rex})
+		}
+		write_memory_address(mem, rm & 0x7, [1]u8{0x02}, false, need_rex) // 02 /r
+	}
+}
+
+// Add register to memory
+add_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
+	has_high_byte := u8(src) >= 16
+	rm := u8(src) & 0xF
+
+	if has_high_byte {
+		// High byte registers can't be used with memory operands in 64-bit mode with REX prefix
+		assert(
+			false,
+			"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
+		)
+	} else {
+		need_rex := rm >= 4 || rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if rm >= 8 {
+			rex |= 0x04 // REX.R
+		}
+
+		if need_rex {
+			write([]u8{rex})
+		}
+		write_memory_address(mem, rm & 0x7, [1]u8{0x00}, false, need_rex) // 00 /r
+	}
+}
+
+// Add immediate to memory
+add_m8_imm8 :: proc(mem: MemoryAddress, imm: u8) {
+	write_memory_address(mem, 0, [1]u8{0x80}, false) // 80 /0 ib
+	write([]u8{imm})
+}
+
+// Note: We don't need special functions for AL/AX/EAX/RAX operations
+// since they're already handled by the general register functions.
+// The assembler automatically uses optimal encodings when these
+// registers are passed to the general-purpose functions.
+
+// Logical Operations (Missing Memory Variants)
+
+// AND variants
+and_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x23}, true) // REX.W + 23 /r
+}
+
+and_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x21}, true) // REX.W + 21 /r
+}
+
+and_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 4, [1]u8{0x83}, true) // REX.W + 83 /4 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 4, [1]u8{0x81}, true) // REX.W + 81 /4 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// OR variants
+or_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x0B}, true) // REX.W + 0B /r
+}
+
+or_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x09}, true) // REX.W + 09 /r
+}
+
+or_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 1, [1]u8{0x83}, true) // REX.W + 83 /1 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 1, [1]u8{0x81}, true) // REX.W + 81 /1 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// XOR variants
+xor_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x33}, true) // REX.W + 33 /r
+}
+
+xor_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x31}, true) // REX.W + 31 /r
+}
+
+xor_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 6, [1]u8{0x83}, true) // REX.W + 83 /6 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 6, [1]u8{0x81}, true) // REX.W + 81 /6 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// CMP variants
+cmp_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x3B}, true) // REX.W + 3B /r
+}
+
+cmp_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
+	write_memory_address(mem, u8(src), [1]u8{0x39}, true) // REX.W + 39 /r
+}
+
+cmp_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	// Special handling for imm8 if possible (smaller encoding)
+	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
+		write_memory_address(mem, 7, [1]u8{0x83}, true) // REX.W + 83 /7 ib
+		write([]u8{u8(imm & 0xFF)})
+	} else {
+		write_memory_address(mem, 7, [1]u8{0x81}, true) // REX.W + 81 /7 id
+
+		// Encode immediate value
+		write(
+			[]u8 {
+				u8(imm & 0xFF),
+				u8((imm >> 8) & 0xFF),
+				u8((imm >> 16) & 0xFF),
+				u8((imm >> 24) & 0xFF),
+			},
+		)
+	}
+}
+
+// TEST variants
+test_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
+	write_memory_address(mem, u8(dst), [1]u8{0x85}, true) // REX.W + 85 /r
+}
+
+test_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
+	write_memory_address(mem, 0, [1]u8{0xF7}, true) // REX.W + F7 /0 id
+
+	// Encode immediate value
+	write(
+		[]u8 {
+			u8(imm & 0xFF),
+			u8((imm >> 8) & 0xFF),
+			u8((imm >> 16) & 0xFF),
+			u8((imm >> 24) & 0xFF),
+		},
+	)
+}
+
 // ==================================
 // LOGICAL INSTRUCTIONS
 // ==================================
