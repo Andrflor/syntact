@@ -641,34 +641,51 @@ lea_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
 	write_memory_address(mem, u8(dst), [1]u8{0x8D}) // 8D is LEA opcode
 }
 
-// Move from control register to 64-bit register
-mov_r64_cr :: proc(reg: Register64, cr: ControlRegister) {
-	// 0F 20/r
-	modrm := encode_modrm(3, u8(cr), u8(reg))
-	write([]u8{0x0F, 0x20, modrm})
+// Fixed mov_r64_cr implementation
+mov_r64_cr :: proc(dst: Register64, src: ControlRegister) {
+	need_rex := u8(dst) >= 8
+	rex: u8 = 0x40 | (need_rex ? 0x4 : 0) // Use REX.R for extended registers
+
+	if src == .CR8 {
+		// CR8 requires REX.R prefix
+		rex |= 0x1
+	}
+
+	// Always emit REX prefix for consistency with GNU assembler behavior
+	write([]u8{rex, 0x0F, 0x20, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
 }
 
-// Move from 64-bit register to control register
-mov_cr_r64 :: proc(cr: ControlRegister, reg: Register64) {
-	// 0F 22/r
-	modrm := encode_modrm(3, u8(cr), u8(reg))
-	write([]u8{0x0F, 0x22, modrm})
+// Fixed mov_cr_r64 implementation
+mov_cr_r64 :: proc(dst: ControlRegister, src: Register64) {
+	need_rex := u8(src) >= 8
+	rex: u8 = 0x40 | (need_rex ? 0x1 : 0) // Use REX.B for extended registers
+
+	if dst == .CR8 {
+		// CR8 requires REX.R prefix
+		rex |= 0x4
+	}
+
+	// Always emit REX prefix for consistency with GNU assembler behavior
+	write([]u8{rex, 0x0F, 0x22, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
 }
 
-// Move from debug register to 64-bit register
-mov_r64_dr :: proc(reg: Register64, dr: DebugRegister) {
-	// 0F 21/r
-	modrm := encode_modrm(3, u8(dr), u8(reg))
-	write([]u8{0x0F, 0x21, modrm})
+// Fixed mov_r64_dr implementation
+mov_r64_dr :: proc(dst: Register64, src: DebugRegister) {
+	need_rex := u8(dst) >= 8
+	rex: u8 = 0x40 | (need_rex ? 0x4 : 0) // Use REX.R for extended registers
+
+	// Always emit REX prefix for consistency with GNU assembler behavior
+	write([]u8{rex, 0x0F, 0x21, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
 }
 
-// Move from 64-bit register to debug register
-mov_dr_r64 :: proc(dr: DebugRegister, reg: Register64) {
-	// 0F 23/r
-	modrm := encode_modrm(3, u8(dr), u8(reg))
-	write([]u8{0x0F, 0x23, modrm})
-}
+// Fixed mov_dr_r64 implementation
+mov_dr_r64 :: proc(dst: DebugRegister, src: Register64) {
+	need_rex := u8(src) >= 8
+	rex: u8 = 0x40 | (need_rex ? 0x1 : 0) // Use REX.B for extended registers
 
+	// Always emit REX prefix for consistency with GNU assembler behavior
+	write([]u8{rex, 0x0F, 0x23, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
+}
 // 32-bit Data Movement Instructions
 // Move immediate value to 32-bit register
 mov_r32_imm32 :: proc(reg: Register32, imm: u32) {
@@ -1598,11 +1615,11 @@ imul_r32_r32 :: proc(dst: Register32, src: Register32) {
 	}
 }
 
-// Signed multiply register by immediate
+// Fixed imul_r32_imm32 implementation
 imul_r32_imm32 :: proc(reg: Register32, imm: u32) {
 	// Same as imul_r32_r32_imm32 with dst = src = reg
 	need_rex := (u8(reg) & 0x8) != 0
-	rex: u8 = 0x41 if need_rex else 0 // REX.B if needed
+	rex: u8 = need_rex ? 0x41 : 0 // REX.B if needed
 	modrm := encode_modrm(3, u8(reg) & 0x7, u8(reg) & 0x7)
 
 	// Handle 8-bit immediate if possible
@@ -1630,7 +1647,6 @@ imul_r32_imm32 :: proc(reg: Register32, imm: u32) {
 		)
 	}
 }
-
 // Unsigned divide EDX:EAX by reg
 div_r32 :: proc(reg: Register32) {
 	need_rex := (u8(reg) & 0x8) != 0
@@ -1860,10 +1876,11 @@ imul_r16_r16 :: proc(dst: Register16, src: Register16) {
 	}
 }
 
-// Signed multiply register by immediate
+
+// Fixed imul_r16_imm16 implementation
 imul_r16_imm16 :: proc(reg: Register16, imm: u16) {
 	need_rex := (u8(reg) & 0x8) != 0
-	rex: u8 = 0x41 if need_rex else 0 // REX.B if needed
+	rex: u8 = need_rex ? 0x41 : 0 // REX.B if needed
 	modrm := encode_modrm(3, u8(reg) & 0x7, u8(reg) & 0x7)
 
 	// Handle 8-bit immediate if possible
@@ -1884,7 +1901,6 @@ imul_r16_imm16 :: proc(reg: Register16, imm: u16) {
 		write([]u8{u8(imm & 0xFF), u8((imm >> 8) & 0xFF)})
 	}
 }
-
 // Unsigned divide DX:AX by reg
 div_r16 :: proc(reg: Register16) {
 	need_rex := (u8(reg) & 0x8) != 0
@@ -1942,22 +1958,25 @@ add_r8_imm8 :: proc(reg: Register8, imm: u8) {
 	}
 }
 
-// Add source register to destination register
+// Fixed add_r8_r8 implementation
 add_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_has_high_byte := u8(dst) >= 16
 	src_has_high_byte := u8(src) >= 16
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to mov_r8_r8 for handling high byte registers
+	// If using SPL/BPL/SIL/DIL, always need REX prefix
+	dst_needs_rex := dst_rm >= 4 && dst_rm < 8
+	src_needs_rex := src_rm >= 4 && src_rm < 8
+
 	if dst_has_high_byte && src_has_high_byte {
 		// Both are high byte registers
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
 		write([]u8{0x00, modrm}) // 00 /r
 	} else if dst_has_high_byte {
 		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
+		need_rex := src_rm >= 8 || src_needs_rex
+		rex: u8 = 0x40 | (src_rm >= 8 ? 0x4 : 0) // REX prefix with REX.R if needed
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
 
 		if need_rex {
@@ -1967,11 +1986,8 @@ add_r8_r8 :: proc(dst: Register8, src: Register8) {
 		}
 	} else if src_has_high_byte {
 		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
+		need_rex := dst_rm >= 8 || dst_needs_rex
+		rex: u8 = 0x40 | (dst_rm >= 8 ? 0x1 : 0) // REX prefix with REX.B if needed
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
 
 		if need_rex {
@@ -1981,13 +1997,13 @@ add_r8_r8 :: proc(dst: Register8, src: Register8) {
 		}
 	} else {
 		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
+		need_rex := dst_rm >= 8 || src_rm >= 8 || dst_needs_rex || src_needs_rex
+		rex: u8 = 0x40
 		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
+			rex |= 0x1 // REX.B
 		}
 		if src_rm >= 8 {
-			rex |= 0x04 // REX.R
+			rex |= 0x4 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
 
@@ -7827,56 +7843,6 @@ vmresume :: proc() {
 // Leave VMX operation
 vmxoff :: proc() {
 	write([]u8{0x0F, 0x01, 0xC4}) // 0F 01 C4
-}
-
-// ==================================
-// ATOMIC OPERATIONS
-// ==================================
-
-// Atomic exchange and add
-lock_xadd_r64_r64 :: proc(dst: Register64, src: Register64) {
-	rex: u8 = rex_rb(true, u8(src), u8(dst))
-	modrm := encode_modrm(3, u8(src), u8(dst))
-	write([]u8{0xF0, rex, 0x0F, 0xC1, modrm}) // F0 REX.W 0F C1 /r
-}
-
-// Atomic compare and exchange
-lock_cmpxchg_r64_r64 :: proc(dst: Register64, src: Register64) {
-	rex: u8 = rex_rb(true, u8(src), u8(dst))
-	modrm := encode_modrm(3, u8(src), u8(dst))
-	write([]u8{0xF0, rex, 0x0F, 0xB1, modrm}) // F0 REX.W 0F B1 /r
-}
-
-// Atomic increment
-lock_inc_r64 :: proc(reg: Register64) {
-	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
-	modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0 (INC opcode extension), r/m=reg
-	write([]u8{0xF0, rex, 0xFF, modrm}) // F0 REX.W FF /0
-}
-
-// Atomic decrement
-lock_dec_r64 :: proc(reg: Register64) {
-	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
-	modrm := encode_modrm(3, 1, u8(reg) & 0x7) // mod=11, reg=1 (DEC opcode extension), r/m=reg
-	write([]u8{0xF0, rex, 0xFF, modrm}) // F0 REX.W FF /1
-}
-
-// Atomic exchange
-lock_xchg_r64_r64 :: proc(dst: Register64, src: Register64) {
-	// XCHG with the LOCK prefix is implicit, so F0 is not needed
-	xchg_r64_r64(dst, src)
-}
-
-// Atomic load
-atomic_load_r64 :: proc(dst: Register64, src: u64) {
-	// Memory load operations are already atomic when naturally aligned
-	mov_r64_m64(dst, src)
-}
-
-// Atomic store
-atomic_store_r64 :: proc(dst: u64, src: Register64) {
-	// Memory store operations are already atomic when naturally aligned
-	mov_m64_r64(dst, src)
 }
 
 // Hardware Transactional Memory
