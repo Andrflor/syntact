@@ -267,6 +267,23 @@ SegmentRegister :: enum u8 {
 	GS = 5,
 }
 
+ControlRegister :: enum u8 {
+	CR0 = 0,
+	CR2 = 2,
+	CR3 = 3,
+	CR4 = 4,
+	CR8 = 8,
+}
+
+DebugRegister :: enum u8 {
+	DR0 = 0,
+	DR1 = 1,
+	DR2 = 2,
+	DR3 = 3,
+	DR6 = 6,
+	DR7 = 7,
+}
+
 
 // AddressComponents represents SIB-style addressing in x86-64.
 // If only displacement is set (base/index absent), it implies RIP-relative.
@@ -290,7 +307,7 @@ MemoryAddress :: union {
 write_memory_address :: proc(
 	mem: MemoryAddress,
 	reg_field: u8,
-	opcode: u8,
+	opcode: $T/[$N]u8, // Compile-time array parameter
 	set_w: bool = true,
 	force_rex: bool = false,
 ) {
@@ -304,41 +321,26 @@ write_memory_address :: proc(
 		if a.index != nil do has_ext_idx = (u8(a.index.(Register64)) & 0x8) != 0
 	}
 
-	// For 8-, 16-, and 64-bit instructions, a REX prefix is needed if:
-	//   - The operation requires a size override (set_w true),
-	//   - OR any register (reg, base, index) is an extended register,
-	//   - OR force_rex is true (e.g. for special low-byte registers).
 	need_rex := set_w || force_rex || has_ext_reg || has_ext_idx || has_ext_base
 
-	// Handle special MOVBE opcodes:
-	//   opcode == 0x8F → MOVBE r64, m64 (memory read)
-	//   opcode == 0x8E → MOVBE m64, r64 (memory write)
-	is_movbe := opcode == 0x8F || opcode == 0x8E
-	if opcode != 0 {
-		if is_movbe {
-			if need_rex {
-				rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
-				if opcode == 0x8E {
-					// MOVBE m64, r64
-					write([]u8{rex, 0x0F, 0x38, 0xF1})
-				} else {
-					// MOVBE r64, m64
-					write([]u8{rex, 0x0F, 0x38, 0xF0})
-				}
-			} else {
-				if opcode == 0x8E {
-					write([]u8{0x0F, 0x38, 0xF1})
-				} else {
-					write([]u8{0x0F, 0x38, 0xF0})
-				}
+	when N > 0 {
+		if need_rex {
+			rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
+
+			// Create a temporary array with room for the REX prefix plus opcodes
+			tmp: [N + 1]u8
+			tmp[0] = rex
+			#unroll for i in 0 ..< N {
+				tmp[i + 1] = opcode[i]
 			}
+			write(tmp[:])
 		} else {
-			if need_rex {
-				rex := get_rex_prefix(set_w, has_ext_reg, has_ext_idx, has_ext_base)
-				write([]u8{rex, opcode})
-			} else {
-				write([]u8{opcode})
+			// Create a copy of the opcode array that can be sliced
+			tmp: [N]u8
+			#unroll for i in 0 ..< N {
+				tmp[i] = opcode[i]
 			}
+			write(tmp[:])
 		}
 	} else {
 		if need_rex {
@@ -353,6 +355,7 @@ write_memory_address :: proc(
 		write([]u8{encode_modrm(0, reg_field & 0x7, 5)})
 		bytes := transmute([4]u8)i32(a)
 		write(bytes[:])
+
 	case AddressComponents:
 		if a.base == nil && a.index == nil {
 			// RIP-relative addressing.
@@ -362,18 +365,22 @@ write_memory_address :: proc(
 			write(bytes[:])
 			return
 		}
+
 		mod: u8 = 0
 		rm: u8 = 0
 		need_sib :=
 			a.index != nil ||
 			a.base == nil ||
 			(a.base != nil && (u8(a.base.(Register64)) & 0x7) == 4)
+
 		if a.base != nil {
 			rm = u8(a.base.(Register64)) & 0x7
 		} else {
 			rm = 4 // Use SIB byte with no base.
 		}
+
 		disp := a.displacement != nil ? a.displacement.(i32) : 0
+
 		if a.base == nil {
 			mod = 0 // No base: force disp32.
 		} else if disp == 0 && rm != 5 {
@@ -383,8 +390,11 @@ write_memory_address :: proc(
 		} else {
 			mod = 2
 		}
+
 		if need_sib do rm = 4
+
 		write([]u8{encode_modrm(mod, reg_field & 0x7, rm)})
+
 		if need_sib {
 			scale_bits: u8
 			switch a.scale != nil ? a.scale.(u8) : 1 {
@@ -397,10 +407,13 @@ write_memory_address :: proc(
 			case 8:
 				scale_bits = 3
 			}
+
 			index := a.index != nil ? u8(a.index.(Register64)) & 0x7 : 4
 			base := a.base != nil ? u8(a.base.(Register64)) & 0x7 : 5
+
 			write([]u8{encode_sib(scale_bits, index, base)})
 		}
+
 		if mod == 1 {
 			write([]u8{u8(disp)})
 		} else if mod == 2 || (need_sib && a.base == nil) {
@@ -481,12 +494,12 @@ mov_r64_imm64 :: proc(reg: Register64, imm: u64) {
 
 // Load 64-bit value from memory into register
 mov_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
-	write_memory_address(mem, u8(dst), 0x8B) // 8B is MOV r64, r/m64 opcode
+	write_memory_address(mem, u8(dst), [1]u8{0x8B}) // 8B is MOV r64, r/m64 opcode
 }
 
 // Store 64-bit register value to memory
 mov_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
-	write_memory_address(mem, u8(src), 0x89) // 89 is MOV r/m64, r64 opcode
+	write_memory_address(mem, u8(src), [1]u8{0x89}) // 89 is MOV r/m64, r64 opcode
 }
 
 movabs_r64_imm64 :: proc(dst: Register64, imm: i64) {
@@ -569,14 +582,12 @@ movsx_r64_r16 :: proc(dst: Register64, src: Register16) {
 
 // Move big-endian value from memory to register
 movbe_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
-	// Write REX + opcode + ModR/M bytes
-	write_memory_address(mem, u8(dst), 0x8F, true) // Using 0x8F as a special "MOVBE read" flag
+	write_memory_address(mem, u8(dst), [3]u8{0x0F, 0x38, 0xF0}, true)
 }
 
 // Move big-endian value from register to memory
 movbe_m64_r64 :: proc(mem: MemoryAddress, src: Register64) {
-	// Write REX + opcode + ModR/M bytes
-	write_memory_address(mem, u8(src), 0x8E, true) // Using 0x8E as a special "MOVBE write" flag
+	write_memory_address(mem, u8(src), [3]u8{0x0F, 0x38, 0xF1}, true)
 }
 
 // Byte swap (reverse byte order) in a 64-bit register
@@ -627,85 +638,35 @@ xchg_r64_r64 :: proc(dst: Register64, src: Register64) {
 // Load effective address into 64-bit register
 lea_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
 	// 8D /r
-	write_memory_address(mem, u8(dst), 0x8D) // 8D is LEA opcode
+	write_memory_address(mem, u8(dst), [1]u8{0x8D}) // 8D is LEA opcode
 }
 
 // Move from control register to 64-bit register
-mov_r64_cr :: proc(reg: Register64, cr: u8) {
+mov_r64_cr :: proc(reg: Register64, cr: ControlRegister) {
 	// 0F 20/r
-	modrm := encode_modrm(3, cr, u8(reg))
+	modrm := encode_modrm(3, u8(cr), u8(reg))
 	write([]u8{0x0F, 0x20, modrm})
 }
 
 // Move from 64-bit register to control register
-mov_cr_r64 :: proc(cr: u8, reg: Register64) {
+mov_cr_r64 :: proc(cr: ControlRegister, reg: Register64) {
 	// 0F 22/r
-	modrm := encode_modrm(3, cr, u8(reg))
+	modrm := encode_modrm(3, u8(cr), u8(reg))
 	write([]u8{0x0F, 0x22, modrm})
 }
 
-// Move from 64-bit register to CR0
-mov_cr0_r64 :: proc(reg: Register64) {
-	mov_cr_r64(0, reg)
-}
-
-// Move from 64-bit register to CR2
-mov_cr2_r64 :: proc(reg: Register64) {
-	mov_cr_r64(2, reg)
-}
-
-// Move from 64-bit register to CR3
-mov_cr3_r64 :: proc(reg: Register64) {
-	mov_cr_r64(3, reg)
-}
-
-// Move from 64-bit register to CR4
-mov_cr4_r64 :: proc(reg: Register64) {
-	mov_cr_r64(4, reg)
-}
-
 // Move from debug register to 64-bit register
-mov_r64_dr :: proc(reg: Register64, dr: u8) {
+mov_r64_dr :: proc(reg: Register64, dr: DebugRegister) {
 	// 0F 21/r
-	modrm := encode_modrm(3, dr, u8(reg))
+	modrm := encode_modrm(3, u8(dr), u8(reg))
 	write([]u8{0x0F, 0x21, modrm})
 }
 
 // Move from 64-bit register to debug register
-mov_dr_r64 :: proc(dr: u8, reg: Register64) {
+mov_dr_r64 :: proc(dr: DebugRegister, reg: Register64) {
 	// 0F 23/r
-	modrm := encode_modrm(3, dr, u8(reg))
+	modrm := encode_modrm(3, u8(dr), u8(reg))
 	write([]u8{0x0F, 0x23, modrm})
-}
-
-// Move from 64-bit register to DR0
-mov_dr0_r64 :: proc(reg: Register64) {
-	mov_dr_r64(0, reg)
-}
-
-// Move from 64-bit register to DR1
-mov_dr1_r64 :: proc(reg: Register64) {
-	mov_dr_r64(1, reg)
-}
-
-// Move from 64-bit register to DR2
-mov_dr2_r64 :: proc(reg: Register64) {
-	mov_dr_r64(2, reg)
-}
-
-// Move from 64-bit register to DR3
-mov_dr3_r64 :: proc(reg: Register64) {
-	mov_dr_r64(3, reg)
-}
-
-// Move from 64-bit register to DR6
-mov_dr6_r64 :: proc(reg: Register64) {
-	mov_dr_r64(6, reg)
-}
-
-// Move from 64-bit register to DR7
-mov_dr7_r64 :: proc(reg: Register64) {
-	mov_dr_r64(7, reg)
 }
 
 // 32-bit Data Movement Instructions
@@ -747,12 +708,12 @@ mov_r32_r32 :: proc(dst: Register32, src: Register32) {
 
 // Load 32-bit value from memory into register
 mov_r32_m32 :: proc(dst: Register32, mem: MemoryAddress) {
-	write_memory_address(mem, u8(dst), 0x8B, false) // 8B /r is MOV r32, r/m32
+	write_memory_address(mem, u8(dst), [1]u8{0x8B}, false) // 8B /r is MOV r32, r/m32
 }
 
 // Store 32-bit register value to memory
 mov_m32_r32 :: proc(mem: MemoryAddress, src: Register32) {
-	write_memory_address(mem, u8(src), 0x89, false) // 89 /r is MOV r/m32, r32
+	write_memory_address(mem, u8(src), [1]u8{0x89}, false) // 89 /r is MOV r/m32, r32
 }
 
 // Move with zero extension from 8-bit to 32-bit
@@ -889,7 +850,7 @@ xchg_r32_r32 :: proc(dst: Register32, src: Register32) {
 lea_r32_m :: proc(dst: Register32, mem: MemoryAddress) {
 	// LEA r32, m (8D /r) - similar to MOV but loads the address calculation result
 	// For 32-bit LEA, don't set the W bit in the REX prefix
-	write_memory_address(mem, u8(dst), 0x8D, false)
+	write_memory_address(mem, u8(dst), [1]u8{0x8D}, false)
 }
 
 // 16-bit Data Movement Instructions
@@ -927,7 +888,7 @@ mov_r16_m16 :: proc(dst: Register16, mem: MemoryAddress) {
 	write([]u8{0x66})
 
 	// Then handle memory addressing with 8B opcode (without setting W bit)
-	write_memory_address(mem, u8(dst), 0x8B, false)
+	write_memory_address(mem, u8(dst), [1]u8{0x8B}, false)
 }
 
 // Store 16-bit register value to memory
@@ -936,7 +897,7 @@ mov_m16_r16 :: proc(mem: MemoryAddress, src: Register16) {
 	write([]u8{0x66})
 
 	// Then handle memory addressing with 89 opcode (without setting W bit)
-	write_memory_address(mem, u8(src), 0x89, false)
+	write_memory_address(mem, u8(src), [1]u8{0x89}, false)
 }
 
 
@@ -1036,7 +997,7 @@ lea_r16_m :: proc(dst: Register16, mem: MemoryAddress) {
 	write([]u8{0x66})
 
 	// Then handle memory addressing with 8D opcode (without setting W bit)
-	write_memory_address(mem, u8(dst), 0x8D, false)
+	write_memory_address(mem, u8(dst), [1]u8{0x8D}, false)
 }
 
 // 8-bit Data Movement Instructions
@@ -1136,7 +1097,7 @@ mov_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
 	// For 8-bit moves, the operand-size is fixed so set_w must be false.
 	// But special registers (SPL/BPL/SIL/DIL) need a REX prefix even though W remains 0.
 	force_rex: bool = u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL)
-	write_memory_address(mem, reg_field, 0x8A, false, force_rex)
+	write_memory_address(mem, reg_field, [1]u8{0x8A}, false, force_rex)
 }
 
 mov_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
@@ -1153,7 +1114,7 @@ mov_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
 	}
 
 	force_rex: bool = u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL)
-	write_memory_address(mem, reg_field, 0x88, false, force_rex)
+	write_memory_address(mem, reg_field, [1]u8{0x88}, false, force_rex)
 }
 
 // Exchange values between two 8-bit registers
@@ -1238,14 +1199,14 @@ mov_r16_sreg :: proc(dst: Register16, src: SegmentRegister) {
 mov_sreg_m16 :: proc(dst: SegmentRegister, mem: MemoryAddress) {
 	// Segment registers don't need REX prefix and are always 16-bit
 	// MOV sreg, r/m16 uses 8E /r opcode
-	write_memory_address(mem, u8(dst), 0x8E, false)
+	write_memory_address(mem, u8(dst), [1]u8{0x8E}, false)
 }
 
 // Store segment register to memory
 mov_m16_sreg :: proc(mem: MemoryAddress, src: SegmentRegister) {
 	// Segment registers don't need REX prefix and are always 16-bit
 	// MOV r/m16, sreg uses 8C /r opcode
-	write_memory_address(mem, u8(src), 0x8C, false)
+	write_memory_address(mem, u8(src), [1]u8{0x8C}, false)
 }
 
 // ==================================
@@ -4525,7 +4486,7 @@ jmp_r64 :: proc(reg: Register64) {
 jmp_m64 :: proc(mem: MemoryAddress) {
 	// For JMP, reg field in ModR/M byte is the opcode extension (4 for JMP)
 	// FF /4 is the encoding for indirect JMP through memory
-	write_memory_address(mem, 4, 0xFF, false)
+	write_memory_address(mem, 4, [1]u8{0xFF}, false)
 }
 
 // Jump short, relative, displacement relative to next instruction
@@ -4564,7 +4525,7 @@ call_r64 :: proc(reg: Register64) {
 
 // Call near, absolute indirect, address in memory
 call_m64 :: proc(mem: MemoryAddress) {
-	write_memory_address(mem, 2, 0xFF, false)
+	write_memory_address(mem, 2, [1]u8{0xFF}, false)
 }
 
 // Return from procedure
@@ -5302,7 +5263,7 @@ movq_xmm_m64 :: proc(dst: XMMRegister, mem: MemoryAddress) {
 
 	// F3 REX 0F 7E /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0xF3})
-	write_memory_address(mem, dst_reg, 0x0F, false)
+	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
 	write([]u8{0x7E})
 }
 
@@ -5312,7 +5273,7 @@ movq_m64_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
 
 	// 66 REX 0F D6 /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0x66})
-	write_memory_address(mem, src_reg, 0x0F, false)
+	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
 	write([]u8{0xD6})
 }
 
@@ -5341,7 +5302,7 @@ movdqa_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
 
 	// 66 REX 0F 6F /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0x66})
-	write_memory_address(mem, dst_reg, 0x0F, false)
+	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
 	write([]u8{0x6F})
 }
 
@@ -5351,7 +5312,7 @@ movdqa_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
 
 	// 66 REX 0F 7F /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0x66})
-	write_memory_address(mem, src_reg, 0x0F, false)
+	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
 	write([]u8{0x7F})
 }
 
@@ -5379,7 +5340,7 @@ movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
 
 	// F3 REX 0F 6F /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0xF3})
-	write_memory_address(mem, dst_reg, 0x0F, false)
+	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
 	write([]u8{0x6F})
 }
 
@@ -5389,7 +5350,7 @@ movdqu_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
 
 	// F3 REX 0F 7F /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0xF3})
-	write_memory_address(mem, src_reg, 0x0F, false)
+	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
 	write([]u8{0x7F})
 }
 
@@ -5416,7 +5377,7 @@ movaps_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
 	rex_r, dst_reg := encode_xmm(dst)
 
 	// REX 0F 28 /r - Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0x0F, false)
+	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
 	write([]u8{0x28})
 }
 
@@ -5425,7 +5386,7 @@ movaps_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
 	rex_r, src_reg := encode_xmm(src)
 
 	// REX 0F 29 /r - Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0x0F, false)
+	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
 	write([]u8{0x29})
 }
 
@@ -5453,7 +5414,7 @@ movapd_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
 
 	// 66 REX 0F 28 /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0x66})
-	write_memory_address(mem, dst_reg, 0x0F, false)
+	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
 	write([]u8{0x28})
 }
 
@@ -5463,7 +5424,7 @@ movapd_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
 
 	// 66 REX 0F 29 /r - Use write_memory_address for proper memory operand handling
 	write([]u8{0x66})
-	write_memory_address(mem, src_reg, 0x0F, false)
+	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
 	write([]u8{0x29})
 }
 
@@ -5472,7 +5433,7 @@ movups_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
 	rex_r, dst_reg := encode_xmm(dst)
 
 	// REX 0F 10 /r - Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0x0F, false)
+	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
 	write([]u8{0x10})
 }
 
@@ -5713,7 +5674,7 @@ vmovdqa_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x6F})
 }
 
@@ -5726,7 +5687,7 @@ vmovdqa_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x7F})
 }
 
@@ -5752,7 +5713,7 @@ vmovdqu_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x6F})
 }
 
@@ -5765,7 +5726,7 @@ vmovdqu_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x7F})
 }
 
@@ -5791,7 +5752,7 @@ vmovaps_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x28})
 }
 
@@ -5804,7 +5765,7 @@ vmovaps_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x29})
 }
 
@@ -5830,7 +5791,7 @@ vmovapd_ymm_m256 :: proc(dst: YMMRegister, mem: MemoryAddress) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x28})
 }
 
@@ -5843,7 +5804,7 @@ vmovapd_m256_ymm :: proc(mem: MemoryAddress, src: YMMRegister) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x29})
 }
 
@@ -6537,7 +6498,7 @@ vmovdqa32_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x6F})
 }
 
@@ -6564,7 +6525,7 @@ vmovdqa32_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x7F})
 }
 
@@ -6618,7 +6579,7 @@ vmovdqa64_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x6F})
 }
 
@@ -6645,7 +6606,7 @@ vmovdqa64_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x7F})
 }
 
@@ -6699,7 +6660,7 @@ vmovdqu32_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x6F})
 }
 
@@ -6726,7 +6687,7 @@ vmovdqu32_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x7F})
 }
 
@@ -6780,7 +6741,7 @@ vmovdqu64_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x6F})
 }
 
@@ -6807,7 +6768,7 @@ vmovdqu64_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x7F})
 }
 
@@ -6861,7 +6822,7 @@ vmovaps_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x28})
 }
 
@@ -6888,7 +6849,7 @@ vmovaps_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x29})
 }
 
@@ -6942,7 +6903,7 @@ vmovapd_zmm_m512 :: proc(dst: ZMMRegister, mem: MemoryAddress) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, dst_reg, 0, false)
+	write_memory_address(mem, dst_reg, [1]u8{0}, false)
 	write([]u8{0x28})
 }
 
@@ -6969,7 +6930,7 @@ vmovapd_m512_zmm :: proc(mem: MemoryAddress, src: ZMMRegister) {
 	write(evex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, src_reg, 0, false)
+	write_memory_address(mem, src_reg, [1]u8{0}, false)
 	write([]u8{0x29})
 }
 
@@ -7019,7 +6980,7 @@ kmovw_k_m16 :: proc(dst: MaskRegister, mem: MemoryAddress) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, u8(dst), 0, false)
+	write_memory_address(mem, u8(dst), [1]u8{0}, false)
 }
 
 // Move 16 bits from mask register to memory
@@ -7029,7 +6990,7 @@ kmovw_m16_k :: proc(mem: MemoryAddress, src: MaskRegister) {
 	write(vex)
 
 	// Use write_memory_address for proper memory operand handling
-	write_memory_address(mem, u8(src), 0, false)
+	write_memory_address(mem, u8(src), [1]u8{0}, false)
 }
 
 // Bitwise OR of mask registers
@@ -7474,51 +7435,42 @@ rdseed_r64 :: proc(reg: Register64) {
 prefetchnta :: proc(mem: MemoryAddress) {
 	// 0x0F 0x18 is the two-byte opcode for prefetch instructions
 	// The reg field (0) specifies the prefetch variant (NTA)
-	write_memory_address(mem, 0, 0, false)
-	write([]u8{0x0F, 0x18})
+	write_memory_address(mem, 0, [2]u8{0x0F, 0x18}, false)
 }
 
 // Prefetch data into level 1 cache and higher
 prefetcht0 :: proc(mem: MemoryAddress) {
 	// The reg field (1) specifies the prefetch variant (T0)
-	write_memory_address(mem, 1, 0, false)
-	write([]u8{0x0F, 0x18})
+	write_memory_address(mem, 1, [2]u8{0x0F, 0x18}, false)
 }
 
 // Prefetch data into level 2 cache and higher
 prefetcht1 :: proc(mem: MemoryAddress) {
 	// The reg field (2) specifies the prefetch variant (T1)
-	write_memory_address(mem, 2, 0, false)
-	write([]u8{0x0F, 0x18})
+	write_memory_address(mem, 2, [2]u8{0x0F, 0x18}, false)
 }
 
 // Prefetch data into level 3 cache and higher
 prefetcht2 :: proc(mem: MemoryAddress) {
 	// The reg field (3) specifies the prefetch variant (T2)
-	write_memory_address(mem, 3, 0, false)
-	write([]u8{0x0F, 0x18})
+	write_memory_address(mem, 3, [2]u8{0x0F, 0x18}, false)
 }
-
 // Flush cache line containing address
 clflush_m64 :: proc(mem: MemoryAddress) {
-	write_memory_address(mem, 7, 0x0F, false)
-	write([]u8{0xAE})
+	write_memory_address(mem, 7, [2]u8{0x0F, 0xAE}, false)
 }
 
 // Flush cache line optimized
 clflushopt_m64 :: proc(mem: MemoryAddress) {
 	write([]u8{0x66})
-	write_memory_address(mem, 7, 0x0F, false)
-	write([]u8{0xAE})
+	write_memory_address(mem, 7, [2]u8{0x0F, 0xAE}, false)
 }
 
 // Cache line write back
 clwb_m64 :: proc(mem: MemoryAddress) {
 	write([]u8{0x66})
-	write_memory_address(mem, 6, 0x0F, false)
-	write([]u8{0xAE})
+	write_memory_address(mem, 6, [2]u8{0x0F, 0xAE}, false)
 }
-
 // Monitor/MWAIT
 monitor :: proc() {
 	write([]u8{0x0F, 0x01, 0xC8}) // 0F 01 C8
