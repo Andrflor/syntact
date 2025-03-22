@@ -2904,6 +2904,207 @@ testing_jge_rel32 :: proc(t: ^testing.T) {
 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
+
+@(test)
+testing_ja_rel32 :: proc(t: ^testing.T) {
+	asm_str := "ja 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	ja_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jae_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jae 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jae_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jb_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jb 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jb_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jbe_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jbe 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jbe_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jo_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jo 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jo_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jno_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jno 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jno_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_js_rel32 :: proc(t: ^testing.T) {
+	asm_str := "js 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	js_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jns_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jns 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jns_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jp_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jp 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jp_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jnp_rel32 :: proc(t: ^testing.T) {
+	asm_str := "jnp 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jnp_rel32(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_ja_rel8 :: proc(t: ^testing.T) {
+	asm_str := "ja 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	ja_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jae_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jae 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jae_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jb_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jb 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jb_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jbe_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jbe 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jbe_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jo_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jo 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jo_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jno_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jno 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jno_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_js_rel8 :: proc(t: ^testing.T) {
+	asm_str := "js 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	js_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jns_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jns 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jns_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jp_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jp 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jp_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
+@(test)
+testing_jnp_rel8 :: proc(t: ^testing.T) {
+	asm_str := "jnp 0"
+
+	buffer := ByteBuffer{}
+	context.user_ptr = &buffer
+	jnp_rel8(0)
+	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+}
+
 @(test)
 testing_jle_rel32 :: proc(t: ^testing.T) {
 	asm_str := "jle 0"
