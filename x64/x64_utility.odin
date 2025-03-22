@@ -215,6 +215,22 @@ register8_to_string :: proc(r: Register8) -> string {
 	return strings.to_lower(name, context.temp_allocator)
 }
 
+// Get the string coresponding to that register
+debug_register_to_string :: proc(r: DebugRegister) -> string {
+	// Convert enum value to a string (will be uppercase like "AL")
+	name := fmt.tprintf("%v", r)
+	// Convert to lowercase
+	return strings.to_lower(name, context.temp_allocator)
+}
+// Get the string coresponding to that register
+control_register_to_string :: proc(r: ControlRegister) -> string {
+	// Convert enum value to a string (will be uppercase like "AL")
+	name := fmt.tprintf("%v", r)
+	// Convert to lowercase
+	return strings.to_lower(name, context.temp_allocator)
+}
+
+
 // Test data generators
 get_all_registers8 :: proc() -> [16]Register8 {
 	return [16]Register8 {
