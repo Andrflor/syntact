@@ -4233,12 +4233,18 @@ testing_jmp_m64 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jmp_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jmp short 0"
+	imm8Values := get_interesting_signed_imm8_values()
 
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jmp_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jmp $+%i" : "jmp $%i", adjusted)
+		log.info(asm_str)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jmp_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 // Call instruction tests
@@ -4450,7 +4456,7 @@ testing_jnp_rel32 :: proc(t: ^testing.T) {
 
 @(test)
 testing_ja_rel8 :: proc(t: ^testing.T) {
-	asm_str := "ja 0"
+	asm_str := "ja short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4460,7 +4466,7 @@ testing_ja_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jae_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jae 0"
+	asm_str := "jae short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4470,7 +4476,7 @@ testing_jae_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jb_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jb 0"
+	asm_str := "jb short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4480,7 +4486,7 @@ testing_jb_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jbe_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jbe 0"
+	asm_str := "jbe short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4490,7 +4496,7 @@ testing_jbe_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jo_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jo 0"
+	asm_str := "jo short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4500,7 +4506,7 @@ testing_jo_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jno_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jno 0"
+	asm_str := "jno short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4510,7 +4516,7 @@ testing_jno_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_js_rel8 :: proc(t: ^testing.T) {
-	asm_str := "js 0"
+	asm_str := "js short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4520,7 +4526,7 @@ testing_js_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jns_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jns 0"
+	asm_str := "jns short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4530,7 +4536,7 @@ testing_jns_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jp_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jp 0"
+	asm_str := "jp short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
@@ -4540,7 +4546,7 @@ testing_jp_rel8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jnp_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jnp 0"
+	asm_str := "jnp short 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
