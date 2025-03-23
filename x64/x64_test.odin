@@ -223,6 +223,1535 @@ testing_movsxd_r64_r32 :: proc(t: ^testing.T) {
 	}
 }
 
+// ADD operations tests
+@(test)
+testing_add_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers64 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("add %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			add_r64_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_add_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("add %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_r32_imm8 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers32 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("add %s, %d", register32_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			add_r32_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_add_r32_m32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers32))
+		dst := registers32[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add %s, dword ptr %s",
+			register32_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_r32_m32(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m32_r32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers32))
+		src := registers32[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add dword ptr %s, %s",
+			memory_address_to_string(dst),
+			register32_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m32_r32(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m32_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("add dword ptr %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m32_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_r16_m16 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers16 := get_all_registers16()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers16))
+		dst := registers16[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add %s, word ptr %s",
+			register16_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_r16_m16(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m16_r16 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers16 := get_all_registers16()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers16))
+		src := registers16[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add word ptr %s, %s",
+			memory_address_to_string(dst),
+			register16_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m16_r16(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m16_imm16 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm16Values := get_interesting_imm16_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm16Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm16Values))
+		imm := imm16Values[imm_idx]
+
+		asm_str := fmt.tprintf("add word ptr %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m16_imm16(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_r8_m8 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers8 := get_all_registers8()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers8))
+		dst := registers8[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add %s, byte ptr %s",
+			register8_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_r8_m8(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m8_r8 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers8 := get_all_registers8()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers8))
+		src := registers8[src_idx]
+
+		asm_str := fmt.tprintf(
+			"add byte ptr %s, %s",
+			memory_address_to_string(dst),
+			register8_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m8_r8(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_add_m8_imm8 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm8Values := get_interesting_imm8_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm8Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm8Values))
+		imm := imm8Values[imm_idx]
+
+		asm_str := fmt.tprintf("add byte ptr %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		add_m8_imm8(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// SUB operations tests
+@(test)
+testing_sub_r64_imm8 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm8Values := get_interesting_imm8_values()
+
+	for reg in registers64 {
+		for imm in imm8Values {
+			asm_str := fmt.tprintf("sub %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			sub_r64_imm8(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_sub_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"sub %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sub_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sub_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"sub %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sub_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sub_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("sub %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sub_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sub_r32_m32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers32))
+		dst := registers32[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"sub %s, dword ptr %s",
+			register32_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sub_r32_m32(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sub_m32_r32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers32 := get_all_registers32()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers32))
+		src := registers32[src_idx]
+
+		asm_str := fmt.tprintf(
+			"sub dword ptr %s, %s",
+			memory_address_to_string(dst),
+			register32_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sub_m32_r32(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sub_m32_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("sub dword ptr %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sub_m32_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// AND operations tests
+@(test)
+testing_and_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"and %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		and_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_and_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"and %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		and_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_and_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("and %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		and_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// OR operations tests
+@(test)
+testing_or_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"or %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		or_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_or_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"or %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		or_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_or_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("or %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		or_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// XOR operations tests
+@(test)
+testing_xor_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"xor %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		xor_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_xor_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"xor %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		xor_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+
+@(test)
+testing_xor_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("xor %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		xor_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// ADC operations tests
+@(test)
+testing_adc_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"adc %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		adc_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_adc_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"adc %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		adc_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_adc_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("adc %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		adc_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// SBB operations tests
+@(test)
+testing_sbb_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"sbb %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sbb_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sbb_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"sbb %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sbb_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_sbb_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("sbb %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		sbb_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// CMP operations tests
+@(test)
+testing_cmp_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"cmp %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		cmp_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_cmp_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"cmp %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		cmp_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_cmp_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("cmp %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		cmp_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// TEST operations tests
+@(test)
+testing_test_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"test %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		test_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_test_m64_imm32 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	imm32Values := get_interesting_imm32_values()
+
+	// Set the number of random tests to run
+	num_tests := len(imm32Values) * 10
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random immediate value
+		imm_idx := rand.int_max(len(imm32Values))
+		imm := imm32Values[imm_idx]
+
+		asm_str := fmt.tprintf("test %s, %d", memory_address_to_string(dst), imm)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		test_m64_imm32(dst, imm)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Unary operations tests
+@(test)
+testing_inc_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("inc %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		inc_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_dec_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("dec %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		dec_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_neg_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("neg %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		neg_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// MUL/DIV operations tests
+@(test)
+testing_mul_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("mul %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mul_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_imul_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("imul %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		imul_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_imul_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"imul %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		imul_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_div_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("div %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		div_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_idiv_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		op_idx := rand.int_max(len(addresses))
+		op := addresses[op_idx]
+
+		asm_str := fmt.tprintf("idiv %s", memory_address_to_string(op))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		idiv_m64(op)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// MOV operations tests
+@(test)
+testing_mov_r64_imm64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+	imm64Values := get_interesting_imm64_values()
+
+	for reg in registers64 {
+		for imm in imm64Values {
+			asm_str := fmt.tprintf("mov %s, %d", register64_to_string(reg), imm)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r64_imm64(reg, imm)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+@(test)
+testing_mov_r64_m64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random register
+		dst_idx := rand.int_max(len(registers64))
+		dst := registers64[dst_idx]
+
+		// Select a random memory addressing mode
+		src_idx := rand.int_max(len(addresses))
+		src := addresses[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, %s",
+			register64_to_string(dst),
+			memory_address_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_r64_m64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_mov_m64_r64 :: proc(t: ^testing.T) {
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	registers64 := get_all_registers64()
+
+	// Set the number of random tests to run
+	num_tests := 400
+	for i := 0; i < num_tests; i += 1 {
+		// Select a random memory addressing mode
+		dst_idx := rand.int_max(len(addresses))
+		dst := addresses[dst_idx]
+
+		// Select a random register
+		src_idx := rand.int_max(len(registers64))
+		src := registers64[src_idx]
+
+		asm_str := fmt.tprintf(
+			"mov %s, %s",
+			memory_address_to_string(dst),
+			register64_to_string(src),
+		)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		mov_m64_r64(dst, src)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_mov_r64_r64 :: proc(t: ^testing.T) {
+	registers64 := get_all_registers64()
+
+	for dst in registers64 {
+		for src in registers64 {
+			asm_str := fmt.tprintf(
+				"mov %s, %s",
+				register64_to_string(dst),
+				register64_to_string(src),
+			)
+
+			buffer := ByteBuffer{}
+			context.user_ptr = &buffer
+			mov_r64_r64(dst, src)
+			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		}
+	}
+}
+
+// Jump tests
+@(test)
+testing_jl_rel8 :: proc(t: ^testing.T) {
+	// Test with various offsets
+	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jl %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jl_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jle_rel8 :: proc(t: ^testing.T) {
+	// Test with various offsets
+	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jle %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jle_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jg_rel8 :: proc(t: ^testing.T) {
+	// Test with various offsets
+	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jg %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jg_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jge_rel8 :: proc(t: ^testing.T) {
+	// Test with various offsets
+	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+
+	for offset in offsets {
+		asm_str := fmt.tprintf("jge %d", offset)
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jge_rel8(offset)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Stack operations tests
+@(test)
+testing_push_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("push %s", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		push_r32(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_pop_r32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+
+	for reg in registers32 {
+		asm_str := fmt.tprintf("pop %s", register32_to_string(reg))
+
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pop_r32(reg)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+// Helper functions tests
+@(test)
+testing_is_low_byte_reg :: proc(t: ^testing.T) {
+	registers8 := get_all_registers8()
+
+	// Check all 8-bit registers
+	for reg in registers8 {
+		result := is_low_byte_reg(reg)
+		expected := reg < Register8.SPL // Typically RAX, RCX, RDX, RBX have low byte registers
+		testing.expect_value(t, result, expected)
+	}
+}
+
 // Zero extension tests
 @(test)
 testing_movzx_r64_r8 :: proc(t: ^testing.T) {
@@ -495,7 +2024,7 @@ testing_mov_r32_m32 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf(
 			"mov %s, dword ptr %s",
 			register32_to_string(dst),
-			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(src),
 		)
 
 		buffer := ByteBuffer{}
@@ -524,7 +2053,7 @@ testing_mov_m32_r32 :: proc(t: ^testing.T) {
 
 		asm_str := fmt.tprintf(
 			"mov dword ptr %s, %s",
-			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(dst),
 			register32_to_string(src),
 		)
 
@@ -663,7 +2192,7 @@ testing_lea_r32_m :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf(
 			"lea %s, %s",
 			register32_to_string(dst),
-			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(src),
 		)
 
 		buffer := ByteBuffer{}
@@ -731,7 +2260,7 @@ testing_mov_r16_m16 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf(
 			"mov %s, word ptr %s",
 			register16_to_string(dst),
-			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(src),
 		)
 
 		buffer := ByteBuffer{}
@@ -760,7 +2289,7 @@ testing_mov_m16_r16 :: proc(t: ^testing.T) {
 
 		asm_str := fmt.tprintf(
 			"mov word ptr %s, %s",
-			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(dst),
 			register16_to_string(src),
 		)
 
@@ -857,7 +2386,7 @@ testing_lea_r16_m :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf(
 			"lea %s, %s",
 			register16_to_string(dst),
-			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(src),
 		)
 
 		buffer := ByteBuffer{}
@@ -925,7 +2454,7 @@ testing_mov_r8_m8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf(
 			"mov %s, byte ptr %s",
 			register8_to_string(dst),
-			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(src),
 		)
 
 		buffer := ByteBuffer{}
@@ -954,7 +2483,7 @@ testing_mov_m8_r8 :: proc(t: ^testing.T) {
 
 		asm_str := fmt.tprintf(
 			"mov byte ptr %s, %s",
-			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
+			memory_address_to_string(dst),
 			register8_to_string(src),
 		)
 
@@ -1051,11 +2580,7 @@ testing_mov_sreg_m16 :: proc(t: ^testing.T) {
 		src_idx := rand.int_max(len(addresses))
 		src := addresses[src_idx]
 
-		asm_str := fmt.tprintf(
-			"mov %s, word ptr %s",
-			segment_name,
-			memory_address_to_string(src)[10:], // Remove "qword ptr " prefix
-		)
+		asm_str := fmt.tprintf("mov %s, word ptr %s", segment_name, memory_address_to_string(src))
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1085,11 +2610,7 @@ testing_mov_m16_sreg :: proc(t: ^testing.T) {
 		segment_name := fmt.tprintf("%v", src)
 		segment_name = strings.to_lower(segment_name, context.temp_allocator)
 
-		asm_str := fmt.tprintf(
-			"mov word ptr %s, %s",
-			memory_address_to_string(dst)[10:], // Remove "qword ptr " prefix
-			segment_name,
-		)
+		asm_str := fmt.tprintf("mov word ptr %s, %s", memory_address_to_string(dst), segment_name)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
