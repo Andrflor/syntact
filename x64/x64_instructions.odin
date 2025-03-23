@@ -2056,47 +2056,18 @@ sub_r8_imm8 :: proc(reg: Register8, imm: u8) {
 	}
 }
 
-// Subtract source register from destination register
+
+// Fixed sub_r8_r8 implementation
 sub_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_has_high_byte := u8(dst) >= 16
 	src_has_high_byte := u8(src) >= 16
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to add_r8_r8
-	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x28, modrm}) // 28 /r
-	} else if dst_has_high_byte {
-		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
-		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
-		if need_rex {
-			write([]u8{rex, 0x28, modrm}) // REX 28 /r
-		} else {
-			write([]u8{0x28, modrm}) // 28 /r
-		}
-	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x28, modrm}) // REX 28 /r
-		} else {
-			write([]u8{0x28, modrm}) // 28 /r
-		}
-	} else {
-		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
+	// Special handling for SPL, BPL, SIL, DIL registers
+	if !dst_has_high_byte && !src_has_high_byte && (is_low_byte_reg(dst) || is_low_byte_reg(src)) {
+		// Either src or dst is one of SPL, BPL, SIL, DIL - requires REX prefix
+		rex := u8(0x40)
 		if dst_rm >= 8 {
 			rex |= 0x01 // REX.B
 		}
@@ -2104,11 +2075,49 @@ sub_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		write([]u8{rex, 0x28, modrm}) // REX 28 /r
+		return
+	}
 
+	// Rest of the implementation...
+	if dst_has_high_byte && src_has_high_byte {
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
+		write([]u8{0x28, modrm})
+	} else if dst_has_high_byte {
+		need_rex := src_rm >= 8
+		rex: u8 = 0x41 if need_rex else 0
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
 		if need_rex {
-			write([]u8{rex, 0x28, modrm}) // REX 28 /r
+			write([]u8{rex, 0x28, modrm})
 		} else {
-			write([]u8{0x28, modrm}) // 28 /r
+			write([]u8{0x28, modrm})
+		}
+	} else if src_has_high_byte {
+		need_rex := dst_rm >= 4 || dst_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x28, modrm})
+		} else {
+			write([]u8{0x28, modrm})
+		}
+	} else {
+		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		if src_rm >= 8 {
+			rex |= 0x04
+		}
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x28, modrm})
+		} else {
+			write([]u8{0x28, modrm})
 		}
 	}
 }
@@ -2188,14 +2197,36 @@ neg_r8 :: proc(reg: Register8) {
 	}
 }
 
-// Continuing from adc_r8_r8
+// Helper function to check if register is SPL, BPL, SIL, or DIL (needs REX)
+is_low_byte_reg :: proc(reg: Register8) -> bool {
+	reg_num := u8(reg) & 0xF
+	// SPL=4, BPL=5, SIL=6, DIL=7 are the low byte registers that need REX
+	return reg_num >= 4 && reg_num <= 7 && u8(reg) < 16
+}
+
+// Fixed adc_r8_r8 implementation
 adc_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_has_high_byte := u8(dst) >= 16
 	src_has_high_byte := u8(src) >= 16
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to add_r8_r8
+	// Special handling for SPL, BPL, SIL, DIL registers
+	if !dst_has_high_byte && !src_has_high_byte && (is_low_byte_reg(dst) || is_low_byte_reg(src)) {
+		// Either src or dst is one of SPL, BPL, SIL, DIL - requires REX prefix
+		rex := u8(0x40)
+		if dst_rm >= 8 {
+			rex |= 0x01 // REX.B
+		}
+		if src_rm >= 8 {
+			rex |= 0x04 // REX.R
+		}
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		write([]u8{rex, 0x10, modrm}) // REX 10 /r
+		return
+	}
+
+	// Remaining logic for other register combinations
 	if dst_has_high_byte && src_has_high_byte {
 		// Both are high byte registers
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
@@ -2205,7 +2236,6 @@ adc_r8_r8 :: proc(dst: Register8, src: Register8) {
 		need_rex := src_rm >= 8
 		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
 		if need_rex {
 			write([]u8{rex, 0x10, modrm}) // REX 10 /r
 		} else {
@@ -2219,7 +2249,6 @@ adc_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x01 // REX.B
 		}
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
 		if need_rex {
 			write([]u8{rex, 0x10, modrm}) // REX 10 /r
 		} else {
@@ -2236,7 +2265,6 @@ adc_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
-
 		if need_rex {
 			write([]u8{rex, 0x10, modrm}) // REX 10 /r
 		} else {
@@ -2245,14 +2273,29 @@ adc_r8_r8 :: proc(dst: Register8, src: Register8) {
 	}
 }
 
-// Subtract with borrow
+// Fixed sbb_r8_r8 implementation
 sbb_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_has_high_byte := u8(dst) >= 16
 	src_has_high_byte := u8(src) >= 16
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to adc_r8_r8 but with opcode 0x18
+	// Special handling for SPL, BPL, SIL, DIL registers
+	if !dst_has_high_byte && !src_has_high_byte && (is_low_byte_reg(dst) || is_low_byte_reg(src)) {
+		// Either src or dst is one of SPL, BPL, SIL, DIL - requires REX prefix
+		rex := u8(0x40)
+		if dst_rm >= 8 {
+			rex |= 0x01 // REX.B
+		}
+		if src_rm >= 8 {
+			rex |= 0x04 // REX.R
+		}
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		write([]u8{rex, 0x18, modrm}) // REX 18 /r
+		return
+	}
+
+	// Remaining logic for other register combinations
 	if dst_has_high_byte && src_has_high_byte {
 		// Both are high byte registers
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
@@ -2262,7 +2305,6 @@ sbb_r8_r8 :: proc(dst: Register8, src: Register8) {
 		need_rex := src_rm >= 8
 		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
 		if need_rex {
 			write([]u8{rex, 0x18, modrm}) // REX 18 /r
 		} else {
@@ -2276,7 +2318,6 @@ sbb_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x01 // REX.B
 		}
 		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
 		if need_rex {
 			write([]u8{rex, 0x18, modrm}) // REX 18 /r
 		} else {
@@ -2293,7 +2334,6 @@ sbb_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
-
 		if need_rex {
 			write([]u8{rex, 0x18, modrm}) // REX 18 /r
 		} else {
@@ -3268,40 +3308,10 @@ and_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to add_r8_r8
-	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x20, modrm}) // 20 /r
-	} else if dst_has_high_byte {
-		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
-		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
-		if need_rex {
-			write([]u8{rex, 0x20, modrm}) // REX 20 /r
-		} else {
-			write([]u8{0x20, modrm}) // 20 /r
-		}
-	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x20, modrm}) // REX 20 /r
-		} else {
-			write([]u8{0x20, modrm}) // 20 /r
-		}
-	} else {
-		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
+	// Special handling for SPL, BPL, SIL, DIL registers
+	if !dst_has_high_byte && !src_has_high_byte && (is_low_byte_reg(dst) || is_low_byte_reg(src)) {
+		// Either src or dst is one of SPL, BPL, SIL, DIL - requires REX prefix
+		rex := u8(0x40)
 		if dst_rm >= 8 {
 			rex |= 0x01 // REX.B
 		}
@@ -3309,15 +3319,52 @@ and_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		write([]u8{rex, 0x20, modrm}) // REX 20 /r
+		return
+	}
 
+	// Rest of the implementation...
+	if dst_has_high_byte && src_has_high_byte {
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
+		write([]u8{0x20, modrm})
+	} else if dst_has_high_byte {
+		need_rex := src_rm >= 8
+		rex: u8 = 0x41 if need_rex else 0
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
 		if need_rex {
-			write([]u8{rex, 0x20, modrm}) // REX 20 /r
+			write([]u8{rex, 0x20, modrm})
 		} else {
-			write([]u8{0x20, modrm}) // 20 /r
+			write([]u8{0x20, modrm})
+		}
+	} else if src_has_high_byte {
+		need_rex := dst_rm >= 4 || dst_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x20, modrm})
+		} else {
+			write([]u8{0x20, modrm})
+		}
+	} else {
+		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		if src_rm >= 8 {
+			rex |= 0x04
+		}
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x20, modrm})
+		} else {
+			write([]u8{0x20, modrm})
 		}
 	}
 }
-
 // Bitwise AND register with immediate
 and_r8_imm8 :: proc(reg: Register8, imm: u8) {
 	has_high_byte := u8(reg) >= 16
@@ -3349,46 +3396,17 @@ and_r8_imm8 :: proc(reg: Register8, imm: u8) {
 }
 
 // Bitwise OR of source and destination
+// Fixed or_r8_r8 implementation
 or_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_has_high_byte := u8(dst) >= 16
 	src_has_high_byte := u8(src) >= 16
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to and_r8_r8 but with opcode 0x08
-	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x08, modrm}) // 08 /r
-	} else if dst_has_high_byte {
-		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
-		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
-		if need_rex {
-			write([]u8{rex, 0x08, modrm}) // REX 08 /r
-		} else {
-			write([]u8{0x08, modrm}) // 08 /r
-		}
-	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x08, modrm}) // REX 08 /r
-		} else {
-			write([]u8{0x08, modrm}) // 08 /r
-		}
-	} else {
-		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
+	// Special handling for SPL, BPL, SIL, DIL registers
+	if !dst_has_high_byte && !src_has_high_byte && (is_low_byte_reg(dst) || is_low_byte_reg(src)) {
+		// Either src or dst is one of SPL, BPL, SIL, DIL - requires REX prefix
+		rex := u8(0x40)
 		if dst_rm >= 8 {
 			rex |= 0x01 // REX.B
 		}
@@ -3396,11 +3414,49 @@ or_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		write([]u8{rex, 0x08, modrm}) // REX 08 /r
+		return
+	}
 
+	// Rest of the implementation...
+	if dst_has_high_byte && src_has_high_byte {
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
+		write([]u8{0x08, modrm})
+	} else if dst_has_high_byte {
+		need_rex := src_rm >= 8
+		rex: u8 = 0x41 if need_rex else 0
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
 		if need_rex {
-			write([]u8{rex, 0x08, modrm}) // REX 08 /r
+			write([]u8{rex, 0x08, modrm})
 		} else {
-			write([]u8{0x08, modrm}) // 08 /r
+			write([]u8{0x08, modrm})
+		}
+	} else if src_has_high_byte {
+		need_rex := dst_rm >= 4 || dst_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x08, modrm})
+		} else {
+			write([]u8{0x08, modrm})
+		}
+	} else {
+		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		if src_rm >= 8 {
+			rex |= 0x04
+		}
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x08, modrm})
+		} else {
+			write([]u8{0x08, modrm})
 		}
 	}
 }
@@ -3442,40 +3498,10 @@ xor_r8_r8 :: proc(dst: Register8, src: Register8) {
 	dst_rm := u8(dst) & 0xF
 	src_rm := u8(src) & 0xF
 
-	// Similar logic to and_r8_r8 but with opcode 0x30
-	if dst_has_high_byte && src_has_high_byte {
-		// Both are high byte registers
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
-		write([]u8{0x30, modrm}) // 30 /r
-	} else if dst_has_high_byte {
-		// Destination is high byte
-		need_rex := src_rm >= 8
-		rex: u8 = 0x41 if need_rex else 0 // REX.B for src if needed
-		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
-
-		if need_rex {
-			write([]u8{rex, 0x30, modrm}) // REX 30 /r
-		} else {
-			write([]u8{0x30, modrm}) // 30 /r
-		}
-	} else if src_has_high_byte {
-		// Source is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if dst_rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
-
-		if need_rex {
-			write([]u8{rex, 0x30, modrm}) // REX 30 /r
-		} else {
-			write([]u8{0x30, modrm}) // 30 /r
-		}
-	} else {
-		// Neither is high byte
-		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
+	// Special handling for SPL, BPL, SIL, DIL registers
+	if !dst_has_high_byte && !src_has_high_byte && (is_low_byte_reg(dst) || is_low_byte_reg(src)) {
+		// Either src or dst is one of SPL, BPL, SIL, DIL - requires REX prefix
+		rex := u8(0x40)
 		if dst_rm >= 8 {
 			rex |= 0x01 // REX.B
 		}
@@ -3483,15 +3509,52 @@ xor_r8_r8 :: proc(dst: Register8, src: Register8) {
 			rex |= 0x04 // REX.R
 		}
 		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		write([]u8{rex, 0x30, modrm}) // REX 30 /r
+		return
+	}
 
+	// Rest of the implementation...
+	if dst_has_high_byte && src_has_high_byte {
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x3)
+		write([]u8{0x30, modrm})
+	} else if dst_has_high_byte {
+		need_rex := src_rm >= 8
+		rex: u8 = 0x41 if need_rex else 0
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x3)
 		if need_rex {
-			write([]u8{rex, 0x30, modrm}) // REX 30 /r
+			write([]u8{rex, 0x30, modrm})
 		} else {
-			write([]u8{0x30, modrm}) // 30 /r
+			write([]u8{0x30, modrm})
+		}
+	} else if src_has_high_byte {
+		need_rex := dst_rm >= 4 || dst_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		modrm := encode_modrm(3, src_rm & 0x3, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x30, modrm})
+		} else {
+			write([]u8{0x30, modrm})
+		}
+	} else {
+		need_rex := dst_rm >= 4 || dst_rm >= 8 || src_rm >= 8
+		rex: u8 = 0x40 if need_rex else 0
+		if dst_rm >= 8 {
+			rex |= 0x01
+		}
+		if src_rm >= 8 {
+			rex |= 0x04
+		}
+		modrm := encode_modrm(3, src_rm & 0x7, dst_rm & 0x7)
+		if need_rex {
+			write([]u8{rex, 0x30, modrm})
+		} else {
+			write([]u8{0x30, modrm})
 		}
 	}
 }
-
 // Bitwise XOR register with immediate
 xor_r8_imm8 :: proc(reg: Register8, imm: u8) {
 	has_high_byte := u8(reg) >= 16

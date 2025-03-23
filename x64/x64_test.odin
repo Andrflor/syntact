@@ -5678,6 +5678,7 @@ testing_clwb_m64 :: proc(t: ^testing.T) {
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
+
 // =====================
 // Memory barriers
 // =====================
