@@ -643,49 +643,62 @@ lea_r64_m64 :: proc(dst: Register64, mem: MemoryAddress) {
 
 // Fixed mov_r64_cr implementation
 mov_r64_cr :: proc(dst: Register64, src: ControlRegister) {
-	need_rex := u8(dst) >= 8
-	rex: u8 = 0x40 | (need_rex ? 0x4 : 0) // Use REX.R for extended registers
-
+	// Special case for CR8
 	if src == .CR8 {
-		// CR8 requires REX.R prefix
-		rex |= 0x1
+		rex: u8 = 0x44 // 0x40 | 0x4 (REX.R)
+		if u8(dst) >= 8 {
+			rex |= 0x1 // Add REX.B for extended destination
+		}
+		write([]u8{rex, 0x0F, 0x20, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
+	} else if u8(dst) >= 8 {
+		// Extended register needs REX.R
+		write([]u8{0x41, 0x0F, 0x20, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
+	} else {
+		// Basic instruction without REX prefix
+		write([]u8{0x0F, 0x20, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
 	}
-
-	// Always emit REX prefix for consistency with GNU assembler behavior
-	write([]u8{rex, 0x0F, 0x20, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
 }
 
 // Fixed mov_cr_r64 implementation
 mov_cr_r64 :: proc(dst: ControlRegister, src: Register64) {
-	need_rex := u8(src) >= 8
-	rex: u8 = 0x40 | (need_rex ? 0x1 : 0) // Use REX.B for extended registers
-
+	// Special case for CR8
 	if dst == .CR8 {
-		// CR8 requires REX.R prefix
-		rex |= 0x4
+		rex: u8 = 0x44 // 0x40 | 0x4 (REX.R)
+		if u8(src) >= 8 {
+			rex |= 0x1 // Add REX.B for extended source
+		}
+		write([]u8{rex, 0x0F, 0x22, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
+	} else if u8(src) >= 8 {
+		// Extended register needs REX.B
+		write([]u8{0x41, 0x0F, 0x22, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
+	} else {
+		// Basic instruction without REX prefix
+		write([]u8{0x0F, 0x22, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
 	}
-
-	// Always emit REX prefix for consistency with GNU assembler behavior
-	write([]u8{rex, 0x0F, 0x22, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
 }
 
 // Fixed mov_r64_dr implementation
 mov_r64_dr :: proc(dst: Register64, src: DebugRegister) {
-	need_rex := u8(dst) >= 8
-	rex: u8 = 0x40 | (need_rex ? 0x4 : 0) // Use REX.R for extended registers
-
-	// Always emit REX prefix for consistency with GNU assembler behavior
-	write([]u8{rex, 0x0F, 0x21, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
+	if u8(dst) >= 8 {
+		// For extended registers, use REX.R (0x44)
+		write([]u8{0x41, 0x0F, 0x21, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
+	} else {
+		// Basic instruction without REX prefix
+		write([]u8{0x0F, 0x21, 0xC0 | (u8(dst) & 0x7) | ((u8(src) & 0x7) << 3)})
+	}
 }
 
 // Fixed mov_dr_r64 implementation
 mov_dr_r64 :: proc(dst: DebugRegister, src: Register64) {
-	need_rex := u8(src) >= 8
-	rex: u8 = 0x40 | (need_rex ? 0x1 : 0) // Use REX.B for extended registers
-
-	// Always emit REX prefix for consistency with GNU assembler behavior
-	write([]u8{rex, 0x0F, 0x23, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
+	if u8(src) >= 8 {
+		// For extended registers, use REX.B (0x41)
+		write([]u8{0x41, 0x0F, 0x23, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
+	} else {
+		// Basic instruction without REX prefix
+		write([]u8{0x0F, 0x23, 0xC0 | (u8(src) & 0x7) | ((u8(dst) & 0x7) << 3)})
+	}
 }
+
 // 32-bit Data Movement Instructions
 // Move immediate value to 32-bit register
 mov_r32_imm32 :: proc(reg: Register32, imm: u32) {
@@ -1619,9 +1632,8 @@ imul_r32_r32 :: proc(dst: Register32, src: Register32) {
 imul_r32_imm32 :: proc(reg: Register32, imm: u32) {
 	// Same as imul_r32_r32_imm32 with dst = src = reg
 	need_rex := (u8(reg) & 0x8) != 0
-	rex: u8 = need_rex ? 0x41 : 0 // REX.B if needed
+	rex: u8 = need_rex ? 0x45 : 0 // REX.R + REX.B for extended registers (was 0x41)
 	modrm := encode_modrm(3, u8(reg) & 0x7, u8(reg) & 0x7)
-
 	// Handle 8-bit immediate if possible
 	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
 		if need_rex {
@@ -1635,7 +1647,6 @@ imul_r32_imm32 :: proc(reg: Register32, imm: u32) {
 		} else {
 			write([]u8{0x69, modrm}) // 69 /r id
 		}
-
 		// Encode 32-bit immediate
 		write(
 			[]u8 {
@@ -1647,6 +1658,7 @@ imul_r32_imm32 :: proc(reg: Register32, imm: u32) {
 		)
 	}
 }
+
 // Unsigned divide EDX:EAX by reg
 div_r32 :: proc(reg: Register32) {
 	need_rex := (u8(reg) & 0x8) != 0
@@ -1880,9 +1892,8 @@ imul_r16_r16 :: proc(dst: Register16, src: Register16) {
 // Fixed imul_r16_imm16 implementation
 imul_r16_imm16 :: proc(reg: Register16, imm: u16) {
 	need_rex := (u8(reg) & 0x8) != 0
-	rex: u8 = need_rex ? 0x41 : 0 // REX.B if needed
+	rex: u8 = need_rex ? 0x45 : 0 // REX.R + REX.B for extended registers (was 0x41)
 	modrm := encode_modrm(3, u8(reg) & 0x7, u8(reg) & 0x7)
-
 	// Handle 8-bit immediate if possible
 	if imm <= 0x7F || imm >= 0xFF80 { 	// Signed 8-bit range
 		if need_rex {
@@ -1896,11 +1907,11 @@ imul_r16_imm16 :: proc(reg: Register16, imm: u16) {
 		} else {
 			write([]u8{0x66, 0x69, modrm}) // 66 69 /r iw
 		}
-
 		// Encode 16-bit immediate
 		write([]u8{u8(imm & 0xFF), u8((imm >> 8) & 0xFF)})
 	}
 }
+
 // Unsigned divide DX:AX by reg
 div_r16 :: proc(reg: Register16) {
 	need_rex := (u8(reg) & 0x8) != 0

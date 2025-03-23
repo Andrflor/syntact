@@ -1411,7 +1411,7 @@ testing_and_r64_r64 :: proc(t: ^testing.T) {
 @(test)
 testing_mov_r64_cr :: proc(t: ^testing.T) {
 	registers64 := get_all_registers64()
-	control_registers := []ControlRegister{.CR0, .CR2, .CR3, .CR4, .CR8}
+	control_registers := get_all_control_register()
 
 	for reg in registers64 {
 		for cr in control_registers {
@@ -1432,7 +1432,7 @@ testing_mov_r64_cr :: proc(t: ^testing.T) {
 @(test)
 testing_mov_cr_r64 :: proc(t: ^testing.T) {
 	registers64 := get_all_registers64()
-	control_registers := []ControlRegister{.CR0, .CR2, .CR3, .CR4, .CR8}
+	control_registers := get_all_control_register()
 
 	for cr in control_registers {
 		for reg in registers64 {
@@ -1453,7 +1453,7 @@ testing_mov_cr_r64 :: proc(t: ^testing.T) {
 @(test)
 testing_mov_r64_dr :: proc(t: ^testing.T) {
 	registers64 := get_all_registers64()
-	debug_registers := []DebugRegister{.DR0, .DR1, .DR2, .DR3, .DR6, .DR7}
+	debug_registers := get_all_debug_register()
 
 	for reg in registers64 {
 		for dr in debug_registers {
@@ -1474,7 +1474,7 @@ testing_mov_r64_dr :: proc(t: ^testing.T) {
 @(test)
 testing_mov_dr_r64 :: proc(t: ^testing.T) {
 	registers64 := get_all_registers64()
-	debug_registers := []DebugRegister{.DR0, .DR1, .DR2, .DR3, .DR6, .DR7}
+	debug_registers := get_all_debug_register()
 
 	for dr in debug_registers {
 		for reg in registers64 {
@@ -1493,7 +1493,6 @@ testing_mov_dr_r64 :: proc(t: ^testing.T) {
 }
 
 // 32-bit arithmetic operation tests
-
 @(test)
 testing_add_r32_imm32 :: proc(t: ^testing.T) {
 	registers32 := get_all_registers32()
@@ -4233,12 +4232,11 @@ testing_jmp_m64 :: proc(t: ^testing.T) {
 
 @(test)
 testing_jmp_rel8 :: proc(t: ^testing.T) {
-	imm8Values := get_interesting_signed_imm8_values()
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
 		asm_str := fmt.tprintf(adjusted >= 0 ? "jmp $+%i" : "jmp $%i", adjusted)
-		log.info(asm_str)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -4455,106 +4453,6 @@ testing_jnp_rel32 :: proc(t: ^testing.T) {
 }
 
 @(test)
-testing_ja_rel8 :: proc(t: ^testing.T) {
-	asm_str := "ja short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	ja_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jae_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jae short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jae_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jb_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jb short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jb_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jbe_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jbe short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jbe_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jo_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jo short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jo_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jno_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jno short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jno_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_js_rel8 :: proc(t: ^testing.T) {
-	asm_str := "js short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	js_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jns_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jns short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jns_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jp_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jp short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jp_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
-testing_jnp_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jnp short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jnp_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-}
-
-@(test)
 testing_jle_rel32 :: proc(t: ^testing.T) {
 	asm_str := "jle 0"
 
@@ -4564,66 +4462,214 @@ testing_jle_rel32 :: proc(t: ^testing.T) {
 	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 }
 
-// Short conditional jumps (8-bit displacement)
+// Refactored jump test using the testing_jmp_rel8 pattern
+@(test)
+testing_ja_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "ja $+%i" : "ja $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		ja_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jae_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jae $+%i" : "jae $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jae_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jb_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jb $+%i" : "jb $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jb_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jbe_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jbe $+%i" : "jbe $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jbe_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jo_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jo $+%i" : "jo $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jo_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jno_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jno $+%i" : "jno $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jno_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_js_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "js $+%i" : "js $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		js_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jns_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jns $+%i" : "jns $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jns_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jp_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jp $+%i" : "jp $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jp_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
+@(test)
+testing_jnp_rel8 :: proc(t: ^testing.T) {
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jnp $+%i" : "jnp $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jnp_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
+}
+
 @(test)
 testing_je_rel8 :: proc(t: ^testing.T) {
-	asm_str := "je short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	je_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "je $+%i" : "je $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		je_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 @(test)
 testing_jne_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jne short 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jne_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jne $+%i" : "jne $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jne_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 // Loop instructions
 @(test)
 testing_loop_rel8 :: proc(t: ^testing.T) {
-	asm_str := "loop 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	loop_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "loop $+%i" : "loop $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		loop_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 @(test)
 testing_loope_rel8 :: proc(t: ^testing.T) {
-	asm_str := "loope 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	loope_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "loope $+%i" : "loope $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		loope_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 @(test)
 testing_loopne_rel8 :: proc(t: ^testing.T) {
-	asm_str := "loopne 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	loopne_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "loopne $+%i" : "loopne $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		loopne_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 @(test)
 testing_jecxz_rel8 :: proc(t: ^testing.T) {
-	asm_str := "jecxz 0"
-
-	buffer := ByteBuffer{}
-	context.user_ptr = &buffer
-	jecxz_rel8(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 124, -124}
+	for imm8 in imm8Values {
+		adjusted := imm8 + 3
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jecxz $+%i" : "jecxz $%i", adjusted)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		jecxz_rel8(imm8)
+		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	}
 }
 
 @(test)
@@ -5635,7 +5681,6 @@ testing_clwb_m64 :: proc(t: ^testing.T) {
 // =====================
 // Memory barriers
 // =====================
-
 @(test)
 testing_mfence :: proc(t: ^testing.T) {
 	asm_str := "mfence"

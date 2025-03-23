@@ -321,6 +321,14 @@ get_all_registers64 :: proc() -> [16]Register64 {
 	}
 }
 
+get_all_control_register :: proc() -> [5]ControlRegister {
+	return [5]ControlRegister{.CR0, .CR2, .CR3, .CR4, .CR8}
+}
+
+get_all_debug_register :: proc() -> [6]DebugRegister {
+	return [6]DebugRegister{.DR0, .DR1, .DR2, .DR3, .DR6, .DR7}
+}
+
 get_interesting_imm8_values :: proc() -> [10]u8 {
 	return [10]u8 {
 		0, // Zero
