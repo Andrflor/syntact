@@ -2476,11 +2476,16 @@ add_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
 	}
 }
 
-// Add sign-extended 8-bit immediate to 64-bit register
-add_r64_imm8 :: proc(reg: Register64, imm: u8) {
-	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
-	modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0 (ADD opcode extension), r/m=reg
-	write([]u8{rex, 0x83, modrm, imm}) // REX.W 83 /0 ib
+add_r64_imm8 :: proc(dst: Register64, imm: u8) {
+	// Use the shorter encoding: REX.W + 83 /0 ib
+	reg := u8(dst) & 0x7
+	rex: u8 = 0x48 // REX.W
+	if u8(dst) >= 8 {
+		rex |= 0x01 // REX.B
+	}
+	write([]u8{rex})
+	modrm := 0xC0 | reg // Direct register addressing, /0 opcode extension
+	write([]u8{0x83, modrm, u8(imm)})
 }
 
 // SUB variants
@@ -2516,10 +2521,16 @@ sub_m64_imm32 :: proc(mem: MemoryAddress, imm: u32) {
 }
 
 // Subtract sign-extended 8-bit immediate from 64-bit register
-sub_r64_imm8 :: proc(reg: Register64, imm: u8) {
-	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
-	modrm := encode_modrm(3, 5, u8(reg) & 0x7) // mod=11, reg=5 (SUB opcode extension), r/m=reg
-	write([]u8{rex, 0x83, modrm, imm}) // REX.W 83 /5 ib
+sub_r64_imm8 :: proc(dst: Register64, imm: u8) {
+	// Use the shorter encoding: REX.W + 83 /5 ib
+	reg := u8(dst) & 0x7
+	rex: u8 = 0x48 // REX.W
+	if u8(dst) >= 8 {
+		rex |= 0x01 // REX.B
+	}
+	write([]u8{rex})
+	modrm := 0xE8 | reg // Direct register addressing, /5 opcode extension
+	write([]u8{0x83, modrm, u8(imm)})
 }
 
 // MUL/IMUL variants
@@ -2663,16 +2674,17 @@ add_m32_imm32 :: proc(mem: MemoryAddress, imm: u32) {
 }
 
 // Add sign-extended 8-bit immediate to 32-bit register
-add_r32_imm8 :: proc(reg: Register32, imm: u8) {
-	need_rex := (u8(reg) & 0x8) != 0
-	rex: u8 = 0x41 if need_rex else 0 // REX.B if needed
-	modrm := encode_modrm(3, 0, u8(reg) & 0x7) // mod=11, reg=0 (ADD opcode extension), r/m=reg
-
+add_r32_imm8 :: proc(dst: Register32, imm: u8) {
+	// Use the shorter encoding: 83 /0 ib
+	reg := u8(dst) & 0x7
+	need_rex := u8(dst) >= 8
+	rex: u8 = 0x40
 	if need_rex {
-		write([]u8{rex, 0x83, modrm, imm}) // REX 83 /0 ib
-	} else {
-		write([]u8{0x83, modrm, imm}) // 83 /0 ib
+		rex |= 0x01 // REX.B
+		write([]u8{rex})
 	}
+	modrm := 0xC0 | reg // Direct register addressing, /0 opcode extension
+	write([]u8{0x83, modrm, u8(imm)})
 }
 
 // SUB variants
@@ -2748,51 +2760,37 @@ add_m16_imm16 :: proc(mem: MemoryAddress, imm: u16) {
 add_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
 	has_high_byte := u8(dst) >= 16
 	rm := u8(dst) & 0xF
-
 	if has_high_byte {
-		// High byte registers can't be used with memory operands in 64-bit mode with REX prefix
-		// This is an architecture limitation
 		assert(
 			false,
 			"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
 		)
 	} else {
-		need_rex := rm >= 4 || rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if rm >= 8 {
-			rex |= 0x01 // REX.B
-		}
-
+		// Only set REX.B when needed (for r8-r15)
+		need_rex := rm >= 8
 		if need_rex {
+			rex: u8 = 0x40 | 0x01 // REX + REX.B
 			write([]u8{rex})
 		}
-		write_memory_address(mem, rm & 0x7, [1]u8{0x02}, false, need_rex) // 02 /r
+		write_memory_address(mem, rm & 0x7, [1]u8{0x02}, false, need_rex)
 	}
 }
 
 // Add register to memory
 add_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
 	has_high_byte := u8(src) >= 16
-	rm := u8(src) & 0xF
-
 	if has_high_byte {
-		// High byte registers can't be used with memory operands in 64-bit mode with REX prefix
-		assert(
-			false,
-			"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
-		)
-	} else {
-		need_rex := rm >= 4 || rm >= 8
-		rex: u8 = 0x40 if need_rex else 0
-		if rm >= 8 {
-			rex |= 0x04 // REX.R
-		}
-
-		if need_rex {
-			write([]u8{rex})
-		}
-		write_memory_address(mem, rm & 0x7, [1]u8{0x00}, false, need_rex) // 00 /r
+		assert(false, "High byte registers (AH–DH) not encodable with memory in 64-bit mode")
+		return
 	}
+	src_rm := u8(src) & 0xF
+	// Only set REX.R when needed (for r8-r15)
+	need_rex := src_rm >= 8
+	if need_rex {
+		rex: u8 = 0x40 | 0x04 // REX + REX.R
+		write([]u8{rex})
+	}
+	write_memory_address(mem, src_rm & 0x7, [1]u8{0x00}, false, need_rex)
 }
 
 // Add immediate to memory
