@@ -5674,26 +5674,6 @@ pop_r64 :: proc(reg: Register64) {
 	}
 }
 
-// Push 32-bit register onto stack
-push_r32 :: proc(reg: Register32) {
-	if u8(reg) >= 8 {
-		// High registers (R8D-R15D) need REX.B prefix
-		write([]u8{0x41, 0x50 + (u8(reg) & 0x7)}) // 41 50+r
-	} else {
-		write([]u8{0x50 + u8(reg)}) // 50+r
-	}
-}
-
-// Pop 32-bit value from stack into register
-pop_r32 :: proc(reg: Register32) {
-	if u8(reg) >= 8 {
-		// High registers (R8D-R15D) need REX.B prefix
-		write([]u8{0x41, 0x58 + (u8(reg) & 0x7)}) // 41 58+r
-	} else {
-		write([]u8{0x58 + u8(reg)}) // 58+r
-	}
-}
-
 // Push 16-bit register onto stack
 push_r16 :: proc(reg: Register16) {
 	if u8(reg) >= 8 {

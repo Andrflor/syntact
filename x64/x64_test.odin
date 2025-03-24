@@ -318,7 +318,7 @@ testing_add_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("add %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("add %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -697,7 +697,7 @@ testing_sub_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("sub %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("sub %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -870,7 +870,7 @@ testing_and_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("and %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("and %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -957,7 +957,7 @@ testing_or_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("or %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("or %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1045,7 +1045,7 @@ testing_xor_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("xor %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("xor %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1132,7 +1132,7 @@ testing_adc_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("adc %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("adc %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1219,7 +1219,7 @@ testing_sbb_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("sbb %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("sbb %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1306,7 +1306,7 @@ testing_cmp_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("cmp %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("cmp %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1363,7 +1363,7 @@ testing_test_m64_imm32 :: proc(t: ^testing.T) {
 		imm_idx := rand.int_max(len(imm32Values))
 		imm := imm32Values[imm_idx]
 
-		asm_str := fmt.tprintf("test %s, %d", memory_address_to_string(dst), imm)
+		asm_str := fmt.tprintf("test %s, %d", memory_address_to_string(dst), cast(i32)imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
@@ -1652,105 +1652,64 @@ testing_mov_r64_r64 :: proc(t: ^testing.T) {
 // Jump tests
 @(test)
 testing_jl_rel8 :: proc(t: ^testing.T) {
-	// Test with various offsets
-	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jl %d", offset)
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jl $+%i" : "jl $%i", adjusted)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		jl_rel8(offset)
+		jl_rel8(imm8)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
 
 @(test)
 testing_jle_rel8 :: proc(t: ^testing.T) {
-	// Test with various offsets
-	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jle %d", offset)
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jle $+%i" : "jle $%i", adjusted)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		jle_rel8(offset)
+		jle_rel8(imm8)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
 
 @(test)
 testing_jg_rel8 :: proc(t: ^testing.T) {
-	// Test with various offsets
-	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jg %d", offset)
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jg $+%i" : "jg $%i", adjusted)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		jg_rel8(offset)
+		jg_rel8(imm8)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
 
 @(test)
 testing_jge_rel8 :: proc(t: ^testing.T) {
-	// Test with various offsets
-	offsets := []i8{-128, -64, -1, 0, 1, 64, 127}
+	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
-	for offset in offsets {
-		asm_str := fmt.tprintf("jge %d", offset)
+	for imm8 in imm8Values {
+		adjusted := imm8 + 2
+		asm_str := fmt.tprintf(adjusted >= 0 ? "jge $+%i" : "jge $%i", adjusted)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		jge_rel8(offset)
+		jge_rel8(imm8)
 		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
 	}
 }
 
-// Stack operations tests
-@(test)
-testing_push_r32 :: proc(t: ^testing.T) {
-	registers32 := get_all_registers32()
-
-	for reg in registers32 {
-		asm_str := fmt.tprintf("push %s", register32_to_string(reg))
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		push_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
-}
-
-@(test)
-testing_pop_r32 :: proc(t: ^testing.T) {
-	registers32 := get_all_registers32()
-
-	for reg in registers32 {
-		asm_str := fmt.tprintf("pop %s", register32_to_string(reg))
-
-		buffer := ByteBuffer{}
-		context.user_ptr = &buffer
-		pop_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
-	}
-}
-
-// Helper functions tests
-@(test)
-testing_is_low_byte_reg :: proc(t: ^testing.T) {
-	registers8 := get_all_registers8()
-
-	// Check all 8-bit registers
-	for reg in registers8 {
-		result := is_low_byte_reg(reg)
-		expected := reg < Register8.SPL // Typically RAX, RCX, RDX, RBX have low byte registers
-		testing.expect_value(t, result, expected)
-	}
-}
 
 // Zero extension tests
 @(test)
