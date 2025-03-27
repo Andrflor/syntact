@@ -376,51 +376,154 @@ skip_whitespace :: proc(l: ^Lexer) {
 	}
 }
 
-// // === FILE READING & TOKEN PRINTING ===
-// main :: proc() {
-// 	if len(os.args) < 2 {
-// 		fmt.println("Usage: lexer <filename>")
-// 		os.exit(1)
-// 	}
+// === FILE READING & TOKEN PRINTING ===
+main :: proc() {
+	if len(os.args) < 2 {
+		fmt.println("Usage: lexer <filename>")
+		os.exit(1)
+	}
 
-// 	filename := os.args[1]
-// 	source, ok := os.read_entire_file(filename)
-// 	if !ok {
-// 		fmt.printf("Error: Could not read file '%s'\n", filename)
-// 		os.exit(1)
-// 	}
-// 	defer delete(source)
+	filename := os.args[1]
+	source, ok := os.read_entire_file(filename)
+	if !ok {
+		fmt.printf("Error: Could not read file '%s'\n", filename)
+		os.exit(1)
+	}
+	defer delete(source)
 
-// 	lexer := Lexer {
-// 		source = string(source),
-// 	}
-// 	fmt.println("Tokenizing file:", filename)
+	lexer := Lexer {
+		source = string(source),
+	}
+	fmt.println("Tokenizing file:", filename)
 
 
-// 	for {
-// 		token := next_token(&lexer)
-// 		fmt.printf("Token: %-15s Text: '%s' Position: %d\n", token.kind, token.text, token.pos)
-// 		if token.kind == .EOF {
-// 			break
-// 		}
-// 	}
-// }
+	base := Scope {
+		value = make([dynamic]Node, 10),
+	}
+
+	currentNode: Maybe(Node)
+
+	for {
+		token := next_token(&lexer)
+		fmt.printf("Token: %-15s Text: '%s' Position: %d\n", token.kind, token.text, token.pos)
+		switch token.kind {
+		case .Invalid:
+		case .EOF:
+			return
+		case .Identifier:
+			switch v in currentNode {
+			case nil:
+				currentNode = Identifier {
+					name = token.text,
+				}
+			case Node:
+				switch d in v {
+				case Identifier:
+				case Pointing:
+				case Scope:
+				case Override:
+				case Product:
+				case Branch:
+				case Pattern:
+				case Constraint:
+				case Operator:
+				case Execute:
+				case Literal:
+				}
+			}
+		case .Integer:
+		case .Float:
+		case .Hexadecimal:
+		case .Binary:
+
+		case .String_Literal:
+		case .Execute:
+		case .At:
+
+		case .PointingPush:
+			switch v in currentNode {
+			case nil:
+				currentNode = Product{}
+			case Node:
+				switch d in v {
+				case Identifier:
+				case Pointing:
+				case Scope:
+				case Override:
+				case Product:
+				case Branch:
+				case Pattern:
+				case Constraint:
+				case Operator:
+				case Execute:
+				case Literal:
+				}
+			}
+
+		case .PointingPull:
+		case .EventPush:
+		case .EventPull:
+		case .ResonancePush:
+		case .ResonancePull:
+
+		case .Equal:
+		case .LessThan:
+		case .GreaterThan:
+		case .LessEqual:
+		case .GreaterEqual:
+
+		case .Colon:
+		case .Question:
+		case .Dot:
+		case .DoubleDot:
+		case .Ellipsis:
+		case .Newline:
+		case .Range:
+		case .PrefixRange:
+		case .PostfixRange:
+
+		case .LeftBrace:
+		case .RightBrace:
+		case .LeftParen:
+		case .RightParen:
+
+		case .Plus:
+		case .Minus:
+		case .Asterisk:
+		case .Slash:
+		case .Percent:
+		case .BitAnd:
+		case .BitOr:
+		case .BitXor:
+		case .BitNot:
+
+		}
+	}
+}
+
 
 Pointing :: struct {
 	name:       string,
-	constraint: ^Constraint,
-	value:      [dynamic]Node,
+	constraint: Maybe(^Constraint),
+	value:      ^Node,
+}
+
+Identifier :: struct {
+	name: string,
+}
+
+Scope :: struct {
+	value: [dynamic]Node,
 }
 
 Override :: struct {
-	source: ^Node,
+	source:    ^Node,
+	overrides: [dynamic]Node,
 }
 
 Product :: struct {
 	value: ^Node,
 }
-
-Statement :: struct {}
 
 Pattern :: struct {
 	target: ^Node,
@@ -440,12 +543,19 @@ Execute :: struct {
 	value: ^Node,
 }
 
-Operator :: struct {}
+Operator :: struct {
+	kind:  Operator_Kind,
+	left:  ^Node,
+	right: ^Node,
+}
 
+Operator_Kind :: enum {
+	Plus,
+	Minus,
+	Mult,
+	Div,
+}
 
-// === AST STRUCTURE DEFINITIONS ===
-
-// Type of literals
 Literal_Kind :: enum {
 	Integer,
 	Float,
@@ -454,884 +564,693 @@ Literal_Kind :: enum {
 	Binary,
 }
 
-// Literal value node
 Literal :: struct {
 	kind:  Literal_Kind,
 	value: string,
 }
 
-// Reference node (for @lib.geometry style references)
-Reference :: struct {
-	path: string, // Full dot-separated path
-}
 
-// Expansion node (for ... operator)
-Expansion :: struct {
-	target: ^Node,
-}
-
-// Event node (for event handling >- and -<)
-Event :: struct {
-	name:    string,
-	is_push: bool, // true for >-, false for -<
-	handler: ^Node,
-}
-
-// Scope node (a block with multiple statements)
-Scope :: struct {
-	statements: [dynamic]Node,
-}
-
-
-// Call node (for function calls with !)
-Call :: struct {
-	target: ^Node,
-	mode:   string, // "!", "[!]", "<!>", etc.
-}
-
-// Update our Node union to include these new types
 Node :: union {
-	Pointing, // Variable definition or constraint
-	Override, // Override field in an object
-	Product, // Return value of a scope
-	Branch, // Pattern matching branch
-	Statement, // Generic statement
-	Pattern, // Pattern matching construct
-	Constraint, // Type or value constraint
-	Operator, // Mathematical operation
-	Execute, // Execute operator (!)
-	Literal, // Literal values
-	Reference, // External reference (@)
-	Expansion, // Expansion operator (...)
-	Event, // Event handling
-	Scope, // A block of code
-	Call, // Function call
+	Pointing,
+	Scope,
+	Override,
+	Product,
+	Branch,
+	Identifier,
+	Pattern,
+	Constraint,
+	Operator,
+	Execute,
+	Literal,
 }
 
-// Helper function to create a new scope
-new_scope :: proc() -> Scope {
-	return Scope{statements = make([dynamic]Node)}
+Parser :: struct {
+	lexer:         ^Lexer,
+	current_token: Token,
+	peek_token:    Token,
 }
 
-// Helper to create literals
-new_literal :: proc(kind: Literal_Kind, value: string) -> Literal {
-	return Literal{kind = kind, value = value}
+init_parser :: proc(parser: ^Parser, lexer: ^Lexer) {
+	parser.lexer = lexer
+	// Initialize with first two tokens
+	parser.current_token = next_token(lexer)
+	parser.peek_token = next_token(lexer)
 }
 
-// Create integer literal
-new_integer :: proc(value: string) -> Literal {
-	return new_literal(.Integer, value)
+advance_token :: proc(parser: ^Parser) {
+	parser.current_token = parser.peek_token
+	parser.peek_token = next_token(parser.lexer)
 }
 
-// Create string literal
-new_string :: proc(value: string) -> Literal {
-	return new_literal(.String, value)
-}
-
-// Create float literal
-new_float :: proc(value: string) -> Literal {
-	return new_literal(.Float, value)
-}
-
-// Modifiez la signature de print_ast pour accepter un pointeur vers Node
-print_ast :: proc(node: ^Node, indent: int = 0) {
-	indent_str := ""
-	for i := 0; i < indent; i += 1 {
-		indent_str = fmt.tprintf("%s  ", indent_str)
+expect_token :: proc(parser: ^Parser, kind: Token_Kind) -> bool {
+	if parser.current_token.kind == kind {
+		advance_token(parser)
+		return true
 	}
+	fmt.printf(
+		"Error: Expected token %v, but got %v at position %d\n",
+		kind,
+		parser.current_token.kind,
+		parser.current_token.pos,
+	)
+	return false
+}
 
-	#partial switch n in node^ { 	// Notez le déréférencement ici
-	case Pointing:
-		fmt.printf("%sPointing: %s\n", indent_str, n.name)
-		if len(n.value) > 0 {
-			fmt.printf("%s  Value:\n", indent_str)
-			for value in n.value {
-				print_ast(&value, indent + 2) // Passez l'adresse de value
-			}
+// Main parsing function
+parse :: proc(parser: ^Parser) -> ^Node {
+	return parse_program(parser)
+}
+
+// Program is the top-level construct
+parse_program :: proc(parser: ^Parser) -> ^Node {
+	scope := new(Scope)
+	scope.value = make([dynamic]Node)
+
+	// Keep parsing until EOF
+	for parser.current_token.kind != .EOF {
+		if node := parse_statement(parser); node != nil {
+			append(&scope.value, node^)
+		} else {
+			// Skip problematic tokens to recover from errors
+			advance_token(parser)
 		}
 
-	case Literal:
-		fmt.printf("%sLiteral: %v '%s'\n", indent_str, n.kind, n.value)
-
-	case Reference:
-		fmt.printf("%sReference: %s\n", indent_str, n.path)
-
-	case Expansion:
-		fmt.printf("%sExpansion:\n", indent_str)
-		print_ast(n.target, indent + 1)
-
-	case Scope:
-		fmt.printf("%sScope: {\n", indent_str)
-		for stmt in n.statements {
-			print_ast(&stmt, indent + 1) // Passez l'adresse de stmt
+		// Skip any newlines between statements
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
 		}
-		fmt.printf("%s}\n", indent_str)
-
-	case Execute:
-		fmt.printf("%sExecute:\n", indent_str)
-		print_ast(n.value, indent + 1)
-
-	case Call:
-		fmt.printf("%sCall (mode: %s):\n", indent_str, n.mode)
-		print_ast(n.target, indent + 1)
-
-	case Pattern:
-		fmt.printf("%sPattern Match:\n", indent_str)
-		fmt.printf("%s  Target:\n", indent_str)
-		print_ast(n.target, indent + 2)
-		fmt.printf("%s  Branches:\n", indent_str)
-		for branch in n.value {
-			fmt.printf("%s    Branch:\n", indent_str)
-			fmt.printf("%s      Constraint:\n", indent_str)
-			print_ast(branch.constraint.value, indent + 4)
-			fmt.printf("%s      Product:\n", indent_str)
-			print_ast(branch.product.value, indent + 4)
-		}
-
-	case:
-		fmt.printf("%sUnknown Node: %T\n", indent_str, node^)
 	}
-}
-// === AST Parsing Implementation ===
 
-// Initialize parser
-init_parser :: proc(p: ^Parser, l: ^Lexer) {
-	p.lexer = l
-	parse_next(p) // Prime the parser with the first token
+	result := new(Node)
+	result^ = scope^
+	return result
 }
 
-// Main entry point for parsing a file
-parse_file :: proc(source: string) -> (Node, bool) {
-	lexer := Lexer {
-		source = source,
-	}
-	parser := Parser {
-		lexer = &lexer,
-	}
-
-	init_parser(&parser, &lexer)
-
-	// Parse the top-level expression
-	result, ok := parse_expression(&parser)
-	if !ok {
-		fmt.println("Error: Failed to parse file")
-		return {}, false
-	}
-
-	return result, true
-}
-
-// Parse expressions (top-level constructs)
-parse_expression :: proc(p: ^Parser) -> (Node, bool) {
-	switch p.current.kind {
+// Statement can be a pointing, pattern match, etc.
+parse_statement :: proc(parser: ^Parser) -> ^Node {
+	switch parser.current_token.kind {
 	case .Identifier:
-		return parse_pointing_or_execute(p)
+		// Could be a pointing or other construct starting with identifier
+		return parse_pointing_or_pattern(parser)
 	case .LeftBrace:
-		return parse_scope(p)
-	case .At:
-		return parse_reference(p)
+		// Anonymous scope
+		return parse_scope(parser)
 	case .Ellipsis:
-		return parse_expansion(p)
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		return parse_literal(p)
+		// Scope expansion
+		return parse_expansion(parser)
+	case .At:
+		// Reference to external scope
+		return parse_reference(parser)
+	case .PointingPush:
+		return parse_pointing_push(parser)
+	case .PointingPull:
+		return parse_pointing_pull(parser)
+	case .EventPush:
+		return parse_event_push(parser)
+	case .EventPull:
+		return parse_event_pull(parser)
 	case:
-		fmt.printf("Error: Unexpected token %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
+		fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
+		return nil
 	}
 }
 
-// Parse a pointing construct (e.g., "name -> {...}")
-parse_pointing_or_execute :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .Identifier {
-		fmt.printf(
-			"Error: Expected identifier, got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
+// Parse a pointing definition or pattern match
+parse_pointing_or_pattern :: proc(parser: ^Parser) -> ^Node {
+	// Save the identifier
+	identifier_name := parser.current_token.text
+	advance_token(parser)
+
+	// Check if it's a pointing
+	if parser.current_token.kind == .PointingPush {
+		return parse_pointing(parser, identifier_name)
 	}
 
-	name := p.current.text
-	parse_next(p)
-
-	// Check if it's an execute expression
-	if p.current.kind == .Execute {
-		parse_next(p)
-		value, ok := parse_expression(p)
-		if !ok {
-			return {}, false
-		}
-
-		execute := Execute {
-			value = value,
-		}
-		return execute, true
+	// Check if it's a pattern match
+	if parser.current_token.kind == .Question {
+		return parse_pattern(parser, identifier_name)
 	}
 
-	// Otherwise expect a pointing operation
-	if p.current.kind != .PointingPush && p.current.kind != .PointingPull {
-		fmt.printf(
-			"Error: Expected -> or <-, got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
+	// Just an identifier
+	result := new(Node)
+	result^ = Identifier {
+		name = identifier_name,
 	}
+	return result
+}
 
-	is_push := p.current.kind == .PointingPush
-	parse_next(p)
+// Parse a pointing like: name -> {...}
+parse_pointing :: proc(parser: ^Parser) -> ^Node {
+	pointing := new(Pointing)
+	pointing.name = identifier_name
 
-	// Parse what's on the right side of the arrow
-	value, ok := parse_expression(p)
-	if !ok {
-		return {}, false
-	}
+	// Consume the ->
+	advance_token(parser)
 
-	// Create pointing node
-	if is_push {
-		pointing := Pointing {
-			name  = name,
-			value = make([dynamic]Node, 0),
-		}
-		append(&pointing.value, value)
-		return pointing, true
+	// Parse the value the pointing points to
+	if value := parse_expression(parser); value != nil {
+		pointing.value = value
 	} else {
-		// Handle pull operation (assign constraint)
-		constraint := Constraint {
-			value = value,
-		}
-		pointing := Pointing {
-			name       = name,
-			constraint = constraint,
-			value      = make([dynamic]Node, 0),
-		}
-		return pointing, true
+		fmt.println("Error: Expected expression after pointing operator")
+		return nil
 	}
+
+	result := new(Node)
+	result^ = pointing^
+	return result
 }
 
-// Parse a scope/block (e.g., "{...}")
-parse_scope :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .LeftBrace {
-		fmt.printf("Error: Expected {, got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
+// Parse a pattern match like: value ? { pattern1: -> result1, pattern2: -> result2 }
+parse_pattern :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
+	pattern := new(Pattern)
+
+	// Create target node (the value being matched)
+	target := new(Node)
+	target^ = Identifier {
+		name = identifier_name,
+	}
+	pattern.target = target
+
+	// Consume the ?
+	advance_token(parser)
+
+	// Expect opening brace for pattern cases
+	if !expect_token(parser, .LeftBrace) {
+		return nil
 	}
 
-	parse_next(p)
+	// Initialize the branches dynamic array
+	pattern.value = make([dynamic]Branch)
 
-	// Parse all statements in the scope
-	statements := make([dynamic]Node)
-
-	for p.current.kind != .RightBrace && p.current.kind != .EOF {
-		stmt, ok := parse_expression(p)
-		if !ok {
-			delete(statements)
-			return {}, false
+	// Parse each pattern branch
+	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+		// Skip newlines between branches
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
 		}
 
-		append(&statements, stmt)
-
-		// Skip optional newlines
-		for p.current.kind == .Newline {
-			parse_next(p)
-		}
-	}
-
-	if p.current.kind != .RightBrace {
-		fmt.printf("Error: Expected }, got %v at position %d\n", p.current.kind, p.current.pos)
-		delete(statements)
-		return {}, false
-	}
-	parse_next(p)
-
-	// Create a product node to represent the scope
-	product := Product {
-		value = Statement{},
-	} // Temporary until we define scope type
-	return product, true
-}
-
-// Parse a reference expression (e.g., "@lib.geometry.Plane")
-parse_reference :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .At {
-		fmt.printf("Error: Expected @, got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
-
-	parse_next(p)
-
-	// Parse the path (e.g., "lib.geometry.Plane")
-	path := ""
-
-	for p.current.kind == .Identifier || p.current.kind == .Dot {
-		path = strings.concatenate({path, p.current.text})
-		parse_next(p)
-	}
-
-	// Create reference node (for now using a statement node)
-	statement := Statement{} // Placeholder - create a proper Reference type
-	return statement, true
-}
-
-// Parse expansion (e.g., "...@lib.geometry{...}")
-parse_expansion :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .Ellipsis {
-		fmt.printf("Error: Expected ..., got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
-
-	parse_next(p)
-
-	// Parse what's being expanded
-	expr, ok := parse_expression(p)
-	if !ok {
-		return {}, false
-	}
-
-	// Create expansion node (using Statement for now)
-	statement := Statement{} // Placeholder - create a proper Expansion type
-	return statement, true
-}
-
-// Parse literal values (numbers, strings)
-parse_literal :: proc(p: ^Parser) -> (Node, bool) {
-	value := p.current.text
-	kind := p.current.kind
-	parse_next(p)
-
-	// Create literal node (using Statement for now)
-	statement := Statement{} // Placeholder - create a proper Literal type
-	return statement, true
-}
-
-// Parse pattern matching (e.g., "-> shape ? {...}")
-parse_pattern :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .Question {
-		fmt.printf("Error: Expected ?, got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
-
-	parse_next(p)
-
-	// Expect a brace to open the pattern match block
-	if p.current.kind != .LeftBrace {
-		fmt.printf(
-			"Error: Expected { after ?, got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
-	}
-	parse_next(p)
-
-	// Parse all branches
-	branches := make([dynamic]Branch)
-
-	for p.current.kind != .RightBrace && p.current.kind != .EOF {
-		// Skip newlines
-		for p.current.kind == .Newline {
-			parse_next(p)
-		}
-
-		if p.current.kind == .RightBrace {
+		if parser.current_token.kind == .RightBrace {
 			break
 		}
 
-		// Parse constraint
-		constraint_expr, ok := parse_expression(p)
-		if !ok {
-			delete(branches)
-			return {}, false
+		// Parse one branch
+		branch := parse_branch(parser)
+		if branch != nil {
+			append(&pattern.value, branch^)
 		}
 
-		// Expect a colon
-		if p.current.kind != .Colon {
-			fmt.printf(
-				"Error: Expected : after constraint, got %v at position %d\n",
-				p.current.kind,
-				p.current.pos,
-			)
-			delete(branches)
-			return {}, false
-		}
-		parse_next(p)
-
-		// Parse product (what happens for this branch)
-		product_expr, ok := parse_expression(p)
-		if !ok {
-			delete(branches)
-			return {}, false
-		}
-
-		// Create branch
-		constraint := Constraint {
-			value = constraint_expr,
-		}
-		product := Product {
-			value = product_expr,
-		}
-		branch := Branch {
-			constraint = constraint,
-			product    = product,
-		}
-
-		append(&branches, branch)
-
-		// Skip optional newlines
-		for p.current.kind == .Newline {
-			parse_next(p)
+		// Skip newlines after a branch
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
 		}
 	}
 
-	if p.current.kind != .RightBrace {
-		fmt.printf(
-			"Error: Expected } to close pattern, got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		delete(branches)
-		return {}, false
-	}
-	parse_next(p)
-
-	// Create pattern node
-	pattern := Pattern {
-		target = Statement{}, // Placeholder - the target is implicit in your language
-		value  = branches,
+	// Consume closing brace
+	if !expect_token(parser, .RightBrace) {
+		return nil
 	}
 
-	return pattern, true
+	result := new(Node)
+	result^ = pattern^
+	return result
 }
 
-// === EXTENDED PARSING FUNCTIONS ===
+// Parse a single branch in a pattern match
+parse_branch :: proc(parser: ^Parser) -> ^Branch {
+	branch := new(Branch)
 
-// Parse a call expression with execution mode (!, <!>, [!], etc.)
-parse_call :: proc(p: ^Parser) -> (Node, bool) {
-	// First check the token kind
-	if p.current.kind != .Execute &&
-	   p.current.kind != .LeftParen &&
-	   p.current.kind != .LeftBrace &&
-	   p.current.kind != .LessThan &&
-	   p.current.kind != .BitOr {
-		fmt.printf(
-			"Error: Expected call token (!, (, [, <, |), got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
+	// Parse the constraint
+	if constraint := parse_constraint(parser); constraint != nil {
+		branch.constraint = constraint
+	} else {
+		fmt.println("Error: Expected constraint in pattern branch")
+		return nil
 	}
 
-	// Determine call mode
-	mode := ""
-
-	switch p.current.kind {
-	case .Execute:
-		mode = "!"
-		parse_next(p)
-
-	case .LeftParen:
-		// Check for background mode (!)
-		parse_next(p)
-		if p.current.kind == .Execute {
-			mode = "(!)"
-			parse_next(p)
-			// Expect closing paren
-			if p.current.kind != .RightParen {
-				fmt.printf(
-					"Error: Expected ) after (!, got %v at position %d\n",
-					p.current.kind,
-					p.current.pos,
-				)
-				return {}, false
-			}
-			parse_next(p)
-		} else {
-			// Handle more complex modes like ([!]) if needed
-			// For now, error out for unsupported modes
-			fmt.printf("Error: Unsupported call mode at position %d\n", p.current.pos)
-			return {}, false
-		}
-
-	case .LeftBrace:
-		parse_next(p)
-		if p.current.kind == .Execute {
-			mode = "[!]"
-			parse_next(p)
-			// Expect closing bracket
-			if p.current.kind != .RightParen {
-				fmt.printf(
-					"Error: Expected ] after [!, got %v at position %d\n",
-					p.current.kind,
-					p.current.pos,
-				)
-				return {}, false
-			}
-			parse_next(p)
-		} else {
-			fmt.printf(
-				"Error: Expected ! after [, got %v at position %d\n",
-				p.current.kind,
-				p.current.pos,
-			)
-			return {}, false
-		}
-
-	case .LessThan:
-		parse_next(p)
-		if p.current.kind == .Execute {
-			mode = "<!>"
-			parse_next(p)
-			// Expect closing angle bracket
-			if p.current.kind != .GreaterThan {
-				fmt.printf(
-					"Error: Expected > after <!, got %v at position %d\n",
-					p.current.kind,
-					p.current.pos,
-				)
-				return {}, false
-			}
-			parse_next(p)
-		} else {
-			fmt.printf(
-				"Error: Expected ! after <, got %v at position %d\n",
-				p.current.kind,
-				p.current.pos,
-			)
-			return {}, false
-		}
-
-	case .BitOr:
-		parse_next(p)
-		if p.current.kind == .Execute {
-			mode = "|!|"
-			parse_next(p)
-			// Expect closing pipe
-			if p.current.kind != .BitOr {
-				fmt.printf(
-					"Error: Expected | after |!, got %v at position %d\n",
-					p.current.kind,
-					p.current.pos,
-				)
-				return {}, false
-			}
-			parse_next(p)
-		} else {
-			fmt.printf(
-				"Error: Expected ! after |, got %v at position %d\n",
-				p.current.kind,
-				p.current.pos,
-			)
-			return {}, false
-		}
+	// Expect colon
+	if !expect_token(parser, .Colon) {
+		return nil
 	}
 
-	// Create call node
-	call := Call {
-		target = Statement{}, // Placeholder - this would normally be a previously parsed expression
-		mode   = mode,
+	// Parse the result product
+	if product := parse_product(parser); product != nil {
+		branch.product = product
+	} else {
+		fmt.println("Error: Expected product after constraint in pattern branch")
+		return nil
 	}
 
-	return call, true
+	return branch
 }
 
-// Parse a list of expressions (e.g., for function arguments)
-parse_list :: proc(p: ^Parser) -> (Node, bool) {
-	list := new_list()
+// Parse a constraint
+parse_constraint :: proc(parser: ^Parser) -> ^Constraint {
+	constraint := new(Constraint)
 
-	// Parse expressions until we hit a delimiter
-	for p.current.kind != .EOF && p.current.kind != .RightBrace && p.current.kind != .RightParen {
-
-		// Skip optional newlines
-		for p.current.kind == .Newline {
-			parse_next(p)
-		}
-
-		// Parse one expression
-		expr, ok := parse_expression(p)
-		if !ok {
-			fmt.printf("Error: Failed to parse list item at position %d\n", p.current.pos)
-			return {}, false
-		}
-
-		append(&list.items, expr)
-
-		// Skip optional newlines again
-		for p.current.kind == .Newline {
-			parse_next(p)
-		}
+	// Parse the value of the constraint
+	if value := parse_expression(parser); value != nil {
+		constraint.value = value
+	} else {
+		fmt.println("Error: Expected expression in constraint")
+		return nil
 	}
 
-	return list, true
+	return constraint
 }
 
-// Parse event expressions (>- and -<)
-parse_event :: proc(p: ^Parser) -> (Node, bool) {
-	is_push := p.current.kind == .EventPush || p.current.kind == .ResonancePush
-	is_resonance := p.current.kind == .ResonancePush || p.current.kind == .ResonancePull
-
-	parse_next(p)
-
-	// Parse event target
-	expr, ok := parse_expression(p)
-	if !ok {
-		return {}, false
+// Parse a product (-> expression)
+parse_product :: proc(parser: ^Parser) -> ^Product {
+	// Expect ->
+	if !expect_token(parser, .PointingPush) {
+		return nil
 	}
 
-	// Parse handler (if any)
-	// In your language, event handlers usually have a specific structure
-	// but for now we'll just capture the expression
+	product := new(Product)
 
-	event := Event {
-		name    = "", // Name would typically be extracted from the expression
-		is_push = is_push,
-		handler = expr,
+	// Parse the value
+	if value := parse_expression(parser); value != nil {
+		product.value = value
+	} else {
+		fmt.println("Error: Expected expression after ->")
+		return nil
 	}
 
-	return event, true
+	return product
 }
 
-// Improved scope parsing with direct Scope type
-parse_improved_scope :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .LeftBrace {
-		fmt.printf("Error: Expected {, got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
+// Parse a scope {...}
+parse_scope :: proc(parser: ^Parser) -> ^Node {
+	// Consume opening brace
+	advance_token(parser)
 
-	parse_next(p)
+	scope := new(Scope)
+	scope.value = make([dynamic]Node)
 
-	scope := new_scope()
-
-	for p.current.kind != .RightBrace && p.current.kind != .EOF {
-		// Skip optional newlines
-		for p.current.kind == .Newline {
-			parse_next(p)
+	// Parse statements until closing brace
+	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+		// Skip newlines between statements
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
 		}
 
-		if p.current.kind == .RightBrace {
+		if parser.current_token.kind == .RightBrace {
 			break
 		}
 
-		// Parse one statement
-		stmt, ok := parse_expression(p)
-		if !ok {
-			fmt.printf("Error: Failed to parse statement at position %d\n", p.current.pos)
-			return {}, false
+		if node := parse_statement(parser); node != nil {
+			append(&scope.value, node^)
+		} else {
+			// Skip problematic tokens
+			advance_token(parser)
 		}
 
-		append(&scope.statements, stmt)
-
-		// Skip optional newlines again
-		for p.current.kind == .Newline {
-			parse_next(p)
+		// Skip newlines after statements
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
 		}
 	}
 
-	if p.current.kind != .RightBrace {
-		fmt.printf(
-			"Error: Expected } to close scope, got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
+	// Consume closing brace
+	if !expect_token(parser, .RightBrace) {
+		return nil
 	}
-	parse_next(p)
 
-	return scope, true
+	result := new(Node)
+	result^ = scope^
+	return result
 }
 
-// Improved literal parsing
-parse_improved_literal :: proc(p: ^Parser) -> (Node, bool) {
-	kind: Literal_Kind
+// Parse a scope expansion like: ...@lib.geometry{Plane->Plane{dimension->3}}
+parse_expansion :: proc(parser: ^Parser) -> ^Node {
+	// Consume ...
+	advance_token(parser)
 
-	switch p.current.kind {
-	case .Integer:
-		kind = .Integer
-	case .Float:
-		kind = .Float
-	case .Hexadecimal:
-		kind = .Hexadecimal
-	case .Binary:
-		kind = .Binary
-	case .String_Literal:
-		kind = .String
-	case:
-		fmt.printf(
-			"Error: Unexpected token for literal: %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
+	override := new(Override)
+
+	// Parse the source
+	if source := parse_expression(parser); source != nil {
+		override.source = source
+	} else {
+		fmt.println("Error: Expected expression after ...")
+		return nil
 	}
 
-	value := p.current.text
-	parse_next(p)
+	// Parse any overrides if there are braces
+	if parser.current_token.kind == .LeftBrace {
+		advance_token(parser)
 
-	return new_literal(kind, value), true
-}
+		override.overrides = make([dynamic]Node)
 
-// Parse a reference (e.g., @lib.geometry.Plane)
-parse_improved_reference :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .At {
-		fmt.printf("Error: Expected @, got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
+		// Parse override expressions until closing brace
+		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+			// Skip newlines
+			for parser.current_token.kind == .Newline {
+				advance_token(parser)
+			}
 
-	parse_next(p)
-
-	path_builder: strings.Builder
-	strings.builder_init(&path_builder)
-	defer strings.builder_destroy(&path_builder)
-
-	// Parse first identifier
-	if p.current.kind != .Identifier {
-		fmt.printf(
-			"Error: Expected identifier after @, got %v at position %d\n",
-			p.current.kind,
-			p.current.pos,
-		)
-		return {}, false
-	}
-
-	strings.write_string(&path_builder, p.current.text)
-	parse_next(p)
-
-	// Parse remaining path components
-	for p.current.kind == .Dot {
-		strings.write_string(&path_builder, ".")
-		parse_next(p)
-
-		if p.current.kind != .Identifier {
-			fmt.printf(
-				"Error: Expected identifier after dot, got %v at position %d\n",
-				p.current.kind,
-				p.current.pos,
-			)
-			return {}, false
-		}
-
-		strings.write_string(&path_builder, p.current.text)
-		parse_next(p)
-	}
-
-	// Check if we have an optional scope modification
-	if p.current.kind == .LeftBrace {
-		// This would handle the case of @lib.geometry{...}
-		// For now we'll just parse and discard the scope
-		_, ok := parse_improved_scope(p)
-		if !ok {
-			return {}, false
-		}
-	}
-
-	ref := Reference {
-		path = strings.to_string(path_builder),
-	}
-
-	return ref, true
-}
-
-// Parse an expansion expression (e.g., ...@lib.geometry)
-parse_improved_expansion :: proc(p: ^Parser) -> (Node, bool) {
-	if p.current.kind != .Ellipsis {
-		fmt.printf("Error: Expected ..., got %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
-
-	parse_next(p)
-
-	// Parse the expression being expanded
-	expr, ok := parse_expression(p)
-	if !ok {
-		return {}, false
-	}
-
-	expansion := Expansion {
-		target = expr,
-	}
-
-	return expansion, true
-}
-
-// === IMPROVED PARSE EXPRESSION ===
-// This would replace the original parse_expression function
-parse_improved_expression :: proc(p: ^Parser) -> (Node, bool) {
-	switch p.current.kind {
-	case .Identifier:
-		// Could be a variable reference, function call, etc.
-		return parse_pointing_or_execute(p)
-
-	case .LeftBrace:
-		return parse_improved_scope(p)
-
-	case .At:
-		return parse_improved_reference(p)
-
-	case .Ellipsis:
-		return parse_improved_expansion(p)
-
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		return parse_improved_literal(p)
-
-	case .EventPush, .EventPull, .ResonancePush, .ResonancePull:
-		return parse_event(p)
-
-	case .Execute, .LeftParen, .LeftBrace, .LessThan, .BitOr:
-		return parse_call(p)
-
-	case .Question:
-		// This would be pattern matching, but it usually comes after an expression
-		// For standalone parsing, we'd need to have a placeholder target
-		return parse_pattern(p)
-
-	case:
-		fmt.printf("Error: Unexpected token %v at position %d\n", p.current.kind, p.current.pos)
-		return {}, false
-	}
-}
-
-// === MAIN FUNCTION UPDATE ===
-main :: proc() {
-	if len(os.args) < 2 {
-		fmt.println("Usage: compiler <filename>")
-		os.exit(1)
-	}
-
-	filename := os.args[1]
-	source, ok := os.read_entire_file(filename)
-	if !ok {
-		fmt.printf("Error: Could not read file '%s'\n", filename)
-		os.exit(1)
-	}
-	defer delete(source)
-
-	// Select mode: tokenize or parse
-	mode := "parse"
-	if len(os.args) >= 3 {
-		mode = os.args[2]
-	}
-
-	if mode == "tokenize" {
-		// Tokenize mode
-		lexer := Lexer {
-			source = string(source),
-		}
-		fmt.println("Tokenizing file:", filename)
-
-		for {
-			token := next_token(&lexer)
-			fmt.printf("Token: %-15s Text: '%s' Position: %d\n", token.kind, token.text, token.pos)
-			if token.kind == .EOF {
+			if parser.current_token.kind == .RightBrace {
 				break
 			}
+
+			if node := parse_statement(parser); node != nil {
+				append(&override.overrides, node^)
+			} else {
+				// Skip problematic tokens
+				advance_token(parser)
+			}
+
+			// Skip newlines
+			for parser.current_token.kind == .Newline {
+				advance_token(parser)
+			}
 		}
-	} else {
-		// Parse mode
-		fmt.println("Parsing file:", filename)
-		ast, parse_ok := parse_file(string(source))
-		if parse_ok {
-			fmt.println("Parsing succeeded!")
-			// Here you would do something with the AST
-		} else {
-			fmt.println("Parsing failed!")
+
+		// Consume closing brace
+		if !expect_token(parser, .RightBrace) {
+			return nil
 		}
 	}
+
+	result := new(Node)
+	result^ = override^
+	return result
+}
+
+// Parse a reference like: @lib.geometry.Plane
+parse_reference :: proc(parser: ^Parser) -> ^Node {
+	// Consume @
+	advance_token(parser)
+
+	// Parse the path as a dot-separated identifier
+	path := parser.current_token.text
+	advance_token(parser)
+
+	for parser.current_token.kind == .Dot {
+		advance_token(parser)
+		if parser.current_token.kind != .Identifier {
+			fmt.println("Error: Expected identifier after dot in reference path")
+			return nil
+		}
+		path = fmt.tprintf("%s.%s", path, parser.current_token.text)
+		advance_token(parser)
+	}
+
+	// Create a special reference node (you might want to add this to your AST)
+	// For now, using Identifier with a special prefix
+	result := new(Node)
+	result^ = Identifier {
+		name = fmt.tprintf("@%s", path),
+	}
+	return result
+}
+
+// Parse execution modifiers like [!], (!), etc.
+parse_execution :: proc(parser: ^Parser, expr: ^Node) -> ^Node {
+	execute := new(Execute)
+	execute.value = expr
+
+	// Determine the type of execution
+	if parser.current_token.kind == .LeftBracket {
+		// Handle [!]
+		advance_token(parser)
+		if !expect_token(parser, .Execute) || !expect_token(parser, .RightBracket) {
+			return nil
+		}
+	} else if parser.current_token.kind == .LeftParen {
+		// Handle (!)
+		advance_token(parser)
+		if !expect_token(parser, .Execute) || !expect_token(parser, .RightParen) {
+			return nil
+		}
+	} else if parser.current_token.kind == .Execute {
+		// Handle simple !
+		advance_token(parser)
+	} else {
+		fmt.println("Error: Expected execution operator")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = execute^
+	return result
+}
+
+// Parse expressions (identifiers, literals, operators, etc.)
+parse_expression :: proc(parser: ^Parser) -> ^Node {
+	// Start with a primary expression
+	expr := parse_primary(parser)
+	if expr == nil {
+		return nil
+	}
+
+	// Check for binary operators
+	if is_binary_operator(parser.current_token.kind) {
+		return parse_binary_expression(parser, expr)
+	}
+
+	// Check for execution modifiers
+	if is_execution_modifier(parser.current_token.kind) {
+		return parse_execution(parser, expr)
+	}
+
+	return expr
+}
+
+// Parse primary expressions (literals, identifiers, scopes)
+parse_primary :: proc(parser: ^Parser) -> ^Node {
+	switch parser.current_token.kind {
+	case .Identifier:
+		// Handle identifier
+		id_name := parser.current_token.text
+		advance_token(parser)
+
+		// Check if it's a function call with arguments
+		if parser.current_token.kind == .LeftBrace {
+			return parse_function_call(parser, id_name)
+		}
+
+		result := new(Node)
+		result^ = Identifier {
+			name = id_name,
+		}
+		return result
+
+	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
+		// Handle literals
+		return parse_literal(parser)
+
+	case .LeftBrace:
+		// Handle scope
+		return parse_scope(parser)
+
+	case .At:
+		// Handle reference
+		return parse_reference(parser)
+
+	case:
+		fmt.printf("Unexpected token in expression: %v\n", parser.current_token.kind)
+		return nil
+	}
+}
+
+// Parse function call or initialization with arguments
+parse_function_call :: proc(parser: ^Parser, function_name: string) -> ^Node {
+	// Create a scope with the function name as a constraint
+	// This is a simplification - you might want a dedicated FunctionCall node
+	scope := new(Scope)
+	scope.value = make([dynamic]Node)
+
+	// Add function name as first element
+	id_node := new(Node)
+	id_node^ = Identifier {
+		name = function_name,
+	}
+	append(&scope.value, id_node^)
+
+	// Parse the argument scope
+	if arg_scope := parse_scope(parser); arg_scope != nil {
+		for i := 0; i < len(scope.value); i += 1 {
+			append(&scope.value, arg_scope.value[i])
+		}
+	} else {
+		fmt.println("Error: Expected argument scope after function name")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = scope^
+	return result
+}
+
+// Parse literal values
+parse_literal :: proc(parser: ^Parser) -> ^Node {
+	literal := new(Literal)
+	literal.value = parser.current_token.text
+
+	switch parser.current_token.kind {
+	case .Integer:
+		literal.kind = .Integer
+	case .Float:
+		literal.kind = .Float
+	case .Hexadecimal:
+		literal.kind = .Hexadecimal
+	case .Binary:
+		literal.kind = .Binary
+	case .String_Literal:
+		literal.kind = .String
+	case:
+		fmt.println("Error: Unknown literal type")
+		return nil
+	}
+
+	advance_token(parser)
+
+	result := new(Node)
+	result^ = literal^
+	return result
+}
+
+// Parse binary expressions
+parse_binary_expression :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	operator := new(Operator)
+	operator.left = left
+
+	// Set operator kind
+	switch parser.current_token.kind {
+	case .Plus:
+		operator.kind = .Plus
+	case .Minus:
+		operator.kind = .Minus
+	case .Asterisk:
+		operator.kind = .Mult
+	case .Slash:
+		operator.kind = .Div
+	case:
+		fmt.println("Error: Unknown binary operator")
+		return nil
+	}
+
+	advance_token(parser)
+
+	// Parse right operand
+	if right := parse_expression(parser); right != nil {
+		operator.right = right
+	} else {
+		fmt.println("Error: Expected expression after binary operator")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = operator^
+	return result
+}
+
+// Helper function to check if token is a binary operator
+is_binary_operator :: proc(kind: Token_Kind) -> bool {
+	return(
+		kind == .Plus ||
+		kind == .Minus ||
+		kind == .Asterisk ||
+		kind == .Slash ||
+		kind == .Percent \
+	)
+}
+
+// Helper function to check if token is an execution modifier
+is_execution_modifier :: proc(kind: Token_Kind) -> bool {
+	return kind == .Execute || kind == .LeftBracket || kind == .LeftParen
+}
+
+// Additional parsing functions for remaining constructs
+parse_pointing_push :: proc(parser: ^Parser) -> ^Node {
+	// Implementation for ->
+	// Similar to parse_pointing but without a name
+	advance_token(parser)
+
+	pointing := new(Pointing)
+	pointing.name = "" // Anonymous pointing
+
+	// Parse the value
+	if value := parse_expression(parser); value != nil {
+		pointing.value = value
+	} else {
+		fmt.println("Error: Expected expression after ->")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = pointing^
+	return result
+}
+
+parse_pointing_pull :: proc(parser: ^Parser) -> ^Node {
+	// Implementation for <-
+	advance_token(parser)
+
+	pointing := new(Pointing)
+	pointing.name = "" // Anonymous pointing
+
+	// Parse the value (constraint)
+	if constraint := parse_expression(parser); constraint != nil {
+		constraint_node := new(Constraint)
+		constraint_node.value = constraint
+		pointing.constraint = constraint_node
+	} else {
+		fmt.println("Error: Expected expression after <-")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = pointing^
+	return result
+}
+
+parse_event_push :: proc(parser: ^Parser) -> ^Node {
+	// Implementation for >-
+	// Similar structure to pointing_push but with different semantics
+	advance_token(parser)
+
+	// For now, treat it as a special type of pointing
+	pointing := new(Pointing)
+	pointing.name = ">-" // Special identifier for event push
+
+	// Parse the value
+	if value := parse_expression(parser); value != nil {
+		pointing.value = value
+	} else {
+		fmt.println("Error: Expected expression after >-")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = pointing^
+	return result
+}
+
+parse_event_pull :: proc(parser: ^Parser) -> ^Node {
+	// Implementation for -<
+	advance_token(parser)
+
+	// For now, treat it as a special type of pointing
+	pointing := new(Pointing)
+	pointing.name = "-<" // Special identifier for event pull
+
+	// Parse the value
+	if value := parse_expression(parser); value != nil {
+		pointing.value = value
+	} else {
+		fmt.println("Error: Expected expression after -<")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = pointing^
+	return result
+}
+
+// Main parsing entry point to replace your current implementation
+parse_file :: proc(lexer: ^Lexer) -> ^Node {
+	parser: Parser
+	init_parser(&parser, lexer)
+	return parse(&parser)
 }
