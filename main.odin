@@ -379,7 +379,7 @@ skip_whitespace :: proc(l: ^Lexer) {
 // === FILE READING & TOKEN PRINTING ===
 main :: proc() {
 	if len(os.args) < 2 {
-		fmt.println("Usage: lexer <filename>")
+		fmt.println("Usage: parser <filename>")
 		os.exit(1)
 	}
 
@@ -391,116 +391,130 @@ main :: proc() {
 	}
 	defer delete(source)
 
+	// Initialize lexer
 	lexer := Lexer {
 		source = string(source),
 	}
-	fmt.println("Tokenizing file:", filename)
 
+	fmt.println("Parsing file:", filename)
 
-	base := Scope {
-		value = make([dynamic]Node, 10),
+	// Parse the file
+	ast := parse_file(&lexer)
+	if ast == nil {
+		fmt.println("Parsing failed!")
+		os.exit(1)
 	}
 
-	currentNode: Maybe(Node)
-
-	for {
-		token := next_token(&lexer)
-		fmt.printf("Token: %-15s Text: '%s' Position: %d\n", token.kind, token.text, token.pos)
-		switch token.kind {
-		case .Invalid:
-		case .EOF:
-			return
-		case .Identifier:
-			switch v in currentNode {
-			case nil:
-				currentNode = Identifier {
-					name = token.text,
-				}
-			case Node:
-				switch d in v {
-				case Identifier:
-				case Pointing:
-				case Scope:
-				case Override:
-				case Product:
-				case Branch:
-				case Pattern:
-				case Constraint:
-				case Operator:
-				case Execute:
-				case Literal:
-				}
-			}
-		case .Integer:
-		case .Float:
-		case .Hexadecimal:
-		case .Binary:
-
-		case .String_Literal:
-		case .Execute:
-		case .At:
-
-		case .PointingPush:
-			switch v in currentNode {
-			case nil:
-				currentNode = Product{}
-			case Node:
-				switch d in v {
-				case Identifier:
-				case Pointing:
-				case Scope:
-				case Override:
-				case Product:
-				case Branch:
-				case Pattern:
-				case Constraint:
-				case Operator:
-				case Execute:
-				case Literal:
-				}
-			}
-
-		case .PointingPull:
-		case .EventPush:
-		case .EventPull:
-		case .ResonancePush:
-		case .ResonancePull:
-
-		case .Equal:
-		case .LessThan:
-		case .GreaterThan:
-		case .LessEqual:
-		case .GreaterEqual:
-
-		case .Colon:
-		case .Question:
-		case .Dot:
-		case .DoubleDot:
-		case .Ellipsis:
-		case .Newline:
-		case .Range:
-		case .PrefixRange:
-		case .PostfixRange:
-
-		case .LeftBrace:
-		case .RightBrace:
-		case .LeftParen:
-		case .RightParen:
-
-		case .Plus:
-		case .Minus:
-		case .Asterisk:
-		case .Slash:
-		case .Percent:
-		case .BitAnd:
-		case .BitOr:
-		case .BitXor:
-		case .BitNot:
-
-		}
-	}
+	// Print AST
+	fmt.println("Successfully parsed file!")
+	print_ast(ast, 0)
 }
 
+// Helper function to print the AST with indentation
+print_ast :: proc(node: ^Node, indent: int) {
+	if node == nil {
+		return
+	}
+
+	indent_str := strings.repeat(" ", indent)
+
+	switch n in node^ {
+	case Pointing:
+		fmt.printf("%sPointing '%s' ->\n", indent_str, n.name)
+		if n.constraint != nil {
+			fmt.printf("%s  Constraint:\n", indent_str)
+			print_ast(n.constraint.value, indent + 4)
+		}
+		if n.value != nil {
+			fmt.printf("%s  Value:\n", indent_str)
+			print_ast(n.value, indent + 4)
+		}
+
+	case Identifier:
+		fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
+
+	case Scope:
+		fmt.printf("%sScope {\n", indent_str)
+		for i := 0; i < len(n.value); i += 1 {
+			entry_node := new(Node)
+			entry_node^ = n.value[i]
+			print_ast(entry_node, indent + 2)
+		}
+		fmt.printf("%s}\n", indent_str)
+
+	case Override:
+		fmt.printf("%sOverride ...\n", indent_str)
+		if n.source != nil {
+			fmt.printf("%s  Source:\n", indent_str)
+			print_ast(n.source, indent + 4)
+		}
+		if len(n.overrides) > 0 {
+			fmt.printf("%s  Overrides {\n", indent_str)
+			for i := 0; i < len(n.overrides); i += 1 {
+				override_node := new(Node)
+				override_node^ = n.overrides[i]
+				print_ast(override_node, indent + 4)
+			}
+			fmt.printf("%s  }\n", indent_str)
+		}
+
+	case Product:
+		fmt.printf("%sProduct ->\n", indent_str)
+		if n.value != nil {
+			print_ast(n.value, indent + 2)
+		}
+
+	case Pattern:
+		fmt.printf("%sPattern ?\n", indent_str)
+		if n.target != nil {
+			fmt.printf("%s  Target:\n", indent_str)
+			print_ast(n.target, indent + 4)
+		}
+		fmt.printf("%s  Branches {\n", indent_str)
+		for i := 0; i < len(n.value); i += 1 {
+			branch := n.value[i]
+			fmt.printf("%s    Branch:\n", indent_str)
+			if branch.constraint != nil {
+				fmt.printf("%s      Constraint:\n", indent_str)
+				print_ast(branch.constraint.value, indent + 8)
+			}
+			if branch.product != nil {
+				fmt.printf("%s      Product:\n", indent_str)
+				print_ast(branch.product.value, indent + 8)
+			}
+		}
+		fmt.printf("%s  }\n", indent_str)
+
+	case Constraint:
+		fmt.printf("%sConstraint:\n", indent_str)
+		if n.value != nil {
+			print_ast(n.value, indent + 2)
+		}
+
+	case Operator:
+		fmt.printf("%sOperator '%v'\n", indent_str, n.kind)
+		if n.left != nil {
+			fmt.printf("%s  Left:\n", indent_str)
+			print_ast(n.left, indent + 4)
+		}
+		if n.right != nil {
+			fmt.printf("%s  Right:\n", indent_str)
+			print_ast(n.right, indent + 4)
+		}
+
+	case Execute:
+		fmt.printf("%sExecute !\n", indent_str)
+		if n.value != nil {
+			print_ast(n.value, indent + 2)
+		}
+
+	case Literal:
+		fmt.printf("%sLiteral (%v): %s\n", indent_str, n.kind, n.value)
+
+	case:
+		fmt.printf("%sUnknown node type\n", indent_str)
+	}
+}
 
 Pointing :: struct {
 	name:       string,
