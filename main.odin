@@ -428,16 +428,16 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Override:
-        fmt.printf("%sOverride ...\n", indent_str)
+        fmt.printf("%sOverride\n", indent_str)
         if n.source != nil {
             fmt.printf("%s  Source:\n", indent_str)
             print_ast(n.source, indent + 4)
+            fmt.printf("%s  Overrides:\n", indent_str)
             for i := 0; i < len(n.overrides); i += 1 {
                 override_node := new(Node)
                 override_node^ = n.overrides[i]
                 print_ast(override_node, indent + 4)
             }
-            fmt.printf("%s  }\n", indent_str)
         }
 
     case Product:
@@ -465,7 +465,6 @@ print_ast :: proc(node: ^Node, indent: int) {
                 print_ast(branch.product, indent + 8)  // Changed from branch.product.value
             }
         }
-        fmt.printf("%s  }\n", indent_str)
 
     case Constraint:
         fmt.printf("%sConstraint:\n", indent_str)
@@ -536,51 +535,51 @@ Branch :: struct {
 Constraint :: struct {
     constraint: ^Node,
     value: Maybe(^Node),
-  }
+}
 
-  Execute :: struct {
-    value: ^Node,
-  }
+Execute :: struct {
+  value: ^Node,
+}
 
-  Operator :: struct {
-    kind:  Operator_Kind,
-    left:  ^Node,
-    right: ^Node,
-  }
+Operator :: struct {
+  kind:  Operator_Kind,
+  left:  ^Node,
+  right: ^Node,
+}
 
-  Operator_Kind :: enum {
-    Plus,
-    Minus,
-    Mult,
-    Div,
-  }
+Operator_Kind :: enum {
+  Plus,
+  Minus,
+  Mult,
+  Div,
+}
 
-  Literal_Kind :: enum {
-    Integer,
-    Float,
-    String,
-    Hexadecimal,
-    Binary,
-  }
+Literal_Kind :: enum {
+  Integer,
+  Float,
+  String,
+  Hexadecimal,
+  Binary,
+}
 
-  Literal :: struct {
-    kind:  Literal_Kind,
-    value: string,
-  }
+Literal :: struct {
+  kind:  Literal_Kind,
+  value: string,
+}
 
 
-  Node :: union {
-    Pointing,
-    Scope,
-    Override,
-    Product,
-    Branch,
-    Identifier,
-    Pattern,
-    Constraint,
-	Operator,
-	Execute,
-	Literal,
+Node :: union {
+  Pointing,
+  Scope,
+  Override,
+  Product,
+  Branch,
+  Identifier,
+  Pattern,
+  Constraint,
+  Operator,
+  Execute,
+  Literal,
 }
 
 Parser :: struct {
@@ -1146,7 +1145,7 @@ parse_primary :: proc(parser: ^Parser) -> ^Node {
             // Consume the colon
             advance_token(parser)
 
-            // Check if there's a value after the colon or if it's just a standalone constraint (u8:)
+            // Check if there's a value after the colon
             if parser.current_token.kind == .Identifier ||
                parser.current_token.kind == .Integer ||
                parser.current_token.kind == .Float ||
@@ -1170,7 +1169,59 @@ parse_primary :: proc(parser: ^Parser) -> ^Node {
             return result
         }
 
-        // Just an identifier
+        // Check for override (identifier followed by left brace)
+        if parser.current_token.kind == .LeftBrace {
+            // Create an override node
+            override := new(Override)
+
+            // The source is the identifier we just parsed
+            source_node := new(Node)
+            source_node^ = Identifier {
+                name = id_name,
+            }
+            override.source = source_node
+
+            // Parse the overrides inside the braces
+            advance_token(parser) // Consume the left brace
+
+            override.overrides = make([dynamic]Node)
+
+            // Parse statements until closing brace
+            for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+                // Skip newlines
+                for parser.current_token.kind == .Newline {
+                    advance_token(parser)
+                }
+
+                if parser.current_token.kind == .RightBrace {
+                    break
+                }
+
+                if node := parse_statement(parser); node != nil {
+                    append_elem(&override.overrides, node^)
+                } else {
+                    // Skip problematic tokens
+                    advance_token(parser)
+                }
+
+                // Skip newlines
+                for parser.current_token.kind == .Newline {
+                    advance_token(parser)
+                }
+            }
+
+            // Consume closing brace
+            if !expect_token(parser, .RightBrace) {
+                return nil
+            }
+
+            // Return the override node
+            result := new(Node)
+            result^ = override^
+            return result
+        }
+
+        // Just a regular identifier
         result := new(Node)
         result^ = Identifier {
             name = id_name,
