@@ -424,13 +424,12 @@ print_ast :: proc(node: ^Node, indent: int) {
 		fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
 
 	case Scope:
-		fmt.printf("%sScope {\n", indent_str)
+		fmt.printf("%sScope\n", indent_str)
 		for i := 0; i < len(n.value); i += 1 {
 			entry_node := new(Node)
 			entry_node^ = n.value[i]
 			print_ast(entry_node, indent + 2)
 		}
-		fmt.printf("%s}\n", indent_str)
 
 	case Override:
 		fmt.printf("%sOverride ...\n", indent_str)
@@ -663,7 +662,7 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
 		// Reference to external scope
 		return parse_reference(parser)
 	case .PointingPush:
-		return parse_pointing_push(parser)
+		return parse_product(parser)
 	case .PointingPull:
 		return parse_pointing_pull(parser)
 	case .EventPush:
@@ -795,7 +794,7 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
 
 	// Parse the result product
 	if product := parse_product(parser); product != nil {
-		branch.product = product
+		branch.product = (^Product)(product)
 	} else {
 		fmt.println("Error: Expected product after constraint in pattern branch")
 		return nil
@@ -817,26 +816,6 @@ parse_constraint :: proc(parser: ^Parser) -> ^Constraint {
 	}
 
 	return constraint
-}
-
-// Parse a product (-> expression)
-parse_product :: proc(parser: ^Parser) -> ^Product {
-	// Expect ->
-	if !expect_token(parser, .PointingPush) {
-		return nil
-	}
-
-	product := new(Product)
-
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		product.value = value
-	} else {
-		fmt.println("Error: Expected expression after ->")
-		return nil
-	}
-
-	return product
 }
 
 // Parse a scope {...}
@@ -1131,24 +1110,22 @@ is_execution_modifier :: proc(kind: Token_Kind) -> bool {
 }
 
 // Additional parsing functions for remaining constructs
-parse_pointing_push :: proc(parser: ^Parser) -> ^Node {
+parse_product :: proc(parser: ^Parser) -> ^Node {
 	// Implementation for ->
-	// Similar to parse_pointing but without a name
 	advance_token(parser)
 
-	pointing := new(Pointing)
-	pointing.name = "" // Anonymous pointing
+	product := new(Product)
 
 	// Parse the value
 	if value := parse_expression(parser); value != nil {
-		pointing.value = value
+		product.value = value
 	} else {
 		fmt.println("Error: Expected expression after ->")
 		return nil
 	}
 
 	result := new(Node)
-	result^ = pointing^
+	result^ = product^
 	return result
 }
 
