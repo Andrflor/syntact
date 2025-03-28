@@ -402,109 +402,107 @@ main :: proc() {
 
 // Helper function to print the AST with indentation
 print_ast :: proc(node: ^Node, indent: int) {
-	if node == nil {
-		return
-	}
+    if node == nil {
+        return
+    }
 
-	indent_str := strings.repeat(" ", indent)
+    indent_str := strings.repeat(" ", indent)
 
-	#partial switch n in node^ {
-	case Pointing:
-		fmt.printf("%sPointing '%s' ->\n", indent_str, n.name)
-		if n.constraint != nil {
-			fmt.printf("%s  Constraint:\n", indent_str)
-			print_ast(cast(^Node)(n.constraint.?), indent + 4)
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    #partial switch n in node^ {
+    case Pointing:
+        fmt.printf("%sPointing '%s' ->\n", indent_str, n.name)
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-	case Identifier:
-		fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
+    case Identifier:
+        fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
 
-	case Scope:
-		fmt.printf("%sScope\n", indent_str)
-		for i := 0; i < len(n.value); i += 1 {
-			entry_node := new(Node)
-			entry_node^ = n.value[i]
-			print_ast(entry_node, indent + 2)
-		}
+    case Scope:
+        fmt.printf("%sScope\n", indent_str)
+        for i := 0; i < len(n.value); i += 1 {
+            entry_node := new(Node)
+            entry_node^ = n.value[i]
+            print_ast(entry_node, indent + 2)
+        }
 
-	case Override:
-		fmt.printf("%sOverride ...\n", indent_str)
-		if n.source != nil {
-			fmt.printf("%s  Source:\n", indent_str)
-			print_ast(n.source, indent + 4)
-			for i := 0; i < len(n.overrides); i += 1 {
-				override_node := new(Node)
-				override_node^ = n.overrides[i]
-				print_ast(override_node, indent + 4)
-			}
-			fmt.printf("%s  }\n", indent_str)
-		}
+    case Override:
+        fmt.printf("%sOverride ...\n", indent_str)
+        if n.source != nil {
+            fmt.printf("%s  Source:\n", indent_str)
+            print_ast(n.source, indent + 4)
+            for i := 0; i < len(n.overrides); i += 1 {
+                override_node := new(Node)
+                override_node^ = n.overrides[i]
+                print_ast(override_node, indent + 4)
+            }
+            fmt.printf("%s  }\n", indent_str)
+        }
 
-	case Product:
-		fmt.printf("%sProduct ->\n", indent_str)
-		if n.value != nil {
-			print_ast(n.value, indent + 2)
-		}
+    case Product:
+        fmt.printf("%sProduct ->\n", indent_str)
+        if n.value != nil {
+            print_ast(n.value, indent + 2)
+        }
 
-	case Pattern:
-		fmt.printf("%sPattern ?\n", indent_str)
-		if n.target != nil {
-			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(n.target, indent + 4)
-		}
-		fmt.printf("%s  Branches {\n", indent_str)
-		for i := 0; i < len(n.value); i += 1 {
-			branch := n.value[i]
-			fmt.printf("%s    Branch:\n", indent_str)
-			if branch.constraint != nil {
-				fmt.printf("%s      Constraint:\n", indent_str)
-				print_ast(branch.constraint.value, indent + 8)
-			}
-			if branch.product != nil {
-				fmt.printf("%s      Product:\n", indent_str)
-				print_ast(branch.product.value, indent + 8)
-			}
-		}
-		fmt.printf("%s  }\n", indent_str)
+    case Pattern:
+        fmt.printf("%sPattern ?\n", indent_str)
+        if n.target != nil {
+            fmt.printf("%s  Target:\n", indent_str)
+            print_ast(n.target, indent + 4)
+        }
+        fmt.printf("%s  Branches {\n", indent_str)
+        for i := 0; i < len(n.value); i += 1 {
+            branch := n.value[i]
+            fmt.printf("%s    Branch:\n", indent_str)
+            if branch.pattern != nil {  // Changed from branch.constraint
+                fmt.printf("%s      Constraint:\n", indent_str)
+                print_ast(branch.pattern, indent + 8)  // Changed from branch.constraint.value
+            }
+            if branch.product != nil {
+                fmt.printf("%s      Product:\n", indent_str)
+                print_ast(branch.product, indent + 8)  // Changed from branch.product.value
+            }
+        }
+        fmt.printf("%s  }\n", indent_str)
 
-	case Constraint:
-		fmt.printf("%sConstraint:\n", indent_str)
-		if n.value != nil {
-			print_ast(n.value, indent + 2)
-		}
+    case Constraint:
+        fmt.printf("%sConstraint:\n", indent_str)
+        print_ast(n.constraint, indent + 2)  // Fixed typo: index -> indent
+        if n.value != nil {
+            if v, ok := n.value.?; ok && v != nil {  // Handle Maybe(^Node) correctly
+                fmt.printf("%s  Value:\n", indent_str)
+                print_ast(v, indent + 4)
+            }
+        }
+    case Operator:
+        fmt.printf("%sOperator '%v'\n", indent_str, n.kind)
+        if n.left != nil {
+            fmt.printf("%s  Left:\n", indent_str)
+            print_ast(n.left, indent + 4)
+        }
+        if n.right != nil {
+            fmt.printf("%s  Right:\n", indent_str)
+            print_ast(n.right, indent + 4)
+        }
 
-	case Operator:
-		fmt.printf("%sOperator '%v'\n", indent_str, n.kind)
-		if n.left != nil {
-			fmt.printf("%s  Left:\n", indent_str)
-			print_ast(n.left, indent + 4)
-		}
-		if n.right != nil {
-			fmt.printf("%s  Right:\n", indent_str)
-			print_ast(n.right, indent + 4)
-		}
+    case Execute:
+        fmt.printf("%sExecute !\n", indent_str)
+        if n.value != nil {
+            print_ast(n.value, indent + 2)
+        }
 
-	case Execute:
-		fmt.printf("%sExecute !\n", indent_str)
-		if n.value != nil {
-			print_ast(n.value, indent + 2)
-		}
+    case Literal:
+        fmt.printf("%sLiteral (%v): %s\n", indent_str, n.kind, n.value)
 
-	case Literal:
-		fmt.printf("%sLiteral (%v): %s\n", indent_str, n.kind, n.value)
-
-	case:
-		fmt.printf("%sUnknown node type\n", indent_str)
-	}
+    case:
+        fmt.printf("%sUnknown node type\n", indent_str)
+    }
 }
 
 Pointing :: struct {
 	name:       string,
-	constraint: Maybe(^Constraint),
 	value:      ^Node,
 }
 
@@ -531,54 +529,55 @@ Pattern :: struct {
 }
 
 Branch :: struct {
-	constraint: ^Constraint,
-	product:    ^Product,
+	pattern: ^Node,
+	product:    ^Node,
 }
 
 Constraint :: struct {
-	value: ^Node,
-}
+    constraint: ^Node,
+    value: Maybe(^Node),
+  }
 
-Execute :: struct {
-	value: ^Node,
-}
+  Execute :: struct {
+    value: ^Node,
+  }
 
-Operator :: struct {
-	kind:  Operator_Kind,
-	left:  ^Node,
-	right: ^Node,
-}
+  Operator :: struct {
+    kind:  Operator_Kind,
+    left:  ^Node,
+    right: ^Node,
+  }
 
-Operator_Kind :: enum {
-	Plus,
-	Minus,
-	Mult,
-	Div,
-}
+  Operator_Kind :: enum {
+    Plus,
+    Minus,
+    Mult,
+    Div,
+  }
 
-Literal_Kind :: enum {
-	Integer,
-	Float,
-	String,
-	Hexadecimal,
-	Binary,
-}
+  Literal_Kind :: enum {
+    Integer,
+    Float,
+    String,
+    Hexadecimal,
+    Binary,
+  }
 
-Literal :: struct {
-	kind:  Literal_Kind,
-	value: string,
-}
+  Literal :: struct {
+    kind:  Literal_Kind,
+    value: string,
+  }
 
 
-Node :: union {
-	Pointing,
-	Scope,
-	Override,
-	Product,
-	Branch,
-	Identifier,
-	Pattern,
-	Constraint,
+  Node :: union {
+    Pointing,
+    Scope,
+    Override,
+    Product,
+    Branch,
+    Identifier,
+    Pattern,
+    Constraint,
 	Operator,
 	Execute,
 	Literal,
@@ -646,34 +645,161 @@ parse_program :: proc(parser: ^Parser) -> ^Node {
 	return result
 }
 
+
+// Add a new function to parse constraint statements (type:value)
+parse_constraint_statement :: proc(parser: ^Parser, type_name: string) -> ^Node {
+    // Create a constraint node
+    constraint := new(Constraint)
+
+    // Set the constraint type
+    type_node := new(Node)
+    type_node^ = Identifier {
+        name = type_name,
+    }
+    constraint.constraint = type_node
+
+    // Consume the colon
+    advance_token(parser)
+
+    // Check if there's a value after the colon or if it's just a standalone constraint (u8:)
+    if parser.current_token.kind == .Identifier ||
+       parser.current_token.kind == .Integer ||
+       parser.current_token.kind == .Float ||
+       parser.current_token.kind == .String_Literal ||
+       parser.current_token.kind == .Hexadecimal ||
+       parser.current_token.kind == .Binary ||
+       parser.current_token.kind == .LeftBrace ||
+       parser.current_token.kind == .At {
+
+        // Parse the value (right side of colon)
+        if value := parse_expression(parser); value != nil {
+            value_maybe: Maybe(^Node)
+            value_maybe = value
+            constraint.value = value_maybe
+        } else {
+            fmt.println("Error: Failed to parse expression after colon in constraint")
+            return nil
+        }
+    } else {
+        // No value after the colon, leave value as nil (u8:)
+        constraint.value = nil
+    }
+
+    result := new(Node)
+    result^ = constraint^
+    return result
+}
+
 // Statement can be a pointing, pattern match, etc.
 parse_statement :: proc(parser: ^Parser) -> ^Node {
-	#partial switch parser.current_token.kind {
-	case .Identifier:
-		// Could be a pointing or other construct starting with identifier
-		return parse_pointing_or_pattern(parser)
-	case .LeftBrace:
-		// Anonymous scope
-		return parse_scope(parser)
-	case .Ellipsis:
-		// Scope expansion
-		return parse_expansion(parser)
-	case .At:
-		// Reference to external scope
-		return parse_reference(parser)
-	case .PointingPush:
-		return parse_product(parser)
-	case .PointingPull:
-		return parse_pointing_pull(parser)
-	case .EventPush:
-		return parse_event_push(parser)
-	case .EventPull:
-		return parse_event_pull(parser)
-	case:
-		fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
-		return nil
-	}
+    #partial switch parser.current_token.kind {
+   case .Identifier:
+        // Save the identifier name
+        id_name := parser.current_token.text
+        advance_token(parser)
+
+        // Check if it's a pointing (identifier ->)
+        if parser.current_token.kind == .PointingPush {
+            return parse_pointing(parser, id_name)
+        }
+
+        // Check if it's a pattern match (identifier ?)
+        if parser.current_token.kind == .Question {
+            return parse_pattern(parser, id_name)
+        }
+
+        // Check if it's a constraint (identifier:)
+        // Correct handling of constraint and pointing
+if parser.current_token.kind == .Colon {
+    constraint_node := parse_constraint_statement(parser, id_name)
+
+    // After parsing the constraint, check if it's followed by ->
+    // which would make it a pointing with constraint as value
+    if parser.current_token.kind == .PointingPush {
+        // This is a pointing with the constraint as a value (u8:a -> 255)
+        pointing := new(Pointing)
+
+        // Extract the identifier name from the constraint value, if it exists
+        constraint := cast(^Constraint)constraint_node
+        if constraint != nil && constraint.value != nil {
+            if v, ok := constraint.value.?; ok {
+                // Check if the value is an identifier
+                id, id_ok := v^.(Identifier)
+                if id_ok {
+                    pointing.name = id.name
+                } else {
+                    pointing.name = "" // Not an identifier
+                }
+            } else {
+                pointing.name = "" // No value
+            }
+        } else {
+            pointing.name = "" // Not a constraint or no value
+        }
+
+        // Consume the ->
+        advance_token(parser)
+
+        // Parse the value that follows ->
+        if value := parse_expression(parser); value != nil {
+            // Create a new constraint with the type from the original constraint
+            // and the value that follows ->
+            constraint := cast(^Constraint)constraint_node
+            if constraint != nil {
+                new_constraint := new(Constraint)
+                new_constraint.constraint = constraint.constraint
+
+                value_maybe: Maybe(^Node)
+                value_maybe = value
+                new_constraint.value = value_maybe
+
+                pointing.value = new(Node)
+                pointing.value^ = new_constraint^
+            } else {
+                // Fallback if we can't extract the constraint properly
+                pointing.value = value
+            }
+
+            result := new(Node)
+            result^ = pointing^
+            return result
+        } else {
+            fmt.println("Error: Expected expression after -> in pointing")
+            return nil
+        }
+    }
+
+    return constraint_node
 }
+        // Just an identifier
+        result := new(Node)
+        result^ = Identifier {
+            name = id_name,
+        }
+        return result
+    case .LeftBrace:
+        // Anonymous scope
+        return parse_scope(parser)
+    case .Ellipsis:
+        // Scope expansion
+        return parse_expansion(parser)
+    case .At:
+        // Reference to external scope
+        return parse_reference(parser)
+    case .PointingPush:
+        return parse_product(parser)
+    case .PointingPull:
+        return parse_pointing_pull(parser)
+    case .EventPush:
+        return parse_event_push(parser)
+    case .EventPull:
+        return parse_event_pull(parser)
+    case:
+        fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
+        return nil
+    }
+}
+
 
 // Parse a pointing definition or pattern match
 parse_pointing_or_pattern :: proc(parser: ^Parser) -> ^Node {
@@ -701,23 +827,23 @@ parse_pointing_or_pattern :: proc(parser: ^Parser) -> ^Node {
 
 // Parse a pointing like: name -> {...}
 parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
-	pointing := new(Pointing)
-	pointing.name = identifier_name
+    pointing := new(Pointing)
+    pointing.name = identifier_name
 
-	// Consume the ->
-	advance_token(parser)
+    // Consume the ->
+    advance_token(parser)
 
-	// Parse the value the pointing points to
-	if value := parse_expression(parser); value != nil {
-		pointing.value = value
-	} else {
-		fmt.println("Error: Expected expression after pointing operator")
-		return nil
-	}
+    // Parse the value the pointing points to
+    if value := parse_expression(parser); value != nil {
+        pointing.value = value
+    } else {
+        fmt.println("Error: Expected expression after pointing operator")
+        return nil
+    }
 
-	result := new(Node)
-	result^ = pointing^
-	return result
+    result := new(Node)
+    result^ = pointing^
+    return result
 }
 
 // Parse a pattern match like: value ? { pattern1: -> result1, pattern2: -> result2 }
@@ -777,30 +903,31 @@ parse_pattern :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
 
 // Parse a single branch in a pattern match
 parse_branch :: proc(parser: ^Parser) -> ^Branch {
-	branch := new(Branch)
+    branch := new(Branch)
 
-	// Parse the constraint
-	if constraint := parse_constraint(parser); constraint != nil {
-		branch.constraint = constraint
-	} else {
-		fmt.println("Error: Expected constraint in pattern branch")
-		return nil
-	}
+    // Parse the pattern (constraint)
+    if pattern := parse_expression(parser); pattern != nil {
+        branch.pattern = pattern  // Use pattern field instead of constraint
+    } else {
+        fmt.println("Error: Expected pattern in branch")
+        return nil
+    }
 
-	// Expect colon
-	if !expect_token(parser, .Colon) {
-		return nil
-	}
+    // Expect colon
+    if !expect_token(parser, .Colon) {
+        return nil
+    }
 
-	// Parse the result product
-	if product := parse_product(parser); product != nil {
-		branch.product = (^Product)(product)
-	} else {
-		fmt.println("Error: Expected product after constraint in pattern branch")
-		return nil
-	}
+    // Parse the result product
+    if product := parse_product(parser); product != nil {
+        // Store the product node directly
+        branch.product = product  // Changed from (^Product)(product)
+    } else {
+        fmt.println("Error: Expected product after pattern in branch")
+        return nil
+    }
 
-	return branch
+    return branch
 }
 
 // Parse a constraint
@@ -998,37 +1125,75 @@ parse_expression :: proc(parser: ^Parser) -> ^Node {
 
 // Parse primary expressions (literals, identifiers, scopes)
 parse_primary :: proc(parser: ^Parser) -> ^Node {
-	#partial switch parser.current_token.kind {
-	case .Identifier:
-		// Handle identifier
-		id_name := parser.current_token.text
-		advance_token(parser)
+    #partial switch parser.current_token.kind {
+    case .Identifier:
+        // Handle identifier
+        id_name := parser.current_token.text
+        advance_token(parser)
 
+        // Check if it's a constraint (identifier followed by colon)
+        if parser.current_token.kind == .Colon {
+            // Create a constraint node
+            constraint := new(Constraint)
 
-		result := new(Node)
-		result^ = Identifier {
-			name = id_name,
-		}
-		return result
+            // Set the constraint type
+            type_node := new(Node)
+            type_node^ = Identifier {
+                name = id_name,
+            }
+            constraint.constraint = type_node
 
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		// Handle literals
-		return parse_literal(parser)
+            // Consume the colon
+            advance_token(parser)
 
-	case .LeftBrace:
-		// Handle scope
-		return parse_scope(parser)
+            // Check if there's a value after the colon or if it's just a standalone constraint (u8:)
+            if parser.current_token.kind == .Identifier ||
+               parser.current_token.kind == .Integer ||
+               parser.current_token.kind == .Float ||
+               parser.current_token.kind == .String_Literal ||
+               parser.current_token.kind == .Hexadecimal ||
+               parser.current_token.kind == .Binary ||
+               parser.current_token.kind == .LeftBrace ||
+               parser.current_token.kind == .At {
 
-	case .At:
-		// Handle reference
-		return parse_reference(parser)
+                // Parse the value (right side of colon)
+                if value := parse_expression(parser); value != nil {
+                    value_maybe: Maybe(^Node)
+                    value_maybe = value
+                    constraint.value = value_maybe
+                }
+            }
 
-	case:
-		fmt.printf("Unexpected token in expression: %v\n", parser.current_token.kind)
-		return nil
-	}
+            // Return the constraint node
+            result := new(Node)
+            result^ = constraint^
+            return result
+        }
+
+        // Just an identifier
+        result := new(Node)
+        result^ = Identifier {
+            name = id_name,
+        }
+        return result
+
+    case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
+        // Handle literals
+        return parse_literal(parser)
+
+    case .LeftBrace:
+        // Handle scope
+        return parse_scope(parser)
+
+    case .At:
+        // Handle reference
+        return parse_reference(parser)
+
+    case:
+        fmt.printf("Unexpected token in expression: %v\n", parser.current_token.kind)
+        return nil
+    }
 }
-
 
 // Parse literal values
 parse_literal :: proc(parser: ^Parser) -> ^Node {
@@ -1111,45 +1276,44 @@ is_execution_modifier :: proc(kind: Token_Kind) -> bool {
 
 // Additional parsing functions for remaining constructs
 parse_product :: proc(parser: ^Parser) -> ^Node {
-	// Implementation for ->
-	advance_token(parser)
+    // Consume the ->
+    advance_token(parser)
 
-	product := new(Product)
+    product := new(Product)
 
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		product.value = value
-	} else {
-		fmt.println("Error: Expected expression after ->")
-		return nil
-	}
+    // Parse the value
+    if value := parse_expression(parser); value != nil {
+        product.value = value
+    } else {
+        fmt.println("Error: Expected expression after ->")
+        return nil
+    }
 
-	result := new(Node)
-	result^ = product^
-	return result
+    result := new(Node)
+    result^ = product^
+    return result
 }
 
 parse_pointing_pull :: proc(parser: ^Parser) -> ^Node {
-	// Implementation for <-
-	advance_token(parser)
+    // Implementation for <-
+    advance_token(parser)
 
-	pointing := new(Pointing)
-	pointing.name = "" // Anonymous pointing
+    pointing := new(Pointing)
+    pointing.name = "" // Anonymous pointing
 
-	// Parse the value (constraint)
-	if constraint := parse_expression(parser); constraint != nil {
-		constraint_node := new(Constraint)
-		constraint_node.value = constraint
-		pointing.constraint = constraint_node
-	} else {
-		fmt.println("Error: Expected expression after <-")
-		return nil
-	}
+    // Parse the value
+    if value := parse_expression(parser); value != nil {
+        pointing.value = value  // Use value field instead of constraint
+    } else {
+        fmt.println("Error: Expected expression after <-")
+        return nil
+    }
 
-	result := new(Node)
-	result^ = pointing^
-	return result
+    result := new(Node)
+    result^ = pointing^
+    return result
 }
+
 
 parse_event_push :: proc(parser: ^Parser) -> ^Node {
 	// Implementation for >-
