@@ -2,6 +2,7 @@ package compiler
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
 
 // === TOKEN ENUM ===
 Token_Kind :: enum {
@@ -75,17 +76,6 @@ Token :: struct {
 Lexer :: struct {
 	source: string,
 	pos:    int,
-}
-
-
-Parser :: struct {
-	lexer:   ^Lexer,
-	current: Token,
-}
-
-// === PARSING FUNCTIONS ===
-parse_next :: proc(p: ^Parser) {
-	p.current = next_token(p.lexer)
 }
 
 
@@ -418,12 +408,12 @@ print_ast :: proc(node: ^Node, indent: int) {
 
 	indent_str := strings.repeat(" ", indent)
 
-	switch n in node^ {
+	#partial switch n in node^ {
 	case Pointing:
 		fmt.printf("%sPointing '%s' ->\n", indent_str, n.name)
 		if n.constraint != nil {
 			fmt.printf("%s  Constraint:\n", indent_str)
-			print_ast(n.constraint.value, indent + 4)
+			print_ast(cast(^Node)(n.constraint.?), indent + 4)
 		}
 		if n.value != nil {
 			fmt.printf("%s  Value:\n", indent_str)
@@ -447,9 +437,6 @@ print_ast :: proc(node: ^Node, indent: int) {
 		if n.source != nil {
 			fmt.printf("%s  Source:\n", indent_str)
 			print_ast(n.source, indent + 4)
-		}
-		if len(n.overrides) > 0 {
-			fmt.printf("%s  Overrides {\n", indent_str)
 			for i := 0; i < len(n.overrides); i += 1 {
 				override_node := new(Node)
 				override_node^ = n.overrides[i]
@@ -662,7 +649,7 @@ parse_program :: proc(parser: ^Parser) -> ^Node {
 
 // Statement can be a pointing, pattern match, etc.
 parse_statement :: proc(parser: ^Parser) -> ^Node {
-	switch parser.current_token.kind {
+	#partial switch parser.current_token.kind {
 	case .Identifier:
 		// Could be a pointing or other construct starting with identifier
 		return parse_pointing_or_pattern(parser)
@@ -714,7 +701,7 @@ parse_pointing_or_pattern :: proc(parser: ^Parser) -> ^Node {
 }
 
 // Parse a pointing like: name -> {...}
-parse_pointing :: proc(parser: ^Parser) -> ^Node {
+parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
 	pointing := new(Pointing)
 	pointing.name = identifier_name
 
@@ -984,10 +971,10 @@ parse_execution :: proc(parser: ^Parser, expr: ^Node) -> ^Node {
 	execute.value = expr
 
 	// Determine the type of execution
-	if parser.current_token.kind == .LeftBracket {
+	if parser.current_token.kind == .LeftBrace {
 		// Handle [!]
 		advance_token(parser)
-		if !expect_token(parser, .Execute) || !expect_token(parser, .RightBracket) {
+		if !expect_token(parser, .Execute) || !expect_token(parser, .RightBrace) {
 			return nil
 		}
 	} else if parser.current_token.kind == .LeftParen {
@@ -1032,16 +1019,12 @@ parse_expression :: proc(parser: ^Parser) -> ^Node {
 
 // Parse primary expressions (literals, identifiers, scopes)
 parse_primary :: proc(parser: ^Parser) -> ^Node {
-	switch parser.current_token.kind {
+	#partial switch parser.current_token.kind {
 	case .Identifier:
 		// Handle identifier
 		id_name := parser.current_token.text
 		advance_token(parser)
 
-		// Check if it's a function call with arguments
-		if parser.current_token.kind == .LeftBrace {
-			return parse_function_call(parser, id_name)
-		}
 
 		result := new(Node)
 		result^ = Identifier {
@@ -1067,41 +1050,13 @@ parse_primary :: proc(parser: ^Parser) -> ^Node {
 	}
 }
 
-// Parse function call or initialization with arguments
-parse_function_call :: proc(parser: ^Parser, function_name: string) -> ^Node {
-	// Create a scope with the function name as a constraint
-	// This is a simplification - you might want a dedicated FunctionCall node
-	scope := new(Scope)
-	scope.value = make([dynamic]Node)
-
-	// Add function name as first element
-	id_node := new(Node)
-	id_node^ = Identifier {
-		name = function_name,
-	}
-	append(&scope.value, id_node^)
-
-	// Parse the argument scope
-	if arg_scope := parse_scope(parser); arg_scope != nil {
-		for i := 0; i < len(scope.value); i += 1 {
-			append(&scope.value, arg_scope.value[i])
-		}
-	} else {
-		fmt.println("Error: Expected argument scope after function name")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = scope^
-	return result
-}
 
 // Parse literal values
 parse_literal :: proc(parser: ^Parser) -> ^Node {
 	literal := new(Literal)
 	literal.value = parser.current_token.text
 
-	switch parser.current_token.kind {
+	#partial switch parser.current_token.kind {
 	case .Integer:
 		literal.kind = .Integer
 	case .Float:
@@ -1130,7 +1085,7 @@ parse_binary_expression :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 	operator.left = left
 
 	// Set operator kind
-	switch parser.current_token.kind {
+	#partial switch parser.current_token.kind {
 	case .Plus:
 		operator.kind = .Plus
 	case .Minus:
@@ -1172,7 +1127,7 @@ is_binary_operator :: proc(kind: Token_Kind) -> bool {
 
 // Helper function to check if token is an execution modifier
 is_execution_modifier :: proc(kind: Token_Kind) -> bool {
-	return kind == .Execute || kind == .LeftBracket || kind == .LeftParen
+	return kind == .Execute || kind == .LeftBrace || kind == .LeftParen
 }
 
 // Additional parsing functions for remaining constructs
