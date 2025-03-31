@@ -477,16 +477,16 @@ print_ast :: proc(node: ^Node, indent: int) {
 			fmt.printf("%s  Target:\n", indent_str)
 			print_ast(n.target, indent + 4)
 		}
-		fmt.printf("%s  Branches {\n", indent_str)
+		fmt.printf("%s  Branches\n", indent_str)
 		for i := 0; i < len(n.value); i += 1 {
 			branch := n.value[i]
 			fmt.printf("%s    Branch:\n", indent_str)
 			if branch.pattern != nil { 	// Changed from branch.constraint
-				fmt.printf("%s      Constraint:\n", indent_str)
+				fmt.printf("%s      Pattern:\n", indent_str)
 				print_ast(branch.pattern, indent + 8) // Changed from branch.constraint.value
 			}
 			if branch.product != nil {
-				fmt.printf("%s      Product:\n", indent_str)
+				fmt.printf("%s      Match:\n", indent_str)
 				print_ast(branch.product, indent + 8) // Changed from branch.product.value
 			}
 		}
@@ -638,7 +638,6 @@ init_parser :: proc(parser: ^Parser, lexer: ^Lexer) {
 
 advance_token :: proc(parser: ^Parser) {
 	parser.current_token = parser.peek_token
-	fmt.println(parser.peek_token.text)
 	parser.peek_token = next_token(parser.lexer)
 }
 
@@ -687,164 +686,215 @@ parse_program :: proc(parser: ^Parser) -> ^Node {
 }
 
 
+// Add this utility function to print token streams for debugging
+debug_print_tokens :: proc(parser: ^Parser, count: int) {
+    fmt.println("\n=== TOKEN STREAM ===")
+
+    // Store original parser state
+    orig_current := parser.current_token
+    orig_peek := parser.peek_token
+
+    // Print current and peek tokens
+    fmt.printf("Current: %v '%s'\n", parser.current_token.kind, parser.current_token.text)
+    fmt.printf("Peek: %v '%s'\n", parser.peek_token.kind, parser.peek_token.text)
+
+    // Print a few tokens ahead
+    fmt.println("\nUpcoming tokens:")
+
+    temp_lexer := parser.lexer^  // Make a copy of the lexer
+    temp_parser: Parser
+    init_parser(&temp_parser, &temp_lexer)
+
+    // Advance to match the current state
+    for temp_parser.current_token.pos < orig_current.pos &&
+        temp_parser.current_token.kind != .EOF {
+        advance_token(&temp_parser)
+    }
+
+    // Print the next 'count' tokens
+    for i := 0; i < count && temp_parser.current_token.kind != .EOF; i += 1 {
+        fmt.printf("%d: %v '%s'\n", i+1, temp_parser.current_token.kind, temp_parser.current_token.text)
+        advance_token(&temp_parser)
+    }
+
+    fmt.println("=== END TOKEN STREAM ===\n")
+}
+
+
 // Add a new function to parse constraint statements (type:value)
 parse_constraint_statement :: proc(parser: ^Parser, type_name: string) -> ^Node {
-	// Create a constraint node
-	constraint := new(Constraint)
+    // Create a constraint node
+    constraint := new(Constraint)
 
-	// Set the constraint type
-	type_node := new(Node)
-	type_node^ = Identifier {
-		name = type_name,
-	}
-	constraint.constraint = type_node
+    // Check if the type might be a complex type like maybe{Shape}
+    if type_name == "maybe" && parser.current_token.kind == .LeftBrace {
+        // We have a maybe{Type} construct
+        advance_token(parser) // consume the '{'
 
-	// Consume the colon
-	advance_token(parser)
+        // Parse the inner type
+        if parser.current_token.kind != .Identifier {
+            fmt.println("Error: Expected identifier inside maybe{}")
+            return nil
+        }
 
-	// Check if there's a value after the colon or if it's just a standalone constraint (u8:)
-	if parser.current_token.kind == .Identifier ||
-	   parser.current_token.kind == .Integer ||
-	   parser.current_token.kind == .Float ||
-	   parser.current_token.kind == .String_Literal ||
-	   parser.current_token.kind == .Hexadecimal ||
-	   parser.current_token.kind == .Binary ||
-	   parser.current_token.kind == .LeftBrace ||
-	   parser.current_token.kind == .At {
+        inner_type_name := parser.current_token.text
+        advance_token(parser) // consume the inner type name
 
-		// Parse the value (right side of colon)
-		if value := parse_expression(parser); value != nil {
-			value_maybe: Maybe(^Node)
-			value_maybe = value
-			constraint.value = value_maybe
-		} else {
-			fmt.println("Error: Failed to parse expression after colon in constraint")
-			return nil
-		}
-	} else {
-		// No value after the colon, leave value as nil (u8:)
-		constraint.value = nil
-	}
+        // Expect closing brace
+        if !expect_token(parser, .RightBrace) {
+            fmt.println("Error: Expected closing brace after maybe{Type}")
+            return nil
+        }
 
-	result := new(Node)
-	result^ = constraint^
-	return result
+        // Create a more complex type identifier for maybe{Type}
+        type_node := new(Node)
+        type_node^ = Identifier {
+            name = fmt.tprintf("maybe{%s}", inner_type_name),
+        }
+        constraint.constraint = type_node
+    } else {
+        // Simple type name
+        type_node := new(Node)
+        type_node^ = Identifier {
+            name = type_name,
+        }
+        constraint.constraint = type_node
+    }
+
+    // Consume the colon
+    if parser.current_token.kind != .Colon {
+        fmt.println("Error: Expected colon in constraint")
+        return nil
+    }
+    advance_token(parser)
+
+    // Check if there's a value after the colon
+    if parser.current_token.kind == .Identifier ||
+       parser.current_token.kind == .Integer ||
+       parser.current_token.kind == .Float ||
+       parser.current_token.kind == .String_Literal ||
+       parser.current_token.kind == .Hexadecimal ||
+       parser.current_token.kind == .Binary ||
+       parser.current_token.kind == .LeftBrace ||
+       parser.current_token.kind == .At {
+
+        // Parse the value (right side of colon)
+        if value := parse_expression(parser); value != nil {
+            value_maybe: Maybe(^Node)
+            value_maybe = value
+            constraint.value = value_maybe
+        } else {
+            fmt.println("Error: Failed to parse expression after colon in constraint")
+            return nil
+        }
+    } else {
+        // No value after the colon, leave value as nil (Type:)
+        constraint.value = nil
+    }
+
+    result := new(Node)
+    result^ = constraint^
+    return result
 }
 
 // Statement can be a pointing, pattern match, etc.
 parse_statement :: proc(parser: ^Parser) -> ^Node {
-	#partial switch parser.current_token.kind {
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		// Handle literals as standalone statements
-		return parse_literal(parser)
+    fmt.printf("\nParse statement, current token: %v '%s'\n",
+               parser.current_token.kind, parser.current_token.text)
 
-	case .Identifier:
-		// Save the identifier name
-		id_name := parser.current_token.text
-		advance_token(parser)
+    #partial switch parser.current_token.kind {
+    case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
+        fmt.println("Parsing literal")
+        return parse_literal(parser)
 
-		// Check if it's a pointing (identifier ->)
-		if parser.current_token.kind == .PointingPush {
-			return parse_pointing(parser, id_name)
-		}
+case .Question:
+    fmt.println("Found standalone ? token")
+    advance_token(parser)
 
-		// Check if it's a pattern match (identifier ?)
-		if parser.current_token.kind == .Question {
-			return parse_pattern(parser, id_name)
-		}
+    if parser.current_token.kind == .LeftBrace {
+        // This should create a pattern with an implicit target
+        // NOT parse it as a scope
+        pattern := new(Pattern)
+        pattern.target = nil  // Implicit target
+        pattern.value = make([dynamic]Branch)
 
-		// Check if it's a constraint (identifier:)
-		if parser.current_token.kind == .Colon {
-			constraint_node := parse_constraint_statement(parser, id_name)
+        // Parse branches inside the braces
+        advance_token(parser)  // Consume the {
 
-			// After parsing the constraint, check if it's followed by ->
-			// which would make it a pointing with constraint as value
-			if parser.current_token.kind == .PointingPush {
-				// This is a pointing with the constraint as a value (u8:a -> 255)
-				pointing := new(Pointing)
+        // [parsing branches code here]
 
-				// Extract the identifier name from the constraint value
-				constraint := cast(^Constraint)constraint_node
-				if constraint != nil && constraint.value != nil {
-					if v, ok := constraint.value.?; ok {
-						// Check if the value is an identifier
-						id, id_ok := v^.(Identifier)
-						if id_ok {
-							pointing.name = id.name
-						} else {
-							pointing.name = "" // Not an identifier
-						}
-					} else {
-						pointing.name = "" // No value
-					}
-				} else {
-					pointing.name = "" // Not a constraint or no value
-				}
+        // Return a proper pattern node
+        result := new(Node)
+        result^ = pattern^
+        return result
+    } else {
+        fmt.println("Error: Expected { after standalone ? token")
+        return nil
+    }
+    case .Identifier:
+        // Save the identifier name
+        id_name := parser.current_token.text
+        fmt.printf("Found identifier: '%s'\n", id_name)
+        advance_token(parser)
 
-				// Consume the ->
-				advance_token(parser)
+        fmt.printf("After identifier, token: %v '%s'\n",
+                   parser.current_token.kind, parser.current_token.text)
 
-				// Parse the value that follows ->
-				if value := parse_expression(parser); value != nil {
-					// Create a new constraint with the type from original constraint
-					constraint := cast(^Constraint)constraint_node
-					if constraint != nil {
-						new_constraint := new(Constraint)
-						new_constraint.constraint = constraint.constraint
+        // Check if it's a pattern match (identifier ?)
+        if parser.current_token.kind == .Question {
+            fmt.printf("Found ? after '%s', parsing as pattern\n", id_name)
+            debug_print_tokens(parser, 5)  // Print next few tokens for debugging
+            return parse_pattern(parser, id_name)
+        }
 
-						value_maybe: Maybe(^Node)
-						value_maybe = value
-						new_constraint.value = value_maybe
+        // Check if it's a pointing (identifier ->)
+        if parser.current_token.kind == .PointingPush {
+            fmt.printf("Found -> after '%s', parsing as pointing\n", id_name)
+            return parse_pointing(parser, id_name)
+        }
 
-						pointing.value = new(Node)
-						pointing.value^ = new_constraint^
-					} else {
-						// Fallback if we can't extract the constraint properly
-						pointing.value = value
-					}
+        // Check if it's a constraint (identifier:)
+        if parser.current_token.kind == .Colon {
+            fmt.printf("Found : after '%s', parsing as constraint\n", id_name)
+            return parse_constraint_statement(parser, id_name)
+        }
 
-					result := new(Node)
-					result^ = pointing^
-					return result
-				} else {
-					fmt.println("Error: Expected expression after -> in pointing")
-					return nil
-				}
-			}
+        // Check if this is an override (Identifier{...})
+        if parser.current_token.kind == .LeftBrace {
+            fmt.printf("Found { after '%s', parsing as override\n", id_name)
+            return parse_override(parser, id_name)
+        }
 
-			return constraint_node
-		}
+        // Just an identifier
+        fmt.printf("Just identifier: '%s'\n", id_name)
+        result := new(Node)
+        result^ = Identifier {
+            name = id_name,
+        }
+        return result
 
-		// Just an identifier
-		result := new(Node)
-		result^ = Identifier {
-			name = id_name,
-		}
-		return result
-
-	case .LeftBrace:
-		// Anonymous scope
-		return parse_scope(parser)
-	case .Ellipsis:
-		// Scope expansion
-		return parse_expansion(parser)
-	case .At:
-		// Reference to external scope
-		return parse_reference(parser)
-	case .PointingPush:
-		return parse_product(parser)
-	case .PointingPull:
-		return parse_pointing_pull(parser)
-	case .EventPush:
-		return parse_event_push(parser)
-	case .EventPull:
-		return parse_event_pull(parser)
-	case:
-		fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
-		return nil
-	}
+    case .LeftBrace:
+        // Anonymous scope
+        return parse_scope(parser)
+    case .Ellipsis:
+        // Scope expansion
+        return parse_expansion(parser)
+    case .At:
+        // Reference to external scope
+        return parse_reference(parser)
+    case .PointingPush:
+        return parse_product(parser)
+    case .PointingPull:
+        return parse_pointing_pull(parser)
+    case .EventPush:
+        return parse_event_push(parser)
+    case .EventPull:
+        return parse_event_pull(parser)
+    case:
+        fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
+        return nil
+    }
 }
-
 
 // Parse a pointing definition or pattern match
 parse_pointing_or_pattern :: proc(parser: ^Parser) -> ^Node {
@@ -927,89 +977,198 @@ parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
 	return result
 }
 
+// Extract the override parsing logic to make the code more modular
+parse_override :: proc(parser: ^Parser, id_name: string) -> ^Node {
+    // Create an override node
+    override := new(Override)
+
+    // Create the source identifier node
+    id := new(Node)
+    id^ = Identifier{name = id_name}
+    override.source = id
+
+    // Consume the left brace
+    advance_token(parser)
+
+    // Initialize the overrides array
+    override.overrides = make([dynamic]Node)
+
+    // Parse statements until closing brace
+    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+        // Skip newlines
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
+
+        if parser.current_token.kind == .RightBrace {
+            break
+        }
+
+        if node := parse_statement(parser); node != nil {
+            append(&override.overrides, node^)
+        } else {
+            // Skip problematic tokens
+            advance_token(parser)
+        }
+
+        // Skip newlines
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
+    }
+
+    // Consume closing brace
+    if !expect_token(parser, .RightBrace) {
+        return nil
+    }
+
+    // Return the override node
+    result := new(Node)
+    result^ = override^
+    return result
+}
+
 // Parse a pattern match like: value ? { pattern1: -> result1, pattern2: -> result2 }
 parse_pattern :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
-	pattern := new(Pattern)
+    // Create pattern node
+    pattern := new(Pattern)
 
-	// Create target node (the value being matched)
-	target := new(Node)
-	target^ = Identifier {
-		name = identifier_name,
-	}
-	pattern.target = target
+    // Set target identifier
+    target := new(Node)
+    target^ = Identifier{name = identifier_name}
+    pattern.target = target
 
-	// Consume the ?
-	advance_token(parser)
+    // Initialize branches array
+    pattern.value = make([dynamic]Branch)
 
-	// Expect opening brace for pattern cases
-	if !expect_token(parser, .LeftBrace) {
-		return nil
-	}
+    // Consume ? token
+    advance_token(parser)
 
-	// Initialize the branches dynamic array
-	pattern.value = make([dynamic]Branch)
+    // Expect {
+    if !expect_token(parser, .LeftBrace) {
+        fmt.println("Error: Expected { after ? in pattern")
+        return nil
+    }
 
-	// Parse each pattern branch
-	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-		// Skip newlines between branches
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
+    // Parse branches until closing brace
+    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+        // Skip newlines
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
 
-		if parser.current_token.kind == .RightBrace {
-			break
-		}
+        if parser.current_token.kind == .RightBrace {
+            break
+        }
 
-		// Parse one branch
-		branch := parse_branch(parser)
-		if branch != nil {
-			append(&pattern.value, branch^)
-		}
+        // Parse a branch and add it to the pattern
+        branch_ptr := parse_branch(parser)
+        if branch_ptr != nil {
+            // Make a copy of the branch and add it to the pattern
+            branch := branch_ptr^
+            append(&pattern.value, branch)
+        } else {
+            fmt.println("Error: Failed to parse branch in pattern")
+            // Skip to next newline or closing brace to recover
+            for parser.current_token.kind != .Newline &&
+                parser.current_token.kind != .RightBrace &&
+                parser.current_token.kind != .EOF {
+                advance_token(parser)
+            }
+        }
 
-		// Skip newlines after a branch
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-	}
+        // Skip newlines between branches
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
+    }
 
-	// Consume closing brace
-	if !expect_token(parser, .RightBrace) {
-		return nil
-	}
+    // Expect closing brace
+    if !expect_token(parser, .RightBrace) {
+        fmt.println("Error: Expected } to close pattern")
+        return nil
+    }
 
-	result := new(Node)
-	result^ = pattern^
-	return result
+    // Create and return pattern node
+    result := new(Node)
+    result^ = pattern^
+    return result
 }
 
 // Parse a single branch in a pattern match
 parse_branch :: proc(parser: ^Parser) -> ^Branch {
-	branch := new(Branch)
+    // Create new branch
+    branch := new(Branch)
 
-	// Parse the pattern (constraint)
-	if pattern := parse_expression(parser); pattern != nil {
-		branch.pattern = pattern // Use pattern field instead of constraint
-	} else {
-		fmt.println("Error: Expected pattern in branch")
-		return nil
-	}
-	// Expect colon
-	if !expect_token(parser, .Colon) {
-		return nil
-	}
+    // Parse the pattern (constraint) part
+    if parser.current_token.kind == .Identifier {
+        // Simple identifier pattern
+        pattern_name := parser.current_token.text
+        advance_token(parser)
 
-	// Parse the result product
-	if product := parse_product(parser); product != nil {
-		// Store the product node directly
-		branch.product = product
-	} else {
-		fmt.println("Error: Expected product after pattern in branch")
-		return nil
-	}
+        pattern_node := new(Node)
+        pattern_node^ = Identifier{name = pattern_name}
+        branch.pattern = pattern_node
+    } else {
+        // More complex pattern expression
+        if pattern := parse_expression(parser); pattern != nil {
+            branch.pattern = pattern
+        } else {
+            fmt.println("Error: Failed to parse pattern in branch")
+            return nil
+        }
+    }
 
-	return branch
+    // Expect colon
+    if parser.current_token.kind != .Colon {
+        fmt.println("Error: Expected : after pattern")
+        return nil
+    }
+    advance_token(parser)
+
+    // Expect ->
+    if parser.current_token.kind != .PointingPush {
+        fmt.println("Error: Expected -> after : in branch")
+        return nil
+    }
+
+    // Parse the product (-> expression)
+    // Note: parse_product consumes the -> token
+    if product := parse_product(parser); product != nil {
+        branch.product = product
+    } else {
+        fmt.println("Error: Failed to parse product after ->")
+        return nil
+    }
+
+    return branch
 }
 
+
+// Updated product parsing to create proper Product nodes
+parse_product :: proc(parser: ^Parser) -> ^Node {
+    fmt.println("Parsing product with -> token")
+
+    // Consume the ->
+    advance_token(parser)
+    fmt.printf("After ->, current: %v '%s'\n",
+               parser.current_token.kind, parser.current_token.text)
+
+    product := new(Product)
+
+    // Parse the value
+    if value := parse_expression(parser); value != nil {
+        product.value = value
+        fmt.println("Successfully parsed product value")
+    } else {
+        fmt.println("Error: Expected expression after ->")
+        return nil
+    }
+
+    result := new(Node)
+    result^ = product^
+    return result
+}
 
 // Fix the parse_reference function to properly handle file system references
 parse_reference :: proc(parser: ^Parser) -> ^Node {
@@ -1279,166 +1438,158 @@ parse_expression :: proc(parser: ^Parser) -> ^Node {
 
 // Parse primary expressions (literals, identifiers, scopes)
 parse_primary :: proc(parser: ^Parser) -> ^Node {
-	#partial switch parser.current_token.kind {
-	case .Identifier:
-		// Sauvegarder le nom de l'identifiant
-		id_name := parser.current_token.text
-		advance_token(parser)
+    #partial switch parser.current_token.kind {
+    case .Identifier:
+        // Save the identifier name
+        id_name := parser.current_token.text
+        advance_token(parser)
 
-		// Créer le nœud identifiant
-		id_node := new(Node)
-		id_node^ = Identifier {
-			name = id_name,
-		}
+        // Create the identifier node
+        id_node := new(Node)
+        id_node^ = Identifier {
+            name = id_name,
+        }
 
-		// Vérifier pour un accès de propriété (identifier suivi d'un point)
-		if parser.current_token.kind == .Dot {
-			// Commencer à construire la chaîne de propriétés
-			current := id_node
+        // Check for property access (identifier followed by dot)
+        if parser.current_token.kind == .Dot {
+            // Start building property chain
+            current := id_node
 
-			// Traiter tous les points dans la chaîne
-			for parser.current_token.kind == .Dot {
-				// Consommer le point
-				advance_token(parser)
+            // Handle property access chain
+            for parser.current_token.kind == .Dot {
+                advance_token(parser)
 
-				// S'attendre à un identifiant après le point
-				if parser.current_token.kind != .Identifier {
-					fmt.println("Error: Expected identifier after dot")
-					return nil
-				}
+                if parser.current_token.kind != .Identifier {
+                    fmt.println("Error: Expected identifier after dot")
+                    return nil
+                }
 
-				// Obtenir le nom de la propriété
-				prop_name := parser.current_token.text
-				advance_token(parser)
+                prop_name := parser.current_token.text
+                advance_token(parser)
 
-				// Créer le nœud d'accès à la propriété
-				prop := new(Property)
-				prop.source = current
+                prop := new(Property)
+                prop.source = current
 
-				// Créer l'identifiant de propriété
-				prop_id := new(Node)
-				prop_id^ = Identifier {
-					name = prop_name,
-				}
-				prop.property = prop_id
+                prop_id := new(Node)
+                prop_id^ = Identifier {
+                    name = prop_name,
+                }
+                prop.property = prop_id
 
-				// Mettre à jour le nœud courant
-				prop_node := new(Node)
-				prop_node^ = prop^
-				current = prop_node
-			}
+                prop_node := new(Node)
+                prop_node^ = prop^
+                current = prop_node
+            }
 
-			return current
-		}
+            return current
+        }
 
-		// Vérifier si c'est une contrainte (identifiant suivi de deux-points)
-		if parser.current_token.kind == .Colon {
-			// Créer un nœud de contrainte
-			constraint := new(Constraint)
+        // Check if it's a constraint (identifier followed by colon)
+        if parser.current_token.kind == .Colon {
+            // Create a constraint node
+            constraint := new(Constraint)
 
-			// Définir le type de contrainte
-			type_node := new(Node)
-			type_node^ = Identifier {
-				name = id_name,
-			}
-			constraint.constraint = type_node
+            // Set the constraint type
+            type_node := new(Node)
+            type_node^ = Identifier {
+                name = id_name,
+            }
+            constraint.constraint = type_node
 
-			// Consommer les deux-points
-			advance_token(parser)
+            // Consume the colon
+            advance_token(parser)
 
-			// Vérifier s'il y a une valeur après les deux-points
-			if parser.current_token.kind == .Identifier ||
-			   parser.current_token.kind == .Integer ||
-			   parser.current_token.kind == .Float ||
-			   parser.current_token.kind == .String_Literal ||
-			   parser.current_token.kind == .Hexadecimal ||
-			   parser.current_token.kind == .Binary ||
-			   parser.current_token.kind == .LeftBrace ||
-			   parser.current_token.kind == .At {
+            // Check for value after colon
+            if parser.current_token.kind == .Identifier ||
+               parser.current_token.kind == .Integer ||
+               parser.current_token.kind == .Float ||
+               parser.current_token.kind == .String_Literal ||
+               parser.current_token.kind == .Hexadecimal ||
+               parser.current_token.kind == .Binary ||
+               parser.current_token.kind == .LeftBrace ||
+               parser.current_token.kind == .At {
 
-				// Analyser la valeur (côté droit des deux-points)
-				if value := parse_expression(parser); value != nil {
-					value_maybe: Maybe(^Node)
-					value_maybe = value
-					constraint.value = value_maybe
-				}
-			}
+                if value := parse_expression(parser); value != nil {
+                    value_maybe: Maybe(^Node)
+                    value_maybe = value
+                    constraint.value = value_maybe
+                }
+            }
 
-			// Retourner le nœud de contrainte
-			result := new(Node)
-			result^ = constraint^
-			return result
-		}
+            result := new(Node)
+            result^ = constraint^
+            return result
+        }
 
-		// Vérifier pour un override (identifiant suivi d'une accolade gauche)
-		if parser.current_token.kind == .LeftBrace {
-			// Créer un nœud d'override
-			override := new(Override)
+        // Check for override (identifier followed by left brace)
+        if parser.current_token.kind == .LeftBrace {
+            // Create an override node
+            override := new(Override)
 
-			// La source est l'identifiant que nous venons d'analyser
-			override.source = id_node
+            // Set the source
+            override.source = id_node
 
-			// Analyser les overrides à l'intérieur des accolades
-			advance_token(parser) // Consommer l'accolade gauche
+            // Parse the overrides inside the braces
+            advance_token(parser) // Consume the left brace
 
-			override.overrides = make([dynamic]Node)
+            override.overrides = make([dynamic]Node)
 
-			// Analyser les instructions jusqu'à l'accolade fermante
-			for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-				// Ignorer les sauts de ligne
-				for parser.current_token.kind == .Newline {
-					advance_token(parser)
-				}
+            // Parse statements until closing brace
+            for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+                // Skip newlines
+                for parser.current_token.kind == .Newline {
+                    advance_token(parser)
+                }
 
-				if parser.current_token.kind == .RightBrace {
-					break
-				}
+                if parser.current_token.kind == .RightBrace {
+                    break
+                }
 
-				if node := parse_statement(parser); node != nil {
-					append(&override.overrides, node^)
-				} else {
-					// Ignorer les tokens problématiques
-					advance_token(parser)
-				}
+                if node := parse_statement(parser); node != nil {
+                    append(&override.overrides, node^)
+                } else {
+                    // Skip problematic tokens
+                    advance_token(parser)
+                }
 
-				// Ignorer les sauts de ligne
-				for parser.current_token.kind == .Newline {
-					advance_token(parser)
-				}
-			}
+                // Skip newlines
+                for parser.current_token.kind == .Newline {
+                    advance_token(parser)
+                }
+            }
 
-			// Consommer l'accolade fermante
-			if !expect_token(parser, .RightBrace) {
-				return nil
-			}
+            // Consume closing brace
+            if !expect_token(parser, .RightBrace) {
+                return nil
+            }
 
-			// Retourner le nœud d'override
-			result := new(Node)
-			result^ = override^
-			return result
-		}
+            // Return the override node
+            result := new(Node)
+            result^ = override^
+            return result
+        }
 
-		// Juste un identifiant régulier
-		return id_node
+        // Just a regular identifier
+        return id_node
 
+    case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
+        // Handle literals
+        return parse_literal(parser)
 
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		// Handle literals
-		return parse_literal(parser)
+    case .LeftBrace:
+        // Handle scope
+        return parse_scope(parser)
 
-	case .LeftBrace:
-		// Handle scope
-		return parse_scope(parser)
+    case .At:
+        // Handle reference
+        return parse_reference(parser)
 
-	case .At:
-		// Handle reference
-		return parse_reference(parser)
-
-	case:
-		fmt.printf("Unexpected token in expression: %v\n", parser.current_token.kind)
-		return nil
-	}
+    case:
+        fmt.printf("Unexpected token in expression: %v\n", parser.current_token.kind)
+        return nil
+    }
 }
+
 // Parse literal values
 parse_literal :: proc(parser: ^Parser) -> ^Node {
 	literal := new(Literal)
@@ -1516,26 +1667,6 @@ is_binary_operator :: proc(kind: Token_Kind) -> bool {
 // Helper function to check if token is an execution modifier
 is_execution_modifier :: proc(kind: Token_Kind) -> bool {
 	return kind == .Execute || kind == .LeftBrace || kind == .LeftParen
-}
-
-// Additional parsing functions for remaining constructs
-parse_product :: proc(parser: ^Parser) -> ^Node {
-	// Consume the ->
-	advance_token(parser)
-
-	product := new(Product)
-
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		product.value = value
-	} else {
-		fmt.println("Error: Expected expression after ->")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = product^
-	return result
 }
 
 parse_pointing_pull :: proc(parser: ^Parser) -> ^Node {
