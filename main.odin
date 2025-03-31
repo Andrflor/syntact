@@ -440,6 +440,31 @@ print_ast :: proc(node: ^Node, indent: int) {
 			}
 		}
 
+	case Property:
+		fmt.printf("%sProperty\n", indent_str)
+		if n.source != nil {
+			fmt.printf("%s  Source:\n", indent_str)
+			print_ast(n.source, indent + 4)
+		}
+		if n.property != nil {
+			fmt.printf("%s  Property:\n", indent_str)
+			print_ast(n.property, indent + 4)
+		}
+
+	case Expand:
+		fmt.printf("%sExpand\n", indent_str)
+		if n.target != nil {
+			fmt.printf("%s  Target:\n", indent_str)
+			print_ast(n.target, indent + 4)
+		}
+
+	case FileSystem:
+		fmt.printf("%sFileSystem\n", indent_str)
+		if n.target != nil {
+			fmt.printf("%s  Target:\n", indent_str)
+			print_ast(n.target, indent + 4)
+		}
+
 	case Product:
 		fmt.printf("%sProduct ->\n", indent_str)
 		if n.value != nil {
@@ -567,6 +592,19 @@ Literal :: struct {
 	value: string,
 }
 
+Property :: struct {
+	source:   ^Node,
+	property: ^Node,
+}
+
+Expand :: struct {
+	target: ^Node,
+}
+
+FileSystem :: struct {
+	target: ^Node,
+}
+
 
 Node :: union {
 	Pointing,
@@ -580,6 +618,9 @@ Node :: union {
 	Operator,
 	Execute,
 	Literal,
+	Property,
+	Expand,
+	FileSystem,
 }
 
 Parser :: struct {
@@ -597,6 +638,7 @@ init_parser :: proc(parser: ^Parser, lexer: ^Lexer) {
 
 advance_token :: proc(parser: ^Parser) {
 	parser.current_token = parser.peek_token
+	fmt.println(parser.peek_token.text)
 	parser.peek_token = next_token(parser.lexer)
 }
 
@@ -828,6 +870,42 @@ parse_pointing_or_pattern :: proc(parser: ^Parser) -> ^Node {
 	return result
 }
 
+parse_property_access :: proc(parser: ^Parser, source: ^Node) -> ^Node {
+	// Create a property access node
+	property_access := new(Property)
+	property_access.source = source
+
+	// Consume the dot
+	advance_token(parser)
+
+	// Parse the property identifier
+	if parser.current_token.kind != .Identifier {
+		fmt.println("Error: Expected identifier after dot in property access")
+		return nil
+	}
+
+	property_name := parser.current_token.text
+	advance_token(parser)
+
+	// Create the property node
+	property_node := new(Node)
+	property_node^ = Identifier {
+		name = property_name,
+	}
+	property_access.property = property_node
+
+	// Check if there are more property accesses in a chain (a.b.c)
+	if parser.current_token.kind == .Dot {
+		result := new(Node)
+		result^ = property_access^
+		return parse_property_access(parser, result)
+	}
+
+	result := new(Node)
+	result^ = property_access^
+	return result
+}
+
 // Parse a pointing like: name -> {...}
 parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
 	pointing := new(Pointing)
@@ -915,7 +993,6 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
 		fmt.println("Error: Expected pattern in branch")
 		return nil
 	}
-
 	// Expect colon
 	if !expect_token(parser, .Colon) {
 		return nil
@@ -924,13 +1001,89 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
 	// Parse the result product
 	if product := parse_product(parser); product != nil {
 		// Store the product node directly
-		branch.product = product // Changed from (^Product)(product)
+		branch.product = product
 	} else {
 		fmt.println("Error: Expected product after pattern in branch")
 		return nil
 	}
 
 	return branch
+}
+
+
+// Fix the parse_reference function to properly handle file system references
+parse_reference :: proc(parser: ^Parser) -> ^Node {
+	// Consommer @
+	advance_token(parser)
+
+	// Vérifier s'il y a un identifiant après @
+	if parser.current_token.kind != .Identifier {
+		fmt.println("Error: Expected identifier after @")
+		return nil
+	}
+
+	// Créer le nœud FileSystem
+	fs_node := new(FileSystem)
+
+	// Analyser le premier identifiant
+	id_name := parser.current_token.text
+	advance_token(parser)
+
+	// Créer un nœud identifiant initial
+	ident_node := new(Node)
+	ident_node^ = Identifier {
+		name = id_name,
+	}
+
+	// Si aucun accès de propriété ne suit, retourner le nœud FileSystem de base
+	if parser.current_token.kind != .Dot {
+		fs_node.target = ident_node
+		result := new(Node)
+		result^ = fs_node^
+		return result
+	}
+
+	// Gérer la chaîne de propriétés (lib.geometry.Plane)
+	current_node := ident_node
+
+	// Traiter tous les points et identifiants dans la chaîne
+	for parser.current_token.kind == .Dot {
+		// Consommer le point
+		advance_token(parser)
+
+		// S'attendre à un identifiant
+		if parser.current_token.kind != .Identifier {
+			fmt.println("Error: Expected identifier after dot")
+			return nil
+		}
+
+		// Obtenir le nom de la propriété
+		property_name := parser.current_token.text
+		advance_token(parser)
+
+		// Créer le nœud de propriété
+		property := new(Property)
+		property.source = current_node
+
+		// Créer l'identifiant de propriété
+		prop_ident := new(Node)
+		prop_ident^ = Identifier {
+			name = property_name,
+		}
+		property.property = prop_ident
+
+		// Mettre à jour le nœud courant à cette propriété
+		property_node := new(Node)
+		property_node^ = property^
+		current_node = property_node
+	}
+
+	// Définir la chaîne de propriétés finale comme cible du FileSystem
+	fs_node.target = current_node
+
+	result := new(Node)
+	result^ = fs_node^
+	return result
 }
 
 // Parse a constraint
@@ -990,30 +1143,51 @@ parse_scope :: proc(parser: ^Parser) -> ^Node {
 	return result
 }
 
-// Parse a scope expansion like: ...@lib.geometry{Plane->Plane{dimension->3}}
 parse_expansion :: proc(parser: ^Parser) -> ^Node {
-	// Consume ...
+	// Consommer ...
 	advance_token(parser)
 
-	override := new(Override)
+	// Créer le nœud d'expansion
+	expand := new(Expand)
 
-	// Parse the source
-	if source := parse_expression(parser); source != nil {
-		override.source = source
+	// Analyser l'expression cible
+	if parser.current_token.kind == .At {
+		// Cas spécial pour la référence au système de fichiers
+		if target := parse_reference(parser); target != nil {
+			expand.target = target
+		} else {
+			fmt.println("Error: Failed to parse file system reference after ...")
+			return nil
+		}
 	} else {
-		fmt.println("Error: Expected expression after ...")
-		return nil
+		// Cas d'expression générale
+		if target := parse_expression(parser); target != nil {
+			expand.target = target
+		} else {
+			fmt.println("Error: Expected expression after ...")
+			return nil
+		}
 	}
 
-	// Parse any overrides if there are braces
+	// Créer le résultat pour le nœud d'expansion
+	expand_result := new(Node)
+	expand_result^ = expand^
+
+	// Vérifier les overrides dans les accolades
 	if parser.current_token.kind == .LeftBrace {
+		// Créer un nœud override avec l'expansion comme source
+		override := new(Override)
+		override.source = expand_result
+
+		// Consommer l'accolade gauche
 		advance_token(parser)
 
+		// Initialiser le tableau d'overrides
 		override.overrides = make([dynamic]Node)
 
-		// Parse override expressions until closing brace
+		// Analyser les instructions jusqu'à l'accolade fermante
 		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-			// Skip newlines
+			// Ignorer les sauts de ligne
 			for parser.current_token.kind == .Newline {
 				advance_token(parser)
 			}
@@ -1022,56 +1196,33 @@ parse_expansion :: proc(parser: ^Parser) -> ^Node {
 				break
 			}
 
+			// Analyser l'instruction et l'ajouter aux overrides
 			if node := parse_statement(parser); node != nil {
 				append(&override.overrides, node^)
 			} else {
-				// Skip problematic tokens
+				// Ignorer les tokens problématiques
 				advance_token(parser)
 			}
 
-			// Skip newlines
+			// Ignorer les sauts de ligne finaux
 			for parser.current_token.kind == .Newline {
 				advance_token(parser)
 			}
 		}
 
-		// Consume closing brace
+		// Consommer l'accolade fermante
 		if !expect_token(parser, .RightBrace) {
 			return nil
 		}
+
+		// Retourner le nœud override
+		result := new(Node)
+		result^ = override^
+		return result
 	}
 
-	result := new(Node)
-	result^ = override^
-	return result
-}
-
-// Parse a reference like: @lib.geometry.Plane
-parse_reference :: proc(parser: ^Parser) -> ^Node {
-	// Consume @
-	advance_token(parser)
-
-	// Parse the path as a dot-separated identifier
-	path := parser.current_token.text
-	advance_token(parser)
-
-	for parser.current_token.kind == .Dot {
-		advance_token(parser)
-		if parser.current_token.kind != .Identifier {
-			fmt.println("Error: Expected identifier after dot in reference path")
-			return nil
-		}
-		path = fmt.tprintf("%s.%s", path, parser.current_token.text)
-		advance_token(parser)
-	}
-
-	// Create a special reference node (you might want to add this to your AST)
-	// For now, using Identifier with a special prefix
-	result := new(Node)
-	result^ = Identifier {
-		name = fmt.tprintf("@%s", path),
-	}
-	return result
+	// Si pas d'overrides, retourner simplement le nœud d'expansion
+	return expand_result
 }
 
 // Parse execution modifiers like [!], (!), etc.
@@ -1130,26 +1281,72 @@ parse_expression :: proc(parser: ^Parser) -> ^Node {
 parse_primary :: proc(parser: ^Parser) -> ^Node {
 	#partial switch parser.current_token.kind {
 	case .Identifier:
-		// Handle identifier
+		// Sauvegarder le nom de l'identifiant
 		id_name := parser.current_token.text
 		advance_token(parser)
 
-		// Check if it's a constraint (identifier followed by colon)
+		// Créer le nœud identifiant
+		id_node := new(Node)
+		id_node^ = Identifier {
+			name = id_name,
+		}
+
+		// Vérifier pour un accès de propriété (identifier suivi d'un point)
+		if parser.current_token.kind == .Dot {
+			// Commencer à construire la chaîne de propriétés
+			current := id_node
+
+			// Traiter tous les points dans la chaîne
+			for parser.current_token.kind == .Dot {
+				// Consommer le point
+				advance_token(parser)
+
+				// S'attendre à un identifiant après le point
+				if parser.current_token.kind != .Identifier {
+					fmt.println("Error: Expected identifier after dot")
+					return nil
+				}
+
+				// Obtenir le nom de la propriété
+				prop_name := parser.current_token.text
+				advance_token(parser)
+
+				// Créer le nœud d'accès à la propriété
+				prop := new(Property)
+				prop.source = current
+
+				// Créer l'identifiant de propriété
+				prop_id := new(Node)
+				prop_id^ = Identifier {
+					name = prop_name,
+				}
+				prop.property = prop_id
+
+				// Mettre à jour le nœud courant
+				prop_node := new(Node)
+				prop_node^ = prop^
+				current = prop_node
+			}
+
+			return current
+		}
+
+		// Vérifier si c'est une contrainte (identifiant suivi de deux-points)
 		if parser.current_token.kind == .Colon {
-			// Create a constraint node
+			// Créer un nœud de contrainte
 			constraint := new(Constraint)
 
-			// Set the constraint type
+			// Définir le type de contrainte
 			type_node := new(Node)
 			type_node^ = Identifier {
 				name = id_name,
 			}
 			constraint.constraint = type_node
 
-			// Consume the colon
+			// Consommer les deux-points
 			advance_token(parser)
 
-			// Check if there's a value after the colon
+			// Vérifier s'il y a une valeur après les deux-points
 			if parser.current_token.kind == .Identifier ||
 			   parser.current_token.kind == .Integer ||
 			   parser.current_token.kind == .Float ||
@@ -1159,7 +1356,7 @@ parse_primary :: proc(parser: ^Parser) -> ^Node {
 			   parser.current_token.kind == .LeftBrace ||
 			   parser.current_token.kind == .At {
 
-				// Parse the value (right side of colon)
+				// Analyser la valeur (côté droit des deux-points)
 				if value := parse_expression(parser); value != nil {
 					value_maybe: Maybe(^Node)
 					value_maybe = value
@@ -1167,32 +1364,28 @@ parse_primary :: proc(parser: ^Parser) -> ^Node {
 				}
 			}
 
-			// Return the constraint node
+			// Retourner le nœud de contrainte
 			result := new(Node)
 			result^ = constraint^
 			return result
 		}
 
-		// Check for override (identifier followed by left brace)
+		// Vérifier pour un override (identifiant suivi d'une accolade gauche)
 		if parser.current_token.kind == .LeftBrace {
-			// Create an override node
+			// Créer un nœud d'override
 			override := new(Override)
 
-			// The source is the identifier we just parsed
-			source_node := new(Node)
-			source_node^ = Identifier {
-				name = id_name,
-			}
-			override.source = source_node
+			// La source est l'identifiant que nous venons d'analyser
+			override.source = id_node
 
-			// Parse the overrides inside the braces
-			advance_token(parser) // Consume the left brace
+			// Analyser les overrides à l'intérieur des accolades
+			advance_token(parser) // Consommer l'accolade gauche
 
 			override.overrides = make([dynamic]Node)
 
-			// Parse statements until closing brace
+			// Analyser les instructions jusqu'à l'accolade fermante
 			for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-				// Skip newlines
+				// Ignorer les sauts de ligne
 				for parser.current_token.kind == .Newline {
 					advance_token(parser)
 				}
@@ -1202,35 +1395,32 @@ parse_primary :: proc(parser: ^Parser) -> ^Node {
 				}
 
 				if node := parse_statement(parser); node != nil {
-					append_elem(&override.overrides, node^)
+					append(&override.overrides, node^)
 				} else {
-					// Skip problematic tokens
+					// Ignorer les tokens problématiques
 					advance_token(parser)
 				}
 
-				// Skip newlines
+				// Ignorer les sauts de ligne
 				for parser.current_token.kind == .Newline {
 					advance_token(parser)
 				}
 			}
 
-			// Consume closing brace
+			// Consommer l'accolade fermante
 			if !expect_token(parser, .RightBrace) {
 				return nil
 			}
 
-			// Return the override node
+			// Retourner le nœud d'override
 			result := new(Node)
 			result^ = override^
 			return result
 		}
 
-		// Just a regular identifier
-		result := new(Node)
-		result^ = Identifier {
-			name = id_name,
-		}
-		return result
+		// Juste un identifiant régulier
+		return id_node
+
 
 	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
 		// Handle literals
