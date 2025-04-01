@@ -215,17 +215,21 @@ scan_newline :: proc(l: ^Lexer, start: int) -> Token {
  * scan_backtick_string processes a string literal enclosed in backticks
  */
 scan_backtick_string :: proc(l: ^Lexer, start: int) -> Token {
-	// Backtick string literal
+	// Skip opening backtick
 	l.pos += 1
 	str_start := l.pos
+
+	// Scan until closing backtick, handling escaped characters if needed
 	for l.pos < len(l.source) && l.source[l.pos] != '`' {
 		l.pos += 1
 	}
+
 	if l.pos < len(l.source) {
 		text := l.source[str_start:l.pos]
 		l.pos += 1 // Skip closing backtick
 		return Token{kind = .String_Literal, text = text, pos = start}
 	}
+
 	return Token{kind = .Invalid, text = "Unterminated string", pos = start}
 }
 
@@ -401,7 +405,7 @@ scan_number :: proc(l: ^Lexer, start: int) -> Token {
 
 	// Check for range notation (e.g., 1..5)
 	if l.pos + 1 < len(l.source) && l.source[l.pos] == '.' && l.source[l.pos + 1] == '.' {
-		int_part := l.source[start:l.pos]
+
 		l.pos += 2 // Skip the '..'
 
 		// Check if there's a number after, making it a full range (1..5)
@@ -450,6 +454,11 @@ scan_identifier :: proc(l: ^Lexer, start: int) -> Token {
  */
 Node :: union {
 	Pointing,
+	PointingPull,
+	EventPush,
+	EventPull,
+	ResonancePush,
+	ResonancePull,
 	Scope,
 	Override,
 	Product,
@@ -469,7 +478,47 @@ Node :: union {
  * Pointing represents a pointing declaration (name -> value)
  */
 Pointing :: struct {
-	name:  string, // Name of the pointing
+	name:  ^Node, // Name of the pointing
+	value: ^Node, // Value being pointed to
+}
+
+/*
+ * Pointing pull is a declaration later override derived value
+ */
+PointingPull :: struct {
+	name:  ^Node, // Name of the pointing
+	value: ^Node, // Value being pointed from
+}
+
+/*
+ * EventPull represents a event being pull from resonance >-
+ */
+EventPull :: struct {
+	name:  ^Node, // Name of the pointing
+	value: ^Node, // Value being pointed to
+}
+
+/*
+ * EventPush represents a event being pushed into resonance -<
+ */
+EventPush :: struct {
+	name:  ^Node, // Name of the pointing
+	value: ^Node, // Value being pointed to
+}
+
+/*
+ * ResonancePull is useed to change value of resonance driven -<<
+ */
+ResonancePull :: struct {
+	name:  ^Node, // Name of the pointing
+	value: ^Node, // Value being pointed to
+}
+
+/*
+ * ResonancePush is useed to drive resonance >>-
+ */
+ResonancePush :: struct {
+	name:  ^Node, // Name of the pointing
 	value: ^Node, // Value being pointed to
 }
 
@@ -541,6 +590,16 @@ Operator_Kind :: enum {
 	Minus,
 	Mult,
 	Div,
+	Mod, // For %
+	Equal,
+	LessThan,
+	GreaterThan,
+	LessEqual,
+	GreaterEqual,
+	BitAnd, // &
+	BitOr, // |
+	BitXor, // ^
+	BitNot, // ~
 }
 
 /*
@@ -678,6 +737,7 @@ parse_program :: proc(parser: ^Parser) -> ^Node {
 
 /*
  * parse_statement parses a single statement
+ * Updated to handle resonance operators
  */
 parse_statement :: proc(parser: ^Parser) -> ^Node {
 	#partial switch parser.current_token.kind {
@@ -688,45 +748,56 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
 		return parse_standalone_pattern(parser)
 
 	case .Identifier:
-		// Save the identifier name
+		// Save the identifier name and create identifier node
 		id_name := parser.current_token.text
+		id_node := new(Node)
+		id_node^ = Identifier {
+			name = id_name,
+		}
 		advance_token(parser)
 
 		// Check what follows the identifier
-		if parser.current_token.kind == .Question {
+		#partial switch parser.current_token.kind {
+		case .Question:
 			return parse_pattern(parser, id_name)
-		} else if parser.current_token.kind == .PointingPush {
+		case .PointingPush:
 			return parse_pointing(parser, id_name)
-		} else if parser.current_token.kind == .Colon {
+		case .PointingPull:
+			return parse_pointing_pull(parser, id_node)
+		case .EventPush:
+			return parse_event_push(parser, id_node)
+		case .EventPull:
+			return parse_event_pull(parser, id_node)
+		case .ResonancePush:
+			return parse_resonance_push(parser, id_node)
+		case .ResonancePull:
+			return parse_resonance_pull(parser, id_node)
+		case .Colon:
 			return parse_constraint_statement(parser, id_name)
-		} else if parser.current_token.kind == .LeftBrace {
+		case .LeftBrace:
 			return parse_override(parser, id_name)
+		case:
+			return id_node
 		}
-
-		// Just an identifier
-		result := new(Node)
-		result^ = Identifier {
-			name = id_name,
-		}
-		return result
 
 	case .LeftBrace:
-		// Anonymous scope
 		return parse_scope(parser)
 	case .Ellipsis:
-		// Scope expansion
 		return parse_expansion(parser)
 	case .At:
-		// Reference to external scope
 		return parse_reference(parser)
 	case .PointingPush:
 		return parse_product(parser)
 	case .PointingPull:
-		return parse_pointing_pull(parser)
+		return parse_pointing_pull(parser, nil)
 	case .EventPush:
-		return parse_event_push(parser)
+		return parse_event_push(parser, nil)
 	case .EventPull:
-		return parse_event_pull(parser)
+		return parse_event_pull(parser, nil)
+	case .ResonancePush:
+		return parse_resonance_push(parser, nil)
+	case .ResonancePull:
+		return parse_resonance_pull(parser, nil)
 	case:
 		fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
 		return nil
@@ -791,47 +862,21 @@ parse_standalone_pattern :: proc(parser: ^Parser) -> ^Node {
 	return nil
 }
 
+
 /*
- * parse_constraint_statement parses type constraints (Type: value)
+ * parse_constraint_statement parses a general constraint statement
+ * Form: Identifier: Value or Identifier:
  */
-parse_constraint_statement :: proc(parser: ^Parser, type_name: string) -> ^Node {
+parse_constraint_statement :: proc(parser: ^Parser, constraint_name: string) -> ^Node {
 	// Create a constraint node
 	constraint := new(Constraint)
 
-	// Check if the type might be a complex type like maybe{Shape}
-	if type_name == "maybe" && parser.current_token.kind == .LeftBrace {
-		// We have a maybe{Type} construct
-		advance_token(parser) // consume the '{'
-
-		// Parse the inner type
-		if parser.current_token.kind != .Identifier {
-			fmt.println("Error: Expected identifier inside maybe{}")
-			return nil
-		}
-
-		inner_type_name := parser.current_token.text
-		advance_token(parser) // consume the inner type name
-
-		// Expect closing brace
-		if !expect_token(parser, .RightBrace) {
-			fmt.println("Error: Expected closing brace after maybe{Type}")
-			return nil
-		}
-
-		// Create a more complex type identifier for maybe{Type}
-		type_node := new(Node)
-		type_node^ = Identifier {
-			name = fmt.tprintf("maybe{%s}", inner_type_name),
-		}
-		constraint.constraint = type_node
-	} else {
-		// Simple type name
-		type_node := new(Node)
-		type_node^ = Identifier {
-			name = type_name,
-		}
-		constraint.constraint = type_node
+	// Create an identifier node for the constraint
+	constraint_id := new(Node)
+	constraint_id^ = Identifier {
+		name = constraint_name,
 	}
+	constraint.constraint = constraint_id
 
 	// Consume the colon
 	if parser.current_token.kind != .Colon {
@@ -852,7 +897,7 @@ parse_constraint_statement :: proc(parser: ^Parser, type_name: string) -> ^Node 
 			return nil
 		}
 	} else {
-		// No value after the colon, leave value as nil (Type:)
+		// No value after the colon, leave value as nil (Constraint:)
 		constraint.value = nil
 	}
 
@@ -1054,29 +1099,6 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
 }
 
 /*
- * parse_pointing parses a pointing definition (name -> value)
- */
-parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
-	pointing := new(Pointing)
-	pointing.name = identifier_name
-
-	// Consume the ->
-	advance_token(parser)
-
-	// Parse the value the pointing points to
-	if value := parse_expression(parser); value != nil {
-		pointing.value = value
-	} else {
-		fmt.println("Error: Expected expression after pointing operator")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = pointing^
-	return result
-}
-
-/*
  * parse_product parses a product expression (-> value)
  */
 parse_product :: proc(parser: ^Parser) -> ^Node {
@@ -1099,73 +1121,166 @@ parse_product :: proc(parser: ^Parser) -> ^Node {
 }
 
 /*
- * parse_pointing_pull parses a pointing pull (<- value)
+ * parse_pointing should also be updated for consistency
  */
-parse_pointing_pull :: proc(parser: ^Parser) -> ^Node {
+parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
+	pointing := new(Pointing)
+
+	// Create a node for the name
+	name_node := new(Node)
+	name_node^ = Identifier {
+		name = identifier_name,
+	}
+	pointing.name = name_node
+
+	// Consume the ->
+	advance_token(parser)
+
+	// Parse the value the pointing points to
+	if value := parse_expression(parser); value != nil {
+		pointing.value = value
+	} else {
+		fmt.println("Error: Expected expression after pointing operator")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = pointing^
+	return result
+}
+
+/*
+ * parse_pointing_pull parses a pointing pull with optional explicit name
+ * (name <- value) or (<- value)
+ */
+parse_pointing_pull :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
 	// Consume <-
 	advance_token(parser)
 
-	pointing := new(Pointing)
-	pointing.name = "" // Anonymous pointing
+	// Create a pointing pull node
+	pointing_pull := new(PointingPull)
+
+	// Set the name node (may be nil for anonymous)
+	pointing_pull.name = name_node
 
 	// Parse the value
 	if value := parse_expression(parser); value != nil {
-		pointing.value = value
+		pointing_pull.value = value
 	} else {
 		fmt.println("Error: Expected expression after <-")
 		return nil
 	}
 
 	result := new(Node)
-	result^ = pointing^
+	result^ = pointing_pull^
 	return result
 }
 
 /*
- * parse_event_push parses an event push (>- value)
+ * parse_event_push parses an event push with optional explicit name
+ * (name >- value) or (>- value)
  */
-parse_event_push :: proc(parser: ^Parser) -> ^Node {
+parse_event_push :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
 	// Consume >-
 	advance_token(parser)
 
-	// Use a special pointing for event push
-	pointing := new(Pointing)
-	pointing.name = ">-" // Special identifier for event push
+	// Create an event push node
+	event_push := new(EventPush)
+
+	// Set the name node (may be nil for anonymous)
+	event_push.name = name_node
 
 	// Parse the value
 	if value := parse_expression(parser); value != nil {
-		pointing.value = value
+		event_push.value = value
 	} else {
 		fmt.println("Error: Expected expression after >-")
 		return nil
 	}
 
 	result := new(Node)
-	result^ = pointing^
+	result^ = event_push^
 	return result
 }
 
 /*
- * parse_event_pull parses an event pull (-< value)
+ * parse_event_pull parses an event pull with optional explicit name
+ * (name -< value) or (-< value)
  */
-parse_event_pull :: proc(parser: ^Parser) -> ^Node {
+parse_event_pull :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
 	// Consume -<
 	advance_token(parser)
 
-	// Use a special pointing for event pull
-	pointing := new(Pointing)
-	pointing.name = "-<" // Special identifier for event pull
+	// Create an event pull node
+	event_pull := new(EventPull)
+
+	// Set the name node (may be nil for anonymous)
+	event_pull.name = name_node
 
 	// Parse the value
 	if value := parse_expression(parser); value != nil {
-		pointing.value = value
+		event_pull.value = value
 	} else {
 		fmt.println("Error: Expected expression after -<")
 		return nil
 	}
 
 	result := new(Node)
-	result^ = pointing^
+	result^ = event_pull^
+	return result
+}
+
+/*
+ * parse_resonance_push parses a resonance push with optional explicit name
+ * (name >>- value) or (>>- value)
+ */
+parse_resonance_push :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
+	// Consume >>-
+	advance_token(parser)
+
+	// Create a resonance push node
+	resonance_push := new(ResonancePush)
+
+	// Set the name node (may be nil for anonymous)
+	resonance_push.name = name_node
+
+	// Parse the value
+	if value := parse_expression(parser); value != nil {
+		resonance_push.value = value
+	} else {
+		fmt.println("Error: Expected expression after >>-")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = resonance_push^
+	return result
+}
+
+/*
+ * parse_resonance_pull parses a resonance pull with optional explicit name
+ * (name -<< value) or (-<< value)
+ */
+parse_resonance_pull :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
+	// Consume -<<
+	advance_token(parser)
+
+	// Create a resonance pull node
+	resonance_pull := new(ResonancePull)
+
+	// Set the name node (may be nil for anonymous)
+	resonance_pull.name = name_node
+
+	// Parse the value
+	if value := parse_expression(parser); value != nil {
+		resonance_pull.value = value
+	} else {
+		fmt.println("Error: Expected expression after -<<")
+		return nil
+	}
+
+	result := new(Node)
+	result^ = resonance_pull^
 	return result
 }
 
@@ -1385,9 +1500,12 @@ parse_expression :: proc(parser: ^Parser) -> ^Node {
 		return nil
 	}
 
-	// Check for binary operators
-	if is_binary_operator(parser.current_token.kind) {
-		return parse_binary_expression(parser, expr)
+	// While we have operators, build up the expression
+	for is_operator(parser.current_token.kind) {
+		expr = parse_operator(parser, expr)
+		if expr == nil {
+			return nil
+		}
 	}
 
 	// Check for execution modifiers
@@ -1599,13 +1717,13 @@ parse_literal :: proc(parser: ^Parser) -> ^Node {
 }
 
 /*
- * parse_binary_expression parses a binary operation expression
+ * parse_operator parses an operator expression
  */
-parse_binary_expression :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+parse_operator :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 	operator := new(Operator)
 	operator.left = left
 
-	// Set operator kind
+	// Set operator kind based on token
 	#partial switch parser.current_token.kind {
 	case .Plus:
 		operator.kind = .Plus
@@ -1615,6 +1733,26 @@ parse_binary_expression :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 		operator.kind = .Mult
 	case .Slash:
 		operator.kind = .Div
+	case .Percent:
+		operator.kind = .Mod
+	case .BitAnd:
+		operator.kind = .BitAnd
+	case .BitOr:
+		operator.kind = .BitOr
+	case .BitXor:
+		operator.kind = .BitXor
+	case .BitNot:
+		operator.kind = .BitNot
+	case .Equal:
+		operator.kind = .Equal
+	case .LessThan:
+		operator.kind = .LessThan
+	case .GreaterThan:
+		operator.kind = .GreaterThan
+	case .LessEqual:
+		operator.kind = .LessEqual
+	case .GreaterEqual:
+		operator.kind = .GreaterEqual
 	case:
 		fmt.println("Error: Unknown binary operator")
 		return nil
@@ -1673,15 +1811,24 @@ parse_execution :: proc(parser: ^Parser, expr: ^Node) -> ^Node {
 // ===========================================================================
 
 /*
- * is_binary_operator checks if a token is a binary operator
+ * is_operator checks if a token is a binary operator
  */
-is_binary_operator :: proc(kind: Token_Kind) -> bool {
+is_operator :: proc(kind: Token_Kind) -> bool {
 	return(
+		kind == .Equal ||
+		kind == .LessThan ||
+		kind == .GreaterThan ||
+		kind == .LessEqual ||
+		kind == .GreaterEqual ||
 		kind == .Plus ||
 		kind == .Minus ||
 		kind == .Asterisk ||
 		kind == .Slash ||
-		kind == .Percent \
+		kind == .Percent ||
+		kind == .BitAnd ||
+		kind == .BitOr ||
+		kind == .BitXor ||
+		kind == .BitNot \
 	)
 }
 
@@ -1793,7 +1940,71 @@ print_ast :: proc(node: ^Node, indent: int) {
 
 	#partial switch n in node^ {
 	case Pointing:
-		fmt.printf("%sPointing '%s' ->\n", indent_str, n.name)
+		fmt.printf("%sPointing ->\n", indent_str)
+		if n.name != nil {
+			fmt.printf("%s  Name:\n", indent_str)
+			print_ast(n.name, indent + 4)
+		}
+		if n.value != nil {
+			fmt.printf("%s  Value:\n", indent_str)
+			print_ast(n.value, indent + 4)
+		}
+
+	case PointingPull:
+		fmt.printf("%sPointingPull <-\n", indent_str)
+		if n.name != nil {
+			fmt.printf("%s  Name:\n", indent_str)
+			print_ast(n.name, indent + 4)
+		}
+		if n.value != nil {
+			fmt.printf("%s  Value:\n", indent_str)
+			print_ast(n.value, indent + 4)
+		}
+
+	case EventPush:
+		fmt.printf("%sEventPush >-\n", indent_str)
+		if n.name != nil {
+			fmt.printf("%s  Name:\n", indent_str)
+			print_ast(n.name, indent + 4)
+		}
+		if n.value != nil {
+			fmt.printf("%s  Value:\n", indent_str)
+			print_ast(n.value, indent + 4)
+		}
+
+	case EventPull:
+		fmt.printf("%sEventPull -<\n", indent_str)
+		if n.name != nil {
+			fmt.printf("%s  Name:\n", indent_str)
+			print_ast(n.name, indent + 4)
+
+		}
+		if n.value != nil {
+			fmt.printf("%s  Value:\n", indent_str)
+			print_ast(n.value, indent + 4)
+		}
+
+	case ResonancePush:
+		fmt.printf("%sResonancePush >>-\n", indent_str)
+		if n.name != nil {
+			fmt.printf("%s  Name:\n", indent_str)
+			print_ast(n.name, indent + 4)
+		} else {
+			fmt.printf("%s  Name: anonymous\n", indent_str)
+		}
+		if n.value != nil {
+			fmt.printf("%s  Value:\n", indent_str)
+			print_ast(n.value, indent + 4)
+		}
+
+	case ResonancePull:
+		fmt.printf("%sResonancePull -<<\n", indent_str)
+		if n.name != nil {
+			fmt.printf("%s  Name:\n", indent_str)
+			print_ast(n.name, indent + 4)
+		} else {
+			fmt.printf("%s  Name: anonymous\n", indent_str)
+		}
 		if n.value != nil {
 			fmt.printf("%s  Value:\n", indent_str)
 			print_ast(n.value, indent + 4)
