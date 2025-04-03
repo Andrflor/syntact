@@ -8,11 +8,11 @@ package compiler
  * like pointings, patterns, and constraints.
  *
  * Organization:
- * 1. Token definitions and lexer
- * 2. AST node definitions
- * 3. Parser implementation
- * 4. Utility functions
- * 5. Main execution and debugging
+ * 1. Token definitions and lexer (unchanged)
+ * 2. AST node definitions (unchanged)
+ * 3. Fixed parser implementation with Pratt parsing for expressions
+ * 4. Utility functions (unchanged)
+ * 5. Improved error handling and recovery
  * ======================================================================
  */
 
@@ -472,6 +472,7 @@ Node :: union {
 	Property,
 	Expand,
 	FileSystem,
+  Range,
 }
 
 /*
@@ -652,1158 +653,1527 @@ FileSystem :: struct {
 	target: ^Node, // Target content in file system
 }
 
+/*
+ * Range represents a range expression (e.g., 1..5, 1.., ..5)
+ */
+Range :: struct {
+	start: ^Node, // Start of range (may be nil for prefix range)
+	end:   ^Node, // End of range (may be nil for postfix range)
+}
+
 // ===========================================================================
 // SECTION 3: PARSER IMPLEMENTATION
 // ===========================================================================
 
 /*
- * Parser maintains state during parsing
+ * Precedence levels for operators, higher value means higher precedence
  */
-Parser :: struct {
-	lexer:         ^Lexer, // Lexer providing tokens
-	current_token: Token, // Current token being processed
-	peek_token:    Token, // Next token (lookahead)
+Precedence :: enum {
+    NONE,       // No precedence
+    ASSIGNMENT, // =, ->, <-, >-, -<, >>-, -<<
+    LOGICAL,    // Reserved for logical operators (&&, ||)
+    EQUALITY,   // ==
+    COMPARISON, // <, >, <=, >=
+    RANGE,      // ..
+    TERM,       // +, -
+    FACTOR,     // *, /, %
+    BITWISE,    // &, |, ^
+    UNARY,      // !, ~, unary -
+    CALL,       // (), .
+    PRIMARY,    // Literals, identifiers
 }
 
 /*
- * init_parser initializes a parser with a lexer and reads initial tokens
+ * Parse_Rule defines how to parse a given token as prefix or infix
+ */
+Parse_Rule :: struct {
+    prefix:     proc(parser: ^Parser, can_assign: bool) -> ^Node,
+    infix:      proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node,
+    precedence: Precedence,
+}
+
+/*
+ * Parser maintains state during parsing
+ */
+Parser :: struct {
+    lexer:           ^Lexer, // Lexer providing tokens
+    current_token:   Token, // Current token being processed
+    peek_token:      Token, // Next token (lookahead)
+    had_error:       bool, // Flag indicating if an error occurred
+    panic_mode:      bool, // Flag for panic mode error recovery
+    error_count:     int, // Count of errors encountered
+}
+
+/*
+ * initialize_parser sets up a parser with a lexer
  */
 init_parser :: proc(parser: ^Parser, lexer: ^Lexer) {
-	parser.lexer = lexer
-	// Initialize with first two tokens
-	parser.current_token = next_token(lexer)
-	parser.peek_token = next_token(lexer)
+    parser.lexer = lexer
+    parser.had_error = false
+    parser.panic_mode = false
+    parser.error_count = 0
+
+    // Initialize with first two tokens
+    parser.current_token = next_token(lexer)
+    parser.peek_token = next_token(lexer)
 }
 
 /*
  * advance_token moves to the next token in the stream
  */
 advance_token :: proc(parser: ^Parser) {
-	parser.current_token = parser.peek_token
-	parser.peek_token = next_token(parser.lexer)
+    parser.current_token = parser.peek_token
+    parser.peek_token = next_token(parser.lexer)
+}
+
+/*
+ * check checks if the current token has the expected kind without advancing
+ */
+check :: proc(parser: ^Parser, kind: Token_Kind) -> bool {
+    return parser.current_token.kind == kind
+}
+
+/*
+ * match checks if the current token has the expected kind and advances if true
+ */
+match :: proc(parser: ^Parser, kind: Token_Kind) -> bool {
+    if !check(parser, kind) {
+        return false
+    }
+    advance_token(parser)
+    return true
 }
 
 /*
  * expect_token checks if the current token is of the expected kind,
- * advances to the next token if true, and returns the result
+ * advances to the next token if true, and reports an error if false
  */
 expect_token :: proc(parser: ^Parser, kind: Token_Kind) -> bool {
-	if parser.current_token.kind == kind {
-		advance_token(parser)
-		return true
-	}
-	fmt.printf(
-		"Error: Expected token %v, but got %v at position %d\n",
-		kind,
-		parser.current_token.kind,
-		parser.current_token.pos,
-	)
-	return false
+    if check(parser, kind) {
+        advance_token(parser)
+        return true
+    }
+
+    error_at_current(parser, fmt.tprintf("Expected %v but got %v", kind, parser.current_token.kind))
+    return false
+}
+
+/*
+ * error_at_current reports an error at the current token
+ */
+error_at_current :: proc(parser: ^Parser, message: string) {
+    error_at(parser, parser.current_token, message)
+}
+
+/*
+ * error_at reports an error at a specific token
+ */
+error_at :: proc(parser: ^Parser, token: Token, message: string) {
+    // Don't report errors in panic mode to avoid cascading
+    if parser.panic_mode do return
+
+    parser.panic_mode = true
+    parser.had_error = true
+    parser.error_count += 1
+
+    fmt.eprintf("Error at position %d: ", token.pos)
+
+    if token.kind == .EOF {
+        fmt.eprintf("at end")
+    } else if token.kind == .Invalid {
+        fmt.eprintf("at '%s'", token.text)
+    } else {
+        fmt.eprintf("at '%s'", token.text)
+    }
+
+    fmt.eprintf(": %s\n", message)
+}
+
+/*
+ * synchronize recovers from panic mode by skipping tokens until a synchronization point
+ */
+synchronize :: proc(parser: ^Parser) {
+    parser.panic_mode = false
+
+    // Track position to detect lack of progress
+    start_pos := parser.current_token.pos
+
+    // Skip tokens until we find a good synchronization point
+    for parser.current_token.kind != .EOF {
+        // Remember token kind to determine if we've advanced
+        prev_token_kind := parser.current_token.kind
+
+        // Use certain tokens as synchronization points
+        if parser.current_token.kind == .Newline ||
+           parser.current_token.kind == .RightBrace {
+            advance_token(parser)
+            return
+        }
+
+        // Look ahead to see if the next token is a good sync point
+        if parser.peek_token.kind == .PointingPush ||  // ->
+           parser.peek_token.kind == .PointingPull ||  // <-
+           parser.peek_token.kind == .Colon ||         // :
+           parser.peek_token.kind == .LeftBrace ||     // {
+           parser.peek_token.kind == .RightBrace {     // }
+            advance_token(parser)
+            return
+        }
+
+        advance_token(parser)
+
+        // Safety check to prevent infinite loops
+        if parser.current_token.pos == start_pos && parser.current_token.kind == prev_token_kind {
+            // We're stuck at the same position, force advance
+            if parser.current_token.kind != .EOF {
+                advance_token(parser)
+            }
+            return
+        }
+    }
 }
 
 /*
  * parse is the main entry point for the parser
  */
 parse :: proc(parser: ^Parser) -> ^Node {
-	return parse_program(parser)
+    return parse_program(parser)
+}
+
+/*
+ * get_rule returns the parse rule for a given token kind
+ */
+get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
+    rules := make(map[Token_Kind]Parse_Rule)
+
+    // Integer and Float Literals
+    rules[.Integer] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    rules[.Float] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    rules[.Hexadecimal] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    rules[.Binary] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    rules[.String_Literal] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+
+    // Identifiers and basic symbols
+    rules[.Identifier] = Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
+    rules[.LeftBrace] = Parse_Rule{prefix = parse_scope, infix = nil, precedence = .NONE}
+    rules[.LeftParen] = Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
+    rules[.RightBrace] = Parse_Rule{prefix = nil, infix = nil, precedence = .NONE}
+    rules[.At] = Parse_Rule{prefix = parse_reference, infix = nil, precedence = .NONE}
+
+    // Unary operators
+    rules[.BitNot] = Parse_Rule{prefix = parse_unary, infix = nil, precedence = .UNARY}
+    rules[.Minus] = Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
+    rules[.Execute] = Parse_Rule{prefix = parse_execute_prefix, infix = parse_execution, precedence = .UNARY}
+
+    // Binary operators
+    rules[.Plus] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .TERM}
+    rules[.Asterisk] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    rules[.Slash] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    rules[.Percent] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    rules[.BitAnd] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    rules[.BitOr] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    rules[.BitXor] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    rules[.Equal] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
+    rules[.LessThan] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    rules[.GreaterThan] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    rules[.LessEqual] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    rules[.GreaterEqual] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+
+    // Specialized operators
+    rules[.PointingPush] = Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .ASSIGNMENT}
+    rules[.PointingPull] = Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
+    rules[.EventPush] = Parse_Rule{prefix = parse_event_push_prefix, infix = parse_event_push, precedence = .ASSIGNMENT}
+    rules[.EventPull] = Parse_Rule{prefix = parse_event_pull_prefix, infix = parse_event_pull, precedence = .ASSIGNMENT}
+    rules[.ResonancePush] = Parse_Rule{prefix = parse_resonance_push_prefix, infix = parse_resonance_push, precedence = .ASSIGNMENT}
+    rules[.ResonancePull] = Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
+
+    // Range notation
+    rules[.DoubleDot] = Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
+
+    // Special cases
+    rules[.Dot] = Parse_Rule{prefix = nil, infix = parse_property, precedence = .CALL}
+    rules[.Question] = Parse_Rule{prefix = parse_standalone_pattern, infix = parse_pattern, precedence = .NONE}
+    rules[.Colon] = Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .ASSIGNMENT}
+    rules[.Ellipsis] = Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .NONE}
+
+    if kind in rules {
+        return rules[kind]
+    }
+
+    return Parse_Rule{}
 }
 
 /*
  * parse_program parses the entire program as a sequence of statements
  */
 parse_program :: proc(parser: ^Parser) -> ^Node {
-	scope := new(Scope)
-	scope.value = make([dynamic]Node)
+    scope := new(Scope)
+    scope.value = make([dynamic]Node)
 
-	// Keep parsing until EOF
-	for parser.current_token.kind != .EOF {
-		if node := parse_statement(parser); node != nil {
-			append(&scope.value, node^)
-		} else {
-			// Skip problematic tokens to recover from errors
-			advance_token(parser)
-		}
+    // Keep parsing until EOF
+    for parser.current_token.kind != .EOF {
+        // Skip newlines between statements
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
 
-		// Skip any newlines between statements
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-	}
+        if parser.current_token.kind == .EOF {
+            break
+        }
 
-	result := new(Node)
-	result^ = scope^
-	return result
+        if node := parse_with_recovery(parser); node != nil {
+            append(&scope.value, node^)
+        }
+    }
+
+    result := new(Node)
+    result^ = scope^
+    return result
+}
+
+/*
+ * parse_with_recovery attempts to parse a statement and recovers from errors
+ */
+parse_with_recovery :: proc(parser: ^Parser) -> ^Node {
+    if parser.panic_mode {
+        synchronize(parser)
+    }
+
+    node := parse_statement(parser)
+
+    // Skip any newlines after a statement
+    for parser.current_token.kind == .Newline {
+        advance_token(parser)
+    }
+
+    return node
 }
 
 /*
  * parse_statement parses a single statement
- * Updated to handle resonance operators
  */
 parse_statement :: proc(parser: ^Parser) -> ^Node {
-	#partial switch parser.current_token.kind {
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		return parse_literal(parser)
+    // Skip empty statements
+    if parser.current_token.kind == .Newline {
+        advance_token(parser)
+        return nil
+    }
 
-	case .Question:
-		return parse_standalone_pattern(parser)
+    #partial switch parser.current_token.kind {
+    case .Question:
+        return parse_standalone_pattern(parser, false)
+    case .Ellipsis:
+        return parse_expansion(parser, false)
+    case .PointingPush: // Handle standalone -> expressions
+        return parse_product_prefix(parser, false)
+    case .EOF, .RightBrace:
+        // Empty statement - don't report an error
+        return nil
+    case:
+        // Try to parse as an expression by default
+        expr := parse_expression(parser)
 
-	case .Identifier:
-		// Save the identifier name and create identifier node
-		id_name := parser.current_token.text
-		id_node := new(Node)
-		id_node^ = Identifier {
-			name = id_name,
-		}
-		advance_token(parser)
+        // For empty statements (just identifier or constraint), don't expect a newline
+        return expr
+    }
+}
 
-		// Check what follows the identifier
-		#partial switch parser.current_token.kind {
-		case .Question:
-			return parse_pattern(parser, id_name)
-		case .PointingPush:
-			return parse_pointing(parser, id_name)
-		case .PointingPull:
-			return parse_pointing_pull(parser, id_node)
-		case .EventPush:
-			return parse_event_push(parser, id_node)
-		case .EventPull:
-			return parse_event_pull(parser, id_node)
-		case .ResonancePush:
-			return parse_resonance_push(parser, id_node)
-		case .ResonancePull:
-			return parse_resonance_pull(parser, id_node)
-		case .Colon:
-			return parse_constraint_statement(parser, id_name)
-		case .LeftBrace:
-			return parse_override(parser, id_name)
-		case:
-			return id_node
-		}
+/*
+ * parse_expression parses expressions using Pratt parsing
+ */
+parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -> ^Node {
+    if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+        // Handle empty expressions without error
+        return nil
+    }
 
-	case .LeftBrace:
-		return parse_scope(parser)
-	case .Ellipsis:
-		return parse_expansion(parser)
-	case .At:
-		return parse_reference(parser)
-	case .PointingPush:
-		return parse_product(parser)
-	case .PointingPull:
-		return parse_pointing_pull(parser, nil)
-	case .EventPush:
-		return parse_event_push(parser, nil)
-	case .EventPull:
-		return parse_event_pull(parser, nil)
-	case .ResonancePush:
-		return parse_resonance_push(parser, nil)
-	case .ResonancePull:
-		return parse_resonance_pull(parser, nil)
-	case:
-		fmt.printf("Unexpected token at start of statement: %v\n", parser.current_token.kind)
-		return nil
-	}
+    // Get prefix rule for current token
+    rule := get_rule(parser.current_token.kind)
+    if rule.prefix == nil {
+        // Check for special cases like empty constraints or products
+        if parser.current_token.kind == .Colon {
+            error_at_current(parser, "Unexpected ':' without a type constraint")
+            return nil
+        }
+
+        // Return nil instead of reporting error for some tokens
+        if parser.current_token.kind == .Newline ||
+           parser.current_token.kind == .RightBrace {
+            return nil
+        }
+
+        // Gracefully handle unexpected tokens by reporting the error once
+        if !parser.panic_mode {
+            error_at_current(parser, fmt.tprintf("Expected expression, found '%v'", parser.current_token.kind))
+        }
+        return nil
+    }
+
+    // Remember if we're in a context where assignment is allowed
+    can_assign := precedence <= .ASSIGNMENT
+
+    // Parse the prefix expression
+    left := rule.prefix(parser, can_assign)
+    if left == nil {
+        return nil
+    }
+
+    // Keep parsing infix expressions as long as they have higher precedence
+    for precedence <= get_rule(parser.current_token.kind).precedence {
+        rule = get_rule(parser.current_token.kind)
+        if rule.infix == nil {
+            break
+        }
+
+        left = rule.infix(parser, left, can_assign)
+        if left == nil {
+            return nil
+        }
+    }
+
+    return left
+}
+
+/*
+ * parse_product_prefix handles the standalone product expression (-> value)
+ */
+parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume the ->
+    advance_token(parser)
+
+    product := new(Product)
+
+    // Parse the value or handle empty product
+    if parser.current_token.kind == .RightBrace || parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        // Empty product - this is valid
+        product.value = nil
+    } else {
+        // Parse the value
+        if value := parse_expression(parser); value != nil {
+            product.value = value
+        } else {
+            // Error already reported
+            return nil
+        }
+    }
+
+    result := new(Node)
+    result^ = product^
+    return result
+}
+
+/*
+ * parse_literal handles literal values (numbers, strings)
+ */
+parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    literal := new(Literal)
+    literal.value = parser.current_token.text
+
+    #partial switch parser.current_token.kind {
+    case .Integer:
+        literal.kind = .Integer
+    case .Float:
+        literal.kind = .Float
+    case .Hexadecimal:
+        literal.kind = .Hexadecimal
+    case .Binary:
+        literal.kind = .Binary
+    case .String_Literal:
+        literal.kind = .String
+    case:
+        error_at_current(parser, "Unknown literal type")
+        return nil
+    }
+
+    advance_token(parser)
+
+    result := new(Node)
+    result^ = literal^
+    return result
+}
+
+/*
+ * parse_identifier handles identifier expressions
+ */
+parse_identifier :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Create identifier node
+    id_node := new(Node)
+    id_node^ = Identifier{name = parser.current_token.text}
+
+    // Advance past identifier
+    advance_token(parser)
+
+    return id_node
+}
+
+/*
+ * skip_newlines skips consecutive newline tokens
+ */
+skip_newlines :: proc(parser: ^Parser) {
+    for parser.current_token.kind == .Newline {
+        advance_token(parser)
+    }
+}
+
+/*
+ * parse_scope parses a scope block {...} - improved to handle empty scopes
+ */
+parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume opening brace
+    advance_token(parser)
+
+    scope := new(Scope)
+    scope.value = make([dynamic]Node)
+
+    // Allow for empty scopes
+    if parser.current_token.kind == .RightBrace {
+        advance_token(parser)
+        result := new(Node)
+        result^ = scope^
+        return result
+    }
+
+    // Parse statements until closing brace
+    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+        // Skip newlines between statements
+        skip_newlines(parser)
+
+        if parser.current_token.kind == .RightBrace {
+            break
+        }
+
+        // Parse statement and add non-nil results to the scope
+        if node := parse_statement(parser); node != nil {
+            append(&scope.value, node^)
+        }
+
+        // Skip newlines after statements
+        skip_newlines(parser)
+    }
+
+    // Consume closing brace
+    if !match(parser, .RightBrace) {
+        error_at_current(parser, "Expected '}' to close scope")
+    }
+
+    result := new(Node)
+    result^ = scope^
+    return result
+}
+
+/*
+ * parse_grouping parses grouping expressions (...)
+ */
+parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume opening parenthesis
+    advance_token(parser)
+
+    // Parse expression inside parentheses
+    expr := parse_expression(parser)
+    if expr == nil {
+        // Handle empty parentheses gracefully
+        if parser.current_token.kind == .RightParen {
+            advance_token(parser)
+            // Return an empty scope as a placeholder
+            empty_scope := new(Node)
+            empty_scope^ = Scope{value = make([dynamic]Node)}
+            return empty_scope
+        }
+
+        error_at_current(parser, "Expected expression after '('")
+        return nil
+    }
+
+    // Expect closing parenthesis
+    if !expect_token(parser, .RightParen) {
+        return nil
+    }
+
+    return expr
+}
+
+/*
+ * parse_unary parses unary operators (-, ~)
+ */
+parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Remember the operator kind
+    operator_kind := parser.current_token.kind
+
+    // Advance past the operator
+    advance_token(parser)
+
+    // Parse the operand
+    operand := parse_expression(parser, .UNARY)
+    if operand == nil {
+        error_at_current(parser, "Expected expression after unary operator")
+        return nil
+    }
+
+    // Create operator node
+    op := new(Operator)
+    op.right = operand
+
+    // Set operator kind based on token
+    #partial switch operator_kind {
+    case .Minus:
+        op.kind = .Minus
+    case .BitNot:
+        op.kind = .BitNot
+    case:
+        error_at_current(parser, "Unexpected unary operator")
+        return nil
+    }
+
+    result := new(Node)
+    result^ = op^
+    return result
+}
+
+/*
+ * parse_execute_prefix parses a prefix execute operator (!expr)
+ */
+parse_execute_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume ! token
+    advance_token(parser)
+
+    // Parse the expression to execute
+    expr := parse_expression(parser, .UNARY)
+    if expr == nil {
+        error_at_current(parser, "Expected expression after '!'")
+        return nil
+    }
+
+    // Create execute node
+    execute := new(Execute)
+    execute.value = expr
+
+    result := new(Node)
+    result^ = execute^
+    return result
+}
+
+/*
+ * parse_binary handles binary operators (+, -, *, /, etc.)
+ */
+parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Remember the operator
+    operator_kind := parser.current_token.kind
+    rule := get_rule(operator_kind)
+
+    // Move past the operator
+    advance_token(parser)
+
+    // Parse the right operand with higher precedence
+    right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
+    if right == nil {
+        error_at_current(parser, "Expected expression after binary operator")
+        return nil
+    }
+
+    // Create operator node
+    op := new(Operator)
+    op.left = left
+    op.right = right
+
+    // Set operator type
+    #partial switch operator_kind {
+    case .Plus:          op.kind = .Plus
+    case .Minus:         op.kind = .Minus
+    case .Asterisk:      op.kind = .Mult
+    case .Slash:         op.kind = .Div
+    case .Percent:       op.kind = .Mod
+    case .BitAnd:        op.kind = .BitAnd
+    case .BitOr:         op.kind = .BitOr
+    case .BitXor:        op.kind = .BitXor
+    case .Equal:         op.kind = .Equal
+    case .LessThan:      op.kind = .LessThan
+    case .GreaterThan:   op.kind = .GreaterThan
+    case .LessEqual:     op.kind = .LessEqual
+    case .GreaterEqual:  op.kind = .GreaterEqual
+    case:
+        error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", operator_kind))
+        return nil
+    }
+
+    result := new(Node)
+    result^ = op^
+    return result
+}
+
+/*
+ * parse_property handles property access (obj.prop)
+ */
+parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Consume the dot
+    advance_token(parser)
+
+    // Expect identifier for property name
+    if parser.current_token.kind != .Identifier {
+        error_at_current(parser, "Expected property name after '.'")
+        return nil
+    }
+
+    // Get property name
+    prop_name := parser.current_token.text
+    advance_token(parser)
+
+    // Create property node
+    property := new(Property)
+    property.source = left
+
+    // Create property identifier
+    prop_id := new(Node)
+    prop_id^ = Identifier{name = prop_name}
+    property.property = prop_id
+
+    // Return property node
+    result := new(Node)
+    result^ = property^
+    return result
+}
+
+/*
+ * parse_execution handles execution modifiers (!expr)
+ */
+parse_execution :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Consume ! token
+    advance_token(parser)
+
+    // Create execute node
+    execute := new(Execute)
+    execute.value = left
+
+    result := new(Node)
+    result^ = execute^
+    return result
+}
+
+/*
+ * parse_pointing_push handles pointing operator (a -> b)
+ * Improved to handle empty expressions
+ */
+parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create pointing node
+    pointing := new(Pointing)
+    pointing.name = left
+
+    // Consume ->
+    advance_token(parser)
+
+    // Handle the case where there's nothing after the arrow
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        pointing.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        pointing.value = value
+    }
+
+    result := new(Node)
+    result^ = pointing^
+    return result
+}
+/*
+ * parse_pointing_pull_prefix handles prefix pointing pull operator (<- value)
+ */
+parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Create pointing pull node
+    pointing_pull := new(PointingPull)
+    pointing_pull.name = nil // Anonymous
+
+    // Consume <-
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        pointing_pull.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        pointing_pull.value = value
+    }
+
+    result := new(Node)
+    result^ = pointing_pull^
+    return result
+}
+
+/*
+ * parse_pointing_pull handles infix pointing pull operator (a <- b)
+ */
+parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create pointing pull node
+    pointing_pull := new(PointingPull)
+    pointing_pull.name = left
+
+    // Consume <-
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        pointing_pull.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        pointing_pull.value = value
+    }
+
+    result := new(Node)
+    result^ = pointing_pull^
+    return result
+}
+
+/*
+ * parse_event_push_prefix handles prefix event push (>- value)
+ */
+parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Create event push node
+    event_push := new(EventPush)
+    event_push.name = nil // Anonymous
+
+    // Consume >-
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        event_push.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        event_push.value = value
+    }
+
+    result := new(Node)
+    result^ = event_push^
+    return result
+}
+
+/*
+ * parse_event_push handles event push (a >- b)
+ */
+parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create event push node
+    event_push := new(EventPush)
+    event_push.name = left
+
+    // Consume >-
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        event_push.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        event_push.value = value
+    }
+
+    result := new(Node)
+    result^ = event_push^
+    return result
+}
+
+/*
+ * parse_event_pull_prefix handles prefix event pull (-< value)
+ */
+parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Create event pull node
+    event_pull := new(EventPull)
+    event_pull.name = nil // Anonymous
+
+    // Consume -<
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        event_pull.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        event_pull.value = value
+    }
+
+    result := new(Node)
+    result^ = event_pull^
+    return result
+}
+
+/*
+ * parse_event_pull handles event pull (a -< b)
+ */
+parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create event pull node
+    event_pull := new(EventPull)
+    event_pull.name = left
+
+    // Consume -<
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        event_pull.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        event_pull.value = value
+    }
+
+    result := new(Node)
+    result^ = event_pull^
+    return result
+}
+
+/*
+ * parse_resonance_push_prefix handles prefix resonance push (>>- value)
+ */
+parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Create resonance push node
+    resonance_push := new(ResonancePush)
+    resonance_push.name = nil // Anonymous
+
+    // Consume >>-
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        resonance_push.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        resonance_push.value = value
+    }
+
+    result := new(Node)
+    result^ = resonance_push^
+    return result
+}
+
+/*
+ * parse_resonance_push handles resonance push (a >>- b)
+ */
+parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create resonance push node
+    resonance_push := new(ResonancePush)
+    resonance_push.name = left
+
+    // Consume >>-
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        resonance_push.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        resonance_push.value = value
+    }
+
+    result := new(Node)
+    result^ = resonance_push^
+    return result
+}
+
+/*
+ * parse_resonance_pull_prefix handles prefix resonance pull (-<< value)
+ */
+parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Create resonance pull node
+    resonance_pull := new(ResonancePull)
+    resonance_pull.name = nil // Anonymous
+
+    // Consume -<<
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        resonance_pull.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        resonance_pull.value = value
+    }
+
+    result := new(Node)
+    result^ = resonance_pull^
+    return result
+}
+
+/*
+ * parse_resonance_pull handles resonance pull (a -<< b)
+ */
+parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create resonance pull node
+    resonance_pull := new(ResonancePull)
+    resonance_pull.name = left
+
+    // Consume -<<
+    advance_token(parser)
+
+    // Parse value or handle empty value
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        resonance_pull.value = nil
+    } else {
+        // Parse value
+        value := parse_expression(parser)
+        resonance_pull.value = value
+    }
+
+    result := new(Node)
+    result^ = resonance_pull^
+    return result
+}
+
+/*
+ * parse_prefix_range handles prefix range (..5)
+ */
+parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume ..
+    advance_token(parser)
+
+    // Parse end value or handle empty value
+    end: ^Node = nil
+    if !(parser.current_token.kind == .RightBrace ||
+         parser.current_token.kind == .EOF ||
+         parser.current_token.kind == .Newline) {
+        end = parse_expression(parser, .RANGE)
+    }
+
+    // Create range node
+    range := new(Range)
+    range.start = nil // No start for prefix range
+    range.end = end
+
+    result := new(Node)
+    result^ = range^
+    return result
+}
+
+/*
+ * parse_range handles range expression (a..b)
+ */
+parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Consume ..
+    advance_token(parser)
+
+    // Create range node
+    range := new(Range)
+    range.start = left
+
+    // Check if there's an end expression
+    if parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline ||
+       parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .RightParen {
+        // This is a postfix range (a..)
+        range.end = nil
+    } else {
+        // This is a full range (a..b)
+        end := parse_expression(parser, .RANGE)
+        range.end = end
+    }
+
+    result := new(Node)
+    result^ = range^
+    return result
+}
+
+/*
+ * parse_constraint handles constraint expressions (Type: value)
+ * Improved to handle empty constraints (Type:)
+ */
+parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create constraint
+    constraint := new(Constraint)
+    constraint.constraint = left
+
+    // Move past :
+    advance_token(parser)
+
+    // Parse value if present, otherwise it's an empty constraint
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline ||
+       parser.current_token.kind == .PointingPush {
+        // Empty constraint (Type:)
+        constraint.value = nil
+    } else if is_expression_start(parser.current_token.kind) {
+        // Constraint with value (Type: value)
+        if value := parse_expression(parser); value != nil {
+            value_maybe: Maybe(^Node)
+            value_maybe = value
+            constraint.value = value_maybe
+        }
+    } else {
+        // No value, but it's allowed
+        constraint.value = nil
+    }
+
+    result := new(Node)
+    result^ = constraint^
+    return result
 }
 
 /*
  * parse_standalone_pattern parses a pattern with no explicit target (? {...})
  */
-parse_standalone_pattern :: proc(parser: ^Parser) -> ^Node {
-	advance_token(parser)
+parse_standalone_pattern :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume ? token
+    advance_token(parser)
 
-	if parser.current_token.kind == .LeftBrace {
-		// Create a pattern with an implicit target
-		pattern := new(Pattern)
-		pattern.target = nil // Implicit target
-		pattern.value = make([dynamic]Branch)
+    if parser.current_token.kind == .LeftBrace {
+        // Create a pattern with an implicit target
+        pattern := new(Pattern)
+        pattern.target = nil // Implicit target
+        pattern.value = make([dynamic]Branch)
 
-		// Consume the '{'
-		advance_token(parser)
+        // Consume the '{'
+        advance_token(parser)
 
-		// Parse branches until closing brace
-		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-			// Skip newlines between branches
-			for parser.current_token.kind == .Newline {
-				advance_token(parser)
-			}
+        // Allow empty pattern
+        if parser.current_token.kind == .RightBrace {
+            advance_token(parser)
+            result := new(Node)
+            result^ = pattern^
+            return result
+        }
 
-			if parser.current_token.kind == .RightBrace {
-				break
-			}
+        // Parse branches until closing brace
+        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+            // Skip newlines between branches
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
 
-			// Parse a branch
-			if branch_ptr := parse_branch(parser); branch_ptr != nil {
-				append(&pattern.value, branch_ptr^)
-			} else {
-				// Skip to next significant token for error recovery
-				for parser.current_token.kind != .Newline &&
-				    parser.current_token.kind != .RightBrace &&
-				    parser.current_token.kind != .EOF {
-					advance_token(parser)
-				}
-			}
+            if parser.current_token.kind == .RightBrace {
+                break
+            }
 
-			// Skip newlines after a branch
-			for parser.current_token.kind == .Newline {
-				advance_token(parser)
-			}
-		}
+            // Parse a branch
+            if branch_ptr := parse_branch(parser); branch_ptr != nil {
+                append(&pattern.value, branch_ptr^)
+            } else {
+                // Error recovery
+                synchronize(parser)
+            }
 
-		// Expect closing brace
-		if !expect_token(parser, .RightBrace) {
-			return nil
-		}
+            // Skip newlines after a branch
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
+        }
 
-		result := new(Node)
-		result^ = pattern^
-		return result
-	}
+        // Expect closing brace
+        if !match(parser, .RightBrace) {
+            error_at_current(parser, "Expected } to close pattern")
+        }
 
-	fmt.println("Error: Expected { after standalone ? token")
-	return nil
-}
+        result := new(Node)
+        result^ = pattern^
+        return result
+    }
 
-
-/*
- * parse_constraint_statement parses a general constraint statement
- * Form: Identifier: Value or Identifier:
- */
-parse_constraint_statement :: proc(parser: ^Parser, constraint_name: string) -> ^Node {
-	// Create a constraint node
-	constraint := new(Constraint)
-
-	// Create an identifier node for the constraint
-	constraint_id := new(Node)
-	constraint_id^ = Identifier {
-		name = constraint_name,
-	}
-	constraint.constraint = constraint_id
-
-	// Consume the colon
-	if parser.current_token.kind != .Colon {
-		fmt.println("Error: Expected colon in constraint")
-		return nil
-	}
-	advance_token(parser)
-
-	// Check if there's a value after the colon
-	if is_expression_start(parser.current_token.kind) {
-		// Parse the value (right side of colon)
-		if value := parse_expression(parser); value != nil {
-			value_maybe: Maybe(^Node)
-			value_maybe = value
-			constraint.value = value_maybe
-		} else {
-			fmt.println("Error: Failed to parse expression after colon in constraint")
-			return nil
-		}
-	} else {
-		// No value after the colon, leave value as nil (Constraint:)
-		constraint.value = nil
-	}
-
-	result := new(Node)
-	result^ = constraint^
-	return result
+    error_at_current(parser, "Expected { after standalone ? token")
+    return nil
 }
 
 /*
- * is_expression_start checks if a token can start an expression
+ * parse_pattern handles pattern match (target ? {...})
  */
-is_expression_start :: proc(kind: Token_Kind) -> bool {
-	return(
-		kind == .Identifier ||
-		kind == .Integer ||
-		kind == .Float ||
-		kind == .String_Literal ||
-		kind == .Hexadecimal ||
-		kind == .Binary ||
-		kind == .LeftBrace ||
-		kind == .At \
-	)
-}
+parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create pattern node
+    pattern := new(Pattern)
+    pattern.target = left
+    pattern.value = make([dynamic]Branch)
 
-/*
- * parse_override parses an override expression (Base{...})
- */
-parse_override :: proc(parser: ^Parser, id_name: string) -> ^Node {
-	// Create an override node
-	override := new(Override)
+    // Consume ? token
+    advance_token(parser)
 
-	// Create the source identifier node
-	id := new(Node)
-	id^ = Identifier {
-		name = id_name,
-	}
-	override.source = id
+    // Expect {
+    if !expect_token(parser, .LeftBrace) {
+        error_at_current(parser, "Expected { after ? in pattern")
+        return nil
+    }
 
-	// Consume the left brace
-	advance_token(parser)
+    // Allow empty pattern
+    if parser.current_token.kind == .RightBrace {
+        advance_token(parser)
+        result := new(Node)
+        result^ = pattern^
+        return result
+    }
 
-	// Initialize the overrides array
-	override.overrides = make([dynamic]Node)
+    // Parse branches until closing brace
+    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+        // Skip newlines
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
 
-	// Parse statements until closing brace
-	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-		// Skip newlines
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
+        if parser.current_token.kind == .RightBrace {
+            break
+        }
 
-		if parser.current_token.kind == .RightBrace {
-			break
-		}
+        // Parse a branch and add it to the pattern
+        branch_ptr := parse_branch(parser)
+        if branch_ptr != nil {
+            append(&pattern.value, branch_ptr^)
+        } else {
+            // Error recovery
+            synchronize(parser)
+        }
 
-		if node := parse_statement(parser); node != nil {
-			append(&override.overrides, node^)
-		} else {
-			// Skip problematic tokens
-			advance_token(parser)
-		}
+        // Skip newlines between branches
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
+    }
 
-		// Skip newlines
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-	}
+    // Expect closing brace
+    if !match(parser, .RightBrace) {
+        error_at_current(parser, "Expected } to close pattern")
+    }
 
-	// Consume closing brace
-	if !expect_token(parser, .RightBrace) {
-		return nil
-	}
-
-	// Return the override node
-	result := new(Node)
-	result^ = override^
-	return result
-}
-
-/*
- * parse_pattern parses a pattern match (target ? {...})
- */
-parse_pattern :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
-	// Create pattern node
-	pattern := new(Pattern)
-
-	// Set target identifier
-	target := new(Node)
-	target^ = Identifier {
-		name = identifier_name,
-	}
-	pattern.target = target
-
-	// Initialize branches array
-	pattern.value = make([dynamic]Branch)
-
-	// Consume ? token
-	advance_token(parser)
-
-	// Expect {
-	if !expect_token(parser, .LeftBrace) {
-		fmt.println("Error: Expected { after ? in pattern")
-		return nil
-	}
-
-	// Parse branches until closing brace
-	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-		// Skip newlines
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-
-		if parser.current_token.kind == .RightBrace {
-			break
-		}
-
-		// Parse a branch and add it to the pattern
-		branch_ptr := parse_branch(parser)
-		if branch_ptr != nil {
-			append(&pattern.value, branch_ptr^)
-		} else {
-			fmt.println("Error: Failed to parse branch in pattern")
-			// Skip to next newline or closing brace to recover
-			for parser.current_token.kind != .Newline &&
-			    parser.current_token.kind != .RightBrace &&
-			    parser.current_token.kind != .EOF {
-				advance_token(parser)
-			}
-		}
-
-		// Skip newlines between branches
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-	}
-
-	// Expect closing brace
-	if !expect_token(parser, .RightBrace) {
-		fmt.println("Error: Expected } to close pattern")
-		return nil
-	}
-
-	// Create and return pattern node
-	result := new(Node)
-	result^ = pattern^
-	return result
+    // Create and return pattern node
+    result := new(Node)
+    result^ = pattern^
+    return result
 }
 
 /*
  * parse_branch parses a single branch in a pattern match
+ * Improved to handle empty cases and standalone identifiers
  */
 parse_branch :: proc(parser: ^Parser) -> ^Branch {
-	// Create new branch
-	branch := new(Branch)
+    // Create new branch
+    branch := new(Branch)
 
-	// Parse the pattern (constraint) part
-	if parser.current_token.kind == .Identifier {
-		// Simple identifier pattern
-		pattern_name := parser.current_token.text
-		advance_token(parser)
+    // Parse the pattern (constraint) part
+    if parser.current_token.kind == .Identifier {
+        // Simple identifier pattern
+        pattern_name := parser.current_token.text
+        advance_token(parser)
 
-		pattern_node := new(Node)
-		pattern_node^ = Identifier {
-			name = pattern_name,
-		}
-		branch.pattern = pattern_node
-	} else {
-		// More complex pattern expression
-		if pattern := parse_expression(parser); pattern != nil {
-			branch.pattern = pattern
-		} else {
-			fmt.println("Error: Failed to parse pattern in branch")
-			return nil
-		}
-	}
+        pattern_node := new(Node)
+        pattern_node^ = Identifier {
+            name = pattern_name,
+        }
+        branch.pattern = pattern_node
+    } else {
+        // More complex pattern expression
+        if pattern := parse_expression(parser); pattern != nil {
+            branch.pattern = pattern
+        } else {
+            error_at_current(parser, "Failed to parse pattern in branch")
+            return nil
+        }
+    }
 
-	// Expect colon
-	if parser.current_token.kind != .Colon {
-		fmt.println("Error: Expected : after pattern")
-		return nil
-	}
-	advance_token(parser)
+    // Expect colon
+    if !match(parser, .Colon) {
+        error_at_current(parser, "Expected : after pattern")
+        return nil
+    }
 
-	// Expect ->
-	if parser.current_token.kind != .PointingPush {
-		fmt.println("Error: Expected -> after : in branch")
-		return nil
-	}
+    // Check for -> (product)
+    if match(parser, .PointingPush) {
+        // Parse the product value
+        value_expr := parse_expression(parser)
+        if value_expr != nil {
+            // Handle case where value has an override expression
+            if parser.current_token.kind == .LeftBrace {
+                // Check if it's an override on a previous expression
+                if id, ok := value_expr^.(Identifier); ok {
+                    // Parse the override
+                    override := new(Override)
+                    override.source = value_expr
+                    override.overrides = make([dynamic]Node)
 
-	// Parse the product (-> expression)
-	if product := parse_product(parser); product != nil {
-		branch.product = product
-	} else {
-		fmt.println("Error: Failed to parse product after ->")
-		return nil
-	}
+                    // Consume the {
+                    advance_token(parser)
 
-	return branch
+                    // Parse statements in the override
+                    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+                        // Skip newlines
+                        for parser.current_token.kind == .Newline {
+                            advance_token(parser)
+                        }
+
+                        if parser.current_token.kind == .RightBrace {
+                            break
+                        }
+
+                        // Parse override expressions
+                        if stmt := parse_statement(parser); stmt != nil {
+                            append(&override.overrides, stmt^)
+                        } else {
+                            synchronize(parser)
+                        }
+
+                        // Skip newlines
+                        for parser.current_token.kind == .Newline {
+                            advance_token(parser)
+                        }
+                    }
+
+                    // Consume the closing }
+                    if !match(parser, .RightBrace) {
+                        error_at_current(parser, "Expected } to close override in branch")
+                    }
+
+                    // Create the override node
+                    override_node := new(Node)
+                    override_node^ = override^
+
+                    // Create product with the override as value
+                    product := new(Product)
+                    product.value = override_node
+
+                    // Set the branch product
+                    branch_product := new(Node)
+                    branch_product^ = product^
+                    branch.product = branch_product
+                } else {
+                    // Error - cannot override non-identifier
+                    error_at_current(parser, "Cannot apply override to non-identifier in branch")
+
+                    // Create a simple product with the value
+                    product := new(Product)
+                    product.value = value_expr
+
+                    branch_product := new(Node)
+                    branch_product^ = product^
+                    branch.product = branch_product
+                }
+            } else {
+                // Simple product with the value
+                product := new(Product)
+                product.value = value_expr
+
+                branch_product := new(Node)
+                branch_product^ = product^
+                branch.product = branch_product
+            }
+        } else {
+            // Empty product
+            product := new(Product)
+            product.value = nil
+
+            branch_product := new(Node)
+            branch_product^ = product^
+            branch.product = branch_product
+        }
+    } else {
+        // No product specified (implicit empty product)
+        product := new(Product)
+        product.value = nil
+
+        branch_product := new(Node)
+        branch_product^ = product^
+        branch.product = branch_product
+    }
+
+    return branch
 }
 
 /*
  * parse_product parses a product expression (-> value)
+ * This is for standalone -> expressions
  */
 parse_product :: proc(parser: ^Parser) -> ^Node {
-	// Consume the ->
-	advance_token(parser)
-
-	product := new(Product)
-
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		product.value = value
-	} else {
-		fmt.println("Error: Expected expression after ->")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = product^
-	return result
+    return parse_product_prefix(parser, false)
 }
 
 /*
- * parse_pointing should also be updated for consistency
+ * parse_expansion parses a content expansion (...expr)
  */
-parse_pointing :: proc(parser: ^Parser, identifier_name: string) -> ^Node {
-	pointing := new(Pointing)
+parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume ...
+    advance_token(parser)
 
-	// Create a node for the name
-	name_node := new(Node)
-	name_node^ = Identifier {
-		name = identifier_name,
-	}
-	pointing.name = name_node
+    // Create expansion node
+    expand := new(Expand)
 
-	// Consume the ->
-	advance_token(parser)
+    // Parse the target expression
+    if parser.current_token.kind == .At {
+        // Special case for file system reference
+        if target := parse_reference(parser, can_assign); target != nil {
+            expand.target = target
+        } else {
+            error_at_current(parser, "Failed to parse file system reference after ...")
+            return nil
+        }
+    } else {
+        // General expression case
+        if target := parse_expression(parser); target != nil {
+            expand.target = target
+        } else {
+            error_at_current(parser, "Expected expression after ...")
+            return nil
+        }
+    }
 
-	// Parse the value the pointing points to
-	if value := parse_expression(parser); value != nil {
-		pointing.value = value
-	} else {
-		fmt.println("Error: Expected expression after pointing operator")
-		return nil
-	}
+    // Create result for the expansion node
+    expand_result := new(Node)
+    expand_result^ = expand^
 
-	result := new(Node)
-	result^ = pointing^
-	return result
-}
+    // Check for overrides in braces
+    if parser.current_token.kind == .LeftBrace {
+        // Create an override node with the expansion as source
+        override := new(Override)
+        override.source = expand_result
 
-/*
- * parse_pointing_pull parses a pointing pull with optional explicit name
- * (name <- value) or (<- value)
- */
-parse_pointing_pull :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
-	// Consume <-
-	advance_token(parser)
+        // Consume left brace
+        advance_token(parser)
 
-	// Create a pointing pull node
-	pointing_pull := new(PointingPull)
+        // Initialize overrides array
+        override.overrides = make([dynamic]Node)
 
-	// Set the name node (may be nil for anonymous)
-	pointing_pull.name = name_node
+        // Allow empty overrides
+        if parser.current_token.kind == .RightBrace {
+            advance_token(parser)
+            result := new(Node)
+            result^ = override^
+            return result
+        }
 
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		pointing_pull.value = value
-	} else {
-		fmt.println("Error: Expected expression after <-")
-		return nil
-	}
+        // Parse statements until closing brace
+        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+            // Skip newlines
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
 
-	result := new(Node)
-	result^ = pointing_pull^
-	return result
-}
+            if parser.current_token.kind == .RightBrace {
+                break
+            }
 
-/*
- * parse_event_push parses an event push with optional explicit name
- * (name >- value) or (>- value)
- */
-parse_event_push :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
-	// Consume >-
-	advance_token(parser)
+            // Parse statement and add to overrides
+            if node := parse_expression(parser); node != nil {
+                append(&override.overrides, node^)
+            } else {
+                // Error recovery
+                synchronize(parser)
+            }
 
-	// Create an event push node
-	event_push := new(EventPush)
+            // Skip trailing newlines
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
+        }
 
-	// Set the name node (may be nil for anonymous)
-	event_push.name = name_node
+        // Consume closing brace
+        if !match(parser, .RightBrace) {
+            error_at_current(parser, "Expected } after expansion overrides")
+        }
 
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		event_push.value = value
-	} else {
-		fmt.println("Error: Expected expression after >-")
-		return nil
-	}
+        // Return the override node
+        result := new(Node)
+        result^ = override^
+        return result
+    }
 
-	result := new(Node)
-	result^ = event_push^
-	return result
-}
-
-/*
- * parse_event_pull parses an event pull with optional explicit name
- * (name -< value) or (-< value)
- */
-parse_event_pull :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
-	// Consume -<
-	advance_token(parser)
-
-	// Create an event pull node
-	event_pull := new(EventPull)
-
-	// Set the name node (may be nil for anonymous)
-	event_pull.name = name_node
-
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		event_pull.value = value
-	} else {
-		fmt.println("Error: Expected expression after -<")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = event_pull^
-	return result
-}
-
-/*
- * parse_resonance_push parses a resonance push with optional explicit name
- * (name >>- value) or (>>- value)
- */
-parse_resonance_push :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
-	// Consume >>-
-	advance_token(parser)
-
-	// Create a resonance push node
-	resonance_push := new(ResonancePush)
-
-	// Set the name node (may be nil for anonymous)
-	resonance_push.name = name_node
-
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		resonance_push.value = value
-	} else {
-		fmt.println("Error: Expected expression after >>-")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = resonance_push^
-	return result
-}
-
-/*
- * parse_resonance_pull parses a resonance pull with optional explicit name
- * (name -<< value) or (-<< value)
- */
-parse_resonance_pull :: proc(parser: ^Parser, name_node: ^Node = nil) -> ^Node {
-	// Consume -<<
-	advance_token(parser)
-
-	// Create a resonance pull node
-	resonance_pull := new(ResonancePull)
-
-	// Set the name node (may be nil for anonymous)
-	resonance_pull.name = name_node
-
-	// Parse the value
-	if value := parse_expression(parser); value != nil {
-		resonance_pull.value = value
-	} else {
-		fmt.println("Error: Expected expression after -<<")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = resonance_pull^
-	return result
-}
-
-/*
- * parse_scope parses a scope block {...}
- */
-parse_scope :: proc(parser: ^Parser) -> ^Node {
-	// Consume opening brace
-	advance_token(parser)
-
-	scope := new(Scope)
-	scope.value = make([dynamic]Node)
-
-	// Parse statements until closing brace
-	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-		// Skip newlines between statements
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-
-		if parser.current_token.kind == .RightBrace {
-			break
-		}
-
-		if node := parse_statement(parser); node != nil {
-			append(&scope.value, node^)
-		} else {
-			// Skip problematic tokens
-			advance_token(parser)
-		}
-
-		// Skip newlines after statements
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-	}
-
-	// Consume closing brace
-	if !expect_token(parser, .RightBrace) {
-		return nil
-	}
-
-	result := new(Node)
-	result^ = scope^
-	return result
-}
-
-/*
- * parse_expansion parses a content expansion (...target)
- */
-parse_expansion :: proc(parser: ^Parser) -> ^Node {
-	// Consume ...
-	advance_token(parser)
-
-	// Create expansion node
-	expand := new(Expand)
-
-	// Parse the target expression
-	if parser.current_token.kind == .At {
-		// Special case for file system reference
-		if target := parse_reference(parser); target != nil {
-			expand.target = target
-		} else {
-			fmt.println("Error: Failed to parse file system reference after ...")
-			return nil
-		}
-	} else {
-		// General expression case
-		if target := parse_expression(parser); target != nil {
-			expand.target = target
-		} else {
-			fmt.println("Error: Expected expression after ...")
-			return nil
-		}
-	}
-
-	// Create result for the expansion node
-	expand_result := new(Node)
-	expand_result^ = expand^
-
-	// Check for overrides in braces
-	if parser.current_token.kind == .LeftBrace {
-		// Create an override node with the expansion as source
-		override := new(Override)
-		override.source = expand_result
-
-		// Consume left brace
-		advance_token(parser)
-
-		// Initialize overrides array
-		override.overrides = make([dynamic]Node)
-
-		// Parse statements until closing brace
-		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-			// Skip newlines
-			for parser.current_token.kind == .Newline {
-				advance_token(parser)
-			}
-
-			if parser.current_token.kind == .RightBrace {
-				break
-			}
-
-			// Parse statement and add to overrides
-			if node := parse_statement(parser); node != nil {
-				append(&override.overrides, node^)
-			} else {
-				// Skip problematic tokens
-				advance_token(parser)
-			}
-
-			// Skip trailing newlines
-			for parser.current_token.kind == .Newline {
-				advance_token(parser)
-			}
-		}
-
-		// Consume closing brace
-		if !expect_token(parser, .RightBrace) {
-			return nil
-		}
-
-		// Return the override node
-		result := new(Node)
-		result^ = override^
-		return result
-	}
-
-	// If no overrides, simply return the expansion node
-	return expand_result
+    // If no overrides, simply return the expansion node
+    return expand_result
 }
 
 /*
  * parse_reference parses a file system reference (@module.lib)
  */
-parse_reference :: proc(parser: ^Parser) -> ^Node {
-	// Consume @
-	advance_token(parser)
+parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Consume @
+    advance_token(parser)
 
-	// Check for identifier after @
-	if parser.current_token.kind != .Identifier {
-		fmt.println("Error: Expected identifier after @")
-		return nil
-	}
+    // Check for identifier after @
+    if parser.current_token.kind != .Identifier {
+        error_at_current(parser, "Expected identifier after @")
+        return nil
+    }
 
-	// Create FileSystem node
-	fs_node := new(FileSystem)
+    // Create FileSystem node
+    fs_node := new(FileSystem)
 
-	// Parse first identifier
-	id_name := parser.current_token.text
-	advance_token(parser)
+    // Parse first identifier
+    id_name := parser.current_token.text
+    advance_token(parser)
 
-	// Create initial identifier node
-	ident_node := new(Node)
-	ident_node^ = Identifier {
-		name = id_name,
-	}
+    // Create initial identifier node
+    ident_node := new(Node)
+    ident_node^ = Identifier{
+        name = id_name,
+    }
 
-	// If no property access follows, return basic FileSystem node
-	if parser.current_token.kind != .Dot {
-		fs_node.target = ident_node
-		result := new(Node)
-		result^ = fs_node^
-		return result
-	}
+    // If no property access follows, return basic FileSystem node
+    if parser.current_token.kind != .Dot {
+        fs_node.target = ident_node
+        result := new(Node)
+        result^ = fs_node^
+        return result
+    }
 
-	// Handle property chain (lib.geometry.Plane)
-	current_node := ident_node
+    // Handle property chain (lib.geometry.Plane)
+    current_node := ident_node
 
-	// Process all dots and identifiers in the chain
-	for parser.current_token.kind == .Dot {
-		// Consume dot
-		advance_token(parser)
+    // Process all dots and identifiers in the chain
+    for parser.current_token.kind == .Dot {
+        // Consume dot
+        advance_token(parser)
 
-		// Expect identifier
-		if parser.current_token.kind != .Identifier {
-			fmt.println("Error: Expected identifier after dot")
-			return nil
-		}
+        // Expect identifier
+        if parser.current_token.kind != .Identifier {
+            error_at_current(parser, "Expected identifier after dot")
+            return nil
+        }
 
-		// Get property name
-		property_name := parser.current_token.text
-		advance_token(parser)
+        // Get property name
+        property_name := parser.current_token.text
+        advance_token(parser)
 
-		// Create property node
-		property := new(Property)
-		property.source = current_node
+        // Create property node
+        property := new(Property)
+        property.source = current_node
 
-		// Create property identifier
-		prop_ident := new(Node)
-		prop_ident^ = Identifier {
-			name = property_name,
-		}
-		property.property = prop_ident
+        // Create property identifier
+        prop_ident := new(Node)
+        prop_ident^ = Identifier{
+            name = property_name,
+        }
+        property.property = prop_ident
 
-		// Update current node to this property
-		property_node := new(Node)
-		property_node^ = property^
-		current_node = property_node
-	}
+        // Update current node to this property
+        property_node := new(Node)
+        property_node^ = property^
+        current_node = property_node
+    }
 
-	// Set final property chain as FileSystem target
-	fs_node.target = current_node
+    // Set final property chain as FileSystem target
+    fs_node.target = current_node
 
-	result := new(Node)
-	result^ = fs_node^
-	return result
-}
-
-/*
- * parse_expression parses expressions (literals, identifiers, operators, etc.)
- */
-parse_expression :: proc(parser: ^Parser) -> ^Node {
-	// Start with a primary expression
-	expr := parse_primary(parser)
-	if expr == nil {
-		return nil
-	}
-
-	// While we have operators, build up the expression
-	for is_operator(parser.current_token.kind) {
-		expr = parse_operator(parser, expr)
-		if expr == nil {
-			return nil
-		}
-	}
-
-	// Check for execution modifiers
-	if is_execution_modifier(parser.current_token.kind) {
-		return parse_execution(parser, expr)
-	}
-
-	return expr
-}
-
-/*
- * parse_primary parses primary expressions (literals, identifiers, scopes)
- */
-parse_primary :: proc(parser: ^Parser) -> ^Node {
-	#partial switch parser.current_token.kind {
-	case .Identifier:
-		return parse_identifier_expression(parser)
-	case .Integer, .Float, .Hexadecimal, .Binary, .String_Literal:
-		return parse_literal(parser)
-	case .LeftBrace:
-		return parse_scope(parser)
-	case .At:
-		return parse_reference(parser)
-	case:
-		fmt.printf("Unexpected token in expression: %v\n", parser.current_token.kind)
-		return nil
-	}
-}
-
-/*
- * parse_identifier_expression parses identifier expressions which may include
- * property access, constraints, or overrides
- */
-parse_identifier_expression :: proc(parser: ^Parser) -> ^Node {
-	// Save the identifier name
-	id_name := parser.current_token.text
-	advance_token(parser)
-
-	// Create the identifier node
-	id_node := new(Node)
-	id_node^ = Identifier {
-		name = id_name,
-	}
-
-	// Check for property access (identifier followed by dot)
-	if parser.current_token.kind == .Dot {
-		return parse_property_chain(parser, id_node)
-	}
-
-	// Check for constraint (identifier followed by colon)
-	if parser.current_token.kind == .Colon {
-		return parse_inline_constraint(parser, id_name)
-	}
-
-	// Check for override (identifier followed by left brace)
-	if parser.current_token.kind == .LeftBrace {
-		return parse_inline_override(parser, id_node)
-	}
-
-	// Just a regular identifier
-	return id_node
-}
-
-/*
- * parse_property_chain parses a chain of property accesses (a.b.c)
- */
-parse_property_chain :: proc(parser: ^Parser, first_node: ^Node) -> ^Node {
-	// Start building property chain
-	current := first_node
-
-	// Handle property access chain
-	for parser.current_token.kind == .Dot {
-		advance_token(parser)
-
-		if parser.current_token.kind != .Identifier {
-			fmt.println("Error: Expected identifier after dot")
-			return nil
-		}
-
-		prop_name := parser.current_token.text
-		advance_token(parser)
-
-		prop := new(Property)
-		prop.source = current
-
-		prop_id := new(Node)
-		prop_id^ = Identifier {
-			name = prop_name,
-		}
-		prop.property = prop_id
-
-		prop_node := new(Node)
-		prop_node^ = prop^
-		current = prop_node
-	}
-
-	return current
-}
-
-/*
- * parse_inline_constraint parses a constraint within an expression
- */
-parse_inline_constraint :: proc(parser: ^Parser, type_name: string) -> ^Node {
-	// Create a constraint node
-	constraint := new(Constraint)
-
-	// Set the constraint type
-	type_node := new(Node)
-	type_node^ = Identifier {
-		name = type_name,
-	}
-	constraint.constraint = type_node
-
-	// Consume the colon
-	advance_token(parser)
-
-	// Check for value after colon
-	if is_expression_start(parser.current_token.kind) {
-		if value := parse_expression(parser); value != nil {
-			value_maybe: Maybe(^Node)
-			value_maybe = value
-			constraint.value = value_maybe
-		}
-	}
-
-	result := new(Node)
-	result^ = constraint^
-	return result
-}
-
-/*
- * parse_inline_override parses an override within an expression
- */
-parse_inline_override :: proc(parser: ^Parser, source_node: ^Node) -> ^Node {
-	// Create an override node
-	override := new(Override)
-
-	// Set the source
-	override.source = source_node
-
-	// Parse the overrides inside the braces
-	advance_token(parser) // Consume the left brace
-
-	override.overrides = make([dynamic]Node)
-
-	// Parse statements until closing brace
-	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-		// Skip newlines
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-
-		if parser.current_token.kind == .RightBrace {
-			break
-		}
-
-		if node := parse_statement(parser); node != nil {
-			append(&override.overrides, node^)
-		} else {
-			// Skip problematic tokens
-			advance_token(parser)
-		}
-
-		// Skip newlines
-		for parser.current_token.kind == .Newline {
-			advance_token(parser)
-		}
-	}
-
-	// Consume closing brace
-	if !expect_token(parser, .RightBrace) {
-		return nil
-	}
-
-	// Return the override node
-	result := new(Node)
-	result^ = override^
-	return result
-}
-
-/*
- * parse_literal parses literal values (numbers, strings)
- */
-parse_literal :: proc(parser: ^Parser) -> ^Node {
-	literal := new(Literal)
-	literal.value = parser.current_token.text
-
-	#partial switch parser.current_token.kind {
-	case .Integer:
-		literal.kind = .Integer
-	case .Float:
-		literal.kind = .Float
-	case .Hexadecimal:
-		literal.kind = .Hexadecimal
-	case .Binary:
-		literal.kind = .Binary
-	case .String_Literal:
-		literal.kind = .String
-	case:
-		fmt.println("Error: Unknown literal type")
-		return nil
-	}
-
-	advance_token(parser)
-
-	result := new(Node)
-	result^ = literal^
-	return result
-}
-
-/*
- * parse_operator parses an operator expression
- */
-parse_operator :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-	operator := new(Operator)
-	operator.left = left
-
-	// Set operator kind based on token
-	#partial switch parser.current_token.kind {
-	case .Plus:
-		operator.kind = .Plus
-	case .Minus:
-		operator.kind = .Minus
-	case .Asterisk:
-		operator.kind = .Mult
-	case .Slash:
-		operator.kind = .Div
-	case .Percent:
-		operator.kind = .Mod
-	case .BitAnd:
-		operator.kind = .BitAnd
-	case .BitOr:
-		operator.kind = .BitOr
-	case .BitXor:
-		operator.kind = .BitXor
-	case .BitNot:
-		operator.kind = .BitNot
-	case .Equal:
-		operator.kind = .Equal
-	case .LessThan:
-		operator.kind = .LessThan
-	case .GreaterThan:
-		operator.kind = .GreaterThan
-	case .LessEqual:
-		operator.kind = .LessEqual
-	case .GreaterEqual:
-		operator.kind = .GreaterEqual
-	case:
-		fmt.println("Error: Unknown binary operator")
-		return nil
-	}
-
-	advance_token(parser)
-
-	// Parse right operand
-	if right := parse_expression(parser); right != nil {
-		operator.right = right
-	} else {
-		fmt.println("Error: Expected expression after binary operator")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = operator^
-	return result
-}
-
-/*
- * parse_execution parses execution modifiers (!expr, [!], etc)
- */
-parse_execution :: proc(parser: ^Parser, expr: ^Node) -> ^Node {
-	execute := new(Execute)
-	execute.value = expr
-
-	// Determine the type of execution
-	if parser.current_token.kind == .LeftBrace {
-		// Handle [!]
-		advance_token(parser)
-		if !expect_token(parser, .Execute) || !expect_token(parser, .RightBrace) {
-			return nil
-		}
-	} else if parser.current_token.kind == .LeftParen {
-		// Handle (!)
-		advance_token(parser)
-		if !expect_token(parser, .Execute) || !expect_token(parser, .RightParen) {
-			return nil
-		}
-	} else if parser.current_token.kind == .Execute {
-		// Handle simple !
-		advance_token(parser)
-	} else {
-		fmt.println("Error: Expected execution operator")
-		return nil
-	}
-
-	result := new(Node)
-	result^ = execute^
-	return result
+    result := new(Node)
+    result^ = fs_node^
+    return result
 }
 
 // ===========================================================================
@@ -1811,76 +2181,112 @@ parse_execution :: proc(parser: ^Parser, expr: ^Node) -> ^Node {
 // ===========================================================================
 
 /*
+ * is_expression_start checks if a token can start an expression
+ */
+is_expression_start :: proc(kind: Token_Kind) -> bool {
+    return(
+        kind == .Identifier ||
+        kind == .Integer ||
+        kind == .Float ||
+        kind == .String_Literal ||
+        kind == .Hexadecimal ||
+        kind == .Binary ||
+        kind == .LeftBrace ||
+        kind == .LeftParen ||
+        kind == .At ||
+        kind == .BitNot ||
+        kind == .Minus ||
+        kind == .Execute ||
+        kind == .PointingPull ||
+        kind == .EventPush ||
+        kind == .EventPull ||
+        kind == .ResonancePush ||
+        kind == .ResonancePull ||
+        kind == .DoubleDot ||
+        kind == .Question ||
+        kind == .Ellipsis ||
+        kind == .PointingPush
+    )
+}
+
+/*
  * is_operator checks if a token is a binary operator
  */
 is_operator :: proc(kind: Token_Kind) -> bool {
-	return(
-		kind == .Equal ||
-		kind == .LessThan ||
-		kind == .GreaterThan ||
-		kind == .LessEqual ||
-		kind == .GreaterEqual ||
-		kind == .Plus ||
-		kind == .Minus ||
-		kind == .Asterisk ||
-		kind == .Slash ||
-		kind == .Percent ||
-		kind == .BitAnd ||
-		kind == .BitOr ||
-		kind == .BitXor ||
-		kind == .BitNot \
-	)
+    return(
+        kind == .Equal ||
+        kind == .LessThan ||
+        kind == .GreaterThan ||
+        kind == .LessEqual ||
+        kind == .GreaterEqual ||
+        kind == .Plus ||
+        kind == .Minus ||
+        kind == .Asterisk ||
+        kind == .Slash ||
+        kind == .Percent ||
+        kind == .BitAnd ||
+        kind == .BitOr ||
+        kind == .BitXor ||
+        kind == .BitNot ||
+        kind == .PointingPush ||
+        kind == .PointingPull ||
+        kind == .EventPush ||
+        kind == .EventPull ||
+        kind == .ResonancePush ||
+        kind == .ResonancePull ||
+        kind == .DoubleDot
+    )
 }
 
 /*
  * is_execution_modifier checks if a token is an execution modifier
  */
 is_execution_modifier :: proc(kind: Token_Kind) -> bool {
-	return kind == .Execute || kind == .LeftBrace || kind == .LeftParen
+    return kind == .Execute || kind == .LeftBrace || kind == .LeftParen
 }
 
 /*
  * is_digit checks if a character is a digit
  */
 is_digit :: proc(c: u8) -> bool {
-	return c >= '0' && c <= '9'
+    return c >= '0' && c <= '9'
 }
 
 /*
  * is_hex_digit checks if a character is a hexadecimal digit
  */
 is_hex_digit :: proc(c: u8) -> bool {
-	return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
 /*
  * is_alpha checks if a character is an alphabetic character
  */
 is_alpha :: proc(c: u8) -> bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
 /*
  * is_alnum checks if a character is alphanumeric or underscore
  */
 is_alnum :: proc(c: u8) -> bool {
-	return is_digit(c) || is_alpha(c) || c == '_'
+    return is_digit(c) || is_alpha(c) || c == '_'
 }
 
 /*
  * is_space checks if a character is a whitespace character
  */
 is_space :: proc(c: u8) -> bool {
-	return c == ' ' || c == '\t' || c == '\r'
+    return c == ' ' || c == '\t' || c == '\r'
 }
 
 /*
  * skip_whitespace advances the lexer past any whitespace characters
  */
 skip_whitespace :: proc(l: ^Lexer) {
-	for l.pos < len(l.source) && is_space(l.source[l.pos]) {
-		l.pos += 1
-	}
+    for l.pos < len(l.source) && is_space(l.source[l.pos]) {
+        l.pos += 1
+    }
 }
 
 // ===========================================================================
@@ -1891,232 +2297,261 @@ skip_whitespace :: proc(l: ^Lexer) {
  * debug_print_tokens prints a sequence of upcoming tokens for debugging
  */
 debug_print_tokens :: proc(parser: ^Parser, count: int) {
-	fmt.println("\n=== TOKEN STREAM ===")
+    fmt.println("\n=== TOKEN STREAM ===")
 
-	// Store original parser state
-	orig_current := parser.current_token
-	orig_peek := parser.peek_token
+    // Store original parser state
+    orig_current := parser.current_token
+    orig_peek := parser.peek_token
 
-	// Print current and peek tokens
-	fmt.printf("Current: %v '%s'\n", parser.current_token.kind, parser.current_token.text)
-	fmt.printf("Peek: %v '%s'\n", parser.peek_token.kind, parser.peek_token.text)
+    // Print current and peek tokens
+    fmt.printf("Current: %v '%s'\n", parser.current_token.kind, parser.current_token.text)
+    fmt.printf("Peek: %v '%s'\n", parser.peek_token.kind, parser.peek_token.text)
 
-	// Print a few tokens ahead
-	fmt.println("\nUpcoming tokens:")
+    // Print a few tokens ahead
+    fmt.println("\nUpcoming tokens:")
 
-	temp_lexer := parser.lexer^ // Make a copy of the lexer
-	temp_parser: Parser
-	init_parser(&temp_parser, &temp_lexer)
+    temp_lexer := parser.lexer^ // Make a copy of the lexer
+    temp_parser: Parser
+    init_parser(&temp_parser, &temp_lexer)
 
-	// Advance to match the current state
-	for temp_parser.current_token.pos < orig_current.pos &&
-	    temp_parser.current_token.kind != .EOF {
-		advance_token(&temp_parser)
-	}
+    // Advance to match the current state
+    for temp_parser.current_token.pos < orig_current.pos &&
+        temp_parser.current_token.kind != .EOF {
+        advance_token(&temp_parser)
+    }
 
-	// Print the next 'count' tokens
-	for i := 0; i < count && temp_parser.current_token.kind != .EOF; i += 1 {
-		fmt.printf(
-			"%d: %v '%s'\n",
-			i + 1,
-			temp_parser.current_token.kind,
-			temp_parser.current_token.text,
-		)
-		advance_token(&temp_parser)
-	}
+    // Print the next 'count' tokens
+    for i := 0; i < count && temp_parser.current_token.kind != .EOF; i += 1 {
+        fmt.printf(
+            "%d: %v '%s'\n",
+            i + 1,
+            temp_parser.current_token.kind,
+            temp_parser.current_token.text,
+        )
+        advance_token(&temp_parser)
+    }
 
-	fmt.println("=== END TOKEN STREAM ===\n")
+    fmt.println("=== END TOKEN STREAM ===\n")
 }
 
 /*
  * print_ast prints the AST with indentation for readability
  */
 print_ast :: proc(node: ^Node, indent: int) {
-	if node == nil {
-		return
-	}
+    if node == nil {
+        return
+    }
 
-	indent_str := strings.repeat(" ", indent)
+    indent_str := strings.repeat(" ", indent)
 
-	#partial switch n in node^ {
-	case Pointing:
-		fmt.printf("%sPointing ->\n", indent_str)
-		if n.name != nil {
-			fmt.printf("%s  Name:\n", indent_str)
-			print_ast(n.name, indent + 4)
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    #partial switch n in node^ {
+    case Pointing:
+        fmt.printf("%sPointing ->\n", indent_str)
+        if n.name != nil {
+            fmt.printf("%s  Name:\n", indent_str)
+            print_ast(n.name, indent + 4)
+        }
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-	case PointingPull:
-		fmt.printf("%sPointingPull <-\n", indent_str)
-		if n.name != nil {
-			fmt.printf("%s  Name:\n", indent_str)
-			print_ast(n.name, indent + 4)
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    case PointingPull:
+        fmt.printf("%sPointingPull <-\n", indent_str)
+        if n.name != nil {
+            fmt.printf("%s  Name:\n", indent_str)
+            print_ast(n.name, indent + 4)
+        } else {
+            fmt.printf("%s  Name: anonymous\n", indent_str)
+        }
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-	case EventPush:
-		fmt.printf("%sEventPush >-\n", indent_str)
-		if n.name != nil {
-			fmt.printf("%s  Name:\n", indent_str)
-			print_ast(n.name, indent + 4)
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    case EventPush:
+        fmt.printf("%sEventPush >-\n", indent_str)
+        if n.name != nil {
+            fmt.printf("%s  Name:\n", indent_str)
+            print_ast(n.name, indent + 4)
+        } else {
+            fmt.printf("%s  Name: anonymous\n", indent_str)
+        }
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-	case EventPull:
-		fmt.printf("%sEventPull -<\n", indent_str)
-		if n.name != nil {
-			fmt.printf("%s  Name:\n", indent_str)
-			print_ast(n.name, indent + 4)
+    case EventPull:
+        fmt.printf("%sEventPull -<\n", indent_str)
+        if n.name != nil {
+            fmt.printf("%s  Name:\n", indent_str)
+            print_ast(n.name, indent + 4)
+        } else {
+            fmt.printf("%s  Name: anonymous\n", indent_str)
+        }
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    case ResonancePush:
+        fmt.printf("%sResonancePush >>-\n", indent_str)
+        if n.name != nil {
+            fmt.printf("%s  Name:\n", indent_str)
+            print_ast(n.name, indent + 4)
+        } else {
+            fmt.printf("%s  Name: anonymous\n", indent_str)
+        }
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-	case ResonancePush:
-		fmt.printf("%sResonancePush >>-\n", indent_str)
-		if n.name != nil {
-			fmt.printf("%s  Name:\n", indent_str)
-			print_ast(n.name, indent + 4)
-		} else {
-			fmt.printf("%s  Name: anonymous\n", indent_str)
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    case ResonancePull:
+        fmt.printf("%sResonancePull -<<\n", indent_str)
+        if n.name != nil {
+            fmt.printf("%s  Name:\n", indent_str)
+            print_ast(n.name, indent + 4)
+        } else {
+            fmt.printf("%s  Name: anonymous\n", indent_str)
+        }
+        if n.value != nil {
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
+        }
 
-	case ResonancePull:
-		fmt.printf("%sResonancePull -<<\n", indent_str)
-		if n.name != nil {
-			fmt.printf("%s  Name:\n", indent_str)
-			print_ast(n.name, indent + 4)
-		} else {
-			fmt.printf("%s  Name: anonymous\n", indent_str)
-		}
-		if n.value != nil {
-			fmt.printf("%s  Value:\n", indent_str)
-			print_ast(n.value, indent + 4)
-		}
+    case Identifier:
+        fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
 
-	case Identifier:
-		fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
+    case Scope:
+        fmt.printf("%sScope\n", indent_str)
+        for i := 0; i < len(n.value); i += 1 {
+            entry_node := new(Node)
+            entry_node^ = n.value[i]
+            print_ast(entry_node, indent + 2)
+        }
 
-	case Scope:
-		fmt.printf("%sScope\n", indent_str)
-		for i := 0; i < len(n.value); i += 1 {
-			entry_node := new(Node)
-			entry_node^ = n.value[i]
-			print_ast(entry_node, indent + 2)
-		}
+    case Override:
+        fmt.printf("%sOverride\n", indent_str)
+        if n.source != nil {
+            fmt.printf("%s  Source:\n", indent_str)
+            print_ast(n.source, indent + 4)
+            fmt.printf("%s  Overrides:\n", indent_str)
+            for i := 0; i < len(n.overrides); i += 1 {
+                override_node := new(Node)
+                override_node^ = n.overrides[i]
+                print_ast(override_node, indent + 4)
+            }
+        }
 
-	case Override:
-		fmt.printf("%sOverride\n", indent_str)
-		if n.source != nil {
-			fmt.printf("%s  Source:\n", indent_str)
-			print_ast(n.source, indent + 4)
-			fmt.printf("%s  Overrides:\n", indent_str)
-			for i := 0; i < len(n.overrides); i += 1 {
-				override_node := new(Node)
-				override_node^ = n.overrides[i]
-				print_ast(override_node, indent + 4)
-			}
-		}
+    case Property:
+        fmt.printf("%sProperty\n", indent_str)
+        if n.source != nil {
+            fmt.printf("%s  Source:\n", indent_str)
+            print_ast(n.source, indent + 4)
+        }
+        if n.property != nil {
+            fmt.printf("%s  Property:\n", indent_str)
+            print_ast(n.property, indent + 4)
+        }
 
-	case Property:
-		fmt.printf("%sProperty\n", indent_str)
-		if n.source != nil {
-			fmt.printf("%s  Source:\n", indent_str)
-			print_ast(n.source, indent + 4)
-		}
-		if n.property != nil {
-			fmt.printf("%s  Property:\n", indent_str)
-			print_ast(n.property, indent + 4)
-		}
+    case Expand:
+        fmt.printf("%sExpand\n", indent_str)
+        if n.target != nil {
+            fmt.printf("%s  Target:\n", indent_str)
+            print_ast(n.target, indent + 4)
+        }
 
-	case Expand:
-		fmt.printf("%sExpand\n", indent_str)
-		if n.target != nil {
-			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(n.target, indent + 4)
-		}
+    case FileSystem:
+        fmt.printf("%sFileSystem\n", indent_str)
+        if n.target != nil {
+            fmt.printf("%s  Target:\n", indent_str)
+            print_ast(n.target, indent + 4)
+        }
 
-	case FileSystem:
-		fmt.printf("%sFileSystem\n", indent_str)
-		if n.target != nil {
-			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(n.target, indent + 4)
-		}
+    case Product:
+        fmt.printf("%sProduct ->\n", indent_str)
+        if n.value != nil {
+            print_ast(n.value, indent + 2)
+        }
 
-	case Product:
-		fmt.printf("%sProduct ->\n", indent_str)
-		if n.value != nil {
-			print_ast(n.value, indent + 2)
-		}
+    case Pattern:
+        fmt.printf("%sPattern ?\n", indent_str)
+        if n.target != nil {
+            fmt.printf("%s  Target:\n", indent_str)
+            print_ast(n.target, indent + 4)
+        } else {
+            fmt.printf("%s  Target: implicit\n", indent_str)
+        }
+        fmt.printf("%s  Branches\n", indent_str)
+        for i := 0; i < len(n.value); i += 1 {
+            branch := n.value[i]
+            fmt.printf("%s    Branch:\n", indent_str)
+            if branch.pattern != nil {
+                fmt.printf("%s      Pattern:\n", indent_str)
+                print_ast(branch.pattern, indent + 8)
+            }
+            if branch.product != nil {
+                fmt.printf("%s      Match:\n", indent_str)
+                print_ast(branch.product, indent + 8)
+            }
+        }
 
-	case Pattern:
-		fmt.printf("%sPattern ?\n", indent_str)
-		if n.target != nil {
-			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(n.target, indent + 4)
-		}
-		fmt.printf("%s  Branches\n", indent_str)
-		for i := 0; i < len(n.value); i += 1 {
-			branch := n.value[i]
-			fmt.printf("%s    Branch:\n", indent_str)
-			if branch.pattern != nil {
-				fmt.printf("%s      Pattern:\n", indent_str)
-				print_ast(branch.pattern, indent + 8)
-			}
-			if branch.product != nil {
-				fmt.printf("%s      Match:\n", indent_str)
-				print_ast(branch.product, indent + 8)
-			}
-		}
+    case Constraint:
+        fmt.printf("%sConstraint:\n", indent_str)
+        print_ast(n.constraint, indent + 2)
+        if n.value != nil {
+            if v, ok := n.value.?; ok && v != nil {
+                fmt.printf("%s  Value:\n", indent_str)
+                print_ast(v, indent + 4)
+            } else {
+                fmt.printf("%s  Value: none\n", indent_str)
+            }
+        } else {
+            fmt.printf("%s  Value: none\n", indent_str)
+        }
 
-	case Constraint:
-		fmt.printf("%sConstraint:\n", indent_str)
-		print_ast(n.constraint, indent + 2)
-		if n.value != nil {
-			if v, ok := n.value.?; ok && v != nil {
-				fmt.printf("%s  Value:\n", indent_str)
-				print_ast(v, indent + 4)
-			}
-		}
-	case Operator:
-		fmt.printf("%sOperator '%v'\n", indent_str, n.kind)
-		if n.left != nil {
-			fmt.printf("%s  Left:\n", indent_str)
-			print_ast(n.left, indent + 4)
-		}
-		if n.right != nil {
-			fmt.printf("%s  Right:\n", indent_str)
-			print_ast(n.right, indent + 4)
-		}
+    case Operator:
+        fmt.printf("%sOperator '%v'\n", indent_str, n.kind)
+        if n.left != nil {
+            fmt.printf("%s  Left:\n", indent_str)
+            print_ast(n.left, indent + 4)
+        } else {
+            fmt.printf("%s  Left: none (unary operator)\n", indent_str)
+        }
+        if n.right != nil {
+            fmt.printf("%s  Right:\n", indent_str)
+            print_ast(n.right, indent + 4)
+        }
 
-	case Execute:
-		fmt.printf("%sExecute !\n", indent_str)
-		if n.value != nil {
-			print_ast(n.value, indent + 2)
-		}
+    case Execute:
+        fmt.printf("%sExecute !\n", indent_str)
+        if n.value != nil {
+            print_ast(n.value, indent + 2)
+        }
 
-	case Literal:
-		fmt.printf("%sLiteral (%v): %s\n", indent_str, n.kind, n.value)
+    case Literal:
+        fmt.printf("%sLiteral (%v): %s\n", indent_str, n.kind, n.value)
 
-	case:
-		fmt.printf("%sUnknown node type\n", indent_str)
-	}
+    case Range:
+        fmt.printf("%sRange\n", indent_str)
+        if n.start != nil {
+            fmt.printf("%s  Start:\n", indent_str)
+            print_ast(n.start, indent + 4)
+        } else {
+            fmt.printf("%s  Start: none (prefix range)\n", indent_str)
+        }
+        if n.end != nil {
+            fmt.printf("%s  End:\n", indent_str)
+            print_ast(n.end, indent + 4)
+        } else {
+            fmt.printf("%s  End: none (postfix range)\n", indent_str)
+        }
+
+    case:
+        fmt.printf("%sUnknown node type\n", indent_str)
+    }
 }
 
 // ===========================================================================
@@ -2126,10 +2561,15 @@ print_ast :: proc(node: ^Node, indent: int) {
 /*
  * parse_file initializes a parser with the given lexer and returns the parsed AST
  */
-parse_file :: proc(lexer: ^Lexer) -> ^Node {
-	parser: Parser
-	init_parser(&parser, lexer)
-	return parse(&parser)
+parse_file :: proc(lexer: ^Lexer) -> (^Node, bool) {
+    parser: Parser
+    init_parser(&parser, lexer)
+
+    // Parse the program
+    ast := parse_program(&parser)
+
+    // Return the AST and success status
+    return ast, !parser.had_error
 }
 
 /*
@@ -2137,34 +2577,55 @@ parse_file :: proc(lexer: ^Lexer) -> ^Node {
  * It reads a file, parses it, and prints the resulting AST
  */
 main :: proc() {
-	if len(os.args) < 2 {
-		fmt.println("Usage: parser <filename>")
-		os.exit(1)
-	}
+    if len(os.args) < 2 {
+        fmt.println("Usage: parser <filename> [--debug]")
+        os.exit(1)
+    }
 
-	filename := os.args[1]
-	source, ok := os.read_entire_file(filename)
-	if !ok {
-		fmt.printf("Error: Could not read file '%s'\n", filename)
-		os.exit(1)
-	}
-	defer delete(source)
+    filename := os.args[1]
+    debug_mode := len(os.args) > 2 && os.args[2] == "--debug"
 
-	// Initialize lexer
-	lexer := Lexer {
-		source = string(source),
-	}
+    source, ok := os.read_entire_file(filename)
+    if !ok {
+        fmt.printf("Error: Could not read file '%s'\n", filename)
+        os.exit(1)
+    }
+    defer delete(source)
 
-	fmt.println("Parsing file:", filename)
+    // Initialize lexer
+    lexer := Lexer{
+        source = string(source),
+    }
 
-	// Parse the file
-	ast := parse_file(&lexer)
-	if ast == nil {
-		fmt.println("Parsing failed!")
-		os.exit(1)
-	}
+    fmt.println("Parsing file:", filename)
 
-	// Print AST
-	fmt.println("Successfully parsed file!")
-	print_ast(ast, 0)
+    // Parse the file
+    ast, success := parse_file(&lexer)
+    if ast == nil {
+        fmt.println("Parsing failed completely!")
+        os.exit(1)
+    }
+
+    if !success {
+        fmt.println("Parsing completed with errors!")
+    } else {
+        fmt.println("Successfully parsed file!")
+    }
+
+    // Print AST
+    print_ast(ast, 0)
+
+    // If in debug mode, print a summary
+    if debug_mode {
+        fmt.println("\n=== DEBUG SUMMARY ===")
+
+        // Count different node types in the AST
+        scope, ok := ast^.(Scope)
+        if ok {
+            fmt.printf("Top level statements: %d\n", len(scope.value))
+        }
+
+        // This could include more debug info like node counts by type, etc.
+        fmt.println("=== END DEBUG SUMMARY ===")
+    }
 }
