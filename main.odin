@@ -8,11 +8,11 @@ package compiler
  * like pointings, patterns, and constraints.
  *
  * Organization:
- * 1. Token definitions and lexer (unchanged)
- * 2. AST node definitions (unchanged)
+ * 1. Token definitions and lexer
+ * 2. AST node definitions
  * 3. Fixed parser implementation with Pratt parsing for expressions
- * 4. Utility functions (unchanged)
- * 5. Improved error handling and recovery
+ * 4. Utility functions
+ * 5. Error handling and recovery
  * ======================================================================
  */
 
@@ -683,7 +683,7 @@ Precedence :: enum {
     FACTOR,     // *, /, %
     BITWISE,    // &, |, ^
     UNARY,      // !, ~, unary -
-    CALL,       // (), .
+    CALL,       // (), ., : (constraint now at this level)
     PRIMARY,    // Literals, identifiers
 }
 
@@ -799,15 +799,12 @@ error_at :: proc(parser: ^Parser, token: Token, message: string) {
 synchronize :: proc(parser: ^Parser) {
     parser.panic_mode = false
 
-    // Track position to detect lack of progress
+    // Record position and token to detect lack of progress
     start_pos := parser.current_token.pos
+    start_kind := parser.current_token.kind
 
     // Skip tokens until we find a good synchronization point
     for parser.current_token.kind != .EOF {
-        // Remember token kind and position before advancing
-        prev_token_kind := parser.current_token.kind
-        prev_pos := parser.current_token.pos
-
         // Check if current token is a synchronization point
         if parser.current_token.kind == .Newline ||
            parser.current_token.kind == .RightBrace ||
@@ -817,14 +814,22 @@ synchronize :: proc(parser: ^Parser) {
             return
         }
 
+        // Current position before advancing
+        current_pos := parser.current_token.pos
+        current_kind := parser.current_token.kind
+
+        // Try to advance
         advance_token(parser)
 
-        // Safety check to prevent infinite loops
-        if parser.current_token.pos == prev_pos && parser.current_token.kind == prev_token_kind {
-            // Force advance to prevent infinite loop - this is crucial
-            if parser.current_token.kind != .EOF {
-                advance_token(parser)
+        // If we're not making progress (position and token kind haven't changed),
+        // force advancement to break potential infinite loops
+        if parser.current_token.pos == current_pos &&
+           parser.current_token.kind == current_kind {
+            // Stuck at same token - force advancement
+            if parser.current_token.kind == .EOF {
+                return
             }
+            advance_token(parser)
             return
         }
     }
@@ -876,7 +881,11 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
     rules[.LessEqual] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
     rules[.GreaterEqual] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
 
-    // Specialized operators
+    // Specialized operators - MODIFIED PRECEDENCE LEVELS
+    // Constraint should have higher precedence than assignment operators
+    rules[.Colon] = Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .CALL}
+
+    // Assignment operators
     rules[.PointingPush] = Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .ASSIGNMENT}
     rules[.PointingPull] = Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
     rules[.EventPush] = Parse_Rule{prefix = parse_event_push_prefix, infix = parse_event_push, precedence = .ASSIGNMENT}
@@ -890,8 +899,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
     // Special cases
     rules[.Dot] = Parse_Rule{prefix = nil, infix = parse_property, precedence = .CALL}
     rules[.Question] = Parse_Rule{prefix = parse_standalone_pattern, infix = parse_pattern, precedence = .NONE}
-    rules[.Colon] = Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .ASSIGNMENT}
-    rules[.Ellipsis] = Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .NONE}
+    rules[.Ellipsis] = Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .PRIMARY}
 
     if kind in rules {
         return rules[kind]
@@ -1021,6 +1029,58 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         if left == nil {
             return nil
         }
+    }
+
+    // Check if we have an expression followed by braces
+    // This could indicate an Override rather than a Scope
+    if parser.current_token.kind == .LeftBrace {
+        // Create an override node
+        override := new(Override)
+        override.source = left  // Set the parsed expression as the source
+        override.overrides = make([dynamic]Node)
+
+        // Consume left brace
+        advance_token(parser)
+
+        // Parse statements inside the braces as overrides
+        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+            // Skip newlines
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
+
+            if parser.current_token.kind == .RightBrace {
+                break
+            }
+
+            // Parse statement and add to overrides
+            if node := parse_statement(parser); node != nil {
+                append(&override.overrides, node^)
+            } else {
+                // Error recovery
+                synchronize(parser)
+
+                // Check if we synchronized to the end of the overrides
+                if parser.current_token.kind == .RightBrace {
+                    break
+                }
+            }
+
+            // Skip newlines
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
+        }
+
+        // Expect closing brace
+        if !match(parser, .RightBrace) {
+            error_at_current(parser, "Expected } after overrides")
+        }
+
+        // Create and return the override node
+        result := new(Node)
+        result^ = override^
+        return result
     }
 
     return left
@@ -1352,7 +1412,6 @@ parse_execution :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node
 
 /*
  * parse_pointing_push handles pointing operator (a -> b)
- * Improved to handle empty expressions
  */
 parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create pointing node
@@ -1703,7 +1762,6 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 
 /*
  * parse_constraint handles constraint expressions (Type: value)
- * Improved to handle empty constraints (Type:)
  */
 parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Check if left is nil before proceeding
@@ -1723,13 +1781,13 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
     // Parse value if present, otherwise it's an empty constraint
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline ||
-       parser.current_token.kind == .PointingPush {
+       parser.current_token.kind == .Newline {
         // Empty constraint (Type:)
         constraint.value = nil
     } else if is_expression_start(parser.current_token.kind) {
         // Constraint with value (Type: value)
-        if value := parse_expression(parser); value != nil {
+        // Use a different precedence level to ensure constraints bind tighter than pointings
+        if value := parse_expression(parser, .CALL); value != nil {
             value_maybe: Maybe(^Node)
             value_maybe = value
             constraint.value = value_maybe
@@ -1811,7 +1869,7 @@ parse_standalone_pattern :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_pattern handles pattern match (target ? {...})
  */
 parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
-    // Create pattern node
+    // Create pattern node with target
     pattern := new(Pattern)
     pattern.target = left
     pattern.value = make([dynamic]Branch)
@@ -1819,19 +1877,19 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Consume ? token
     advance_token(parser)
 
-    // Skip any newlines between ? and {
+    // Skip newlines between ? and {
     skip_newlines(parser)
 
-    // Expect {
-    if !expect_token(parser, .LeftBrace) {
+    // Expect opening brace
+    if !match(parser, .LeftBrace) {
         error_at_current(parser, "Expected { after ? in pattern")
         return nil
     }
 
-    // Skip any newlines after opening brace
+    // Skip newlines after opening brace
     skip_newlines(parser)
 
-    // Allow empty pattern
+    // Handle empty pattern block
     if parser.current_token.kind == .RightBrace {
         advance_token(parser)
         result := new(Node)
@@ -1840,35 +1898,62 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     // Parse branches until closing brace
-    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-        // Skip newlines
-        skip_newlines(parser)
+    brace_depth := 1  // Track nested braces
 
-        if parser.current_token.kind == .RightBrace {
-            break
-        }
-
-        // Parse a branch and add it to the pattern if valid
-        branch_ptr := parse_branch(parser)
-        if branch_ptr != nil {
-            append(&pattern.value, branch_ptr^)
-        } else if parser.panic_mode {
-            // If in panic mode, try to synchronize
-            synchronize(parser)
-
-            // Check if we synchronized to the end of the pattern
-            if parser.current_token.kind == .RightBrace {
-                break
-            }
-        }
-
+    for parser.current_token.kind != .EOF {
         // Skip newlines between branches
         skip_newlines(parser)
-    }
 
-    // Expect closing brace
-    if !match(parser, .RightBrace) {
-        error_at_current(parser, "Expected } to close pattern")
+        // Check for closing brace at current level
+        if parser.current_token.kind == .RightBrace {
+            brace_depth -= 1
+            if brace_depth == 0 {
+                // This is the closing brace for our pattern
+                advance_token(parser)
+                break
+            }
+            // This is a closing brace for a nested construct
+            advance_token(parser)
+            continue
+        }
+
+        // Track nested opening braces
+        if parser.current_token.kind == .LeftBrace {
+            brace_depth += 1
+            advance_token(parser)
+            continue
+        }
+
+        // Only parse branches at the top level of our pattern
+        if brace_depth == 1 {
+            // Track position to ensure we're making progress
+            branch_start_pos := parser.current_token.pos
+
+            // Parse a branch
+            branch_ptr := parse_branch(parser)
+            if branch_ptr != nil {
+                append(&pattern.value, branch_ptr^)
+            } else if parser.panic_mode {
+                // Error recovery
+                synchronize(parser)
+
+                // Check if we synchronized to the end of the pattern
+                if parser.current_token.kind == .RightBrace && brace_depth == 1 {
+                    brace_depth -= 1
+                    advance_token(parser)
+                    break
+                }
+            }
+
+            // Check if we're making progress
+            if parser.current_token.pos == branch_start_pos {
+                // Force advancement if stuck
+                advance_token(parser)
+            }
+        } else {
+            // We're inside a nested expression, just advance
+            advance_token(parser)
+        }
     }
 
     // Create and return pattern node
@@ -1879,74 +1964,51 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 
 /*
  * parse_branch parses a single branch in a pattern match
- * Improved to handle empty cases and standalone identifiers
  */
 parse_branch :: proc(parser: ^Parser) -> ^Branch {
-    // Create new branch
+    // Don't try to parse a branch if we're at a token that can't start an expression
+    if !is_expression_start(parser.current_token.kind) {
+        advance_token(parser)  // Skip problematic token
+        return nil
+    }
+
+    // Create branch
     branch := new(Branch)
 
-    // Parse the pattern (constraint) part
-    if parser.current_token.kind == .Identifier {
-        // Simple identifier pattern
-        pattern_name := parser.current_token.text
-        advance_token(parser)
-
-        pattern_node := new(Node)
-        pattern_node^ = Identifier {
-            name = pattern_name,
-        }
-        branch.pattern = pattern_node
+    // Parse pattern expression
+    if pattern := parse_expression(parser); pattern != nil {
+        branch.pattern = pattern
     } else {
-        // More complex pattern expression
-        if pattern := parse_expression(parser); pattern != nil {
-            branch.pattern = pattern
-        } else {
-            // Error already reported
-            return nil
-        }
+        // Error already reported
+        return nil
     }
 
-    // Expect colon, but be more lenient for recovery
+    // Expect colon
     if !match(parser, .Colon) {
         error_at_current(parser, "Expected : after pattern")
-
-        // If we see tokens that likely come after a colon, try to recover
-        if parser.current_token.kind == .PointingPush {
-            // Continue parsing as if the colon was there
-        } else {
-            return nil
-        }
+        return nil
     }
 
-    // Check for -> (product)
+    // Check for product (->)
     if match(parser, .PointingPush) {
-        // Parse the product value
-        value_expr := parse_expression(parser)
-        if value_expr != nil {
-            // Create product with the value
-            product := new(Product)
-            product.value = value_expr
+        // Parse product value
+        value := parse_expression(parser)
 
-            branch_product := new(Node)
-            branch_product^ = product^
-            branch.product = branch_product
-        } else {
-            // Empty product
-            product := new(Product)
-            product.value = nil
+        // Create product node
+        product := new(Product)
+        product.value = value
 
-            branch_product := new(Node)
-            branch_product^ = product^
-            branch.product = branch_product
-        }
+        product_node := new(Node)
+        product_node^ = product^
+        branch.product = product_node
     } else {
-        // No product specified (implicit empty product)
+        // No product specified, use empty product
         product := new(Product)
         product.value = nil
 
-        branch_product := new(Node)
-        branch_product^ = product^
-        branch.product = branch_product
+        product_node := new(Node)
+        product_node^ = product^
+        branch.product = product_node
     }
 
     return branch
@@ -1964,93 +2026,24 @@ parse_product :: proc(parser: ^Parser) -> ^Node {
  * parse_expansion parses a content expansion (...expr)
  */
 parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
-    // Consume ...
+    // Consume ellipsis token
     advance_token(parser)
 
-    // Create expansion node
+    // Get the expression that follows with appropriate precedence
+    // Use the UNARY precedence to ensure we get the entire expression
+    target := parse_expression(parser, .UNARY)
+    if target == nil {
+        error_at_current(parser, "Expected expression after ...")
+        return nil
+    }
+
+    // Create the expansion node with the target
     expand := new(Expand)
+    expand.target = target
 
-    // Parse the target expression
-    if parser.current_token.kind == .At {
-        // Special case for file system reference
-        if target := parse_reference(parser, can_assign); target != nil {
-            expand.target = target
-        } else {
-            error_at_current(parser, "Failed to parse file system reference after ...")
-            return nil
-        }
-    } else {
-        // General expression case
-        if target := parse_expression(parser); target != nil {
-            expand.target = target
-        } else {
-            error_at_current(parser, "Expected expression after ...")
-            return nil
-        }
-    }
-
-    // Create result for the expansion node
-    expand_result := new(Node)
-    expand_result^ = expand^
-
-    // Check for overrides in braces
-    if parser.current_token.kind == .LeftBrace {
-        // Create an override node with the expansion as source
-        override := new(Override)
-        override.source = expand_result
-
-        // Consume left brace
-        advance_token(parser)
-
-        // Initialize overrides array
-        override.overrides = make([dynamic]Node)
-
-        // Allow empty overrides
-        if parser.current_token.kind == .RightBrace {
-            advance_token(parser)
-            result := new(Node)
-            result^ = override^
-            return result
-        }
-
-        // Parse statements until closing brace
-        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-            // Skip newlines
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-
-            if parser.current_token.kind == .RightBrace {
-                break
-            }
-
-            // Parse statement and add to overrides
-            if node := parse_expression(parser); node != nil {
-                append(&override.overrides, node^)
-            } else {
-                // Error recovery
-                synchronize(parser)
-            }
-
-            // Skip trailing newlines
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-        }
-
-        // Consume closing brace
-        if !match(parser, .RightBrace) {
-            error_at_current(parser, "Expected } after expansion overrides")
-        }
-
-        // Return the override node
-        result := new(Node)
-        result^ = override^
-        return result
-    }
-
-    // If no overrides, simply return the expansion node
-    return expand_result
+    result := new(Node)
+    result^ = expand^
+    return result
 }
 
 /*
