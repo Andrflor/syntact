@@ -90,20 +90,36 @@ Token_Kind :: enum {
 }
 
 /*
+ * Position represents a location in the source code with line and column information
+ */
+Position :: struct {
+    line:   int, // Line number (1-based)
+    column: int, // Column number (1-based)
+    offset: int, // Absolute offset in source
+}
+
+/*
  * Token represents a lexical token with its kind, text content and position
  */
 Token :: struct {
-	kind: Token_Kind, // Type of token
-	text: string, // Original text of the token
-	pos:  int, // Position in source
+    kind:     Token_Kind, // Type of token
+    text:     string,     // Original text of the token
+    position: Position,   // Position information (line, column, offset)
 }
 
 /*
  * Lexer maintains state during lexical analysis
  */
 Lexer :: struct {
-	source: string, // Source code being lexed
-	pos:    int, // Current position in source
+    source:   string, // Source code being lexed
+    position: Position, // Current position in source (line, column, offset)
+}
+
+/*
+ * create_position creates a new Position struct
+ */
+create_position :: proc(line, column, offset: int) -> Position {
+    return Position{line = line, column = column, offset = offset}
 }
 
 // ===========================================================================
@@ -111,342 +127,393 @@ Lexer :: struct {
 // ===========================================================================
 
 /*
+ * init_lexer initializes a lexer with the given source code
+ */
+init_lexer :: proc(l: ^Lexer, source: string) {
+    l.source = source
+    l.position = create_position(1, 1, 0) // Start at line 1, column 1
+}
+
+/*
+ * advance_position moves the lexer position forward by one character,
+ * updating line and column information appropriately
+ */
+advance_position :: proc(l: ^Lexer) {
+    if l.position.offset < len(l.source) {
+        // Check if we're at a newline character
+        if l.source[l.position.offset] == '\n' {
+            l.position.line += 1
+            l.position.column = 1
+        } else {
+            l.position.column += 1
+        }
+        l.position.offset += 1
+    }
+}
+
+/*
+ * advance_by advances the lexer position by n characters
+ */
+advance_by :: proc(l: ^Lexer, n: int) {
+    for i := 0; i < n && l.position.offset < len(l.source); i += 1 {
+        advance_position(l)
+    }
+}
+
+/*
  * next_token scans and returns the next token from the input source
  * It moves the lexer position forward as it consumes characters
  */
 next_token :: proc(l: ^Lexer) -> Token {
-	skip_whitespace(l)
+    skip_whitespace(l)
 
-	if l.pos >= len(l.source) {
-		return Token{kind = .EOF, pos = l.pos}
-	}
+    if l.position.offset >= len(l.source) {
+        return Token{kind = .EOF, position = l.position}
+    }
 
-	start := l.pos
-	c := l.source[l.pos]
+    start_pos := l.position
+    c := l.source[l.position.offset]
 
-	switch c {
-	case '\n':
-		return scan_newline(l, start)
-	case '`':
-		return scan_backtick_string(l, start)
-	case '@':
-		l.pos += 1;return Token{kind = .At, text = "@", pos = start}
-	case '{':
-		l.pos += 1;return Token{kind = .LeftBrace, text = "{", pos = start}
-	case '}':
-		l.pos += 1;return Token{kind = .RightBrace, text = "}", pos = start}
-	case '(':
-		l.pos += 1;return Token{kind = .LeftParen, text = "(", pos = start}
-	case ')':
-		l.pos += 1;return Token{kind = .RightParen, text = ")", pos = start}
-	case '!':
-		l.pos += 1;return Token{kind = .Execute, text = "!", pos = start}
-	case ':':
-		l.pos += 1;return Token{kind = .Colon, text = ":", pos = start}
-	case '?':
-		l.pos += 1;return Token{kind = .Question, text = "?", pos = start}
-	case '.':
-		return scan_dot(l, start)
-	case '=':
-		return scan_equal(l, start)
-	case '<':
-		return scan_less_than(l, start)
-	case '>':
-		return scan_greater_than(l, start)
-	case '-':
-		return scan_minus(l, start)
-	case '/':
-		return scan_slash(l, start)
-	case '+':
-		l.pos += 1;return Token{kind = .Plus, text = "+", pos = start}
-	case '*':
-		l.pos += 1;return Token{kind = .Asterisk, text = "*", pos = start}
-	case '%':
-		l.pos += 1;return Token{kind = .Percent, text = "%", pos = start}
-	case '&':
-		l.pos += 1;return Token{kind = .BitAnd, text = "&", pos = start}
-	case '|':
-		l.pos += 1;return Token{kind = .BitOr, text = "|", pos = start}
-	case '^':
-		l.pos += 1;return Token{kind = .BitXor, text = "^", pos = start}
-	case '~':
-		l.pos += 1;return Token{kind = .BitNot, text = "~", pos = start}
-	case '0':
-		// Special number formats (hex, binary)
-		if l.pos + 1 < len(l.source) {
-			next := l.source[l.pos + 1]
+    switch c {
+    case '\n':
+        return scan_newline(l, start_pos)
+    case '`':
+        return scan_backtick_string(l, start_pos)
+    case '@':
+        advance_position(l)
+        return Token{kind = .At, text = "@", position = start_pos}
+    case '{':
+        advance_position(l)
+        return Token{kind = .LeftBrace, text = "{", position = start_pos}
+    case '}':
+        advance_position(l)
+        return Token{kind = .RightBrace, text = "}", position = start_pos}
+    case '(':
+        advance_position(l)
+        return Token{kind = .LeftParen, text = "(", position = start_pos}
+    case ')':
+        advance_position(l)
+        return Token{kind = .RightParen, text = ")", position = start_pos}
+    case '!':
+        advance_position(l)
+        return Token{kind = .Execute, text = "!", position = start_pos}
+    case ':':
+        advance_position(l)
+        return Token{kind = .Colon, text = ":", position = start_pos}
+    case '?':
+        advance_position(l)
+        return Token{kind = .Question, text = "?", position = start_pos}
+    case '.':
+        return scan_dot(l, start_pos)
+    case '=':
+        return scan_equal(l, start_pos)
+    case '<':
+        return scan_less_than(l, start_pos)
+    case '>':
+        return scan_greater_than(l, start_pos)
+    case '-':
+        return scan_minus(l, start_pos)
+    case '/':
+        return scan_slash(l, start_pos)
+    case '+':
+        advance_position(l)
+        return Token{kind = .Plus, text = "+", position = start_pos}
+    case '*':
+        advance_position(l)
+        return Token{kind = .Asterisk, text = "*", position = start_pos}
+    case '%':
+        advance_position(l)
+        return Token{kind = .Percent, text = "%", position = start_pos}
+    case '&':
+        advance_position(l)
+        return Token{kind = .BitAnd, text = "&", position = start_pos}
+    case '|':
+        advance_position(l)
+        return Token{kind = .BitOr, text = "|", position = start_pos}
+    case '^':
+        advance_position(l)
+        return Token{kind = .BitXor, text = "^", position = start_pos}
+    case '~':
+        advance_position(l)
+        return Token{kind = .BitNot, text = "~", position = start_pos}
+    case '0':
+        // Special number formats (hex, binary)
+        if l.position.offset + 1 < len(l.source) {
+            next := l.source[l.position.offset + 1]
 
-			if next == 'x' || next == 'X' {
-				return scan_hexadecimal(l, start)
-			}
+            if next == 'x' || next == 'X' {
+                return scan_hexadecimal(l, start_pos)
+            }
 
-			if next == 'b' || next == 'B' {
-				return scan_binary(l, start)
-			}
-		}
-		// Fall through to regular number handling
-		fallthrough
-	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		return scan_number(l, start)
-	case:
-		// Identifiers
-		if is_alpha(c) || c == '_' {
-			return scan_identifier(l, start)
-		}
+            if next == 'b' || next == 'B' {
+                return scan_binary(l, start_pos)
+            }
+        }
+        // Fall through to regular number handling
+        fallthrough
+    case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+        return scan_number(l, start_pos)
+    case:
+        // Identifiers
+        if is_alpha(c) || c == '_' {
+            return scan_identifier(l, start_pos)
+        }
 
-		// Unknown character
-		l.pos += 1
-		return Token{kind = .Invalid, text = string([]u8{c}), pos = start}
-	}
+        // Unknown character
+        advance_position(l)
+        return Token{kind = .Invalid, text = string([]u8{c}), position = start_pos}
+    }
 }
 
 /*
  * scan_newline processes consecutive newline characters
  */
-scan_newline :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 1
-	for l.pos < len(l.source) && l.source[l.pos] == '\n' {
-		l.pos += 1
-	}
-	return Token{kind = .Newline, text = "\\n", pos = start}
+scan_newline :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_position(l) // Consume first newline
+    for l.position.offset < len(l.source) && l.source[l.position.offset] == '\n' {
+        advance_position(l)
+    }
+    return Token{kind = .Newline, text = "\\n", position = start_pos}
 }
 
 /*
  * scan_backtick_string processes a string literal enclosed in backticks
  */
-scan_backtick_string :: proc(l: ^Lexer, start: int) -> Token {
+scan_backtick_string :: proc(l: ^Lexer, start_pos: Position) -> Token {
     // Skip opening backtick
-    l.pos += 1
-    str_start := l.pos
+    advance_position(l)
+    str_start := l.position.offset
 
     // Scan until closing backtick, handling escaped characters if needed
-    for l.pos < len(l.source) && l.source[l.pos] != '`' {
+    for l.position.offset < len(l.source) && l.source[l.position.offset] != '`' {
         // Handle escaped backticks and other escape sequences
-        if l.source[l.pos] == '\\' && l.pos + 1 < len(l.source) {
-            l.pos += 2  // Skip the escape sequence
+        if l.source[l.position.offset] == '\\' && l.position.offset + 1 < len(l.source) {
+            advance_by(l, 2)  // Skip the escape sequence
         } else {
-            l.pos += 1
+            advance_position(l)
         }
     }
 
-    if l.pos < len(l.source) {
-        text := l.source[str_start:l.pos]
-        l.pos += 1 // Skip closing backtick
-        return Token{kind = .String_Literal, text = text, pos = start}
+    if l.position.offset < len(l.source) {
+        text := l.source[str_start:l.position.offset]
+        advance_position(l) // Skip closing backtick
+        return Token{kind = .String_Literal, text = text, position = start_pos}
     }
 
-    return Token{kind = .Invalid, text = "Unterminated string", pos = start}
+    return Token{kind = .Invalid, text = "Unterminated string", position = start_pos}
 }
+
 /*
  * scan_dot processes dot-related tokens (./ ../.../..)
  */
-scan_dot :: proc(l: ^Lexer, start: int) -> Token {
-	// Check for ranges
-	if l.pos + 1 < len(l.source) && l.source[l.pos + 1] == '.' {
-		l.pos += 2 // Skip ".."
+scan_dot :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    // Check for ranges
+    if l.position.offset + 1 < len(l.source) && l.source[l.position.offset + 1] == '.' {
+        advance_by(l, 2) // Skip ".."
 
-		// Check for ellipsis "..."
-		if l.pos < len(l.source) && l.source[l.pos] == '.' {
-			l.pos += 1
-			return Token{kind = .Ellipsis, text = "...", pos = start}
-		}
+        // Check for ellipsis "..."
+        if l.position.offset < len(l.source) && l.source[l.position.offset] == '.' {
+            advance_position(l)
+            return Token{kind = .Ellipsis, text = "...", position = start_pos}
+        }
 
-		// Check for prefix range "..1"
-		if l.pos < len(l.source) && is_digit(l.source[l.pos]) {
-			start_num := l.pos
-			for l.pos < len(l.source) && is_digit(l.source[l.pos]) {
-				l.pos += 1
-			}
-			return Token{kind = .PrefixRange, text = l.source[start:l.pos], pos = start}
-		}
+        // Check for prefix range "..1"
+        if l.position.offset < len(l.source) && is_digit(l.source[l.position.offset]) {
+            start_num := l.position.offset
+            for l.position.offset < len(l.source) && is_digit(l.source[l.position.offset]) {
+                advance_position(l)
+            }
+            return Token{kind = .PrefixRange, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+        }
 
-		return Token{kind = .DoubleDot, text = "..", pos = start}
-	}
+        return Token{kind = .DoubleDot, text = "..", position = start_pos}
+    }
 
-	l.pos += 1
-	return Token{kind = .Dot, text = ".", pos = start}
+    advance_position(l)
+    return Token{kind = .Dot, text = ".", position = start_pos}
 }
 
 /*
  * scan_equal processes equal-related tokens (= and ==)
  */
-scan_equal :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 1
-	if l.pos < len(l.source) && l.source[l.pos] == '=' {
-		l.pos += 1
-		return Token{kind = .Equal, text = "==", pos = start}
-	}
-	return Token{kind = .Equal, text = "=", pos = start}
+scan_equal :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_position(l)
+    if l.position.offset < len(l.source) && l.source[l.position.offset] == '=' {
+        advance_position(l)
+        return Token{kind = .Equal, text = "==", position = start_pos}
+    }
+    return Token{kind = .Equal, text = "=", position = start_pos}
 }
 
 /*
  * scan_less_than processes less-than-related tokens (<, <=, <-)
  */
-scan_less_than :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 1
-	if l.pos < len(l.source) {
-		if l.source[l.pos] == '=' {
-			l.pos += 1
-			return Token{kind = .LessEqual, text = "<=", pos = start}
-		} else if l.source[l.pos] == '-' {
-			l.pos += 1
-			return Token{kind = .PointingPull, text = "<-", pos = start}
-		}
-	}
-	return Token{kind = .LessThan, text = "<", pos = start}
+scan_less_than :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_position(l)
+    if l.position.offset < len(l.source) {
+        if l.source[l.position.offset] == '=' {
+            advance_position(l)
+            return Token{kind = .LessEqual, text = "<=", position = start_pos}
+        } else if l.source[l.position.offset] == '-' {
+            advance_position(l)
+            return Token{kind = .PointingPull, text = "<-", position = start_pos}
+        }
+    }
+    return Token{kind = .LessThan, text = "<", position = start_pos}
 }
 
 /*
  * scan_greater_than processes greater-than-related tokens (>, >=, >-, >>-)
  */
-scan_greater_than :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 1
-	if l.pos < len(l.source) {
-		if l.source[l.pos] == '=' {
-			l.pos += 1
-			return Token{kind = .GreaterEqual, text = ">=", pos = start}
-		} else if l.source[l.pos] == '-' {
-			l.pos += 1
-			return Token{kind = .EventPush, text = ">-", pos = start}
-		} else if l.pos + 1 < len(l.source) &&
-		   l.source[l.pos] == '>' &&
-		   l.source[l.pos + 1] == '-' {
-			l.pos += 2
-			return Token{kind = .ResonancePush, text = ">>-", pos = start}
-		}
-	}
-	return Token{kind = .GreaterThan, text = ">", pos = start}
+scan_greater_than :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_position(l)
+    if l.position.offset < len(l.source) {
+        if l.source[l.position.offset] == '=' {
+            advance_position(l)
+            return Token{kind = .GreaterEqual, text = ">=", position = start_pos}
+        } else if l.source[l.position.offset] == '-' {
+            advance_position(l)
+            return Token{kind = .EventPush, text = ">-", position = start_pos}
+        } else if l.position.offset + 1 < len(l.source) &&
+           l.source[l.position.offset] == '>' &&
+           l.source[l.position.offset + 1] == '-' {
+            advance_by(l, 2)
+            return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
+        }
+    }
+    return Token{kind = .GreaterThan, text = ">", position = start_pos}
 }
 
 /*
  * scan_minus processes minus-related tokens (-, ->, -<, -<<)
  */
-scan_minus :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 1
-	if l.pos < len(l.source) {
-		if l.source[l.pos] == '>' {
-			l.pos += 1
-			return Token{kind = .PointingPush, text = "->", pos = start}
-		} else if l.source[l.pos] == '<' {
-			l.pos += 1
-			if l.pos < len(l.source) && l.source[l.pos] == '<' {
-				l.pos += 1
-				return Token{kind = .ResonancePull, text = "-<<", pos = start}
-			}
-			return Token{kind = .EventPull, text = "-<", pos = start}
-		}
-	}
-	return Token{kind = .Minus, text = "-", pos = start}
+scan_minus :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_position(l)
+    if l.position.offset < len(l.source) {
+        if l.source[l.position.offset] == '>' {
+            advance_position(l)
+            return Token{kind = .PointingPush, text = "->", position = start_pos}
+        } else if l.source[l.position.offset] == '<' {
+            advance_position(l)
+            if l.position.offset < len(l.source) && l.source[l.position.offset] == '<' {
+                advance_position(l)
+                return Token{kind = .ResonancePull, text = "-<<", position = start_pos}
+            }
+            return Token{kind = .EventPull, text = "-<", position = start_pos}
+        }
+    }
+    return Token{kind = .Minus, text = "-", position = start_pos}
 }
 
 /*
  * scan_slash processes slash and comments
  */
-scan_slash :: proc(l: ^Lexer, start: int) -> Token {
-	// Single line comment
-	if l.pos + 1 < len(l.source) && l.source[l.pos + 1] == '/' {
-		l.pos += 2
-		for l.pos < len(l.source) && l.source[l.pos] != '\n' {
-			l.pos += 1
-		}
-		return next_token(l)
-	}
+scan_slash :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    // Single line comment
+    if l.position.offset + 1 < len(l.source) && l.source[l.position.offset + 1] == '/' {
+        advance_by(l, 2)
+        for l.position.offset < len(l.source) && l.source[l.position.offset] != '\n' {
+            advance_position(l)
+        }
+        return next_token(l)
+    }
 
-	// Multi line comment
-	if l.pos + 1 < len(l.source) && l.source[l.pos + 1] == '*' {
-		l.pos += 2
-		for l.pos + 1 < len(l.source) && !(l.source[l.pos] == '*' && l.source[l.pos + 1] == '/') {
-			l.pos += 1
-		}
-		if l.pos + 1 < len(l.source) {
-			l.pos += 2 // Skip
-		}
-		return next_token(l)
-	}
+    // Multi line comment
+    if l.position.offset + 1 < len(l.source) && l.source[l.position.offset + 1] == '*' {
+        advance_by(l, 2)
+        for l.position.offset + 1 < len(l.source) && !(l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/') {
+            advance_position(l)
+        }
+        if l.position.offset + 1 < len(l.source) {
+            advance_by(l, 2) // Skip closing */
+        }
+        return next_token(l)
+    }
 
-	l.pos += 1
-	return Token{kind = .Slash, text = "/", pos = start}
+    advance_position(l)
+    return Token{kind = .Slash, text = "/", position = start_pos}
 }
 
 /*
  * scan_hexadecimal processes hexadecimal number literals
  */
-scan_hexadecimal :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 2
-	hex_start := l.pos
-	for l.pos < len(l.source) && is_hex_digit(l.source[l.pos]) {
-		l.pos += 1
-	}
-	if l.pos == hex_start {
-		return Token{kind = .Invalid, text = "Invalid hexadecimal number", pos = start}
-	}
-	return Token{kind = .Hexadecimal, text = l.source[start:l.pos], pos = start}
+scan_hexadecimal :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_by(l, 2)
+    hex_start := l.position.offset
+    for l.position.offset < len(l.source) && is_hex_digit(l.source[l.position.offset]) {
+        advance_position(l)
+    }
+    if l.position.offset == hex_start {
+        return Token{kind = .Invalid, text = "Invalid hexadecimal number", position = start_pos}
+    }
+    return Token{kind = .Hexadecimal, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
 }
 
 /*
  * scan_binary processes binary number literals
  */
-scan_binary :: proc(l: ^Lexer, start: int) -> Token {
-	l.pos += 2
-	bin_start := l.pos
-	for l.pos < len(l.source) && (l.source[l.pos] == '0' || l.source[l.pos] == '1') {
-		l.pos += 1
-	}
-	if l.pos == bin_start {
-		return Token{kind = .Invalid, text = "Invalid binary number", pos = start}
-	}
-	return Token{kind = .Binary, text = l.source[start:l.pos], pos = start}
+scan_binary :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    advance_by(l, 2)
+    bin_start := l.position.offset
+    for l.position.offset < len(l.source) && (l.source[l.position.offset] == '0' || l.source[l.position.offset] == '1') {
+        advance_position(l)
+    }
+    if l.position.offset == bin_start {
+        return Token{kind = .Invalid, text = "Invalid binary number", position = start_pos}
+    }
+    return Token{kind = .Binary, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
 }
 
 /*
  * scan_number processes numeric literals and range notations
  */
-scan_number :: proc(l: ^Lexer, start: int) -> Token {
-	// Parse integer part
-	for l.pos < len(l.source) && is_digit(l.source[l.pos]) {
-		l.pos += 1
-	}
+scan_number :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    // Parse integer part
+    for l.position.offset < len(l.source) && is_digit(l.source[l.position.offset]) {
+        advance_position(l)
+    }
 
-	// Check for range notation (e.g., 1..5)
-	if l.pos + 1 < len(l.source) && l.source[l.pos] == '.' && l.source[l.pos + 1] == '.' {
+    // Check for range notation (e.g., 1..5)
+    if l.position.offset + 1 < len(l.source) &&
+       l.source[l.position.offset] == '.' &&
+       l.source[l.position.offset + 1] == '.' {
 
-		l.pos += 2 // Skip the '..'
+        advance_by(l, 2) // Skip the '..'
 
-		// Check if there's a number after, making it a full range (1..5)
-		if l.pos < len(l.source) && is_digit(l.source[l.pos]) {
-			range_start := l.pos
-			for l.pos < len(l.source) && is_digit(l.source[l.pos]) {
-				l.pos += 1
-			}
-			return Token{kind = .Range, text = l.source[start:l.pos], pos = start}
-		}
+        // Check if there's a number after, making it a full range (1..5)
+        if l.position.offset < len(l.source) && is_digit(l.source[l.position.offset]) {
+            for l.position.offset < len(l.source) && is_digit(l.source[l.position.offset]) {
+                advance_position(l)
+            }
+            return Token{kind = .Range, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+        }
 
-		// Just a postfix range (1..)
-		return Token{kind = .PostfixRange, text = l.source[start:l.pos], pos = start}
-	}
+        // Just a postfix range (1..)
+        return Token{kind = .PostfixRange, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+    }
 
-	// Check for floating point
-	if l.pos < len(l.source) && l.source[l.pos] == '.' {
-		if l.pos + 1 < len(l.source) && is_digit(l.source[l.pos + 1]) {
-			l.pos += 1 // Skip the '.'
-			for l.pos < len(l.source) && is_digit(l.source[l.pos]) {
-				l.pos += 1
-			}
-			return Token{kind = .Float, text = l.source[start:l.pos], pos = start}
-		}
-	}
+    // Check for floating point
+    if l.position.offset < len(l.source) && l.source[l.position.offset] == '.' {
+        if l.position.offset + 1 < len(l.source) && is_digit(l.source[l.position.offset + 1]) {
+            advance_position(l) // Skip the '.'
+            for l.position.offset < len(l.source) && is_digit(l.source[l.position.offset]) {
+                advance_position(l)
+            }
+            return Token{kind = .Float, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+        }
+    }
 
-	return Token{kind = .Integer, text = l.source[start:l.pos], pos = start}
+    return Token{kind = .Integer, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
 }
 
 /*
  * scan_identifier processes identifier tokens
  */
-scan_identifier :: proc(l: ^Lexer, start: int) -> Token {
-	for l.pos < len(l.source) && is_alnum(l.source[l.pos]) {
-		l.pos += 1
-	}
-	return Token{kind = .Identifier, text = l.source[start:l.pos], pos = start}
+scan_identifier :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    for l.position.offset < len(l.source) && is_alnum(l.source[l.position.offset]) {
+        advance_position(l)
+    }
+    return Token{kind = .Identifier, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
 }
 
 // ===========================================================================
@@ -476,7 +543,7 @@ Node :: union {
 	Property,
 	Expand,
 	FileSystem,
-  Range,
+    Range,
 }
 
 /*
@@ -770,7 +837,7 @@ error_at_current :: proc(parser: ^Parser, message: string) {
 }
 
 /*
- * error_at reports an error at a specific token
+ * error_at reports an error at a specific token with line and column info
  */
 error_at :: proc(parser: ^Parser, token: Token, message: string) {
     // Don't report errors in panic mode to avoid cascading
@@ -780,7 +847,7 @@ error_at :: proc(parser: ^Parser, token: Token, message: string) {
     parser.had_error = true
     parser.error_count += 1
 
-    fmt.eprintf("Error at position %d: ", token.pos)
+    fmt.eprintf("Error at line %d, column %d: ", token.position.line, token.position.column)
 
     if token.kind == .EOF {
         fmt.eprintf("at end")
@@ -799,8 +866,8 @@ error_at :: proc(parser: ^Parser, token: Token, message: string) {
 synchronize :: proc(parser: ^Parser) {
     parser.panic_mode = false
 
-    // Record position and token to detect lack of progress
-    start_pos := parser.current_token.pos
+    // Record position to detect lack of progress
+    start_pos := parser.current_token.position.offset
     start_kind := parser.current_token.kind
 
     // Skip tokens until we find a good synchronization point
@@ -815,7 +882,7 @@ synchronize :: proc(parser: ^Parser) {
         }
 
         // Current position before advancing
-        current_pos := parser.current_token.pos
+        current_pos := parser.current_token.position.offset
         current_kind := parser.current_token.kind
 
         // Try to advance
@@ -823,7 +890,7 @@ synchronize :: proc(parser: ^Parser) {
 
         // If we're not making progress (position and token kind haven't changed),
         // force advancement to break potential infinite loops
-        if parser.current_token.pos == current_pos &&
+        if parser.current_token.position.offset == current_pos &&
            parser.current_token.kind == current_kind {
             // Stuck at same token - force advancement
             if parser.current_token.kind == .EOF {
@@ -898,7 +965,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
 
     // Special cases
     rules[.Dot] = Parse_Rule{prefix = nil, infix = parse_property, precedence = .CALL}
-    rules[.Question] = Parse_Rule{prefix = parse_standalone_pattern, infix = parse_pattern, precedence = .NONE}
+    rules[.Question] = Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
     rules[.Ellipsis] = Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .PRIMARY}
 
     if kind in rules {
@@ -965,12 +1032,10 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
     }
 
     #partial switch parser.current_token.kind {
-    case .Question:
-        return parse_standalone_pattern(parser, false)
     case .Ellipsis:
         return parse_expansion(parser, false)
     case .PointingPush: // Handle standalone -> expressions
-        return parse_product_prefix(parser, false)
+        return parse_product(parser)
     case .EOF, .RightBrace:
         // Empty statement - don't report an error
         return nil
@@ -1031,12 +1096,11 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         }
     }
 
-    // Check if we have an expression followed by braces
-    // This could indicate an Override rather than a Scope
+    // Check for override expressions (expression followed by braces)
     if parser.current_token.kind == .LeftBrace {
         // Create an override node
         override := new(Override)
-        override.source = left  // Set the parsed expression as the source
+        override.source = left
         override.overrides = make([dynamic]Node)
 
         // Consume left brace
@@ -1075,12 +1139,43 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         // Expect closing brace
         if !match(parser, .RightBrace) {
             error_at_current(parser, "Expected } after overrides")
+            return nil
         }
 
-        // Create and return the override node
+        // Create and set the override as our left-hand expression
         result := new(Node)
         result^ = override^
-        return result
+        left = result
+
+        // The updated expression may have different operations available
+        // Check for execution operator immediately after the override
+        if parser.current_token.kind == .Execute {
+            // Create an execute node wrapping the entire override
+            execute := new(Execute)
+            execute.value = left
+
+            // Consume the ! token
+            advance_token(parser)
+
+            // Create and return the execute node
+            result := new(Node)
+            result^ = execute^
+            left = result
+        }
+
+        // Check if there are infix operations that can follow the override
+        // Example: List{T}:value - the colon should be processed after the override
+        for precedence <= get_rule(parser.current_token.kind).precedence {
+            rule = get_rule(parser.current_token.kind)
+            if rule.infix == nil {
+                break
+            }
+
+            left = rule.infix(parser, left, can_assign)
+            if left == nil {
+                return nil
+            }
+        }
     }
 
     return left
@@ -1742,7 +1837,7 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     range := new(Range)
     range.start = left
 
-    // Check if there's an end expression
+// Check if there's an end expression
     if parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline ||
        parser.current_token.kind == .RightBrace ||
@@ -1800,69 +1895,6 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
     result := new(Node)
     result^ = constraint^
     return result
-}
-
-/*
- * parse_standalone_pattern parses a pattern with no explicit target (? {...})
- */
-parse_standalone_pattern :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
-    // Consume ? token
-    advance_token(parser)
-
-    if parser.current_token.kind == .LeftBrace {
-        // Create a pattern with an implicit target
-        pattern := new(Pattern)
-        pattern.target = nil // Implicit target
-        pattern.value = make([dynamic]Branch)
-
-        // Consume the '{'
-        advance_token(parser)
-
-        // Allow empty pattern
-        if parser.current_token.kind == .RightBrace {
-            advance_token(parser)
-            result := new(Node)
-            result^ = pattern^
-            return result
-        }
-
-        // Parse branches until closing brace
-        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-            // Skip newlines between branches
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-
-            if parser.current_token.kind == .RightBrace {
-                break
-            }
-
-            // Parse a branch
-            if branch_ptr := parse_branch(parser); branch_ptr != nil {
-                append(&pattern.value, branch_ptr^)
-            } else {
-                // Error recovery
-                synchronize(parser)
-            }
-
-            // Skip newlines after a branch
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-        }
-
-        // Expect closing brace
-        if !match(parser, .RightBrace) {
-            error_at_current(parser, "Expected } to close pattern")
-        }
-
-        result := new(Node)
-        result^ = pattern^
-        return result
-    }
-
-    error_at_current(parser, "Expected { after standalone ? token")
-    return nil
 }
 
 /*
@@ -1927,7 +1959,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
         // Only parse branches at the top level of our pattern
         if brace_depth == 1 {
             // Track position to ensure we're making progress
-            branch_start_pos := parser.current_token.pos
+            branch_start_pos := parser.current_token.position.offset
 
             // Parse a branch
             branch_ptr := parse_branch(parser)
@@ -1946,7 +1978,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
             }
 
             // Check if we're making progress
-            if parser.current_token.pos == branch_start_pos {
+            if parser.current_token.position.offset == branch_start_pos {
                 // Force advancement if stuck
                 advance_token(parser)
             }
@@ -1975,7 +2007,7 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     // Create branch
     branch := new(Branch)
 
-    // Parse pattern expression
+    // Parse pattern expression (the left side of ->)
     if pattern := parse_expression(parser); pattern != nil {
         branch.pattern = pattern
     } else {
@@ -1983,18 +2015,15 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
         return nil
     }
 
-    // Expect colon
-    if !match(parser, .Colon) {
-        error_at_current(parser, "Expected : after pattern")
+    // Expect pointing arrow for pattern branches
+    if !match(parser, .PointingPush) {
+        error_at_current(parser, "Expected -> in pattern branch")
         return nil
     }
 
-    // Check for product (->)
-    if match(parser, .PointingPush) {
-        // Parse product value
-        value := parse_expression(parser)
-
-        // Create product node
+    // Parse the result expression (right side of ->)
+    if value := parse_expression(parser); value != nil {
+        // Create product node to hold the result
         product := new(Product)
         product.value = value
 
@@ -2002,7 +2031,7 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
         product_node^ = product^
         branch.product = product_node
     } else {
-        // No product specified, use empty product
+        // Handle case where there's no expression after ->
         product := new(Product)
         product.value = nil
 
@@ -2229,10 +2258,11 @@ is_space :: proc(c: u8) -> bool {
 
 /*
  * skip_whitespace advances the lexer past any whitespace characters
+ * but preserves newline tokens for statement separation
  */
 skip_whitespace :: proc(l: ^Lexer) {
-    for l.pos < len(l.source) && is_space(l.source[l.pos]) {
-        l.pos += 1
+    for l.position.offset < len(l.source) && is_space(l.source[l.position.offset]) {
+        advance_position(l)
     }
 }
 
@@ -2251,18 +2281,28 @@ debug_print_tokens :: proc(parser: ^Parser, count: int) {
     orig_peek := parser.peek_token
 
     // Print current and peek tokens
-    fmt.printf("Current: %v '%s'\n", parser.current_token.kind, parser.current_token.text)
-    fmt.printf("Peek: %v '%s'\n", parser.peek_token.kind, parser.peek_token.text)
+    fmt.printf("Current: %v '%s' at line %d, column %d\n",
+               parser.current_token.kind,
+               parser.current_token.text,
+               parser.current_token.position.line,
+               parser.current_token.position.column)
+
+    fmt.printf("Peek: %v '%s' at line %d, column %d\n",
+               parser.peek_token.kind,
+               parser.peek_token.text,
+               parser.peek_token.position.line,
+               parser.peek_token.position.column)
 
     // Print a few tokens ahead
     fmt.println("\nUpcoming tokens:")
 
+    // Create a temporary lexer and parser to scan ahead
     temp_lexer := parser.lexer^ // Make a copy of the lexer
     temp_parser: Parser
     init_parser(&temp_parser, &temp_lexer)
 
     // Advance to match the current state
-    for temp_parser.current_token.pos < orig_current.pos &&
+    for temp_parser.current_token.position.offset < orig_current.position.offset &&
         temp_parser.current_token.kind != .EOF {
         advance_token(&temp_parser)
     }
@@ -2270,10 +2310,12 @@ debug_print_tokens :: proc(parser: ^Parser, count: int) {
     // Print the next 'count' tokens
     for i := 0; i < count && temp_parser.current_token.kind != .EOF; i += 1 {
         fmt.printf(
-            "%d: %v '%s'\n",
+            "%d: %v '%s' at line %d, column %d\n",
             i + 1,
             temp_parser.current_token.kind,
             temp_parser.current_token.text,
+            temp_parser.current_token.position.line,
+            temp_parser.current_token.position.column
         )
         advance_token(&temp_parser)
     }
@@ -2540,9 +2582,8 @@ main :: proc() {
     defer delete(source)
 
     // Initialize lexer
-    lexer := Lexer{
-        source = string(source),
-    }
+    lexer: Lexer
+    init_lexer(&lexer, string(source))
 
     fmt.println("Parsing file:", filename)
 
