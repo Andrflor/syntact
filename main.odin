@@ -179,8 +179,8 @@ next_token :: proc(l: ^Lexer) -> Token {
     switch c {
     case '\n':
         return scan_newline(l, start_pos)
-    case '`':
-        return scan_backtick_string(l, start_pos)
+    case '`', '"',  '\'':
+        return scan_string(l, start_pos)
     case '@':
         advance_position(l)
         return Token{kind = .At, text = "@", position = start_pos}
@@ -285,16 +285,17 @@ scan_newline :: proc(l: ^Lexer, start_pos: Position) -> Token {
 }
 
 /*
- * scan_backtick_string processes a string literal enclosed in backticks
+ * scan_string processes a string literal enclosed in provided delimiter
  */
-scan_backtick_string :: proc(l: ^Lexer, start_pos: Position) -> Token {
-    // Skip opening backtick
+scan_string :: proc(l: ^Lexer, start_pos: Position) -> Token {
+    delimiter := l.source[l.position.offset]
+    // Skip opening delimiter
     advance_position(l)
     str_start := l.position.offset
 
-    // Scan until closing backtick, handling escaped characters if needed
-    for l.position.offset < len(l.source) && l.source[l.position.offset] != '`' {
-        // Handle escaped backticks and other escape sequences
+    // Scan until closing delimited, handling escaped characters if needed
+    for l.position.offset < len(l.source) && l.source[l.position.offset] != delimiter {
+        // Handle escaped delimiters and other escape sequences
         if l.source[l.position.offset] == '\\' && l.position.offset + 1 < len(l.source) {
             advance_by(l, 2)  // Skip the escape sequence
         } else {
@@ -304,7 +305,7 @@ scan_backtick_string :: proc(l: ^Lexer, start_pos: Position) -> Token {
 
     if l.position.offset < len(l.source) {
         text := l.source[str_start:l.position.offset]
-        advance_position(l) // Skip closing backtick
+        advance_position(l) // Skip closing delimiter
         return Token{kind = .String_Literal, text = text, position = start_pos}
     }
 
@@ -551,7 +552,7 @@ Node :: union {
 	Property,
 	Expand,
 	FileSystem,
-    Range,
+  Range,
 }
 
 /*
@@ -652,7 +653,7 @@ Branch :: struct {
  */
 Constraint :: struct {
 	constraint: ^Node, // Type constraint
-	value:      Maybe(^Node), // Optional value
+	value:      ^Node, // Optional value
 }
 
 /*
@@ -1442,10 +1443,12 @@ parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         return nil
     }
 
+
     advance_token(parser)
 
     result := new(Node)
     result^ = literal^
+    print_ast(result, 0)
     return result
 }
 
@@ -2161,9 +2164,7 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
         // Constraint with value (Type: value)
         // Use a different precedence level to ensure constraints bind tighter than pointings
         if value := parse_expression(parser, .CALL); value != nil {
-            value_maybe: Maybe(^Node)
-            value_maybe = value
-            constraint.value = value_maybe
+            constraint.value = value
         }
     } else {
         // No value, but it's allowed
@@ -2200,73 +2201,19 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     skip_newlines(parser)
 
     // Handle empty pattern block
-    if parser.current_token.kind == .RightBrace {
-        advance_token(parser)
-        result := new(Node)
-        result^ = pattern^
-        return result
+    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+      node := parse_branch(parser)
+      if(node!=nil) {
+        append(&pattern.value, node^)
+      }
+      skip_newlines(parser)
     }
 
-    // Parse branches until closing brace
-    brace_depth := 1  // Track nested braces
-
-    for parser.current_token.kind != .EOF {
-        // Skip newlines between branches
-        skip_newlines(parser)
-
-        // Check for closing brace at current level
-        if parser.current_token.kind == .RightBrace {
-            brace_depth -= 1
-            if brace_depth == 0 {
-                // This is the closing brace for our pattern
-                advance_token(parser)
-                break
-            }
-            // This is a closing brace for a nested construct
-            advance_token(parser)
-            continue
-        }
-
-        // Track nested opening braces
-        if parser.current_token.kind == .LeftBrace {
-            brace_depth += 1
-            advance_token(parser)
-            continue
-        }
-
-        // Only parse branches at the top level of our pattern
-        if brace_depth == 1 {
-            // Track position to ensure we're making progress
-            branch_start_pos := parser.current_token.position.offset
-
-            // Parse a branch
-            branch_ptr := parse_branch(parser)
-            if branch_ptr != nil {
-                append(&pattern.value, branch_ptr^)
-            } else if parser.panic_mode {
-                // Error recovery
-                synchronize(parser)
-
-                // Check if we synchronized to the end of the pattern
-                if parser.current_token.kind == .RightBrace && brace_depth == 1 {
-                    brace_depth -= 1
-                    advance_token(parser)
-                    break
-                }
-            }
-
-            // Check if we're making progress
-            if parser.current_token.position.offset == branch_start_pos {
-                // Force advancement if stuck
-                advance_token(parser)
-            }
-        } else {
-            // We're inside a nested expression, just advance
-            advance_token(parser)
-        }
+    if !match(parser, .RightBrace) {
+        error_at_current(parser, "Expected } after pattern branches")
+        return nil
     }
 
-    // Create and return pattern node
     result := new(Node)
     result^ = pattern^
     return result
@@ -2286,12 +2233,26 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     branch := new(Branch)
 
     // Parse pattern expression (the left side of ->)
-    if pattern := parse_expression(parser); pattern != nil {
-      #partial switch pointing in pattern {
+    if pattern := parse_expression(parser, ); pattern != nil {
+      #partial switch parse in pattern {
+
       case Pointing:
-        branch.source = pointing.name
-        branch.product = pointing.value
-        return brach
+        branch.source = parse.name
+        branch.product = parse.value
+        return branch
+      case Constraint:
+      if parse.value != nil {
+          #partial switch value in parse.value {
+          case Product:
+            branch.product = value.value
+            constraint := new(Constraint)
+            constraint.constraint = parse.constraint
+            result := new(Node)
+            result^ = constraint^
+            branch.source = result
+            return branch
+          }
+        }
       }
       branch.source = pattern
     } else {
@@ -2782,12 +2743,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         fmt.printf("%sConstraint:\n", indent_str)
         print_ast(n.constraint, indent + 2)
         if n.value != nil {
-            if v, ok := n.value.?; ok && v != nil {
-                fmt.printf("%s  Value:\n", indent_str)
-                print_ast(v, indent + 4)
-            } else {
-                fmt.printf("%s  Value: none\n", indent_str)
-            }
+            fmt.printf("%s  Value:\n", indent_str)
+            print_ast(n.value, indent + 4)
         } else {
             fmt.printf("%s  Value: none\n", indent_str)
         }
