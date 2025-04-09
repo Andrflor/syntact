@@ -1031,7 +1031,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
  * parse_program parses the entire program as a sequence of statements
  */
 parse_program :: proc(parser: ^Parser) -> ^Node {
-    scope := new(Scope)
+    scope := Scope{}
     scope.value = make([dynamic]Node)
 
     // Keep parsing until EOF
@@ -1051,7 +1051,7 @@ parse_program :: proc(parser: ^Parser) -> ^Node {
     }
 
     result := new(Node)
-    result^ = scope^
+    result^ = scope
     return result
 }
 
@@ -1134,16 +1134,17 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
     // Check for execution pattern after expression
     if parser.current_token.kind == .Execute {
         // Create execute node with sequential execution
-        execute := new(Execute)
-        execute.value = left
-        execute.wrappers = make([dynamic]ExecutionWrapper)
+        execute := Execute{
+          value = left,
+          wrappers = make([dynamic]ExecutionWrapper),
+        }
         append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
 
         // Consume the !
         advance_token(parser)
 
         result := new(Node)
-        result^ = execute^
+        result^ = execute
         left = result
     } else if parser.current_token.kind == .LeftBracket {
         // Handle [!] pattern
@@ -1152,9 +1153,10 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
 
         // Look for ! inside brackets
         if parser.current_token.kind == .Execute {
-            execute := new(Execute)
-            execute.value = left
-            execute.wrappers = make([dynamic]ExecutionWrapper)
+            execute := Execute{
+              value = left,
+              wrappers = make([dynamic]ExecutionWrapper),
+            }
             append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
             append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
 
@@ -1169,7 +1171,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
             advance_token(parser)
 
             result := new(Node)
-            result^ = execute^
+            result^ = execute
             left = result
         }
     } else if parser.current_token.kind == .LessThan {
@@ -1181,9 +1183,10 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         advance_token(parser)
 
         if parser.current_token.kind == .Execute {
-            execute := new(Execute)
-            execute.value = left
-            execute.wrappers = make([dynamic]ExecutionWrapper)
+            execute := Execute{
+              value = left,
+              wrappers = make([dynamic]ExecutionWrapper),
+            }
             append_elem(&execute.wrappers, ExecutionWrapper.Threading)
             append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
             append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
@@ -1205,7 +1208,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
             advance_token(parser)
 
             result := new(Node)
-            result^ = execute^
+            result^ = execute
             left = result
         }
     }
@@ -1238,9 +1241,10 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
     // Check for override expressions (expression followed by braces)
     if parser.current_token.kind == .LeftBrace {
         // Create an override node
-        override := new(Override)
-        override.source = left
-        override.overrides = make([dynamic]Node)
+        override := Override {
+          source = left,
+          overrides = make([dynamic]Node),
+        }
 
         // Consume left brace
         advance_token(parser)
@@ -1283,7 +1287,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
 
         // Create and set the override as our left-hand expression
         result := new(Node)
-        result^ = override^
+        result^ = override
         left = result
 
         // Check for execution pattern after the override
@@ -1316,9 +1320,10 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
  */
 parse_execution_pattern_postfix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Create execute node to hold the left expression
-    execute := new(Execute)
-    execute.value = left
-    execute.wrappers = make([dynamic]ExecutionWrapper)
+    execute := Execute{
+      value = left,
+      wrappers = make([dynamic]ExecutionWrapper),
+    }
 
     // Process the execution pattern
     found_exclamation := false
@@ -1412,7 +1417,7 @@ parse_execution_pattern_postfix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create and return execute node
     result := new(Node)
-    result^ = execute^
+    result^ = execute
 
     // Check if there's a new execution pattern immediately following
     if is_execution_pattern_start(parser.current_token.kind) {
@@ -1429,7 +1434,7 @@ parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Consume the ->
     advance_token(parser)
 
-    product := new(Product)
+    product := Product{}
 
     // Parse the value or handle empty product
     if parser.current_token.kind == .RightBrace || parser.current_token.kind == .EOF ||
@@ -1447,7 +1452,7 @@ parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = product^
+    result^ = product
     return result
 }
 
@@ -1455,8 +1460,9 @@ parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_literal handles literal values (numbers, strings)
  */
 parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
-    literal := new(Literal)
-    literal.value = parser.current_token.text
+    literal := Literal {
+      value = parser.current_token.text,
+    }
 
     #partial switch parser.current_token.kind {
     case .Integer:
@@ -1478,7 +1484,7 @@ parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     advance_token(parser)
 
     result := new(Node)
-    result^ = literal^
+    result^ = literal
     return result
 }
 
@@ -1512,14 +1518,13 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Consume opening brace
     advance_token(parser)
 
-    scope := new(Scope)
-    scope.value = make([dynamic]Node)
+    scope := Scope{value = make([dynamic]Node)}
 
     // Allow for empty scopes
     if parser.current_token.kind == .RightBrace {
         advance_token(parser)
         result := new(Node)
-        result^ = scope^
+        result^ = scope
         return result
     }
 
@@ -1556,7 +1561,7 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = scope^
+    result^ = scope
     return result
 }
 
@@ -1609,8 +1614,7 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Create operator node
-    op := new(Operator)
-    op.right = operand
+    op := Operator{right = operand}
 
     // Set operator kind based on token
     #partial switch operator_kind {
@@ -1624,7 +1628,7 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = op^
+    result^ = op
     return result
 }
 
@@ -1643,13 +1647,14 @@ parse_execute_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Create execute node with sequential execution
-    execute := new(Execute)
-    execute.value = expr
-    execute.wrappers = make([dynamic]ExecutionWrapper)
+    execute := Execute{
+      value = expr,
+      wrappers = make([dynamic]ExecutionWrapper),
+    }
     append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
 
     result := new(Node)
-    result^ = execute^
+    result^ = execute
     return result
 }
 
@@ -1672,9 +1677,7 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     // Create operator node
-    op := new(Operator)
-    op.left = left
-    op.right = right
+    op := Operator{left = left, right = right}
 
     // Set operator type
     #partial switch operator_kind {
@@ -1697,7 +1700,7 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = op^
+    result^ = op
     return result
 }
 
@@ -1719,8 +1722,7 @@ parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
     advance_token(parser)
 
     // Create property node
-    property := new(Property)
-    property.source = left
+    property := Property{source = left}
 
     // Create property identifier
     prop_id := new(Node)
@@ -1729,7 +1731,7 @@ parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
 
     // Return property node
     result := new(Node)
-    result^ = property^
+    result^ = property
     return result
 }
 
@@ -1746,12 +1748,13 @@ parse_execution :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node
     }
 
     // Create execute node
-    execute := new(Execute)
-    execute.value = left
-    execute.wrappers = wrappers
+    execute := Execute {
+      value = left,
+      wrappers = wrappers,
+    }
 
     result := new(Node)
-    result^ = execute^
+    result^ = execute
     return result
 }
 
@@ -1821,8 +1824,7 @@ parse_execution_pattern :: proc(parser: ^Parser) -> (wrappers: [dynamic]Executio
  */
 parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create pointing node
-    pointing := new(Pointing)
-    pointing.name = left
+    pointing := Pointing{name = left}
 
     // Consume ->
     advance_token(parser)
@@ -1839,7 +1841,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
     }
 
     result := new(Node)
-    result^ = pointing^
+    result^ = pointing
     return result
 }
 /*
@@ -1847,8 +1849,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
  */
 parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Create pointing pull node
-    pointing_pull := new(PointingPull)
-    pointing_pull.name = nil // Anonymous
+    pointing_pull := PointingPull{}
 
     // Consume <-
     advance_token(parser)
@@ -1865,7 +1866,7 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = pointing_pull^
+    result^ = pointing_pull
     return result
 }
 
@@ -1874,8 +1875,7 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  */
 parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create pointing pull node
-    pointing_pull := new(PointingPull)
-    pointing_pull.name = left
+    pointing_pull := PointingPull{name = left}
 
     // Consume <-
     advance_token(parser)
@@ -1892,7 +1892,7 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
     }
 
     result := new(Node)
-    result^ = pointing_pull^
+    result^ = pointing_pull
     return result
 }
 
@@ -1901,8 +1901,7 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
  */
 parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Create event push node
-    event_push := new(EventPush)
-    event_push.name = nil // Anonymous
+    event_push := EventPush{}
 
     // Consume >-
     advance_token(parser)
@@ -1919,7 +1918,7 @@ parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = event_push^
+    result^ = event_push
     return result
 }
 
@@ -1928,8 +1927,7 @@ parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  */
 parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create event push node
-    event_push := new(EventPush)
-    event_push.name = left
+    event_push := EventPush{name = left}
 
     // Consume >-
     advance_token(parser)
@@ -1946,7 +1944,7 @@ parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
     }
 
     result := new(Node)
-    result^ = event_push^
+    result^ = event_push
     return result
 }
 
@@ -1955,8 +1953,7 @@ parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
  */
 parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Create event pull node
-    event_pull := new(EventPull)
-    event_pull.name = nil // Anonymous
+    event_pull := EventPull{}
 
     // Consume -<
     advance_token(parser)
@@ -1973,7 +1970,7 @@ parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = event_pull^
+    result^ = event_pull
     return result
 }
 
@@ -1982,8 +1979,7 @@ parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  */
 parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create event pull node
-    event_pull := new(EventPull)
-    event_pull.name = left
+    event_pull := EventPull{name = left}
 
     // Consume -<
     advance_token(parser)
@@ -2000,7 +1996,7 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
     }
 
     result := new(Node)
-    result^ = event_pull^
+    result^ = event_pull
     return result
 }
 
@@ -2009,8 +2005,7 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
  */
 parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Create resonance push node
-    resonance_push := new(ResonancePush)
-    resonance_push.name = nil // Anonymous
+    resonance_push := ResonancePush{}
 
     // Consume >>-
     advance_token(parser)
@@ -2027,7 +2022,7 @@ parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
     }
 
     result := new(Node)
-    result^ = resonance_push^
+    result^ = resonance_push
     return result
 }
 
@@ -2036,8 +2031,7 @@ parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
  */
 parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create resonance push node
-    resonance_push := new(ResonancePush)
-    resonance_push.name = left
+    resonance_push := ResonancePush{name = left}
 
     // Consume >>-
     advance_token(parser)
@@ -2054,7 +2048,7 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
     }
 
     result := new(Node)
-    result^ = resonance_push^
+    result^ = resonance_push
     return result
 }
 
@@ -2063,8 +2057,7 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
  */
 parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Create resonance pull node
-    resonance_pull := new(ResonancePull)
-    resonance_pull.name = nil // Anonymous
+    resonance_pull := ResonancePull{}
 
     // Consume -<<
     advance_token(parser)
@@ -2081,7 +2074,7 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
     }
 
     result := new(Node)
-    result^ = resonance_pull^
+    result^ = resonance_pull
     return result
 }
 
@@ -2090,8 +2083,7 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
  */
 parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create resonance pull node
-    resonance_pull := new(ResonancePull)
-    resonance_pull.name = left
+    resonance_pull := ResonancePull{name = left}
 
     // Consume -<<
     advance_token(parser)
@@ -2108,7 +2100,7 @@ parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
     }
 
     result := new(Node)
-    result^ = resonance_pull^
+    result^ = resonance_pull
     return result
 }
 
@@ -2128,12 +2120,10 @@ parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Create range node
-    range := new(Range)
-    range.start = nil // No start for prefix range
-    range.end = end
+    range := Range{end = end}
 
     result := new(Node)
-    result^ = range^
+    result^ = range
     return result
 }
 
@@ -2145,8 +2135,7 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     advance_token(parser)
 
     // Create range node
-    range := new(Range)
-    range.start = left
+    range := Range{start = left}
 
 // Check if there's an end expression
     if parser.current_token.kind == .EOF ||
@@ -2162,7 +2151,7 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = range^
+    result^ = range
     return result
 }
 
@@ -2178,8 +2167,7 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
     }
 
     // Create constraint
-    constraint := new(Constraint)
-    constraint.constraint = left
+    constraint := Constraint{constraint=left}
 
     // Move past :
     advance_token(parser)
@@ -2202,7 +2190,7 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
     }
 
     result := new(Node)
-    result^ = constraint^
+    result^ = constraint
     return result
 }
 
@@ -2211,9 +2199,10 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
  */
 parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create pattern node with target
-    pattern := new(Pattern)
-    pattern.target = left
-    pattern.value = make([dynamic]Branch)
+    pattern := Pattern{
+      target = left,
+      value = make([dynamic]Branch),
+    }
 
     // Consume ? token
     advance_token(parser)
@@ -2245,7 +2234,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     result := new(Node)
-    result^ = pattern^
+    result^ = pattern
     return result
 }
 
@@ -2275,10 +2264,11 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
           #partial switch value in parse.value {
           case Product:
             branch.product = value.value
-            constraint := new(Constraint)
-            constraint.constraint = parse.constraint
+            constraint := Constraint{
+              constraint = parse.constraint,
+            }
             result := new(Node)
-            result^ = constraint^
+            result^ = constraint
             branch.source = result
             return branch
           }
@@ -2299,19 +2289,17 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     // Parse the result expression (right side of ->)
     if value := parse_expression(parser); value != nil {
         // Create product node to hold the result
-        product := new(Product)
-        product.value = value
+        product := Product{value = value}
 
         product_node := new(Node)
-        product_node^ = product^
+        product_node^ = product
         branch.product = product_node
     } else {
         // Handle case where there's no expression after ->
-        product := new(Product)
-        product.value = nil
+        product := Product{}
 
         product_node := new(Node)
-        product_node^ = product^
+        product_node^ = product
         branch.product = product_node
     }
 
@@ -2341,11 +2329,10 @@ parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Create the expansion node with the target
-    expand := new(Expand)
-    expand.target = target
+    expand := Expand{target=target}
 
     result := new(Node)
-    result^ = expand^
+    result^ = expand
     return result
 }
 
@@ -2363,7 +2350,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Create FileSystem node
-    fs_node := new(FileSystem)
+    fs_node := FileSystem{}
 
     // Parse first identifier
     id_name := parser.current_token.text
@@ -2379,7 +2366,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     if parser.current_token.kind != .Dot {
         fs_node.target = ident_node
         result := new(Node)
-        result^ = fs_node^
+        result^ = fs_node
         return result
     }
 
@@ -2402,8 +2389,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         advance_token(parser)
 
         // Create property node
-        property := new(Property)
-        property.source = current_node
+        property := Property{source = current_node}
 
         // Create property identifier
         prop_ident := new(Node)
@@ -2414,7 +2400,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
         // Update current node to this property
         property_node := new(Node)
-        property_node^ = property^
+        property_node^ = property
         current_node = property_node
     }
 
@@ -2422,7 +2408,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     fs_node.target = current_node
 
     result := new(Node)
-    result^ = fs_node^
+    result^ = fs_node
     return result
 }
 
