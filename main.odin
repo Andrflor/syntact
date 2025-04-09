@@ -935,67 +935,98 @@ parse :: proc(parser: ^Parser) -> ^Node {
  * get_rule returns the parse rule for a given token kind
  */
 get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
-    rules := make(map[Token_Kind]Parse_Rule)
-
+    #partial switch kind {
     // Integer and Float Literals
-    rules[.Integer] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
-    rules[.Float] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
-    rules[.Hexadecimal] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
-    rules[.Binary] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
-    rules[.String_Literal] = Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    case .Integer:
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    case .Float:
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    case .Hexadecimal:
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    case .Binary:
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+    case .String_Literal:
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
 
     // Identifiers and basic symbols
-    rules[.Identifier] = Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
-    rules[.LeftBrace] = Parse_Rule{prefix = parse_scope, infix = nil, precedence = .NONE}
-    rules[.LeftParen] = Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
-    rules[.RightBrace] = Parse_Rule{prefix = nil, infix = nil, precedence = .NONE}
-    rules[.At] = Parse_Rule{prefix = parse_reference, infix = nil, precedence = .NONE}
+    case .Identifier:
+        return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
+    case .LeftBrace:
+        return Parse_Rule{prefix = parse_scope, infix = nil, precedence = .NONE}
+    case .LeftParen:
+        return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
+    case .RightBrace:
+        return Parse_Rule{prefix = nil, infix = nil, precedence = .NONE}
+    case .At:
+        return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .NONE}
 
     // Unary operators
-    rules[.BitNot] = Parse_Rule{prefix = parse_unary, infix = nil, precedence = .UNARY}
-    rules[.Minus] = Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
-    rules[.Execute] = Parse_Rule{prefix = parse_execute_prefix, infix = nil, precedence = .UNARY}
+    case .BitNot:
+        return Parse_Rule{prefix = parse_unary, infix = nil, precedence = .UNARY}
+    case .Minus:
+        return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
+    case .Execute:
+        return Parse_Rule{prefix = parse_execute_prefix, infix = nil, precedence = .UNARY}
 
     // Binary operators
-    rules[.Plus] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .TERM}
-    rules[.Asterisk] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    rules[.Slash] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    rules[.Percent] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    rules[.BitAnd] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
-    rules[.BitOr] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
-    rules[.BitXor] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
-    rules[.Equal] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
-    rules[.LessThan] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
-    rules[.GreaterThan] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
-    rules[.LessEqual] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
-    rules[.GreaterEqual] = Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    case .Plus:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .TERM}
+    case .Asterisk:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    case .Slash:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    case .Percent:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    case .BitAnd:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    case .BitOr:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    case .BitXor:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    case .Equal:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
+    case .LessThan:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    case .GreaterThan:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    case .LessEqual:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+    case .GreaterEqual:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
 
-    // Specialized operators - MODIFIED PRECEDENCE LEVELS
-    // Constraint should have higher precedence than assignment operators
-    rules[.Colon] = Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .CALL}
+    // Specialized operators
+    case .Colon:
+        return Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .CALL}
 
     // Assignment operators
-    rules[.PointingPush] = Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .ASSIGNMENT}
-    rules[.PointingPull] = Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
-    rules[.EventPush] = Parse_Rule{prefix = parse_event_push_prefix, infix = parse_event_push, precedence = .ASSIGNMENT}
-    rules[.EventPull] = Parse_Rule{prefix = parse_event_pull_prefix, infix = parse_event_pull, precedence = .ASSIGNMENT}
-    rules[.ResonancePush] = Parse_Rule{prefix = parse_resonance_push_prefix, infix = parse_resonance_push, precedence = .ASSIGNMENT}
-    rules[.ResonancePull] = Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
+    case .PointingPush:
+        return Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .ASSIGNMENT}
+    case .PointingPull:
+        return Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
+    case .EventPush:
+        return Parse_Rule{prefix = parse_event_push_prefix, infix = parse_event_push, precedence = .ASSIGNMENT}
+    case .EventPull:
+        return Parse_Rule{prefix = parse_event_pull_prefix, infix = parse_event_pull, precedence = .ASSIGNMENT}
+    case .ResonancePush:
+        return Parse_Rule{prefix = parse_resonance_push_prefix, infix = parse_resonance_push, precedence = .ASSIGNMENT}
+    case .ResonancePull:
+        return Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
 
     // Range notation
-    rules[.DoubleDot] = Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
+    case .DoubleDot:
+        return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
 
     // Special cases
-    rules[.Dot] = Parse_Rule{prefix = nil, infix = parse_property, precedence = .CALL}
-    rules[.Question] = Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
-    rules[.Ellipsis] = Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .PRIMARY}
-
-    if kind in rules {
-        return rules[kind]
+    case .Dot:
+        return Parse_Rule{prefix = nil, infix = parse_property, precedence = .CALL}
+    case .Question:
+        return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
+    case .Ellipsis:
+        return Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .PRIMARY}
     }
-
-    return Parse_Rule{}
+    return Parse_Rule{} // Default empty rule
 }
+
 /*
  * parse_program parses the entire program as a sequence of statements
  */
