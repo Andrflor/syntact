@@ -1046,27 +1046,27 @@ parse_with_recovery :: proc(parser: ^Parser) -> ^Node {
  * parse_statement parses a single statement
  */
 parse_statement :: proc(parser: ^Parser) -> ^Node {
-    // Skip empty statements
     if parser.current_token.kind == .Newline {
         advance_token(parser)
         return nil
     }
 
-    #partial switch parser.current_token.kind {
-    case .Ellipsis:
-        return parse_expansion(parser, false)
-    case .PointingPush: // Handle standalone -> expressions
-        return parse_product(parser)
-    case .EOF, .RightBrace:
-        // Empty statement - don't report an error
+    if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+        // Acceptable empty statements — BUT force advancement
+        advance_token(parser)
         return nil
-    case:
-        // Try to parse as an expression by default
-        expr := parse_expression(parser)
-
-        // For empty statements (just identifier or constraint), don't expect a newline
-        return expr
     }
+
+    expr := parse_expression(parser)
+
+    // Defensive: ensure we’re not stuck
+    if expr == nil && parser.current_token.kind == .RightBrace {
+        error_at_current(parser, "Unexpected }")
+        advance_token(parser)
+        return nil
+    }
+
+    return expr
 }
 
 /*
@@ -1448,7 +1448,6 @@ parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
     result := new(Node)
     result^ = literal^
-    print_ast(result, 0)
     return result
 }
 
