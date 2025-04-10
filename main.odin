@@ -783,7 +783,6 @@ Precedence :: enum {
 Parse_Rule :: struct {
     prefix:     proc(parser: ^Parser, can_assign: bool) -> ^Node,
     infix:      proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node,
-    postfix:    proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node,
     precedence: Precedence,
 }
 
@@ -954,7 +953,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
     case .Identifier:
         return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
     case .LeftBrace:
-        return Parse_Rule{prefix = parse_scope, infix = nil, postfix=parse_override, precedence = .NONE}
+        return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .NONE}
     case .LeftParen:
         return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
     case .RightBrace:
@@ -967,8 +966,12 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = parse_unary, infix = nil, precedence = .UNARY}
     case .Minus:
         return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
+
+
+    // Postfix operator
     case .Execute:
-        return Parse_Rule{prefix = nil, infix = nil, precedence = .UNARY}
+    return Parse_Rule{prefix = nil, infix = parse_execute, precedence = .ASSIGNMENT}
+
 
     // Binary operators
     case .Plus:
@@ -1014,6 +1017,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
     case .ResonancePull:
         return Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
 
+
     // Range notation
     case .DoubleDot:
         return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
@@ -1034,7 +1038,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
  */
 parse_program :: proc(parser: ^Parser) -> ^Node {
     scope := Scope{}
-    scope.value = make([dynamic]Node)
+    scope.value = make([dynamic]Node, 0, 2)
 
     // Keep parsing until EOF
     for parser.current_token.kind != .EOF {
@@ -1114,8 +1118,17 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
     // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
     if rule.prefix == nil {
-        // Error handling for missing prefix parser
-        // ...
+        // Better error messages for common cases
+        if parser.current_token.kind == .Colon {
+            error_at_current(parser, "Unexpected ':' without a type constraint")
+        } else if parser.current_token.kind == .PointingPush {
+            error_at_current(parser, "Unexpected '->' without a name to point from")
+        } else if !parser.panic_mode {
+            error_at_current(parser, fmt.tprintf("Expected expression, found '%v'", parser.current_token.kind))
+        }
+
+        // Advance past the problematic token to avoid getting stuck
+        advance_token(parser)
         return nil
     }
 
@@ -1124,23 +1137,9 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
 
     // Parse the prefix expression
     left := rule.prefix(parser, can_assign)
+
     if left == nil {
         return nil
-    }
-
-    // Process postfix operators first - they bind more tightly than infix
-    for {
-        // Check if the current token has a postfix rule
-        postfix_rule := get_rule(parser.current_token.kind)
-        if postfix_rule.postfix == nil || precedence > postfix_rule.precedence {
-            break
-        }
-
-        // Apply the postfix operation
-        left = postfix_rule.postfix(parser, left, can_assign)
-        if left == nil {
-            return nil
-        }
     }
 
     // Keep parsing infix expressions as long as they have higher precedence
@@ -1156,7 +1155,6 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         }
     }
 
-    // The rest of the function remains the same...
     return left
 }
 
@@ -1167,7 +1165,7 @@ parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
     // Create an override node
     override := Override {
         source = left,
-        overrides = make([dynamic]Node),
+        overrides = make([dynamic]Node, 0, 2),
     }
 
     // Consume left brace (already checked by the caller)
@@ -1218,18 +1216,18 @@ parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
 /*
  * parse_execute handles postfix execution patterns like expr<[!]>
  */
-parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+parse_execute :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create execute node to hold the left expression
     execute := Execute{
       value = left,
-      wrappers = make([dynamic]ExecutionWrapper),
+      wrappers = make([dynamic]ExecutionWrapper, 0, 2),
     }
 
     // Process the execution pattern
     found_exclamation := false
 
     // Stack to track opening symbols for proper nesting
-    stack := make([dynamic]Token_Kind)
+    stack := make([dynamic]Token_Kind, 0, 2)
     defer delete(stack)
 
     // Continue parsing until we have a complete execution pattern
@@ -1413,7 +1411,7 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Consume opening brace
     advance_token(parser)
 
-    scope := Scope{value = make([dynamic]Node)}
+    scope := Scope{value = make([dynamic]Node, 0, 2)}
 
     // Allow for empty scopes
     if parser.current_token.kind == .RightBrace {
@@ -1475,7 +1473,7 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
             advance_token(parser)
             // Return an empty scope as a placeholder
             empty_scope := new(Node)
-            empty_scope^ = Scope{value = make([dynamic]Node)}
+            empty_scope^ = Scope{value = make([dynamic]Node, 0, 2)}
             return empty_scope
         }
 
@@ -1524,32 +1522,6 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
     result := new(Node)
     result^ = op
-    return result
-}
-
-/*
- * parse_execute_prefix handles prefix execution with ! pattern (e.g., !expr)
- */
-parse_execute_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
-    // Consume the !
-    advance_token(parser)
-
-    // Parse the expression to execute
-    expr := parse_expression(parser, .UNARY)
-    if expr == nil {
-        error_at_current(parser, "Expected expression after '!'")
-        return nil
-    }
-
-    // Create execute node with sequential execution
-    execute := Execute{
-      value = expr,
-      wrappers = make([dynamic]ExecutionWrapper),
-    }
-    append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
-
-    result := new(Node)
-    result^ = execute
     return result
 }
 
@@ -1629,90 +1601,6 @@ parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
     result^ = property
     return result
 }
-
-/*
- * parse_execution handles execution modifiers with arbitrary compositions
- */
-parse_execution :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
-    // Parse the execution pattern
-    wrappers, found_exclamation := parse_execution_pattern(parser)
-
-    if !found_exclamation {
-        error_at_current(parser, "Execution pattern must contain '!'")
-        return nil
-    }
-
-    // Create execute node
-    execute := Execute {
-      value = left,
-      wrappers = wrappers,
-    }
-
-    result := new(Node)
-    result^ = execute
-    return result
-}
-
-/*
- * parse_execution_pattern parses complex execution patterns recursively
- */
-parse_execution_pattern :: proc(parser: ^Parser) -> (wrappers: [dynamic]ExecutionWrapper, found_exclamation: bool) {
-    wrappers = make([dynamic]ExecutionWrapper)
-    found_exclamation = false
-
-    // Loop to handle nested/composed execution patterns
-    for {
-        // Save the current token
-        current := parser.current_token.kind
-
-        // Check for wrapper start tokens
-        if current == .LeftParen {
-            // Background wrapper
-            append_elem(&wrappers, ExecutionWrapper.Background)  // Fixed append call
-            advance_token(parser)
-
-            // ... rest of the function ...
-        } else if current == .LessThan {
-            // Threading wrapper
-            append_elem(&wrappers, ExecutionWrapper.Threading)  // Fixed append call
-            advance_token(parser)
-
-            // ... rest of the function ...
-        } else if current == .LeftBracket {
-            // Parallel CPU wrapper
-            append_elem(&wrappers, ExecutionWrapper.Parallel_CPU)  // Fixed append call
-            advance_token(parser)
-
-            // ... rest of the function ...
-        } else if current == .BitOr {
-            // GPU wrapper
-            append_elem(&wrappers, ExecutionWrapper.GPU)  // Fixed append call
-            advance_token(parser)
-
-            // ... rest of the function ...
-        } else if current == .Execute {
-            // Found the exclamation mark
-            append_elem(&wrappers, ExecutionWrapper.Sequential)  // Fixed append call
-            advance_token(parser)
-            found_exclamation = true
-
-
-            // Check if we need to continue parsing more
-            next := parser.current_token.kind
-            if !(next == .RightParen || next == .RightBracket ||
-                next == .GreaterThan || next == .BitOr) {
-                // We've reached the end of the execution pattern
-                break
-            }
-        } else {
-            // No more execution pattern tokens
-            break
-        }
-    }
-
-    return wrappers, found_exclamation
-}
-
 
 /*
  * parse_pointing_push handles pointing operator (a -> b)
@@ -2096,7 +1984,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Create pattern node with target
     pattern := Pattern{
       target = left,
-      value = make([dynamic]Branch),
+      value = make([dynamic]Branch, 0, 2),
     }
 
     // Consume ? token
@@ -2768,7 +2656,8 @@ parse_file :: proc(lexer: ^Lexer) -> (^Node, bool) {
  */
 main :: proc() {
     arena : vmem.Arena
-    err := vmem.arena_init_growing(&arena)
+    CHUNK_SIZE :: 8 * 1024 * 1024
+    err := vmem.arena_init_growing(&arena, CHUNK_SIZE)
     if(err != nil) {
       panic("Cannot init arena")
     }
