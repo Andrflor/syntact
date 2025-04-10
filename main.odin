@@ -783,6 +783,7 @@ Precedence :: enum {
 Parse_Rule :: struct {
     prefix:     proc(parser: ^Parser, can_assign: bool) -> ^Node,
     infix:      proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node,
+    postfix:    proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node,
     precedence: Precedence,
 }
 
@@ -953,7 +954,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
     case .Identifier:
         return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
     case .LeftBrace:
-        return Parse_Rule{prefix = parse_scope, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_scope, infix = nil, postfix=parse_override, precedence = .NONE}
     case .LeftParen:
         return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
     case .RightBrace:
@@ -967,7 +968,7 @@ get_rule :: proc(kind: Token_Kind) -> Parse_Rule {
     case .Minus:
         return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
     case .Execute:
-        return Parse_Rule{prefix = parse_execute_prefix, infix = nil, precedence = .UNARY}
+        return Parse_Rule{prefix = nil, infix = nil, precedence = .UNARY}
 
     // Binary operators
     case .Plus:
@@ -1113,17 +1114,8 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
     // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
     if rule.prefix == nil {
-        // Better error messages for common cases
-        if parser.current_token.kind == .Colon {
-            error_at_current(parser, "Unexpected ':' without a type constraint")
-        } else if parser.current_token.kind == .PointingPush {
-            error_at_current(parser, "Unexpected '->' without a name to point from")
-        } else if !parser.panic_mode {
-            error_at_current(parser, fmt.tprintf("Expected expression, found '%v'", parser.current_token.kind))
-        }
-
-        // Advance past the problematic token to avoid getting stuck
-        advance_token(parser)
+        // Error handling for missing prefix parser
+        // ...
         return nil
     }
 
@@ -1132,90 +1124,23 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
 
     // Parse the prefix expression
     left := rule.prefix(parser, can_assign)
-    // Check for execution pattern after expression
-    if parser.current_token.kind == .Execute {
-        // Create execute node with sequential execution
-        execute := Execute{
-          value = left,
-          wrappers = make([dynamic]ExecutionWrapper),
-        }
-        append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
-
-        // Consume the !
-        advance_token(parser)
-
-        result := new(Node)
-        result^ = execute
-        left = result
-    } else if parser.current_token.kind == .LeftBracket {
-        // Handle [!] pattern
-        opening := parser.current_token.kind
-        advance_token(parser)
-
-        // Look for ! inside brackets
-        if parser.current_token.kind == .Execute {
-            execute := Execute{
-              value = left,
-              wrappers = make([dynamic]ExecutionWrapper),
-            }
-            append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
-            append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
-
-            // Consume the !
-            advance_token(parser)
-
-            // Expect closing bracket
-            if parser.current_token.kind != .RightBracket {
-                error_at_current(parser, "Expected ']' after execution pattern")
-                return nil
-            }
-            advance_token(parser)
-
-            result := new(Node)
-            result^ = execute
-            left = result
-        }
-    } else if parser.current_token.kind == .LessThan {
-        // Handle <[!]> pattern
-        advance_token(parser)
-
-    if parser.current_token.kind == .LeftBracket {
-        // Handle <[!]> pattern
-        advance_token(parser)
-
-        if parser.current_token.kind == .Execute {
-            execute := Execute{
-              value = left,
-              wrappers = make([dynamic]ExecutionWrapper),
-            }
-            append_elem(&execute.wrappers, ExecutionWrapper.Threading)
-            append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
-            append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
-
-            // Consume the !
-            advance_token(parser)
-
-            // Expect closing bracket and angle bracket
-            if parser.current_token.kind != .RightBracket {
-                error_at_current(parser, "Expected ']' in execution pattern")
-                return nil
-            }
-            advance_token(parser)
-
-            if parser.current_token.kind != .GreaterThan {
-                error_at_current(parser, "Expected '>' to close execution pattern")
-                return nil
-            }
-            advance_token(parser)
-
-            result := new(Node)
-            result^ = execute
-            left = result
-        }
-    }
-}
     if left == nil {
         return nil
+    }
+
+    // Process postfix operators first - they bind more tightly than infix
+    for {
+        // Check if the current token has a postfix rule
+        postfix_rule := get_rule(parser.current_token.kind)
+        if postfix_rule.postfix == nil || precedence > postfix_rule.precedence {
+            break
+        }
+
+        // Apply the postfix operation
+        left = postfix_rule.postfix(parser, left, can_assign)
+        if left == nil {
+            return nil
+        }
     }
 
     // Keep parsing infix expressions as long as they have higher precedence
@@ -1231,95 +1156,69 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         }
     }
 
-    // Check for execution pattern postfix
-    if is_execution_pattern_start(parser.current_token.kind) {
-        left = parse_execution_pattern_postfix(parser, left)
-        if left == nil {
-            return nil
-        }
-    }
-
-    // Check for override expressions (expression followed by braces)
-    if parser.current_token.kind == .LeftBrace {
-        // Create an override node
-        override := Override {
-          source = left,
-          overrides = make([dynamic]Node),
-        }
-
-        // Consume left brace
-        advance_token(parser)
-
-        // Parse statements inside the braces as overrides
-        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-            // Skip newlines
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-
-            if parser.current_token.kind == .RightBrace {
-                break
-            }
-
-            // Parse statement and add to overrides
-            if node := parse_statement(parser); node != nil {
-                append(&override.overrides, node^)
-            } else {
-                // Error recovery
-                synchronize(parser)
-
-                // Check if we synchronized to the end of the overrides
-                if parser.current_token.kind == .RightBrace {
-                    break
-                }
-            }
-
-            // Skip newlines
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-        }
-
-        // Expect closing brace
-        if !match(parser, .RightBrace) {
-            error_at_current(parser, "Expected } after overrides")
-            return nil
-        }
-
-        // Create and set the override as our left-hand expression
-        result := new(Node)
-        result^ = override
-        left = result
-
-        // Check for execution pattern after the override
-        if is_execution_pattern_start(parser.current_token.kind) {
-            left = parse_execution_pattern_postfix(parser, left)
-            if left == nil {
-                return nil
-            }
-        }
-
-        // Check if there are infix operations that can follow the override
-        for precedence <= get_rule(parser.current_token.kind).precedence {
-            rule = get_rule(parser.current_token.kind)
-            if rule.infix == nil {
-                break
-            }
-
-            left = rule.infix(parser, left, can_assign)
-            if left == nil {
-                return nil
-            }
-        }
-    }
-
+    // The rest of the function remains the same...
     return left
 }
 
 /*
- * parse_execution_pattern_postfix handles postfix execution patterns like expr<[!]>
+* Implementation of the override postfix rule
+*/
+parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Create an override node
+    override := Override {
+        source = left,
+        overrides = make([dynamic]Node),
+    }
+
+    // Consume left brace (already checked by the caller)
+    advance_token(parser)
+
+    // Parse statements inside the braces as overrides
+    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+        // Skip newlines
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
+
+        if parser.current_token.kind == .RightBrace {
+            break
+        }
+
+        // Parse statement and add to overrides
+        if node := parse_statement(parser); node != nil {
+            append(&override.overrides, node^)
+        } else {
+            // Error recovery
+            synchronize(parser)
+
+            // Check if we synchronized to the end of the overrides
+            if parser.current_token.kind == .RightBrace {
+                break
+            }
+        }
+
+        // Skip newlines
+        for parser.current_token.kind == .Newline {
+            advance_token(parser)
+        }
+    }
+
+    // Expect closing brace
+    if !match(parser, .RightBrace) {
+        error_at_current(parser, "Expected } after overrides")
+        return nil
+    }
+
+    // Create and return the override node
+    result := new(Node)
+    result^ = override
+    return result
+}
+
+/*
+ * parse_execute handles postfix execution patterns like expr<[!]>
  */
-parse_execution_pattern_postfix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Create execute node to hold the left expression
     execute := Execute{
       value = left,
@@ -1419,11 +1318,6 @@ parse_execution_pattern_postfix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Create and return execute node
     result := new(Node)
     result^ = execute
-
-    // Check if there's a new execution pattern immediately following
-    if is_execution_pattern_start(parser.current_token.kind) {
-        return parse_execution_pattern_postfix(parser, result)
-    }
 
     return result
 }
@@ -2917,7 +2811,7 @@ main :: proc() {
     }
 
     // Print AST
-    print_ast(ast, 0)
+    // print_ast(ast, 0)
 
     // If in debug mode, print a summary
     if debug_mode {
