@@ -19,6 +19,7 @@ package compiler
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import vmem "core:mem/virtual"
 
 // ===========================================================================
 // SECTION 1: TOKEN DEFINITIONS AND LEXER
@@ -2866,11 +2867,19 @@ parse_file :: proc(lexer: ^Lexer) -> (^Node, bool) {
     return ast, !parser.had_error
 }
 
+
 /*
  * main is the entry point of the compiler
  * It reads a file, parses it, and prints the resulting AST
  */
 main :: proc() {
+    arena : vmem.Arena
+    err := vmem.arena_init_growing(&arena)
+    if(err != nil) {
+      panic("Cannot init arena")
+    }
+    arena_allocator := vmem.arena_allocator(&arena)
+
     if len(os.args) < 2 {
         fmt.println("Usage: parser <filename> [--debug]")
         os.exit(1)
@@ -2885,6 +2894,8 @@ main :: proc() {
         os.exit(1)
     }
     defer delete(source)
+
+    context.allocator = arena_allocator
 
     // Initialize lexer
     lexer: Lexer
@@ -2921,4 +2932,6 @@ main :: proc() {
         // This could include more debug info like node counts by type, etc.
         fmt.println("=== END DEBUG SUMMARY ===")
     }
+
+    free_all(arena_allocator)
 }
