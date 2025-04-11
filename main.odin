@@ -1054,7 +1054,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .Identifier:
         return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
     case .LeftBrace:
-        return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .NONE}
+        return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .CALL}
     case .LeftParen:
         return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
     case .RightBrace:
@@ -2189,6 +2189,7 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
 
     return branch
 }
+
 /*
  * parse_product parses a product expression (-> value)
  * This is for standalone -> expressions
