@@ -23,7 +23,7 @@ import "core:time"
  * Compiler_Options holds all command-line options
  */
 Compiler_Options :: struct {
-	input_files:        []string, // Files to compile
+	input_files:        [dynamic]string, // Files to compile
 	output_file:        string, // Output file (if compilation enabled)
 	print_ast:          bool, // Whether to print the AST
 	print_symbol_table: bool, // Whether to print the symbol table
@@ -39,7 +39,7 @@ Compiler_Options :: struct {
  */
 parse_args :: proc() -> Compiler_Options {
 	options: Compiler_Options
-	options.input_files = make([]string, 0, 10)
+	options.input_files = make([dynamic]string, 0, 10)
 
 	i := 1
 	for i < len(os.args) {
@@ -237,11 +237,11 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 	// Print timing information if requested
 	if options.timing {
 		fmt.printf("\nTiming for %s:\n", filename)
-		fmt.printf("  Parsing:   %.3fms\n", float64(time.duration_milliseconds(parse_duration)))
-		fmt.printf("  Analysis:  %.3fms\n", float64(time.duration_milliseconds(analysis_duration)))
+		fmt.printf("  Parsing:   %.3fms\n", f64(time.duration_milliseconds(parse_duration)))
+		fmt.printf("  Analysis:  %.3fms\n", f64(time.duration_milliseconds(analysis_duration)))
 		fmt.printf(
 			"  Total:     %.3fms\n",
-			float64(time.duration_milliseconds(parse_duration + analysis_duration)),
+			f64(time.duration_milliseconds(parse_duration + analysis_duration)),
 		)
 	}
 
@@ -308,7 +308,7 @@ main :: proc() {
 		total_duration := time.diff(total_start, time.now())
 		fmt.printf(
 			"\nTotal compilation time: %.3fms\n",
-			float64(time.duration_milliseconds(total_duration)),
+			f64(time.duration_milliseconds(total_duration)),
 		)
 	}
 
