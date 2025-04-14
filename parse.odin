@@ -661,62 +661,70 @@ Node :: union {
  * Pointing represents a pointing declaration (name -> value)
  */
 Pointing :: struct {
-	name:  ^Node, // Name of the pointing
-	value: ^Node, // Value being pointed to
+	name:     ^Node, // Name of the pointing
+	value:    ^Node, // Value being pointed to
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Pointing pull is a declaration later override derived value
  */
 PointingPull :: struct {
-	name:  ^Node, // Name of the pointing
-	value: ^Node, // Value being pointed from
+	name:     ^Node, // Name of the pointing
+	value:    ^Node, // Value being pointed from
+	position: Position, // Position information for error reporting
 }
 
 /*
  * EventPull represents a event being pull from resonance >-
  */
 EventPull :: struct {
-	name:  ^Node, // Name of the pointing
-	value: ^Node, // Value being pointed to
+	name:     ^Node, // Name of the pointing
+	value:    ^Node, // Value being pointed to
+	position: Position, // Position information for error reporting
 }
 
 /*
  * EventPush represents a event being pushed into resonance -<
  */
 EventPush :: struct {
-	name:  ^Node, // Name of the pointing
-	value: ^Node, // Value being pointed to
+	name:     ^Node, // Name of the pointing
+	value:    ^Node, // Value being pointed to
+	position: Position, // Position information for error reporting
 }
 
 /*
  * ResonancePull is useed to change value of resonance driven -<<
  */
 ResonancePull :: struct {
-	name:  ^Node, // Name of the pointing
-	value: ^Node, // Value being pointed to
+	name:     ^Node, // Name of the pointing
+	value:    ^Node, // Value being pointed to
+	position: Position, // Position information for error reporting
 }
 
 /*
  * ResonancePush is useed to drive resonance >>-
  */
 ResonancePush :: struct {
-	name:  ^Node, // Name of the pointing
-	value: ^Node, // Value being pointed to
+	name:     ^Node, // Name of the pointing
+	value:    ^Node, // Value being pointed to
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Identifier represents a named reference
  */
 Identifier :: struct {
-	name: string, // Name of the identifier
+	name:     string, // Name of the identifier
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Scope represents a block of statements enclosed in braces
  */
 Scope :: struct {
-	value: [dynamic]Node, // Statements in the scope
+	value:    [dynamic]Node, // Statements in the scope
+	position: Position, // Position information for error reporting
 }
 
 /*
@@ -725,29 +733,33 @@ Scope :: struct {
 Override :: struct {
 	source:    ^Node, // Base entity being modified
 	overrides: [dynamic]Node, // Modifications
+	position:  Position, // Position information for error reporting
 }
 
 /*
  * Product represents a produced value (-> expr)
  */
 Product :: struct {
-	value: ^Node, // Value produced
+	value:    ^Node, // Value produced
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Pattern represents a pattern match expression
  */
 Pattern :: struct {
-	target: ^Node, // Value to match against
-	value:  [dynamic]Branch, // Pattern branches
+	target:   ^Node, // Value to match against
+	value:    [dynamic]Branch, // Pattern branches
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Branch represents a single pattern match branch
  */
 Branch :: struct {
-	source: ^Node, // Pattern to match
-	product: ^Node, // Result if pattern matches
+	source:   ^Node, // Pattern to match
+	product:  ^Node, // Result if pattern matches
+	position: Position, // Position information for error reporting
 }
 
 /*
@@ -756,6 +768,7 @@ Branch :: struct {
 Constraint :: struct {
 	constraint: ^Node, // Type constraint
 	value:      ^Node, // Optional value
+	position:   Position, // Position information for error reporting
 }
 
 /*
@@ -774,8 +787,9 @@ ExecutionWrapper :: enum {
  * Execute represents an execution modifier
  */
 Execute :: struct {
-    value: ^Node,                     // Expression to execute
+    value:    ^Node,                     // Expression to execute
     wrappers: [dynamic]ExecutionWrapper, // Ordered list of execution wrappers (from outside to inside)
+    position: Position, // Position information for error reporting
 }
 
 /*
@@ -802,9 +816,10 @@ Operator_Kind :: enum {
  * Operator represents a binary operation
  */
 Operator :: struct {
-	kind:  Operator_Kind, // Type of operation
-	left:  ^Node, // Left operand
-	right: ^Node, // Right operand
+	kind:     Operator_Kind, // Type of operation
+	left:     ^Node, // Left operand
+	right:    ^Node, // Right operand
+	position: Position, // Position information for error reporting
 }
 
 /*
@@ -822,8 +837,9 @@ Literal_Kind :: enum {
  * Literal represents a literal value in the source
  */
 Literal :: struct {
-	kind:  Literal_Kind, // Type of literal
-	value: string, // String representation of the value
+	kind:     Literal_Kind, // Type of literal
+	value:    string, // String representation of the value
+	position: Position, // Position information for error reporting
 }
 
 /*
@@ -832,28 +848,32 @@ Literal :: struct {
 Property :: struct {
 	source:   ^Node, // Object being accessed
 	property: ^Node, // Property being accessed
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Expand represents a content expansion (...expr)
  */
 Expand :: struct {
-	target: ^Node, // Content to expand
+	target:   ^Node, // Content to expand
+	position: Position, // Position information for error reporting
 }
 
 /*
  * FileSystem represents a file system reference (@lib.module)
  */
 FileSystem :: struct {
-	target: ^Node, // Target content in file system
+	target:   ^Node, // Target content in file system
+	position: Position, // Position information for error reporting
 }
 
 /*
  * Range represents a range expression (e.g., 1..5, 1.., ..5)
  */
 Range :: struct {
-	start: ^Node, // Start of range (may be nil for prefix range)
-	end:   ^Node, // End of range (may be nil for postfix range)
+	start:    ^Node, // Start of range (may be nil for prefix range)
+	end:      ^Node, // End of range (may be nil for postfix range)
+	position: Position, // Position information for error reporting
 }
 
 // ===========================================================================
@@ -1138,8 +1158,13 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
  * parse_program parses the entire program as a sequence of statements
  */
 parse_program :: proc(parser: ^Parser) -> ^Node {
-    scope := Scope{}
-    scope.value = make([dynamic]Node, 0, 2)
+    // Store the position of the first token
+    position := parser.current_token.position
+
+    scope := Scope{
+        value = make([dynamic]Node, 0, 2),
+        position = position, // Store position
+    }
 
     // Keep parsing until EOF
     for parser.current_token.kind != .EOF {
@@ -1197,7 +1222,7 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
 
     expr := parse_expression(parser)
 
-    // Defensive: ensure we’re not stuck
+    // Defensive: ensure we're not stuck
     if expr == nil && parser.current_token.kind == .RightBrace {
         error_at_current(parser, "Unexpected }")
         advance_token(parser)
@@ -1263,10 +1288,14 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
 * Implementation of the override postfix rule
 */
 parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the left brace
+    position := parser.current_token.position
+
     // Create an override node
     override := Override {
         source = left,
         overrides = make([dynamic]Node, 0, 2),
+        position = position, // Store position
     }
 
     // Consume left brace (already checked by the caller)
@@ -1318,10 +1347,14 @@ parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
  * parse_execute handles postfix execution patterns like expr<[!]>
  */
 parse_execute :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the execution token
+    position := parser.current_token.position
+
     // Create execute node to hold the left expression
     execute := Execute{
       value = left,
       wrappers = make([dynamic]ExecutionWrapper, 0, 2),
+      position = position, // Store position
     }
 
     // Process the execution pattern
@@ -1425,10 +1458,15 @@ parse_execute :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
  * parse_product_prefix handles the standalone product expression (-> value)
  */
 parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the -> token
+    position := parser.current_token.position
+
     // Consume the ->
     advance_token(parser)
 
-    product := Product{}
+    product := Product{
+        position = position, // Store position
+    }
 
     // Parse the value or handle empty product
     if parser.current_token.kind == .RightBrace || parser.current_token.kind == .EOF ||
@@ -1454,8 +1492,12 @@ parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_literal handles literal values (numbers, strings)
  */
 parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the literal token
+    position := parser.current_token.position
+
     literal := Literal {
       value = parser.current_token.text,
+      position = position, // Store position
     }
 
     #partial switch parser.current_token.kind {
@@ -1474,7 +1516,6 @@ parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         return nil
     }
 
-
     advance_token(parser)
 
     result := new(Node)
@@ -1486,9 +1527,15 @@ parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_identifier handles identifier expressions
  */
 parse_identifier :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the identifier token
+    position := parser.current_token.position
+
     // Create identifier node
     id_node := new(Node)
-    id_node^ = Identifier{name = parser.current_token.text}
+    id_node^ = Identifier{
+        name = parser.current_token.text,
+        position = position, // Store position
+    }
 
     // Advance past identifier
     advance_token(parser)
@@ -1509,10 +1556,16 @@ skip_newlines :: proc(parser: ^Parser) {
  * parse_scope parses a scope block {...} - improved to handle empty scopes
  */
 parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the left brace
+    position := parser.current_token.position
+
     // Consume opening brace
     advance_token(parser)
 
-    scope := Scope{value = make([dynamic]Node, 0, 2)}
+    scope := Scope{
+        value = make([dynamic]Node, 0, 2),
+        position = position, // Store position
+    }
 
     // Allow for empty scopes
     if parser.current_token.kind == .RightBrace {
@@ -1563,6 +1616,9 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_grouping parses grouping expressions (...)
  */
 parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the opening parenthesis
+    position := parser.current_token.position
+
     // Consume opening parenthesis
     advance_token(parser)
 
@@ -1572,9 +1628,13 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         // Handle empty parentheses gracefully
         if parser.current_token.kind == .RightParen {
             advance_token(parser)
+
             // Return an empty scope as a placeholder
             empty_scope := new(Node)
-            empty_scope^ = Scope{value = make([dynamic]Node, 0, 2)}
+            empty_scope^ = Scope{
+                value = make([dynamic]Node, 0, 2),
+                position = position, // Store position
+            }
             return empty_scope
         }
 
@@ -1594,6 +1654,9 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_unary parses unary operators (-, ~)
  */
 parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the unary operator
+    position := parser.current_token.position
+
     // Remember the operator kind
     operator_kind := parser.current_token.kind
 
@@ -1608,7 +1671,10 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Create operator node
-    op := Operator{right = operand}
+    op := Operator{
+        right = operand,
+        position = position, // Store position
+    }
 
     // Set operator kind based on token
     #partial switch operator_kind {
@@ -1630,6 +1696,9 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_binary handles binary operators (+, -, *, /, etc.)
  */
 parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the binary operator
+    position := parser.current_token.position
+
     // Remember the operator
     operator_kind := parser.current_token.kind
     rule := get_rule(operator_kind)
@@ -1645,7 +1714,11 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     // Create operator node
-    op := Operator{left = left, right = right}
+    op := Operator{
+        left = left,
+        right = right,
+        position = position, // Store position
+    }
 
     // Set operator type
     #partial switch operator_kind {
@@ -1676,6 +1749,9 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
  * parse_property handles property access (obj.prop)
  */
 parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the dot
+    position := parser.current_token.position
+
     // Consume the dot
     advance_token(parser)
 
@@ -1690,11 +1766,17 @@ parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
     advance_token(parser)
 
     // Create property node
-    property := Property{source = left}
+    property := Property{
+        source = left,
+        position = position, // Store position
+    }
 
     // Create property identifier
     prop_id := new(Node)
-    prop_id^ = Identifier{name = prop_name}
+    prop_id^ = Identifier{
+        name = prop_name,
+        position = position, // Use dot position for the property identifier
+    }
     property.property = prop_id
 
     // Return property node
@@ -1707,8 +1789,14 @@ parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
  * parse_pointing_push handles pointing operator (a -> b)
  */
 parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the -> token
+    position := parser.current_token.position
+
     // Create pointing node
-    pointing := Pointing{name = left}
+    pointing := Pointing{
+        name = left,
+        position = position, // Store position
+    }
 
     // Consume ->
     advance_token(parser)
@@ -1723,17 +1811,22 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
         value := parse_expression(parser)
         pointing.value = value
     }
-
     result := new(Node)
     result^ = pointing
     return result
 }
+
 /*
  * parse_pointing_pull_prefix handles prefix pointing pull operator (<- value)
  */
 parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the <- token
+    position := parser.current_token.position
+
     // Create pointing pull node
-    pointing_pull := PointingPull{}
+    pointing_pull := PointingPull{
+        position = position, // Store position
+    }
 
     // Consume <-
     advance_token(parser)
@@ -1758,8 +1851,14 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_pointing_pull handles infix pointing pull operator (a <- b)
  */
 parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the <- token
+    position := parser.current_token.position
+
     // Create pointing pull node
-    pointing_pull := PointingPull{name = left}
+    pointing_pull := PointingPull{
+        name = left,
+        position = position, // Store position
+    }
 
     // Consume <-
     advance_token(parser)
@@ -1784,8 +1883,13 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
  * parse_event_push_prefix handles prefix event push (>- value)
  */
 parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the >- token
+    position := parser.current_token.position
+
     // Create event push node
-    event_push := EventPush{}
+    event_push := EventPush{
+        position = position, // Store position
+    }
 
     // Consume >-
     advance_token(parser)
@@ -1810,8 +1914,14 @@ parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_event_push handles event push (a >- b)
  */
 parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the >- token
+    position := parser.current_token.position
+
     // Create event push node
-    event_push := EventPush{name = left}
+    event_push := EventPush{
+        name = left,
+        position = position, // Store position
+    }
 
     // Consume >-
     advance_token(parser)
@@ -1836,8 +1946,13 @@ parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
  * parse_event_pull_prefix handles prefix event pull (-< value)
  */
 parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the -< token
+    position := parser.current_token.position
+
     // Create event pull node
-    event_pull := EventPull{}
+    event_pull := EventPull{
+        position = position, // Store position
+    }
 
     // Consume -<
     advance_token(parser)
@@ -1862,8 +1977,14 @@ parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_event_pull handles event pull (a -< b)
  */
 parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the -< token
+    position := parser.current_token.position
+
     // Create event pull node
-    event_pull := EventPull{name = left}
+    event_pull := EventPull{
+        name = left,
+        position = position, // Store position
+    }
 
     // Consume -<
     advance_token(parser)
@@ -1888,8 +2009,13 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
  * parse_resonance_push_prefix handles prefix resonance push (>>- value)
  */
 parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the >>- token
+    position := parser.current_token.position
+
     // Create resonance push node
-    resonance_push := ResonancePush{}
+    resonance_push := ResonancePush{
+        position = position, // Store position
+    }
 
     // Consume >>-
     advance_token(parser)
@@ -1914,8 +2040,14 @@ parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
  * parse_resonance_push handles resonance push (a >>- b)
  */
 parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the >>- token
+    position := parser.current_token.position
+
     // Create resonance push node
-    resonance_push := ResonancePush{name = left}
+    resonance_push := ResonancePush{
+        name = left,
+        position = position, // Store position
+    }
 
     // Consume >>-
     advance_token(parser)
@@ -1940,8 +2072,13 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
  * parse_resonance_pull_prefix handles prefix resonance pull (-<< value)
  */
 parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the -<< token
+    position := parser.current_token.position
+
     // Create resonance pull node
-    resonance_pull := ResonancePull{}
+    resonance_pull := ResonancePull{
+        position = position, // Store position
+    }
 
     // Consume -<<
     advance_token(parser)
@@ -1966,8 +2103,14 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
  * parse_resonance_pull handles resonance pull (a -<< b)
  */
 parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the -<< token
+    position := parser.current_token.position
+
     // Create resonance pull node
-    resonance_pull := ResonancePull{name = left}
+    resonance_pull := ResonancePull{
+        name = left,
+        position = position, // Store position
+    }
 
     // Consume -<<
     advance_token(parser)
@@ -1992,6 +2135,9 @@ parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
  * parse_prefix_range handles prefix range (..5)
  */
 parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the .. token
+    position := parser.current_token.position
+
     // Consume ..
     advance_token(parser)
 
@@ -2003,8 +2149,11 @@ parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         end = parse_expression(parser, .RANGE)
     }
 
-    // Create range node
-    range := Range{end = end}
+    // Create range node with position
+    range := Range{
+        end = end,
+        position = position, // Store position
+    }
 
     result := new(Node)
     result^ = range
@@ -2015,13 +2164,19 @@ parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_range handles range expression (a..b)
  */
 parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the .. token
+    position := parser.current_token.position
+
     // Consume ..
     advance_token(parser)
 
-    // Create range node
-    range := Range{start = left}
+    // Create range node with position
+    range := Range{
+        start = left,
+        position = position, // Store position
+    }
 
-// Check if there's an end expression
+    // Check if there's an end expression
     if parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline ||
        parser.current_token.kind == .RightBrace ||
@@ -2043,6 +2198,9 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
  * parse_constraint handles constraint expressions (Type: value)
  */
 parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Save position of the : token
+    position := parser.current_token.position
+
     // Check if left is nil before proceeding
     if left == nil {
         error_at_current(parser, "Constraint requires a type before ':'")
@@ -2050,8 +2208,11 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
         return nil
     }
 
-    // Create constraint
-    constraint := Constraint{constraint=left}
+    // Create constraint with position
+    constraint := Constraint{
+        constraint = left,
+        position = position, // Store position
+    }
 
     // Move past :
     advance_token(parser)
@@ -2082,10 +2243,14 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
  * parse_pattern handles pattern match (target ? {...})
  */
 parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
-    // Create pattern node with target
+    // Save position of the ? token
+    position := parser.current_token.position
+
+    // Create pattern node with target and position
     pattern := Pattern{
-      target = left,
-      value = make([dynamic]Branch, 0, 2),
+        target = left,
+        value = make([dynamic]Branch, 0, 2),
+        position = position, // Store position
     }
 
     // Consume ? token
@@ -2105,11 +2270,11 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 
     // Handle empty pattern block
     for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-      node := parse_branch(parser)
-      if(node!=nil) {
-        append(&pattern.value, node^)
-      }
-      skip_newlines(parser)
+        node := parse_branch(parser)
+        if(node != nil) {
+            append(&pattern.value, node^)
+        }
+        skip_newlines(parser)
     }
 
     if !match(parser, .RightBrace) {
@@ -2126,39 +2291,43 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
  * parse_branch parses a single branch in a pattern match
  */
 parse_branch :: proc(parser: ^Parser) -> ^Branch {
+    // Save position of the branch start
+    position := parser.current_token.position
+
     // Don't try to parse a branch if we're at a token that can't start an expression
     if !is_expression_start(parser.current_token.kind) {
         advance_token(parser)  // Skip problematic token
         return nil
     }
 
-    // Create branch
+    // Create branch with position
     branch := new(Branch)
+    branch.position = position // Store position
 
     // Parse pattern expression (the left side of ->)
     if pattern := parse_expression(parser, ); pattern != nil {
-      #partial switch parse in pattern {
-
-      case Pointing:
-        branch.source = parse.name
-        branch.product = parse.value
-        return branch
-      case Constraint:
-      if parse.value != nil {
-          #partial switch value in parse.value {
-          case Product:
-            branch.product = value.value
-            constraint := Constraint{
-              constraint = parse.constraint,
-            }
-            result := new(Node)
-            result^ = constraint
-            branch.source = result
+        #partial switch parse in pattern {
+        case Pointing:
+            branch.source = parse.name
+            branch.product = parse.value
             return branch
-          }
+        case Constraint:
+            if parse.value != nil {
+                #partial switch value in parse.value {
+                case Product:
+                    branch.product = value.value
+                    constraint := Constraint{
+                        constraint = parse.constraint,
+                        position = parse.position, // Preserve constraint position
+                    }
+                    result := new(Node)
+                    result^ = constraint
+                    branch.source = result
+                    return branch
+                }
+            }
         }
-      }
-      branch.source = pattern
+        branch.source = pattern
     } else {
         // Error already reported
         return nil
@@ -2173,14 +2342,19 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     // Parse the result expression (right side of ->)
     if value := parse_expression(parser); value != nil {
         // Create product node to hold the result
-        product := Product{value = value}
+        product := Product{
+            value = value,
+            position = parser.current_token.position, // Use current token position
+        }
 
         product_node := new(Node)
         product_node^ = product
         branch.product = product_node
     } else {
         // Handle case where there's no expression after ->
-        product := Product{}
+        product := Product{
+            position = parser.current_token.position, // Use current token position
+        }
 
         product_node := new(Node)
         product_node^ = product
@@ -2202,6 +2376,9 @@ parse_product :: proc(parser: ^Parser) -> ^Node {
  * parse_expansion parses a content expansion (...expr)
  */
 parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the ellipsis token
+    position := parser.current_token.position
+
     // Consume ellipsis token
     advance_token(parser)
 
@@ -2213,8 +2390,11 @@ parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         return nil
     }
 
-    // Create the expansion node with the target
-    expand := Expand{target=target}
+    // Create the expansion node with the target and position
+    expand := Expand{
+        target = target,
+        position = position, // Store position
+    }
 
     result := new(Node)
     result^ = expand
@@ -2225,6 +2405,9 @@ parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_reference parses a file system reference (@module.lib)
  */
 parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+    // Save position of the @ token
+    position := parser.current_token.position
+
     // Consume @
     advance_token(parser)
 
@@ -2234,17 +2417,21 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         return nil
     }
 
-    // Create FileSystem node
-    fs_node := FileSystem{}
+    // Create FileSystem node with position
+    fs_node := FileSystem{
+        position = position, // Store position
+    }
 
     // Parse first identifier
     id_name := parser.current_token.text
+    id_position := parser.current_token.position
     advance_token(parser)
 
-    // Create initial identifier node
+    // Create initial identifier node with position
     ident_node := new(Node)
     ident_node^ = Identifier{
         name = id_name,
+        position = id_position, // Store identifier position
     }
 
     // If no property access follows, return basic FileSystem node
@@ -2260,6 +2447,9 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
     // Process all dots and identifiers in the chain
     for parser.current_token.kind == .Dot {
+        // Save dot position
+        dot_position := parser.current_token.position
+
         // Consume dot
         advance_token(parser)
 
@@ -2269,17 +2459,22 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
             return nil
         }
 
-        // Get property name
+        // Get property name and position
         property_name := parser.current_token.text
+        property_position := parser.current_token.position
         advance_token(parser)
 
-        // Create property node
-        property := Property{source = current_node}
+        // Create property node with position
+        property := Property{
+            source = current_node,
+            position = dot_position, // Store dot position
+        }
 
-        // Create property identifier
+        // Create property identifier with position
         prop_ident := new(Node)
         prop_ident^ = Identifier{
             name = property_name,
+            position = property_position, // Store identifier position
         }
         property.property = prop_ident
 
@@ -2498,7 +2693,8 @@ print_ast :: proc(node: ^Node, indent: int) {
 
     #partial switch n in node^ {
     case Pointing:
-        fmt.printf("%sPointing ->\n", indent_str)
+        fmt.printf("%sPointing -> (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.name != nil {
             fmt.printf("%s  Name:\n", indent_str)
             print_ast(n.name, indent + 4)
@@ -2509,7 +2705,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case PointingPull:
-        fmt.printf("%sPointingPull <-\n", indent_str)
+        fmt.printf("%sPointingPull <- (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.name != nil {
             fmt.printf("%s  Name:\n", indent_str)
             print_ast(n.name, indent + 4)
@@ -2522,7 +2719,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case EventPush:
-        fmt.printf("%sEventPush >-\n", indent_str)
+        fmt.printf("%sEventPush >- (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.name != nil {
             fmt.printf("%s  Name:\n", indent_str)
             print_ast(n.name, indent + 4)
@@ -2535,7 +2733,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case EventPull:
-        fmt.printf("%sEventPull -<\n", indent_str)
+        fmt.printf("%sEventPull -< (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.name != nil {
             fmt.printf("%s  Name:\n", indent_str)
             print_ast(n.name, indent + 4)
@@ -2548,7 +2747,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case ResonancePush:
-        fmt.printf("%sResonancePush >>-\n", indent_str)
+        fmt.printf("%sResonancePush >>- (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.name != nil {
             fmt.printf("%s  Name:\n", indent_str)
             print_ast(n.name, indent + 4)
@@ -2561,7 +2761,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case ResonancePull:
-        fmt.printf("%sResonancePull -<<\n", indent_str)
+        fmt.printf("%sResonancePull -<< (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.name != nil {
             fmt.printf("%s  Name:\n", indent_str)
             print_ast(n.name, indent + 4)
@@ -2574,10 +2775,12 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Identifier:
-        fmt.printf("%sIdentifier: %s\n", indent_str, n.name)
+        fmt.printf("%sIdentifier: %s (line %d, column %d)\n",
+            indent_str, n.name, n.position.line, n.position.column)
 
     case Scope:
-        fmt.printf("%sScope\n", indent_str)
+        fmt.printf("%sScope (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         for i := 0; i < len(n.value); i += 1 {
             entry_node := new(Node)
             entry_node^ = n.value[i]
@@ -2585,7 +2788,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Override:
-        fmt.printf("%sOverride\n", indent_str)
+        fmt.printf("%sOverride (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.source != nil {
             fmt.printf("%s  Source:\n", indent_str)
             print_ast(n.source, indent + 4)
@@ -2598,7 +2802,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Property:
-        fmt.printf("%sProperty\n", indent_str)
+        fmt.printf("%sProperty (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.source != nil {
             fmt.printf("%s  Source:\n", indent_str)
             print_ast(n.source, indent + 4)
@@ -2609,27 +2814,31 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Expand:
-        fmt.printf("%sExpand\n", indent_str)
+        fmt.printf("%sExpand (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.target != nil {
             fmt.printf("%s  Target:\n", indent_str)
             print_ast(n.target, indent + 4)
         }
 
     case FileSystem:
-        fmt.printf("%sFileSystem\n", indent_str)
+        fmt.printf("%sFileSystem (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.target != nil {
             fmt.printf("%s  Target:\n", indent_str)
             print_ast(n.target, indent + 4)
         }
 
     case Product:
-        fmt.printf("%sProduct ->\n", indent_str)
+        fmt.printf("%sProduct -> (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.value != nil {
             print_ast(n.value, indent + 2)
         }
 
     case Pattern:
-        fmt.printf("%sPattern ?\n", indent_str)
+        fmt.printf("%sPattern ? (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.target != nil {
             fmt.printf("%s  Target:\n", indent_str)
             print_ast(n.target, indent + 4)
@@ -2639,7 +2848,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         fmt.printf("%s  Branches\n", indent_str)
         for i := 0; i < len(n.value); i += 1 {
             branch := n.value[i]
-            fmt.printf("%s    Branch:\n", indent_str)
+            fmt.printf("%s    Branch: (line %d, column %d)\n",
+                indent_str, branch.position.line, branch.position.column)
             if branch.source != nil {
                 fmt.printf("%s      Pattern:\n", indent_str)
                 print_ast(branch.source, indent + 8)
@@ -2651,7 +2861,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Constraint:
-        fmt.printf("%sConstraint:\n", indent_str)
+        fmt.printf("%sConstraint: (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         print_ast(n.constraint, indent + 2)
         if n.value != nil {
             fmt.printf("%s  Value:\n", indent_str)
@@ -2661,7 +2872,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Operator:
-        fmt.printf("%sOperator '%v'\n", indent_str, n.kind)
+        fmt.printf("%sOperator '%v' (line %d, column %d)\n",
+            indent_str, n.kind, n.position.line, n.position.column)
         if n.left != nil {
             fmt.printf("%s  Left:\n", indent_str)
             print_ast(n.left, indent + 4)
@@ -2715,16 +2927,19 @@ print_ast :: proc(node: ^Node, indent: int) {
         for i := 0; i < parallel_open; i += 1 { pattern = strings.concatenate({pattern, "]"}) }
         for i := 0; i < threading_open; i += 1 { pattern = strings.concatenate({pattern, ">"}) }
 
-        fmt.printf("%sExecute %s\n", indent_str, pattern)
+        fmt.printf("%sExecute %s (line %d, column %d)\n",
+            indent_str, pattern, n.position.line, n.position.column)
         if n.value != nil {
             print_ast(n.value, indent + 2)
         }
 
     case Literal:
-        fmt.printf("%sLiteral (%v): %s\n", indent_str, n.kind, n.value)
+        fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n",
+            indent_str, n.kind, n.value, n.position.line, n.position.column)
 
     case Range:
-        fmt.printf("%sRange\n", indent_str)
+        fmt.printf("%sRange (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
         if n.start != nil {
             fmt.printf("%s  Start:\n", indent_str)
             print_ast(n.start, indent + 4)

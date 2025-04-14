@@ -995,7 +995,52 @@ get_position_from_node :: proc(node: ^Node) -> Position {
 
 	// In real implementation, position would be stored in the node
 	// For now we return a placeholder
-	return Position{line = 1, column = 1, offset = 0}
+    #partial switch n in node^ {
+    case Scope:
+        return n.position
+    case Pointing:
+        return n.position
+    case PointingPull:
+        return n.position
+    case EventPush:
+        return n.position
+    case EventPull:
+        return n.position
+    case ResonancePush:
+        return n.position
+    case ResonancePull:
+        return n.position
+    case Override:
+        return n.position
+    case Pattern:
+        return n.position
+    case Constraint:
+        return n.position
+    case Product:
+        return n.position
+    case Execute:
+        return n.position
+    case Expand:
+        return n.position
+    case Identifier:
+        return n.position
+    case Literal:
+        return n.position
+    case Operator:
+        return n.position
+    case Range:
+        return n.position
+    case Property:
+        return n.position
+    case Branch:
+        return n.position
+    case FileSystem:
+        return n.position
+    case:
+        // If we encounter an unknown node type, print a warning for debugging
+        fmt.eprintln("Unknown node type in get_position_from_node")
+        return Position{line = 0, column = 0, offset = 0}
+    }
 }
 
 // ===========================================================================
