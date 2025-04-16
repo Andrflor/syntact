@@ -775,8 +775,6 @@ Constraint :: struct {
  * ExecutionWrapper represents a single wrapper in a potentially nested execution pattern
  */
 ExecutionWrapper :: enum {
-    None,
-    Sequential,      // !
     Threading,       // < >
     Parallel_CPU,    // [ ]
     Background,      // ( )
@@ -1075,8 +1073,10 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
     case .LeftBrace:
         return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .CALL}
+    case .LeftBracket:
+        return Parse_Rule{prefix = nil, infix = parse_left_bracket, precedence = .CALL}
     case .LeftParen:
-        return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_grouping, infix = parse_left_paren, precedence = .CALL}
     case .RightBrace:
         return Parse_Rule{prefix = nil, infix = nil, precedence = .NONE}
     case .At:
@@ -1091,7 +1091,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Postfix operator
     case .Execute:
-    return Parse_Rule{prefix = nil, infix = parse_execute, precedence = .ASSIGNMENT}
+    return Parse_Rule{prefix = nil, infix = parse_execute, precedence = .CALL}
 
 
     // Binary operators
@@ -1106,13 +1106,13 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .BitAnd:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .BitOr:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .BITWISE}
     case .BitXor:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .Equal:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
     case .LessThan:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+        return Parse_Rule{prefix = nil, infix = parse_less_than, precedence = .COMPARISON}
     case .GreaterThan:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
     case .LessEqual:
@@ -1347,110 +1347,22 @@ parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
  * parse_execute handles postfix execution patterns like expr<[!]>
  */
 parse_execute :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
-    // Save position of the execution token
+    // Save position of the ! token
     position := parser.current_token.position
 
-    // Create execute node to hold the left expression
+    // Create execute node
     execute := Execute{
-      value = left,
-      wrappers = make([dynamic]ExecutionWrapper, 0, 2),
-      position = position, // Store position
+        value = left,
+        wrappers = make([dynamic]ExecutionWrapper, 0, 0),
+        position = position,
     }
 
-    // Process the execution pattern
-    found_exclamation := false
-
-    // Stack to track opening symbols for proper nesting
-    stack := make([dynamic]Token_Kind, 0, 2)
-    defer delete(stack)
-
-    // Continue parsing until we have a complete execution pattern
-    for {
-        current := parser.current_token.kind
-
-        if current == .Execute {
-            // Add sequential execution wrapper
-            append_elem(&execute.wrappers, ExecutionWrapper.Sequential)
-            found_exclamation = true
-            advance_token(parser)
-        } else if current == .LeftParen {
-            // Start of background execution
-            append_elem(&execute.wrappers, ExecutionWrapper.Background)
-            append_elem(&stack, Token_Kind.LeftParen)
-            advance_token(parser)
-        } else if current == .LessThan {
-            // Start of threading execution
-            append_elem(&execute.wrappers, ExecutionWrapper.Threading)
-            append_elem(&stack, Token_Kind.LessThan)
-            advance_token(parser)
-        } else if current == .LeftBracket {
-            // Start of parallel CPU execution
-            append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
-            append_elem(&stack, Token_Kind.LeftBracket)
-            advance_token(parser)
-        } else if current == .BitOr {
-            // Check if it's an opening or closing BitOr
-            if len(stack) > 0 && stack[len(stack)-1] == Token_Kind.BitOr {
-                // Closing BitOr, pop from stack
-                ordered_remove(&stack, len(stack)-1)
-                advance_token(parser)
-            } else {
-                // Opening BitOr, push to stack
-                append_elem(&execute.wrappers, ExecutionWrapper.GPU)
-                append_elem(&stack, Token_Kind.BitOr)
-                advance_token(parser)
-            }
-        } else if current == .RightParen {
-            // Check for corresponding opening parenthesis
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftParen {
-                error_at_current(parser, "Mismatched ')' in execution pattern")
-                return nil
-            }
-
-            // Pop opening parenthesis from stack
-            ordered_remove(&stack, len(stack)-1)
-            advance_token(parser)
-        } else if current == .GreaterThan {
-            // Check for corresponding opening angle bracket
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LessThan {
-                error_at_current(parser, "Mismatched '>' in execution pattern")
-                return nil
-            }
-
-            // Pop opening angle bracket from stack
-            ordered_remove(&stack, len(stack)-1)
-            advance_token(parser)
-        } else if current == .RightBracket {
-            // Check for corresponding opening square bracket
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftBracket {
-                error_at_current(parser, "Mismatched ']' in execution pattern")
-                return nil
-            }
-
-            // Pop opening square bracket from stack
-            ordered_remove(&stack, len(stack)-1)
-            advance_token(parser)
-        } else {
-            // No more execution pattern tokens
-            break
-        }
-
-        // If stack is empty and we found an exclamation mark, we're done
-        if len(stack) == 0 && found_exclamation {
-            break
-        }
-    }
-
-    // Ensure we found an exclamation mark
-    if !found_exclamation {
-        error_at_current(parser, "Execution pattern must contain '!'")
-        return nil
-    }
+    // Consume the ! token
+    advance_token(parser)
 
     // Create and return execute node
     result := new(Node)
     result^ = execute
-
     return result
 }
 
@@ -1648,6 +1560,253 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     return expr
+}
+
+
+/*
+ * Parse bitwise or with disambiguation for GPU execution
+ */
+parse_bit_or :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Try to parse as an execution pattern
+    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+        return node
+    }
+
+    // Otherwise, parse as normal binary operator
+    position := parser.current_token.position
+    advance_token(parser) // Consume |
+
+    // Get precedence rule for BitOr
+    precedence := Precedence.BITWISE
+
+    // Parse right operand with higher precedence
+    right := parse_expression(parser, Precedence(int(precedence) + 1))
+    if right == nil {
+        error_at_current(parser, "Expected expression after '|'")
+        return nil
+    }
+
+    // Create operator node
+    op := Operator{
+        kind = .BitOr,
+        left = left,
+        right = right,
+        position = position,
+    }
+
+    result := new(Node)
+    result^ = op
+    return result
+}
+
+/*
+ * try_parse_wrapped_execute attempts to parse an execute wrapped.
+ * If successful, it returns the Execute node and true.
+ * If not an execution pattern, it returns nil and false and leaves the parser position unchanged.
+ */
+try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool) {
+   // Save original parser position to restore if this isn't an execution pattern
+    original_position := parser.lexer.position
+    original_current := parser.current_token
+    original_peek := parser.peek_token
+
+    // Stack to track opening symbols for proper nesting
+    stack := make([dynamic]Token_Kind)
+    defer delete(stack)
+
+    // Create execute node
+    execute := Execute{
+        value = left,
+        wrappers = make([dynamic]ExecutionWrapper, 0, 4),
+        position = parser.current_token.position,
+    }
+
+    // Process the execution pattern
+    found_exclamation := false
+
+    // Continue parsing until we have a complete execution pattern
+    for {
+        current := parser.current_token.kind
+
+        #partial switch current {
+        case .Execute:
+            // Add sequential execution wrapper
+            found_exclamation = true
+            advance_token(parser)
+
+        case .LeftParen:
+            // Start of background execution
+            append_elem(&execute.wrappers, ExecutionWrapper.Background)
+            append_elem(&stack, Token_Kind.LeftParen)
+            advance_token(parser)
+
+        case .LessThan:
+            // Start of threading execution
+            append_elem(&execute.wrappers, ExecutionWrapper.Threading)
+            append_elem(&stack, Token_Kind.LessThan)
+            advance_token(parser)
+
+        case .LeftBracket:
+            // Start of parallel CPU execution
+            append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
+            append_elem(&stack, Token_Kind.LeftBracket)
+            advance_token(parser)
+
+        case .BitOr:
+            // Check if it's an opening or closing BitOr
+            if len(stack) > 0 && stack[len(stack)-1] == Token_Kind.BitOr {
+                // Closing BitOr, pop from stack
+                ordered_remove(&stack, len(stack)-1)
+                advance_token(parser)
+            } else {
+                // Opening BitOr, push to stack
+                append_elem(&execute.wrappers, ExecutionWrapper.GPU)
+                append_elem(&stack, Token_Kind.BitOr)
+                advance_token(parser)
+            }
+
+        case .RightParen:
+            // Check for corresponding opening parenthesis
+            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftParen {
+                error_at_current(parser, "Mismatched ')' in execution pattern")
+                parser.lexer.position = original_position
+                parser.current_token = original_current
+                parser.peek_token = original_peek
+                return nil, false
+            }
+
+            // Pop opening parenthesis from stack
+            ordered_remove(&stack, len(stack)-1)
+            advance_token(parser)
+
+        case .GreaterThan:
+            // Check for corresponding opening angle bracket
+            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LessThan {
+                error_at_current(parser, "Mismatched '>' in execution pattern")
+                parser.lexer.position = original_position
+                parser.current_token = original_current
+                parser.peek_token = original_peek
+                return nil, false
+            }
+
+            // Pop opening angle bracket from stack
+            ordered_remove(&stack, len(stack)-1)
+            advance_token(parser)
+
+        case .RightBracket:
+            // Check for corresponding opening square bracket
+            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftBracket {
+                error_at_current(parser, "Mismatched ']' in execution pattern")
+                parser.lexer.position = original_position
+                parser.current_token = original_current
+                parser.peek_token = original_peek
+                return nil, false
+            }
+
+            // Pop opening square bracket from stack
+            ordered_remove(&stack, len(stack)-1)
+            advance_token(parser)
+
+        case:
+            // No more execution pattern tokens
+            break
+        }
+
+        // If stack is empty and we found an exclamation mark, we're done
+        if len(stack) == 0 && found_exclamation {
+            break
+        }
+    }
+
+    // Verify we've found an exclamation mark and all opening tokens have been closed
+    if !found_exclamation {
+        error_at_current(parser, "Execution pattern must contain '!'")
+        parser.lexer.position = original_position
+        parser.current_token = original_current
+        parser.peek_token = original_peek
+        return nil, false
+    }
+
+    if len(stack) > 0 {
+        // We have unclosed tokens in the stack
+        token_kind := stack[len(stack)-1]
+        closing_token: string
+
+        #partial switch token_kind {
+        case .LeftParen:    closing_token = ")"
+        case .LeftBracket:  closing_token = "]"
+        case .LessThan:     closing_token = ">"
+        case .BitOr:        closing_token = "|"
+        }
+
+        error_at_current(parser, fmt.tprintf("Unclosed '%v' in execution pattern, expected '%s'",
+                                           token_kind, closing_token))
+        parser.lexer.position = original_position
+        parser.current_token = original_current
+        parser.peek_token = original_peek
+        return nil, false
+    }
+
+    // Successfully parsed an execution pattern
+    result := new(Node)
+    result^ = execute
+    return result, true
+}
+
+/*
+ * Parse less than with disambiguation for threading execution
+ */
+parse_less_than :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Try to parse as an execution pattern
+    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+        return node
+    }
+
+    // Otherwise, parse as normal binary operator
+    position := parser.current_token.position
+    advance_token(parser) // Consume
+
+    // It's a simple < operator
+    op := Operator{
+        kind = .LessThan,
+        left = left,
+        right = parse_expression(parser, Precedence(int(Precedence.COMPARISON) + 1)),
+        position = position,
+    }
+
+    result := new(Node)
+    result^ = op
+    return result
+}
+
+/*
+ * Parse left bracket with disambiguation for parallel execution
+ */
+parse_left_bracket :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Try to parse as an execution pattern
+    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+        return node
+    }
+
+    // Otherwise, handle as array access or other bracket-related syntax
+    // Implement array access or other bracket-related parsing here
+    error_at_current(parser, "Array access or indexing not yet implemented")
+    return nil
+}
+
+/*
+ * Parse left parenthesis with disambiguation for background execution
+ */
+parse_left_paren :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+    // Try to parse as an execution pattern
+    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+        return node
+    }
+
+    // Otherwise, handle as function call or grouping
+    // Implement function call parsing here
+    error_at_current(parser, "Function call not yet implemented")
+    return nil
 }
 
 /*
@@ -2886,52 +3045,45 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Execute:
-        // Build the pattern string with proper nesting
-        pattern := ""
+      // Build the pattern string with proper nesting
+      pattern := ""
 
-        // Count each wrapper type
-        sequential_count := 0
-        threading_open := 0
-        parallel_open := 0
-        background_open := 0
-        gpu_open := 0
+      // First build opening symbols - from outer (first in list) to inner
+      for wrapper in n.wrappers {
+        switch wrapper {
+          case .Threading:
+              pattern = strings.concatenate({pattern, "<"})
+          case .Parallel_CPU:
+              pattern = strings.concatenate({pattern, "["})
+          case .Background:
+              pattern = strings.concatenate({pattern, "("})
+          case .GPU:
+              pattern = strings.concatenate({pattern, "|"})
+          }
+      }
 
-        // Count the wrappers
-        for wrapper in n.wrappers {
-            #partial switch wrapper {
-            case .Sequential:
-                sequential_count += 1
-            case .Threading:
-                threading_open += 1
-            case .Parallel_CPU:
-                parallel_open += 1
-            case .Background:
-                background_open += 1
-            case .GPU:
-                gpu_open += 1
-            }
+      // Add exclamation mark in the middle
+      pattern = strings.concatenate({pattern, "!"})
+
+      // Add closing symbols in reverse order - from inner to outer
+      for i := len(n.wrappers)-1; i >= 0; i -= 1 {
+        switch n.wrappers[i] {
+          case .Threading:
+              pattern = strings.concatenate({pattern, ">"})
+          case .Parallel_CPU:
+              pattern = strings.concatenate({pattern, "]"})
+          case .Background:
+              pattern = strings.concatenate({pattern, ")"})
+          case .GPU:
+              pattern = strings.concatenate({pattern, "|"})
         }
+      }
 
-        // Build pattern
-        for i := 0; i < threading_open; i += 1 { pattern = strings.concatenate({pattern, "<"}) }
-        for i := 0; i < parallel_open; i += 1 { pattern = strings.concatenate({pattern, "["}) }
-        for i := 0; i < background_open; i += 1 { pattern = strings.concatenate({pattern, "("}) }
-        for i := 0; i < gpu_open; i += 1 { pattern = strings.concatenate({pattern, "|"}) }
-
-        // Add the exclamation mark
-        pattern = strings.concatenate({pattern, "!"})
-
-        // Add closing symbols
-        for i := 0; i < gpu_open; i += 1 { pattern = strings.concatenate({pattern, "|"}) }
-        for i := 0; i < background_open; i += 1 { pattern = strings.concatenate({pattern, ")"}) }
-        for i := 0; i < parallel_open; i += 1 { pattern = strings.concatenate({pattern, "]"}) }
-        for i := 0; i < threading_open; i += 1 { pattern = strings.concatenate({pattern, ">"}) }
-
-        fmt.printf("%sExecute %s (line %d, column %d)\n",
-            indent_str, pattern, n.position.line, n.position.column)
-        if n.value != nil {
-            print_ast(n.value, indent + 2)
-        }
+      fmt.printf("%sExecute %s (line %d, column %d)\n",
+          indent_str, pattern, n.position.line, n.position.column)
+      if n.value != nil {
+          print_ast(n.value, indent + 2)
+      }
 
     case Literal:
         fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n",

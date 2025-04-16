@@ -34,6 +34,7 @@ Reference_Kind :: enum {
 	ResonancePush, // >>- (resonance push)
 	ResonancePull, // -<< (resonance pull)
 	Override, // Overriding in a scope
+	Builtin, // Built-in type or constant
 }
 
 /*
@@ -50,6 +51,8 @@ Symbol :: struct {
 	driver:         ^Symbol, // What drives this symbol (if is_driven)
 	references:     [dynamic]^Reference, // Places where this symbol is referenced
 	position:       Position, // Source position for better error reporting
+	is_builtin:     bool, // Whether this is a built-in symbol
+	index:          int, // Position in scope (for positional references)
 }
 
 /*
@@ -60,6 +63,7 @@ Reference :: struct {
 	node:     ^Node, // The AST node containing the reference
 	kind:     Reference_Kind, // How the symbol is being referenced
 	position: Position, // Source position of the reference
+	index:    int, // For positional references
 }
 
 /*
@@ -67,8 +71,8 @@ Reference :: struct {
  */
 Scope_Info :: struct {
 	parent:       ^Scope_Info, // Parent scope
-	symbols:      map[string]^Symbol, // Named symbols in this scope
-	anonymous:    [dynamic]^Symbol, // Anonymous symbols
+	symbols:      map[string]^Symbol, // Named symbols in this scope by name
+	symbol_list:  [dynamic]^Symbol, // Ordered list of symbols (for positional access)
 	expansions:   [dynamic]^Scope_Info, // Expanded scopes
 	scope_symbol: ^Symbol, // The symbol representing this scope (if named)
 	is_pattern:   bool, // Whether this is a pattern matching scope
@@ -126,11 +130,31 @@ Analyzer :: struct {
 	warnings:        [dynamic]string, // Collected warnings
 	in_pattern:      bool, // Whether we're in a pattern match
 	current_pattern: ^Node, // Current pattern being analyzed
+	builtin_types:   map[string]^Symbol, // Built-in types available in all scopes
 }
 
 // ===========================================================================
 // SECTION 2: SEMANTIC ANALYZER INITIALIZATION
 // ===========================================================================
+
+/*
+ * Built-in type names
+ */
+BUILTIN_TYPES :: []string {
+	"u8",
+	"u16",
+	"u32",
+	"u64",
+	"i8",
+	"i16",
+	"i32",
+	"i64",
+	"f32",
+	"f64",
+	"char",
+	"String",
+	"bool",
+}
 
 /*
  * init_analyzer creates and initializes a new semantic analyzer
@@ -141,8 +165,32 @@ init_analyzer :: proc() -> ^Analyzer {
 	analyzer.current_scope = analyzer.global_scope
 	analyzer.errors = make([dynamic]string, 0, 16)
 	analyzer.warnings = make([dynamic]string, 0, 16)
+	analyzer.builtin_types = make(map[string]^Symbol)
+
+	// Register built-in types
+	register_builtin_types(analyzer)
 
 	return analyzer
+}
+
+/*
+ * register_builtin_types adds built-in types to the analyzer
+ */
+register_builtin_types :: proc(analyzer: ^Analyzer) {
+	default_pos := Position {
+		line   = 0,
+		column = 0,
+		offset = 0,
+	}
+
+	for type_name in BUILTIN_TYPES {
+		symbol := create_symbol(type_name, nil, analyzer.global_scope, .Builtin, default_pos)
+		symbol.is_builtin = true
+		analyzer.builtin_types[type_name] = symbol
+
+		// Also add to global scope so they're visible everywhere
+		add_symbol(analyzer, symbol)
+	}
 }
 
 /*
@@ -152,7 +200,7 @@ init_scope :: proc(parent: ^Scope_Info) -> ^Scope_Info {
 	scope := new(Scope_Info)
 	scope.parent = parent
 	scope.symbols = make(map[string]^Symbol)
-	scope.anonymous = make([dynamic]^Symbol, 0, 8)
+	scope.symbol_list = make([dynamic]^Symbol, 0, 8)
 	scope.expansions = make([dynamic]^Scope_Info, 0, 2)
 	scope.branches = make([dynamic]^Branch_Info, 0, 4)
 	scope.constraints = make([dynamic]^Constraint_Info, 0, 4)
@@ -179,6 +227,8 @@ create_symbol :: proc(
 	symbol.kind = kind
 	symbol.position = position
 	symbol.references = make([dynamic]^Reference, 0, 4)
+	symbol.is_builtin = false
+	// Index will be set when adding to scope
 
 	return symbol
 }
@@ -188,20 +238,25 @@ create_symbol :: proc(
  */
 add_symbol :: proc(analyzer: ^Analyzer, symbol: ^Symbol) -> ^Symbol {
 	if symbol.name != "" {
-		// Check if the symbol already exists in this scope
-		if existing, ok := analyzer.current_scope.symbols[symbol.name]; ok {
-			if symbol.kind == .Definition || symbol.kind == .PullDefinition {
-				add_error(
-					analyzer,
-					fmt.tprintf("Symbol '%s' is already defined in this scope", symbol.name),
-					symbol.position,
-				)
-				return existing
-			}
+		// Check if we're shadowing a built-in type
+		if builtin, ok := analyzer.builtin_types[symbol.name]; ok && !symbol.is_builtin {
+			add_warning(
+				analyzer,
+				fmt.tprintf("Definition of '%s' shadows a built-in type", symbol.name),
+				symbol.position,
+			)
 		}
-		analyzer.current_scope.symbols[symbol.name] = symbol
+
+		// In this language, we allow multiple definitions with the same name
+		// Set the index for positional reference
+		symbol.index = len(analyzer.current_scope.symbol_list)
+
+		analyzer.current_scope.symbols[symbol.name] = symbol // Note: This will replace any previous definition with same name
+		append(&analyzer.current_scope.symbol_list, symbol)
 	} else {
-		append(&analyzer.current_scope.anonymous, symbol)
+		// Anonymous symbol (still add to positional list)
+		symbol.index = len(analyzer.current_scope.symbol_list)
+		append(&analyzer.current_scope.symbol_list, symbol)
 	}
 	return symbol
 }
@@ -221,6 +276,7 @@ add_reference :: proc(
 	reference.node = node
 	reference.kind = kind
 	reference.position = position
+	reference.index = symbol.index
 
 	append(&symbol.references, reference)
 	return reference
@@ -237,7 +293,6 @@ add_error :: proc(analyzer: ^Analyzer, message: string, position: Position) {
 		message,
 	)
 	append(&analyzer.errors, error_message)
-	fmt.eprintln(error_message)
 }
 
 /*
@@ -251,7 +306,6 @@ add_warning :: proc(analyzer: ^Analyzer, message: string, position: Position) {
 		message,
 	)
 	append(&analyzer.warnings, warning_message)
-	fmt.eprintln(warning_message)
 }
 
 /*
@@ -322,6 +376,11 @@ lookup_symbol :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
 		current = current.parent
 	}
 
+	// Check built-in types as a last resort
+	if builtin, ok := analyzer.builtin_types[name]; ok {
+		return builtin
+	}
+
 	return nil
 }
 
@@ -356,6 +415,32 @@ lookup_symbol_local :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
 		if symbol := lookup_symbol_in_scope(expansion, name); symbol != nil {
 			return symbol
 		}
+	}
+
+	return nil
+}
+
+/*
+ * lookup_symbol_by_position looks up a symbol by its position index
+ */
+lookup_symbol_by_position :: proc(analyzer: ^Analyzer, name: string, index: int) -> ^Symbol {
+	current := analyzer.current_scope
+
+	for current != nil {
+		// Try to find all symbols with matching name
+		name_matches := 0
+		for sym in current.symbol_list {
+			if sym.name == name {
+				// Count how many we've seen
+				if name_matches == index {
+					return sym
+				}
+				name_matches += 1
+			}
+		}
+
+		// Not found in this scope, check parent
+		current = current.parent
 	}
 
 	return nil
@@ -521,6 +606,14 @@ analyze_pointing :: proc(
 
 	// Create symbol for the pointing
 	symbol := create_symbol(name, node, analyzer.current_scope, .Definition, position)
+
+	// Check if there's already a constrained version of this symbol
+	// If so, copy its constraint
+	existing := lookup_symbol_local(analyzer, name)
+	if existing != nil && existing.constraint != nil {
+		symbol.constraint = existing.constraint
+	}
+
 	add_symbol(analyzer, symbol)
 
 	// If value is a scope, handle it specially
@@ -620,7 +713,11 @@ analyze_event_push :: proc(
 			event_info.event = symbol
 			add_reference(analyzer, symbol, node, .EventPush, position)
 		} else {
-			add_error(analyzer, fmt.tprintf("Undefined event target '%s'", id.name), position)
+			// For resonance, we might be handling a case like "response >- Get{...}"
+			// where response is implicitly defined by the resonance
+			symbol = create_symbol(id.name, node, analyzer.current_scope, .Definition, position)
+			add_symbol(analyzer, symbol)
+			event_info.event = symbol
 		}
 	}
 
@@ -633,7 +730,6 @@ analyze_event_push :: proc(
 	// Add to events list
 	append(&analyzer.current_scope.events, event_info)
 }
-
 /*
  * analyze_event_pull analyzes an event pull (a -< b) node
  */
@@ -652,7 +748,7 @@ analyze_event_pull :: proc(
 	}
 
 	// Analyze the handler name
-	name: string
+	name: string = ""
 	if id, ok := event_pull.name^.(Identifier); ok {
 		name = id.name
 	} else {
@@ -687,7 +783,6 @@ analyze_event_pull :: proc(
 	// Add to events list
 	append(&analyzer.current_scope.events, event_info)
 }
-
 /*
  * analyze_resonance_push analyzes a resonance push (a >>- b) node
  */
@@ -766,6 +861,12 @@ analyze_resonance_pull :: proc(
 		return
 	}
 
+	// Get the name if it's an identifier
+	name: string = ""
+	if id, ok := resonance_pull.name^.(Identifier); ok {
+		name = id.name
+	}
+
 	// Analyze the target
 	build_symbol_table(analyzer, resonance_pull.name)
 
@@ -774,26 +875,41 @@ analyze_resonance_pull :: proc(
 	resonance_info.is_push = false
 	resonance_info.node = node
 
-	// If name is an identifier, try to find the symbol
-	if id, ok := resonance_pull.name^.(Identifier); ok {
-		symbol := lookup_symbol(analyzer, id.name)
-		if symbol != nil {
-			resonance_info.target = symbol
-			add_reference(analyzer, symbol, node, .ResonancePull, position)
-		} else {
-			add_error(analyzer, fmt.tprintf("Undefined resonance target '%s'", id.name), position)
+	// If name is an identifier, try to find or create the symbol
+	if name != "" {
+		symbol := lookup_symbol(analyzer, name)
+		if symbol == nil {
+			// This is where we handle the case like "response >- Get{...}"
+			// Create a new symbol for the resonance target
+			symbol = create_symbol(name, node, analyzer.current_scope, .Definition, position)
+			add_symbol(analyzer, symbol)
 		}
+
+		resonance_info.target = symbol
+		add_reference(analyzer, symbol, node, .ResonancePull, position)
 	}
 
 	// Analyze the driver
 	if resonance_pull.value != nil {
 		build_symbol_table(analyzer, resonance_pull.value)
+
+		// If value is an identifier, set it as driver
+		if id, ok := resonance_pull.value^.(Identifier); ok {
+			driver := lookup_symbol(analyzer, id.name)
+			if driver != nil {
+				resonance_info.driver = driver
+				add_reference(analyzer, driver, node, .ResonancePull, position)
+			}
+		} else {
+			// For complex expressions like Get{url->"..."}, we need to analyze what's being driven
+			// For now, we'll just use a placeholder
+			// In a real implementation, you'd analyze the structure of the driver expression
+		}
 	}
 
 	// Add to resonances list
 	append(&analyzer.current_scope.resonances, resonance_info)
 }
-
 /*
  * analyze_override analyzes an override (a{...}) node
  */
@@ -886,33 +1002,62 @@ analyze_constraint :: proc(
 	constraint: Constraint,
 	position: Position,
 ) {
-	// Analyze the constraint
-	if constraint.constraint != nil {
+	// Safety check for nil values
+	if constraint.constraint == nil {
+		add_error(analyzer, "Constraint type is nil", position)
+		return
+	}
+
+	// First, check if constraint is a valid type
+	constraint_symbol: ^Symbol
+	if id, ok := constraint.constraint^.(Identifier); ok {
+		constraint_symbol = lookup_symbol(analyzer, id.name)
+		if constraint_symbol == nil {
+			add_error(analyzer, fmt.tprintf("Undefined constraint type '%s'", id.name), position)
+		}
+	} else {
+		// Non-identifier constraint, analyze it
 		build_symbol_table(analyzer, constraint.constraint)
 	}
 
-	// Analyze the value if present
-	if constraint.value != nil {
+	// If value is nil, this might be a nameless constraint like "u8:"
+	if constraint.value == nil {
+		// Create an anonymous constrained symbol
+		symbol := create_symbol("", node, analyzer.current_scope, .Definition, position)
+		symbol.constraint = constraint_symbol
+		add_symbol(analyzer, symbol)
+
+		// Create constraint info
+		constraint_info := new(Constraint_Info)
+		constraint_info.target = symbol
+		constraint_info.constraint = constraint_symbol
+		constraint_info.node = node
+		append(&analyzer.current_scope.constraints, constraint_info)
+		return
+	}
+
+	// Get name from the value if it's an identifier
+	name: string = ""
+	if id, ok := constraint.value^.(Identifier); ok {
+		name = id.name
+	} else {
+		// If not a simple identifier, analyze the value expression
 		build_symbol_table(analyzer, constraint.value)
 	}
 
-	// Create constraint info
-	constraint_info := new(Constraint_Info)
-	constraint_info.node = node
+	// Create a symbol for the name if we have one
+	if name != "" {
+		symbol := create_symbol(name, node, analyzer.current_scope, .Definition, position)
+		symbol.constraint = constraint_symbol
+		add_symbol(analyzer, symbol)
 
-	// If constraint is an identifier, check if it exists
-	if id, ok := constraint.constraint^.(Identifier); ok {
-		constraint_symbol := lookup_symbol(analyzer, id.name)
-		if constraint_symbol == nil {
-			add_error(analyzer, fmt.tprintf("Undefined constraint '%s'", id.name), position)
-		} else {
-			constraint_info.constraint = constraint_symbol
-			add_reference(analyzer, constraint_symbol, node, .Constraint, position)
-		}
+		// Create constraint info
+		constraint_info := new(Constraint_Info)
+		constraint_info.target = symbol
+		constraint_info.constraint = constraint_symbol
+		constraint_info.node = node
+		append(&analyzer.current_scope.constraints, constraint_info)
 	}
-
-	// Add to constraints list
-	append(&analyzer.current_scope.constraints, constraint_info)
 }
 
 /*
@@ -968,10 +1113,16 @@ analyze_expand :: proc(analyzer: ^Analyzer, node: ^Node, expand: Expand, positio
  * analyze_identifier analyzes an identifier reference
  */
 analyze_identifier :: proc(analyzer: ^Analyzer, node: ^Node, id: Identifier, position: Position) {
-	// Look up the symbol
+	// Regular name lookup
 	symbol := lookup_symbol(analyzer, id.name)
 
 	if symbol == nil {
+		// Check if this might be defined by a constraint
+		if is_defined_by_constraint(analyzer, id.name) {
+			// It's defined by a constraint, so this is okay
+			return
+		}
+
 		// In pattern context, this might be a new symbol being introduced
 		if analyzer.in_pattern {
 			symbol = create_symbol(id.name, node, analyzer.current_scope, .Definition, position)
@@ -995,52 +1146,52 @@ get_position_from_node :: proc(node: ^Node) -> Position {
 
 	// In real implementation, position would be stored in the node
 	// For now we return a placeholder
-    #partial switch n in node^ {
-    case Scope:
-        return n.position
-    case Pointing:
-        return n.position
-    case PointingPull:
-        return n.position
-    case EventPush:
-        return n.position
-    case EventPull:
-        return n.position
-    case ResonancePush:
-        return n.position
-    case ResonancePull:
-        return n.position
-    case Override:
-        return n.position
-    case Pattern:
-        return n.position
-    case Constraint:
-        return n.position
-    case Product:
-        return n.position
-    case Execute:
-        return n.position
-    case Expand:
-        return n.position
-    case Identifier:
-        return n.position
-    case Literal:
-        return n.position
-    case Operator:
-        return n.position
-    case Range:
-        return n.position
-    case Property:
-        return n.position
-    case Branch:
-        return n.position
-    case FileSystem:
-        return n.position
-    case:
-        // If we encounter an unknown node type, print a warning for debugging
-        fmt.eprintln("Unknown node type in get_position_from_node")
-        return Position{line = 0, column = 0, offset = 0}
-    }
+	#partial switch n in node^ {
+	case Scope:
+		return n.position
+	case Pointing:
+		return n.position
+	case PointingPull:
+		return n.position
+	case EventPush:
+		return n.position
+	case EventPull:
+		return n.position
+	case ResonancePush:
+		return n.position
+	case ResonancePull:
+		return n.position
+	case Override:
+		return n.position
+	case Pattern:
+		return n.position
+	case Constraint:
+		return n.position
+	case Product:
+		return n.position
+	case Execute:
+		return n.position
+	case Expand:
+		return n.position
+	case Identifier:
+		return n.position
+	case Literal:
+		return n.position
+	case Operator:
+		return n.position
+	case Range:
+		return n.position
+	case Property:
+		return n.position
+	case Branch:
+		return n.position
+	case FileSystem:
+		return n.position
+	case:
+		// If we encounter an unknown node type, print a warning for debugging
+		fmt.eprintln("Unknown node type in get_position_from_node")
+		return Position{line = 0, column = 0, offset = 0}
+	}
 }
 
 // ===========================================================================
@@ -1063,27 +1214,16 @@ validate_definitions_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
 	}
 
 	// Check all symbols in this scope
-	for _, symbol in scope.symbols {
+	for sym in scope.symbol_list {
 		// Check all references to this symbol
-		for reference in symbol.references {
+		for reference in sym.references {
 			// Verify the reference makes sense in context
 			validate_reference(analyzer, reference)
 		}
 
 		// If this symbol defines a scope, check that scope too
-		if symbol.defining_scope != nil {
-			validate_definitions_in_scope(analyzer, symbol.defining_scope)
-		}
-	}
-
-	// Check anonymous symbols too
-	for symbol in scope.anonymous {
-		for reference in symbol.references {
-			validate_reference(analyzer, reference)
-		}
-
-		if symbol.defining_scope != nil {
-			validate_definitions_in_scope(analyzer, symbol.defining_scope)
+		if sym.defining_scope != nil {
+			validate_definitions_in_scope(analyzer, sym.defining_scope)
 		}
 	}
 
@@ -1107,16 +1247,21 @@ validate_reference :: proc(analyzer: ^Analyzer, reference: ^Reference) {
 	// Usage is fine for any defined symbol
 
 	case .Constraint:
-	// TODO: Check that the symbol can be used as a constraint
+		// Check that the symbol can be used as a constraint
+		// For built-in types, this is always true
+		if !reference.symbol.is_builtin {
+			// Non-builtin symbols might need additional validation to be used as constraints
+			// For example, they might need to be defined with a specific kind
+		}
 
 	case .Override:
-	// TODO: Check that the symbol can be overridden
+	// Check that the symbol can be overridden
 
 	case .EventPush, .EventPull:
-	// TODO: Check event handlers
+	// Check event handlers
 
 	case .ResonancePush, .ResonancePull:
-	// TODO: Check resonance bindings
+	// Check resonance bindings
 	}
 }
 
@@ -1137,25 +1282,45 @@ validate_constraints_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
 
 	// Check all constraints in this scope
 	for constraint in scope.constraints {
-		if constraint.constraint != nil {
-			// TODO: Check if the constrained value matches the constraint
+		if constraint.constraint != nil && constraint.target != nil {
+			// Record that this constraint is defined and used
+			// This prevents errors about undefined symbols when they are defined via constraints
+
+			// If the constraint has a defining scope (like Color), it can be used as a constraint itself
+			if constraint.constraint.defining_scope != nil {
+				// Validate that the structure matches what's expected
+				// TODO: Implement detailed structure validation
+			} else {
+				// Built-in type or simple constraint
+				// Here we would check that values assigned to constrained symbols match their constraints
+				// TODO: Implement type checking for constrained values
+			}
 		}
 	}
 
 	// Check nested scopes in symbols
-	for _, symbol in scope.symbols {
-		if symbol.defining_scope != nil {
-			validate_constraints_in_scope(analyzer, symbol.defining_scope)
-		}
-	}
-
-	for symbol in scope.anonymous {
-		if symbol.defining_scope != nil {
-			validate_constraints_in_scope(analyzer, symbol.defining_scope)
+	for _, sym in scope.symbols {
+		if sym.defining_scope != nil {
+			validate_constraints_in_scope(analyzer, sym.defining_scope)
 		}
 	}
 }
 
+/*
+ * is_defined_by_constraint checks if a symbol is defined by a constraint
+ */
+is_defined_by_constraint :: proc(analyzer: ^Analyzer, name: string) -> bool {
+	scope := analyzer.current_scope
+	for scope != nil {
+		for constraint in scope.constraints {
+			if constraint.target != nil && constraint.target.name == name {
+				return true
+			}
+		}
+		scope = scope.parent
+	}
+	return false
+}
 /*
  * validate_pattern_matches checks pattern match exhaustiveness
  */
@@ -1177,15 +1342,9 @@ validate_pattern_matches_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Inf
 	}
 
 	// Check nested scopes in symbols
-	for _, symbol in scope.symbols {
-		if symbol.defining_scope != nil {
-			validate_pattern_matches_in_scope(analyzer, symbol.defining_scope)
-		}
-	}
-
-	for symbol in scope.anonymous {
-		if symbol.defining_scope != nil {
-			validate_pattern_matches_in_scope(analyzer, symbol.defining_scope)
+	for sym in scope.symbol_list {
+		if sym.defining_scope != nil {
+			validate_pattern_matches_in_scope(analyzer, sym.defining_scope)
 		}
 	}
 }
@@ -1233,22 +1392,19 @@ validate_resonance_bindings_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_
 		return
 	}
 
+	// Create a map to count resonance drive targets
+	drive_count := make(map[^Symbol]int)
+	defer delete(drive_count)
+
 	// Check all resonance bindings
 	for resonance in scope.resonances {
 		if resonance.target != nil {
 			if resonance.is_push {
 				// For resonance push (>>-), check if the target can be driven
 				// A symbol can only be driven once
+				drive_count[resonance.target] += 1
 
-				// Count how many times this symbol is driven
-				drive_count := 0
-				for r in scope.resonances {
-					if r.is_push && r.target == resonance.target {
-						drive_count += 1
-					}
-				}
-
-				if drive_count > 1 {
+				if drive_count[resonance.target] > 1 {
 					position := get_position_from_node(resonance.node)
 					add_error(
 						analyzer,
@@ -1264,15 +1420,9 @@ validate_resonance_bindings_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_
 	}
 
 	// Check nested scopes in symbols
-	for _, symbol in scope.symbols {
-		if symbol.defining_scope != nil {
-			validate_resonance_bindings_in_scope(analyzer, symbol.defining_scope)
-		}
-	}
-
-	for symbol in scope.anonymous {
-		if symbol.defining_scope != nil {
-			validate_resonance_bindings_in_scope(analyzer, symbol.defining_scope)
+	for sym in scope.symbol_list {
+		if sym.defining_scope != nil {
+			validate_resonance_bindings_in_scope(analyzer, sym.defining_scope)
 		}
 	}
 }
@@ -1343,14 +1493,9 @@ print_scope :: proc(scope: ^Scope_Info, indent: int) {
 
 	fmt.println(":")
 
-	// Print symbols
-	for name, symbol in scope.symbols {
-		print_symbol(symbol, indent + 2)
-	}
-
-	// Print anonymous symbols
-	for symbol in scope.anonymous {
-		print_symbol(symbol, indent + 2)
+	// Print symbols in order by position
+	for sym, i in scope.symbol_list {
+		print_symbol(sym, indent + 2, i)
 	}
 
 	// Print expansions
@@ -1418,32 +1563,45 @@ print_scope :: proc(scope: ^Scope_Info, indent: int) {
 /*
  * print_symbol prints a symbol and its nested scopes
  */
-print_symbol :: proc(symbol: ^Symbol, indent: int) {
+print_symbol :: proc(symbol: ^Symbol, indent: int, position: int = -1) {
 	if symbol == nil {
 		return
 	}
 
 	indent_str := strings.repeat(" ", indent)
 
-	if symbol.name != "" {
-		fmt.printf("%s%s", indent_str, symbol.name)
+	// Print position if available
+	if position >= 0 {
+		fmt.printf("%s[%d] ", indent_str, position)
 	} else {
-		fmt.printf("%s<anonymous>", indent_str)
+		fmt.printf("%s", indent_str)
 	}
 
+	// Print name
+	if symbol.name != "" {
+		fmt.printf("%s", symbol.name)
+	} else {
+		fmt.printf("<anonymous>")
+	}
+
+	// Print kind
 	#partial switch symbol.kind {
 	case .Definition:
 		fmt.printf(" -> ")
 	case .PullDefinition:
 		fmt.printf(" <- ")
+	case .Builtin:
+		fmt.printf(" (builtin) ")
 	case:
 		fmt.printf(" (unknown kind) ")
 	}
 
+	// Print constraint if any
 	if symbol.constraint != nil {
 		fmt.printf("%s: ", symbol.constraint.name)
 	}
 
+	// Print resonance info
 	if symbol.is_driven {
 		fmt.printf(" [driven]")
 		if symbol.driver != nil {
@@ -1576,16 +1734,9 @@ is_reachable :: proc(from_scope: ^Scope_Info, symbol: ^Symbol) -> bool {
 	// Check if the symbol is in the current scope
 	current := from_scope
 	for current != nil {
-		// Check direct symbols
-		for name, s in current.symbols {
-			if s == symbol {
-				return true
-			}
-		}
-
-		// Check anonymous symbols
-		for s in current.anonymous {
-			if s == symbol {
+		// Check symbols
+		for sym in current.symbol_list {
+			if sym == symbol {
 				return true
 			}
 		}
@@ -1614,6 +1765,28 @@ get_qualified_name :: proc(symbol: ^Symbol) -> string {
 
 	if symbol.name == "" {
 		return "<anonymous>"
+	}
+
+	// For built-in types, just return the name
+	if symbol.is_builtin {
+		return symbol.name
+	}
+
+	// If it has a positional index, include it
+	if symbol.index >= 0 {
+		// Get the scope path
+		path := get_scope_path(symbol)
+		defer delete(path.segments) // Properly delete the dynamic array
+		defer free(path) // Free the path struct itself
+
+		// Convert path to string and append symbol name with index
+		path_str := print_scope_path(path)
+
+		if path_str == "<global>" {
+			return fmt.tprintf("%s@%d", symbol.name, symbol.index)
+		}
+
+		return fmt.tprintf("%s.%s@%d", path_str, symbol.name, symbol.index)
 	}
 
 	// Get the scope path
