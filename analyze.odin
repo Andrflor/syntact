@@ -1,1597 +1,1642 @@
 package compiler
 
 import "core:fmt"
-import "core:hash"
-
-
-import "core:mem" // For performance tracking
 import "core:slice"
 import "core:strings"
+import "core:hash"
 import "core:time"
 
 /*
  * ====================================================================
- * Semantic Analysis for Homoiconic Language - OPTIMIZED VERSION
+ * Semantic Analysis for Homoiconic Language
  * ====================================================================
  */
 
 // ===========================================================================
-// SECTION 1: SYMBOL TABLE STRUCTURE
+// SECTION 1: DATA STRUCTURES
 // ===========================================================================
 
 Reference_Kind :: enum {
-	Definition,
-	PullDefinition,
-	Usage,
-	Constraint,
-	EventPush,
-	EventPull,
-	ResonancePush,
-	ResonancePull,
-	Override,
-	Builtin,
-}
-
-Symbol :: struct {
-	name:           string,
-	node:           ^Node,
-	scope:          ^Scope_Info,
-	kind:           Reference_Kind,
-	defining_scope: ^Scope_Info,
-	constraint:     ^Symbol,
-	is_driven:      bool,
-	driver:         ^Symbol,
-	references:     [dynamic]^Reference,
-	position:       Position,
-	is_builtin:     bool,
-	index:          int,
-	// New: Symbol flags for fast lookup
-	flags:          bit_set[Symbol_Flag],
-	hash:           u64, // Name hash for faster comparison
+    Definition,
+    PullDefinition,
+    Usage,
+    Constraint,
+    EventPush,
+    EventPull,
+    ResonancePush,
+    ResonancePull,
+    Override,
+    Builtin,
 }
 
 Symbol_Flag :: enum {
-	Visited, // For traversal marking
-	Referenced, // Whether symbol is referenced
-	HasConstraint, // Shortcut for constraint presence
-	IsEvent, // Marks event symbols
-	IsResonance, // Marks resonance symbols
+    Visited,
+    Referenced,
+    HasConstraint,
+    IsEvent,
+    IsResonance,
+    IsExported,
+    InGlobalIndex,
+    Builtin,
+    IsDriven,
 }
 
+// Symbol structure
+Symbol :: struct {
+    name:           string,
+    node:           ^Node,
+    scope:          ^Scope_Info,
+    kind:           Reference_Kind,
+    defining_scope: ^Scope_Info,
+    constraint:     ^Symbol,
+    driver:         ^Symbol,
+    position:       Position,
+    flags:          bit_set[Symbol_Flag],
+    hash:           u64,              // Pre-computed name hash
+    index:          int,              // Position in scope
+    references:     [dynamic]^Reference,
+}
+
+// Reference structure
 Reference :: struct {
-	symbol:   ^Symbol,
-	node:     ^Node,
-	kind:     Reference_Kind,
-	position: Position,
-	index:    int,
+    symbol:   ^Symbol,
+    node:     ^Node,
+    kind:     Reference_Kind,
+    position: Position,
+    index:    int,
 }
 
+// Scope structure with optimized lookups
 Scope_Info :: struct {
-	parent:       ^Scope_Info,
-	symbols:      map[string]^Symbol, // Named symbols lookup
-	symbol_list:  [dynamic]^Symbol, // Ordered list for traversal
-	expansions:   [dynamic]^Scope_Info,
-	scope_symbol: ^Symbol,
-	is_pattern:   bool,
-	branches:     [dynamic]^Branch_Info,
-	constraints:  [dynamic]^Constraint_Info,
-	resonances:   [dynamic]^Resonance_Info,
-	events:       [dynamic]^Event_Info,
-	// New: Symbol cache for fast lookup without string comparison
-	symbol_cache: map[u64]^Symbol, // Hash -> Symbol for faster lookups
+    parent:         ^Scope_Info,
+    symbols:        map[string]^Symbol,
+    symbol_list:    [dynamic]^Symbol,
+    expansions:     [dynamic]^Scope_Info,
+    scope_symbol:   ^Symbol,
+    is_pattern:     bool,
+
+    // Analysis data
+    branches:       [dynamic]Branch_Info,
+    constraints:    [dynamic]Constraint_Info,
+    resonances:     [dynamic]Resonance_Info,
+    events:         [dynamic]Event_Info,
+
+    // Lookup optimizations
+    symbol_cache:   map[u64]^Symbol,       // Hash-based lookup
+    visible_symbols: map[string]^Symbol,   // Pre-computed visible symbols
+    is_visible_computed: bool,
 }
 
-Constraint_Info :: struct {
-	target:     ^Symbol,
-	constraint: ^Symbol,
-	node:       ^Node,
-}
-
+// Simplified branch info
 Branch_Info :: struct {
-	pattern:          ^Node,
-	result:           ^Node,
-	captured_symbols: map[string]^Symbol,
+    pattern:          ^Node,
+    result:           ^Node,
+    captured_symbols: map[string]^Symbol,
+}
+
+// Constraint info
+Constraint_Info :: struct {
+    target:     ^Symbol,
+    constraint: ^Symbol,
+    node:       ^Node,
+}
+
+// Event and resonance info
+Event_Info :: struct {
+    event:   ^Symbol,
+    handler: ^Node,
+    is_push: bool,
+    node:    ^Node,
 }
 
 Resonance_Info :: struct {
-	target:  ^Symbol,
-	driver:  ^Symbol,
-	is_push: bool,
-	node:    ^Node,
+    target:  ^Symbol,
+    driver:  ^Symbol,
+    is_push: bool,
+    node:    ^Node,
 }
 
-Event_Info :: struct {
-	event:   ^Symbol,
-	handler: ^Node,
-	is_push: bool,
-	node:    ^Node,
+// Work queue for non-recursive traversal
+Work_Item :: struct {
+    node:  ^Node,
+    scope: ^Scope_Info,
 }
 
+// Main analyzer structure
 Analyzer :: struct {
-	global_scope:     ^Scope_Info,
-	current_scope:    ^Scope_Info,
-	errors:           [dynamic]string,
-	warnings:         [dynamic]string,
-	in_pattern:       bool,
-	current_pattern:  ^Node,
-	builtin_types:    map[string]^Symbol,
-	// New: Performance metrics
-	metrics:          struct {
-		symbol_lookups:   int,
-		symbol_creations: int,
-		scope_traversals: int,
-		start_time:       time.Time,
-	},
-	// New: Caches for optimization
-	defined_symbols:  map[string]bool, // Cache for faster is_defined_by_constraint
-	resolution_cache: map[string]^Symbol, // Cache resolved symbol lookups
+    global_scope:    ^Scope_Info,
+    current_scope:   ^Scope_Info,
+
+    // Error and warning storage
+    errors:          [dynamic]string,
+    warnings:        [dynamic]string,
+
+    // State tracking
+    in_pattern:      bool,
+    current_pattern: ^Node,
+
+    // Global symbol tables and caches
+    builtin_types:   map[string]^Symbol,
+    global_symbols:  map[string]^Symbol,       // All symbols by qualified name
+    defined_symbols: map[string]bool,          // Cache for constraint checking
+    resolution_cache: map[u64]^Symbol,         // Hash-based resolution cache
+
+    // Processing queue
+    work_queue:      [dynamic]Work_Item,
+    queue_head:      int,
 }
 
 // ===========================================================================
-// SECTION 2: SEMANTIC ANALYZER INITIALIZATION
+// SECTION 2: INITIALIZATION
 // ===========================================================================
 
-BUILTIN_TYPES :: []string {
-	"u8",
-	"u16",
-	"u32",
-	"u64",
-	"i8",
-	"i16",
-	"i32",
-	"i64",
-	"f32",
-	"f64",
-	"char",
-	"String",
-	"bool",
-}
-
+// Initialize the analyzer
 init_analyzer :: proc() -> ^Analyzer {
-	analyzer := new(Analyzer)
-	analyzer.global_scope = init_scope(nil)
-	analyzer.current_scope = analyzer.global_scope
-	analyzer.errors = make([dynamic]string, 0, 16)
-	analyzer.warnings = make([dynamic]string, 0, 16)
-	analyzer.builtin_types = make(map[string]^Symbol)
-	analyzer.defined_symbols = make(map[string]bool)
-	analyzer.resolution_cache = make(map[string]^Symbol, 128) // Pre-allocate for performance
+    analyzer := new(Analyzer)
 
-	// Track startup time
-	analyzer.metrics.start_time = time.now()
+    // Init core structures
+    analyzer.global_scope = init_scope(nil)
+    analyzer.current_scope = analyzer.global_scope
 
-	register_builtin_types(analyzer)
-	return analyzer
+    // Error tracking
+    analyzer.errors = make([dynamic]string)
+    analyzer.warnings = make([dynamic]string)
+
+    // Init caches and indices
+    analyzer.builtin_types = make(map[string]^Symbol)
+    analyzer.global_symbols = make(map[string]^Symbol)
+    analyzer.defined_symbols = make(map[string]bool)
+    analyzer.resolution_cache = make(map[u64]^Symbol)
+
+    // Work queue
+    analyzer.work_queue = make([dynamic]Work_Item)
+    analyzer.queue_head = 0
+
+    // Register built-ins
+    register_builtin_types(analyzer)
+
+    return analyzer
 }
 
-register_builtin_types :: proc(analyzer: ^Analyzer) {
-	default_pos := Position {
-		line   = 0,
-		column = 0,
-		offset = 0,
-	}
-
-	for type_name in BUILTIN_TYPES {
-		symbol := create_symbol(type_name, nil, analyzer.global_scope, .Builtin, default_pos)
-		symbol.is_builtin = true
-		analyzer.builtin_types[type_name] = symbol
-		add_symbol(analyzer, symbol)
-	}
-}
-
+// Initialize a scope
 init_scope :: proc(parent: ^Scope_Info) -> ^Scope_Info {
-	scope := new(Scope_Info)
-	scope.parent = parent
-	scope.symbols = make(map[string]^Symbol, 32) // Pre-allocate for better performance
-	scope.symbol_list = make([dynamic]^Symbol, 0, 32) // Increased capacity
-	scope.expansions = make([dynamic]^Scope_Info, 0, 4)
-	scope.branches = make([dynamic]^Branch_Info, 0, 4)
-	scope.constraints = make([dynamic]^Constraint_Info, 0, 8)
-	scope.resonances = make([dynamic]^Resonance_Info, 0, 4)
-	scope.events = make([dynamic]^Event_Info, 0, 4)
-	scope.symbol_cache = make(map[u64]^Symbol, 32) // For hash-based lookups
-	return scope
+    scope := new(Scope_Info)
+    scope.parent = parent
+
+    // Initialize maps and arrays
+    scope.symbols = make(map[string]^Symbol)
+    scope.symbol_list = make([dynamic]^Symbol)
+    scope.expansions = make([dynamic]^Scope_Info)
+    scope.branches = make([dynamic]Branch_Info)
+    scope.constraints = make([dynamic]Constraint_Info)
+    scope.resonances = make([dynamic]Resonance_Info)
+    scope.events = make([dynamic]Event_Info)
+
+    // Optimization caches
+    scope.symbol_cache = make(map[u64]^Symbol)
+
+    return scope
 }
 
+// Register built-in types
+register_builtin_types :: proc(analyzer: ^Analyzer) {
+    default_pos := Position{line = 0, column = 0, offset = 0}
+
+    BUILTIN_TYPES := []string{
+        "u8", "u16", "u32", "u64",
+        "i8", "i16", "i32", "i64",
+        "f32", "f64", "char", "String", "bool",
+    }
+
+    for type_name in BUILTIN_TYPES {
+        symbol := create_symbol(analyzer, type_name, nil, analyzer.global_scope, .Builtin, default_pos)
+        symbol.flags += {.Builtin}
+        analyzer.builtin_types[type_name] = symbol
+        add_symbol(analyzer, symbol)
+    }
+}
+
+// Create a new symbol
 create_symbol :: proc(
-	name: string,
-	node: ^Node,
-	scope: ^Scope_Info,
-	kind: Reference_Kind,
-	position: Position,
+    analyzer: ^Analyzer,
+    name: string,
+    node: ^Node,
+    scope: ^Scope_Info,
+    kind: Reference_Kind,
+    position: Position
 ) -> ^Symbol {
-	symbol := new(Symbol)
-	symbol.name = name
-	symbol.node = node
-	symbol.scope = scope
-	symbol.kind = kind
-	symbol.position = position
-	symbol.references = make([dynamic]^Reference, 0, 8) // Increased initial capacity
-	symbol.is_builtin = false
-	symbol.hash = calculate_symbol_hash(name)
+    // Create the symbol
+    symbol := new(Symbol)
+    symbol.name = name
+    symbol.node = node
+    symbol.scope = scope
+    symbol.kind = kind
+    symbol.position = position
+    symbol.references = make([dynamic]^Reference)
 
-	return symbol
+    // Pre-compute hash for faster lookups
+    symbol.hash = calculate_symbol_hash(name)
+
+    return symbol
 }
 
-// Fast hash calculation for symbols
+// Fast hash calculation
 calculate_symbol_hash :: proc(name: string) -> u64 {
-	if len(name) == 0 {
-		return 0
-	}
-	return hash.fnv64a(transmute([]byte)name)
+    if len(name) == 0 {
+        return 0
+    }
+    return hash.fnv64a(transmute([]byte)name)
 }
 
-add_symbol :: proc(analyzer: ^Analyzer, symbol: ^Symbol) -> ^Symbol {
-	analyzer.metrics.symbol_creations += 1
-
-	if symbol.name != "" {
-		if builtin, ok := analyzer.builtin_types[symbol.name]; ok && !symbol.is_builtin {
-			add_warning(
-				analyzer,
-				fmt.tprintf("Definition of '%s' shadows a built-in type", symbol.name),
-				symbol.position,
-			)
-		}
-
-		symbol.index = len(analyzer.current_scope.symbol_list)
-		analyzer.current_scope.symbols[symbol.name] = symbol
-
-		// Add to hash cache for faster lookups
-		analyzer.current_scope.symbol_cache[symbol.hash] = symbol
-
-		// Add to defined symbols for fast constraint checking
-		analyzer.defined_symbols[symbol.name] = true
-	} else {
-		symbol.index = len(analyzer.current_scope.symbol_list)
-	}
-
-	append(&analyzer.current_scope.symbol_list, symbol)
-	return symbol
-}
-
+// Add a reference to a symbol
 add_reference :: proc(
-	analyzer: ^Analyzer,
-	symbol: ^Symbol,
-	node: ^Node,
-	kind: Reference_Kind,
-	position: Position,
+    analyzer: ^Analyzer,
+    symbol: ^Symbol,
+    node: ^Node,
+    kind: Reference_Kind,
+    position: Position,
 ) -> ^Reference {
-	reference := new(Reference)
-	reference.symbol = symbol
-	reference.node = node
-	reference.kind = kind
-	reference.position = position
-	reference.index = symbol.index
+    if symbol == nil do return nil
 
-	append(&symbol.references, reference)
-	symbol.flags += {.Referenced} // Mark as referenced using flags
-	return reference
+    // Create reference
+    ref := new(Reference)
+    ref.symbol = symbol
+    ref.node = node
+    ref.kind = kind
+    ref.position = position
+    ref.index = symbol.index
+
+    // Store reference
+    symbol.flags += {.Referenced}
+    append(&symbol.references, ref)
+
+    return ref
 }
 
-// Optimized error/warning handling
+// Add a symbol to the current scope
+add_symbol :: proc(analyzer: ^Analyzer, symbol: ^Symbol) -> ^Symbol {
+    if symbol == nil do return nil
+
+    current := analyzer.current_scope
+
+    if symbol.name != "" {
+        // Check for built-in shadows
+        if builtin, ok := analyzer.builtin_types[symbol.name]; ok && .Builtin not_in symbol.flags {
+            add_warning(analyzer, fmt.tprintf("Definition of '%s' shadows a built-in type", symbol.name), symbol.position)
+        }
+
+        // Set index and add to lookup tables
+        symbol.index = len(current.symbol_list)
+        current.symbols[symbol.name] = symbol
+        current.symbol_cache[symbol.hash] = symbol
+
+        // Add to global index if exported
+        if .IsExported in symbol.flags || (symbol.name[0] >= 'A' && symbol.name[0] <= 'Z') {
+            qualified_name := get_qualified_name(symbol)
+            analyzer.global_symbols[qualified_name] = symbol
+            symbol.flags += {.InGlobalIndex}
+        }
+
+        // Add to defined symbols for constraint checking
+        analyzer.defined_symbols[symbol.name] = true
+    }
+
+    // Add to symbol list
+    append(&current.symbol_list, symbol)
+
+    // Invalidate visible symbols cache for parent scopes
+    invalidate_visible_cache(current.parent)
+
+    return symbol
+}
+
+// Invalidate visible symbols cache up the scope chain
+invalidate_visible_cache :: proc(scope: ^Scope_Info) {
+    current := scope
+    for current != nil {
+        if current.is_visible_computed {
+            current.is_visible_computed = false
+            if current.visible_symbols != nil {
+                clear(&current.visible_symbols)
+            }
+        }
+        current = current.parent
+    }
+}
+
+// Add an error
 add_error :: proc(analyzer: ^Analyzer, message: string, position: Position) {
-	error_message := fmt.tprintf(
-		"Error at line %d, column %d: %s",
-		position.line,
-		position.column,
-		message,
-	)
-	append(&analyzer.errors, error_message)
+    error_message := fmt.tprintf(
+        "Error at line %d, column %d: %s",
+        position.line,
+        position.column,
+        message,
+    )
+    append(&analyzer.errors, error_message)
 }
 
+// Add a warning
 add_warning :: proc(analyzer: ^Analyzer, message: string, position: Position) {
-	warning_message := fmt.tprintf(
-		"Warning at line %d, column %d: %s",
-		position.line,
-		position.column,
-		message,
-	)
-	append(&analyzer.warnings, warning_message)
+    warning_message := fmt.tprintf(
+        "Warning at line %d, column %d: %s",
+        position.line,
+        position.column,
+        message,
+    )
+    append(&analyzer.warnings, warning_message)
 }
 
+// Enter a scope with visible symbols pre-computation
 enter_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) -> ^Scope_Info {
-	prev_scope := analyzer.current_scope
-	analyzer.current_scope = scope
-	return prev_scope
+    prev_scope := analyzer.current_scope
+    analyzer.current_scope = scope
+
+    // Prepare visible symbols table if needed
+    if !scope.is_visible_computed && scope.parent != nil {
+        if scope.visible_symbols == nil {
+            scope.visible_symbols = make(map[string]^Symbol)
+        } else {
+            clear(&scope.visible_symbols)
+        }
+
+        // Add all symbols from parent scopes
+        compute_visible_symbols(scope)
+        scope.is_visible_computed = true
+    }
+
+    return prev_scope
 }
 
+// Pre-compute all symbols visible from a scope
+compute_visible_symbols :: proc(scope: ^Scope_Info) {
+    if scope == nil || scope.parent == nil do return
+
+    // Ensure parent has computed its visible symbols
+    parent := scope.parent
+    if !parent.is_visible_computed {
+        if parent.visible_symbols == nil {
+            parent.visible_symbols = make(map[string]^Symbol)
+        } else {
+            clear(&parent.visible_symbols)
+        }
+
+        compute_visible_symbols(parent)
+        parent.is_visible_computed = true
+    }
+
+    // Copy all symbols from parent's visible set
+    for name, symbol in parent.visible_symbols {
+        scope.visible_symbols[name] = symbol
+    }
+
+    // Add parent's direct symbols
+    for name, symbol in parent.symbols {
+        // Skip if already defined in a closer scope
+        if _, exists := scope.visible_symbols[name]; !exists {
+            scope.visible_symbols[name] = symbol
+        }
+    }
+
+    // Handle expansions from parent
+    for expansion in parent.expansions {
+        add_expansion_symbols(scope, expansion)
+    }
+}
+
+// Add all symbols from an expansion to the visible symbols
+add_expansion_symbols :: proc(scope: ^Scope_Info, expansion: ^Scope_Info) {
+    for name, symbol in expansion.symbols {
+        // Skip if already defined in a closer scope
+        if _, exists := scope.visible_symbols[name]; !exists {
+            scope.visible_symbols[name] = symbol
+        }
+    }
+
+    // Add nested expansions
+    for nested in expansion.expansions {
+        add_expansion_symbols(scope, nested)
+    }
+}
+
+// Leave a scope
 leave_scope :: proc(analyzer: ^Analyzer, prev_scope: ^Scope_Info) {
-	analyzer.current_scope = prev_scope
+    analyzer.current_scope = prev_scope
 }
 
+// Create a scope for a node
 create_scope_for_node :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	name: string,
-	position: Position,
+    analyzer: ^Analyzer,
+    node: ^Node,
+    name: string,
+    position: Position,
 ) -> ^Scope_Info {
-	scope := init_scope(analyzer.current_scope)
-	symbol := create_symbol(name, node, analyzer.current_scope, .Definition, position)
-	symbol.defining_scope = scope
-	scope.scope_symbol = symbol
-	add_symbol(analyzer, symbol)
-	return scope
+    // Create scope
+    scope := init_scope(analyzer.current_scope)
+
+    // Create symbol for the scope
+    symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position)
+    symbol.defining_scope = scope
+    scope.scope_symbol = symbol
+
+    // Register scope
+    add_symbol(analyzer, symbol)
+
+    return scope
 }
 
 // ===========================================================================
-// SECTION 3: SYMBOL LOOKUP - OPTIMIZED
+// SECTION 3: OPTIMIZED SYMBOL LOOKUP
 // ===========================================================================
 
-// Cache key generation for symbol lookups
-generate_lookup_key :: proc(scope_ptr: rawptr, name: string) -> string {
-	return fmt.tprintf("%v:%s", scope_ptr, name)
+// Fast cache key for resolution cache
+generate_lookup_key :: proc(scope_ptr: rawptr, name_hash: u64) -> u64 {
+    // Combine scope pointer and name hash
+    ptr_val := u64(uintptr(scope_ptr))
+    return ptr_val ~ ((name_hash << 16) | (name_hash >> 48))
 }
 
+// Optimized symbol lookup with caching
 lookup_symbol :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
-	analyzer.metrics.symbol_lookups += 1
+    // Pre-compute hash for faster lookups
+    name_hash := calculate_symbol_hash(name)
 
-	// Check resolution cache first for huge performance gain
-	cache_key := generate_lookup_key(analyzer.current_scope, name)
-	if cached, found := analyzer.resolution_cache[cache_key]; found {
-		return cached
-	}
+    // Try visible symbols cache first (fastest path)
+    scope := analyzer.current_scope
+    if scope.is_visible_computed {
+        if symbol, ok := scope.visible_symbols[name]; ok {
+            return symbol
+        }
+    }
 
-	// Hash-based lookup
-	name_hash := calculate_symbol_hash(name)
+    // Try resolution cache next
+    cache_key := generate_lookup_key(scope, name_hash)
+    if cached, found := analyzer.resolution_cache[cache_key]; found {
+        return cached
+    }
 
-	current := analyzer.current_scope
-	for current != nil {
-		analyzer.metrics.scope_traversals += 1
+    // Try current scope's direct symbol table
+    if symbol, ok := scope.symbol_cache[name_hash]; ok && symbol.name == name {
+        // Found in current scope
+        analyzer.resolution_cache[cache_key] = symbol
+        return symbol
+    }
 
-		// Try hash lookup first (much faster)
-		if symbol, ok := current.symbol_cache[name_hash]; ok && symbol.name == name {
-			// Cache the result for future lookups
-			analyzer.resolution_cache[cache_key] = symbol
-			return symbol
-		}
+    // Original lookup with scope traversal
+    symbol := lookup_symbol_in_scope_chain(analyzer, scope, name, name_hash)
 
-		// Fallback to map lookup
-		if symbol, ok := current.symbols[name]; ok {
-			// Cache the result for future lookups
-			analyzer.resolution_cache[cache_key] = symbol
-			return symbol
-		}
+    // Cache the result (even if nil)
+    analyzer.resolution_cache[cache_key] = symbol
 
-		// Check expansions - use optimized batch processing
-		for expansion in current.expansions {
-			if symbol := lookup_symbol_in_scope(expansion, name, name_hash); symbol != nil {
-				// Cache the result
-				analyzer.resolution_cache[cache_key] = symbol
-				return symbol
-			}
-		}
-
-		current = current.parent
-	}
-
-	// Check built-in types as a last resort
-	if builtin, ok := analyzer.builtin_types[name]; ok {
-		analyzer.resolution_cache[cache_key] = builtin
-		return builtin
-	}
-
-	// Cache the negative result too
-	analyzer.resolution_cache[cache_key] = nil
-	return nil
+    return symbol
 }
 
+// Optimized scope chain traversal
+lookup_symbol_in_scope_chain :: proc(analyzer: ^Analyzer, scope: ^Scope_Info, name: string, name_hash: u64) -> ^Symbol {
+    current := scope
+
+    for current != nil {
+        // Try hash lookup first (faster)
+        if symbol, ok := current.symbol_cache[name_hash]; ok {
+            if symbol.name == name { // Verify in case of hash collision
+                return symbol
+            }
+        }
+
+        // Fallback to map lookup
+        if symbol, ok := current.symbols[name]; ok {
+            return symbol
+        }
+
+        // Check expansions
+        for expansion in current.expansions {
+            if symbol := lookup_symbol_in_scope(expansion, name, name_hash); symbol != nil {
+                return symbol
+            }
+        }
+
+        current = current.parent
+    }
+
+    // Try builtin types as last resort
+    if builtin, ok := analyzer.builtin_types[name]; ok {
+        return builtin
+    }
+
+    // Try global index for exported symbols
+    qualified_name := name  // For top-level symbols, qualified = simple name
+    if symbol, ok := analyzer.global_symbols[qualified_name]; ok {
+        // Verify symbol is visible from current scope
+        if is_symbol_visible_from(scope, symbol) {
+            return symbol
+        }
+    }
+
+    return nil
+}
+
+// Check if a symbol is visible from a scope
+is_symbol_visible_from :: proc(from_scope: ^Scope_Info, symbol: ^Symbol) -> bool {
+    if from_scope == nil || symbol == nil {
+        return false
+    }
+
+    // Builtin symbols are visible everywhere
+    if .Builtin in symbol.flags {
+        return true
+    }
+
+    // Check if symbol is in the current scope or any parent
+    current := from_scope
+    for current != nil {
+        if symbol.scope == current {
+            return true
+        }
+
+        // Check expansions
+        for expansion in current.expansions {
+            if is_in_expansion(expansion, symbol) {
+                return true
+            }
+        }
+
+        current = current.parent
+    }
+
+    return false
+}
+
+// Check if a symbol is in an expansion
+is_in_expansion :: proc(expansion: ^Scope_Info, symbol: ^Symbol) -> bool {
+    if expansion == nil || symbol == nil {
+        return false
+    }
+
+    // Check direct symbols
+    if symbol.scope == expansion {
+        return true
+    }
+
+    // Check nested expansions
+    for nested in expansion.expansions {
+        if is_in_expansion(nested, symbol) {
+            return true
+        }
+    }
+
+    return false
+}
+
+// Optimized scope lookup
 lookup_symbol_in_scope :: proc(scope: ^Scope_Info, name: string, name_hash: u64 = 0) -> ^Symbol {
-	hash := name_hash == 0 ? calculate_symbol_hash(name) : name_hash
+    if scope == nil {
+        return nil
+    }
 
-	// Try direct hash lookup first (faster)
-	if symbol, ok := scope.symbol_cache[hash]; ok && symbol.name == name {
-		return symbol
-	}
+    hash := name_hash == 0 ? calculate_symbol_hash(name) : name_hash
 
-	// Fallback to map lookup
-	if symbol, ok := scope.symbols[name]; ok {
-		return symbol
-	}
+    // Try hash lookup first (faster)
+    if symbol, ok := scope.symbol_cache[hash]; ok && symbol.name == name {
+        return symbol
+    }
 
-	// Check expansions
-	for expansion in scope.expansions {
-		if symbol := lookup_symbol_in_scope(expansion, name, hash); symbol != nil {
-			return symbol
-		}
-	}
+    // Fallback to map lookup
+    if symbol, ok := scope.symbols[name]; ok {
+        return symbol
+    }
 
-	return nil
+    // Check expansions
+    for expansion in scope.expansions {
+        if symbol := lookup_symbol_in_scope(expansion, name, hash); symbol != nil {
+            return symbol
+        }
+    }
+
+    return nil
 }
 
+// Optimized local symbol lookup
 lookup_symbol_local :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
-	// Use hash for faster lookup
-	name_hash := calculate_symbol_hash(name)
+    name_hash := calculate_symbol_hash(name)
+    scope := analyzer.current_scope
 
-	// Try hash-based lookup first
-	if symbol, ok := analyzer.current_scope.symbol_cache[name_hash]; ok && symbol.name == name {
-		return symbol
-	}
+    // Try hash lookup first
+    if symbol, ok := scope.symbol_cache[name_hash]; ok && symbol.name == name {
+        return symbol
+    }
 
-	// Fallback to map
-	if symbol, ok := analyzer.current_scope.symbols[name]; ok {
-		return symbol
-	}
+    // Fallback to map
+    if symbol, ok := scope.symbols[name]; ok {
+        return symbol
+    }
 
-	// Check expansions
-	for expansion in analyzer.current_scope.expansions {
-		if symbol := lookup_symbol_in_scope(expansion, name, name_hash); symbol != nil {
-			return symbol
-		}
-	}
+    // Check expansions
+    for expansion in scope.expansions {
+        if symbol := lookup_symbol_in_scope(expansion, name, name_hash); symbol != nil {
+            return symbol
+        }
+    }
 
-	return nil
-}
-
-lookup_symbol_by_position :: proc(analyzer: ^Analyzer, name: string, index: int) -> ^Symbol {
-	// Optimization: If index is out of bounds for most scopes, return early
-	if index >= 64 {
-		return nil
-	}
-
-	current := analyzer.current_scope
-	for current != nil {
-		name_matches := 0
-		// Only scan through the symbol list if we have enough symbols
-		if len(current.symbol_list) > index {
-			for sym in current.symbol_list {
-				if sym.name == name {
-					if name_matches == index {
-						return sym
-					}
-					name_matches += 1
-				}
-			}
-		}
-		current = current.parent
-	}
-	return nil
+    return nil
 }
 
 // ===========================================================================
-// SECTION 4: MAIN ANALYSIS - OPTIMIZED
+// SECTION 4: MAIN ANALYSIS - NON-RECURSIVE
 // ===========================================================================
 
+// Non-recursive analysis
 analyze_ast :: proc(ast: ^Node) -> ^Analyzer {
-	analyzer := init_analyzer()
+    analyzer := init_analyzer()
 
-	// Single-pass analysis for better performance
-	build_symbol_table_and_validate(analyzer, ast)
+    // Enqueue root node
+    enqueue_node(analyzer, ast, analyzer.global_scope)
 
-	// Final validation
-	validate_constraints(analyzer)
-	validate_pattern_matches(analyzer)
-	validate_resonance_bindings(analyzer)
+    // Process all nodes with iterative approach
+    process_work_queue(analyzer)
 
-	// Report metrics
-	report_analysis_metrics(analyzer)
+    // Final validation passes
+    validate_analysis(analyzer)
 
-	return analyzer
+    return analyzer
 }
 
-// Combined analysis pass for better performance
-build_symbol_table_and_validate :: proc(analyzer: ^Analyzer, node: ^Node) {
-	if node == nil {
-		return
-	}
+// Add a node to the work queue
+enqueue_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info) {
+    if node == nil do return
 
-	position := get_position_from_node(node)
-
-	#partial switch n in node^ {
-	case Scope:
-		// Process scope nodes
-		scope_info := create_scope_for_node(analyzer, node, "", position)
-		prev_scope := enter_scope(analyzer, scope_info)
-
-		// Process children in batches for better cache locality
-		for i := 0; i < len(n.value); i += 1 {
-			child_node := new(Node)
-			child_node^ = n.value[i]
-			build_symbol_table_and_validate(analyzer, child_node)
-		}
-
-		leave_scope(analyzer, prev_scope)
-
-	case Pointing:
-		analyze_pointing(analyzer, node, n, position)
-
-	case PointingPull:
-		analyze_pointing_pull(analyzer, node, n, position)
-
-	case EventPush:
-		analyze_event_push(analyzer, node, n, position)
-
-	case EventPull:
-		analyze_event_pull(analyzer, node, n, position)
-
-	case ResonancePush:
-		analyze_resonance_push(analyzer, node, n, position)
-
-	case ResonancePull:
-		analyze_resonance_pull(analyzer, node, n, position)
-
-	case Override:
-		analyze_override(analyzer, node, n, position)
-
-	case Pattern:
-		analyze_pattern(analyzer, node, n, position)
-
-	case Constraint:
-		analyze_constraint(analyzer, node, n, position)
-
-	case Product:
-		analyze_product(analyzer, node, n, position)
-
-	case Execute:
-		// Simplified execute handling
-		if n.value != nil {
-			build_symbol_table_and_validate(analyzer, n.value)
-		}
-
-	case Expand:
-		analyze_expand(analyzer, node, n, position)
-
-	case Identifier:
-		analyze_identifier(analyzer, node, n, position)
-
-	case Literal, Operator, Range, Property:
-		// Process children for these node types
-		#partial switch n in node^ {
-		case Operator:
-			if n.left != nil do build_symbol_table_and_validate(analyzer, n.left)
-			if n.right != nil do build_symbol_table_and_validate(analyzer, n.right)
-
-		case Property:
-			if n.source != nil do build_symbol_table_and_validate(analyzer, n.source)
-			if n.property != nil do build_symbol_table_and_validate(analyzer, n.property)
-
-		case Range:
-			if n.start != nil do build_symbol_table_and_validate(analyzer, n.start)
-			if n.end != nil do build_symbol_table_and_validate(analyzer, n.end)
-		}
-	}
+    item := Work_Item{node = node, scope = scope}
+    append(&analyzer.work_queue, item)
 }
 
-analyze_scope :: proc(analyzer: ^Analyzer, node: ^Node, scope: Scope, position: Position) {
-	scope_info := create_scope_for_node(analyzer, node, "", position)
-	prev_scope := enter_scope(analyzer, scope_info)
+// Process work queue until empty (non-recursive traversal)
+process_work_queue :: proc(analyzer: ^Analyzer) {
+    for analyzer.queue_head < len(analyzer.work_queue) {
+        item := analyzer.work_queue[analyzer.queue_head]
+        analyzer.queue_head += 1
+        process_node(analyzer, item.node, item.scope)
+    }
 
-	// Batch process children
-	for i := 0; i < len(scope.value); i += 1 {
-		child_node := new(Node)
-		child_node^ = scope.value[i]
-		build_symbol_table_and_validate(analyzer, child_node)
-	}
-
-	leave_scope(analyzer, prev_scope)
+    // Clear the queue when done
+    clear(&analyzer.work_queue)
+    analyzer.queue_head = 0
 }
 
-analyze_pointing :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	pointing: Pointing,
-	position: Position,
-) {
-	// Handle product case
-	if pointing.name == nil {
-		// Anonymous product symbol
-		product := create_symbol("", node, analyzer.current_scope, .Definition, position)
-		add_symbol(analyzer, product)
+// Process a single node (replaces recursive traversal)
+process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info) {
+    if node == nil do return
 
-		if pointing.value != nil {
-			build_symbol_table_and_validate(analyzer, pointing.value)
-		}
-		return
-	}
+    // Save current scope
+    prev_scope := analyzer.current_scope
+    if scope != analyzer.current_scope {
+        analyzer.current_scope = scope
+    }
 
-	// Get the name
-	name: string
-	if id, ok := pointing.name^.(Identifier); ok {
-		name = id.name
-	} else {
-		// Complex naming
-		build_symbol_table_and_validate(analyzer, pointing.name)
-		if pointing.value != nil {
-			build_symbol_table_and_validate(analyzer, pointing.value)
-		}
-		return
-	}
+    position := get_position_from_node(node)
 
-	// Create symbol
-	symbol := create_symbol(name, node, analyzer.current_scope, .Definition, position)
+    #partial switch n in node^ {
+    case Scope:
+        process_scope(analyzer, node, n, position)
 
-	// Check for existing constraint
-	existing := lookup_symbol_local(analyzer, name)
-	if existing != nil && existing.constraint != nil {
-		symbol.constraint = existing.constraint
-		symbol.flags += {.HasConstraint}
-	}
+    case Pointing:
+        process_pointing(analyzer, node, n, position)
 
-	add_symbol(analyzer, symbol)
+    case PointingPull:
+        process_pointing_pull(analyzer, node, n, position)
 
-	// Handle scope value
-	if pointing.value != nil {
-		if scope, ok := pointing.value^.(Scope); ok {
-			scope_info := init_scope(analyzer.current_scope)
-			scope_info.scope_symbol = symbol
-			symbol.defining_scope = scope_info
+    case EventPush:
+        process_event_push(analyzer, node, n, position)
 
-			prev_scope := enter_scope(analyzer, scope_info)
-			build_symbol_table_and_validate(analyzer, pointing.value)
-			leave_scope(analyzer, prev_scope)
-		} else {
-			build_symbol_table_and_validate(analyzer, pointing.value)
-		}
-	}
+    case EventPull:
+        process_event_pull(analyzer, node, n, position)
+
+    case ResonancePush:
+        process_resonance_push(analyzer, node, n, position)
+
+    case ResonancePull:
+        process_resonance_pull(analyzer, node, n, position)
+
+    case Override:
+        process_override(analyzer, node, n, position)
+
+    case Pattern:
+        process_pattern(analyzer, node, n, position)
+
+    case Constraint:
+        process_constraint(analyzer, node, n, position)
+
+    case Product:
+        process_product(analyzer, node, n, position)
+
+    case Execute:
+        if n.value != nil {
+            enqueue_node(analyzer, n.value, analyzer.current_scope)
+        }
+
+    case Expand:
+        process_expand(analyzer, node, n, position)
+
+    case Identifier:
+        process_identifier(analyzer, node, n, position)
+
+    case Literal:
+        // No action needed for literals
+
+    case Operator:
+        if n.left != nil {
+            enqueue_node(analyzer, n.left, analyzer.current_scope)
+        }
+        if n.right != nil {
+            enqueue_node(analyzer, n.right, analyzer.current_scope)
+        }
+
+    case Range:
+        if n.start != nil {
+            enqueue_node(analyzer, n.start, analyzer.current_scope)
+        }
+        if n.end != nil {
+            enqueue_node(analyzer, n.end, analyzer.current_scope)
+        }
+
+    case Property:
+        if n.source != nil {
+            enqueue_node(analyzer, n.source, analyzer.current_scope)
+        }
+        if n.property != nil {
+            enqueue_node(analyzer, n.property, analyzer.current_scope)
+        }
+    }
+
+    // Restore scope
+    if scope != prev_scope {
+        analyzer.current_scope = prev_scope
+    }
 }
 
-analyze_pointing_pull :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	pointing_pull: PointingPull,
-	position: Position,
-) {
-	// Handle anonymous pointing pull
-	if pointing_pull.name == nil {
-		if pointing_pull.value != nil {
-			build_symbol_table_and_validate(analyzer, pointing_pull.value)
-		}
-		return
-	}
+// Process scope nodes
+process_scope :: proc(analyzer: ^Analyzer, node: ^Node, scope: Scope, position: Position) {
+    // Create new scope
+    scope_info := create_scope_for_node(analyzer, node, "", position)
 
-	// Get the name
-	name: string
-	if id, ok := pointing_pull.name^.(Identifier); ok {
-		name = id.name
-	} else {
-		// Complex expression
-		build_symbol_table_and_validate(analyzer, pointing_pull.name)
-		if pointing_pull.value != nil {
-			build_symbol_table_and_validate(analyzer, pointing_pull.value)
-		}
-		return
-	}
+    // Enter new scope
+    prev_scope := analyzer.current_scope
+    analyzer.current_scope = scope_info
 
-	// Create parameter symbol
-	symbol := create_symbol(name, node, analyzer.current_scope, .PullDefinition, position)
-	add_symbol(analyzer, symbol)
+    // Enqueue all children
+    for i := 0; i < len(scope.value); i += 1 {
+        enqueue_node(analyzer, &scope.value[i], scope_info)
+    }
 
-	if pointing_pull.value != nil {
-		build_symbol_table_and_validate(analyzer, pointing_pull.value)
-	}
+    // Restore scope
+    analyzer.current_scope = prev_scope
 }
 
-analyze_event_push :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	event_push: EventPush,
-	position: Position,
-) {
-	// Anonymous event push
-	if event_push.name == nil {
-		if event_push.value != nil {
-			build_symbol_table_and_validate(analyzer, event_push.value)
-		}
-		return
-	}
+// Process pointing nodes (name -> value)
+process_pointing :: proc(analyzer: ^Analyzer, node: ^Node, pointing: Pointing, position: Position) {
+    // Handle product case
+    if pointing.name == nil {
+        // Create anonymous product symbol
+        product := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position)
+        add_symbol(analyzer, product)
 
-	// Process target
-	build_symbol_table_and_validate(analyzer, event_push.name)
+        if pointing.value != nil {
+            enqueue_node(analyzer, pointing.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Create event info
-	event_info := new(Event_Info)
-	event_info.is_push = true
-	event_info.node = node
+    // Get the name
+    name: string
+    if id, ok := pointing.name^.(Identifier); ok {
+        name = id.name
+    } else {
+        // Complex naming
+        enqueue_node(analyzer, pointing.name, analyzer.current_scope)
+        if pointing.value != nil {
+            enqueue_node(analyzer, pointing.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Handle identifier
-	if id, ok := event_push.name^.(Identifier); ok {
-		symbol := lookup_symbol(analyzer, id.name)
-		if symbol != nil {
-			event_info.event = symbol
-			symbol.flags += {.IsEvent}
-			add_reference(analyzer, symbol, node, .EventPush, position)
-		} else {
-			// Create implicit symbol
-			symbol = create_symbol(id.name, node, analyzer.current_scope, .Definition, position)
-			symbol.flags += {.IsEvent}
-			add_symbol(analyzer, symbol)
-			event_info.event = symbol
-		}
-	}
+    // Create symbol
+    symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position)
 
-	// Process handler
-	if event_push.value != nil {
-		event_info.handler = event_push.value
-		build_symbol_table_and_validate(analyzer, event_push.value)
-	}
+    // Check for existing constraint
+    existing := lookup_symbol_local(analyzer, name)
+    if existing != nil && existing.constraint != nil {
+        symbol.constraint = existing.constraint
+        symbol.flags += {.HasConstraint}
+    }
 
-	append(&analyzer.current_scope.events, event_info)
+    add_symbol(analyzer, symbol)
+
+    // Handle scope value
+    if pointing.value != nil {
+        if sc, ok := pointing.value^.(Scope); ok {
+            // Create a new scope
+            scope_info := init_scope(analyzer.current_scope)
+            scope_info.scope_symbol = symbol
+            symbol.defining_scope = scope_info
+
+            // Process scope contents in the new scope
+            for i := 0; i < len(sc.value); i += 1 {
+                enqueue_node(analyzer, &sc.value[i], scope_info)
+            }
+        } else {
+            // Regular value, process it in current scope
+            enqueue_node(analyzer, pointing.value, analyzer.current_scope)
+        }
+    }
 }
 
-analyze_event_pull :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	event_pull: EventPull,
-	position: Position,
-) {
-	// Anonymous event pull
-	if event_pull.name == nil {
-		if event_pull.value != nil {
-			build_symbol_table_and_validate(analyzer, event_pull.value)
-		}
-		return
-	}
+// Process pointing pull nodes (name <- value)
+process_pointing_pull :: proc(analyzer: ^Analyzer, node: ^Node, pointing_pull: PointingPull, position: Position) {
+    // Handle anonymous pointing pull
+    if pointing_pull.name == nil {
+        if pointing_pull.value != nil {
+            enqueue_node(analyzer, pointing_pull.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Process handler name
-	name: string = ""
-	if id, ok := event_pull.name^.(Identifier); ok {
-		name = id.name
-	} else {
-		build_symbol_table_and_validate(analyzer, event_pull.name)
-	}
+    // Get the name
+    name: string
+    if id, ok := pointing_pull.name^.(Identifier); ok {
+        name = id.name
+    } else {
+        // Complex expression
+        enqueue_node(analyzer, pointing_pull.name, analyzer.current_scope)
+        if pointing_pull.value != nil {
+            enqueue_node(analyzer, pointing_pull.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Create event info
-	event_info := new(Event_Info)
-	event_info.is_push = false
-	event_info.node = node
+    // Create parameter symbol
+    symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .PullDefinition, position)
+    add_symbol(analyzer, symbol)
 
-	// Handle identifier
-	if name != "" {
-		symbol := lookup_symbol(analyzer, name)
-		if symbol == nil {
-			symbol = create_symbol(name, node, analyzer.current_scope, .Definition, position)
-			symbol.flags += {.IsEvent}
-			add_symbol(analyzer, symbol)
-		} else {
-			add_reference(analyzer, symbol, node, .EventPull, position)
-		}
-		event_info.event = symbol
-	}
-
-	// Process handler
-	if event_pull.value != nil {
-		event_info.handler = event_pull.value
-		build_symbol_table_and_validate(analyzer, event_pull.value)
-	}
-
-	append(&analyzer.current_scope.events, event_info)
+    if pointing_pull.value != nil {
+        enqueue_node(analyzer, pointing_pull.value, analyzer.current_scope)
+    }
 }
 
-analyze_resonance_push :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	resonance_push: ResonancePush,
-	position: Position,
-) {
-	// Anonymous resonance push
-	if resonance_push.name == nil {
-		if resonance_push.value != nil {
-			build_symbol_table_and_validate(analyzer, resonance_push.value)
-		}
-		return
-	}
+// Process event push nodes (a >- b)
+process_event_push :: proc(analyzer: ^Analyzer, node: ^Node, event_push: EventPush, position: Position) {
+    // Anonymous event push
+    if event_push.name == nil {
+        if event_push.value != nil {
+            enqueue_node(analyzer, event_push.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Process target
-	build_symbol_table_and_validate(analyzer, resonance_push.name)
+    // Process target
+    enqueue_node(analyzer, event_push.name, analyzer.current_scope)
 
-	// Create resonance info
-	resonance_info := new(Resonance_Info)
-	resonance_info.is_push = true
-	resonance_info.node = node
+    // Create event info
+    event_info := Event_Info{
+        is_push = true,
+        node = node,
+    }
 
-	// Handle identifier target
-	if id, ok := resonance_push.name^.(Identifier); ok {
-		symbol := lookup_symbol(analyzer, id.name)
-		if symbol != nil {
-			resonance_info.target = symbol
-			symbol.is_driven = true
-			symbol.flags += {.IsResonance}
-			add_reference(analyzer, symbol, node, .ResonancePush, position)
-		} else {
-			add_error(analyzer, fmt.tprintf("Undefined resonance target '%s'", id.name), position)
-		}
-	}
+    // Handle identifier
+    if id, ok := event_push.name^.(Identifier); ok {
+        symbol := lookup_symbol(analyzer, id.name)
+        if symbol != nil {
+            event_info.event = symbol
+            symbol.flags += {.IsEvent}
+            add_reference(analyzer, symbol, node, .EventPush, position)
+        } else {
+            // Create implicit symbol
+            symbol = create_symbol(analyzer, id.name, node, analyzer.current_scope, .Definition, position)
+            symbol.flags += {.IsEvent}
+            add_symbol(analyzer, symbol)
+            event_info.event = symbol
+        }
+    }
 
-	// Process driver
-	if resonance_push.value != nil {
-		build_symbol_table_and_validate(analyzer, resonance_push.value)
+    // Process handler
+    if event_push.value != nil {
+        event_info.handler = event_push.value
+        enqueue_node(analyzer, event_push.value, analyzer.current_scope)
+    }
 
-		// Set driver if it's an identifier
-		if id, ok := resonance_push.value^.(Identifier); ok {
-			driver := lookup_symbol(analyzer, id.name)
-			if driver != nil {
-				resonance_info.driver = driver
-				if resonance_info.target != nil {
-					resonance_info.target.driver = driver
-				}
-				add_reference(analyzer, driver, node, .ResonancePush, position)
-			}
-		}
-	}
-
-	append(&analyzer.current_scope.resonances, resonance_info)
+    // Add to events list
+    append(&analyzer.current_scope.events, event_info)
 }
 
-analyze_resonance_pull :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	resonance_pull: ResonancePull,
-	position: Position,
-) {
-	// Anonymous resonance pull
-	if resonance_pull.name == nil {
-		if resonance_pull.value != nil {
-			build_symbol_table_and_validate(analyzer, resonance_pull.value)
-		}
-		return
-	}
+// Process event pull nodes (a -< b)
+process_event_pull :: proc(analyzer: ^Analyzer, node: ^Node, event_pull: EventPull, position: Position) {
+    // Anonymous event pull
+    if event_pull.name == nil {
+        if event_pull.value != nil {
+            enqueue_node(analyzer, event_pull.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Get name from identifier
-	name: string = ""
-	if id, ok := resonance_pull.name^.(Identifier); ok {
-		name = id.name
-	}
+    // Process handler name
+    name: string = ""
+    if id, ok := event_pull.name^.(Identifier); ok {
+        name = id.name
+    } else {
+        enqueue_node(analyzer, event_pull.name, analyzer.current_scope)
+    }
 
-	// Process target
-	build_symbol_table_and_validate(analyzer, resonance_pull.name)
+    // Create event info
+    event_info := Event_Info{
+        is_push = false,
+        node = node,
+    }
 
-	// Create resonance info
-	resonance_info := new(Resonance_Info)
-	resonance_info.is_push = false
-	resonance_info.node = node
+    // Handle identifier
+    if name != "" {
+        symbol := lookup_symbol(analyzer, name)
+        if symbol == nil {
+            symbol = create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position)
+            symbol.flags += {.IsEvent}
+            add_symbol(analyzer, symbol)
+        } else {
+            add_reference(analyzer, symbol, node, .EventPull, position)
+        }
+        event_info.event = symbol
+    }
 
-	// Handle identifier
-	if name != "" {
-		symbol := lookup_symbol(analyzer, name)
-		if symbol == nil {
-			symbol = create_symbol(name, node, analyzer.current_scope, .Definition, position)
-			symbol.flags += {.IsResonance}
-			add_symbol(analyzer, symbol)
-		}
-		resonance_info.target = symbol
-		add_reference(analyzer, symbol, node, .ResonancePull, position)
-	}
+    // Process handler
+    if event_pull.value != nil {
+        event_info.handler = event_pull.value
+        enqueue_node(analyzer, event_pull.value, analyzer.current_scope)
+    }
 
-	// Process driver
-	if resonance_pull.value != nil {
-		build_symbol_table_and_validate(analyzer, resonance_pull.value)
-
-		// Set driver if it's an identifier
-		if id, ok := resonance_pull.value^.(Identifier); ok {
-			driver := lookup_symbol(analyzer, id.name)
-			if driver != nil {
-				resonance_info.driver = driver
-				add_reference(analyzer, driver, node, .ResonancePull, position)
-			}
-		}
-	}
-
-	append(&analyzer.current_scope.resonances, resonance_info)
+    // Add to events list
+    append(&analyzer.current_scope.events, event_info)
 }
 
-analyze_override :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	override: Override,
-	position: Position,
-) {
-	// Process base
-	if override.source != nil {
-		build_symbol_table_and_validate(analyzer, override.source)
+// Process resonance push nodes (a >>- b)
+process_resonance_push :: proc(analyzer: ^Analyzer, node: ^Node, resonance_push: ResonancePush, position: Position) {
+    // Anonymous resonance push
+    if resonance_push.name == nil {
+        if resonance_push.value != nil {
+            enqueue_node(analyzer, resonance_push.value, analyzer.current_scope)
+        }
+        return
+    }
 
-		// Check if source exists if it's an identifier
-		if id, ok := override.source^.(Identifier); ok {
-			symbol := lookup_symbol(analyzer, id.name)
-			if symbol == nil {
-				add_error(
-					analyzer,
-					fmt.tprintf("Cannot override undefined '%s'", id.name),
-					position,
-				)
-			} else {
-				add_reference(analyzer, symbol, node, .Override, position)
-			}
-		}
-	}
+    // Process target
+    enqueue_node(analyzer, resonance_push.name, analyzer.current_scope)
 
-	// Process overrides in batch
-	for i := 0; i < len(override.overrides); i += 1 {
-		override_node := new(Node)
-		override_node^ = override.overrides[i]
-		build_symbol_table_and_validate(analyzer, override_node)
-	}
+    // Create resonance info
+    resonance_info := Resonance_Info{
+        is_push = true,
+        node = node,
+    }
+
+    // Handle identifier target
+    if id, ok := resonance_push.name^.(Identifier); ok {
+        symbol := lookup_symbol(analyzer, id.name)
+        if symbol != nil {
+            resonance_info.target = symbol
+            symbol.flags += {.IsDriven, .IsResonance}
+            add_reference(analyzer, symbol, node, .ResonancePush, position)
+        } else {
+            add_error(analyzer, fmt.tprintf("Undefined resonance target '%s'", id.name), position)
+        }
+    }
+
+    // Process driver
+    if resonance_push.value != nil {
+        enqueue_node(analyzer, resonance_push.value, analyzer.current_scope)
+
+        // Set driver if it's an identifier
+        if id, ok := resonance_push.value^.(Identifier); ok {
+            driver := lookup_symbol(analyzer, id.name)
+            if driver != nil {
+                resonance_info.driver = driver
+                if resonance_info.target != nil {
+                    resonance_info.target.driver = driver
+                }
+                add_reference(analyzer, driver, node, .ResonancePush, position)
+            }
+        }
+    }
+
+    // Add to resonances list
+    append(&analyzer.current_scope.resonances, resonance_info)
 }
 
-analyze_pattern :: proc(analyzer: ^Analyzer, node: ^Node, pattern: Pattern, position: Position) {
-	// Process target
-	if pattern.target != nil {
-		build_symbol_table_and_validate(analyzer, pattern.target)
-	}
+// Process resonance pull nodes (a -<< b)
+process_resonance_pull :: proc(analyzer: ^Analyzer, node: ^Node, resonance_pull: ResonancePull, position: Position) {
+    // Anonymous resonance pull
+    if resonance_pull.name == nil {
+        if resonance_pull.value != nil {
+            enqueue_node(analyzer, resonance_pull.value, analyzer.current_scope)
+        }
+        return
+    }
 
-	// Create pattern scope
-	pattern_scope := create_scope_for_node(analyzer, node, "", position)
-	pattern_scope.is_pattern = true
+    // Get name from identifier
+    name: string = ""
+    if id, ok := resonance_pull.name^.(Identifier); ok {
+        name = id.name
+    }
 
-	// Set up pattern context
-	prev_scope := enter_scope(analyzer, pattern_scope)
-	prev_in_pattern := analyzer.in_pattern
-	prev_pattern := analyzer.current_pattern
+    // Process target
+    enqueue_node(analyzer, resonance_pull.name, analyzer.current_scope)
 
-	analyzer.in_pattern = true
-	analyzer.current_pattern = node
+    // Create resonance info
+    resonance_info := Resonance_Info{
+        is_push = false,
+        node = node,
+    }
 
-	// Process branches in batch
-	for i := 0; i < len(pattern.value); i += 1 {
-		branch := pattern.value[i]
+    // Handle identifier
+    if name != "" {
+        symbol := lookup_symbol(analyzer, name)
+        if symbol == nil {
+            symbol = create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position)
+            symbol.flags += {.IsResonance}
+            add_symbol(analyzer, symbol)
+        }
+        resonance_info.target = symbol
+        add_reference(analyzer, symbol, node, .ResonancePull, position)
+    }
 
-		// Create branch info
-		branch_info := new(Branch_Info)
-		branch_info.pattern = branch.source
-		branch_info.result = branch.product
-		branch_info.captured_symbols = make(map[string]^Symbol)
+    // Process driver
+    if resonance_pull.value != nil {
+        enqueue_node(analyzer, resonance_pull.value, analyzer.current_scope)
 
-		// Process pattern and result
-		if branch.source != nil {
-			build_symbol_table_and_validate(analyzer, branch.source)
-		}
-		if branch.product != nil {
-			build_symbol_table_and_validate(analyzer, branch.product)
-		}
+        // Set driver if it's an identifier
+        if id, ok := resonance_pull.value^.(Identifier); ok {
+            driver := lookup_symbol(analyzer, id.name)
+            if driver != nil {
+                resonance_info.driver = driver
+                add_reference(analyzer, driver, node, .ResonancePull, position)
+            }
+        }
+    }
 
-		append(&pattern_scope.branches, branch_info)
-	}
-
-	// Restore context
-	analyzer.in_pattern = prev_in_pattern
-	analyzer.current_pattern = prev_pattern
-	leave_scope(analyzer, prev_scope)
+    // Add to resonances list
+    append(&analyzer.current_scope.resonances, resonance_info)
 }
 
+// Process override nodes (a{...})
+process_override :: proc(analyzer: ^Analyzer, node: ^Node, override: Override, position: Position) {
+    // Process base
+    if override.source != nil {
+        enqueue_node(analyzer, override.source, analyzer.current_scope)
 
-analyze_constraint :: proc(
-	analyzer: ^Analyzer,
-	node: ^Node,
-	constraint: Constraint,
-	position: Position,
-) {
-	// Safety check
-	if constraint.constraint == nil {
-		add_error(analyzer, "Constraint type is nil", position)
-		return
-	}
+        // Check if source exists if it's an identifier
+        if id, ok := override.source^.(Identifier); ok {
+            symbol := lookup_symbol(analyzer, id.name)
+            if symbol == nil {
+                add_error(analyzer, fmt.tprintf("Cannot override undefined '%s'", id.name), position)
+            } else {
+                add_reference(analyzer, symbol, node, .Override, position)
+            }
+        }
+    }
 
-	// Get constraint symbol
-	constraint_symbol: ^Symbol
-	if id, ok := constraint.constraint^.(Identifier); ok {
-		constraint_symbol = lookup_symbol(analyzer, id.name)
-		if constraint_symbol == nil {
-			add_error(analyzer, fmt.tprintf("Undefined constraint type '%s'", id.name), position)
-		}
-	} else {
-		// Process complex constraint
-		build_symbol_table_and_validate(analyzer, constraint.constraint)
-	}
-
-	// Nameless constraint
-	if constraint.value == nil {
-		// Create anonymous constrained symbol
-		symbol := create_symbol("", node, analyzer.current_scope, .Definition, position)
-		symbol.constraint = constraint_symbol
-		symbol.flags += {.HasConstraint}
-		add_symbol(analyzer, symbol)
-
-		// Add constraint info
-		constraint_info := new(Constraint_Info)
-		constraint_info.target = symbol
-		constraint_info.constraint = constraint_symbol
-		constraint_info.node = node
-		append(&analyzer.current_scope.constraints, constraint_info)
-		return
-	}
-
-	// Get name from value if it's an identifier
-	name: string = ""
-	if id, ok := constraint.value^.(Identifier); ok {
-		name = id.name
-	} else {
-		// Process complex value
-		build_symbol_table_and_validate(analyzer, constraint.value)
-	}
-
-	// Create named symbol
-	if name != "" {
-		symbol := create_symbol(name, node, analyzer.current_scope, .Definition, position)
-		symbol.constraint = constraint_symbol
-		symbol.flags += {.HasConstraint}
-		add_symbol(analyzer, symbol)
-
-		// Add to constraint info
-		constraint_info := new(Constraint_Info)
-		constraint_info.target = symbol
-		constraint_info.constraint = constraint_symbol
-		constraint_info.node = node
-
-		// Update cache for faster constraint checks
-		analyzer.defined_symbols[name] = true
-
-		append(&analyzer.current_scope.constraints, constraint_info)
-	}
+    // Process overrides
+    for i := 0; i < len(override.overrides); i += 1 {
+        enqueue_node(analyzer, &override.overrides[i], analyzer.current_scope)
+    }
 }
 
-analyze_product :: proc(analyzer: ^Analyzer, node: ^Node, product: Product, position: Position) {
-	// Create anonymous symbol
-	symbol := create_symbol("", node, analyzer.current_scope, .Definition, position)
-	add_symbol(analyzer, symbol)
+// Process pattern match nodes (target ? {...})
+process_pattern :: proc(analyzer: ^Analyzer, node: ^Node, pattern: Pattern, position: Position) {
+    // Process target
+    if pattern.target != nil {
+        enqueue_node(analyzer, pattern.target, analyzer.current_scope)
+    }
 
-	// Process value
-	if product.value != nil {
-		build_symbol_table_and_validate(analyzer, product.value)
-	}
+    // Create pattern scope
+    pattern_scope := create_scope_for_node(analyzer, node, "", position)
+    pattern_scope.is_pattern = true
+
+    // Set up pattern context
+    prev_scope := analyzer.current_scope
+    prev_in_pattern := analyzer.in_pattern
+    prev_pattern := analyzer.current_pattern
+
+    analyzer.current_scope = pattern_scope
+    analyzer.in_pattern = true
+    analyzer.current_pattern = node
+
+    // Process branches
+    for i := 0; i < len(pattern.value); i += 1 {
+        branch := pattern.value[i]
+
+        // Create branch info
+        branch_info := Branch_Info{
+            pattern = branch.source,
+            result = branch.product,
+            captured_symbols = make(map[string]^Symbol),
+        }
+
+        // Process pattern and result
+        if branch.source != nil {
+            enqueue_node(analyzer, branch.source, pattern_scope)
+        }
+        if branch.product != nil {
+            enqueue_node(analyzer, branch.product, pattern_scope)
+        }
+
+        // Add to branches list
+        append(&pattern_scope.branches, branch_info)
+    }
+
+    // Restore context
+    analyzer.in_pattern = prev_in_pattern
+    analyzer.current_pattern = prev_pattern
+    analyzer.current_scope = prev_scope
 }
 
-analyze_expand :: proc(analyzer: ^Analyzer, node: ^Node, expand: Expand, position: Position) {
-	// Process target
-	if expand.target != nil {
-		build_symbol_table_and_validate(analyzer, expand.target)
+// Process constraint nodes (Type: value)
+process_constraint :: proc(analyzer: ^Analyzer, node: ^Node, constraint: Constraint, position: Position) {
+    // Safety check
+    if constraint.constraint == nil {
+        add_error(analyzer, "Constraint type is nil", position)
+        return
+    }
 
-		// Check if it's an identifier for expansion
-		if id, ok := expand.target^.(Identifier); ok {
-			symbol := lookup_symbol(analyzer, id.name)
-			if symbol == nil {
-				add_error(analyzer, fmt.tprintf("Cannot expand undefined '%s'", id.name), position)
-			} else {
-				add_reference(analyzer, symbol, node, .Usage, position)
+    // Get constraint symbol
+    constraint_symbol: ^Symbol
+    if id, ok := constraint.constraint^.(Identifier); ok {
+        constraint_symbol = lookup_symbol(analyzer, id.name)
+        if constraint_symbol == nil {
+            add_error(analyzer, fmt.tprintf("Undefined constraint type '%s'", id.name), position)
+        }
+    } else {
+        // Process complex constraint
+        enqueue_node(analyzer, constraint.constraint, analyzer.current_scope)
+    }
 
-				// Add to expansions if it has a scope
-				if symbol.defining_scope != nil {
-					append(&analyzer.current_scope.expansions, symbol.defining_scope)
-				}
-			}
-		}
-	}
+    // Nameless constraint
+    if constraint.value == nil {
+        // Create anonymous constrained symbol
+        symbol := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position)
+        symbol.constraint = constraint_symbol
+        symbol.flags += {.HasConstraint}
+        add_symbol(analyzer, symbol)
+
+        // Add constraint info
+        constraint_info := Constraint_Info{
+            target = symbol,
+            constraint = constraint_symbol,
+            node = node,
+        }
+
+        // Add to constraints list
+        append(&analyzer.current_scope.constraints, constraint_info)
+        return
+    }
+
+    // Get name from value if it's an identifier
+    name: string = ""
+    if id, ok := constraint.value^.(Identifier); ok {
+        name = id.name
+    } else {
+        // Process complex value
+        enqueue_node(analyzer, constraint.value, analyzer.current_scope)
+    }
+
+    // Create named symbol
+    if name != "" {
+        symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position)
+        symbol.constraint = constraint_symbol
+        symbol.flags += {.HasConstraint}
+        add_symbol(analyzer, symbol)
+
+        // Add to constraint info
+        constraint_info := Constraint_Info{
+            target = symbol,
+            constraint = constraint_symbol,
+            node = node,
+        }
+
+        // Update cache for faster constraint checking
+        analyzer.defined_symbols[name] = true
+
+        // Add to constraints list
+        append(&analyzer.current_scope.constraints, constraint_info)
+    }
 }
 
-analyze_identifier :: proc(analyzer: ^Analyzer, node: ^Node, id: Identifier, position: Position) {
-	// Fast lookup using name hash
-	name_hash := calculate_symbol_hash(id.name)
+// Process product nodes (-> value)
+process_product :: proc(analyzer: ^Analyzer, node: ^Node, product: Product, position: Position) {
+    // Create anonymous symbol
+    symbol := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position)
+    add_symbol(analyzer, symbol)
 
-	// Try cache lookup first (much faster)
-	cache_key := generate_lookup_key(analyzer.current_scope, id.name)
-	cached_symbol, found := analyzer.resolution_cache[cache_key]
+    // Process value
+    if product.value != nil {
+        enqueue_node(analyzer, product.value, analyzer.current_scope)
+    }
+}
 
-	// If we've seen this identifier already, use cached result
-	if found {
-		if cached_symbol != nil {
-			add_reference(analyzer, cached_symbol, node, .Usage, position)
-		}
-		return
-	}
+// Process expand nodes (...expr)
+process_expand :: proc(analyzer: ^Analyzer, node: ^Node, expand: Expand, position: Position) {
+    // Process target
+    if expand.target != nil {
+        enqueue_node(analyzer, expand.target, analyzer.current_scope)
 
-	// Regular lookup
-	symbol := lookup_symbol(analyzer, id.name)
+        // Check if it's an identifier for expansion
+        if id, ok := expand.target^.(Identifier); ok {
+            symbol := lookup_symbol(analyzer, id.name)
+            if symbol == nil {
+                add_error(analyzer, fmt.tprintf("Cannot expand undefined '%s'", id.name), position)
+            } else {
+                add_reference(analyzer, symbol, node, .Usage, position)
 
-	if symbol == nil {
-		// Fast check for constraint-defined symbols
-		if analyzer.defined_symbols[id.name] {
-			return
-		}
+                // Add to expansions if it has a scope
+                if symbol.defining_scope != nil {
+                    append(&analyzer.current_scope.expansions, symbol.defining_scope)
 
-		// Create symbol in pattern context
-		if analyzer.in_pattern {
-			symbol = create_symbol(id.name, node, analyzer.current_scope, .Definition, position)
-			add_symbol(analyzer, symbol)
+                    // Invalidate visible symbols cache
+                    invalidate_visible_cache(analyzer.current_scope)
+                }
+            }
+        }
+    }
+}
 
-			// Update cache
-			analyzer.resolution_cache[cache_key] = symbol
-		} else {
-			add_error(analyzer, fmt.tprintf("Undefined symbol '%s'", id.name), position)
+// Process identifier nodes
+process_identifier :: proc(analyzer: ^Analyzer, node: ^Node, id: Identifier, position: Position) {
+    // Fast lookup using name hash
+    name_hash := calculate_symbol_hash(id.name)
 
-			// Cache negative result
-			analyzer.resolution_cache[cache_key] = nil
-		}
-	} else {
-		// Add reference and cache result
-		add_reference(analyzer, symbol, node, .Usage, position)
-		analyzer.resolution_cache[cache_key] = symbol
-	}
+    // Try cache lookup first (much faster)
+    cache_key := generate_lookup_key(analyzer.current_scope, name_hash)
+    if cached, found := analyzer.resolution_cache[cache_key]; found {
+        if cached != nil {
+            add_reference(analyzer, cached, node, .Usage, position)
+        }
+        return
+    }
+
+    // Regular lookup
+    symbol := lookup_symbol(analyzer, id.name)
+
+    if symbol == nil {
+        // Fast check for constraint-defined symbols
+        if analyzer.defined_symbols[id.name] {
+            // Cache result
+            analyzer.resolution_cache[cache_key] = nil
+            return
+        }
+
+        // Create symbol in pattern context
+        if analyzer.in_pattern {
+            symbol = create_symbol(analyzer, id.name, node, analyzer.current_scope, .Definition, position)
+            add_symbol(analyzer, symbol)
+
+            // Update cache
+            analyzer.resolution_cache[cache_key] = symbol
+        } else {
+            add_error(analyzer, fmt.tprintf("Undefined symbol '%s'", id.name), position)
+
+            // Cache negative result
+            analyzer.resolution_cache[cache_key] = nil
+        }
+    } else {
+        // Add reference and cache result
+        add_reference(analyzer, symbol, node, .Usage, position)
+        analyzer.resolution_cache[cache_key] = symbol
+    }
 }
 
 // Fast position lookup
 get_position_from_node :: proc(node: ^Node) -> Position {
-	if node == nil {
-		return Position{line = 0, column = 0, offset = 0}
-	}
+    if node == nil {
+        return Position{line = 0, column = 0, offset = 0}
+    }
 
-	#partial switch n in node^ {
-	case Scope:
-		return n.position
-	case Pointing:
-		return n.position
-	case PointingPull:
-		return n.position
-	case EventPush:
-		return n.position
-	case EventPull:
-		return n.position
-	case ResonancePush:
-		return n.position
-	case ResonancePull:
-		return n.position
-	case Override:
-		return n.position
-	case Pattern:
-		return n.position
-	case Constraint:
-		return n.position
-	case Product:
-		return n.position
-	case Execute:
-		return n.position
-	case Expand:
-		return n.position
-	case Identifier:
-		return n.position
-	case Literal:
-		return n.position
-	case Operator:
-		return n.position
-	case Range:
-		return n.position
-	case Property:
-		return n.position
-	case Branch:
-		return n.position
-	case FileSystem:
-		return n.position
-	case:
-		return Position{line = 0, column = 0, offset = 0}
-	}
+    #partial switch n in node^ {
+    case Scope:
+        return n.position
+    case Pointing:
+        return n.position
+    case PointingPull:
+        return n.position
+    case EventPush:
+        return n.position
+    case EventPull:
+        return n.position
+    case ResonancePush:
+        return n.position
+    case ResonancePull:
+        return n.position
+    case Override:
+        return n.position
+    case Pattern:
+        return n.position
+    case Constraint:
+        return n.position
+    case Product:
+        return n.position
+    case Execute:
+        return n.position
+    case Expand:
+        return n.position
+    case Identifier:
+        return n.position
+    case Literal:
+        return n.position
+    case Operator:
+        return n.position
+    case Range:
+        return n.position
+    case Property:
+        return n.position
+    case Branch:
+        return n.position
+    case FileSystem:
+        return n.position
+    case:
+        return Position{line = 0, column = 0, offset = 0}
+    }
 }
 
 // ===========================================================================
-// SECTION 5: VALIDATION PASSES - OPTIMIZED
+// SECTION 5: VALIDATION
 // ===========================================================================
 
-// Short-circuit validation if we already have errors
-should_continue_validation :: #force_inline proc(analyzer: ^Analyzer) -> bool {
-	// Skip remaining validation if we already have errors
-	return len(analyzer.errors) < 50 // Threshold to avoid wasting time
+// Combined validation in a single pass
+validate_analysis :: proc(analyzer: ^Analyzer) {
+    if len(analyzer.errors) > 50 do return  // Skip if too many errors already
+
+    // Validate global scope
+    validate_scope(analyzer, analyzer.global_scope)
 }
 
-validate_definitions :: proc(analyzer: ^Analyzer) {
-	if !should_continue_validation(analyzer) do return
-	validate_definitions_in_scope(analyzer, analyzer.global_scope)
+// Validate a scope and its children
+validate_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
+    if scope == nil || len(analyzer.errors) > 50 do return
+
+    // Validate resonance bindings (most critical)
+    validate_resonance_bindings_in_scope(analyzer, scope)
+
+    // Check pattern exhaustiveness if this is a pattern scope
+    if scope.is_pattern {
+        check_exhaustiveness(analyzer, scope)
+    }
+
+    // Validate constraints if any
+    if len(scope.constraints) > 0 {
+        validate_constraints_in_scope(analyzer, scope)
+    }
+
+    // Recursively check nested scopes
+    for sym in scope.symbol_list {
+        if sym.defining_scope != nil {
+            validate_scope(analyzer, sym.defining_scope)
+        }
+    }
 }
 
-validate_definitions_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-	if scope == nil || !should_continue_validation(analyzer) {
-		return
-	}
-
-	// Check referenced symbols in batch
-	for sym in scope.symbol_list {
-		if .Referenced in sym.flags {
-			// Only validate referenced symbols (faster)
-			for reference in sym.references {
-				validate_reference(analyzer, reference)
-			}
-		}
-
-		// Recursively check nested scopes
-		if sym.defining_scope != nil {
-			validate_definitions_in_scope(analyzer, sym.defining_scope)
-		}
-	}
-}
-
-validate_reference :: proc(analyzer: ^Analyzer, reference: ^Reference) {
-	if reference == nil || reference.symbol == nil {
-		return
-	}
-
-	// Skip detailed validation for builtin types (always valid)
-	if reference.symbol.is_builtin do return
-
-	// Fast check using flags
-	#partial switch reference.kind {
-	case .Constraint:
-		if !reference.symbol.is_builtin {
-			// Additional validation only for non-builtin constraints
-		}
-
-	case .EventPush, .EventPull:
-		if .IsEvent not_in reference.symbol.flags {
-			// Warning for events
-			// add_warning(analyzer, "Symbol used as event but not marked as such", reference.position)
-		}
-
-	case .ResonancePush, .ResonancePull:
-		if .IsResonance not_in reference.symbol.flags && !reference.symbol.is_driven {
-			// Warning for resonance
-			// add_warning(analyzer, "Symbol used in resonance but not marked properly", reference.position)
-		}
-	}
-}
-
-validate_constraints :: proc(analyzer: ^Analyzer) {
-	if !should_continue_validation(analyzer) do return
-	validate_constraints_in_scope(analyzer, analyzer.global_scope)
-}
-
+// Optimized constraint validation
 validate_constraints_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-	if scope == nil || !should_continue_validation(analyzer) {
-		return
-	}
+    if scope == nil || len(analyzer.errors) > 50 do return
 
-	// Fast batch processing for constraints
-	if len(scope.constraints) > 0 {
-		// Use flags for fast filtering
-		for constraint in scope.constraints {
-			if constraint.constraint != nil && constraint.target != nil {
-				// Fast validation using flags
-				if constraint.constraint.defining_scope != nil {
-					// Structure validation would go here
-				}
-			}
-		}
-	}
+    // Process constraints in batch
+    for constraint in scope.constraints {
+        if constraint.constraint != nil && constraint.target != nil {
+            // Flag valid constraint for faster lookups
+            if constraint.target.name != "" {
+                analyzer.defined_symbols[constraint.target.name] = true
+            }
 
-	// Recursively check nested scopes
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			validate_constraints_in_scope(analyzer, sym.defining_scope)
-		}
-	}
+            // Structure validation would go here for complex constraints
+        }
+    }
 }
 
-// Optimized constraint check
-is_defined_by_constraint :: proc(analyzer: ^Analyzer, name: string) -> bool {
-	// Use cached value if available (much faster)
-	if defined, found := analyzer.defined_symbols[name]; found {
-		return defined
-	}
-
-	// Slower fallback path
-	scope := analyzer.current_scope
-	for scope != nil {
-		for constraint in scope.constraints {
-			if constraint.target != nil && constraint.target.name == name {
-				// Cache result for future lookups
-				analyzer.defined_symbols[name] = true
-				return true
-			}
-		}
-		scope = scope.parent
-	}
-
-	// Cache negative result too
-	analyzer.defined_symbols[name] = false
-	return false
-}
-
-validate_pattern_matches :: proc(analyzer: ^Analyzer) {
-	if !should_continue_validation(analyzer) do return
-	validate_pattern_matches_in_scope(analyzer, analyzer.global_scope)
-}
-
-validate_pattern_matches_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-	if scope == nil || !should_continue_validation(analyzer) {
-		return
-	}
-
-	// Only check pattern scopes
-	if scope.is_pattern {
-		check_exhaustiveness(analyzer, scope)
-	}
-
-	// Recursively check nested scopes
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			validate_pattern_matches_in_scope(analyzer, sym.defining_scope)
-		}
-	}
-}
-
-check_exhaustiveness :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-	if scope == nil || !scope.is_pattern || scope.scope_symbol == nil {
-		return
-	}
-
-	// Fast exhaustiveness checking using pattern classification
-	has_catchall := false
-
-	// Actual implementation would have more complex pattern analysis
-	// For now we just issue a warning
-
-	if !has_catchall && len(scope.branches) > 0 {
-		position := get_position_from_node(scope.scope_symbol.node)
-		add_warning(analyzer, "Pattern match may not be exhaustive", position)
-	}
-}
-
-validate_resonance_bindings :: proc(analyzer: ^Analyzer) {
-	if !should_continue_validation(analyzer) do return
-	validate_resonance_bindings_in_scope(analyzer, analyzer.global_scope)
-}
-
+// Optimized resonance binding validation
 validate_resonance_bindings_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-	if scope == nil || !should_continue_validation(analyzer) {
-		return
-	}
+    if scope == nil || len(scope.resonances) == 0 || len(analyzer.errors) > 50 do return
 
-	// Skip if no resonances in this scope
-	if len(scope.resonances) == 0 {
-		// Just check nested scopes
-		for sym in scope.symbol_list {
-			if sym.defining_scope != nil {
-				validate_resonance_bindings_in_scope(analyzer, sym.defining_scope)
-			}
-		}
-		return
-	}
+    // Use a map to track driven targets
+    driven_targets := make(map[^Symbol]bool)
+    defer delete(driven_targets)
 
-	// Pre-count driven targets for efficiency
-	drive_count := make(map[^Symbol]int, len(scope.resonances))
-	defer delete(drive_count)
+    // Check all resonance bindings
+    for resonance in scope.resonances {
+        if resonance.target != nil && resonance.is_push {
+            if driven_targets[resonance.target] {
+                // Target already driven, report error
+                add_error(
+                    analyzer,
+                    fmt.tprintf("Symbol '%s' is driven by multiple resonances", resonance.target.name),
+                    get_position_from_node(resonance.node),
+                )
+            } else {
+                driven_targets[resonance.target] = true
+            }
+        }
+    }
+}
 
-	// Check all resonance bindings in batch
-	for resonance in scope.resonances {
-		if resonance.target != nil && resonance.is_push {
-			drive_count[resonance.target] += 1
+// Optimized pattern match exhaustiveness check
+check_exhaustiveness :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
+    if scope == nil || !scope.is_pattern || scope.scope_symbol == nil do return
 
-			if drive_count[resonance.target] > 1 {
-				position := get_position_from_node(resonance.node)
-				add_error(
-					analyzer,
-					fmt.tprintf(
-						"Symbol '%s' is driven by multiple resonances",
-						resonance.target.name,
-					),
-					position,
-				)
-			}
-		}
-	}
+    // Look for catch-all patterns
+    has_catchall := false
 
-	// Check nested scopes
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			validate_resonance_bindings_in_scope(analyzer, sym.defining_scope)
-		}
-	}
+    // Simple heuristic: If we have a pattern with a single identifier, it's probably a catch-all
+    for branch in scope.branches {
+        if branch.pattern != nil {
+            if _, is_id := branch.pattern^.(Identifier); is_id {
+                has_catchall = true
+                break
+            }
+        }
+    }
+
+    if !has_catchall && len(scope.branches) > 0 {
+        add_warning(analyzer, "Pattern match may not be exhaustive", get_position_from_node(scope.scope_symbol.node))
+    }
+}
+
+// Optimized constraint definition check
+is_defined_by_constraint :: proc(analyzer: ^Analyzer, name: string) -> bool {
+    // Use cached result for speed
+    return analyzer.defined_symbols[name]
 }
 
 // ===========================================================================
-// SECTION 6: PERFORMANCE METRICS
+// SECTION 6: QUALIFIED NAMING AND UTILITIES
 // ===========================================================================
 
-report_analysis_metrics :: proc(analyzer: ^Analyzer) {
-	duration := time.diff(analyzer.metrics.start_time, time.now())
-	milliseconds := time.duration_milliseconds(duration)
+// Get a fully qualified name for a symbol
+get_qualified_name :: proc(symbol: ^Symbol) -> string {
+    if symbol == nil {
+        return "<nil>"
+    }
 
-	fmt.printf("\n=== PERFORMANCE METRICS ===\n")
-	fmt.printf("Analysis time: %.2f ms\n", milliseconds)
-	fmt.printf("Symbol lookups: %d\n", analyzer.metrics.symbol_lookups)
-	fmt.printf("Symbol creations: %d\n", analyzer.metrics.symbol_creations)
-	fmt.printf("Scope traversals: %d\n", analyzer.metrics.scope_traversals)
+    if symbol.name == "" {
+        return "<anonymous>"
+    }
 
-	cache_hit_rate := 0.0
-	if analyzer.metrics.symbol_lookups > 0 {
-		cache_hit_rate =
-			100.0 * (f64(len(analyzer.resolution_cache)) / f64(analyzer.metrics.symbol_lookups))
-	}
-	fmt.printf("Cache size: %d entries\n", len(analyzer.resolution_cache))
-	fmt.printf("Cache hit rate: %.1f%%\n", cache_hit_rate)
-	fmt.printf("=========================\n")
+    // For built-in types, just return the name
+    if .Builtin in symbol.flags {
+        return symbol.name
+    }
+
+    // For global scope, just return the name
+    if symbol.scope != nil && symbol.scope.parent == nil {
+        if symbol.index > 0 {
+            return fmt.tprintf("%s@%d", symbol.name, symbol.index)
+        }
+        return symbol.name
+    }
+
+    // Otherwise build the qualified name
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    // Build path from root to symbol
+    build_path_to_symbol(&builder, symbol)
+
+    // Add index if needed
+    if symbol.index > 0 {
+        fmt.sbprintf(&builder, "@%d", symbol.index)
+    }
+
+    return strings.to_string(builder)
+}
+
+// Build a path to a symbol recursively
+build_path_to_symbol :: proc(builder: ^strings.Builder, symbol: ^Symbol) {
+    if symbol == nil || builder == nil {
+        return
+    }
+
+    // Start with scope path
+    if symbol.scope != nil && symbol.scope.parent != nil {
+        // Build path to scope symbol first
+        scope_sym := symbol.scope.scope_symbol
+        if scope_sym != nil {
+            build_path_to_symbol(builder, scope_sym)
+            strings.write_string(builder, ".")
+        }
+    }
+
+    // Add this symbol's name
+    if symbol.name != "" {
+        strings.write_string(builder, symbol.name)
+    } else {
+        strings.write_string(builder, "<anonymous>")
+    }
 }
 
 // ===========================================================================
-// SECTION 7: MEMORY MANAGEMENT OPTIMIZATIONS
+// SECTION 7: SCOPE GRAPH VISUALIZATION
 // ===========================================================================
 
-// Memory pool for faster allocation of common structures
-Memory_Pool :: struct {
-	symbols:      [1024]Symbol,
-	references:   [2048]Reference,
-	symbol_index: int,
-	ref_index:    int,
-}
-
-// Initialize memory pools
-init_memory_pools :: proc() -> ^Memory_Pool {
-	pool := new(Memory_Pool)
-	pool.symbol_index = 0
-	pool.ref_index = 0
-	return pool
-}
-
-// Fast allocation from pool
-alloc_symbol_from_pool :: proc(pool: ^Memory_Pool) -> ^Symbol {
-	if pool.symbol_index >= 1024 {
-		// Fall back to regular allocation
-		return new(Symbol)
-	}
-
-	result := &pool.symbols[pool.symbol_index]
-	pool.symbol_index += 1
-	return result
-}
-
-alloc_reference_from_pool :: proc(pool: ^Memory_Pool) -> ^Reference {
-	if pool.ref_index >= 2048 {
-		// Fall back to regular allocation
-		return new(Reference)
-	}
-
-	result := &pool.references[pool.ref_index]
-	pool.ref_index += 1
-	return result
-}
-
-// ===========================================================================
-// SECTION 8: SCOPE GRAPH VISUALIZATION - SIMPLIFIED
-// ===========================================================================
-
+// Print the scope graph for debug purposes
 print_scope_graph :: proc(analyzer: ^Analyzer) {
-	fmt.println("\n=== SCOPE GRAPH SUMMARY ===")
-	fmt.printf("Global scope: %d symbols\n", len(analyzer.global_scope.symbol_list))
+    fmt.println("\n=== SCOPE GRAPH SUMMARY ===")
+    fmt.printf("Global scope: %d symbols\n", len(analyzer.global_scope.symbol_list))
 
-	// Count total symbols
-	total_symbols := count_symbols_recursive(analyzer.global_scope)
-	fmt.printf("Total symbols: %d\n", total_symbols)
+    // Count total symbols
+    total_symbols := count_symbols_recursive(analyzer.global_scope)
+    fmt.printf("Total symbols: %d\n", total_symbols)
 
-	// Count scopes
-	total_scopes := count_scopes_recursive(analyzer.global_scope)
-	fmt.printf("Total scopes: %d\n", total_scopes)
+    // Count scopes
+    total_scopes := count_scopes_recursive(analyzer.global_scope)
+    fmt.printf("Total scopes: %d\n", total_scopes)
 
-	fmt.println("=== END SCOPE GRAPH SUMMARY ===\n")
+    fmt.println("=== END SCOPE GRAPH SUMMARY ===\n")
 }
 
+// Count total symbols recursively
 count_symbols_recursive :: proc(scope: ^Scope_Info) -> int {
-	if scope == nil {
-		return 0
-	}
+    if scope == nil {
+        return 0
+    }
 
-	count := len(scope.symbol_list)
+    count := len(scope.symbol_list)
 
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			count += count_symbols_recursive(sym.defining_scope)
-		}
-	}
+    for sym in scope.symbol_list {
+        if sym.defining_scope != nil {
+            count += count_symbols_recursive(sym.defining_scope)
+        }
+    }
 
-	return count
+    return count
 }
 
+// Count total scopes recursively
 count_scopes_recursive :: proc(scope: ^Scope_Info) -> int {
-	if scope == nil {
-		return 0
-	}
+    if scope == nil {
+        return 0
+    }
 
-	count := 1 // Count this scope
+    count := 1  // Count this scope
 
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			count += count_scopes_recursive(sym.defining_scope)
-		}
-	}
+    for sym in scope.symbol_list {
+        if sym.defining_scope != nil {
+            count += count_scopes_recursive(sym.defining_scope)
+        }
+    }
 
-	return count
-}
-
-// Print detailed scope information if needed
-print_scope :: proc(scope: ^Scope_Info, indent: int) {
-	if scope == nil {
-		return
-	}
-
-	indent_str := strings.repeat(" ", indent)
-
-	fmt.printf("%sScope", indent_str)
-	if scope.scope_symbol != nil && scope.scope_symbol.name != "" {
-		fmt.printf(" '%s'", scope.scope_symbol.name)
-	}
-
-	if scope.is_pattern {
-		fmt.printf(" (Pattern Match)")
-	}
-
-	fmt.printf(": %d symbols\n", len(scope.symbol_list))
-
-	// Print only the first few symbols (to avoid excessive output)
-	max_symbols := min(len(scope.symbol_list), 5)
-	for i := 0; i < max_symbols; i += 1 {
-		print_symbol(scope.symbol_list[i], indent + 2, i)
-	}
-
-	if len(scope.symbol_list) > max_symbols {
-		fmt.printf(
-			"%s  ... and %d more symbols\n",
-			indent_str,
-			len(scope.symbol_list) - max_symbols,
-		)
-	}
-}
-
-// Simplified symbol printing
-print_symbol :: proc(symbol: ^Symbol, indent: int, position: int = -1) {
-	if symbol == nil {
-		return
-	}
-
-	indent_str := strings.repeat(" ", indent)
-	fmt.printf("%s%s", indent_str, symbol.name != "" ? symbol.name : "<anonymous>")
-
-	if symbol.constraint != nil {
-		fmt.printf(": %s", symbol.constraint.name)
-	}
-
-	if symbol.is_driven {
-		fmt.printf(" [driven]")
-	}
-
-	fmt.println()
+    return count
 }
 
 // ===========================================================================
-// SECTION 9: MAIN DRIVER - OPTIMIZED
+// SECTION 8: MAIN API
 // ===========================================================================
 
-// Optimized semantic analysis with memory tracking
+// Perform semantic analysis
 perform_semantic_analysis :: proc(ast: ^Node) -> bool {
-	// Track memory usage
-	tracker: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&tracker, context.allocator)
-	context.allocator = mem.tracking_allocator(&tracker)
+    // Run analysis
+    analyzer := analyze_ast(ast)
+    success := len(analyzer.errors) == 0
 
-	// Run analysis
-	analyzer := analyze_ast(ast)
+    // Report results
+    if len(analyzer.errors) > 0 {
+        fmt.printf("\nSemantic analysis found %d errors:\n", len(analyzer.errors))
+        // Print only first few errors to avoid flooding output
+        max_errors := min(len(analyzer.errors), 10)
+        for i := 0; i < max_errors; i += 1 {
+            fmt.eprintln(analyzer.errors[i])
+        }
+        if len(analyzer.errors) > max_errors {
+            fmt.printf("... and %d more errors\n", len(analyzer.errors) - max_errors)
+        }
+    }
 
-	// Report results
-	if len(analyzer.errors) > 0 {
-		fmt.printf("\nSemantic analysis found %d errors:\n", len(analyzer.errors))
-		// Print only first few errors to avoid flooding output
-		max_errors := min(len(analyzer.errors), 10)
-		for i := 0; i < max_errors; i += 1 {
-			fmt.println(analyzer.errors[i])
-		}
-		if len(analyzer.errors) > max_errors {
-			fmt.printf("... and %d more errors\n", len(analyzer.errors) - max_errors)
-		}
-	}
+    if len(analyzer.warnings) > 0 {
+        fmt.printf("\nSemantic analysis found %d warnings:\n", len(analyzer.warnings))
+        // Print only first few warnings
+        max_warnings := min(len(analyzer.warnings), 10)
+        for i := 0; i < max_warnings; i += 1 {
+            fmt.eprintln(analyzer.warnings[i])
+        }
+        if len(analyzer.warnings) > max_warnings {
+            fmt.printf("... and %d more warnings\n", len(analyzer.warnings) - max_warnings)
+        }
+    }
 
-	if len(analyzer.warnings) > 0 {
-		fmt.printf("\nSemantic analysis found %d warnings:\n", len(analyzer.warnings))
-		// Print only first few warnings
-		max_warnings := min(len(analyzer.warnings), 10)
-		for i := 0; i < max_warnings; i += 1 {
-			fmt.println(analyzer.warnings[i])
-		}
-		if len(analyzer.warnings) > max_warnings {
-			fmt.printf("... and %d more warnings\n", len(analyzer.warnings) - max_warnings)
-		}
-	}
-
-	// Cleanup
-	mem.tracking_allocator_destroy(&tracker)
-
-	return len(analyzer.errors) == 0
+    return success
 }
 
+// Main entry point for semantic analysis
 main_semantic_analysis :: proc(ast: ^Node, filename: string) -> bool {
-	if ast == nil {
-		fmt.println("Cannot perform semantic analysis: AST is nil")
-		return false
-	}
+    if ast == nil {
+        fmt.println("Cannot perform semantic analysis: AST is nil")
+        return false
+    }
 
-	fmt.printf("Performing optimized semantic analysis on %s...\n", filename)
+    fmt.printf("Performing semantic analysis on %s...\n", filename)
 
-	success := perform_semantic_analysis(ast)
+    success := perform_semantic_analysis(ast)
 
-	if success {
-		fmt.println("Semantic analysis completed successfully!")
-	} else {
-		fmt.println("Semantic analysis failed.")
-	}
+    if success {
+        fmt.println("Semantic analysis completed successfully!")
+    } else {
+        fmt.println("Semantic analysis failed.")
+    }
 
-	return success
+    return success
 }
