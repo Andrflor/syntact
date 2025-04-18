@@ -16,6 +16,7 @@ import "core:time"
 // SECTION 1: DATA STRUCTURES
 // ===========================================================================
 
+// Extended reference kind to include imports
 Reference_Kind :: enum {
 	Definition,
 	PullDefinition,
@@ -27,8 +28,11 @@ Reference_Kind :: enum {
 	ResonancePull,
 	Override,
 	Builtin,
+	Import, // Reference is an import
+	FileReference, // Reference to a file/module
 }
 
+// Extended symbol flag to track imported/file references
 Symbol_Flag :: enum {
 	Visited,
 	Referenced,
@@ -39,8 +43,12 @@ Symbol_Flag :: enum {
 	InGlobalIndex,
 	Builtin,
 	IsDriven,
+	IsImported, // Symbol is imported
+	IsModule, // Symbol represents a module
+	InProgress, // File is being processed
+	Processed, // File has been processed
+	Failed, // File processing failed
 }
-
 // Symbol structure
 Symbol :: struct {
 	name:           string,

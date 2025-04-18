@@ -23,7 +23,7 @@ import "core:time"
  * Compiler_Options holds all command-line options
  */
 Compiler_Options :: struct {
-	input_files:        [dynamic]string, // Files to compile
+	input_file:         string, // Files to compile
 	output_file:        string, // Output file (if compilation enabled)
 	print_ast:          bool, // Whether to print the AST
 	print_symbol_table: bool, // Whether to print the symbol table
@@ -39,12 +39,12 @@ Compiler_Options :: struct {
  */
 parse_args :: proc() -> Compiler_Options {
 	options: Compiler_Options
-	options.input_files = make([dynamic]string, 0, 10)
 
 	i := 1
+	input_file_set := false
+
 	for i < len(os.args) {
 		arg := os.args[i]
-
 		if arg[0] == '-' {
 			// Handle options
 			switch arg {
@@ -56,32 +56,23 @@ parse_args :: proc() -> Compiler_Options {
 					fmt.eprintln("Error: Missing output file after", arg)
 					os.exit(1)
 				}
-
 			case "--ast":
 				options.print_ast = true
-
 			case "--symbols", "--symbol-table":
 				options.print_symbol_table = true
-
 			case "--scopes", "--scope-graph":
 				options.print_scope_graph = true
-
 			case "--parse-only":
 				options.parse_only = true
-
 			case "--analyze-only":
 				options.analyze_only = true
-
 			case "-v", "--verbose":
 				options.verbose = true
-
 			case "-t", "--timing":
 				options.timing = true
-
 			case "-h", "--help":
 				print_usage()
 				os.exit(0)
-
 			case:
 				if strings.has_prefix(arg, "-") {
 					fmt.eprintln("Unknown option:", arg)
@@ -90,15 +81,20 @@ parse_args :: proc() -> Compiler_Options {
 				}
 			}
 		} else {
-			// Add input file
-			append(&options.input_files, arg)
+			// Set input file
+			if input_file_set {
+				fmt.eprintln("Error: Only one input file can be specified")
+				print_usage()
+				os.exit(1)
+			}
+			options.input_file = arg
+			input_file_set = true
 		}
-
 		i += 1
 	}
 
-	if len(options.input_files) == 0 {
-		fmt.eprintln("Error: No input files specified")
+	if !input_file_set {
+		fmt.eprintln("Error: No input file specified")
 		print_usage()
 		os.exit(1)
 	}
@@ -289,18 +285,16 @@ main :: proc() {
 	all_success := true
 
 	// Process each input file
-	for filename in options.input_files {
-		ast, analyzer, success := process_file(filename, options)
-		all_success = all_success && success
+	ast, analyzer, success := process_file(options.input_file, options)
+	all_success = all_success && success
 
-		// Generate output if not in parse-only or analyze-only mode
-		if success && !options.parse_only && !options.analyze_only {
-			// This would call your code generation function
-			// generate_code(ast, analyzer, options.output_file)
+	// Generate output if not in parse-only or analyze-only mode
+	if success && !options.parse_only && !options.analyze_only {
+		// This would call your code generation function
+		// generate_code(ast, analyzer, options.output_file)
 
-			if options.verbose {
-				fmt.println("Code generation completed.")
-			}
+		if options.verbose {
+			fmt.println("Code generation completed.")
 		}
 	}
 
