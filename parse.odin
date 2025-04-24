@@ -827,6 +827,7 @@ Literal_Kind :: enum {
 	Integer,
 	Float,
 	String,
+  Bool,
 	Hexadecimal,
 	Binary,
 }

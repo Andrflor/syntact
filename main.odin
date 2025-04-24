@@ -311,7 +311,7 @@ main :: proc() {
 	// Generate output if not in parse-only or analyze-only mode
 	if success && !options.parse_only && !options.analyze_only {
 		// This would call your code generation function
-		// generate_code(ast, analyzer, options.output_file)
+		generate_code(ast, analyzer, options.output_file)
 
 		if options.verbose {
 			fmt.println("Code generation completed.")
