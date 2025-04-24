@@ -915,16 +915,20 @@ Parser :: struct {
     had_error:       bool, // Flag indicating if an error occurred
     panic_mode:      bool, // Flag for panic mode error recovery
     error_count:     int, // Count of errors encountered
+    file_resolver: ^File_Resolver,
+    filename: string,
 }
 
 /*
  * initialize_parser sets up a parser with a lexer
  */
-init_parser :: proc(parser: ^Parser, lexer: ^Lexer) {
+init_parser :: proc(parser: ^Parser, lexer: ^Lexer, resolver: ^File_Resolver = nil, filename: string = "") {
     parser.lexer = lexer
     parser.had_error = false
     parser.panic_mode = false
     parser.error_count = 0
+    parser.file_resolver = resolver
+    parser.filename = filename
 
     // Initialize with first two tokens
     parser.current_token = next_token(lexer)
@@ -2576,75 +2580,44 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         return nil
     }
 
-    // Create FileSystem node with position
-    fs_node := FileSystem{
-        position = position, // Store position
-    }
+    // Start building the reference path
+    path_builder := strings.builder_make()
+    defer strings.builder_destroy(&path_builder)
+    strings.write_string(&path_builder, "@")
 
-    // Parse first identifier
+    // Process first identifier
     id_name := parser.current_token.text
-    id_position := parser.current_token.position
+    strings.write_string(&path_builder, id_name)
     advance_token(parser)
 
-    // Create initial identifier node with position
-    ident_node := new(Node)
-    ident_node^ = Identifier{
-        name = id_name,
-        position = id_position, // Store identifier position
-    }
-
-    // If no property access follows, return basic FileSystem node
-    if parser.current_token.kind != .Dot {
-        fs_node.target = ident_node
-        result := new(Node)
-        result^ = fs_node
-        return result
-    }
-
-    // Handle property chain (lib.geometry.Plane)
-    current_node := ident_node
-
-    // Process all dots and identifiers in the chain
+    // Process property chain if present
     for parser.current_token.kind == .Dot {
-        // Save dot position
-        dot_position := parser.current_token.position
-
-        // Consume dot
+        strings.write_string(&path_builder, ".")
         advance_token(parser)
 
-        // Expect identifier
         if parser.current_token.kind != .Identifier {
-            error_at_current(parser, "Expected identifier after dot")
-            return nil
+            error_at_current(parser, "Expected identifier after dot in file reference")
+            break
         }
 
-        // Get property name and position
-        property_name := parser.current_token.text
-        property_position := parser.current_token.position
+        strings.write_string(&path_builder, parser.current_token.text)
         advance_token(parser)
-
-        // Create property node with position
-        property := Property{
-            source = current_node,
-            position = dot_position, // Store dot position
-        }
-
-        // Create property identifier with position
-        prop_ident := new(Node)
-        prop_ident^ = Identifier{
-            name = property_name,
-            position = property_position, // Store identifier position
-        }
-        property.property = prop_ident
-
-        // Update current node to this property
-        property_node := new(Node)
-        property_node^ = property
-        current_node = property_node
     }
 
-    // Set final property chain as FileSystem target
-    fs_node.target = current_node
+    // Get the full path
+    full_path := strings.to_string(path_builder)
+
+    // Create FileSystem node with position
+    fs_node := FileSystem{
+        position = position,
+    }
+
+    // (rest of the code to build the node structure)
+
+    // Process reference immediately if we have a resolver
+    if parser.file_resolver != nil {
+        enqueue_file_reference(parser, full_path, position)
+    }
 
     result := new(Node)
     result^ = fs_node
@@ -3117,9 +3090,9 @@ print_ast :: proc(node: ^Node, indent: int) {
 /*
  * parse_file initializes a parser with the given lexer and returns the parsed AST
  */
-parse_file :: proc(lexer: ^Lexer) -> (^Node, bool) {
+parse_file :: proc(lexer: ^Lexer, resolver: ^File_Resolver = nil, filename: string = "") -> (^Node, bool) {
     parser: Parser
-    init_parser(&parser, lexer)
+    init_parser(&parser, lexer, resolver, filename)
 
     // Parse the program
     ast := parse_program(&parser)

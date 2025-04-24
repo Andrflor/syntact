@@ -5,6 +5,7 @@ import vmem "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sync"
 import "core:time"
 
 /*
@@ -138,6 +139,21 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 		parse_start = time.now()
 	}
 
+	// Initialize memory arena for resolver
+	arena: vmem.Arena
+	RESOLVER_CHUNK_SIZE :: 8 * 1024 * 1024
+	err := vmem.arena_init_growing(&arena, RESOLVER_CHUNK_SIZE)
+	if err != nil {
+		fmt.println("Failed to initialize memory arena for file resolution")
+		return nil, nil, false
+	}
+	defer vmem.arena_destroy(&arena)
+
+	// Initialize file resolver
+	resolver: File_Resolver
+	init_file_resolver(&resolver, filename, &arena, options)
+	// defer destroy_file_resolver(&resolver)
+
 	// Read the file
 	source, read_ok := os.read_entire_file(filename)
 	if !read_ok {
@@ -150,8 +166,8 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 	lexer: Lexer
 	init_lexer(&lexer, string(source))
 
-	// Parse the file
-	ast, parse_success := parse_file(&lexer)
+	// Parse the file with resolver integration
+	ast, parse_success := parse_file(&lexer, &resolver, filename)
 
 	if options.timing {
 		parse_duration = time.diff(parse_start, time.now())
@@ -175,22 +191,26 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 		fmt.println("=== END AST ===\n")
 	}
 
+	// Wait for all referenced files to be processed
+	sync.wait_group_wait(&resolver.thread_pool.wait_group)
+
 	// If parse-only, we're done
 	if options.parse_only {
 		return ast, nil, parse_success
 	}
 
-	// Perform semantic analysis
+	// Perform semantic analysis with imports
 	if options.timing {
 		analysis_start = time.now()
 	}
 
-	analyzer := analyze_ast(ast)
+	analyzer := analyze_ast(ast, &resolver, filename)
 	semantic_success := len(analyzer.errors) == 0
 
 	if options.timing {
 		analysis_duration = time.diff(analysis_start, time.now())
 	}
+
 
 	// Print analysis results
 	if len(analyzer.errors) > 0 {

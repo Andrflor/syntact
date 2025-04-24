@@ -152,6 +152,10 @@ Analyzer :: struct {
 	// Processing queue
 	work_queue:       [dynamic]Work_Item,
 	queue_head:       int,
+
+	// Multiple file processing
+	filename:         string,
+	resolver:         ^File_Resolver,
 }
 
 // ===========================================================================
@@ -159,12 +163,15 @@ Analyzer :: struct {
 // ===========================================================================
 
 // Initialize the analyzer
-init_analyzer :: proc() -> ^Analyzer {
+init_analyzer :: proc(resolver: ^File_Resolver, filename: string) -> ^Analyzer {
 	analyzer := new(Analyzer)
 
 	// Init core structures
 	analyzer.global_scope = init_scope(nil)
 	analyzer.current_scope = analyzer.global_scope
+
+	analyzer.filename = filename
+	analyzer.resolver = resolver
 
 	// Error tracking
 	analyzer.errors = make([dynamic]string)
@@ -682,8 +689,8 @@ lookup_symbol_local :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
 // ===========================================================================
 
 // Non-recursive analysis
-analyze_ast :: proc(ast: ^Node) -> ^Analyzer {
-	analyzer := init_analyzer()
+analyze_ast :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) -> ^Analyzer {
+	analyzer := init_analyzer(resolver, filename)
 
 	// Enqueue root node
 	enqueue_node(analyzer, ast, analyzer.global_scope)
@@ -1715,62 +1722,4 @@ count_scopes_recursive :: proc(scope: ^Scope_Info) -> int {
 	}
 
 	return count
-}
-
-// ===========================================================================
-// SECTION 8: MAIN API
-// ===========================================================================
-
-// Perform semantic analysis
-perform_semantic_analysis :: proc(ast: ^Node) -> bool {
-	// Run analysis
-	analyzer := analyze_ast(ast)
-	success := len(analyzer.errors) == 0
-
-	// Report results
-	if len(analyzer.errors) > 0 {
-		fmt.printf("\nSemantic analysis found %d errors:\n", len(analyzer.errors))
-		// Print only first few errors to avoid flooding output
-		max_errors := min(len(analyzer.errors), 10)
-		for i := 0; i < max_errors; i += 1 {
-			fmt.eprintln(analyzer.errors[i])
-		}
-		if len(analyzer.errors) > max_errors {
-			fmt.printf("... and %d more errors\n", len(analyzer.errors) - max_errors)
-		}
-	}
-
-	if len(analyzer.warnings) > 0 {
-		fmt.printf("\nSemantic analysis found %d warnings:\n", len(analyzer.warnings))
-		// Print only first few warnings
-		max_warnings := min(len(analyzer.warnings), 10)
-		for i := 0; i < max_warnings; i += 1 {
-			fmt.eprintln(analyzer.warnings[i])
-		}
-		if len(analyzer.warnings) > max_warnings {
-			fmt.printf("... and %d more warnings\n", len(analyzer.warnings) - max_warnings)
-		}
-	}
-
-	return success
-}
-
-// Main entry point for semantic analysis
-main_semantic_analysis :: proc(ast: ^Node, filename: string) -> bool {
-	if ast == nil {
-		fmt.println("Cannot perform semantic analysis: AST is nil")
-		return false
-	}
-
-	fmt.printf("Performing semantic analysis on %s...\n", filename)
-
-	success := perform_semantic_analysis(ast)
-
-	if success {
-		fmt.println("Semantic analysis completed successfully!")
-	} else {
-		fmt.println("Semantic analysis failed.")
-	}
-
-	return success
 }

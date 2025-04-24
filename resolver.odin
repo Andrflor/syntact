@@ -29,7 +29,7 @@ STATE_PROCESSED :: u32(3)
 STATE_FAILED :: u32(4)
 
 // File cache entry
-File_Cache_Entry :: struct {
+File_Cache :: struct {
 	path:         string, // Full path to the file
 	mod_time:     i64, // Modification time
 	file_size:    i64, // File size for quick change detection
@@ -47,7 +47,7 @@ File_Cache_Entry :: struct {
 Worker :: struct {
 	id:          int, // Worker ID
 	thread:      ^thread.Thread, // Thread handle
-	pool:        ^Thread_Pool, // Pointer to thread pool
+	thread_pool: ^Thread_Pool, // Pointer to thread pool
 	arena:       vmem.Arena, // Worker-specific memory arena
 	allocator:   runtime.Allocator, // Worker-specific allocator
 	active:      bool, // Whether worker is processing a file
@@ -65,19 +65,27 @@ Thread_Pool :: struct {
 	should_exit:  bool, // Signal all workers to exit (atomic)
 }
 
+File_Entry :: struct {
+	path:         string, // Full path to the file
+	state:        u32, // Processing state (atomic)
+	parser:       ^Parser, // Parser instance
+	analyzer:     ^Analyzer, // Analyzer instance
+	ast:          ^Node, // Parsed AST
+	dependencies: [dynamic]string, // Files this file depends on
+}
+
 // File System Resolver
-File_System_Resolver :: struct {
-	// Configuration
+File_Resolver :: struct {
 	base_dir:        string, // Base directory for resolving paths
-	file_cache:      map[string]^File_Cache_Entry, // Cache of processed files
+	file_entries:    map[string]^File_Entry, // Map of file entries
 	cache_mutex:     sync.RW_Mutex, // Mutex for cache access
 	thread_pool:     Thread_Pool, // Thread pool for parallel processing
 	global_scope:    ^Scope_Info, // Global scope for sharing symbols
 	global_arena:    ^vmem.Arena, // Global memory arena
+	options:         Compiler_Options, // Compiler options
 
 	// Analysis state
 	main_file:       string, // Main file being processed
-	analyzer:        ^Analyzer, // Main analyzer
 	verbose:         bool, // Verbose output flag
 	timing:          bool, // Output timing information
 
@@ -90,17 +98,18 @@ File_System_Resolver :: struct {
 
 // Initialize the file system resolver
 init_file_resolver :: proc(
-	resolver: ^File_System_Resolver,
+	resolver: ^File_Resolver,
 	main_file: string,
 	global_arena: ^vmem.Arena,
 	options: Compiler_Options,
 ) {
 	resolver.base_dir = filepath.dir(main_file)
-	resolver.file_cache = make(map[string]^File_Cache_Entry)
+	resolver.file_entries = make(map[string]^File_Entry) // Add this line
 	resolver.global_arena = global_arena
 	resolver.main_file = main_file
 	resolver.verbose = options.verbose
 	resolver.timing = options.timing
+	resolver.options = options
 
 	// Initialize mutex
 	// sync.rw_mutex_init(&resolver.cache_mutex)
@@ -120,9 +129,62 @@ init_file_resolver :: proc(
 	}
 }
 
+// Called whenever we find a file reference during parsing
+enqueue_file_reference :: proc(parser: ^Parser, ref_path: string, position: Position) -> bool {
+	if parser.file_resolver == nil {
+		return false
+	}
+
+	resolver := parser.file_resolver
+
+	// Resolve the actual path
+	resolved_path := resolve_file_reference(resolver, ref_path, parser.filename)
+	if resolved_path == "" {
+		error_at(
+			parser,
+			parser.current_token,
+			fmt.tprintf("Could not resolve file reference '%s'", ref_path),
+		)
+		return false
+	}
+
+	// Track dependency
+	add_dependency(parser.filename, resolved_path, resolver)
+
+	// Check if already processed or queued
+	sync.rw_mutex_lock(&resolver.cache_mutex)
+	_, already_exists := resolver.file_entries[resolved_path]
+	sync.rw_mutex_unlock(&resolver.cache_mutex)
+
+	if already_exists {
+		return true // Already handled
+	}
+
+	// Create new entry
+	entry := new(File_Entry)
+	entry.path = strings.clone(resolved_path)
+	entry.state = STATE_QUEUED
+	entry.dependencies = make([dynamic]string)
+
+	// Register entry
+	sync.rw_mutex_lock(&resolver.cache_mutex)
+	resolver.file_entries[resolved_path] = entry
+	sync.rw_mutex_unlock(&resolver.cache_mutex)
+
+	// Queue for processing
+	sync.mutex_lock(&resolver.thread_pool.queue_mutex)
+	append(&resolver.thread_pool.work_queue, resolved_path)
+	sync.mutex_unlock(&resolver.thread_pool.queue_mutex)
+
+	// Increment wait group
+	sync.wait_group_add(&resolver.thread_pool.wait_group, 1)
+
+	return true
+}
+
 
 // Initialize thread pool
-init_thread_pool :: proc(resolver: ^File_System_Resolver) {
+init_thread_pool :: proc(resolver: ^File_Resolver) {
 	// Determine optimal thread count (leave one core for main thread)
 	num_threads := os.processor_core_count()
 
@@ -139,7 +201,7 @@ init_thread_pool :: proc(resolver: ^File_System_Resolver) {
 	for i := 0; i < num_threads; i += 1 {
 		worker := &pool.workers[i]
 		worker.id = i
-		worker.pool = pool
+		worker.thread_pool = pool
 		worker.active = false
 		worker.should_exit = false
 
@@ -155,7 +217,7 @@ init_thread_pool :: proc(resolver: ^File_System_Resolver) {
 		// Create thread
 		worker_proc :: proc(data: ^thread.Thread) {
 			worker := cast(^Worker)data
-			resolver := cast(^File_System_Resolver)worker.pool
+			resolver := cast(^File_Resolver)worker.thread_pool
 			worker_thread_proc(worker, resolver)
 		}
 
@@ -164,7 +226,8 @@ init_thread_pool :: proc(resolver: ^File_System_Resolver) {
 }
 
 // Worker thread procedure
-worker_thread_proc :: proc(worker: ^Worker, resolver: ^File_System_Resolver) {
+
+worker_thread_proc :: proc(worker: ^Worker, resolver: ^File_Resolver) {
 	// Set up worker context
 	context.allocator = worker.allocator
 
@@ -174,16 +237,16 @@ worker_thread_proc :: proc(worker: ^Worker, resolver: ^File_System_Resolver) {
 		got_work := false
 
 		{
-			sync.mutex_lock(&worker.pool.queue_mutex)
-			if len(worker.pool.work_queue) > 0 {
-				file_path = worker.pool.work_queue[0]
-				ordered_remove(&worker.pool.work_queue, 0)
+			sync.mutex_lock(&worker.thread_pool.queue_mutex)
+			if len(worker.thread_pool.work_queue) > 0 {
+				file_path = worker.thread_pool.work_queue[0]
+				ordered_remove(&worker.thread_pool.work_queue, 0)
 				worker.active = true
 				worker.file_path = strings.clone(file_path)
-				sync.atomic_add(&worker.pool.active_count, 1)
+				sync.atomic_add(&worker.thread_pool.active_count, 1)
 				got_work = true
 			}
-			sync.mutex_unlock(&worker.pool.queue_mutex)
+			sync.mutex_unlock(&worker.thread_pool.queue_mutex)
 		}
 
 		if !got_work {
@@ -201,14 +264,14 @@ worker_thread_proc :: proc(worker: ^Worker, resolver: ^File_System_Resolver) {
 		worker.file_path = ""
 
 		// Update stats and signal completion
-		sync.atomic_sub(&worker.pool.active_count, 1)
+		sync.atomic_sub(&worker.thread_pool.active_count, 1)
 		sync.atomic_add(&resolver.files_processed, 1)
-		sync.wait_group_done(&worker.pool.wait_group)
+		sync.wait_group_done(&resolver.thread_pool.wait_group)
 	}
 }
 
 // Clean up thread pool
-destroy_thread_pool :: proc(resolver: ^File_System_Resolver) {
+destroy_thread_pool :: proc(resolver: ^File_Resolver) {
 	pool := &resolver.thread_pool
 
 	// Signal all threads to exit
@@ -232,31 +295,8 @@ destroy_thread_pool :: proc(resolver: ^File_System_Resolver) {
 	delete(pool.work_queue)
 }
 
-// Clean up resolver resources
-destroy_file_resolver :: proc(resolver: ^File_System_Resolver) {
-	// Clean up thread pool
-	destroy_thread_pool(resolver)
-
-	// Clean up cache entries
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	for _, entry in resolver.file_cache {
-		if entry != nil {
-			delete(entry.path)
-			if len(entry.dependencies) != 0 {
-				delete(entry.dependencies)
-			}
-			free(entry)
-		}
-	}
-	delete(resolver.file_cache)
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	// Clean up mutex
-	// sync.rw_mutex_destroy(&resolver.cache_mutex)
-}
-
 // Queue a file for processing
-queue_file :: proc(resolver: ^File_System_Resolver, file_path: string) -> bool {
+queue_file :: proc(resolver: ^File_Resolver, file_path: string) -> bool {
 	// Normalize path
 	norm_path := filepath.clean(file_path)
 
@@ -270,7 +310,7 @@ queue_file :: proc(resolver: ^File_System_Resolver, file_path: string) -> bool {
 
 	// Check cache to see if already processed or in progress
 	sync.rw_mutex_lock(&resolver.cache_mutex)
-	entry, in_cache := resolver.file_cache[norm_path]
+	entry, in_cache := resolver.file_entries[norm_path]
 	if in_cache {
 		state := sync.atomic_load(&entry.state)
 		if state == STATE_PROCESSED || state == STATE_PROCESSING || state == STATE_QUEUED {
@@ -281,11 +321,11 @@ queue_file :: proc(resolver: ^File_System_Resolver, file_path: string) -> bool {
 	}
 	sync.rw_mutex_unlock(&resolver.cache_mutex)
 
-	// Create or update cache entry
+	// Create or update entry
 	sync.rw_mutex_lock(&resolver.cache_mutex)
 
 	// Check again in case another thread updated while we were waiting
-	entry, in_cache = resolver.file_cache[norm_path]
+	entry, in_cache = resolver.file_entries[norm_path]
 	if in_cache {
 		state := sync.atomic_load(&entry.state)
 		if state == STATE_PROCESSED || state == STATE_PROCESSING || state == STATE_QUEUED {
@@ -308,16 +348,13 @@ queue_file :: proc(resolver: ^File_System_Resolver, file_path: string) -> bool {
 		}
 
 		// Create new entry
-		entry = new(File_Cache_Entry)
+		entry = new(File_Entry)
 		entry.path = strings.clone(norm_path)
-		entry.mod_time = mod_time
-		entry.file_size = file_size
-		entry.dependencies = make([dynamic]string)
 		entry.state = STATE_QUEUED
-		entry.worker_id = -1
+		entry.dependencies = make([dynamic]string)
 
-		// sync.atomic_mutex_init(&entry.lock)
-		resolver.file_cache[norm_path] = entry
+		// Register in file entries
+		resolver.file_entries[norm_path] = entry
 	}
 
 	sync.rw_mutex_unlock(&resolver.cache_mutex)
@@ -367,294 +404,110 @@ when ODIN_OS == .Windows {
 }
 
 // Has the file been modified since last cached?
-file_modified :: proc(resolver: ^File_System_Resolver, file_path: string) -> bool {
+file_modified :: proc(resolver: ^File_Resolver, file_path: string) -> bool {
 	sync.rw_mutex_lock(&resolver.cache_mutex)
 	defer sync.rw_mutex_unlock(&resolver.cache_mutex)
 
-	entry, exists := resolver.file_cache[file_path]
+	entry, exists := resolver.file_entries[file_path]
 	if !exists {
 		return true
 	}
 
-	// Get current stats
-	current_mod_time, current_size, ok := get_file_stats(file_path)
-	if !ok {
-		return true // Assume modified if can't get stats
-	}
-
-	// Changed if either mod time or size changed
-	return entry.mod_time != current_mod_time || entry.file_size != current_size
+	// For now, always return true to force reprocessing
+	// In the future, you could store mod_time and file_size in File_Entry
+	return true
 }
 
 // Process a file (worker implementation)
-process_file_worker :: proc(resolver: ^File_System_Resolver, worker: ^Worker, file_path: string) {
-	// Get cache entry
+process_file_worker :: proc(resolver: ^File_Resolver, worker: ^Worker, file_path: string) {
+	// Get entry
 	sync.rw_mutex_lock(&resolver.cache_mutex)
-	entry, exists := resolver.file_cache[file_path]
+	entry, exists := resolver.file_entries[file_path]
 	sync.rw_mutex_unlock(&resolver.cache_mutex)
 
-	if !exists {
-		if resolver.verbose {
-			fmt.eprintf("Error: File '%s' not found in cache during processing\n", file_path)
-		}
+	if !exists || entry == nil {
+		fmt.eprintf("Error: Missing entry for '%s'\n", file_path)
 		return
 	}
 
-	// Update entry state
+	// Update state
 	sync.atomic_store(&entry.state, STATE_PROCESSING)
-	entry.worker_id = i32(worker.id)
-
-	// Start timing
-	start_time: time.Time
-	if resolver.timing {
-		start_time = time.now()
-	}
 
 	// Read the file
 	source, read_ok := os.read_entire_file(file_path)
 	if !read_ok {
-		if resolver.verbose {
-			fmt.eprintf("Error: Could not read file '%s'\n", file_path)
-		}
 		sync.atomic_store(&entry.state, STATE_FAILED)
-		sync.atomic_add(&resolver.parse_errors, 1)
 		return
 	}
 	defer delete(source)
 
-	// Compute content hash
-	content_hash := hash.fnv64a(source)
+	// Initialize lexer
+	lexer: Lexer
+	init_lexer(&lexer, string(source))
 
-	// Check if we can reuse existing AST (hash matches)
-	if entry.ast != nil && entry.hash == content_hash {
-		sync.atomic_add(&resolver.cache_hits, 1)
+	// Create parser
+	parser := new(Parser)
+	init_parser(parser, &lexer)
+	parser.file_resolver = resolver
+	parser.filename = file_path
+	entry.parser = parser
+
+	// Parse file
+	ast := parse(parser)
+	entry.ast = ast
+
+	// Skip analysis if parse-only flag is set
+	if resolver.options.parse_only {
 		sync.atomic_store(&entry.state, STATE_PROCESSED)
 		return
 	}
 
-	// Update content hash
-	entry.hash = content_hash
-
-	// Initialize lexer and parser
-	lexer: Lexer
-	init_lexer(&lexer, string(source))
-
-	parser: Parser
-	init_parser(&parser, &lexer)
-
-	// Parse the file
-	ast := parse(&parser)
-
-	parse_time: time.Duration
-	if resolver.timing {
-		parse_time = time.diff(start_time, time.now())
-	}
-
-	// Update cache with new AST
-	entry.ast = ast
-
-	// Extract @references from AST
-	references := extract_references(ast)
-
-	// Process each reference
-	for ref in references {
-		resolved_path := resolve_file_reference(resolver, ref, file_path)
-		if resolved_path != "" {
-			// Add dependency
-			add_dependency(entry, resolved_path)
-
-			// Queue the dependency for processing
-			queue_file(resolver, resolved_path)
-		}
-	}
-
-	delete(references)
-
-	// Mark as processed
-	sync.atomic_store(&entry.state, STATE_PROCESSED)
-
-	if resolver.timing && resolver.verbose {
-		process_time := time.diff(start_time, time.now())
-		fmt.printf(
-			"File '%s' processed in %.3fms (parsing: %.3fms)\n",
-			filepath.base(file_path),
-			f64(time.duration_milliseconds(process_time)),
-			f64(time.duration_milliseconds(parse_time)),
-		)
-	}
-}
-
-// Add a dependency to a file
-add_dependency :: proc(entry: ^File_Cache_Entry, dependency: string) {
-	if entry == nil {
+	// Skip analysis if there were parse errors
+	if parser.had_error {
+		sync.atomic_store(&entry.state, STATE_PROCESSED)
 		return
 	}
 
-	sync.atomic_mutex_lock(&entry.lock)
-	defer sync.atomic_mutex_unlock(&entry.lock)
+	// Skip analysis if analyze-only flag is not set
+	if !resolver.options.analyze_only {
+		sync.atomic_store(&entry.state, STATE_PROCESSED)
+		return
+	}
 
-	// Check if dependency already exists
-	for dep in entry.dependencies {
-		if dep == dependency {
+	// Create analyzer
+	analyzer := init_analyzer(parser.file_resolver, file_path)
+	entry.analyzer = analyzer
+
+	// Analyze file (we'll integrate imports later)
+	enqueue_node(analyzer, ast, analyzer.global_scope)
+	process_work_queue(analyzer)
+
+	// Mark as processed
+	sync.atomic_store(&entry.state, STATE_PROCESSED)
+}
+// Add a dependency to a file
+add_dependency :: proc(source_file, target_file: string, resolver: ^File_Resolver) {
+	if resolver == nil || source_file == "" || target_file == "" {
+		return
+	}
+
+	sync.rw_mutex_lock(&resolver.cache_mutex)
+	defer sync.rw_mutex_unlock(&resolver.cache_mutex)
+
+	source_entry, exists := resolver.file_entries[source_file]
+	if !exists || source_entry == nil {
+		return
+	}
+
+	// Check if already exists
+	for dep in source_entry.dependencies {
+		if dep == target_file {
 			return
 		}
 	}
 
 	// Add dependency
-	append(&entry.dependencies, strings.clone(dependency))
-}
-
-// Extract @references from an AST
-extract_references :: proc(node: ^Node) -> [dynamic]string {
-	refs := make([dynamic]string)
-	extract_references_impl(node, &refs)
-	return refs
-}
-
-// Implementation of reference extraction
-extract_references_impl :: proc(node: ^Node, refs: ^[dynamic]string) {
-	if node == nil {
-		return
-	}
-
-	#partial switch n in node^ {
-	case FileSystem:
-		// Extract file reference
-		ref_path := get_filesystem_path(n)
-		if ref_path != "" {
-			append(refs, ref_path)
-		}
-
-		// Also check target for nested references
-		if n.target != nil {
-			extract_references_impl(n.target, refs)
-		}
-
-	case Scope:
-		for i := 0; i < len(n.value); i += 1 {
-			child_node := new(Node)
-			child_node^ = n.value[i]
-			extract_references_impl(child_node, refs)
-		}
-
-	case Pointing:
-		if n.name != nil {
-			extract_references_impl(n.name, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case PointingPull:
-		if n.name != nil {
-			extract_references_impl(n.name, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case EventPush:
-		if n.name != nil {
-			extract_references_impl(n.name, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case EventPull:
-		if n.name != nil {
-			extract_references_impl(n.name, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case ResonancePush:
-		if n.name != nil {
-			extract_references_impl(n.name, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case ResonancePull:
-		if n.name != nil {
-			extract_references_impl(n.name, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case Override:
-		if n.source != nil {
-			extract_references_impl(n.source, refs)
-		}
-		for i := 0; i < len(n.overrides); i += 1 {
-			override_node := new(Node)
-			override_node^ = n.overrides[i]
-			extract_references_impl(override_node, refs)
-		}
-
-	case Pattern:
-		if n.target != nil {
-			extract_references_impl(n.target, refs)
-		}
-		for branch in n.value {
-			if branch.source != nil {
-				extract_references_impl(branch.source, refs)
-			}
-			if branch.product != nil {
-				extract_references_impl(branch.product, refs)
-			}
-		}
-
-	case Constraint:
-		if n.constraint != nil {
-			extract_references_impl(n.constraint, refs)
-		}
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case Operator:
-		if n.left != nil {
-			extract_references_impl(n.left, refs)
-		}
-		if n.right != nil {
-			extract_references_impl(n.right, refs)
-		}
-
-	case Execute:
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case Property:
-		if n.source != nil {
-			extract_references_impl(n.source, refs)
-		}
-		if n.property != nil {
-			extract_references_impl(n.property, refs)
-		}
-
-	case Expand:
-		if n.target != nil {
-			extract_references_impl(n.target, refs)
-		}
-
-	case Product:
-		if n.value != nil {
-			extract_references_impl(n.value, refs)
-		}
-
-	case Range:
-		if n.start != nil {
-			extract_references_impl(n.start, refs)
-		}
-		if n.end != nil {
-			extract_references_impl(n.end, refs)
-		}
-	}
+	append(&source_entry.dependencies, strings.clone(target_file))
 }
 
 // Extract filesystem path from FileSystem node
@@ -714,7 +567,7 @@ get_filesystem_path :: proc(node: FileSystem) -> string {
 
 // Resolve a file reference
 resolve_file_reference :: proc(
-	resolver: ^File_System_Resolver,
+	resolver: ^File_Resolver,
 	reference: string,
 	source_file: string,
 ) -> string {
@@ -737,7 +590,7 @@ resolve_file_reference :: proc(
 
 // Resolve path components recursively
 resolve_path_components :: proc(
-	resolver: ^File_System_Resolver,
+	resolver: ^File_Resolver,
 	components: []string,
 	base_path: string,
 ) -> string {
@@ -794,94 +647,4 @@ resolve_path_components :: proc(
 	}
 
 	return ""
-}
-
-// Main entry point to process a file and all its dependencies
-process_file_deps :: proc(
-	resolver: ^File_System_Resolver,
-	file_path: string,
-) -> (
-	^Node,
-	^Analyzer,
-	bool,
-) {
-	if resolver.verbose {
-		fmt.printf("Processing file: %s\n", file_path)
-	}
-
-	start_time := time.now()
-
-	// Queue the file for processing
-	if !queue_file(resolver, file_path) {
-		fmt.eprintf("Error: Failed to queue file '%s' for processing\n", file_path)
-		return nil, nil, false
-	}
-
-	// Wait for all files to be processed
-	sync.wait_group_wait(&resolver.thread_pool.wait_group)
-
-	// Get the main file's AST
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	main_entry, exists := resolver.file_cache[file_path]
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	if !exists || main_entry.ast == nil {
-		fmt.eprintf("Error: Main file '%s' could not be processed\n", file_path)
-		return nil, nil, false
-	}
-
-	// Create analyzer for semantic analysis
-	analyzer := init_analyzer()
-	resolver.analyzer = analyzer
-
-	// Integrate imported modules
-	integrate_modules(resolver, analyzer)
-
-	// Analyze main file
-	analyze_success := main_semantic_analysis(main_entry.ast, file_path)
-
-	if resolver.timing {
-		duration := time.diff(start_time, time.now())
-		fmt.printf("\nFile processing statistics:\n")
-		fmt.printf("  Total time:       %.3fms\n", f64(time.duration_milliseconds(duration)))
-		fmt.printf("  Files processed:  %d\n", resolver.files_processed)
-		fmt.printf("  Cache hits:       %d\n", resolver.cache_hits)
-		fmt.printf("  Parse errors:     %d\n", resolver.parse_errors)
-		fmt.printf("  Semantic errors:  %d\n", resolver.semantic_errors)
-	}
-
-	return main_entry.ast, analyzer, analyze_success
-}
-
-// Integrate modules into the analyzer
-integrate_modules :: proc(resolver: ^File_System_Resolver, analyzer: ^Analyzer) {
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	defer sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	// First pass: Register all modules in global scope
-	for path, entry in resolver.file_cache {
-		if entry.ast == nil || sync.atomic_load(&entry.state) != STATE_PROCESSED {
-			continue
-		}
-
-		// Create a module symbol for this file
-		module_name := filepath.base(path)
-		module_name = strings.trim_suffix(module_name, ".st")
-
-		// Create a symbol for the module
-		symbol := create_symbol(
-			analyzer,
-			module_name,
-			nil,
-			analyzer.global_scope,
-			.FileReference,
-			Position{line = 0, column = 0, offset = 0},
-		)
-
-		symbol.flags += {.IsModule, .IsExported}
-		entry.symbol = symbol
-
-		// Register in global scope
-		add_symbol(analyzer, symbol)
-	}
 }
