@@ -68,18 +68,11 @@ generate_code :: proc(ast: ^Node, analyzer: ^Analyzer, output_file: string) {
 // Main assembly generation function
 generate_assembly :: proc(ast: ^Node, analyzer: ^Analyzer) {
 	x64.write_elf()
-
-	x64.push_r64(.RBP)
-	x64.mov_r64_r64(.RBP, .RSP)
-	x64.sub_r64_imm32(.RSP, 32) // Reserve some stack space
-
 	// Generate code for the AST
-	generate_node(ast, analyzer)
-
-	// Function epilogue
-	x64.mov_r64_r64(.RSP, .RBP)
-	x64.pop_r64(.RBP)
-	x64.ret()
+	x64.mov_r64_imm64(.RDI, 0)
+	x64.mov_r64_imm64(.RAX, 60)
+	x64.syscall()
+	// generate_node(ast, analyzer)
 }
 
 // Generate code for an AST node
