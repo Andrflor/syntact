@@ -90,6 +90,8 @@ Token_Kind :: enum {
 	BitOr, // |
 	BitXor, // ^
 	BitNot, // ~
+  RShift, // >>
+  LShift, // <<
 }
 
 /*
@@ -337,6 +339,9 @@ next_token :: proc(l: ^Lexer) -> Token {
             if l.source[l.position.offset] == '=' {
                 advance_position(l)
                 return Token{kind = .LessEqual, text = "<=", position = start_pos}
+            } else if l.source[l.position.offset] == '<' {
+                advance_position(l)
+                return Token{kind = .LShift, text = "<<", position = start_pos}
             } else if l.source[l.position.offset] == '-' {
                 advance_position(l)
                 return Token{kind = .PointingPull, text = "<-", position = start_pos}
@@ -350,6 +355,9 @@ next_token :: proc(l: ^Lexer) -> Token {
             if l.source[l.position.offset] == '=' {
                 advance_position(l)
                 return Token{kind = .GreaterEqual, text = ">=", position = start_pos}
+            } else if l.source[l.position.offset] == '>' {
+                advance_position(l)
+                return Token{kind = .RShift, text = ">>", position = start_pos}
             } else if l.source[l.position.offset] == '-' {
                 advance_position(l)
                 return Token{kind = .EventPush, text = ">-", position = start_pos}
@@ -808,6 +816,8 @@ Operator_Kind :: enum {
 	BitOr, // |
 	BitXor, // ^
 	BitNot, // ~
+  RShift, // >>
+  LShift, // <<
 }
 
 /*
@@ -1113,6 +1123,10 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .BitOr:
         return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .BITWISE}
     case .BitXor:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    case .RShift:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+    case .LShift:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .Equal:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
@@ -1899,6 +1913,8 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     case .GreaterThan:   op.kind = .GreaterThan
     case .LessEqual:     op.kind = .LessEqual
     case .GreaterEqual:  op.kind = .GreaterEqual
+    case .LShift:        op.kind = .LShift
+    case .RShift:        op.kind = .RShift
     case:
         error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", operator_kind))
         return nil
@@ -2666,41 +2682,6 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
     )
 }
 
-/*
- * is_operator checks if a token is a binary operator
- */
-is_operator :: proc(kind: Token_Kind) -> bool {
-    return(
-        kind == .Equal ||
-        kind == .LessThan ||
-        kind == .GreaterThan ||
-        kind == .LessEqual ||
-        kind == .GreaterEqual ||
-        kind == .Plus ||
-        kind == .Minus ||
-        kind == .Asterisk ||
-        kind == .Slash ||
-        kind == .Percent ||
-        kind == .BitAnd ||
-        kind == .BitOr ||
-        kind == .BitXor ||
-        kind == .BitNot ||
-        kind == .PointingPush ||
-        kind == .PointingPull ||
-        kind == .EventPush ||
-        kind == .EventPull ||
-        kind == .ResonancePush ||
-        kind == .ResonancePull ||
-        kind == .DoubleDot
-    )
-}
-
-/*
- * is_execution_modifier checks if a token is an execution modifier
- */
-is_execution_modifier :: proc(kind: Token_Kind) -> bool {
-    return kind == .Execute || kind == .LeftBrace || kind == .LeftParen
-}
 
 /*
  * is_digit checks if a character is a digit
