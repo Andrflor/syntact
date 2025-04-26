@@ -431,14 +431,12 @@ generate_int_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Co
 		x64.or_r64_r64(.RAX, .RBX)
 	case .BitXor:
 		x64.xor_r64_r64(.RAX, .RBX)
-	// case .LShift:
-	// 	x64.mov_r64_r64(.RCX, .RAX)
-	// 	x64.mov_r64_r64(.RAX, .RBX)
-	// 	x64.shl_r64_cl(.RAX)
-	// case .RShift:
-	// 	x64.mov_r64_r64(.RCX, .RAX)
-	// 	x64.mov_r64_r64(.RAX, .RBX)
-	// 	x64.shr_r64_cl(.RAX)
+	case .LShift:
+		x64.mov_r64_r64(.RCX, .RAX)
+		x64.mov_r64_r64(.RAX, .RBX)
+	case .RShift:
+		x64.mov_r64_r64(.RCX, .RAX)
+		x64.mov_r64_r64(.RAX, .RBX)
 	case:
 		add_compile_error(gen_context, fmt.tprintf("Unsupported integer operation: %v", op_kind))
 	}
