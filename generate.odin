@@ -84,13 +84,13 @@ generate_code :: proc(ast: ^Node, analyzer: ^Analyzer, output_file: string) {
 	// Initialize code generation context
 	gen_context := init_code_gen_context()
 	gen_context.buffer = &buffer
-	gen_context.current_scope = analyzer.global_scope
+	gen_context.current_scope = analyzer.root_scope
 
 	// Write ELF header
 	x64.write_elf()
 
 	// Find the main product in the global scope
-	main_product := find_main_product(analyzer.global_scope)
+	main_product := find_main_product(analyzer.root_scope)
 	if main_product == nil {
 		fmt.eprintln("Error: No main product found in the program")
 		return
@@ -139,10 +139,9 @@ find_main_product :: proc(scope: ^Scope_Info) -> ^Node {
 		return nil
 	}
 
-	root_scope := scope.symbol_list[len(scope.symbol_list) - 1].defining_scope
 	// Look for a product node (anonymous symbol with no name)
-	for i := 0; i < len(root_scope.symbol_list); i += 1 {
-		symbol := root_scope.symbol_list[i]
+	for i := 0; i < len(scope.symbol_list); i += 1 {
+		symbol := scope.symbol_list[i]
 		// Check if it's a product node
 		if symbol.node != nil {
 			// Check if the node is a Product

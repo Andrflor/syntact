@@ -8,7 +8,7 @@ import "core:time"
 
 /*
  * ====================================================================
- * Semantic Analysis for Homoiconic Language
+ * Semantic Analysis for Homoiconic Language - Refactored
  * ====================================================================
  */
 
@@ -49,20 +49,20 @@ Symbol_Flag :: enum {
 	Processed, // File has been processed
 	Failed, // File processing failed
 }
+
 // Symbol structure
 Symbol :: struct {
-	name:           string,
-	node:           ^Node,
-	scope:          ^Scope_Info,
-	kind:           Reference_Kind,
-	defining_scope: ^Scope_Info,
-	constraint:     ^Symbol,
-	driver:         ^Symbol,
-	position:       Position,
-	flags:          bit_set[Symbol_Flag],
-	hash:           u64, // Pre-computed name hash
-	index:          int, // Position in scope
-	references:     [dynamic]^Reference,
+	name:       string,
+	node:       ^Node, // The AST node that defines this symbol
+	scope_info: ^Scope_Info, // The scope info this symbol belongs to
+	kind:       Reference_Kind,
+	constraint: ^Symbol,
+	driver:     ^Symbol,
+	position:   Position,
+	flags:      bit_set[Symbol_Flag],
+	hash:       u64, // Pre-computed name hash
+	index:      int, // Position in scope
+	references: [dynamic]^Reference,
 }
 
 // Reference structure
@@ -74,13 +74,14 @@ Reference :: struct {
 	index:    int,
 }
 
-// Scope structure with optimized lookups
+// Scope information attached to scope nodes
 Scope_Info :: struct {
-	parent:              ^Scope_Info,
+	node:                ^Node, // The AST node this scope belongs to (UNIFIED with node structure)
+	parent_scope:        ^Scope_Info,
 	symbols:             map[string]^Symbol,
 	symbol_list:         [dynamic]^Symbol,
 	expansions:          [dynamic]^Scope_Info,
-	scope_symbol:        ^Symbol,
+	scope_symbol:        ^Symbol, // Symbol that defines this scope (if any)
 	is_pattern:          bool,
 
 	// Analysis data
@@ -132,8 +133,8 @@ Work_Item :: struct {
 
 // Main analyzer structure
 Analyzer :: struct {
-	global_scope:     ^Scope_Info,
-	current_scope:    ^Scope_Info,
+	root_scope:       ^Scope_Info, // The scope info attached to the root node
+	current_scope:    ^Scope_Info, // Current scope during analysis
 
 	// Error and warning storage
 	errors:           [dynamic]string,
@@ -162,13 +163,13 @@ Analyzer :: struct {
 // SECTION 2: INITIALIZATION
 // ===========================================================================
 
-// Initialize the analyzer
-init_analyzer :: proc(resolver: ^File_Resolver, filename: string) -> ^Analyzer {
+// Initialize the analyzer with the AST root as the global scope
+init_analyzer :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) -> ^Analyzer {
 	analyzer := new(Analyzer)
 
-	// Init core structures
-	analyzer.global_scope = init_scope(nil)
-	analyzer.current_scope = analyzer.global_scope
+	// Init core structures - create root scope info attached to the root node
+	analyzer.root_scope = create_scope_info_for_node(ast, nil)
+	analyzer.current_scope = analyzer.root_scope
 
 	analyzer.filename = filename
 	analyzer.resolver = resolver
@@ -187,16 +188,17 @@ init_analyzer :: proc(resolver: ^File_Resolver, filename: string) -> ^Analyzer {
 	analyzer.work_queue = make([dynamic]Work_Item)
 	analyzer.queue_head = 0
 
-	// Register built-ins
+	// Register built-ins within the root scope
 	register_builtin_types(analyzer)
 
 	return analyzer
 }
 
-// Initialize a scope
-init_scope :: proc(parent: ^Scope_Info) -> ^Scope_Info {
+// Create scope info for a node
+create_scope_info_for_node :: proc(node: ^Node, parent: ^Scope_Info) -> ^Scope_Info {
 	scope := new(Scope_Info)
-	scope.parent = parent
+	scope.node = node // Directly attach to the node
+	scope.parent_scope = parent
 
 	// Initialize maps and arrays
 	scope.symbols = make(map[string]^Symbol)
@@ -213,7 +215,7 @@ init_scope :: proc(parent: ^Scope_Info) -> ^Scope_Info {
 	return scope
 }
 
-// Register built-in types
+// Register built-in types in the root scope
 register_builtin_types :: proc(analyzer: ^Analyzer) {
 	default_pos := Position {
 		line   = 0,
@@ -242,7 +244,7 @@ register_builtin_types :: proc(analyzer: ^Analyzer) {
 			analyzer,
 			type_name,
 			nil,
-			analyzer.global_scope,
+			analyzer.root_scope,
 			.Builtin,
 			default_pos,
 		)
@@ -265,7 +267,7 @@ create_symbol :: proc(
 	symbol := new(Symbol)
 	symbol.name = name
 	symbol.node = node
-	symbol.scope = scope
+	symbol.scope_info = scope
 	symbol.kind = kind
 	symbol.position = position
 	symbol.references = make([dynamic]^Reference)
@@ -345,7 +347,7 @@ add_symbol :: proc(analyzer: ^Analyzer, symbol: ^Symbol) -> ^Symbol {
 	append(&current.symbol_list, symbol)
 
 	// Invalidate visible symbols cache for parent scopes
-	invalidate_visible_cache(current.parent)
+	invalidate_visible_cache(current.parent_scope)
 
 	return symbol
 }
@@ -360,7 +362,7 @@ invalidate_visible_cache :: proc(scope: ^Scope_Info) {
 				clear(&current.visible_symbols)
 			}
 		}
-		current = current.parent
+		current = current.parent_scope
 	}
 }
 
@@ -392,7 +394,7 @@ enter_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) -> ^Scope_Info {
 	analyzer.current_scope = scope
 
 	// Prepare visible symbols table if needed
-	if !scope.is_visible_computed && scope.parent != nil {
+	if !scope.is_visible_computed && scope.parent_scope != nil {
 		if scope.visible_symbols == nil {
 			scope.visible_symbols = make(map[string]^Symbol)
 		} else {
@@ -409,10 +411,10 @@ enter_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) -> ^Scope_Info {
 
 // Pre-compute all symbols visible from a scope
 compute_visible_symbols :: proc(scope: ^Scope_Info) {
-	if scope == nil || scope.parent == nil do return
+	if scope == nil || scope.parent_scope == nil do return
 
 	// Ensure parent has computed its visible symbols
-	parent := scope.parent
+	parent := scope.parent_scope
 	if !parent.is_visible_computed {
 		if parent.visible_symbols == nil {
 			parent.visible_symbols = make(map[string]^Symbol)
@@ -463,23 +465,29 @@ leave_scope :: proc(analyzer: ^Analyzer, prev_scope: ^Scope_Info) {
 	analyzer.current_scope = prev_scope
 }
 
-// Create a scope for a node
+// Create a scope for a node with proper homoiconic structure
 create_scope_for_node :: proc(
 	analyzer: ^Analyzer,
 	node: ^Node,
 	name: string,
 	position: Position,
 ) -> ^Scope_Info {
-	// Create scope
-	scope := init_scope(analyzer.current_scope)
+	// Create scope directly attached to the node
+	scope := create_scope_info_for_node(node, analyzer.current_scope)
 
-	// Create symbol for the scope
-	symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position)
-	symbol.defining_scope = scope
-	scope.scope_symbol = symbol
-
-	// Register scope
-	add_symbol(analyzer, symbol)
+	// Create symbol for the scope if needed
+	if name != "" {
+		symbol := create_symbol(
+			analyzer,
+			name,
+			node,
+			analyzer.current_scope,
+			.Definition,
+			position,
+		)
+		scope.scope_symbol = symbol
+		add_symbol(analyzer, symbol)
+	}
 
 	return scope
 }
@@ -559,7 +567,7 @@ lookup_symbol_in_scope_chain :: proc(
 			}
 		}
 
-		current = current.parent
+		current = current.parent_scope
 	}
 
 	// Try builtin types as last resort
@@ -593,7 +601,7 @@ is_symbol_visible_from :: proc(from_scope: ^Scope_Info, symbol: ^Symbol) -> bool
 	// Check if symbol is in the current scope or any parent
 	current := from_scope
 	for current != nil {
-		if symbol.scope == current {
+		if symbol.scope_info == current {
 			return true
 		}
 
@@ -604,7 +612,7 @@ is_symbol_visible_from :: proc(from_scope: ^Scope_Info, symbol: ^Symbol) -> bool
 			}
 		}
 
-		current = current.parent
+		current = current.parent_scope
 	}
 
 	return false
@@ -617,7 +625,7 @@ is_in_expansion :: proc(expansion: ^Scope_Info, symbol: ^Symbol) -> bool {
 	}
 
 	// Check direct symbols
-	if symbol.scope == expansion {
+	if symbol.scope_info == expansion {
 		return true
 	}
 
@@ -688,15 +696,19 @@ lookup_symbol_local :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
 // SECTION 4: MAIN ANALYSIS - NON-RECURSIVE
 // ===========================================================================
 
-// Non-recursive analysis
+// Non-recursive analysis with proper homoiconic structure
 analyze_ast :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) -> ^Analyzer {
-	analyzer := init_analyzer(resolver, filename)
+	// Initialize analyzer with the AST root as the global scope
+	analyzer := init_analyzer(ast, resolver, filename)
 
-	// Enqueue root node
-	enqueue_node(analyzer, ast, analyzer.global_scope)
 
-	// Process all nodes with iterative approach
-	process_work_queue(analyzer)
+	// Enqueue all children
+	#partial switch n in ast {
+	case Scope:
+		for i := 0; i < len(n.value); i += 1 {
+			process_node(analyzer, &n.value[i], analyzer.root_scope)
+		}
+	}
 
 	// Final validation passes
 	validate_analysis(analyzer)
@@ -728,7 +740,7 @@ process_work_queue :: proc(analyzer: ^Analyzer) {
 	analyzer.queue_head = 0
 }
 
-// Process a single node (replaces recursive traversal)
+// Process a single node with homoiconic awareness
 process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info) {
 	if node == nil do return
 
@@ -742,7 +754,20 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info) {
 
 	#partial switch n in node^ {
 	case Scope:
-		process_scope(analyzer, node, n, position)
+		// For a scope node, create a scope directly attached to the node
+		scope_info := create_scope_info_for_node(node, analyzer.current_scope)
+
+		// Enter new scope
+		prev_inner_scope := analyzer.current_scope
+		analyzer.current_scope = scope_info
+
+		// Enqueue all children
+		for i := 0; i < len(n.value); i += 1 {
+			enqueue_node(analyzer, &n.value[i], scope_info)
+		}
+
+		// Restore scope
+		analyzer.current_scope = prev_inner_scope
 
 	case Pointing:
 		process_pointing(analyzer, node, n, position)
@@ -819,25 +844,8 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info) {
 	}
 }
 
-// Process scope nodes
-process_scope :: proc(analyzer: ^Analyzer, node: ^Node, scope: Scope, position: Position) {
-	// Create new scope
-	scope_info := create_scope_for_node(analyzer, node, "", position)
-
-	// Enter new scope
-	prev_scope := analyzer.current_scope
-	analyzer.current_scope = scope_info
-
-	// Enqueue all children
-	for i := 0; i < len(scope.value); i += 1 {
-		enqueue_node(analyzer, &scope.value[i], scope_info)
-	}
-
-	// Restore scope
-	analyzer.current_scope = prev_scope
-}
-
 // Process pointing nodes (name -> value)
+// Modified to properly maintain homoiconic structure
 process_pointing :: proc(
 	analyzer: ^Analyzer,
 	node: ^Node,
@@ -884,10 +892,9 @@ process_pointing :: proc(
 	// Handle scope value
 	if pointing.value != nil {
 		if sc, ok := pointing.value^.(Scope); ok {
-			// Create a new scope
-			scope_info := init_scope(analyzer.current_scope)
+			// Create a new scope directly attached to the scope node
+			scope_info := create_scope_info_for_node(pointing.value, analyzer.current_scope)
 			scope_info.scope_symbol = symbol
-			symbol.defining_scope = scope_info
 
 			// Process scope contents in the new scope
 			for i := 0; i < len(sc.value); i += 1 {
@@ -1046,18 +1053,18 @@ process_event_pull :: proc(
 			add_symbol(analyzer, symbol)
 		} else {
 			add_reference(analyzer, symbol, node, .EventPull, position)
+			event_info.event = symbol
 		}
-		event_info.event = symbol
-	}
 
-	// Process handler
-	if event_pull.value != nil {
-		event_info.handler = event_pull.value
-		enqueue_node(analyzer, event_pull.value, analyzer.current_scope)
-	}
+		// Process handler
+		if event_pull.value != nil {
+			event_info.handler = event_pull.value
+			enqueue_node(analyzer, event_pull.value, analyzer.current_scope)
+		}
 
-	// Add to events list
-	append(&analyzer.current_scope.events, event_info)
+		// Add to events list
+		append(&analyzer.current_scope.events, event_info)
+	}
 }
 
 // Process resonance push nodes (a >>- b)
@@ -1217,14 +1224,15 @@ process_override :: proc(
 }
 
 // Process pattern match nodes (target ? {...})
+// Refactored to maintain homoiconic structure
 process_pattern :: proc(analyzer: ^Analyzer, node: ^Node, pattern: Pattern, position: Position) {
 	// Process target
 	if pattern.target != nil {
 		enqueue_node(analyzer, pattern.target, analyzer.current_scope)
 	}
 
-	// Create pattern scope
-	pattern_scope := create_scope_for_node(analyzer, node, "", position)
+	// Create pattern scope directly attached to the pattern node
+	pattern_scope := create_scope_info_for_node(node, analyzer.current_scope)
 	pattern_scope.is_pattern = true
 
 	// Set up pattern context
@@ -1374,9 +1382,17 @@ process_expand :: proc(analyzer: ^Analyzer, node: ^Node, expand: Expand, positio
 			} else {
 				add_reference(analyzer, symbol, node, .Usage, position)
 
-				// Add to expansions if it has a scope
-				if symbol.defining_scope != nil {
-					append(&analyzer.current_scope.expansions, symbol.defining_scope)
+				// Add to expansions if it has an associated scope
+				if symbol.scope_info != nil {
+					// Find the scope info associated with the symbol's defining node
+					symbol_node := symbol.node
+					if symbol_node != nil {
+						// Look for scope info for this node
+						scope_to_expand := find_scope_for_node(analyzer, symbol_node)
+						if scope_to_expand != nil {
+							append(&analyzer.current_scope.expansions, scope_to_expand)
+						}
+					}
 
 					// Invalidate visible symbols cache
 					invalidate_visible_cache(analyzer.current_scope)
@@ -1384,6 +1400,45 @@ process_expand :: proc(analyzer: ^Analyzer, node: ^Node, expand: Expand, positio
 			}
 		}
 	}
+}
+
+// Find scope info for a node - helps maintain homoiconic structure
+find_scope_for_node :: proc(analyzer: ^Analyzer, node: ^Node) -> ^Scope_Info {
+	// First check if this is the root node
+	if node == analyzer.root_scope.node {
+		return analyzer.root_scope
+	}
+
+	// Otherwise, search through all scopes (could be optimized with a node->scope map)
+	return find_scope_for_node_recursive(analyzer.root_scope, node)
+}
+
+// Recursive helper to find scope for node
+find_scope_for_node_recursive :: proc(scope: ^Scope_Info, node: ^Node) -> ^Scope_Info {
+	if scope == nil || node == nil {
+		return nil
+	}
+
+	// Check if this scope is for the given node
+	if scope.node == node {
+		return scope
+	}
+
+	// Check symbols with defining scopes
+	for symbol in scope.symbol_list {
+		if symbol.node == node && symbol.scope_info != nil {
+			return symbol.scope_info
+		}
+	}
+
+	// Check expansions
+	for expansion in scope.expansions {
+		if found := find_scope_for_node_recursive(expansion, node); found != nil {
+			return found
+		}
+	}
+
+	return nil
 }
 
 // Process identifier nodes
@@ -1496,15 +1551,13 @@ get_position_from_node :: proc(node: ^Node) -> Position {
 
 // Combined validation in a single pass
 validate_analysis :: proc(analyzer: ^Analyzer) {
-	if len(analyzer.errors) > 50 do return // Skip if too many errors already
-
-	// Validate global scope
-	validate_scope(analyzer, analyzer.global_scope)
+	// Validate root scope
+	validate_scope(analyzer, analyzer.root_scope)
 }
 
 // Validate a scope and its children
 validate_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-	if scope == nil || len(analyzer.errors) > 50 do return
+	if scope == nil do return
 
 	// Validate resonance bindings (most critical)
 	validate_resonance_bindings_in_scope(analyzer, scope)
@@ -1518,11 +1571,60 @@ validate_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
 	if len(scope.constraints) > 0 {
 		validate_constraints_in_scope(analyzer, scope)
 	}
+	// Recursively check nested scopes by finding all scope nodes
+	// check_scopes_for_node(analyzer, scope.node, scope)
 
-	// Recursively check nested scopes
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			validate_scope(analyzer, sym.defining_scope)
+	// Also check through expansions
+	for expansion in scope.expansions {
+		validate_scope(analyzer, expansion)
+	}
+}
+
+// Check scopes for a specific node
+check_scopes_for_node :: proc(analyzer: ^Analyzer, node: ^Node, parent_scope: ^Scope_Info) {
+	if node == nil do return
+
+	// Check if this node has a scope
+	#partial switch n in node^ {
+	case Scope:
+		// Find associated scope info
+		scope_info := find_scope_for_node(analyzer, node)
+		if scope_info != nil {
+			validate_scope(analyzer, scope_info)
+		}
+
+		// Also check each child
+		for i := 0; i < len(n.value); i += 1 {
+			check_scopes_for_node(analyzer, &n.value[i], parent_scope)
+		}
+
+	case Pointing:
+		if n.value != nil {
+			if _, is_scope := n.value^.(Scope); is_scope {
+				scope_info := find_scope_for_node(analyzer, n.value)
+				if scope_info != nil {
+					validate_scope(analyzer, scope_info)
+				}
+			} else {
+				check_scopes_for_node(analyzer, n.value, parent_scope)
+			}
+		}
+
+	case Pattern:
+		scope_info := find_scope_for_node(analyzer, node)
+		if scope_info != nil {
+			validate_scope(analyzer, scope_info)
+		}
+
+		// Check branches
+		for i := 0; i < len(n.value); i += 1 {
+			branch := n.value[i]
+			if branch.source != nil {
+				check_scopes_for_node(analyzer, branch.source, parent_scope)
+			}
+			if branch.product != nil {
+				check_scopes_for_node(analyzer, branch.product, parent_scope)
+			}
 		}
 	}
 }
@@ -1593,7 +1695,7 @@ check_exhaustiveness :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
 		add_warning(
 			analyzer,
 			"Pattern match may not be exhaustive",
-			get_position_from_node(scope.scope_symbol.node),
+			get_position_from_node(scope.node),
 		)
 	}
 }
@@ -1624,7 +1726,7 @@ get_qualified_name :: proc(symbol: ^Symbol) -> string {
 	}
 
 	// For global scope, just return the name
-	if symbol.scope != nil && symbol.scope.parent == nil {
+	if symbol.scope_info != nil && symbol.scope_info.parent_scope == nil {
 		if symbol.index > 0 {
 			return fmt.tprintf("%s@%d", symbol.name, symbol.index)
 		}
@@ -1653,9 +1755,9 @@ build_path_to_symbol :: proc(builder: ^strings.Builder, symbol: ^Symbol) {
 	}
 
 	// Start with scope path
-	if symbol.scope != nil && symbol.scope.parent != nil {
+	if symbol.scope_info != nil && symbol.scope_info.parent_scope != nil {
 		// Build path to scope symbol first
-		scope_sym := symbol.scope.scope_symbol
+		scope_sym := symbol.scope_info.scope_symbol
 		if scope_sym != nil {
 			build_path_to_symbol(builder, scope_sym)
 			strings.write_string(builder, ".")
@@ -1677,16 +1779,11 @@ build_path_to_symbol :: proc(builder: ^strings.Builder, symbol: ^Symbol) {
 // Print the scope graph for debug purposes
 print_scope_graph :: proc(analyzer: ^Analyzer) {
 	fmt.println("\n=== SCOPE GRAPH SUMMARY ===")
-	fmt.printf("Global scope: %d symbols\n", len(analyzer.global_scope.symbol_list))
+	fmt.printf("Root scope: %d symbols\n", len(analyzer.root_scope.symbol_list))
 
 	// Count total symbols
-	total_symbols := count_symbols_recursive(analyzer.global_scope)
+	total_symbols := count_symbols_recursive(analyzer.root_scope)
 	fmt.printf("Total symbols: %d\n", total_symbols)
-
-	// Count scopes
-	total_scopes := count_scopes_recursive(analyzer.global_scope)
-	fmt.printf("Total scopes: %d\n", total_scopes)
-
 	fmt.println("=== END SCOPE GRAPH SUMMARY ===\n")
 }
 
@@ -1698,27 +1795,20 @@ count_symbols_recursive :: proc(scope: ^Scope_Info) -> int {
 
 	count := len(scope.symbol_list)
 
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			count += count_symbols_recursive(sym.defining_scope)
+	// Find all nested scopes and count their symbols
+	for symbol in scope.symbol_list {
+		// For each symbol, find if it has an associated scope
+		if symbol.node != nil {
+			child_scope := find_scope_for_node_recursive(scope, symbol.node)
+			if child_scope != nil && child_scope != scope {
+				count += count_symbols_recursive(child_scope)
+			}
 		}
 	}
 
-	return count
-}
-
-// Count total scopes recursively
-count_scopes_recursive :: proc(scope: ^Scope_Info) -> int {
-	if scope == nil {
-		return 0
-	}
-
-	count := 1 // Count this scope
-
-	for sym in scope.symbol_list {
-		if sym.defining_scope != nil {
-			count += count_scopes_recursive(sym.defining_scope)
-		}
+	// Check expansions
+	for expansion in scope.expansions {
+		count += count_symbols_recursive(expansion)
 	}
 
 	return count

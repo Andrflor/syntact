@@ -475,11 +475,11 @@ process_file_worker :: proc(resolver: ^File_Resolver, worker: ^Worker, file_path
 	}
 
 	// Create analyzer
-	analyzer := init_analyzer(parser.file_resolver, file_path)
+	analyzer := init_analyzer(ast, parser.file_resolver, file_path)
 	entry.analyzer = analyzer
 
 	// Analyze file (we'll integrate imports later)
-	enqueue_node(analyzer, ast, analyzer.global_scope)
+	enqueue_node(analyzer, ast, analyzer.root_scope)
 	process_work_queue(analyzer)
 
 	// Mark as processed

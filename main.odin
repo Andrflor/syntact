@@ -173,15 +173,18 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 		parse_duration = time.diff(parse_start, time.now())
 	}
 
-	if ast == nil {
-		fmt.eprintln("Parsing failed completely!")
-		return nil, nil, false
-	}
+	if options.verbose {
 
-	if !parse_success {
-		fmt.eprintln("Parsing completed with errors!")
-	} else if options.verbose {
-		fmt.println("Successfully parsed file!")
+		if ast == nil {
+			fmt.eprintln("Parsing failed completely!")
+			return nil, nil, false
+		}
+
+		if !parse_success {
+			fmt.eprintln("Parsing completed with errors!")
+		} else {
+			fmt.println("Successfully parsed file!")
+		}
 	}
 
 	// Print AST if requested
@@ -269,14 +272,14 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
  * This is a simplified version; expand it based on your actual symbol table structure
  */
 print_symbol_table :: proc(analyzer: ^Analyzer) {
-	if analyzer == nil || analyzer.global_scope == nil {
+	if analyzer == nil || analyzer.root_scope == nil {
 		fmt.println("  <No symbol table available>")
 		return
 	}
 
 	// Print global scope symbols
 	fmt.println("  Global Scope:")
-	for name, symbol in analyzer.global_scope.symbols {
+	for name, symbol in analyzer.root_scope.symbols {
 		fmt.printf("    %s\n", name)
 	}
 
