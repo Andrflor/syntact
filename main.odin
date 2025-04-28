@@ -232,17 +232,13 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 
 	// Print symbol table if requested
 	if options.print_symbol_table {
-		fmt.println("\n=== SYMBOL TABLE ===")
 		// This function would be defined in your semantic analyzer
 		print_symbol_table(analyzer)
-		fmt.println("=== END SYMBOL TABLE ===\n")
 	}
 
 	// Print scope graph if requested
 	if options.print_scope_graph {
-		fmt.println("\n=== SCOPE GRAPH ===")
 		print_scope_graph(analyzer)
-		fmt.println("=== END SCOPE GRAPH ===\n")
 	}
 
 	if semantic_success {
