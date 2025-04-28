@@ -268,25 +268,6 @@ process_file :: proc(filename: string, options: Compiler_Options) -> (^Node, ^An
 }
 
 /*
- * print_symbol_table prints the symbol table in a readable format
- * This is a simplified version; expand it based on your actual symbol table structure
- */
-print_symbol_table :: proc(analyzer: ^Analyzer) {
-	if analyzer == nil || analyzer.root_scope == nil {
-		fmt.println("  <No symbol table available>")
-		return
-	}
-
-	// Print global scope symbols
-	fmt.println("  Global Scope:")
-	for name, symbol in analyzer.root_scope.symbols {
-		fmt.printf("    %s\n", name)
-	}
-
-	// You would implement a more detailed traversal of your symbol table here
-}
-
-/*
  * main is the entry point for the compiler
  */
 main :: proc() {

@@ -845,7 +845,7 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info) {
 }
 
 // Process pointing nodes (name -> value)
-// Modified to properly maintain homoiconic structure
+// Fixed process_pointing function to properly create nested scopes
 process_pointing :: proc(
 	analyzer: ^Analyzer,
 	node: ^Node,
@@ -894,12 +894,19 @@ process_pointing :: proc(
 		if sc, ok := pointing.value^.(Scope); ok {
 			// Create a new scope directly attached to the scope node
 			scope_info := create_scope_info_for_node(pointing.value, analyzer.current_scope)
-			scope_info.scope_symbol = symbol
+			scope_info.scope_symbol = symbol // Link the scope with its defining symbol
+			symbol.node = pointing.value // Ensure the symbol points to the scope node
+
+			// Enter the new scope
+			prev_scope := enter_scope(analyzer, scope_info)
 
 			// Process scope contents in the new scope
 			for i := 0; i < len(sc.value); i += 1 {
 				enqueue_node(analyzer, &sc.value[i], scope_info)
 			}
+
+			// Restore previous scope
+			leave_scope(analyzer, prev_scope)
 		} else {
 			// Regular value, process it in current scope
 			enqueue_node(analyzer, pointing.value, analyzer.current_scope)
@@ -1812,4 +1819,40 @@ count_symbols_recursive :: proc(scope: ^Scope_Info) -> int {
 	}
 
 	return count
+}
+
+
+// Simple recursive symbol table printer
+print_symbol_table :: proc(analyzer: ^Analyzer) {
+	fmt.println("\n=== SYMBOL TABLE ===")
+	print_scope_recursive(analyzer.root_scope, 1)
+	fmt.println("=== END SYMBOL TABLE ===\n")
+}
+
+// Print a scope and all its symbols recursively
+print_scope_recursive :: proc(scope: ^Scope_Info, depth: int) {
+	if scope == nil do return
+
+	indent := strings.repeat("  ", depth - 1)
+
+	// Print scope name
+	name := "Global Scope"
+	if scope != nil && scope.scope_symbol != nil && scope.scope_symbol.name != "" {
+		name = scope.scope_symbol.name
+	}
+
+	fmt.printf("%s%s:\n", indent, name)
+
+	// Print all symbols in this scope
+	for symbol in scope.symbol_list {
+		// Skip empty names
+		if symbol.name == "" do continue
+
+		fmt.printf("%s  %s\n", indent, symbol.name)
+
+		// Recursively print any nested scope defined by this symbol
+		if symbol.scope_info != nil {
+			print_scope_recursive(symbol.scope_info, depth + 1)
+		}
+	}
 }
