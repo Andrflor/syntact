@@ -153,8 +153,8 @@ square -> {
 maybe{u32}:plop -> 12
 
 square{n->22}! //484 u8
-sqaure{n->plop}! //144 u32
-squre{n->{}}! //0 u8
+square{n->plop}! //144 u32
+square{n->{}}! //0 u8
 
 Log -> {
   String:message

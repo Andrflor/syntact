@@ -28,8 +28,6 @@ Reference_Kind :: enum {
     ResonancePull,
     Override,
     Builtin,
-    Import,
-    FileReference,
 }
 
 // Symbol flags
@@ -42,13 +40,9 @@ Symbol_Flag :: enum {
     IsExported,
     InGlobalIndex,
     Builtin,
-    IsDriven,
-    IsImported,
-    IsModule,
-    InProgress,
-    Processed,
-    Failed,
-    IsTopLevel,     // NEW FLAG: Indicates symbol is from a top-level node in a scope
+    IsDriven,    // Symbol is driven by a resonance
+    IsDriver,    // Symbol drives other symbols via resonance
+    IsTopLevel,  // Indicates symbol is from a top-level node in a scope
 }
 
 // Scope information
@@ -103,9 +97,12 @@ Symbol :: struct {
     position:            Position,
     references:          [dynamic]^Reference,
 
-    // Type information
+    // Constraint information
     constraint:          ^Symbol,
-    driver:              ^Symbol,
+
+    // Resonance relationships
+    driver:              ^Symbol,  // Symbol that drives this one (for resonance)
+    driven_symbols:      [dynamic]^Symbol,  // Symbols this one drives
 
     // Flags
     flags:               bit_set[Symbol_Flag],
@@ -143,15 +140,8 @@ Event_Info :: struct {
 Resonance_Info :: struct {
     target:             ^Symbol,
     driver:             ^Symbol,
-    is_push:            bool,
+    is_push:            bool,  // Push (>>-) vs Pull (-<<)
     node:               ^Node,
-}
-
-// Work queue for non-recursive traversal
-Work_Item :: struct {
-    node:               ^Node,
-    scope:              ^Scope_Info,
-    is_top_level:       bool,  // NEW: Tracks if this node is a direct child of a scope
 }
 
 // Main analyzer structure
@@ -180,10 +170,6 @@ Analyzer :: struct {
     current_pattern:    ^Node,
     next_scope_id:      u64,
     next_symbol_id:     u64,
-
-    // Processing queue
-    work_queue:         [dynamic]Work_Item,
-    queue_head:         int,
 
     // File information
     filename:           string,
@@ -217,10 +203,6 @@ init_analyzer :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) ->
     // Error tracking
     analyzer.errors = make([dynamic]string)
     analyzer.warnings = make([dynamic]string)
-
-    // Work queue
-    analyzer.work_queue = make([dynamic]Work_Item)
-    analyzer.queue_head = 0
 
     // File information
     analyzer.filename = filename
@@ -296,6 +278,7 @@ create_symbol :: proc(
     symbol.kind = kind
     symbol.position = position
     symbol.references = make([dynamic]^Reference)
+    symbol.driven_symbols = make([dynamic]^Symbol)
 
     // Pre-compute hash
     symbol.hash = calculate_symbol_hash(name)
@@ -308,7 +291,7 @@ create_symbol :: proc(
     return symbol
 }
 
-// Modified register_builtin_types
+// Register built-in types
 register_builtin_types :: proc(analyzer: ^Analyzer) {
     default_pos := Position{
         line   = 0,
@@ -434,6 +417,25 @@ add_reference :: proc(
     symbol.flags += {.Referenced}
     append(&symbol.references, ref)
 
+    // Handle resonance and event references
+    if kind == .ResonancePush || kind == .ResonancePull {
+        symbol.flags += {.IsResonance}
+
+        // For push (>>-), the symbol is driven by something
+        if kind == .ResonancePush {
+            symbol.flags += {.IsDriven}
+        }
+
+        // For pull (-<<), the symbol drives something else
+        if kind == .ResonancePull {
+            symbol.flags += {.IsDriver}
+        }
+    }
+
+    if kind == .EventPush || kind == .EventPull {
+        symbol.flags += {.IsEvent}
+    }
+
     return ref
 }
 
@@ -467,7 +469,7 @@ add_warning :: proc(analyzer: ^Analyzer, message: string, position: Position) {
     append(&analyzer.warnings, warning_message)
 }
 
-// Invalidate visible symbols cache
+// Invalidate visible symbols cache for a scope and its parents
 invalidate_visible_cache :: proc(scope: ^Scope_Info) {
     current := scope
     for current != nil {
@@ -530,15 +532,29 @@ compute_visible_symbols :: proc(scope: ^Scope_Info) {
         parent.is_visible_computed = true
     }
 
-    // Copy all symbols from parent's visible set
+    // Copy all symbols from parent's visible set, respect resonance visibility
     for name, symbol in parent.visible_symbols {
+        // Skip symbols hidden by resonance (>>-)
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            // Only add if this is a pull resonance (-<<) which remains visible
+            // or if the driver isn't visible from this scope
+            if is_push_resonance(parent, symbol) {
+                continue
+            }
+        }
         scope.visible_symbols[name] = symbol
     }
 
-    // Add parent's direct symbols
+    // Add parent's direct symbols, respect resonance
     for name, symbol in parent.symbols {
         // Skip if already defined in a closer scope
         if _, exists := scope.visible_symbols[name]; !exists {
+            // Skip symbols hidden by resonance
+            if .IsDriven in symbol.flags && symbol.driver != nil {
+                if is_push_resonance(parent, symbol) {
+                    continue
+                }
+            }
             scope.visible_symbols[name] = symbol
         }
     }
@@ -549,11 +565,39 @@ compute_visible_symbols :: proc(scope: ^Scope_Info) {
     }
 }
 
+// Check if a symbol is hidden by resonance (>>- operation)
+is_push_resonance :: proc(scope: ^Scope_Info, symbol: ^Symbol) -> bool {
+    if !(.IsDriven in symbol.flags) || symbol.driver == nil {
+        return false
+    }
+
+    // Look for resonance info in this scope
+    for res in scope.resonances {
+        if res.target == symbol {
+            return res.is_push  // Push resonance (>>-) hides by default
+        }
+    }
+
+    // Check parent scopes if needed
+    if scope.parent != nil {
+        return is_push_resonance(scope.parent, symbol)
+    }
+
+    // Default for resonance is false (visible)
+    return false
+}
+
 // Add expansion symbols to visible symbols
 add_expansion_symbols :: proc(scope: ^Scope_Info, expansion: ^Scope_Info) {
     for name, symbol in expansion.symbols {
         // Skip if already defined in a closer scope
         if _, exists := scope.visible_symbols[name]; !exists {
+            // Skip symbols hidden by resonance
+            if .IsDriven in symbol.flags && symbol.driver != nil {
+                if is_push_resonance(expansion, symbol) {
+                    continue
+                }
+            }
             scope.visible_symbols[name] = symbol
         }
     }
@@ -596,9 +640,20 @@ lookup_symbol :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
 
     // Try current scope's direct symbol table
     if symbol, ok := scope.symbol_cache[name_hash]; ok && symbol.name == name {
-        // Found in current scope
-        analyzer.resolution_cache[cache_key] = symbol
-        return symbol
+        // Check if symbol is hidden by resonance
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            if is_push_resonance(scope, symbol) {
+                // Symbol is hidden by resonance, continue lookup in parent
+            } else {
+                // Symbol is visible
+                analyzer.resolution_cache[cache_key] = symbol
+                return symbol
+            }
+        } else {
+            // Normal symbol, not driven by resonance
+            analyzer.resolution_cache[cache_key] = symbol
+            return symbol
+        }
     }
 
     // Original lookup with scope traversal
@@ -617,7 +672,7 @@ lookup_symbol :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
     return symbol
 }
 
-// Lookup in scope chain
+// Lookup in scope chain with resonance awareness
 lookup_symbol_in_scope_chain :: proc(
     analyzer: ^Analyzer,
     scope: ^Scope_Info,
@@ -630,12 +685,26 @@ lookup_symbol_in_scope_chain :: proc(
         // Try hash lookup first (faster)
         if symbol, ok := current.symbol_cache[name_hash]; ok {
             if symbol.name == name { // Verify in case of hash collision
+                // Skip if hidden by resonance
+                if .IsDriven in symbol.flags && symbol.driver != nil {
+                    if is_push_resonance(current, symbol) {
+                        current = current.parent
+                        continue
+                    }
+                }
                 return symbol
             }
         }
 
         // Fallback to map lookup
         if symbol, ok := current.symbols[name]; ok {
+            // Skip if hidden by resonance
+            if .IsDriven in symbol.flags && symbol.driver != nil {
+                if is_push_resonance(current, symbol) {
+                    current = current.parent
+                    continue
+                }
+            }
             return symbol
         }
 
@@ -671,11 +740,23 @@ lookup_symbol_in_scope :: proc(scope: ^Scope_Info, name: string, name_hash: u64 
 
     // Try hash lookup first (faster)
     if symbol, ok := scope.symbol_cache[hash]; ok && symbol.name == name {
+        // Skip if hidden by resonance
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            if is_push_resonance(scope, symbol) {
+                return nil
+            }
+        }
         return symbol
     }
 
     // Fallback to map lookup
     if symbol, ok := scope.symbols[name]; ok {
+        // Skip if hidden by resonance
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            if is_push_resonance(scope, symbol) {
+                return nil
+            }
+        }
         return symbol
     }
 
@@ -696,11 +777,23 @@ lookup_symbol_local :: proc(analyzer: ^Analyzer, name: string) -> ^Symbol {
 
     // Try hash lookup first
     if symbol, ok := scope.symbol_cache[name_hash]; ok && symbol.name == name {
+        // Skip if hidden by resonance
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            if is_push_resonance(scope, symbol) {
+                return nil
+            }
+        }
         return symbol
     }
 
     // Fallback to map
     if symbol, ok := scope.symbols[name]; ok {
+        // Skip if hidden by resonance
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            if is_push_resonance(scope, symbol) {
+                return nil
+            }
+        }
         return symbol
     }
 
@@ -729,6 +822,12 @@ is_symbol_visible_from :: proc(from_scope: ^Scope_Info, symbol: ^Symbol) -> bool
     current := from_scope
     for current != nil {
         if symbol.containing_scope == current {
+            // Skip if hidden by resonance
+            if .IsDriven in symbol.flags && symbol.driver != nil {
+                if is_push_resonance(current, symbol) {
+                    return false
+                }
+            }
             return true
         }
 
@@ -753,6 +852,12 @@ is_in_expansion :: proc(expansion: ^Scope_Info, symbol: ^Symbol) -> bool {
 
     // Check direct symbols
     if symbol.containing_scope == expansion {
+        // Skip if hidden by resonance
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            if is_push_resonance(expansion, symbol) {
+                return false
+            }
+        }
         return true
     }
 
@@ -775,22 +880,14 @@ analyze_ast :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) -> ^
     // Initialize analyzer with the AST root as the global scope
     analyzer := init_analyzer(ast, resolver, filename)
 
-    // Process the root scope
+    // Process the root scope directly - top-down traversal
     #partial switch n in ast {
     case Scope:
         for i := 0; i < len(n.value); i += 1 {
             // All direct children of a scope are top-level nodes
-            item := Work_Item{
-                node = &n.value[i],
-                scope = analyzer.root_scope,
-                is_top_level = true,  // Mark as top-level
-            }
-            append(&analyzer.work_queue, item)
+            process_node(analyzer, &n.value[i], analyzer.root_scope, true)
         }
     }
-
-    // Process the work queue
-    process_work_queue(analyzer)
 
     // Final validation passes
     validate_analysis(analyzer)
@@ -798,34 +895,7 @@ analyze_ast :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) -> ^
     return analyzer
 }
 
-// Process the work queue
-process_work_queue :: proc(analyzer: ^Analyzer) {
-    for analyzer.queue_head < len(analyzer.work_queue) {
-        item := analyzer.work_queue[analyzer.queue_head]
-        analyzer.queue_head += 1
-        process_node(analyzer, item.node, item.scope, item.is_top_level)
-    }
-
-    // Clear the queue when done
-    clear(&analyzer.work_queue)
-    analyzer.queue_head = 0
-}
-
-// Add a node to the work queue
-enqueue_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_top_level: bool = false) {
-    if node == nil {
-        return
-    }
-
-    item := Work_Item{
-        node = node,
-        scope = scope,
-        is_top_level = is_top_level,
-    }
-    append(&analyzer.work_queue, item)
-}
-
-// Process a single node
+// Process a single node - enhanced for resonance
 process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_top_level: bool = false) {
     if node == nil {
         return
@@ -842,7 +912,6 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_to
     // CORE PRINCIPLE: Any direct child of a scope gets a symbol
     // If this is a top-level node (direct child of a scope), create a symbol for it
     if is_top_level {
-        // Get node name if it has one
         name := ""
 
         #partial switch n in node^ {
@@ -861,16 +930,9 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_to
         case Identifier:
             name = n.name
         }
-
-        // If no specific name, create an anonymous symbol
-        if name == "" {
-            // For any top-level node, create a symbol
-            symbol := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position, true)
-            add_symbol(analyzer, symbol)
-        }
-        // Named ones are handled in their specific case sections below
     }
 
+    // Process by node type
     #partial switch n in node^ {
     case Scope:
         // Handle empty scope vs. scope with content
@@ -889,7 +951,7 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_to
 
             // Process all children - ALL direct children of a scope are top-level in that scope
             for i := 0; i < len(n.value); i += 1 {
-                enqueue_node(analyzer, &n.value[i], scope_info, true)  // Mark as top-level
+                process_node(analyzer, &n.value[i], scope_info, true)
             }
 
             // Restore scope
@@ -922,14 +984,12 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_to
 
     case Constraint:
         process_constraint(analyzer, node, n, position, is_top_level)
-
-    case Product:
+case Product:
         process_product(analyzer, node, n, position, is_top_level)
 
     case Execute:
         if n.value != nil {
-            // Child nodes of Execute are NOT top-level
-            enqueue_node(analyzer, n.value, analyzer.current_scope, false)
+            process_node(analyzer, n.value, analyzer.current_scope, false)
         }
 
     case Expand:
@@ -945,28 +1005,28 @@ process_node :: proc(analyzer: ^Analyzer, node: ^Node, scope: ^Scope_Info, is_to
     case Operator:
         // Operators don't get symbols, but their children are not top-level
         if n.left != nil {
-            enqueue_node(analyzer, n.left, analyzer.current_scope, false)
+            process_node(analyzer, n.left, analyzer.current_scope, false)
         }
         if n.right != nil {
-            enqueue_node(analyzer, n.right, analyzer.current_scope, false)
+            process_node(analyzer, n.right, analyzer.current_scope, false)
         }
 
     case Range:
         // Children of a range are not top-level
         if n.start != nil {
-            enqueue_node(analyzer, n.start, analyzer.current_scope, false)
+            process_node(analyzer, n.start, analyzer.current_scope, false)
         }
         if n.end != nil {
-            enqueue_node(analyzer, n.end, analyzer.current_scope, false)
+            process_node(analyzer, n.end, analyzer.current_scope, false)
         }
 
     case Property:
         // Children of a property are not top-level
         if n.source != nil {
-            enqueue_node(analyzer, n.source, analyzer.current_scope, false)
+            process_node(analyzer, n.source, analyzer.current_scope, false)
         }
         if n.property != nil {
-            enqueue_node(analyzer, n.property, analyzer.current_scope, false)
+            process_node(analyzer, n.property, analyzer.current_scope, false)
         }
     }
 
@@ -984,67 +1044,106 @@ process_pointing :: proc(
     position: Position,
     is_top_level: bool,
 ) {
-    // Handle anonymous pointing (-> value)
+    // A pointing node must have a name
     if pointing.name == nil {
-        // Anonymous symbol was already created if this is top-level
+        add_error(analyzer, "Pointing node has no name", position)
+        return
+    }
 
+    // Only top-level nodes should create symbols
+    if !is_top_level {
+        // Process children nodes without creating symbols
+        process_node(analyzer, pointing.name, analyzer.current_scope, false)
         if pointing.value != nil {
-            // Children of a pointing value are not top-level
-            enqueue_node(analyzer, pointing.value, analyzer.current_scope, false)
+            process_node(analyzer, pointing.value, analyzer.current_scope, false)
         }
         return
     }
 
-    // Get the name
-    name: string
-    if id, ok := pointing.name^.(Identifier); ok {
+    // For top-level pointing nodes, determine name and constraint
+    name := ""
+    constraint_symbol: ^Symbol = nil
+
+    // Extract name and constraint from the name field
+    if id, is_id := pointing.name^.(Identifier); is_id {
+        // Simple case: name is an identifier
         name = id.name
-    } else {
-        // Complex naming
-        enqueue_node(analyzer, pointing.name, analyzer.current_scope, false)
-        if pointing.value != nil {
-            enqueue_node(analyzer, pointing.value, analyzer.current_scope, false)
+    } else if constraint, is_constraint := pointing.name^.(Constraint); is_constraint {
+        // The name is a constraint expression
+
+        // Get constraint type
+        if type_id, is_type_id := constraint.constraint^.(Identifier); is_type_id {
+            constraint_symbol = lookup_symbol(analyzer, type_id.name)
+            if constraint_symbol == nil {
+                add_error(analyzer, fmt.tprintf("Undefined constraint type '%s'", type_id.name), position)
+            }
+        } else {
+            // Complex constraint type, process it
+            process_node(analyzer, constraint.constraint, analyzer.current_scope, false)
         }
-        return
+
+        // Get the name from constraint value if present
+        if constraint.value != nil {
+            if value_id, is_value_id := constraint.value^.(Identifier); is_value_id {
+                name = value_id.name
+            } else {
+                // Complex constraint value, process it
+                process_node(analyzer, constraint.value, analyzer.current_scope, false)
+            }
+        }
+    } else {
+        // Complex name expression, process it
+        process_node(analyzer, pointing.name, analyzer.current_scope, false)
     }
 
-// Create symbol - using the name from the Identifier
-    symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position, is_top_level)
+    // Create a symbol for this pointing (named or anonymous)
+    symbol := create_symbol(analyzer, name, node, analyzer.current_scope, .Definition, position, true)
 
-    // Check for existing constraint
-    existing := lookup_symbol_local(analyzer, name)
-    if existing != nil && existing.constraint != nil {
-        symbol.constraint = existing.constraint
+    // Apply constraint if one was found
+    if constraint_symbol != nil {
+        symbol.constraint = constraint_symbol
         symbol.flags += {.HasConstraint}
+
+        // Add constraint info to the scope
+        constraint_info := Constraint_Info{
+            target     = symbol,
+            constraint = constraint_symbol,
+            node       = node,
+        }
+
+        append(&analyzer.current_scope.constraints, constraint_info)
     }
 
+    // Add the symbol to the scope
     add_symbol(analyzer, symbol)
 
-    // Handle scope value
+    // Process the value
     if pointing.value != nil {
         if sc, ok := pointing.value^.(Scope); ok {
-            // Only create a scope if it's not empty
+            // Create child scope if value is a non-empty scope
             if len(sc.value) > 0 {
-                // Create a new scope for the scope node
-                scope_info := create_scope(analyzer, analyzer.current_scope, symbol, pointing.value, name)
+                scope_info := create_scope(
+                    analyzer,
+                    analyzer.current_scope,
+                    symbol,
+                    pointing.value,
+                    name == "" ? "<anonymous>" : name
+                )
 
-                // Establish bidirectional link
                 symbol.introduced_scope = scope_info
 
-                // Enter the new scope
+                // Process scope contents
                 prev_scope := enter_scope(analyzer, scope_info)
 
-                // Process scope contents - ALL direct children of a scope are top-level
                 for i := 0; i < len(sc.value); i += 1 {
-                    enqueue_node(analyzer, &sc.value[i], scope_info, true)  // Mark as top-level
+                    process_node(analyzer, &sc.value[i], scope_info, true)
                 }
 
-                // Restore previous scope
                 leave_scope(analyzer, prev_scope)
             }
         } else {
-            // Regular value, not top-level
-            enqueue_node(analyzer, pointing.value, analyzer.current_scope, false)
+            // Regular value
+            process_node(analyzer, pointing.value, analyzer.current_scope, false)
         }
     }
 }
@@ -1063,7 +1162,7 @@ process_pointing_pull :: proc(
 
         if pointing_pull.value != nil {
             // Value is not top-level
-            enqueue_node(analyzer, pointing_pull.value, analyzer.current_scope, false)
+            process_node(analyzer, pointing_pull.value, analyzer.current_scope, false)
         }
         return
     }
@@ -1074,9 +1173,9 @@ process_pointing_pull :: proc(
         name = id.name
     } else {
         // Complex expression
-        enqueue_node(analyzer, pointing_pull.name, analyzer.current_scope, false)
+        process_node(analyzer, pointing_pull.name, analyzer.current_scope, false)
         if pointing_pull.value != nil {
-            enqueue_node(analyzer, pointing_pull.value, analyzer.current_scope, false)
+            process_node(analyzer, pointing_pull.value, analyzer.current_scope, false)
         }
         return
     }
@@ -1094,8 +1193,26 @@ process_pointing_pull :: proc(
     add_symbol(analyzer, symbol)
 
     if pointing_pull.value != nil {
-        // Value is not top-level
-        enqueue_node(analyzer, pointing_pull.value, analyzer.current_scope, false)
+        // Process constraint value
+        if id, is_id := pointing_pull.value^.(Identifier); is_id {
+            constraint := lookup_symbol(analyzer, id.name)
+            if constraint != nil {
+                symbol.constraint = constraint
+                symbol.flags += {.HasConstraint}
+
+                constraint_info := Constraint_Info{
+                    target = symbol,
+                    constraint = constraint,
+                    node = node,
+                }
+
+                append(&analyzer.current_scope.constraints, constraint_info)
+                add_reference(analyzer, constraint, node, .Constraint, position)
+            }
+        } else {
+            // Complex constraint, process it
+            process_node(analyzer, pointing_pull.value, analyzer.current_scope, false)
+        }
     }
 }
 
@@ -1113,13 +1230,13 @@ process_event_push :: proc(
 
         if event_push.value != nil {
             // Value is not top-level
-            enqueue_node(analyzer, event_push.value, analyzer.current_scope, false)
+            process_node(analyzer, event_push.value, analyzer.current_scope, false)
         }
         return
     }
 
     // Process target
-    enqueue_node(analyzer, event_push.name, analyzer.current_scope, false)
+    process_node(analyzer, event_push.name, analyzer.current_scope, false)
 
     // Create event info
     event_info := Event_Info{
@@ -1155,7 +1272,7 @@ process_event_push :: proc(
     if event_push.value != nil {
         event_info.handler = event_push.value
         // Handler is not top-level
-        enqueue_node(analyzer, event_push.value, analyzer.current_scope, false)
+        process_node(analyzer, event_push.value, analyzer.current_scope, false)
     }
 
     // Add to events list
@@ -1176,7 +1293,7 @@ process_event_pull :: proc(
 
         if event_pull.value != nil {
             // Value is not top-level
-            enqueue_node(analyzer, event_pull.value, analyzer.current_scope, false)
+            process_node(analyzer, event_pull.value, analyzer.current_scope, false)
         }
         return
     }
@@ -1186,7 +1303,7 @@ process_event_pull :: proc(
     if id, ok := event_pull.name^.(Identifier); ok {
         name = id.name
     } else {
-        enqueue_node(analyzer, event_pull.name, analyzer.current_scope, false)
+        process_node(analyzer, event_pull.name, analyzer.current_scope, false)
     }
 
     // Create event info
@@ -1219,7 +1336,7 @@ process_event_pull :: proc(
         if event_pull.value != nil {
             event_info.handler = event_pull.value
             // Handler is not top-level
-            enqueue_node(analyzer, event_pull.value, analyzer.current_scope, false)
+            process_node(analyzer, event_pull.value, analyzer.current_scope, false)
         }
 
         // Add to events list
@@ -1241,13 +1358,13 @@ process_resonance_push :: proc(
 
         if resonance_push.value != nil {
             // Value is not top-level
-            enqueue_node(analyzer, resonance_push.value, analyzer.current_scope, false)
+            process_node(analyzer, resonance_push.value, analyzer.current_scope, false)
         }
         return
     }
 
     // Process target
-    enqueue_node(analyzer, resonance_push.name, analyzer.current_scope, false)
+    process_node(analyzer, resonance_push.name, analyzer.current_scope, false)
 
     // Create resonance info
     resonance_info := Resonance_Info{
@@ -1270,16 +1387,20 @@ process_resonance_push :: proc(
     // Process driver
     if resonance_push.value != nil {
         // Value is not top-level
-        enqueue_node(analyzer, resonance_push.value, analyzer.current_scope, false)
+        process_node(analyzer, resonance_push.value, analyzer.current_scope, false)
 
         // Set driver if it's an identifier
         if id, ok := resonance_push.value^.(Identifier); ok {
             driver := lookup_symbol(analyzer, id.name)
             if driver != nil {
                 resonance_info.driver = driver
+                driver.flags += {.IsDriver}
+
                 if resonance_info.target != nil {
                     resonance_info.target.driver = driver
+                    append(&driver.driven_symbols, resonance_info.target)
                 }
+
                 add_reference(analyzer, driver, node, .ResonancePush, position)
             }
         }
@@ -1287,6 +1408,9 @@ process_resonance_push :: proc(
 
     // Add to resonances list
     append(&analyzer.current_scope.resonances, resonance_info)
+
+    // Invalidate visible symbols cache since resonance affects visibility
+    invalidate_visible_cache(analyzer.current_scope)
 }
 
 // Process resonance pull nodes (a -<< b)
@@ -1303,7 +1427,7 @@ process_resonance_pull :: proc(
 
         if resonance_pull.value != nil {
             // Value is not top-level
-            enqueue_node(analyzer, resonance_pull.value, analyzer.current_scope, false)
+            process_node(analyzer, resonance_pull.value, analyzer.current_scope, false)
         }
         return
     }
@@ -1315,11 +1439,11 @@ process_resonance_pull :: proc(
     }
 
     // Process target
-    enqueue_node(analyzer, resonance_pull.name, analyzer.current_scope, false)
+    process_node(analyzer, resonance_pull.name, analyzer.current_scope, false)
 
     // Create resonance info
     resonance_info := Resonance_Info{
-        is_push = false,
+        is_push = false, // Pull resonance (-<<)
         node    = node,
     }
 
@@ -1336,7 +1460,7 @@ process_resonance_pull :: proc(
                 position,
                 is_top_level,
             )
-            symbol.flags += {.IsResonance}
+            symbol.flags += {.IsResonance, .IsDriver}
             add_symbol(analyzer, symbol)
         }
         resonance_info.target = symbol
@@ -1346,13 +1470,20 @@ process_resonance_pull :: proc(
     // Process driver
     if resonance_pull.value != nil {
         // Value is not top-level
-        enqueue_node(analyzer, resonance_pull.value, analyzer.current_scope, false)
+        process_node(analyzer, resonance_pull.value, analyzer.current_scope, false)
 
         // Set driver if it's an identifier
         if id, ok := resonance_pull.value^.(Identifier); ok {
             driver := lookup_symbol(analyzer, id.name)
             if driver != nil {
                 resonance_info.driver = driver
+                driver.flags += {.IsDriven}
+
+                if resonance_info.target != nil {
+                    driver.driver = resonance_info.target
+                    append(&resonance_info.target.driven_symbols, driver)
+                }
+
                 add_reference(analyzer, driver, node, .ResonancePull, position)
             }
         }
@@ -1360,6 +1491,9 @@ process_resonance_pull :: proc(
 
     // Add to resonances list
     append(&analyzer.current_scope.resonances, resonance_info)
+
+    // Invalidate visible symbols cache since resonance affects visibility
+    invalidate_visible_cache(analyzer.current_scope)
 }
 
 // Process override nodes (a{...})
@@ -1373,7 +1507,7 @@ process_override :: proc(
     // Process base
     if override.source != nil {
         // Source is not top-level
-        enqueue_node(analyzer, override.source, analyzer.current_scope, false)
+        process_node(analyzer, override.source, analyzer.current_scope, false)
 
         // Check if source exists if it's an identifier
         if id, ok := override.source^.(Identifier); ok {
@@ -1392,9 +1526,8 @@ process_override :: proc(
 
     // Process overrides
     for i := 0; i < len(override.overrides); i += 1 {
-        // Overrides are top-level within their container scope,
-        // but not within the current scope
-        enqueue_node(analyzer, &override.overrides[i], analyzer.current_scope, false)
+        // Overrides are not top-level
+        process_node(analyzer, &override.overrides[i], analyzer.current_scope, false)
     }
 }
 
@@ -1409,7 +1542,7 @@ process_pattern :: proc(
     // Process target
     if pattern.target != nil {
         // Target is not top-level
-        enqueue_node(analyzer, pattern.target, analyzer.current_scope, false)
+        process_node(analyzer, pattern.target, analyzer.current_scope, false)
     }
 
     // Create pattern scope
@@ -1436,12 +1569,12 @@ process_pattern :: proc(
             captured_symbols = make(map[string]^Symbol),
         }
 
-        // Process pattern and result - they are top-level in the pattern scope
+        // Process pattern and result (they are top-level in the pattern scope)
         if branch.source != nil {
-            enqueue_node(analyzer, branch.source, pattern_scope, true)
+            process_node(analyzer, branch.source, pattern_scope, true)
         }
         if branch.product != nil {
-            enqueue_node(analyzer, branch.product, pattern_scope, true)
+            process_node(analyzer, branch.product, pattern_scope, true)
         }
 
         // Add to branches list
@@ -1454,7 +1587,7 @@ process_pattern :: proc(
     analyzer.current_scope = prev_scope
 }
 
-// Process constraint nodes (Type: value)
+// Process constraint nodes (Constraint: value)
 process_constraint :: proc(
     analyzer: ^Analyzer,
     node: ^Node,
@@ -1462,103 +1595,87 @@ process_constraint :: proc(
     position: Position,
     is_top_level: bool,
 ) {
-    // Safety check
-    if constraint.constraint == nil {
-        add_error(analyzer, "Constraint type is nil", position)
+    // Only top-level constraints should create symbols
+    if !is_top_level {
+        // Process children without creating symbols
+        process_node(analyzer, constraint.constraint, analyzer.current_scope, false)
+        if constraint.value != nil {
+            process_node(analyzer, constraint.value, analyzer.current_scope, false)
+        }
         return
     }
 
-    // Get constraint symbol - constraint type is not top-level
-    constraint_symbol: ^Symbol
-    if id, ok := constraint.constraint^.(Identifier); ok {
+    // For top-level constraints, create symbols and add to scope
+
+    // Get constraint type
+    constraint_symbol: ^Symbol = nil
+    if id, is_id := constraint.constraint^.(Identifier); is_id {
         constraint_symbol = lookup_symbol(analyzer, id.name)
         if constraint_symbol == nil {
             add_error(analyzer, fmt.tprintf("Undefined constraint type '%s'", id.name), position)
         }
     } else {
-        // Process complex constraint
-        enqueue_node(analyzer, constraint.constraint, analyzer.current_scope, false)
+        process_node(analyzer, constraint.constraint, analyzer.current_scope, false)
     }
 
-    // Nameless constraint
+    // Create symbol based on constraint value
     if constraint.value == nil {
-        // Anonymous symbol already created if top-level (at the beginning of process_node)
-        // Just update it with constraint info
-        if is_top_level {
-            // Find the anonymous symbol that was just created
-            if len(analyzer.current_scope.symbol_list) > 0 {
-                symbol := analyzer.current_scope.symbol_list[len(analyzer.current_scope.symbol_list)-1]
-                if symbol.node == node {
-                    symbol.constraint = constraint_symbol
-                    symbol.flags += {.HasConstraint}
+        // Anonymous constraint
+        symbol := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position, true)
 
-                    // Add constraint info
-                    constraint_info := Constraint_Info{
-                        target     = symbol,
-                        constraint = constraint_symbol,
-                        node       = node,
-                    }
-
-                    // Add to constraints list
-                    append(&analyzer.current_scope.constraints, constraint_info)
-                }
-            }
-        } else {
-            // Not a top-level node, create a new anonymous symbol
-            symbol := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position, false)
+        if constraint_symbol != nil {
             symbol.constraint = constraint_symbol
             symbol.flags += {.HasConstraint}
-            add_symbol(analyzer, symbol)
 
-            // Add constraint info
             constraint_info := Constraint_Info{
                 target     = symbol,
                 constraint = constraint_symbol,
                 node       = node,
             }
 
-            // Add to constraints list
             append(&analyzer.current_scope.constraints, constraint_info)
         }
-        return
-    }
 
-    // Get name from value if it's an identifier
-    name: string = ""
-    if id, ok := constraint.value^.(Identifier); ok {
-        name = id.name
-    } else {
-        // Process complex value - not top-level
-        enqueue_node(analyzer, constraint.value, analyzer.current_scope, false)
-    }
-
-    // Create named symbol
-    if name != "" {
-        symbol := create_symbol(
-            analyzer,
-            name,
-            node,
-            analyzer.current_scope,
-            .Definition,
-            position,
-            is_top_level,
-        )
-        symbol.constraint = constraint_symbol
-        symbol.flags += {.HasConstraint}
         add_symbol(analyzer, symbol)
+    } else if id, is_id := constraint.value^.(Identifier); is_id {
+        // Named constraint
+        symbol := create_symbol(analyzer, id.name, node, analyzer.current_scope, .Definition, position, true)
 
-        // Add to constraint info
-        constraint_info := Constraint_Info{
-            target     = symbol,
-            constraint = constraint_symbol,
-            node       = node,
+        if constraint_symbol != nil {
+            symbol.constraint = constraint_symbol
+            symbol.flags += {.HasConstraint}
+
+            constraint_info := Constraint_Info{
+                target     = symbol,
+                constraint = constraint_symbol,
+                node       = node,
+            }
+
+            append(&analyzer.current_scope.constraints, constraint_info)
         }
 
-        // Update cache for faster constraint checking
-        analyzer.defined_symbols[name] = true
+        add_symbol(analyzer, symbol)
+    } else {
+        // Complex value
+        process_node(analyzer, constraint.value, analyzer.current_scope, false)
 
-        // Add to constraints list
-        append(&analyzer.current_scope.constraints, constraint_info)
+        // Create anonymous symbol for the constraint
+        symbol := create_symbol(analyzer, "", node, analyzer.current_scope, .Definition, position, true)
+
+        if constraint_symbol != nil {
+            symbol.constraint = constraint_symbol
+            symbol.flags += {.HasConstraint}
+
+            constraint_info := Constraint_Info{
+                target     = symbol,
+                constraint = constraint_symbol,
+                node       = node,
+            }
+
+            append(&analyzer.current_scope.constraints, constraint_info)
+        }
+
+        add_symbol(analyzer, symbol)
     }
 }
 
@@ -1568,7 +1685,7 @@ process_product :: proc(analyzer: ^Analyzer, node: ^Node, product: Product, posi
 
     // Process value - not top-level
     if product.value != nil {
-        enqueue_node(analyzer, product.value, analyzer.current_scope, false)
+        process_node(analyzer, product.value, analyzer.current_scope, false)
     }
 }
 
@@ -1582,7 +1699,7 @@ process_expand :: proc(
 ) {
     // Process target - not top-level
     if expand.target != nil {
-        enqueue_node(analyzer, expand.target, analyzer.current_scope, false)
+        process_node(analyzer, expand.target, analyzer.current_scope, false)
 
         // Check if it's an identifier for expansion
         if id, ok := expand.target^.(Identifier); ok {
@@ -1677,108 +1794,147 @@ process_identifier :: proc(analyzer: ^Analyzer, node: ^Node, id: Identifier, pos
 // SECTION 6: VALIDATION
 // ===========================================================================
 
-// Combined validation in a single pass
+// Combined validation passes
 validate_analysis :: proc(analyzer: ^Analyzer) {
-    // Validate root scope
-    validate_scope(analyzer, analyzer.root_scope)
+    // Validate all constraints
+    validate_constraints(analyzer)
+
+    // Validate resonance relationships
+    validate_resonance(analyzer)
+
+    // Validate patterns
+    validate_patterns(analyzer)
+
+    // Validate events
+    validate_events(analyzer)
 }
 
-// Validate a scope and its children
-validate_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-    if scope == nil do return
-
-    // Validate resonance bindings (most critical)
-    validate_resonance_bindings_in_scope(analyzer, scope)
-
-    // Check pattern exhaustiveness if this is a pattern scope
-    if scope.is_pattern {
-        check_exhaustiveness(analyzer, scope)
-    }
-
-    // Validate constraints if any
-    if len(scope.constraints) > 0 {
-        validate_constraints_in_scope(analyzer, scope)
-    }
-
-    // Recursively validate child scopes
-    for child_scope in scope.child_scopes {
-        validate_scope(analyzer, child_scope)
-    }
-
-    // Also check through expanded scopes
-    for expansion in scope.expanded_scopes {
-        validate_scope(analyzer, expansion)
-    }
-}
-
-// Optimized constraint validation
-validate_constraints_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-    if scope == nil || len(analyzer.errors) > 50 do return
-
-    // Process constraints in batch
-    for constraint in scope.constraints {
-        if constraint.constraint != nil && constraint.target != nil {
-            // Flag valid constraint for faster lookups
-            if constraint.target.name != "" {
-                analyzer.defined_symbols[constraint.target.name] = true
-            }
-
-            // Structure validation would go here for complex constraints
+// Validate constraints and check completeness
+validate_constraints :: proc(analyzer: ^Analyzer) {
+    // Check for constraint conflicts
+    for _, scope in analyzer.scopes_by_id {
+        for constraint in scope.constraints {
+            validate_constraint(analyzer, constraint)
         }
     }
 }
 
-// Optimized resonance binding validation
-validate_resonance_bindings_in_scope :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-    if scope == nil || len(scope.resonances) == 0 || len(analyzer.errors) > 50 do return
-
-    // Use a map to track driven targets
-    driven_targets := make(map[^Symbol]bool)
-    defer delete(driven_targets)
-
-    // Check all resonance bindings
-    for resonance in scope.resonances {
-        if resonance.target != nil && resonance.is_push {
-            if driven_targets[resonance.target] {
-                // Target already driven, report error
-                add_error(
-                    analyzer,
-                    fmt.tprintf(
-                        "Symbol '%s' is driven by multiple resonances",
-                        resonance.target.name,
-                    ),
-                    get_position_from_node(resonance.node),
-                )
-            } else {
-                driven_targets[resonance.target] = true
-            }
-        }
-    }
-}
-
-// Optimized pattern match exhaustiveness check
-check_exhaustiveness :: proc(analyzer: ^Analyzer, scope: ^Scope_Info) {
-    if scope == nil || !scope.is_pattern do return
-
-    // Look for catch-all patterns
-    has_catchall := false
-
-    // Simple heuristic: If we have a pattern with a single identifier, it's probably a catch-all
-    for branch in scope.branches {
-        if branch.pattern != nil {
-            if _, is_id := branch.pattern^.(Identifier); is_id {
-                has_catchall = true
-                break
-            }
-        }
+// Validate a single constraint
+validate_constraint :: proc(analyzer: ^Analyzer, constraint: Constraint_Info) {
+    if constraint.target == nil || constraint.constraint == nil {
+        return
     }
 
-    if !has_catchall && len(scope.branches) > 0 {
-        add_warning(
+    // Special check for None constraint - these are allowed to be overridden
+    if constraint.constraint.name == "None" {
+        // Allow multiple None constraints
+        return
+    }
+
+    // For non-None constraints, check for conflicts
+    target := constraint.target
+    if target.constraint != nil && target.constraint != constraint.constraint {
+        // Check if one is a None constraint (allowed)
+        if target.constraint.name == "None" || constraint.constraint.name == "None" {
+            return
+        }
+
+        // Otherwise it's a conflict
+        add_error(
             analyzer,
-            "Pattern match may not be exhaustive",
-            get_position_from_node(scope.node),
+            fmt.tprintf("Incompatible constraints for '%s': %s and %s",
+                target.name,
+                target.constraint.name,
+                constraint.constraint.name),
+            get_position_from_node(constraint.node)
         )
+    }
+}
+
+// Validate resonance relationships
+validate_resonance :: proc(analyzer: ^Analyzer) {
+    // Check for multiple drivers of the same symbol
+    driven_symbols := make(map[u64]^Symbol)
+    defer delete(driven_symbols)
+
+    for _, scope in analyzer.scopes_by_id {
+        for resonance in scope.resonances {
+            if resonance.target != nil && resonance.is_push {
+                // For push resonance (>>-), check if target already has a driver
+                if previous, has_driver := driven_symbols[resonance.target.id]; has_driver {
+                    add_error(
+                        analyzer,
+                        fmt.tprintf("Symbol '%s' is driven by multiple resonances",
+                            resonance.target.name),
+                        get_position_from_node(resonance.node)
+                    )
+                } else {
+                    driven_symbols[resonance.target.id] = resonance.target
+                }
+            }
+        }
+    }
+}
+
+// Validate pattern completeness
+validate_patterns :: proc(analyzer: ^Analyzer) {
+    for _, scope in analyzer.scopes_by_id {
+        if scope.is_pattern {
+            // Check for a catchall case
+            has_catchall := false
+            for branch in scope.branches {
+                if branch.pattern == nil {
+                    has_catchall = true
+                    break
+                }
+
+                // A lone identifier in a pattern is also a catchall
+                if id, is_id := branch.pattern^.(Identifier); is_id {
+                    has_catchall = true
+                    break
+                }
+            }
+
+            if !has_catchall && len(scope.branches) > 0 {
+                add_warning(
+                    analyzer,
+                    "Pattern match may not be exhaustive, consider adding a catchall case",
+                    get_position_from_node(scope.node)
+                )
+            }
+        }
+    }
+}
+
+// Validate event handlers
+validate_events :: proc(analyzer: ^Analyzer) {
+    // Track which events have handlers
+    event_handlers := make(map[u64]bool)
+    defer delete(event_handlers)
+
+    // First pass: collect all event handlers
+    for _, scope in analyzer.scopes_by_id {
+        for event in scope.events {
+            if !event.is_push && event.event != nil {
+                event_handlers[event.event.id] = true
+            }
+        }
+    }
+
+    // Second pass: check for unhandled events
+    for _, scope in analyzer.scopes_by_id {
+        for event in scope.events {
+            if event.is_push && event.event != nil {
+                if !event_handlers[event.event.id] {
+                    add_warning(
+                        analyzer,
+                        fmt.tprintf("Event '%s' is pushed but not handled by any event handler",
+                            event.event.name),
+                        get_position_from_node(event.node)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1829,7 +1985,7 @@ get_position_from_node :: proc(node: ^Node) -> Position {
         return n.position
     case Property:
         return n.position
-    case Branch:
+case Branch:
         return n.position
     case FileSystem:
         return n.position
@@ -1914,39 +2070,39 @@ print_symbol_table :: proc(analyzer: ^Analyzer) {
 
     // Print the root scope with detailed debug info
     fmt.println("\n")
-    print_scope_debug(analyzer.root_scope, 0)
+    print_scope(analyzer.root_scope, 0)
 
     fmt.println("=== END SYMBOL TABLE  ===\n")
 }
 
-// Enhanced debug printing with node types and IDs
-print_scope_debug :: proc(scope: ^Scope_Info, depth: int) {
+// Printing with node types and IDs
+print_scope :: proc(scope: ^Scope_Info, depth: int) {
     if scope == nil do return
 
     indent := strings.repeat("  ", depth)
 
- // Print scope details
+    // Print scope details
     scope_name := "Global Scope"
-        if scope.defining_symbol != nil {
-            if scope.defining_symbol.name != "" {
-                scope_name = scope.defining_symbol.name
-            } else {
-                scope_name = "<anonymous>"
-            }
-            node_type_name := "nil"
-            if scope.node != nil {
-                node_type_name = fmt.tprintf("%T", scope.node^)
-            }
-            fmt.printf("%sScope: %s (id:%d, symbol_id:%d, node_type:%s)\n",
-                indent, scope_name, scope.id, scope.defining_symbol.id, node_type_name)
+    if scope.defining_symbol != nil {
+        if scope.defining_symbol.name != "" {
+            scope_name = scope.defining_symbol.name
         } else {
-            node_type_name := "nil"
-            if scope.node != nil {
-                node_type_name = fmt.tprintf("%T", scope.node^)
-            }
-            fmt.printf("%sScope: <unnamed> (id:%d, no_defining_symbol, node_type:%s)\n",
-                indent, scope.id, node_type_name)
+            scope_name = "<anonymous>"
         }
+        node_type_name := "nil"
+        if scope.node != nil {
+            node_type_name = fmt.tprintf("%T", scope.node^)
+        }
+        fmt.printf("%sScope: %s (id:%d, symbol_id:%d, node_type:%s)\n",
+            indent, scope_name, scope.id, scope.defining_symbol.id, node_type_name)
+    } else {
+        node_type_name := "nil"
+        if scope.node != nil {
+            node_type_name = fmt.tprintf("%T", scope.node^)
+        }
+        fmt.printf("%sScope: <unnamed> (id:%d, no_defining_symbol, node_type:%s)\n",
+            indent, scope.id, node_type_name)
+    }
 
     // Print all symbols in this scope with detailed info
     for symbol in scope.symbol_list {
@@ -1971,26 +2127,136 @@ print_scope_debug :: proc(scope: ^Scope_Info, depth: int) {
             }
         }
 
-        // Print symbol with debug info
+        // Print symbol with debug info including flags and constraints on the same line
+        symbol_info := ""
+
+        // Add flags to info
+        if symbol.flags != {} {
+            symbol_info = fmt.tprintf("%s, flags:%v", symbol_info, symbol.flags)
+        }
+
+        // Add constraint to info
+        if .HasConstraint in symbol.flags && symbol.constraint != nil {
+            constraint_name: string
+            if symbol.constraint.name != "" {
+                constraint_name = symbol.constraint.name
+            } else {
+                constraint_name = fmt.tprintf("<anonymous>@%d", symbol.constraint.index)
+            }
+            symbol_info = fmt.tprintf("%s, constraint:%s", symbol_info, constraint_name)
+        }
+
+        // Add driver to info
+        if .IsDriven in symbol.flags && symbol.driver != nil {
+            driver_name: string
+            if symbol.driver.name != "" {
+                driver_name = symbol.driver.name
+            } else {
+                driver_name = fmt.tprintf("<anonymous>@%d", symbol.driver.index)
+            }
+            symbol_info = fmt.tprintf("%s, driven_by:%s", symbol_info, driver_name)
+        }
+
+        // Print the symbol with all the combined info
         if symbol.name != "" {
-            fmt.printf("%s  Symbol: %s (id:%d, index:%d, node_type:%s, kind:%v)\n",
-                indent, symbol.name, symbol.id, symbol.index, node_type, symbol.kind)
+            fmt.printf("%s  Symbol: %s (id:%d, index:%d, node_type:%s, kind:%v%s)\n",
+                indent, symbol.name, symbol.id, symbol.index, node_type, symbol.kind, symbol_info)
         } else {
-            fmt.printf("%s  Symbol: <anonymous> (id:%d, index:%d, node_type:%s, kind:%v)\n",
-                indent, symbol.id, symbol.index, node_type, symbol.kind)
+            fmt.printf("%s  Symbol: <anonymous> (id:%d, index:%d, node_type:%s, kind:%v%s)\n",
+                indent, symbol.id, symbol.index, node_type, symbol.kind, symbol_info)
+        }
+
+        // Print references count if any
+        if len(symbol.references) > 0 {
+            fmt.printf("%s    References: %d\n", indent, len(symbol.references))
         }
 
         // Print info about introduced scope if any
         if symbol.introduced_scope != nil {
             fmt.printf("%s    → Introduces scope (id:%d)\n", indent, symbol.introduced_scope.id)
-            print_scope_debug(symbol.introduced_scope, depth + 1)
+            print_scope(symbol.introduced_scope, depth + 1)
+        }
+    }
+
+
+    // Print resonances section if any resonances exist
+    if len(scope.resonances) > 0 {
+        fmt.printf("%s  === Resonances (%d) ===\n", indent, len(scope.resonances))
+        for resonance, i in scope.resonances {
+            target_name := "nil"
+            if resonance.target != nil {
+                if resonance.target.name != "" {
+                    target_name = resonance.target.name
+                } else {
+                    target_name = fmt.tprintf("<anonymous>@%d", resonance.target.index)
+                }
+            }
+
+            driver_name := "nil"
+            if resonance.driver != nil {
+                if resonance.driver.name != "" {
+                    driver_name = resonance.driver.name
+                } else {
+                    driver_name = fmt.tprintf("<anonymous>@%d", resonance.driver.index)
+                }
+            }
+
+            direction: string
+            if resonance.is_push {
+                direction = "push"
+            } else {
+                direction = "pull"
+            }
+
+            fmt.printf("%s    Resonance %d: %s %s driver %s\n",
+                indent, i, target_name, direction, driver_name)
+        }
+    }
+
+    // Print events section if any events exist
+    if len(scope.events) > 0 {
+        fmt.printf("%s  === Events (%d) ===\n", indent, len(scope.events))
+        for event, i in scope.events {
+            event_name := "nil"
+            if event.event != nil {
+                if event.event.name != "" {
+                    event_name = event.event.name
+                } else {
+                    event_name = fmt.tprintf("<anonymous>@%d", event.event.index)
+                }
+            }
+
+            direction: string
+            if event.is_push {
+                direction = "push"
+            } else {
+                direction = "pull"
+            }
+
+            has_handler: string
+            if event.handler != nil {
+                has_handler = "with handler"
+            } else {
+                has_handler = "no handler"
+            }
+
+            fmt.printf("%s    Event %d: %s (%s) %s\n",
+                indent, i, event_name, direction, has_handler)
+        }
+    }
+
+    // Print branches section if this is a pattern scope
+    if scope.is_pattern && len(scope.branches) > 0 {
+        fmt.printf("%s  === Pattern Branches (%d) ===\n", indent, len(scope.branches))
+        for i := 0; i < len(scope.branches); i += 1 {
+            fmt.printf("%s    Branch %d: pattern-match branch\n", indent, i)
         }
     }
 
     // Print child scopes that don't have defining symbols
     for child in scope.child_scopes {
         if child.defining_symbol == nil {
-            print_scope_debug(child, depth + 1)
+            print_scope(child, depth + 1)
         }
     }
 }
@@ -2031,7 +2297,6 @@ destroy_analyzer :: proc(analyzer: ^Analyzer) {
     delete(analyzer.resolution_cache)
     delete(analyzer.errors)
     delete(analyzer.warnings)
-    delete(analyzer.work_queue)
 
     // Free the analyzer itself
     free(analyzer)
@@ -2066,52 +2331,5 @@ destroy_symbol :: proc(symbol: ^Symbol) {
         free(ref)
     }
     delete(symbol.references)
+    delete(symbol.driven_symbols)
 }
-
-// ===========================================================================
-// SECTION 10: TESTING UTILITIES
-// ===========================================================================
-
-// Run the analyzer with timing info
-analyze_with_timing :: proc(ast: ^Node, resolver: ^File_Resolver, filename: string) -> (^Analyzer, time.Duration) {
-    start := time.now()
-
-    analyzer := analyze_ast(ast, resolver, filename)
-
-    end := time.now()
-    duration := time.diff(start, end)
-
-    return analyzer, duration
-}
-
-// Check analyzer statistics
-print_analyzer_stats :: proc(analyzer: ^Analyzer) {
-    fmt.println("\n=== ANALYZER STATISTICS ===")
-    fmt.printf("Total scopes: %d\n", len(analyzer.scopes_by_id))
-    fmt.printf("Total symbols: %d\n", len(analyzer.symbols_by_id))
-    fmt.printf("Errors: %d\n", len(analyzer.errors))
-    fmt.printf("Warnings: %d\n", len(analyzer.warnings))
-
-    // Count symbol types
-    named_symbols := 0
-    anonymous_symbols := 0
-    top_level_symbols := 0
-
-    for _, symbol in analyzer.symbols_by_id {
-        if symbol.name != "" {
-            named_symbols += 1
-        } else {
-            anonymous_symbols += 1
-        }
-
-        if .IsTopLevel in symbol.flags {
-            top_level_symbols += 1
-        }
-    }
-
-    fmt.printf("Named symbols: %d\n", named_symbols)
-    fmt.printf("Anonymous symbols: %d\n", anonymous_symbols)
-    fmt.printf("Top-level symbols: %d\n", top_level_symbols)
-    fmt.println("=== END STATISTICS ===\n")
-}
-
