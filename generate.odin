@@ -242,13 +242,13 @@ evaluate_constant_expression :: proc(
 			result.kind = .Integer
 
 			#partial switch n.kind {
-			case .Plus:
+			case .Add:
 				result.integer = left_val.integer + right_val.integer
-			case .Minus:
+			case .Subtract:
 				result.integer = left_val.integer - right_val.integer
-			case .Mult:
+			case .Multiply:
 				result.integer = left_val.integer * right_val.integer
-			case .Div:
+			case .Divide:
 				if right_val.integer == 0 {
 					add_compile_error(gen_context, "Division by zero in constant expression")
 					return nil
@@ -260,11 +260,11 @@ evaluate_constant_expression :: proc(
 					return nil
 				}
 				result.integer = left_val.integer % right_val.integer
-			case .BitAnd:
+			case .And:
 				result.integer = left_val.integer & right_val.integer
-			case .BitOr:
+			case .Or:
 				result.integer = left_val.integer | right_val.integer
-			case .BitXor:
+			case .Xor:
 				result.integer = left_val.integer ~ right_val.integer
 			case:
 				// Unsupported operator for constant evaluation
@@ -407,15 +407,15 @@ generate_expression :: proc(node: ^Node, analyzer: ^Analyzer, gen_context: ^Code
 // Generate code for integer operations
 generate_int_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Context) {
 	#partial switch op_kind {
-	case .Plus:
+	case .Add:
 		x64.add_r64_r64(.RAX, .RBX)
-	case .Minus:
+	case .Subtract:
 		x64.mov_r64_r64(.RCX, .RAX)
 		x64.mov_r64_r64(.RAX, .RBX)
 		x64.sub_r64_r64(.RAX, .RCX)
-	case .Mult:
+	case .Multiply:
 		x64.imul_r64_r64(.RAX, .RBX)
-	case .Div:
+	case .Divide:
 		x64.mov_r64_r64(.RCX, .RAX)
 		x64.mov_r64_r64(.RAX, .RBX)
 		x64.idiv_r64(.RCX)
@@ -424,11 +424,11 @@ generate_int_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Co
 		x64.mov_r64_r64(.RAX, .RBX)
 		x64.idiv_r64(.RCX)
 		x64.mov_r64_r64(.RAX, .RDX) // Remainder is in RDX
-	case .BitAnd:
+	case .And:
 		x64.and_r64_r64(.RAX, .RBX)
-	case .BitOr:
+	case .Or:
 		x64.or_r64_r64(.RAX, .RBX)
-	case .BitXor:
+	case .Xor:
 		x64.xor_r64_r64(.RAX, .RBX)
 	case .LShift:
 		x64.mov_r64_r64(.RCX, .RAX)

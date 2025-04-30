@@ -56,8 +56,8 @@ Token_Kind :: enum {
 
 	// Comparisons
 	Equal, // =
-	LessThan, // <
-	GreaterThan, // >
+	Less, // <
+	Greater, // >
 	LessEqual, // <=
 	GreaterEqual, // >=
 
@@ -86,10 +86,10 @@ Token_Kind :: enum {
 	Asterisk, // *
 	Slash, // /
 	Percent, // %
-	BitAnd, // &
-	BitOr, // |
-	BitXor, // ^
-	BitNot, // ~
+	And, // &
+	Or, // |
+	Xor, // ^
+	Not, // ~
   RShift, // >>
   LShift, // <<
 }
@@ -347,7 +347,7 @@ next_token :: proc(l: ^Lexer) -> Token {
                 return Token{kind = .PointingPull, text = "<-", position = start_pos}
             }
         }
-        return Token{kind = .LessThan, text = "<", position = start_pos}
+        return Token{kind = .Less, text = "<", position = start_pos}
     case '>':
         // Optimized greater-than related tokens
         advance_position(l)
@@ -368,7 +368,7 @@ next_token :: proc(l: ^Lexer) -> Token {
                 return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
             }
         }
-        return Token{kind = .GreaterThan, text = ">", position = start_pos}
+        return Token{kind = .Greater, text = ">", position = start_pos}
     case '-':
         // Optimized minus-related tokens
         advance_position(l)
@@ -400,7 +400,7 @@ next_token :: proc(l: ^Lexer) -> Token {
             return next_token(l)
         }
 
-        // Multi line comment
+        // Multiplyi line comment
         if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '*' {
             advance_by(l, 2)
 
@@ -448,16 +448,16 @@ next_token :: proc(l: ^Lexer) -> Token {
         return Token{kind = .Percent, text = "%", position = start_pos}
     case '&':
         advance_position(l)
-        return Token{kind = .BitAnd, text = "&", position = start_pos}
+        return Token{kind = .And, text = "&", position = start_pos}
     case '|':
         advance_position(l)
-        return Token{kind = .BitOr, text = "|", position = start_pos}
+        return Token{kind = .Or, text = "|", position = start_pos}
     case '^':
         advance_position(l)
-        return Token{kind = .BitXor, text = "^", position = start_pos}
+        return Token{kind = .Xor, text = "^", position = start_pos}
     case '~':
         advance_position(l)
-        return Token{kind = .BitNot, text = "~", position = start_pos}
+        return Token{kind = .Not, text = "~", position = start_pos}
     case:
         // Identifiers - optimized with direct character range checks
         if is_alpha(c) || c == '_' {
@@ -802,20 +802,21 @@ Execute :: struct {
  * Operator_Kind defines the types of operators
  */
 Operator_Kind :: enum {
-	Plus,
-	Minus,
-	Mult,
-	Div,
+	Add,
+	Subtract,
+	Multiply,
+	Divide,
 	Mod, // For %
 	Equal,
-	LessThan,
-	GreaterThan,
+	Less,
+	Greater,
+  NotEqual,
 	LessEqual,
 	GreaterEqual,
-	BitAnd, // &
-	BitOr, // |
-	BitXor, // ^
-	BitNot, // ~
+	And, // &
+	Or, // |
+	Xor, // ^
+	Not, // ~
   RShift, // >>
   LShift, // <<
 }
@@ -1098,7 +1099,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .NONE}
 
     // Unary operators
-    case .BitNot:
+    case .Not:
         return Parse_Rule{prefix = parse_unary, infix = nil, precedence = .UNARY}
     case .Minus:
         return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
@@ -1118,11 +1119,11 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
     case .Percent:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    case .BitAnd:
+    case .And:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
-    case .BitOr:
+    case .Or:
         return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .BITWISE}
-    case .BitXor:
+    case .Xor:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .RShift:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
@@ -1130,9 +1131,9 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .Equal:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
-    case .LessThan:
+    case .Less:
         return Parse_Rule{prefix = nil, infix = parse_less_than, precedence = .COMPARISON}
-    case .GreaterThan:
+    case .Greater:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
     case .LessEqual:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
@@ -1595,7 +1596,7 @@ parse_bit_or :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     position := parser.current_token.position
     advance_token(parser) // Consume |
 
-    // Get precedence rule for BitOr
+    // Get precedence rule for Or
     precedence := Precedence.BITWISE
 
     // Parse right operand with higher precedence
@@ -1607,7 +1608,7 @@ parse_bit_or :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 
     // Create operator node
     op := Operator{
-        kind = .BitOr,
+        kind = .Or,
         left = left,
         right = right,
         position = position,
@@ -1659,10 +1660,10 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
             append_elem(&stack, Token_Kind.LeftParen)
             advance_token(parser)
 
-        case .LessThan:
+        case .Less:
             // Start of threading execution
             append_elem(&execute.wrappers, ExecutionWrapper.Threading)
-            append_elem(&stack, Token_Kind.LessThan)
+            append_elem(&stack, Token_Kind.Less)
             advance_token(parser)
 
         case .LeftBracket:
@@ -1671,16 +1672,16 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
             append_elem(&stack, Token_Kind.LeftBracket)
             advance_token(parser)
 
-        case .BitOr:
-            // Check if it's an opening or closing BitOr
-            if len(stack) > 0 && stack[len(stack)-1] == Token_Kind.BitOr {
-                // Closing BitOr, pop from stack
+        case .Or:
+            // Check if it's an opening or closing Or
+            if len(stack) > 0 && stack[len(stack)-1] == Token_Kind.Or {
+                // Closing Or, pop from stack
                 ordered_remove(&stack, len(stack)-1)
                 advance_token(parser)
             } else {
-                // Opening BitOr, push to stack
+                // Opening Or, push to stack
                 append_elem(&execute.wrappers, ExecutionWrapper.GPU)
-                append_elem(&stack, Token_Kind.BitOr)
+                append_elem(&stack, Token_Kind.Or)
                 advance_token(parser)
             }
 
@@ -1698,9 +1699,9 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
             ordered_remove(&stack, len(stack)-1)
             advance_token(parser)
 
-        case .GreaterThan:
+        case .Greater:
             // Check for corresponding opening angle bracket
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LessThan {
+            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.Less {
                 error_at_current(parser, "Mismatched '>' in execution pattern")
                 parser.lexer.position = original_position
                 parser.current_token = original_current
@@ -1754,8 +1755,8 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
         #partial switch token_kind {
         case .LeftParen:    closing_token = ")"
         case .LeftBracket:  closing_token = "]"
-        case .LessThan:     closing_token = ">"
-        case .BitOr:        closing_token = "|"
+        case .Less:     closing_token = ">"
+        case .Or:        closing_token = "|"
         }
 
         error_at_current(parser, fmt.tprintf("Unclosed '%v' in execution pattern, expected '%s'",
@@ -1787,7 +1788,7 @@ parse_less_than :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node
 
     // It's a simple < operator
     op := Operator{
-        kind = .LessThan,
+        kind = .Less,
         left = left,
         right = parse_expression(parser, Precedence(int(Precedence.COMPARISON) + 1)),
         position = position,
@@ -1836,7 +1837,7 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     position := parser.current_token.position
 
     // Remember the operator kind
-    operator_kind := parser.current_token.kind
+    token_kind := parser.current_token.kind
 
     // Advance past the operator
     advance_token(parser)
@@ -1855,11 +1856,11 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     }
 
     // Set operator kind based on token
-    #partial switch operator_kind {
+    #partial switch token_kind {
     case .Minus:
-        op.kind = .Minus
-    case .BitNot:
-        op.kind = .BitNot
+        op.kind = .Subtract
+    case .Not:
+        op.kind = .Not
     case:
         error_at_current(parser, "Unexpected unary operator")
         return nil
@@ -1878,8 +1879,8 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     position := parser.current_token.position
 
     // Remember the operator
-    operator_kind := parser.current_token.kind
-    rule := get_rule(operator_kind)
+    token_kind := parser.current_token.kind
+    rule := get_rule(token_kind)
 
     // Move past the operator
     advance_token(parser)
@@ -1899,24 +1900,24 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     }
 
     // Set operator type
-    #partial switch operator_kind {
-    case .Plus:          op.kind = .Plus
-    case .Minus:         op.kind = .Minus
-    case .Asterisk:      op.kind = .Mult
-    case .Slash:         op.kind = .Div
+    #partial switch token_kind {
+    case .Plus:          op.kind = .Add
+    case .Minus:         op.kind = .Subtract
+    case .Asterisk:      op.kind = .Multiply
+    case .Slash:         op.kind = .Divide
     case .Percent:       op.kind = .Mod
-    case .BitAnd:        op.kind = .BitAnd
-    case .BitOr:         op.kind = .BitOr
-    case .BitXor:        op.kind = .BitXor
+    case .And:        op.kind = .And
+    case .Or:         op.kind = .Or
+    case .Xor:        op.kind = .Xor
     case .Equal:         op.kind = .Equal
-    case .LessThan:      op.kind = .LessThan
-    case .GreaterThan:   op.kind = .GreaterThan
+    case .Less:          op.kind = .Less
+    case .Greater:       op.kind = .Greater
     case .LessEqual:     op.kind = .LessEqual
     case .GreaterEqual:  op.kind = .GreaterEqual
     case .LShift:        op.kind = .LShift
     case .RShift:        op.kind = .RShift
     case:
-        error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", operator_kind))
+        error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", token_kind))
         return nil
     }
 
@@ -2649,8 +2650,8 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * Helper function to check if a token can start an execution pattern
  */
 is_execution_pattern_start :: proc(kind: Token_Kind) -> bool {
-    return kind == .Execute || kind == .LeftParen || kind == .LessThan ||
-           kind == .LeftBracket || kind == .BitOr
+    return kind == .Execute || kind == .LeftParen || kind == .Less ||
+           kind == .LeftBracket || kind == .Or
 }
 
 /*
@@ -2667,8 +2668,8 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .LeftBrace ||
         kind == .LeftParen ||
         kind == .At ||
-        kind == .BitNot ||
-        kind == .Minus ||
+        kind == .Not ||
+        kind == .Minus||
         kind == .Execute ||
         kind == .PointingPull ||
         kind == .EventPush ||

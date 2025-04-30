@@ -1825,19 +1825,8 @@ validate_constraint :: proc(analyzer: ^Analyzer, constraint: Constraint_Info) {
         return
     }
 
-    // Special check for None constraint - these are allowed to be overridden
-    if constraint.constraint.name == "None" {
-        // Allow multiple None constraints
-        return
-    }
-
-    // For non-None constraints, check for conflicts
     target := constraint.target
     if target.constraint != nil && target.constraint != constraint.constraint {
-        // Check if one is a None constraint (allowed)
-        if target.constraint.name == "None" || constraint.constraint.name == "None" {
-            return
-        }
 
         // Otherwise it's a conflict
         add_error(

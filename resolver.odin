@@ -474,13 +474,9 @@ process_file_worker :: proc(resolver: ^File_Resolver, worker: ^Worker, file_path
 		return
 	}
 
-	// Create analyzer
-	analyzer := init_analyzer(ast, parser.file_resolver, file_path)
+	analyzer := analyze_ast(ast, parser.file_resolver, file_path)
 	entry.analyzer = analyzer
 
-	// Analyze file (we'll integrate imports later)
-	enqueue_node(analyzer, ast, analyzer.root_scope)
-	process_work_queue(analyzer)
 
 	// Mark as processed
 	sync.atomic_store(&entry.state, STATE_PROCESSED)
