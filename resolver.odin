@@ -73,7 +73,7 @@ resolve_entry :: proc() -> bool {
 	}
 
 	// Nombre optimal de threads - un par cœur
-	num_threads := os.processor_core_count()
+	num_threads := max(os.processor_core_count() - 1, 1)
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Initializing thread pool with %d threads\n", num_threads)
 	}
@@ -134,40 +134,59 @@ resolve_entry :: proc() -> bool {
 		fmt.printf("[DEBUG] resolve_entry completed with success: %t\n", success)
 	}
 
-	// Calculate and display total time
+	// At the end of resolve_entry, modify the timing output to be clearer:
 	if resolver.options.timing {
 		timing_data.total_time = time.diff(total_start, time.now())
 
-		// Print timing summary
+		// Print timing summary with clearer formatting
 		fmt.println("\n---- Compilation Timing Summary ----")
-		fmt.printf("Total time:       %v\n", timing_data.total_time)
+		fmt.printf("Total elapsed time: %v\n", timing_data.total_time)
+
+		// Display user time breakdown
+		user_time :=
+			timing_data.file_read_time + timing_data.parsing_time + timing_data.analysis_time
 		fmt.printf(
-			"File reading:     %v (%.2f%%)\n",
-			timing_data.file_read_time,
-			(timing_data.file_read_time) / (timing_data.total_time) * 100,
+			"User processing time: %v (%.2f%%)\n",
+			user_time,
+			f64(user_time) / f64(timing_data.total_time) * 100,
 		)
+
 		fmt.printf(
-			"Parsing:          %v (%.2f%%)\n",
+			"  ├─ File reading: %v (%.2f%%)\n",
+			timing_data.file_read_time,
+			f64(timing_data.file_read_time) / f64(timing_data.total_time) * 100,
+		)
+
+		fmt.printf(
+			"  ├─ Parsing:      %v (%.2f%%)\n",
 			timing_data.parsing_time,
-			(timing_data.parsing_time) / (timing_data.total_time) * 100,
+			f64(timing_data.parsing_time) / f64(timing_data.total_time) * 100,
 		)
 
 		if !resolver.options.analyze_only {
 			fmt.printf(
-				"Analysis:         %v (%.2f%%)\n",
+				"  └─ Analysis:     %v (%.2f%%)\n",
 				timing_data.analysis_time,
-				(timing_data.analysis_time) / (timing_data.total_time) * 100,
+				f64(timing_data.analysis_time) / f64(timing_data.total_time) * 100,
 			)
 		}
 
+		// System overhead
+		system_overhead := timing_data.total_time - user_time - timing_data.thread_wait_time
 		fmt.printf(
-			"Thread wait time: %v (%.2f%%)\n",
-			timing_data.thread_wait_time,
-			(timing_data.thread_wait_time) / (timing_data.total_time) * 100,
+			"System overhead:    %v (%.2f%%)\n",
+			system_overhead,
+			f64(system_overhead) / f64(timing_data.total_time) * 100,
 		)
+
+		fmt.printf(
+			"Thread wait time:   %v (%.2f%%)\n",
+			timing_data.thread_wait_time,
+			f64(timing_data.thread_wait_time) / f64(timing_data.total_time) * 100,
+		)
+
 		fmt.println("----------------------------------")
 	}
-
 	return success
 }
 
@@ -371,7 +390,17 @@ process_cache_task :: proc(task: thread.Task) {
 process_filenode :: proc(node: ^Node) {
 	// TODO: implement that later
 	if resolver.options.verbose {
-		fmt.printf("[DEBUG] process_filenode called for node at %p\n", node)
+		fmt.printf("[DEBUG] process_filenode called for node %s\n", node)
+	}
+
+	i := 0
+	for i < 240 {
+		sync.mutex_lock(&resolver.files_mutex)
+		cache := create_cache("long.sc")
+		resolver.files[cache.path] = cache
+		sync.mutex_unlock(&resolver.files_mutex)
+		process_cache(cache)
+		i += 1
 	}
 }
 
