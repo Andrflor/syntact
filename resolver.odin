@@ -41,9 +41,30 @@ Cache :: struct {
 	mutex:         sync.Mutex,
 }
 
+// Timing data structure to track execution times
+TimingInfo :: struct {
+	total_time:       time.Duration,
+	parsing_time:     time.Duration,
+	analysis_time:    time.Duration,
+	file_read_time:   time.Duration,
+	thread_wait_time: time.Duration,
+}
+
+// Global timing data
+timing_data: TimingInfo
+
 resolve_entry :: proc() -> bool {
 	resolver.options = parse_args()
 	success := true
+
+	// Start total time measurement if timing is enabled
+	total_start: time.Time
+	if resolver.options.timing {
+		total_start = time.now()
+		if resolver.options.verbose {
+			fmt.println("[TIMING] Starting overall timing measurement")
+		}
+	}
 
 	// Debug start
 	if resolver.options.verbose {
@@ -84,6 +105,15 @@ resolve_entry :: proc() -> bool {
 		success = false
 	}
 
+	// Measure thread wait time
+	thread_wait_start: time.Time
+	if resolver.options.timing {
+		thread_wait_start = time.now()
+		if resolver.options.verbose {
+			fmt.println("[TIMING] Starting thread wait timing measurement")
+		}
+	}
+
 	// Attendre la fin
 	if resolver.options.verbose {
 		fmt.println("[DEBUG] Waiting for thread pool tasks to complete")
@@ -92,12 +122,55 @@ resolve_entry :: proc() -> bool {
 	thread.pool_finish(&resolver.pool)
 	thread.pool_destroy(&resolver.pool)
 
+	// Calculate thread wait time
+	if resolver.options.timing {
+		timing_data.thread_wait_time = time.diff(thread_wait_start, time.now())
+		if resolver.options.verbose {
+			fmt.printf("[TIMING] Thread wait time: %v\n", timing_data.thread_wait_time)
+		}
+	}
+
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] resolve_entry completed with success: %t\n", success)
 	}
 
+	// Calculate and display total time
+	if resolver.options.timing {
+		timing_data.total_time = time.diff(total_start, time.now())
+
+		// Print timing summary
+		fmt.println("\n---- Compilation Timing Summary ----")
+		fmt.printf("Total time:       %v\n", timing_data.total_time)
+		fmt.printf(
+			"File reading:     %v (%.2f%%)\n",
+			timing_data.file_read_time,
+			(timing_data.file_read_time) / (timing_data.total_time) * 100,
+		)
+		fmt.printf(
+			"Parsing:          %v (%.2f%%)\n",
+			timing_data.parsing_time,
+			(timing_data.parsing_time) / (timing_data.total_time) * 100,
+		)
+
+		if !resolver.options.analyze_only {
+			fmt.printf(
+				"Analysis:         %v (%.2f%%)\n",
+				timing_data.analysis_time,
+				(timing_data.analysis_time) / (timing_data.total_time) * 100,
+			)
+		}
+
+		fmt.printf(
+			"Thread wait time: %v (%.2f%%)\n",
+			timing_data.thread_wait_time,
+			(timing_data.thread_wait_time) / (timing_data.total_time) * 100,
+		)
+		fmt.println("----------------------------------")
+	}
+
 	return success
 }
+
 
 process_cache :: proc(cache: ^Cache) {
 	if resolver.options.verbose {
@@ -173,6 +246,15 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Temporary arena initialized with size: %d bytes\n", file_size)
 	}
 
+	// Start file read timing
+	file_read_start: time.Time
+	if resolver.options.timing {
+		file_read_start = time.now()
+		if resolver.options.verbose {
+			fmt.printf("[TIMING] Starting file read timing for: %s\n", cache.path)
+		}
+	}
+
 	// Lecture du fichier avec un allocateur temporaire
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Reading entire file: %s\n", cache.path)
@@ -187,6 +269,15 @@ process_cache_task :: proc(task: thread.Task) {
 		return
 	}
 
+	// End file read timing
+	if resolver.options.timing {
+		file_read_duration := time.diff(file_read_start, time.now())
+		sync.atomic_add(&timing_data.file_read_time, file_read_duration)
+		if resolver.options.verbose {
+			fmt.printf("[TIMING] File read time for %s: %v\n", cache.path, file_read_duration)
+		}
+	}
+
 	if resolver.options.verbose {
 		fmt.printf(
 			"[DEBUG] Successfully read %d bytes from file: %s\n",
@@ -198,6 +289,15 @@ process_cache_task :: proc(task: thread.Task) {
 	// Utiliser l'allocateur d'arena du cache pour stocker la source
 	cache.source = string(source_bytes)
 
+	// Start parsing timing
+	parsing_start: time.Time
+	if resolver.options.timing {
+		parsing_start = time.now()
+		if resolver.options.verbose {
+			fmt.printf("[TIMING] Starting parsing timing for: %s\n", cache.path)
+		}
+	}
+
 	// Parsing et analyse
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Starting parsing for file: %s\n", cache.path)
@@ -205,7 +305,16 @@ process_cache_task :: proc(task: thread.Task) {
 
 	ast := parse(cache)
 	cache.status = .Parsed
-	// TODO: destrouy temp arena and free all
+	// TODO: destroy temp arena and free all
+
+	// End parsing timing
+	if resolver.options.timing {
+		parsing_duration := time.diff(parsing_start, time.now())
+		sync.atomic_add(&timing_data.parsing_time, parsing_duration)
+		if resolver.options.verbose {
+			fmt.printf("[TIMING] Parsing time for %s: %v\n", cache.path, parsing_duration)
+		}
+	}
 
 	if (resolver.options.print_ast) {
 		print_ast(ast, 0)
@@ -224,9 +333,27 @@ process_cache_task :: proc(task: thread.Task) {
 			fmt.printf("[DEBUG] Starting analysis for file: %s\n", cache.path)
 		}
 
+		// Start analysis timing
+		analysis_start: time.Time
+		if resolver.options.timing {
+			analysis_start = time.now()
+			if resolver.options.verbose {
+				fmt.printf("[TIMING] Starting analysis timing for: %s\n", cache.path)
+			}
+		}
+
 		cache.status = .Analyzing
 		// analyze(cache)
 		cache.status = .Analyzed
+
+		// End analysis timing
+		if resolver.options.timing {
+			analysis_duration := time.diff(analysis_start, time.now())
+			sync.atomic_add(&timing_data.analysis_time, analysis_duration)
+			if resolver.options.verbose {
+				fmt.printf("[TIMING] Analysis time for %s: %v\n", cache.path, analysis_duration)
+			}
+		}
 
 		if resolver.options.verbose {
 			fmt.printf(
@@ -239,6 +366,7 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)
 	}
 }
+
 
 process_filenode :: proc(node: ^Node) {
 	// TODO: implement that later
