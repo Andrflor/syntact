@@ -2583,63 +2583,73 @@ parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 }
 
 /*
- * parse_reference parses a file system reference (@module.lib)
- */
+ * parse_reference parses a file system reference */
 parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
-    // Save position of the @ token
     position := parser.current_token.position
+    advance_token(parser) // Consume @
 
-    // Consume @
-    advance_token(parser)
-
-    // Check for identifier after @
     if parser.current_token.kind != .Identifier {
         error_at_current(parser, "Expected identifier after @")
         return nil
     }
 
-    // Start building the reference path
-    path_builder := strings.builder_make()
-    defer strings.builder_destroy(&path_builder)
-    strings.write_string(&path_builder, "@")
+    // Create the initial FileSystem node
+    result := new(Node)
+    result^ = FileSystem{
+        position = position,
+        target = new(Node),
+    }
 
-    // Process first identifier
-    id_name := parser.current_token.text
-    strings.write_string(&path_builder, id_name)
+    // Set the initial target
+    (cast(^FileSystem)result).target^ = Identifier{
+        name = parser.current_token.text,
+        position = parser.current_token.position
+    }
+
     advance_token(parser)
 
-    // Process property chain if present
+    // Start with our result node
+    current := result
+
+    // Chain property access
     for parser.current_token.kind == .Dot {
-        strings.write_string(&path_builder, ".")
         advance_token(parser)
 
         if parser.current_token.kind != .Identifier {
-            error_at_current(parser, "Expected identifier after dot in file reference")
+            error_at_current(parser, "Expected identifier after '.'")
             break
         }
 
-        strings.write_string(&path_builder, parser.current_token.text)
+        // Create property identifier
+        property_id := new(Node)
+        property_id^ = Identifier{
+            name = parser.current_token.text,
+            position = parser.current_token.position,
+        }
+
+        // Create new Property node
+        next := new(Node)
+        next^ = Property{
+            source = current,
+            property = property_id,
+            position = position,
+        }
+
+        // Update current to point to the new node
+        current = next
         advance_token(parser)
     }
 
-    // Get the full path
-    full_path := strings.to_string(path_builder)
-
-    // Create FileSystem node with position
-    fs_node := FileSystem{
-        position = position,
-    }
-
-    // (rest of the code to build the node structure)
-
-    // Process reference immediately if we have a resolver
+    // Queue only root file
     if parser.file_resolver != nil {
-        enqueue_file_reference(parser, full_path, position)
+        // Check if the base node is a FileSystem type
+        if fs, ok := result^.(FileSystem); ok {
+            path := get_filesystem_path(fs)
+            enqueue_file_reference(parser, path, position)
+        }
     }
 
-    result := new(Node)
-    result^ = fs_node
-    return result
+    return current
 }
 
 // ===========================================================================

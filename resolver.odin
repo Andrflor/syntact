@@ -131,6 +131,7 @@ init_file_resolver :: proc(
 
 // Called whenever we find a file reference during parsing
 enqueue_file_reference :: proc(parser: ^Parser, ref_path: string, position: Position) -> bool {
+	fmt.println(ref_path)
 	if parser.file_resolver == nil {
 		return false
 	}
