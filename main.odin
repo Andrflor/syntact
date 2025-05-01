@@ -1,5 +1,4 @@
 package compiler
-
 import "core:fmt"
 import vmem "core:mem/virtual"
 import "core:os"
@@ -12,38 +11,36 @@ import "core:time"
  * ====================================================================
  * Compiler Main Function
  *
- * A flexible entry point for the compiler that:
+ * Entry point for the compiler that:
  * 1. Parses command-line arguments
- * 2. Processes input files according to specified options
- * 3. Coordinates parsing and semantic analysis
- * 4. Produces output according to user preferences
+ * 2. Sets up compilation options
+ * 3. Delegates to the resolver for compilation
+ * 4. Returns an appropriate exit code
  * ====================================================================
  */
 
 /*
- * Options holds all command-line options
+ * Options holds all command-line options for compilation
  */
 Options :: struct {
-	input_path:         string, // Files to compile
-	output_path:        string, // Output file (if compilation enabled)
-	print_ast:          bool, // Whether to print the AST
-	print_symbol_table: bool, // Whether to print the symbol table
-	print_scope_graph:  bool, // Whether to print the scope graph
-	parse_only:         bool, // Whether to only parse, not analyze
-	analyze_only:       bool, // Whether to only analyze, not generate code
-	verbose:            bool, // Whether to print verbose output
-	timing:             bool, // Whether to print timing information
+	input_path:         string, // Path to input file
+	output_path:        string, // Path to output file
+	print_ast:          bool, // Toggle AST printing
+	print_symbol_table: bool, // Toggle symbol table printing
+	print_scope_graph:  bool, // Toggle scope graph printing
+	parse_only:         bool, // Skip analysis and code generation
+	analyze_only:       bool, // Skip code generation
+	verbose:            bool, // Enable verbose logging
+	timing:             bool, // Enable performance timing
 }
 
-
 /*
- * parse_args parses command-line arguments into Options
+ * parse_args extracts command-line options
  */
 parse_args :: proc() -> Options {
 	options: Options
 	i := 1
 	input_path_set := false
-
 	for i < len(os.args) {
 		arg := os.args[i]
 		if arg[0] == '-' {
@@ -93,18 +90,16 @@ parse_args :: proc() -> Options {
 		}
 		i += 1
 	}
-
 	if !input_path_set {
 		fmt.eprintln("Error: No input file specified")
 		print_usage()
 		os.exit(1)
 	}
-
 	return options
 }
 
 /*
- * print_usage prints usage instructions
+ * print_usage displays help information
  */
 print_usage :: proc() {
 	fmt.println("Usage: compiler [options] input_paths...")
@@ -122,15 +117,10 @@ print_usage :: proc() {
 }
 
 /*
- * process_file processes a single input file
- */
-
-/*
- * main is the entry point for the compiler
+ * main delegates to the resolver and handles exit codes
  */
 main :: proc() {
 	success := resolve_entry()
-
 	// Exit with appropriate status
 	if !success {
 		os.exit(1)
