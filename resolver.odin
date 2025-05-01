@@ -1,8 +1,8 @@
 package compiler
-
 import "base:runtime"
 import "core:fmt"
 import "core:hash"
+import "core:mem"
 import vmem "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
@@ -11,637 +11,306 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-/*
- * ====================================================================
- * High-Performance File System Resolver for Homoiconic Language
- *
- * This module integrates with the existing optimized analyzer
- * to handle @references with efficient caching, threading, and memory
- * management techniques.
- * ====================================================================
- */
-
-// State flags for file processing
-STATE_UNPROCESSED :: u32(0)
-STATE_QUEUED :: u32(1)
-STATE_PROCESSING :: u32(2)
-STATE_PROCESSED :: u32(3)
-STATE_FAILED :: u32(4)
-
-// File cache entry
-File_Cache :: struct {
-	path:         string, // Full path to the file
-	mod_time:     i64, // Modification time
-	file_size:    i64, // File size for quick change detection
-	hash:         u64, // Content hash
-	ast:          ^Node, // Parsed AST
-	analyzer:     ^Analyzer, // Analyzer for this file
-	symbol:       ^Symbol, // Symbol representing this file
-	dependencies: [dynamic]string, // Files this file depends on
-	state:        u32, // Processing state (atomic)
-	worker_id:    i32, // ID of worker processing this file
-	lock:         sync.Atomic_Mutex, // Lock for updating this entry
+Resolver :: struct {
+	files:       map[string]^Cache,
+	files_mutex: sync.Mutex,
+	entry:       ^Cache,
+	options:     Options,
+	pool:        thread.Pool,
 }
 
-// Thread pool worker
-Worker :: struct {
-	id:          int, // Worker ID
-	thread:      ^thread.Thread, // Thread handle
-	thread_pool: ^Thread_Pool, // Pointer to thread pool
-	arena:       vmem.Arena, // Worker-specific memory arena
-	allocator:   runtime.Allocator, // Worker-specific allocator
-	active:      bool, // Whether worker is processing a file
-	file_path:   string, // Current file being processed
-	should_exit: bool, // Signal to exit (atomic)
+resolver := Resolver{}
+
+Status :: enum {
+	Fresh,
+	Parsing,
+	Parsed,
+	Analyzing,
+	Analyzed,
 }
 
-// Thread pool
-Thread_Pool :: struct {
-	workers:      [dynamic]Worker, // Worker threads
-	work_queue:   [dynamic]string, // Files to process
-	queue_mutex:  sync.Mutex, // Mutex for queue access
-	wait_group:   sync.Wait_Group, // For waiting on completion
-	active_count: int, // Number of active workers (atomic)
-	should_exit:  bool, // Signal all workers to exit (atomic)
+Cache :: struct {
+	path:          string,
+	analyzer:      ^Analyzer,
+	parser:        ^Parser,
+	source:        string,
+	status:        Status,
+	last_modified: time.Time,
+	arena:         vmem.Arena,
+	allocator:     mem.Allocator,
+	mutex:         sync.Mutex,
 }
 
-File_Entry :: struct {
-	path:         string, // Full path to the file
-	state:        u32, // Processing state (atomic)
-	parser:       ^Parser, // Parser instance
-	analyzer:     ^Analyzer, // Analyzer instance
-	ast:          ^Node, // Parsed AST
-	dependencies: [dynamic]string, // Files this file depends on
-}
+resolve_entry :: proc() -> bool {
+	resolver.options = parse_args()
+	success := true
 
-// File System Resolver
-File_Resolver :: struct {
-	base_dir:        string, // Base directory for resolving paths
-	file_entries:    map[string]^File_Entry, // Map of file entries
-	cache_mutex:     sync.RW_Mutex, // Mutex for cache access
-	thread_pool:     Thread_Pool, // Thread pool for parallel processing
-	global_scope:    ^Scope_Info, // Global scope for sharing symbols
-	global_arena:    ^vmem.Arena, // Global memory arena
-	options:         Compiler_Options, // Compiler options
-
-	// Analysis state
-	main_file:       string, // Main file being processed
-	verbose:         bool, // Verbose output flag
-	timing:          bool, // Output timing information
-
-	// Statistics (all atomic)
-	files_processed: int, // Total files processed
-	cache_hits:      int, // Cache hits
-	parse_errors:    int, // Parse errors
-	semantic_errors: int, // Semantic analysis errors
-}
-
-// Initialize the file system resolver
-init_file_resolver :: proc(
-	resolver: ^File_Resolver,
-	main_file: string,
-	global_arena: ^vmem.Arena,
-	options: Compiler_Options,
-) {
-	resolver.base_dir = filepath.dir(main_file)
-	resolver.file_entries = make(map[string]^File_Entry) // Add this line
-	resolver.global_arena = global_arena
-	resolver.main_file = main_file
-	resolver.verbose = options.verbose
-	resolver.timing = options.timing
-	resolver.options = options
-
-	// Initialize mutex
-	// sync.rw_mutex_init(&resolver.cache_mutex)
-
-	// Initialize thread pool
-	init_thread_pool(resolver)
-
-	// Initialize atomic counters
-	resolver.files_processed = 0
-	resolver.cache_hits = 0
-	resolver.parse_errors = 0
-	resolver.semantic_errors = 0
-
-	if options.verbose {
-		num_threads := len(resolver.thread_pool.workers)
-		fmt.printf("File resolver initialized with %d worker threads\n", num_threads)
-	}
-}
-
-// Called whenever we find a file reference during parsing
-enqueue_file_reference :: proc(parser: ^Parser, ref_path: string, position: Position) -> bool {
-	fmt.println(ref_path)
-	if parser.file_resolver == nil {
-		return false
+	// Debug start
+	if resolver.options.verbose {
+		fmt.println("[DEBUG] Starting resolve_entry procedure")
+		fmt.printf("[DEBUG] Input path: %s\n", resolver.options.input_path)
 	}
 
-	resolver := parser.file_resolver
-
-	// Resolve the actual path
-	resolved_path := resolve_file_reference(resolver, ref_path, parser.filename)
-	if resolved_path == "" {
-		error_at(
-			parser,
-			parser.current_token,
-			fmt.tprintf("Could not resolve file reference '%s'", ref_path),
-		)
-		return false
-	}
-
-	// Track dependency
-	add_dependency(parser.filename, resolved_path, resolver)
-
-	// Check if already processed or queued
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	_, already_exists := resolver.file_entries[resolved_path]
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	if already_exists {
-		return true // Already handled
-	}
-
-	// Create new entry
-	entry := new(File_Entry)
-	entry.path = strings.clone(resolved_path)
-	entry.state = STATE_QUEUED
-	entry.dependencies = make([dynamic]string)
-
-	// Register entry
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	resolver.file_entries[resolved_path] = entry
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	// Queue for processing
-	sync.mutex_lock(&resolver.thread_pool.queue_mutex)
-	append(&resolver.thread_pool.work_queue, resolved_path)
-	sync.mutex_unlock(&resolver.thread_pool.queue_mutex)
-
-	// Increment wait group
-	sync.wait_group_add(&resolver.thread_pool.wait_group, 1)
-
-	return true
-}
-
-
-// Initialize thread pool
-init_thread_pool :: proc(resolver: ^File_Resolver) {
-	// Determine optimal thread count (leave one core for main thread)
+	// Nombre optimal de threads - un par cœur
 	num_threads := os.processor_core_count()
-
-	// Initialize pool structures
-	pool := &resolver.thread_pool
-	pool.workers = make([dynamic]Worker, num_threads)
-	pool.work_queue = make([dynamic]string, 0, 32)
-	// sync.mutex_init(&pool.queue_mutex)
-	// sync.wait_group_init(&pool.wait_group)
-	pool.active_count = 0
-	pool.should_exit = false
-
-	// Create worker threads
-	for i := 0; i < num_threads; i += 1 {
-		worker := &pool.workers[i]
-		worker.id = i
-		worker.thread_pool = pool
-		worker.active = false
-		worker.should_exit = false
-
-		// Initialize arena
-		WORKER_ARENA_SIZE :: 8 * 1024 * 1024 // 8 MB per worker
-		err := vmem.arena_init_growing(&worker.arena, WORKER_ARENA_SIZE)
-		if err != nil {
-			fmt.eprintf("Error initializing arena for worker %d: %v\n", i, err)
-			continue
-		}
-		worker.allocator = vmem.arena_allocator(&worker.arena)
-
-		// Create thread
-		worker_proc :: proc(data: ^thread.Thread) {
-			worker := cast(^Worker)data
-			resolver := cast(^File_Resolver)worker.thread_pool
-			worker_thread_proc(worker, resolver)
-		}
-
-		worker.thread = thread.create(worker_proc)
-	}
-}
-
-// Worker thread procedure
-
-worker_thread_proc :: proc(worker: ^Worker, resolver: ^File_Resolver) {
-	// Set up worker context
-	context.allocator = worker.allocator
-
-	for !worker.should_exit && !resolver.thread_pool.should_exit {
-		// Get file from queue
-		file_path: string
-		got_work := false
-
-		{
-			sync.mutex_lock(&worker.thread_pool.queue_mutex)
-			if len(worker.thread_pool.work_queue) > 0 {
-				file_path = worker.thread_pool.work_queue[0]
-				ordered_remove(&worker.thread_pool.work_queue, 0)
-				worker.active = true
-				worker.file_path = strings.clone(file_path)
-				sync.atomic_add(&worker.thread_pool.active_count, 1)
-				got_work = true
-			}
-			sync.mutex_unlock(&worker.thread_pool.queue_mutex)
-		}
-
-		if !got_work {
-			// No work available, sleep briefly
-			time.sleep(1 * time.Millisecond)
-			continue
-		}
-
-		// Process the file
-		process_file_worker(resolver, worker, file_path)
-
-		// Clean up
-		worker.active = false
-		delete(worker.file_path)
-		worker.file_path = ""
-
-		// Update stats and signal completion
-		sync.atomic_sub(&worker.thread_pool.active_count, 1)
-		sync.atomic_add(&resolver.files_processed, 1)
-		sync.wait_group_done(&resolver.thread_pool.wait_group)
-	}
-}
-
-// Clean up thread pool
-destroy_thread_pool :: proc(resolver: ^File_Resolver) {
-	pool := &resolver.thread_pool
-
-	// Signal all threads to exit
-	pool.should_exit = true
-
-	// Wait for all threads to exit
-	for &worker in &pool.workers {
-		worker.should_exit = true
-		if worker.thread != nil {
-			thread.join(worker.thread)
-		}
-
-		// Clean up worker resources
-		vmem.arena_destroy(&worker.arena)
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Initializing thread pool with %d threads\n", num_threads)
 	}
 
-	// Clean up pool resources
-	// sync.mutex_destroy(&pool.queue_mutex)
-	// sync.wait_group_destroy(&pool.wait_group)
-	delete(pool.workers)
-	delete(pool.work_queue)
-}
+	thread.pool_init(&resolver.pool, context.allocator, num_threads)
+	thread.pool_start(&resolver.pool)
 
-// Queue a file for processing
-queue_file :: proc(resolver: ^File_Resolver, file_path: string) -> bool {
-	// Normalize path
-	norm_path := filepath.clean(file_path)
-
-	// Check if file exists
-	if !os.exists(norm_path) {
-		if resolver.verbose {
-			fmt.eprintf("Error: File '%s' not found\n", norm_path)
-		}
-		return false
+	resolver.files = make(map[string]^Cache, 16)
+	if resolver.options.verbose {
+		fmt.println("[DEBUG] Files map initialized with capacity 16")
 	}
 
-	// Check cache to see if already processed or in progress
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	entry, in_cache := resolver.file_entries[norm_path]
-	if in_cache {
-		state := sync.atomic_load(&entry.state)
-		if state == STATE_PROCESSED || state == STATE_PROCESSING || state == STATE_QUEUED {
-			// Already processed or in queue
-			sync.rw_mutex_unlock(&resolver.cache_mutex)
-			return true
-		}
+	// Fichier d'entrée
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Creating cache for entry file: %s\n", resolver.options.input_path)
 	}
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
 
-	// Create or update entry
-	sync.rw_mutex_lock(&resolver.cache_mutex)
+	resolver.entry = create_cache(resolver.options.input_path)
+	resolver.files[resolver.entry.path] = resolver.entry
 
-	// Check again in case another thread updated while we were waiting
-	entry, in_cache = resolver.file_entries[norm_path]
-	if in_cache {
-		state := sync.atomic_load(&entry.state)
-		if state == STATE_PROCESSED || state == STATE_PROCESSING || state == STATE_QUEUED {
-			// Already processed or in queue
-			sync.rw_mutex_unlock(&resolver.cache_mutex)
-			return true
+	// Traiter l'entrée
+	if (resolver.entry != nil) {
+		if resolver.options.verbose {
+			fmt.println("[DEBUG] Entry file cache created successfully, processing...")
 		}
-
-		// Update state
-		sync.atomic_store(&entry.state, STATE_QUEUED)
+		process_cache(resolver.entry)
 	} else {
-		// Get file stats
-		mod_time, file_size, ok := get_file_stats(norm_path)
-		if !ok {
-			sync.rw_mutex_unlock(&resolver.cache_mutex)
-			if resolver.verbose {
-				fmt.eprintf("Error: Could not get stats for '%s'\n", norm_path)
-			}
-			return false
+		fmt.printf("[ERROR] Impossible to load %s from filesystem\n", resolver.options.input_path)
+		success = false
+	}
+
+	// Attendre la fin
+	if resolver.options.verbose {
+		fmt.println("[DEBUG] Waiting for thread pool tasks to complete")
+	}
+
+	thread.pool_finish(&resolver.pool)
+	thread.pool_destroy(&resolver.pool)
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] resolve_entry completed with success: %t\n", success)
+	}
+
+	return success
+}
+
+process_cache :: proc(cache: ^Cache) {
+	if resolver.options.verbose {
+		fmt.printf(
+			"[DEBUG] Adding process task for file: %s (status: %v)\n",
+			cache.path,
+			cache.status,
+		)
+	}
+	thread.pool_add_task(&resolver.pool, context.allocator, process_cache_task, cache, 0)
+}
+
+process_cache_task :: proc(task: thread.Task) {
+	cache := cast(^Cache)task.data
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Starting process_cache_task for file: %s\n", cache.path)
+	}
+
+	// Verrouillage pour toute la tâche
+	sync.mutex_lock(&cache.mutex)
+	defer sync.mutex_unlock(&cache.mutex)
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Mutex locked for file: %s\n", cache.path)
+	}
+
+	context.allocator = cache.allocator
+
+	// Vérification de la date de modification
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Checking file modification time for: %s\n", cache.path)
+	}
+
+	file_info, err := os.stat(cache.path)
+	if err != os.ERROR_NONE {
+		if resolver.options.verbose {
+			fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", cache.path, err)
 		}
-
-		// Create new entry
-		entry = new(File_Entry)
-		entry.path = strings.clone(norm_path)
-		entry.state = STATE_QUEUED
-		entry.dependencies = make([dynamic]string)
-
-		// Register in file entries
-		resolver.file_entries[norm_path] = entry
+		return
 	}
 
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	// Add to work queue
-	{
-		sync.mutex_lock(&resolver.thread_pool.queue_mutex)
-		append(&resolver.thread_pool.work_queue, norm_path)
-		sync.mutex_unlock(&resolver.thread_pool.queue_mutex)
-	}
-
-	// Increment wait group
-	sync.wait_group_add(&resolver.thread_pool.wait_group, 1)
-
-	return true
-}
-
-// Get file stats (modification time and size)
-get_file_stats :: proc(file_path: string) -> (mod_time: i64, size: i64, success: bool) {
-	when ODIN_OS == .Windows {
-		path_w := win32_utf8_to_utf16(file_path)
-		defer delete(path_w)
-
-		info: os.Wstat_t
-		err := os.wstat(path_w, &info)
-		if err != 0 {
-			return 0, 0, false
+	if file_info.modification_time == cache.last_modified && cache.status != .Fresh {
+		if resolver.options.verbose {
+			fmt.printf("[DEBUG] File %s unchanged, skipping processing\n", cache.path)
 		}
+		return // Fichier inchangé, rien à faire
+	}
 
-		return info.mtime, info.size, true
-	} else {
-		file_info, err := os.stat(file_path)
-		if err != 0 {
-			return 0, 0, false
+	vmem.arena_destroy(&cache.arena)
+
+	cache.last_modified = file_info.modification_time
+	cache.status = .Parsing
+
+	if resolver.options.verbose {
+		fmt.printf(
+			"[DEBUG] File %s has changed, status updated to: %v\n",
+			cache.path,
+			cache.status,
+		)
+		fmt.printf("[DEBUG] File size: %d bytes\n", file_info.size)
+	}
+
+	// Récupérer la taille du fichier à partir de file_info
+	file_size := int(file_info.size)
+
+	// Création d'un allocateur temporaire
+	temp_arena: mem.Arena
+	mem.arena_init(&temp_arena, make([]byte, file_size))
+	temp_allocator := mem.arena_allocator(&temp_arena)
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Temporary arena initialized with size: %d bytes\n", file_size)
+	}
+
+	// Lecture du fichier avec un allocateur temporaire
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Reading entire file: %s\n", cache.path)
+	}
+
+	source_bytes, success := os.read_entire_file(cache.path, temp_allocator)
+	if !success {
+		if resolver.options.verbose {
+			fmt.printf("[ERROR] Failed to read file: %s\n", cache.path)
 		}
-
-		unix_time := time.time_to_unix(file_info.modification_time)
-		return unix_time, file_info.size, true
-	}
-}
-
-// Convert UTF-8 string to UTF-16 for Windows
-when ODIN_OS == .Windows {
-	win32_utf8_to_utf16 :: proc(s: string) -> []u16 {
-		return utf8_to_utf16le(s)
-	}
-}
-
-// Has the file been modified since last cached?
-file_modified :: proc(resolver: ^File_Resolver, file_path: string) -> bool {
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	defer sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	entry, exists := resolver.file_entries[file_path]
-	if !exists {
-		return true
-	}
-
-	// For now, always return true to force reprocessing
-	// In the future, you could store mod_time and file_size in File_Entry
-	return true
-}
-
-// Process a file (worker implementation)
-process_file_worker :: proc(resolver: ^File_Resolver, worker: ^Worker, file_path: string) {
-	// Get entry
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	entry, exists := resolver.file_entries[file_path]
-	sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	if !exists || entry == nil {
-		fmt.eprintf("Error: Missing entry for '%s'\n", file_path)
+		cache.status = .Fresh
 		return
 	}
 
-	// Update state
-	sync.atomic_store(&entry.state, STATE_PROCESSING)
-
-	// Read the file
-	source, read_ok := os.read_entire_file(file_path)
-	if !read_ok {
-		sync.atomic_store(&entry.state, STATE_FAILED)
-		return
-	}
-	defer delete(source)
-
-	// Initialize lexer
-	lexer: Lexer
-	init_lexer(&lexer, string(source))
-
-	// Create parser
-	parser := new(Parser)
-	init_parser(parser, &lexer)
-	parser.file_resolver = resolver
-	parser.filename = file_path
-	entry.parser = parser
-
-	// Parse file
-	ast := parse(parser)
-	entry.ast = ast
-
-	// Skip analysis if parse-only flag is set
-	if resolver.options.parse_only {
-		sync.atomic_store(&entry.state, STATE_PROCESSED)
-		return
+	if resolver.options.verbose {
+		fmt.printf(
+			"[DEBUG] Successfully read %d bytes from file: %s\n",
+			len(source_bytes),
+			cache.path,
+		)
 	}
 
-	// Skip analysis if there were parse errors
-	if parser.had_error {
-		sync.atomic_store(&entry.state, STATE_PROCESSED)
-		return
+	// Utiliser l'allocateur d'arena du cache pour stocker la source
+	cache.source = string(source_bytes)
+
+	// Parsing et analyse
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Starting parsing for file: %s\n", cache.path)
 	}
 
-	// Skip analysis if analyze-only flag is not set
+	ast := parse(cache)
+	cache.status = .Parsed
+	// TODO: destrouy temp arena and free all
+
+	if (resolver.options.print_ast) {
+		print_ast(ast, 0)
+	}
+
+	if resolver.options.verbose {
+		fmt.printf(
+			"[DEBUG] Parsing completed for file: %s, status updated to: %v\n",
+			cache.path,
+			cache.status,
+		)
+	}
+
 	if !resolver.options.analyze_only {
-		sync.atomic_store(&entry.state, STATE_PROCESSED)
-		return
-	}
-
-	analyzer := analyze_ast(ast, parser.file_resolver, file_path)
-	entry.analyzer = analyzer
-
-
-	// Mark as processed
-	sync.atomic_store(&entry.state, STATE_PROCESSED)
-}
-// Add a dependency to a file
-add_dependency :: proc(source_file, target_file: string, resolver: ^File_Resolver) {
-	if resolver == nil || source_file == "" || target_file == "" {
-		return
-	}
-
-	sync.rw_mutex_lock(&resolver.cache_mutex)
-	defer sync.rw_mutex_unlock(&resolver.cache_mutex)
-
-	source_entry, exists := resolver.file_entries[source_file]
-	if !exists || source_entry == nil {
-		return
-	}
-
-	// Check if already exists
-	for dep in source_entry.dependencies {
-		if dep == target_file {
-			return
+		if resolver.options.verbose {
+			fmt.printf("[DEBUG] Starting analysis for file: %s\n", cache.path)
 		}
-	}
 
-	// Add dependency
-	append(&source_entry.dependencies, strings.clone(target_file))
+		cache.status = .Analyzing
+		// analyze(cache)
+		cache.status = .Analyzed
+
+		if resolver.options.verbose {
+			fmt.printf(
+				"[DEBUG] Analysis completed for file: %s, status updated to: %v\n",
+				cache.path,
+				cache.status,
+			)
+		}
+	} else if resolver.options.verbose {
+		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)
+	}
 }
 
-// Extract filesystem path from FileSystem node
-get_filesystem_path :: proc(node: FileSystem) -> string {
-	if node.target == nil {
-		return ""
+process_filenode :: proc(node: ^Node) {
+	// TODO: implement that later
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] process_filenode called for node at %p\n", node)
 	}
-
-	builder := strings.builder_make()
-	defer strings.builder_destroy(&builder)
-
-	strings.write_string(&builder, "@")
-
-	// Extract the path
-	#partial switch target in node.target^ {
-	case Identifier:
-		strings.write_string(&builder, target.name)
-		return strings.to_string(builder)
-
-	case Property:
-		// Build property chain
-		property_chain := make([dynamic]string)
-		defer delete(property_chain)
-
-		target_var := target
-		current := &target_var
-		for {
-			#partial switch prop in current.property^ {
-			case Identifier:
-				append(&property_chain, prop.name)
-			}
-
-			#partial switch source in current.source^ {
-			case Identifier:
-				append(&property_chain, source.name)
-				break
-			case Property:
-				current = (^Property)(current.source)
-				continue
-			}
-			break
-		}
-
-		// Reverse and join the chain
-		for i := len(property_chain) - 1; i >= 0; i -= 1 {
-			if i < len(property_chain) - 1 {
-				strings.write_string(&builder, ".")
-			}
-			strings.write_string(&builder, property_chain[i])
-		}
-
-		return strings.to_string(builder)
-	}
-
-	return ""
 }
 
-// Resolve a file reference
-resolve_file_reference :: proc(
-	resolver: ^File_Resolver,
-	reference: string,
-	source_file: string,
-) -> string {
-	if len(reference) == 0 || reference[0] != '@' {
-		return ""
+// Fonction pour créer un nouveau cache avec arena appropriée
+create_cache :: proc(path: string) -> ^Cache {
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Creating cache for file: %s\n", path)
 	}
 
-	// Remove @ prefix
-	path_ref := reference[1:]
+	cache := new(Cache)
+	cache.path = path
+	cache.status = .Fresh
 
-	// Split into components
-	components := strings.split(path_ref, ".")
-	defer delete(components)
+	// Obtenir les infos du fichier
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Getting file info for: %s\n", path)
+	}
 
-	// Start from the directory of the source file
-	current_path := filepath.dir(source_file)
+	file_info, err := os.stat(path)
+	if err != os.ERROR_NONE {
+		if resolver.options.verbose {
+			fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", path, err)
+		}
+		free(cache)
+		return nil
+	}
 
-	return resolve_path_components(resolver, components, current_path)
+	cache.last_modified = file_info.modification_time
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] File last modified: %v\n", cache.last_modified)
+	}
+
+	// Initialiser l'arena avec une taille basée sur la taille du fichier
+	// Mais au moins une page (4KB)
+	arena_size := max(int(file_info.size) * 2, 4 * 1024)
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Initializing arena with size: %d bytes\n", arena_size)
+	}
+
+	err = vmem.arena_init_growing(&cache.arena, (uint)(arena_size))
+	if (err != nil) {
+		if resolver.options.verbose {
+			fmt.printf("[ERROR] Failed to initialize arena for file: %s, error: %v\n", path, err)
+		}
+	}
+
+	cache.allocator = vmem.arena_allocator(&cache.arena)
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Cache created successfully for file: %s\n", path)
+	}
+
+	return cache
 }
 
-// Resolve path components recursively
-resolve_path_components :: proc(
-	resolver: ^File_Resolver,
-	components: []string,
-	base_path: string,
-) -> string {
-	if len(components) == 0 {
-		return ""
+// Fonction pour libérer un cache
+free_cache :: proc(cache: ^Cache) {
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Freeing cache for file: %s\n", cache.path)
 	}
 
-	current_path := base_path
+	vmem.arena_destroy(&cache.arena)
+	free(cache)
 
-	for i := 0; i < len(components); i += 1 {
-		component := components[i]
-
-		// Check for .st file first
-		st_file := filepath.join({current_path, fmt.tprintf("%s.st", component)})
-		defer delete(st_file)
-
-		if os.exists(st_file) {
-			// Found a .st file
-			if i == len(components) - 1 {
-				// This is the last component, so we're good
-				return strings.clone(st_file)
-			} else {
-				// File in the middle of the path - can't go deeper
-				if resolver.verbose {
-					fmt.eprintf(
-						"Error: '%s' is a file, not a directory, can't access '%s'\n",
-						st_file,
-						components[i + 1],
-					)
-				}
-				return ""
-			}
-		}
-
-		// Check for directory
-		dir_path := filepath.join({current_path, component})
-		defer delete(dir_path)
-
-		if !os.exists(dir_path) {
-			// Path doesn't exist
-			if resolver.verbose {
-				fmt.eprintf("Error: Component '%s' not found at '%s'\n", component, current_path)
-			}
-			return ""
-		}
-
-		// If this is the last component, we've found a directory
-		if i == len(components) - 1 {
-			return "" // No file to process, just a directory
-		}
-
-		// Continue with the next component
-		current_path = strings.clone(dir_path)
+	if resolver.options.verbose {
+		fmt.println("[DEBUG] Cache freed successfully")
 	}
-
-	return ""
 }

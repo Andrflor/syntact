@@ -918,33 +918,56 @@ Parse_Rule :: struct {
 }
 
 /*
+ * Error_Type defines the type of parsing error encountered
+ */
+Error_Type :: enum {
+    Syntax,           // Basic syntax errors
+    Unexpected_Token, // Token didn't match what was expected
+    Invalid_Expression, // Expression is malformed
+    Unclosed_Delimiter, // Missing closing delimiter
+    Type_Mismatch,    // Type related errors
+    Invalid_Operation, // Operations not supported on types
+    Reference_Error,  // Reference to undefined identifier
+    Other,            // Other errors
+}
+
+/*
+ * Parse_Error represents a detailed error encountered during parsing
+ */
+Parse_Error :: struct {
+    type:     Error_Type,    // Type of error for categorization
+    message:  string,        // Error message
+    position: Position,      // Position where error occurred
+    token:    Token,         // Token involved in the error
+    expected: Token_Kind,    // The expected token kind (if applicable)
+    found:    Token_Kind,    // The actual token kind found (if applicable)
+}
+
+/*
  * Parser maintains state during parsing
  */
 Parser :: struct {
     lexer:           ^Lexer, // Lexer providing tokens
     current_token:   Token, // Current token being processed
     peek_token:      Token, // Next token (lookahead)
-    had_error:       bool, // Flag indicating if an error occurred
     panic_mode:      bool, // Flag for panic mode error recovery
-    error_count:     int, // Count of errors encountered
-    file_resolver: ^File_Resolver,
-    filename: string,
+
+    // Error tracking
+    errors:     [dynamic]Parse_Error,
 }
 
 /*
  * initialize_parser sets up a parser with a lexer
  */
-init_parser :: proc(parser: ^Parser, lexer: ^Lexer, resolver: ^File_Resolver = nil, filename: string = "") {
-    parser.lexer = lexer
-    parser.had_error = false
-    parser.panic_mode = false
-    parser.error_count = 0
-    parser.file_resolver = resolver
-    parser.filename = filename
+init_parser :: proc(cache: ^Cache) {
+    cache.parser = new(Parser)
+    cache.parser.lexer = new(Lexer)
+    init_lexer(cache.parser.lexer, cache.source)
+    cache.parser.panic_mode = false
 
     // Initialize with first two tokens
-    parser.current_token = next_token(lexer)
-    parser.peek_token = next_token(lexer)
+    cache.parser.current_token = next_token(cache.parser.lexer)
+    cache.parser.peek_token = next_token(cache.parser.lexer)
 }
 
 /*
@@ -988,34 +1011,35 @@ expect_token :: #force_inline proc(parser: ^Parser, kind: Token_Kind) -> bool {
 }
 
 /*
- * error_at_current reports an error at the current token
+ * error_at_current creates an error record for the current token
  */
-error_at_current :: #force_inline proc(parser: ^Parser, message: string) {
-    error_at(parser, parser.current_token, message)
+error_at_current :: #force_inline proc(parser: ^Parser, message: string, error_type: Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
+    error_at(parser, parser.current_token, message, error_type, expected)
 }
 
+
 /*
- * error_at reports an error at a specific token with line and column info
+ * error_at creates a detailed error record at a specific token
  */
-error_at :: #force_inline proc(parser: ^Parser, token: Token, message: string) {
+error_at :: proc(parser: ^Parser, token: Token, message: string, error_type: Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
     // Don't report errors in panic mode to avoid cascading
     if parser.panic_mode do return
 
+    // Enter panic mode
     parser.panic_mode = true
-    parser.had_error = true
-    parser.error_count += 1
 
-    fmt.eprintf("Error at line %d, column %d: ", token.position.line, token.position.column)
-
-    if token.kind == .EOF {
-        fmt.eprintf("at end")
-    } else if token.kind == .Invalid {
-        fmt.eprintf("at '%s'", token.text)
-    } else {
-        fmt.eprintf("at '%s'", token.text)
+    // Create detailed error record
+    error := Parse_Error{
+        type = error_type,
+        message = message,
+        position = token.position,
+        token = token,
+        expected = expected,
+        found = token.kind,
     }
 
-    fmt.eprintf(": %s\n", message)
+    // Add to errors list
+    append(&parser.errors, error)
 }
 
 /*
@@ -1058,13 +1082,6 @@ synchronize :: proc(parser: ^Parser) {
             return
         }
     }
-}
-
-/*
- * parse is the main entry point for the parser
- */
-parse :: proc(parser: ^Parser) -> ^Node {
-    return parse_program(parser)
 }
 
 /*
@@ -1175,9 +1192,11 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 }
 
 /*
- * parse_program parses the entire program as a sequence of statements
+ * parse program parses the entire program as a sequence of statements
  */
-parse_program :: proc(parser: ^Parser) -> ^Node {
+parse:: proc(cache: ^Cache) -> ^Node {
+    init_parser(cache)
+    parser := cache.parser
     // Store the position of the first token
     position := parser.current_token.position
 
@@ -1808,9 +1827,7 @@ parse_left_bracket :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^N
         return node
     }
 
-    // Otherwise, handle as array access or other bracket-related syntax
-    // Implement array access or other bracket-related parsing here
-    error_at_current(parser, "Array access or indexing not yet implemented")
+    error_at_current(parser, "Trying to use left bracket [ for something else than execution wrapper like [!]")
     return nil
 }
 
@@ -1823,9 +1840,9 @@ parse_left_paren :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
         return node
     }
 
-    // Otherwise, handle as function call or grouping
-    // Implement function call parsing here
-    error_at_current(parser, "Function call not yet implemented")
+
+    // Otherwhise it supposed to be grouping
+    parse_grouping(parser, can_assign)
     return nil
 }
 
@@ -2640,14 +2657,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         advance_token(parser)
     }
 
-    // Queue only root file
-    if parser.file_resolver != nil {
-        // Check if the base node is a FileSystem type
-        if fs, ok := result^.(FileSystem); ok {
-            path := get_filesystem_path(fs)
-            enqueue_file_reference(parser, path, position)
-        }
-    }
+    process_filenode(current)
 
     return current
 }
@@ -2752,59 +2762,6 @@ skip_whitespace :: #force_inline proc(l: ^Lexer) {
 // ===========================================================================
 // SECTION 5: DEBUG UTILITIES
 // ===========================================================================
-
-/*
- * debug_print_tokens prints a sequence of upcoming tokens for debugging
- */
-debug_print_tokens :: proc(parser: ^Parser, count: int) {
-    fmt.println("\n=== TOKEN STREAM ===")
-
-    // Store original parser state
-    orig_current := parser.current_token
-    orig_peek := parser.peek_token
-
-    // Print current and peek tokens
-    fmt.printf("Current: %v '%s' at line %d, column %d\n",
-               parser.current_token.kind,
-               parser.current_token.text,
-               parser.current_token.position.line,
-               parser.current_token.position.column)
-
-    fmt.printf("Peek: %v '%s' at line %d, column %d\n",
-               parser.peek_token.kind,
-               parser.peek_token.text,
-               parser.peek_token.position.line,
-               parser.peek_token.position.column)
-
-    // Print a few tokens ahead
-    fmt.println("\nUpcoming tokens:")
-
-    // Create a temporary lexer and parser to scan ahead
-    temp_lexer := parser.lexer^ // Make a copy of the lexer
-    temp_parser: Parser
-    init_parser(&temp_parser, &temp_lexer)
-
-    // Advance to match the current state
-    for temp_parser.current_token.position.offset < orig_current.position.offset &&
-        temp_parser.current_token.kind != .EOF {
-        advance_token(&temp_parser)
-    }
-
-    // Print the next 'count' tokens
-    for i := 0; i < count && temp_parser.current_token.kind != .EOF; i += 1 {
-        fmt.printf(
-            "%d: %v '%s' at line %d, column %d\n",
-            i + 1,
-            temp_parser.current_token.kind,
-            temp_parser.current_token.text,
-            temp_parser.current_token.position.line,
-            temp_parser.current_token.position.column
-        )
-        advance_token(&temp_parser)
-    }
-
-    fmt.println("=== END TOKEN STREAM ===\n")
-}
 
 /*
  * print_ast prints the AST with indentation for readability
@@ -3076,20 +3033,3 @@ print_ast :: proc(node: ^Node, indent: int) {
     }
 }
 
-// ===========================================================================
-// SECTION 6: MAIN EXECUTION
-// ===========================================================================
-
-/*
- * parse_file initializes a parser with the given lexer and returns the parsed AST
- */
-parse_file :: proc(lexer: ^Lexer, resolver: ^File_Resolver = nil, filename: string = "") -> (^Node, bool) {
-    parser: Parser
-    init_parser(&parser, lexer, resolver, filename)
-
-    // Parse the program
-    ast := parse_program(&parser)
-
-    // Return the AST and success status
-    return ast, !parser.had_error
-}
