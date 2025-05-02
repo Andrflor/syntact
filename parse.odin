@@ -661,7 +661,7 @@ Node :: union {
 	Literal,
 	Property,
 	Expand,
-	FileSystem,
+	External,
   Range,
 }
 
@@ -870,10 +870,11 @@ Expand :: struct {
 }
 
 /*
- * FileSystem represents a file system reference (@lib.module)
+ * External represents an external reference (@lib.geometry)
  */
-FileSystem :: struct {
-	target:   ^Node, // Target content in file system
+External :: struct {
+  name:    string, // Name of the ref
+	scope:   ^Node, // The external scope to be resolved
 	position: Position, // Position information for error reporting
 }
 
@@ -927,7 +928,7 @@ Error_Type :: enum {
     Unclosed_Delimiter, // Missing closing delimiter
     Type_Mismatch,    // Type related errors
     Invalid_Operation, // Operations not supported on types
-    Reference_Error,  // Reference to undefined identifier
+    External_Error,  // Reference to undefined identifier
     Other,            // Other errors
 }
 
@@ -2610,17 +2611,11 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         return nil
     }
 
-    // Create the initial FileSystem node
+    // Create the initial External node
     result := new(Node)
-    result^ = FileSystem{
+    result^ = External{
         position = position,
-        target = new(Node),
-    }
-
-    // Set the initial target
-    (cast(^FileSystem)result).target^ = Identifier{
         name = parser.current_token.text,
-        position = parser.current_token.position
     }
 
     advance_token(parser)
@@ -2657,7 +2652,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         advance_token(parser)
     }
 
-    process_filenode(current)
+    process_filenode(current, result)
 
     return current
 }
@@ -2903,12 +2898,12 @@ print_ast :: proc(node: ^Node, indent: int) {
             print_ast(n.target, indent + 4)
         }
 
-    case FileSystem:
-        fmt.printf("%sFileSystem (line %d, column %d)\n",
+    case External:
+        fmt.printf("%sExternal (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.target != nil {
+        if n.scope != nil {
             fmt.printf("%s  Target:\n", indent_str)
-            print_ast(n.target, indent + 4)
+            print_ast(n.scope, indent + 4)
         }
 
     case Product:

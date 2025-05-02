@@ -16,7 +16,7 @@ import "core:time"
 // SECTION 1: CORE DATA STRUCTURES
 // ===========================================================================
 
-// Reference kinds
+// Reference_Info kinds
 Reference_Kind :: enum {
 	Definition,
 	PullDefinition,
@@ -33,7 +33,7 @@ Reference_Kind :: enum {
 // Symbol flags
 Symbol_Flag :: enum {
 	Visited,
-	Referenced,
+	Reference_Infod,
 	HasConstraint,
 	IsEvent,
 	IsResonance,
@@ -92,10 +92,10 @@ Symbol :: struct {
 	// Introduced scope (if this symbol introduces a scope)
 	introduced_scope: ^Scope_Info,
 
-	// Reference information
+	// Reference_Info information
 	kind:             Reference_Kind,
 	position:         Position,
-	references:       [dynamic]^Reference,
+	references:       [dynamic]^Reference_Info,
 
 	// Constraint information
 	constraint:       ^Symbol,
@@ -108,8 +108,8 @@ Symbol :: struct {
 	flags:            bit_set[Symbol_Flag],
 }
 
-// Reference structure
-Reference :: struct {
+// Reference_Info structure
+Reference_Info :: struct {
 	symbol:   ^Symbol,
 	node:     ^Node,
 	kind:     Reference_Kind,
@@ -275,7 +275,7 @@ create_symbol :: proc(
 	symbol.containing_scope = containing_scope
 	symbol.kind = kind
 	symbol.position = position
-	symbol.references = make([dynamic]^Reference)
+	symbol.references = make([dynamic]^Reference_Info)
 	symbol.driven_symbols = make([dynamic]^Symbol)
 
 	// Pre-compute hash
@@ -407,13 +407,13 @@ add_reference :: proc(
 	node: ^Node,
 	kind: Reference_Kind,
 	position: Position,
-) -> ^Reference {
+) -> ^Reference_Info {
 	if symbol == nil {
 		return nil
 	}
 
 	// Create reference
-	ref := new(Reference)
+	ref := new(Reference_Info)
 	ref.symbol = symbol
 	ref.node = node
 	ref.kind = kind
@@ -421,7 +421,7 @@ add_reference :: proc(
 	ref.index = len(symbol.references)
 
 	// Store reference
-	symbol.flags += {.Referenced}
+	symbol.flags += {.Reference_Infod}
 	append(&symbol.references, ref)
 
 	// Handle resonance and event references
@@ -2049,7 +2049,7 @@ get_position_from_node :: proc(node: ^Node) -> Position {
 		return n.position
 	case Branch:
 		return n.position
-	case FileSystem:
+	case External:
 		return n.position
 	case:
 		return Position{line = 0, column = 0, offset = 0}
@@ -2255,7 +2255,7 @@ print_scope :: proc(scope: ^Scope_Info, depth: int) {
 
 		// Print references count if any
 		if len(symbol.references) > 0 {
-			fmt.printf("%s    References: %d\n", indent, len(symbol.references))
+			fmt.printf("%s    Reference_Infos: %d\n", indent, len(symbol.references))
 		}
 
 		// Print info about introduced scope if any
