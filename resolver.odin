@@ -66,6 +66,8 @@ resolve_entry :: proc() -> bool {
 		}
 	}
 
+	load_all_caches_from_disk()
+
 	// Debug start
 	if resolver.options.verbose {
 		fmt.println("[DEBUG] Starting resolve_entry procedure")
@@ -217,7 +219,6 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Mutex locked for file: %s\n", cache.path)
 	}
 
-	context.allocator = cache.allocator
 
 	// Vérification de la date de modification
 	if resolver.options.verbose {
@@ -239,6 +240,7 @@ process_cache_task :: proc(task: thread.Task) {
 		return // Fichier inchangé, rien à faire
 	}
 
+	context.allocator = cache.allocator
 	vmem.arena_destroy(&cache.arena)
 
 	cache.last_modified = file_info.modification_time
@@ -384,25 +386,34 @@ process_cache_task :: proc(task: thread.Task) {
 	} else if resolver.options.verbose {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)
 	}
+
+	save_cache_to_disk(cache)
 }
 
 
 process_filenode :: proc(node: ^Node) {
-	// TODO: implement that later
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] process_filenode called for node %s\n", node)
 	}
 
 	i := 0
 	for i < 240 {
-		sync.mutex_lock(&resolver.files_mutex)
-		cache := create_cache("long.sc")
-		resolver.files[cache.path] = cache
-		sync.mutex_unlock(&resolver.files_mutex)
-		process_cache(cache)
+		compute_on_need("long.sc")
 		i += 1
 	}
 }
+
+compute_on_need :: proc(path: string) {
+	sync.mutex_lock(&resolver.files_mutex)
+	cache := resolver.files[path]
+	if (cache == nil) {
+		cache = create_cache(path)
+		resolver.files[cache.path] = cache
+		process_cache(cache)
+	}
+	sync.mutex_unlock(&resolver.files_mutex)
+}
+
 
 // Fonction pour créer un nouveau cache avec arena appropriée
 create_cache :: proc(path: string) -> ^Cache {
@@ -470,4 +481,277 @@ free_cache :: proc(cache: ^Cache) {
 	if resolver.options.verbose {
 		fmt.println("[DEBUG] Cache freed successfully")
 	}
+}
+
+
+// Fonction pour sauvegarder un cache sur disque
+save_cache_to_disk :: proc(cache: ^Cache) -> bool {
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Saving cache to disk for: %s\n", cache.path)
+	}
+	// Créer un répertoire de cache s'il n'existe pas
+	cache_dir := filepath.join([]string{os.get_current_directory(), ".cache"})
+	if !os.exists(cache_dir) {
+		if err := os.make_directory(cache_dir); err != os.ERROR_NONE {
+			fmt.printf("[ERROR] Failed to create cache directory: %v\n", err)
+			return false
+		}
+	}
+
+	// Générer un nom de fichier unique basé sur le chemin
+	hash_value := hash.fnv64a(transmute([]byte)cache.path)
+	cache_filename := fmt.aprintf("%x.cache", hash_value)
+	cache_path := filepath.join([]string{cache_dir, cache_filename})
+
+	// Supprimer le fichier existant s'il existe
+	if os.exists(cache_path) {
+		if err := os.remove(cache_path); err != os.ERROR_NONE {
+			fmt.printf(
+				"[ERROR] Failed to remove existing cache file: %s, error: %v\n",
+				cache_path,
+				err,
+			)
+			return false
+		}
+	}
+
+	// Ouvrir le fichier pour écriture
+	cache_file, err := os.open(cache_path, os.O_WRONLY | os.O_CREATE)
+	if err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to create cache file: %s, error: %v\n", cache_path, err)
+		return false
+	}
+	defer os.close(cache_file)
+
+	// Écrire d'abord les données de base (chemin, date de modification)
+	header := struct {
+		path_len:      int,
+		last_modified: time.Time,
+		status:        Status,
+	} {
+		path_len      = len(cache.path),
+		last_modified = cache.last_modified,
+		status        = cache.status,
+	}
+
+	header_slice := make([]byte, size_of(header))
+	mem.copy(&header_slice[0], &header, size_of(header))
+
+	bytes_written, write_err := os.write(cache_file, header_slice)
+	if write_err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to write header: %v\n", write_err)
+		return false
+	}
+
+	// Écrire le chemin
+	path_slice := transmute([]byte)cache.path
+	bytes_written, write_err = os.write(cache_file, path_slice)
+	if write_err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to write path: %v\n", write_err)
+		return false
+	}
+
+	// Écrire l'arena complète (incluant la structure et les données)
+	arena_slice := make([]byte, size_of(vmem.Arena))
+	mem.copy(&arena_slice[0], &cache.arena, size_of(vmem.Arena))
+
+	bytes_written, write_err = os.write(cache_file, arena_slice)
+	if write_err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to write arena structure: %v\n", write_err)
+		return false
+	}
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Cache saved to: %s\n", cache_path)
+	}
+
+	return true
+}
+
+// Fonction pour charger un cache depuis le disque
+load_cache_from_disk :: proc(path: string) -> ^Cache {
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Trying to load cache for: %s\n", path)
+	}
+
+	// Générer le même nom de fichier que lors de la sauvegarde
+	hash_value := hash.fnv64a(transmute([]byte)path)
+	cache_filename := fmt.aprintf("%x.cache", hash_value)
+	cache_path := filepath.join([]string{cache_dir, cache_filename})
+
+	// Vérifier si le fichier de cache existe
+	if !os.exists(cache_path) {
+		if resolver.options.verbose {
+			fmt.printf("[DEBUG] No cache file found at: %s\n", cache_path)
+		}
+		return nil
+	}
+
+	// Ouvrir le fichier pour lecture
+	cache_file, err := os.open(cache_path, os.O_RDONLY)
+	if err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to open cache file: %s, error: %v\n", cache_path, err)
+		return nil
+	}
+	defer os.close(cache_file)
+
+	// Lire l'en-tête
+	header := struct {
+		path_len:      int,
+		last_modified: time.Time,
+		status:        Status,
+	}{}
+
+	header_slice := make([]byte, size_of(header))
+	bytes_read, read_err := os.read(cache_file, header_slice)
+	if read_err != os.ERROR_NONE || bytes_read != size_of(header) {
+		fmt.printf("[ERROR] Failed to read header: %v\n", read_err)
+		return nil
+	}
+	mem.copy(&header, &header_slice[0], size_of(header))
+
+	// Vérifier que le fichier source n'a pas été modifié
+	file_info, stat_err := os.stat(path)
+	if stat_err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", path, stat_err)
+		return nil
+	}
+
+	if file_info.modification_time != header.last_modified {
+		if resolver.options.verbose {
+			fmt.printf("[DEBUG] File modified since cache was created: %s\n", path)
+		}
+		return nil
+	}
+
+	// Créer une nouvelle instance de Cache
+	cache := new(Cache)
+
+	// Lire le chemin
+	path_data := make([]byte, header.path_len)
+	bytes_read, read_err = os.read(cache_file, path_data)
+	if read_err != os.ERROR_NONE || bytes_read != header.path_len {
+		fmt.printf("[ERROR] Failed to read path from cache: %v\n", read_err)
+		free(cache)
+		return nil
+	}
+
+	cache.path = string(path_data)
+
+	// Lire la structure Arena
+	arena_slice := make([]byte, size_of(vmem.Arena))
+	bytes_read, read_err = os.read(cache_file, arena_slice)
+	if read_err != os.ERROR_NONE || bytes_read != size_of(vmem.Arena) {
+		fmt.printf("[ERROR] Failed to read arena structure: %v\n", read_err)
+		free(cache)
+		return nil
+	}
+
+	// Copier la structure Arena dans le cache
+	mem.copy(&cache.arena, &arena_slice[0], size_of(vmem.Arena))
+
+	// Configurer le reste du cache
+	cache.allocator = vmem.arena_allocator(&cache.arena)
+	cache.last_modified = header.last_modified
+	cache.status = header.status
+
+	if resolver.options.verbose {
+		fmt.printf(
+			"[DEBUG] Successfully loaded cache for: %s (status: %v)\n",
+			cache.path,
+			cache.status,
+		)
+	}
+
+	return cache
+}
+
+cache_dir := filepath.join([]string{os.get_current_directory(), ".cache"})
+
+// Fonction pour charger tous les caches depuis le disque
+load_all_caches_from_disk :: proc() -> int {
+	loaded_count := 0
+
+	if resolver.options.verbose {
+		fmt.println("[DEBUG] Loading all caches from disk")
+	}
+
+	// Si le répertoire de cache n'existe pas, rien à faire
+	if !os.exists(cache_dir) {
+		if resolver.options.verbose {
+			fmt.printf("[DEBUG] Cache directory does not exist: %s\n", cache_dir)
+		}
+		return 0
+	}
+
+	// Lire tous les fichiers du répertoire de cache
+	dir_handle, err := os.open(cache_dir, os.O_RDONLY)
+	if err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to open cache directory: %s, error: %v\n", cache_dir, err)
+		return 0
+	}
+	defer os.close(dir_handle)
+
+	dir_info, dir_err := os.read_dir(dir_handle, 0)
+	if dir_err != os.ERROR_NONE {
+		fmt.printf("[ERROR] Failed to read cache directory: %s, error: %v\n", cache_dir, dir_err)
+		return 0
+	}
+
+	// Pour chaque fichier de cache
+	for file_info in dir_info {
+		if !strings.has_suffix(file_info.name, ".cache") {
+			continue
+		}
+
+		// Extract the original path from the cache file
+		cache_path := filepath.join([]string{cache_dir, file_info.name})
+
+		// Ouvrir le fichier pour lire juste l'en-tête et le chemin
+		cache_file, open_err := os.open(cache_path, os.O_RDONLY)
+		if open_err != os.ERROR_NONE {
+			fmt.println("Error loading cache")
+			continue
+		}
+
+		// Lire l'en-tête pour obtenir la longueur du chemin
+		header := struct {
+			path_len:      int,
+			last_modified: time.Time,
+			status:        Status,
+		}{}
+
+		header_slice := make([]byte, size_of(header))
+		bytes_read, read_err := os.read(cache_file, header_slice)
+		if read_err != os.ERROR_NONE || bytes_read != size_of(header) {
+			os.close(cache_file)
+			continue
+		}
+		mem.copy(&header, &header_slice[0], size_of(header))
+
+		// Lire le chemin original
+		orig_path := make([]byte, header.path_len)
+		bytes_read, read_err = os.read(cache_file, orig_path)
+		os.close(cache_file)
+
+		if read_err != os.ERROR_NONE || bytes_read != header.path_len {
+			delete(orig_path)
+			continue
+		}
+
+		// Charger le cache pour ce chemin
+		path_str := string(orig_path)
+		if cache := load_cache_from_disk(path_str); cache != nil {
+			resolver.files[path_str] = cache
+			loaded_count += 1
+		}
+
+		delete(orig_path)
+	}
+
+	if resolver.options.verbose {
+		fmt.printf("[DEBUG] Loaded %d caches from disk\n", loaded_count)
+	}
+
+	return loaded_count
 }
