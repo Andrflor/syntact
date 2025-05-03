@@ -27,7 +27,7 @@ import "core:time"
 Resolver :: struct {
 	files:       map[string]^Cache, // Map of file paths to cache entries
 	files_mutex: sync.Mutex, // Mutex to protect concurrent access to files map
-	entry:       ^Cache, // Entry point file cache
+	entry:       ^FileCache, // Entry point file cache
 	options:     Options, // Compilation options
 	pool:        thread.Pool, // Thread pool for parallel processing
 }
@@ -47,9 +47,9 @@ Status :: enum {
 }
 
 /*
- * Cache stores compilation data for a single file
+ * FileCache stores compilation data for a single file
  */
-Cache :: struct {
+FileCache :: struct {
 	path:          string, // File path
 	analyzer:      ^Analyzer, // Analyzer instance
 	parser:        ^Parser, // Parser instance
@@ -60,6 +60,12 @@ Cache :: struct {
 	arena:         vmem.Arena, // Memory arena
 	allocator:     mem.Allocator, // Allocator for this cache
 	mutex:         sync.Mutex, // Mutex for thread safety
+}
+
+Cache :: struct {
+	name:      string,
+	filecache: FileCache,
+	content:   map[string]^Cache,
 }
 
 /*
@@ -93,7 +99,11 @@ resolve_entry :: proc() -> bool {
 		}
 	}
 
-	load_all_caches_from_disk()
+	if (resolver.options.no_cache) {
+		resolver.files = make(map[string]^Cache, 8)
+	} else {
+		load_all_caches_from_disk()
+	}
 
 	// Debug start
 	if resolver.options.verbose {
@@ -224,7 +234,7 @@ resolve_entry :: proc() -> bool {
 /*
  * process_cache schedules a file for processing in the thread pool
  */
-process_cache :: proc(cache: ^Cache) {
+process_cache :: proc(cache: ^FileCache) {
 	if resolver.options.verbose {
 		fmt.printf(
 			"[DEBUG] Adding process task for file: %s (status: %v)\n",
@@ -240,7 +250,7 @@ process_cache :: proc(cache: ^Cache) {
  * This is executed in a worker thread from the pool
  */
 process_cache_task :: proc(task: thread.Task) {
-	cache := cast(^Cache)task.data
+	cache := cast(^FileCache)task.data
 
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Starting process_cache_task for file: %s\n", cache.path)
@@ -433,13 +443,16 @@ process_filenode :: proc(node: ^Node, ref: ^Node) {
 		fmt.printf("[DEBUG] process_filenode called for node %s\n", node)
 	}
 
-	// TODO(andrflor): implement node load from there
-	// i := 0
-	// for i < 240 {
-	// compute_on_need("long.sc")
-	// 	i += 1
-	// }
+	#partial switch n in node {
+	case Property:
+		fmt.println("Property")
+	case External:
+		fmt.println("Exernal")
+	case:
+		fmt.printf("[Error] expected External node or Property Node")
+	}
 }
+
 
 /*
  * compute_on_need ensures a file is loaded and processed on demand
@@ -459,12 +472,12 @@ compute_on_need :: proc(path: string) {
  * create_cache initializes a new cache entry for a file
  * Returns nil if the file cannot be accessed
  */
-create_cache :: proc(path: string) -> ^Cache {
+create_cache :: proc(path: string) -> ^FileCache {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Creating cache for file: %s\n", path)
 	}
 
-	cache := new(Cache)
+	cache := new(FileCache)
 	cache.path = path
 	cache.status = .Fresh
 
@@ -515,7 +528,7 @@ create_cache :: proc(path: string) -> ^Cache {
 /*
  * free_cache releases resources associated with a cache
  */
-free_cache :: proc(cache: ^Cache) {
+free_cache :: proc(cache: ^FileCache) {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Freeing cache for file: %s\n", cache.path)
 	}
@@ -524,7 +537,7 @@ free_cache :: proc(cache: ^Cache) {
 	free(cache)
 
 	if resolver.options.verbose {
-		fmt.println("[DEBUG] Cache freed successfully")
+		fmt.println("[DEBUG] FileCache freed successfully")
 	}
 }
 
@@ -532,7 +545,7 @@ free_cache :: proc(cache: ^Cache) {
  * save_cache_to_disk persists a cache to the filesystem
  * Returns true on success, false on failure
  */
-save_cache_to_disk :: proc(cache: ^Cache) -> bool {
+save_cache_to_disk :: proc(cache: ^FileCache) -> bool {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Saving cache to disk for: %s\n", cache.path)
 	}
@@ -609,7 +622,7 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	}
 
 	if resolver.options.verbose {
-		fmt.printf("[DEBUG] Cache saved to: %s\n", cache_path)
+		fmt.printf("[DEBUG] FileCache saved to: %s\n", cache_path)
 	}
 
 	return true
@@ -619,7 +632,7 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
  * load_cache_from_disk loads a cache from the filesystem
  * Returns nil if the cache doesn't exist or is invalid
  */
-load_cache_from_disk :: proc(path: string) -> ^Cache {
+load_cache_from_disk :: proc(path: string) -> ^FileCache {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Trying to load cache for: %s\n", path)
 	}
@@ -674,8 +687,8 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 		return nil
 	}
 
-	// Create new Cache instance
-	cache := new(Cache)
+	// Create new FileCache instance
+	cache := new(FileCache)
 
 	// Read path
 	path_data := make([]byte, header.path_len)
@@ -732,7 +745,7 @@ load_all_caches_from_disk :: proc() -> int {
 	// If cache directory doesn't exist, nothing to do
 	if !os.exists(cache_dir) {
 		if resolver.options.verbose {
-			fmt.printf("[DEBUG] Cache directory does not exist: %s\n", cache_dir)
+			fmt.printf("[DEBUG] FileCache directory does not exist: %s\n", cache_dir)
 		}
 		return 0
 	}

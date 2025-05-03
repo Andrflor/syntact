@@ -32,8 +32,9 @@ Options :: struct {
 	analyze_only:       bool, // Skip code generation
 	verbose:            bool, // Enable verbose logging
 	timing:             bool, // Enable performance timing
+	no_cache:           bool, // Disable caching during compilation
+	evict_cache:        bool, // Clear cache before compilation
 }
-
 /*
  * parse_args extracts command-line options
  */
@@ -68,6 +69,10 @@ parse_args :: proc() -> Options {
 				options.verbose = true
 			case "-t", "--timing":
 				options.timing = true
+			case "--no-cache":
+				options.no_cache = true
+			case "--evict-cache":
+				options.evict_cache = true
 			case "-h", "--help":
 				print_usage()
 				os.exit(0)
@@ -111,6 +116,8 @@ print_usage :: proc() {
 	fmt.println("  --scopes                Print the scope graph")
 	fmt.println("  --parse-only            Only parse, don't analyze")
 	fmt.println("  --analyze-only          Only parse and analyze, don't generate code")
+	fmt.println("  --no-cache              Disable compilation cache")
+	fmt.println("  --evict-cache           Clear compilation cache before starting")
 	fmt.println("  -v, --verbose           Print verbose output")
 	fmt.println("  -t, --timing            Print timing information")
 	fmt.println("  -h, --help              Print this help message")

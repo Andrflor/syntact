@@ -960,7 +960,7 @@ Parser :: struct {
 /*
  * initialize_parser sets up a parser with a lexer
  */
-init_parser :: proc(cache: ^Cache) {
+init_parser :: proc(cache: ^FileCache) {
     cache.parser = new(Parser)
     cache.parser.lexer = new(Lexer)
     init_lexer(cache.parser.lexer, cache.source)
@@ -1195,7 +1195,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 /*
  * parse program parses the entire program as a sequence of statements
  */
-parse:: proc(cache: ^Cache) -> ^Node {
+parse:: proc(cache: ^FileCache) -> ^Node {
     init_parser(cache)
     parser := cache.parser
     // Store the position of the first token
