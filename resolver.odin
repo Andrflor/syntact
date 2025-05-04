@@ -102,12 +102,6 @@ resolve_entry :: proc() -> bool {
 		)
 	}
 
-	if (resolver.options.no_cache) {
-		resolver.files = make(map[string]^Cache, 8)
-	} else {
-		load_all_caches_from_disk()
-	}
-
 	// Debug start
 	if resolver.options.verbose {
 		fmt.println("[DEBUG] Starting resolve_entry procedure")
@@ -123,20 +117,9 @@ resolve_entry :: proc() -> bool {
 	thread.pool_init(&resolver.pool, context.allocator, num_threads)
 	thread.pool_start(&resolver.pool)
 
-	maybe_entry := resolver.files[resolver.options.input_path]
 
-	if (maybe_entry == nil) {
-		if resolver.options.verbose {
-			fmt.printf("[DEBUG] Creating cache for entry file: %s\n", resolver.options.input_path)
-		}
-		resolver.entry = create_cache(absolute_path)
-		resolver.files[absolute_path] = resolver.entry
-	} else {
-		if resolver.options.verbose {
-			fmt.printf("[DEBUG] Loading cache for entry file: %s\n", resolver.options.input_path)
-		}
-		resolver.entry = maybe_entry
-	}
+	compute_on_need(absolute_path)
+	resolver.entry = resolver.files[absolute_path]
 
 	// Process the entry file
 	if (resolver.entry != nil) {
@@ -435,7 +418,9 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)
 	}
 
-	save_cache_to_disk(cache)
+	if !resolver.options.no_cache {
+		save_cache_to_disk(cache)
+	}
 }
 
 /*
@@ -508,9 +493,19 @@ compute_on_need :: proc(path: string) {
 	cache := resolver.files[path]
 	if (cache == nil) {
 		if resolver.options.verbose {
-			fmt.printf("[DEBUG] File cache not found for: %s\n", path)
+			fmt.printf("[DEBUG] Live cache not found for: %s\n", path)
 		}
-		cache = create_cache(path)
+		if (resolver.options.no_cache) {
+			cache = create_cache(path)
+		} else {
+			cache = load_cache_from_disk(path)
+			if (cache == nil) {
+				if resolver.options.verbose {
+					fmt.printf("[DEBUG] File cache not found for: %s\n", path)
+				}
+				cache = create_cache(path)
+			}
+		}
 		if (cache != nil) {
 			resolver.files[cache.path] = cache
 			process_cache(cache)
@@ -780,96 +775,6 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 }
 
 cache_dir := filepath.join([]string{get_temp_directory(), ".syntact_cache"})
-
-/*
- * load_all_caches_from_disk loads all available caches from disk
- * Returns the number of caches loaded
- */
-load_all_caches_from_disk :: proc() -> int {
-	loaded_count := 0
-
-	if resolver.options.verbose {
-		fmt.println("[DEBUG] Loading all caches from disk")
-	}
-
-	// If cache directory doesn't exist, nothing to do
-	if !os.exists(cache_dir) {
-		if resolver.options.verbose {
-			fmt.printf("[DEBUG] Cache directory does not exist: %s\n", cache_dir)
-		}
-		return 0
-	}
-
-	// Read all files from cache directory
-	dir_handle, err := os.open(cache_dir, os.O_RDONLY)
-	if err != os.ERROR_NONE {
-		fmt.printf("[ERROR] Failed to open cache directory: %s, error: %v\n", cache_dir, err)
-		return 0
-	}
-	defer os.close(dir_handle)
-
-	dir_info, dir_err := os.read_dir(dir_handle, 0)
-	if dir_err != os.ERROR_NONE {
-		fmt.printf("[ERROR] Failed to read cache directory: %s, error: %v\n", cache_dir, dir_err)
-		return 0
-	}
-
-	// For each cache file
-	for file_info in dir_info {
-		if !strings.has_suffix(file_info.name, ".cache") {
-			continue
-		}
-
-		// Extract the original path from the cache file
-		cache_path := filepath.join([]string{cache_dir, file_info.name})
-
-		// Open file to read just the header and path
-		cache_file, open_err := os.open(cache_path, os.O_RDONLY)
-		if open_err != os.ERROR_NONE {
-			continue
-		}
-
-		// Read header to get path length
-		header := struct {
-			path_len:      int,
-			last_modified: time.Time,
-			status:        Status,
-		}{}
-
-		header_slice := make([]byte, size_of(header))
-		bytes_read, read_err := os.read(cache_file, header_slice)
-		if read_err != os.ERROR_NONE || bytes_read != size_of(header) {
-			os.close(cache_file)
-			continue
-		}
-		mem.copy(&header, &header_slice[0], size_of(header))
-
-		// Read original path
-		orig_path := make([]byte, header.path_len)
-		bytes_read, read_err = os.read(cache_file, orig_path)
-		os.close(cache_file)
-
-		if read_err != os.ERROR_NONE || bytes_read != header.path_len {
-			delete(orig_path)
-			continue
-		}
-
-		// Load cache for this path
-		path_str := string(orig_path)
-		if cache := load_cache_from_disk(path_str); cache != nil {
-			resolver.files[cache.path] = cache
-			loaded_count += 1
-		}
-
-		delete(orig_path)
-	}
-
-	if resolver.options.verbose {
-		fmt.printf("[DEBUG] Loaded %d caches from disk\n", loaded_count)
-	}
-
-	return loaded_count
-}
 
 get_temp_directory :: proc() -> string {
 	// Try standard environment variables first
