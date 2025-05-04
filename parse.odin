@@ -948,6 +948,7 @@ Parse_Error :: struct {
  * Parser maintains state during parsing
  */
 Parser :: struct {
+    file_cache: ^Cache,
     lexer:           ^Lexer, // Lexer providing tokens
     current_token:   Token, // Current token being processed
     peek_token:      Token, // Next token (lookahead)
@@ -960,8 +961,9 @@ Parser :: struct {
 /*
  * initialize_parser sets up a parser with a lexer
  */
-init_parser :: proc(cache: ^FileCache) {
+init_parser :: proc(cache: ^Cache) {
     cache.parser = new(Parser)
+    cache.parser.file_cache = cache
     cache.parser.lexer = new(Lexer)
     init_lexer(cache.parser.lexer, cache.source)
     cache.parser.panic_mode = false
@@ -1195,7 +1197,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 /*
  * parse program parses the entire program as a sequence of statements
  */
-parse:: proc(cache: ^FileCache) -> ^Node {
+parse:: proc(cache: ^Cache) -> ^Node {
     init_parser(cache)
     parser := cache.parser
     // Store the position of the first token
@@ -2652,7 +2654,7 @@ parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
         advance_token(parser)
     }
 
-    process_filenode(current, result)
+    process_filenode(current, parser.file_cache)
 
     return current
 }
