@@ -51,9 +51,7 @@ Status :: enum {
  */
 Cache :: struct {
 	path:          string, // File path
-	analyzer:      ^Analyzer, // Analyzer instance
-	parser:        ^Parser, // Parser instance
-	ast:           ^Node, // Abstract syntax tree
+	table:         ^Symbol,
 	source:        string, // Source code
 	status:        Status, // Current compilation status
 	last_modified: time.Time, // Last modification timestamp
@@ -355,7 +353,7 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Starting parsing for file: %s\n", cache.path)
 	}
 
-	cache.ast = parse(cache)
+	ast := parse(cache)
 	cache.status = .Parsed
 	// TODO: destroy temp arena and free all
 
@@ -369,7 +367,7 @@ process_cache_task :: proc(task: thread.Task) {
 	}
 
 	if (resolver.options.print_ast) {
-		print_ast(cache.ast, 0)
+		print_ast(ast, 0)
 	}
 
 	if resolver.options.verbose {
@@ -395,7 +393,7 @@ process_cache_task :: proc(task: thread.Task) {
 		}
 
 		cache.status = .Analyzing
-		// analyze(cache)
+		analyze(cache, ast)
 		cache.status = .Analyzed
 
 		// End analysis timing

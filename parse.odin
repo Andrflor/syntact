@@ -921,7 +921,7 @@ Parse_Rule :: struct {
 /*
  * Error_Type defines the type of parsing error encountered
  */
-Error_Type :: enum {
+Parser_Error_Type :: enum {
     Syntax,           // Basic syntax errors
     Unexpected_Token, // Token didn't match what was expected
     Invalid_Expression, // Expression is malformed
@@ -936,7 +936,7 @@ Error_Type :: enum {
  * Parse_Error represents a detailed error encountered during parsing
  */
 Parse_Error :: struct {
-    type:     Error_Type,    // Type of error for categorization
+    type:     Parser_Error_Type,    // Type of error for categorization
     message:  string,        // Error message
     position: Position,      // Position where error occurred
     token:    Token,         // Token involved in the error
@@ -961,16 +961,17 @@ Parser :: struct {
 /*
  * initialize_parser sets up a parser with a lexer
  */
-init_parser :: proc(cache: ^Cache) {
-    cache.parser = new(Parser)
-    cache.parser.file_cache = cache
-    cache.parser.lexer = new(Lexer)
-    init_lexer(cache.parser.lexer, cache.source)
-    cache.parser.panic_mode = false
+init_parser :: proc(cache: ^Cache) -> ^Parser{
+  parser := new(Parser)
+    parser.file_cache = cache
+    parser.lexer = new(Lexer)
+    init_lexer(parser.lexer, cache.source)
+  parser.panic_mode = false
 
     // Initialize with first two tokens
-    cache.parser.current_token = next_token(cache.parser.lexer)
-    cache.parser.peek_token = next_token(cache.parser.lexer)
+    parser.current_token = next_token(parser.lexer)
+    parser.peek_token = next_token(parser.lexer)
+    return parser
 }
 
 /*
@@ -1016,7 +1017,7 @@ expect_token :: #force_inline proc(parser: ^Parser, kind: Token_Kind) -> bool {
 /*
  * error_at_current creates an error record for the current token
  */
-error_at_current :: #force_inline proc(parser: ^Parser, message: string, error_type: Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
+error_at_current :: #force_inline proc(parser: ^Parser, message: string, error_type: Parser_Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
     error_at(parser, parser.current_token, message, error_type, expected)
 }
 
@@ -1024,7 +1025,7 @@ error_at_current :: #force_inline proc(parser: ^Parser, message: string, error_t
 /*
  * error_at creates a detailed error record at a specific token
  */
-error_at :: proc(parser: ^Parser, token: Token, message: string, error_type: Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
+error_at :: proc(parser: ^Parser, token: Token, message: string, error_type: Parser_Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
     // Don't report errors in panic mode to avoid cascading
     if parser.panic_mode do return
 
@@ -1198,8 +1199,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
  * parse program parses the entire program as a sequence of statements
  */
 parse:: proc(cache: ^Cache) -> ^Node {
-    init_parser(cache)
-    parser := cache.parser
+    parser := init_parser(cache)
     // Store the position of the first token
     position := parser.current_token.position
 

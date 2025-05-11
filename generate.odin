@@ -15,509 +15,509 @@ import x64 "./x64"
  * This module translates the analyzed AST into machine code
  */
 
-// Code generation context to track state
-Code_Gen_Context :: struct {
-	// Current scope being processed
-	current_scope:        ^Scope_Info,
+// // Code generation context to track state
+// Code_Gen_Context :: struct {
+// 	// Current scope being processed
+// 	current_scope:        ^Scope_Info,
 
-	// Symbol mappings and locations
-	stack_offsets:        map[^Symbol]int,
-	current_stack_offset: int,
+// 	// Symbol mappings and locations
+// 	stack_offsets:        map[^Symbol]int,
+// 	current_stack_offset: int,
 
-	// For returns and jumps
-	current_exit_label:   string,
-	label_counter:        int,
+// 	// For returns and jumps
+// 	current_exit_label:   string,
+// 	label_counter:        int,
 
-	// Output buffer
-	buffer:               ^x64.ByteBuffer,
+// 	// Output buffer
+// 	buffer:               ^x64.ByteBuffer,
 
-	// Error tracking
-	errors:               [dynamic]string,
-}
+// 	// Error tracking
+// 	errors:               [dynamic]string,
+// }
 
-// Initialize code generation context
-init_code_gen_context :: proc() -> ^Code_Gen_Context {
-	gen_context := new(Code_Gen_Context)
-	gen_context.stack_offsets = make(map[^Symbol]int)
-	gen_context.current_stack_offset = 0
-	gen_context.label_counter = 0
-	gen_context.errors = make([dynamic]string)
-	return gen_context
-}
+// // Initialize code generation context
+// init_code_gen_context :: proc() -> ^Code_Gen_Context {
+// 	gen_context := new(Code_Gen_Context)
+// 	gen_context.stack_offsets = make(map[^Symbol]int)
+// 	gen_context.current_stack_offset = 0
+// 	gen_context.label_counter = 0
+// 	gen_context.errors = make([dynamic]string)
+// 	return gen_context
+// }
 
-// Main entry point for code generation
-generate_code :: proc(ast: ^Node, analyzer: ^Analyzer, output_file: string) {
-	if ast == nil {
-		fmt.eprintln("Error: Cannot generate code from nil AST")
-		return
-	}
+// // Main entry point for code generation
+// generate_code :: proc(ast: ^Node, analyzer: ^Analyzer, output_file: string) {
+// 	if ast == nil {
+// 		fmt.eprintln("Error: Cannot generate code from nil AST")
+// 		return
+// 	}
 
-	if analyzer == nil {
-		fmt.eprintln("Error: Cannot generate code without analyzer data")
-		return
-	}
+// 	if analyzer == nil {
+// 		fmt.eprintln("Error: Cannot generate code without analyzer data")
+// 		return
+// 	}
 
-	// Determine the output file name
-	final_output_file := output_file
-	if final_output_file == "" {
-		// If no output file is specified, use the input file name without extension
-		input_file := analyzer.filename
-		ext := filepath.ext(input_file)
-		if ext != "" {
-			// Remove extension and use that as the output file
-			final_output_file = input_file[:len(input_file) - len(ext)]
-		} else {
-			// If there's no extension, just use the input filename
-			final_output_file = input_file
-		}
-	}
+// 	// Determine the output file name
+// 	final_output_file := output_file
+// 	if final_output_file == "" {
+// 		// If no output file is specified, use the input file name without extension
+// 		input_file := analyzer.filename
+// 		ext := filepath.ext(input_file)
+// 		if ext != "" {
+// 			// Remove extension and use that as the output file
+// 			final_output_file = input_file[:len(input_file) - len(ext)]
+// 		} else {
+// 			// If there's no extension, just use the input filename
+// 			final_output_file = input_file
+// 		}
+// 	}
 
-	// Start timing for code generation
-	gen_start := time.now()
+// 	// Start timing for code generation
+// 	gen_start := time.now()
 
-	// Initialize the bytecode buffer
-	buffer := x64.ByteBuffer{}
+// 	// Initialize the bytecode buffer
+// 	buffer := x64.ByteBuffer{}
 
-	// Set the buffer as the context's user pointer for assembly functions
-	context.user_ptr = &buffer
+// 	// Set the buffer as the context's user pointer for assembly functions
+// 	context.user_ptr = &buffer
 
-	// Initialize code generation context
-	gen_context := init_code_gen_context()
-	gen_context.buffer = &buffer
-	gen_context.current_scope = analyzer.root_scope
+// 	// Initialize code generation context
+// 	gen_context := init_code_gen_context()
+// 	gen_context.buffer = &buffer
+// 	gen_context.current_scope = analyzer.root_scope
 
-	// Write ELF header
-	x64.write_elf()
+// 	// Write ELF header
+// 	x64.write_elf()
 
-	// Find the main product in the global scope
-	main_product := find_main_product(analyzer.root_scope)
-	if main_product == nil {
-		fmt.eprintln("Error: No main product found in the program")
-		return
-	}
+// 	// Find the main product in the global scope
+// 	main_product := find_main_product(analyzer.root_scope)
+// 	if main_product == nil {
+// 		fmt.eprintln("Error: No main product found in the program")
+// 		return
+// 	}
 
-	// Generate code for the main product
-	value := evaluate_constant_expression(main_product, analyzer, gen_context)
-	if value != nil {
-		// We have a constant value, emit a direct exit
-		x64.mov_r64_imm64(.RDI, u64(value.integer))
-		x64.mov_r64_imm64(.RAX, 60) // exit syscall
-		x64.syscall()
-	} else {
-		// Not a constant, generate code
-		generate_expression(main_product, analyzer, gen_context)
-		// Move the result to RDI for the exit code
-		x64.mov_r64_r64(.RDI, .RAX)
-		x64.mov_r64_imm64(.RAX, 60) // exit syscall
-		x64.syscall()
-	}
+// 	// Generate code for the main product
+// 	value := evaluate_constant_expression(main_product, analyzer, gen_context)
+// 	if value != nil {
+// 		// We have a constant value, emit a direct exit
+// 		x64.mov_r64_imm64(.RDI, u64(value.integer))
+// 		x64.mov_r64_imm64(.RAX, 60) // exit syscall
+// 		x64.syscall()
+// 	} else {
+// 		// Not a constant, generate code
+// 		generate_expression(main_product, analyzer, gen_context)
+// 		// Move the result to RDI for the exit code
+// 		x64.mov_r64_r64(.RDI, .RAX)
+// 		x64.mov_r64_imm64(.RAX, 60) // exit syscall
+// 		x64.syscall()
+// 	}
 
-	// Write the generated bytecode to the output file
-	err := os.write_entire_file_or_err(final_output_file, buffer.data[:buffer.len])
-	if err != nil {
-		fmt.eprintf("Error writing to output file '%s': %v\n", final_output_file, err)
-	} else {
-		fmt.printf("Generated code written to '%s' (%d bytes)\n", final_output_file, buffer.len)
-	}
+// 	// Write the generated bytecode to the output file
+// 	err := os.write_entire_file_or_err(final_output_file, buffer.data[:buffer.len])
+// 	if err != nil {
+// 		fmt.eprintf("Error writing to output file '%s': %v\n", final_output_file, err)
+// 	} else {
+// 		fmt.printf("Generated code written to '%s' (%d bytes)\n", final_output_file, buffer.len)
+// 	}
 
-	// Report generation time
-	gen_duration := time.diff(gen_start, time.now())
-	fmt.printf("Code generation time: %.3fms\n", f64(time.duration_milliseconds(gen_duration)))
+// 	// Report generation time
+// 	gen_duration := time.diff(gen_start, time.now())
+// 	fmt.printf("Code generation time: %.3fms\n", f64(time.duration_milliseconds(gen_duration)))
 
-	// Check for errors
-	if len(gen_context.errors) > 0 {
-		fmt.eprintln("Errors during code generation:")
-		for err in gen_context.errors {
-			fmt.eprintln("  ", err)
-		}
-	}
-}
+// 	// Check for errors
+// 	if len(gen_context.errors) > 0 {
+// 		fmt.eprintln("Errors during code generation:")
+// 		for err in gen_context.errors {
+// 			fmt.eprintln("  ", err)
+// 		}
+// 	}
+// }
 
-// Find the main product (the final -> expression) in a scope
-find_main_product :: proc(scope: ^Scope_Info) -> ^Node {
-	if scope == nil || len(scope.symbol_list) == 0 {
-		return nil
-	}
+// // Find the main product (the final -> expression) in a scope
+// find_main_product :: proc(scope: ^Scope_Info) -> ^Node {
+// 	if scope == nil || len(scope.symbol_list) == 0 {
+// 		return nil
+// 	}
 
-	// Look for a product node (anonymous symbol with no name)
-	for i := 0; i < len(scope.symbol_list); i += 1 {
-		symbol := scope.symbol_list[i]
-		// Check if it's a product node
-		if symbol.node != nil {
-			// Check if the node is a Product
-			if product, is_product := symbol.node^.(Product); is_product {
-				return product.value
-			}
-		}
-	}
+// 	// Look for a product node (anonymous symbol with no name)
+// 	for i := 0; i < len(scope.symbol_list); i += 1 {
+// 		symbol := scope.symbol_list[i]
+// 		// Check if it's a product node
+// 		if symbol.node != nil {
+// 			// Check if the node is a Product
+// 			if product, is_product := symbol.node^.(Product); is_product {
+// 				return product.value
+// 			}
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-// Constant evaluation result
-Const_Value :: struct {
-	kind:    enum {
-		Integer,
-		Float,
-		Bool,
-		String,
-		Unknown,
-	},
-	integer: i64,
-	float:   f64,
-	bool:    bool,
-	string:  string,
-}
+// // Constant evaluation result
+// Const_Value :: struct {
+// 	kind:    enum {
+// 		Integer,
+// 		Float,
+// 		Bool,
+// 		String,
+// 		Unknown,
+// 	},
+// 	integer: i64,
+// 	float:   f64,
+// 	bool:    bool,
+// 	string:  string,
+// }
 
-// Try to evaluate a constant expression at compile time
-evaluate_constant_expression :: proc(
-	node: ^Node,
-	analyzer: ^Analyzer,
-	gen_context: ^Code_Gen_Context,
-) -> ^Const_Value {
-	if node == nil {
-		return nil
-	}
+// // Try to evaluate a constant expression at compile time
+// evaluate_constant_expression :: proc(
+// 	node: ^Node,
+// 	analyzer: ^Analyzer,
+// 	gen_context: ^Code_Gen_Context,
+// ) -> ^Const_Value {
+// 	if node == nil {
+// 		return nil
+// 	}
 
-	result := new(Const_Value)
-	result.kind = .Unknown
+// 	result := new(Const_Value)
+// 	result.kind = .Unknown
 
-	#partial switch n in node^ {
-	case Literal:
-		#partial switch n.kind {
-		case .Integer:
-			value, ok := strconv.parse_int(n.value, 10)
-			if ok {
-				result.kind = .Integer
-				result.integer = i64(value)
-				return result
-			}
-		case .Hexadecimal:
-			// Convert hex to int
-			value_str := strings.trim_prefix(n.value, "0x")
-			value, ok := strconv.parse_int(value_str, 16)
-			if ok {
-				result.kind = .Integer
-				result.integer = i64(value)
-				return result
-			}
-		case .Float:
-			value, ok := strconv.parse_f64(n.value)
-			if ok {
-				result.kind = .Float
-				result.float = value
-				return result
-			}
-		case .String:
-			result.kind = .String
-			result.string = n.value
-			return result
-		case .Bool:
-			result.kind = .Bool
-			result.bool = n.value == "true"
-			return result
-		}
+// 	#partial switch n in node^ {
+// 	case Literal:
+// 		#partial switch n.kind {
+// 		case .Integer:
+// 			value, ok := strconv.parse_int(n.value, 10)
+// 			if ok {
+// 				result.kind = .Integer
+// 				result.integer = i64(value)
+// 				return result
+// 			}
+// 		case .Hexadecimal:
+// 			// Convert hex to int
+// 			value_str := strings.trim_prefix(n.value, "0x")
+// 			value, ok := strconv.parse_int(value_str, 16)
+// 			if ok {
+// 				result.kind = .Integer
+// 				result.integer = i64(value)
+// 				return result
+// 			}
+// 		case .Float:
+// 			value, ok := strconv.parse_f64(n.value)
+// 			if ok {
+// 				result.kind = .Float
+// 				result.float = value
+// 				return result
+// 			}
+// 		case .String:
+// 			result.kind = .String
+// 			result.string = n.value
+// 			return result
+// 		case .Bool:
+// 			result.kind = .Bool
+// 			result.bool = n.value == "true"
+// 			return result
+// 		}
 
-	case Identifier:
-		// Look up the identifier in the symbol table
-		symbol := lookup_symbol(analyzer, n.name)
-		if symbol != nil && symbol.node != nil {
-			// If it's a definition, try to evaluate its value
-			if pointing, is_pointing := symbol.node^.(Pointing);
-			   is_pointing && pointing.value != nil {
-				return evaluate_constant_expression(pointing.value, analyzer, gen_context)
-			}
-		}
+// 	case Identifier:
+// 		// Look up the identifier in the symbol table
+// 		symbol := lookup_symbol(analyzer, n.name)
+// 		if symbol != nil && symbol.node != nil {
+// 			// If it's a definition, try to evaluate its value
+// 			if pointing, is_pointing := symbol.node^.(Pointing);
+// 			   is_pointing && pointing.value != nil {
+// 				return evaluate_constant_expression(pointing.value, analyzer, gen_context)
+// 			}
+// 		}
 
-	case Operator:
-		// Evaluate both operands
-		left_val := evaluate_constant_expression(n.left, analyzer, gen_context)
-		right_val := evaluate_constant_expression(n.right, analyzer, gen_context)
+// 	case Operator:
+// 		// Evaluate both operands
+// 		left_val := evaluate_constant_expression(n.left, analyzer, gen_context)
+// 		right_val := evaluate_constant_expression(n.right, analyzer, gen_context)
 
-		// If both are constants, compute the result
-		if left_val != nil &&
-		   right_val != nil &&
-		   left_val.kind == .Integer &&
-		   right_val.kind == .Integer {
-			result.kind = .Integer
+// 		// If both are constants, compute the result
+// 		if left_val != nil &&
+// 		   right_val != nil &&
+// 		   left_val.kind == .Integer &&
+// 		   right_val.kind == .Integer {
+// 			result.kind = .Integer
 
-			#partial switch n.kind {
-			case .Add:
-				result.integer = left_val.integer + right_val.integer
-			case .Subtract:
-				result.integer = left_val.integer - right_val.integer
-			case .Multiply:
-				result.integer = left_val.integer * right_val.integer
-			case .Divide:
-				if right_val.integer == 0 {
-					add_compile_error(gen_context, "Division by zero in constant expression")
-					return nil
-				}
-				result.integer = left_val.integer / right_val.integer
-			case .Mod:
-				if right_val.integer == 0 {
-					add_compile_error(gen_context, "Modulo by zero in constant expression")
-					return nil
-				}
-				result.integer = left_val.integer % right_val.integer
-			case .And:
-				result.integer = left_val.integer & right_val.integer
-			case .Or:
-				result.integer = left_val.integer | right_val.integer
-			case .Xor:
-				result.integer = left_val.integer ~ right_val.integer
-			case:
-				// Unsupported operator for constant evaluation
-				return nil
-			}
+// 			#partial switch n.kind {
+// 			case .Add:
+// 				result.integer = left_val.integer + right_val.integer
+// 			case .Subtract:
+// 				result.integer = left_val.integer - right_val.integer
+// 			case .Multiply:
+// 				result.integer = left_val.integer * right_val.integer
+// 			case .Divide:
+// 				if right_val.integer == 0 {
+// 					add_compile_error(gen_context, "Division by zero in constant expression")
+// 					return nil
+// 				}
+// 				result.integer = left_val.integer / right_val.integer
+// 			case .Mod:
+// 				if right_val.integer == 0 {
+// 					add_compile_error(gen_context, "Modulo by zero in constant expression")
+// 					return nil
+// 				}
+// 				result.integer = left_val.integer % right_val.integer
+// 			case .And:
+// 				result.integer = left_val.integer & right_val.integer
+// 			case .Or:
+// 				result.integer = left_val.integer | right_val.integer
+// 			case .Xor:
+// 				result.integer = left_val.integer ~ right_val.integer
+// 			case:
+// 				// Unsupported operator for constant evaluation
+// 				return nil
+// 			}
 
-			return result
-		}
-	}
+// 			return result
+// 		}
+// 	}
 
-	// Not a constant expression
-	return nil
-}
+// 	// Not a constant expression
+// 	return nil
+// }
 
-// Generate code for an expression
-generate_expression :: proc(node: ^Node, analyzer: ^Analyzer, gen_context: ^Code_Gen_Context) {
-	if node == nil {
-		return
-	}
+// // Generate code for an expression
+// generate_expression :: proc(node: ^Node, analyzer: ^Analyzer, gen_context: ^Code_Gen_Context) {
+// 	if node == nil {
+// 		return
+// 	}
 
-	// Get position for error reporting
-	position := get_position_from_node(node)
+// 	// Get position for error reporting
+// 	position := get_position_from_node(node)
 
-	#partial switch n in node^ {
-	case Literal:
-		#partial switch n.kind {
-		case .Integer:
-			value, ok := strconv.parse_int(n.value, 10)
-			if ok {
-				x64.mov_r64_imm64(.RAX, u64(value))
-			} else {
-				add_compile_error(gen_context, fmt.tprintf("Invalid integer literal: %s", n.value))
-			}
-		case .Hexadecimal:
-			// Convert hex to int
-			value_str := strings.trim_prefix(n.value, "0x")
-			value, ok := strconv.parse_int(value_str, 16)
-			if ok {
-				x64.mov_r64_imm64(.RAX, u64(value))
-			} else {
-				add_compile_error(gen_context, fmt.tprintf("Invalid hex literal: %s", n.value))
-			}
-		case .Float:
-			// Float handling would require more complex code
-			add_compile_error(gen_context, "Float literals not yet implemented")
-		case .String:
-			// String handling would require string table
-			add_compile_error(gen_context, "String literals not yet implemented")
-		case .Bool:
-			if n.value == "true" {
-				x64.mov_r64_imm64(.RAX, 1)
-			} else {
-				x64.mov_r64_imm64(.RAX, 0)
-			}
-		}
+// 	#partial switch n in node^ {
+// 	case Literal:
+// 		#partial switch n.kind {
+// 		case .Integer:
+// 			value, ok := strconv.parse_int(n.value, 10)
+// 			if ok {
+// 				x64.mov_r64_imm64(.RAX, u64(value))
+// 			} else {
+// 				add_compile_error(gen_context, fmt.tprintf("Invalid integer literal: %s", n.value))
+// 			}
+// 		case .Hexadecimal:
+// 			// Convert hex to int
+// 			value_str := strings.trim_prefix(n.value, "0x")
+// 			value, ok := strconv.parse_int(value_str, 16)
+// 			if ok {
+// 				x64.mov_r64_imm64(.RAX, u64(value))
+// 			} else {
+// 				add_compile_error(gen_context, fmt.tprintf("Invalid hex literal: %s", n.value))
+// 			}
+// 		case .Float:
+// 			// Float handling would require more complex code
+// 			add_compile_error(gen_context, "Float literals not yet implemented")
+// 		case .String:
+// 			// String handling would require string table
+// 			add_compile_error(gen_context, "String literals not yet implemented")
+// 		case .Bool:
+// 			if n.value == "true" {
+// 				x64.mov_r64_imm64(.RAX, 1)
+// 			} else {
+// 				x64.mov_r64_imm64(.RAX, 0)
+// 			}
+// 		}
 
-	case Identifier:
-		// Look up the identifier in the symbol table
-		symbol := lookup_symbol(analyzer, n.name)
-		if symbol == nil {
-			add_compile_error(gen_context, fmt.tprintf("Undefined symbol: %s", n.name))
-			return
-		}
+// 	case Identifier:
+// 		// Look up the identifier in the symbol table
+// 		symbol := lookup_symbol(analyzer, n.name)
+// 		if symbol == nil {
+// 			add_compile_error(gen_context, fmt.tprintf("Undefined symbol: %s", n.name))
+// 			return
+// 		}
 
-		// Determine what to do based on the symbol kind
-		#partial switch symbol.kind {
-		case .Definition:
-			// It's a variable definition, generate code for its value
-			if symbol.node != nil {
-				if pointing, is_pointing := symbol.node^.(Pointing);
-				   is_pointing && pointing.value != nil {
-					generate_expression(pointing.value, analyzer, gen_context)
-				} else {
-					add_compile_error(gen_context, fmt.tprintf("Symbol %s has no value", n.name))
-				}
-			}
-		case .Builtin:
-			// Handle built-in types
-			add_compile_error(gen_context, fmt.tprintf("Cannot use type %s as a value", n.name))
-		}
+// 		// Determine what to do based on the symbol kind
+// 		#partial switch symbol.kind {
+// 		case .Definition:
+// 			// It's a variable definition, generate code for its value
+// 			if symbol.node != nil {
+// 				if pointing, is_pointing := symbol.node^.(Pointing);
+// 				   is_pointing && pointing.value != nil {
+// 					generate_expression(pointing.value, analyzer, gen_context)
+// 				} else {
+// 					add_compile_error(gen_context, fmt.tprintf("Symbol %s has no value", n.name))
+// 				}
+// 			}
+// 		case .Builtin:
+// 			// Handle built-in types
+// 			add_compile_error(gen_context, fmt.tprintf("Cannot use type %s as a value", n.name))
+// 		}
 
-	case Operator:
-		// Check if we can evaluate this as a constant
-		const_val := evaluate_constant_expression(node, analyzer, gen_context)
-		if const_val != nil && const_val.kind == .Integer {
-			// Constant expression, just load the value
-			x64.mov_r64_imm64(.RAX, u64(const_val.integer))
-			return
-		}
+// 	case Operator:
+// 		// Check if we can evaluate this as a constant
+// 		const_val := evaluate_constant_expression(node, analyzer, gen_context)
+// 		if const_val != nil && const_val.kind == .Integer {
+// 			// Constant expression, just load the value
+// 			x64.mov_r64_imm64(.RAX, u64(const_val.integer))
+// 			return
+// 		}
 
-		// Get type information for operands if available
-		symbol := get_node_type(node, analyzer)
+// 		// Get type information for operands if available
+// 		symbol := get_node_type(node, analyzer)
 
-		// Generate code for operands
-		if n.left != nil {
-			generate_expression(n.left, analyzer, gen_context)
-			x64.push_r64(.RAX) // Save left result
-		}
+// 		// Generate code for operands
+// 		if n.left != nil {
+// 			generate_expression(n.left, analyzer, gen_context)
+// 			x64.push_r64(.RAX) // Save left result
+// 		}
 
-		if n.right != nil {
-			generate_expression(n.right, analyzer, gen_context)
-			// Right result in RAX, pop left result
-			x64.pop_r64(.RBX)
+// 		if n.right != nil {
+// 			generate_expression(n.right, analyzer, gen_context)
+// 			// Right result in RAX, pop left result
+// 			x64.pop_r64(.RBX)
 
-			// Generate operation based on operator and types
-			if symbol != nil && symbol.constraint != nil {
-				// Check constraints for type information
-				if symbol.constraint == analyzer.builtin_types["i64"] ||
-				   symbol.constraint == analyzer.builtin_types["i32"] ||
-				   symbol.constraint == analyzer.builtin_types["i16"] ||
-				   symbol.constraint == analyzer.builtin_types["i8"] {
-					// Integer operation
-					generate_int_operation(n.kind, gen_context)
-				} else if symbol.constraint == analyzer.builtin_types["f64"] ||
-				   symbol.constraint == analyzer.builtin_types["f32"] {
-					// Floating point operation
-					generate_float_operation(n.kind, gen_context)
-				} else {
-					// Default to integer operations
-					generate_int_operation(n.kind, gen_context)
-				}
-			} else {
-				// No type info, default to integer operations
-				generate_int_operation(n.kind, gen_context)
-			}
-		}
+// 			// Generate operation based on operator and types
+// 			if symbol != nil && symbol.constraint != nil {
+// 				// Check constraints for type information
+// 				if symbol.constraint == analyzer.builtin_types["i64"] ||
+// 				   symbol.constraint == analyzer.builtin_types["i32"] ||
+// 				   symbol.constraint == analyzer.builtin_types["i16"] ||
+// 				   symbol.constraint == analyzer.builtin_types["i8"] {
+// 					// Integer operation
+// 					generate_int_operation(n.kind, gen_context)
+// 				} else if symbol.constraint == analyzer.builtin_types["f64"] ||
+// 				   symbol.constraint == analyzer.builtin_types["f32"] {
+// 					// Floating point operation
+// 					generate_float_operation(n.kind, gen_context)
+// 				} else {
+// 					// Default to integer operations
+// 					generate_int_operation(n.kind, gen_context)
+// 				}
+// 			} else {
+// 				// No type info, default to integer operations
+// 				generate_int_operation(n.kind, gen_context)
+// 			}
+// 		}
 
-	case Product:
-		// Handle return value
-		if n.value != nil {
-			generate_expression(n.value, analyzer, gen_context)
-			// Result is in RAX
-		} else {
-			// No value, return 0
-			x64.mov_r64_imm64(.RAX, 0)
-		}
-	}
-}
+// 	case Product:
+// 		// Handle return value
+// 		if n.value != nil {
+// 			generate_expression(n.value, analyzer, gen_context)
+// 			// Result is in RAX
+// 		} else {
+// 			// No value, return 0
+// 			x64.mov_r64_imm64(.RAX, 0)
+// 		}
+// 	}
+// }
 
-// Generate code for integer operations
-generate_int_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Context) {
-	#partial switch op_kind {
-	case .Add:
-		x64.add_r64_r64(.RAX, .RBX)
-	case .Subtract:
-		x64.mov_r64_r64(.RCX, .RAX)
-		x64.mov_r64_r64(.RAX, .RBX)
-		x64.sub_r64_r64(.RAX, .RCX)
-	case .Multiply:
-		x64.imul_r64_r64(.RAX, .RBX)
-	case .Divide:
-		x64.mov_r64_r64(.RCX, .RAX)
-		x64.mov_r64_r64(.RAX, .RBX)
-		x64.idiv_r64(.RCX)
-	case .Mod:
-		x64.mov_r64_r64(.RCX, .RAX)
-		x64.mov_r64_r64(.RAX, .RBX)
-		x64.idiv_r64(.RCX)
-		x64.mov_r64_r64(.RAX, .RDX) // Remainder is in RDX
-	case .And:
-		x64.and_r64_r64(.RAX, .RBX)
-	case .Or:
-		x64.or_r64_r64(.RAX, .RBX)
-	case .Xor:
-		x64.xor_r64_r64(.RAX, .RBX)
-	case .LShift:
-		x64.mov_r64_r64(.RCX, .RAX)
-		x64.mov_r64_r64(.RAX, .RBX)
-	case .RShift:
-		x64.mov_r64_r64(.RCX, .RAX)
-		x64.mov_r64_r64(.RAX, .RBX)
-	case:
-		add_compile_error(gen_context, fmt.tprintf("Unsupported integer operation: %v", op_kind))
-	}
-}
+// // Generate code for integer operations
+// generate_int_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Context) {
+// 	#partial switch op_kind {
+// 	case .Add:
+// 		x64.add_r64_r64(.RAX, .RBX)
+// 	case .Subtract:
+// 		x64.mov_r64_r64(.RCX, .RAX)
+// 		x64.mov_r64_r64(.RAX, .RBX)
+// 		x64.sub_r64_r64(.RAX, .RCX)
+// 	case .Multiply:
+// 		x64.imul_r64_r64(.RAX, .RBX)
+// 	case .Divide:
+// 		x64.mov_r64_r64(.RCX, .RAX)
+// 		x64.mov_r64_r64(.RAX, .RBX)
+// 		x64.idiv_r64(.RCX)
+// 	case .Mod:
+// 		x64.mov_r64_r64(.RCX, .RAX)
+// 		x64.mov_r64_r64(.RAX, .RBX)
+// 		x64.idiv_r64(.RCX)
+// 		x64.mov_r64_r64(.RAX, .RDX) // Remainder is in RDX
+// 	case .And:
+// 		x64.and_r64_r64(.RAX, .RBX)
+// 	case .Or:
+// 		x64.or_r64_r64(.RAX, .RBX)
+// 	case .Xor:
+// 		x64.xor_r64_r64(.RAX, .RBX)
+// 	case .LShift:
+// 		x64.mov_r64_r64(.RCX, .RAX)
+// 		x64.mov_r64_r64(.RAX, .RBX)
+// 	case .RShift:
+// 		x64.mov_r64_r64(.RCX, .RAX)
+// 		x64.mov_r64_r64(.RAX, .RBX)
+// 	case:
+// 		add_compile_error(gen_context, fmt.tprintf("Unsupported integer operation: %v", op_kind))
+// 	}
+// }
 
-// Generate code for floating point operations
-generate_float_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Context) {
-	add_compile_error(gen_context, "Floating point operations not yet implemented")
-	// Would use SSE instructions for floating point operations
-}
+// // Generate code for floating point operations
+// generate_float_operation :: proc(op_kind: Operator_Kind, gen_context: ^Code_Gen_Context) {
+// 	add_compile_error(gen_context, "Floating point operations not yet implemented")
+// 	// Would use SSE instructions for floating point operations
+// }
 
-// Get the type of a node using the analyzer
-get_node_type :: proc(node: ^Node, analyzer: ^Analyzer) -> ^Symbol {
-	if node == nil {
-		return nil
-	}
+// // Get the type of a node using the analyzer
+// get_node_type :: proc(node: ^Node, analyzer: ^Analyzer) -> ^Symbol {
+// 	if node == nil {
+// 		return nil
+// 	}
 
-	#partial switch n in node^ {
-	case Literal:
-		#partial switch n.kind {
-		case .Integer:
-			return analyzer.builtin_types["i64"]
-		case .Hexadecimal:
-			return analyzer.builtin_types["i64"]
-		case .Float:
-			return analyzer.builtin_types["f64"]
-		case .String:
-			return analyzer.builtin_types["String"]
-		case .Bool:
-			return analyzer.builtin_types["bool"]
-		}
+// 	#partial switch n in node^ {
+// 	case Literal:
+// 		#partial switch n.kind {
+// 		case .Integer:
+// 			return analyzer.builtin_types["i64"]
+// 		case .Hexadecimal:
+// 			return analyzer.builtin_types["i64"]
+// 		case .Float:
+// 			return analyzer.builtin_types["f64"]
+// 		case .String:
+// 			return analyzer.builtin_types["String"]
+// 		case .Bool:
+// 			return analyzer.builtin_types["bool"]
+// 		}
 
-	case Identifier:
-		// Look up the identifier
-		symbol := lookup_symbol(analyzer, n.name)
-		if symbol != nil {
-			return symbol.constraint
-		}
+// 	case Identifier:
+// 		// Look up the identifier
+// 		symbol := lookup_symbol(analyzer, n.name)
+// 		if symbol != nil {
+// 			return symbol.constraint
+// 		}
 
-	case Operator:
-		// Determine operator result type
-		left_type := get_node_type(n.left, analyzer)
-		right_type := get_node_type(n.right, analyzer)
+// 	case Operator:
+// 		// Determine operator result type
+// 		left_type := get_node_type(n.left, analyzer)
+// 		right_type := get_node_type(n.right, analyzer)
 
-		// Type promotion rules
-		if left_type == analyzer.builtin_types["f64"] ||
-		   right_type == analyzer.builtin_types["f64"] {
-			return analyzer.builtin_types["f64"]
-		} else if left_type == analyzer.builtin_types["f32"] ||
-		   right_type == analyzer.builtin_types["f32"] {
-			return analyzer.builtin_types["f32"]
-		} else if left_type == analyzer.builtin_types["i64"] ||
-		   right_type == analyzer.builtin_types["i64"] {
-			return analyzer.builtin_types["i64"]
-		} else if left_type == analyzer.builtin_types["i32"] ||
-		   right_type == analyzer.builtin_types["i32"] {
-			return analyzer.builtin_types["i32"]
-		} else {
-			// Default integer type
-			return analyzer.builtin_types["i64"]
-		}
-	}
+// 		// Type promotion rules
+// 		if left_type == analyzer.builtin_types["f64"] ||
+// 		   right_type == analyzer.builtin_types["f64"] {
+// 			return analyzer.builtin_types["f64"]
+// 		} else if left_type == analyzer.builtin_types["f32"] ||
+// 		   right_type == analyzer.builtin_types["f32"] {
+// 			return analyzer.builtin_types["f32"]
+// 		} else if left_type == analyzer.builtin_types["i64"] ||
+// 		   right_type == analyzer.builtin_types["i64"] {
+// 			return analyzer.builtin_types["i64"]
+// 		} else if left_type == analyzer.builtin_types["i32"] ||
+// 		   right_type == analyzer.builtin_types["i32"] {
+// 			return analyzer.builtin_types["i32"]
+// 		} else {
+// 			// Default integer type
+// 			return analyzer.builtin_types["i64"]
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-// Add an error
-add_compile_error :: proc(gen_context: ^Code_Gen_Context, message: string) {
-	if gen_context == nil {
-		return
-	}
+// // Add an error
+// add_compile_error :: proc(gen_context: ^Code_Gen_Context, message: string) {
+// 	if gen_context == nil {
+// 		return
+// 	}
 
-	append(&gen_context.errors, message)
-}
+// 	append(&gen_context.errors, message)
+// }
 
-// Generate a unique label
-generate_label :: proc(gen_context: ^Code_Gen_Context, prefix: string) -> string {
-	if gen_context == nil {
-		return fmt.tprintf(".L%s_0", prefix)
-	}
+// // Generate a unique label
+// generate_label :: proc(gen_context: ^Code_Gen_Context, prefix: string) -> string {
+// 	if gen_context == nil {
+// 		return fmt.tprintf(".L%s_0", prefix)
+// 	}
 
-	label := fmt.tprintf(".L%s_%d", prefix, gen_context.label_counter)
-	gen_context.label_counter += 1
-	return label
-}
+// 	label := fmt.tprintf(".L%s_%d", prefix, gen_context.label_counter)
+// 	gen_context.label_counter += 1
+// 	return label
+// }
