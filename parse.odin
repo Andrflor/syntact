@@ -649,7 +649,7 @@ Node :: union {
 	EventPull,
 	ResonancePush,
 	ResonancePull,
-	Scope,
+	ScopeNode,
 	Override,
 	Product,
 	Branch,
@@ -728,9 +728,9 @@ Identifier :: struct {
 }
 
 /*
- * Scope represents a block of statements enclosed in braces
+ * ScopeNode represents a block of statements enclosed in braces
  */
-Scope :: struct {
+ScopeNode :: struct {
 	value:    [dynamic]Node, // Statements in the scope
 	position: Position, // Position information for error reporting
 }
@@ -948,7 +948,7 @@ Parse_Error :: struct {
  * Parser maintains state during parsing
  */
 Parser :: struct {
-    file_cache: ^Cache,
+    file_cache:     ^Cache,
     lexer:           ^Lexer, // Lexer providing tokens
     current_token:   Token, // Current token being processed
     peek_token:      Token, // Next token (lookahead)
@@ -961,11 +961,11 @@ Parser :: struct {
 /*
  * initialize_parser sets up a parser with a lexer
  */
-init_parser :: proc(cache: ^Cache) -> ^Parser{
+init_parser :: proc(cache: ^Cache, source: string) -> ^Parser{
   parser := new(Parser)
     parser.file_cache = cache
     parser.lexer = new(Lexer)
-    init_lexer(parser.lexer, cache.source)
+    init_lexer(parser.lexer, source)
   parser.panic_mode = false
 
     // Initialize with first two tokens
@@ -1198,12 +1198,12 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 /*
  * parse program parses the entire program as a sequence of statements
  */
-parse:: proc(cache: ^Cache) -> ^Node {
-    parser := init_parser(cache)
+parse:: proc(cache: ^Cache, source: string) -> ^Node {
+    parser := init_parser(cache, source)
     // Store the position of the first token
     position := parser.current_token.position
 
-    scope := Scope{
+    scope := ScopeNode{
         value = make([dynamic]Node, 0, 2),
         position = position, // Store position
     }
@@ -1516,7 +1516,7 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Consume opening brace
     advance_token(parser)
 
-    scope := Scope{
+    scope := ScopeNode{
         value = make([dynamic]Node, 0, 2),
         position = position, // Store position
     }
@@ -1585,7 +1585,7 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
             // Return an empty scope as a placeholder
             empty_scope := new(Node)
-            empty_scope^ = Scope{
+            empty_scope^ = ScopeNode{
                 value = make([dynamic]Node, 0, 2),
                 position = position, // Store position
             }
@@ -2857,8 +2857,8 @@ print_ast :: proc(node: ^Node, indent: int) {
         fmt.printf("%sIdentifier: %s (line %d, column %d)\n",
             indent_str, n.name, n.position.line, n.position.column)
 
-    case Scope:
-        fmt.printf("%sScope (line %d, column %d)\n",
+    case ScopeNode:
+        fmt.printf("%sScopeNode (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
         for i := 0; i < len(n.value); i += 1 {
             entry_node := new(Node)

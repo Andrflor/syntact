@@ -51,8 +51,7 @@ Status :: enum {
  */
 Cache :: struct {
 	path:          string, // File path
-	table:         ^Symbol,
-	source:        string, // Source code
+	content:       ^Scope,
 	status:        Status, // Current compilation status
 	last_modified: time.Time, // Last modification timestamp
 	arena:         vmem.Arena, // Memory arena
@@ -337,7 +336,7 @@ process_cache_task :: proc(task: thread.Task) {
 	}
 
 	// Use cache arena allocator to store the source
-	cache.source = string(source_bytes)
+	source := string(source_bytes)
 
 	// Start parsing timing
 	parsing_start: time.Time
@@ -353,7 +352,7 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Starting parsing for file: %s\n", cache.path)
 	}
 
-	ast := parse(cache)
+	ast := parse(cache, source)
 	cache.status = .Parsed
 	// TODO: destroy temp arena and free all
 

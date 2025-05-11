@@ -9,7 +9,8 @@ import "core:time"
 Analyzer :: struct {
 	errors:   [dynamic]Analyzer_Error,
 	warnings: [dynamic]Analyzer_Error,
-	root:     Symbol,
+	root:     ^Scope,
+	current:  ^Scope,
 }
 
 Analyzer_Error_Type :: enum {}
@@ -35,22 +36,29 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 		return false
 	}
 
+	root := new(Scope)
+	root.name = cache.path
+	root.content = make([dynamic]Scope, 8)
+
 	analyzer := Analyzer {
 		errors   = make([dynamic]Analyzer_Error, 1),
 		warnings = make([dynamic]Analyzer_Error, 1),
+		root     = root,
 	}
+
 	return true
 }
 
-enter_scope :: proc(symbol: ^Symbol) {
+enter_scope :: proc(symbol: ^Scope) {
 }
 
 leave_scope :: proc() {
 
 }
 
-Symbol :: struct {
+Scope :: struct {
 	name:         string,
-	content:      [dynamic]Symbol,
+	parent:       ^Scope,
+	content:      [dynamic]Scope,
 	binding_kind: Binding_Kind,
 }
