@@ -67,7 +67,6 @@ leave_scope :: proc() {
 }
 
 analyze_node :: proc(node: ^Node) {
-	analyzer := (^Analyzer)(context.user_ptr)
 	switch n in node {
 	case Pointing:
 	case PointingPull:
@@ -76,10 +75,12 @@ analyze_node :: proc(node: ^Node) {
 	case ResonancePush:
 	case ResonancePull:
 	case ScopeNode:
+		process_raw_scope_node(n)
 	case Override:
 	case Product:
 	case Branch:
 	case Identifier:
+		process_identifier(n)
 	case Pattern:
 	case Constraint:
 	case Operator:
@@ -91,6 +92,30 @@ analyze_node :: proc(node: ^Node) {
 	case Range:
 	}
 }
+
+process_raw_scope_node :: proc(scope_node: ScopeNode) {
+	analyzer := (^Analyzer)(context.user_ptr)
+	scope := new(Scope)
+	scope.parent = analyzer.current
+	analyzer.current = scope
+	for i := 0; i < len(scope_node.value); i += 1 {
+		analyze_node(&scope_node.value[i])
+	}
+}
+
+process_identifier :: proc(identifier: Identifier) {
+	analyzer := (^Analyzer)(context.user_ptr)
+	symbol := resolve_symbol(analyzer.current, identifier.name)
+	if (symbol != nil) {
+	}
+}
+
+process_scope_node :: proc(scope_node: ScopeNode) {
+	for i := 0; i < len(scope_node.value); i += 1 {
+		analyze_node(&scope_node.value[i])
+	}
+}
+
 
 resolve_symbol :: proc(scope: ^Scope, name: string) -> ^Scope {
 	if scope == nil {
