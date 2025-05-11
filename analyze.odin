@@ -7,15 +7,15 @@ import "core:strings"
 import "core:time"
 
 Analyzer :: struct {
-	errors:       [dynamic]Analyzer_Error,
-	warnings:     [dynamic]Analyzer_Error,
-	root:         ^Scope,
-	current:      ^Scope,
-	current_node: ^Node,
+	errors:   [dynamic]Analyzer_Error,
+	warnings: [dynamic]Analyzer_Error,
+	root:     ^Scope,
+	current:  ^Scope,
 }
 
 Analyzer_Error_Type :: enum {
 	Undefined,
+	Invalid_Binding_Name,
 }
 
 
@@ -48,34 +48,29 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	root.content = make([dynamic]Scope, 8)
 
 	analyzer := Analyzer {
-		errors   = make([dynamic]Analyzer_Error, 1),
-		warnings = make([dynamic]Analyzer_Error, 1),
+		errors   = make([dynamic]Analyzer_Error, 0),
+		warnings = make([dynamic]Analyzer_Error, 0),
 		root     = root,
 		current  = root,
 	}
 	context.user_ptr = &analyzer
 
 	analyze_node(ast)
+	print_analyzer_results(&analyzer)
 	return true
-}
-
-enter_scope :: proc(symbol: ^Scope) {
-}
-
-leave_scope :: proc() {
-
 }
 
 analyze_node :: proc(node: ^Node) {
 	switch n in node {
 	case Pointing:
+		process_pointing_push(n)
 	case PointingPull:
 	case EventPush:
 	case EventPull:
 	case ResonancePush:
 	case ResonancePull:
 	case ScopeNode:
-		process_raw_scope_node(n)
+		process_scope_node(n)
 	case Override:
 	case Product:
 	case Branch:
@@ -93,14 +88,57 @@ analyze_node :: proc(node: ^Node) {
 	}
 }
 
-process_raw_scope_node :: proc(scope_node: ScopeNode) {
+process_pointing_push :: proc(node: Pointing) {
+	handle_binding_name(node.name, .pointing_push)
+	handle_binding_value(node.value)
+	pop_scope()
+}
+
+handle_binding_name :: #force_inline proc(node: ^Node, binding: Binding_Kind) {
+	#partial switch n in node {
+	case Identifier:
+		push_scope(n.name, binding)
+	case Constraint:
+		push_scope("", binding)
+	case:
+		push_scope("", binding)
+		analyzer_error_at(
+			"Binding name must be a valid identifier with or without constaint",
+			.Invalid_Binding_Name,
+		)
+	}
+}
+
+handle_binding_value :: #force_inline proc(node: ^Node) {
+	#partial switch n in node {
+	case ScopeNode:
+	case:
+		analyzer_error_at(
+			"Binding name must be a valid identifier with or without constaint",
+			.Invalid_Binding_Name,
+		)
+	}
+}
+
+
+process_scope_node :: proc(scope_node: ScopeNode) {
+	push_scope()
+	for i := 0; i < len(scope_node.value); i += 1 {
+		analyze_node(&scope_node.value[i])
+	}
+	pop_scope()
+}
+
+push_scope :: proc(name: string = "", kind: Binding_Kind = .pointing_push) {
 	analyzer := (^Analyzer)(context.user_ptr)
 	scope := new(Scope)
 	scope.parent = analyzer.current
 	analyzer.current = scope
-	for i := 0; i < len(scope_node.value); i += 1 {
-		analyze_node(&scope_node.value[i])
-	}
+}
+
+pop_scope :: proc() {
+	analyzer := (^Analyzer)(context.user_ptr)
+	analyzer.current = analyzer.current.parent
 }
 
 process_identifier :: proc(identifier: Identifier) {
@@ -109,13 +147,6 @@ process_identifier :: proc(identifier: Identifier) {
 	if (symbol != nil) {
 	}
 }
-
-process_scope_node :: proc(scope_node: ScopeNode) {
-	for i := 0; i < len(scope_node.value); i += 1 {
-		analyze_node(&scope_node.value[i])
-	}
-}
-
 
 resolve_symbol :: proc(scope: ^Scope, name: string) -> ^Scope {
 	if scope == nil {
@@ -216,4 +247,46 @@ NODE_POS :: #force_inline proc(node: ^Node) -> Position {
 		return n.position
 	}
 	return Position{}
+}
+
+print_analyzer_results :: proc(analyzer: ^Analyzer) {
+	fmt.println("\n=== ANALYZER RESULTS ===")
+
+	// Print errors
+	if len(analyzer.errors) > 0 {
+		fmt.println("\nERRORS:")
+		for error, i in analyzer.errors {
+			pos := error.position
+			fmt.printf(
+				"[%d] %v at line %d, column %d: %s\n",
+				i + 1,
+				error.type,
+				pos.line,
+				pos.column,
+				error.message,
+			)
+		}
+	} else {
+		fmt.println("\nNo errors detected.")
+	}
+
+	// Print warnings
+	if len(analyzer.warnings) > 0 {
+		fmt.println("\nWARNINGS:")
+		for warning, i in analyzer.warnings {
+			pos := warning.position
+			fmt.printf(
+				"[%d] %v at line %d, column %d: %s\n",
+				i + 1,
+				warning.type,
+				pos.line,
+				pos.column,
+				warning.message,
+			)
+		}
+	} else {
+		fmt.println("\nNo warnings detected.")
+	}
+
+	fmt.println("\n======================")
 }
