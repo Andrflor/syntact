@@ -78,6 +78,7 @@ analyze_node :: proc(node: ^Node) {
 		process_identifier(n)
 	case Pattern:
 	case Constraint:
+    validate_constraint_binding(n, .pointing_push)
 	case Operator:
 	case Execute:
 	case Literal:
@@ -99,7 +100,7 @@ handle_binding_name :: #force_inline proc(node: ^Node, binding: Binding_Kind) {
 	case Identifier:
 		push_scope(n.name, binding)
 	case Constraint:
-		push_scope("", binding)
+    validate_constraint_binding(n, binding)
 	case:
 		push_scope("", binding)
 		analyzer_error_at(
@@ -118,6 +119,13 @@ handle_binding_value :: #force_inline proc(node: ^Node) {
 			.Invalid_Binding_Name,
 		)
 	}
+}
+
+validate_constraint_binding :: proc(constraint: Constraint, binding: Binding_Kind) {
+  #partial switch n in constraint.value {
+    case Identifier:
+      push_scope(n.name, binding)
+  }
 }
 
 
@@ -145,6 +153,7 @@ process_identifier :: proc(identifier: Identifier) {
 	analyzer := (^Analyzer)(context.user_ptr)
 	symbol := resolve_symbol(analyzer.current, identifier.name)
 	if (symbol != nil) {
+    append(&analyzer.current.content, symbol)
 	}
 }
 
@@ -173,7 +182,7 @@ analyzer_error_at :: proc(message: string, error_type: Analyzer_Error_Type) {
 	error := Analyzer_Error {
 		type     = error_type,
 		message  = message,
-		position = NODE_POS(analyzer.current_node),
+		// position = NODE_POS(analyzer.current_node),
 	}
 
 	// Add to errors list
@@ -189,7 +198,7 @@ analyzer_warning_at :: proc(message: string, error_type: Analyzer_Error_Type) {
 	error := Analyzer_Error {
 		type     = error_type,
 		message  = message,
-		position = NODE_POS(analyzer.current_node),
+		// position = NODE_POS(analyzer.current_node),
 	}
 
 	// Add to errors list
