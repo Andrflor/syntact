@@ -1,10 +1,8 @@
 package compiler
 
 import "core:fmt"
-import "core:hash"
 import "core:slice"
 import "core:strings"
-import "core:time"
 
 Analyzer :: struct {
 	errors:   [dynamic]Analyzer_Error,
@@ -16,8 +14,9 @@ Analyzer :: struct {
 Analyzer_Error_Type :: enum {
 	Undefined,
 	Invalid_Binding_Name,
+	Type_Mismatch,
+	Circular_Reference,
 }
-
 
 Binding_Kind :: enum {
 	pointing_push,
@@ -35,9 +34,19 @@ Analyzer_Error :: struct {
 	position: Position,
 }
 
+// Simplified scope structure focused on tracking references
+Scope :: struct {
+	name:         string,
+	parent:       ^Scope,
+	content:      [dynamic]^Scope, // Child scopes
+	binding_kind: Binding_Kind,
+	expression:   ^Node, // Original AST node
+	type_info:    ^Scope, // Type constraint if present
+	referenced:   bool, // Track if the binding is used
+}
 
 analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
-	if (ast == nil) {
+	if ast == nil {
 		return false
 	}
 
@@ -45,7 +54,7 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	root.name = cache.path
 	root.parent = &builtin
 	root.binding_kind = .pointing_push
-	root.content = make([dynamic]Scope, 8)
+	root.content = make([dynamic]^Scope, 8)
 
 	analyzer := Analyzer {
 		errors   = make([dynamic]Analyzer_Error, 0),
@@ -55,207 +64,287 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	}
 	context.user_ptr = &analyzer
 
+	// Build the scope hierarchy
 	analyze_node(ast)
+
+	// Print analysis results
 	print_analyzer_results(&analyzer)
-	return true
+
+	return len(analyzer.errors) == 0
 }
 
 analyze_node :: proc(node: ^Node) {
+	if node == nil {
+		return
+	}
+
 	switch n in node {
 	case Pointing:
 		process_pointing_push(n)
 	case PointingPull:
+		process_pointing_pull(n)
 	case EventPush:
+		process_event_push(n)
 	case EventPull:
+		process_event_pull(n)
 	case ResonancePush:
+		process_resonance_push(n)
 	case ResonancePull:
+		process_resonance_pull(n)
 	case ScopeNode:
 		process_scope_node(n)
 	case Override:
+		process_override(n)
 	case Product:
+		process_product(n)
 	case Branch:
+		process_branch(n)
 	case Identifier:
 		process_identifier(n)
 	case Pattern:
+		process_pattern(n)
 	case Constraint:
-    validate_constraint_binding(n, .pointing_push)
+		process_constraint(n)
 	case Operator:
+		process_operator(n)
 	case Execute:
+		process_execute(n)
 	case Literal:
+		process_literal(n)
 	case Property:
+		process_property(n)
 	case Expand:
+		process_expand(n)
 	case External:
+		process_external(n)
 	case Range:
+		process_range(n)
 	}
 }
 
+// Core implementations
 process_pointing_push :: proc(node: Pointing) {
-	handle_binding_name(node.name, .pointing_push)
-	handle_binding_value(node.value)
-	pop_scope()
-}
+	analyzer := (^Analyzer)(context.user_ptr)
 
-handle_binding_name :: #force_inline proc(node: ^Node, binding: Binding_Kind) {
-	#partial switch n in node {
-	case Identifier:
-		push_scope(n.name, binding)
-	case Constraint:
-    validate_constraint_binding(n, binding)
-	case:
-		push_scope("", binding)
-		analyzer_error_at(
-			"Binding name must be a valid identifier with or without constaint",
-			.Invalid_Binding_Name,
-		)
+	// Create scope for binding
+	scope := create_binding_scope(node.name, .pointing_push)
+
+	// Store the value expression directly
+	scope.expression = node.value
+
+	// Process scope value if it's a scope node
+	if scope_node, is_scope := node.value.(ScopeNode); is_scope {
+		old_current := analyzer.current
+		analyzer.current = scope // Enter the binding's scope
+		process_scope_node(scope_node)
+		analyzer.current = old_current // Return to parent
 	}
 }
 
-handle_binding_value :: #force_inline proc(node: ^Node) {
-	#partial switch n in node {
-	case ScopeNode:
-	case:
-		analyzer_error_at(
-			"Binding name must be a valid identifier with or without constaint",
-			.Invalid_Binding_Name,
-		)
-	}
+process_pointing_pull :: proc(node: PointingPull) {
+	analyzer := (^Analyzer)(context.user_ptr)
+	// Create scope for binding
+	scope := create_binding_scope(node.name, .pointing_pull)
+	// Store the value expression
+	scope.expression = node.value
 }
 
-validate_constraint_binding :: proc(constraint: Constraint, binding: Binding_Kind) {
-  #partial switch n in constraint.value {
-    case Identifier:
-      push_scope(n.name, binding)
-  }
+process_event_push :: proc(node: EventPush) {
+	analyzer := (^Analyzer)(context.user_ptr)
+	// Create scope for binding
+	scope := create_binding_scope(node.name, .event_push)
+	// Store the value expression
+	scope.expression = node.value
 }
 
+process_event_pull :: proc(node: EventPull) {
+	analyzer := (^Analyzer)(context.user_ptr)
+	// Create scope for binding
+	scope := create_binding_scope(node.name, .event_pull)
+	// Store the value expression
+	scope.expression = node.value
+}
+
+process_resonance_push :: proc(node: ResonancePush) {
+	analyzer := (^Analyzer)(context.user_ptr)
+	// Create scope for binding
+	scope := create_binding_scope(node.name, .resonance_push)
+}
+
+process_resonance_pull :: proc(node: ResonancePull) {
+	analyzer := (^Analyzer)(context.user_ptr)
+
+	// Create scope for binding
+	scope := create_binding_scope(node.name, .resonance_pull)
+
+	// Store the value expression
+	scope.expression = node.value
+}
 
 process_scope_node :: proc(scope_node: ScopeNode) {
-	push_scope()
+	analyzer := (^Analyzer)(context.user_ptr)
+
+	// Process all nodes in the scope
 	for i := 0; i < len(scope_node.value); i += 1 {
 		analyze_node(&scope_node.value[i])
 	}
-	pop_scope()
 }
 
-push_scope :: proc(name: string = "", kind: Binding_Kind = .pointing_push) {
+process_override :: proc(node: Override) {
 	analyzer := (^Analyzer)(context.user_ptr)
+
+	// Process all overrides
+	for i := 0; i < len(node.overrides); i += 1 {
+		analyze_node(&node.overrides[i])
+	}
+}
+
+process_product :: proc(node: Product) {
+	analyzer := (^Analyzer)(context.user_ptr)
+
+	// Create a product scope
 	scope := new(Scope)
+	scope.binding_kind = .product
 	scope.parent = analyzer.current
-	analyzer.current = scope
+	scope.content = make([dynamic]^Scope, 0)
+	scope.expression = node.value
+
+	append(&analyzer.current.content, scope)
 }
 
-pop_scope :: proc() {
+process_branch :: proc(node: Branch) {
 	analyzer := (^Analyzer)(context.user_ptr)
-	analyzer.current = analyzer.current.parent
 }
 
 process_identifier :: proc(identifier: Identifier) {
 	analyzer := (^Analyzer)(context.user_ptr)
+
+	// Resolve symbol
 	symbol := resolve_symbol(analyzer.current, identifier.name)
-	if (symbol != nil) {
-    append(&analyzer.current.content, symbol)
+
+	if symbol == nil {
+		analyzer_error(
+			fmt.tprintf("Undefined symbol: %s", identifier.name),
+			.Undefined,
+			identifier.position,
+		)
+	} else {
+		// Mark as referenced
+		symbol.referenced = true
 	}
+}
+
+process_pattern :: proc(node: Pattern) {
+	analyzer := (^Analyzer)(context.user_ptr)
+
+}
+
+process_constraint :: proc(node: Constraint) {
+	analyzer := (^Analyzer)(context.user_ptr)
+
+
+	// Process value if present
+	if node.value != nil {
+	}
+}
+
+process_operator :: proc(node: Operator) {
+}
+
+process_execute :: proc(node: Execute) {
+	analyzer := (^Analyzer)(context.user_ptr)
+
+	// Process the value to be executed
+	if node.value != nil {
+
+		// If executing an identifier, mark it as referenced
+		if id, is_id := node.value.(Identifier); is_id {
+			symbol := resolve_symbol(analyzer.current, id.name)
+			if symbol != nil {
+				symbol.referenced = true
+			} else {
+				analyzer_error(
+					fmt.tprintf("Cannot execute undefined symbol: %s", id.name),
+					.Undefined,
+					id.position,
+				)
+			}
+		}
+	}
+}
+
+process_literal :: proc(node: Literal) {
+
+}
+
+process_property :: proc(node: Property) {
+}
+
+process_expand :: proc(node: Expand) {
+}
+
+process_external :: proc(node: External) {
+}
+
+process_range :: proc(node: Range) {
+
+}
+
+// Create a scope for a binding from a name node
+create_binding_scope :: proc(name_node: ^Node, kind: Binding_Kind) -> ^Scope {
+	analyzer := (^Analyzer)(context.user_ptr)
+
+	scope := new(Scope)
+	scope.binding_kind = kind
+	scope.parent = analyzer.current
+	scope.content = make([dynamic]^Scope, 0)
+	scope.referenced = false
+
+	// Extract name
+	if id, is_id := name_node.(Identifier); is_id {
+		scope.name = id.name
+	} else if constraint, is_constraint := name_node.(Constraint); is_constraint {
+		// Handle type constraint
+		if type_id, is_type_id := constraint.constraint.(Identifier); is_type_id {
+			scope.type_info = resolve_symbol(analyzer.current, type_id.name)
+		}
+
+		// Extract name from constraint
+		if id, is_id := constraint.value.(Identifier); is_id {
+			scope.name = id.name
+		}
+	}
+
+	append(&analyzer.current.content, scope)
+	return scope
 }
 
 resolve_symbol :: proc(scope: ^Scope, name: string) -> ^Scope {
 	if scope == nil {
-		analyzer_error_at(fmt.tprintf("Cannot find name %s in current scope", name), .Undefined)
 		return nil
 	}
 
+	// Check in current scope
 	for i := 0; i < len(scope.content); i += 1 {
-		content_scope := &scope.content[i]
-		if content_scope.name == name {
-			return content_scope
+		if scope.content[i].name == name {
+			return scope.content[i]
 		}
 	}
 
+	// Check parent scope
 	return resolve_symbol(scope.parent, name)
 }
 
-/*
- * error_at creates a detailed error record at a specific token
- */
-analyzer_error_at :: proc(message: string, error_type: Analyzer_Error_Type) {
+analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, position: Position) {
 	analyzer := (^Analyzer)(context.user_ptr)
-	// Create detailed error record
+
 	error := Analyzer_Error {
 		type     = error_type,
 		message  = message,
-		// position = NODE_POS(analyzer.current_node),
+		position = position,
 	}
 
-	// Add to errors list
 	append(&analyzer.errors, error)
-}
-
-/*
- * error_at creates a detailed error record at a specific token
- */
-analyzer_warning_at :: proc(message: string, error_type: Analyzer_Error_Type) {
-	analyzer := (^Analyzer)(context.user_ptr)
-	// Create detailed error record
-	error := Analyzer_Error {
-		type     = error_type,
-		message  = message,
-		// position = NODE_POS(analyzer.current_node),
-	}
-
-	// Add to errors list
-	append(&analyzer.errors, error)
-}
-
-Scope :: struct {
-	name:         string,
-	parent:       ^Scope,
-	content:      [dynamic]Scope,
-	binding_kind: Binding_Kind,
-}
-
-NODE_POS :: #force_inline proc(node: ^Node) -> Position {
-	#partial switch n in node^ {
-	case Pointing:
-		return n.position
-	case PointingPull:
-		return n.position
-	case EventPush:
-		return n.position
-	case EventPull:
-		return n.position
-	case ResonancePush:
-		return n.position
-	case ResonancePull:
-		return n.position
-	case ScopeNode:
-		return n.position
-	case Override:
-		return n.position
-	case Product:
-		return n.position
-	case Branch:
-		return n.position
-	case Identifier:
-		return n.position
-	case Pattern:
-		return n.position
-	case Constraint:
-		return n.position
-	case Operator:
-		return n.position
-	case Execute:
-		return n.position
-	case Literal:
-		return n.position
-	case Property:
-		return n.position
-	case Expand:
-		return n.position
-	case External:
-		return n.position
-	case Range:
-		return n.position
-	}
-	return Position{}
 }
 
 print_analyzer_results :: proc(analyzer: ^Analyzer) {
@@ -297,5 +386,53 @@ print_analyzer_results :: proc(analyzer: ^Analyzer) {
 		fmt.println("\nNo warnings detected.")
 	}
 
+	// Print scope tree
+	fmt.println("\n=== SCOPE TREE ===")
+	print_scope_tree(analyzer.root)
 	fmt.println("\n======================")
+}
+
+print_scope_tree :: proc(scope: ^Scope, indent: int = 0) {
+	if scope == nil {
+		return
+	}
+
+	indentation := strings.repeat(" ", indent * 2)
+
+	// Print type if present
+	type_str := ""
+	if scope.type_info != nil {
+		type_str = fmt.tprintf(" : %s", scope.type_info.name)
+	}
+
+	// Print expression summary if present
+	expr_str := ""
+	if scope.expression != nil {
+		#partial switch e in scope.expression {
+		case Literal:
+			expr_str = fmt.tprintf(" = %s (%v)", e.value, e.kind)
+		case Operator:
+			expr_str = fmt.tprintf(" = <operator: %v>", e.kind)
+		case:
+			expr_str = fmt.tprintf(" = <%T>", scope.expression^)
+		}
+	}
+
+	// Add reference status
+	ref_str := scope.referenced ? " (used)" : " (unused)"
+
+	fmt.printf(
+		"%s%s%s%s (%v)%s\n",
+		indentation,
+		scope.name,
+		type_str,
+		expr_str,
+		scope.binding_kind,
+		ref_str,
+	)
+
+	// Print children
+	for i := 0; i < len(scope.content); i += 1 {
+		print_scope_tree(scope.content[i], indent + 1)
+	}
 }
