@@ -51,7 +51,7 @@ Status :: enum {
  */
 Cache :: struct {
 	path:          string, // File path
-	content:       ^Scope,
+	content:       ^ScopeData,
 	status:        Status, // Current compilation status
 	last_modified: time.Time, // Last modification timestamp
 	arena:         vmem.Arena, // Memory arena

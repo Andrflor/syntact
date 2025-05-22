@@ -7,15 +7,59 @@ import "core:strings"
 Analyzer :: struct {
 	errors:   [dynamic]Analyzer_Error,
 	warnings: [dynamic]Analyzer_Error,
-	root:     ^Scope,
-	current:  ^Scope,
+	stack:    [dynamic]^ScopeData,
+}
+
+Analyzer_Mode :: enum {}
+
+Binding :: struct {
+	name:      string,
+	kind:      Binding_Kind,
+	constaint: ^Shape,
+	value:     ^ValueData,
+}
+
+Shape :: struct {
+	content: [dynamic]^ValueData,
+}
+
+ValueData :: union {
+	ScopeData,
+	StringData,
+	IntegerData,
+	FloatData,
+	BoolData,
+}
+
+ScopeData :: struct {
+	content: [dynamic]^Binding,
+}
+
+StringData :: struct {
+	content: string,
+}
+
+IntegerData :: struct {
+	content: u64,
+}
+
+FloatData :: struct {
+	content: f64,
+}
+
+BoolData :: struct {
+	content: bool,
 }
 
 Analyzer_Error_Type :: enum {
 	Undefined,
 	Invalid_Binding_Name,
+	Invalid_Property_Access,
 	Type_Mismatch,
+	Invalid_Constaint_Name,
+	Invalid_Constaint_Value,
 	Circular_Reference,
+	Invalide_Binding_Value,
 }
 
 Binding_Kind :: enum {
@@ -34,41 +78,42 @@ Analyzer_Error :: struct {
 	position: Position,
 }
 
-// Simplified scope structure focused on tracking references
-Scope :: struct {
-	name:         string,
-	parent:       ^Scope,
-	content:      [dynamic]^Scope, // Child scopes
-	binding_kind: Binding_Kind,
-	expression:   ^Node, // Original AST node
-	type_info:    ^Scope, // Type constraint if present
-	referenced:   bool, // Track if the binding is used
+push_scope :: #force_inline proc(data: ^ScopeData) {
+	append(&(^Analyzer)(context.user_ptr).stack, data)
 }
+
+pop_scope :: #force_inline proc(data: ^ScopeData) {
+	pop(&(^Analyzer)(context.user_ptr).stack)
+}
+
+add_binding :: #force_inline proc(binding: ^Binding) {
+	append(
+		&(^Analyzer)(context.user_ptr).stack[len((^Analyzer)(context.user_ptr).stack) - 1].content,
+		binding,
+	)
+}
+
 
 analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	if ast == nil {
 		return false
 	}
 
-	root := new(Scope)
-	root.name = cache.path
-	root.parent = &builtin
-	root.binding_kind = .pointing_push
-	root.content = make([dynamic]^Scope, 8)
+	root := new(ScopeData)
+	root.content = make([dynamic]^Binding, 8)
 
 	analyzer := Analyzer {
 		errors   = make([dynamic]Analyzer_Error, 0),
 		warnings = make([dynamic]Analyzer_Error, 0),
-		root     = root,
-		current  = root,
+		stack    = make([dynamic]^ScopeData, 4),
 	}
+
 	context.user_ptr = &analyzer
+	push_scope(&builtin)
+	push_scope(root)
 
 	// Build the scope hierarchy
 	analyze_node(ast)
-
-	// Print analysis results
-	print_analyzer_results(&analyzer)
 
 	return len(analyzer.errors) == 0
 }
@@ -77,8 +122,7 @@ analyze_node :: proc(node: ^Node) {
 	if node == nil {
 		return
 	}
-
-	switch n in node {
+	#partial switch n in node {
 	case Pointing:
 		process_pointing_push(n)
 	case PointingPull:
@@ -91,18 +135,129 @@ analyze_node :: proc(node: ^Node) {
 		process_resonance_push(n)
 	case ResonancePull:
 		process_resonance_pull(n)
+	case Expand:
+	case Pattern:
+	case:
+		binding := Binding {
+			kind = .pointing_push,
+		}
+		analyze_binding_value(node, &binding)
+		add_binding(&binding)
+	}
+}
+
+analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
+	#partial switch n in node {
+	case Identifier:
+		binding.name = n.name
+	case Constraint:
+		#partial switch v in n.value {
+		case Identifier:
+			binding.name = v.name
+		case:
+			analyzer_error(
+				"The : constraint indicator must be followed by an identifier or nothing",
+				.Invalid_Constaint_Name,
+				get_position(n.value^),
+			)
+		}
+		#partial switch v in n.constraint {
+		case External:
+		case Execute:
+		case ScopeNode:
+		case Override:
+		case Identifier:
+		case:
+			analyzer_error(
+				"The : constraint value must be a valid form",
+				.Invalid_Constaint_Value,
+				get_position(n.value^),
+			)
+		}
+	case:
+		analyzer_error(
+			"The binding name can either be a constraint or an identifier",
+			.Invalid_Binding_Name,
+			get_position(n),
+		)
+	}
+}
+
+
+analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
+	switch n in node {
+	case Pointing:
+		analyzer_error(
+			"Cannot use a Pointing rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case PointingPull:
+		analyzer_error(
+			"Cannot use a Pointing Pull rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case EventPush:
+		analyzer_error(
+			"Cannot use a Event Push rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case EventPull:
+		analyzer_error(
+			"Cannot use a Event Pull rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case ResonancePush:
+		analyzer_error(
+			"Cannot use a Resonance Push rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case ResonancePull:
+		analyzer_error(
+			"Cannot use a Resonance Pull rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case Product:
+		analyzer_error(
+			"Cannot use a Product rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case Branch:
+		analyzer_error(
+			"Cannot use a Branch rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case Pattern:
+		analyzer_error(
+			"Cannot use a Pattern rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case Expand:
+		analyzer_error(
+			"Cannot use an Expand rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
+	case Range:
+		analyzer_error(
+			"Cannot use a Range rule as a binding value",
+			.Invalide_Binding_Value,
+			n.position,
+		)
 	case ScopeNode:
 		process_scope_node(n)
 	case Override:
 		process_override(n)
-	case Product:
-		process_product(n)
-	case Branch:
-		process_branch(n)
 	case Identifier:
 		process_identifier(n)
-	case Pattern:
-		process_pattern(n)
 	case Constraint:
 		process_constraint(n)
 	case Operator:
@@ -113,73 +268,66 @@ analyze_node :: proc(node: ^Node) {
 		process_literal(n)
 	case Property:
 		process_property(n)
-	case Expand:
-		process_expand(n)
 	case External:
 		process_external(n)
-	case Range:
-		process_range(n)
 	}
 }
 
-// Core implementations
+
 process_pointing_push :: proc(node: Pointing) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
-	// Create scope for binding
-	scope := create_binding_scope(node.name, .pointing_push)
-
-	// Store the value expression directly
-	scope.expression = node.value
-
-	// Process scope value if it's a scope node
-	if scope_node, is_scope := node.value.(ScopeNode); is_scope {
-		old_current := analyzer.current
-		analyzer.current = scope // Enter the binding's scope
-		process_scope_node(scope_node)
-		analyzer.current = old_current // Return to parent
+	binding := Binding {
+		kind = .pointing_push,
 	}
+	analyze_binding_name(node.name, &binding)
+	analyze_binding_value(node.value, &binding)
+	add_binding(&binding)
 }
 
 process_pointing_pull :: proc(node: PointingPull) {
-	analyzer := (^Analyzer)(context.user_ptr)
-	// Create scope for binding
-	scope := create_binding_scope(node.name, .pointing_pull)
-	// Store the value expression
-	scope.expression = node.value
+	binding := Binding {
+		kind = .pointing_pull,
+	}
+	analyze_binding_name(node.name, &binding)
+	analyze_binding_value(node.value, &binding)
+	add_binding(&binding)
 }
 
 process_event_push :: proc(node: EventPush) {
-	analyzer := (^Analyzer)(context.user_ptr)
-	// Create scope for binding
-	scope := create_binding_scope(node.name, .event_push)
-	// Store the value expression
-	scope.expression = node.value
+	binding := Binding {
+		kind = .event_push,
+	}
+	analyze_binding_name(node.name, &binding)
+	analyze_binding_value(node.value, &binding)
+	add_binding(&binding)
 }
 
 process_event_pull :: proc(node: EventPull) {
-	analyzer := (^Analyzer)(context.user_ptr)
-	// Create scope for binding
-	scope := create_binding_scope(node.name, .event_pull)
-	// Store the value expression
-	scope.expression = node.value
+	binding := Binding {
+		kind = .event_pull,
+	}
+	analyze_binding_name(node.name, &binding)
+	analyze_binding_value(node.value, &binding)
+	add_binding(&binding)
 }
 
 process_resonance_push :: proc(node: ResonancePush) {
-	analyzer := (^Analyzer)(context.user_ptr)
-	// Create scope for binding
-	scope := create_binding_scope(node.name, .resonance_push)
+	binding := Binding {
+		kind = .resonance_push,
+	}
+	analyze_binding_name(node.name, &binding)
+	analyze_binding_value(node.value, &binding)
+	add_binding(&binding)
 }
 
 process_resonance_pull :: proc(node: ResonancePull) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
-	// Create scope for binding
-	scope := create_binding_scope(node.name, .resonance_pull)
-
-	// Store the value expression
-	scope.expression = node.value
+	binding := Binding {
+		kind = .resonance_pull,
+	}
+	analyze_binding_name(node.name, &binding)
+	analyze_binding_value(node.value, &binding)
+	add_binding(&binding)
 }
+
 
 process_scope_node :: proc(scope_node: ScopeNode) {
 	analyzer := (^Analyzer)(context.user_ptr)
@@ -200,16 +348,7 @@ process_override :: proc(node: Override) {
 }
 
 process_product :: proc(node: Product) {
-	analyzer := (^Analyzer)(context.user_ptr)
 
-	// Create a product scope
-	scope := new(Scope)
-	scope.binding_kind = .product
-	scope.parent = analyzer.current
-	scope.content = make([dynamic]^Scope, 0)
-	scope.expression = node.value
-
-	append(&analyzer.current.content, scope)
 }
 
 process_branch :: proc(node: Branch) {
@@ -217,21 +356,6 @@ process_branch :: proc(node: Branch) {
 }
 
 process_identifier :: proc(identifier: Identifier) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
-	// Resolve symbol
-	symbol := resolve_symbol(analyzer.current, identifier.name)
-
-	if symbol == nil {
-		analyzer_error(
-			fmt.tprintf("Undefined symbol: %s", identifier.name),
-			.Undefined,
-			identifier.position,
-		)
-	} else {
-		// Mark as referenced
-		symbol.referenced = true
-	}
 }
 
 process_pattern :: proc(node: Pattern) {
@@ -252,29 +376,9 @@ process_operator :: proc(node: Operator) {
 }
 
 process_execute :: proc(node: Execute) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
-	// Process the value to be executed
-	if node.value != nil {
-
-		// If executing an identifier, mark it as referenced
-		if id, is_id := node.value.(Identifier); is_id {
-			symbol := resolve_symbol(analyzer.current, id.name)
-			if symbol != nil {
-				symbol.referenced = true
-			} else {
-				analyzer_error(
-					fmt.tprintf("Cannot execute undefined symbol: %s", id.name),
-					.Undefined,
-					id.position,
-				)
-			}
-		}
-	}
 }
 
 process_literal :: proc(node: Literal) {
-
 }
 
 process_property :: proc(node: Property) {
@@ -290,40 +394,17 @@ process_range :: proc(node: Range) {
 
 }
 
-// Create a scope for a binding from a name node
-create_binding_scope :: proc(name_node: ^Node, kind: Binding_Kind) -> ^Scope {
-	analyzer := (^Analyzer)(context.user_ptr)
 
-	scope := new(Scope)
-	scope.binding_kind = kind
-	scope.parent = analyzer.current
-	scope.content = make([dynamic]^Scope, 0)
-	scope.referenced = false
-
-	// Extract name
-	if id, is_id := name_node.(Identifier); is_id {
-		scope.name = id.name
-	} else if constraint, is_constraint := name_node.(Constraint); is_constraint {
-		// Handle type constraint
-		if type_id, is_type_id := constraint.constraint.(Identifier); is_type_id {
-			scope.type_info = resolve_symbol(analyzer.current, type_id.name)
-		}
-
-		// Extract name from constraint
-		if id, is_id := constraint.value.(Identifier); is_id {
-			scope.name = id.name
-		}
-	}
-
-	append(&analyzer.current.content, scope)
-	return scope
+resolve_first_symbol :: #force_inline proc(name: string) -> ^Binding {
+	return _resolve_first_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
 }
 
-resolve_symbol :: proc(scope: ^Scope, name: string) -> ^Scope {
-	if scope == nil {
+_resolve_first_symbol :: proc(name: string, index: int = 0) -> ^Binding {
+	if index == 0 {
 		return nil
 	}
 
+	scope := (^Analyzer)(context.user_ptr).stack[index]
 	// Check in current scope
 	for i := 0; i < len(scope.content); i += 1 {
 		if scope.content[i].name == name {
@@ -332,7 +413,27 @@ resolve_symbol :: proc(scope: ^Scope, name: string) -> ^Scope {
 	}
 
 	// Check parent scope
-	return resolve_symbol(scope.parent, name)
+	return _resolve_first_symbol(name, index - 1)
+}
+
+resolve_symbol :: #force_inline proc(name: string) -> ^Binding {
+	return _resolve_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
+}
+
+_resolve_symbol :: proc(name: string, index: int = 0) -> ^Binding {
+	if index == 0 {
+		return nil
+	}
+
+	scope := (^Analyzer)(context.user_ptr).stack[index]
+	// Check in current scope
+	for i := len(scope.content) - 1; i <= 0; i -= 1 {
+		if scope.content[i].name == name {
+			return scope.content[i]
+		}
+	}
+
+	return _resolve_symbol(name, index - 1)
 }
 
 analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, position: Position) {
@@ -347,92 +448,48 @@ analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, positio
 	append(&analyzer.errors, error)
 }
 
-print_analyzer_results :: proc(analyzer: ^Analyzer) {
-	fmt.println("\n=== ANALYZER RESULTS ===")
-
-	// Print errors
-	if len(analyzer.errors) > 0 {
-		fmt.println("\nERRORS:")
-		for error, i in analyzer.errors {
-			pos := error.position
-			fmt.printf(
-				"[%d] %v at line %d, column %d: %s\n",
-				i + 1,
-				error.type,
-				pos.line,
-				pos.column,
-				error.message,
-			)
-		}
-	} else {
-		fmt.println("\nNo errors detected.")
+get_position :: proc(node: Node) -> Position {
+	switch n in node {
+	case Pointing:
+		return n.position
+	case PointingPull:
+		return n.position
+	case EventPush:
+		return n.position
+	case EventPull:
+		return n.position
+	case ResonancePush:
+		return n.position
+	case ResonancePull:
+		return n.position
+	case ScopeNode:
+		return n.position
+	case Override:
+		return n.position
+	case Product:
+		return n.position
+	case Branch:
+		return n.position
+	case Identifier:
+		return n.position
+	case Pattern:
+		return n.position
+	case Constraint:
+		return n.position
+	case Operator:
+		return n.position
+	case Execute:
+		return n.position
+	case Literal:
+		return n.position
+	case Property:
+		return n.position
+	case Expand:
+		return n.position
+	case External:
+		return n.position
+	case Range:
+		return n.position
 	}
-
-	// Print warnings
-	if len(analyzer.warnings) > 0 {
-		fmt.println("\nWARNINGS:")
-		for warning, i in analyzer.warnings {
-			pos := warning.position
-			fmt.printf(
-				"[%d] %v at line %d, column %d: %s\n",
-				i + 1,
-				warning.type,
-				pos.line,
-				pos.column,
-				warning.message,
-			)
-		}
-	} else {
-		fmt.println("\nNo warnings detected.")
-	}
-
-	// Print scope tree
-	fmt.println("\n=== SCOPE TREE ===")
-	print_scope_tree(analyzer.root)
-	fmt.println("\n======================")
-}
-
-print_scope_tree :: proc(scope: ^Scope, indent: int = 0) {
-	if scope == nil {
-		return
-	}
-
-	indentation := strings.repeat(" ", indent * 2)
-
-	// Print type if present
-	type_str := ""
-	if scope.type_info != nil {
-		type_str = fmt.tprintf(" : %s", scope.type_info.name)
-	}
-
-	// Print expression summary if present
-	expr_str := ""
-	if scope.expression != nil {
-		#partial switch e in scope.expression {
-		case Literal:
-			expr_str = fmt.tprintf(" = %s (%v)", e.value, e.kind)
-		case Operator:
-			expr_str = fmt.tprintf(" = <operator: %v>", e.kind)
-		case:
-			expr_str = fmt.tprintf(" = <%T>", scope.expression^)
-		}
-	}
-
-	// Add reference status
-	ref_str := scope.referenced ? " (used)" : " (unused)"
-
-	fmt.printf(
-		"%s%s%s%s (%v)%s\n",
-		indentation,
-		scope.name,
-		type_str,
-		expr_str,
-		scope.binding_kind,
-		ref_str,
-	)
-
-	// Print children
-	for i := 0; i < len(scope.content); i += 1 {
-		print_scope_tree(scope.content[i], indent + 1)
-	}
+	return Position{}
 }
