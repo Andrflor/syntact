@@ -16,7 +16,7 @@ Binding :: struct {
 	name:       string,
 	kind:       Binding_Kind,
 	constraint: ^Shape,
-	value:      ^ValueData,
+	value:      ValueData,
 }
 
 Shape :: struct {
@@ -24,11 +24,11 @@ Shape :: struct {
 }
 
 ValueData :: union {
-	ScopeData,
-	StringData,
-	IntegerData,
-	FloatData,
-	BoolData,
+	^ScopeData,
+	^StringData,
+	^IntegerData,
+	^FloatData,
+	^BoolData,
 }
 
 ScopeData :: struct {
@@ -82,7 +82,7 @@ push_scope :: #force_inline proc(data: ^ScopeData) {
 	append(&(^Analyzer)(context.user_ptr).stack, data)
 }
 
-pop_scope :: #force_inline proc(data: ^ScopeData) {
+pop_scope :: #force_inline proc() {
 	pop(&(^Analyzer)(context.user_ptr).stack)
 }
 
@@ -141,11 +141,11 @@ analyze_node :: proc(node: ^Node) {
 	case Expand:
 		process_expand(n)
 	case:
-		binding := Binding {
-			kind = .pointing_push,
-		}
-		analyze_binding_value(node, &binding)
-		add_binding(&binding)
+    binding := new(Binding)
+    binding.name = ""
+    binding.kind = .pointing_push
+		analyze_binding_value(node, binding)
+		add_binding(binding)
 	}
 }
 
@@ -256,7 +256,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			n.position,
 		)
 	case ScopeNode:
-		process_scope_node(n)
+		process_scope_node(n, binding)
 	case Override:
 		process_override(n)
 	case Identifier:
@@ -278,67 +278,72 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 
 
 process_pointing_push :: proc(node: Pointing) {
-	binding := Binding {
-		kind = .pointing_push,
-	}
-	analyze_binding_name(node.name, &binding)
-	analyze_binding_value(node.value, &binding)
-	add_binding(&binding)
+  binding := new(Binding)
+  binding.name = ""
+  binding.kind = .pointing_push
+	analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
 }
 
 process_pointing_pull :: proc(node: PointingPull) {
-	binding := Binding {
-		kind = .pointing_pull,
-	}
-	analyze_binding_name(node.name, &binding)
-	analyze_binding_value(node.value, &binding)
-	add_binding(&binding)
+  binding := new(Binding)
+  binding.name = ""
+  binding.kind = .pointing_pull
+	analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
 }
 
 process_event_push :: proc(node: EventPush) {
-	binding := Binding {
-		kind = .event_push,
-	}
-	analyze_binding_name(node.name, &binding)
-	analyze_binding_value(node.value, &binding)
-	add_binding(&binding)
+  binding := new(Binding)
+  binding.name = ""
+  binding.kind = .event_push
+	analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
 }
 
 process_event_pull :: proc(node: EventPull) {
-	binding := Binding {
-		kind = .event_pull,
-	}
-	analyze_binding_name(node.name, &binding)
-	analyze_binding_value(node.value, &binding)
-	add_binding(&binding)
+  binding := new(Binding)
+  binding.name = ""
+  binding.kind = .event_pull
+  analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
 }
 
 process_resonance_push :: proc(node: ResonancePush) {
-	binding := Binding {
-		kind = .resonance_push,
-	}
-	analyze_binding_name(node.name, &binding)
-	analyze_binding_value(node.value, &binding)
-	add_binding(&binding)
+  binding := new(Binding)
+  binding.name = ""
+  binding.kind = .resonance_push
+	analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
 }
 
 process_resonance_pull :: proc(node: ResonancePull) {
-	binding := Binding {
-		kind = .resonance_pull,
-	}
-	analyze_binding_name(node.name, &binding)
-	analyze_binding_value(node.value, &binding)
-	add_binding(&binding)
+  binding := new(Binding)
+  binding.name = ""
+  binding.kind = .resonance_pull
+	analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
 }
 
-
-process_scope_node :: proc(scope_node: ScopeNode) {
+process_scope_node :: proc(scope_node: ScopeNode, binding: ^Binding) {
 	analyzer := (^Analyzer)(context.user_ptr)
 
-	// Process all nodes in the scope
+  scope := new(ScopeData)
+  scope.content = make([dynamic]^Binding, 0)
+
+  binding.value = scope
+  push_scope(scope)
+
 	for i := 0; i < len(scope_node.value); i += 1 {
 		analyze_node(&scope_node.value[i])
 	}
+  pop_scope()
 }
 
 process_override :: proc(node: Override) {
@@ -549,17 +554,18 @@ debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
 	}
 
 	for binding, i in scope.content {
-		debug_binding(binding, level + 1, i, verbose)
+    if(binding != nil) {
+      debug_binding(binding, level + 1, i, verbose)
+    }
 	}
 }
 
 // Debug a single binding
 debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose: bool = false) {
 	indent := strings.repeat("  ", indent_level)
-	kind_str := binding_kind_to_string(binding.kind)
 
-	fmt.printf("%s[%d] %s '%s'", indent, index, kind_str, binding.name)
-
+    kind_str := binding_kind_to_string(binding.kind)
+    fmt.printf("%s[%d] %s '%s'", indent, index, kind_str, binding.name)
 	if binding.constraint != nil {
 		fmt.printf(" (constrained)")
 	}
@@ -578,17 +584,17 @@ debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose:
 }
 
 // Get the type name of a ValueData
-debug_value_type :: proc(value: ^ValueData) -> string {
+debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
-	case ScopeData:
+	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
-	case StringData:
+	case ^StringData:
 		return "String"
-	case IntegerData:
+	case ^IntegerData:
 		return "Integer"
-	case FloatData:
+	case ^FloatData:
 		return "Float"
-	case BoolData:
+	case ^BoolData:
 		return "Bool"
 	case:
 		return "Unknown"
@@ -596,22 +602,22 @@ debug_value_type :: proc(value: ^ValueData) -> string {
 }
 
 // Debug ValueData contents
-debug_value_data :: proc(value: ^ValueData, indent_level: int) {
+debug_value_data :: proc(value: ValueData, indent_level: int) {
 	indent := strings.repeat("  ", indent_level)
 
 	switch v in value {
-	case ScopeData:
+	case ^ScopeData:
 		fmt.printf("Scope with %d bindings:\n", len(v.content))
 		for binding, i in v.content {
 			debug_binding(binding, indent_level + 1, i, false)
 		}
-	case StringData:
+	case ^StringData:
 		fmt.printf("'%s'\n", v.content)
-	case IntegerData:
+	case ^IntegerData:
 		fmt.printf("%d\n", v.content)
-	case FloatData:
+	case ^FloatData:
 		fmt.printf("%f\n", v.content)
-	case BoolData:
+	case ^BoolData:
 		fmt.printf("%t\n", v.content)
 	case:
 		fmt.printf("Unknown value type\n")
@@ -638,71 +644,4 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 	case:
 		return "Unknown"
 	}
-}
-
-// Debug specific binding by name across all scopes
-debug_find_binding :: proc(analyzer: ^Analyzer, name: string) {
-	fmt.printf("=== SEARCHING FOR BINDING '%s' ===\n", name)
-	found := false
-
-	for scope, level in analyzer.stack {
-		for binding, i in scope.content {
-			if binding.name == name {
-				fmt.printf("Found in scope %d:\n", level)
-				debug_binding(binding, 1, i, true)
-				found = true
-			}
-		}
-	}
-
-	if !found {
-		fmt.printf("Binding '%s' not found in any scope\n", name)
-	}
-	fmt.println("=== END SEARCH ===\n")
-}
-
-// Debug scope resolution for a symbol
-debug_symbol_resolution :: proc(analyzer: ^Analyzer, name: string) {
-	fmt.printf("=== SYMBOL RESOLUTION FOR '%s' ===\n", name)
-
-	// Test both resolution functions
-	first := resolve_first_symbol(name)
-	last := resolve_symbol(name)
-
-	if first != nil {
-		fmt.printf(
-			"resolve_first_symbol found: %s (%s)\n",
-			first.name,
-			binding_kind_to_string(first.kind),
-		)
-	} else {
-		fmt.printf("resolve_first_symbol: not found\n")
-	}
-
-	if last != nil {
-		fmt.printf("resolve_symbol found: %s (%s)\n", last.name, binding_kind_to_string(last.kind))
-	} else {
-		fmt.printf("resolve_symbol: not found\n")
-	}
-
-	// Show resolution path
-	fmt.println("Resolution path (top to bottom):")
-	for i := len(analyzer.stack) - 1; i >= 0; i -= 1 {
-		scope := analyzer.stack[i]
-		found_in_scope := false
-
-		for binding in scope.content {
-			if binding.name == name {
-				fmt.printf("  Scope %d: FOUND (%s)\n", i, binding_kind_to_string(binding.kind))
-				found_in_scope = true
-				break
-			}
-		}
-
-		if !found_in_scope {
-			fmt.printf("  Scope %d: not found\n", i)
-		}
-	}
-
-	fmt.println("=== END RESOLUTION ===\n")
 }
