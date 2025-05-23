@@ -4,20 +4,10 @@ package compiler
 builtin := init_builtins()
 
 init_builtins :: proc() -> ScopeData {
-	builtins := make([dynamic]^Binding, 13)
-	append_elem(&builtin.content, &u8_binding)
-	append_elem(&builtin.content, &i8_binding)
-	append_elem(&builtin.content, &u16_binding)
-	append_elem(&builtin.content, &i16_binding)
-	append_elem(&builtin.content, &u32_binding)
-	append_elem(&builtin.content, &i32_binding)
-	append_elem(&builtin.content, &u64_binding)
-	append_elem(&builtin.content, &i64_binding)
-	append_elem(&builtin.content, &f32_binding)
-	append_elem(&builtin.content, &f64_binding)
-	append_elem(&builtin.content, &bool_binding)
-	append_elem(&builtin.content, &char_binding)
-	append_elem(&builtin.content, &string_binding)
+	builtins := make([dynamic]^Binding, 0)
+	for i in 0 ..< len(builtin_bindings) {
+		append(&builtins, &builtin_bindings[i])
+	}
 
 	builtin := ScopeData {
 		content = builtins,
@@ -25,6 +15,23 @@ init_builtins :: proc() -> ScopeData {
 
 
 	return builtin
+}
+
+@(private = "file")
+builtin_bindings := [13]Binding {
+	u8_binding,
+	i8_binding,
+	u16_binding,
+	i16_binding,
+	u32_binding,
+	i32_binding,
+	u64_binding,
+	i64_binding,
+	f32_binding,
+	f64_binding,
+	bool_binding,
+	char_binding,
+	string_binding,
 }
 
 u8_binding := Binding {

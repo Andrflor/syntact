@@ -13,10 +13,10 @@ Analyzer :: struct {
 Analyzer_Mode :: enum {}
 
 Binding :: struct {
-	name:      string,
-	kind:      Binding_Kind,
-	constaint: ^Shape,
-	value:     ^ValueData,
+	name:       string,
+	kind:       Binding_Kind,
+	constraint: ^Shape,
+	value:      ^ValueData,
 }
 
 Shape :: struct {
@@ -59,7 +59,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Constaint_Name,
 	Invalid_Constaint_Value,
 	Circular_Reference,
-	Invalide_Binding_Value,
+	Invalid_Binding_Value,
 }
 
 Binding_Kind :: enum {
@@ -93,19 +93,18 @@ add_binding :: #force_inline proc(binding: ^Binding) {
 	)
 }
 
-
 analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	if ast == nil {
 		return false
 	}
 
 	root := new(ScopeData)
-	root.content = make([dynamic]^Binding, 8)
+	root.content = make([dynamic]^Binding, 0)
 
 	analyzer := Analyzer {
 		errors   = make([dynamic]Analyzer_Error, 0),
 		warnings = make([dynamic]Analyzer_Error, 0),
-		stack    = make([dynamic]^ScopeData, 4),
+		stack    = make([dynamic]^ScopeData, 0),
 	}
 
 	context.user_ptr = &analyzer
@@ -114,6 +113,8 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 
 	// Build the scope hierarchy
 	analyze_node(ast)
+	fmt.println(root)
+	debug_analyzer(&analyzer)
 
 	return len(analyzer.errors) == 0
 }
@@ -135,8 +136,10 @@ analyze_node :: proc(node: ^Node) {
 		process_resonance_push(n)
 	case ResonancePull:
 		process_resonance_pull(n)
+	case Product:
+		process_product(n)
 	case Expand:
-	case Pattern:
+		process_expand(n)
 	case:
 		binding := Binding {
 			kind = .pointing_push,
@@ -189,67 +192,67 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case Pointing:
 		analyzer_error(
 			"Cannot use a Pointing rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case PointingPull:
 		analyzer_error(
 			"Cannot use a Pointing Pull rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case EventPush:
 		analyzer_error(
 			"Cannot use a Event Push rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case EventPull:
 		analyzer_error(
 			"Cannot use a Event Pull rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case ResonancePush:
 		analyzer_error(
 			"Cannot use a Resonance Push rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case ResonancePull:
 		analyzer_error(
 			"Cannot use a Resonance Pull rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case Product:
 		analyzer_error(
 			"Cannot use a Product rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case Branch:
 		analyzer_error(
 			"Cannot use a Branch rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case Pattern:
 		analyzer_error(
 			"Cannot use a Pattern rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case Expand:
 		analyzer_error(
 			"Cannot use an Expand rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case Range:
 		analyzer_error(
 			"Cannot use a Range rule as a binding value",
-			.Invalide_Binding_Value,
+			.Invalid_Binding_Value,
 			n.position,
 		)
 	case ScopeNode:
@@ -399,41 +402,38 @@ resolve_first_symbol :: #force_inline proc(name: string) -> ^Binding {
 	return _resolve_first_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
 }
 
-_resolve_first_symbol :: proc(name: string, index: int = 0) -> ^Binding {
-	if index == 0 {
-		return nil
-	}
-
-	scope := (^Analyzer)(context.user_ptr).stack[index]
-	// Check in current scope
-	for i := 0; i < len(scope.content); i += 1 {
-		if scope.content[i].name == name {
-			return scope.content[i]
-		}
-	}
-
-	// Check parent scope
-	return _resolve_first_symbol(name, index - 1)
-}
-
-resolve_symbol :: #force_inline proc(name: string) -> ^Binding {
-	return _resolve_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
-}
-
 _resolve_symbol :: proc(name: string, index: int = 0) -> ^Binding {
-	if index == 0 {
+	if index < 0 { 	// Changed from index == 0 to index < 0
 		return nil
 	}
 
 	scope := (^Analyzer)(context.user_ptr).stack[index]
-	// Check in current scope
-	for i := len(scope.content) - 1; i <= 0; i -= 1 {
+	for i := len(scope.content) - 1; i >= 0; i -= 1 {
 		if scope.content[i].name == name {
 			return scope.content[i]
 		}
 	}
 
 	return _resolve_symbol(name, index - 1)
+}
+
+_resolve_first_symbol :: proc(name: string, index: int = 0) -> ^Binding {
+	if index < 0 { 	// Changed from index == 0 to index < 0
+		return nil
+	}
+
+	scope := (^Analyzer)(context.user_ptr).stack[index]
+	for i := 0; i < len(scope.content); i += 1 {
+		if scope.content[i].name == name {
+			return scope.content[i]
+		}
+	}
+
+	return _resolve_first_symbol(name, index - 1)
+}
+
+resolve_symbol :: #force_inline proc(name: string) -> ^Binding {
+	return _resolve_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
 }
 
 analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, position: Position) {
@@ -492,4 +492,217 @@ get_position :: proc(node: Node) -> Position {
 		return n.position
 	}
 	return Position{}
+}
+
+debug_analyzer :: proc(analyzer: ^Analyzer, verbose: bool = false) {
+	fmt.println("=== ANALYZER DEBUG REPORT ===")
+	fmt.printf("Errors: %d, Warnings: %d\n", len(analyzer.errors), len(analyzer.warnings))
+	fmt.printf("Stack depth: %d\n\n", len(analyzer.stack))
+
+	// Print errors
+	if len(analyzer.errors) > 0 {
+		fmt.println("ERRORS:")
+		for error, i in analyzer.errors {
+			debug_error(error, i)
+		}
+		fmt.println()
+	}
+
+	// Print warnings
+	if len(analyzer.warnings) > 0 {
+		fmt.println("WARNINGS:")
+		for warning, i in analyzer.warnings {
+			debug_error(warning, i)
+		}
+		fmt.println()
+	}
+
+	// Print scope stack
+	fmt.println("SCOPE STACK:")
+	for scope, level in analyzer.stack {
+		debug_scope(scope, level, verbose)
+	}
+
+	fmt.println("=== END DEBUG REPORT ===\n")
+}
+
+// Debug a single error/warning
+debug_error :: proc(error: Analyzer_Error, index: int) {
+	fmt.printf(
+		"  [%d] %v at line %d, col %d: %s\n",
+		index,
+		error.type,
+		error.position.line,
+		error.position.column,
+		error.message,
+	)
+}
+
+// Debug a scope with all its bindings
+debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
+	indent := strings.repeat("  ", level)
+	fmt.printf("%sScope [%d] - %d bindings:\n", indent, level, len(scope.content))
+
+	if len(scope.content) == 0 {
+		fmt.printf("%s  (empty)\n", indent)
+		return
+	}
+
+	for binding, i in scope.content {
+		debug_binding(binding, level + 1, i, verbose)
+	}
+}
+
+// Debug a single binding
+debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose: bool = false) {
+	indent := strings.repeat("  ", indent_level)
+	kind_str := binding_kind_to_string(binding.kind)
+
+	fmt.printf("%s[%d] %s '%s'", indent, index, kind_str, binding.name)
+
+	if binding.constraint != nil {
+		fmt.printf(" (constrained)")
+	}
+
+	if binding.value != nil {
+		value_type := debug_value_type(binding.value)
+		fmt.printf(" -> %s", value_type)
+
+		if verbose {
+			fmt.printf("\n%s    Value: ", indent)
+			debug_value_data(binding.value, indent_level + 2)
+		}
+	}
+
+	fmt.println()
+}
+
+// Get the type name of a ValueData
+debug_value_type :: proc(value: ^ValueData) -> string {
+	switch v in value {
+	case ScopeData:
+		return fmt.tprintf("Scope(%d bindings)", len(v.content))
+	case StringData:
+		return "String"
+	case IntegerData:
+		return "Integer"
+	case FloatData:
+		return "Float"
+	case BoolData:
+		return "Bool"
+	case:
+		return "Unknown"
+	}
+}
+
+// Debug ValueData contents
+debug_value_data :: proc(value: ^ValueData, indent_level: int) {
+	indent := strings.repeat("  ", indent_level)
+
+	switch v in value {
+	case ScopeData:
+		fmt.printf("Scope with %d bindings:\n", len(v.content))
+		for binding, i in v.content {
+			debug_binding(binding, indent_level + 1, i, false)
+		}
+	case StringData:
+		fmt.printf("'%s'\n", v.content)
+	case IntegerData:
+		fmt.printf("%d\n", v.content)
+	case FloatData:
+		fmt.printf("%f\n", v.content)
+	case BoolData:
+		fmt.printf("%t\n", v.content)
+	case:
+		fmt.printf("Unknown value type\n")
+	}
+}
+
+// Convert binding kind to readable string
+binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
+	switch kind {
+	case .pointing_push:
+		return "PointingPush"
+	case .pointing_pull:
+		return "PointingPull"
+	case .event_push:
+		return "EventPush"
+	case .event_pull:
+		return "EventPull"
+	case .resonance_push:
+		return "ResonancePush"
+	case .resonance_pull:
+		return "ResonancePull"
+	case .product:
+		return "Product"
+	case:
+		return "Unknown"
+	}
+}
+
+// Debug specific binding by name across all scopes
+debug_find_binding :: proc(analyzer: ^Analyzer, name: string) {
+	fmt.printf("=== SEARCHING FOR BINDING '%s' ===\n", name)
+	found := false
+
+	for scope, level in analyzer.stack {
+		for binding, i in scope.content {
+			if binding.name == name {
+				fmt.printf("Found in scope %d:\n", level)
+				debug_binding(binding, 1, i, true)
+				found = true
+			}
+		}
+	}
+
+	if !found {
+		fmt.printf("Binding '%s' not found in any scope\n", name)
+	}
+	fmt.println("=== END SEARCH ===\n")
+}
+
+// Debug scope resolution for a symbol
+debug_symbol_resolution :: proc(analyzer: ^Analyzer, name: string) {
+	fmt.printf("=== SYMBOL RESOLUTION FOR '%s' ===\n", name)
+
+	// Test both resolution functions
+	first := resolve_first_symbol(name)
+	last := resolve_symbol(name)
+
+	if first != nil {
+		fmt.printf(
+			"resolve_first_symbol found: %s (%s)\n",
+			first.name,
+			binding_kind_to_string(first.kind),
+		)
+	} else {
+		fmt.printf("resolve_first_symbol: not found\n")
+	}
+
+	if last != nil {
+		fmt.printf("resolve_symbol found: %s (%s)\n", last.name, binding_kind_to_string(last.kind))
+	} else {
+		fmt.printf("resolve_symbol: not found\n")
+	}
+
+	// Show resolution path
+	fmt.println("Resolution path (top to bottom):")
+	for i := len(analyzer.stack) - 1; i >= 0; i -= 1 {
+		scope := analyzer.stack[i]
+		found_in_scope := false
+
+		for binding in scope.content {
+			if binding.name == name {
+				fmt.printf("  Scope %d: FOUND (%s)\n", i, binding_kind_to_string(binding.kind))
+				found_in_scope = true
+				break
+			}
+		}
+
+		if !found_in_scope {
+			fmt.printf("  Scope %d: not found\n", i)
+		}
+	}
+
+	fmt.println("=== END RESOLUTION ===\n")
 }
