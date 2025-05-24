@@ -113,8 +113,7 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 
 	// Build the scope hierarchy
 	analyze_node(ast)
-	fmt.println(root)
-	debug_analyzer(&analyzer)
+	debug_analyzer(&analyzer, true)
 
 	return len(analyzer.errors) == 0
 }
@@ -141,15 +140,23 @@ analyze_node :: proc(node: ^Node) {
 	case Expand:
 		process_expand(n)
 	case:
-    binding := new(Binding)
-    binding.name = ""
-    binding.kind = .pointing_push
+		binding := new(Binding)
+		binding.name = ""
+		binding.kind = .pointing_push
 		analyze_binding_value(node, binding)
 		add_binding(binding)
 	}
 }
 
 analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
+	if (node == nil) {
+		analyzer_error(
+			"A name was expected for the binding got nothing",
+			.Invalid_Binding_Value,
+			Position{},
+		)
+		return
+	}
 	#partial switch n in node {
 	case Identifier:
 		binding.name = n.name
@@ -188,6 +195,15 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 
 
 analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
+	if (node == nil) {
+		analyzer_error(
+			"A value was expexted for the binding got nothing",
+			.Invalid_Binding_Value,
+			Position{},
+		)
+
+		return
+	}
 	switch n in node {
 	case Pointing:
 		analyzer_error(
@@ -237,12 +253,6 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			.Invalid_Binding_Value,
 			n.position,
 		)
-	case Pattern:
-		analyzer_error(
-			"Cannot use a Pattern rule as a binding value",
-			.Invalid_Binding_Value,
-			n.position,
-		)
 	case Expand:
 		analyzer_error(
 			"Cannot use an Expand rule as a binding value",
@@ -255,6 +265,8 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			.Invalid_Binding_Value,
 			n.position,
 		)
+	case Pattern:
+		process_pattern(n, binding)
 	case ScopeNode:
 		process_scope_node(n, binding)
 	case Override:
@@ -276,57 +288,68 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	}
 }
 
-
 process_pointing_push :: proc(node: Pointing) {
-  binding := new(Binding)
-  binding.name = ""
-  binding.kind = .pointing_push
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .pointing_push
 	analyze_binding_name(node.name, binding)
 	analyze_binding_value(node.value, binding)
 	add_binding(binding)
 }
 
 process_pointing_pull :: proc(node: PointingPull) {
-  binding := new(Binding)
-  binding.name = ""
-  binding.kind = .pointing_pull
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .pointing_pull
 	analyze_binding_name(node.name, binding)
 	analyze_binding_value(node.value, binding)
 	add_binding(binding)
 }
 
 process_event_push :: proc(node: EventPush) {
-  binding := new(Binding)
-  binding.name = ""
-  binding.kind = .event_push
-	analyze_binding_name(node.name, binding)
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .event_push
+	if (node.name != nil) {
+		analyze_binding_name(node.name, binding)
+	}
 	analyze_binding_value(node.value, binding)
 	add_binding(binding)
 }
 
 process_event_pull :: proc(node: EventPull) {
-  binding := new(Binding)
-  binding.name = ""
-  binding.kind = .event_pull
-  analyze_binding_name(node.name, binding)
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .event_pull
+	analyze_binding_name(node.name, binding)
 	analyze_binding_value(node.value, binding)
 	add_binding(binding)
 }
 
 process_resonance_push :: proc(node: ResonancePush) {
-  binding := new(Binding)
-  binding.name = ""
-  binding.kind = .resonance_push
-	analyze_binding_name(node.name, binding)
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .resonance_push
+	if (node.name != nil) {
+		analyze_binding_name(node.name, binding)
+	}
 	analyze_binding_value(node.value, binding)
 	add_binding(binding)
 }
 
 process_resonance_pull :: proc(node: ResonancePull) {
-  binding := new(Binding)
-  binding.name = ""
-  binding.kind = .resonance_pull
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .resonance_pull
 	analyze_binding_name(node.name, binding)
+	analyze_binding_value(node.value, binding)
+	add_binding(binding)
+}
+
+process_product :: proc(node: Product) {
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .product
 	analyze_binding_value(node.value, binding)
 	add_binding(binding)
 }
@@ -334,16 +357,16 @@ process_resonance_pull :: proc(node: ResonancePull) {
 process_scope_node :: proc(scope_node: ScopeNode, binding: ^Binding) {
 	analyzer := (^Analyzer)(context.user_ptr)
 
-  scope := new(ScopeData)
-  scope.content = make([dynamic]^Binding, 0)
+	scope := new(ScopeData)
+	scope.content = make([dynamic]^Binding, 0)
 
-  binding.value = scope
-  push_scope(scope)
+	binding.value = scope
+	push_scope(scope)
 
 	for i := 0; i < len(scope_node.value); i += 1 {
 		analyze_node(&scope_node.value[i])
 	}
-  pop_scope()
+	pop_scope()
 }
 
 process_override :: proc(node: Override) {
@@ -355,9 +378,6 @@ process_override :: proc(node: Override) {
 	}
 }
 
-process_product :: proc(node: Product) {
-
-}
 
 process_branch :: proc(node: Branch) {
 	analyzer := (^Analyzer)(context.user_ptr)
@@ -366,7 +386,7 @@ process_branch :: proc(node: Branch) {
 process_identifier :: proc(identifier: Identifier) {
 }
 
-process_pattern :: proc(node: Pattern) {
+process_pattern :: proc(node: Pattern, binding: ^Binding) {
 	analyzer := (^Analyzer)(context.user_ptr)
 
 }
@@ -548,15 +568,10 @@ debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
 	indent := strings.repeat("  ", level)
 	fmt.printf("%sScope [%d] - %d bindings:\n", indent, level, len(scope.content))
 
-	if len(scope.content) == 0 {
-		fmt.printf("%s  (empty)\n", indent)
-		return
-	}
-
 	for binding, i in scope.content {
-    if(binding != nil) {
-      debug_binding(binding, level + 1, i, verbose)
-    }
+		if (binding != nil) {
+			debug_binding(binding, level + 1, i, verbose)
+		}
 	}
 }
 
@@ -564,8 +579,8 @@ debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
 debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose: bool = false) {
 	indent := strings.repeat("  ", indent_level)
 
-    kind_str := binding_kind_to_string(binding.kind)
-    fmt.printf("%s[%d] %s '%s'", indent, index, kind_str, binding.name)
+	kind_str := binding_kind_to_string(binding.kind)
+	fmt.printf("%s[%d] %s '%s'", indent, index, kind_str, binding.name)
 	if binding.constraint != nil {
 		fmt.printf(" (constrained)")
 	}
@@ -575,7 +590,7 @@ debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose:
 		fmt.printf(" -> %s", value_type)
 
 		if verbose {
-			fmt.printf("\n%s    Value: ", indent)
+			fmt.println()
 			debug_value_data(binding.value, indent_level + 2)
 		}
 	}
@@ -607,10 +622,7 @@ debug_value_data :: proc(value: ValueData, indent_level: int) {
 
 	switch v in value {
 	case ^ScopeData:
-		fmt.printf("Scope with %d bindings:\n", len(v.content))
-		for binding, i in v.content {
-			debug_binding(binding, indent_level + 1, i, false)
-		}
+		debug_scope(v, indent_level, true)
 	case ^StringData:
 		fmt.printf("'%s'\n", v.content)
 	case ^IntegerData:
