@@ -52,7 +52,7 @@ BoolData :: struct {
 }
 
 Analyzer_Error_Type :: enum {
-	Undefined,
+	Undefined_Identifier,
 	Invalid_Binding_Name,
 	Invalid_Property_Access,
 	Type_Mismatch,
@@ -382,6 +382,9 @@ process_override :: proc(node: Override, binding: ^Binding) {
 			analyze_node(&node.overrides[i])
 		}
 		pop_scope()
+	} else {
+		//TODO(andrflor): finish implement here
+		// binding := resolve_symbol(node.name)
 	}
 }
 
@@ -391,6 +394,14 @@ process_branch :: proc(node: Branch) {
 }
 
 process_identifier :: proc(identifier: Identifier) {
+	binding := resolve_symbol(identifier.name)
+	if (binding == nil) {
+		analyzer_error(
+			fmt.tprintf("Undefined identifier named %s found", identifier.name),
+			.Undefined_Identifier,
+			identifier.position,
+		)
+	}
 }
 
 process_pattern :: proc(node: Pattern, binding: ^Binding) {
@@ -429,7 +440,7 @@ process_range :: proc(node: Range) {
 
 }
 
-
+// TODO(andrflor): process for a binding instead of first symbol for override check
 resolve_first_symbol :: #force_inline proc(name: string) -> ^Binding {
 	return _resolve_first_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
 }
