@@ -270,7 +270,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case ScopeNode:
 		process_scope_node(n, binding)
 	case Override:
-		process_override(n)
+		process_override(n, binding)
 	case Identifier:
 		process_identifier(n)
 	case Constraint:
@@ -369,12 +369,19 @@ process_scope_node :: proc(scope_node: ScopeNode, binding: ^Binding) {
 	pop_scope()
 }
 
-process_override :: proc(node: Override) {
+process_override :: proc(node: Override, binding: ^Binding) {
 	analyzer := (^Analyzer)(context.user_ptr)
 
-	// Process all overrides
-	for i := 0; i < len(node.overrides); i += 1 {
-		analyze_node(&node.overrides[i])
+	if (binding.kind == .event_pull) {
+		scope := new(ScopeData)
+		scope.content = make([dynamic]^Binding, 0)
+
+		binding.value = scope
+		push_scope(scope)
+		for i := 0; i < len(node.overrides); i += 1 {
+			analyze_node(&node.overrides[i])
+		}
+		pop_scope()
 	}
 }
 
