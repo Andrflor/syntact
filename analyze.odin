@@ -272,9 +272,9 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case Override:
 		process_override(n, binding)
 	case Identifier:
-		process_identifier(n)
+		process_identifier(n, binding)
 	case Constraint:
-		process_constraint(n)
+		process_constraint(n, binding)
 	case Operator:
 		process_operator(n)
 	case Execute:
@@ -355,8 +355,6 @@ process_product :: proc(node: Product) {
 }
 
 process_scope_node :: proc(scope_node: ScopeNode, binding: ^Binding) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
 	scope := new(ScopeData)
 	scope.content = make([dynamic]^Binding, 0)
 
@@ -370,11 +368,20 @@ process_scope_node :: proc(scope_node: ScopeNode, binding: ^Binding) {
 }
 
 process_override :: proc(node: Override, binding: ^Binding) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
 	if (binding.kind == .event_pull) {
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
+
+		#partial switch name in node.source {
+		case Identifier:
+		// TODO(andrflor): handle override for even pull
+		case:
+			analyzer_error(
+				"Only identifiers can be used in even push name binding",
+				.Invalid_Binding_Name,
+				get_position(node.source^),
+			)
+		}
 
 		binding.value = scope
 		push_scope(scope)
@@ -383,8 +390,6 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		}
 		pop_scope()
 	} else {
-		//TODO(andrflor): finish implement here
-		// binding := resolve_symbol(node.name)
 	}
 }
 
@@ -393,29 +398,48 @@ process_branch :: proc(node: Branch) {
 	analyzer := (^Analyzer)(context.user_ptr)
 }
 
-process_identifier :: proc(identifier: Identifier) {
-	binding := resolve_symbol(identifier.name)
-	if (binding == nil) {
+process_identifier :: proc(identifier: Identifier, binding: ^Binding) {
+	symbol := resolve_symbol(identifier.name)
+	if (symbol == nil) {
 		analyzer_error(
 			fmt.tprintf("Undefined identifier named %s found", identifier.name),
 			.Undefined_Identifier,
 			identifier.position,
 		)
+		return
 	}
+	binding.value = symbol.value
+	binding.constraint = loosen_constraint(binding.constraint, symbol.constraint)
 }
 
 process_pattern :: proc(node: Pattern, binding: ^Binding) {
-	analyzer := (^Analyzer)(context.user_ptr)
 
 }
 
-process_constraint :: proc(node: Constraint) {
-	analyzer := (^Analyzer)(context.user_ptr)
-
-
-	// Process value if present
-	if node.value != nil {
+process_constraint :: proc(node: Constraint, binding: ^Binding) {
+	#partial switch n in node.constraint {
+	case Identifier:
+		symbol := resolve_symbol(n.name)
+		if (symbol == nil) {
+			analyzer_error(
+				fmt.tprintf("Undefined identifier named %s found", n.name),
+				.Undefined_Identifier,
+				n.position,
+			)
+			return
+		}
 	}
+}
+
+loosen_constraint :: #force_inline proc(shape1: ^Shape, shape2: ^Shape) -> ^Shape {
+	if (shape1 == nil) {
+		return shape2
+	}
+	if (shape2 == nil) {
+		return shape1
+	}
+	// TODO(andrflor): implement loosen constraint with selected
+	return nil
 }
 
 process_operator :: proc(node: Operator) {
