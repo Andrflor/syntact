@@ -440,9 +440,34 @@ process_range :: proc(node: Range) {
 
 }
 
-// TODO(andrflor): process for a binding instead of first symbol for override check
-resolve_first_symbol :: #force_inline proc(name: string) -> ^Binding {
-	return _resolve_first_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
+resolve_named_override_symbol :: #force_inline proc(name: string, binding: ^Binding) -> ^Binding {
+	if (binding.value == nil) {
+		return nil
+	}
+	#partial switch scope in binding.value {
+	case ^ScopeData:
+		for i := 0; i < len(scope.content); i += 1 {
+			if scope.content[i].name == name {
+				return scope.content[i]
+			}
+		}
+	}
+	return nil
+}
+
+resolve_named_property_symbol :: #force_inline proc(name: string, binding: ^Binding) -> ^Binding {
+	if (binding.value == nil) {
+		return nil
+	}
+	#partial switch scope in binding.value {
+	case ^ScopeData:
+		for i := len(scope.content) - 1; i >= 0; i -= 1 {
+			if scope.content[i].name == name {
+				return scope.content[i]
+			}
+		}
+	}
+	return nil
 }
 
 _resolve_symbol :: proc(name: string, index: int = 0) -> ^Binding {
@@ -460,20 +485,6 @@ _resolve_symbol :: proc(name: string, index: int = 0) -> ^Binding {
 	return _resolve_symbol(name, index - 1)
 }
 
-_resolve_first_symbol :: proc(name: string, index: int = 0) -> ^Binding {
-	if index < 0 { 	// Changed from index == 0 to index < 0
-		return nil
-	}
-
-	scope := (^Analyzer)(context.user_ptr).stack[index]
-	for i := 0; i < len(scope.content); i += 1 {
-		if scope.content[i].name == name {
-			return scope.content[i]
-		}
-	}
-
-	return _resolve_first_symbol(name, index - 1)
-}
 
 resolve_symbol :: #force_inline proc(name: string) -> ^Binding {
 	return _resolve_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
