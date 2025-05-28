@@ -445,6 +445,7 @@ process_constraint :: proc(node: Constraint, binding: ^Binding) {
     analyzer_error("Override for constraint named should be using identifier", .Invalid_Binding_Name, get_position(node.value^))
       }
       //TODO(andrflor): need to handle overrides
+      // TODO(andrflor): fix issue wrong parsed with space on list (constraints)
   case:
     analyzer_error("Constraint should be only applied to identifier with or without overrides or be empty", .Invalid_Binding_Name, get_position(node.value^))
 	}
