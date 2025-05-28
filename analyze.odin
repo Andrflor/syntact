@@ -70,6 +70,7 @@ Binding_Kind :: enum {
 	resonance_push,
 	resonance_pull,
 	product,
+  event_source,
 }
 
 Analyzer_Error :: struct {
@@ -371,10 +372,14 @@ process_override :: proc(node: Override, binding: ^Binding) {
 	if (binding.kind == .event_pull) {
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
-
+		binding.value = scope
+		push_scope(scope)
 		#partial switch name in node.source {
 		case Identifier:
-		// TODO(andrflor): handle override for even pull
+      identifier := new(Binding)
+      binding.name = name.name
+      binding.kind = .event_source
+      add_binding(identifier)
 		case:
 			analyzer_error(
 				"Only identifiers can be used in even push name binding",
@@ -382,14 +387,12 @@ process_override :: proc(node: Override, binding: ^Binding) {
 				get_position(node.source^),
 			)
 		}
-
-		binding.value = scope
-		push_scope(scope)
 		for i := 0; i < len(node.overrides); i += 1 {
 			analyze_node(&node.overrides[i])
 		}
 		pop_scope()
 	} else {
+
 	}
 }
 
@@ -426,8 +429,24 @@ process_constraint :: proc(node: Constraint, binding: ^Binding) {
 				.Undefined_Identifier,
 				n.position,
 			)
-			return
 		}
+	}
+  if(node.value == nil) {
+    return
+  }
+  #partial switch n in node.value {
+	case Identifier:
+      binding.name = n.name
+  case Override:
+      #partial switch o in n.source {
+	case Identifier:
+      binding.name = o.name
+  case:
+    analyzer_error("Override for constraint named should be using identifier", .Invalid_Binding_Name, get_position(node.value^))
+      }
+      //TODO(andrflor): need to handle overrides
+  case:
+    analyzer_error("Constraint should be only applied to identifier with or without overrides or be empty", .Invalid_Binding_Name, get_position(node.value^))
 	}
 }
 
@@ -700,6 +719,8 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 		return "EventPush"
 	case .event_pull:
 		return "EventPull"
+  case .event_source:
+    return "EventSource"
 	case .resonance_push:
 		return "ResonancePush"
 	case .resonance_pull:

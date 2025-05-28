@@ -95,6 +95,6 @@ char_binding := Binding {
 }
 
 string_binding := Binding {
-	name = "string",
+	name = "String",
 	kind = .pointing_push,
 }
