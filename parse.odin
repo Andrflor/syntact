@@ -2415,24 +2415,24 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
         position = position, // Store position
     }
 
+    next_space := is_space(parser.lexer.source[parser.current_token.position.offset+1])
     // Move past :
     advance_token(parser)
 
-    // Parse value if present, otherwise it's an empty constraint
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        // Empty constraint (Type:)
-        constraint.value = nil
-    } else if is_expression_start(parser.current_token.kind) {
-        // Constraint with value (Type: value)
-        // Use a different precedence level to ensure constraints bind tighter than pointings
-        if value := parse_expression(parser, .CALL); value != nil {
-            constraint.value = value
+    if(!next_space) {
+        // Parse value if present, otherwise it's an empty constraint
+        if parser.current_token.kind == .RightBrace ||
+          parser.current_token.kind == .EOF ||
+          parser.current_token.kind == .Newline {
+            // Empty constraint (Type:)
+            constraint.value = nil
+        } else if is_expression_start(parser.current_token.kind) {
+            // Constraint with value (Type: value)
+            // Use a different precedence level to ensure constraints bind tighter than pointings
+            if value := parse_expression(parser, .CALL); value != nil {
+                constraint.value = value
+            }
         }
-    } else {
-        // No value, but it's allowed
-        constraint.value = nil
     }
 
     result := new(Node)
