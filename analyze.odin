@@ -70,7 +70,7 @@ Binding_Kind :: enum {
 	resonance_push,
 	resonance_pull,
 	product,
-  event_source,
+	event_source,
 }
 
 Analyzer_Error :: struct {
@@ -172,19 +172,8 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 				get_position(n.value^),
 			)
 		}
-		#partial switch v in n.constraint {
-		case External:
-		case Execute:
-		case ScopeNode:
-		case Override:
-		case Identifier:
-		case:
-			analyzer_error(
-				"The : constraint value must be a valid form",
-				.Invalid_Constaint_Value,
-				get_position(n.value^),
-			)
-		}
+		process_constraint_shape(n.constraint, binding)
+
 	case:
 		analyzer_error(
 			"The binding name can either be a constraint or an identifier",
@@ -376,10 +365,10 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		push_scope(scope)
 		#partial switch name in node.source {
 		case Identifier:
-      identifier := new(Binding)
-      binding.name = name.name
-      binding.kind = .event_source
-      add_binding(identifier)
+			identifier := new(Binding)
+			binding.name = name.name
+			binding.kind = .event_source
+			add_binding(identifier)
 		case:
 			analyzer_error(
 				"Only identifiers can be used in even push name binding",
@@ -419,8 +408,12 @@ process_pattern :: proc(node: Pattern, binding: ^Binding) {
 
 }
 
-process_constraint :: proc(node: Constraint, binding: ^Binding) {
-	#partial switch n in node.constraint {
+process_constraint_shape :: proc(node: ^Node, binding: ^Binding) {
+	#partial switch n in node {
+	case External:
+	case Execute:
+	case ScopeNode:
+	case Override:
 	case Identifier:
 		symbol := resolve_symbol(n.name)
 		if (symbol == nil) {
@@ -430,24 +423,42 @@ process_constraint :: proc(node: Constraint, binding: ^Binding) {
 				n.position,
 			)
 		}
+
+	case:
+		analyzer_error(
+			"The : constraint value must be a valid form",
+			.Invalid_Constaint_Value,
+			get_position(node^),
+		)
 	}
-  if(node.value == nil) {
-    return
-  }
-  #partial switch n in node.value {
+}
+
+process_constraint :: proc(node: Constraint, binding: ^Binding) {
+	process_constraint_shape(node.constraint, binding)
+	if (node.value == nil) {
+		return
+	}
+	#partial switch n in node.value {
 	case Identifier:
-      binding.name = n.name
-  case Override:
-      #partial switch o in n.source {
-	case Identifier:
-      binding.name = o.name
-  case:
-    analyzer_error("Override for constraint named should be using identifier", .Invalid_Binding_Name, get_position(node.value^))
-      }
-      //TODO(andrflor): need to handle overrides
-      // TODO(andrflor): fix issue wrong parsed with space on list (constraints)
-  case:
-    analyzer_error("Constraint should be only applied to identifier with or without overrides or be empty", .Invalid_Binding_Name, get_position(node.value^))
+		binding.name = n.name
+	case Override:
+		#partial switch o in n.source {
+		case Identifier:
+			binding.name = o.name
+		case:
+			analyzer_error(
+				"Override for constraint named should be using identifier",
+				.Invalid_Binding_Name,
+				get_position(node.value^),
+			)
+		}
+	//TODO(andrflor): need to handle overrides
+	case:
+		analyzer_error(
+			"Constraint should be only applied to identifier with or without overrides or be empty",
+			.Invalid_Binding_Name,
+			get_position(node.value^),
+		)
 	}
 }
 
@@ -720,8 +731,8 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 		return "EventPush"
 	case .event_pull:
 		return "EventPull"
-  case .event_source:
-    return "EventSource"
+	case .event_source:
+		return "EventSource"
 	case .resonance_push:
 		return "ResonancePush"
 	case .resonance_pull:
