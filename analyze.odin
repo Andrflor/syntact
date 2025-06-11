@@ -15,7 +15,7 @@ Analyzer_Mode :: enum {}
 Binding :: struct {
 	name:       string,
 	kind:       Binding_Kind,
-	constraint: ^Shape,
+	constraint: ^ScopeData,
 	value:      ValueData,
 }
 
@@ -56,6 +56,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Binding_Name,
 	Invalid_Property_Access,
 	Type_Mismatch,
+	Invalid_Constaint,
 	Invalid_Constaint_Name,
 	Invalid_Constaint_Value,
 	Circular_Reference,
@@ -172,7 +173,7 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 				get_position(n.value^),
 			)
 		}
-		process_constraint_shape(n.constraint, binding)
+		process_constraint(n.constraint, binding)
 
 	case:
 		analyzer_error(
@@ -276,6 +277,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case External:
 		process_external(n)
 	}
+  typecheck_binding(binding)
 }
 
 process_pointing_push :: proc(node: Pointing) {
@@ -401,14 +403,40 @@ process_identifier :: proc(identifier: Identifier, binding: ^Binding) {
 		return
 	}
 	binding.value = symbol.value
-	binding.constraint = loosen_constraint(binding.constraint, symbol.constraint)
 }
 
 process_pattern :: proc(node: Pattern, binding: ^Binding) {
 
 }
 
-process_constraint_shape :: proc(node: ^Node, binding: ^Binding) {
+emptyScope := ScopeData{content= make([dynamic]^Binding, 0)};
+
+typecheck_binding :: #force_inline proc(binding: ^Binding) {
+  if(binding.constraint == nil) {
+    return;
+  }
+  if(binding.value == nil) {
+    binding.value = resolve_default(binding.constraint)
+  }
+  else {
+
+  }
+}
+
+resolve_default :: #force_inline proc(constraint: ^ScopeData)  -> ValueData {
+
+}
+
+
+resolve_constraint:: #force_inline proc(node: ^Node) -> ^ScopeData {
+  #partial switch c in compile_time_resolve(node) {
+  case ^ScopeData:
+    return c
+  }
+  return &emptyScope
+}
+
+compile_time_resolve:: proc(node: ^Node) -> ^ValueData {
 	#partial switch n in node {
 	case External:
 	case Execute:
@@ -431,10 +459,20 @@ process_constraint_shape :: proc(node: ^Node, binding: ^Binding) {
 			get_position(node^),
 		)
 	}
+
+  return nil;
 }
 
+
 process_constraint :: proc(node: Constraint, binding: ^Binding) {
-	process_constraint_shape(node.constraint, binding)
+  if(node.constraint == nil) {
+			analyzer_error(
+				"Constraint node without a specific constraint is not allowed",
+				.Invalid_Constaint,
+				get_position(node.value^),
+			)
+  }
+  binding.constraint = resolve_constraint(node.constraint)
 	if (node.value == nil) {
 		return
 	}
@@ -462,16 +500,7 @@ process_constraint :: proc(node: Constraint, binding: ^Binding) {
 	}
 }
 
-loosen_constraint :: #force_inline proc(shape1: ^Shape, shape2: ^Shape) -> ^Shape {
-	if (shape1 == nil) {
-		return shape2
-	}
-	if (shape2 == nil) {
-		return shape1
-	}
-	// TODO(andrflor): implement loosen constraint with selected
-	return nil
-}
+
 
 process_operator :: proc(node: Operator) {
 }
@@ -492,7 +521,6 @@ process_external :: proc(node: External) {
 }
 
 process_range :: proc(node: Range) {
-
 }
 
 resolve_named_override_symbol :: #force_inline proc(name: string, binding: ^Binding) -> ^Binding {
