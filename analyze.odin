@@ -423,8 +423,20 @@ typecheck_binding :: #force_inline proc(binding: ^Binding) {
 	if (binding.value == nil) {
 		binding.value = resolve_default(binding.constraint)
 	} else {
-
+		for i in 0 ..< len(binding.constraint.content) {
+			if (binding.constraint.content[i].kind == .product) {
+				if typecheck(binding.constraint.content[i].value, binding.value) {
+					return
+				}
+			}
+		}
+		analyzer_error("The constraint do not match the given value", .Type_Mismatch, Position{})
 	}
+}
+
+typecheck :: #force_inline proc(constraintShape: ValueData, valueShape: ValueData) -> bool {
+	// TODO(andrflor): implement typecheck
+	return true
 }
 
 resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
@@ -474,7 +486,7 @@ compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 }
 
 
-process_constraint :: proc(node: Constraint, binding: ^Binding) {
+process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 	if (node.constraint == nil) {
 		analyzer_error(
 			"Constraint node without a specific constraint is not allowed",
