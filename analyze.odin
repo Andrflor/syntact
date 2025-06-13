@@ -29,7 +29,10 @@ ValueData :: union {
 	^IntegerData,
 	^FloatData,
 	^BoolData,
+	Empty,
 }
+
+Empty :: struct {}
 
 ScopeData :: struct {
 	content: [dynamic]^Binding,
@@ -277,7 +280,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case External:
 		process_external(n)
 	}
-  typecheck_binding(binding)
+	typecheck_binding(binding)
 }
 
 process_pointing_push :: proc(node: Pointing) {
@@ -409,39 +412,46 @@ process_pattern :: proc(node: Pattern, binding: ^Binding) {
 
 }
 
-emptyScope := ScopeData{content= make([dynamic]^Binding, 0)};
+emptyScope := ScopeData {
+	content = make([dynamic]^Binding, 0),
+}
 
 typecheck_binding :: #force_inline proc(binding: ^Binding) {
-  if(binding.constraint == nil) {
-    return;
-  }
-  if(binding.value == nil) {
-    binding.value = resolve_default(binding.constraint)
-  }
-  else {
+	if (binding.constraint == nil) {
+		return
+	}
+	if (binding.value == nil) {
+		binding.value = resolve_default(binding.constraint)
+	} else {
 
-  }
+	}
 }
 
-resolve_default :: #force_inline proc(constraint: ^ScopeData)  -> ValueData {
-
+resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
+	for i in 0 ..< len(constraint.content) {
+		if (constraint.content[i].kind == .product) {
+			return constraint.content[i].value
+		}
+	}
+	return Empty{}
 }
 
 
-resolve_constraint:: #force_inline proc(node: ^Node) -> ^ScopeData {
-  #partial switch c in compile_time_resolve(node) {
-  case ^ScopeData:
-    return c
-  }
-  return &emptyScope
+resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
+	#partial switch c in compile_time_resolve(node) {
+	case ^ScopeData:
+		return c
+	}
+	return &emptyScope
 }
 
-compile_time_resolve:: proc(node: ^Node) -> ^ValueData {
+compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 	#partial switch n in node {
 	case External:
 	case Execute:
 	case ScopeNode:
 	case Override:
+		target := compile_time_resolve(n.source)
 	case Identifier:
 		symbol := resolve_symbol(n.name)
 		if (symbol == nil) {
@@ -460,19 +470,19 @@ compile_time_resolve:: proc(node: ^Node) -> ^ValueData {
 		)
 	}
 
-  return nil;
+	return nil
 }
 
 
 process_constraint :: proc(node: Constraint, binding: ^Binding) {
-  if(node.constraint == nil) {
-			analyzer_error(
-				"Constraint node without a specific constraint is not allowed",
-				.Invalid_Constaint,
-				get_position(node.value^),
-			)
-  }
-  binding.constraint = resolve_constraint(node.constraint)
+	if (node.constraint == nil) {
+		analyzer_error(
+			"Constraint node without a specific constraint is not allowed",
+			.Invalid_Constaint,
+			get_position(node.value^),
+		)
+	}
+	binding.constraint = resolve_constraint(node.constraint)
 	if (node.value == nil) {
 		return
 	}
@@ -499,7 +509,6 @@ process_constraint :: proc(node: Constraint, binding: ^Binding) {
 		)
 	}
 }
-
 
 
 process_operator :: proc(node: Operator) {
@@ -723,6 +732,8 @@ debug_value_type :: proc(value: ValueData) -> string {
 		return "Float"
 	case ^BoolData:
 		return "Bool"
+	case Empty:
+		return "Empty"
 	case:
 		return "Unknown"
 	}
@@ -743,6 +754,8 @@ debug_value_data :: proc(value: ValueData, indent_level: int) {
 		fmt.printf("%f\n", v.content)
 	case ^BoolData:
 		fmt.printf("%t\n", v.content)
+	case Empty:
+		fmt.printf("Empty value type\n")
 	case:
 		fmt.printf("Unknown value type\n")
 	}
