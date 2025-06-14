@@ -44,10 +44,30 @@ StringData :: struct {
 
 IntegerData :: struct {
 	content: u64,
+	kind:    IntegerKind,
+}
+
+IntegerKind :: enum {
+	none,
+	u8,
+	i8,
+	u16,
+	i16,
+	u32,
+	i32,
+	u64,
+	i64,
+}
+
+FloatKind :: enum {
+	none,
+	f32,
+	f64,
 }
 
 FloatData :: struct {
 	content: f64,
+	kind:    FloatKind,
 }
 
 BoolData :: struct {
@@ -434,9 +454,85 @@ typecheck_binding :: #force_inline proc(binding: ^Binding) {
 	}
 }
 
-typecheck :: #force_inline proc(constraintShape: ValueData, valueShape: ValueData) -> bool {
+typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool {
 	// TODO(andrflor): implement typecheck
-	return true
+	switch val in value {
+	case ^ScopeData:
+		#partial switch constr in constraint {
+		case ^ScopeData:
+		case:
+			return false
+		}
+	case ^StringData:
+		#partial switch constr in constraint {
+		case ^StringData:
+			return true
+		case:
+			return false
+		}
+	case ^IntegerData:
+		#partial switch constr in constraint {
+		case ^IntegerData:
+			switch kind in val.kind {
+			case .none:
+
+			case .u8:
+				#partial switch kind in constr.kind {
+				case .u8:
+				}
+			case .i8:
+			case .u16:
+			case .i16:
+			case .u32:
+			case .i32:
+			case .u64:
+			case .i64:
+
+			}
+		case:
+			return false
+		}
+	case ^FloatData:
+		#partial switch constr in constraint {
+		case ^FloatData:
+			switch kind in val.kind {
+			case .none:
+				#partial switch kind in constr.kind {
+				case .f32:
+					// TODO(andrflor): add the check for the f32 size match
+					return false
+				case:
+					return true
+				}
+			case .f32:
+				return true
+			case .f64:
+				#partial switch kind in constr.kind {
+				case .f32:
+					return false
+				case:
+					return true
+				}
+			case:
+				return false
+			}
+		}
+	case ^BoolData:
+		#partial switch constr in constraint {
+		case ^BoolData:
+			return true
+		case:
+			return false
+		}
+	case Empty:
+		#partial switch constr in constraint {
+		case Empty:
+			return true
+		case:
+			return false
+		}
+	}
+	return false
 }
 
 resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
