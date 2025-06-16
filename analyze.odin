@@ -196,7 +196,7 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 				get_position(n.value^),
 			)
 		}
-		process_constraint(n.constraint, binding)
+		process_constraint(n, binding)
 
 	case:
 		analyzer_error(
@@ -460,6 +460,7 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 	case ^ScopeData:
 		#partial switch constr in constraint {
 		case ^ScopeData:
+
 		case:
 			return false
 		}
@@ -473,11 +474,11 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 	case ^IntegerData:
 		#partial switch constr in constraint {
 		case ^IntegerData:
-			switch kind in val.kind {
+			switch val.kind {
 			case .none:
 
 			case .u8:
-				#partial switch kind in constr.kind {
+				#partial switch constr.kind {
 				case .u8:
 				}
 			case .i8:
@@ -495,9 +496,9 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 	case ^FloatData:
 		#partial switch constr in constraint {
 		case ^FloatData:
-			switch kind in val.kind {
+			switch val.kind {
 			case .none:
-				#partial switch kind in constr.kind {
+				#partial switch constr.kind {
 				case .f32:
 					// TODO(andrflor): add the check for the f32 size match
 					return false
@@ -507,7 +508,7 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 			case .f32:
 				return true
 			case .f64:
-				#partial switch kind in constr.kind {
+				#partial switch constr.kind {
 				case .f32:
 					return false
 				case:
