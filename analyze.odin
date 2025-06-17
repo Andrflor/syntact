@@ -2,6 +2,7 @@ package compiler
 
 import "core:fmt"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 
 Analyzer :: struct {
@@ -294,7 +295,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case Execute:
 		process_execute(n)
 	case Literal:
-		process_literal(n)
+		process_literal(n, binding)
 	case Property:
 		process_property(n)
 	case External:
@@ -474,23 +475,31 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 	case ^IntegerData:
 		#partial switch constr in constraint {
 		case ^IntegerData:
-			switch val.kind {
+			#partial switch val.kind {
 			case .none:
-
-			case .u8:
-				#partial switch constr.kind {
+				switch constr.kind {
+				case .none:
+					return true
+				case .i8:
+					return val.content < 256
 				case .u8:
-				}
-			case .i8:
-			case .u16:
-			case .i16:
-			case .u32:
-			case .i32:
-			case .u64:
-			case .i64:
+					return val.content < 256
+				case .u16:
+					return val.content < 65536
+				case .i16:
+					return val.content < 65536
+				case .u32:
+					return val.content < 4294967296
+				case .i32:
+					return val.content < 4294967296
+				case .u64:
+					return true
+				case .i64:
+					return true
 
+				}
+				return constr.kind == .none || constr.kind == val.kind
 			}
-		case:
 			return false
 		}
 	case ^FloatData:
@@ -500,8 +509,7 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 			case .none:
 				#partial switch constr.kind {
 				case .f32:
-					// TODO(andrflor): add the check for the f32 size match
-					return false
+					return val.content < 4294967296
 				case:
 					return true
 				}
@@ -628,7 +636,51 @@ process_operator :: proc(node: Operator) {
 process_execute :: proc(node: Execute) {
 }
 
-process_literal :: proc(node: Literal) {
+process_literal :: proc(node: Literal, binding: ^Binding) {
+
+	switch node.kind {
+	case .Integer:
+		value := new(IntegerData)
+		content, ok := strconv.parse_int(node.value)
+		if (ok) {
+			value.content = u64(content)
+		}
+		value.kind = .none
+		binding.value = value
+	case .Float:
+		value := new(IntegerData)
+		content, ok := strconv.parse_f64(node.value)
+		if (ok) {
+			value.content = u64(content)
+		}
+		value.kind = .none
+		binding.value = value
+	case .String:
+		value := new(StringData)
+		value.content = node.value
+		binding.value = value
+	case .Bool:
+		value := new(BoolData)
+		value.content = node.value == "true"
+		binding.value = value
+	case .Hexadecimal:
+		value := new(IntegerData)
+		content, ok := strconv.parse_int(node.value, 16)
+		if (ok) {
+			value.content = u64(content)
+		}
+		value.kind = .none
+		binding.value = value
+	case .Binary:
+		value := new(IntegerData)
+		content, ok := strconv.parse_int(node.value, 2)
+		if (ok) {
+			value.content = u64(content)
+		}
+		value.kind = .none
+		binding.value = value
+
+	}
 }
 
 process_property :: proc(node: Property) {
