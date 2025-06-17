@@ -570,6 +570,7 @@ compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 				n.position,
 			)
 		}
+		return &symbol.value
 
 	case:
 		analyzer_error(
@@ -617,6 +618,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 			get_position(node.value^),
 		)
 	}
+
 }
 
 
