@@ -486,14 +486,14 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		}
 		pop_scope()
 	} else {
-		// TODO: Handle non-event-pull overrides
+		// TODO(andrflor): Handle non-event-pull overrides
 	}
 }
 
 // Processes a branch node (conditional logic)
 process_branch :: proc(node: Branch) {
 	analyzer := (^Analyzer)(context.user_ptr)
-	// TODO: Implement branch processing
+	// TODO(andrflor): Implement branch processing
 }
 
 // Processes an identifier reference
@@ -515,7 +515,7 @@ process_identifier :: proc(identifier: Identifier, binding: ^Binding) {
 
 // Processes a pattern node (pattern matching)
 process_pattern :: proc(node: Pattern, binding: ^Binding) {
-	// TODO: Implement pattern processing
+	// TODO(andrflor): Implement pattern processing
 }
 
 // Empty scope used as a default when constraint resolution fails
@@ -671,13 +671,13 @@ resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
 compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 	#partial switch n in node {
 	case External:
-		// TODO: Handle external references
+		// TODO(andrflor): Handle external references
 	case Execute:
-		// TODO: Handle execution blocks
+		// TODO(andrflor): Handle execution blocks
 	case ScopeNode:
-		// TODO: Handle scope nodes
+		// TODO(andrflor): Handle scope nodes
 	case Override:
-		// TODO: Handle override resolution
+		// TODO(andrflor): Handle override resolution
 		target := compile_time_resolve(n.source)
 	case Identifier:
 		// Resolve identifier to its symbol
@@ -734,7 +734,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 				get_position(node.value^),
 			)
 		}
-		//TODO(andrflor): need to handle overrides
+		//TODO(andrflor)(andrflor): need to handle overrides
 	case:
 		analyzer_error(
 			"Constraint should be only applied to identifier with or without overrides or be empty",
@@ -746,12 +746,12 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 
 // Processes operator nodes (arithmetic, logical, etc.)
 process_operator :: proc(node: Operator) {
-	// TODO: Implement operator processing
+	// TODO(andrflor): Implement operator processing
 }
 
 // Processes execution blocks
 process_execute :: proc(node: Execute) {
-	// TODO: Implement execution block processing
+	// TODO(andrflor): Implement execution block processing
 }
 
 // Processes literal values (numbers, strings, booleans)
@@ -803,22 +803,22 @@ process_literal :: proc(node: Literal, binding: ^Binding) {
 
 // Processes property access nodes (object.property)
 process_property :: proc(node: Property) {
-	// TODO: Implement property access processing
+	// TODO(andrflor): Implement property access processing
 }
 
 // Processes expand nodes (unpacking/spreading)
 process_expand :: proc(node: Expand) {
-	// TODO: Implement expand processing
+	// TODO(andrflor): Implement expand processing
 }
 
 // Processes external reference nodes
 process_external :: proc(node: External) {
-	// TODO: Implement external reference processing
+	// TODO(andrflor): Implement external reference processing
 }
 
 // Processes range nodes (1..10, etc.)
 process_range :: proc(node: Range) {
-	// TODO: Implement range processing
+	// TODO(andrflor): Implement range processing
 }
 
 // Resolves a named symbol within a specific binding's scope
