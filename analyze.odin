@@ -455,13 +455,21 @@ typecheck_binding :: #force_inline proc(binding: ^Binding) {
 	}
 }
 
-typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool {
+typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	// TODO(andrflor): implement typecheck
 	switch val in value {
 	case ^ScopeData:
 		#partial switch constr in constraint {
 		case ^ScopeData:
-
+			valid := true
+			for i in 0 ..< len(val.content) {
+				if (constr.content[i].value != nil) {
+					valid =
+						constr.content[i].name == val.content[i].name &&
+						typecheck(constr.content[i].value, val.content[i].value)
+				}
+			}
+			return valid
 		case:
 			return false
 		}
@@ -498,9 +506,8 @@ typecheck :: #force_inline proc(constraint: ValueData, value: ValueData) -> bool
 					return true
 
 				}
-				return constr.kind == .none || constr.kind == val.kind
 			}
-			return false
+			return constr.kind == .none || constr.kind == val.kind
 		}
 	case ^FloatData:
 		#partial switch constr in constraint {
@@ -826,11 +833,11 @@ debug_analyzer :: proc(analyzer: ^Analyzer, verbose: bool = false) {
 		fmt.println()
 	}
 
-	// Print scope stack
-	fmt.println("SCOPE STACK:")
-	for scope, level in analyzer.stack {
-		debug_scope(scope, level, verbose)
-	}
+	// // Print scope stack
+	// fmt.println("SCOPE STACK:")
+	// for scope, level in analyzer.stack {
+	// 	debug_scope(scope, level, verbose)
+	// }
 
 	fmt.println("=== END DEBUG REPORT ===\n")
 }
