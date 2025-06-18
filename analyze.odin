@@ -456,7 +456,6 @@ typecheck_binding :: #force_inline proc(binding: ^Binding) {
 }
 
 typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
-	// TODO(andrflor): implement typecheck
 	switch val in value {
 	case ^ScopeData:
 		#partial switch constr in constraint {
@@ -509,6 +508,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			}
 			return constr.kind == .none || constr.kind == val.kind
 		}
+		return false
 	case ^FloatData:
 		#partial switch constr in constraint {
 		case ^FloatData:
@@ -644,7 +644,6 @@ process_execute :: proc(node: Execute) {
 }
 
 process_literal :: proc(node: Literal, binding: ^Binding) {
-
 	switch node.kind {
 	case .Integer:
 		value := new(IntegerData)
@@ -655,10 +654,10 @@ process_literal :: proc(node: Literal, binding: ^Binding) {
 		value.kind = .none
 		binding.value = value
 	case .Float:
-		value := new(IntegerData)
+		value := new(FloatData)
 		content, ok := strconv.parse_f64(node.value)
 		if (ok) {
-			value.content = u64(content)
+			value.content = content
 		}
 		value.kind = .none
 		binding.value = value
