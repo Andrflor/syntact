@@ -5,113 +5,140 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 
+// Main analyzer structure that maintains the analysis state
+// Contains error tracking and a scope stack for symbol resolution
 Analyzer :: struct {
-	errors:   [dynamic]Analyzer_Error,
-	warnings: [dynamic]Analyzer_Error,
-	stack:    [dynamic]^ScopeData,
+	errors:   [dynamic]Analyzer_Error,  // Collection of semantic errors found during analysis
+	warnings: [dynamic]Analyzer_Error,  // Collection of warnings found during analysis
+	stack:    [dynamic]^ScopeData,      // Stack of nested scopes for symbol resolution
 }
 
+// Enumeration for different analyzer modes (currently empty but ready for extension)
 Analyzer_Mode :: enum {}
 
+// Represents a binding (variable/symbol) in the language
+// Contains the name, type of binding, optional type constraint, and value
 Binding :: struct {
-	name:       string,
-	kind:       Binding_Kind,
-	constraint: ^ScopeData,
-	value:      ValueData,
+	name:       string,         // The identifier name of the binding
+	kind:       Binding_Kind,   // What type of binding this is (push/pull/event/etc.)
+	constraint: ^ScopeData,     // Optional type constraint for the binding
+	value:      ValueData,      // The actual value/data associated with this binding
 }
 
+// Shape structure for handling collections of values (currently unused)
 Shape :: struct {
 	content: [dynamic]^ValueData,
 }
 
+// Union type representing all possible value types in the language
+// This is the core data representation for runtime values
 ValueData :: union {
-	^ScopeData,
-	^StringData,
-	^IntegerData,
-	^FloatData,
-	^BoolData,
-	Empty,
+	^ScopeData,    // Reference to a scope (nested bindings)
+	^StringData,   // String literal value
+	^IntegerData,  // Integer literal value
+	^FloatData,    // Float literal value
+	^BoolData,     // Boolean literal value
+	Empty,         // Empty/null value
 }
 
+// Represents an empty/null value
 Empty :: struct {}
 
+// Represents a scope containing multiple bindings
+// Scopes are used for namespacing and variable resolution
 ScopeData :: struct {
-	content: [dynamic]^Binding,
+	content: [dynamic]^Binding, // Array of bindings within this scope
 }
 
+// String literal data with content
 StringData :: struct {
 	content: string,
 }
 
+// Integer literal data with content and specific integer type
 IntegerData :: struct {
-	content: u64,
-	kind:    IntegerKind,
+	content: u64,          // The actual integer value
+	kind:    IntegerKind,  // Specific integer type (u8, i32, etc.)
 }
 
+// Enumeration of supported integer types
 IntegerKind :: enum {
-	none,
-	u8,
-	i8,
-	u16,
-	i16,
-	u32,
-	i32,
-	u64,
-	i64,
+	none, // Unspecified integer type
+	u8,   // 8-bit unsigned integer
+	i8,   // 8-bit signed integer
+	u16,  // 16-bit unsigned integer
+	i16,  // 16-bit signed integer
+	u32,  // 32-bit unsigned integer
+	i32,  // 32-bit signed integer
+	u64,  // 64-bit unsigned integer
+	i64,  // 64-bit signed integer
 }
 
+// Enumeration of supported floating-point types
 FloatKind :: enum {
-	none,
-	f32,
-	f64,
+	none, // Unspecified float type
+	f32,  // 32-bit float
+	f64,  // 64-bit float
 }
 
+// Float literal data with content and specific float type
 FloatData :: struct {
-	content: f64,
-	kind:    FloatKind,
+	content: f64,        // The actual float value
+	kind:    FloatKind,  // Specific float type
 }
 
+// Boolean literal data
 BoolData :: struct {
 	content: bool,
 }
 
+// Enumeration of all possible analyzer error types
 Analyzer_Error_Type :: enum {
-	Undefined_Identifier,
-	Invalid_Binding_Name,
-	Invalid_Property_Access,
-	Type_Mismatch,
-	Invalid_Constaint,
-	Invalid_Constaint_Name,
-	Invalid_Constaint_Value,
-	Circular_Reference,
-	Invalid_Binding_Value,
+	Undefined_Identifier,     // Reference to undeclared identifier
+	Invalid_Binding_Name,     // Invalid syntax for binding names
+	Invalid_Property_Access,  // Invalid property access syntax
+	Type_Mismatch,           // Type constraint violation
+	Invalid_Constaint,       // Invalid constraint syntax
+	Invalid_Constaint_Name,  // Invalid constraint name
+	Invalid_Constaint_Value, // Invalid constraint value
+	Circular_Reference,      // Circular dependency detected
+	Invalid_Binding_Value,   // Invalid value for binding
 }
 
+// Enumeration of different binding types in the language
+// These represent different semantic categories of bindings
 Binding_Kind :: enum {
-	pointing_push,
-	pointing_pull,
-	event_push,
-	event_pull,
-	resonance_push,
-	resonance_pull,
-	product,
-	event_source,
+	pointing_push,   // Push-style pointing binding
+	pointing_pull,   // Pull-style pointing binding
+	event_push,      // Push-style event binding
+	event_pull,      // Pull-style event binding
+	resonance_push,  // Push-style resonance binding
+	resonance_pull,  // Pull-style resonance binding
+	product,         // Product/output binding
+	event_source,    // Event source binding
 }
 
+// Structure representing an analyzer error with context
 Analyzer_Error :: struct {
-	type:     Analyzer_Error_Type,
-	message:  string,
-	position: Position,
+	type:     Analyzer_Error_Type, // The type of error
+	message:  string,              // Human-readable error message
+	position: Position,            // Source code position where error occurred
 }
 
+// Pushes a new scope onto the scope stack
+// Used when entering nested scopes (functions, blocks, etc.)
 push_scope :: #force_inline proc(data: ^ScopeData) {
 	append(&(^Analyzer)(context.user_ptr).stack, data)
 }
 
+// Pops the current scope from the scope stack
+// Used when exiting nested scopes
 pop_scope :: #force_inline proc() {
 	pop(&(^Analyzer)(context.user_ptr).stack)
 }
 
+// Adds a binding to the current (top) scope
+// New bindings are always added to the most recent scope
 add_binding :: #force_inline proc(binding: ^Binding) {
 	append(
 		&(^Analyzer)(context.user_ptr).stack[len((^Analyzer)(context.user_ptr).stack) - 1].content,
@@ -119,35 +146,50 @@ add_binding :: #force_inline proc(binding: ^Binding) {
 	)
 }
 
+// Main entry point for semantic analysis
+// Takes a cache and AST root node, returns true if analysis succeeded (no errors)
 analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	if ast == nil {
 		return false
 	}
 
+	// Create the root scope for global bindings
 	root := new(ScopeData)
 	root.content = make([dynamic]^Binding, 0)
 
+	// Initialize the analyzer with empty error collections and scope stack
 	analyzer := Analyzer {
 		errors   = make([dynamic]Analyzer_Error, 0),
 		warnings = make([dynamic]Analyzer_Error, 0),
 		stack    = make([dynamic]^ScopeData, 0),
 	}
 
+	// Set up the context for analyzer procedures to access the analyzer state
 	context.user_ptr = &analyzer
+
+	// Push builtin scope first (contains built-in functions/types)
 	push_scope(&builtin)
+	// Push the root scope for user-defined bindings
 	push_scope(root)
 
-	// Build the scope hierarchy
+	// Process the entire AST starting from the root
 	analyze_node(ast)
+
+	// Print debug information about the analysis results
 	debug_analyzer(&analyzer, true)
 
+	// Return true if no errors were found
 	return len(analyzer.errors) == 0
 }
 
+// Recursive procedure to analyze individual AST nodes
+// Dispatches to specific processing procedures based on node type
 analyze_node :: proc(node: ^Node) {
 	if node == nil {
 		return
 	}
+
+	// Pattern match on the node type and dispatch to appropriate handler
 	#partial switch n in node {
 	case Pointing:
 		process_pointing_push(n)
@@ -166,6 +208,7 @@ analyze_node :: proc(node: ^Node) {
 	case Expand:
 		process_expand(n)
 	case:
+		// Default case: create an anonymous binding for unhandled node types
 		binding := new(Binding)
 		binding.name = ""
 		binding.kind = .pointing_push
@@ -174,6 +217,8 @@ analyze_node :: proc(node: ^Node) {
 	}
 }
 
+// Analyzes and validates the name part of a binding
+// Handles identifiers and constraints on binding names
 analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	if (node == nil) {
 		analyzer_error(
@@ -183,10 +228,13 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 		)
 		return
 	}
+
 	#partial switch n in node {
 	case Identifier:
+		// Simple identifier as binding name
 		binding.name = n.name
 	case Constraint:
+		// Constraint with optional identifier
 		#partial switch v in n.value {
 		case Identifier:
 			binding.name = v.name
@@ -197,8 +245,8 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 				get_position(n.value^),
 			)
 		}
+		// Process the constraint part
 		process_constraint(n, binding)
-
 	case:
 		analyzer_error(
 			"The binding name can either be a constraint or an identifier",
@@ -208,7 +256,8 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	}
 }
 
-
+// Analyzes and validates the value part of a binding
+// Ensures the value is appropriate for the binding context
 analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	if (node == nil) {
 		analyzer_error(
@@ -216,10 +265,12 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			.Invalid_Binding_Value,
 			Position{},
 		)
-
 		return
 	}
+
+	// Check each node type and either process it or report an error
 	switch n in node {
+	// These node types cannot be used as binding values
 	case Pointing:
 		analyzer_error(
 			"Cannot use a Pointing rule as a binding value",
@@ -280,6 +331,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			.Invalid_Binding_Value,
 			n.position,
 		)
+	// These node types can be used as binding values
 	case Pattern:
 		process_pattern(n, binding)
 	case ScopeNode:
@@ -301,9 +353,12 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case External:
 		process_external(n)
 	}
+
+	// After processing, check if the binding satisfies its type constraints
 	typecheck_binding(binding)
 }
 
+// Processes a pointing push binding (name -> value)
 process_pointing_push :: proc(node: Pointing) {
 	binding := new(Binding)
 	binding.name = ""
@@ -313,6 +368,7 @@ process_pointing_push :: proc(node: Pointing) {
 	add_binding(binding)
 }
 
+// Processes a pointing pull binding (name <- value)
 process_pointing_pull :: proc(node: PointingPull) {
 	binding := new(Binding)
 	binding.name = ""
@@ -322,10 +378,12 @@ process_pointing_pull :: proc(node: PointingPull) {
 	add_binding(binding)
 }
 
+// Processes an event push binding (optional name >> value)
 process_event_push :: proc(node: EventPush) {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .event_push
+	// Event push bindings can have optional names
 	if (node.name != nil) {
 		analyze_binding_name(node.name, binding)
 	}
@@ -333,6 +391,7 @@ process_event_push :: proc(node: EventPush) {
 	add_binding(binding)
 }
 
+// Processes an event pull binding (name << value)
 process_event_pull :: proc(node: EventPull) {
 	binding := new(Binding)
 	binding.name = ""
@@ -342,10 +401,12 @@ process_event_pull :: proc(node: EventPull) {
 	add_binding(binding)
 }
 
+// Processes a resonance push binding (optional name ~> value)
 process_resonance_push :: proc(node: ResonancePush) {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .resonance_push
+	// Resonance push bindings can have optional names
 	if (node.name != nil) {
 		analyze_binding_name(node.name, binding)
 	}
@@ -353,6 +414,7 @@ process_resonance_push :: proc(node: ResonancePush) {
 	add_binding(binding)
 }
 
+// Processes a resonance pull binding (name <~ value)
 process_resonance_pull :: proc(node: ResonancePull) {
 	binding := new(Binding)
 	binding.name = ""
@@ -362,6 +424,7 @@ process_resonance_pull :: proc(node: ResonancePull) {
 	add_binding(binding)
 }
 
+// Processes a product binding (produces output)
 process_product :: proc(node: Product) {
 	binding := new(Binding)
 	binding.name = ""
@@ -370,29 +433,43 @@ process_product :: proc(node: Product) {
 	add_binding(binding)
 }
 
+// Processes a scope node (block of statements)
+// Creates a new scope, processes all contained statements, then pops the scope
 process_scope_node :: proc(scope_node: ScopeNode, binding: ^Binding) {
+	// Create a new scope for the block
 	scope := new(ScopeData)
 	scope.content = make([dynamic]^Binding, 0)
 
+	// Associate the scope with the binding
 	binding.value = scope
+
+	// Enter the new scope
 	push_scope(scope)
 
+	// Process all statements in the scope
 	for i := 0; i < len(scope_node.value); i += 1 {
 		analyze_node(&scope_node.value[i])
 	}
+
+	// Exit the scope
 	pop_scope()
 }
 
+// Processes an override binding (name = source { overrides... })
+// Used for event pull bindings with source and override specifications
 process_override :: proc(node: Override, binding: ^Binding) {
 	if (binding.kind == .event_pull) {
+		// Create a scope for the override
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
 		binding.value = scope
 		push_scope(scope)
+
+		// Process the source identifier
 		#partial switch name in node.source {
 		case Identifier:
 			identifier := new(Binding)
-			binding.name = name.name
+			binding.name = name.name  // Note: This looks like a bug - should be identifier.name
 			binding.kind = .event_source
 			add_binding(identifier)
 		case:
@@ -402,21 +479,27 @@ process_override :: proc(node: Override, binding: ^Binding) {
 				get_position(node.source^),
 			)
 		}
+
+		// Process all override statements
 		for i := 0; i < len(node.overrides); i += 1 {
 			analyze_node(&node.overrides[i])
 		}
 		pop_scope()
 	} else {
-
+		// TODO: Handle non-event-pull overrides
 	}
 }
 
-
+// Processes a branch node (conditional logic)
 process_branch :: proc(node: Branch) {
 	analyzer := (^Analyzer)(context.user_ptr)
+	// TODO: Implement branch processing
 }
 
+// Processes an identifier reference
+// Resolves the identifier to a symbol and assigns its value to the binding
 process_identifier :: proc(identifier: Identifier, binding: ^Binding) {
+	// Look up the identifier in the symbol table
 	symbol := resolve_symbol(identifier.name)
 	if (symbol == nil) {
 		analyzer_error(
@@ -426,24 +509,32 @@ process_identifier :: proc(identifier: Identifier, binding: ^Binding) {
 		)
 		return
 	}
+	// Copy the symbol's value to this binding
 	binding.value = symbol.value
 }
 
+// Processes a pattern node (pattern matching)
 process_pattern :: proc(node: Pattern, binding: ^Binding) {
-
+	// TODO: Implement pattern processing
 }
 
+// Empty scope used as a default when constraint resolution fails
 emptyScope := ScopeData {
 	content = make([dynamic]^Binding, 0),
 }
 
+// Validates that a binding's value satisfies its type constraint
+// If no value is provided, uses the constraint's default value
 typecheck_binding :: #force_inline proc(binding: ^Binding) {
 	if (binding.constraint == nil) {
 		return
 	}
+
 	if (binding.value == nil) {
+		// No value provided, use the constraint's default
 		binding.value = resolve_default(binding.constraint)
 	} else {
+		// Check if the value matches any product binding in the constraint
 		for i in 0 ..< len(binding.constraint.content) {
 			if (binding.constraint.content[i].kind == .product) {
 				if typecheck(binding.constraint.content[i].value, binding.value) {
@@ -455,12 +546,16 @@ typecheck_binding :: #force_inline proc(binding: ^Binding) {
 	}
 }
 
+// Recursively checks if a value matches a type constraint
+// Returns true if the value is compatible with the constraint
 typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	switch val in value {
 	case ^ScopeData:
+		// Scope values must match scope constraints
 		#partial switch constr in constraint {
 		case ^ScopeData:
 			valid := true
+			// Check each binding in the value scope against the constraint scope
 			for i in 0 ..< len(val.content) {
 				if (constr.content[i].value != nil) {
 					valid =
@@ -473,6 +568,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			return false
 		}
 	case ^StringData:
+		// String values must match string constraints
 		#partial switch constr in constraint {
 		case ^StringData:
 			return true
@@ -480,49 +576,46 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			return false
 		}
 	case ^IntegerData:
+		// Integer values must match integer constraints with size checking
 		#partial switch constr in constraint {
 		case ^IntegerData:
 			#partial switch val.kind {
 			case .none:
+				// Untyped integer - check if it fits in the constraint type
 				switch constr.kind {
 				case .none:
 					return true
-				case .i8:
+				case .i8, .u8:
 					return val.content < 256
-				case .u8:
-					return val.content < 256
-				case .u16:
+				case .u16, .i16:
 					return val.content < 65536
-				case .i16:
-					return val.content < 65536
-				case .u32:
+				case .u32, .i32:
 					return val.content < 4294967296
-				case .i32:
-					return val.content < 4294967296
-				case .u64:
+				case .u64, .i64:
 					return true
-				case .i64:
-					return true
-
 				}
 			}
+			// Typed integer - must match exactly or constraint must be untyped
 			return constr.kind == .none || constr.kind == val.kind
 		}
 		return false
 	case ^FloatData:
+		// Float values must match float constraints
 		#partial switch constr in constraint {
 		case ^FloatData:
 			switch val.kind {
 			case .none:
+				// Untyped float - check precision requirements
 				#partial switch constr.kind {
 				case .f32:
-					return val.content < 4294967296
+					return val.content < 4294967296  // Rough f32 precision limit
 				case:
 					return true
 				}
 			case .f32:
 				return true
 			case .f64:
+				// f64 cannot be constrained to f32
 				#partial switch constr.kind {
 				case .f32:
 					return false
@@ -534,6 +627,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			}
 		}
 	case ^BoolData:
+		// Boolean values must match boolean constraints
 		#partial switch constr in constraint {
 		case ^BoolData:
 			return true
@@ -541,6 +635,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			return false
 		}
 	case Empty:
+		// Empty values must match empty constraints
 		#partial switch constr in constraint {
 		case Empty:
 			return true
@@ -551,6 +646,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	return false
 }
 
+// Finds the default value for a constraint by looking for product bindings
 resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
 	for i in 0 ..< len(constraint.content) {
 		if (constraint.content[i].kind == .product) {
@@ -560,7 +656,8 @@ resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
 	return Empty{}
 }
 
-
+// Resolves a constraint node to a ScopeData structure
+// Used for type constraint processing
 resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
 	#partial switch c in compile_time_resolve(node) {
 	case ^ScopeData:
@@ -569,14 +666,21 @@ resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
 	return &emptyScope
 }
 
+// Performs compile-time resolution of nodes to values
+// Used for constraint evaluation and constant folding
 compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 	#partial switch n in node {
 	case External:
+		// TODO: Handle external references
 	case Execute:
+		// TODO: Handle execution blocks
 	case ScopeNode:
+		// TODO: Handle scope nodes
 	case Override:
+		// TODO: Handle override resolution
 		target := compile_time_resolve(n.source)
 	case Identifier:
+		// Resolve identifier to its symbol
 		symbol := resolve_symbol(n.name)
 		if (symbol == nil) {
 			analyzer_error(
@@ -586,7 +690,6 @@ compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 			)
 		}
 		return &symbol.value
-
 	case:
 		analyzer_error(
 			"The : constraint value must be a valid form",
@@ -598,7 +701,8 @@ compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 	return nil
 }
 
-
+// Processes a constraint node (name : constraint)
+// Sets up type constraints for bindings
 process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 	if (node.constraint == nil) {
 		analyzer_error(
@@ -607,10 +711,15 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 			get_position(node.value^),
 		)
 	}
+
+	// Resolve the constraint to a scope
 	binding.constraint = resolve_constraint(node.constraint)
+
 	if (node.value == nil) {
 		return
 	}
+
+	// Process the constrained value
 	#partial switch n in node.value {
 	case Identifier:
 		binding.name = n.name
@@ -625,7 +734,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 				get_position(node.value^),
 			)
 		}
-	//TODO(andrflor): need to handle overrides
+		//TODO(andrflor): need to handle overrides
 	case:
 		analyzer_error(
 			"Constraint should be only applied to identifier with or without overrides or be empty",
@@ -633,16 +742,20 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 			get_position(node.value^),
 		)
 	}
-
 }
 
-
+// Processes operator nodes (arithmetic, logical, etc.)
 process_operator :: proc(node: Operator) {
+	// TODO: Implement operator processing
 }
 
+// Processes execution blocks
 process_execute :: proc(node: Execute) {
+	// TODO: Implement execution block processing
 }
 
+// Processes literal values (numbers, strings, booleans)
+// Converts string representations to typed data structures
 process_literal :: proc(node: Literal, binding: ^Binding) {
 	switch node.kind {
 	case .Integer:
@@ -685,22 +798,31 @@ process_literal :: proc(node: Literal, binding: ^Binding) {
 		}
 		value.kind = .none
 		binding.value = value
-
 	}
 }
 
+// Processes property access nodes (object.property)
 process_property :: proc(node: Property) {
+	// TODO: Implement property access processing
 }
 
+// Processes expand nodes (unpacking/spreading)
 process_expand :: proc(node: Expand) {
+	// TODO: Implement expand processing
 }
 
+// Processes external reference nodes
 process_external :: proc(node: External) {
+	// TODO: Implement external reference processing
 }
 
+// Processes range nodes (1..10, etc.)
 process_range :: proc(node: Range) {
+	// TODO: Implement range processing
 }
 
+// Resolves a named symbol within a specific binding's scope
+// Used for override resolution
 resolve_named_override_symbol :: #force_inline proc(name: string, binding: ^Binding) -> ^Binding {
 	if (binding.value == nil) {
 		return nil
@@ -716,12 +838,15 @@ resolve_named_override_symbol :: #force_inline proc(name: string, binding: ^Bind
 	return nil
 }
 
+// Resolves a named symbol within a specific binding's scope
+// Used for property access (searches from end to beginning for shadowing)
 resolve_named_property_symbol :: #force_inline proc(name: string, binding: ^Binding) -> ^Binding {
 	if (binding.value == nil) {
 		return nil
 	}
 	#partial switch scope in binding.value {
 	case ^ScopeData:
+		// Search from end to beginning to handle variable shadowing
 		for i := len(scope.content) - 1; i >= 0; i -= 1 {
 			if scope.content[i].name == name {
 				return scope.content[i]
@@ -731,26 +856,32 @@ resolve_named_property_symbol :: #force_inline proc(name: string, binding: ^Bind
 	return nil
 }
 
+// Internal recursive symbol resolution function
+// Searches through the scope stack from a specific index downward
 _resolve_symbol :: proc(name: string, index: int = 0) -> ^Binding {
-	if index < 0 { 	// Changed from index == 0 to index < 0
+	if index < 0 {
 		return nil
 	}
 
 	scope := (^Analyzer)(context.user_ptr).stack[index]
+	// Search the current scope from end to beginning (for shadowing)
 	for i := len(scope.content) - 1; i >= 0; i -= 1 {
 		if scope.content[i].name == name {
 			return scope.content[i]
 		}
 	}
 
+	// If not found in current scope, search parent scope
 	return _resolve_symbol(name, index - 1)
 }
 
-
+// Public interface for symbol resolution
+// Searches through all scopes starting from the current scope
 resolve_symbol :: #force_inline proc(name: string) -> ^Binding {
 	return _resolve_symbol(name, len((^Analyzer)(context.user_ptr).stack) - 1)
 }
 
+// Reports an analyzer error with message, type, and position
 analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, position: Position) {
 	analyzer := (^Analyzer)(context.user_ptr)
 
