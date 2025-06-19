@@ -8,9 +8,9 @@ import "core:strings"
 // Main analyzer structure that maintains the analysis state
 // Contains error tracking and a scope stack for symbol resolution
 Analyzer :: struct {
-	errors:   [dynamic]Analyzer_Error,  // Collection of semantic errors found during analysis
-	warnings: [dynamic]Analyzer_Error,  // Collection of warnings found during analysis
-	stack:    [dynamic]^ScopeData,      // Stack of nested scopes for symbol resolution
+	errors:   [dynamic]Analyzer_Error, // Collection of semantic errors found during analysis
+	warnings: [dynamic]Analyzer_Error, // Collection of warnings found during analysis
+	stack:    [dynamic]^ScopeData, // Stack of nested scopes for symbol resolution
 }
 
 // Enumeration for different analyzer modes (currently empty but ready for extension)
@@ -19,10 +19,10 @@ Analyzer_Mode :: enum {}
 // Represents a binding (variable/symbol) in the language
 // Contains the name, type of binding, optional type constraint, and value
 Binding :: struct {
-	name:       string,         // The identifier name of the binding
-	kind:       Binding_Kind,   // What type of binding this is (push/pull/event/etc.)
-	constraint: ^ScopeData,     // Optional type constraint for the binding
-	value:      ValueData,      // The actual value/data associated with this binding
+	name:       string, // The identifier name of the binding
+	kind:       Binding_Kind, // What type of binding this is (push/pull/event/etc.)
+	constraint: ^ScopeData, // Optional type constraint for the binding
+	value:      ValueData, // The actual value/data associated with this binding
 }
 
 // Shape structure for handling collections of values (currently unused)
@@ -33,12 +33,12 @@ Shape :: struct {
 // Union type representing all possible value types in the language
 // This is the core data representation for runtime values
 ValueData :: union {
-	^ScopeData,    // Reference to a scope (nested bindings)
-	^StringData,   // String literal value
-	^IntegerData,  // Integer literal value
-	^FloatData,    // Float literal value
-	^BoolData,     // Boolean literal value
-	Empty,         // Empty/null value
+	^ScopeData, // Reference to a scope (nested bindings)
+	^StringData, // String literal value
+	^IntegerData, // Integer literal value
+	^FloatData, // Float literal value
+	^BoolData, // Boolean literal value
+	Empty, // Empty/null value
 }
 
 // Represents an empty/null value
@@ -57,34 +57,34 @@ StringData :: struct {
 
 // Integer literal data with content and specific integer type
 IntegerData :: struct {
-	content: u64,          // The actual integer value
-	kind:    IntegerKind,  // Specific integer type (u8, i32, etc.)
+	content: u64, // The actual integer value
+	kind:    IntegerKind, // Specific integer type (u8, i32, etc.)
 }
 
 // Enumeration of supported integer types
 IntegerKind :: enum {
 	none, // Unspecified integer type
-	u8,   // 8-bit unsigned integer
-	i8,   // 8-bit signed integer
-	u16,  // 16-bit unsigned integer
-	i16,  // 16-bit signed integer
-	u32,  // 32-bit unsigned integer
-	i32,  // 32-bit signed integer
-	u64,  // 64-bit unsigned integer
-	i64,  // 64-bit signed integer
+	u8, // 8-bit unsigned integer
+	i8, // 8-bit signed integer
+	u16, // 16-bit unsigned integer
+	i16, // 16-bit signed integer
+	u32, // 32-bit unsigned integer
+	i32, // 32-bit signed integer
+	u64, // 64-bit unsigned integer
+	i64, // 64-bit signed integer
 }
 
 // Enumeration of supported floating-point types
 FloatKind :: enum {
 	none, // Unspecified float type
-	f32,  // 32-bit float
-	f64,  // 64-bit float
+	f32, // 32-bit float
+	f64, // 64-bit float
 }
 
 // Float literal data with content and specific float type
 FloatData :: struct {
-	content: f64,        // The actual float value
-	kind:    FloatKind,  // Specific float type
+	content: f64, // The actual float value
+	kind:    FloatKind, // Specific float type
 }
 
 // Boolean literal data
@@ -94,35 +94,35 @@ BoolData :: struct {
 
 // Enumeration of all possible analyzer error types
 Analyzer_Error_Type :: enum {
-	Undefined_Identifier,     // Reference to undeclared identifier
-	Invalid_Binding_Name,     // Invalid syntax for binding names
-	Invalid_Property_Access,  // Invalid property access syntax
-	Type_Mismatch,           // Type constraint violation
-	Invalid_Constaint,       // Invalid constraint syntax
-	Invalid_Constaint_Name,  // Invalid constraint name
+	Undefined_Identifier, // Reference to undeclared identifier
+	Invalid_Binding_Name, // Invalid syntax for binding names
+	Invalid_Property_Access, // Invalid property access syntax
+	Type_Mismatch, // Type constraint violation
+	Invalid_Constaint, // Invalid constraint syntax
+	Invalid_Constaint_Name, // Invalid constraint name
 	Invalid_Constaint_Value, // Invalid constraint value
-	Circular_Reference,      // Circular dependency detected
-	Invalid_Binding_Value,   // Invalid value for binding
+	Circular_Reference, // Circular dependency detected
+	Invalid_Binding_Value, // Invalid value for binding
 }
 
 // Enumeration of different binding types in the language
 // These represent different semantic categories of bindings
 Binding_Kind :: enum {
-	pointing_push,   // Push-style pointing binding
-	pointing_pull,   // Pull-style pointing binding
-	event_push,      // Push-style event binding
-	event_pull,      // Pull-style event binding
-	resonance_push,  // Push-style resonance binding
-	resonance_pull,  // Pull-style resonance binding
-	product,         // Product/output binding
-	event_source,    // Event source binding
+	pointing_push, // Push-style pointing binding
+	pointing_pull, // Pull-style pointing binding
+	event_push, // Push-style event binding
+	event_pull, // Pull-style event binding
+	resonance_push, // Push-style resonance binding
+	resonance_pull, // Pull-style resonance binding
+	product, // Product/output binding
+	event_source, // Event source binding
 }
 
 // Structure representing an analyzer error with context
 Analyzer_Error :: struct {
 	type:     Analyzer_Error_Type, // The type of error
-	message:  string,              // Human-readable error message
-	position: Position,            // Source code position where error occurred
+	message:  string, // Human-readable error message
+	position: Position, // Source code position where error occurred
 }
 
 // Pushes a new scope onto the scope stack
@@ -355,7 +355,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	}
 
 	// After processing, check if the binding satisfies its type constraints
-	typecheck_binding(binding)
+	typecheck_binding(binding, get_position(node^))
 }
 
 // Processes a pointing push binding (name -> value)
@@ -469,7 +469,7 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		#partial switch name in node.source {
 		case Identifier:
 			identifier := new(Binding)
-			binding.name = name.name  // Note: This looks like a bug - should be identifier.name
+			binding.name = name.name // Note: This looks like a bug - should be identifier.name
 			binding.kind = .event_source
 			add_binding(identifier)
 		case:
@@ -525,7 +525,7 @@ emptyScope := ScopeData {
 
 // Validates that a binding's value satisfies its type constraint
 // If no value is provided, uses the constraint's default value
-typecheck_binding :: #force_inline proc(binding: ^Binding) {
+typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 	if (binding.constraint == nil) {
 		return
 	}
@@ -542,7 +542,7 @@ typecheck_binding :: #force_inline proc(binding: ^Binding) {
 				}
 			}
 		}
-		analyzer_error("The constraint do not match the given value", .Type_Mismatch, Position{})
+		analyzer_error("The constraint do not match the given value", .Type_Mismatch, position)
 	}
 }
 
@@ -608,7 +608,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 				// Untyped float - check precision requirements
 				#partial switch constr.kind {
 				case .f32:
-					return val.content < 4294967296  // Rough f32 precision limit
+					return val.content < 4294967296 // Rough f32 precision limit
 				case:
 					return true
 				}
@@ -671,11 +671,11 @@ resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
 compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 	#partial switch n in node {
 	case External:
-		// TODO(andrflor): Handle external references
+	// TODO(andrflor): Handle external references
 	case Execute:
-		// TODO(andrflor): Handle execution blocks
+	// TODO(andrflor): Handle execution blocks
 	case ScopeNode:
-		// TODO(andrflor): Handle scope nodes
+	// TODO(andrflor): Handle scope nodes
 	case Override:
 		// TODO(andrflor): Handle override resolution
 		target := compile_time_resolve(n.source)
@@ -734,7 +734,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 				get_position(node.value^),
 			)
 		}
-		//TODO(andrflor)(andrflor): need to handle overrides
+	//TODO(andrflor)(andrflor): need to handle overrides
 	case:
 		analyzer_error(
 			"Constraint should be only applied to identifier with or without overrides or be empty",
