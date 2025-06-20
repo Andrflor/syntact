@@ -926,7 +926,6 @@ Parser_Error_Type :: enum {
     Unexpected_Token, // Token didn't match what was expected
     Invalid_Expression, // Expression is malformed
     Unclosed_Delimiter, // Missing closing delimiter
-    Type_Mismatch,    // Type related errors
     Invalid_Operation, // Operations not supported on types
     External_Error,  // Reference to undefined identifier
     Other,            // Other errors

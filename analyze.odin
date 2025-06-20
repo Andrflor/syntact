@@ -13,9 +13,6 @@ Analyzer :: struct {
 	stack:    [dynamic]^ScopeData, // Stack of nested scopes for symbol resolution
 }
 
-// Enumeration for different analyzer modes (currently empty but ready for extension)
-Analyzer_Mode :: enum {}
-
 // Represents a binding (variable/symbol) in the language
 // Contains the name, type of binding, optional type constraint, and value
 Binding :: struct {
@@ -23,11 +20,6 @@ Binding :: struct {
 	kind:       Binding_Kind, // What type of binding this is (push/pull/event/etc.)
 	constraint: ^ScopeData, // Optional type constraint for the binding
 	value:      ValueData, // The actual value/data associated with this binding
-}
-
-// Shape structure for handling collections of values (currently unused)
-Shape :: struct {
-	content: [dynamic]^ValueData,
 }
 
 // Union type representing all possible value types in the language
@@ -518,10 +510,6 @@ process_pattern :: proc(node: Pattern, binding: ^Binding) {
 	// TODO(andrflor): Implement pattern processing
 }
 
-// Empty scope used as a default when constraint resolution fails
-emptyScope := ScopeData {
-	content = make([dynamic]^Binding, 0),
-}
 
 // Validates that a binding's value satisfies its type constraint
 // If no value is provided, uses the constraint's default value
@@ -542,6 +530,8 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 				}
 			}
 		}
+		// Replace the value with the default so that we can continue compiling
+		binding.value = resolve_default(binding.constraint)
 		analyzer_error("The constraint do not match the given value", .Type_Mismatch, position)
 	}
 }
@@ -559,6 +549,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			for i in 0 ..< len(val.content) {
 				if (constr.content[i].value != nil) {
 					valid =
+						valid &&
 						constr.content[i].name == val.content[i].name &&
 						typecheck(constr.content[i].value, val.content[i].value)
 				}
@@ -585,13 +576,29 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 				switch constr.kind {
 				case .none:
 					return true
-				case .i8, .u8:
+				case .u8:
+					val.kind = .u8
 					return val.content < 256
-				case .u16, .i16:
+				case .i8:
+					val.kind = .i8
+					return val.content < 256
+				case .u16:
+					val.kind = .u16
 					return val.content < 65536
-				case .u32, .i32:
+				case .i16:
+					val.kind = .i16
+					return val.content < 65536
+				case .u32:
+					val.kind = .u32
 					return val.content < 4294967296
-				case .u64, .i64:
+				case .i32:
+					val.kind = .i32
+					return val.content < 4294967296
+				case .u64:
+					val.kind = .u64
+					return true
+				case .i64:
+					val.kind = .i64
 					return true
 				}
 			}
@@ -608,7 +615,10 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 				// Untyped float - check precision requirements
 				#partial switch constr.kind {
 				case .f32:
+					val.kind = .f32
 					return val.content < 4294967296 // Rough f32 precision limit
+				case .f64:
+					val.kind = .f64
 				case:
 					return true
 				}
@@ -666,23 +676,55 @@ resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
 	return &emptyScope
 }
 
+// Empty scope used as a default when constraint resolution fails
+emptyScope := ScopeData {
+	content = make([dynamic]^Binding, 0),
+}
+
+
+// Executes a node at compile-time and returns the computed value
+// TODO(andrflor): Implement compile-time execution for Execute blocks
+compile_time_execute :: proc(node: ^Node) -> ^ValueData {
+	return nil
+}
+
+// Applies overrides to a target value at compile-time
+// TODO(andrflor): Implement override merging for scope modifications
+compile_time_override :: proc(target: ^ValueData, overrides: [dynamic]Node) -> ^ValueData {
+	return nil
+}
+
+// Accesses a property of a target value at compile-time
+// TODO(andrflor): Implement property access resolution (obj.prop, arr[index])
+compile_time_access :: proc(target: ^ValueData, property: ^Node) -> ^ValueData {
+	return nil
+}
+
 // Performs compile-time resolution of nodes to values
 // Used for constraint evaluation and constant folding
 compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 	#partial switch n in node {
 	case External:
-	// TODO(andrflor): Handle external references
+		// TODO(andrflor): Handle external references
+		return nil
 	case Execute:
-	// TODO(andrflor): Handle execution blocks
+		return compile_time_execute(n.value)
 	case ScopeNode:
-	// TODO(andrflor): Handle scope nodes
+		// TODO(andrflor): Handle scope nodes
+		return nil
 	case Override:
-		// TODO(andrflor): Handle override resolution
 		target := compile_time_resolve(n.source)
+		if target != nil {
+			return compile_time_override(target, n.overrides)
+		}
+	case Property:
+		target := compile_time_resolve(n.source)
+		if target != nil {
+			return compile_time_access(target, n.property)
+		}
 	case Identifier:
-		// Resolve identifier to its symbol
 		symbol := resolve_symbol(n.name)
-		if (symbol == nil) {
+		if symbol == nil {
 			analyzer_error(
 				fmt.tprintf("Undefined identifier named %s found", n.name),
 				.Undefined_Identifier,
@@ -697,10 +739,8 @@ compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 			get_position(node^),
 		)
 	}
-
 	return nil
 }
-
 // Processes a constraint node (name : constraint)
 // Sets up type constraints for bindings
 process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
@@ -963,11 +1003,13 @@ debug_analyzer :: proc(analyzer: ^Analyzer, verbose: bool = false) {
 		fmt.println()
 	}
 
-	// // Print scope stack
-	// fmt.println("SCOPE STACK:")
-	// for scope, level in analyzer.stack {
-	// 	debug_scope(scope, level, verbose)
-	// }
+	// Print scope stack
+	fmt.println("SCOPE STACK:")
+	for scope, level in analyzer.stack {
+		if (level != 0) {
+			debug_scope(scope, level - 1, verbose)
+		}
+	}
 
 	fmt.println("=== END DEBUG REPORT ===\n")
 }
@@ -1011,7 +1053,6 @@ debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose:
 		fmt.printf(" -> %s", value_type)
 
 		if verbose {
-			fmt.println()
 			debug_value_data(binding.value, indent_level + 2)
 		}
 	}
@@ -1027,16 +1068,39 @@ debug_value_type :: proc(value: ValueData) -> string {
 	case ^StringData:
 		return "String"
 	case ^IntegerData:
+		#partial switch v.kind {
+		case .u8:
+			return "u8"
+		case .i8:
+			return "i8"
+		case .u16:
+			return "u16"
+		case .i16:
+			return "i16"
+		case .u32:
+			return "u32"
+		case .i32:
+			return "i32"
+		case .u64:
+			return "u64"
+		case .i64:
+			return "i64"
+		}
 		return "Integer"
 	case ^FloatData:
+		#partial switch v.kind {
+		case .f32:
+			return "f32"
+		case .f64:
+			return "f64"
+		}
 		return "Float"
 	case ^BoolData:
-		return "Bool"
+		return "bool"
 	case Empty:
-		return "Empty"
-	case:
-		return "Unknown"
+		return "none"
 	}
+	return "Unknown"
 }
 
 // Debug ValueData contents
@@ -1045,19 +1109,18 @@ debug_value_data :: proc(value: ValueData, indent_level: int) {
 
 	switch v in value {
 	case ^ScopeData:
+		fmt.println()
 		debug_scope(v, indent_level, true)
 	case ^StringData:
-		fmt.printf("'%s'\n", v.content)
+		fmt.printf("('%s')\n", v.content)
 	case ^IntegerData:
-		fmt.printf("%d\n", v.content)
+		fmt.printf("(%d)\n", v.content)
 	case ^FloatData:
-		fmt.printf("%f\n", v.content)
+		fmt.printf("(%f)\n", v.content)
 	case ^BoolData:
-		fmt.printf("%t\n", v.content)
+		fmt.printf("(%t)\n", v.content)
 	case Empty:
-		fmt.printf("Empty value type\n")
-	case:
-		fmt.printf("Unknown value type\n")
+		fmt.printf("(none)\n")
 	}
 }
 
