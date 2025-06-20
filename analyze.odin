@@ -88,6 +88,7 @@ BoolData :: struct {
 Analyzer_Error_Type :: enum {
 	Undefined_Identifier, // Reference to undeclared identifier
 	Invalid_Binding_Name, // Invalid syntax for binding names
+	Invalid_Override, // Invalid property access syntax
 	Invalid_Property_Access, // Invalid property access syntax
 	Type_Mismatch, // Type constraint violation
 	Invalid_Constaint, // Invalid constraint syntax
@@ -683,35 +684,91 @@ emptyScope := ScopeData {
 
 
 // Executes a node at compile-time and returns the computed value
-// TODO(andrflor): Implement compile-time execution for Execute blocks
-compile_time_execute :: proc(node: ^Node) -> ^ValueData {
-	return nil
+compile_time_execute :: proc(node: ^Node) -> ValueData {
+	target := compile_time_resolve(node)
+	#partial switch t in target {
+	case ^ScopeData:
+		for binding in t.content {
+			if binding.kind == .product {
+				return binding.value
+			}
+		}
+	}
+	return Empty{}
 }
 
 // Applies overrides to a target value at compile-time
-// TODO(andrflor): Implement override merging for scope modifications
-compile_time_override :: proc(target: ^ValueData, overrides: [dynamic]Node) -> ^ValueData {
-	return nil
+compile_time_override :: proc(target: ValueData, overrides: [dynamic]Node) -> ValueData {
+	#partial switch t in target {
+	case ^ScopeData:
+		for override in overrides {
+			switch o in override {
+			// TODO(andrflor): process cimpile time override
+			case Pointing:
+			case PointingPull:
+			case EventPush:
+			case EventPull:
+			case ResonancePush:
+			case ResonancePull:
+			// TODO(andrflor): process the rest as positional
+			}
+		}
+	}
+
+	analyzer_error(
+		"Impossible to override with provided values",
+		.Invalid_Property_Access,
+		Position{},
+	)
+	return target
 }
 
 // Accesses a property of a target value at compile-time
-// TODO(andrflor): Implement property access resolution (obj.prop, arr[index])
-compile_time_access :: proc(target: ^ValueData, property: ^Node) -> ^ValueData {
+compile_time_access :: proc(target: ValueData, property: ^Node) -> ValueData {
+	#partial switch t in target {
+	case ^ScopeData:
+		#partial switch n in property {
+		case Identifier:
+			for binding in t.content {
+				if binding.name == n.name {
+					return binding.value
+				}
+			}
+		case Literal:
+			#partial switch n.kind {
+			case .Integer:
+				access_index, ok := strconv.parse_int(n.value)
+				if (ok) {
+					if access_index >= 0 && len(t.content) < access_index {
+						return t.content[access_index].value
+					}
+				}
+			}
+		}
+	}
+	analyzer_error(
+		"Impossible to find the property",
+		.Invalid_Property_Access,
+		get_position(property^),
+	)
 	return nil
 }
 
 // Performs compile-time resolution of nodes to values
 // Used for constraint evaluation and constant folding
-compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
+compile_time_resolve :: proc(node: ^Node) -> ValueData {
 	#partial switch n in node {
 	case External:
-		// TODO(andrflor): Handle external references
-		return nil
+		return compile_time_resolve(n.scope)
 	case Execute:
 		return compile_time_execute(n.value)
 	case ScopeNode:
-		// TODO(andrflor): Handle scope nodes
-		return nil
+		scope := new(ScopeData)
+		// TODO(andrflor): make the parsing maybe??
+		for node in n.value {
+
+		}
+		return scope
 	case Override:
 		target := compile_time_resolve(n.source)
 		if target != nil {
@@ -731,7 +788,7 @@ compile_time_resolve :: proc(node: ^Node) -> ^ValueData {
 				n.position,
 			)
 		}
-		return &symbol.value
+		return symbol.value
 	case:
 		analyzer_error(
 			"The : constraint value must be a valid form",
