@@ -616,7 +616,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 				#partial switch constr.kind {
 				case .f32:
 					val.kind = .f32
-					return val.content < 4294967296 // Rough f32 precision limit
+					return val.content < 1 << 24 // Rough f32 precision limit
 				case .f64:
 					val.kind = .f64
 				case:
