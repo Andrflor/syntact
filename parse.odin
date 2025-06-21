@@ -665,137 +665,138 @@ Node :: union {
   Range,
 }
 
+NodeBase :: struct {
+  position: Position, // Position information for error reporting
+}
+
+/*
+ * Base struct containing common fields for all pointing types
+ */
+PointingBase :: struct {
+  using _: NodeBase,
+  name:     ^Node, // Name of the pointing
+  value:    ^Node, // Value being pointed to/from
+}
+
 /*
  * Pointing represents a pointing declaration (name -> value)
  */
 Pointing :: struct {
-	name:     ^Node, // Name of the pointing
-	value:    ^Node, // Value being pointed to
-	position: Position, // Position information for error reporting
+  using _: PointingBase,
 }
 
 /*
  * Pointing pull is a declaration later override derived value
  */
 PointingPull :: struct {
-	name:     ^Node, // Name of the pointing
-	value:    ^Node, // Value being pointed from
-	position: Position, // Position information for error reporting
+  using _: PointingBase,
 }
 
 /*
  * EventPull represents a event being pull from resonance >-
  */
 EventPull :: struct {
-	name:     ^Node, // Name of the pointing
-	value:    ^Node, // Value being pointed to
-	position: Position, // Position information for error reporting
+  using _: PointingBase,
 }
 
 /*
- * EventPush represents a event being pushed into resonance -<
+ * EventPush represents a event being pushed into resonance -
  */
 EventPush :: struct {
-	name:     ^Node, // Name of the pointing
-	value:    ^Node, // Value being pointed to
-	position: Position, // Position information for error reporting
+  using _: PointingBase,
 }
 
 /*
- * ResonancePull is useed to change value of resonance driven -<<
+ * ResonancePull is useed to change value of resonance driven -
  */
 ResonancePull :: struct {
-	name:     ^Node, // Name of the pointing
-	value:    ^Node, // Value being pointed to
-	position: Position, // Position information for error reporting
+  using _: PointingBase,
 }
 
 /*
  * ResonancePush is useed to drive resonance >>-
  */
 ResonancePush :: struct {
-	name:     ^Node, // Name of the pointing
-	value:    ^Node, // Value being pointed to
-	position: Position, // Position information for error reporting
+  using _: PointingBase,
 }
 
 /*
  * Identifier represents a named reference
  */
 Identifier :: struct {
+  using _: NodeBase,
 	name:     string, // Name of the identifier
-	position: Position, // Position information for error reporting
 }
 
 /*
  * ScopeNode represents a block of statements enclosed in braces
  */
 ScopeNode :: struct {
+  using _: NodeBase,
 	value:    [dynamic]Node, // Statements in the scope
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Override represents modifications to a base entity
  */
 Override :: struct {
+  using _: NodeBase,
 	source:    ^Node, // Base entity being modified
 	overrides: [dynamic]Node, // Modifications
-	position:  Position, // Position information for error reporting
 }
 
 /*
  * Product represents a produced value (-> expr)
  */
 Product :: struct {
+  using _: NodeBase,
 	value:    ^Node, // Value produced
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Pattern represents a pattern match expression
  */
 Pattern :: struct {
+  using _: NodeBase,
 	target:   ^Node, // Value to match against
 	value:    [dynamic]Branch, // Pattern branches
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Branch represents a single pattern match branch
  */
 Branch :: struct {
+  using _: NodeBase,
 	source:   ^Node, // Pattern to match
 	product:  ^Node, // Result if pattern matches
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Constraint represents a type constraint (Type: value)
  */
 Constraint :: struct {
+  using _: NodeBase,
 	constraint: ^Node, // Type constraint
 	value:      ^Node, // Optional value
-	position:   Position, // Position information for error reporting
 }
 
 /*
  * ExecutionWrapper represents a single wrapper in a potentially nested execution pattern
  */
 ExecutionWrapper :: enum {
-    Threading,       // < >
-    Parallel_CPU,    // [ ]
-    Background,      // ( )
-    GPU,             // | |
+  Threading,       // < >
+  Parallel_CPU,    // [ ]
+  Background,      // ( )
+  GPU,             // | |
 }
 
 /*
  * Execute represents an execution modifier
  */
 Execute :: struct {
-    value:    ^Node,                     // Expression to execute
-    wrappers: [dynamic]ExecutionWrapper, // Ordered list of execution wrappers (from outside to inside)
-    position: Position, // Position information for error reporting
+  using _: NodeBase,
+  value:    ^Node,                     // Expression to execute
+  wrappers: [dynamic]ExecutionWrapper, // Ordered list of execution wrappers (from outside to inside)
 }
 
 /*
@@ -825,10 +826,10 @@ Operator_Kind :: enum {
  * Operator represents a binary operation
  */
 Operator :: struct {
+  using _: NodeBase,
 	kind:     Operator_Kind, // Type of operation
 	left:     ^Node, // Left operand
 	right:    ^Node, // Right operand
-	position: Position, // Position information for error reporting
 }
 
 /*
@@ -847,44 +848,44 @@ Literal_Kind :: enum {
  * Literal represents a literal value in the source
  */
 Literal :: struct {
+  using _: NodeBase,
 	kind:     Literal_Kind, // Type of literal
 	value:    string, // String representation of the value
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Property represents a property access (a.b)
  */
 Property :: struct {
+  using _: NodeBase,
 	source:   ^Node, // Object being accessed
 	property: ^Node, // Property being accessed
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Expand represents a content expansion (...expr)
  */
 Expand :: struct {
+  using _: NodeBase,
 	target:   ^Node, // Content to expand
-	position: Position, // Position information for error reporting
 }
 
 /*
  * External represents an external reference (@lib.geometry)
  */
 External :: struct {
+  using _: NodeBase,
   name:    string, // Name of the ref
 	scope:   ^Node, // The external scope to be resolved
-	position: Position, // Position information for error reporting
 }
 
 /*
  * Range represents a range expression (e.g., 1..5, 1.., ..5)
  */
 Range :: struct {
+  using _: NodeBase,
 	start:    ^Node, // Start of range (may be nil for prefix range)
 	end:      ^Node, // End of range (may be nil for postfix range)
-	position: Position, // Position information for error reporting
 }
 
 // ===========================================================================

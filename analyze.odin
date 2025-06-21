@@ -235,7 +235,7 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			analyzer_error(
 				"The : constraint indicator must be followed by an identifier or nothing",
 				.Invalid_Constaint_Name,
-				get_position(n.value^),
+				get_position(n.value),
 			)
 		}
 		// Process the constraint part
@@ -244,7 +244,7 @@ analyze_binding_name :: #force_inline proc(node: ^Node, binding: ^Binding) {
 		analyzer_error(
 			"The binding name can either be a constraint or an identifier",
 			.Invalid_Binding_Name,
-			get_position(n),
+			get_position(node),
 		)
 	}
 }
@@ -348,7 +348,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	}
 
 	// After processing, check if the binding satisfies its type constraints
-	typecheck_binding(binding, get_position(node^))
+	typecheck_binding(binding, get_position(node))
 }
 
 // Processes a pointing push binding (name -> value)
@@ -469,7 +469,7 @@ process_override :: proc(node: Override, binding: ^Binding) {
 			analyzer_error(
 				"Only identifiers can be used in even push name binding",
 				.Invalid_Binding_Name,
-				get_position(node.source^),
+				get_position(node.source),
 			)
 		}
 
@@ -682,6 +682,15 @@ emptyScope := ScopeData {
 	content = make([dynamic]^Binding, 0),
 }
 
+shallow_copy_scope :: #force_inline proc(original: ^ScopeData) -> ^ScopeData {
+	if original == nil do return nil
+
+	scope := new(ScopeData)
+	scope.content = make([dynamic]^Binding, len(original.content))
+	copy(scope.content[:], original.content[:])
+	return scope
+}
+
 
 // Executes a node at compile-time and returns the computed value
 compile_time_execute :: proc(node: ^Node) -> ValueData {
@@ -697,19 +706,53 @@ compile_time_execute :: proc(node: ^Node) -> ValueData {
 	return Empty{}
 }
 
+compile_time_solve_binding_override :: #force_inline proc(
+	target: ^ScopeData,
+	override: PointingBase,
+	kind: Binding_Kind,
+) {
+	#partial switch n in override.name {
+	case Identifier:
+		for binding, index in target.content {
+			if binding.kind == kind && binding.name == n.name {
+
+			}
+		}
+	case Literal:
+		#partial switch n.kind {
+		case .Integer:
+			access_index, ok := strconv.parse_int(n.value)
+			if (ok) {
+				if access_index >= 0 && len(target.content) < access_index {
+					if target.content[access_index].kind == kind {
+
+					}
+				}
+			}
+		}
+	}
+
+}
+
 // Applies overrides to a target value at compile-time
 compile_time_override :: proc(target: ValueData, overrides: [dynamic]Node) -> ValueData {
 	#partial switch t in target {
 	case ^ScopeData:
+		scope := shallow_copy_scope(t)
 		for override in overrides {
-			switch o in override {
-			// TODO(andrflor): process cimpile time override
+			#partial switch o in override {
 			case Pointing:
+				compile_time_solve_binding_override(scope, o, .pointing_push)
 			case PointingPull:
+				compile_time_solve_binding_override(scope, o, .pointing_pull)
 			case EventPush:
+				compile_time_solve_binding_override(scope, o, .event_push)
 			case EventPull:
+				compile_time_solve_binding_override(scope, o, .event_pull)
 			case ResonancePush:
+				compile_time_solve_binding_override(scope, o, .resonance_push)
 			case ResonancePull:
+				compile_time_solve_binding_override(scope, o, .resonance_pull)
 			// TODO(andrflor): process the rest as positional
 			}
 		}
@@ -749,7 +792,7 @@ compile_time_access :: proc(target: ValueData, property: ^Node) -> ValueData {
 	analyzer_error(
 		"Impossible to find the property",
 		.Invalid_Property_Access,
-		get_position(property^),
+		get_position(property),
 	)
 	return nil
 }
@@ -793,7 +836,7 @@ compile_time_resolve :: proc(node: ^Node) -> ValueData {
 		analyzer_error(
 			"The : constraint value must be a valid form",
 			.Invalid_Constaint_Value,
-			get_position(node^),
+			get_position(node),
 		)
 	}
 	return nil
@@ -805,7 +848,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 		analyzer_error(
 			"Constraint node without a specific constraint is not allowed",
 			.Invalid_Constaint,
-			get_position(node.value^),
+			get_position(node.value),
 		)
 	}
 
@@ -828,7 +871,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 			analyzer_error(
 				"Override for constraint named should be using identifier",
 				.Invalid_Binding_Name,
-				get_position(node.value^),
+				get_position(node.value),
 			)
 		}
 	//TODO(andrflor)(andrflor): need to handle overrides
@@ -836,7 +879,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 		analyzer_error(
 			"Constraint should be only applied to identifier with or without overrides or be empty",
 			.Invalid_Binding_Name,
-			get_position(node.value^),
+			get_position(node.value),
 		)
 	}
 }
@@ -991,50 +1034,8 @@ analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, positio
 	append(&analyzer.errors, error)
 }
 
-get_position :: proc(node: Node) -> Position {
-	switch n in node {
-	case Pointing:
-		return n.position
-	case PointingPull:
-		return n.position
-	case EventPush:
-		return n.position
-	case EventPull:
-		return n.position
-	case ResonancePush:
-		return n.position
-	case ResonancePull:
-		return n.position
-	case ScopeNode:
-		return n.position
-	case Override:
-		return n.position
-	case Product:
-		return n.position
-	case Branch:
-		return n.position
-	case Identifier:
-		return n.position
-	case Pattern:
-		return n.position
-	case Constraint:
-		return n.position
-	case Operator:
-		return n.position
-	case Execute:
-		return n.position
-	case Literal:
-		return n.position
-	case Property:
-		return n.position
-	case Expand:
-		return n.position
-	case External:
-		return n.position
-	case Range:
-		return n.position
-	}
-	return Position{}
+get_position :: #force_inline proc(node: ^Node) -> Position {
+	return (^NodeBase)(node).position
 }
 
 debug_analyzer :: proc(analyzer: ^Analyzer, verbose: bool = false) {
