@@ -715,7 +715,8 @@ compile_time_solve_binding_override :: #force_inline proc(
 	case Identifier:
 		for binding, index in target.content {
 			if binding.kind == kind && binding.name == n.name {
-
+				target.content[index] = override_binding(binding, override.value)
+				return
 			}
 		}
 	case Literal:
@@ -723,23 +724,40 @@ compile_time_solve_binding_override :: #force_inline proc(
 		case .Integer:
 			access_index, ok := strconv.parse_int(n.value)
 			if (ok) {
-				if access_index >= 0 && len(target.content) < access_index {
+				if access_index >= 0 && access_index < len(target.content) {
 					if target.content[access_index].kind == kind {
-
+						target.content[access_index] = override_binding(
+							target.content[access_index],
+							override.value,
+						)
+						return
 					}
 				}
 			}
 		}
 	}
-
 }
+
+override_binding :: #force_inline proc(binding: ^Binding, value: ^Node) -> ^Binding {
+	value := compile_time_resolve(value)
+	if typecheck(binding.value, value) {
+		overriden := new(Binding)
+		overriden.value = value
+		overriden.kind = binding.kind
+		overriden.name = binding.name
+		overriden.constraint = binding.constraint
+		return overriden
+	}
+	return binding
+}
+
 
 // Applies overrides to a target value at compile-time
 compile_time_override :: proc(target: ValueData, overrides: [dynamic]Node) -> ValueData {
 	#partial switch t in target {
 	case ^ScopeData:
 		scope := shallow_copy_scope(t)
-		for override in overrides {
+		for override, index in overrides {
 			#partial switch o in override {
 			case Pointing:
 				compile_time_solve_binding_override(scope, o, .pointing_push)
@@ -753,7 +771,10 @@ compile_time_override :: proc(target: ValueData, overrides: [dynamic]Node) -> Va
 				compile_time_solve_binding_override(scope, o, .resonance_push)
 			case ResonancePull:
 				compile_time_solve_binding_override(scope, o, .resonance_pull)
-			// TODO(andrflor): process the rest as positional
+			case:
+				if index < len(t.content) {
+					scope.content[index] = override_binding(scope.content[index], override)
+				}
 			}
 		}
 	}
@@ -782,7 +803,7 @@ compile_time_access :: proc(target: ValueData, property: ^Node) -> ValueData {
 			case .Integer:
 				access_index, ok := strconv.parse_int(n.value)
 				if (ok) {
-					if access_index >= 0 && len(t.content) < access_index {
+					if access_index >= 0 && access_index < len(t.content) {
 						return t.content[access_index].value
 					}
 				}
