@@ -483,12 +483,6 @@ process_override :: proc(node: Override, binding: ^Binding) {
 	}
 }
 
-// Processes a branch node (conditional logic)
-process_branch :: proc(node: Branch) {
-	analyzer := (^Analyzer)(context.user_ptr)
-	// TODO(andrflor): Implement branch processing
-}
-
 // Processes an identifier reference
 // Resolves the identifier to a symbol and assigns its value to the binding
 process_identifier :: proc(identifier: Identifier, binding: ^Binding) {
@@ -511,6 +505,10 @@ process_pattern :: proc(node: Pattern, binding: ^Binding) {
 	// TODO(andrflor): Implement pattern processing
 }
 
+// Processes a branch node (conditional logic)
+process_branch :: proc(node: Branch) {
+	// TODO(andrflor): Implement branch processing
+}
 
 // Validates that a binding's value satisfies its type constraint
 // If no value is provided, uses the constraint's default value
@@ -773,7 +771,10 @@ compile_time_override :: proc(target: ValueData, overrides: [dynamic]Node) -> Va
 				compile_time_solve_binding_override(scope, o, .resonance_pull)
 			case:
 				if index < len(t.content) {
-					scope.content[index] = override_binding(scope.content[index], override)
+					scope.content[index] = override_binding(
+						scope.content[index],
+						&overrides[index],
+					)
 				}
 			}
 		}
