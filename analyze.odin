@@ -462,8 +462,8 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		#partial switch name in node.source {
 		case Identifier:
 			identifier := new(Binding)
-			binding.name = name.name // Note: This looks like a bug - should be identifier.name
-			binding.kind = .event_source
+			identifier.name = name.name
+			identifier.kind = .event_source
 			add_binding(identifier)
 		case:
 			analyzer_error(
