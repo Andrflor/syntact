@@ -342,7 +342,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case Literal:
 		process_literal(n, binding)
 	case Property:
-		process_property(n)
+		process_property(n, binding)
 	case External:
 		process_external(n)
 	}
@@ -357,8 +357,8 @@ process_pointing_push :: proc(node: Pointing) {
 	binding.name = ""
 	binding.kind = .pointing_push
 	analyze_binding_name(node.name, binding)
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes a pointing pull binding (name <- value)
@@ -367,8 +367,8 @@ process_pointing_pull :: proc(node: PointingPull) {
 	binding.name = ""
 	binding.kind = .pointing_pull
 	analyze_binding_name(node.name, binding)
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes an event push binding (optional name >> value)
@@ -380,8 +380,8 @@ process_event_push :: proc(node: EventPush) {
 	if (node.name != nil) {
 		analyze_binding_name(node.name, binding)
 	}
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes an event pull binding (name << value)
@@ -390,8 +390,8 @@ process_event_pull :: proc(node: EventPull) {
 	binding.name = ""
 	binding.kind = .event_pull
 	analyze_binding_name(node.name, binding)
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes a resonance push binding (optional name ~> value)
@@ -403,8 +403,8 @@ process_resonance_push :: proc(node: ResonancePush) {
 	if (node.name != nil) {
 		analyze_binding_name(node.name, binding)
 	}
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes a resonance pull binding (name <~ value)
@@ -413,8 +413,8 @@ process_resonance_pull :: proc(node: ResonancePull) {
 	binding.name = ""
 	binding.kind = .resonance_pull
 	analyze_binding_name(node.name, binding)
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes a product binding (produces output)
@@ -422,8 +422,8 @@ process_product :: proc(node: Product) {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .product
-	analyze_binding_value(node.value, binding)
 	add_binding(binding)
+	analyze_binding_value(node.value, binding)
 }
 
 // Processes a scope node (block of statements)
@@ -462,8 +462,8 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		#partial switch name in node.source {
 		case Identifier:
 			identifier := new(Binding)
-			identifier.name = name.name
-			identifier.kind = .event_source
+			binding.name = name.name // Note: This looks like a bug - should be identifier.name
+			binding.kind = .event_source
 			add_binding(identifier)
 		case:
 			analyzer_error(
@@ -546,6 +546,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			valid := true
 			// Check each binding in the value scope against the constraint scope
 			for i in 0 ..< len(val.content) {
+        fmt.println(constr);
 				if (constr.content[i].value != nil) {
 					valid =
 						valid &&
@@ -964,7 +965,7 @@ process_literal :: proc(node: Literal, binding: ^Binding) {
 }
 
 // Processes property access nodes (object.property)
-process_property :: proc(node: Property) {
+process_property :: proc(node: Property, binding: ^Binding) {
 	// TODO(andrflor): Implement property access processing
 }
 
