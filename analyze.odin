@@ -27,6 +27,7 @@ Binding :: struct {
 ValueData :: union {
 	^ScopeData, // Reference to a scope (nested bindings)
 	^StringData, // String literal value
+	^[dynamic]^Binding, // Direct binding array without scope
 	^IntegerData, // Integer literal value
 	^FloatData, // Float literal value
 	^BoolData, // Boolean literal value
@@ -198,8 +199,6 @@ analyze_node :: proc(node: ^Node) {
 		process_resonance_pull(n)
 	case Product:
 		process_product(n)
-	case Expand:
-		process_expand(n)
 	case:
 		// Default case: create an anonymous binding for unhandled node types
 		binding := new(Binding)
@@ -312,12 +311,6 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			.Invalid_Binding_Value,
 			n.position,
 		)
-	case Expand:
-		analyzer_error(
-			"Cannot use an Expand rule as a binding value",
-			.Invalid_Binding_Value,
-			n.position,
-		)
 	case Range:
 		analyzer_error(
 			"Cannot use a Range rule as a binding value",
@@ -325,6 +318,8 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			n.position,
 		)
 	// These node types can be used as binding values
+	case Expand:
+		process_expand(n, binding)
 	case Pattern:
 		process_pattern(n, binding)
 	case ScopeNode:
@@ -539,20 +534,24 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 // Returns true if the value is compatible with the constraint
 typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	switch val in value {
+	case ^[dynamic]^Binding:
 	case ^ScopeData:
 		// Scope values must match scope constraints
 		#partial switch constr in constraint {
 		case ^ScopeData:
 			valid := true
 			// Check each binding in the value scope against the constraint scope
-			for i in 0 ..< len(val.content) {
-        fmt.println(constr);
-				if (constr.content[i].value != nil) {
-					valid =
-						valid &&
-						constr.content[i].name == val.content[i].name &&
-						typecheck(constr.content[i].value, val.content[i].value)
+			if (len(val.content) == len(constr.content)) {
+				for i in 0 ..< len(val.content) {
+					if (constr.content[i].value != nil) {
+						valid =
+							valid &&
+							constr.content[i].name == val.content[i].name &&
+							typecheck(constr.content[i].value, val.content[i].value)
+					}
 				}
+			} else {
+
 			}
 			return valid
 		case:
@@ -970,8 +969,12 @@ process_property :: proc(node: Property, binding: ^Binding) {
 }
 
 // Processes expand nodes (unpacking/spreading)
-process_expand :: proc(node: Expand) {
-	// TODO(andrflor): Implement expand processing
+process_expand :: proc(node: Expand, binding: ^Binding) {
+	analyze_binding_value(node.target, binding)
+	#partial switch v in binding.value {
+	case ^ScopeData:
+		binding.value = &v.content
+	}
 }
 
 // Processes external reference nodes
@@ -1119,6 +1122,17 @@ debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
 	}
 }
 
+debug_raw_bindings :: proc(bindings: ^[dynamic]^Binding, level: int, verbose: bool = false) {
+	indent := strings.repeat("  ", level)
+	fmt.printf("%RawBindings [%d] - %d bindings:\n", indent, level, len(bindings))
+
+	for binding, i in bindings {
+		if (binding != nil) {
+			debug_binding(binding, level + 1, i, verbose)
+		}
+	}
+}
+
 // Debug a single binding
 debug_binding :: proc(binding: ^Binding, indent_level: int, index: int, verbose: bool = false) {
 	indent := strings.repeat("  ", indent_level)
@@ -1146,6 +1160,8 @@ debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
 	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
+	case ^[dynamic]^Binding:
+		return fmt.tprintf("RawBindings(%d bindings)", len(v))
 	case ^StringData:
 		return "String"
 	case ^IntegerData:
@@ -1192,6 +1208,9 @@ debug_value_data :: proc(value: ValueData, indent_level: int) {
 	case ^ScopeData:
 		fmt.println()
 		debug_scope(v, indent_level, true)
+	case ^[dynamic]^Binding:
+		fmt.println()
+		debug_raw_bindings(v, indent_level, true)
 	case ^StringData:
 		fmt.printf("('%s')\n", v.content)
 	case ^IntegerData:
