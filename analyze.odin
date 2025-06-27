@@ -474,7 +474,11 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		}
 		pop_scope()
 	} else {
-		// TODO(andrflor): Handle non-event-pull overrides
+		analyze_binding_value(node.source, binding)
+		#partial switch v in binding.value {
+		case ^ScopeData:
+		case ^[dynamic]^Binding:
+		}
 	}
 }
 
@@ -965,7 +969,58 @@ process_literal :: proc(node: Literal, binding: ^Binding) {
 
 // Processes property access nodes (object.property)
 process_property :: proc(node: Property, binding: ^Binding) {
-	// TODO(andrflor): Implement property access processing
+	analyze_binding_value(node.source, binding)
+	#partial switch v in binding.value {
+	case ^ScopeData:
+		#partial switch n in node.property {
+		case Identifier:
+			for bind in v.content {
+				if bind.name == n.name {
+					binding.value = bind.value
+					return
+				}
+			}
+		case Literal:
+			#partial switch n.kind {
+			case .Integer:
+				access_index, ok := strconv.parse_int(n.value)
+				if (ok) {
+					if access_index >= 0 && access_index < len(v.content) {
+						binding.value = v.content[access_index].value
+						return
+					}
+				}
+			}
+
+		}
+	case ^[dynamic]^Binding:
+		#partial switch n in node.property {
+		case Identifier:
+			for bind in v {
+				if bind.name == n.name {
+					binding.value = bind.value
+					return
+				}
+			}
+		case Literal:
+			#partial switch n.kind {
+			case .Integer:
+				access_index, ok := strconv.parse_int(n.value)
+				if (ok) {
+					if access_index >= 0 && access_index < len(v) {
+						binding.value = v[access_index].value
+						return
+					}
+				}
+			}
+
+		}
+	}
+	analyzer_error(
+		"Impossible to find the property",
+		.Invalid_Property_Access,
+		get_position(node.property),
+	)
 }
 
 // Processes expand nodes (unpacking/spreading)
