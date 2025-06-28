@@ -543,43 +543,32 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 // Recursively checks if a value matches a type constraint
 // Returns true if the value is compatible with the constraint
 typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
-	switch val in value {
+	switch constr in constraint {
 	case ^[dynamic]^Binding:
-		fmt.println("Typechecking")
+		#partial switch val in value {
+		case ^[dynamic]^Binding:
+			return true
+		case:
+			return false
+		}
 	case ^ScopeData:
-		// Scope values must match scope constraints
-		#partial switch constr in constraint {
+		#partial switch val in value {
 		case ^ScopeData:
-			valid := true
-			// Check each binding in the value scope against the constraint scope
-			if (len(val.content) == len(constr.content)) {
-				for i in 0 ..< len(val.content) {
-					if (constr.content[i].value != nil) {
-						valid =
-							valid &&
-							constr.content[i].name == val.content[i].name &&
-							typecheck(constr.content[i].value, val.content[i].value)
-					}
-				}
-			} else if len(val.content) < len(constr.content) {
-				return false
-			} else {
-			}
-			return valid
+			return true
 		case:
 			return false
 		}
 	case ^StringData:
-		// String values must match string constraints
-		#partial switch constr in constraint {
+		// String constraints must match string values
+		#partial switch val in value {
 		case ^StringData:
 			return true
 		case:
 			return false
 		}
 	case ^IntegerData:
-		// Integer values must match integer constraints with size checking
-		#partial switch constr in constraint {
+		// Integer constraints must match integer values with size checking
+		#partial switch val in value {
 		case ^IntegerData:
 			#partial switch val.kind {
 			case .none:
@@ -615,11 +604,12 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			}
 			// Typed integer - must match exactly or constraint must be untyped
 			return constr.kind == .none || constr.kind == val.kind
+		case:
+			return false
 		}
-		return false
 	case ^FloatData:
-		// Float values must match float constraints
-		#partial switch constr in constraint {
+		// Float constraints must match float values
+		#partial switch val in value {
 		case ^FloatData:
 			switch val.kind {
 			case .none:
@@ -646,18 +636,20 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 			case:
 				return false
 			}
+		case:
+			return false
 		}
 	case ^BoolData:
-		// Boolean values must match boolean constraints
-		#partial switch constr in constraint {
+		// Boolean constraints must match boolean values
+		#partial switch val in value {
 		case ^BoolData:
 			return true
 		case:
 			return false
 		}
 	case Empty:
-		// Empty values must match empty constraints
-		#partial switch constr in constraint {
+		// Empty constraints must match empty values
+		#partial switch val in value {
 		case Empty:
 			return true
 		case:
