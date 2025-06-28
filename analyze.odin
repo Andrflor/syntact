@@ -206,6 +206,7 @@ analyze_node :: proc(node: ^Node) {
 		binding.kind = .pointing_push
 		analyze_binding_value(node, binding)
 		add_binding(binding)
+		typecheck_binding(binding, get_position(node))
 	}
 }
 
@@ -342,8 +343,6 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 		process_external(n)
 	}
 
-	// After processing, check if the binding satisfies its type constraints
-	typecheck_binding(binding, get_position(node))
 }
 
 // Processes a pointing push binding (name -> value)
@@ -354,6 +353,7 @@ process_pointing_push :: proc(node: Pointing) {
 	analyze_binding_name(node.name, binding)
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes a pointing pull binding (name <- value)
@@ -364,6 +364,7 @@ process_pointing_pull :: proc(node: PointingPull) {
 	analyze_binding_name(node.name, binding)
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes an event push binding (optional name >> value)
@@ -377,6 +378,7 @@ process_event_push :: proc(node: EventPush) {
 	}
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes an event pull binding (name << value)
@@ -387,6 +389,7 @@ process_event_pull :: proc(node: EventPull) {
 	analyze_binding_name(node.name, binding)
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes a resonance push binding (optional name ~> value)
@@ -400,6 +403,7 @@ process_resonance_push :: proc(node: ResonancePush) {
 	}
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes a resonance pull binding (name <~ value)
@@ -410,6 +414,7 @@ process_resonance_pull :: proc(node: ResonancePull) {
 	analyze_binding_name(node.name, binding)
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes a product binding (produces output)
@@ -419,6 +424,7 @@ process_product :: proc(node: Product) {
 	binding.kind = .product
 	add_binding(binding)
 	analyze_binding_value(node.value, binding)
+	typecheck_binding(binding, node.position)
 }
 
 // Processes a scope node (block of statements)
@@ -539,6 +545,7 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	switch val in value {
 	case ^[dynamic]^Binding:
+		fmt.println("Typechecking")
 	case ^ScopeData:
 		// Scope values must match scope constraints
 		#partial switch constr in constraint {
@@ -554,8 +561,9 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 							typecheck(constr.content[i].value, val.content[i].value)
 					}
 				}
+			} else if len(val.content) < len(constr.content) {
+				return false
 			} else {
-
 			}
 			return valid
 		case:
