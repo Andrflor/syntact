@@ -547,14 +547,18 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	case ^[dynamic]^Binding:
 		#partial switch val in value {
 		case ^[dynamic]^Binding:
-			return true
+			return typecheck_scope_content(constr, val)
+		case ^ScopeData:
+			return typecheck_scope_content(constr, &val.content)
 		case:
 			return false
 		}
 	case ^ScopeData:
 		#partial switch val in value {
+		case ^[dynamic]^Binding:
+			return typecheck_scope_content(&constr.content, val)
 		case ^ScopeData:
-			return true
+			return typecheck_scope_content(&constr.content, &val.content)
 		case:
 			return false
 		}
@@ -658,6 +662,23 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	}
 	return false
 }
+
+typecheck_scope_content :: #force_inline proc(
+	constraint: ^[dynamic]^Binding,
+	value: ^[dynamic]^Binding,
+) -> bool {
+	if (len(constraint) == len(value)) {
+		for i in 0 ..< len(constraint) {
+			// TODO(andrflor): typecheck with constraint and value
+			if (constraint[i].name != value[i].name || constraint[i].kind != value[i].kind) {
+				return false
+			}
+		}
+	}
+	// TODO(andrflor): check with binding
+	return false
+}
+
 
 // Finds the default value for a constraint by looking for product bindings
 resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
