@@ -669,13 +669,13 @@ typecheck_scope_content :: #force_inline proc(
 ) -> bool {
 	if (len(constraint) == len(value)) {
 		for i in 0 ..< len(constraint) {
-			// TODO(andrflor): typecheck with constraint and value
 			if (constraint[i].name != value[i].name || constraint[i].kind != value[i].kind) {
 				return false
 			}
 		}
 	}
 	// TODO(andrflor): check with binding
+
 	return false
 }
 
