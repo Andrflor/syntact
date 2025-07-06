@@ -667,16 +667,36 @@ typecheck_scope_content :: #force_inline proc(
 	constraint: ^[dynamic]^Binding,
 	value: ^[dynamic]^Binding,
 ) -> bool {
-	if (len(constraint) == len(value)) {
-		for i in 0 ..< len(constraint) {
-			if (constraint[i].name != value[i].name || constraint[i].kind != value[i].kind) {
+	valueLength := len(value)
+	constraintLength := len(constraint)
+
+	if valueLength == 0 {
+		if constraintLength == 0 {
+			return true
+		}
+		for i in 0 ..< constraintLength {
+			if constraint[i].value == empty {
+				continue
+			}
+			if constraint[i].constraint == nil {
 				return false
 			}
+			constraintContentLength := len(constraint[i].constraint.content)
+			for j in 0 ..< constraintContentLength {
+				valid := false
+				if constraint[i].constraint.content[j].kind == .product {
+					if typecheck(constraint[i].constraint.content[j].value, empty) {
+					}
+				}
+			}
 		}
+		return false
+	}
+	for i in 0 ..< valueLength {
 	}
 	// TODO(andrflor): check with binding
 
-	return false
+	return true
 }
 
 
@@ -687,7 +707,7 @@ resolve_default :: #force_inline proc(constraint: ^ScopeData) -> ValueData {
 			return constraint.content[i].value
 		}
 	}
-	return Empty{}
+	return empty
 }
 
 // Resolves a constraint node to a ScopeData structure
@@ -699,6 +719,8 @@ resolve_constraint :: #force_inline proc(node: ^Node) -> ^ScopeData {
 	}
 	return &emptyScope
 }
+
+empty := Empty{}
 
 // Empty scope used as a default when constraint resolution fails
 emptyScope := ScopeData {
@@ -726,7 +748,7 @@ compile_time_execute :: proc(node: ^Node) -> ValueData {
 			}
 		}
 	}
-	return Empty{}
+	return empty
 }
 
 compile_time_solve_binding_override :: #force_inline proc(
@@ -888,6 +910,7 @@ compile_time_resolve :: proc(node: ^Node) -> ValueData {
 	}
 	return nil
 }
+
 // Processes a constraint node (name : constraint)
 // Sets up type constraints for bindings
 process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
@@ -1046,10 +1069,15 @@ process_property :: proc(node: Property, binding: ^Binding) {
 
 // Processes expand nodes (unpacking/spreading)
 process_expand :: proc(node: Expand, binding: ^Binding) {
+	no_start_constraint := binding.constraint == nil
 	analyze_binding_value(node.target, binding)
+	fmt.println(binding.constraint)
 	#partial switch v in binding.value {
 	case ^ScopeData:
 		binding.value = &v.content
+	}
+	if no_start_constraint && binding.constraint != nil {
+
 	}
 }
 
