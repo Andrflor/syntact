@@ -683,9 +683,11 @@ typecheck_scope_content :: #force_inline proc(
 			}
 			constraintContentLength := len(constraint[i].constraint.content)
 			for j in 0 ..< constraintContentLength {
-				valid := false
+				valid := true
 				if constraint[i].constraint.content[j].kind == .product {
 					if typecheck(constraint[i].constraint.content[j].value, empty) {
+						valid := true
+						continue
 					}
 				}
 			}
