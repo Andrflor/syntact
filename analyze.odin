@@ -27,7 +27,6 @@ Binding :: struct {
 ValueData :: union {
 	^ScopeData, // Reference to a scope (nested bindings)
 	^StringData, // String literal value
-	^[dynamic]^Binding, // Direct binding array without scope
 	^IntegerData, // Integer literal value
 	^FloatData, // Float literal value
 	^BoolData, // Boolean literal value
@@ -97,6 +96,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Constaint_Value, // Invalid constraint value
 	Circular_Reference, // Circular dependency detected
 	Invalid_Binding_Value, // Invalid value for binding
+  Invalid_Expand
 }
 
 // Enumeration of different binding types in the language
@@ -108,6 +108,7 @@ Binding_Kind :: enum {
 	event_pull, // Pull-style event binding
 	resonance_push, // Push-style resonance binding
 	resonance_pull, // Pull-style resonance binding
+  inline_push, // Paste value of a scope in another
 	product, // Product/output binding
 	event_source, // Event source binding
 }
@@ -197,6 +198,8 @@ analyze_node :: proc(node: ^Node) {
 		process_resonance_push(n)
 	case ResonancePull:
 		process_resonance_pull(n)
+  case Expand:
+		process_expand(n)
 	case Product:
 		process_product(n)
 	case:
@@ -300,6 +303,12 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			.Invalid_Binding_Value,
 			n.position,
 		)
+	case Expand:
+    analyzer_error(
+			"Cannot use a expand rule as a binding value",
+			.Invalid_Binding_Value,
+			n.position,
+		)
 	case Product:
 		analyzer_error(
 			"Cannot use a Product rule as a binding value",
@@ -319,8 +328,6 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			n.position,
 		)
 	// These node types can be used as binding values
-	case Expand:
-		process_expand(n, binding)
 	case Pattern:
 		process_pattern(n, binding)
 	case ScopeNode:
@@ -380,6 +387,26 @@ process_event_push :: proc(node: EventPush) {
 	analyze_binding_value(node.value, binding)
 	typecheck_binding(binding, node.position)
 }
+
+// Processes expand nodes (unpacking/spreading)
+process_expand :: proc(node: Expand) {
+	binding := new(Binding)
+	binding.name = ""
+	binding.kind = .inline_push
+	// Event push bindings can have optional names
+	if (node.target == nil) {
+		analyzer_error(
+			"Cannot use a Expand without a target value",
+			.Invalid_Expand,
+			node.position,
+		)
+    return
+	}
+	analyze_binding_value(node.target, binding)
+  add_binding(binding)
+  typecheck_binding(binding, get_position(node.target))
+}
+
 
 // Processes an event pull binding (name << value)
 process_event_pull :: proc(node: EventPull) {
@@ -483,7 +510,6 @@ process_override :: proc(node: Override, binding: ^Binding) {
 		analyze_binding_value(node.source, binding)
 		#partial switch v in binding.value {
 		case ^ScopeData:
-		case ^[dynamic]^Binding:
 		}
 	}
 }
@@ -544,19 +570,8 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 // Returns true if the value is compatible with the constraint
 typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	switch constr in constraint {
-	case ^[dynamic]^Binding:
-		#partial switch val in value {
-		case ^[dynamic]^Binding:
-			return typecheck_scope_content(constr, val)
-		case ^ScopeData:
-			return typecheck_scope_content(constr, &val.content)
-		case:
-			return false
-		}
 	case ^ScopeData:
 		#partial switch val in value {
-		case ^[dynamic]^Binding:
-			return typecheck_scope_content(&constr.content, val)
 		case ^ScopeData:
 			return typecheck_scope_content(&constr.content, &val.content)
 		case:
@@ -667,38 +682,7 @@ typecheck_scope_content :: #force_inline proc(
 	constraint: ^[dynamic]^Binding,
 	value: ^[dynamic]^Binding,
 ) -> bool {
-	valueLength := len(value)
-	constraintLength := len(constraint)
-
-	if valueLength == 0 {
-		if constraintLength == 0 {
-			return true
-		}
-		for i in 0 ..< constraintLength {
-			if constraint[i].value == empty {
-				continue
-			}
-			if constraint[i].constraint == nil {
-				return false
-			}
-			constraintContentLength := len(constraint[i].constraint.content)
-			for j in 0 ..< constraintContentLength {
-				valid := true
-				if constraint[i].constraint.content[j].kind == .product {
-					if typecheck(constraint[i].constraint.content[j].value, empty) {
-						valid := true
-						continue
-					}
-				}
-			}
-		}
-		return false
-	}
-	for i in 0 ..< valueLength {
-	}
-	// TODO(andrflor): check with binding
-
-	return true
+  return true
 }
 
 
@@ -1039,28 +1023,6 @@ process_property :: proc(node: Property, binding: ^Binding) {
 			}
 
 		}
-	case ^[dynamic]^Binding:
-		#partial switch n in node.property {
-		case Identifier:
-			for bind in v {
-				if bind.name == n.name {
-					binding.value = bind.value
-					return
-				}
-			}
-		case Literal:
-			#partial switch n.kind {
-			case .Integer:
-				access_index, ok := strconv.parse_int(n.value)
-				if (ok) {
-					if access_index >= 0 && access_index < len(v) {
-						binding.value = v[access_index].value
-						return
-					}
-				}
-			}
-
-		}
 	}
 	analyzer_error(
 		"Impossible to find the property",
@@ -1069,19 +1031,6 @@ process_property :: proc(node: Property, binding: ^Binding) {
 	)
 }
 
-// Processes expand nodes (unpacking/spreading)
-process_expand :: proc(node: Expand, binding: ^Binding) {
-	no_start_constraint := binding.constraint == nil
-	analyze_binding_value(node.target, binding)
-	fmt.println(binding.constraint)
-	#partial switch v in binding.value {
-	case ^ScopeData:
-		binding.value = &v.content
-	}
-	if no_start_constraint && binding.constraint != nil {
-
-	}
-}
 
 // Processes external reference nodes
 process_external :: proc(node: External) {
@@ -1266,8 +1215,6 @@ debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
 	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
-	case ^[dynamic]^Binding:
-		return fmt.tprintf("RawBindings(%d bindings)", len(v))
 	case ^StringData:
 		return "String"
 	case ^IntegerData:
@@ -1314,9 +1261,6 @@ debug_value_data :: proc(value: ValueData, indent_level: int) {
 	case ^ScopeData:
 		fmt.println()
 		debug_scope(v, indent_level, true)
-	case ^[dynamic]^Binding:
-		fmt.println()
-		debug_raw_bindings(v, indent_level, true)
 	case ^StringData:
 		fmt.printf("('%s')\n", v.content)
 	case ^IntegerData:
@@ -1347,6 +1291,8 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 		return "ResonancePush"
 	case .resonance_pull:
 		return "ResonancePull"
+  case .inline_push:
+    return "Inline"
 	case .product:
 		return "Product"
 	case:
