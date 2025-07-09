@@ -96,7 +96,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Constaint_Value, // Invalid constraint value
 	Circular_Reference, // Circular dependency detected
 	Invalid_Binding_Value, // Invalid value for binding
-  Invalid_Expand
+	Invalid_Expand,
 }
 
 // Enumeration of different binding types in the language
@@ -108,7 +108,7 @@ Binding_Kind :: enum {
 	event_pull, // Pull-style event binding
 	resonance_push, // Push-style resonance binding
 	resonance_pull, // Pull-style resonance binding
-  inline_push, // Paste value of a scope in another
+	inline_push, // Paste value of a scope in another
 	product, // Product/output binding
 	event_source, // Event source binding
 }
@@ -198,7 +198,7 @@ analyze_node :: proc(node: ^Node) {
 		process_resonance_push(n)
 	case ResonancePull:
 		process_resonance_pull(n)
-  case Expand:
+	case Expand:
 		process_expand(n)
 	case Product:
 		process_product(n)
@@ -304,7 +304,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 			n.position,
 		)
 	case Expand:
-    analyzer_error(
+		analyzer_error(
 			"Cannot use a expand rule as a binding value",
 			.Invalid_Binding_Value,
 			n.position,
@@ -400,11 +400,11 @@ process_expand :: proc(node: Expand) {
 			.Invalid_Expand,
 			node.position,
 		)
-    return
+		return
 	}
 	analyze_binding_value(node.target, binding)
-  add_binding(binding)
-  typecheck_binding(binding, get_position(node.target))
+	add_binding(binding)
+	typecheck_binding(binding, get_position(node.target))
 }
 
 
@@ -552,18 +552,44 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 		// No value provided, use the constraint's default
 		binding.value = resolve_default(binding.constraint)
 	} else {
-		// Check if the value matches any product binding in the constraint
-		for i in 0 ..< len(binding.constraint.content) {
-			if (binding.constraint.content[i].kind == .product) {
-				if typecheck(binding.constraint.content[i].value, binding.value) {
-					return
-				}
-			}
+		if (typecheck_constraint(binding.constraint, binding.value)) {
+			return
 		}
 		// Replace the value with the default so that we can continue compiling
 		binding.value = resolve_default(binding.constraint)
 		analyzer_error("The constraint do not match the given value", .Type_Mismatch, position)
 	}
+}
+
+typecheck_scope_content :: proc(constraints: []^Binding, value: []^Binding) -> bool {
+	if (len(value) == 0) {
+		if (len(constraints) == 0) {
+			return true
+		} else {
+			for constraint in constraints {
+				if (constraint.kind != .inline_push) {
+					return false
+				} else if len(constraint.value.(^ScopeData).content) != 0 &&
+				   !typecheck_constraint(constraint.constraint, &emptyScope) {
+					return false
+				}
+			}
+		}
+	} else {
+
+	}
+	return true
+}
+
+typecheck_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> bool {
+	for i in 0 ..< len(constraint.content) {
+		if (constraint.content[i].kind == .product) {
+			if typecheck(constraint.content[i].value, value) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Recursively checks if a value matches a type constraint
@@ -573,7 +599,7 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 	case ^ScopeData:
 		#partial switch val in value {
 		case ^ScopeData:
-			return typecheck_scope_content(&constr.content, &val.content)
+			return typecheck_scope_content(constr.content[:], val.content[:])
 		case:
 			return false
 		}
@@ -676,13 +702,6 @@ typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
 		}
 	}
 	return false
-}
-
-typecheck_scope_content :: #force_inline proc(
-	constraint: ^[dynamic]^Binding,
-	value: ^[dynamic]^Binding,
-) -> bool {
-  return true
 }
 
 
@@ -1291,8 +1310,8 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 		return "ResonancePush"
 	case .resonance_pull:
 		return "ResonancePull"
-  case .inline_push:
-    return "Inline"
+	case .inline_push:
+		return "Inline"
 	case .product:
 		return "Product"
 	case:
