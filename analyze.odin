@@ -576,7 +576,32 @@ typecheck_scope_content :: proc(constraints: []^Binding, value: []^Binding) -> b
 			}
 		}
 	} else {
+		if value[0].kind == .inline_push {
 
+		} else {
+			if len(constraints) == 0 {
+				return false
+			}
+			if constraints[0].kind == .inline_push {
+			} else {
+				if constraints[0].name != value[0].name {
+					return false
+				}
+				if (constraints[0].constraint == nil) {
+					if typecheck(constraints[0].value, value[0].value) {
+						return typecheck_scope_content(constraints[1:], value[1:])
+					} else {
+						return false
+					}
+				} else {
+					if typecheck_constraint(constraints[0].constraint, value[0].value) {
+						return typecheck_scope_content(constraints[1:], value[1:])
+					} else {
+						return false
+					}
+				}
+			}
+		}
 	}
 	return true
 }
