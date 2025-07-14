@@ -595,7 +595,16 @@ typecheck_scope_content :: proc(
 				fmt.println("Inline_push now")
 				constraint := constraints[0].constraint
 				if (constraint != nil) {
-					// TODO(andrflor): we need to typecheck with the constraint here
+					for i in 0 ..< len(constraint.content) {
+						if (constraint.content[i].kind == .product) {
+							if constr, ok := constraint.content[i].value.(^ScopeData); ok {
+								if typecheck_scope_content(constr.content[:], value) {
+									return true
+								}
+							}
+						}
+					}
+					return false
 				} else {
 					content := constraints[0].value.(^ScopeData).content
 					contentLengh := len(content)
