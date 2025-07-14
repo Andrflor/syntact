@@ -561,7 +561,11 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 	}
 }
 
-typecheck_scope_content :: proc(constraints: []^Binding, value: []^Binding) -> bool {
+typecheck_scope_content :: proc(
+	constraints: []^Binding,
+	value: []^Binding,
+	inline_constr_index: int = 0,
+) -> bool {
 	if (len(value) == 0) {
 		if (len(constraints) == 0) {
 			return true
@@ -577,13 +581,47 @@ typecheck_scope_content :: proc(constraints: []^Binding, value: []^Binding) -> b
 		}
 	} else {
 		if value[0].kind == .inline_push {
+			content := value[0].value.(^ScopeData).content
+			for value in content {
 
+			}
+			return typecheck_scope_content(constraints[1:], value[1:])
 		} else {
 			if len(constraints) == 0 {
 				return false
 			}
+			fmt.println("Checking here")
 			if constraints[0].kind == .inline_push {
+				fmt.println("Inline_push now")
+				constraint := constraints[0].constraint
+				if (constraint != nil) {
+					// TODO(andrflor): we need to typecheck with the constraint here
+				} else {
+					content := constraints[0].value.(^ScopeData).content
+					contentLengh := len(content)
+					fmt.printf("Content length is %s", contentLengh)
+					if (contentLengh == 0) {
+						return false
+					}
+					if typecheck_constraint(
+						content[inline_constr_index].constraint,
+						value[0].value,
+					) {
+						if inline_constr_index + 1 < contentLengh {
+							return typecheck_scope_content(
+								constraints,
+								value[1:],
+								inline_constr_index + 1,
+							)
+						} else {
+							return typecheck_scope_content(constraints[1:], value[1:])
+						}
+					} else {
+						return false
+					}
+				}
 			} else {
+				fmt.println("Yep this is it")
 				if constraints[0].name != value[0].name {
 					return false
 				}
@@ -594,7 +632,9 @@ typecheck_scope_content :: proc(constraints: []^Binding, value: []^Binding) -> b
 						return false
 					}
 				} else {
+					fmt.println("We have a contraint bil")
 					if typecheck_constraint(constraints[0].constraint, value[0].value) {
+						fmt.println("It typecheck")
 						return typecheck_scope_content(constraints[1:], value[1:])
 					} else {
 						return false
