@@ -339,7 +339,7 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 	case Constraint:
 		process_constraint(n, binding)
 	case Operator:
-		process_operator(n)
+		process_operator(n, binding)
 	case Execute:
 		process_execute(n)
 	case Literal:
@@ -552,7 +552,7 @@ typecheck_binding :: #force_inline proc(binding: ^Binding, position: Position) {
 		// No value provided, use the constraint's default
 		binding.value = resolve_default(binding.constraint)
 	} else {
-		if (typecheck_constraint(binding.constraint, binding.value)) {
+		if (typecheck_by_constraint(binding.constraint, binding.value)) {
 			return
 		}
 		// Replace the value with the default so that we can continue compiling
@@ -566,99 +566,132 @@ typecheck_scope_content :: proc(
 	value: []^Binding,
 	inline_constr_index: int = 0,
 ) -> bool {
-	if (len(value) == 0) {
-		if (len(constraints) == 0) {
-			return true
-		} else {
-			for constraint in constraints {
-				if (constraint.kind != .inline_push) {
-					return false
-				} else if len(constraint.value.(^ScopeData).content) != 0 &&
-				   !typecheck_constraint(constraint.constraint, &emptyScope) {
-					return false
-				}
+	for val in value {
+		if !typecheck_scope_binding(val, constraints) {
+			return false
+		}
+	}
+	return true
+	// if (len(value) == 0) {
+	// 	if (len(constraints) == 0) {
+	// 		return true
+	// 	} else {
+	// 		for constraint in constraints {
+	// 			if (constraint.kind != .inline_push) {
+	// 				return false
+	// 			} else if len(constraint.value.(^ScopeData).content) != 0 &&
+	// 			   !typecheck_by_constraint(constraint.constraint, &emptyScope) {
+	// 				return false
+	// 			}
+	// 		}
+	// 	}
+	// } else {
+	// 	if value[0].kind == .inline_push {
+	// 		content := value[0].value.(^ScopeData).content
+	// 		for value in content {
+	// 			// TODO(andrflor): complete that part
+	// 		}
+	// 		return typecheck_scope_content(constraints[1:], value[1:])
+	// 	} else {
+	// 		if len(constraints) == 0 {
+	// 			return false
+	// 		}
+	// 		if constraints[0].kind == .inline_push {
+	// 			constraint := constraints[0].constraint
+	// 			if (constraint != nil) {
+	// 				for i in 0 ..< len(constraint.content) {
+	// 					if (constraint.content[i].kind == .product) {
+	// 						if constr, ok := constraint.content[i].value.(^ScopeData); ok {
+	// 							if typecheck_scope_content(constr.content[:], value) {
+	// 								return true
+	// 							}
+	// 						}
+	// 					}
+	// 				}
+	// 				return false
+	// 			} else {
+	// 				content := constraints[0].value.(^ScopeData).content
+	// 				contentLengh := len(content)
+	// 				if (contentLengh == 0) {
+	// 					return false
+	// 				}
+	// 				if typecheck_by_constraint(
+	// 					content[inline_constr_index].constraint,
+	// 					value[0].value,
+	// 				) {
+	// 					if inline_constr_index + 1 < contentLengh {
+	// 						return typecheck_scope_content(
+	// 							constraints,
+	// 							value[1:],
+	// 							inline_constr_index + 1,
+	// 						)
+	// 					} else {
+	// 						return typecheck_scope_content(constraints[1:], value[1:])
+	// 					}
+	// 				} else {
+	// 					return false
+	// 				}
+	// 			}
+	// 		} else {
+	// 			if constraints[0].name != value[0].name {
+	// 				return false
+	// 			}
+	// 			if (constraints[0].constraint == nil) {
+	// 				if typecheck_by_value(constraints[0].value, value[0].value) {
+	// 					return typecheck_scope_content(constraints[1:], value[1:])
+	// 				} else {
+	// 					return false
+	// 				}
+	// 			} else {
+	// 				if typecheck_by_constraint(constraints[0].constraint, value[0].value) {
+	// 					return typecheck_scope_content(constraints[1:], value[1:])
+	// 				} else {
+	// 					return false
+	// 				}
+	// 			}
+	// 		}
+	// 	}
+	// }
+	// return true
+}
+
+typecheck_scope_binding :: proc(binding: ^Binding, constraint: []^Binding) -> bool {
+	if (binding.kind == .inline_push) {
+		for innerBinding in binding.value.(^ScopeData).content {
+			if (!typecheck_scope_binding(innerBinding, constraint)) {
+				return false
 			}
 		}
 	} else {
-		if value[0].kind == .inline_push {
-			content := value[0].value.(^ScopeData).content
-			for value in content {
+		if (len(constraint) == 0) {
+			return false
+		}
+		constr := constraint[0]
+		if (constr.kind == .inline_push) {
 
-			}
-			return typecheck_scope_content(constraints[1:], value[1:])
 		} else {
-			if len(constraints) == 0 {
-				return false
-			}
-			fmt.println("Checking here")
-			if constraints[0].kind == .inline_push {
-				fmt.println("Inline_push now")
-				constraint := constraints[0].constraint
-				if (constraint != nil) {
-					for i in 0 ..< len(constraint.content) {
-						if (constraint.content[i].kind == .product) {
-							if constr, ok := constraint.content[i].value.(^ScopeData); ok {
-								if typecheck_scope_content(constr.content[:], value) {
-									return true
-								}
-							}
-						}
-					}
-					return false
-				} else {
-					content := constraints[0].value.(^ScopeData).content
-					contentLengh := len(content)
-					fmt.printf("Content length is %s", contentLengh)
-					if (contentLengh == 0) {
-						return false
-					}
-					if typecheck_constraint(
-						content[inline_constr_index].constraint,
-						value[0].value,
-					) {
-						if inline_constr_index + 1 < contentLengh {
-							return typecheck_scope_content(
-								constraints,
-								value[1:],
-								inline_constr_index + 1,
-							)
-						} else {
-							return typecheck_scope_content(constraints[1:], value[1:])
-						}
-					} else {
-						return false
-					}
-				}
-			} else {
-				fmt.println("Yep this is it")
-				if constraints[0].name != value[0].name {
-					return false
-				}
-				if (constraints[0].constraint == nil) {
-					if typecheck(constraints[0].value, value[0].value) {
-						return typecheck_scope_content(constraints[1:], value[1:])
-					} else {
-						return false
-					}
-				} else {
-					fmt.println("We have a contraint bil")
-					if typecheck_constraint(constraints[0].constraint, value[0].value) {
-						fmt.println("It typecheck")
-						return typecheck_scope_content(constraints[1:], value[1:])
-					} else {
-						return false
-					}
-				}
-			}
+			return typecheck(binding, constr)
 		}
 	}
 	return true
 }
 
-typecheck_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> bool {
+typecheck :: proc(value: ^Binding, constraint: ^Binding) -> bool {
+	if (value.name != constraint.name || value.kind != constraint.kind) {
+		return false
+	}
+	if (constraint.constraint == nil) {
+		return typecheck_by_value(constraint.value, value.value)
+	} else {
+		return typecheck_by_constraint(constraint.constraint, value.value)
+	}
+}
+
+
+typecheck_by_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> bool {
 	for i in 0 ..< len(constraint.content) {
 		if (constraint.content[i].kind == .product) {
-			if typecheck(constraint.content[i].value, value) {
+			if typecheck_by_value(constraint.content[i].value, value) {
 				return true
 			}
 		}
@@ -668,7 +701,7 @@ typecheck_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> bool {
 
 // Recursively checks if a value matches a type constraint
 // Returns true if the value is compatible with the constraint
-typecheck :: proc(constraint: ValueData, value: ValueData) -> bool {
+typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 	switch constr in constraint {
 	case ^ScopeData:
 		#partial switch val in value {
@@ -864,7 +897,7 @@ compile_time_solve_binding_override :: #force_inline proc(
 
 override_binding :: #force_inline proc(binding: ^Binding, value: ^Node) -> ^Binding {
 	value := compile_time_resolve(value)
-	if typecheck(binding.value, value) {
+	if typecheck_by_value(binding.value, value) {
 		overriden := new(Binding)
 		overriden.value = value
 		overriden.kind = binding.kind
@@ -1034,7 +1067,7 @@ process_constraint :: #force_inline proc(node: Constraint, binding: ^Binding) {
 }
 
 // Processes operator nodes (arithmetic, logical, etc.)
-process_operator :: proc(node: Operator) {
+process_operator :: proc(node: Operator, binding: ^Binding) {
 	// TODO(andrflor): Implement operator processing
 }
 
