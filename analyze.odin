@@ -19,6 +19,7 @@ Binding :: struct {
 	name:       string, // The identifier name of the binding
 	kind:       Binding_Kind, // What type of binding this is (push/pull/event/etc.)
 	constraint: ^ScopeData, // Optional type constraint for the binding
+	source:     ^Node,
 	value:      ValueData, // The actual value/data associated with this binding
 }
 
@@ -263,6 +264,8 @@ analyze_binding_value :: #force_inline proc(node: ^Node, binding: ^Binding) {
 		)
 		return
 	}
+
+	binding.source = node
 
 	// Check each node type and either process it or report an error
 	switch n in node {
