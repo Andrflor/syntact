@@ -388,6 +388,7 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 		}
 		ref := new(RefData)
 		ref.refered = symbol
+    return ref
 	case Property:
 		if identifier, ok := n.property.(Identifier); ok {
 			prop := new(PropertyData)
@@ -424,6 +425,7 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 		exec := new(ExecuteData)
 		exec.target = analyze_value(n.value)
 		exec.wrappers = n.wrappers
+    return exec
 	case Literal:
 		switch n.kind {
 		case .Integer:
