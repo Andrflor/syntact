@@ -37,8 +37,18 @@ ValueData :: union {
 	^ExecuteData,
 	^RefData,
 	^BinaryOpData,
+  ^ReactiveData,
+  ^EffectData,
 	^UnaryOpData,
 	Empty, // Empty/null value
+}
+
+ReactiveData :: struct {
+  initial: ValueData,
+}
+
+EffectData :: struct {
+  placeholder: ValueData,
 }
 
 PropertyData :: struct {
@@ -56,6 +66,7 @@ UnaryOpData :: struct {
 	value:   ValueData,
 	oprator: Operator_Kind,
 }
+
 
 ExecuteData :: struct {
 	target:   ValueData,
@@ -658,6 +669,10 @@ debug_value_inline :: proc(value: ValueData) -> string {
 			return fmt.tprintf("Property(<scope>.%s)", v.prop)
 		}
 		return fmt.tprintf("Property(%s.%s)", source_inline, v.prop)
+  case ^ReactiveData:
+    return fmt.tprintf("Reactive(%s)", debug_value_inline(v.initial))
+  case ^EffectData:
+    return fmt.tprintf("Reactive(%s)", debug_value_inline(v.placeholder))
 	case ^RangeData:
 		start_inline := debug_value_inline(v.start)
 		end_inline := debug_value_inline(v.end)
@@ -700,6 +715,10 @@ debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
 	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
+  case ^ReactiveData:
+    return "Rx"
+  case ^EffectData:
+    return "Eff"
 	case ^StringData:
 		return "String"
 	case ^IntegerData:
