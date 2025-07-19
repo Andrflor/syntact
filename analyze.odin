@@ -24,6 +24,7 @@ Binding :: struct {
 	static_value:   ValueData,
 }
 
+
 // Union type representing all possible value types in the language
 // This is the core data representation for runtime values
 ValueData :: union {
@@ -450,6 +451,32 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		if (n.left == nil) {
 			op := new(UnaryOpData)
 			value, static_value := analyze_value(n.right)
+			switch n.kind {
+			case .Subtract:
+			case .Not:
+
+			case .Add,
+			     .Multiply,
+			     .Divide,
+			     .Mod,
+			     .Equal,
+			     .Less,
+			     .Greater,
+			     .NotEqual,
+			     .LessEqual,
+			     .GreaterEqual,
+			     .And,
+			     .Or,
+			     .Xor,
+			     .RShift,
+			     .LShift:
+				analyzer_error(
+					"Operator should not be used as unary",
+					.Invalid_operator,
+					n.position,
+				)
+				return value, static_value
+			}
 			op.value = value
 			op.oprator = n.kind
 			return op
@@ -460,11 +487,32 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			op.oprator = n.kind
 			return op
 		}
-		op := new(BinaryOpData)
-		op.left = analyze_value(n.left)
-		op.right = analyze_value(n.right)
-		op.oprator = n.kind
-		return op
+		switch n.kind {
+		case .Not:
+			analyzer_error("Cannot use not as binary operator", .Invalid_operator, n.position)
+			return empty, empty
+		case .Add:
+		case .Subtract:
+		case .Multiply:
+		case .Divide:
+		case .Mod:
+		case .Less:
+			return analyze_ordering_operator(n, less_than)
+		case .Greater:
+			return analyze_ordering_operator(n, greater_than)
+		case .LessEqual:
+			return analyze_ordering_operator(n, less_equal)
+		case .GreaterEqual:
+			return analyze_ordering_operator(n, greater_equal)
+		case .Equal:
+		case .NotEqual:
+		case .And:
+		case .Or:
+		case .Xor:
+		case .RShift:
+		case .LShift:
+		}
+
 	case Execute:
 		exec := new(ExecuteData)
 		target, static_target := analyze_value(n.value)
@@ -553,6 +601,98 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 
 empty := Empty{}
 
+string_to_u64 :: proc(s: string) -> u64 {
+	bytes := transmute([]u8)s
+	if len(bytes) > 8 {
+		return max(u64)
+	}
+
+	result: u64 = 0
+	for b in bytes {
+		result = (result << 8) + cast(u64)b
+	}
+
+	return result
+}
+
+less_than :: #force_inline proc(a, b: $T) -> bool {return a < b}
+greater_than :: #force_inline proc(a, b: $T) -> bool {return a > b}
+less_equal :: #force_inline proc(a, b: $T) -> bool {return a <= b}
+greater_equal :: #force_inline proc(a, b: $T) -> bool {return a >= b}
+equal :: #force_inline proc(a, b: $T) -> bool {return a == b}
+not_equal :: #force_inline proc(a, b: $T) -> bool {return a != b}
+
+analyze_ordering_operator :: #force_inline proc(
+	node: Operator,
+	compare_func: proc(left, right: $T) -> bool,
+) -> (
+	ValueData,
+	ValueData,
+) {
+	op := new(BinaryOpData)
+	left, static_left := analyze_value(node.left)
+	right, static_right := analyze_value(node.right)
+	op.oprator = node.kind
+	op.left = left
+	op.right = right
+
+	#partial switch l in static_left {
+	case ^IntegerData:
+		#partial switch r in static_right {
+		case ^IntegerData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(l.content, r.content)
+			return op, boolData
+		case ^FloatData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(cast(f64)l.content, r.content)
+			return op, boolData
+		case ^StringData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(l.content, string_to_u64(r.content))
+			return op, boolData
+		}
+	case ^FloatData:
+		#partial switch r in static_right {
+		case ^IntegerData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(l.content, cast(f64)r.content)
+			return op, boolData
+		case ^FloatData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(l.content, r.content)
+			return op, boolData
+		case ^StringData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(l.content, cast(f64)string_to_u64(r.content))
+			return op, boolData
+		}
+	case ^StringData:
+		#partial switch r in static_right {
+		case ^IntegerData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(string_to_u64(l.content), r.content)
+			return op, boolData
+		case ^FloatData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(cast(f64)string_to_u64(l.content), r.content)
+			return op, boolData
+		case ^StringData:
+			boolData := new(BoolData)
+			boolData.content = compare_func(string_to_u64(l.content), string_to_u64(r.content))
+			return op, boolData
+		}
+	}
+	analyzer_error(
+		fmt.tprintf(
+			"Cannot use %s operator on anything else than string integer or float",
+			node.kind,
+		),
+		.Invalid_operator,
+		node.position,
+	)
+	return empty, empty
+}
 
 // Internal recursive symbol resolution function
 // Searches through the scope stack from a specific index downward
