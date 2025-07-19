@@ -16,13 +16,12 @@ Analyzer :: struct {
 // Represents a binding (variable/symbol) in the language
 // Contains the name, type of binding, optional type constraint, and value
 Binding :: struct {
-	name:         string, // The identifier name of the binding
-	kind:         Binding_Kind, // What type of binding this is (push/pull/event/etc.)
-	constraint:   ^ScopeData, // Optional type constraint for the binding
-	owner:        ^ScopeData,
-	source:       ^Node,
-	value:        ValueData, // The actual value/data associated with this binding
-	static_value: ValueData,
+	name:           string, // The identifier name of the binding
+	kind:           Binding_Kind, // What type of binding this is (push/pull/event/etc.)
+	constraint:     ^ScopeData, // Optional type constraint for the binding
+	owner:          ^ScopeData,
+	symbolic_value: ValueData, // The actual value/data associated with this binding
+	static_value:   ValueData,
 }
 
 // Union type representing all possible value types in the language
@@ -153,6 +152,8 @@ Analyzer_Error_Type :: enum {
 	Invalid_Binding_Value, // Invalid value for binding
 	Invalid_Expand,
 	Invalid_Execute,
+	Invalid_operator,
+	Invalid_Range,
 	Default,
 }
 
@@ -245,35 +246,34 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 // Dispatches to specific processing procedures based on node type
 analyze_node :: proc(node: ^Node) {
 	binding := new(Binding)
-	binding.source = node
 	add_binding(binding)
 	#partial switch n in node {
 	case EventPull:
 		binding.kind = .event_pull
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case EventPush:
 		binding.kind = .event_push
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case ResonancePush:
 		binding.kind = .resonance_push
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case ResonancePull:
 		binding.kind = .resonance_pull
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case Pointing:
 		binding.kind = .pointing_push
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case PointingPull:
 		binding.kind = .pointing_pull
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case Product:
 		binding.kind = .product
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case Constraint:
 		binding.kind = .pointing_push
 		analyze_name(node, binding)
@@ -281,7 +281,7 @@ analyze_node :: proc(node: ^Node) {
 		process_expand_value(n.target, binding)
 	case:
 		binding.kind = .pointing_push
-		binding.value, binding.static_value = analyze_value(node)
+		binding.symbolic_value, binding.static_value = analyze_value(node)
 	}
 }
 
@@ -289,31 +289,31 @@ process_expand_value :: proc(node: ^Node, binding: ^Binding) {
 	#partial switch n in node {
 	case EventPull:
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case EventPush:
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case ResonancePush:
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case ResonancePull:
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case Pointing:
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case PointingPull:
 		analyze_name(n.name, binding)
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case Product:
-		binding.value, binding.static_value = analyze_value(n.value)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case Constraint:
 		analyze_name(node, binding)
 	case Expand:
 		analyzer_error("Nested expands are not allowed", .Invalid_Expand, n.position)
 		process_expand_value(n.target, binding)
 	case:
-		binding.value, binding.static_value = analyze_value(node)
+		binding.symbolic_value, binding.static_value = analyze_value(node)
 	}
 }
 
@@ -390,11 +390,20 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		return scope, scope
 	case Override:
 		override := new(OverrideData)
-		override.target = analyze_value(n.source)
-		for i in 0 ..< len(n.overrides) {
-			// analyze_node(&n.overrides[i])
+		target, static_target := analyze_value(n.source)
+		override.target = target
+		if scope, ok := static_target.(^ScopeData); ok {
+			// TODO(andrflor): process override check and static override
+			static_override := scope
+			return override, static_override
+		} else {
+			analyzer_error(
+				"Trying to override an element that does no resolve to a scope",
+				.Invalid_Override,
+				n.position,
+			)
+			return target, static_target
 		}
-		return override, override
 	case Identifier:
 		symbol := resolve_symbol(n.name)
 		if (symbol == nil) {
@@ -407,25 +416,41 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		}
 		ref := new(RefData)
 		ref.refered = symbol
-		return ref, ref.refered
+		return ref, ref.refered.static_value
 	case Property:
 		if identifier, ok := n.property.(Identifier); ok {
 			prop := new(PropertyData)
-			prop.source = analyze_value(n.source)
 			prop.prop = identifier.name
+			source, static_source := analyze_value(n.source)
+			if scope, ok := static_source.(^ScopeData); ok {
+				for binding in scope.content {
+					if binding.name == identifier.name {
+						return prop, binding.static_value
+					}
+				}
+			} else {
+				analyzer_error(
+					fmt.tprintf("There is no property %s", identifier.name),
+					.Invalid_Property_Access,
+					n.position,
+				)
+				return empty, empty
+			}
+			return prop, empty
 		}
 		analyzer_error(
 			"Invalid property access without identifier",
 			.Invalid_Property_Access,
 			n.position,
 		)
-		return empty
+		return empty, empty
 	case Pattern:
 		source := analyze_value(n.target)
 	case Operator:
 		if (n.left == nil) {
 			op := new(UnaryOpData)
-			op.value = analyze_value(n.right)
+			value, static_value := analyze_value(n.right)
+			op.value = value
 			op.oprator = n.kind
 			return op
 		}
@@ -442,9 +467,17 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		return op
 	case Execute:
 		exec := new(ExecuteData)
-		exec.target = analyze_value(n.value)
+		target, static_target := analyze_value(n.value)
+		exec.target = target
 		exec.wrappers = n.wrappers
-		return exec
+		if scope, ok := static_target.(^ScopeData); ok {
+			for binding in scope.content {
+				if binding.kind == .product {
+					return exec, binding.static_value
+				}
+			}
+		}
+		return exec, empty
 	case Literal:
 		switch n.kind {
 		case .Integer:
@@ -454,7 +487,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 				value.content = u64(content)
 			}
 			value.kind = .none
-			return value
+			return value, value
 		case .Float:
 			value := new(FloatData)
 			content, ok := strconv.parse_f64(n.value)
@@ -462,15 +495,15 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 				value.content = content
 			}
 			value.kind = .none
-			return value
+			return value, value
 		case .String:
 			value := new(StringData)
 			value.content = n.value
-			return value
+			return value, value
 		case .Bool:
 			value := new(BoolData)
 			value.content = n.value == "true"
-			return value
+			return value, value
 		case .Hexadecimal:
 			value := new(IntegerData)
 			content, ok := strconv.parse_int(n.value, 16)
@@ -478,7 +511,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 				value.content = u64(content)
 			}
 			value.kind = .none
-			return value
+			return value, value
 		case .Binary:
 			value := new(IntegerData)
 			content, ok := strconv.parse_int(n.value, 2)
@@ -486,19 +519,36 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 				value.content = u64(content)
 			}
 			value.kind = .none
-			return value
+			return value, value
 		}
 	case External:
 		ref := new(RefData)
 		//TODO(andrflor): resolve the ref
-		return ref
+		return ref, empty
 	case Range:
 		range := new(RangeData)
-		range.start = analyze_value(n.start)
-		range.end = analyze_value(n.end)
-		return range
+		start, static_start := analyze_value(n.start)
+		end, static_end := analyze_value(n.end)
+		start_data, start_ok := static_start.(^IntegerData)
+		end_data, end_ok := static_end.(^IntegerData)
+		range.start = start
+		range.end = end
+		static_range := new(RangeData)
+		static_range.start = static_start
+		static_range.end = static_end
+
+		if !start_ok || !end_ok {
+			analyzer_error(
+				"Trying to create a range with a non integer value",
+				.Invalid_Range,
+				n.position,
+			)
+		}
+
+		return range, static_range
+
 	}
-	return empty
+	return empty, empty
 }
 
 empty := Empty{}
@@ -532,10 +582,10 @@ resolve_symbol :: #force_inline proc(name: string) -> ^Binding {
 // Resolves a named symbol within a specific binding's scope
 // Used for property access (searches from end to beginning for shadowing)
 resolve_named_property_symbol :: #force_inline proc(name: string, binding: ^Binding) -> ^Binding {
-	if (binding.value == nil) {
+	if (binding.symbolic_value == nil) {
 		return nil
 	}
-	#partial switch scope in binding.value {
+	#partial switch scope in binding.symbolic_value {
 	case ^ScopeData:
 		// Search from end to beginning to handle variable shadowing
 		for i := len(scope.content) - 1; i >= 0; i -= 1 {
@@ -642,17 +692,17 @@ debug_binding :: proc(binding: ^Binding, indent_level: int, index: int) {
 	if binding.constraint != nil {
 		fmt.printf(" (constrained)")
 	}
-	if binding.value != nil {
+	if binding.symbolic_value != nil {
 		// Check if it's a scope
-		if scope_data, is_scope := binding.value.(^ScopeData); is_scope {
+		if scope_data, is_scope := binding.symbolic_value.(^ScopeData); is_scope {
 			fmt.printf(" -> Scope(%d bindings)\n", len(scope_data.content))
 			debug_scope(scope_data, indent_level + 1, false)
 		} else {
-			inline_repr := debug_value_inline(binding.value)
+			inline_repr := debug_value_inline(binding.symbolic_value)
 			if inline_repr != "" {
 				fmt.printf(" = %s\n", inline_repr)
 			} else {
-				fmt.printf(" -> %s\n", debug_value_type(binding.value))
+				fmt.printf(" -> %s\n", debug_value_type(binding.symbolic_value))
 			}
 		}
 	} else {

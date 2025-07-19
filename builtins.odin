@@ -15,6 +15,20 @@ init_builtins :: proc() -> ScopeData {
 	return builtin
 }
 
+u8_binding := create_integer_default("u8", .u8)
+i8_binding := create_integer_default("i8", .i8)
+u16_binding := create_integer_default("u16", .u16)
+i16_binding := create_integer_default("i16", .i16)
+u32_binding := create_integer_default("u32", .u32)
+i32_binding := create_integer_default("i32", .i32)
+u64_binding := create_integer_default("u64", .u64)
+i64_binding := create_integer_default("i64", .i64)
+f32_binding := create_float_default("f32", .f32)
+f64_binding := create_float_default("f64", .f64)
+bool_binding := create_bool_default()
+char_binding := create_integer_default("char", .u8)
+string_binding := create_string_default()
+
 @(private = "file")
 builtin_bindings := [13]Binding {
 	u8_binding,
@@ -32,131 +46,76 @@ builtin_bindings := [13]Binding {
 	string_binding,
 }
 
-create_integer_default :: proc(enum_value: IntegerKind) -> ^ScopeData {
+create_integer_default :: proc(name: string, enum_value: IntegerKind) -> Binding {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .product
-	binding.value = new(IntegerData)
-	(binding.value.(^IntegerData)).content = 0
-	(binding.value.(^IntegerData)).kind = enum_value
+	binding.symbolic_value = new(IntegerData)
+	(binding.symbolic_value.(^IntegerData)).content = 0
+	(binding.symbolic_value.(^IntegerData)).kind = enum_value
+	binding.static_value = binding.symbolic_value
 	scope := new(ScopeData)
 	scope.content = make([dynamic]^Binding, 0)
 	append(&scope.content, binding)
-	return scope
+	return Binding {
+		name = name,
+		kind = .pointing_push,
+		symbolic_value = scope,
+		static_value = scope,
+	}
 }
 
-create_float_default :: proc(enum_value: FloatKind) -> ^ScopeData {
+create_float_default :: proc(name: string, enum_value: FloatKind) -> Binding {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .product
-	binding.value = new(FloatData)
-	(binding.value.(^FloatData)).content = 0.0
-	(binding.value.(^FloatData)).kind = enum_value
+	binding.symbolic_value = new(FloatData)
+	(binding.symbolic_value.(^FloatData)).content = 0.0
+	(binding.symbolic_value.(^FloatData)).kind = enum_value
+	binding.static_value = binding.symbolic_value
 	scope := new(ScopeData)
 	scope.content = make([dynamic]^Binding, 0)
 	append(&scope.content, binding)
-	return scope
+	return Binding {
+		name = name,
+		kind = .pointing_push,
+		symbolic_value = scope,
+		static_value = scope,
+	}
 }
 
-create_bool_default :: proc() -> ^ScopeData {
+create_bool_default :: proc() -> Binding {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .product
-	binding.value = new(BoolData)
-	(binding.value.(^BoolData)).content = false
+	binding.symbolic_value = new(BoolData)
+	(binding.symbolic_value.(^BoolData)).content = false
+	binding.static_value = binding.symbolic_value
 	scope := new(ScopeData)
 	scope.content = make([dynamic]^Binding, 0)
 	append(&scope.content, binding)
-	return scope
+	return Binding {
+		name = "bool",
+		kind = .pointing_push,
+		symbolic_value = scope,
+		static_value = scope,
+	}
 }
 
-create_string_default :: proc() -> ^ScopeData {
+create_string_default :: proc() -> Binding {
 	binding := new(Binding)
 	binding.name = ""
 	binding.kind = .product
-	binding.value = new(StringData)
-	(binding.value.(^StringData)).content = ""
+	binding.symbolic_value = new(StringData)
+	(binding.symbolic_value.(^StringData)).content = ""
+	binding.static_value = binding.symbolic_value
 	scope := new(ScopeData)
 	scope.content = make([dynamic]^Binding, 0)
 	append(&scope.content, binding)
-	return scope
-}
-
-u8_binding := Binding {
-	name  = "u8",
-	kind  = .pointing_push,
-	value = create_integer_default(.u8),
-}
-
-i8_binding := Binding {
-	name  = "i8",
-	kind  = .pointing_push,
-	value = create_integer_default(.i8),
-}
-
-u16_binding := Binding {
-	name  = "u16",
-	kind  = .pointing_push,
-	value = create_integer_default(.u16),
-}
-
-i16_binding := Binding {
-	name  = "i16",
-	kind  = .pointing_push,
-	value = create_integer_default(.i16),
-}
-
-u32_binding := Binding {
-	name  = "u32",
-	kind  = .pointing_push,
-	value = create_integer_default(.u32),
-}
-
-i32_binding := Binding {
-	name  = "i32",
-	kind  = .pointing_push,
-	value = create_integer_default(.i32),
-}
-
-u64_binding := Binding {
-	name  = "u64",
-	kind  = .pointing_push,
-	value = create_integer_default(.u64),
-}
-
-i64_binding := Binding {
-	name  = "i64",
-	kind  = .pointing_push,
-	value = create_integer_default(.i64),
-}
-
-f32_binding := Binding {
-	name  = "f32",
-	kind  = .pointing_push,
-	value = create_float_default(.f32),
-}
-
-f64_binding := Binding {
-	name  = "f64",
-	kind  = .pointing_push,
-	value = create_float_default(.f64),
-}
-
-bool_binding := Binding {
-	name  = "bool",
-	kind  = .pointing_push,
-	value = create_bool_default(),
-}
-
-// Pour char, j'assume que c'est un u8
-char_binding := Binding {
-	name  = "char",
-	kind  = .pointing_push,
-	value = create_integer_default(.u8),
-}
-
-string_binding := Binding {
-	name  = "String",
-	kind  = .pointing_push,
-	value = create_string_default(),
+	return Binding {
+		name = "string",
+		kind = .pointing_push,
+		symbolic_value = scope,
+		static_value = scope,
+	}
 }
