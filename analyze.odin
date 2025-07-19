@@ -16,12 +16,13 @@ Analyzer :: struct {
 // Represents a binding (variable/symbol) in the language
 // Contains the name, type of binding, optional type constraint, and value
 Binding :: struct {
-	name:       string, // The identifier name of the binding
-	kind:       Binding_Kind, // What type of binding this is (push/pull/event/etc.)
-	constraint: ^ScopeData, // Optional type constraint for the binding
-	owner:      ^ScopeData,
-	source:     ^Node,
-	value:      ValueData, // The actual value/data associated with this binding
+	name:         string, // The identifier name of the binding
+	kind:         Binding_Kind, // What type of binding this is (push/pull/event/etc.)
+	constraint:   ^ScopeData, // Optional type constraint for the binding
+	owner:        ^ScopeData,
+	source:       ^Node,
+	value:        ValueData, // The actual value/data associated with this binding
+	static_value: ValueData,
 }
 
 // Union type representing all possible value types in the language
@@ -35,20 +36,21 @@ ValueData :: union {
 	^PropertyData,
 	^RangeData,
 	^ExecuteData,
+	^OverrideData,
 	^RefData,
 	^BinaryOpData,
-  ^ReactiveData,
-  ^EffectData,
+	^ReactiveData,
+	^EffectData,
 	^UnaryOpData,
 	Empty, // Empty/null value
 }
 
 ReactiveData :: struct {
-  initial: ValueData,
+	initial: ValueData,
 }
 
 EffectData :: struct {
-  placeholder: ValueData,
+	placeholder: ValueData,
 }
 
 PropertyData :: struct {
@@ -67,6 +69,10 @@ UnaryOpData :: struct {
 	oprator: Operator_Kind,
 }
 
+OverrideData :: struct {
+	target:    ValueData,
+	overrides: [dynamic]^Binding,
+}
 
 ExecuteData :: struct {
 	target:   ValueData,
@@ -245,30 +251,29 @@ analyze_node :: proc(node: ^Node) {
 	case EventPull:
 		binding.kind = .event_pull
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case EventPush:
 		binding.kind = .event_push
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case ResonancePush:
 		binding.kind = .resonance_push
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case ResonancePull:
 		binding.kind = .resonance_pull
-		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case Pointing:
 		binding.kind = .pointing_push
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case PointingPull:
 		binding.kind = .pointing_pull
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case Product:
 		binding.kind = .product
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case Constraint:
 		binding.kind = .pointing_push
 		analyze_name(node, binding)
@@ -276,7 +281,7 @@ analyze_node :: proc(node: ^Node) {
 		process_expand_value(n.target, binding)
 	case:
 		binding.kind = .pointing_push
-		binding.value = analyze_value(node)
+		binding.value, binding.static_value = analyze_value(node)
 	}
 }
 
@@ -284,31 +289,31 @@ process_expand_value :: proc(node: ^Node, binding: ^Binding) {
 	#partial switch n in node {
 	case EventPull:
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case EventPush:
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case ResonancePush:
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case ResonancePull:
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case Pointing:
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case PointingPull:
 		analyze_name(n.name, binding)
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case Product:
-		binding.value = analyze_value(n.value)
+		binding.value, binding.static_value = analyze_value(n.value)
 	case Constraint:
 		analyze_name(node, binding)
 	case Expand:
 		analyzer_error("Nested expands are not allowed", .Invalid_Expand, n.position)
 		process_expand_value(n.target, binding)
 	case:
-		binding.value = analyze_value(node)
+		binding.value, binding.static_value = analyze_value(node)
 	}
 }
 
@@ -350,7 +355,7 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
 }
 
-analyze_value :: proc(node: ^Node) -> ValueData {
+analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 	switch n in node {
 	case EventPull,
 	     EventPush,
@@ -366,14 +371,14 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 			.Invalid_Binding_Value,
 			get_position(node),
 		)
-		return empty
+		return empty, empty
 	case Branch:
 		analyzer_error(
 			"We should not find a branch outside a pattern node",
 			.Invalid_Binding_Value,
 			get_position(node),
 		)
-		return empty
+		return empty, empty
 	case ScopeNode:
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
@@ -382,11 +387,14 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 			analyze_node(&n.value[i])
 		}
 		pop_scope()
-		return scope
+		return scope, scope
 	case Override:
-		value := analyze_value(n.source)
-		for override in n.overrides {
+		override := new(OverrideData)
+		override.target = analyze_value(n.source)
+		for i in 0 ..< len(n.overrides) {
+			// analyze_node(&n.overrides[i])
 		}
+		return override, override
 	case Identifier:
 		symbol := resolve_symbol(n.name)
 		if (symbol == nil) {
@@ -395,11 +403,11 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 				.Undefined_Identifier,
 				n.position,
 			)
-			return empty
+			return empty, empty
 		}
 		ref := new(RefData)
 		ref.refered = symbol
-    return ref
+		return ref, ref.refered
 	case Property:
 		if identifier, ok := n.property.(Identifier); ok {
 			prop := new(PropertyData)
@@ -436,7 +444,7 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 		exec := new(ExecuteData)
 		exec.target = analyze_value(n.value)
 		exec.wrappers = n.wrappers
-    return exec
+		return exec
 	case Literal:
 		switch n.kind {
 		case .Integer:
@@ -481,6 +489,9 @@ analyze_value :: proc(node: ^Node) -> ValueData {
 			return value
 		}
 	case External:
+		ref := new(RefData)
+		//TODO(andrflor): resolve the ref
+		return ref
 	case Range:
 		range := new(RangeData)
 		range.start = analyze_value(n.start)
@@ -669,10 +680,10 @@ debug_value_inline :: proc(value: ValueData) -> string {
 			return fmt.tprintf("Property(<scope>.%s)", v.prop)
 		}
 		return fmt.tprintf("Property(%s.%s)", source_inline, v.prop)
-  case ^ReactiveData:
-    return fmt.tprintf("Reactive(%s)", debug_value_inline(v.initial))
-  case ^EffectData:
-    return fmt.tprintf("Reactive(%s)", debug_value_inline(v.placeholder))
+	case ^ReactiveData:
+		return fmt.tprintf("Reactive(%s)", debug_value_inline(v.initial))
+	case ^EffectData:
+		return fmt.tprintf("Reactive(%s)", debug_value_inline(v.placeholder))
 	case ^RangeData:
 		start_inline := debug_value_inline(v.start)
 		end_inline := debug_value_inline(v.end)
@@ -715,10 +726,10 @@ debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
 	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
-  case ^ReactiveData:
-    return "Rx"
-  case ^EffectData:
-    return "Eff"
+	case ^ReactiveData:
+		return "Rx"
+	case ^EffectData:
+		return "Eff"
 	case ^StringData:
 		return "String"
 	case ^IntegerData:
