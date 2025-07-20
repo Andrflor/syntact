@@ -104,8 +104,9 @@ StringData :: struct {
 
 // Integer literal data with content and specific integer type
 IntegerData :: struct {
-	content: u64, // The actual integer value
-	kind:    IntegerKind, // Specific integer type (u8, i32, etc.)
+	content:  u64, // The actual integer value
+	kind:     IntegerKind, // Specific integer type (u8, i32, etc.)
+	negative: bool,
 }
 
 // Enumeration of supported integer types
@@ -446,46 +447,13 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		)
 		return empty, empty
 	case Pattern:
-		source := analyze_value(n.target)
+		source, static_source := analyze_value(n.target)
 	case Operator:
 		if (n.left == nil) {
-			op := new(UnaryOpData)
-			value, static_value := analyze_value(n.right)
-			switch n.kind {
-			case .Subtract:
-			case .Not:
-
-			case .Add,
-			     .Multiply,
-			     .Divide,
-			     .Mod,
-			     .Equal,
-			     .Less,
-			     .Greater,
-			     .NotEqual,
-			     .LessEqual,
-			     .GreaterEqual,
-			     .And,
-			     .Or,
-			     .Xor,
-			     .RShift,
-			     .LShift:
-				analyzer_error(
-					"Operator should not be used as unary",
-					.Invalid_operator,
-					n.position,
-				)
-				return value, static_value
-			}
-			op.value = value
-			op.oprator = n.kind
-			return op
+			return analyze_unary_operator(n, n.left)
 		}
 		if (n.right == nil) {
-			op := new(UnaryOpData)
-			op.value = analyze_value(n.left)
-			op.oprator = n.kind
-			return op
+			return analyze_unary_operator(n, n.right)
 		}
 		switch n.kind {
 		case .Not:
@@ -637,6 +605,75 @@ compare_func :: #force_inline proc(a, b: $T, kind: Operator_Kind) -> bool {
 		return a >= b
 	}
 	return false
+}
+
+analyze_unary_operator :: #force_inline proc(
+	node: Operator,
+	child: ^Node,
+) -> (
+	ValueData,
+	ValueData,
+) {
+	op := new(UnaryOpData)
+	value, static_value := analyze_value(child)
+	op.value = value
+	op.oprator = node.kind
+	switch node.kind {
+	case .Subtract:
+		#partial switch v in static_value {
+		case ^IntegerData:
+			#partial switch v.kind {
+			case .u8, .u16, .u32, .u64:
+			case:
+				analyzer_error("Cannot sub on an unsigned int", .Invalid_operator, node.position)
+				return value, static_value
+			}
+			static_int := new(IntegerData)
+			static_int.kind = v.kind
+			static_int.negative = true
+			return op, static_int
+		case ^FloatData:
+			static_float := new(FloatData)
+			static_float.kind = v.kind
+			static_float.content = -v.content
+			return op, static_float
+		case:
+			analyzer_error(
+				"Cannot sub anything else than float or int",
+				.Invalid_operator,
+				node.position,
+			)
+		}
+	case .Not:
+		#partial switch v in static_value {
+		case ^IntegerData:
+			static_int := new(IntegerData)
+			static_int.content = ~v.content
+			return op, static_int
+		case ^BoolData:
+			static_bool := new(BoolData)
+			static_bool.content = !v.content
+			return op, static_bool
+		}
+	case .Add,
+	     .Multiply,
+	     .Divide,
+	     .Mod,
+	     .Equal,
+	     .Less,
+	     .Greater,
+	     .NotEqual,
+	     .LessEqual,
+	     .GreaterEqual,
+	     .And,
+	     .Or,
+	     .Xor,
+	     .RShift,
+	     .LShift:
+		analyzer_error("Operator should not be used as unary", .Invalid_operator, node.position)
+		return value, static_value
+	}
+	return value, static_value
 }
 
 analyze_equal_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
@@ -1092,6 +1129,8 @@ debug_value_inline :: proc(value: ValueData) -> string {
 	case ^ScopeData:
 		// Scopes should not be inlined - they need to show their contents
 		return "" // This signals that scope should be handled separately
+	case ^OverrideData:
+		return ""
 	case ^StringData:
 		return fmt.tprintf("String(\"%s\")", v.content)
 	case ^IntegerData:
@@ -1152,6 +1191,8 @@ debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
 	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
+	case ^OverrideData:
+		return "Override"
 	case ^ReactiveData:
 		return "Rx"
 	case ^EffectData:
