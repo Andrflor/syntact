@@ -496,23 +496,32 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		case .Multiply:
 		case .Divide:
 		case .Mod:
-		case .Less:
-			return analyze_ordering_operator(n, less_than)
-		case .Greater:
-			return analyze_ordering_operator(n, greater_than)
-		case .LessEqual:
-			return analyze_ordering_operator(n, less_equal)
-		case .GreaterEqual:
-			return analyze_ordering_operator(n, greater_equal)
-		case .Equal:
-		case .NotEqual:
 		case .And:
 		case .Or:
 		case .Xor:
+		case .Less:
+			return analyze_ordering_operator(n)
+		case .Greater:
+			return analyze_ordering_operator(n)
+		case .LessEqual:
+			return analyze_ordering_operator(n)
+		case .GreaterEqual:
+			return analyze_ordering_operator(n)
+		case .Equal:
+			return analyze_equal_operator(n)
+		case .NotEqual:
+			op, bool := analyze_equal_operator(n)
+			#partial switch b in bool {
+			case ^BoolData:
+				b.content = !b.content
+				return op, b
+			}
+			return op, bool
 		case .RShift:
+			return analyze_int_operator(n)
 		case .LShift:
+			return analyze_int_operator(n)
 		}
-
 	case Execute:
 		exec := new(ExecuteData)
 		target, static_target := analyze_value(n.value)
@@ -615,20 +624,235 @@ string_to_u64 :: proc(s: string) -> u64 {
 	return result
 }
 
-less_than :: #force_inline proc(a, b: $T) -> bool {return a < b}
-greater_than :: #force_inline proc(a, b: $T) -> bool {return a > b}
-less_equal :: #force_inline proc(a, b: $T) -> bool {return a <= b}
-greater_equal :: #force_inline proc(a, b: $T) -> bool {return a >= b}
-equal :: #force_inline proc(a, b: $T) -> bool {return a == b}
-not_equal :: #force_inline proc(a, b: $T) -> bool {return a != b}
 
-analyze_ordering_operator :: #force_inline proc(
-	node: Operator,
-	compare_func: proc(left, right: $T) -> bool,
-) -> (
-	ValueData,
-	ValueData,
-) {
+compare_func :: #force_inline proc(a, b: $T, kind: Operator_Kind) -> bool {
+	#partial switch kind {
+	case .Less:
+		return a < b
+	case .Greater:
+		return a > b
+	case .LessEqual:
+		return a <= b
+	case .GreaterEqual:
+		return a >= b
+	}
+	return false
+}
+
+analyze_equal_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
+	op := new(BinaryOpData)
+	left, static_left := analyze_value(node.left)
+	right, static_right := analyze_value(node.right)
+	op.oprator = node.kind
+	op.left = left
+	op.right = right
+
+	#partial switch r in static_right {
+	case ^IntegerData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			boolean := new(BoolData)
+			if (r.kind == .none || l.kind == .none) {
+				boolean.content = r.content == l.content
+			} else {
+				boolean.content = r.kind == l.kind && r.content == l.content
+			}
+			return op, boolean
+		case ^FloatData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^ScopeData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^BoolData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^StringData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		}
+	case ^FloatData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^FloatData:
+			boolean := new(BoolData)
+			if (r.kind == .none || l.kind == .none) {
+				boolean.content = r.content == l.content
+			} else {
+				boolean.content = r.kind == l.kind && r.content == l.content
+			}
+			return op, boolean
+		case ^ScopeData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^BoolData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^StringData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		}
+	case ^ScopeData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^FloatData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^ScopeData:
+			boolean := new(BoolData)
+			rlen := len(r.content)
+			llen := len(l.content)
+			if (rlen != llen) {
+				boolean.content = false
+			} else {
+				for i in 0 ..< llen {
+					right := r.content[i]
+					left := l.content[i]
+					if (right.kind != left.kind ||
+						   right.name != left.name ||
+						   right.static_value != left.static_value) {
+						boolean.content = false
+						break
+					}
+				}
+				boolean.content = true
+			}
+			return op, boolean
+		case ^BoolData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^StringData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		}
+	case ^BoolData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^FloatData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^ScopeData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^BoolData:
+			boolean := new(BoolData)
+			boolean.content = l.content == r.content
+			return op, boolean
+		case ^StringData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		}
+	case ^StringData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^FloatData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^ScopeData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^BoolData:
+			boolean := new(BoolData)
+			boolean.content = false
+			return op, boolean
+		case ^StringData:
+			boolean := new(BoolData)
+			boolean.content = r.content == l.content
+			return op, boolean
+		}
+	}
+	analyzer_error(
+		fmt.tprintf("Invalid static value for %s", node.kind),
+		.Invalid_operator,
+		node.position,
+	)
+	return empty, empty
+}
+
+
+analyze_int_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
+	op := new(BinaryOpData)
+	left, static_left := analyze_value(node.left)
+	right, static_right := analyze_value(node.right)
+	op.oprator = node.kind
+	op.left = left
+	op.right = right
+
+	#partial switch r in static_right {
+	case ^IntegerData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			#partial switch op.oprator {
+			case .LShift:
+				integer := new(IntegerData)
+				integer.kind = l.kind
+				integer.content = l.content << r.content
+				return op, integer
+			case .RShift:
+				integer := new(IntegerData)
+				integer.kind = l.kind
+				integer.content = l.content >> r.content
+				return op, integer
+			case:
+				analyzer_error(
+					fmt.tprintf("Use of invalid %s as a shifting operator", node.kind),
+					.Invalid_operator,
+					node.position,
+				)
+				return empty, empty
+			}
+		case:
+			analyzer_error(
+				fmt.tprintf("Cannot %s with a %s value", node.kind, debug_value_type(static_left)),
+				.Invalid_operator,
+				node.position,
+			)
+			return empty, empty
+		}
+	case:
+		analyzer_error(
+			fmt.tprintf(
+				"Cannot %s with a %s increment",
+				node.kind,
+				debug_value_type(static_right),
+			),
+			.Invalid_operator,
+			node.position,
+		)
+		return empty, empty
+	}
+	return empty, empty
+}
+
+
+analyze_ordering_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
 	op := new(BinaryOpData)
 	left, static_left := analyze_value(node.left)
 	right, static_right := analyze_value(node.right)
@@ -641,45 +865,57 @@ analyze_ordering_operator :: #force_inline proc(
 		#partial switch r in static_right {
 		case ^IntegerData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(l.content, r.content)
+			boolData.content = compare_func(l.content, r.content, node.kind)
 			return op, boolData
 		case ^FloatData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(cast(f64)l.content, r.content)
+			boolData.content = compare_func(cast(f64)l.content, r.content, node.kind)
 			return op, boolData
 		case ^StringData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(l.content, string_to_u64(r.content))
+			boolData.content = compare_func(l.content, string_to_u64(r.content), node.kind)
 			return op, boolData
 		}
 	case ^FloatData:
 		#partial switch r in static_right {
 		case ^IntegerData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(l.content, cast(f64)r.content)
+			boolData.content = compare_func(l.content, cast(f64)r.content, node.kind)
 			return op, boolData
 		case ^FloatData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(l.content, r.content)
+			boolData.content = compare_func(l.content, r.content, node.kind)
 			return op, boolData
 		case ^StringData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(l.content, cast(f64)string_to_u64(r.content))
+			boolData.content = compare_func(
+				l.content,
+				cast(f64)string_to_u64(r.content),
+				node.kind,
+			)
 			return op, boolData
 		}
 	case ^StringData:
 		#partial switch r in static_right {
 		case ^IntegerData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(string_to_u64(l.content), r.content)
+			boolData.content = compare_func(string_to_u64(l.content), r.content, node.kind)
 			return op, boolData
 		case ^FloatData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(cast(f64)string_to_u64(l.content), r.content)
+			boolData.content = compare_func(
+				cast(f64)string_to_u64(l.content),
+				r.content,
+				node.kind,
+			)
 			return op, boolData
 		case ^StringData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(string_to_u64(l.content), string_to_u64(r.content))
+			boolData.content = compare_func(
+				string_to_u64(l.content),
+				string_to_u64(r.content),
+				node.kind,
+			)
 			return op, boolData
 		}
 	}
