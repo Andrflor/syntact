@@ -326,12 +326,13 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 			#partial switch v in n.value {
 			case Identifier:
 				binding.name = v.name
+			case:
+				analyzer_error(
+					"The : constraint indicator must be followed by an identifier or nothing",
+					.Invalid_Constaint_Name,
+					get_position(n.value),
+				)
 			}
-			analyzer_error(
-				"The : constraint indicator must be followed by an identifier or nothing",
-				.Invalid_Constaint_Name,
-				get_position(n.value),
-			)
 		}
 		if (n.constraint == nil) {
 			analyzer_error(
