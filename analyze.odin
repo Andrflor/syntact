@@ -460,13 +460,21 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			analyzer_error("Cannot use not as binary operator", .Invalid_operator, n.position)
 			return empty, empty
 		case .Add:
+			return analyze_math_operator(n)
 		case .Subtract:
+			return analyze_math_operator(n)
 		case .Multiply:
+			return analyze_math_operator(n)
 		case .Divide:
+			return analyze_math_operator(n)
 		case .Mod:
+			return analyze_math_operator(n)
 		case .And:
+			return analyze_bitwise_operator(n)
 		case .Or:
+			return analyze_bitwise_operator(n)
 		case .Xor:
+			return analyze_bitwise_operator(n)
 		case .Less:
 			return analyze_ordering_operator(n)
 		case .Greater:
@@ -674,6 +682,144 @@ analyze_unary_operator :: #force_inline proc(
 		return value, static_value
 	}
 	return value, static_value
+}
+
+analyze_math_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
+	op := new(BinaryOpData)
+	left, static_left := analyze_value(node.left)
+	right, static_right := analyze_value(node.right)
+	op.oprator = node.kind
+	op.left = left
+	op.right = right
+
+	#partial switch r in static_right {
+	case ^IntegerData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			if (l.kind == r.kind || l.kind == .none || r.kind == .none) {
+				static_int := new(IntegerData)
+				#partial switch node.kind {
+				case .Add:
+					static_int.content = l.content + r.content
+					return op, static_int
+				case .Divide:
+					static_int.content = l.content / r.content
+					return op, static_int
+				case .Mod:
+					static_int.content = l.content % r.content
+					return op, static_int
+				case .Multiply:
+					static_int.content = l.content * r.content
+					return op, static_int
+				}
+			} else {
+				analyzer_error(
+					fmt.tprintf("Icompatible integer types for %s", node.kind),
+					.Invalid_operator,
+					node.position,
+				)
+				return empty, empty
+			}
+		}
+	case ^FloatData:
+		#partial switch l in static_left {
+		case ^FloatData:
+			if (l.kind == r.kind || l.kind == .none || r.kind == .none) {
+				static_float := new(FloatData)
+				#partial switch node.kind {
+				case .Add:
+					static_float.content = l.content + r.content
+					return op, static_float
+				case .Divide:
+					static_float.content = l.content / r.content
+					return op, static_float
+				case .Mod:
+					analyzer_error(
+						fmt.tprintf("Mod is only allowed with integers", node.kind),
+						.Invalid_operator,
+						node.position,
+					)
+					return empty, empty
+				case .Multiply:
+					static_float.content = l.content * r.content
+					return op, static_float
+				}
+			} else {
+				analyzer_error(
+					fmt.tprintf("Icompatible float types for %s", node.kind),
+					.Invalid_operator,
+					node.position,
+				)
+				return empty, empty
+			}
+		}
+	}
+	analyzer_error(
+		fmt.tprintf("Icompatible types for %s", node.kind),
+		.Invalid_operator,
+		node.position,
+	)
+	return empty, empty
+}
+
+
+analyze_bitwise_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
+	op := new(BinaryOpData)
+	left, static_left := analyze_value(node.left)
+	right, static_right := analyze_value(node.right)
+	op.oprator = node.kind
+	op.left = left
+	op.right = right
+
+	#partial switch r in static_right {
+	case ^IntegerData:
+		#partial switch l in static_left {
+		case ^IntegerData:
+			if (l.kind == r.kind || l.kind == .none || r.kind == .none) {
+				static_int := new(IntegerData)
+				#partial switch node.kind {
+				case .Or:
+					static_int.content = l.content | r.content
+					return op, static_int
+				case .Xor:
+					static_int.content = l.content ~ r.content
+					return op, static_int
+				case .And:
+					static_int.content = l.content & r.content
+					return op, static_int
+				}
+			} else {
+				analyzer_error(
+					fmt.tprintf("Icompatible integer types for %s", node.kind),
+					.Invalid_operator,
+					node.position,
+				)
+				return empty, empty
+			}
+		}
+	case ^BoolData:
+		#partial switch l in static_left {
+		case ^BoolData:
+			static_bool := new(BoolData)
+			#partial switch node.kind {
+			case .Or:
+				static_bool.content = r.content | l.content
+				return op, static_bool
+			case .Xor:
+				static_bool.content = r.content ~ l.content
+				return op, static_bool
+			case .And:
+				static_bool.content = r.content & l.content
+				return op, static_bool
+			}
+		}
+	}
+	analyzer_error(
+		fmt.tprintf("Icompatible types for %s", node.kind),
+		.Invalid_operator,
+		node.position,
+	)
+	return empty, empty
 }
 
 analyze_equal_operator :: #force_inline proc(node: Operator) -> (ValueData, ValueData) {
