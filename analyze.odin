@@ -358,6 +358,48 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
 }
 
+analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
+	// TODO(andrflor): return nil binding when needed and add analyzer errors when doing so
+	// TODO(andrlofr): make analyze name and analyze value for overrides
+	binding := new(Binding)
+	#partial switch n in node {
+	case EventPull:
+		binding.kind = .event_pull
+		analyze_name(n.name, binding)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case EventPush:
+		binding.kind = .event_push
+		analyze_name(n.name, binding)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case ResonancePush:
+		binding.kind = .resonance_push
+		analyze_name(n.name, binding)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case ResonancePull:
+		binding.kind = .resonance_pull
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case Pointing:
+		binding.kind = .pointing_push
+		analyze_name(n.name, binding)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case PointingPull:
+		binding.kind = .pointing_pull
+		analyze_name(n.name, binding)
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case Product:
+		binding.kind = .product
+		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+	case Constraint:
+		return nil
+	case Expand:
+		return nil
+	case:
+		binding.kind = .pointing_push
+		binding.symbolic_value, binding.static_value = analyze_value(node)
+	}
+	return binding
+}
+
 analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 	switch n in node {
 	case EventPull,
@@ -392,12 +434,20 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		pop_scope()
 		return scope, scope
 	case Override:
-		override := new(OverrideData)
 		target, static_target := analyze_value(n.source)
-		override.target = target
 		if scope, ok := static_target.(^ScopeData); ok {
-			// TODO(andrflor): process override check and static override
-			static_override := scope
+			override := new(OverrideData)
+			override.target = target
+			override.overrides = make([dynamic]^Binding, 0)
+			static_override := new(ScopeData)
+			static_override.content = make([dynamic]^Binding, len(scope.content))
+			copy(static_override.content[:], scope.content[:])
+			for i in 0 ..< len(n.overrides) {
+				binding := analyze_override(&n.overrides[i], static_override)
+				if (binding != nil) {
+					append(&override.overrides, binding)
+				}
+			}
 			return override, static_override
 		} else {
 			analyzer_error(
