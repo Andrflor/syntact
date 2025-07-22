@@ -252,30 +252,99 @@ analyze_node :: proc(node: ^Node) {
 	#partial switch n in node {
 	case EventPull:
 		binding.kind = .event_pull
-		analyze_name(n.name, binding)
+		if (n.name == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+		} else {
+			analyze_name(n.name, binding)
+		}
 		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case EventPush:
 		binding.kind = .event_push
-		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		if (n.name != nil) {
+			analyze_name(n.name, binding)
+		}
+		if (n.value == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
+		} else {
+			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		}
 	case ResonancePush:
 		binding.kind = .resonance_push
-		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		if (n.name == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+		} else {
+			analyze_name(n.name, binding)
+		}
+		if (n.value == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
+		} else {
+			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		}
 	case ResonancePull:
 		binding.kind = .resonance_pull
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		if (n.name == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+		} else {
+			analyze_name(n.name, binding)
+		}
+		if (n.value == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
+		} else {
+			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		}
 	case Pointing:
 		binding.kind = .pointing_push
-		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		if (n.name == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+		} else {
+			analyze_name(n.name, binding)
+		}
+		if (n.value == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
+		} else {
+			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		}
 	case PointingPull:
 		binding.kind = .pointing_pull
-		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		if (n.name == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+		} else {
+			analyze_name(n.name, binding)
+		}
+		if (n.value == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
+		} else {
+			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		}
 	case Product:
 		binding.kind = .product
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		if (n.value == nil) {
+			binding.symbolic_value = empty
+			binding.static_value = empty
+			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
+		} else {
+			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		}
 	case Constraint:
 		binding.kind = .pointing_push
 		analyze_name(node, binding)
@@ -293,7 +362,9 @@ process_expand_value :: proc(node: ^Node, binding: ^Binding) {
 		analyze_name(n.name, binding)
 		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case EventPush:
-		analyze_name(n.name, binding)
+		if (n.name != nil) {
+			analyze_name(n.name, binding)
+		}
 		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case ResonancePush:
 		analyze_name(n.name, binding)
@@ -356,6 +427,7 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 }
 
 analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
+	constraint, static_constraint := analyze_value(node)
 }
 
 analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
@@ -409,8 +481,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 	     Pointing,
 	     PointingPull,
 	     Product,
-	     Expand,
-	     Constraint:
+	     Expand:
 		analyzer_error(
 			"Cannot use a binding definition has a binding value",
 			.Invalid_Binding_Value,
@@ -423,6 +494,8 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			.Invalid_Binding_Value,
 			get_position(node),
 		)
+		return empty, empty
+	case Constraint:
 		return empty, empty
 	case ScopeNode:
 		scope := new(ScopeData)
@@ -501,10 +574,10 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		source, static_source := analyze_value(n.target)
 	case Operator:
 		if (n.left == nil) {
-			return analyze_unary_operator(n, n.left)
+			return analyze_unary_operator(n, n.right)
 		}
 		if (n.right == nil) {
-			return analyze_unary_operator(n, n.right)
+			return analyze_unary_operator(n, n.left)
 		}
 		switch n.kind {
 		case .Not:
@@ -673,6 +746,7 @@ analyze_unary_operator :: #force_inline proc(
 	ValueData,
 	ValueData,
 ) {
+
 	op := new(UnaryOpData)
 	value, static_value := analyze_value(child)
 	op.value = value
