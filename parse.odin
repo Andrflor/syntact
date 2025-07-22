@@ -356,16 +356,15 @@ next_token :: proc(l: ^Lexer) -> Token {
                 advance_position(l)
                 return Token{kind = .GreaterEqual, text = ">=", position = start_pos}
             } else if l.source[l.position.offset] == '>' {
-                advance_position(l)
-                return Token{kind = .RShift, text = ">>", position = start_pos}
+              if  l.source[l.position.offset + 1] == '-' {
+                advance_by(l, 2)
+                return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
+              }
+              advance_position(l)
+              return Token{kind = .RShift, text = ">>", position = start_pos}
             } else if l.source[l.position.offset] == '-' {
                 advance_position(l)
                 return Token{kind = .EventPush, text = ">-", position = start_pos}
-            } else if l.position.offset + 1 < l.source_len &&
-                   l.source[l.position.offset] == '>' &&
-                   l.source[l.position.offset + 1] == '-' {
-                advance_by(l, 2)
-                return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
             }
         }
         return Token{kind = .Greater, text = ">", position = start_pos}
