@@ -151,6 +151,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Constaint_Name, // Invalid constraint name
 	Invalid_Constaint_Value, // Invalid constraint value
 	Circular_Reference, // Circular dependency detected
+	Invalid_Event_Pull,
 	Invalid_Binding_Value, // Invalid value for binding
 	Invalid_Expand,
 	Invalid_Execute,
@@ -253,12 +254,18 @@ analyze_node :: proc(node: ^Node) {
 	case EventPull:
 		binding.kind = .event_pull
 		if (n.name == nil) {
-			binding.symbolic_value = empty
-			binding.static_value = empty
-			analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+			analyzer_error(
+				"Event pulling must have a Event descriptor left",
+				.Invalid_Event_Pull,
+				get_position(node),
+			)
 		} else {
-			analyze_name(n.name, binding)
+
 		}
+		binding.symbolic_value = empty
+		binding.static_value = empty
+		analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
+		analyze_name(n.name, binding)
 		binding.symbolic_value, binding.static_value = analyze_value(n.value)
 	case EventPush:
 		binding.kind = .event_push
@@ -679,9 +686,10 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			return value, value
 		}
 	case External:
-		ref := new(RefData)
-		//TODO(andrflor): resolve the ref
-		return ref, empty
+		fmt.println(n.name)
+		content := resolver.files[n.name]
+		fmt.println(content)
+		return empty, empty
 	case Range:
 		range := new(RangeData)
 		start, static_start := analyze_value(n.start)
@@ -830,6 +838,9 @@ analyze_math_operator :: #force_inline proc(node: Operator) -> (ValueData, Value
 				case .Divide:
 					static_int.content = l.content / r.content
 					return op, static_int
+				case .Subtract:
+					static_int.content = l.content - r.content
+					return op, static_int
 				case .Mod:
 					static_int.content = l.content % r.content
 					return op, static_int
@@ -857,6 +868,9 @@ analyze_math_operator :: #force_inline proc(node: Operator) -> (ValueData, Value
 					return op, static_float
 				case .Divide:
 					static_float.content = l.content / r.content
+					return op, static_float
+				case .Subtract:
+					static_float.content = l.content - r.content
 					return op, static_float
 				case .Mod:
 					analyzer_error(

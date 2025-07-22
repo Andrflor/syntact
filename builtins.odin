@@ -3,48 +3,60 @@ package compiler
 builtin := init_builtins()
 
 init_builtins :: proc() -> ScopeData {
+	u8_binding = create_integer_default("u8", .u8)
+	i8_binding = create_integer_default("i8", .i8)
+	u16_binding = create_integer_default("u16", .u16)
+	i16_binding = create_integer_default("i16", .i16)
+	u32_binding = create_integer_default("u32", .u32)
+	i32_binding = create_integer_default("i32", .i32)
+	u64_binding = create_integer_default("u64", .u64)
+	i64_binding = create_integer_default("i64", .i64)
+	f32_binding = create_float_default("f32", .f32)
+	f64_binding = create_float_default("f64", .f64)
+	bool_binding = create_bool_default()
+	char_binding = create_integer_default("char", .u8)
+	string_binding = create_string_default()
+
+	builtin_bindings = {
+		u8_binding,
+		i8_binding,
+		u16_binding,
+		i16_binding,
+		u32_binding,
+		i32_binding,
+		u64_binding,
+		i64_binding,
+		f32_binding,
+		f64_binding,
+		bool_binding,
+		char_binding,
+		string_binding,
+	}
+
 	builtins := make([dynamic]^Binding, 0)
 	for i in 0 ..< len(builtin_bindings) {
 		append(&builtins, &builtin_bindings[i])
 	}
 
-	builtin := ScopeData {
-		content = builtins,
-	}
-
-	return builtin
+	return ScopeData{content = builtins}
 }
-
-u8_binding := create_integer_default("u8", .u8)
-i8_binding := create_integer_default("i8", .i8)
-u16_binding := create_integer_default("u16", .u16)
-i16_binding := create_integer_default("i16", .i16)
-u32_binding := create_integer_default("u32", .u32)
-i32_binding := create_integer_default("i32", .i32)
-u64_binding := create_integer_default("u64", .u64)
-i64_binding := create_integer_default("i64", .i64)
-f32_binding := create_float_default("f32", .f32)
-f64_binding := create_float_default("f64", .f64)
-bool_binding := create_bool_default()
-char_binding := create_integer_default("char", .u8)
-string_binding := create_string_default()
 
 @(private = "file")
-builtin_bindings := [13]Binding {
-	u8_binding,
-	i8_binding,
-	u16_binding,
-	i16_binding,
-	u32_binding,
-	i32_binding,
-	u64_binding,
-	i64_binding,
-	f32_binding,
-	f64_binding,
-	bool_binding,
-	char_binding,
-	string_binding,
-}
+builtin_bindings: [13]Binding
+
+u8_binding: Binding
+i8_binding: Binding
+u16_binding: Binding
+i16_binding: Binding
+u32_binding: Binding
+i32_binding: Binding
+u64_binding: Binding
+i64_binding: Binding
+f32_binding: Binding
+f64_binding: Binding
+bool_binding: Binding
+char_binding: Binding
+string_binding: Binding
 
 create_integer_default :: proc(name: string, enum_value: IntegerKind) -> Binding {
 	binding := new(Binding)
@@ -113,7 +125,7 @@ create_string_default :: proc() -> Binding {
 	scope.content = make([dynamic]^Binding, 0)
 	append(&scope.content, binding)
 	return Binding {
-		name = "string",
+		name = "String",
 		kind = .pointing_push,
 		symbolic_value = scope,
 		static_value = scope,
