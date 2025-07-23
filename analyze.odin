@@ -361,6 +361,136 @@ analyze_node :: proc(node: ^Node) {
 		binding.kind = .pointing_push
 		binding.symbolic_value, binding.static_value = analyze_value(node)
 	}
+	typecheck_binding(binding, node)
+}
+
+typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
+	if (binding.constraint == nil) {
+		return
+	}
+	for bind in binding.constraint.content {
+		if bind.kind == .product {
+			if typecheck_by_value(bind.constraint, bind.static_value) {
+				return
+			}
+		}
+	}
+	analyzer_error("Type are not matching", .Type_Mismatch, get_position(node))
+}
+
+typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
+	// TODO(andrflor): implement typecheck for scope with inline check
+	return true
+}
+
+typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
+	#partial switch constr in constraint {
+	case ^ScopeData:
+		#partial switch val in value {
+		case ^ScopeData:
+			return typecheck_scope(constr.content[:], val.content[:])
+		case:
+			return false
+		}
+	case ^StringData:
+		// String constraints must match string values
+		#partial switch val in value {
+		case ^StringData:
+			return true
+		case:
+			return false
+		}
+	case ^IntegerData:
+		// Integer constraints must match integer values with size checking
+		#partial switch val in value {
+		case ^IntegerData:
+			#partial switch val.kind {
+			case .none:
+				// Untyped integer - check if it fits in the constraint type
+				switch constr.kind {
+				case .none:
+					return true
+				case .u8:
+					val.kind = .u8
+					return val.content < 256
+				case .i8:
+					val.kind = .i8
+					return val.content < 256
+				case .u16:
+					val.kind = .u16
+					return val.content < 65536
+				case .i16:
+					val.kind = .i16
+					return val.content < 65536
+				case .u32:
+					val.kind = .u32
+					return val.content < 4294967296
+				case .i32:
+					val.kind = .i32
+					return val.content < 4294967296
+				case .u64:
+					val.kind = .u64
+					return true
+				case .i64:
+					val.kind = .i64
+					return true
+				}
+			}
+			// Typed integer - must match exactly or constraint must be untyped
+			return constr.kind == .none || constr.kind == val.kind
+		case:
+			return false
+		}
+	case ^FloatData:
+		// Float constraints must match float values
+		#partial switch val in value {
+		case ^FloatData:
+			switch val.kind {
+			case .none:
+				// Untyped float - check precision requirements
+				#partial switch constr.kind {
+				case .f32:
+					val.kind = .f32
+					return val.content < 1 << 24 // Rough f32 precision limit
+				case .f64:
+					val.kind = .f64
+				case:
+					return true
+				}
+			case .f32:
+				return true
+			case .f64:
+				// f64 cannot be constrained to f32
+				#partial switch constr.kind {
+				case .f32:
+					return false
+				case:
+					return true
+				}
+			case:
+				return false
+			}
+		case:
+			return false
+		}
+	case ^BoolData:
+		// Boolean constraints must match boolean values
+		#partial switch val in value {
+		case ^BoolData:
+			return true
+		case:
+			return false
+		}
+	case Empty:
+		// Empty constraints must match empty values
+		#partial switch val in value {
+		case Empty:
+			return true
+		case:
+			return false
+		}
+	}
+	return false
 }
 
 process_expand_value :: proc(node: ^Node, binding: ^Binding) {
@@ -435,6 +565,10 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 
 analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
 	constraint, static_constraint := analyze_value(node)
+	#partial switch c in static_constraint {
+	case ^ScopeData:
+		binding.constraint = c
+	}
 }
 
 analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
