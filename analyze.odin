@@ -365,25 +365,57 @@ analyze_node :: proc(node: ^Node) {
 }
 
 typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
-	if (binding.constraint == nil) {
+	if binding.constraint == nil {
+    if binding.static_value == nil {
+			 binding.static_value = empty
+       binding.symbolic_value = empty
+    }
 		return
 	}
+
+  if binding.static_value == nil {
+    binding.static_value = resolve_default(binding.constraint)
+    binding.symbolic_value = binding.static_value
+    return
+  }
+
+  fmt.printfln("Typechecking %s", debug_value_inline(binding.static_value))
+
 	for bind in binding.constraint.content {
 		if bind.kind == .product {
-			if typecheck_by_value(bind.constraint, bind.static_value) {
+    fmt.printfln("Typechecking for %s", debug_value_inline(bind.static_value))
+			if typecheck_by_value(bind.static_value, binding.static_value) {
+        fmt.printfln("Typecheck success")
 				return
 			}
 		}
 	}
+
 	analyzer_error("Type are not matching", .Type_Mismatch, get_position(node))
+  binding.static_value = resolve_default(binding.constraint)
+  binding.symbolic_value = binding.static_value
+}
+
+resolve_default:: #force_inline proc(constraint: ValueData) -> ValueData {
+  #partial switch c in constraint {
+    case ^ScopeData:
+    for i in 0 ..< len(c.content) {
+      if (c.content[i].kind == .product) {
+        return c.content[i].static_value
+      }
+    }
+  }
+  return empty
 }
 
 typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
 	// TODO(andrflor): implement typecheck for scope with inline check
+  fmt.println("Got here")
 	return true
 }
 
 typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
+  fmt.printfln("%s", debug_value_inline(value))
 	#partial switch constr in constraint {
 	case ^ScopeData:
 		#partial switch val in value {
@@ -401,7 +433,6 @@ typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 			return false
 		}
 	case ^IntegerData:
-		// Integer constraints must match integer values with size checking
 		#partial switch val in value {
 		case ^IntegerData:
 			#partial switch val.kind {
@@ -411,26 +442,47 @@ typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 				case .none:
 					return true
 				case .u8:
-					val.kind = .u8
-					return val.content < 256
+					if val.negative == false && val.content < 256 {
+						val.kind = .u8
+						return true
+					}
+					return false
 				case .i8:
-					val.kind = .i8
-					return val.content < 256
+					if val.content < 256 {
+						val.kind = .i8
+						return true
+					}
+					return false
 				case .u16:
-					val.kind = .u16
-					return val.content < 65536
+					if val.negative == false && val.content < 65536 {
+						val.kind = .u16
+						return true
+					}
+					return false
 				case .i16:
-					val.kind = .i16
-					return val.content < 65536
+					if val.content < 65536 {
+						val.kind = .i16
+						return true
+					}
+					return false
 				case .u32:
-					val.kind = .u32
-					return val.content < 4294967296
+					if val.negative == false && val.content < 4294967296 {
+						val.kind = .u32
+						return true
+					}
+					return false
 				case .i32:
-					val.kind = .i32
-					return val.content < 4294967296
+					if val.content < 4294967296 {
+						val.kind = .i32
+						return true
+					}
+					return false
 				case .u64:
-					val.kind = .u64
-					return true
+					if val.negative == false {
+						val.kind = .u64
+						return true
+					}
+					return false
 				case .i64:
 					val.kind = .i64
 					return true
@@ -442,25 +494,26 @@ typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 			return false
 		}
 	case ^FloatData:
-		// Float constraints must match float values
 		#partial switch val in value {
 		case ^FloatData:
 			switch val.kind {
 			case .none:
-				// Untyped float - check precision requirements
 				#partial switch constr.kind {
 				case .f32:
-					val.kind = .f32
-					return val.content < 1 << 24 // Rough f32 precision limit
+					if val.content < 1 << 24 { // Rough f32 precision limit
+						val.kind = .f32
+						return true
+					}
+					return false
 				case .f64:
 					val.kind = .f64
+					return true
 				case:
 					return true
 				}
 			case .f32:
 				return true
 			case .f64:
-				// f64 cannot be constrained to f32
 				#partial switch constr.kind {
 				case .f32:
 					return false
@@ -637,7 +690,9 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		)
 		return empty, empty
 	case Constraint:
-		return empty, empty
+    constraint, static_constraint := analyze_value(n.constraint)
+    value := resolve_default(static_constraint)
+    return value, value
 	case ScopeNode:
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
@@ -899,12 +954,12 @@ analyze_unary_operator :: #force_inline proc(
 		case ^IntegerData:
 			#partial switch v.kind {
 			case .u8, .u16, .u32, .u64:
-			case:
 				analyzer_error("Cannot sub on an unsigned int", .Invalid_operator, node.position)
 				return value, static_value
 			}
 			static_int := new(IntegerData)
 			static_int.kind = v.kind
+      static_int.content = v.content
 			static_int.negative = true
 			return op, static_int
 		case ^FloatData:
@@ -1553,9 +1608,13 @@ debug_value_inline :: proc(value: ValueData) -> string {
 	case ^StringData:
 		return fmt.tprintf("String(\"%s\")", v.content)
 	case ^IntegerData:
-		return fmt.tprintf("%s(%d)", debug_value_type(value), v.content)
+    if(v.negative) {
+      return fmt.tprintf("%s(-%d)", debug_value_type(value), v.content)
+    } else {
+      return fmt.tprintf("%s(%d)", debug_value_type(value), v.content)
+    }
 	case ^FloatData:
-		return fmt.tprintf("%s(%f)", debug_value_type(value), v.content)
+		return fmt.tprintf("%s(%f, %s)", debug_value_type(value), v.content, v.kind)
 	case ^BoolData:
 		return fmt.tprintf("bool(%t)", v.content)
 	case ^PropertyData:
