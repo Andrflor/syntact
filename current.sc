@@ -53,7 +53,7 @@ double -> {
 
 List -> {
   T -> None
-  -> None:
+  -> {}
   -> {
     T:
     ...List{T}: // Expansion of the scope in this one
@@ -195,6 +195,20 @@ getPony -> {
   -> response
 }
 
+// Create compile-time of the http ref
+// That mean that side effect in httpCompileTime are now compile time
+httpCompileTime -> @compile{@http}!
+
+// Config Text is a string here
+String:configText -> httpCompileTime.get{"https://api.myservice.com/config"}!
+
+// Pattern match directly on the string
+result -> configText ? {
+  "PRODUCTION" -> "Production mode"
+  "DEVELOPMENT" -> "Development mode"
+  -> "Unknown mode"
+}
+
 main -> {
   Arena:arena
   Log -< e {
@@ -215,6 +229,8 @@ main -> {
   response -> getPony(!)
   printBack{message->"Input something here"}!
   debugPrint{message->response!}(!)
+  // The result is compile time constant and thus a binary value in the final executable
+  debugPrint{message->result}
   packed -> map{
     mapper->double
     list->{1 2 3 4 5}

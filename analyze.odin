@@ -366,56 +366,56 @@ analyze_node :: proc(node: ^Node) {
 
 typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
 	if binding.constraint == nil {
-    if binding.static_value == nil {
-			 binding.static_value = empty
-       binding.symbolic_value = empty
-    }
+		if binding.static_value == nil {
+			binding.static_value = empty
+			binding.symbolic_value = empty
+		}
 		return
 	}
 
-  if binding.static_value == nil {
-    binding.static_value = resolve_default(binding.constraint)
-    binding.symbolic_value = binding.static_value
-    return
-  }
+	if binding.static_value == nil {
+		binding.static_value = resolve_default(binding.constraint)
+		binding.symbolic_value = binding.static_value
+		return
+	}
 
-  fmt.printfln("Typechecking %s", debug_value_inline(binding.static_value))
+	fmt.printfln("Typechecking %s", debug_value_inline(binding.static_value))
 
 	for bind in binding.constraint.content {
 		if bind.kind == .product {
-    fmt.printfln("Typechecking for %s", debug_value_inline(bind.static_value))
+			fmt.printfln("Typechecking for %s", debug_value_inline(bind.static_value))
 			if typecheck_by_value(bind.static_value, binding.static_value) {
-        fmt.printfln("Typecheck success")
+				fmt.printfln("Typecheck success")
 				return
 			}
 		}
 	}
 
 	analyzer_error("Type are not matching", .Type_Mismatch, get_position(node))
-  binding.static_value = resolve_default(binding.constraint)
-  binding.symbolic_value = binding.static_value
+	binding.static_value = resolve_default(binding.constraint)
+	binding.symbolic_value = binding.static_value
 }
 
-resolve_default:: #force_inline proc(constraint: ValueData) -> ValueData {
-  #partial switch c in constraint {
-    case ^ScopeData:
-    for i in 0 ..< len(c.content) {
-      if (c.content[i].kind == .product) {
-        return c.content[i].static_value
-      }
-    }
-  }
-  return empty
+resolve_default :: #force_inline proc(constraint: ValueData) -> ValueData {
+	#partial switch c in constraint {
+	case ^ScopeData:
+		for i in 0 ..< len(c.content) {
+			if (c.content[i].kind == .product) {
+				return c.content[i].static_value
+			}
+		}
+	}
+	return empty
 }
 
 typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
 	// TODO(andrflor): implement typecheck for scope with inline check
-  fmt.println("Got here")
+	fmt.println("Got here")
 	return true
 }
 
 typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
-  fmt.printfln("%s", debug_value_inline(value))
+	fmt.printfln("%s", debug_value_inline(value))
 	#partial switch constr in constraint {
 	case ^ScopeData:
 		#partial switch val in value {
@@ -500,7 +500,7 @@ typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 			case .none:
 				#partial switch constr.kind {
 				case .f32:
-					if val.content < 1 << 24 { // Rough f32 precision limit
+					if val.content < 1 << 24 { 	// Rough f32 precision limit
 						val.kind = .f32
 						return true
 					}
@@ -690,9 +690,9 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		)
 		return empty, empty
 	case Constraint:
-    constraint, static_constraint := analyze_value(n.constraint)
-    value := resolve_default(static_constraint)
-    return value, value
+		constraint, static_constraint := analyze_value(n.constraint)
+		value := resolve_default(static_constraint)
+		return value, value
 	case ScopeNode:
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
@@ -959,7 +959,7 @@ analyze_unary_operator :: #force_inline proc(
 			}
 			static_int := new(IntegerData)
 			static_int.kind = v.kind
-      static_int.content = v.content
+			static_int.content = v.content
 			static_int.negative = true
 			return op, static_int
 		case ^FloatData:
@@ -1608,11 +1608,11 @@ debug_value_inline :: proc(value: ValueData) -> string {
 	case ^StringData:
 		return fmt.tprintf("String(\"%s\")", v.content)
 	case ^IntegerData:
-    if(v.negative) {
-      return fmt.tprintf("%s(-%d)", debug_value_type(value), v.content)
-    } else {
-      return fmt.tprintf("%s(%d)", debug_value_type(value), v.content)
-    }
+		if (v.negative) {
+			return fmt.tprintf("%s(-%d)", debug_value_type(value), v.content)
+		} else {
+			return fmt.tprintf("%s(%d)", debug_value_type(value), v.content)
+		}
 	case ^FloatData:
 		return fmt.tprintf("%s(%f, %s)", debug_value_type(value), v.content, v.kind)
 	case ^BoolData:
