@@ -379,21 +379,28 @@ typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
 		return
 	}
 
-	fmt.printfln("Typechecking %s", debug_value_inline(binding.static_value))
-
-	for bind in binding.constraint.content {
-		if bind.kind == .product {
-			fmt.printfln("Typechecking for %s", debug_value_inline(bind.static_value))
-			if typecheck_by_value(bind.static_value, binding.static_value) {
-				fmt.printfln("Typecheck success")
-				return
-			}
-		}
+	if typecheck_by_constraint(binding.constraint, binding.static_value) {
+		return
 	}
 
 	analyzer_error("Type are not matching", .Type_Mismatch, get_position(node))
 	binding.static_value = resolve_default(binding.constraint)
 	binding.symbolic_value = binding.static_value
+}
+
+typecheck_by_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> bool {
+	for binding in constraint.content {
+		if binding.kind == .product {
+			if binding.constraint != nil {
+				if (typecheck_by_constraint(binding.constraint, value)) {
+					return true
+				}
+			} else if typecheck_by_value(binding.static_value, value) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 resolve_default :: #force_inline proc(constraint: ValueData) -> ValueData {
