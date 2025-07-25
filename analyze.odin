@@ -426,12 +426,10 @@ resolve_default :: #force_inline proc(constraint: ValueData) -> ValueData {
 
 typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
 	// TODO(andrflor): implement typecheck for scope with inline check
-	fmt.println("Got here")
 	return true
 }
 
 typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
-	fmt.printfln("%s", debug_value_inline(value))
 	#partial switch constr in constraint {
 	case ^ScopeData:
 		#partial switch val in value {
@@ -603,6 +601,21 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 			#partial switch v in n.value {
 			case Identifier:
 				binding.name = v.name
+      case Override:
+        fmt.println("Override")
+        fmt.println(v.source)
+        if i, ok := v.source.(Identifier); ok {
+          binding.name = i.name
+        } else {
+          analyzer_error(
+					"The : constraint indicator must be followed by an identifier or nothing",
+					.Invalid_Constaint_Name,
+					get_position(n.value),
+				)
+        }
+      case ScopeNode:
+        fmt.println("Scope")
+        // We have a anonymous value
 			case:
 				analyzer_error(
 					"The : constraint indicator must be followed by an identifier or nothing",
@@ -718,6 +731,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			return value, value
 		} else {
 			// TODO(andrflor): process value of the node
+      fmt.println(n.value)
 			return value, value
 		}
 	case ScopeNode:
@@ -902,9 +916,9 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			return value, value
 		}
 	case External:
-		fmt.println(n.name)
+		// fmt.println(n.name)
 		content := resolver.files[n.name]
-		fmt.println(content)
+		// fmt.println(content)
 		return empty, empty
 	case Range:
 		range := new(RangeData)

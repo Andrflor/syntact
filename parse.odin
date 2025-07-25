@@ -1162,7 +1162,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Specialized operators
     case .Colon:
-        return Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .CALL}
+        return Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .PRIMARY}
 
     // Assignment operators
     case .PointingPush:
@@ -2395,7 +2395,7 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 }
 
 /*
- * parse_constraint handles constraint expressions (Type: value)
+ * parse_constraint handles constraint expressions (Type:value)
  */
 parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     // Save position of the : token
