@@ -186,6 +186,16 @@ push_scope :: #force_inline proc(data: ^ScopeData) {
 	append(&(^Analyzer)(context.user_ptr).stack, data)
 }
 
+curr_scope :: #force_inline proc() -> ^ScopeData {
+	stack := (^Analyzer)(context.user_ptr).stack
+	return stack[len(stack) - 1]
+}
+
+curr_binding :: #force_inline proc() -> ^Binding {
+	scope := curr_scope()
+	return scope.content[len(scope.content) - 1]
+}
+
 // Pops the current scope from the scope stack
 // Used when exiting nested scopes
 pop_scope :: #force_inline proc() {
@@ -195,8 +205,7 @@ pop_scope :: #force_inline proc() {
 // Adds a binding to the current (top) scope
 // New bindings are always added to the most recent scope
 add_binding :: #force_inline proc(binding: ^Binding) {
-	binding.owner =
-		(^Analyzer)(context.user_ptr).stack[len((^Analyzer)(context.user_ptr).stack) - 1]
+	binding.owner = curr_scope()
 	append(&binding.owner.content, binding)
 }
 
@@ -698,8 +707,19 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		return empty, empty
 	case Constraint:
 		constraint, static_constraint := analyze_value(n.constraint)
+		if c, ok := static_constraint.(^ScopeData); ok {
+			binding := curr_binding()
+			if binding.constraint == nil {
+				binding.constraint = c
+			}
+		}
 		value := resolve_default(static_constraint)
-		return value, value
+		if n.value == nil {
+			return value, value
+		} else {
+			// TODO(andrflor): process value of the node
+			return value, value
+		}
 	case ScopeNode:
 		scope := new(ScopeData)
 		scope.content = make([dynamic]^Binding, 0)
