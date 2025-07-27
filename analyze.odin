@@ -254,6 +254,117 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	return len(analyzer.errors) == 0
 }
 
+
+// Deep copy function for ValueData
+copy_value_data :: proc(original: ValueData, allocator := context.allocator) -> ValueData {
+	switch data in original {
+	case ^ScopeData:
+		new_scope := new(ScopeData, allocator)
+		new_scope.content = make([dynamic]^Binding, len(data.content), allocator)
+		for binding, i in data.content {
+			new_scope.content[i] = copy_binding(binding, allocator)
+		}
+		return new_scope
+
+	case ^StringData:
+		new_string := new(StringData, allocator)
+		new_string.content = strings.clone(data.content, allocator)
+		return new_string
+
+	case ^IntegerData:
+		new_int := new(IntegerData, allocator)
+		new_int^ = data^ // Copy all fields (content, kind, negative)
+		return new_int
+
+	case ^FloatData:
+		new_float := new(FloatData, allocator)
+		new_float^ = data^ // Copy all fields (content, kind)
+		return new_float
+
+	case ^BoolData:
+		new_bool := new(BoolData, allocator)
+		new_bool.content = data.content
+		return new_bool
+
+	case ^PropertyData:
+		new_prop := new(PropertyData, allocator)
+		new_prop.source = copy_value_data(data.source, allocator)
+		new_prop.prop = strings.clone(data.prop, allocator)
+		return new_prop
+
+	case ^RangeData:
+		new_range := new(RangeData, allocator)
+		new_range.start = copy_value_data(data.start, allocator)
+		new_range.end = copy_value_data(data.end, allocator)
+		return new_range
+
+	case ^ExecuteData:
+		new_execute := new(ExecuteData, allocator)
+		new_execute.target = copy_value_data(data.target, allocator)
+		new_execute.wrappers = data.wrappers
+		return new_execute
+
+	case ^OverrideData:
+		new_override := new(OverrideData, allocator)
+		new_override.target = copy_value_data(data.target, allocator)
+		new_override.overrides = make([dynamic]^Binding, len(data.overrides), allocator)
+		for binding, i in data.overrides {
+			new_override.overrides[i] = copy_binding(binding, allocator)
+		}
+		return new_override
+
+	case ^RefData:
+		new_ref := new(RefData, allocator)
+		new_ref.refered = data.refered
+		return new_ref
+
+	case ^BinaryOpData:
+		new_binop := new(BinaryOpData, allocator)
+		new_binop.left = copy_value_data(data.left, allocator)
+		new_binop.right = copy_value_data(data.right, allocator)
+		new_binop.oprator = data.oprator
+		return new_binop
+
+	case ^ReactiveData:
+		new_reactive := new(ReactiveData, allocator)
+		new_reactive.initial = copy_value_data(data.initial, allocator)
+		return new_reactive
+
+	case ^EffectData:
+		new_effect := new(EffectData, allocator)
+		new_effect.placeholder = copy_value_data(data.placeholder, allocator)
+		return new_effect
+
+	case ^UnaryOpData:
+		new_unary := new(UnaryOpData, allocator)
+		new_unary.value = copy_value_data(data.value, allocator)
+		new_unary.oprator = data.oprator
+		return new_unary
+
+	case Empty:
+		return Empty{}
+	}
+
+	return Empty{}
+}
+
+
+// Deep copy function for Binding
+copy_binding :: proc(original: ^Binding, allocator := context.allocator) -> ^Binding {
+	new_binding := new(Binding, allocator)
+	new_binding.name = strings.clone(original.name, allocator)
+	new_binding.kind = original.kind
+	new_binding.owner = original.owner
+	new_binding.constraint = original.constraint
+
+	// Copy the symbolic and static values
+	new_binding.symbolic_value = copy_value_data(original.symbolic_value, allocator)
+	new_binding.static_value = copy_value_data(original.static_value, allocator)
+
+	return new_binding
+}
+
+
 // Recursive procedure to analyze individual AST nodes
 // Dispatches to specific processing procedures based on node type
 analyze_node :: proc(node: ^Node) {
@@ -429,6 +540,95 @@ typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
 	return true
 }
 
+typecheck_float :: #force_inline proc(val: ^FloatData, constr: ^FloatData) -> bool {
+	switch val.kind {
+	case .none:
+		#partial switch constr.kind {
+		case .f32:
+			if val.content < 1 << 24 { 	// Rough f32 precision limit
+				val.kind = .f32
+				return true
+			}
+			return false
+		case .f64:
+			val.kind = .f64
+			return true
+		case:
+			return true
+		}
+	case .f32:
+		return true
+	case .f64:
+		#partial switch constr.kind {
+		case .f32:
+			return false
+		case:
+			return true
+		}
+	case:
+		return false
+	}
+}
+
+typecheck_int :: #force_inline proc(val: ^IntegerData, constr: ^IntegerData) -> bool {
+	#partial switch val.kind {
+	case .none:
+		// Untyped integer - check if it fits in the constraint type
+		switch constr.kind {
+		case .none:
+			return true
+		case .u8:
+			if val.negative == false && val.content < 256 {
+				val.kind = .u8
+				return true
+			}
+			return false
+		case .i8:
+			if val.content < 256 {
+				val.kind = .i8
+				return true
+			}
+			return false
+		case .u16:
+			if val.negative == false && val.content < 65536 {
+				val.kind = .u16
+				return true
+			}
+			return false
+		case .i16:
+			if val.content < 65536 {
+				val.kind = .i16
+				return true
+			}
+			return false
+		case .u32:
+			if val.negative == false && val.content < 4294967296 {
+				val.kind = .u32
+				return true
+			}
+			return false
+		case .i32:
+			if val.content < 4294967296 {
+				val.kind = .i32
+				return true
+			}
+			return false
+		case .u64:
+			if val.negative == false {
+				val.kind = .u64
+				return true
+			}
+			return false
+		case .i64:
+			val.kind = .i64
+			return true
+		}
+	}
+	// Typed integer - must match exactly or constraint must be untyped
+	return constr.kind == .none || constr.kind == val.kind
+}
+
+
 typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 	#partial switch constr in constraint {
 	case ^ScopeData:
@@ -449,94 +649,14 @@ typecheck_by_value :: proc(constraint: ValueData, value: ValueData) -> bool {
 	case ^IntegerData:
 		#partial switch val in value {
 		case ^IntegerData:
-			#partial switch val.kind {
-			case .none:
-				// Untyped integer - check if it fits in the constraint type
-				switch constr.kind {
-				case .none:
-					return true
-				case .u8:
-					if val.negative == false && val.content < 256 {
-						val.kind = .u8
-						return true
-					}
-					return false
-				case .i8:
-					if val.content < 256 {
-						val.kind = .i8
-						return true
-					}
-					return false
-				case .u16:
-					if val.negative == false && val.content < 65536 {
-						val.kind = .u16
-						return true
-					}
-					return false
-				case .i16:
-					if val.content < 65536 {
-						val.kind = .i16
-						return true
-					}
-					return false
-				case .u32:
-					if val.negative == false && val.content < 4294967296 {
-						val.kind = .u32
-						return true
-					}
-					return false
-				case .i32:
-					if val.content < 4294967296 {
-						val.kind = .i32
-						return true
-					}
-					return false
-				case .u64:
-					if val.negative == false {
-						val.kind = .u64
-						return true
-					}
-					return false
-				case .i64:
-					val.kind = .i64
-					return true
-				}
-			}
-			// Typed integer - must match exactly or constraint must be untyped
-			return constr.kind == .none || constr.kind == val.kind
+			return typecheck_int(val, constr)
 		case:
 			return false
 		}
 	case ^FloatData:
 		#partial switch val in value {
 		case ^FloatData:
-			switch val.kind {
-			case .none:
-				#partial switch constr.kind {
-				case .f32:
-					if val.content < 1 << 24 { 	// Rough f32 precision limit
-						val.kind = .f32
-						return true
-					}
-					return false
-				case .f64:
-					val.kind = .f64
-					return true
-				case:
-					return true
-				}
-			case .f32:
-				return true
-			case .f64:
-				#partial switch constr.kind {
-				case .f32:
-					return false
-				case:
-					return true
-				}
-			case:
-				return false
-			}
+			return typecheck_float(val, constr)
 		case:
 			return false
 		}
@@ -601,21 +721,21 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 			#partial switch v in n.value {
 			case Identifier:
 				binding.name = v.name
-      case Override:
-        fmt.println("Override")
-        fmt.println(v.source)
-        if i, ok := v.source.(Identifier); ok {
-          binding.name = i.name
-        } else {
-          analyzer_error(
-					"The : constraint indicator must be followed by an identifier or nothing",
-					.Invalid_Constaint_Name,
-					get_position(n.value),
-				)
-        }
-      case ScopeNode:
-        fmt.println("Scope")
-        // We have a anonymous value
+			case Override:
+				fmt.println("Override")
+				fmt.println(v.source)
+				if i, ok := v.source.(Identifier); ok {
+					binding.name = i.name
+				} else {
+					analyzer_error(
+						"The : constraint indicator must be followed by an identifier or nothing",
+						.Invalid_Constaint_Name,
+						get_position(n.value),
+					)
+				}
+			case ScopeNode:
+				fmt.println("Scope")
+			// We have a anonymous value
 			case:
 				analyzer_error(
 					"The : constraint indicator must be followed by an identifier or nothing",
@@ -695,6 +815,66 @@ analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
 	return binding
 }
 
+apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> ValueData {
+	switch t in target {
+	case ^ScopeData:
+	case ^StringData:
+		if (len(overrides) == 1 &&
+			   overrides[0].name == "" &&
+			   overrides[0].kind == .pointing_push) {
+			if s, ok := overrides[0].static_value.(^StringData); ok {
+				t.content = s.content
+				return t
+			}
+		}
+		analyzer_error("Override for string should just be string", .Invalid_Override, Position{})
+	case ^IntegerData:
+		if (len(overrides) == 1 &&
+			   overrides[0].name == "" &&
+			   overrides[0].kind == .pointing_push) {
+			if i, ok := overrides[0].static_value.(^IntegerData); ok {
+				t.content = i.content
+				return t
+			}
+
+		}
+		analyzer_error("Override for int should just be string", .Invalid_Override, Position{})
+	case ^FloatData:
+		if (len(overrides) == 1 &&
+			   overrides[0].name == "" &&
+			   overrides[0].kind == .pointing_push) {
+		}
+		analyzer_error("Override for float should just be string", .Invalid_Override, Position{})
+	case ^BoolData:
+		if (len(overrides) == 1 &&
+			   overrides[0].name == "" &&
+			   overrides[0].kind == .pointing_push) {
+		}
+		analyzer_error("Override for boolean should just be string", .Invalid_Override, Position{})
+	case ^PropertyData,
+	     ^RangeData,
+	     ^ExecuteData,
+	     ^OverrideData,
+	     ^RefData,
+	     ^BinaryOpData,
+	     ^ReactiveData,
+	     ^EffectData,
+	     ^UnaryOpData:
+		analyzer_error(
+			"Those dynamic elements should ne be used here",
+			.Invalid_Override,
+			Position{},
+		)
+	case Empty:
+		analyzer_error(
+			"Cannot override someting that resolve to empty",
+			.Invalid_Override,
+			Position{},
+		)
+	}
+	return target
+}
+
 analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 	switch n in node {
 	case EventPull,
@@ -730,8 +910,15 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		if n.value == nil {
 			return value, value
 		} else {
-			// TODO(andrflor): process value of the node
-      fmt.println(n.value)
+			if s, ok := n.value.(ScopeNode); ok {
+
+			} else {
+				analyzer_error(
+					"Value for constraint data should be override",
+					.Invalid_Constaint,
+					n.position,
+				)
+			}
 			return value, value
 		}
 	case ScopeNode:
