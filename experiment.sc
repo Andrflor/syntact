@@ -36,6 +36,26 @@ Counter -> {
     // This is the correct Change driven value
     -> value
   }
+  // We are using @unknow and compile time default constant force to proove properties
+  incrementAlwaysIncreases -> {
+    u8:prev -> @unknown
+    Counter:count{value -> prev}
+    count.increment!
+    -> count! = prev + 1
+  }
+  decrementAlwaysDecreases -> {
+    u8:prev -> @unknown
+    Counter:count{value -> prev}
+    count.decrement!
+    -> count! = prev - 1
+  }
+  incrementAndDecrementAreComplementaty -> {
+    u8:prev -> @unknown
+    Counter:count{value -> prev}
+    count.increment!
+    count.decrement!
+    -> count! = prev
+  }
 }
 
 Counter:globalCounter
@@ -75,23 +95,19 @@ DynList -> {
     u64:length
   }
   -> {
-    u64:_length
+    u64:length
     List{T}:value
-    _length -> // Need to compute initial length
-    // The bind >>- remove the visibility from outside
-    // It's possible to bind to nothingness (data >>-)
-    // This allow access controll
-    _length >>- Update
+    length -> // Need to compute initial length
+    length >>- Update
     value >>- Update
     Update -< e {
       value >>- e.data
-      _length >>- e.length
+      length >>- e.length
     }
     push -> {
       T:element
       >- Update{{...value element} _length+1}
     }
-    length -> _length
     -> value
   }
 }
