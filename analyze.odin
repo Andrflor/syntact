@@ -536,7 +536,6 @@ resolve_default :: #force_inline proc(constraint: ValueData) -> ValueData {
 }
 
 typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
-	// TODO(andrflor): implement typecheck for scope with inline check
 	return true
 }
 
@@ -818,6 +817,7 @@ analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
 apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> ValueData {
 	switch t in target {
 	case ^ScopeData:
+	// TODO(andrflor): override apply for scope data
 	case ^StringData:
 		if (len(overrides) == 1 &&
 			   overrides[0].name == "" &&
@@ -833,22 +833,36 @@ apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> Value
 			   overrides[0].name == "" &&
 			   overrides[0].kind == .pointing_push) {
 			if i, ok := overrides[0].static_value.(^IntegerData); ok {
-				t.content = i.content
-				return t
+				if typecheck_int(t, i) {
+					t.content = i.content
+					t.kind = i.kind
+					t.negative = i.negative
+					return t
+				}
 			}
-
 		}
 		analyzer_error("Override for int should just be string", .Invalid_Override, Position{})
 	case ^FloatData:
 		if (len(overrides) == 1 &&
 			   overrides[0].name == "" &&
 			   overrides[0].kind == .pointing_push) {
+			if f, ok := overrides[0].static_value.(^FloatData); ok {
+				if typecheck_float(t, f) {
+					t.content = f.content
+					t.kind = f.kind
+					return t
+				}
+			}
 		}
 		analyzer_error("Override for float should just be string", .Invalid_Override, Position{})
 	case ^BoolData:
 		if (len(overrides) == 1 &&
 			   overrides[0].name == "" &&
 			   overrides[0].kind == .pointing_push) {
+			if b, ok := overrides[0].static_value.(^BoolData); ok {
+				t.content = b.content
+				return t
+			}
 		}
 		analyzer_error("Override for boolean should just be string", .Invalid_Override, Position{})
 	case ^PropertyData,
@@ -911,7 +925,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			return value, value
 		} else {
 			if s, ok := n.value.(ScopeNode); ok {
-
+				// TODO(andrflor): apply override here?
 			} else {
 				analyzer_error(
 					"Value for constraint data should be override",
