@@ -209,7 +209,6 @@ add_binding :: #force_inline proc(binding: ^Binding) {
 	append(&binding.owner.content, binding)
 }
 
-
 // Main entry point for semantic analysis
 // Takes a cache and AST root node, returns true if analysis succeeded (no errors)
 analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
@@ -509,9 +508,12 @@ typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
 }
 
 typecheck_by_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> bool {
+	isEmptyConstraint := true
 	for binding in constraint.content {
 		if binding.kind == .product {
+			isEmptyConstraint = false
 			if binding.constraint != nil {
+				fmt.println(binding.constraint)
 				if (typecheck_by_constraint(binding.constraint, value)) {
 					return true
 				}
@@ -520,7 +522,27 @@ typecheck_by_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> boo
 			}
 		}
 	}
+	if value == empty {
+		return isEmptyConstraint
+	}
 	return false
+}
+
+check_constraint_compatibility :: proc(constraint: ^ScopeData, value: ^ScopeData) -> bool {
+	for valBind in value.content {
+		if valBind.kind == .product {
+			if valBind.constraint != nil {
+				if (!check_constraint_compatibility(constraint, valBind.constraint)) {
+					return false
+				}
+			} else {
+				if (!typecheck_by_constraint(constraint, valBind.static_value)) {
+					return false
+				}
+			}
+		}
+	}
+	return true
 }
 
 resolve_default :: #force_inline proc(constraint: ValueData) -> ValueData {
@@ -536,6 +558,24 @@ resolve_default :: #force_inline proc(constraint: ValueData) -> ValueData {
 }
 
 typecheck_scope :: proc(constraint: []^Binding, value: []^Binding) -> bool {
+	if len(value) != len(constraint) {
+		return false
+	}
+	for i in 0 ..< len(value) {
+		if value[i].kind != constraint[i].kind || value[i].name != constraint[i].name {
+			return false
+		}
+		if constraint[i].constraint != nil {
+			if value[i].constraint != nil {
+				if !check_constraint_compatibility(constraint[i].constraint, value[i].constraint) {
+					return false
+				}
+			}
+			if !typecheck_by_constraint(constraint[i].constraint, value[i].static_value) {
+				return false
+			}
+		}
+	}
 	return true
 }
 
