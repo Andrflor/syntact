@@ -8,9 +8,10 @@ import "core:strings"
 // Main analyzer structure that maintains the analysis state
 // Contains error tracking and a scope stack for symbol resolution
 Analyzer :: struct {
-	errors:   [dynamic]Analyzer_Error, // Collection of semantic errors found during analysis
-	warnings: [dynamic]Analyzer_Error, // Collection of warnings found during analysis
-	stack:    [dynamic]^ScopeData, // Stack of nested scopes for symbol resolution
+	errors:          [dynamic]Analyzer_Error, // Collection of semantic errors found during analysis
+	warnings:        [dynamic]Analyzer_Error, // Collection of warnings found during analysis
+	stack:           [dynamic]^ScopeData, // Stack of nested scopes for symbol resolution
+	pending_binding: ^Binding,
 }
 
 // Represents a binding (variable/symbol) in the language
@@ -183,12 +184,21 @@ Analyzer_Error :: struct {
 // Pushes a new scope onto the scope stack
 // Used when entering nested scopes (functions, blocks, etc.)
 push_scope :: #force_inline proc(data: ^ScopeData) {
+	add_binding()
 	append(&(^Analyzer)(context.user_ptr).stack, data)
 }
 
 curr_scope :: #force_inline proc() -> ^ScopeData {
 	stack := (^Analyzer)(context.user_ptr).stack
 	return stack[len(stack) - 1]
+}
+
+pending_binding :: #force_inline proc() -> ^Binding {
+	return (^Analyzer)(context.user_ptr).pending_binding
+}
+
+set_pending_binding :: #force_inline proc(binding: ^Binding) {
+	(^Analyzer)(context.user_ptr).pending_binding = binding
 }
 
 curr_binding :: #force_inline proc() -> ^Binding {
@@ -204,9 +214,13 @@ pop_scope :: #force_inline proc() {
 
 // Adds a binding to the current (top) scope
 // New bindings are always added to the most recent scope
-add_binding :: #force_inline proc(binding: ^Binding) {
-	binding.owner = curr_scope()
-	append(&binding.owner.content, binding)
+add_binding :: #force_inline proc() {
+	binding := pending_binding()
+	if binding != nil {
+		set_pending_binding(nil)
+		binding.owner = curr_scope()
+		append(&binding.owner.content, binding)
+	}
 }
 
 // Main entry point for semantic analysis
@@ -368,7 +382,7 @@ copy_binding :: proc(original: ^Binding, allocator := context.allocator) -> ^Bin
 // Dispatches to specific processing procedures based on node type
 analyze_node :: proc(node: ^Node) {
 	binding := new(Binding)
-	add_binding(binding)
+	set_pending_binding(binding)
 	#partial switch n in node {
 	case EventPull:
 		binding.kind = .event_pull
@@ -481,6 +495,7 @@ analyze_node :: proc(node: ^Node) {
 		binding.symbolic_value, binding.static_value = analyze_value(node)
 	}
 	typecheck_binding(binding, node)
+	add_binding()
 }
 
 typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
@@ -513,7 +528,6 @@ typecheck_by_constraint :: proc(constraint: ^ScopeData, value: ValueData) -> boo
 		if binding.kind == .product {
 			isEmptyConstraint = false
 			if binding.constraint != nil {
-				fmt.println(binding.constraint)
 				if (typecheck_by_constraint(binding.constraint, value)) {
 					return true
 				}
@@ -761,8 +775,6 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 			case Identifier:
 				binding.name = v.name
 			case Override:
-				fmt.println("Override")
-				fmt.println(v.source)
 				if i, ok := v.source.(Identifier); ok {
 					binding.name = i.name
 				} else {
@@ -773,7 +785,6 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 					)
 				}
 			case ScopeNode:
-				fmt.println("Scope")
 			// We have a anonymous value
 			case:
 				analyzer_error(
@@ -854,10 +865,61 @@ analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
 	return binding
 }
 
+index_override :: #force_inline proc(target: ^ScopeData, index: int, override: ^Binding) {
+	skip := 0
+	for i in 0 ..< len(target.content) {
+		if target.content[i].kind != .pointing_push {
+			skip += 1
+		} else if i == index + skip {
+			target.content[i].symbolic_value = override.symbolic_value
+			target.content[i].static_value = override.static_value
+			return
+		}
+	}
+}
+
+name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) {
+	for binding in target.content {
+		if binding.name == override.name {
+			if binding.kind == override.kind {
+				binding.symbolic_value = override.symbolic_value
+				binding.static_value = override.static_value
+			} else {
+				analyzer_error(
+					fmt.tprintf("Binding kind mismatch for %s", override.name),
+					.Invalid_Override,
+					Position{},
+				)
+			}
+			return
+		}
+	}
+	analyzer_error(
+		fmt.tprintf("Property %s not found", override.name),
+		.Invalid_Override,
+		Position{},
+	)
+}
+
+reeval_overriden_scope :: #force_inline proc(target: ^ScopeData) {
+	for binding in target.content {
+		fmt.println(binding)
+	}
+}
+
 apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> ValueData {
 	switch t in target {
 	case ^ScopeData:
-	// TODO(andrflor): override apply for scope data
+		for i in 0 ..< len(overrides) {
+			if overrides[i].name == "" {
+				index_override(t, i, overrides[i])
+			} else {
+				// TODO: sucessive name override over the same value override the second one
+				name_override(t, overrides[i])
+			}
+		}
+		reeval_overriden_scope(t)
+
 	case ^StringData:
 		if (len(overrides) == 1 &&
 			   overrides[0].name == "" &&
@@ -990,16 +1052,14 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			override := new(OverrideData)
 			override.target = target
 			override.overrides = make([dynamic]^Binding, 0)
-			static_override := new(ScopeData)
-			static_override.content = make([dynamic]^Binding, len(scope.content))
-			copy(static_override.content[:], scope.content[:])
+			static_override := copy_value_data(scope)
 			for i in 0 ..< len(n.overrides) {
-				binding := analyze_override(&n.overrides[i], static_override)
+				binding := analyze_override(&n.overrides[i], static_override.(^ScopeData))
 				if (binding != nil) {
 					append(&override.overrides, binding)
 				}
 			}
-			return override, static_override
+			return override, apply_override(static_override, override.overrides)
 		} else {
 			analyzer_error(
 				"Trying to override an element that does no resolve to a scope",
@@ -1157,9 +1217,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			return value, value
 		}
 	case External:
-		// fmt.println(n.name)
 		content := resolver.files[n.name]
-		// fmt.println(content)
 		return empty, empty
 	case Range:
 		range := new(RangeData)
@@ -1861,21 +1919,41 @@ debug_binding :: proc(binding: ^Binding, indent_level: int, index: int) {
 	if binding.constraint != nil {
 		fmt.printf(" (constrained)")
 	}
+
+	// Debug symbolic_value
 	if binding.symbolic_value != nil {
 		// Check if it's a scope
 		if scope_data, is_scope := binding.symbolic_value.(^ScopeData); is_scope {
-			fmt.printf(" -> Scope(%d bindings)\n", len(scope_data.content))
-			debug_scope(scope_data, indent_level + 1, false)
+			fmt.printf(" -> Scope(%d bindings)", len(scope_data.content))
 		} else {
 			inline_repr := debug_value_inline(binding.symbolic_value)
 			if inline_repr != "" {
-				fmt.printf(" = %s\n", inline_repr)
+				fmt.printf(" = %s", inline_repr)
 			} else {
-				fmt.printf(" -> %s\n", debug_value_type(binding.symbolic_value))
+				fmt.printf(" -> %s", debug_value_type(binding.symbolic_value))
 			}
 		}
-	} else {
-		fmt.println()
+	}
+
+	// Debug static_value
+	if binding.static_value != nil {
+		fmt.printf(" | ")
+
+		static_inline := debug_value_inline(binding.static_value)
+		if static_inline != "" {
+			fmt.printf("%s", static_inline)
+		} else {
+			fmt.printf("%s", debug_value_type(binding.static_value))
+		}
+	}
+
+	fmt.println()
+
+	// Expand scope if present in symbolic_value
+	if binding.symbolic_value != nil {
+		if scope_data, is_scope := binding.symbolic_value.(^ScopeData); is_scope {
+			debug_scope(scope_data, indent_level + 1, false)
+		}
 	}
 }
 
