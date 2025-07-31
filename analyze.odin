@@ -158,6 +158,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Execute,
 	Invalid_operator,
 	Invalid_Range,
+	Infinite_Recursion,
 	Default,
 }
 
@@ -184,7 +185,7 @@ Analyzer_Error :: struct {
 // Pushes a new scope onto the scope stack
 // Used when entering nested scopes (functions, blocks, etc.)
 push_scope :: #force_inline proc(data: ^ScopeData) {
-	add_binding()
+	add_binding(data)
 	append(&(^Analyzer)(context.user_ptr).stack, data)
 }
 
@@ -214,11 +215,15 @@ pop_scope :: #force_inline proc() {
 
 // Adds a binding to the current (top) scope
 // New bindings are always added to the most recent scope
-add_binding :: #force_inline proc() {
+add_binding :: #force_inline proc(scope: ^ScopeData = nil) {
 	binding := pending_binding()
 	if binding != nil {
 		set_pending_binding(nil)
 		binding.owner = curr_scope()
+		if (scope != nil) {
+			binding.static_value = scope
+			binding.symbolic_value = scope
+		}
 		append(&binding.owner.content, binding)
 	}
 }
@@ -399,7 +404,7 @@ analyze_node :: proc(node: ^Node) {
 		binding.static_value = empty
 		analyzer_error("Missing binding name", .Invalid_Binding_Value, get_position(node))
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case EventPush:
 		binding.kind = .event_push
 		if (n.name != nil) {
@@ -410,7 +415,7 @@ analyze_node :: proc(node: ^Node) {
 			binding.static_value = empty
 			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
 		} else {
-			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+			bind_value(binding, n.value)
 		}
 	case ResonancePush:
 		binding.kind = .resonance_push
@@ -426,7 +431,7 @@ analyze_node :: proc(node: ^Node) {
 			binding.static_value = empty
 			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
 		} else {
-			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+			bind_value(binding, n.value)
 		}
 	case ResonancePull:
 		binding.kind = .resonance_pull
@@ -442,7 +447,7 @@ analyze_node :: proc(node: ^Node) {
 			binding.static_value = empty
 			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
 		} else {
-			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+			bind_value(binding, n.value)
 		}
 	case Pointing:
 		binding.kind = .pointing_push
@@ -458,7 +463,7 @@ analyze_node :: proc(node: ^Node) {
 			binding.static_value = empty
 			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
 		} else {
-			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+			bind_value(binding, n.value)
 		}
 	case PointingPull:
 		binding.kind = .pointing_pull
@@ -474,7 +479,7 @@ analyze_node :: proc(node: ^Node) {
 			binding.static_value = empty
 			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
 		} else {
-			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+			bind_value(binding, n.value)
 		}
 	case Product:
 		binding.kind = .product
@@ -483,7 +488,7 @@ analyze_node :: proc(node: ^Node) {
 			binding.static_value = empty
 			analyzer_error("Missing binding value", .Invalid_Binding_Value, get_position(node))
 		} else {
-			binding.symbolic_value, binding.static_value = analyze_value(n.value)
+			bind_value(binding, n.value)
 		}
 	case Constraint:
 		binding.kind = .pointing_push
@@ -492,10 +497,17 @@ analyze_node :: proc(node: ^Node) {
 		process_expand_value(n.target, binding)
 	case:
 		binding.kind = .pointing_push
-		binding.symbolic_value, binding.static_value = analyze_value(node)
+		bind_value(binding, node)
 	}
 	typecheck_binding(binding, node)
 	add_binding()
+}
+
+bind_value :: #force_inline proc(binding: ^Binding, node: ^Node) {
+	binding.symbolic_value, binding.static_value = analyze_value(node)
+	if s, ok := binding.static_value.(^ScopeData); ok {
+		analyze_scope_recursive_properties(s)
+	}
 }
 
 typecheck_binding :: proc(binding: ^Binding, node: ^Node) {
@@ -737,33 +749,33 @@ process_expand_value :: proc(node: ^Node, binding: ^Binding) {
 	#partial switch n in node {
 	case EventPull:
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case EventPush:
 		if (n.name != nil) {
 			analyze_name(n.name, binding)
 		}
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case ResonancePush:
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case ResonancePull:
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case Pointing:
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case PointingPull:
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case Product:
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case Constraint:
 		analyze_name(node, binding)
 	case Expand:
 		analyzer_error("Nested expands are not allowed", .Invalid_Expand, n.position)
 		process_expand_value(n.target, binding)
 	case:
-		binding.symbolic_value, binding.static_value = analyze_value(node)
+		bind_value(binding, node)
 	}
 }
 
@@ -815,6 +827,38 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 	}
 }
 
+
+analyze_scope_recursive_properties :: proc(scope: ^ScopeData) {
+	// TODO: check for deep nested and indirect recursion
+	for binding in scope.content {
+		if binding.kind == .product {
+			if (binding.constraint == scope) {
+				analyzer_error(
+					"Infinite recursion you need a base case",
+					.Infinite_Recursion,
+					Position{},
+				)
+				scope.content = make([dynamic]^Binding, 0)
+				return
+			}
+			if s, ok := binding.static_value.(^ScopeData); ok {
+				for bind in s.content {
+					if (bind.constraint == scope) {
+						analyzer_error(
+							"Infinite recursion you need a base case",
+							.Infinite_Recursion,
+							Position{},
+						)
+						scope.content = make([dynamic]^Binding, 0)
+						return
+					}
+				}
+			}
+			return
+		}
+	}
+}
+
 analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
 	constraint, static_constraint := analyze_value(node)
 	#partial switch c in static_constraint {
@@ -831,36 +875,36 @@ analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
 	case EventPull:
 		binding.kind = .event_pull
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case EventPush:
 		binding.kind = .event_push
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case ResonancePush:
 		binding.kind = .resonance_push
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case ResonancePull:
 		binding.kind = .resonance_pull
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case Pointing:
 		binding.kind = .pointing_push
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case PointingPull:
 		binding.kind = .pointing_pull
 		analyze_name(n.name, binding)
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case Product:
 		binding.kind = .product
-		binding.symbolic_value, binding.static_value = analyze_value(n.value)
+		bind_value(binding, n.value)
 	case Constraint:
 		return nil
 	case Expand:
 		return nil
 	case:
 		binding.kind = .pointing_push
-		binding.symbolic_value, binding.static_value = analyze_value(node)
+		bind_value(binding, node)
 	}
 	return binding
 }
@@ -1017,6 +1061,7 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 	case Constraint:
 		constraint, static_constraint := analyze_value(n.constraint)
 		if c, ok := static_constraint.(^ScopeData); ok {
+			add_binding()
 			binding := curr_binding()
 			if binding.constraint == nil {
 				binding.constraint = c
