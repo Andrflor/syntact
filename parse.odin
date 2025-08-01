@@ -1310,7 +1310,38 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
     }
 
     // Keep parsing infix expressions as long as they have higher precedence
-    for precedence <= get_rule(parser.current_token.kind).precedence {
+    for {
+        // Check if we should skip newlines to find a continuation operator
+        if parser.current_token.kind == .Newline {
+            // Look ahead past newlines to see if there's a ? operator
+            saved_position := parser.lexer.position
+            saved_current := parser.current_token
+            saved_peek := parser.peek_token
+
+            // Skip newlines
+            for parser.current_token.kind == .Newline {
+                advance_token(parser)
+            }
+
+            // Check if we have a ? operator that should continue the expression
+            if parser.current_token.kind == .Question {
+                // Great! We found a continuation operator, keep the newlines skipped
+                // and continue with normal precedence checking
+            } else {
+                // No continuation operator, restore position and break
+                parser.lexer.position = saved_position
+                parser.current_token = saved_current
+                parser.peek_token = saved_peek
+                break
+            }
+        }
+
+        // Normal precedence checking
+        current_precedence := get_rule(parser.current_token.kind).precedence
+        if precedence > current_precedence {
+            break
+        }
+
         rule = get_rule(parser.current_token.kind)
         if rule.infix == nil {
             break
