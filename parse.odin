@@ -725,6 +725,7 @@ ResonancePush :: struct {
 Identifier :: struct {
   using _: NodeBase,
 	name:     string, // Name of the identifier
+	parenthesized:  bool,   // True if the identifier was written as (name)
 }
 
 /*
@@ -1519,6 +1520,7 @@ parse_identifier :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     id_node^ = Identifier{
         name = parser.current_token.text,
         position = position, // Store position
+        parenthesized = false,
     }
 
     // Advance past identifier
@@ -1598,6 +1600,7 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
 /*
  * parse_grouping parses grouping expressions (...)
+ * If it's (identifier), treat it as parenthesized identifier
  */
 parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Save position of the opening parenthesis
@@ -1606,22 +1609,42 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
     // Consume opening parenthesis
     advance_token(parser)
 
-    // Parse expression inside parentheses
+    // Check if it's the simple case: (identifier)
+    if parser.current_token.kind == .Identifier {
+        identifier_name := parser.current_token.text
+        identifier_pos := parser.current_token.position
+
+
+        // Look ahead to see if there's a closing paren right after
+        if parser.peek_token.kind == .RightParen {
+            // It's (identifier) - consume both tokens
+            advance_token(parser) // consume identifier
+            advance_token(parser) // consume )
+
+            // Return the identifier marked as parenthesized
+            id_node := new(Node)
+            id_node^ = Identifier{
+                name = identifier_name,
+                position = identifier_pos,
+                parenthesized = true,
+            }
+            return id_node
+        }
+    }
+
+    // Not the simple (identifier) case - parse as normal expression
     expr := parse_expression(parser)
     if expr == nil {
         // Handle empty parentheses gracefully
         if parser.current_token.kind == .RightParen {
             advance_token(parser)
-
-            // Return an empty scope as a placeholder
             empty_scope := new(Node)
             empty_scope^ = ScopeNode{
                 value = make([dynamic]Node, 0, 2),
-                position = position, // Store position
+                position = position,
             }
             return empty_scope
         }
-
         error_at_current(parser, "Expected expression after '('")
         return nil
     }
@@ -1633,7 +1656,6 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
     return expr
 }
-
 
 /*
  * Parse bitwise or with disambiguation for GPU execution
@@ -1780,13 +1802,19 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
             advance_token(parser)
 
         case:
-            // No more execution pattern tokens
+          if !found_exclamation {
+            return nil, false
+          }
             break
         }
 
         // If stack is empty and we found an exclamation mark, we're done
-        if len(stack) == 0 && found_exclamation {
+        if len(stack) == 0 {
+          if found_exclamation {
             break
+          } else {
+            return nil, false
+          }
         }
     }
 
@@ -2884,8 +2912,13 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Identifier:
+      if(n.parenthesized) {
+        fmt.printf("%sIdentifier: (%s) (line %d, column %d)\n",
+            indent_str, n.name, n.position.line, n.position.column)
+      } else {
         fmt.printf("%sIdentifier: %s (line %d, column %d)\n",
             indent_str, n.name, n.position.line, n.position.column)
+      }
 
     case ScopeNode:
         fmt.printf("%sScopeNode (line %d, column %d)\n",
