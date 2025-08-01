@@ -36,28 +36,28 @@ r -> r ? {
 
 // Processing with ? operator chaining
 responseBody -> json.decode{param_1}!
-  ? { Error:(e) -> e (json) -> request_from_internet{json}!}
-  ? { Error:(e) -> e (req)  -> read_body{req}!}
-  ? { Error:(e) -> e (body) -> {print{body}! ->body}!}
-
-Token -> {
-  id -> String
-}
+  ? { :Error:(e) -> e (json) -> request_from_internet{json}!}
+  ? { :Error:(e) -> e (req)  -> read_body{req}!}
+  ? { :Error:(e) -> e (body) -> {print{body}! ->body}!}
 
 User -> {
-  name -> String
-  token -> Token
+  -> {
+    String:name
+    String:token
+  }
 }
 
 UserRequest -> {
-  user -> User
-  action -> String
+  -> {
+    User:user
+    String:action
+  }
 }
 
 UserRequest:userReq
 
 userReq ? {
-  // :UserRequest mean structural and created from UserRequest
+  // Structural polymorphic match of UserReq
   :UserRequest:{user{token{(id)?("jwt"..|"JWT"..) }} (action)} ?? action != id-> funwith{id}!
   -> baseCaseShit!
 }
