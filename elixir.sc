@@ -106,6 +106,45 @@ encode -> {
   -> // encode logic
 }
 
+Serializer {
+  S <- {}
+  R <- {}
+  encode -> {
+    S:
+    -> R:
+  }
+  decode -> {
+    R:
+    -> S:
+  }
+
+  (serializerRoundTrip) <- {
+    S:value -> ??
+    -> decode{encode{value}!}! = value ?! true
+  }
+}
+
+Json -> {
+  ...Serializer{
+    encode -> {
+      (value) -> {}:
+      -> value ? {
+        {}: -> {}
+        {(T):(n) -> (v) ...rest} -> '{$n: $v, ...toJson{{rest}}!}'
+        {...rest} -> toJson{{rest}!
+      }
+    }
+
+    decode-> {
+      T -> {}:
+      value
+      -> value ?// Finish decode enplementation
+    }
+
+  }
+  // Other properties we may want to have...
+}
+
 // This is a compile time garantee
 decodeEncodeSymmetry -> {
   String:m -> ??
