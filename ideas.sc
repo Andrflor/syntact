@@ -1,12 +1,10 @@
-// Dependent type
+// Refinement type
 intPlus -> {
   -> {
     (v) -> 0
-    -> v ? {
-      0.. -> v
-      -> @panic{"This should only be positive"}!
-    }
-  }!
+    -> v ?! >0
+   }
+}
 
 intPlus:b -> 4
 intPlus:c -> 10
@@ -21,36 +19,34 @@ Foo -> {
 
 
 // Theorem proving trough constraint constant default
-theorem -> {
+RSAIdentity -> {
   PubKey:pub
   PrivKey:priv
   -> {
-    String:m -> @unknown
-    -> decrypt{encrypt{m, priv}! pub}! = m
-  }!
-}
-
-assert -> {
-  T -> {
-    -> bool:
-  }
-  -> {
-    T:proof ? {
-      true -> {}
-      false -> @panic{"Theorem is refuted"}
-    }
+    String:m -> ??
+    -> decrypt{encrypt{m, priv}! pub}! = m ?! true
   }
 }
-assert{theorem}!
 
 // Compile time effect trigered on anythinhg
-compileTimeGet -> @compile{get}
+compileTimeGet -> !{get}
 // Can be used on anything
 
 Nat -> {
   -> {}
   -> {{} ...Nat:}
 }
+
+succ -> {
+  Nat:nat
+  -> {...nat {}}
+}
+
+
+one -> {{}}
+two -> {{}{}}
+
+succ{one}! = two // true
 
 add -> {
   Nat:a
@@ -68,18 +64,15 @@ mult -> {
 }
 
 multByOne -> {
-  Nat:n -> @unknown
-  -> mult{n {{}}}! = n
+  Nat:n -> ??
+  -> mult{n {{}}}! = n ?! true
 }
 
 addCommutative -> {
-  Nat:a -> @unknown
-  Nat:b -> @unknown
-  -> add{a b}! = add{b a}!
+  Nat:a -> ??
+  Nat:b -> ??
+  -> add{a b}! = add{b a}! ?! true
 }
-
-proove{multByOne}!
-proove{addCommutative}!
 
 Ring {
   T -> {}
@@ -98,12 +91,12 @@ Ring {
     }
   }
   addCommutative -> {
-    T:a -> @unknown
-    T:b -> @unknown
-    -> add{a b}! = add{b a}!
+    T:a -> ??
+    T:b -> ??
+    -> add{a b}! = add{b a}! ?! true
   }
   multByOne -> {
-  T:n -> @unknown
-  -> mult{n {{}}}! = n
+  T:n -> ??
+  -> mult{n {{}}}! = n ?! true
   }
 }

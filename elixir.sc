@@ -58,9 +58,105 @@ UserRequest:userReq
 
 userReq ? {
   // Structural polymorphic match of UserReq
-  :UserRequest:{user{token{(id)?("jwt"..|"JWT"..) }} (action)} ?? action != id-> funwith{id}!
+  :UserRequest:{user{token{(id)?("jwt"..|"JWT"..) }} (action)} & action != id-> funwith{id}!
   -> baseCaseShit!
 }
 
+Rectangle:(e) & (Diamond:(e) & e.width = 10)
 
-:UserRequest:{user{(name)} (action)} ?? name=action ->
+Circle:{radius(r)} & r > 10
+
+Circle:{radius?(>5 & <10)}-> MediumCircle{r}!
+
+area -> {
+  Shape:shape
+  -> shape ? {
+    Circle:{radius(r)} -> r * r * 3
+    Square:{side(s)} | Diamond:{side(s)}  -> s * s
+    Triangle:{a b c} ? {
+      a+b>c & b+c>a & c+a>b -> (a + b + c) / 2
+      -> sqrt{s * (s - a) * (s - b) * (s - c)}
+    }
+  }
+}
+
+// Jwt will panic if not jwt
+Jwt -> {
+  String:(s) -> 'jwt' ? {
+    'jwt'.. -> s
+    -> panic{'String is not valid jwt'}!
+  }
+}
+
+// Jwt is enforce by compiler to start with jwt
+// Refuse to compile if cannot be proven jwt
+Jwt -> {
+  String:(s) -> 'jwt'
+  // Refinedment
+  -> s ?! 'jwt'..
+}
+
+decode -> {
+  String:m
+  -> // decode logic
+}
+
+encode -> {
+  String:m
+  -> // encode logic
+}
+
+// This is a compile time garantee
+decodeEncodeSymmetry -> {
+  String:m -> ??
+  -> decode{encode{m}!}! = m ?! true
+}
+
+Maybe -> {
+  T -> {}
+  value -> {}:
+  -> value ? {
+    T:(v) -> v
+    -> {}:
+  }
+  -> T:
+}
+
+
+toJson -> {
+  (value) -> {}:
+  -> value ? {
+    {}: -> {}
+    {(T):(n) -> (v) ...rest} -> '{$n: $v, ...toJson{{rest}}!}'
+    {...rest} -> toJson{{rest}!
+  }
+}
+
+fromJson -> {
+  T -> {}:
+  value
+  -> value ? {
+  }
+}
+
+// Assert if a string is jwt
+isJwt ->  {
+  String:s
+  -> s ? 'jwt'..
+}
+
+String:data -> 'notjwt'
+Maybe{Jwt data}:r // r would just be {} side
+Jwt:jwt -> data // Won't compile this is not provable jwt
+isJwt{data}! // False
+
+String:data -> 'jwtweare'
+Maybe{Jwt data}:r // r would be Jwt side
+Jwt:jwt -> data // Will compile this is provable jwt
+isJwt{data}! // True
+
+u8:data
+Maybe{String data}:r // r would be {} cause data is not matching string
+
+// We could also say
+r -> Maybe{String data}! // Same stuff
