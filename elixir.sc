@@ -162,6 +162,16 @@ Json -> {
   // Other properties we may want to have...
 }
 
+Email -> {
+  -> String: !? ('a'_'z'|'.'|'0'_'9')*2..+'@'+('a'_'z'|'.'|'0'_'9')*2..+'.'+'a'_'z'*2..
+}
+
+space -> '\t'|'\n'|'\r'|' '
+s -> space*0..
+alnum -> ('a'_'z'|'.'|'0'_'9')*1..
+
+json -> '$s{$s"$alnum":$s$value$s}$s'
+
 // This is a compile time garantee
 decodeEncodeSymmetry -> {
   String:m -> ??
