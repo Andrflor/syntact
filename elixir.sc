@@ -58,7 +58,7 @@ UserRequest:userReq
 
 userReq ? {
   // Structural polymorphic match of UserReq
-  :UserRequest:{user{token{(id)?("jwt"..|"JWT"..) }} (action)} & action != id-> funwith{id}!
+  :UserRequest:{user{token{(id)?("jwt"...|"JWT"...) }} (action)} & action != id-> funwith{id}!
   -> baseCaseShit!
 }
 
@@ -152,7 +152,7 @@ Json -> {
       String:(value)
       -> value ? {
         // TODO: find regex like to transform into json object maybe also using Json.data and Json.string???
-        `{r'w'}`
+        `{r'w'}`:
       }
     }
 
@@ -163,7 +163,8 @@ Json -> {
 }
 
 Email -> {
-  -> String:
+  String:(s) -> 'email@example.com'
+  -> s
     !? ('a'_'z'|'.'|'0'_'9')*2..
     +'@'
     +('a'_'z'|'.'|'0'_'9')*2..
@@ -247,3 +248,23 @@ Maybe{String data}:r // r would be {} cause data is not matching string
 
 // We could also say
 r -> Maybe{String data}! // Same stuff
+
+Circle -> {
+  -> {
+   u8:radius -> 0
+   }
+}
+
+BetterCircle -> Circle{}
+
+Circle:c1
+BetterCircle:c2
+
+c1 ? Circle: // True
+c2 ? Circle // True
+c1 ? :Circle: // True
+c2 ? :Circle: // False
+c1 ? >=:Circle: // True
+c2 ? >=:Circle: // True
+c1 ? >:Circle: // False
+c2 ? >:Circle: // True
