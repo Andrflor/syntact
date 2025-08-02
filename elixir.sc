@@ -124,24 +124,41 @@ Serializer {
   }
 }
 
+
 Json -> {
+  data -> {
+    -> ..0.0..:
+    -> String:
+    -> bool:
+    -> List{data}:
+    -> List{{String:name data:value}}:
+  }
+
+  string -> {
+
+  }
+
   ...Serializer{
     encode -> {
       (value) -> {}:
       -> value ? {
         {}: -> {}
-        {(T):(n) -> (v) ...rest} -> '{$n: $v, ...toJson{{rest}}!}'
-        {...rest} -> toJson{{rest}!
+        {(T):(n) -> (v) ...rest} -> '{$n: $v, ...encode{{rest}}!}'
+        {...rest} -> encode{{rest}}!
       }
     }
 
     decode-> {
-      T -> {}:
-      value
-      -> value ?// Finish decode enplementation
+      String:(value)
+      -> value ? {
+        // TODO: find regex like to transform into json object maybe also using Json.data and Json.string???
+        `{r'w'}`
+      }
     }
 
   }
+
+  -> data:
   // Other properties we may want to have...
 }
 
@@ -183,6 +200,13 @@ isJwt ->  {
   String:s
   -> s ? 'jwt'..
 }
+
+// Some thing writen differently
+isJwt ->  {
+  String:s
+  -> s ? Jwt:
+}
+
 
 String:data -> 'notjwt'
 Maybe{Jwt data}:r // r would just be {} side
