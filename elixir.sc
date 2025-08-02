@@ -163,12 +163,26 @@ Json -> {
 }
 
 Email -> {
-  -> String: !? ('a'_'z'|'.'|'0'_'9')*2..+'@'+('a'_'z'|'.'|'0'_'9')*2..+'.'+'a'_'z'*2..
+  -> String:
+    !? ('a'_'z'|'.'|'0'_'9')*2..
+    +'@'
+    +('a'_'z'|'.'|'0'_'9')*2..
+    +'.'
+    +'a'_'z'*2..
 }
 
 space -> '\t'|'\n'|'\r'|' '
 s -> space*0..
-alnum -> ('a'_'z'|'.'|'0'_'9')*1..
+alnum -> ('a'..z'|'.'|'0'..'9')*1..
+
+Identifier -> {
+  ('a'..'z'|'A'..'Z'|'-'|'_')*1..&~(...'_'):init -> 'defaultId'
+  -> init
+}
+
+Identifier:id // Valud is defaultId
+Identifier:someId -> 'someId' //Value someId ok
+Identifier:oopsi -> 'wthareyoudoing_' // Won't compile
 
 json -> '$s{$s"$alnum":$s$value$s}$s'
 
