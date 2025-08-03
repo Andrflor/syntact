@@ -75,7 +75,7 @@ area -> {
     Square:{side(s)} | Diamond:{side(s)}  -> s * s
     Triangle:{a b c} ? {
       a+b>c & b+c>a & c+a>b -> (a + b + c) / 2
-      -> sqrt{s * (s - a) * (s - b) * (s - c)}
+      -> sqrt{s * (s - a) * (s - b) * (s - c)}!
     }
   }
 }
@@ -165,11 +165,11 @@ Json -> {
 Email -> {
   String:(s) -> 'email@example.com'
   -> s
-    !? ('a'_'z'|'.'|'0'_'9')*2..
+    !? ('a'..'z'|'.'|'0'..'9')*2..
     +'@'
-    +('a'_'z'|'.'|'0'_'9')*2..
+    +('a'..'z'|'.'|'0'..'9')*2..
     +'.'
-    +'a'_'z'*2..
+    +'a'..'z'*2..
 }
 
 space -> '\t'|'\n'|'\r'|' '
@@ -177,7 +177,7 @@ s -> space*0..
 alnum -> ('a'..z'|'.'|'0'..'9')*1..
 
 Identifier -> {
-  ('a'..'z'|'A'..'Z'|'-'|'_')*1..&~(...'_'):init -> 'defaultId'
+  ('a'..'z'|'A'..'Z'|'-'|'_')*1..&~(...*0.. + '_'):init -> 'defaultId'
   -> init
 }
 
@@ -209,14 +209,25 @@ toJson -> {
   -> value ? {
     {}: -> {}
     {(T):(n) -> (v) ...rest} -> '{$n: $v, ...toJson{{rest}}!}'
-    {...rest} -> toJson{{rest}!
+    {...rest} -> toJson{{rest}}!
   }
 }
 
-fromJson -> {
-  T -> {}:
-  value
-  -> value ? {
+Json -> {
+  space -> ('\n'|'\s'|'\t'|' ')*0..
+  num -> ('0'..'9')*1..+'.'*0..+('0'..'9')*0..
+  string -> '"'+...*0.. +'"'
+  key -> string
+
+  fromJson -> {
+    T -> {}:
+    String:value
+    -> value :? {
+        space + num(n) + space -> toNum{n}!
+        space + string(s) + space -> s
+        space + '[' + space +  ']' + space -> {}
+        space + '[' + ...
+    }
   }
 }
 
