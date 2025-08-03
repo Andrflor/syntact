@@ -36,21 +36,21 @@ Counter -> {
     // This is the correct Change driven value
     -> value
   }
-  // We are using @unknow and compile time default constant force to proove properties
+  // We are using ?? and compile time default constant force to proove properties
   incrementAlwaysIncreases -> {
-    u8:prev -> @unknown
+    u8:prev -> ??
     Counter:count{value -> prev}
     count.increment!
     -> count! = prev + 1
   }
   decrementAlwaysDecreases -> {
-    u8:prev -> @unknown
+    u8:prev -> ??
     Counter:count{value -> prev}
     count.decrement!
     -> count! = prev - 1
   }
   incrementAndDecrementAreComplementaty -> {
-    u8:prev -> @unknown
+    u8:prev -> ??
     Counter:count{value -> prev}
     count.increment!
     count.decrement!

@@ -197,7 +197,7 @@ getPony -> {
 
 // Create compile-time of the http ref
 // That mean that side effect in httpCompileTime are now compile time
-httpCompileTime -> @compile{@http}!
+httpCompileTime -> !{@http}
 
 // Config Text is a string here
 String:configText -> httpCompileTime.get{"https://api.myservice.com/config"}!
