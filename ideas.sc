@@ -32,10 +32,113 @@ RSAIdentity -> {
 compileTimeGet -> !{get}
 // Can be used on anything
 
-Nat -> {
+N -> {
   -> {}
-  -> {{} ...Nat:}
+  -> {{} ...N:}
+
+  equal -> {
+    N:a
+    N:b
+    -> a = b
+  }
+
+  add -> {
+    N:a
+    N:b
+    -> {...a ...b}
+  }
+
+  sub -> {
+    N:a
+    N:b
+    -> a ? {...b ...(r)} ? {
+      -> r
+      -> b ? {{...a ...(r)} -> {-1 r}
+    }
+  }
+
+  mult -> {
+    N:a
+    N:b
+    -> a ? {
+      {{} ...(r)} -> {...b ...mult{r b}!}
+      -> {}
+    }
+  }
 }
+
+Z -> {
+  -> N:
+  -> {-1 N:}
+  equal -> {
+    Z:a
+    Z:b
+    -> a = b
+  }
+  sym -> {
+    Z:z
+    -> z ? {
+      {-1 N:(n)} -> n
+      N: -> Z:{-1 z}
+    }
+  }
+  add -> {
+    Z:a
+    Z:b
+    {a b} ? {
+      {N:(a) N:(b)} -> N.add{a b}!
+      {N:(a) {-1 N:(b)}} -> N.sub{a b}!
+      {{-1 N:(a)} N:(b)} -> N.sub{b a}!
+      {{-1 N:(a)} {-1 N:(b)}} -> {-1 N.add{a b}!}
+    }
+
+  }
+  sub -> {
+    Z:a
+    Z:b
+    -> add{a symetric{b}!}!
+  }
+  mult -> {
+    Z:a
+    Z:b
+    -> {a b} ? {
+      {N:(a) N:(b)} | {{-1 N:(a)} {-1 N:(b)}} -> N.mult{a b}!
+      {{-1 N:(a)} N:(b)} | {{N:(a)} {-1 N:(b)}} -> Z:{-1 N.mult{a b}!}
+    }
+  }
+}
+
+Q -> {
+  -> Z:
+  -> {Z:n (N&~{}):d}
+  equal -> {
+    Q:a
+    Q:b
+    ->
+  }
+  inv -> {
+    Q:q
+    -> q.n ? {
+      N:(n) -> Q:{q n}
+      {-1 N:(n)} -> Q:{{-1 q} n}
+    }
+  }
+  sym -> {
+    Q:q
+    -> Q:{Z.sym{q.n}! d}
+  }
+  add -> {
+    Q:a
+    Q:b
+    -> Q:{Z.add{Z.mult{a.n b.d}! Z.mult{b.n a.d}!}! N.mult{a.d b.d}!}
+  }
+  mult -> {
+    Q:a
+    Q:b
+    -> {Z.mult{a.n b.n}! N.mult{a.d b.d}!}
+  }
+}
+
 
 succ -> {
   Nat:nat
