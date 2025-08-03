@@ -1,10 +1,12 @@
 // Refinement type
 intPlus -> {
   -> {
-    (v) -> 0
+    (v) -> 1
     -> v ?! >0
-   }
+   }!
 }
+
+(u8|i8)&>10:x
 
 intPlus:b -> 4
 intPlus:c -> 10
@@ -117,7 +119,7 @@ Q -> {
     -> Z.mult{a.n b.d}! = Z.mult{b.n a.d}!
   }
   inv -> {
-    (Q{(n) (d)} & {}!=n!={-1 {}}):q
+    Q:{n?(!={}&!={-1 {}})}:q
     -> q.n ? {
       (N&~{}):(n) -> Q:{q n}
       {-1 (N&~{})}:(n)} -> Q:{{-1 q} n}
