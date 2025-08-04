@@ -273,6 +273,15 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 }
 
 
+copy_scope :: proc(original: ^ScopeData, allocator := context.allocator) -> ^ScopeData {
+	new_scope := new(ScopeData, allocator)
+	new_scope.content = make([dynamic]^Binding, len(original.content), allocator)
+	for binding, i in original.content {
+		new_scope.content[i] = binding
+	}
+	return new_scope
+}
+
 // Deep copy function for ValueData
 copy_value_data :: proc(original: ValueData, allocator := context.allocator) -> ValueData {
 	switch data in original {
@@ -867,7 +876,7 @@ analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
 	}
 }
 
-analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
+analyze_override :: proc(node: ^Node) -> ^Binding {
 	// TODO(andrflor): return nil binding when needed and add analyzer errors when doing so
 	// TODO(andrlofr): make analyze name and analyze value for overrides
 	binding := new(Binding)
@@ -909,25 +918,35 @@ analyze_override :: proc(node: ^Node, override: ^ScopeData) -> ^Binding {
 	return binding
 }
 
-index_override :: #force_inline proc(target: ^ScopeData, index: int, override: ^Binding) {
+index_override :: #force_inline proc(
+	target: ^ScopeData,
+	index: int,
+	override: ^Binding,
+) -> ^Binding {
 	skip := 0
 	for i in 0 ..< len(target.content) {
 		if target.content[i].kind != .pointing_push {
 			skip += 1
 		} else if i == index + skip {
+			overriden := target.content[i]
+			target.content[i] = copy_binding(overriden)
 			target.content[i].symbolic_value = override.symbolic_value
 			target.content[i].static_value = override.static_value
-			return
+			return overriden
 		}
 	}
+	return nil
 }
 
-name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) {
-	for binding in target.content {
+name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> ^Binding {
+	for binding, i in target.content {
 		if binding.name == override.name {
 			if binding.kind == override.kind {
-				binding.symbolic_value = override.symbolic_value
-				binding.static_value = override.static_value
+				overriden := target.content[i]
+				target.content[i] = copy_binding(overriden)
+				target.content[i].symbolic_value = override.symbolic_value
+				target.content[i].static_value = override.static_value
+				return overriden
 			} else {
 				analyzer_error(
 					fmt.tprintf("Binding kind mismatch for %s", override.name),
@@ -935,7 +954,7 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) {
 					Position{},
 				)
 			}
-			return
+			return nil
 		}
 	}
 	analyzer_error(
@@ -943,26 +962,38 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) {
 		.Invalid_Override,
 		Position{},
 	)
+	return nil
 }
 
-reeval_overriden_scope :: #force_inline proc(target: ^ScopeData) {
+reeval_overriden_scope :: #force_inline proc(target: ^ScopeData, overriden: [dynamic]^Binding) {
 	for binding in target.content {
 		fmt.println(binding)
+		// TODO: look at all the refs and replace refs
+		// TODO: maybe we should keep what ref was replaced by what first
 	}
 }
 
 apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> ValueData {
 	switch t in target {
 	case ^ScopeData:
+		overriden := make([dynamic]^Binding, 0)
 		for i in 0 ..< len(overrides) {
 			if overrides[i].name == "" {
-				index_override(t, i, overrides[i])
+				ovr := index_override(t, i, overrides[i])
+				if (ovr != nil) {
+					append(&overriden, ovr)
+				}
 			} else {
 				// TODO: sucessive name override over the same value override the second one
-				name_override(t, overrides[i])
+				ovr := name_override(t, overrides[i])
+				if (ovr != nil) {
+					append(&overriden, ovr)
+				}
 			}
 		}
-		reeval_overriden_scope(t)
+		if len(overriden) > 0 {
+			reeval_overriden_scope(t, overriden)
+		}
 
 	case ^StringData:
 		if (len(overrides) == 1 &&
@@ -1097,14 +1128,13 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			override := new(OverrideData)
 			override.target = target
 			override.overrides = make([dynamic]^Binding, 0)
-			static_override := copy_value_data(scope)
 			for i in 0 ..< len(n.overrides) {
-				binding := analyze_override(&n.overrides[i], static_override.(^ScopeData))
+				binding := analyze_override(&n.overrides[i])
 				if (binding != nil) {
 					append(&override.overrides, binding)
 				}
 			}
-			return override, apply_override(static_override, override.overrides)
+			return override, apply_override(copy_scope(scope), override.overrides)
 		} else {
 			analyzer_error(
 				"Trying to override an element that does no resolve to a scope",
