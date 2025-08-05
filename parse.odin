@@ -64,6 +64,8 @@ Token_Kind :: enum {
 	// Separators
 	Colon, // :
 	Question, // ?
+  DoubleQuestion, // ??
+  QuestionExclamation, // ?!
 	Dot, // .
 	DoubleDot, // ..
 	Ellipsis, // ...
@@ -298,6 +300,14 @@ next_token :: proc(l: ^Lexer) -> Token {
         return Token{kind = .Colon, text = ":", position = start_pos}
     case '?':
         advance_position(l)
+         switch l.source[l.position.offset] {
+         case '?':
+          advance_position(l)
+          return Token{kind = .DoubleQuestion, text = "?", position = start_pos}
+         case '!':
+          advance_position(l)
+          return Token{kind = .QuestionExclamation, text = "?", position = start_pos}
+        }
         return Token{kind = .Question, text = "?", position = start_pos}
     case '.':
         // Check for .. or ...
@@ -878,14 +888,14 @@ Range :: struct {
  */
 Precedence :: enum {
     NONE = 0,        // No precedence
-    ASSIGNMENT = 1,  // =, ->, <-, >-, -<, >>-, -<< (lowest precedence)
-    LOGICAL = 2,     // Reserved for logical operators (&&, ||)
-    EQUALITY = 3,    // ==
-    COMPARISON = 4,  // <, >, <=, >=
-    TERM = 5,        // +, -
-    FACTOR = 2,      // *, /, %
+    ASSIGNMENT = 1,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
+    EQUALITY = 2,    // =
+    COMPARISON = 3,  // <, >, <=, >=
+    TERM = 4,        // +, -
+    FACTOR = 5,      // *, /, %
+    LOGICAL = 6,     // Reserved for logical operators (&, |)
     RANGE = 7,       // ..
-    UNARY = 9,       // !, ~, unary -
+    UNARY = 8,       // !, ~, unary -
     CALL = 9,       // (), ., ?
     CONSTRAINT = 10, // : (constraints bind tighter than calls but looser than primary)
     PRIMARY = 11,    // Literals, identifiers (highest precedence)
@@ -1259,22 +1269,14 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
  */
 parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Node {
     if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
-        fmt.printf("DEBUG: parse_expression early exit - token: %v\n", parser.current_token.kind)
         return nil
     }
-
-    // Debug: Print current token
-    fmt.printf("DEBUG: parse_expression starting with token: %v ('%s')\n",
-               parser.current_token.kind, parser.current_token.text)
 
     // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
 
     // Debug: Check if prefix rule exists
     if rule.prefix == nil {
-        fmt.printf("DEBUG: NO PREFIX RULE for token %v ('%s')\n",
-                   parser.current_token.kind, parser.current_token.text)
-
         if parser.current_token.kind == .Colon {
             error_at_current(parser, "Unexpected ':' without a type constraint")
         } else if parser.current_token.kind == .PointingPush {
@@ -1286,45 +1288,32 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
         return nil
     }
 
-    fmt.printf("DEBUG: Found prefix rule for %v, calling prefix parser\n", parser.current_token.kind)
-
     // Parse the prefix expression
     left := rule.prefix(parser)
     if left == nil {
-        fmt.printf("DEBUG: Prefix parser returned nil for token %v\n", parser.current_token.kind)
         return nil
     }
-
-    fmt.printf("DEBUG: Prefix parsing successful, now checking for infix operations\n")
 
     // Keep parsing infix expressions while they have higher precedence
     for {
         current_precedence := get_rule(parser.current_token.kind).precedence
 
-        fmt.printf("DEBUG: Checking infix - current token: %v, precedence: %v (min: %v)\n",
-                   parser.current_token.kind, current_precedence, precedence)
-
         // In Pratt parsing: continue while current operator has higher precedence than minimum
-        if int(current_precedence) <= int(precedence) {
-            fmt.printf("DEBUG: Precedence check failed, stopping infix parsing\n")
+        if int(current_precedence) < int(precedence) {
             break
         }
 
         rule = get_rule(parser.current_token.kind)
         if rule.infix == nil {
-            fmt.printf("DEBUG: No infix rule for %v, stopping\n", parser.current_token.kind)
             break
         }
 
-        fmt.printf("DEBUG: Calling infix parser for %v\n", parser.current_token.kind)
         left = rule.infix(parser, left)
         if left == nil {
-            fmt.printf("DEBUG: Infix parser returned nil\n")
             return nil
         }
     }
 
-    fmt.printf("DEBUG: parse_expression completed successfully\n")
     return left
 }
 
@@ -2026,7 +2015,6 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     } else {
         // Parse value
         value := parse_expression(parser)
-        fmt.println(value)
         pointing.value = value
     }
     result := new(Node)

@@ -174,7 +174,7 @@ Email -> {
 
 space -> '\t'|'\n'|'\r'|' '
 s -> space*0..
-alnum -> ('a'..z'|'.'|'0'..'9')*1..
+alnum -> 'a'..'z'|'.'|'0'..'9'*1..
 
 Identifier -> {
   ('a'..'z'|'A'..'Z'|'-'|'_')*1..&~(...*0.. + '_'):init -> 'defaultId'
@@ -208,7 +208,7 @@ toJson -> {
   (value) -> {}:
   -> value ? {
     {}: -> {}
-    {(T):(n) -> (v) ...rest} -> '{$n: $v, ...toJson{{rest}}!}'
+    {(T):(n) -> (v) ...rest} -> '{$n: $v, $(...toJson{{rest}}!)}'
     {...rest} -> toJson{{rest}}!
   }
 }
@@ -272,7 +272,7 @@ Circle:c1
 BetterCircle:c2
 
 c1 ? Circle: // True
-c2 ? Circle // True
+c2 ? Circle: // True
 c1 ? :Circle: // True
 c2 ? :Circle: // False
 c1 ? >=:Circle: // True
