@@ -918,9 +918,9 @@ analyze_override :: proc(node: ^Node) -> ^Binding {
 	return binding
 }
 
-BindSwap::struct {
-  old: ^Binding,
-  new: ^Binding,
+BindSwap :: struct {
+	old: ^Binding,
+	new: ^Binding,
 }
 
 index_override :: #force_inline proc(
@@ -937,12 +937,11 @@ index_override :: #force_inline proc(
 			target.content[i] = copy_binding(overriden)
 			target.content[i].symbolic_value = override.symbolic_value
 			target.content[i].static_value = override.static_value
-      return BindSwap{old=overriden, new=target.content[i]}
+			return BindSwap{old = overriden, new = target.content[i]}
 		}
 	}
 	return BindSwap{}
 }
-
 
 
 name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> BindSwap {
@@ -953,7 +952,7 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> B
 				target.content[i] = copy_binding(overriden)
 				target.content[i].symbolic_value = override.symbolic_value
 				target.content[i].static_value = override.static_value
-				return BindSwap{old=overriden, new=target.content[i]}
+				return BindSwap{old = overriden, new = target.content[i]}
 			} else {
 				analyzer_error(
 					fmt.tprintf("Binding kind mismatch for %s", override.name),
@@ -974,13 +973,16 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> B
 
 reeval_overriden_scope :: #force_inline proc(target: ^ScopeData, swapped: ^[dynamic]BindSwap) {
 	for binding, i in target.content {
-    symbolic_value, static_value := replace_references_and_collapse(binding.symbolic_value, swapped)
-    if static_value != binding.static_value {
-      target.content[i] = copy_binding(binding)
-      target.content[i].symbolic_value = symbolic_value
-      target.content[i].static_value = static_value
-      append(swapped, BindSwap{old=binding, new=target.content[i]})
-    }
+		symbolic_value, static_value := replace_references_and_collapse(
+			binding.symbolic_value,
+			swapped,
+		)
+		if static_value != binding.static_value {
+			target.content[i] = copy_binding(binding)
+			target.content[i].symbolic_value = symbolic_value
+			target.content[i].static_value = static_value
+			append(swapped, BindSwap{old = binding, new = target.content[i]})
+		}
 	}
 }
 
@@ -2196,7 +2198,13 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 }
 
 // Only modifies values if references are found and need replacement
-replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]BindSwap) -> (ValueData, ValueData) {
+replace_references_and_collapse :: proc(
+	symbolic: ValueData,
+	swapped: ^[dynamic]BindSwap,
+) -> (
+	ValueData,
+	ValueData,
+) {
 	switch s in symbolic {
 	case ^ScopeData:
 		// Check if any binding in scope needs reference replacement
@@ -2216,7 +2224,10 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 		new_scope := copy_scope(s)
 		for binding in new_scope.content {
 			if binding != nil {
-				binding.symbolic_value, binding.static_value = replace_references_and_collapse(binding.symbolic_value, swapped)
+				binding.symbolic_value, binding.static_value = replace_references_and_collapse(
+					binding.symbolic_value,
+					swapped,
+				)
 			}
 		}
 		return new_scope, new_scope
@@ -2227,14 +2238,14 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 
 	case ^RefData:
 		// Check if this reference needs to be swapped
-    for swap in swapped {
-      if swap.old == s.refered {
+		for swap in swapped {
+			if swap.old == s.refered {
 
-        new_ref := new(RefData)
-        new_ref.refered = swap.new
-        return new_ref, swap.new.static_value
-      }
-    }
+				new_ref := new(RefData)
+				new_ref.refered = swap.new
+				return new_ref, swap.new.static_value
+			}
+		}
 
 		// Reference unchanged
 		if s.refered != nil {
@@ -2326,7 +2337,8 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 			if contains_references(override.symbolic_value, swapped) {
 				overrides_changed = true
 				new_override := copy_binding(override)
-				new_override.symbolic_value, new_override.static_value = replace_references_and_collapse(override.symbolic_value, swapped)
+				new_override.symbolic_value, new_override.static_value =
+					replace_references_and_collapse(override.symbolic_value, swapped)
 				new_overrides[i] = new_override
 			} else {
 				new_overrides[i] = override
@@ -2420,7 +2432,10 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 
 	case ^EffectData:
 		// Check placeholder
-		new_placeholder, static_placeholder := replace_references_and_collapse(s.placeholder, swapped)
+		new_placeholder, static_placeholder := replace_references_and_collapse(
+			s.placeholder,
+			swapped,
+		)
 
 		// If nothing changed, return original
 		if new_placeholder == s.placeholder {
@@ -2438,13 +2453,13 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 
 // Helper function to check if a value contains references that need swapping
 contains_references :: proc(value: ValueData, swapped: ^[dynamic]BindSwap) -> bool {
-  #partial switch v in value {
+	#partial switch v in value {
 	case ^RefData:
-    for swap in swapped {
-      if swap.old == v.refered {
-        return true
-      }
-    }
+		for swap in swapped {
+			if swap.old == v.refered {
+				return true
+			}
+		}
 		return false
 	case ^PropertyData:
 		return contains_references(v.source, swapped)
@@ -2483,7 +2498,7 @@ contains_references :: proc(value: ValueData, swapped: ^[dynamic]BindSwap) -> bo
 
 // Helper function to evaluate binary operations on static values
 evaluate_binary_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
-  #partial switch op {
+	#partial switch op {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:
 		return evaluate_math_op(left, right, op)
 	case .And, .Or, .Xor:
@@ -2500,9 +2515,9 @@ evaluate_binary_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind)
 
 // Helper function to evaluate unary operations on static values
 evaluate_unary_op :: proc(value: ValueData, op: Operator_Kind) -> ValueData {
-  #partial switch op {
+	#partial switch op {
 	case .Subtract:
-    #partial switch v in value {
+		#partial switch v in value {
 		case ^IntegerData:
 			result := new(IntegerData)
 			result.content = v.content
@@ -2516,7 +2531,7 @@ evaluate_unary_op :: proc(value: ValueData, op: Operator_Kind) -> ValueData {
 			return result
 		}
 	case .Not:
-    #partial switch v in value {
+		#partial switch v in value {
 		case ^BoolData:
 			result := new(BoolData)
 			result.content = !v.content
@@ -2534,14 +2549,14 @@ evaluate_unary_op :: proc(value: ValueData, op: Operator_Kind) -> ValueData {
 
 // Helper function for math operations
 evaluate_math_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
-  #partial switch l in left {
+	#partial switch l in left {
 	case ^IntegerData:
 		if r, ok := right.(^IntegerData); ok {
 			result := new(IntegerData)
 			result.kind = l.kind if l.kind != .none else r.kind
 			result.negative = l.negative || r.negative
 
-      #partial switch op {
+			#partial switch op {
 			case .Add:
 				result.content = l.content + r.content
 			case .Subtract:
@@ -2564,7 +2579,7 @@ evaluate_math_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -
 			result := new(FloatData)
 			result.kind = l.kind if l.kind != .none else r.kind
 
-      #partial switch op {
+			#partial switch op {
 			case .Add:
 				result.content = l.content + r.content
 			case .Subtract:
@@ -2586,11 +2601,11 @@ evaluate_math_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -
 
 // Helper function for bitwise operations
 evaluate_bitwise_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
-  #partial switch l in left {
+	#partial switch l in left {
 	case ^BoolData:
 		if r, ok := right.(^BoolData); ok {
 			result := new(BoolData)
-      #partial switch op {
+			#partial switch op {
 			case .And:
 				result.content = l.content && r.content
 			case .Or:
@@ -2606,7 +2621,7 @@ evaluate_bitwise_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind
 			result.kind = l.kind if l.kind != .none else r.kind
 			result.negative = l.negative
 
-      #partial switch op {
+			#partial switch op {
 			case .And:
 				result.content = l.content & r.content
 			case .Or:
@@ -2650,9 +2665,9 @@ evaluate_comparison_op :: proc(left: ValueData, right: ValueData, op: Operator_K
 		return result
 	}
 
-  #partial switch l in left {
+	#partial switch l in left {
 	case ^IntegerData:
-    #partial switch r in right {
+		#partial switch r in right {
 		case ^IntegerData:
 			result.content = compare_func(l.content, r.content, op)
 		case ^FloatData:
@@ -2663,7 +2678,7 @@ evaluate_comparison_op :: proc(left: ValueData, right: ValueData, op: Operator_K
 			return empty
 		}
 	case ^FloatData:
-    #partial switch r in right {
+		#partial switch r in right {
 		case ^IntegerData:
 			result.content = compare_func(l.content, cast(f64)r.content, op)
 		case ^FloatData:
@@ -2674,7 +2689,7 @@ evaluate_comparison_op :: proc(left: ValueData, right: ValueData, op: Operator_K
 			return empty
 		}
 	case ^StringData:
-    #partial switch r in right {
+		#partial switch r in right {
 		case ^IntegerData:
 			result.content = compare_func(string_to_u64(l.content), r.content, op)
 		case ^FloatData:
@@ -2696,7 +2711,7 @@ evaluate_equality_op :: proc(left: ValueData, right: ValueData, op: Operator_Kin
 	result := new(BoolData)
 	equal := values_equal(left, right)
 
-  #partial switch op {
+	#partial switch op {
 	case .Equal:
 		result.content = equal
 	case .NotEqual:
@@ -2714,7 +2729,7 @@ evaluate_shift_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) 
 			result.kind = l.kind
 			result.negative = l.negative
 
-      #partial switch op {
+			#partial switch op {
 			case .LShift:
 				result.content = l.content << r.content
 			case .RShift:
@@ -2728,7 +2743,7 @@ evaluate_shift_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) 
 
 // Helper function to check if two values are equal
 values_equal :: proc(left: ValueData, right: ValueData) -> bool {
-  #partial switch l in left {
+	#partial switch l in left {
 	case ^IntegerData:
 		if r, ok := right.(^IntegerData); ok {
 			return l.content == r.content && l.kind == r.kind && l.negative == r.negative
@@ -2750,7 +2765,7 @@ values_equal :: proc(left: ValueData, right: ValueData) -> bool {
 			if len(l.content) != len(r.content) {
 				return false
 			}
-			for i in 0..<len(l.content) {
+			for i in 0 ..< len(l.content) {
 				if l.content[i].name != r.content[i].name ||
 				   l.content[i].kind != r.content[i].kind ||
 				   !values_equal(l.content[i].static_value, r.content[i].static_value) {
@@ -2765,4 +2780,3 @@ values_equal :: proc(left: ValueData, right: ValueData) -> bool {
 	}
 	return false
 }
-
