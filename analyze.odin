@@ -918,11 +918,16 @@ analyze_override :: proc(node: ^Node) -> ^Binding {
 	return binding
 }
 
+BindSwap::struct {
+  old: ^Binding,
+  new: ^Binding,
+}
+
 index_override :: #force_inline proc(
 	target: ^ScopeData,
 	index: int,
 	override: ^Binding,
-) -> ^Binding {
+) -> BindSwap {
 	skip := 0
 	for i in 0 ..< len(target.content) {
 		if target.content[i].kind != .pointing_push {
@@ -932,13 +937,15 @@ index_override :: #force_inline proc(
 			target.content[i] = copy_binding(overriden)
 			target.content[i].symbolic_value = override.symbolic_value
 			target.content[i].static_value = override.static_value
-			return overriden
+      return BindSwap{old=overriden, new=target.content[i]}
 		}
 	}
-	return nil
+	return BindSwap{}
 }
 
-name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> ^Binding {
+
+
+name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> BindSwap {
 	for binding, i in target.content {
 		if binding.name == override.name {
 			if binding.kind == override.kind {
@@ -946,7 +953,7 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> ^
 				target.content[i] = copy_binding(overriden)
 				target.content[i].symbolic_value = override.symbolic_value
 				target.content[i].static_value = override.static_value
-				return overriden
+				return BindSwap{old=overriden, new=target.content[i]}
 			} else {
 				analyzer_error(
 					fmt.tprintf("Binding kind mismatch for %s", override.name),
@@ -954,7 +961,7 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> ^
 					Position{},
 				)
 			}
-			return nil
+			return BindSwap{}
 		}
 	}
 	analyzer_error(
@@ -962,37 +969,41 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> ^
 		.Invalid_Override,
 		Position{},
 	)
-	return nil
+	return BindSwap{}
 }
 
-reeval_overriden_scope :: #force_inline proc(target: ^ScopeData, overriden: [dynamic]^Binding) {
-	for binding in target.content {
-		fmt.println(binding)
-		// TODO: look at all the refs and replace refs
-		// TODO: maybe we should keep what ref was replaced by what first
+reeval_overriden_scope :: #force_inline proc(target: ^ScopeData, swapped: ^[dynamic]BindSwap) {
+	for binding, i in target.content {
+    symbolic_value, static_value := replace_references_and_collapse(binding.symbolic_value, swapped)
+    if static_value != binding.static_value {
+      target.content[i] = copy_binding(binding)
+      target.content[i].symbolic_value = symbolic_value
+      target.content[i].static_value = static_value
+      append(swapped, BindSwap{old=binding, new=target.content[i]})
+    }
 	}
 }
 
 apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> ValueData {
 	switch t in target {
 	case ^ScopeData:
-		overriden := make([dynamic]^Binding, 0)
+		swapped := make([dynamic]BindSwap, 0)
 		for i in 0 ..< len(overrides) {
 			if overrides[i].name == "" {
-				ovr := index_override(t, i, overrides[i])
-				if (ovr != nil) {
-					append(&overriden, ovr)
+				swap := index_override(t, i, overrides[i])
+				if (swap.old != nil) {
+					append(&swapped, swap)
 				}
 			} else {
 				// TODO: sucessive name override over the same value override the second one
-				ovr := name_override(t, overrides[i])
-				if (ovr != nil) {
-					append(&overriden, ovr)
+				swap := name_override(t, overrides[i])
+				if (swap.old != nil) {
+					append(&swapped, swap)
 				}
 			}
 		}
-		if len(overriden) > 0 {
-			reeval_overriden_scope(t, overriden)
+		if len(swapped) > 0 {
+			reeval_overriden_scope(t, &swapped)
 		}
 
 	case ^StringData:
@@ -2183,3 +2194,575 @@ binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 		return "Unknown"
 	}
 }
+
+// Only modifies values if references are found and need replacement
+replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]BindSwap) -> (ValueData, ValueData) {
+	switch s in symbolic {
+	case ^ScopeData:
+		// Check if any binding in scope needs reference replacement
+		needs_update := false
+		for binding in s.content {
+			if binding != nil && contains_references(binding.symbolic_value, swapped) {
+				needs_update = true
+				break
+			}
+		}
+
+		if !needs_update {
+			return s, s
+		}
+
+		// Create new scope with updated bindings
+		new_scope := copy_scope(s)
+		for binding in new_scope.content {
+			if binding != nil {
+				binding.symbolic_value, binding.static_value = replace_references_and_collapse(binding.symbolic_value, swapped)
+			}
+		}
+		return new_scope, new_scope
+
+	case ^StringData, ^IntegerData, ^FloatData, ^BoolData, Empty:
+		// Primitive values have no references - return unchanged
+		return symbolic, symbolic
+
+	case ^RefData:
+		// Check if this reference needs to be swapped
+    for swap in swapped {
+      if swap.old == s.refered {
+
+        new_ref := new(RefData)
+        new_ref.refered = swap.new
+        return new_ref, swap.new.static_value
+      }
+    }
+
+		// Reference unchanged
+		if s.refered != nil {
+			return s, s.refered.static_value
+		}
+		return s, empty
+
+	case ^PropertyData:
+		// Check if source contains references
+		new_source, static_source := replace_references_and_collapse(s.source, swapped)
+
+		// If source unchanged, return original
+		if new_source == s.source {
+			// Try to resolve property from original static value
+			if scope, ok := static_source.(^ScopeData); ok {
+				for binding in scope.content {
+					if binding.name == s.prop {
+						return s, binding.static_value
+					}
+				}
+			}
+			return s, empty
+		}
+
+		// Source changed, create new property
+		new_prop := new(PropertyData)
+		new_prop.source = new_source
+		new_prop.prop = s.prop
+
+		// Resolve property from new static source
+		if scope, ok := static_source.(^ScopeData); ok {
+			for binding in scope.content {
+				if binding.name == s.prop {
+					return new_prop, binding.static_value
+				}
+			}
+		}
+		return new_prop, empty
+
+	case ^BinaryOpData:
+		// Check both operands
+		new_left, static_left := replace_references_and_collapse(s.left, swapped)
+		new_right, static_right := replace_references_and_collapse(s.right, swapped)
+
+		// If nothing changed, return original
+		if new_left == s.left && new_right == s.right {
+			// Evaluate with original static values
+			static_result := evaluate_binary_op(static_left, static_right, s.oprator)
+			return s, static_result
+		}
+
+		// Create new binary op
+		new_binop := new(BinaryOpData)
+		new_binop.left = new_left
+		new_binop.right = new_right
+		new_binop.oprator = s.oprator
+
+		// Evaluate with new static values
+		static_result := evaluate_binary_op(static_left, static_right, s.oprator)
+		return new_binop, static_result
+
+	case ^UnaryOpData:
+		// Check operand
+		new_value, static_value := replace_references_and_collapse(s.value, swapped)
+
+		// If nothing changed, return original
+		if new_value == s.value {
+			static_result := evaluate_unary_op(static_value, s.oprator)
+			return s, static_result
+		}
+
+		// Create new unary op
+		new_unary := new(UnaryOpData)
+		new_unary.value = new_value
+		new_unary.oprator = s.oprator
+
+		// Evaluate with new static value
+		static_result := evaluate_unary_op(static_value, s.oprator)
+		return new_unary, static_result
+
+	case ^OverrideData:
+		// Check target
+		new_target, static_target := replace_references_and_collapse(s.target, swapped)
+
+		// Check overrides
+		overrides_changed := false
+		new_overrides := make([dynamic]^Binding, len(s.overrides))
+		for override, i in s.overrides {
+			if contains_references(override.symbolic_value, swapped) {
+				overrides_changed = true
+				new_override := copy_binding(override)
+				new_override.symbolic_value, new_override.static_value = replace_references_and_collapse(override.symbolic_value, swapped)
+				new_overrides[i] = new_override
+			} else {
+				new_overrides[i] = override
+			}
+		}
+
+		// If nothing changed, return original with applied overrides
+		if new_target == s.target && !overrides_changed {
+			static_result := apply_override(static_target, s.overrides)
+			return s, static_result
+		}
+
+		// Create new override
+		new_override_data := new(OverrideData)
+		new_override_data.target = new_target
+		new_override_data.overrides = new_overrides
+
+		// Apply overrides to get static result
+		static_result := apply_override(static_target, new_overrides)
+		return new_override_data, static_result
+
+	case ^ExecuteData:
+		// Check target
+		new_target, static_target := replace_references_and_collapse(s.target, swapped)
+
+		// If nothing changed, return original
+		if new_target == s.target {
+			// Execute original
+			if scope, ok := static_target.(^ScopeData); ok {
+				for binding in scope.content {
+					if binding.kind == .product {
+						return s, binding.static_value
+					}
+				}
+			}
+			return s, empty
+		}
+
+		// Create new execute
+		new_exec := new(ExecuteData)
+		new_exec.target = new_target
+		new_exec.wrappers = s.wrappers
+
+		// Execute new target
+		if scope, ok := static_target.(^ScopeData); ok {
+			for binding in scope.content {
+				if binding.kind == .product {
+					return new_exec, binding.static_value
+				}
+			}
+		}
+		return new_exec, empty
+
+	case ^RangeData:
+		// Check both bounds
+		new_start, static_start := replace_references_and_collapse(s.start, swapped)
+		new_end, static_end := replace_references_and_collapse(s.end, swapped)
+
+		// If nothing changed, return original
+		if new_start == s.start && new_end == s.end {
+			static_range := new(RangeData)
+			static_range.start = static_start
+			static_range.end = static_end
+			return s, static_range
+		}
+
+		// Create new range
+		new_range := new(RangeData)
+		new_range.start = new_start
+		new_range.end = new_end
+
+		static_range := new(RangeData)
+		static_range.start = static_start
+		static_range.end = static_end
+
+		return new_range, static_range
+
+	case ^ReactiveData:
+		// Check initial value
+		new_initial, static_initial := replace_references_and_collapse(s.initial, swapped)
+
+		// If nothing changed, return original
+		if new_initial == s.initial {
+			return s, static_initial
+		}
+
+		// Create new reactive
+		new_reactive := new(ReactiveData)
+		new_reactive.initial = new_initial
+		return new_reactive, static_initial
+
+	case ^EffectData:
+		// Check placeholder
+		new_placeholder, static_placeholder := replace_references_and_collapse(s.placeholder, swapped)
+
+		// If nothing changed, return original
+		if new_placeholder == s.placeholder {
+			return s, static_placeholder
+		}
+
+		// Create new effect
+		new_effect := new(EffectData)
+		new_effect.placeholder = new_placeholder
+		return new_effect, static_placeholder
+	}
+
+	return symbolic, symbolic
+}
+
+// Helper function to check if a value contains references that need swapping
+contains_references :: proc(value: ValueData, swapped: ^[dynamic]BindSwap) -> bool {
+  #partial switch v in value {
+	case ^RefData:
+    for swap in swapped {
+      if swap.old == v.refered {
+        return true
+      }
+    }
+		return false
+	case ^PropertyData:
+		return contains_references(v.source, swapped)
+	case ^BinaryOpData:
+		return contains_references(v.left, swapped) || contains_references(v.right, swapped)
+	case ^UnaryOpData:
+		return contains_references(v.value, swapped)
+	case ^OverrideData:
+		if contains_references(v.target, swapped) {
+			return true
+		}
+		for override in v.overrides {
+			if contains_references(override.symbolic_value, swapped) {
+				return true
+			}
+		}
+		return false
+	case ^ExecuteData:
+		return contains_references(v.target, swapped)
+	case ^RangeData:
+		return contains_references(v.start, swapped) || contains_references(v.end, swapped)
+	case ^ReactiveData:
+		return contains_references(v.initial, swapped)
+	case ^EffectData:
+		return contains_references(v.placeholder, swapped)
+	case ^ScopeData:
+		for binding in v.content {
+			if binding != nil && contains_references(binding.symbolic_value, swapped) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// Helper function to evaluate binary operations on static values
+evaluate_binary_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
+  #partial switch op {
+	case .Add, .Subtract, .Multiply, .Divide, .Mod:
+		return evaluate_math_op(left, right, op)
+	case .And, .Or, .Xor:
+		return evaluate_bitwise_op(left, right, op)
+	case .Less, .Greater, .LessEqual, .GreaterEqual:
+		return evaluate_comparison_op(left, right, op)
+	case .Equal, .NotEqual:
+		return evaluate_equality_op(left, right, op)
+	case .LShift, .RShift:
+		return evaluate_shift_op(left, right, op)
+	}
+	return empty
+}
+
+// Helper function to evaluate unary operations on static values
+evaluate_unary_op :: proc(value: ValueData, op: Operator_Kind) -> ValueData {
+  #partial switch op {
+	case .Subtract:
+    #partial switch v in value {
+		case ^IntegerData:
+			result := new(IntegerData)
+			result.content = v.content
+			result.kind = v.kind
+			result.negative = !v.negative
+			return result
+		case ^FloatData:
+			result := new(FloatData)
+			result.content = -v.content
+			result.kind = v.kind
+			return result
+		}
+	case .Not:
+    #partial switch v in value {
+		case ^BoolData:
+			result := new(BoolData)
+			result.content = !v.content
+			return result
+		case ^IntegerData:
+			result := new(IntegerData)
+			result.content = ~v.content
+			result.kind = v.kind
+			result.negative = v.negative
+			return result
+		}
+	}
+	return empty
+}
+
+// Helper function for math operations
+evaluate_math_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
+  #partial switch l in left {
+	case ^IntegerData:
+		if r, ok := right.(^IntegerData); ok {
+			result := new(IntegerData)
+			result.kind = l.kind if l.kind != .none else r.kind
+			result.negative = l.negative || r.negative
+
+      #partial switch op {
+			case .Add:
+				result.content = l.content + r.content
+			case .Subtract:
+				result.content = l.content - r.content
+			case .Multiply:
+				result.content = l.content * r.content
+			case .Divide:
+				if r.content != 0 {
+					result.content = l.content / r.content
+				}
+			case .Mod:
+				if r.content != 0 {
+					result.content = l.content % r.content
+				}
+			}
+			return result
+		}
+	case ^FloatData:
+		if r, ok := right.(^FloatData); ok {
+			result := new(FloatData)
+			result.kind = l.kind if l.kind != .none else r.kind
+
+      #partial switch op {
+			case .Add:
+				result.content = l.content + r.content
+			case .Subtract:
+				result.content = l.content - r.content
+			case .Multiply:
+				result.content = l.content * r.content
+			case .Divide:
+				if r.content != 0 {
+					result.content = l.content / r.content
+				}
+			case .Mod:
+				return empty
+			}
+			return result
+		}
+	}
+	return empty
+}
+
+// Helper function for bitwise operations
+evaluate_bitwise_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
+  #partial switch l in left {
+	case ^BoolData:
+		if r, ok := right.(^BoolData); ok {
+			result := new(BoolData)
+      #partial switch op {
+			case .And:
+				result.content = l.content && r.content
+			case .Or:
+				result.content = l.content || r.content
+			case .Xor:
+				result.content = l.content ~ r.content
+			}
+			return result
+		}
+	case ^IntegerData:
+		if r, ok := right.(^IntegerData); ok {
+			result := new(IntegerData)
+			result.kind = l.kind if l.kind != .none else r.kind
+			result.negative = l.negative
+
+      #partial switch op {
+			case .And:
+				result.content = l.content & r.content
+			case .Or:
+				result.content = l.content | r.content
+			case .Xor:
+				result.content = l.content ~ r.content
+			}
+			return result
+		}
+	}
+	return empty
+}
+
+// Helper function for comparison operations
+evaluate_comparison_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
+	result := new(BoolData)
+
+	compare_func :: #force_inline proc(a, b: $T, kind: Operator_Kind) -> bool {
+		#partial switch kind {
+		case .Less:
+			return a < b
+		case .Greater:
+			return a > b
+		case .LessEqual:
+			return a <= b
+		case .GreaterEqual:
+			return a >= b
+		}
+		return false
+	}
+
+	string_to_u64 :: proc(s: string) -> u64 {
+		bytes := transmute([]u8)s
+		if len(bytes) > 8 {
+			return max(u64)
+		}
+		result: u64 = 0
+		for b in bytes {
+			result = (result << 8) + cast(u64)b
+		}
+		return result
+	}
+
+  #partial switch l in left {
+	case ^IntegerData:
+    #partial switch r in right {
+		case ^IntegerData:
+			result.content = compare_func(l.content, r.content, op)
+		case ^FloatData:
+			result.content = compare_func(cast(f64)l.content, r.content, op)
+		case ^StringData:
+			result.content = compare_func(l.content, string_to_u64(r.content), op)
+		case:
+			return empty
+		}
+	case ^FloatData:
+    #partial switch r in right {
+		case ^IntegerData:
+			result.content = compare_func(l.content, cast(f64)r.content, op)
+		case ^FloatData:
+			result.content = compare_func(l.content, r.content, op)
+		case ^StringData:
+			result.content = compare_func(l.content, cast(f64)string_to_u64(r.content), op)
+		case:
+			return empty
+		}
+	case ^StringData:
+    #partial switch r in right {
+		case ^IntegerData:
+			result.content = compare_func(string_to_u64(l.content), r.content, op)
+		case ^FloatData:
+			result.content = compare_func(cast(f64)string_to_u64(l.content), r.content, op)
+		case ^StringData:
+			result.content = compare_func(string_to_u64(l.content), string_to_u64(r.content), op)
+		case:
+			return empty
+		}
+	case:
+		return empty
+	}
+
+	return result
+}
+
+// Helper function for equality operations
+evaluate_equality_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
+	result := new(BoolData)
+	equal := values_equal(left, right)
+
+  #partial switch op {
+	case .Equal:
+		result.content = equal
+	case .NotEqual:
+		result.content = !equal
+	}
+
+	return result
+}
+
+// Helper function for shift operations
+evaluate_shift_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -> ValueData {
+	if l, l_ok := left.(^IntegerData); l_ok {
+		if r, r_ok := right.(^IntegerData); r_ok {
+			result := new(IntegerData)
+			result.kind = l.kind
+			result.negative = l.negative
+
+      #partial switch op {
+			case .LShift:
+				result.content = l.content << r.content
+			case .RShift:
+				result.content = l.content >> r.content
+			}
+			return result
+		}
+	}
+	return empty
+}
+
+// Helper function to check if two values are equal
+values_equal :: proc(left: ValueData, right: ValueData) -> bool {
+  #partial switch l in left {
+	case ^IntegerData:
+		if r, ok := right.(^IntegerData); ok {
+			return l.content == r.content && l.kind == r.kind && l.negative == r.negative
+		}
+	case ^FloatData:
+		if r, ok := right.(^FloatData); ok {
+			return l.content == r.content && l.kind == r.kind
+		}
+	case ^BoolData:
+		if r, ok := right.(^BoolData); ok {
+			return l.content == r.content
+		}
+	case ^StringData:
+		if r, ok := right.(^StringData); ok {
+			return l.content == r.content
+		}
+	case ^ScopeData:
+		if r, ok := right.(^ScopeData); ok {
+			if len(l.content) != len(r.content) {
+				return false
+			}
+			for i in 0..<len(l.content) {
+				if l.content[i].name != r.content[i].name ||
+				   l.content[i].kind != r.content[i].kind ||
+				   !values_equal(l.content[i].static_value, r.content[i].static_value) {
+					return false
+				}
+			}
+			return true
+		}
+	case Empty:
+		_, ok := right.(Empty)
+		return ok
+	}
+	return false
+}
+
