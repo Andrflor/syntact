@@ -300,7 +300,7 @@ next_token :: proc(l: ^Lexer) -> Token {
         advance_position(l)
         return Token{kind = .Question, text = "?", position = start_pos}
     case '.':
-        // Optimized to use direct character checks instead of function calls
+        // Check for .. or ...
         if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '.' {
             advance_by(l, 2) // Skip ".."
 
@@ -310,18 +310,9 @@ next_token :: proc(l: ^Lexer) -> Token {
                 return Token{kind = .Ellipsis, text = "...", position = start_pos}
             }
 
-            // Check for prefix range "..1"
-            if l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-                start_num := l.position.offset
-                for l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-                    advance_position(l)
-                }
-                return Token{kind = .PrefixRange, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-            }
-
+            // Just return DoubleDot - let parser handle prefix/postfix logic
             return Token{kind = .DoubleDot, text = "..", position = start_pos}
         }
-
         advance_position(l)
         return Token{kind = .Dot, text = ".", position = start_pos}
     case '=':
@@ -598,36 +589,26 @@ scan_number :: proc(l: ^Lexer, start_pos: Position) -> Token {
         advance_position(l)
     }
 
-    // Check for range notation (e.g., 1..5)
-    if l.position.offset + 1 < l.source_len &&
-       l.source[l.position.offset] == '.' &&
-       l.source[l.position.offset + 1] == '.' {
-
-        advance_by(l, 2) // Skip the '..'
-
-        // Check if there's a number after, making it a full range (1..5)
-        if l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-            for l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-                advance_position(l)
-            }
-            return Token{kind = .Range, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-        }
-
-        // Just a postfix range (1..)
-        return Token{kind = .PostfixRange, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-    }
-
-    // Check for floating point
+    // Check for floating point (but NOT for ranges - let parser handle that)
     if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
-        if l.position.offset + 1 < l.source_len && is_digit(l.source[l.position.offset + 1]) {
-            advance_position(l) // Skip the '.'
+        // Look ahead to see if it's a float (digit after .) or a range (..)
+        if l.position.offset + 1 < l.source_len {
+            next_char := l.source[l.position.offset + 1]
 
-            // Fast path for decimal digits
-            for l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-                advance_position(l)
+            // If next char is a digit, it's a float
+            if is_digit(next_char) {
+                advance_position(l) // Skip the '.'
+
+                // Fast path for decimal digits
+                for l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
+                    advance_position(l)
+                }
+
+                return Token{kind = .Float, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
             }
 
-            return Token{kind = .Float, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+            // If next char is '.', it's a range - let the dot handler deal with it
+            // Don't consume the '.' here, let next_token() handle it as separate tokens
         }
     }
 
@@ -901,14 +882,13 @@ Precedence :: enum {
     LOGICAL = 2,     // Reserved for logical operators (&&, ||)
     EQUALITY = 3,    // ==
     COMPARISON = 4,  // <, >, <=, >=
-    RANGE = 5,       // ..
-    TERM = 6,        // +, -
-    FACTOR = 7,      // *, /, %
-    BITWISE = 8,     // &, |, ^, <<, >>
+    TERM = 5,        // +, -
+    FACTOR = 2,      // *, /, %
+    RANGE = 7,       // ..
     UNARY = 9,       // !, ~, unary -
-    CALL = 10,       // (), ., ?
-    CONSTRAINT = 11, // : (constraints bind tighter than calls but looser than primary)
-    PRIMARY = 12,    // Literals, identifiers (highest precedence)
+    CALL = 9,       // (), ., ?
+    CONSTRAINT = 10, // : (constraints bind tighter than calls but looser than primary)
+    PRIMARY = 11,    // Literals, identifiers (highest precedence)
 }
 
 /*
@@ -1138,15 +1118,15 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Bitwise operators
     case .And:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
     case .Or:
-        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .BITWISE}
+        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .LOGICAL}
     case .Xor:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
     case .RShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
     case .LShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
 
     // Arithmetic operators
     case .Plus:
@@ -1279,12 +1259,22 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
  */
 parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Node {
     if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+        fmt.printf("DEBUG: parse_expression early exit - token: %v\n", parser.current_token.kind)
         return nil
     }
 
+    // Debug: Print current token
+    fmt.printf("DEBUG: parse_expression starting with token: %v ('%s')\n",
+               parser.current_token.kind, parser.current_token.text)
+
     // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
+
+    // Debug: Check if prefix rule exists
     if rule.prefix == nil {
+        fmt.printf("DEBUG: NO PREFIX RULE for token %v ('%s')\n",
+                   parser.current_token.kind, parser.current_token.text)
+
         if parser.current_token.kind == .Colon {
             error_at_current(parser, "Unexpected ':' without a type constraint")
         } else if parser.current_token.kind == .PointingPush {
@@ -1296,35 +1286,45 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
         return nil
     }
 
-    // Remember if we're in a context where assignment is allowed
-    can_assign := precedence <= .ASSIGNMENT
+    fmt.printf("DEBUG: Found prefix rule for %v, calling prefix parser\n", parser.current_token.kind)
 
     // Parse the prefix expression
     left := rule.prefix(parser)
     if left == nil {
+        fmt.printf("DEBUG: Prefix parser returned nil for token %v\n", parser.current_token.kind)
         return nil
     }
+
+    fmt.printf("DEBUG: Prefix parsing successful, now checking for infix operations\n")
 
     // Keep parsing infix expressions while they have higher precedence
     for {
         current_precedence := get_rule(parser.current_token.kind).precedence
 
+        fmt.printf("DEBUG: Checking infix - current token: %v, precedence: %v (min: %v)\n",
+                   parser.current_token.kind, current_precedence, precedence)
+
         // In Pratt parsing: continue while current operator has higher precedence than minimum
         if int(current_precedence) <= int(precedence) {
+            fmt.printf("DEBUG: Precedence check failed, stopping infix parsing\n")
             break
         }
 
         rule = get_rule(parser.current_token.kind)
         if rule.infix == nil {
+            fmt.printf("DEBUG: No infix rule for %v, stopping\n", parser.current_token.kind)
             break
         }
 
+        fmt.printf("DEBUG: Calling infix parser for %v\n", parser.current_token.kind)
         left = rule.infix(parser, left)
         if left == nil {
+            fmt.printf("DEBUG: Infix parser returned nil\n")
             return nil
         }
     }
 
+    fmt.printf("DEBUG: parse_expression completed successfully\n")
     return left
 }
 
@@ -1632,37 +1632,11 @@ parse_grouping :: proc(parser: ^Parser) -> ^Node {
  * Parse bitwise or with disambiguation for GPU execution
  */
 parse_bit_or :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Try to parse as an execution pattern
     if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
         return node
     }
-
-    // Otherwise, parse as normal binary operator
-    position := parser.current_token.position
-    advance_token(parser) // Consume |
-
-    // Get precedence rule for Or
-    precedence := Precedence.BITWISE
-
-    // Parse right operand with higher precedence
-    right := parse_expression(parser, Precedence(int(precedence) + 1))
-    if right == nil {
-        error_at_current(parser, "Expected expression after '|'")
-        return nil
-    }
-
-    // Create operator node
-    op := Operator{
-        kind = .Or,
-        left = left,
-        right = right,
-        position = position,
-    }
-
-    result := new(Node)
-    result^ = op
-    return result
-}
+    return parse_binary(parser, left)
+  }
 
 /*
  * try_parse_wrapped_execute attempts to parse an execute wrapped.
@@ -1774,6 +1748,9 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
 
         case:
           if !found_exclamation {
+            parser.lexer.position = original_position
+            parser.current_token = original_current
+            parser.peek_token = original_peek
             return nil, false
           }
             break
@@ -1784,6 +1761,9 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
           if found_exclamation {
             break
           } else {
+            parser.lexer.position = original_position
+            parser.current_token = original_current
+            parser.peek_token = original_peek
             return nil, false
           }
         }
@@ -1955,9 +1935,9 @@ parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     case .Asterisk:      op.kind = .Multiply
     case .Slash:         op.kind = .Divide
     case .Percent:       op.kind = .Mod
-    case .And:        op.kind = .And
-    case .Or:         op.kind = .Or
-    case .Xor:        op.kind = .Xor
+    case .And:           op.kind = .And
+    case .Or:            op.kind = .Or
+    case .Xor:           op.kind = .Xor
     case .Equal:         op.kind = .Equal
     case .Less:          op.kind = .Less
     case .Greater:       op.kind = .Greater
@@ -2046,6 +2026,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     } else {
         // Parse value
         value := parse_expression(parser)
+        fmt.println(value)
         pointing.value = value
     }
     result := new(Node)
@@ -2455,7 +2436,7 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Move past :
     advance_token(parser)
 
-    if(!next_space) {
+    if !next_space {
         // Parse value if present, otherwise it's an empty constraint
         if parser.current_token.kind == .RightBrace ||
           parser.current_token.kind == .EOF ||
@@ -2549,7 +2530,6 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
       case Product:
         branch.product = e.value
       case:
-        fmt.println(expression)
         error_at_current(parser, "Invalid value for pattern")
     }
 

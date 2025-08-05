@@ -377,7 +377,7 @@ process_cache_task :: proc(task: thread.Task) {
 		)
 	}
 
-	if !resolver.options.analyze_only {
+	if !resolver.options.parse_only {
 		if resolver.options.verbose {
 			fmt.printf("[DEBUG] Starting analysis for file: %s\n", cache.path)
 		}

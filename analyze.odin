@@ -272,7 +272,6 @@ analyze :: proc(cache: ^Cache, ast: ^Node) -> bool {
 	return len(analyzer.errors) == 0
 }
 
-
 copy_scope :: proc(original: ^ScopeData, allocator := context.allocator) -> ^ScopeData {
 	new_scope := new(ScopeData, allocator)
 	new_scope.content = make([dynamic]^Binding, len(original.content), allocator)
@@ -1173,7 +1172,6 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		if identifier, ok := n.property.(Identifier); ok {
 			prop := new(PropertyData)
 			prop.prop = identifier.name
-			fmt.println("Property")
 			if n.source != nil {
 				source, static_source := analyze_value(n.source)
 				if scope, ok := static_source.(^ScopeData); ok {
