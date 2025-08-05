@@ -915,8 +915,8 @@ Precedence :: enum {
  * Parse_Rule defines how to parse a given token as prefix or infix
  */
 Parse_Rule :: struct {
-    prefix:     proc(parser: ^Parser, can_assign: bool) -> ^Node,
-    infix:      proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node,
+    prefix:     proc(parser: ^Parser) -> ^Node,
+    infix:      proc(parser: ^Parser, left: ^Node) -> ^Node,
     precedence: Precedence,
 }
 
@@ -1300,35 +1300,13 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
     can_assign := precedence <= .ASSIGNMENT
 
     // Parse the prefix expression
-    left := rule.prefix(parser, can_assign)
+    left := rule.prefix(parser)
     if left == nil {
         return nil
     }
 
     // Keep parsing infix expressions while they have higher precedence
     for {
-        // Handle newlines for pattern continuation
-        if parser.current_token.kind == .Newline {
-            saved_position := parser.lexer.position
-            saved_current := parser.current_token
-            saved_peek := parser.peek_token
-
-            for parser.current_token.kind == .Newline {
-                advance_token(parser)
-            }
-
-            if parser.current_token.kind == .Question {
-                // Continue parsing pattern
-            } else {
-                // Restore and break
-                parser.lexer.position = saved_position
-                parser.current_token = saved_current
-                parser.peek_token = saved_peek
-                break
-            }
-        }
-
-        // FIXED: Correct Pratt parsing precedence comparison
         current_precedence := get_rule(parser.current_token.kind).precedence
 
         // In Pratt parsing: continue while current operator has higher precedence than minimum
@@ -1341,7 +1319,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
             break
         }
 
-        left = rule.infix(parser, left, can_assign)
+        left = rule.infix(parser, left)
         if left == nil {
             return nil
         }
@@ -1353,7 +1331,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
 /*
 * Implementation of the override postfix rule
 */
-parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_override :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the left brace
     position := parser.current_token.position
 
@@ -1412,7 +1390,7 @@ parse_override :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
 /*
  * parse_execute handles postfix execution patterns like expr<[!]>
  */
-parse_execute :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the ! token
     position := parser.current_token.position
 
@@ -1435,7 +1413,7 @@ parse_execute :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 /*
  * parse_product_prefix handles the standalone product expression (-> value)
  */
-parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_product_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the -> token
     position := parser.current_token.position
 
@@ -1469,7 +1447,7 @@ parse_product_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_literal handles literal values (numbers, strings)
  */
-parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_literal :: proc(parser: ^Parser) -> ^Node {
     // Save position of the literal token
     position := parser.current_token.position
 
@@ -1504,7 +1482,7 @@ parse_literal :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_identifier handles identifier expressions
  */
-parse_identifier :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_identifier :: proc(parser: ^Parser) -> ^Node {
     // Save position of the identifier token
     position := parser.current_token.position
 
@@ -1534,7 +1512,7 @@ skip_newlines :: proc(parser: ^Parser) {
 /*
  * parse_scope parses a scope block {...} - improved to handle empty scopes
  */
-parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_scope :: proc(parser: ^Parser) -> ^Node {
     // Save position of the left brace
     position := parser.current_token.position
 
@@ -1595,7 +1573,7 @@ parse_scope :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
  * parse_grouping parses grouping expressions (...)
  * If it's (identifier), treat it as parenthesized identifier
  */
-parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_grouping :: proc(parser: ^Parser) -> ^Node {
     // Save position of the opening parenthesis
     position := parser.current_token.position
 
@@ -1653,7 +1631,7 @@ parse_grouping :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * Parse bitwise or with disambiguation for GPU execution
  */
-parse_bit_or :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_bit_or :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Try to parse as an execution pattern
     if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
         return node
@@ -1849,7 +1827,7 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
 /*
  * Parse less than with disambiguation for threading execution
  */
-parse_less_than :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_less_than :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Try to parse as an execution pattern
     if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
         return node
@@ -1875,7 +1853,7 @@ parse_less_than :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node
 /*
  * Parse left bracket with disambiguation for parallel execution
  */
-parse_left_bracket :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_left_bracket :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Try to parse as an execution pattern
     if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
         return node
@@ -1888,7 +1866,7 @@ parse_left_bracket :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^N
 /*
  * Parse left parenthesis with disambiguation for background execution
  */
-parse_left_paren :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_left_paren :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Try to parse as an execution pattern
     if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
         return node
@@ -1896,14 +1874,14 @@ parse_left_paren :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
 
 
     // Otherwhise it supposed to be grouping
-    parse_grouping(parser, can_assign)
+    parse_grouping(parser)
     return nil
 }
 
 /*
  * parse_unary parses unary operators (-, ~)
  */
-parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_unary :: proc(parser: ^Parser) -> ^Node {
     // Save position of the unary operator
     position := parser.current_token.position
 
@@ -1945,7 +1923,7 @@ parse_unary :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_binary handles binary operators (+, -, *, /, etc.)
  */
-parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the binary operator
     position := parser.current_token.position
 
@@ -2000,14 +1978,14 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 /*
  * parse_prefix_property handles property access (.prop)
  */
-parse_prefix_property::proc(parser: ^Parser, can_assign: bool) -> ^Node {
-  return parse_property(parser, nil, can_assign);
+parse_prefix_property::proc(parser: ^Parser) -> ^Node {
+  return parse_property(parser, nil);
 }
 
 /*
  * parse_property handles property access (obj.prop)
  */
-parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_property :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the dot
     position := parser.current_token.position
 
@@ -2047,7 +2025,7 @@ parse_property :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node 
 /*
  * parse_pointing_push handles pointing operator (a -> b)
  */
-parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the -> token
     position := parser.current_token.position
 
@@ -2078,7 +2056,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
 /*
  * parse_pointing_pull_prefix handles prefix pointing pull operator (<- value)
  */
-parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_pointing_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the <- token
     position := parser.current_token.position
 
@@ -2109,7 +2087,7 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_pointing_pull handles infix pointing pull operator (a <- b)
  */
-parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_pointing_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the <- token
     position := parser.current_token.position
 
@@ -2141,7 +2119,7 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^
 /*
  * parse_event_push_prefix handles prefix event push (>- value)
  */
-parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_event_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the >- token
     position := parser.current_token.position
 
@@ -2172,7 +2150,7 @@ parse_event_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_event_push handles event push (a >- b)
  */
-parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_event_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the >- token
     position := parser.current_token.position
 
@@ -2204,7 +2182,7 @@ parse_event_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
 /*
  * parse_event_pull_prefix handles prefix event pull (-< value)
  */
-parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_event_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the -< token
     position := parser.current_token.position
 
@@ -2235,7 +2213,7 @@ parse_event_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_event_pull handles event pull (a -< b)
  */
-parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_event_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the -< token
     position := parser.current_token.position
 
@@ -2267,7 +2245,7 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
 /*
  * parse_resonance_push_prefix handles prefix resonance push (>>- value)
  */
-parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_resonance_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the >>- token
     position := parser.current_token.position
 
@@ -2298,7 +2276,7 @@ parse_resonance_push_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
 /*
  * parse_resonance_push handles resonance push (a >>- b)
  */
-parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_resonance_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the >>- token
     position := parser.current_token.position
 
@@ -2330,7 +2308,7 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
 /*
  * parse_resonance_pull_prefix handles prefix resonance pull (-<< value)
  */
-parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_resonance_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the -<< token
     position := parser.current_token.position
 
@@ -2361,7 +2339,7 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser, can_assign: bool) -> ^Node 
 /*
  * parse_resonance_pull handles resonance pull (a -<< b)
  */
-parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_resonance_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the -<< token
     position := parser.current_token.position
 
@@ -2393,7 +2371,7 @@ parse_resonance_pull :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> 
 /*
  * parse_prefix_range handles prefix range (..5)
  */
-parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_prefix_range :: proc(parser: ^Parser) -> ^Node {
     // Save position of the .. token
     position := parser.current_token.position
 
@@ -2422,7 +2400,7 @@ parse_prefix_range :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 /*
  * parse_range handles range expression (a..b)
  */
-parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the .. token
     position := parser.current_token.position
 
@@ -2456,7 +2434,7 @@ parse_range :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
 /*
  * parse_constraint handles constraint expressions (Type:value)
  */
-parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the : token
     position := parser.current_token.position
 
@@ -2501,7 +2479,7 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Nod
 /*
  * parse_pattern handles pattern match (target ? {...})
  */
-parse_pattern :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
+parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the ? token
     position := parser.current_token.position
 
@@ -2583,13 +2561,13 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
  * This is for standalone -> expressions
  */
 parse_product :: proc(parser: ^Parser) -> ^Node {
-    return parse_product_prefix(parser, false)
+    return parse_product_prefix(parser)
 }
 
 /*
  * parse_expansion parses a content expansion (...expr)
  */
-parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_expansion :: proc(parser: ^Parser) -> ^Node {
     // Save position of the ellipsis token
     position := parser.current_token.position
 
@@ -2617,7 +2595,7 @@ parse_expansion :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
 
 /*
  * parse_reference parses a file system reference */
-parse_reference :: proc(parser: ^Parser, can_assign: bool) -> ^Node {
+parse_reference :: proc(parser: ^Parser) -> ^Node {
     position := parser.current_token.position
     advance_token(parser) // Consume @
 
