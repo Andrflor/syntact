@@ -896,18 +896,19 @@ Range :: struct {
  * Precedence levels for operators, higher value means higher precedence
  */
 Precedence :: enum {
-    NONE,       // No precedence
-    ASSIGNMENT, // =, ->, <-, >-, -<, >>-, -<<
-    LOGICAL,    // Reserved for logical operators (&&, ||)
-    EQUALITY,   // ==
-    COMPARISON, // <, >, <=, >=
-    RANGE,      // ..
-    TERM,       // +, -
-    FACTOR,     // *, /, %
-    BITWISE,    // &, |, ^
-    UNARY,      // !, ~, unary -
-    CALL,       // (), ., : (constraint now at this level)
-    PRIMARY,    // Literals, identifiers
+    NONE = 0,        // No precedence
+    ASSIGNMENT = 1,  // =, ->, <-, >-, -<, >>-, -<< (lowest precedence)
+    LOGICAL = 2,     // Reserved for logical operators (&&, ||)
+    EQUALITY = 3,    // ==
+    COMPARISON = 4,  // <, >, <=, >=
+    RANGE = 5,       // ..
+    TERM = 6,        // +, -
+    FACTOR = 7,      // *, /, %
+    BITWISE = 8,     // &, |, ^, <<, >>
+    UNARY = 9,       // !, ~, unary -
+    CALL = 10,       // (), ., ?
+    CONSTRAINT = 11, // : (constraints bind tighter than calls but looser than primary)
+    PRIMARY = 12,    // Literals, identifiers (highest precedence)
 }
 
 /*
@@ -1093,31 +1094,41 @@ synchronize :: proc(parser: ^Parser) {
  */
 get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     #partial switch kind {
-    // Integer and Float Literals
+    // Literals and identifiers - highest precedence
     case .Integer:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .Float:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .Hexadecimal:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .Binary:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .String_Literal:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .NONE}
-
-    // Identifiers and basic symbols
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .Identifier:
-        return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .PRIMARY}
+
+    // Grouping and calls
     case .LeftBrace:
         return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .CALL}
     case .LeftBracket:
         return Parse_Rule{prefix = nil, infix = parse_left_bracket, precedence = .CALL}
     case .LeftParen:
         return Parse_Rule{prefix = parse_grouping, infix = parse_left_paren, precedence = .CALL}
-    case .RightBrace:
-        return Parse_Rule{prefix = nil, infix = nil, precedence = .NONE}
     case .At:
-        return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .NONE}
+        return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .PRIMARY}
+
+    // Constraints - bind tighter than calls but looser than primary
+    case .Colon:
+        return Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .CONSTRAINT}
+
+    // Property access and patterns
+    case .Dot:
+        return Parse_Rule{prefix = parse_prefix_property, infix = parse_property, precedence = .CALL}
+    case .Question:
+        return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
+    case .Execute:
+        return Parse_Rule{prefix = nil, infix = parse_execute, precedence = .CALL}
 
     // Unary operators
     case .Not:
@@ -1125,21 +1136,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .Minus:
         return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
 
-
-    // Postfix operator
-    case .Execute:
-    return Parse_Rule{prefix = nil, infix = parse_execute, precedence = .CALL}
-
-
-    // Binary operators
-    case .Plus:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .TERM}
-    case .Asterisk:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    case .Slash:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    case .Percent:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    // Bitwise operators
     case .And:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .Or:
@@ -1150,6 +1147,18 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
     case .LShift:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .BITWISE}
+
+    // Arithmetic operators
+    case .Plus:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .TERM}
+    case .Asterisk:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    case .Slash:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+    case .Percent:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+
+    // Comparison operators
     case .Equal:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
     case .Less:
@@ -1161,11 +1170,11 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .GreaterEqual:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
 
-    // Specialized operators
-    case .Colon:
-        return Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .PRIMARY}
+    // Range operators
+    case .DoubleDot:
+        return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
 
-    // Assignment operators
+    // Assignment operators (lowest precedence)
     case .PointingPush:
         return Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .ASSIGNMENT}
     case .PointingPull:
@@ -1179,16 +1188,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .ResonancePull:
         return Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
 
-
-    // Range notation
-    case .DoubleDot:
-        return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
-
-    // Special cases
-    case .Dot:
-        return Parse_Rule{prefix = parse_prefix_property, infix = parse_property, precedence = .CALL}
-    case .Question:
-        return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
+    // Special expansions
     case .Ellipsis:
         return Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .PRIMARY}
     }
@@ -1277,16 +1277,14 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
 /*
  * parse_expression parses expressions using Pratt parsing
  */
-parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -> ^Node {
+parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Node {
     if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
-        // Handle empty expressions without error
         return nil
     }
 
     // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
     if rule.prefix == nil {
-        // Better error messages for common cases
         if parser.current_token.kind == .Colon {
             error_at_current(parser, "Unexpected ':' without a type constraint")
         } else if parser.current_token.kind == .PointingPush {
@@ -1294,8 +1292,6 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
         } else if !parser.panic_mode {
             error_at_current(parser, fmt.tprintf("Expected expression, found '%v'", parser.current_token.kind))
         }
-
-        // Advance past the problematic token to avoid getting stuck
         advance_token(parser)
         return nil
     }
@@ -1305,31 +1301,26 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
 
     // Parse the prefix expression
     left := rule.prefix(parser, can_assign)
-
     if left == nil {
         return nil
     }
 
-    // Keep parsing infix expressions as long as they have higher precedence
+    // Keep parsing infix expressions while they have higher precedence
     for {
-        // Check if we should skip newlines to find a continuation operator
+        // Handle newlines for pattern continuation
         if parser.current_token.kind == .Newline {
-            // Look ahead past newlines to see if there's a ? operator
             saved_position := parser.lexer.position
             saved_current := parser.current_token
             saved_peek := parser.peek_token
 
-            // Skip newlines
             for parser.current_token.kind == .Newline {
                 advance_token(parser)
             }
 
-            // Check if we have a ? operator that should continue the expression
             if parser.current_token.kind == .Question {
-                // Great! We found a continuation operator, keep the newlines skipped
-                // and continue with normal precedence checking
+                // Continue parsing pattern
             } else {
-                // No continuation operator, restore position and break
+                // Restore and break
                 parser.lexer.position = saved_position
                 parser.current_token = saved_current
                 parser.peek_token = saved_peek
@@ -1337,9 +1328,11 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.ASSIGNMENT) -
             }
         }
 
-        // Normal precedence checking
+        // FIXED: Correct Pratt parsing precedence comparison
         current_precedence := get_rule(parser.current_token.kind).precedence
-        if precedence > current_precedence {
+
+        // In Pratt parsing: continue while current operator has higher precedence than minimum
+        if int(current_precedence) <= int(precedence) {
             break
         }
 
@@ -2570,61 +2563,16 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     branch := new(Branch)
     branch.position = position // Store position
 
-    // Parse pattern expression (the left side of ->)
-    if pattern := parse_expression(parser, ); pattern != nil {
-        #partial switch parse in pattern {
-        case Pointing:
-            branch.source = parse.name
-            branch.product = parse.value
-            return branch
-        case Constraint:
-            if parse.value != nil {
-                #partial switch value in parse.value {
-                case Product:
-                    branch.product = value.value
-                    constraint := Constraint{
-                        constraint = parse.constraint,
-                        position = parse.position, // Preserve constraint position
-                    }
-                    result := new(Node)
-                    result^ = constraint
-                    branch.source = result
-                    return branch
-                }
-            }
-        }
-        branch.source = pattern
-    } else {
-        // Error already reported
-        return nil
-    }
-
-    // Expect pointing arrow for pattern branches
-    if !match(parser, .PointingPush) {
-        error_at_current(parser, "Expected -> in pattern branch")
-        return nil
-    }
-
-    // Parse the result expression (right side of ->)
-    if value := parse_expression(parser); value != nil {
-        // Create product node to hold the result
-        product := Product{
-            value = value,
-            position = parser.current_token.position, // Use current token position
-        }
-
-        product_node := new(Node)
-        product_node^ = product
-        branch.product = product_node
-    } else {
-        // Handle case where there's no expression after ->
-        product := Product{
-            position = parser.current_token.position, // Use current token position
-        }
-
-        product_node := new(Node)
-        product_node^ = product
-        branch.product = product_node
+    expression := parse_expression(parser,)
+    #partial switch e in expression {
+      case Pointing:
+        branch.source = e.name
+        branch.product = e.value
+      case Product:
+        branch.product = e.value
+      case:
+        fmt.println(expression)
+        error_at_current(parser, "Invalid value for pattern")
     }
 
     return branch
