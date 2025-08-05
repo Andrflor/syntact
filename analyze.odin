@@ -1173,21 +1173,28 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		if identifier, ok := n.property.(Identifier); ok {
 			prop := new(PropertyData)
 			prop.prop = identifier.name
-			source, static_source := analyze_value(n.source)
-			if scope, ok := static_source.(^ScopeData); ok {
-				for binding in scope.content {
+			fmt.println("Property")
+			if n.source != nil {
+				source, static_source := analyze_value(n.source)
+				if scope, ok := static_source.(^ScopeData); ok {
+					for binding in scope.content {
+						if binding.name == identifier.name {
+							return prop, binding.static_value
+						}
+					}
+				}
+			} else {
+				for binding in curr_scope().content {
 					if binding.name == identifier.name {
 						return prop, binding.static_value
 					}
 				}
-			} else {
-				analyzer_error(
-					fmt.tprintf("There is no property %s", identifier.name),
-					.Invalid_Property_Access,
-					n.position,
-				)
-				return empty, empty
 			}
+			analyzer_error(
+				fmt.tprintf("There is no property %s", identifier.name),
+				.Invalid_Property_Access,
+				n.position,
+			)
 			return prop, empty
 		}
 		analyzer_error(

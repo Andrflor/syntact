@@ -1186,7 +1186,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Special cases
     case .Dot:
-        return Parse_Rule{prefix = nil, infix = parse_property, precedence = .CALL}
+        return Parse_Rule{prefix = parse_prefix_property, infix = parse_property, precedence = .CALL}
     case .Question:
         return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
     case .Ellipsis:
@@ -2002,6 +2002,13 @@ parse_binary :: proc(parser: ^Parser, left: ^Node, can_assign: bool) -> ^Node {
     result := new(Node)
     result^ = op
     return result
+}
+
+/*
+ * parse_prefix_property handles property access (.prop)
+ */
+parse_prefix_property::proc(parser: ^Parser, can_assign: bool) -> ^Node {
+  return parse_property(parser, nil, can_assign);
 }
 
 /*
