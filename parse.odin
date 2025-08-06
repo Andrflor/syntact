@@ -328,10 +328,6 @@ next_token :: proc(l: ^Lexer) -> Token {
     case '=':
         // Optimized equality check
         advance_position(l)
-        if l.position.offset < l.source_len && l.source[l.position.offset] == '=' {
-            advance_position(l)
-            return Token{kind = .Equal, text = "==", position = start_pos}
-        }
         return Token{kind = .Equal, text = "=", position = start_pos}
     case '<':
         // Optimized less-than related tokens
@@ -713,12 +709,12 @@ ResonancePush :: struct {
 }
 
 /*
- * Identifier represents a named reference
+ * Identifier represents a named reference or capture or both
  */
 Identifier :: struct {
   using _: NodeBase,
-	name:     string, // Name of the identifier
-	parenthesized:  bool,   // True if the identifier was written as (name)
+  name: string,        // The identifier name (empty if just capture)
+  capture: string,     // The capture name (empty if no capture)
 }
 
 /*
@@ -1170,15 +1166,15 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Comparison operators
     case .Equal:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
+        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
     case .Less:
-        return Parse_Rule{prefix = nil, infix = parse_less_than, precedence = .COMPARISON}
+        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_less_than, precedence = .COMPARISON}
     case .Greater:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
     case .LessEqual:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
     case .GreaterEqual:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .COMPARISON}
+        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
 
     // Range operators
     case .DoubleDot:
@@ -1240,9 +1236,25 @@ parse:: proc(cache: ^Cache, source: string) -> ^Node {
         }
     }
 
+    for error in parser.errors {
+      debug_parse_error(error, 0)
+    }
+
     result := new(Node)
     result^ = scope
     return result
+}
+
+// Debug a single error/warning
+debug_parse_error :: proc(error: Parse_Error, index: int) {
+	fmt.printf(
+		"  [%d] %v at line %d, col %d: %s\n",
+		index,
+		error.type,
+		error.position.line,
+		error.position.column,
+		error.message,
+	)
 }
 
 /*
@@ -1498,21 +1510,38 @@ parse_literal :: proc(parser: ^Parser) -> ^Node {
  * parse_identifier handles identifier expressions
  */
 parse_identifier :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the identifier token
     position := parser.current_token.position
+    name := parser.current_token.text
 
-    // Create identifier node
-    id_node := new(Node)
-    id_node^ = Identifier{
-        name = parser.current_token.text,
-        position = position, // Store position
-        parenthesized = false,
+    advance_token(parser) // consume identifier
+
+    id := Identifier{
+        name = name,
+        capture = "",
+        position = position,
     }
 
-    // Advance past identifier
-    advance_token(parser)
+    // Check for (capture) after identifier
+    if parser.current_token.kind == .LeftParen {
+        advance_token(parser) // consume (
 
-    return id_node
+        if parser.current_token.kind == .Identifier {
+            id.capture = parser.current_token.text
+            advance_token(parser) // consume capture
+
+            if parser.current_token.kind == .RightParen {
+                advance_token(parser) // consume )
+            } else {
+                error_at_current(parser, "Expected ')' after capture")
+            }
+        } else {
+            error_at_current(parser, "Expected identifier in capture")
+        }
+    }
+
+    result := new(Node)
+    result^ = id
+    return result
 }
 
 /*
@@ -1586,56 +1615,44 @@ parse_scope :: proc(parser: ^Parser) -> ^Node {
 
 /*
  * parse_grouping parses grouping expressions (...)
- * If it's (identifier), treat it as parenthesized identifier
  */
 parse_grouping :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the opening parenthesis
     position := parser.current_token.position
+    advance_token(parser) // consume (
 
-    // Consume opening parenthesis
-    advance_token(parser)
+    // Handle (identifier) as just an identifier
+    if parser.current_token.kind == .Identifier && parser.peek_token.kind == .RightParen {
+        capture := parser.current_token.text
+        advance_token(parser) // consume identifier
+        advance_token(parser) // consume )
 
-    // Check if it's the simple case: (identifier)
-    if parser.current_token.kind == .Identifier {
-        identifier_name := parser.current_token.text
-        identifier_pos := parser.current_token.position
-
-
-        // Look ahead to see if there's a closing paren right after
-        if parser.peek_token.kind == .RightParen {
-            // It's (identifier) - consume both tokens
-            advance_token(parser) // consume identifier
-            advance_token(parser) // consume )
-
-            // Return the identifier marked as parenthesized
-            id_node := new(Node)
-            id_node^ = Identifier{
-                name = identifier_name,
-                position = identifier_pos,
-                parenthesized = true,
-            }
-            return id_node
+        id := new(Node)
+        id^ = Identifier{
+            name = "",
+            capture = capture,
+            position = position,
         }
+        return id
     }
 
-    // Not the simple (identifier) case - parse as normal expression
+    // Empty parentheses
+    if parser.current_token.kind == .RightParen {
+        advance_token(parser)
+        empty := new(Node)
+        empty^ = ScopeNode{
+            value = make([dynamic]Node, 0, 2),
+            position = position,
+        }
+        return empty
+    }
+
+    // Regular expression grouping
     expr := parse_expression(parser)
     if expr == nil {
-        // Handle empty parentheses gracefully
-        if parser.current_token.kind == .RightParen {
-            advance_token(parser)
-            empty_scope := new(Node)
-            empty_scope^ = ScopeNode{
-                value = make([dynamic]Node, 0, 2),
-                position = position,
-            }
-            return empty_scope
-        }
         error_at_current(parser, "Expected expression after '('")
         return nil
     }
 
-    // Expect closing parenthesis
     if !expect_token(parser, .RightParen) {
         return nil
     }
@@ -2437,6 +2454,49 @@ parse_prefix_range :: proc(parser: ^Parser) -> ^Node {
 }
 
 /*
+ * parse_prefix_comparison handles prefix comparison operators (=value, >value, etc.)
+ */
+parse_prefix_comparison :: proc(parser: ^Parser) -> ^Node {
+    // Save position of the comparison operator
+    position := parser.current_token.position
+
+    // Remember the operator kind
+    token_kind := parser.current_token.kind
+
+    // Advance past the operator
+    advance_token(parser)
+
+    // Parse the operand
+    operand := parse_expression(parser, .UNARY)
+    if operand == nil {
+        error_at_current(parser, "Expected expression after prefix comparison operator")
+        return nil
+    }
+
+    // Create operator node
+    op := Operator{
+        right = operand,
+        position = position,
+    }
+
+    // Set operator kind based on token
+    #partial switch token_kind {
+    case .Equal:         op.kind = .Equal
+    case .Less:          op.kind = .Less
+    case .Greater:       op.kind = .Greater
+    case .LessEqual:     op.kind = .LessEqual
+    case .GreaterEqual:  op.kind = .GreaterEqual
+    case:
+        error_at_current(parser, "Unexpected prefix comparison operator")
+        return nil
+    }
+
+    result := new(Node)
+    result^ = op
+    return result
+}
+
+/*
  * parse_range handles range expression (a..b)
  */
 parse_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
@@ -2474,40 +2534,33 @@ parse_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
  * parse_constraint handles constraint expressions (Type:value)
  */
 parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the : token
     position := parser.current_token.position
 
-    // Check if left is nil before proceeding
     if left == nil {
         error_at_current(parser, "Constraint requires a type before ':'")
-        advance_token(parser) // Skip the colon
+        advance_token(parser)
         return nil
     }
 
-    // Create constraint with position
     constraint := Constraint{
         constraint = left,
-        position = position, // Store position
+        position = position,
     }
 
-    next_space := is_space(parser.lexer.source[parser.current_token.position.offset+1])
-    // Move past :
-    advance_token(parser)
+    advance_token(parser) // consume :
 
-    if !next_space {
-        // Parse value if present, otherwise it's an empty constraint
-        if parser.current_token.kind == .RightBrace ||
-          parser.current_token.kind == .EOF ||
-          parser.current_token.kind == .Newline {
-            // Empty constraint (Type:)
-            constraint.value = nil
-        } else if is_expression_start(parser.current_token.kind) {
-            // Constraint with value (Type: value)
-            // Use a different precedence level to ensure constraints bind tighter than pointings
-            if value := parse_expression(parser, .CALL); value != nil {
-                constraint.value = value
-            }
-        }
+    // Parse what follows the colon
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        // Empty constraint (Type:)
+        constraint.value = nil
+    } else if parser.current_token.kind == .LeftParen {
+        // Type:(capture)
+        constraint.value = parse_grouping(parser)
+    } else if is_expression_start(parser.current_token.kind) {
+        // Type:value
+        constraint.value = parse_expression(parser, .CALL)
     }
 
     result := new(Node)
@@ -2519,43 +2572,50 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
  * parse_pattern handles pattern match (target ? {...})
  */
 parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the ? token
     position := parser.current_token.position
+    advance_token(parser) // consume ?
 
-    // Create pattern node with target and position
     pattern := Pattern{
         target = left,
         value = make([dynamic]Branch, 0, 2),
-        position = position, // Store position
+        position = position,
     }
 
-    // Consume ? token
-    advance_token(parser)
-
-    // Skip newlines between ? and {
     skip_newlines(parser)
 
-    // Expect opening brace
-    if !match(parser, .LeftBrace) {
-        error_at_current(parser, "Expected { after ? in pattern")
-        return nil
-    }
-
-    // Skip newlines after opening brace
-    skip_newlines(parser)
-
-    // Handle empty pattern block
-    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-        node := parse_branch(parser)
-        if(node != nil) {
-            append(&pattern.value, node^)
-        }
+    if parser.current_token.kind == .LeftBrace {
+        // Pattern matching with branches: data ? {branches}
+        advance_token(parser) // consume {
         skip_newlines(parser)
-    }
 
-    if !match(parser, .RightBrace) {
-        error_at_current(parser, "Expected } after pattern branches")
-        return nil
+        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+            node := parse_branch(parser)
+            if node != nil {
+                append(&pattern.value, node^)
+            }
+            skip_newlines(parser)
+        }
+
+        if !match(parser, .RightBrace) {
+            error_at_current(parser, "Expected } after pattern branches")
+            return nil
+        }
+    } else {
+        // Inline pattern: data ? expr (including ({...}) objects)
+        if is_expression_start(parser.current_token.kind) {
+            inline_expr := parse_expression(parser, .RANGE)
+            if inline_expr != nil {
+                branch := Branch{
+                    source = inline_expr,  // The pattern/object to match against
+                    product = nil,
+                    position = position,
+                }
+                append(&pattern.value, branch)
+            }
+        } else {
+            error_at_current(parser, "Expected pattern expression after ?")
+            return nil
+        }
     }
 
     result := new(Node)
@@ -2716,7 +2776,6 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .At ||
         kind == .Not ||
         kind == .Minus||
-        kind == .Execute ||
         kind == .PointingPull ||
         kind == .EventPush ||
         kind == .EventPull ||
@@ -2725,7 +2784,12 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .DoubleDot ||
         kind == .Question ||
         kind == .Ellipsis ||
-        kind == .PointingPush
+        kind == .PointingPush ||
+        kind == .Equal ||
+        kind == .LessEqual ||
+        kind == .Less ||
+        kind == .Greater ||
+        kind == .GreaterEqual
     )
 }
 
@@ -2883,9 +2947,9 @@ print_ast :: proc(node: ^Node, indent: int) {
         }
 
     case Identifier:
-      if(n.parenthesized) {
-        fmt.printf("%sIdentifier: (%s) (line %d, column %d)\n",
-            indent_str, n.name, n.position.line, n.position.column)
+      if n.capture!="" {
+        fmt.printf("%sIdentifier: %s(%s) (line %d, column %d)\n",
+            indent_str, n.name, n.capture, n.position.line, n.position.column)
       } else {
         fmt.printf("%sIdentifier: %s (line %d, column %d)\n",
             indent_str, n.name, n.position.line, n.position.column)
