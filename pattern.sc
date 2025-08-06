@@ -36,5 +36,6 @@ userAction ? {
   -> "NotOk"
 }
 
-// TODO: add ?! and ?? tokens to nodes
 // TODO: make so that patterns are parse and detructured according to idea
+// TODO: make analyzer properly use unknow and enforce
+// TODO: make analyzer structures for patterns

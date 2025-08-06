@@ -303,10 +303,10 @@ next_token :: proc(l: ^Lexer) -> Token {
          switch l.source[l.position.offset] {
          case '?':
           advance_position(l)
-          return Token{kind = .DoubleQuestion, text = "?", position = start_pos}
+          return Token{kind = .DoubleQuestion, text = "??", position = start_pos}
          case '!':
           advance_position(l)
-          return Token{kind = .QuestionExclamation, text = "?", position = start_pos}
+          return Token{kind = .QuestionExclamation, text = "?!", position = start_pos}
         }
         return Token{kind = .Question, text = "?", position = start_pos}
     case '.':
@@ -653,6 +653,8 @@ Node :: union {
 	Expand,
 	External,
   Range,
+  Enforce,
+  Unknown,
 }
 
 NodeBase :: struct {
@@ -763,7 +765,7 @@ Branch :: struct {
 }
 
 /*
- * Constraint represents a type constraint (Type: value)
+ * Constraint represents a type constraint Type: value
  */
 Constraint :: struct {
   using _: NodeBase,
@@ -879,6 +881,23 @@ Range :: struct {
 	end:      ^Node, // End of range (may be nil for postfix range)
 }
 
+/*
+ * Unkwnown represents a unknown ?? mainly use for proof
+ */
+Unknown :: struct {
+  using _: NodeBase,
+}
+
+/*
+ * Enforce note ?! represent a compiler forced property usefull for proofs
+ */
+Enforce :: struct {
+  using _: NodeBase,
+	left:     ^Node, // Left operand
+	right:    ^Node, // Right operand
+}
+
+
 // ===========================================================================
 // SECTION 3: PARSER IMPLEMENTATION
 // ===========================================================================
@@ -888,17 +907,18 @@ Range :: struct {
  */
 Precedence :: enum {
     NONE = 0,        // No precedence
-    ASSIGNMENT = 1,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
-    EQUALITY = 2,    // =
-    COMPARISON = 3,  // <, >, <=, >=
-    TERM = 4,        // +, -
-    FACTOR = 5,      // *, /, %
-    LOGICAL = 6,     // Reserved for logical operators (&, |)
-    RANGE = 7,       // ..
-    UNARY = 8,       // !, ~, unary -
-    CALL = 9,       // (), ., ?
-    CONSTRAINT = 10, // : (constraints bind tighter than calls but looser than primary)
-    PRIMARY = 11,    // Literals, identifiers (highest precedence)
+    ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
+    TERM,        // +, -
+    FACTOR,      // *, /, %
+    CONDITIONAL,     // Reserved for logical operators (&, |)
+    LOGICAL,     // Reserved for logical operators (&, |)
+    UNARY,       // ~, unary -
+    RANGE,       // ..
+    EQUALITY,    // =
+    COMPARISON,  // <, >, <=, >=
+    CALL,       // (), ., ?
+    CONSTRAINT, // : (constraints bind tighter than calls but looser than primary)
+    PRIMARY,    // Literals, identifiers (highest precedence)
 }
 
 /*
@@ -1130,7 +1150,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .And:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
     case .Or:
-        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .LOGICAL}
+        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .CONDITIONAL}
     case .Xor:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
     case .RShift:
@@ -1163,6 +1183,12 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     // Range operators
     case .DoubleDot:
         return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
+
+    // Proof and constraint
+    case .DoubleQuestion:
+        return Parse_Rule{prefix = parse_unknown, infix = nil, precedence = .PRIMARY}
+    case .QuestionExclamation:
+        return Parse_Rule{prefix = nil, infix = parse_enforce, precedence = .LOGICAL}
 
     // Assignment operators (lowest precedence)
     case .PointingPush:
@@ -1846,6 +1872,50 @@ parse_left_paren :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     parse_grouping(parser)
     return nil
 }
+
+/*
+ * parse_unknown parses unknown literal ??
+ */
+parse_unknown :: proc(parser: ^Parser) -> ^Node {
+    result := new(Node)
+    result^ = Unknown{position = parser.current_token.position}
+    advance_token(parser)
+    return result
+}
+
+/*
+ * parse_enforce handle property enforcement with ?!
+ */
+parse_enforce:: proc(parser: ^Parser, left: ^Node) -> ^Node {
+    fmt.println("We have enforce")
+    // Save position of the binary operator
+    position := parser.current_token.position
+
+    // Remember the operator
+    token_kind := parser.current_token.kind
+    rule := get_rule(token_kind)
+
+    // Move past the operator
+    advance_token(parser)
+
+    // Parse the right operand with higher precedence
+    right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
+    if right == nil {
+        error_at_current(parser, "Expected expression after binary operator")
+        return nil
+    }
+
+    // Create operator node
+    enforce := Enforce{
+        left = left,
+        right = right,
+        position = position, // Store position
+    }
+    result := new(Node)
+    result^ = enforce
+    return result
+}
+
 
 /*
  * parse_unary parses unary operators (-, ~)
@@ -2729,7 +2799,7 @@ print_ast :: proc(node: ^Node, indent: int) {
 
     indent_str := strings.repeat(" ", indent)
 
-    #partial switch n in node^ {
+   switch n in node^ {
     case Pointing:
         fmt.printf("%sPointing -> (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
@@ -2928,6 +2998,23 @@ print_ast :: proc(node: ^Node, indent: int) {
             print_ast(n.right, indent + 4)
         }
 
+    case Enforce:
+        fmt.printf("%sEnforce ?! (line %d, column %d)\n",
+            indent_str, n.position.line, n.position.column)
+        if n.left != nil {
+            fmt.printf("%s  Left:\n", indent_str)
+            print_ast(n.left, indent + 4)
+        } else {
+            fmt.printf("%s  Left: none (unary operator)\n", indent_str)
+        }
+        if n.right != nil {
+            fmt.printf("%s  Right:\n", indent_str)
+            print_ast(n.right, indent + 4)
+        }
+
+    case Branch:
+
+
     case Execute:
       // Build the pattern string with proper nesting
       pattern := ""
@@ -2988,9 +3075,9 @@ print_ast :: proc(node: ^Node, indent: int) {
         } else {
             fmt.printf("%s  End: none (postfix range)\n", indent_str)
         }
+    case Unknown:
+        fmt.printf("%sUnknown\n", indent_str)
 
-    case:
-        fmt.printf("%sUnknown node type\n", indent_str)
     }
 }
 

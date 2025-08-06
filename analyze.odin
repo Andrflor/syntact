@@ -1094,6 +1094,8 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			get_position(node),
 		)
 		return empty, empty
+	case Unknown:
+	case Enforce:
 	case Branch:
 		analyzer_error(
 			"We should not find a branch outside a pattern node",
