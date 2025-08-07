@@ -1,0 +1,5 @@
+{
+  "name": "Simple Pattern Match",
+  "source": "x ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

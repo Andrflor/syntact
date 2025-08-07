@@ -41,7 +41,6 @@ userAction ?  {
 // TODO: adapt old example with new syntax ideas
 // TODO: make sure that structure is used as default for sure
 // Pattern assert on shape directly if we want value we use =value
-// Thing to consider is that the shape of object witout production rule is itself
 
 // That mean
 Record -> {
@@ -51,8 +50,27 @@ Record -> {
   }
 }
 
-// Now become
-Record -> {
+process -> {
   Action:action
-  String:payLoad
+  -> validate{action.payLoad}!
+}
+
+String:nany -> "mama"
+
+Record:record
+Record:anotherRecord
+
+record ? {
+  Record -> "" /* match if is of shape record */
+  2 | 3 -> "" /* match if of shape 2 or 3 so if 2 or 3 */
+  2.. -> "" /* match if more than 2 aka shape range 2.. */
+  2 -> "" /* match if shape 2 aka value is 2 */
+  nany -> "" /* match if shape mama aka value mama */
+  anotherRecord -> "" /* match if shape anotherRecord aka value anotherRecord */
+}
+
+record ? {
+  process -> "wow" /* shape defined by process */
+  =process -> "woaw" /* process value */
+  {->process} -> "wiw" /* shape of process */
 }

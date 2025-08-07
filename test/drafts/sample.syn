@@ -1,0 +1,21 @@
+...@fmt
+...@std
+
+concat -> {
+  T <- None
+  List{T}:list
+  -> list ? {
+    {T:(a) ...List{T}:(b)}: -> a + concat{b}!
+    -> T:
+  }
+}
+
+@os.args ? {
+  {string: "echo" ...List{string}:(r)}: -> print{concat{r}!}
+  {string: "add" ...List{string}:(r)}: -> r ? {
+    {string:(num1) string:(num2)} -> print{parseInt{num1}!+parseInt{num2}!}
+    -> print{"Usage: prog add <num1> <num2>"}
+  }
+  {string: string:(c) ...List{string}:} -> print{"Unknown command: " + c}
+  -> print{"Usage: prog <command> [args]"}
+}!

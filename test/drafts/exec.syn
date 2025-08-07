@@ -1,0 +1,42 @@
+// Test cases for arbitrary composition of execution patterns
+
+// Basic execution patterns for reference:
+// -----------------------------------------
+// Sequential: !
+// Threading: <>
+// Parallel CPU: []
+// Background: ()
+// GPU: ||
+
+// Simple compositions
+// -----------------------------------------
+result -> packed<[!]>     // Threaded parallel execution
+result -> packed([<!>])   // Parallel threaded execution
+result -> packed<(!)>     // Threaded background execution
+result -> packed(<!>)     // Background threaded execution
+result -> packed<|!|>     // Threaded GPU execution
+result -> packed(|!|)     // Background GPU execution
+
+// Complex multi-level compositions
+// -----------------------------------------
+result -> packed(<[!]>)   // Background threaded parallel execution
+result -> packed(|<[!]>|) // GPU background threaded parallel execution
+result -> packed([([!])]) // Parallel background parallel execution
+
+// Arbitrary compositions as mentioned in the comment
+// -----------------------------------------
+result -> packed<[!]>     // As mentioned in comment
+result -> packed(<[!]>)   // As mentioned in comment "even"
+
+// With function calls and complex expressions
+// -----------------------------------------
+map{list->{1 2 3 4 5} mapper->double}![!]
+reduce{list->packed! reducer->add}<!>
+transform{shape->shape transformer->double}(<[!]>)
+
+// Other potential uses
+// -----------------------------------------
+// Execution pattern can be applied to any expression
+Circle{radius->10}<[!]>
+(1 + 2)<!>
+map{list->{2 3}}[!] + reduce{reducer->plop}<!>

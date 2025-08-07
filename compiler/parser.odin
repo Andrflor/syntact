@@ -71,8 +71,8 @@ Token_Kind :: enum {
 	Ellipsis, // ...
 	Newline, // \n
 	Range, // 1..2 (full range)
-	PrefixRange, // ..1
-	PostfixRange, // 1..
+	PrefixRange, // 1..
+	PostfixRange, // ..1
 
 	// Grouping
 	LeftBrace, // {
@@ -311,14 +311,32 @@ next_token :: proc(l: ^Lexer) -> Token {
         return Token{kind = .Question, text = "?", position = start_pos}
     case '.':
         // Check for .. or ...
-        if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '.' {
-            advance_by(l, 2) // Skip ".."
+    if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '.' {
+        // Check what's before
+        has_before_delimiter := l.position.offset == 0 ||
+            is_before_delimiter(l.source[l.position.offset - 1])
+        // Check what's after
+        has_after_delimiter := l.position.offset + 2 >= l.source_len ||
+            is_after_delimiter(l.source[l.position.offset + 2])
 
-            // Check for ellipsis "..."
-            if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
-                advance_position(l)
-                return Token{kind = .Ellipsis, text = "...", position = start_pos}
-            }
+        advance_by(l, 2)
+        // Check for ellipsis "..."
+        if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
+            advance_position(l)
+            return Token{kind = .Ellipsis, text = "...", position = start_pos}
+        }
+
+        if has_before_delimiter && has_after_delimiter {
+            return Token{kind = .DoubleDot, text = "..", position = start_pos}
+        } else if has_before_delimiter {
+            return Token{kind = .PrefixRange, text = "..", position = start_pos}
+        } else if has_after_delimiter {
+            return Token{kind = .PostfixRange, text = "..", position = start_pos}
+        } else {
+            return Token{kind = .Range, text = "..", position = start_pos}
+        }
+
+
 
             // Just return DoubleDot - let parser handle prefix/postfix logic
             return Token{kind = .DoubleDot, text = "..", position = start_pos}
@@ -662,19 +680,19 @@ NodeBase :: struct {
  */
 PointingBase :: struct {
   using _: NodeBase,
-  name:     ^Node, // Name of the pointing
-  value:    ^Node, // Value being pointed to/from
+  from:     ^Node, // From of the pointing
+  to:    ^Node, // To being pointed to/from
 }
 
 /*
- * Pointing represents a pointing declaration (name -> value)
+ * Pointing represents a pointing declaration (from -> to)
  */
 Pointing :: struct {
   using _: PointingBase,
 }
 
 /*
- * Pointing pull is a declaration later override derived value
+ * Pointing pull is a declaration later override derived to
  */
 PointingPull :: struct {
   using _: PointingBase,
@@ -695,7 +713,7 @@ EventPush :: struct {
 }
 
 /*
- * ResonancePull is useed to change value of resonance driven -
+ * ResonancePull is useed to change to of resonance driven -
  */
 ResonancePull :: struct {
   using _: PointingBase,
@@ -709,12 +727,12 @@ ResonancePush :: struct {
 }
 
 /*
- * Identifier represents a named reference or capture or both
+ * Identifier represents a fromd reference or capture or both
  */
 Identifier :: struct {
   using _: NodeBase,
   name: string,        // The identifier name (empty if just capture)
-  capture: string,     // The capture name (empty if no capture)
+  capture: string,     // The capture from (empty if no capture)
 }
 
 /*
@@ -722,7 +740,7 @@ Identifier :: struct {
  */
 ScopeNode :: struct {
   using _: NodeBase,
-	value:    [dynamic]Node, // Statements in the scope
+	to:    [dynamic]Node, // Statements in the scope
 }
 
 /*
@@ -735,11 +753,11 @@ Override :: struct {
 }
 
 /*
- * Product represents a produced value (-> expr)
+ * Product represents a produced to (-> expr)
  */
 Product :: struct {
   using _: NodeBase,
-	value:    ^Node, // Value produced
+	to:    ^Node, // To produced
 }
 
 /*
@@ -747,8 +765,8 @@ Product :: struct {
  */
 Pattern :: struct {
   using _: NodeBase,
-	target:   ^Node, // Value to match against
-	value:    [dynamic]Branch, // Pattern branches
+	target:   ^Node, // To to match against
+	to:    [dynamic]Branch, // Pattern branches
 }
 
 /*
@@ -761,12 +779,12 @@ Branch :: struct {
 }
 
 /*
- * Constraint represents a type constraint Type: value
+ * Constraint represents a type constraint Type: to
  */
 Constraint :: struct {
   using _: NodeBase,
 	constraint: ^Node, // Type constraint
-	value:      ^Node, // Optional value
+	name:       ^Node, // Optional value
 }
 
 /*
@@ -784,7 +802,7 @@ ExecutionWrapper :: enum {
  */
 Execute :: struct {
   using _: NodeBase,
-  value:    ^Node,                     // Expression to execute
+  to:    ^Node,                     // Expression to execute
   wrappers: [dynamic]ExecutionWrapper, // Ordered list of execution wrappers (from outside to inside)
 }
 
@@ -822,7 +840,7 @@ Operator :: struct {
 }
 
 /*
- * Literal_Kind defines the types of literal values
+ * Literal_Kind defines the types of literal tos
  */
 Literal_Kind :: enum {
 	Integer,
@@ -834,12 +852,12 @@ Literal_Kind :: enum {
 }
 
 /*
- * Literal represents a literal value in the source
+ * Literal represents a literal to in the source
  */
 Literal :: struct {
   using _: NodeBase,
 	kind:     Literal_Kind, // Type of literal
-	value:    string, // String representation of the value
+	to:    string, // String representation of the value
 }
 
 /*
@@ -864,7 +882,7 @@ Expand :: struct {
  */
 External :: struct {
   using _: NodeBase,
-  name:    string, // Name of the ref
+  name:    string, // From of the ref
 	scope:   ^Node, // The external scope to be resolved
 }
 
@@ -899,7 +917,7 @@ Enforce :: struct {
 // ===========================================================================
 
 /*
- * Precedence levels for operators, higher value means higher precedence
+ * Precedence levels for operators, higher to means higher precedence
  */
 Precedence :: enum {
     NONE = 0,        // No precedence
@@ -969,11 +987,11 @@ Parser :: struct {
  * initialize_parser sets up a parser with a lexer
  */
 init_parser :: proc(cache: ^Cache, source: string) -> ^Parser{
-  parser := new(Parser)
+    parser := new(Parser)
     parser.file_cache = cache
     parser.lexer = new(Lexer)
     init_lexer(parser.lexer, source)
-  parser.panic_mode = false
+    parser.panic_mode = false
 
     // Initialize with first two tokens
     parser.current_token = next_token(parser.lexer)
@@ -1178,6 +1196,12 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Range operators
     case .DoubleDot:
+        return Parse_Rule{prefix = parse_empty_range, infix = nil, precedence = .PRIMARY}
+    case .PrefixRange:
+        return Parse_Rule{prefix = parse_prefix_range, infix = nil, precedence = .RANGE}
+    case .PostfixRange:
+        return Parse_Rule{prefix = nil, infix = parse_postfix_range, precedence = .RANGE}
+    case .Range:
         return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
 
     // Proof and constraint
@@ -1216,7 +1240,7 @@ parse:: proc(cache: ^Cache, source: string) -> ^Node {
     position := parser.current_token.position
 
     scope := ScopeNode{
-        value = make([dynamic]Node, 0, 2),
+        to = make([dynamic]Node, 0, 2),
         position = position, // Store position
     }
 
@@ -1232,7 +1256,7 @@ parse:: proc(cache: ^Cache, source: string) -> ^Node {
         }
 
         if node := parse_with_recovery(parser); node != nil {
-            append(&scope.value, node^)
+            append(&scope.to, node^)
         }
     }
 
@@ -1310,21 +1334,9 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
         return nil
     }
 
+    fmt.println("line:", parser.current_token.position.line, "col:", parser.current_token.position.column)
     // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
-
-    // Debug: Check if prefix rule exists
-    if rule.prefix == nil {
-        if parser.current_token.kind == .Colon {
-            error_at_current(parser, "Unexpected ':' without a type constraint")
-        } else if parser.current_token.kind == .PointingPush {
-            error_at_current(parser, "Unexpected '->' without a name to point from")
-        } else if !parser.panic_mode {
-            error_at_current(parser, fmt.tprintf("Expected expression, found '%v'", parser.current_token.kind))
-        }
-        advance_token(parser)
-        return nil
-    }
 
     // Parse the prefix expression
     left := rule.prefix(parser)
@@ -1334,24 +1346,16 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
 
     // Keep parsing infix expressions while they have higher precedence
     for {
-        current_precedence := get_rule(parser.current_token.kind).precedence
-
-        // In Pratt parsing: continue while current operator has higher precedence than minimum
-        if int(current_precedence) < int(precedence) {
+        fmt.println("line:", parser.current_token.position.line, "col:", parser.current_token.position.column)
+        rule := get_rule(parser.current_token.kind)
+        if rule.infix == nil || rule.precedence < precedence {
             break
         }
-
-        rule = get_rule(parser.current_token.kind)
-        if rule.infix == nil {
-            break
-        }
-
         left = rule.infix(parser, left)
         if left == nil {
             return nil
         }
     }
-
     return left
 }
 
@@ -1423,7 +1427,7 @@ parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create execute node
     execute := Execute{
-        value = left,
+        to = left,
         wrappers = make([dynamic]ExecutionWrapper, 0, 0),
         position = position,
     }
@@ -1438,7 +1442,7 @@ parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_product_prefix handles the standalone product expression (-> value)
+ * parse_product_prefix handles the standalone product expression (-> to)
  */
 parse_product_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the -> token
@@ -1451,15 +1455,15 @@ parse_product_prefix :: proc(parser: ^Parser) -> ^Node {
         position = position, // Store position
     }
 
-    // Parse the value or handle empty product
+    // Parse the to or handle empty product
     if parser.current_token.kind == .RightBrace || parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
         // Empty product - this is valid
-        product.value = nil
+        product.to = nil
     } else {
-        // Parse the value
-        if value := parse_expression(parser); value != nil {
-            product.value = value
+        // Parse the to
+        if to := parse_expression(parser); to != nil {
+            product.to = to
         } else {
             // Error already reported
             return nil
@@ -1472,14 +1476,14 @@ parse_product_prefix :: proc(parser: ^Parser) -> ^Node {
 }
 
 /*
- * parse_literal handles literal values (numbers, strings)
+ * parse_literal handles literal tos (numbers, strings)
  */
 parse_literal :: proc(parser: ^Parser) -> ^Node {
     // Save position of the literal token
     position := parser.current_token.position
 
     literal := Literal {
-      value = parser.current_token.text,
+      to = parser.current_token.text,
       position = position, // Store position
     }
 
@@ -1564,7 +1568,7 @@ parse_scope :: proc(parser: ^Parser) -> ^Node {
     advance_token(parser)
 
     scope := ScopeNode{
-        value = make([dynamic]Node, 0, 2),
+        to = make([dynamic]Node, 0, 2),
         position = position, // Store position
     }
 
@@ -1596,7 +1600,7 @@ parse_scope :: proc(parser: ^Parser) -> ^Node {
         }
 
         if node := parse_statement(parser); node != nil {
-            append(&scope.value, node^)
+            append(&scope.to, node^)
         }
 
         // Skip newlines after statements
@@ -1640,7 +1644,7 @@ parse_grouping :: proc(parser: ^Parser) -> ^Node {
         advance_token(parser)
         empty := new(Node)
         empty^ = ScopeNode{
-            value = make([dynamic]Node, 0, 2),
+            to = make([dynamic]Node, 0, 2),
             position = position,
         }
         return empty
@@ -1687,7 +1691,7 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
 
     // Create execute node
     execute := Execute{
-        value = left,
+        to = left,
         wrappers = make([dynamic]ExecutionWrapper, 0, 4),
         position = parser.current_token.position,
     }
@@ -2048,13 +2052,13 @@ parse_property :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Consume the dot
     advance_token(parser)
 
-    // Expect identifier for property name
+    // Expect identifier for property from
     if parser.current_token.kind != .Identifier {
-        error_at_current(parser, "Expected property name after '.'")
+        error_at_current(parser, "Expected property from after '.'")
         return nil
     }
 
-    // Get property name
+    // Get property from
     prop_name := parser.current_token.text
     advance_token(parser)
 
@@ -2087,7 +2091,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create pointing node
     pointing := Pointing{
-        name = left,
+        from = left,
         position = position, // Store position
     }
 
@@ -2098,11 +2102,11 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        pointing.value = nil
+        pointing.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        pointing.value = value
+        // Parse to
+        to := parse_expression(parser)
+        pointing.to = to
     }
     result := new(Node)
     result^ = pointing
@@ -2110,7 +2114,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_pointing_pull_prefix handles prefix pointing pull operator (<- value)
+ * parse_pointing_pull_prefix handles prefix pointing pull operator (<- to)
  */
 parse_pointing_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the <- token
@@ -2124,15 +2128,15 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume <-
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        pointing_pull.value = nil
+        pointing_pull.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        pointing_pull.value = value
+        // Parse to
+        to := parse_expression(parser)
+        pointing_pull.to = to
     }
 
     result := new(Node)
@@ -2149,22 +2153,22 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create pointing pull node
     pointing_pull := PointingPull{
-        name = left,
+        from = left,
         position = position, // Store position
     }
 
     // Consume <-
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        pointing_pull.value = nil
+        pointing_pull.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        pointing_pull.value = value
+        // Parse to
+        to := parse_expression(parser)
+        pointing_pull.to = to
     }
 
     result := new(Node)
@@ -2173,7 +2177,7 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_event_push_prefix handles prefix event push (>- value)
+ * parse_event_push_prefix handles prefix event push (>- to)
  */
 parse_event_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the >- token
@@ -2187,15 +2191,15 @@ parse_event_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume >-
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        event_push.value = nil
+        event_push.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        event_push.value = value
+        // Parse to
+        to := parse_expression(parser)
+        event_push.to = to
     }
 
     result := new(Node)
@@ -2212,22 +2216,22 @@ parse_event_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create event push node
     event_push := EventPush{
-        name = left,
+        from = left,
         position = position, // Store position
     }
 
     // Consume >-
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        event_push.value = nil
+        event_push.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        event_push.value = value
+        // Parse to
+        to := parse_expression(parser)
+        event_push.to = to
     }
 
     result := new(Node)
@@ -2236,7 +2240,7 @@ parse_event_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_event_pull_prefix handles prefix event pull (-< value)
+ * parse_event_pull_prefix handles prefix event pull (-< to)
  */
 parse_event_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the -< token
@@ -2250,15 +2254,15 @@ parse_event_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume -<
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        event_pull.value = nil
+        event_pull.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        event_pull.value = value
+        // Parse to
+        to := parse_expression(parser)
+        event_pull.to = to
     }
 
     result := new(Node)
@@ -2275,22 +2279,22 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create event pull node
     event_pull := EventPull{
-        name = left,
+        from = left,
         position = position, // Store position
     }
 
     // Consume -<
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        event_pull.value = nil
+        event_pull.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        event_pull.value = value
+        // Parse to
+        to := parse_expression(parser)
+        event_pull.to = to
     }
 
     result := new(Node)
@@ -2299,7 +2303,7 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_resonance_push_prefix handles prefix resonance push (>>- value)
+ * parse_resonance_push_prefix handles prefix resonance push (>>- to)
  */
 parse_resonance_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the >>- token
@@ -2313,15 +2317,15 @@ parse_resonance_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume >>-
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        resonance_push.value = nil
+        resonance_push.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        resonance_push.value = value
+        // Parse to
+        to := parse_expression(parser)
+        resonance_push.to = to
     }
 
     result := new(Node)
@@ -2338,22 +2342,22 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create resonance push node
     resonance_push := ResonancePush{
-        name = left,
+        from = left,
         position = position, // Store position
     }
 
     // Consume >>-
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        resonance_push.value = nil
+        resonance_push.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        resonance_push.value = value
+        // Parse to
+        to := parse_expression(parser)
+        resonance_push.to = to
     }
 
     result := new(Node)
@@ -2362,7 +2366,7 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_resonance_pull_prefix handles prefix resonance pull (-<< value)
+ * parse_resonance_pull_prefix handles prefix resonance pull (-<< to)
  */
 parse_resonance_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Save position of the -<< token
@@ -2376,15 +2380,15 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume -<<
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        resonance_pull.value = nil
+        resonance_pull.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        resonance_pull.value = value
+        // Parse to
+        to := parse_expression(parser)
+        resonance_pull.to = to
     }
 
     result := new(Node)
@@ -2401,26 +2405,42 @@ parse_resonance_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Create resonance pull node
     resonance_pull := ResonancePull{
-        name = left,
+        from = left,
         position = position, // Store position
     }
 
     // Consume -<<
     advance_token(parser)
 
-    // Parse value or handle empty value
+    // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
-        resonance_pull.value = nil
+        resonance_pull.to = nil
     } else {
-        // Parse value
-        value := parse_expression(parser)
-        resonance_pull.value = value
+        // Parse to
+        to := parse_expression(parser)
+        resonance_pull.to = to
     }
 
     result := new(Node)
     result^ = resonance_pull
+    return result
+}
+
+/*
+ * parse_empty_range handles empty range (..)
+ */
+parse_empty_range :: proc(parser: ^Parser) -> ^Node {
+    // Save position of the .. token
+    position := parser.current_token.position
+    advance_token(parser)
+    range := Range{
+        position = position, // Store position
+    }
+
+    result := new(Node)
+    result^ = range
     return result
 }
 
@@ -2434,7 +2454,7 @@ parse_prefix_range :: proc(parser: ^Parser) -> ^Node {
     // Consume ..
     advance_token(parser)
 
-    // Parse end value or handle empty value
+    // Parse end to or handle empty value
     end: ^Node = nil
     if !(parser.current_token.kind == .RightBrace ||
          parser.current_token.kind == .EOF ||
@@ -2454,7 +2474,58 @@ parse_prefix_range :: proc(parser: ^Parser) -> ^Node {
 }
 
 /*
- * parse_prefix_comparison handles prefix comparison operators (=value, >value, etc.)
+ * parse_postfix_range handles postfix range (5..)
+ */
+parse_postfix_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+    // Save position of the .. token
+    position := parser.current_token.position
+
+    // Consume ..
+    advance_token(parser)
+
+    // Create range node with position
+    range := Range{
+        start = left,
+        position = position, // Store position
+    }
+
+    result := new(Node)
+    result^ = range
+    return result
+}
+
+/*
+ * parse_range handles complete range (5..2)
+ */
+parse_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+    // Save position of the .. token
+    position := parser.current_token.position
+
+    // Consume ..
+    advance_token(parser)
+
+    // Parse end to or handle empty value
+    end: ^Node = nil
+    if !(parser.current_token.kind == .RightBrace ||
+         parser.current_token.kind == .EOF ||
+         parser.current_token.kind == .Newline) {
+        end = parse_expression(parser, .RANGE)
+    }
+
+    // Create range node with position
+    range := Range{
+        start = left,
+        end = end,
+        position = position, // Store position
+    }
+
+    result := new(Node)
+    result^ = range
+    return result
+}
+
+/*
+ * parse_prefix_comparison handles prefix comparison operators (=to, >value, etc.)
  */
 parse_prefix_comparison :: proc(parser: ^Parser) -> ^Node {
     // Save position of the comparison operator
@@ -2497,41 +2568,7 @@ parse_prefix_comparison :: proc(parser: ^Parser) -> ^Node {
 }
 
 /*
- * parse_range handles range expression (a..b)
- */
-parse_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the .. token
-    position := parser.current_token.position
-
-    // Consume ..
-    advance_token(parser)
-
-    // Create range node with position
-    range := Range{
-        start = left,
-        position = position, // Store position
-    }
-
-    // Check if there's an end expression
-    if parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline ||
-       parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .RightParen {
-        // This is a postfix range (a..)
-        range.end = nil
-    } else {
-        // This is a full range (a..b)
-        end := parse_expression(parser, .RANGE)
-        range.end = end
-    }
-
-    result := new(Node)
-    result^ = range
-    return result
-}
-
-/*
- * parse_constraint handles constraint expressions (Type:value)
+ * parse_constraint handles constraint expressions (Type:to)
  */
 parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     position := parser.current_token.position
@@ -2554,13 +2591,13 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
         // Empty constraint (Type:)
-        constraint.value = nil
+        constraint.name = nil
     } else if parser.current_token.kind == .LeftParen {
         // Type:(capture)
-        constraint.value = parse_grouping(parser)
+        constraint.name = parse_grouping(parser)
     } else if is_expression_start(parser.current_token.kind) {
-        // Type:value
-        constraint.value = parse_expression(parser, .CALL)
+        // Type:to
+        constraint.name = parse_expression(parser, .CALL)
     }
 
     result := new(Node)
@@ -2577,7 +2614,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     pattern := Pattern{
         target = left,
-        value = make([dynamic]Branch, 0, 2),
+        to = make([dynamic]Branch, 0, 2),
         position = position,
     }
 
@@ -2591,7 +2628,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
         for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
             node := parse_branch(parser)
             if node != nil {
-                append(&pattern.value, node^)
+                append(&pattern.to, node^)
             }
             skip_newlines(parser)
         }
@@ -2610,7 +2647,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
                     product = nil,
                     position = position,
                 }
-                append(&pattern.value, branch)
+                append(&pattern.to, branch)
             }
         } else {
             error_at_current(parser, "Expected pattern expression after ?")
@@ -2643,19 +2680,19 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     expression := parse_expression(parser,)
     #partial switch e in expression {
       case Pointing:
-        branch.source = e.name
-        branch.product = e.value
+        branch.source = e.from
+        branch.product = e.to
       case Product:
-        branch.product = e.value
+        branch.product = e.to
       case:
-        error_at_current(parser, "Invalid value for pattern")
+        error_at_current(parser, "Invalid to for pattern")
     }
 
     return branch
 }
 
 /*
- * parse_product parses a product expression (-> value)
+ * parse_product parses a product expression (-> to)
  * This is for standalone -> expressions
  */
 parse_product :: proc(parser: ^Parser) -> ^Node {
@@ -2789,7 +2826,10 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .LessEqual ||
         kind == .Less ||
         kind == .Greater ||
-        kind == .GreaterEqual
+        kind == .GreaterEqual ||
+        kind == .Range ||
+        kind == .PostfixRange ||
+        kind == .PrefixRange
     )
 }
 
@@ -2824,6 +2864,22 @@ is_alpha :: #force_inline proc(c: u8) -> bool {
  */
 is_alnum :: #force_inline proc(c: u8) -> bool {
     return is_digit(c) || is_alpha(c) || c == '_'
+}
+
+/*
+ * is_before_delimiter checks if a character can appear before .. to make it not a range
+ * Valid before delimiters: " " (space), ":", ",", "{", "("
+ */
+is_before_delimiter :: #force_inline proc(c: u8) -> bool {
+    return is_space(c) || c == '\n'|| c == ':' || c == ',' || c == '{' || c == '('
+}
+
+/*
+ * is_after_delimiter checks if a character can appear after .. to make it not a range
+ * Valid after delimiters: "}", ")", " " (space), ",", ":", EOF (handled separately)
+ */
+is_after_delimiter :: #force_inline proc(c: u8) -> bool {
+    return is_space(c) || c == '\n' || c == '}' || c == ')' || c == ',' || c == ':'
 }
 
 /*
@@ -2867,83 +2923,83 @@ print_ast :: proc(node: ^Node, indent: int) {
     case Pointing:
         fmt.printf("%sPointing -> (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.name != nil {
-            fmt.printf("%s  Name:\n", indent_str)
-            print_ast(n.name, indent + 4)
+        if n.from != nil {
+            fmt.printf("%s  From:\n", indent_str)
+            print_ast(n.from, indent + 4)
         }
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.to != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.to, indent + 4)
         }
 
     case PointingPull:
         fmt.printf("%sPointingPull <- (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.name != nil {
-            fmt.printf("%s  Name:\n", indent_str)
-            print_ast(n.name, indent + 4)
+        if n.from != nil {
+            fmt.printf("%s  From:\n", indent_str)
+            print_ast(n.from, indent + 4)
         } else {
-            fmt.printf("%s  Name: anonymous\n", indent_str)
+            fmt.printf("%s  From: anonymous\n", indent_str)
         }
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.to != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.to, indent + 4)
         }
 
     case EventPush:
         fmt.printf("%sEventPush >- (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.name != nil {
-            fmt.printf("%s  Name:\n", indent_str)
-            print_ast(n.name, indent + 4)
+        if n.from != nil {
+            fmt.printf("%s  From:\n", indent_str)
+            print_ast(n.from, indent + 4)
         } else {
-            fmt.printf("%s  Name: anonymous\n", indent_str)
+            fmt.printf("%s  From: anonymous\n", indent_str)
         }
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.to != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.to, indent + 4)
         }
 
     case EventPull:
         fmt.printf("%sEventPull -< (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.name != nil {
-            fmt.printf("%s  Name:\n", indent_str)
-            print_ast(n.name, indent + 4)
+        if n.from != nil {
+            fmt.printf("%s  From:\n", indent_str)
+            print_ast(n.from, indent + 4)
         } else {
-            fmt.printf("%s  Name: anonymous\n", indent_str)
+            fmt.printf("%s  From: anonymous\n", indent_str)
         }
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.to != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.to, indent + 4)
         }
 
     case ResonancePush:
         fmt.printf("%sResonancePush >>- (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.name != nil {
-            fmt.printf("%s  Name:\n", indent_str)
-            print_ast(n.name, indent + 4)
+        if n.from != nil {
+            fmt.printf("%s  From:\n", indent_str)
+            print_ast(n.from, indent + 4)
         } else {
-            fmt.printf("%s  Name: anonymous\n", indent_str)
+            fmt.printf("%s  From: anonymous\n", indent_str)
         }
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.to != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.to, indent + 4)
         }
 
     case ResonancePull:
         fmt.printf("%sResonancePull -<< (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.name != nil {
-            fmt.printf("%s  Name:\n", indent_str)
-            print_ast(n.name, indent + 4)
+        if n.from != nil {
+            fmt.printf("%s  From:\n", indent_str)
+            print_ast(n.from, indent + 4)
         } else {
-            fmt.printf("%s  Name: anonymous\n", indent_str)
+            fmt.printf("%s  From: anonymous\n", indent_str)
         }
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.to != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.to, indent + 4)
         }
 
     case Identifier:
@@ -2958,9 +3014,9 @@ print_ast :: proc(node: ^Node, indent: int) {
     case ScopeNode:
         fmt.printf("%sScopeNode (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        for i := 0; i < len(n.value); i += 1 {
+        for i := 0; i < len(n.to); i += 1 {
             entry_node := new(Node)
-            entry_node^ = n.value[i]
+            entry_node^ = n.to[i]
             print_ast(entry_node, indent + 2)
         }
 
@@ -3009,8 +3065,8 @@ print_ast :: proc(node: ^Node, indent: int) {
     case Product:
         fmt.printf("%sProduct -> (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
-        if n.value != nil {
-            print_ast(n.value, indent + 2)
+        if n.to != nil {
+            print_ast(n.to, indent + 2)
         }
 
     case Pattern:
@@ -3023,8 +3079,8 @@ print_ast :: proc(node: ^Node, indent: int) {
             fmt.printf("%s  Target: implicit\n", indent_str)
         }
         fmt.printf("%s  Branches\n", indent_str)
-        for i := 0; i < len(n.value); i += 1 {
-            branch := n.value[i]
+        for i := 0; i < len(n.to); i += 1 {
+            branch := n.to[i]
             fmt.printf("%s    Branch: (line %d, column %d)\n",
                 indent_str, branch.position.line, branch.position.column)
             if branch.source != nil {
@@ -3041,11 +3097,11 @@ print_ast :: proc(node: ^Node, indent: int) {
         fmt.printf("%sConstraint: (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
         print_ast(n.constraint, indent + 2)
-        if n.value != nil {
-            fmt.printf("%s  Value:\n", indent_str)
-            print_ast(n.value, indent + 4)
+        if n.name != nil {
+            fmt.printf("%s  To:\n", indent_str)
+            print_ast(n.name, indent + 4)
         } else {
-            fmt.printf("%s  Value: none\n", indent_str)
+            fmt.printf("%s  To: none\n", indent_str)
         }
 
     case Operator:
@@ -3116,13 +3172,13 @@ print_ast :: proc(node: ^Node, indent: int) {
 
       fmt.printf("%sExecute %s (line %d, column %d)\n",
           indent_str, pattern, n.position.line, n.position.column)
-      if n.value != nil {
-          print_ast(n.value, indent + 2)
+      if n.to != nil {
+          print_ast(n.to, indent + 2)
       }
 
     case Literal:
         fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n",
-            indent_str, n.kind, n.value, n.position.line, n.position.column)
+            indent_str, n.kind, n.to, n.position.line, n.position.column)
 
     case Range:
         fmt.printf("%sRange (line %d, column %d)\n",

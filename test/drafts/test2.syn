@@ -1,0 +1,7 @@
+// Named resonance operations
+Signal >>- frequency
+Channel -<< data
+
+// Anonymous resonance operations
+>>- initialize
+-<< cleanup

@@ -1,0 +1,15 @@
+Text -> {
+  ""
+}
+
+App -> {
+
+}
+
+
+App{
+  Text{
+    "Counter $id"
+  }
+}
+

@@ -1,0 +1,5 @@
+{
+  "name": "External Reference",
+  "source": "Plane2D -> @lib.geometry.Plane",
+  "expect": "Scope[Pointing(Identifier(Plane2D),Property(Property(External(lib,nil),Identifier(geometry)),Identifier(Plane)))]"
+}

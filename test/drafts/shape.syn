@@ -1,0 +1,7 @@
+{T:(e1) T:(e2) ...List{T}:(l)}: -> {
+  reducer{a->e1 b->e2}!
+  ...reduce{
+      list->l
+      reducer->reducer
+    }!
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Simple Pointing",
+  "description": "Tests basic pointing syntax",
+  "source": "a -> b",
+  "expect": "Scope[Pointing(Identifier(a),Identifier(b))]"
+}

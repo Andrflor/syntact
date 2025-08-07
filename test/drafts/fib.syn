@@ -1,0 +1,31 @@
+fibonnaci -> {
+  a -> 0
+  -> a ? {
+    0 -> 1
+    1 -> 1
+    -> fibonnaci{a-1} + fibonnaci{a-2}
+  }
+}
+
+-> fibonnaci{22}!
+
+_fib -> {
+  n -> 2
+  i -> 2
+  prev -> 0
+  cur -> 1
+  i < n ? {
+    -> _fib{n i+1 cur cur+prev}!
+    -> cur
+  }
+}
+
+fib -> {
+  n -> 0
+  n ? {
+    <2 -> n
+    -> _fib{n}!
+  }
+}
+
+-> _fib{22}!

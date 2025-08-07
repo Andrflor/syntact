@@ -1,0 +1,63 @@
+User -> {
+  -> {
+    id:u32
+    name:String
+    u8:age
+    corpo:u32
+  }
+}
+
+Corpo -> {
+  -> {
+    id:u32
+    name:String
+  }
+}
+
+Db -> {
+  Sql{User}:user
+  Sql{Corpo}:corpo
+}
+
+Sql {
+  T ->{->{id:u32}}
+  List{T}:data
+  where -> {
+    select -> {
+      T: e
+      -> false
+    }
+    -> Sql{T}{data->where{data select->select}!}
+  }
+}
+
+
+where -> {
+  List{T}: list  // Input list of elements
+  select -> {     // Condition for filtering
+    T: e
+    -> false      // Default: Exclude everything unless condition is met
+  }
+  -> list ? {
+    {}: -> {}  // Base case: Empty list returns empty list
+    {T ...List{T}}: -> {   // Recursive case: Match first element and rest
+      ...(select{T}! ? {  // Apply the filter condition
+        true -> {T}  // Keep element if true
+        false -> {}  // Discard if false
+      })
+      ...where{1..list select->select}!  // Recurse over the rest of the list
+    }
+  }
+}
+
+query -> Db.user.where{
+  User:e
+  e.name == `didier`
+}!
+
+sqlExecutor {
+  Sql{T}:sql
+  -> // Do stuff to convert the structure to sql
+}
+
+sqlExecutor{query}!

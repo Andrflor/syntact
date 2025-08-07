@@ -1,0 +1,5 @@
+{
+  "name": "Simple Type Like Definition",
+  "source": "Color -> { u8:r }",
+  "expect": "Scope[Pointing(Identifier(Color),Scope[Constraint(Identifier(u8),Identifier(r))])]"
+}

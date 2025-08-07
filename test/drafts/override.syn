@@ -1,0 +1,11 @@
+scope -> {
+  a -> 2
+  a -> a+2
+  b -> a+2
+  -> b+a
+}
+
+scope!
+
+scope -> scope{a->scope.a+4}
+scope!

@@ -1,0 +1,6 @@
+{
+  "name": "Simple Pointing",
+  "description": "Tests pattern syntax",
+  "source": "e ? { 2..:(s) -> 'wow' \n 1|-1 -> 'wiw' }",
+  "expect": "Scope[Pattern(Identifier(e),[Branch(Constraint(Range(Literal(Integer,2),nil),Identifier(,s)),Literal(String,wow)),Branch(Operator(Or,Literal(Integer,1),Operator(Subtract,nil,Literal(Integer,1))),Literal(String,wiw))])]"
+}

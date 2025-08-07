@@ -1,0 +1,5 @@
+// Processing with ? operator chaining
+responseBody -> json.decode{param_1}!
+  ? { Error:(e)->e (json)->request_from_internet{json}!}
+  ? { Error:(e)->e (req)->read_body{req}!}
+  ? { Error:(e)->e (body)->{print{body}! ->body}!}

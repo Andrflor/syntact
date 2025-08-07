@@ -1,0 +1,7 @@
+double -> {
+  maybe{Shape}:shape
+  -> shape ? {
+    None: -> shape
+    Circle: -> shape{radius->radius2}
+    Square: -> shape{side->side2}
+  }

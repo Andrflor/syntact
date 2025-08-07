@@ -1,0 +1,20 @@
+User -> {
+  -> {
+    String:name
+    String:token
+  }
+}
+
+UserRequest -> {
+  -> {
+    User:user
+    String:action
+  }
+}
+
+UserRequest:userReq
+
+userReq ? {
+  >:UserRequest:(e) | User:(e) -> ""
+   -> ""
+}

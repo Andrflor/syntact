@@ -8,7 +8,7 @@ import "core:strings"
 import "core:time"
 
 // Import the x64 assembler package
-import x64 "./x64"
+import x64 "./backends/x64"
 
 /*
  * Code Generation for Homoiconic Language

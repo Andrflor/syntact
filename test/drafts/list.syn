@@ -1,0 +1,28 @@
+List -> {
+  -> {
+    u8:
+    ...List:
+  }
+}
+
+InfiniteTree -> {
+  -> {
+    u8:data
+    InfiniteTree:left
+    InfiniteTree:right
+  }
+}
+
+Node -> {
+  Edge -> {
+    -> {Node:from Node:to}
+  }
+  -> { u8:data Edge:edge }
+}
+
+A -> {
+  B -> {
+    -> A:
+  }
+  -> B:
+}

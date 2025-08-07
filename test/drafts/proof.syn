@@ -1,0 +1,8 @@
+RSAIdentity -> {
+  PubKey:pub
+  PrivKey:priv
+  -> {
+    String:m -> ??
+    -> decrypt{encrypt{m priv}! pub}! = m ?! true
+  }
+}
