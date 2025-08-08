@@ -54,12 +54,23 @@ Token_Kind :: enum {
 	ResonancePush, // >>-
 	ResonancePull, // -<<
 
+
 	// Comparisons
 	Equal, // =
 	Less, // <
 	Greater, // >
 	LessEqual, // <=
 	GreaterEqual, // >=
+
+  // Property access tokens based on delimiter context
+	PropertyAccess, // a.b (no spaces around dot)
+	PropertyFromNone, // .b (dot at start or after delimiter)
+	PropertyToNone, // a. (dot at end or before delimiter)
+
+	// Constraint tokens based on delimiter context
+	ConstraintBind, // a:b (no spaces around colon)
+	ConstraintFromNone, // :b (colon at start or after delimiter)
+	ConstraintToNone, // a: (colon at end or before delimiter)
 
 	// Separators
 	Colon, // :
@@ -252,245 +263,300 @@ match_str :: proc(l: ^Lexer, expected: string) -> bool {
 }
 
 /*
+ * has_space_before checks if there's a space character immediately before current position
+ */
+has_space_before :: #force_inline proc(l: ^Lexer) -> bool {
+	return l.position.offset > 0 && is_space(l.source[l.position.offset - 1])
+}
+
+/*
+ * has_space_after checks if there's a space character immediately after the given character
+ */
+has_space_after :: #force_inline proc(l: ^Lexer, char: u8) -> bool {
+	if l.position.offset < l.source_len && l.source[l.position.offset] == char {
+		return l.position.offset + 1 < l.source_len && is_space(l.source[l.position.offset + 1])
+	}
+	return false
+}
+
+/*
  * next_token scans and returns the next token from the input source
  * Optimized for speed by reducing function calls and using direct pattern matching
  */
 next_token :: proc(l: ^Lexer) -> Token {
-    skip_whitespace(l)
+	skip_whitespace(l)
 
-    if l.position.offset >= l.source_len {
-        return Token{kind = .EOF, position = l.position}
-    }
+	if l.position.offset >= l.source_len {
+		return Token{kind = .EOF, position = l.position}
+	}
 
-    start_pos := l.position
-    c := l.source[l.position.offset]
+	start_pos := l.position
+	c := l.source[l.position.offset]
 
-    // Use a jump table approach for faster dispatch
-    switch c {
-    case '\n':
-        return scan_newline(l, start_pos)
-    case '`', '"', '\'':
-        return scan_string(l, start_pos)
-    case '@':
-        advance_position(l)
-        return Token{kind = .At, text = "@", position = start_pos}
-    case '{':
-        advance_position(l)
-        return Token{kind = .LeftBrace, text = "{", position = start_pos}
-    case '}':
-        advance_position(l)
-        return Token{kind = .RightBrace, text = "}", position = start_pos}
-    case '[':
-        advance_position(l)
-        return Token{kind = .LeftBracket, text = "[", position = start_pos}
-    case ']':
-        advance_position(l)
-        return Token{kind = .RightBracket, text = "]", position = start_pos}
-    case '(':
-        advance_position(l)
-        return Token{kind = .LeftParen, text = "(", position = start_pos}
-    case ')':
-        advance_position(l)
-        return Token{kind = .RightParen, text = ")", position = start_pos}
-    case '!':
-        advance_position(l)
-        return Token{kind = .Execute, text = "!", position = start_pos}
-    case ':':
-        advance_position(l)
-        return Token{kind = .Colon, text = ":", position = start_pos}
-    case '?':
-        advance_position(l)
-         switch l.source[l.position.offset] {
-         case '?':
-          advance_position(l)
-          return Token{kind = .DoubleQuestion, text = "??", position = start_pos}
-         case '!':
-          advance_position(l)
-          return Token{kind = .QuestionExclamation, text = "?!", position = start_pos}
-        }
-        return Token{kind = .Question, text = "?", position = start_pos}
-    case '.':
-        // Check for .. or ...
-    if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '.' {
-        // Check what's before
-        has_before_delimiter := l.position.offset == 0 ||
-            is_before_delimiter(l.source[l.position.offset - 1])
-        // Check what's after
-        has_after_delimiter := l.position.offset + 2 >= l.source_len ||
-            is_after_delimiter(l.source[l.position.offset + 2])
+	// Use a jump table approach for faster dispatch
+	switch c {
+	case '\n':
+		return scan_newline(l, start_pos)
+	case '`', '"', '\'':
+		return scan_string(l, start_pos)
+	case '@':
+		advance_position(l)
+		return Token{kind = .At, text = "@", position = start_pos}
+	case '{':
+		advance_position(l)
+		return Token{kind = .LeftBrace, text = "{", position = start_pos}
+	case '}':
+		advance_position(l)
+		return Token{kind = .RightBrace, text = "}", position = start_pos}
+	case '[':
+		advance_position(l)
+		return Token{kind = .LeftBracket, text = "[", position = start_pos}
+	case ']':
+		advance_position(l)
+		return Token{kind = .RightBracket, text = "]", position = start_pos}
+	case '(':
+		advance_position(l)
+		return Token{kind = .LeftParen, text = "(", position = start_pos}
+	case ')':
+		advance_position(l)
+		return Token{kind = .RightParen, text = ")", position = start_pos}
+	case '!':
+		advance_position(l)
+		return Token{kind = .Execute, text = "!", position = start_pos}
+	case ':':
+		// Handle constraint patterns based on space context
+		space_before := has_space_before(l)
+		space_after := has_space_after(l, ':')
 
-        advance_by(l, 2)
-        // Check for ellipsis "..."
-        if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
-            advance_position(l)
-            return Token{kind = .Ellipsis, text = "...", position = start_pos}
-        }
+		advance_position(l)
 
-        if has_before_delimiter && has_after_delimiter {
-            return Token{kind = .DoubleDot, text = "..", position = start_pos}
-        } else if has_before_delimiter {
-            return Token{kind = .PrefixRange, text = "..", position = start_pos}
-        } else if has_after_delimiter {
-            return Token{kind = .PostfixRange, text = "..", position = start_pos}
-        } else {
-            return Token{kind = .Range, text = "..", position = start_pos}
-        }
+		if space_before && space_after {
+			// Both sides have spaces - invalid (like "a : b")
+			return Token{kind = .Colon, text = ":", position = start_pos}
+		} else if space_before && !space_after {
+			// Space before only - constraint before space (like "a :b")
+			return Token{kind = .ConstraintFromNone, text = ":", position = start_pos}
+		} else if !space_before && space_after {
+			// Space after only - constraint after space (like "a: b")
+			return Token{kind = .ConstraintToNone, text = ":", position = start_pos}
+		} else if start_pos.offset == 0 || !is_alnum(l.source[start_pos.offset - 1]) {
+			// No spaces and at start or after non-identifier - constraint from none (like ":b")
+			return Token{kind = .ConstraintFromNone, text = ":", position = start_pos}
+		} else {
+			// No spaces - normal constraint bind (like "a:b")
+			return Token{kind = .ConstraintBind, text = ":", position = start_pos}
+		}
+	case '?':
+		advance_position(l)
+		switch l.source[l.position.offset] {
+		case '?':
+			advance_position(l)
+			return Token{kind = .DoubleQuestion, text = "??", position = start_pos}
+		case '!':
+			advance_position(l)
+			return Token{kind = .QuestionExclamation, text = "?!", position = start_pos}
+		}
+		return Token{kind = .Question, text = "?", position = start_pos}
+	case '.':
+		// Check for .. or ... first (existing range logic)
+		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '.' {
+			// Check what's before
+			has_before_delimiter := l.position.offset == 0 ||
+				is_before_delimiter(l.source[l.position.offset - 1])
+			// Check what's after
+			has_after_delimiter := l.position.offset + 2 >= l.source_len ||
+				is_after_delimiter(l.source[l.position.offset + 2])
 
+			advance_by(l, 2)
+			// Check for ellipsis "..."
+			if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
+				advance_position(l)
+				return Token{kind = .Ellipsis, text = "...", position = start_pos}
+			}
 
+			if has_before_delimiter && has_after_delimiter {
+				return Token{kind = .DoubleDot, text = "..", position = start_pos}
+			} else if has_before_delimiter {
+				return Token{kind = .PrefixRange, text = "..", position = start_pos}
+			} else if has_after_delimiter {
+				return Token{kind = .PostfixRange, text = "..", position = start_pos}
+			} else {
+				return Token{kind = .Range, text = "..", position = start_pos}
+			}
+		}
 
-            // Just return DoubleDot - let parser handle prefix/postfix logic
-            return Token{kind = .DoubleDot, text = "..", position = start_pos}
-        }
-        advance_position(l)
-        return Token{kind = .Dot, text = ".", position = start_pos}
-    case '=':
-        // Optimized equality check
-        advance_position(l)
-        return Token{kind = .Equal, text = "=", position = start_pos}
-    case '<':
-        // Optimized less-than related tokens
-        advance_position(l)
-        if l.position.offset < l.source_len {
-            if l.source[l.position.offset] == '=' {
-                advance_position(l)
-                return Token{kind = .LessEqual, text = "<=", position = start_pos}
-            } else if l.source[l.position.offset] == '<' {
-                advance_position(l)
-                return Token{kind = .LShift, text = "<<", position = start_pos}
-            } else if l.source[l.position.offset] == '-' {
-                advance_position(l)
-                return Token{kind = .PointingPull, text = "<-", position = start_pos}
-            }
-        }
-        return Token{kind = .Less, text = "<", position = start_pos}
-    case '>':
-        // Optimized greater-than related tokens
-        advance_position(l)
-        if l.position.offset < l.source_len {
-            if l.source[l.position.offset] == '=' {
-                advance_position(l)
-                return Token{kind = .GreaterEqual, text = ">=", position = start_pos}
-            } else if l.source[l.position.offset] == '>' {
-              if  l.source[l.position.offset + 1] == '-' {
-                advance_by(l, 2)
-                return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
-              }
-              advance_position(l)
-              return Token{kind = .RShift, text = ">>", position = start_pos}
-            } else if l.source[l.position.offset] == '-' {
-                advance_position(l)
-                return Token{kind = .EventPush, text = ">-", position = start_pos}
-            }
-        }
-        return Token{kind = .Greater, text = ">", position = start_pos}
-    case '-':
-        // Optimized minus-related tokens
-        advance_position(l)
-        if l.position.offset < l.source_len {
-            if l.source[l.position.offset] == '>' {
-                advance_position(l)
-                return Token{kind = .PointingPush, text = "->", position = start_pos}
-            } else if l.source[l.position.offset] == '<' {
-                advance_position(l)
-                if l.position.offset < l.source_len && l.source[l.position.offset] == '<' {
-                    advance_position(l)
-                    return Token{kind = .ResonancePull, text = "-<<", position = start_pos}
-                }
-                return Token{kind = .EventPull, text = "-<", position = start_pos}
-            }
-        }
-        return Token{kind = .Minus, text = "-", position = start_pos}
-    case '/':
-        // Single line comment - optimized with direct string matching
-        if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '/' {
-            advance_by(l, 2)
+		// Single dot - handle property patterns based on space context
+		space_before := has_space_before(l)
+		space_after := has_space_after(l, '.')
 
-            // Consume until newline
-            for l.position.offset < l.source_len && l.source[l.position.offset] != '\n' {
-                advance_position(l)
-            }
+		advance_position(l)
 
-            // Recursive call to get the next non-comment token
-            return next_token(l)
-        }
+		if space_before && space_after {
+			// Both sides have spaces - invalid (like "a . b")
+			return Token{kind = .Dot, text = ".", position = start_pos}
+		} else if space_before && !space_after {
+			// Space before only - property before space (like "a .b")
+			return Token{kind = .PropertyFromNone, text = ".", position = start_pos}
+		} else if !space_before && space_after {
+			// Space after only - property after space (like "a. b")
+			return Token{kind = .PropertyToNone, text = ".", position = start_pos}
+		} else if start_pos.offset == 0 || !is_alnum(l.source[start_pos.offset - 1]) {
+			// No spaces and at start or after non-identifier - property from none (like ".b")
+			return Token{kind = .PropertyFromNone, text = ".", position = start_pos}
+		} else {
+			// No spaces - normal property access (like "a.b")
+			return Token{kind = .PropertyAccess, text = ".", position = start_pos}
+		}
+	case '=':
+		// Optimized equality check
+		advance_position(l)
+		return Token{kind = .Equal, text = "=", position = start_pos}
+	case '<':
+		// Optimized less-than related tokens
+		advance_position(l)
+		if l.position.offset < l.source_len {
+			if l.source[l.position.offset] == '=' {
+				advance_position(l)
+				return Token{kind = .LessEqual, text = "<=", position = start_pos}
+			} else if l.source[l.position.offset] == '<' {
+				advance_position(l)
+				return Token{kind = .LShift, text = "<<", position = start_pos}
+			} else if l.source[l.position.offset] == '-' {
+				advance_position(l)
+				return Token{kind = .PointingPull, text = "<-", position = start_pos}
+			}
+		}
+		return Token{kind = .Less, text = "<", position = start_pos}
+	case '>':
+		// Optimized greater-than related tokens
+		advance_position(l)
+		if l.position.offset < l.source_len {
+			if l.source[l.position.offset] == '=' {
+				advance_position(l)
+				return Token{kind = .GreaterEqual, text = ">=", position = start_pos}
+			} else if l.source[l.position.offset] == '>' {
+				if l.source[l.position.offset + 1] == '-' {
+					advance_by(l, 2)
+					return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
+				}
+				advance_position(l)
+				return Token{kind = .RShift, text = ">>", position = start_pos}
+			} else if l.source[l.position.offset] == '-' {
+				advance_position(l)
+				return Token{kind = .EventPush, text = ">-", position = start_pos}
+			}
+		}
+		return Token{kind = .Greater, text = ">", position = start_pos}
+	case '-':
+		// Optimized minus-related tokens
+		advance_position(l)
+		if l.position.offset < l.source_len {
+			if l.source[l.position.offset] == '>' {
+				advance_position(l)
+				return Token{kind = .PointingPush, text = "->", position = start_pos}
+			} else if l.source[l.position.offset] == '<' {
+				advance_position(l)
+				if l.position.offset < l.source_len && l.source[l.position.offset] == '<' {
+					advance_position(l)
+					return Token{kind = .ResonancePull, text = "-<<", position = start_pos}
+				}
+				return Token{kind = .EventPull, text = "-<", position = start_pos}
+			}
+		}
+		return Token{kind = .Minus, text = "-", position = start_pos}
+	case '/':
+		// Single line comment - optimized with direct string matching
+		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '/' {
+			advance_by(l, 2)
 
-        // Multiplyi line comment
-        if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '*' {
-            advance_by(l, 2)
+			// Consume until newline
+			for l.position.offset < l.source_len && l.source[l.position.offset] != '\n' {
+				advance_position(l)
+			}
 
-            // Scan for */
-            loop: for l.position.offset + 1 < l.source_len {
-                if l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
-                    advance_by(l, 2) // Skip closing */
-                    break loop
-                }
-                advance_position(l)
-            }
+			// Recursive call to get the next non-comment token
+			return next_token(l)
+		}
 
-            // Recursive call to get the next non-comment token
-            return next_token(l)
-        }
+		// Multi line comment
+		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '*' {
+			advance_by(l, 2)
 
-        advance_position(l)
-        return Token{kind = .Slash, text = "/", position = start_pos}
-    case '0':
-        // Special number formats (hex, binary)
-        if l.position.offset + 1 < l.source_len {
-            next := l.source[l.position.offset + 1]
+			// Scan for */
+			loop: for l.position.offset + 1 < l.source_len {
+				if l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
+					advance_by(l, 2) // Skip closing */
+					break loop
+				}
+				advance_position(l)
+			}
 
-            if next == 'x' || next == 'X' {
-                return scan_hexadecimal(l, start_pos)
-            }
+			// Recursive call to get the next non-comment token
+			return next_token(l)
+		}
 
-            if next == 'b' || next == 'B' {
-                return scan_binary(l, start_pos)
-            }
-        }
+		advance_position(l)
+		return Token{kind = .Slash, text = "/", position = start_pos}
+	case '0':
+		// Special number formats (hex, binary)
+		if l.position.offset + 1 < l.source_len {
+			next := l.source[l.position.offset + 1]
 
-        // Fall through to regular number handling
-        fallthrough
-    case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-        return scan_number(l, start_pos)
-    case '+':
-        advance_position(l)
-        return Token{kind = .Plus, text = "+", position = start_pos}
-    case '*':
-        advance_position(l)
-        return Token{kind = .Asterisk, text = "*", position = start_pos}
-    case '%':
-        advance_position(l)
-        return Token{kind = .Percent, text = "%", position = start_pos}
-    case '&':
-        advance_position(l)
-        return Token{kind = .And, text = "&", position = start_pos}
-    case '|':
-        advance_position(l)
-        return Token{kind = .Or, text = "|", position = start_pos}
-    case '^':
-        advance_position(l)
-        return Token{kind = .Xor, text = "^", position = start_pos}
-    case '~':
-        advance_position(l)
-        return Token{kind = .Not, text = "~", position = start_pos}
-    case:
-        // Identifiers - optimized with direct character range checks
-        if is_alpha(c) || c == '_' {
-            // Fast path for identifiers
-            advance_position(l)
+			if next == 'x' || next == 'X' {
+				return scan_hexadecimal(l, start_pos)
+			}
 
-            // Consume all alphanumeric characters
-            for l.position.offset < l.source_len && is_alnum(l.source[l.position.offset]) {
-                advance_position(l)
-            }
+			if next == 'b' || next == 'B' {
+				return scan_binary(l, start_pos)
+			}
+		}
 
-            return Token{kind = .Identifier, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-        }
+		// Fall through to regular number handling
+		fallthrough
+	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return scan_number(l, start_pos)
+	case '+':
+		advance_position(l)
+		return Token{kind = .Plus, text = "+", position = start_pos}
+	case '*':
+		advance_position(l)
+		return Token{kind = .Asterisk, text = "*", position = start_pos}
+	case '%':
+		advance_position(l)
+		return Token{kind = .Percent, text = "%", position = start_pos}
+	case '&':
+		advance_position(l)
+		return Token{kind = .And, text = "&", position = start_pos}
+	case '|':
+		advance_position(l)
+		return Token{kind = .Or, text = "|", position = start_pos}
+	case '^':
+		advance_position(l)
+		return Token{kind = .Xor, text = "^", position = start_pos}
+	case '~':
+		advance_position(l)
+		return Token{kind = .Not, text = "~", position = start_pos}
+	case:
+		// Identifiers - optimized with direct character range checks
+		if is_alpha(c) || c == '_' {
+			// Fast path for identifiers
+			advance_position(l)
 
-        // Unknown character
-        advance_position(l)
-        return Token{kind = .Invalid, text = string([]u8{c}), position = start_pos}
-    }
+			// Consume all alphanumeric characters
+			for l.position.offset < l.source_len && is_alnum(l.source[l.position.offset]) {
+				advance_position(l)
+			}
+
+			return Token{kind = .Identifier, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+		}
+
+		// Unknown character
+		advance_position(l)
+		return Token{kind = .Invalid, text = string([]u8{c}), position = start_pos}
+	}
 }
+
+
 
 /*
  * scan_newline processes consecutive newline characters
@@ -1142,13 +1208,26 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .At:
         return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .PRIMARY}
 
-    // Constraints - bind tighter than calls but looser than primary
-    case .Colon:
-        return Parse_Rule{prefix = nil, infix = parse_constraint, precedence = .CONSTRAINT}
+// Property access tokens
+	case .PropertyAccess:
+		return Parse_Rule{prefix = nil, infix = parse_property_access, precedence = .CALL}
+	case .PropertyFromNone:
+		return Parse_Rule{prefix = parse_property_from_none, infix = nil, precedence = .CALL}
+	case .PropertyToNone:
+		return Parse_Rule{prefix = nil, infix = parse_property_to_none, precedence = .CALL}
+	case .Dot:
+		return Parse_Rule{prefix = parse_invalid_property, infix = parse_invalid_property_infix, precedence = .CALL}
 
-    // Property access and patterns
-    case .Dot:
-        return Parse_Rule{prefix = parse_prefix_property, infix = parse_property, precedence = .CALL}
+	// Constraint tokens
+	case .ConstraintBind:
+		return Parse_Rule{prefix = nil, infix = parse_constraint_bind, precedence = .CONSTRAINT}
+	case .ConstraintFromNone:
+		return Parse_Rule{prefix = parse_constraint_from_none, infix = nil, precedence = .CONSTRAINT}
+	case .ConstraintToNone:
+		return Parse_Rule{prefix = nil, infix = parse_constraint_to_none, precedence = .CONSTRAINT}
+	case .Colon:
+		return Parse_Rule{prefix = parse_invalid_constraint, infix = parse_invalid_constraint_infix, precedence = .CONSTRAINT}
+
     case .Question:
         return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
     case .Execute:
@@ -2037,52 +2116,230 @@ parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_prefix_property handles property access (.prop)
+ * parse_property_access handles normal property access (a.b)
  */
-parse_prefix_property::proc(parser: ^Parser) -> ^Node {
-  return parse_property(parser, nil);
+parse_property_access :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	// Save position of the property access token
+	position := parser.current_token.position
+
+	// Consume the property access token
+	advance_token(parser)
+
+	// Expect identifier for property name
+	if parser.current_token.kind != .Identifier {
+		error_at_current(parser, "Expected property name after '.'")
+		return nil
+	}
+
+	prop_name := parser.current_token.text
+	advance_token(parser)
+
+	// Create property node
+	property := Property{
+		source = left,
+		position = position,
+	}
+
+	// Create property identifier
+	prop_id := new(Node)
+	prop_id^ = Identifier{
+		name = prop_name,
+		position = position,
+	}
+	property.property = prop_id
+
+	result := new(Node)
+	result^ = property
+	return result
 }
 
 /*
- * parse_property handles property access (obj.prop)
+ * parse_property_from_none handles property access with no source (.b)
  */
-parse_property :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the dot
-    position := parser.current_token.position
+parse_property_from_none :: proc(parser: ^Parser) -> ^Node {
+	// Save position of the property from none token
+	position := parser.current_token.position
 
-    // Consume the dot
-    advance_token(parser)
+	// Consume the property from none token
+	advance_token(parser)
 
-    // Expect identifier for property from
-    if parser.current_token.kind != .Identifier {
-        error_at_current(parser, "Expected property from after '.'")
-        return nil
-    }
+	// Expect identifier for property name
+	if parser.current_token.kind != .Identifier {
+		error_at_current(parser, "Expected property name after '.'")
+		return nil
+	}
 
-    // Get property from
-    prop_name := parser.current_token.text
-    advance_token(parser)
+	prop_name := parser.current_token.text
+	advance_token(parser)
 
-    // Create property node
-    property := Property{
-        source = left,
-        position = position, // Store position
-    }
+	// Create property node with nil source (source none)
+	property := Property{
+		source = nil, // source none
+		position = position,
+	}
 
-    // Create property identifier
-    prop_id := new(Node)
-    prop_id^ = Identifier{
-        name = prop_name,
-        position = position, // Use dot position for the property identifier
-    }
-    property.property = prop_id
+	// Create property identifier
+	prop_id := new(Node)
+	prop_id^ = Identifier{
+		name = prop_name,
+		position = position,
+	}
+	property.property = prop_id
 
-    // Return property node
-    result := new(Node)
-    result^ = property
-    return result
+	result := new(Node)
+	result^ = property
+	return result
 }
 
+/*
+ * parse_property_to_none handles property access with no property (a.)
+ */
+parse_property_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	// Save position of the property to none token
+	position := parser.current_token.position
+
+	// Consume the property to none token
+	advance_token(parser)
+
+	// Create property node with nil property (property none)
+	property := Property{
+		source = left,
+		property = nil, // property none
+		position = position,
+	}
+
+	result := new(Node)
+	result^ = property
+	return result
+}
+
+/*
+ * parse_constraint_bind handles normal constraint (a:b)
+ */
+parse_constraint_bind :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	// Save position of the constraint bind token
+	position := parser.current_token.position
+
+	// Consume the constraint bind token
+	advance_token(parser)
+
+	// Create constraint node
+	constraint := Constraint{
+		constraint = left,
+		position = position,
+	}
+
+	// Parse what follows the colon
+	if parser.current_token.kind == .RightBrace ||
+	   parser.current_token.kind == .EOF ||
+	   parser.current_token.kind == .Newline {
+		// Empty constraint (a:)
+		constraint.name = nil
+	} else if parser.current_token.kind == .LeftParen {
+		// a:(capture)
+		constraint.name = parse_grouping(parser)
+	} else if is_expression_start(parser.current_token.kind) {
+		// a:value
+		constraint.name = parse_expression(parser, .CALL)
+	}
+
+	result := new(Node)
+	result^ = constraint
+	return result
+}
+
+/*
+ * parse_constraint_from_none handles constraint with no constraint type (:b)
+ */
+parse_constraint_from_none :: proc(parser: ^Parser) -> ^Node {
+	// Save position of the constraint from none token
+	position := parser.current_token.position
+
+	// Consume the constraint from none token
+	advance_token(parser)
+
+	// Create constraint node with nil constraint (constraint none)
+	constraint := Constraint{
+		constraint = nil, // constraint none
+		position = position,
+	}
+
+	// Parse what follows the colon
+	if parser.current_token.kind == .RightBrace ||
+	   parser.current_token.kind == .EOF ||
+	   parser.current_token.kind == .Newline {
+		// Empty constraint (:)
+		constraint.name = nil
+	} else if parser.current_token.kind == .LeftParen {
+		// :(capture)
+		constraint.name = parse_grouping(parser)
+	} else if is_expression_start(parser.current_token.kind) {
+		// :value
+		constraint.name = parse_expression(parser, .CALL)
+	}
+
+	result := new(Node)
+	result^ = constraint
+	return result
+}
+
+/*
+ * parse_constraint_to_none handles constraint with no value (a:)
+ */
+parse_constraint_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	// Save position of the constraint to none token
+	position := parser.current_token.position
+
+	// Consume the constraint to none token
+	advance_token(parser)
+
+	// Create constraint node with nil name (value none)
+	constraint := Constraint{
+		constraint = left,
+		name = nil, // value none
+		position = position,
+	}
+
+	result := new(Node)
+	result^ = constraint
+	return result
+}
+
+/*
+ * parse_invalid_property handles invalid property syntax with spaces
+ */
+parse_invalid_property :: proc(parser: ^Parser) -> ^Node {
+	error_at_current(parser, "Invalid property syntax with spaces around '.' - use 'a.b', '.b', or 'a.'")
+	advance_token(parser)
+	return nil
+}
+
+/*
+ * parse_invalid_property_infix handles invalid property syntax with spaces (infix)
+ */
+parse_invalid_property_infix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	error_at_current(parser, "Invalid property syntax with spaces around '.' - use 'a.b', '.b', or 'a.'")
+	advance_token(parser)
+	return nil
+}
+
+/*
+ * parse_invalid_constraint handles invalid constraint syntax with spaces
+ */
+parse_invalid_constraint :: proc(parser: ^Parser) -> ^Node {
+	error_at_current(parser, "Invalid constraint syntax with spaces around ':' - use 'a:b', ':b', or 'a:'")
+	advance_token(parser)
+	return nil
+}
+
+/*
+ * parse_invalid_constraint_infix handles invalid constraint syntax with spaces (infix)
+ */
+parse_invalid_constraint_infix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+	error_at_current(parser, "Invalid constraint syntax with spaces around ':' - use 'a:b', ':b', or 'a:'")
+	advance_token(parser)
+	return nil
+}
 /*
  * parse_pointing_push handles pointing operator (a -> b)
  */
