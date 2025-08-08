@@ -1334,9 +1334,11 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
         return nil
     }
 
-    fmt.println("line:", parser.current_token.position.line, "col:", parser.current_token.position.column)
-    // Get prefix rule for current token
     rule := get_rule(parser.current_token.kind)
+    if rule.prefix == nil {
+        advance_token(parser)
+        return nil
+    }
 
     // Parse the prefix expression
     left := rule.prefix(parser)
@@ -1346,7 +1348,6 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
 
     // Keep parsing infix expressions while they have higher precedence
     for {
-        fmt.println("line:", parser.current_token.position.line, "col:", parser.current_token.position.column)
         rule := get_rule(parser.current_token.kind)
         if rule.infix == nil || rule.precedence < precedence {
             break
