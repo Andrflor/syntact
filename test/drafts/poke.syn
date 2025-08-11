@@ -1,0 +1,20 @@
+Stats -> {
+  -> {
+    u8:hp
+    u8:atk
+    u8:def
+    u8:sp_atk
+    u8:sp_def
+    u8:spd
+  }
+}
+
+Pokemon -> {
+  -> {
+    u32:num
+    String:name
+    Stats:stats
+  }
+}
+
+

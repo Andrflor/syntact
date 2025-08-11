@@ -24,19 +24,25 @@ test_simple_pointing_2 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_complex_3 :: proc(t: ^testing.T) {
+test_resonant_3 :: proc(t: ^testing.T) {
+	ok, msg := run_single_test("tests/resonant.json")
+	testing.expectf(t, ok, "%s", msg)
+}
+
+@(test)
+test_complex_4 :: proc(t: ^testing.T) {
 	ok, msg := run_single_test("tests/complex.json")
 	testing.expectf(t, ok, "%s", msg)
 }
 
 @(test)
-test_pattern_4 :: proc(t: ^testing.T) {
+test_pattern_5 :: proc(t: ^testing.T) {
 	ok, msg := run_single_test("tests/pattern.json")
 	testing.expectf(t, ok, "%s", msg)
 }
 
 @(test)
-test_simple_reference_5 :: proc(t: ^testing.T) {
+test_simple_reference_6 :: proc(t: ^testing.T) {
 	ok, msg := run_single_test("tests/simple_reference.json")
 	testing.expectf(t, ok, "%s", msg)
 }

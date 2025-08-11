@@ -986,14 +986,14 @@ Precedence :: enum {
     NONE = 0,        // No precedence
     ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
     CONSTRAINT, // : (constraints bind tighter than calls but looser than primary)
+    EQUALITY,    // =
+    COMPARISON,  // <, >, <=, >=
     TERM,        // +, -
     FACTOR,      // *, /, %
     CONDITIONAL,     // Reserved for logical operators (&, |)
     LOGICAL,     // Reserved for logical operators (&, |)
     UNARY,       // ~, unary -
     RANGE,       // ..
-    EQUALITY,    // =
-    COMPARISON,  // <, >, <=, >=
     CALL,       // (), ., ?
     PRIMARY,    // Literals, identifiers (highest precedence)
 }
