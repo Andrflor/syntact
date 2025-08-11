@@ -330,23 +330,22 @@ next_token :: proc(l: ^Lexer) -> Token {
 
 		advance_position(l)
 
-		if space_before && space_after {
-			// Both sides have spaces - invalid (like "a : b")
-			return Token{kind = .Colon, text = ":", position = start_pos}
-		} else if space_before && !space_after {
-			// Space before only - constraint before space (like "a :b")
-			return Token{kind = .ConstraintFromNone, text = ":", position = start_pos}
-		} else if !space_before && space_after {
-			// Space after only - constraint after space (like "a: b")
-			return Token{kind = .ConstraintToNone, text = ":", position = start_pos}
-		} else if start_pos.offset == 0 || !is_alnum(l.source[start_pos.offset - 1]) {
-			// No spaces and at start or after non-identifier - constraint from none (like ":b")
-			return Token{kind = .ConstraintFromNone, text = ":", position = start_pos}
-		} else {
-			// No spaces - normal constraint bind (like "a:b")
-			return Token{kind = .ConstraintBind, text = ":", position = start_pos}
-		}
-	case '?':
+    if space_before {
+      if space_after {
+        return Token{kind = .Colon, text = ":", position = start_pos}
+      } else {
+        return Token{kind = .ConstraintFromNone, text = ":", position = start_pos}
+      }
+    } else {
+      if space_after {
+        return Token{kind = .ConstraintToNone, text = ":", position = start_pos}
+      } else {
+
+        return Token{kind = .ConstraintBind, text = ":", position = start_pos}
+      }
+    }
+
+    case '?':
 		advance_position(l)
 		switch l.source[l.position.offset] {
 		case '?':
@@ -391,22 +390,20 @@ next_token :: proc(l: ^Lexer) -> Token {
 
 		advance_position(l)
 
-		if space_before && space_after {
-			// Both sides have spaces - invalid (like "a . b")
-			return Token{kind = .Dot, text = ".", position = start_pos}
-		} else if space_before && !space_after {
-			// Space before only - property before space (like "a .b")
-			return Token{kind = .PropertyFromNone, text = ".", position = start_pos}
-		} else if !space_before && space_after {
-			// Space after only - property after space (like "a. b")
-			return Token{kind = .PropertyToNone, text = ".", position = start_pos}
-		} else if start_pos.offset == 0 || !is_alnum(l.source[start_pos.offset - 1]) {
-			// No spaces and at start or after non-identifier - property from none (like ".b")
-			return Token{kind = .PropertyFromNone, text = ".", position = start_pos}
-		} else {
-			// No spaces - normal property access (like "a.b")
-			return Token{kind = .PropertyAccess, text = ".", position = start_pos}
-		}
+    if space_before {
+      if space_after {
+        return Token{kind = .Dot, text = ".", position = start_pos}
+      } else {
+        return Token{kind = .PropertyFromNone, text = ".", position = start_pos}
+      }
+    } else {
+      if space_after {
+        return Token{kind = .PropertyToNone, text = ".", position = start_pos}
+      } else {
+
+        return Token{kind = .PropertyAccess, text = ".", position = start_pos}
+      }
+    }
 	case '=':
 		// Optimized equality check
 		advance_position(l)
@@ -988,6 +985,7 @@ Enforce :: struct {
 Precedence :: enum {
     NONE = 0,        // No precedence
     ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
+    CONSTRAINT, // : (constraints bind tighter than calls but looser than primary)
     TERM,        // +, -
     FACTOR,      // *, /, %
     CONDITIONAL,     // Reserved for logical operators (&, |)
@@ -997,7 +995,6 @@ Precedence :: enum {
     EQUALITY,    // =
     COMPARISON,  // <, >, <=, >=
     CALL,       // (), ., ?
-    CONSTRAINT, // : (constraints bind tighter than calls but looser than primary)
     PRIMARY,    // Literals, identifiers (highest precedence)
 }
 
