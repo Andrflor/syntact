@@ -2214,92 +2214,110 @@ parse_property_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
  * parse_constraint_bind handles normal constraint (a:b)
  */
 parse_constraint_bind :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-	// Save position of the constraint bind token
-	position := parser.current_token.position
+    // Save position of the constraint bind token
+    position := parser.current_token.position
 
-	// Consume the constraint bind token
-	advance_token(parser)
+    // Consume the constraint bind token
+    advance_token(parser)
 
-	// Create constraint node
-	constraint := Constraint{
-		constraint = left,
-		position = position,
-	}
+    // Create constraint node
+    constraint := Constraint{
+        constraint = left,
+        position = position,
+    }
 
-	// Parse what follows the colon
-	if parser.current_token.kind == .RightBrace ||
-	   parser.current_token.kind == .EOF ||
-	   parser.current_token.kind == .Newline {
-		// Empty constraint (a:)
-		constraint.name = nil
-	} else if parser.current_token.kind == .LeftParen {
-		// a:(capture)
-		constraint.name = parse_grouping(parser)
-	} else if is_expression_start(parser.current_token.kind) {
-		// a:value
-		constraint.name = parse_expression(parser, .CALL)
-	}
+    // Parse what follows the colon
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        // Empty constraint (a:)
+        constraint.name = nil
+    } else if parser.current_token.kind == .LeftParen {
+        // a:(capture)
+        constraint.name = parse_grouping(parser)
+    } else if parser.current_token.kind == .LeftBrace {
+        // leave name nil; handled below as an override on the whole constraint
+    } else if is_expression_start(parser.current_token.kind) {
+        // a:value — parse value but DO NOT consume trailing '{' (reserved for outer override)
+        constraint.name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+    }
 
-	result := new(Node)
-	result^ = constraint
-	return result
+    // If a '{' follows, treat it as an Override applied to the entire constraint
+    node := new(Node)
+    node^ = constraint
+    if parser.current_token.kind == .LeftBrace {
+        return parse_override(parser, node)
+    }
+
+    return node
 }
 
 /*
  * parse_constraint_from_none handles constraint with no constraint type (:b)
  */
 parse_constraint_from_none :: proc(parser: ^Parser) -> ^Node {
-	// Save position of the constraint from none token
-	position := parser.current_token.position
+    // Save position of the constraint from none token
+    position := parser.current_token.position
 
-	// Consume the constraint from none token
-	advance_token(parser)
+    // Consume the constraint from none token
+    advance_token(parser)
 
-	// Create constraint node with nil constraint (constraint none)
-	constraint := Constraint{
-		constraint = nil, // constraint none
-		position = position,
-	}
+    // Create constraint node with nil constraint (constraint none)
+    constraint := Constraint{
+        constraint = nil, // constraint none
+        position = position,
+    }
 
-	// Parse what follows the colon
-	if parser.current_token.kind == .RightBrace ||
-	   parser.current_token.kind == .EOF ||
-	   parser.current_token.kind == .Newline {
-		// Empty constraint (:)
-		constraint.name = nil
-	} else if parser.current_token.kind == .LeftParen {
-		// :(capture)
-		constraint.name = parse_grouping(parser)
-	} else if is_expression_start(parser.current_token.kind) {
-		// :value
-		constraint.name = parse_expression(parser, .CALL)
-	}
+    // Parse what follows the colon
+    if parser.current_token.kind == .RightBrace ||
+       parser.current_token.kind == .EOF ||
+       parser.current_token.kind == .Newline {
+        // Empty constraint (:)
+        constraint.name = nil
+    } else if parser.current_token.kind == .LeftParen {
+        // :(capture)
+        constraint.name = parse_grouping(parser)
+    } else if parser.current_token.kind == .LeftBrace {
+        // leave name nil; handled below as an override on the whole constraint
+    } else if is_expression_start(parser.current_token.kind) {
+        // :value — parse value but DO NOT consume trailing '{'
+        constraint.name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+    }
 
-	result := new(Node)
-	result^ = constraint
-	return result
+    // If a '{' follows, treat it as an Override applied to the entire constraint
+    node := new(Node)
+    node^ = constraint
+    if parser.current_token.kind == .LeftBrace {
+        return parse_override(parser, node)
+    }
+
+    return node
 }
-
 /*
  * parse_constraint_to_none handles constraint with no value (a:)
  */
 parse_constraint_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-	// Save position of the constraint to none token
-	position := parser.current_token.position
+    // Save position of the constraint to none token
+    position := parser.current_token.position
 
-	// Consume the constraint to none token
-	advance_token(parser)
+    // Consume the constraint to none token
+    advance_token(parser)
 
-	// Create constraint node with nil name (value none)
-	constraint := Constraint{
-		constraint = left,
-		name = nil, // value none
-		position = position,
-	}
+    // Create constraint node with nil name (value none)
+    constraint := Constraint{
+        constraint = left,
+        name = nil, // value none
+        position = position,
+    }
 
-	result := new(Node)
-	result^ = constraint
-	return result
+    // If a '{' follows, treat it as an Override applied to the entire constraint
+    node := new(Node)
+    node^ = constraint
+    if parser.current_token.kind == .LeftBrace {
+        return parse_override(parser, node)
+    }
+
+    return node
 }
 
 /*
