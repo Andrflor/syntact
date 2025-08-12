@@ -1,1 +1,4 @@
 u8: -> Circle:{radius->data}
+u8: -> Circle:name{radius->data}
+u8: -> Circle:name(capture){radius->data}
+u8: -> Circle:(capture){radius->data}

@@ -1,0 +1,3 @@
+  packed(!)   // Background(return a scope that can be collapsed in sync to extract value)
+  packed([!]) // Parallel in background(also collapsable scope wrap)
+  packed(|!|) // GPU in background(also collapsable scope wrap)

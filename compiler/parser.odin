@@ -1228,7 +1228,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .Question:
         return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
     case .Execute:
-        return Parse_Rule{prefix = nil, infix = parse_execute, precedence = .CALL}
+        return Parse_Rule{prefix = parse_execute_prefix, infix = parse_execute, precedence = .CALL}
 
     // Unary operators
     case .Not:
@@ -1496,6 +1496,43 @@ parse_override :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
+ * parse_execute_prefix handles execute as a prefix used for compile tim effects
+ */
+parse_execute_prefix :: proc(parser: ^Parser) -> ^Node {
+    // Save position of the ! token
+    position := parser.current_token.position
+
+    // Create execute node (prefix form)
+    exec := Execute{
+        to = nil,
+        wrappers = make([dynamic]ExecutionWrapper, 0, 0),
+        position = position,
+    }
+
+    // Consume '!'
+    advance_token(parser)
+
+    // If immediately followed by '{', apply override to the Execute node
+    node := new(Node)
+    node^ = exec
+    if parser.current_token.kind == .LeftBrace {
+        return parse_override(parser, node)
+    }
+
+    // Otherwise, parse an operand but keep any trailing '{' for an override on Execute
+    if is_expression_start(parser.current_token.kind) {
+        operand := parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+        exec.to = operand
+        node^ = exec
+        if parser.current_token.kind == .LeftBrace {
+            return parse_override(parser, node)
+        }
+    }
+
+    return node
+}
+
+/*
  * parse_execute handles postfix execution patterns like expr<[!]>
  */
 parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
@@ -1604,9 +1641,8 @@ parse_identifier :: proc(parser: ^Parser) -> ^Node {
 
     // Check for (capture) after identifier
     if parser.current_token.kind == .LeftParen {
-        advance_token(parser) // consume (
-
-        if parser.current_token.kind == .Identifier {
+        if parser.peek_token.kind == .Identifier {
+            advance_token(parser) // consume capture
             id.capture = parser.current_token.text
             advance_token(parser) // consume capture
 
@@ -1615,8 +1651,6 @@ parse_identifier :: proc(parser: ^Parser) -> ^Node {
             } else {
                 error_at_current(parser, "Expected ')' after capture")
             }
-        } else {
-            error_at_current(parser, "Expected identifier in capture")
         }
     }
 
