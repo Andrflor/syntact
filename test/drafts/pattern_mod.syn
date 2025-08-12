@@ -1,0 +1,4 @@
+-> T%2 ? {
+  0 -> // something
+  1 -> // something else
+}

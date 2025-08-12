@@ -986,6 +986,7 @@ Precedence :: enum {
     NONE = 0,        // No precedence
     ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
     CONSTRAINT, // : (constraints bind tighter than calls but looser than primary)
+    PATTERN,
     EQUALITY,    // =
     COMPARISON,  // <, >, <=, >=
     TERM,        // +, -
@@ -1226,7 +1227,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 		return Parse_Rule{prefix = parse_invalid_constraint, infix = parse_invalid_constraint_infix, precedence = .CONSTRAINT}
 
     case .Question:
-        return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .CALL}
+        return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .PATTERN}
     case .Execute:
         return Parse_Rule{prefix = parse_execute_prefix, infix = parse_execute, precedence = .CALL}
 
@@ -1284,7 +1285,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .DoubleQuestion:
         return Parse_Rule{prefix = parse_unknown, infix = nil, precedence = .PRIMARY}
     case .QuestionExclamation:
-        return Parse_Rule{prefix = nil, infix = parse_enforce, precedence = .LOGICAL}
+        return Parse_Rule{prefix = nil, infix = parse_enforce, precedence = .PATTERN}
 
     // Assignment operators (lowest precedence)
     case .PointingPush:
