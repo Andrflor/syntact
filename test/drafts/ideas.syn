@@ -31,7 +31,7 @@ RSAIdentity -> {
 }
 
 // Compile time effect trigered on anythinhg
-compileTimeGet -> !{get}
+compileTimeGet -> !{@http.get}
 // Can be used on anything
 
 N -> {

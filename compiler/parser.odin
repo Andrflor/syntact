@@ -295,7 +295,7 @@ next_token :: proc(l: ^Lexer) -> Token {
 
 	// Use a jump table approach for faster dispatch
 	switch c {
-	case '\n':
+	case '\n', ',':
 		return scan_newline(l, start_pos)
 	case '`', '"', '\'':
 		return scan_string(l, start_pos)
@@ -2020,7 +2020,6 @@ parse_unknown :: proc(parser: ^Parser) -> ^Node {
  * parse_enforce handle property enforcement with ?!
  */
 parse_enforce:: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    fmt.println("We have enforce")
     // Save position of the binary operator
     position := parser.current_token.position
 
