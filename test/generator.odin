@@ -6,17 +6,17 @@ import "core:path/filepath"
 import "core:strings"
 
 // Set this to the folder that contains parser_test_harness.odin (package compiler_test)
-TEST_DIR    :: "tests"
+TEST_DIR :: "tests"
 OUTPUT_ODIN :: "parser_generated_tests.odin"
 
 main :: proc() {
 	// discover json files
 	dir, err := os.open(TEST_DIR)
-	if err != nil { return }
+	if err != nil {return}
 	defer os.close(dir)
 
 	infos, rerr := os.read_dir(dir, -1, context.temp_allocator)
-	if rerr != nil { return }
+	if rerr != nil {return}
 
 	files := make([dynamic]string, context.temp_allocator)
 	for i := 0; i < len(infos); i += 1 {
@@ -25,7 +25,7 @@ main :: proc() {
 			append(&files, filepath.join({TEST_DIR, info.name}, context.temp_allocator))
 		}
 	}
-	if len(files) == 0 { return }
+	if len(files) == 0 {return}
 
 	// build output source directly into []u8
 	out := make([dynamic]u8, context.temp_allocator)
@@ -43,10 +43,9 @@ main :: proc() {
 		append(&out, "@(test)\n")
 		append(&out, fn)
 		append(&out, " :: proc(t: ^testing.T) {\n")
-		append(&out, "\tok, msg := run_single_test(\"")
+		append(&out, "\trun_test(\"")
 		append(&out, p)
-		append(&out, "\")\n")
-		append(&out, "\ttesting.expectf(t, ok, \"%s\", msg)\n")
+		append(&out, "\", t)\n")
 		append(&out, "}\n\n")
 	}
 
@@ -68,11 +67,11 @@ itoa :: proc(i: int) -> string {
 	// collect digits reversed
 	digs := make([dynamic]u8, context.temp_allocator)
 	for n > 0 {
-		append(&digs, u8('0' + n%10))
+		append(&digs, u8('0' + n % 10))
 		n /= 10
 	}
 	// append reversed
-	for j := len(digs)-1; j >= 0; j -= 1 {
+	for j := len(digs) - 1; j >= 0; j -= 1 {
 		append(&buf, digs[j])
 	}
 	return string(buf[:])
@@ -97,10 +96,7 @@ sanitize_identifier :: proc(s: string) -> string {
 	start := 1 if len(s) > 0 else 0
 	for i := start; i < len(s); i += 1 {
 		c := s[i]
-		if (c >= 'a' && c <= 'z') ||
-		   (c >= 'A' && c <= 'Z') ||
-		   (c >= '0' && c <= '9') ||
-		   c == '_' {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
 			append(&buf, c)
 		} else {
 			append(&buf, '_')

@@ -7,49 +7,40 @@ import "core:testing"
 
 @(test)
 test_resonant_0 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/resonant.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/resonant.json", t)
 }
 
 @(test)
 test_simple_typelike_def_1 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/simple_typelike_def.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/simple_typelike_def.json", t)
 }
 
 @(test)
 test_pattern_2 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/pattern.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/pattern.json", t)
 }
 
 @(test)
 test_simple_reference_3 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/simple_reference.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/simple_reference.json", t)
 }
 
 @(test)
 test_refinement_4 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/refinement.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/refinement.json", t)
 }
 
 @(test)
 test_complex_5 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/complex.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/complex.json", t)
 }
 
 @(test)
 test_simple_pointing_6 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/simple_pointing.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/simple_pointing.json", t)
 }
 
 @(test)
 test_simple_pattern_7 :: proc(t: ^testing.T) {
-	ok, msg := run_single_test("tests/simple_pattern.json")
-	testing.expectf(t, ok, "%s", msg)
+	run_test("tests/simple_pattern.json", t)
 }
-
