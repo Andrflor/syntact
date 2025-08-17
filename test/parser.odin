@@ -97,7 +97,6 @@ ast_to_string :: proc(node: ^compiler.Node) -> string {
 	}
 }
 
-// Show source context around line/column
 show_source_context :: proc(source: string, position: compiler.Position) -> string {
 	lines := strings.split_lines(source)
 	if position.line <= 0 || position.line > len(lines) {
@@ -151,9 +150,70 @@ run_test :: proc(path: string, t: ^testing.T) {
 
 		if !ok {
 			position := (^compiler.NodeBase)(ast).position
-			msg = strings.concatenate({"\n\n", show_source_context(tc.source, position)})
+			msg = strings.concatenate(
+				{
+					fmt.tprintf(
+						"\n\nTest failed for (%s)\nSource diff line %v, column %v:\n",
+						tc.name,
+						position.line,
+						position.column,
+					),
+					show_source_context(tc.source, position),
+					"\n\n",
+					format_difference(tc.expect, actual, first_difference(actual, tc.expect)),
+				},
+			)
 		}
 	}
 
 	testing.expectf(t, ok, "%s", msg)
+}
+
+first_difference :: proc(str1, str2: string) -> int {
+	min_len := min(len(str1), len(str2))
+
+	for i in 0 ..< min_len {
+		if str1[i] != str2[i] {
+			return i
+		}
+	}
+
+	if len(str1) != len(str2) {
+		return min_len
+	}
+	return -1
+}
+
+format_difference :: proc(str1, str2: string, pos: int, ctx: int = 40) -> string {
+
+	builder := strings.builder_make()
+	defer if builder.buf != nil do strings.builder_destroy(&builder)
+
+	strings.write_string(&builder, fmt.aprintf("String diff pos: %d\n", pos))
+
+	// Calculate context window
+	start := max(0, pos - ctx)
+	end1 := min(len(str1), pos + ctx + 1)
+	end2 := min(len(str2), pos + ctx + 1)
+
+	// Extract context substrings
+	context1 := str1[start:end1]
+	context2 := str2[start:end2]
+
+	strings.write_string(&builder, fmt.aprintf("Expected: %s\n", context1))
+	strings.write_string(&builder, fmt.aprintf("Actual  : %s\n", context2))
+
+	// Create pointer line showing where the difference is
+	pointer_line := make([]u8, len("String 1: \"") + (pos - start) + 1)
+
+	for i in 0 ..< len(pointer_line) {
+		if i == len("Expected: \"") + (pos - start) {
+			pointer_line[i] = '^'
+		} else {
+			pointer_line[i] = ' '
+		}
+	}
+	strings.write_string(&builder, fmt.aprintf("%s\n", string(pointer_line)))
+
+	return strings.clone(strings.to_string(builder))
 }
