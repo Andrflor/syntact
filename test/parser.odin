@@ -86,176 +86,313 @@ ast_to_string :: proc(node: ^compiler.Node) -> string {
 		return "Unknown"
 	case compiler.Enforce:
 		return fmt.tprintf("Enforce(%s,%s)", ast_to_string(n.left), ast_to_string(n.right))
+	case compiler.Branch:
+		return fmt.tprintf("Branch(%s,%s)", ast_to_string(n.source), ast_to_string(n.product))
 	case:
 		return fmt.tprintf("UnhandledNode(%T)", n)
 	}
 }
 
-// ---------- Diff helpers (pure) ----------
-tokenize_ast_string :: proc(s: string) -> []string {
-	tokens := make([dynamic]string, context.temp_allocator)
-	i := 0
-	for i < len(s) {
-		switch s[i] {
-		case ' ', '\t', '\n', '\r': i += 1
-		case '(', ')', '[', ']', ',':
-			append(&tokens, s[i:i+1]); i += 1
-		case:
-			start := i
-			for i < len(s) &&
-			    s[i] != '(' && s[i] != ')' &&
-			    s[i] != '[' && s[i] != ']' &&
-			    s[i] != ',' && s[i] != ' ' &&
-			    s[i] != '\t' && s[i] != '\n' &&
-			    s[i] != '\r' { i += 1 }
-			if i > start {
-				token := s[start:i]
-				if len(token) > 0 do append(&tokens, token)
-			}
-		}
-	}
-	return tokens[:]
-}
-
-join_tokens_readable :: proc(tokens: []string, max_tokens: int = 10) -> string {
-	if len(tokens) == 0 do return ""
-	out := make([dynamic]string, context.temp_allocator)
-	n := min(max_tokens, len(tokens))
-	for i in 0 ..< n {
-		append(&out, tokens[i])
-		if i < n-1 {
-			next := tokens[i+1]
-			if next != ")" && next != "]" && next != "," { append(&out, " ") }
-		}
-	}
-	if len(tokens) > max_tokens do append(&out, "...")
-	return strings.concatenate(out[:], context.temp_allocator)
-}
-
-find_first_difference :: proc(et, at: []string) -> (int, string) {
-	min_len := min(len(et), len(at))
-	for i in 0 ..< min_len {
-		if et[i] != at[i] {
-			start := max(0, i-3)
-			ee := min(len(et), i+4)
-			ae := min(len(at), i+4)
-			ec := join_tokens_readable(et[start:ee], ee-start)
-			ac := join_tokens_readable(at[start:ae], ae-start)
-			return i, fmt.tprintf(
-				"First difference at token %d:\n  Expected: ...%s\n  Actual:   ...%s\n  >>> Expected token: '%s'\n  >>> Actual token:   '%s'",
-				i, ec, ac, et[i], at[i],
-			)
-		}
-	}
-	if len(et) != len(at) {
-		i := min_len
-		msg := fmt.tprintf("Length difference at token %d:\n  Expected length: %d\n  Actual length:   %d",
-		                   i, len(et), len(at))
-		if len(et) > len(at) {
-			ms := i; me := min(len(et), ms+5)
-			msg = fmt.tprintf("%s\n  Missing tokens: %s", msg, join_tokens_readable(et[ms:me], 5))
+// Find line/column from offset in source
+get_line_column :: proc(source: string, offset: int) -> (line: int, column: int) {
+	line = 1
+	column = 1
+	for i := 0; i < offset && i < len(source); i += 1 {
+		if source[i] == '\n' {
+			line += 1
+			column = 1
 		} else {
-			es := i; ee := min(len(at), es+5)
-			msg = fmt.tprintf("%s\n  Extra tokens: %s", msg, join_tokens_readable(at[es:ee], 5))
-		}
-		return i, msg
-	}
-	return -1, "No differences found"
-}
-
-find_structural_differences :: proc(expected, actual: string) -> []string {
-	diffs := make([dynamic]string, context.temp_allocator)
-  nodes := []string{
-		"Pointing(Identifier(List)",
-		"Pointing(Identifier(Error)",
-		"Pointing(Identifier(transform)",
-		"Pointing(Identifier(NonEmptyList)",
-	}
-	for node in  nodes {
-		if strings.contains(expected, node) && !strings.contains(actual, node) {
-			append(&diffs, fmt.tprintf("Missing major node: %s", node))
+			column += 1
 		}
 	}
-  checks := []struct{pattern, description: string}{
-		{"Branch(nil,nil)", "Empty pattern branches (should have content)"},
-		{"Override(Pointing(", "Incorrect Override structure (should be simpler)"},
-		{"Property(Property(External", "Double-wrapped External property"},
+	return
+}
+
+// Show source context around line/column
+show_source_context :: proc(source: string, line: int, column: int) -> string {
+	lines := strings.split_lines(source, context.temp_allocator)
+	if line <= 0 || line > len(lines) {
+		return "Invalid line"
 	}
-	for check in  checks {
-		ec := strings.count(expected, check.pattern)
-		ac := strings.count(actual,   check.pattern)
-		if ec != ac {
-			append(&diffs, fmt.tprintf("%s: Expected %d occurrences, got %d", check.description, ec, ac))
+
+	result := make([dynamic]string, context.temp_allocator)
+
+	start_line := max(1, line - 2)
+	end_line := min(len(lines), line + 2)
+
+	for i := start_line; i <= end_line; i += 1 {
+		prefix := "  "
+		if i == line {
+			prefix = "> "
+		}
+		append(&result, fmt.tprintf("%s%3d: %s", prefix, i, lines[i-1]))
+		if i == line {
+			pointer := strings.repeat(" ", 6 + column - 1, context.temp_allocator)
+			append(&result, fmt.tprintf("%s^", pointer))
 		}
 	}
-	return diffs[:]
+
+	return strings.join(result[:], "\n", context.temp_allocator)
 }
 
-normalize_string :: proc(s: string) -> string {
-	o := strings.trim_space(s)
-	o, _ = strings.replace_all(o, " ",  "", context.temp_allocator)
-	o, _ = strings.replace_all(o, "\t", "", context.temp_allocator)
-	o, _ = strings.replace_all(o, "\n", "", context.temp_allocator)
-	o, _ = strings.replace_all(o, "\r", "", context.temp_allocator)
-	return o
+// Track positions while building AST string
+Position_Info :: struct {
+	start_pos: int,  // Position in output string
+	end_pos: int,    // Position in output string
+	line: int,       // Line in source
+	column: int,     // Column in source
 }
 
-create_detailed_diff :: proc(expected, actual: string, test_name: string) -> string {
-	r := make([dynamic]string, context.temp_allocator)
-	append(&r, fmt.tprintf("=== DETAILED DIFF REPORT FOR: %s ===", test_name))
-	en := normalize_string(expected)
-	an := normalize_string(actual)
-	et := tokenize_ast_string(en)
-	at := tokenize_ast_string(an)
+ast_to_string_with_positions :: proc(node: ^compiler.Node, positions: ^[dynamic]Position_Info) -> string {
+	if node == nil do return "nil"
 
-	pos, msg := find_first_difference(et, at)
-	if pos >= 0 {
-		append(&r, "")
-		append(&r, "TOKEN-LEVEL DIFFERENCE:")
-		append(&r, msg)
+	start_pos := 0
+	if positions != nil && len(positions^) > 0 {
+		// Calculate current position in output string
+		for pos in positions^ {
+			start_pos = max(start_pos, pos.end_pos)
+		}
 	}
 
-	structs := find_structural_differences(en, an)
-	if len(structs) > 0 {
-		append(&r, "")
-		append(&r, "STRUCTURAL DIFFERENCES:")
-		for d in structs do append(&r, fmt.tprintf("  - %s", d))
+	result := ""
+
+	#partial switch n in node^ {
+	case compiler.Identifier:
+		if n.capture != "" {
+			result = fmt.tprintf("Identifier(%s,%s)", n.name, n.capture)
+		} else {
+			result = fmt.tprintf("Identifier(%s)", n.name)
+		}
+	case compiler.Literal:
+		result = fmt.tprintf("Literal(%v,%s)", n.kind, n.to)
+	case compiler.Pointing:
+		left := ast_to_string_with_positions(n.from, positions)
+		right := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("Pointing(%s,%s)", left, right)
+	case compiler.PointingPull:
+		left := ast_to_string_with_positions(n.from, positions)
+		right := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("PointingPull(%s,%s)", left, right)
+	case compiler.EventPush:
+		left := ast_to_string_with_positions(n.from, positions)
+		right := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("EventPush(%s,%s)", left, right)
+	case compiler.EventPull:
+		left := ast_to_string_with_positions(n.from, positions)
+		right := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("EventPull(%s,%s)", left, right)
+	case compiler.ResonancePush:
+		left := ast_to_string_with_positions(n.from, positions)
+		right := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("ResonancePush(%s,%s)", left, right)
+	case compiler.ResonancePull:
+		left := ast_to_string_with_positions(n.from, positions)
+		right := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("ResonancePull(%s,%s)", left, right)
+	case compiler.ScopeNode:
+		if len(n.to) == 0 {
+			result = "Scope[]"
+		} else {
+			parts := make([dynamic]string, context.temp_allocator)
+			for i in 0 ..< len(n.to) {
+				stmt := new(compiler.Node, context.temp_allocator)
+				stmt^ = n.to[i]
+				append(&parts, ast_to_string_with_positions(stmt, positions))
+			}
+			result = fmt.tprintf("Scope[%s]", strings.join(parts[:], ",", context.temp_allocator))
+		}
+	case compiler.Override:
+		ov := make([dynamic]string, context.temp_allocator)
+		for i in 0 ..< len(n.overrides) {
+			x := new(compiler.Node, context.temp_allocator)
+			x^ = n.overrides[i]
+			append(&ov, ast_to_string_with_positions(x, positions))
+		}
+		source_str := ast_to_string_with_positions(n.source, positions)
+		result = fmt.tprintf("Override(%s,[%s])", source_str, strings.join(ov[:], ",", context.temp_allocator))
+	case compiler.Property:
+		source_str := ast_to_string_with_positions(n.source, positions)
+		prop_str := ast_to_string_with_positions(n.property, positions)
+		result = fmt.tprintf("Property(%s,%s)", source_str, prop_str)
+	case compiler.Operator:
+		left_str := ast_to_string_with_positions(n.left, positions)
+		right_str := ast_to_string_with_positions(n.right, positions)
+		result = fmt.tprintf("Operator(%v,%s,%s)", n.kind, left_str, right_str)
+	case compiler.Execute:
+		ws := make([dynamic]string, context.temp_allocator)
+		for w in n.wrappers do append(&ws, fmt.tprintf("%v", w))
+		to_str := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("Execute(%s,[%s])", to_str, strings.join(ws[:], ",", context.temp_allocator))
+	case compiler.Range:
+		start_str := ast_to_string_with_positions(n.start, positions)
+		end_str := ast_to_string_with_positions(n.end, positions)
+		result = fmt.tprintf("Range(%s,%s)", start_str, end_str)
+	case compiler.Pattern:
+		bs := make([dynamic]string, context.temp_allocator)
+		for b in n.to {
+			source_str := ast_to_string_with_positions(b.source, positions)
+			prod_str := ast_to_string_with_positions(b.product, positions)
+			append(&bs, fmt.tprintf("Branch(%s,%s)", source_str, prod_str))
+		}
+		target_str := ast_to_string_with_positions(n.target, positions)
+		result = fmt.tprintf("Pattern(%s,[%s])", target_str, strings.join(bs[:], ",", context.temp_allocator))
+	case compiler.Constraint:
+		constraint_str := ast_to_string_with_positions(n.constraint, positions)
+		name_str := ast_to_string_with_positions(n.name, positions)
+		result = fmt.tprintf("Constraint(%s,%s)", constraint_str, name_str)
+	case compiler.Product:
+		to_str := ast_to_string_with_positions(n.to, positions)
+		result = fmt.tprintf("Product(%s)", to_str)
+	case compiler.Expand:
+		target_str := ast_to_string_with_positions(n.target, positions)
+		result = fmt.tprintf("Expand(%s)", target_str)
+	case compiler.External:
+		scope_str := ast_to_string_with_positions(n.scope, positions)
+		result = fmt.tprintf("External(%s,%s)", n.name, scope_str)
+	case compiler.Unknown:
+		result = "Unknown"
+	case compiler.Enforce:
+		left_str := ast_to_string_with_positions(n.left, positions)
+		right_str := ast_to_string_with_positions(n.right, positions)
+		result = fmt.tprintf("Enforce(%s,%s)", left_str, right_str)
+	case compiler.Branch:
+		source_str := ast_to_string_with_positions(n.source, positions)
+		prod_str := ast_to_string_with_positions(n.product, positions)
+		result = fmt.tprintf("Branch(%s,%s)", source_str, prod_str)
+	case:
+		result = fmt.tprintf("UnhandledNode(%T)", n)
 	}
 
-	append(&r, "")
-	append(&r, "LENGTH COMPARISON:")
-	append(&r, fmt.tprintf("  Expected tokens: %d", len(et)))
-	append(&r, fmt.tprintf("  Actual tokens:   %d", len(at)))
-	append(&r, fmt.tprintf("  Difference:      %+d", len(at)-len(et)))
-
-	show := 10
-	if len(et) > 0 {
-		append(&r, "")
-		append(&r, "FIRST FEW EXPECTED TOKENS:")
-		append(&r, fmt.tprintf("  %s", join_tokens_readable(et, show)))
-	}
-	if len(at) > 0 {
-		append(&r, "")
-		append(&r, "FIRST FEW ACTUAL TOKENS:")
-		append(&r, fmt.tprintf("  %s", join_tokens_readable(at, show)))
+	// Record position mapping
+	if positions != nil {
+		end_pos := start_pos + len(result)
+		line, column, found := get_node_position(node)
+		if found {
+			append(positions, Position_Info{
+				start_pos = start_pos,
+				end_pos = end_pos,
+				line = line,
+				column = column,
+			})
+		}
 	}
 
-	if pos >= 0 && pos < min(len(et), len(at)) {
-		append(&r, "")
-		append(&r, "CONTEXT AROUND DIFFERENCE:")
-		ctx := 8
-		start := max(0, pos-ctx)
-		ee := min(len(et), pos+ctx+1)
-		ae := min(len(at), pos+ctx+1)
-		append(&r, fmt.tprintf("  Expected: %s", join_tokens_readable(et[start:ee], ee-start)))
-		append(&r, fmt.tprintf("  Actual:   %s", join_tokens_readable(at[start:ae], ae-start)))
-	}
-	append(&r, "")
-	append(&r, "=== END DIFF REPORT ===")
-	return strings.join(r[:], "\n", context.temp_allocator)
+	return result
 }
 
-// ---------- IO (pure) ----------
+// Find source position for a given position in the AST output
+find_source_position_from_diff :: proc(positions: []Position_Info, diff_pos: int) -> (line: int, column: int, found: bool) {
+	for pos in positions {
+		if diff_pos >= pos.start_pos && diff_pos < pos.end_pos {
+			return pos.line, pos.column, true
+		}
+	}
+	return 1, 1, false
+}
+
+// Get position from any AST node
+get_node_position :: proc(node: ^compiler.Node) -> (line: int, column: int, found: bool) {
+	if node == nil do return 1, 1, false
+
+	#partial switch n in node^ {
+	case compiler.Identifier:
+		return n.position.line, n.position.column, true
+	case compiler.Literal:
+		return n.position.line, n.position.column, true
+	case compiler.Pointing:
+		return n.position.line, n.position.column, true
+	case compiler.PointingPull:
+		return n.position.line, n.position.column, true
+	case compiler.EventPush:
+		return n.position.line, n.position.column, true
+	case compiler.EventPull:
+		return n.position.line, n.position.column, true
+	case compiler.ResonancePush:
+		return n.position.line, n.position.column, true
+	case compiler.ResonancePull:
+		return n.position.line, n.position.column, true
+	case compiler.ScopeNode:
+		return n.position.line, n.position.column, true
+	case compiler.Override:
+		return n.position.line, n.position.column, true
+	case compiler.Property:
+		return n.position.line, n.position.column, true
+	case compiler.Operator:
+		return n.position.line, n.position.column, true
+	case compiler.Execute:
+		return n.position.line, n.position.column, true
+	case compiler.Range:
+		return n.position.line, n.position.column, true
+	case compiler.Pattern:
+		return n.position.line, n.position.column, true
+	case compiler.Constraint:
+		return n.position.line, n.position.column, true
+	case compiler.Product:
+		return n.position.line, n.position.column, true
+	case compiler.Expand:
+		return n.position.line, n.position.column, true
+	case compiler.External:
+		return n.position.line, n.position.column, true
+	case compiler.Unknown:
+		return n.position.line, n.position.column, true
+	case compiler.Enforce:
+		return n.position.line, n.position.column, true
+	case compiler.Branch:
+		return n.position.line, n.position.column, true
+	}
+	return 1, 1, false
+}
+
+// Simple diff with source location
+create_diff :: proc(expected, actual, test_name, source: string, ast: ^compiler.Node) -> string {
+	// Build position map while generating actual output
+	positions := make([dynamic]Position_Info, context.temp_allocator)
+	actual_with_positions := ast_to_string_with_positions(ast, &positions)
+
+	// Find first difference
+	min_len := min(len(expected), len(actual))
+	diff_pos := -1
+	for i := 0; i < min_len; i += 1 {
+		if expected[i] != actual[i] {
+			diff_pos = i
+			break
+		}
+	}
+
+	result := make([dynamic]string, context.temp_allocator)
+	append(&result, fmt.tprintf("FAILED: %s", test_name))
+
+	if diff_pos >= 0 {
+		append(&result, fmt.tprintf("AST difference at position %d:", diff_pos))
+
+		// Show AST difference
+		start := max(0, diff_pos - 20)
+		end := min(len(expected), diff_pos + 20)
+		append(&result, fmt.tprintf("Expected: ...%s...", expected[start:end]))
+		append(&result, fmt.tprintf("Actual:   ...%s...", actual[start:min(len(actual), diff_pos + 20)]))
+		append(&result, fmt.tprintf("           %s^ HERE", strings.repeat(" ", diff_pos - start + 3)))
+
+		// Find the source position for this diff
+		line, column, found := find_source_position_from_diff(positions[:], diff_pos)
+		if found {
+			append(&result, "")
+			append(&result, fmt.tprintf("Source location: line %d, column %d", line, column))
+			append(&result, show_source_context(source, line, column))
+		}
+	} else if len(expected) != len(actual) {
+		append(&result, fmt.tprintf("Length difference: expected %d, got %d", len(expected), len(actual)))
+
+		if len(expected) > len(actual) {
+			append(&result, fmt.tprintf("Missing: %s", expected[len(actual):]))
+		} else {
+			append(&result, fmt.tprintf("Extra: %s", actual[len(expected):]))
+		}
+	}
+
+	return strings.join(result[:], "\n", context.temp_allocator)
+}
+
+// ---------- IO ----------
 load_test_file :: proc(path: string) -> (Test_Case, bool, string) {
 	data, ok := os.read_entire_file(path, context.temp_allocator)
 	if !ok do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
@@ -266,14 +403,14 @@ load_test_file :: proc(path: string) -> (Test_Case, bool, string) {
 	return tc, true, ""
 }
 
-// ---------- Single test (pure) ----------
+// ---------- Single test ----------
 run_single_test :: proc(path: string) -> (ok: bool, message: string) {
 	arena: vmem.Arena
 	defer vmem.arena_destroy(&arena)
 	context.allocator = vmem.arena_allocator(&arena)
 
 	tc, _ok, msg := load_test_file(path)
-  ok = _ok
+	ok = _ok
 	if !ok do return false, msg
 
 	cache := new(compiler.Cache)
@@ -282,11 +419,11 @@ run_single_test :: proc(path: string) -> (ok: bool, message: string) {
 		return false, fmt.tprintf("Failed to parse source in test '%s' (%s)", tc.name, path)
 	}
 
-	actual   := normalize_string(ast_to_string(ast))
-	expected := normalize_string(tc.expect)
+	actual := ast_to_string(ast)
+	expected := tc.expect
+
 	if actual != expected {
-		return false, fmt.tprintf("Test '%s' (%s) mismatch:\n%s",
-		                          tc.name, path, create_detailed_diff(tc.expect, ast_to_string(ast), tc.name))
+		return false, create_diff(expected, actual, tc.name, tc.source, ast)
 	}
 	return true, ""
 }

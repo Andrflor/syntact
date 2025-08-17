@@ -1,0 +1,4 @@
+a<=b>s+222=sum.b ? {
+  true -> "wow"
+  false -> "damn"
+}
