@@ -19,7 +19,27 @@ Test_Case :: struct {
 	expect:      string `json:"expect"`,
 }
 
-// ---------- AST -> string ----------
+
+Position_Map :: struct {
+	positions: [dynamic]Node_Position,
+}
+
+Node_Position :: struct {
+	output_start: int,
+	output_end:   int,
+	node:         ^compiler.Node,
+}
+
+find_node_at_position :: proc(pos_map: ^Position_Map, char_pos: int) -> ^compiler.Node {
+	for pos in pos_map.positions {
+		if char_pos == pos.output_start {
+			return pos.node
+		}
+	}
+	return nil
+}
+
+// Keep your original function exactly as is
 ast_to_string :: proc(node: ^compiler.Node) -> string {
 	if node == nil do return "nil"
 	#partial switch n in node^ {
@@ -97,6 +117,121 @@ ast_to_string :: proc(node: ^compiler.Node) -> string {
 	}
 }
 
+// Recursively walk ALL nodes and map their positions
+walk_all_nodes :: proc(node: ^compiler.Node, full_string: string, pos_map: ^Position_Map) {
+	if node == nil do return
+
+	// Get this node's string representation
+	node_str := ast_to_string(node)
+
+	// Find ALL occurrences of this string in the full string
+	search_start := 0
+	for {
+		found_pos := strings.index(full_string[search_start:], node_str)
+		if found_pos == -1 do break
+
+		actual_pos := search_start + found_pos
+
+		// Check if this position is already mapped to avoid duplicates
+		already_mapped := false
+		for existing in pos_map.positions {
+			if existing.output_start == actual_pos &&
+			   existing.output_end == actual_pos + len(node_str) {
+				already_mapped = true
+				break
+			}
+		}
+
+		if !already_mapped {
+			append(
+				&pos_map.positions,
+				Node_Position {
+					output_start = actual_pos,
+					output_end = actual_pos + len(node_str),
+					node = node,
+				},
+			)
+		}
+
+		search_start = actual_pos + 1 // Move past this occurrence
+	}
+
+	// Now recursively walk all child nodes
+	#partial switch n in node^ {
+	case compiler.Pointing:
+		walk_all_nodes(n.from, full_string, pos_map)
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.PointingPull:
+		walk_all_nodes(n.from, full_string, pos_map)
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.EventPush:
+		walk_all_nodes(n.from, full_string, pos_map)
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.EventPull:
+		walk_all_nodes(n.from, full_string, pos_map)
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.ResonancePush:
+		walk_all_nodes(n.from, full_string, pos_map)
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.ResonancePull:
+		walk_all_nodes(n.from, full_string, pos_map)
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.ScopeNode:
+		for i in 0 ..< len(n.to) {
+			stmt := new(compiler.Node)
+			stmt^ = n.to[i]
+			walk_all_nodes(stmt, full_string, pos_map)
+		}
+	case compiler.Override:
+		walk_all_nodes(n.source, full_string, pos_map)
+		for i in 0 ..< len(n.overrides) {
+			x := new(compiler.Node)
+			x^ = n.overrides[i]
+			walk_all_nodes(x, full_string, pos_map)
+		}
+	case compiler.Property:
+		walk_all_nodes(n.source, full_string, pos_map)
+		walk_all_nodes(n.property, full_string, pos_map)
+	case compiler.Operator:
+		walk_all_nodes(n.left, full_string, pos_map)
+		walk_all_nodes(n.right, full_string, pos_map)
+	case compiler.Execute:
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.Range:
+		walk_all_nodes(n.start, full_string, pos_map)
+		walk_all_nodes(n.end, full_string, pos_map)
+	case compiler.Pattern:
+		walk_all_nodes(n.target, full_string, pos_map)
+		for b in n.to {
+			walk_all_nodes(b.source, full_string, pos_map)
+			walk_all_nodes(b.product, full_string, pos_map)
+		}
+	case compiler.Constraint:
+		walk_all_nodes(n.constraint, full_string, pos_map)
+		walk_all_nodes(n.name, full_string, pos_map)
+	case compiler.Product:
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.Expand:
+		walk_all_nodes(n.target, full_string, pos_map)
+	case compiler.External:
+		walk_all_nodes(n.scope, full_string, pos_map)
+	case compiler.Enforce:
+		walk_all_nodes(n.left, full_string, pos_map)
+		walk_all_nodes(n.right, full_string, pos_map)
+	case compiler.Branch:
+		walk_all_nodes(n.source, full_string, pos_map)
+		walk_all_nodes(n.product, full_string, pos_map)
+	}
+}
+
+// Build position map by walking ALL nodes
+build_position_map :: proc(root_node: ^compiler.Node, full_string: string) -> Position_Map {
+	pos_map := Position_Map{}
+	walk_all_nodes(root_node, full_string, &pos_map)
+	return pos_map
+}
+
+
 show_source_context :: proc(source: string, position: compiler.Position) -> string {
 	lines := strings.split_lines(source)
 	if position.line <= 0 || position.line > len(lines) {
@@ -146,10 +281,15 @@ run_test :: proc(path: string, t: ^testing.T) {
 		cache := new(compiler.Cache)
 		ast := compiler.parse(cache, tc.source)
 		actual := ast_to_string(ast)
+
 		ok = actual == tc.expect
 
 		if !ok {
-			position := (^compiler.NodeBase)(ast).position
+			first_diff := first_difference(actual, tc.expect)
+			pos_map := build_position_map(ast, actual)
+			log.info(len(pos_map.positions))
+			position := (^compiler.NodeBase)(find_node_at_position(&pos_map, first_diff)).position
+			log.info(position)
 			msg = strings.concatenate(
 				{
 					fmt.tprintf(
@@ -160,7 +300,7 @@ run_test :: proc(path: string, t: ^testing.T) {
 					),
 					show_source_context(tc.source, position),
 					"\n\n",
-					format_difference(tc.expect, actual, first_difference(actual, tc.expect)),
+					format_difference(tc.expect, actual, first_diff),
 				},
 			)
 		}
@@ -185,7 +325,6 @@ first_difference :: proc(str1, str2: string) -> int {
 }
 
 format_difference :: proc(str1, str2: string, pos: int, ctx: int = 40) -> string {
-
 	builder := strings.builder_make()
 	defer if builder.buf != nil do strings.builder_destroy(&builder)
 
