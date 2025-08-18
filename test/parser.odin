@@ -31,12 +31,13 @@ Node_Position :: struct {
 }
 
 find_node_at_position :: proc(pos_map: ^Position_Map, char_pos: int) -> ^compiler.Node {
+	found: ^compiler.Node
 	for pos in pos_map.positions {
-		if char_pos == pos.output_start {
-			return pos.node
+		if pos.output_start <= char_pos && char_pos <= pos.output_end {
+			found = pos.node
 		}
 	}
-	return nil
+	return found
 }
 
 // Keep your original function exactly as is
@@ -289,7 +290,6 @@ run_test :: proc(path: string, t: ^testing.T) {
 			pos_map := build_position_map(ast, actual)
 			log.info(len(pos_map.positions))
 			position := (^compiler.NodeBase)(find_node_at_position(&pos_map, first_diff)).position
-			log.info(position)
 			msg = strings.concatenate(
 				{
 					fmt.tprintf(
@@ -324,7 +324,7 @@ first_difference :: proc(str1, str2: string) -> int {
 	return -1
 }
 
-format_difference :: proc(str1, str2: string, pos: int, ctx: int = 40) -> string {
+format_difference :: proc(str1, str2: string, pos: int, ctx: int = 100) -> string {
 	builder := strings.builder_make()
 	defer if builder.buf != nil do strings.builder_destroy(&builder)
 
