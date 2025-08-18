@@ -87,8 +87,10 @@ Token_Kind :: enum {
 
 	// Grouping
 	LeftBrace, // {
+  LeftBraceOverride, // Special case for space sensitive overrides
 	RightBrace, // }
 	LeftParen, // (
+	LeftParenNoSpace, // (
 	RightParen, // )
   LeftBracket, // [
   RightBracket, // ]
@@ -303,8 +305,13 @@ next_token :: proc(l: ^Lexer) -> Token {
 		advance_position(l)
 		return Token{kind = .At, text = "@", position = start_pos}
 	case '{':
+    space_before := has_space_before(l)
 		advance_position(l)
-		return Token{kind = .LeftBrace, text = "{", position = start_pos}
+    if space_before || start_pos.offset == 0 {
+        return Token{kind = .LeftBrace, text = "{", position = start_pos}
+    } else {
+        return Token{kind = .LeftBraceOverride, text = "{", position = start_pos}
+    }
 	case '}':
 		advance_position(l)
 		return Token{kind = .RightBrace, text = "}", position = start_pos}
@@ -315,8 +322,13 @@ next_token :: proc(l: ^Lexer) -> Token {
 		advance_position(l)
 		return Token{kind = .RightBracket, text = "]", position = start_pos}
 	case '(':
+    space_before := has_space_before(l)
 		advance_position(l)
-		return Token{kind = .LeftParen, text = "(", position = start_pos}
+    if space_before || start_pos.offset == 0 {
+        return Token{kind = .LeftParen, text = "(", position = start_pos}
+    } else {
+        return Token{kind = .LeftParenNoSpace, text = "(", position = start_pos}
+    }
 	case ')':
 		advance_position(l)
 		return Token{kind = .RightParen, text = ")", position = start_pos}
@@ -766,6 +778,7 @@ PointingPull :: struct {
  */
 EventPull :: struct {
   using _: PointingBase,
+  name: string,
 }
 
 /*
@@ -1198,10 +1211,14 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Grouping and calls
     case .LeftBrace:
+        return Parse_Rule{prefix = parse_scope, infix = nil, precedence = .CALL}
+    case .LeftBraceOverride:
         return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .CALL}
     case .LeftBracket:
         return Parse_Rule{prefix = nil, infix = parse_left_bracket, precedence = .CALL}
     case .LeftParen:
+        return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .CALL}
+    case .LeftParenNoSpace:
         return Parse_Rule{prefix = parse_grouping, infix = parse_left_paren, precedence = .CALL}
     case .At:
         return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .PRIMARY}
@@ -1641,7 +1658,7 @@ parse_identifier :: proc(parser: ^Parser) -> ^Node {
     }
 
     // Check for (capture) after identifier
-    if parser.current_token.kind == .LeftParen {
+    if parser.current_token.kind == .LeftParenNoSpace {
         if parser.peek_token.kind == .Identifier {
             advance_token(parser) // consume capture
             id.capture = parser.current_token.text
@@ -1821,7 +1838,7 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
             found_exclamation = true
             advance_token(parser)
 
-        case .LeftParen:
+        case .LeftParen, .LeftParenNoSpace:
             // Start of background execution
             append_elem(&execute.wrappers, ExecutionWrapper.Background)
             append_elem(&stack, Token_Kind.LeftParen)
@@ -1932,7 +1949,7 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool)
         closing_token: string
 
         #partial switch token_kind {
-        case .LeftParen:    closing_token = ")"
+        case .LeftParen, .LeftParenNoSpace:    closing_token = ")"
         case .LeftBracket:  closing_token = "]"
         case .Less:     closing_token = ">"
         case .Or:        closing_token = "|"
@@ -2266,7 +2283,7 @@ parse_constraint_bind :: proc(parser: ^Parser, left: ^Node) -> ^Node {
        parser.current_token.kind == .Newline {
         // Empty constraint (a:)
         constraint.name = nil
-    } else if parser.current_token.kind == .LeftParen {
+    } else if parser.current_token.kind == .LeftParenNoSpace {
         // a:(capture)
         constraint.name = parse_grouping(parser)
     } else if parser.current_token.kind == .LeftBrace {
@@ -2279,7 +2296,7 @@ parse_constraint_bind :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // If a '{' follows, treat it as an Override applied to the entire constraint
     node := new(Node)
     node^ = constraint
-    if parser.current_token.kind == .LeftBrace {
+    if parser.current_token.kind == .LeftBraceOverride {
         return parse_override(parser, node)
     }
 
@@ -2308,7 +2325,7 @@ parse_constraint_from_none :: proc(parser: ^Parser) -> ^Node {
        parser.current_token.kind == .Newline {
         // Empty constraint (:)
         constraint.name = nil
-    } else if parser.current_token.kind == .LeftParen {
+    } else if parser.current_token.kind == .LeftParenNoSpace {
         // :(capture)
         constraint.name = parse_grouping(parser)
     } else if parser.current_token.kind == .LeftBrace {
@@ -2321,7 +2338,7 @@ parse_constraint_from_none :: proc(parser: ^Parser) -> ^Node {
     // If a '{' follows, treat it as an Override applied to the entire constraint
     node := new(Node)
     node^ = constraint
-    if parser.current_token.kind == .LeftBrace {
+    if parser.current_token.kind == .LeftBraceOverride {
         return parse_override(parser, node)
     }
 
@@ -2347,7 +2364,7 @@ parse_constraint_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // If a '{' follows, treat it as an Override applied to the entire constraint
     node := new(Node)
     node^ = constraint
-    if parser.current_token.kind == .LeftBrace {
+    if parser.current_token.kind == .LeftBraceOverride {
         return parse_override(parser, node)
     }
 
@@ -2561,6 +2578,11 @@ parse_event_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume -<
     advance_token(parser)
 
+    if parser.current_token.kind == .Identifier {
+      event_pull.name = parser.current_token.text
+      advance_token(parser)
+    }
+
     // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
@@ -2592,6 +2614,11 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Consume -<
     advance_token(parser)
+
+    if parser.current_token.kind == .Identifier {
+      event_pull.name = parser.current_token.text
+      advance_token(parser)
+    }
 
     // Parse to or handle empty value
     if parser.current_token.kind == .RightBrace ||
@@ -2899,7 +2926,7 @@ parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
        parser.current_token.kind == .Newline {
         // Empty constraint (Type:)
         constraint.name = nil
-    } else if parser.current_token.kind == .LeftParen {
+    } else if parser.current_token.kind == .LeftParenNoSpace {
         // Type:(capture)
         constraint.name = parse_grouping(parser)
     } else if is_expression_start(parser.current_token.kind) {
