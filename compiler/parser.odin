@@ -778,7 +778,7 @@ PointingPull :: struct {
  */
 EventPull :: struct {
   using _: PointingBase,
-  name: string,
+  catch: string,
 }
 
 /*
@@ -2579,7 +2579,7 @@ parse_event_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     advance_token(parser)
 
     if parser.current_token.kind == .Identifier {
-      event_pull.name = parser.current_token.text
+      event_pull.catch = parser.current_token.text
       advance_token(parser)
     }
 
@@ -2616,7 +2616,7 @@ parse_event_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     advance_token(parser)
 
     if parser.current_token.kind == .Identifier {
-      event_pull.name = parser.current_token.text
+      event_pull.catch = parser.current_token.text
       advance_token(parser)
     }
 
@@ -3297,6 +3297,9 @@ print_ast :: proc(node: ^Node, indent: int) {
     case EventPull:
         fmt.printf("%sEventPull -< (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
+        if n.catch != "" {
+            fmt.printfln("%s  Catch: %s", indent_str, n.catch)
+        }
         if n.from != nil {
             fmt.printf("%s  From:\n", indent_str)
             print_ast(n.from, indent + 4)

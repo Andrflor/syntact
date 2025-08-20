@@ -1,0 +1,3 @@
+Log -< e {
+  -> io.write{e.message}!
+}
