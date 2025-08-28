@@ -259,3 +259,5 @@ main -> {
 // Still everything is optimized around those side effects in the produced binary
 // So it's optimized as hell
 ->main!
+
+a

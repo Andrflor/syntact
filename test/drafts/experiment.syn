@@ -20,17 +20,19 @@ Counter -> {
     u8:value
   }
   -> {
-    u8:value -> 0
-    // Value is now driven via Change resonance
-    value >>- Change
+    // Value of type u8 driven by change event default is 0
+    u8:value >>- Change -> 0
+    // Change resonance handler
     Change -< e {
       // We can use resonance to drive value here
       value -<< e.value
     }
     increment -> {
+      // Emiting change event
       >- Change{value+1}
     }
     decrement -> {
+      // Emiting change event
       >- Change{value-1}
     }
     // This is the correct Change driven value
@@ -59,8 +61,11 @@ Counter -> {
 }
 
 Counter:globalCounter
-// counterPositive is true
-bool:counterPositive >>- globalCounter.value >= 0
+// This is a bind so it's value will reflect globalCounter.value
+// Bind can be used as the same as references if they can be resolved to one
+// Here there is a computation that prevent to make it a reference
+// As such it would be recomputed each time Change is triggered
+bool:counterPositive >>= globalCounter.value >= 0
 funWithCounter -> {
   globalCounter.decrement!
   globalCounter.increment!
@@ -75,10 +80,9 @@ State -> {
     T:value
   }
   -> {
-    T:value -> initial
-    value >>- Update
+    T:value >>- Update -> initial
     Update -< e {
-      value >>- e.value
+      value -<< e.value
     }
     update -> {
       T:value
@@ -101,8 +105,8 @@ DynList -> {
     length >>- Update
     value >>- Update
     Update -< e {
-      value >>- e.data
-      length >>- e.length
+      value -<< e.data
+      length -<< e.length
     }
     push -> {
       T:element
@@ -111,6 +115,42 @@ DynList -> {
     -> value
   }
 }
+
+State -> {
+  T <- None
+  T:initial
+  Update -> { T:value }
+  -> {
+    T:value >>- Update -> initial
+    Update -< e { value -<< e.value ,}
+    update -> { T:value, >- Update{value}}
+    -> value
+  }
+}
+
+RefState -> {
+  T <- None
+  T:initial
+  Update -> { T:value }
+  -> {
+    T:value >>- Update >>= initial
+    Update -< e { value -<< e.value }
+    update -> { T:value, >- Update{value}}
+    -> value
+  }
+}
+
+Node -> {
+  T <- {}
+  T:data
+  RefState{{}|Node{T:}:}:next
+}
+
+Node:nodeA{0}
+Node:nodeB{2 next->RefState{nodeA}:}
+nodeA.next.update{nodeB}!
+
+nodeB.next!.next! // nodeA nodeB
 
 DynList{u8}:dynList{value->{1 2 3 4 5}}
 dynList.length // 5
@@ -138,3 +178,38 @@ main -> {
 }
 
 main!
+
+List -> {
+  T -> None
+  -> {}
+  -> {
+    T:
+    ...List{T}:
+  }
+}
+
+Array -> {
+  T -> None
+  u32:length
+  generate -> {
+    T -> None
+    u32:length
+    length=0 ? {
+      -> {}
+      -> {T: ...generate{T length-1}!}
+    }
+  }
+  -> generate{T length}!
+}
+
+NDArray {
+  u32:rank <- 0
+  T <- None
+  List{T}:source >>= {}
+  Array{u64 rank}:shape
+  Array{i64 rank}:stride
+  u64:offset
+}
+
+
+NDArray:array{{2 0 3 4 1} shape->{4 1} stride{1 1}}

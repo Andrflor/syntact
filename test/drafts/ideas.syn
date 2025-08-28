@@ -34,6 +34,14 @@ RSAIdentity -> {
 compileTimeGet -> !{@http.get}
 // Can be used on anything
 
+u8 -> {
+  -> u8:(i)
+  avg -> {
+    u8:e
+    -> (e+i)/2
+  }
+}
+
 N -> {
   -> {}
   -> {{} ...N:}
@@ -121,7 +129,7 @@ Q -> {
     -> Z.mult{a.n b.d}! = Z.mult{b.n a.d}!
   }
   inv -> {
-    Q?!{n?(!={}&!={-1 {}})}:q
+    Q:q
     -> q.n ? {
       (N&~{}):(n) -> Q:{q n}
       {-1 (N&~{})}:(n)} -> Q:{{-1 q} n}
@@ -142,7 +150,6 @@ Q -> {
     -> {Z.mult{a.n b.n}! N.mult{a.d b.d}!}
   }
 }
-
 
 succ -> {
   Nat:nat

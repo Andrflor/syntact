@@ -71,7 +71,7 @@ Circle:{radius?(>5 & <10)} -> MediumCircle{r}!
 area -> {
   Shape:shape
   -> shape ? {
-    Circle:{radius(r)} -> r * r * 3
+    Circle:{radius(r)?<10} -> r * r * 3
     Square:{side(s)} | Diamond:{side(s)}  -> s * s
     Triangle:{a b c} ? {
       a+b>c & b+c>a & c+a>b -> (a + b + c) / 2
@@ -202,7 +202,6 @@ Maybe -> {
   }
   -> T:
 }
-
 
 toJson -> {
   (value) -> {}:
