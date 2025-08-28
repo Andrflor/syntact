@@ -129,7 +129,7 @@ Q -> {
     -> Z.mult{a.n b.d}! = Z.mult{b.n a.d}!
   }
   inv -> {
-    Q:q
+    ?Q:{(n~({}|{-1 {}}))|~({}|{-1 {}})}:q
     -> q.n ? {
       (N&~{}):(n) -> Q:{q n}
       {-1 (N&~{})}:(n)} -> Q:{{-1 q} n}
@@ -213,4 +213,74 @@ Ring {
   T:n -> ??
   -> mult{n {{}}}! = n ?! true
   }
+}
+
+Data -> {
+  -> {
+    u8:i
+    String:name
+  }
+}
+
+Data -> {
+  u8:i
+  String:name
+}
+
+Data:some
+
+Data:some{i->4}
+Data:{i->4}
+Data{->Data!{i8:i}}
+
+
+
+N -> {
+  -> {}
+  -> {{} ...N:}
+}
+NZero -> {}
+NStar -> N ~ NZero
+
+Z -> {
+  -> N:
+  -> {-1 N:}
+}
+ZZero -> NZero | {-1 NZero}
+ZStart -> Z ~ Zero
+
+Q -> {
+  -> Z:
+  -> {Z:n NStar:d}
+}
+QZero -> ZZero | ?Q:{ZZero:n}
+QStar -> Q ~ QZero
+
+QStar -> Q ~ {{}|{-1 {}}} | ?Q:{n~{{}|{-1 {}}}}
+
+false | true
+false & true
+i & u
+
+n -> {ZZero:n NStar:d}
+ZZero | n
+
+
+u8:a -> 10
+data -> {u8:a u8:b}
+data2 -> {
+   -> {u8:a u8:b}
+}
+
+b ? {
+  a -> // b is a
+  >a -> //b is superior to a
+  a: -> // b is the shape of a
+  >a: -> // b is superset of a
+  data -> // b is data
+  data: -> // b is shape data
+  >data: -> // b is superset data
+  data2 -> // b is data2
+  data2: -> // b is shape of data2
+  >data2: -> // b is superset data2
 }
