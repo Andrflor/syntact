@@ -1,0 +1,143 @@
+RefState -> {
+  (T):initial // This mean a default value initial
+  // The (T) mean that we extact it's type constraint
+  // The default is nothing
+  -> {
+    // We declare a Update structure to use it as event
+    Update -> { T:value }
+    // We declare a value that is tied at first to initial by ref
+    // But we nominally make it driven by update handler
+    T:value >>- Update =<< initial
+    // Defining the update handler and using the update capability
+    Update -< e { value -<< e.value }
+    -> {
+      // Here we unpack a first parameter unnamed but with capture it as v
+      (v) ==< value
+      // Assert on v
+      -> v ? {
+        // It's the same as value so nothing changed so just give it pack
+        value -> value
+        // It's different so capture it shadowing v update and return it
+        (v) -> {>-Update{v}, ->v}!
+      }
+    }
+  }! // Direct collapse to directly get only the return we want and hide the rest
+}
+
+DynList -> {
+  T -> None
+  -> {
+    Update -> {
+      T:data
+    }
+    List{T}:value >>- Update
+    Update -< e {
+      value -<< e.data
+    }
+    -> {->value, push->{T:element, ->{>-Update{{...value element}}}}
+  }!
+}
+
+Dynlist{u8}:list
+list.push{2}!
+
+pushToList -> {
+  u8:a
+  list.push{a}!
+}
+
+pushToList{.1[!]{}}
+
+pushToList
+
+
+if -> {
+  bool:condition
+  then -> {}
+  else -> {}
+  condition?{
+    -> then!
+    -> else!
+  }
+}
+
+if[?]
+
+i=2?{
+  -> pushToList{i}
+  -> pushToList{0}
+}
+
+if{i=2 pushToList{i} pushToList{0}}
+
+for -> {
+  >=0:i
+  compute -> {
+    >=0:i
+  }
+  compute{i}!
+  i>0?{
+    -> for{i-1 compute}
+    -> {}
+  }
+}
+
+while {
+  condition -> {->bool:}
+  do -> {}
+  condition!? {
+    -> {
+      do!
+      while{condition do}
+    }
+    -> {}
+  }
+}
+
+rename -> {
+  -> while{
+    {->bob.name! ="Bob"}
+    {->bob.name{"bill"}!}
+  }
+}
+
+rename -> {->for}
+rename[->][for]{20}
+
+rename[->][while]{do[->][!]bob.name{"billy"}}
+
+a -> {u8:value->0}
+b -> a{value->10}
+
+rename!
+
+data -> for{22 {>0:i, @log.print{i}!}}
+data[for]{
+  10
+}
+
+
+User -> {
+  RefState{String:}:name
+  u8:age
+}
+
+[!]suspend!
+
+
+bobRefName -> RefState{"Bob"}
+User:bob{name->RefState{bobRefName!}}
+
+bobRefName{"Bill"}!
+bobRefName!
+bob.name // bill
+
+{
+  refname -> RefName{"Refname"}
+}! // We collapse the scope with ! as such we free all the content such as refname
+
+// Now what will happend if we do
+{
+  refname -> RefName{"Refname"}
+  bob.name{refname!}!
+}!
