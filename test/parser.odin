@@ -58,7 +58,12 @@ ast_to_string :: proc(node: ^compiler.Node) -> string {
 	case compiler.EventPush:
 		return fmt.tprintf("EventPush(%s,%s)", ast_to_string(n.from), ast_to_string(n.to))
 	case compiler.EventPull:
-		return fmt.tprintf("EventPull(%s,%s)", ast_to_string(n.from), ast_to_string(n.to))
+		return fmt.tprintf(
+			"EventPull(%s,%s,%s)",
+			n.catch,
+			ast_to_string(n.from),
+			ast_to_string(n.to),
+		)
 	case compiler.ResonancePush:
 		return fmt.tprintf("ResonancePush(%s,%s)", ast_to_string(n.from), ast_to_string(n.to))
 	case compiler.ResonancePull:
