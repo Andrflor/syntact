@@ -1,0 +1,168 @@
+Counter -> {
+  u8:initial
+  -> {
+    Change -> { u8:value }
+    u8:value >>- Change -> initial
+    Change -< e {value -<< e.value}
+    -> {
+      -> value
+      increment -> {>- Change{value+1}}
+      decrement -> {>- Change{value-1}}
+    }
+  }!
+}
+
+Text -> {
+  String:text =<< ""
+  =<< text ? {
+    -> >- Redraw{}
+  }
+}
+
+even -> %2=0
+odd -> %2=1
+
+isAdult -> {
+  u8:age
+  -> age>=18
+}
+
+User -> {
+   String:name
+   u8:age
+}
+
+User:billy{name->"billy" age->40}
+
+Adult -> ?User:(u):&isAdult{u.age}!
+
+Adult -> ?User:{age?>=18}
+
+billy ? Adult:
+
+predicate -> {
+  u8:age
+  -> age%2=0
+}
+
+byPredicte -> ? {
+  u8:(a) -> predicte{a}!
+  -> false
+}
+
+a -> 18
+
+b -> ? {
+  >=0:(d) -> d
+  -> a
+}
+
+c -> 10
+
+c ? b:
+
+complex:compl
+
+Text{"text"}
+
+Widget -> {
+  Render{}
+}
+
+Counter:globalCounter
+// counterPositive is true
+bool:counterPositive =<< globalCounter.value >= 0
+funWithCounter -> {
+  globalCounter.decrement!
+  globalCounter.increment!
+}
+
+funWithCounter! // counterPositive updates to false then to true again
+
+State -> {
+  T <- None
+  T:initial
+  -> {
+    Update -> { T:value }
+    T:value >>- Update -> initial
+    Update -< e { value >>- e.value }
+    update -> { T:value, >- Update{value}}
+    -> {->value set->update}
+  }!
+}
+
+State{"SuperString"}:myState
+myState! // "SuperString"
+myState.set{"Someotherstring"}!
+myState! // "Someotherstring"
+
+RefState -> {
+  T <- None
+  T:initial
+  -> {
+    Update -> { T:value }
+    T:value >>- Update =<< initial
+    Update -< e { value >>- e.value }
+    update -> { T:value, >- Update{value}}
+    -> {-> value set->update}
+  }!
+}
+
+Array -> {
+  T <- None
+  u64:size <- 0
+  -> size=0?{
+    -> {}
+    -> {T:  ...Array{T size-1}}
+  }
+}
+
+MutableArray -> {
+  T <- None
+  u64:size <- 0
+  -> {
+    Mutate -> {T:value u64:index}
+    -> size=0 ? {
+      {}
+      {T: >>- Mutate ...Array{T size-1}}
+    }
+  }!
+}
+
+Array:array{2 3 1 5 0}
+
+
+u8:n -> io.input{"Number of elements:"}!
+
+generate -> {
+  u8:n
+  -> n=0 ? {
+    -> {}
+    -> {0 ...generate{n-1}!}
+  }
+}
+
+data -> generate{n}!
+
+RefState -> {
+  T <- None
+  T:initial
+  -> {
+    Update -> { T:value }
+    T:value >>- Update =<< initial
+    Update -< e { value >>- e.value }
+    update -> { T:value, >- Update{value}}
+    -> {-> value set->update}
+  }!
+}
+
+
+List{RefState}:list
+u8:n -> io.input{"Number of elements:"}!
+{
+  RefState{3}:three
+  n=0 ? {
+   -> list.push{three}!
+   -> {}
+  }
+}!

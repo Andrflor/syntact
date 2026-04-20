@@ -68,6 +68,9 @@ i=2?{
   -> pushToList{0}
 }
 
+ouf -> if{condition->true}
+
+
 if{i=2 pushToList{i} pushToList{0}}
 
 for -> {
@@ -94,6 +97,7 @@ while {
   }
 }
 
+
 rename -> {
   -> while{
     {->bob.name! ="Bob"}
@@ -102,9 +106,11 @@ rename -> {
 }
 
 rename -> {->for}
-rename[->][for]{20}
+rename{[->]{do->{->{}}}}
+rename{[->]{do{[->][<!>]bob.name{"Binny"}}}}
 
-rename[->][while]{do[->][!]bob.name{"billy"}}
+
+Square -> Square{[->]{side->10}}
 
 a -> {u8:value->0}
 b -> a{value->10}
