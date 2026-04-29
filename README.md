@@ -4,6 +4,38 @@
 
 ---
 
+## Table of Contents
+
+- [Why Syntact exists](#why-syntact-exists)
+- [The problem with functions](#the-problem-with-functions)
+- [Syntact in one idea](#syntact-in-one-idea)
+- [Your first program](#your-first-program)
+- [Bindings: pointing with `->`](#bindings-pointing-with--)
+- [Scopes: the only structure there is](#scopes-the-only-structure-there-is)
+- [Collapse: turning a scope into a value with `!`](#collapse-turning-a-scope-into-a-value-with-)
+- [Override: producing new scopes from old ones](#override-producing-new-scopes-from-old-ones)
+- [Putting it together: callables without functions](#putting-it-together-callables-without-functions)
+- [Default values, immutability, and totality](#default-values-immutability-and-totality)
+- [Primitive types: scopes of all their values](#primitive-types-scopes-of-all-their-values)
+- [The shape operator `:`](#the-shape-operator-)
+- [You don't have to use `:`](#you-dont-have-to-use-)
+- [Pattern matching with `?`](#pattern-matching-with-)
+- [Pull bindings: holes filled later with `<-`](#pull-bindings-holes-filled-later-with--)
+- [Building a list, step by step](#building-a-list-step-by-step)
+- [Effects: `>-` and `-<`](#effects---and--)
+- [Resonance: reactivity with `>>-` and `-<<`](#resonance-reactivity-with----and--)
+- [Files and folders are scopes](#files-and-folders-are-scopes)
+- [Compile-time is just collapse without effects](#compile-time-is-just-collapse-without-effects)
+- [Proofs with `??` and `?!`](#proofs-with--and-)
+- [Concurrency: choosing how to collapse](#concurrency-choosing-how-to-collapse)
+- [Why this is fast](#why-this-is-fast)
+- [How a program runs](#how-a-program-runs)
+- [A complete example](#a-complete-example)
+- [What you give up, and what you get](#what-you-give-up-and-what-you-get)
+- [Status](#status)
+
+---
+
 ## Why Syntact exists
 
 The journey to create Syntact began with a deep sense of disappointment about the current state of programming.
@@ -22,114 +54,498 @@ That's why Syntact is a step in a different direction — with its emphasis on f
 
 ## The problem with functions
 
-Programming languages have inherited a strange dogma from 18th-century mathematicians: that the *function* — a thing taking inputs and returning outputs — is the fundamental unit of computation. Every modern language is some variation of this assumption. We have free functions, methods, lambdas, closures, monadic bindings, async functions, generator functions, async generator functions… an entire phylogenetic tree of accidental complexity built on top of one borrowed idea.
+Programming languages have inherited a strange dogma from 18th-century mathematicians: that the *function* — a thing taking inputs and returning outputs — is the fundamental unit of computation. Every modern language is some variation of this assumption. We have free functions, methods, lambdas, closures, monadic bindings, async functions, generator functions, async generator functions… an entire phylogenetic tree of accidental complexity built on one borrowed idea.
 
-But look at what a processor actually does. There are no functions in assembly. There are blocks of instructions, jumps, and data. The "function" is a calling convention — a social contract bolted on top of a stack pointer. It is not the essence of programming; it is an artifact of how mathematicians wanted to talk about computation two hundred years ago.
+But look at what a processor actually does. There are no functions in assembly. There are blocks of instructions, jumps, and data. The "function" is a calling convention — a social contract bolted onto a stack pointer. It is not the essence of programming; it is an artifact of how mathematicians wanted to talk about computation two hundred years ago.
 
 Syntact takes the opposite stance: **the function does not exist**. What does exist is the *scope* — a structured collection of named potentialities — and a small set of operators for binding scopes together and reducing them to values. Everything that functions traditionally do (and a great deal that they cannot) emerges naturally from this single primitive.
 
+This isn't a stunt. It's the door to something practical: an optimization model where high-level abstractions cost exactly nothing, because there is no abstraction barrier to optimize across.
+
 ---
 
-## The one and only primitive: the scope
+## Syntact in one idea
 
-A scope is a collection of bindings, written between braces:
+The whole language is built on one structural primitive — the **scope** — and a handful of operators to bind scopes together (`->`, `<-`, `>-`, `-<`, `>>-`, `-<<`), reduce them (`!`), modify them (`{...}`), constrain them (`:`), and inspect them (`?`).
+
+That's it. There are no classes, no functions, no methods, no traits, no generics-as-a-separate-system, no macros, no module system, no async runtime. All of those things *exist* in Syntact — they just aren't separate features. They emerge from combining the operators above.
+
+The rest of this README walks through those operators one at a time, in roughly the order you'd want to learn them.
+
+---
+
+## Your first program
+
+Here is a complete Syntact program:
 
 ```syntact
-{
-  u8:r
-  u8:g
-  u8:b
-  u8:a -> 255
-}
+-> 0
 ```
 
-That's it. That is the entire structural vocabulary of the language.
+That's it. The arrow `->` says "produce." The file produces the value `0`. Compiling this and running it returns `0`. There is no `main`, no entry point, no boilerplate — the file *is* the program, and a program is something that produces a value.
 
-But every kind of construct you've ever encountered in a programming language is *also* a scope:
-
-- A **type** is a scope (`Color`, `User`, `Shape`).
-- A **value** is a scope (`{255 0 128 255}`).
-- A **module** is a scope.
-- A **file** is a scope. Its top-level bindings are its contents.
-- A **directory** is a scope. Its bindings are the files and subdirectories it contains.
-- An **event** is a scope.
-- A **pattern** is a scope.
-- Even **primitive types** are scopes — `u8` is the scope containing all valid `u8` values, with `0` as its default.
-
-This is not metaphor. It's the actual data structure the compiler manipulates. Because everything shares the same shape, the language is **homoiconic** (code is data, trivially) and **isomorphic** across every level — you operate on a struct literal exactly the way you operate on a directory tree.
-
----
-
-## Bindings: how scopes connect
-
-A program is built by *binding* scopes together. Syntact has six fundamental binding arrows, organized as three symmetric push/pull pairs:
-
-| Pair | Push | Pull | Meaning |
-|------|------|------|---------|
-| **Pointing** | `->` | `<-` | Definition / data flow |
-| **Event** | `>-` | `-<` | Emit / handle effects |
-| **Resonance** | `>>-` | `-<<` | Drive / push reactive value |
-
-Plus a few derived forms (`=<<`, `>>=` for reference-based resonance; `...` for inline expansion). That's the whole list. From these, the entire language is built.
-
-### Pointing — the everyday arrow
-
-`->` declares a binding. To the left, what you're naming; to the right, what it points to.
+A slightly less trivial one:
 
 ```syntact
 greeting -> "hello"
 answer   -> 42
-double   -> { u8:n, -> n * 2 }
+-> answer
 ```
 
-The pull form `<-` declares a binding that *cannot be directly overridden* — its value is decided later, by whoever uses it. This is how generics work, with no separate generic system:
+This program produces `42`. The binding `greeting` is computed but ignored, because nothing depends on it — and since Syntact reduces statically, the unused work is simply never emitted in the binary.
+
+That second program contains the language's two most important ideas already: **bindings** (`greeting -> "hello"`) and **production** (`-> answer`). Everything else is built from these.
+
+---
+
+## Bindings: pointing with `->`
+
+The `->` operator is a *pointing*. To the left, a name; to the right, what it points to.
+
+```syntact
+name -> "Alice"
+age  -> 30
+pi   -> 3.14159
+```
+
+Bindings are read **top-down**: a binding can only see what was declared above it in the same scope (or in enclosing scopes). There is no hoisting, no forward reference. This makes the order of code on the page also the order of evaluation in the compiler's mind, which makes everything easier to reason about.
+
+A binding without a left-hand name is a *production* — it tells the enclosing scope what to produce when reduced:
+
+```syntact
+greeting -> "hello"
+-> greeting        // this scope produces "hello"
+```
+
+A scope can have several productions; they are alternative potentialities, and the first one is the default. (We'll come back to this when we talk about types.)
+
+---
+
+## Scopes: the only structure there is
+
+A scope is a collection of bindings between braces:
+
+```syntact
+point -> {
+  x -> 10
+  y -> 20
+}
+```
+
+`point` is now a scope with two bindings. You access them with `.`:
+
+```syntact
+point.x        // 10
+point.y        // 20
+```
+
+Scopes nest:
+
+```syntact
+user -> {
+  name -> "Alice"
+  address -> {
+    city -> "Lyon"
+    zip  -> 69000
+  }
+}
+
+user.address.city     // "Lyon"
+```
+
+A file is itself a scope. So is a directory. So is a primitive type. So is an event. So is a pattern. Everything you encounter in Syntact is a scope of some kind, which is what makes the language *homoiconic* (code and data have the same shape) and *uniform* (one set of operators works on everything).
+
+---
+
+## Collapse: turning a scope into a value with `!`
+
+A scope by itself is a description, not a value. To get the value it represents, you **collapse** it with `!`:
+
+```syntact
+two -> {
+  a -> 1
+  b -> 1
+  -> a + b
+}
+
+two!     // 2
+```
+
+Without the `!`, `two` is just a scope — a recipe. With `!`, it is reduced to its produced value.
+
+This split is the engine of Syntact. **Computation never happens by accident.** A scope can be passed around, stored, overridden, inspected, or examined symbolically without ever being executed. It runs only when you say so.
+
+The `!` has variants that say *how* the collapse should happen:
+
+```syntact
+work!         // sequential, right here
+work<!>       // on another thread (locks/atomics handled for you)
+work[!]       // parallel CPU (the work must be pure)
+work(!)       // background — returns a re-collapsable handle
+work|!|       // GPU (the work must be pure)
+work([!])     // parallel CPU, in background
+work(|!|)     // GPU, in background
+```
+
+The wrappers compose freely: `<[!]>` is "parallel CPU, on another thread." `(<[!]>)` wraps that in a background handle. The same scope `work` can be collapsed sequentially, on the GPU, or in a background thread pool — without rewriting it. Concurrency is a property of the *collapse*, not of the code.
+
+A background collapse `work(!)` produces a handle. You collapse that handle later (`handle!`) to wait for the result. There is no separate `Future`, `Promise`, or `async/await` machinery — just `(!)` and `!`.
+
+---
+
+## Override: producing new scopes from old ones
+
+Once you have a scope, you can produce a *new* scope based on it by overriding some of its bindings. The override syntax is `{...}` directly after the scope:
+
+```syntact
+point -> {
+  x -> 0
+  y -> 0
+}
+
+origin    -> point             // {x:0 y:0}
+shifted   -> point{x->5}       // {x:5 y:0}
+diagonal  -> point{x->5 y->5}  // {x:5 y:5}
+```
+
+`point` itself is unchanged. Override produces a new scope — Syntact is **immutable by default**. There is no assignment operator, anywhere, ever. The only way to "change" anything is to produce a new scope from an old one.
+
+Overrides can also *add* bindings, replace whole sub-scopes, or change what the scope produces. They are structural, not positional, so you don't care about the order things were declared in.
+
+---
+
+## Putting it together: callables without functions
+
+Override and collapse, used together, are how Syntact does what other languages call "calling a function."
+
+```syntact
+square -> {
+  n -> 0
+  -> n * n
+}
+
+square!              // 0   (uses the default n -> 0)
+square{n->5}!        // 25
+square{n->10}!       // 100
+```
+
+`square` is just a scope. `square{n->5}` is the same scope with `n` overridden — still a scope, not yet computed. `square{n->5}!` collapses it to `25`.
+
+This is general enough that it replaces every callable-related concept other languages have:
+
+- **Default arguments**: just give the binding a value (`n -> 0`).
+- **Partial application**: override some bindings now, others later. `squareOf7 -> square{n->7}` — this is a scope, callable later.
+- **Higher-order callables**: a scope is a value, so you pass scopes around like any other data.
+- **Methods**: bindings inside a scope are accessed with `.`. There is no method-vs-function distinction.
+
+Crucially, you can override *any* binding, not just the input-looking ones. You can override what the scope produces:
+
+```syntact
+square{-> 99}!    // ignores n, produces 99
+```
+
+Or override the body to compute differently:
+
+```syntact
+double -> square{-> n + n}      // same n, different body
+double{n->5}!                    // 10
+```
+
+A "function" in Syntact is just *override + collapse*, in either order. There is no function declaration, no function type, no calling convention — and consequently nothing for an optimizer to lose information across.
+
+---
+
+## Default values, immutability, and totality
+
+Two properties make Syntact code unusually safe:
+
+**Every scope always has a value.** There is no `null`, no "uninitialized," no `undefined`. A scope's value, when no override is applied, is its first declared potentiality.
+
+```syntact
+Color -> {
+  -> { r -> 0, g -> 0, b -> 0, a -> 255 }
+}
+
+Color:bg     // automatically {r:0 g:0 b:0 a:255}
+```
+
+**Bindings are immutable.** Once you write `name -> "Alice"`, `name` *is* `"Alice"` for the rest of that scope. To get a different value, you produce a new scope (with override) or you reach for *resonance* (covered later) — which is itself just a structured way of producing new scopes in response to events.
+
+The benefit is that the compiler can reason about every value statically. There are no mutable aliases to worry about, no surprise `null` deref, no "did this get initialized yet" question. Programs are *total* by construction.
+
+---
+
+## Primitive types: scopes of all their values
+
+This is where Syntact starts looking unlike other languages. The primitive types — `u8`, `i32`, `f64`, `bool`, `String`, etc. — are not built-in keywords with special status. They are **scopes**, and their bindings are *all the values they can hold*.
+
+`u8` is the scope of all 256 valid `u8` values, with `0` as its first (and therefore default) potentiality. `bool` is a scope with two potentialities: `false` and `true`, defaulting to `false`. `String` is the scope of all strings, defaulting to `""`.
+
+Because they are just scopes, you write them with the same syntax as anything else:
+
+```syntact
+counter -> 0           // a u8, defaulting to 0
+flag    -> true        // a bool
+name    -> "Alice"     // a String
+```
+
+The compiler infers the most specific type from the value you wrote. You can also be explicit (next section).
+
+---
+
+## The shape operator `:`
+
+`:` constrains a binding to a particular *shape* — a particular scope. Read `u8:age` as "age, shaped like a u8."
+
+```syntact
+u8:age          // age is a u8, defaulting to 0
+String:name     // name is a String, defaulting to ""
+Color:bg        // bg is a Color, defaulting to its first potentiality
+```
+
+Because every scope has a default, `u8:age` already gives `age` a meaningful value (`0`). You can override it the usual way:
+
+```syntact
+u8:age -> 30
+```
+
+This is what other languages would call a "type annotation," but it isn't a separate annotation system — it's just an operator that constrains a binding to a sub-scope.
+
+It works for any scope, not just primitives:
+
+```syntact
+Point -> {
+  u8:x
+  u8:y
+}
+
+Point:p              // p is {x:0 y:0}
+Point:p2 -> {x->5}   // p2 is {x:5 y:0}
+```
+
+Combine `:` with the override syntax to constrain *and* override at once:
+
+```syntact
+Point:origin{x->10 y->20}
+```
+
+---
+
+## You don't have to use `:`
+
+Here is something important that often surprises newcomers: **you can write entire Syntact programs without ever using `:`**. The shape operator is a tool for when you want the compiler to enforce a constraint. But pointing and override alone — `->` and `{...}` — are enough to write working programs.
+
+```syntact
+greeting -> "hello"
+person -> {
+  name -> "Alice"
+  age -> 30
+}
+older -> person{age -> 31}
+-> older.name
+```
+
+That's a complete program. No `:`, no type annotations, no boilerplate. The compiler infers everything it needs from the values you wrote.
+
+Use `:` when you want to:
+- Document an intent ("this binding holds a `u8`").
+- Refine a value into a sub-scope ("this binding must satisfy `Adult`").
+- Make the compiler verify a structural property at the boundary.
+
+Otherwise, leave it out. Syntact is meant to feel light when you want it light.
+
+---
+
+## Pattern matching with `?`
+
+`?` matches a value against the potentialities of a scope, or against literal patterns:
+
+```syntact
+n ? {
+  0 -> "zero"
+  1 -> "one"
+  -> "many"
+}
+```
+
+The last branch (no left-hand pattern) is the default. Branches are tried top-down.
+
+You can match on shape:
+
+```syntact
+shape ? {
+  Circle: -> "round"
+  Square: -> "square"
+  -> "unknown"
+}
+```
+
+You can match on refinements (sub-scopes):
+
+```syntact
+n ? {
+  0  -> "zero"
+  >0 -> "positive"
+  -> "negative"
+}
+```
+
+You can destructure:
+
+```syntact
+point ? {
+  {x -> 0, y -> 0} -> "origin"
+  {x -> (x)} -> "x is " + x
+}
+```
+
+Because *types are their potentialities* in Syntact, `?` doesn't distinguish between "matching a sum type" and "matching a value" and "checking a refinement" — all three are the same operation: constrain a value to a sub-scope and pick the matching branch.
+
+---
+
+## Pull bindings: holes filled later with `<-`
+
+`->` is *push*: the value flows from right to left. `<-` is *pull*: the binding declares a hole that will be filled by *whoever uses this scope*. This is how Syntact does generics — without a separate generic system.
+
+```syntact
+identity -> {
+  T <- None        // T is a hole, filled at the use site
+  T:value
+  -> value
+}
+
+identity{T->u8 value->5}!       // 5, with T resolved to u8
+identity{T->String value->"hi"}!  // "hi", with T resolved to String
+```
+
+The pull arrow tells the compiler: "this binding is not the place to fix `T` — wait until someone uses this scope, and let *their* override decide." This is what makes a scope *parametrically polymorphic* without any `<T>` syntax or template machinery.
+
+In practice you'll see `<-` everywhere generics would appear in another language: in containers, in mappers, in algebraic structures.
+
+---
+
+## Building a list, step by step
+
+Let's build a `List` type from scratch, slowly, to see how the pieces fit.
+
+A list is either empty, or it is one element followed by another list. In Syntact, we say that by giving the scope two productions — two potentialities for what a `List` can be:
 
 ```syntact
 List -> {
-  T <- None      // T is a hole — filled at use site
-  -> {}
-  -> { T:, ...List{T}: }
+  T <- None              // element type, filled at use site
+  -> {}                  // potentiality 1: empty list
+  -> { T:, ...List{T}: } // potentiality 2: an element, then another list
 }
-
-List{u8}:numbers     // T resolves to u8 here
-List{String}:names   // and to String here
 ```
 
-No `<T>`, no `Generic[T]`, no template metaprogramming dialect. Just the same arrow, pointed the other way.
+Three things are happening here:
 
-### Events — algebraic effects, structurally
+1. `T <- None` declares the element type as a hole. It defaults to `None` (a built-in empty scope), and is filled by whoever uses `List`.
+2. `-> {}` says "one of the things a `List` can be is the empty scope." This is the first potentiality, and therefore the default.
+3. `-> { T:, ...List{T}: }` says "another thing a `List` can be is a scope containing a `T` followed by the contents of another `List{T}`." `T:` is a binding shaped like `T`, anonymous. `...` *expands* the contents of another scope into this one. So the second potentiality is "one element, then everything that's in another list."
 
-`>-` emits an effect. `-<` handles it.
+To use it:
 
 ```syntact
-Log -> { String:message }
+List{T->u8}:numbers              // an empty u8 list (the default)
+List{T->u8}:numbers -> {1 2 3}   // a u8 list with three elements
+```
 
-debugPrint -> {
-  String:message
-  >- Log{message->message}    // emit
-}
+Because `...` flattens, you don't need to write `{1 {2 {3 {}}}}` — `{1 2 3}` *is* the nested form, written flatly. The two are the same data.
 
-main -> {
-  Log -< e {                  // handle
-    -> io.write{e.message}!
+A `map` over a list:
+
+```syntact
+map -> {
+  S <- None
+  R <- None
+  List{S}:list
+  mapper -> {
+    S:(e)        // takes an S, captured as e
+    -> R:        // produces an R
   }
-  debugPrint{message->"hi"}!
+  -> list ? {
+    {} -> {}                                       // empty list maps to empty list
+    {S:(e) ...List{S}:(rest)} ->                   // first element + the rest
+      {mapper{e}! ...map{list->rest mapper}!}
+  }
 }
 ```
 
-The handler doesn't have to live near the emitter. The compiler statically proves that every emitted effect has a handler in scope at the point of collapse. The same `debugPrint` can be interpreted as real I/O, as a mock, as a replay log, or as a compile-time evaluation — depending entirely on which handlers are installed at the call site. Effects are never magic; they are just bindings.
+Read the body slowly:
+- The pattern `{}` matches the empty list — produce the empty list.
+- The pattern `{S:(e) ...List{S}:(rest)}` matches a non-empty list, capturing the head as `e` and the tail as `rest`.
+- The result is `{mapper{e}! ...map{list->rest mapper}!}` — apply `mapper` to `e`, then expand the recursive map of the tail.
 
-### Resonance — reactivity without a framework
+You now have a fully generic `map`, written using only the operators we've seen so far. There was no class, no interface, no `Functor`, no template, no `<T>`. Just scopes, bindings, override, collapse, expansion, and pattern match.
 
-`>>-` says "this value is *driven* by that event." `-<<` pushes a new value into a resonant binding. There is no `useState`, no `Observable`, no `signal()` — just two arrows.
+---
+
+## Effects: `>-` and `-<`
+
+So far everything has been pure. Real programs need to talk to the world — to print things, to read files, to make HTTP calls. Syntact handles this through **algebraic effects**, with two arrows: `>-` to emit, `-<` to handle.
+
+An effect is just a scope (of course). You declare it like any other:
+
+```syntact
+Log -> {
+  String:message
+}
+```
+
+To emit a `Log` effect, use `>-`:
+
+```syntact
+debugPrint -> {
+  String:message
+  >- Log{message}
+}
+```
+
+To handle it, use `-<`. The handler captures the emitted scope (here as `e`):
+
+```syntact
+Log -< e {
+  -> io.write{e.message}!
+}
+```
+
+The trick is that *the handler doesn't need to be near the emitter*. You install handlers wherever you want the effects to take meaning — typically near the top of your program:
+
+```syntact
+program -> {
+  Log -< e { -> io.write{e.message}! }    // install handler
+  debugPrint{message->"hello"}!            // emit propagates up to handler
+}
+
+-> program!
+```
+
+The compiler **statically proves** that every emitted effect has a handler in scope at the point of collapse. If it doesn't, the program does not compile. There is no exception, no runtime error, no "effect not handled" surprise — only compile errors.
+
+This is enormously powerful. The same `debugPrint` can be:
+- Real I/O (handler writes to stdout).
+- A unit test (handler captures the messages into a list).
+- A replay log (handler timestamps and stores them).
+- A compile-time evaluation (handler runs at compile time, see later).
+
+The code you wrote doesn't change. Only the handler does.
+
+---
+
+## Resonance: reactivity with `>>-` and `-<<`
+
+Sometimes a value isn't a single computation — it changes over time in response to events. Syntact handles this with **resonance**, written `>>-` ("driven by") and `-<<` ("push to").
+
+A counter:
 
 ```syntact
 Counter -> {
-  Change -> { u8:value }
+  Change -> { u8:value }       // the event that changes the counter
   -> {
-    u8:value >>- Change -> 0      // value is driven by Change, default 0
-    Change -< e {
-      value -<< e.value           // push the new value
+    u8:value >>- Change -> 0   // value is driven by Change, defaults to 0
+    Change -< e {              // when Change fires...
+      value -<< e.value        // ...push the new value into `value`
     }
     increment -> { >- Change{value+1} }
     decrement -> { >- Change{value-1} }
@@ -138,158 +554,53 @@ Counter -> {
 }
 ```
 
-That's a complete reactive counter. No subscriptions to manage, no lifecycle, no diff. The same primitives also drive a UI, a piece of state, an animation, or a database row.
+Read this carefully:
+- `value >>- Change -> 0` says "`value` is a `u8` driven by the `Change` event, with initial value `0`."
+- `Change -< e { value -<< e.value }` is the handler — when `Change` fires, push the new value into `value`.
+- `increment` emits `Change{value+1}`, which causes `value` to update.
+
+There's no framework here. No subscriptions. No diffing. No lifecycle. Just two arrows.
+
+The same machinery handles UI reactivity, observable streams, signal-based state management, and database row subscriptions — they were never different things. They were all just "value driven by event."
 
 ---
 
-## Immutability and default values
+## Files and folders are scopes
 
-**Everything in Syntact is immutable by default.** No binding can be reassigned. The "mutation" you see in `Counter` is not assignment — it is a new value produced in response to an event, via resonance. Mutation is not a primitive; it is a *pattern* you opt into.
-
-**Every scope always has a value.** This is one of the language's quiet superpowers. There is no `null`, no "uninitialized," no `undefined`, no surprise zero-value. A scope's default is simply its *first declared potentiality*. For `u8`, that is `0`. For your own `Color`, it's `{0 0 0 255}`. For an `Option`-like type, it's whichever variant you list first.
+`@` resolves the filesystem as a scope graph. A folder is a scope; its bindings are its files and subfolders. A file is a scope; its bindings are its top-level pointings.
 
 ```syntact
-Color -> {
-  -> { u8:r, u8:g, u8:b, u8:a -> 255 }
-}
+Plane2D -> @lib.geometry.Plane
 
-Color:c        // c is { r:0 g:0 b:0 a:255 } — automatically
+// expand a modified version of an entire directory into the current scope
+...@lib.geometry{Plane -> Plane{dimension -> 3}}
 ```
 
-This makes types **total** — every value of every type is constructible without ceremony — and gives the language a clean story about initialization that doesn't require constructors, factory methods, or `Default` traits.
+Read the second line slowly: `@lib.geometry` is a folder-scope. `{Plane -> Plane{dimension -> 3}}` overrides one of its bindings. `...` expands the result into the current scope. So this single line takes a whole library, modifies one piece of it, and dumps it into the current namespace.
 
----
-
-## Types as enumerated potentiality
-
-Because a type is just a scope, and a scope is a set of named potentialities, **a type is literally the set of values it can hold**. `u8` is the scope containing all 256 valid `u8` values; `Shape` is the scope of all shapes; `Color` is the scope of all colors. Pattern matching, refinement, and "type checking" are therefore the same operation: *constraining a scope to a sub-scope*.
-
-The shape operator `:` enforces that a value collapses into a given scope:
-
-```syntact
-u8:age -> 30           // age is constrained to the u8 scope
-Color:bg               // bg defaults to the first Color potentiality
-```
-
-Refinement extends this to arbitrary subsets:
-
-```syntact
-Adult -> ?User:{ age ?>= 18 }     // refinement type
-even  -> %2 = 0                   // a predicate scope
-```
-
-Set operators compose types directly: `&` (intersection), `|` (union), `~` (complement). There is no separate "type algebra" — it's just scope arithmetic.
-
-```syntact
-NStar -> N ~ {}              // natural numbers minus zero
-NumOrText -> u8 | String     // sum type, no enum keyword
-```
-
----
-
-## "Functions," redefined
-
-Since there are no functions, what does a callable look like? A scope that produces a value:
-
-```syntact
-square -> {
-  u8:n
-  -> n * n
-}
-```
-
-You "call" it by *overriding* its inputs and *collapsing* it:
-
-```syntact
-square{n->5}!     // override n to 5, collapse, get 25
-```
-
-Override (`{...}`) and collapse (`!`) are independent primitives. They compose. You can override without collapsing (partial application, for free):
-
-```syntact
-squareOf7 -> square{n->7}      // a scope, not yet collapsed
-squareOf7!                      // 49, when you want it
-```
-
-You can pass a scope as a value (no special "function pointer"):
-
-```syntact
-map{ list->{1 2 3}, mapper->square }!
-```
-
-You can override the *body* of a callable, not just its inputs (override is structural, not positional):
-
-```syntact
-doubleIt -> square{n -> n + n}    // changes what square computes
-```
-
-You can derive new behaviors by composing scopes:
-
-```syntact
-transform -> {
-  maybe{Shape}:shape
-  transformer -> { maybe{Shape}:shape, -> shape }
-  -> transformer{shape->shape}!
-}
-
-doubleV2 -> transform{transformer->double}    // same runtime cost as double
-```
-
-There is no calling convention, no closure capture rule, no method-vs-function distinction, no curry-vs-partial-application debate. There is one operation — override-and-collapse — and it does all of it.
-
----
-
-## Collapse and how you get it done
-
-`!` reduces a scope to its produced value. The wrappers around `!` say *where* and *how*:
-
-```syntact
-work!         // sequential
-work<!>       // on another thread (locks/atomics handled for you)
-work[!]       // parallel CPU (must be pure)
-work(!)       // background — returns a re-collapsable handle
-work|!|       // GPU (must be pure)
-work([!])     // parallel CPU in background
-work(|!|)     // GPU in background
-```
-
-These compose. `<[!]>` is "parallel CPU, on another thread." `(<[!]>)` is "the same, in background." Concurrency is a property of the *collapse*, not of the code being collapsed. The same scope can be run sequentially, on the GPU, or in a background thread pool, with no rewriting.
-
----
-
-## Pattern matching: collapse along a potentiality
-
-`?` matches a value against the potentialities of a scope:
-
-```syntact
-shape ? {
-  Circle: -> shape{radius -> radius * 2}
-  Square: -> shape{side -> side * 2}
-  -> shape
-}
-```
-
-Because types *are* their potentialities, the same operator handles structural destructuring, sum-type dispatch, refinement matching, and value comparison — they were never different things to begin with.
-
-```syntact
-n ? {
-  0 -> "zero"
-  >0 -> "positive"
-  -> "negative"
-}
-```
+There is no import system, no module syntax, no `from … import …`. There is one scope graph, and the same five operators that work on everything else work on it too.
 
 ---
 
 ## Compile-time is just collapse without effects
 
-Pure reduction is the same operation at compile time and at run time. So the compiler does as much of it as it possibly can, ahead of time. A program with no effects literally compiles to a constant — there is nothing left to run.
+Here's a quietly enormous property of Syntact: **the compiler is the same engine as the runtime**, used at a different time.
 
-Effects can be *lifted* to compile time explicitly:
+A pure computation has no effects. A pure computation can therefore be fully reduced by the compiler. The result is baked into the binary. There is nothing left to run.
 
 ```syntact
-httpCompileTime -> !{@http}
-configText -> httpCompileTime.get{"https://api.example.com/config"}!
+greeting -> "hello, " + "world"
+-> greeting
+```
+
+This program contains no effects. The compiler reduces `"hello, " + "world"` to `"hello, world"` and the binary is a constant. No string concat happens at runtime.
+
+This generalizes. You can lift an effectful operation into compile-time evaluation by wrapping it:
+
+```syntact
+compileTimeHttp -> !{@http}
+
+configText -> compileTimeHttp.get{"https://api.example.com/config"}!
 
 result -> configText ? {
   "PRODUCTION"  -> "Production mode"
@@ -298,22 +609,29 @@ result -> configText ? {
 }
 ```
 
-The HTTP request happens during compilation. The result is baked into the binary. The pattern match collapses to a constant. There is no macro system because there does not need to be one — the language is its own metalanguage.
+The HTTP call happens during compilation. The pattern match collapses to a constant. The runtime program is a single string load. There is no macro system in Syntact because there does not need to be one — the language is its own metalanguage.
 
 ---
 
-## Proofs: the same machinery, used for guarantees
+## Proofs with `??` and `?!`
 
-`??` declares a symbolic unknown — a universally quantified value. `?!` enforces a property. Together, they let you write theorems the compiler must prove:
+Two more operators let you write theorems that the compiler proves at compile time:
+
+- `??` declares a *symbolic unknown* — a value that stands for "any value of this shape."
+- `?!` *enforces* a property — the compiler must prove it holds, or the program does not compile.
 
 ```syntact
 incrementAlwaysIncreases -> {
-  u8:prev -> ??
+  u8:prev -> ??              // for any prev
   Counter:count{value -> prev}
   count.increment!
-  -> count! = prev + 1
+  -> count! = prev + 1       // the result must equal prev + 1
 }
+```
 
+The compiler symbolically reduces both sides for every possible `prev`. If it can't prove the equality, the program is rejected.
+
+```syntact
 addCommutative -> {
   Nat:a -> ??
   Nat:b -> ??
@@ -321,59 +639,82 @@ addCommutative -> {
 }
 ```
 
-The compiler reduces both sides symbolically and verifies the equality holds for *every* `prev`, every `a`, every `b`. Refusing to compile is the failure mode.
-
-This isn't a separate proof assistant bolted on. It's the same reducer used for everything else, asked to prove an equality instead of compute a value.
+This isn't a separate proof assistant glued onto the language. It's the *same* reducer used for everything else, asked a slightly different question: "for all values of these holes, does this equation hold?"
 
 ---
 
-## Files and folders are scopes too
+## Concurrency: choosing how to collapse
+
+We mentioned the collapse wrappers earlier. Here they are again, in context:
 
 ```syntact
-Plane2D -> @lib.geometry.Plane
-
-// Expand a modified version of an entire directory into the current scope
-...@lib.geometry{Plane -> Plane{dimension -> 3}}
+result -> heavyComputation!       // run it now, sequentially
+result -> heavyComputation<!>     // on another thread; locks/atomics auto-managed
+result -> heavyComputation[!]     // parallel CPU (data-parallel; must be pure)
+result -> heavyComputation(!)     // background; result is a handle
+result -> heavyComputation|!|     // GPU (must be pure)
+result -> heavyComputation([!])   // parallel CPU, in background
 ```
 
-`@` resolves the filesystem as a scope. `lib` is a folder-scope; `geometry` is a file-scope inside it; `Plane` is a binding inside that. The dot is the same property access you use on any other scope. Override and expansion work on directories the same way they work on struct literals.
+The wrappers compose: `<[!]>` is "parallel CPU on another thread," `(<[!]>)` is "the same, deferred until you collapse the handle."
 
-There is no import system. There is no module system. There is one filesystem-backed scope graph, and the same five operators that work on everything else work on it too.
+Three things matter here:
+
+1. The *code being collapsed* doesn't know how it will run. The same `heavyComputation` scope can be collapsed sequentially in tests and in parallel in production. No rewriting.
+2. Purity is enforced statically by the compiler. `[!]` and `|!|` will not compile if the scope they wrap can emit effects with non-commutative handlers.
+3. Background collapses produce a handle. To wait, you collapse the handle: `result!`. This is the same `!` you've been using all along — there is no `await` keyword.
 
 ---
 
-## How execution actually works
+## Why this is fast
 
-> **Running a program means collapsing the scope of a file.**
+Syntact has performance ambitions that are unusual for a high-level language: it aims to be **faster than traditional compiled languages**, not despite its abstractions but *because of* them.
 
-That's the entire execution model. There is no main loop, no runtime, no special entry function. The compiler takes a file, finds its produced value (`-> ...`), and reduces it.
+The argument is simple. In a typical language, an abstraction is an opaque barrier — a function call, an interface dispatch, a virtual method, a closure capture. Optimizers work hard to see through these barriers, and they often fail. The cost of an abstraction in those languages is real.
+
+In Syntact, there are no such barriers. There is one primitive: scope reduction. Every "abstraction" in Syntact — generics, higher-order callables, modules, traits, effect handlers, even reactivity — is just a particular shape of scope being reduced. The compiler doesn't have to *see through* abstractions; there is nothing to see through.
+
+The collapse operator `!` is, fundamentally, **an optimization mechanism**. When you write `f{x->5}!`, you are not "calling a function with the value 5." You are asking the compiler to reduce the scope `f` with `x` overridden to `5`, as far as it can. Often, that reduction is total: the entire `f` evaporates into a constant. Sometimes it bottoms out at an effect that has to wait for runtime. Either way, no abstraction has been preserved beyond what was necessary.
+
+The intended programming experience is this: **you should be able to think at the level of data and machine instructions, while writing extremely high abstractions, and pay nothing for them.** The high-level shape of your code and the low-level shape of your binary are bridged by a single uniform reduction process. There is no semantic gap to optimize across, because there are no extra semantic layers to begin with.
+
+This is the reason Syntact rejects the function as a primitive. The function is exactly the kind of opaque abstraction barrier that prevents languages from compiling to optimal code.
+
+---
+
+## How a program runs
+
+> **Running a Syntact program means collapsing the scope of a file.**
+
+That's the entire execution model. The compiler takes your entry file. It finds the file's production (`-> something`). It reduces.
+
+If the production has no effects, the program *is* its result. It compiles to a constant. The binary literally returns a value and exits.
 
 ```syntact
-// some_file.syn
-greeting -> "hello"
--> 0
+-> 42       // compiles to: return 42
 ```
 
-This program returns `0`. With no effects in the chain, it compiles to a constant `return 0` — the binary literally does nothing else.
+If the production passes through effects, the compiler arranges for those effects to fire in the right order before the result is produced. It statically guarantees that every effect has a handler in scope.
 
 ```syntact
-// app.syn
-main -> {
+program -> {
   Log -< e { -> io.write{e.message}! }
   >- Log{"hello"}
   -> 0
 }
 
--> main!
+-> program!
 ```
 
-This program *also* returns `0`. But to get there, the collapse of `main` traverses an effect emission, which forces the compiled binary to perform the I/O before returning. The compiler statically guarantees that every effect emitted along the way has a handler installed at the point of collapse. If it doesn't, the program does not compile. There is no exception handler, no runtime panic, no "effect not found" error at run time — the failure mode is a compile error, always.
+This program returns `0`. But the collapse of `program` traverses an effect emission, so the binary writes "hello" to stdout before returning `0`. The handler is statically resolved, so there is no runtime lookup, no dispatch table, nothing dynamic — just the I/O call inlined where the emit was.
 
-The name `main` is a convention. You could call it `start`, `program`, `do_thing` — what matters is that the file ends with `-> something!`, and that "something" is what the program does.
+The name `program` is arbitrary. You could call it `main`, `start`, `run`, `do_thing`, `xyz`. What matters is that the *file* ends with `-> something!`, and that "something" is what the program does.
 
 ---
 
-## The shape of a real program
+## A complete example
+
+Putting it together — a reactive counter, an effect handler module, and a program that uses both:
 
 ```syntact
 Counter -> {
@@ -392,20 +733,26 @@ Logging -> {
   Log -< e { -> io.write{e.message}! }
 }
 
-main -> {
-  ...Logging
-  Counter:counter
-  >- Log{counter!}    // 0
+program -> {
+  ...Logging                  // install the Log handler
+  Counter:counter             // a counter, defaults to 0
+  >- Log{counter!}            // "0"
   counter.increment!
-  >- Log{counter!}    // 1
+  >- Log{counter!}            // "1"
   counter.decrement!
-  >- Log{counter!}    // 0
+  >- Log{counter!}            // "0"
+  -> 0
 }
 
--> main!
+-> program!
 ```
 
-A reactive counter, an effect handler module, and a program that uses both — in twenty lines, with no framework, no class system, no async runtime, no observer pattern, no dependency injection, no import statement.
+What you have here:
+- A reactive counter type.
+- An effect handler module, expanded inline.
+- A program that uses both.
+
+What's missing — and notably so — is everything you'd expect to see in another language: no class declaration, no constructor, no observer pattern, no event subscription, no async runtime, no framework, no import statement, no entry-point boilerplate. Twenty lines, and the language gave you all of that for free.
 
 ---
 
@@ -419,16 +766,16 @@ Syntact gives up:
 - The distinction between compile time and run time.
 - Separate systems for generics, traits, macros, modules, effects, reactivity, and proofs.
 
-In exchange, you get:
+In exchange:
 
-- One structural primitive (scope) and six binding arrows.
+- One structural primitive (scope) and a small set of binding arrows.
 - Everything is total. Everything has a default. Nothing is null.
 - Generics, sum types, refinement types, pattern matching, dependent types, and proofs — all from the same operators.
 - Algebraic effects with statically-proven handlers — no runtime cost beyond the I/O itself.
 - Reactivity without a framework.
 - Compile-time evaluation without a macro system.
 - Composable concurrency wrappers (sequential, threaded, parallel, GPU, background) that don't require the code itself to know how it will run.
-- A program that, in the absence of effects, compiles to a constant.
+- Performance ambitions beyond traditional languages, because there are no abstraction barriers for the optimizer to fight.
 
 ---
 
