@@ -4,30 +4,80 @@
 
 ---
 
-## Table of Contents
+Syntact is an experimental general-purpose programming language built on a single radical idea: **the function is an 18th-century idea, and we don't need it.**
 
+In its place, Syntact has *scopes* — structured collections of named things — and a small set of arrows for binding scopes together. From those primitives, everything emerges: types, generics, modules, pattern matching, algebraic effects, reactivity, even compile-time-verified proofs. There is no class system, no trait system, no macro system, no async runtime. There is one structural primitive, and a handful of operators.
+
+A complete program looks like this:
+
+```syntact
+Counter -> {
+  Change -> { u8:value }
+  -> {
+    u8:value >>- Change -> 0
+    Change -< e { value -<< e.value }
+    increment -> { >- Change{value + 1} }
+    -> value
+  }
+}
+
+program -> {
+  Log -> { String:message }
+  Log -< e { -> io.write{e.message}! }
+
+  Counter:counter
+  >- Log{counter!}        // "0"
+  counter.increment!
+  >- Log{counter!}        // "1"
+  -> 0
+}
+
+-> program!
+```
+
+That's a reactive counter, an effect handler, and a program that uses both — in fifteen lines, with no framework, no class, no observer pattern, no subscription, no `useState`, no import statement. The compiler reduces everything it can ahead of time, statically proves that every effect has a handler, and produces a binary with zero abstraction overhead.
+
+The performance ambition is unusual: Syntact aims to be **faster than traditional compiled languages**, because it has no abstraction barriers for the optimizer to fight against. The collapse operator `!` is, fundamentally, an optimization mechanism. You write at the level of high abstractions, and you pay the cost of the underlying assembly — nothing more.
+
+The rest of this document walks through the language one operator at a time. By the end, you'll be able to read every snippet above without translation.
+
+---
+
+## Contents
+
+**Motivation**
 - [Why Syntact exists](#why-syntact-exists)
 - [The problem with functions](#the-problem-with-functions)
 - [Syntact in one idea](#syntact-in-one-idea)
+
+**The basics**
 - [Your first program](#your-first-program)
 - [Bindings: pointing with `->`](#bindings-pointing-with--)
 - [Scopes: the only structure there is](#scopes-the-only-structure-there-is)
 - [Collapse: turning a scope into a value with `!`](#collapse-turning-a-scope-into-a-value-with-)
 - [Override: producing new scopes from old ones](#override-producing-new-scopes-from-old-ones)
 - [Putting it together: callables without functions](#putting-it-together-callables-without-functions)
+
+**Values, types, and matching**
 - [Default values, immutability, and totality](#default-values-immutability-and-totality)
 - [Primitive types: scopes of all their values](#primitive-types-scopes-of-all-their-values)
 - [The shape operator `:`](#the-shape-operator-)
 - [You don't have to use `:`](#you-dont-have-to-use-)
 - [Pattern matching with `?`](#pattern-matching-with-)
+
+**Building real programs**
 - [Pull bindings: holes filled later with `<-`](#pull-bindings-holes-filled-later-with--)
 - [Building a list, step by step](#building-a-list-step-by-step)
 - [Effects: `>-` and `-<`](#effects---and--)
 - [Resonance: reactivity with `>>-` and `-<<`](#resonance-reactivity-with----and--)
 - [Files and folders are scopes](#files-and-folders-are-scopes)
+
+**Beyond runtime**
 - [Compile-time is just collapse without effects](#compile-time-is-just-collapse-without-effects)
 - [Proofs with `??` and `?!`](#proofs-with--and-)
 - [Concurrency: choosing how to collapse](#concurrency-choosing-how-to-collapse)
+
+**Closing**
 - [Why this is fast](#why-this-is-fast)
 - [How a program runs](#how-a-program-runs)
 - [A complete example](#a-complete-example)
@@ -92,7 +142,16 @@ answer   -> 42
 -> answer
 ```
 
-This program produces `42`. The binding `greeting` is computed but ignored, because nothing depends on it — and since Syntact reduces statically, the unused work is simply never emitted in the binary.
+This program produces `42`. The binding `greeting` is computed but ignored, because nothing depends on it — and since Syntact reduces statically, the unused work is simply never emitted in the binary. To make that concrete, here is the entire x86-64 program the compiler produces for the snippet above:
+
+```asm
+_start:
+    mov     edi, 42         ; exit code = 42
+    mov     eax, 60         ; syscall: exit
+    syscall
+```
+
+That's the whole binary. No string `"hello"` appears anywhere — it was reduced away at compile time, along with the binding that held it. Two syscalls' worth of instructions, because that's all the program actually does.
 
 That second program contains the language's two most important ideas already: **bindings** (`greeting -> "hello"`) and **production** (`-> answer`). Everything else is built from these.
 
