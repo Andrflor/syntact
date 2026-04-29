@@ -578,15 +578,25 @@ String:name     // name is a String, defaulting to ""
 Color:bg        // bg is a Color, defaulting to its first production
 ```
 
-Because every scope has a default, `u8:age` already gives `age` a meaningful value. You can override it:
+Because every scope has a default, `u8:age` already gives `age` a meaningful value.
 
-```dart
-u8:age -> 30
-```
+This is what other languages would call a "type annotation," but it isn't a separate annotation system — and it isn't passive either.
 
-This is what other languages would call a "type annotation," but it isn't a separate annotation system — it's just an operator that says "constrain this binding to a sub-scope of that scope."
+### `:` is a collapse-like operation
 
-It works on any scope, not just primitives:
+`:` and `!` are siblings. Both examine the **productions** of a scope to decide what comes out:
+
+- `!` reduces a scope through its productions to a value.
+- `:` constrains a binding to one of those productions, and uses the first one as default.
+
+This is why "primitive types" need no special status: `u8` is a scope whose productions are its 256 valid values, and `:` simply picks one (the first by default). It's the same machinery used for everything else.
+
+The two operators differ in one important way — what happens when the target scope has **no production**:
+
+- `!` on a scope with no production returns `none` (the empty sentinel).
+- `:` on a scope with no production constrains to the **scope itself**.
+
+That second rule is what makes ordinary types ergonomic. You don't have to wrap a simple type in `{ -> { ... } }` to make it usable as a shape:
 
 ```dart
 Point -> {
@@ -594,15 +604,53 @@ Point -> {
   u8:y
 }
 
-Point:p              // p is {x:0 y:0}
-Point:p2 -> {x->5}   // p2 is {x:5 y:0}
+Point:p              // p is {x:0 y:0} — Point itself is the shape
 ```
 
-You can combine `:` and carving to constrain *and* override at once:
+If `:` defaulted to `none` like `!` does, you would have to write `Point -> { -> { u8:x u8:y } }` every time you wanted a usable type. The asymmetry removes that boilerplate. A scope without an explicit production *is* its own shape.
+
+### Carving with `:`
+
+You can combine `:` and carving to constrain *and* override at once. The carving applies after the shape constraint:
 
 ```dart
-Point:origin{x->10 y->20}
+Point:origin{x->10 y->20}    // an instance of Point, with x=10 y=20
+Point:p2{x->5}               // an instance of Point, with x=5 y=0 (default)
 ```
+
+### Anonymous constraints
+
+The label on the left of `:` is **optional**. When you omit it, you get an anonymous constraint — a positional binding shaped like the given scope, with no name attached. This is useful when position alone is enough to identify the binding, typically inside structural patterns or other scopes:
+
+```dart
+List -> {
+  T <- None
+  -> {}
+  -> { T:, ...List{T}: }    // T: is an anonymous binding shaped like T
+}
+
+shape ? {
+  Circle: -> "round"        // Circle: matches the Circle shape, no name needed
+  Square: -> "square"
+}
+```
+
+When you do want a name, just write it: `Circle:c` instead of `Circle:`. The choice is yours.
+
+### Sum types come for free
+
+Because `:` looks at productions, and a scope can be bound to several things, sum types fall out naturally. Declare a scope with multiple productions, and `:` lets a binding shaped like that scope take any of them:
+
+```dart
+Shape -> {
+  -> Circle:
+  -> Square:
+}
+
+Shape:s    // s is a Shape — could be a Circle or a Square (defaulting to Circle)
+```
+
+The pattern matching operator `?` (next section) is then what lets you discriminate between the productions. There is no `enum` keyword, no `union` keyword, no tagged-variant machinery — just productions and `:`.
 
 ### You don't have to use `:`
 
