@@ -227,7 +227,7 @@ answer   -> 42
 -> answer
 ```
 
-This program produces `42`. The binding `greeting` is computed but ignored, because nothing depends on it — and since Syntact reduces statically, the unused work is simply never emitted in the binary. To make that concrete, here is the entire x86-64 program the compiler produces for the snippet above:
+This program produces `42`. The binding `greeting` is computed but ignored, because nothing depends on it — and since Syntact reduces statically, the unused work is simply never emitted in the binary. To make that concrete, if we compile for Linux on x86-64, here is the entire program the compiler produces for the snippet above:
 
 ```asm
 _start:
