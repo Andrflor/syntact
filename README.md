@@ -349,33 +349,48 @@ A subtlety worth being precise about: **`!` is not general expression evaluation
 A binding can point directly to a value or expression:
 
 ```dart
-base -> {
+box -> {
   x -> 1
   y -> x + 1
 }
 
-base.y    // 2
+box.y    // 2
 ```
 
-Here `y` is not a scope — it is a binding pointing at the expression `x + 1`. There is nothing to collapse. Reading `base.y` resolves to `2` by following the binding.
+Here `y` is not a scope — it is a binding pointing at the expression `x + 1`. There is nothing to collapse. Reading `box.y` resolves to `2` by following the binding.
 
 A binding can also point at a scope:
 
 ```dart
-base -> {
+box -> {
   x -> 1
   y -> {
     -> x + 1
   }
 }
 
-base.y     // the scope bound to y
-base.y!    // 2
+box.y     // the scope bound to y
+box.y!    // 2
 ```
 
-Now `y` is a binding pointing at a scope. Reading `base.y` gives you that scope. Writing `base.y!` is what reduces it.
+Now `y` is a binding pointing at a scope. Reading `box.y` gives you that scope. Writing `box.y!` is what reduces it.
 
 The rule is simple: **expressions resolve, scopes collapse.** `!` only appears when the thing being reduced is a scope.
+
+### Collapsing a scope with no production
+
+What if you collapse a scope that has no production at all?
+
+```dart
+empty -> {
+  x -> 1
+  y -> 2
+}
+
+empty!     // none
+```
+
+Collapse is a total operation: it always returns something. When the scope has no `-> ...` line, there is nothing to reduce through, so the collapse returns `none` — Syntact's empty-value sentinel. This is consistent with the rest of the language: nothing is undefined, nothing throws, nothing is null in the C sense. A scope without a production is still a perfectly valid scope; it just has no value to produce when reduced.
 
 ### Reduction is intentional
 
@@ -423,15 +438,15 @@ This is what other languages would call inheritance, instantiation, configuratio
 Because scopes are top-down reduction structures, overriding an earlier binding propagates naturally to anything declared below it that depended on it.
 
 ```dart
-base -> {
+box -> {
   x -> 1
   y -> x + 1
 }
 
-base.y                   // 2
+box.y                   // 2
 
-derived -> base{x -> 10}
-derived.y                // 11
+derived -> box{x -> 10}
+derived.y               // 11
 ```
 
 `y` is not a collapsed scope here — it is a binding whose target depends on `x`. When `x` is carved over in `derived`, `y` is resolved in the new derived structure, so it sees the new `x` and resolves to `11`. Carving doesn't poke into a fixed object; it derives a new structure where the rest of the scope is reinterpreted with the new binding in place.
@@ -439,15 +454,15 @@ derived.y                // 11
 If you want `y` itself to be a scope (something you'd reduce with `!`), you write one:
 
 ```dart
-base -> {
+box -> {
   x -> 1
   y -> {
     -> x + 1
   }
 }
 
-base.y      // the scope bound to y
-base.y!     // 2
+box.y       // the scope bound to y
+box.y!      // 2
 ```
 
 Same top-down propagation, same carving rules — `!` shows up only because `y` is now a scope, not an expression.
