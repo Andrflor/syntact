@@ -19,9 +19,13 @@ square -> {
 square.n         // 0
 square!          // 0
 square{n -> 5}!  // 25
+
+square5 -> square{n -> 5}    // a new scope, derived from square; not yet reduced
+square5.n                    // 5
+square5!                     // 25
 ```
 
-`square` is a complete scope with one binding (`n`) and one production (`n * n`). You can read its bindings directly (`square.n`), reduce it with `!`, or carve a new scope from it (`square{n -> 5}`) and reduce that. There is no function being called anywhere; there are only scopes, bindings, derivation, and reduction.
+`square` is a complete scope with one binding (`n`) and one production (`n * n`). You can read its bindings directly (`square.n`), reduce it with `!`, or carve a new scope from it (`square{n -> 5}`) and either reduce it on the spot (`square{n -> 5}!`) or bind it to a name first (`square5`) and reduce later. Carving and collapsing are two independent operations: the first derives a new scope, the second reduces a scope to a value. They compose freely. There is no function being called anywhere; there are only scopes, bindings, derivation, and reduction.
 
 That model scales. Here is a larger example using effects and reactivity:
 
