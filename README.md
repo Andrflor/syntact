@@ -8,7 +8,22 @@ Syntact is an experimental general-purpose programming language built around one
 
 What other languages express with function calls, Syntact expresses with two independent operations: *carve* a new scope from an existing one, and *collapse* a scope to the value it produces. From this model — scope, binding, carving, collapse — everything else emerges: types, generics, modules, pattern matching, algebraic effects, reactivity, compile-time evaluation, and eventually proofs. There is no class system, no trait system, no macro system, no async runtime. There is one structural primitive, and a handful of operators.
 
-A complete program looks like this:
+Here is what writing Syntact actually looks like:
+
+```dart
+square -> {
+  n -> 0
+  -> n * n
+}
+
+square.n         // 0
+square!          // 0
+square{n -> 5}!  // 25
+```
+
+`square` is a complete scope with one binding (`n`) and one production (`n * n`). You can read its bindings directly (`square.n`), reduce it with `!`, or carve a new scope from it (`square{n -> 5}`) and reduce that. There is no function being called anywhere; there are only scopes, bindings, derivation, and reduction.
+
+That model scales. Here is a larger example using effects and reactivity:
 
 ```dart
 Counter -> {
@@ -195,7 +210,44 @@ age  -> 30
 pi   -> 3.14159
 ```
 
-Each line is a binding: the label on the left is *pointed at* the value on the right. Bindings are read **top-down** — a binding can only see what was declared above it in the same scope (or in enclosing scopes). There is no hoisting, no forward reference. The order of code on the page is the order in which the compiler thinks about it.
+Each line is a binding: the label on the left is *pointed at* the value on the right.
+
+### Top-down structure
+
+Bindings in Syntact are **top-down**. A binding can only see what already exists above it in the same scope, or in an enclosing scope. There is no hoisting and no forward reference.
+
+```dart
+x -> 1
+y -> x + 1    // valid: x exists above y
+```
+
+But this is invalid:
+
+```dart
+y -> x + 1    // invalid: x does not exist yet when y is bound
+x -> 1
+```
+
+This is not only a visibility rule. It is part of the execution model. A scope is not an unordered namespace — it is a **directed reduction structure**. The order of bindings is the order in which the scope is built, and later bindings may depend on earlier ones — never the reverse. Reduction follows the same direction: a collapse walks the scope downward through dependencies that already exist by construction.
+
+A consequence worth naming: **there is no separate parameter zone in Syntact.** What other languages would call a "function parameter" is simply an earlier binding that later bindings or productions depend on. Look back at:
+
+```dart
+square -> {
+  n -> 0
+  -> n * n
+}
+```
+
+`n` is not declared as a parameter. It is just a binding, and the production `-> n * n` is allowed to depend on it because `n` appears above. Nothing more. That is why `square.n` and `square!` both work without supplying anything — `square` is already complete, and `n` already exists.
+
+If you want a different `n`, you don't pass an argument; you carve a new scope, which produces a new structure where `n` is overridden *before* the production reads it:
+
+```dart
+square{n -> 5}!    // 25
+```
+
+The model is still top-down. The production can use `n` because `n` is structurally above it; carving replaces that earlier binding before the production runs.
 
 ### Productions: pointing without a label
 
@@ -284,7 +336,46 @@ two!     // 2
 
 `two` is already a complete scope. Nothing about it is missing. You can read its bindings (`two.a`, `two.b`), you can carve a new scope from it, you can pass it around — all of these are valid because the scope already exists. Without `!`, the scope is simply not reduced at that point. With `!`, Syntact reduces it through its production.
 
-This separation is the engine of Syntact. **Reduction never happens by accident.** It happens exactly where you write `!`, and nowhere else. That is what lets the compiler reason about your program: every reduction has a place on the page, and so does every non-reduction.
+### `!` is not evaluation
+
+A subtlety worth being precise about: **`!` is not general expression evaluation. `!` is scope collapse.**
+
+`!` does not mean "evaluate this expression." It specifically means: take this scope and reduce it through its production. That distinction matters because a binding can point at two very different kinds of thing.
+
+A binding can point directly to a value or expression:
+
+```dart
+base -> {
+  x -> 1
+  y -> x + 1
+}
+
+base.y    // 2
+```
+
+Here `y` is not a scope — it is a binding pointing at the expression `x + 1`. There is nothing to collapse. Reading `base.y` resolves to `2` by following the binding.
+
+A binding can also point at a scope:
+
+```dart
+base -> {
+  x -> 1
+  y -> {
+    -> x + 1
+  }
+}
+
+base.y     // the scope bound to y
+base.y!    // 2
+```
+
+Now `y` is a binding pointing at a scope. Reading `base.y` gives you that scope. Writing `base.y!` is what reduces it.
+
+The rule is simple: **expressions resolve, scopes collapse.** `!` only appears when the thing being reduced is a scope.
+
+### Reduction is intentional
+
+This separation is the engine of Syntact. **Collapse never happens by accident.** It happens exactly where you write `!`, and nowhere else. That is what lets the compiler reason about your program: every reduction has a place on the page, and so does every non-reduction.
 
 The `!` has variants that say *how* the reduction should happen — but they're all the same fundamental operation, just routed differently. We'll come back to them in [Concurrency](#concurrency-choosing-how-to-collapse).
 
@@ -322,6 +413,42 @@ shifted.y       // 0   (inherited from point)
 The same operator does both. **Declaration is just carving from nothing; override is carving from something.** There is no separate "modify" syntax in Syntact, because modification doesn't exist — only derivation.
 
 This is what other languages would call inheritance, instantiation, configuration, partial application, or "with"-syntax. They were all the same operation; Syntact gives it one name and one symbol.
+
+### Carving propagates structurally
+
+Because scopes are top-down reduction structures, overriding an earlier binding propagates naturally to anything declared below it that depended on it.
+
+```dart
+base -> {
+  x -> 1
+  y -> x + 1
+}
+
+base.y                   // 2
+
+derived -> base{x -> 10}
+derived.y                // 11
+```
+
+`y` is not a collapsed scope here — it is a binding whose target depends on `x`. When `x` is carved over in `derived`, `y` is resolved in the new derived structure, so it sees the new `x` and resolves to `11`. Carving doesn't poke into a fixed object; it derives a new structure where the rest of the scope is reinterpreted with the new binding in place.
+
+If you want `y` itself to be a scope (something you'd reduce with `!`), you write one:
+
+```dart
+base -> {
+  x -> 1
+  y -> {
+    -> x + 1
+  }
+}
+
+base.y      // the scope bound to y
+base.y!     // 2
+```
+
+Same top-down propagation, same carving rules — `!` shows up only because `y` is now a scope, not an expression.
+
+This is what makes carving + collapse genuinely different from a function call: a function applies an argument to a fixed body, while carving rewrites the structure itself before reduction touches it.
 
 ---
 
