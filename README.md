@@ -143,6 +143,20 @@ Syntact recognizes that "assignment" was always too narrow a word for what was h
 
 Six arrows. They cover everything other languages do with dozens of keywords and entire framework ecosystems — because they correctly carve up what *binding* actually is.
 
+A binding always has two sides: a *source* (the label being bound) and a *target* (what it's bound to). The label on the source side can be a name, but it can also be **omitted** — and when it is, the source isn't missing. It's the **enclosing scope itself**. A binding written without a label means "the surrounding scope is the thing being bound." This is what we call a **production** — it's not a separate operator, just the same binding with an implicit source.
+
+This has an immediate structural consequence: **a scope can be bound multiple times**. You can point the enclosing scope at several different targets, and all of them coexist as alternative potentialities the scope can resolve to. The first one is the default; the others remain available. This isn't syntactic sugar for "alternatives" — it's the natural shape of binding when the source is implicit and can be repeated:
+
+```dart
+maybe_value -> {
+  -> 0           // first potentiality (default)
+  -> 1           // also a valid potentiality
+  -> 2           // and another
+}
+```
+
+This property is fundamental. It's what makes types in Syntact work the way they do, and it's the entire basis for what the constraint operator `:` will let us express later. Keep it in mind: a scope is not a single thing pointing at a single value — it's an arbitrary set of bindings, and several of them can point the scope at itself.
+
 ### 3. The collapse — execution as a separate operation
 
 This is the unit that makes Syntact different from every other language.
@@ -237,8 +251,6 @@ _start:
 ```
 
 That's the whole binary. No string `"hello"` appears anywhere — it was reduced away at compile time, along with the binding that held it. Two syscalls' worth of instructions, because that's all the program actually does.
-
-That second program contains the language's two most important ideas already: **bindings** (`greeting -> "hello"`) and **production** (`-> answer`). Everything else is built from these.
 
 ---
 
