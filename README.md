@@ -161,11 +161,41 @@ This sounds like a small thing. It is not. It means:
 
 The trinity — **scope, binding, collapse** — is everything fundamental. Three concepts. That's the entire conceptual budget of the language.
 
-### What you do with the trinity
+### Carving: how you actually use the trinity
 
-Three concepts get you very far, but you'd have to rewrite a lot if you couldn't *modify* what you have. So Syntact adds the **override** — the `{...}` syntax that produces a new scope from an old one, with some bindings replaced. Override is what lets you reuse and compose: it's the operation that derives a new piece of data from an existing one, the same way a class derives from a parent or a function instantiates a generic — but uniformly, structurally, with one syntax.
+The trinity gives you the conceptual ingredients, but you'd be writing everything from scratch every time without a way to *derive* new scopes from existing ones. This is the role of `{...}`.
 
-A few more operators round out the language: `:` constrains a binding to a sub-scope, `?` matches against a scope's potentialities, `...` expands one scope into another, `??` and `?!` carve out a corner for compile-time proofs. None of them introduce new fundamental concepts — they're all expressed in terms of scope, binding, and collapse.
+`{...}` is the **carving operator**. It carves out a scope. What scope it carves depends on what it's applied to:
+
+- **Applied to nothing**, it carves a fresh scope from the void:
+  ```dart
+  point -> {
+    x -> 0
+    y -> 0
+  }
+  ```
+  Here `{...}` opens an empty space and the bindings inside fill it. Standard scope declaration.
+
+- **Applied to an existing scope**, it carves a *new* scope derived from that one, with the bindings inside the braces overlaid on top:
+  ```dart
+  shifted -> point{x -> 5}
+  ```
+  `point{x->5}` doesn't modify `point`. It carves a new scope that *is* `point`, except `x` is now `5`. The original is untouched. This is what other languages call inheritance, instantiation, configuration, partial application, or "with"-syntax — all the same operation, expressed once.
+
+The same operator does both. Declaration is just carving from nothing; override is carving from something. There is no separate "modify" syntax, because modification doesn't exist — only derivation. Combined with collapse (`!`), this is also how you "call" things: `square{n->5}!` carves a derived `square` with `n` overridden, then collapses the result.
+
+Carving is the verb that ties the trinity into a usable language. Scope tells you *what shape* something has, binding tells you *how it connects*, collapse tells you *when it runs*, and carving tells you *how to make a new one based on what already exists*.
+
+### Everything else
+
+A handful of smaller operators sit on top of the trinity and carving. They are not new fundamental ideas — they are conveniences expressed in terms of what's already there.
+
+- **`:`** constrains a binding to a particular scope. `u8:age` says "age is shaped like a u8." It's a check, not a new concept: it just asks the compiler to verify that a value belongs to a sub-scope.
+- **`?`** matches a value against the potentialities of a scope. Pattern matching, sum-type dispatch, refinement, and value comparison are all the same operation in Syntact, because types *are* their potentialities — `?` is how you ask which one applies.
+- **`...`** expands one scope's bindings into another. Useful for splatting a list, importing a module's contents, or merging two scopes.
+- **`??` and `?!`** carve out a corner for compile-time proofs: `??` declares a symbolic unknown, `?!` enforces a property that the compiler must prove.
+
+That's the entire surface area of the language. Three fundamental units (scope, binding, collapse), one operator that combines them by deriving (carving / `{...}`), and four small operators on top for constraints, matching, expansion, and proofs.
 
 ### Why this gives you optimization for free
 
