@@ -64,29 +64,36 @@ The rest of this document walks through the language from the ground up. By the 
 
 ## Why Syntact exists
 
-The journey to create Syntact began with a deep sense of disappointment about the current state of programming.
+Classical programming languages model computation through inherited abstractions — functions, objects, modules, classes, traits, closures, coroutines, async runtimes — and then rely on compilers to recover the underlying computational structure after the fact. Inline, monomorphize, devirtualize, escape-analyze, constant-fold, partially evaluate: most of what an optimizer does is *undoing* the ontology the language imposed in the first place.
 
-We put a lot of effort into creating encapsulations, but then we end up writing a lot of code just to get around them, and it feels like there's no real purpose to them. With all the technological advancements we have, we should be able to create applications that run incredibly fast and smoothly. Instead, we're constantly dealing with frustratingly slow programs and artificial boundaries imposed by frameworks upon frameworks.
+Syntact starts from the other end. Its ontology is **scope, binding, carving, and collapse**: named dependency structures, structural derivation, and explicit reduction. The claim is not that scopes are the only possible model of computation. The claim is that they form a *better programming ontology* — closer to the dependency and reduction structure that compilers ultimately need to recover anyway. Familiar abstractions don't disappear; they emerge as derived forms of the same primitive, instead of being primitive themselves.
 
-It's clear that current programming languages are inadequate, and we need to develop new ones that prioritize both expressiveness and high-order programming capabilities **without compromising performance**.
+This is the deeper reason for the rest of the design. The boilerplate, the framework towers, the artificial boundaries that compilers spend enormous effort tearing down — they are not accidents. They are the cost of an ontological mismatch between how we *describe* programs and what programs *are* once they run. Syntact tries to remove the mismatch rather than optimize around it.
 
-Despite incorporating genericity, most languages require excessive boilerplate for simple memory operations and fail to match C's performance while still restricting the extent of genericity. Languages that attempt zero-cost abstraction with ownership systems (Rust) end up with narrow, constrained syntax and ultra-slow compile times. Others rely on garbage collection, which incurs a hidden performance cost. None of them are honest about what programming actually *is*.
+A note on what this means for the reader. Syntact is **not exotic syntax sitting on top of the same old concepts** — it is a *different semantics* deliberately hidden behind a familiar-looking syntax. The braces, the dots, the arrows: they are chosen so that someone who has written any C-family language can read a snippet without flinching. But what those characters *mean* is not what they mean elsewhere. `{...}` is not a block, it is a scope you can carry. `->` is not assignment or return, it is a directed binding. `f{x->5}!` is not a function call, it is a carving followed by a collapse. The familiarity is a courtesy on the surface; underneath, the rules are different. Reading Syntact like another language will work for the first few minutes and then quietly mislead — the rest of this document is written to retrain that intuition.
 
-That's why Syntact is a step in a different direction — with its emphasis on flexibility, efficiency, and structural simplicity, it aims to be a more powerful tool for expressing computation without paying for it.
-
-**At its core, Syntact is built around the idea that programming is simply the act of manipulating data.**
+**At its core, Syntact is built around the idea that programming is simply the act of structuring data and its reductions.**
 
 ---
 
 ## The problem with functions
 
-Programming languages have inherited a strange dogma from 18th-century mathematicians: that the *function* — a thing taking inputs and returning outputs — is the fundamental unit of computation. Every modern language is some variation of this assumption. We have free functions, methods, lambdas, closures, monadic bindings, async functions, generator functions, async generator functions… an entire phylogenetic tree of accidental complexity built on one borrowed idea.
+The function is the most visible casualty of this rethinking. Programming languages have inherited a strange dogma from 18th-century mathematicians: that the *function* — a thing taking inputs and returning outputs — is the fundamental unit of computation. Every modern language is some variation of this assumption. We have free functions, methods, lambdas, closures, monadic bindings, async functions, generator functions, async generator functions… an entire phylogenetic tree of accidental complexity built on one borrowed idea.
 
-But look at what a processor actually does. There are no functions in assembly. There are blocks of instructions, jumps, and data. The "function" is a calling convention — a social contract bolted onto a stack pointer. It is not the essence of programming; it is an artifact of how mathematicians wanted to talk about computation two hundred years ago.
+But the function is not a primitive — it is a *bundle*. Hidden under one shape, it conflates parameterization, environment, body, evaluation, calling convention, capture, effect, return, and temporality. Every modern language feature (generics, closures, async, effects, traits) is essentially a workaround for the fact that one of these collapsed concerns needed to be teased back out. And look at what a processor actually does: there are no functions in assembly, only blocks of instructions, jumps, and data. The "function" is a calling convention bolted onto a stack pointer.
 
-Syntact takes the opposite stance: **the function does not exist**. What does exist is the *scope* — a structured collection of named potentialities — and a small set of operators for binding scopes together and reducing them to values. Everything that functions traditionally do (and a great deal that they cannot) emerges naturally from this single primitive.
+Syntact decomposes the bundle:
 
-This isn't a stunt. It's the door to something practical: an optimization model where high-level abstractions cost exactly nothing, because there is no abstraction barrier to optimize across.
+- *Parameterization* becomes **carving** — deriving a new scope from an existing one.
+- *Execution* becomes **collapse** — an explicit, named reduction operator.
+- *Environment* becomes **scope** — first-class and inspectable.
+- *Relation* becomes **binding** — six distinct arrows for six distinct ways to associate names.
+- *Effect* becomes **emit / handle** — algebraic, statically resolved.
+- *Mutation* becomes **resonance** — a value driven by a structured event.
+
+What does exist, then, is the *scope* — a structured collection of named potentialities — and a small set of operators for binding scopes together and reducing them to values. Everything that functions traditionally do (and a great deal that they cannot) emerges naturally from this decomposition.
+
+This isn't a stunt. "No functions" is just the provocative consequence. The substantive claim is that the function is a poor *ontological* primitive for general programming, because it forces the compiler to re-derive structure the language could have exposed directly. Once it's exposed, an optimization model falls out for free: high-level abstractions cost exactly nothing, because there is no abstraction barrier to optimize across.
 
 ---
 
@@ -1028,9 +1035,9 @@ This isn't a separate proof assistant glued onto the language. It's the *same* r
 
 We've been hinting at this. Now that you've seen the language, the argument lands cleanly.
 
-In a typical compiled language, an abstraction is an opaque barrier — a function call, an interface dispatch, a virtual method, a closure capture. Optimizers work hard to see through these barriers, and they often fail. The cost of an abstraction in those languages is real, even when "zero-cost" is on the marketing page.
+In a typical compiled language, an abstraction is an opaque barrier — a function call, an interface dispatch, a virtual method, a closure capture. Optimizers work hard to see through these barriers, and they often fail. The cost of an abstraction in those languages is real, even when "zero-cost" is on the marketing page. The barriers exist because the language's surface ontology (functions, objects, modules, traits) doesn't line up with what reduction actually needs to see — so the optimizer spends its budget translating one back into the other.
 
-In Syntact, there are no such barriers. There is one primitive: scope reduction. Every "abstraction" — generics, higher-order callables, modules, traits, effect handlers, even reactivity — is just a particular shape of scope being reduced. The compiler doesn't have to *see through* abstractions; there is nothing to see through.
+Syntact removes that translation step. There is one primitive: scope reduction. Every "abstraction" — generics, higher-order callables, modules, traits, effect handlers, even reactivity — is just a particular shape of scope being reduced. The compiler doesn't have to *see through* abstractions; there is nothing to see through.
 
 The collapse operator `!` is, fundamentally, **an optimization mechanism**. When you write `f{x->5}!`, you are not "calling a function with the value 5." You are asking the compiler to reduce the scope `f` with `x` overridden to `5`, as far as it can. Often, that reduction is total — the entire `f` evaporates into a constant. Sometimes it bottoms out at an effect that has to wait for runtime. Either way, no abstraction has been preserved beyond what was necessary.
 
