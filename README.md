@@ -1022,13 +1022,23 @@ This is not meant to be in the first implementation. But it shows the direction:
 ```syntact
 identity -> {
   T <- none
-  T:value
+  value <- none
   -> value
 }
 
-identity{T -> u8 value -> 5}!
-identity{T -> String value -> "hello"}!
+identity{value -> 5}!
+identity{value -> "hello"}!
 ```
+
+`T` and `value` are both holes. Carving with `value -> 5` fills `value`, and `T` is inferred from the shape of what filled it. The use site never has to mention `T` — it is recovered from the carving.
+
+A hole can also be filled explicitly. Since a hole is *pulled*, not pushed, the fill arrow at the use site is `<-`, not `->`:
+
+```syntact
+identity{T <- u8 value -> 5}!
+```
+
+`value -> 5` is an ordinary push binding into the hole `value`. `T <- u8` says “fill the hole `T` with `u8`”. Mixing the two arrows is not a quirk: `->` pushes a value into a binding, `<-` pulls a value into a hole. The carve can do either at any position.
 
 This is genericity without a separate generic syntax.
 
@@ -1043,13 +1053,15 @@ List -> {
 }
 ```
 
-The first production is the empty list. The second production is a head shaped like `T` followed by another `List{T}` expanded into the same structure.
+The first production is the empty list. The second production is a head shaped like `T` followed by another `List{T}` expanded into the same structure. The recursive reference `List{T}` propagates the same hole — it does not refill it.
 
 Use it:
 
 ```syntact
-List{T -> u8}:numbers
+List{T <- u8}:numbers
 ```
+
+`T <- u8` fills the hole at the use site. As with `identity`, `T` can also be left to inference when the carving carries enough shape to recover it.
 
 Generic abstractions are just scopes with holes.
 
@@ -1323,7 +1335,7 @@ Then UI state can be built by libraries, not special syntax:
 
 ```syntact
 CounterView -> {
-  State{T -> u8 initial -> 0}:value
+  State{initial -> 0}:value
 
   -> Column{
     children -> {
@@ -1557,7 +1569,7 @@ RestEndPoint:userEndpoint{
   path -> "/users/:id"
 
   get -> {
-    maybeId -> Maybe{T -> UserId value -> req.path.get{"id"}!}!
+    maybeId -> Maybe{value -> req.path.get{"id"}!}!
 
     -> maybeId ? {
       {}: -> HttpResponse{
