@@ -150,6 +150,9 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [Carving](#carving)
 * [Extension](#extension)
 * [Defaults and completeness](#defaults-and-completeness)
+* [Algebraic immutability](#algebraic-immutability)
+* [Same-name bindings are not redeclarations](#same-name-bindings-are-not-redeclarations)
+* [Mutation is opt-in through resonance](#mutation-is-opt-in-through-resonance)
 * [Primitive types](#primitive-types)
 * [Shapes](#shapes)
 * [The pattern operator `?`](#the-pattern-operator-)
@@ -597,12 +600,108 @@ p.x
 
 The difference between “type”, “value”, “blueprint”, and “instance” is not a difference of world. It is a difference of operation.
 
-Bindings are immutable. To change something, derive a new scope.
+---
+
+## Algebraic immutability
+
+This is the most important property of Syntact, and it must not be confused with the way mainstream languages talk about “immutability”.
+
+**Nothing is ever modified.** A scope, once described, never changes. Every operator that looks like it changes something actually derives a *new* scope. The original is untouched and remains valid.
 
 ```syntact
-alice -> User{name -> "Alice" age -> 29}
-older -> alice{age -> 30}
+box -> {
+  x -> 1
+  y -> x + 1
+}
+
+box2 -> box{x -> 10}
 ```
+
+`box2` is **not** `box` with `x` patched. `box2` is a *new* scope derived from `box` by carving. In `box`, `x` is `1` and `y` is `2`. In `box2`, `x` is `10` and `y` is `11`. Both scopes coexist. Neither was mutated.
+
+This is not “immutability by convention”. It is the meaning of carving. There is no operator in the language that mutates a binding in place. Every transformation is a fresh derivation in the algebra.
+
+A consequence: there is no notion of “the value of `x` after we changed it”. There is only `box.x`, `box2.x`, and any other scope that participates in the derivation graph. Any of them can be inspected at any time.
+
+## Same-name bindings are not redeclarations
+
+In a scope, two bindings can share a name. They are not in conflict and the second does not overwrite the first.
+
+```syntact
+box -> {
+  x -> 1
+  y -> x
+  x -> 2
+}
+```
+
+`box` contains two distinct bindings, `x#0` and `x#1`. They are independent entries in an ordered structure, not conflicting entries in a symbol table. The compiler tracks them by index.
+
+This is not shadowing and not redefinition. It is a structural feature: a scope is a sequence of bindings, and several can share a name. Syntact treats a scope as data, not as a symbol table. A symbol table forces unique names. Data does not.
+
+### Access and carving target different occurrences
+
+Same-name bindings introduce a subtle but central rule: **access by name and carving do not look at the scope the same way**.
+
+* **Access** (`box.x`) returns the **last** visible occurrence of `x`. It is a current-view resolution, walking the scope top-down and keeping the last one.
+* **Carving** (`box{x -> ...}`) targets the **first** structural occurrence of `x` by default. It is a structural transformation of the scope's foundation.
+
+So given the `box` above:
+
+```syntact
+box.x // 2          (last occurrence: x#1)
+box.y // 1          (y was bound to x#0, the x in scope at that line)
+```
+
+And a carve:
+
+```syntact
+box2 -> box{x -> 10}
+
+box2.x // 2         (still reads the last x, which is x#1, untouched)
+box2.y // 10        (y depends on x#0, which was carved to 10)
+```
+
+Either occurrence can be targeted explicitly:
+
+```syntact
+box{x#0 -> 5}  // carve the first x
+box{x#1 -> 9}  // carve the last x
+box{x   -> 7}  // unqualified: carves x#0
+```
+
+A motivating example:
+
+```syntact
+Config -> {
+  port -> 8080
+  url  -> "localhost:" + port
+  port -> 3000
+}
+
+Config.port // 3000              (last port)
+Config.url  // "localhost:8080"  (url was built from the first port)
+
+DevConfig -> Config{port -> 9000}
+
+DevConfig.port // 3000
+DevConfig.url  // "localhost:9000"
+```
+
+This is not an inconsistency. The two operators answer different questions:
+
+* reading asks **what is the current view of this name**;
+* carving asks **what is the structural source this scope is built on**.
+
+Same-name bindings let you expose one value through the visible name while keeping the foundational value carvable. Shadowing and structural rewriting coexist instead of fighting each other.
+
+## Mutation is opt-in through resonance
+
+## Mutation is opt-in through resonance
+
+Because the algebra is immutable, ordinary bindings cannot be mutated, reassigned, or updated in place. The only way to model time-varying state is **resonance**, a separate, explicit, advanced feature where bindings are declared resonant and their values evolve in response to nominal events.
+
+Resonance is layered on top of the immutable core. It does not change the core. A program with no resonant bindings is purely algebraic.
 
 No null. No uninitialized value. No hidden mutation. Absence must be modeled explicitly.
 
