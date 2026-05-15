@@ -1,0 +1,6 @@
+{
+  "name": "Constraint With Complex Type And Default",
+  "description": "((u8 | i8) & >10):x -> 42 — directly constrain x by a refinement type, with a default value",
+  "source": "((u8 | i8) & >10):x -> 42",
+  "expect": "Scope[Pointing(Constraint(Operator(And,Operator(Or,Identifier(u8),Identifier(i8)),Operator(Greater,nil,Literal(Integer,10))),Identifier(x)),Literal(Integer,42))]"
+}

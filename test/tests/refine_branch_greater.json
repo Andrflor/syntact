@@ -1,0 +1,6 @@
+{
+  "name": "Refinement Branch With Prefix Greater",
+  "description": ">0 in a branch source — a prefix Greater operator",
+  "source": "n ? { >0 -> 'pos' }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Greater,nil,Literal(Integer,0)),Literal(String,pos))])]"
+}

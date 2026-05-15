@@ -1,0 +1,6 @@
+{
+  "name": "Type Algebra With And",
+  "description": "PositiveU8 -> u8 & Positive composes a primitive with a refinement",
+  "source": "PositiveU8 -> u8 & Positive",
+  "expect": "Scope[Pointing(Identifier(PositiveU8),Operator(And,Identifier(u8),Identifier(Positive)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Anonymous Shape",
+  "description": "Circle: in a branch means 'matches Circle anonymously' — produces Constraint(Circle, nil)",
+  "source": "shape ? { Circle: -> 1 }",
+  "expect": "Scope[Pattern(Identifier(shape),[Branch(Constraint(Identifier(Circle),nil),Literal(Integer,1))])]"
+}

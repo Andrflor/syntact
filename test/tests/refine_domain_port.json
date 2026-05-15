@@ -1,0 +1,6 @@
+{
+  "name": "Domain Shape (Port -> u16 & >0)",
+  "description": "A typical domain refinement type combining a primitive and a positive bound",
+  "source": "Port -> u16 & >0",
+  "expect": "Scope[Pointing(Identifier(Port),Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0))))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Refinement Type Declaration (Positive -> >0)",
+  "description": "A refinement type defined by a single prefix comparison",
+  "source": "Positive -> >0",
+  "expect": "Scope[Pointing(Identifier(Positive),Operator(Greater,nil,Literal(Integer,0)))]"
+}
