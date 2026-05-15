@@ -44,3 +44,4 @@ test_simple_pointing_6 :: proc(t: ^testing.T) {
 test_simple_pattern_7 :: proc(t: ^testing.T) {
 	run_test("tests/simple_pattern.json", t)
 }
+
