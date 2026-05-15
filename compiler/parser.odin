@@ -1285,7 +1285,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .Equal:
         return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
     case .NotEqual:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
+        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
     case .Less:
         return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_less_than, precedence = .COMPARISON}
     case .Greater:
@@ -2895,6 +2895,7 @@ parse_prefix_comparison :: proc(parser: ^Parser) -> ^Node {
     // Set operator kind based on token
     #partial switch token_kind {
     case .Equal:         op.kind = .Equal
+    case .NotEqual:      op.kind = .NotEqual
     case .Less:          op.kind = .Less
     case .Greater:       op.kind = .Greater
     case .LessEqual:     op.kind = .LessEqual
@@ -2981,19 +2982,24 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
         }
     } else {
         // Inline pattern: data ? expr (including ({...}) objects)
-        if is_expression_start(parser.current_token.kind) {
-            inline_expr := parse_expression(parser, .RANGE)
-            if inline_expr != nil {
-                branch := Branch{
-                    source = inline_expr,  // The pattern/object to match against
-                    product = nil,
-                    position = position,
-                }
-                append(&pattern.to, branch)
-            }
+        // LeftParenNoSpace (`?(...)`) has no prefix rule on its own, but in pattern
+        // position the parens are pure grouping — dispatch to parse_grouping.
+        inline_expr: ^Node
+        if parser.current_token.kind == .LeftParenNoSpace {
+            inline_expr = parse_grouping(parser)
+        } else if is_expression_start(parser.current_token.kind) {
+            inline_expr = parse_expression(parser, .RANGE)
         } else {
             error_at_current(parser, "Expected pattern expression after ?")
             return nil
+        }
+        if inline_expr != nil {
+            branch := Branch{
+                source = inline_expr,  // The pattern/object to match against
+                product = nil,
+                position = position,
+            }
+            append(&pattern.to, branch)
         }
     }
 
@@ -3152,6 +3158,7 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .Binary ||
         kind == .LeftBrace ||
         kind == .LeftParen ||
+        kind == .LeftParenNoSpace ||
         kind == .At ||
         kind == .Not ||
         kind == .Minus||
