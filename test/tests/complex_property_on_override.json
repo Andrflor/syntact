@@ -1,0 +1,6 @@
+{
+  "name": "Property Access On An Override",
+  "description": "Foo{x -> 1}.bar — first override Foo, then access .bar on the result",
+  "source": "Foo{x -> 1}.bar",
+  "expect": "Scope[Property(Override(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(bar))]"
+}

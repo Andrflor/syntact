@@ -1,0 +1,6 @@
+{
+  "name": "Deep Override Chain A{B{C{D{e -> 1}}}}",
+  "description": "Four levels of no-space override nested",
+  "source": "A{B{C{D{e -> 1}}}}",
+  "expect": "Scope[Override(Identifier(A),[Override(Identifier(B),[Override(Identifier(C),[Override(Identifier(D),[Pointing(Identifier(e),Literal(Integer,1))])])])])]"
+}

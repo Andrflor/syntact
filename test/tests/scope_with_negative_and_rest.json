@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Negative Literal And Rest",
+  "description": "{ -1 ...r } combines a unary-negative literal and a rest expansion",
+  "source": "{ -1 ...r }",
+  "expect": "Scope[Scope[Operator(Subtract,nil,Literal(Integer,1)),Expand(Identifier(r))]]"
+}

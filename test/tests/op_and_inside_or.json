@@ -1,0 +1,6 @@
+{
+  "name": "And Inside Or Precedence",
+  "description": "a & b | c & d should group both & first since LOGICAL > CONDITIONAL",
+  "source": "a & b | c & d",
+  "expect": "Scope[Operator(Or,Operator(And,Identifier(a),Identifier(b)),Operator(And,Identifier(c),Identifier(d)))]"
+}

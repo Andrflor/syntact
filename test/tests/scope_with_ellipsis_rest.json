@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Identifier And Rest",
+  "description": "{a ...rest} is a scope with two entries: a bare identifier and a rest expansion",
+  "source": "{a ...rest}",
+  "expect": "Scope[Scope[Identifier(a),Expand(Identifier(rest))]]"
+}

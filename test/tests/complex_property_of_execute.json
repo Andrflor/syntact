@@ -1,0 +1,6 @@
+{
+  "name": "Property Access On A Grouped Execute",
+  "description": "(foo!).bar — grouping then property access",
+  "source": "(foo!).bar",
+  "expect": "Scope[Property(Execute(Identifier(foo),[]),Identifier(bar))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Proof-Style Constraint With Unknown Default",
+  "description": "String:m -> ?? from proof.syn — a typed binding whose default is Unknown (to be proven)",
+  "source": "String:m -> ??",
+  "expect": "Scope[Pointing(Constraint(Identifier(String),Identifier(m)),Unknown)]"
+}

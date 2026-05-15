@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Arithmetic Operand",
+  "description": "a + ?? — Unknown can stand in any expression position",
+  "source": "a + ??",
+  "expect": "Scope[Operator(Add,Identifier(a),Unknown)]"
+}

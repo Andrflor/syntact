@@ -1,0 +1,6 @@
+{
+  "name": "Constraint Carving Then Bind (T{a}:q)",
+  "description": "T{a}:q builds a constraint whose type is the Override of T",
+  "source": "T{a}:q",
+  "expect": "Scope[Constraint(Override(Identifier(T),[Identifier(a)]),Identifier(q))]"
+}

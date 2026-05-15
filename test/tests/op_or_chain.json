@@ -1,0 +1,6 @@
+{
+  "name": "Or Chain Of Three",
+  "description": "a | b | c is left-associative",
+  "source": "a | b | c",
+  "expect": "Scope[Operator(Or,Operator(Or,Identifier(a),Identifier(b)),Identifier(c))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "And Of Two Prefix Not-Equal Refinements",
+  "description": "n ? (!={} & !=bar) — value must differ from both {} and bar. & binds tighter than | (which is not present here, but precedence matters anyway).",
+  "source": "n ? (!={} & !=bar)",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(And,Operator(NotEqual,nil,Scope[]),Operator(NotEqual,nil,Identifier(bar))),nil)])]"
+}

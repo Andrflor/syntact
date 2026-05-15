@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Range Source",
+  "description": "n ? { 0..10 -> 'small' } — a range as a pattern source",
+  "source": "n ? { 0..10 -> 'small' }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Range(Literal(Integer,0),Literal(Integer,10)),Literal(String,small))])]"
+}

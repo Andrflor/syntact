@@ -1,0 +1,6 @@
+{
+  "name": "Chained Constraint (u8:n:m)",
+  "description": "u8:n:m chains two constraints — left-associative since both : tokens share precedence",
+  "source": "u8:n:m",
+  "expect": "Scope[Constraint(Constraint(Identifier(u8),Identifier(n)),Identifier(m))]"
+}

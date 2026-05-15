@@ -1,0 +1,6 @@
+{
+  "name": "Nested Generic-Style Constraint (List{List{T}}:items)",
+  "description": "Two layers of Override (List{...}) inside a Constraint",
+  "source": "List{List{T}}:items",
+  "expect": "Scope[Constraint(Override(Identifier(List),[Override(Identifier(List),[Identifier(T)])]),Identifier(items))]"
+}

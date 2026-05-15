@@ -1,0 +1,6 @@
+{
+  "name": "Generic-Style Constraint With Capture-Only Name",
+  "description": "List{T}:(items) — the constraint name slot holds a capture-only identifier",
+  "source": "List{T}:(items)",
+  "expect": "Scope[Constraint(Override(Identifier(List),[Identifier(T)]),Identifier(,items))]"
+}

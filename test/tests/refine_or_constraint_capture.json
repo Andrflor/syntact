@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Two Constraints With Capture",
+  "description": "u8:(x) | i8:(x) is a symmetric Or of two captured constraints",
+  "source": "u8:(x) | i8:(x)",
+  "expect": "Scope[Operator(Or,Constraint(Identifier(u8),Identifier(,x)),Constraint(Identifier(i8),Identifier(,x)))]"
+}

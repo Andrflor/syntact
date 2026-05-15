@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Whose Target Is An Execute",
+  "description": "foo! ? { 1 -> 2 } matches on the result of executing foo",
+  "source": "foo! ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Execute(Identifier(foo),[]),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}
