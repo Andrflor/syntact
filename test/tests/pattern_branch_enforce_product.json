@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Enforce In Product",
+  "description": "n ? { x -> y ?! >0 } — the branch product is an Enforce expression",
+  "source": "n ? { x -> y ?! >0 }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Identifier(x),Enforce(Identifier(y),Operator(Greater,nil,Literal(Integer,0))))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Nested Pattern (Pattern Inside Branch Product)",
+  "description": "x ? { 1 -> y ? { 2 -> 3 } } — the product of a branch can itself be a Pattern",
+  "source": "x ? { 1 -> y ? { 2 -> 3 } }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Pattern(Identifier(y),[Branch(Literal(Integer,2),Literal(Integer,3))]))])]"
+}

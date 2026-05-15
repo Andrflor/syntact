@@ -1,0 +1,6 @@
+{
+  "name": "Chained Comparison (a<b<c)",
+  "description": "Same-precedence chain is left-associative — a<b<c is (a<b)<c",
+  "source": "a < b < c",
+  "expect": "Scope[Operator(Less,Operator(Less,Identifier(a),Identifier(b)),Identifier(c))]"
+}

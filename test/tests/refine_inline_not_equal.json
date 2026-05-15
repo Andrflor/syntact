@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Prefix Not Equal",
+  "description": "n ? (!=foo) — pattern with a refinement that excludes foo",
+  "source": "n ? (!=foo)",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(NotEqual,nil,Identifier(foo)),nil)])]"
+}

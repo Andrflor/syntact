@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Rest In Pattern Branch",
+  "description": "x ? { {a ...rest} -> rest } — the branch source is a scope used as a structural pattern with a rest binding",
+  "source": "x ? { {a ...rest} -> rest }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[Identifier(a),Expand(Identifier(rest))],Identifier(rest))])]"
+}

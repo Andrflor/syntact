@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Whose Target Is A Property Access",
+  "description": "obj.field ? { 1 -> 2 } matches on the value at obj.field",
+  "source": "obj.field ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Property(Identifier(obj),Identifier(field)),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

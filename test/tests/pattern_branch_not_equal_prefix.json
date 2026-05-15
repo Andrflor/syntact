@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Prefix Not Equal",
+  "description": "!=0 in a branch source filters out the value 0",
+  "source": "x ? { !=0 -> 'nz' }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Operator(NotEqual,nil,Literal(Integer,0)),Literal(String,nz))])]"
+}

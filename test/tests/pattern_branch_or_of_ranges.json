@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Or Of Two Ranges",
+  "description": "n ? { 0..10 | 100..1000 -> 'ok' } accepts either range",
+  "source": "n ? { 0..10 | 100..1000 -> 'ok' }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Or,Range(Literal(Integer,0),Literal(Integer,10)),Range(Literal(Integer,100),Literal(Integer,1000))),Literal(String,ok))])]"
+}

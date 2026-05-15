@@ -1,0 +1,6 @@
+{
+  "name": "Operator Prefix Not Equal",
+  "description": "!=foo as a prefix means 'different from foo'. Mirrors the prefix forms of =, >, <, >=, <=.",
+  "source": "!=foo",
+  "expect": "Scope[Operator(NotEqual,nil,Identifier(foo))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "RSA-Style Proof Composition",
+  "description": "decrypt{encrypt{m priv}! pub}! = m ?! true from proof.syn line 6 — chained executes, equality and enforcement",
+  "source": "decrypt{encrypt{m priv}! pub}! = m ?! true",
+  "expect": "Scope[Enforce(Operator(Equal,Execute(Override(Identifier(decrypt),[Execute(Override(Identifier(encrypt),[Identifier(m),Identifier(priv)]),[]),Identifier(pub)]),[]),Identifier(m)),Identifier(true))]"
+}

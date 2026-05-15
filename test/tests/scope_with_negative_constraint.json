@@ -1,0 +1,6 @@
+{
+  "name": "Scope Mixing Negative Literal And Anonymous Constraint",
+  "description": "{-1 N:} from pattern.syn refinement — shape for the negative side of Z",
+  "source": "{-1 N:}",
+  "expect": "Scope[Scope[Operator(Subtract,nil,Literal(Integer,1)),Constraint(Identifier(N),nil)]]"
+}

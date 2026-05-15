@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Inline With Parens In Carving",
+  "description": "T{n?(>0)} carves T by refining n with >0. Inside the override, n?(>0) is the inline pattern with a grouped refinement source.",
+  "source": "T{n?(>0)}",
+  "expect": "Scope[Override(Identifier(T),[Pattern(Identifier(n),[Branch(Operator(Greater,nil,Literal(Integer,0)),nil)])])]"
+}

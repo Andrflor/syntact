@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Inline With Parens (n?(>0))",
+  "description": "n?(>0) is the inline-pattern form: n must match the refinement >0. The parens are just grouping. Equivalent to 'n ? >0'.",
+  "source": "n?(>0)",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Greater,nil,Literal(Integer,0)),nil)])]"
+}

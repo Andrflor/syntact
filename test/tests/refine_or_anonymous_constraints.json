@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Two Anonymous Constraints",
+  "description": "Square: | Diamond: should produce a symmetric Or of two anonymous constraints. Semantically the | acts above the level of each constraint, not pulling its right operand back in.",
+  "source": "Square: | Diamond:",
+  "expect": "Scope[Operator(Or,Constraint(Identifier(Square),nil),Constraint(Identifier(Diamond),nil))]"
+}
