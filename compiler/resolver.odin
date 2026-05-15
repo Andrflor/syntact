@@ -424,6 +424,9 @@ process_cache_task :: proc(task: thread.Task) {
  * process_filenode handles references to external files in the AST
  */
 process_filenode :: proc(node: ^Node, cache: ^Cache) {
+	// TODO(andrflor): Check how that path should be handled
+	// This is used to prevent to parse other files in test atm
+	if cache.path == "" {return}
 	dir_path := filepath.dir(cache.path)
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] process_filenode called from %s\n", cache.path)
@@ -468,7 +471,10 @@ _process_node :: proc(node: ^Node, dir_path: string, segments: ^[dynamic]string)
 			}
 		} else {
 			// We maybe have a file
-			file_path, _ := filepath.join({dir_path, fmt.tprintf("%s.st", n.name)}, context.temp_allocator)
+			file_path, _ := filepath.join(
+				{dir_path, fmt.tprintf("%s.st", n.name)},
+				context.temp_allocator,
+			)
 			if os.exists(file_path) {
 				// Process the file if it exists
 				compute_on_need(file_path)
