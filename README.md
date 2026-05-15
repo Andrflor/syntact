@@ -54,6 +54,87 @@ That separation is the root of the language.
 
 ---
 
+## Syntact in one sentence
+
+> Syntact is a structural reduction language with nominal effects.
+
+Its central claim is not that functions, types, modules, and objects are the same thing. Its claim is that they do not need to be primitive categories. They can emerge from operations over complete structures.
+
+---
+
+## How to read Syntact
+
+Syntact intentionally uses familiar surface syntax.
+
+A beginner may read:
+
+```syntact
+square -> {
+  n -> 0
+  -> n * n
+}
+
+square{n -> 5}!
+```
+
+as something close to:
+
+```text
+function square(n = 0) { return n * n }
+square(5)
+```
+
+That reading is useful, but incomplete.
+
+The structural reading is:
+
+```text
+square        a complete scope
+n -> 0        a binding occurrence with a default
+{n -> 5}      a structural derivation of the scope
+!             explicit collapse through the scope production
+```
+
+Syntact is designed so shallow readings are productive, but deeper readings reveal the actual model.
+
+A scope is not a function, object, module, record, class, or type. Those are projections produced by operations over scopes.
+
+### Classical reading vs Syntact reading
+
+| Surface form | Classical temptation | Syntact meaning |
+|---|---|---|
+| `n -> 0` | variable assignment | binding occurrence |
+| `-> x` | return | production |
+| `square{n -> 5}` | function call setup | structural derivation |
+| `square!` | call/eval | collapse |
+| `Point:p` | declaration of variable p | binding shaped by `Point` |
+| `box.x` | field access | projection through current view |
+| `User+{...}` | inheritance | structural extension |
+| `Log -< e {...}` | callback/listener | nominal effect handler |
+
+The analogies in the middle column help you start reading code. They are not what the language actually does.
+
+---
+
+## Core rules
+
+1. A scope is an ordered structure, not a symbol table.
+2. A binding is an occurrence, not a variable slot.
+3. A name is a projection, not an identity.
+4. Access resolves a name through the current view.
+5. Carving derives a new scope by targeting existing structural occurrences.
+6. Extension explicitly adds new structure.
+7. Collapse reduces a scope through its production.
+8. Shapes are scopes used as structural constraints.
+9. Patterns are scopes used analytically.
+10. Effects are nominal; everything else is structural.
+11. Defaults compose structurally.
+12. No binding is ever mutated by the core language.
+
+Come back to this list when a section feels surprising. Most surprises resolve to one of these rules.
+
+---
+
 ## Status
 
 Syntact is in active development.
@@ -144,14 +225,15 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [First program](#first-program)
 * [Scopes](#scopes)
 * [Bindings](#bindings)
+* [Same-name bindings are not redeclarations](#same-name-bindings-are-not-redeclarations)
 * [Productions](#productions)
 * [Collapse](#collapse)
 * [Execution patterns](#execution-patterns)
 * [Carving](#carving)
 * [Extension](#extension)
 * [Defaults and completeness](#defaults-and-completeness)
+* [No null, no uninitialized state](#no-null-no-uninitialized-state)
 * [Algebraic immutability](#algebraic-immutability)
-* [Same-name bindings are not redeclarations](#same-name-bindings-are-not-redeclarations)
 * [Mutation is opt-in through resonance](#mutation-is-opt-in-through-resonance)
 * [Primitive types](#primitive-types)
 * [Shapes](#shapes)
@@ -232,7 +314,7 @@ user -> {
 user.address.city // "Toulouse"
 ```
 
-A scope is not only a lexical region. It is data. You can bind it to a name, read its bindings, derive it, constrain values by it, match against it, expand it, or collapse it if it has a production.
+A scope is a complete ordered structure. You can bind it to a name, read its bindings, derive it, constrain values by it, match against it, expand it, or collapse it if it has a production. The role it plays — value, type, module, function-like computation, instance — comes from the operation applied to it, not from a built-in category.
 
 A file is a scope. A folder is a scope. A library is a scope. A primitive type is a scope. A pattern can be a scope. A program is a scope.
 
@@ -275,6 +357,80 @@ square -> {
 ```
 
 `n` is a binding. The production can use it because it appears above.
+
+---
+
+## Same-name bindings are not redeclarations
+
+In a scope, two bindings can share a name. They are not in conflict and the second does not overwrite the first.
+
+```syntact
+box -> {
+  x -> 1
+  y -> x
+  x -> 2
+}
+```
+
+`box` contains two distinct bindings, `x#0` and `x#1`. They are independent entries in an ordered structure, not conflicting entries in a symbol table. The compiler tracks them by index.
+
+This is not shadowing and not redefinition. It is a structural feature: a scope is a sequence of bindings, and several can share a name. Syntact treats a scope as data, not as a symbol table. A symbol table forces unique names. Data does not.
+
+### Access and carving target different occurrences
+
+Same-name bindings introduce a subtle but central rule: **access by name and carving do not look at the scope the same way**.
+
+* **Access** (`box.x`) returns the **last** visible occurrence of `x`. It is a current-view resolution, walking the scope top-down and keeping the last one.
+* **Carving** (`box{x -> ...}`) targets the **first** structural occurrence of `x` by default. It is a structural transformation of the scope's foundation.
+
+So given the `box` above:
+
+```syntact
+box.x // 2          (last occurrence: x#1)
+box.y // 1          (y was bound to x#0, the x in scope at that line)
+```
+
+And a carve:
+
+```syntact
+box2 -> box{x -> 10}
+
+box2.x // 2         (still reads the last x, which is x#1, untouched)
+box2.y // 10        (y depends on x#0, which was carved to 10)
+```
+
+Either occurrence can be targeted explicitly:
+
+```syntact
+box{x#0 -> 5}  // carve the first x
+box{x#1 -> 9}  // carve the last x
+box{x   -> 7}  // unqualified: carves x#0
+```
+
+A motivating example:
+
+```syntact
+Config -> {
+  port -> 8080
+  url  -> "localhost:" + port
+  port -> 3000
+}
+
+Config.port // 3000              (last port)
+Config.url  // "localhost:8080"  (url was built from the first port)
+
+DevConfig -> Config{port -> 9000}
+
+DevConfig.port // 3000
+DevConfig.url  // "localhost:9000"
+```
+
+This is not an inconsistency. The two operators answer different questions:
+
+* reading asks **what is the current view of this name**;
+* carving asks **what is the structural source this scope is built on**.
+
+Same-name bindings let you expose one value through the visible name while keeping the foundational value carvable. Shadowing and structural rewriting coexist instead of fighting each other.
 
 ---
 
@@ -450,6 +606,22 @@ The compiler is responsible for checking whether a pattern is legal. For example
 
 This keeps concurrency, background work, threading, and GPU dispatch out of the computation itself. They are not different function kinds and do not require separate async syntax. They are different ways to collapse the same scope.
 
+### Patterns constrain strategy, not machine form
+
+A GPU collapse does not mean “compile this scope into exactly one GPU kernel”.
+
+Depending on the reduced structure, a GPU collapse may produce:
+
+```text
+zero kernels       if everything is reduced at compile time
+one kernel         for simple data-parallel work
+multiple kernels   for reductions or complex pipelines
+library calls      for specialized operations such as matrix multiplication
+a compile error    if the region is not legal for GPU execution
+```
+
+`|!|` constrains the collapse strategy. It does not expose a kernel model in the source language. The same is true of `[!]`, `<!>`, and `(!)`: they declare a strategy, not a fixed lowering.
+
 ---
 
 ## Carving
@@ -600,6 +772,55 @@ p.x
 
 The difference between “type”, “value”, “blueprint”, and “instance” is not a difference of world. It is a difference of operation.
 
+### Defaults compose
+
+Defaults are compositional.
+
+The default of a structured scope is obtained from the defaults of its shaped bindings. A complete structure composed of complete parts is itself complete.
+
+```syntact
+Vec2 -> {
+  f32:x
+  f32:y
+}
+
+Transform -> {
+  Vec2:position
+  Vec2:scale -> Vec2{x -> 1 y -> 1}
+}
+
+Transform.position.x // 0
+Transform.position.y // 0
+Transform.scale.x    // 1
+Transform.scale.y    // 1
+```
+
+Defaults are not magic values produced by the compiler. They are the natural reading of a complete structure.
+
+---
+
+## No null, no uninitialized state
+
+Syntact has no null.
+
+There is no hidden “missing value” state and no uninitialized binding. A binding is complete because its shape provides a default, and defaults compose structurally.
+
+```syntact
+Point -> {
+  u8:x
+  u8:y
+}
+
+Point:p
+
+p.x // 0
+p.y // 0
+```
+
+`p` is not partially initialized. It is complete by composition.
+
+If absence, failure, optionality, or emptiness is needed, it must be modeled structurally. It is never smuggled in as a null pointer or an uninitialized value.
+
 ---
 
 ## Algebraic immutability
@@ -623,79 +844,7 @@ This is not “immutability by convention”. It is the meaning of carving. Ther
 
 A consequence: there is no notion of “the value of `x` after we changed it”. There is only `box.x`, `box2.x`, and any other scope that participates in the derivation graph. Any of them can be inspected at any time.
 
-## Same-name bindings are not redeclarations
-
-In a scope, two bindings can share a name. They are not in conflict and the second does not overwrite the first.
-
-```syntact
-box -> {
-  x -> 1
-  y -> x
-  x -> 2
-}
-```
-
-`box` contains two distinct bindings, `x#0` and `x#1`. They are independent entries in an ordered structure, not conflicting entries in a symbol table. The compiler tracks them by index.
-
-This is not shadowing and not redefinition. It is a structural feature: a scope is a sequence of bindings, and several can share a name. Syntact treats a scope as data, not as a symbol table. A symbol table forces unique names. Data does not.
-
-### Access and carving target different occurrences
-
-Same-name bindings introduce a subtle but central rule: **access by name and carving do not look at the scope the same way**.
-
-* **Access** (`box.x`) returns the **last** visible occurrence of `x`. It is a current-view resolution, walking the scope top-down and keeping the last one.
-* **Carving** (`box{x -> ...}`) targets the **first** structural occurrence of `x` by default. It is a structural transformation of the scope's foundation.
-
-So given the `box` above:
-
-```syntact
-box.x // 2          (last occurrence: x#1)
-box.y // 1          (y was bound to x#0, the x in scope at that line)
-```
-
-And a carve:
-
-```syntact
-box2 -> box{x -> 10}
-
-box2.x // 2         (still reads the last x, which is x#1, untouched)
-box2.y // 10        (y depends on x#0, which was carved to 10)
-```
-
-Either occurrence can be targeted explicitly:
-
-```syntact
-box{x#0 -> 5}  // carve the first x
-box{x#1 -> 9}  // carve the last x
-box{x   -> 7}  // unqualified: carves x#0
-```
-
-A motivating example:
-
-```syntact
-Config -> {
-  port -> 8080
-  url  -> "localhost:" + port
-  port -> 3000
-}
-
-Config.port // 3000              (last port)
-Config.url  // "localhost:8080"  (url was built from the first port)
-
-DevConfig -> Config{port -> 9000}
-
-DevConfig.port // 3000
-DevConfig.url  // "localhost:9000"
-```
-
-This is not an inconsistency. The two operators answer different questions:
-
-* reading asks **what is the current view of this name**;
-* carving asks **what is the structural source this scope is built on**.
-
-Same-name bindings let you expose one value through the visible name while keeping the foundational value carvable. Shadowing and structural rewriting coexist instead of fighting each other.
-
-## Mutation is opt-in through resonance
+---
 
 ## Mutation is opt-in through resonance
 
@@ -703,7 +852,7 @@ Because the algebra is immutable, ordinary bindings cannot be mutated, reassigne
 
 Resonance is layered on top of the immutable core. It does not change the core. A program with no resonant bindings is purely algebraic.
 
-No null. No uninitialized value. No hidden mutation. Absence must be modeled explicitly.
+Combined with the no-null rule above, this gives the core a strong guarantee: every binding has a value, no value is ever silently replaced, and the only way to model change is to opt in through resonance.
 
 ---
 
@@ -1215,13 +1364,15 @@ Proof obligations are long-term. The generic structure does not depend on them.
 
 ## Effects as nominal events
 
-Syntact is structural almost everywhere.
+> Syntact is structural by default. Effects are the exception: they are nominal because sometimes structural equality is not meaning equality.
+
+Two events may have the same payload and still be different capabilities. A `Log` and an `Audit` event can carry the same string and still mean very different things. The structure cannot tell them apart; only the name can.
+
+Nominality is not a property of ordinary data in Syntact. It is introduced explicitly through effects.
 
 Values are structural. Shapes are structural. Patterns are structural. Modules are structural. Scopes are structural.
 
-Effects are different.
-
-Effects are **nominal events** with structural payloads.
+Effects are different. Effects are **nominal events** with structural payloads.
 
 ```syntact
 Log -> {
