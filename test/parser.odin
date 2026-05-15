@@ -267,8 +267,8 @@ show_source_context :: proc(source: string, position: compiler.Position) -> stri
 
 // ---------- IO ----------
 load_test_file :: proc(path: string) -> (Test_Case, bool, string) {
-	data, ok := os.read_entire_file(path)
-	if !ok do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
+	data, err := os.read_entire_file(path, context.allocator)
+	if err != nil do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
 	tc: Test_Case
 	if err := json.unmarshal(data, &tc); err != nil {
 		return {}, false, fmt.tprintf("Failed to parse JSON in %s: %v", path, err)
