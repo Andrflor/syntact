@@ -1,6 +1,6 @@
 package compiler
 
-builtin := init_builtins()
+builtin: ScopeData
 
 init_builtins :: proc() -> ScopeData {
 	u8_binding = create_integer_default("u8", .u8)
