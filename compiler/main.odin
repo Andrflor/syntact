@@ -129,6 +129,7 @@ print_usage :: proc() {
  * main delegates to the resolver and handles exit codes
  */
 main :: proc() {
+	builtin := init_builtins()
 	success := resolve_entry()
 	// Exit with appropriate status
 	if !success {
