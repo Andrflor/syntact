@@ -1,0 +1,6 @@
+{
+  "name": "Literal Integer",
+  "description": "Bare integer literal",
+  "source": "42",
+  "expect": "Scope[Literal(Integer,42)]"
+}

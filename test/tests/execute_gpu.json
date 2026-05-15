@@ -1,0 +1,6 @@
+{
+  "name": "Execute GPU |!|",
+  "description": "GPU wrapper using vertical bars",
+  "source": "foo|!|",
+  "expect": "Scope[Execute(Identifier(foo),[GPU])]"
+}

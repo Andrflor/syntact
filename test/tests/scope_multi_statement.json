@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Multiple Statements",
+  "description": "Statements separated by newlines",
+  "source": "{\n  a -> 1\n  b -> 2\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]]"
+}

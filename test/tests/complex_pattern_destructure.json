@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Scope Destructuring Branch",
+  "description": "A branch source can be a scope used for destructuring",
+  "source": "x ? {\n  {a b} -> 1\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[Identifier(a),Identifier(b)],Literal(Integer,1))])]"
+}

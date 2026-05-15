@@ -1,0 +1,6 @@
+{
+  "name": "Override Simple",
+  "description": "Identifier{...} (no space) creates an Override",
+  "source": "Foo{a -> 1}",
+  "expect": "Scope[Override(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1))])]"
+}

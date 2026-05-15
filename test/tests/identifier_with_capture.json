@@ -1,0 +1,6 @@
+{
+  "name": "Identifier With Capture",
+  "description": "name(capture) — no space before paren — binds capture to name",
+  "source": "T(c)",
+  "expect": "Scope[Identifier(T,c)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Constraint Bind (a:b)",
+  "description": "No-space colon: a:b binds name b to type a",
+  "source": "u8:x",
+  "expect": "Scope[Constraint(Identifier(u8),Identifier(x))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Event Push Infix",
+  "description": "value >- Change emits Change with captured value",
+  "source": "value >- Change",
+  "expect": "Scope[EventPush(Identifier(value),Identifier(Change))]"
+}

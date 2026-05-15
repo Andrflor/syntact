@@ -1,0 +1,6 @@
+{
+  "name": "Operator Mod",
+  "description": "Binary modulo",
+  "source": "10 % 3",
+  "expect": "Scope[Operator(Mod,Literal(Integer,10),Literal(Integer,3))]"
+}

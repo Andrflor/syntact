@@ -1,0 +1,6 @@
+{
+  "name": "Capture Alone",
+  "description": "(name) at the start parses as a capture-only Identifier with empty name",
+  "source": "(c)",
+  "expect": "Scope[Identifier(,c)]"
+}

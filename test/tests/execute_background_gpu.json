@@ -1,0 +1,6 @@
+{
+  "name": "Execute Background+GPU (|!|)",
+  "description": "Background wrapping GPU",
+  "source": "foo(|!|)",
+  "expect": "Scope[Execute(Identifier(foo),[Background,GPU])]"
+}

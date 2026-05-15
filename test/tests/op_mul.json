@@ -1,0 +1,6 @@
+{
+  "name": "Operator Multiply",
+  "description": "Binary multiplication",
+  "source": "2 * 3",
+  "expect": "Scope[Operator(Multiply,Literal(Integer,2),Literal(Integer,3))]"
+}

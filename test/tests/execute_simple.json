@@ -1,0 +1,6 @@
+{
+  "name": "Execute Simple",
+  "description": "Postfix ! produces Execute with no wrappers",
+  "source": "foo!",
+  "expect": "Scope[Execute(Identifier(foo),[])]"
+}

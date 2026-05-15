@@ -1,0 +1,6 @@
+{
+  "name": "Multi-Statement Scope With Mixed Forms",
+  "description": "A scope mixing a constraint, a pointing, an event push and a product",
+  "source": "{\n  u8:value -> 0\n  >- Change\n  -> value\n}",
+  "expect": "Scope[Scope[Pointing(Constraint(Identifier(u8),Identifier(value)),Literal(Integer,0)),EventPush(nil,Identifier(Change)),Product(Identifier(value))]]"
+}

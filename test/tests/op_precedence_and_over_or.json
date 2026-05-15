@@ -1,0 +1,6 @@
+{
+  "name": "Operator Precedence: And over Or",
+  "description": "& binds tighter than | (LOGICAL > CONDITIONAL)",
+  "source": "a | b & c",
+  "expect": "Scope[Operator(Or,Identifier(a),Operator(And,Identifier(b),Identifier(c)))]"
+}

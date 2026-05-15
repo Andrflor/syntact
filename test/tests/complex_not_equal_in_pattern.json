@@ -1,0 +1,6 @@
+{
+  "name": "Not Equal Combined With And In Constraint",
+  "description": "Uses the new != token in a structural refinement constraint like (N & ~{}):x",
+  "source": "a != b & c",
+  "expect": "Scope[Operator(NotEqual,Identifier(a),Operator(And,Identifier(b),Identifier(c)))]"
+}

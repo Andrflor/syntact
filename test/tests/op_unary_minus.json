@@ -1,0 +1,6 @@
+{
+  "name": "Operator Unary Minus",
+  "description": "Unary negation produces Subtract with nil left",
+  "source": "-7",
+  "expect": "Scope[Operator(Subtract,nil,Literal(Integer,7))]"
+}

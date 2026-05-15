@@ -1,0 +1,6 @@
+{
+  "name": "Execute Threading <!>",
+  "description": "Threading wrapper",
+  "source": "foo<!>",
+  "expect": "Scope[Execute(Identifier(foo),[Threading])]"
+}

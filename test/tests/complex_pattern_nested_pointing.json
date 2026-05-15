@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Nested Pointing",
+  "description": "A branch product can itself be a Pointing (right-associative -> chain), with the outer parse_branch destructuring only the top-level Pointing",
+  "source": "x ? {\n  1 -> y -> 2\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Pointing(Identifier(y),Literal(Integer,2)))])]"
+}

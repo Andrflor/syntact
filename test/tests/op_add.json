@@ -1,0 +1,6 @@
+{
+  "name": "Operator Add",
+  "description": "Binary addition",
+  "source": "1 + 2",
+  "expect": "Scope[Operator(Add,Literal(Integer,1),Literal(Integer,2))]"
+}

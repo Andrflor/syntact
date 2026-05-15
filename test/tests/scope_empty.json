@@ -1,0 +1,6 @@
+{
+  "name": "Empty Scope",
+  "description": "An empty {} produces Scope[] inside the outer scope",
+  "source": "{}",
+  "expect": "Scope[Scope[]]"
+}

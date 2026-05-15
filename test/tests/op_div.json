@@ -1,0 +1,6 @@
+{
+  "name": "Operator Divide",
+  "description": "Binary division",
+  "source": "10 / 2",
+  "expect": "Scope[Operator(Divide,Literal(Integer,10),Literal(Integer,2))]"
+}

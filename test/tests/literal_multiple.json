@@ -1,0 +1,6 @@
+{
+  "name": "Multiple Literals In Scope",
+  "description": "Multiple literals separated by newlines become a scope of literals",
+  "source": "1\n2\n3",
+  "expect": "Scope[Literal(Integer,1),Literal(Integer,2),Literal(Integer,3)]"
+}

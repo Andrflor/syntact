@@ -1,0 +1,6 @@
+{
+  "name": "Execute Parallel CPU [!]",
+  "description": "Parallel CPU wrapper",
+  "source": "foo[!]",
+  "expect": "Scope[Execute(Identifier(foo),[Parallel_CPU])]"
+}

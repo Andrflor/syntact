@@ -1,0 +1,6 @@
+{
+  "name": "Product Prefix",
+  "description": "Standalone -> expr creates a Product node",
+  "source": "-> 42",
+  "expect": "Scope[Product(Literal(Integer,42))]"
+}

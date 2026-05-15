@@ -1,0 +1,6 @@
+{
+  "name": "Refinement-Style Constraint (u8|i8)&>10:x",
+  "description": "Combines grouped Or, And with a prefix Greater (refinement), then a ConstraintBind. & binds tighter than |, comparison is unary prefix here.",
+  "source": "(u8|i8)&>10:x",
+  "expect": "Scope[Constraint(Operator(And,Operator(Or,Identifier(u8),Identifier(i8)),Operator(Greater,nil,Literal(Integer,10))),Identifier(x))]"
+}

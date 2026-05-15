@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push To Comparison Expression",
+  "description": "bool:flag >>- counter >= 0 wires a constraint on the left to the resonance source, and the right is a GreaterEqual expression",
+  "source": "bool:flag >>- counter >= 0",
+  "expect": "Scope[ResonancePush(Constraint(Identifier(bool),Identifier(flag)),Operator(GreaterEqual,Identifier(counter),Literal(Integer,0)))]"
+}

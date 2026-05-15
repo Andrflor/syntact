@@ -1,0 +1,6 @@
+{
+  "name": "Three Pointings In Sibling Statements",
+  "description": "Newline separates statements, so the three pointings are siblings (not nested)",
+  "source": "a -> 1\nb -> 2\nc -> 3",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2)),Pointing(Identifier(c),Literal(Integer,3))]"
+}

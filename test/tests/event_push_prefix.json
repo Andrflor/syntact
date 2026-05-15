@@ -1,0 +1,6 @@
+{
+  "name": "Event Push Prefix",
+  "description": "Standalone >- creates an EventPush with nil from",
+  "source": ">- Change",
+  "expect": "Scope[EventPush(nil,Identifier(Change))]"
+}

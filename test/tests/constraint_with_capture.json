@@ -1,0 +1,6 @@
+{
+  "name": "Constraint Bind With Capture (T:(name))",
+  "description": "Capture after constraint binds name as a pure capture identifier",
+  "source": "T:(name)",
+  "expect": "Scope[Constraint(Identifier(T),Identifier(,name))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Event Pull Infix With Catch",
+  "description": "Change -< e { ... } handler binding",
+  "source": "Change -< e { body }",
+  "expect": "Scope[EventPull(e,Identifier(Change),Scope[Identifier(body)])]"
+}

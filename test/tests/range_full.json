@@ -1,0 +1,6 @@
+{
+  "name": "Range Full (a..b)",
+  "description": "Both bounds present",
+  "source": "1..5",
+  "expect": "Scope[Range(Literal(Integer,1),Literal(Integer,5))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push From Property",
+  "description": "state.value >>- Update wires a property access into a resonance push",
+  "source": "state.value >>- Update",
+  "expect": "Scope[ResonancePush(Property(Identifier(state),Identifier(value)),Identifier(Update))]"
+}

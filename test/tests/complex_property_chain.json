@@ -1,0 +1,6 @@
+{
+  "name": "Long Property Chain",
+  "description": "Five-deep property access stays left-associative",
+  "source": "a.b.c.d.e",
+  "expect": "Scope[Property(Property(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d)),Identifier(e))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Range Empty (..)",
+  "description": "Both bounds absent — full range",
+  "source": "{ .. }",
+  "expect": "Scope[Scope[Range(nil,nil)]]"
+}

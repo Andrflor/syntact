@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Empty Branches Block",
+  "description": "Pattern with empty {} produces no branches",
+  "source": "x ? {}",
+  "expect": "Scope[Pattern(Identifier(x),[])]"
+}

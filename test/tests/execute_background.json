@@ -1,0 +1,6 @@
+{
+  "name": "Execute Background (!)",
+  "description": "Background wrapper (parens with no space before)",
+  "source": "foo(!)",
+  "expect": "Scope[Execute(Identifier(foo),[Background])]"
+}

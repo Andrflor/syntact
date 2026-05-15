@@ -1,0 +1,6 @@
+{
+  "name": "Operator Chain Multiply and Divide",
+  "description": "Same-precedence chain is left-associative",
+  "source": "8 / 4 * 2",
+  "expect": "Scope[Operator(Multiply,Operator(Divide,Literal(Integer,8),Literal(Integer,4)),Literal(Integer,2))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull Infix",
+  "description": "a -<< b creates ResonancePull",
+  "source": "a -<< b",
+  "expect": "Scope[ResonancePull(Identifier(a),Identifier(b))]"
+}

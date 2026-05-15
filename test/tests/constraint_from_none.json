@@ -1,0 +1,6 @@
+{
+  "name": "Constraint From None (:b)",
+  "description": "Colon at start (space before, no space after) gives Constraint with nil constraint",
+  "source": "{ :b }",
+  "expect": "Scope[Scope[Constraint(nil,Identifier(b))]]"
+}

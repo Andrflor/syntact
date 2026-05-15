@@ -1,0 +1,6 @@
+{
+  "name": "Range Prefix (..b)",
+  "description": "Only upper bound",
+  "source": "..5",
+  "expect": "Scope[Range(nil,Literal(Integer,5))]"
+}

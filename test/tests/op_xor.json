@@ -1,0 +1,6 @@
+{
+  "name": "Operator Xor",
+  "description": "Bitwise xor",
+  "source": "a ^ b",
+  "expect": "Scope[Operator(Xor,Identifier(a),Identifier(b))]"
+}
