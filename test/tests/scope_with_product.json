@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Product",
+  "description": "A scope that yields a value via -> expr",
+  "source": "{ -> 1 }",
+  "expect": "Scope[Scope[Product(Literal(Integer,1))]]"
+}

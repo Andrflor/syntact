@@ -1,0 +1,6 @@
+{
+  "name": "Execute Background+Parallel ([!])",
+  "description": "Background wrapping Parallel CPU: wrappers ordered outside-in",
+  "source": "foo([!])",
+  "expect": "Scope[Execute(Identifier(foo),[Background,Parallel_CPU])]"
+}

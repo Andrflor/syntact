@@ -1,0 +1,6 @@
+{
+  "name": "Property Access Mixed With Arithmetic",
+  "description": "a.b + c.d * e checks that property access binds tighter than * and + (PRIMARY/CALL > FACTOR > TERM)",
+  "source": "a.b + c.d * e",
+  "expect": "Scope[Operator(Add,Property(Identifier(a),Identifier(b)),Operator(Multiply,Property(Identifier(c),Identifier(d)),Identifier(e)))]"
+}

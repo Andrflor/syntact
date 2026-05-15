@@ -1,0 +1,6 @@
+{
+  "name": "Operator Left-Associativity of Terms",
+  "description": "a - b - c is (a - b) - c",
+  "source": "10 - 3 - 2",
+  "expect": "Scope[Operator(Subtract,Operator(Subtract,Literal(Integer,10),Literal(Integer,3)),Literal(Integer,2))]"
+}

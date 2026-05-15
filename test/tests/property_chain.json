@@ -1,0 +1,6 @@
+{
+  "name": "Property Chain (a.b.c)",
+  "description": "Property access chains left-associatively",
+  "source": "a.b.c",
+  "expect": "Scope[Property(Property(Identifier(a),Identifier(b)),Identifier(c))]"
+}

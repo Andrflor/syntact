@@ -1,0 +1,6 @@
+{
+  "name": "Operator Not Equal Requires No Space Between ! and =",
+  "description": "A space between ! and = breaks the != token: '! =' is parsed as prefix Execute followed by Equal. This documents the lexer rule.",
+  "source": "a ! = b",
+  "expect": "Scope[Operator(Equal,Execute(Identifier(a),[]),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Literal Hexadecimal",
+  "description": "Hexadecimal integer literal",
+  "source": "0xFF",
+  "expect": "Scope[Literal(Hexadecimal,0xFF)]"
+}

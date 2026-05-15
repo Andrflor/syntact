@@ -1,0 +1,6 @@
+{
+  "name": "Execute Prefix With Trailing Override",
+  "description": "!{...} produces Execute(nil,[]) wrapped in Override",
+  "source": "!{foo}",
+  "expect": "Scope[Override(Execute(nil,[]),[Identifier(foo)])]"
+}

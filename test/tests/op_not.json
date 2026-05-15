@@ -1,0 +1,6 @@
+{
+  "name": "Operator Not (unary)",
+  "description": "Unary tilde produces Not with nil left",
+  "source": "~a",
+  "expect": "Scope[Operator(Not,nil,Identifier(a))]"
+}

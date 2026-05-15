@@ -1,0 +1,6 @@
+{
+  "name": "Override Empty",
+  "description": "Identifier{} (no space, empty) creates an Override with no entries",
+  "source": "Foo{}",
+  "expect": "Scope[Override(Identifier(Foo),[])]"
+}

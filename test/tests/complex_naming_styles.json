@@ -1,0 +1,6 @@
+{
+  "name": "Different Identifier Naming Styles",
+  "description": "snake_case, CamelCase, mixedCase123, ALL_CAPS, _leading_underscore — all accepted as a single Identifier",
+  "source": "snake_case -> CamelCase\nmixedCase123 -> ALL_CAPS\n_leading -> _trailing_",
+  "expect": "Scope[Pointing(Identifier(snake_case),Identifier(CamelCase)),Pointing(Identifier(mixedCase123),Identifier(ALL_CAPS)),Pointing(Identifier(_leading),Identifier(_trailing_))]"
+}

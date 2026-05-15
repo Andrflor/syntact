@@ -1,0 +1,6 @@
+{
+  "name": "Literal Float",
+  "description": "Bare float literal",
+  "source": "3.14",
+  "expect": "Scope[Literal(Float,3.14)]"
+}

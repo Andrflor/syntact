@@ -1,0 +1,6 @@
+{
+  "name": "Operator And",
+  "description": "Bitwise/logical and",
+  "source": "a & b",
+  "expect": "Scope[Operator(And,Identifier(a),Identifier(b))]"
+}

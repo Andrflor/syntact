@@ -1,0 +1,6 @@
+{
+  "name": "Operator Right Shift",
+  "description": "Right shift",
+  "source": "a >> b",
+  "expect": "Scope[Operator(RShift,Identifier(a),Identifier(b))]"
+}

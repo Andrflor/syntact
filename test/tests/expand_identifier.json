@@ -1,0 +1,6 @@
+{
+  "name": "Expand Identifier",
+  "description": "...x produces Expand(target)",
+  "source": "...x",
+  "expect": "Scope[Expand(Identifier(x))]"
+}

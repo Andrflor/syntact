@@ -1,0 +1,6 @@
+{
+  "name": "Pointing With Empty Right",
+  "description": "a -> at end of line produces Pointing with nil to",
+  "source": "a ->\nb",
+  "expect": "Scope[Pointing(Identifier(a),nil),Identifier(b)]"
+}

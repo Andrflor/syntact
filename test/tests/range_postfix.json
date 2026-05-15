@@ -1,0 +1,6 @@
+{
+  "name": "Range Postfix (a..)",
+  "description": "Only lower bound",
+  "source": "1..",
+  "expect": "Scope[Range(Literal(Integer,1),nil)]"
+}

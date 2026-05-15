@@ -1,0 +1,6 @@
+{
+  "name": "Operator Not Equal",
+  "description": "Inequality comparison via != token (lexer produces NotEqual when ! is immediately followed by =)",
+  "source": "a != b",
+  "expect": "Scope[Operator(NotEqual,Identifier(a),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "External Simple (@name)",
+  "description": "@name on its own produces an External node with empty scope (nil)",
+  "source": "@http",
+  "expect": "Scope[External(http,nil)]"
+}

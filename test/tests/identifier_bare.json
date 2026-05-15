@@ -1,0 +1,6 @@
+{
+  "name": "Bare Identifier",
+  "description": "Just an identifier",
+  "source": "foo",
+  "expect": "Scope[Identifier(foo)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Pointing Chain (right-associative)",
+  "description": "Same-precedence -> chain. Pratt parses right of -> at precedence ASSIGNMENT (no +1), so a -> b -> c becomes Pointing(a, Pointing(b, c))",
+  "source": "a -> b -> c",
+  "expect": "Scope[Pointing(Identifier(a),Pointing(Identifier(b),Identifier(c)))]"
+}

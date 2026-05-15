@@ -1,0 +1,6 @@
+{
+  "name": "Event Pull With Identifier Treated As Catch",
+  "description": "After -< the parser greedily consumes any Identifier as the catch. So 'Change -< handler' is read as catch='handler' with nil body. To get a body, use a scope (Change -< { body }).",
+  "source": "Change -< handler",
+  "expect": "Scope[EventPull(handler,Identifier(Change),nil)]"
+}

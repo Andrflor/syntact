@@ -1,0 +1,6 @@
+{
+  "name": "Pointing To Scope",
+  "description": "a -> { ... } binds an identifier to a scope",
+  "source": "a -> { b }",
+  "expect": "Scope[Pointing(Identifier(a),Scope[Identifier(b)])]"
+}

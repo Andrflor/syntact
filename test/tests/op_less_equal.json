@@ -1,0 +1,6 @@
+{
+  "name": "Operator Less Equal",
+  "description": "Less-than-or-equal comparison",
+  "source": "a <= b",
+  "expect": "Scope[Operator(LessEqual,Identifier(a),Identifier(b))]"
+}

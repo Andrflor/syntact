@@ -1,0 +1,6 @@
+{
+  "name": "Nested Scope",
+  "description": "A scope inside a scope",
+  "source": "{ { a } }",
+  "expect": "Scope[Scope[Scope[Identifier(a)]]]"
+}

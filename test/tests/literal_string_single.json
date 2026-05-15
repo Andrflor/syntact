@@ -1,0 +1,6 @@
+{
+  "name": "Literal String Single Quote",
+  "description": "Single-quoted string literal",
+  "source": "'hello'",
+  "expect": "Scope[Literal(String,hello)]"
+}

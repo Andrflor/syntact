@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push Prefix",
+  "description": "Standalone >>- creates a ResonancePush with nil from",
+  "source": ">>- x",
+  "expect": "Scope[ResonancePush(nil,Identifier(x))]"
+}

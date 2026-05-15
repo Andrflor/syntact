@@ -1,0 +1,6 @@
+{
+  "name": "Pointing Whose Target Is A Pattern",
+  "description": "result -> x ? { 1 -> 'a' }: pointing where the right-hand side is itself a Pattern expression",
+  "source": "result -> x ? { 1 -> 'a' }",
+  "expect": "Scope[Pointing(Identifier(result),Pattern(Identifier(x),[Branch(Literal(Integer,1),Literal(String,a))]))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Operator Precedence: Factor over Term",
+  "description": "Multiplication binds tighter than addition",
+  "source": "1 + 2 * 3",
+  "expect": "Scope[Operator(Add,Literal(Integer,1),Operator(Multiply,Literal(Integer,2),Literal(Integer,3)))]"
+}

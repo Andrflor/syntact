@@ -1,0 +1,6 @@
+{
+  "name": "Space Before Brace Makes Scope Not Override",
+  "description": "Identifier {...} (with space) does not produce an Override; the brace is a fresh scope. The two are sibling statements.",
+  "source": "Foo {a}",
+  "expect": "Scope[Identifier(Foo),Scope[Identifier(a)]]"
+}

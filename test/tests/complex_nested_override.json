@@ -1,0 +1,6 @@
+{
+  "name": "Nested Override",
+  "description": "An override whose entry is itself an override",
+  "source": "Foo{a -> Bar{b -> 1}}",
+  "expect": "Scope[Override(Identifier(Foo),[Pointing(Identifier(a),Override(Identifier(Bar),[Pointing(Identifier(b),Literal(Integer,1))]))])]"
+}

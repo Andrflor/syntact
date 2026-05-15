@@ -1,0 +1,6 @@
+{
+  "name": "Operator Greater",
+  "description": "Greater-than comparison",
+  "source": "a > b",
+  "expect": "Scope[Operator(Greater,Identifier(a),Identifier(b))]"
+}

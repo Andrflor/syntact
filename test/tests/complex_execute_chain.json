@@ -1,0 +1,6 @@
+{
+  "name": "Execute On Execute",
+  "description": "foo!! produces a postfix Execute twice — the outer Execute wraps the inner Execute",
+  "source": "foo!!",
+  "expect": "Scope[Execute(Execute(Identifier(foo),[]),[])]"
+}

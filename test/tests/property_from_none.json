@@ -1,0 +1,6 @@
+{
+  "name": "Property From None (.b)",
+  "description": "Dot at start (space before, no space after) gives Property with nil source",
+  "source": "{ .b }",
+  "expect": "Scope[Scope[Property(nil,Identifier(b))]]"
+}

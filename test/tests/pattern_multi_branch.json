@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Multiple Branches",
+  "description": "Pattern with three explicit branches",
+  "source": "v ? {\n  1 -> 'a'\n  2 -> 'b'\n  3 -> 'c'\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Literal(String,a)),Branch(Literal(Integer,2),Literal(String,b)),Branch(Literal(Integer,3),Literal(String,c))])]"
+}

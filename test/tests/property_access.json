@@ -1,0 +1,6 @@
+{
+  "name": "Property Access (a.b)",
+  "description": "No-space dot creates a Property",
+  "source": "a.b",
+  "expect": "Scope[Property(Identifier(a),Identifier(b))]"
+}

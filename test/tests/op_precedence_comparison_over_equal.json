@@ -1,0 +1,6 @@
+{
+  "name": "Operator Precedence: Comparison over Equal",
+  "description": "< binds tighter than = (COMPARISON > EQUALITY)",
+  "source": "a = b < c",
+  "expect": "Scope[Operator(Equal,Identifier(a),Operator(Less,Identifier(b),Identifier(c)))]"
+}

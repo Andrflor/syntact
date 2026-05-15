@@ -1,0 +1,6 @@
+{
+  "name": "Operator Prefix Greater",
+  "description": "Prefix > produces Greater with nil left (used in refinement: >0)",
+  "source": ">0",
+  "expect": "Scope[Operator(Greater,nil,Literal(Integer,0))]"
+}

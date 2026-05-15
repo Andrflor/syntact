@@ -1,0 +1,6 @@
+{
+  "name": "Enforce (?!)",
+  "description": "a ?! b builds an Enforce node",
+  "source": "a ?! b",
+  "expect": "Scope[Enforce(Identifier(a),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Operator Subtract",
+  "description": "Binary subtraction",
+  "source": "5 - 3",
+  "expect": "Scope[Operator(Subtract,Literal(Integer,5),Literal(Integer,3))]"
+}

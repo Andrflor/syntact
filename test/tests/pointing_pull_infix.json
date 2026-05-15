@@ -1,0 +1,6 @@
+{
+  "name": "Pointing Pull Infix",
+  "description": "a <- b creates a PointingPull",
+  "source": "a <- b",
+  "expect": "Scope[PointingPull(Identifier(a),Identifier(b))]"
+}

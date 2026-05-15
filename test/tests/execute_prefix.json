@@ -1,0 +1,6 @@
+{
+  "name": "Execute Prefix",
+  "description": "Prefix ! on an identifier",
+  "source": "!foo",
+  "expect": "Scope[Execute(Identifier(foo),[])]"
+}

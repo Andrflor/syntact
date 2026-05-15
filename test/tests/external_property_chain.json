@@ -1,0 +1,6 @@
+{
+  "name": "External Chained With Property",
+  "description": "@lib.geometry.Plane chains Property accesses on the External",
+  "source": "@lib.geometry.Plane",
+  "expect": "Scope[Property(Property(External(lib,nil),Identifier(geometry)),Identifier(Plane))]"
+}

@@ -57,6 +57,7 @@ Token_Kind :: enum {
 
 	// Comparisons
 	Equal, // =
+	NotEqual, // !=
 	Less, // <
 	Greater, // >
 	LessEqual, // <=
@@ -334,6 +335,10 @@ next_token :: proc(l: ^Lexer) -> Token {
 		return Token{kind = .RightParen, text = ")", position = start_pos}
 	case '!':
 		advance_position(l)
+		if l.position.offset < l.source_len && l.source[l.position.offset] == '=' {
+			advance_position(l)
+			return Token{kind = .NotEqual, text = "!=", position = start_pos}
+		}
 		return Token{kind = .Execute, text = "!", position = start_pos}
 	case ':':
 		// Handle constraint patterns based on space context
@@ -1279,6 +1284,8 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     // Comparison operators
     case .Equal:
         return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
+    case .NotEqual:
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .EQUALITY}
     case .Less:
         return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_less_than, precedence = .COMPARISON}
     case .Greater:
@@ -2147,6 +2154,7 @@ parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     case .Or:            op.kind = .Or
     case .Xor:           op.kind = .Xor
     case .Equal:         op.kind = .Equal
+    case .NotEqual:      op.kind = .NotEqual
     case .Less:          op.kind = .Less
     case .Greater:       op.kind = .Greater
     case .LessEqual:     op.kind = .LessEqual

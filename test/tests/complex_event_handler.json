@@ -1,0 +1,6 @@
+{
+  "name": "Full Event Handler",
+  "description": "Logger -< e { -> io.write{e.msg}! } binds an EventPull with catch=e, source=Logger, body is a scope with a Product wrapping an Execute over an Override of the property.",
+  "source": "Logger -< e { -> io.write{e.msg}! }",
+  "expect": "Scope[EventPull(e,Identifier(Logger),Scope[Product(Execute(Override(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(msg))]),[]))])]"
+}
