@@ -1,0 +1,6 @@
+{
+  "name": "Constraint With Name+Capture Followed By Carved Override",
+  "description": "Circle:name(capture){radius->data} — both name and capture together",
+  "source": "Circle:name(capture){radius->data}",
+  "expect": "Scope[Override(Constraint(Identifier(Circle),Identifier(name,capture)),[Pointing(Identifier(radius),Identifier(data))])]"
+}

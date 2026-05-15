@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Equal In Pattern Branch",
+  "description": "=foo as a branch source means 'match by value of foo' — a prefix Equal operator with nil left",
+  "source": "x ? { =foo -> 1 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Operator(Equal,nil,Identifier(foo)),Literal(Integer,1))])]"
+}

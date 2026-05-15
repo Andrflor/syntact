@@ -1,0 +1,6 @@
+{
+  "name": "Scope Shape In Pattern Branch",
+  "description": "{->foo} as a branch source matches values shaped like that scope",
+  "source": "x ? { {->foo} -> 1 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[Product(Identifier(foo))],Literal(Integer,1))])]"
+}

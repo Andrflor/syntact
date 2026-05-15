@@ -1,0 +1,6 @@
+{
+  "name": "Composed Refinement Branch",
+  "description": "(u8|i8)&>10 in a branch source mixes grouping, Or, And and prefix Greater",
+  "source": "v ? { (u8|i8)&>10 -> 'x' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(And,Operator(Or,Identifier(u8),Identifier(i8)),Operator(Greater,nil,Literal(Integer,10))),Literal(String,x))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Type Algebra Grouped",
+  "description": "weirdInt -> (u8 | i8) & >10 — grouped union refined with a comparison",
+  "source": "weirdInt -> (u8 | i8) & >10",
+  "expect": "Scope[Pointing(Identifier(weirdInt),Operator(And,Operator(Or,Identifier(u8),Identifier(i8)),Operator(Greater,nil,Literal(Integer,10))))]"
+}

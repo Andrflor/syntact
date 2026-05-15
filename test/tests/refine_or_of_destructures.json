@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Shape Destructures In Branch",
+  "description": "Square:{side(s)} | Diamond:{side(s)} unifies two shapes through a shared capture. The parser builds it as a Constraint chain (Square,nil) override side(s), Or with Diamond, then another override side(s) on the Constraint of the whole.",
+  "source": "s ? { Square:{side(s)} | Diamond:{side(s)} -> s }",
+  "expect": "Scope[Pattern(Identifier(s),[Branch(Override(Constraint(Operator(Or,Override(Constraint(Identifier(Square),nil),[Identifier(side,s)]),Identifier(Diamond)),nil),[Identifier(side,s)]),Identifier(s))])]"
+}
