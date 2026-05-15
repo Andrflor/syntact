@@ -12,7 +12,7 @@ package x64_assembler
 import "base:runtime"
 import "core:fmt"
 import "core:log"
-import os "core:os/os2"
+import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:time"
@@ -69,7 +69,6 @@ assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 		os.close(r)
 		_ = os.process_wait(p) or_return
 		os.remove(asm_file)
-		os.process_close(p) or_return
 		if (len(output) != 0) {
 			panic(
 				fmt.tprintf(
@@ -99,7 +98,6 @@ assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 		os.close(r)
 		_ = os.process_wait(p) or_return
 		os.remove(obj_file)
-		os.process_close(p) or_return
 	}
 
 	// Parse the objdump output to extract bytes

@@ -90,9 +90,9 @@ resolve_entry :: proc() -> bool {
 		}
 	}
 
-	absolute_path, sucess := filepath.abs(resolver.options.input_path)
+	absolute_path, abs_err := filepath.abs(resolver.options.input_path, context.allocator)
 
-	if !success {
+	if abs_err != nil {
 		fmt.printf(
 			"[ERROR]  Impossible to get absolute path for entrypoint %s\n",
 			resolver.options.input_path,
@@ -106,7 +106,7 @@ resolve_entry :: proc() -> bool {
 	}
 
 	// Optimal thread count - one per core
-	num_threads := max(os.processor_core_count() - 1, 1)
+	num_threads := max(os.get_processor_core_count() - 1, 1)
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Initializing thread pool with %d threads\n", num_threads)
 	}
@@ -253,8 +253,8 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Checking file modification time for: %s\n", cache.path)
 	}
 
-	file_info, err := os.stat(cache.path)
-	if err != os.ERROR_NONE {
+	file_info, err := os.stat(cache.path, context.allocator)
+	if err != nil {
 		if resolver.options.verbose {
 			fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", cache.path, err)
 		}
@@ -309,8 +309,8 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Reading entire file: %s\n", cache.path)
 	}
 
-	source_bytes, success := os.read_entire_file(cache.path, temp_allocator)
-	if !success {
+	source_bytes, read_err := os.read_entire_file(cache.path, temp_allocator)
+	if read_err != nil {
 		if resolver.options.verbose {
 			fmt.printf("[ERROR] Failed to read file: %s\n", cache.path)
 		}
@@ -442,19 +442,20 @@ _process_node :: proc(node: ^Node, dir_path: string, segments: ^[dynamic]string)
 		append(segments, n.property.(Identifier).name)
 		_process_node(n.source, dir_path, segments)
 	case External:
-		path := filepath.join({dir_path, n.name})
+		path, _ := filepath.join({dir_path, n.name}, context.temp_allocator)
 		if os.is_dir(path) {
 			// This is a directory, so we need to check the segments in reverse order
 			current_path := path
 			for i := len(segments) - 1; i >= 0; i -= 1 {
 				segment := segments[i]
-				path := filepath.join({current_path, segment})
+				path, _ := filepath.join({current_path, segment}, context.temp_allocator)
 				if os.is_dir(path) {
 					// If the path is a directory, update the current path
 					current_path = path
 				} else {
 					// If it's not a directory, check if there's a .st file
-					st_path := fmt.tprintf("%s.st", filepath.join({current_path, segment}))
+					joined, _ := filepath.join({current_path, segment}, context.temp_allocator)
+					st_path := fmt.tprintf("%s.st", joined)
 					if os.exists(st_path) {
 						// Process the file if it exists
 						compute_on_need(st_path)
@@ -467,7 +468,7 @@ _process_node :: proc(node: ^Node, dir_path: string, segments: ^[dynamic]string)
 			}
 		} else {
 			// We maybe have a file
-			file_path := filepath.join({dir_path, fmt.tprintf("%s.st", n.name)})
+			file_path, _ := filepath.join({dir_path, fmt.tprintf("%s.st", n.name)}, context.temp_allocator)
 			if os.exists(file_path) {
 				// Process the file if it exists
 				compute_on_need(file_path)
@@ -529,8 +530,8 @@ create_cache :: proc(path: string) -> ^Cache {
 		fmt.printf("[DEBUG] Getting file info for: %s\n", path)
 	}
 
-	file_info, err := os.stat(path)
-	if err != os.ERROR_NONE {
+	file_info, err := os.stat(path, context.allocator)
+	if err != nil {
 		if resolver.options.verbose {
 			fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", path, err)
 		}
@@ -594,7 +595,7 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	}
 	// Create cache directory if it doesn't exist
 	if !os.exists(cache_dir) {
-		if err := os.make_directory(cache_dir); err != os.ERROR_NONE {
+		if err := os.make_directory(cache_dir); err != nil {
 			fmt.printf("[ERROR] Failed to create cache directory: %v\n", err)
 			return false
 		}
@@ -603,11 +604,11 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	// Generate unique filename based on path
 	hash_value := hash.fnv64a(transmute([]byte)cache.path)
 	cache_filename := fmt.aprintf("%x.cache", hash_value)
-	cache_path := filepath.join([]string{cache_dir, cache_filename})
+	cache_path, _ := filepath.join([]string{cache_dir, cache_filename}, context.allocator)
 
 	// Remove existing file if it exists
 	if os.exists(cache_path) {
-		if err := os.remove(cache_path); err != os.ERROR_NONE {
+		if err := os.remove(cache_path); err != nil {
 			fmt.printf(
 				"[ERROR] Failed to remove existing cache file: %s, error: %v\n",
 				cache_path,
@@ -618,8 +619,8 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	}
 
 	// Open file for writing
-	cache_file, err := os.open(cache_path, os.O_WRONLY | os.O_CREATE, 0o755)
-	if err != os.ERROR_NONE {
+	cache_file, err := os.open(cache_path, os.O_WRONLY | os.O_CREATE, os.Permissions_Default_File)
+	if err != nil {
 		fmt.printf("[ERROR] Failed to create cache file: %s, error: %v\n", cache_path, err)
 		return false
 	}
@@ -640,7 +641,7 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	mem.copy(&header_slice[0], &header, size_of(header))
 
 	bytes_written, write_err := os.write(cache_file, header_slice)
-	if write_err != os.ERROR_NONE {
+	if write_err != nil {
 		fmt.printf("[ERROR] Failed to write header: %v\n", write_err)
 		return false
 	}
@@ -648,7 +649,7 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	// Write the path
 	path_slice := transmute([]byte)cache.path
 	bytes_written, write_err = os.write(cache_file, path_slice)
-	if write_err != os.ERROR_NONE {
+	if write_err != nil {
 		fmt.printf("[ERROR] Failed to write path: %v\n", write_err)
 		return false
 	}
@@ -658,7 +659,7 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	mem.copy(&arena_slice[0], &cache.arena, size_of(vmem.Arena))
 
 	bytes_written, write_err = os.write(cache_file, arena_slice)
-	if write_err != os.ERROR_NONE {
+	if write_err != nil {
 		fmt.printf("[ERROR] Failed to write arena structure: %v\n", write_err)
 		return false
 	}
@@ -682,7 +683,7 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 	// Generate the same filename as when saving
 	hash_value := hash.fnv64a(transmute([]byte)path)
 	cache_filename := fmt.aprintf("%x.cache", hash_value)
-	cache_path := filepath.join([]string{cache_dir, cache_filename})
+	cache_path, _ := filepath.join([]string{cache_dir, cache_filename}, context.allocator)
 
 	// Check if cache file exists
 	if !os.exists(cache_path) {
@@ -694,7 +695,7 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 
 	// Open file for reading
 	cache_file, err := os.open(cache_path, os.O_RDONLY)
-	if err != os.ERROR_NONE {
+	if err != nil {
 		fmt.printf("[ERROR] Failed to open cache file: %s, error: %v\n", cache_path, err)
 		return nil
 	}
@@ -709,15 +710,15 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 
 	header_slice := make([]byte, size_of(header))
 	bytes_read, read_err := os.read(cache_file, header_slice)
-	if read_err != os.ERROR_NONE || bytes_read != size_of(header) {
+	if read_err != nil || bytes_read != size_of(header) {
 		fmt.printf("[ERROR] Failed to read header: %v\n", read_err)
 		return nil
 	}
 	mem.copy(&header, &header_slice[0], size_of(header))
 
 	// Verify source file hasn't been modified
-	file_info, stat_err := os.stat(path)
-	if stat_err != os.ERROR_NONE {
+	file_info, stat_err := os.stat(path, context.allocator)
+	if stat_err != nil {
 		fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", path, stat_err)
 		return nil
 	}
@@ -735,7 +736,7 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 	// Read path
 	path_data := make([]byte, header.path_len)
 	bytes_read, read_err = os.read(cache_file, path_data)
-	if read_err != os.ERROR_NONE || bytes_read != header.path_len {
+	if read_err != nil || bytes_read != header.path_len {
 		fmt.printf("[ERROR] Failed to read path from cache: %v\n", read_err)
 		free(cache)
 		return nil
@@ -746,7 +747,7 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 	// Read Arena structure
 	arena_slice := make([]byte, size_of(vmem.Arena))
 	bytes_read, read_err = os.read(cache_file, arena_slice)
-	if read_err != os.ERROR_NONE || bytes_read != size_of(vmem.Arena) {
+	if read_err != nil || bytes_read != size_of(vmem.Arena) {
 		fmt.printf("[ERROR] Failed to read arena structure: %v\n", read_err)
 		free(cache)
 		return nil
@@ -771,15 +772,15 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 	return cache
 }
 
-cache_dir := filepath.join([]string{get_temp_directory(), ".syntact_cache"})
+cache_dir: string
 
 get_temp_directory :: proc() -> string {
 	// Try standard environment variables first
-	if temp, ok := os.lookup_env("TEMP"); ok {
+	if temp, ok := os.lookup_env("TEMP", context.allocator); ok {
 		return temp
 	}
 
-	if tmp, ok := os.lookup_env("TMP"); ok {
+	if tmp, ok := os.lookup_env("TMP", context.allocator); ok {
 		return tmp
 	}
 

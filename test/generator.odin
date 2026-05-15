@@ -21,8 +21,9 @@ main :: proc() {
 	files := make([dynamic]string, context.temp_allocator)
 	for i := 0; i < len(infos); i += 1 {
 		info := infos[i]
-		if !info.is_dir && strings.has_suffix(info.name, ".json") {
-			append(&files, filepath.join({TEST_DIR, info.name}, context.temp_allocator))
+		if info.type != .Directory && strings.has_suffix(info.name, ".json") {
+			joined, _ := filepath.join({TEST_DIR, info.name}, context.temp_allocator)
+			append(&files, joined)
 		}
 	}
 	if len(files) == 0 {return}
