@@ -39,14 +39,14 @@ main.odin → resolver.odin → parser.odin → analyzer.odin → generate.odin 
 
 1. **`main.odin`** : parsing des arguments CLI dans `Options`, puis délègue à `resolve_entry()`.
 2. **`resolver.odin`** : orchestrateur multi-thread. `Resolver` global contient un `map[string]^Cache` (un `Cache` par fichier source, avec son propre `vmem.Arena`) et un `thread.Pool`. Compile les fichiers en parallèle via `process_cache_task`. La machine d'état `Status` (`Fresh → Parsing → Parsed → Analyzing → Analyzed`) et les mutex par `Cache` protègent la compilation concurrente.
-3. **`parser.odin`** (~100k lignes) : lexer + parser Pratt. Produit un AST dont les nœuds sont une `union` Odin (voir `Node` et ses variantes : `Pointing`, `EventPush`, `ResonancePull`, `Pattern`, `Constraint`, `Override`, `Execute`, `Range`, `Branch`, etc.). Chaque nœud embarque un `NodeBase` avec la `Position` source.
+3. **`parser.odin`** (~3.5k lignes) : lexer + parser Pratt. Produit un AST dont les nœuds sont une `union` Odin (voir `Node` ligne 729 et ses variantes : `Pointing`, `PointingPull`, `EventPush`, `EventPull`, `ResonancePush`, `ResonancePull`, `ScopeNode`, `Override`, `Product`, `Branch`, `Identifier`, `Pattern`, `Constraint`, `Operator`, `Execute`, `Literal`, `Property`, `Expand`, `External`, `Range`, `Enforce`, `Unknown`). Chaque nœud embarque un `NodeBase` avec la `Position` source.
 4. **`analyzer.odin`** : résolution sémantique. Transforme l'AST en `ScopeData` contenant des `^Binding` (nom, `Binding_Kind`, contrainte, `symbolic_value` et `static_value` de type `ValueData`). `ValueData` est une union couvrant scopes, littéraux, propriétés, ranges, effets réactifs (`ReactiveData`, `EffectData`), binaires/unaires, overrides, refs.
 5. **`generate.odin`** : génération de code. La majeure partie est commentée — le backend actif est en cours de reconstruction au-dessus de `./backends/x64`.
-6. **`builtins.odin`** : initialise les bindings built-in (`u8`, `i8`…`i64`, `f32`, `f64`, `bool`, `char`, `string`) dans un `ScopeData` global `builtin`.
+6. **`builtins.odin`** : initialise les bindings built-in (`u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`, `f32`, `f64`, `char`, `bool`, `String`) dans un `ScopeData` global `builtin`. Attention : `String` est majuscule (pas `string`), et `usize`/`isize`/`none` mentionnés dans le README ne sont pas encore implémentés.
 
 ### Backends (`compiler/backends/`)
 
-Seul `x64/` a du code Odin actif (package `x64_assembler`) : `x64_header.odin`, `x64_instructions.odin`, `x64_utility.odin`, `x64_test.odin`. `arm64/` et `wasm/` ne sont pour l'instant que des binaires compilés — pas de sources. Un `x64.odin.bak` indique un refactor en cours.
+Seul `x64/` a du code Odin actif (package `x64_assembler`) : `x64_header.odin`, `x64_instructions.odin`, `x64_utility.odin`, `x64_test.odin`. `arm64/arm64` et `wasm/wasm` sont des fichiers source Odin avec un nom sans extension (packages `arm64_assembler` et `wasm_assembler`), pas encore intégrés au build du compilateur. Un `x64.odin.bak` dans `x64/` indique un refactor en cours.
 
 ### LSP (`lsp/`, package `lsp`)
 
