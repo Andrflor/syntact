@@ -1,6 +1,6 @@
 {
-  "name": "Override Positional Entries",
-  "description": "Overrides can be bare expressions (positional)",
+  "name": "Carve Positional Entries",
+  "description": "Carves can be bare expressions (positional)",
   "source": "Foo{1 2 3}",
-  "expect": "Scope[Override(Identifier(Foo),[Literal(Integer,1),Literal(Integer,2),Literal(Integer,3)])]"
+  "expect": "Scope[Carve(Identifier(Foo),[Literal(Integer,1),Literal(Integer,2),Literal(Integer,3)])]"
 }

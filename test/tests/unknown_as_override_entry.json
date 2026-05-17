@@ -1,6 +1,6 @@
 {
-  "name": "Unknown As Override Entry",
-  "description": "T{??} — an override whose only entry is Unknown",
+  "name": "Unknown As Carve Entry",
+  "description": "T{??} — an carve whose only entry is Unknown",
   "source": "T{??}",
-  "expect": "Scope[Override(Identifier(T),[Unknown])]"
+  "expect": "Scope[Carve(Identifier(T),[Unknown])]"
 }

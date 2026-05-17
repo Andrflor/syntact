@@ -1,6 +1,6 @@
 {
   "name": "Carved Refinement (Circle{radius?<10})",
-  "description": "SmallCircle -> Circle{radius?<10}: an Override on Circle whose entry is an inline Pattern on the radius field constrained by <10",
+  "description": "SmallCircle -> Circle{radius?<10}: an Carve on Circle whose entry is an inline Pattern on the radius field constrained by <10",
   "source": "SmallCircle -> Circle{radius?<10}",
-  "expect": "Scope[Pointing(Identifier(SmallCircle),Override(Identifier(Circle),[Pattern(Identifier(radius),[Branch(Operator(Less,nil,Literal(Integer,10)),nil)])]))]"
+  "expect": "Scope[Pointing(Identifier(SmallCircle),Carve(Identifier(Circle),[Pattern(Identifier(radius),[Branch(Operator(Less,nil,Literal(Integer,10)),nil)])]))]"
 }

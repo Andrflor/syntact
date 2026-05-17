@@ -88,7 +88,7 @@ Token_Kind :: enum {
 
 	// Grouping
 	LeftBrace, // {
-  LeftBraceOverride, // Special case for space sensitive overrides
+  LeftBraceCarve, // Special case for space sensitive carves
 	RightBrace, // }
 	LeftParen, // (
 	LeftParenNoSpace, // (
@@ -311,7 +311,7 @@ next_token :: proc(l: ^Lexer) -> Token {
     if space_before || start_pos.offset == 0 {
         return Token{kind = .LeftBrace, text = "{", position = start_pos}
     } else {
-        return Token{kind = .LeftBraceOverride, text = "{", position = start_pos}
+        return Token{kind = .LeftBraceCarve, text = "{", position = start_pos}
     }
 	case '}':
 		advance_position(l)
@@ -734,7 +734,7 @@ Node :: union {
 	ResonancePush,
 	ResonancePull,
 	ScopeNode,
-	Override,
+	Carve,
 	Product,
 	Branch,
 	Identifier,
@@ -773,7 +773,7 @@ Pointing :: struct {
 }
 
 /*
- * Pointing pull is a declaration later override derived to
+ * Pointing pull is a declaration later carve derived to
  */
 PointingPull :: struct {
   using _: PointingBase,
@@ -826,12 +826,12 @@ ScopeNode :: struct {
 }
 
 /*
- * Override represents modifications to a base entity
+ * Carve represents modifications to a base entity
  */
-Override :: struct {
+Carve :: struct {
   using _: NodeBase,
 	source:    ^Node, // Base entity being modified
-	overrides: [dynamic]Node, // Modifications
+	carves: [dynamic]Node, // Modifications
 }
 
 /*
@@ -1226,8 +1226,8 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     // Grouping and calls
     case .LeftBrace:
         return Parse_Rule{prefix = parse_scope, infix = nil, precedence = .CALL}
-    case .LeftBraceOverride:
-        return Parse_Rule{prefix = parse_scope, infix = parse_override, precedence = .CALL}
+    case .LeftBraceCarve:
+        return Parse_Rule{prefix = parse_scope, infix = parse_carve, precedence = .CALL}
     case .LeftBracket:
         return Parse_Rule{prefix = nil, infix = parse_left_bracket, precedence = .CALL}
     case .LeftParen:
@@ -1471,23 +1471,23 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
 }
 
 /*
-* Implementation of the override postfix rule
+* Implementation of the carve postfix rule
 */
-parse_override :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+parse_carve :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Save position of the left brace
     position := parser.current_token.position
 
-    // Create an override node
-    override := Override {
+    // Create an carve node
+    carve := Carve {
         source = left,
-        overrides = make([dynamic]Node, 0, 2),
+        carves = make([dynamic]Node, 0, 2),
         position = position, // Store position
     }
 
     // Consume left brace (already checked by the caller)
     advance_token(parser)
 
-    // Parse statements inside the braces as overrides
+    // Parse statements inside the braces as carves
     for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
         // Skip newlines
         for parser.current_token.kind == .Newline {
@@ -1498,14 +1498,14 @@ parse_override :: proc(parser: ^Parser, left: ^Node) -> ^Node {
             break
         }
 
-        // Parse statement and add to overrides
+        // Parse statement and add to carves
         if node := parse_statement(parser); node != nil {
-            append(&override.overrides, node^)
+            append(&carve.carves, node^)
         } else {
             // Error recovery
             synchronize(parser)
 
-            // Check if we synchronized to the end of the overrides
+            // Check if we synchronized to the end of the carves
             if parser.current_token.kind == .RightBrace {
                 break
             }
@@ -1519,13 +1519,13 @@ parse_override :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Expect closing brace
     if !match(parser, .RightBrace) {
-        error_at_current(parser, "Expected } after overrides")
+        error_at_current(parser, "Expected } after carves")
         return nil
     }
 
-    // Create and return the override node
+    // Create and return the carve node
     result := new(Node)
-    result^ = override
+    result^ = carve
     return result
 }
 
@@ -1543,10 +1543,10 @@ parse_execute_prefix :: proc(parser: ^Parser) -> ^Node {
         position = position,
     }
 
-    // After a unary prefix, a following '{' is the operand scope, not an override
-    // (LeftBraceOverride is produced when '{' is glued to the previous token).
+    // After a unary prefix, a following '{' is the operand scope, not an carve
+    // (LeftBraceCarve is produced when '{' is glued to the previous token).
     if is_expression_start(parser.current_token.kind) ||
-       parser.current_token.kind == .LeftBraceOverride {
+       parser.current_token.kind == .LeftBraceCarve {
         ct.to = parse_expression(parser, Precedence.UNARY)
     }
 
@@ -2293,17 +2293,17 @@ parse_constraint_bind :: proc(parser: ^Parser, left: ^Node) -> ^Node {
         // a:(capture)
         constraint.name = parse_grouping(parser)
     } else if parser.current_token.kind == .LeftBrace {
-        // leave name nil; handled below as an override on the whole constraint
+        // leave name nil; handled below as an carve on the whole constraint
     } else if is_expression_start(parser.current_token.kind) {
-        // a:value — parse value but DO NOT consume trailing '{' (reserved for outer override)
+        // a:value — parse value but DO NOT consume trailing '{' (reserved for outer carve)
         constraint.name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
     }
 
-    // If a '{' follows, treat it as an Override applied to the entire constraint
+    // If a '{' follows, treat it as an Carve applied to the entire constraint
     node := new(Node)
     node^ = constraint
-    if parser.current_token.kind == .LeftBraceOverride {
-        return parse_override(parser, node)
+    if parser.current_token.kind == .LeftBraceCarve {
+        return parse_carve(parser, node)
     }
 
     return node
@@ -2335,17 +2335,17 @@ parse_constraint_from_none :: proc(parser: ^Parser) -> ^Node {
         // :(capture)
         constraint.name = parse_grouping(parser)
     } else if parser.current_token.kind == .LeftBrace {
-        // leave name nil; handled below as an override on the whole constraint
+        // leave name nil; handled below as an carve on the whole constraint
     } else if is_expression_start(parser.current_token.kind) {
         // :value — parse value but DO NOT consume trailing '{'
         constraint.name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
     }
 
-    // If a '{' follows, treat it as an Override applied to the entire constraint
+    // If a '{' follows, treat it as an Carve applied to the entire constraint
     node := new(Node)
     node^ = constraint
-    if parser.current_token.kind == .LeftBraceOverride {
-        return parse_override(parser, node)
+    if parser.current_token.kind == .LeftBraceCarve {
+        return parse_carve(parser, node)
     }
 
     return node
@@ -2367,11 +2367,11 @@ parse_constraint_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
         position = position,
     }
 
-    // If a '{' follows, treat it as an Override applied to the entire constraint
+    // If a '{' follows, treat it as an Carve applied to the entire constraint
     node := new(Node)
     node^ = constraint
-    if parser.current_token.kind == .LeftBraceOverride {
-        return parse_override(parser, node)
+    if parser.current_token.kind == .LeftBraceCarve {
+        return parse_carve(parser, node)
     }
 
     return node
@@ -3371,17 +3371,17 @@ print_ast :: proc(node: ^Node, indent: int) {
             print_ast(entry_node, indent + 2)
         }
 
-    case Override:
-        fmt.printf("%sOverride (line %d, column %d)\n",
+    case Carve:
+        fmt.printf("%sCarve (line %d, column %d)\n",
             indent_str, n.position.line, n.position.column)
         if n.source != nil {
             fmt.printf("%s  Source:\n", indent_str)
             print_ast(n.source, indent + 4)
-            fmt.printf("%s  Overrides:\n", indent_str)
-            for i := 0; i < len(n.overrides); i += 1 {
-                override_node := new(Node)
-                override_node^ = n.overrides[i]
-                print_ast(override_node, indent + 4)
+            fmt.printf("%s  Carves:\n", indent_str)
+            for i := 0; i < len(n.carves); i += 1 {
+                carve_node := new(Node)
+                carve_node^ = n.carves[i]
+                print_ast(carve_node, indent + 4)
             }
         }
 

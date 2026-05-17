@@ -1,6 +1,6 @@
 {
-  "name": "Constraint With Capture Followed By Carved Override",
-  "description": "Circle:(capture){radius->data} — capture-only identifier, then {...} wraps the Constraint in an Override",
+  "name": "Constraint With Capture Followed By Carved Carve",
+  "description": "Circle:(capture){radius->data} — capture-only identifier, then {...} wraps the Constraint in an Carve",
   "source": "Circle:(capture){radius->data}",
-  "expect": "Scope[Override(Constraint(Identifier(Circle),Identifier(,capture)),[Pointing(Identifier(radius),Identifier(data))])]"
+  "expect": "Scope[Carve(Constraint(Identifier(Circle),Identifier(,capture)),[Pointing(Identifier(radius),Identifier(data))])]"
 }

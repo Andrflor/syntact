@@ -2,5 +2,5 @@
   "name": "Expand Of An Overridden Identifier",
   "description": "...Logger{level -> Debug} expands a customised Logger value",
   "source": "...Logger{level -> Debug}",
-  "expect": "Scope[Expand(Override(Identifier(Logger),[Pointing(Identifier(level),Identifier(Debug))]))]"
+  "expect": "Scope[Expand(Carve(Identifier(Logger),[Pointing(Identifier(level),Identifier(Debug))]))]"
 }

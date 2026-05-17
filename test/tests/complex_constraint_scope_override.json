@@ -1,6 +1,6 @@
 {
-  "name": "Constraint With No Name Then Override-Brace",
-  "description": "T:{a -> 1} — the no-space '{' is LeftBraceOverride. The constraint has nil name and gets wrapped in an Override at constraint-level.",
+  "name": "Constraint With No Name Then Carve-Brace",
+  "description": "T:{a -> 1} — the no-space '{' is LeftBraceCarve. The constraint has nil name and gets wrapped in an Carve at constraint-level.",
   "source": "T:{a -> 1}",
-  "expect": "Scope[Override(Constraint(Identifier(T),nil),[Pointing(Identifier(a),Literal(Integer,1))])]"
+  "expect": "Scope[Carve(Constraint(Identifier(T),nil),[Pointing(Identifier(a),Literal(Integer,1))])]"
 }

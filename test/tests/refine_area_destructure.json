@@ -2,5 +2,5 @@
   "name": "Area-Style Destructure With Arithmetic",
   "description": "Circle:{radius(r)} -> r * r * 3 destructures Circle and uses captured r in an arithmetic expression. Note the precedence test inside: r*r*3 is left-associative.",
   "source": "shape ? { Circle:{radius(r)} -> r * r * 3 }",
-  "expect": "Scope[Pattern(Identifier(shape),[Branch(Override(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Operator(Multiply,Operator(Multiply,Identifier(r),Identifier(r)),Literal(Integer,3)))])]"
+  "expect": "Scope[Pattern(Identifier(shape),[Branch(Carve(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Operator(Multiply,Operator(Multiply,Identifier(r),Identifier(r)),Literal(Integer,3)))])]"
 }
