@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 05 — Reactive UI counter",
+  "description": "Counter avec State resonant + view rendering. Exerce: Carve, Constraint, Pointing, ResonancePush, ResonancePull, EventPull, EventPush, Property, Execute. WILL_FAIL_UNTIL_FIX: anomalie #2 sur >>- right-assoc.",
+  "source": "Change -> { i32:value }\n\nCounterView -> {\n  i32:value >>- Change -> 0\n  Change -< e {\n    value -<< e.value\n  }\n  increment -> {\n    >- Change{value -> value + 1}\n  }\n  -> Text{content -> value}\n}",
+  "expect": "Scope[Pointing(Identifier(Change),Scope[Constraint(Identifier(i32),Identifier(value))]),Pointing(Identifier(CounterView),Scope[Pointing(ResonancePush(Constraint(Identifier(i32),Identifier(value)),Identifier(Change)),Literal(Integer,0)),EventPull(e,Identifier(Change),Scope[ResonancePull(Identifier(value),Property(Identifier(e),Identifier(value)))]),Pointing(Identifier(increment),Scope[EventPush(nil,Carve(Identifier(Change),[Pointing(Identifier(value),Operator(Add,Identifier(value),Literal(Integer,1)))]))]),Product(Carve(Identifier(Text),[Pointing(Identifier(content),Identifier(value))]))])]"
+}
