@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 18 — CSV reader",
+  "description": "CSV avec char-level parsing et escape. Exerce: Range, Pointing, Operator(Or,And,Not), Constraint, Pattern, Property, ScopeNode.",
+  "source": "comma -> ','\nquote -> '\"'\nnewline -> '\\n'\nfieldChar -> ~comma & ~newline\n\nRow -> {\n  List{T <- String}:fields\n}\n\nCSV -> {\n  List{T <- Row}:rows\n}\n\nparseField -> {\n  String:input\n  -> input.head ? {\n    quote -> \"quoted\"\n    fieldChar -> \"plain\"\n    -> \"empty\"\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(comma),Literal(String,,)),Pointing(Identifier(quote),Literal(String,\")),Pointing(Identifier(newline),Literal(String,\\n)),Pointing(Identifier(fieldChar),Operator(And,Operator(Not,nil,Identifier(comma)),Operator(Not,nil,Identifier(newline)))),Pointing(Identifier(Row),Scope[Constraint(Carve(Identifier(List),[PointingPull(Identifier(T),Identifier(String))]),Identifier(fields))]),Pointing(Identifier(CSV),Scope[Constraint(Carve(Identifier(List),[PointingPull(Identifier(T),Identifier(Row))]),Identifier(rows))]),Pointing(Identifier(parseField),Scope[Constraint(Identifier(String),Identifier(input)),Product(Pattern(Property(Identifier(input),Identifier(head)),[Branch(Identifier(quote),Literal(String,quoted)),Branch(Identifier(fieldChar),Literal(String,plain)),Branch(nil,Literal(String,empty))]))])]"
+}

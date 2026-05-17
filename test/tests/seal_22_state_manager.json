@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 22 — Multi-key state manager",
+  "description": "Store avec resonance et subscribe. Exerce: PointingPull, Constraint, ResonancePush, ResonancePull, EventPull, EventPush, Property. WILL_FAIL_UNTIL_FIX anomalie #2.",
+  "source": "Set -> { String:key Value:value }\n\nStore -> {\n  T <- none\n  T:state >>- Set -> none\n  Set -< e {\n    state -<< e.value\n  }\n  set -> {\n    String:k\n    T:v\n    >- Set{key -> k value -> v}\n  }\n  get -> {\n    -> state\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Set),Scope[Constraint(Identifier(String),Identifier(key)),Constraint(Identifier(Value),Identifier(value))]),Pointing(Identifier(Store),Scope[PointingPull(Identifier(T),Identifier(none)),Pointing(ResonancePush(Constraint(Identifier(T),Identifier(state)),Identifier(Set)),Identifier(none)),EventPull(e,Identifier(Set),Scope[ResonancePull(Identifier(state),Property(Identifier(e),Identifier(value)))]),Pointing(Identifier(set),Scope[Constraint(Identifier(String),Identifier(k)),Constraint(Identifier(T),Identifier(v)),EventPush(nil,Carve(Identifier(Set),[Pointing(Identifier(key),Identifier(k)),Pointing(Identifier(value),Identifier(v))]))]),Pointing(Identifier(get),Scope[Product(Identifier(state))])])]"
+}

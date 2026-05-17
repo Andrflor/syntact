@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 07 — SQL builder DSL",
+  "description": "Query DSL avec Select/Where/Join composés via carving. Exerce: ScopeNode, Pointing, Constraint, Carve chains 4+, Property, PointingPull.",
+  "source": "Query -> {\n  T <- none\n  String:table\n  String:filter -> \"\"\n}\n\nuserQuery -> Query{\n  table -> \"users\"\n  filter -> \"age > 18\"\n}\n\norderedQuery -> userQuery{filter -> \"age > 21\"}{table -> \"admins\"}",
+  "expect": "Scope[Pointing(Identifier(Query),Scope[PointingPull(Identifier(T),Identifier(none)),Constraint(Identifier(String),Identifier(table)),Pointing(Constraint(Identifier(String),Identifier(filter)),Literal(String,))]),Pointing(Identifier(userQuery),Carve(Identifier(Query),[Pointing(Identifier(table),Literal(String,users)),Pointing(Identifier(filter),Literal(String,age > 18))])),Pointing(Identifier(orderedQuery),Carve(Carve(Identifier(userQuery),[Pointing(Identifier(filter),Literal(String,age > 21))]),[Pointing(Identifier(table),Literal(String,admins))]))]"
+}

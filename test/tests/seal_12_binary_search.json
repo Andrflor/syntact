@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 12 — Binary search",
+  "description": "Recursive binary search avec patterns. Exerce: Pointing, Constraint, Pattern, Carve, Operator, Execute, Property.",
+  "source": "search -> {\n  T <- none\n  List{T <- i32}:items\n  i32:target\n  i32:low -> 0\n  i32:high -> items.length\n  -> low > high ? {\n    true -> -1\n    -> search{low -> low + 1 high -> high target -> target items -> items}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(search),Scope[PointingPull(Identifier(T),Identifier(none)),Constraint(Carve(Identifier(List),[PointingPull(Identifier(T),Identifier(i32))]),Identifier(items)),Constraint(Identifier(i32),Identifier(target)),Pointing(Constraint(Identifier(i32),Identifier(low)),Literal(Integer,0)),Pointing(Constraint(Identifier(i32),Identifier(high)),Property(Identifier(items),Identifier(length))),Product(Pattern(Operator(Greater,Identifier(low),Identifier(high)),[Branch(Identifier(true),Operator(Subtract,nil,Literal(Integer,1))),Branch(nil,Execute(Carve(Identifier(search),[Pointing(Identifier(low),Operator(Add,Identifier(low),Literal(Integer,1))),Pointing(Identifier(high),Identifier(high)),Pointing(Identifier(target),Identifier(target)),Pointing(Identifier(items),Identifier(items))]),[]))]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 16 — Email validator with grammar",
+  "description": "Email validation via char ranges + grammar (Operator | for alternation). Exerce: Pointing, Range, Operator(Or), Constraint, ScopeNode, Pattern.",
+  "source": "alpha -> 'a'..'z' | 'A'..'Z'\ndigit -> '0'..'9'\nemailChar -> alpha | digit | '.' | '_' | '-'\n\nValid -> {\n  String:s\n  -> bool:\n}\n\nisValidEmail -> {\n  String:input\n  -> input.length ? {\n    0 -> false\n    -> true\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(alpha),Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z)))),Pointing(Identifier(digit),Range(Literal(String,0),Literal(String,9))),Pointing(Identifier(emailChar),Operator(Or,Operator(Or,Operator(Or,Operator(Or,Identifier(alpha),Identifier(digit)),Literal(String,.)),Literal(String,_)),Literal(String,-))),Pointing(Identifier(Valid),Scope[Constraint(Identifier(String),Identifier(s)),Product(Constraint(Identifier(bool),nil))]),Pointing(Identifier(isValidEmail),Scope[Constraint(Identifier(String),Identifier(input)),Product(Pattern(Property(Identifier(input),Identifier(length)),[Branch(Literal(Integer,0),Identifier(false)),Branch(nil,Identifier(true))]))])]"
+}
