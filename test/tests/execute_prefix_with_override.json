@@ -1,6 +1,6 @@
 {
-  "name": "Execute Prefix With Trailing Override",
-  "description": "!{...} produces Execute(nil,[]) wrapped in Override",
+  "name": "Compile Time Prefix With Scope",
+  "description": "Prefix ! applied to a scope expression",
   "source": "!{foo}",
-  "expect": "Scope[Override(Execute(nil,[]),[Identifier(foo)])]"
+  "expect": "Scope[CompileTime(Scope[Identifier(foo)])]"
 }

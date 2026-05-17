@@ -1270,6 +1270,9 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			}
 		}
 		return exec, empty
+	case CompileTime:
+		// TODO: enforce compile-time reduction. For now, analyze the wrapped expression.
+		return analyze_value(n.to)
 	case Literal:
 		switch n.kind {
 		case .Integer:
