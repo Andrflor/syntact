@@ -3170,6 +3170,7 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .Ellipsis ||
         kind == .PointingPush ||
         kind == .Equal ||
+        kind == .NotEqual ||
         kind == .LessEqual ||
         kind == .Less ||
         kind == .Greater ||
