@@ -1,0 +1,6 @@
+{
+  "name": "Multiple Productions In Same Scope",
+  "description": "README §Productions: a scope may have several productions (-> false / -> true). The AST keeps them as separate Product nodes in the scope.",
+  "source": "BoolLike -> {\n  -> false\n  -> true\n}",
+  "expect": "Scope[Pointing(Identifier(BoolLike),Scope[Product(Identifier(false)),Product(Identifier(true))])]"
+}

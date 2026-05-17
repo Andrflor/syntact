@@ -1,0 +1,6 @@
+{
+  "name": "Extension Plus Brace Currently Parses As Add",
+  "description": "User+{role -> \"admin\"} — README documents this as structural extension distinct from carving, but the parser currently has no '+' extension token, so '+' is the Add binary operator and {...} is a Scope literal. Test pins the current behavior so any future Extension feature shows up clearly in this diff.",
+  "source": "User+{role -> \"admin\"}",
+  "expect": "Scope[Operator(Add,Identifier(User),Scope[Pointing(Identifier(role),Literal(String,admin))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Compile Time Of External Property",
+  "description": "!@http.get — CompileTime applied to a property access whose source is an External. Property is the immediate child of CompileTime.",
+  "source": "!@http.get",
+  "expect": "Scope[CompileTime(Property(External(http,nil),Identifier(get)))]"
+}

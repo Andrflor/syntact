@@ -1,0 +1,6 @@
+{
+  "name": "Program Factorial Via Pattern",
+  "description": "Recursive factorial defined as a scope with a default value n=1, that pattern-matches on n. Branch 0 -> 1, otherwise n * factorial{n -> n-1}!. Tests recursive Carve within a Pattern branch.",
+  "source": "factorial -> {\n  n -> 1\n  -> n ? {\n    0 -> 1\n    -> n * factorial{n -> n - 1}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(factorial),Scope[Pointing(Identifier(n),Literal(Integer,1)),Product(Pattern(Identifier(n),[Branch(Literal(Integer,0),Literal(Integer,1)),Branch(nil,Operator(Multiply,Identifier(n),Execute(Carve(Identifier(factorial),[Pointing(Identifier(n),Operator(Subtract,Identifier(n),Literal(Integer,1)))]),[])))]))])]"
+}

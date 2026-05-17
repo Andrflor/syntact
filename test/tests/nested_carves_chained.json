@@ -1,0 +1,6 @@
+{
+  "name": "Sequential Carves On Same Source",
+  "description": "Foo{x->1}{y->2} — the result of the first Carve is the source of the second. Carves can be chained left-associatively at CALL precedence.",
+  "source": "Foo{x->1}{y->2}",
+  "expect": "Scope[Carve(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),[Pointing(Identifier(y),Literal(Integer,2))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Threaded GPU Execution",
+  "description": "expr<|!|> nests GPU inside Threading.",
+  "source": "foo<|!|>",
+  "expect": "Scope[Execute(Identifier(foo),[Threading,GPU])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Background Threaded Execution",
+  "description": "expr(<!>) nests Threading inside Background.",
+  "source": "foo(<!>)",
+  "expect": "Scope[Execute(Identifier(foo),[Background,Threading])]"
+}

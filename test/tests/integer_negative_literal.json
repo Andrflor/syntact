@@ -1,0 +1,6 @@
+{
+  "name": "Negative Integer Read As Unary Minus",
+  "description": "-5 standalone is unary minus on Literal(5), not a single negative literal token. The Operator node has nil left.",
+  "source": "-5",
+  "expect": "Scope[Operator(Subtract,nil,Literal(Integer,5))]"
+}

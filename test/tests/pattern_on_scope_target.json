@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target Is Multi Element Scope",
+  "description": "{a b} ? { ... } — pattern target is a scope literal with two bare identifiers. The Pattern.target is therefore a Scope.",
+  "source": "{a b} ? { {N:(a) N:(b)} -> 1 }",
+  "expect": "Scope[Pattern(Scope[Identifier(a),Identifier(b)],[Branch(Scope[Constraint(Identifier(N),Identifier(,a)),Constraint(Identifier(N),Identifier(,b))],Literal(Integer,1))])]"
+}

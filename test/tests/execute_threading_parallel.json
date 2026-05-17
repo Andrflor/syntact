@@ -1,0 +1,6 @@
+{
+  "name": "Threaded Parallel Execution",
+  "description": "expr<[!]> wraps Parallel_CPU inside Threading. Wrappers are stored outer-to-inner.",
+  "source": "foo<[!]>",
+  "expect": "Scope[Execute(Identifier(foo),[Threading,Parallel_CPU])]"
+}

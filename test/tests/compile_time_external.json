@@ -1,0 +1,6 @@
+{
+  "name": "Compile Time Of External Reference",
+  "description": "!@http forces a bare external reference to compile-time evaluation. The CompileTime wraps the External directly with no scope around it.",
+  "source": "!@http",
+  "expect": "Scope[CompileTime(External(http,nil))]"
+}

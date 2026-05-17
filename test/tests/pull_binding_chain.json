@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding Chained",
+  "description": "T <- U <- V chains two pull arrows. ASSIGNMENT precedence is right-associative so T <- (U <- V).",
+  "source": "T <- U <- V",
+  "expect": "Scope[PointingPull(Identifier(T),PointingPull(Identifier(U),Identifier(V)))]"
+}

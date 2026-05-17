@@ -1,0 +1,6 @@
+{
+  "name": "True And False Are Not Reserved Identifiers",
+  "description": "The Literal_Kind enum lists Bool but the parser never emits a Bool literal: 'true' and 'false' are bare identifiers. Test pins this so any future bool literal lexer rule will show up in the diff.",
+  "source": "{true false}",
+  "expect": "Scope[Scope[Identifier(true),Identifier(false)]]"
+}

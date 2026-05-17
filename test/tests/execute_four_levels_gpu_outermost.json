@@ -1,0 +1,6 @@
+{
+  "name": "Four Level Execution Wrapping GPU Background Threaded Parallel",
+  "description": "expr|(<[!]>)| from README §Execution patterns: GPU outermost, then Background, then Threading, then Parallel_CPU innermost.",
+  "source": "foo|(<[!]>)|",
+  "expect": "Scope[Execute(Identifier(foo),[GPU,Background,Threading,Parallel_CPU])]"
+}

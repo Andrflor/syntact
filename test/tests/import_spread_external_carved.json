@@ -1,0 +1,6 @@
+{
+  "name": "Spread Of Carved External",
+  "description": "...@lib.geometry{Plane->Plane3D} expands an external scope after carving one of its bindings. The Expand wraps a Carve whose source is a Property chain on External.",
+  "source": "...@lib.geometry{Plane->Plane3D}",
+  "expect": "Scope[Expand(Carve(Property(External(lib,nil),Identifier(geometry)),[Pointing(Identifier(Plane),Identifier(Plane3D))]))]"
+}

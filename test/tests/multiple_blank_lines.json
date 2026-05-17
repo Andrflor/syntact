@@ -1,0 +1,6 @@
+{
+  "name": "Multiple Blank Lines Between Statements",
+  "description": "Consecutive newlines collapse into a single statement separator. The AST has two siblings, not extra empties.",
+  "source": "a -> 1\n\n\n\nb -> 2",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]"
+}

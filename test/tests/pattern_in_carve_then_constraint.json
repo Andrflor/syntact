@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Inside Carve Then Constraint",
+  "description": "Q{n?(!={}&!={-1 {}})}:q — carve Q by refining n with a pattern, then bind to q. From refinement.json source.",
+  "source": "Q{n?(!={}&!={-1 {}})}:q",
+  "expect": "Scope[Constraint(Carve(Identifier(Q),[Pattern(Identifier(n),[Branch(Operator(And,Operator(NotEqual,nil,Scope[]),Operator(NotEqual,nil,Scope[Operator(Subtract,nil,Literal(Integer,1)),Scope[]])),nil)])]),Identifier(q))]"
+}

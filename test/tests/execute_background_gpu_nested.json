@@ -1,0 +1,6 @@
+{
+  "name": "Background GPU Execution Explicit",
+  "description": "expr(|!|) nests GPU inside Background. Distinct from execute_background_gpu which tests the bare ([|!|]) form.",
+  "source": "foo(|!|)",
+  "expect": "Scope[Execute(Identifier(foo),[Background,GPU])]"
+}

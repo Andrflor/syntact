@@ -1,0 +1,6 @@
+{
+  "name": "Event Handler That Drives Resonance",
+  "description": "Change -< e { value -<< e.value } — handler binding catches Change events as e and pulls their value field into the resonant binding 'value' via -<<.",
+  "source": "Change -< e { value -<< e.value }",
+  "expect": "Scope[EventPull(e,Identifier(Change),Scope[ResonancePull(Identifier(value),Property(Identifier(e),Identifier(value)))])]"
+}

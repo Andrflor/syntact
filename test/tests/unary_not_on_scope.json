@@ -1,0 +1,6 @@
+{
+  "name": "Unary Not In Front Of Scope",
+  "description": "~{} — README §Scope algebra: N & ~{} excludes the empty scope. Not operator with nil left, empty scope as right.",
+  "source": "~{}",
+  "expect": "Scope[Operator(Not,nil,Scope[])]"
+}

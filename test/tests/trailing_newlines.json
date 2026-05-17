@@ -1,0 +1,6 @@
+{
+  "name": "Trailing Newlines",
+  "description": "Trailing newlines after the last statement do not produce an extra empty entry.",
+  "source": "a -> 1\n\n",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
+}

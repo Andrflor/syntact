@@ -1,0 +1,6 @@
+{
+  "name": "Empty Source",
+  "description": "Empty input produces an empty top-level Scope.",
+  "source": "",
+  "expect": "Scope[]"
+}

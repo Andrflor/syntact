@@ -1,0 +1,6 @@
+{
+  "name": "Comment Inside Carve Body",
+  "description": "Foo{ // inline comment\n  x -> 1\n} — the lexer strips // comments before tokens are seen by the parser, so they have no effect on the AST.",
+  "source": "Foo{ // c\n  x -> 1\n}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

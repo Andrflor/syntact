@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target Is Pull Binding",
+  "description": "T <- u8 followed by T ? { ... } at the same nesting level produces two siblings — pull binding then pattern. Confirms that ASSIGNMENT precedence consumes only one statement at a time.",
+  "source": "{T <- u8\nT ? { u8 -> 1 }}",
+  "expect": "Scope[Scope[PointingPull(Identifier(T),Identifier(u8)),Pattern(Identifier(T),[Branch(Identifier(u8),Literal(Integer,1))])]]"
+}

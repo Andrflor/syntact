@@ -1,0 +1,6 @@
+{
+  "name": "Same Name Bindings Coexist In Scope",
+  "description": "A scope can hold two bindings with the same name (README: 'Same-name bindings are not redeclarations'). The AST stores them as two separate Pointings in order; the second does not overwrite the first.",
+  "source": "{\n  x -> 1\n  y -> x\n  x -> 2\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Identifier(x)),Pointing(Identifier(x),Literal(Integer,2))]]"
+}
