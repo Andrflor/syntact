@@ -1,0 +1,6 @@
+{
+  "name": "Z Enforce With Arithmetic RHS",
+  "description": "result ?! a + b — Enforce at PATTERN, Add at TERM (higher). RHS forms first then attaches as enforce predicate.",
+  "source": "result ?! a + b",
+  "expect": "Scope[Enforce(Identifier(result),Operator(Add,Identifier(a),Identifier(b)))]"
+}

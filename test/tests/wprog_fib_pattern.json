@@ -1,0 +1,6 @@
+{
+  "name": "Fibonacci Pattern",
+  "description": "Fibonacci via pattern matching.",
+  "source": "fib -> {\n  u32:n\n  -> n ? {\n    0 -> 0\n    1 -> 1\n    -> fib{n - 1}! + fib{n - 2}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(fib),Scope[Constraint(Identifier(u32),Identifier(n)),Product(Pattern(Identifier(n),[Branch(Literal(Integer,0),Literal(Integer,0)),Branch(Literal(Integer,1),Literal(Integer,1)),Branch(nil,Operator(Add,Execute(Carve(Identifier(fib),[Operator(Subtract,Identifier(n),Literal(Integer,1))]),[]),Execute(Carve(Identifier(fib),[Operator(Subtract,Identifier(n),Literal(Integer,2))]),[])))]))])]"
+}

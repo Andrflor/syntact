@@ -1,0 +1,6 @@
+{
+  "name": "Nested Default Branches",
+  "description": "x ? { 0 -> y ? { 1 -> 'a' -> 'b' } -> 'c' } — outer default branch on the outside, inner default inside the nested pattern.",
+  "source": "x ? { 0 -> y ? { 1 -> 'a' -> 'b' } -> 'c' }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,0),Pattern(Identifier(y),[Branch(Literal(Integer,1),Literal(String,a)),Branch(nil,Literal(String,b))])),Branch(nil,Literal(String,c))])]"
+}

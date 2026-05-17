@@ -1,0 +1,6 @@
+{
+  "name": "Module With Property Imports",
+  "description": "Module using imports via @ external.",
+  "source": "io -> @std.io\nfs -> @std.fs\nmain -> {\n  io.write{\"hello\"}!\n  fs.read{\"file.txt\"}!\n}",
+  "expect": "Scope[Pointing(Identifier(io),Property(External(std,nil),Identifier(io))),Pointing(Identifier(fs),Property(External(std,nil),Identifier(fs))),Pointing(Identifier(main),Scope[Execute(Carve(Property(Identifier(io),Identifier(write)),[Literal(String,hello)]),[]),Execute(Carve(Property(Identifier(fs),Identifier(read)),[Literal(String,file.txt)]),[])])]"
+}

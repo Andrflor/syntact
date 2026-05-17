@@ -1,0 +1,6 @@
+{
+  "name": "Combo Range As Constraint Target",
+  "description": "0..10:x — the constraint expression on the left is a Range. UNCERTAIN: '0..10:x' parses left at CONSTRAINT precedence. Range produces Range(0,10), then ':x' binds with ConstraintBind precedence CONSTRAINT < RANGE so Range is the constraint target.",
+  "source": "0..10:x",
+  "expect": "Scope[Constraint(Range(Literal(Integer,0),Literal(Integer,10)),Identifier(x))]"
+}

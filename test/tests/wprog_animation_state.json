@@ -1,0 +1,6 @@
+{
+  "name": "Animation State Machine",
+  "description": "Animation with idle/walking/running states.",
+  "source": "AnimState -> {\n  -> Idle:\n  -> Walking:\n  -> Running:\n}\nspeed -> {\n  AnimState:s\n  -> s ? {\n    Idle: -> 0\n    Walking: -> 3\n    Running: -> 8\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(AnimState),Scope[Product(Constraint(Identifier(Idle),nil)),Product(Constraint(Identifier(Walking),nil)),Product(Constraint(Identifier(Running),nil))]),Pointing(Identifier(speed),Scope[Constraint(Identifier(AnimState),Identifier(s)),Product(Pattern(Identifier(s),[Branch(Constraint(Identifier(Idle),nil),Literal(Integer,0)),Branch(Constraint(Identifier(Walking),nil),Literal(Integer,3)),Branch(Constraint(Identifier(Running),nil),Literal(Integer,8))]))])]"
+}

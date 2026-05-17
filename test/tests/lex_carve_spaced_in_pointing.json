@@ -1,0 +1,6 @@
+{
+  "name": "Lex Spaced Carve Inside Pointing RHS",
+  "description": "x -> Foo {a} — space before '{' makes it a Scope, not a Carve. The Pointing right side is just Foo; the {a} is a sibling top-level statement. WILL_FAIL_UNTIL_FIX: this depends on how parse_expression terminates at space. Actually parse_expression continues consuming infix only at higher precedence; LeftBrace has CALL=12 so it WILL attach as infix to Foo via parse_scope (but parse_scope is registered as PREFIX, not infix, for LeftBrace). So Foo terminates, then '{a}' becomes a sibling top-level statement. Result: Pointing(x,Foo), Scope[a].",
+  "source": "x -> Foo {a}",
+  "expect": "Scope[Pointing(Identifier(x),Identifier(Foo)),Scope[Identifier(a)]]"
+}

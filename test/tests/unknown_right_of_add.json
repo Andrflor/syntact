@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Right Of Add",
+  "description": "x + ?? — duplicates the existing unknown_in_arithmetic but with Unknown on the right of an identifier.",
+  "source": "x + ??",
+  "expect": "Scope[Operator(Add,Identifier(x),Unknown)]"
+}

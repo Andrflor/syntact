@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Constraint With And",
+  "description": "a:b & c — AND (9) > CONSTRAINT (8). 'a:b' first (right-of-':' at CALL+1=13, '&' AND=9<13 stops). Then top loop '& c' attaches. Result And(Constraint(a,b), c).",
+  "source": "a:b & c",
+  "expect": "Scope[Operator(And,Constraint(Identifier(a),Identifier(b)),Identifier(c))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chain_compile_time_property",
+  "description": "!a.b — CompileTime prefix consumes operand at UNARY=10 < CALL=12; property chain absorbed. CompileTime(Property(a,b)).",
+  "source": "!a.b",
+  "expect": "Scope[CompileTime(Property(Identifier(a),Identifier(b)))]"
+}

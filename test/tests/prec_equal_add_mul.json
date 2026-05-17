@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Equal With Add And Mul",
+  "description": "a = b + c * d — FACTOR > TERM > EQUALITY. 'c * d' forms first, then 'b + (c*d)', then '= b+c*d'.",
+  "source": "a = b + c * d",
+  "expect": "Scope[Operator(Equal,Identifier(a),Operator(Add,Identifier(b),Operator(Multiply,Identifier(c),Identifier(d))))]"
+}

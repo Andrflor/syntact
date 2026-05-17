@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Composed Refinement",
+  "description": "Circle:{radius(r)?(>5 & <20)} — capture r, then refine via grouped And of two comparisons. The ? attaches to (radius capture) with parenthesized refinement.",
+  "source": "s ? { Circle:{radius(r)?(>5 & <20)} -> r }",
+  "expect": "Scope[Pattern(Identifier(s),[Branch(Carve(Constraint(Identifier(Circle),nil),[Pattern(Identifier(radius,r),[Branch(Operator(And,Operator(Greater,nil,Literal(Integer,5)),Operator(Less,nil,Literal(Integer,20))),nil)])]),Identifier(r))])]"
+}

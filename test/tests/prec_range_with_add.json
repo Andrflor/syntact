@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Range With Add (left)",
+  "description": "a..b + c — RANGE (11) > TERM (5). 'a..b' first, then '+ c' outer. Result Add(Range(a,b), c). Documents the same anomaly as range_with_expr_bounds.",
+  "source": "a..b + c",
+  "expect": "Scope[Operator(Add,Range(Identifier(a),Identifier(b)),Identifier(c))]"
+}

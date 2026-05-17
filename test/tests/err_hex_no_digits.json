@@ -1,0 +1,6 @@
+{
+  "name": "Hex Prefix Without Digits",
+  "description": "0x — scan_hexadecimal returns an Invalid token. UNCERTAIN: parser cannot use it as primary, errors and recovery returns empty Scope.",
+  "source": "0x",
+  "expect": "Scope[]"
+}

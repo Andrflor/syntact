@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Identifier",
+  "description": "n ? x — inline pattern with simple identifier as source.",
+  "source": "n ? x",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Identifier(x),nil)])]"
+}

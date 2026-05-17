@@ -1,0 +1,6 @@
+{
+  "name": "Unknown Chained Through Multiply And Add",
+  "description": "?? * ?? + ?? — FACTOR (Multiply) higher than TERM (Add), so left-associative chain forms Add(Multiply(??,??),??).",
+  "source": "?? * ?? + ??",
+  "expect": "Scope[Operator(Add,Operator(Multiply,Unknown,Unknown),Unknown)]"
+}

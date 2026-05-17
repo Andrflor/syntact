@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Range With Constraint",
+  "description": "1..10:n — RANGE (11) > CONSTRAINT (8). '1..10' first, then ':n' attaches as ConstraintBind infix.",
+  "source": "1..10:n",
+  "expect": "Scope[Constraint(Range(Literal(Integer,1),Literal(Integer,10)),Identifier(n))]"
+}

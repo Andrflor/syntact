@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Carve",
+  "description": "v ? { Foo{x -> 1} -> 'ok' } — branch source is a carve. Space between Foo and { is not enforced; here Foo is glued to { so LeftBraceCarve.",
+  "source": "v ? { Foo{x -> 1} -> 'ok' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),Literal(String,ok))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Branch Product Is Itself A Pointing",
+  "description": "n ? { 1 -> x -> 10 } — branch source is 1, product is Pointing(x,10). parse_branch splits the first '->' so source=1 product=Pointing(x,10). UNCERTAIN: parse_expression of branch consumes nested Pointing via right-assoc.",
+  "source": "n ? { 1 -> x -> 10 }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,1),Pointing(Identifier(x),Literal(Integer,10)))])]"
+}

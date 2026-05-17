@@ -1,0 +1,6 @@
+{
+  "name": "Default Bool Enabled",
+  "description": "bool:enabled — bool shape defaults to false (semantically). AST is plain Constraint.",
+  "source": "bool:enabled",
+  "expect": "Scope[Constraint(Identifier(bool),Identifier(enabled))]"
+}

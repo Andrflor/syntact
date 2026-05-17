@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Carve",
+  "description": "Foo{ — open carve immediately at EOF. parse_carve loops until RightBrace or EOF, finds EOF, emits error. UNCERTAIN: should yield Carve(Foo,[]).",
+  "source": "Foo{",
+  "expect": "Scope[Carve(Identifier(Foo),[])]"
+}

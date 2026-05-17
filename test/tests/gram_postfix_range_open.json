@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Postfix Range Open Lower",
+  "description": "alpha*..5 — Multiply alpha by an open-lower Range(nil,5).",
+  "source": "alpha*..5",
+  "expect": "Scope[Operator(Multiply,Identifier(alpha),Range(nil,Literal(Integer,5)))]"
+}

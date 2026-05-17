@@ -1,0 +1,6 @@
+{
+  "name": "Program Arena Allocator Handler",
+  "description": "Alloc handler that routes allocations to arena.alloc. Tests EventPull inside a Pointing target where the body calls a property on arena.",
+  "source": "WithArena -> {\n  Alloc -< e {\n    -> arena.alloc{e.size}!\n  }\n  -> Buffer{size -> 1024}!\n}",
+  "expect": "Scope[Pointing(Identifier(WithArena),Scope[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Property(Identifier(arena),Identifier(alloc)),[Property(Identifier(e),Identifier(size))]),[]))]),Product(Execute(Carve(Identifier(Buffer),[Pointing(Identifier(size),Literal(Integer,1024))]),[]))])]"
+}

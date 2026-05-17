@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_pointing_push",
+  "description": "'->' alone at top-level — Product prefix with EOF gives Product(nil) (parse_product_prefix explicitly handles EOF as empty product).",
+  "source": "->",
+  "expect": "Scope[Product(nil)]"
+}

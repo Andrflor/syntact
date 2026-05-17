@@ -1,0 +1,6 @@
+{
+  "name": "Library Carved With Handler Override",
+  "description": "@lib.geometry{Alloc -< e { -> arena.alloc{e.size}! }} — README §Files: handler override via carve on a property of External.",
+  "source": "@lib.geometry{Alloc -< e { -> arena.alloc{e.size}! }}",
+  "expect": "Scope[Carve(Property(External(lib,nil),Identifier(geometry)),[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Property(Identifier(arena),Identifier(alloc)),[Property(Identifier(e),Identifier(size))]),[]))])])]"
+}

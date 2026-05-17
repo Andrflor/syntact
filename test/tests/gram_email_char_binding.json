@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Email Char Binding",
+  "description": "emailChar -> alpha | digit | '.' | '_' | '-' — README §Grammars: composition of identifiers and char literals.",
+  "source": "emailChar -> alpha | digit | '.' | '_' | '-'",
+  "expect": "Scope[Pointing(Identifier(emailChar),Operator(Or,Operator(Or,Operator(Or,Operator(Or,Identifier(alpha),Identifier(digit)),Literal(String,.)),Literal(String,_)),Literal(String,-)))]"
+}

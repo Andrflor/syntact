@@ -1,0 +1,6 @@
+{
+  "name": "Lex Carve Glued Inside Pointing RHS",
+  "description": "x -> Foo{a} — '->' right side parses an expression; Foo identifier then '{' glued is LeftBraceCarve. Pointing(x, Carve(Foo,[a])).",
+  "source": "x -> Foo{a}",
+  "expect": "Scope[Pointing(Identifier(x),Carve(Identifier(Foo),[Identifier(a)]))]"
+}

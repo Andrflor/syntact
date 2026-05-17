@@ -1,0 +1,6 @@
+{
+  "name": "Enforce With Two Unknowns",
+  "description": "?? ?! ?? — proof obligation whose sides are both symbolic unknowns. Useful as a parser smoke test.",
+  "source": "?? ?! ??",
+  "expect": "Scope[Enforce(Unknown,Unknown)]"
+}

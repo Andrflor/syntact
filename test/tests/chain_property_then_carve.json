@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_then_carve",
+  "description": "a.b{x -> 1} — Property then Carve (LeftBraceCarve glued). Both at CALL, left-assoc. Carve(Property(a,b),[Pointing(x,1)]).",
+  "source": "a.b{x -> 1}",
+  "expect": "Scope[Carve(Property(Identifier(a),Identifier(b)),[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

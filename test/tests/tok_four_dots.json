@@ -1,0 +1,6 @@
+{
+  "name": "tok_four_dots",
+  "description": "1....3 — lexer consumes two dots, sees third '.' and advances to produce Ellipsis. Remaining '.3' is PropertyAccess (no spaces) which has no prefix at statement start. UNCERTAIN: parser keeps '1' and '3' as siblings with Ellipsis attempting an expansion that fails on '.3'.",
+  "source": "1....3",
+  "expect": "Scope[Literal(Integer,1),Literal(Integer,3)]"
+}

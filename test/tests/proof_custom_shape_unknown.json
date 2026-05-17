@@ -1,0 +1,6 @@
+{
+  "name": "Custom Shape Binding With Unknown Default",
+  "description": "Foo:bar -> ?? — same proof-style default, but with a user-defined shape.",
+  "source": "Foo:bar -> ??",
+  "expect": "Scope[Pointing(Constraint(Identifier(Foo),Identifier(bar)),Unknown)]"
+}

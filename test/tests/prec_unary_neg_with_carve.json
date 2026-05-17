@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Negate With Glued Carve",
+  "description": "-Foo{x} — '-' parses operand at UNARY; 'Foo' then '{' LeftBraceCarve at CALL ≥ UNARY attaches. Result Subtract(nil, Carve(Foo,[x])).",
+  "source": "-Foo{x}",
+  "expect": "Scope[Operator(Subtract,nil,Carve(Identifier(Foo),[Identifier(x)]))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Default Anonymous Shape Carve",
+  "description": "Point:{x -> 10} — anonymous (nameless) shaped binding with carve. ':' followed by '{' produces ConstraintToNone with the LeftBraceCarve. WILL_FAIL_UNTIL_FIX: the cleanest reading is Carve(Constraint(Point,nil),[...]).",
+  "source": "Point:{x -> 10}",
+  "expect": "Scope[Carve(Constraint(Identifier(Point),nil),[Pointing(Identifier(x),Literal(Integer,10))])]"
+}

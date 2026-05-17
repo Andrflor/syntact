@@ -1,0 +1,6 @@
+{
+  "name": "tok_carve_triple_chain",
+  "description": "Foo{a}{b}{c} — three-level carve chain. Carve(Carve(Carve(Foo,[a]),[b]),[c]).",
+  "source": "Foo{a}{b}{c}",
+  "expect": "Scope[Carve(Carve(Carve(Identifier(Foo),[Identifier(a)]),[Identifier(b)]),[Identifier(c)])]"
+}

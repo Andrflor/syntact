@@ -1,0 +1,6 @@
+{
+  "name": "chain_grouped_property_constraint",
+  "description": "(a.b):x — grouping returns Property(a,b); then ConstraintBind infix at CONSTRAINT. Constraint(Property(a,b), x).",
+  "source": "(a.b):x",
+  "expect": "Scope[Constraint(Property(Identifier(a),Identifier(b)),Identifier(x))]"
+}

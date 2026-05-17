@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Multiply Postfix Range",
+  "description": "digit*1.. — '*' is Multiply (FACTOR=6), '1..' is a postfix Range. FACTOR > RANGE (5 vs 11)? RANGE=11>FACTOR=6 so the range binds tighter on its operand, but here 1.. is a primary expression following *, producing Operator(Multiply, digit, Range(1,nil)).",
+  "source": "digit*1..",
+  "expect": "Scope[Operator(Multiply,Identifier(digit),Range(Literal(Integer,1),nil))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Carve With Inner Scope Literal As Default",
+  "description": "Foo{x -> {a b}} — A Carve where a binding default is a nested scope-literal containing two bare identifiers.",
+  "source": "Foo{x -> {a b}}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Scope[Identifier(a),Identifier(b)])])]"
+}

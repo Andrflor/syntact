@@ -1,0 +1,6 @@
+{
+  "name": "Lex Ellipsis Followed By Carve",
+  "description": "...List{T} — '...' parsed by parse_expansion at .UNARY. CALL > UNARY so Carve attaches inside. Result Expand(Carve(List,[T])).",
+  "source": "...List{T}",
+  "expect": "Scope[Expand(Carve(Identifier(List),[Identifier(T)]))]"
+}

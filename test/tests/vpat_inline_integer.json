@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Integer Literal",
+  "description": "n ? 5 — inline pattern, branch source=5 product=nil.",
+  "source": "n ? 5",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,5),nil)])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Property To Property",
+  "description": "a.b >>- c.d — both sides are property chains.",
+  "source": "a.b >>- c.d",
+  "expect": "Scope[ResonancePush(Property(Identifier(a),Identifier(b)),Property(Identifier(c),Identifier(d)))]"
+}

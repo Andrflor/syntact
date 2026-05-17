@@ -1,0 +1,6 @@
+{
+  "name": "Z Range Then Enforce",
+  "description": "1..10 ?! valid — Range (RANGE=11) binds tighter than Enforce (PATTERN=2). Result Enforce(Range(1,10),valid).",
+  "source": "1..10 ?! valid",
+  "expect": "Scope[Enforce(Range(Literal(Integer,1),Literal(Integer,10)),Identifier(valid))]"
+}

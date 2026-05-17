@@ -1,0 +1,6 @@
+{
+  "name": "Two Consecutive Event Emits",
+  "description": "Two top-level EventPush statements separated by newline.",
+  "source": ">- A\n>- B",
+  "expect": "Scope[EventPush(nil,Identifier(A)),EventPush(nil,Identifier(B))]"
+}

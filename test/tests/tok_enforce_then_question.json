@@ -1,0 +1,6 @@
+{
+  "name": "tok_enforce_then_question",
+  "description": "'?!?' — QuestionExclamation has only infix rule (parse_enforce); at statement start no prefix → no statement. Then '?' also no prefix. UNCERTAIN: empty Scope[].",
+  "source": "?!?",
+  "expect": "Scope[]"
+}

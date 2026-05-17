@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Add Then Property",
+  "description": "a + b.c — right of '+' at TERM+1=6; '.' at CALL=12 ≥ 6 attaches. Result Add(a, Property(b,c)).",
+  "source": "a + b.c",
+  "expect": "Scope[Operator(Add,Identifier(a),Property(Identifier(b),Identifier(c)))]"
+}

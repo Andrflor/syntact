@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Postfix Execute Then Add",
+  "description": "foo! + bar — Execute (CALL=12) > TERM (5). 'foo!' first as postfix, then '+ bar'.",
+  "source": "foo! + bar",
+  "expect": "Scope[Operator(Add,Execute(Identifier(foo),[]),Identifier(bar))]"
+}

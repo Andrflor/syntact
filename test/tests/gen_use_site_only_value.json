@@ -1,0 +1,6 @@
+{
+  "name": "Use Site Only Pushes Value",
+  "description": "identity{value -> 5}! — README §Pull bindings: T inferred from shape of value; only push value into the hole 'value'.",
+  "source": "identity{value -> 5}!",
+  "expect": "Scope[Execute(Carve(Identifier(identity),[Pointing(Identifier(value),Literal(Integer,5))]),[])]"
+}

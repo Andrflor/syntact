@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Parens Group Then Repeat",
+  "description": "('a'..'z' | '0'..'9')*2.. — grouped Or of two ranges, then Multiply by postfix Range. Parens dissolve to inner expression.",
+  "source": "('a'..'z' | '0'..'9')*2..",
+  "expect": "Scope[Operator(Multiply,Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,0),Literal(String,9))),Range(Literal(Integer,2),nil))]"
+}

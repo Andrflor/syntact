@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding Whose Value Is Itself Carve",
+  "description": "T <- List{Item} — pull T defaulted to a Carve of List with Item identifier.",
+  "source": "T <- List{Item}",
+  "expect": "Scope[PointingPull(Identifier(T),Carve(Identifier(List),[Identifier(Item)]))]"
+}

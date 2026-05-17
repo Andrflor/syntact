@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Or Three Punctuations",
+  "description": "Alternation of three punctuation chars '.' | '_' | '-'. Left-associative Or chain.",
+  "source": "'.' | '_' | '-'",
+  "expect": "Scope[Operator(Or,Operator(Or,Literal(String,.),Literal(String,_)),Literal(String,-))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Pointing With Arithmetic RHS",
+  "description": "x -> 2 * 3 + 1 — RHS chains Multiply then Add. Multiply (FACTOR=6) binds tighter than Add (TERM=5).",
+  "source": "x -> 2 * 3 + 1",
+  "expect": "Scope[Pointing(Identifier(x),Operator(Add,Operator(Multiply,Literal(Integer,2),Literal(Integer,3)),Literal(Integer,1)))]"
+}

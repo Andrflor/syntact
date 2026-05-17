@@ -1,0 +1,6 @@
+{
+  "name": "Property Of External Collapsed In Carve",
+  "description": "@core.utils.now!{} — call utils.now then carve empty. Property -> Execute -> Carve. UNCERTAIN: '!{}' = Execute then space-glued LeftBrace which is LeftBrace (with space) prefix scope, not infix carve. So parses as Execute(...,[]) followed by an empty Scope[] as second statement at the same line — but they would be on same line without separator, which is itself a parse issue. Re-examined: '!{' with no space between is LeftBraceCarve. With no separator after !, the next char '{' produces LeftBraceCarve and infix Carve attaches. Treating as Carve here.",
+  "source": "@core.utils.now!{}",
+  "expect": "Scope[Carve(Execute(Property(Property(External(core,nil),Identifier(utils)),Identifier(now)),[]),[])]"
+}

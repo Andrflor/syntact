@@ -1,0 +1,6 @@
+{
+  "name": "Lone Arrow At Top Level",
+  "description": "-> alone — PointingPush as prefix produces Product. With no right operand parse_expression errors; the Product is dropped. UNCERTAIN: empty Scope.",
+  "source": "->",
+  "expect": "Scope[]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Two Captures Same Carve",
+  "description": "Point:{x(a) y(b)} captures both fields. Branch product uses both.",
+  "source": "p ? { Point:{x(a) y(b)} -> a + b }",
+  "expect": "Scope[Pattern(Identifier(p),[Branch(Carve(Constraint(Identifier(Point),nil),[Identifier(x,a),Identifier(y,b)]),Operator(Add,Identifier(a),Identifier(b)))])]"
+}

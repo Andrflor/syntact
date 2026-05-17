@@ -1,0 +1,6 @@
+{
+  "name": "Dispatch Table",
+  "description": "Pattern-based dispatch.",
+  "source": "dispatch -> {\n  String:cmd\n  -> cmd ? {\n    \"help\" -> showHelp{}!\n    \"quit\" -> exit{0}!\n    \"version\" -> printVersion{}!\n    -> unknown{cmd}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(dispatch),Scope[Constraint(Identifier(String),Identifier(cmd)),Product(Pattern(Identifier(cmd),[Branch(Literal(String,help),Execute(Carve(Identifier(showHelp),[]),[])),Branch(Literal(String,quit),Execute(Carve(Identifier(exit),[Literal(Integer,0)]),[])),Branch(Literal(String,version),Execute(Carve(Identifier(printVersion),[]),[])),Branch(nil,Execute(Carve(Identifier(unknown),[Identifier(cmd)]),[]))]))])]"
+}

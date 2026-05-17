@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Char Range Upper",
+  "description": "Upper-case char range 'A'..'Z'.",
+  "source": "'A'..'Z'",
+  "expect": "Scope[Range(Literal(String,A),Literal(String,Z))]"
+}

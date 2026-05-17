@@ -1,0 +1,6 @@
+{
+  "name": "Combo Pull Binding Inside Carve Inside Constraint",
+  "description": "List{T <- u8}:numbers — at the constraint name slot 'List{T <- u8}' is parsed as a Carve with a PointingPull inside. UNCERTAIN: parse_constraint_bind uses parse_expression at CALL+1 which excludes Carve precedence, but List is identifier and the {} is glued: it goes through CALL-level infix carve.",
+  "source": "List{T <- u8}:numbers",
+  "expect": "Scope[Constraint(Carve(Identifier(List),[PointingPull(Identifier(T),Identifier(u8))]),Identifier(numbers))]"
+}

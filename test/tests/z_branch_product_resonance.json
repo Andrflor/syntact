@@ -1,0 +1,6 @@
+{
+  "name": "Z Branch Product Is ResonancePush",
+  "description": "n ? { 1 -> v >>- Up } — Branch product is a ResonancePush. Both Pointing and ResonancePush are at ASSIGNMENT (right-assoc), so the entire RHS of -> becomes the product.",
+  "source": "n ? { 1 -> v >>- Up }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,1),ResonancePush(Identifier(v),Identifier(Up)))])]"
+}

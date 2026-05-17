@@ -1,0 +1,6 @@
+{
+  "name": "Factorial Recursive",
+  "description": "factorial defined via pattern: 0->1, default -> n * factorial{n -> n-1}!",
+  "source": "factorial -> {\n  n -> 0\n  -> n ? { 0 -> 1\n    -> n * factorial{n -> n - 1}! }\n}",
+  "expect": "Scope[Pointing(Identifier(factorial),Scope[Pointing(Identifier(n),Literal(Integer,0)),Product(Pattern(Identifier(n),[Branch(Literal(Integer,0),Literal(Integer,1)),Branch(nil,Operator(Multiply,Identifier(n),Execute(Carve(Identifier(factorial),[Pointing(Identifier(n),Operator(Subtract,Identifier(n),Literal(Integer,1)))]),[])))]))])]"
+}

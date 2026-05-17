@@ -1,0 +1,6 @@
+{
+  "name": "Z Pattern Target Is Property",
+  "description": "obj.kind ? { 1 -> a } — Pattern target is a Property chain (CALL > PATTERN forms first).",
+  "source": "obj.kind ? { 1 -> a }",
+  "expect": "Scope[Pattern(Property(Identifier(obj),Identifier(kind)),[Branch(Literal(Integer,1),Identifier(a))])]"
+}

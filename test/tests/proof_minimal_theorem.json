@@ -1,0 +1,6 @@
+{
+  "name": "Minimal Theorem Scope",
+  "description": "A minimalist theorem body: one symbolic Nat binding and a tautological proof obligation true ?! true.",
+  "source": "thm -> {\n  Nat:n -> ??\n  -> true ?! true\n}",
+  "expect": "Scope[Pointing(Identifier(thm),Scope[Pointing(Constraint(Identifier(Nat),Identifier(n)),Unknown),Product(Enforce(Identifier(true),Identifier(true)))])]"
+}

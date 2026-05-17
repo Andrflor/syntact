@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace Glued After Identifier With Capture",
+  "description": "foo(c){x} — capture is consumed inside parse_identifier; then '{' glued to ')' is LeftBraceCarve which attaches as infix at CALL.",
+  "source": "foo(c){x}",
+  "expect": "Scope[Carve(Identifier(foo,c),[Identifier(x)])]"
+}

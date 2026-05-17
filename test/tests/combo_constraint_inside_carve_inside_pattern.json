@@ -1,0 +1,6 @@
+{
+  "name": "Combo Constraint Inside Carve Inside Pattern Branch",
+  "description": "Branch source is a Carve of a Constraint with capture. v ? { Circle:c{x->1} -> 1 } — the source is Carve(Constraint(Circle,c),[...]).",
+  "source": "v ? { Circle:c{x -> 1} -> 1 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Carve(Constraint(Identifier(Circle),Identifier(c)),[Pointing(Identifier(x),Literal(Integer,1))]),Literal(Integer,1))])]"
+}

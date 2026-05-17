@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Or Range Digits Underscore",
+  "description": "'a'..'z' | '0'..'9' | '_' — mixes char ranges and a single char in an Or chain.",
+  "source": "'a'..'z' | '0'..'9' | '_'",
+  "expect": "Scope[Operator(Or,Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,0),Literal(String,9))),Literal(String,_))]"
+}

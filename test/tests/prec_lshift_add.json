@@ -1,0 +1,6 @@
+{
+  "name": "Precedence LShift With Add",
+  "description": "a << b + c — LShift (AND=9) > TERM (5). 'b + c' on right binds to LShift only at AND+1=10; TERM=5<10 stops. So 'a << b' first. Then '+ c' at top level: top loop already at AND result; '+' (TERM=5 >= NONE=0) attaches. Result Add(LShift(a,b), c).",
+  "source": "a << b + c",
+  "expect": "Scope[Operator(Add,Operator(LShift,Identifier(a),Identifier(b)),Identifier(c))]"
+}

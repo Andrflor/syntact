@@ -1,0 +1,6 @@
+{
+  "name": "Z Range With CompileTime Endpoints",
+  "description": "!a..!b — Range with CompileTime on both endpoints. CompileTime is UNARY=10, Range is RANGE=11; Range as infix sees its left operand 'CompileTime(a)' formed first, then parses RHS at RANGE which lets it also pick up the prefix CompileTime(b).",
+  "source": "!a..!b",
+  "expect": "Scope[Range(CompileTime(Identifier(a)),CompileTime(Identifier(b)))]"
+}

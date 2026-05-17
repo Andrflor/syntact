@@ -1,0 +1,6 @@
+{
+  "name": "Program Server Config",
+  "description": "README-style server config with port refinement type and three shaped bindings with defaults. Tests Pointing with Constraint left and value right at multiple lines.",
+  "source": "Port -> u16 & >0\nServerConfig -> {\n  String:host -> \"localhost\"\n  Port:port -> 8080\n  bool:debug -> false\n}",
+  "expect": "Scope[Pointing(Identifier(Port),Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0)))),Pointing(Identifier(ServerConfig),Scope[Pointing(Constraint(Identifier(String),Identifier(host)),Literal(String,localhost)),Pointing(Constraint(Identifier(Port),Identifier(port)),Literal(Integer,8080)),Pointing(Constraint(Identifier(bool),Identifier(debug)),Identifier(false))])]"
+}

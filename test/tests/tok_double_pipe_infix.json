@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_pipe_infix",
+  "description": "a||b — first '|' infix Or (via parse_bit_or which falls back to binary); RHS prefix '|' has no rule. UNCERTAIN: empty Scope[].",
+  "source": "a||b",
+  "expect": "Scope[]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Capture Then Pattern",
+  "description": "(x) ? { 1 -> 2 } — anonymous capture as Pattern target. The capture Identifier(,x) is the target.",
+  "source": "(x) ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Identifier(,x),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

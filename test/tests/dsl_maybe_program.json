@@ -1,0 +1,6 @@
+{
+  "name": "Maybe With Map Function",
+  "description": "Maybe with productions and map carving inside.",
+  "source": "Maybe -> {\n  T <- none\n  -> None:\n  -> Some:(v)\n}\nmap -> {\n  Maybe:m\n  f <- none\n  -> m ? { None: -> None: Some:(v) -> Some:(f{v}!) }\n}",
+  "expect": "Scope[Pointing(Identifier(Maybe),Scope[PointingPull(Identifier(T),Identifier(none)),Product(Constraint(Identifier(None),nil)),Product(Constraint(Identifier(Some),Identifier(,v)))]),Pointing(Identifier(map),Scope[Constraint(Identifier(Maybe),Identifier(m)),PointingPull(Identifier(f),Identifier(none)),Product(Pattern(Identifier(m),[Branch(Constraint(Identifier(None),nil),Constraint(Identifier(None),nil)),Branch(Constraint(Identifier(Some),Identifier(,v)),Constraint(Identifier(Some),Carve(Execute(Identifier(f),[]),[Identifier(v)])))]))])]"
+}

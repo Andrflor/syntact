@@ -1,0 +1,6 @@
+{
+  "name": "Combo Property Then Carve Then Constraint",
+  "description": "lib.X{a->1}:name — Property, Carve, then Constraint. UNCERTAIN: at the constraint name slot we look back; the chain Property->Carve is at CALL, and the colon is ConstraintBind. The whole left-side becomes constraint target.",
+  "source": "lib.X{a->1}:name",
+  "expect": "Scope[Constraint(Carve(Property(Identifier(lib),Identifier(X)),[Pointing(Identifier(a),Literal(Integer,1))]),Identifier(name))]"
+}

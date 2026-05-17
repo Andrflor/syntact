@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern Followed By Constraint",
+  "description": "n ? Foo: — semantically the inline source is Constraint(Foo,nil). WILL_FAIL_UNTIL_FIX: parser current behavior is Constraint(Pattern(n,[Branch(Foo,nil)]),nil) because inline parses RHS at RANGE=11 which exceeds CONSTRAINT=8, so : binds outside. Fix: inline pattern RHS should accept CONSTRAINT-level forms.",
+  "source": "n ? Foo:",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Constraint(Identifier(Foo),nil),nil)])]"
+}

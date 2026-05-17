@@ -1,0 +1,6 @@
+{
+  "name": "Lex Paren Spaced Yields Grouping Sibling",
+  "description": "foo (x) — space before '(' yields LeftParen (no infix rule). foo and (x) are two sibling statements; (x) parses via parse_grouping as Identifier(,x).",
+  "source": "foo (x)",
+  "expect": "Scope[Identifier(foo),Identifier(,x)]"
+}

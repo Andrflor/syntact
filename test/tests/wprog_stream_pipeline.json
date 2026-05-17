@@ -1,0 +1,6 @@
+{
+  "name": "Stream Pipeline Process",
+  "description": "Stream with process step.",
+  "source": "Stream -> {\n  source\n  step -> {\n    x\n    -> x * 2\n  }\n}\nprocess -> {\n  Stream:s\n  -> s.step{s.source}!\n}",
+  "expect": "Scope[Pointing(Identifier(Stream),Scope[Identifier(source),Pointing(Identifier(step),Scope[Identifier(x),Product(Operator(Multiply,Identifier(x),Literal(Integer,2)))])]),Pointing(Identifier(process),Scope[Constraint(Identifier(Stream),Identifier(s)),Product(Execute(Carve(Property(Identifier(s),Identifier(step)),[Property(Identifier(s),Identifier(source))]),[]))])]"
+}

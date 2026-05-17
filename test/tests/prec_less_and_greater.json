@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Less And Greater With Logical And",
+  "description": "a < b & c > d — AND (9) > COMPARISON (4) so '&' binds tighter than '<' or '>'. Trace: 'a < b' starts; inside right-of-<, 'b' consumed then '& c' attaches (AND ≥ COMPARISON+1). 'b & c' returned. Then '< returns Less(a, And(b,c)). Outer COMPARISON loop attaches '> d' (left-assoc). Result Greater(Less(a, And(b,c)), d).",
+  "source": "a < b & c > d",
+  "expect": "Scope[Operator(Greater,Operator(Less,Identifier(a),Operator(And,Identifier(b),Identifier(c))),Identifier(d))]"
+}

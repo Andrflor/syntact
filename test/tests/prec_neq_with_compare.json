@@ -1,0 +1,6 @@
+{
+  "name": "Precedence NotEqual With Comparison",
+  "description": "a != b < c — COMPARISON (4) > EQUALITY (3). Trace: 'a !=' starts at EQ; right at EQ+1=4. 'b' then '< c' (COMP=4 ≥ 4) attaches. Result NotEqual(a, Less(b,c)).",
+  "source": "a != b < c",
+  "expect": "Scope[Operator(NotEqual,Identifier(a),Operator(Less,Identifier(b),Identifier(c)))]"
+}

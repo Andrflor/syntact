@@ -1,0 +1,6 @@
+{
+  "name": "Precedence CompileTime Of Grouped Add",
+  "description": "!(foo + bar) — '!' prefix consumes operand starting with '('. parse_grouping yields Add(foo,bar). CompileTime(Add(foo,bar)).",
+  "source": "!(foo + bar)",
+  "expect": "Scope[CompileTime(Operator(Add,Identifier(foo),Identifier(bar)))]"
+}

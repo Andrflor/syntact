@@ -1,0 +1,6 @@
+{
+  "name": "Composed Refinement Or Of Ands",
+  "description": "n ? ((>0 & <100) | (>1000 & <2000)) — Or of two And-groups.",
+  "source": "n ? ((>0 & <100) | (>1000 & <2000))",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Or,Operator(And,Operator(Greater,nil,Literal(Integer,0)),Operator(Less,nil,Literal(Integer,100))),Operator(And,Operator(Greater,nil,Literal(Integer,1000)),Operator(Less,nil,Literal(Integer,2000)))),nil)])]"
+}

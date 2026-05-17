@@ -1,0 +1,6 @@
+{
+  "name": "Lexer Stub",
+  "description": "Token shape and scan function.",
+  "source": "Token -> {\n  -> Ident:{String:name}\n  -> Num:{u32:value}\n  -> Punct:{String:c}\n}\nscan -> {\n  String:input\n  -> input ? {\n    'a'..'z' -> Ident:{name -> input}\n    '0'..'9' -> Num:{value -> 0}\n    -> Punct:{c -> input}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Token),Scope[Product(Carve(Constraint(Identifier(Ident),nil),[Constraint(Identifier(String),Identifier(name))])),Product(Carve(Constraint(Identifier(Num),nil),[Constraint(Identifier(u32),Identifier(value))])),Product(Carve(Constraint(Identifier(Punct),nil),[Constraint(Identifier(String),Identifier(c))]))]),Pointing(Identifier(scan),Scope[Constraint(Identifier(String),Identifier(input)),Product(Pattern(Identifier(input),[Branch(Range(Literal(String,a),Literal(String,z)),Carve(Constraint(Identifier(Ident),nil),[Pointing(Identifier(name),Identifier(input))])),Branch(Range(Literal(String,0),Literal(String,9)),Carve(Constraint(Identifier(Num),nil),[Pointing(Identifier(value),Literal(Integer,0))])),Branch(nil,Carve(Constraint(Identifier(Punct),nil),[Pointing(Identifier(c),Identifier(input))]))]))])]"
+}

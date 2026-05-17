@@ -1,0 +1,6 @@
+{
+  "name": "chain_grouped_property_pattern_target",
+  "description": "(a.b).c ? {x->1} — '(a.b)' grouping returns Property(a,b); then '.c' PropertyAccess at CALL; then '?' Pattern. UNCERTAIN: parse_grouping should strip parens to give the same AST as a.b.c.",
+  "source": "(a.b).c ? { x -> 1 }",
+  "expect": "Scope[Pattern(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[Branch(Identifier(x),Literal(Integer,1))])]"
+}

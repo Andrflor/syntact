@@ -1,0 +1,6 @@
+{
+  "name": "Lex Underscore In Middle Of Identifier",
+  "description": "foo_bar_baz is a single Identifier; underscores in the middle are alphanumeric per is_alnum.",
+  "source": "foo_bar_baz",
+  "expect": "Scope[Identifier(foo_bar_baz)]"
+}

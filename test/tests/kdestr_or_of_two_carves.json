@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Two Carve Destructures With Different Fields",
+  "description": "A:{x(a)} | B:{x(b)} -> a (different captures across alternatives). Branch source is an Or of two Carve-of-Constraints.",
+  "source": "v ? { A:{x(a)} | B:{x(b)} -> a }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Carve(Constraint(Identifier(A),nil),[Identifier(x,a)]),Carve(Constraint(Identifier(B),nil),[Identifier(x,b)])),Identifier(a))])]"
+}

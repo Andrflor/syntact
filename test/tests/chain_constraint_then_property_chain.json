@@ -1,0 +1,6 @@
+{
+  "name": "chain_constraint_then_property_chain",
+  "description": "Foo:a.b.c — parse_constraint_bind RHS at CALL+1=PRIMARY consumes only 'a' as name. Outer loop then sees '.b.c' as PropertyAccess (CALL) which attaches to the Constraint. Property(Property(Constraint(Foo,a),b),c).",
+  "source": "Foo:a.b.c",
+  "expect": "Scope[Property(Property(Constraint(Identifier(Foo),Identifier(a)),Identifier(b)),Identifier(c))]"
+}

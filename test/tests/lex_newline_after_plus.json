@@ -1,0 +1,6 @@
+{
+  "name": "Lex Newline After Plus Operator",
+  "description": "{a +\\nb} — newline immediately after '+' separates statements. UNCERTAIN: parse_binary doesn't skip newlines before parsing the right operand, so 'a +' should probably continue to 'b' but the current parser may abort. WILL_FAIL_UNTIL_FIX: parse_binary should skip newlines after the operator token. Semantic intent: Operator(Add,a,b).",
+  "source": "{a +\nb}",
+  "expect": "Scope[Scope[Operator(Add,Identifier(a),Identifier(b))]]"
+}

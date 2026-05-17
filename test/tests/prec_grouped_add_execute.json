@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Grouped Add Then Postfix Execute",
+  "description": "(a+b)! — parens form Add first, then '!' as postfix on the grouped expression.",
+  "source": "(a+b)!",
+  "expect": "Scope[Execute(Operator(Add,Identifier(a),Identifier(b)),[])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence CompileTime With Range",
+  "description": "!1..5 — CompileTime operand parsed at UNARY; '1' then '..' (RANGE=11 ≥ UNARY=10) attaches. Result CompileTime(Range(1,5)).",
+  "source": "!1..5",
+  "expect": "Scope[CompileTime(Range(Literal(Integer,1),Literal(Integer,5)))]"
+}

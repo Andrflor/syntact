@@ -1,0 +1,6 @@
+{
+  "name": "Combo Pattern Inside Event Handler Product",
+  "description": "Event handler whose body produces a Pattern. The Pattern's branches return strings.",
+  "source": "Log -< e {\n  -> e.level ? {\n    0 -> \"info\"\n    1 -> \"warn\"\n  }\n}",
+  "expect": "Scope[EventPull(e,Identifier(Log),Scope[Product(Pattern(Property(Identifier(e),Identifier(level)),[Branch(Literal(Integer,0),Literal(String,info)),Branch(Literal(Integer,1),Literal(String,warn))]))])]"
+}

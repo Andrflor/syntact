@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Pattern Target Is And Expression",
+  "description": "a & b ? { 1 -> 2 } — AND (9) > PATTERN (2). 'a & b' first, then '?' attaches to whole And.",
+  "source": "a & b ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Operator(And,Identifier(a),Identifier(b)),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

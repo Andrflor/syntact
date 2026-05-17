@@ -1,0 +1,6 @@
+{
+  "name": "Double Orphan Right Brace",
+  "description": "} } — two orphan right braces; both consumed silently per parse_statement RightBrace path. Empty scope.",
+  "source": "} }",
+  "expect": "Scope[]"
+}

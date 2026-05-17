@@ -1,0 +1,6 @@
+{
+  "name": "Z Event Pull Body Uses CompileTime",
+  "description": "Tick -< e { -> !e.ms } — EventPull with body producing CompileTime prefix on a property.",
+  "source": "Tick -< e { -> !e.ms }",
+  "expect": "Scope[EventPull(e,Identifier(Tick),Scope[Product(CompileTime(Property(Identifier(e),Identifier(ms))))])]"
+}

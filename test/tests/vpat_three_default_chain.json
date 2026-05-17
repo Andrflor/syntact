@@ -1,0 +1,6 @@
+{
+  "name": "Multiple Default-Only Branches Sequence",
+  "description": "v ? { -> 1 -> 2 -> 3 } — three default branches in series. Each is Branch(nil, n).",
+  "source": "v ? { -> 1\n -> 2\n -> 3 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(nil,Literal(Integer,1)),Branch(nil,Literal(Integer,2)),Branch(nil,Literal(Integer,3))])]"
+}

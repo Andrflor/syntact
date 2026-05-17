@@ -1,0 +1,6 @@
+{
+  "name": "Default Multi Primitive Scope",
+  "description": "{ u8:count\\n bool:enabled\\n String:name } — three primitive shaped bindings in a single scope. Tests that each defaults independently.",
+  "source": "{\n  u8:count\n  bool:enabled\n  String:name\n}",
+  "expect": "Scope[Scope[Constraint(Identifier(u8),Identifier(count)),Constraint(Identifier(bool),Identifier(enabled)),Constraint(Identifier(String),Identifier(name))]]"
+}

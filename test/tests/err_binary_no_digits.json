@@ -1,0 +1,6 @@
+{
+  "name": "Binary Prefix Without Digits",
+  "description": "0b — scan_binary returns an Invalid token. UNCERTAIN: same as hex.",
+  "source": "0b",
+  "expect": "Scope[]"
+}

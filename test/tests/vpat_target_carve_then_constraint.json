@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target With Constraint Then Pattern",
+  "description": "T:x ? { 0 -> 'z' } — Constraint(T,x) as target. PATTERN=2 > CONSTRAINT=8? No, CONSTRAINT > PATTERN. So Constraint forms first then ? attaches outside.",
+  "source": "T:x ? { 0 -> 'z' }",
+  "expect": "Scope[Pattern(Constraint(Identifier(T),Identifier(x)),[Branch(Literal(Integer,0),Literal(String,z))])]"
+}

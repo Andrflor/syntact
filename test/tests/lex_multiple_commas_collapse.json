@@ -1,0 +1,6 @@
+{
+  "name": "Lex Multiple Commas Collapse Like Newlines",
+  "description": "{a,,,b} — runs of separators (newlines and commas) are collapsed by skip_newlines. Equivalent to two statements.",
+  "source": "{a,,,b}",
+  "expect": "Scope[Scope[Identifier(a),Identifier(b)]]"
+}

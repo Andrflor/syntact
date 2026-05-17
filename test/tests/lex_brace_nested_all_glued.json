@@ -1,0 +1,6 @@
+{
+  "name": "Lex Nested Carve All Glued",
+  "description": "Foo{Bar{x}} — Bar is glued to '{', producing a nested Carve inside the outer Carve.",
+  "source": "Foo{Bar{x}}",
+  "expect": "Scope[Carve(Identifier(Foo),[Carve(Identifier(Bar),[Identifier(x)])])]"
+}

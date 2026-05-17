@@ -1,0 +1,6 @@
+{
+  "name": "Constrained Carve Form",
+  "description": "Circle{radius?<10}: — the carve refines, the trailing : creates anonymous constrained binding. README §Carving versus destructuring §Circle{...}:",
+  "source": "Circle{radius?<10}:",
+  "expect": "Scope[Constraint(Carve(Identifier(Circle),[Pattern(Identifier(radius),[Branch(Operator(Less,nil,Literal(Integer,10)),nil)])]),nil)]"
+}

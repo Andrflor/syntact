@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_question_then_ident",
+  "description": "'??x' — Unknown literal then identifier on same line. parse_unknown returns immediately; there's no infix between Unknown and 'x'. parse_statement returns Unknown. Outer scope loop tries 'x' as fresh statement. UNCERTAIN: two siblings.",
+  "source": "??x",
+  "expect": "Scope[Unknown,Identifier(x)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Default Point Instance Via Carve",
+  "description": "p -> Point{x -> 10 y -> 20} — derive a point by carving the shape.",
+  "source": "p -> Point{x -> 10 y -> 20}",
+  "expect": "Scope[Pointing(Identifier(p),Carve(Identifier(Point),[Pointing(Identifier(x),Literal(Integer,10)),Pointing(Identifier(y),Literal(Integer,20))]))]"
+}

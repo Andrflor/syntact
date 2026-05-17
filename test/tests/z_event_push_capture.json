@@ -1,0 +1,6 @@
+{
+  "name": "Z Event Push With Capture RHS",
+  "description": "x >- (e) — EventPush with anonymous capture as the emitted event.",
+  "source": "x >- (e)",
+  "expect": "Scope[EventPush(Identifier(x),Identifier(,e))]"
+}

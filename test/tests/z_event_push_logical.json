@@ -1,0 +1,6 @@
+{
+  "name": "Z Event Push With BitOr RHS",
+  "description": "x >- a | b — EventPush at ASSIGNMENT, BitOr at OR (higher). RHS is the Or operator.",
+  "source": "x >- a | b",
+  "expect": "Scope[EventPush(Identifier(x),Operator(Or,Identifier(a),Identifier(b)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Unclosed Brace Around Pointing",
+  "description": "{a -> 1 — open brace then a pointing then EOF. parse_scope errors on missing '}' but should keep the parsed Pointing. UNCERTAIN.",
+  "source": "{a -> 1",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1))]]"
+}

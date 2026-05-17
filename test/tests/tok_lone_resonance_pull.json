@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_resonance_pull",
+  "description": "'-<<' alone — prefix ResonancePull at EOF. UNCERTAIN: empty Scope[] (error in prefix RHS parsing) or ResonancePull(nil,nil).",
+  "source": "-<<",
+  "expect": "Scope[]"
+}

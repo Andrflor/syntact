@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Identifier Block",
+  "description": "Identifier -> { String:(s) -> \"defaultId\"\\n -> s ?! idChar*1.. & ~(.. + '_') } — README §Grammars. AND (9) > TERM (5) so each side of & is a full expression; ~(..+'_') has Range(nil,nil) on the left of + then '_' on the right. UNCERTAIN: the standalone '..' inside parens is just DoubleDot prefix (Range(nil,nil) per range_empty.json); confirmed.",
+  "source": "Identifier -> {\n  String:(s) -> \"defaultId\"\n  -> s ?!\n    idChar*1..\n    & ~(.. + '_')\n}",
+  "expect": "Scope[Pointing(Identifier(Identifier),Scope[Pointing(Constraint(Identifier(String),Identifier(,s)),Literal(String,defaultId)),Product(Enforce(Identifier(s),Operator(And,Operator(Multiply,Identifier(idChar),Range(Literal(Integer,1),nil)),Operator(Not,nil,Operator(Add,Range(nil,nil),Literal(String,_))))))])]"
+}

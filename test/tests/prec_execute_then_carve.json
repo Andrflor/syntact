@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Postfix Execute Then Carve",
+  "description": "foo!{x} — Execute (postfix, CALL) and Carve (LeftBraceCarve glued to '!') both at CALL, left-assoc. 'foo!' first, then '{x}' carves the Execute node.",
+  "source": "foo!{x}",
+  "expect": "Scope[Carve(Execute(Identifier(foo),[]),[Identifier(x)])]"
+}

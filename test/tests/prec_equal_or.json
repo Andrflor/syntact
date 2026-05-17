@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Equal With Or",
+  "description": "a = b | c — OR (7) > EQUALITY (3). 'b | c' first inside right-of-=. Result Equal(a, Or(b,c)).",
+  "source": "a = b | c",
+  "expect": "Scope[Operator(Equal,Identifier(a),Operator(Or,Identifier(b),Identifier(c)))]"
+}

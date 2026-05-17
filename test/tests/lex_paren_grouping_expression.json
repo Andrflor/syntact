@@ -1,0 +1,6 @@
+{
+  "name": "Lex Paren Grouping Non-Identifier Expression",
+  "description": "(1+2) — parens at start, inner is an arithmetic expression not a single identifier so parse_grouping returns the Operator.",
+  "source": "(1+2)",
+  "expect": "Scope[Operator(Add,Literal(Integer,1),Literal(Integer,2))]"
+}

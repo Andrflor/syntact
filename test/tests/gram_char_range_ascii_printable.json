@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Char Range ASCII Printable",
+  "description": "ASCII printable range '!'..'~' — both bounds are single-char String literals.",
+  "source": "'!'..'~'",
+  "expect": "Scope[Range(Literal(String,!),Literal(String,~))]"
+}

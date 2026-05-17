@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Literal Match",
+  "description": "x ? { Point:{x(a) y -> 0} -> a } — destructure where one field is captured and another is constrained to a literal value through Pointing.",
+  "source": "x ? { Point:{x(a) y -> 0} -> a }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Point),nil),[Identifier(x,a),Pointing(Identifier(y),Literal(Integer,0))]),Identifier(a))])]"
+}

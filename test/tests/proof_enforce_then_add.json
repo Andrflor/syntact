@@ -1,0 +1,6 @@
+{
+  "name": "Enforce Right Operand Captures Sum",
+  "description": "a ?! b + c — Enforce parses its right operand at EQUALITY precedence; Add (TERM=5) > EQUALITY (3), so b+c becomes the right operand.",
+  "source": "a ?! b + c",
+  "expect": "Scope[Enforce(Identifier(a),Operator(Add,Identifier(b),Identifier(c)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "External Used As Branch Source",
+  "description": "x ? { @lib.None -> 0 -> 1 } — branch source matches an externally referenced shape.",
+  "source": "x ? { @lib.None -> 0\n  -> 1 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Property(External(lib,nil),Identifier(None)),Literal(Integer,0)),Branch(nil,Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Empty Carve",
+  "description": "Foo{} — empty Carve with no entries.",
+  "source": "Foo{}",
+  "expect": "Scope[Carve(Identifier(Foo),[])]"
+}

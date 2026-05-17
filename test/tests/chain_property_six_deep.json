@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_six_deep",
+  "description": "a.b.c.d.e.f — six-deep property chain.",
+  "source": "a.b.c.d.e.f",
+  "expect": "Scope[Property(Property(Property(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d)),Identifier(e)),Identifier(f))]"
+}

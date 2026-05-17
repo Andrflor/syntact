@@ -1,0 +1,6 @@
+{
+  "name": "chain_mix_carve_nested_property_carve_execute",
+  "description": "Foo{x -> a.b.c{y -> 1}}! — carve with property-chain-then-carve nested in pointing target, then outer execute.",
+  "source": "Foo{x -> a.b.c{y -> 1}}!",
+  "expect": "Scope[Execute(Carve(Identifier(Foo),[Pointing(Identifier(x),Carve(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[Pointing(Identifier(y),Literal(Integer,1))]))]),[])]"
+}

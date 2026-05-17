@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern Postfix Range",
+  "description": "n ? 5.. — inline pattern with open-ended Range.",
+  "source": "n ? 5..",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Range(Literal(Integer,5),nil),nil)])]"
+}

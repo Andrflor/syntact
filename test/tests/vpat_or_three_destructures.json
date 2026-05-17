@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Three Destructures",
+  "description": "v ? { A:{x} | B:{y} | C:{z} -> 0 } — three-way Or of destructures.",
+  "source": "v ? { A:{x} | B:{y} | C:{z} -> 0 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Operator(Or,Carve(Constraint(Identifier(A),nil),[Identifier(x)]),Carve(Constraint(Identifier(B),nil),[Identifier(y)])),Carve(Constraint(Identifier(C),nil),[Identifier(z)])),Literal(Integer,0))])]"
+}

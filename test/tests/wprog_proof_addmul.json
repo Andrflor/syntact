@@ -1,0 +1,6 @@
+{
+  "name": "Proof Addition And Multiplication",
+  "description": "Theorems for plus and times with symbolic values.",
+  "source": "addZero -> {\n  Nat:n -> ??\n  -> add{n 0}! = n ?! true\n}\nmulOne -> {\n  Nat:n -> ??\n  -> mul{n 1}! = n ?! true\n}",
+  "expect": "Scope[Pointing(Identifier(addZero),Scope[Pointing(Constraint(Identifier(Nat),Identifier(n)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(add),[Identifier(n),Literal(Integer,0)]),[]),Identifier(n)),Identifier(true)))]),Pointing(Identifier(mulOne),Scope[Pointing(Constraint(Identifier(Nat),Identifier(n)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(mul),[Identifier(n),Literal(Integer,1)]),[]),Identifier(n)),Identifier(true)))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Comparison With Terms",
+  "description": "a + b < c - d — TERM (+,-) tighter than COMPARISON (<). So (a+b) < (c-d).",
+  "source": "a + b < c - d",
+  "expect": "Scope[Operator(Less,Operator(Add,Identifier(a),Identifier(b)),Operator(Subtract,Identifier(c),Identifier(d)))]"
+}

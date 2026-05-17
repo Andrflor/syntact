@@ -1,0 +1,6 @@
+{
+  "name": "Three Holes Filled In Same Carve",
+  "description": "Triple{A <- u8 B <- i8 C <- bool} — carve filling three holes.",
+  "source": "Triple{A <- u8 B <- i8 C <- bool}",
+  "expect": "Scope[Carve(Identifier(Triple),[PointingPull(Identifier(A),Identifier(u8)),PointingPull(Identifier(B),Identifier(i8)),PointingPull(Identifier(C),Identifier(bool))])]"
+}

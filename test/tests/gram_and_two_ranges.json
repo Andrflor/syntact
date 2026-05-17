@@ -1,0 +1,6 @@
+{
+  "name": "Grammar And Two Ranges",
+  "description": "'a'..'z' & 'A'..'Z' — And of two ranges (semantically empty intersection but a valid algebraic expression). AND > RANGE so ranges form first.",
+  "source": "'a'..'z' & 'A'..'Z'",
+  "expect": "Scope[Operator(And,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "tok_minus_then_not_unary",
+  "description": "-~a — Subtract unary then Not unary. Operator(Subtract, nil, Operator(Not,nil,a)).",
+  "source": "-~a",
+  "expect": "Scope[Operator(Subtract,nil,Operator(Not,nil,Identifier(a)))]"
+}

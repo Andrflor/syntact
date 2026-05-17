@@ -1,0 +1,6 @@
+{
+  "name": "Enforce Picks Up Sum As Left Operand",
+  "description": "a + b ?! c — Enforce is at PATTERN (2), Add at TERM (5). TERM > PATTERN, so a+b binds first and becomes the left operand of ?!.",
+  "source": "a + b ?! c",
+  "expect": "Scope[Enforce(Operator(Add,Identifier(a),Identifier(b)),Identifier(c))]"
+}

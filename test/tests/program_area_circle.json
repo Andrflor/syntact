@@ -1,0 +1,6 @@
+{
+  "name": "Program Area of a Circle via Destructure",
+  "description": "Computes area by destructuring Shape against Circle:{radius(r)} and using r in arithmetic. Tests Pattern with destructure capture and Multiply chain.",
+  "source": "area -> {\n  Shape:shape\n  -> shape ? {\n    Circle:{radius(r)} -> r * r * 3\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(area),Scope[Constraint(Identifier(Shape),Identifier(shape)),Product(Pattern(Identifier(shape),[Branch(Carve(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Operator(Multiply,Operator(Multiply,Identifier(r),Identifier(r)),Literal(Integer,3)))]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Range With Space Before The Dots",
+  "description": "1 ..5 — space before '..', '5' after non-delim. has_before_delimiter true (space). PrefixRange. So '1' is sibling identifier, '..5' is Range(nil,5).",
+  "source": "{1 ..5}",
+  "expect": "Scope[Scope[Literal(Integer,1),Range(nil,Literal(Integer,5))]]"
+}

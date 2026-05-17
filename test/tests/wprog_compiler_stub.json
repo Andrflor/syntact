@@ -1,0 +1,6 @@
+{
+  "name": "Compiler Stub",
+  "description": "Compile pipeline with phases.",
+  "source": "compile -> {\n  String:source\n  -> source ? {\n    \"\" -> none\n    -> lex{source}!\n  }\n}\nlex -> {\n  String:s\n  -> {tokens -> s}\n}",
+  "expect": "Scope[Pointing(Identifier(compile),Scope[Constraint(Identifier(String),Identifier(source)),Product(Pattern(Identifier(source),[Branch(Literal(String,),Identifier(none)),Branch(nil,Execute(Carve(Identifier(lex),[Identifier(source)]),[]))]))]),Pointing(Identifier(lex),Scope[Constraint(Identifier(String),Identifier(s)),Product(Scope[Pointing(Identifier(tokens),Identifier(s))])])]"
+}

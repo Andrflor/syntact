@@ -1,0 +1,6 @@
+{
+  "name": "HTTP Router Skeleton",
+  "description": "Routes shape with method/path constraints and handler dispatch.",
+  "source": "Route -> {\n  String:method\n  String:path\n  handler\n}\nrouter -> {\n  Route:r\n  -> r.method ? {\n    'GET' -> r.handler\n    'POST' -> r.handler\n    -> notFound\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Route),Scope[Constraint(Identifier(String),Identifier(method)),Constraint(Identifier(String),Identifier(path)),Identifier(handler)]),Pointing(Identifier(router),Scope[Constraint(Identifier(Route),Identifier(r)),Product(Pattern(Property(Identifier(r),Identifier(method)),[Branch(Literal(String,GET),Property(Identifier(r),Identifier(handler))),Branch(Literal(String,POST),Property(Identifier(r),Identifier(handler))),Branch(nil,Identifier(notFound))]))])]"
+}

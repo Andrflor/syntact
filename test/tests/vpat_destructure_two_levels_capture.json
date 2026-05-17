@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Two Levels Capture",
+  "description": "Outer:{inner(Inner:{x(a)})} — nested destructure two levels deep with captures. UNCERTAIN: bracketing here may parse as Pattern(Identifier(inner), …) because parens after identifier produce inline-pattern? Actually inner(...) here is a capture-paren (inner followed by glued paren), so Identifier(inner,Inner:{x(a)}) is not valid because capture must be an identifier. WILL_FAIL_UNTIL_FIX: the cleanest reading remains via inline pattern.",
+  "source": "Outer:{inner ? Inner:{x(a)}}",
+  "expect": "Scope[Carve(Constraint(Identifier(Outer),nil),[Pattern(Identifier(inner),[Branch(Carve(Constraint(Identifier(Inner),nil),[Identifier(x,a)]),nil)])])]"
+}

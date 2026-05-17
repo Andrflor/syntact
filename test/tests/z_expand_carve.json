@@ -1,0 +1,6 @@
+{
+  "name": "Z Expand Of A Carve",
+  "description": "...Foo{x -> 1} — parse_expansion at UNARY; Carve is at CALL > UNARY so it forms entirely as the expansion target.",
+  "source": "...Foo{x -> 1}",
+  "expect": "Scope[Expand(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]))]"
+}

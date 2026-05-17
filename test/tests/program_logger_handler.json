@@ -1,0 +1,6 @@
+{
+  "name": "Program Logger With Handler",
+  "description": "Defines a Log shape with a message field, a handler that writes the message, and emits a Log event. Tests EventPull catch+body and EventPush prefix with carve.",
+  "source": "Log -> {\n  String:message\n}\nprogram -> {\n  Log -< e {\n    -> io.write{e.message}!\n  }\n  >- Log{message -> \"hello\"}\n  -> 0\n}",
+  "expect": "Scope[Pointing(Identifier(Log),Scope[Constraint(Identifier(String),Identifier(message))]),Pointing(Identifier(program),Scope[EventPull(e,Identifier(Log),Scope[Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(message))]),[]))]),EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(message),Literal(String,hello))])),Product(Literal(Integer,0))])]"
+}

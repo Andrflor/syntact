@@ -1,0 +1,6 @@
+{
+  "name": "Config Pattern Program",
+  "description": "ServerConfig with port shape, host, debug. Followed by carved variants. README §A small practical comparison.",
+  "source": "Port -> u16 & >0\nServerConfig -> {\n  String:host -> \"localhost\"\n  Port:port -> 8080\n  bool:debug -> false\n}",
+  "expect": "Scope[Pointing(Identifier(Port),Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0)))),Pointing(Identifier(ServerConfig),Scope[Pointing(Constraint(Identifier(String),Identifier(host)),Literal(String,localhost)),Pointing(Constraint(Identifier(Port),Identifier(port)),Literal(Integer,8080)),Pointing(Constraint(Identifier(bool),Identifier(debug)),Identifier(false))])]"
+}

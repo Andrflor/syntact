@@ -1,0 +1,6 @@
+{
+  "name": "Lex Nested Brace Mixed Glued And Spaced",
+  "description": "Foo{Bar {x}} — inside the outer carve, Bar followed by space-then-'{' yields a sibling Scope (so the carve has two entries: Identifier(Bar) and Scope[x]).",
+  "source": "Foo{Bar {x}}",
+  "expect": "Scope[Carve(Identifier(Foo),[Identifier(Bar),Scope[Identifier(x)]])]"
+}

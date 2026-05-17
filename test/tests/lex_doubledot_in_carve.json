@@ -1,0 +1,6 @@
+{
+  "name": "Lex DoubleDot Inside Carve",
+  "description": "Foo{..} — inside a carve, '..' has '{' before and '}' after; both delimiters. Yields DoubleDot, parsed as Range(nil,nil).",
+  "source": "Foo{..}",
+  "expect": "Scope[Carve(Identifier(Foo),[Range(nil,nil)])]"
+}

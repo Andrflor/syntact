@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Multiply Then Or",
+  "description": "alpha*1.. | digit — Multiply (FACTOR=6) > Or (7)? No: FACTOR < OR. Actually Precedence enum has FACTOR=6, OR=7 so OR binds tighter? In get_rule, Or is precedence OR (level 7) and * is FACTOR (level 6). Higher number binds tighter. So OR > FACTOR means | binds tighter than *. UNCERTAIN: Verifying. Actually README lists alpha*1.. as a multiplicative chunk inside grammars. Looking at parse_expression(prec): an operator binds when its precedence > given. Pratt loop continues while infix_prec > precedence. For 'alpha*1.. | digit' starting at expression, alpha is primary, then * has FACTOR=6, continues. After 1.. (Range from postfix), then | has OR=7. Since 7>6, parse_bit_or absorbs the multiply expression as left and parses right at OR+1, giving (alpha*1..) | digit. Expect: Operator(Or, Operator(Multiply, alpha, Range(1,nil)), Identifier(digit)).",
+  "source": "alpha*1.. | digit",
+  "expect": "Scope[Operator(Or,Operator(Multiply,Identifier(alpha),Range(Literal(Integer,1),nil)),Identifier(digit))]"
+}

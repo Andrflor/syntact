@@ -1,0 +1,6 @@
+{
+  "name": "Game Entity With Stats",
+  "description": "Character entity with stats and refinement.",
+  "source": "Character -> {\n  String:name\n  (u16 & >0 & <=100):hp\n  (u16 & >=0):mp\n  level -> 1\n}\nhero -> Character{\n  name -> \"Knight\"\n  hp -> 100\n  mp -> 20\n  level -> 5\n}",
+  "expect": "Scope[Pointing(Identifier(Character),Scope[Constraint(Identifier(String),Identifier(name)),Constraint(Operator(And,Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0))),Operator(LessEqual,nil,Literal(Integer,100))),Identifier(hp)),Constraint(Operator(And,Identifier(u16),Operator(GreaterEqual,nil,Literal(Integer,0))),Identifier(mp)),Pointing(Identifier(level),Literal(Integer,1))]),Pointing(Identifier(hero),Carve(Identifier(Character),[Pointing(Identifier(name),Literal(String,Knight)),Pointing(Identifier(hp),Literal(Integer,100)),Pointing(Identifier(mp),Literal(Integer,20)),Pointing(Identifier(level),Literal(Integer,5))]))]"
+}

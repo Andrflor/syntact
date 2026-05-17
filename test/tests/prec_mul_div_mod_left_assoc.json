@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Mul Div Mod Left Assoc",
+  "description": "a * b / c % d — all FACTOR=6, left-assoc. Result Mod(Divide(Multiply(a,b), c), d).",
+  "source": "a * b / c % d",
+  "expect": "Scope[Operator(Mod,Operator(Divide,Operator(Multiply,Identifier(a),Identifier(b)),Identifier(c)),Identifier(d))]"
+}

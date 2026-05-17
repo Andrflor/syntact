@@ -1,0 +1,6 @@
+{
+  "name": "Spread Inside Inner Scope",
+  "description": "{ ...@core\n  -> 1 } — inner scope containing an Expand and a Product.",
+  "source": "{ ...@core\n  -> 1 }",
+  "expect": "Scope[Scope[Expand(External(core,nil)),Product(Literal(Integer,1))]]"
+}

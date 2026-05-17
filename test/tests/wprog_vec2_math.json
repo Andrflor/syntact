@@ -1,0 +1,6 @@
+{
+  "name": "Vec2 Math Library",
+  "description": "Vec2 shape with add, dot, length methods. Tests Constraint, Pointing, Carve, Execute, arithmetic.",
+  "source": "Vec2 -> {\n  f64:x\n  f64:y\n}\nadd -> {\n  Vec2:a\n  Vec2:b\n  -> Vec2{x -> a.x + b.x  y -> a.y + b.y}\n}\ndot -> {\n  Vec2:a\n  Vec2:b\n  -> a.x * b.x + a.y * b.y\n}",
+  "expect": "Scope[Pointing(Identifier(Vec2),Scope[Constraint(Identifier(f64),Identifier(x)),Constraint(Identifier(f64),Identifier(y))]),Pointing(Identifier(add),Scope[Constraint(Identifier(Vec2),Identifier(a)),Constraint(Identifier(Vec2),Identifier(b)),Product(Carve(Identifier(Vec2),[Pointing(Identifier(x),Operator(Add,Property(Identifier(a),Identifier(x)),Property(Identifier(b),Identifier(x)))),Pointing(Identifier(y),Operator(Add,Property(Identifier(a),Identifier(y)),Property(Identifier(b),Identifier(y))))]))]),Pointing(Identifier(dot),Scope[Constraint(Identifier(Vec2),Identifier(a)),Constraint(Identifier(Vec2),Identifier(b)),Product(Operator(Add,Operator(Multiply,Property(Identifier(a),Identifier(x)),Property(Identifier(b),Identifier(x))),Operator(Multiply,Property(Identifier(a),Identifier(y)),Property(Identifier(b),Identifier(y)))))])]"
+}

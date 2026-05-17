@@ -1,0 +1,6 @@
+{
+  "name": "CounterView UI With State And Buttons",
+  "description": "CounterView scope from README §Resonance. Uses State carved and Button carved with onClick.",
+  "source": "CounterView -> {\n  State{initial -> 0}:value\n  -> Column{children -> {\n    Text{content -> value!}\n    Button{label -> \"Inc\" onClick -> { value.set{value -> value! + 1}! }}\n  }}\n}",
+  "expect": "Scope[Pointing(Identifier(CounterView),Scope[Constraint(Carve(Identifier(State),[Pointing(Identifier(initial),Literal(Integer,0))]),Identifier(value)),Product(Carve(Identifier(Column),[Pointing(Identifier(children),Scope[Carve(Identifier(Text),[Pointing(Identifier(content),Execute(Identifier(value),[]))]),Carve(Identifier(Button),[Pointing(Identifier(label),Literal(String,Inc)),Pointing(Identifier(onClick),Scope[Execute(Carve(Property(Identifier(value),Identifier(set)),[Pointing(Identifier(value),Operator(Add,Execute(Identifier(value),[]),Literal(Integer,1)))]),[])])])])]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding With Carved Default",
+  "description": "T <- Vec2{x -> 1 y -> 1} — pull binding default is a Carve expression.",
+  "source": "T <- Vec2{x -> 1 y -> 1}",
+  "expect": "Scope[PointingPull(Identifier(T),Carve(Identifier(Vec2),[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Literal(Integer,1))]))]"
+}

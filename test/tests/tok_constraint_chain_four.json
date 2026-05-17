@@ -1,0 +1,6 @@
+{
+  "name": "tok_constraint_chain_four",
+  "description": "a:b:c:d — left-associative ConstraintBind chain. parse_constraint_bind RHS at CALL+1=PRIMARY consumes only the next identifier; outer top loop reapplies ':' infix at CONSTRAINT precedence. Constraint(Constraint(Constraint(a,b),c),d).",
+  "source": "a:b:c:d",
+  "expect": "Scope[Constraint(Constraint(Constraint(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d))]"
+}

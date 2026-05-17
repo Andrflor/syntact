@@ -1,0 +1,6 @@
+{
+  "name": "Z Pointing Pull With Carve RHS",
+  "description": "result <- Foo{x -> 1} — PointingPull whose RHS is a Carve.",
+  "source": "result <- Foo{x -> 1}",
+  "expect": "Scope[PointingPull(Identifier(result),Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]))]"
+}

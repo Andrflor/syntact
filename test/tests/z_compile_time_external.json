@@ -1,0 +1,6 @@
+{
+  "name": "Z CompileTime On External",
+  "description": "!@lib — CompileTime prefix consumes External (PRIMARY) entirely.",
+  "source": "!@lib",
+  "expect": "Scope[CompileTime(External(lib,nil))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Chained Comparison",
+  "description": "a < b < c — left-associative comparisons. Note parse_less_than tries threading first; with spaces around '<' it falls back to binary.",
+  "source": "a < b < c",
+  "expect": "Scope[Operator(Less,Operator(Less,Identifier(a),Identifier(b)),Identifier(c))]"
+}

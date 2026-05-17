@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Add Tighter Than Equal",
+  "description": "a + b = c — TERM (5) > EQUALITY (3). 'a + b' first, then '= c'.",
+  "source": "a + b = c",
+  "expect": "Scope[Operator(Equal,Operator(Add,Identifier(a),Identifier(b)),Identifier(c))]"
+}

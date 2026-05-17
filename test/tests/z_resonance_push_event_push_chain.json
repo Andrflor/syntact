@@ -1,0 +1,6 @@
+{
+  "name": "Z Two Statements ResonancePush And EventPush",
+  "description": "Top-level: ResonancePush followed by EventPush in same scope.",
+  "source": "counter >>- counter + 1\n>- Tick",
+  "expect": "Scope[ResonancePush(Identifier(counter),Operator(Add,Identifier(counter),Literal(Integer,1))),EventPush(nil,Identifier(Tick))]"
+}

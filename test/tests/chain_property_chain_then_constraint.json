@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_chain_then_constraint",
+  "description": "a.b.c:x — property chain at CALL absorbs everything left of ':' which is CONSTRAINT (lower). Constraint(Property(Property(a,b),c), x).",
+  "source": "a.b.c:x",
+  "expect": "Scope[Constraint(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(x))]"
+}

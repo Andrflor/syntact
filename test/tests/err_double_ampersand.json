@@ -1,0 +1,6 @@
+{
+  "name": "Two Adjacent Ampersands",
+  "description": "&& — there is no AndAnd token; the lexer should emit two separate And tokens. With no prefix rule on And, the first errors. UNCERTAIN: empty scope after recovery.",
+  "source": "&&",
+  "expect": "Scope[]"
+}

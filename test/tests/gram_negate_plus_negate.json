@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Negate Plus Negate",
+  "description": "~'.' + ~'_' — two Not'd char literals joined by Add. UNARY (10) > TERM (5) so each ~lit forms first, then +.",
+  "source": "~'.' + ~'_'",
+  "expect": "Scope[Operator(Add,Operator(Not,nil,Literal(String,.)),Operator(Not,nil,Literal(String,_)))]"
+}

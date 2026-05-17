@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Or Then Constraint",
+  "description": "a | b:c — CONSTRAINT > OR. 'b:c' first (inside right-of-|, at OR+1=8, but CONSTRAINT=8 attaches: ConstraintBind ≥ 8). So Or(a, Constraint(b,c)).",
+  "source": "a | b:c",
+  "expect": "Scope[Operator(Or,Identifier(a),Constraint(Identifier(b),Identifier(c)))]"
+}

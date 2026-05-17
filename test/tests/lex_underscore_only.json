@@ -1,0 +1,6 @@
+{
+  "name": "Lex Identifier That Is Just Underscore",
+  "description": "_ alone is a valid identifier (the lexer treats _ as an alpha character for the leading rule).",
+  "source": "_",
+  "expect": "Scope[Identifier(_)]"
+}

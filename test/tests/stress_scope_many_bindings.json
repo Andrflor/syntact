@@ -1,0 +1,6 @@
+{
+  "name": "Stress Scope With Many Bindings",
+  "description": "A scope with 16 sequential pointings, separated by newlines.",
+  "source": "{\n  a -> 1\n  b -> 2\n  c -> 3\n  d -> 4\n  e -> 5\n  f -> 6\n  g -> 7\n  h -> 8\n  i -> 9\n  j -> 10\n  k -> 11\n  l -> 12\n  m -> 13\n  n -> 14\n  o -> 15\n  p -> 16\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2)),Pointing(Identifier(c),Literal(Integer,3)),Pointing(Identifier(d),Literal(Integer,4)),Pointing(Identifier(e),Literal(Integer,5)),Pointing(Identifier(f),Literal(Integer,6)),Pointing(Identifier(g),Literal(Integer,7)),Pointing(Identifier(h),Literal(Integer,8)),Pointing(Identifier(i),Literal(Integer,9)),Pointing(Identifier(j),Literal(Integer,10)),Pointing(Identifier(k),Literal(Integer,11)),Pointing(Identifier(l),Literal(Integer,12)),Pointing(Identifier(m),Literal(Integer,13)),Pointing(Identifier(n),Literal(Integer,14)),Pointing(Identifier(o),Literal(Integer,15)),Pointing(Identifier(p),Literal(Integer,16))]]"
+}

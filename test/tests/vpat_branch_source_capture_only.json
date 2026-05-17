@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Anonymous Capture",
+  "description": "v ? { (n) -> n } — branch source is an anonymous capture; product uses the captured name.",
+  "source": "v ? { (n) -> n }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Identifier(,n),Identifier(n))])]"
+}

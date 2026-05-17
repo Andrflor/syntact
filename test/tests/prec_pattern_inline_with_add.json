@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Pattern Inline With Add Inside",
+  "description": "x ? a + b — inline pattern's right side is at .RANGE (per parse_pattern). TERM=5 < RANGE=11 so '+' doesn't attach inside. So pattern source is 'a' only; then top loop '+ b' attaches to the Pattern. WILL_FAIL_UNTIL_FIX: probably the inline form should consume the full arithmetic expression.",
+  "source": "x ? a + b",
+  "expect": "Scope[Operator(Add,Pattern(Identifier(x),[Branch(Identifier(a),nil)]),Identifier(b))]"
+}

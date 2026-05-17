@@ -1,0 +1,6 @@
+{
+  "name": "Lex Excessive Internal Whitespace",
+  "description": "'   a   ->   b   ' — multiple spaces are insignificant; same as 'a -> b'.",
+  "source": "   a   ->   b   ",
+  "expect": "Scope[Pointing(Identifier(a),Identifier(b))]"
+}

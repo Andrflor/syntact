@@ -1,0 +1,6 @@
+{
+  "name": "Z Enforce With Carve LHS",
+  "description": "Foo{x -> 0} ?! valid — Carve forms first (CALL); Enforce wraps it.",
+  "source": "Foo{x -> 0} ?! valid",
+  "expect": "Scope[Enforce(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,0))]),Identifier(valid))]"
+}

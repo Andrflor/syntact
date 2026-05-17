@@ -1,0 +1,6 @@
+{
+  "name": "List Generic Carved",
+  "description": "List{T <- u8}:numbers — README §Pull bindings: carve List filling T, then constrain numbers binding by the result. CONSTRAINT < CALL so List{T <- u8} parses first then :numbers.",
+  "source": "List{T <- u8}:numbers",
+  "expect": "Scope[Constraint(Carve(Identifier(List),[PointingPull(Identifier(T),Identifier(u8))]),Identifier(numbers))]"
+}

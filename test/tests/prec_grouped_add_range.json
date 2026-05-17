@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Grouped Add Then Range",
+  "description": "(a+b)..c — parens force Add first, then Range as infix on the grouped expression.",
+  "source": "(a+b)..c",
+  "expect": "Scope[Range(Operator(Add,Identifier(a),Identifier(b)),Identifier(c))]"
+}

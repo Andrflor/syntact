@@ -1,0 +1,6 @@
+{
+  "name": "Lex Empty Parens",
+  "description": "() — empty grouping with no contents produces an empty ScopeNode per parse_grouping.",
+  "source": "()",
+  "expect": "Scope[Scope[]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Three Alternative Destructures",
+  "description": "A:{n(v)} | B:{n(v)} | C:{n(v)} -> v. Or is left-associative.",
+  "source": "x ? { A:{n(v)} | B:{n(v)} | C:{n(v)} -> v }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Operator(Or,Operator(Or,Carve(Constraint(Identifier(A),nil),[Identifier(n,v)]),Carve(Constraint(Identifier(B),nil),[Identifier(n,v)])),Carve(Constraint(Identifier(C),nil),[Identifier(n,v)])),Identifier(v))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence CompileTime With Add",
+  "description": "!foo + bar — '!' prefix CompileTime parses operand at .UNARY. 'foo' is consumed; '+' (TERM=5 < UNARY=10) stops inside. CompileTime(foo) returned. Then top loop '+ bar' attaches. Result Add(CompileTime(foo), bar).",
+  "source": "!foo + bar",
+  "expect": "Scope[Operator(Add,CompileTime(Identifier(foo)),Identifier(bar))]"
+}

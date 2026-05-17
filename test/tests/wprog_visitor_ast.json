@@ -1,0 +1,6 @@
+{
+  "name": "AST Visitor",
+  "description": "Visitor pattern over a tiny AST.",
+  "source": "Node -> {\n  -> Lit:{u32:value}\n  -> Var:{String:name}\n  -> Add:{left right}\n}\nvisit -> {\n  Node:n\n  -> n ? {\n    Lit:{value} -> value\n    Var:{name} -> name\n    Add:{left right} -> visit{left}! + visit{right}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Node),Scope[Product(Carve(Constraint(Identifier(Lit),nil),[Constraint(Identifier(u32),Identifier(value))])),Product(Carve(Constraint(Identifier(Var),nil),[Constraint(Identifier(String),Identifier(name))])),Product(Carve(Constraint(Identifier(Add),nil),[Identifier(left),Identifier(right)]))]),Pointing(Identifier(visit),Scope[Constraint(Identifier(Node),Identifier(n)),Product(Pattern(Identifier(n),[Branch(Carve(Constraint(Identifier(Lit),nil),[Identifier(value)]),Identifier(value)),Branch(Carve(Constraint(Identifier(Var),nil),[Identifier(name)]),Identifier(name)),Branch(Carve(Constraint(Identifier(Add),nil),[Identifier(left),Identifier(right)]),Operator(Add,Execute(Carve(Identifier(visit),[Identifier(left)]),[]),Execute(Carve(Identifier(visit),[Identifier(right)]),[])))]))])]"
+}

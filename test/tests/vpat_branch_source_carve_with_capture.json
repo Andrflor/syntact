@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Carve With Capture Glued",
+  "description": "v ? { Foo:(x) -> x } — constraint with anonymous capture as branch source.",
+  "source": "v ? { Foo:(x) -> x }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Constraint(Identifier(Foo),Identifier(,x)),Identifier(x))])]"
+}

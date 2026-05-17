@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Three Bindings",
+  "description": "Foo:{a b c} — anonymous shaped Carve with three identifier bindings. WILL_FAIL_UNTIL_FIX: see anomaly #4 of vague 1; sem expects Carve(Constraint(Foo,nil),[a,b,c]).",
+  "source": "Foo:{a b c}",
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Identifier(a),Identifier(b),Identifier(c)])]"
+}

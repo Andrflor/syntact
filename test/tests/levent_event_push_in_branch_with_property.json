@@ -1,0 +1,6 @@
+{
+  "name": "Event Push Of Property Inside Branch",
+  "description": "Pattern branch product is a bare EventPush of a property chain.",
+  "source": "x ? { 1 -> >- err.code }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),EventPush(nil,Property(Identifier(err),Identifier(code))))])]"
+}

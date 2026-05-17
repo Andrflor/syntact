@@ -1,0 +1,6 @@
+{
+  "name": "Add Commutative Theorem",
+  "description": "addCommutative — two symbolic Nat bindings and a proof that add{a b}! = add{b a}!.",
+  "source": "addCommutative -> {\n  Nat:a -> ??\n  Nat:b -> ??\n  -> add{a b}! = add{b a}! ?! true\n}",
+  "expect": "Scope[Pointing(Identifier(addCommutative),Scope[Pointing(Constraint(Identifier(Nat),Identifier(a)),Unknown),Pointing(Constraint(Identifier(Nat),Identifier(b)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(add),[Identifier(a),Identifier(b)]),[]),Execute(Carve(Identifier(add),[Identifier(b),Identifier(a)]),[])),Identifier(true)))])]"
+}

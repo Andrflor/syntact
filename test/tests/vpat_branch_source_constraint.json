@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Constraint",
+  "description": "v ? { Foo:x -> x } — branch source is a Constraint with bind.",
+  "source": "v ? { Foo:x -> x }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Constraint(Identifier(Foo),Identifier(x)),Identifier(x))])]"
+}

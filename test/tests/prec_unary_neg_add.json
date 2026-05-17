@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Minus With Add",
+  "description": "-a + b — parse_unary at .UNARY=10 reads 'a' (PRIMARY=13 ≥ 10) then '+' (TERM=5 < 10) stops. Returns Subtract(nil,a). Then top loop '+ b' attaches. Result Add(Subtract(nil,a), b).",
+  "source": "-a + b",
+  "expect": "Scope[Operator(Add,Operator(Subtract,nil,Identifier(a)),Identifier(b))]"
+}

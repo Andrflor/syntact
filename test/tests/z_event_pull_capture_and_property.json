@@ -1,0 +1,6 @@
+{
+  "name": "Z Event Pull Body With Property",
+  "description": "Tick -< e { -> e.ms } — EventPull whose handler body produces e.ms via property access.",
+  "source": "Tick -< e { -> e.ms }",
+  "expect": "Scope[EventPull(e,Identifier(Tick),Scope[Product(Property(Identifier(e),Identifier(ms)))])]"
+}

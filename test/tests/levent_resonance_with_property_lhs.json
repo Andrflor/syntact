@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push With Property LHS",
+  "description": "self.count >>- Tick — resonant binding on property access.",
+  "source": "self.count >>- Tick",
+  "expect": "Scope[ResonancePush(Property(Identifier(self),Identifier(count)),Identifier(Tick))]"
+}

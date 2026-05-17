@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Pattern Target Is Constraint",
+  "description": "a:b ? { 1 -> 2 } — CONSTRAINT (8) > PATTERN (2). 'a:b' first, then '?' on the constraint.",
+  "source": "a:b ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Constraint(Identifier(a),Identifier(b)),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

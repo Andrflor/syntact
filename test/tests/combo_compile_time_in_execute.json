@@ -1,0 +1,6 @@
+{
+  "name": "Combo CompileTime Nested In Execute",
+  "description": "Prefix ! applied to an identifier, then postfix ! executes. Source '!foo!' is CompileTime(Execute(foo,[])) because prefix ! parses an UNARY expression which lets postfix ! apply to the operand.",
+  "source": "!foo!",
+  "expect": "Scope[CompileTime(Execute(Identifier(foo),[]))]"
+}

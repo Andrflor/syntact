@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_capital_branch_source",
+  "description": "n ? { Foo.bar -> 1 } — property chain on shape (capitalized identifier) as branch source.",
+  "source": "n ? { Foo.bar -> 1 }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Property(Identifier(Foo),Identifier(bar)),Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Parser Combinator Mini",
+  "description": "Tiny parser combinators with alt and seq.",
+  "source": "alt -> {\n  p1\n  p2\n  input\n  -> p1{input}! ? {\n    Some:(v) -> Some:v\n    None: -> p2{input}!\n  }\n}\nseq -> {\n  p1\n  p2\n  input\n  -> p1{input}!\n}",
+  "expect": "Scope[Pointing(Identifier(alt),Scope[Identifier(p1),Identifier(p2),Identifier(input),Product(Pattern(Execute(Carve(Identifier(p1),[Identifier(input)]),[]),[Branch(Constraint(Identifier(Some),Identifier(,v)),Constraint(Identifier(Some),Identifier(v))),Branch(Constraint(Identifier(None),nil),Execute(Carve(Identifier(p2),[Identifier(input)]),[]))]))]),Pointing(Identifier(seq),Scope[Identifier(p1),Identifier(p2),Identifier(input),Product(Execute(Carve(Identifier(p1),[Identifier(input)]),[]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Simple Traffic State Machine",
+  "description": "Traffic -> { -> Red: -> Yellow: -> Green: } and next pattern.",
+  "source": "Traffic -> { -> Red:\n  -> Yellow:\n  -> Green: }\nnext -> s ? { Red: -> Green: Green: -> Yellow: Yellow: -> Red: }",
+  "expect": "Scope[Pointing(Identifier(Traffic),Scope[Product(Constraint(Identifier(Red),nil)),Product(Constraint(Identifier(Yellow),nil)),Product(Constraint(Identifier(Green),nil))]),Pointing(Identifier(next),Pattern(Identifier(s),[Branch(Constraint(Identifier(Red),nil),Constraint(Identifier(Green),nil)),Branch(Constraint(Identifier(Green),nil),Constraint(Identifier(Yellow),nil)),Branch(Constraint(Identifier(Yellow),nil),Constraint(Identifier(Red),nil))]))]"
+}

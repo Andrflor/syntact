@@ -1,0 +1,6 @@
+{
+  "name": "Pull Default Is Property Chain",
+  "description": "T <- a.b.c — pull default is a Property chain.",
+  "source": "T <- a.b.c",
+  "expect": "Scope[PointingPull(Identifier(T),Property(Property(Identifier(a),Identifier(b)),Identifier(c)))]"
+}

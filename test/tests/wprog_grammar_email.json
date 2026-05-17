@@ -1,0 +1,6 @@
+{
+  "name": "Email Grammar",
+  "description": "Email format grammar with shape.",
+  "source": "Email -> {\n  String:(s)\n  -> s\n  alpha -> 'a'..'z' | 'A'..'Z'\n  digit -> '0'..'9'\n  local -> alpha | digit\n  domain -> alpha | digit\n}",
+  "expect": "Scope[Pointing(Identifier(Email),Scope[Constraint(Identifier(String),Identifier(,s)),Product(Identifier(s)),Pointing(Identifier(alpha),Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z)))),Pointing(Identifier(digit),Range(Literal(String,0),Literal(String,9))),Pointing(Identifier(local),Operator(Or,Identifier(alpha),Identifier(digit))),Pointing(Identifier(domain),Operator(Or,Identifier(alpha),Identifier(digit)))])]"
+}

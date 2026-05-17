@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Double Not",
+  "description": "~~x — two prefix Nots.",
+  "source": "~~x",
+  "expect": "Scope[Operator(Not,nil,Operator(Not,nil,Identifier(x)))]"
+}

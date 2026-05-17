@@ -1,0 +1,6 @@
+{
+  "name": "Two Externals At Top Level",
+  "description": "@a.x and @b.y, each on a different line.",
+  "source": "@a.x\n@b.y",
+  "expect": "Scope[Property(External(a,nil),Identifier(x)),Property(External(b,nil),Identifier(y))]"
+}

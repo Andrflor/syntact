@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_pointing_pull",
+  "description": "'<-' alone at top-level — prefix PointingPull with no RHS. UNCERTAIN: likely empty Scope[] (error path) or PointingPull(nil,nil).",
+  "source": "<-",
+  "expect": "Scope[]"
+}

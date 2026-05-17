@@ -1,0 +1,6 @@
+{
+  "name": "Stress Long Property Chain",
+  "description": "Eight-level property access stays left-associative.",
+  "source": "a.b.c.d.e.f.g.h",
+  "expect": "Scope[Property(Property(Property(Property(Property(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d)),Identifier(e)),Identifier(f)),Identifier(g)),Identifier(h))]"
+}

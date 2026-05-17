@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Pattern Target",
+  "description": "?? ? { 1 -> 2 } — Unknown can be the target of an inline-braces pattern.",
+  "source": "?? ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Unknown,[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

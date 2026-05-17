@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Range With Comparison",
+  "description": "1..5 < x — RANGE (11) > COMPARISON (4). '1..5' first, then '< x' outer.",
+  "source": "1..5 < x",
+  "expect": "Scope[Operator(Less,Range(Literal(Integer,1),Literal(Integer,5)),Identifier(x))]"
+}

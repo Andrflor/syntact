@@ -1,0 +1,6 @@
+{
+  "name": "Precedence And Xor Or Combined",
+  "description": "a & b ^ c | d — AND (& ^) both at 9 left-assoc, Or at 7. Parse: 'a & b' first, then '^ c' (left assoc) yields ((a & b) ^ c), then '| d'.",
+  "source": "a & b ^ c | d",
+  "expect": "Scope[Operator(Or,Operator(Xor,Operator(And,Identifier(a),Identifier(b)),Identifier(c)),Identifier(d))]"
+}

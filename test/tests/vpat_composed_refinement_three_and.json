@@ -1,0 +1,6 @@
+{
+  "name": "Composed Refinement With Three Ands",
+  "description": "n ? (>0 & <10 & !=5) — refinement composed of three And-chained prefix comparisons. AND is left-assoc.",
+  "source": "n ? (>0 & <10 & !=5)",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(And,Operator(And,Operator(Greater,nil,Literal(Integer,0)),Operator(Less,nil,Literal(Integer,10))),Operator(NotEqual,nil,Literal(Integer,5))),nil)])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Pattern Branch Product Is CompileTime",
+  "description": "n ? { 1 -> !foo } — Branch product is a CompileTime prefix.",
+  "source": "n ? { 1 -> !foo }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,1),CompileTime(Identifier(foo)))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Stress Patterns Nested In Products",
+  "description": "Three-level nested patterns where each branch product is itself a Pattern.",
+  "source": "a ? {\n  1 -> b ? {\n    2 -> c ? {\n      3 -> 4\n    }\n  }\n}",
+  "expect": "Scope[Pattern(Identifier(a),[Branch(Literal(Integer,1),Pattern(Identifier(b),[Branch(Literal(Integer,2),Pattern(Identifier(c),[Branch(Literal(Integer,3),Literal(Integer,4))]))]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Range With Unknown Bound",
+  "description": "0..?? — a range whose upper bound is symbolic. Lower bound is 0, upper is Unknown.",
+  "source": "0..??",
+  "expect": "Scope[Range(Literal(Integer,0),Unknown)]"
+}

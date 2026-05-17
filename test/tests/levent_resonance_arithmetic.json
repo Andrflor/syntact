@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull With Arithmetic Right",
+  "description": "value -<< value + 1 — pull value with right being an Add expression. ASSIGNMENT < TERM so the entire arithmetic right binds.",
+  "source": "value -<< value + 1",
+  "expect": "Scope[ResonancePull(Identifier(value),Operator(Add,Identifier(value),Literal(Integer,1)))]"
+}

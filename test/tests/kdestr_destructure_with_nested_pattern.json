@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Containing Inline Refinement",
+  "description": "Box:{a?>0 b?<10} — each field has its own inline pattern refinement. The carve entry list holds two Pattern nodes.",
+  "source": "b ? { Box:{a?>0 b?<10} -> 1 }",
+  "expect": "Scope[Pattern(Identifier(b),[Branch(Carve(Constraint(Identifier(Box),nil),[Pattern(Identifier(a),[Branch(Operator(Greater,nil,Literal(Integer,0)),nil)]),Pattern(Identifier(b),[Branch(Operator(Less,nil,Literal(Integer,10)),nil)])]),Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Color Enum With Match",
+  "description": "Color sum type and to-rgb function.",
+  "source": "Color -> {\n  -> Red:\n  -> Green:\n  -> Blue:\n}\ntoRGB -> {\n  Color:c\n  -> c ? {\n    Red: -> {255 0 0}\n    Green: -> {0 255 0}\n    Blue: -> {0 0 255}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Color),Scope[Product(Constraint(Identifier(Red),nil)),Product(Constraint(Identifier(Green),nil)),Product(Constraint(Identifier(Blue),nil))]),Pointing(Identifier(toRGB),Scope[Constraint(Identifier(Color),Identifier(c)),Product(Pattern(Identifier(c),[Branch(Constraint(Identifier(Red),nil),Scope[Literal(Integer,255),Literal(Integer,0),Literal(Integer,0)]),Branch(Constraint(Identifier(Green),nil),Scope[Literal(Integer,0),Literal(Integer,255),Literal(Integer,0)]),Branch(Constraint(Identifier(Blue),nil),Scope[Literal(Integer,0),Literal(Integer,0),Literal(Integer,255)])]))])]"
+}

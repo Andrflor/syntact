@@ -1,0 +1,6 @@
+{
+  "name": "chain_alternating_carve_property",
+  "description": "Foo{a}.x{b}.y{c} — alternating carve/property chains, all CALL left-assoc.",
+  "source": "Foo{a}.x{b}.y{c}",
+  "expect": "Scope[Carve(Property(Carve(Property(Carve(Identifier(Foo),[Identifier(a)]),Identifier(x)),[Identifier(b)]),Identifier(y)),[Identifier(c)])]"
+}

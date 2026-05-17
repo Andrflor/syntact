@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Pointing With Arithmetic On Right",
+  "description": "a -> b + c — parse_pointing_push reads to via parse_expression() at NONE. 'b + c' forms freely. Result Pointing(a, Add(b,c)).",
+  "source": "a -> b + c",
+  "expect": "Scope[Pointing(Identifier(a),Operator(Add,Identifier(b),Identifier(c)))]"
+}

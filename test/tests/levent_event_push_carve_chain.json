@@ -1,0 +1,6 @@
+{
+  "name": "EventPush With Carve Chain",
+  "description": ">- Log{level -> 'warn' msg -> Msg{n -> 1}!} — EventPush of a Carve whose entries include another Carve collapsed via Execute.",
+  "source": ">- Log{level -> 'warn' msg -> Msg{n -> 1}!}",
+  "expect": "Scope[EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(level),Literal(String,warn)),Pointing(Identifier(msg),Execute(Carve(Identifier(Msg),[Pointing(Identifier(n),Literal(Integer,1))]),[]))]))]"
+}

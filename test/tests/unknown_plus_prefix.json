@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Left Of Add",
+  "description": "?? + x — Unknown is a primary, so the Add takes it as left operand.",
+  "source": "?? + x",
+  "expect": "Scope[Operator(Add,Unknown,Identifier(x))]"
+}

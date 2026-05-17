@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Multi-Level Scope",
+  "description": "x ? { {a {b c} ...rest} -> 1 } — pattern source is a scope holding a primitive identifier a, a nested scope {b c}, and an Expand of rest.",
+  "source": "x ? { {a {b c} ...rest} -> 1 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[Identifier(a),Scope[Identifier(b),Identifier(c)],Expand(Identifier(rest))],Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Default String With Override",
+  "description": "String:greeting -> \"hello\" — README-style string binding with explicit override.",
+  "source": "String:greeting -> \"hello\"",
+  "expect": "Scope[Pointing(Constraint(Identifier(String),Identifier(greeting)),Literal(String,hello))]"
+}

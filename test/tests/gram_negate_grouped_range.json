@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Negate Grouped Range",
+  "description": "~('a'..'z') — unary tilde on a parenthesised char range.",
+  "source": "~('a'..'z')",
+  "expect": "Scope[Operator(Not,nil,Range(Literal(String,a),Literal(String,z)))]"
+}

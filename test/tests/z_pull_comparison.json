@@ -1,0 +1,6 @@
+{
+  "name": "Z PointingPull With Comparison",
+  "description": "x <- a < b — PointingPull is ASSIGNMENT, Less is COMPARISON, so the comparison forms the RHS of the pull.",
+  "source": "x <- a < b",
+  "expect": "Scope[PointingPull(Identifier(x),Operator(Less,Identifier(a),Identifier(b)))]"
+}

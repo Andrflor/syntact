@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Xor With And",
+  "description": "a ^ b & c — Xor (AND=9) and And (AND=9) same level, left-associative. 'a ^ b' first, then '& c'. Result And(Xor(a,b), c).",
+  "source": "a ^ b & c",
+  "expect": "Scope[Operator(And,Operator(Xor,Identifier(a),Identifier(b)),Identifier(c))]"
+}

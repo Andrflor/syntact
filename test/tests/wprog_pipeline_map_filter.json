@@ -1,0 +1,6 @@
+{
+  "name": "Functional Pipeline Map/Filter/Reduce",
+  "description": "Three operations chained.",
+  "source": "map -> {\n  list\n  f\n  -> list ? {\n    {} -> {}\n    {h ...t} -> {f{h}! ...map{t f}!}\n  }\n}\nfilter -> {\n  list\n  pred\n  -> list ? {\n    {} -> {}\n    {h ...t} -> pred{h}! ? {\n      true -> {h ...filter{t pred}!}\n      -> filter{t pred}!\n    }\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(map),Scope[Identifier(list),Identifier(f),Product(Pattern(Identifier(list),[Branch(Scope[],Scope[]),Branch(Scope[Identifier(h),Expand(Identifier(t))],Scope[Execute(Carve(Identifier(f),[Identifier(h)]),[]),Expand(Execute(Carve(Identifier(map),[Identifier(t),Identifier(f)]),[]))])]))]),Pointing(Identifier(filter),Scope[Identifier(list),Identifier(pred),Product(Pattern(Identifier(list),[Branch(Scope[],Scope[]),Branch(Scope[Identifier(h),Expand(Identifier(t))],Pattern(Execute(Carve(Identifier(pred),[Identifier(h)]),[]),[Branch(Identifier(true),Scope[Identifier(h),Expand(Execute(Carve(Identifier(filter),[Identifier(t),Identifier(pred)]),[]))]),Branch(nil,Execute(Carve(Identifier(filter),[Identifier(t),Identifier(pred)]),[]))]))]))])]"
+}

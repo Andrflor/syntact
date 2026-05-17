@@ -1,0 +1,6 @@
+{
+  "name": "Precedence RShift Mixed With Or",
+  "description": "a | b >> c — RShift is at AND precedence, Or at OR (lower). So 'b >> c' binds first, then '| a' wraps. UNCERTAIN: parse_bit_or tries wrapped execute first; needs disambiguation by spaces.",
+  "source": "a | b >> c",
+  "expect": "Scope[Operator(Or,Identifier(a),Operator(RShift,Identifier(b),Identifier(c)))]"
+}

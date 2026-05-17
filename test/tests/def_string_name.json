@@ -1,0 +1,6 @@
+{
+  "name": "Default String Name",
+  "description": "String:name — String shape defaults to empty. README §Primitive types.",
+  "source": "String:name",
+  "expect": "Scope[Constraint(Identifier(String),Identifier(name))]"
+}

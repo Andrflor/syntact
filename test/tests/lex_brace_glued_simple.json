@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace Glued Identifier Single Item",
+  "description": "Foo{x} — '{' glued to identifier yields LeftBraceCarve, producing Carve.",
+  "source": "Foo{x}",
+  "expect": "Scope[Carve(Identifier(Foo),[Identifier(x)])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Float With Multiple Digits Both Sides",
+  "description": "12.345 is a Float literal preserved verbatim.",
+  "source": "12.345",
+  "expect": "Scope[Literal(Float,12.345)]"
+}

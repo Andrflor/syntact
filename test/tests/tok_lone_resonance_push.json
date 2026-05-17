@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_resonance_push",
+  "description": "'>>-' alone — prefix ResonancePush at EOF. UNCERTAIN: empty Scope[] (error in prefix RHS parsing) or ResonancePush(nil,nil).",
+  "source": ">>-",
+  "expect": "Scope[]"
+}

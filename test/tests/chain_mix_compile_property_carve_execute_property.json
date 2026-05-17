@@ -1,0 +1,6 @@
+{
+  "name": "chain_mix_compile_property_carve_execute_property",
+  "description": "!a.b{x -> 1}!.c — CompileTime over (property + carve + execute + property), all at CALL > UNARY. CompileTime(Property(Execute(Carve(Property(a,b),[x->1]),[]),c)).",
+  "source": "!a.b{x -> 1}!.c",
+  "expect": "Scope[CompileTime(Property(Execute(Carve(Property(Identifier(a),Identifier(b)),[Pointing(Identifier(x),Literal(Integer,1))]),[]),Identifier(c)))]"
+}

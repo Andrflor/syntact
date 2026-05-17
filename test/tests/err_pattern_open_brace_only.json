@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Open Brace Only",
+  "description": "x ? { — parse_pattern consumes '{', then loops for branches; hits EOF and errors on missing '}'. UNCERTAIN: result likely is Pattern(x,[]) — empty branches.",
+  "source": "x ? {",
+  "expect": "Scope[Pattern(Identifier(x),[])]"
+}

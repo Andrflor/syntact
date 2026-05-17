@@ -1,0 +1,6 @@
+{
+  "name": "Multiple Allocator Handler Implementations",
+  "description": "Three scopes WithMalloc/WithArena/WithStack each handling Alloc differently. README §Handlers as DI.",
+  "source": "WithMalloc -> {\n  Alloc -< e { -> malloc{e.size}! }\n}\nWithArena -> {\n  Alloc -< e { -> arena.alloc{e.size}! }\n}\nWithStack -> {\n  Alloc -< e { -> stack.alloc{e.size}! }\n}",
+  "expect": "Scope[Pointing(Identifier(WithMalloc),Scope[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Identifier(malloc),[Property(Identifier(e),Identifier(size))]),[]))])]),Pointing(Identifier(WithArena),Scope[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Property(Identifier(arena),Identifier(alloc)),[Property(Identifier(e),Identifier(size))]),[]))])]),Pointing(Identifier(WithStack),Scope[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Property(Identifier(stack),Identifier(alloc)),[Property(Identifier(e),Identifier(size))]),[]))])])]"
+}

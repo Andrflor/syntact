@@ -1,0 +1,6 @@
+{
+  "name": "Default Server Config Carve Port",
+  "description": "ServerConfig:config{port -> 3000} — README §A small practical comparison: shaped binding with carve. WILL_FAIL_UNTIL_FIX: semantic reading is Carve(Constraint(ServerConfig,config),[Pointing(port,3000)]) — parser may currently produce Constraint(ServerConfig, Carve(config,[...])).",
+  "source": "ServerConfig:config{port -> 3000}",
+  "expect": "Scope[Carve(Constraint(Identifier(ServerConfig),Identifier(config)),[Pointing(Identifier(port),Literal(Integer,3000))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex PrefixRange In Carve (..5)",
+  "description": "Foo{..5} — '{' before so before-delimiter; '5' after is not a delimiter. PrefixRange. Range(nil, 5).",
+  "source": "Foo{..5}",
+  "expect": "Scope[Carve(Identifier(Foo),[Range(nil,Literal(Integer,5))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_in_branch_source",
+  "description": "n ? { a.b -> 1 } — Property chain as branch source.",
+  "source": "n ? { a.b -> 1 }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Property(Identifier(a),Identifier(b)),Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Pull Binding",
+  "description": "Foo:{T <- u8 x} — destructure with a pull binding inside. WILL_FAIL_UNTIL_FIX: see observation about parse_branch only accepting Pointing/Product. Here outside a branch, the entries inside Carve are positional and PointingPull should be allowed.",
+  "source": "Foo:{T <- u8 x}",
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[PointingPull(Identifier(T),Identifier(u8)),Identifier(x)])]"
+}

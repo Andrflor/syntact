@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Add Tighter Than Less",
+  "description": "a + b < c — TERM (5) > COMPARISON (4). 'a + b' forms first, then '< c'.",
+  "source": "a + b < c",
+  "expect": "Scope[Operator(Less,Operator(Add,Identifier(a),Identifier(b)),Identifier(c))]"
+}

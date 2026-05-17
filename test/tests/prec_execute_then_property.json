@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Postfix Execute Then Property",
+  "description": "a!.b — both at CALL, left-assoc. 'a!' first, then '.b' on the Execute.",
+  "source": "a!.b",
+  "expect": "Scope[Property(Execute(Identifier(a),[]),Identifier(b))]"
+}

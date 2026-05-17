@@ -1,0 +1,6 @@
+{
+  "name": "External Property Then Deep Carve",
+  "description": "@lib.geometry.Plane{dimension -> 3} — Carve on a three-level property chain.",
+  "source": "@lib.geometry.Plane{dimension -> 3}",
+  "expect": "Scope[Carve(Property(Property(External(lib,nil),Identifier(geometry)),Identifier(Plane)),[Pointing(Identifier(dimension),Literal(Integer,3))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Event Push With Property RHS",
+  "description": "x >- e.kind — EventPush whose right-hand side is a Property access.",
+  "source": "x >- e.kind",
+  "expect": "Scope[EventPush(Identifier(x),Property(Identifier(e),Identifier(kind)))]"
+}

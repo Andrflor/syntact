@@ -1,0 +1,6 @@
+{
+  "name": "Default Anonymous Circle",
+  "description": "Circle: — bare shape with no name (ConstraintToNone). AST: Constraint(Identifier(Circle),nil).",
+  "source": "Circle:",
+  "expect": "Scope[Constraint(Identifier(Circle),nil)]"
+}

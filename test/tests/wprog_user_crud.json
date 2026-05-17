@@ -1,0 +1,6 @@
+{
+  "name": "User CRUD Adapter",
+  "description": "User record with refined fields and validation.",
+  "source": "User -> {\n  u64:id\n  String:name\n  (u8 & >0 & <120):age\n}\nvalidate -> {\n  User:u\n  -> u.age ? {\n    (>0 & <120) -> true\n    -> false\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(User),Scope[Constraint(Identifier(u64),Identifier(id)),Constraint(Identifier(String),Identifier(name)),Constraint(Operator(And,Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0))),Operator(Less,nil,Literal(Integer,120))),Identifier(age))]),Pointing(Identifier(validate),Scope[Constraint(Identifier(User),Identifier(u)),Product(Pattern(Property(Identifier(u),Identifier(age)),[Branch(Operator(And,Operator(Greater,nil,Literal(Integer,0)),Operator(Less,nil,Literal(Integer,120))),Identifier(true)),Branch(nil,Identifier(false))]))])]"
+}

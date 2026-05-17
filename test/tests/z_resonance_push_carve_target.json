@@ -1,0 +1,6 @@
+{
+  "name": "Z Resonance Push Carve Target",
+  "description": "value >>- Update{kind -> 1} — ResonancePush whose RHS is a Carve. ResonancePush at ASSIGNMENT; Carve at CALL so it forms entirely on the right.",
+  "source": "value >>- Update{kind -> 1}",
+  "expect": "Scope[ResonancePush(Identifier(value),Carve(Identifier(Update),[Pointing(Identifier(kind),Literal(Integer,1))]))]"
+}

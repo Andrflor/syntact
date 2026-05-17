@@ -1,0 +1,6 @@
+{
+  "name": "Z Multi Statement Mixing Pointing And Pull",
+  "description": "Two top-level statements: a Pointing and a PointingPull. Tests sequential statement parsing.",
+  "source": "x -> 1\ny <- 2",
+  "expect": "Scope[Pointing(Identifier(x),Literal(Integer,1)),PointingPull(Identifier(y),Literal(Integer,2))]"
+}

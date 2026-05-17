@@ -1,0 +1,6 @@
+{
+  "name": "Stress Long Chain Of Carves",
+  "description": "A{x->1}{y->2}{z->3}{w->4}{v->5} — five-deep left-associative chain of Carves.",
+  "source": "A{x->1}{y->2}{z->3}{w->4}{v->5}",
+  "expect": "Scope[Carve(Carve(Carve(Carve(Carve(Identifier(A),[Pointing(Identifier(x),Literal(Integer,1))]),[Pointing(Identifier(y),Literal(Integer,2))]),[Pointing(Identifier(z),Literal(Integer,3))]),[Pointing(Identifier(w),Literal(Integer,4))]),[Pointing(Identifier(v),Literal(Integer,5))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Ellipsis Followed By Identifier",
+  "description": "...foo is an Expand of foo. Parser parses ellipsis as prefix.",
+  "source": "...foo",
+  "expect": "Scope[Expand(Identifier(foo))]"
+}

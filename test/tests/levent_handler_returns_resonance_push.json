@@ -1,0 +1,6 @@
+{
+  "name": "Handler Body Sets Resonant Field Via Push",
+  "description": "Update -< e { count >>- Counter } — handler body is a ResonancePush binding count to event Counter.",
+  "source": "Update -< e { count >>- Counter }",
+  "expect": "Scope[EventPull(e,Identifier(Update),Scope[ResonancePush(Identifier(count),Identifier(Counter))])]"
+}

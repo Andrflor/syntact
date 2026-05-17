@@ -1,0 +1,6 @@
+{
+  "name": "Branch Captures Used In Product",
+  "description": "p ? { Point:{x(a) y(b)} -> a * b } — captured fields used in product.",
+  "source": "p ? { Point:{x(a) y(b)} -> a * b }",
+  "expect": "Scope[Pattern(Identifier(p),[Branch(Carve(Constraint(Identifier(Point),nil),[Identifier(x,a),Identifier(y,b)]),Operator(Multiply,Identifier(a),Identifier(b)))])]"
+}

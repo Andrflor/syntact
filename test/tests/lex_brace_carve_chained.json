@@ -1,0 +1,6 @@
+{
+  "name": "Lex Carve Chained Glued",
+  "description": "Foo{x}{y} — first carve attaches at CALL, then second '{' is glued to '}' (no space before) yielding another Carve at CALL on the resulting node.",
+  "source": "Foo{x}{y}",
+  "expect": "Scope[Carve(Carve(Identifier(Foo),[Identifier(x)]),[Identifier(y)])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_from_none_alone",
+  "description": "'.a' alone — PropertyFromNone prefix (BOF = before-delimiter, no space after). Property(nil, a).",
+  "source": ".a",
+  "expect": "Scope[Property(nil,Identifier(a))]"
+}

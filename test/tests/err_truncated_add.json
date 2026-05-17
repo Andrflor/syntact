@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Add",
+  "description": "a + — Plus with no right operand. parse_binary errors and returns nil; the binary node is dropped, leaving Identifier(a) at top level. UNCERTAIN.",
+  "source": "a + ",
+  "expect": "Scope[Identifier(a)]"
+}

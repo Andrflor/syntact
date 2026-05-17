@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Property",
+  "description": "v ? { a.b -> 'ok' } — branch source is a property chain.",
+  "source": "v ? { a.b -> 'ok' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Property(Identifier(a),Identifier(b)),Literal(String,ok))])]"
+}

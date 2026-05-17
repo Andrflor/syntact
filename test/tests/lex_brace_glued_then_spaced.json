@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace Glued Then Spaced",
+  "description": "Foo{x} {y} — first '{' is glued (Carve), second '{' is space-separated (Scope sibling).",
+  "source": "Foo{x} {y}",
+  "expect": "Scope[Carve(Identifier(Foo),[Identifier(x)]),Scope[Identifier(y)]]"
+}

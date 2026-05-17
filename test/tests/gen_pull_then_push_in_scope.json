@@ -1,0 +1,6 @@
+{
+  "name": "Pull Then Push In Scope",
+  "description": "{ T <- none\n  value -> 5\n  -> value } — scope with pull binding then push binding then production.",
+  "source": "{ T <- none\n  value -> 5\n  -> value }",
+  "expect": "Scope[Scope[PointingPull(Identifier(T),Identifier(none)),Pointing(Identifier(value),Literal(Integer,5)),Product(Identifier(value))]]"
+}

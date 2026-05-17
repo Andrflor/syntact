@@ -1,0 +1,6 @@
+{
+  "name": "External In Pointing Chain",
+  "description": "x -> y -> @lib.z — right-assoc Pointing chain ending with External property.",
+  "source": "x -> y -> @lib.z",
+  "expect": "Scope[Pointing(Identifier(x),Pointing(Identifier(y),Property(External(lib,nil),Identifier(z))))]"
+}

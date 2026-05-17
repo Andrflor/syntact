@@ -1,0 +1,6 @@
+{
+  "name": "chain_inline_pattern_property_both",
+  "description": "a.b.c ? a.b.c — inline pattern. Target is property chain (CALL > PATTERN). Inline RHS parsed at RANGE=11 < CALL=12 so RHS property chain attaches inside the single branch.",
+  "source": "a.b.c ? a.b.c",
+  "expect": "Scope[Pattern(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[Branch(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),nil)])]"
+}

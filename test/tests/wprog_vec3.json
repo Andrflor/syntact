@@ -1,0 +1,6 @@
+{
+  "name": "Vec3 With Length",
+  "description": "Vec3 shape with dot and length squared.",
+  "source": "Vec3 -> {\n  f64:x\n  f64:y\n  f64:z\n}\ndot -> {\n  Vec3:a\n  Vec3:b\n  -> a.x * b.x + a.y * b.y + a.z * b.z\n}\nlenSq -> {\n  Vec3:v\n  -> dot{v v}!\n}",
+  "expect": "Scope[Pointing(Identifier(Vec3),Scope[Constraint(Identifier(f64),Identifier(x)),Constraint(Identifier(f64),Identifier(y)),Constraint(Identifier(f64),Identifier(z))]),Pointing(Identifier(dot),Scope[Constraint(Identifier(Vec3),Identifier(a)),Constraint(Identifier(Vec3),Identifier(b)),Product(Operator(Add,Operator(Add,Operator(Multiply,Property(Identifier(a),Identifier(x)),Property(Identifier(b),Identifier(x))),Operator(Multiply,Property(Identifier(a),Identifier(y)),Property(Identifier(b),Identifier(y)))),Operator(Multiply,Property(Identifier(a),Identifier(z)),Property(Identifier(b),Identifier(z)))))]),Pointing(Identifier(lenSq),Scope[Constraint(Identifier(Vec3),Identifier(v)),Product(Execute(Carve(Identifier(dot),[Identifier(v),Identifier(v)]),[]))])]"
+}

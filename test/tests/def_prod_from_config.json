@@ -1,0 +1,6 @@
+{
+  "name": "Default Prod From Config",
+  "description": "prod -> config{host -> \"0.0.0.0\" debug -> false} — derive prod from config by carving.",
+  "source": "prod -> config{host -> \"0.0.0.0\" debug -> false}",
+  "expect": "Scope[Pointing(Identifier(prod),Carve(Identifier(config),[Pointing(Identifier(host),Literal(String,0.0.0.0)),Pointing(Identifier(debug),Identifier(false))]))]"
+}

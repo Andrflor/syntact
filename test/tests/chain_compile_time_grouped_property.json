@@ -1,0 +1,6 @@
+{
+  "name": "chain_compile_time_grouped_property",
+  "description": "!(a.b) — CompileTime over parenthesized property chain. parse_grouping strips parens. CompileTime(Property(a,b)). UNCERTAIN.",
+  "source": "!(a.b)",
+  "expect": "Scope[CompileTime(Property(Identifier(a),Identifier(b)))]"
+}

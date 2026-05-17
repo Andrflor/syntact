@@ -1,0 +1,6 @@
+{
+  "name": "Default Maybe Pattern",
+  "description": "maybe -> { T -> None\\n -> None:\\n -> T: } — README-like Maybe expressed structurally. Two Product alternatives: anonymous None: and anonymous T:. AST: Pointing(maybe, Scope[Pointing(T,None), Product(Constraint(None,nil)), Product(Constraint(T,nil))]).",
+  "source": "maybe -> {\n  T -> None\n  -> None:\n  -> T:\n}",
+  "expect": "Scope[Pointing(Identifier(maybe),Scope[Pointing(Identifier(T),Identifier(None)),Product(Constraint(Identifier(None),nil)),Product(Constraint(Identifier(T),nil))])]"
+}

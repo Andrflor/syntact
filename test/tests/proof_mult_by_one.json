@@ -1,0 +1,6 @@
+{
+  "name": "Mult By One Theorem",
+  "description": "multByOne — for any Nat n, mult{n {{}}}! = n. The default ?? marks n as universally quantified.",
+  "source": "multByOne -> {\n  Nat:n -> ??\n  -> mult{n {{}}}! = n ?! true\n}",
+  "expect": "Scope[Pointing(Identifier(multByOne),Scope[Pointing(Constraint(Identifier(Nat),Identifier(n)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(mult),[Identifier(n),Scope[Scope[]]]),[]),Identifier(n)),Identifier(true)))])]"
+}

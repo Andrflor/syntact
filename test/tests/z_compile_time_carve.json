@@ -1,0 +1,6 @@
+{
+  "name": "Z CompileTime On Carve",
+  "description": "!Foo{x -> 1} — CompileTime prefix at UNARY; Carve at CALL > UNARY so Carve forms as the operand entirely.",
+  "source": "!Foo{x -> 1}",
+  "expect": "Scope[CompileTime(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]))]"
+}

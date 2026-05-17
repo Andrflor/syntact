@@ -1,0 +1,6 @@
+{
+  "name": "Pattern As Branch Source",
+  "description": "x ? { (n?>0) -> 'pos' } — the branch source is a parenthesized inline-pattern. The branch product is 'pos'.",
+  "source": "x ? { (n?>0) -> 'pos' }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Pattern(Identifier(n),[Branch(Operator(Greater,nil,Literal(Integer,0)),nil)]),Literal(String,pos))])]"
+}

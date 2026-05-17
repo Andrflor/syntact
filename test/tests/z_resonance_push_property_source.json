@@ -1,0 +1,6 @@
+{
+  "name": "Z Resonance Push From Property Source",
+  "description": "self.counter >>- 0 — ResonancePush whose source is a Property chain.",
+  "source": "self.counter >>- 0",
+  "expect": "Scope[ResonancePush(Property(Identifier(self),Identifier(counter)),Literal(Integer,0))]"
+}

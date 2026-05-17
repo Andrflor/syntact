@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Or Lower Upper",
+  "description": "Alternation 'a'..'z' | 'A'..'Z' — Or of two char ranges. RANGE (11) > OR (7) so each range forms before Or.",
+  "source": "'a'..'z' | 'A'..'Z'",
+  "expect": "Scope[Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z)))]"
+}

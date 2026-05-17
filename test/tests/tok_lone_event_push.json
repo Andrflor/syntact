@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_event_push",
+  "description": "'>-' alone — prefix EventPush at EOF. UNCERTAIN: probably empty Scope[] (error in prefix RHS parsing) or EventPush(nil,nil).",
+  "source": ">-",
+  "expect": "Scope[]"
+}

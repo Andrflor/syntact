@@ -1,0 +1,6 @@
+{
+  "name": "Default Point Property Y",
+  "description": "Transform.position.x — chained property access on a deeply composed shape. README §Defaults compose example.",
+  "source": "Transform.position.x",
+  "expect": "Scope[Property(Property(Identifier(Transform),Identifier(position)),Identifier(x))]"
+}

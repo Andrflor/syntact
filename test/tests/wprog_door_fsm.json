@@ -1,0 +1,6 @@
+{
+  "name": "Door Finite State Machine",
+  "description": "Door shape with Open/Closed/Locked states and transitions via pattern matching.",
+  "source": "Door -> {\n  state -> Closed:\n  open -> {\n    Door:d\n    -> d.state ? {\n      Closed: -> Door{state -> Open:}\n      Locked: -> d\n      -> d\n    }\n  }\n  close -> {\n    Door:d\n    -> d.state ? {\n      Open: -> Door{state -> Closed:}\n      -> d\n    }\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Door),Scope[Pointing(Identifier(state),Constraint(Identifier(Closed),nil)),Pointing(Identifier(open),Scope[Constraint(Identifier(Door),Identifier(d)),Product(Pattern(Property(Identifier(d),Identifier(state)),[Branch(Constraint(Identifier(Closed),nil),Carve(Identifier(Door),[Pointing(Identifier(state),Constraint(Identifier(Open),nil))])),Branch(Constraint(Identifier(Locked),nil),Identifier(d)),Branch(nil,Identifier(d))]))]),Pointing(Identifier(close),Scope[Constraint(Identifier(Door),Identifier(d)),Product(Pattern(Property(Identifier(d),Identifier(state)),[Branch(Constraint(Identifier(Open),nil),Carve(Identifier(Door),[Pointing(Identifier(state),Constraint(Identifier(Closed),nil))])),Branch(nil,Identifier(d))]))])])]"
+}

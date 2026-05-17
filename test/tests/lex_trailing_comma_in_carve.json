@@ -1,0 +1,6 @@
+{
+  "name": "Lex Trailing Comma In Carve",
+  "description": "Foo{a,b,} — trailing comma in carve content is just a separator, harmless.",
+  "source": "Foo{a,b,}",
+  "expect": "Scope[Carve(Identifier(Foo),[Identifier(a),Identifier(b)])]"
+}

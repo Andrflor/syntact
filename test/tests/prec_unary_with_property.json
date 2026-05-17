@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Minus With Property",
+  "description": "-a.b — unary at UNARY consumes 'a.b' (CALL > UNARY). Result Subtract(nil, Property(a,b)).",
+  "source": "-a.b",
+  "expect": "Scope[Operator(Subtract,nil,Property(Identifier(a),Identifier(b)))]"
+}

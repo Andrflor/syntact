@@ -1,0 +1,6 @@
+{
+  "name": "Network Message Protocol",
+  "description": "Protocol message types and encode/decode.",
+  "source": "Message -> {\n  -> Ping:\n  -> Pong:\n  -> Data:{String:payload}\n}\nencode -> {\n  Message:m\n  -> m ? {\n    Ping: -> {0}\n    Pong: -> {1}\n    Data:{payload} -> {2 payload}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Message),Scope[Product(Constraint(Identifier(Ping),nil)),Product(Constraint(Identifier(Pong),nil)),Product(Carve(Constraint(Identifier(Data),nil),[Constraint(Identifier(String),Identifier(payload))]))]),Pointing(Identifier(encode),Scope[Constraint(Identifier(Message),Identifier(m)),Product(Pattern(Identifier(m),[Branch(Constraint(Identifier(Ping),nil),Scope[Literal(Integer,0)]),Branch(Constraint(Identifier(Pong),nil),Scope[Literal(Integer,1)]),Branch(Carve(Constraint(Identifier(Data),nil),[Identifier(payload)]),Scope[Literal(Integer,2),Identifier(payload)])]))])]"
+}

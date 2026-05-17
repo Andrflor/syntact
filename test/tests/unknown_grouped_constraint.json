@@ -1,0 +1,6 @@
+{
+  "name": "Constraint With Add-Of-Unknowns As Shape",
+  "description": "(?? + ??):x — group of two Unknowns becomes the shape side of a Constraint. UNCERTAIN: depends whether parse_grouping preserves Add inside or wraps in scope. Per other tests grouping returns the inner expression directly.",
+  "source": "(?? + ??):x",
+  "expect": "Scope[Constraint(Operator(Add,Unknown,Unknown),Identifier(x))]"
+}

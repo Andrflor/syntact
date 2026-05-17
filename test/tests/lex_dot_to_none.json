@@ -1,0 +1,6 @@
+{
+  "name": "Lex Dot ToNone (a. b)",
+  "description": "{a. b} — no space before, space after. PropertyToNone variant, then sibling identifier 'b'.",
+  "source": "{a. b}",
+  "expect": "Scope[Scope[Property(Identifier(a),nil),Identifier(b)]]"
+}

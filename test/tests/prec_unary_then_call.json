@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Then Carve Postfix",
+  "description": "-Foo{x->1} — UNARY is below CALL. parse_unary parses .UNARY which doesn't include CALL infixes, so Subtract(nil, Foo) and the Carve never binds inside. UNCERTAIN: parse_unary calls parse_expression(.UNARY) — RANGE/CALL/PRIMARY are higher than UNARY, so they DO attach. Foo{x->1} parses fully as the operand. Therefore Subtract(nil, Carve(Foo,[...])).",
+  "source": "-Foo{x->1}",
+  "expect": "Scope[Operator(Subtract,nil,Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]))]"
+}

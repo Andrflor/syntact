@@ -1,0 +1,6 @@
+{
+  "name": "Carve-Style Destructure",
+  "description": "Circle{radius(r)} — distinct from Circle:{radius(r)}. This is a Carve on Circle (not a Constraint), whose entry is the captured radius. README §Carving versus destructuring.",
+  "source": "x ? { Circle{radius(r)} -> r }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Identifier(Circle),[Identifier(radius,r)]),Identifier(r))])]"
+}

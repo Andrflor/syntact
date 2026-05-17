@@ -1,0 +1,6 @@
+{
+  "name": "Default Percent Refined",
+  "description": "Percent -> u8 & <=100 — refined u8 ≤100. <= is prefix LessEqual at refinement position.",
+  "source": "Percent -> u8 & <=100",
+  "expect": "Scope[Pointing(Identifier(Percent),Operator(And,Identifier(u8),Operator(LessEqual,nil,Literal(Integer,100))))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Decode-Encode Symmetry Refinement Theorem",
+  "description": "Classic codec roundtrip proof obligation: encode then decode should return the original m, enforced to be true.",
+  "source": "decodeEncodeSymmetry -> { String:m -> ??\n  -> decode{value -> encode{value -> m}!}! = m ?! true\n}",
+  "expect": "Scope[Pointing(Identifier(decodeEncodeSymmetry),Scope[Pointing(Constraint(Identifier(String),Identifier(m)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(decode),[Pointing(Identifier(value),Execute(Carve(Identifier(encode),[Pointing(Identifier(value),Identifier(m))]),[]))]),[]),Identifier(m)),Identifier(true)))])]"
+}

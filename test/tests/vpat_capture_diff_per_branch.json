@@ -1,0 +1,6 @@
+{
+  "name": "Different Captures Per Or Branch",
+  "description": "Foo:(a) | Bar:(b) as Or of two captures with different names. Top-level expression.",
+  "source": "Foo:(a) | Bar:(b)",
+  "expect": "Scope[Operator(Or,Constraint(Identifier(Foo),Identifier(,a)),Constraint(Identifier(Bar),Identifier(,b)))]"
+}

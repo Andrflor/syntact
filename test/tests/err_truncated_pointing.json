@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Pointing",
+  "description": "a -> — pointing operator with no right operand. parse_pointing_push errors, returns nil. UNCERTAIN: likely top-level becomes just Identifier(a) because the Pointing was rejected.",
+  "source": "a ->",
+  "expect": "Scope[Identifier(a)]"
+}

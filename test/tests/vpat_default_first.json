@@ -1,0 +1,6 @@
+{
+  "name": "Default Branch First",
+  "description": "v ? { -> 'd' 1 -> 'one' } — default branch precedes a typed branch.",
+  "source": "v ? {\n  -> 'd'\n  1 -> 'one'\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(nil,Literal(String,d)),Branch(Literal(Integer,1),Literal(String,one))])]"
+}

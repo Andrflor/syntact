@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_empty_parens",
+  "description": "'(())' — nested empty parens. UNCERTAIN: parse_grouping on empty group typically errors or returns nil; outer grouping then has nil content.",
+  "source": "(())",
+  "expect": "Scope[]"
+}

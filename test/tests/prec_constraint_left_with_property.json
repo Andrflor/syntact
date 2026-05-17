@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Constraint With Property On Left",
+  "description": "a.b:c — Property at CALL forms first 'a.b', then ':c' attaches as ConstraintBind. Result Constraint(Property(a,b), c).",
+  "source": "a.b:c",
+  "expect": "Scope[Constraint(Property(Identifier(a),Identifier(b)),Identifier(c))]"
+}

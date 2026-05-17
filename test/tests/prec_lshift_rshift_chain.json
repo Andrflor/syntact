@@ -1,0 +1,6 @@
+{
+  "name": "Precedence LShift RShift Chain",
+  "description": "a << b >> c — both AND=9, left-assoc. Result RShift(LShift(a,b), c).",
+  "source": "a << b >> c",
+  "expect": "Scope[Operator(RShift,Operator(LShift,Identifier(a),Identifier(b)),Identifier(c))]"
+}

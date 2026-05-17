@@ -1,0 +1,6 @@
+{
+  "name": "Lex Empty Scope",
+  "description": "{} at start — empty Scope.",
+  "source": "{}",
+  "expect": "Scope[Scope[]]"
+}

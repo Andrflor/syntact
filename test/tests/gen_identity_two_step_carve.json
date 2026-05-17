@@ -1,0 +1,6 @@
+{
+  "name": "Identity Sequential Carve",
+  "description": "identity{T <- u8}{value -> 5} — chain two carves: first fills T, second pushes value.",
+  "source": "identity{T <- u8}{value -> 5}",
+  "expect": "Scope[Carve(Carve(Identifier(identity),[PointingPull(Identifier(T),Identifier(u8))]),[Pointing(Identifier(value),Literal(Integer,5))])]"
+}

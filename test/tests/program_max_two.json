@@ -1,0 +1,6 @@
+{
+  "name": "Program Max of Two Values",
+  "description": "Max defined as a scope with two bindings and a Pattern on comparison. Branch uses a default (no source).",
+  "source": "max -> {\n  a -> 0\n  b -> 0\n  -> a > b ? {\n    -> a\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(max),Scope[Pointing(Identifier(a),Literal(Integer,0)),Pointing(Identifier(b),Literal(Integer,0)),Product(Pattern(Operator(Greater,Identifier(a),Identifier(b)),[Branch(nil,Identifier(a))]))])]"
+}

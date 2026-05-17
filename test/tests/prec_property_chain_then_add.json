@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Property Chain Then Add",
+  "description": "a.b.c + d — properties at CALL, left-assoc. Result Add(Property(Property(a,b),c), d).",
+  "source": "a.b.c + d",
+  "expect": "Scope[Operator(Add,Property(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d))]"
+}

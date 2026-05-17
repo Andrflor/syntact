@@ -1,0 +1,6 @@
+{
+  "name": "Lex Range With Spaces On Both Sides",
+  "description": "1 .. 5 — both sides have spaces. DoubleDot token, then sibling literals. UNCERTAIN: parsed by parse_empty_range as prefix Range(nil,nil), then '5' as sibling after '1' (with DoubleDot consumed in between).",
+  "source": "{1 .. 5}",
+  "expect": "Scope[Scope[Literal(Integer,1),Range(nil,nil),Literal(Integer,5)]]"
+}

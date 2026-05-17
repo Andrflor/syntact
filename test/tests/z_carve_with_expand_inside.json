@@ -1,0 +1,6 @@
+{
+  "name": "Z Carve Containing Expand Entry",
+  "description": "Foo{...base} — Carve whose entry is an Expand. Expand applies to Identifier base inside the carve scope.",
+  "source": "Foo{...base}",
+  "expect": "Scope[Carve(Identifier(Foo),[Expand(Identifier(base))])]"
+}

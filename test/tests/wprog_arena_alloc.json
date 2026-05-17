@@ -1,0 +1,6 @@
+{
+  "name": "Arena Allocator Skeleton",
+  "description": "Arena with allocate event and reset.",
+  "source": "Arena -> {\n  u64:size\n  u64:used -> 0\n}\nAlloc -> { u64:bytes }\nalloc_handler -> {\n  Arena:a\n  Alloc -< e {\n    a.used >>- a.used + e.bytes\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Arena),Scope[Constraint(Identifier(u64),Identifier(size)),Pointing(Constraint(Identifier(u64),Identifier(used)),Literal(Integer,0))]),Pointing(Identifier(Alloc),Scope[Constraint(Identifier(u64),Identifier(bytes))]),Pointing(Identifier(alloc_handler),Scope[Constraint(Identifier(Arena),Identifier(a)),EventPull(e,Identifier(Alloc),Scope[ResonancePush(Property(Identifier(a),Identifier(used)),Operator(Add,Property(Identifier(a),Identifier(used)),Property(Identifier(e),Identifier(bytes))))])])]"
+}

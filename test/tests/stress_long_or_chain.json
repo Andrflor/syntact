@@ -1,0 +1,6 @@
+{
+  "name": "Stress Long Or Chain",
+  "description": "Six-deep left-associative Or chain.",
+  "source": "a | b | c | d | e | f",
+  "expect": "Scope[Operator(Or,Operator(Or,Operator(Or,Operator(Or,Operator(Or,Identifier(a),Identifier(b)),Identifier(c)),Identifier(d)),Identifier(e)),Identifier(f))]"
+}

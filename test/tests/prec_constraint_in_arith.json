@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Constraint Inside Arithmetic",
+  "description": "a + b:c — CONSTRAINT (high) binds 'b:c' first, then '+ a' wraps. Result Add(a, Constraint(b,c)).",
+  "source": "a + b:c",
+  "expect": "Scope[Operator(Add,Identifier(a),Constraint(Identifier(b),Identifier(c)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Long Arithmetic Chain",
+  "description": "1+2*3-4/5%6 — tests * / % binding tighter than + and -, all left-associative within same level.",
+  "source": "1+2*3-4/5%6",
+  "expect": "Scope[Operator(Subtract,Operator(Add,Literal(Integer,1),Operator(Multiply,Literal(Integer,2),Literal(Integer,3))),Operator(Mod,Operator(Divide,Literal(Integer,4),Literal(Integer,5)),Literal(Integer,6)))]"
+}

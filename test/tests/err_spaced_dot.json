@@ -1,0 +1,6 @@
+{
+  "name": "Spaced Dot Between Identifiers",
+  "description": "a . b — Dot with spaces is the 'invalid property' path; parse_invalid_property_infix errors and returns nil after consuming '.'. UNCERTAIN per PARSER_NOTES: the behaviour is to return nil and advance, so 'b' should remain as its own statement. Best guess: 'a' then 'b' as siblings.",
+  "source": "a . b",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

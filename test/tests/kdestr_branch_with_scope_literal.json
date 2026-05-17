@@ -1,0 +1,6 @@
+{
+  "name": "Branch With Scope-Literal Source",
+  "description": "x ? { {1 2 3} -> 'ok' } — match against a scope literal containing three integer literals.",
+  "source": "x ? { {1 2 3} -> 'ok' }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[Literal(Integer,1),Literal(Integer,2),Literal(Integer,3)],Literal(String,ok))])]"
+}

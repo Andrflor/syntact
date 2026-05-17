@@ -1,0 +1,6 @@
+{
+  "name": "Z Pattern Branch Source Is Capture",
+  "description": "v ? { (x) -> 1 } — Branch source is an anonymous capture Identifier(,x).",
+  "source": "v ? { (x) -> 1 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Identifier(,x),Literal(Integer,1))])]"
+}

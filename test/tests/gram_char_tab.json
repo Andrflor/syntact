@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Char Tab",
+  "description": "Char with escape '\\t' — raw text kept by the lexer.",
+  "source": "'\\t'",
+  "expect": "Scope[Literal(String,\\t)]"
+}

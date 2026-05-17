@@ -1,0 +1,6 @@
+{
+  "name": "Combo Carve On Pattern Target",
+  "description": "Foo{x->1} ? { 1 -> 2 } — the pattern target is a Carve. Note the space before ? makes the brace LeftBraceCarve since it's glued to Foo.",
+  "source": "Foo{x->1} ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chain_grouped_property_to_none",
+  "description": "'(a.).b' — inside parens 'a.': has_space_after looks at next char which is ')' (not whitespace) so '.' is treated as PropertyAccess; PropertyAccess expects an identifier next but sees ')'. UNCERTAIN: parser errors out. Likely empty Scope[].",
+  "source": "(a.).b",
+  "expect": "Scope[]"
+}

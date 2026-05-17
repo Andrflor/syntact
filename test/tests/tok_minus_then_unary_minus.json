@@ -1,0 +1,6 @@
+{
+  "name": "tok_minus_then_unary_minus",
+  "description": "a--b — first '-' is infix Subtract (TERM); second '-' is its RHS unary minus on b. Result Subtract(a, Subtract(nil,b)).",
+  "source": "a--b",
+  "expect": "Scope[Operator(Subtract,Identifier(a),Operator(Subtract,nil,Identifier(b)))]"
+}

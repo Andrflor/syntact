@@ -1,0 +1,6 @@
+{
+  "name": "Program Compose Multiple Refinements",
+  "description": "Defines Positive, Small, then PositiveU8 composing primitives with &. Tests sequential pointings with refinement composition.",
+  "source": "Positive -> >0\nSmall -> <100\nPositiveU8 -> u8 & Positive\nSmallPositiveU8 -> u8 & Positive & Small",
+  "expect": "Scope[Pointing(Identifier(Positive),Operator(Greater,nil,Literal(Integer,0))),Pointing(Identifier(Small),Operator(Less,nil,Literal(Integer,100))),Pointing(Identifier(PositiveU8),Operator(And,Identifier(u8),Identifier(Positive))),Pointing(Identifier(SmallPositiveU8),Operator(And,Operator(And,Identifier(u8),Identifier(Positive)),Identifier(Small)))]"
+}

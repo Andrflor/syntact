@@ -1,0 +1,6 @@
+{
+  "name": "Z ResonancePush With Unknown RHS",
+  "description": "x >>- ?? — Resonance assignment whose RHS is the Unknown sentinel.",
+  "source": "x >>- ??",
+  "expect": "Scope[ResonancePush(Identifier(x),Unknown)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_exec_carve_exec_property",
+  "description": "Foo{x}!{y}!.z — carve, execute, carve, execute, property — all at CALL.",
+  "source": "Foo{x}!{y}!.z",
+  "expect": "Scope[Property(Execute(Carve(Execute(Carve(Identifier(Foo),[Identifier(x)]),[]),[Identifier(y)]),[]),Identifier(z))]"
+}

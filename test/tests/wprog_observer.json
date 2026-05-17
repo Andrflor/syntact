@@ -1,0 +1,6 @@
+{
+  "name": "Observer Pattern With Resonance",
+  "description": "Observer notifying via resonance.",
+  "source": "Subject -> {\n  u32:value -> 0\n}\nObserver -> {\n  Subject:subj\n  observe -> {\n    subj.value -<< notify\n  }\n}\nnotify -> {\n  u32:v\n  -> io.write{v}!\n}",
+  "expect": "Scope[Pointing(Identifier(Subject),Scope[Pointing(Constraint(Identifier(u32),Identifier(value)),Literal(Integer,0))]),Pointing(Identifier(Observer),Scope[Constraint(Identifier(Subject),Identifier(subj)),Pointing(Identifier(observe),Scope[ResonancePull(Property(Identifier(subj),Identifier(value)),Identifier(notify))])]),Pointing(Identifier(notify),Scope[Constraint(Identifier(u32),Identifier(v)),Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Identifier(v)]),[]))])]"
+}

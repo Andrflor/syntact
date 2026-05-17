@@ -1,0 +1,6 @@
+{
+  "name": "Default Carve On Shaped Binding",
+  "description": "Point:p{x -> 10 y -> 20} — README §Defaults: constrain a binding by shape and carve. ':' (ConstraintBind) is precedence CONSTRAINT=8, '{' (carve) is at CALL=12. parse_constraint_bind parses the right side at CALL+1, so 'p{...}' is parsed as a Carve and then becomes the name. UNCERTAIN: depending on how parse_constraint_bind sequences these, the alt is Carve(Constraint(Point,p),[...]). The semantic intent of README is 'p constrained by Point, then carved' — so Carve over Constraint. WILL_FAIL_UNTIL_FIX: parser likely produces Constraint(Point, Carve(p,[...])) because Carve binds tighter to the right operand. Semantically README wants Carve(Constraint(Point,p),[...]).",
+  "source": "Point:p{x -> 10 y -> 20}",
+  "expect": "Scope[Carve(Constraint(Identifier(Point),Identifier(p)),[Pointing(Identifier(x),Literal(Integer,10)),Pointing(Identifier(y),Literal(Integer,20))])]"
+}

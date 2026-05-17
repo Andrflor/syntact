@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Add Then LShift",
+  "description": "a + b << c — Add (TERM=5) parses first as 'a + b' (right at TERM+1=6, '<<' AND=9 ≥ 6 attaches). So 'a + (b << c)'. Result Add(a, LShift(b,c)).",
+  "source": "a + b << c",
+  "expect": "Scope[Operator(Add,Identifier(a),Operator(LShift,Identifier(b),Identifier(c)))]"
+}

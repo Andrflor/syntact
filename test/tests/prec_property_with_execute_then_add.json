@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Property Execute Then Add",
+  "description": "a.b! + c — '.b' then '!' then '+ c'. Both Property and Execute at CALL left-assoc. Result Add(Execute(Property(a,b),[]), c).",
+  "source": "a.b! + c",
+  "expect": "Scope[Operator(Add,Execute(Property(Identifier(a),Identifier(b)),[]),Identifier(c))]"
+}

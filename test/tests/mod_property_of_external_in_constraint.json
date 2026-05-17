@@ -1,0 +1,6 @@
+{
+  "name": "Property Of External Used As Constraint",
+  "description": "@lib.types.Int:x — External property chain used as shape constraint on x.",
+  "source": "@lib.types.Int:x",
+  "expect": "Scope[Constraint(Property(Property(External(lib,nil),Identifier(types)),Identifier(Int)),Identifier(x))]"
+}

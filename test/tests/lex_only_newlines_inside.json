@@ -1,0 +1,6 @@
+{
+  "name": "Lex Only Newlines Inside Scope",
+  "description": "{\\n\\n\\n} — only newlines. parse_scope skips them and closes. Empty Scope.",
+  "source": "{\n\n\n}",
+  "expect": "Scope[Scope[]]"
+}

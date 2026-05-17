@@ -1,0 +1,6 @@
+{
+  "name": "Stress Quintuple-Wrapped Execute",
+  "description": "Five execution wrappers nested: GPU(Threading(Background(Parallel(!)))). Wrappers stored outer-to-inner: |, <, (, [.",
+  "source": "foo|<([!])>|",
+  "expect": "Scope[Execute(Identifier(foo),[GPU,Threading,Background,Parallel_CPU])]"
+}

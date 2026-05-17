@@ -1,0 +1,6 @@
+{
+  "name": "Circle Area Program",
+  "description": "Circle shape with radius and area function carving Circle.",
+  "source": "Circle -> { u8:radius }\narea -> {\n  Shape:shape\n  -> shape ? { Circle:{radius(r)} -> r * r * 3 }\n}",
+  "expect": "Scope[Pointing(Identifier(Circle),Scope[Constraint(Identifier(u8),Identifier(radius))]),Pointing(Identifier(area),Scope[Constraint(Identifier(Shape),Identifier(shape)),Product(Pattern(Identifier(shape),[Branch(Carve(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Operator(Multiply,Operator(Multiply,Identifier(r),Identifier(r)),Literal(Integer,3)))]))])]"
+}

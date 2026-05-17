@@ -1,0 +1,6 @@
+{
+  "name": "tok_range_then_range",
+  "description": "1..2..3 — parse_range parses RHS at RANGE precedence (not RANGE+1), so right-associative. Range(1, Range(2,3)).",
+  "source": "1..2..3",
+  "expect": "Scope[Range(Literal(Integer,1),Range(Literal(Integer,2),Literal(Integer,3)))]"
+}

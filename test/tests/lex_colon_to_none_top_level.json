@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon ToNone At Top Level",
+  "description": "u8: — top-level a: (no newline at end, EOF). parse_constraint_to_none sees EOF/end and sets name nil. Result Constraint(u8, nil).",
+  "source": "u8: ",
+  "expect": "Scope[Constraint(Identifier(u8),nil)]"
+}

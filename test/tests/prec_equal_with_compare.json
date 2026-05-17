@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Equal With Three Comparisons",
+  "description": "a = b < c >= d — COMPARISON > EQUALITY, comparisons left-assoc. So Equal(a, GreaterEqual(Less(b,c), d)).",
+  "source": "a = b < c >= d",
+  "expect": "Scope[Operator(Equal,Identifier(a),Operator(GreaterEqual,Operator(Less,Identifier(b),Identifier(c)),Identifier(d)))]"
+}

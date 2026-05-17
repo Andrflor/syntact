@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_property_execute",
+  "description": "Foo{x -> 1}.bar! — carve, property, execute. Execute(Property(Carve(Foo,[x->1]),bar),[]).",
+  "source": "Foo{x -> 1}.bar!",
+  "expect": "Scope[Execute(Property(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(bar)),[])]"
+}

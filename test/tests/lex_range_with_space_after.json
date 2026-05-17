@@ -1,0 +1,6 @@
+{
+  "name": "Lex Range With Space After The Dots",
+  "description": "1.. 5 — '1' before non-delim, space after the '..'. has_after_delimiter true. PostfixRange. Range(1, nil), then '5' is a sibling Literal.",
+  "source": "{1.. 5}",
+  "expect": "Scope[Scope[Range(Literal(Integer,1),nil),Literal(Integer,5)]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern Anonymous Capture",
+  "description": "v ? (x) — inline pattern, source is anonymous capture.",
+  "source": "v ? (x)",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Identifier(,x),nil)])]"
+}

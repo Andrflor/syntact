@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Two Bare Scope Destructures",
+  "description": "v ? { {a b} | {c d e} -> 0 } — Or of two scope literals as branch source.",
+  "source": "v ? { {a b} | {c d e} -> 0 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Scope[Identifier(a),Identifier(b)],Scope[Identifier(c),Identifier(d),Identifier(e)]),Literal(Integer,0))])]"
+}

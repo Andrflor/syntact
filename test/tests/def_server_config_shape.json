@@ -1,0 +1,6 @@
+{
+  "name": "Default Server Config Shape",
+  "description": "ServerConfig -> { String:host -> \"localhost\"\\n Port:port -> 8080\\n bool:debug -> false } — README §A small practical comparison. 'false' is Identifier(false) per anomaly #3.",
+  "source": "ServerConfig -> {\n  String:host -> \"localhost\"\n  Port:port -> 8080\n  bool:debug -> false\n}",
+  "expect": "Scope[Pointing(Identifier(ServerConfig),Scope[Pointing(Constraint(Identifier(String),Identifier(host)),Literal(String,localhost)),Pointing(Constraint(Identifier(Port),Identifier(port)),Literal(Integer,8080)),Pointing(Constraint(Identifier(bool),Identifier(debug)),Identifier(false))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Grammar DoubleDot Plus Char",
+  "description": ".. + '_' — bare DoubleDot is Range(nil,nil); then Add with a single-char literal.",
+  "source": ".. + '_'",
+  "expect": "Scope[Operator(Add,Range(nil,nil),Literal(String,_))]"
+}

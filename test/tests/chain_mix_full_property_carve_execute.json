@@ -1,0 +1,6 @@
+{
+  "name": "chain_mix_full_property_carve_execute",
+  "description": "a.b{c -> d.e{f -> g}}.h{i -> j}! — Property+Carve+Property+Carve+Execute monster chain.",
+  "source": "a.b{c -> d.e{f -> g}}.h{i -> j}!",
+  "expect": "Scope[Execute(Carve(Property(Carve(Property(Identifier(a),Identifier(b)),[Pointing(Identifier(c),Carve(Property(Identifier(d),Identifier(e)),[Pointing(Identifier(f),Identifier(g))]))]),Identifier(h)),[Pointing(Identifier(i),Identifier(j))]),[])]"
+}

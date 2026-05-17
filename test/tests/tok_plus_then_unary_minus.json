@@ -1,0 +1,6 @@
+{
+  "name": "tok_plus_then_unary_minus",
+  "description": "a+-b — Add then unary minus on RHS. Operator(Add, a, Subtract(nil,b)).",
+  "source": "a+-b",
+  "expect": "Scope[Operator(Add,Identifier(a),Operator(Subtract,nil,Identifier(b)))]"
+}

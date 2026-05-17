@@ -1,0 +1,6 @@
+{
+  "name": "tok_minus_space_greater",
+  "description": "'- > a' — '-' then space then '>'. Minus is unary at UNARY; reads expression at UNARY which dispatches '>' prefix parse_prefix_comparison on 'a'. Subtract(nil, Greater(nil, a)). UNCERTAIN.",
+  "source": "- > a",
+  "expect": "Scope[Operator(Subtract,nil,Operator(Greater,nil,Identifier(a)))]"
+}

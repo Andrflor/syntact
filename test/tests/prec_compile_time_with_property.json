@@ -1,0 +1,6 @@
+{
+  "name": "Precedence CompileTime With Property",
+  "description": "!foo.bar — '!' at UNARY parses operand at UNARY; 'foo' then '.bar' (CALL=12 ≥ 10) attaches inside. Result CompileTime(Property(foo,bar)).",
+  "source": "!foo.bar",
+  "expect": "Scope[CompileTime(Property(Identifier(foo),Identifier(bar)))]"
+}

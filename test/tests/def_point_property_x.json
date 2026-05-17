@@ -1,0 +1,6 @@
+{
+  "name": "Default Point Property X",
+  "description": "Point.x — README §Defaults: 'A shape used as type, value, instance'; property access on a shape yields its default.",
+  "source": "Point.x",
+  "expect": "Scope[Property(Identifier(Point),Identifier(x))]"
+}

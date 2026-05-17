@@ -1,0 +1,6 @@
+{
+  "name": "tok_less_space_minus",
+  "description": "'< - a' — prefix Less (parse_prefix_comparison) then unary minus on a. Less(nil, Subtract(nil, a)). UNCERTAIN.",
+  "source": "< - a",
+  "expect": "Scope[Operator(Less,nil,Operator(Subtract,nil,Identifier(a)))]"
+}

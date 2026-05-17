@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Empty Char",
+  "description": "Empty char literal '' — scan_string produces a String literal with empty text since str_start equals position when delimiter immediately follows.",
+  "source": "''",
+  "expect": "Scope[Literal(String,)]"
+}

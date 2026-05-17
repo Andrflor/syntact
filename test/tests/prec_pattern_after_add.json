@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Pattern Followed By Add (right-of-?)",
+  "description": "a ? { 1 -> 2 } + b — pattern's right side (the branches in braces) closes at '}'. After ?{...} returns, the outer top-level loop sees '+'. TERM=5 > NONE=0 attaches to the Pattern node. WILL_FAIL_UNTIL_FIX: semantically, '+ b' as infix on a pattern is malformed; this exists to document the precedence behavior.",
+  "source": "a ? { 1 -> 2 } + b",
+  "expect": "Scope[Operator(Add,Pattern(Identifier(a),[Branch(Literal(Integer,1),Literal(Integer,2))]),Identifier(b))]"
+}

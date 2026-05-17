@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern Prefix Range",
+  "description": "n ? ..10 — inline pattern with prefix Range.",
+  "source": "n ? ..10",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Range(nil,Literal(Integer,10)),nil)])]"
+}

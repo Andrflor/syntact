@@ -1,0 +1,6 @@
+{
+  "name": "tok_range_ident_chain",
+  "description": "a..b..c — Range right-associative. Range(a, Range(b,c)).",
+  "source": "a..b..c",
+  "expect": "Scope[Range(Identifier(a),Range(Identifier(b),Identifier(c)))]"
+}

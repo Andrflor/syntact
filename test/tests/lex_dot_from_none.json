@@ -1,0 +1,6 @@
+{
+  "name": "Lex Dot FromNone (.b)",
+  "description": "{a .b} — space before, no space after. 'a' is sibling, then '.b' is PropertyFromNone yielding Property(nil, b).",
+  "source": "{a .b}",
+  "expect": "Scope[Scope[Identifier(a),Property(nil,Identifier(b))]]"
+}

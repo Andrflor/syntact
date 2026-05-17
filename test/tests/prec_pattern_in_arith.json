@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Pattern Inside Arithmetic",
+  "description": "1 + x ? { 1 -> 2 } — PATTERN is lower than TERM, so '1 + x' forms first, then '?' attaches to the whole Add.",
+  "source": "1 + x ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Operator(Add,Literal(Integer,1),Identifier(x)),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

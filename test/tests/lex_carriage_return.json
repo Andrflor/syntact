@@ -1,0 +1,6 @@
+{
+  "name": "Lex Carriage Return Treated As Space",
+  "description": "is_space includes \\r so CRLF line endings collapse to just newline-separation behaviour.",
+  "source": "a -> 1\r\nb -> 2",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]"
+}

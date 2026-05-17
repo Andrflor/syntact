@@ -1,0 +1,6 @@
+{
+  "name": "Nested Pattern As Target",
+  "description": "(x ? { 1 -> 2 }) ? { 2 -> 3 } — outer pattern target is itself a (grouped) pattern. UNCERTAIN: parse_grouping returns the inner Pattern directly.",
+  "source": "(x ? { 1 -> 2 }) ? { 2 -> 3 }",
+  "expect": "Scope[Pattern(Pattern(Identifier(x),[Branch(Literal(Integer,1),Literal(Integer,2))]),[Branch(Literal(Integer,2),Literal(Integer,3))])]"
+}

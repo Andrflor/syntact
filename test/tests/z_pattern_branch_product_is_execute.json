@@ -1,0 +1,6 @@
+{
+  "name": "Z Pattern Branch Product Is Execute",
+  "description": "v ? { 1 -> foo! } — Branch product is an Execute postfix.",
+  "source": "v ? { 1 -> foo! }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Execute(Identifier(foo),[]))])]"
+}

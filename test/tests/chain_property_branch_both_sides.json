@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_branch_both_sides",
+  "description": "n ? { a.b -> c.d } — pattern branch with property chain on both sides of '->'.",
+  "source": "n ? { a.b -> c.d }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Property(Identifier(a),Identifier(b)),Property(Identifier(c),Identifier(d)))])]"
+}

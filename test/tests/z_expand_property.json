@@ -1,0 +1,6 @@
+{
+  "name": "Z Expand Of Property",
+  "description": "...a.b — Expand whose target is a Property chain. parse_expansion calls UNARY; Property at CALL > UNARY so the whole property is consumed as target.",
+  "source": "...a.b",
+  "expect": "Scope[Expand(Property(Identifier(a),Identifier(b)))]"
+}

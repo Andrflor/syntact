@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding As Branch Product",
+  "description": "x ? { 0 -> T <- none } — branch product is a PointingPull. ASSIGNMENT is right-assoc so source=0, product=PointingPull.",
+  "source": "x ? { 0 -> T <- none }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,0),PointingPull(Identifier(T),Identifier(none)))])]"
+}

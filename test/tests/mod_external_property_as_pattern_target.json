@@ -1,0 +1,6 @@
+{
+  "name": "External Property As Pattern Target",
+  "description": "@lib.flag ? { 1 -> 'on' -> 'off' } — pattern target is an External property.",
+  "source": "@lib.flag ? { 1 -> 'on' -> 'off' }",
+  "expect": "Scope[Pattern(Property(External(lib,nil),Identifier(flag)),[Branch(Literal(Integer,1),Literal(String,on)),Branch(nil,Literal(String,off))])]"
+}

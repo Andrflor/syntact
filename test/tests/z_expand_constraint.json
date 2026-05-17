@@ -1,0 +1,6 @@
+{
+  "name": "Z Expand Of Constraint",
+  "description": "...T:x — UNCERTAIN per PARSER_NOTES anomaly #4: parse_expansion parses at UNARY (below CONSTRAINT). Semantic intent: Expand(Constraint(T,x)). The parser currently likely produces Constraint(Expand(T),x). WILL_FAIL_UNTIL_FIX.",
+  "source": "...T:x",
+  "expect": "Scope[Expand(Constraint(Identifier(T),Identifier(x)))]"
+}

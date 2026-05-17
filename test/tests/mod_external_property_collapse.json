@@ -1,0 +1,6 @@
+{
+  "name": "External Property Collapsed",
+  "description": "@lib.compute! — Execute over Property chain on External.",
+  "source": "@lib.compute!",
+  "expect": "Scope[Execute(Property(External(lib,nil),Identifier(compute)),[])]"
+}

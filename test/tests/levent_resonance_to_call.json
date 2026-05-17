@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull From Carve Collapse",
+  "description": "x -<< compute{n -> 5}! — resonance pull whose source is an Execute over a Carve.",
+  "source": "x -<< compute{n -> 5}!",
+  "expect": "Scope[ResonancePull(Identifier(x),Execute(Carve(Identifier(compute),[Pointing(Identifier(n),Literal(Integer,5))]),[]))]"
+}

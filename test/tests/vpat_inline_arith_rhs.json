@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Arithmetic RHS",
+  "description": "n ? a + b — semantically the inline source is the entire Add. WILL_FAIL_UNTIL_FIX: parser current behavior is Operator(Add,Pattern(n,[Branch(a,nil)]),b) because TERM=5 < RANGE=11 stops the inline-RHS at a. Fix: inline pattern should consume at full assignment precedence.",
+  "source": "n ? a + b",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Add,Identifier(a),Identifier(b)),nil)])]"
+}

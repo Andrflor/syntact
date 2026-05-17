@@ -1,0 +1,6 @@
+{
+  "name": "tok_carve_two_empty",
+  "description": "Foo{}{} — two empty carves chained. Carve(Carve(Foo,[]),[]).",
+  "source": "Foo{}{}",
+  "expect": "Scope[Carve(Carve(Identifier(Foo),[]),[])]"
+}

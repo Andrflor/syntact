@@ -1,0 +1,6 @@
+{
+  "name": "Module-Like Scope With Pull Binding",
+  "description": "Lib -> { T <- none\n  encode -> { T:value -> value }\n  decode -> { T:value -> value } } — module scope exposing two functions sharing pulled T.",
+  "source": "Lib -> { T <- none\n  encode -> { T:value -> value }\n  decode -> { T:value -> value } }",
+  "expect": "Scope[Pointing(Identifier(Lib),Scope[PointingPull(Identifier(T),Identifier(none)),Pointing(Identifier(encode),Scope[Pointing(Constraint(Identifier(T),Identifier(value)),Identifier(value))]),Pointing(Identifier(decode),Scope[Pointing(Constraint(Identifier(T),Identifier(value)),Identifier(value))])])]"
+}

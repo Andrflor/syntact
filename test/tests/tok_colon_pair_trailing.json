@@ -1,0 +1,6 @@
+{
+  "name": "tok_colon_pair_trailing",
+  "description": "'a::' — 'a' then two colons. First ':' ConstraintBind with name=nil (next ':' not is_expression_start). Second ':' depends on lexer EOF-as-space; if treated as space_after=true → ConstraintToNone infix. Result Constraint(Constraint(a,nil),nil). UNCERTAIN.",
+  "source": "a::",
+  "expect": "Scope[Constraint(Constraint(Identifier(a),nil),nil)]"
+}

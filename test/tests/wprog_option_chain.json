@@ -1,0 +1,6 @@
+{
+  "name": "Option Chain Application",
+  "description": "Option flatMap chain example.",
+  "source": "Option -> {\n  -> Some:{value}\n  -> None:\n}\nflatMap -> {\n  Option:o\n  f\n  -> o ? {\n    Some:{value} -> f{value}!\n    None: -> None:\n  }\n}\nchain -> {\n  Option:o\n  -> flatMap{o {x -> Some:{value -> x + 1}}}!\n}",
+  "expect": "Scope[Pointing(Identifier(Option),Scope[Product(Carve(Constraint(Identifier(Some),nil),[Identifier(value)])),Product(Constraint(Identifier(None),nil))]),Pointing(Identifier(flatMap),Scope[Constraint(Identifier(Option),Identifier(o)),Identifier(f),Product(Pattern(Identifier(o),[Branch(Carve(Constraint(Identifier(Some),nil),[Identifier(value)]),Execute(Carve(Identifier(f),[Identifier(value)]),[])),Branch(Constraint(Identifier(None),nil),Constraint(Identifier(None),nil))]))]),Pointing(Identifier(chain),Scope[Constraint(Identifier(Option),Identifier(o)),Product(Execute(Carve(Identifier(flatMap),[Identifier(o),Scope[Pointing(Identifier(x),Carve(Constraint(Identifier(Some),nil),[Pointing(Identifier(value),Operator(Add,Identifier(x),Literal(Integer,1)))]))]]),[]))])]"
+}

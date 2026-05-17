@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Not With And",
+  "description": "~a & b — parse_unary at UNARY reads 'a', then '&' (AND=9 < 10) stops. Returns Not(nil,a). Then top loop '& b' attaches. Result And(Not(nil,a), b).",
+  "source": "~a & b",
+  "expect": "Scope[Operator(And,Operator(Not,nil,Identifier(a)),Identifier(b))]"
+}

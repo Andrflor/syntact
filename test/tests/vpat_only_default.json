@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Only Default Branch",
+  "description": "n ? { -> 1 } — single default branch (source nil).",
+  "source": "n ? { -> 1 }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(nil,Literal(Integer,1))])]"
+}

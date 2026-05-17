@@ -1,0 +1,6 @@
+{
+  "name": "Asterisk As Prefix",
+  "description": "* a — Asterisk has no prefix rule, only an infix binary at FACTOR. parse_expression should error and recover to next statement, leaving 'a' as a top-level identifier. UNCERTAIN.",
+  "source": "* a",
+  "expect": "Scope[Identifier(a)]"
+}

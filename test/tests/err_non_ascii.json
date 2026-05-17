@@ -1,0 +1,6 @@
+{
+  "name": "Non-ASCII Identifier-Like Character",
+  "description": "Source containing é — non-ASCII bytes are not identifier-start in this lexer. UNCERTAIN: lexer emits Invalid for the non-ASCII byte, parser recovers to empty.",
+  "source": "é",
+  "expect": "Scope[]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Grouping Then Glued Carve",
+  "description": "(a+b){x} — grouping returns Operator(Add,a,b); '{' is glued to ')' (no space before) so LeftBraceCarve. Carve attaches at CALL on the resulting operator.",
+  "source": "(a+b){x}",
+  "expect": "Scope[Carve(Operator(Add,Identifier(a),Identifier(b)),[Identifier(x)])]"
+}

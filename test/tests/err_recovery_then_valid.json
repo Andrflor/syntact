@@ -1,0 +1,6 @@
+{
+  "name": "Recovery After Error Resumes On Next Statement",
+  "description": "a + \\n b — first line has truncated Add; second line is a valid identifier. Synchronize finds Newline and consumes it, then 'b' parses normally. UNCERTAIN but expected outcome is Identifier(a) and Identifier(b) at top level.",
+  "source": "a + \nb",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

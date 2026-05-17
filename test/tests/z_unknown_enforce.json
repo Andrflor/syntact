@@ -1,0 +1,6 @@
+{
+  "name": "Z Enforce With Unknown LHS",
+  "description": "?? ?! valid — Unknown then Enforce predicate. Enforce(Unknown, valid).",
+  "source": "?? ?! valid",
+  "expect": "Scope[Enforce(Unknown,Identifier(valid))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Imported Module Carved And Collapsed",
+  "description": "@lib.compute{n -> 5}! — full carve+collapse over an external property.",
+  "source": "@lib.compute{n -> 5}!",
+  "expect": "Scope[Execute(Carve(Property(External(lib,nil),Identifier(compute)),[Pointing(Identifier(n),Literal(Integer,5))]),[])]"
+}

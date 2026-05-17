@@ -1,0 +1,6 @@
+{
+  "name": "Skill Tree With Inventory",
+  "description": "Character with skills and inventory.",
+  "source": "Skill -> {\n  String:name\n  (u8 & >=1 & <=10):level\n}\nInventory -> {\n  items -> {}\n  skills -> {}\n}\naddSkill -> {\n  Inventory:inv\n  Skill:s\n  -> Inventory{skills -> {...inv.skills s}}\n}",
+  "expect": "Scope[Pointing(Identifier(Skill),Scope[Constraint(Identifier(String),Identifier(name)),Constraint(Operator(And,Operator(And,Identifier(u8),Operator(GreaterEqual,nil,Literal(Integer,1))),Operator(LessEqual,nil,Literal(Integer,10))),Identifier(level))]),Pointing(Identifier(Inventory),Scope[Pointing(Identifier(items),Scope[]),Pointing(Identifier(skills),Scope[])]),Pointing(Identifier(addSkill),Scope[Constraint(Identifier(Inventory),Identifier(inv)),Constraint(Identifier(Skill),Identifier(s)),Product(Carve(Identifier(Inventory),[Pointing(Identifier(skills),Scope[Expand(Property(Identifier(inv),Identifier(skills))),Identifier(s)])]))])]"
+}

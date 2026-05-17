@@ -1,0 +1,6 @@
+{
+  "name": "Lex Range In Carve (1..5)",
+  "description": "Foo{1..5} — both sides non-delimiter. Range token (infix). Result Range(1,5) inside Carve.",
+  "source": "Foo{1..5}",
+  "expect": "Scope[Carve(Identifier(Foo),[Range(Literal(Integer,1),Literal(Integer,5))])]"
+}

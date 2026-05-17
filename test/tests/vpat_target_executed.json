@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target Is Execute Postfix",
+  "description": "foo! ? { 1 -> 2 } — pattern target is an executed identifier (no carve).",
+  "source": "foo! ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Execute(Identifier(foo),[]),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

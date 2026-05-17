@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_then_constraint",
+  "description": "Foo{x -> 1}:y — Carve (CALL) then ConstraintBind (CONSTRAINT, lower). Constraint(Carve(Foo,[x->1]),y).",
+  "source": "Foo{x -> 1}:y",
+  "expect": "Scope[Constraint(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(y))]"
+}

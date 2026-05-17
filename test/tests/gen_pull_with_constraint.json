@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding With Constrained Default",
+  "description": "T <- Positive:n — constraint to right side of pull.",
+  "source": "T <- Positive:n",
+  "expect": "Scope[PointingPull(Identifier(T),Constraint(Identifier(Positive),Identifier(n)))]"
+}
