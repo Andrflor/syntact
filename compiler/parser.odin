@@ -742,6 +742,7 @@ Node :: union {
 	Constraint,
 	Operator,
 	Execute,
+	CompileTime,
 	Literal,
 	Property,
 	Expand,
@@ -885,6 +886,14 @@ Execute :: struct {
   using _: NodeBase,
   to:    ^Node,                     // Expression to execute
   wrappers: [dynamic]ExecutionWrapper, // Ordered list of execution wrappers (from outside to inside)
+}
+
+/*
+ * CompileTime marks an expression to be evaluated at compile time (prefix !)
+ */
+CompileTime :: struct {
+  using _: NodeBase,
+  to:    ^Node, // Expression forced to compile-time evaluation
 }
 
 /*
@@ -1521,39 +1530,28 @@ parse_override :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 }
 
 /*
- * parse_execute_prefix handles execute as a prefix used for compile tim effects
+ * parse_execute_prefix handles ! as a unary prefix marking compile-time evaluation
  */
 parse_execute_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the ! token
     position := parser.current_token.position
-
-    // Create execute node (prefix form)
-    exec := Execute{
-        to = nil,
-        wrappers = make([dynamic]ExecutionWrapper, 0, 0),
-        position = position,
-    }
 
     // Consume '!'
     advance_token(parser)
 
-    // If immediately followed by '{', apply override to the Execute node
+    ct := CompileTime{
+        to = nil,
+        position = position,
+    }
+
+    // After a unary prefix, a following '{' is the operand scope, not an override
+    // (LeftBraceOverride is produced when '{' is glued to the previous token).
+    if is_expression_start(parser.current_token.kind) ||
+       parser.current_token.kind == .LeftBraceOverride {
+        ct.to = parse_expression(parser, Precedence.UNARY)
+    }
+
     node := new(Node)
-    node^ = exec
-    if parser.current_token.kind == .LeftBrace {
-        return parse_override(parser, node)
-    }
-
-    // Otherwise, parse an operand but keep any trailing '{' for an override on Execute
-    if is_expression_start(parser.current_token.kind) {
-        operand := parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
-        exec.to = operand
-        node^ = exec
-        if parser.current_token.kind == .LeftBrace {
-            return parse_override(parser, node)
-        }
-    }
-
+    node^ = ct
     return node
 }
 
@@ -3524,6 +3522,13 @@ print_ast :: proc(node: ^Node, indent: int) {
 
       fmt.printf("%sExecute %s (line %d, column %d)\n",
           indent_str, pattern, n.position.line, n.position.column)
+      if n.to != nil {
+          print_ast(n.to, indent + 2)
+      }
+
+    case CompileTime:
+      fmt.printf("%sCompileTime ! (line %d, column %d)\n",
+          indent_str, n.position.line, n.position.column)
       if n.to != nil {
           print_ast(n.to, indent + 2)
       }

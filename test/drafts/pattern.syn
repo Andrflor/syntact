@@ -5,26 +5,22 @@ Action -> {
 
 
 Record -> {
-  -> {
-    Action:action
-    String:payLoad
-  }
+  Action:action
+  String:payLoad
 }
 
 Pac -> {
-  -> {
-    u8:payLoad
-    String:content
-  }
+  u8:payLoad
+  String:content
 }
 
 Data -> Pac | Record
+// Equivalent to
+Data -> {->Pac ->Record}
 
 User -> {
-  -> {
-    String:name
-    Data:data
-  }
+  String:name
+  Data:data
 }
 
 UserAction -> User | Action
@@ -44,10 +40,8 @@ userAction ?  {
 
 // That mean
 Record -> {
-  -> {
-    Action:action
-    String:payLoad
-  }
+  Action:action
+  String:payLoad
 }
 
 process -> {

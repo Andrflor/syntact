@@ -98,6 +98,8 @@ ast_to_string :: proc(node: ^compiler.Node) -> string {
 		ws := make([dynamic]string)
 		for w in n.wrappers do append(&ws, fmt.tprintf("%v", w))
 		return fmt.tprintf("Execute(%s,[%s])", ast_to_string(n.to), strings.join(ws[:], ","))
+	case compiler.CompileTime:
+		return fmt.tprintf("CompileTime(%s)", ast_to_string(n.to))
 	case compiler.Range:
 		return fmt.tprintf("Range(%s,%s)", ast_to_string(n.start), ast_to_string(n.end))
 	case compiler.Pattern:
@@ -202,6 +204,8 @@ walk_all_nodes :: proc(node: ^compiler.Node, full_string: string, pos_map: ^Posi
 		walk_all_nodes(n.left, full_string, pos_map)
 		walk_all_nodes(n.right, full_string, pos_map)
 	case compiler.Execute:
+		walk_all_nodes(n.to, full_string, pos_map)
+	case compiler.CompileTime:
 		walk_all_nodes(n.to, full_string, pos_map)
 	case compiler.Range:
 		walk_all_nodes(n.start, full_string, pos_map)
