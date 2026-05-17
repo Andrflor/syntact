@@ -1012,14 +1012,14 @@ Enforce :: struct {
 Precedence :: enum {
     NONE = 0,        // No precedence
     ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
-    CONSTRAINT, // : (constraints bind tighter than calls but looser than primary)
     PATTERN,
     EQUALITY,    // =
     COMPARISON,  // <, >, <=, >=
     TERM,        // +, -
     FACTOR,      // *, /, %
-    CONDITIONAL,     // Reserved for logical operators (&, |)
-    LOGICAL,     // Reserved for logical operators (&, |)
+    OR,          // | (union of shapes / or-pattern) — looser than &
+    CONSTRAINT,  // : (binds tighter than | so `Square: | Diamond:` is `(Square:) | (Diamond:)`, looser than & so `(u8|i8)&>10:x` binds the whole composition)
+    AND,         // & (intersection / refinement) — tighter than |
     UNARY,       // ~, unary -
     RANGE,       // ..
     CALL,       // (), ., ?
@@ -1268,17 +1268,17 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .Minus:
         return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
 
-    // Bitwise operators
+    // Shape algebra / logical operators
     case .And:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
     case .Or:
-        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .CONDITIONAL}
+        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .OR}
     case .Xor:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
     case .RShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
     case .LShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .LOGICAL}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
 
     // Arithmetic operators
     case .Plus:
