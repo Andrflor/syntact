@@ -1,0 +1,6 @@
+{
+  "name": "Multi-Env Configuration Loader",
+  "description": "Configuration with dev/prod overrides.",
+  "source": "Config -> {\n  String:host -> \"localhost\"\n  u16:port -> 8080\n  bool:debug -> false\n}\ndev -> Config{debug -> true}\nprod -> Config{host -> \"api.example.com\" port -> 443 debug -> false}",
+  "expect": "Scope[Pointing(Identifier(Config),Scope[Pointing(Constraint(Identifier(String),Identifier(host)),Literal(String,localhost)),Pointing(Constraint(Identifier(u16),Identifier(port)),Literal(Integer,8080)),Pointing(Constraint(Identifier(bool),Identifier(debug)),Identifier(false))]),Pointing(Identifier(dev),Carve(Identifier(Config),[Pointing(Identifier(debug),Identifier(true))])),Pointing(Identifier(prod),Carve(Identifier(Config),[Pointing(Identifier(host),Literal(String,api.example.com)),Pointing(Identifier(port),Literal(Integer,443)),Pointing(Identifier(debug),Identifier(false))]))]"
+}

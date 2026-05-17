@@ -1,0 +1,6 @@
+{
+  "name": "Combo Pattern Target Is An Expand",
+  "description": "...x ? { y -> 1 } — UNCERTAIN: parse_expansion calls parse_expression at UNARY precedence, which is below CALL/PATTERN. So inside expand, only the bare 'x' is consumed (unary level doesn't include PATTERN). Then ? operator at PATTERN is below the surrounding expression, so does it apply? After parse_expansion returns Expand(x), parse_expression resumes and the next token '?' has precedence PATTERN which is >= NONE, so it attaches as infix on Expand. Result: Pattern(Expand(x),[...]).",
+  "source": "...x ? { y -> 1 }",
+  "expect": "Scope[Pattern(Expand(Identifier(x)),[Branch(Identifier(y),Literal(Integer,1))])]"
+}

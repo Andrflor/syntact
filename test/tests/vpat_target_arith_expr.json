@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target Is Arithmetic Group",
+  "description": "(a + b) ? { 0 -> 'zero' } — pattern target is grouped Add expression.",
+  "source": "(a + b) ? { 0 -> 'zero' }",
+  "expect": "Scope[Pattern(Operator(Add,Identifier(a),Identifier(b)),[Branch(Literal(Integer,0),Literal(String,zero))])]"
+}

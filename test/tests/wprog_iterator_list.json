@@ -1,0 +1,6 @@
+{
+  "name": "Iterator Over List",
+  "description": "List with Nil/Cons cases and iteration.",
+  "source": "List -> {\n  -> Nil:\n  -> Cons:{head tail}\n}\nlength -> {\n  List:l\n  -> l ? {\n    Nil: -> 0\n    Cons:{head tail} -> 1 + length{tail}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(List),Scope[Product(Constraint(Identifier(Nil),nil)),Product(Carve(Constraint(Identifier(Cons),nil),[Identifier(head),Identifier(tail)]))]),Pointing(Identifier(length),Scope[Constraint(Identifier(List),Identifier(l)),Product(Pattern(Identifier(l),[Branch(Constraint(Identifier(Nil),nil),Literal(Integer,0)),Branch(Carve(Constraint(Identifier(Cons),nil),[Identifier(head),Identifier(tail)]),Operator(Add,Literal(Integer,1),Execute(Carve(Identifier(length),[Identifier(tail)]),[])))]))])]"
+}

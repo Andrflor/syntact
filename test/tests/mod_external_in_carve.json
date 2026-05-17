@@ -1,0 +1,6 @@
+{
+  "name": "External Inside Carve Entry",
+  "description": "Config{path -> @lib.fs.root} — a carve where one entry's value is an External property chain.",
+  "source": "Config{path -> @lib.fs.root}",
+  "expect": "Scope[Carve(Identifier(Config),[Pointing(Identifier(path),Property(Property(External(lib,nil),Identifier(fs)),Identifier(root)))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Handler Resonance Then Re-Emit",
+  "description": "Change -< e { value -<< e.value\n  >- Notify{value -> e.value} } — handler that updates resonant state and re-emits.",
+  "source": "Change -< e { value -<< e.value\n  >- Notify{value -> e.value} }",
+  "expect": "Scope[EventPull(e,Identifier(Change),Scope[ResonancePull(Identifier(value),Property(Identifier(e),Identifier(value))),EventPush(nil,Carve(Identifier(Notify),[Pointing(Identifier(value),Property(Identifier(e),Identifier(value)))]))])]"
+}

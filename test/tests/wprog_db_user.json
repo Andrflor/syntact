@@ -1,0 +1,6 @@
+{
+  "name": "Database User Record",
+  "description": "User database record with read/write operations.",
+  "source": "DbUser -> {\n  u64:id\n  String:email\n  u8:age\n}\nfind -> {\n  u64:id\n  -> @db.query{\"users\" id}!\n}\ninsert -> {\n  DbUser:u\n  -> @db.execute{\"INSERT\" u}!\n}",
+  "expect": "Scope[Pointing(Identifier(DbUser),Scope[Constraint(Identifier(u64),Identifier(id)),Constraint(Identifier(String),Identifier(email)),Constraint(Identifier(u8),Identifier(age))]),Pointing(Identifier(find),Scope[Constraint(Identifier(u64),Identifier(id)),Product(Execute(Carve(Property(External(db,nil),Identifier(query)),[Literal(String,users),Identifier(id)]),[]))]),Pointing(Identifier(insert),Scope[Constraint(Identifier(DbUser),Identifier(u)),Product(Execute(Carve(Property(External(db,nil),Identifier(execute)),[Literal(String,INSERT),Identifier(u)]),[]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence And Or Mixed (And on left)",
+  "description": "a & b | c — AND > OR. 'a & b' forms first, then '| c' as outer. Result Or(And(a,b), c).",
+  "source": "a & b | c",
+  "expect": "Scope[Operator(Or,Operator(And,Identifier(a),Identifier(b)),Identifier(c))]"
+}

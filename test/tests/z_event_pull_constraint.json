@@ -1,0 +1,6 @@
+{
+  "name": "Z Event Pull On Constrained Source",
+  "description": "Foo:bar -< e {} — EventPull where the event source is a Constraint(Foo,bar). Empty handler body.",
+  "source": "Foo:bar -< e {}",
+  "expect": "Scope[EventPull(e,Constraint(Identifier(Foo),Identifier(bar)),Scope[])]"
+}

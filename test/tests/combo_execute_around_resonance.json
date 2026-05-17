@@ -1,0 +1,6 @@
+{
+  "name": "Combo Execute Around Resonance Push",
+  "description": "(a >>- b)! — grouped resonance push, then postfix execute on the grouping result. Tests Execute over ResonancePush.",
+  "source": "(a >>- b)!",
+  "expect": "Scope[Execute(ResonancePush(Identifier(a),Identifier(b)),[])]"
+}

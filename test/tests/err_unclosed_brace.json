@@ -1,0 +1,6 @@
+{
+  "name": "Unclosed Open Brace",
+  "description": "{ alone — parse_scope opens, hits EOF inside the for loop, errors that '}' missing, but still returns an empty Scope. UNCERTAIN: error recovery details.",
+  "source": "{",
+  "expect": "Scope[Scope[]]"
+}

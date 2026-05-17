@@ -1,0 +1,6 @@
+{
+  "name": "Z Constraint With Logical RHS",
+  "description": "T:x & u8 — Constraint at CONSTRAINT=8, And at AND=9 (higher). The constraint forms with RHS being Identifier(x), then the And wraps the whole thing. Result: Operator(And, Constraint(T,x), u8).",
+  "source": "T:x & u8",
+  "expect": "Scope[Operator(And,Constraint(Identifier(T),Identifier(x)),Identifier(u8))]"
+}

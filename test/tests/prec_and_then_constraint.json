@@ -1,0 +1,6 @@
+{
+  "name": "Precedence And Then Constraint",
+  "description": "a & b:c — AND > CONSTRAINT. 'a & b' first; right-of-& at AND+1=10, ':' CONSTRAINT=8<10 stops. Then top loop ':c' attaches as ConstraintBind infix on And(a,b). Result Constraint(And(a,b), c).",
+  "source": "a & b:c",
+  "expect": "Scope[Constraint(Operator(And,Identifier(a),Identifier(b)),Identifier(c))]"
+}

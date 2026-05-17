@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Range Then Arithmetic",
+  "description": "1..5 + 1 — RANGE > TERM means 1..5 is formed first, then '+ 1' attaches outside. Existing test range_with_expr_bounds documents this.",
+  "source": "1..5 + 1",
+  "expect": "Scope[Operator(Add,Range(Literal(Integer,1),Literal(Integer,5)),Literal(Integer,1))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Dot Access (a.b)",
+  "description": "a.b — no spaces around dot. PropertyAccess infix.",
+  "source": "a.b",
+  "expect": "Scope[Property(Identifier(a),Identifier(b))]"
+}

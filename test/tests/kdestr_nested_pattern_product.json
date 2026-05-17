@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Whose Branch Product Is A Pattern Over Captured Var",
+  "description": "x ? { Some:(v) -> v ? { 0 -> 'z' -> 'nz' } } — branch product is itself a Pattern keyed on the captured v.",
+  "source": "x ? { Some:(v) -> v ? { 0 -> 'z' -> 'nz' } }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Constraint(Identifier(Some),Identifier(,v)),Pattern(Identifier(v),[Branch(Literal(Integer,0),Literal(String,z)),Branch(nil,Literal(String,nz))]))])]"
+}

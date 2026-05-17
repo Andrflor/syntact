@@ -1,0 +1,6 @@
+{
+  "name": "Branch Product Is Execute",
+  "description": "v ? { 1 -> f{x}! } — branch product is an Execute of a Carve.",
+  "source": "v ? { 1 -> f{x}! }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Execute(Carve(Identifier(f),[Identifier(x)]),[]))])]"
+}

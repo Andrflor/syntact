@@ -1,0 +1,6 @@
+{
+  "name": "Full Counter With Increment And Decrement",
+  "description": "Counter scope with Change event, resonant value binding, handler updating value, and two methods that emit Change. README §Resonance. WILL_FAIL_UNTIL_FIX: 'u8:value >>- Change -> 0' is currently parsed as ResonancePush(u8:value, Pointing(Change,0)); intended Pointing(ResonancePush(u8:value,Change),0). See PARSER_NOTES anomaly #1.",
+  "source": "Counter -> {\n  Change -> { u8:value }\n  u8:value >>- Change -> 0\n  Change -< e { value -<< e.value }\n  increment -> { >- Change{value -> value + 1} }\n  decrement -> { >- Change{value -> value - 1} }\n  -> value\n}",
+  "expect": "Scope[Pointing(Identifier(Counter),Scope[Pointing(Identifier(Change),Scope[Constraint(Identifier(u8),Identifier(value))]),Pointing(ResonancePush(Constraint(Identifier(u8),Identifier(value)),Identifier(Change)),Literal(Integer,0)),EventPull(e,Identifier(Change),Scope[ResonancePull(Identifier(value),Property(Identifier(e),Identifier(value)))]),Pointing(Identifier(increment),Scope[EventPush(nil,Carve(Identifier(Change),[Pointing(Identifier(value),Operator(Add,Identifier(value),Literal(Integer,1)))]))]),Pointing(Identifier(decrement),Scope[EventPush(nil,Carve(Identifier(Change),[Pointing(Identifier(value),Operator(Subtract,Identifier(value),Literal(Integer,1)))]))]),Product(Identifier(value))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Program Counter Increment",
+  "description": "A scope with a counter binding and increment expressed as scope carving (no resonance). Tests nested scope with Pointing inside.",
+  "source": "Counter -> {\n  u8:count -> 0\n  increment -> count + 1\n}",
+  "expect": "Scope[Pointing(Identifier(Counter),Scope[Pointing(Constraint(Identifier(u8),Identifier(count)),Literal(Integer,0)),Pointing(Identifier(increment),Operator(Add,Identifier(count),Literal(Integer,1)))])]"
+}

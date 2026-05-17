@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Range No Parens",
+  "description": "n ? 0..10 — inline pattern with Range (RANGE precedence in inline-RHS).",
+  "source": "n ? 0..10",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Range(Literal(Integer,0),Literal(Integer,10)),nil)])]"
+}

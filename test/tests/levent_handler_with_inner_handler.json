@@ -1,0 +1,6 @@
+{
+  "name": "Nested Event Handler",
+  "description": "Outer -< e { Inner -< f { body } } — handler body contains another EventPull. Tests nested handler resolution structure.",
+  "source": "Outer -< e { Inner -< f { body } }",
+  "expect": "Scope[EventPull(e,Identifier(Outer),Scope[EventPull(f,Identifier(Inner),Scope[Identifier(body)])])]"
+}

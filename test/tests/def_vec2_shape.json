@@ -1,0 +1,6 @@
+{
+  "name": "Default Vec2 Shape Definition",
+  "description": "Vec2 -> { f32:x\\n f32:y } — README §Defaults compose, base shape Vec2.",
+  "source": "Vec2 -> {\n  f32:x\n  f32:y\n}",
+  "expect": "Scope[Pointing(Identifier(Vec2),Scope[Constraint(Identifier(f32),Identifier(x)),Constraint(Identifier(f32),Identifier(y))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Default Port Refined",
+  "description": "Port -> u16 & >0 — README §A small practical comparison. Pointing(Port, And of u16 and prefix-Greater 0).",
+  "source": "Port -> u16 & >0",
+  "expect": "Scope[Pointing(Identifier(Port),Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0))))]"
+}

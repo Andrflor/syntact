@@ -1,0 +1,6 @@
+{
+  "name": "Orphan Right Brace",
+  "description": "} alone at top level — parse_statement sees RightBrace, advances, returns nil. Top-level produces an empty Scope. (Per PARSER_NOTES observation #9.)",
+  "source": "}",
+  "expect": "Scope[]"
+}

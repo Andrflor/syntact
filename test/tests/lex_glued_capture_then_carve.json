@@ -1,0 +1,6 @@
+{
+  "name": "Lex Identifier Glued Capture Then Carve",
+  "description": "foo(c){x->1} — identifier with capture then no-space carve. Tests that capture is consumed first and then the Carve attaches at CALL level.",
+  "source": "foo(c){x->1}",
+  "expect": "Scope[Carve(Identifier(foo,c),[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

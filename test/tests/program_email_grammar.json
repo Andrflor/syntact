@@ -1,0 +1,6 @@
+{
+  "name": "Program Email Grammar Definitions",
+  "description": "Three grammar-style bindings: alpha as char range Or, digit as char range, emailChar combining the three. Tests Or chain with Range and Literal.",
+  "source": "alpha -> 'a'..'z' | 'A'..'Z'\ndigit -> '0'..'9'\nemailChar -> alpha | digit | '.' | '_' | '-'",
+  "expect": "Scope[Pointing(Identifier(alpha),Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z)))),Pointing(Identifier(digit),Range(Literal(String,0),Literal(String,9))),Pointing(Identifier(emailChar),Operator(Or,Operator(Or,Operator(Or,Operator(Or,Identifier(alpha),Identifier(digit)),Literal(String,.)),Literal(String,_)),Literal(String,-)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Less With Add On Right",
+  "description": "a < b + c — TERM > COMPARISON; 'b + c' on the right forms first, then a < (b+c).",
+  "source": "a < b + c",
+  "expect": "Scope[Operator(Less,Identifier(a),Operator(Add,Identifier(b),Identifier(c)))]"
+}

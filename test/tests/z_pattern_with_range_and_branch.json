@@ -1,0 +1,6 @@
+{
+  "name": "Z Pattern Branch Source Is Range",
+  "description": "v ? { 1..5 -> 0 } — Branch source is a Range. UNCERTAIN per anomaly #5 — but Range as a self-contained source bounded by literal-literal should produce Range(1,5).",
+  "source": "v ? { 1..5 -> 0 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Range(Literal(Integer,1),Literal(Integer,5)),Literal(Integer,0))])]"
+}

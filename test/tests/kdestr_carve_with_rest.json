@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Rest Captured",
+  "description": "Record:{first(a) ...rest} — first is captured, rest is expanded for the remainder.",
+  "source": "r ? { Record:{first(a) ...rest} -> rest }",
+  "expect": "Scope[Pattern(Identifier(r),[Branch(Carve(Constraint(Identifier(Record),nil),[Identifier(first,a),Expand(Identifier(rest))]),Identifier(rest))])]"
+}

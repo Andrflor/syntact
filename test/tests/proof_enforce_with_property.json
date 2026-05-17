@@ -1,0 +1,6 @@
+{
+  "name": "Enforce On Property Access",
+  "description": "obj.field ?! >0 — Enforce a positivity constraint on a property. Property is CALL (12), Enforce is PATTERN (2), so the property forms left of ?!.",
+  "source": "obj.field ?! >0",
+  "expect": "Scope[Enforce(Property(Identifier(obj),Identifier(field)),Operator(Greater,nil,Literal(Integer,0)))]"
+}

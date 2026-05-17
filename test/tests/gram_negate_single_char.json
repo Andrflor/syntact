@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Negate Single Char",
+  "description": "~'a' — unary tilde on a char literal.",
+  "source": "~'a'",
+  "expect": "Scope[Operator(Not,nil,Literal(String,a))]"
+}

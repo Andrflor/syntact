@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Long Compare Chain",
+  "description": "a < b > c <= d — all COMPARISON (4) left-assoc. Result Less first then Greater then LessEqual chained.",
+  "source": "a < b > c <= d",
+  "expect": "Scope[Operator(LessEqual,Operator(Greater,Operator(Less,Identifier(a),Identifier(b)),Identifier(c)),Identifier(d))]"
+}

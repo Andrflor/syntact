@@ -1,0 +1,6 @@
+{
+  "name": "Z Execute Postfix On External",
+  "description": "@lib! — Execute postfix on an External reference. Verifies that External can be a collapse target.",
+  "source": "@lib!",
+  "expect": "Scope[Execute(External(lib,nil),[])]"
+}

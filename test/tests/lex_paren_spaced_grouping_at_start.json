@@ -1,0 +1,6 @@
+{
+  "name": "Lex Spaced Paren At Start Is Capture",
+  "description": "Leading spaces then (c) — space_before true but start_pos.offset is not 0 — still LeftParen. parse_grouping handles Identifier ) Identifier as capture-only.",
+  "source": "  (c)",
+  "expect": "Scope[Identifier(,c)]"
+}

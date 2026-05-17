@@ -1,0 +1,6 @@
+{
+  "name": "Program User and Admin via Extension",
+  "description": "User scope with name and age, then admin via +{} extension carrying role. Note: '+{...}' currently parses as Operator(Add,...) per known anomaly. UNCERTAIN: this depends on the documented bug in extension_plus_brace.json.",
+  "source": "User -> {\n  String:name\n  u8:age\n}\nAdmin -> User+{\n  role -> \"admin\"\n}",
+  "expect": "Scope[Pointing(Identifier(User),Scope[Constraint(Identifier(String),Identifier(name)),Constraint(Identifier(u8),Identifier(age))]),Pointing(Identifier(Admin),Operator(Add,Identifier(User),Scope[Pointing(Identifier(role),Literal(String,admin))]))]"
+}

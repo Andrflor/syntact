@@ -1,0 +1,6 @@
+{
+  "name": "Combo Enforce Operating On Pattern Result",
+  "description": "An Enforce whose left is a Pattern and right is true. Tests that ?! sits at PATTERN precedence so the inline pattern source is the value 1, and Enforce wraps the whole Pattern. UNCERTAIN: ?! and ? both at PATTERN; left-associative would re-parse. The pattern is inline so it consumes just the next expr at RANGE precedence.",
+  "source": "v ? 1 ?! true",
+  "expect": "Scope[Enforce(Pattern(Identifier(v),[Branch(Literal(Integer,1),nil)]),Identifier(true))]"
+}

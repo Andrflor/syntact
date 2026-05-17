@@ -1,0 +1,6 @@
+{
+  "name": "chain_compile_time_property_chain",
+  "description": "!a.b.c — CompileTime over 3-deep property.",
+  "source": "!a.b.c",
+  "expect": "Scope[CompileTime(Property(Property(Identifier(a),Identifier(b)),Identifier(c)))]"
+}

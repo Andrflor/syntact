@@ -1,0 +1,6 @@
+{
+  "name": "Program Shape Sum Circle Or Square",
+  "description": "Shape declared with two productions of anonymous shaped bindings. Tests two Product nodes in a scope, each containing a Constraint with nil name.",
+  "source": "Shape -> {\n  -> Circle:\n  -> Square:\n}",
+  "expect": "Scope[Pointing(Identifier(Shape),Scope[Product(Constraint(Identifier(Circle),nil)),Product(Constraint(Identifier(Square),nil))])]"
+}

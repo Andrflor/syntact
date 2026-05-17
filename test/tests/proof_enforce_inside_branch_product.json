@@ -1,0 +1,6 @@
+{
+  "name": "Enforce As Branch Product",
+  "description": "v ? { 1 -> a ?! true } — Enforce appears as the product side of a branch. Should fold into Branch(1, Enforce(a, true)).",
+  "source": "v ? { 1 -> a ?! true }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Enforce(Identifier(a),Identifier(true)))])]"
+}

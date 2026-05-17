@@ -1,0 +1,6 @@
+{
+  "name": "Default Transform Scale Property Chain",
+  "description": "Transform.scale.y — README §Defaults compose: navigation through composed defaults.",
+  "source": "Transform.scale.y",
+  "expect": "Scope[Property(Property(Identifier(Transform),Identifier(scale)),Identifier(y))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Double Plus At Start",
+  "description": "+ + — Plus has no prefix (only infix at TERM). First + errors, recovery skips to EOF. UNCERTAIN: empty top-level Scope is the expected resilient outcome.",
+  "source": "+ +",
+  "expect": "Scope[]"
+}

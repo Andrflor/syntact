@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Within Pattern Branch Body",
+  "description": "v ? { 0 -> x -<< 1 } — branch product is a ResonancePull. ASSIGNMENT precedence ensures Branch source=0 product=ResonancePull(x,1).",
+  "source": "v ? { 0 -> x -<< 1 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,0),ResonancePull(Identifier(x),Literal(Integer,1)))])]"
+}

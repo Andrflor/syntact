@@ -1,0 +1,6 @@
+{
+  "name": "Matrix 2x2 With Determinant",
+  "description": "2x2 matrix determinant.",
+  "source": "Matrix2 -> {\n  f64:a\n  f64:b\n  f64:c\n  f64:d\n}\ndet -> {\n  Matrix2:m\n  -> m.a * m.d - m.b * m.c\n}",
+  "expect": "Scope[Pointing(Identifier(Matrix2),Scope[Constraint(Identifier(f64),Identifier(a)),Constraint(Identifier(f64),Identifier(b)),Constraint(Identifier(f64),Identifier(c)),Constraint(Identifier(f64),Identifier(d))]),Pointing(Identifier(det),Scope[Constraint(Identifier(Matrix2),Identifier(m)),Product(Operator(Subtract,Operator(Multiply,Property(Identifier(m),Identifier(a)),Property(Identifier(m),Identifier(d))),Operator(Multiply,Property(Identifier(m),Identifier(b)),Property(Identifier(m),Identifier(c)))))])]"
+}

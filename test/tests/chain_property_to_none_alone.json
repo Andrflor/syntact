@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_to_none_alone",
+  "description": "'a.' alone at top level — PropertyToNone infix on 'a' (no space before, EOF after counted as space). Property(a, nil). UNCERTAIN: depends on whether lexer treats EOF as space-after for the '.' token.",
+  "source": "a.",
+  "expect": "Scope[Property(Identifier(a),nil)]"
+}

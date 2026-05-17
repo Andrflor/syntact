@@ -1,0 +1,6 @@
+{
+  "name": "tok_triple_asterisk",
+  "description": "a***b — Asterisk is infix-only; first '*' infix, second '*' as RHS prefix has no rule. UNCERTAIN: empty Scope[].",
+  "source": "a***b",
+  "expect": "Scope[]"
+}

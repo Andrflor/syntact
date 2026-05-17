@@ -1,0 +1,6 @@
+{
+  "name": "Z Execute On Property Chain",
+  "description": "a.b! — Execute postfix at CALL on a Property chain.",
+  "source": "a.b!",
+  "expect": "Scope[Execute(Property(Identifier(a),Identifier(b)),[])]"
+}

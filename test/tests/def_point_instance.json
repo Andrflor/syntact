@@ -1,0 +1,6 @@
+{
+  "name": "Default Point Instance",
+  "description": "Point:p — shaped binding (the instance from README §Defaults).",
+  "source": "Point:p",
+  "expect": "Scope[Constraint(Identifier(Point),Identifier(p))]"
+}

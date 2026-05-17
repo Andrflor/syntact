@@ -1,0 +1,6 @@
+{
+  "name": "Carve With Empty Pointing Production",
+  "description": "Foo{->} — open carve, then a Product (-> with no left side, no right operand). UNCERTAIN: parse_pointing_push as prefix would parse a left-less pointing as Product(nil)? Per other tests, '-> x' yields Product(x). With nothing after '->', the Product target is nil. Best guess: Carve(Foo,[]) — Product is dropped because target is missing.",
+  "source": "Foo{->}",
+  "expect": "Scope[Carve(Identifier(Foo),[])]"
+}

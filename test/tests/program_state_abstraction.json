@@ -1,0 +1,6 @@
+{
+  "name": "Program State Abstraction Scope",
+  "description": "State scope with pulled T type and shaped initial binding plus an inner update method using EventPush carve.",
+  "source": "State -> {\n  T <- none\n  T:initial\n  set -> {\n    T:value\n    >- Update{value -> value}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(State),Scope[PointingPull(Identifier(T),Identifier(none)),Constraint(Identifier(T),Identifier(initial)),Pointing(Identifier(set),Scope[Constraint(Identifier(T),Identifier(value)),EventPush(nil,Carve(Identifier(Update),[Pointing(Identifier(value),Identifier(value))]))])])]"
+}

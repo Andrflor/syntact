@@ -1,0 +1,6 @@
+{
+  "name": "Unknown Default Inside Larger Scope",
+  "description": "A proof-style symbolic binding (T:n -> ??) inside a larger scope alongside a normal pointing.",
+  "source": "{\n  T:n -> ??\n  -> n\n}",
+  "expect": "Scope[Scope[Pointing(Constraint(Identifier(T),Identifier(n)),Unknown),Product(Identifier(n))]]"
+}

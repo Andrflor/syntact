@@ -1,0 +1,6 @@
+{
+  "name": "Z External As Pattern Target",
+  "description": "@flag ? { 1 -> 0 } — External reference used as the target of an inline-Pattern matching.",
+  "source": "@flag ? { 1 -> 0 }",
+  "expect": "Scope[Pattern(External(flag,nil),[Branch(Literal(Integer,1),Literal(Integer,0))])]"
+}

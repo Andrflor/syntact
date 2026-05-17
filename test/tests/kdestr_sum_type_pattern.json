@@ -1,0 +1,6 @@
+{
+  "name": "Pattern On Sum Type Scope",
+  "description": "Shape -> { -> Circle: -> Square: -> Triangle: } then s ? { Circle: -> 1 Square: -> 2 Triangle: -> 3 }. Two top-level statements.",
+  "source": "Shape -> { -> Circle: -> Square: -> Triangle: }\ns ? { Circle: -> 1 Square: -> 2 Triangle: -> 3 }",
+  "expect": "Scope[Pointing(Identifier(Shape),Scope[Product(Constraint(Identifier(Circle),nil)),Product(Constraint(Identifier(Square),nil)),Product(Constraint(Identifier(Triangle),nil))]),Pattern(Identifier(s),[Branch(Constraint(Identifier(Circle),nil),Literal(Integer,1)),Branch(Constraint(Identifier(Square),nil),Literal(Integer,2)),Branch(Constraint(Identifier(Triangle),nil),Literal(Integer,3))])]"
+}

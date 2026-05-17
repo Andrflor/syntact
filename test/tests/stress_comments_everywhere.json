@@ -1,0 +1,6 @@
+{
+  "name": "Stress Comments Between Many Tokens",
+  "description": "Sources with line and block comments scattered among tokens. Comments are stripped by the lexer and do not appear in the AST.",
+  "source": "// header\na /* between name */ -> /* between arrow */ 1 // trailing\n/* full line */\nb -> /* mid */ 2",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]"
+}

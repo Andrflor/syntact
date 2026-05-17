@@ -1,0 +1,6 @@
+{
+  "name": "Currency Converter",
+  "description": "Currency conversion with rate table.",
+  "source": "Currency -> {\n  -> USD:\n  -> EUR:\n  -> JPY:\n}\nconvert -> {\n  Currency:from\n  Currency:to\n  f64:amount\n  -> amount * rate{from to}!\n}",
+  "expect": "Scope[Pointing(Identifier(Currency),Scope[Product(Constraint(Identifier(USD),nil)),Product(Constraint(Identifier(EUR),nil)),Product(Constraint(Identifier(JPY),nil))]),Pointing(Identifier(convert),Scope[Constraint(Identifier(Currency),Identifier(from)),Constraint(Identifier(Currency),Identifier(to)),Constraint(Identifier(f64),Identifier(amount)),Product(Operator(Multiply,Identifier(amount),Execute(Carve(Identifier(rate),[Identifier(from),Identifier(to)]),[])))])]"
+}

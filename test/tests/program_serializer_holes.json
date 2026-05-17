@@ -1,0 +1,6 @@
+{
+  "name": "Program Serializer With Holes",
+  "description": "Serializer pattern with two pulled type variables S and R and two scoped operations. Tests two PointingPull (with empty scope as default) and Pointing with nested scope.",
+  "source": "Serializer -> {\n  S <- {}\n  R <- {}\n  encode -> {\n    S:value\n    -> R:\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Serializer),Scope[PointingPull(Identifier(S),Scope[]),PointingPull(Identifier(R),Scope[]),Pointing(Identifier(encode),Scope[Constraint(Identifier(S),Identifier(value)),Product(Constraint(Identifier(R),nil))])])]"
+}

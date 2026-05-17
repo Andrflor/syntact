@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Double Unary Minus",
+  "description": "--x — two prefix minuses. UNCERTAIN: parse_unary at UNARY precedence calls parse_expression with .UNARY, so inner can also be a unary minus.",
+  "source": "--x",
+  "expect": "Scope[Operator(Subtract,nil,Operator(Subtract,nil,Identifier(x)))]"
+}

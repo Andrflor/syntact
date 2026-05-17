@@ -1,0 +1,6 @@
+{
+  "name": "Default Anonymous Square",
+  "description": "Square: — same pattern; an anonymous shaped binding to express 'a square exists with defaults'.",
+  "source": "Square:",
+  "expect": "Scope[Constraint(Identifier(Square),nil)]"
+}

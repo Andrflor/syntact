@@ -1,0 +1,6 @@
+{
+  "name": "Maybe Monad Skeleton",
+  "description": "Maybe with Some/None and map/flatMap/getOrElse.",
+  "source": "Maybe -> {\n  -> Some:\n  -> None:\n}\nmap -> {\n  Maybe:m\n  f\n  -> m ? {\n    Some:(v) -> Some:f{v}!\n    None: -> None:\n  }\n}\ngetOrElse -> {\n  Maybe:m\n  d\n  -> m ? {\n    Some:(v) -> v\n    None: -> d\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Maybe),Scope[Product(Constraint(Identifier(Some),nil)),Product(Constraint(Identifier(None),nil))]),Pointing(Identifier(map),Scope[Constraint(Identifier(Maybe),Identifier(m)),Identifier(f),Product(Pattern(Identifier(m),[Branch(Constraint(Identifier(Some),Identifier(,v)),Constraint(Identifier(Some),Execute(Carve(Identifier(f),[Identifier(v)]),[]))),Branch(Constraint(Identifier(None),nil),Constraint(Identifier(None),nil))]))]),Pointing(Identifier(getOrElse),Scope[Constraint(Identifier(Maybe),Identifier(m)),Identifier(d),Product(Pattern(Identifier(m),[Branch(Constraint(Identifier(Some),Identifier(,v)),Identifier(v)),Branch(Constraint(Identifier(None),nil),Identifier(d))]))])]"
+}

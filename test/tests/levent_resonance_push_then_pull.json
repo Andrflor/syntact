@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push And Pull In Same Scope",
+  "description": "Two-statement scope: declare resonant binding via >>- and update via -<<.",
+  "source": "{\n  value >>- Update\n  value -<< 42\n}",
+  "expect": "Scope[Scope[ResonancePush(Identifier(value),Identifier(Update)),ResonancePull(Identifier(value),Literal(Integer,42))]]"
+}

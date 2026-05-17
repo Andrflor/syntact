@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_parens_x",
+  "description": "'((x))' — nested grouping. parse_grouping returns the inner expression as-is, so ((x)) reduces to Identifier(x). UNCERTAIN: depends on how parse_grouping handles nested parens.",
+  "source": "((x))",
+  "expect": "Scope[Identifier(x)]"
+}

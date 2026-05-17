@@ -1,0 +1,6 @@
+{
+  "name": "Spread Followed By Pointing",
+  "description": "...@core\nfoo -> 1 — two top-level statements: an Expand and a Pointing.",
+  "source": "...@core\nfoo -> 1",
+  "expect": "Scope[Expand(External(core,nil)),Pointing(Identifier(foo),Literal(Integer,1))]"
+}

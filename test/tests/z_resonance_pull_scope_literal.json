@@ -1,0 +1,6 @@
+{
+  "name": "Z Resonance Pull With Scope Literal",
+  "description": "state -<< {a b} — ResonancePull (ASSIGNMENT) with a Scope literal as the RHS source.",
+  "source": "state -<< {a b}",
+  "expect": "Scope[ResonancePull(Identifier(state),Scope[Identifier(a),Identifier(b)])]"
+}

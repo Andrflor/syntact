@@ -1,0 +1,6 @@
+{
+  "name": "tok_ident_two_captures",
+  "description": "'Foo(x)(y)' — Identifier(Foo,x) consumes first capture in parse_identifier. Then second '(y)' as LeftParenNoSpace infix calls parse_left_paren which falls into parse_grouping and returns nil (parser obs). UNCERTAIN: probably Scope[Identifier(Foo,x)].",
+  "source": "Foo(x)(y)",
+  "expect": "Scope[Identifier(Foo,x)]"
+}

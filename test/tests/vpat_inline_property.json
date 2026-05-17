@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Property",
+  "description": "n ? a.b — inline pattern with property chain as source.",
+  "source": "n ? a.b",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Property(Identifier(a),Identifier(b)),nil)])]"
+}

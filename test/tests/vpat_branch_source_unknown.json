@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Unknown",
+  "description": "v ? { ?? -> 'unset' } — branch source is the Unknown sentinel.",
+  "source": "v ? { ?? -> 'unset' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Unknown,Literal(String,unset))])]"
+}

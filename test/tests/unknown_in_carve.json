@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As One Of Carve Entries",
+  "description": "T{a ?? b} — Unknown can sit beside named entries inside a carve.",
+  "source": "T{a ?? b}",
+  "expect": "Scope[Carve(Identifier(T),[Identifier(a),Unknown,Identifier(b)])]"
+}

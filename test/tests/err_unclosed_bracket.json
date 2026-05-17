@@ -1,0 +1,6 @@
+{
+  "name": "Unclosed Open Bracket",
+  "description": "[ alone — LeftBracket has no prefix rule, only an infix one for parallel execution wrappers. As a prefix it errors and recovery should produce an empty scope. UNCERTAIN.",
+  "source": "[",
+  "expect": "Scope[]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Dollar Sign Invalid Token",
+  "description": "a $ b — $ is not recognized by the lexer and emits an Invalid token. Parser should error on it and recover to 'b'. UNCERTAIN: best guess is the 'a' parses, recovery on $ skips to b on the same line.",
+  "source": "a $ b",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

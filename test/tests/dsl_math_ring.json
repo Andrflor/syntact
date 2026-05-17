@@ -1,0 +1,6 @@
+{
+  "name": "Math Algebra Ring Structure",
+  "description": "Ring -> { T <- none\n  add -> { T:a T:b -> a + b }\n  mul -> { T:a T:b -> a * b }\n  zero -> 0\n  one -> 1 } — basic ring scope.",
+  "source": "Ring -> { T <- none\n  add -> { T:a T:b -> a + b }\n  mul -> { T:a T:b -> a * b }\n  zero -> 0\n  one -> 1 }",
+  "expect": "Scope[Pointing(Identifier(Ring),Scope[PointingPull(Identifier(T),Identifier(none)),Pointing(Identifier(add),Scope[Constraint(Identifier(T),Identifier(a)),Constraint(Identifier(T),Identifier(b)),Product(Operator(Add,Identifier(a),Identifier(b)))]),Pointing(Identifier(mul),Scope[Constraint(Identifier(T),Identifier(a)),Constraint(Identifier(T),Identifier(b)),Product(Operator(Multiply,Identifier(a),Identifier(b)))]),Pointing(Identifier(zero),Literal(Integer,0)),Pointing(Identifier(one),Literal(Integer,1))])]"
+}

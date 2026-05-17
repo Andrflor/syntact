@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Zero Branches",
+  "description": "n ? {} — empty braces, zero branches.",
+  "source": "n ? {}",
+  "expect": "Scope[Pattern(Identifier(n),[])]"
+}

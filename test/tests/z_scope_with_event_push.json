@@ -1,0 +1,6 @@
+{
+  "name": "Z Scope Literal Containing Event Push",
+  "description": "{>- Log} — a scope-literal expression whose single statement is a bare EventPush (no source, only emitted event).",
+  "source": "{>- Log}",
+  "expect": "Scope[Scope[EventPush(nil,Identifier(Log))]]"
+}

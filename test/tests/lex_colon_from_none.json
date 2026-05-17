@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon FromNone (space before, no space after)",
+  "description": "{a :b} — ConstraintFromNone variant, so 'a' is a sibling identifier then ':b' is Constraint(nil, b).",
+  "source": "{a :b}",
+  "expect": "Scope[Scope[Identifier(a),Constraint(nil,Identifier(b))]]"
+}

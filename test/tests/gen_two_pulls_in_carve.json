@@ -1,0 +1,6 @@
+{
+  "name": "Two Pull Bindings In Carve",
+  "description": "Map{K <- String V <- u8} — carve with two pull bindings filling K and V.",
+  "source": "Map{K <- String V <- u8}",
+  "expect": "Scope[Carve(Identifier(Map),[PointingPull(Identifier(K),Identifier(String)),PointingPull(Identifier(V),Identifier(u8))])]"
+}

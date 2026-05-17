@@ -1,0 +1,6 @@
+{
+  "name": "Branch Product Is Scope",
+  "description": "v ? { 1 -> { a b c } } — branch product is a scope literal.",
+  "source": "v ? { 1 -> { a b c } }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Scope[Identifier(a),Identifier(b),Identifier(c)])])]"
+}

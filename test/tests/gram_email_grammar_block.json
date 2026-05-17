@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Email Block",
+  "description": "Email -> { String:(s) -> \"email@example.com\"\\n -> s ?! emailChar*1.. + '@' + emailChar*1.. + '.' + alpha*2.. } — README §Grammars block. The production is Product(Enforce(Identifier(s), <chain>)). The chain is Add-left-associative since '+' is TERM; each '*1..' is Operator(Multiply, X, Range(1,nil)) and '*2..' is Range(2,nil). The capture binding form String:(s) at CONSTRAINT level produces Constraint(Identifier(String),Identifier(,s)), then Pointing to the literal.",
+  "source": "Email -> {\n  String:(s) -> \"email@example.com\"\n  -> s ?!\n    emailChar*1..\n    + '@'\n    + emailChar*1..\n    + '.'\n    + alpha*2..\n}",
+  "expect": "Scope[Pointing(Identifier(Email),Scope[Pointing(Constraint(Identifier(String),Identifier(,s)),Literal(String,email@example.com)),Product(Enforce(Identifier(s),Operator(Add,Operator(Add,Operator(Add,Operator(Add,Operator(Multiply,Identifier(emailChar),Range(Literal(Integer,1),nil)),Literal(String,@)),Operator(Multiply,Identifier(emailChar),Range(Literal(Integer,1),nil))),Literal(String,.)),Operator(Multiply,Identifier(alpha),Range(Literal(Integer,2),nil)))))])]"
+}

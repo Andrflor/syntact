@@ -1,0 +1,6 @@
+{
+  "name": "Lex Commas Act As Statement Separators",
+  "description": "{a,b,c} — commas are treated as newlines by scan_newline. Three sibling statements.",
+  "source": "{a,b,c}",
+  "expect": "Scope[Scope[Identifier(a),Identifier(b),Identifier(c)]]"
+}

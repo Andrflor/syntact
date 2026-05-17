@@ -1,0 +1,6 @@
+{
+  "name": "Unterminated Double-Quoted String",
+  "description": "\"hello — scan_string never finds the closing delimiter; emits an Invalid token. Parser errors. UNCERTAIN: result is an empty top-level Scope.",
+  "source": "\"hello",
+  "expect": "Scope[]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Dot Inside Constraint Right Side",
+  "description": "T:a.b — ConstraintBind binds left T; right is parsed at CALL+1=13 which doesn't include CALL (PropertyAccess at CALL=12), so '.b' does NOT attach inside the constraint. WILL_FAIL_UNTIL_FIX: semantically 'a.b' should be the bound name, but the parser cuts at CALL+1. Then Property attaches via outer loop on the whole Constraint. Expect Property(Constraint(T,a),b).",
+  "source": "T:a.b",
+  "expect": "Scope[Property(Constraint(Identifier(T),Identifier(a)),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Default Adult Age Refined",
+  "description": "AdultAge -> u8 & >=18 & <=120 — chained And refinements, left-associative.",
+  "source": "AdultAge -> u8 & >=18 & <=120",
+  "expect": "Scope[Pointing(Identifier(AdultAge),Operator(And,Operator(And,Identifier(u8),Operator(GreaterEqual,nil,Literal(Integer,18))),Operator(LessEqual,nil,Literal(Integer,120))))]"
+}

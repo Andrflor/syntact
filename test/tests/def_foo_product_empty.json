@@ -1,0 +1,6 @@
+{
+  "name": "Default Foo Product Empty",
+  "description": "Foo -> { -> {} } — Foo whose body has a Product yielding an empty scope.",
+  "source": "Foo -> { -> {} }",
+  "expect": "Scope[Pointing(Identifier(Foo),Scope[Product(Scope[])])]"
+}

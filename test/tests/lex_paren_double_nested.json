@@ -1,0 +1,6 @@
+{
+  "name": "Lex Double Parens",
+  "description": "((x)) — outer LeftParen, inner LeftParenNoSpace (no space before). Both are pure grouping; the inner returns Identifier(,x), outer just unwraps it.",
+  "source": "((x))",
+  "expect": "Scope[Identifier(,x)]"
+}

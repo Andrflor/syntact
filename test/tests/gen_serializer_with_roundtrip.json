@@ -1,0 +1,6 @@
+{
+  "name": "Serializer With Round-Trip Law",
+  "description": "Adds roundTrip <- {...} law. README §Pull bindings end. UNCERTAIN: '?? -> ...' inside scope as pull binding default — '<- {' is space-delimited '<-' followed by LeftBrace, parses pull binding with scope default.",
+  "source": "Serializer -> {\n  S <- {}\n  R <- {}\n  encode -> { S:value -> R: }\n  decode -> { R:value -> S: }\n  roundTrip <- { S:value -> ?? }\n}",
+  "expect": "Scope[Pointing(Identifier(Serializer),Scope[PointingPull(Identifier(S),Scope[]),PointingPull(Identifier(R),Scope[]),Pointing(Identifier(encode),Scope[Pointing(Constraint(Identifier(S),Identifier(value)),Constraint(Identifier(R),nil))]),Pointing(Identifier(decode),Scope[Pointing(Constraint(Identifier(R),Identifier(value)),Constraint(Identifier(S),nil))]),PointingPull(Identifier(roundTrip),Scope[Pointing(Constraint(Identifier(S),Identifier(value)),Unknown)])])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lone Less-Than As Prefix",
+  "description": "< alone — Less has parse_prefix_comparison as its prefix handler; followed by EOF the operand parse fails. UNCERTAIN: most likely empty Scope (operand-less prefix yields nil).",
+  "source": "<",
+  "expect": "Scope[]"
+}

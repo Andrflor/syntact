@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Enforce With Add",
+  "description": "a + b ?! c — Enforce at PATTERN=2; '?!' parses right at PATTERN+1=3. TERM > PATTERN so 'a + b' first as left; right is parsed at 3, 'c' returned (EQUALITY etc not present). Result Enforce(Add(a,b), c).",
+  "source": "a + b ?! c",
+  "expect": "Scope[Enforce(Operator(Add,Identifier(a),Identifier(b)),Identifier(c))]"
+}

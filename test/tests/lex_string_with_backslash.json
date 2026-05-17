@@ -1,0 +1,6 @@
+{
+  "name": "Lex String With Escaped Backslash",
+  "description": "A string containing an escaped quote. The lexer keeps the escape characters in the text and treats the next char as part of the string. UNCERTAIN: lexer stores raw between delimiters including '\\\\\"' verbatim.",
+  "source": "\"hello\\\"world\"",
+  "expect": "Scope[Literal(String,hello\\\"world)]"
+}

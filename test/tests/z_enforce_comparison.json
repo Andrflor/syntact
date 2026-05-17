@@ -1,0 +1,6 @@
+{
+  "name": "Z Enforce With Comparison RHS",
+  "description": "x ?! a < b — Enforce at PATTERN, Less at COMPARISON (higher). Less forms first then becomes Enforce predicate.",
+  "source": "x ?! a < b",
+  "expect": "Scope[Enforce(Identifier(x),Operator(Less,Identifier(a),Identifier(b)))]"
+}

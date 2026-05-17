@@ -1,0 +1,6 @@
+{
+  "name": "Or With Three Alternatives In Branch",
+  "description": "v ? { 1 | 2 | 3 -> 'small' } — Or chain in branch source.",
+  "source": "v ? { 1 | 2 | 3 -> 'small' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Operator(Or,Literal(Integer,1),Literal(Integer,2)),Literal(Integer,3)),Literal(String,small))])]"
+}

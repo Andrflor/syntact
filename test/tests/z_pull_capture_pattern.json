@@ -1,0 +1,6 @@
+{
+  "name": "Z Pull Binding With Capture Pattern",
+  "description": "(x) <- src — Anonymous capture as the LHS of a PointingPull. Identifier(,x) as from.",
+  "source": "(x) <- src",
+  "expect": "Scope[PointingPull(Identifier(,x),Identifier(src))]"
+}

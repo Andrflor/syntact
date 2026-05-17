@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Captures In Branch",
+  "description": "v ? { Circle:(c) | Square:(s) -> area } — Or of two anonymous-capture Constraints as branch source.",
+  "source": "v ? { Circle:(c) | Square:(s) -> area }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Constraint(Identifier(Circle),Identifier(,c)),Constraint(Identifier(Square),Identifier(,s))),Identifier(area))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Or Xor Or",
+  "description": "a | b ^ c | d — Xor (AND=9) > Or (OR=7). 'b ^ c' first inside the first |'s right. Then second '| d' attaches at top. Result Or(Or(a, Xor(b,c)), d).",
+  "source": "a | b ^ c | d",
+  "expect": "Scope[Operator(Or,Operator(Or,Identifier(a),Operator(Xor,Identifier(b),Identifier(c))),Identifier(d))]"
+}

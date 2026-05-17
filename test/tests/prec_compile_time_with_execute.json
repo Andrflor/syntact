@@ -1,0 +1,6 @@
+{
+  "name": "Precedence CompileTime With Postfix Execute",
+  "description": "!foo! — first '!' is prefix CompileTime; operand parsed at UNARY. 'foo' then second '!' (Execute postfix, CALL=12 ≥ 10) attaches inside. Result CompileTime(Execute(foo,[])).",
+  "source": "!foo!",
+  "expect": "Scope[CompileTime(Execute(Identifier(foo),[]))]"
+}

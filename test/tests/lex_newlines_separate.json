@@ -1,0 +1,6 @@
+{
+  "name": "Lex Newlines Separate Statements",
+  "description": "{a\\nb\\nc} — newlines between three statements produce the same AST as commas.",
+  "source": "{a\nb\nc}",
+  "expect": "Scope[Scope[Identifier(a),Identifier(b),Identifier(c)]]"
+}

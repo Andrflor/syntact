@@ -1,0 +1,6 @@
+{
+  "name": "Todo List With Toggle",
+  "description": "Todo with state and toggle event.",
+  "source": "Todo -> {\n  String:title\n  bool:done -> false\n}\nToggle -> { u64:id }\ntoggle_handler -> {\n  Todo:t\n  Toggle -< e {\n    t.done >>- ~t.done\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Todo),Scope[Constraint(Identifier(String),Identifier(title)),Pointing(Constraint(Identifier(bool),Identifier(done)),Identifier(false))]),Pointing(Identifier(Toggle),Scope[Constraint(Identifier(u64),Identifier(id))]),Pointing(Identifier(toggle_handler),Scope[Constraint(Identifier(Todo),Identifier(t)),EventPull(e,Identifier(Toggle),Scope[ResonancePush(Property(Identifier(t),Identifier(done)),Operator(Not,nil,Property(Identifier(t),Identifier(done))))])])]"
+}

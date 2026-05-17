@@ -1,0 +1,6 @@
+{
+  "name": "Program Role Then User Carving",
+  "description": "Role with two productions (member, admin) then User uses Role:role default to member. AdminUser carves to override role. Tests Pointing chain with same-name carving.",
+  "source": "Role -> {\n  -> \"member\"\n  -> \"admin\"\n}\nUser -> {\n  Role:role -> \"member\"\n}\nAdminUser -> User{\n  role -> \"admin\"\n}",
+  "expect": "Scope[Pointing(Identifier(Role),Scope[Product(Literal(String,member)),Product(Literal(String,admin))]),Pointing(Identifier(User),Scope[Pointing(Constraint(Identifier(Role),Identifier(role)),Literal(String,member))]),Pointing(Identifier(AdminUser),Carve(Identifier(User),[Pointing(Identifier(role),Literal(String,admin))]))]"
+}

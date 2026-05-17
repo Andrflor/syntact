@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Inline Pattern With Property In Source",
+  "description": "x ? a.b — inline at .RANGE; CALL > RANGE so 'a.b' is full source. Result Pattern(x, [Branch(Property(a,b), nil)]).",
+  "source": "x ? a.b",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Property(Identifier(a),Identifier(b)),nil)])]"
+}

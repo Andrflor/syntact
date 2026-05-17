@@ -1,0 +1,6 @@
+{
+  "name": "tok_triple_question",
+  "description": "'???' — '??' Unknown then single '?' which has no prefix rule at statement start (Question is infix-only for parse_pattern). UNCERTAIN: probably Scope[Unknown] (second statement fails).",
+  "source": "???",
+  "expect": "Scope[Unknown]"
+}

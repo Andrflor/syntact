@@ -1,0 +1,6 @@
+{
+  "name": "Lex Hexadecimal With Mixed Case Letters",
+  "description": "0xAbCd is a hex literal; is_hex_digit accepts both lowercase and uppercase a-f.",
+  "source": "0xAbCd",
+  "expect": "Scope[Literal(Hexadecimal,0xAbCd)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace At Offset 0 With Multi Items",
+  "description": "{a b c} at offset 0 — LeftBrace (start_pos.offset==0). Items separated by space act as siblings within scope.",
+  "source": "{a b c}",
+  "expect": "Scope[Scope[Identifier(a),Identifier(b),Identifier(c)]]"
+}

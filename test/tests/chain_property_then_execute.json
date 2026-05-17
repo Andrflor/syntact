@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_then_execute",
+  "description": "a.b! — Property then postfix Execute. Execute(Property(a,b),[]).",
+  "source": "a.b!",
+  "expect": "Scope[Execute(Property(Identifier(a),Identifier(b)),[])]"
+}

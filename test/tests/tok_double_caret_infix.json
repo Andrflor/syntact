@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_caret_infix",
+  "description": "a^^b — first '^' infix Xor; RHS prefix '^' has no rule. UNCERTAIN: empty Scope[].",
+  "source": "a^^b",
+  "expect": "Scope[]"
+}

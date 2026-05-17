@@ -1,0 +1,6 @@
+{
+  "name": "Form Validation",
+  "description": "Form with email and password validation.",
+  "source": "Form -> {\n  String:email\n  String:password\n}\nvalidEmail -> {\n  String:s\n  -> s = \"\" ? {\n    true -> false\n    -> true\n  }\n}\nvalidate -> {\n  Form:f\n  -> validEmail{f.email}!\n}",
+  "expect": "Scope[Pointing(Identifier(Form),Scope[Constraint(Identifier(String),Identifier(email)),Constraint(Identifier(String),Identifier(password))]),Pointing(Identifier(validEmail),Scope[Constraint(Identifier(String),Identifier(s)),Product(Pattern(Operator(Equal,Identifier(s),Literal(String,)),[Branch(Identifier(true),Identifier(false)),Branch(nil,Identifier(true))]))]),Pointing(Identifier(validate),Scope[Constraint(Identifier(Form),Identifier(f)),Product(Execute(Carve(Identifier(validEmail),[Property(Identifier(f),Identifier(email))]),[]))])]"
+}

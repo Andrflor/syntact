@@ -1,0 +1,6 @@
+{
+  "name": "Unknown Standalone",
+  "description": "?? alone at top level produces a single Unknown node.",
+  "source": "??",
+  "expect": "Scope[Unknown]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Simple Spread Of External",
+  "description": "...@lib — Expand of External alone with no property chain.",
+  "source": "...@lib",
+  "expect": "Scope[Expand(External(lib,nil))]"
+}

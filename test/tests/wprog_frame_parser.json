@@ -1,0 +1,6 @@
+{
+  "name": "Length-Prefix Frame Parser",
+  "description": "Frame with length and payload, decoder pattern.",
+  "source": "Frame -> {\n  u32:length\n  String:payload\n}\ndecode -> {\n  bytes\n  -> bytes ? {\n    {len(l) rest} -> Frame{length -> l  payload -> rest}\n    -> none\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Frame),Scope[Constraint(Identifier(u32),Identifier(length)),Constraint(Identifier(String),Identifier(payload))]),Pointing(Identifier(decode),Scope[Identifier(bytes),Product(Pattern(Identifier(bytes),[Branch(Scope[Identifier(len,l),Identifier(rest)],Carve(Identifier(Frame),[Pointing(Identifier(length),Identifier(l)),Pointing(Identifier(payload),Identifier(rest))])),Branch(nil,Identifier(none))]))])]"
+}

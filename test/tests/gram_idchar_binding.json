@@ -1,0 +1,6 @@
+{
+  "name": "Grammar IdChar Binding",
+  "description": "idChar -> 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-' — README §Grammars: chain of Or with mixed ranges and chars.",
+  "source": "idChar -> 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-'",
+  "expect": "Scope[Pointing(Identifier(idChar),Operator(Or,Operator(Or,Operator(Or,Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z))),Range(Literal(String,0),Literal(String,9))),Literal(String,_)),Literal(String,-)))]"
+}

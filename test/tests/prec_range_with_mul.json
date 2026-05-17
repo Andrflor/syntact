@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Range With Multiply",
+  "description": "a..b * c — RANGE (11) > FACTOR (6). 'a..b' first, then '* c' outer.",
+  "source": "a..b * c",
+  "expect": "Scope[Operator(Multiply,Range(Identifier(a),Identifier(b)),Identifier(c))]"
+}

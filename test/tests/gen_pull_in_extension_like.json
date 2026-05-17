@@ -1,0 +1,6 @@
+{
+  "name": "Pull Inside Inner Scope Used As Generic",
+  "description": "Container -> { T <- none\n  Item -> { T:value }\n} — pull binding shared inside Container, referenced inside Item.",
+  "source": "Container -> { T <- none\n  Item -> { T:value }\n}",
+  "expect": "Scope[Pointing(Identifier(Container),Scope[PointingPull(Identifier(T),Identifier(none)),Pointing(Identifier(Item),Scope[Constraint(Identifier(T),Identifier(value))])])]"
+}

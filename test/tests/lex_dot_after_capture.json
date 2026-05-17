@@ -1,0 +1,6 @@
+{
+  "name": "Lex Dot Glued After Capture",
+  "description": "foo(c).x — PropertyAccess after a captured identifier. Property(Identifier(foo,c), Identifier(x)).",
+  "source": "foo(c).x",
+  "expect": "Scope[Property(Identifier(foo,c),Identifier(x))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Program Identity With Pull Binding",
+  "description": "Identity function via two pulled bindings T and value. Tests scope with PointingPull bindings and a production using a captured value.",
+  "source": "identity -> {\n  T <- none\n  value <- none\n  -> value\n}",
+  "expect": "Scope[Pointing(Identifier(identity),Scope[PointingPull(Identifier(T),Identifier(none)),PointingPull(Identifier(value),Identifier(none)),Product(Identifier(value))])]"
+}

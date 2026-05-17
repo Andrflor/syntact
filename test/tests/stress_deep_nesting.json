@@ -1,0 +1,6 @@
+{
+  "name": "Stress Deeply Nested Scopes",
+  "description": "A 10-level deep scope nesting using '-> {...}'. Each level contains one Pointing whose value is the next scope.",
+  "source": "a -> {\nb -> {\nc -> {\nd -> {\ne -> {\nf -> {\ng -> {\nh -> {\ni -> {\nj -> 1\n}\n}\n}\n}\n}\n}\n}\n}\n}",
+  "expect": "Scope[Pointing(Identifier(a),Scope[Pointing(Identifier(b),Scope[Pointing(Identifier(c),Scope[Pointing(Identifier(d),Scope[Pointing(Identifier(e),Scope[Pointing(Identifier(f),Scope[Pointing(Identifier(g),Scope[Pointing(Identifier(h),Scope[Pointing(Identifier(i),Scope[Pointing(Identifier(j),Literal(Integer,1))])])])])])])])])])]"
+}

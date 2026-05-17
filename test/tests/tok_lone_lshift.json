@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_lshift",
+  "description": "'<<' alone — LShift has no prefix rule. UNCERTAIN: empty Scope[].",
+  "source": "<<",
+  "expect": "Scope[]"
+}

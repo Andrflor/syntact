@@ -1,0 +1,6 @@
+{
+  "name": "Lex Leading Comma Acts As Newline",
+  "description": "{,a} — leading comma is just a separator, skipped. Equivalent to {a}.",
+  "source": "{,a}",
+  "expect": "Scope[Scope[Identifier(a)]]"
+}

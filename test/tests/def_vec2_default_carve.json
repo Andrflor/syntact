@@ -1,0 +1,6 @@
+{
+  "name": "Default Vec2 Default Via Carve",
+  "description": "Vec2{x -> 1 y -> 1} — pure carve expression deriving a unit Vec2 default (README §Defaults compose).",
+  "source": "Vec2{x -> 1 y -> 1}",
+  "expect": "Scope[Carve(Identifier(Vec2),[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Hash Map Lookup",
+  "description": "Map with get and set.",
+  "source": "Map -> {\n  entries -> {}\n}\nget -> {\n  Map:m\n  key\n  -> m.entries ? {\n    {} -> none\n    {{k v} ...rest} -> k = key ? {\n      true -> v\n      -> get{Map{entries -> rest} key}!\n    }\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Map),Scope[Pointing(Identifier(entries),Scope[])]),Pointing(Identifier(get),Scope[Constraint(Identifier(Map),Identifier(m)),Identifier(key),Product(Pattern(Property(Identifier(m),Identifier(entries)),[Branch(Scope[],Identifier(none)),Branch(Scope[Scope[Identifier(k),Identifier(v)],Expand(Identifier(rest))],Pattern(Operator(Equal,Identifier(k),Identifier(key)),[Branch(Identifier(true),Identifier(v)),Branch(nil,Execute(Carve(Identifier(get),[Carve(Identifier(Map),[Pointing(Identifier(entries),Identifier(rest))]),Identifier(key)]),[]))]))]))])]"
+}

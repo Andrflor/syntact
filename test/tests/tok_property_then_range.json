@@ -1,0 +1,6 @@
+{
+  "name": "tok_property_then_range",
+  "description": "a.b..c — Property(a,b) then Range. Token '..' between 'b' (non-delim) and 'c' (non-delim) → kind Range (infix). Range(Property(a,b), c).",
+  "source": "a.b..c",
+  "expect": "Scope[Range(Property(Identifier(a),Identifier(b)),Identifier(c))]"
+}

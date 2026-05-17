@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_from_none_then_property",
+  "description": "'.a.b' — first '.' PropertyFromNone (BOF before, no space after), then 'a', then '.b' PropertyAccess. Property(Property(nil,a),b).",
+  "source": ".a.b",
+  "expect": "Scope[Property(Property(nil,Identifier(a)),Identifier(b))]"
+}

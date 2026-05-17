@@ -1,0 +1,6 @@
+{
+  "name": "LRU Cache Skeleton",
+  "description": "Cache with max-size constraint and put.",
+  "source": "Cache -> {\n  (u32 & >0):capacity\n  entries -> {}\n}\nput -> {\n  Cache:c\n  key\n  value\n  -> Cache{entries -> {...c.entries {key value}}}\n}",
+  "expect": "Scope[Pointing(Identifier(Cache),Scope[Constraint(Operator(And,Identifier(u32),Operator(Greater,nil,Literal(Integer,0))),Identifier(capacity)),Pointing(Identifier(entries),Scope[])]),Pointing(Identifier(put),Scope[Constraint(Identifier(Cache),Identifier(c)),Identifier(key),Identifier(value),Product(Carve(Identifier(Cache),[Pointing(Identifier(entries),Scope[Expand(Property(Identifier(c),Identifier(entries))),Scope[Identifier(key),Identifier(value)]])]))])]"
+}

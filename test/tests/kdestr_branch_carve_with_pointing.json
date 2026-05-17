@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Where One Field Is Itself A Pointing",
+  "description": "Config:{port -> 80 host(h)} — destructure mixes a Pointing literal-match and a capture. Order of fields preserved.",
+  "source": "c ? { Config:{port -> 80 host(h)} -> h }",
+  "expect": "Scope[Pattern(Identifier(c),[Branch(Carve(Constraint(Identifier(Config),nil),[Pointing(Identifier(port),Literal(Integer,80)),Identifier(host,h)]),Identifier(h))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Async Task With Threading Wrapper",
+  "description": "Task running on background thread.",
+  "source": "Task -> {\n  body\n}\nrun -> {\n  Task:t\n  -> t.body(!)\n}",
+  "expect": "Scope[Pointing(Identifier(Task),Scope[Identifier(body)]),Pointing(Identifier(run),Scope[Constraint(Identifier(Task),Identifier(t)),Product(Execute(Property(Identifier(t),Identifier(body)),[Background]))])]"
+}

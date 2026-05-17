@@ -1,0 +1,6 @@
+{
+  "name": "tok_lone_rshift",
+  "description": "'>>' alone — RShift has no prefix rule. UNCERTAIN: empty Scope[].",
+  "source": ">>",
+  "expect": "Scope[]"
+}

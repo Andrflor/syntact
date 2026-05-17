@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Add After Unknown",
+  "description": "?? + — Unknown then Plus with no right operand. parse_binary errors and returns nil; the Add wrapping is dropped, leaving Unknown as the statement. UNCERTAIN.",
+  "source": "?? + ",
+  "expect": "Scope[Unknown]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Multiple Captures",
+  "description": "Foo:{x(a) y(b) z(c)} — three captured fields in a destructure. WILL_FAIL_UNTIL_FIX possible.",
+  "source": "Foo:{x(a) y(b) z(c)}",
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Identifier(x,a),Identifier(y,b),Identifier(z,c)])]"
+}

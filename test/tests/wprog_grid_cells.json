@@ -1,0 +1,6 @@
+{
+  "name": "2D Grid Cells",
+  "description": "Cell with position and state.",
+  "source": "Cell -> {\n  u32:x\n  u32:y\n  -> Alive:\n  -> Dead:\n}\nstep -> {\n  Cell:c\n  -> c ? {\n    Alive: -> Dead:\n    Dead: -> Alive:\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Cell),Scope[Constraint(Identifier(u32),Identifier(x)),Constraint(Identifier(u32),Identifier(y)),Product(Constraint(Identifier(Alive),nil)),Product(Constraint(Identifier(Dead),nil))]),Pointing(Identifier(step),Scope[Constraint(Identifier(Cell),Identifier(c)),Product(Pattern(Identifier(c),[Branch(Constraint(Identifier(Alive),nil),Constraint(Identifier(Dead),nil)),Branch(Constraint(Identifier(Dead),nil),Constraint(Identifier(Alive),nil))]))])]"
+}

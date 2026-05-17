@@ -1,0 +1,6 @@
+{
+  "name": "UI Button With Click Handler",
+  "description": "Button{label -> 'Submit' onClick -> { >- Submit{value -> input} }} — a UI carve with embedded event push.",
+  "source": "Button{label -> 'Submit' onClick -> { >- Submit{value -> input} }}",
+  "expect": "Scope[Carve(Identifier(Button),[Pointing(Identifier(label),Literal(String,Submit)),Pointing(Identifier(onClick),Scope[EventPush(nil,Carve(Identifier(Submit),[Pointing(Identifier(value),Identifier(input))]))])])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Paren Glued Capture",
+  "description": "foo(c) — '(' glued to identifier yields LeftParenNoSpace, consumed inside parse_identifier as capture.",
+  "source": "foo(c)",
+  "expect": "Scope[Identifier(foo,c)]"
+}

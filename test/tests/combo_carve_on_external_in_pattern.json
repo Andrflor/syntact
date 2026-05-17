@@ -1,0 +1,6 @@
+{
+  "name": "Combo Carve On External In Pattern Branch",
+  "description": "Branch source is a carve of an external reference. Tests Carve+External+Property+Pattern composition.",
+  "source": "v ? {\n  @lib.x{a -> 1} -> 2\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Carve(Property(External(lib,nil),Identifier(x)),[Pointing(Identifier(a),Literal(Integer,1))]),Literal(Integer,2))])]"
+}

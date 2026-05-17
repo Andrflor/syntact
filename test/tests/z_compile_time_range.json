@@ -1,0 +1,6 @@
+{
+  "name": "Z CompileTime On Range",
+  "description": "!0..10 — CompileTime prefix at UNARY; Range at RANGE > UNARY consumes both endpoints as the operand.",
+  "source": "!0..10",
+  "expect": "Scope[CompileTime(Range(Literal(Integer,0),Literal(Integer,10)))]"
+}

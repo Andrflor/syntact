@@ -1,0 +1,6 @@
+{
+  "name": "Validation Chain With Refinements",
+  "description": "Password -> String & len>=8 & hasDigit & hasUpper — a refined shape chain.",
+  "source": "Password -> String & len>=8 & hasDigit & hasUpper",
+  "expect": "Scope[Pointing(Identifier(Password),Operator(And,Operator(And,Operator(And,Identifier(String),Operator(GreaterEqual,Identifier(len),Literal(Integer,8))),Identifier(hasDigit)),Identifier(hasUpper)))]"
+}

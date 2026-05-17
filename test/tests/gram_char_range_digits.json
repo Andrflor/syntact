@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Char Range Digits",
+  "description": "Digit char range '0'..'9'.",
+  "source": "'0'..'9'",
+  "expect": "Scope[Range(Literal(String,0),Literal(String,9))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Program Chained Imports",
+  "description": "Three lines of import via @ external references. Tests External name + Property chain across lines.",
+  "source": "Geometry -> @lib.geometry\nPlane -> @lib.geometry.Plane\nFastGeometry -> @lib.geometry",
+  "expect": "Scope[Pointing(Identifier(Geometry),Property(External(lib,nil),Identifier(geometry))),Pointing(Identifier(Plane),Property(Property(External(lib,nil),Identifier(geometry)),Identifier(Plane))),Pointing(Identifier(FastGeometry),Property(External(lib,nil),Identifier(geometry)))]"
+}

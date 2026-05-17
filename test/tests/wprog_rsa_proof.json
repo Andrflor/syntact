@@ -1,0 +1,6 @@
+{
+  "name": "RSA-like Identity Proof",
+  "description": "RSA identity round-trip with proof obligation.",
+  "source": "RSAIdentity -> {\n  PubKey:pub\n  PrivKey:priv\n  -> {\n    String:m -> ??\n    -> decrypt{encrypt{m priv}! pub}! = m ?! true\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(RSAIdentity),Scope[Constraint(Identifier(PubKey),Identifier(pub)),Constraint(Identifier(PrivKey),Identifier(priv)),Product(Scope[Pointing(Constraint(Identifier(String),Identifier(m)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(decrypt),[Execute(Carve(Identifier(encrypt),[Identifier(m),Identifier(priv)]),[]),Identifier(pub)]),[]),Identifier(m)),Identifier(true)))])])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Two Unknown Defaults Sequentially",
+  "description": "Two ?? defaults in sequence inside a braces-scope. Tests statement separation.",
+  "source": "{ T:a -> ?? T:b -> ?? }",
+  "expect": "Scope[Scope[Pointing(Constraint(Identifier(T),Identifier(a)),Unknown),Pointing(Constraint(Identifier(T),Identifier(b)),Unknown)]]"
+}

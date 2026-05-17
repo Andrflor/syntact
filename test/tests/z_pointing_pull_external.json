@@ -1,0 +1,6 @@
+{
+  "name": "Z Pointing Pull From External",
+  "description": "lib <- @core — Pull binding whose RHS is an External reference.",
+  "source": "lib <- @core",
+  "expect": "Scope[PointingPull(Identifier(lib),External(core,nil))]"
+}

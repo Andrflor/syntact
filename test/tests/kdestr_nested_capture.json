@@ -1,0 +1,6 @@
+{
+  "name": "Nested Destructure With Capture",
+  "description": "Outer Point captures, inner nested Coord captures further. Carve of constraint with nested Carve as entry.",
+  "source": "p ? { Point:{coord(c) Coord:{x(a) y(b)}} -> 1 }",
+  "expect": "Scope[Pattern(Identifier(p),[Branch(Carve(Constraint(Identifier(Point),nil),[Identifier(coord,c),Carve(Constraint(Identifier(Coord),nil),[Identifier(x,a),Identifier(y,b)])]),Literal(Integer,1))])]"
+}

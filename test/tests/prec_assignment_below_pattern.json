@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Assignment Below Pattern",
+  "description": "a -> b ? { 1 -> 2 } — PATTERN (2) > ASSIGNMENT (1). Inside right-of-pointing (parse_expression with default NONE, but parse_pointing_push calls parse_expression() at NONE), '?' attaches: pointing.to = Pattern(b, branches). Result Pointing(a, Pattern(b, [...])).",
+  "source": "a -> b ? { 1 -> 2 }",
+  "expect": "Scope[Pointing(Identifier(a),Pattern(Identifier(b),[Branch(Literal(Integer,1),Literal(Integer,2))]))]"
+}

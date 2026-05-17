@@ -1,0 +1,6 @@
+{
+  "name": "Natural Numbers Inductive",
+  "description": "Nat with Zero/Succ and add.",
+  "source": "Nat -> {\n  -> Zero:\n  -> Succ:{Nat:pred}\n}\nadd -> {\n  Nat:a\n  Nat:b\n  -> a ? {\n    Zero: -> b\n    Succ:{pred} -> Succ:{pred -> add{pred b}!}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Nat),Scope[Product(Constraint(Identifier(Zero),nil)),Product(Carve(Constraint(Identifier(Succ),nil),[Constraint(Identifier(Nat),Identifier(pred))]))]),Pointing(Identifier(add),Scope[Constraint(Identifier(Nat),Identifier(a)),Constraint(Identifier(Nat),Identifier(b)),Product(Pattern(Identifier(a),[Branch(Constraint(Identifier(Zero),nil),Identifier(b)),Branch(Carve(Constraint(Identifier(Succ),nil),[Identifier(pred)]),Carve(Constraint(Identifier(Succ),nil),[Pointing(Identifier(pred),Execute(Carve(Identifier(add),[Identifier(pred),Identifier(b)]),[]))]))]))])]"
+}

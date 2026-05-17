@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Or With And Negate",
+  "description": "'a'..'z' | ('0'..'9' & ~'5') — Or of a range and a grouped And-with-negation. AND=9>OR=7 so the right group is one And. ~ is unary Not (Operator(Not,nil,_)).",
+  "source": "'a'..'z' | ('0'..'9' & ~'5')",
+  "expect": "Scope[Operator(Or,Range(Literal(String,a),Literal(String,z)),Operator(And,Range(Literal(String,0),Literal(String,9)),Operator(Not,nil,Literal(String,5))))]"
+}

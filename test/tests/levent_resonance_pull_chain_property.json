@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull With Deep Property Source",
+  "description": "state.value -<< e.payload.value — pull resonance from a two-level property into state.value.",
+  "source": "state.value -<< e.payload.value",
+  "expect": "Scope[ResonancePull(Property(Identifier(state),Identifier(value)),Property(Property(Identifier(e),Identifier(payload)),Identifier(value)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Allocator Handler Program",
+  "description": "WithMalloc scope from README §Handlers: Alloc handler returning malloc, Buffer carved and collapsed.",
+  "source": "WithMalloc -> {\n  Alloc -< e { -> malloc{e.size}! }\n  -> Buffer{size -> 1024}!\n}",
+  "expect": "Scope[Pointing(Identifier(WithMalloc),Scope[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Identifier(malloc),[Property(Identifier(e),Identifier(size))]),[]))]),Product(Execute(Carve(Identifier(Buffer),[Pointing(Identifier(size),Literal(Integer,1024))]),[]))])]"
+}

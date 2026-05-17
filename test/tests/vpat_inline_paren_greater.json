@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern (>0)",
+  "description": "n ? (>0) — refinement inside grouping; equivalent to n ? >0.",
+  "source": "n ? (>0)",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Greater,nil,Literal(Integer,0)),nil)])]"
+}

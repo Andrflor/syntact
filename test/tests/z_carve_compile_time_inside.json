@@ -1,0 +1,6 @@
+{
+  "name": "Z Carve With CompileTime Entry",
+  "description": "Foo{x -> !sz} — A carve where the default of x is a CompileTime prefix expression.",
+  "source": "Foo{x -> !sz}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),CompileTime(Identifier(sz)))])]"
+}

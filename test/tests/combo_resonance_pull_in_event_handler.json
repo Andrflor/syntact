@@ -1,0 +1,6 @@
+{
+  "name": "Combo Resonance Pull Inside Event Handler",
+  "description": "Inside an EventPull, the body emits a ResonancePull where right is a property of e.",
+  "source": "Update -< e { state -<< e.value }",
+  "expect": "Scope[EventPull(e,Identifier(Update),Scope[ResonancePull(Identifier(state),Property(Identifier(e),Identifier(value)))])]"
+}

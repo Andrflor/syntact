@@ -1,0 +1,6 @@
+{
+  "name": "Three-Way Pull Chain",
+  "description": "A <- B <- C <- D — right-associative chain of three PointingPull.",
+  "source": "A <- B <- C <- D",
+  "expect": "Scope[PointingPull(Identifier(A),PointingPull(Identifier(B),PointingPull(Identifier(C),Identifier(D))))]"
+}

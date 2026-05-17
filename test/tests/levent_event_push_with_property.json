@@ -1,0 +1,6 @@
+{
+  "name": "Event Push With Property Carved",
+  "description": ">- module.Event{x -> 1} — EventPush of a Carve whose source is a Property on module.",
+  "source": ">- module.Event{x -> 1}",
+  "expect": "Scope[EventPush(nil,Carve(Property(Identifier(module),Identifier(Event)),[Pointing(Identifier(x),Literal(Integer,1))]))]"
+}

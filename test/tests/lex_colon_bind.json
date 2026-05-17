@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon Bind (no space either side)",
+  "description": "a:b — ConstraintBind variant.",
+  "source": "a:b",
+  "expect": "Scope[Constraint(Identifier(a),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Hexadecimal With Capital X Prefix",
+  "description": "0XFF — the lexer accepts both 0x and 0X.",
+  "source": "0XFF",
+  "expect": "Scope[Literal(Hexadecimal,0XFF)]"
+}

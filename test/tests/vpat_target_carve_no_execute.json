@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target Is Carve",
+  "description": "Foo{x -> 1} ? { 1 -> 2 } — pattern target is a Carve (no execute).",
+  "source": "Foo{x -> 1} ? { 1 -> 2 }",
+  "expect": "Scope[Pattern(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),[Branch(Literal(Integer,1),Literal(Integer,2))])]"
+}

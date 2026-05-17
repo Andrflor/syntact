@@ -1,0 +1,6 @@
+{
+  "name": "u8 Constraint With Unknown Default",
+  "description": "u8:x -> ?? — a typed binding (u8) whose default is the symbolic Unknown.",
+  "source": "u8:x -> ??",
+  "expect": "Scope[Pointing(Constraint(Identifier(u8),Identifier(x)),Unknown)]"
+}

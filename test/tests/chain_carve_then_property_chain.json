@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_then_property_chain",
+  "description": "Foo{x -> 1}.bar.baz — Carve then two PropertyAccess.",
+  "source": "Foo{x -> 1}.bar.baz",
+  "expect": "Scope[Property(Property(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(bar)),Identifier(baz))]"
+}

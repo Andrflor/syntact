@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_chain_pattern_target",
+  "description": "Property chain as pattern target. Property chain at CALL is consumed by parse_pattern's left argument. Pattern(Property(Property(a,b),c),[Branch(x,1)]).",
+  "source": "a.b.c ? { x -> 1 }",
+  "expect": "Scope[Pattern(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[Branch(Identifier(x),Literal(Integer,1))])]"
+}

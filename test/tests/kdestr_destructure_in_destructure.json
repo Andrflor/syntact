@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Whose Field Is A Scope Pattern",
+  "description": "Outer:{inner {a b}} — inner is followed by a scope-literal pattern as the next field. Two separate carve entries.",
+  "source": "x ? { Outer:{inner {a b}} -> 1 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Outer),nil),[Identifier(inner),Scope[Identifier(a),Identifier(b)]]),Literal(Integer,1))])]"
+}

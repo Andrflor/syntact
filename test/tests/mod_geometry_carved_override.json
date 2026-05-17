@@ -1,0 +1,6 @@
+{
+  "name": "Geometry Carved Override Of Plane",
+  "description": "...@lib.geometry{Plane -> Plane{dimension -> 3}} — spread of carved external where one entry rebinds Plane with a sub-carve. Use of same name on both sides of Pointing.",
+  "source": "...@lib.geometry{Plane -> Plane{dimension -> 3}}",
+  "expect": "Scope[Expand(Carve(Property(External(lib,nil),Identifier(geometry)),[Pointing(Identifier(Plane),Carve(Identifier(Plane),[Pointing(Identifier(dimension),Literal(Integer,3))]))]))]"
+}

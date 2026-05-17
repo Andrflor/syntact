@@ -1,0 +1,6 @@
+{
+  "name": "Capture Then Refine With Range",
+  "description": "Circle:{radius(r)?(1..10)} — capture r then refine with a parenthesized range.",
+  "source": "s ? { Circle:{radius(r)?(1..10)} -> r }",
+  "expect": "Scope[Pattern(Identifier(s),[Branch(Carve(Constraint(Identifier(Circle),nil),[Pattern(Identifier(radius,r),[Branch(Range(Literal(Integer,1),Literal(Integer,10)),nil)])]),Identifier(r))])]"
+}

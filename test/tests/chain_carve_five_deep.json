@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_five_deep",
+  "description": "A{x}{y}{z}{w}{v} — five-level carve chain.",
+  "source": "A{x}{y}{z}{w}{v}",
+  "expect": "Scope[Carve(Carve(Carve(Carve(Carve(Identifier(A),[Identifier(x)]),[Identifier(y)]),[Identifier(z)]),[Identifier(w)]),[Identifier(v)])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Combo Pattern Branch Product Is Event Push",
+  "description": "Pattern with a single branch whose product is an EventPush expression. Tests that a branch product can hold any ASSIGNMENT-level node.",
+  "source": "v ? {\n  1 -> >- Log\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),EventPush(nil,Identifier(Log)))])]"
+}

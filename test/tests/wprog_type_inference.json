@@ -1,0 +1,6 @@
+{
+  "name": "Tiny Type Inference",
+  "description": "Type kinds and infer function.",
+  "source": "Type -> {\n  -> Int:\n  -> Bool:\n  -> Pair:{a b}\n}\ninfer -> {\n  expr\n  -> expr ? {\n    'int' -> Int:\n    'bool' -> Bool:\n    -> none\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Type),Scope[Product(Constraint(Identifier(Int),nil)),Product(Constraint(Identifier(Bool),nil)),Product(Carve(Constraint(Identifier(Pair),nil),[Identifier(a),Identifier(b)]))]),Pointing(Identifier(infer),Scope[Identifier(expr),Product(Pattern(Identifier(expr),[Branch(Literal(String,int),Constraint(Identifier(Int),nil)),Branch(Literal(String,bool),Constraint(Identifier(Bool),nil)),Branch(nil,Identifier(none))]))])]"
+}

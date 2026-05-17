@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is External",
+  "description": "v ? { @lib -> 'imported' } — branch source is an External reference.",
+  "source": "v ? { @lib -> 'imported' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(External(lib,nil),Literal(String,imported))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Newline Before Closing Brace",
+  "description": "{a -> 1\\n} — trailing newline before '}' is harmless. skip_newlines in parse_scope handles it.",
+  "source": "{a -> 1\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1))]]"
+}

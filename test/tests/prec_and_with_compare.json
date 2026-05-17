@@ -1,0 +1,6 @@
+{
+  "name": "Precedence And With Comparison Left",
+  "description": "a & b < c — AND (9) > COMPARISON (4). Trace: 'a' then '&' binds: parse_binary at AND, right at AND+1=10. Inside: 'b' then '<' (COMP=4 < 10) stops. b returned. So And(a,b). Then back at top-level: '< c' attaches. Result Less(And(a,b), c).",
+  "source": "a & b < c",
+  "expect": "Scope[Operator(Less,Operator(And,Identifier(a),Identifier(b)),Identifier(c))]"
+}

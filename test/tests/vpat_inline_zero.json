@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Zero",
+  "description": "n ? 0 — minimal inline pattern.",
+  "source": "n ? 0",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,0),nil)])]"
+}

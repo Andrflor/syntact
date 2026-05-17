@@ -1,0 +1,6 @@
+{
+  "name": "Unterminated Single-Quoted String",
+  "description": "'world — scan_string with the single-quote delimiter similarly fails. UNCERTAIN: empty Scope.",
+  "source": "'world",
+  "expect": "Scope[]"
+}

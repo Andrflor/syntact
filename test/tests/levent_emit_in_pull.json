@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding Of EventPush",
+  "description": "handler <- >- Log{n -> 1} — pull binding whose value is an EventPush of a Carve. ASSIGNMENT is right-associative.",
+  "source": "handler <- >- Log{n -> 1}",
+  "expect": "Scope[PointingPull(Identifier(handler),EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(n),Literal(Integer,1))])))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Enforce Inside Event Pull Handler",
+  "description": "Log -< e { -> e.message ?! != \"\" } — handler scope returns a proof obligation on a property. UNCERTAIN: != is parsed as prefix-comparison; '?! != x' should be Enforce(left, Operator(NotEqual,nil,x)).",
+  "source": "Log -< e { -> e.message ?! != \"\" }",
+  "expect": "Scope[EventPull(e,Identifier(Log),Scope[Product(Enforce(Property(Identifier(e),Identifier(message)),Operator(NotEqual,nil,Literal(String,))))])]"
+}

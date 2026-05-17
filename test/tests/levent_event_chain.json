@@ -1,0 +1,6 @@
+{
+  "name": "Handler That Emits Another Event",
+  "description": "Click -< e { >- Log{message -> 'clicked'} } — handler body itself emits a Log event (chain).",
+  "source": "Click -< e { >- Log{message -> 'clicked'} }",
+  "expect": "Scope[EventPull(e,Identifier(Click),Scope[EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(message),Literal(String,clicked))]))])]"
+}

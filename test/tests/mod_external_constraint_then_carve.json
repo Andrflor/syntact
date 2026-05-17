@@ -1,0 +1,6 @@
+{
+  "name": "External Used As Constraint With Carve",
+  "description": "@lib.Point:p{x -> 10} — declare anonymous binding constrained by external Point, then carve. Constraint is at lower precedence than Carve so right side binds tightly.",
+  "source": "@lib.Point:p{x -> 10}",
+  "expect": "Scope[Constraint(Property(External(lib,nil),Identifier(Point)),Carve(Identifier(p),[Pointing(Identifier(x),Literal(Integer,10))]))]"
+}

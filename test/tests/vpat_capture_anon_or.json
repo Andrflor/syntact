@@ -1,0 +1,6 @@
+{
+  "name": "Or Of Two Anonymous Captures",
+  "description": "(a)|(b) — Or of two anonymous-capture identifiers.",
+  "source": "(a)|(b)",
+  "expect": "Scope[Operator(Or,Identifier(,a),Identifier(,b))]"
+}

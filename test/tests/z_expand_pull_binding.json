@@ -1,0 +1,6 @@
+{
+  "name": "Z Expand Of A Pull Scope",
+  "description": "...{T <- u8} — Expand whose target is a Scope containing a PointingPull. UNCERTAIN: parse_expansion parses at UNARY; LeftBrace prefix produces a ScopeNode at PRIMARY. Expected: Expand(Scope[PointingPull(T,u8)]).",
+  "source": "...{T <- u8}",
+  "expect": "Scope[Expand(Scope[PointingPull(Identifier(T),Identifier(u8))])]"
+}

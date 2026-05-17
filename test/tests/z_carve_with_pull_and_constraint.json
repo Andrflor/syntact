@@ -1,0 +1,6 @@
+{
+  "name": "Z Carve With Pull And Constraint Entries",
+  "description": "List{T <- u8 x:i32} — Carve with two entries: a PointingPull and a Constraint. Tests two distinct entry kinds in one carve.",
+  "source": "List{T <- u8 x:i32}",
+  "expect": "Scope[Carve(Identifier(List),[PointingPull(Identifier(T),Identifier(u8)),Constraint(Identifier(x),Identifier(i32))])]"
+}

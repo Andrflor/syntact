@@ -1,0 +1,6 @@
+{
+  "name": "Spread In Branch Product",
+  "description": "x ? { 1 -> ...@lib.actions } — branch product is an Expand of an External property chain.",
+  "source": "x ? { 1 -> ...@lib.actions }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Expand(Property(External(lib,nil),Identifier(actions))))])]"
+}

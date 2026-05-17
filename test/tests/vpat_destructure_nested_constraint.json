@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Nested With Constraint",
+  "description": "Foo:{Bar:{x}} — nested destructure where the inner field is itself a constrained destructure. WILL_FAIL_UNTIL_FIX possible.",
+  "source": "Foo:{Bar:{x}}",
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Carve(Constraint(Identifier(Bar),nil),[Identifier(x)])])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Char Range Lower",
+  "description": "Char range 'a'..'z' — single-char strings linked by Range.",
+  "source": "'a'..'z'",
+  "expect": "Scope[Range(Literal(String,a),Literal(String,z))]"
+}

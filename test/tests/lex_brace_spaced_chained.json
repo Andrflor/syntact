@@ -1,0 +1,6 @@
+{
+  "name": "Lex Spaced Braces Chained",
+  "description": "Foo {x} {y} — spaces before both braces yield three sibling statements (Identifier, Scope, Scope).",
+  "source": "Foo {x} {y}",
+  "expect": "Scope[Identifier(Foo),Scope[Identifier(x)],Scope[Identifier(y)]]"
+}

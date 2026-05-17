@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding With Default None",
+  "description": "T <- none — README §Pull bindings: holes default to none when not filled.",
+  "source": "T <- none",
+  "expect": "Scope[PointingPull(Identifier(T),Identifier(none))]"
+}

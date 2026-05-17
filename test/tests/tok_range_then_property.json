@@ -1,0 +1,6 @@
+{
+  "name": "tok_range_then_property",
+  "description": "a..b.c — '..' between 'a' and 'b' is Range infix; parse_range parses RHS at RANGE=11 which is <= CALL=12, so PropertyAccess attaches inside the RHS. Range(a, Property(b,c)).",
+  "source": "a..b.c",
+  "expect": "Scope[Range(Identifier(a),Property(Identifier(b),Identifier(c)))]"
+}

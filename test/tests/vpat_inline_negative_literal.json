@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Negative Literal",
+  "description": "n ? -5 — inline pattern with prefix-minus literal as source. UNARY=10 < RANGE=11 so the prefix attaches as the source.",
+  "source": "n ? -5",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Subtract,nil,Literal(Integer,5)),nil)])]"
+}

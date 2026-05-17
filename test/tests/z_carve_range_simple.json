@@ -1,0 +1,6 @@
+{
+  "name": "Z Carve Range Simple",
+  "description": "Foo{x -> 1..5} — Carve with Range as binding default. Range at RANGE=11 inside the pointing RHS.",
+  "source": "Foo{x -> 1..5}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Range(Literal(Integer,1),Literal(Integer,5)))])]"
+}

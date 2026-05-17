@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern Unknown Source",
+  "description": "n ? ?? — inline pattern, source is Unknown.",
+  "source": "n ? ??",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Unknown,nil)])]"
+}

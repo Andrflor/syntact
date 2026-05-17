@@ -1,0 +1,6 @@
+{
+  "name": "Test Framework Stub",
+  "description": "Assert / describe / it constructs.",
+  "source": "describe -> {\n  String:name\n  body\n  -> body!\n}\nit -> {\n  String:label\n  body\n  -> body!\n}\nassertEq -> {\n  a\n  b\n  -> a = b ?! true\n}",
+  "expect": "Scope[Pointing(Identifier(describe),Scope[Constraint(Identifier(String),Identifier(name)),Identifier(body),Product(Execute(Identifier(body),[]))]),Pointing(Identifier(it),Scope[Constraint(Identifier(String),Identifier(label)),Identifier(body),Product(Execute(Identifier(body),[]))]),Pointing(Identifier(assertEq),Scope[Identifier(a),Identifier(b),Product(Enforce(Operator(Equal,Identifier(a),Identifier(b)),Identifier(true)))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Vec2 With Add And Scale Operations",
+  "description": "Vec2 with two shaped fields, add and scale operations as scopes.",
+  "source": "Vec2 -> { f32:x f32:y }\nadd -> { Vec2:a Vec2:b\n  -> Vec2{x -> a.x + b.x y -> a.y + b.y}\n}\nscale -> { Vec2:v f32:k\n  -> Vec2{x -> v.x * k y -> v.y * k}\n}",
+  "expect": "Scope[Pointing(Identifier(Vec2),Scope[Constraint(Identifier(f32),Identifier(x)),Constraint(Identifier(f32),Identifier(y))]),Pointing(Identifier(add),Scope[Constraint(Identifier(Vec2),Identifier(a)),Constraint(Identifier(Vec2),Identifier(b)),Product(Carve(Identifier(Vec2),[Pointing(Identifier(x),Operator(Add,Property(Identifier(a),Identifier(x)),Property(Identifier(b),Identifier(x)))),Pointing(Identifier(y),Operator(Add,Property(Identifier(a),Identifier(y)),Property(Identifier(b),Identifier(y))))]))]),Pointing(Identifier(scale),Scope[Constraint(Identifier(Vec2),Identifier(v)),Constraint(Identifier(f32),Identifier(k)),Product(Carve(Identifier(Vec2),[Pointing(Identifier(x),Operator(Multiply,Property(Identifier(v),Identifier(x)),Identifier(k))),Pointing(Identifier(y),Operator(Multiply,Property(Identifier(v),Identifier(y)),Identifier(k)))]))])]"
+}

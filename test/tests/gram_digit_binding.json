@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Digit Binding",
+  "description": "digit -> '0'..'9' — simple Pointing of a char range.",
+  "source": "digit -> '0'..'9'",
+  "expect": "Scope[Pointing(Identifier(digit),Range(Literal(String,0),Literal(String,9)))]"
+}

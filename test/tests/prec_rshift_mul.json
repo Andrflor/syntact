@@ -1,0 +1,6 @@
+{
+  "name": "Precedence RShift With Multiply",
+  "description": "a >> b * c — RShift (AND=9) > FACTOR (6). Right at AND+1=10; 'b' then '*' FACTOR=6<10 stops. 'a >> b' first. Then top loop '* c' attaches. Result Multiply(RShift(a,b), c).",
+  "source": "a >> b * c",
+  "expect": "Scope[Operator(Multiply,Operator(RShift,Identifier(a),Identifier(b)),Identifier(c))]"
+}

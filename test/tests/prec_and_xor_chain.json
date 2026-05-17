@@ -1,0 +1,6 @@
+{
+  "name": "Precedence And Xor Chain",
+  "description": "a & b ^ c — both & and ^ are at AND precedence, left-associative. So (a & b) ^ c.",
+  "source": "a & b ^ c",
+  "expect": "Scope[Operator(Xor,Operator(And,Identifier(a),Identifier(b)),Identifier(c))]"
+}

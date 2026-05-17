@@ -1,0 +1,6 @@
+{
+  "name": "Z External Property Then Carve",
+  "description": "@core.utils{a -> 1} — External, then property access on it, then a Carve.",
+  "source": "@core.utils{a -> 1}",
+  "expect": "Scope[Carve(Property(External(core,nil),Identifier(utils)),[Pointing(Identifier(a),Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Domain Shapes Port Percent AdultAge",
+  "description": "Three domain shapes from README §Scope algebra.",
+  "source": "Port -> u16 & >0\nPercent -> u8 & <=100\nAdultAge -> u8 & >=18 & <=120",
+  "expect": "Scope[Pointing(Identifier(Port),Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0)))),Pointing(Identifier(Percent),Operator(And,Identifier(u8),Operator(LessEqual,nil,Literal(Integer,100)))),Pointing(Identifier(AdultAge),Operator(And,Operator(And,Identifier(u8),Operator(GreaterEqual,nil,Literal(Integer,18))),Operator(LessEqual,nil,Literal(Integer,120))))]"
+}

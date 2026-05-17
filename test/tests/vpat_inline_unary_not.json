@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With Unary Not",
+  "description": "n ? ~x — inline pattern with unary Not source.",
+  "source": "n ? ~x",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Operator(Not,nil,Identifier(x)),nil)])]"
+}

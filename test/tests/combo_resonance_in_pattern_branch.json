@@ -1,0 +1,6 @@
+{
+  "name": "Combo Resonance Push Inside Pattern Branch Product",
+  "description": "A branch product is a ResonancePush. The right of -> in the branch is itself a >>- assignment.",
+  "source": "v ? {\n  1 -> x >>- Update\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),ResonancePush(Identifier(x),Identifier(Update)))])]"
+}

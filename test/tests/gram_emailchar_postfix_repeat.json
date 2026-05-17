@@ -1,0 +1,6 @@
+{
+  "name": "Grammar EmailChar Postfix Repeat",
+  "description": "emailChar*1.. — identifier multiplied by a postfix Range.",
+  "source": "emailChar*1..",
+  "expect": "Scope[Operator(Multiply,Identifier(emailChar),Range(Literal(Integer,1),nil))]"
+}

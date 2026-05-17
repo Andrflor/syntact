@@ -1,0 +1,6 @@
+{
+  "name": "Stress Pattern With Eight Branches",
+  "description": "A Pattern with eight integer branches.",
+  "source": "v ? {\n  0 -> 'a'\n  1 -> 'b'\n  2 -> 'c'\n  3 -> 'd'\n  4 -> 'e'\n  5 -> 'f'\n  6 -> 'g'\n  7 -> 'h'\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,0),Literal(String,a)),Branch(Literal(Integer,1),Literal(String,b)),Branch(Literal(Integer,2),Literal(String,c)),Branch(Literal(Integer,3),Literal(String,d)),Branch(Literal(Integer,4),Literal(String,e)),Branch(Literal(Integer,5),Literal(String,f)),Branch(Literal(Integer,6),Literal(String,g)),Branch(Literal(Integer,7),Literal(String,h))])]"
+}

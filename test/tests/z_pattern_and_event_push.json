@@ -1,0 +1,6 @@
+{
+  "name": "Z Two Top-Level Statements Pattern And Event Push",
+  "description": "A pattern statement followed by a bare event-push at top level.",
+  "source": "v ? { 1 -> a }\n>- Log",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Identifier(a))]),EventPush(nil,Identifier(Log))]"
+}

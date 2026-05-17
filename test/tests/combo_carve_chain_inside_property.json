@@ -1,0 +1,6 @@
+{
+  "name": "Combo Carve Chain Then Property Access",
+  "description": "Foo{a->1}{b->2}.field — two chained carves at CALL then a property access. All left-associative.",
+  "source": "Foo{a->1}{b->2}.field",
+  "expect": "Scope[Property(Carve(Carve(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1))]),[Pointing(Identifier(b),Literal(Integer,2))]),Identifier(field))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Equality Of Property Calls Inside Enforce",
+  "description": "a.x = b.x ?! true — equality at COMPARISON/EQUALITY level binds first, then ?! lifts the whole.",
+  "source": "a.x = b.x ?! true",
+  "expect": "Scope[Enforce(Operator(Equal,Property(Identifier(a),Identifier(x)),Property(Identifier(b),Identifier(x))),Identifier(true))]"
+}

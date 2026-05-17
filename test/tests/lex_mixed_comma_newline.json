@@ -1,0 +1,6 @@
+{
+  "name": "Lex Mixed Commas And Newlines",
+  "description": "{a,\\nb,c\\n} — commas and newlines mix freely; scan_newline collapses runs.",
+  "source": "{a,\nb,c\n}",
+  "expect": "Scope[Scope[Identifier(a),Identifier(b),Identifier(c)]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Or Range Then Pointing",
+  "description": "ws -> ' ' | '\\t' | '\\n' — README-style whitespace grammar binding.",
+  "source": "ws -> ' ' | '\\t' | '\\n'",
+  "expect": "Scope[Pointing(Identifier(ws),Operator(Or,Operator(Or,Literal(String, ),Literal(String,\\t)),Literal(String,\\n)))]"
+}

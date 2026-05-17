@@ -1,0 +1,6 @@
+{
+  "name": "Lex Range Inside Parens",
+  "description": "(1..5) — '(' is before-delimiter, ')' is after-delimiter, but '1' and '5' break those. So the inner '..' is a Range token (no delimiters on either side of the dots).",
+  "source": "(1..5)",
+  "expect": "Scope[Range(Literal(Integer,1),Literal(Integer,5))]"
+}

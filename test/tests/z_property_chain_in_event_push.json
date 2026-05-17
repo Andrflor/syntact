@@ -1,0 +1,6 @@
+{
+  "name": "Z EventPush Source Is Property Chain",
+  "description": "ctx.queue >- msg — EventPush whose source side is a property chain. Property at CALL > EventPush at ASSIGNMENT so the property is fully formed first.",
+  "source": "ctx.queue >- msg",
+  "expect": "Scope[EventPush(Property(Identifier(ctx),Identifier(queue)),Identifier(msg))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Spaced Colon Between Identifiers",
+  "description": "a : b — Colon with spaces triggers parse_invalid_constraint_infix which returns nil and advances. UNCERTAIN: same as spaced dot.",
+  "source": "a : b",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

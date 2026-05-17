@@ -1,0 +1,6 @@
+{
+  "name": "Combo Execute Inside Carve Inside Property",
+  "description": "obj.method{x -> y!}! — inside the Carve there is an Execute on y, then the outer is also an Execute. Tests nested Executes through Carve+Property.",
+  "source": "obj.method{x -> y!}!",
+  "expect": "Scope[Execute(Carve(Property(Identifier(obj),Identifier(method)),[Pointing(Identifier(x),Execute(Identifier(y),[]))]),[])]"
+}

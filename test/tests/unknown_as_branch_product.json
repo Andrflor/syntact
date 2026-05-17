@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Branch Product",
+  "description": "n ? { 0 -> ?? } — Unknown can be the product side of a branch.",
+  "source": "n ? { 0 -> ?? }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,0),Unknown)])]"
+}

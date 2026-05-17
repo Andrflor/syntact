@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Or vs Constraint vs And",
+  "description": "a | b:c & d — & is AND (highest), : is CONSTRAINT (between OR and AND), | is OR. So 'b:c' binds first, then '& d' (AND tighter than OR), then 'a | (...)'. UNCERTAIN: precedence ordering OR < CONSTRAINT < AND.",
+  "source": "a | b:c & d",
+  "expect": "Scope[Operator(Or,Identifier(a),Operator(And,Constraint(Identifier(b),Identifier(c)),Identifier(d)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Binary With Capital B Prefix",
+  "description": "0B1010 — the lexer accepts both 0b and 0B.",
+  "source": "0B1010",
+  "expect": "Scope[Literal(Binary,0B1010)]"
+}

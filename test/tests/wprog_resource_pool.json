@@ -1,0 +1,6 @@
+{
+  "name": "Resource Pool With Acquire/Release",
+  "description": "Pool with acquire/release events.",
+  "source": "Pool -> {\n  available -> 10\n}\nAcquire\nRelease\nhandler -> {\n  Pool:p\n  Acquire -< {\n    p.available >>- p.available - 1\n  }\n  Release -< {\n    p.available >>- p.available + 1\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Pool),Scope[Pointing(Identifier(available),Literal(Integer,10))]),Identifier(Acquire),Identifier(Release),Pointing(Identifier(handler),Scope[Constraint(Identifier(Pool),Identifier(p)),EventPull(,Identifier(Acquire),Scope[ResonancePush(Property(Identifier(p),Identifier(available)),Operator(Subtract,Property(Identifier(p),Identifier(available)),Literal(Integer,1)))]),EventPull(,Identifier(Release),Scope[ResonancePush(Property(Identifier(p),Identifier(available)),Operator(Add,Property(Identifier(p),Identifier(available)),Literal(Integer,1)))])])]"
+}

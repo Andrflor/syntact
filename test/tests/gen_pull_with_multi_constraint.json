@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding With Multi-Constraint Default",
+  "description": "T <- u8 & >0 — right side is intersection of u8 and >0 (refined shape). AND > ASSIGNMENT so right binds as the And expression.",
+  "source": "T <- u8 & >0",
+  "expect": "Scope[PointingPull(Identifier(T),Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0))))]"
+}

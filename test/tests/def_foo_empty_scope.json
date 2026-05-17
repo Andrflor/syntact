@@ -1,0 +1,6 @@
+{
+  "name": "Default Foo Empty Scope",
+  "description": "Foo -> {} — empty scope as default value. The empty Scope[] is itself complete.",
+  "source": "Foo -> {}",
+  "expect": "Scope[Pointing(Identifier(Foo),Scope[])]"
+}

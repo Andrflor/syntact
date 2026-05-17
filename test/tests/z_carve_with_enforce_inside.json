@@ -1,0 +1,6 @@
+{
+  "name": "Z Carve Containing Enforce Statement",
+  "description": "Foo{a ?! valid} — Carve whose entry is a bare Enforce statement.",
+  "source": "Foo{a ?! valid}",
+  "expect": "Scope[Carve(Identifier(Foo),[Enforce(Identifier(a),Identifier(valid))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Foo Carved With Pull And Push Bindings",
+  "description": "Foo{T <- u8 value -> 5} — carve mixes a pull (T) and a push (value). README §Pull bindings.",
+  "source": "Foo{T <- u8 value -> 5}",
+  "expect": "Scope[Carve(Identifier(Foo),[PointingPull(Identifier(T),Identifier(u8)),Pointing(Identifier(value),Literal(Integer,5))])]"
+}

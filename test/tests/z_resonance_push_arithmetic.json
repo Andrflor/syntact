@@ -1,0 +1,6 @@
+{
+  "name": "Z Resonance Push With Arithmetic RHS",
+  "description": "counter >>- counter + 1 — increment via resonance. Add (TERM=5) > ResonancePush (ASSIGNMENT=1) so the RHS forms first.",
+  "source": "counter >>- counter + 1",
+  "expect": "Scope[ResonancePush(Identifier(counter),Operator(Add,Identifier(counter),Literal(Integer,1)))]"
+}

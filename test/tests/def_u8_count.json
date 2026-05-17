@@ -1,0 +1,6 @@
+{
+  "name": "Default U8 Count",
+  "description": "u8:count — shaped binding with no value, defaults to 0 per primitive shape. Pure shape carries the default; the AST is just Constraint(Identifier(u8),Identifier(count)).",
+  "source": "u8:count",
+  "expect": "Scope[Constraint(Identifier(u8),Identifier(count))]"
+}

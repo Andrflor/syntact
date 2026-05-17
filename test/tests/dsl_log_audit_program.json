@@ -1,0 +1,6 @@
+{
+  "name": "Log And Audit Program",
+  "description": "program scope from README §Effects: handler + emit + return.",
+  "source": "program -> {\n  Log -< e { -> io.write{e.message}! }\n  >- Log{message -> \"hello\"}\n  -> 0\n}\n-> program!",
+  "expect": "Scope[Pointing(Identifier(program),Scope[EventPull(e,Identifier(Log),Scope[Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(message))]),[]))]),EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(message),Literal(String,hello))])),Product(Literal(Integer,0))]),Product(Execute(Identifier(program),[]))]"
+}

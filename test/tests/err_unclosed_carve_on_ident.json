@@ -1,0 +1,6 @@
+{
+  "name": "Unclosed Carve On Identifier",
+  "description": "Foo{x -> 1 — Foo followed by a carve with pointing then EOF. parse_carve should produce a Carve(Foo,[Pointing(x,1)]) and emit an error about the missing '}'. UNCERTAIN.",
+  "source": "Foo{x -> 1",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

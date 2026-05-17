@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Range Branches And Default",
+  "description": "n ? { 0..10 -> 'small' 10..100 -> 'big' -> 'huge' } — three branches: two ranges and a default.",
+  "source": "n ? {\n  0..10 -> 'small'\n  10..100 -> 'big'\n  -> 'huge'\n}",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Range(Literal(Integer,0),Literal(Integer,10)),Literal(String,small)),Branch(Range(Literal(Integer,10),Literal(Integer,100)),Literal(String,big)),Branch(nil,Literal(String,huge))])]"
+}

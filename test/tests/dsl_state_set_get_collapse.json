@@ -1,0 +1,6 @@
+{
+  "name": "State Set/Get Collapse",
+  "description": "Two-action state abstraction: set and get use carve.",
+  "source": "State -> {\n  T <- none\n  T:value\n  set -> { T:v -> v }\n  get -> { -> value }\n}",
+  "expect": "Scope[Pointing(Identifier(State),Scope[PointingPull(Identifier(T),Identifier(none)),Constraint(Identifier(T),Identifier(value)),Pointing(Identifier(set),Scope[Pointing(Constraint(Identifier(T),Identifier(v)),Identifier(v))]),Pointing(Identifier(get),Scope[Product(Identifier(value))])])]"
+}

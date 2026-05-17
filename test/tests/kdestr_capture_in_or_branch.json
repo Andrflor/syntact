@@ -1,0 +1,6 @@
+{
+  "name": "Anonymous Capture In Or Branch",
+  "description": "Some:(v) | None: -> v — alternative with capture vs empty Constraint.",
+  "source": "m ? { Some:(v) | None: -> v }",
+  "expect": "Scope[Pattern(Identifier(m),[Branch(Operator(Or,Constraint(Identifier(Some),Identifier(,v)),Constraint(Identifier(None),nil)),Identifier(v))])]"
+}

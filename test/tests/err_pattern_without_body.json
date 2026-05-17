@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Without Body",
+  "description": "x ? — parse_pattern advances past '?', then is_expression_start returns false at EOF; errors 'Expected pattern expression after ?' and returns nil. UNCERTAIN: top-level scope likely just keeps Identifier(x) since the pattern wrapping is dropped.",
+  "source": "x ?",
+  "expect": "Scope[Identifier(x)]"
+}

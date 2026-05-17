@@ -1,0 +1,6 @@
+{
+  "name": "Destructure With Rest Only",
+  "description": "Foo:{...rest} — single expanded rest binding in destructure. WILL_FAIL_UNTIL_FIX possible: sem expects Carve(Constraint(Foo,nil),[Expand(rest)]).",
+  "source": "Foo:{...rest}",
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Expand(Identifier(rest))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Unknown As Branch Source",
+  "description": "v ? { ?? -> 0 } — Unknown sentinel as a branch source (wildcard-like).",
+  "source": "v ? { ?? -> 0 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Unknown,Literal(Integer,0))])]"
+}

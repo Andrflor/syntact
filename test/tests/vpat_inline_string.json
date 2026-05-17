@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern With String",
+  "description": "s ? 'hello' — inline pattern with string literal.",
+  "source": "s ? 'hello'",
+  "expect": "Scope[Pattern(Identifier(s),[Branch(Literal(String,hello),nil)])]"
+}

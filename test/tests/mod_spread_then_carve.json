@@ -1,0 +1,6 @@
+{
+  "name": "Spread Then Carve On External",
+  "description": "...@lib.fs{root -> '/tmp'} — spread of carved external, like README §Files.",
+  "source": "...@lib.fs{root -> '/tmp'}",
+  "expect": "Scope[Expand(Carve(Property(External(lib,nil),Identifier(fs)),[Pointing(Identifier(root),Literal(String,/tmp))]))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "tok_scope_then_carve",
+  "description": "'{a}{b}' — first '{a}' parses as Scope (prefix LeftBrace). Second '{' is LeftBraceCarve (glued to '}') with infix parse_carve. Carve(Scope[a],[b]).",
+  "source": "{a}{b}",
+  "expect": "Scope[Carve(Scope[Identifier(a)],[Identifier(b)])]"
+}

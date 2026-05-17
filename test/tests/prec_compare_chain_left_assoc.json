@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Comparison Chain Left-Assoc",
+  "description": "a < b < c — Less (COMPARISON=4) is left-assoc via parse_binary at right=COMP+1=5. So '(a < b) < c'. UNCERTAIN: parse_less_than may have special behavior but the rule says COMPARISON.",
+  "source": "a < b < c",
+  "expect": "Scope[Operator(Less,Operator(Less,Identifier(a),Identifier(b)),Identifier(c))]"
+}

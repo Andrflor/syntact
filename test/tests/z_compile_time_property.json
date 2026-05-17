@@ -1,0 +1,6 @@
+{
+  "name": "Z CompileTime On Property",
+  "description": "!a.b — CompileTime prefix parses UNARY-precedence operand; Property is at CALL so it's fully consumed. Result CompileTime(Property(a,b)).",
+  "source": "!a.b",
+  "expect": "Scope[CompileTime(Property(Identifier(a),Identifier(b)))]"
+}

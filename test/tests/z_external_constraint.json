@@ -1,0 +1,6 @@
+{
+  "name": "Z External As Constraint LHS",
+  "description": "@Lib:x — External as the shape side of a constraint binding.",
+  "source": "@Lib:x",
+  "expect": "Scope[Constraint(External(Lib,nil),Identifier(x))]"
+}

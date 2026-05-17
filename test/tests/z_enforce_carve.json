@@ -1,0 +1,6 @@
+{
+  "name": "Z Enforce Predicate Is Carve",
+  "description": "x ?! Foo{n -> 0} — Enforce at PATTERN, Carve at CALL (higher) — Carve forms first as RHS.",
+  "source": "x ?! Foo{n -> 0}",
+  "expect": "Scope[Enforce(Identifier(x),Carve(Identifier(Foo),[Pointing(Identifier(n),Literal(Integer,0))]))]"
+}

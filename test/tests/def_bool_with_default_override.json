@@ -1,0 +1,6 @@
+{
+  "name": "Default Bool With Override",
+  "description": "bool:enabled -> true — shaped binding overridden with 'true'. 'true' is Identifier per anomaly #3.",
+  "source": "bool:enabled -> true",
+  "expect": "Scope[Pointing(Constraint(Identifier(bool),Identifier(enabled)),Identifier(true))]"
+}

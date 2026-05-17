@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Constraint With Add On Left",
+  "description": "a:b + c — ConstraintBind (CONSTRAINT=8) > TERM (5). 'a:b' first; right of ':' is at CALL+1=13 so '+' doesn't attach inside. Then top loop '+ c' attaches to Constraint. Result Add(Constraint(a,b), c).",
+  "source": "a:b + c",
+  "expect": "Scope[Operator(Add,Constraint(Identifier(a),Identifier(b)),Identifier(c))]"
+}

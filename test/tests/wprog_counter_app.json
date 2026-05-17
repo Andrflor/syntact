@@ -1,0 +1,6 @@
+{
+  "name": "Reactive Counter With Increment Event",
+  "description": "Counter app: state binding, increment event, resonance push.",
+  "source": "Counter -> {\n  u32:value -> 0\n  Increment\n  increment -> {\n    >- Increment\n  }\n  Increment -< {\n    value >>- value + 1\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Counter),Scope[Pointing(Constraint(Identifier(u32),Identifier(value)),Literal(Integer,0)),Identifier(Increment),Pointing(Identifier(increment),Scope[EventPush(nil,Identifier(Increment))]),EventPull(,Identifier(Increment),Scope[ResonancePush(Identifier(value),Operator(Add,Identifier(value),Literal(Integer,1)))])])]"
+}

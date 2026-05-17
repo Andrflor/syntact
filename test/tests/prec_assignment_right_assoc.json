@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Assignment Right Associativity",
+  "description": "a -> b -> c -> d — chain of three pointings is right-associative.",
+  "source": "a -> b -> c -> d",
+  "expect": "Scope[Pointing(Identifier(a),Pointing(Identifier(b),Pointing(Identifier(c),Identifier(d))))]"
+}

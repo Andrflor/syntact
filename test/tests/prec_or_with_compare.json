@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Or With Comparisons",
+  "description": "a > b | c < d — OR (7) > COMPARISON (4). '|' attaches tighter than '<' or '>'. Trace: 'a > b' starts, but in right-of->, 'b' then '| c' (OR=7 ≥ COMP+1=5) attaches yielding (b | c). Then > returns Greater(a, Or(b,c)). Outer top-level loop: '< d' attaches as Less. Result Less(Greater(a, Or(b,c)), d).",
+  "source": "a > b | c < d",
+  "expect": "Scope[Operator(Less,Operator(Greater,Identifier(a),Operator(Or,Identifier(b),Identifier(c))),Identifier(d))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Unterminated Block Comment",
+  "description": "/* never closed — the lexer's '/* */' scanner reads till EOF without finding the closing marker, then returns next_token which yields EOF. Result: empty Scope, no error reported because the lexer silently terminates.",
+  "source": "/* unterminated",
+  "expect": "Scope[]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Default None As Empty",
+  "description": "None -> {} — README §No null: absence is modeled structurally with an empty scope.",
+  "source": "None -> {}",
+  "expect": "Scope[Pointing(Identifier(None),Scope[])]"
+}

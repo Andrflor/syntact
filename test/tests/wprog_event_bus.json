@@ -1,0 +1,6 @@
+{
+  "name": "Event Bus With Multiple Handlers",
+  "description": "Bus dispatches events.",
+  "source": "Click -> { u32:x  u32:y }\nHover -> { u32:x  u32:y }\nbus -> {\n  Click -< e {\n    -> handleClick{e.x e.y}!\n  }\n  Hover -< e {\n    -> handleHover{e.x e.y}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Click),Scope[Constraint(Identifier(u32),Identifier(x)),Constraint(Identifier(u32),Identifier(y))]),Pointing(Identifier(Hover),Scope[Constraint(Identifier(u32),Identifier(x)),Constraint(Identifier(u32),Identifier(y))]),Pointing(Identifier(bus),Scope[EventPull(e,Identifier(Click),Scope[Product(Execute(Carve(Identifier(handleClick),[Property(Identifier(e),Identifier(x)),Property(Identifier(e),Identifier(y))]),[]))]),EventPull(e,Identifier(Hover),Scope[Product(Execute(Carve(Identifier(handleHover),[Property(Identifier(e),Identifier(x)),Property(Identifier(e),Identifier(y))]),[]))])])]"
+}

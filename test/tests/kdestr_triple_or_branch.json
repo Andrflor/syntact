@@ -1,0 +1,6 @@
+{
+  "name": "Triple-Or Pattern Branch",
+  "description": "v ? { A: | B: | C: -> 1 } — Or is left-associative at OR precedence: ((A:|B:)|C:).",
+  "source": "v ? { A: | B: | C: -> 1 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Operator(Or,Constraint(Identifier(A),nil),Constraint(Identifier(B),nil)),Constraint(Identifier(C),nil)),Literal(Integer,1))])]"
+}

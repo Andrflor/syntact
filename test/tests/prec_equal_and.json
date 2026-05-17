@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Equal With And",
+  "description": "a = b & c — AND (9) > EQUALITY (3). 'b & c' first (right of '=' at EQ+1=4, AND=9 ≥ 4 attaches). Result Equal(a, And(b,c)).",
+  "source": "a = b & c",
+  "expect": "Scope[Operator(Equal,Identifier(a),Operator(And,Identifier(b),Identifier(c)))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon Glued After Capture",
+  "description": "foo(c):x — ConstraintBind glued to captured identifier. Constraint(Identifier(foo,c), Identifier(x)).",
+  "source": "foo(c):x",
+  "expect": "Scope[Constraint(Identifier(foo,c),Identifier(x))]"
+}

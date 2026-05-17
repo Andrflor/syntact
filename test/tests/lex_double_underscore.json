@@ -1,0 +1,6 @@
+{
+  "name": "Lex Double Underscore Identifier",
+  "description": "__foo and foo__bar — two distinct identifiers separated by newline. Underscore is alphanumeric.",
+  "source": "__foo\nfoo__bar",
+  "expect": "Scope[Identifier(__foo),Identifier(foo__bar)]"
+}

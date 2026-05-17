@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Not With Or And",
+  "description": "~a | b & c — Not at UNARY consumes 'a' (PRIMARY) only; then '|' (OR=7) attaches outside at top loop; '& c' attaches inside Or's right (AND=9>OR+1=8 succeeds for 'b & c'). Result Or(Not(nil,a), And(b,c)).",
+  "source": "~a | b & c",
+  "expect": "Scope[Operator(Or,Operator(Not,nil,Identifier(a)),Operator(And,Identifier(b),Identifier(c)))]"
+}

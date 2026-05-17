@@ -1,0 +1,6 @@
+{
+  "name": "Program Point2D Structure",
+  "description": "Defines a Point2D shape with shaped bindings x and y. Tests Constraint inside a scope as part of a structural type definition.",
+  "source": "Point2D -> {\n  u8:x\n  u8:y\n}",
+  "expect": "Scope[Pointing(Identifier(Point2D),Scope[Constraint(Identifier(u8),Identifier(x)),Constraint(Identifier(u8),Identifier(y))])]"
+}

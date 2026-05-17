@@ -1,0 +1,6 @@
+{
+  "name": "Program Maybe-Style Pattern",
+  "description": "A small program defining Maybe-like shape with two productions (none and a Some), then patterning on a value. Tests Pattern with anonymous constraints as branch sources and identifier productions.",
+  "source": "Maybe -> {\n  -> none\n  -> Some:\n}\nresult -> v ? {\n  none -> 0\n  Some: -> 1\n}",
+  "expect": "Scope[Pointing(Identifier(Maybe),Scope[Product(Identifier(none)),Product(Constraint(Identifier(Some),nil))]),Pointing(Identifier(result),Pattern(Identifier(v),[Branch(Identifier(none),Literal(Integer,0)),Branch(Constraint(Identifier(Some),nil),Literal(Integer,1))]))]"
+}

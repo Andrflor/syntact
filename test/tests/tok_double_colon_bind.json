@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_colon_bind",
+  "description": "a::b — first ':' is ConstraintBind (no spaces). Its RHS branch checks is_expression_start on next token ':' which is NOT in is_expression_start, so name stays nil giving Constraint(a,nil). Outer loop sees second ':' as ConstraintBind again with name=b. Constraint(Constraint(a,nil), b). UNCERTAIN.",
+  "source": "a::b",
+  "expect": "Scope[Constraint(Constraint(Identifier(a),nil),Identifier(b))]"
+}

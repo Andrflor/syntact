@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Range",
+  "description": "v ? { 1..100 -> 'r' } — branch source is a Range.",
+  "source": "v ? { 1..100 -> 'r' }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Range(Literal(Integer,1),Literal(Integer,100)),Literal(String,r))])]"
+}

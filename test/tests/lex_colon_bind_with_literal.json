@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon Bind With Literal",
+  "description": "u8:42 — ConstraintBind, right side is a literal (Integer). Constraint(u8, 42).",
+  "source": "u8:42",
+  "expect": "Scope[Constraint(Identifier(u8),Literal(Integer,42))]"
+}

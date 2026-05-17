@@ -1,0 +1,6 @@
+{
+  "name": "Lex Carve With Inner Spaces Around Item",
+  "description": "Foo{ x } — spaces inside the carve do not affect tokenization of '{' (glued to Foo).",
+  "source": "Foo{ x }",
+  "expect": "Scope[Carve(Identifier(Foo),[Identifier(x)])]"
+}

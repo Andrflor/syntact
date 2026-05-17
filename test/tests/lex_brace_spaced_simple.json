@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace Spaced Single Item",
+  "description": "Foo {x} — space before '{' yields LeftBrace, producing sibling Scope statement.",
+  "source": "Foo {x}",
+  "expect": "Scope[Identifier(Foo),Scope[Identifier(x)]]"
+}

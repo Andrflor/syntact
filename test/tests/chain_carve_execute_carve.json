@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_execute_carve",
+  "description": "Foo{x}!{y} — carve, postfix execute, carve on execute result. Carve(Execute(Carve(Foo,[x]),[]),[y]).",
+  "source": "Foo{x}!{y}",
+  "expect": "Scope[Carve(Execute(Carve(Identifier(Foo),[Identifier(x)]),[]),[Identifier(y)])]"
+}

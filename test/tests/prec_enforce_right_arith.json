@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Enforce With Arith On Right",
+  "description": "a ?! b + c — Enforce right at PATTERN+1=3. TERM=5 ≥ 3 attaches inside. Result Enforce(a, Add(b,c)).",
+  "source": "a ?! b + c",
+  "expect": "Scope[Enforce(Identifier(a),Operator(Add,Identifier(b),Identifier(c)))]"
+}

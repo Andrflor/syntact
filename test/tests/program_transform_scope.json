@@ -1,0 +1,6 @@
+{
+  "name": "Program Transform With Default Vec2",
+  "description": "Transform contains a position default Vec2 and a scale carved Vec2{x->1 y->1}. Tests Constraint with carved scope as default value.",
+  "source": "Transform -> {\n  Vec2:position\n  Vec2:scale -> Vec2{x -> 1 y -> 1}\n}",
+  "expect": "Scope[Pointing(Identifier(Transform),Scope[Constraint(Identifier(Vec2),Identifier(position)),Pointing(Constraint(Identifier(Vec2),Identifier(scale)),Carve(Identifier(Vec2),[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Literal(Integer,1))]))])]"
+}

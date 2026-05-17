@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding As Pattern Branch Source",
+  "description": "x ? { T <- u8 -> 1 } — branch where source is a PointingPull. parse_branch expects Pointing or Product; PointingPull is neither. WILL_FAIL_UNTIL_FIX: parse_branch must accept PointingPull as a branch carrier with source=from, product=to. Semantic intent: in a branch like 'T <- u8 -> 1', T is a hole, u8 fills it, then -> 1 is the product.",
+  "source": "x ? { T <- u8 -> 1 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(PointingPull(Identifier(T),Identifier(u8)),Literal(Integer,1))])]"
+}

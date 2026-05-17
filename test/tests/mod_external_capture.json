@@ -1,0 +1,6 @@
+{
+  "name": "External With Trailing Capture-Like Paren",
+  "description": "@lib(x) — External followed by space-glued LeftParenNoSpace acts as infix. UNCERTAIN: parse_left_paren on External could fall into try_parse_wrapped_execute or parse_grouping. README does not define capture on External; expected to be Property(External(lib,nil),Identifier(x)) under .At rules? More likely parse fails into nil. WILL_FAIL_UNTIL_FIX: edge case undefined — expected behavior is grouping treated as no-op leaving External(lib,nil) followed by an identifier statement.",
+  "source": "@lib(x)",
+  "expect": "Scope[External(lib,nil)]"
+}

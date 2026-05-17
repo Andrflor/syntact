@@ -1,0 +1,6 @@
+{
+  "name": "Module-Like Scope With Multiple Productions",
+  "description": "A scope with three bindings and two productions, simulating a module export with default variants.",
+  "source": "Module -> {\n  PI -> 314\n  E -> 271\n  add -> { a -> 0 b -> 0 -> a + b }\n  -> PI\n  -> E\n}",
+  "expect": "Scope[Pointing(Identifier(Module),Scope[Pointing(Identifier(PI),Literal(Integer,314)),Pointing(Identifier(E),Literal(Integer,271)),Pointing(Identifier(add),Scope[Pointing(Identifier(a),Literal(Integer,0)),Pointing(Identifier(b),Literal(Integer,0)),Product(Operator(Add,Identifier(a),Identifier(b)))]),Product(Identifier(PI)),Product(Identifier(E))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "REST Endpoint DSL",
+  "description": "RestEndPoint:userEndpoint with path and get handler. Simplified from README §A small practical comparison.",
+  "source": "RestEndPoint:userEndpoint{\n  path -> \"/users/:id\"\n  get -> { user -> db.users.find{id -> req.id}!\n    -> HttpResponse{status -> 200 body -> user}\n  }\n}",
+  "expect": "Scope[Constraint(Identifier(RestEndPoint),Carve(Identifier(userEndpoint),[Pointing(Identifier(path),Literal(String,/users/:id)),Pointing(Identifier(get),Scope[Pointing(Identifier(user),Execute(Carve(Property(Property(Identifier(db),Identifier(users)),Identifier(find)),[Pointing(Identifier(id),Property(Identifier(req),Identifier(id)))]),[])),Product(Carve(Identifier(HttpResponse),[Pointing(Identifier(status),Literal(Integer,200)),Pointing(Identifier(body),Identifier(user))]))])]))]"
+}

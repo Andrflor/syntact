@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Minus Mul Add",
+  "description": "-a * b + c — unary returns Subtract(nil,a); then top loop '*' (FACTOR=6) attaches: Mul(neg(a),b); then '+ c' attaches at TERM.",
+  "source": "-a * b + c",
+  "expect": "Scope[Operator(Add,Operator(Multiply,Operator(Subtract,nil,Identifier(a)),Identifier(b)),Identifier(c))]"
+}

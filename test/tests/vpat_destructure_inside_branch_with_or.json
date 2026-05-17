@@ -1,0 +1,6 @@
+{
+  "name": "Destructure Inside Branch With Or",
+  "description": "v ? { Point:{x y} | Circle:{r} -> 0 } — Or of two destructures as branch source.",
+  "source": "v ? { Point:{x y} | Circle:{r} -> 0 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Or,Carve(Constraint(Identifier(Point),nil),[Identifier(x),Identifier(y)]),Carve(Constraint(Identifier(Circle),nil),[Identifier(r)])),Literal(Integer,0))])]"
+}

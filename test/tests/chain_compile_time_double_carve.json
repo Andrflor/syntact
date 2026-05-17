@@ -1,0 +1,6 @@
+{
+  "name": "chain_compile_time_double_carve",
+  "description": "!Foo{x}{y} — CompileTime over double carve.",
+  "source": "!Foo{x}{y}",
+  "expect": "Scope[CompileTime(Carve(Carve(Identifier(Foo),[Identifier(x)]),[Identifier(y)]))]"
+}

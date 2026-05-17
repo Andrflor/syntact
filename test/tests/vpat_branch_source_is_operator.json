@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Operator Expression",
+  "description": "v ? { a + b -> c } — branch source is an Add operator.",
+  "source": "v ? { a + b -> c }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Operator(Add,Identifier(a),Identifier(b)),Identifier(c))])]"
+}

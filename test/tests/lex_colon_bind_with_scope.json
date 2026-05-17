@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon Bind Followed By Carve",
+  "description": "T:n{...} — ConstraintBind, then '{' glued to constraint becomes a Carve on the whole Constraint per parse_constraint_bind's trailing LeftBraceCarve handling.",
+  "source": "T:n{a -> 1}",
+  "expect": "Scope[Carve(Constraint(Identifier(T),Identifier(n)),[Pointing(Identifier(a),Literal(Integer,1))])]"
+}

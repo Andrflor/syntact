@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace With Leading Spaces Only",
+  "description": "Leading spaces then '{x}' — space_before is true so LeftBrace, producing a scope statement.",
+  "source": "   {x}",
+  "expect": "Scope[Scope[Identifier(x)]]"
+}

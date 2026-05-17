@@ -1,0 +1,6 @@
+{
+  "name": "Z Range With Arithmetic Endpoint",
+  "description": "1..n*2 — Range right endpoint is Multiply. UNCERTAIN per PARSER_NOTES anomaly #5: RANGE > FACTOR so Range may form before the Multiply binds. Semantic intent: Range(1, Multiply(n,2)). WILL_FAIL_UNTIL_FIX if parser actually returns Operator(Multiply,Range(1,n),2).",
+  "source": "1..n*2",
+  "expect": "Scope[Range(Literal(Integer,1),Operator(Multiply,Identifier(n),Literal(Integer,2)))]"
+}

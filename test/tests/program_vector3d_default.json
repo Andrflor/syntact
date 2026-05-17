@@ -1,0 +1,6 @@
+{
+  "name": "Program Vector3D With Defaults",
+  "description": "Vector3D with three float fields each defaulting to 0.0. Tests Pointing where left is a Constraint and right is a literal Float.",
+  "source": "Vector3D -> {\n  f32:x -> 0.0\n  f32:y -> 0.0\n  f32:z -> 0.0\n}",
+  "expect": "Scope[Pointing(Identifier(Vector3D),Scope[Pointing(Constraint(Identifier(f32),Identifier(x)),Literal(Float,0.0)),Pointing(Constraint(Identifier(f32),Identifier(y)),Literal(Float,0.0)),Pointing(Constraint(Identifier(f32),Identifier(z)),Literal(Float,0.0))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Z Expand External Simple",
+  "description": "...@lib — Expand of an External. parse_expansion calls parse_expression at UNARY; External is PRIMARY so it's consumed entirely. Result: Expand(External(lib,nil)).",
+  "source": "...@lib",
+  "expect": "Scope[Expand(External(lib,nil))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "tok_double_plus_infix",
+  "description": "a++b — Plus is infix-only (no prefix). After 'a' the first '+' starts infix Add; RHS prefix '+' fails. UNCERTAIN: recovery may yield empty Scope[] or partial Operator(Add,a,nil).",
+  "source": "a++b",
+  "expect": "Scope[]"
+}

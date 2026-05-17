@@ -1,0 +1,6 @@
+{
+  "name": "Lex DoubleDot In Parens",
+  "description": "(..) — '(' before and ')' after both delimiters. DoubleDot token. Range(nil,nil).",
+  "source": "(..)",
+  "expect": "Scope[Range(nil,nil)]"
+}

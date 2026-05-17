@@ -1,0 +1,6 @@
+{
+  "name": "Program List With Pull Binding",
+  "description": "List defined with a pull binding T and two productions (empty list and head/tail). Tests PointingPull inside a scope plus structural recursion via Carve. The form ...List{T}: should mean 'expand each element shaped like List{T}' — i.e. Expand wraps the Constraint, not the other way around.",
+  "source": "List -> {\n  T <- none\n  -> {}\n  -> { T: ...List{T}: }\n}",
+  "expect": "Scope[Pointing(Identifier(List),Scope[PointingPull(Identifier(T),Identifier(none)),Product(Scope[]),Product(Scope[Constraint(Identifier(T),nil),Expand(Constraint(Carve(Identifier(List),[Identifier(T)]),nil))])])]"
+}

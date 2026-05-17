@@ -1,0 +1,6 @@
+{
+  "name": "Handler With Three-Statement Body",
+  "description": "Click -< e { log -> 'clicked' counter -<< counter + 1 -> 0 } — three statements: Pointing, ResonancePull, Product.",
+  "source": "Click -< e { log -> 'clicked'\n  counter -<< counter + 1\n  -> 0 }",
+  "expect": "Scope[EventPull(e,Identifier(Click),Scope[Pointing(Identifier(log),Literal(String,clicked)),ResonancePull(Identifier(counter),Operator(Add,Identifier(counter),Literal(Integer,1))),Product(Literal(Integer,0))])]"
+}

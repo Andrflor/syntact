@@ -1,0 +1,6 @@
+{
+  "name": "Tree Traversal",
+  "description": "Binary tree with sum.",
+  "source": "Tree -> {\n  -> Leaf:\n  -> Node:{value left right}\n}\nsum -> {\n  Tree:t\n  -> t ? {\n    Leaf: -> 0\n    Node:{value left right} -> value + sum{left}! + sum{right}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Tree),Scope[Product(Constraint(Identifier(Leaf),nil)),Product(Carve(Constraint(Identifier(Node),nil),[Identifier(value),Identifier(left),Identifier(right)]))]),Pointing(Identifier(sum),Scope[Constraint(Identifier(Tree),Identifier(t)),Product(Pattern(Identifier(t),[Branch(Constraint(Identifier(Leaf),nil),Literal(Integer,0)),Branch(Carve(Constraint(Identifier(Node),nil),[Identifier(value),Identifier(left),Identifier(right)]),Operator(Add,Operator(Add,Identifier(value),Execute(Carve(Identifier(sum),[Identifier(left)]),[])),Execute(Carve(Identifier(sum),[Identifier(right)]),[])))]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Double Unary Negate Then Not",
+  "description": "-~x — outer Subtract prefix calls parse_expression at UNARY which dispatches to Not prefix on '~x'. Result Subtract(nil, Not(nil, x)).",
+  "source": "-~x",
+  "expect": "Scope[Operator(Subtract,nil,Operator(Not,nil,Identifier(x)))]"
+}

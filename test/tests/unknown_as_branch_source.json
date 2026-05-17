@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Branch Source",
+  "description": "n ? { ?? -> done } — Unknown stands as the matched-against branch source.",
+  "source": "n ? { ?? -> done }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Unknown,Identifier(done))])]"
+}

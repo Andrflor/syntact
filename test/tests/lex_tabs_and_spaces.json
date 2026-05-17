@@ -1,0 +1,6 @@
+{
+  "name": "Lex Tabs Mixed With Spaces",
+  "description": "Indentation by tabs and spaces is irrelevant to the parser; is_space treats tab and space identically.",
+  "source": "a\t->\t  1\n\tb -> 2",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]"
+}

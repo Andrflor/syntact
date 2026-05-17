@@ -1,0 +1,6 @@
+{
+  "name": "Parser Combinator Stub",
+  "description": "Parser scope with parse method shaped over input.",
+  "source": "Parser -> { T <- none\n  input -> \"\"\n  parse -> { String:s -> input ? { '' -> none\n    -> T: } }\n}",
+  "expect": "Scope[Pointing(Identifier(Parser),Scope[PointingPull(Identifier(T),Identifier(none)),Pointing(Identifier(input),Literal(String,)),Pointing(Identifier(parse),Scope[Pointing(Constraint(Identifier(String),Identifier(s)),Pattern(Identifier(input),[Branch(Literal(String,),Identifier(none)),Branch(nil,Constraint(Identifier(T),nil))]))])])]"
+}

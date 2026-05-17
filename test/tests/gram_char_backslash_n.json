@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Char Backslash N",
+  "description": "Char with escape '\\n' — the lexer keeps the raw two characters '\\n' in the token text (scan_string's escape branch just skips two bytes without translation).",
+  "source": "'\\n'",
+  "expect": "Scope[Literal(String,\\n)]"
+}

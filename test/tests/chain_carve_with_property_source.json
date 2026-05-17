@@ -1,0 +1,6 @@
+{
+  "name": "chain_carve_with_property_source",
+  "description": "Foo{a.b -> 1} — Pointing source inside carve is property chain.",
+  "source": "Foo{a.b -> 1}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Property(Identifier(a),Identifier(b)),Literal(Integer,1))])]"
+}

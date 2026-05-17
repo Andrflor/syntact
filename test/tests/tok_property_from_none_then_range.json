@@ -1,0 +1,6 @@
+{
+  "name": "tok_property_from_none_then_range",
+  "description": "'.a..b' — leading '.a' is PropertyFromNone (start-of-source = before-delimiter, no space after) producing Property(nil,a); then '..' between 'a' and 'b' (both non-delim) is Range infix. Range(Property(nil,a), b).",
+  "source": ".a..b",
+  "expect": "Scope[Range(Property(nil,Identifier(a)),Identifier(b))]"
+}

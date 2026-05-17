@@ -1,0 +1,6 @@
+{
+  "name": "Combo Unknown Inside Carve Inside Pointing",
+  "description": "x -> Foo{n -> ??} — a carve where a binding default is the Unknown sentinel.",
+  "source": "x -> Foo{n -> ??}",
+  "expect": "Scope[Pointing(Identifier(x),Carve(Identifier(Foo),[Pointing(Identifier(n),Unknown)]))]"
+}

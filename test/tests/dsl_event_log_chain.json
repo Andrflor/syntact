@@ -1,0 +1,6 @@
+{
+  "name": "Event Logger Chain",
+  "description": "Logger handles Log by writing then re-emitting Audit. Chain of handlers.",
+  "source": "Logger -> {\n  Log -< e { -> io.write{e.msg}!\n    >- Audit{msg -> e.msg}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Logger),Scope[EventPull(e,Identifier(Log),Scope[Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(msg))]),[])),EventPush(nil,Carve(Identifier(Audit),[Pointing(Identifier(msg),Property(Identifier(e),Identifier(msg)))]))])])]"
+}

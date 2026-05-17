@@ -1,0 +1,6 @@
+{
+  "name": "Lex Brace At File Start",
+  "description": "{x} at offset 0 — start_pos.offset == 0 in lexer forces LeftBrace (not Carve).",
+  "source": "{x}",
+  "expect": "Scope[Scope[Identifier(x)]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Deep External Property Chain",
+  "description": "@lib.geometry.shapes.Plane — three-level chain on External(lib).",
+  "source": "@lib.geometry.shapes.Plane",
+  "expect": "Scope[Property(Property(Property(External(lib,nil),Identifier(geometry)),Identifier(shapes)),Identifier(Plane))]"
+}

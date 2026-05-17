@@ -1,0 +1,6 @@
+{
+  "name": "Combo Property Chain On Wrapped Execute",
+  "description": "Foo{x->1}<!>.bar.baz — Threading-wrapped Execute on a Carve, then property chain on the result. CALL precedence chains all postfix.",
+  "source": "Foo{x->1}<!>.bar.baz",
+  "expect": "Scope[Property(Property(Execute(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),[Threading]),Identifier(bar)),Identifier(baz))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "chain_double_carve_then_property",
+  "description": "Foo{a -> 1}{b -> 2}.c — double carve then property.",
+  "source": "Foo{a -> 1}{b -> 2}.c",
+  "expect": "Scope[Property(Carve(Carve(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1))]),[Pointing(Identifier(b),Literal(Integer,2))]),Identifier(c))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Branch Source Is Nested Scope",
+  "description": "v ? { {a {b c}} -> 0 } — branch source is a scope with a nested scope.",
+  "source": "v ? { {a {b c}} -> 0 }",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Scope[Identifier(a),Scope[Identifier(b),Identifier(c)]],Literal(Integer,0))])]"
+}

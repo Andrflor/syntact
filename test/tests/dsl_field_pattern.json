@@ -1,0 +1,6 @@
+{
+  "name": "Field Algebra With Refinements",
+  "description": "Field -> Ring & hasInverse. Refined shape on Ring.",
+  "source": "Field -> Ring & hasInverse",
+  "expect": "Scope[Pointing(Identifier(Field),Operator(And,Identifier(Ring),Identifier(hasInverse)))]"
+}

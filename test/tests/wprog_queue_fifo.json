@@ -1,0 +1,6 @@
+{
+  "name": "Queue FIFO",
+  "description": "Queue with enqueue and dequeue.",
+  "source": "Queue -> {\n  items -> {}\n}\nenqueue -> {\n  Queue:q\n  x\n  -> Queue{items -> {...q.items x}}\n}\ndequeue -> {\n  Queue:q\n  -> q.items ? {\n    {} -> none\n    {h ...t} -> {h Queue{items -> t}}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Queue),Scope[Pointing(Identifier(items),Scope[])]),Pointing(Identifier(enqueue),Scope[Constraint(Identifier(Queue),Identifier(q)),Identifier(x),Product(Carve(Identifier(Queue),[Pointing(Identifier(items),Scope[Expand(Property(Identifier(q),Identifier(items))),Identifier(x)])]))]),Pointing(Identifier(dequeue),Scope[Constraint(Identifier(Queue),Identifier(q)),Product(Pattern(Property(Identifier(q),Identifier(items)),[Branch(Scope[],Identifier(none)),Branch(Scope[Identifier(h),Expand(Identifier(t))],Scope[Identifier(h),Carve(Identifier(Queue),[Pointing(Identifier(items),Identifier(t))])])]))])]"
+}

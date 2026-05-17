@@ -1,0 +1,6 @@
+{
+  "name": "JSON-Like Data Structure With Validators",
+  "description": "User scope with shaped bindings and refinement on age.",
+  "source": "Age -> u8 & >0 & <=120\nUser -> {\n  String:name\n  Age:age\n  String:email\n}",
+  "expect": "Scope[Pointing(Identifier(Age),Operator(And,Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0))),Operator(LessEqual,nil,Literal(Integer,120)))),Pointing(Identifier(User),Scope[Constraint(Identifier(String),Identifier(name)),Constraint(Identifier(Age),Identifier(age)),Constraint(Identifier(String),Identifier(email))])]"
+}

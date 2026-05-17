@@ -1,0 +1,6 @@
+{
+  "name": "Deep Capture Chain Through Destructure",
+  "description": "x ? { Outer:{inner Inner:{leaf(v)}} -> v } — Outer destructured, includes a bare 'inner' field and a nested Inner destructure capturing leaf as v.",
+  "source": "x ? { Outer:{inner Inner:{leaf(v)}} -> v }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Outer),nil),[Identifier(inner),Carve(Constraint(Identifier(Inner),nil),[Identifier(leaf,v)])]),Identifier(v))])]"
+}

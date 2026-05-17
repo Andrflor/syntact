@@ -1,0 +1,6 @@
+{
+  "name": "Multiple Handlers In Same Scope",
+  "description": "A scope with two distinct event handlers Log and Audit, each producing different effects.",
+  "source": "{\n  Log -< e { -> io.write{e.msg}! }\n  Audit -< e { -> db.write{e.msg}! }\n}",
+  "expect": "Scope[Scope[EventPull(e,Identifier(Log),Scope[Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(msg))]),[]))]),EventPull(e,Identifier(Audit),Scope[Product(Execute(Carve(Property(Identifier(db),Identifier(write)),[Property(Identifier(e),Identifier(msg))]),[]))])]]"
+}

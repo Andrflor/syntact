@@ -1,0 +1,6 @@
+{
+  "name": "Group Algebra Structure",
+  "description": "Group with identity and inverse with proof obligation.",
+  "source": "Group -> {\n  T\n  identity\n  op -> {\n    T:a\n    T:b\n    -> a + b\n  }\n  leftIdentity -> {\n    T:a -> ??\n    -> op{identity a}! = a ?! true\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Group),Scope[Identifier(T),Identifier(identity),Pointing(Identifier(op),Scope[Constraint(Identifier(T),Identifier(a)),Constraint(Identifier(T),Identifier(b)),Product(Operator(Add,Identifier(a),Identifier(b)))]),Pointing(Identifier(leftIdentity),Scope[Pointing(Constraint(Identifier(T),Identifier(a)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(op),[Identifier(identity),Identifier(a)]),[]),Identifier(a)),Identifier(true)))])])]"
+}

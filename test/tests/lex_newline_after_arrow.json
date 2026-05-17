@@ -1,0 +1,6 @@
+{
+  "name": "Lex Newline Immediately After Arrow",
+  "description": "a ->\\n  b — parse_pointing_push explicitly treats Newline after '->' as empty to (pointing.to = nil). Then 'b' is a sibling statement.",
+  "source": "a ->\n  b",
+  "expect": "Scope[Pointing(Identifier(a),nil),Identifier(b)]"
+}

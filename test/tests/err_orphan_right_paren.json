@@ -1,0 +1,6 @@
+{
+  "name": "Orphan Right Paren",
+  "description": ") alone — RightParen has no prefix; parse_expression errors. UNCERTAIN: recovery should skip and yield empty scope.",
+  "source": ")",
+  "expect": "Scope[]"
+}

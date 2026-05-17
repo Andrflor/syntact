@@ -1,0 +1,6 @@
+{
+  "name": "Combo Event Push In Pattern Target",
+  "description": "Pattern target is a complex EventPush expression. UNCERTAIN: '>- Log ? {...}' — '>-' is prefix at ASSIGNMENT, parses entire right side. Pattern '?' is at PATTERN (higher than ASSIGNMENT), so ? would attach to Log inside the right of >-. Result: EventPush(nil, Pattern(Log,...)).",
+  "source": ">- Log ? { 1 -> 2 }",
+  "expect": "Scope[EventPush(nil,Pattern(Identifier(Log),[Branch(Literal(Integer,1),Literal(Integer,2))]))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Multi-Level Logger",
+  "description": "Logger with level pattern matching.",
+  "source": "Level -> {\n  -> Info:\n  -> Warn:\n  -> Error:\n}\nlog -> {\n  Level:l\n  String:msg\n  -> l ? {\n    Info: -> io.write{msg}!\n    Warn: -> io.write{msg}!\n    Error: -> io.write{msg}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Level),Scope[Product(Constraint(Identifier(Info),nil)),Product(Constraint(Identifier(Warn),nil)),Product(Constraint(Identifier(Error),nil))]),Pointing(Identifier(log),Scope[Constraint(Identifier(Level),Identifier(l)),Constraint(Identifier(String),Identifier(msg)),Product(Pattern(Identifier(l),[Branch(Constraint(Identifier(Info),nil),Execute(Carve(Property(Identifier(io),Identifier(write)),[Identifier(msg)]),[])),Branch(Constraint(Identifier(Warn),nil),Execute(Carve(Property(Identifier(io),Identifier(write)),[Identifier(msg)]),[])),Branch(Constraint(Identifier(Error),nil),Execute(Carve(Property(Identifier(io),Identifier(write)),[Identifier(msg)]),[]))]))])]"
+}

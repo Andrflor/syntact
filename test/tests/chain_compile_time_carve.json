@@ -1,0 +1,6 @@
+{
+  "name": "chain_compile_time_carve",
+  "description": "!Foo{x} — CompileTime prefix consumes operand at UNARY=10; LeftBraceCarve at CALL > UNARY attaches inside. CompileTime(Carve(Foo,[x])).",
+  "source": "!Foo{x}",
+  "expect": "Scope[CompileTime(Carve(Identifier(Foo),[Identifier(x)]))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "tok_postfix_then_prefix_range",
+  "description": "'1.. ..3' — '1..' is PostfixRange (no space before, space after) producing Range(1,nil). The following '..3' has space before and no space after → PrefixRange. As prefix it produces Range(nil,3) as a fresh expression. After Range(1,nil) at RANGE precedence the next token PrefixRange has no infix rule → top loop returns. New statement reads '..3' as Range(nil,3). UNCERTAIN.",
+  "source": "1.. ..3",
+  "expect": "Scope[Range(Literal(Integer,1),nil),Range(nil,Literal(Integer,3))]"
+}

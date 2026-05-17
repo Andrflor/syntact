@@ -1,0 +1,6 @@
+{
+  "name": "Unclosed Open Paren",
+  "description": "( alone — parse_grouping expects an inner expression but hits EOF, should not crash. UNCERTAIN: very likely returns nil and an empty top-level Scope.",
+  "source": "(",
+  "expect": "Scope[]"
+}

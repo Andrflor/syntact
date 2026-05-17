@@ -1,0 +1,6 @@
+{
+  "name": "Handler Source Is Carved Constrained Shape",
+  "description": "Log{level -> 'warn'} -< e { body } — the from of the EventPull is a Carve.",
+  "source": "Log{level -> 'warn'} -< e { body }",
+  "expect": "Scope[EventPull(e,Carve(Identifier(Log),[Pointing(Identifier(level),Literal(String,warn))]),Scope[Identifier(body)])]"
+}

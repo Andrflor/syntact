@@ -1,0 +1,6 @@
+{
+  "name": "chain_property_chain_then_execute",
+  "description": "a.b.c! — chained property then execute.",
+  "source": "a.b.c!",
+  "expect": "Scope[Execute(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[])]"
+}

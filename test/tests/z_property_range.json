@@ -1,0 +1,6 @@
+{
+  "name": "Z Property With Range Endpoint",
+  "description": "a.lo..a.hi — Range whose endpoints are Property accesses. Property at CALL > Range RANGE so each endpoint forms first.",
+  "source": "a.lo..a.hi",
+  "expect": "Scope[Range(Property(Identifier(a),Identifier(lo)),Property(Identifier(a),Identifier(hi)))]"
+}

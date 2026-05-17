@@ -1,0 +1,6 @@
+{
+  "name": "tok_slash_then_unary_minus",
+  "description": "a/-b — Divide infix then unary minus RHS. Operator(Divide, a, Subtract(nil,b)).",
+  "source": "a/-b",
+  "expect": "Scope[Operator(Divide,Identifier(a),Operator(Subtract,nil,Identifier(b)))]"
+}

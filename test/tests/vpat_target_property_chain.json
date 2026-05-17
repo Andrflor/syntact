@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Target Is Property Chain",
+  "description": "a.b.c ? { 0 -> 'z' } — pattern target is a deep property chain.",
+  "source": "a.b.c ? { 0 -> 'z' }",
+  "expect": "Scope[Pattern(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[Branch(Literal(Integer,0),Literal(String,z))])]"
+}

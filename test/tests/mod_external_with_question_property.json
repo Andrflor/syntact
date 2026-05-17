@@ -1,0 +1,6 @@
+{
+  "name": "External With Inline Pattern On Field",
+  "description": "@lib.flag?<10 — External.property followed by inline pattern. Property is CALL, ? is PATTERN; PATTERN < CALL so ? becomes a postfix on the whole Property chain.",
+  "source": "@lib.flag?<10",
+  "expect": "Scope[Pattern(Property(External(lib,nil),Identifier(flag)),[Branch(Operator(Less,nil,Literal(Integer,10)),nil)])]"
+}

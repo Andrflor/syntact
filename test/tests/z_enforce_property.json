@@ -1,0 +1,6 @@
+{
+  "name": "Z Enforce With Property",
+  "description": "a.b ?! c — Property (CALL) binds before Enforce (PATTERN). Enforce(Property(a,b),c).",
+  "source": "a.b ?! c",
+  "expect": "Scope[Enforce(Property(Identifier(a),Identifier(b)),Identifier(c))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Lex Whitespace Only Inside Scope",
+  "description": "{   } — only whitespace inside braces. skip_whitespace eats it, then '}' closes. Empty Scope.",
+  "source": "{   }",
+  "expect": "Scope[Scope[]]"
+}

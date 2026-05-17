@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Not Then Arithmetic",
+  "description": "~a + b — Not binds at UNARY (high), so ~a is computed first, then + b. Result: Add(Not(nil,a), b).",
+  "source": "~a + b",
+  "expect": "Scope[Operator(Add,Operator(Not,nil,Identifier(a)),Identifier(b))]"
+}

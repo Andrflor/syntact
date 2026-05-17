@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Nested Negate And",
+  "description": "alpha & ~digit — And of alpha and unary-Not on digit.",
+  "source": "alpha & ~digit",
+  "expect": "Scope[Operator(And,Identifier(alpha),Operator(Not,nil,Identifier(digit)))]"
+}

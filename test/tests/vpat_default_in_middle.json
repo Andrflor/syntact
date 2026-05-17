@@ -1,0 +1,6 @@
+{
+  "name": "Default Branch In Middle Of Pattern",
+  "description": "v ? { 1 -> 'a' -> 'b' 2 -> 'c' } — default branch sits in the middle (source nil). Each branch is a Pointing or Product as per parse_branch.",
+  "source": "v ? {\n  1 -> 'a'\n  -> 'b'\n  2 -> 'c'\n}",
+  "expect": "Scope[Pattern(Identifier(v),[Branch(Literal(Integer,1),Literal(String,a)),Branch(nil,Literal(String,b)),Branch(Literal(Integer,2),Literal(String,c))])]"
+}

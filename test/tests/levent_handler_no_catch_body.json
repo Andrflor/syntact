@@ -1,0 +1,6 @@
+{
+  "name": "Handler Without Catch Identifier",
+  "description": "Tick -< { -> 0 } — infix EventPull with no catch identifier (catch empty). Body is a scope with a Product.",
+  "source": "Tick -< { -> 0 }",
+  "expect": "Scope[EventPull(,Identifier(Tick),Scope[Product(Literal(Integer,0))])]"
+}

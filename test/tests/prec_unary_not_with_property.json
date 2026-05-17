@@ -1,0 +1,6 @@
+{
+  "name": "Precedence Unary Not With Property",
+  "description": "~a.b — Not at UNARY parses operand at UNARY; '.b' at CALL attaches inside. Result Not(nil, Property(a,b)).",
+  "source": "~a.b",
+  "expect": "Scope[Operator(Not,nil,Property(Identifier(a),Identifier(b)))]"
+}

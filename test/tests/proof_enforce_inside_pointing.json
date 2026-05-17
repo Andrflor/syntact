@@ -1,0 +1,6 @@
+{
+  "name": "Enforce As Pointing Target",
+  "description": "ok -> a ?! true — declares a binding whose value is a proof obligation.",
+  "source": "ok -> a ?! true",
+  "expect": "Scope[Pointing(Identifier(ok),Enforce(Identifier(a),Identifier(true)))]"
+}

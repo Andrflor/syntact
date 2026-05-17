@@ -1,0 +1,6 @@
+{
+  "name": "Lex Only Tabs Between Tokens",
+  "description": "a\\t->\\tb — tabs treated as whitespace (is_space matches \\t).",
+  "source": "a\t->\tb",
+  "expect": "Scope[Pointing(Identifier(a),Identifier(b))]"
+}

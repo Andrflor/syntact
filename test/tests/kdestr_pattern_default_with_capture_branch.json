@@ -1,0 +1,6 @@
+{
+  "name": "Pattern With Capture Branch And Default",
+  "description": "x ? { Some:(v) -> v -> 0 } — Some destructure with anonymous capture, then default branch returning 0.",
+  "source": "x ? { Some:(v) -> v\n  -> 0 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Constraint(Identifier(Some),Identifier(,v)),Identifier(v)),Branch(nil,Literal(Integer,0))])]"
+}

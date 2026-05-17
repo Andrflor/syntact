@@ -1,0 +1,6 @@
+{
+  "name": "Event Push Of Collapsed Carve",
+  "description": ">- Log{n -> 1}! — EventPush wraps Execute of a Carve. Prefix EventPush parses without precedence so consumes the whole expression including the postfix !.",
+  "source": ">- Log{n -> 1}!",
+  "expect": "Scope[EventPush(nil,Execute(Carve(Identifier(Log),[Pointing(Identifier(n),Literal(Integer,1))]),[]))]"
+}

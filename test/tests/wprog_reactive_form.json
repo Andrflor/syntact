@@ -1,0 +1,6 @@
+{
+  "name": "Reactive Form With Events",
+  "description": "Form with submit event and validation.",
+  "source": "Form -> {\n  String:name -> \"\"\n  String:email -> \"\"\n  Submit\n  validate -> {\n    Form:f\n    -> f.name = \"\" ? {\n      true -> false\n      -> true\n    }\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Form),Scope[Pointing(Constraint(Identifier(String),Identifier(name)),Literal(String,)),Pointing(Constraint(Identifier(String),Identifier(email)),Literal(String,)),Identifier(Submit),Pointing(Identifier(validate),Scope[Constraint(Identifier(Form),Identifier(f)),Product(Pattern(Operator(Equal,Property(Identifier(f),Identifier(name)),Literal(String,)),[Branch(Identifier(true),Identifier(false)),Branch(nil,Identifier(true))]))])])]"
+}

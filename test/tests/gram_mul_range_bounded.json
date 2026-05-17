@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Multiply Range Bounded",
+  "description": "'a'..'z'*0..5 — Char range multiplied by a bounded Range. RANGE binds tightest, so 'a'..'z' forms first, then * (Multiply), then 0..5 forms as Range.",
+  "source": "'a'..'z'*0..5",
+  "expect": "Scope[Operator(Multiply,Range(Literal(String,a),Literal(String,z)),Range(Literal(Integer,0),Literal(Integer,5)))]"
+}

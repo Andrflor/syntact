@@ -1,0 +1,6 @@
+{
+  "name": "Default Deep Compose Object",
+  "description": "Object -> { Transform:t\\n Vec2:offset } — three-level deep default composition. Implicitly relies on Transform and Vec2 being shapes with their own defaults.",
+  "source": "Object -> {\n  Transform:t\n  Vec2:offset\n}",
+  "expect": "Scope[Pointing(Identifier(Object),Scope[Constraint(Identifier(Transform),Identifier(t)),Constraint(Identifier(Vec2),Identifier(offset))])]"
+}

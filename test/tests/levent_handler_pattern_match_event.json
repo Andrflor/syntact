@@ -1,0 +1,6 @@
+{
+  "name": "Handler Pattern-Matches On Event Payload",
+  "description": "Msg -< e { -> e.kind ? { 0 -> 'a' 1 -> 'b' } } — handler body returns a Pattern over event property.",
+  "source": "Msg -< e { -> e.kind ? { 0 -> 'a' 1 -> 'b' } }",
+  "expect": "Scope[EventPull(e,Identifier(Msg),Scope[Product(Pattern(Property(Identifier(e),Identifier(kind)),[Branch(Literal(Integer,0),Literal(String,a)),Branch(Literal(Integer,1),Literal(String,b))]))])]"
+}

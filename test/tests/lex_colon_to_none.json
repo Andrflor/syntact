@@ -1,0 +1,6 @@
+{
+  "name": "Lex Colon ToNone (no space before, space after)",
+  "description": "a: b — ConstraintToNone variant, then 'b' is a sibling statement.",
+  "source": "{a: b}",
+  "expect": "Scope[Scope[Constraint(Identifier(a),nil),Identifier(b)]]"
+}

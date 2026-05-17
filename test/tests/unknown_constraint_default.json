@@ -1,0 +1,6 @@
+{
+  "name": "Constraint With Unknown As Shape",
+  "description": "??:x — using Unknown itself as the shape of a Constraint. README permits ?? anywhere.",
+  "source": "??:x",
+  "expect": "Scope[Constraint(Unknown,Identifier(x))]"
+}

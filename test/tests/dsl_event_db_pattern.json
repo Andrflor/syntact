@@ -1,0 +1,6 @@
+{
+  "name": "Event Handler With Database Pattern",
+  "description": "Query -< e { -> db.users.find{id -> e.id}! ? { none -> 404 -> 200 } } — pattern on a property result.",
+  "source": "Query -< e { -> db.users.find{id -> e.id}! ? { none -> 404\n  -> 200 } }",
+  "expect": "Scope[EventPull(e,Identifier(Query),Scope[Product(Pattern(Execute(Carve(Property(Property(Identifier(db),Identifier(users)),Identifier(find)),[Pointing(Identifier(id),Property(Identifier(e),Identifier(id)))]),[]),[Branch(Identifier(none),Literal(Integer,404)),Branch(nil,Literal(Integer,200))]))])]"
+}

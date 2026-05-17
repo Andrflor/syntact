@@ -1,0 +1,6 @@
+{
+  "name": "Lex Very Large Integer Beyond u64",
+  "description": "The lexer stores integer literals as text only — it does not bounds-check, so 99999999999999999999999 is a valid Integer literal as text.",
+  "source": "99999999999999999999999",
+  "expect": "Scope[Literal(Integer,99999999999999999999999)]"
+}

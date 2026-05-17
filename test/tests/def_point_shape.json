@@ -1,0 +1,6 @@
+{
+  "name": "Default Point Shape Definition",
+  "description": "Point -> { u8:x\\n u8:y } — README §Defaults. Pointing(Point, Scope of two shaped bindings).",
+  "source": "Point -> {\n  u8:x\n  u8:y\n}",
+  "expect": "Scope[Pointing(Identifier(Point),Scope[Constraint(Identifier(u8),Identifier(x)),Constraint(Identifier(u8),Identifier(y))])]"
+}

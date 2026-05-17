@@ -1,0 +1,6 @@
+{
+  "name": "Geometry Shapes Sum Type",
+  "description": "Shape sum: Circle/Square/Rect with area.",
+  "source": "Shape -> {\n  -> Circle:{f64:radius}\n  -> Square:{f64:side}\n  -> Rect:{f64:w f64:h}\n}\narea -> {\n  Shape:s\n  -> s ? {\n    Circle:{radius} -> radius * radius * 3\n    Square:{side} -> side * side\n    Rect:{w h} -> w * h\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Shape),Scope[Product(Carve(Constraint(Identifier(Circle),nil),[Constraint(Identifier(f64),Identifier(radius))])),Product(Carve(Constraint(Identifier(Square),nil),[Constraint(Identifier(f64),Identifier(side))])),Product(Carve(Constraint(Identifier(Rect),nil),[Constraint(Identifier(f64),Identifier(w)),Constraint(Identifier(f64),Identifier(h))]))]),Pointing(Identifier(area),Scope[Constraint(Identifier(Shape),Identifier(s)),Product(Pattern(Identifier(s),[Branch(Carve(Constraint(Identifier(Circle),nil),[Identifier(radius)]),Operator(Multiply,Operator(Multiply,Identifier(radius),Identifier(radius)),Literal(Integer,3))),Branch(Carve(Constraint(Identifier(Square),nil),[Identifier(side)]),Operator(Multiply,Identifier(side),Identifier(side))),Branch(Carve(Constraint(Identifier(Rect),nil),[Identifier(w),Identifier(h)]),Operator(Multiply,Identifier(w),Identifier(h)))]))])]"
+}

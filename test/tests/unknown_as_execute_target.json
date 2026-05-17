@@ -1,0 +1,6 @@
+{
+  "name": "Unknown Followed By Execute Bang",
+  "description": "??! — Unknown is a primary (PRIMARY=13), bang collapse is postfix at CALL (12). With no space, ! binds as Execute on the Unknown.",
+  "source": "??!",
+  "expect": "Scope[Execute(Unknown,[])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Or Pattern Where Only One Alternative Has A Capture",
+  "description": "0 | Some:(v) -> v — alternative literal vs constrained capture. Or under PATTERN precedence; capture available in branch product on Some side only.",
+  "source": "x ? { 0 | Some:(v) -> v }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Operator(Or,Literal(Integer,0),Constraint(Identifier(Some),Identifier(,v))),Identifier(v))])]"
+}

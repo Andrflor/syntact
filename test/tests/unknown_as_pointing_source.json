@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Source Of Pointing",
+  "description": "?? -> x — odd but legal: pointing whose source binding name is symbolic.",
+  "source": "?? -> x",
+  "expect": "Scope[Pointing(Unknown,Identifier(x))]"
+}

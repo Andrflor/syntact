@@ -1,0 +1,6 @@
+{
+  "name": "Default Transform Composed",
+  "description": "Transform -> { Vec2:position\\n Vec2:scale -> Vec2{x -> 1 y -> 1} } — README §Defaults compose; position has no override, scale is initialized via Carve.",
+  "source": "Transform -> {\n  Vec2:position\n  Vec2:scale -> Vec2{x -> 1 y -> 1}\n}",
+  "expect": "Scope[Pointing(Identifier(Transform),Scope[Constraint(Identifier(Vec2),Identifier(position)),Pointing(Constraint(Identifier(Vec2),Identifier(scale)),Carve(Identifier(Vec2),[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Literal(Integer,1))]))])]"
+}
