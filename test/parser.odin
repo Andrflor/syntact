@@ -77,14 +77,14 @@ ast_to_string :: proc(node: ^compiler.Node) -> string {
 			append(&parts, ast_to_string(stmt))
 		}
 		return fmt.tprintf("Scope[%s]", strings.join(parts[:], ","))
-	case compiler.Override:
+	case compiler.Carve:
 		ov := make([dynamic]string)
-		for i in 0 ..< len(n.overrides) {
+		for i in 0 ..< len(n.carves) {
 			x := new(compiler.Node)
-			x^ = n.overrides[i]
+			x^ = n.carves[i]
 			append(&ov, ast_to_string(x))
 		}
-		return fmt.tprintf("Override(%s,[%s])", ast_to_string(n.source), strings.join(ov[:], ","))
+		return fmt.tprintf("Carve(%s,[%s])", ast_to_string(n.source), strings.join(ov[:], ","))
 	case compiler.Property:
 		return fmt.tprintf("Property(%s,%s)", ast_to_string(n.source), ast_to_string(n.property))
 	case compiler.Operator:
@@ -190,11 +190,11 @@ walk_all_nodes :: proc(node: ^compiler.Node, full_string: string, pos_map: ^Posi
 			stmt^ = n.to[i]
 			walk_all_nodes(stmt, full_string, pos_map)
 		}
-	case compiler.Override:
+	case compiler.Carve:
 		walk_all_nodes(n.source, full_string, pos_map)
-		for i in 0 ..< len(n.overrides) {
+		for i in 0 ..< len(n.carves) {
 			x := new(compiler.Node)
-			x^ = n.overrides[i]
+			x^ = n.carves[i]
 			walk_all_nodes(x, full_string, pos_map)
 		}
 	case compiler.Property:

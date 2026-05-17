@@ -1,6 +1,6 @@
 {
-  "name": "Override Empty",
-  "description": "Identifier{} (no space, empty) creates an Override with no entries",
+  "name": "Carve Empty",
+  "description": "Identifier{} (no space, empty) creates an Carve with no entries",
   "source": "Foo{}",
-  "expect": "Scope[Override(Identifier(Foo),[])]"
+  "expect": "Scope[Carve(Identifier(Foo),[])]"
 }

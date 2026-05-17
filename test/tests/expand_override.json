@@ -1,6 +1,6 @@
 {
-  "name": "Expand With Override",
+  "name": "Expand With Carve",
   "description": "...Foo{a -> 1} expands an overridden value",
   "source": "...Foo{a -> 1}",
-  "expect": "Scope[Expand(Override(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1))]))]"
+  "expect": "Scope[Expand(Carve(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1))]))]"
 }

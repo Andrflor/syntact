@@ -1,6 +1,6 @@
 {
-  "name": "Override Applied To An Execute Result",
-  "description": "foo!{x -> 1} — postfix Execute then no-space override on the result",
+  "name": "Carve Applied To An Execute Result",
+  "description": "foo!{x -> 1} — postfix Execute then no-space carve on the result",
   "source": "foo!{x -> 1}",
-  "expect": "Scope[Override(Execute(Identifier(foo),[]),[Pointing(Identifier(x),Literal(Integer,1))])]"
+  "expect": "Scope[Carve(Execute(Identifier(foo),[]),[Pointing(Identifier(x),Literal(Integer,1))])]"
 }

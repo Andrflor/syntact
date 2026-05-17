@@ -1,6 +1,6 @@
 {
-  "name": "Constraint With Name Followed By Carved Override",
-  "description": "Circle:name{radius->data} — name is the bound identifier, then a no-space {...} wraps the whole Constraint in an Override",
+  "name": "Constraint With Name Followed By Carved Carve",
+  "description": "Circle:name{radius->data} — name is the bound identifier, then a no-space {...} wraps the whole Constraint in an Carve",
   "source": "Circle:name{radius->data}",
-  "expect": "Scope[Override(Constraint(Identifier(Circle),Identifier(name)),[Pointing(Identifier(radius),Identifier(data))])]"
+  "expect": "Scope[Carve(Constraint(Identifier(Circle),Identifier(name)),[Pointing(Identifier(radius),Identifier(data))])]"
 }

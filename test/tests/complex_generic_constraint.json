@@ -1,6 +1,6 @@
 {
-  "name": "Generic-Style Override In Constraint",
-  "description": "List{T}:items reads as Constraint(Override(List,[T]), items)",
+  "name": "Generic-Style Carve In Constraint",
+  "description": "List{T}:items reads as Constraint(Carve(List,[T]), items)",
   "source": "List{T}:items",
-  "expect": "Scope[Constraint(Override(Identifier(List),[Identifier(T)]),Identifier(items))]"
+  "expect": "Scope[Constraint(Carve(Identifier(List),[Identifier(T)]),Identifier(items))]"
 }

@@ -1,6 +1,6 @@
 {
   "name": "Pattern Destructure With Capture",
-  "description": "Circle:{radius(r)} in a branch source is an Override of Constraint(Circle,nil) whose entry is an Identifier(radius,r) with capture",
+  "description": "Circle:{radius(r)} in a branch source is an Carve of Constraint(Circle,nil) whose entry is an Identifier(radius,r) with capture",
   "source": "s ? { Circle:{radius(r)} -> r }",
-  "expect": "Scope[Pattern(Identifier(s),[Branch(Override(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Identifier(r))])]"
+  "expect": "Scope[Pattern(Identifier(s),[Branch(Carve(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Identifier(r))])]"
 }

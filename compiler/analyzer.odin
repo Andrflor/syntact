@@ -37,7 +37,7 @@ ValueData :: union {
 	^PropertyData,
 	^RangeData,
 	^ExecuteData,
-	^OverrideData,
+	^CarveData,
 	^RefData,
 	^BinaryOpData,
 	^ReactiveData,
@@ -70,9 +70,9 @@ UnaryOpData :: struct {
 	oprator: Operator_Kind,
 }
 
-OverrideData :: struct {
+CarveData :: struct {
 	target:    ValueData,
-	overrides: [dynamic]^Binding,
+	carves: [dynamic]^Binding,
 }
 
 ExecuteData :: struct {
@@ -145,7 +145,7 @@ BoolData :: struct {
 Analyzer_Error_Type :: enum {
 	Undefined_Identifier, // Reference to undeclared identifier
 	Invalid_Binding_Name, // Invalid syntax for binding names
-	Invalid_Override, // Invalid property access syntax
+	Invalid_Carve, // Invalid property access syntax
 	Invalid_Property_Access, // Invalid property access syntax
 	Type_Mismatch, // Type constraint violation
 	Invalid_Constaint, // Invalid constraint syntax
@@ -330,14 +330,14 @@ copy_value_data :: proc(original: ValueData, allocator := context.allocator) -> 
 		new_execute.wrappers = data.wrappers
 		return new_execute
 
-	case ^OverrideData:
-		new_override := new(OverrideData, allocator)
-		new_override.target = copy_value_data(data.target, allocator)
-		new_override.overrides = make([dynamic]^Binding, len(data.overrides), allocator)
-		for binding, i in data.overrides {
-			new_override.overrides[i] = copy_binding(binding, allocator)
+	case ^CarveData:
+		new_carve := new(CarveData, allocator)
+		new_carve.target = copy_value_data(data.target, allocator)
+		new_carve.carves = make([dynamic]^Binding, len(data.carves), allocator)
+		for binding, i in data.carves {
+			new_carve.carves[i] = copy_binding(binding, allocator)
 		}
-		return new_override
+		return new_carve
 
 	case ^RefData:
 		new_ref := new(RefData, allocator)
@@ -794,7 +794,7 @@ analyze_name :: proc(node: ^Node, binding: ^Binding) {
 			#partial switch v in n.name {
 			case Identifier:
 				binding.name = v.name
-			case Override:
+			case Carve:
 				if i, ok := v.source.(Identifier); ok {
 					binding.name = i.name
 				} else {
@@ -875,9 +875,9 @@ analyze_constraint :: proc(node: ^Node, binding: ^Binding) {
 	}
 }
 
-analyze_override :: proc(node: ^Node) -> ^Binding {
+analyze_carve :: proc(node: ^Node) -> ^Binding {
 	// TODO(andrflor): return nil binding when needed and add analyzer errors when doing so
-	// TODO(andrlofr): make analyze name and analyze value for overrides
+	// TODO(andrlofr): make analyze name and analyze value for carves
 	binding := new(Binding)
 	#partial switch n in node {
 	case EventPull:
@@ -922,40 +922,40 @@ BindSwap :: struct {
 	new: ^Binding,
 }
 
-index_override :: #force_inline proc(
+index_carve :: #force_inline proc(
 	target: ^ScopeData,
 	index: int,
-	override: ^Binding,
+	carve: ^Binding,
 ) -> BindSwap {
 	skip := 0
 	for i in 0 ..< len(target.content) {
 		if target.content[i].kind != .pointing_push {
 			skip += 1
 		} else if i == index + skip {
-			overriden := target.content[i]
-			target.content[i] = copy_binding(overriden)
-			target.content[i].symbolic_value = override.symbolic_value
-			target.content[i].static_value = override.static_value
-			return BindSwap{old = overriden, new = target.content[i]}
+			carven := target.content[i]
+			target.content[i] = copy_binding(carven)
+			target.content[i].symbolic_value = carve.symbolic_value
+			target.content[i].static_value = carve.static_value
+			return BindSwap{old = carven, new = target.content[i]}
 		}
 	}
 	return BindSwap{}
 }
 
 
-name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> BindSwap {
+name_carve :: #force_inline proc(target: ^ScopeData, carve: ^Binding) -> BindSwap {
 	for binding, i in target.content {
-		if binding.name == override.name {
-			if binding.kind == override.kind {
-				overriden := target.content[i]
-				target.content[i] = copy_binding(overriden)
-				target.content[i].symbolic_value = override.symbolic_value
-				target.content[i].static_value = override.static_value
-				return BindSwap{old = overriden, new = target.content[i]}
+		if binding.name == carve.name {
+			if binding.kind == carve.kind {
+				carven := target.content[i]
+				target.content[i] = copy_binding(carven)
+				target.content[i].symbolic_value = carve.symbolic_value
+				target.content[i].static_value = carve.static_value
+				return BindSwap{old = carven, new = target.content[i]}
 			} else {
 				analyzer_error(
-					fmt.tprintf("Binding kind mismatch for %s", override.name),
-					.Invalid_Override,
+					fmt.tprintf("Binding kind mismatch for %s", carve.name),
+					.Invalid_Carve,
 					Position{},
 				)
 			}
@@ -963,14 +963,14 @@ name_override :: #force_inline proc(target: ^ScopeData, override: ^Binding) -> B
 		}
 	}
 	analyzer_error(
-		fmt.tprintf("Property %s not found", override.name),
-		.Invalid_Override,
+		fmt.tprintf("Property %s not found", carve.name),
+		.Invalid_Carve,
 		Position{},
 	)
 	return BindSwap{}
 }
 
-reeval_overriden_scope :: #force_inline proc(target: ^ScopeData, swapped: ^[dynamic]BindSwap) {
+reeval_carven_scope :: #force_inline proc(target: ^ScopeData, swapped: ^[dynamic]BindSwap) {
 	for binding, i in target.content {
 		symbolic_value, static_value := replace_references_and_collapse(
 			binding.symbolic_value,
@@ -985,43 +985,43 @@ reeval_overriden_scope :: #force_inline proc(target: ^ScopeData, swapped: ^[dyna
 	}
 }
 
-apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> ValueData {
+apply_carve :: proc(target: ValueData, carves: [dynamic]^Binding) -> ValueData {
 	switch t in target {
 	case ^ScopeData:
 		swapped := make([dynamic]BindSwap, 0)
-		for i in 0 ..< len(overrides) {
-			if overrides[i].name == "" {
-				swap := index_override(t, i, overrides[i])
+		for i in 0 ..< len(carves) {
+			if carves[i].name == "" {
+				swap := index_carve(t, i, carves[i])
 				if (swap.old != nil) {
 					append(&swapped, swap)
 				}
 			} else {
-				// TODO: sucessive name override over the same value override the second one
-				swap := name_override(t, overrides[i])
+				// TODO: sucessive name carve over the same value carve the second one
+				swap := name_carve(t, carves[i])
 				if (swap.old != nil) {
 					append(&swapped, swap)
 				}
 			}
 		}
 		if len(swapped) > 0 {
-			reeval_overriden_scope(t, &swapped)
+			reeval_carven_scope(t, &swapped)
 		}
 
 	case ^StringData:
-		if (len(overrides) == 1 &&
-			   overrides[0].name == "" &&
-			   overrides[0].kind == .pointing_push) {
-			if s, ok := overrides[0].static_value.(^StringData); ok {
+		if (len(carves) == 1 &&
+			   carves[0].name == "" &&
+			   carves[0].kind == .pointing_push) {
+			if s, ok := carves[0].static_value.(^StringData); ok {
 				t.content = s.content
 				return t
 			}
 		}
-		analyzer_error("Override for string should just be string", .Invalid_Override, Position{})
+		analyzer_error("Carve for string should just be string", .Invalid_Carve, Position{})
 	case ^IntegerData:
-		if (len(overrides) == 1 &&
-			   overrides[0].name == "" &&
-			   overrides[0].kind == .pointing_push) {
-			if i, ok := overrides[0].static_value.(^IntegerData); ok {
+		if (len(carves) == 1 &&
+			   carves[0].name == "" &&
+			   carves[0].kind == .pointing_push) {
+			if i, ok := carves[0].static_value.(^IntegerData); ok {
 				if typecheck_int(t, i) {
 					t.content = i.content
 					t.kind = i.kind
@@ -1030,12 +1030,12 @@ apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> Value
 				}
 			}
 		}
-		analyzer_error("Override for int should just be string", .Invalid_Override, Position{})
+		analyzer_error("Carve for int should just be string", .Invalid_Carve, Position{})
 	case ^FloatData:
-		if (len(overrides) == 1 &&
-			   overrides[0].name == "" &&
-			   overrides[0].kind == .pointing_push) {
-			if f, ok := overrides[0].static_value.(^FloatData); ok {
+		if (len(carves) == 1 &&
+			   carves[0].name == "" &&
+			   carves[0].kind == .pointing_push) {
+			if f, ok := carves[0].static_value.(^FloatData); ok {
 				if typecheck_float(t, f) {
 					t.content = f.content
 					t.kind = f.kind
@@ -1043,21 +1043,21 @@ apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> Value
 				}
 			}
 		}
-		analyzer_error("Override for float should just be string", .Invalid_Override, Position{})
+		analyzer_error("Carve for float should just be string", .Invalid_Carve, Position{})
 	case ^BoolData:
-		if (len(overrides) == 1 &&
-			   overrides[0].name == "" &&
-			   overrides[0].kind == .pointing_push) {
-			if b, ok := overrides[0].static_value.(^BoolData); ok {
+		if (len(carves) == 1 &&
+			   carves[0].name == "" &&
+			   carves[0].kind == .pointing_push) {
+			if b, ok := carves[0].static_value.(^BoolData); ok {
 				t.content = b.content
 				return t
 			}
 		}
-		analyzer_error("Override for boolean should just be string", .Invalid_Override, Position{})
+		analyzer_error("Carve for boolean should just be string", .Invalid_Carve, Position{})
 	case ^PropertyData,
 	     ^RangeData,
 	     ^ExecuteData,
-	     ^OverrideData,
+	     ^CarveData,
 	     ^RefData,
 	     ^BinaryOpData,
 	     ^ReactiveData,
@@ -1065,13 +1065,13 @@ apply_override :: proc(target: ValueData, overrides: [dynamic]^Binding) -> Value
 	     ^UnaryOpData:
 		analyzer_error(
 			"Those dynamic elements should ne be used here",
-			.Invalid_Override,
+			.Invalid_Carve,
 			Position{},
 		)
 	case Empty:
 		analyzer_error(
-			"Cannot override someting that resolve to empty",
-			.Invalid_Override,
+			"Cannot carve someting that resolve to empty",
+			.Invalid_Carve,
 			Position{},
 		)
 	}
@@ -1119,10 +1119,10 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 			return value, value
 		} else {
 			if s, ok := n.name.(ScopeNode); ok {
-				// TODO(andrflor): apply override here?
+				// TODO(andrflor): apply carve here?
 			} else {
 				analyzer_error(
-					"Value for constraint data should be override",
+					"Value for constraint data should be carve",
 					.Invalid_Constaint,
 					n.position,
 				)
@@ -1138,23 +1138,23 @@ analyze_value :: proc(node: ^Node) -> (ValueData, ValueData) {
 		}
 		pop_scope()
 		return scope, scope
-	case Override:
+	case Carve:
 		target, static_target := analyze_value(n.source)
 		if scope, ok := static_target.(^ScopeData); ok {
-			override := new(OverrideData)
-			override.target = target
-			override.overrides = make([dynamic]^Binding, 0)
-			for i in 0 ..< len(n.overrides) {
-				binding := analyze_override(&n.overrides[i])
+			carve := new(CarveData)
+			carve.target = target
+			carve.carves = make([dynamic]^Binding, 0)
+			for i in 0 ..< len(n.carves) {
+				binding := analyze_carve(&n.carves[i])
 				if (binding != nil) {
-					append(&override.overrides, binding)
+					append(&carve.carves, binding)
 				}
 			}
-			return override, apply_override(copy_scope(scope), override.overrides)
+			return carve, apply_carve(copy_scope(scope), carve.carves)
 		} else {
 			analyzer_error(
-				"Trying to override an element that does no resolve to a scope",
-				.Invalid_Override,
+				"Trying to carve an element that does no resolve to a scope",
+				.Invalid_Carve,
 				n.position,
 			)
 			return target, static_target
@@ -2063,7 +2063,7 @@ debug_value_inline :: proc(value: ValueData) -> string {
 	case ^ScopeData:
 		// Scopes should not be inlined - they need to show their contents
 		return "" // This signals that scope should be handled separately
-	case ^OverrideData:
+	case ^CarveData:
 		return ""
 	case ^StringData:
 		return fmt.tprintf("String(\"%s\")", v.content)
@@ -2129,8 +2129,8 @@ debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
 	case ^ScopeData:
 		return fmt.tprintf("Scope(%d bindings)", len(v.content))
-	case ^OverrideData:
-		return "Override"
+	case ^CarveData:
+		return "Carve"
 	case ^ReactiveData:
 		return "Rx"
 	case ^EffectData:
@@ -2338,39 +2338,39 @@ replace_references_and_collapse :: proc(
 		static_result := evaluate_unary_op(static_value, s.oprator)
 		return new_unary, static_result
 
-	case ^OverrideData:
+	case ^CarveData:
 		// Check target
 		new_target, static_target := replace_references_and_collapse(s.target, swapped)
 
-		// Check overrides
-		overrides_changed := false
-		new_overrides := make([dynamic]^Binding, len(s.overrides))
-		for override, i in s.overrides {
-			if contains_references(override.symbolic_value, swapped) {
-				overrides_changed = true
-				new_override := copy_binding(override)
-				new_override.symbolic_value, new_override.static_value =
-					replace_references_and_collapse(override.symbolic_value, swapped)
-				new_overrides[i] = new_override
+		// Check carves
+		carves_changed := false
+		new_carves := make([dynamic]^Binding, len(s.carves))
+		for carve, i in s.carves {
+			if contains_references(carve.symbolic_value, swapped) {
+				carves_changed = true
+				new_carve := copy_binding(carve)
+				new_carve.symbolic_value, new_carve.static_value =
+					replace_references_and_collapse(carve.symbolic_value, swapped)
+				new_carves[i] = new_carve
 			} else {
-				new_overrides[i] = override
+				new_carves[i] = carve
 			}
 		}
 
-		// If nothing changed, return original with applied overrides
-		if new_target == s.target && !overrides_changed {
-			static_result := apply_override(static_target, s.overrides)
+		// If nothing changed, return original with applied carves
+		if new_target == s.target && !carves_changed {
+			static_result := apply_carve(static_target, s.carves)
 			return s, static_result
 		}
 
-		// Create new override
-		new_override_data := new(OverrideData)
-		new_override_data.target = new_target
-		new_override_data.overrides = new_overrides
+		// Create new carve
+		new_carve_data := new(CarveData)
+		new_carve_data.target = new_target
+		new_carve_data.carves = new_carves
 
-		// Apply overrides to get static result
-		static_result := apply_override(static_target, new_overrides)
-		return new_override_data, static_result
+		// Apply carves to get static result
+		static_result := apply_carve(static_target, new_carves)
+		return new_carve_data, static_result
 
 	case ^ExecuteData:
 		// Check target
@@ -2479,12 +2479,12 @@ contains_references :: proc(value: ValueData, swapped: ^[dynamic]BindSwap) -> bo
 		return contains_references(v.left, swapped) || contains_references(v.right, swapped)
 	case ^UnaryOpData:
 		return contains_references(v.value, swapped)
-	case ^OverrideData:
+	case ^CarveData:
 		if contains_references(v.target, swapped) {
 			return true
 		}
-		for override in v.overrides {
-			if contains_references(override.symbolic_value, swapped) {
+		for carve in v.carves {
+			if contains_references(carve.symbolic_value, swapped) {
 				return true
 			}
 		}

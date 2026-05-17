@@ -1,6 +1,6 @@
 {
   "name": "Or Of Shape Destructures In Branch",
-  "description": "Square:{side(s)} | Diamond:{side(s)} unifies two shapes through a common projection (README §Destructuring patterns). The branch source must be a symmetric Or whose operands are both Override-of-Constraint destructurings.",
+  "description": "Square:{side(s)} | Diamond:{side(s)} unifies two shapes through a common projection (README §Destructuring patterns). The branch source must be a symmetric Or whose operands are both Carve-of-Constraint destructurings.",
   "source": "s ? { Square:{side(s)} | Diamond:{side(s)} -> s }",
-  "expect": "Scope[Pattern(Identifier(s),[Branch(Operator(Or,Override(Constraint(Identifier(Square),nil),[Identifier(side,s)]),Override(Constraint(Identifier(Diamond),nil),[Identifier(side,s)])),Identifier(s))])]"
+  "expect": "Scope[Pattern(Identifier(s),[Branch(Operator(Or,Carve(Constraint(Identifier(Square),nil),[Identifier(side,s)]),Carve(Constraint(Identifier(Diamond),nil),[Identifier(side,s)])),Identifier(s))])]"
 }

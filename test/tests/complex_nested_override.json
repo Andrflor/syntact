@@ -1,6 +1,6 @@
 {
-  "name": "Nested Override",
-  "description": "An override whose entry is itself an override",
+  "name": "Nested Carve",
+  "description": "An carve whose entry is itself an carve",
   "source": "Foo{a -> Bar{b -> 1}}",
-  "expect": "Scope[Override(Identifier(Foo),[Pointing(Identifier(a),Override(Identifier(Bar),[Pointing(Identifier(b),Literal(Integer,1))]))])]"
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(a),Carve(Identifier(Bar),[Pointing(Identifier(b),Literal(Integer,1))]))])]"
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Constraint Followed By Override",
-  "description": "When a no-space '{' follows a constraint, the whole constraint is wrapped in an Override",
+  "name": "Constraint Followed By Carve",
+  "description": "When a no-space '{' follows a constraint, the whole constraint is wrapped in an Carve",
   "source": "T:x{a -> 1}",
-  "expect": "Scope[Override(Constraint(Identifier(T),Identifier(x)),[Pointing(Identifier(a),Literal(Integer,1))])]"
+  "expect": "Scope[Carve(Constraint(Identifier(T),Identifier(x)),[Pointing(Identifier(a),Literal(Integer,1))])]"
 }

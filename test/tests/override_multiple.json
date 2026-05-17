@@ -1,6 +1,6 @@
 {
-  "name": "Override Multiple Entries",
-  "description": "Override with several entries separated by newlines",
+  "name": "Carve Multiple Entries",
+  "description": "Carve with several entries separated by newlines",
   "source": "Foo{\n  a -> 1\n  b -> 2\n}",
-  "expect": "Scope[Override(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))])]"
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))])]"
 }

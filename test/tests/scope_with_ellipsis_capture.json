@@ -2,5 +2,5 @@
   "name": "Scope With Ellipsis Capture On A Generic Constraint",
   "description": "{...List{T}:(l)} — a scope of one entry which is the rest expansion of a captured List constraint",
   "source": "{...List{T}:(l)}",
-  "expect": "Scope[Scope[Constraint(Expand(Override(Identifier(List),[Identifier(T)])),Identifier(,l))]]"
+  "expect": "Scope[Scope[Constraint(Expand(Carve(Identifier(List),[Identifier(T)])),Identifier(,l))]]"
 }

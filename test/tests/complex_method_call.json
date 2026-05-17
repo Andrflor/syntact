@@ -1,6 +1,6 @@
 {
   "name": "Complex Method Call With Argument",
-  "description": "obj.method{arg -> 1}! combines Property + Override + Execute. The trailing ! produces a postfix Execute around the Override of the method property.",
+  "description": "obj.method{arg -> 1}! combines Property + Carve + Execute. The trailing ! produces a postfix Execute around the Carve of the method property.",
   "source": "obj.method{arg -> 1}!",
-  "expect": "Scope[Execute(Override(Property(Identifier(obj),Identifier(method)),[Pointing(Identifier(arg),Literal(Integer,1))]),[])]"
+  "expect": "Scope[Execute(Carve(Property(Identifier(obj),Identifier(method)),[Pointing(Identifier(arg),Literal(Integer,1))]),[])]"
 }
