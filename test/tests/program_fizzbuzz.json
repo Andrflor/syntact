@@ -1,0 +1,6 @@
+{
+  "name": "Program FizzBuzz Style Pattern",
+  "description": "Classic FizzBuzz expressed via a Pattern on n%15, n%3, n%5. Tests pattern with multiple Mod operations and string productions.",
+  "source": "fizzbuzz -> {\n  n -> 0\n  -> n % 15 ? {\n    0 -> \"FizzBuzz\"\n    -> n % 3 ? {\n      0 -> \"Fizz\"\n      -> n % 5 ? {\n        0 -> \"Buzz\"\n        -> n\n      }\n    }\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(fizzbuzz),Scope[Pointing(Identifier(n),Literal(Integer,0)),Product(Pattern(Operator(Mod,Identifier(n),Literal(Integer,15)),[Branch(Literal(Integer,0),Literal(String,FizzBuzz)),Branch(nil,Pattern(Operator(Mod,Identifier(n),Literal(Integer,3)),[Branch(Literal(Integer,0),Literal(String,Fizz)),Branch(nil,Pattern(Operator(Mod,Identifier(n),Literal(Integer,5)),[Branch(Literal(Integer,0),Literal(String,Buzz)),Branch(nil,Identifier(n))]))]))]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Parallel Threaded Execution Inversion",
+  "description": "expr[<!>] wraps Threading inside Parallel_CPU — opposite nesting of execute_threading_parallel.",
+  "source": "foo[<!>]",
+  "expect": "Scope[Execute(Identifier(foo),[Parallel_CPU,Threading])]"
+}

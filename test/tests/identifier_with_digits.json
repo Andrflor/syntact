@@ -1,0 +1,6 @@
+{
+  "name": "Identifier With Trailing Digits",
+  "description": "foo123 is a single Identifier. Digits are allowed after the leading letter.",
+  "source": "foo123",
+  "expect": "Scope[Identifier(foo123)]"
+}

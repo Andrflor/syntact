@@ -1,0 +1,6 @@
+{
+  "name": "Character Range Like Grammar",
+  "description": "README §Grammars: 'a'..'z' is a character range. Lexer treats 'a' and 'z' as String literals so the Range carries two single-char strings.",
+  "source": "'a'..'z'",
+  "expect": "Scope[Range(Literal(String,a),Literal(String,z))]"
+}

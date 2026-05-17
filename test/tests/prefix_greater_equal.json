@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Greater Equal As Refinement",
+  "description": ">=18 is a prefix comparison producing GreaterEqual with nil left. Used in AdultAge -> u8 & >=18.",
+  "source": ">=18",
+  "expect": "Scope[Operator(GreaterEqual,nil,Literal(Integer,18))]"
+}

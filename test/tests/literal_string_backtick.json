@@ -1,0 +1,6 @@
+{
+  "name": "Backtick String Literal",
+  "description": "Backticks are a third string delimiter (drafts use them for interpolation-style strings). Parser stores raw content.",
+  "source": "`hello`",
+  "expect": "Scope[Literal(String,hello)]"
+}

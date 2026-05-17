@@ -1,0 +1,6 @@
+{
+  "name": "Parallel Wrapping Background Wrapping Parallel",
+  "description": "expr[([!])] — Parallel outermost, then Background, then Parallel again. Same wrapper kind can appear at multiple depths.",
+  "source": "foo[([!])]",
+  "expect": "Scope[Execute(Identifier(foo),[Parallel_CPU,Background,Parallel_CPU])]"
+}

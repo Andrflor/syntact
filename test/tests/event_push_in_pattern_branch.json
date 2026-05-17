@@ -1,0 +1,6 @@
+{
+  "name": "Event Push As Branch Product",
+  "description": "A pattern branch can produce a side effect: 0 -> >- Log{message -> 'zero'} drives a Log event when the value matches zero.",
+  "source": "n ? { 0 -> >- Log{message -> 'zero'} }",
+  "expect": "Scope[Pattern(Identifier(n),[Branch(Literal(Integer,0),EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(message),Literal(String,zero))])))])]"
+}

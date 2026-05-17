@@ -1,0 +1,6 @@
+{
+  "name": "Event Handler With Constrained Source",
+  "description": "Logger:debug -< e { -> io.write{e.message}! } — the from of EventPull is a Constraint (Logger:debug), not a bare Identifier.",
+  "source": "Logger:debug -< e { -> io.write{e.message}! }",
+  "expect": "Scope[EventPull(e,Constraint(Identifier(Logger),Identifier(debug)),Scope[Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(message))]),[]))])]"
+}

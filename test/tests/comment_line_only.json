@@ -1,0 +1,6 @@
+{
+  "name": "Single Line Comment Only",
+  "description": "Source containing nothing but a // comment produces an empty top-level scope.",
+  "source": "// just a comment",
+  "expect": "Scope[]"
+}

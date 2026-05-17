@@ -1,0 +1,6 @@
+{
+  "name": "Anonymous Capture After Constraint",
+  "description": "String:(s) — anonymous shaped binding with capture s. The Constraint's name is an Identifier with empty name and capture='s'.",
+  "source": "String:(s)",
+  "expect": "Scope[Constraint(Identifier(String),Identifier(,s))]"
+}

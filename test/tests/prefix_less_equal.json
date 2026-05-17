@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Less Equal As Refinement",
+  "description": "<=100 is a prefix comparison producing LessEqual with nil left. Used as a refinement bound.",
+  "source": "<=100",
+  "expect": "Scope[Operator(LessEqual,nil,Literal(Integer,100))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Less Alone",
+  "description": "<10 is a prefix Less. Confirms that the prefix-less rule lives independently of the threading wrapper '<...>'.",
+  "source": "<10",
+  "expect": "Scope[Operator(Less,nil,Literal(Integer,10))]"
+}

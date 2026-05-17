@@ -1,0 +1,6 @@
+{
+  "name": "Wrapped Execution On Carve",
+  "description": "From README §Execution patterns: map{...}![!] — a Carve collapsed once then collapsed again with parallel. The outer Execute wraps the inner one.",
+  "source": "map{list -> packed}![!]",
+  "expect": "Scope[Execute(Execute(Carve(Identifier(map),[Pointing(Identifier(list),Identifier(packed))]),[]),[Parallel_CPU])]"
+}

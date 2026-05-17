@@ -1,0 +1,6 @@
+{
+  "name": "Comments Between Statements",
+  "description": "// and /* */ comments are skipped by the lexer and do not appear in the AST. Statements before and after remain siblings.",
+  "source": "a -> 1 // first\n/* middle */\nb -> 2",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]"
+}

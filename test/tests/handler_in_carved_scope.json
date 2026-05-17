@@ -1,0 +1,6 @@
+{
+  "name": "Handler Inside Carved Scope",
+  "description": "FastLib -> SomeLib{Alloc -< e {-> arena.alloc{e.size}!}} — README §Handlers as DI: a Carve whose entry is an EventPull. The carve is the value of a Pointing.",
+  "source": "FastLib -> SomeLib{Alloc -< e {-> arena.alloc{e.size}!}}",
+  "expect": "Scope[Pointing(Identifier(FastLib),Carve(Identifier(SomeLib),[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Property(Identifier(arena),Identifier(alloc)),[Property(Identifier(e),Identifier(size))]),[]))])]))]"
+}

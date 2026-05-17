@@ -1,0 +1,6 @@
+{
+  "name": "Program Square Function With Default",
+  "description": "Canonical example from README: square is a scope with one binding 'n' defaulting to 0 and a production n*n. Carving with n->5 then collapsing yields 25.",
+  "source": "square -> {\n  n -> 0\n  -> n * n\n}\nsquare{n -> 5}!",
+  "expect": "Scope[Pointing(Identifier(square),Scope[Pointing(Identifier(n),Literal(Integer,0)),Product(Operator(Multiply,Identifier(n),Identifier(n)))]),Execute(Carve(Identifier(square),[Pointing(Identifier(n),Literal(Integer,5))]),[])]"
+}

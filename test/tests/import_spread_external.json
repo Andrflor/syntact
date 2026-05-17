@@ -1,0 +1,6 @@
+{
+  "name": "Spread Of External Reference",
+  "description": "...@lib.geometry expands an external scope. The Expand wraps a Property chain whose root is an External('lib').",
+  "source": "...@lib.geometry",
+  "expect": "Scope[Expand(Property(External(lib,nil),Identifier(geometry)))]"
+}

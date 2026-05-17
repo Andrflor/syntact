@@ -1,0 +1,6 @@
+{
+  "name": "Resonant Binding With Default Right Associative",
+  "description": "u8:value >>- Change -> 0 — both >>- and -> are at ASSIGNMENT precedence which is right-associative. The parser binds the trailing 'Change -> 0' as a single Pointing, then makes it the to-side of the ResonancePush. This pins the current behavior; the README's resonance form does not specify how a trailing default attaches.",
+  "source": "u8:value >>- Change -> 0",
+  "expect": "Scope[ResonancePush(Constraint(Identifier(u8),Identifier(value)),Pointing(Identifier(Change),Literal(Integer,0)))]"
+}

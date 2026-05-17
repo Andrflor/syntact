@@ -1,0 +1,6 @@
+{
+  "name": "Empty String Literal",
+  "description": "\"\" produces a String literal with empty content.",
+  "source": "\"\"",
+  "expect": "Scope[Literal(String,)]"
+}

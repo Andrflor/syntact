@@ -1,0 +1,6 @@
+{
+  "name": "Three Level Execution Wrapping",
+  "description": "expr<([!])> nests three wrappers: Threading outermost, then Background, then Parallel_CPU.",
+  "source": "foo<([!])>",
+  "expect": "Scope[Execute(Identifier(foo),[Threading,Background,Parallel_CPU])]"
+}

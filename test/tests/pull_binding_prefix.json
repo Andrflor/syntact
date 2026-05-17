@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding Prefix With No From",
+  "description": "Standalone <- foo creates PointingPull whose from is nil.",
+  "source": "<- foo",
+  "expect": "Scope[PointingPull(nil,Identifier(foo))]"
+}

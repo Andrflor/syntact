@@ -1,0 +1,6 @@
+{
+  "name": "Unary Minus In Front Of Scope",
+  "description": "-{a} — unary minus applied to a scope literal. Subtract operator with nil left, scope as right.",
+  "source": "-{a}",
+  "expect": "Scope[Operator(Subtract,nil,Scope[Identifier(a)])]"
+}

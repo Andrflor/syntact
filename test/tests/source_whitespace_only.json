@@ -1,0 +1,6 @@
+{
+  "name": "Whitespace Only Source",
+  "description": "Spaces, tabs and newlines without any token produce an empty top-level Scope.",
+  "source": "   \n\n\t  \n",
+  "expect": "Scope[]"
+}

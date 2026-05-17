@@ -1,0 +1,6 @@
+{
+  "name": "Identifier Starting With Underscore",
+  "description": "_foo is a single Identifier. Underscore is a valid leading character.",
+  "source": "_foo",
+  "expect": "Scope[Identifier(_foo)]"
+}

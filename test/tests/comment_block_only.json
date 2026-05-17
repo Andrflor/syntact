@@ -1,0 +1,6 @@
+{
+  "name": "Block Comment Only",
+  "description": "Source with only a /* ... */ block comment produces an empty top-level scope.",
+  "source": "/* hello\nworld */",
+  "expect": "Scope[]"
+}

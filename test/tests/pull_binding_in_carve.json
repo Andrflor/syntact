@@ -1,0 +1,6 @@
+{
+  "name": "Pull Binding Inside Carve",
+  "description": "identity{T <- u8 value -> 5} fills hole T via PointingPull and pushes value via Pointing in the same carve.",
+  "source": "identity{T <- u8 value -> 5}",
+  "expect": "Scope[Carve(Identifier(identity),[PointingPull(Identifier(T),Identifier(u8)),Pointing(Identifier(value),Literal(Integer,5))])]"
+}
