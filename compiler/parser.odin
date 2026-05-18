@@ -2138,6 +2138,10 @@ parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Move past the operator
     advance_token(parser)
 
+    // A binary operator commits to a right operand — newlines after the
+    // operator are purely cosmetic line-continuation, not statement breaks.
+    skip_newlines(parser)
+
     // Parse the right operand with higher precedence
     right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
     if right == nil {
