@@ -2668,14 +2668,16 @@ parse_resonance_push_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume >>-
     advance_token(parser)
 
-    // Parse to or handle empty value
+    // Parse to or handle empty value. Use precedence ASSIGNMENT+1 so a
+    // trailing pointing (`->`, `<-`, `>-`, `-<`) attaches to the whole
+    // resonance binding instead of being absorbed as the RHS. This makes
+    // `T:v >>- E -> X` parse as `Pointing(ResonancePush(T:v, E), X)`.
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
         resonance_push.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
         resonance_push.to = to
     }
 
@@ -2700,14 +2702,14 @@ parse_resonance_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Consume >>-
     advance_token(parser)
 
-    // Parse to or handle empty value
+    // See prefix variant: RHS is parsed at ASSIGNMENT+1 so `->` and friends
+    // remain trailing on the binding.
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
         resonance_push.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
         resonance_push.to = to
     }
 
@@ -2731,14 +2733,13 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume -<<
     advance_token(parser)
 
-    // Parse to or handle empty value
+    // See >>- variant: keep `->`/`<-`/`>-`/`-<` outside the resonance RHS.
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
         resonance_pull.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
         resonance_pull.to = to
     }
 
@@ -2763,14 +2764,13 @@ parse_resonance_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Consume -<<
     advance_token(parser)
 
-    // Parse to or handle empty value
+    // See >>- variant: keep `->`/`<-`/`>-`/`-<` outside the resonance RHS.
     if parser.current_token.kind == .RightBrace ||
        parser.current_token.kind == .EOF ||
        parser.current_token.kind == .Newline {
         resonance_pull.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
         resonance_pull.to = to
     }
 
