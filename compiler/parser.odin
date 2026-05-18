@@ -405,8 +405,8 @@ next_token :: proc(l: ^Lexer) -> Token {
 		}
 
 		// Single dot - handle property patterns based on space context
-		space_before := has_space_before(l)
-		space_after := has_space_after(l, '.')
+		space_before := l.position.offset == 0 || is_before_delimiter(l.source[l.position.offset - 1])
+		space_after := has_space_after(l, '.') || (l.position.offset + 1 >= l.source_len)
 
 		advance_position(l)
 
@@ -1530,7 +1530,6 @@ parse_carve :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     // Expect closing brace
     if !match(parser, .RightBrace) {
         error_at_current(parser, "Expected } after carves")
-        return nil
     }
 
     // Create and return the carve node
@@ -2147,7 +2146,8 @@ parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
     right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
     if right == nil {
         error_at_current(parser, "Expected expression after binary operator")
-        return nil
+        parser.panic_mode = false
+        return left
     }
 
     // Create operator node
@@ -2408,7 +2408,8 @@ parse_invalid_property :: proc(parser: ^Parser) -> ^Node {
 parse_invalid_property_infix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 	error_at_current(parser, "Invalid property syntax with spaces around '.' - use 'a.b', '.b', or 'a.'")
 	advance_token(parser)
-	return nil
+	parser.panic_mode = false
+	return left
 }
 
 /*
@@ -2426,7 +2427,8 @@ parse_invalid_constraint :: proc(parser: ^Parser) -> ^Node {
 parse_invalid_constraint_infix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 	error_at_current(parser, "Invalid constraint syntax with spaces around ':' - use 'a:b', ':b', or 'a:'")
 	advance_token(parser)
-	return nil
+	parser.panic_mode = false
+	return left
 }
 /*
  * parse_pointing_push handles pointing operator (a -> b)
@@ -2992,7 +2994,6 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
         if !match(parser, .RightBrace) {
             error_at_current(parser, "Expected } after pattern branches")
-            return nil
         }
     } else {
         // Inline pattern: data ? expr (including ({...}) objects)
