@@ -3070,9 +3070,10 @@ parse_expansion :: proc(parser: ^Parser) -> ^Node {
     // Consume ellipsis token
     advance_token(parser)
 
-    // Get the expression that follows with appropriate precedence
-    // Use the UNARY precedence to ensure we get the entire expression
-    target := parse_expression(parser, .UNARY)
+    // Get the expression that follows with appropriate precedence.
+    // Use CONSTRAINT so the expansion absorbs `:` (e.g. `...T:x` → Expand(Constraint(T,x)))
+    // while staying below PATTERN, so `...x ? {…}` still parses as Pattern(Expand(x), …).
+    target := parse_expression(parser, .CONSTRAINT)
     if target == nil {
         error_at_current(parser, "Expected expression after ...")
         return nil
