@@ -3002,7 +3002,7 @@ parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
         if parser.current_token.kind == .LeftParenNoSpace {
             inline_expr = parse_grouping(parser)
         } else if is_expression_start(parser.current_token.kind) {
-            inline_expr = parse_expression(parser, .RANGE)
+            inline_expr = parse_expression(parser, .OR)
         } else {
             error_at_current(parser, "Expected pattern expression after ?")
             return nil
@@ -3195,7 +3195,9 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .GreaterEqual ||
         kind == .Range ||
         kind == .PostfixRange ||
-        kind == .PrefixRange
+        kind == .PrefixRange ||
+        kind == .DoubleQuestion ||
+        kind == .Execute
     )
 }
 
