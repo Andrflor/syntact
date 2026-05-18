@@ -1,6 +1,6 @@
 {
   "name": "Precedence Pattern Inline With Add Inside",
-  "description": "x ? a + b — inline pattern's right side is at .RANGE (per parse_pattern). TERM=5 < RANGE=11 so '+' doesn't attach inside. So pattern source is 'a' only; then top loop '+ b' attaches to the Pattern. WILL_FAIL_UNTIL_FIX: probably the inline form should consume the full arithmetic expression.",
+  "description": "x ? a + b — the inline pattern's RHS should consume the full arithmetic expression, so '+ b' attaches inside the Branch rather than to the Pattern. WILL_FAIL_UNTIL_FIX: parser currently stops inline-RHS at TERM precedence (a), producing Operator(Add,Pattern(...),b).",
   "source": "x ? a + b",
-  "expect": "Scope[Operator(Add,Pattern(Identifier(x),[Branch(Identifier(a),nil)]),Identifier(b))]"
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Operator(Add,Identifier(a),Identifier(b)),nil)])]"
 }

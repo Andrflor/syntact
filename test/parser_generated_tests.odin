@@ -3486,1307 +3486,1302 @@ test_wprog_arena_alloc_695 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_vpat_inline_arith_rhs_696 :: proc(t: ^testing.T) {
-	run_test("tests/vpat_inline_arith_rhs.json", t)
-}
-
-@(test)
-test_complex_not_equal_in_pattern_697 :: proc(t: ^testing.T) {
+test_complex_not_equal_in_pattern_696 :: proc(t: ^testing.T) {
 	run_test("tests/complex_not_equal_in_pattern.json", t)
 }
 
 @(test)
-test_def_port_refined_698 :: proc(t: ^testing.T) {
+test_def_port_refined_697 :: proc(t: ^testing.T) {
 	run_test("tests/def_port_refined.json", t)
 }
 
 @(test)
-test_seal_33_websocket_699 :: proc(t: ^testing.T) {
+test_seal_33_websocket_698 :: proc(t: ^testing.T) {
 	run_test("tests/seal_33_websocket.json", t)
 }
 
 @(test)
-test_wprog_test_framework_700 :: proc(t: ^testing.T) {
+test_wprog_test_framework_699 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_test_framework.json", t)
 }
 
 @(test)
-test_lex_paren_spaced_grouping_701 :: proc(t: ^testing.T) {
+test_lex_paren_spaced_grouping_700 :: proc(t: ^testing.T) {
 	run_test("tests/lex_paren_spaced_grouping.json", t)
 }
 
 @(test)
-test_proof_enforce_with_equal_and_property_702 :: proc(t: ^testing.T) {
+test_proof_enforce_with_equal_and_property_701 :: proc(t: ^testing.T) {
 	run_test("tests/proof_enforce_with_equal_and_property.json", t)
 }
 
 @(test)
-test_program_state_abstraction_703 :: proc(t: ^testing.T) {
+test_program_state_abstraction_702 :: proc(t: ^testing.T) {
 	run_test("tests/program_state_abstraction.json", t)
 }
 
 @(test)
-test_gram_alpha_binding_704 :: proc(t: ^testing.T) {
+test_gram_alpha_binding_703 :: proc(t: ^testing.T) {
 	run_test("tests/gram_alpha_binding.json", t)
 }
 
 @(test)
-test_def_prod_from_config_705 :: proc(t: ^testing.T) {
+test_def_prod_from_config_704 :: proc(t: ^testing.T) {
 	run_test("tests/def_prod_from_config.json", t)
 }
 
 @(test)
-test_levent_event_chain_706 :: proc(t: ^testing.T) {
+test_levent_event_chain_705 :: proc(t: ^testing.T) {
 	run_test("tests/levent_event_chain.json", t)
 }
 
 @(test)
-test_gram_char_range_digits_707 :: proc(t: ^testing.T) {
+test_gram_char_range_digits_706 :: proc(t: ^testing.T) {
 	run_test("tests/gram_char_range_digits.json", t)
 }
 
 @(test)
-test_prec_execute_then_add_708 :: proc(t: ^testing.T) {
+test_prec_execute_then_add_707 :: proc(t: ^testing.T) {
 	run_test("tests/prec_execute_then_add.json", t)
 }
 
 @(test)
-test_def_none_as_empty_709 :: proc(t: ^testing.T) {
+test_def_none_as_empty_708 :: proc(t: ^testing.T) {
 	run_test("tests/def_none_as_empty.json", t)
 }
 
 @(test)
-test_gen_pull_with_multi_constraint_710 :: proc(t: ^testing.T) {
+test_gen_pull_with_multi_constraint_709 :: proc(t: ^testing.T) {
 	run_test("tests/gen_pull_with_multi_constraint.json", t)
 }
 
 @(test)
-test_chain_compile_time_property_chain_711 :: proc(t: ^testing.T) {
+test_chain_compile_time_property_chain_710 :: proc(t: ^testing.T) {
 	run_test("tests/chain_compile_time_property_chain.json", t)
 }
 
 @(test)
-test_prec_add_lshift_712 :: proc(t: ^testing.T) {
+test_prec_add_lshift_711 :: proc(t: ^testing.T) {
 	run_test("tests/prec_add_lshift.json", t)
 }
 
 @(test)
-test_event_push_prefix_713 :: proc(t: ^testing.T) {
+test_event_push_prefix_712 :: proc(t: ^testing.T) {
 	run_test("tests/event_push_prefix.json", t)
 }
 
 @(test)
-test_prec_unary_with_property_714 :: proc(t: ^testing.T) {
+test_prec_unary_with_property_713 :: proc(t: ^testing.T) {
 	run_test("tests/prec_unary_with_property.json", t)
 }
 
 @(test)
-test_err_unclosed_carve_scope_brace_715 :: proc(t: ^testing.T) {
+test_err_unclosed_carve_scope_brace_714 :: proc(t: ^testing.T) {
 	run_test("tests/err_unclosed_carve_scope_brace.json", t)
 }
 
 @(test)
-test_z_external_property_carve_716 :: proc(t: ^testing.T) {
+test_z_external_property_carve_715 :: proc(t: ^testing.T) {
 	run_test("tests/z_external_property_carve.json", t)
 }
 
 @(test)
-test_seal_29_form_validator_717 :: proc(t: ^testing.T) {
+test_seal_29_form_validator_716 :: proc(t: ^testing.T) {
 	run_test("tests/seal_29_form_validator.json", t)
 }
 
 @(test)
-test_combo_resonance_in_pattern_branch_718 :: proc(t: ^testing.T) {
+test_combo_resonance_in_pattern_branch_717 :: proc(t: ^testing.T) {
 	run_test("tests/combo_resonance_in_pattern_branch.json", t)
 }
 
 @(test)
-test_program_list_recursive_719 :: proc(t: ^testing.T) {
+test_program_list_recursive_718 :: proc(t: ^testing.T) {
 	run_test("tests/program_list_recursive.json", t)
 }
 
 @(test)
-test_lex_colon_bind_with_literal_720 :: proc(t: ^testing.T) {
+test_lex_colon_bind_with_literal_719 :: proc(t: ^testing.T) {
 	run_test("tests/lex_colon_bind_with_literal.json", t)
 }
 
 @(test)
-test_vpat_branch_source_carve_with_capture_721 :: proc(t: ^testing.T) {
+test_vpat_branch_source_carve_with_capture_720 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_branch_source_carve_with_capture.json", t)
 }
 
 @(test)
-test_lex_commas_as_separators_722 :: proc(t: ^testing.T) {
+test_lex_commas_as_separators_721 :: proc(t: ^testing.T) {
 	run_test("tests/lex_commas_as_separators.json", t)
 }
 
 @(test)
-test_combo_property_carve_constraint_723 :: proc(t: ^testing.T) {
+test_combo_property_carve_constraint_722 :: proc(t: ^testing.T) {
 	run_test("tests/combo_property_carve_constraint.json", t)
 }
 
 @(test)
-test_lex_glued_capture_then_carve_724 :: proc(t: ^testing.T) {
+test_lex_glued_capture_then_carve_723 :: proc(t: ^testing.T) {
 	run_test("tests/lex_glued_capture_then_carve.json", t)
 }
 
 @(test)
-test_gen_foo_pull_in_carve_725 :: proc(t: ^testing.T) {
+test_gen_foo_pull_in_carve_724 :: proc(t: ^testing.T) {
 	run_test("tests/gen_foo_pull_in_carve.json", t)
 }
 
 @(test)
-test_override_simple_726 :: proc(t: ^testing.T) {
+test_override_simple_725 :: proc(t: ^testing.T) {
 	run_test("tests/override_simple.json", t)
 }
 
 @(test)
-test_mod_external_inside_pointing_chain_727 :: proc(t: ^testing.T) {
+test_mod_external_inside_pointing_chain_726 :: proc(t: ^testing.T) {
 	run_test("tests/mod_external_inside_pointing_chain.json", t)
 }
 
 @(test)
-test_mod_two_externals_property_728 :: proc(t: ^testing.T) {
+test_mod_two_externals_property_727 :: proc(t: ^testing.T) {
 	run_test("tests/mod_two_externals_property.json", t)
 }
 
 @(test)
-test_range_postfix_729 :: proc(t: ^testing.T) {
+test_range_postfix_728 :: proc(t: ^testing.T) {
 	run_test("tests/range_postfix.json", t)
 }
 
 @(test)
-test_lex_hex_capital_prefix_730 :: proc(t: ^testing.T) {
+test_lex_hex_capital_prefix_729 :: proc(t: ^testing.T) {
 	run_test("tests/lex_hex_capital_prefix.json", t)
 }
 
 @(test)
-test_prec_long_compare_chain_731 :: proc(t: ^testing.T) {
+test_prec_long_compare_chain_730 :: proc(t: ^testing.T) {
 	run_test("tests/prec_long_compare_chain.json", t)
 }
 
 @(test)
-test_gram_or_range_and_underscore_732 :: proc(t: ^testing.T) {
+test_gram_or_range_and_underscore_731 :: proc(t: ^testing.T) {
 	run_test("tests/gram_or_range_and_underscore.json", t)
 }
 
 @(test)
-test_program_role_default_733 :: proc(t: ^testing.T) {
+test_program_role_default_732 :: proc(t: ^testing.T) {
 	run_test("tests/program_role_default.json", t)
 }
 
 @(test)
-test_gen_two_pulls_in_carve_734 :: proc(t: ^testing.T) {
+test_gen_two_pulls_in_carve_733 :: proc(t: ^testing.T) {
 	run_test("tests/gen_two_pulls_in_carve.json", t)
 }
 
 @(test)
-test_refine_destructure_with_refinement_735 :: proc(t: ^testing.T) {
+test_refine_destructure_with_refinement_734 :: proc(t: ^testing.T) {
 	run_test("tests/refine_destructure_with_refinement.json", t)
 }
 
 @(test)
-test_z_carve_enforce_736 :: proc(t: ^testing.T) {
+test_z_carve_enforce_735 :: proc(t: ^testing.T) {
 	run_test("tests/z_carve_enforce.json", t)
 }
 
 @(test)
-test_wprog_geometry_shapes_737 :: proc(t: ^testing.T) {
+test_wprog_geometry_shapes_736 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_geometry_shapes.json", t)
 }
 
 @(test)
-test_vpat_destructure_inside_branch_with_or_738 :: proc(t: ^testing.T) {
+test_vpat_destructure_inside_branch_with_or_737 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_destructure_inside_branch_with_or.json", t)
 }
 
 @(test)
-test_wprog_todo_list_739 :: proc(t: ^testing.T) {
+test_wprog_todo_list_738 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_todo_list.json", t)
 }
 
 @(test)
-test_z_unknown_enforce_740 :: proc(t: ^testing.T) {
+test_z_unknown_enforce_739 :: proc(t: ^testing.T) {
 	run_test("tests/z_unknown_enforce.json", t)
 }
 
 @(test)
-test_z_execute_property_741 :: proc(t: ^testing.T) {
+test_z_execute_property_740 :: proc(t: ^testing.T) {
 	run_test("tests/z_execute_property.json", t)
 }
 
 @(test)
-test_lex_binary_capital_prefix_742 :: proc(t: ^testing.T) {
+test_lex_binary_capital_prefix_741 :: proc(t: ^testing.T) {
 	run_test("tests/lex_binary_capital_prefix.json", t)
 }
 
 @(test)
-test_complex_pattern_with_range_743 :: proc(t: ^testing.T) {
+test_complex_pattern_with_range_742 :: proc(t: ^testing.T) {
 	run_test("tests/complex_pattern_with_range.json", t)
 }
 
 @(test)
-test_z_expand_pull_binding_744 :: proc(t: ^testing.T) {
+test_z_expand_pull_binding_743 :: proc(t: ^testing.T) {
 	run_test("tests/z_expand_pull_binding.json", t)
 }
 
 @(test)
-test_prec_pattern_after_add_745 :: proc(t: ^testing.T) {
+test_prec_pattern_after_add_744 :: proc(t: ^testing.T) {
 	run_test("tests/prec_pattern_after_add.json", t)
 }
 
 @(test)
-test_prec_xor_and_746 :: proc(t: ^testing.T) {
+test_prec_xor_and_745 :: proc(t: ^testing.T) {
 	run_test("tests/prec_xor_and.json", t)
 }
 
 @(test)
-test_lex_brace_at_start_747 :: proc(t: ^testing.T) {
+test_lex_brace_at_start_746 :: proc(t: ^testing.T) {
 	run_test("tests/lex_brace_at_start.json", t)
 }
 
 @(test)
-test_comment_block_only_748 :: proc(t: ^testing.T) {
+test_comment_block_only_747 :: proc(t: ^testing.T) {
 	run_test("tests/comment_block_only.json", t)
 }
 
 @(test)
-test_seal_28_localization_749 :: proc(t: ^testing.T) {
+test_seal_28_localization_748 :: proc(t: ^testing.T) {
 	run_test("tests/seal_28_localization.json", t)
 }
 
 @(test)
-test_wprog_resource_pool_750 :: proc(t: ^testing.T) {
+test_wprog_resource_pool_749 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_resource_pool.json", t)
 }
 
 @(test)
-test_def_transform_shape_751 :: proc(t: ^testing.T) {
+test_def_transform_shape_750 :: proc(t: ^testing.T) {
 	run_test("tests/def_transform_shape.json", t)
 }
 
 @(test)
-test_constraint_carving_then_bind_752 :: proc(t: ^testing.T) {
+test_constraint_carving_then_bind_751 :: proc(t: ^testing.T) {
 	run_test("tests/constraint_carving_then_bind.json", t)
 }
 
 @(test)
-test_prec_compile_time_with_property_753 :: proc(t: ^testing.T) {
+test_prec_compile_time_with_property_752 :: proc(t: ^testing.T) {
 	run_test("tests/prec_compile_time_with_property.json", t)
 }
 
 @(test)
-test_chain_compile_time_property_754 :: proc(t: ^testing.T) {
+test_chain_compile_time_property_753 :: proc(t: ^testing.T) {
 	run_test("tests/chain_compile_time_property.json", t)
 }
 
 @(test)
-test_op_not_equal_space_keeps_bang_755 :: proc(t: ^testing.T) {
+test_op_not_equal_space_keeps_bang_754 :: proc(t: ^testing.T) {
 	run_test("tests/op_not_equal_space_keeps_bang.json", t)
 }
 
 @(test)
-test_pointing_to_scope_756 :: proc(t: ^testing.T) {
+test_pointing_to_scope_755 :: proc(t: ^testing.T) {
 	run_test("tests/pointing_to_scope.json", t)
 }
 
 @(test)
-test_program_email_grammar_757 :: proc(t: ^testing.T) {
+test_program_email_grammar_756 :: proc(t: ^testing.T) {
 	run_test("tests/program_email_grammar.json", t)
 }
 
 @(test)
-test_tok_lone_pointing_push_758 :: proc(t: ^testing.T) {
+test_tok_lone_pointing_push_757 :: proc(t: ^testing.T) {
 	run_test("tests/tok_lone_pointing_push.json", t)
 }
 
 @(test)
-test_lex_multiple_commas_collapse_759 :: proc(t: ^testing.T) {
+test_lex_multiple_commas_collapse_758 :: proc(t: ^testing.T) {
 	run_test("tests/lex_multiple_commas_collapse.json", t)
 }
 
 @(test)
-test_refine_constraint_capture_override_760 :: proc(t: ^testing.T) {
+test_refine_constraint_capture_override_759 :: proc(t: ^testing.T) {
 	run_test("tests/refine_constraint_capture_override.json", t)
 }
 
 @(test)
-test_tok_carve_two_empty_761 :: proc(t: ^testing.T) {
+test_tok_carve_two_empty_760 :: proc(t: ^testing.T) {
 	run_test("tests/tok_carve_two_empty.json", t)
 }
 
 @(test)
-test_seal_11_avl_tree_762 :: proc(t: ^testing.T) {
+test_seal_11_avl_tree_761 :: proc(t: ^testing.T) {
 	run_test("tests/seal_11_avl_tree.json", t)
 }
 
 @(test)
-test_dsl_allocator_handlers_763 :: proc(t: ^testing.T) {
+test_dsl_allocator_handlers_762 :: proc(t: ^testing.T) {
 	run_test("tests/dsl_allocator_handlers.json", t)
 }
 
 @(test)
-test_lex_postfix_range_in_carve_764 :: proc(t: ^testing.T) {
+test_lex_postfix_range_in_carve_763 :: proc(t: ^testing.T) {
 	run_test("tests/lex_postfix_range_in_carve.json", t)
 }
 
 @(test)
-test_z_expand_external_simple_765 :: proc(t: ^testing.T) {
+test_z_expand_external_simple_764 :: proc(t: ^testing.T) {
 	run_test("tests/z_expand_external_simple.json", t)
 }
 
 @(test)
-test_program_vector3d_default_766 :: proc(t: ^testing.T) {
+test_program_vector3d_default_765 :: proc(t: ^testing.T) {
 	run_test("tests/program_vector3d_default.json", t)
 }
 
 @(test)
-test_vpat_inline_postfix_range_767 :: proc(t: ^testing.T) {
+test_vpat_inline_postfix_range_766 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_inline_postfix_range.json", t)
 }
 
 @(test)
-test_complex_property_of_execute_768 :: proc(t: ^testing.T) {
+test_complex_property_of_execute_767 :: proc(t: ^testing.T) {
 	run_test("tests/complex_property_of_execute.json", t)
 }
 
 @(test)
-test_gram_char_range_upper_769 :: proc(t: ^testing.T) {
+test_gram_char_range_upper_768 :: proc(t: ^testing.T) {
 	run_test("tests/gram_char_range_upper.json", t)
 }
 
 @(test)
-test_kdestr_carve_only_destructure_770 :: proc(t: ^testing.T) {
+test_kdestr_carve_only_destructure_769 :: proc(t: ^testing.T) {
 	run_test("tests/kdestr_carve_only_destructure.json", t)
 }
 
 @(test)
-test_seal_18_csv_reader_771 :: proc(t: ^testing.T) {
+test_seal_18_csv_reader_770 :: proc(t: ^testing.T) {
 	run_test("tests/seal_18_csv_reader.json", t)
 }
 
 @(test)
-test_def_percent_refined_772 :: proc(t: ^testing.T) {
+test_def_percent_refined_771 :: proc(t: ^testing.T) {
 	run_test("tests/def_percent_refined.json", t)
 }
 
 @(test)
-test_prec_less_and_greater_773 :: proc(t: ^testing.T) {
+test_prec_less_and_greater_772 :: proc(t: ^testing.T) {
 	run_test("tests/prec_less_and_greater.json", t)
 }
 
 @(test)
-test_z_constraint_logical_774 :: proc(t: ^testing.T) {
+test_z_constraint_logical_773 :: proc(t: ^testing.T) {
 	run_test("tests/z_constraint_logical.json", t)
 }
 
 @(test)
-test_literal_float_775 :: proc(t: ^testing.T) {
+test_literal_float_774 :: proc(t: ^testing.T) {
 	run_test("tests/literal_float.json", t)
 }
 
 @(test)
-test_dsl_config_pattern_program_776 :: proc(t: ^testing.T) {
+test_dsl_config_pattern_program_775 :: proc(t: ^testing.T) {
 	run_test("tests/dsl_config_pattern_program.json", t)
 }
 
 @(test)
-test_kdestr_nested_capture_777 :: proc(t: ^testing.T) {
+test_kdestr_nested_capture_776 :: proc(t: ^testing.T) {
 	run_test("tests/kdestr_nested_capture.json", t)
 }
 
 @(test)
-test_vpat_inline_integer_778 :: proc(t: ^testing.T) {
+test_vpat_inline_integer_777 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_inline_integer.json", t)
 }
 
 @(test)
-test_property_chain_779 :: proc(t: ^testing.T) {
+test_property_chain_778 :: proc(t: ^testing.T) {
 	run_test("tests/property_chain.json", t)
 }
 
 @(test)
-test_combo_resonance_pull_in_event_handler_780 :: proc(t: ^testing.T) {
+test_combo_resonance_pull_in_event_handler_779 :: proc(t: ^testing.T) {
 	run_test("tests/combo_resonance_pull_in_event_handler.json", t)
 }
 
 @(test)
-test_lex_colon_to_none_top_level_781 :: proc(t: ^testing.T) {
+test_lex_colon_to_none_top_level_780 :: proc(t: ^testing.T) {
 	run_test("tests/lex_colon_to_none_top_level.json", t)
 }
 
 @(test)
-test_refine_constraint_name_capture_override_782 :: proc(t: ^testing.T) {
+test_refine_constraint_name_capture_override_781 :: proc(t: ^testing.T) {
 	run_test("tests/refine_constraint_name_capture_override.json", t)
 }
 
 @(test)
-test_unknown_as_override_entry_783 :: proc(t: ^testing.T) {
+test_unknown_as_override_entry_782 :: proc(t: ^testing.T) {
 	run_test("tests/unknown_as_override_entry.json", t)
 }
 
 @(test)
-test_combo_carve_on_external_in_pattern_784 :: proc(t: ^testing.T) {
+test_combo_carve_on_external_in_pattern_783 :: proc(t: ^testing.T) {
 	run_test("tests/combo_carve_on_external_in_pattern.json", t)
 }
 
 @(test)
-test_gram_or_three_punct_785 :: proc(t: ^testing.T) {
+test_gram_or_three_punct_784 :: proc(t: ^testing.T) {
 	run_test("tests/gram_or_three_punct.json", t)
 }
 
 @(test)
-test_def_maybe_pattern_786 :: proc(t: ^testing.T) {
+test_def_maybe_pattern_785 :: proc(t: ^testing.T) {
 	run_test("tests/def_maybe_pattern.json", t)
 }
 
 @(test)
-test_wprog_hash_map_lookup_787 :: proc(t: ^testing.T) {
+test_wprog_hash_map_lookup_786 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_hash_map_lookup.json", t)
 }
 
 @(test)
-test_seal_03_mini_lisp_788 :: proc(t: ^testing.T) {
+test_seal_03_mini_lisp_787 :: proc(t: ^testing.T) {
 	run_test("tests/seal_03_mini_lisp.json", t)
 }
 
 @(test)
-test_lex_ellipsis_alone_789 :: proc(t: ^testing.T) {
+test_lex_ellipsis_alone_788 :: proc(t: ^testing.T) {
 	run_test("tests/lex_ellipsis_alone.json", t)
 }
 
 @(test)
-test_complex_pointing_to_pattern_790 :: proc(t: ^testing.T) {
+test_complex_pointing_to_pattern_789 :: proc(t: ^testing.T) {
 	run_test("tests/complex_pointing_to_pattern.json", t)
 }
 
 @(test)
-test_err_unterminated_string_double_791 :: proc(t: ^testing.T) {
+test_err_unterminated_string_double_790 :: proc(t: ^testing.T) {
 	run_test("tests/err_unterminated_string_double.json", t)
 }
 
 @(test)
-test_chain_property_then_execute_792 :: proc(t: ^testing.T) {
+test_chain_property_then_execute_791 :: proc(t: ^testing.T) {
 	run_test("tests/chain_property_then_execute.json", t)
 }
 
 @(test)
-test_literal_binary_793 :: proc(t: ^testing.T) {
+test_literal_binary_792 :: proc(t: ^testing.T) {
 	run_test("tests/literal_binary.json", t)
 }
 
 @(test)
-test_lex_trailing_comma_in_carve_794 :: proc(t: ^testing.T) {
+test_lex_trailing_comma_in_carve_793 :: proc(t: ^testing.T) {
 	run_test("tests/lex_trailing_comma_in_carve.json", t)
 }
 
 @(test)
-test_err_only_arrow_795 :: proc(t: ^testing.T) {
+test_err_only_arrow_794 :: proc(t: ^testing.T) {
 	run_test("tests/err_only_arrow.json", t)
 }
 
 @(test)
-test_gram_idchar_binding_796 :: proc(t: ^testing.T) {
+test_gram_idchar_binding_795 :: proc(t: ^testing.T) {
 	run_test("tests/gram_idchar_binding.json", t)
 }
 
 @(test)
-test_gen_serializer_with_roundtrip_797 :: proc(t: ^testing.T) {
+test_gen_serializer_with_roundtrip_796 :: proc(t: ^testing.T) {
 	run_test("tests/gen_serializer_with_roundtrip.json", t)
 }
 
 @(test)
-test_lex_range_in_carve_798 :: proc(t: ^testing.T) {
+test_lex_range_in_carve_797 :: proc(t: ^testing.T) {
 	run_test("tests/lex_range_in_carve.json", t)
 }
 
 @(test)
-test_def_point_property_y_799 :: proc(t: ^testing.T) {
+test_def_point_property_y_798 :: proc(t: ^testing.T) {
 	run_test("tests/def_point_property_y.json", t)
 }
 
 @(test)
-test_seal_31_iterator_800 :: proc(t: ^testing.T) {
+test_seal_31_iterator_799 :: proc(t: ^testing.T) {
 	run_test("tests/seal_31_iterator.json", t)
 }
 
 @(test)
-test_lex_space_only_inside_braces_801 :: proc(t: ^testing.T) {
+test_lex_space_only_inside_braces_800 :: proc(t: ^testing.T) {
 	run_test("tests/lex_space_only_inside_braces.json", t)
 }
 
 @(test)
-test_gram_mul_then_or_802 :: proc(t: ^testing.T) {
+test_gram_mul_then_or_801 :: proc(t: ^testing.T) {
 	run_test("tests/gram_mul_then_or.json", t)
 }
 
 @(test)
-test_seal_38_workflow_engine_803 :: proc(t: ^testing.T) {
+test_seal_38_workflow_engine_802 :: proc(t: ^testing.T) {
 	run_test("tests/seal_38_workflow_engine.json", t)
 }
 
 @(test)
-test_refine_type_algebra_804 :: proc(t: ^testing.T) {
+test_refine_type_algebra_803 :: proc(t: ^testing.T) {
 	run_test("tests/refine_type_algebra.json", t)
 }
 
 @(test)
-test_lex_brace_spaced_chained_805 :: proc(t: ^testing.T) {
+test_lex_brace_spaced_chained_804 :: proc(t: ^testing.T) {
 	run_test("tests/lex_brace_spaced_chained.json", t)
 }
 
 @(test)
-test_tok_property_from_none_then_range_806 :: proc(t: ^testing.T) {
+test_tok_property_from_none_then_range_805 :: proc(t: ^testing.T) {
 	run_test("tests/tok_property_from_none_then_range.json", t)
 }
 
 @(test)
-test_levent_event_push_in_branch_with_property_807 :: proc(t: ^testing.T) {
+test_levent_event_push_in_branch_with_property_806 :: proc(t: ^testing.T) {
 	run_test("tests/levent_event_push_in_branch_with_property.json", t)
 }
 
 @(test)
-test_op_greater_808 :: proc(t: ^testing.T) {
+test_op_greater_807 :: proc(t: ^testing.T) {
 	run_test("tests/op_greater.json", t)
 }
 
 @(test)
-test_lex_colon_glued_after_capture_809 :: proc(t: ^testing.T) {
+test_lex_colon_glued_after_capture_808 :: proc(t: ^testing.T) {
 	run_test("tests/lex_colon_glued_after_capture.json", t)
 }
 
 @(test)
-test_comment_between_statements_810 :: proc(t: ^testing.T) {
+test_comment_between_statements_809 :: proc(t: ^testing.T) {
 	run_test("tests/comment_between_statements.json", t)
 }
 
 @(test)
-test_scope_with_product_811 :: proc(t: ^testing.T) {
+test_scope_with_product_810 :: proc(t: ^testing.T) {
 	run_test("tests/scope_with_product.json", t)
 }
 
 @(test)
-test_levent_event_push_carve_chain_812 :: proc(t: ^testing.T) {
+test_levent_event_push_carve_chain_811 :: proc(t: ^testing.T) {
 	run_test("tests/levent_event_push_carve_chain.json", t)
 }
 
 @(test)
-test_refine_compound_not_equal_813 :: proc(t: ^testing.T) {
+test_refine_compound_not_equal_812 :: proc(t: ^testing.T) {
 	run_test("tests/refine_compound_not_equal.json", t)
 }
 
 @(test)
-test_err_recovery_then_valid_814 :: proc(t: ^testing.T) {
+test_err_recovery_then_valid_813 :: proc(t: ^testing.T) {
 	run_test("tests/err_recovery_then_valid.json", t)
 }
 
 @(test)
-test_event_push_in_pattern_branch_815 :: proc(t: ^testing.T) {
+test_event_push_in_pattern_branch_814 :: proc(t: ^testing.T) {
 	run_test("tests/event_push_in_pattern_branch.json", t)
 }
 
 @(test)
-test_override_space_makes_scope_816 :: proc(t: ^testing.T) {
+test_override_space_makes_scope_815 :: proc(t: ^testing.T) {
 	run_test("tests/override_space_makes_scope.json", t)
 }
 
 @(test)
-test_def_point_instance_817 :: proc(t: ^testing.T) {
+test_def_point_instance_816 :: proc(t: ^testing.T) {
 	run_test("tests/def_point_instance.json", t)
 }
 
 @(test)
-test_gram_postfix_range_open_818 :: proc(t: ^testing.T) {
+test_gram_postfix_range_open_817 :: proc(t: ^testing.T) {
 	run_test("tests/gram_postfix_range_open.json", t)
 }
 
 @(test)
-test_prec_grouped_add_execute_819 :: proc(t: ^testing.T) {
+test_prec_grouped_add_execute_818 :: proc(t: ^testing.T) {
 	run_test("tests/prec_grouped_add_execute.json", t)
 }
 
 @(test)
-test_gram_negate_grouped_range_820 :: proc(t: ^testing.T) {
+test_gram_negate_grouped_range_819 :: proc(t: ^testing.T) {
 	run_test("tests/gram_negate_grouped_range.json", t)
 }
 
 @(test)
-test_refine_destructure_capture_821 :: proc(t: ^testing.T) {
+test_refine_destructure_capture_820 :: proc(t: ^testing.T) {
 	run_test("tests/refine_destructure_capture.json", t)
 }
 
 @(test)
-test_execute_background_threading_822 :: proc(t: ^testing.T) {
+test_execute_background_threading_821 :: proc(t: ^testing.T) {
 	run_test("tests/execute_background_threading.json", t)
 }
 
 @(test)
-test_program_square_function_823 :: proc(t: ^testing.T) {
+test_program_square_function_822 :: proc(t: ^testing.T) {
 	run_test("tests/program_square_function.json", t)
 }
 
 @(test)
-test_wprog_counter_app_824 :: proc(t: ^testing.T) {
+test_wprog_counter_app_823 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_counter_app.json", t)
 }
 
 @(test)
-test_gram_double_dot_plus_char_825 :: proc(t: ^testing.T) {
+test_gram_double_dot_plus_char_824 :: proc(t: ^testing.T) {
 	run_test("tests/gram_double_dot_plus_char.json", t)
 }
 
 @(test)
-test_trailing_newlines_826 :: proc(t: ^testing.T) {
+test_trailing_newlines_825 :: proc(t: ^testing.T) {
 	run_test("tests/trailing_newlines.json", t)
 }
 
 @(test)
-test_wprog_http_router_827 :: proc(t: ^testing.T) {
+test_wprog_http_router_826 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_http_router.json", t)
 }
 
 @(test)
-test_mod_spread_with_pointing_828 :: proc(t: ^testing.T) {
+test_mod_spread_with_pointing_827 :: proc(t: ^testing.T) {
 	run_test("tests/mod_spread_with_pointing.json", t)
 }
 
 @(test)
-test_def_bool_with_default_override_829 :: proc(t: ^testing.T) {
+test_def_bool_with_default_override_828 :: proc(t: ^testing.T) {
 	run_test("tests/def_bool_with_default_override.json", t)
 }
 
 @(test)
-test_chain_property_chain_pattern_target_830 :: proc(t: ^testing.T) {
+test_chain_property_chain_pattern_target_829 :: proc(t: ^testing.T) {
 	run_test("tests/chain_property_chain_pattern_target.json", t)
 }
 
 @(test)
-test_kdestr_pattern_default_with_capture_branch_831 :: proc(t: ^testing.T) {
+test_kdestr_pattern_default_with_capture_branch_830 :: proc(t: ^testing.T) {
 	run_test("tests/kdestr_pattern_default_with_capture_branch.json", t)
 }
 
 @(test)
-test_prec_unary_not_and_832 :: proc(t: ^testing.T) {
+test_prec_unary_not_and_831 :: proc(t: ^testing.T) {
 	run_test("tests/prec_unary_not_and.json", t)
 }
 
 @(test)
-test_z_event_push_property_833 :: proc(t: ^testing.T) {
+test_z_event_push_property_832 :: proc(t: ^testing.T) {
 	run_test("tests/z_event_push_property.json", t)
 }
 
 @(test)
-test_wprog_visitor_ast_834 :: proc(t: ^testing.T) {
+test_wprog_visitor_ast_833 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_visitor_ast.json", t)
 }
 
 @(test)
-test_gen_serializer_program_835 :: proc(t: ^testing.T) {
+test_gen_serializer_program_834 :: proc(t: ^testing.T) {
 	run_test("tests/gen_serializer_program.json", t)
 }
 
 @(test)
-test_z_resonance_push_carve_target_836 :: proc(t: ^testing.T) {
+test_z_resonance_push_carve_target_835 :: proc(t: ^testing.T) {
 	run_test("tests/z_resonance_push_carve_target.json", t)
 }
 
 @(test)
-test_z_property_range_837 :: proc(t: ^testing.T) {
+test_z_property_range_836 :: proc(t: ^testing.T) {
 	run_test("tests/z_property_range.json", t)
 }
 
 @(test)
-test_simple_pattern_838 :: proc(t: ^testing.T) {
+test_simple_pattern_837 :: proc(t: ^testing.T) {
 	run_test("tests/simple_pattern.json", t)
 }
 
 @(test)
-test_vpat_nested_pattern_as_target_839 :: proc(t: ^testing.T) {
+test_vpat_nested_pattern_as_target_838 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_nested_pattern_as_target.json", t)
 }
 
 @(test)
-test_tok_two_captures_adjacent_840 :: proc(t: ^testing.T) {
+test_tok_two_captures_adjacent_839 :: proc(t: ^testing.T) {
 	run_test("tests/tok_two_captures_adjacent.json", t)
 }
 
 @(test)
-test_tok_postfix_then_prefix_range_841 :: proc(t: ^testing.T) {
+test_tok_postfix_then_prefix_range_840 :: proc(t: ^testing.T) {
 	run_test("tests/tok_postfix_then_prefix_range.json", t)
 }
 
 @(test)
-test_mod_spread_then_carve_842 :: proc(t: ^testing.T) {
+test_mod_spread_then_carve_841 :: proc(t: ^testing.T) {
 	run_test("tests/mod_spread_then_carve.json", t)
 }
 
 @(test)
-test_gram_nested_negate_and_843 :: proc(t: ^testing.T) {
+test_gram_nested_negate_and_842 :: proc(t: ^testing.T) {
 	run_test("tests/gram_nested_negate_and.json", t)
 }
 
 @(test)
-test_lex_excessive_internal_whitespace_844 :: proc(t: ^testing.T) {
+test_lex_excessive_internal_whitespace_843 :: proc(t: ^testing.T) {
 	run_test("tests/lex_excessive_internal_whitespace.json", t)
 }
 
 @(test)
-test_prec_constraint_with_add_left_845 :: proc(t: ^testing.T) {
+test_prec_constraint_with_add_left_844 :: proc(t: ^testing.T) {
 	run_test("tests/prec_constraint_with_add_left.json", t)
 }
 
 @(test)
-test_unknown_double_constraint_846 :: proc(t: ^testing.T) {
+test_unknown_double_constraint_845 :: proc(t: ^testing.T) {
 	run_test("tests/unknown_double_constraint.json", t)
 }
 
 @(test)
-test_gram_char_backslash_n_847 :: proc(t: ^testing.T) {
+test_gram_char_backslash_n_846 :: proc(t: ^testing.T) {
 	run_test("tests/gram_char_backslash_n.json", t)
 }
 
 @(test)
-test_vpat_or_three_destructures_848 :: proc(t: ^testing.T) {
+test_vpat_or_three_destructures_847 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_or_three_destructures.json", t)
 }
 
 @(test)
-test_z_carve_with_expand_inside_849 :: proc(t: ^testing.T) {
+test_z_carve_with_expand_inside_848 :: proc(t: ^testing.T) {
 	run_test("tests/z_carve_with_expand_inside.json", t)
 }
 
 @(test)
-test_wprog_fib_pattern_850 :: proc(t: ^testing.T) {
+test_wprog_fib_pattern_849 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_fib_pattern.json", t)
 }
 
 @(test)
-test_vpat_branch_source_external_851 :: proc(t: ^testing.T) {
+test_vpat_branch_source_external_850 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_branch_source_external.json", t)
 }
 
 @(test)
-test_lex_dot_to_none_852 :: proc(t: ^testing.T) {
+test_lex_dot_to_none_851 :: proc(t: ^testing.T) {
 	run_test("tests/lex_dot_to_none.json", t)
 }
 
 @(test)
-test_constraint_with_override_853 :: proc(t: ^testing.T) {
+test_constraint_with_override_852 :: proc(t: ^testing.T) {
 	run_test("tests/constraint_with_override.json", t)
 }
 
 @(test)
-test_prec_double_unary_neg_not_854 :: proc(t: ^testing.T) {
+test_prec_double_unary_neg_not_853 :: proc(t: ^testing.T) {
 	run_test("tests/prec_double_unary_neg_not.json", t)
 }
 
 @(test)
-test_complex_generic_constraint_855 :: proc(t: ^testing.T) {
+test_complex_generic_constraint_854 :: proc(t: ^testing.T) {
 	run_test("tests/complex_generic_constraint.json", t)
 }
 
 @(test)
-test_wprog_type_inference_856 :: proc(t: ^testing.T) {
+test_wprog_type_inference_855 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_type_inference.json", t)
 }
 
 @(test)
-test_tok_constraint_chain_four_857 :: proc(t: ^testing.T) {
+test_tok_constraint_chain_four_856 :: proc(t: ^testing.T) {
 	run_test("tests/tok_constraint_chain_four.json", t)
 }
 
 @(test)
-test_pattern_branch_capture_in_destructure_858 :: proc(t: ^testing.T) {
+test_pattern_branch_capture_in_destructure_857 :: proc(t: ^testing.T) {
 	run_test("tests/pattern_branch_capture_in_destructure.json", t)
 }
 
 @(test)
-test_seal_04_vending_machine_859 :: proc(t: ^testing.T) {
+test_seal_04_vending_machine_858 :: proc(t: ^testing.T) {
 	run_test("tests/seal_04_vending_machine.json", t)
 }
 
 @(test)
-test_tok_lone_lshift_860 :: proc(t: ^testing.T) {
+test_tok_lone_lshift_859 :: proc(t: ^testing.T) {
 	run_test("tests/tok_lone_lshift.json", t)
 }
 
 @(test)
-test_lex_comma_at_start_861 :: proc(t: ^testing.T) {
+test_lex_comma_at_start_860 :: proc(t: ^testing.T) {
 	run_test("tests/lex_comma_at_start.json", t)
 }
 
 @(test)
-test_scope_with_negative_constraint_862 :: proc(t: ^testing.T) {
+test_scope_with_negative_constraint_861 :: proc(t: ^testing.T) {
 	run_test("tests/scope_with_negative_constraint.json", t)
 }
 
 @(test)
-test_prec_range_then_arith_863 :: proc(t: ^testing.T) {
+test_prec_range_then_arith_862 :: proc(t: ^testing.T) {
 	run_test("tests/prec_range_then_arith.json", t)
 }
 
 @(test)
-test_mod_external_in_carve_864 :: proc(t: ^testing.T) {
+test_mod_external_in_carve_863 :: proc(t: ^testing.T) {
 	run_test("tests/mod_external_in_carve.json", t)
 }
 
 @(test)
-test_pattern_branch_or_of_ranges_865 :: proc(t: ^testing.T) {
+test_pattern_branch_or_of_ranges_864 :: proc(t: ^testing.T) {
 	run_test("tests/pattern_branch_or_of_ranges.json", t)
 }
 
 @(test)
-test_seal_17_uri_parser_866 :: proc(t: ^testing.T) {
+test_seal_17_uri_parser_865 :: proc(t: ^testing.T) {
 	run_test("tests/seal_17_uri_parser.json", t)
 }
 
 @(test)
-test_prec_and_then_constraint_867 :: proc(t: ^testing.T) {
+test_prec_and_then_constraint_866 :: proc(t: ^testing.T) {
 	run_test("tests/prec_and_then_constraint.json", t)
 }
 
 @(test)
-test_vpat_target_executed_carve_868 :: proc(t: ^testing.T) {
+test_vpat_target_executed_carve_867 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_target_executed_carve.json", t)
 }
 
 @(test)
-test_literal_string_empty_869 :: proc(t: ^testing.T) {
+test_literal_string_empty_868 :: proc(t: ^testing.T) {
 	run_test("tests/literal_string_empty.json", t)
 }
 
 @(test)
-test_wprog_config_loader_870 :: proc(t: ^testing.T) {
+test_wprog_config_loader_869 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_config_loader.json", t)
 }
 
 @(test)
-test_lex_mixed_comma_newline_871 :: proc(t: ^testing.T) {
+test_lex_mixed_comma_newline_870 :: proc(t: ^testing.T) {
 	run_test("tests/lex_mixed_comma_newline.json", t)
 }
 
 @(test)
-test_z_pattern_and_event_push_872 :: proc(t: ^testing.T) {
+test_z_pattern_and_event_push_871 :: proc(t: ^testing.T) {
 	run_test("tests/z_pattern_and_event_push.json", t)
 }
 
 @(test)
-test_prec_or_then_constraint_873 :: proc(t: ^testing.T) {
+test_prec_or_then_constraint_872 :: proc(t: ^testing.T) {
 	run_test("tests/prec_or_then_constraint.json", t)
 }
 
 @(test)
-test_prec_pattern_with_constraint_874 :: proc(t: ^testing.T) {
+test_prec_pattern_with_constraint_873 :: proc(t: ^testing.T) {
 	run_test("tests/prec_pattern_with_constraint.json", t)
 }
 
 @(test)
-test_dsl_state_set_get_collapse_875 :: proc(t: ^testing.T) {
+test_dsl_state_set_get_collapse_874 :: proc(t: ^testing.T) {
 	run_test("tests/dsl_state_set_get_collapse.json", t)
 }
 
 @(test)
-test_pattern_target_property_876 :: proc(t: ^testing.T) {
+test_pattern_target_property_875 :: proc(t: ^testing.T) {
 	run_test("tests/pattern_target_property.json", t)
 }
 
 @(test)
-test_levent_resonance_in_branch_877 :: proc(t: ^testing.T) {
+test_levent_resonance_in_branch_876 :: proc(t: ^testing.T) {
 	run_test("tests/levent_resonance_in_branch.json", t)
 }
 
 @(test)
-test_combo_carve_chain_inside_property_878 :: proc(t: ^testing.T) {
+test_combo_carve_chain_inside_property_877 :: proc(t: ^testing.T) {
 	run_test("tests/combo_carve_chain_inside_property.json", t)
 }
 
 @(test)
-test_range_prefix_879 :: proc(t: ^testing.T) {
+test_range_prefix_878 :: proc(t: ^testing.T) {
 	run_test("tests/range_prefix.json", t)
 }
 
 @(test)
-test_chain_mix_carve_nested_property_carve_execute_880 :: proc(t: ^testing.T) {
+test_chain_mix_carve_nested_property_carve_execute_879 :: proc(t: ^testing.T) {
 	run_test("tests/chain_mix_carve_nested_property_carve_execute.json", t)
 }
 
 @(test)
-test_wprog_logger_levels_881 :: proc(t: ^testing.T) {
+test_wprog_logger_levels_880 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_logger_levels.json", t)
 }
 
 @(test)
-test_mod_spread_inside_scope_882 :: proc(t: ^testing.T) {
+test_mod_spread_inside_scope_881 :: proc(t: ^testing.T) {
 	run_test("tests/mod_spread_inside_scope.json", t)
 }
 
 @(test)
-test_prec_unary_neg_with_carve_883 :: proc(t: ^testing.T) {
+test_prec_unary_neg_with_carve_882 :: proc(t: ^testing.T) {
 	run_test("tests/prec_unary_neg_with_carve.json", t)
 }
 
 @(test)
-test_lex_newline_after_arrow_884 :: proc(t: ^testing.T) {
+test_lex_newline_after_arrow_883 :: proc(t: ^testing.T) {
 	run_test("tests/lex_newline_after_arrow.json", t)
 }
 
 @(test)
-test_z_execute_with_external_885 :: proc(t: ^testing.T) {
+test_z_execute_with_external_884 :: proc(t: ^testing.T) {
 	run_test("tests/z_execute_with_external.json", t)
 }
 
 @(test)
-test_execute_background_gpu_nested_886 :: proc(t: ^testing.T) {
+test_execute_background_gpu_nested_885 :: proc(t: ^testing.T) {
 	run_test("tests/execute_background_gpu_nested.json", t)
 }
 
 @(test)
-test_complex_constraint_scope_override_887 :: proc(t: ^testing.T) {
+test_complex_constraint_scope_override_886 :: proc(t: ^testing.T) {
 	run_test("tests/complex_constraint_scope_override.json", t)
 }
 
 @(test)
-test_kdestr_branch_carve_with_pointing_888 :: proc(t: ^testing.T) {
+test_kdestr_branch_carve_with_pointing_887 :: proc(t: ^testing.T) {
 	run_test("tests/kdestr_branch_carve_with_pointing.json", t)
 }
 
 @(test)
-test_gen_pull_default_none_889 :: proc(t: ^testing.T) {
+test_gen_pull_default_none_888 :: proc(t: ^testing.T) {
 	run_test("tests/gen_pull_default_none.json", t)
 }
 
 @(test)
-test_lex_range_with_space_before_890 :: proc(t: ^testing.T) {
+test_lex_range_with_space_before_889 :: proc(t: ^testing.T) {
 	run_test("tests/lex_range_with_space_before.json", t)
 }
 
 @(test)
-test_wprog_user_crud_891 :: proc(t: ^testing.T) {
+test_wprog_user_crud_890 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_user_crud.json", t)
 }
 
 @(test)
-test_tok_lone_rshift_892 :: proc(t: ^testing.T) {
+test_tok_lone_rshift_891 :: proc(t: ^testing.T) {
 	run_test("tests/tok_lone_rshift.json", t)
 }
 
 @(test)
-test_tok_range_then_range_893 :: proc(t: ^testing.T) {
+test_tok_range_then_range_892 :: proc(t: ^testing.T) {
 	run_test("tests/tok_range_then_range.json", t)
 }
 
 @(test)
-test_execute_threading_gpu_894 :: proc(t: ^testing.T) {
+test_execute_threading_gpu_893 :: proc(t: ^testing.T) {
 	run_test("tests/execute_threading_gpu.json", t)
 }
 
 @(test)
-test_seal_08_algebra_group_895 :: proc(t: ^testing.T) {
+test_seal_08_algebra_group_894 :: proc(t: ^testing.T) {
 	run_test("tests/seal_08_algebra_group.json", t)
 }
 
 @(test)
-test_kdestr_pattern_or_with_capture_only_one_side_896 :: proc(t: ^testing.T) {
+test_kdestr_pattern_or_with_capture_only_one_side_895 :: proc(t: ^testing.T) {
 	run_test("tests/kdestr_pattern_or_with_capture_only_one_side.json", t)
 }
 
 @(test)
-test_stress_scope_many_bindings_897 :: proc(t: ^testing.T) {
+test_stress_scope_many_bindings_896 :: proc(t: ^testing.T) {
 	run_test("tests/stress_scope_many_bindings.json", t)
 }
 
 @(test)
-test_event_pull_no_catch_898 :: proc(t: ^testing.T) {
+test_event_pull_no_catch_897 :: proc(t: ^testing.T) {
 	run_test("tests/event_pull_no_catch.json", t)
 }
 
 @(test)
-test_z_external_pattern_899 :: proc(t: ^testing.T) {
+test_z_external_pattern_898 :: proc(t: ^testing.T) {
 	run_test("tests/z_external_pattern.json", t)
 }
 
 @(test)
-test_vpat_branch_source_is_property_900 :: proc(t: ^testing.T) {
+test_vpat_branch_source_is_property_899 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_branch_source_is_property.json", t)
 }
 
 @(test)
-test_z_expand_property_901 :: proc(t: ^testing.T) {
+test_z_expand_property_900 :: proc(t: ^testing.T) {
 	run_test("tests/z_expand_property.json", t)
 }
 
 @(test)
-test_execute_prefix_with_override_902 :: proc(t: ^testing.T) {
+test_execute_prefix_with_override_901 :: proc(t: ^testing.T) {
 	run_test("tests/execute_prefix_with_override.json", t)
 }
 
 @(test)
-test_z_pattern_with_range_and_branch_903 :: proc(t: ^testing.T) {
+test_z_pattern_with_range_and_branch_902 :: proc(t: ^testing.T) {
 	run_test("tests/z_pattern_with_range_and_branch.json", t)
 }
 
 @(test)
-test_program_serializer_holes_904 :: proc(t: ^testing.T) {
+test_program_serializer_holes_903 :: proc(t: ^testing.T) {
 	run_test("tests/program_serializer_holes.json", t)
 }
 
 @(test)
-test_complex_override_on_execute_905 :: proc(t: ^testing.T) {
+test_complex_override_on_execute_904 :: proc(t: ^testing.T) {
 	run_test("tests/complex_override_on_execute.json", t)
 }
 
 @(test)
-test_vpat_inline_constraint_to_none_906 :: proc(t: ^testing.T) {
+test_vpat_inline_constraint_to_none_905 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_inline_constraint_to_none.json", t)
 }
 
 @(test)
-test_gen_list_generic_carved_907 :: proc(t: ^testing.T) {
+test_gen_list_generic_carved_906 :: proc(t: ^testing.T) {
 	run_test("tests/gen_list_generic_carved.json", t)
 }
 
 @(test)
-test_gen_pull_then_carve_908 :: proc(t: ^testing.T) {
+test_gen_pull_then_carve_907 :: proc(t: ^testing.T) {
 	run_test("tests/gen_pull_then_carve.json", t)
 }
 
 @(test)
-test_constraint_to_none_909 :: proc(t: ^testing.T) {
+test_constraint_to_none_908 :: proc(t: ^testing.T) {
 	run_test("tests/constraint_to_none.json", t)
 }
 
 @(test)
-test_seal_22_state_manager_910 :: proc(t: ^testing.T) {
+test_seal_22_state_manager_909 :: proc(t: ^testing.T) {
 	run_test("tests/seal_22_state_manager.json", t)
 }
 
 @(test)
-test_vpat_empty_braces_911 :: proc(t: ^testing.T) {
+test_vpat_empty_braces_910 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_empty_braces.json", t)
 }
 
 @(test)
-test_gram_digit_binding_912 :: proc(t: ^testing.T) {
+test_gram_digit_binding_911 :: proc(t: ^testing.T) {
 	run_test("tests/gram_digit_binding.json", t)
 }
 
 @(test)
-test_lex_string_with_backslash_913 :: proc(t: ^testing.T) {
+test_lex_string_with_backslash_912 :: proc(t: ^testing.T) {
 	run_test("tests/lex_string_with_backslash.json", t)
 }
 
 @(test)
-test_z_pattern_with_capture_branch_source_914 :: proc(t: ^testing.T) {
+test_z_pattern_with_capture_branch_source_913 :: proc(t: ^testing.T) {
 	run_test("tests/z_pattern_with_capture_branch_source.json", t)
 }
 
 @(test)
-test_mod_spread_external_simple_915 :: proc(t: ^testing.T) {
+test_mod_spread_external_simple_914 :: proc(t: ^testing.T) {
 	run_test("tests/mod_spread_external_simple.json", t)
 }
 
 @(test)
-test_refine_carved_916 :: proc(t: ^testing.T) {
+test_refine_carved_915 :: proc(t: ^testing.T) {
 	run_test("tests/refine_carved.json", t)
 }
 
 @(test)
-test_execute_threading_background_917 :: proc(t: ^testing.T) {
+test_execute_threading_background_916 :: proc(t: ^testing.T) {
 	run_test("tests/execute_threading_background.json", t)
 }
 
 @(test)
-test_extension_plus_brace_918 :: proc(t: ^testing.T) {
+test_extension_plus_brace_917 :: proc(t: ^testing.T) {
 	run_test("tests/extension_plus_brace.json", t)
 }
 
 @(test)
-test_execute_wrapped_on_carve_919 :: proc(t: ^testing.T) {
+test_execute_wrapped_on_carve_918 :: proc(t: ^testing.T) {
 	run_test("tests/execute_wrapped_on_carve.json", t)
 }
 
 @(test)
-test_err_pattern_without_body_920 :: proc(t: ^testing.T) {
+test_err_pattern_without_body_919 :: proc(t: ^testing.T) {
 	run_test("tests/err_pattern_without_body.json", t)
 }
 
 @(test)
-test_override_empty_921 :: proc(t: ^testing.T) {
+test_override_empty_920 :: proc(t: ^testing.T) {
 	run_test("tests/override_empty.json", t)
 }
 
 @(test)
-test_prec_property_with_execute_then_add_922 :: proc(t: ^testing.T) {
+test_prec_property_with_execute_then_add_921 :: proc(t: ^testing.T) {
 	run_test("tests/prec_property_with_execute_then_add.json", t)
 }
 
 @(test)
-test_z_pattern_branch_with_compile_time_923 :: proc(t: ^testing.T) {
+test_z_pattern_branch_with_compile_time_922 :: proc(t: ^testing.T) {
 	run_test("tests/z_pattern_branch_with_compile_time.json", t)
 }
 
 @(test)
-test_dsl_maybe_program_924 :: proc(t: ^testing.T) {
+test_dsl_maybe_program_923 :: proc(t: ^testing.T) {
 	run_test("tests/dsl_maybe_program.json", t)
 }
 
 @(test)
-test_pattern_default_branch_925 :: proc(t: ^testing.T) {
+test_pattern_default_branch_924 :: proc(t: ^testing.T) {
 	run_test("tests/pattern_default_branch.json", t)
 }
 
 @(test)
-test_complex_enforce_with_proof_926 :: proc(t: ^testing.T) {
+test_complex_enforce_with_proof_925 :: proc(t: ^testing.T) {
 	run_test("tests/complex_enforce_with_proof.json", t)
 }
 
 @(test)
-test_refine_area_destructure_927 :: proc(t: ^testing.T) {
+test_refine_area_destructure_926 :: proc(t: ^testing.T) {
 	run_test("tests/refine_area_destructure.json", t)
 }
 
 @(test)
-test_execute_gpu_928 :: proc(t: ^testing.T) {
+test_execute_gpu_927 :: proc(t: ^testing.T) {
 	run_test("tests/execute_gpu.json", t)
 }
 
 @(test)
-test_combo_compile_time_in_execute_929 :: proc(t: ^testing.T) {
+test_combo_compile_time_in_execute_928 :: proc(t: ^testing.T) {
 	run_test("tests/combo_compile_time_in_execute.json", t)
 }
 
 @(test)
-test_stress_deep_nesting_930 :: proc(t: ^testing.T) {
+test_stress_deep_nesting_929 :: proc(t: ^testing.T) {
 	run_test("tests/stress_deep_nesting.json", t)
 }
 
 @(test)
-test_wprog_color_enum_931 :: proc(t: ^testing.T) {
+test_wprog_color_enum_930 :: proc(t: ^testing.T) {
 	run_test("tests/wprog_color_enum.json", t)
 }
 
 @(test)
-test_chain_grouped_property_pattern_target_932 :: proc(t: ^testing.T) {
+test_chain_grouped_property_pattern_target_931 :: proc(t: ^testing.T) {
 	run_test("tests/chain_grouped_property_pattern_target.json", t)
 }
 
 @(test)
-test_refine_domain_port_933 :: proc(t: ^testing.T) {
+test_refine_domain_port_932 :: proc(t: ^testing.T) {
 	run_test("tests/refine_domain_port.json", t)
 }
 
 @(test)
-test_range_char_grammar_934 :: proc(t: ^testing.T) {
+test_range_char_grammar_933 :: proc(t: ^testing.T) {
 	run_test("tests/range_char_grammar.json", t)
 }
 
 @(test)
-test_vpat_branch_source_nested_scope_935 :: proc(t: ^testing.T) {
+test_vpat_branch_source_nested_scope_934 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_branch_source_nested_scope.json", t)
 }
 
 @(test)
-test_prec_pattern_inline_with_add_936 :: proc(t: ^testing.T) {
+test_prec_pattern_inline_with_add_935 :: proc(t: ^testing.T) {
 	run_test("tests/prec_pattern_inline_with_add.json", t)
 }
 
 @(test)
-test_seal_02_json_parser_937 :: proc(t: ^testing.T) {
+test_seal_02_json_parser_936 :: proc(t: ^testing.T) {
 	run_test("tests/seal_02_json_parser.json", t)
 }
 
 @(test)
-test_refine_branch_greater_938 :: proc(t: ^testing.T) {
+test_refine_branch_greater_937 :: proc(t: ^testing.T) {
 	run_test("tests/refine_branch_greater.json", t)
 }
 
 @(test)
-test_carve_on_external_939 :: proc(t: ^testing.T) {
+test_carve_on_external_938 :: proc(t: ^testing.T) {
 	run_test("tests/carve_on_external.json", t)
 }
 
 @(test)
-test_def_carve_on_shaped_binding_940 :: proc(t: ^testing.T) {
+test_def_carve_on_shaped_binding_939 :: proc(t: ^testing.T) {
 	run_test("tests/def_carve_on_shaped_binding.json", t)
 }
 
 @(test)
-test_seal_05_reactive_counter_941 :: proc(t: ^testing.T) {
+test_seal_05_reactive_counter_940 :: proc(t: ^testing.T) {
 	run_test("tests/seal_05_reactive_counter.json", t)
 }
 
 @(test)
-test_event_handler_constrained_source_942 :: proc(t: ^testing.T) {
+test_event_handler_constrained_source_941 :: proc(t: ^testing.T) {
 	run_test("tests/event_handler_constrained_source.json", t)
 }
 
 @(test)
-test_vpat_inline_zero_943 :: proc(t: ^testing.T) {
+test_vpat_inline_zero_942 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_inline_zero.json", t)
 }
 
 @(test)
-test_seal_26_physics_body_944 :: proc(t: ^testing.T) {
+test_seal_26_physics_body_943 :: proc(t: ^testing.T) {
 	run_test("tests/seal_26_physics_body.json", t)
 }
 
 @(test)
-test_seal_40_shell_dsl_945 :: proc(t: ^testing.T) {
+test_seal_40_shell_dsl_944 :: proc(t: ^testing.T) {
 	run_test("tests/seal_40_shell_dsl.json", t)
 }
 
 @(test)
-test_literal_string_double_946 :: proc(t: ^testing.T) {
+test_literal_string_double_945 :: proc(t: ^testing.T) {
 	run_test("tests/literal_string_double.json", t)
 }
 
 @(test)
-test_resonance_with_default_947 :: proc(t: ^testing.T) {
+test_resonance_with_default_946 :: proc(t: ^testing.T) {
 	run_test("tests/resonance_with_default.json", t)
 }
 
 @(test)
-test_vpat_branch_source_is_carve_948 :: proc(t: ^testing.T) {
+test_vpat_branch_source_is_carve_947 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_branch_source_is_carve.json", t)
 }
 
 @(test)
-test_z_pull_with_carve_rhs_949 :: proc(t: ^testing.T) {
+test_z_pull_with_carve_rhs_948 :: proc(t: ^testing.T) {
 	run_test("tests/z_pull_with_carve_rhs.json", t)
 }
 
 @(test)
-test_vpat_inline_property_capture_950 :: proc(t: ^testing.T) {
+test_vpat_inline_property_capture_949 :: proc(t: ^testing.T) {
 	run_test("tests/vpat_inline_property_capture.json", t)
 }
 
 @(test)
-test_z_carve_with_scope_literal_entry_951 :: proc(t: ^testing.T) {
+test_z_carve_with_scope_literal_entry_950 :: proc(t: ^testing.T) {
 	run_test("tests/z_carve_with_scope_literal_entry.json", t)
 }
 
 @(test)
-test_proof_enforce_chain_952 :: proc(t: ^testing.T) {
+test_proof_enforce_chain_951 :: proc(t: ^testing.T) {
 	run_test("tests/proof_enforce_chain.json", t)
 }
 
 @(test)
-test_chain_property_capital_branch_source_953 :: proc(t: ^testing.T) {
+test_chain_property_capital_branch_source_952 :: proc(t: ^testing.T) {
 	run_test("tests/chain_property_capital_branch_source.json", t)
 }
 
 @(test)
-test_seal_39_plugin_system_954 :: proc(t: ^testing.T) {
+test_seal_39_plugin_system_953 :: proc(t: ^testing.T) {
 	run_test("tests/seal_39_plugin_system.json", t)
 }
 
 @(test)
-test_kdestr_carve_with_rest_955 :: proc(t: ^testing.T) {
+test_kdestr_carve_with_rest_954 :: proc(t: ^testing.T) {
 	run_test("tests/kdestr_carve_with_rest.json", t)
 }
 
 @(test)
-test_constraint_chained_956 :: proc(t: ^testing.T) {
+test_constraint_chained_955 :: proc(t: ^testing.T) {
 	run_test("tests/constraint_chained.json", t)
 }
 
