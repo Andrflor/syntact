@@ -1,6 +1,6 @@
 {
   "name": "Default Server Config Carve Port",
-  "description": "ServerConfig:config{port -> 3000} — declaring a binding config of shape ServerConfig whose value is a carve overriding port. Constraint at the top, Carve nested as the value.",
+  "description": "ServerConfig:config{port -> 3000} — shaped binding with carve. The Constraint(ServerConfig,config) is wrapped in Carve overriding port.",
   "source": "ServerConfig:config{port -> 3000}",
-  "expect": "Scope[Constraint(Identifier(ServerConfig),Carve(Identifier(config),[Pointing(Identifier(port),Literal(Integer,3000))]))]"
+  "expect": "Scope[Carve(Constraint(Identifier(ServerConfig),Identifier(config)),[Pointing(Identifier(port),Literal(Integer,3000))])]"
 }

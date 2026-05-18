@@ -1,6 +1,6 @@
 {
   "name": "Destructure With Three Bindings",
-  "description": "Foo:{a b c} — anonymous shaped Carve with three identifier bindings. Constraint at the top with Carve as its value.",
+  "description": "Foo:{a b c} — anonymous shaped Carve with three identifier bindings.",
   "source": "Foo:{a b c}",
-  "expect": "Scope[Constraint(Identifier(Foo),Carve(nil,[Identifier(a),Identifier(b),Identifier(c)]))]"
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Identifier(a),Identifier(b),Identifier(c)])]"
 }

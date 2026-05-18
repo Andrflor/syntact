@@ -1,6 +1,6 @@
 {
   "name": "Default Carve On Shaped Binding",
-  "description": "Point:p{x -> 10 y -> 20} — README §Defaults: a binding p of shape Point whose value is a carve. Constraint sits at the top (Point bound to a value), the value being Carve(p, [...]).",
+  "description": "Point:p{x -> 10 y -> 20} — README §Defaults: constrain a binding by shape and carve. The whole Constraint(Point,p) is wrapped in Carve with the entries inside the braces.",
   "source": "Point:p{x -> 10 y -> 20}",
-  "expect": "Scope[Constraint(Identifier(Point),Carve(Identifier(p),[Pointing(Identifier(x),Literal(Integer,10)),Pointing(Identifier(y),Literal(Integer,20))]))]"
+  "expect": "Scope[Carve(Constraint(Identifier(Point),Identifier(p)),[Pointing(Identifier(x),Literal(Integer,10)),Pointing(Identifier(y),Literal(Integer,20))])]"
 }

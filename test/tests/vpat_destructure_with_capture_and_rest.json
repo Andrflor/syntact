@@ -1,6 +1,6 @@
 {
   "name": "Destructure With Capture And Rest",
-  "description": "Foo:{x(a) ...r} — first field captured, then rest expanded. Constraint at the top with Carve as value.",
+  "description": "Foo:{x(a) ...r} — first field captured, then rest expanded.",
   "source": "Foo:{x(a) ...r}",
-  "expect": "Scope[Constraint(Identifier(Foo),Carve(nil,[Identifier(x,a),Expand(Identifier(r))]))]"
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Identifier(x,a),Expand(Identifier(r))])]"
 }

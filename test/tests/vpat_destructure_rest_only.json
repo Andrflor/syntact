@@ -1,6 +1,6 @@
 {
   "name": "Destructure With Rest Only",
-  "description": "Foo:{...rest} — single expanded rest binding in destructure. Constraint at the top, Carve as value with the Expand entry.",
+  "description": "Foo:{...rest} — single expanded rest binding in destructure.",
   "source": "Foo:{...rest}",
-  "expect": "Scope[Constraint(Identifier(Foo),Carve(nil,[Expand(Identifier(rest))]))]"
+  "expect": "Scope[Carve(Constraint(Identifier(Foo),nil),[Expand(Identifier(rest))])]"
 }
