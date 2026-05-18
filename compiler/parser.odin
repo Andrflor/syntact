@@ -1457,7 +1457,10 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
     rule := get_rule(parser.current_token.kind)
     if rule.prefix == nil {
         advance_token(parser)
-        return nil
+        if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+            return nil
+        }
+        return parse_expression(parser, precedence)
     }
 
     // Parse the prefix expression
