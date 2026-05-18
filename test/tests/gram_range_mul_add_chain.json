@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Range Mul Add Chain",
+  "description": "'a'..'z' * 3 + '0'..'9' + 'a'..'z' — regex-like composition. Semantic expectation: + is at the root (left-assoc), * binds the range below, and the .. ranges are leaves. Expect: Add(Add(Mul(Range('a','z'),3), Range('0','9')), Range('a','z')).",
+  "source": "'a'..'z' * 3 + '0'..'9' + 'a'..'z'",
+  "expect": "Scope[Operator(Add,Operator(Add,Operator(Multiply,Range(Literal(String,a),Literal(String,z)),Literal(Integer,3)),Range(Literal(String,0),Literal(String,9))),Range(Literal(String,a),Literal(String,z)))]"
+}
