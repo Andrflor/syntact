@@ -1,6 +1,6 @@
 {
   "name": "Range Bounds Are Expressions",
-  "description": "x..y+1 — range bounds parsed at RANGE precedence. Right bound includes the addition because Add (TERM=6) is below Range (RANGE=12). Wait — RANGE > TERM means the addition does NOT bind into the range from the right. Test pins behavior: end is just y, then '+1' becomes the next infix on the whole Range.",
+  "description": "x..y+1 — semantic expectation: the range's right bound is the expression y+1, matching the convention used by most languages. Expect: Range(x, Add(y,1)).",
   "source": "x..y+1",
-  "expect": "Scope[Operator(Add,Range(Identifier(x),Identifier(y)),Literal(Integer,1))]"
+  "expect": "Scope[Range(Identifier(x),Operator(Add,Identifier(y),Literal(Integer,1)))]"
 }
