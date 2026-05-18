@@ -1,6 +1,6 @@
 {
   "name": "Precedence Equal With Or",
-  "description": "a = b | c — OR (7) > EQUALITY (3). 'b | c' first inside right-of-=. Result Equal(a, Or(b,c)).",
+  "description": "a = b | c — EQUALITY > OR. '=' binds tighter than '|', so 'a = b' forms first, then '| c' wraps it. Result Or(Equal(a,b), c).",
   "source": "a = b | c",
-  "expect": "Scope[Operator(Equal,Identifier(a),Operator(Or,Identifier(b),Identifier(c)))]"
+  "expect": "Scope[Operator(Or,Operator(Equal,Identifier(a),Identifier(b)),Identifier(c))]"
 }

@@ -1020,14 +1020,15 @@ Precedence :: enum {
     NONE = 0,        // No precedence
     ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
     PATTERN,
+    OR,          // | (union of shapes / or-pattern) — looser than & — looser than comparisons so `a > b | c < d` becomes Or(Greater(a,b), Less(c,d))
+    AND,         // & (intersection / refinement) — tighter than | but looser than comparisons so `a < b & c > d` becomes And(Less(a,b), Greater(c,d))
     EQUALITY,    // =
     COMPARISON,  // <, >, <=, >=
     TERM,        // +, -
     FACTOR,      // *, /, %
-    OR,          // | (union of shapes / or-pattern) — looser than &
-    CONSTRAINT,  // : (binds tighter than | so `Square: | Diamond:` is `(Square:) | (Diamond:)`, looser than & so `(u8|i8)&>10:x` binds the whole composition)
-    AND,         // & (intersection / refinement) — tighter than |
+    CONSTRAINT,  // : (binds tighter than arithmetic so `(u8|i8)&>10:x` binds the whole composition)
     UNARY,       // ~, unary -
+    SHIFT,       // <<, >> — just below RANGE so shifts bind tight against arithmetic and ranges still beat them
     RANGE,       // ..
     CALL,       // (), ., ?
     PRIMARY,    // Literals, identifiers (highest precedence)
@@ -1285,9 +1286,9 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
     case .Xor:
         return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
     case .RShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .SHIFT}
     case .LShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
+        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .SHIFT}
 
     // Arithmetic operators
     case .Plus:

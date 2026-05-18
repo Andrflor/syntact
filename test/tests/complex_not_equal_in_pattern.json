@@ -1,6 +1,6 @@
 {
   "name": "Not Equal Combined With And In Constraint",
-  "description": "Uses the new != token in a structural refinement constraint like (N & ~{}):x",
+  "description": "a != b & c — EQUALITY (where != lives, same level as =) binds tighter than AND. 'a != b' forms first, then '& c' wraps it. Result And(NotEqual(a,b), c).",
   "source": "a != b & c",
-  "expect": "Scope[Operator(NotEqual,Identifier(a),Operator(And,Identifier(b),Identifier(c)))]"
+  "expect": "Scope[Operator(And,Operator(NotEqual,Identifier(a),Identifier(b)),Identifier(c))]"
 }

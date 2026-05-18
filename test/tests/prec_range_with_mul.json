@@ -1,6 +1,6 @@
 {
   "name": "Precedence Range With Multiply",
-  "description": "a..b * c — semantic expectation: the multiplication binds into the range's right bound. Expect: Range(a, Multiply(b,c)).",
+  "description": "a..b * c — RANGE binds tighter than FACTOR. 'a..b' forms first, then '* c' wraps it. Result Multiply(Range(a,b), c).",
   "source": "a..b * c",
-  "expect": "Scope[Range(Identifier(a),Operator(Multiply,Identifier(b),Identifier(c)))]"
+  "expect": "Scope[Operator(Multiply,Range(Identifier(a),Identifier(b)),Identifier(c))]"
 }
