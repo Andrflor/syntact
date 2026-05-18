@@ -1,6 +1,6 @@
 {
   "name": "Precedence Range Then Arithmetic",
-  "description": "1..5 + 1 — semantic expectation: the addition binds into the range's right bound, matching the convention used by most languages. Expect: Range(1, Add(5,1)).",
+  "description": "1..5 + 1 — RANGE binds tighter than TERM. '1..5' forms first, then '+ 1' wraps it. Result Add(Range(1,5), 1).",
   "source": "1..5 + 1",
-  "expect": "Scope[Range(Literal(Integer,1),Operator(Add,Literal(Integer,5),Literal(Integer,1)))]"
+  "expect": "Scope[Operator(Add,Range(Literal(Integer,1),Literal(Integer,5)),Literal(Integer,1))]"
 }

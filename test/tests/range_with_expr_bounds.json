@@ -1,6 +1,6 @@
 {
   "name": "Range Bounds Are Expressions",
-  "description": "x..y+1 — semantic expectation: the range's right bound is the expression y+1, matching the convention used by most languages. Expect: Range(x, Add(y,1)).",
+  "description": "x..y+1 — RANGE binds tighter than TERM. 'x..y' forms first, then '+1' wraps it. Result Add(Range(x,y), 1).",
   "source": "x..y+1",
-  "expect": "Scope[Range(Identifier(x),Operator(Add,Identifier(y),Literal(Integer,1)))]"
+  "expect": "Scope[Operator(Add,Range(Identifier(x),Identifier(y)),Literal(Integer,1))]"
 }
