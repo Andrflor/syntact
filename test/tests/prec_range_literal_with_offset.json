@@ -1,6 +1,6 @@
 {
   "name": "Precedence Range Literal With Offset Identifier",
-  "description": "1..5 + offset — RANGE > TERM, so '1..5' first then '+ offset'.",
+  "description": "1..5 + offset — semantic expectation: the addition binds into the range's right bound. Expect: Range(1, Add(5, offset)).",
   "source": "1..5 + offset",
-  "expect": "Scope[Operator(Add,Range(Literal(Integer,1),Literal(Integer,5)),Identifier(offset))]"
+  "expect": "Scope[Range(Literal(Integer,1),Operator(Add,Literal(Integer,5),Identifier(offset)))]"
 }
