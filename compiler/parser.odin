@@ -42,6 +42,9 @@ Token_Kind :: enum {
 	// String Literal
 	String_Literal,
 
+	// Boolean Literal
+	Bool_Literal,
+
 	// Executors
 	Execute, // !
 	At,
@@ -561,7 +564,11 @@ next_token :: proc(l: ^Lexer) -> Token {
 				advance_position(l)
 			}
 
-			return Token{kind = .Identifier, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
+			text := l.source[start_pos.offset:l.position.offset]
+			if text == "true" || text == "false" {
+				return Token{kind = .Bool_Literal, text = text, position = start_pos}
+			}
+			return Token{kind = .Identifier, text = text, position = start_pos}
 		}
 
 		// Unknown character
@@ -1220,6 +1227,8 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
         return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .String_Literal:
         return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
+    case .Bool_Literal:
+        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
     case .Identifier:
         return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .PRIMARY}
 
@@ -1635,6 +1644,8 @@ parse_literal :: proc(parser: ^Parser) -> ^Node {
         literal.kind = .Binary
     case .String_Literal:
         literal.kind = .String
+    case .Bool_Literal:
+        literal.kind = .Bool
     case:
         error_at_current(parser, "Unknown literal type")
         return nil
@@ -3152,6 +3163,7 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
         kind == .Integer ||
         kind == .Float ||
         kind == .String_Literal ||
+        kind == .Bool_Literal ||
         kind == .Hexadecimal ||
         kind == .Binary ||
         kind == .LeftBrace ||

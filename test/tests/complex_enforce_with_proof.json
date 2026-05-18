@@ -2,5 +2,5 @@
   "name": "Enforce Inside A Proof-Style Pointing",
   "description": "T:n -> ?? then -> mult{n} = n ?! true is a typical refinement proof shape. No '!' is applied after the carve, so it stays an Carve (not Execute).",
   "source": "T:n -> ??\n-> mult{n} = n ?! true",
-  "expect": "Scope[Pointing(Constraint(Identifier(T),Identifier(n)),Unknown),Product(Enforce(Operator(Equal,Carve(Identifier(mult),[Identifier(n)]),Identifier(n)),Identifier(true)))]"
+  "expect": "Scope[Pointing(Constraint(Identifier(T),Identifier(n)),Unknown),Product(Enforce(Operator(Equal,Carve(Identifier(mult),[Identifier(n)]),Identifier(n)),Literal(Bool,true)))]"
 }
