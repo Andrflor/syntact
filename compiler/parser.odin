@@ -500,8 +500,8 @@ next_token :: proc(l: ^Lexer) -> Token {
 			advance_by(l, 2)
 
 			// Scan for */
-			loop: for l.position.offset + 1 < l.source_len {
-				if l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
+			loop: for l.position.offset < l.source_len {
+				if l.position.offset + 1 < l.source_len && l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
 					advance_by(l, 2) // Skip closing */
 					break loop
 				}
