@@ -1,6 +1,6 @@
 {
-  "name": "Lone Execute Prefix",
-  "description": "! alone as prefix CompileTime with no operand. Operand parse fails, result dropped. UNCERTAIN.",
+  "name": "Lone execute prefix",
+  "description": "! alone should be Execute(nil,[]), not CompileTime. Parser bug: currently produces CompileTime(nil).",
   "source": "!",
-  "expect": "Scope[]"
+  "expect": "Scope[Execute(nil,[])]"
 }
