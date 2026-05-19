@@ -1,0 +1,6 @@
+{
+  "name": "PropertyToNone In Scope",
+  "description": "{ a. } — PropertyToNone produces Property(a,nil) inside a scope.",
+  "source": "{ a. }",
+  "expect": "Scope[Scope[Property(Identifier(a),nil)]]"
+}

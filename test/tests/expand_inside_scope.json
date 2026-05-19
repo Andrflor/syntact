@@ -1,0 +1,6 @@
+{
+  "name": "Expand Inside Scope",
+  "description": "{ ...defaults name -> \"override\" } — expand used inside a scope alongside a regular binding.",
+  "source": "{\n  ...defaults\n  name -> \"override\"\n}",
+  "expect": "Scope[Scope[Expand(Identifier(defaults)),Pointing(Identifier(name),Literal(String,override))]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "External With Carve",
+  "description": "@lib.geometry{dimension -> 3} — carve applied to an external property chain.",
+  "source": "@lib.geometry{dimension -> 3}",
+  "expect": "Scope[Carve(Property(External(lib,nil),Identifier(geometry)),[Pointing(Identifier(dimension),Literal(Integer,3))])]"
+}

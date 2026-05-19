@@ -1,0 +1,6 @@
+{
+  "name": "Carve With Expand Inside",
+  "description": "Foo{...defaults} — carve entry is an expand expression spreading defaults into the carve.",
+  "source": "Foo{...defaults}",
+  "expect": "Scope[Carve(Identifier(Foo),[Expand(Identifier(defaults))])]"
+}

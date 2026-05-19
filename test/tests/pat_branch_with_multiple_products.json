@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch Product Is Scope With Bindings",
+  "description": "Branch product is a full scope with internal bindings and a product expression.",
+  "source": "x ? {\n  1 -> {\n    msg -> \"one\"\n    -> msg\n  }\n  -> \"other\"\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Scope[Pointing(Identifier(msg),Literal(String,one)),Product(Identifier(msg))]),Branch(nil,Literal(String,other))])]"
+}

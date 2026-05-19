@@ -1,0 +1,6 @@
+{
+  "name": "Literal String Empty Double Quotes",
+  "description": "Empty string literal using double quotes",
+  "source": "\"\"",
+  "expect": "Scope[Literal(String,)]"
+}

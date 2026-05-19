@@ -1,0 +1,6 @@
+{
+  "name": "Hex literal with invalid digits",
+  "description": "Hex prefix followed by non-hex characters. UNCERTAIN.",
+  "source": "0xGG",
+  "expect": "Scope[Identifier(GG)]"
+}

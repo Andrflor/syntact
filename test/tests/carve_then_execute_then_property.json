@@ -1,0 +1,6 @@
+{
+  "name": "Carve Then Execute Then Property",
+  "description": "Foo{x -> 5}!.result — carve followed by execute followed by property access, testing postfix chaining order.",
+  "source": "Foo{x -> 5}!.result",
+  "expect": "Scope[Property(Execute(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,5))]),[]),Identifier(result))]"
+}

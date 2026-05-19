@@ -1,0 +1,6 @@
+{
+  "name": "Property Chain Six Deep With Constraint",
+  "description": "a.b.c.d.e.f:x — six-level property chain then constraint. Property is at CALL (higher), so the full chain forms first, then :x wraps it all at CONSTRAINT precedence.",
+  "source": "a.b.c.d.e.f:x",
+  "expect": "Scope[Constraint(Property(Property(Property(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d)),Identifier(e)),Identifier(f)),Identifier(x))]"
+}

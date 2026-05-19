@@ -1,0 +1,6 @@
+{
+  "name": "Lone Execute Prefix",
+  "description": "! alone as prefix CompileTime with no operand. Operand parse fails, result dropped. UNCERTAIN.",
+  "source": "!",
+  "expect": "Scope[]"
+}

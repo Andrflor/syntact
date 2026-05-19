@@ -1,0 +1,6 @@
+{
+  "name": "Constraint With Carve",
+  "description": "Point:p{x -> 10} — named constraint followed by carve. The carve wraps the constraint result.",
+  "source": "Point:p{x -> 10}",
+  "expect": "Scope[Carve(Constraint(Identifier(Point),Identifier(p)),[Pointing(Identifier(x),Literal(Integer,10))])]"
+}

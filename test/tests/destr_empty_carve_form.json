@@ -1,0 +1,6 @@
+{
+  "name": "Destructuring Empty Carve Form",
+  "description": "Pattern match with empty carve — Shape:{} matches the shape constraint with no field extractions.",
+  "source": "x ? {\n  Shape:{} -> \"empty\"\n  -> \"other\"\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Shape),nil),[]),Literal(String,empty)),Branch(nil,Literal(String,other))])]"
+}

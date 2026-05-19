@@ -1,0 +1,6 @@
+{
+  "name": "Mismatched paren closed by brace",
+  "description": "Opening ( closed by }. UNCERTAIN: the parser may keep the contents.",
+  "source": "(a + b}",
+  "expect": "Scope[Operator(Add,Identifier(a),Identifier(b))]"
+}

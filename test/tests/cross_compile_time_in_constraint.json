@@ -1,0 +1,6 @@
+{
+  "name": "Cross Compile Time In Constraint",
+  "description": "Pointing with Constraint left and CompileTime right",
+  "source": "Config:c -> !defaults.config",
+  "expect": "Scope[Pointing(Constraint(Identifier(Config),Identifier(c)),CompileTime(Property(Identifier(defaults),Identifier(config))))]"
+}

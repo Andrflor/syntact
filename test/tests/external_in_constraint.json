@@ -1,0 +1,6 @@
+{
+  "name": "External In Constraint",
+  "description": "@lib.types.Point:p — external property chain used as the shape of a constraint.",
+  "source": "@lib.types.Point:p",
+  "expect": "Scope[Constraint(Property(Property(External(lib,nil),Identifier(types)),Identifier(Point)),Identifier(p))]"
+}

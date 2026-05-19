@@ -1,0 +1,6 @@
+{
+  "name": "Lone At Prefix",
+  "description": "@ alone as prefix External with no identifier. Parse fails, result dropped. UNCERTAIN.",
+  "source": "@",
+  "expect": "Scope[]"
+}

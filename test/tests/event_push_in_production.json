@@ -1,0 +1,6 @@
+{
+  "name": "Event Push In Production",
+  "description": "{-> >- Log{message -> \"done\"}} — scope with a production whose value is a prefix event push with a carved payload.",
+  "source": "{\n  -> >- Log{message -> \"done\"}\n}",
+  "expect": "Scope[Scope[Product(EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(message),Literal(String,done))])))]]"
+}

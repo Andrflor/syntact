@@ -1,0 +1,6 @@
+{
+  "name": "Escape Carriage Return",
+  "description": "UNCERTAIN - Carriage return escape \\r in string literal. Lexer keeps raw source text including the escape sequence.",
+  "source": "\"line\\rreturn\"",
+  "expect": "Scope[Literal(String,line\\rreturn)]"
+}

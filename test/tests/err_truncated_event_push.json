@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Event Push",
+  "description": "a >- with no target. EventPush infix with missing right operand. UNCERTAIN: may yield EventPush(a,nil) or just Identifier(a).",
+  "source": "a >- ",
+  "expect": "Scope[EventPush(Identifier(a),nil)]"
+}

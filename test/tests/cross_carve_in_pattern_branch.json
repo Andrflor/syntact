@@ -1,0 +1,6 @@
+{
+  "name": "Cross Carve In Pattern Branch",
+  "description": "Pattern branches produce Carve nodes as their products",
+  "source": "x ? {\n  1 -> Foo{a -> 10}\n  -> Foo{a -> 0}\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Carve(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,10))])),Branch(nil,Carve(Identifier(Foo),[Pointing(Identifier(a),Literal(Integer,0))]))])]"
+}

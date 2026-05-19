@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Pointing Pull",
+  "description": "a <- with no right operand. PointingPull infix with missing source. UNCERTAIN.",
+  "source": "a <- ",
+  "expect": "Scope[Identifier(a)]"
+}

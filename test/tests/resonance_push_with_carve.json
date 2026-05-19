@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push With Carve",
+  "description": "value >>- Change{amount -> 5} — resonance push where the target is a carve expression.",
+  "source": "value >>- Change{amount -> 5}",
+  "expect": "Scope[ResonancePush(Identifier(value),Carve(Identifier(Change),[Pointing(Identifier(amount),Literal(Integer,5))]))]"
+}

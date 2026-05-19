@@ -1,0 +1,6 @@
+{
+  "name": "Scope Single Binding",
+  "description": "{ x -> 1 } — a scope containing a single Pointing binding.",
+  "source": "{ x -> 1 }",
+  "expect": "Scope[Scope[Pointing(Identifier(x),Literal(Integer,1))]]"
+}

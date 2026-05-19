@@ -1,0 +1,6 @@
+{
+  "name": "Cross Pull In Event Handler",
+  "description": "EventPull body contains PointingPull and Product with Execute",
+  "source": "Log -< e {\n  Sink <- none\n  -> Sink{data -> e.message}!\n}",
+  "expect": "Scope[EventPull(e,Identifier(Log),Scope[PointingPull(Identifier(Sink),Identifier(none)),Product(Execute(Carve(Identifier(Sink),[Pointing(Identifier(data),Property(Identifier(e),Identifier(message)))]),[]))])]"
+}

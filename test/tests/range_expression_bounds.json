@@ -1,0 +1,6 @@
+{
+  "name": "Range Expression Bounds",
+  "description": "(a + 1)..(b * 2) — range where both bounds are grouped arithmetic expressions.",
+  "source": "(a + 1)..(b * 2)",
+  "expect": "Scope[Range(Operator(Add,Identifier(a),Literal(Integer,1)),Operator(Multiply,Identifier(b),Literal(Integer,2)))]"
+}

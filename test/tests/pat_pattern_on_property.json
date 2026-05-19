@@ -1,0 +1,6 @@
+{
+  "name": "Pattern On Property Access",
+  "description": "a.b ? { ... } — pattern target is a property access result.",
+  "source": "a.b ? {\n  1 -> \"one\"\n  -> \"other\"\n}",
+  "expect": "Scope[Pattern(Property(Identifier(a),Identifier(b)),[Branch(Literal(Integer,1),Literal(String,one)),Branch(nil,Literal(String,other))])]"
+}

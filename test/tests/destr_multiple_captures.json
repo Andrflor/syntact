@@ -1,0 +1,6 @@
+{
+  "name": "Destructuring Multiple Captures",
+  "description": "Pattern match destructuring two fields — Point:{x(px), y(py)} captures both x and y into px and py, product sums them.",
+  "source": "x ? {\n  Point:{x(px), y(py)} -> px + py\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Point),nil),[Identifier(x,px),Identifier(y,py)]),Operator(Add,Identifier(px),Identifier(py)))])]"
+}

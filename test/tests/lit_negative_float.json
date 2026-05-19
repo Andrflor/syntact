@@ -1,0 +1,6 @@
+{
+  "name": "Literal Negative Float",
+  "description": "Unary minus applied to a float literal produces Operator(Subtract,nil,Literal(Float,...))",
+  "source": "-3.14",
+  "expect": "Scope[Operator(Subtract,nil,Literal(Float,3.14))]"
+}

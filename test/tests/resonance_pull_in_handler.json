@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull In Handler",
+  "description": "Change -< e { count -<< e.value } — event pull handler containing a resonance pull inside its body.",
+  "source": "Change -< e {\n  count -<< e.value\n}",
+  "expect": "Scope[EventPull(e,Identifier(Change),Scope[ResonancePull(Identifier(count),Property(Identifier(e),Identifier(value)))])]"
+}

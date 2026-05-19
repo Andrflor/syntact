@@ -1,0 +1,6 @@
+{
+  "name": "Extension with event handler",
+  "description": "Extension block adding an event handler to a scope.",
+  "source": "Base+{\n  Log -< e {\n    -> e.message\n  }\n}",
+  "expect": "Scope[Operator(Add,Identifier(Base),Scope[EventPull(e,Identifier(Log),Scope[Product(Property(Identifier(e),Identifier(message)))])])]"
+}

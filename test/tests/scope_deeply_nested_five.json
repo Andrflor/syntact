@@ -1,0 +1,6 @@
+{
+  "name": "Scope Deeply Nested Five Levels",
+  "description": "{ { { { { x -> 1 } } } } } — five levels of nested scopes wrapping a single Pointing binding.",
+  "source": "{ { { { { x -> 1 } } } } }",
+  "expect": "Scope[Scope[Scope[Scope[Scope[Scope[Pointing(Identifier(x),Literal(Integer,1))]]]]]]"
+}

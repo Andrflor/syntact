@@ -1,0 +1,6 @@
+{
+  "name": "Carve With Constraint Inside",
+  "description": "Foo{u8:x -> 5} — carve entry is a constrained pointing binding.",
+  "source": "Foo{u8:x -> 5}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Constraint(Identifier(u8),Identifier(x)),Literal(Integer,5))])]"
+}

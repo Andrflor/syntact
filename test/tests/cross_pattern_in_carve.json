@@ -1,0 +1,6 @@
+{
+  "name": "Cross Pattern In Carve",
+  "description": "Carve entry value is a Pattern expression with branches",
+  "source": "Foo{x -> y ? { 0 -> 1, -> 2 }}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Pattern(Identifier(y),[Branch(Literal(Integer,0),Literal(Integer,1)),Branch(nil,Literal(Integer,2))]))])]"
+}

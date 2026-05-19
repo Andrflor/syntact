@@ -1,0 +1,6 @@
+{
+  "name": "Carve With Event Handler",
+  "description": "Lib{Log -< e {-> io.write{e.message}!}} — carve entry is an event handler whose body produces an execute of a carve on a property chain.",
+  "source": "Lib{Log -< e {\n  -> io.write{e.message}!\n}}",
+  "expect": "Scope[Carve(Identifier(Lib),[EventPull(e,Identifier(Log),Scope[Product(Execute(Carve(Property(Identifier(io),Identifier(write)),[Property(Identifier(e),Identifier(message))]),[]))])])]"
+}

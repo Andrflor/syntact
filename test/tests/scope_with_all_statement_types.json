@@ -1,0 +1,6 @@
+{
+  "name": "Scope With All Statement Types",
+  "description": "A scope exercising all major statement types: Pointing, PointingPull, Product, Constraint, EventPull, Expand, and ResonancePush combined with Pointing.",
+  "source": "{\n  a -> 1\n  T <- none\n  -> a\n  u8:b\n  Log -< e { -> e }\n  ...defaults\n  u8:c >>- Change -> 0\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),PointingPull(Identifier(T),Identifier(none)),Product(Identifier(a)),Constraint(Identifier(u8),Identifier(b)),EventPull(e,Identifier(Log),Scope[Product(Identifier(e))]),Expand(Identifier(defaults)),Pointing(ResonancePush(Constraint(Identifier(u8),Identifier(c)),Identifier(Change)),Literal(Integer,0))]]"
+}

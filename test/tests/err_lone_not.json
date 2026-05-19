@@ -1,0 +1,6 @@
+{
+  "name": "Lone Not Prefix",
+  "description": "~ alone as prefix Not with no operand. Operand parse fails, result dropped. UNCERTAIN.",
+  "source": "~",
+  "expect": "Scope[]"
+}

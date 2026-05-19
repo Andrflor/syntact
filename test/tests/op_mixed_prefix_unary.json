@@ -1,0 +1,6 @@
+{
+  "name": "Mixed Prefix Unary Not And Subtract",
+  "description": "~-a then newline -~b — the minus on the second line is treated as infix continuation (is_infix_operator includes Minus), so the whole expression becomes Subtract(~(-a), ~b).",
+  "source": "~-a\n-~b",
+  "expect": "Scope[Operator(Subtract,Operator(Not,nil,Operator(Subtract,nil,Identifier(a))),Operator(Not,nil,Identifier(b)))]"
+}

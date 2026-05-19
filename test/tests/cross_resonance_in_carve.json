@@ -1,0 +1,6 @@
+{
+  "name": "Cross Resonance In Carve",
+  "description": "Inside carve: ResonancePush as left side of Pointing",
+  "source": "Foo{x >>- Change -> 0}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(ResonancePush(Identifier(x),Identifier(Change)),Literal(Integer,0))])]"
+}

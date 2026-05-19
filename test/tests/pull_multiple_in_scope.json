@@ -1,0 +1,6 @@
+{
+  "name": "Pull Multiple In Scope",
+  "description": "{ A <- none B <- none C <- none -> A } — multiple pull bindings in a scope with a production.",
+  "source": "{\n  A <- none\n  B <- none\n  C <- none\n  -> A\n}",
+  "expect": "Scope[Scope[PointingPull(Identifier(A),Identifier(none)),PointingPull(Identifier(B),Identifier(none)),PointingPull(Identifier(C),Identifier(none)),Product(Identifier(A))]]"
+}

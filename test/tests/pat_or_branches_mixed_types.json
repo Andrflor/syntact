@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Or Branch Mixing Literal And Range",
+  "description": "0 | 1..5 — Or combining a literal and a range as branch source. Range has higher precedence than Or so it forms first.",
+  "source": "x ? {\n  0 | 1..5 -> \"small\"\n  -> \"big\"\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Operator(Or,Literal(Integer,0),Range(Literal(Integer,1),Literal(Integer,5))),Literal(String,small)),Branch(nil,Literal(String,big))])]"
+}

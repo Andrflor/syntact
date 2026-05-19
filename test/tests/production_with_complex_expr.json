@@ -1,0 +1,6 @@
+{
+  "name": "Production With Complex Expression",
+  "description": "Product with a binary expression involving multiplication, addition, and a property access. Precedence: Property at CALL(14), Multiply at FACTOR(9), Add at TERM(8).",
+  "source": "{\n  x -> 5\n  y -> 10\n  -> x * y + x.length\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(x),Literal(Integer,5)),Pointing(Identifier(y),Literal(Integer,10)),Product(Operator(Add,Operator(Multiply,Identifier(x),Identifier(y)),Property(Identifier(x),Identifier(length))))]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Program Server Config Full",
+  "description": "Refinement type Port, struct-like ServerConfig with defaults, instantiation via Carve with constraint, and override via Carve on identifier.",
+  "source": "Port -> u16 & >0\nServerConfig -> {\n  String:host -> \"localhost\"\n  Port:port -> 8080\n  bool:debug -> false\n}\nServerConfig:config{port -> 3000}\nprod -> config{\n  host -> \"0.0.0.0\"\n  debug -> false\n}",
+  "expect": "Scope[Pointing(Identifier(Port),Operator(And,Identifier(u16),Operator(Greater,nil,Literal(Integer,0)))),Pointing(Identifier(ServerConfig),Scope[Pointing(Constraint(Identifier(String),Identifier(host)),Literal(String,localhost)),Pointing(Constraint(Identifier(Port),Identifier(port)),Literal(Integer,8080)),Pointing(Constraint(Identifier(bool),Identifier(debug)),Literal(Bool,false))]),Carve(Constraint(Identifier(ServerConfig),Identifier(config)),[Pointing(Identifier(port),Literal(Integer,3000))]),Pointing(Identifier(prod),Carve(Identifier(config),[Pointing(Identifier(host),Literal(String,0.0.0.0)),Pointing(Identifier(debug),Literal(Bool,false))]))]"
+}

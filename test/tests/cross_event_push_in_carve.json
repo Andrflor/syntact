@@ -1,0 +1,6 @@
+{
+  "name": "Cross Event Push In Carve",
+  "description": "Carve entry value is an EventPush whose target is a Carve",
+  "source": "Foo{x -> >- Change{value -> 5}}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),EventPush(nil,Carve(Identifier(Change),[Pointing(Identifier(value),Literal(Integer,5))])))])]"
+}

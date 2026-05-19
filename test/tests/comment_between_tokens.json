@@ -1,0 +1,6 @@
+{
+  "name": "Block comment between operator tokens",
+  "description": "A block comment splitting a binary expression: a /* comment */ + b.",
+  "source": "a /* comment */ + b",
+  "expect": "Scope[Operator(Add,Identifier(a),Identifier(b))]"
+}

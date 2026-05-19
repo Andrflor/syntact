@@ -1,0 +1,6 @@
+{
+  "name": "Pattern On Execute Result",
+  "description": "foo! ? { ... } — pattern target is an executed expression.",
+  "source": "foo! ? {\n  0 -> \"zero\"\n  -> \"nonzero\"\n}",
+  "expect": "Scope[Pattern(Execute(Identifier(foo),[]),[Branch(Literal(Integer,0),Literal(String,zero)),Branch(nil,Literal(String,nonzero))])]"
+}

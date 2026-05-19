@@ -1,0 +1,6 @@
+{
+  "name": "Cross Execute In Carve",
+  "description": "Carve entry value is an Execute expression",
+  "source": "Foo{x -> bar!}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Execute(Identifier(bar),[]))])]"
+}

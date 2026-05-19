@@ -1,0 +1,6 @@
+{
+  "name": "Literal Float Large Decimal",
+  "description": "Float literal with many decimal places (pi)",
+  "source": "3.141592653589793",
+  "expect": "Scope[Literal(Float,3.141592653589793)]"
+}

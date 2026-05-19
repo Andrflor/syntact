@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Branch With Empty Scope Source",
+  "description": "x ? { {} -> \"empty\" -> \"notempty\" } — branch source is an empty scope literal.",
+  "source": "x ? {\n  {} -> \"empty\"\n  -> \"notempty\"\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[],Literal(String,empty)),Branch(nil,Literal(String,notempty))])]"
+}

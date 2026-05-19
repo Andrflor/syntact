@@ -1,0 +1,6 @@
+{
+  "name": "Double pointing arrow",
+  "description": "a -> -> b: the second -> is parsed as a Product prefix in the right-hand expression. UNCERTAIN.",
+  "source": "a -> -> b",
+  "expect": "Scope[Pointing(Identifier(a),Product(Identifier(b)))]"
+}

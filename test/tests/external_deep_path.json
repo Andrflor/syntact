@@ -1,0 +1,6 @@
+{
+  "name": "External Deep Path",
+  "description": "@lib.geometry.shapes.Circle — external with a chain of three property accesses.",
+  "source": "@lib.geometry.shapes.Circle",
+  "expect": "Scope[Property(Property(Property(External(lib,nil),Identifier(geometry)),Identifier(shapes)),Identifier(Circle))]"
+}

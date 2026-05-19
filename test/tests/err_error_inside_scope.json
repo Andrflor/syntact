@@ -1,0 +1,6 @@
+{
+  "name": "Error inside scope then valid",
+  "description": "An invalid token inside a scope followed by valid bindings. UNCERTAIN.",
+  "source": "{\n  * a\n  b -> 1\n}",
+  "expect": "Scope[Scope[Identifier(a),Pointing(Identifier(b),Literal(Integer,1))]]"
+}

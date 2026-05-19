@@ -1,0 +1,6 @@
+{
+  "name": "Escape Multiple Escapes",
+  "description": "UNCERTAIN - Multiple escape sequences in one string: \\n, \\t, and \\\\. Lexer keeps raw source text.",
+  "source": "\"a\\nb\\tc\\\\\"",
+  "expect": "Scope[Literal(String,a\\nb\\tc\\\\)]"
+}

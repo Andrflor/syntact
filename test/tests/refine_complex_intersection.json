@@ -1,0 +1,6 @@
+{
+  "name": "Refinement Complex Intersection",
+  "description": "Left-associative And chain with multiple refinement operators — greater than, less than, and negation on u8.",
+  "source": "u8 & >0 & <100 & ~50",
+  "expect": "Scope[Operator(And,Operator(And,Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0))),Operator(Less,nil,Literal(Integer,100))),Operator(Not,nil,Literal(Integer,50)))]"
+}

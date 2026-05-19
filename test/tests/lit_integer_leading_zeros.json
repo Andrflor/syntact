@@ -1,0 +1,6 @@
+{
+  "name": "Literal Integer Leading Zeros",
+  "description": "Integer literal with leading zeros is parsed as integer (not octal)",
+  "source": "007",
+  "expect": "Scope[Literal(Integer,007)]"
+}

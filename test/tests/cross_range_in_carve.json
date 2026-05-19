@@ -1,0 +1,6 @@
+{
+  "name": "Cross Range In Carve",
+  "description": "Carve entry value is a Range expression",
+  "source": "Foo{x -> 1..10}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Range(Literal(Integer,1),Literal(Integer,10)))])]"
+}

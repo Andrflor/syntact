@@ -1,0 +1,6 @@
+{
+  "name": "Destructuring Capture And Rest",
+  "description": "Pattern match with field capture and rest expansion — Point:{x(px), ...rest} captures x as px and collects remaining fields.",
+  "source": "x ? {\n  Point:{x(px), ...rest} -> px\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Point),nil),[Identifier(x,px),Expand(Identifier(rest))]),Identifier(px))])]"
+}

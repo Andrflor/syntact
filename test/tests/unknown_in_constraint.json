@@ -1,0 +1,6 @@
+{
+  "name": "Unknown In Constraint Pointing",
+  "description": "u8:x -> ?? — Pointing with a Constraint on the left and Unknown on the right, typical for declaring a typed binding with an indeterminate value.",
+  "source": "u8:x -> ??",
+  "expect": "Scope[Pointing(Constraint(Identifier(u8),Identifier(x)),Unknown)]"
+}

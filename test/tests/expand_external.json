@@ -1,0 +1,6 @@
+{
+  "name": "Expand External",
+  "description": "...@lib.utils — expand wrapping an external with a property access.",
+  "source": "...@lib.utils",
+  "expect": "Scope[Expand(Property(External(lib,nil),Identifier(utils)))]"
+}

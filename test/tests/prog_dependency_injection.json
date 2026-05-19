@@ -1,0 +1,6 @@
+{
+  "name": "Program Dependency Injection",
+  "description": "Buffer allocation via event push, WithMalloc handles Alloc event — demonstrates algebraic effects for dependency injection.",
+  "source": "Buffer -> {\n  usize:size\n  ptr -> >- Alloc{size -> size}\n  -> ptr\n}\nWithMalloc -> {\n  Alloc -< e {\n    -> malloc{e.size}!\n  }\n  -> Buffer{size -> 1024}!\n}",
+  "expect": "Scope[Pointing(Identifier(Buffer),Scope[Constraint(Identifier(usize),Identifier(size)),Pointing(Identifier(ptr),EventPush(nil,Carve(Identifier(Alloc),[Pointing(Identifier(size),Identifier(size))]))),Product(Identifier(ptr))]),Pointing(Identifier(WithMalloc),Scope[EventPull(e,Identifier(Alloc),Scope[Product(Execute(Carve(Identifier(malloc),[Property(Identifier(e),Identifier(size))]),[]))]),Product(Execute(Carve(Identifier(Buffer),[Pointing(Identifier(size),Literal(Integer,1024))]),[]))])]"
+}

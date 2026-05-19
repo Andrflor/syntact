@@ -1,0 +1,6 @@
+{
+  "name": "Execute All Wrapper Types",
+  "description": "Five execute expressions each with a different wrapper type: plain, Threading, Parallel_CPU, Background, GPU.",
+  "source": "a!\na<!>\na[!]\na(!)\na|!|",
+  "expect": "Scope[Execute(Identifier(a),[]),Execute(Identifier(a),[Threading]),Execute(Identifier(a),[Parallel_CPU]),Execute(Identifier(a),[Background]),Execute(Identifier(a),[GPU])]"
+}

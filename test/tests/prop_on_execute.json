@@ -1,0 +1,6 @@
+{
+  "name": "Property Execute Property Execute Property Chain",
+  "description": "foo!.bar!.baz — alternating Execute and Property. foo executes, then .bar, then execute again, then .baz.",
+  "source": "foo!.bar!.baz",
+  "expect": "Scope[Property(Execute(Property(Execute(Identifier(foo),[]),Identifier(bar)),[]),Identifier(baz))]"
+}

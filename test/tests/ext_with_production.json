@@ -1,0 +1,6 @@
+{
+  "name": "Extension with production",
+  "description": "Extension block that adds a production to the scope.",
+  "source": "Foo+{-> x + 1}",
+  "expect": "Scope[Operator(Add,Identifier(Foo),Scope[Product(Operator(Add,Identifier(x),Literal(Integer,1)))])]"
+}

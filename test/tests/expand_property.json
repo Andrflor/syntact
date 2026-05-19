@@ -1,0 +1,6 @@
+{
+  "name": "Expand Property",
+  "description": "...obj.data — expand wrapping a property chain.",
+  "source": "...obj.data",
+  "expect": "Scope[Expand(Property(Identifier(obj),Identifier(data)))]"
+}

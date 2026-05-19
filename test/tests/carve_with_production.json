@@ -1,0 +1,6 @@
+{
+  "name": "Carve With Production",
+  "description": "Foo{-> x + 1} — carve containing a production entry with an addition operator.",
+  "source": "Foo{-> x + 1}",
+  "expect": "Scope[Carve(Identifier(Foo),[Product(Operator(Add,Identifier(x),Literal(Integer,1)))])]"
+}

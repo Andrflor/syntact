@@ -1,0 +1,6 @@
+{
+  "name": "Not On Grouped Comparison",
+  "description": "~(a > b) — prefix Not applied to a grouped comparison. The parentheses force the Greater comparison to form first, then Not wraps the result.",
+  "source": "~(a > b)",
+  "expect": "Scope[Operator(Not,nil,Operator(Greater,Identifier(a),Identifier(b)))]"
+}

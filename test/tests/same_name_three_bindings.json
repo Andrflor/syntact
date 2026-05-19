@@ -1,0 +1,6 @@
+{
+  "name": "Same Name Three Bindings",
+  "description": "Three bindings with the same name x in one scope. All are stored as separate Pointings.",
+  "source": "{\n  x -> 1\n  x -> 2\n  x -> 3\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(x),Literal(Integer,2)),Pointing(Identifier(x),Literal(Integer,3))]]"
+}

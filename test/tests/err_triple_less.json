@@ -1,0 +1,6 @@
+{
+  "name": "Triple less-than",
+  "description": "Three < in a row: lexer produces << then <. UNCERTAIN.",
+  "source": "a <<< b",
+  "expect": "Scope[Operator(LeftShift,Identifier(a),Operator(Less,nil,Identifier(b)))]"
+}

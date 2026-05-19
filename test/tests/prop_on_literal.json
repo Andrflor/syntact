@@ -1,0 +1,6 @@
+{
+  "name": "Property On String Literal",
+  "description": "\"hello\".length — PropertyAccess on a string literal. The literal becomes the left side of Property.",
+  "source": "\"hello\".length",
+  "expect": "Scope[Property(Literal(String,hello),Identifier(length))]"
+}

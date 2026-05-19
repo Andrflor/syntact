@@ -1,0 +1,6 @@
+{
+  "name": "Carve On Scope Literal",
+  "description": "{x -> 0}{x -> 5} — first braces create a scope literal, second braces carve on it (LeftBraceCarve after closing brace).",
+  "source": "{x -> 0}{x -> 5}",
+  "expect": "Scope[Carve(Scope[Pointing(Identifier(x),Literal(Integer,0))],[Pointing(Identifier(x),Literal(Integer,5))])]"
+}

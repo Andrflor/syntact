@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Greater",
+  "description": "a > with no right operand. Infix Greater with missing right operand, operator dropped. UNCERTAIN.",
+  "source": "a > ",
+  "expect": "Scope[Identifier(a)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Extension on a carved scope",
+  "description": "Carving then extending: Foo{x -> 1}+{y -> 2}.",
+  "source": "Foo{x -> 1}+{y -> 2}",
+  "expect": "Scope[Operator(Add,Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]),Scope[Pointing(Identifier(y),Literal(Integer,2))])]"
+}

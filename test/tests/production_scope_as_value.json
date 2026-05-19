@@ -1,0 +1,6 @@
+{
+  "name": "Production Scope As Value",
+  "description": "Product pointing to a nested scope containing two bindings.",
+  "source": "{\n  -> {\n    a -> 1\n    b -> 2\n  }\n}",
+  "expect": "Scope[Scope[Product(Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))])]]"
+}

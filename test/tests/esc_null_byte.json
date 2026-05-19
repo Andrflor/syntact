@@ -1,0 +1,6 @@
+{
+  "name": "Escape Null Byte",
+  "description": "UNCERTAIN - Null byte escape \\0 in string literal. Lexer keeps raw source text including the escape sequence.",
+  "source": "\"null\\0byte\"",
+  "expect": "Scope[Literal(String,null\\0byte)]"
+}

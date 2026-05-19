@@ -1,0 +1,6 @@
+{
+  "name": "Nested Event Handlers",
+  "description": "Outer -< e1 {Inner -< e2 {-> e2.data}, -> e1.data} — nested event handlers, inner handler inside outer handler body.",
+  "source": "{\n  Outer -< e1 {\n    Inner -< e2 {\n      -> e2.data\n    }\n    -> e1.data\n  }\n}",
+  "expect": "Scope[Scope[EventPull(e1,Identifier(Outer),Scope[EventPull(e2,Identifier(Inner),Scope[Product(Property(Identifier(e2),Identifier(data)))]),Product(Property(Identifier(e1),Identifier(data)))])]]"
+}

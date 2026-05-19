@@ -1,0 +1,6 @@
+{
+  "name": "Extension with constrained binding",
+  "description": "Extension block adding a shaped binding.",
+  "source": "User+{u8:age -> 25}",
+  "expect": "Scope[Operator(Add,Identifier(User),Scope[Pointing(Constraint(Identifier(u8),Identifier(age)),Literal(Integer,25))])]"
+}

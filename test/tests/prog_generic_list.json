@@ -1,0 +1,6 @@
+{
+  "name": "Program Generic List",
+  "description": "Generic list definition with PointingPull for type parameter, empty scope product, and recursive constraint with Expand.",
+  "source": "List -> {\n  T <- none\n  -> {}\n  -> { T:, ...List{T}: }\n}",
+  "expect": "Scope[Pointing(Identifier(List),Scope[PointingPull(Identifier(T),Identifier(none)),Product(Scope[]),Product(Scope[Constraint(Identifier(T),nil),Expand(Constraint(Carve(Identifier(List),[Identifier(T)]),nil))])])]"
+}

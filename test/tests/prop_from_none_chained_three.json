@@ -1,0 +1,6 @@
+{
+  "name": "PropertyFromNone Chained Three Deep",
+  "description": "{ .a.b.c } — PropertyFromNone at .a gives Property(nil,a), then left-associative chaining through .b and .c.",
+  "source": "{ .a.b.c }",
+  "expect": "Scope[Scope[Property(Property(Property(nil,Identifier(a)),Identifier(b)),Identifier(c))]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Event Pull Multiple Handlers",
+  "description": "Two event handlers in one scope: Log and Audit, each with a production returning a property of the caught event.",
+  "source": "{\n  Log -< e {\n    -> e.message\n  }\n  Audit -< e {\n    -> e.content\n  }\n}",
+  "expect": "Scope[Scope[EventPull(e,Identifier(Log),Scope[Product(Property(Identifier(e),Identifier(message)))]),EventPull(e,Identifier(Audit),Scope[Product(Property(Identifier(e),Identifier(content)))])]]"
+}
