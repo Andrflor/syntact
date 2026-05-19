@@ -1018,7 +1018,8 @@ Enforce :: struct {
  */
 Precedence :: enum {
     NONE = 0,        // No precedence
-    ASSIGNMENT,  // ->, <-, >-, -<, >>-, -<< (lowest precedence)
+    POINTING,    // -> (lowest — so branches and scopes can separate pointings)
+    ASSIGNMENT,  // <-, >-, -<, >>-, -<<
     PATTERN,
     OR,          // | (union of shapes / or-pattern) — looser than & — looser than comparisons so `a > b | c < d` becomes Or(Greater(a,b), Less(c,d))
     AND,         // & (intersection / refinement) — tighter than | but looser than comparisons so `a < b & c > d` becomes And(Less(a,b), Greater(c,d))
@@ -1332,7 +1333,7 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
 
     // Assignment operators (lowest precedence)
     case .PointingPush:
-        return Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .ASSIGNMENT}
+        return Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .POINTING}
     case .PointingPull:
         return Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
     case .EventPush:
@@ -1478,7 +1479,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
     }
 
     // Keep parsing infix expressions while they have higher precedence
-    for {
+    infix_loop: for {
         if parser.current_token.kind == .Newline {
             saved_current := parser.current_token
             saved_peek := parser.peek_token
@@ -1495,8 +1496,11 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
         if rule.infix == nil || rule.precedence < precedence {
             break
         }
-        if _, is_product := left^.(Product); is_product && rule.precedence == .ASSIGNMENT {
-            break
+        if parser.current_token.kind == .PointingPush {
+            #partial switch _ in left^ {
+            case Product, Pointing:
+                break infix_loop
+            }
         }
         left = rule.infix(parser, left)
         if left == nil {
@@ -2510,8 +2514,8 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser) -> ^Node {
        parser.current_token.kind == .Newline {
         pointing_pull.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        // Parse to — use ASSIGNMENT to prevent -> from chaining inside
+        to := parse_expression(parser, .ASSIGNMENT)
         pointing_pull.to = to
     }
 
@@ -2542,8 +2546,8 @@ parse_pointing_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
        parser.current_token.kind == .Newline {
         pointing_pull.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        // Parse to — use ASSIGNMENT to prevent -> from chaining inside
+        to := parse_expression(parser, .ASSIGNMENT)
         pointing_pull.to = to
     }
 
@@ -3070,12 +3074,12 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
 
     if parser.current_token.kind == .PointingPush {
         advance_token(parser)
-        branch.product = parse_expression(parser)
+        branch.product = parse_expression(parser, .ASSIGNMENT)
     } else {
-        branch.source = parse_expression(parser, .PATTERN)
+        branch.source = parse_expression(parser, .ASSIGNMENT)
         if parser.current_token.kind == .PointingPush {
             advance_token(parser)
-            branch.product = parse_expression(parser)
+            branch.product = parse_expression(parser, .ASSIGNMENT)
         }
     }
 
