@@ -161,11 +161,12 @@ Node :: struct {
 }
 
 Ast :: struct {
-	source:      string,
-	nodes:       [dynamic]Node,
-	extra:       [dynamic]Node_Index,
-	extra_u8:    [dynamic]u8,
-	line_starts: [dynamic]u32,
+	source:              string,
+	nodes:               [dynamic]Node,
+	extra:               [dynamic]Node_Index,
+	extra_u8:            [dynamic]u8,
+	line_starts:         [dynamic]u32,
+	line_starts_computed: bool,
 }
 
 Position :: struct {
@@ -174,7 +175,22 @@ Position :: struct {
 	offset: int,
 }
 
+ensure_line_starts :: proc(ast: ^Ast) {
+	if ast.line_starts_computed do return
+	ast.line_starts_computed = true
+	if ast.line_starts == nil {
+		ast.line_starts = make([dynamic]u32, 0, 64)
+	}
+	append(&ast.line_starts, 0)
+	for i := 0; i < len(ast.source); i += 1 {
+		if ast.source[i] == '\n' {
+			append(&ast.line_starts, u32(i + 1))
+		}
+	}
+}
+
 span_to_position :: proc(ast: ^Ast, offset: u32) -> Position {
+	ensure_line_starts(ast)
 	lo, hi := 0, len(ast.line_starts) - 1
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
@@ -765,16 +781,6 @@ scan_number :: proc(l: ^Lexer, start: u32, sb: bool) -> Token {
 	return Token{kind = .Integer, span = Span{start, l.offset}, space_before = sb}
 }
 
-compute_line_starts :: proc(source: string) -> [dynamic]u32 {
-	ls := make([dynamic]u32, 0, 64)
-	append(&ls, 0)
-	for i := 0; i < len(source); i += 1 {
-		if source[i] == '\n' {
-			append(&ls, u32(i + 1))
-		}
-	}
-	return ls
-}
 
 /* ======================================================================
  * SECTION 4: PARSER
@@ -837,8 +843,7 @@ Parser :: struct {
 	file_cache:    ^Cache,
 }
 
-init_parser :: proc(cache: ^Cache, source: string) -> ^Parser {
-	parser := new(Parser)
+init_parser :: proc(parser: ^Parser, cache: ^Cache, source: string) {
 	parser.source = source
 	parser.file_cache = cache
 	init_lexer(&parser.lexer, source)
@@ -852,7 +857,6 @@ init_parser :: proc(cache: ^Cache, source: string) -> ^Parser {
 
 	parser.current_token = next_token(&parser.lexer)
 	parser.peek_token = next_token(&parser.lexer)
-	return parser
 }
 
 advance_token :: #force_inline proc(parser: ^Parser) {
@@ -1030,52 +1034,51 @@ get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
  * ====================================================================== */
 
 parse :: proc(cache: ^Cache, source: string) -> ^Ast {
-	parser := init_parser(cache, source)
+	parser: Parser
+	init_parser(&parser, cache, source)
 	span_start := parser.current_token.span.start
 
 	children := make([dynamic]Node_Index, 0, 16, context.temp_allocator)
 
 	for parser.current_token.kind != .EOF {
 		for parser.current_token.kind == .Newline {
-			advance_token(parser)
+			advance_token(&parser)
 		}
 		if parser.current_token.kind == .EOF do break
 
-		if node := parse_with_recovery(parser); node != INVALID_NODE {
+		if node := parse_with_recovery(&parser); node != INVALID_NODE {
 			append(&children, node)
 		}
 	}
 
-	for error in parser.errors {
-		debug_parse_error(error, parser.source, nil)
-	}
-
 	data: Node_Data
-	r := add_extra(parser, children[:])
+	r := add_extra(&parser, children[:])
 	data.scope = {start = r.start, len = r.len}
 	root_span := Span{span_start, parser.current_token.span.end}
-	add_node(parser, .ScopeNode, data, root_span)
+	add_node(&parser, .ScopeNode, data, root_span)
 
 	ast := new(Ast)
 	ast.source = source
 	ast.nodes = parser.nodes
 	ast.extra = parser.extra
 	ast.extra_u8 = parser.extra_u8
-	ast.line_starts = compute_line_starts(source)
+
+	for error in parser.errors {
+		debug_parse_error(error, source, ast)
+	}
+
 	return ast
 }
 
 debug_parse_error :: proc(error: Parse_Error, source: string, ast: ^Ast) {
+	pos: Position
 	if ast != nil {
-		pos := span_to_position(ast, error.span.start)
-		fmt.printf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
+		pos = span_to_position(ast, error.span.start)
 	} else {
-		ls := compute_line_starts(source)
-		defer delete(ls)
-		temp_ast := Ast{source = source, line_starts = ls}
-		pos := span_to_position(&temp_ast, error.span.start)
-		fmt.printf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
+		temp_ast := Ast{source = source}
+		pos = span_to_position(&temp_ast, error.span.start)
 	}
+	fmt.printf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
 }
 
 parse_with_recovery :: proc(parser: ^Parser) -> Node_Index {
