@@ -85,7 +85,7 @@ Document :: struct {
 	uri:         string,
 	version:     int,
 	content:     string,
-	ast:         ^compiler.Node,
+	ast:         ^compiler.Ast,
 	diagnostics: [dynamic]Diagnostic,
 }
 
@@ -385,60 +385,15 @@ handle_did_close :: proc(server: ^LSP_Server, notif: LSP_Notification) {
 analyze_document :: proc(server: ^LSP_Server, uri: string) {
 	doc := &server.documents[uri]
 
-	// Analyze document and send diagnostics
-	analyze_document :: proc(server: ^LSP_Server, uri: string) {
-		doc := &server.documents[uri]
+	ast := compiler.parse(server.cache, doc.content)
+	doc.ast = ast
 
-		// Parse the document using your compiler
-		ast := compiler.parse(server.cache, doc.content)
-		doc.ast = ast
+	clear(&doc.diagnostics)
 
-		// Run semantic analysis
-		clear(&doc.diagnostics)
-
-		if ast != nil {
-			_ = compiler.analyze(server.cache, ast)
-
-			// Convert compiler errors to LSP diagnostics
-			// Access the analyzer that was used during analysis
-			// Note: You'll need to expose the analyzer errors somehow from your compiler module
-			// For now, I'll show the structure but you'll need to adapt based on how
-			// your compiler exposes the error information
-
-			// TODO: Add access to analyzer errors from compiler module
-			// This is a placeholder - you'll need to modify your compiler to expose
-			// the analyzer state or return errors in a way the LSP can access
-
-			// Example of what the integration might look like:
-			/*
-        if errors := compiler.get_analyzer_errors(server.cache); errors != nil {
-            for error in errors {
-                diagnostic := Diagnostic{
-                    range = Range{
-                        start = Position{
-                            line = error.position.line - 1, // LSP is 0-based
-                            character = error.position.column - 1,
-                        },
-                        end = Position{
-                            line = error.position.line - 1,
-                            character = error.position.column,
-                        },
-                    },
-                    severity = 1, // Error
-                    source = "your-language-server",
-                    message = error.message,
-                }
-                append(&doc.diagnostics, diagnostic)
-            }
-        }
-        */
-		}
-
-		// Send diagnostics to client
-		send_diagnostics(uri, doc.diagnostics[:])
+	if ast != nil {
+		_ = compiler.analyze(server.cache, ast)
 	}
 
-	// Send diagnostics to client
 	send_diagnostics(uri, doc.diagnostics[:])
 }
 
