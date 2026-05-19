@@ -3068,15 +3068,15 @@ parse_branch :: proc(parser: ^Parser) -> ^Branch {
     branch := new(Branch)
     branch.position = position // Store position
 
-    expression := parse_expression(parser,)
-    #partial switch e in expression {
-      case Pointing:
-        branch.source = e.from
-        branch.product = e.to
-      case Product:
-        branch.product = e.to
-      case:
-        error_at_current(parser, "Invalid to for pattern")
+    if parser.current_token.kind == .PointingPush {
+        advance_token(parser)
+        branch.product = parse_expression(parser)
+    } else {
+        branch.source = parse_expression(parser, .PATTERN)
+        if parser.current_token.kind == .PointingPush {
+            advance_token(parser)
+            branch.product = parse_expression(parser)
+        }
     }
 
     return branch
