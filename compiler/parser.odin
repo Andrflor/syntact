@@ -1446,6 +1446,14 @@ parse_statement :: proc(parser: ^Parser) -> ^Node {
     return expr
 }
 
+is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
+    #partial switch kind {
+    case .Plus, .Minus, .Asterisk, .Slash, .Percent, .And, .Or:
+        return true
+    }
+    return false
+}
+
 /*
  * parse_expression parses expressions using Pratt parsing
  */
@@ -1471,6 +1479,18 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
 
     // Keep parsing infix expressions while they have higher precedence
     for {
+        if parser.current_token.kind == .Newline {
+            saved_current := parser.current_token
+            saved_peek := parser.peek_token
+            saved_lexer := parser.lexer^
+            skip_newlines(parser)
+            if is_infix_operator(parser.current_token.kind) {
+                continue
+            }
+            parser.current_token = saved_current
+            parser.peek_token = saved_peek
+            parser.lexer^ = saved_lexer
+        }
         rule := get_rule(parser.current_token.kind)
         if rule.infix == nil || rule.precedence < precedence {
             break
@@ -2065,6 +2085,8 @@ parse_enforce:: proc(parser: ^Parser, left: ^Node) -> ^Node {
 
     // Move past the operator
     advance_token(parser)
+
+    skip_newlines(parser)
 
     // Parse the right operand with higher precedence
     right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
