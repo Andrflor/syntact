@@ -1495,6 +1495,9 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Nod
         if rule.infix == nil || rule.precedence < precedence {
             break
         }
+        if _, is_product := left^.(Product); is_product && rule.precedence == .ASSIGNMENT {
+            break
+        }
         left = rule.infix(parser, left)
         if left == nil {
             return nil
@@ -1630,8 +1633,8 @@ parse_product_prefix :: proc(parser: ^Parser) -> ^Node {
         // Empty product - this is valid
         product.to = nil
     } else {
-        // Parse the to
-        if to := parse_expression(parser); to != nil {
+        // Parse the to — use PATTERN to prevent another -> from attaching as infix
+        if to := parse_expression(parser, .PATTERN); to != nil {
             product.to = to
         } else {
             // Error already reported
