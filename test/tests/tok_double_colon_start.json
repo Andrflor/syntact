@@ -1,6 +1,6 @@
 {
   "name": "tok_double_colon_start",
-  "description": "'::a' — first ':' has no space before (BOF) and no space after (next is ':') → ConstraintBind. ConstraintBind has no prefix rule → no statement. Same for the second ':'. UNCERTAIN: empty Scope[].",
+  "description": "'::a' — the two colons are consumed/skipped by recovery, then 'a' parses as Identifier.",
   "source": "::a",
-  "expect": "Scope[]"
+  "expect": "Scope[Identifier(a)]"
 }
