@@ -2484,8 +2484,8 @@ parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
        parser.current_token.kind == .Newline {
         pointing.to = nil
     } else {
-        // Parse to
-        to := parse_expression(parser)
+        // Parse to — use ASSIGNMENT to prevent another -> from chaining
+        to := parse_expression(parser, .ASSIGNMENT)
         pointing.to = to
     }
     result := new(Node)
