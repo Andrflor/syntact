@@ -1,0 +1,6 @@
+{
+  "name": "Execute On Carve Then Property",
+  "description": "square{n -> 5}!.result — carve on square, execute, then property access on result.",
+  "source": "square{n -> 5}!.result",
+  "expect": "Scope[Property(Execute(Carve(Identifier(square),[Pointing(Identifier(n),Literal(Integer,5))]),[]),Identifier(result))]"
+}

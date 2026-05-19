@@ -1,0 +1,6 @@
+{
+  "name": "Program Full Counter",
+  "description": "Counter with reactive state — resonance push/pull, event push/pull, and nested scopes for increment action.",
+  "source": "Counter -> {\n  Change -> { u8:value }\n  -> {\n    u8:value >>- Change -> 0\n    Change -< e {\n      value -<< e.value\n    }\n    increment -> {\n      >- Change{value -> value + 1}\n    }\n    -> value\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Counter),Scope[Pointing(Identifier(Change),Scope[Constraint(Identifier(u8),Identifier(value))]),Product(Scope[Pointing(ResonancePush(Constraint(Identifier(u8),Identifier(value)),Identifier(Change)),Literal(Integer,0)),EventPull(e,Identifier(Change),Scope[ResonancePull(Identifier(value),Property(Identifier(e),Identifier(value)))]),Pointing(Identifier(increment),Scope[EventPush(nil,Carve(Identifier(Change),[Pointing(Identifier(value),Operator(Add,Identifier(value),Literal(Integer,1)))]))]),Product(Identifier(value))])])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Pattern All Literal Types As Branch Sources",
+  "description": "Pattern with branches covering all literal types: Integer, Float, String, Bool, Hexadecimal, Binary, plus a default.",
+  "source": "x ? {\n  42 -> \"int\"\n  3.14 -> \"float\"\n  \"hello\" -> \"string\"\n  true -> \"bool\"\n  0xFF -> \"hex\"\n  0b101 -> \"binary\"\n  -> \"other\"\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,42),Literal(String,int)),Branch(Literal(Float,3.14),Literal(String,float)),Branch(Literal(String,hello),Literal(String,string)),Branch(Literal(Bool,true),Literal(String,bool)),Branch(Literal(Hexadecimal,0xFF),Literal(String,hex)),Branch(Literal(Binary,0b101),Literal(String,binary)),Branch(nil,Literal(String,other))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Double Not Prefix",
+  "description": "~~a — two prefix Not operators. The outer ~ parses its operand at UNARY, which encounters the inner ~ also at UNARY, which finally wraps the identifier.",
+  "source": "~~a",
+  "expect": "Scope[Operator(Not,nil,Operator(Not,nil,Identifier(a)))]"
+}

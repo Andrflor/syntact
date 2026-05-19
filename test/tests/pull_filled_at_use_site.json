@@ -1,0 +1,6 @@
+{
+  "name": "Pull Filled At Use Site",
+  "description": "Define a scope with pull bindings, then carve and execute it with concrete values filled in.",
+  "source": "identity -> {\n  T <- none\n  value <- none\n  -> value\n}\nidentity{T <- u8 value -> 5}!",
+  "expect": "Scope[Pointing(Identifier(identity),Scope[PointingPull(Identifier(T),Identifier(none)),PointingPull(Identifier(value),Identifier(none)),Product(Identifier(value))]),Execute(Carve(Identifier(identity),[PointingPull(Identifier(T),Identifier(u8)),Pointing(Identifier(value),Literal(Integer,5))]),[])]"
+}

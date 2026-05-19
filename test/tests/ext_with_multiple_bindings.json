@@ -1,0 +1,6 @@
+{
+  "name": "Extension with multiple bindings",
+  "description": "Extension block with several new bindings.",
+  "source": "User+{\n  role -> \"admin\"\n  level -> 5\n}",
+  "expect": "Scope[Operator(Add,Identifier(User),Scope[Pointing(Identifier(role),Literal(String,admin)),Pointing(Identifier(level),Literal(Integer,5))])]"
+}

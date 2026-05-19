@@ -1,0 +1,6 @@
+{
+  "name": "Cross Expand In Carve",
+  "description": "Carve with Expand and Pointing entries separated by comma",
+  "source": "Foo{...defaults, x -> 1}",
+  "expect": "Scope[Carve(Identifier(Foo),[Expand(Identifier(defaults)),Pointing(Identifier(x),Literal(Integer,1))])]"
+}

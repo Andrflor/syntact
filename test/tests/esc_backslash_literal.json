@@ -1,0 +1,6 @@
+{
+  "name": "Escape Backslash Literal",
+  "description": "Double backslash in source is processed by lexer to single backslash",
+  "source": "\"hello\\\\world\"",
+  "expect": "Scope[Literal(String,hello\\\\world)]"
+}

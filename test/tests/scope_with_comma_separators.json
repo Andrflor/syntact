@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Comma Separators",
+  "description": "{ a -> 1, b -> 2, c -> 3 } — commas are equivalent to newlines for separating statements inside a scope.",
+  "source": "{ a -> 1, b -> 2, c -> 3 }",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2)),Pointing(Identifier(c),Literal(Integer,3))]]"
+}

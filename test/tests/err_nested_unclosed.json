@@ -1,0 +1,6 @@
+{
+  "name": "Nested unclosed delimiters",
+  "description": "Multiple unclosed braces. UNCERTAIN.",
+  "source": "{{{",
+  "expect": "Scope[Scope[Scope[Scope[]]]]"
+}

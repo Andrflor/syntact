@@ -1,0 +1,6 @@
+{
+  "name": "Error inside carve body",
+  "description": "Invalid token inside a carve body. UNCERTAIN.",
+  "source": "Foo{ $ }",
+  "expect": "Scope[Carve(Identifier(Foo),[])]"
+}

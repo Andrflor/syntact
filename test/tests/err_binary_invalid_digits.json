@@ -1,0 +1,6 @@
+{
+  "name": "Binary literal with invalid digits",
+  "description": "Binary prefix followed by non-binary digits. UNCERTAIN.",
+  "source": "0b22",
+  "expect": "Scope[Literal(Integer,22)]"
+}

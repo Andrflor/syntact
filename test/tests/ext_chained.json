@@ -1,0 +1,6 @@
+{
+  "name": "Chained extensions",
+  "description": "Two extensions applied in sequence: Foo+{a -> 1}+{b -> 2}.",
+  "source": "Foo+{a -> 1}+{b -> 2}",
+  "expect": "Scope[Operator(Add,Operator(Add,Identifier(Foo),Scope[Pointing(Identifier(a),Literal(Integer,1))]),Scope[Pointing(Identifier(b),Literal(Integer,2))])]"
+}

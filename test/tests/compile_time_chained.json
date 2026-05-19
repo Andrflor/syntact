@@ -1,0 +1,6 @@
+{
+  "name": "Compile-Time Chained Property",
+  "description": "Compile-time evaluation wraps the full property chain. !config.port — Property is at CALL > UNARY so it is fully consumed as the operand.",
+  "source": "!config.port",
+  "expect": "Scope[CompileTime(Property(Identifier(config),Identifier(port)))]"
+}

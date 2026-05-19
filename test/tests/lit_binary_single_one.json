@@ -1,0 +1,6 @@
+{
+  "name": "Literal Binary Single One",
+  "description": "Binary literal with a single one digit",
+  "source": "0b1",
+  "expect": "Scope[Literal(Binary,0b1)]"
+}

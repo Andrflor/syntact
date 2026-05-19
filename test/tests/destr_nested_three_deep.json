@@ -1,0 +1,6 @@
+{
+  "name": "Destructuring Nested Three Deep",
+  "description": "Three levels of nested destructuring — Outer contains Inner which contains Deep, extracting value(v) from the innermost level.",
+  "source": "x ? {\n  Outer:{inner -> Inner:{deep -> Deep:{value(v)}}} -> v\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Carve(Constraint(Identifier(Outer),nil),[Pointing(Identifier(inner),Carve(Constraint(Identifier(Inner),nil),[Pointing(Identifier(deep),Carve(Constraint(Identifier(Deep),nil),[Identifier(value,v)]))]))]),Identifier(v))])]"
+}

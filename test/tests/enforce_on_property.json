@@ -1,0 +1,6 @@
+{
+  "name": "Enforce On Property",
+  "description": "a.b ?! true — Property at CALL(14) > PATTERN(3) so a.b groups first, then ?! wraps the property access with the enforcement value.",
+  "source": "a.b ?! true",
+  "expect": "Scope[Enforce(Property(Identifier(a),Identifier(b)),Literal(Bool,true))]"
+}

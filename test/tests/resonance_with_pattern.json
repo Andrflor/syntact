@@ -1,0 +1,6 @@
+{
+  "name": "Resonance With Pattern",
+  "description": "u8:mode >>- ModeChange -> mode ? { 0 -> \"idle\" -> \"active\" } — pointing wrapping a resonance push on the left and a pattern on the right.",
+  "source": "u8:mode >>- ModeChange -> mode ? {\n  0 -> \"idle\"\n  -> \"active\"\n}",
+  "expect": "Scope[Pointing(ResonancePush(Constraint(Identifier(u8),Identifier(mode)),Identifier(ModeChange)),Pattern(Identifier(mode),[Branch(Literal(Integer,0),Literal(String,idle)),Branch(nil,Literal(String,active))]))]"
+}

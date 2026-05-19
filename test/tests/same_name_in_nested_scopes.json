@@ -1,0 +1,6 @@
+{
+  "name": "Same Name In Nested Scopes",
+  "description": "x is bound in outer scope and again in inner scope. Inner x shadows outer x. Inner scope produces x.",
+  "source": "{\n  x -> 1\n  inner -> {\n    x -> 2\n    -> x\n  }\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(inner),Scope[Pointing(Identifier(x),Literal(Integer,2)),Product(Identifier(x))])]]"
+}

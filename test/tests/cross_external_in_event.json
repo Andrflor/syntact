@@ -1,0 +1,6 @@
+{
+  "name": "Cross External In Event",
+  "description": "External with property chain as EventPull source",
+  "source": "@events.Log -< e {\n  -> e.message\n}",
+  "expect": "Scope[EventPull(e,Property(External(events,nil),Identifier(Log)),Scope[Product(Property(Identifier(e),Identifier(message)))])]"
+}

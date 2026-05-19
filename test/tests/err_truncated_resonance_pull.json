@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Resonance Pull",
+  "description": "a -<< with no right operand. ResonancePull infix with missing target. UNCERTAIN.",
+  "source": "a -<< ",
+  "expect": "Scope[Identifier(a)]"
+}

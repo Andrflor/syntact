@@ -1,0 +1,6 @@
+{
+  "name": "Refinement Applied To Binding",
+  "description": "Grouped refinement type used as constraint shape with named binding and default value — (u8 & >0 & <=100):percent -> 50.",
+  "source": "(u8 & >0 & <=100):percent -> 50",
+  "expect": "Scope[Pointing(Constraint(Operator(And,Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0))),Operator(LessEqual,nil,Literal(Integer,100))),Identifier(percent)),Literal(Integer,50))]"
+}

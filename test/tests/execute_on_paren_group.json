@@ -1,0 +1,6 @@
+{
+  "name": "Execute On Parenthesized Group",
+  "description": "(a + b)! — parenthesized addition followed by execute, parens are stripped leaving the operator node.",
+  "source": "(a + b)!",
+  "expect": "Scope[Execute(Operator(Add,Identifier(a),Identifier(b)),[])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Constraint Pointing To Scope",
+  "description": "Config:c -> { port -> 8080 } — constraint with named binding, pointing to a scope containing a binding.",
+  "source": "Config:c -> {\n  port -> 8080\n}",
+  "expect": "Scope[Pointing(Constraint(Identifier(Config),Identifier(c)),Scope[Pointing(Identifier(port),Literal(Integer,8080))])]"
+}

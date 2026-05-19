@@ -1,0 +1,6 @@
+{
+  "name": "Whitespace CRLF Line Endings",
+  "description": "CRLF line endings should be handled like LF by the lexer",
+  "source": "a -> 1\r\nb -> 2\r\n-> a + b",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2)),Product(Operator(Add,Identifier(a),Identifier(b)))]"
+}

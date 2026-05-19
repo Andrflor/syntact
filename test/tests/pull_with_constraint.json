@@ -1,0 +1,6 @@
+{
+  "name": "Pull With Constraint",
+  "description": "{ u8:T <- none } — pull binding inside a scope where the left side is a constraint.",
+  "source": "{ u8:T <- none }",
+  "expect": "Scope[Scope[PointingPull(Constraint(Identifier(u8),Identifier(T)),Identifier(none))]]"
+}

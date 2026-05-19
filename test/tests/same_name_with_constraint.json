@@ -1,0 +1,6 @@
+{
+  "name": "Same Name With Different Constraints",
+  "description": "Two bindings with same name x but different type constraints u8 and u16. Both coexist in the scope.",
+  "source": "{\n  u8:x -> 1\n  u16:x -> 2\n}",
+  "expect": "Scope[Scope[Pointing(Constraint(Identifier(u8),Identifier(x)),Literal(Integer,1)),Pointing(Constraint(Identifier(u16),Identifier(x)),Literal(Integer,2))]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Refinement Nested Negation",
+  "description": "Double negation prefix on a grouped And refinement — ~~(u8 & >0).",
+  "source": "~~(u8 & >0)",
+  "expect": "Scope[Operator(Not,nil,Operator(Not,nil,Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0)))))]"
+}

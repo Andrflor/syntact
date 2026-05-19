@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Recursive Reference",
+  "description": "Digit range and number repetition — digit as char range, number as multiply with open-ended range for 1-or-more.",
+  "source": "digit -> '0'..'9'\nnumber -> digit*1..",
+  "expect": "Scope[Pointing(Identifier(digit),Range(Literal(String,0),Literal(String,9))),Pointing(Identifier(number),Operator(Multiply,Identifier(digit),Range(Literal(Integer,1),nil)))]"
+}

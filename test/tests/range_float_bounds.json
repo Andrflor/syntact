@@ -1,0 +1,6 @@
+{
+  "name": "Range Float Bounds",
+  "description": "0.0..1.0 — range with float literal bounds.",
+  "source": "0.0..1.0",
+  "expect": "Scope[Range(Literal(Float,0.0),Literal(Float,1.0))]"
+}

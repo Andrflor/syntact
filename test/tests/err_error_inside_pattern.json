@@ -1,0 +1,6 @@
+{
+  "name": "Error inside pattern branch",
+  "description": "An invalid construct inside a pattern branch. UNCERTAIN.",
+  "source": "x ? {\n  * -> 1\n  -> 2\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(nil,Literal(Integer,2))])]"
+}

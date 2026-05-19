@@ -1,0 +1,6 @@
+{
+  "name": "All Binary Operators In One Expression",
+  "description": "a + b - c * d / e % f & g | h ^ i << j >> k — exercises all binary operators. Precedence (high to low): SHIFT(12) > FACTOR(9) > TERM(8) > AND(5, also ^) > OR(4). Grouping: shifts bind i/j/k, then factor groups c*d/e%f, then term groups a+b and subtraction, then & attaches g, then ^ attaches shifted result, and | joins the two halves.",
+  "source": "a + b - c * d / e % f & g | h ^ i << j >> k",
+  "expect": "Scope[Operator(Or,Operator(And,Operator(Subtract,Operator(Add,Identifier(a),Identifier(b)),Operator(Mod,Operator(Divide,Operator(Multiply,Identifier(c),Identifier(d)),Identifier(e)),Identifier(f))),Identifier(g)),Operator(Xor,Identifier(h),Operator(RShift,Operator(LShift,Identifier(i),Identifier(j)),Identifier(k))))]"
+}

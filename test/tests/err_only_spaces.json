@@ -1,0 +1,6 @@
+{
+  "name": "Only whitespace",
+  "description": "Source containing only spaces. No tokens produced.",
+  "source": "   ",
+  "expect": "Scope[]"
+}

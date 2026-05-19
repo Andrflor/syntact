@@ -1,0 +1,6 @@
+{
+  "name": "Range Identifier Bounds",
+  "description": "a..b — range with identifier bounds on both sides.",
+  "source": "a..b",
+  "expect": "Scope[Range(Identifier(a),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Unterminated backtick string",
+  "description": "A backtick-delimited string that is never closed. The lexer scans to EOF. UNCERTAIN.",
+  "source": "`hello",
+  "expect": "Scope[]"
+}

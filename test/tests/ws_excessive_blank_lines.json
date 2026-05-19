@@ -1,0 +1,6 @@
+{
+  "name": "Whitespace Excessive Blank Lines",
+  "description": "Multiple consecutive blank lines should be skipped by the parser",
+  "source": "a -> 1\n\n\n\n\n\nb -> 2",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]"
+}

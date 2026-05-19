@@ -1,0 +1,6 @@
+{
+  "name": "Literal Hex Single Digit",
+  "description": "Hexadecimal literal with a single zero digit",
+  "source": "0x0",
+  "expect": "Scope[Literal(Hexadecimal,0x0)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "External With Execute",
+  "description": "@lib.main! — execute applied to an external property chain.",
+  "source": "@lib.main!",
+  "expect": "Scope[Execute(Property(External(lib,nil),Identifier(main)),[])]"
+}

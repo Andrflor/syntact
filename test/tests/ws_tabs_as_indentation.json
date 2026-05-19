@@ -1,0 +1,6 @@
+{
+  "name": "Whitespace Tabs As Indentation",
+  "description": "Tab characters used for indentation should not affect parsing",
+  "source": "{\n\ta -> 1\n\tb -> 2\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]]"
+}

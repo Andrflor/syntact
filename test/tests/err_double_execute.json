@@ -1,0 +1,6 @@
+{
+  "name": "Double execute !!",
+  "description": "Two compile-time prefix tokens: !!a produces CompileTime(CompileTime(a)). UNCERTAIN.",
+  "source": "!!a",
+  "expect": "Scope[CompileTime(CompileTime(Identifier(a)))]"
+}

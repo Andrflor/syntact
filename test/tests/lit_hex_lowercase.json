@@ -1,0 +1,6 @@
+{
+  "name": "Literal Hex Lowercase",
+  "description": "Hexadecimal literal with all lowercase hex digits a-f",
+  "source": "0xabcdef",
+  "expect": "Scope[Literal(Hexadecimal,0xabcdef)]"
+}

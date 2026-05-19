@@ -1,0 +1,6 @@
+{
+  "name": "Paren inside scope unclosed",
+  "description": "Opening paren inside a scope where the scope closes but the paren does not. UNCERTAIN.",
+  "source": "{ (a }",
+  "expect": "Scope[Scope[Identifier(a)]]"
+}

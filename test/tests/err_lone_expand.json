@@ -1,0 +1,6 @@
+{
+  "name": "Lone Expand Prefix",
+  "description": "... alone as prefix Expand with no operand. Operand parse fails, result dropped. UNCERTAIN.",
+  "source": "...",
+  "expect": "Scope[]"
+}

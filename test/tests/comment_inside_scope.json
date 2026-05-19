@@ -1,0 +1,6 @@
+{
+  "name": "Comments inside scope between bindings",
+  "description": "Line and block comments interspersed between bindings inside a scope.",
+  "source": "{\n  // first\n  a -> 1\n  /* middle */\n  b -> 2\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]]"
+}

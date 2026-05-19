@@ -1,0 +1,6 @@
+{
+  "name": "Anonymous Constraint With Carve",
+  "description": "Circle:{radius -> 5} — anonymous constraint (Circle: with no name) then carve wraps it.",
+  "source": "Circle:{radius -> 5}",
+  "expect": "Scope[Carve(Constraint(Identifier(Circle),nil),[Pointing(Identifier(radius),Literal(Integer,5))])]"
+}

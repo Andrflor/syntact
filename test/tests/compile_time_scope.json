@@ -1,0 +1,6 @@
+{
+  "name": "Compile-Time Scope",
+  "description": "Compile-time evaluation of a scope. Inside the scope, x -> 1 is a Pointing (right of -> parsed at ASSIGNMENT stops at the next ->). Then -> x is a separate statement parsed as Product.",
+  "source": "!{x -> 1 -> x}",
+  "expect": "Scope[CompileTime(Scope[Pointing(Identifier(x),Literal(Integer,1)),Product(Identifier(x))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Event Push With Carve",
+  "description": ">- Log{message -> \"hello\"} — prefix event push with a carved payload containing a string pointing.",
+  "source": ">- Log{message -> \"hello\"}",
+  "expect": "Scope[EventPush(nil,Carve(Identifier(Log),[Pointing(Identifier(message),Literal(String,hello))]))]"
+}

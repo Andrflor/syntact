@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Xor",
+  "description": "a ^ with no right operand. Binary operator dropped, left identifier survives. UNCERTAIN.",
+  "source": "a ^ ",
+  "expect": "Scope[Identifier(a)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Whitespace All On One Line",
+  "description": "Comma-separated statements on a single line",
+  "source": "a -> 1, b -> 2, -> a + b",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2)),Product(Operator(Add,Identifier(a),Identifier(b)))]"
+}

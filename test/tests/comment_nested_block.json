@@ -1,0 +1,6 @@
+{
+  "name": "Nested block comments",
+  "description": "Block comment inside block comment. Tests whether nested block comments are supported. UNCERTAIN.",
+  "source": "/* outer /* inner */ outer_end */\na -> 1",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
+}

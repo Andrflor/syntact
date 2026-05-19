@@ -1,0 +1,6 @@
+{
+  "name": "Constraint From None With Pointing",
+  "description": "{ :x -> 5 } — ConstraintFromNone produces Constraint(nil,x), then -> 5 makes a Pointing.",
+  "source": "{ :x -> 5 }",
+  "expect": "Scope[Scope[Pointing(Constraint(nil,Identifier(x)),Literal(Integer,5))]]"
+}

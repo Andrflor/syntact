@@ -1,0 +1,6 @@
+{
+  "name": "Truncated Enforce",
+  "description": "a ?! with no right operand. Enforce infix with missing right side. UNCERTAIN.",
+  "source": "a ?! ",
+  "expect": "Scope[Identifier(a)]"
+}

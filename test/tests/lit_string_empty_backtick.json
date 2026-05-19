@@ -1,0 +1,6 @@
+{
+  "name": "Literal String Empty Backtick",
+  "description": "Empty string literal using backticks",
+  "source": "``",
+  "expect": "Scope[Literal(String,)]"
+}

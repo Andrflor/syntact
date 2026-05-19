@@ -1,0 +1,6 @@
+{
+  "name": "Literal Integer Max U64",
+  "description": "Maximum u64 value (18446744073709551615) parsed as integer literal",
+  "source": "18446744073709551615",
+  "expect": "Scope[Literal(Integer,18446744073709551615)]"
+}

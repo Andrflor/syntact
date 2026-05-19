@@ -1,0 +1,6 @@
+{
+  "name": "Comment between arrow and value",
+  "description": "A block comment after -> but before the value.",
+  "source": "a -> /* comment */ 1",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Literal Negative Binary",
+  "description": "Unary minus applied to a binary literal",
+  "source": "-0b1010",
+  "expect": "Scope[Operator(Subtract,nil,Literal(Binary,0b1010))]"
+}

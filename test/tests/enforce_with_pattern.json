@@ -1,0 +1,6 @@
+{
+  "name": "Enforce With Equality",
+  "description": "a = b ?! true — Equal at EQUALITY(6) > PATTERN(3) so a = b groups first, then ?! wraps the equality check with the enforcement value.",
+  "source": "a = b ?! true",
+  "expect": "Scope[Enforce(Operator(Equal,Identifier(a),Identifier(b)),Literal(Bool,true))]"
+}

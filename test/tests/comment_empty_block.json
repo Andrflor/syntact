@@ -1,0 +1,6 @@
+{
+  "name": "Empty block comment",
+  "description": "A block comment with no content: /**/.",
+  "source": "/**/ a -> 1",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
+}

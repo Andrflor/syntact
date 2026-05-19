@@ -1,0 +1,6 @@
+{
+  "name": "Program Shape Sum Full",
+  "description": "Sum type Shape with Circle/Square variants, area function using pattern matching with destructuring captures and arithmetic products.",
+  "source": "Circle -> { u8:radius }\nSquare -> { u16:side }\nShape -> {\n  -> Circle:\n  -> Square:\n}\narea -> {\n  Shape:shape\n  -> shape ? {\n    Circle:{radius(r)} -> r * r * 3\n    Square:{side(s)} -> s * s\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Circle),Scope[Constraint(Identifier(u8),Identifier(radius))]),Pointing(Identifier(Square),Scope[Constraint(Identifier(u16),Identifier(side))]),Pointing(Identifier(Shape),Scope[Product(Constraint(Identifier(Circle),nil)),Product(Constraint(Identifier(Square),nil))]),Pointing(Identifier(area),Scope[Constraint(Identifier(Shape),Identifier(shape)),Product(Pattern(Identifier(shape),[Branch(Carve(Constraint(Identifier(Circle),nil),[Identifier(radius,r)]),Operator(Multiply,Operator(Multiply,Identifier(r),Identifier(r)),Literal(Integer,3))),Branch(Carve(Constraint(Identifier(Square),nil),[Identifier(side,s)]),Operator(Multiply,Identifier(s),Identifier(s)))]))])]"
+}

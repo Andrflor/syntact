@@ -1,0 +1,6 @@
+{
+  "name": "Orphan right bracket",
+  "description": "A lone ] at top level. Like orphan ) and }, consumed silently. UNCERTAIN.",
+  "source": "]",
+  "expect": "Scope[]"
+}

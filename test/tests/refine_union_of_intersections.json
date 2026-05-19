@@ -1,0 +1,6 @@
+{
+  "name": "Refinement Union Of Intersections",
+  "description": "Or of two grouped And refinements — positive u8 or negative i8.",
+  "source": "(u8 & >0) | (i8 & <0)",
+  "expect": "Scope[Operator(Or,Operator(And,Identifier(u8),Operator(Greater,nil,Literal(Integer,0))),Operator(And,Identifier(i8),Operator(Less,nil,Literal(Integer,0))))]"
+}

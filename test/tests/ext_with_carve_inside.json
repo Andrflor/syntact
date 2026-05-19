@@ -1,0 +1,6 @@
+{
+  "name": "Extension with carve inside",
+  "description": "Extension block containing a carve expression. +{} currently parses as Operator(Add).",
+  "source": "Foo+{bar{x -> 1}}",
+  "expect": "Scope[Operator(Add,Identifier(Foo),Scope[Carve(Identifier(bar),[Pointing(Identifier(x),Literal(Integer,1))])])]"
+}

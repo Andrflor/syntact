@@ -1,0 +1,6 @@
+{
+  "name": "Mismatched brace closed by paren",
+  "description": "Opening { closed by ). UNCERTAIN.",
+  "source": "{a -> 1)",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1))]]"
+}

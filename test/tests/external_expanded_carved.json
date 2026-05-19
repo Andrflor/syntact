@@ -1,0 +1,6 @@
+{
+  "name": "External Expanded Carved",
+  "description": "...@lib.geometry{Plane -> Plane{dimension -> 3}} — expand wrapping a carve on an external property chain, where a carve entry is itself a pointing to a nested carve.",
+  "source": "...@lib.geometry{Plane -> Plane{dimension -> 3}}",
+  "expect": "Scope[Expand(Carve(Property(External(lib,nil),Identifier(geometry)),[Pointing(Identifier(Plane),Carve(Identifier(Plane),[Pointing(Identifier(dimension),Literal(Integer,3))]))]))]"
+}

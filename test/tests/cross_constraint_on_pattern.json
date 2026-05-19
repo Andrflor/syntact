@@ -1,0 +1,6 @@
+{
+  "name": "Cross Constraint On Pattern",
+  "description": "Pointing with Constraint left and Pattern right",
+  "source": "u8:result -> x ? {\n  0 -> 1\n  -> 2\n}",
+  "expect": "Scope[Pointing(Constraint(Identifier(u8),Identifier(result)),Pattern(Identifier(x),[Branch(Literal(Integer,0),Literal(Integer,1)),Branch(nil,Literal(Integer,2))]))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Execute Chained Three Times",
+  "description": "foo!!! — triple chained execute, each wrapping the previous.",
+  "source": "foo!!!",
+  "expect": "Scope[Execute(Execute(Execute(Identifier(foo),[]),[]),[])]"
+}

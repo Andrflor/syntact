@@ -1,0 +1,6 @@
+{
+  "name": "Asterisk inside block comment",
+  "description": "A * character inside a block comment should not close it prematurely.",
+  "source": "/* a * b */ c -> 1",
+  "expect": "Scope[Pointing(Identifier(c),Literal(Integer,1))]"
+}

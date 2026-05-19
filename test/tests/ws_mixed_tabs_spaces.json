@@ -1,0 +1,6 @@
+{
+  "name": "Whitespace Mixed Tabs And Spaces",
+  "description": "Mixed tabs and spaces for indentation should not affect parsing",
+  "source": "{\n\t  a -> 1\n  \tb -> 2\n}",
+  "expect": "Scope[Scope[Pointing(Identifier(a),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))]]"
+}

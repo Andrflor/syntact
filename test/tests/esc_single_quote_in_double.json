@@ -1,0 +1,6 @@
+{
+  "name": "Escape Single Quote In Double Quotes",
+  "description": "Single quote character inside double-quoted string needs no escaping",
+  "source": "\"it's fine\"",
+  "expect": "Scope[Literal(String,it's fine)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Constraint Triple Chain",
+  "description": "A:B:c — left-associative constraint chaining. A:B forms first, then :c wraps the result.",
+  "source": "A:B:c",
+  "expect": "Scope[Constraint(Constraint(Identifier(A),Identifier(B)),Identifier(c))]"
+}

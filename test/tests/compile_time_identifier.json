@@ -1,0 +1,6 @@
+{
+  "name": "Compile-Time Identifier",
+  "description": "Compile-time evaluation of a simple identifier.",
+  "source": "!x",
+  "expect": "Scope[CompileTime(Identifier(x))]"
+}

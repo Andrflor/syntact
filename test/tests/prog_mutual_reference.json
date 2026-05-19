@@ -1,0 +1,6 @@
+{
+  "name": "Program Mutual Reference",
+  "description": "Even/Odd mutual recursion — two top-level Pointings each containing a scope with n Pointing and Product wrapping Pattern with recursive Execute of Carve.",
+  "source": "Even -> {\n  n -> 0\n  -> n ? {\n    0 -> true\n    -> Odd{n -> n - 1}!\n  }\n}\nOdd -> {\n  n -> 0\n  -> n ? {\n    0 -> false\n    -> Even{n -> n - 1}!\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Even),Scope[Pointing(Identifier(n),Literal(Integer,0)),Product(Pattern(Identifier(n),[Branch(Literal(Integer,0),Literal(Bool,true)),Branch(nil,Execute(Carve(Identifier(Odd),[Pointing(Identifier(n),Operator(Subtract,Identifier(n),Literal(Integer,1)))]),[]))]))]),Pointing(Identifier(Odd),Scope[Pointing(Identifier(n),Literal(Integer,0)),Product(Pattern(Identifier(n),[Branch(Literal(Integer,0),Literal(Bool,false)),Branch(nil,Execute(Carve(Identifier(Even),[Pointing(Identifier(n),Operator(Subtract,Identifier(n),Literal(Integer,1)))]),[]))]))])]"
+}

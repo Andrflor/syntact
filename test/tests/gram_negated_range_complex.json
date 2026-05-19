@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Negated Range Complex",
+  "description": "UNCERTAIN — idChar as 5-way Or of char ranges and literals, valid as repetition intersected with negated range-plus-underscore pattern. The standalone '..' and '~' prefix parsing may behave unexpectedly.",
+  "source": "idChar -> 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-'\nvalid -> idChar*1.. & ~(.. + '_')",
+  "expect": "Scope[Pointing(Identifier(idChar),Operator(Or,Operator(Or,Operator(Or,Operator(Or,Range(Literal(String,a),Literal(String,z)),Range(Literal(String,A),Literal(String,Z))),Range(Literal(String,0),Literal(String,9))),Literal(String,_)),Literal(String,-))),Pointing(Identifier(valid),Operator(And,Operator(Multiply,Identifier(idChar),Range(Literal(Integer,1),nil)),Operator(Not,nil,Operator(Add,Range(nil,nil),Literal(String,_)))))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Expand Carved Scope",
+  "description": "...Foo{x -> 1} — expand wrapping a carve expression.",
+  "source": "...Foo{x -> 1}",
+  "expect": "Scope[Expand(Carve(Identifier(Foo),[Pointing(Identifier(x),Literal(Integer,1))]))]"
+}

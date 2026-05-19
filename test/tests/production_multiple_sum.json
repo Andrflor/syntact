@@ -1,0 +1,6 @@
+{
+  "name": "Production Multiple Sum Type Variants",
+  "description": "Three productions with anonymous constraints (ConstraintToNone), representing a simple sum type with Circle, Square, and Triangle variants.",
+  "source": "{\n  -> Circle:\n  -> Square:\n  -> Triangle:\n}",
+  "expect": "Scope[Scope[Product(Constraint(Identifier(Circle),nil)),Product(Constraint(Identifier(Square),nil)),Product(Constraint(Identifier(Triangle),nil))]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Unknown In Production",
+  "description": "{ -> ?? } — Product with Unknown as its value, representing a scope that produces an indeterminate result.",
+  "source": "{ -> ?? }",
+  "expect": "Scope[Scope[Product(Unknown)]]"
+}

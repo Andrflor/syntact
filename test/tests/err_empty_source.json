@@ -1,0 +1,6 @@
+{
+  "name": "Completely empty source",
+  "description": "Zero bytes of input. Parser must handle gracefully.",
+  "source": "",
+  "expect": "Scope[]"
+}

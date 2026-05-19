@@ -1,0 +1,6 @@
+{
+  "name": "Lone Minus Prefix",
+  "description": "- alone as prefix Subtract with no operand. Operand parse fails, result dropped. UNCERTAIN.",
+  "source": "-",
+  "expect": "Scope[]"
+}

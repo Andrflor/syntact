@@ -1,0 +1,6 @@
+{
+  "name": "Program Serializer Laws",
+  "description": "Serializer typeclass with encode/decode, roundTrip law using PointingPull, Unknown, nested Execute of Carve, Equal comparison, and Enforce.",
+  "source": "Serializer -> {\n  S <- {}\n  R <- {}\n  encode -> {\n    S:value\n    -> R:\n  }\n  decode -> {\n    R:value\n    -> S:\n  }\n  roundTrip <- {\n    S:value -> ??\n    -> decode{value -> encode{value -> value}!}! = value ?! true\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Serializer),Scope[PointingPull(Identifier(S),Scope[]),PointingPull(Identifier(R),Scope[]),Pointing(Identifier(encode),Scope[Constraint(Identifier(S),Identifier(value)),Product(Constraint(Identifier(R),nil))]),Pointing(Identifier(decode),Scope[Constraint(Identifier(R),Identifier(value)),Product(Constraint(Identifier(S),nil))]),PointingPull(Identifier(roundTrip),Scope[Pointing(Constraint(Identifier(S),Identifier(value)),Unknown),Product(Enforce(Operator(Equal,Execute(Carve(Identifier(decode),[Pointing(Identifier(value),Execute(Carve(Identifier(encode),[Pointing(Identifier(value),Identifier(value))]),[]))]),[]),Identifier(value)),Literal(Bool,true)))])])]"
+}

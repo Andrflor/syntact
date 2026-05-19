@@ -1,0 +1,6 @@
+{
+  "name": "Cross Enforce In Carve",
+  "description": "Carve entry value is Enforce wrapping an equality check",
+  "source": "Foo{x -> a = b ?! true}",
+  "expect": "Scope[Carve(Identifier(Foo),[Pointing(Identifier(x),Enforce(Operator(Equal,Identifier(a),Identifier(b)),Literal(Bool,true)))])]"
+}

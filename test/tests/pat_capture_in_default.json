@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Capture In Default Branch",
+  "description": "(other) in branch source position is a capture-only Identifier with empty name. This acts as a catch-all that binds the matched value.",
+  "source": "x ? {\n  0 -> \"zero\"\n  (other) -> other\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,0),Literal(String,zero)),Branch(Identifier(,other),Identifier(other))])]"
+}

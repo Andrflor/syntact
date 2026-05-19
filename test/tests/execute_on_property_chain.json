@@ -1,0 +1,6 @@
+{
+  "name": "Execute On Property Chain",
+  "description": "a.b.c! — property chain followed by execute postfix.",
+  "source": "a.b.c!",
+  "expect": "Scope[Execute(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[])]"
+}

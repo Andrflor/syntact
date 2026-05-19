@@ -1,0 +1,6 @@
+{
+  "name": "Multiple errors across lines with recovery",
+  "description": "Several invalid constructs across lines. UNCERTAIN.",
+  "source": "* a\n$ b\nc -> 1",
+  "expect": "Scope[Identifier(a),Identifier(b),Pointing(Identifier(c),Literal(Integer,1))]"
+}

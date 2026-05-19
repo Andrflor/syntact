@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Nested Three Levels",
+  "description": "Three levels of nested patterns: a matches to b matches to c matches to literals, each with default branches.",
+  "source": "a ? {\n  1 -> b ? {\n    2 -> c ? {\n      3 -> \"deep\"\n      -> \"c-default\"\n    }\n    -> \"b-default\"\n  }\n  -> \"a-default\"\n}",
+  "expect": "Scope[Pattern(Identifier(a),[Branch(Literal(Integer,1),Pattern(Identifier(b),[Branch(Literal(Integer,2),Pattern(Identifier(c),[Branch(Literal(Integer,3),Literal(String,deep)),Branch(nil,Literal(String,c-default))])),Branch(nil,Literal(String,b-default))])),Branch(nil,Literal(String,a-default))])]"
+}

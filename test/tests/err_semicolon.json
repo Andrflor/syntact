@@ -1,0 +1,6 @@
+{
+  "name": "Semicolon character",
+  "description": "A semicolon is not in the token set. UNCERTAIN.",
+  "source": "a ; b",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

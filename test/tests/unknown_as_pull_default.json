@@ -1,0 +1,6 @@
+{
+  "name": "Unknown As Pull Default",
+  "description": "{ T <- ?? } — PointingPull with Unknown as the right-hand side, representing a type parameter with an indeterminate default.",
+  "source": "{ T <- ?? }",
+  "expect": "Scope[Scope[PointingPull(Identifier(T),Unknown)]]"
+}

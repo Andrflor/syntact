@@ -1,0 +1,6 @@
+{
+  "name": "Range In Constraint",
+  "description": "(0..100):x — grouped range expression used as the shape of a constraint.",
+  "source": "(0..100):x",
+  "expect": "Scope[Constraint(Range(Literal(Integer,0),Literal(Integer,100)),Identifier(x))]"
+}
