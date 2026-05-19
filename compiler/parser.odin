@@ -1,743 +1,23 @@
 package compiler
 
-/*
- * ======================================================================
- * Language Compiler Implementation
- *
- * This package implements a compiler for a custom language with features
- * like pointings, patterns, and constraints.
- *
- * Organization:
- * 1. Token definitions and lexer
- * 2. AST node definitions
- * 3. Fixed parser implementation with Pratt parsing for expressions
- * 4. Utility functions
- * 5. Error handling and recovery
- * ======================================================================
- */
-
 import "core:fmt"
-import "core:os"
 import "core:strings"
-import vmem "core:mem/virtual"
 
-// ===========================================================================
-// SECTION 1: TOKEN DEFINITIONS AND LEXER
-// ===========================================================================
+/* ======================================================================
+ * SECTION 1: FUNDAMENTAL TYPES
+ * ====================================================================== */
 
-/*
- * Token_Kind represents all possible token types in the language
- */
-Token_Kind :: enum {
-	Invalid,
-	EOF,
-	Identifier,
-
-	// Numbers
-	Integer,
-	Float,
-	Hexadecimal,
-	Binary,
-
-	// String Literal
-	String_Literal,
-
-	// Boolean Literal
-	Bool_Literal,
-
-	// Executors
-	Execute, // !
-	At,
-
-	// Assignators
-	PointingPush, // ->
-	PointingPull, // <-
-	EventPush, // >-
-	EventPull, // -<
-	ResonancePush, // >>-
-	ResonancePull, // -<<
-
-
-	// Comparisons
-	Equal, // =
-	NotEqual, // !=
-	Less, // <
-	Greater, // >
-	LessEqual, // <=
-	GreaterEqual, // >=
-
-  // Property access tokens based on delimiter context
-	PropertyAccess, // a.b (no spaces around dot)
-	PropertyFromNone, // .b (dot at start or after delimiter)
-	PropertyToNone, // a. (dot at end or before delimiter)
-
-	// Constraint tokens based on delimiter context
-	ConstraintBind, // a:b (no spaces around colon)
-	ConstraintFromNone, // :b (colon at start or after delimiter)
-	ConstraintToNone, // a: (colon at end or before delimiter)
-
-	// Separators
-	Colon, // :
-	Question, // ?
-  DoubleQuestion, // ??
-  QuestionExclamation, // ?!
-	Dot, // .
-	DoubleDot, // ..
-	Ellipsis, // ...
-	Newline, // \n
-	Range, // 1..2 (full range)
-	PrefixRange, // 1..
-	PostfixRange, // ..1
-
-	// Grouping
-	LeftBrace, // {
-  LeftBraceCarve, // Special case for space sensitive carves
-	RightBrace, // }
-	LeftParen, // (
-	LeftParenNoSpace, // (
-	RightParen, // )
-  LeftBracket, // [
-  RightBracket, // ]
-
-	// Math & Logic
-	Plus, // +
-	Minus, // -
-	Asterisk, // *
-	Slash, // /
-	Percent, // %
-	And, // &
-	Or, // |
-	Xor, // ^
-	Not, // ~
-  RShift, // >>
-  LShift, // <<
+Span :: struct {
+	start: u32,
+	end:   u32,
 }
 
-/*
- * Position represents a location in the source code with line and column information
- */
-Position :: struct {
-    line:   int, // Line number (1-based)
-    column: int, // Column number (1-based)
-    offset: int, // Absolute offset in source
-}
+EMPTY_SPAN :: Span{0, 0}
 
-/*
- * Token represents a lexical token with its kind, text content and position
- */
-Token :: struct {
-    kind:     Token_Kind, // Type of token
-    text:     string,     // Original text of the token
-    position: Position,   // Position information (line, column, offset)
-}
+Node_Index :: distinct u32
+INVALID_NODE :: Node_Index(0xFFFFFFFF)
 
-/*
- * Lexer maintains state during lexical analysis
- */
-Lexer :: struct {
-    source:      string, // Source code being lexed
-    position:    Position, // Current position in source (line, column, offset)
-    peek_offset: int, // Lookahead for peeking at characters without advancing
-    line_starts: []int, // Precomputed array of line start positions for faster line/column calculation
-    source_len:  int, // Cache length to avoid repeated calls
-}
-
-/*
- * create_position creates a new Position struct
- */
-create_position :: #force_inline proc(line, column, offset: int) -> Position {
-    return Position{line = line, column = column, offset = offset}
-}
-
-/*
- * init_lexer initializes a lexer with the given source code with optimized line tracking
- */
-init_lexer :: proc(l: ^Lexer, source: string) {
-    l.source = source
-    l.position = create_position(1, 1, 0) // Start at line 1, column 1
-    l.peek_offset = 0
-    l.source_len = len(source)
-
-    // Pre-compute line starts for faster line/column calculation
-    // This is a significant optimization for large files
-    line_count := 1 // At least one line
-    for i := 0; i < l.source_len; i += 1 {
-        if source[i] == '\n' {
-            line_count += 1
-        }
-    }
-
-    // Allocate and initialize line starts array
-    l.line_starts = make([]int, line_count, context.allocator)
-    l.line_starts[0] = 0 // First line starts at offset 0
-
-    line_idx := 1
-    for i := 0; i < l.source_len; i += 1 {
-        if source[i] == '\n' && line_idx < line_count {
-            l.line_starts[line_idx] = i + 1
-            line_idx += 1
-        }
-    }
-}
-
-/*
- * current_char returns the current character without advancing
- */
-current_char :: #force_inline proc(l: ^Lexer) -> u8 {
-    if l.position.offset >= l.source_len {
-        return 0
-    }
-    return l.source[l.position.offset]
-}
-
-/*
- * peek_char looks ahead by n characters without advancing
- */
-peek_char :: #force_inline proc(l: ^Lexer, n: int = 1) -> u8 {
-    peek_pos := l.position.offset + n
-    if peek_pos >= l.source_len {
-        return 0
-    }
-    return l.source[peek_pos]
-}
-
-/*
- * advance_position moves the lexer position forward by one character,
- * using precomputed line starts for faster line/column updates
- */
-advance_position :: #force_inline proc(l: ^Lexer) {
-    if l.position.offset < l.source_len {
-        // Check if we're at a newline character
-        if l.source[l.position.offset] == '\n' {
-            l.position.line += 1
-            l.position.column = 1
-        } else {
-            l.position.column += 1
-        }
-        l.position.offset += 1
-    }
-}
-
-/*
- * advance_by advances the lexer position by n characters
- * Optimized to avoid excessive function calls
- */
-advance_by :: #force_inline proc(l: ^Lexer, n: int) {
-    if n <= 0 do return
-
-    for i := 0; i < n && l.position.offset < l.source_len; i += 1 {
-        // Direct inlining of advance_position for speed
-        if l.source[l.position.offset] == '\n' {
-            l.position.line += 1
-            l.position.column = 1
-        } else {
-            l.position.column += 1
-        }
-        l.position.offset += 1
-    }
-}
-
-/*
- * match_char checks if the current character matches expected
- * and advances if it does, returning true on match
- */
-match_char :: #force_inline proc(l: ^Lexer, expected: u8) -> bool {
-    if l.position.offset >= l.source_len || l.source[l.position.offset] != expected {
-        return false
-    }
-    advance_position(l)
-    return true
-}
-
-/*
- * match_str checks if the string at current position matches expected
- * and advances by the length of the string if it does
- */
-match_str :: proc(l: ^Lexer, expected: string) -> bool {
-    if l.position.offset + len(expected) > l.source_len {
-        return false
-    }
-
-    for i := 0; i < len(expected); i += 1 {
-        if l.source[l.position.offset + i] != expected[i] {
-            return false
-        }
-    }
-
-    advance_by(l, len(expected))
-    return true
-}
-
-/*
- * has_space_before checks if there's a space character immediately before current position
- */
-has_space_before :: #force_inline proc(l: ^Lexer) -> bool {
-	return l.position.offset > 0 && is_space(l.source[l.position.offset - 1])
-}
-
-/*
- * has_space_after checks if there's a space character immediately after the given character
- */
-has_space_after :: #force_inline proc(l: ^Lexer, char: u8) -> bool {
-	if l.position.offset < l.source_len && l.source[l.position.offset] == char {
-		return l.position.offset + 1 < l.source_len && is_space(l.source[l.position.offset + 1])
-	}
-	return false
-}
-
-/*
- * next_token scans and returns the next token from the input source
- * Optimized for speed by reducing function calls and using direct pattern matching
- */
-next_token :: proc(l: ^Lexer) -> Token {
-	skip_whitespace(l)
-
-	if l.position.offset >= l.source_len {
-		return Token{kind = .EOF, position = l.position}
-	}
-
-	start_pos := l.position
-	c := l.source[l.position.offset]
-
-	// Use a jump table approach for faster dispatch
-	switch c {
-	case '\n', ',':
-		return scan_newline(l, start_pos)
-	case '`', '"', '\'':
-		return scan_string(l, start_pos)
-	case '@':
-		advance_position(l)
-		return Token{kind = .At, text = "@", position = start_pos}
-	case '{':
-    space_before := has_space_before(l)
-		advance_position(l)
-    if space_before || start_pos.offset == 0 {
-        return Token{kind = .LeftBrace, text = "{", position = start_pos}
-    } else {
-        return Token{kind = .LeftBraceCarve, text = "{", position = start_pos}
-    }
-	case '}':
-		advance_position(l)
-		return Token{kind = .RightBrace, text = "}", position = start_pos}
-	case '[':
-		advance_position(l)
-		return Token{kind = .LeftBracket, text = "[", position = start_pos}
-	case ']':
-		advance_position(l)
-		return Token{kind = .RightBracket, text = "]", position = start_pos}
-	case '(':
-    space_before := has_space_before(l)
-		advance_position(l)
-    if space_before || start_pos.offset == 0 {
-        return Token{kind = .LeftParen, text = "(", position = start_pos}
-    } else {
-        return Token{kind = .LeftParenNoSpace, text = "(", position = start_pos}
-    }
-	case ')':
-		advance_position(l)
-		return Token{kind = .RightParen, text = ")", position = start_pos}
-	case '!':
-		advance_position(l)
-		if l.position.offset < l.source_len && l.source[l.position.offset] == '=' {
-			advance_position(l)
-			return Token{kind = .NotEqual, text = "!=", position = start_pos}
-		}
-		return Token{kind = .Execute, text = "!", position = start_pos}
-	case ':':
-		// Handle constraint patterns based on space context
-		space_before := has_space_before(l)
-		space_after := has_space_after(l, ':')
-
-		advance_position(l)
-
-    if space_before {
-      if space_after {
-        return Token{kind = .Colon, text = ":", position = start_pos}
-      } else {
-        return Token{kind = .ConstraintFromNone, text = ":", position = start_pos}
-      }
-    } else {
-      if space_after {
-        return Token{kind = .ConstraintToNone, text = ":", position = start_pos}
-      } else {
-
-        return Token{kind = .ConstraintBind, text = ":", position = start_pos}
-      }
-    }
-
-    case '?':
-		advance_position(l)
-		switch l.source[l.position.offset] {
-		case '?':
-			advance_position(l)
-			return Token{kind = .DoubleQuestion, text = "??", position = start_pos}
-		case '!':
-			advance_position(l)
-			return Token{kind = .QuestionExclamation, text = "?!", position = start_pos}
-		}
-		return Token{kind = .Question, text = "?", position = start_pos}
-	case '.':
-		// Check for .. or ... first (existing range logic)
-		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '.' {
-			// Check what's before
-			has_before_delimiter := l.position.offset == 0 ||
-				is_before_delimiter(l.source[l.position.offset - 1])
-			// Check what's after
-			has_after_delimiter := l.position.offset + 2 >= l.source_len ||
-				is_after_delimiter(l.source[l.position.offset + 2])
-
-			advance_by(l, 2)
-			// Check for ellipsis "..."
-			if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
-				advance_position(l)
-				return Token{kind = .Ellipsis, text = "...", position = start_pos}
-			}
-
-			if has_before_delimiter && has_after_delimiter {
-				return Token{kind = .DoubleDot, text = "..", position = start_pos}
-			} else if has_before_delimiter {
-				return Token{kind = .PrefixRange, text = "..", position = start_pos}
-			} else if has_after_delimiter {
-				return Token{kind = .PostfixRange, text = "..", position = start_pos}
-			} else {
-				return Token{kind = .Range, text = "..", position = start_pos}
-			}
-		}
-
-		// Single dot - handle property patterns based on space context
-		space_before := l.position.offset == 0 || is_before_delimiter(l.source[l.position.offset - 1])
-		space_after := has_space_after(l, '.') || (l.position.offset + 1 >= l.source_len)
-
-		advance_position(l)
-
-    if space_before {
-      if space_after {
-        return Token{kind = .Dot, text = ".", position = start_pos}
-      } else {
-        return Token{kind = .PropertyFromNone, text = ".", position = start_pos}
-      }
-    } else {
-      if space_after {
-        return Token{kind = .PropertyToNone, text = ".", position = start_pos}
-      } else {
-
-        return Token{kind = .PropertyAccess, text = ".", position = start_pos}
-      }
-    }
-	case '=':
-		// Optimized equality check
-		advance_position(l)
-		return Token{kind = .Equal, text = "=", position = start_pos}
-	case '<':
-		// Optimized less-than related tokens
-		advance_position(l)
-		if l.position.offset < l.source_len {
-			if l.source[l.position.offset] == '=' {
-				advance_position(l)
-				return Token{kind = .LessEqual, text = "<=", position = start_pos}
-			} else if l.source[l.position.offset] == '<' {
-				advance_position(l)
-				return Token{kind = .LShift, text = "<<", position = start_pos}
-			} else if l.source[l.position.offset] == '-' {
-				advance_position(l)
-				return Token{kind = .PointingPull, text = "<-", position = start_pos}
-			}
-		}
-		return Token{kind = .Less, text = "<", position = start_pos}
-	case '>':
-		// Optimized greater-than related tokens
-		advance_position(l)
-		if l.position.offset < l.source_len {
-			if l.source[l.position.offset] == '=' {
-				advance_position(l)
-				return Token{kind = .GreaterEqual, text = ">=", position = start_pos}
-			} else if l.source[l.position.offset] == '>' {
-				if l.source[l.position.offset + 1] == '-' {
-					advance_by(l, 2)
-					return Token{kind = .ResonancePush, text = ">>-", position = start_pos}
-				}
-				advance_position(l)
-				return Token{kind = .RShift, text = ">>", position = start_pos}
-			} else if l.source[l.position.offset] == '-' {
-				advance_position(l)
-				return Token{kind = .EventPush, text = ">-", position = start_pos}
-			}
-		}
-		return Token{kind = .Greater, text = ">", position = start_pos}
-	case '-':
-		// Optimized minus-related tokens
-		advance_position(l)
-		if l.position.offset < l.source_len {
-			if l.source[l.position.offset] == '>' {
-				advance_position(l)
-				return Token{kind = .PointingPush, text = "->", position = start_pos}
-			} else if l.source[l.position.offset] == '<' {
-				advance_position(l)
-				if l.position.offset < l.source_len && l.source[l.position.offset] == '<' {
-					advance_position(l)
-					return Token{kind = .ResonancePull, text = "-<<", position = start_pos}
-				}
-				return Token{kind = .EventPull, text = "-<", position = start_pos}
-			}
-		}
-		return Token{kind = .Minus, text = "-", position = start_pos}
-	case '/':
-		// Single line comment - optimized with direct string matching
-		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '/' {
-			advance_by(l, 2)
-
-			// Consume until newline
-			for l.position.offset < l.source_len && l.source[l.position.offset] != '\n' {
-				advance_position(l)
-			}
-
-			// Recursive call to get the next non-comment token
-			return next_token(l)
-		}
-
-		// Multi line comment (supports nesting)
-		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '*' {
-			advance_by(l, 2)
-
-			depth := 1
-			for l.position.offset < l.source_len && depth > 0 {
-				if l.position.offset + 1 < l.source_len && l.source[l.position.offset] == '/' && l.source[l.position.offset + 1] == '*' {
-					advance_by(l, 2)
-					depth += 1
-				} else if l.position.offset + 1 < l.source_len && l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
-					advance_by(l, 2)
-					depth -= 1
-				} else {
-					advance_position(l)
-				}
-			}
-
-			// Recursive call to get the next non-comment token
-			return next_token(l)
-		}
-
-		advance_position(l)
-		return Token{kind = .Slash, text = "/", position = start_pos}
-	case '0':
-		// Special number formats (hex, binary)
-		if l.position.offset + 1 < l.source_len {
-			next := l.source[l.position.offset + 1]
-
-			if next == 'x' || next == 'X' {
-				return scan_hexadecimal(l, start_pos)
-			}
-
-			if next == 'b' || next == 'B' {
-				return scan_binary(l, start_pos)
-			}
-		}
-
-		// Fall through to regular number handling
-		fallthrough
-	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		return scan_number(l, start_pos)
-	case '+':
-		advance_position(l)
-		return Token{kind = .Plus, text = "+", position = start_pos}
-	case '*':
-		advance_position(l)
-		return Token{kind = .Asterisk, text = "*", position = start_pos}
-	case '%':
-		advance_position(l)
-		return Token{kind = .Percent, text = "%", position = start_pos}
-	case '&':
-		advance_position(l)
-		return Token{kind = .And, text = "&", position = start_pos}
-	case '|':
-		advance_position(l)
-		return Token{kind = .Or, text = "|", position = start_pos}
-	case '^':
-		advance_position(l)
-		return Token{kind = .Xor, text = "^", position = start_pos}
-	case '~':
-		advance_position(l)
-		return Token{kind = .Not, text = "~", position = start_pos}
-	case:
-		// Identifiers - optimized with direct character range checks
-		if is_alpha(c) || c == '_' {
-			// Fast path for identifiers
-			advance_position(l)
-
-			// Consume all alphanumeric characters
-			for l.position.offset < l.source_len && is_alnum(l.source[l.position.offset]) {
-				advance_position(l)
-			}
-
-			text := l.source[start_pos.offset:l.position.offset]
-			if text == "true" || text == "false" {
-				return Token{kind = .Bool_Literal, text = text, position = start_pos}
-			}
-			return Token{kind = .Identifier, text = text, position = start_pos}
-		}
-
-		// Unknown character
-		advance_position(l)
-		return Token{kind = .Invalid, text = string([]u8{c}), position = start_pos}
-	}
-}
-
-
-
-/*
- * scan_newline processes consecutive newline characters
- * Optimized with a direct loop instead of recursive function calls
- */
-scan_newline :: #force_inline proc(l: ^Lexer, start_pos: Position) -> Token {
-    // Consume first newline
-    advance_position(l)
-
-    // Consume all consecutive newlines
-    for l.position.offset < l.source_len && l.source[l.position.offset] == '\n' {
-        advance_position(l)
-    }
-
-    return Token{kind = .Newline, text = "\\n", position = start_pos}
-}
-
-/*
- * scan_string processes a string literal enclosed in provided delimiter
- * Optimized for speed with fewer function calls
- */
-scan_string :: proc(l: ^Lexer, start_pos: Position) -> Token {
-    delimiter := l.source[l.position.offset]
-    // Skip opening delimiter
-    advance_position(l)
-    str_start := l.position.offset
-
-    // Fast path: scan without escapes
-    // This optimization significantly improves performance for strings without escape sequences
-    escape_found := false
-    for l.position.offset < l.source_len {
-        current := l.source[l.position.offset]
-
-        if current == delimiter {
-            break
-        }
-
-        if current == '\\' {
-            escape_found = true
-            break
-        }
-
-        advance_position(l)
-    }
-
-    // If we found an escape sequence, handle the more complex path
-    if escape_found {
-        for l.position.offset < l.source_len && l.source[l.position.offset] != delimiter {
-            // Handle escapes
-            if l.source[l.position.offset] == '\\' && l.position.offset + 1 < l.source_len {
-                advance_by(l, 2)  // Skip the escape sequence
-            } else {
-                advance_position(l)
-            }
-        }
-    }
-
-    if l.position.offset < l.source_len {
-        text := l.source[str_start:l.position.offset]
-        advance_position(l) // Skip closing delimiter
-        return Token{kind = .String_Literal, text = text, position = start_pos}
-    }
-
-    return Token{kind = .Invalid, text = "Unterminated string", position = start_pos}
-}
-
-/*
- * scan_hexadecimal processes hexadecimal number literals
- * Optimized with direct character checks
- */
-scan_hexadecimal :: #force_inline proc(l: ^Lexer, start_pos: Position) -> Token {
-    // Skip "0x" prefix
-    advance_by(l, 2)
-    hex_start := l.position.offset
-
-    // Fast path: use a tight loop to consume all hex digits
-    for l.position.offset < l.source_len && is_hex_digit(l.source[l.position.offset]) {
-        advance_position(l)
-    }
-
-    if l.position.offset == hex_start {
-        return Token{kind = .Invalid, text = "Invalid hexadecimal number", position = start_pos}
-    }
-
-    return Token{kind = .Hexadecimal, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-}
-
-/*
- * scan_binary processes binary number literals
- * Optimized with direct character checks
- */
-scan_binary :: #force_inline proc(l: ^Lexer, start_pos: Position) -> Token {
-    // Skip "0b" prefix
-    advance_by(l, 2)
-    bin_start := l.position.offset
-
-    // Fast path: use tight loop for binary digits
-    for l.position.offset < l.source_len {
-        c := l.source[l.position.offset]
-        if c != '0' && c != '1' {
-            break
-        }
-        advance_position(l)
-    }
-
-    if l.position.offset == bin_start {
-        return Token{kind = .Invalid, text = "Invalid binary number", position = start_pos}
-    }
-
-    return Token{kind = .Binary, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-}
-
-/*
- * scan_number processes numeric literals and range notations
- * Optimized to use direct character checks for different paths
- */
-scan_number :: proc(l: ^Lexer, start_pos: Position) -> Token {
-    // Parse integer part with fast path
-    for l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-        advance_position(l)
-    }
-
-    // Check for floating point (but NOT for ranges - let parser handle that)
-    if l.position.offset < l.source_len && l.source[l.position.offset] == '.' {
-        // Look ahead to see if it's a float (digit after .) or a range (..)
-        if l.position.offset + 1 < l.source_len {
-            next_char := l.source[l.position.offset + 1]
-
-            // If next char is a digit, it's a float
-            if is_digit(next_char) {
-                advance_position(l) // Skip the '.'
-
-                // Fast path for decimal digits
-                for l.position.offset < l.source_len && is_digit(l.source[l.position.offset]) {
-                    advance_position(l)
-                }
-
-                return Token{kind = .Float, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-            }
-
-            // If next char is '.', it's a range - let the dot handler deal with it
-            // Don't consume the '.' here, let next_token() handle it as separate tokens
-        }
-    }
-
-    return Token{kind = .Integer, text = l.source[start_pos.offset:l.position.offset], position = start_pos}
-}
-
-// ===========================================================================
-// SECTION 2: AST NODE DEFINITIONS
-// ===========================================================================
-
-/*
- * Node is a union of all possible AST node types
- */
-Node :: union {
+Node_Kind :: enum u8 {
 	Pointing,
 	PointingPull,
 	EventPush,
@@ -758,2866 +38,2483 @@ Node :: union {
 	Property,
 	Expand,
 	External,
-  Range,
-  Enforce,
-  Unknown,
+	Range,
+	Enforce,
+	Unknown,
 }
 
-NodeBase :: struct {
-  position: Position, // Position information for error reporting
-}
-
-/*
- * Base struct containing common fields for all pointing types
- */
-PointingBase :: struct {
-  using _: NodeBase,
-  from:     ^Node, // From of the pointing
-  to:    ^Node, // To being pointed to/from
-}
-
-/*
- * Pointing represents a pointing declaration (from -> to)
- */
-Pointing :: struct {
-  using _: PointingBase,
-}
-
-/*
- * Pointing pull is a declaration later carve derived to
- */
-PointingPull :: struct {
-  using _: PointingBase,
-}
-
-/*
- * EventPull represents a event being pull from resonance >-
- */
-EventPull :: struct {
-  using _: PointingBase,
-  catch: string,
-}
-
-/*
- * EventPush represents a event being pushed into resonance -
- */
-EventPush :: struct {
-  using _: PointingBase,
-}
-
-/*
- * ResonancePull is useed to change to of resonance driven -
- */
-ResonancePull :: struct {
-  using _: PointingBase,
-}
-
-/*
- * ResonancePush is useed to drive resonance >>-
- */
-ResonancePush :: struct {
-  using _: PointingBase,
-}
-
-/*
- * Identifier represents a fromd reference or capture or both
- */
-Identifier :: struct {
-  using _: NodeBase,
-  name: string,        // The identifier name (empty if just capture)
-  capture: string,     // The capture from (empty if no capture)
-}
-
-/*
- * ScopeNode represents a block of statements enclosed in braces
- */
-ScopeNode :: struct {
-  using _: NodeBase,
-	to:    [dynamic]Node, // Statements in the scope
-}
-
-/*
- * Carve represents modifications to a base entity
- */
-Carve :: struct {
-  using _: NodeBase,
-	source:    ^Node, // Base entity being modified
-	carves: [dynamic]Node, // Modifications
-}
-
-/*
- * Product represents a produced to (-> expr)
- */
-Product :: struct {
-  using _: NodeBase,
-	to:    ^Node, // To produced
-}
-
-/*
- * Pattern represents a pattern match expression
- */
-Pattern :: struct {
-  using _: NodeBase,
-	target:   ^Node, // To to match against
-	to:    [dynamic]Branch, // Pattern branches
-}
-
-/*
- * Branch represents a single pattern match branch
- */
-Branch :: struct {
-  using _: NodeBase,
-	source:   ^Node, // Pattern to match
-	product:  ^Node, // Result if pattern matches
-}
-
-/*
- * Constraint represents a type constraint Type: to
- */
-Constraint :: struct {
-  using _: NodeBase,
-	constraint: ^Node, // Type constraint
-	name:       ^Node, // Optional value
-}
-
-/*
- * ExecutionWrapper represents a single wrapper in a potentially nested execution pattern
- */
-ExecutionWrapper :: enum {
-  Threading,       // < >
-  Parallel_CPU,    // [ ]
-  Background,      // ( )
-  GPU,             // | |
-}
-
-/*
- * Execute represents an execution modifier
- */
-Execute :: struct {
-  using _: NodeBase,
-  to:    ^Node,                     // Expression to execute
-  wrappers: [dynamic]ExecutionWrapper, // Ordered list of execution wrappers (from outside to inside)
-}
-
-/*
- * CompileTime marks an expression to be evaluated at compile time (prefix !)
- */
-CompileTime :: struct {
-  using _: NodeBase,
-  to:    ^Node, // Expression forced to compile-time evaluation
-}
-
-/*
- * Operator_Kind defines the types of operators
- */
-Operator_Kind :: enum {
-	Add,
-	Subtract,
-	Multiply,
-	Divide,
-	Mod, // For %
-	Equal,
-	Less,
-	Greater,
-  NotEqual,
-	LessEqual,
-	GreaterEqual,
-	And, // &
-	Or, // |
-	Xor, // ^
-	Not, // ~
-  RShift, // >>
-  LShift, // <<
-}
-
-/*
- * Operator represents a binary operation
- */
-Operator :: struct {
-  using _: NodeBase,
-	kind:     Operator_Kind, // Type of operation
-	left:     ^Node, // Left operand
-	right:    ^Node, // Right operand
-}
-
-/*
- * Literal_Kind defines the types of literal tos
- */
-Literal_Kind :: enum {
+Literal_Kind :: enum u8 {
 	Integer,
 	Float,
 	String,
-  Bool,
+	Bool,
 	Hexadecimal,
 	Binary,
 }
 
-/*
- * Literal represents a literal to in the source
- */
-Literal :: struct {
-  using _: NodeBase,
-	kind:     Literal_Kind, // Type of literal
-	to:    string, // String representation of the value
+Operator_Kind :: enum u8 {
+	Add,
+	Subtract,
+	Multiply,
+	Divide,
+	Mod,
+	Equal,
+	Less,
+	Greater,
+	NotEqual,
+	LessEqual,
+	GreaterEqual,
+	And,
+	Or,
+	Xor,
+	Not,
+	RShift,
+	LShift,
 }
 
-/*
- * Property represents a property access (a.b)
- */
-Property :: struct {
-  using _: NodeBase,
-	source:   ^Node, // Object being accessed
-	property: ^Node, // Property being accessed
+ExecutionWrapper :: enum u8 {
+	Threading,
+	Parallel_CPU,
+	Background,
+	GPU,
 }
 
-/*
- * Expand represents a content expansion (...expr)
- */
-Expand :: struct {
-  using _: NodeBase,
-	target:   ^Node, // Content to expand
+Index_Range :: struct {
+	start: u32,
+	len:   u32,
 }
 
-/*
- * External represents an external reference (@lib.geometry)
- */
-External :: struct {
-  using _: NodeBase,
-  name:    string, // From of the ref
-	scope:   ^Node, // The external scope to be resolved
+EMPTY_RANGE :: Index_Range{0, 0}
+
+Binary_Data :: struct {
+	left:  Node_Index,
+	right: Node_Index,
 }
 
-/*
- * Range represents a range expression (e.g., 1..5, 1.., ..5)
- */
-Range :: struct {
-  using _: NodeBase,
-	start:    ^Node, // Start of range (may be nil for prefix range)
-	end:      ^Node, // End of range (may be nil for postfix range)
+Unary_Data :: struct {
+	operand: Node_Index,
 }
 
-/*
- * Unkwnown represents a unknown ?? mainly use for proof
- */
-Unknown :: struct {
-  using _: NodeBase,
+Literal_Data :: struct {
+	kind: Literal_Kind,
 }
 
-/*
- * Enforce note ?! represent a compiler forced property usefull for proofs
- */
-Enforce :: struct {
-  using _: NodeBase,
-	left:     ^Node, // Left operand
-	right:    ^Node, // Right operand
+Identifier_Data :: struct {
+	name:    Span,
+	capture: Span,
 }
 
+Scope_Data :: struct {
+	using _: Index_Range,
+}
 
-// ===========================================================================
-// SECTION 3: PARSER IMPLEMENTATION
-// ===========================================================================
+Carve_Data :: struct {
+	source:   Node_Index,
+	children: Index_Range,
+}
 
-/*
- * Precedence levels for operators, higher to means higher precedence
- */
+Pattern_Data :: struct {
+	target:   Node_Index,
+	branches: Index_Range,
+}
+
+Execute_Data :: struct {
+	target:   Node_Index,
+	wrappers: Index_Range,
+}
+
+Operator_Node_Data :: struct {
+	kind:  Operator_Kind,
+	left:  Node_Index,
+	right: Node_Index,
+}
+
+External_Data :: struct {
+	name:  Span,
+	scope: Node_Index,
+}
+
+EventPull_Data :: struct {
+	from:       Node_Index,
+	to:         Node_Index,
+	catch_span: Span,
+}
+
+Node_Data :: struct #raw_union {
+	binary:     Binary_Data,
+	unary:      Unary_Data,
+	literal:    Literal_Data,
+	identifier: Identifier_Data,
+	scope:      Scope_Data,
+	carve:      Carve_Data,
+	pattern:    Pattern_Data,
+	execute:    Execute_Data,
+	operator:   Operator_Node_Data,
+	external:   External_Data,
+	event_pull: EventPull_Data,
+}
+
+Node :: struct {
+	kind: Node_Kind,
+	span: Span,
+	data: Node_Data,
+}
+
+Ast :: struct {
+	source:      string,
+	nodes:       [dynamic]Node,
+	extra:       [dynamic]Node_Index,
+	extra_u8:    [dynamic]u8,
+	line_starts: [dynamic]u32,
+}
+
+Position :: struct {
+	line:   int,
+	column: int,
+	offset: int,
+}
+
+span_to_position :: proc(ast: ^Ast, offset: u32) -> Position {
+	lo, hi := 0, len(ast.line_starts) - 1
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if ast.line_starts[mid] <= offset {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return Position{
+		line   = lo + 1,
+		column = int(offset) - int(ast.line_starts[lo]) + 1,
+		offset = int(offset),
+	}
+}
+
+/* ======================================================================
+ * SECTION 2: AST ACCESSOR API
+ * ====================================================================== */
+
+node_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Kind {
+	return ast.nodes[idx].kind
+}
+
+node_span :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Span {
+	return ast.nodes[idx].span
+}
+
+node_position :: proc(ast: ^Ast, idx: Node_Index) -> Position {
+	return span_to_position(ast, ast.nodes[idx].span.start)
+}
+
+node_text :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.nodes[idx].span
+	return ast.source[s.start:s.end]
+}
+
+node_left :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.binary.left
+}
+
+node_right :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.binary.right
+}
+
+node_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
+	r := ast.nodes[idx].data.scope
+	if r.len == 0 do return nil
+	return ast.extra[r.start : r.start + r.len]
+}
+
+node_carve_source :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.carve.source
+}
+
+node_carve_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
+	r := ast.nodes[idx].data.carve.children
+	if r.len == 0 do return nil
+	return ast.extra[r.start : r.start + r.len]
+}
+
+node_pattern_target :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.pattern.target
+}
+
+node_pattern_branches :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
+	r := ast.nodes[idx].data.pattern.branches
+	if r.len == 0 do return nil
+	return ast.extra[r.start : r.start + r.len]
+}
+
+node_execute_target :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.execute.target
+}
+
+node_execute_wrappers :: proc(ast: ^Ast, idx: Node_Index) -> []u8 {
+	r := ast.nodes[idx].data.execute.wrappers
+	if r.len == 0 do return nil
+	return ast.extra_u8[r.start : r.start + r.len]
+}
+
+node_operator_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Operator_Kind {
+	return ast.nodes[idx].data.operator.kind
+}
+
+node_operator_left :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.operator.left
+}
+
+node_operator_right :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.operator.right
+}
+
+node_unary_operand :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.unary.operand
+}
+
+node_name_span :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Span {
+	return ast.nodes[idx].data.identifier.name
+}
+
+node_name_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.nodes[idx].data.identifier.name
+	if s.start == s.end do return ""
+	return ast.source[s.start:s.end]
+}
+
+node_capture_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.nodes[idx].data.identifier.capture
+	if s.start == s.end do return ""
+	return ast.source[s.start:s.end]
+}
+
+node_literal_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Literal_Kind {
+	return ast.nodes[idx].data.literal.kind
+}
+
+node_external_name :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.nodes[idx].data.external.name
+	if s.start == s.end do return ""
+	return ast.source[s.start:s.end]
+}
+
+node_external_scope :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.external.scope
+}
+
+node_event_pull_from :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.event_pull.from
+}
+
+node_event_pull_to :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
+	return ast.nodes[idx].data.event_pull.to
+}
+
+node_event_pull_catch :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.nodes[idx].data.event_pull.catch_span
+	if s.start == s.end do return ""
+	return ast.source[s.start:s.end]
+}
+
+/* ======================================================================
+ * SECTION 3: TOKEN DEFINITIONS AND LEXER
+ * ====================================================================== */
+
+Token_Kind :: enum {
+	Invalid,
+	EOF,
+	Identifier,
+
+	Integer,
+	Float,
+	Hexadecimal,
+	Binary,
+
+	String_Literal,
+	Bool_Literal,
+
+	Execute,
+	At,
+
+	PointingPush,
+	PointingPull,
+	EventPush,
+	EventPull,
+	ResonancePush,
+	ResonancePull,
+
+	Equal,
+	NotEqual,
+	Less,
+	Greater,
+	LessEqual,
+	GreaterEqual,
+
+	PropertyAccess,
+	PropertyFromNone,
+	PropertyToNone,
+
+	ConstraintBind,
+	ConstraintFromNone,
+	ConstraintToNone,
+
+	Colon,
+	Question,
+	DoubleQuestion,
+	QuestionExclamation,
+	Dot,
+	DoubleDot,
+	Ellipsis,
+	Newline,
+	Range,
+	PrefixRange,
+	PostfixRange,
+
+	LeftBrace,
+	LeftBraceCarve,
+	RightBrace,
+	LeftParen,
+	LeftParenNoSpace,
+	RightParen,
+	LeftBracket,
+	RightBracket,
+
+	Plus,
+	Minus,
+	Asterisk,
+	Slash,
+	Percent,
+	And,
+	Or,
+	Xor,
+	Not,
+	RShift,
+	LShift,
+}
+
+Token :: struct {
+	kind:         Token_Kind,
+	span:         Span,
+	space_before: bool,
+}
+
+token_text :: #force_inline proc(source: string, t: Token) -> string {
+	return source[t.span.start:t.span.end]
+}
+
+Lexer :: struct {
+	source:     string,
+	offset:     u32,
+	source_len: u32,
+}
+
+init_lexer :: #force_inline proc(l: ^Lexer, source: string) {
+	l.source = source
+	l.offset = 0
+	l.source_len = u32(len(source))
+}
+
+current_char :: #force_inline proc(l: ^Lexer) -> u8 {
+	if l.offset >= l.source_len do return 0
+	return l.source[l.offset]
+}
+
+peek_char :: #force_inline proc(l: ^Lexer, n: u32 = 1) -> u8 {
+	pos := l.offset + n
+	if pos >= l.source_len do return 0
+	return l.source[pos]
+}
+
+has_space_before :: #force_inline proc(l: ^Lexer) -> bool {
+	return l.offset > 0 && is_space(l.source[l.offset - 1])
+}
+
+has_space_after_char :: #force_inline proc(l: ^Lexer, char: u8) -> bool {
+	if l.offset < l.source_len && l.source[l.offset] == char {
+		return l.offset + 1 < l.source_len && is_space(l.source[l.offset + 1])
+	}
+	return false
+}
+
+skip_whitespace :: #force_inline proc(l: ^Lexer) {
+	for l.offset < l.source_len && is_space(l.source[l.offset]) {
+		l.offset += 1
+	}
+}
+
+next_token :: proc(l: ^Lexer) -> Token {
+	skip_whitespace(l)
+
+	if l.offset >= l.source_len {
+		return Token{kind = .EOF, span = Span{l.offset, l.offset}}
+	}
+
+	start := l.offset
+	sb := l.offset > 0 && is_space(l.source[l.offset - 1])
+	c := l.source[l.offset]
+
+	switch c {
+	case '\n', ',':
+		return scan_newline(l, start, sb)
+	case '`', '"', '\'':
+		return scan_string(l, start, sb)
+	case '@':
+		l.offset += 1
+		return Token{kind = .At, span = Span{start, l.offset}, space_before = sb}
+	case '{':
+		space_before := has_space_before(l)
+		l.offset += 1
+		if space_before || start == 0 {
+			return Token{kind = .LeftBrace, span = Span{start, l.offset}, space_before = sb}
+		} else {
+			return Token{kind = .LeftBraceCarve, span = Span{start, l.offset}, space_before = sb}
+		}
+	case '}':
+		l.offset += 1
+		return Token{kind = .RightBrace, span = Span{start, l.offset}, space_before = sb}
+	case '[':
+		l.offset += 1
+		return Token{kind = .LeftBracket, span = Span{start, l.offset}, space_before = sb}
+	case ']':
+		l.offset += 1
+		return Token{kind = .RightBracket, span = Span{start, l.offset}, space_before = sb}
+	case '(':
+		space_before := has_space_before(l)
+		l.offset += 1
+		if space_before || start == 0 {
+			return Token{kind = .LeftParen, span = Span{start, l.offset}, space_before = sb}
+		} else {
+			return Token{kind = .LeftParenNoSpace, span = Span{start, l.offset}, space_before = sb}
+		}
+	case ')':
+		l.offset += 1
+		return Token{kind = .RightParen, span = Span{start, l.offset}, space_before = sb}
+	case '!':
+		l.offset += 1
+		if l.offset < l.source_len && l.source[l.offset] == '=' {
+			l.offset += 1
+			return Token{kind = .NotEqual, span = Span{start, l.offset}, space_before = sb}
+		}
+		return Token{kind = .Execute, span = Span{start, l.offset}, space_before = sb}
+	case ':':
+		space_before := has_space_before(l)
+		space_after := has_space_after_char(l, ':')
+		l.offset += 1
+		if space_before {
+			if space_after {
+				return Token{kind = .Colon, span = Span{start, l.offset}, space_before = sb}
+			} else {
+				return Token{kind = .ConstraintFromNone, span = Span{start, l.offset}, space_before = sb}
+			}
+		} else {
+			if space_after {
+				return Token{kind = .ConstraintToNone, span = Span{start, l.offset}, space_before = sb}
+			} else {
+				return Token{kind = .ConstraintBind, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+	case '?':
+		l.offset += 1
+		if l.offset < l.source_len {
+			switch l.source[l.offset] {
+			case '?':
+				l.offset += 1
+				return Token{kind = .DoubleQuestion, span = Span{start, l.offset}, space_before = sb}
+			case '!':
+				l.offset += 1
+				return Token{kind = .QuestionExclamation, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+		return Token{kind = .Question, span = Span{start, l.offset}, space_before = sb}
+	case '.':
+		if l.offset + 1 < l.source_len && l.source[l.offset + 1] == '.' {
+			has_before_delimiter := l.offset == 0 || is_before_delimiter(l.source[l.offset - 1])
+			has_after_delimiter := l.offset + 2 >= l.source_len || is_after_delimiter(l.source[l.offset + 2])
+			l.offset += 2
+			if l.offset < l.source_len && l.source[l.offset] == '.' {
+				l.offset += 1
+				return Token{kind = .Ellipsis, span = Span{start, l.offset}, space_before = sb}
+			}
+			if has_before_delimiter && has_after_delimiter {
+				return Token{kind = .DoubleDot, span = Span{start, l.offset}, space_before = sb}
+			} else if has_before_delimiter {
+				return Token{kind = .PrefixRange, span = Span{start, l.offset}, space_before = sb}
+			} else if has_after_delimiter {
+				return Token{kind = .PostfixRange, span = Span{start, l.offset}, space_before = sb}
+			} else {
+				return Token{kind = .Range, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+		space_before_dot := l.offset == 0 || is_before_delimiter(l.source[l.offset - 1])
+		space_after_dot := has_space_after_char(l, '.') || (l.offset + 1 >= l.source_len)
+		l.offset += 1
+		if space_before_dot {
+			if space_after_dot {
+				return Token{kind = .Dot, span = Span{start, l.offset}, space_before = sb}
+			} else {
+				return Token{kind = .PropertyFromNone, span = Span{start, l.offset}, space_before = sb}
+			}
+		} else {
+			if space_after_dot {
+				return Token{kind = .PropertyToNone, span = Span{start, l.offset}, space_before = sb}
+			} else {
+				return Token{kind = .PropertyAccess, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+	case '=':
+		l.offset += 1
+		return Token{kind = .Equal, span = Span{start, l.offset}, space_before = sb}
+	case '<':
+		l.offset += 1
+		if l.offset < l.source_len {
+			if l.source[l.offset] == '=' {
+				l.offset += 1
+				return Token{kind = .LessEqual, span = Span{start, l.offset}, space_before = sb}
+			} else if l.source[l.offset] == '<' {
+				l.offset += 1
+				return Token{kind = .LShift, span = Span{start, l.offset}, space_before = sb}
+			} else if l.source[l.offset] == '-' {
+				l.offset += 1
+				return Token{kind = .PointingPull, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+		return Token{kind = .Less, span = Span{start, l.offset}, space_before = sb}
+	case '>':
+		l.offset += 1
+		if l.offset < l.source_len {
+			if l.source[l.offset] == '=' {
+				l.offset += 1
+				return Token{kind = .GreaterEqual, span = Span{start, l.offset}, space_before = sb}
+			} else if l.source[l.offset] == '>' {
+				if l.offset + 1 < l.source_len && l.source[l.offset + 1] == '-' {
+					l.offset += 2
+					return Token{kind = .ResonancePush, span = Span{start, l.offset}, space_before = sb}
+				}
+				l.offset += 1
+				return Token{kind = .RShift, span = Span{start, l.offset}, space_before = sb}
+			} else if l.source[l.offset] == '-' {
+				l.offset += 1
+				return Token{kind = .EventPush, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+		return Token{kind = .Greater, span = Span{start, l.offset}, space_before = sb}
+	case '-':
+		l.offset += 1
+		if l.offset < l.source_len {
+			if l.source[l.offset] == '>' {
+				l.offset += 1
+				return Token{kind = .PointingPush, span = Span{start, l.offset}, space_before = sb}
+			} else if l.source[l.offset] == '<' {
+				l.offset += 1
+				if l.offset < l.source_len && l.source[l.offset] == '<' {
+					l.offset += 1
+					return Token{kind = .ResonancePull, span = Span{start, l.offset}, space_before = sb}
+				}
+				return Token{kind = .EventPull, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+		return Token{kind = .Minus, span = Span{start, l.offset}, space_before = sb}
+	case '/':
+		if l.offset + 1 < l.source_len && l.source[l.offset + 1] == '/' {
+			l.offset += 2
+			for l.offset < l.source_len && l.source[l.offset] != '\n' {
+				l.offset += 1
+			}
+			return next_token(l)
+		}
+		if l.offset + 1 < l.source_len && l.source[l.offset + 1] == '*' {
+			l.offset += 2
+			depth : u32 = 1
+			for l.offset < l.source_len && depth > 0 {
+				if l.offset + 1 < l.source_len && l.source[l.offset] == '/' && l.source[l.offset + 1] == '*' {
+					l.offset += 2
+					depth += 1
+				} else if l.offset + 1 < l.source_len && l.source[l.offset] == '*' && l.source[l.offset + 1] == '/' {
+					l.offset += 2
+					depth -= 1
+				} else {
+					l.offset += 1
+				}
+			}
+			return next_token(l)
+		}
+		l.offset += 1
+		return Token{kind = .Slash, span = Span{start, l.offset}, space_before = sb}
+	case '0':
+		if l.offset + 1 < l.source_len {
+			next := l.source[l.offset + 1]
+			if next == 'x' || next == 'X' {
+				return scan_hexadecimal(l, start, sb)
+			}
+			if next == 'b' || next == 'B' {
+				return scan_binary(l, start, sb)
+			}
+		}
+		fallthrough
+	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		return scan_number(l, start, sb)
+	case '+':
+		l.offset += 1
+		return Token{kind = .Plus, span = Span{start, l.offset}, space_before = sb}
+	case '*':
+		l.offset += 1
+		return Token{kind = .Asterisk, span = Span{start, l.offset}, space_before = sb}
+	case '%':
+		l.offset += 1
+		return Token{kind = .Percent, span = Span{start, l.offset}, space_before = sb}
+	case '&':
+		l.offset += 1
+		return Token{kind = .And, span = Span{start, l.offset}, space_before = sb}
+	case '|':
+		l.offset += 1
+		return Token{kind = .Or, span = Span{start, l.offset}, space_before = sb}
+	case '^':
+		l.offset += 1
+		return Token{kind = .Xor, span = Span{start, l.offset}, space_before = sb}
+	case '~':
+		l.offset += 1
+		return Token{kind = .Not, span = Span{start, l.offset}, space_before = sb}
+	case:
+		if is_alpha(c) || c == '_' {
+			l.offset += 1
+			for l.offset < l.source_len && is_alnum(l.source[l.offset]) {
+				l.offset += 1
+			}
+			text := l.source[start:l.offset]
+			if text == "true" || text == "false" {
+				return Token{kind = .Bool_Literal, span = Span{start, l.offset}, space_before = sb}
+			}
+			return Token{kind = .Identifier, span = Span{start, l.offset}, space_before = sb}
+		}
+		l.offset += 1
+		return Token{kind = .Invalid, span = Span{start, l.offset}, space_before = sb}
+	}
+}
+
+scan_newline :: #force_inline proc(l: ^Lexer, start: u32, sb: bool) -> Token {
+	l.offset += 1
+	for l.offset < l.source_len && l.source[l.offset] == '\n' {
+		l.offset += 1
+	}
+	return Token{kind = .Newline, span = Span{start, l.offset}, space_before = sb}
+}
+
+scan_string :: proc(l: ^Lexer, start: u32, sb: bool) -> Token {
+	delimiter := l.source[l.offset]
+	l.offset += 1
+	for l.offset < l.source_len {
+		current := l.source[l.offset]
+		if current == delimiter {
+			break
+		}
+		if current == '\\' && l.offset + 1 < l.source_len {
+			l.offset += 2
+		} else {
+			l.offset += 1
+		}
+	}
+	if l.offset < l.source_len {
+		l.offset += 1
+		return Token{kind = .String_Literal, span = Span{start, l.offset}, space_before = sb}
+	}
+	return Token{kind = .Invalid, span = Span{start, l.offset}, space_before = sb}
+}
+
+scan_hexadecimal :: #force_inline proc(l: ^Lexer, start: u32, sb: bool) -> Token {
+	l.offset += 2
+	hex_start := l.offset
+	for l.offset < l.source_len && is_hex_digit(l.source[l.offset]) {
+		l.offset += 1
+	}
+	if l.offset == hex_start {
+		return Token{kind = .Invalid, span = Span{start, l.offset}, space_before = sb}
+	}
+	return Token{kind = .Hexadecimal, span = Span{start, l.offset}, space_before = sb}
+}
+
+scan_binary :: #force_inline proc(l: ^Lexer, start: u32, sb: bool) -> Token {
+	l.offset += 2
+	bin_start := l.offset
+	for l.offset < l.source_len {
+		c := l.source[l.offset]
+		if c != '0' && c != '1' do break
+		l.offset += 1
+	}
+	if l.offset == bin_start {
+		return Token{kind = .Invalid, span = Span{start, l.offset}, space_before = sb}
+	}
+	return Token{kind = .Binary, span = Span{start, l.offset}, space_before = sb}
+}
+
+scan_number :: proc(l: ^Lexer, start: u32, sb: bool) -> Token {
+	for l.offset < l.source_len && is_digit(l.source[l.offset]) {
+		l.offset += 1
+	}
+	if l.offset < l.source_len && l.source[l.offset] == '.' {
+		if l.offset + 1 < l.source_len {
+			next_char := l.source[l.offset + 1]
+			if is_digit(next_char) {
+				l.offset += 1
+				for l.offset < l.source_len && is_digit(l.source[l.offset]) {
+					l.offset += 1
+				}
+				return Token{kind = .Float, span = Span{start, l.offset}, space_before = sb}
+			}
+		}
+	}
+	return Token{kind = .Integer, span = Span{start, l.offset}, space_before = sb}
+}
+
+compute_line_starts :: proc(source: string) -> [dynamic]u32 {
+	ls := make([dynamic]u32, 0, 64)
+	append(&ls, 0)
+	for i := 0; i < len(source); i += 1 {
+		if source[i] == '\n' {
+			append(&ls, u32(i + 1))
+		}
+	}
+	return ls
+}
+
+/* ======================================================================
+ * SECTION 4: PARSER
+ * ====================================================================== */
+
 Precedence :: enum {
-    NONE = 0,        // No precedence
-    POINTING,    // -> (lowest — so branches and scopes can separate pointings)
-    ASSIGNMENT,  // <-, >-, -<, >>-, -<<
-    PATTERN,
-    OR,          // | (union of shapes / or-pattern) — looser than & — looser than comparisons so `a > b | c < d` becomes Or(Greater(a,b), Less(c,d))
-    AND,         // & (intersection / refinement) — tighter than | but looser than comparisons so `a < b & c > d` becomes And(Less(a,b), Greater(c,d))
-    EQUALITY,    // =
-    COMPARISON,  // <, >, <=, >=
-    TERM,        // +, -
-    FACTOR,      // *, /, %
-    CONSTRAINT,  // : (binds tighter than arithmetic so `(u8|i8)&>10:x` binds the whole composition)
-    UNARY,       // ~, unary -
-    SHIFT,       // <<, >> — just below RANGE so shifts bind tight against arithmetic and ranges still beat them
-    RANGE,       // ..
-    CALL,       // (), ., ?
-    PRIMARY,    // Literals, identifiers (highest precedence)
+	NONE = 0,
+	POINTING,
+	ASSIGNMENT,
+	PATTERN,
+	OR,
+	AND,
+	EQUALITY,
+	COMPARISON,
+	TERM,
+	FACTOR,
+	CONSTRAINT,
+	UNARY,
+	SHIFT,
+	RANGE,
+	CALL,
+	PRIMARY,
 }
 
-/*
- * Parse_Rule defines how to parse a given token as prefix or infix
- */
-Parse_Rule :: struct {
-    prefix:     proc(parser: ^Parser) -> ^Node,
-    infix:      proc(parser: ^Parser, left: ^Node) -> ^Node,
-    precedence: Precedence,
-}
-
-/*
- * Error_Type defines the type of parsing error encountered
- */
 Parser_Error_Type :: enum {
-    Syntax,           // Basic syntax errors
-    Unexpected_Token, // Token didn't match what was expected
-    Invalid_Expression, // Expression is malformed
-    Unclosed_Delimiter, // Missing closing delimiter
-    Invalid_Operation, // Operations not supported on types
-    External_Error,  // Reference to undefined identifier
-    Other,            // Other errors
+	Syntax,
+	Unexpected_Token,
+	Invalid_Expression,
+	Unclosed_Delimiter,
+	Invalid_Operation,
+	External_Error,
+	Other,
 }
 
-/*
- * Parse_Error represents a detailed error encountered during parsing
- */
 Parse_Error :: struct {
-    type:     Parser_Error_Type,    // Type of error for categorization
-    message:  string,        // Error message
-    position: Position,      // Position where error occurred
-    token:    Token,         // Token involved in the error
-    expected: Token_Kind,    // The expected token kind (if applicable)
-    found:    Token_Kind,    // The actual token kind found (if applicable)
+	type:     Parser_Error_Type,
+	message:  string,
+	span:     Span,
+	token:    Token,
+	expected: Token_Kind,
+	found:    Token_Kind,
 }
 
-/*
- * Parser maintains state during parsing
- */
+Parse_Rule :: struct {
+	prefix:     proc(parser: ^Parser) -> Node_Index,
+	infix:      proc(parser: ^Parser, left: Node_Index) -> Node_Index,
+	precedence: Precedence,
+}
+
 Parser :: struct {
-    file_cache:     ^Cache,
-    lexer:           ^Lexer, // Lexer providing tokens
-    current_token:   Token, // Current token being processed
-    peek_token:      Token, // Next token (lookahead)
-    panic_mode:      bool, // Flag for panic mode error recovery
-
-    // Error tracking
-    errors:     [dynamic]Parse_Error,
+	source:        string,
+	lexer:         Lexer,
+	current_token: Token,
+	peek_token:    Token,
+	nodes:         [dynamic]Node,
+	extra:         [dynamic]Node_Index,
+	extra_u8:      [dynamic]u8,
+	errors:        [dynamic]Parse_Error,
+	panic_mode:    bool,
+	file_cache:    ^Cache,
 }
 
-/*
- * initialize_parser sets up a parser with a lexer
- */
-init_parser :: proc(cache: ^Cache, source: string) -> ^Parser{
-    parser := new(Parser)
-    parser.file_cache = cache
-    parser.lexer = new(Lexer)
-    init_lexer(parser.lexer, source)
-    parser.panic_mode = false
+init_parser :: proc(cache: ^Cache, source: string) -> ^Parser {
+	parser := new(Parser)
+	parser.source = source
+	parser.file_cache = cache
+	init_lexer(&parser.lexer, source)
+	parser.panic_mode = false
 
-    // Initialize with first two tokens
-    parser.current_token = next_token(parser.lexer)
-    parser.peek_token = next_token(parser.lexer)
-    return parser
+	estimated_nodes := max(len(source) / 8, 64)
+	estimated_extra := estimated_nodes / 3
+	parser.nodes = make([dynamic]Node, 0, estimated_nodes)
+	parser.extra = make([dynamic]Node_Index, 0, estimated_extra)
+	parser.extra_u8 = make([dynamic]u8, 0, 32)
+
+	parser.current_token = next_token(&parser.lexer)
+	parser.peek_token = next_token(&parser.lexer)
+	return parser
 }
 
-/*
- * advance_token moves to the next token in the stream
- */
 advance_token :: #force_inline proc(parser: ^Parser) {
-    parser.current_token = parser.peek_token
-    parser.peek_token = next_token(parser.lexer)
+	parser.current_token = parser.peek_token
+	parser.peek_token = next_token(&parser.lexer)
 }
 
-/*
- * check checks if the current token has the expected kind without advancing
- */
 check :: #force_inline proc(parser: ^Parser, kind: Token_Kind) -> bool {
-    return parser.current_token.kind == kind
+	return parser.current_token.kind == kind
 }
 
-/*
- * match checks if the current token has the expected kind and advances if true
- */
-match :: #force_inline proc(parser: ^Parser, kind: Token_Kind) -> bool {
-    if !check(parser, kind) {
-        return false
-    }
-    advance_token(parser)
-    return true
+match_token :: #force_inline proc(parser: ^Parser, kind: Token_Kind) -> bool {
+	if !check(parser, kind) do return false
+	advance_token(parser)
+	return true
 }
 
-/*
- * expect_token checks if the current token is of the expected kind,
- * advances to the next token if true, and reports an error if false
- */
 expect_token :: #force_inline proc(parser: ^Parser, kind: Token_Kind) -> bool {
-    if check(parser, kind) {
-        advance_token(parser)
-        return true
-    }
-
-    error_at_current(parser, fmt.tprintf("Expected %v but got %v", kind, parser.current_token.kind))
-    return false
+	if check(parser, kind) {
+		advance_token(parser)
+		return true
+	}
+	error_at_current(parser, fmt.tprintf("Expected %v but got %v", kind, parser.current_token.kind))
+	return false
 }
 
-/*
- * error_at_current creates an error record for the current token
- */
 error_at_current :: #force_inline proc(parser: ^Parser, message: string, error_type: Parser_Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
-    error_at(parser, parser.current_token, message, error_type, expected)
+	error_at(parser, parser.current_token, message, error_type, expected)
 }
 
-
-/*
- * error_at creates a detailed error record at a specific token
- */
 error_at :: proc(parser: ^Parser, token: Token, message: string, error_type: Parser_Error_Type = .Syntax, expected: Token_Kind = .Invalid) {
-    // Don't report errors in panic mode to avoid cascading
-    if parser.panic_mode do return
-
-    // Enter panic mode
-    parser.panic_mode = true
-
-    // Create detailed error record
-    error := Parse_Error{
-        type = error_type,
-        message = message,
-        position = token.position,
-        token = token,
-        expected = expected,
-        found = token.kind,
-    }
-
-    // Add to errors list
-    append(&parser.errors, error)
+	if parser.panic_mode do return
+	parser.panic_mode = true
+	error := Parse_Error{
+		type     = error_type,
+		message  = message,
+		span     = token.span,
+		token    = token,
+		expected = expected,
+		found    = token.kind,
+	}
+	append(&parser.errors, error)
 }
 
-/*
- * synchronize recovers from panic mode by skipping tokens until a synchronization point
- */
 synchronize :: proc(parser: ^Parser) {
-    parser.panic_mode = false
+	parser.panic_mode = false
+	start_offset := parser.current_token.span.start
+	start_kind := parser.current_token.kind
 
-    // Record position to detect lack of progress
-    start_pos := parser.current_token.position.offset
-    start_kind := parser.current_token.kind
-
-    // Skip tokens until we find a good synchronization point
-    for parser.current_token.kind != .EOF {
-        // Check if current token is a synchronization point
-        if parser.current_token.kind == .Newline ||
-           parser.current_token.kind == .RightBrace ||
-           parser.current_token.kind == .PointingPush ||
-           parser.current_token.kind == .PointingPull {
-            advance_token(parser)
-            return
-        }
-
-        // Current position before advancing
-        current_pos := parser.current_token.position.offset
-        current_kind := parser.current_token.kind
-
-        // Try to advance
-        advance_token(parser)
-
-        // If we're not making progress (position and token kind haven't changed),
-        // force advancement to break potential infinite loops
-        if parser.current_token.position.offset == current_pos &&
-           parser.current_token.kind == current_kind {
-            // Stuck at same token - force advancement
-            if parser.current_token.kind == .EOF {
-                return
-            }
-            advance_token(parser)
-            return
-        }
-    }
+	for parser.current_token.kind != .EOF {
+		if parser.current_token.kind == .Newline ||
+		   parser.current_token.kind == .RightBrace ||
+		   parser.current_token.kind == .PointingPush ||
+		   parser.current_token.kind == .PointingPull {
+			advance_token(parser)
+			return
+		}
+		current_offset := parser.current_token.span.start
+		current_kind := parser.current_token.kind
+		advance_token(parser)
+		if parser.current_token.span.start == current_offset &&
+		   parser.current_token.kind == current_kind {
+			if parser.current_token.kind == .EOF do return
+			advance_token(parser)
+			return
+		}
+	}
 }
 
-/*
- * get_rule returns the parse rule for a given token kind
- */
+add_node :: #force_inline proc(p: ^Parser, kind: Node_Kind, data: Node_Data, span: Span) -> Node_Index {
+	index := Node_Index(len(p.nodes))
+	append(&p.nodes, Node{kind = kind, span = span, data = data})
+	return index
+}
+
+add_extra :: proc(p: ^Parser, indices: []Node_Index) -> Index_Range {
+	start := u32(len(p.extra))
+	for idx in indices {
+		append(&p.extra, idx)
+	}
+	return Index_Range{start = start, len = u32(len(indices))}
+}
+
+add_extra_u8 :: proc(p: ^Parser, wrappers: []u8) -> Index_Range {
+	start := u32(len(p.extra_u8))
+	for w in wrappers {
+		append(&p.extra_u8, w)
+	}
+	return Index_Range{start = start, len = u32(len(wrappers))}
+}
+
+skip_newlines :: proc(parser: ^Parser) {
+	for parser.current_token.kind == .Newline {
+		advance_token(parser)
+	}
+}
+
+/* ======================================================================
+ * SECTION 5: PARSE RULES TABLE
+ * ====================================================================== */
+
 get_rule :: #force_inline proc(kind: Token_Kind) -> Parse_Rule {
-    #partial switch kind {
-    // Literals and identifiers - highest precedence
-    case .Integer:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
-    case .Float:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
-    case .Hexadecimal:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
-    case .Binary:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
-    case .String_Literal:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
-    case .Bool_Literal:
-        return Parse_Rule{prefix = parse_literal, infix = nil, precedence = .PRIMARY}
-    case .Identifier:
-        return Parse_Rule{prefix = parse_identifier, infix = nil, precedence = .PRIMARY}
+	#partial switch kind {
+	case .Integer:         return Parse_Rule{prefix = parse_literal, precedence = .PRIMARY}
+	case .Float:           return Parse_Rule{prefix = parse_literal, precedence = .PRIMARY}
+	case .Hexadecimal:     return Parse_Rule{prefix = parse_literal, precedence = .PRIMARY}
+	case .Binary:          return Parse_Rule{prefix = parse_literal, precedence = .PRIMARY}
+	case .String_Literal:  return Parse_Rule{prefix = parse_literal, precedence = .PRIMARY}
+	case .Bool_Literal:    return Parse_Rule{prefix = parse_literal, precedence = .PRIMARY}
+	case .Identifier:      return Parse_Rule{prefix = parse_identifier, precedence = .PRIMARY}
 
-    // Grouping and calls
-    case .LeftBrace:
-        return Parse_Rule{prefix = parse_scope, infix = nil, precedence = .CALL}
-    case .LeftBraceCarve:
-        return Parse_Rule{prefix = parse_scope, infix = parse_carve, precedence = .CALL}
-    case .LeftBracket:
-        return Parse_Rule{prefix = nil, infix = parse_left_bracket, precedence = .CALL}
-    case .LeftParen:
-        return Parse_Rule{prefix = parse_grouping, infix = nil, precedence = .CALL}
-    case .LeftParenNoSpace:
-        return Parse_Rule{prefix = parse_grouping, infix = parse_left_paren, precedence = .CALL}
-    case .At:
-        return Parse_Rule{prefix = parse_reference, infix = nil, precedence = .PRIMARY}
+	case .LeftBrace:       return Parse_Rule{prefix = parse_scope, precedence = .CALL}
+	case .LeftBraceCarve:  return Parse_Rule{prefix = parse_scope, infix = parse_carve, precedence = .CALL}
+	case .LeftBracket:     return Parse_Rule{infix = parse_left_bracket, precedence = .CALL}
+	case .LeftParen:       return Parse_Rule{prefix = parse_grouping, precedence = .CALL}
+	case .LeftParenNoSpace: return Parse_Rule{prefix = parse_grouping, infix = parse_left_paren, precedence = .CALL}
+	case .At:              return Parse_Rule{prefix = parse_reference, precedence = .PRIMARY}
 
-// Property access tokens
-	case .PropertyAccess:
-		return Parse_Rule{prefix = nil, infix = parse_property_access, precedence = .CALL}
-	case .PropertyFromNone:
-		return Parse_Rule{prefix = parse_property_from_none, infix = nil, precedence = .CALL}
-	case .PropertyToNone:
-		return Parse_Rule{prefix = nil, infix = parse_property_to_none, precedence = .CALL}
-	case .Dot:
-		return Parse_Rule{prefix = parse_invalid_property, infix = parse_invalid_property_infix, precedence = .CALL}
+	case .PropertyAccess:    return Parse_Rule{infix = parse_property_access, precedence = .CALL}
+	case .PropertyFromNone:  return Parse_Rule{prefix = parse_property_from_none, precedence = .CALL}
+	case .PropertyToNone:    return Parse_Rule{infix = parse_property_to_none, precedence = .CALL}
+	case .Dot:               return Parse_Rule{prefix = parse_invalid_property, infix = parse_invalid_property_infix, precedence = .CALL}
 
-	// Constraint tokens
-	case .ConstraintBind:
-		return Parse_Rule{prefix = nil, infix = parse_constraint_bind, precedence = .CONSTRAINT}
-	case .ConstraintFromNone:
-		return Parse_Rule{prefix = parse_constraint_from_none, infix = nil, precedence = .CONSTRAINT}
-	case .ConstraintToNone:
-		return Parse_Rule{prefix = nil, infix = parse_constraint_to_none, precedence = .CONSTRAINT}
-	case .Colon:
-		return Parse_Rule{prefix = parse_invalid_constraint, infix = parse_invalid_constraint_infix, precedence = .CONSTRAINT}
+	case .ConstraintBind:      return Parse_Rule{infix = parse_constraint_bind, precedence = .CONSTRAINT}
+	case .ConstraintFromNone:  return Parse_Rule{prefix = parse_constraint_from_none, precedence = .CONSTRAINT}
+	case .ConstraintToNone:    return Parse_Rule{infix = parse_constraint_to_none, precedence = .CONSTRAINT}
+	case .Colon:               return Parse_Rule{prefix = parse_invalid_constraint, infix = parse_invalid_constraint_infix, precedence = .CONSTRAINT}
 
-    case .Question:
-        return Parse_Rule{prefix = nil, infix = parse_pattern, precedence = .PATTERN}
-    case .Execute:
-        return Parse_Rule{prefix = parse_execute_prefix, infix = parse_execute, precedence = .CALL}
+	case .Question:          return Parse_Rule{infix = parse_pattern, precedence = .PATTERN}
+	case .Execute:           return Parse_Rule{prefix = parse_execute_prefix, infix = parse_execute, precedence = .CALL}
 
-    // Unary operators
-    case .Not:
-        return Parse_Rule{prefix = parse_unary, infix = nil, precedence = .UNARY}
-    case .Minus:
-        return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
+	case .Not:   return Parse_Rule{prefix = parse_unary, precedence = .UNARY}
+	case .Minus: return Parse_Rule{prefix = parse_unary, infix = parse_binary, precedence = .TERM}
 
-    // Shape algebra / logical operators
-    case .And:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
-    case .Or:
-        return Parse_Rule{prefix = nil, infix = parse_bit_or, precedence = .OR}
-    case .Xor:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .AND}
-    case .RShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .SHIFT}
-    case .LShift:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .SHIFT}
+	case .And:    return Parse_Rule{infix = parse_binary, precedence = .AND}
+	case .Or:     return Parse_Rule{infix = parse_bit_or, precedence = .OR}
+	case .Xor:    return Parse_Rule{infix = parse_binary, precedence = .AND}
+	case .RShift: return Parse_Rule{infix = parse_binary, precedence = .SHIFT}
+	case .LShift: return Parse_Rule{infix = parse_binary, precedence = .SHIFT}
 
-    // Arithmetic operators
-    case .Plus:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .TERM}
-    case .Asterisk:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    case .Slash:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
-    case .Percent:
-        return Parse_Rule{prefix = nil, infix = parse_binary, precedence = .FACTOR}
+	case .Plus:     return Parse_Rule{infix = parse_binary, precedence = .TERM}
+	case .Asterisk: return Parse_Rule{infix = parse_binary, precedence = .FACTOR}
+	case .Slash:    return Parse_Rule{infix = parse_binary, precedence = .FACTOR}
+	case .Percent:  return Parse_Rule{infix = parse_binary, precedence = .FACTOR}
 
-    // Comparison operators
-    case .Equal:
-        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
-    case .NotEqual:
-        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
-    case .Less:
-        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_less_than, precedence = .COMPARISON}
-    case .Greater:
-        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
-    case .LessEqual:
-        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
-    case .GreaterEqual:
-        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
+	case .Equal:        return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
+	case .NotEqual:     return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .EQUALITY}
+	case .Less:         return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_less_than, precedence = .COMPARISON}
+	case .Greater:      return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
+	case .LessEqual:    return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
+	case .GreaterEqual: return Parse_Rule{prefix = parse_prefix_comparison, infix = parse_binary, precedence = .COMPARISON}
 
-    // Range operators
-    case .DoubleDot:
-        return Parse_Rule{prefix = parse_empty_range, infix = nil, precedence = .PRIMARY}
-    case .PrefixRange:
-        return Parse_Rule{prefix = parse_prefix_range, infix = nil, precedence = .RANGE}
-    case .PostfixRange:
-        return Parse_Rule{prefix = nil, infix = parse_postfix_range, precedence = .RANGE}
-    case .Range:
-        return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
+	case .DoubleDot:    return Parse_Rule{prefix = parse_empty_range, precedence = .PRIMARY}
+	case .PrefixRange:  return Parse_Rule{prefix = parse_prefix_range, precedence = .RANGE}
+	case .PostfixRange: return Parse_Rule{infix = parse_postfix_range, precedence = .RANGE}
+	case .Range:        return Parse_Rule{prefix = parse_prefix_range, infix = parse_range, precedence = .RANGE}
 
-    // Proof and constraint
-    case .DoubleQuestion:
-        return Parse_Rule{prefix = parse_unknown, infix = nil, precedence = .PRIMARY}
-    case .QuestionExclamation:
-        return Parse_Rule{prefix = nil, infix = parse_enforce, precedence = .PATTERN}
+	case .DoubleQuestion:      return Parse_Rule{prefix = parse_unknown, precedence = .PRIMARY}
+	case .QuestionExclamation: return Parse_Rule{infix = parse_enforce, precedence = .PATTERN}
 
-    // Assignment operators (lowest precedence)
-    case .PointingPush:
-        return Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .POINTING}
-    case .PointingPull:
-        return Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
-    case .EventPush:
-        return Parse_Rule{prefix = parse_event_push_prefix, infix = parse_event_push, precedence = .ASSIGNMENT}
-    case .EventPull:
-        return Parse_Rule{prefix = parse_event_pull_prefix, infix = parse_event_pull, precedence = .ASSIGNMENT}
-    case .ResonancePush:
-        return Parse_Rule{prefix = parse_resonance_push_prefix, infix = parse_resonance_push, precedence = .ASSIGNMENT}
-    case .ResonancePull:
-        return Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
+	case .PointingPush:  return Parse_Rule{prefix = parse_product_prefix, infix = parse_pointing_push, precedence = .POINTING}
+	case .PointingPull:  return Parse_Rule{prefix = parse_pointing_pull_prefix, infix = parse_pointing_pull, precedence = .ASSIGNMENT}
+	case .EventPush:     return Parse_Rule{prefix = parse_event_push_prefix, infix = parse_event_push, precedence = .ASSIGNMENT}
+	case .EventPull:     return Parse_Rule{prefix = parse_event_pull_prefix, infix = parse_event_pull, precedence = .ASSIGNMENT}
+	case .ResonancePush: return Parse_Rule{prefix = parse_resonance_push_prefix, infix = parse_resonance_push, precedence = .ASSIGNMENT}
+	case .ResonancePull: return Parse_Rule{prefix = parse_resonance_pull_prefix, infix = parse_resonance_pull, precedence = .ASSIGNMENT}
 
-    // Special expansions
-    case .Ellipsis:
-        return Parse_Rule{prefix = parse_expansion, infix = nil, precedence = .PRIMARY}
-    }
-    return Parse_Rule{} // Default empty rule
+	case .Ellipsis: return Parse_Rule{prefix = parse_expansion, precedence = .PRIMARY}
+	}
+	return Parse_Rule{}
 }
 
-/*
- * parse program parses the entire program as a sequence of statements
- */
-parse:: proc(cache: ^Cache, source: string) -> ^Node {
-    parser := init_parser(cache, source)
-    // Store the position of the first token
-    position := parser.current_token.position
+/* ======================================================================
+ * SECTION 6: MAIN PARSE ENTRY POINTS
+ * ====================================================================== */
 
-    scope := ScopeNode{
-        to = make([dynamic]Node, 0, 2),
-        position = position, // Store position
-    }
+parse :: proc(cache: ^Cache, source: string) -> ^Ast {
+	parser := init_parser(cache, source)
+	span_start := parser.current_token.span.start
 
-    // Keep parsing until EOF
-    for parser.current_token.kind != .EOF {
-        // Skip newlines between statements
-        for parser.current_token.kind == .Newline {
-            advance_token(parser)
-        }
+	children := make([dynamic]Node_Index, 0, 16, context.temp_allocator)
 
-        if parser.current_token.kind == .EOF {
-            break
-        }
+	for parser.current_token.kind != .EOF {
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
+		}
+		if parser.current_token.kind == .EOF do break
 
-        if node := parse_with_recovery(parser); node != nil {
-            append(&scope.to, node^)
-        }
-    }
+		if node := parse_with_recovery(parser); node != INVALID_NODE {
+			append(&children, node)
+		}
+	}
 
-    for error in parser.errors {
-      debug_parse_error(error, 0)
-    }
+	for error in parser.errors {
+		debug_parse_error(error, parser.source, nil)
+	}
 
-    result := new(Node)
-    result^ = scope
-    return result
+	data: Node_Data
+	r := add_extra(parser, children[:])
+	data.scope = {start = r.start, len = r.len}
+	root_span := Span{span_start, parser.current_token.span.end}
+	add_node(parser, .ScopeNode, data, root_span)
+
+	ast := new(Ast)
+	ast.source = source
+	ast.nodes = parser.nodes
+	ast.extra = parser.extra
+	ast.extra_u8 = parser.extra_u8
+	ast.line_starts = compute_line_starts(source)
+	return ast
 }
 
-// Debug a single error/warning
-debug_parse_error :: proc(error: Parse_Error, index: int) {
-	fmt.printf(
-		"  [%d] %v at line %d, col %d: %s\n",
-		index,
-		error.type,
-		error.position.line,
-		error.position.column,
-		error.message,
-	)
+debug_parse_error :: proc(error: Parse_Error, source: string, ast: ^Ast) {
+	if ast != nil {
+		pos := span_to_position(ast, error.span.start)
+		fmt.printf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
+	} else {
+		ls := compute_line_starts(source)
+		defer delete(ls)
+		temp_ast := Ast{source = source, line_starts = ls}
+		pos := span_to_position(&temp_ast, error.span.start)
+		fmt.printf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
+	}
 }
 
-/*
- * parse_with_recovery attempts to parse a statement and recovers from errors
- */
-parse_with_recovery :: proc(parser: ^Parser) -> ^Node {
-    if parser.panic_mode {
-        synchronize(parser)
-    }
-
-    node := parse_statement(parser)
-
-    // Skip any newlines after a statement
-    for parser.current_token.kind == .Newline {
-        advance_token(parser)
-    }
-
-    return node
+parse_with_recovery :: proc(parser: ^Parser) -> Node_Index {
+	if parser.panic_mode {
+		synchronize(parser)
+	}
+	node := parse_statement(parser)
+	for parser.current_token.kind == .Newline {
+		advance_token(parser)
+	}
+	return node
 }
 
-/*
- * parse_statement parses a single statement
- */
-parse_statement :: proc(parser: ^Parser) -> ^Node {
-    if parser.current_token.kind == .Newline {
-        advance_token(parser)
-        return nil
-    }
-
-    if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
-        // Acceptable empty statements — BUT force advancement
-        advance_token(parser)
-        return nil
-    }
-
-    expr := parse_expression(parser)
-
-    // Defensive: ensure we're not stuck
-    if expr == nil && parser.current_token.kind == .RightBrace {
-        error_at_current(parser, "Unexpected }")
-        advance_token(parser)
-        return nil
-    }
-
-    return expr
+parse_statement :: proc(parser: ^Parser) -> Node_Index {
+	if parser.current_token.kind == .Newline {
+		advance_token(parser)
+		return INVALID_NODE
+	}
+	if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+		advance_token(parser)
+		return INVALID_NODE
+	}
+	expr := parse_expression(parser)
+	if expr == INVALID_NODE && parser.current_token.kind == .RightBrace {
+		error_at_current(parser, "Unexpected }")
+		advance_token(parser)
+		return INVALID_NODE
+	}
+	return expr
 }
 
 is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
-    #partial switch kind {
-    case .Plus, .Minus, .Asterisk, .Slash, .Percent, .And, .Or:
-        return true
-    }
-    return false
+	#partial switch kind {
+	case .Plus, .Minus, .Asterisk, .Slash, .Percent, .And, .Or:
+		return true
+	}
+	return false
 }
 
-/*
- * parse_expression parses expressions using Pratt parsing
- */
-parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> ^Node {
-    if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
-        return nil
-    }
+parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node_Index {
+	if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+		return INVALID_NODE
+	}
 
-    rule := get_rule(parser.current_token.kind)
-    if rule.prefix == nil {
-        advance_token(parser)
-        if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
-            return nil
-        }
-        return parse_expression(parser, precedence)
-    }
+	rule := get_rule(parser.current_token.kind)
+	if rule.prefix == nil {
+		advance_token(parser)
+		if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+			return INVALID_NODE
+		}
+		return parse_expression(parser, precedence)
+	}
 
-    // Parse the prefix expression
-    left := rule.prefix(parser)
-    if left == nil {
-        return nil
-    }
+	left := rule.prefix(parser)
+	if left == INVALID_NODE do return INVALID_NODE
 
-    // Keep parsing infix expressions while they have higher precedence
-    infix_loop: for {
-        if parser.current_token.kind == .Newline {
-            saved_current := parser.current_token
-            saved_peek := parser.peek_token
-            saved_lexer := parser.lexer^
-            skip_newlines(parser)
-            if is_infix_operator(parser.current_token.kind) {
-                continue
-            }
-            parser.current_token = saved_current
-            parser.peek_token = saved_peek
-            parser.lexer^ = saved_lexer
-        }
-        rule := get_rule(parser.current_token.kind)
-        if rule.infix == nil || rule.precedence < precedence {
-            break
-        }
-        if parser.current_token.kind == .PointingPush {
-            #partial switch _ in left^ {
-            case Product, Pointing:
-                break infix_loop
-            }
-        }
-        left = rule.infix(parser, left)
-        if left == nil {
-            return nil
-        }
-    }
-    return left
+	infix_loop: for {
+		if parser.current_token.kind == .Newline {
+			saved_current := parser.current_token
+			saved_peek := parser.peek_token
+			saved_offset := parser.lexer.offset
+			skip_newlines(parser)
+			if is_infix_operator(parser.current_token.kind) {
+				continue
+			}
+			parser.current_token = saved_current
+			parser.peek_token = saved_peek
+			parser.lexer.offset = saved_offset
+		}
+		rule := get_rule(parser.current_token.kind)
+		if rule.infix == nil || rule.precedence < precedence {
+			break
+		}
+		if parser.current_token.kind == .PointingPush {
+			left_kind := parser.nodes[left].kind
+			if left_kind == .Product || left_kind == .Pointing {
+				break infix_loop
+			}
+		}
+		left = rule.infix(parser, left)
+		if left == INVALID_NODE do return INVALID_NODE
+	}
+	return left
 }
 
-/*
-* Implementation of the carve postfix rule
-*/
-parse_carve :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the left brace
-    position := parser.current_token.position
+/* ======================================================================
+ * SECTION 7: PARSE FUNCTIONS
+ * ====================================================================== */
 
-    // Create an carve node
-    carve := Carve {
-        source = left,
-        carves = make([dynamic]Node, 0, 2),
-        position = position, // Store position
-    }
-
-    // Consume left brace (already checked by the caller)
-    advance_token(parser)
-
-    // Parse statements inside the braces as carves
-    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-        // Skip newlines
-        for parser.current_token.kind == .Newline {
-            advance_token(parser)
-        }
-
-        if parser.current_token.kind == .RightBrace {
-            break
-        }
-
-        // Parse statement and add to carves
-        if node := parse_statement(parser); node != nil {
-            append(&carve.carves, node^)
-        } else {
-            // Error recovery
-            synchronize(parser)
-
-            // Check if we synchronized to the end of the carves
-            if parser.current_token.kind == .RightBrace {
-                break
-            }
-        }
-
-        // Skip newlines
-        for parser.current_token.kind == .Newline {
-            advance_token(parser)
-        }
-    }
-
-    // Expect closing brace
-    if !match(parser, .RightBrace) {
-        error_at_current(parser, "Expected } after carves")
-    }
-
-    // Create and return the carve node
-    result := new(Node)
-    result^ = carve
-    return result
+parse_literal :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	data: Node_Data
+	#partial switch parser.current_token.kind {
+	case .Integer:        data.literal = Literal_Data{kind = .Integer}
+	case .Float:          data.literal = Literal_Data{kind = .Float}
+	case .Hexadecimal:    data.literal = Literal_Data{kind = .Hexadecimal}
+	case .Binary:         data.literal = Literal_Data{kind = .Binary}
+	case .String_Literal:
+		data.literal = Literal_Data{kind = .String}
+		span = Span{span.start + 1, span.end - 1}
+	case .Bool_Literal:   data.literal = Literal_Data{kind = .Bool}
+	case:
+		error_at_current(parser, "Unknown literal type")
+		return INVALID_NODE
+	}
+	advance_token(parser)
+	return add_node(parser, .Literal, data, span)
 }
 
-/*
- * parse_execute_prefix handles ! as a unary prefix marking compile-time evaluation
- */
-parse_execute_prefix :: proc(parser: ^Parser) -> ^Node {
-    position := parser.current_token.position
+parse_identifier :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	name_span := span
+	capture_span := EMPTY_SPAN
 
-    // Consume '!'
-    advance_token(parser)
-
-    // If no operand follows, this is a lone Execute, not CompileTime
-    if !is_expression_start(parser.current_token.kind) &&
-       parser.current_token.kind != .LeftBraceCarve {
-        exec := Execute{
-            to = nil,
-            wrappers = make([dynamic]ExecutionWrapper, 0, 0),
-            position = position,
-        }
-        node := new(Node)
-        node^ = exec
-        return node
-    }
-
-    ct := CompileTime{
-        to = parse_expression(parser, Precedence.UNARY),
-        position = position,
-    }
-
-    node := new(Node)
-    node^ = ct
-    return node
-}
-
-/*
- * parse_execute handles postfix execution patterns like expr<[!]>
- */
-parse_execute :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the ! token
-    position := parser.current_token.position
-
-    // Create execute node
-    execute := Execute{
-        to = left,
-        wrappers = make([dynamic]ExecutionWrapper, 0, 0),
-        position = position,
-    }
-
-    // Consume the ! token
-    advance_token(parser)
-
-    // Create and return execute node
-    result := new(Node)
-    result^ = execute
-    return result
-}
-
-/*
- * parse_product_prefix handles the standalone product expression (-> to)
- */
-parse_product_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the -> token
-    position := parser.current_token.position
-
-    // Consume the ->
-    advance_token(parser)
-
-    product := Product{
-        position = position, // Store position
-    }
-
-    // Parse the to or handle empty product
-    if parser.current_token.kind == .RightBrace || parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        // Empty product - this is valid
-        product.to = nil
-    } else {
-        // Parse the to — use PATTERN to prevent another -> from attaching as infix
-        if to := parse_expression(parser, .PATTERN); to != nil {
-            product.to = to
-        } else {
-            // Error already reported
-            return nil
-        }
-    }
-
-    result := new(Node)
-    result^ = product
-    return result
-}
-
-/*
- * parse_literal handles literal tos (numbers, strings)
- */
-parse_literal :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the literal token
-    position := parser.current_token.position
-
-    literal := Literal {
-      to = parser.current_token.text,
-      position = position, // Store position
-    }
-
-    #partial switch parser.current_token.kind {
-    case .Integer:
-        literal.kind = .Integer
-    case .Float:
-        literal.kind = .Float
-    case .Hexadecimal:
-        literal.kind = .Hexadecimal
-    case .Binary:
-        literal.kind = .Binary
-    case .String_Literal:
-        literal.kind = .String
-    case .Bool_Literal:
-        literal.kind = .Bool
-    case:
-        error_at_current(parser, "Unknown literal type")
-        return nil
-    }
-
-    advance_token(parser)
-
-    result := new(Node)
-    result^ = literal
-    return result
-}
-
-/*
- * parse_identifier handles identifier expressions
- */
-parse_identifier :: proc(parser: ^Parser) -> ^Node {
-    position := parser.current_token.position
-    name := parser.current_token.text
-
-    advance_token(parser) // consume identifier
-
-    id := Identifier{
-        name = name,
-        capture = "",
-        position = position,
-    }
-
-    // Check for (capture) after identifier
-    if parser.current_token.kind == .LeftParenNoSpace {
-        if parser.peek_token.kind == .Identifier {
-            advance_token(parser) // consume capture
-            id.capture = parser.current_token.text
-            advance_token(parser) // consume capture
-
-            if parser.current_token.kind == .RightParen {
-                advance_token(parser) // consume )
-            } else {
-                error_at_current(parser, "Expected ')' after capture")
-            }
-        }
-    }
-
-    result := new(Node)
-    result^ = id
-    return result
-}
-
-/*
- * skip_newlines skips consecutive newline tokens
- */
-skip_newlines :: proc(parser: ^Parser) {
-    for parser.current_token.kind == .Newline {
-        advance_token(parser)
-    }
-}
-
-/*
- * parse_scope parses a scope block {...} - improved to handle empty scopes
- */
-parse_scope :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the left brace
-    position := parser.current_token.position
-
-    // Consume opening brace
-    advance_token(parser)
-
-    scope := ScopeNode{
-        to = make([dynamic]Node, 0, 2),
-        position = position, // Store position
-    }
-
-    // Allow for empty scopes
-    if parser.current_token.kind == .RightBrace {
-        advance_token(parser)
-        result := new(Node)
-        result^ = scope
-        return result
-    }
-
-    // Parse statements until closing brace
-    for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-        // Skip newlines between statements
-        skip_newlines(parser)
-
-        if parser.current_token.kind == .RightBrace {
-            break
-        }
-
-        // Parse statement with error recovery
-        if parser.panic_mode {
-            synchronize(parser)
-
-            // After synchronizing, check if we're at the end of the scope
-            if parser.current_token.kind == .RightBrace {
-                break
-            }
-        }
-
-        if node := parse_statement(parser); node != nil {
-            append(&scope.to, node^)
-        }
-
-        // Skip newlines after statements
-        skip_newlines(parser)
-    }
-
-    // Consume closing brace
-    if !match(parser, .RightBrace) {
-        error_at_current(parser, "Expected '}' to close scope")
-    }
-
-    result := new(Node)
-    result^ = scope
-    return result
-}
-
-/*
- * parse_grouping parses grouping expressions (...)
- */
-parse_grouping :: proc(parser: ^Parser) -> ^Node {
-    position := parser.current_token.position
-    advance_token(parser) // consume (
-
-    // Handle (identifier) as just an identifier
-    if parser.current_token.kind == .Identifier && parser.peek_token.kind == .RightParen {
-        capture := parser.current_token.text
-        advance_token(parser) // consume identifier
-        advance_token(parser) // consume )
-
-        id := new(Node)
-        id^ = Identifier{
-            name = "",
-            capture = capture,
-            position = position,
-        }
-        return id
-    }
-
-    // Empty parentheses
-    if parser.current_token.kind == .RightParen {
-        advance_token(parser)
-        empty := new(Node)
-        empty^ = ScopeNode{
-            to = make([dynamic]Node, 0, 2),
-            position = position,
-        }
-        return empty
-    }
-
-    // Regular expression grouping
-    expr := parse_expression(parser)
-    if expr == nil {
-        error_at_current(parser, "Expected expression after '('")
-        return nil
-    }
-
-    if !expect_token(parser, .RightParen) {
-        return nil
-    }
-
-    return expr
-}
-
-/*
- * Parse bitwise or with disambiguation for GPU execution
- */
-parse_bit_or :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
-        return node
-    }
-    return parse_binary(parser, left)
-  }
-
-/*
- * try_parse_wrapped_execute attempts to parse an execute wrapped.
- * If successful, it returns the Execute node and true.
- * If not an execution pattern, it returns nil and false and leaves the parser position unchanged.
- */
-try_parse_wrapped_execute :: proc(parser: ^Parser, left: ^Node) -> (^Node, bool) {
-   // Save original parser position to restore if this isn't an execution pattern
-    original_position := parser.lexer.position
-    original_current := parser.current_token
-    original_peek := parser.peek_token
-
-    // Stack to track opening symbols for proper nesting
-    stack := make([dynamic]Token_Kind)
-    defer delete(stack)
-
-    // Create execute node
-    execute := Execute{
-        to = left,
-        wrappers = make([dynamic]ExecutionWrapper, 0, 4),
-        position = parser.current_token.position,
-    }
-
-    // Process the execution pattern
-    found_exclamation := false
-
-    // Continue parsing until we have a complete execution pattern
-    for {
-        current := parser.current_token.kind
-
-        #partial switch current {
-        case .Execute:
-            // Add sequential execution wrapper
-            found_exclamation = true
-            advance_token(parser)
-
-        case .LeftParen, .LeftParenNoSpace:
-            // Start of background execution
-            append_elem(&execute.wrappers, ExecutionWrapper.Background)
-            append_elem(&stack, Token_Kind.LeftParen)
-            advance_token(parser)
-
-        case .Less:
-            // Start of threading execution
-            append_elem(&execute.wrappers, ExecutionWrapper.Threading)
-            append_elem(&stack, Token_Kind.Less)
-            advance_token(parser)
-
-        case .LeftBracket:
-            // Start of parallel CPU execution
-            append_elem(&execute.wrappers, ExecutionWrapper.Parallel_CPU)
-            append_elem(&stack, Token_Kind.LeftBracket)
-            advance_token(parser)
-
-        case .Or:
-            // Check if it's an opening or closing Or
-            if len(stack) > 0 && stack[len(stack)-1] == Token_Kind.Or {
-                // Closing Or, pop from stack
-                ordered_remove(&stack, len(stack)-1)
-                advance_token(parser)
-            } else {
-                // Opening Or, push to stack
-                append_elem(&execute.wrappers, ExecutionWrapper.GPU)
-                append_elem(&stack, Token_Kind.Or)
-                advance_token(parser)
-            }
-
-        case .RightParen:
-            // Check for corresponding opening parenthesis
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftParen {
-                error_at_current(parser, "Mismatched ')' in execution pattern")
-                parser.lexer.position = original_position
-                parser.current_token = original_current
-                parser.peek_token = original_peek
-                return nil, false
-            }
-
-            // Pop opening parenthesis from stack
-            ordered_remove(&stack, len(stack)-1)
-            advance_token(parser)
-
-        case .Greater:
-            // Check for corresponding opening angle bracket
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.Less {
-                error_at_current(parser, "Mismatched '>' in execution pattern")
-                parser.lexer.position = original_position
-                parser.current_token = original_current
-                parser.peek_token = original_peek
-                return nil, false
-            }
-
-            // Pop opening angle bracket from stack
-            ordered_remove(&stack, len(stack)-1)
-            advance_token(parser)
-
-        case .RightBracket:
-            // Check for corresponding opening square bracket
-            if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftBracket {
-                error_at_current(parser, "Mismatched ']' in execution pattern")
-                parser.lexer.position = original_position
-                parser.current_token = original_current
-                parser.peek_token = original_peek
-                return nil, false
-            }
-
-            // Pop opening square bracket from stack
-            ordered_remove(&stack, len(stack)-1)
-            advance_token(parser)
-
-        case:
-          if !found_exclamation {
-            parser.lexer.position = original_position
-            parser.current_token = original_current
-            parser.peek_token = original_peek
-            return nil, false
-          }
-            break
-        }
-
-        // If stack is empty and we found an exclamation mark, we're done
-        if len(stack) == 0 {
-          if found_exclamation {
-            break
-          } else {
-            parser.lexer.position = original_position
-            parser.current_token = original_current
-            parser.peek_token = original_peek
-            return nil, false
-          }
-        }
-    }
-
-    // Verify we've found an exclamation mark and all opening tokens have been closed
-    if !found_exclamation {
-        error_at_current(parser, "Execution pattern must contain '!'")
-        parser.lexer.position = original_position
-        parser.current_token = original_current
-        parser.peek_token = original_peek
-        return nil, false
-    }
-
-    if len(stack) > 0 {
-        // We have unclosed tokens in the stack
-        token_kind := stack[len(stack)-1]
-        closing_token: string
-
-        #partial switch token_kind {
-        case .LeftParen, .LeftParenNoSpace:    closing_token = ")"
-        case .LeftBracket:  closing_token = "]"
-        case .Less:     closing_token = ">"
-        case .Or:        closing_token = "|"
-        }
-
-        error_at_current(parser, fmt.tprintf("Unclosed '%v' in execution pattern, expected '%s'",
-                                           token_kind, closing_token))
-        parser.lexer.position = original_position
-        parser.current_token = original_current
-        parser.peek_token = original_peek
-        return nil, false
-    }
-
-    // Successfully parsed an execution pattern
-    result := new(Node)
-    result^ = execute
-    return result, true
-}
-
-/*
- * Parse less than with disambiguation for threading execution
- */
-parse_less_than :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Try to parse as an execution pattern
-    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
-        return node
-    }
-
-    // Otherwise, parse as normal binary operator
-    position := parser.current_token.position
-    advance_token(parser) // Consume
-
-    // It's a simple < operator
-    op := Operator{
-        kind = .Less,
-        left = left,
-        right = parse_expression(parser, Precedence(int(Precedence.COMPARISON) + 1)),
-        position = position,
-    }
-
-    result := new(Node)
-    result^ = op
-    return result
-}
-
-/*
- * Parse left bracket with disambiguation for parallel execution
- */
-parse_left_bracket :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Try to parse as an execution pattern
-    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
-        return node
-    }
-
-    error_at_current(parser, "Trying to use left bracket [ for something else than execution wrapper like [!]")
-    return nil
-}
-
-/*
- * Parse left parenthesis with disambiguation for background execution
- */
-parse_left_paren :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Try to parse as an execution pattern
-    if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
-        return node
-    }
-
-    // Not an execution pattern — consume the grouping but return left unchanged
-    parse_grouping(parser)
-    return left
-}
-
-/*
- * parse_unknown parses unknown literal ??
- */
-parse_unknown :: proc(parser: ^Parser) -> ^Node {
-    result := new(Node)
-    result^ = Unknown{position = parser.current_token.position}
-    advance_token(parser)
-    return result
-}
-
-/*
- * parse_enforce handle property enforcement with ?!
- */
-parse_enforce:: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the binary operator
-    position := parser.current_token.position
-
-    // Remember the operator
-    token_kind := parser.current_token.kind
-    rule := get_rule(token_kind)
-
-    // Move past the operator
-    advance_token(parser)
-
-    skip_newlines(parser)
-
-    // Parse the right operand with higher precedence
-    right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
-    if right == nil {
-        error_at_current(parser, "Expected expression after binary operator")
-        return nil
-    }
-
-    // Create operator node
-    enforce := Enforce{
-        left = left,
-        right = right,
-        position = position, // Store position
-    }
-    result := new(Node)
-    result^ = enforce
-    return result
-}
-
-
-/*
- * parse_unary parses unary operators (-, ~)
- */
-parse_unary :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the unary operator
-    position := parser.current_token.position
-
-    // Remember the operator kind
-    token_kind := parser.current_token.kind
-
-    // Advance past the operator
-    advance_token(parser)
-
-    // Parse the operand
-    operand := parse_expression(parser, .UNARY)
-    if operand == nil {
-        error_at_current(parser, "Expected expression after unary operator")
-        return nil
-    }
-
-    // Create operator node
-    op := Operator{
-        right = operand,
-        position = position, // Store position
-    }
-
-    // Set operator kind based on token
-    #partial switch token_kind {
-    case .Minus:
-        op.kind = .Subtract
-    case .Not:
-        op.kind = .Not
-    case:
-        error_at_current(parser, "Unexpected unary operator")
-        return nil
-    }
-
-    result := new(Node)
-    result^ = op
-    return result
-}
-
-/*
- * parse_binary handles binary operators (+, -, *, /, etc.)
- */
-parse_binary :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the binary operator
-    position := parser.current_token.position
-
-    // Remember the operator
-    token_kind := parser.current_token.kind
-    rule := get_rule(token_kind)
-
-    // Move past the operator
-    advance_token(parser)
-
-    // A binary operator commits to a right operand — newlines after the
-    // operator are purely cosmetic line-continuation, not statement breaks.
-    skip_newlines(parser)
-
-    // Parse the right operand with higher precedence
-    right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
-    if right == nil {
-        error_at_current(parser, "Expected expression after binary operator")
-        parser.panic_mode = false
-        return left
-    }
-
-    // Create operator node
-    op := Operator{
-        left = left,
-        right = right,
-        position = position, // Store position
-    }
-
-    // Set operator type
-    #partial switch token_kind {
-    case .Plus:          op.kind = .Add
-    case .Minus:         op.kind = .Subtract
-    case .Asterisk:      op.kind = .Multiply
-    case .Slash:         op.kind = .Divide
-    case .Percent:       op.kind = .Mod
-    case .And:           op.kind = .And
-    case .Or:            op.kind = .Or
-    case .Xor:           op.kind = .Xor
-    case .Equal:         op.kind = .Equal
-    case .NotEqual:      op.kind = .NotEqual
-    case .Less:          op.kind = .Less
-    case .Greater:       op.kind = .Greater
-    case .LessEqual:     op.kind = .LessEqual
-    case .GreaterEqual:  op.kind = .GreaterEqual
-    case .LShift:        op.kind = .LShift
-    case .RShift:        op.kind = .RShift
-    case:
-        error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", token_kind))
-        return nil
-    }
-
-    result := new(Node)
-    result^ = op
-    return result
-}
-
-/*
- * parse_property_access handles normal property access (a.b)
- */
-parse_property_access :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-	// Save position of the property access token
-	position := parser.current_token.position
-
-	// Consume the property access token
 	advance_token(parser)
 
-	// Expect identifier for property name
+	if parser.current_token.kind == .LeftParenNoSpace {
+		if parser.peek_token.kind == .Identifier {
+			advance_token(parser)
+			capture_span = parser.current_token.span
+			advance_token(parser)
+			if parser.current_token.kind == .RightParen {
+				advance_token(parser)
+			} else {
+				error_at_current(parser, "Expected ')' after capture")
+			}
+		}
+	}
+
+	data: Node_Data
+	data.identifier = Identifier_Data{name = name_span, capture = capture_span}
+	full_span := Span{span.start, max(name_span.end, capture_span.end)}
+	if capture_span != EMPTY_SPAN {
+		full_span.end += 1
+	}
+	return add_node(parser, .Identifier, data, full_span)
+}
+
+parse_scope :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+
+	if parser.current_token.kind == .RightBrace {
+		span_end := parser.current_token.span.end
+		advance_token(parser)
+		data: Node_Data
+		data.scope = {start = 0, len = 0}
+		return add_node(parser, .ScopeNode, data, Span{span_start, span_end})
+	}
+
+	children := make([dynamic]Node_Index, 0, 4, context.temp_allocator)
+
+	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+		skip_newlines(parser)
+		if parser.current_token.kind == .RightBrace do break
+
+		if parser.panic_mode {
+			synchronize(parser)
+			if parser.current_token.kind == .RightBrace do break
+		}
+
+		if node := parse_statement(parser); node != INVALID_NODE {
+			append(&children, node)
+		}
+		skip_newlines(parser)
+	}
+
+	span_end := parser.current_token.span.end
+	if !match_token(parser, .RightBrace) {
+		error_at_current(parser, "Expected '}' to close scope")
+	}
+
+	data: Node_Data
+	r2 := add_extra(parser, children[:])
+	data.scope = {start = r2.start, len = r2.len}
+	return add_node(parser, .ScopeNode, data, Span{span_start, span_end})
+}
+
+parse_carve :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+
+	children := make([dynamic]Node_Index, 0, 4, context.temp_allocator)
+
+	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
+		}
+		if parser.current_token.kind == .RightBrace do break
+
+		if node := parse_statement(parser); node != INVALID_NODE {
+			append(&children, node)
+		} else {
+			synchronize(parser)
+			if parser.current_token.kind == .RightBrace do break
+		}
+
+		for parser.current_token.kind == .Newline {
+			advance_token(parser)
+		}
+	}
+
+	span_end := parser.current_token.span.end
+	if !match_token(parser, .RightBrace) {
+		error_at_current(parser, "Expected } after carves")
+	}
+
+	data: Node_Data
+	data.carve = Carve_Data{source = left, children = add_extra(parser, children[:])}
+	return add_node(parser, .Carve, data, Span{span_start, span_end})
+}
+
+parse_grouping :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+
+	if parser.current_token.kind == .Identifier && parser.peek_token.kind == .RightParen {
+		capture_span := parser.current_token.span
+		advance_token(parser)
+		span_end := parser.current_token.span.end
+		advance_token(parser)
+		data: Node_Data
+		data.identifier = Identifier_Data{name = EMPTY_SPAN, capture = capture_span}
+		return add_node(parser, .Identifier, data, Span{span_start, span_end})
+	}
+
+	if parser.current_token.kind == .RightParen {
+		span_end := parser.current_token.span.end
+		advance_token(parser)
+		data: Node_Data
+		data.scope = {start = 0, len = 0}
+		return add_node(parser, .ScopeNode, data, Span{span_start, span_end})
+	}
+
+	expr := parse_expression(parser)
+	if expr == INVALID_NODE {
+		error_at_current(parser, "Expected expression after '('")
+		return INVALID_NODE
+	}
+
+	if !expect_token(parser, .RightParen) {
+		return INVALID_NODE
+	}
+
+	return expr
+}
+
+parse_execute_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	advance_token(parser)
+
+	if !is_expression_start(parser.current_token.kind) &&
+	   parser.current_token.kind != .LeftBraceCarve {
+		data: Node_Data
+		data.execute = Execute_Data{target = INVALID_NODE, wrappers = EMPTY_RANGE}
+		return add_node(parser, .Execute, data, span)
+	}
+
+	operand := parse_expression(parser, Precedence.UNARY)
+	data: Node_Data
+	data.unary = Unary_Data{operand = operand}
+	return add_node(parser, .CompileTime, data, Span{span.start, parser.nodes[operand].span.end})
+}
+
+parse_execute :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span := parser.current_token.span
+	advance_token(parser)
+	data: Node_Data
+	data.execute = Execute_Data{target = left, wrappers = EMPTY_RANGE}
+	return add_node(parser, .Execute, data, Span{parser.nodes[left].span.start, span.end})
+}
+
+parse_product_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+
+	if parser.current_token.kind == .RightBrace || parser.current_token.kind == .EOF ||
+	   parser.current_token.kind == .Newline {
+		data: Node_Data
+		data.unary = Unary_Data{operand = INVALID_NODE}
+		return add_node(parser, .Product, data, Span{span_start, parser.current_token.span.start})
+	}
+
+	to := parse_expression(parser, .PATTERN)
+	if to == INVALID_NODE do return INVALID_NODE
+
+	data: Node_Data
+	data.unary = Unary_Data{operand = to}
+	return add_node(parser, .Product, data, Span{span_start, parser.nodes[to].span.end})
+}
+
+parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	token_kind := parser.current_token.kind
+	rule := get_rule(token_kind)
+	advance_token(parser)
+	skip_newlines(parser)
+
+	right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
+	if right == INVALID_NODE {
+		error_at_current(parser, "Expected expression after binary operator")
+		parser.panic_mode = false
+		return left
+	}
+
+	op_kind: Operator_Kind
+	#partial switch token_kind {
+	case .Plus:          op_kind = .Add
+	case .Minus:         op_kind = .Subtract
+	case .Asterisk:      op_kind = .Multiply
+	case .Slash:         op_kind = .Divide
+	case .Percent:       op_kind = .Mod
+	case .And:           op_kind = .And
+	case .Or:            op_kind = .Or
+	case .Xor:           op_kind = .Xor
+	case .Equal:         op_kind = .Equal
+	case .NotEqual:      op_kind = .NotEqual
+	case .Less:          op_kind = .Less
+	case .Greater:       op_kind = .Greater
+	case .LessEqual:     op_kind = .LessEqual
+	case .GreaterEqual:  op_kind = .GreaterEqual
+	case .LShift:        op_kind = .LShift
+	case .RShift:        op_kind = .RShift
+	case:
+		error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", token_kind))
+		return INVALID_NODE
+	}
+
+	data: Node_Data
+	data.operator = Operator_Node_Data{kind = op_kind, left = left, right = right}
+	return add_node(parser, .Operator, data, Span{span_start, parser.nodes[right].span.end})
+}
+
+parse_unary :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	token_kind := parser.current_token.kind
+	advance_token(parser)
+
+	operand := parse_expression(parser, .UNARY)
+	if operand == INVALID_NODE {
+		error_at_current(parser, "Expected expression after unary operator")
+		return INVALID_NODE
+	}
+
+	op_kind: Operator_Kind
+	#partial switch token_kind {
+	case .Minus: op_kind = .Subtract
+	case .Not:   op_kind = .Not
+	case:
+		error_at_current(parser, "Unexpected unary operator")
+		return INVALID_NODE
+	}
+
+	data: Node_Data
+	data.operator = Operator_Node_Data{kind = op_kind, left = INVALID_NODE, right = operand}
+	return add_node(parser, .Operator, data, Span{span_start, parser.nodes[operand].span.end})
+}
+
+parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
+
 	if parser.current_token.kind != .Identifier {
 		error_at_current(parser, "Expected property name after '.'")
-		return nil
+		return INVALID_NODE
 	}
 
-	prop_name := parser.current_token.text
+	prop_span := parser.current_token.span
 	advance_token(parser)
 
-	// Create property node
-	property := Property{
-		source = left,
-		position = position,
-	}
+	prop_data: Node_Data
+	prop_data.identifier = Identifier_Data{name = prop_span, capture = EMPTY_SPAN}
+	prop_id := add_node(parser, .Identifier, prop_data, prop_span)
 
-	// Create property identifier
-	prop_id := new(Node)
-	prop_id^ = Identifier{
-		name = prop_name,
-		position = position,
-	}
-	property.property = prop_id
-
-	result := new(Node)
-	result^ = property
-	return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = prop_id}
+	return add_node(parser, .Property, data, Span{span_start, prop_span.end})
 }
 
-/*
- * parse_property_from_none handles property access with no source (.b)
- */
-parse_property_from_none :: proc(parser: ^Parser) -> ^Node {
-	// Save position of the property from none token
-	position := parser.current_token.position
-
-	// Consume the property from none token
+parse_property_from_none :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
 	advance_token(parser)
 
-	// Expect identifier for property name
 	if parser.current_token.kind != .Identifier {
 		error_at_current(parser, "Expected property name after '.'")
-		return nil
+		return INVALID_NODE
 	}
 
-	prop_name := parser.current_token.text
+	prop_span := parser.current_token.span
 	advance_token(parser)
 
-	// Create property node with nil source (source none)
-	property := Property{
-		source = nil, // source none
-		position = position,
-	}
+	prop_data: Node_Data
+	prop_data.identifier = Identifier_Data{name = prop_span, capture = EMPTY_SPAN}
+	prop_id := add_node(parser, .Identifier, prop_data, prop_span)
 
-	// Create property identifier
-	prop_id := new(Node)
-	prop_id^ = Identifier{
-		name = prop_name,
-		position = position,
-	}
-	property.property = prop_id
-
-	result := new(Node)
-	result^ = property
-	return result
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = prop_id}
+	return add_node(parser, .Property, data, Span{span_start, prop_span.end})
 }
 
-/*
- * parse_property_to_none handles property access with no property (a.)
- */
-parse_property_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-	// Save position of the property to none token
-	position := parser.current_token.position
-
-	// Consume the property to none token
+parse_property_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
 	advance_token(parser)
 
-	// Create property node with nil property (property none)
-	property := Property{
-		source = left,
-		property = nil, // property none
-		position = position,
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = INVALID_NODE}
+	return add_node(parser, .Property, data, Span{span_start, parser.current_token.span.start})
+}
+
+parse_constraint_bind :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
+
+	name := INVALID_NODE
+	if parser.current_token.kind == .RightBrace ||
+	   parser.current_token.kind == .EOF ||
+	   parser.current_token.kind == .Newline {
+	} else if parser.current_token.kind == .LeftParenNoSpace {
+		name = parse_grouping(parser)
+	} else if parser.current_token.kind == .LeftBrace {
+	} else if is_expression_start(parser.current_token.kind) {
+		name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
 	}
 
-	result := new(Node)
-	result^ = property
-	return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = name}
+	span_end := parser.current_token.span.start
+	if name != INVALID_NODE {
+		span_end = parser.nodes[name].span.end
+	}
+	node := add_node(parser, .Constraint, data, Span{span_start, span_end})
+
+	if parser.current_token.kind == .LeftBraceCarve {
+		return parse_carve(parser, node)
+	}
+	return node
 }
 
-/*
- * parse_constraint_bind handles normal constraint (a:b)
- */
-parse_constraint_bind :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the constraint bind token
-    position := parser.current_token.position
+parse_constraint_from_none :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Consume the constraint bind token
-    advance_token(parser)
+	name := INVALID_NODE
+	if parser.current_token.kind == .RightBrace ||
+	   parser.current_token.kind == .EOF ||
+	   parser.current_token.kind == .Newline {
+	} else if parser.current_token.kind == .LeftParenNoSpace {
+		name = parse_grouping(parser)
+	} else if parser.current_token.kind == .LeftBrace {
+	} else if is_expression_start(parser.current_token.kind) {
+		name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+	}
 
-    // Create constraint node
-    constraint := Constraint{
-        constraint = left,
-        position = position,
-    }
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = name}
+	span_end := parser.current_token.span.start
+	if name != INVALID_NODE {
+		span_end = parser.nodes[name].span.end
+	}
+	node := add_node(parser, .Constraint, data, Span{span_start, span_end})
 
-    // Parse what follows the colon
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        // Empty constraint (a:)
-        constraint.name = nil
-    } else if parser.current_token.kind == .LeftParenNoSpace {
-        // a:(capture)
-        constraint.name = parse_grouping(parser)
-    } else if parser.current_token.kind == .LeftBrace {
-        // leave name nil; handled below as an carve on the whole constraint
-    } else if is_expression_start(parser.current_token.kind) {
-        // a:value — parse value but DO NOT consume trailing '{' (reserved for outer carve)
-        constraint.name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
-    }
-
-    // If a '{' follows, treat it as an Carve applied to the entire constraint
-    node := new(Node)
-    node^ = constraint
-    if parser.current_token.kind == .LeftBraceCarve {
-        return parse_carve(parser, node)
-    }
-
-    return node
+	if parser.current_token.kind == .LeftBraceCarve {
+		return parse_carve(parser, node)
+	}
+	return node
 }
 
-/*
- * parse_constraint_from_none handles constraint with no constraint type (:b)
- */
-parse_constraint_from_none :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the constraint from none token
-    position := parser.current_token.position
+parse_constraint_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Consume the constraint from none token
-    advance_token(parser)
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = INVALID_NODE}
+	node := add_node(parser, .Constraint, data, Span{span_start, parser.current_token.span.start})
 
-    // Create constraint node with nil constraint (constraint none)
-    constraint := Constraint{
-        constraint = nil, // constraint none
-        position = position,
-    }
-
-    // Parse what follows the colon
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        // Empty constraint (:)
-        constraint.name = nil
-    } else if parser.current_token.kind == .LeftParenNoSpace {
-        // :(capture)
-        constraint.name = parse_grouping(parser)
-    } else if parser.current_token.kind == .LeftBrace {
-        // leave name nil; handled below as an carve on the whole constraint
-    } else if is_expression_start(parser.current_token.kind) {
-        // :value — parse value but DO NOT consume trailing '{'
-        constraint.name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
-    }
-
-    // If a '{' follows, treat it as an Carve applied to the entire constraint
-    node := new(Node)
-    node^ = constraint
-    if parser.current_token.kind == .LeftBraceCarve {
-        return parse_carve(parser, node)
-    }
-
-    return node
-}
-/*
- * parse_constraint_to_none handles constraint with no value (a:)
- */
-parse_constraint_to_none :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the constraint to none token
-    position := parser.current_token.position
-
-    // Consume the constraint to none token
-    advance_token(parser)
-
-    // Create constraint node with nil name (value none)
-    constraint := Constraint{
-        constraint = left,
-        name = nil, // value none
-        position = position,
-    }
-
-    // If a '{' follows, treat it as an Carve applied to the entire constraint
-    node := new(Node)
-    node^ = constraint
-    if parser.current_token.kind == .LeftBraceCarve {
-        return parse_carve(parser, node)
-    }
-
-    return node
+	if parser.current_token.kind == .LeftBraceCarve {
+		return parse_carve(parser, node)
+	}
+	return node
 }
 
-/*
- * parse_invalid_property handles invalid property syntax with spaces
- */
-parse_invalid_property :: proc(parser: ^Parser) -> ^Node {
+parse_invalid_property :: proc(parser: ^Parser) -> Node_Index {
 	error_at_current(parser, "Invalid property syntax with spaces around '.' - use 'a.b', '.b', or 'a.'")
 	advance_token(parser)
-	return nil
+	return INVALID_NODE
 }
 
-/*
- * parse_invalid_property_infix handles invalid property syntax with spaces (infix)
- */
-parse_invalid_property_infix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+parse_invalid_property_infix :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	error_at_current(parser, "Invalid property syntax with spaces around '.' - use 'a.b', '.b', or 'a.'")
 	advance_token(parser)
 	parser.panic_mode = false
 	return left
 }
 
-/*
- * parse_invalid_constraint handles invalid constraint syntax with spaces
- */
-parse_invalid_constraint :: proc(parser: ^Parser) -> ^Node {
+parse_invalid_constraint :: proc(parser: ^Parser) -> Node_Index {
 	error_at_current(parser, "Invalid constraint syntax with spaces around ':' - use 'a:b', ':b', or 'a:'")
 	advance_token(parser)
-	return nil
+	return INVALID_NODE
 }
 
-/*
- * parse_invalid_constraint_infix handles invalid constraint syntax with spaces (infix)
- */
-parse_invalid_constraint_infix :: proc(parser: ^Parser, left: ^Node) -> ^Node {
+parse_invalid_constraint_infix :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	error_at_current(parser, "Invalid constraint syntax with spaces around ':' - use 'a:b', ':b', or 'a:'")
 	advance_token(parser)
 	parser.panic_mode = false
 	return left
 }
-/*
- * parse_pointing_push handles pointing operator (a -> b)
- */
-parse_pointing_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the -> token
-    position := parser.current_token.position
 
-    // Create pointing node
-    pointing := Pointing{
-        from = left,
-        position = position, // Store position
-    }
+parse_pointing_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Consume ->
-    advance_token(parser)
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, .ASSIGNMENT)
+	}
 
-    // Handle the case where there's nothing after the arrow
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        pointing.to = nil
-    } else {
-        // Parse to — use ASSIGNMENT to prevent another -> from chaining
-        to := parse_expression(parser, .ASSIGNMENT)
-        pointing.to = to
-    }
-    result := new(Node)
-    result^ = pointing
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .Pointing, data, Span{span_start, span_end})
 }
 
-/*
- * parse_pointing_pull_prefix handles prefix pointing pull operator (<- to)
- */
-parse_pointing_pull_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the <- token
-    position := parser.current_token.position
+parse_pointing_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Create pointing pull node
-    pointing_pull := PointingPull{
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, .ASSIGNMENT)
+	}
 
-    // Consume <-
-    advance_token(parser)
-
-    // Parse to or handle empty value
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        pointing_pull.to = nil
-    } else {
-        // Parse to — use ASSIGNMENT to prevent -> from chaining inside
-        to := parse_expression(parser, .ASSIGNMENT)
-        pointing_pull.to = to
-    }
-
-    result := new(Node)
-    result^ = pointing_pull
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .PointingPull, data, Span{span_start, span_end})
 }
 
-/*
- * parse_pointing_pull handles infix pointing pull operator (a <- b)
- */
-parse_pointing_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the <- token
-    position := parser.current_token.position
+parse_pointing_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Create pointing pull node
-    pointing_pull := PointingPull{
-        from = left,
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, .ASSIGNMENT)
+	}
 
-    // Consume <-
-    advance_token(parser)
-
-    // Parse to or handle empty value
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        pointing_pull.to = nil
-    } else {
-        // Parse to — use ASSIGNMENT to prevent -> from chaining inside
-        to := parse_expression(parser, .ASSIGNMENT)
-        pointing_pull.to = to
-    }
-
-    result := new(Node)
-    result^ = pointing_pull
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .PointingPull, data, Span{span_start, span_end})
 }
 
-/*
- * parse_event_push_prefix handles prefix event push (>- to)
- */
-parse_event_push_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the >- token
-    position := parser.current_token.position
+parse_event_push_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Create event push node
-    event_push := EventPush{
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser)
+	}
 
-    // Consume >-
-    advance_token(parser)
-
-    // Parse to or handle empty value
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        event_push.to = nil
-    } else {
-        // Parse to
-        to := parse_expression(parser)
-        event_push.to = to
-    }
-
-    result := new(Node)
-    result^ = event_push
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .EventPush, data, Span{span_start, span_end})
 }
 
-/*
- * parse_event_push handles event push (a >- b)
- */
-parse_event_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the >- token
-    position := parser.current_token.position
+parse_event_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Create event push node
-    event_push := EventPush{
-        from = left,
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser)
+	}
 
-    // Consume >-
-    advance_token(parser)
-
-    // Parse to or handle empty value
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        event_push.to = nil
-    } else {
-        // Parse to
-        to := parse_expression(parser)
-        event_push.to = to
-    }
-
-    result := new(Node)
-    result^ = event_push
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .EventPush, data, Span{span_start, span_end})
 }
 
-/*
- * parse_event_pull_prefix handles prefix event pull (-< to)
- */
-parse_event_pull_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the -< token
-    position := parser.current_token.position
+parse_event_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Create event pull node
-    event_pull := EventPull{
-        position = position, // Store position
-    }
+	catch_span := EMPTY_SPAN
+	if parser.current_token.kind == .Identifier {
+		catch_span = parser.current_token.span
+		advance_token(parser)
+	}
 
-    // Consume -<
-    advance_token(parser)
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser)
+	}
 
-    if parser.current_token.kind == .Identifier {
-      event_pull.catch = parser.current_token.text
-      advance_token(parser)
-    }
-
-    // Parse to or handle empty value
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        event_pull.to = nil
-    } else {
-        // Parse to
-        to := parse_expression(parser)
-        event_pull.to = to
-    }
-
-    result := new(Node)
-    result^ = event_pull
-    return result
+	data: Node_Data
+	data.event_pull = EventPull_Data{from = INVALID_NODE, to = to, catch_span = catch_span}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .EventPull, data, Span{span_start, span_end})
 }
 
-/*
- * parse_event_pull handles event pull (a -< b)
- */
-parse_event_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the -< token
-    position := parser.current_token.position
+parse_event_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Create event pull node
-    event_pull := EventPull{
-        from = left,
-        position = position, // Store position
-    }
+	catch_span := EMPTY_SPAN
+	if parser.current_token.kind == .Identifier {
+		catch_span = parser.current_token.span
+		advance_token(parser)
+	}
 
-    // Consume -<
-    advance_token(parser)
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser)
+	}
 
-    if parser.current_token.kind == .Identifier {
-      event_pull.catch = parser.current_token.text
-      advance_token(parser)
-    }
-
-    // Parse to or handle empty value
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        event_pull.to = nil
-    } else {
-        // Parse to
-        to := parse_expression(parser)
-        event_pull.to = to
-    }
-
-    result := new(Node)
-    result^ = event_pull
-    return result
+	data: Node_Data
+	data.event_pull = EventPull_Data{from = left, to = to, catch_span = catch_span}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .EventPull, data, Span{span_start, span_end})
 }
 
-/*
- * parse_resonance_push_prefix handles prefix resonance push (>>- to)
- */
-parse_resonance_push_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the >>- token
-    position := parser.current_token.position
+parse_resonance_push_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Create resonance push node
-    resonance_push := ResonancePush{
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
+	}
 
-    // Consume >>-
-    advance_token(parser)
-
-    // Parse to or handle empty value. Use precedence ASSIGNMENT+1 so a
-    // trailing pointing (`->`, `<-`, `>-`, `-<`) attaches to the whole
-    // resonance binding instead of being absorbed as the RHS. This makes
-    // `T:v >>- E -> X` parse as `Pointing(ResonancePush(T:v, E), X)`.
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        resonance_push.to = nil
-    } else {
-        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
-        resonance_push.to = to
-    }
-
-    result := new(Node)
-    result^ = resonance_push
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .ResonancePush, data, Span{span_start, span_end})
 }
 
-/*
- * parse_resonance_push handles resonance push (a >>- b)
- */
-parse_resonance_push :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the >>- token
-    position := parser.current_token.position
+parse_resonance_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Create resonance push node
-    resonance_push := ResonancePush{
-        from = left,
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
+	}
 
-    // Consume >>-
-    advance_token(parser)
-
-    // See prefix variant: RHS is parsed at ASSIGNMENT+1 so `->` and friends
-    // remain trailing on the binding.
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        resonance_push.to = nil
-    } else {
-        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
-        resonance_push.to = to
-    }
-
-    result := new(Node)
-    result^ = resonance_push
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .ResonancePush, data, Span{span_start, span_end})
 }
 
-/*
- * parse_resonance_pull_prefix handles prefix resonance pull (-<< to)
- */
-parse_resonance_pull_prefix :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the -<< token
-    position := parser.current_token.position
+parse_resonance_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Create resonance pull node
-    resonance_pull := ResonancePull{
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
+	}
 
-    // Consume -<<
-    advance_token(parser)
-
-    // See >>- variant: keep `->`/`<-`/`>-`/`-<` outside the resonance RHS.
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        resonance_pull.to = nil
-    } else {
-        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
-        resonance_pull.to = to
-    }
-
-    result := new(Node)
-    result^ = resonance_pull
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .ResonancePull, data, Span{span_start, span_end})
 }
 
-/*
- * parse_resonance_pull handles resonance pull (a -<< b)
- */
-parse_resonance_pull :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the -<< token
-    position := parser.current_token.position
+parse_resonance_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Create resonance pull node
-    resonance_pull := ResonancePull{
-        from = left,
-        position = position, // Store position
-    }
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		to = parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
+	}
 
-    // Consume -<<
-    advance_token(parser)
-
-    // See >>- variant: keep `->`/`<-`/`>-`/`-<` outside the resonance RHS.
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        resonance_pull.to = nil
-    } else {
-        to := parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
-        resonance_pull.to = to
-    }
-
-    result := new(Node)
-    result^ = resonance_pull
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.nodes[to].span.end
+	}
+	return add_node(parser, .ResonancePull, data, Span{span_start, span_end})
 }
 
-/*
- * parse_empty_range handles empty range (..)
- */
-parse_empty_range :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the .. token
-    position := parser.current_token.position
-    advance_token(parser)
-    range := Range{
-        position = position, // Store position
-    }
-
-    result := new(Node)
-    result^ = range
-    return result
+parse_empty_range :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	advance_token(parser)
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = INVALID_NODE}
+	return add_node(parser, .Range, data, span)
 }
 
-/*
- * parse_prefix_range handles prefix range (..5)
- */
-parse_prefix_range :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the .. token
-    position := parser.current_token.position
+parse_prefix_range :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Consume ..
-    advance_token(parser)
+	end := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		end = parse_expression(parser, .RANGE)
+	}
 
-    // Parse end to or handle empty value
-    end: ^Node = nil
-    if !(parser.current_token.kind == .RightBrace ||
-         parser.current_token.kind == .EOF ||
-         parser.current_token.kind == .Newline) {
-        end = parse_expression(parser, .RANGE)
-    }
-
-    // Create range node with position
-    range := Range{
-        end = end,
-        position = position, // Store position
-    }
-
-    result := new(Node)
-    result^ = range
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = end}
+	span_end := parser.current_token.span.start
+	if end != INVALID_NODE {
+		span_end = parser.nodes[end].span.end
+	}
+	return add_node(parser, .Range, data, Span{span_start, span_end})
 }
 
-/*
- * parse_postfix_range handles postfix range (5..)
- */
-parse_postfix_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the .. token
-    position := parser.current_token.position
+parse_postfix_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Consume ..
-    advance_token(parser)
-
-    // Create range node with position
-    range := Range{
-        start = left,
-        position = position, // Store position
-    }
-
-    result := new(Node)
-    result^ = range
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = INVALID_NODE}
+	return add_node(parser, .Range, data, Span{span_start, parser.current_token.span.start})
 }
 
-/*
- * parse_range handles complete range (5..2)
- */
-parse_range :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    // Save position of the .. token
-    position := parser.current_token.position
+parse_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    // Consume ..
-    advance_token(parser)
+	end := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   parser.current_token.kind != .Newline {
+		end = parse_expression(parser, .RANGE)
+	}
 
-    // Parse end to or handle empty value
-    end: ^Node = nil
-    if !(parser.current_token.kind == .RightBrace ||
-         parser.current_token.kind == .EOF ||
-         parser.current_token.kind == .Newline) {
-        end = parse_expression(parser, .RANGE)
-    }
-
-    // Create range node with position
-    range := Range{
-        start = left,
-        end = end,
-        position = position, // Store position
-    }
-
-    result := new(Node)
-    result^ = range
-    return result
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = end}
+	span_end := parser.current_token.span.start
+	if end != INVALID_NODE {
+		span_end = parser.nodes[end].span.end
+	}
+	return add_node(parser, .Range, data, Span{span_start, span_end})
 }
 
-/*
- * parse_prefix_comparison handles prefix comparison operators (=to, >value, etc.)
- */
-parse_prefix_comparison :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the comparison operator
-    position := parser.current_token.position
+parse_prefix_comparison :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	token_kind := parser.current_token.kind
+	advance_token(parser)
 
-    // Remember the operator kind
-    token_kind := parser.current_token.kind
+	operand := parse_expression(parser, .UNARY)
+	if operand == INVALID_NODE {
+		error_at_current(parser, "Expected expression after prefix comparison operator")
+		return INVALID_NODE
+	}
 
-    // Advance past the operator
-    advance_token(parser)
+	op_kind: Operator_Kind
+	#partial switch token_kind {
+	case .Equal:        op_kind = .Equal
+	case .NotEqual:     op_kind = .NotEqual
+	case .Less:         op_kind = .Less
+	case .Greater:      op_kind = .Greater
+	case .LessEqual:    op_kind = .LessEqual
+	case .GreaterEqual: op_kind = .GreaterEqual
+	case:
+		error_at_current(parser, "Unexpected prefix comparison operator")
+		return INVALID_NODE
+	}
 
-    // Parse the operand
-    operand := parse_expression(parser, .UNARY)
-    if operand == nil {
-        error_at_current(parser, "Expected expression after prefix comparison operator")
-        return nil
-    }
-
-    // Create operator node
-    op := Operator{
-        right = operand,
-        position = position,
-    }
-
-    // Set operator kind based on token
-    #partial switch token_kind {
-    case .Equal:         op.kind = .Equal
-    case .NotEqual:      op.kind = .NotEqual
-    case .Less:          op.kind = .Less
-    case .Greater:       op.kind = .Greater
-    case .LessEqual:     op.kind = .LessEqual
-    case .GreaterEqual:  op.kind = .GreaterEqual
-    case:
-        error_at_current(parser, "Unexpected prefix comparison operator")
-        return nil
-    }
-
-    result := new(Node)
-    result^ = op
-    return result
+	data: Node_Data
+	data.operator = Operator_Node_Data{kind = op_kind, left = INVALID_NODE, right = operand}
+	return add_node(parser, .Operator, data, Span{span_start, parser.nodes[operand].span.end})
 }
 
-/*
- * parse_constraint handles constraint expressions (Type:to)
- */
-parse_constraint :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    position := parser.current_token.position
+parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
 
-    if left == nil {
-        error_at_current(parser, "Constraint requires a type before ':'")
-        advance_token(parser)
-        return nil
-    }
+	skip_newlines(parser)
 
-    constraint := Constraint{
-        constraint = left,
-        position = position,
-    }
+	branch_indices := make([dynamic]Node_Index, 0, 4, context.temp_allocator)
 
-    advance_token(parser) // consume :
+	if parser.current_token.kind == .LeftBrace {
+		advance_token(parser)
+		skip_newlines(parser)
 
-    // Parse what follows the colon
-    if parser.current_token.kind == .RightBrace ||
-       parser.current_token.kind == .EOF ||
-       parser.current_token.kind == .Newline {
-        // Empty constraint (Type:)
-        constraint.name = nil
-    } else if parser.current_token.kind == .LeftParenNoSpace {
-        // Type:(capture)
-        constraint.name = parse_grouping(parser)
-    } else if is_expression_start(parser.current_token.kind) {
-        // Type:to
-        constraint.name = parse_expression(parser, .CALL)
-    }
+		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+			source_idx, product_idx := parse_branch(parser)
+			append(&branch_indices, source_idx)
+			append(&branch_indices, product_idx)
+			skip_newlines(parser)
+		}
 
-    result := new(Node)
-    result^ = constraint
-    return result
+		if !match_token(parser, .RightBrace) {
+			error_at_current(parser, "Expected } after pattern branches")
+		}
+	} else {
+		inline_expr := INVALID_NODE
+		if parser.current_token.kind == .LeftParenNoSpace {
+			inline_expr = parse_grouping(parser)
+		} else if is_expression_start(parser.current_token.kind) {
+			inline_expr = parse_expression(parser, .OR)
+		} else {
+			error_at_current(parser, "Expected pattern expression after ?")
+			return INVALID_NODE
+		}
+		if inline_expr != INVALID_NODE {
+			append(&branch_indices, inline_expr)
+			append(&branch_indices, INVALID_NODE)
+		}
+	}
+
+	data: Node_Data
+	data.pattern = Pattern_Data{target = left, branches = add_extra(parser, branch_indices[:])}
+	span_end := parser.current_token.span.start
+	return add_node(parser, .Pattern, data, Span{span_start, span_end})
 }
 
-/*
- * parse_pattern handles pattern match (target ? {...})
- */
-parse_pattern :: proc(parser: ^Parser, left: ^Node) -> ^Node {
-    position := parser.current_token.position
-    advance_token(parser) // consume ?
+parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: Node_Index) {
+	if !is_expression_start(parser.current_token.kind) {
+		advance_token(parser)
+		return INVALID_NODE, INVALID_NODE
+	}
 
-    pattern := Pattern{
-        target = left,
-        to = make([dynamic]Branch, 0, 2),
-        position = position,
-    }
+	if parser.current_token.kind == .PointingPush {
+		advance_token(parser)
+		product := parse_expression(parser, .ASSIGNMENT)
+		return INVALID_NODE, product
+	}
 
-    skip_newlines(parser)
+	source := parse_expression(parser, .ASSIGNMENT)
+	product := INVALID_NODE
+	if parser.current_token.kind == .PointingPush {
+		advance_token(parser)
+		product = parse_expression(parser, .ASSIGNMENT)
+	}
 
-    if parser.current_token.kind == .LeftBrace {
-        // Pattern matching with branches: data ? {branches}
-        advance_token(parser) // consume {
-        skip_newlines(parser)
-
-        for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
-            node := parse_branch(parser)
-            if node != nil {
-                append(&pattern.to, node^)
-            }
-            skip_newlines(parser)
-        }
-
-        if !match(parser, .RightBrace) {
-            error_at_current(parser, "Expected } after pattern branches")
-        }
-    } else {
-        // Inline pattern: data ? expr (including ({...}) objects)
-        // LeftParenNoSpace (`?(...)`) has no prefix rule on its own, but in pattern
-        // position the parens are pure grouping — dispatch to parse_grouping.
-        inline_expr: ^Node
-        if parser.current_token.kind == .LeftParenNoSpace {
-            inline_expr = parse_grouping(parser)
-        } else if is_expression_start(parser.current_token.kind) {
-            inline_expr = parse_expression(parser, .OR)
-        } else {
-            error_at_current(parser, "Expected pattern expression after ?")
-            return nil
-        }
-        if inline_expr != nil {
-            branch := Branch{
-                source = inline_expr,  // The pattern/object to match against
-                product = nil,
-                position = position,
-            }
-            append(&pattern.to, branch)
-        }
-    }
-
-    result := new(Node)
-    result^ = pattern
-    return result
+	return source, product
 }
 
-/*
- * parse_branch parses a single branch in a pattern match
- */
-parse_branch :: proc(parser: ^Parser) -> ^Branch {
-    // Save position of the branch start
-    position := parser.current_token.position
+parse_enforce :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.nodes[left].span.start
+	token_kind := parser.current_token.kind
+	rule := get_rule(token_kind)
+	advance_token(parser)
+	skip_newlines(parser)
 
-    // Don't try to parse a branch if we're at a token that can't start an expression
-    if !is_expression_start(parser.current_token.kind) {
-        advance_token(parser)  // Skip problematic token
-        return nil
-    }
+	right := parse_expression(parser, Precedence(int(rule.precedence) + 1))
+	if right == INVALID_NODE {
+		error_at_current(parser, "Expected expression after binary operator")
+		return INVALID_NODE
+	}
 
-    // Create branch with position
-    branch := new(Branch)
-    branch.position = position // Store position
-
-    if parser.current_token.kind == .PointingPush {
-        advance_token(parser)
-        branch.product = parse_expression(parser, .ASSIGNMENT)
-    } else {
-        branch.source = parse_expression(parser, .ASSIGNMENT)
-        if parser.current_token.kind == .PointingPush {
-            advance_token(parser)
-            branch.product = parse_expression(parser, .ASSIGNMENT)
-        }
-    }
-
-    return branch
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = right}
+	return add_node(parser, .Enforce, data, Span{span_start, parser.nodes[right].span.end})
 }
 
-/*
- * parse_product parses a product expression (-> to)
- * This is for standalone -> expressions
- */
-parse_product :: proc(parser: ^Parser) -> ^Node {
-    return parse_product_prefix(parser)
+parse_unknown :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	advance_token(parser)
+	data: Node_Data
+	return add_node(parser, .Unknown, data, span)
 }
 
-/*
- * parse_expansion parses a content expansion (...expr)
- */
-parse_expansion :: proc(parser: ^Parser) -> ^Node {
-    // Save position of the ellipsis token
-    position := parser.current_token.position
+parse_expansion :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    // Consume ellipsis token
-    advance_token(parser)
+	target := parse_expression(parser, .CONSTRAINT)
+	if target == INVALID_NODE {
+		error_at_current(parser, "Expected expression after ...")
+		return INVALID_NODE
+	}
 
-    // Get the expression that follows with appropriate precedence.
-    // Use CONSTRAINT so the expansion absorbs `:` (e.g. `...T:x` → Expand(Constraint(T,x)))
-    // while staying below PATTERN, so `...x ? {…}` still parses as Pattern(Expand(x), …).
-    target := parse_expression(parser, .CONSTRAINT)
-    if target == nil {
-        error_at_current(parser, "Expected expression after ...")
-        return nil
-    }
-
-    // Create the expansion node with the target and position
-    expand := Expand{
-        target = target,
-        position = position, // Store position
-    }
-
-    result := new(Node)
-    result^ = expand
-    return result
+	data: Node_Data
+	data.unary = Unary_Data{operand = target}
+	return add_node(parser, .Expand, data, Span{span_start, parser.nodes[target].span.end})
 }
 
-/*
- * parse_reference parses a file system reference */
-parse_reference :: proc(parser: ^Parser) -> ^Node {
-    position := parser.current_token.position
-    advance_token(parser) // Consume @
+parse_reference :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
 
-    if parser.current_token.kind != .Identifier {
-        error_at_current(parser, "Expected identifier after @")
-        return nil
-    }
+	if parser.current_token.kind != .Identifier {
+		error_at_current(parser, "Expected identifier after @")
+		return INVALID_NODE
+	}
 
-    // Create the initial External node
-    result := new(Node)
-    result^ = External{
-        position = position,
-        name = parser.current_token.text,
-    }
+	name_span := parser.current_token.span
+	advance_token(parser)
 
-    advance_token(parser)
+	data: Node_Data
+	data.external = External_Data{name = name_span, scope = INVALID_NODE}
+	current := add_node(parser, .External, data, Span{span_start, name_span.end})
 
-    // Start with our result node
-    current := result
+	for parser.current_token.kind == .Dot {
+		advance_token(parser)
+		if parser.current_token.kind != .Identifier {
+			error_at_current(parser, "Expected identifier after '.'")
+			break
+		}
 
-    // Chain property access
-    for parser.current_token.kind == .Dot {
-        advance_token(parser)
+		prop_span := parser.current_token.span
+		prop_data: Node_Data
+		prop_data.identifier = Identifier_Data{name = prop_span, capture = EMPTY_SPAN}
+		prop_id := add_node(parser, .Identifier, prop_data, prop_span)
 
-        if parser.current_token.kind != .Identifier {
-            error_at_current(parser, "Expected identifier after '.'")
-            break
-        }
+		prop_node_data: Node_Data
+		prop_node_data.binary = Binary_Data{left = current, right = prop_id}
+		current = add_node(parser, .Property, prop_node_data, Span{span_start, prop_span.end})
+		advance_token(parser)
+	}
 
-        // Create property identifier
-        property_id := new(Node)
-        property_id^ = Identifier{
-            name = parser.current_token.text,
-            position = parser.current_token.position,
-        }
+	process_filenode_flat(current, parser)
 
-        // Create new Property node
-        next := new(Node)
-        next^ = Property{
-            source = current,
-            property = property_id,
-            position = position,
-        }
-
-        // Update current to point to the new node
-        current = next
-        advance_token(parser)
-    }
-
-    process_filenode(current, parser.file_cache)
-
-    return current
+	return current
 }
 
-// ===========================================================================
-// SECTION 4: UTILITY FUNCTIONS
-// ===========================================================================
+parse_bit_or :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+		return node
+	}
+	return parse_binary(parser, left)
+}
 
-/*
- * Helper function to check if a token can start an execution pattern
- */
+parse_less_than :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+		return node
+	}
+
+	span_start := parser.nodes[left].span.start
+	advance_token(parser)
+
+	right := parse_expression(parser, Precedence(int(Precedence.COMPARISON) + 1))
+	data: Node_Data
+	data.operator = Operator_Node_Data{kind = .Less, left = left, right = right}
+	span_end := parser.current_token.span.start
+	if right != INVALID_NODE {
+		span_end = parser.nodes[right].span.end
+	}
+	return add_node(parser, .Operator, data, Span{span_start, span_end})
+}
+
+parse_left_bracket :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+		return node
+	}
+	error_at_current(parser, "Trying to use left bracket [ for something else than execution wrapper like [!]")
+	return INVALID_NODE
+}
+
+parse_left_paren :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
+		return node
+	}
+	parse_grouping(parser)
+	return left
+}
+
+try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_Index, bool) {
+	original_offset := parser.lexer.offset
+	original_current := parser.current_token
+	original_peek := parser.peek_token
+	nodes_len := len(parser.nodes)
+
+	wrappers := make([dynamic]u8, 0, 4, context.temp_allocator)
+	stack := make([dynamic]Token_Kind, 0, 4, context.temp_allocator)
+
+	found_exclamation := false
+
+	for {
+		current := parser.current_token.kind
+		#partial switch current {
+		case .Execute:
+			found_exclamation = true
+			advance_token(parser)
+		case .LeftParen, .LeftParenNoSpace:
+			append(&wrappers, u8(ExecutionWrapper.Background))
+			append(&stack, Token_Kind.LeftParen)
+			advance_token(parser)
+		case .Less:
+			append(&wrappers, u8(ExecutionWrapper.Threading))
+			append(&stack, Token_Kind.Less)
+			advance_token(parser)
+		case .LeftBracket:
+			append(&wrappers, u8(ExecutionWrapper.Parallel_CPU))
+			append(&stack, Token_Kind.LeftBracket)
+			advance_token(parser)
+		case .Or:
+			if len(stack) > 0 && stack[len(stack)-1] == Token_Kind.Or {
+				ordered_remove(&stack, len(stack)-1)
+				advance_token(parser)
+			} else {
+				append(&wrappers, u8(ExecutionWrapper.GPU))
+				append(&stack, Token_Kind.Or)
+				advance_token(parser)
+			}
+		case .RightParen:
+			if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftParen {
+				parser.lexer.offset = original_offset
+				parser.current_token = original_current
+				parser.peek_token = original_peek
+				resize(&parser.nodes, nodes_len)
+				return INVALID_NODE, false
+			}
+			ordered_remove(&stack, len(stack)-1)
+			advance_token(parser)
+		case .Greater:
+			if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.Less {
+				parser.lexer.offset = original_offset
+				parser.current_token = original_current
+				parser.peek_token = original_peek
+				resize(&parser.nodes, nodes_len)
+				return INVALID_NODE, false
+			}
+			ordered_remove(&stack, len(stack)-1)
+			advance_token(parser)
+		case .RightBracket:
+			if len(stack) == 0 || stack[len(stack)-1] != Token_Kind.LeftBracket {
+				parser.lexer.offset = original_offset
+				parser.current_token = original_current
+				parser.peek_token = original_peek
+				resize(&parser.nodes, nodes_len)
+				return INVALID_NODE, false
+			}
+			ordered_remove(&stack, len(stack)-1)
+			advance_token(parser)
+		case:
+			if !found_exclamation {
+				parser.lexer.offset = original_offset
+				parser.current_token = original_current
+				parser.peek_token = original_peek
+				resize(&parser.nodes, nodes_len)
+				return INVALID_NODE, false
+			}
+			break
+		}
+
+		if len(stack) == 0 {
+			if found_exclamation {
+				break
+			} else {
+				parser.lexer.offset = original_offset
+				parser.current_token = original_current
+				parser.peek_token = original_peek
+				resize(&parser.nodes, nodes_len)
+				return INVALID_NODE, false
+			}
+		}
+	}
+
+	if !found_exclamation || len(stack) > 0 {
+		parser.lexer.offset = original_offset
+		parser.current_token = original_current
+		parser.peek_token = original_peek
+		resize(&parser.nodes, nodes_len)
+		return INVALID_NODE, false
+	}
+
+	data: Node_Data
+	data.execute = Execute_Data{target = left, wrappers = add_extra_u8(parser, wrappers[:])}
+	span := Span{parser.nodes[left].span.start, parser.current_token.span.start}
+	return add_node(parser, .Execute, data, span), true
+}
+
+/* ======================================================================
+ * SECTION 8: UTILITY FUNCTIONS
+ * ====================================================================== */
+
 is_execution_pattern_start :: proc(kind: Token_Kind) -> bool {
-    return kind == .Execute || kind == .LeftParen || kind == .Less ||
-           kind == .LeftBracket || kind == .Or
+	return kind == .Execute || kind == .LeftParen || kind == .Less ||
+	       kind == .LeftBracket || kind == .Or
 }
 
-/*
- * is_expression_start checks if a token can start an expression
- */
 is_expression_start :: proc(kind: Token_Kind) -> bool {
-    return(
-        kind == .Identifier ||
-        kind == .Integer ||
-        kind == .Float ||
-        kind == .String_Literal ||
-        kind == .Bool_Literal ||
-        kind == .Hexadecimal ||
-        kind == .Binary ||
-        kind == .LeftBrace ||
-        kind == .LeftParen ||
-        kind == .LeftParenNoSpace ||
-        kind == .At ||
-        kind == .Not ||
-        kind == .Minus||
-        kind == .PointingPull ||
-        kind == .EventPush ||
-        kind == .EventPull ||
-        kind == .ResonancePush ||
-        kind == .ResonancePull ||
-        kind == .DoubleDot ||
-        kind == .Question ||
-        kind == .Ellipsis ||
-        kind == .PointingPush ||
-        kind == .Equal ||
-        kind == .NotEqual ||
-        kind == .LessEqual ||
-        kind == .Less ||
-        kind == .Greater ||
-        kind == .GreaterEqual ||
-        kind == .Range ||
-        kind == .PostfixRange ||
-        kind == .PrefixRange ||
-        kind == .DoubleQuestion ||
-        kind == .Execute
-    )
+	return(
+		kind == .Identifier ||
+		kind == .Integer ||
+		kind == .Float ||
+		kind == .String_Literal ||
+		kind == .Bool_Literal ||
+		kind == .Hexadecimal ||
+		kind == .Binary ||
+		kind == .LeftBrace ||
+		kind == .LeftParen ||
+		kind == .LeftParenNoSpace ||
+		kind == .At ||
+		kind == .Not ||
+		kind == .Minus ||
+		kind == .PointingPull ||
+		kind == .EventPush ||
+		kind == .EventPull ||
+		kind == .ResonancePush ||
+		kind == .ResonancePull ||
+		kind == .DoubleDot ||
+		kind == .Question ||
+		kind == .Ellipsis ||
+		kind == .PointingPush ||
+		kind == .Equal ||
+		kind == .NotEqual ||
+		kind == .LessEqual ||
+		kind == .Less ||
+		kind == .Greater ||
+		kind == .GreaterEqual ||
+		kind == .Range ||
+		kind == .PostfixRange ||
+		kind == .PrefixRange ||
+		kind == .DoubleQuestion ||
+		kind == .Execute ||
+		kind == .ConstraintFromNone ||
+		kind == .PropertyFromNone
+	)
 }
 
-
-/*
- * is_digit checks if a character is a digit
- * Inlined for speed
- */
 is_digit :: #force_inline proc(c: u8) -> bool {
-    return c >= '0' && c <= '9'
+	return c >= '0' && c <= '9'
 }
 
-/*
- * is_hex_digit checks if a character is a hexadecimal digit
- * Inlined for speed
- */
 is_hex_digit :: #force_inline proc(c: u8) -> bool {
-    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+	return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-/*
- * is_alpha checks if a character is an alphabetic character
- * Inlined for speed
- */
 is_alpha :: #force_inline proc(c: u8) -> bool {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-/*
- * is_alnum checks if a character is alphanumeric or underscore
- * Inlined for speed
- */
 is_alnum :: #force_inline proc(c: u8) -> bool {
-    return is_digit(c) || is_alpha(c) || c == '_'
+	return is_digit(c) || is_alpha(c) || c == '_'
 }
 
-/*
- * is_before_delimiter checks if a character can appear before .. to make it not a range
- * Valid before delimiters: " " (space), ":", ",", "{", "("
- */
 is_before_delimiter :: #force_inline proc(c: u8) -> bool {
-    return is_space(c) || c == '\n'|| c == ':' || c == ',' || c == '{' || c == '('
+	return is_space(c) || c == '\n' || c == ':' || c == ',' || c == '{' || c == '('
 }
 
-/*
- * is_after_delimiter checks if a character can appear after .. to make it not a range
- * Valid after delimiters: "}", ")", " " (space), ",", ":", EOF (handled separately)
- */
 is_after_delimiter :: #force_inline proc(c: u8) -> bool {
-    return is_space(c) || c == '\n' || c == '}' || c == ')' || c == ',' || c == ':'
+	return is_space(c) || c == '\n' || c == '}' || c == ')' || c == ',' || c == ':'
 }
 
-/*
- * is_space checks if a character is a whitespace character
- * Inlined for speed
- */
 is_space :: #force_inline proc(c: u8) -> bool {
-    return c == ' ' || c == '\t' || c == '\r'
+	return c == ' ' || c == '\t' || c == '\r'
 }
 
-/*
- * skip_whitespace advances the lexer past any whitespace characters
- * but preserves newline tokens for statement separation
- * Optimized with a direct tight loop
- */
-skip_whitespace :: #force_inline proc(l: ^Lexer) {
-    for l.position.offset < l.source_len {
-        c := l.source[l.position.offset]
-        if !is_space(c) {
-            break
-        }
-        advance_position(l)
-    }
+/* ======================================================================
+ * SECTION 9: DEBUG UTILITIES
+ * ====================================================================== */
+
+print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
+	if idx == INVALID_NODE do return
+
+	indent_str := strings.repeat(" ", indent)
+	n := ast.nodes[idx]
+	pos := span_to_position(ast, n.span.start)
+
+	switch n.kind {
+	case .Pointing:
+		fmt.printf("%sPointing -> (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .PointingPull:
+		fmt.printf("%sPointingPull <- (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .EventPush:
+		fmt.printf("%sEventPush >- (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .EventPull:
+		fmt.printf("%sEventPull -< (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		catch_str := node_event_pull_catch(ast, idx)
+		if catch_str != "" {
+			fmt.printfln("%s  Catch: %s", indent_str, catch_str)
+		}
+		if n.data.event_pull.from != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n.data.event_pull.from, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n.data.event_pull.to != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.event_pull.to, indent + 4)
+		}
+	case .ResonancePush:
+		fmt.printf("%sResonancePush >>- (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .ResonancePull:
+		fmt.printf("%sResonancePull -<< (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .Identifier:
+		name := node_name_str(ast, idx)
+		capture := node_capture_str(ast, idx)
+		if capture != "" {
+			fmt.printf("%sIdentifier: %s(%s) (line %d, column %d)\n", indent_str, name, capture, pos.line, pos.column)
+		} else {
+			fmt.printf("%sIdentifier: %s (line %d, column %d)\n", indent_str, name, pos.line, pos.column)
+		}
+	case .ScopeNode:
+		fmt.printf("%sScopeNode (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		for child in node_children(ast, idx) {
+			print_ast(ast, child, indent + 2)
+		}
+	case .Carve:
+		fmt.printf("%sCarve (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.carve.source != INVALID_NODE {
+			fmt.printf("%s  Source:\n", indent_str)
+			print_ast(ast, n.data.carve.source, indent + 4)
+			fmt.printf("%s  Carves:\n", indent_str)
+			for child in node_carve_children(ast, idx) {
+				print_ast(ast, child, indent + 4)
+			}
+		}
+	case .Property:
+		fmt.printf("%sProperty (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  Source:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  Property:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .Expand:
+		fmt.printf("%sExpand (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.unary.operand != INVALID_NODE {
+			fmt.printf("%s  Target:\n", indent_str)
+			print_ast(ast, n.data.unary.operand, indent + 4)
+		}
+	case .External:
+		fmt.printf("%sExternal (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.external.scope != INVALID_NODE {
+			fmt.printf("%s  Target:\n", indent_str)
+			print_ast(ast, n.data.external.scope, indent + 4)
+		}
+	case .Product:
+		fmt.printf("%sProduct -> (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.unary.operand != INVALID_NODE {
+			print_ast(ast, n.data.unary.operand, indent + 2)
+		}
+	case .Pattern:
+		fmt.printf("%sPattern ? (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.pattern.target != INVALID_NODE {
+			fmt.printf("%s  Target:\n", indent_str)
+			print_ast(ast, n.data.pattern.target, indent + 4)
+		} else {
+			fmt.printf("%s  Target: implicit\n", indent_str)
+		}
+		fmt.printf("%s  Branches\n", indent_str)
+		branches := node_pattern_branches(ast, idx)
+		for i := 0; i < len(branches); i += 2 {
+			source := branches[i]
+			product := INVALID_NODE
+			if i + 1 < len(branches) do product = branches[i+1]
+			if source != INVALID_NODE {
+				fmt.printf("%s      Pattern:\n", indent_str)
+				print_ast(ast, source, indent + 8)
+			}
+			if product != INVALID_NODE {
+				fmt.printf("%s      Match:\n", indent_str)
+				print_ast(ast, product, indent + 8)
+			}
+		}
+	case .Constraint:
+		fmt.printf("%sConstraint: (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			print_ast(ast, n.data.binary.left, indent + 2)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		} else {
+			fmt.printf("%s  To: none\n", indent_str)
+		}
+	case .Operator:
+		fmt.printf("%sOperator '%v' (line %d, column %d)\n", indent_str, n.data.operator.kind, pos.line, pos.column)
+		if n.data.operator.left != INVALID_NODE {
+			fmt.printf("%s  Left:\n", indent_str)
+			print_ast(ast, n.data.operator.left, indent + 4)
+		} else {
+			fmt.printf("%s  Left: none (unary operator)\n", indent_str)
+		}
+		if n.data.operator.right != INVALID_NODE {
+			fmt.printf("%s  Right:\n", indent_str)
+			print_ast(ast, n.data.operator.right, indent + 4)
+		}
+	case .Enforce:
+		fmt.printf("%sEnforce ?! (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  Left:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  Left: none (unary operator)\n", indent_str)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  Right:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		}
+	case .Branch:
+	case .Execute:
+		wrappers := node_execute_wrappers(ast, idx)
+		pattern := ""
+		for w in wrappers {
+			switch ExecutionWrapper(w) {
+			case .Threading:    pattern = strings.concatenate({pattern, "<"})
+			case .Parallel_CPU: pattern = strings.concatenate({pattern, "["})
+			case .Background:   pattern = strings.concatenate({pattern, "("})
+			case .GPU:          pattern = strings.concatenate({pattern, "|"})
+			}
+		}
+		pattern = strings.concatenate({pattern, "!"})
+		for i := len(wrappers) - 1; i >= 0; i -= 1 {
+			switch ExecutionWrapper(wrappers[i]) {
+			case .Threading:    pattern = strings.concatenate({pattern, ">"})
+			case .Parallel_CPU: pattern = strings.concatenate({pattern, "]"})
+			case .Background:   pattern = strings.concatenate({pattern, ")"})
+			case .GPU:          pattern = strings.concatenate({pattern, "|"})
+			}
+		}
+		fmt.printf("%sExecute %s (line %d, column %d)\n", indent_str, pattern, pos.line, pos.column)
+		if n.data.execute.target != INVALID_NODE {
+			print_ast(ast, n.data.execute.target, indent + 2)
+		}
+	case .CompileTime:
+		fmt.printf("%sCompileTime ! (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.unary.operand != INVALID_NODE {
+			print_ast(ast, n.data.unary.operand, indent + 2)
+		}
+	case .Literal:
+		fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n", indent_str, n.data.literal.kind, node_text(ast, idx), pos.line, pos.column)
+	case .Range:
+		fmt.printf("%sRange (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n.data.binary.left != INVALID_NODE {
+			fmt.printf("%s  Start:\n", indent_str)
+			print_ast(ast, n.data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  Start: none (prefix range)\n", indent_str)
+		}
+		if n.data.binary.right != INVALID_NODE {
+			fmt.printf("%s  End:\n", indent_str)
+			print_ast(ast, n.data.binary.right, indent + 4)
+		} else {
+			fmt.printf("%s  End: none (postfix range)\n", indent_str)
+		}
+	case .Unknown:
+		fmt.printf("%sUnknown\n", indent_str)
+	}
 }
 
-// ===========================================================================
-// SECTION 5: DEBUG UTILITIES
-// ===========================================================================
-
-/*
- * print_ast prints the AST with indentation for readability
- */
-print_ast :: proc(node: ^Node, indent: int) {
-    if node == nil {
-        return
-    }
-
-    indent_str := strings.repeat(" ", indent)
-
-   switch n in node^ {
-    case Pointing:
-        fmt.printf("%sPointing -> (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.from != nil {
-            fmt.printf("%s  From:\n", indent_str)
-            print_ast(n.from, indent + 4)
-        }
-        if n.to != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.to, indent + 4)
-        }
-
-    case PointingPull:
-        fmt.printf("%sPointingPull <- (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.from != nil {
-            fmt.printf("%s  From:\n", indent_str)
-            print_ast(n.from, indent + 4)
-        } else {
-            fmt.printf("%s  From: anonymous\n", indent_str)
-        }
-        if n.to != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.to, indent + 4)
-        }
-
-    case EventPush:
-        fmt.printf("%sEventPush >- (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.from != nil {
-            fmt.printf("%s  From:\n", indent_str)
-            print_ast(n.from, indent + 4)
-        } else {
-            fmt.printf("%s  From: anonymous\n", indent_str)
-        }
-        if n.to != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.to, indent + 4)
-        }
-
-    case EventPull:
-        fmt.printf("%sEventPull -< (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.catch != "" {
-            fmt.printfln("%s  Catch: %s", indent_str, n.catch)
-        }
-        if n.from != nil {
-            fmt.printf("%s  From:\n", indent_str)
-            print_ast(n.from, indent + 4)
-        } else {
-            fmt.printf("%s  From: anonymous\n", indent_str)
-        }
-        if n.to != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.to, indent + 4)
-        }
-
-    case ResonancePush:
-        fmt.printf("%sResonancePush >>- (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.from != nil {
-            fmt.printf("%s  From:\n", indent_str)
-            print_ast(n.from, indent + 4)
-        } else {
-            fmt.printf("%s  From: anonymous\n", indent_str)
-        }
-        if n.to != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.to, indent + 4)
-        }
-
-    case ResonancePull:
-        fmt.printf("%sResonancePull -<< (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.from != nil {
-            fmt.printf("%s  From:\n", indent_str)
-            print_ast(n.from, indent + 4)
-        } else {
-            fmt.printf("%s  From: anonymous\n", indent_str)
-        }
-        if n.to != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.to, indent + 4)
-        }
-
-    case Identifier:
-      if n.capture!="" {
-        fmt.printf("%sIdentifier: %s(%s) (line %d, column %d)\n",
-            indent_str, n.name, n.capture, n.position.line, n.position.column)
-      } else {
-        fmt.printf("%sIdentifier: %s (line %d, column %d)\n",
-            indent_str, n.name, n.position.line, n.position.column)
-      }
-
-    case ScopeNode:
-        fmt.printf("%sScopeNode (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        for i := 0; i < len(n.to); i += 1 {
-            entry_node := new(Node)
-            entry_node^ = n.to[i]
-            print_ast(entry_node, indent + 2)
-        }
-
-    case Carve:
-        fmt.printf("%sCarve (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.source != nil {
-            fmt.printf("%s  Source:\n", indent_str)
-            print_ast(n.source, indent + 4)
-            fmt.printf("%s  Carves:\n", indent_str)
-            for i := 0; i < len(n.carves); i += 1 {
-                carve_node := new(Node)
-                carve_node^ = n.carves[i]
-                print_ast(carve_node, indent + 4)
-            }
-        }
-
-    case Property:
-        fmt.printf("%sProperty (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.source != nil {
-            fmt.printf("%s  Source:\n", indent_str)
-            print_ast(n.source, indent + 4)
-        }
-        if n.property != nil {
-            fmt.printf("%s  Property:\n", indent_str)
-            print_ast(n.property, indent + 4)
-        }
-
-    case Expand:
-        fmt.printf("%sExpand (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.target != nil {
-            fmt.printf("%s  Target:\n", indent_str)
-            print_ast(n.target, indent + 4)
-        }
-
-    case External:
-        fmt.printf("%sExternal (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.scope != nil {
-            fmt.printf("%s  Target:\n", indent_str)
-            print_ast(n.scope, indent + 4)
-        }
-
-    case Product:
-        fmt.printf("%sProduct -> (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.to != nil {
-            print_ast(n.to, indent + 2)
-        }
-
-    case Pattern:
-        fmt.printf("%sPattern ? (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.target != nil {
-            fmt.printf("%s  Target:\n", indent_str)
-            print_ast(n.target, indent + 4)
-        } else {
-            fmt.printf("%s  Target: implicit\n", indent_str)
-        }
-        fmt.printf("%s  Branches\n", indent_str)
-        for i := 0; i < len(n.to); i += 1 {
-            branch := n.to[i]
-            fmt.printf("%s    Branch: (line %d, column %d)\n",
-                indent_str, branch.position.line, branch.position.column)
-            if branch.source != nil {
-                fmt.printf("%s      Pattern:\n", indent_str)
-                print_ast(branch.source, indent + 8)
-            }
-            if branch.product != nil {
-                fmt.printf("%s      Match:\n", indent_str)
-                print_ast(branch.product, indent + 8)
-            }
-        }
-
-    case Constraint:
-        fmt.printf("%sConstraint: (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        print_ast(n.constraint, indent + 2)
-        if n.name != nil {
-            fmt.printf("%s  To:\n", indent_str)
-            print_ast(n.name, indent + 4)
-        } else {
-            fmt.printf("%s  To: none\n", indent_str)
-        }
-
-    case Operator:
-        fmt.printf("%sOperator '%v' (line %d, column %d)\n",
-            indent_str, n.kind, n.position.line, n.position.column)
-        if n.left != nil {
-            fmt.printf("%s  Left:\n", indent_str)
-            print_ast(n.left, indent + 4)
-        } else {
-            fmt.printf("%s  Left: none (unary operator)\n", indent_str)
-        }
-        if n.right != nil {
-            fmt.printf("%s  Right:\n", indent_str)
-            print_ast(n.right, indent + 4)
-        }
-
-    case Enforce:
-        fmt.printf("%sEnforce ?! (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.left != nil {
-            fmt.printf("%s  Left:\n", indent_str)
-            print_ast(n.left, indent + 4)
-        } else {
-            fmt.printf("%s  Left: none (unary operator)\n", indent_str)
-        }
-        if n.right != nil {
-            fmt.printf("%s  Right:\n", indent_str)
-            print_ast(n.right, indent + 4)
-        }
-
-    case Branch:
-
-
-    case Execute:
-      // Build the pattern string with proper nesting
-      pattern := ""
-
-      // First build opening symbols - from outer (first in list) to inner
-      for wrapper in n.wrappers {
-        switch wrapper {
-          case .Threading:
-              pattern = strings.concatenate({pattern, "<"})
-          case .Parallel_CPU:
-              pattern = strings.concatenate({pattern, "["})
-          case .Background:
-              pattern = strings.concatenate({pattern, "("})
-          case .GPU:
-              pattern = strings.concatenate({pattern, "|"})
-          }
-      }
-
-      // Add exclamation mark in the middle
-      pattern = strings.concatenate({pattern, "!"})
-
-      // Add closing symbols in reverse order - from inner to outer
-      for i := len(n.wrappers)-1; i >= 0; i -= 1 {
-        switch n.wrappers[i] {
-          case .Threading:
-              pattern = strings.concatenate({pattern, ">"})
-          case .Parallel_CPU:
-              pattern = strings.concatenate({pattern, "]"})
-          case .Background:
-              pattern = strings.concatenate({pattern, ")"})
-          case .GPU:
-              pattern = strings.concatenate({pattern, "|"})
-        }
-      }
-
-      fmt.printf("%sExecute %s (line %d, column %d)\n",
-          indent_str, pattern, n.position.line, n.position.column)
-      if n.to != nil {
-          print_ast(n.to, indent + 2)
-      }
-
-    case CompileTime:
-      fmt.printf("%sCompileTime ! (line %d, column %d)\n",
-          indent_str, n.position.line, n.position.column)
-      if n.to != nil {
-          print_ast(n.to, indent + 2)
-      }
-
-    case Literal:
-        fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n",
-            indent_str, n.kind, n.to, n.position.line, n.position.column)
-
-    case Range:
-        fmt.printf("%sRange (line %d, column %d)\n",
-            indent_str, n.position.line, n.position.column)
-        if n.start != nil {
-            fmt.printf("%s  Start:\n", indent_str)
-            print_ast(n.start, indent + 4)
-        } else {
-            fmt.printf("%s  Start: none (prefix range)\n", indent_str)
-        }
-        if n.end != nil {
-            fmt.printf("%s  End:\n", indent_str)
-            print_ast(n.end, indent + 4)
-        } else {
-            fmt.printf("%s  End: none (postfix range)\n", indent_str)
-        }
-    case Unknown:
-        fmt.printf("%sUnknown\n", indent_str)
-
-    }
+ast_root :: #force_inline proc(ast: ^Ast) -> Node_Index {
+	return Node_Index(len(ast.nodes) - 1)
 }
-

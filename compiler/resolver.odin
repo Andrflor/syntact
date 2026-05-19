@@ -354,7 +354,6 @@ process_cache_task :: proc(task: thread.Task) {
 
 	ast := parse(cache, source)
 	cache.status = .Parsed
-	// TODO: destroy temp arena and free all
 
 	// End parsing timing
 	if resolver.options.timing {
@@ -366,7 +365,7 @@ process_cache_task :: proc(task: thread.Task) {
 	}
 
 	if (resolver.options.print_ast) {
-		print_ast(ast, 0)
+		print_ast(ast, ast_root(ast), 0)
 	}
 
 	if resolver.options.verbose {
@@ -420,68 +419,59 @@ process_cache_task :: proc(task: thread.Task) {
 	}
 }
 
-/*
- * process_filenode handles references to external files in the AST
- */
-process_filenode :: proc(node: ^Node, cache: ^Cache) {
-	// TODO(andrflor): Check how that path should be handled
-	// This is used to prevent to parse other files in test atm
-	if cache.path == "" {return}
-	dir_path := filepath.dir(cache.path)
+process_filenode_flat :: proc(idx: Node_Index, parser: ^Parser) {
+	if parser.file_cache == nil || parser.file_cache.path == "" do return
+	dir_path := filepath.dir(parser.file_cache.path)
 	if resolver.options.verbose {
-		fmt.printf("[DEBUG] process_filenode called from %s\n", cache.path)
+		fmt.printf("[DEBUG] process_filenode called from %s\n", parser.file_cache.path)
 	}
-	segments := make([dynamic]string, 4, context.temp_allocator)
-	_process_node(node, dir_path, &segments)
+	segments := make([dynamic]string, 0, 4, context.temp_allocator)
+	_process_node_flat(idx, parser, dir_path, &segments)
 }
 
-/*
- * _process_node is used to recursivly parse not used in external reference
- */
-_process_node :: proc(node: ^Node, dir_path: string, segments: ^[dynamic]string) {
-	#partial switch n in node {
-	case Property:
-		// TODO(andrflor): need to make sure we have Identifier here...
-		append(segments, n.property.(Identifier).name)
-		_process_node(n.source, dir_path, segments)
-	case External:
-		path, _ := filepath.join({dir_path, n.name}, context.temp_allocator)
+_process_node_flat :: proc(idx: Node_Index, parser: ^Parser, dir_path: string, segments: ^[dynamic]string) {
+	if idx == INVALID_NODE do return
+	n := parser.nodes[idx]
+	#partial switch n.kind {
+	case .Property:
+		right := n.data.binary.right
+		if right != INVALID_NODE && parser.nodes[right].kind == .Identifier {
+			s := parser.nodes[right].data.identifier.name
+			append(segments, parser.source[s.start:s.end])
+		}
+		_process_node_flat(n.data.binary.left, parser, dir_path, segments)
+	case .External:
+		name_s := n.data.external.name
+		name := parser.source[name_s.start:name_s.end]
+		path, _ := filepath.join({dir_path, name}, context.temp_allocator)
 		if os.is_dir(path) {
-			// This is a directory, so we need to check the segments in reverse order
 			current_path := path
 			for i := len(segments) - 1; i >= 0; i -= 1 {
 				segment := segments[i]
 				path, _ := filepath.join({current_path, segment}, context.temp_allocator)
 				if os.is_dir(path) {
-					// If the path is a directory, update the current path
 					current_path = path
 				} else {
-					// If it's not a directory, check if there's a .st file
 					joined, _ := filepath.join({current_path, segment}, context.temp_allocator)
 					st_path := fmt.tprintf("%s.st", joined)
 					if os.exists(st_path) {
-						// Process the file if it exists
 						compute_on_need(st_path)
 						return
 					} else {
-						// File not found, exit
 						return
 					}
 				}
 			}
 		} else {
-			// We maybe have a file
 			file_path, _ := filepath.join(
-				{dir_path, fmt.tprintf("%s.st", n.name)},
+				{dir_path, fmt.tprintf("%s.st", name)},
 				context.temp_allocator,
 			)
 			if os.exists(file_path) {
-				// Process the file if it exists
 				compute_on_need(file_path)
 			}
 		}
 	case:
-		// For any other node type, just return
 		return
 	}
 }
