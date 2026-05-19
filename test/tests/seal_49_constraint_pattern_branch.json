@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 49 — Constraint In Pattern Branch",
+  "description": "Pattern matching where branches use constraints: Circle: -> area, Square: -> side.",
+  "source": "shape ? {\n  Circle: -> area\n  Square: -> side\n  -> 0\n}",
+  "expect": "Scope[Pattern(Identifier(shape),[Branch(Constraint(Identifier(Circle),nil),Identifier(area)),Branch(Constraint(Identifier(Square),nil),Identifier(side)),Branch(nil,Literal(Integer,0))])]"
+}

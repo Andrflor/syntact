@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 45 — Same-Name Binding Carve",
+  "description": "box{x -> 10} — carving a scope that has same-name bindings. The carve targets x#0.",
+  "source": "box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}\nderived -> box{x -> 10}",
+  "expect": "Scope[Pointing(Identifier(box),Scope[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Identifier(x)),Pointing(Identifier(x),Literal(Integer,2))]),Pointing(Identifier(derived),Carve(Identifier(box),[Pointing(Identifier(x),Literal(Integer,10))]))]"
+}
