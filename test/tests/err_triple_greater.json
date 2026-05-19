@@ -2,5 +2,5 @@
   "name": "Triple greater-than",
   "description": "Three > in a row: lexer produces >> then >. UNCERTAIN.",
   "source": "a >>> b",
-  "expect": "Scope[Operator(RightShift,Identifier(a),Operator(Greater,nil,Identifier(b)))]"
+  "expect": "Scope[Operator(RShift,Identifier(a),Operator(Greater,nil,Identifier(b)))]"
 }

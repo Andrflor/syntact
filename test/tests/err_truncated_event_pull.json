@@ -2,5 +2,5 @@
   "name": "Truncated Event Pull",
   "description": "a -< with no catch or body. EventPull infix with missing operands. UNCERTAIN.",
   "source": "a -< ",
-  "expect": "Scope[Identifier(a)]"
+  "expect": "Scope[EventPull(,Identifier(a),nil)]"
 }
