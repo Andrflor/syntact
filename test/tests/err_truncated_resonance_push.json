@@ -2,5 +2,5 @@
   "name": "Truncated Resonance Push",
   "description": "a >>- with no right operand. ResonancePush infix with missing target. UNCERTAIN.",
   "source": "a >>- ",
-  "expect": "Scope[Identifier(a)]"
+  "expect": "Scope[ResonancePush(Identifier(a),nil)]"
 }

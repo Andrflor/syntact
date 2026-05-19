@@ -2,5 +2,5 @@
   "name": "Truncated Less",
   "description": "a < with no right operand. Infix Less with missing right operand, operator dropped. UNCERTAIN.",
   "source": "a < ",
-  "expect": "Scope[Identifier(a)]"
+  "expect": "Scope[Operator(Less,Identifier(a),nil)]"
 }
