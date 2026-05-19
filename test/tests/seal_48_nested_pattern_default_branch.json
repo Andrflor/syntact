@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 48 — Nested Pattern Default Branch",
+  "description": "Pattern with default branch containing another pattern match — tests nested destructuring.",
+  "source": "x ? {\n  1 -> 'a'\n  2 -> 'b'\n  -> y ? {\n    3 -> 'c'\n    -> 'd'\n  }\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Literal(String,a)),Branch(Literal(Integer,2),Literal(String,b)),Branch(nil,Pattern(Identifier(y),[Branch(Literal(Integer,3),Literal(String,c)),Branch(nil,Literal(String,d))]))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 44 — Pull Binding Scope Default",
+  "description": "T <- { shape:value } — pull binding with a scope as default.",
+  "source": "Gen -> {\n  T <- { shape:value }\n  -> T:\n}",
+  "expect": "Scope[Pointing(Identifier(Gen),Scope[PointingPull(Identifier(T),Scope[Constraint(Identifier(shape),Identifier(value))]),Product(Constraint(Identifier(T),nil))])]"
+}

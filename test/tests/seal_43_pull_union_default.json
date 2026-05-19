@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 43 — Pull Binding Union Default",
+  "description": "T <- (u8 | i8) — pull binding with union type as default value.",
+  "source": "identity -> {\n  T <- (u8 | i8)\n  T:value\n  -> value\n}",
+  "expect": "Scope[Pointing(Identifier(identity),Scope[PointingPull(Identifier(T),Operator(Or,Identifier(u8),Identifier(i8))),Constraint(Identifier(T),Identifier(value)),Product(Identifier(value))])]"
+}

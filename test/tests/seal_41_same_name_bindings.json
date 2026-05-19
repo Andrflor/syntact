@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 41 — Same-Name Bindings",
+  "description": "box -> { x -> 1\\n y -> x\\n x -> 2 } — two bindings named x coexist in same scope. y references x#0 (first occurrence). Carving targets x#0 by default.",
+  "source": "box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}",
+  "expect": "Scope[Pointing(Identifier(box),Scope[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Identifier(x)),Pointing(Identifier(x),Literal(Integer,2))])]"
+}

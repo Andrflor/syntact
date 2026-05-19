@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 46 — Resonance Event Counter",
+  "description": "Counter with u8:count >>- Increment event and -< handler updating count via -<<.",
+  "source": "Counter -> {\n  Increment -> { u8:value }\n  u8:count >>- Increment -> 0\n  Increment -< e {\n    count -<< count + e.value\n  }\n  -> count\n}",
+  "expect": "Scope[Pointing(Identifier(Counter),Scope[Pointing(Identifier(Increment),Scope[Constraint(Identifier(u8),Identifier(value))]),Pointing(ResonancePush(Constraint(Identifier(u8),Identifier(count)),Identifier(Increment)),Literal(Integer,0)),EventPull(e,Identifier(Increment),Scope[ResonancePull(Identifier(count),Operator(Add,Identifier(count),Property(Identifier(e),Identifier(value))))]),Product(Identifier(count))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Sealing 50 — Multiple Event Handlers",
+  "description": "Scope with two different events and their handlers using >- and -<.",
+  "source": "Widget -> {\n  Click -> { u32:x u32:y }\n  Resize -> { u32:w u32:h }\n  state >- Click -> 'idle'\n  state >- Resize -> 'idle'\n  Click -< e {\n    -> e.x\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Widget),Scope[Pointing(Identifier(Click),Scope[Constraint(Identifier(u32),Identifier(x)),Constraint(Identifier(u32),Identifier(y))]),Pointing(Identifier(Resize),Scope[Constraint(Identifier(u32),Identifier(w)),Constraint(Identifier(u32),Identifier(h))]),Pointing(EventPush(Identifier(state),Identifier(Click)),Literal(String,idle)),Pointing(EventPush(Identifier(state),Identifier(Resize)),Literal(String,idle)),EventPull(e,Identifier(Click),Scope[Product(Property(Identifier(e),Identifier(x)))])])]"
+}
