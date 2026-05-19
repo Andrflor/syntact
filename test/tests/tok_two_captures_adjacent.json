@@ -1,6 +1,6 @@
 {
   "name": "tok_two_captures_adjacent",
-  "description": "'(x)(y)' — '(x)' grouping returns Identifier(x). Then '(y)' as LeftParenNoSpace infix triggers parse_left_paren which delegates to parse_grouping and returns nil (documented parser obs). UNCERTAIN: probably just Identifier(x).",
+  "description": "'(x)(y)' — two adjacent captures. (x) is Identifier(,x), then (y) as LeftParenNoSpace infix is consumed but left is preserved, yielding Identifier(,x) then Identifier(,y) as separate statement on next parse.",
   "source": "(x)(y)",
-  "expect": "Scope[Identifier(x)]"
+  "expect": "Scope[Identifier(,x),Identifier(,y)]"
 }

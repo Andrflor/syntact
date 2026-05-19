@@ -495,17 +495,21 @@ next_token :: proc(l: ^Lexer) -> Token {
 			return next_token(l)
 		}
 
-		// Multi line comment
+		// Multi line comment (supports nesting)
 		if l.position.offset + 1 < l.source_len && l.source[l.position.offset + 1] == '*' {
 			advance_by(l, 2)
 
-			// Scan for */
-			loop: for l.position.offset < l.source_len {
-				if l.position.offset + 1 < l.source_len && l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
-					advance_by(l, 2) // Skip closing */
-					break loop
+			depth := 1
+			for l.position.offset < l.source_len && depth > 0 {
+				if l.position.offset + 1 < l.source_len && l.source[l.position.offset] == '/' && l.source[l.position.offset + 1] == '*' {
+					advance_by(l, 2)
+					depth += 1
+				} else if l.position.offset + 1 < l.source_len && l.source[l.position.offset] == '*' && l.source[l.position.offset + 1] == '/' {
+					advance_by(l, 2)
+					depth -= 1
+				} else {
+					advance_position(l)
 				}
-				advance_position(l)
 			}
 
 			// Recursive call to get the next non-comment token
@@ -1577,16 +1581,22 @@ parse_execute_prefix :: proc(parser: ^Parser) -> ^Node {
     // Consume '!'
     advance_token(parser)
 
-    ct := CompileTime{
-        to = nil,
-        position = position,
+    // If no operand follows, this is a lone Execute, not CompileTime
+    if !is_expression_start(parser.current_token.kind) &&
+       parser.current_token.kind != .LeftBraceCarve {
+        exec := Execute{
+            to = nil,
+            wrappers = make([dynamic]ExecutionWrapper, 0, 0),
+            position = position,
+        }
+        node := new(Node)
+        node^ = exec
+        return node
     }
 
-    // After a unary prefix, a following '{' is the operand scope, not an carve
-    // (LeftBraceCarve is produced when '{' is glued to the previous token).
-    if is_expression_start(parser.current_token.kind) ||
-       parser.current_token.kind == .LeftBraceCarve {
-        ct.to = parse_expression(parser, Precedence.UNARY)
+    ct := CompileTime{
+        to = parse_expression(parser, Precedence.UNARY),
+        position = position,
     }
 
     node := new(Node)
@@ -2063,10 +2073,9 @@ parse_left_paren :: proc(parser: ^Parser, left: ^Node) -> ^Node {
         return node
     }
 
-
-    // Otherwhise it supposed to be grouping
+    // Not an execution pattern — consume the grouping but return left unchanged
     parse_grouping(parser)
-    return nil
+    return left
 }
 
 /*

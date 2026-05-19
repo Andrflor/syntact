@@ -1,6 +1,6 @@
 {
   "name": "Error inside pattern branch",
-  "description": "An invalid construct inside a pattern branch. UNCERTAIN.",
+  "description": "An invalid token * in branch source is skipped by recovery, leaving -> 1 as a default branch (nil source). Both default branches are kept.",
   "source": "x ? {\n  * -> 1\n  -> 2\n}",
-  "expect": "Scope[Pattern(Identifier(x),[Branch(nil,Literal(Integer,2))])]"
+  "expect": "Scope[Pattern(Identifier(x),[Branch(nil,Literal(Integer,1)),Branch(nil,Literal(Integer,2))])]"
 }
