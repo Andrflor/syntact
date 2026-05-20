@@ -2,5 +2,5 @@
   "name": "Event Handler With Pattern",
   "description": "Log -< e {-> e.level ? {\"error\" -> handle_error{e}!, -> log_default{e}!}} — event handler body produces a pattern match on e.level with two branches.",
   "source": "Log -< e {\n  -> e.level ? {\n    \"error\" -> handle_error{e}!\n    -> log_default{e}!\n  }\n}",
-  "expect": "Scope[EventPull(e,Identifier(Log),Scope[Product(Pattern(Property(Identifier(e),Identifier(level)),[Branch(Literal(String,error),Execute(Carve(Identifier(handle_error),[Identifier(e)]),[]))),Branch(nil,Execute(Carve(Identifier(log_default),[Identifier(e)]),[]))]))])]"
+  "expect": "Scope[EventPull(e,Identifier(Log),Scope[Product(Pattern(Property(Identifier(e),Identifier(level)),[Branch(Literal(String,error),Execute(Carve(Identifier(handle_error),[Identifier(e)]),[])),Branch(nil,Execute(Carve(Identifier(log_default),[Identifier(e)]),[]))]))])]"
 }

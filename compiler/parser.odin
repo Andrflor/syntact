@@ -1359,6 +1359,12 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 				break infix_loop
 			}
 		}
+		if kind == .LeftParenNoSpace && parser.node_kinds[left] == .Identifier {
+			left_data := parser.node_data[left].identifier
+			if left_data.name == EMPTY_SPAN {
+				break infix_loop
+			}
+		}
 		left = infix(parser, left)
 		if left == INVALID_NODE do return INVALID_NODE
 	}
@@ -2152,7 +2158,9 @@ parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: N
 	product := INVALID_NODE
 	if parser.current_token.kind == .PointingPush {
 		advance_token(parser)
-		product = parse_expression(parser, .ASSIGNMENT)
+		if !has_flag(parser.current_token, .Separator_Before) {
+			product = parse_expression(parser, .ASSIGNMENT)
+		}
 	}
 
 	return source, product
@@ -2273,12 +2281,6 @@ parse_left_bracket :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 parse_left_paren :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
 		return node
-	}
-	if parser.node_kinds[left] == .Identifier {
-		left_data := parser.node_data[left].identifier
-		if left_data.name == EMPTY_SPAN {
-			return INVALID_NODE
-		}
 	}
 	parse_grouping(parser)
 	return left
