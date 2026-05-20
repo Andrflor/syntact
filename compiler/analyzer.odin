@@ -233,7 +233,12 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 		analyzer_error("Root should be a scope", .Default, node_position(ast, root_idx))
 	}
 
-	debug_analyzer(&analyzer, true)
+	cache.analyze_errors = analyzer.errors
+	cache.analyze_warnings = analyzer.warnings
+
+	if resolver.options.print_error {
+		debug_analyzer(&analyzer, true)
+	}
 	return len(analyzer.errors) == 0
 }
 

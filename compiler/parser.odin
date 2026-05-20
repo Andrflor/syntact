@@ -1274,8 +1274,12 @@ parse :: proc(cache: ^Cache, source: string) -> (^Ast, bool) {
 	ast.extra = parser.extra[:parser.extra_count]
 	ast.extra_u8 = parser.extra_u8[:parser.extra_u8_count]
 
-	for error in parser.errors {
-		debug_parse_error(error, source, ast)
+	cache.parse_errors = parser.errors
+
+	if resolver.options.print_error {
+		for error in parser.errors {
+			debug_parse_error(error, source, ast)
+		}
 	}
 
 	return ast, len(parser.errors) == 0
