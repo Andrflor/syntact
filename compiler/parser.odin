@@ -2459,33 +2459,6 @@ init_ident_tables :: proc "contextless" () {
 	for c in u8('A')..=u8('F') { IS_HEX[c] = true }
 }
 
-is_digit :: #force_inline proc(c: u8) -> bool {
-	return IS_DIGIT[c]
-}
-
-is_hex_digit :: #force_inline proc(c: u8) -> bool {
-	return IS_HEX[c]
-}
-
-is_alpha :: #force_inline proc(c: u8) -> bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
-}
-
-is_alnum :: #force_inline proc(c: u8) -> bool {
-	return IS_DIGIT[c] || is_alpha(c) || c == '_'
-}
-
-is_before_delimiter :: #force_inline proc(c: u8) -> bool {
-	return IS_BEFORE_DELIM[c]
-}
-
-is_after_delimiter :: #force_inline proc(c: u8) -> bool {
-	return IS_AFTER_DELIM[c]
-}
-
-is_space :: #force_inline proc(c: u8) -> bool {
-	return IS_SPACE[c]
-}
 
 /* ======================================================================
  * SECTION 9: DEBUG UTILITIES
