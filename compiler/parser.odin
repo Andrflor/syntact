@@ -1245,7 +1245,7 @@ add_extra_u8 :: proc(p: ^Parser, wrappers: []u8) -> Index_Range {
  * SECTION 6: MAIN PARSE ENTRY POINTS
  * ====================================================================== */
 
-parse :: proc(cache: ^Cache, source: string) -> ^Ast {
+parse :: proc(cache: ^Cache, source: string) -> (^Ast, bool) {
 	parser: Parser
 	init_parser(&parser, cache, source)
 	span_start := parser.current_token.span.start
@@ -1278,7 +1278,7 @@ parse :: proc(cache: ^Cache, source: string) -> ^Ast {
 		debug_parse_error(error, source, ast)
 	}
 
-	return ast
+	return ast, len(parser.errors) == 0
 }
 
 debug_parse_error :: proc(error: Parse_Error, source: string, ast: ^Ast) {
@@ -1289,7 +1289,7 @@ debug_parse_error :: proc(error: Parse_Error, source: string, ast: ^Ast) {
 		temp_ast := Ast{source = source}
 		pos = span_to_position(&temp_ast, error.span.start)
 	}
-	fmt.printf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
+	fmt.eprintf("  [%v] at line %d, col %d: %s\n", error.type, pos.line, pos.column, error.message)
 }
 
 parse_with_recovery :: proc(parser: ^Parser) -> Node_Index {

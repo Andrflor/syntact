@@ -128,9 +128,9 @@ Analyzer_Error_Type :: enum {
 	Invalid_Carve,
 	Invalid_Property_Access,
 	Type_Mismatch,
-	Invalid_Constaint,
-	Invalid_Constaint_Name,
-	Invalid_Constaint_Value,
+	Invalid_Constraint,
+	Invalid_Constraint_Name,
+	Invalid_Constraint_Value,
 	Circular_Reference,
 	Invalid_Event_Pull,
 	Invalid_Binding_Value,
@@ -714,15 +714,15 @@ analyze_name :: proc(idx: Node_Index, binding: ^Binding) {
 				if source_idx != INVALID_NODE && node_kind(ast, source_idx) == .Identifier {
 					binding.name = node_name_str(ast, source_idx)
 				} else {
-					analyzer_error("The : constraint indicator must be followed by an identifier or nothing", .Invalid_Constaint_Name, node_position(ast, name_idx))
+					analyzer_error("The : constraint indicator must be followed by an identifier or nothing", .Invalid_Constraint_Name, node_position(ast, name_idx))
 				}
 			case .ScopeNode:
 			case:
-				analyzer_error("The : constraint indicator must be followed by an identifier or nothing", .Invalid_Constaint_Name, node_position(ast, name_idx))
+				analyzer_error("The : constraint indicator must be followed by an identifier or nothing", .Invalid_Constraint_Name, node_position(ast, name_idx))
 			}
 		}
 		if constraint_idx == INVALID_NODE {
-			analyzer_error("Constraint node without a specific constraint is not allowed", .Invalid_Constaint, pos)
+			analyzer_error("Constraint node without a specific constraint is not allowed", .Invalid_Constraint, pos)
 			return
 		}
 		analyze_constraint(constraint_idx, binding)
@@ -967,7 +967,7 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 			if node_kind(ast, name_idx) == .ScopeNode {
 				// TODO(andrflor): apply carve here?
 			} else {
-				analyzer_error("Value for constraint data should be carve", .Invalid_Constaint, pos)
+				analyzer_error("Value for constraint data should be carve", .Invalid_Constraint, pos)
 			}
 			return value, value
 		}
@@ -1572,37 +1572,37 @@ analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, positio
 }
 
 debug_analyzer :: proc(analyzer: ^Analyzer, verbose: bool = false) {
-	fmt.println("=== ANALYZER DEBUG REPORT ===")
-	fmt.printf("Errors: %d, Warnings: %d\n", len(analyzer.errors), len(analyzer.warnings))
-	fmt.printf("Stack depth: %d\n\n", len(analyzer.stack))
+	fmt.eprintln("=== ANALYZER DEBUG REPORT ===")
+	fmt.eprintf("Errors: %d, Warnings: %d\n", len(analyzer.errors), len(analyzer.warnings))
+	fmt.eprintf("Stack depth: %d\n\n", len(analyzer.stack))
 
 	if len(analyzer.errors) > 0 {
-		fmt.println("ERRORS:")
+		fmt.eprintln("ERRORS:")
 		for error, i in analyzer.errors {
 			debug_error(error, i)
 		}
-		fmt.println()
+		fmt.eprintln()
 	}
 
 	if len(analyzer.warnings) > 0 {
-		fmt.println("WARNINGS:")
+		fmt.eprintln("WARNINGS:")
 		for warning, i in analyzer.warnings {
 			debug_error(warning, i)
 		}
-		fmt.println()
+		fmt.eprintln()
 	}
 
-	fmt.println("SCOPE STACK:")
+	fmt.eprintln("SCOPE STACK:")
 	for scope, level in analyzer.stack {
 		if level != 0 {
 			debug_scope(scope, level - 1, verbose)
 		}
 	}
-	fmt.println("=== END DEBUG REPORT ===\n")
+	fmt.eprintln("=== END DEBUG REPORT ===\n")
 }
 
 debug_error :: proc(error: Analyzer_Error, index: int) {
-	fmt.printf("  [%d] %v at line %d, col %d: %s\n", index, error.type, error.position.line, error.position.column, error.message)
+	fmt.eprintf("  [%d] %v at line %d, col %d: %s\n", index, error.type, error.position.line, error.position.column, error.message)
 }
 
 debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
