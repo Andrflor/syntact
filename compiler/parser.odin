@@ -2368,7 +2368,7 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_In
 			stack_len -= 1
 			advance_token(parser)
 		case:
-			if !found_exclamation {
+			if !found_exclamation || stack_len > 0 {
 				restore(parser, original_offset, original_current, original_peek, nodes_len)
 				return INVALID_NODE, false
 			}
