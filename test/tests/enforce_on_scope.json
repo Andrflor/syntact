@@ -1,0 +1,6 @@
+{
+  "name": "Enforce On Scope",
+  "description": "Enforce with scopes on both sides",
+  "source": "{x} ?! {y}",
+  "expect": "Scope[Enforce(Scope[Identifier(x)],Scope[Identifier(y)])]"
+}

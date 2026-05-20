@@ -1,0 +1,6 @@
+{
+  "name": "Program Reactive Counter",
+  "description": "Reactive counter using events and resonance for state synchronization",
+  "source": "Counter -> {\n  count -> 0\n  increment >- count\n  decrement >- count\n  count -< e {\n    increment -> count + 1\n    decrement -> count - 1\n  }\n  display >>- count\n}",
+  "expect": "Scope[Pointing(Identifier(Counter),Scope[Pointing(Identifier(count),Literal(Integer,0)),EventPush(Identifier(increment),Identifier(count)),EventPush(Identifier(decrement),Identifier(count)),EventPull(e,Identifier(count),Scope[Pointing(Identifier(increment),Operator(Add,Identifier(count),Literal(Integer,1))),Pointing(Identifier(decrement),Operator(Subtract,Identifier(count),Literal(Integer,1)))]),ResonancePush(Identifier(display),Identifier(count))])]"
+}

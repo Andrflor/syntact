@@ -1,0 +1,6 @@
+{
+  "name": "Program Error Result Type",
+  "description": "Result type with ok/err variants, pattern matching and enforce for error handling",
+  "source": "Result -> {\n  ok -> {value:??}\n  err -> {message:String}\n}\nparse -> input:String ? {\n  \"\" -> Result.err{message -> \"empty input\"}\n  -> Result.ok{value -> input}\n}\nsafe -> parse! ?! Result.ok",
+  "expect": "Scope[Pointing(Identifier(Result),Scope[Pointing(Identifier(ok),Scope[Constraint(Identifier(value),Unknown)]),Pointing(Identifier(err),Scope[Constraint(Identifier(message),Identifier(String))])]),Pointing(Identifier(parse),Pattern(Constraint(Identifier(input),Identifier(String)),[Branch(Literal(String,),Carve(Property(Identifier(Result),Identifier(err)),[Pointing(Identifier(message),Literal(String,empty input))])),Branch(nil,Carve(Property(Identifier(Result),Identifier(ok)),[Pointing(Identifier(value),Identifier(input))]))])),Pointing(Identifier(safe),Enforce(Execute(Identifier(parse),[]),Property(Identifier(Result),Identifier(ok))))]"
+}

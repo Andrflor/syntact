@@ -1,0 +1,6 @@
+{
+  "name": "Program Compile Time Config",
+  "description": "Compile-time evaluation mixed with runtime code, externals, and constraints",
+  "source": "MAX_SIZE -> !1024\nBUFFER_MASK -> !0xFF\nConfig -> !@env.config\nvalidated -> !input:u32 ?! 0..!MAX_SIZE",
+  "expect": "Scope[Pointing(Identifier(MAX_SIZE),CompileTime(Literal(Integer,1024))),Pointing(Identifier(BUFFER_MASK),CompileTime(Literal(Hexadecimal,0xFF))),Pointing(Identifier(Config),CompileTime(External(env,nil))),Pointing(Identifier(validated),CompileTime(Enforce(Constraint(Identifier(input),Identifier(u32)),Range(Literal(Integer,0),CompileTime(Identifier(MAX_SIZE))))))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Mod Standalone",
+  "description": "Modulo operator standalone",
+  "source": "a % b",
+  "expect": "Scope[Operator(Mod,Identifier(a),Identifier(b))]"
+}

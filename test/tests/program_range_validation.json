@@ -1,0 +1,6 @@
+{
+  "name": "Program Range Validation",
+  "description": "Range expressions used in constraints, enforce, and pattern branches",
+  "source": "Age -> {\n  value:u8\n  value ?! 0..150\n}\nclassify -> age:Age ? {\n  0..12 -> \"child\"\n  13..19 -> \"teen\"\n  20..64 -> \"adult\"\n  65.. -> \"senior\"\n}",
+  "expect": "Scope[Pointing(Identifier(Age),Scope[Constraint(Identifier(value),Identifier(u8)),Enforce(Identifier(value),Range(Literal(Integer,0),Literal(Integer,150)))]),Pointing(Identifier(classify),Pattern(Constraint(Identifier(age),Identifier(Age)),[Branch(Range(Literal(Integer,0),Literal(Integer,12)),Literal(String,child)),Branch(Range(Literal(Integer,13),Literal(Integer,19)),Literal(String,teen)),Branch(Range(Literal(Integer,20),Literal(Integer,64)),Literal(String,adult)),Branch(Range(Literal(Integer,65),nil),Literal(String,senior))]))]"
+}

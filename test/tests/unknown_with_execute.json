@@ -1,0 +1,6 @@
+{
+  "name": "Unknown With Execute",
+  "description": "Execute on unknown value",
+  "source": "??!",
+  "expect": "Scope[Execute(Unknown,[])]"
+}

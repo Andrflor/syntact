@@ -1,0 +1,6 @@
+{
+  "name": "Property On Paren Group",
+  "description": "Property access on a parenthesized expression",
+  "source": "(a + b).x",
+  "expect": "Scope[Property(Operator(Add,Identifier(a),Identifier(b)),Identifier(x))]"
+}

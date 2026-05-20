@@ -1,0 +1,6 @@
+{
+  "name": "Program State Machine Full",
+  "description": "Complete state machine with events, transitions via pattern match, and resonance for observers",
+  "source": "Door -> {\n  state -> \"closed\"\n  open >- state\n  close >- state\n  lock >- state\n  state -< e {\n    open -> state ? {\n      \"closed\" -> \"open\"\n      -> state\n    }\n    close -> state ? {\n      \"open\" -> \"closed\"\n      -> state\n    }\n    lock -> state ? {\n      \"closed\" -> \"locked\"\n      -> state\n    }\n  }\n  state >>- display\n}",
+  "expect": "Scope[Pointing(Identifier(Door),Scope[Pointing(Identifier(state),Literal(String,closed)),EventPush(Identifier(open),Identifier(state)),EventPush(Identifier(close),Identifier(state)),EventPush(Identifier(lock),Identifier(state)),EventPull(e,Identifier(state),Scope[Pointing(Identifier(open),Pattern(Identifier(state),[Branch(Literal(String,closed),Literal(String,open)),Branch(nil,Identifier(state))])),Pointing(Identifier(close),Pattern(Identifier(state),[Branch(Literal(String,open),Literal(String,closed)),Branch(nil,Identifier(state))])),Pointing(Identifier(lock),Pattern(Identifier(state),[Branch(Literal(String,closed),Literal(String,locked)),Branch(nil,Identifier(state))]))]),ResonancePush(Identifier(state),Identifier(display))])]"
+}

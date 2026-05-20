@@ -1,0 +1,6 @@
+{
+  "name": "Pattern On Unknown",
+  "description": "Pattern match on unknown value",
+  "source": "?? ? {\n  1 -> \"one\"\n  -> \"other\"\n}",
+  "expect": "Scope[Pattern(Unknown,[Branch(Literal(Integer,1),Literal(String,one)),Branch(nil,Literal(String,other))])]"
+}

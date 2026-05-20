@@ -1,0 +1,6 @@
+{
+  "name": "Constraint On Integer Literal",
+  "description": "Constraint bind applied to an integer literal - colon glued to 5",
+  "source": "5:u8",
+  "expect": "Scope[Constraint(Literal(Integer,5),Identifier(u8))]"
+}

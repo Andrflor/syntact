@@ -1,0 +1,6 @@
+{
+  "name": "Enforce On Execute",
+  "description": "Enforce applied to an execute result",
+  "source": "a! ?! b",
+  "expect": "Scope[Enforce(Execute(Identifier(a),[]),Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "EventPull Minimal",
+  "description": "Minimal event pull with just a catch identifier",
+  "source": "-< e handler",
+  "expect": "Scope[EventPull(e,nil,Identifier(handler))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Program Event Handler Chain",
+  "description": "Multiple event handlers on the same target with catch identifiers and nested patterns",
+  "source": "Button -> {\n  click >- self\n  hover >- self\n  self -< e {\n    click -> onClick!\n    hover -> style{color -> \"blue\"}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Button),Scope[EventPush(Identifier(click),Identifier(self)),EventPush(Identifier(hover),Identifier(self)),EventPull(e,Identifier(self),Scope[Pointing(Identifier(click),Execute(Identifier(onClick),[])),Pointing(Identifier(hover),Carve(Identifier(style),[Pointing(Identifier(color),Literal(String,blue))]))])])]"
+}

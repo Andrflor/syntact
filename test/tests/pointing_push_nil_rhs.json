@@ -1,0 +1,6 @@
+{
+  "name": "Pointing Push Nil RHS",
+  "description": "Pointing with nothing on right side at end of line",
+  "source": "a ->",
+  "expect": "Scope[Pointing(Identifier(a),nil)]"
+}

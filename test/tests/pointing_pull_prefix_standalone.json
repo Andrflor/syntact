@@ -1,0 +1,6 @@
+{
+  "name": "PointingPull Prefix Standalone",
+  "description": "Prefix pointing pull <- x as standalone expression",
+  "source": "<- x",
+  "expect": "Scope[PointingPull(nil,Identifier(x))]"
+}

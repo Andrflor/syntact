@@ -1,0 +1,6 @@
+{
+  "name": "Unknown With Constraint",
+  "description": "Constraint on unknown value",
+  "source": "??:u8",
+  "expect": "Scope[Constraint(Unknown,Identifier(u8))]"
+}

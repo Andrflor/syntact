@@ -1,0 +1,6 @@
+{
+  "name": "Program Unknown Defaults",
+  "description": "Using unknown values as type-level placeholders with constraints and defaults",
+  "source": "Container -> {\n  element:??\n  size:u32\n  empty -> Container{element -> ??, size -> 0}\n}\nIntBox -> Container{element -> i32}",
+  "expect": "Scope[Pointing(Identifier(Container),Scope[Constraint(Identifier(element),Unknown),Constraint(Identifier(size),Identifier(u32)),Pointing(Identifier(empty),Carve(Identifier(Container),[Pointing(Identifier(element),Unknown),Pointing(Identifier(size),Literal(Integer,0))]))]),Pointing(Identifier(IntBox),Carve(Identifier(Container),[Pointing(Identifier(element),Identifier(i32))]))]"
+}

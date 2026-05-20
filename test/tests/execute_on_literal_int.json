@@ -1,0 +1,6 @@
+{
+  "name": "Execute On Integer Literal",
+  "description": "Execute applied to an integer literal",
+  "source": "5!",
+  "expect": "Scope[Execute(Literal(Integer,5),[])]"
+}

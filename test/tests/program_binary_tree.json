@@ -1,0 +1,6 @@
+{
+  "name": "Program Binary Tree",
+  "description": "Binary tree type with leaf and node constructors",
+  "source": "Tree -> {\n  leaf -> {}\n  node -> {\n    value:i32\n    left:Tree\n    right:Tree\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Tree),Scope[Pointing(Identifier(leaf),Scope[]),Pointing(Identifier(node),Scope[Constraint(Identifier(value),Identifier(i32)),Constraint(Identifier(left),Identifier(Tree)),Constraint(Identifier(right),Identifier(Tree))])])]"
+}

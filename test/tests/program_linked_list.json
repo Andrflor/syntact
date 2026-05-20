@@ -1,0 +1,6 @@
+{
+  "name": "Program Linked List",
+  "description": "Linked list type definition with recursive pattern, carving for cons and nil constructors",
+  "source": "List -> {\n  Node -> {\n    value:??\n    next:List\n  }\n  empty -> {}\n  head -> self ? {\n    Node -> self.value\n    empty -> ??\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(List),Scope[Pointing(Identifier(Node),Scope[Constraint(Identifier(value),Unknown),Constraint(Identifier(next),Identifier(List))]),Pointing(Identifier(empty),Scope[]),Pointing(Identifier(head),Pattern(Identifier(self),[Branch(Identifier(Node),Property(Identifier(self),Identifier(value))),Branch(Identifier(empty),Unknown)]))])]"
+}

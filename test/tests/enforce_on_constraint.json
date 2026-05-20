@@ -1,0 +1,6 @@
+{
+  "name": "Enforce On Constraint",
+  "description": "Enforce applied to a constraint expression - constraint binds tighter than enforce",
+  "source": "a:u8 ?! b",
+  "expect": "Scope[Enforce(Constraint(Identifier(a),Identifier(u8)),Identifier(b))]"
+}

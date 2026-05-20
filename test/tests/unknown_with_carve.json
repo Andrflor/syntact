@@ -1,0 +1,6 @@
+{
+  "name": "Unknown With Carve",
+  "description": "Unknown value with glued carve brace",
+  "source": "??{x -> 1}",
+  "expect": "Scope[Carve(Unknown,[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Non Infix Breaks On Newline",
+  "description": "Non-infix operators do not continue expression across newline - pointing on new line is separate statement",
+  "source": "a\n-> b",
+  "expect": "Scope[Identifier(a),Product(Identifier(b))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Pattern On Integer Literal",
+  "description": "Pattern match on an integer literal with two branches",
+  "source": "5 ? {\n  5 -> \"five\"\n  -> \"other\"\n}",
+  "expect": "Scope[Pattern(Literal(Integer,5),[Branch(Literal(Integer,5),Literal(String,five)),Branch(nil,Literal(String,other))])]"
+}

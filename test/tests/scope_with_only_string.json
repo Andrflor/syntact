@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Only String",
+  "description": "Scope containing just a string literal",
+  "source": "{ \"hello\" }",
+  "expect": "Scope[Scope[Literal(String,hello)]]"
+}

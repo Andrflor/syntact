@@ -1,0 +1,6 @@
+{
+  "name": "Carve On String Literal",
+  "description": "Carve applied to a string literal",
+  "source": "\"hello\"{name -> \"world\"}",
+  "expect": "Scope[Carve(Literal(String,hello),[Pointing(Identifier(name),Literal(String,world))])]"
+}

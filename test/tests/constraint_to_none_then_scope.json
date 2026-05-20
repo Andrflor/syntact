@@ -1,0 +1,6 @@
+{
+  "name": "Constraint To None Then Scope",
+  "description": "Constraint with nil right followed by separate scope - space before brace makes LeftBrace not carve",
+  "source": "a: {x -> 1}",
+  "expect": "Scope[Constraint(Identifier(a),nil),Scope[Pointing(Identifier(x),Literal(Integer,1))]]"
+}

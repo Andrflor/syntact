@@ -1,0 +1,6 @@
+{
+  "name": "Bool Comma Separated In Scope",
+  "description": "Bool literals separated by commas inside a scope",
+  "source": "{true, false, true}",
+  "expect": "Scope[Scope[Literal(Bool,true),Literal(Bool,false),Literal(Bool,true)]]"
+}

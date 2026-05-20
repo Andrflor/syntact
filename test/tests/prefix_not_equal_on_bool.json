@@ -1,0 +1,6 @@
+{
+  "name": "Prefix NotEqual On Bool",
+  "description": "Prefix not-equal operator on a bool literal",
+  "source": "!= true",
+  "expect": "Scope[Operator(NotEqual,nil,Literal(Bool,true))]"
+}

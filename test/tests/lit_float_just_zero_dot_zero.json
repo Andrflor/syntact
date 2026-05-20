@@ -1,0 +1,6 @@
+{
+  "name": "Literal Float Zero Dot Zero",
+  "description": "Float literal 0.0 — explicit zero with decimal point",
+  "source": "0.0",
+  "expect": "Scope[Literal(Float,0.0)]"
+}

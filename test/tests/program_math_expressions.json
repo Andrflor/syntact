@@ -1,0 +1,6 @@
+{
+  "name": "Program Math Expressions",
+  "description": "Complex math with all arithmetic operators and precedence testing",
+  "source": "result -> (a + b) * c - d / e % f\nshifted -> x << 2 | y >> 1\nmasked -> value & 0xFF ^ flag",
+  "expect": "Scope[Pointing(Identifier(result),Operator(Subtract,Operator(Multiply,Operator(Add,Identifier(a),Identifier(b)),Identifier(c)),Operator(Mod,Operator(Divide,Identifier(d),Identifier(e)),Identifier(f)))),Pointing(Identifier(shifted),Operator(Or,Operator(LShift,Identifier(x),Literal(Integer,2)),Operator(RShift,Identifier(y),Literal(Integer,1)))),Pointing(Identifier(masked),Operator(Xor,Operator(And,Identifier(value),Literal(Hexadecimal,0xFF)),Identifier(flag)))]"
+}

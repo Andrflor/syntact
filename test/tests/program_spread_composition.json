@@ -1,0 +1,6 @@
+{
+  "name": "Program Spread Composition",
+  "description": "Object composition using expand/spread operator to merge properties",
+  "source": "Base -> {\n  x -> 0\n  y -> 0\n}\nExtended -> {\n  ...Base\n  z -> 0\n}\ninstance -> Extended{x -> 1, y -> 2, z -> 3}",
+  "expect": "Scope[Pointing(Identifier(Base),Scope[Pointing(Identifier(x),Literal(Integer,0)),Pointing(Identifier(y),Literal(Integer,0))]),Pointing(Identifier(Extended),Scope[Expand(Identifier(Base)),Pointing(Identifier(z),Literal(Integer,0))]),Pointing(Identifier(instance),Carve(Identifier(Extended),[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(y),Literal(Integer,2)),Pointing(Identifier(z),Literal(Integer,3))]))]"
+}

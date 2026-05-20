@@ -1,0 +1,6 @@
+{
+  "name": "Carve On Bool Literal",
+  "description": "Carve applied to a bool literal - brace glued to 'true' since 'e' is not a space",
+  "source": "true{x -> 1}",
+  "expect": "Scope[Carve(Literal(Bool,true),[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

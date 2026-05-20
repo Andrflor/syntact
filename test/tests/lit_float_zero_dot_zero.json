@@ -1,0 +1,6 @@
+{
+  "name": "Float Zero Dot Zero",
+  "description": "Float literal 0.0",
+  "source": "0.0",
+  "expect": "Scope[Literal(Float,0.0)]"
+}

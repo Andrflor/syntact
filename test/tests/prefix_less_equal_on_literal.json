@@ -1,0 +1,6 @@
+{
+  "name": "Prefix LessEqual On Literal",
+  "description": "Prefix less-or-equal operator on integer",
+  "source": "<= 10",
+  "expect": "Scope[Operator(LessEqual,nil,Literal(Integer,10))]"
+}

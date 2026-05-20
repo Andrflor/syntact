@@ -1,0 +1,6 @@
+{
+  "name": "Bool In Pointing",
+  "description": "Bool literal as pointing target",
+  "source": "enabled -> true",
+  "expect": "Scope[Pointing(Identifier(enabled),Literal(Bool,true))]"
+}

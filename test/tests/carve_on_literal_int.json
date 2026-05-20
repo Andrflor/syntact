@@ -1,0 +1,6 @@
+{
+  "name": "Carve On Integer Literal",
+  "description": "Carve applied to an integer literal - brace glued to 5 makes LeftBraceCarve",
+  "source": "5{x -> 1}",
+  "expect": "Scope[Carve(Literal(Integer,5),[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

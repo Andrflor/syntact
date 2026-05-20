@@ -1,0 +1,6 @@
+{
+  "name": "Program Pattern Guard With Enforce",
+  "description": "Pattern matching combined with enforce guard clauses for input validation",
+  "source": "validate -> input:String ? {\n  \"\" -> {valid -> false, error -> \"empty\"}\n  -> input ?! {\n    ok -> {valid -> true, value -> input}\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(validate),Pattern(Constraint(Identifier(input),Identifier(String)),[Branch(Literal(String,),Scope[Pointing(Identifier(valid),Literal(Bool,false)),Pointing(Identifier(error),Literal(String,empty))]),Branch(nil,Enforce(Identifier(input),Scope[Pointing(Identifier(ok),Scope[Pointing(Identifier(valid),Literal(Bool,true)),Pointing(Identifier(value),Identifier(input))])]))]))]"
+}
