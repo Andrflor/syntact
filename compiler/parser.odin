@@ -1518,7 +1518,7 @@ parse_execute_prefix :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	advance_token(parser)
 
-	if !is_expression_start(parser.current_token.kind) &&
+	if !IS_EXPRESSION_START[parser.current_token.kind] &&
 	   parser.current_token.kind != .LeftBraceCarve {
 		data: Node_Data
 		data.execute = Execute_Data{target = INVALID_NODE, wrappers = EMPTY_RANGE}
@@ -1686,7 +1686,7 @@ parse_constraint_bind :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	} else if parser.current_token.kind == .LeftParenNoSpace {
 		name = parse_grouping(parser)
 	} else if parser.current_token.kind == .LeftBrace {
-	} else if is_expression_start(parser.current_token.kind) {
+	} else if IS_EXPRESSION_START[parser.current_token.kind] {
 		name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
 	}
 
@@ -1715,7 +1715,7 @@ parse_constraint_from_none :: proc(parser: ^Parser) -> Node_Index {
 	} else if parser.current_token.kind == .LeftParenNoSpace {
 		name = parse_grouping(parser)
 	} else if parser.current_token.kind == .LeftBrace {
-	} else if is_expression_start(parser.current_token.kind) {
+	} else if IS_EXPRESSION_START[parser.current_token.kind] {
 		name = parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
 	}
 
@@ -2114,7 +2114,7 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		inline_expr := INVALID_NODE
 		if parser.current_token.kind == .LeftParenNoSpace {
 			inline_expr = parse_grouping(parser)
-		} else if is_expression_start(parser.current_token.kind) {
+		} else if IS_EXPRESSION_START[parser.current_token.kind] {
 			inline_expr = parse_expression(parser, .OR)
 		} else {
 			error_at_current(parser, "Expected pattern expression after ?")
@@ -2134,7 +2134,7 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 }
 
 parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: Node_Index) {
-	if !is_expression_start(parser.current_token.kind) {
+	if !IS_EXPRESSION_START[parser.current_token.kind] {
 		advance_token(parser)
 		return INVALID_NODE, INVALID_NODE
 	}
@@ -2400,49 +2400,50 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_In
  * SECTION 8: UTILITY FUNCTIONS
  * ====================================================================== */
 
-is_execution_pattern_start :: proc(kind: Token_Kind) -> bool {
-	return kind == .Execute || kind == .LeftParen || kind == .Less ||
-	       kind == .LeftBracket || kind == .Or
+IS_EXECUTION_PATTERN_START: [Token_Kind]bool = #partial {
+	.Execute     = true,
+	.LeftParen   = true,
+	.Less        = true,
+	.LeftBracket = true,
+	.Or          = true,
 }
 
-is_expression_start :: proc(kind: Token_Kind) -> bool {
-	return(
-		kind == .Identifier ||
-		kind == .Integer ||
-		kind == .Float ||
-		kind == .String_Literal ||
-		kind == .Bool_Literal ||
-		kind == .Hexadecimal ||
-		kind == .Binary ||
-		kind == .LeftBrace ||
-		kind == .LeftParen ||
-		kind == .LeftParenNoSpace ||
-		kind == .At ||
-		kind == .Not ||
-		kind == .Minus ||
-		kind == .PointingPull ||
-		kind == .EventPush ||
-		kind == .EventPull ||
-		kind == .ResonancePush ||
-		kind == .ResonancePull ||
-		kind == .DoubleDot ||
-		kind == .Question ||
-		kind == .Ellipsis ||
-		kind == .PointingPush ||
-		kind == .Equal ||
-		kind == .NotEqual ||
-		kind == .LessEqual ||
-		kind == .Less ||
-		kind == .Greater ||
-		kind == .GreaterEqual ||
-		kind == .Range ||
-		kind == .PostfixRange ||
-		kind == .PrefixRange ||
-		kind == .DoubleQuestion ||
-		kind == .Execute ||
-		kind == .ConstraintFromNone ||
-		kind == .PropertyFromNone
-	)
+IS_EXPRESSION_START: [Token_Kind]bool = #partial {
+	.Identifier       = true,
+	.Integer          = true,
+	.Float            = true,
+	.String_Literal   = true,
+	.Bool_Literal     = true,
+	.Hexadecimal      = true,
+	.Binary           = true,
+	.LeftBrace        = true,
+	.LeftParen        = true,
+	.LeftParenNoSpace = true,
+	.At               = true,
+	.Not              = true,
+	.Minus            = true,
+	.PointingPull     = true,
+	.EventPush        = true,
+	.EventPull        = true,
+	.ResonancePush    = true,
+	.ResonancePull    = true,
+	.DoubleDot        = true,
+	.Question         = true,
+	.Ellipsis         = true,
+	.PointingPush     = true,
+	.Equal            = true,
+	.NotEqual         = true,
+	.LessEqual        = true,
+	.Less             = true,
+	.Greater          = true,
+	.GreaterEqual     = true,
+	.Range            = true,
+	.PostfixRange     = true,
+	.PrefixRange      = true,
+	.DoubleQuestion   = true,
+	.Execute          = true,
+	.ConstraintFromNone = true,
+	.PropertyFromNone = true,
 }
 
 IDENT_START:    [256]bool
