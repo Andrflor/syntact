@@ -1,6 +1,6 @@
 {
   "name": "Z CompileTime On Range",
-  "description": "!0..10 — CompileTime prefix at UNARY; Range at RANGE > UNARY consumes both endpoints as the operand.",
+  "description": "!0..10 — CompileTime prefix at CALL takes only '0', then Range infix forms Range(CompileTime(0),10).",
   "source": "!0..10",
-  "expect": "Scope[CompileTime(Range(Literal(Integer,0),Literal(Integer,10)))]"
+  "expect": "Scope[Range(CompileTime(Literal(Integer,0)),Literal(Integer,10))]"
 }
