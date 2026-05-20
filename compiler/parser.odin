@@ -489,271 +489,288 @@ skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
 	return flags
 }
 
-next_token :: proc(l: ^Lexer) -> Token {
-	flags: u8
-	start: u32
-	c: u8
+Lex_Handler :: #type proc(l: ^Lexer, start: u32, flags: u8) -> Token
+
+LEX_DISPATCH: [256]Lex_Handler
+
+Pair_Result :: struct {
+	kind: Token_Kind,
+	len:  u8,
+}
+
+PAIR_LESS:     [256]Pair_Result
+PAIR_GREATER:  [256]Pair_Result
+PAIR_MINUS:    [256]Pair_Result
+PAIR_BANG:     [256]Pair_Result
+PAIR_QUESTION: [256]Pair_Result
+PAIR_ZERO:     [256]Pair_Result
+
+COLON_TABLE: [2][2]Token_Kind
+
+@(init)
+init_lex_dispatch :: proc "contextless" () {
+	for i in 0..<256 { LEX_DISPATCH[i] = lex_invalid }
+
+	LEX_DISPATCH['@'] = lex_single_at
+	LEX_DISPATCH['}'] = lex_single_rbrace
+	LEX_DISPATCH[']'] = lex_single_rbracket
+	LEX_DISPATCH[')'] = lex_single_rparen
+	LEX_DISPATCH['='] = lex_single_equal
+	LEX_DISPATCH['+'] = lex_single_plus
+	LEX_DISPATCH['*'] = lex_single_asterisk
+	LEX_DISPATCH['%'] = lex_single_percent
+	LEX_DISPATCH['&'] = lex_single_and
+	LEX_DISPATCH['|'] = lex_single_or
+	LEX_DISPATCH['^'] = lex_single_xor
+	LEX_DISPATCH['~'] = lex_single_not
+	LEX_DISPATCH['/'] = lex_single_slash
+	LEX_DISPATCH['['] = lex_single_lbracket
+
+	LEX_DISPATCH['`'] = scan_string
+	LEX_DISPATCH['"'] = scan_string
+	LEX_DISPATCH['\''] = scan_string
+
+	LEX_DISPATCH['{'] = lex_lbrace
+	LEX_DISPATCH['('] = lex_lparen
+	LEX_DISPATCH['!'] = lex_bang
+	LEX_DISPATCH[':'] = lex_colon
+	LEX_DISPATCH['?'] = lex_question
+	LEX_DISPATCH['.'] = lex_dot
+	LEX_DISPATCH['<'] = lex_less
+	LEX_DISPATCH['>'] = lex_greater
+	LEX_DISPATCH['-'] = lex_minus
+
+	LEX_DISPATCH['0'] = lex_zero
+	for c in u8('1')..=u8('9') { LEX_DISPATCH[c] = scan_number }
+	for c in u8('a')..=u8('z') { LEX_DISPATCH[c] = lex_ident }
+	for c in u8('A')..=u8('Z') { LEX_DISPATCH[c] = lex_ident }
+	LEX_DISPATCH['_'] = lex_ident
+
+	PAIR_LESS['='] = {.LessEqual, 2}
+	PAIR_LESS['<'] = {.LShift, 2}
+	PAIR_LESS['-'] = {.PointingPull, 2}
+
+	PAIR_GREATER['='] = {.GreaterEqual, 2}
+	PAIR_GREATER['>'] = {.RShift, 2}
+	PAIR_GREATER['-'] = {.EventPush, 2}
+
+	PAIR_MINUS['>'] = {.PointingPush, 2}
+	PAIR_MINUS['<'] = {.EventPull, 2}
+
+	PAIR_BANG['='] = {.NotEqual, 2}
+
+	PAIR_QUESTION['?'] = {.DoubleQuestion, 2}
+	PAIR_QUESTION['!'] = {.QuestionExclamation, 2}
+
+	PAIR_ZERO['x'] = {.Hexadecimal, 0}
+	PAIR_ZERO['X'] = {.Hexadecimal, 0}
+	PAIR_ZERO['b'] = {.Binary, 0}
+	PAIR_ZERO['B'] = {.Binary, 0}
+
+	COLON_TABLE[0][0] = .ConstraintBind
+	COLON_TABLE[0][1] = .ConstraintToNone
+	COLON_TABLE[1][0] = .ConstraintFromNone
+	COLON_TABLE[1][1] = .Colon
+}
+
+lex_single_at       :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.At, Span{s,s+1}, f} }
+lex_single_rbrace   :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.RightBrace, Span{s,s+1}, f} }
+lex_single_rbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.RightBracket, Span{s,s+1}, f} }
+lex_single_rparen   :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.RightParen, Span{s,s+1}, f} }
+lex_single_equal    :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Equal, Span{s,s+1}, f} }
+lex_single_plus     :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Plus, Span{s,s+1}, f} }
+lex_single_asterisk :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Asterisk, Span{s,s+1}, f} }
+lex_single_percent  :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Percent, Span{s,s+1}, f} }
+lex_single_and      :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.And, Span{s,s+1}, f} }
+lex_single_or       :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Or, Span{s,s+1}, f} }
+lex_single_xor      :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Xor, Span{s,s+1}, f} }
+lex_single_not      :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Not, Span{s,s+1}, f} }
+lex_single_slash    :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.Slash, Span{s,s+1}, f} }
+lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token { l.offset = s+1; return Token{.LeftBracket, Span{s,s+1}, f} }
+
+lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	sb := start == 0 || IS_SPACE[l.src[start - 1]]
+	l.offset = start + 1
+	return Token{kind = sb ? .LeftBrace : .LeftBraceCarve, span = Span{start, start + 1}, flags = flags}
+}
+
+lex_lparen :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	sb := start == 0 || IS_SPACE[l.src[start - 1]]
+	l.offset = start + 1
+	return Token{kind = sb ? .LeftParen : .LeftParenNoSpace, span = Span{start, start + 1}, flags = flags}
+}
+
+lex_bang :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
+	p := PAIR_BANG[nc]
+	kind := p.len != 0 ? p.kind : Token_Kind.Execute
+	tlen := u32(p.len != 0 ? p.len : 1)
+	l.offset = start + tlen
+	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
+}
+
+lex_colon :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	src := l.src
+	sb := u8(start > 0 && IS_SPACE[src[start - 1]])
+	sa := u8(start < l.source_len && src[start] == ':' && start + 1 < l.source_len && IS_SPACE[src[start + 1]])
+	l.offset = start + 1
+	return Token{kind = COLON_TABLE[sb][sa], span = Span{start, start + 1}, flags = flags}
+}
+
+lex_question :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
+	p := PAIR_QUESTION[nc]
+	kind := p.len != 0 ? p.kind : Token_Kind.Question
+	tlen := u32(p.len != 0 ? p.len : 1)
+	l.offset = start + tlen
+	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
+}
+
+lex_less :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
+	p := PAIR_LESS[nc]
+	kind := p.len != 0 ? p.kind : Token_Kind.Less
+	tlen := u32(p.len != 0 ? p.len : 1)
+	l.offset = start + tlen
+	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
+}
+
+lex_greater :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
+	p := PAIR_GREATER[nc]
+	if p.kind == .RShift && start + 2 < l.source_len && l.src[start + 2] == '-' {
+		l.offset = start + 3
+		return Token{kind = .ResonancePush, span = Span{start, start + 3}, flags = flags}
+	}
+	kind := p.len != 0 ? p.kind : Token_Kind.Greater
+	tlen := u32(p.len != 0 ? p.len : 1)
+	l.offset = start + tlen
+	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
+}
+
+lex_minus :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
+	p := PAIR_MINUS[nc]
+	if p.kind == .EventPull && start + 2 < l.source_len && l.src[start + 2] == '<' {
+		l.offset = start + 3
+		return Token{kind = .ResonancePull, span = Span{start, start + 3}, flags = flags}
+	}
+	kind := p.len != 0 ? p.kind : Token_Kind.Minus
+	tlen := u32(p.len != 0 ? p.len : 1)
+	l.offset = start + tlen
+	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
+}
+
+lex_zero :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
+	p := PAIR_ZERO[nc]
+	if p.kind == .Hexadecimal { return scan_hexadecimal(l, start, flags) }
+	if p.kind == .Binary      { return scan_binary(l, start, flags) }
+	return scan_number(l, start, flags)
+}
+
+lex_dot :: proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
 	slen := l.source_len
+	off := start
+	if off + 1 < slen && src[off + 1] == '.' {
+		has_before := off == 0 || IS_BEFORE_DELIM[src[off - 1]]
+		has_after := off + 2 >= slen || IS_AFTER_DELIM[src[off + 2]]
+		off += 2
+		if off < slen && src[off] == '.' {
+			off += 1
+			l.offset = off
+			return Token{kind = .Ellipsis, span = Span{start, off}, flags = flags}
+		}
+		l.offset = off
+		kind := Token_Kind.Range
+		if has_before && has_after { kind = .DoubleDot }
+		else if has_before         { kind = .PrefixRange }
+		else if has_after          { kind = .PostfixRange }
+		return Token{kind = kind, span = Span{start, off}, flags = flags}
+	}
+	bd := off == 0 || IS_BEFORE_DELIM[src[off - 1]]
+	ad := (off + 1 >= slen) || (src[off] == '.' && off + 1 < slen && IS_SPACE[src[off + 1]])
+	off += 1
+	l.offset = off
+	kind := Token_Kind.PropertyAccess
+	if bd && ad       { kind = .Dot }
+	else if bd        { kind = .PropertyFromNone }
+	else if ad        { kind = .PropertyToNone }
+	return Token{kind = kind, span = Span{start, off}, flags = flags}
+}
+
+lex_ident :: proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	src := l.src
+	slen := l.source_len
+	off := start + 1
+	for off < slen && IDENT_CONTINUE[src[off]] {
+		off += 1
+	}
+	l.offset = off
+	ilen := off - start
+	if ilen == 4 && src[start] == 't' && src[start+1] == 'r' && src[start+2] == 'u' && src[start+3] == 'e' {
+		return Token{kind = .Bool_Literal, span = Span{start, off}, flags = flags}
+	}
+	if ilen == 5 && src[start] == 'f' && src[start+1] == 'a' && src[start+2] == 'l' && src[start+3] == 's' && src[start+4] == 'e' {
+		return Token{kind = .Bool_Literal, span = Span{start, off}, flags = flags}
+	}
+	return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
+}
+
+lex_invalid :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	l.offset = start + 1
+	return Token{kind = .Invalid, span = Span{start, start + 1}, flags = flags}
+}
+
+next_token :: proc(l: ^Lexer) -> Token {
+	flags: u8
+	src := l.src
+	slen := l.source_len
+	off: u32
 
 	for {
 		flags = skip_trivia(l)
+		off = l.offset
 
-		if l.offset >= slen {
-			return Token{kind = .EOF, span = Span{l.offset, l.offset}, flags = flags}
+		if off >= slen {
+			return Token{kind = .EOF, span = Span{off, off}, flags = flags}
 		}
 
-		start = l.offset
-		c = src[l.offset]
+		c := src[off]
 
-		if c == '/' && l.offset + 1 < slen {
-			if src[l.offset + 1] == '/' {
-				l.offset += 2
-				for l.offset < slen && src[l.offset] != '\n' {
-					l.offset += 1
+		if c == '/' && off + 1 < slen {
+			nc := src[off + 1]
+			if nc == '/' {
+				off += 2
+				for off < slen && src[off] != '\n' {
+					off += 1
 				}
+				l.offset = off
 				continue
 			}
-			if src[l.offset + 1] == '*' {
-				l.offset += 2
+			if nc == '*' {
+				off += 2
 				depth : u32 = 1
-				for l.offset < slen && depth > 0 {
-					if l.offset + 1 < slen && src[l.offset] == '/' && src[l.offset + 1] == '*' {
-						l.offset += 2
+				for off < slen && depth > 0 {
+					if off + 1 < slen && src[off] == '/' && src[off + 1] == '*' {
+						off += 2
 						depth += 1
-					} else if l.offset + 1 < slen && src[l.offset] == '*' && src[l.offset + 1] == '/' {
-						l.offset += 2
+					} else if off + 1 < slen && src[off] == '*' && src[off + 1] == '/' {
+						off += 2
 						depth -= 1
 					} else {
-						l.offset += 1
+						off += 1
 					}
 				}
+				l.offset = off
 				continue
 			}
 		}
 		break
 	}
 
-	switch c {
-	case '`', '"', '\'':
-		return scan_string(l, start, flags)
-	case '@':
-		l.offset += 1
-		return Token{kind = .At, span = Span{start, l.offset}, flags = flags}
-	case '{':
-		space_before := has_space_before(l)
-		l.offset += 1
-		if space_before || start == 0 {
-			return Token{kind = .LeftBrace, span = Span{start, l.offset}, flags = flags}
-		} else {
-			return Token{kind = .LeftBraceCarve, span = Span{start, l.offset}, flags = flags}
-		}
-	case '}':
-		l.offset += 1
-		return Token{kind = .RightBrace, span = Span{start, l.offset}, flags = flags}
-	case '[':
-		l.offset += 1
-		return Token{kind = .LeftBracket, span = Span{start, l.offset}, flags = flags}
-	case ']':
-		l.offset += 1
-		return Token{kind = .RightBracket, span = Span{start, l.offset}, flags = flags}
-	case '(':
-		space_before := has_space_before(l)
-		l.offset += 1
-		if space_before || start == 0 {
-			return Token{kind = .LeftParen, span = Span{start, l.offset}, flags = flags}
-		} else {
-			return Token{kind = .LeftParenNoSpace, span = Span{start, l.offset}, flags = flags}
-		}
-	case ')':
-		l.offset += 1
-		return Token{kind = .RightParen, span = Span{start, l.offset}, flags = flags}
-	case '!':
-		l.offset += 1
-		if l.offset < slen && src[l.offset] == '=' {
-			l.offset += 1
-			return Token{kind = .NotEqual, span = Span{start, l.offset}, flags = flags}
-		}
-		return Token{kind = .Execute, span = Span{start, l.offset}, flags = flags}
-	case ':':
-		space_before := has_space_before(l)
-		space_after := has_space_after_char(l, ':')
-		l.offset += 1
-		if space_before {
-			if space_after {
-				return Token{kind = .Colon, span = Span{start, l.offset}, flags = flags}
-			} else {
-				return Token{kind = .ConstraintFromNone, span = Span{start, l.offset}, flags = flags}
-			}
-		} else {
-			if space_after {
-				return Token{kind = .ConstraintToNone, span = Span{start, l.offset}, flags = flags}
-			} else {
-				return Token{kind = .ConstraintBind, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-	case '?':
-		l.offset += 1
-		if l.offset < slen {
-			switch src[l.offset] {
-			case '?':
-				l.offset += 1
-				return Token{kind = .DoubleQuestion, span = Span{start, l.offset}, flags = flags}
-			case '!':
-				l.offset += 1
-				return Token{kind = .QuestionExclamation, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-		return Token{kind = .Question, span = Span{start, l.offset}, flags = flags}
-	case '.':
-		if l.offset + 1 < slen && src[l.offset + 1] == '.' {
-			has_before_delimiter := l.offset == 0 || IS_BEFORE_DELIM[src[l.offset - 1]]
-			has_after_delimiter := l.offset + 2 >= slen || IS_AFTER_DELIM[src[l.offset + 2]]
-			l.offset += 2
-			if l.offset < slen && src[l.offset] == '.' {
-				l.offset += 1
-				return Token{kind = .Ellipsis, span = Span{start, l.offset}, flags = flags}
-			}
-			if has_before_delimiter && has_after_delimiter {
-				return Token{kind = .DoubleDot, span = Span{start, l.offset}, flags = flags}
-			} else if has_before_delimiter {
-				return Token{kind = .PrefixRange, span = Span{start, l.offset}, flags = flags}
-			} else if has_after_delimiter {
-				return Token{kind = .PostfixRange, span = Span{start, l.offset}, flags = flags}
-			} else {
-				return Token{kind = .Range, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-		space_before_dot := l.offset == 0 || IS_BEFORE_DELIM[src[l.offset - 1]]
-		space_after_dot := has_space_after_char(l, '.') || (l.offset + 1 >= slen)
-		l.offset += 1
-		if space_before_dot {
-			if space_after_dot {
-				return Token{kind = .Dot, span = Span{start, l.offset}, flags = flags}
-			} else {
-				return Token{kind = .PropertyFromNone, span = Span{start, l.offset}, flags = flags}
-			}
-		} else {
-			if space_after_dot {
-				return Token{kind = .PropertyToNone, span = Span{start, l.offset}, flags = flags}
-			} else {
-				return Token{kind = .PropertyAccess, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-	case '=':
-		l.offset += 1
-		return Token{kind = .Equal, span = Span{start, l.offset}, flags = flags}
-	case '<':
-		l.offset += 1
-		if l.offset < slen {
-			nc := src[l.offset]
-			if nc == '=' {
-				l.offset += 1
-				return Token{kind = .LessEqual, span = Span{start, l.offset}, flags = flags}
-			} else if nc == '<' {
-				l.offset += 1
-				return Token{kind = .LShift, span = Span{start, l.offset}, flags = flags}
-			} else if nc == '-' {
-				l.offset += 1
-				return Token{kind = .PointingPull, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-		return Token{kind = .Less, span = Span{start, l.offset}, flags = flags}
-	case '>':
-		l.offset += 1
-		if l.offset < slen {
-			nc := src[l.offset]
-			if nc == '=' {
-				l.offset += 1
-				return Token{kind = .GreaterEqual, span = Span{start, l.offset}, flags = flags}
-			} else if nc == '>' {
-				if l.offset + 1 < slen && src[l.offset + 1] == '-' {
-					l.offset += 2
-					return Token{kind = .ResonancePush, span = Span{start, l.offset}, flags = flags}
-				}
-				l.offset += 1
-				return Token{kind = .RShift, span = Span{start, l.offset}, flags = flags}
-			} else if nc == '-' {
-				l.offset += 1
-				return Token{kind = .EventPush, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-		return Token{kind = .Greater, span = Span{start, l.offset}, flags = flags}
-	case '-':
-		l.offset += 1
-		if l.offset < slen {
-			nc := src[l.offset]
-			if nc == '>' {
-				l.offset += 1
-				return Token{kind = .PointingPush, span = Span{start, l.offset}, flags = flags}
-			} else if nc == '<' {
-				l.offset += 1
-				if l.offset < slen && src[l.offset] == '<' {
-					l.offset += 1
-					return Token{kind = .ResonancePull, span = Span{start, l.offset}, flags = flags}
-				}
-				return Token{kind = .EventPull, span = Span{start, l.offset}, flags = flags}
-			}
-		}
-		return Token{kind = .Minus, span = Span{start, l.offset}, flags = flags}
-	case '/':
-		l.offset += 1
-		return Token{kind = .Slash, span = Span{start, l.offset}, flags = flags}
-	case '0':
-		if l.offset + 1 < slen {
-			next := src[l.offset + 1]
-			if next == 'x' || next == 'X' {
-				return scan_hexadecimal(l, start, flags)
-			}
-			if next == 'b' || next == 'B' {
-				return scan_binary(l, start, flags)
-			}
-		}
-		fallthrough
-	case '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		return scan_number(l, start, flags)
-	case '+':
-		l.offset += 1
-		return Token{kind = .Plus, span = Span{start, l.offset}, flags = flags}
-	case '*':
-		l.offset += 1
-		return Token{kind = .Asterisk, span = Span{start, l.offset}, flags = flags}
-	case '%':
-		l.offset += 1
-		return Token{kind = .Percent, span = Span{start, l.offset}, flags = flags}
-	case '&':
-		l.offset += 1
-		return Token{kind = .And, span = Span{start, l.offset}, flags = flags}
-	case '|':
-		l.offset += 1
-		return Token{kind = .Or, span = Span{start, l.offset}, flags = flags}
-	case '^':
-		l.offset += 1
-		return Token{kind = .Xor, span = Span{start, l.offset}, flags = flags}
-	case '~':
-		l.offset += 1
-		return Token{kind = .Not, span = Span{start, l.offset}, flags = flags}
-	case:
-		if IDENT_START[c] {
-			l.offset += 1
-			for l.offset < slen && IDENT_CONTINUE[src[l.offset]] {
-				l.offset += 1
-			}
-			ilen := l.offset - start
-			if ilen == 4 {
-				if src[start] == 't' && src[start+1] == 'r' && src[start+2] == 'u' && src[start+3] == 'e' {
-					return Token{kind = .Bool_Literal, span = Span{start, l.offset}, flags = flags}
-				}
-			} else if ilen == 5 {
-				if src[start] == 'f' && src[start+1] == 'a' && src[start+2] == 'l' && src[start+3] == 's' && src[start+4] == 'e' {
-					return Token{kind = .Bool_Literal, span = Span{start, l.offset}, flags = flags}
-				}
-			}
-			return Token{kind = .Identifier, span = Span{start, l.offset}, flags = flags}
-		}
-		l.offset += 1
-		return Token{kind = .Invalid, span = Span{start, l.offset}, flags = flags}
-	}
+	return LEX_DISPATCH[src[off]](l, off, flags)
 }
 
 scan_string :: proc(l: ^Lexer, start: u32, f: u8) -> Token {
