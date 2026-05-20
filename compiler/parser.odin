@@ -1526,7 +1526,7 @@ parse_execute_prefix :: proc(parser: ^Parser) -> Node_Index {
 		return add_node(parser, .Execute, data, span)
 	}
 
-	operand := parse_expression(parser, Precedence.UNARY)
+	operand := parse_expression(parser, Precedence.CALL)
 	data: Node_Data
 	data.unary = Unary_Data{operand = operand}
 	return add_node(parser, .CompileTime, data, Span{span.start, parser.node_spans[operand].end})
@@ -1842,7 +1842,7 @@ parse_event_push_prefix :: proc(parser: ^Parser) -> Node_Index {
 	if parser.current_token.kind != .RightBrace &&
 	   parser.current_token.kind != .EOF &&
 	   !has_flag(parser.current_token, .Separator_Before) {
-		to = parse_expression(parser)
+		to = parse_expression(parser, .ASSIGNMENT)
 	}
 
 	data: Node_Data
@@ -1862,7 +1862,7 @@ parse_event_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	if parser.current_token.kind != .RightBrace &&
 	   parser.current_token.kind != .EOF &&
 	   !has_flag(parser.current_token, .Separator_Before) {
-		to = parse_expression(parser)
+		to = parse_expression(parser, .ASSIGNMENT)
 	}
 
 	data: Node_Data
@@ -2273,6 +2273,12 @@ parse_left_bracket :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 parse_left_paren :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
 		return node
+	}
+	if parser.node_kinds[left] == .Identifier {
+		left_data := parser.node_data[left].identifier
+		if left_data.name == EMPTY_SPAN {
+			return INVALID_NODE
+		}
 	}
 	parse_grouping(parser)
 	return left
