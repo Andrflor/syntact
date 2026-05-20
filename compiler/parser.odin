@@ -156,11 +156,11 @@ Node_Data :: struct #raw_union {
 
 Ast :: struct {
 	source:              string,
-	node_kinds:          [dynamic]Node_Kind,
-	node_spans:          [dynamic]Span,
-	node_data:           [dynamic]Node_Data,
-	extra:               [dynamic]Node_Index,
-	extra_u8:            [dynamic]u8,
+	node_kinds:          []Node_Kind,
+	node_spans:          []Span,
+	node_data:           []Node_Data,
+	extra:               []Node_Index,
+	extra_u8:            []u8,
 	line_starts:         [dynamic]u32,
 	line_starts_computed: bool,
 }
@@ -1005,25 +1005,38 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Ellipsis] = .PRIMARY
 }
 
+grow_buffer :: proc($T: typeid, buf: ^[]T, current_len: int) {
+	old := buf^
+	new_cap := len(old) * 2
+	new_buf := make([]T, new_cap)
+	copy(new_buf[:current_len], old[:current_len])
+	delete(old)
+	buf^ = new_buf
+}
+
 Scratch_Buffer :: struct {
-	items: [dynamic]Node_Index,
+	items: []Node_Index,
+	count: int,
 }
 
 scratch_begin :: #force_inline proc(s: ^Scratch_Buffer) -> int {
-	return len(s.items)
+	return s.count
 }
 
 scratch_end :: #force_inline proc(s: ^Scratch_Buffer, checkpoint: int) -> []Node_Index {
-	result := s.items[checkpoint:]
-	return result[:]
+	return s.items[checkpoint:s.count]
 }
 
 scratch_reset :: #force_inline proc(s: ^Scratch_Buffer, checkpoint: int) {
-	resize(&s.items, checkpoint)
+	s.count = checkpoint
 }
 
 scratch_append :: #force_inline proc(s: ^Scratch_Buffer, idx: Node_Index) {
-	append(&s.items, idx)
+	if s.count >= len(s.items) {
+		grow_buffer(Node_Index, &s.items, s.count)
+	}
+	s.items[s.count] = idx
+	s.count += 1
 }
 
 Parser :: struct {
@@ -1031,11 +1044,14 @@ Parser :: struct {
 	lexer:         Lexer,
 	current_token: Token,
 	peek_token:    Token,
-	node_kinds:    [dynamic]Node_Kind,
-	node_spans:    [dynamic]Span,
-	node_data:     [dynamic]Node_Data,
-	extra:         [dynamic]Node_Index,
-	extra_u8:      [dynamic]u8,
+	node_kinds:    []Node_Kind,
+	node_spans:    []Span,
+	node_data:     []Node_Data,
+	node_count:    u32,
+	extra:         []Node_Index,
+	extra_count:   u32,
+	extra_u8:      []u8,
+	extra_u8_count: u32,
 	errors:        [dynamic]Parse_Error,
 	panic_mode:    bool,
 	file_cache:    ^Cache,
@@ -1060,12 +1076,16 @@ init_parser :: proc(parser: ^Parser, cache: ^Cache, source: string) {
 		estimated_nodes = src_len / 8
 	}
 	estimated_extra := estimated_nodes / 3
-	parser.node_kinds = make([dynamic]Node_Kind, 0, estimated_nodes)
-	parser.node_spans = make([dynamic]Span, 0, estimated_nodes)
-	parser.node_data = make([dynamic]Node_Data, 0, estimated_nodes)
-	parser.extra = make([dynamic]Node_Index, 0, estimated_extra)
-	parser.extra_u8 = make([dynamic]u8, 0, 32)
-	parser.scratch.items = make([dynamic]Node_Index, 0, 256)
+	parser.node_kinds = make([]Node_Kind, estimated_nodes)
+	parser.node_spans = make([]Span, estimated_nodes)
+	parser.node_data = make([]Node_Data, estimated_nodes)
+	parser.node_count = 0
+	parser.extra = make([]Node_Index, estimated_extra)
+	parser.extra_count = 0
+	parser.extra_u8 = make([]u8, max(64, estimated_extra / 4))
+	parser.extra_u8_count = 0
+	parser.scratch.items = make([]Node_Index, max(256, estimated_nodes / 4))
+	parser.scratch.count = 0
 
 	parser.current_token = next_token(&parser.lexer)
 	parser.peek_token = next_token(&parser.lexer)
@@ -1138,25 +1158,41 @@ synchronize :: proc(parser: ^Parser) {
 }
 
 add_node :: #force_inline proc(p: ^Parser, kind: Node_Kind, data: Node_Data, span: Span) -> Node_Index {
-	index := Node_Index(len(p.node_kinds))
-	append(&p.node_kinds, kind)
-	append(&p.node_spans, span)
-	append(&p.node_data, data)
-	return index
+	i := p.node_count
+	if int(i) >= len(p.node_kinds) {
+		grow_buffer(Node_Kind, &p.node_kinds, int(i))
+		grow_buffer(Span, &p.node_spans, int(i))
+		grow_buffer(Node_Data, &p.node_data, int(i))
+	}
+	p.node_count = i + 1
+	p.node_kinds[i] = kind
+	p.node_spans[i] = span
+	p.node_data[i] = data
+	return Node_Index(i)
 }
 
 add_extra :: proc(p: ^Parser, indices: []Node_Index) -> Index_Range {
-	start := u32(len(p.extra))
+	start := p.extra_count
+	needed := p.extra_count + u32(len(indices))
+	if int(needed) > len(p.extra) {
+		grow_buffer(Node_Index, &p.extra, int(p.extra_count))
+	}
 	for idx in indices {
-		append(&p.extra, idx)
+		p.extra[p.extra_count] = idx
+		p.extra_count += 1
 	}
 	return Index_Range{start = start, len = u32(len(indices))}
 }
 
 add_extra_u8 :: proc(p: ^Parser, wrappers: []u8) -> Index_Range {
-	start := u32(len(p.extra_u8))
+	start := p.extra_u8_count
+	needed := p.extra_u8_count + u32(len(wrappers))
+	if int(needed) > len(p.extra_u8) {
+		grow_buffer(u8, &p.extra_u8, int(p.extra_u8_count))
+	}
 	for w in wrappers {
-		append(&p.extra_u8, w)
+		p.extra_u8[p.extra_u8_count] = w
+		p.extra_u8_count += 1
 	}
 	return Index_Range{start = start, len = u32(len(wrappers))}
 }
@@ -1194,11 +1230,11 @@ parse :: proc(cache: ^Cache, source: string) -> ^Ast {
 
 	ast := new(Ast)
 	ast.source = source
-	ast.node_kinds = parser.node_kinds
-	ast.node_spans = parser.node_spans
-	ast.node_data = parser.node_data
-	ast.extra = parser.extra
-	ast.extra_u8 = parser.extra_u8
+	ast.node_kinds = parser.node_kinds[:parser.node_count]
+	ast.node_spans = parser.node_spans[:parser.node_count]
+	ast.node_data = parser.node_data[:parser.node_count]
+	ast.extra = parser.extra[:parser.extra_count]
+	ast.extra_u8 = parser.extra_u8[:parser.extra_u8_count]
 
 	for error in parser.errors {
 		debug_parse_error(error, source, ast)
@@ -2205,15 +2241,13 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_In
 	original_offset := parser.lexer.offset
 	original_current := parser.current_token
 	original_peek := parser.peek_token
-	nodes_len := len(parser.node_kinds)
+	nodes_len := parser.node_count
 
-	restore :: proc(parser: ^Parser, offset: u32, current, peek: Token, nlen: int) {
+	restore :: proc(parser: ^Parser, offset: u32, current, peek: Token, nlen: u32) {
 		parser.lexer.offset = offset
 		parser.current_token = current
 		parser.peek_token = peek
-		resize(&parser.node_kinds, nlen)
-		resize(&parser.node_spans, nlen)
-		resize(&parser.node_data, nlen)
+		parser.node_count = nlen
 	}
 
 	wrappers: [MAX_WRAPPER_DEPTH]u8
