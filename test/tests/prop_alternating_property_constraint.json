@@ -1,6 +1,6 @@
 {
   "name": "Alternating Property And Constraint",
-  "description": "a.b:c.d — Property a.b forms first (CALL), then :c.d constrains. The right side of constraint absorbs .d at CALL level, giving Constraint(Property(a,b),Property(c,d)). UNCERTAIN: depends on right-side precedence of constraint parse.",
+  "description": "a.b:c.d — Property a.b forms first (CALL), then :c binds constraint, then .d accesses property on the result. Property is above constraint.",
   "source": "a.b:c.d",
-  "expect": "Scope[Constraint(Property(Identifier(a),Identifier(b)),Property(Identifier(c),Identifier(d)))]"
+  "expect": "Scope[Property(Constraint(Property(Identifier(a),Identifier(b)),Identifier(c)),Identifier(d))]"
 }
