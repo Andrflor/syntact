@@ -385,12 +385,12 @@ handle_did_close :: proc(server: ^LSP_Server, notif: LSP_Notification) {
 analyze_document :: proc(server: ^LSP_Server, uri: string) {
 	doc := &server.documents[uri]
 
-	ast := compiler.parse(server.cache, doc.content)
+	ast, parse_ok := compiler.parse(server.cache, doc.content)
 	doc.ast = ast
 
 	clear(&doc.diagnostics)
 
-	if ast != nil {
+	if ast != nil && parse_ok {
 		_ = compiler.analyze(server.cache, ast)
 	}
 

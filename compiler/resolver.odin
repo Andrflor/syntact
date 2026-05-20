@@ -352,7 +352,7 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Starting parsing for file: %s\n", cache.path)
 	}
 
-	ast := parse(cache, source)
+	ast, parse_ok := parse(cache, source)
 	cache.status = .Parsed
 
 	// End parsing timing
@@ -376,7 +376,7 @@ process_cache_task :: proc(task: thread.Task) {
 		)
 	}
 
-	if !resolver.options.parse_only {
+	if !resolver.options.parse_only && parse_ok {
 		if resolver.options.verbose {
 			fmt.printf("[DEBUG] Starting analysis for file: %s\n", cache.path)
 		}

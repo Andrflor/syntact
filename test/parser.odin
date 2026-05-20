@@ -265,7 +265,7 @@ run_test :: proc(path: string, t: ^testing.T) {
 	tc, ok, msg := load_test_file(path)
 	if ok {
 		cache := new(compiler.Cache)
-		ast := compiler.parse(cache, tc.source)
+		ast, _ := compiler.parse(cache, tc.source)
 		root := compiler.ast_root(ast)
 		actual := ast_to_string(ast, root)
 
