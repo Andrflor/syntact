@@ -433,54 +433,59 @@ token_text :: #force_inline proc(source: string, t: Token) -> string {
 
 Lexer :: struct {
 	source:     string,
+	src:        [^]u8,
 	offset:     u32,
 	source_len: u32,
 }
 
 init_lexer :: #force_inline proc(l: ^Lexer, source: string) {
 	l.source = source
+	l.src = raw_data(source)
 	l.offset = 0
 	l.source_len = u32(len(source))
 }
 
 current_char :: #force_inline proc(l: ^Lexer) -> u8 {
 	if l.offset >= l.source_len do return 0
-	return l.source[l.offset]
+	return l.src[l.offset]
 }
 
 peek_char :: #force_inline proc(l: ^Lexer, n: u32 = 1) -> u8 {
 	pos := l.offset + n
 	if pos >= l.source_len do return 0
-	return l.source[pos]
+	return l.src[pos]
 }
 
 has_space_before :: #force_inline proc(l: ^Lexer) -> bool {
-	return l.offset > 0 && is_space(l.source[l.offset - 1])
+	return l.offset > 0 && IS_SPACE[l.src[l.offset - 1]]
 }
 
 has_space_after_char :: #force_inline proc(l: ^Lexer, char: u8) -> bool {
-	if l.offset < l.source_len && l.source[l.offset] == char {
-		return l.offset + 1 < l.source_len && is_space(l.source[l.offset + 1])
+	if l.offset < l.source_len && l.src[l.offset] == char {
+		return l.offset + 1 < l.source_len && IS_SPACE[l.src[l.offset + 1]]
 	}
 	return false
 }
 
 skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
 	flags: u8 = 0
-	for l.offset < l.source_len {
-		c := l.source[l.offset]
-		switch c {
-		case ' ', '\t', '\r':
+	src := l.src
+	slen := l.source_len
+	off := l.offset
+	for off < slen {
+		c := src[off]
+		if IS_SPACE[c] {
 			set_flag(&flags, .Space_Before)
-			l.offset += 1
-		case '\n', ',':
+			off += 1
+		} else if c == '\n' || c == ',' {
 			set_flag(&flags, .Line_Before)
 			set_flag(&flags, .Separator_Before)
-			l.offset += 1
-		case:
-			return flags
+			off += 1
+		} else {
+			break
 		}
 	}
+	l.offset = off
 	return flags
 }
 
@@ -488,34 +493,35 @@ next_token :: proc(l: ^Lexer) -> Token {
 	flags: u8
 	start: u32
 	c: u8
+	src := l.src
+	slen := l.source_len
 
 	for {
 		flags = skip_trivia(l)
 
-		if l.offset >= l.source_len {
+		if l.offset >= slen {
 			return Token{kind = .EOF, span = Span{l.offset, l.offset}, flags = flags}
 		}
 
 		start = l.offset
-		c = l.source[l.offset]
+		c = src[l.offset]
 
-		// Comment handling (iterative, not recursive)
-		if c == '/' && l.offset + 1 < l.source_len {
-			if l.source[l.offset + 1] == '/' {
+		if c == '/' && l.offset + 1 < slen {
+			if src[l.offset + 1] == '/' {
 				l.offset += 2
-				for l.offset < l.source_len && l.source[l.offset] != '\n' {
+				for l.offset < slen && src[l.offset] != '\n' {
 					l.offset += 1
 				}
 				continue
 			}
-			if l.source[l.offset + 1] == '*' {
+			if src[l.offset + 1] == '*' {
 				l.offset += 2
 				depth : u32 = 1
-				for l.offset < l.source_len && depth > 0 {
-					if l.offset + 1 < l.source_len && l.source[l.offset] == '/' && l.source[l.offset + 1] == '*' {
+				for l.offset < slen && depth > 0 {
+					if l.offset + 1 < slen && src[l.offset] == '/' && src[l.offset + 1] == '*' {
 						l.offset += 2
 						depth += 1
-					} else if l.offset + 1 < l.source_len && l.source[l.offset] == '*' && l.source[l.offset + 1] == '/' {
+					} else if l.offset + 1 < slen && src[l.offset] == '*' && src[l.offset + 1] == '/' {
 						l.offset += 2
 						depth -= 1
 					} else {
@@ -564,7 +570,7 @@ next_token :: proc(l: ^Lexer) -> Token {
 		return Token{kind = .RightParen, span = Span{start, l.offset}, flags = flags}
 	case '!':
 		l.offset += 1
-		if l.offset < l.source_len && l.source[l.offset] == '=' {
+		if l.offset < slen && src[l.offset] == '=' {
 			l.offset += 1
 			return Token{kind = .NotEqual, span = Span{start, l.offset}, flags = flags}
 		}
@@ -588,8 +594,8 @@ next_token :: proc(l: ^Lexer) -> Token {
 		}
 	case '?':
 		l.offset += 1
-		if l.offset < l.source_len {
-			switch l.source[l.offset] {
+		if l.offset < slen {
+			switch src[l.offset] {
 			case '?':
 				l.offset += 1
 				return Token{kind = .DoubleQuestion, span = Span{start, l.offset}, flags = flags}
@@ -600,11 +606,11 @@ next_token :: proc(l: ^Lexer) -> Token {
 		}
 		return Token{kind = .Question, span = Span{start, l.offset}, flags = flags}
 	case '.':
-		if l.offset + 1 < l.source_len && l.source[l.offset + 1] == '.' {
-			has_before_delimiter := l.offset == 0 || is_before_delimiter(l.source[l.offset - 1])
-			has_after_delimiter := l.offset + 2 >= l.source_len || is_after_delimiter(l.source[l.offset + 2])
+		if l.offset + 1 < slen && src[l.offset + 1] == '.' {
+			has_before_delimiter := l.offset == 0 || IS_BEFORE_DELIM[src[l.offset - 1]]
+			has_after_delimiter := l.offset + 2 >= slen || IS_AFTER_DELIM[src[l.offset + 2]]
 			l.offset += 2
-			if l.offset < l.source_len && l.source[l.offset] == '.' {
+			if l.offset < slen && src[l.offset] == '.' {
 				l.offset += 1
 				return Token{kind = .Ellipsis, span = Span{start, l.offset}, flags = flags}
 			}
@@ -618,8 +624,8 @@ next_token :: proc(l: ^Lexer) -> Token {
 				return Token{kind = .Range, span = Span{start, l.offset}, flags = flags}
 			}
 		}
-		space_before_dot := l.offset == 0 || is_before_delimiter(l.source[l.offset - 1])
-		space_after_dot := has_space_after_char(l, '.') || (l.offset + 1 >= l.source_len)
+		space_before_dot := l.offset == 0 || IS_BEFORE_DELIM[src[l.offset - 1]]
+		space_after_dot := has_space_after_char(l, '.') || (l.offset + 1 >= slen)
 		l.offset += 1
 		if space_before_dot {
 			if space_after_dot {
@@ -639,14 +645,15 @@ next_token :: proc(l: ^Lexer) -> Token {
 		return Token{kind = .Equal, span = Span{start, l.offset}, flags = flags}
 	case '<':
 		l.offset += 1
-		if l.offset < l.source_len {
-			if l.source[l.offset] == '=' {
+		if l.offset < slen {
+			nc := src[l.offset]
+			if nc == '=' {
 				l.offset += 1
 				return Token{kind = .LessEqual, span = Span{start, l.offset}, flags = flags}
-			} else if l.source[l.offset] == '<' {
+			} else if nc == '<' {
 				l.offset += 1
 				return Token{kind = .LShift, span = Span{start, l.offset}, flags = flags}
-			} else if l.source[l.offset] == '-' {
+			} else if nc == '-' {
 				l.offset += 1
 				return Token{kind = .PointingPull, span = Span{start, l.offset}, flags = flags}
 			}
@@ -654,18 +661,19 @@ next_token :: proc(l: ^Lexer) -> Token {
 		return Token{kind = .Less, span = Span{start, l.offset}, flags = flags}
 	case '>':
 		l.offset += 1
-		if l.offset < l.source_len {
-			if l.source[l.offset] == '=' {
+		if l.offset < slen {
+			nc := src[l.offset]
+			if nc == '=' {
 				l.offset += 1
 				return Token{kind = .GreaterEqual, span = Span{start, l.offset}, flags = flags}
-			} else if l.source[l.offset] == '>' {
-				if l.offset + 1 < l.source_len && l.source[l.offset + 1] == '-' {
+			} else if nc == '>' {
+				if l.offset + 1 < slen && src[l.offset + 1] == '-' {
 					l.offset += 2
 					return Token{kind = .ResonancePush, span = Span{start, l.offset}, flags = flags}
 				}
 				l.offset += 1
 				return Token{kind = .RShift, span = Span{start, l.offset}, flags = flags}
-			} else if l.source[l.offset] == '-' {
+			} else if nc == '-' {
 				l.offset += 1
 				return Token{kind = .EventPush, span = Span{start, l.offset}, flags = flags}
 			}
@@ -673,13 +681,14 @@ next_token :: proc(l: ^Lexer) -> Token {
 		return Token{kind = .Greater, span = Span{start, l.offset}, flags = flags}
 	case '-':
 		l.offset += 1
-		if l.offset < l.source_len {
-			if l.source[l.offset] == '>' {
+		if l.offset < slen {
+			nc := src[l.offset]
+			if nc == '>' {
 				l.offset += 1
 				return Token{kind = .PointingPush, span = Span{start, l.offset}, flags = flags}
-			} else if l.source[l.offset] == '<' {
+			} else if nc == '<' {
 				l.offset += 1
-				if l.offset < l.source_len && l.source[l.offset] == '<' {
+				if l.offset < slen && src[l.offset] == '<' {
 					l.offset += 1
 					return Token{kind = .ResonancePull, span = Span{start, l.offset}, flags = flags}
 				}
@@ -688,12 +697,11 @@ next_token :: proc(l: ^Lexer) -> Token {
 		}
 		return Token{kind = .Minus, span = Span{start, l.offset}, flags = flags}
 	case '/':
-		// Non-comment slash (comments handled above)
 		l.offset += 1
 		return Token{kind = .Slash, span = Span{start, l.offset}, flags = flags}
 	case '0':
-		if l.offset + 1 < l.source_len {
-			next := l.source[l.offset + 1]
+		if l.offset + 1 < slen {
+			next := src[l.offset + 1]
 			if next == 'x' || next == 'X' {
 				return scan_hexadecimal(l, start, flags)
 			}
@@ -728,12 +736,18 @@ next_token :: proc(l: ^Lexer) -> Token {
 	case:
 		if IDENT_START[c] {
 			l.offset += 1
-			for l.offset < l.source_len && IDENT_CONTINUE[l.source[l.offset]] {
+			for l.offset < slen && IDENT_CONTINUE[src[l.offset]] {
 				l.offset += 1
 			}
-			text := l.source[start:l.offset]
-			if text == "true" || text == "false" {
-				return Token{kind = .Bool_Literal, span = Span{start, l.offset}, flags = flags}
+			ilen := l.offset - start
+			if ilen == 4 {
+				if src[start] == 't' && src[start+1] == 'r' && src[start+2] == 'u' && src[start+3] == 'e' {
+					return Token{kind = .Bool_Literal, span = Span{start, l.offset}, flags = flags}
+				}
+			} else if ilen == 5 {
+				if src[start] == 'f' && src[start+1] == 'a' && src[start+2] == 'l' && src[start+3] == 's' && src[start+4] == 'e' {
+					return Token{kind = .Bool_Literal, span = Span{start, l.offset}, flags = flags}
+				}
 			}
 			return Token{kind = .Identifier, span = Span{start, l.offset}, flags = flags}
 		}
@@ -743,20 +757,22 @@ next_token :: proc(l: ^Lexer) -> Token {
 }
 
 scan_string :: proc(l: ^Lexer, start: u32, f: u8) -> Token {
-	delimiter := l.source[l.offset]
+	src := l.src
+	slen := l.source_len
+	delimiter := src[l.offset]
 	l.offset += 1
-	for l.offset < l.source_len {
-		current := l.source[l.offset]
+	for l.offset < slen {
+		current := src[l.offset]
 		if current == delimiter {
 			break
 		}
-		if current == '\\' && l.offset + 1 < l.source_len {
+		if current == '\\' && l.offset + 1 < slen {
 			l.offset += 2
 		} else {
 			l.offset += 1
 		}
 	}
-	if l.offset < l.source_len {
+	if l.offset < slen {
 		l.offset += 1
 		return Token{kind = .String_Literal, span = Span{start, l.offset}, flags = f}
 	}
@@ -764,9 +780,11 @@ scan_string :: proc(l: ^Lexer, start: u32, f: u8) -> Token {
 }
 
 scan_hexadecimal :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
+	src := l.src
+	slen := l.source_len
 	l.offset += 2
 	hex_start := l.offset
-	for l.offset < l.source_len && is_hex_digit(l.source[l.offset]) {
+	for l.offset < slen && IS_HEX[src[l.offset]] {
 		l.offset += 1
 	}
 	if l.offset == hex_start {
@@ -776,10 +794,12 @@ scan_hexadecimal :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
 }
 
 scan_binary :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
+	src := l.src
+	slen := l.source_len
 	l.offset += 2
 	bin_start := l.offset
-	for l.offset < l.source_len {
-		c := l.source[l.offset]
+	for l.offset < slen {
+		c := src[l.offset]
 		if c != '0' && c != '1' do break
 		l.offset += 1
 	}
@@ -790,15 +810,16 @@ scan_binary :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
 }
 
 scan_number :: proc(l: ^Lexer, start: u32, f: u8) -> Token {
-	for l.offset < l.source_len && is_digit(l.source[l.offset]) {
+	src := l.src
+	slen := l.source_len
+	for l.offset < slen && IS_DIGIT[src[l.offset]] {
 		l.offset += 1
 	}
-	if l.offset < l.source_len && l.source[l.offset] == '.' {
-		if l.offset + 1 < l.source_len {
-			next_char := l.source[l.offset + 1]
-			if is_digit(next_char) {
+	if l.offset < slen && src[l.offset] == '.' {
+		if l.offset + 1 < slen {
+			if IS_DIGIT[src[l.offset + 1]] {
 				l.offset += 1
-				for l.offset < l.source_len && is_digit(l.source[l.offset]) {
+				for l.offset < slen && IS_DIGIT[src[l.offset]] {
 					l.offset += 1
 				}
 				return Token{kind = .Float, span = Span{start, l.offset}, flags = f}
@@ -2409,6 +2430,11 @@ is_expression_start :: proc(kind: Token_Kind) -> bool {
 
 IDENT_START:    [256]bool
 IDENT_CONTINUE: [256]bool
+IS_SPACE:       [256]bool
+IS_BEFORE_DELIM:[256]bool
+IS_AFTER_DELIM: [256]bool
+IS_DIGIT:       [256]bool
+IS_HEX:         [256]bool
 
 @(init)
 init_ident_tables :: proc "contextless" () {
@@ -2417,14 +2443,28 @@ init_ident_tables :: proc "contextless" () {
 	IDENT_START['_'] = true
 	IDENT_CONTINUE['_'] = true
 	for c in u8('0')..=u8('9') { IDENT_CONTINUE[c] = true }
+
+	IS_SPACE[' '] = true; IS_SPACE['\t'] = true; IS_SPACE['\r'] = true
+
+	IS_BEFORE_DELIM[' '] = true; IS_BEFORE_DELIM['\t'] = true; IS_BEFORE_DELIM['\r'] = true
+	IS_BEFORE_DELIM['\n'] = true; IS_BEFORE_DELIM[':'] = true; IS_BEFORE_DELIM[','] = true
+	IS_BEFORE_DELIM['{'] = true; IS_BEFORE_DELIM['('] = true
+
+	IS_AFTER_DELIM[' '] = true; IS_AFTER_DELIM['\t'] = true; IS_AFTER_DELIM['\r'] = true
+	IS_AFTER_DELIM['\n'] = true; IS_AFTER_DELIM['}'] = true; IS_AFTER_DELIM[')'] = true
+	IS_AFTER_DELIM[','] = true; IS_AFTER_DELIM[':'] = true
+
+	for c in u8('0')..=u8('9') { IS_DIGIT[c] = true; IS_HEX[c] = true }
+	for c in u8('a')..=u8('f') { IS_HEX[c] = true }
+	for c in u8('A')..=u8('F') { IS_HEX[c] = true }
 }
 
 is_digit :: #force_inline proc(c: u8) -> bool {
-	return c >= '0' && c <= '9'
+	return IS_DIGIT[c]
 }
 
 is_hex_digit :: #force_inline proc(c: u8) -> bool {
-	return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+	return IS_HEX[c]
 }
 
 is_alpha :: #force_inline proc(c: u8) -> bool {
@@ -2432,19 +2472,19 @@ is_alpha :: #force_inline proc(c: u8) -> bool {
 }
 
 is_alnum :: #force_inline proc(c: u8) -> bool {
-	return is_digit(c) || is_alpha(c) || c == '_'
+	return IS_DIGIT[c] || is_alpha(c) || c == '_'
 }
 
 is_before_delimiter :: #force_inline proc(c: u8) -> bool {
-	return is_space(c) || c == '\n' || c == ':' || c == ',' || c == '{' || c == '('
+	return IS_BEFORE_DELIM[c]
 }
 
 is_after_delimiter :: #force_inline proc(c: u8) -> bool {
-	return is_space(c) || c == '\n' || c == '}' || c == ')' || c == ',' || c == ':'
+	return IS_AFTER_DELIM[c]
 }
 
 is_space :: #force_inline proc(c: u8) -> bool {
-	return c == ' ' || c == '\t' || c == '\r'
+	return IS_SPACE[c]
 }
 
 /* ======================================================================
