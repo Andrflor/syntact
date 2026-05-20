@@ -188,7 +188,7 @@ addCommutative -> {
   -> add{a b}! = add{b a}! ?! true
 }
 
-Ring {
+Ring -> {
   T -> {}
   addNeutral -> {}
   add -> {
