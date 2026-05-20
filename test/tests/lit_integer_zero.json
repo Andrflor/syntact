@@ -1,0 +1,6 @@
+{
+  "name": "Integer Zero",
+  "description": "Integer literal zero standalone",
+  "source": "0",
+  "expect": "Scope[Literal(Integer,0)]"
+}

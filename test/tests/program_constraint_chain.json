@@ -1,0 +1,6 @@
+{
+  "name": "Program Constraint Chain",
+  "description": "Multiple constraints and property accesses building up type definitions",
+  "source": "Vec2 -> {\n  x:f32\n  y:f32\n  length -> (x * x + y * y)\n  add -> other:Vec2 -> Vec2{x -> x + other.x, y -> y + other.y}\n}",
+  "expect": "Scope[Pointing(Identifier(Vec2),Scope[Constraint(Identifier(x),Identifier(f32)),Constraint(Identifier(y),Identifier(f32)),Pointing(Identifier(length),Operator(Add,Operator(Multiply,Identifier(x),Identifier(x)),Operator(Multiply,Identifier(y),Identifier(y)))),Pointing(Identifier(add),Pointing(Constraint(Identifier(other),Identifier(Vec2)),Carve(Identifier(Vec2),[Pointing(Identifier(x),Operator(Add,Identifier(x),Property(Identifier(other),Identifier(x)))),Pointing(Identifier(y),Operator(Add,Identifier(y),Property(Identifier(other),Identifier(y))))])))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Newline As Statement Separator",
+  "description": "Newline separates two statements - not joined as infix",
+  "source": "a\nb",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

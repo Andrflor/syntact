@@ -1,0 +1,6 @@
+{
+  "name": "Bool True Standalone",
+  "description": "Standalone true literal at top level",
+  "source": "true",
+  "expect": "Scope[Literal(Bool,true)]"
+}

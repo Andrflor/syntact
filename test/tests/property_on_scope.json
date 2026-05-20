@@ -1,0 +1,6 @@
+{
+  "name": "Property On Scope",
+  "description": "Property access on a scope literal - brace char } before dot is not in IS_BEFORE_DELIM so it is PropertyAccess",
+  "source": "{a}.x",
+  "expect": "Scope[Property(Scope[Identifier(a)],Identifier(x))]"
+}

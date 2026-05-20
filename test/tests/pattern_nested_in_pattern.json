@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Nested In Pattern",
+  "description": "Pattern branch product is itself a pattern match",
+  "source": "x ? {\n  1 -> y ? {\n    true -> \"a\"\n    false -> \"b\"\n  }\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Pattern(Identifier(y),[Branch(Literal(Bool,true),Literal(String,a)),Branch(Literal(Bool,false),Literal(String,b))]))])]"
+}

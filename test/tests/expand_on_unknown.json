@@ -1,0 +1,6 @@
+{
+  "name": "Expand On Unknown",
+  "description": "Expand operator applied to unknown value",
+  "source": "...??",
+  "expect": "Scope[Expand(Unknown)]"
+}

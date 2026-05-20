@@ -1,0 +1,6 @@
+{
+  "name": "CompileTime On Constraint",
+  "description": "Prefix ! at CALL precedence takes just identifier, then constraint binds at CONSTRAINT precedence",
+  "source": "!a:u8",
+  "expect": "Scope[Constraint(CompileTime(Identifier(a)),Identifier(u8))]"
+}

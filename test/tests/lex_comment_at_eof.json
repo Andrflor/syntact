@@ -1,0 +1,6 @@
+{
+  "name": "Line Comment At EOF",
+  "description": "Line comment at end of file with no trailing newline",
+  "source": "a -> 1 // end",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
+}

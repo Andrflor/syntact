@@ -1,0 +1,6 @@
+{
+  "name": "Infix Continues Across Newline",
+  "description": "Infix operators (+,-,*,/,%,&,|) continue expression across newline",
+  "source": "a +\nb",
+  "expect": "Scope[Operator(Add,Identifier(a),Identifier(b))]"
+}

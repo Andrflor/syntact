@@ -1,0 +1,6 @@
+{
+  "name": "String All Three Delimiters",
+  "description": "Three string literals using double quotes, single quotes, and backticks",
+  "source": "\"alpha\"\n'beta'\n`gamma`",
+  "expect": "Scope[Literal(String,alpha),Literal(String,beta),Literal(String,gamma)]"
+}

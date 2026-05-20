@@ -1,0 +1,6 @@
+{
+  "name": "Constraint On Paren Group",
+  "description": "Constraint on a parenthesized expression - paren strips to inner expression",
+  "source": "(a):u8",
+  "expect": "Scope[Constraint(Identifier(a),Identifier(u8))]"
+}

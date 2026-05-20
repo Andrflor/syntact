@@ -1,0 +1,6 @@
+{
+  "name": "Unknown With Property",
+  "description": "Property access on unknown value",
+  "source": "??.x",
+  "expect": "Scope[Property(Unknown,Identifier(x))]"
+}

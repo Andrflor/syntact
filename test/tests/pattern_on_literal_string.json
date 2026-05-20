@@ -1,0 +1,6 @@
+{
+  "name": "Pattern On String Literal",
+  "description": "Pattern match on a string literal",
+  "source": "\"x\" ? {\n  \"x\" -> 1\n  \"y\" -> 2\n}",
+  "expect": "Scope[Pattern(Literal(String,x),[Branch(Literal(String,x),Literal(Integer,1)),Branch(Literal(String,y),Literal(Integer,2))])]"
+}

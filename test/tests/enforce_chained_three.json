@@ -1,0 +1,6 @@
+{
+  "name": "Enforce Chained Three",
+  "description": "Three chained enforce operators - ?! at PATTERN precedence, right-associative since each parse calls at prec+1",
+  "source": "a ?! b ?! c",
+  "expect": "Scope[Enforce(Identifier(a),Enforce(Identifier(b),Identifier(c)))]"
+}

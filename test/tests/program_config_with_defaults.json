@@ -1,0 +1,6 @@
+{
+  "name": "Program Config With Defaults",
+  "description": "Configuration system with defaults, overrides, and compile-time evaluation",
+  "source": "Config -> {\n  host -> \"localhost\"\n  port -> 8080\n  debug -> false\n}\nProdConfig -> Config{host -> \"prod.example.com\", port -> 443, debug -> false}\nDevConfig -> Config{debug -> true}\nsettings -> !ProdConfig",
+  "expect": "Scope[Pointing(Identifier(Config),Scope[Pointing(Identifier(host),Literal(String,localhost)),Pointing(Identifier(port),Literal(Integer,8080)),Pointing(Identifier(debug),Literal(Bool,false))]),Pointing(Identifier(ProdConfig),Carve(Identifier(Config),[Pointing(Identifier(host),Literal(String,prod.example.com)),Pointing(Identifier(port),Literal(Integer,443)),Pointing(Identifier(debug),Literal(Bool,false))])),Pointing(Identifier(DevConfig),Carve(Identifier(Config),[Pointing(Identifier(debug),Literal(Bool,true))])),Pointing(Identifier(settings),CompileTime(Identifier(ProdConfig)))]"
+}

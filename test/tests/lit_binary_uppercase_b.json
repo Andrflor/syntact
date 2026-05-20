@@ -1,0 +1,6 @@
+{
+  "name": "Binary Uppercase B Prefix",
+  "description": "Binary literal with uppercase 0B prefix",
+  "source": "0B1101",
+  "expect": "Scope[Literal(Binary,0B1101)]"
+}

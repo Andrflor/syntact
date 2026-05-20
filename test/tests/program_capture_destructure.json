@@ -1,0 +1,6 @@
+{
+  "name": "Program Capture Destructure",
+  "description": "Identifiers with capture syntax, destructuring in pattern branches",
+  "source": "transform -> list(items) ? {\n  head(h) -> process(p){value -> h}\n  -> empty\n}",
+  "expect": "Scope[Pointing(Identifier(transform),Pattern(Identifier(list,items),[Branch(Identifier(head,h),Carve(Identifier(process,p),[Pointing(Identifier(value),Identifier(h))])),Branch(nil,Identifier(empty))]))]"
+}

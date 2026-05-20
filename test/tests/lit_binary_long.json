@@ -1,0 +1,6 @@
+{
+  "name": "Literal Binary Long",
+  "description": "Binary literal representing 8 bits (0b11111111 = 255)",
+  "source": "0b11111111",
+  "expect": "Scope[Literal(Binary,0b11111111)]"
+}

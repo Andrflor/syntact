@@ -1,0 +1,6 @@
+{
+  "name": "Program Event System",
+  "description": "Event system with push, pull, and resonance showing reactive patterns",
+  "source": "EventBus -> {\n  counter -> 0\n  tick >- counter\n  counter -< e {\n    count -> count + 1\n  }\n  state >>- observer\n  observer -<< state\n}",
+  "expect": "Scope[Pointing(Identifier(EventBus),Scope[Pointing(Identifier(counter),Literal(Integer,0)),EventPush(Identifier(tick),Identifier(counter)),EventPull(e,Identifier(counter),Scope[Pointing(Identifier(count),Operator(Add,Identifier(count),Literal(Integer,1)))]),ResonancePush(Identifier(state),Identifier(observer)),ResonancePull(Identifier(observer),Identifier(state))])]"
+}

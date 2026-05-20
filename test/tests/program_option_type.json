@@ -1,0 +1,6 @@
+{
+  "name": "Program Option Type",
+  "description": "Option/Maybe type with some and none variants using pattern matching and unknown",
+  "source": "Option -> {\n  some -> {value:??}\n  none -> {}\n  map -> self ? {\n    some -> Option.some{value -> fn!}\n    none -> Option.none\n  }\n  unwrap_or -> self ? {\n    some -> self.value\n    none -> default\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(Option),Scope[Pointing(Identifier(some),Scope[Constraint(Identifier(value),Unknown)]),Pointing(Identifier(none),Scope[]),Pointing(Identifier(map),Pattern(Identifier(self),[Branch(Identifier(some),Carve(Property(Identifier(Option),Identifier(some)),[Pointing(Identifier(value),Execute(Identifier(fn),[]))])),Branch(Identifier(none),Property(Identifier(Option),Identifier(none)))])),Pointing(Identifier(unwrap_or),Pattern(Identifier(self),[Branch(Identifier(some),Property(Identifier(self),Identifier(value))),Branch(Identifier(none),Identifier(default))]))])]"
+}

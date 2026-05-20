@@ -1,0 +1,6 @@
+{
+  "name": "Program Calculator",
+  "description": "Calculator with pattern matching on operator symbols and arithmetic execution",
+  "source": "calc -> {\n  op:String\n  a:i32\n  b:i32\n  result -> op ? {\n    \"+\" -> a + b\n    \"-\" -> a - b\n    \"*\" -> a * b\n    \"/\" -> a / b\n    -> 0\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(calc),Scope[Constraint(Identifier(op),Identifier(String)),Constraint(Identifier(a),Identifier(i32)),Constraint(Identifier(b),Identifier(i32)),Pointing(Identifier(result),Pattern(Identifier(op),[Branch(Literal(String,+),Operator(Add,Identifier(a),Identifier(b))),Branch(Literal(String,-),Operator(Subtract,Identifier(a),Identifier(b))),Branch(Literal(String,*),Operator(Multiply,Identifier(a),Identifier(b))),Branch(Literal(String,/),Operator(Divide,Identifier(a),Identifier(b))),Branch(nil,Literal(Integer,0))]))])]"
+}

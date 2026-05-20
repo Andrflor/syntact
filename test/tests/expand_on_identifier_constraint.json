@@ -1,0 +1,6 @@
+{
+  "name": "Expand On Identifier With Constraint",
+  "description": "Expand operator followed by constrained identifier - expand parses at CONSTRAINT prec so constraint is included",
+  "source": "...a:u8",
+  "expect": "Scope[Expand(Constraint(Identifier(a),Identifier(u8)))]"
+}

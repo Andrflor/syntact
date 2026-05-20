@@ -1,0 +1,6 @@
+{
+  "name": "Execute Wrapper On Carve",
+  "description": "Threading execution wrapper on a carved expression",
+  "source": "a{x -> 1}<!>",
+  "expect": "Scope[Execute(Carve(Identifier(a),[Pointing(Identifier(x),Literal(Integer,1))]),[Threading])]"
+}

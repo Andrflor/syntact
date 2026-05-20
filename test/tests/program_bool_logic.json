@@ -1,0 +1,6 @@
+{
+  "name": "Program Bool Logic",
+  "description": "Boolean logic with and, or, xor, not operators on bool literals and identifiers",
+  "source": "result -> (a & b) | (~c ^ d)\ncheck -> ~(x | y) & z",
+  "expect": "Scope[Pointing(Identifier(result),Operator(Or,Operator(And,Identifier(a),Identifier(b)),Operator(Xor,Operator(Not,nil,Identifier(c)),Identifier(d)))),Pointing(Identifier(check),Operator(And,Operator(Not,nil,Operator(Or,Identifier(x),Identifier(y))),Identifier(z)))]"
+}

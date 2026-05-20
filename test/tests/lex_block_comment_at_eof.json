@@ -1,0 +1,6 @@
+{
+  "name": "Block Comment At EOF",
+  "description": "Block comment at end of file",
+  "source": "a -> 1 /* done */",
+  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
+}

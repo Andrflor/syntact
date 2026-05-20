@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Equal On String",
+  "description": "Prefix equal operator on a string literal",
+  "source": "= \"hello\"",
+  "expect": "Scope[Operator(Equal,nil,Literal(String,hello))]"
+}

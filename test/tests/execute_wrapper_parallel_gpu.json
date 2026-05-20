@@ -1,0 +1,6 @@
+{
+  "name": "Execute Wrapper Parallel Then GPU",
+  "description": "Combined parallel CPU and GPU execution wrappers",
+  "source": "a[|!|]",
+  "expect": "Scope[Execute(Identifier(a),[Parallel_CPU,GPU])]"
+}

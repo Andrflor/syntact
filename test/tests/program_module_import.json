@@ -1,0 +1,6 @@
+{
+  "name": "Program Module Import And Use",
+  "description": "External module import with property chain and carve override",
+  "source": "@std.collections\nList -> @std.collections.List\nMyList -> List{element -> i32}\nfirst -> MyList.head!",
+  "expect": "Scope[Property(External(std,nil),Identifier(collections)),Pointing(Identifier(List),Property(Property(External(std,nil),Identifier(collections)),Identifier(List))),Pointing(Identifier(MyList),Carve(Identifier(List),[Pointing(Identifier(element),Identifier(i32))])),Pointing(Identifier(first),Execute(Property(Identifier(MyList),Identifier(head)),[]))]"
+}

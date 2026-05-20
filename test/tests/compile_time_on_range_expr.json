@@ -1,0 +1,6 @@
+{
+  "name": "CompileTime On Range Expression",
+  "description": "Prefix ! takes just the literal, then range binds at RANGE precedence on the CompileTime node",
+  "source": "!1..10",
+  "expect": "Scope[Range(CompileTime(Literal(Integer,1)),Literal(Integer,10))]"
+}

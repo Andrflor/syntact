@@ -1,0 +1,6 @@
+{
+  "name": "Program Resonance Sync",
+  "description": "Bidirectional resonance between model and view with property chains",
+  "source": "Model -> {\n  data -> {x -> 0, y -> 0}\n  data.x >>- View.posX\n  data.y >>- View.posY\n  View.input -<< data\n}",
+  "expect": "Scope[Pointing(Identifier(Model),Scope[Pointing(Identifier(data),Scope[Pointing(Identifier(x),Literal(Integer,0)),Pointing(Identifier(y),Literal(Integer,0))]),ResonancePush(Property(Identifier(data),Identifier(x)),Property(Identifier(View),Identifier(posX))),ResonancePush(Property(Identifier(data),Identifier(y)),Property(Identifier(View),Identifier(posY))),ResonancePull(Property(Identifier(View),Identifier(input)),Identifier(data))])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Binary Eight Bits",
+  "description": "Eight-bit binary literal all ones",
+  "source": "0b11111111",
+  "expect": "Scope[Literal(Binary,0b11111111)]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Consecutive Line Comments",
+  "description": "Multiple line comments before valid code",
+  "source": "// first\n// second\na",
+  "expect": "Scope[Identifier(a)]"
+}

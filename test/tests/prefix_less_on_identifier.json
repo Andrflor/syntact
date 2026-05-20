@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Less On Identifier",
+  "description": "Prefix less-than operator",
+  "source": "< x",
+  "expect": "Scope[Operator(Less,nil,Identifier(x))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Constraint On String Literal",
+  "description": "Constraint bind applied to a string literal",
+  "source": "\"hello\":String",
+  "expect": "Scope[Constraint(Literal(String,hello),Identifier(String))]"
+}

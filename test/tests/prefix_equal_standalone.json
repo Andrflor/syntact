@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Equal Standalone",
+  "description": "Prefix equal operator with nil left",
+  "source": "= 5",
+  "expect": "Scope[Operator(Equal,nil,Literal(Integer,5))]"
+}

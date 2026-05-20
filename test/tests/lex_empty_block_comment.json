@@ -1,0 +1,6 @@
+{
+  "name": "Empty Block Comment",
+  "description": "Empty block comment followed by valid code",
+  "source": "/**/ a",
+  "expect": "Scope[Identifier(a)]"
+}

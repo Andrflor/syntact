@@ -1,0 +1,6 @@
+{
+  "name": "Comma As Statement Separator",
+  "description": "Comma separates two statements at top level like newline",
+  "source": "a, b",
+  "expect": "Scope[Identifier(a),Identifier(b)]"
+}

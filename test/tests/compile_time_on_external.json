@@ -1,0 +1,6 @@
+{
+  "name": "CompileTime On External",
+  "description": "Compile-time evaluation of an external reference",
+  "source": "!@config",
+  "expect": "Scope[CompileTime(External(config,nil))]"
+}

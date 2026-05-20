@@ -1,0 +1,6 @@
+{
+  "name": "EventPull Prefix No Catch",
+  "description": "Prefix event pull with no catch identifier and a scope body",
+  "source": "-< {x -> 1}",
+  "expect": "Scope[EventPull(,nil,Scope[Pointing(Identifier(x),Literal(Integer,1))])]"
+}

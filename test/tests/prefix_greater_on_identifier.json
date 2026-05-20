@@ -1,0 +1,6 @@
+{
+  "name": "Prefix Greater On Identifier",
+  "description": "Prefix greater-than operator",
+  "source": "> x",
+  "expect": "Scope[Operator(Greater,nil,Identifier(x))]"
+}

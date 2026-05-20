@@ -1,0 +1,6 @@
+{
+  "name": "Range On Scope Bounds",
+  "description": "Range where both bounds are scope literals",
+  "source": "{a}..{b}",
+  "expect": "Scope[Range(Scope[Identifier(a)],Scope[Identifier(b)])]"
+}

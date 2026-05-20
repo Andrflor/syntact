@@ -1,0 +1,6 @@
+{
+  "name": "Program Type Algebra",
+  "description": "Type algebra with constraints, carve overrides, enforce validation, and compile-time eval",
+  "source": "Port -> {\n  value:u16\n  value ?! 0..65535\n}\nEmail -> {\n  value:String\n}\nServerConfig -> {\n  host:String\n  port:Port\n  tls:bool\n}\ndev -> !ServerConfig{host -> \"localhost\", port -> Port{value -> 8080}, tls -> false}",
+  "expect": "Scope[Pointing(Identifier(Port),Scope[Constraint(Identifier(value),Identifier(u16)),Enforce(Identifier(value),Range(Literal(Integer,0),Literal(Integer,65535)))]),Pointing(Identifier(Email),Scope[Constraint(Identifier(value),Identifier(String))]),Pointing(Identifier(ServerConfig),Scope[Constraint(Identifier(host),Identifier(String)),Constraint(Identifier(port),Identifier(Port)),Constraint(Identifier(tls),Identifier(bool))]),Pointing(Identifier(dev),CompileTime(Carve(Identifier(ServerConfig),[Pointing(Identifier(host),Literal(String,localhost)),Pointing(Identifier(port),Carve(Identifier(Port),[Pointing(Identifier(value),Literal(Integer,8080))])),Pointing(Identifier(tls),Literal(Bool,false))])))]"
+}

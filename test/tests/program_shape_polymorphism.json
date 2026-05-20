@@ -1,0 +1,6 @@
+{
+  "name": "Program Shape Polymorphism",
+  "description": "Shape types with carve overrides for area calculation, showing constraint and pattern together",
+  "source": "Shape -> {\n  area:f64\n}\nCircle -> Shape{area -> 3.14 * radius * radius}\nSquare -> Shape{area -> side * side}\ncompute -> shape:Shape ? {\n  Circle -> shape.area!\n  Square -> shape.area!\n}",
+  "expect": "Scope[Pointing(Identifier(Shape),Scope[Constraint(Identifier(area),Identifier(f64))]),Pointing(Identifier(Circle),Carve(Identifier(Shape),[Pointing(Identifier(area),Operator(Multiply,Operator(Multiply,Literal(Float,3.14),Identifier(radius)),Identifier(radius)))])),Pointing(Identifier(Square),Carve(Identifier(Shape),[Pointing(Identifier(area),Operator(Multiply,Identifier(side),Identifier(side)))])),Pointing(Identifier(compute),Pattern(Constraint(Identifier(shape),Identifier(Shape)),[Branch(Identifier(Circle),Execute(Property(Identifier(shape),Identifier(area)),[])),Branch(Identifier(Square),Execute(Property(Identifier(shape),Identifier(area)),[]))]))]"
+}

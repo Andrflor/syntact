@@ -1,0 +1,6 @@
+{
+  "name": "Execute On String Literal",
+  "description": "Execute applied to a string literal",
+  "source": "\"hello\"!",
+  "expect": "Scope[Execute(Literal(String,hello),[])]"
+}

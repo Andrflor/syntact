@@ -1,0 +1,6 @@
+{
+  "name": "ResonancePush Chained",
+  "description": "Chained resonance push - right-to-left at ASSIGNMENT precedence",
+  "source": "a >>- b >>- c",
+  "expect": "Scope[ResonancePush(Identifier(a),ResonancePush(Identifier(b),Identifier(c)))]"
+}

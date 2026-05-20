@@ -1,0 +1,6 @@
+{
+  "name": "EventPush Prefix Standalone",
+  "description": "Prefix event push >- x as standalone expression",
+  "source": ">- x",
+  "expect": "Scope[EventPush(nil,Identifier(x))]"
+}

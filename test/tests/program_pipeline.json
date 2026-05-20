@@ -1,0 +1,6 @@
+{
+  "name": "Program Pipeline Chain",
+  "description": "Data pipeline using chained property access, execute, and carve for transformation steps",
+  "source": "pipeline -> data.filter!{pred -> isValid}.map!{fn -> transform}.reduce!{init -> 0, fn -> sum}",
+  "expect": "Scope[Pointing(Identifier(pipeline),Carve(Execute(Property(Carve(Execute(Property(Carve(Execute(Property(Identifier(data),Identifier(filter)),[]),[Pointing(Identifier(pred),Identifier(isValid))]),Identifier(map)),[]),[Pointing(Identifier(fn),Identifier(transform))]),Identifier(reduce)),[]),[Pointing(Identifier(init),Literal(Integer,0)),Pointing(Identifier(fn),Identifier(sum))]))]"
+}

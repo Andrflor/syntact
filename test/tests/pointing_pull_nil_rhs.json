@@ -1,0 +1,6 @@
+{
+  "name": "PointingPull Nil RHS",
+  "description": "Pointing pull with nothing on right side",
+  "source": "a <-",
+  "expect": "Scope[PointingPull(Identifier(a),nil)]"
+}

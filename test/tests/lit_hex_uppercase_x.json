@@ -1,0 +1,6 @@
+{
+  "name": "Hex Uppercase X Prefix",
+  "description": "Hexadecimal literal with uppercase 0X prefix",
+  "source": "0XAB",
+  "expect": "Scope[Literal(Hexadecimal,0XAB)]"
+}

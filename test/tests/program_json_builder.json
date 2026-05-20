@@ -1,0 +1,6 @@
+{
+  "name": "Program JSON Builder",
+  "description": "JSON-like structure building with nested scopes, strings, integers, booleans, and property chains",
+  "source": "response -> {\n  status -> 200\n  headers -> {\n    content_type -> \"application/json\"\n    cache -> \"no-cache\"\n  }\n  body -> {\n    users -> {\n      count -> 3\n      items -> {\n        name -> \"alice\"\n        active -> true\n      }\n    }\n  }\n}",
+  "expect": "Scope[Pointing(Identifier(response),Scope[Pointing(Identifier(status),Literal(Integer,200)),Pointing(Identifier(headers),Scope[Pointing(Identifier(content_type),Literal(String,application/json)),Pointing(Identifier(cache),Literal(String,no-cache))]),Pointing(Identifier(body),Scope[Pointing(Identifier(users),Scope[Pointing(Identifier(count),Literal(Integer,3)),Pointing(Identifier(items),Scope[Pointing(Identifier(name),Literal(String,alice)),Pointing(Identifier(active),Literal(Bool,true))])])])])]"
+}

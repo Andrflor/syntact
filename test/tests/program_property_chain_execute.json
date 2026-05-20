@@ -1,0 +1,6 @@
+{
+  "name": "Program Property Chain Execute",
+  "description": "Deep property chains with interspersed executes and carves",
+  "source": "result -> obj.method!.next{x -> 1}.value!",
+  "expect": "Scope[Pointing(Identifier(result),Execute(Property(Carve(Property(Execute(Property(Identifier(obj),Identifier(method)),[]),Identifier(next)),[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(value)),[]))]"
+}

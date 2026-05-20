@@ -1,0 +1,6 @@
+{
+  "name": "Execute Wrapper On Scope",
+  "description": "Threading execution wrapper on a scope literal",
+  "source": "{x}<!>",
+  "expect": "Scope[Execute(Scope[Identifier(x)],[Threading])]"
+}

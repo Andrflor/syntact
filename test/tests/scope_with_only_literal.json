@@ -1,0 +1,6 @@
+{
+  "name": "Scope With Only Literal",
+  "description": "Scope containing just an integer literal",
+  "source": "{ 5 }",
+  "expect": "Scope[Scope[Literal(Integer,5)]]"
+}

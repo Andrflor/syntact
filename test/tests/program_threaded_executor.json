@@ -1,0 +1,6 @@
+{
+  "name": "Program Threaded Executor",
+  "description": "Task executor using various execution wrappers for concurrency control",
+  "source": "Executor -> {\n  cpuTask -> work<!>\n  gpuTask -> render|!|\n  bgTask -> cleanup(!)\n  parallelTask -> batch[!]\n}",
+  "expect": "Scope[Pointing(Identifier(Executor),Scope[Pointing(Identifier(cpuTask),Execute(Identifier(work),[Threading])),Pointing(Identifier(gpuTask),Execute(Identifier(render),[GPU])),Pointing(Identifier(bgTask),Execute(Identifier(cleanup),[Background])),Pointing(Identifier(parallelTask),Execute(Identifier(batch),[Parallel_CPU]))])]"
+}

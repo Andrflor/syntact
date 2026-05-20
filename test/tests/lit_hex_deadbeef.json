@@ -1,0 +1,6 @@
+{
+  "name": "Hex Long DEADBEEF",
+  "description": "Long hexadecimal literal with mixed case",
+  "source": "0xDEADBEEF",
+  "expect": "Scope[Literal(Hexadecimal,0xDEADBEEF)]"
+}
