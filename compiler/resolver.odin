@@ -50,13 +50,16 @@ Status :: enum {
  * Cache stores compilation data for a single file
  */
 Cache :: struct {
-	path:          string, // File path
-	content:       ^ScopeData,
-	status:        Status, // Current compilation status
-	last_modified: time.Time, // Last modification timestamp
-	arena:         vmem.Arena, // Memory arena
-	allocator:     mem.Allocator, // Allocator for this cache
-	mutex:         sync.Mutex, // Mutex for thread safety
+	path:            string,
+	content:         ^ScopeData,
+	status:          Status,
+	last_modified:   time.Time,
+	arena:           vmem.Arena,
+	allocator:       mem.Allocator,
+	mutex:           sync.Mutex,
+	parse_errors:    [dynamic]Parse_Error,
+	analyze_errors:  [dynamic]Analyzer_Error,
+	analyze_warnings:[dynamic]Analyzer_Error,
 }
 
 /*
