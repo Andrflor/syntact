@@ -1498,11 +1498,8 @@ parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 	}
 
 	if parser.current_token.kind == .RightParen {
-		span_end := parser.current_token.span.end
 		advance_token(parser)
-		data: Node_Data
-		data.scope = {start = 0, len = 0}
-		return add_node(parser, .ScopeNode, data, Span{span_start, span_end})
+		return INVALID_NODE
 	}
 
 	expr := parse_expression(parser)
@@ -1512,7 +1509,7 @@ parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 	}
 
 	if !expect_token(parser, .RightParen) {
-		return INVALID_NODE
+		return expr
 	}
 
 	return expr
@@ -2107,8 +2104,10 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
 			source_idx, product_idx := parse_branch(parser)
-			scratch_append(&parser.scratch, source_idx)
-			scratch_append(&parser.scratch, product_idx)
+			if source_idx != INVALID_NODE || product_idx != INVALID_NODE {
+				scratch_append(&parser.scratch, source_idx)
+				scratch_append(&parser.scratch, product_idx)
+			}
 		}
 
 		if !match_token(parser, .RightBrace) {
@@ -2122,7 +2121,7 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 			inline_expr = parse_expression(parser, .OR)
 		} else {
 			error_at_current(parser, "Expected pattern expression after ?")
-			return INVALID_NODE
+			return left
 		}
 		if inline_expr != INVALID_NODE {
 			scratch_append(&parser.scratch, inline_expr)
@@ -2167,8 +2166,9 @@ parse_enforce :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	right := parse_expression(parser, Precedence(int(prec) + 1))
 	if right == INVALID_NODE {
-		error_at_current(parser, "Expected expression after binary operator")
-		return INVALID_NODE
+		error_at_current(parser, "Expected expression after ?!")
+		parser.panic_mode = false
+		return left
 	}
 
 	data: Node_Data
