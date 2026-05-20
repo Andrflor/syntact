@@ -1,6 +1,6 @@
 {
   "name": "Lex Empty Parens",
-  "description": "() — empty grouping with no contents produces an empty ScopeNode per parse_grouping.",
+  "description": "() — empty parens produce nothing, parens are not scopes.",
   "source": "()",
-  "expect": "Scope[Scope[]]"
+  "expect": "Scope[]"
 }
