@@ -154,15 +154,11 @@ Node_Data :: struct #raw_union {
 	event_pull: EventPull_Data,
 }
 
-Node :: struct {
-	kind: Node_Kind,
-	span: Span,
-	data: Node_Data,
-}
-
 Ast :: struct {
 	source:              string,
-	nodes:               [dynamic]Node,
+	node_kinds:          [dynamic]Node_Kind,
+	node_spans:          [dynamic]Span,
+	node_data:           [dynamic]Node_Data,
 	extra:               [dynamic]Node_Index,
 	extra_u8:            [dynamic]u8,
 	line_starts:         [dynamic]u32,
@@ -212,122 +208,126 @@ span_to_position :: proc(ast: ^Ast, offset: u32) -> Position {
  * ====================================================================== */
 
 node_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Kind {
-	return ast.nodes[idx].kind
+	return ast.node_kinds[idx]
 }
 
 node_span :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Span {
-	return ast.nodes[idx].span
+	return ast.node_spans[idx]
+}
+
+node_data :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Data {
+	return ast.node_data[idx]
 }
 
 node_position :: proc(ast: ^Ast, idx: Node_Index) -> Position {
-	return span_to_position(ast, ast.nodes[idx].span.start)
+	return span_to_position(ast, ast.node_spans[idx].start)
 }
 
 node_text :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.nodes[idx].span
+	s := ast.node_spans[idx]
 	return ast.source[s.start:s.end]
 }
 
 node_left :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.binary.left
+	return ast.node_data[idx].binary.left
 }
 
 node_right :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.binary.right
+	return ast.node_data[idx].binary.right
 }
 
 node_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
-	r := ast.nodes[idx].data.scope
+	r := ast.node_data[idx].scope
 	if r.len == 0 do return nil
 	return ast.extra[r.start : r.start + r.len]
 }
 
 node_carve_source :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.carve.source
+	return ast.node_data[idx].carve.source
 }
 
 node_carve_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
-	r := ast.nodes[idx].data.carve.children
+	r := ast.node_data[idx].carve.children
 	if r.len == 0 do return nil
 	return ast.extra[r.start : r.start + r.len]
 }
 
 node_pattern_target :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.pattern.target
+	return ast.node_data[idx].pattern.target
 }
 
 node_pattern_branches :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
-	r := ast.nodes[idx].data.pattern.branches
+	r := ast.node_data[idx].pattern.branches
 	if r.len == 0 do return nil
 	return ast.extra[r.start : r.start + r.len]
 }
 
 node_execute_target :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.execute.target
+	return ast.node_data[idx].execute.target
 }
 
 node_execute_wrappers :: proc(ast: ^Ast, idx: Node_Index) -> []u8 {
-	r := ast.nodes[idx].data.execute.wrappers
+	r := ast.node_data[idx].execute.wrappers
 	if r.len == 0 do return nil
 	return ast.extra_u8[r.start : r.start + r.len]
 }
 
 node_operator_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Operator_Kind {
-	return ast.nodes[idx].data.operator.kind
+	return ast.node_data[idx].operator.kind
 }
 
 node_operator_left :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.operator.left
+	return ast.node_data[idx].operator.left
 }
 
 node_operator_right :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.operator.right
+	return ast.node_data[idx].operator.right
 }
 
 node_unary_operand :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.unary.operand
+	return ast.node_data[idx].unary.operand
 }
 
 node_name_span :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Span {
-	return ast.nodes[idx].data.identifier.name
+	return ast.node_data[idx].identifier.name
 }
 
 node_name_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.nodes[idx].data.identifier.name
+	s := ast.node_data[idx].identifier.name
 	if s.start == s.end do return ""
 	return ast.source[s.start:s.end]
 }
 
 node_capture_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.nodes[idx].data.identifier.capture
+	s := ast.node_data[idx].identifier.capture
 	if s.start == s.end do return ""
 	return ast.source[s.start:s.end]
 }
 
 node_literal_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Literal_Kind {
-	return ast.nodes[idx].data.literal.kind
+	return ast.node_data[idx].literal.kind
 }
 
 node_external_name :: proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.nodes[idx].data.external.name
+	s := ast.node_data[idx].external.name
 	if s.start == s.end do return ""
 	return ast.source[s.start:s.end]
 }
 
 node_external_scope :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.external.scope
+	return ast.node_data[idx].external.scope
 }
 
 node_event_pull_from :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.event_pull.from
+	return ast.node_data[idx].event_pull.from
 }
 
 node_event_pull_to :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.nodes[idx].data.event_pull.to
+	return ast.node_data[idx].event_pull.to
 }
 
 node_event_pull_catch :: proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.nodes[idx].data.event_pull.catch_span
+	s := ast.node_data[idx].event_pull.catch_span
 	if s.start == s.end do return ""
 	return ast.source[s.start:s.end]
 }
@@ -1031,7 +1031,9 @@ Parser :: struct {
 	lexer:         Lexer,
 	current_token: Token,
 	peek_token:    Token,
-	nodes:         [dynamic]Node,
+	node_kinds:    [dynamic]Node_Kind,
+	node_spans:    [dynamic]Span,
+	node_data:     [dynamic]Node_Data,
 	extra:         [dynamic]Node_Index,
 	extra_u8:      [dynamic]u8,
 	errors:        [dynamic]Parse_Error,
@@ -1058,7 +1060,9 @@ init_parser :: proc(parser: ^Parser, cache: ^Cache, source: string) {
 		estimated_nodes = src_len / 8
 	}
 	estimated_extra := estimated_nodes / 3
-	parser.nodes = make([dynamic]Node, 0, estimated_nodes)
+	parser.node_kinds = make([dynamic]Node_Kind, 0, estimated_nodes)
+	parser.node_spans = make([dynamic]Span, 0, estimated_nodes)
+	parser.node_data = make([dynamic]Node_Data, 0, estimated_nodes)
 	parser.extra = make([dynamic]Node_Index, 0, estimated_extra)
 	parser.extra_u8 = make([dynamic]u8, 0, 32)
 	parser.scratch.items = make([dynamic]Node_Index, 0, 256)
@@ -1134,8 +1138,10 @@ synchronize :: proc(parser: ^Parser) {
 }
 
 add_node :: #force_inline proc(p: ^Parser, kind: Node_Kind, data: Node_Data, span: Span) -> Node_Index {
-	index := Node_Index(len(p.nodes))
-	append(&p.nodes, Node{kind = kind, span = span, data = data})
+	index := Node_Index(len(p.node_kinds))
+	append(&p.node_kinds, kind)
+	append(&p.node_spans, span)
+	append(&p.node_data, data)
 	return index
 }
 
@@ -1188,7 +1194,9 @@ parse :: proc(cache: ^Cache, source: string) -> ^Ast {
 
 	ast := new(Ast)
 	ast.source = source
-	ast.nodes = parser.nodes
+	ast.node_kinds = parser.node_kinds
+	ast.node_spans = parser.node_spans
+	ast.node_data = parser.node_data
 	ast.extra = parser.extra
 	ast.extra_u8 = parser.extra_u8
 
@@ -1268,7 +1276,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 			break
 		}
 		if kind == .PointingPush {
-			left_kind := parser.nodes[left].kind
+			left_kind := parser.node_kinds[left]
 			if left_kind == .Product || left_kind == .Pointing {
 				break infix_loop
 			}
@@ -1446,7 +1454,7 @@ parse_execute_prefix :: proc(parser: ^Parser) -> Node_Index {
 	operand := parse_expression(parser, Precedence.UNARY)
 	data: Node_Data
 	data.unary = Unary_Data{operand = operand}
-	return add_node(parser, .CompileTime, data, Span{span.start, parser.nodes[operand].span.end})
+	return add_node(parser, .CompileTime, data, Span{span.start, parser.node_spans[operand].end})
 }
 
 parse_execute :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
@@ -1454,7 +1462,7 @@ parse_execute :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	advance_token(parser)
 	data: Node_Data
 	data.execute = Execute_Data{target = left, wrappers = EMPTY_RANGE}
-	return add_node(parser, .Execute, data, Span{parser.nodes[left].span.start, span.end})
+	return add_node(parser, .Execute, data, Span{parser.node_spans[left].start, span.end})
 }
 
 parse_product_prefix :: proc(parser: ^Parser) -> Node_Index {
@@ -1473,11 +1481,11 @@ parse_product_prefix :: proc(parser: ^Parser) -> Node_Index {
 
 	data: Node_Data
 	data.unary = Unary_Data{operand = to}
-	return add_node(parser, .Product, data, Span{span_start, parser.nodes[to].span.end})
+	return add_node(parser, .Product, data, Span{span_start, parser.node_spans[to].end})
 }
 
 parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	token_kind := parser.current_token.kind
 	prec := prec_table[token_kind]
 	advance_token(parser)
@@ -1514,7 +1522,7 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	data: Node_Data
 	data.operator = Operator_Node_Data{kind = op_kind, left = left, right = right}
-	return add_node(parser, .Operator, data, Span{span_start, parser.nodes[right].span.end})
+	return add_node(parser, .Operator, data, Span{span_start, parser.node_spans[right].end})
 }
 
 parse_unary :: proc(parser: ^Parser) -> Node_Index {
@@ -1539,11 +1547,11 @@ parse_unary :: proc(parser: ^Parser) -> Node_Index {
 
 	data: Node_Data
 	data.operator = Operator_Node_Data{kind = op_kind, left = INVALID_NODE, right = operand}
-	return add_node(parser, .Operator, data, Span{span_start, parser.nodes[operand].span.end})
+	return add_node(parser, .Operator, data, Span{span_start, parser.node_spans[operand].end})
 }
 
 parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	if parser.current_token.kind != .Identifier {
@@ -1585,7 +1593,7 @@ parse_property_from_none :: proc(parser: ^Parser) -> Node_Index {
 }
 
 parse_property_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	data: Node_Data
@@ -1594,7 +1602,7 @@ parse_property_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Index 
 }
 
 parse_constraint_bind :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	name := INVALID_NODE
@@ -1612,7 +1620,7 @@ parse_constraint_bind :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = name}
 	span_end := parser.current_token.span.start
 	if name != INVALID_NODE {
-		span_end = parser.nodes[name].span.end
+		span_end = parser.node_spans[name].end
 	}
 	node := add_node(parser, .Constraint, data, Span{span_start, span_end})
 
@@ -1641,7 +1649,7 @@ parse_constraint_from_none :: proc(parser: ^Parser) -> Node_Index {
 	data.binary = Binary_Data{left = INVALID_NODE, right = name}
 	span_end := parser.current_token.span.start
 	if name != INVALID_NODE {
-		span_end = parser.nodes[name].span.end
+		span_end = parser.node_spans[name].end
 	}
 	node := add_node(parser, .Constraint, data, Span{span_start, span_end})
 
@@ -1652,7 +1660,7 @@ parse_constraint_from_none :: proc(parser: ^Parser) -> Node_Index {
 }
 
 parse_constraint_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	data: Node_Data
@@ -1692,7 +1700,7 @@ parse_invalid_constraint_infix :: proc(parser: ^Parser, left: Node_Index) -> Nod
 }
 
 parse_pointing_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	to := INVALID_NODE
@@ -1706,7 +1714,7 @@ parse_pointing_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .Pointing, data, Span{span_start, span_end})
 }
@@ -1726,13 +1734,13 @@ parse_pointing_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
 	data.binary = Binary_Data{left = INVALID_NODE, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .PointingPull, data, Span{span_start, span_end})
 }
 
 parse_pointing_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	to := INVALID_NODE
@@ -1746,7 +1754,7 @@ parse_pointing_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .PointingPull, data, Span{span_start, span_end})
 }
@@ -1766,13 +1774,13 @@ parse_event_push_prefix :: proc(parser: ^Parser) -> Node_Index {
 	data.binary = Binary_Data{left = INVALID_NODE, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .EventPush, data, Span{span_start, span_end})
 }
 
 parse_event_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	to := INVALID_NODE
@@ -1786,7 +1794,7 @@ parse_event_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .EventPush, data, Span{span_start, span_end})
 }
@@ -1812,13 +1820,13 @@ parse_event_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
 	data.event_pull = EventPull_Data{from = INVALID_NODE, to = to, catch_span = catch_span}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .EventPull, data, Span{span_start, span_end})
 }
 
 parse_event_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	catch_span := EMPTY_SPAN
@@ -1838,7 +1846,7 @@ parse_event_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.event_pull = EventPull_Data{from = left, to = to, catch_span = catch_span}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .EventPull, data, Span{span_start, span_end})
 }
@@ -1858,13 +1866,13 @@ parse_resonance_push_prefix :: proc(parser: ^Parser) -> Node_Index {
 	data.binary = Binary_Data{left = INVALID_NODE, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .ResonancePush, data, Span{span_start, span_end})
 }
 
 parse_resonance_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	to := INVALID_NODE
@@ -1878,7 +1886,7 @@ parse_resonance_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .ResonancePush, data, Span{span_start, span_end})
 }
@@ -1898,13 +1906,13 @@ parse_resonance_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
 	data.binary = Binary_Data{left = INVALID_NODE, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .ResonancePull, data, Span{span_start, span_end})
 }
 
 parse_resonance_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	to := INVALID_NODE
@@ -1918,7 +1926,7 @@ parse_resonance_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = to}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
-		span_end = parser.nodes[to].span.end
+		span_end = parser.node_spans[to].end
 	}
 	return add_node(parser, .ResonancePull, data, Span{span_start, span_end})
 }
@@ -1946,13 +1954,13 @@ parse_prefix_range :: proc(parser: ^Parser) -> Node_Index {
 	data.binary = Binary_Data{left = INVALID_NODE, right = end}
 	span_end := parser.current_token.span.start
 	if end != INVALID_NODE {
-		span_end = parser.nodes[end].span.end
+		span_end = parser.node_spans[end].end
 	}
 	return add_node(parser, .Range, data, Span{span_start, span_end})
 }
 
 parse_postfix_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	data: Node_Data
@@ -1961,7 +1969,7 @@ parse_postfix_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 }
 
 parse_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	end := INVALID_NODE
@@ -1975,7 +1983,7 @@ parse_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.binary = Binary_Data{left = left, right = end}
 	span_end := parser.current_token.span.start
 	if end != INVALID_NODE {
-		span_end = parser.nodes[end].span.end
+		span_end = parser.node_spans[end].end
 	}
 	return add_node(parser, .Range, data, Span{span_start, span_end})
 }
@@ -2006,11 +2014,11 @@ parse_prefix_comparison :: proc(parser: ^Parser) -> Node_Index {
 
 	data: Node_Data
 	data.operator = Operator_Node_Data{kind = op_kind, left = INVALID_NODE, right = operand}
-	return add_node(parser, .Operator, data, Span{span_start, parser.nodes[operand].span.end})
+	return add_node(parser, .Operator, data, Span{span_start, parser.node_spans[operand].end})
 }
 
 parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	cp := scratch_begin(&parser.scratch)
@@ -2074,7 +2082,7 @@ parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: N
 }
 
 parse_enforce :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	token_kind := parser.current_token.kind
 	prec := prec_table[token_kind]
 	advance_token(parser)
@@ -2087,7 +2095,7 @@ parse_enforce :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	data: Node_Data
 	data.binary = Binary_Data{left = left, right = right}
-	return add_node(parser, .Enforce, data, Span{span_start, parser.nodes[right].span.end})
+	return add_node(parser, .Enforce, data, Span{span_start, parser.node_spans[right].end})
 }
 
 parse_unknown :: proc(parser: ^Parser) -> Node_Index {
@@ -2109,7 +2117,7 @@ parse_expansion :: proc(parser: ^Parser) -> Node_Index {
 
 	data: Node_Data
 	data.unary = Unary_Data{operand = target}
-	return add_node(parser, .Expand, data, Span{span_start, parser.nodes[target].span.end})
+	return add_node(parser, .Expand, data, Span{span_start, parser.node_spans[target].end})
 }
 
 parse_reference :: proc(parser: ^Parser) -> Node_Index {
@@ -2163,7 +2171,7 @@ parse_less_than :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		return node
 	}
 
-	span_start := parser.nodes[left].span.start
+	span_start := parser.node_spans[left].start
 	advance_token(parser)
 
 	right := parse_expression(parser, Precedence(int(Precedence.COMPARISON) + 1))
@@ -2171,7 +2179,7 @@ parse_less_than :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	data.operator = Operator_Node_Data{kind = .Less, left = left, right = right}
 	span_end := parser.current_token.span.start
 	if right != INVALID_NODE {
-		span_end = parser.nodes[right].span.end
+		span_end = parser.node_spans[right].end
 	}
 	return add_node(parser, .Operator, data, Span{span_start, span_end})
 }
@@ -2197,13 +2205,15 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_In
 	original_offset := parser.lexer.offset
 	original_current := parser.current_token
 	original_peek := parser.peek_token
-	nodes_len := len(parser.nodes)
+	nodes_len := len(parser.node_kinds)
 
 	restore :: proc(parser: ^Parser, offset: u32, current, peek: Token, nlen: int) {
 		parser.lexer.offset = offset
 		parser.current_token = current
 		parser.peek_token = peek
-		resize(&parser.nodes, nlen)
+		resize(&parser.node_kinds, nlen)
+		resize(&parser.node_spans, nlen)
+		resize(&parser.node_data, nlen)
 	}
 
 	wrappers: [MAX_WRAPPER_DEPTH]u8
@@ -2310,7 +2320,7 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_In
 
 	data: Node_Data
 	data.execute = Execute_Data{target = left, wrappers = add_extra_u8(parser, wrappers[:wrappers_len])}
-	span := Span{parser.nodes[left].span.start, parser.current_token.span.start}
+	span := Span{parser.node_spans[left].start, parser.current_token.span.start}
 	return add_node(parser, .Execute, data, span), true
 }
 
@@ -2411,43 +2421,45 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 	if idx == INVALID_NODE do return
 
 	indent_str := strings.repeat(" ", indent)
-	n := ast.nodes[idx]
-	pos := span_to_position(ast, n.span.start)
+	n_kind := ast.node_kinds[idx]
+	n_span := ast.node_spans[idx]
+	n_data := ast.node_data[idx]
+	pos := span_to_position(ast, n_span.start)
 
-	switch n.kind {
+	switch n_kind {
 	case .Pointing:
 		fmt.printf("%sPointing -> (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .PointingPull:
 		fmt.printf("%sPointingPull <- (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		} else {
 			fmt.printf("%s  From: anonymous\n", indent_str)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .EventPush:
 		fmt.printf("%sEventPush >- (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		} else {
 			fmt.printf("%s  From: anonymous\n", indent_str)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .EventPull:
 		fmt.printf("%sEventPull -< (line %d, column %d)\n", indent_str, pos.line, pos.column)
@@ -2455,39 +2467,39 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		if catch_str != "" {
 			fmt.printfln("%s  Catch: %s", indent_str, catch_str)
 		}
-		if n.data.event_pull.from != INVALID_NODE {
+		if n_data.event_pull.from != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
-			print_ast(ast, n.data.event_pull.from, indent + 4)
+			print_ast(ast, n_data.event_pull.from, indent + 4)
 		} else {
 			fmt.printf("%s  From: anonymous\n", indent_str)
 		}
-		if n.data.event_pull.to != INVALID_NODE {
+		if n_data.event_pull.to != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.event_pull.to, indent + 4)
+			print_ast(ast, n_data.event_pull.to, indent + 4)
 		}
 	case .ResonancePush:
 		fmt.printf("%sResonancePush >>- (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		} else {
 			fmt.printf("%s  From: anonymous\n", indent_str)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .ResonancePull:
 		fmt.printf("%sResonancePull -<< (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		} else {
 			fmt.printf("%s  From: anonymous\n", indent_str)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .Identifier:
 		name := node_name_str(ast, idx)
@@ -2504,9 +2516,9 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		}
 	case .Carve:
 		fmt.printf("%sCarve (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.carve.source != INVALID_NODE {
+		if n_data.carve.source != INVALID_NODE {
 			fmt.printf("%s  Source:\n", indent_str)
-			print_ast(ast, n.data.carve.source, indent + 4)
+			print_ast(ast, n_data.carve.source, indent + 4)
 			fmt.printf("%s  Carves:\n", indent_str)
 			for child in node_carve_children(ast, idx) {
 				print_ast(ast, child, indent + 4)
@@ -2514,36 +2526,36 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		}
 	case .Property:
 		fmt.printf("%sProperty (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  Source:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  Property:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .Expand:
 		fmt.printf("%sExpand (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.unary.operand != INVALID_NODE {
+		if n_data.unary.operand != INVALID_NODE {
 			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(ast, n.data.unary.operand, indent + 4)
+			print_ast(ast, n_data.unary.operand, indent + 4)
 		}
 	case .External:
 		fmt.printf("%sExternal (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.external.scope != INVALID_NODE {
+		if n_data.external.scope != INVALID_NODE {
 			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(ast, n.data.external.scope, indent + 4)
+			print_ast(ast, n_data.external.scope, indent + 4)
 		}
 	case .Product:
 		fmt.printf("%sProduct -> (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.unary.operand != INVALID_NODE {
-			print_ast(ast, n.data.unary.operand, indent + 2)
+		if n_data.unary.operand != INVALID_NODE {
+			print_ast(ast, n_data.unary.operand, indent + 2)
 		}
 	case .Pattern:
 		fmt.printf("%sPattern ? (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.pattern.target != INVALID_NODE {
+		if n_data.pattern.target != INVALID_NODE {
 			fmt.printf("%s  Target:\n", indent_str)
-			print_ast(ast, n.data.pattern.target, indent + 4)
+			print_ast(ast, n_data.pattern.target, indent + 4)
 		} else {
 			fmt.printf("%s  Target: implicit\n", indent_str)
 		}
@@ -2564,38 +2576,38 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		}
 	case .Constraint:
 		fmt.printf("%sConstraint: (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
-			print_ast(ast, n.data.binary.left, indent + 2)
+		if n_data.binary.left != INVALID_NODE {
+			print_ast(ast, n_data.binary.left, indent + 2)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  To:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		} else {
 			fmt.printf("%s  To: none\n", indent_str)
 		}
 	case .Operator:
-		fmt.printf("%sOperator '%v' (line %d, column %d)\n", indent_str, n.data.operator.kind, pos.line, pos.column)
-		if n.data.operator.left != INVALID_NODE {
+		fmt.printf("%sOperator '%v' (line %d, column %d)\n", indent_str, n_data.operator.kind, pos.line, pos.column)
+		if n_data.operator.left != INVALID_NODE {
 			fmt.printf("%s  Left:\n", indent_str)
-			print_ast(ast, n.data.operator.left, indent + 4)
+			print_ast(ast, n_data.operator.left, indent + 4)
 		} else {
 			fmt.printf("%s  Left: none (unary operator)\n", indent_str)
 		}
-		if n.data.operator.right != INVALID_NODE {
+		if n_data.operator.right != INVALID_NODE {
 			fmt.printf("%s  Right:\n", indent_str)
-			print_ast(ast, n.data.operator.right, indent + 4)
+			print_ast(ast, n_data.operator.right, indent + 4)
 		}
 	case .Enforce:
 		fmt.printf("%sEnforce ?! (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  Left:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		} else {
 			fmt.printf("%s  Left: none (unary operator)\n", indent_str)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  Right:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .Branch:
 	case .Execute:
@@ -2619,27 +2631,27 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 			}
 		}
 		fmt.printf("%sExecute %s (line %d, column %d)\n", indent_str, pattern, pos.line, pos.column)
-		if n.data.execute.target != INVALID_NODE {
-			print_ast(ast, n.data.execute.target, indent + 2)
+		if n_data.execute.target != INVALID_NODE {
+			print_ast(ast, n_data.execute.target, indent + 2)
 		}
 	case .CompileTime:
 		fmt.printf("%sCompileTime ! (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.unary.operand != INVALID_NODE {
-			print_ast(ast, n.data.unary.operand, indent + 2)
+		if n_data.unary.operand != INVALID_NODE {
+			print_ast(ast, n_data.unary.operand, indent + 2)
 		}
 	case .Literal:
-		fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n", indent_str, n.data.literal.kind, node_text(ast, idx), pos.line, pos.column)
+		fmt.printf("%sLiteral (%v): %s (line %d, column %d)\n", indent_str, n_data.literal.kind, node_text(ast, idx), pos.line, pos.column)
 	case .Range:
 		fmt.printf("%sRange (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n.data.binary.left != INVALID_NODE {
+		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  Start:\n", indent_str)
-			print_ast(ast, n.data.binary.left, indent + 4)
+			print_ast(ast, n_data.binary.left, indent + 4)
 		} else {
 			fmt.printf("%s  Start: none (prefix range)\n", indent_str)
 		}
-		if n.data.binary.right != INVALID_NODE {
+		if n_data.binary.right != INVALID_NODE {
 			fmt.printf("%s  End:\n", indent_str)
-			print_ast(ast, n.data.binary.right, indent + 4)
+			print_ast(ast, n_data.binary.right, indent + 4)
 		} else {
 			fmt.printf("%s  End: none (postfix range)\n", indent_str)
 		}
@@ -2649,5 +2661,5 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 }
 
 ast_root :: #force_inline proc(ast: ^Ast) -> Node_Index {
-	return Node_Index(len(ast.nodes) - 1)
+	return Node_Index(len(ast.node_kinds) - 1)
 }

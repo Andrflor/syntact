@@ -431,17 +431,18 @@ process_filenode_flat :: proc(idx: Node_Index, parser: ^Parser) {
 
 _process_node_flat :: proc(idx: Node_Index, parser: ^Parser, dir_path: string, segments: ^[dynamic]string) {
 	if idx == INVALID_NODE do return
-	n := parser.nodes[idx]
-	#partial switch n.kind {
+	n_kind := parser.node_kinds[idx]
+	n_data := parser.node_data[idx]
+	#partial switch n_kind {
 	case .Property:
-		right := n.data.binary.right
-		if right != INVALID_NODE && parser.nodes[right].kind == .Identifier {
-			s := parser.nodes[right].data.identifier.name
+		right := n_data.binary.right
+		if right != INVALID_NODE && parser.node_kinds[right] == .Identifier {
+			s := parser.node_data[right].identifier.name
 			append(segments, parser.source[s.start:s.end])
 		}
-		_process_node_flat(n.data.binary.left, parser, dir_path, segments)
+		_process_node_flat(n_data.binary.left, parser, dir_path, segments)
 	case .External:
-		name_s := n.data.external.name
+		name_s := n_data.external.name
 		name := parser.source[name_s.start:name_s.end]
 		path, _ := filepath.join({dir_path, name}, context.temp_allocator)
 		if os.is_dir(path) {
