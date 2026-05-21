@@ -1,6 +1,7 @@
 package compiler
 
 import "core:fmt"
+import "core:strconv"
 import "core:strings"
 
 /* ======================================================================
@@ -104,6 +105,7 @@ Literal_Data :: struct {
 Identifier_Data :: struct {
 	name:    Span,
 	capture: Span,
+	ordinal: i16,
 }
 
 Scope_Data :: struct {
@@ -304,6 +306,10 @@ node_capture_str :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
 	s := ast.node_data[idx].identifier.capture
 	if s.start == s.end do return ""
 	return ast.source[s.start:s.end]
+}
+
+node_ordinal :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> i16 {
+	return ast.node_data[idx].identifier.ordinal
 }
 
 node_literal_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Literal_Kind {
@@ -754,6 +760,13 @@ lex_ident :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	   src[start + 3] == 's' &&
 	   src[start + 4] == 'e' {
 		return Token{kind = .Bool_Literal, span = Span{start, off}, flags = flags}
+	}
+	if off < slen && src[off] == '#' && off + 1 < slen && IS_DIGIT[src[off + 1]] {
+		off += 1
+		for off < slen && IS_DIGIT[src[off]] {
+			off += 1
+		}
+		l.offset = off
 	}
 	return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
 }
@@ -1486,6 +1499,17 @@ parse_identifier :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	name_span := span
 	capture_span := EMPTY_SPAN
+	ordinal: i16 = -1
+
+	src := parser.lexer.src
+	for i in span.start ..< span.end {
+		if src[i] == '#' {
+			name_span.end = i
+			ord, ok := strconv.parse_int(string(src[i + 1:span.end]))
+			if ok do ordinal = i16(ord)
+			break
+		}
+	}
 
 	advance_token(parser)
 
@@ -1506,8 +1530,9 @@ parse_identifier :: proc(parser: ^Parser) -> Node_Index {
 	data.identifier = Identifier_Data {
 		name    = name_span,
 		capture = capture_span,
+		ordinal = ordinal,
 	}
-	full_span := Span{span.start, max(name_span.end, capture_span.end)}
+	full_span := Span{span.start, max(span.end, capture_span.end)}
 	if capture_span != EMPTY_SPAN {
 		full_span.end += 1
 	}

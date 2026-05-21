@@ -207,20 +207,29 @@ reduce_literal :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 
 reduce_identifier :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 	name := node_name_str(r.ast, idx)
+	ordinal := node_ordinal(r.ast, idx)
 
 	for i := len(r.env) - 1; i >= 0; i -= 1 {
 		frame := r.env[i]
-		for ov in frame.overrides {
-			if ov.name == name {
-				return ov.value
+		if ordinal < 0 {
+			for ov in frame.overrides {
+				if ov.name == name {
+					return ov.value
+				}
 			}
 		}
 
 		if frame.scope_id != INVALID_SCOPE {
-			bid, found := sem_resolve_in_scope(r.sem, frame.scope_id, name)
-			if found {
-				entry := &r.sem.bindings[bid]
-				return reduce_node(r, entry.value_node)
+			if ordinal >= 0 {
+				bid, found := sem_resolve_by_ordinal(r.sem, frame.scope_id, name, ordinal)
+				if found {
+					return reduce_node(r, r.sem.bindings[bid].value_node)
+				}
+			} else {
+				bid, found := sem_resolve_in_scope(r.sem, frame.scope_id, name)
+				if found {
+					return reduce_node(r, r.sem.bindings[bid].value_node)
+				}
 			}
 		}
 	}
