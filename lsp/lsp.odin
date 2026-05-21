@@ -115,9 +115,11 @@ LSP_Server :: struct {
 }
 
 Document :: struct {
-	uri:     string,
-	version: int,
-	content: string,
+	uri:      string,
+	version:  int,
+	content:  string,
+	ast:      ^compiler.Ast,
+	semantic: ^compiler.Semantic,
 }
 
 /* ======================================================================
@@ -326,7 +328,7 @@ handle_request :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	case "textDocument/hover":
 		send_response(msg.id, json.Null{})
 	case "textDocument/definition":
-		send_response(msg.id, json.Null{})
+		handle_definition(server, msg)
 	case "textDocument/completion":
 		result := make(map[string]json.Value)
 		result["isIncomplete"] = json.Boolean(false)
@@ -383,6 +385,7 @@ handle_initialize :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	capabilities := make(map[string]json.Value)
 	capabilities["textDocumentSync"] = json.Object(text_doc_sync)
 	capabilities["semanticTokensProvider"] = json.Object(sem_tokens_provider)
+	capabilities["definitionProvider"] = json.Boolean(true)
 
 	server_info := make(map[string]json.Value)
 	server_info["name"] = json.String("syn-lsp")
@@ -487,6 +490,8 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	cache := compiler.Cache{}
 
 	ast, parse_ok := compiler.parse(&cache, doc.content)
+	doc.ast = ast
+	doc.semantic = nil
 
 	diagnostics := make([dynamic]Diagnostic, 0, len(cache.parse_errors) + 16)
 	defer delete(diagnostics)
@@ -507,6 +512,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 
 	if ast != nil && parse_ok {
 		compiler.analyze(&cache, ast)
+		doc.semantic = cache.semantic
 
 		for err in cache.analyze_errors {
 			append(&diagnostics, Diagnostic{
@@ -634,6 +640,12 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 	compiler.ensure_line_starts(ast)
 	node_count := len(ast.node_kinds)
 
+	parent_kind := make([]compiler.Node_Kind, node_count)
+	defer delete(parent_kind)
+	is_left := make([]bool, node_count)
+	defer delete(is_left)
+	build_parent_map(ast, parent_kind, is_left)
+
 	for i := 0; i < node_count; i += 1 {
 		idx := compiler.Node_Index(i)
 		kind := ast.node_kinds[i]
@@ -648,9 +660,49 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 			name := compiler.node_name_str(ast, idx)
 			_, is_builtin := compiler.resolve_builtin_by_name(name)
 			if is_builtin {
-				tok_type = int(Sem_Token_Type.Type)
+				tok_type = int(Sem_Token_Type.Class)
 			} else {
-				tok_type = int(Sem_Token_Type.Variable)
+				pk := parent_kind[i]
+				left := is_left[i]
+				#partial switch pk {
+				case .Pointing, .PointingPull:
+					if left {
+						tok_type = int(Sem_Token_Type.Function)
+						tok_mod = 1
+					} else {
+						tok_type = int(Sem_Token_Type.Variable)
+					}
+				case .EventPush, .EventPull:
+					tok_type = int(Sem_Token_Type.Event)
+				case .ResonancePush, .ResonancePull:
+					tok_type = int(Sem_Token_Type.Event)
+				case .ReactivePush, .ReactivePull:
+					tok_type = int(Sem_Token_Type.Event)
+				case .Constraint:
+					if left {
+						tok_type = int(Sem_Token_Type.Type)
+					} else {
+						tok_type = int(Sem_Token_Type.Variable)
+					}
+				case .Property:
+					if left {
+						tok_type = int(Sem_Token_Type.Variable)
+					} else {
+						tok_type = int(Sem_Token_Type.Property)
+					}
+				case .Execute:
+					tok_type = int(Sem_Token_Type.Function)
+				case .External:
+					tok_type = int(Sem_Token_Type.Namespace)
+				case .Pattern:
+					tok_type = int(Sem_Token_Type.Variable)
+				case:
+					tok_type = int(Sem_Token_Type.Variable)
+				}
+			}
+			name_span := compiler.node_name_span(ast, idx)
+			if name_span.start != name_span.end {
+				span = name_span
 			}
 
 		case .Literal:
@@ -660,7 +712,6 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 				tok_type = int(Sem_Token_Type.Number)
 			case .String:
 				tok_type = int(Sem_Token_Type.String)
-				// Parser strips quotes from span — emit with quotes included
 				start_pos := compiler.span_to_position(ast, span.start > 0 ? span.start - 1 : 0)
 				length := int(span.end - span.start) + 2
 				append(tokens, Raw_Sem_Token{
@@ -675,65 +726,12 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 				tok_type = int(Sem_Token_Type.Keyword)
 			}
 
-		case .Pointing:
-			tok_type = int(Sem_Token_Type.Variable)
-			tok_mod = 1 // declaration
-
-		case .PointingPull:
-			tok_type = int(Sem_Token_Type.Variable)
-
-		case .EventPush, .EventPull:
-			tok_type = int(Sem_Token_Type.Event)
-
-		case .ResonancePush, .ResonancePull:
-			tok_type = int(Sem_Token_Type.Event)
-			tok_mod = 4 // readonly
-
-		case .ScopeNode:
-			continue
-
-		case .Carve:
-			continue
-
-		case .Product:
-			tok_type = int(Sem_Token_Type.Struct)
-
-		case .Branch:
-			tok_type = int(Sem_Token_Type.EnumMember)
-
-		case .Pattern:
-			tok_type = int(Sem_Token_Type.Keyword)
-
-		case .Constraint:
-			tok_type = int(Sem_Token_Type.TypeParameter)
-
 		case .Operator:
 			emit_operator_tokens(ast, idx, tokens)
 			continue
 
-		case .Execute:
-			tok_type = int(Sem_Token_Type.Function)
-
-		case .CompileTime:
-			tok_type = int(Sem_Token_Type.Macro)
-
-		case .Property:
-			tok_type = int(Sem_Token_Type.Property)
-
-		case .Expand:
-			tok_type = int(Sem_Token_Type.Decorator)
-
-		case .External:
-			tok_type = int(Sem_Token_Type.Namespace)
-
-		case .Range:
+		case:
 			continue
-
-		case .Enforce:
-			tok_type = int(Sem_Token_Type.Modifier)
-
-		case .Unknown:
-			tok_type = int(Sem_Token_Type.Keyword)
 		}
 
 		if tok_type < 0 do continue
@@ -751,6 +749,69 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 	}
 
 	emit_punctuation_tokens(ast, tokens)
+}
+
+build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, is_left: []bool) {
+	node_count := len(ast.node_kinds)
+	for i := 0; i < node_count; i += 1 {
+		idx := compiler.Node_Index(i)
+		kind := ast.node_kinds[i]
+
+		mark_binary :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, kind: compiler.Node_Kind, parent_kind: []compiler.Node_Kind, is_left: []bool, node_count: int) {
+			left := compiler.node_left(ast, idx)
+			right := compiler.node_right(ast, idx)
+			if left != compiler.INVALID_NODE && int(left) < node_count {
+				parent_kind[left] = kind
+				is_left[left] = true
+			}
+			if right != compiler.INVALID_NODE && int(right) < node_count {
+				parent_kind[right] = kind
+			}
+		}
+
+		#partial switch kind {
+		case .Pointing, .PointingPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull, .EventPush:
+			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
+		case .EventPull:
+			d := ast.node_data[i].event_pull
+			if d.from != compiler.INVALID_NODE && int(d.from) < node_count {
+				parent_kind[d.from] = kind
+				is_left[d.from] = true
+			}
+			if d.to != compiler.INVALID_NODE && int(d.to) < node_count {
+				parent_kind[d.to] = kind
+			}
+		case .Constraint:
+			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
+		case .Property:
+			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
+		case .Execute:
+			target := compiler.node_execute_target(ast, idx)
+			if target != compiler.INVALID_NODE && int(target) < node_count {
+				parent_kind[target] = kind
+				is_left[target] = true
+			}
+		case .External:
+			d := ast.node_data[i].external
+			if d.scope != compiler.INVALID_NODE && int(d.scope) < node_count {
+				parent_kind[d.scope] = kind
+			}
+		case .Pattern:
+			target := compiler.node_pattern_target(ast, idx)
+			if target != compiler.INVALID_NODE && int(target) < node_count {
+				parent_kind[target] = kind
+			}
+		case .Operator:
+			left := compiler.node_operator_left(ast, idx)
+			right := compiler.node_operator_right(ast, idx)
+			if left != compiler.INVALID_NODE && int(left) < node_count {
+				parent_kind[left] = kind
+			}
+			if right != compiler.INVALID_NODE && int(right) < node_count {
+				parent_kind[right] = kind
+			}
+		}
+	}
 }
 
 emit_operator_tokens :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, tokens: ^[dynamic]Raw_Sem_Token) {
@@ -841,6 +902,10 @@ emit_punctuation_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		case .ResonancePush:
 			tok_type = int(Sem_Token_Type.Keyword)
 		case .ResonancePull:
+			tok_type = int(Sem_Token_Type.Keyword)
+		case .ReactivePush:
+			tok_type = int(Sem_Token_Type.Keyword)
+		case .ReactivePull:
 			tok_type = int(Sem_Token_Type.Keyword)
 		case .Question:
 			tok_type = int(Sem_Token_Type.Keyword)

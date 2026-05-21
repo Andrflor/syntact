@@ -111,6 +111,10 @@ A scope is not a function, object, module, record, class, or type. Those are pro
 | `box.x` | field access | projection through current view |
 | `User+{...}` | inheritance | structural extension |
 | `Log -< e {...}` | callback/listener | nominal effect handler |
+| `value >>- Change` | mutable variable | resonant binding driven by nominal event |
+| `value -<< e.value` | assignment | resonant update inside handler |
+| `x >>= expr` | computed property | reactive derived binding |
+| `=<< expr` | reactive effect | reactive production |
 
 The analogies in the middle column help you start reading code. They are not what the language actually does.
 
@@ -169,6 +173,8 @@ shape      scope used as constraint
 pattern    shape used analytically
 collapse   explicit reduction
 handler    scoped interpretation of a nominal effect
+resonance  explicit state driven by nominal events
+reactivity implicit derived binding that tracks its dependencies
 ```
 
 The syntax is intentionally familiar. Braces, dots, arrows, and names should not make the language look alien. But the semantics are different.
@@ -214,6 +220,7 @@ relation         -> binding
 execution        -> collapse
 effect           -> event + handler
 mutation         -> resonance
+reactivity       -> reactive bindings
 ```
 
 So “no functions” is not the goal. It is the consequence of choosing smaller primitives.
@@ -234,7 +241,7 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [Defaults and completeness](#defaults-and-completeness)
 * [No null, no uninitialized state](#no-null-no-uninitialized-state)
 * [Algebraic immutability](#algebraic-immutability)
-* [Mutation is opt-in through resonance](#mutation-is-opt-in-through-resonance)
+* [Mutation and reactivity are opt-in](#mutation-and-reactivity-are-opt-in)
 * [Primitive types](#primitive-types)
 * [Shapes](#shapes)
 * [The pattern operator `?`](#the-pattern-operator-)
@@ -245,6 +252,7 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [Effects as nominal events](#effects-as-nominal-events)
 * [Handlers as compile-time dependency injection](#handlers-as-compile-time-dependency-injection)
 * [Resonance](#resonance)
+* [Reactivity](#reactivity)
 * [Files, folders, and imports](#files-folders-and-imports)
 * [Compile-time and metaprogramming](#compile-time-and-metaprogramming)
 * [Proofs](#proofs)
@@ -846,13 +854,16 @@ A consequence: there is no notion of “the value of `x` after we changed it”.
 
 ---
 
-## Mutation is opt-in through resonance
+## Mutation and reactivity are opt-in
 
-Because the algebra is immutable, ordinary bindings cannot be mutated, reassigned, or updated in place. The only way to model time-varying state is **resonance**, a separate, explicit, advanced feature where bindings are declared resonant and their values evolve in response to nominal events.
+Because the algebra is immutable, ordinary bindings cannot be mutated, reassigned, or updated in place. There are two separate mechanisms to model change, both layered on top of the immutable core:
 
-Resonance is layered on top of the immutable core. It does not change the core. A program with no resonant bindings is purely algebraic.
+- **Resonance** (`>>-` / `-<<`): explicit state driven by nominal events. A binding is declared resonant and its value evolves only when a named event is emitted and handled.
+- **Reactivity** (`>>=` / `=<<`): implicit derived bindings that automatically recompute when their dependencies change. No explicit event is needed.
 
-Combined with the no-null rule above, this gives the core a strong guarantee: every binding has a value, no value is ever silently replaced, and the only way to model change is to opt in through resonance.
+Resonance is the foundation: it is where mutation actually happens. Reactivity is built on top: a reactive binding observes other bindings (including resonant ones) and recomputes structurally.
+
+A program with no resonant or reactive bindings is purely algebraic. Combined with the no-null rule above, this gives the core a strong guarantee: every binding has a value, no value is ever silently replaced, and the only way to model change is to opt in explicitly.
 
 ---
 
@@ -1516,7 +1527,7 @@ In other languages, this often requires DI, interfaces, mocks, macros, build-tim
 
 ## Resonance
 
-Resonance is the planned model for state and reactivity.
+Resonance is the explicit model for state.
 
 The idea:
 
@@ -1550,6 +1561,8 @@ Counter -> {
 }
 ```
 
+`>>-` declares that a binding is **resonant**: it can change, but only through a named event. `-<<` performs the actual update inside the handler.
+
 There is no hidden mutable field. The state changes only through a visible nominal event.
 
 A reusable state abstraction can be a normal scope:
@@ -1581,6 +1594,76 @@ State -> {
 }
 ```
 
+Resonance is not part of the first implementation. Events come first. Resonance is built on top of events.
+
+---
+
+## Reactivity
+
+Reactivity is the implicit model for derived state.
+
+Where resonance requires an explicit event to drive change, a reactive binding automatically recomputes when its dependencies change. The operators are `>>=` and `=<<`.
+
+### Reactive bindings with `>>=`
+
+`>>=` declares a binding whose value is derived from an expression and recomputes when that expression's dependencies change.
+
+```syntact
+Counter:globalCounter
+
+bool:counterPositive >>= globalCounter.value >= 0
+```
+
+`counterPositive` is not set once. It tracks `globalCounter.value` and recomputes whenever it changes. If `globalCounter` is driven by resonance, then `counterPositive` reacts to each resonant update without needing its own event.
+
+A reactive binding can also be combined with resonance on the same binding:
+
+```syntact
+T:value >>- Update =<< initial
+```
+
+This means: `value` is resonant (driven by the `Update` event) and initially bound by reference to `initial`. The `>>=`/`=<<` side provides the initialization and structural link; the `>>-` side provides the mutation channel.
+
+### Reactive productions with `=<<`
+
+`=<<` without a left side declares a reactive production: a side effect that re-executes when its dependencies change.
+
+```syntact
+Text -> {
+  String:text =<< ""
+  =<< text ? {
+    -> >- Redraw{}
+  }
+}
+```
+
+When `text` changes, the production re-evaluates and emits a `Redraw` event. This is how a UI component can react to its own state without polling or manual subscriptions.
+
+### Resonance vs reactivity
+
+The two mechanisms serve different roles and compose together:
+
+```text
+resonance   explicit state change through a nominal event
+reactivity  implicit derived computation that tracks dependencies
+```
+
+Resonance is where mutation happens. Reactivity is where propagation happens. A reactive binding can observe resonant bindings, other reactive bindings, or any binding whose value may change.
+
+```syntact
+State -> {
+  T <- none
+  T:initial
+  -> {
+    Update -> { T:value }
+    T:value >>- Update =<< initial
+    Update -< e { value -<< e.value }
+    update -> { T:value, >- Update{value} }
+    -> { -> value, set -> update }
+  }!
+}
+```
+
 Then UI state can be built by libraries, not special syntax:
 
 ```syntact
@@ -1604,7 +1687,7 @@ CounterView -> {
 
 `State`, `Column`, `Text`, and `Button` are scopes. The SDK should be a library of scopes, not a second language.
 
-Resonance is not part of the first implementation. Events come first. Resonance is built on top of events.
+Neither resonance nor reactivity is part of the first implementation. Events come first. Resonance is built on top of events. Reactivity is built on top of resonance.
 
 ---
 
@@ -1881,7 +1964,8 @@ nominal effects
 scoped handlers
 compile-time dependency injection
 metaprogramming without a meta layer
-reactivity through resonance
+resonance for explicit state
+reactivity for derived bindings
 proofs as future reduction obligations
 ```
 
@@ -2001,16 +2085,19 @@ program -> {
 }
 ```
 
-### V3 — Resonance
+### V3 — Resonance and reactivity
 
-Goal: model state and reactivity through events.
+Goal: model state, mutation, and derived bindings.
 
 Include:
 
 ```text
->>-
--<<
-resonant bindings
+>>-    resonant binding declaration
+-<<    resonant update inside handler
+>>=    reactive derived binding
+=<<    reactive production
+resonant bindings driven by nominal events
+reactive bindings that track dependencies
 state abstractions as library scopes
 UI-friendly reactive patterns
 ```

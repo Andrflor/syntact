@@ -76,6 +76,10 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 		return fmt.tprintf("ResonancePush(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
 	case .ResonancePull:
 		return fmt.tprintf("ResonancePull(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+	case .ReactivePush:
+		return fmt.tprintf("ReactivePush(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+	case .ReactivePull:
+		return fmt.tprintf("ReactivePull(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
 	case .ScopeNode:
 		children := compiler.node_children(ast, idx)
 		if len(children) == 0 do return "Scope[]"
@@ -175,7 +179,7 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 
 	kind := compiler.node_kind(ast, idx)
 	switch kind {
-	case .Pointing, .PointingPull, .EventPush, .ResonancePush, .ResonancePull, .Property, .Constraint, .Range, .Enforce, .Branch:
+	case .Pointing, .PointingPull, .EventPush, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull, .Property, .Constraint, .Range, .Enforce, .Branch:
 		walk_all_nodes(ast, compiler.node_left(ast, idx), full_string, pos_map)
 		walk_all_nodes(ast, compiler.node_right(ast, idx), full_string, pos_map)
 	case .EventPull:
