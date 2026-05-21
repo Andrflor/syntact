@@ -388,7 +388,6 @@ sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
 	if idx == INVALID_NODE do return
 	ast := s.ast
 	kind := node_kind(ast, idx)
-	pos := node_position(ast, idx)
 
 	s.node_sems[idx].scope_id = sem_current_scope(s)
 
