@@ -1318,6 +1318,30 @@ sem_evaluate_range :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
  * SECTION 14: CARVE EVALUATION
  * ====================================================================== */
 
+sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_id: Scope_Id = INVALID_SCOPE) {
+	ast := s.ast
+	for child in node_carve_children(ast, idx) {
+		ck := node_kind(ast, child)
+		#partial switch ck {
+		case .Pointing, .PointingPull:
+			from_idx := node_left(ast, child)
+			to_idx := node_right(ast, child)
+			if to_idx != INVALID_NODE {
+				sem_evaluate_value(s, to_idx)
+			}
+			if target_scope_id != INVALID_SCOPE && from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
+				name := node_name_str(ast, from_idx)
+				_, found := sem_resolve_in_scope(s, target_scope_id, name)
+				if !found {
+					sem_error(s, fmt.tprintf("Unknown override '%s' in carve", name), .Undefined_Identifier, node_position(ast, from_idx))
+				}
+			}
+		case:
+			sem_evaluate_value(s, child)
+		}
+	}
+}
+
 sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
 	ast := s.ast
 	source_idx := node_carve_source(ast, idx)
@@ -1330,16 +1354,12 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 	}
 
 	if tvk == .Builtin {
-		for child in node_carve_children(ast, idx) {
-			sem_evaluate_value(s, child)
-		}
+		sem_evaluate_carve_children(s, idx)
 		return .Builtin, tsv
 	}
 
 	if tvk != .Scope && tvk != .Ref {
-		for child in node_carve_children(ast, idx) {
-			sem_evaluate_value(s, child)
-		}
+		sem_evaluate_carve_children(s, idx)
 		if tvk == .None {
 			sem_error(s, "Trying to carve an element that does not resolve to a scope", .Invalid_Carve, pos)
 		}
@@ -1352,26 +1372,20 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 		if entry.value_kind == .Scope {
 			target_node = entry.value.scope
 		} else {
-			for child in node_carve_children(ast, idx) {
-				sem_evaluate_value(s, child)
-			}
+			sem_evaluate_carve_children(s, idx)
 			return entry.value_kind, entry.value
 		}
 	}
 
 	target_scope_id, ok := sem_find_scope(s, target_node)
 	if !ok {
-		for child in node_carve_children(ast, idx) {
-			sem_evaluate_value(s, child)
-		}
+		sem_evaluate_carve_children(s, idx)
 		return .Symbolic, {}
 	}
 
 	target_flags := s.scopes[target_scope_id].flags
 
-	for child in node_carve_children(ast, idx) {
-		sem_evaluate_value(s, child)
-	}
+	sem_evaluate_carve_children(s, idx, target_scope_id)
 
 	if .Self_Referential in target_flags {
 		return .Symbolic, {}

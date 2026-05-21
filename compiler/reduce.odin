@@ -1,0 +1,755 @@
+package compiler
+
+import "core:fmt"
+import "core:strconv"
+
+/* ======================================================================
+ * SECTION 1: TYPES
+ * ====================================================================== */
+
+Reduced_Kind :: enum u8 {
+	None,
+	Integer,
+	Float,
+	Bool,
+	String,
+	Scope,
+}
+
+Reduced_Value :: struct {
+	kind:    Reduced_Kind,
+	data:    Reduced_Data,
+}
+
+Reduced_Data :: struct #raw_union {
+	integer: Integer_SV,
+	float_v: Float_SV,
+	bool_v:  bool,
+	str:     string,
+	scope:   Node_Index,
+}
+
+Override :: struct {
+	name:  string,
+	value: Reduced_Value,
+}
+
+Env_Frame :: struct {
+	scope_id:  Scope_Id,
+	overrides: []Override,
+}
+
+Reducer :: struct {
+	sem:       ^Semantic,
+	ast:       ^Ast,
+	env:       [dynamic]Env_Frame,
+	errors:    [dynamic]Analyzer_Error,
+	max_depth: int,
+	depth:     int,
+}
+
+REDUCE_MAX_DEPTH :: 1024
+
+/* ======================================================================
+ * SECTION 2: ENTRY POINT
+ * ====================================================================== */
+
+reduce :: proc(sem: ^Semantic, ast: ^Ast) -> Reduced_Value {
+	r := Reducer {
+		sem       = sem,
+		ast       = ast,
+		env       = make([dynamic]Env_Frame, 0, 16),
+		errors    = make([dynamic]Analyzer_Error, 0),
+		max_depth = REDUCE_MAX_DEPTH,
+		depth     = 0,
+	}
+
+	root_scope_id := Scope_Id(1)
+	if int(root_scope_id) >= len(sem.scopes) {
+		return Reduced_Value{kind = .None}
+	}
+
+	scope := sem.scopes[root_scope_id]
+	first := u32(scope.first_binding)
+
+	last_product: ^Binding_Entry
+	for i in first ..< first + scope.binding_count {
+		if sem.bindings[i].kind == .Product {
+			last_product = &sem.bindings[i]
+		}
+	}
+
+	if last_product == nil {
+		return Reduced_Value{kind = .None}
+	}
+
+	append(&r.env, Env_Frame{scope_id = root_scope_id})
+	result := reduce_node(&r, last_product.value_node)
+	pop(&r.env)
+
+	if len(r.errors) > 0 {
+		fmt.eprintln("=== REDUCTION ERRORS ===")
+		for err in r.errors {
+			fmt.eprintf("  %v: %s\n", err.type, err.message)
+		}
+	}
+
+	return result
+}
+
+/* ======================================================================
+ * SECTION 3: CORE REDUCTION
+ * ====================================================================== */
+
+reduce_node :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	if idx == INVALID_NODE do return Reduced_Value{kind = .None}
+
+	r.depth += 1
+	defer { r.depth -= 1 }
+
+	if r.depth > r.max_depth {
+		reduce_error(r, "Reduction depth exceeded, possible infinite loop", .Infinite_Recursion, idx)
+		return Reduced_Value{kind = .None}
+	}
+
+	ast := r.ast
+	kind := node_kind(ast, idx)
+
+	#partial switch kind {
+	case .Literal:
+		return reduce_literal(r, idx)
+	case .Identifier:
+		return reduce_identifier(r, idx)
+	case .Operator:
+		return reduce_operator(r, idx)
+	case .ScopeNode:
+		sv: Reduced_Value
+		sv.kind = .Scope
+		sv.data.scope = idx
+		return sv
+	case .Carve:
+		return reduce_carve(r, idx)
+	case .Execute:
+		return reduce_execute(r, idx)
+	case .Pattern:
+		return reduce_pattern(r, idx)
+	case .Property:
+		return reduce_property(r, idx)
+	case .CompileTime:
+		operand := node_unary_operand(ast, idx)
+		return reduce_node(r, operand)
+	case .Product:
+		operand := node_unary_operand(ast, idx)
+		return reduce_node(r, operand)
+	case .Constraint:
+		constraint_idx := node_left(ast, idx)
+		return reduce_node(r, constraint_idx)
+	case .Range:
+		return Reduced_Value{kind = .None}
+	case .Expand:
+		operand := node_unary_operand(ast, idx)
+		return reduce_node(r, operand)
+	case .External:
+		return Reduced_Value{kind = .None}
+	}
+
+	return Reduced_Value{kind = .None}
+}
+
+/* ======================================================================
+ * SECTION 4: LITERALS
+ * ====================================================================== */
+
+reduce_literal :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	lit_kind := node_literal_kind(ast, idx)
+	text := node_text(ast, idx)
+	rv: Reduced_Value
+
+	switch lit_kind {
+	case .Integer:
+		content, ok := strconv.parse_int(text)
+		rv.kind = .Integer
+		if ok do rv.data.integer.content = u64(content)
+	case .Float:
+		content, ok := strconv.parse_f64(text)
+		rv.kind = .Float
+		if ok do rv.data.float_v.content = content
+	case .String:
+		rv.kind = .String
+		rv.data.str = text
+	case .Bool:
+		rv.kind = .Bool
+		rv.data.bool_v = text == "true"
+	case .Hexadecimal:
+		hex_text := text
+		if len(hex_text) > 2 && hex_text[0] == '0' && (hex_text[1] == 'x' || hex_text[1] == 'X') {
+			hex_text = hex_text[2:]
+		}
+		content, ok := strconv.parse_int(hex_text, 16)
+		rv.kind = .Integer
+		if ok do rv.data.integer.content = u64(content)
+	case .Binary:
+		bin_text := text
+		if len(bin_text) > 2 && bin_text[0] == '0' && (bin_text[1] == 'b' || bin_text[1] == 'B') {
+			bin_text = bin_text[2:]
+		}
+		content, ok := strconv.parse_int(bin_text, 2)
+		rv.kind = .Integer
+		if ok do rv.data.integer.content = u64(content)
+	}
+	return rv
+}
+
+/* ======================================================================
+ * SECTION 5: IDENTIFIER RESOLUTION
+ * ====================================================================== */
+
+reduce_identifier :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	name := node_name_str(r.ast, idx)
+
+	for i := len(r.env) - 1; i >= 0; i -= 1 {
+		frame := r.env[i]
+		for ov in frame.overrides {
+			if ov.name == name {
+				return ov.value
+			}
+		}
+
+		if frame.scope_id != INVALID_SCOPE {
+			bid, found := sem_resolve_in_scope(r.sem, frame.scope_id, name)
+			if found {
+				entry := &r.sem.bindings[bid]
+				return reduce_node(r, entry.value_node)
+			}
+		}
+	}
+
+	bid, found := sem_resolve_builtin_binding(r.sem, name)
+	if found {
+		entry := &r.sem.bindings[bid]
+		if .Has_Value in entry.flags {
+			return static_to_reduced(entry.value_kind, entry.value, r.ast)
+		}
+	}
+
+	reduce_error(r, fmt.tprintf("Undefined identifier '%s' during reduction", name), .Undefined_Identifier, idx)
+	return Reduced_Value{kind = .None}
+}
+
+/* ======================================================================
+ * SECTION 6: OPERATOR REDUCTION
+ * ====================================================================== */
+
+reduce_operator :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	op_kind := node_operator_kind(ast, idx)
+	left_idx := node_operator_left(ast, idx)
+	right_idx := node_operator_right(ast, idx)
+
+	if left_idx == INVALID_NODE && right_idx != INVALID_NODE {
+		return reduce_unary(r, right_idx, op_kind)
+	}
+	if right_idx == INVALID_NODE && left_idx != INVALID_NODE {
+		return reduce_unary(r, left_idx, op_kind)
+	}
+
+	left := reduce_node(r, left_idx)
+	right := reduce_node(r, right_idx)
+
+	rv: Reduced_Value
+
+	#partial switch op_kind {
+	case .Add, .Subtract, .Multiply, .Divide, .Mod:
+		return reduce_math(left, right, op_kind)
+	case .And, .Or, .Xor:
+		return reduce_bitwise(left, right, op_kind)
+	case .Less, .Greater, .LessEqual, .GreaterEqual:
+		return reduce_comparison(left, right, op_kind)
+	case .Equal:
+		rv.kind = .Bool
+		rv.data.bool_v = reduced_equal(left, right)
+		return rv
+	case .NotEqual:
+		rv.kind = .Bool
+		rv.data.bool_v = !reduced_equal(left, right)
+		return rv
+	case .LShift, .RShift:
+		if left.kind == .Integer && right.kind == .Integer {
+			rv.kind = .Integer
+			rv.data.integer.kind = left.data.integer.kind
+			if op_kind == .LShift {
+				rv.data.integer.content = left.data.integer.content << right.data.integer.content
+			} else {
+				rv.data.integer.content = left.data.integer.content >> right.data.integer.content
+			}
+			return rv
+		}
+	}
+
+	return Reduced_Value{kind = .None}
+}
+
+reduce_unary :: proc(r: ^Reducer, child_idx: Node_Index, op: Operator_Kind) -> Reduced_Value {
+	child := reduce_node(r, child_idx)
+	rv: Reduced_Value
+
+	switch op {
+	case .Subtract:
+		if child.kind == .Integer {
+			rv = child
+			rv.data.integer.negative = !child.data.integer.negative
+			return rv
+		}
+		if child.kind == .Float {
+			rv = child
+			rv.data.float_v.content = -child.data.float_v.content
+			return rv
+		}
+	case .Not:
+		if child.kind == .Bool {
+			rv.kind = .Bool
+			rv.data.bool_v = !child.data.bool_v
+			return rv
+		}
+		if child.kind == .Integer {
+			rv = child
+			rv.data.integer.content = ~child.data.integer.content
+			return rv
+		}
+	case .Add, .Multiply, .Divide, .Mod, .Equal, .Less, .Greater,
+	     .NotEqual, .LessEqual, .GreaterEqual, .And, .Or, .Xor, .RShift, .LShift:
+	}
+	return child
+}
+
+reduce_math :: proc(l, r: Reduced_Value, op: Operator_Kind) -> Reduced_Value {
+	rv: Reduced_Value
+	if l.kind == .Integer && r.kind == .Integer {
+		rv.kind = .Integer
+		rv.data.integer.kind = l.data.integer.kind if l.data.integer.kind != .none else r.data.integer.kind
+		#partial switch op {
+		case .Add:      rv.data.integer.content = l.data.integer.content + r.data.integer.content
+		case .Subtract: rv.data.integer.content = l.data.integer.content - r.data.integer.content
+		case .Multiply: rv.data.integer.content = l.data.integer.content * r.data.integer.content
+		case .Divide:
+			if r.data.integer.content != 0 do rv.data.integer.content = l.data.integer.content / r.data.integer.content
+		case .Mod:
+			if r.data.integer.content != 0 do rv.data.integer.content = l.data.integer.content % r.data.integer.content
+		}
+		return rv
+	}
+	if l.kind == .Float && r.kind == .Float {
+		rv.kind = .Float
+		rv.data.float_v.kind = l.data.float_v.kind if l.data.float_v.kind != .none else r.data.float_v.kind
+		#partial switch op {
+		case .Add:      rv.data.float_v.content = l.data.float_v.content + r.data.float_v.content
+		case .Subtract: rv.data.float_v.content = l.data.float_v.content - r.data.float_v.content
+		case .Multiply: rv.data.float_v.content = l.data.float_v.content * r.data.float_v.content
+		case .Divide:
+			if r.data.float_v.content != 0 do rv.data.float_v.content = l.data.float_v.content / r.data.float_v.content
+		}
+		return rv
+	}
+	return Reduced_Value{kind = .None}
+}
+
+reduce_bitwise :: proc(l, r: Reduced_Value, op: Operator_Kind) -> Reduced_Value {
+	rv: Reduced_Value
+	if l.kind == .Integer && r.kind == .Integer {
+		rv.kind = .Integer
+		rv.data.integer.kind = l.data.integer.kind if l.data.integer.kind != .none else r.data.integer.kind
+		#partial switch op {
+		case .And: rv.data.integer.content = l.data.integer.content & r.data.integer.content
+		case .Or:  rv.data.integer.content = l.data.integer.content | r.data.integer.content
+		case .Xor: rv.data.integer.content = l.data.integer.content ~ r.data.integer.content
+		}
+		return rv
+	}
+	if l.kind == .Bool && r.kind == .Bool {
+		rv.kind = .Bool
+		#partial switch op {
+		case .And: rv.data.bool_v = l.data.bool_v && r.data.bool_v
+		case .Or:  rv.data.bool_v = l.data.bool_v || r.data.bool_v
+		case .Xor: rv.data.bool_v = l.data.bool_v ~ r.data.bool_v
+		}
+		return rv
+	}
+	return Reduced_Value{kind = .None}
+}
+
+reduce_comparison :: proc(l, r: Reduced_Value, op: Operator_Kind) -> Reduced_Value {
+	rv: Reduced_Value
+	rv.kind = .Bool
+
+	rcmp :: #force_inline proc(a, b: $T, op: Operator_Kind) -> bool {
+		#partial switch op {
+		case .Less:         return a < b
+		case .Greater:      return a > b
+		case .LessEqual:    return a <= b
+		case .GreaterEqual: return a >= b
+		}
+		return false
+	}
+
+	if l.kind == .Integer && r.kind == .Integer {
+		rv.data.bool_v = rcmp(l.data.integer.content, r.data.integer.content, op)
+		return rv
+	}
+	if l.kind == .Float && r.kind == .Float {
+		rv.data.bool_v = rcmp(l.data.float_v.content, r.data.float_v.content, op)
+		return rv
+	}
+	return Reduced_Value{kind = .None}
+}
+
+reduced_equal :: proc(l, r: Reduced_Value) -> bool {
+	if l.kind != r.kind do return false
+	switch l.kind {
+	case .Integer: return l.data.integer.content == r.data.integer.content
+	case .Float:   return l.data.float_v.content == r.data.float_v.content
+	case .Bool:    return l.data.bool_v == r.data.bool_v
+	case .String:  return l.data.str == r.data.str
+	case .Scope:   return l.data.scope == r.data.scope
+	case .None:    return true
+	}
+	return false
+}
+
+/* ======================================================================
+ * SECTION 7: CARVE REDUCTION
+ * ====================================================================== */
+
+reduce_carve :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	source_idx := node_carve_source(ast, idx)
+
+	source := reduce_node(r, source_idx)
+	if source.kind != .Scope {
+		return source
+	}
+
+	scope_node := source.data.scope
+	scope_id, ok := sem_find_scope(r.sem, scope_node)
+	if !ok do return Reduced_Value{kind = .None}
+
+	scope := r.sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+
+	overrides := make([dynamic]Override, 0, 8)
+	defer delete(overrides)
+
+	carve_children := node_carve_children(ast, idx)
+	named_idx := 0
+	for child in carve_children {
+		child_kind := node_kind(ast, child)
+
+		#partial switch child_kind {
+		case .Pointing, .PointingPull:
+			from_idx := node_left(ast, child)
+			to_idx := node_right(ast, child)
+			if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
+				name := node_name_str(ast, from_idx)
+				value := reduce_node(r, to_idx)
+				append(&overrides, Override{name = name, value = value})
+			} else if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Constraint {
+				name_idx := node_right(ast, from_idx)
+				if name_idx != INVALID_NODE && node_kind(ast, name_idx) == .Identifier {
+					name := node_name_str(ast, name_idx)
+					value := reduce_node(r, to_idx)
+					append(&overrides, Override{name = name, value = value})
+				}
+			}
+		case .Identifier:
+			name := node_name_str(ast, child)
+			value := reduce_node(r, child)
+			pos_idx := 0
+			for i in first ..< first + scope.binding_count {
+				entry := &r.sem.bindings[i]
+				if entry.kind != .Product && entry.name != EMPTY_SPAN {
+					if pos_idx == named_idx {
+						target_name := sem_span_str(ast, entry.name)
+						append(&overrides, Override{name = target_name, value = value})
+						break
+					}
+					pos_idx += 1
+				}
+			}
+			named_idx += 1
+		case:
+			value := reduce_node(r, child)
+			pos_idx := 0
+			for i in first ..< first + scope.binding_count {
+				entry := &r.sem.bindings[i]
+				if entry.kind != .Product && entry.name != EMPTY_SPAN {
+					if pos_idx == named_idx {
+						target_name := sem_span_str(ast, entry.name)
+						append(&overrides, Override{name = target_name, value = value})
+						break
+					}
+					pos_idx += 1
+				}
+			}
+			named_idx += 1
+		}
+	}
+
+	frame := Env_Frame {
+		scope_id  = scope_id,
+		overrides = overrides[:],
+	}
+	append(&r.env, frame)
+
+	result := Reduced_Value{kind = .Scope, data = {scope = scope_node}}
+
+	pop(&r.env)
+	return result
+}
+
+/* ======================================================================
+ * SECTION 8: EXECUTE REDUCTION
+ * ====================================================================== */
+
+reduce_execute :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	target_idx := node_execute_target(ast, idx)
+	target_kind := node_kind(ast, target_idx)
+
+	if target_kind == .Carve {
+		return reduce_carve_and_execute(r, target_idx)
+	}
+
+	target := reduce_node(r, target_idx)
+	if target.kind != .Scope do return target
+
+	scope_id, ok := sem_find_scope(r.sem, target.data.scope)
+	if !ok do return Reduced_Value{kind = .None}
+
+	return reduce_scope_product(r, scope_id, nil)
+}
+
+reduce_carve_and_execute :: proc(r: ^Reducer, carve_idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	source_idx := node_carve_source(ast, carve_idx)
+
+	source := reduce_node(r, source_idx)
+	if source.kind != .Scope {
+		return source
+	}
+
+	scope_node := source.data.scope
+	scope_id, ok := sem_find_scope(r.sem, scope_node)
+	if !ok do return Reduced_Value{kind = .None}
+
+	scope := r.sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+
+	overrides := make([dynamic]Override, 0, 8)
+	defer delete(overrides)
+
+	carve_children := node_carve_children(ast, carve_idx)
+	named_idx := 0
+	for child in carve_children {
+		child_kind := node_kind(ast, child)
+
+		#partial switch child_kind {
+		case .Pointing, .PointingPull:
+			from_idx := node_left(ast, child)
+			to_idx := node_right(ast, child)
+			if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
+				name := node_name_str(ast, from_idx)
+				value := reduce_node(r, to_idx)
+				append(&overrides, Override{name = name, value = value})
+			} else if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Constraint {
+				name_idx := node_right(ast, from_idx)
+				if name_idx != INVALID_NODE && node_kind(ast, name_idx) == .Identifier {
+					name := node_name_str(ast, name_idx)
+					value := reduce_node(r, to_idx)
+					append(&overrides, Override{name = name, value = value})
+				}
+			}
+		case:
+			value := reduce_node(r, child)
+			pos_idx := 0
+			for i in first ..< first + scope.binding_count {
+				entry := &r.sem.bindings[i]
+				if entry.kind != .Product && entry.name != EMPTY_SPAN {
+					if pos_idx == named_idx {
+						target_name := sem_span_str(ast, entry.name)
+						append(&overrides, Override{name = target_name, value = value})
+						break
+					}
+					pos_idx += 1
+				}
+			}
+			named_idx += 1
+		}
+	}
+
+	return reduce_scope_product(r, scope_id, overrides[:])
+}
+
+reduce_scope_product :: proc(r: ^Reducer, scope_id: Scope_Id, overrides: []Override) -> Reduced_Value {
+	scope := r.sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+
+	frame := Env_Frame {
+		scope_id  = scope_id,
+		overrides = overrides,
+	}
+	append(&r.env, frame)
+
+	result := Reduced_Value{kind = .None}
+	for i in first ..< first + scope.binding_count {
+		entry := &r.sem.bindings[i]
+		if entry.kind == .Product {
+			result = reduce_node(r, entry.value_node)
+		}
+	}
+
+	pop(&r.env)
+	return result
+}
+
+/* ======================================================================
+ * SECTION 9: PATTERN REDUCTION
+ * ====================================================================== */
+
+reduce_pattern :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	target_idx := node_pattern_target(ast, idx)
+	branches := node_pattern_branches(ast, idx)
+
+	target := reduce_node(r, target_idx)
+
+	i := 0
+	for i < len(branches) {
+		pattern_idx := Node_Index(branches[i])
+		product_idx := Node_Index(branches[i + 1]) if i + 1 < len(branches) else INVALID_NODE
+
+		if reduce_matches(r, target, pattern_idx) {
+			if product_idx != INVALID_NODE {
+				return reduce_node(r, product_idx)
+			}
+			return target
+		}
+		i += 2
+	}
+
+	return Reduced_Value{kind = .None}
+}
+
+reduce_matches :: proc(r: ^Reducer, target: Reduced_Value, pattern_idx: Node_Index) -> bool {
+	if pattern_idx == INVALID_NODE do return true
+
+	ast := r.ast
+	pat_kind := node_kind(ast, pattern_idx)
+
+	#partial switch pat_kind {
+	case .Literal:
+		pat := reduce_literal(r, pattern_idx)
+		return reduced_equal(target, pat)
+	case .ScopeNode:
+		return target.kind == .Scope
+	case .Identifier:
+		return true
+	case .Operator:
+		op := node_operator_kind(ast, pattern_idx)
+		left_idx := node_operator_left(ast, pattern_idx)
+		right_idx := node_operator_right(ast, pattern_idx)
+		if left_idx == INVALID_NODE && right_idx != INVALID_NODE {
+			right := reduce_node(r, right_idx)
+			rv := reduce_comparison(target, right, op)
+			return rv.kind == .Bool && rv.data.bool_v
+		}
+	}
+
+	return false
+}
+
+/* ======================================================================
+ * SECTION 10: PROPERTY REDUCTION
+ * ====================================================================== */
+
+reduce_property :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	prop_idx := node_right(ast, idx)
+	source_idx := node_left(ast, idx)
+
+	if prop_idx == INVALID_NODE || node_kind(ast, prop_idx) != .Identifier {
+		return Reduced_Value{kind = .None}
+	}
+
+	prop_name := node_name_str(ast, prop_idx)
+
+	if source_idx != INVALID_NODE {
+		source := reduce_node(r, source_idx)
+		if source.kind == .Scope {
+			scope_id, ok := sem_find_scope(r.sem, source.data.scope)
+			if ok {
+				bid, found := sem_resolve_in_scope(r.sem, scope_id, prop_name)
+				if found {
+					return reduce_node(r, r.sem.bindings[bid].value_node)
+				}
+			}
+		}
+	}
+
+	return Reduced_Value{kind = .None}
+}
+
+/* ======================================================================
+ * SECTION 11: UTILITIES
+ * ====================================================================== */
+
+static_to_reduced :: proc(vk: Value_Kind, sv: Static_Value, ast: ^Ast) -> Reduced_Value {
+	rv: Reduced_Value
+	switch vk {
+	case .Integer:
+		rv.kind = .Integer
+		rv.data.integer = sv.integer
+	case .Float:
+		rv.kind = .Float
+		rv.data.float_v = sv.float_v
+	case .Bool:
+		rv.kind = .Bool
+		rv.data.bool_v = sv.bool_v
+	case .String_Literal:
+		rv.kind = .String
+		rv.data.str = sem_span_str(ast, sv.str_span)
+	case .Scope:
+		rv.kind = .Scope
+		rv.data.scope = sv.scope
+	case .Builtin:
+		bvk, bsv := builtin_default_value(sv.builtin)
+		return static_to_reduced(bvk, bsv, ast)
+	case .None, .Ref, .Symbolic:
+		rv.kind = .None
+	}
+	return rv
+}
+
+reduce_error :: proc(r: ^Reducer, message: string, error_type: Analyzer_Error_Type, idx: Node_Index) {
+	pos := node_position(r.ast, idx) if idx != INVALID_NODE else Position{}
+	append(&r.errors, Analyzer_Error {
+		type     = error_type,
+		message  = message,
+		position = pos,
+	})
+}
+
+print_reduced :: proc(rv: Reduced_Value) {
+	switch rv.kind {
+	case .None:    fmt.println("none")
+	case .Integer:
+		if rv.data.integer.negative {
+			fmt.printf("-%d\n", rv.data.integer.content)
+		} else {
+			fmt.printf("%d\n", rv.data.integer.content)
+		}
+	case .Float:   fmt.printf("%f\n", rv.data.float_v.content)
+	case .Bool:    fmt.println(rv.data.bool_v)
+	case .String:  fmt.printf("\"%s\"\n", rv.data.str)
+	case .Scope:   fmt.printf("scope@%d\n", rv.data.scope)
+	}
+}
