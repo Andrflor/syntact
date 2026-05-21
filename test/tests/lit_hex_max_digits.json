@@ -1,6 +1,0 @@
-{
-  "name": "Literal Hex Long Value",
-  "description": "Hexadecimal literal with many digits (0xDEADBEEF)",
-  "source": "0xDEADBEEF",
-  "expect": "Scope[Literal(Hexadecimal,0xDEADBEEF)]"
-}

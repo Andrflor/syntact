@@ -1,0 +1,6 @@
+{
+  "name": "String Hex Escape",
+  "description": "String with hex escape sequence",
+  "source": "\"\\x41\"",
+  "expect": "Scope[Literal(String,\\x41)]"
+}

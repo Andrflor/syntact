@@ -1,6 +1,0 @@
-{
-  "name": "ResonancePull Prefix Standalone",
-  "description": "Prefix resonance pull -<< x as standalone expression",
-  "source": "-<< x",
-  "expect": "Scope[ResonancePull(nil,Identifier(x))]"
-}

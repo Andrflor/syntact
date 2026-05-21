@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Repetition With And Intersection",
+  "description": "idChar*1.. & ~keyword — tests precedence between repetition (*) and intersection (&). Multiply binds tighter than And, so left is Multiply(idChar, Range(1,nil))",
+  "source": "idChar*1.. & ~keyword",
+  "expect": "Scope[Operator(And,Operator(Multiply,Identifier(idChar),Range(Literal(Integer,1),nil)),Operator(Not,nil,Identifier(keyword)))]"
+}

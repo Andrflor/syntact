@@ -1,0 +1,6 @@
+{
+  "name": "Unknown Property In Addition",
+  "description": "a + ??.field — Unknown used as Primary with postfix property access inside addition",
+  "source": "a + ??.field",
+  "expect": "Scope[Operator(Add,Identifier(a),Property(Unknown,Identifier(field)))]"
+}

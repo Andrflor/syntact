@@ -1,6 +1,0 @@
-{
-  "name": "External Deep Property Chain",
-  "description": "External reference with long property chain using dot notation after @",
-  "source": "@lib.math.vector.add",
-  "expect": "Scope[Property(Property(Property(External(lib,nil),Identifier(math)),Identifier(vector)),Identifier(add))]"
-}

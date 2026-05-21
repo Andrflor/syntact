@@ -1,0 +1,6 @@
+{
+  "name": "Pointing Mixed Push Event Chain",
+  "description": "a -> b >- c — pointing then event push on one line, right-associative: Pointing(a, EventPush(b, c))",
+  "source": "a -> b >- c",
+  "expect": "Scope[Pointing(Identifier(a),EventPush(Identifier(b),Identifier(c)))]"
+}

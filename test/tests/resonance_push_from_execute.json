@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push From Execute Result",
+  "description": "obj.compute! >>- Target — resonance push where left is a postfix execute on property chain",
+  "source": "obj.compute! >>- Target",
+  "expect": "Scope[ResonancePush(Execute(Property(Identifier(obj),Identifier(compute)),[]),Identifier(Target))]"
+}

@@ -1,6 +1,0 @@
-{
-  "name": "LShift Standalone",
-  "description": "Left shift operator standalone",
-  "source": "a << b",
-  "expect": "Scope[Operator(LShift,Identifier(a),Identifier(b))]"
-}

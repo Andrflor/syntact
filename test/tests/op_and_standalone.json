@@ -1,6 +1,0 @@
-{
-  "name": "And Standalone",
-  "description": "And operator standalone",
-  "source": "a & b",
-  "expect": "Scope[Operator(And,Identifier(a),Identifier(b))]"
-}

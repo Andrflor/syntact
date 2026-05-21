@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Destructure Anonymous Scope",
+  "description": "x ? { {a, b} -> a } — destructuring an anonymous scope in pattern branch source",
+  "source": "x ? { {a, b} -> a }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Scope[Identifier(a),Identifier(b)],Identifier(a))])]"
+}

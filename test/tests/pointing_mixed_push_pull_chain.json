@@ -1,0 +1,6 @@
+{
+  "name": "Pointing Mixed Push Pull Chain",
+  "description": "a -> b <- c — mixed pointing types on one line, right-associative: Pointing(a, PointingPull(b, c))",
+  "source": "a -> b <- c",
+  "expect": "Scope[Pointing(Identifier(a),PointingPull(Identifier(b),Identifier(c)))]"
+}

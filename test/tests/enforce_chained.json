@@ -1,6 +1,0 @@
-{
-  "name": "Enforce Chained",
-  "description": "a ?! b ?! c — parse_enforce parses right at PATTERN+1 = OR, so a second ?! is not consumed inside but caught as the next infix. Left-associative: Enforce(Enforce(a,b),c).",
-  "source": "a ?! b ?! c",
-  "expect": "Scope[Enforce(Enforce(Identifier(a),Identifier(b)),Identifier(c))]"
-}

@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push Then Pointing Conflict",
+  "description": "a >>- b -> c — tests precedence between resonance push and pointing. Pointing has lower precedence so this should be Pointing(ResonancePush(a,b), c)",
+  "source": "a >>- b -> c",
+  "expect": "Scope[Pointing(ResonancePush(Identifier(a),Identifier(b)),Identifier(c))]"
+}

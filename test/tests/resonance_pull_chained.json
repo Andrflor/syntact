@@ -1,6 +1,6 @@
 {
   "name": "ResonancePull Chained",
-  "description": "Chained resonance pull - right-to-left at ASSIGNMENT precedence",
+  "description": "Chained resonance pull - right-associative",
   "source": "a -<< b -<< c",
   "expect": "Scope[ResonancePull(Identifier(a),ResonancePull(Identifier(b),Identifier(c)))]"
 }

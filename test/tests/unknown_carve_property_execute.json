@@ -1,0 +1,6 @@
+{
+  "name": "Unknown Carve Then Property Then Execute",
+  "description": "??{x -> 1}.y! — Unknown with carve, property access, and execute postfix chain",
+  "source": "??{x -> 1}.y!",
+  "expect": "Scope[Execute(Property(Carve(Unknown,[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(y)),[])]"
+}

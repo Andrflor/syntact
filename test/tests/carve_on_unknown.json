@@ -1,0 +1,6 @@
+{
+  "name": "Carve On Unknown",
+  "description": "??{x} — carve applied to Unknown node",
+  "source": "??{x}",
+  "expect": "Scope[Carve(Unknown,[Identifier(x)])]"
+}

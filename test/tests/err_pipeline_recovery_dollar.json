@@ -1,0 +1,6 @@
+{
+  "name": "Pipeline Recovery After Invalid Symbol",
+  "description": "data.filter!{ x -> 1 }.map!{ $ }.reduce!{ init -> 0 } — $ in middle block, parser should recover for reduce",
+  "source": "data.filter!{ x -> 1 }.map!{ $ }.reduce!{ init -> 0 }",
+  "expect": "Scope[Carve(Execute(Property(Carve(Execute(Property(Identifier(data),Identifier(filter)),[]),[Pointing(Identifier(x),Literal(Integer,1))]),Identifier(map)),[]),[])]"
+}

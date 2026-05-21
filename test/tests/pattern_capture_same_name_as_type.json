@@ -1,0 +1,6 @@
+{
+  "name": "Pattern Capture Same Name As Type",
+  "description": "x ? { u8(u8) -> u8 } — capture variable named same as type, parser must not confuse with Constraint",
+  "source": "x ? { u8(u8) -> u8 }",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Execute(Identifier(u8),[Identifier(u8)]),Identifier(u8))])]"
+}

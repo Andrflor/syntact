@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Push Into Scope Literal",
+  "description": "source >>- { x y } — resonance push target is a scope literal, not just an identifier",
+  "source": "source >>- { x y }",
+  "expect": "Scope[ResonancePush(Identifier(source),Scope[Identifier(x),Identifier(y)])]"
+}

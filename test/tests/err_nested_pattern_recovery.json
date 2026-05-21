@@ -1,0 +1,6 @@
+{
+  "name": "Error Recovery In Nested Pattern",
+  "description": "Error ($) inside nested pattern — parser should recover and parse remaining branches",
+  "source": "x ? {\n  1 -> y ? {\n    2 -> $\n    3 -> 'ok'\n  }\n  -> 'default'\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Pattern(Identifier(y),[Branch(Literal(Integer,3),Literal(String,ok))])),Branch(nil,Literal(String,default))])]"
+}

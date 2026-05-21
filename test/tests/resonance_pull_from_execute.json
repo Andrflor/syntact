@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull To Execute Result",
+  "description": "getBus -<< eventStream! — resonance pull where right is a postfix execute",
+  "source": "getBus -<< eventStream!",
+  "expect": "Scope[ResonancePull(Identifier(getBus),Execute(Identifier(eventStream),[]))]"
+}

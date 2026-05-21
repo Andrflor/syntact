@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Bounded Repetition With Add",
+  "description": "alpha*0..5 + digit*1..2 — bounded repetition combined with Add. Multiply binds tighter than Add",
+  "source": "alpha*0..5 + digit*1..2",
+  "expect": "Scope[Operator(Add,Operator(Multiply,Identifier(alpha),Range(Literal(Integer,0),Literal(Integer,5))),Operator(Multiply,Identifier(digit),Range(Literal(Integer,1),Literal(Integer,2))))]"
+}

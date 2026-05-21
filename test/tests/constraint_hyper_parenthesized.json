@@ -1,0 +1,6 @@
+{
+  "name": "Constraint Hyper Parenthesized",
+  "description": "(((((u8))))):(((((x))))) — recursive paren unwrapping on both sides of constraint",
+  "source": "(((((u8))))):(((((x)))))",
+  "expect": "Scope[Constraint(Identifier(u8),Identifier(x))]"
+}

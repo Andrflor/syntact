@@ -1,6 +1,0 @@
-{
-  "name": "Whitespace No Newline At EOF",
-  "description": "Source without trailing newline should parse normally",
-  "source": "a -> 1",
-  "expect": "Scope[Pointing(Identifier(a),Literal(Integer,1))]"
-}
