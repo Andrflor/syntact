@@ -941,6 +941,20 @@ sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> 
 	if bid, ok := s.scopes[scope_id].names[name]; ok {
 		return bid, true
 	}
+
+	scope := s.scopes[scope_id]
+	first := u32(scope.first_binding)
+	for i in first ..< first + scope.binding_count {
+		entry := &s.bindings[i]
+		if entry.kind == .Inline_Push && entry.value_kind == .Scope {
+			expanded_id, ok := sem_find_scope(s, entry.value.scope)
+			if ok {
+				bid, found := sem_resolve_in_scope(s, expanded_id, name)
+				if found do return bid, true
+			}
+		}
+	}
+
 	return INVALID_BINDING, false
 }
 
@@ -1395,10 +1409,6 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 
 	if .Self_Referential in target_flags {
 		return .Symbolic, {}
-	}
-
-	if .Is_Collapsible in target_flags {
-		return sem_apply_carve_overlay(s, target_scope_id, idx)
 	}
 
 	sv: Static_Value

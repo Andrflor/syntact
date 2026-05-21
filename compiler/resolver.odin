@@ -69,6 +69,7 @@ TimingInfo :: struct {
 	total_time:       time.Duration, // Total compilation time
 	parsing_time:     time.Duration, // Time spent parsing
 	analysis_time:    time.Duration, // Time spent analyzing
+	reduce_time:      time.Duration, // Time spent reducing
 	file_read_time:   time.Duration, // Time spent reading files
 	thread_wait_time: time.Duration, // Time spent waiting for threads
 }
@@ -178,7 +179,7 @@ resolve_entry :: proc() -> bool {
 
 		// Display user time breakdown
 		user_time :=
-			timing_data.file_read_time + timing_data.parsing_time + timing_data.analysis_time
+			timing_data.file_read_time + timing_data.parsing_time + timing_data.analysis_time + timing_data.reduce_time
 		fmt.printf(
 			"User processing time: %v (%.2f%%)\n",
 			user_time,
@@ -199,9 +200,14 @@ resolve_entry :: proc() -> bool {
 
 		if !resolver.options.analyze_only {
 			fmt.printf(
-				"  └─ Analysis:     %v (%.2f%%)\n",
+				"  ├─ Analysis:     %v (%.2f%%)\n",
 				timing_data.analysis_time,
 				f64(timing_data.analysis_time) / f64(timing_data.total_time) * 100,
+			)
+			fmt.printf(
+				"  └─ Reduce:       %v (%.2f%%)\n",
+				timing_data.reduce_time,
+				f64(timing_data.reduce_time) / f64(timing_data.total_time) * 100,
 			)
 		}
 
@@ -430,6 +436,7 @@ process_cache_task :: proc(task: thread.Task) {
 
 			if resolver.options.timing {
 				reduce_duration := time.diff(reduce_start, time.now())
+				sync.atomic_add(&timing_data.reduce_time, reduce_duration)
 				if resolver.options.verbose {
 					fmt.printf("[TIMING] Reduce time for %s: %v\n", cache.path, reduce_duration)
 				}
