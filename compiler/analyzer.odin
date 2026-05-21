@@ -138,6 +138,7 @@ Scope_Info :: struct {
 	first_binding: Binding_Id,
 	binding_count: u32,
 	flags:         Sem_Flags,
+	names:         map[string]Binding_Id,
 }
 
 Sem_Binding_Kind :: enum u8 {
@@ -166,6 +167,7 @@ Binding_Entry :: struct {
 Semantic :: struct {
 	ast:            ^Ast,
 	node_sems:      []Node_Sem,
+	node_to_scope:  []Scope_Id,
 	scopes:         [dynamic]Scope_Info,
 	bindings:       [dynamic]Binding_Entry,
 	scope_stack:    [dynamic]Scope_Id,
@@ -284,6 +286,8 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	s := new(Semantic)
 	s.ast = ast
 	s.node_sems = make([]Node_Sem, len(ast.node_kinds))
+	s.node_to_scope = make([]Scope_Id, len(ast.node_kinds))
+	for &v in s.node_to_scope { v = INVALID_SCOPE }
 	s.scopes = make([dynamic]Scope_Info, 0, 32)
 	s.bindings = make([dynamic]Binding_Entry, 0, 128)
 	s.scope_stack = make([dynamic]Scope_Id, 0, 16)
@@ -354,6 +358,9 @@ sem_push_scope :: proc(s: ^Semantic, node: Node_Index) -> Scope_Id {
 	id := Scope_Id(len(s.scopes))
 	append(&s.scopes, scope)
 	append(&s.scope_stack, id)
+	if node != INVALID_NODE {
+		s.node_to_scope[node] = id
+	}
 	return id
 }
 
@@ -366,6 +373,10 @@ sem_add_binding :: proc(s: ^Semantic, entry: Binding_Entry) -> Binding_Id {
 	append(&s.bindings, entry)
 	scope_id := sem_current_scope(s)
 	s.scopes[scope_id].binding_count += 1
+	if entry.name != EMPTY_SPAN {
+		name := s.ast.source[entry.name.start:entry.name.end]
+		s.scopes[scope_id].names[name] = id
+	}
 	return id
 }
 
@@ -728,11 +739,10 @@ sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> (Value
 	return .None, {}
 }
 
-sem_find_scope :: proc(s: ^Semantic, node: Node_Index) -> (Scope_Id, bool) {
-	for scope, i in s.scopes {
-		if scope.node == node do return Scope_Id(i), true
-	}
-	return INVALID_SCOPE, false
+sem_find_scope :: #force_inline proc(s: ^Semantic, node: Node_Index) -> (Scope_Id, bool) {
+	if node == INVALID_NODE do return INVALID_SCOPE, false
+	id := s.node_to_scope[node]
+	return id, id != INVALID_SCOPE
 }
 
 /* ======================================================================
@@ -903,14 +913,8 @@ sem_resolve_symbol :: proc(s: ^Semantic, name: string) -> (Binding_Id, bool) {
 			if found do return bid, true
 			continue
 		}
-		scope := s.scopes[sid]
-		first := u32(scope.first_binding)
-		for j := int(first + scope.binding_count) - 1; j >= int(first); j -= 1 {
-			entry := &s.bindings[j]
-			entry_name := sem_span_str(s.ast, entry.name)
-			if entry_name == name {
-				return Binding_Id(j), true
-			}
+		if bid, ok := s.scopes[sid].names[name]; ok {
+			return bid, true
 		}
 	}
 	return INVALID_BINDING, false
@@ -929,14 +933,8 @@ sem_resolve_builtin_binding :: proc(s: ^Semantic, name: string) -> (Binding_Id, 
 }
 
 sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> (Binding_Id, bool) {
-	scope := s.scopes[scope_id]
-	first := u32(scope.first_binding)
-	for j := int(first + scope.binding_count) - 1; j >= int(first); j -= 1 {
-		entry := &s.bindings[j]
-		entry_name := sem_span_str(s.ast, entry.name)
-		if entry_name == name {
-			return Binding_Id(j), true
-		}
+	if bid, ok := s.scopes[scope_id].names[name]; ok {
+		return bid, true
 	}
 	return INVALID_BINDING, false
 }
