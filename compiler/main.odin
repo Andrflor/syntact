@@ -32,7 +32,7 @@ Options :: struct {
 	analyze_only:       bool, // Skip code generation
 	verbose:            bool, // Enable verbose logging
 	timing:             bool, // Enable performance timing
-	print_error:        bool,
+	print_errors:       bool,
 	no_cache:           bool,
 	evict_cache:        bool,
 }
@@ -68,8 +68,8 @@ parse_args :: proc() -> Options {
 				options.parse_only = true
 			case "--analyze-only":
 				options.analyze_only = true
-			case "--print-error":
-				options.print_error = true
+			case "--print-errors":
+				options.print_errors = true
 			case "-v", "--verbose":
 				options.verbose = true
 			case "-t", "--timing":
@@ -123,7 +123,7 @@ print_usage :: proc() {
 	fmt.println("  --analyze-only          Only parse and analyze, don't generate code")
 	// fmt.println("  --no-cache              Disable compilation cache")
 	// fmt.println("  --evict-cache           Clear compilation cache before starting")
-	fmt.println("  --print-error           Print parse/analysis errors")
+	fmt.println("  --print-errors          Print parse/analysis errors")
 	fmt.println("  -v, --verbose           Print verbose output")
 	fmt.println("  -t, --timing            Print timing information")
 	fmt.println("  -h, --help              Print this help message")

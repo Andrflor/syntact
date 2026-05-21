@@ -1322,7 +1322,7 @@ parse :: proc(cache: ^Cache, source: string) -> (^Ast, bool) {
 
 	cache.parse_errors = parser.errors
 
-	if resolver.options.print_error {
+	if resolver.options.print_errors {
 		for error in parser.errors {
 			debug_parse_error(error, source, ast)
 		}

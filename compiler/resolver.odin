@@ -157,6 +157,13 @@ resolve_entry :: proc() -> bool {
 		}
 	}
 
+	for _, cache in resolver.files {
+		if len(cache.parse_errors) > 0 || len(cache.analyze_errors) > 0 {
+			success = false
+			break
+		}
+	}
+
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] resolve_entry completed with success: %t\n", success)
 	}
@@ -379,7 +386,7 @@ process_cache_task :: proc(task: thread.Task) {
 		)
 	}
 
-	if !resolver.options.parse_only && parse_ok {
+	if !resolver.options.parse_only {
 		if resolver.options.verbose {
 			fmt.printf("[DEBUG] Starting analysis for file: %s\n", cache.path)
 		}
@@ -394,7 +401,7 @@ process_cache_task :: proc(task: thread.Task) {
 		}
 
 		cache.status = .Analyzing
-		analyze(cache, ast)
+		analyze_ok := analyze(cache, ast)
 		cache.status = .Analyzed
 
 		// End analysis timing
