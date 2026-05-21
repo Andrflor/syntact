@@ -1,0 +1,6 @@
+{
+  "name": "Carve On Execute Result",
+  "description": "a.b.c!{x} — carve attached to postfix execute on property chain",
+  "source": "a.b.c!{x}",
+  "expect": "Scope[Carve(Execute(Property(Property(Identifier(a),Identifier(b)),Identifier(c)),[]),[Identifier(x)])]"
+}

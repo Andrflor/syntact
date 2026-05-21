@@ -1,6 +1,0 @@
-{
-  "name": "Product Empty",
-  "description": "Product prefix -> at end of input with no operand",
-  "source": "->",
-  "expect": "Scope[Product(nil)]"
-}

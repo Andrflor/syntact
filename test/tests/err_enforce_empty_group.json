@@ -1,0 +1,6 @@
+{
+  "name": "Enforce On Empty Parens",
+  "description": "() ?! true — empty grouping produces nil, enforce must not crash on nil left operand",
+  "source": "() ?! true",
+  "expect": "Scope[Enforce(nil,Literal(Bool,true))]"
+}

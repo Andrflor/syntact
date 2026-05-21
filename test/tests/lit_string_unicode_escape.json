@@ -1,0 +1,6 @@
+{
+  "name": "String Unicode Escape",
+  "description": "String with Unicode escape sequence — tests lexer escape handling",
+  "source": "\"\\u0041\"",
+  "expect": "Scope[Literal(String,\\u0041)]"
+}

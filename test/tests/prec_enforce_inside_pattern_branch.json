@@ -1,0 +1,6 @@
+{
+  "name": "Enforce Inside Pattern Branch Product",
+  "description": "x ? 1 -> y ?! true — enforce inside the product of a pattern branch. The ?! should bind to y as left operand, producing Branch(1, Enforce(y, true))",
+  "source": "x ? 1 -> y ?! true",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Enforce(Identifier(y),Literal(Bool,true)))])]"
+}

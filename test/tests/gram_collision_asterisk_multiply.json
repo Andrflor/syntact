@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Asterisk Collision Repeat Then Multiply",
+  "description": "alpha * 1.. * 2 — repeat then arithmetic multiply, tests (alpha * 1..) * 2",
+  "source": "alpha * 1.. * 2",
+  "expect": "Scope[Operator(Multiply,Operator(Multiply,Identifier(alpha),Range(Literal(Integer,1),nil)),Literal(Integer,2))]"
+}

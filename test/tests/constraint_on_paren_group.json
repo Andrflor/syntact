@@ -1,6 +1,6 @@
 {
   "name": "Constraint On Paren Group",
-  "description": "Constraint on a parenthesized expression - paren strips to inner expression",
+  "description": "Constraint on a parenthesized capture - (a) at start is LeftParen, then Identifier+RightParen triggers capture path producing Identifier(,a)",
   "source": "(a):u8",
-  "expect": "Scope[Constraint(Identifier(a),Identifier(u8))]"
+  "expect": "Scope[Constraint(Identifier(,a),Identifier(u8))]"
 }

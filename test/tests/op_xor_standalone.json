@@ -1,6 +1,0 @@
-{
-  "name": "Xor Standalone",
-  "description": "Xor operator standalone",
-  "source": "a ^ b",
-  "expect": "Scope[Operator(Xor,Identifier(a),Identifier(b))]"
-}

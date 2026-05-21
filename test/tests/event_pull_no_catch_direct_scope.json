@@ -1,0 +1,6 @@
+{
+  "name": "Event Pull No Catch Direct Scope",
+  "description": "Log -< { -> 0 } — event pull with no catch identifier, direct scope body",
+  "source": "Log -< { -> 0 }",
+  "expect": "Scope[EventPull(nil,Identifier(Log),Scope[Pointing(nil,Literal(Integer,0))])]"
+}

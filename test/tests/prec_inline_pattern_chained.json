@@ -1,0 +1,6 @@
+{
+  "name": "Inline Pattern Chained Ambiguity",
+  "description": "x ? y ? z — chained inline patterns, tests if second ? is parsed as nested pattern on product",
+  "source": "x ? y ? z",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Pattern(Identifier(y),[Branch(Identifier(z),nil)]),nil)])]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Unclosed Paren Mid Scope Recovery",
+  "description": "a -> { x -> 1\n (unclosed\n b -> 2 } — unclosed paren in middle of scope. Parser should recover and parse b -> 2 after synchronizing past the broken paren group",
+  "source": "a -> { x -> 1\n (unclosed\n b -> 2 }",
+  "expect": "Scope[Pointing(Identifier(a),Scope[Pointing(Identifier(x),Literal(Integer,1)),Pointing(Identifier(b),Literal(Integer,2))])]"
+}

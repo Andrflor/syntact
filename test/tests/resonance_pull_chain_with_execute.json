@@ -1,0 +1,6 @@
+{
+  "name": "Resonance Pull Chain With Execute Postfix",
+  "description": "a -<< b -<< c.d! — right-associative pull chain where innermost has execute postfix",
+  "source": "a -<< b -<< c.d!",
+  "expect": "Scope[ResonancePull(Identifier(a),ResonancePull(Identifier(b),Execute(Property(Identifier(c),Identifier(d)),[])))]"
+}

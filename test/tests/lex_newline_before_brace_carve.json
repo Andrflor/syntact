@@ -1,0 +1,6 @@
+{
+  "name": "Newline Before Brace Is Scope Not Carve",
+  "description": "Foo\\n{x -> 1} — newline breaks LeftBraceCarve, should be two separate nodes: Identifier then Scope",
+  "source": "Foo\n{x -> 1}",
+  "expect": "Scope[Identifier(Foo),Scope[Pointing(Identifier(x),Literal(Integer,1))]]"
+}

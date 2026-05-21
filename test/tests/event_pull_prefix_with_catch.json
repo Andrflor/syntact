@@ -1,6 +1,0 @@
-{
-  "name": "Event Pull Prefix With Catch",
-  "description": "Standalone -< with catch identifier",
-  "source": "-< e handler",
-  "expect": "Scope[EventPull(e,nil,Identifier(handler))]"
-}

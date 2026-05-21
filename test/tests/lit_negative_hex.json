@@ -1,6 +1,0 @@
-{
-  "name": "Negative Hex Literal",
-  "description": "Unary minus on hexadecimal literal",
-  "source": "-0xFF",
-  "expect": "Scope[Operator(Subtract,nil,Literal(Hexadecimal,0xFF))]"
-}

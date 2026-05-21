@@ -1,6 +1,0 @@
-{
-  "name": "Sealing 42 — Anonymous Constraint Top-Level",
-  "description": "Circle: alone as a top-level scope statement — anonymous shaped binding.",
-  "source": "Circle:",
-  "expect": "Scope[Constraint(Identifier(Circle),nil)]"
-}

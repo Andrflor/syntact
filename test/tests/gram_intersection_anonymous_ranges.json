@@ -1,0 +1,6 @@
+{
+  "name": "Grammar Intersection Of Anonymous Repeat Ranges",
+  "description": "..5 * alpha & digit * 2.. — And isolates two multiplicative grammar blocks",
+  "source": "..5 * alpha & digit * 2..",
+  "expect": "Scope[Operator(And,Operator(Multiply,Range(nil,Literal(Integer,5)),Identifier(alpha)),Operator(Multiply,Identifier(digit),Range(Literal(Integer,2),nil)))]"
+}

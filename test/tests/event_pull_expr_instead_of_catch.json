@@ -1,0 +1,6 @@
+{
+  "name": "Event Pull Expression Instead Of Catch",
+  "description": "Log -< e + 1 { } — invalid: expression after catch identifier instead of scope",
+  "source": "Log -< e + 1 { }",
+  "expect": "Scope[EventPull(e,Identifier(Log),Operator(Add,nil,Literal(Integer,1))),Scope[]]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Enforce After Pattern Block",
+  "description": "x ? { 1 -> y } ?! true — enforce applied to entire pattern block after closing brace",
+  "source": "x ? { 1 -> y } ?! true",
+  "expect": "Scope[Enforce(Pattern(Identifier(x),[Branch(Literal(Integer,1),Identifier(y))]),Literal(Bool,true))]"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Char String With Double Quotes Inside",
+  "description": "Single-quoted string containing double quote characters — delimiter conflict test",
+  "source": "'text with \"double\" inside'",
+  "expect": "Scope[Literal(String,text with \"double\" inside)]"
+}

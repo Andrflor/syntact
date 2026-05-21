@@ -1,0 +1,6 @@
+{
+  "name": "Block Comment Before Brace Breaks Carve",
+  "description": "Foo/* comment */{x -> 1} — block comment between identifier and brace should break LeftBraceCarve",
+  "source": "Foo/* comment */{x -> 1}",
+  "expect": "Scope[Identifier(Foo),Scope[Pointing(Identifier(x),Literal(Integer,1))]]"
+}
