@@ -24,6 +24,8 @@ Node_Kind :: enum u8 {
 	EventPull,
 	ResonancePush,
 	ResonancePull,
+	ReactivePush,
+	ReactivePull,
 	ScopeNode,
 	Carve,
 	Product,
@@ -354,6 +356,8 @@ Token_Kind :: enum u8 {
 	EventPull,
 	ResonancePush,
 	ResonancePull,
+	ReactivePush,
+	ReactivePull,
 	Equal,
 	NotEqual,
 	Less,
@@ -571,7 +575,12 @@ lex_single_rbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.
 	return Token{.RightBracket, Span{s, s + 1}, f}}
 lex_single_rparen :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.RightParen, Span{s, s + 1}, f}}
-lex_single_equal :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
+lex_single_equal :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
+	if s + 2 < l.source_len && l.src[s + 1] == '<' && l.src[s + 2] == '<' {
+		l.offset = s + 3
+		return Token{kind = .ReactivePull, span = Span{s, s + 3}, flags = f}
+	}
+	l.offset = s + 1
 	return Token{.Equal, Span{s, s + 1}, f}}
 lex_single_plus :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.Plus, Span{s, s + 1}, f}}
@@ -655,9 +664,16 @@ lex_less :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 lex_greater :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
 	p := PAIR_GREATER[nc]
-	if p.kind == .RShift && start + 2 < l.source_len && l.src[start + 2] == '-' {
-		l.offset = start + 3
-		return Token{kind = .ResonancePush, span = Span{start, start + 3}, flags = flags}
+	if p.kind == .RShift && start + 2 < l.source_len {
+		c3 := l.src[start + 2]
+		if c3 == '-' {
+			l.offset = start + 3
+			return Token{kind = .ResonancePush, span = Span{start, start + 3}, flags = flags}
+		}
+		if c3 == '=' {
+			l.offset = start + 3
+			return Token{kind = .ReactivePush, span = Span{start, start + 3}, flags = flags}
+		}
 	}
 	kind := p.len != 0 ? p.kind : Token_Kind.Greater
 	tlen := u32(p.len != 0 ? p.len : 1)
@@ -961,6 +977,8 @@ init_parse_tables :: proc "contextless" () {
 	prefix_table[.EventPull] = parse_event_pull_prefix
 	prefix_table[.ResonancePush] = parse_resonance_push_prefix
 	prefix_table[.ResonancePull] = parse_resonance_pull_prefix
+	prefix_table[.ReactivePush] = parse_reactive_push_prefix
+	prefix_table[.ReactivePull] = parse_reactive_pull_prefix
 	prefix_table[.Ellipsis] = parse_expansion
 
 	infix_table[.LeftBraceCarve] = parse_carve
@@ -999,6 +1017,8 @@ init_parse_tables :: proc "contextless" () {
 	infix_table[.EventPull] = parse_event_pull
 	infix_table[.ResonancePush] = parse_resonance_push
 	infix_table[.ResonancePull] = parse_resonance_pull
+	infix_table[.ReactivePush] = parse_reactive_push
+	infix_table[.ReactivePull] = parse_reactive_pull
 
 	prec_table[.Integer] = .PRIMARY
 	prec_table[.Float] = .PRIMARY
@@ -1063,6 +1083,8 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.EventPull] = .ASSIGNMENT
 	prec_table[.ResonancePush] = .ASSIGNMENT
 	prec_table[.ResonancePull] = .ASSIGNMENT
+	prec_table[.ReactivePush] = .ASSIGNMENT
+	prec_table[.ReactivePull] = .ASSIGNMENT
 
 	prec_table[.Ellipsis] = .PRIMARY
 }
@@ -2202,6 +2224,86 @@ parse_resonance_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .ResonancePull, data, Span{span_start, span_end})
 }
 
+parse_reactive_push_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   !has_flag(parser.current_token, .Separator_Before) {
+		to = parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
+	}
+
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.node_spans[to].end
+	}
+	return add_node(parser, .ReactivePush, data, Span{span_start, span_end})
+}
+
+parse_reactive_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.node_spans[left].start
+	advance_token(parser)
+
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   !has_flag(parser.current_token, .Separator_Before) {
+		to = parse_expression(parser, .ASSIGNMENT)
+	}
+
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.node_spans[to].end
+	}
+	return add_node(parser, .ReactivePush, data, Span{span_start, span_end})
+}
+
+parse_reactive_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
+	span_start := parser.current_token.span.start
+	advance_token(parser)
+
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   !has_flag(parser.current_token, .Separator_Before) {
+		to = parse_expression(parser, Precedence(int(Precedence.ASSIGNMENT) + 1))
+	}
+
+	data: Node_Data
+	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.node_spans[to].end
+	}
+	return add_node(parser, .ReactivePull, data, Span{span_start, span_end})
+}
+
+parse_reactive_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
+	span_start := parser.node_spans[left].start
+	advance_token(parser)
+
+	to := INVALID_NODE
+	if parser.current_token.kind != .RightBrace &&
+	   parser.current_token.kind != .EOF &&
+	   !has_flag(parser.current_token, .Separator_Before) {
+		to = parse_expression(parser, .ASSIGNMENT)
+	}
+
+	data: Node_Data
+	data.binary = Binary_Data{left = left, right = to}
+	span_end := parser.current_token.span.start
+	if to != INVALID_NODE {
+		span_end = parser.node_spans[to].end
+	}
+	return add_node(parser, .ReactivePull, data, Span{span_start, span_end})
+}
+
 parse_empty_range :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	advance_token(parser)
@@ -2678,6 +2780,8 @@ IS_EXPRESSION_START: [Token_Kind]bool = #partial {
 	.EventPull          = true,
 	.ResonancePush      = true,
 	.ResonancePull      = true,
+	.ReactivePush       = true,
+	.ReactivePull       = true,
 	.DoubleDot          = true,
 	.Question           = true,
 	.Ellipsis           = true,
@@ -2807,6 +2911,30 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		}
 	case .ResonancePull:
 		fmt.printf("%sResonancePull -<< (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n_data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n_data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n_data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n_data.binary.right, indent + 4)
+		}
+	case .ReactivePush:
+		fmt.printf("%sReactivePush >>= (line %d, column %d)\n", indent_str, pos.line, pos.column)
+		if n_data.binary.left != INVALID_NODE {
+			fmt.printf("%s  From:\n", indent_str)
+			print_ast(ast, n_data.binary.left, indent + 4)
+		} else {
+			fmt.printf("%s  From: anonymous\n", indent_str)
+		}
+		if n_data.binary.right != INVALID_NODE {
+			fmt.printf("%s  To:\n", indent_str)
+			print_ast(ast, n_data.binary.right, indent + 4)
+		}
+	case .ReactivePull:
+		fmt.printf("%sReactivePull =<< (line %d, column %d)\n", indent_str, pos.line, pos.column)
 		if n_data.binary.left != INVALID_NODE {
 			fmt.printf("%s  From:\n", indent_str)
 			print_ast(ast, n_data.binary.left, indent + 4)

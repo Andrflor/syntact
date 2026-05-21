@@ -148,6 +148,8 @@ Sem_Binding_Kind :: enum u8 {
 	Event_Pull,
 	Resonance_Push,
 	Resonance_Pull,
+	Reactive_Push,
+	Reactive_Pull,
 	Inline_Push,
 	Product,
 }
@@ -404,6 +406,10 @@ sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
 		sem_register_pointing(s, idx, .Resonance_Push)
 	case .ResonancePull:
 		sem_register_pointing(s, idx, .Resonance_Pull)
+	case .ReactivePush:
+		sem_register_pointing(s, idx, .Reactive_Push)
+	case .ReactivePull:
+		sem_register_pointing(s, idx, .Reactive_Pull)
 	case .Product:
 		sem_register_product(s, idx)
 	case .Constraint:
@@ -820,7 +826,7 @@ sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 	case .Enforce:
 		vk = .Symbolic
 	case .EventPull, .EventPush, .ResonancePush, .ResonancePull,
-	     .Pointing, .PointingPull, .Product:
+	     .ReactivePush, .ReactivePull, .Pointing, .PointingPull, .Product:
 		sem_error(
 			s,
 			"Cannot use a binding definition as a binding value",
@@ -1596,6 +1602,8 @@ sem_binding_kind_str :: proc(kind: Sem_Binding_Kind) -> string {
 	case .Event_Pull:     return "-<"
 	case .Resonance_Push: return ">>-"
 	case .Resonance_Pull: return "-<<"
+	case .Reactive_Push:  return ">>="
+	case .Reactive_Pull:  return "=<<"
 	case .Inline_Push:    return "inline"
 	case .Product:        return "product"
 	}
