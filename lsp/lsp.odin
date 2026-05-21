@@ -577,7 +577,160 @@ publish_diagnostics :: proc(uri: string, diagnostics: []Diagnostic) {
 }
 
 /* ======================================================================
- * SECTION 10: SEMANTIC TOKENS
+ * SECTION 10: GO TO DEFINITION
+ * ====================================================================== */
+
+handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
+	params, ok := msg.params.(json.Object)
+	if !ok {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	uri, uri_ok := get_text_doc_uri(msg.params)
+	if !uri_ok || uri not_in server.documents {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	pos_obj, pos_ok := params["position"].(json.Object)
+	if !pos_ok {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	line := 0
+	char := 0
+	if v, v_ok := pos_obj["line"].(json.Integer); v_ok { line = int(v) }
+	if v, v_ok := pos_obj["character"].(json.Integer); v_ok { char = int(v) }
+
+	doc := &server.documents[uri]
+	ast := doc.ast
+	sem := doc.semantic
+
+	if ast == nil || sem == nil {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	compiler.ensure_line_starts(ast)
+	offset := lsp_pos_to_offset(ast, line, char)
+	if offset < 0 {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	target_node := find_node_at_offset(ast, u32(offset))
+	if target_node == compiler.INVALID_NODE {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	if ast.node_kinds[target_node] != .Identifier {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	name := compiler.node_name_str(ast, target_node)
+	if name == "" {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	def_span := find_binding_definition(ast, sem, target_node, name)
+	if def_span.start == def_span.end {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	def_start := compiler.span_to_position(ast, def_span.start)
+	def_end := compiler.span_to_position(ast, def_span.end)
+
+	start_pos := make(map[string]json.Value)
+	start_pos["line"] = json.Integer(def_start.line - 1)
+	start_pos["character"] = json.Integer(def_start.column - 1)
+
+	end_pos := make(map[string]json.Value)
+	end_pos["line"] = json.Integer(def_end.line - 1)
+	end_pos["character"] = json.Integer(def_end.column - 1)
+
+	range_obj := make(map[string]json.Value)
+	range_obj["start"] = json.Object(start_pos)
+	range_obj["end"] = json.Object(end_pos)
+
+	result := make(map[string]json.Value)
+	result["uri"] = json.String(uri)
+	result["range"] = json.Object(range_obj)
+
+	send_response(msg.id, json.Object(result))
+}
+
+lsp_pos_to_offset :: proc(ast: ^compiler.Ast, line, char: int) -> int {
+	if line < 0 || line >= len(ast.line_starts) do return -1
+	return int(ast.line_starts[line]) + char
+}
+
+find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
+	best := compiler.INVALID_NODE
+	best_size := max(u32)
+
+	for i := 0; i < len(ast.node_kinds); i += 1 {
+		span := ast.node_spans[i]
+		if span.start <= offset && offset < span.end {
+			size := span.end - span.start
+			if size < best_size {
+				best_size = size
+				best = compiler.Node_Index(i)
+			}
+		}
+	}
+	return best
+}
+
+find_binding_definition :: proc(ast: ^compiler.Ast, sem: ^compiler.Semantic, target: compiler.Node_Index, name: string) -> compiler.Span {
+	scope_id := sem.node_to_scope[target]
+	if scope_id == compiler.INVALID_SCOPE {
+		scope_id = find_enclosing_scope(ast, sem, target)
+	}
+
+	for scope_id != compiler.INVALID_SCOPE {
+		scope := &sem.scopes[scope_id]
+		if bid, found := scope.names[name]; found {
+			entry := &sem.bindings[bid]
+			if entry.name.start != entry.name.end {
+				return entry.name
+			}
+			if entry.node != compiler.INVALID_NODE {
+				return ast.node_spans[entry.node]
+			}
+		}
+		scope_id = scope.parent
+	}
+	return compiler.EMPTY_SPAN
+}
+
+find_enclosing_scope :: proc(ast: ^compiler.Ast, sem: ^compiler.Semantic, node: compiler.Node_Index) -> compiler.Scope_Id {
+	offset := ast.node_spans[node].start
+	best_id := compiler.INVALID_SCOPE
+	best_size := max(u32)
+
+	for si := 0; si < len(sem.scopes); si += 1 {
+		scope := &sem.scopes[si]
+		if scope.node == compiler.INVALID_NODE do continue
+		span := ast.node_spans[scope.node]
+		if span.start <= offset && offset < span.end {
+			size := span.end - span.start
+			if size < best_size {
+				best_size = size
+				best_id = compiler.Scope_Id(si)
+			}
+		}
+	}
+	return best_id
+}
+
+/* ======================================================================
+ * SECTION 11: SEMANTIC TOKENS
  * ====================================================================== */
 
 handle_semantic_tokens :: proc(server: ^LSP_Server, msg: LSP_Message) {
