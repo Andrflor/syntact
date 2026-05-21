@@ -101,10 +101,14 @@ IntegerData :: struct {
 
 IntegerKind :: enum {
 	none,
-	u8, i8,
-	u16, i16,
-	u32, i32,
-	u64, i64,
+	u8,
+	i8,
+	u16,
+	i16,
+	u32,
+	i32,
+	u64,
+	i64,
 }
 
 FloatKind :: enum {
@@ -213,7 +217,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	root := new(ScopeData)
 	root.content = make([dynamic]^Binding, 0)
 
-	analyzer := Analyzer{
+	analyzer := Analyzer {
 		ast      = ast,
 		errors   = make([dynamic]Analyzer_Error, 0),
 		warnings = make([dynamic]Analyzer_Error, 0),
@@ -236,7 +240,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	cache.analyze_errors = analyzer.errors
 	cache.analyze_warnings = analyzer.warnings
 
-	if resolver.options.print_error {
+	if resolver.options.print_errors {
 		debug_analyzer(&analyzer, true)
 	}
 	return len(analyzer.errors) == 0
@@ -353,7 +357,11 @@ analyze_node :: proc(idx: Node_Index) {
 		from := node_event_pull_from(ast, idx)
 		to := node_event_pull_to(ast, idx)
 		if from == INVALID_NODE {
-			analyzer_error("Event pulling must have a Event descriptor left", .Invalid_Event_Pull, pos)
+			analyzer_error(
+				"Event pulling must have a Event descriptor left",
+				.Invalid_Event_Pull,
+				pos,
+			)
 		}
 		binding.symbolic_value = empty
 		binding.static_value = empty
@@ -602,15 +610,26 @@ typecheck_int :: #force_inline proc(val: ^IntegerData, constr: ^IntegerData) -> 
 	#partial switch val.kind {
 	case .none:
 		switch constr.kind {
-		case .none:   return true
-		case .u8:     if val.negative == false && val.content < 256 { val.kind = .u8; return true }; return false
-		case .i8:     if val.content < 256 { val.kind = .i8; return true }; return false
-		case .u16:    if val.negative == false && val.content < 65536 { val.kind = .u16; return true }; return false
-		case .i16:    if val.content < 65536 { val.kind = .i16; return true }; return false
-		case .u32:    if val.negative == false && val.content < 4294967296 { val.kind = .u32; return true }; return false
-		case .i32:    if val.content < 4294967296 { val.kind = .i32; return true }; return false
-		case .u64:    if val.negative == false { val.kind = .u64; return true }; return false
-		case .i64:    val.kind = .i64; return true
+		case .none:
+			return true
+		case .u8:
+			if val.negative == false && val.content < 256 {val.kind = .u8;return true};return false
+		case .i8:
+			if val.content < 256 {val.kind = .i8;return true};return false
+		case .u16:
+			if val.negative == false &&
+			   val.content < 65536 {val.kind = .u16;return true};return false
+		case .i16:
+			if val.content < 65536 {val.kind = .i16;return true};return false
+		case .u32:
+			if val.negative == false &&
+			   val.content < 4294967296 {val.kind = .u32;return true};return false
+		case .i32:
+			if val.content < 4294967296 {val.kind = .i32;return true};return false
+		case .u64:
+			if val.negative == false {val.kind = .u64;return true};return false
+		case .i64:
+			val.kind = .i64;return true
 		}
 	}
 	return constr.kind == .none || constr.kind == val.kind
@@ -719,22 +738,38 @@ analyze_name :: proc(idx: Node_Index, binding: ^Binding) {
 				if source_idx != INVALID_NODE && node_kind(ast, source_idx) == .Identifier {
 					binding.name = node_name_str(ast, source_idx)
 				} else {
-					analyzer_error("The : constraint indicator must be followed by an identifier or nothing", .Invalid_Constraint_Name, node_position(ast, name_idx))
+					analyzer_error(
+						"The : constraint indicator must be followed by an identifier or nothing",
+						.Invalid_Constraint_Name,
+						node_position(ast, name_idx),
+					)
 				}
 			case .ScopeNode:
 			case:
-				analyzer_error("The : constraint indicator must be followed by an identifier or nothing", .Invalid_Constraint_Name, node_position(ast, name_idx))
+				analyzer_error(
+					"The : constraint indicator must be followed by an identifier or nothing",
+					.Invalid_Constraint_Name,
+					node_position(ast, name_idx),
+				)
 			}
 		}
 		if constraint_idx == INVALID_NODE {
-			analyzer_error("Constraint node without a specific constraint is not allowed", .Invalid_Constraint, pos)
+			analyzer_error(
+				"Constraint node without a specific constraint is not allowed",
+				.Invalid_Constraint,
+				pos,
+			)
 			return
 		}
 		analyze_constraint(constraint_idx, binding)
 	case .Identifier:
 		binding.name = node_name_str(ast, idx)
 	case:
-		analyzer_error("Cannot use anything other than constraint or identifier as binding name", .Invalid_Binding_Name, pos)
+		analyzer_error(
+			"Cannot use anything other than constraint or identifier as binding name",
+			.Invalid_Binding_Name,
+			pos,
+		)
 	}
 }
 
@@ -742,14 +777,22 @@ analyze_scope_recursive_properties :: proc(scope: ^ScopeData) {
 	for binding in scope.content {
 		if binding.kind == .product {
 			if binding.constraint == scope {
-				analyzer_error("Infinite recursion you need a base case", .Infinite_Recursion, Position{})
+				analyzer_error(
+					"Infinite recursion you need a base case",
+					.Infinite_Recursion,
+					Position{},
+				)
 				scope.content = make([dynamic]^Binding, 0)
 				return
 			}
 			if s, ok := binding.static_value.(^ScopeData); ok {
 				for bind in s.content {
 					if bind.constraint == scope {
-						analyzer_error("Infinite recursion you need a base case", .Infinite_Recursion, Position{})
+						analyzer_error(
+							"Infinite recursion you need a base case",
+							.Infinite_Recursion,
+							Position{},
+						)
 						scope.content = make([dynamic]^Binding, 0)
 						return
 					}
@@ -855,7 +898,11 @@ name_carve :: #force_inline proc(target: ^ScopeData, carve: ^Binding) -> BindSwa
 				target.content[i].static_value = carve.static_value
 				return BindSwap{old = carven, new = target.content[i]}
 			} else {
-				analyzer_error(fmt.tprintf("Binding kind mismatch for %s", carve.name), .Invalid_Carve, Position{})
+				analyzer_error(
+					fmt.tprintf("Binding kind mismatch for %s", carve.name),
+					.Invalid_Carve,
+					Position{},
+				)
 			}
 			return BindSwap{}
 		}
@@ -866,7 +913,10 @@ name_carve :: #force_inline proc(target: ^ScopeData, carve: ^Binding) -> BindSwa
 
 reeval_carven_scope :: #force_inline proc(target: ^ScopeData, swapped: ^[dynamic]BindSwap) {
 	for binding, i in target.content {
-		symbolic_value, static_value := replace_references_and_collapse(binding.symbolic_value, swapped)
+		symbolic_value, static_value := replace_references_and_collapse(
+			binding.symbolic_value,
+			swapped,
+		)
 		if static_value != binding.static_value {
 			target.content[i] = copy_binding(binding)
 			target.content[i].symbolic_value = symbolic_value
@@ -931,7 +981,15 @@ apply_carve :: proc(target: ValueData, carves: [dynamic]^Binding) -> ValueData {
 			}
 		}
 		analyzer_error("Carve for boolean should just be string", .Invalid_Carve, Position{})
-	case ^PropertyData, ^RangeData, ^AExecuteData, ^CarveAData, ^RefData, ^BinaryOpData, ^ReactiveData, ^EffectData, ^UnaryOpData:
+	case ^PropertyData,
+	     ^RangeData,
+	     ^AExecuteData,
+	     ^CarveAData,
+	     ^RefData,
+	     ^BinaryOpData,
+	     ^ReactiveData,
+	     ^EffectData,
+	     ^UnaryOpData:
 		analyzer_error("Those dynamic elements should ne be used here", .Invalid_Carve, Position{})
 	case Empty:
 		analyzer_error("Cannot carve someting that resolve to empty", .Invalid_Carve, Position{})
@@ -946,13 +1004,28 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 	pos := node_position(ast, idx)
 
 	#partial switch kind {
-	case .EventPull, .EventPush, .ResonancePush, .ResonancePull, .Pointing, .PointingPull, .Product, .Expand:
-		analyzer_error("Cannot use a binding definition has a binding value", .Invalid_Binding_Value, pos)
+	case .EventPull,
+	     .EventPush,
+	     .ResonancePush,
+	     .ResonancePull,
+	     .Pointing,
+	     .PointingPull,
+	     .Product,
+	     .Expand:
+		analyzer_error(
+			"Cannot use a binding definition has a binding value",
+			.Invalid_Binding_Value,
+			pos,
+		)
 		return empty, empty
 	case .Unknown:
 	case .Enforce:
 	case .Branch:
-		analyzer_error("We should not find a branch outside a pattern node", .Invalid_Binding_Value, pos)
+		analyzer_error(
+			"We should not find a branch outside a pattern node",
+			.Invalid_Binding_Value,
+			pos,
+		)
 		return empty, empty
 	case .Constraint:
 		constraint_idx := node_left(ast, idx)
@@ -972,7 +1045,11 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 			if node_kind(ast, name_idx) == .ScopeNode {
 				// TODO(andrflor): apply carve here?
 			} else {
-				analyzer_error("Value for constraint data should be carve", .Invalid_Constraint, pos)
+				analyzer_error(
+					"Value for constraint data should be carve",
+					.Invalid_Constraint,
+					pos,
+				)
 			}
 			return value, value
 		}
@@ -1000,14 +1077,22 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 			}
 			return carve, apply_carve(copy_scope(scope), carve.carves)
 		} else {
-			analyzer_error("Trying to carve an element that does no resolve to a scope", .Invalid_Carve, pos)
+			analyzer_error(
+				"Trying to carve an element that does no resolve to a scope",
+				.Invalid_Carve,
+				pos,
+			)
 			return target, static_target
 		}
 	case .Identifier:
 		name := node_name_str(ast, idx)
 		symbol := resolve_symbol(name)
 		if symbol == nil {
-			analyzer_error(fmt.tprintf("Undefined identifier named %s found", name), .Undefined_Identifier, pos)
+			analyzer_error(
+				fmt.tprintf("Undefined identifier named %s found", name),
+				.Undefined_Identifier,
+				pos,
+			)
 			return empty, empty
 		}
 		ref := new(RefData)
@@ -1036,7 +1121,11 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 					}
 				}
 			}
-			analyzer_error(fmt.tprintf("There is no property %s", prop_name), .Invalid_Property_Access, pos)
+			analyzer_error(
+				fmt.tprintf("There is no property %s", prop_name),
+				.Invalid_Property_Access,
+				pos,
+			)
 			return prop, empty
 		}
 		analyzer_error("Invalid property access without identifier", .Invalid_Property_Access, pos)
@@ -1125,7 +1214,9 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 		case .Hexadecimal:
 			value := new(IntegerData)
 			hex_text := text
-			if len(hex_text) > 2 && hex_text[0] == '0' && (hex_text[1] == 'x' || hex_text[1] == 'X') {
+			if len(hex_text) > 2 &&
+			   hex_text[0] == '0' &&
+			   (hex_text[1] == 'x' || hex_text[1] == 'X') {
 				hex_text = hex_text[2:]
 			}
 			content, ok := strconv.parse_int(hex_text, 16)
@@ -1135,7 +1226,9 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 		case .Binary:
 			value := new(IntegerData)
 			bin_text := text
-			if len(bin_text) > 2 && bin_text[0] == '0' && (bin_text[1] == 'b' || bin_text[1] == 'B') {
+			if len(bin_text) > 2 &&
+			   bin_text[0] == '0' &&
+			   (bin_text[1] == 'b' || bin_text[1] == 'B') {
 				bin_text = bin_text[2:]
 			}
 			content, ok := strconv.parse_int(bin_text, 2)
@@ -1161,7 +1254,11 @@ analyze_value :: proc(idx: Node_Index) -> (ValueData, ValueData) {
 		static_range.start = static_start
 		static_range.end = static_end
 		if !start_ok || !end_ok {
-			analyzer_error("Trying to create a range with a non integer value", .Invalid_Range, pos)
+			analyzer_error(
+				"Trying to create a range with a non integer value",
+				.Invalid_Range,
+				pos,
+			)
 		}
 		return range_data, static_range
 	}
@@ -1182,15 +1279,25 @@ string_to_u64 :: proc(s: string) -> u64 {
 
 compare_func :: #force_inline proc(a, b: $T, kind: Operator_Kind) -> bool {
 	#partial switch kind {
-	case .Less:         return a < b
-	case .Greater:      return a > b
-	case .LessEqual:    return a <= b
-	case .GreaterEqual: return a >= b
+	case .Less:
+		return a < b
+	case .Greater:
+		return a > b
+	case .LessEqual:
+		return a <= b
+	case .GreaterEqual:
+		return a >= b
 	}
 	return false
 }
 
-analyze_unary_operator :: #force_inline proc(op_idx: Node_Index, child_idx: Node_Index) -> (ValueData, ValueData) {
+analyze_unary_operator :: #force_inline proc(
+	op_idx: Node_Index,
+	child_idx: Node_Index,
+) -> (
+	ValueData,
+	ValueData,
+) {
 	ast := get_ast()
 	op_kind := node_operator_kind(ast, op_idx)
 	pos := node_position(ast, op_idx)
@@ -1232,7 +1339,21 @@ analyze_unary_operator :: #force_inline proc(op_idx: Node_Index, child_idx: Node
 			static_bool.content = !v.content
 			return op, static_bool
 		}
-	case .Add, .Multiply, .Divide, .Mod, .Equal, .Less, .Greater, .NotEqual, .LessEqual, .GreaterEqual, .And, .Or, .Xor, .RShift, .LShift:
+	case .Add,
+	     .Multiply,
+	     .Divide,
+	     .Mod,
+	     .Equal,
+	     .Less,
+	     .Greater,
+	     .NotEqual,
+	     .LessEqual,
+	     .GreaterEqual,
+	     .And,
+	     .Or,
+	     .Xor,
+	     .RShift,
+	     .LShift:
 		analyzer_error("Operator should not be used as unary", .Invalid_operator, pos)
 		return value, static_value
 	}
@@ -1260,14 +1381,23 @@ analyze_math_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, Valu
 			if l.kind == r.kind || l.kind == .none || r.kind == .none {
 				static_int := new(IntegerData)
 				#partial switch op_kind {
-				case .Add:      static_int.content = l.content + r.content; return op, static_int
-				case .Divide:   static_int.content = l.content / r.content; return op, static_int
-				case .Subtract: static_int.content = l.content - r.content; return op, static_int
-				case .Mod:      static_int.content = l.content % r.content; return op, static_int
-				case .Multiply: static_int.content = l.content * r.content; return op, static_int
+				case .Add:
+					static_int.content = l.content + r.content;return op, static_int
+				case .Divide:
+					static_int.content = l.content / r.content;return op, static_int
+				case .Subtract:
+					static_int.content = l.content - r.content;return op, static_int
+				case .Mod:
+					static_int.content = l.content % r.content;return op, static_int
+				case .Multiply:
+					static_int.content = l.content * r.content;return op, static_int
 				}
 			} else {
-				analyzer_error(fmt.tprintf("Icompatible integer types for %s", op_kind), .Invalid_operator, pos)
+				analyzer_error(
+					fmt.tprintf("Icompatible integer types for %s", op_kind),
+					.Invalid_operator,
+					pos,
+				)
 				return empty, empty
 			}
 		}
@@ -1277,16 +1407,28 @@ analyze_math_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, Valu
 			if l.kind == r.kind || l.kind == .none || r.kind == .none {
 				static_float := new(FloatData)
 				#partial switch op_kind {
-				case .Add:      static_float.content = l.content + r.content; return op, static_float
-				case .Divide:   static_float.content = l.content / r.content; return op, static_float
-				case .Subtract: static_float.content = l.content - r.content; return op, static_float
+				case .Add:
+					static_float.content = l.content + r.content;return op, static_float
+				case .Divide:
+					static_float.content = l.content / r.content;return op, static_float
+				case .Subtract:
+					static_float.content = l.content - r.content;return op, static_float
 				case .Mod:
-					analyzer_error(fmt.tprintf("Mod is only allowed with integers", op_kind), .Invalid_operator, pos)
+					analyzer_error(
+						fmt.tprintf("Mod is only allowed with integers", op_kind),
+						.Invalid_operator,
+						pos,
+					)
 					return empty, empty
-				case .Multiply: static_float.content = l.content * r.content; return op, static_float
+				case .Multiply:
+					static_float.content = l.content * r.content;return op, static_float
 				}
 			} else {
-				analyzer_error(fmt.tprintf("Icompatible float types for %s", op_kind), .Invalid_operator, pos)
+				analyzer_error(
+					fmt.tprintf("Icompatible float types for %s", op_kind),
+					.Invalid_operator,
+					pos,
+				)
 				return empty, empty
 			}
 		}
@@ -1316,12 +1458,19 @@ analyze_bitwise_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, V
 			if l.kind == r.kind || l.kind == .none || r.kind == .none {
 				static_int := new(IntegerData)
 				#partial switch op_kind {
-				case .Or:  static_int.content = l.content | r.content; return op, static_int
-				case .Xor: static_int.content = l.content ~ r.content; return op, static_int
-				case .And: static_int.content = l.content & r.content; return op, static_int
+				case .Or:
+					static_int.content = l.content | r.content;return op, static_int
+				case .Xor:
+					static_int.content = l.content ~ r.content;return op, static_int
+				case .And:
+					static_int.content = l.content & r.content;return op, static_int
 				}
 			} else {
-				analyzer_error(fmt.tprintf("Icompatible integer types for %s", op_kind), .Invalid_operator, pos)
+				analyzer_error(
+					fmt.tprintf("Icompatible integer types for %s", op_kind),
+					.Invalid_operator,
+					pos,
+				)
 				return empty, empty
 			}
 		}
@@ -1330,9 +1479,12 @@ analyze_bitwise_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, V
 		case ^BoolData:
 			static_bool := new(BoolData)
 			#partial switch op_kind {
-			case .Or:  static_bool.content = r.content | l.content; return op, static_bool
-			case .Xor: static_bool.content = r.content ~ l.content; return op, static_bool
-			case .And: static_bool.content = r.content & l.content; return op, static_bool
+			case .Or:
+				static_bool.content = r.content | l.content;return op, static_bool
+			case .Xor:
+				static_bool.content = r.content ~ l.content;return op, static_bool
+			case .And:
+				static_bool.content = r.content & l.content;return op, static_bool
 			}
 		}
 	}
@@ -1402,7 +1554,9 @@ analyze_equal_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, Val
 				for i in 0 ..< llen {
 					rr := r.content[i]
 					ll := l.content[i]
-					if rr.kind != ll.kind || rr.name != ll.name || rr.static_value != ll.static_value {
+					if rr.kind != ll.kind ||
+					   rr.name != ll.name ||
+					   rr.static_value != ll.static_value {
 						boolean.content = false
 						break
 					}
@@ -1467,15 +1621,27 @@ analyze_int_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, Value
 				integer.content = l.content >> r.content
 				return op, integer
 			case:
-				analyzer_error(fmt.tprintf("Use of invalid %s as a shifting operator", op_kind), .Invalid_operator, pos)
+				analyzer_error(
+					fmt.tprintf("Use of invalid %s as a shifting operator", op_kind),
+					.Invalid_operator,
+					pos,
+				)
 				return empty, empty
 			}
 		case:
-			analyzer_error(fmt.tprintf("Cannot %s with a %s value", op_kind, debug_value_type(static_left)), .Invalid_operator, pos)
+			analyzer_error(
+				fmt.tprintf("Cannot %s with a %s value", op_kind, debug_value_type(static_left)),
+				.Invalid_operator,
+				pos,
+			)
 			return empty, empty
 		}
 	case:
-		analyzer_error(fmt.tprintf("Cannot %s with a %s increment", op_kind, debug_value_type(static_right)), .Invalid_operator, pos)
+		analyzer_error(
+			fmt.tprintf("Cannot %s with a %s increment", op_kind, debug_value_type(static_right)),
+			.Invalid_operator,
+			pos,
+		)
 		return empty, empty
 	}
 	return empty, empty
@@ -1538,11 +1704,22 @@ analyze_ordering_operator :: #force_inline proc(idx: Node_Index) -> (ValueData, 
 			return op, boolData
 		case ^StringData:
 			boolData := new(BoolData)
-			boolData.content = compare_func(string_to_u64(l.content), string_to_u64(r.content), op_kind)
+			boolData.content = compare_func(
+				string_to_u64(l.content),
+				string_to_u64(r.content),
+				op_kind,
+			)
 			return op, boolData
 		}
 	}
-	analyzer_error(fmt.tprintf("Cannot use %s operator on anything else than string integer or float", op_kind), .Invalid_operator, pos)
+	analyzer_error(
+		fmt.tprintf(
+			"Cannot use %s operator on anything else than string integer or float",
+			op_kind,
+		),
+		.Invalid_operator,
+		pos,
+	)
 	return empty, empty
 }
 
@@ -1572,7 +1749,11 @@ resolve_named_property_symbol :: #force_inline proc(name: string, binding: ^Bind
 
 analyzer_error :: proc(message: string, error_type: Analyzer_Error_Type, position: Position) {
 	analyzer := get_analyzer()
-	error := Analyzer_Error{type = error_type, message = message, position = position}
+	error := Analyzer_Error {
+		type     = error_type,
+		message  = message,
+		position = position,
+	}
 	append(&analyzer.errors, error)
 }
 
@@ -1607,7 +1788,14 @@ debug_analyzer :: proc(analyzer: ^Analyzer, verbose: bool = false) {
 }
 
 debug_error :: proc(error: Analyzer_Error, index: int) {
-	fmt.eprintf("  [%d] %v at line %d, col %d: %s\n", index, error.type, error.position.line, error.position.column, error.message)
+	fmt.eprintf(
+		"  [%d] %v at line %d, col %d: %s\n",
+		index,
+		error.type,
+		error.position.line,
+		error.position.column,
+		error.message,
+	)
 }
 
 debug_scope :: proc(scope: ^ScopeData, level: int, verbose: bool = false) {
@@ -1668,25 +1856,32 @@ debug_binding :: proc(binding: ^Binding, indent_level: int, index: int) {
 
 debug_value_inline :: proc(value: ValueData) -> string {
 	switch v in value {
-	case ^ScopeData:    return ""
-	case ^CarveAData:    return ""
-	case ^StringData:   return fmt.tprintf("String(\"%s\")", v.content)
+	case ^ScopeData:
+		return ""
+	case ^CarveAData:
+		return ""
+	case ^StringData:
+		return fmt.tprintf("String(\"%s\")", v.content)
 	case ^IntegerData:
 		if v.negative {
 			return fmt.tprintf("%s(-%d)", debug_value_type(value), v.content)
 		} else {
 			return fmt.tprintf("%s(%d)", debug_value_type(value), v.content)
 		}
-	case ^FloatData:    return fmt.tprintf("%s(%f, %s)", debug_value_type(value), v.content, v.kind)
-	case ^BoolData:     return fmt.tprintf("bool(%t)", v.content)
+	case ^FloatData:
+		return fmt.tprintf("%s(%f, %s)", debug_value_type(value), v.content, v.kind)
+	case ^BoolData:
+		return fmt.tprintf("bool(%t)", v.content)
 	case ^PropertyData:
 		source_inline := debug_value_inline(v.source)
 		if source_inline == "" {
 			return fmt.tprintf("Property(<scope>.%s)", v.prop)
 		}
 		return fmt.tprintf("Property(%s.%s)", source_inline, v.prop)
-	case ^ReactiveData: return fmt.tprintf("Reactive(%s)", debug_value_inline(v.initial))
-	case ^EffectData:   return fmt.tprintf("Reactive(%s)", debug_value_inline(v.placeholder))
+	case ^ReactiveData:
+		return fmt.tprintf("Reactive(%s)", debug_value_inline(v.initial))
+	case ^EffectData:
+		return fmt.tprintf("Reactive(%s)", debug_value_inline(v.placeholder))
 	case ^RangeData:
 		start_inline := debug_value_inline(v.start)
 		end_inline := debug_value_inline(v.end)
@@ -1716,56 +1911,94 @@ debug_value_inline :: proc(value: ValueData) -> string {
 
 debug_value_type :: proc(value: ValueData) -> string {
 	switch v in value {
-	case ^ScopeData:    return fmt.tprintf("Scope(%d bindings)", len(v.content))
-	case ^CarveAData:    return "Carve"
-	case ^ReactiveData: return "Rx"
-	case ^EffectData:   return "Eff"
-	case ^StringData:   return "String"
+	case ^ScopeData:
+		return fmt.tprintf("Scope(%d bindings)", len(v.content))
+	case ^CarveAData:
+		return "Carve"
+	case ^ReactiveData:
+		return "Rx"
+	case ^EffectData:
+		return "Eff"
+	case ^StringData:
+		return "String"
 	case ^IntegerData:
 		#partial switch v.kind {
-		case .u8:  return "u8"
-		case .i8:  return "i8"
-		case .u16: return "u16"
-		case .i16: return "i16"
-		case .u32: return "u32"
-		case .i32: return "i32"
-		case .u64: return "u64"
-		case .i64: return "i64"
+		case .u8:
+			return "u8"
+		case .i8:
+			return "i8"
+		case .u16:
+			return "u16"
+		case .i16:
+			return "i16"
+		case .u32:
+			return "u32"
+		case .i32:
+			return "i32"
+		case .u64:
+			return "u64"
+		case .i64:
+			return "i64"
 		}
 		return "Integer"
-	case ^PropertyData: return "Property"
-	case ^RangeData:    return "Range"
-	case ^AExecuteData:  return "Execute"
-	case ^RefData:      return "Ref"
-	case ^BinaryOpData: return "BinaryOp"
-	case ^UnaryOpData:  return "UnaryOp"
+	case ^PropertyData:
+		return "Property"
+	case ^RangeData:
+		return "Range"
+	case ^AExecuteData:
+		return "Execute"
+	case ^RefData:
+		return "Ref"
+	case ^BinaryOpData:
+		return "BinaryOp"
+	case ^UnaryOpData:
+		return "UnaryOp"
 	case ^FloatData:
 		#partial switch v.kind {
-		case .f32: return "f32"
-		case .f64: return "f64"
+		case .f32:
+			return "f32"
+		case .f64:
+			return "f64"
 		}
 		return "Float"
-	case ^BoolData:     return "bool"
-	case Empty:         return "none"
+	case ^BoolData:
+		return "bool"
+	case Empty:
+		return "none"
 	}
 	return "Unknown"
 }
 
 binding_kind_to_string :: proc(kind: Binding_Kind) -> string {
 	switch kind {
-	case .pointing_push:  return "PointingPush"
-	case .pointing_pull:  return "PointingPull"
-	case .event_push:     return "EventPush"
-	case .event_pull:     return "EventPull"
-	case .resonance_push: return "ResonancePush"
-	case .resonance_pull: return "ResonancePull"
-	case .inline_push:    return "Inline"
-	case .product:        return "Product"
-	case:                 return "Unknown"
+	case .pointing_push:
+		return "PointingPush"
+	case .pointing_pull:
+		return "PointingPull"
+	case .event_push:
+		return "EventPush"
+	case .event_pull:
+		return "EventPull"
+	case .resonance_push:
+		return "ResonancePush"
+	case .resonance_pull:
+		return "ResonancePull"
+	case .inline_push:
+		return "Inline"
+	case .product:
+		return "Product"
+	case:
+		return "Unknown"
 	}
 }
 
-replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]BindSwap) -> (ValueData, ValueData) {
+replace_references_and_collapse :: proc(
+	symbolic: ValueData,
+	swapped: ^[dynamic]BindSwap,
+) -> (
+	ValueData,
+	ValueData,
+) {
 	switch s in symbolic {
 	case ^ScopeData:
 		needs_update := false
@@ -1779,7 +2012,10 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 		new_scope := copy_scope(s)
 		for binding in new_scope.content {
 			if binding != nil {
-				binding.symbolic_value, binding.static_value = replace_references_and_collapse(binding.symbolic_value, swapped)
+				binding.symbolic_value, binding.static_value = replace_references_and_collapse(
+					binding.symbolic_value,
+					swapped,
+				)
 			}
 		}
 		return new_scope, new_scope
@@ -1852,7 +2088,10 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 			if contains_references(carve.symbolic_value, swapped) {
 				carves_changed = true
 				new_carve := copy_binding(carve)
-				new_carve.symbolic_value, new_carve.static_value = replace_references_and_collapse(carve.symbolic_value, swapped)
+				new_carve.symbolic_value, new_carve.static_value = replace_references_and_collapse(
+					carve.symbolic_value,
+					swapped,
+				)
 				new_carves[i] = new_carve
 			} else {
 				new_carves[i] = carve
@@ -1913,7 +2152,10 @@ replace_references_and_collapse :: proc(symbolic: ValueData, swapped: ^[dynamic]
 		return new_reactive, static_initial
 
 	case ^EffectData:
-		new_placeholder, static_placeholder := replace_references_and_collapse(s.placeholder, swapped)
+		new_placeholder, static_placeholder := replace_references_and_collapse(
+			s.placeholder,
+			swapped,
+		)
 		if new_placeholder == s.placeholder do return s, static_placeholder
 		new_effect := new(EffectData)
 		new_effect.placeholder = new_placeholder
@@ -1929,19 +2171,26 @@ contains_references :: proc(value: ValueData, swapped: ^[dynamic]BindSwap) -> bo
 			if swap.old == v.refered do return true
 		}
 		return false
-	case ^PropertyData:  return contains_references(v.source, swapped)
-	case ^BinaryOpData:  return contains_references(v.left, swapped) || contains_references(v.right, swapped)
-	case ^UnaryOpData:   return contains_references(v.value, swapped)
+	case ^PropertyData:
+		return contains_references(v.source, swapped)
+	case ^BinaryOpData:
+		return contains_references(v.left, swapped) || contains_references(v.right, swapped)
+	case ^UnaryOpData:
+		return contains_references(v.value, swapped)
 	case ^CarveAData:
 		if contains_references(v.target, swapped) do return true
 		for carve in v.carves {
 			if contains_references(carve.symbolic_value, swapped) do return true
 		}
 		return false
-	case ^AExecuteData:  return contains_references(v.target, swapped)
-	case ^RangeData:     return contains_references(v.start, swapped) || contains_references(v.end, swapped)
-	case ^ReactiveData:  return contains_references(v.initial, swapped)
-	case ^EffectData:    return contains_references(v.placeholder, swapped)
+	case ^AExecuteData:
+		return contains_references(v.target, swapped)
+	case ^RangeData:
+		return contains_references(v.start, swapped) || contains_references(v.end, swapped)
+	case ^ReactiveData:
+		return contains_references(v.initial, swapped)
+	case ^EffectData:
+		return contains_references(v.placeholder, swapped)
 	case ^ScopeData:
 		for binding in v.content {
 			if binding != nil && contains_references(binding.symbolic_value, swapped) do return true
@@ -2008,11 +2257,16 @@ evaluate_math_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -
 			result.kind = l.kind if l.kind != .none else r.kind
 			result.negative = l.negative || r.negative
 			#partial switch op {
-			case .Add:      result.content = l.content + r.content
-			case .Subtract: result.content = l.content - r.content
-			case .Multiply: result.content = l.content * r.content
-			case .Divide:   if r.content != 0 do result.content = l.content / r.content
-			case .Mod:      if r.content != 0 do result.content = l.content % r.content
+			case .Add:
+				result.content = l.content + r.content
+			case .Subtract:
+				result.content = l.content - r.content
+			case .Multiply:
+				result.content = l.content * r.content
+			case .Divide:
+				if r.content != 0 do result.content = l.content / r.content
+			case .Mod:
+				if r.content != 0 do result.content = l.content % r.content
 			}
 			return result
 		}
@@ -2021,11 +2275,16 @@ evaluate_math_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) -
 			result := new(FloatData)
 			result.kind = l.kind if l.kind != .none else r.kind
 			#partial switch op {
-			case .Add:      result.content = l.content + r.content
-			case .Subtract: result.content = l.content - r.content
-			case .Multiply: result.content = l.content * r.content
-			case .Divide:   if r.content != 0 do result.content = l.content / r.content
-			case .Mod:      return empty
+			case .Add:
+				result.content = l.content + r.content
+			case .Subtract:
+				result.content = l.content - r.content
+			case .Multiply:
+				result.content = l.content * r.content
+			case .Divide:
+				if r.content != 0 do result.content = l.content / r.content
+			case .Mod:
+				return empty
 			}
 			return result
 		}
@@ -2039,9 +2298,12 @@ evaluate_bitwise_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind
 		if r, ok := right.(^BoolData); ok {
 			result := new(BoolData)
 			#partial switch op {
-			case .And: result.content = l.content && r.content
-			case .Or:  result.content = l.content || r.content
-			case .Xor: result.content = l.content ~ r.content
+			case .And:
+				result.content = l.content && r.content
+			case .Or:
+				result.content = l.content || r.content
+			case .Xor:
+				result.content = l.content ~ r.content
 			}
 			return result
 		}
@@ -2051,9 +2313,12 @@ evaluate_bitwise_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind
 			result.kind = l.kind if l.kind != .none else r.kind
 			result.negative = l.negative
 			#partial switch op {
-			case .And: result.content = l.content & r.content
-			case .Or:  result.content = l.content | r.content
-			case .Xor: result.content = l.content ~ r.content
+			case .And:
+				result.content = l.content & r.content
+			case .Or:
+				result.content = l.content | r.content
+			case .Xor:
+				result.content = l.content ~ r.content
 			}
 			return result
 		}
@@ -2065,10 +2330,14 @@ evaluate_comparison_op :: proc(left: ValueData, right: ValueData, op: Operator_K
 	result := new(BoolData)
 	compare_func :: #force_inline proc(a, b: $T, kind: Operator_Kind) -> bool {
 		#partial switch kind {
-		case .Less:         return a < b
-		case .Greater:      return a > b
-		case .LessEqual:    return a <= b
-		case .GreaterEqual: return a >= b
+		case .Less:
+			return a < b
+		case .Greater:
+			return a > b
+		case .LessEqual:
+			return a <= b
+		case .GreaterEqual:
+			return a >= b
 		}
 		return false
 	}
@@ -2076,32 +2345,45 @@ evaluate_comparison_op :: proc(left: ValueData, right: ValueData, op: Operator_K
 		bytes := transmute([]u8)s
 		if len(bytes) > 8 do return max(u64)
 		result: u64 = 0
-		for b in bytes { result = (result << 8) + cast(u64)b }
+		for b in bytes {result = (result << 8) + cast(u64)b}
 		return result
 	}
 	#partial switch l in left {
 	case ^IntegerData:
 		#partial switch r in right {
-		case ^IntegerData: result.content = compare_func(l.content, r.content, op)
-		case ^FloatData:   result.content = compare_func(cast(f64)l.content, r.content, op)
-		case ^StringData:  result.content = compare_func(l.content, string_to_u64(r.content), op)
-		case: return empty
+		case ^IntegerData:
+			result.content = compare_func(l.content, r.content, op)
+		case ^FloatData:
+			result.content = compare_func(cast(f64)l.content, r.content, op)
+		case ^StringData:
+			result.content = compare_func(l.content, string_to_u64(r.content), op)
+		case:
+			return empty
 		}
 	case ^FloatData:
 		#partial switch r in right {
-		case ^IntegerData: result.content = compare_func(l.content, cast(f64)r.content, op)
-		case ^FloatData:   result.content = compare_func(l.content, r.content, op)
-		case ^StringData:  result.content = compare_func(l.content, cast(f64)string_to_u64(r.content), op)
-		case: return empty
+		case ^IntegerData:
+			result.content = compare_func(l.content, cast(f64)r.content, op)
+		case ^FloatData:
+			result.content = compare_func(l.content, r.content, op)
+		case ^StringData:
+			result.content = compare_func(l.content, cast(f64)string_to_u64(r.content), op)
+		case:
+			return empty
 		}
 	case ^StringData:
 		#partial switch r in right {
-		case ^IntegerData: result.content = compare_func(string_to_u64(l.content), r.content, op)
-		case ^FloatData:   result.content = compare_func(cast(f64)string_to_u64(l.content), r.content, op)
-		case ^StringData:  result.content = compare_func(string_to_u64(l.content), string_to_u64(r.content), op)
-		case: return empty
+		case ^IntegerData:
+			result.content = compare_func(string_to_u64(l.content), r.content, op)
+		case ^FloatData:
+			result.content = compare_func(cast(f64)string_to_u64(l.content), r.content, op)
+		case ^StringData:
+			result.content = compare_func(string_to_u64(l.content), string_to_u64(r.content), op)
+		case:
+			return empty
 		}
-	case: return empty
+	case:
+		return empty
 	}
 	return result
 }
@@ -2110,8 +2392,10 @@ evaluate_equality_op :: proc(left: ValueData, right: ValueData, op: Operator_Kin
 	result := new(BoolData)
 	equal := values_equal(left, right)
 	#partial switch op {
-	case .Equal:    result.content = equal
-	case .NotEqual: result.content = !equal
+	case .Equal:
+		result.content = equal
+	case .NotEqual:
+		result.content = !equal
 	}
 	return result
 }
@@ -2123,8 +2407,10 @@ evaluate_shift_op :: proc(left: ValueData, right: ValueData, op: Operator_Kind) 
 			result.kind = l.kind
 			result.negative = l.negative
 			#partial switch op {
-			case .LShift: result.content = l.content << r.content
-			case .RShift: result.content = l.content >> r.content
+			case .LShift:
+				result.content = l.content << r.content
+			case .RShift:
+				result.content = l.content >> r.content
 			}
 			return result
 		}
