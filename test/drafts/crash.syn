@@ -1,0 +1,6 @@
+Array -> {
+  T -> {}
+  -> {}
+  -> {T ...Array{T}}
+}
+Array{u8}:array

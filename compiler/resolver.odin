@@ -51,7 +51,7 @@ Status :: enum {
  */
 Cache :: struct {
 	path:            string,
-	content:         ^ScopeData,
+	semantic:        ^Semantic,
 	status:          Status,
 	last_modified:   time.Time,
 	arena:           vmem.Arena,
