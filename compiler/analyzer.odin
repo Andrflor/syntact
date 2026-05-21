@@ -910,7 +910,7 @@ sem_span_str :: #force_inline proc(ast: ^Ast, span: Span) -> string {
 	return ast.source[span.start:span.end]
 }
 
-sem_resolve_symbol :: proc(s: ^Semantic, name: string) -> (Binding_Id, bool) {
+sem_resolve_symbol :: proc(s: ^Semantic, name: string, ordinal: i16 = -1) -> (Binding_Id, bool) {
 	for i := len(s.scope_stack) - 1; i >= 0; i -= 1 {
 		sid := s.scope_stack[i]
 		if sid == s.builtin_scope {
@@ -918,8 +918,32 @@ sem_resolve_symbol :: proc(s: ^Semantic, name: string) -> (Binding_Id, bool) {
 			if found do return bid, true
 			continue
 		}
-		if bid, ok := s.scopes[sid].names[name]; ok {
-			return bid, true
+		if ordinal >= 0 {
+			bid, found := sem_resolve_by_ordinal(s, sid, name, ordinal)
+			if found do return bid, true
+		} else {
+			if bid, ok := s.scopes[sid].names[name]; ok {
+				return bid, true
+			}
+		}
+	}
+	return INVALID_BINDING, false
+}
+
+sem_resolve_by_ordinal :: proc(s: ^Semantic, scope_id: Scope_Id, name: string, ordinal: i16) -> (Binding_Id, bool) {
+	scope := s.scopes[scope_id]
+	first := u32(scope.first_binding)
+	occurrence: i16 = 0
+	for i in first ..< first + scope.binding_count {
+		entry := &s.bindings[i]
+		if entry.name != EMPTY_SPAN {
+			entry_name := s.ast.source[entry.name.start:entry.name.end]
+			if entry_name == name {
+				if occurrence == ordinal {
+					return Binding_Id(i), true
+				}
+				occurrence += 1
+			}
 		}
 	}
 	return INVALID_BINDING, false
@@ -961,8 +985,9 @@ sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> 
 sem_evaluate_identifier :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
 	ast := s.ast
 	name := node_name_str(ast, idx)
+	ordinal := node_ordinal(ast, idx)
 
-	bid, found := sem_resolve_symbol(s, name)
+	bid, found := sem_resolve_symbol(s, name, ordinal)
 	if !found {
 		sem_error(
 			s,
