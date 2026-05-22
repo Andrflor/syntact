@@ -126,10 +126,11 @@ Float_SV :: struct {
 }
 
 Node_Sem :: struct {
-	value_kind: Value_Kind,
-	value:      Static_Value,
-	flags:      Sem_Flags,
-	scope_id:   Scope_Id,
+	value_kind:  Value_Kind,
+	value:       Static_Value,
+	flags:       Sem_Flags,
+	scope_id:    Scope_Id,
+	ref_binding: Binding_Id,
 }
 
 Scope_Info :: struct {
@@ -288,6 +289,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	s := new(Semantic)
 	s.ast = ast
 	s.node_sems = make([]Node_Sem, len(ast.node_kinds))
+	for &ns in s.node_sems { ns.ref_binding = INVALID_BINDING }
 	s.node_to_scope = make([]Scope_Id, len(ast.node_kinds))
 	for &v in s.node_to_scope { v = INVALID_SCOPE }
 	s.scopes = make([dynamic]Scope_Info, 0, 32)
@@ -997,6 +999,8 @@ sem_evaluate_identifier :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, S
 		)
 		return .None, {}
 	}
+
+	s.node_sems[idx].ref_binding = bid
 
 	entry := &s.bindings[bid]
 	sv: Static_Value
