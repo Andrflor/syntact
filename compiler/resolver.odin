@@ -442,7 +442,7 @@ process_cache_task :: proc(task: thread.Task) {
 				}
 			}
 
-			print_reduced(result)
+			print_reduced(result, cache.semantic, ast)
 		}
 	} else if resolver.options.verbose {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)
