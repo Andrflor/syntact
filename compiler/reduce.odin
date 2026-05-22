@@ -69,22 +69,8 @@ reduce :: proc(sem: ^Semantic, ast: ^Ast) -> Reduced_Value {
 		return Reduced_Value{kind = .None}
 	}
 
-	scope := sem.scopes[root_scope_id]
-	first := u32(scope.first_binding)
-
-	last_product: ^Binding_Entry
-	for i in first ..< first + scope.binding_count {
-		if sem.bindings[i].kind == .Product {
-			last_product = &sem.bindings[i]
-		}
-	}
-
-	if last_product == nil {
-		return Reduced_Value{kind = .None}
-	}
-
 	append(&r.env, Env_Frame{scope_id = root_scope_id})
-	result := reduce_node(&r, last_product.value_node)
+	result := find_scope_product(&r, root_scope_id)
 	pop(&r.env)
 
 	if len(r.errors) > 0 {
@@ -599,25 +585,36 @@ reduce_carve_and_execute :: proc(r: ^Reducer, carve_idx: Node_Index) -> Reduced_
 }
 
 reduce_scope_product :: proc(r: ^Reducer, scope_id: Scope_Id, overrides: []Override) -> Reduced_Value {
-	scope := r.sem.scopes[scope_id]
-	first := u32(scope.first_binding)
-
 	frame := Env_Frame {
 		scope_id  = scope_id,
 		overrides = overrides,
 	}
 	append(&r.env, frame)
+	result := find_scope_product(r, scope_id)
+	pop(&r.env)
+	return result
+}
 
-	result := Reduced_Value{kind = .None}
+find_scope_product :: proc(r: ^Reducer, scope_id: Scope_Id) -> Reduced_Value {
+	scope := r.sem.scopes[scope_id]
+	first := u32(scope.first_binding)
 	for i in first ..< first + scope.binding_count {
 		entry := &r.sem.bindings[i]
 		if entry.kind == .Product {
-			result = reduce_node(r, entry.value_node)
+			return reduce_node(r, entry.value_node)
+		}
+		if entry.kind == .Inline_Push {
+			inline_val := reduce_node(r, entry.value_node)
+			if inline_val.kind == .Scope {
+				expanded_id, ok := sem_find_scope(r.sem, inline_val.data.scope)
+				if ok {
+					inner := find_scope_product(r, expanded_id)
+					if inner.kind != .None do return inner
+				}
+			}
 		}
 	}
-
-	pop(&r.env)
-	return result
+	return Reduced_Value{kind = .None}
 }
 
 /* ======================================================================

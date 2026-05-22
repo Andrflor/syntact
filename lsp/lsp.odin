@@ -688,8 +688,8 @@ find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_In
 }
 
 find_binding_definition :: proc(ast: ^compiler.Ast, sem: ^compiler.Semantic, target: compiler.Node_Index, name: string) -> compiler.Span {
-	scope_id := sem.node_to_scope[target]
-	if scope_id == compiler.INVALID_SCOPE {
+	scope_id := sem.node_sems[target].scope_id
+	if scope_id == compiler.INVALID_SCOPE || scope_id == sem.builtin_scope {
 		scope_id = find_enclosing_scope(ast, sem, target)
 	}
 
