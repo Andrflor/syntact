@@ -1815,11 +1815,17 @@ parse_unary :: proc(parser: ^Parser) -> Node_Index {
 
 parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
+	dot_span_end := parser.current_token.span.end
 	advance_token(parser)
 
-	if parser.current_token.kind != .Identifier {
-		error_at_current(parser, "Expected property name after '.'")
-		return INVALID_NODE
+	if parser.current_token.kind != .Identifier ||
+	   has_flag(parser.current_token, .Separator_Before) {
+		data: Node_Data
+		data.binary = Binary_Data {
+			left  = left,
+			right = INVALID_NODE,
+		}
+		return add_node(parser, .Property, data, Span{span_start, dot_span_end})
 	}
 
 	prop_id := parse_identifier(parser)

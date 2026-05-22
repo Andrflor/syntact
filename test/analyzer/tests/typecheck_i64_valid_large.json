@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck i64 valid large",
+  "description": "i64:a -> 999999999999 is valid, fits in i64",
+  "source": "i64:a -> 999999999999",
+  "expect_errors": []
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck i32 float mismatch",
+  "description": "i32:a -> 1.5 is invalid, float cannot be assigned to i32",
+  "source": "i32:a -> 1.5",
+  "expect_errors": ["Type_Mismatch"]
+}

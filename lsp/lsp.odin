@@ -981,60 +981,31 @@ collect_property_completions :: proc(
 	offset: u32,
 	items: ^[dynamic]json.Value,
 ) {
-	dot_pos := offset - 1
-	end := dot_pos
-	for end > 0 && (ast.source[end - 1] == ' ' || ast.source[end - 1] == '\t') {
-		end -= 1
-	}
-	if end == 0 do return
+	source_node := find_dot_source(ast, offset)
+	if source_node == compiler.INVALID_NODE do return
 
-	scope_id := resolve_dot_source(ast, sem, end)
+	scope_id := node_to_scope_id(ast, sem, source_node)
 	if scope_id != compiler.INVALID_SCOPE {
 		add_scope_bindings(ast, sem, scope_id, items)
-		return
-	}
-
-	cur_scope := find_scope_at_offset(ast, sem, offset)
-	sid := cur_scope
-	for sid != compiler.INVALID_SCOPE {
-		scope := &sem.scopes[sid]
-		first := u32(scope.first_binding)
-		for i in first ..< first + scope.binding_count {
-			entry := &sem.bindings[i]
-			if entry.name == compiler.EMPTY_SPAN do continue
-			name := ast.source[entry.name.start:entry.name.end]
-			if entry.value_kind == .Scope {
-				scope_target, ok := compiler.sem_find_scope(sem, entry.value.scope)
-				if ok {
-					add_scope_bindings(ast, sem, scope_target, items)
-					return
-				}
-			}
-		}
-		sid = sem.scopes[sid].parent
 	}
 }
 
-resolve_dot_source :: proc(
-	ast: ^compiler.Ast,
-	sem: ^compiler.Semantic,
-	end_offset: u32,
-) -> compiler.Scope_Id {
+find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
 	best := compiler.INVALID_NODE
 	best_size := max(u32)
 	for i := 0; i < len(ast.node_kinds); i += 1 {
+		if ast.node_kinds[i] != .Property do continue
 		span := ast.node_spans[i]
-		if span.end != end_offset do continue
-		if ast.node_kinds[i] == .Property do continue
-		size := span.end - span.start
-		if size < best_size {
-			best_size = size
-			best = compiler.Node_Index(i)
+		if span.start < offset && offset <= span.end + 1 {
+			size := span.end - span.start
+			if size < best_size {
+				best_size = size
+				best = compiler.Node_Index(i)
+			}
 		}
 	}
-
-	if best == compiler.INVALID_NODE do return compiler.INVALID_SCOPE
-	return node_to_scope_id(ast, sem, best)
+	if best == compiler.INVALID_NODE do return compiler.INVALID_NODE
+	return compiler.node_left(ast, best)
 }
 
 node_to_scope_id :: proc(
@@ -1062,6 +1033,18 @@ node_to_scope_id :: proc(
 		if entry.value_kind == .Scope {
 			sid, ok := compiler.sem_find_scope(sem, entry.value.scope)
 			if ok do return sid
+		}
+	}
+
+	bid := sem.node_sems[node].ref_binding
+	if bid != compiler.INVALID_BINDING {
+		entry := &sem.bindings[bid]
+		if entry.value_node != compiler.INVALID_NODE {
+			vn := entry.value_node
+			if ast.node_kinds[vn] == .ScopeNode {
+				sid, ok := compiler.sem_find_scope(sem, vn)
+				if ok do return sid
+			}
 		}
 	}
 

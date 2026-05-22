@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck i32 valid",
+  "description": "i32:a -> 2147483647 is valid, max i32",
+  "source": "i32:a -> 2147483647",
+  "expect_errors": []
+}

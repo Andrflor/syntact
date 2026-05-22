@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck f32 valid",
+  "description": "f32:a -> 3.14 is valid, small float fits f32",
+  "source": "f32:a -> 3.14",
+  "expect_errors": []
+}

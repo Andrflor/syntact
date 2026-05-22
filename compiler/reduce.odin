@@ -128,8 +128,19 @@ reduce_node :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 		operand := node_unary_operand(ast, idx)
 		return reduce_node(r, operand)
 	case .Constraint:
+		sem := r.sem.node_sems[idx]
+		if .Has_Value in sem.flags {
+			return static_to_reduced(sem.value_kind, sem.value, ast)
+		}
 		constraint_idx := node_left(ast, idx)
-		return reduce_node(r, constraint_idx)
+		constraint_val := reduce_node(r, constraint_idx)
+		if constraint_val.kind == .Scope {
+			scope_id, ok := sem_find_scope(r.sem, constraint_val.data.scope)
+			if ok {
+				return find_scope_product(r, scope_id)
+			}
+		}
+		return constraint_val
 	case .Range:
 		return Reduced_Value{kind = .None}
 	case .Expand:
@@ -191,6 +202,17 @@ reduce_literal :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
  * SECTION 5: IDENTIFIER RESOLUTION
  * ====================================================================== */
 
+reduce_binding :: proc(r: ^Reducer, bid: Binding_Id) -> Reduced_Value {
+	entry := &r.sem.bindings[bid]
+	if entry.value_node != INVALID_NODE {
+		return reduce_node(r, entry.value_node)
+	}
+	if .Has_Value in entry.flags {
+		return static_to_reduced(entry.value_kind, entry.value, r.ast)
+	}
+	return Reduced_Value{kind = .None}
+}
+
 reduce_identifier :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 	name := node_name_str(r.ast, idx)
 	ordinal := node_ordinal(r.ast, idx)
@@ -209,12 +231,12 @@ reduce_identifier :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 			if ordinal >= 0 {
 				bid, found := sem_resolve_by_ordinal(r.sem, frame.scope_id, name, ordinal)
 				if found {
-					return reduce_node(r, r.sem.bindings[bid].value_node)
+					return reduce_binding(r, bid)
 				}
 			} else {
 				bid, found := sem_resolve_in_scope(r.sem, frame.scope_id, name)
 				if found {
-					return reduce_node(r, r.sem.bindings[bid].value_node)
+					return reduce_binding(r, bid)
 				}
 			}
 		}
@@ -677,7 +699,7 @@ reduce_property :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 					bid, found = sem_resolve_in_scope(r.sem, scope_id, prop_name)
 				}
 				if found {
-					return reduce_node(r, r.sem.bindings[bid].value_node)
+					return reduce_binding(r, bid)
 				}
 			}
 		}

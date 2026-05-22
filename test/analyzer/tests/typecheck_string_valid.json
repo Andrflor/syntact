@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck String valid",
+  "description": "String:a -> 'hello' is valid",
+  "source": "String:a -> 'hello'",
+  "expect_errors": []
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck f64 valid",
+  "description": "f64:a -> 3.14 is valid",
+  "source": "f64:a -> 3.14",
+  "expect_errors": []
+}

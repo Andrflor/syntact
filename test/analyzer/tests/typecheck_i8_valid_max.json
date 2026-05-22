@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck i8 valid max",
+  "description": "i8:a -> 127 is valid, max value for i8",
+  "source": "i8:a -> 127",
+  "expect_errors": []
+}

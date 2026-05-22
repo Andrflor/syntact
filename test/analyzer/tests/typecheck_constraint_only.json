@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck constraint only no value",
+  "description": "u8:a with no value gets default, no error",
+  "source": "u8:a",
+  "expect_errors": []
+}

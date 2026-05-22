@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck u32 valid",
+  "description": "u32:a -> 4294967295 is valid, max u32",
+  "source": "u32:a -> 4294967295",
+  "expect_errors": []
+}

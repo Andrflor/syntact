@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck bool valid true",
+  "description": "bool:a -> true is valid",
+  "source": "bool:a -> true",
+  "expect_errors": []
+}

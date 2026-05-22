@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck no constraint",
+  "description": "a -> 42 has no constraint, always valid",
+  "source": "a -> 42",
+  "expect_errors": []
+}

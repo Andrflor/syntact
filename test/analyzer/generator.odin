@@ -1,16 +1,14 @@
-// generator.odin
-package compiler_test
+// +build ignore
+package analyzer_test
 
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-// Set this to the folder that contains parser_test_harness.odin (package compiler_test)
 TEST_DIR :: "tests"
-OUTPUT_ODIN :: "parser_generated_tests.odin"
+OUTPUT_ODIN :: "generated_tests.odin"
 
 main :: proc() {
-	// discover json files
 	dir, err := os.open(TEST_DIR)
 	if err != nil {return}
 	defer os.close(dir)
@@ -28,12 +26,10 @@ main :: proc() {
 	}
 	if len(files) == 0 {return}
 
-	// build output source directly into []u8
 	out := make([dynamic]u8, context.temp_allocator)
 	append(&out, "// AUTO-GENERATED. DO NOT EDIT.\n")
-	append(&out, "package compiler_test\n\n")
+	append(&out, "package analyzer_test\n\n")
 	append(&out, "import \"core:testing\"\n\n")
-	append(&out, "// run_single_test is provided by parser_test_harness.odin\n\n")
 
 	for i := 0; i < len(files); i += 1 {
 		p := files[i]
@@ -44,7 +40,7 @@ main :: proc() {
 		append(&out, "@(test)\n")
 		append(&out, fn)
 		append(&out, " :: proc(t: ^testing.T) {\n")
-		append(&out, "\trun_test(\"")
+		append(&out, "\trun_analyzer_test(\"")
 		append(&out, p)
 		append(&out, "\", t)\n")
 		append(&out, "}\n\n")
@@ -54,7 +50,6 @@ main :: proc() {
 }
 
 itoa :: proc(i: int) -> string {
-	// simple non-allocating-ish itoa into temp allocator
 	buf := make([dynamic]u8, context.temp_allocator)
 	if i == 0 {
 		append(&buf, '0')
@@ -65,13 +60,11 @@ itoa :: proc(i: int) -> string {
 		append(&buf, '-')
 		n = -n
 	}
-	// collect digits reversed
 	digs := make([dynamic]u8, context.temp_allocator)
 	for n > 0 {
 		append(&digs, u8('0' + n % 10))
 		n /= 10
 	}
-	// append reversed
 	for j := len(digs) - 1; j >= 0; j -= 1 {
 		append(&buf, digs[j])
 	}
@@ -81,7 +74,6 @@ itoa :: proc(i: int) -> string {
 sanitize_identifier :: proc(s: string) -> string {
 	buf := make([dynamic]u8, context.temp_allocator)
 
-	// first char
 	if len(s) == 0 {
 		append(&buf, 't')
 	} else {
@@ -93,7 +85,6 @@ sanitize_identifier :: proc(s: string) -> string {
 		}
 	}
 
-	// rest
 	start := 1 if len(s) > 0 else 0
 	for i := start; i < len(s); i += 1 {
 		c := s[i]

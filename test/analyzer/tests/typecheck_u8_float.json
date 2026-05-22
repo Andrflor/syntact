@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck u8 float mismatch",
+  "description": "u8:a -> 3.14 is invalid, float cannot be assigned to u8",
+  "source": "u8:a -> 3.14",
+  "expect_errors": ["Type_Mismatch"]
+}

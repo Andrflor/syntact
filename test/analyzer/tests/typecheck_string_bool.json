@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck String bool mismatch",
+  "description": "String:a -> true is invalid, bool cannot be assigned to String",
+  "source": "String:a -> true",
+  "expect_errors": ["Type_Mismatch"]
+}

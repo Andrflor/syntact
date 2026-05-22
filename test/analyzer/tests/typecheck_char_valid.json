@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck char valid",
+  "description": "char:a -> 65 is valid, 65 fits in u8 range",
+  "source": "char:a -> 65",
+  "expect_errors": []
+}

@@ -1,13 +1,12 @@
-package compiler_test
+package parser_test
 
-import compiler "../compiler"
+import compiler "../../compiler"
 
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
 import vmem "core:mem/virtual"
 import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 
@@ -140,7 +139,6 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 	return fmt.tprintf("UnhandledNode(%v)", kind)
 }
 
-// Recursively walk ALL nodes and map their positions
 walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string: string, pos_map: ^Position_Map) {
 	if idx == compiler.INVALID_NODE do return
 
@@ -210,11 +208,9 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 	case .External:
 		walk_all_nodes(ast, compiler.node_external_scope(ast, idx), full_string, pos_map)
 	case .Identifier, .Literal, .Unknown:
-		// leaf nodes
 	}
 }
 
-// Build position map by walking ALL nodes
 build_position_map :: proc(ast: ^compiler.Ast, root: compiler.Node_Index, full_string: string) -> Position_Map {
 	pos_map := Position_Map{}
 	walk_all_nodes(ast, root, full_string, &pos_map)
@@ -324,19 +320,16 @@ format_difference :: proc(str1, str2: string, pos: int, ctx: int = 100) -> strin
 
 	strings.write_string(&builder, fmt.aprintf("String diff pos: %d\n", pos))
 
-	// Calculate context window
 	start := max(0, pos - ctx)
 	end1 := min(len(str1), pos + ctx + 1)
 	end2 := min(len(str2), pos + ctx + 1)
 
-	// Extract context substrings
 	context1 := str1[start:end1]
 	context2 := str2[start:end2]
 
 	strings.write_string(&builder, fmt.aprintf("Expected: %s\n", context1))
 	strings.write_string(&builder, fmt.aprintf("Actual  : %s\n", context2))
 
-	// Create pointer line showing where the difference is
 	pointer_line := make([]u8, len("String 1: \"") + (pos - start) + 1)
 
 	for i in 0 ..< len(pointer_line) {
