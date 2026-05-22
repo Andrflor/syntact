@@ -62,41 +62,58 @@ Diagnostic :: struct {
  * ====================================================================== */
 
 Sem_Token_Type :: enum {
-	Namespace,    // 0
-	Type,         // 1
-	Class,        // 2
-	Enum,         // 3
-	Interface,    // 4
-	Struct,       // 5
-	TypeParameter,// 6
-	Parameter,    // 7
-	Variable,     // 8
-	Property,     // 9
-	EnumMember,   // 10
-	Event,        // 11
-	Function,     // 12
-	Method,       // 13
-	Macro,        // 14
-	Keyword,      // 15
-	Modifier,     // 16
-	Comment,      // 17
-	String,       // 18
-	Number,       // 19
-	Regexp,       // 20
-	Operator,     // 21
-	Decorator,    // 22
+	Namespace, // 0
+	Type, // 1
+	Class, // 2
+	Enum, // 3
+	Interface, // 4
+	Struct, // 5
+	TypeParameter, // 6
+	Parameter, // 7
+	Variable, // 8
+	Property, // 9
+	EnumMember, // 10
+	Event, // 11
+	Function, // 12
+	Method, // 13
+	Macro, // 14
+	Keyword, // 15
+	Modifier, // 16
+	Comment, // 17
+	String, // 18
+	Number, // 19
+	Regexp, // 20
+	Operator, // 21
+	Decorator, // 22
 }
 
-SEMANTIC_TOKEN_TYPES :: [?]string{
-	"namespace", "type", "class", "enum", "interface", "struct",
-	"typeParameter", "parameter", "variable", "property", "enumMember",
-	"event", "function", "method", "macro", "keyword", "modifier",
-	"comment", "string", "number", "regexp", "operator", "decorator",
+SEMANTIC_TOKEN_TYPES :: [?]string {
+	"namespace",
+	"type",
+	"class",
+	"enum",
+	"interface",
+	"struct",
+	"typeParameter",
+	"parameter",
+	"variable",
+	"property",
+	"enumMember",
+	"event",
+	"function",
+	"method",
+	"macro",
+	"keyword",
+	"modifier",
+	"comment",
+	"string",
+	"number",
+	"regexp",
+	"operator",
+	"decorator",
 }
 
-SEMANTIC_TOKEN_MODIFIERS :: [?]string{
-	"declaration", "definition", "readonly", "static",
-}
+SEMANTIC_TOKEN_MODIFIERS :: [?]string{"declaration", "definition", "readonly", "static"}
 
 Raw_Sem_Token :: struct {
 	line:       int,
@@ -190,7 +207,9 @@ read_message :: proc() -> union {
 	}
 
 	if "id" in obj {
-		msg := LSP_Message{jsonrpc = "2.0"}
+		msg := LSP_Message {
+			jsonrpc = "2.0",
+		}
 		msg.id = obj["id"]
 		if method, ok := obj["method"].(json.String); ok {
 			msg.method = strings.clone(method)
@@ -198,13 +217,23 @@ read_message :: proc() -> union {
 		msg.params = obj["params"] or_else json.Null{}
 		return msg
 	} else {
-		notif := LSP_Notification{jsonrpc = "2.0"}
+		notif := LSP_Notification {
+			jsonrpc = "2.0",
+		}
 		if method, ok := obj["method"].(json.String); ok {
 			notif.method = strings.clone(method)
 		}
 		notif.params = obj["params"] or_else json.Null{}
 		return notif
 	}
+}
+
+json_to_int :: proc(v: json.Value) -> int {
+	#partial switch val in v {
+	case json.Integer: return int(val)
+	case json.Float:   return int(val)
+	}
+	return 0
 }
 
 send_raw :: proc(content: string) {
@@ -250,12 +279,18 @@ write_json_string :: proc(b: ^strings.Builder, s: string) {
 	strings.write_byte(b, '"')
 	for c in s {
 		switch c {
-		case '"':  strings.write_string(b, "\\\"")
-		case '\\': strings.write_string(b, "\\\\")
-		case '\n': strings.write_string(b, "\\n")
-		case '\r': strings.write_string(b, "\\r")
-		case '\t': strings.write_string(b, "\\t")
-		case:      strings.write_rune(b, c)
+		case '"':
+			strings.write_string(b, "\\\"")
+		case '\\':
+			strings.write_string(b, "\\\\")
+		case '\n':
+			strings.write_string(b, "\\n")
+		case '\r':
+			strings.write_string(b, "\\r")
+		case '\t':
+			strings.write_string(b, "\\t")
+		case:
+			strings.write_rune(b, c)
 		}
 	}
 	strings.write_byte(b, '"')
@@ -301,7 +336,7 @@ send_notification :: proc(method: string, params: json.Value) {
  * ====================================================================== */
 
 main :: proc() {
-	server := LSP_Server{
+	server := LSP_Server {
 		documents = make(map[string]Document),
 	}
 	for {
@@ -425,11 +460,13 @@ handle_did_open :: proc(server: ^LSP_Server, notif: LSP_Notification) {
 	if !text_ok do return
 
 	version := 0
-	if v, v_ok := td["version"].(json.Integer); v_ok {
-		version = int(v)
-	}
+	version = json_to_int(td["version"])
 
-	server.documents[uri] = Document{uri = uri, version = version, content = text}
+	server.documents[uri] = Document {
+		uri     = uri,
+		version = version,
+		content = text,
+	}
 	analyze_and_publish(server, uri)
 }
 
@@ -499,15 +536,18 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	for err in cache.parse_errors {
 		start_pos := compiler.span_to_position(ast, err.span.start)
 		end_pos := compiler.span_to_position(ast, err.span.end)
-		append(&diagnostics, Diagnostic{
-			range = Range{
-				start = Position{line = start_pos.line - 1, character = start_pos.column - 1},
-				end   = Position{line = end_pos.line - 1, character = end_pos.column - 1},
+		append(
+			&diagnostics,
+			Diagnostic {
+				range = Range {
+					start = Position{line = start_pos.line - 1, character = start_pos.column - 1},
+					end = Position{line = end_pos.line - 1, character = end_pos.column - 1},
+				},
+				severity = 1,
+				source = "syn-parse",
+				message = err.message,
 			},
-			severity = 1,
-			source   = "syn-parse",
-			message  = err.message,
-		})
+		)
 	}
 
 	if ast != nil && parse_ok {
@@ -515,27 +555,45 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		doc.semantic = cache.semantic
 
 		for err in cache.analyze_errors {
-			append(&diagnostics, Diagnostic{
-				range = Range{
-					start = Position{line = err.position.line - 1, character = err.position.column - 1},
-					end   = Position{line = err.position.line - 1, character = err.position.column - 1},
+			append(
+				&diagnostics,
+				Diagnostic {
+					range = Range {
+						start = Position {
+							line = err.position.line - 1,
+							character = err.position.column - 1,
+						},
+						end = Position {
+							line = err.position.line - 1,
+							character = err.position.column - 1,
+						},
+					},
+					severity = 1,
+					source = "syn-analyze",
+					message = err.message,
 				},
-				severity = 1,
-				source   = "syn-analyze",
-				message  = err.message,
-			})
+			)
 		}
 
 		for warn in cache.analyze_warnings {
-			append(&diagnostics, Diagnostic{
-				range = Range{
-					start = Position{line = warn.position.line - 1, character = warn.position.column - 1},
-					end   = Position{line = warn.position.line - 1, character = warn.position.column - 1},
+			append(
+				&diagnostics,
+				Diagnostic {
+					range = Range {
+						start = Position {
+							line = warn.position.line - 1,
+							character = warn.position.column - 1,
+						},
+						end = Position {
+							line = warn.position.line - 1,
+							character = warn.position.column - 1,
+						},
+					},
+					severity = 2,
+					source = "syn-analyze",
+					message = warn.message,
 				},
-				severity = 2,
-				source   = "syn-analyze",
-				message  = warn.message,
-			})
+			)
 		}
 	}
 
@@ -599,10 +657,8 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 		return
 	}
 
-	line := 0
-	char := 0
-	if v, v_ok := pos_obj["line"].(json.Integer); v_ok { line = int(v) }
-	if v, v_ok := pos_obj["character"].(json.Integer); v_ok { char = int(v) }
+	line := json_to_int(pos_obj["line"])
+	char := json_to_int(pos_obj["character"])
 
 	doc := &server.documents[uri]
 	ast := doc.ast
@@ -631,13 +687,17 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 		return
 	}
 
-	name := compiler.node_name_str(ast, target_node)
-	if name == "" {
+	bid := sem.node_sems[target_node].ref_binding
+	if bid == compiler.INVALID_BINDING {
 		send_response(msg.id, json.Null{})
 		return
 	}
 
-	def_span := find_binding_definition(ast, sem, target_node, name)
+	entry := &sem.bindings[bid]
+	def_span := entry.name
+	if def_span.start == def_span.end && entry.node != compiler.INVALID_NODE {
+		def_span = ast.node_spans[entry.node]
+	}
 	if def_span.start == def_span.end {
 		send_response(msg.id, json.Null{})
 		return
@@ -645,14 +705,17 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 
 	def_start := compiler.span_to_position(ast, def_span.start)
 	def_end := compiler.span_to_position(ast, def_span.end)
+	send_response(msg.id, make_location(uri, def_start, def_end))
+}
 
+make_location :: proc(uri: string, start, end: compiler.Position) -> json.Value {
 	start_pos := make(map[string]json.Value)
-	start_pos["line"] = json.Integer(def_start.line - 1)
-	start_pos["character"] = json.Integer(def_start.column - 1)
+	start_pos["line"] = json.Integer(start.line - 1)
+	start_pos["character"] = json.Integer(start.column - 1)
 
 	end_pos := make(map[string]json.Value)
-	end_pos["line"] = json.Integer(def_end.line - 1)
-	end_pos["character"] = json.Integer(def_end.column - 1)
+	end_pos["line"] = json.Integer(end.line - 1)
+	end_pos["character"] = json.Integer(end.column - 1)
 
 	range_obj := make(map[string]json.Value)
 	range_obj["start"] = json.Object(start_pos)
@@ -661,8 +724,7 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	result := make(map[string]json.Value)
 	result["uri"] = json.String(uri)
 	result["range"] = json.Object(range_obj)
-
-	send_response(msg.id, json.Object(result))
+	return json.Object(result)
 }
 
 lsp_pos_to_offset :: proc(ast: ^compiler.Ast, line, char: int) -> int {
@@ -685,48 +747,6 @@ find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_In
 		}
 	}
 	return best
-}
-
-find_binding_definition :: proc(ast: ^compiler.Ast, sem: ^compiler.Semantic, target: compiler.Node_Index, name: string) -> compiler.Span {
-	scope_id := sem.node_sems[target].scope_id
-	if scope_id == compiler.INVALID_SCOPE || scope_id == sem.builtin_scope {
-		scope_id = find_enclosing_scope(ast, sem, target)
-	}
-
-	for scope_id != compiler.INVALID_SCOPE {
-		scope := &sem.scopes[scope_id]
-		if bid, found := scope.names[name]; found {
-			entry := &sem.bindings[bid]
-			if entry.name.start != entry.name.end {
-				return entry.name
-			}
-			if entry.node != compiler.INVALID_NODE {
-				return ast.node_spans[entry.node]
-			}
-		}
-		scope_id = scope.parent
-	}
-	return compiler.EMPTY_SPAN
-}
-
-find_enclosing_scope :: proc(ast: ^compiler.Ast, sem: ^compiler.Semantic, node: compiler.Node_Index) -> compiler.Scope_Id {
-	offset := ast.node_spans[node].start
-	best_id := compiler.INVALID_SCOPE
-	best_size := max(u32)
-
-	for si := 0; si < len(sem.scopes); si += 1 {
-		scope := &sem.scopes[si]
-		if scope.node == compiler.INVALID_NODE do continue
-		span := ast.node_spans[scope.node]
-		if span.start <= offset && offset < span.end {
-			size := span.end - span.start
-			if size < best_size {
-				best_size = size
-				best_id = compiler.Scope_Id(si)
-			}
-		}
-	}
-	return best_id
 }
 
 /* ======================================================================
@@ -867,13 +887,16 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 				tok_type = int(Sem_Token_Type.String)
 				start_pos := compiler.span_to_position(ast, span.start > 0 ? span.start - 1 : 0)
 				length := int(span.end - span.start) + 2
-				append(tokens, Raw_Sem_Token{
-					line       = start_pos.line - 1,
-					start_char = start_pos.column - 1,
-					length     = length,
-					type       = tok_type,
-					modifiers  = 0,
-				})
+				append(
+					tokens,
+					Raw_Sem_Token {
+						line = start_pos.line - 1,
+						start_char = start_pos.column - 1,
+						length = length,
+						type = tok_type,
+						modifiers = 0,
+					},
+				)
 				continue
 			case .Bool:
 				tok_type = int(Sem_Token_Type.Keyword)
@@ -892,13 +915,16 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		start_pos := compiler.span_to_position(ast, span.start)
 		length := int(span.end - span.start)
 
-		append(tokens, Raw_Sem_Token{
-			line       = start_pos.line - 1,
-			start_char = start_pos.column - 1,
-			length     = length,
-			type       = tok_type,
-			modifiers  = tok_mod,
-		})
+		append(
+			tokens,
+			Raw_Sem_Token {
+				line = start_pos.line - 1,
+				start_char = start_pos.column - 1,
+				length = length,
+				type = tok_type,
+				modifiers = tok_mod,
+			},
+		)
 	}
 
 	emit_punctuation_tokens(ast, tokens)
@@ -910,7 +936,14 @@ build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, 
 		idx := compiler.Node_Index(i)
 		kind := ast.node_kinds[i]
 
-		mark_binary :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, kind: compiler.Node_Kind, parent_kind: []compiler.Node_Kind, is_left: []bool, node_count: int) {
+		mark_binary :: proc(
+			ast: ^compiler.Ast,
+			idx: compiler.Node_Index,
+			kind: compiler.Node_Kind,
+			parent_kind: []compiler.Node_Kind,
+			is_left: []bool,
+			node_count: int,
+		) {
 			left := compiler.node_left(ast, idx)
 			right := compiler.node_right(ast, idx)
 			if left != compiler.INVALID_NODE && int(left) < node_count {
@@ -923,7 +956,13 @@ build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, 
 		}
 
 		#partial switch kind {
-		case .Pointing, .PointingPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull, .EventPush:
+		case .Pointing,
+		     .PointingPull,
+		     .ResonancePush,
+		     .ResonancePull,
+		     .ReactivePush,
+		     .ReactivePull,
+		     .EventPush:
 			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
 		case .EventPull:
 			d := ast.node_data[i].event_pull
@@ -967,7 +1006,11 @@ build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, 
 	}
 }
 
-emit_operator_tokens :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, tokens: ^[dynamic]Raw_Sem_Token) {
+emit_operator_tokens :: proc(
+	ast: ^compiler.Ast,
+	idx: compiler.Node_Index,
+	tokens: ^[dynamic]Raw_Sem_Token,
+) {
 	span := compiler.node_span(ast, idx)
 	left := compiler.node_operator_left(ast, idx)
 	right := compiler.node_operator_right(ast, idx)
@@ -986,7 +1029,10 @@ emit_operator_tokens :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, token
 			}
 		}
 		for j := u32(len(src)); j > op_start; j -= 1 {
-			if src[j - 1] != ' ' && src[j - 1] != '\t' && src[j - 1] != '\n' && src[j - 1] != '\r' {
+			if src[j - 1] != ' ' &&
+			   src[j - 1] != '\t' &&
+			   src[j - 1] != '\n' &&
+			   src[j - 1] != '\r' {
 				op_end = j
 				break
 			}
@@ -995,13 +1041,16 @@ emit_operator_tokens :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, token
 		actual_end := left_end + op_end
 		if actual_start < actual_end {
 			pos := compiler.span_to_position(ast, actual_start)
-			append(tokens, Raw_Sem_Token{
-				line       = pos.line - 1,
-				start_char = pos.column - 1,
-				length     = int(actual_end - actual_start),
-				type       = int(Sem_Token_Type.Operator),
-				modifiers  = 0,
-			})
+			append(
+				tokens,
+				Raw_Sem_Token {
+					line = pos.line - 1,
+					start_char = pos.column - 1,
+					length = int(actual_end - actual_start),
+					type = int(Sem_Token_Type.Operator),
+					modifiers = 0,
+				},
+			)
 		}
 	}
 }
@@ -1018,13 +1067,16 @@ emit_comment_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token)
 				end += 1
 			}
 			pos := compiler.span_to_position(ast, start)
-			append(tokens, Raw_Sem_Token{
-				line       = pos.line - 1,
-				start_char = pos.column - 1,
-				length     = end - i,
-				type       = int(Sem_Token_Type.Comment),
-				modifiers  = 0,
-			})
+			append(
+				tokens,
+				Raw_Sem_Token {
+					line = pos.line - 1,
+					start_char = pos.column - 1,
+					length = end - i,
+					type = int(Sem_Token_Type.Comment),
+					modifiers = 0,
+				},
+			)
 			i = end
 		} else {
 			i += 1
@@ -1091,13 +1143,16 @@ emit_punctuation_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		pos := compiler.span_to_position(ast, tok.span.start)
 		length := int(tok.span.end - tok.span.start)
 
-		append(tokens, Raw_Sem_Token{
-			line       = pos.line - 1,
-			start_char = pos.column - 1,
-			length     = length,
-			type       = tok_type,
-			modifiers  = 0,
-		})
+		append(
+			tokens,
+			Raw_Sem_Token {
+				line = pos.line - 1,
+				start_char = pos.column - 1,
+				length = length,
+				type = tok_type,
+				modifiers = 0,
+			},
+		)
 	}
 }
 
