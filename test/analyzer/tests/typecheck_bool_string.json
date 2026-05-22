@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck bool string mismatch",
+  "description": "bool:a -> 'yes' is invalid, string cannot be assigned to bool",
+  "source": "bool:a -> 'yes'",
+  "expect_errors": ["Type_Mismatch"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck i32 overflow",
+  "description": "i32:a -> 2147483648 is invalid, overflows i32",
+  "source": "i32:a -> 2147483648",
+  "expect_errors": ["Type_Mismatch"]
+}

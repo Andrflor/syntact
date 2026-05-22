@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck u8 valid zero",
+  "description": "u8:a -> 0 is valid, 0 fits in u8",
+  "source": "u8:a -> 0",
+  "expect_errors": []
+}

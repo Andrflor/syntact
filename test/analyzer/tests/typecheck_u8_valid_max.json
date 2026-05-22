@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck u8 valid max",
+  "description": "u8:a -> 255 is valid, max value for u8",
+  "source": "u8:a -> 255",
+  "expect_errors": []
+}

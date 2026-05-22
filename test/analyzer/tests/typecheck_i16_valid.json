@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck i16 valid",
+  "description": "i16:a -> 32767 is valid, max value for i16",
+  "source": "i16:a -> 32767",
+  "expect_errors": []
+}

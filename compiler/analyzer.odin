@@ -416,6 +416,21 @@ sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
 		sem_register_product(s, idx)
 	case .Constraint:
 		sem_register_constraint(s, idx)
+	case .Carve:
+		source_idx := node_carve_source(ast, idx)
+		if source_idx != INVALID_NODE && node_kind(ast, source_idx) == .Constraint {
+			sem_register_constraint(s, source_idx)
+		} else {
+			entry := Binding_Entry {
+				node            = idx,
+				name            = EMPTY_SPAN,
+				kind            = .Pointing_Push,
+				value_node      = idx,
+				constraint_node = INVALID_NODE,
+				scope_id        = sem_current_scope(s),
+			}
+			sem_add_binding(s, entry)
+		}
 	case .Expand:
 		sem_register_expand(s, idx)
 	case .ScopeNode:
@@ -713,6 +728,10 @@ sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 			entry.flags |= {.Has_Value}
 		}
 	}
+
+	if .Has_Constraint in entry.flags && .Has_Value in entry.flags {
+		sem_typecheck_binding(s, entry)
+	}
 }
 
 sem_evaluate_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
@@ -720,6 +739,152 @@ sem_evaluate_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if vk == .Scope || vk == .Builtin {
 		entry.flags |= {.Has_Constraint}
 	}
+}
+
+sem_typecheck_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
+	if entry.constraint_node == INVALID_NODE do return
+	if entry.value_kind == .Symbolic || entry.value_kind == .Ref do return
+	if entry.value_kind == .None do return
+
+	csem := s.node_sems[entry.constraint_node]
+
+	if csem.value_kind == .Builtin {
+		if sem_typecheck_builtin(s, csem.value.builtin, entry) do return
+		pos := node_position(s.ast, entry.node)
+		sem_error(s, fmt.tprintf("Type mismatch: value is not compatible with constraint"), .Type_Mismatch, pos)
+		dvk, dsv := builtin_default_value(csem.value.builtin)
+		entry.value_kind = dvk
+		entry.value = dsv
+		return
+	}
+
+	if csem.value_kind == .Scope {
+		if sem_typecheck_by_scope(s, csem.value.scope, entry.value_kind, entry.value) do return
+		pos := node_position(s.ast, entry.node)
+		sem_error(s, fmt.tprintf("Type mismatch: value is not compatible with scope constraint"), .Type_Mismatch, pos)
+		dvk, dsv := sem_resolve_default(s, entry.constraint_node)
+		if dvk != .None {
+			entry.value_kind = dvk
+			entry.value = dsv
+		}
+		return
+	}
+}
+
+sem_typecheck_builtin :: proc(s: ^Semantic, bid: Builtin_Id, entry: ^Binding_Entry) -> bool {
+	def := builtin_def_by_id(bid)
+
+	if def.is_int {
+		if entry.value_kind != .Integer do return false
+		return sem_typecheck_int(&entry.value.integer, def.int_kind)
+	}
+	if def.is_float {
+		if entry.value_kind != .Float do return false
+		return sem_typecheck_float(&entry.value.float_v, def.flt_kind)
+	}
+	if def.is_bool {
+		return entry.value_kind == .Bool
+	}
+	if def.is_string {
+		return entry.value_kind == .String_Literal
+	}
+	return false
+}
+
+sem_typecheck_int :: proc(val: ^Integer_SV, constr_kind: IntegerKind) -> bool {
+	if val.kind == .none {
+		switch constr_kind {
+		case .none:  return true
+		case .u8:    if !val.negative && val.content < 256        { val.kind = .u8;  return true }; return false
+		case .i8:    if val.content < 128                         { val.kind = .i8;  return true }; return false
+		case .u16:   if !val.negative && val.content < 65536      { val.kind = .u16; return true }; return false
+		case .i16:   if val.content < 32768                       { val.kind = .i16; return true }; return false
+		case .u32:   if !val.negative && val.content < 4294967296 { val.kind = .u32; return true }; return false
+		case .i32:   if val.content < 2147483648                  { val.kind = .i32; return true }; return false
+		case .u64:   if !val.negative                             { val.kind = .u64; return true }; return false
+		case .i64:   val.kind = .i64; return true
+		}
+	}
+	return constr_kind == .none || constr_kind == val.kind
+}
+
+sem_typecheck_float :: proc(val: ^Float_SV, constr_kind: FloatKind) -> bool {
+	switch val.kind {
+	case .none:
+		#partial switch constr_kind {
+		case .f32:
+			if val.content < (1 << 24) {
+				val.kind = .f32
+				return true
+			}
+			return false
+		case .f64:
+			val.kind = .f64
+			return true
+		case:
+			return true
+		}
+	case .f32:
+		return constr_kind == .none || constr_kind == .f32
+	case .f64:
+		return constr_kind == .none || constr_kind == .f64
+	}
+	return false
+}
+
+sem_typecheck_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_Kind, sv: Static_Value) -> bool {
+	scope_id, ok := sem_find_scope(s, scope_node)
+	if !ok do return false
+
+	scope := s.scopes[scope_id]
+	first := u32(scope.first_binding)
+	has_product := false
+
+	for i in first ..< first + scope.binding_count {
+		entry := &s.bindings[i]
+		if entry.kind != .Product do continue
+		has_product = true
+
+		if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
+			csem := s.node_sems[entry.constraint_node]
+			if csem.value_kind == .Builtin {
+				test_entry := Binding_Entry{ value_kind = vk, value = sv }
+				if sem_typecheck_builtin(s, csem.value.builtin, &test_entry) do return true
+			} else if csem.value_kind == .Scope {
+				if sem_typecheck_by_scope(s, csem.value.scope, vk, sv) do return true
+			}
+		} else if .Has_Value in entry.flags {
+			if sem_typecheck_by_value(entry.value_kind, entry.value, vk, sv) do return true
+		}
+	}
+
+	if !has_product {
+		return vk == .Scope
+	}
+	return false
+}
+
+sem_typecheck_by_value :: proc(constr_vk: Value_Kind, constr_sv: Static_Value, val_vk: Value_Kind, val_sv: Static_Value) -> bool {
+	if constr_vk != val_vk do return false
+	switch constr_vk {
+	case .Integer:
+		copy := val_sv.integer
+		return sem_typecheck_int(&copy, constr_sv.integer.kind)
+	case .Float:
+		copy := val_sv.float_v
+		return sem_typecheck_float(&copy, constr_sv.float_v.kind)
+	case .Bool:
+		return true
+	case .String_Literal:
+		return true
+	case .Scope:
+		return true
+	case .None:
+		return true
+	case .Ref, .Symbolic, .Builtin:
+		return true
+	}
+	return false
 }
 
 sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> (Value_Kind, Static_Value) {
@@ -741,6 +906,9 @@ sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> (Value
 				return s.bindings[i].value_kind, s.bindings[i].value
 			}
 		}
+		sv: Static_Value
+		sv.scope = scope_node
+		return .Scope, sv
 	}
 
 	return .None, {}
