@@ -151,7 +151,7 @@ Sem_Binding_Kind :: enum u8 {
 	Resonance_Pull,
 	Reactive_Push,
 	Reactive_Pull,
-	Inline_Push,
+	Expand,
 	Product,
 }
 
@@ -432,7 +432,7 @@ sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
 		entry := Binding_Entry {
 			node            = idx,
 			name            = EMPTY_SPAN,
-			kind            = .Inline_Push,
+			kind            = .Pointing_Push,
 			value_node      = idx,
 			constraint_node = INVALID_NODE,
 			scope_id        = sem_current_scope(s),
@@ -569,7 +569,7 @@ sem_register_expand :: proc(s: ^Semantic, idx: Node_Index) {
 	entry := Binding_Entry {
 		node            = idx,
 		name            = EMPTY_SPAN,
-		kind            = .Inline_Push,
+		kind            = .Expand,
 		value_node      = operand,
 		constraint_node = INVALID_NODE,
 		scope_id        = sem_current_scope(s),
@@ -951,6 +951,15 @@ sem_resolve_by_ordinal :: proc(s: ^Semantic, scope_id: Scope_Id, name: string, o
 	return INVALID_BINDING, false
 }
 
+sem_resolve_by_index :: proc(s: ^Semantic, scope_id: Scope_Id, index: i16) -> (Binding_Id, bool) {
+	scope := s.scopes[scope_id]
+	first := u32(scope.first_binding)
+	if u32(index) < scope.binding_count {
+		return Binding_Id(first + u32(index)), true
+	}
+	return INVALID_BINDING, false
+}
+
 sem_resolve_builtin_binding :: proc(s: ^Semantic, name: string) -> (Binding_Id, bool) {
 	scope := s.scopes[s.builtin_scope]
 	first := u32(scope.first_binding)
@@ -972,7 +981,7 @@ sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> 
 	first := u32(scope.first_binding)
 	for i in first ..< first + scope.binding_count {
 		entry := &s.bindings[i]
-		if entry.kind == .Inline_Push && entry.value_kind == .Scope {
+		if entry.kind == .Expand && entry.value_kind == .Scope {
 			expanded_id, ok := sem_find_scope(s, entry.value.scope)
 			if ok {
 				bid, found := sem_resolve_in_scope(s, expanded_id, name)
@@ -1298,18 +1307,28 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 	pos := node_position(ast, idx)
 
 	if prop_idx == INVALID_NODE || node_kind(ast, prop_idx) != .Identifier {
+		if source_idx != INVALID_NODE {
+			sem_evaluate_value(s, source_idx)
+		}
 		sem_error(s, "Invalid property access without identifier", .Invalid_Property_Access, pos)
 		return .None, {}
 	}
 
 	prop_name := node_name_str(ast, prop_idx)
+	prop_ordinal := node_ordinal(ast, prop_idx)
 
 	if source_idx != INVALID_NODE {
 		svk, ssv := sem_evaluate_value(s, source_idx)
 		if svk == .Scope {
 			scope_id, ok := sem_find_scope(s, ssv.scope)
 			if ok {
-				bid, found := sem_resolve_in_scope(s, scope_id, prop_name)
+				bid: Binding_Id
+				found: bool
+				if prop_name == "" && prop_ordinal >= 0 {
+					bid, found = sem_resolve_by_index(s, scope_id, prop_ordinal)
+				} else {
+					bid, found = sem_resolve_in_scope(s, scope_id, prop_name)
+				}
 				if found {
 					entry := &s.bindings[bid]
 					if .Has_Value in entry.flags {
@@ -1326,7 +1345,13 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 		}
 	} else {
 		scope_id := sem_current_scope(s)
-		bid, found := sem_resolve_in_scope(s, scope_id, prop_name)
+		bid: Binding_Id
+		found: bool
+		if prop_name == "" && prop_ordinal >= 0 {
+			bid, found = sem_resolve_by_index(s, scope_id, prop_ordinal)
+		} else {
+			bid, found = sem_resolve_in_scope(s, scope_id, prop_name)
+		}
 		if found {
 			entry := &s.bindings[bid]
 			if .Has_Value in entry.flags {
@@ -1643,7 +1668,7 @@ sem_binding_kind_str :: proc(kind: Sem_Binding_Kind) -> string {
 	case .Resonance_Pull: return "-<<"
 	case .Reactive_Push:  return ">>="
 	case .Reactive_Pull:  return "=<<"
-	case .Inline_Push:    return "inline"
+	case .Expand:         return "expand"
 	case .Product:        return "product"
 	}
 	return "?"

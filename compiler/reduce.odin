@@ -415,132 +415,12 @@ reduced_equal :: proc(l, r: Reduced_Value) -> bool {
  * SECTION 7: CARVE REDUCTION
  * ====================================================================== */
 
-reduce_carve :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+build_carve_overrides :: proc(r: ^Reducer, carve_idx: Node_Index, scope_id: Scope_Id) -> [dynamic]Override {
 	ast := r.ast
-	source_idx := node_carve_source(ast, idx)
-
-	source := reduce_node(r, source_idx)
-	if source.kind != .Scope {
-		return source
-	}
-
-	scope_node := source.data.scope
-	scope_id, ok := sem_find_scope(r.sem, scope_node)
-	if !ok do return Reduced_Value{kind = .None}
-
 	scope := r.sem.scopes[scope_id]
 	first := u32(scope.first_binding)
 
 	overrides := make([dynamic]Override, 0, 8)
-	defer delete(overrides)
-
-	carve_children := node_carve_children(ast, idx)
-	named_idx := 0
-	for child in carve_children {
-		child_kind := node_kind(ast, child)
-
-		#partial switch child_kind {
-		case .Pointing, .PointingPull:
-			from_idx := node_left(ast, child)
-			to_idx := node_right(ast, child)
-			if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
-				name := node_name_str(ast, from_idx)
-				value := reduce_node(r, to_idx)
-				append(&overrides, Override{name = name, value = value})
-			} else if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Constraint {
-				name_idx := node_right(ast, from_idx)
-				if name_idx != INVALID_NODE && node_kind(ast, name_idx) == .Identifier {
-					name := node_name_str(ast, name_idx)
-					value := reduce_node(r, to_idx)
-					append(&overrides, Override{name = name, value = value})
-				}
-			}
-		case .Identifier:
-			name := node_name_str(ast, child)
-			value := reduce_node(r, child)
-			pos_idx := 0
-			for i in first ..< first + scope.binding_count {
-				entry := &r.sem.bindings[i]
-				if entry.kind != .Product && entry.name != EMPTY_SPAN {
-					if pos_idx == named_idx {
-						target_name := sem_span_str(ast, entry.name)
-						append(&overrides, Override{name = target_name, value = value})
-						break
-					}
-					pos_idx += 1
-				}
-			}
-			named_idx += 1
-		case:
-			value := reduce_node(r, child)
-			pos_idx := 0
-			for i in first ..< first + scope.binding_count {
-				entry := &r.sem.bindings[i]
-				if entry.kind != .Product && entry.name != EMPTY_SPAN {
-					if pos_idx == named_idx {
-						target_name := sem_span_str(ast, entry.name)
-						append(&overrides, Override{name = target_name, value = value})
-						break
-					}
-					pos_idx += 1
-				}
-			}
-			named_idx += 1
-		}
-	}
-
-	frame := Env_Frame {
-		scope_id  = scope_id,
-		overrides = overrides[:],
-	}
-	append(&r.env, frame)
-
-	result := Reduced_Value{kind = .Scope, data = {scope = scope_node}}
-
-	pop(&r.env)
-	return result
-}
-
-/* ======================================================================
- * SECTION 8: EXECUTE REDUCTION
- * ====================================================================== */
-
-reduce_execute :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
-	ast := r.ast
-	target_idx := node_execute_target(ast, idx)
-	target_kind := node_kind(ast, target_idx)
-
-	if target_kind == .Carve {
-		return reduce_carve_and_execute(r, target_idx)
-	}
-
-	target := reduce_node(r, target_idx)
-	if target.kind != .Scope do return target
-
-	scope_id, ok := sem_find_scope(r.sem, target.data.scope)
-	if !ok do return Reduced_Value{kind = .None}
-
-	return reduce_scope_product(r, scope_id, nil)
-}
-
-reduce_carve_and_execute :: proc(r: ^Reducer, carve_idx: Node_Index) -> Reduced_Value {
-	ast := r.ast
-	source_idx := node_carve_source(ast, carve_idx)
-
-	source := reduce_node(r, source_idx)
-	if source.kind != .Scope {
-		return source
-	}
-
-	scope_node := source.data.scope
-	scope_id, ok := sem_find_scope(r.sem, scope_node)
-	if !ok do return Reduced_Value{kind = .None}
-
-	scope := r.sem.scopes[scope_id]
-	first := u32(scope.first_binding)
-
-	overrides := make([dynamic]Override, 0, 8)
-	defer delete(overrides)
 
 	carve_children := node_carve_children(ast, carve_idx)
 	named_idx := 0
@@ -581,6 +461,73 @@ reduce_carve_and_execute :: proc(r: ^Reducer, carve_idx: Node_Index) -> Reduced_
 		}
 	}
 
+	return overrides
+}
+
+reduce_carve :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	source_idx := node_carve_source(ast, idx)
+
+	source := reduce_node(r, source_idx)
+	if source.kind != .Scope {
+		return source
+	}
+
+	scope_node := source.data.scope
+	scope_id, ok := sem_find_scope(r.sem, scope_node)
+	if !ok do return Reduced_Value{kind = .None}
+
+	overrides := build_carve_overrides(r, idx, scope_id)
+	defer delete(overrides)
+
+	frame := Env_Frame {
+		scope_id  = scope_id,
+		overrides = overrides[:],
+	}
+	append(&r.env, frame)
+
+	result := Reduced_Value{kind = .Scope, data = {scope = scope_node}}
+
+	pop(&r.env)
+	return result
+}
+
+/* ======================================================================
+ * SECTION 8: EXECUTE REDUCTION
+ * ====================================================================== */
+
+reduce_execute :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
+	ast := r.ast
+	target_idx := node_execute_target(ast, idx)
+	target_kind := node_kind(ast, target_idx)
+
+	if target_kind == .Carve {
+		return reduce_carve_and_execute(r, target_idx)
+	}
+
+	target := reduce_node(r, target_idx)
+	if target.kind != .Scope do return target
+
+	scope_id, ok := sem_find_scope(r.sem, target.data.scope)
+	if !ok do return Reduced_Value{kind = .None}
+
+	return reduce_scope_product(r, scope_id, nil)
+}
+
+reduce_carve_and_execute :: proc(r: ^Reducer, carve_idx: Node_Index) -> Reduced_Value {
+	source_idx := node_carve_source(r.ast, carve_idx)
+
+	source := reduce_node(r, source_idx)
+	if source.kind != .Scope {
+		return source
+	}
+
+	scope_id, ok := sem_find_scope(r.sem, source.data.scope)
+	if !ok do return Reduced_Value{kind = .None}
+
+	overrides := build_carve_overrides(r, carve_idx, scope_id)
+	defer delete(overrides)
+
 	return reduce_scope_product(r, scope_id, overrides[:])
 }
 
@@ -603,18 +550,46 @@ find_scope_product :: proc(r: ^Reducer, scope_id: Scope_Id) -> Reduced_Value {
 		if entry.kind == .Product {
 			return reduce_node(r, entry.value_node)
 		}
-		if entry.kind == .Inline_Push {
-			inline_val := reduce_node(r, entry.value_node)
-			if inline_val.kind == .Scope {
-				expanded_id, ok := sem_find_scope(r.sem, inline_val.data.scope)
-				if ok {
-					inner := find_scope_product(r, expanded_id)
-					if inner.kind != .None do return inner
+		if entry.kind == .Expand {
+			if entry.value_node != INVALID_NODE && node_kind(r.ast, entry.value_node) == .Carve {
+				carve_idx := entry.value_node
+				source_idx := node_carve_source(r.ast, carve_idx)
+				source := reduce_node(r, source_idx)
+				if source.kind == .Scope {
+					expanded_id, ok := sem_find_scope(r.sem, source.data.scope)
+					if ok {
+						overrides := build_carve_overrides(r, carve_idx, expanded_id)
+						apply_parent_overrides(r, &overrides)
+						inner := reduce_scope_product(r, expanded_id, overrides[:])
+						delete(overrides)
+						if inner.kind != .None do return inner
+					}
+				}
+			} else {
+				inline_val := reduce_node(r, entry.value_node)
+				if inline_val.kind == .Scope {
+					expanded_id, ok := sem_find_scope(r.sem, inline_val.data.scope)
+					if ok {
+						inner := reduce_scope_product(r, expanded_id, nil)
+						if inner.kind != .None do return inner
+					}
 				}
 			}
 		}
 	}
 	return Reduced_Value{kind = .None}
+}
+
+apply_parent_overrides :: proc(r: ^Reducer, overrides: ^[dynamic]Override) {
+	for i := len(r.env) - 1; i >= 0; i -= 1 {
+		for parent_ov in r.env[i].overrides {
+			for &ov in overrides {
+				if ov.name == parent_ov.name {
+					ov.value = parent_ov.value
+				}
+			}
+		}
+	}
 }
 
 /* ======================================================================
@@ -687,13 +662,20 @@ reduce_property :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 	}
 
 	prop_name := node_name_str(ast, prop_idx)
+	prop_ordinal := node_ordinal(ast, prop_idx)
 
 	if source_idx != INVALID_NODE {
 		source := reduce_node(r, source_idx)
 		if source.kind == .Scope {
 			scope_id, ok := sem_find_scope(r.sem, source.data.scope)
 			if ok {
-				bid, found := sem_resolve_in_scope(r.sem, scope_id, prop_name)
+				bid: Binding_Id
+				found: bool
+				if prop_name == "" && prop_ordinal >= 0 {
+					bid, found = sem_resolve_by_index(r.sem, scope_id, prop_ordinal)
+				} else {
+					bid, found = sem_resolve_in_scope(r.sem, scope_id, prop_name)
+				}
 				if found {
 					return reduce_node(r, r.sem.bindings[bid].value_node)
 				}

@@ -545,6 +545,7 @@ init_lex_dispatch :: proc "contextless" () {
 	for c in u8('a') ..= u8('z') {LEX_DISPATCH[c] = lex_ident}
 	for c in u8('A') ..= u8('Z') {LEX_DISPATCH[c] = lex_ident}
 	LEX_DISPATCH['_'] = lex_ident
+	LEX_DISPATCH['#'] = lex_hash
 
 	PAIR_LESS['='] = {.LessEqual, 2}
 	PAIR_LESS['<'] = {.LShift, 2}
@@ -769,6 +770,21 @@ lex_ident :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 		l.offset = off
 	}
 	return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
+}
+
+lex_hash :: proc(l: ^Lexer, start: u32, flags: u8) -> Token {
+	src := l.src
+	slen := l.source_len
+	off := start + 1
+	if off < slen && IS_DIGIT[src[off]] {
+		for off < slen && IS_DIGIT[src[off]] {
+			off += 1
+		}
+		l.offset = off
+		return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
+	}
+	l.offset = start + 1
+	return Token{kind = .Invalid, span = Span{start, start + 1}, flags = flags}
 }
 
 lex_invalid :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
@@ -1806,15 +1822,8 @@ parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		return INVALID_NODE
 	}
 
-	prop_span := parser.current_token.span
-	advance_token(parser)
-
-	prop_data: Node_Data
-	prop_data.identifier = Identifier_Data {
-		name    = prop_span,
-		capture = EMPTY_SPAN,
-	}
-	prop_id := add_node(parser, .Identifier, prop_data, prop_span)
+	prop_id := parse_identifier(parser)
+	prop_span := parser.node_spans[prop_id]
 
 	data: Node_Data
 	data.binary = Binary_Data {
@@ -1833,15 +1842,8 @@ parse_property_from_none :: proc(parser: ^Parser) -> Node_Index {
 		return INVALID_NODE
 	}
 
-	prop_span := parser.current_token.span
-	advance_token(parser)
-
-	prop_data: Node_Data
-	prop_data.identifier = Identifier_Data {
-		name    = prop_span,
-		capture = EMPTY_SPAN,
-	}
-	prop_id := add_node(parser, .Identifier, prop_data, prop_span)
+	prop_id := parse_identifier(parser)
+	prop_span := parser.node_spans[prop_id]
 
 	data: Node_Data
 	data.binary = Binary_Data {
