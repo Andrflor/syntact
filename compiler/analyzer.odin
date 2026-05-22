@@ -741,17 +741,45 @@ sem_evaluate_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	}
 }
 
+sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string {
+	csem := s.node_sems[constraint_node]
+	if csem.value_kind == .Builtin {
+		return builtin_def_by_id(csem.value.builtin).name
+	}
+	if csem.value_kind == .Scope {
+		return "scope"
+	}
+	return "unknown"
+}
+
+sem_value_kind_name :: proc(vk: Value_Kind) -> string {
+	switch vk {
+	case .Integer:        return "integer"
+	case .Float:          return "float"
+	case .Bool:           return "bool"
+	case .String_Literal: return "string"
+	case .Scope:          return "scope"
+	case .Builtin:        return "type"
+	case .Ref:            return "ref"
+	case .Symbolic:       return "symbolic"
+	case .None:           return "none"
+	}
+	return "unknown"
+}
+
 sem_typecheck_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.constraint_node == INVALID_NODE do return
 	if entry.value_kind == .Symbolic || entry.value_kind == .Ref do return
 	if entry.value_kind == .None do return
 
 	csem := s.node_sems[entry.constraint_node]
+	binding_name := sem_span_str(s.ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
 
 	if csem.value_kind == .Builtin {
 		if sem_typecheck_builtin(s, csem.value.builtin, entry) do return
 		pos := node_position(s.ast, entry.node)
-		sem_error(s, fmt.tprintf("Type mismatch: value is not compatible with constraint"), .Type_Mismatch, pos)
+		cname := builtin_def_by_id(csem.value.builtin).name
+		sem_error(s, fmt.tprintf("'%s' expects %s, got %s", binding_name, cname, sem_value_kind_name(entry.value_kind)), .Type_Mismatch, pos)
 		dvk, dsv := builtin_default_value(csem.value.builtin)
 		entry.value_kind = dvk
 		entry.value = dsv
@@ -761,7 +789,7 @@ sem_typecheck_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if csem.value_kind == .Scope {
 		if sem_typecheck_by_scope(s, csem.value.scope, entry.value_kind, entry.value) do return
 		pos := node_position(s.ast, entry.node)
-		sem_error(s, fmt.tprintf("Type mismatch: value is not compatible with scope constraint"), .Type_Mismatch, pos)
+		sem_error(s, fmt.tprintf("'%s' does not match its scope constraint, got %s", binding_name, sem_value_kind_name(entry.value_kind)), .Type_Mismatch, pos)
 		dvk, dsv := sem_resolve_default(s, entry.constraint_node)
 		if dvk != .None {
 			entry.value_kind = dvk
@@ -1122,8 +1150,25 @@ sem_resolve_by_ordinal :: proc(s: ^Semantic, scope_id: Scope_Id, name: string, o
 sem_resolve_by_index :: proc(s: ^Semantic, scope_id: Scope_Id, index: i16) -> (Binding_Id, bool) {
 	scope := s.scopes[scope_id]
 	first := u32(scope.first_binding)
-	if u32(index) < scope.binding_count {
-		return Binding_Id(first + u32(index)), true
+	pos: i16 = 0
+	for i in first ..< first + scope.binding_count {
+		entry := &s.bindings[i]
+		if entry.kind == .Expand && entry.value_kind == .Scope {
+			expanded_id, ok := sem_find_scope(s, entry.value.scope)
+			if ok {
+				expanded_count := i16(s.scopes[expanded_id].binding_count)
+				if index < pos + expanded_count {
+					return sem_resolve_by_index(s, expanded_id, index - pos)
+				}
+				pos += expanded_count
+			}
+			continue
+		}
+		if entry.kind == .Product do continue
+		if pos == index {
+			return Binding_Id(i), true
+		}
+		pos += 1
 	}
 	return INVALID_BINDING, false
 }
@@ -1560,26 +1605,60 @@ sem_evaluate_range :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
  * SECTION 14: CARVE EVALUATION
  * ====================================================================== */
 
+sem_typecheck_carve_override :: proc(s: ^Semantic, target_entry: ^Binding_Entry, vk: Value_Kind, sv: Static_Value, name: string, pos: Position) {
+	if vk == .Symbolic || vk == .Ref || vk == .None do return
+	if .Has_Constraint not_in target_entry.flags do return
+	if target_entry.constraint_node == INVALID_NODE do return
+
+	csem := s.node_sems[target_entry.constraint_node]
+	if csem.value_kind == .Builtin {
+		test_entry := Binding_Entry{ value_kind = vk, value = sv }
+		if !sem_typecheck_builtin(s, csem.value.builtin, &test_entry) {
+			cname := builtin_def_by_id(csem.value.builtin).name
+			sem_error(s, fmt.tprintf("Carve override '%s' expects %s, got %s", name, cname, sem_value_kind_name(vk)), .Type_Mismatch, pos)
+		}
+	} else if csem.value_kind == .Scope {
+		if !sem_typecheck_by_scope(s, csem.value.scope, vk, sv) {
+			sem_error(s, fmt.tprintf("Carve override '%s' does not match its scope constraint, got %s", name, sem_value_kind_name(vk)), .Type_Mismatch, pos)
+		}
+	}
+}
+
 sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_id: Scope_Id = INVALID_SCOPE) {
 	ast := s.ast
+	positional_idx: i16 = 0
+
 	for child in node_carve_children(ast, idx) {
 		ck := node_kind(ast, child)
 		#partial switch ck {
 		case .Pointing, .PointingPull:
 			from_idx := node_left(ast, child)
 			to_idx := node_right(ast, child)
+			vk: Value_Kind
+			sv: Static_Value
 			if to_idx != INVALID_NODE {
-				sem_evaluate_value(s, to_idx)
+				vk, sv = sem_evaluate_value(s, to_idx)
 			}
 			if target_scope_id != INVALID_SCOPE && from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
 				name := node_name_str(ast, from_idx)
-				_, found := sem_resolve_in_scope(s, target_scope_id, name)
+				bid, found := sem_resolve_in_scope(s, target_scope_id, name)
 				if !found {
 					sem_error(s, fmt.tprintf("Unknown override '%s' in carve", name), .Undefined_Identifier, node_position(ast, from_idx))
+				} else if to_idx != INVALID_NODE {
+					sem_typecheck_carve_override(s, &s.bindings[bid], vk, sv, name, node_position(ast, child))
 				}
 			}
 		case:
-			sem_evaluate_value(s, child)
+			vk, sv := sem_evaluate_value(s, child)
+			if target_scope_id != INVALID_SCOPE {
+				bid, found := sem_resolve_by_index(s, target_scope_id, positional_idx)
+				if found {
+					target_entry := &s.bindings[bid]
+					name := sem_span_str(ast, target_entry.name) if target_entry.name != EMPTY_SPAN else fmt.tprintf("#%d", positional_idx)
+					sem_typecheck_carve_override(s, target_entry, vk, sv, name, node_position(ast, child))
+				}
+				positional_idx += 1
+			}
 		}
 	}
 }
