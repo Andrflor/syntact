@@ -2,6 +2,7 @@ package compiler
 
 import "core:fmt"
 import "core:strconv"
+import "core:strings"
 
 /* ======================================================================
  * SECTION 1: TYPES
@@ -17,8 +18,9 @@ Reduced_Kind :: enum u8 {
 }
 
 Reduced_Value :: struct {
-	kind:    Reduced_Kind,
-	data:    Reduced_Data,
+	kind:       Reduced_Kind,
+	data:       Reduced_Data,
+	extra_scopes: []Node_Index,
 }
 
 Reduced_Data :: struct #raw_union {
@@ -40,12 +42,13 @@ Env_Frame :: struct {
 }
 
 Reducer :: struct {
-	sem:       ^Semantic,
-	ast:       ^Ast,
-	env:       [dynamic]Env_Frame,
-	errors:    [dynamic]Analyzer_Error,
-	max_depth: int,
-	depth:     int,
+	sem:             ^Semantic,
+	ast:             ^Ast,
+	env:             [dynamic]Env_Frame,
+	errors:          [dynamic]Analyzer_Error,
+	max_depth:       int,
+	depth:           int,
+	current_binding: Binding_Id,
 }
 
 REDUCE_MAX_DEPTH :: 1024
@@ -56,12 +59,13 @@ REDUCE_MAX_DEPTH :: 1024
 
 reduce :: proc(sem: ^Semantic, ast: ^Ast) -> Reduced_Value {
 	r := Reducer {
-		sem       = sem,
-		ast       = ast,
-		env       = make([dynamic]Env_Frame, 0, 16),
-		errors    = make([dynamic]Analyzer_Error, 0),
-		max_depth = REDUCE_MAX_DEPTH,
-		depth     = 0,
+		sem             = sem,
+		ast             = ast,
+		env             = make([dynamic]Env_Frame, 0, 16),
+		errors          = make([dynamic]Analyzer_Error, 0),
+		max_depth       = REDUCE_MAX_DEPTH,
+		depth           = 0,
+		current_binding = INVALID_BINDING,
 	}
 
 	root_scope_id := Scope_Id(1)
@@ -205,7 +209,11 @@ reduce_literal :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 reduce_binding :: proc(r: ^Reducer, bid: Binding_Id) -> Reduced_Value {
 	entry := &r.sem.bindings[bid]
 	if entry.value_node != INVALID_NODE {
-		return reduce_node(r, entry.value_node)
+		prev := r.current_binding
+		r.current_binding = bid
+		result := reduce_node(r, entry.value_node)
+		r.current_binding = prev
+		return result
 	}
 	if .Has_Value in entry.flags {
 		return static_to_reduced(entry.value_kind, entry.value, r.ast)
@@ -236,6 +244,13 @@ reduce_identifier :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 			} else {
 				bid, found := sem_resolve_in_scope(r.sem, frame.scope_id, name)
 				if found {
+					if bid == r.current_binding && frame.scope_id == r.sem.bindings[bid].scope_id {
+						prev, prev_found := resolve_previous_binding(r, frame.scope_id, name, bid)
+						if prev_found {
+							return reduce_binding(r, prev)
+						}
+						continue
+					}
 					return reduce_binding(r, bid)
 				}
 			}
@@ -368,8 +383,20 @@ reduce_math :: proc(l, r: Reduced_Value, op: Operator_Kind) -> Reduced_Value {
 		}
 		return rv
 	}
-	if (l.kind == .Scope || r.kind == .Scope) && op == .Add {
-		return l if l.kind == .Scope else r
+	if l.kind == .Scope && r.kind == .Scope && op == .Add {
+		extras := make([dynamic]Node_Index, 0, 4)
+		if l.extra_scopes != nil {
+			for s in l.extra_scopes do append(&extras, s)
+		}
+		append(&extras, r.data.scope)
+		if r.extra_scopes != nil {
+			for s in r.extra_scopes do append(&extras, s)
+		}
+
+		rv.kind = .Scope
+		rv.data.scope = l.data.scope
+		rv.extra_scopes = extras[:]
+		return rv
 	}
 	return Reduced_Value{kind = .None}
 }
@@ -742,6 +769,21 @@ static_to_reduced :: proc(vk: Value_Kind, sv: Static_Value, ast: ^Ast) -> Reduce
 	return rv
 }
 
+resolve_previous_binding :: proc(r: ^Reducer, scope_id: Scope_Id, name: string, current: Binding_Id) -> (Binding_Id, bool) {
+	scope := r.sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+	last_found := INVALID_BINDING
+	for i in first ..< first + scope.binding_count {
+		bid := Binding_Id(i)
+		if bid == current do break
+		entry := &r.sem.bindings[i]
+		if entry.name != EMPTY_SPAN && sem_span_str(r.ast, entry.name) == name {
+			last_found = bid
+		}
+	}
+	return last_found, last_found != INVALID_BINDING
+}
+
 reduce_error :: proc(r: ^Reducer, message: string, error_type: Analyzer_Error_Type, idx: Node_Index) {
 	pos := node_position(r.ast, idx) if idx != INVALID_NODE else Position{}
 	append(&r.errors, Analyzer_Error {
@@ -751,7 +793,7 @@ reduce_error :: proc(r: ^Reducer, message: string, error_type: Analyzer_Error_Ty
 	})
 }
 
-reduced_to_string :: proc(rv: Reduced_Value) -> string {
+reduced_to_string :: proc(rv: Reduced_Value, sem: ^Semantic = nil, ast: ^Ast = nil) -> string {
 	switch rv.kind {
 	case .None:    return fmt.tprintf("none")
 	case .Integer:
@@ -763,11 +805,124 @@ reduced_to_string :: proc(rv: Reduced_Value) -> string {
 	case .Float:   return fmt.tprintf("%f", rv.data.float_v.content)
 	case .Bool:    return fmt.tprintf("%v", rv.data.bool_v)
 	case .String:  return fmt.tprintf("\"%s\"", rv.data.str)
-	case .Scope:   return fmt.tprintf("scope@%d", rv.data.scope)
+	case .Scope:
+		if sem != nil && ast != nil {
+			if rv.extra_scopes != nil {
+				return composite_scope_to_string(rv.data.scope, rv.extra_scopes, sem, ast)
+			}
+			return scope_to_string(rv.data.scope, sem, ast)
+		}
+		return fmt.tprintf("scope@%d", rv.data.scope)
 	}
 	return "none"
 }
 
-print_reduced :: proc(rv: Reduced_Value) {
-	fmt.println(reduced_to_string(rv))
+scope_to_string :: proc(scope_node: Node_Index, sem: ^Semantic, ast: ^Ast, depth: int = 0) -> string {
+	if depth > 8 do return "{...}"
+
+	b := strings.builder_make(0, 128)
+	strings.write_string(&b, "{ ")
+	write_scope_bindings(&b, scope_node, sem, ast, depth, 0)
+	strings.write_string(&b, " }")
+	return strings.to_string(b)
+}
+
+composite_scope_to_string :: proc(first_scope: Node_Index, extra: []Node_Index, sem: ^Semantic, ast: ^Ast) -> string {
+	b := strings.builder_make(0, 128)
+	strings.write_string(&b, "{ ")
+	count := write_scope_bindings(&b, first_scope, sem, ast, 0, 0)
+	for s in extra {
+		count = write_scope_bindings(&b, s, sem, ast, 0, count)
+	}
+	strings.write_string(&b, " }")
+	return strings.to_string(b)
+}
+
+@(private = "file")
+write_scope_bindings :: proc(b: ^strings.Builder, scope_node: Node_Index, sem: ^Semantic, ast: ^Ast, depth: int, start_count: int) -> int {
+	scope_id, ok := sem_find_scope(sem, scope_node)
+	if !ok do return start_count
+
+	scope := sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+
+	count := start_count
+	for i in first ..< first + scope.binding_count {
+		entry := &sem.bindings[i]
+		name := sem_span_str(ast, entry.name)
+
+		if count > 0 do strings.write_string(b, ", ")
+
+		if entry.kind == .Product {
+			strings.write_string(b, "-> ")
+			write_binding_value(b, entry, sem, ast, depth)
+		} else {
+			constraint_str := ""
+			if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
+				constraint_str = sem_constraint_name(sem, entry.constraint_node)
+			}
+			if constraint_str != "" && constraint_str != "unknown" {
+				strings.write_string(b, constraint_str)
+				strings.write_string(b, ":")
+			}
+			if name != "" {
+				strings.write_string(b, name)
+				strings.write_string(b, " -> ")
+			}
+			write_binding_value(b, entry, sem, ast, depth)
+		}
+		count += 1
+	}
+	return count
+}
+
+@(private = "file")
+write_binding_value :: proc(b: ^strings.Builder, entry: ^Binding_Entry, sem: ^Semantic, ast: ^Ast, depth: int) {
+	if .Has_Value in entry.flags {
+		switch entry.value_kind {
+		case .Integer:
+			if entry.value.integer.negative {
+				fmt.sbprintf(b, "-%d", entry.value.integer.content)
+			} else {
+				fmt.sbprintf(b, "%d", entry.value.integer.content)
+			}
+		case .Float:
+			fmt.sbprintf(b, "%f", entry.value.float_v.content)
+		case .Bool:
+			fmt.sbprintf(b, "%v", entry.value.bool_v)
+		case .String_Literal:
+			fmt.sbprintf(b, "\"%s\"", sem_span_str(ast, entry.value.str_span))
+		case .Scope:
+			strings.write_string(b, scope_to_string(entry.value.scope, sem, ast, depth + 1))
+		case .None, .Ref, .Symbolic, .Builtin:
+			if entry.value_node != INVALID_NODE {
+				text := node_text(ast, entry.value_node)
+				if text != "" {
+					strings.write_string(b, text)
+				} else {
+					strings.write_string(b, "?")
+				}
+			} else {
+				strings.write_string(b, "?")
+			}
+		}
+	} else if entry.value_node != INVALID_NODE {
+		vk := node_kind(ast, entry.value_node)
+		if vk == .ScopeNode {
+			strings.write_string(b, scope_to_string(entry.value_node, sem, ast, depth + 1))
+		} else {
+			text := node_text(ast, entry.value_node)
+			if text != "" {
+				strings.write_string(b, text)
+			} else {
+				strings.write_string(b, "?")
+			}
+		}
+	} else {
+		strings.write_string(b, "?")
+	}
+}
+
+print_reduced :: proc(rv: Reduced_Value, sem: ^Semantic = nil, ast: ^Ast = nil) {
+	fmt.println(reduced_to_string(rv, sem, ast))
 }
