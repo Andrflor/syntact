@@ -748,18 +748,23 @@ reduce_error :: proc(r: ^Reducer, message: string, error_type: Analyzer_Error_Ty
 	})
 }
 
-print_reduced :: proc(rv: Reduced_Value) {
+reduced_to_string :: proc(rv: Reduced_Value) -> string {
 	switch rv.kind {
-	case .None:    fmt.println("none")
+	case .None:    return fmt.tprintf("none")
 	case .Integer:
 		if rv.data.integer.negative {
-			fmt.printf("-%d\n", rv.data.integer.content)
+			return fmt.tprintf("-%d", rv.data.integer.content)
 		} else {
-			fmt.printf("%d\n", rv.data.integer.content)
+			return fmt.tprintf("%d", rv.data.integer.content)
 		}
-	case .Float:   fmt.printf("%f\n", rv.data.float_v.content)
-	case .Bool:    fmt.println(rv.data.bool_v)
-	case .String:  fmt.printf("\"%s\"\n", rv.data.str)
-	case .Scope:   fmt.printf("scope@%d\n", rv.data.scope)
+	case .Float:   return fmt.tprintf("%f", rv.data.float_v.content)
+	case .Bool:    return fmt.tprintf("%v", rv.data.bool_v)
+	case .String:  return fmt.tprintf("\"%s\"", rv.data.str)
+	case .Scope:   return fmt.tprintf("scope@%d", rv.data.scope)
 	}
+	return "none"
+}
+
+print_reduced :: proc(rv: Reduced_Value) {
+	fmt.println(reduced_to_string(rv))
 }
