@@ -767,6 +767,12 @@ sem_value_kind_name :: proc(vk: Value_Kind) -> string {
 	return "unknown"
 }
 
+Typecheck_Override :: struct {
+	binding_id: Binding_Id,
+	value_kind: Value_Kind,
+	value:      Static_Value,
+}
+
 sem_typecheck_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.constraint_node == INVALID_NODE do return
 	if entry.value_kind == .Symbolic || entry.value_kind == .Ref do return
@@ -787,7 +793,8 @@ sem_typecheck_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	}
 
 	if csem.value_kind == .Scope {
-		if sem_typecheck_by_scope(s, csem.value.scope, entry.value_kind, entry.value) do return
+		overrides := sem_extract_carve_overrides(s, entry.constraint_node)
+		if sem_typecheck_by_scope(s, csem.value.scope, entry.value_kind, entry.value, overrides[:]) do return
 		pos := node_position(s.ast, entry.node)
 		sem_error(s, fmt.tprintf("'%s' does not match its scope constraint, got %s", binding_name, sem_value_kind_name(entry.value_kind)), .Type_Mismatch, pos)
 		dvk, dsv := sem_resolve_default(s, entry.constraint_node)
@@ -797,6 +804,46 @@ sem_typecheck_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 		}
 		return
 	}
+}
+
+sem_extract_carve_overrides :: proc(s: ^Semantic, constraint_node: Node_Index) -> [dynamic]Typecheck_Override {
+	overrides := make([dynamic]Typecheck_Override, 0, 4)
+	if constraint_node == INVALID_NODE do return overrides
+	ast := s.ast
+	if node_kind(ast, constraint_node) != .Carve do return overrides
+
+	source_idx := node_carve_source(ast, constraint_node)
+	svk, ssv := s.node_sems[source_idx].value_kind, s.node_sems[source_idx].value
+	if svk != .Scope do return overrides
+
+	target_scope_id, ok := sem_find_scope(s, ssv.scope)
+	if !ok do return overrides
+
+	positional_idx: i16 = 0
+	for child in node_carve_children(ast, constraint_node) {
+		ck := node_kind(ast, child)
+		#partial switch ck {
+		case .Pointing, .PointingPull:
+			from_idx := node_left(ast, child)
+			to_idx := node_right(ast, child)
+			if from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
+				name := node_name_str(ast, from_idx)
+				bid, found := sem_resolve_in_scope(s, target_scope_id, name)
+				if found && to_idx != INVALID_NODE {
+					child_sem := s.node_sems[to_idx]
+					append(&overrides, Typecheck_Override{binding_id = bid, value_kind = child_sem.value_kind, value = child_sem.value})
+				}
+			}
+		case:
+			child_sem := s.node_sems[child]
+			bid, found := sem_resolve_by_index(s, target_scope_id, positional_idx)
+			if found {
+				append(&overrides, Typecheck_Override{binding_id = bid, value_kind = child_sem.value_kind, value = child_sem.value})
+			}
+			positional_idx += 1
+		}
+	}
+	return overrides
 }
 
 sem_typecheck_builtin :: proc(s: ^Semantic, bid: Builtin_Id, entry: ^Binding_Entry) -> bool {
@@ -860,7 +907,7 @@ sem_typecheck_float :: proc(val: ^Float_SV, constr_kind: FloatKind) -> bool {
 	return false
 }
 
-sem_typecheck_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_Kind, sv: Static_Value) -> bool {
+sem_typecheck_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_Kind, sv: Static_Value, overrides: []Typecheck_Override = {}) -> bool {
 	scope_id, ok := sem_find_scope(s, scope_node)
 	if !ok do return false
 
@@ -874,22 +921,140 @@ sem_typecheck_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_K
 		has_product = true
 
 		if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
-			csem := s.node_sems[entry.constraint_node]
-			if csem.value_kind == .Builtin {
-				test_entry := Binding_Entry{ value_kind = vk, value = sv }
-				if sem_typecheck_builtin(s, csem.value.builtin, &test_entry) do return true
-			} else if csem.value_kind == .Scope {
-				if sem_typecheck_by_scope(s, csem.value.scope, vk, sv) do return true
+			resolved_vk, resolved_sv, resolved := sem_resolve_constraint_with_overrides(s, entry.constraint_node, overrides)
+			if resolved {
+				if resolved_vk == .Builtin {
+					test_entry := Binding_Entry{ value_kind = vk, value = sv }
+					if sem_typecheck_builtin(s, resolved_sv.builtin, &test_entry) do return true
+				} else if resolved_vk == .Scope {
+					if sem_typecheck_by_scope(s, resolved_sv.scope, vk, sv, overrides) do return true
+				}
+			} else {
+				csem := s.node_sems[entry.constraint_node]
+				if csem.value_kind == .Builtin {
+					test_entry := Binding_Entry{ value_kind = vk, value = sv }
+					if sem_typecheck_builtin(s, csem.value.builtin, &test_entry) do return true
+				} else if csem.value_kind == .Scope {
+					if sem_typecheck_by_scope(s, csem.value.scope, vk, sv, overrides) do return true
+				}
 			}
 		} else if .Has_Value in entry.flags {
-			if sem_typecheck_by_value(entry.value_kind, entry.value, vk, sv) do return true
+			if entry.value_kind == .Scope && vk == .Scope {
+				if sem_typecheck_scope_structural(s, sv.scope, entry.value.scope, overrides) do return true
+			} else {
+				if sem_typecheck_by_value(entry.value_kind, entry.value, vk, sv) do return true
+			}
 		}
 	}
 
 	if !has_product {
-		return vk == .Scope
+		if vk == .Scope {
+			return sem_typecheck_scope_structural(s, sv.scope, scope_node, overrides)
+		}
+		return false
 	}
 	return false
+}
+
+sem_resolve_constraint_with_overrides :: proc(s: ^Semantic, constraint_node: Node_Index, overrides: []Typecheck_Override) -> (Value_Kind, Static_Value, bool) {
+	if constraint_node == INVALID_NODE do return .None, {}, false
+
+	csem := s.node_sems[constraint_node]
+
+	if csem.ref_binding != INVALID_BINDING {
+		for ov in overrides {
+			if ov.binding_id == csem.ref_binding {
+				return ov.value_kind, ov.value, true
+			}
+		}
+	}
+
+	return .None, {}, false
+}
+
+sem_typecheck_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, constraint_scope_node: Node_Index, overrides: []Typecheck_Override) -> bool {
+	val_scope_id, vok := sem_find_scope(s, value_scope_node)
+	if !vok do return true
+
+	con_scope_id, cok := sem_find_scope(s, constraint_scope_node)
+	if !cok do return true
+
+	con_scope := s.scopes[con_scope_id]
+	val_scope_tmp := s.scopes[val_scope_id]
+
+	con_element_count: u32 = 0
+	has_expand := false
+	cfirst := u32(con_scope.first_binding)
+	for i in cfirst ..< cfirst + con_scope.binding_count {
+		e := &s.bindings[i]
+		if e.kind == .Expand { has_expand = true; continue }
+		if e.kind == .Product do continue
+		con_element_count += 1
+	}
+
+	val_element_count: u32 = 0
+	vfirst_tmp := u32(val_scope_tmp.first_binding)
+	for i in vfirst_tmp ..< vfirst_tmp + val_scope_tmp.binding_count {
+		e := &s.bindings[i]
+		if e.kind != .Product && e.kind != .Expand do val_element_count += 1
+	}
+
+	if con_element_count == 0 && !has_expand {
+		return val_element_count == 0
+	}
+
+	element_constraint_vk, element_constraint_sv, has_element_constraint := sem_find_element_constraint(s, con_scope_id, overrides)
+
+	if !has_element_constraint do return true
+
+	val_scope := s.scopes[val_scope_id]
+	vfirst := u32(val_scope.first_binding)
+
+	for i in vfirst ..< vfirst + val_scope.binding_count {
+		val_entry := &s.bindings[i]
+		if val_entry.kind == .Product || val_entry.kind == .Expand do continue
+		if .Has_Value not_in val_entry.flags do continue
+
+		if .Has_Constraint in val_entry.flags && val_entry.constraint_node != INVALID_NODE {
+			continue
+		}
+
+		if element_constraint_vk == .Builtin {
+			test_entry := Binding_Entry{ value_kind = val_entry.value_kind, value = val_entry.value }
+			if !sem_typecheck_builtin(s, element_constraint_sv.builtin, &test_entry) {
+				return false
+			}
+		} else if element_constraint_vk == .Scope {
+			if !sem_typecheck_by_scope(s, element_constraint_sv.scope, val_entry.value_kind, val_entry.value, overrides) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+sem_find_element_constraint :: proc(s: ^Semantic, scope_id: Scope_Id, overrides: []Typecheck_Override) -> (Value_Kind, Static_Value, bool) {
+	scope := s.scopes[scope_id]
+	first := u32(scope.first_binding)
+
+	for i in first ..< first + scope.binding_count {
+		entry := &s.bindings[i]
+		if entry.kind == .Product || entry.kind == .Expand do continue
+		if .Has_Constraint not_in entry.flags do continue
+		if entry.constraint_node == INVALID_NODE do continue
+
+		resolved_vk, resolved_sv, resolved := sem_resolve_constraint_with_overrides(s, entry.constraint_node, overrides)
+		if resolved {
+			return resolved_vk, resolved_sv, true
+		}
+
+		csem := s.node_sems[entry.constraint_node]
+		if csem.value_kind == .Builtin || csem.value_kind == .Scope {
+			return csem.value_kind, csem.value, true
+		}
+	}
+
+	return .None, {}, false
 }
 
 sem_typecheck_by_value :: proc(constr_vk: Value_Kind, constr_sv: Static_Value, val_vk: Value_Kind, val_sv: Static_Value) -> bool {
@@ -1367,6 +1532,10 @@ sem_fold_math :: proc(
 			return .None, {}
 		}
 		return .Float, sv
+	}
+
+	if (lvk == .Scope || rvk == .Scope) && op == .Add {
+		return .Scope, lsv if lvk == .Scope else rsv
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)

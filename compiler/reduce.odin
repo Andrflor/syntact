@@ -368,6 +368,9 @@ reduce_math :: proc(l, r: Reduced_Value, op: Operator_Kind) -> Reduced_Value {
 		}
 		return rv
 	}
+	if (l.kind == .Scope || r.kind == .Scope) && op == .Add {
+		return l if l.kind == .Scope else r
+	}
 	return Reduced_Value{kind = .None}
 }
 
