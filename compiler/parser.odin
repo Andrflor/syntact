@@ -2261,7 +2261,10 @@ parse_reactive_push_prefix :: proc(parser: ^Parser) -> Node_Index {
 	}
 
 	data: Node_Data
-	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	data.binary = Binary_Data {
+		left  = INVALID_NODE,
+		right = to,
+	}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
 		span_end = parser.node_spans[to].end
@@ -2281,7 +2284,10 @@ parse_reactive_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	}
 
 	data: Node_Data
-	data.binary = Binary_Data{left = left, right = to}
+	data.binary = Binary_Data {
+		left  = left,
+		right = to,
+	}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
 		span_end = parser.node_spans[to].end
@@ -2301,7 +2307,10 @@ parse_reactive_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
 	}
 
 	data: Node_Data
-	data.binary = Binary_Data{left = INVALID_NODE, right = to}
+	data.binary = Binary_Data {
+		left  = INVALID_NODE,
+		right = to,
+	}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
 		span_end = parser.node_spans[to].end
@@ -2321,7 +2330,10 @@ parse_reactive_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	}
 
 	data: Node_Data
-	data.binary = Binary_Data{left = left, right = to}
+	data.binary = Binary_Data {
+		left  = left,
+		right = to,
+	}
 	span_end := parser.current_token.span.start
 	if to != INVALID_NODE {
 		span_end = parser.node_spans[to].end
