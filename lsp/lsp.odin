@@ -371,10 +371,7 @@ handle_request :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	case "textDocument/prepareRename":
 		handle_prepare_rename(server, msg)
 	case "textDocument/completion":
-		result := make(map[string]json.Value)
-		result["isIncomplete"] = json.Boolean(false)
-		result["items"] = json.Array(make([dynamic]json.Value))
-		send_response(msg.id, json.Object(result))
+		handle_completion(server, msg)
 	case:
 		send_error_response(msg.id, -32601, "Method not found")
 	}
@@ -429,6 +426,12 @@ handle_initialize :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	capabilities["definitionProvider"] = json.Boolean(true)
 	capabilities["referencesProvider"] = json.Boolean(true)
 	capabilities["renameProvider"] = json.Boolean(true)
+
+	trigger_chars := make([dynamic]json.Value)
+	append(&trigger_chars, json.String("."))
+	completion_opts := make(map[string]json.Value)
+	completion_opts["triggerCharacters"] = json.Array(trigger_chars)
+	capabilities["completionProvider"] = json.Object(completion_opts)
 
 	server_info := make(map[string]json.Value)
 	server_info["name"] = json.String("syn-lsp")
@@ -898,6 +901,308 @@ find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_In
 		}
 	}
 	return best
+}
+
+/* ======================================================================
+ * SECTION 10d: COMPLETION
+ * ====================================================================== */
+
+COMPLETION_KIND_VARIABLE :: 6
+COMPLETION_KIND_MODULE :: 9    // scope-valued bindings (no parens)
+COMPLETION_KIND_KEYWORD :: 14
+COMPLETION_KIND_PROPERTY :: 10
+COMPLETION_KIND_EVENT :: 23
+COMPLETION_KIND_CLASS :: 7
+
+handle_completion :: proc(server: ^LSP_Server, msg: LSP_Message) {
+	params, ok := msg.params.(json.Object)
+	if !ok {
+		send_empty_completion(msg.id)
+		return
+	}
+
+	uri, uri_ok := get_text_doc_uri(msg.params)
+	if !uri_ok || uri not_in server.documents {
+		send_empty_completion(msg.id)
+		return
+	}
+
+	pos_obj, pos_ok := params["position"].(json.Object)
+	if !pos_ok {
+		send_empty_completion(msg.id)
+		return
+	}
+
+	line := json_to_int(pos_obj["line"])
+	char := json_to_int(pos_obj["character"])
+
+	doc := &server.documents[uri]
+	ast := doc.ast
+	sem := doc.semantic
+
+	if ast == nil || sem == nil {
+		send_empty_completion(msg.id)
+		return
+	}
+
+	compiler.ensure_line_starts(ast)
+	offset := lsp_pos_to_offset(ast, line, char)
+	if offset < 0 {
+		send_empty_completion(msg.id)
+		return
+	}
+
+	items := make([dynamic]json.Value, 0, 32)
+
+	is_dot := offset > 0 && ast.source[offset - 1] == '.'
+
+	if is_dot {
+		collect_property_completions(ast, sem, u32(offset), &items)
+	} else {
+		collect_scope_completions(ast, sem, u32(offset), &items)
+	}
+
+	result := make(map[string]json.Value)
+	result["isIncomplete"] = json.Boolean(false)
+	result["items"] = json.Array(items)
+	send_response(msg.id, json.Object(result))
+}
+
+send_empty_completion :: proc(id: Maybe(json.Value)) {
+	result := make(map[string]json.Value)
+	result["isIncomplete"] = json.Boolean(false)
+	result["items"] = json.Array(make([dynamic]json.Value))
+	send_response(id, json.Object(result))
+}
+
+collect_property_completions :: proc(
+	ast: ^compiler.Ast,
+	sem: ^compiler.Semantic,
+	offset: u32,
+	items: ^[dynamic]json.Value,
+) {
+	dot_pos := offset - 1
+	end := dot_pos
+	for end > 0 && (ast.source[end - 1] == ' ' || ast.source[end - 1] == '\t') {
+		end -= 1
+	}
+	if end == 0 do return
+
+	scope_id := resolve_dot_source(ast, sem, end)
+	if scope_id != compiler.INVALID_SCOPE {
+		add_scope_bindings(ast, sem, scope_id, items)
+		return
+	}
+
+	cur_scope := find_scope_at_offset(ast, sem, offset)
+	sid := cur_scope
+	for sid != compiler.INVALID_SCOPE {
+		scope := &sem.scopes[sid]
+		first := u32(scope.first_binding)
+		for i in first ..< first + scope.binding_count {
+			entry := &sem.bindings[i]
+			if entry.name == compiler.EMPTY_SPAN do continue
+			name := ast.source[entry.name.start:entry.name.end]
+			if entry.value_kind == .Scope {
+				scope_target, ok := compiler.sem_find_scope(sem, entry.value.scope)
+				if ok {
+					add_scope_bindings(ast, sem, scope_target, items)
+					return
+				}
+			}
+		}
+		sid = sem.scopes[sid].parent
+	}
+}
+
+resolve_dot_source :: proc(
+	ast: ^compiler.Ast,
+	sem: ^compiler.Semantic,
+	end_offset: u32,
+) -> compiler.Scope_Id {
+	best := compiler.INVALID_NODE
+	best_size := max(u32)
+	for i := 0; i < len(ast.node_kinds); i += 1 {
+		span := ast.node_spans[i]
+		if span.end != end_offset do continue
+		if ast.node_kinds[i] == .Property do continue
+		size := span.end - span.start
+		if size < best_size {
+			best_size = size
+			best = compiler.Node_Index(i)
+		}
+	}
+
+	if best == compiler.INVALID_NODE do return compiler.INVALID_SCOPE
+	return node_to_scope_id(ast, sem, best)
+}
+
+node_to_scope_id :: proc(
+	ast: ^compiler.Ast,
+	sem: ^compiler.Semantic,
+	node: compiler.Node_Index,
+) -> compiler.Scope_Id {
+	ns := &sem.node_sems[node]
+
+	if ns.value_kind == .Scope {
+		sid, ok := compiler.sem_find_scope(sem, ns.value.scope)
+		if ok do return sid
+	}
+
+	if ns.value_kind == .Ref {
+		entry := &sem.bindings[ns.value.ref]
+		if entry.value_kind == .Scope {
+			sid, ok := compiler.sem_find_scope(sem, entry.value.scope)
+			if ok do return sid
+		}
+	}
+
+	if ns.ref_binding != compiler.INVALID_BINDING {
+		entry := &sem.bindings[ns.ref_binding]
+		if entry.value_kind == .Scope {
+			sid, ok := compiler.sem_find_scope(sem, entry.value.scope)
+			if ok do return sid
+		}
+	}
+
+	return compiler.INVALID_SCOPE
+}
+
+collect_scope_completions :: proc(
+	ast: ^compiler.Ast,
+	sem: ^compiler.Semantic,
+	offset: u32,
+	items: ^[dynamic]json.Value,
+) {
+	seen := make(map[string]bool)
+	defer delete(seen)
+
+	scope_id := find_scope_at_offset(ast, sem, offset)
+	sid := scope_id
+	for sid != compiler.INVALID_SCOPE {
+		scope := &sem.scopes[sid]
+		first := u32(scope.first_binding)
+		for i in first ..< first + scope.binding_count {
+			entry := &sem.bindings[i]
+			if entry.name == compiler.EMPTY_SPAN do continue
+			name := ast.source[entry.name.start:entry.name.end]
+			if name in seen do continue
+			seen[name] = true
+			append(items, make_completion_item(name, entry))
+		}
+		sid = sem.scopes[sid].parent
+	}
+
+	for def in compiler.BUILTIN_DEFS {
+		if def.id == .None do break
+		if def.name in seen do continue
+		item := make(map[string]json.Value)
+		item["label"] = json.String(def.name)
+		item["kind"] = json.Integer(COMPLETION_KIND_CLASS)
+		append(items, json.Object(item))
+	}
+}
+
+find_scope_at_offset :: proc(
+	ast: ^compiler.Ast,
+	sem: ^compiler.Semantic,
+	offset: u32,
+) -> compiler.Scope_Id {
+	best_scope := compiler.Scope_Id(0)
+	best_size := max(u32)
+
+	for i := 0; i < len(sem.scopes); i += 1 {
+		scope := &sem.scopes[i]
+		if scope.node == compiler.INVALID_NODE {
+			if i == 0 {
+				best_scope = compiler.Scope_Id(i)
+			}
+			continue
+		}
+		span := ast.node_spans[scope.node]
+		if span.start <= offset && offset <= span.end {
+			size := span.end - span.start
+			if size < best_size {
+				best_size = size
+				best_scope = compiler.Scope_Id(i)
+			}
+		}
+	}
+
+	return best_scope
+}
+
+add_scope_bindings :: proc(
+	ast: ^compiler.Ast,
+	sem: ^compiler.Semantic,
+	scope_id: compiler.Scope_Id,
+	items: ^[dynamic]json.Value,
+) {
+	scope := &sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+	for i in first ..< first + scope.binding_count {
+		entry := &sem.bindings[i]
+		if entry.name == compiler.EMPTY_SPAN do continue
+		name := ast.source[entry.name.start:entry.name.end]
+		append(items, make_completion_item(name, entry))
+	}
+}
+
+make_completion_item :: proc(name: string, entry: ^compiler.Binding_Entry) -> json.Value {
+	item := make(map[string]json.Value)
+	item["label"] = json.String(name)
+	item["insertTextFormat"] = json.Integer(1) // plain text, not snippet
+
+	kind := COMPLETION_KIND_VARIABLE
+	#partial switch entry.kind {
+	case .Pointing_Push:
+		if entry.value_kind == .Scope {
+			kind = COMPLETION_KIND_MODULE
+		}
+	case .Pointing_Pull:
+		kind = COMPLETION_KIND_VARIABLE
+	case .Event_Push, .Event_Pull:
+		kind = COMPLETION_KIND_EVENT
+	case .Resonance_Push, .Resonance_Pull:
+		kind = COMPLETION_KIND_EVENT
+	case .Reactive_Push, .Reactive_Pull:
+		kind = COMPLETION_KIND_EVENT
+	case .Product:
+		kind = COMPLETION_KIND_PROPERTY
+	}
+	item["kind"] = json.Integer(kind)
+
+	detail := binding_kind_label(entry.kind, entry.value_kind)
+	if detail != "" {
+		item["detail"] = json.String(detail)
+	}
+
+	return json.Object(item)
+}
+
+binding_kind_label :: proc(kind: compiler.Sem_Binding_Kind, vk: compiler.Value_Kind) -> string {
+	switch kind {
+	case .Pointing_Push:
+		#partial switch vk {
+		case .Scope:          return "scope (->)"
+		case .Integer:        return "integer (->)"
+		case .Float:          return "float (->)"
+		case .Bool:           return "bool (->)"
+		case .String_Literal: return "string (->)"
+		case .Builtin:        return "type (->)"
+		case:                 return "binding (->)"
+		}
+	case .Pointing_Pull:  return "pull (<-)"
+	case .Event_Push:     return "event push (>-)"
+	case .Event_Pull:     return "event pull (-<)"
+	case .Resonance_Push: return "resonance (>>-)"
+	case .Resonance_Pull: return "resonance (-<<)"
+	case .Reactive_Push:  return "reactive (>>=)"
+	case .Reactive_Pull:  return "reactive (=<<)"
+	case .Product:        return "production (->)"
+	case .Expand:         return "expand (...)"
+	}
+	return ""
 }
 
 /* ======================================================================
