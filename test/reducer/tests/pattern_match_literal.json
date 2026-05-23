@@ -1,0 +1,6 @@
+{
+  "name": "Pattern match literal",
+  "description": "Pattern matches a literal value",
+  "source": "x -> 2\n-> x ? {\n  1 -> 10\n  2 -> 20\n  3 -> 30\n}",
+  "expect": "20"
+}

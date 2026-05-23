@@ -1,0 +1,6 @@
+{
+  "name": "Literal bool false",
+  "description": "Reduces boolean false",
+  "source": "-> false",
+  "expect": "false"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Complex arithmetic expression",
+  "description": "Reduces a multi-operator expression",
+  "source": "-> (2 + 3) * 4",
+  "expect": "20"
+}

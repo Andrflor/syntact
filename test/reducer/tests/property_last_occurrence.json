@@ -1,0 +1,6 @@
+{
+  "name": "Property last occurrence",
+  "description": "Property access resolves last visible occurrence",
+  "source": "s -> {\n  x -> 1\n  x -> 2\n}\n-> s.x",
+  "expect": "2"
+}

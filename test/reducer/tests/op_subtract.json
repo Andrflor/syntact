@@ -1,0 +1,6 @@
+{
+  "name": "Operator subtract",
+  "description": "Reduces integer subtraction",
+  "source": "-> 10 - 3",
+  "expect": "7"
+}

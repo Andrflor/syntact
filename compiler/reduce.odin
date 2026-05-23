@@ -719,6 +719,22 @@ reduce_property :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 	if source_idx != INVALID_NODE {
 		source := reduce_node(r, source_idx)
 		if source.kind == .Scope {
+			if source.extra_scopes != nil {
+				for i := len(source.extra_scopes) - 1; i >= 0; i -= 1 {
+					eid, eok := sem_find_scope(r.sem, source.extra_scopes[i])
+					if !eok do continue
+					bid: Binding_Id
+					found: bool
+					if prop_name == "" && prop_ordinal >= 0 {
+						bid, found = sem_resolve_by_index(r.sem, eid, prop_ordinal)
+					} else {
+						bid, found = sem_resolve_in_scope(r.sem, eid, prop_name)
+					}
+					if found {
+						return reduce_binding(r, bid)
+					}
+				}
+			}
 			scope_id, ok := sem_find_scope(r.sem, source.data.scope)
 			if ok {
 				bid: Binding_Id

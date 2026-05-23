@@ -1,0 +1,6 @@
+{
+  "name": "No production",
+  "description": "Scope without production reduces to none",
+  "source": "x -> 5",
+  "expect": "none"
+}

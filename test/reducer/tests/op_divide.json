@@ -1,0 +1,6 @@
+{
+  "name": "Operator divide",
+  "description": "Reduces integer division",
+  "source": "-> 20 / 4",
+  "expect": "5"
+}

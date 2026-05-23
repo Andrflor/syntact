@@ -1,0 +1,6 @@
+{
+  "name": "Literal hexadecimal",
+  "description": "Reduces a hex literal to integer",
+  "source": "-> 0xFF",
+  "expect": "255"
+}

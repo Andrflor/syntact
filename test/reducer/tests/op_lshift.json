@@ -1,0 +1,6 @@
+{
+  "name": "Operator left shift",
+  "description": "Reduces left bit shift",
+  "source": "-> 1 << 4",
+  "expect": "16"
+}

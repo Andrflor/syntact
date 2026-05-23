@@ -1,0 +1,6 @@
+{
+  "name": "Literal negative integer",
+  "description": "Reduces a negated integer",
+  "source": "-> -7",
+  "expect": "-7"
+}

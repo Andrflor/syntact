@@ -1,0 +1,6 @@
+{
+  "name": "Operator modulo",
+  "description": "Reduces integer modulo",
+  "source": "-> 17 % 5",
+  "expect": "2"
+}

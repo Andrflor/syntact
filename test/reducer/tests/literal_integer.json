@@ -1,0 +1,6 @@
+{
+  "name": "Literal integer",
+  "description": "Reduces a simple integer literal",
+  "source": "-> 42",
+  "expect": "42"
+}

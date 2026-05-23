@@ -1,0 +1,6 @@
+{
+  "name": "Scope add property extension",
+  "description": "p.z should resolve to 10 from the extension scope",
+  "source": "Point -> {\n  u8:x -> 2\n  u8:y -> 3\n}\nPoint:p\np -> p + {u8:z -> 10}\n-> p.z",
+  "expect": "10"
+}

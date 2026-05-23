@@ -1,0 +1,6 @@
+{
+  "name": "Constraint bool default",
+  "description": "bool constraint without value gets default false",
+  "source": "bool:x\n-> x",
+  "expect": "false"
+}

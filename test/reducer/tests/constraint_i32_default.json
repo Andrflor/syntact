@@ -1,0 +1,6 @@
+{
+  "name": "Constraint i32 default",
+  "description": "i32 constraint without value gets default 0",
+  "source": "i32:x\n-> x",
+  "expect": "0"
+}

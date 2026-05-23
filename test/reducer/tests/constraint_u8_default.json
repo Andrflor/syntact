@@ -1,0 +1,6 @@
+{
+  "name": "Constraint u8 default",
+  "description": "u8 constraint without value gets default 0",
+  "source": "u8:x\n-> x",
+  "expect": "0"
+}
