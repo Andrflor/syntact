@@ -2,5 +2,5 @@
   "name": "Typecheck u16 overflow",
   "description": "u16:a -> 65536 is invalid, overflows u16",
   "source": "u16:a -> 65536",
-  "expect_errors": ["Type_Mismatch"]
+  "expect_errors": ["Constraint_Violation"]
 }

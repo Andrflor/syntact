@@ -2,5 +2,5 @@
   "name": "Typecheck f64 int mismatch",
   "description": "f64:a -> 42 is invalid, integer cannot be assigned to f64",
   "source": "f64:a -> 42",
-  "expect_errors": ["Type_Mismatch"]
+  "expect_errors": ["Constraint_Violation"]
 }

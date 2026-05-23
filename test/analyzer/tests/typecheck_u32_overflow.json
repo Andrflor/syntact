@@ -2,5 +2,5 @@
   "name": "Typecheck u32 overflow",
   "description": "u32:a -> 4294967296 is invalid, overflows u32",
   "source": "u32:a -> 4294967296",
-  "expect_errors": ["Type_Mismatch"]
+  "expect_errors": ["Constraint_Violation"]
 }

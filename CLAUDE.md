@@ -42,7 +42,7 @@ The compiler pipeline flows: **source → parser → analyzer → reducer → (g
 All compiler stages share one `package compiler`:
 
 - **parser.odin** (~3200 lines) — Lexer + parser. Produces a flat arena-allocated AST (`Ast` struct with SOA node arrays). Node types defined via `Node_Kind` enum. Uses `Node_Index` (distinct u32) for references, `INVALID_NODE` as sentinel. The parser is single-pass, top-down, handling the full Syntact grammar: bindings (`->`), productions, carving (`{}`), extension (`+{}`), collapse (`!`), patterns (`?`), constraints (`:`), events (`-<`, `>-`), resonance (`>>-`, `-<<`), reactivity (`>>=`, `=<<`), properties (`.`), ranges (`..`), externals (`@`), and operators.
-- **analyzer.odin** (~1650 lines) — Semantic analysis. Builds `Semantic` structure with `Scope_Id`/`Binding_Id` indexed types. Resolves identifiers, validates constraints, checks shapes, detects circular references.
+- **analyzer.odin** (~1700 lines) — Semantic analysis. Builds `Semantic` structure with `Scope_Id`/`Binding_Id` indexed types. Resolves identifiers, validates structural constraints, checks shapes, detects circular references. Constraint checking uses `sem_check_*` procs (not "typecheck" — Syntact has no types, only structural constraints via the `:` operator).
 - **reduce.odin** (~770 lines) — Runtime reduction/evaluation. Collapses scopes through their productions, evaluates operators, handles carving overrides. `Reducer` struct maintains an environment stack (`Env_Frame` with overrides). Max recursion depth: `REDUCE_MAX_DEPTH` (1024).
 - **resolver.odin** (~820 lines) — Compilation orchestrator. Thread pool for parallel file processing. `Cache` struct per file tracks parse/analysis status. Entry point: `resolve_entry()`.
 - **generate.odin** — x64 code generation (largely commented out / WIP).
@@ -82,7 +82,7 @@ Test names become Odin test function names via `test_{stem}_{index}`. To run a s
 - **Extension**: `scope +{...}` adds new structure
 - **Collapse**: `scope!` reduces through production
 - **Pattern**: `expr ? { branches }` structural matching
-- **Constraint/Shape**: `Shape:name` constrains a binding
+- **Constraint**: `Shape:name` constrains a binding — the `:` operator accepts any construct (builtin, scope, compound via `|`/`&`). Syntact has no type system; constraints are structural, not nominal. Error type: `Constraint_Violation`
 - **Events**: `>-` emit, `-<` handle (nominal effects)
 - **Property access**: `scope.name` resolves last visible occurrence
 - **External/Import**: `@path` filesystem scope resolution
@@ -95,3 +95,4 @@ Test names become Odin test function names via `test_{stem}_{index}`. To run a s
 - Same-name bindings are valid and tracked by ordinal (`#0`, `#1`, etc.) — this is a core language feature, not a bug.
 - Access (`.`) resolves the **last** occurrence; carving targets the **first** by default.
 - Code generation is largely WIP. The active pipeline is parse → analyze → reduce.
+- Syntact has no types — the `:` operator applies structural constraints. The analyzer uses `sem_check_*` naming (not "typecheck"). The error enum uses `Constraint_Violation` (not `Type_Mismatch`). Builtins like `u8`, `f32`, `String` are constraint constructs, not types.

@@ -2,5 +2,5 @@
   "name": "Typecheck u64 negative rejected",
   "description": "u64:a -> -1 is invalid, u64 cannot hold negative values",
   "source": "u64:a -> -1",
-  "expect_errors": ["Type_Mismatch"]
+  "expect_errors": ["Constraint_Violation"]
 }

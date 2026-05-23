@@ -1,0 +1,6 @@
+{
+  "name": "Constraint scope vs String",
+  "description": "String:a -> {} should fail, scope does not satisfy String",
+  "source": "String:a -> {}",
+  "expect_errors": ["Constraint_Violation"]
+}
