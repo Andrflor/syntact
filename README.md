@@ -107,7 +107,7 @@ A scope is not a function, object, module, record, class, or type. Those are pro
 | `-> x` | return | production |
 | `square{n -> 5}` | function call setup | structural derivation |
 | `square!` | call/eval | collapse |
-| `Point:p` | declaration of variable p | binding shaped by `Point` |
+| `Point:p` | declaration of variable p | binding colored by `Point` — the constraint propagates structurally |
 | `box.x` | field access | projection through current view |
 | `User+{...}` | inheritance | structural extension |
 | `Log -< e {...}` | callback/listener | nominal effect handler |
@@ -183,7 +183,7 @@ The syntax is intentionally familiar. Braces, dots, arrows, and names should not
 
 `->` is not assignment.
 
-`:` is not merely a type annotation.
+`:` is not merely a type annotation. It is structural coloring that propagates implicitly.
 
 `?` is not just a conditional.
 
@@ -974,6 +974,69 @@ Shape -> {
 ```
 
 This says that a `Shape` can produce a `Circle` or a `Square`.
+
+### Constraints as implicit structural coloring
+
+`:` does more than check a value against a shape. It **colors** the binding structurally: every constraint imposed by the shape propagates through the binding and everything it contains, without needing to be restated.
+
+Any scope can be used as a constraint. Primitive types, user-defined scopes, carved scopes, refined scopes — the mechanism is the same.
+
+```syntact
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array:}
+}
+```
+
+`Array` is a recursive scope parameterized by `T`. Its productions describe either an empty scope or a head shaped by `T` followed by more `Array`.
+
+Now define a union-like scope:
+
+```syntact
+F32OrString -> {
+  -> f32:
+  -> String:
+}
+```
+
+`F32OrString` is a scope whose productions are either `f32` or `String`. It is not a type declaration — it is a scope that produces one of two shapes.
+
+Use it as a constraint through carving:
+
+```syntact
+Array{F32OrString}:array -> {0.1 2.0 "hello"}
+```
+
+What happens here:
+
+```text
+Array{F32OrString}    carve Array with T = F32OrString
+:array                constrain array by the carved scope
+-> {0.1 2.0 "hello"}  give it a value
+```
+
+The constraint on `array` is `Array{F32OrString}`. This means every element must satisfy `F32OrString`. But this constraint was never written on any individual element. `0.1` is not annotated as `f32:`. `"hello"` is not annotated as `String:`. The coloring is **implicit** — it flows from the constraint on the whole scope down to each structural position.
+
+This is a direct consequence of default completeness and the scope model. A constraint is not an annotation that lives on one binding. It is a structural property of the scope, and it propagates inward.
+
+If `array` is later passed to another scope that expects `Array:`, the `F32OrString` constraint on `T` travels with it. No re-annotation is needed at the receiving site.
+
+```syntact
+printAll -> {
+  Array:items
+  -> items ? {
+    {} -> "done"
+    {head ...tail} -> head + " " + printAll{items -> tail}!
+  }
+}
+
+printAll{items -> array}!
+```
+
+`printAll` accepts any `Array:`. Because `array` was colored as `Array{F32OrString}`, the constraint is already satisfied. The coloring is carried by the value, not by the call site.
+
+This is not type inference in the traditional sense. There is no separate type system reconstructing constraints from usage. Coloring is a structural property: once a scope is constrained, every operation that depends on it inherits the constraint. The scope carries its coloring the way data carries its shape.
 
 ---
 
