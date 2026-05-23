@@ -1,0 +1,6 @@
+{
+  "name": "Constraint integer in compound array",
+  "description": "Array{F32ORString}:a -> {0.1 2} should fail, integer satisfies neither f32 nor String",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> f32:\n  -> String:\n}\n\nArray{F32ORString}:a -> {0.1 2}",
+  "expect_errors": ["Constraint_Violation"]
+}

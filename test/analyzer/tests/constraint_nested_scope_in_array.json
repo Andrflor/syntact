@@ -1,0 +1,6 @@
+{
+  "name": "Constraint nested scope in array",
+  "description": "Array{u8}:a -> {1 2 {3}} should fail, {3} is a scope not an integer",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nArray{u8}:a -> {1 2 {3}}",
+  "expect_errors": ["Constraint_Violation"]
+}

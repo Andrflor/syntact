@@ -2,5 +2,5 @@
   "name": "Typecheck i8 overflow",
   "description": "i8:a -> 128 is invalid, 128 overflows i8",
   "source": "i8:a -> 128",
-  "expect_errors": ["Type_Mismatch"]
+  "expect_errors": ["Constraint_Violation"]
 }
