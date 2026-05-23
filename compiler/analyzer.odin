@@ -1900,6 +1900,59 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 		if svk == .Builtin {
 			return .Symbolic, {}
 		}
+		if svk == .Symbolic || svk == .Ref {
+			return .Symbolic, {}
+		}
+		if node_kind(ast, source_idx) == .Identifier {
+			ref_bid := s.node_sems[source_idx].ref_binding
+			if ref_bid != INVALID_BINDING {
+				ref_scope_id := s.bindings[ref_bid].scope_id
+				ref_name := sem_span_str(ast, s.bindings[ref_bid].name)
+				scope := s.scopes[ref_scope_id]
+				first := u32(scope.first_binding)
+				for ri := first + scope.binding_count; ri > first; ri -= 1 {
+					i := ri - 1
+					e := &s.bindings[i]
+					if e.name == EMPTY_SPAN do continue
+					if sem_span_str(ast, e.name) != ref_name do continue
+					scopes_to_check: [2]struct{node: Node_Index, ok: bool}
+					count := 0
+					if e.value_kind == .Scope {
+						scopes_to_check[count] = {e.value.scope, true}
+						count += 1
+					}
+					if .Has_Constraint in e.flags && e.constraint_node != INVALID_NODE {
+						cvk, csv := sem_evaluate_value(s, e.constraint_node)
+						if cvk == .Scope {
+							scopes_to_check[count] = {csv.scope, true}
+							count += 1
+						}
+					}
+					for ci in 0..<count {
+						sc := scopes_to_check[ci]
+						if !sc.ok do continue
+						sid, sok := sem_find_scope(s, sc.node)
+						if !sok do continue
+						bid: Binding_Id
+						found: bool
+						if prop_name == "" && prop_ordinal >= 0 {
+							bid, found = sem_resolve_by_index(s, sid, prop_ordinal)
+						} else {
+							bid, found = sem_resolve_in_scope(s, sid, prop_name)
+						}
+						if found {
+							entry := &s.bindings[bid]
+							if .Has_Value in entry.flags {
+								return entry.value_kind, entry.value
+							}
+							sv: Static_Value
+							sv.ref = bid
+							return .Ref, sv
+						}
+					}
+				}
+			}
+		}
 	} else {
 		scope_id := sem_current_scope(s)
 		bid: Binding_Id

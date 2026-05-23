@@ -1,0 +1,6 @@
+{
+  "name": "Constraint with explicit value",
+  "description": "Constraint with explicit value uses the value, not default",
+  "source": "i32:x -> 42\n-> x",
+  "expect": "42"
+}

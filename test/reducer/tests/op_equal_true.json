@@ -1,0 +1,6 @@
+{
+  "name": "Operator equal true",
+  "description": "Reduces equality comparison to true",
+  "source": "-> 5 == 5",
+  "expect": "true"
+}

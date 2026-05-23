@@ -1,0 +1,6 @@
+{
+  "name": "Carve empty on constraint",
+  "description": "u8:a{} behaves same as u8:a, gets default 0",
+  "source": "u8:a{}\n-> a",
+  "expect": "0"
+}

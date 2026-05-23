@@ -1,0 +1,6 @@
+{
+  "name": "Carve with override",
+  "description": "Carve overrides a binding and executes",
+  "source": "double -> {\n  u8:a\n  -> a * 2\n}\n-> double{a -> 3}!",
+  "expect": "6"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Scope add property override",
+  "description": "Last extension wins: p.x should be 1 (overridden), p.z + p.x = 11",
+  "source": "Point -> {\n  u8:x -> 2\n  u8:y -> 3\n}\nPoint:p\np -> p + {u8:z -> 10} + {x -> 1}\n-> p.z + p.x",
+  "expect": "11"
+}

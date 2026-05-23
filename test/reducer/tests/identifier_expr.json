@@ -1,0 +1,6 @@
+{
+  "name": "Identifier in expression",
+  "description": "Uses bound identifier in arithmetic",
+  "source": "x -> 3\ny -> 4\n-> x + y",
+  "expect": "7"
+}

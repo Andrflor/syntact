@@ -1,0 +1,6 @@
+{
+  "name": "Nested scope execute",
+  "description": "Execute on a scope that references outer binding",
+  "source": "a -> 5\ns -> {\n  -> a + 1\n}\n-> s!",
+  "expect": "6"
+}

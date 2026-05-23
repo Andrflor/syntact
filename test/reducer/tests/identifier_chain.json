@@ -1,0 +1,6 @@
+{
+  "name": "Identifier chain",
+  "description": "Reduces through a chain of bindings",
+  "source": "x -> 5\ny -> x\n-> y",
+  "expect": "5"
+}

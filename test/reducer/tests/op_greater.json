@@ -1,0 +1,6 @@
+{
+  "name": "Operator greater than",
+  "description": "Reduces greater-than comparison",
+  "source": "-> 5 > 3",
+  "expect": "true"
+}

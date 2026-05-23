@@ -1,0 +1,6 @@
+{
+  "name": "Pattern match bool",
+  "description": "Pattern matches boolean value",
+  "source": "x -> true\n-> x ? {\n  true -> 1\n  false -> 0\n}",
+  "expect": "1"
+}

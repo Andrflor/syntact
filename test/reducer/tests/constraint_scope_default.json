@@ -1,0 +1,6 @@
+{
+  "name": "Constraint scope default",
+  "description": "Scope constraint provides the scope as default, property access works",
+  "source": "Point -> {\n  i32:x\n  i32:y\n}\nPoint:p\n-> p.x + p.y",
+  "expect": "0"
+}

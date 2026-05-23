@@ -1,0 +1,6 @@
+{
+  "name": "Literal binary",
+  "description": "Reduces a binary literal to integer",
+  "source": "-> 0b1010",
+  "expect": "10"
+}

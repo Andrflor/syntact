@@ -1,0 +1,6 @@
+{
+  "name": "Property access",
+  "description": "Accesses a binding inside a scope via dot",
+  "source": "s -> {\n  x -> 42\n}\n-> s.x",
+  "expect": "42"
+}

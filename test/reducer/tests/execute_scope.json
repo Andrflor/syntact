@@ -1,0 +1,6 @@
+{
+  "name": "Execute scope",
+  "description": "Collapses a scope to its production",
+  "source": "s -> {\n  -> 99\n}\n-> s!",
+  "expect": "99"
+}

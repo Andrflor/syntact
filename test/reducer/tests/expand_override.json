@@ -1,0 +1,6 @@
+{
+  "name": "Expand with production override",
+  "description": "Second scope expands first and overrides production",
+  "source": "a -> 22\ndouble -> {\n  u8:a\n  -> a * 2\n}\ndouble -> {\n  ...double#0\n  -> 6\n}\n-> double!",
+  "expect": "0"
+}

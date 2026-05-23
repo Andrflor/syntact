@@ -1,0 +1,6 @@
+{
+  "name": "Literal string",
+  "description": "Reduces a string literal",
+  "source": "-> \"hello\"",
+  "expect": "\"hello\""
+}
