@@ -1,0 +1,6 @@
+{
+  "name": "Carve materialize collapse",
+  "description": "Carve with collapse should reduce to the product value with overrides",
+  "source": "first -> {\n  arr -> {42}\n  -> arr.#0 + 2\n}\n-> first{arr -> {1}}!",
+  "expect": "3"
+}
