@@ -1,0 +1,6 @@
+{
+  "name": "Implicit carve valid both overrides",
+  "description": "Carving with both bindings overridden to valid values should pass",
+  "source": "example -> {\n  data -> 1\n  x -> 2\n  -> data + x\n}\n-> example{data -> 1, x -> 2}!",
+  "expect_errors": []
+}

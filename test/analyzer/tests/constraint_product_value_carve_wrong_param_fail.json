@@ -1,0 +1,6 @@
+{
+  "name": "Product value carve wrong param fail",
+  "description": "-> Array{u8} as value production, Array{f32} is not structurally Array{u8} because f32 != u8",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nU8OrArrayU8 -> {\n  -> u8:\n  -> Array{u8}\n}\n\nArray{U8OrArrayU8}:array -> {1 2 Array{f32}}",
+  "expect_errors": ["Constraint_Violation"]
+}

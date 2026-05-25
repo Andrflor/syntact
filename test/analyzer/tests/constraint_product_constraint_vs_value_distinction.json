@@ -1,0 +1,6 @@
+{
+  "name": "Product constraint vs value distinction",
+  "description": "With -> Array{u8}: (constraint), {2} satisfies because 2 is u8. Distinct from -> Array{u8} (value) where {2} would not pass",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nAcceptsArrayU8Constraint -> {\n  -> u8:\n  -> Array{u8}:\n}\n\nArray{AcceptsArrayU8Constraint}:array -> {1 {2}}",
+  "expect_errors": []
+}

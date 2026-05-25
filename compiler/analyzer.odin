@@ -1997,6 +1997,7 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 					bid, found = sem_resolve_in_scope(s, scope_id, prop_name)
 				}
 				if found {
+					s.node_sems[prop_idx].ref_binding = bid
 					entry := &s.bindings[bid]
 					if .Has_Value in entry.flags {
 						return entry.value_kind, entry.value
@@ -2051,6 +2052,7 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 							bid, found = sem_resolve_in_scope(s, sid, prop_name)
 						}
 						if found {
+							s.node_sems[prop_idx].ref_binding = bid
 							entry := &s.bindings[bid]
 							if .Has_Value in entry.flags {
 								return entry.value_kind, entry.value
@@ -2073,6 +2075,7 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 			bid, found = sem_resolve_in_scope(s, scope_id, prop_name)
 		}
 		if found {
+			s.node_sems[prop_idx].ref_binding = bid
 			entry := &s.bindings[bid]
 			if .Has_Value in entry.flags {
 				return entry.value_kind, entry.value
@@ -2149,9 +2152,17 @@ sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_
 			}
 			if target_scope_id != INVALID_SCOPE && from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
 				name := node_name_str(ast, from_idx)
-				bid, found := sem_resolve_in_scope(s, target_scope_id, name)
+				ordinal := node_ordinal(ast, from_idx)
+				bid: Binding_Id
+				found: bool
+				if name == "" && ordinal >= 0 {
+					bid, found = sem_resolve_by_index(s, target_scope_id, ordinal)
+				} else {
+					bid, found = sem_resolve_in_scope(s, target_scope_id, name)
+				}
 				if !found {
-					sem_error(s, fmt.tprintf("Unknown override '%s' in carve", name), .Undefined_Identifier, node_position(ast, from_idx))
+					label := name if name != "" else fmt.tprintf("#%d", ordinal)
+					sem_error(s, fmt.tprintf("Unknown override '%s' in carve", label), .Undefined_Identifier, node_position(ast, from_idx))
 				} else {
 					s.node_sems[from_idx].ref_binding = bid
 				}
@@ -2557,12 +2568,21 @@ sem_vcarve_eval_property :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_
 
 	svk, ssv := sem_vcarve_eval(s, source_idx, scope_id, overrides, depth + 1)
 
+	source_name := ""
+	if node_kind(ast, source_idx) == .Identifier {
+		source_name = node_name_str(ast, source_idx)
+	}
+	prop_label := prop_name if prop_name != "" else fmt.tprintf("#%d", prop_ordinal)
+
 	if svk == .Symbolic do return .Symbolic, {}
 
 	if svk != .Scope {
 		if svk != .None && svk != .Ref {
-			prop_label := prop_name if prop_name != "" else fmt.tprintf("#%d", prop_ordinal)
-			sem_error(s, fmt.tprintf("carve result: cannot access property '%s' on %s", prop_label, sem_value_kind_name(svk)), .Constraint_Violation, pos)
+			if source_name != "" {
+				sem_error(s, fmt.tprintf("'%s' should have property '%s' but got %s", source_name, prop_label, sem_value_kind_name(svk)), .Constraint_Violation, pos)
+			} else {
+				sem_error(s, fmt.tprintf("cannot access property '%s' on %s", prop_label, sem_value_kind_name(svk)), .Constraint_Violation, pos)
+			}
 		}
 		return .None, {}
 	}
@@ -2579,8 +2599,11 @@ sem_vcarve_eval_property :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_
 	}
 
 	if !found {
-		prop_label := prop_name if prop_name != "" else fmt.tprintf("#%d", prop_ordinal)
-		sem_error(s, fmt.tprintf("carve result: no property '%s'", prop_label), .Constraint_Violation, pos)
+		if source_name != "" {
+			sem_error(s, fmt.tprintf("'%s' should have property '%s'", source_name, prop_label), .Constraint_Violation, pos)
+		} else {
+			sem_error(s, fmt.tprintf("no property '%s'", prop_label), .Constraint_Violation, pos)
+		}
 		return .None, {}
 	}
 

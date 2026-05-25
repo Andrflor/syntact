@@ -1,0 +1,6 @@
+{
+  "name": "Implicit carve missing ordinal",
+  "description": "Carving with empty scope when body uses ordinal property access should fail",
+  "source": "first -> {\n  arr -> {0}\n  -> arr.#0\n}\n-> first{arr -> {}}!",
+  "expect_errors": ["Constraint_Violation"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Implicit carve missing named property",
+  "description": "Carving with empty scope when body uses named property access should fail",
+  "source": "point -> {\n  data -> {x -> 1, y -> 2}\n  -> data.x\n}\n-> point{data -> {}}!",
+  "expect_errors": ["Constraint_Violation"]
+}

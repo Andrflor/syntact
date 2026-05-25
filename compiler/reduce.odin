@@ -538,10 +538,35 @@ reduce_carve :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 	}
 	append(&r.env, frame)
 
-	result := Reduced_Value{kind = .Scope, data = {scope = scope_node}}
+	scope := r.sem.scopes[scope_id]
+	first := u32(scope.first_binding)
+	for i in first ..< first + scope.binding_count {
+		entry := &r.sem.bindings[i]
+		name := sem_span_str(ast, entry.name)
+		rv: Reduced_Value
+		found_override := false
+		if name != "" {
+			for ov in overrides {
+				if ov.name == name {
+					rv = ov.value
+					found_override = true
+					break
+				}
+			}
+		}
+		if !found_override {
+			rv = reduce_binding(r, Binding_Id(i))
+		}
+		vk, sv := reduced_to_static(rv)
+		if vk != .None {
+			entry.value_kind = vk
+			entry.value = sv
+			entry.flags |= {.Has_Value}
+		}
+	}
 
 	pop(&r.env)
-	return result
+	return Reduced_Value{kind = .Scope, data = {scope = scope_node}}
 }
 
 /* ======================================================================
@@ -757,6 +782,29 @@ reduce_property :: proc(r: ^Reducer, idx: Node_Index) -> Reduced_Value {
 /* ======================================================================
  * SECTION 11: UTILITIES
  * ====================================================================== */
+
+reduced_to_static :: proc(rv: Reduced_Value) -> (Value_Kind, Static_Value) {
+	sv: Static_Value
+	switch rv.kind {
+	case .Integer:
+		sv.integer = rv.data.integer
+		return .Integer, sv
+	case .Float:
+		sv.float_v = rv.data.float_v
+		return .Float, sv
+	case .Bool:
+		sv.bool_v = rv.data.bool_v
+		return .Bool, sv
+	case .String:
+		return .String_Literal, sv
+	case .Scope:
+		sv.scope = rv.data.scope
+		return .Scope, sv
+	case .None:
+		return .None, sv
+	}
+	return .None, sv
+}
 
 static_to_reduced :: proc(vk: Value_Kind, sv: Static_Value, ast: ^Ast) -> Reduced_Value {
 	rv: Reduced_Value
