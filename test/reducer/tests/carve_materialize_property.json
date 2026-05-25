@@ -1,0 +1,6 @@
+{
+  "name": "Carve materialize property access",
+  "description": "Carve override with scope should allow property access in product",
+  "source": "get -> {\n  data -> {x -> 10}\n  -> data.x\n}\n-> get{data -> {x -> 42}}!",
+  "expect": "42"
+}

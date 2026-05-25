@@ -1,0 +1,6 @@
+{
+  "name": "Carve materialize override",
+  "description": "Carve without collapse should show overridden values and recomputed product",
+  "source": "first -> {\n  arr -> {42}\n  -> arr.#0 + 2\n}\n-> first{arr -> {1}}",
+  "expect": "{ arr -> { 1 }, -> 3 }"
+}

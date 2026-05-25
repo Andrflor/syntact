@@ -1,0 +1,6 @@
+{
+  "name": "Carve materialize without collapse shows derived scope",
+  "description": "Carve without collapse should show the full derived scope with overridden binding",
+  "source": "double -> {\n  u8:a -> 0\n  -> a * 2\n}\n-> double{a -> 5}",
+  "expect": "{ u8:a -> 5, -> 10 }"
+}
