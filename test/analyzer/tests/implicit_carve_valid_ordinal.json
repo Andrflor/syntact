@@ -1,0 +1,6 @@
+{
+  "name": "Implicit carve valid ordinal",
+  "description": "Carving with scope that has required ordinal property should pass",
+  "source": "first -> {\n  arr -> {0}\n  -> arr.#0\n}\n-> first{arr -> {99}}!",
+  "expect_errors": []
+}

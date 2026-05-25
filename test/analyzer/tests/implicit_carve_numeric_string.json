@@ -1,0 +1,6 @@
+{
+  "name": "Implicit carve numeric string mismatch",
+  "description": "Carving with string when body uses arithmetic should fail",
+  "source": "example -> {\n  data -> 1\n  x -> 2\n  -> data + x\n}\n-> example{data -> \"hello\"}!",
+  "expect_errors": ["Invalid_operator"]
+}
