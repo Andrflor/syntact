@@ -536,6 +536,14 @@ sem_register_product :: proc(s: ^Semantic, idx: Node_Index) {
 		constraint_node = INVALID_NODE,
 		scope_id        = sem_current_scope(s),
 	}
+
+	if operand != INVALID_NODE && node_kind(ast, operand) == .Constraint {
+		constraint_idx := node_left(ast, operand)
+		entry.value_node = INVALID_NODE
+		entry.constraint_node = constraint_idx
+		entry.flags |= {.Has_Constraint}
+	}
+
 	sem_add_binding(s, entry)
 }
 
@@ -942,10 +950,111 @@ sem_check_constraint_node :: proc(s: ^Semantic, constraint_node: Node_Index, ent
 
 	if csem.value_kind == .Scope {
 		overrides := sem_extract_carve_overrides(s, constraint_node)
+		if entry.value_kind == .Scope && entry.value_node != INVALID_NODE {
+			if sem_check_scope_against_carve_constraint(s, entry.value_node, constraint_node, overrides[:]) {
+				return true
+			}
+		}
 		return sem_check_by_scope(s, csem.value.scope, entry.value_kind, entry.value, overrides[:])
 	}
 
 	return false
+}
+
+sem_check_scope_against_carve_constraint :: proc(s: ^Semantic, value_node: Node_Index, constraint_node: Node_Index, constraint_overrides: []Constraint_Override) -> bool {
+	ast := s.ast
+	if constraint_node == INVALID_NODE do return false
+
+	con_source_node := constraint_node
+	if node_kind(ast, constraint_node) == .Carve {
+		con_source_node = node_carve_source(ast, constraint_node)
+	}
+	con_sem := s.node_sems[con_source_node]
+	if con_sem.value_kind != .Scope do return false
+	con_scope_node := con_sem.value.scope
+
+	val_node := value_node
+	val_overrides: [dynamic]Constraint_Override
+
+	if node_kind(ast, val_node) == .Carve {
+		val_overrides = sem_extract_carve_overrides(s, val_node)
+		val_source := node_carve_source(ast, val_node)
+		val_sem := s.node_sems[val_source]
+		if val_sem.value_kind == .Scope && val_sem.value.scope == con_scope_node {
+			return sem_check_carve_overrides_compatible(s, con_scope_node, val_overrides[:], constraint_overrides)
+		}
+	} else if node_kind(ast, val_node) == .Identifier {
+		val_sem := s.node_sems[val_node]
+		if val_sem.value_kind == .Scope {
+			return sem_check_scope_productions_compatible(s, val_sem.value.scope, con_scope_node, constraint_overrides)
+		}
+	}
+
+	return false
+}
+
+sem_check_carve_overrides_compatible :: proc(s: ^Semantic, scope_node: Node_Index, val_overrides: []Constraint_Override, con_overrides: []Constraint_Override) -> bool {
+	for co in con_overrides {
+		found := false
+		for vo in val_overrides {
+			if vo.binding_id == co.binding_id {
+				found = true
+				if co.value_kind == .Builtin {
+					test_entry := Binding_Entry{ value_kind = vo.value_kind, value = vo.value }
+					if !sem_check_builtin(s, co.value.builtin, &test_entry) do return false
+				} else if co.value_kind == .Scope {
+					if vo.value_kind != .Scope do return false
+				} else if co.value_kind != vo.value_kind {
+					return false
+				}
+				break
+			}
+		}
+		if !found do return false
+	}
+	return true
+}
+
+sem_check_scope_productions_compatible :: proc(s: ^Semantic, val_scope_node: Node_Index, con_scope_node: Node_Index, con_overrides: []Constraint_Override) -> bool {
+	val_scope_id, vok := sem_find_scope(s, val_scope_node)
+	if !vok do return false
+	con_scope_id, cok := sem_find_scope(s, con_scope_node)
+	if !cok do return false
+
+	con_scope := s.scopes[con_scope_id]
+	val_scope := s.scopes[val_scope_id]
+
+	cfirst := u32(con_scope.first_binding)
+	for ci in cfirst ..< cfirst + con_scope.binding_count {
+		ce := &s.bindings[ci]
+		if ce.kind == .Product || ce.kind == .Expand do continue
+		if .Has_Constraint not_in ce.flags do continue
+		if ce.constraint_node == INVALID_NODE do continue
+
+		resolved_vk, resolved_sv, _, resolved := sem_resolve_constraint_with_overrides(s, ce.constraint_node, con_overrides)
+
+		vfirst := u32(val_scope.first_binding)
+		for vi in vfirst ..< vfirst + val_scope.binding_count {
+			ve := &s.bindings[vi]
+			if ve.kind == .Product || ve.kind == .Expand do continue
+			if .Has_Value not_in ve.flags do continue
+
+			if resolved {
+				if resolved_vk == .Builtin {
+					test_entry := Binding_Entry{ value_kind = ve.value_kind, value = ve.value }
+					if !sem_check_builtin(s, resolved_sv.builtin, &test_entry) do return false
+				}
+			} else {
+				csem := s.node_sems[ce.constraint_node]
+				if csem.value_kind == .Builtin {
+					test_entry := Binding_Entry{ value_kind = ve.value_kind, value = ve.value }
+					if !sem_check_builtin(s, csem.value.builtin, &test_entry) do return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 sem_extract_carve_overrides :: proc(s: ^Semantic, constraint_node: Node_Index) -> [dynamic]Constraint_Override {
@@ -1075,17 +1184,18 @@ sem_check_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_Kind,
 					if sem_check_by_scope(s, resolved_sv.scope, vk, sv, overrides, report) do return true
 				}
 			} else {
-				csem := s.node_sems[entry.constraint_node]
-				if csem.value_kind == .Builtin {
-					test_entry := Binding_Entry{ value_kind = vk, value = sv }
-					if sem_check_builtin(s, csem.value.builtin, &test_entry) do return true
-				} else if csem.value_kind == .Scope {
-					if sem_check_by_scope(s, csem.value.scope, vk, sv, overrides, report) do return true
-				}
+				test_entry := Binding_Entry{ value_kind = vk, value = sv }
+				if sem_check_constraint_node(s, entry.constraint_node, &test_entry) do return true
 			}
 		} else if .Has_Value in entry.flags {
 			if entry.value_kind == .Scope && vk == .Scope {
-				if sem_check_scope_structural(s, sv.scope, entry.value.scope, overrides, report) do return true
+				product_overrides := overrides
+				own_overrides: [dynamic]Constraint_Override
+				if entry.value_node != INVALID_NODE && node_kind(s.ast, entry.value_node) == .Carve {
+					own_overrides = sem_extract_carve_overrides(s, entry.value_node)
+					product_overrides = own_overrides[:]
+				}
+				if sem_check_scope_structural(s, sv.scope, entry.value.scope, product_overrides, report) do return true
 			} else {
 				if sem_check_by_value(entry.value_kind, entry.value, vk, sv) do return true
 			}
