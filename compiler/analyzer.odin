@@ -176,7 +176,9 @@ Semantic :: struct {
 	scope_stack:    [dynamic]Scope_Id,
 	errors:         [dynamic]Analyzer_Error,
 	warnings:       [dynamic]Analyzer_Error,
-	builtin_scope:  Scope_Id,
+	builtin_scope:    Scope_Id,
+	pending_commit:   Binding_Id,
+	pending_scope:    Scope_Id,
 }
 
 /* ======================================================================
@@ -297,6 +299,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	s.scope_stack = make([dynamic]Scope_Id, 0, 16)
 	s.errors = make([dynamic]Analyzer_Error, 0)
 	s.warnings = make([dynamic]Analyzer_Error, 0)
+	s.pending_commit = INVALID_BINDING
 
 	init_sem_builtins(s)
 
@@ -347,6 +350,10 @@ sem_current_scope :: #force_inline proc(s: ^Semantic) -> Scope_Id {
 }
 
 sem_push_scope :: proc(s: ^Semantic, node: Node_Index) -> Scope_Id {
+	if s.pending_commit != INVALID_BINDING {
+		sem_commit_binding(s, s.pending_scope, s.pending_commit)
+		s.pending_commit = INVALID_BINDING
+	}
 	parent := sem_current_scope(s)
 	scope := Scope_Info {
 		node          = node,
@@ -373,11 +380,15 @@ sem_add_binding :: proc(s: ^Semantic, entry: Binding_Entry) -> Binding_Id {
 	append(&s.bindings, entry)
 	scope_id := sem_current_scope(s)
 	s.scopes[scope_id].binding_count += 1
+	return id
+}
+
+sem_commit_binding :: proc(s: ^Semantic, scope_id: Scope_Id, bid: Binding_Id) {
+	entry := &s.bindings[bid]
 	if entry.name != EMPTY_SPAN {
 		name := s.ast.source[entry.name.start:entry.name.end]
-		s.scopes[scope_id].names[name] = id
+		s.scopes[scope_id].names[name] = bid
 	}
-	return id
 }
 
 /* ======================================================================
@@ -398,8 +409,14 @@ sem_process_scope :: proc(s: ^Semantic, scope_id: Scope_Id, scope_node: Node_Ind
 		bid := sem_register_child(s, child)
 		if bid == INVALID_BINDING do continue
 
+		s.pending_commit = bid
+		s.pending_scope = scope_id
+
 		entry := &s.bindings[bid]
 		sem_evaluate_binding(s, entry)
+
+		s.pending_commit = INVALID_BINDING
+		sem_commit_binding(s, scope_id, bid)
 
 		#partial switch entry.kind {
 		case .Product:
@@ -700,10 +717,6 @@ sem_extract_name :: proc(s: ^Semantic, idx: Node_Index, entry: ^Binding_Entry) {
 		)
 	}
 }
-
-/* ======================================================================
- * SECTION 7: (removed — merged into sem_process_scope)
- * ====================================================================== */
 
 sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.value_node == INVALID_NODE && entry.constraint_node == INVALID_NODE {
@@ -2170,9 +2183,12 @@ sem_check_carve_override :: proc(s: ^Semantic, target_entry: ^Binding_Entry, vk:
 			sem_error(s, fmt.tprintf("carve override '%s' expected %s, got %s", name, cname, sem_value_kind_name(vk)), .Constraint_Violation, pos)
 		}
 	} else if csem.value_kind == .Scope {
-		if !sem_check_by_scope(s, csem.value.scope, vk, sv) {
-			sem_error(s, fmt.tprintf("carve override '%s' expected scope constraint, got %s", name, sem_value_kind_name(vk)), .Constraint_Violation, pos)
+		overrides := sem_extract_carve_overrides(s, target_entry.constraint_node)
+		if !sem_check_by_scope(s, csem.value.scope, vk, sv, overrides[:]) {
+			cname := sem_constraint_name(s, target_entry.constraint_node)
+			sem_error(s, fmt.tprintf("carve override '%s' expected %s, got %s", name, cname, sem_value_kind_name(vk)), .Constraint_Violation, pos)
 		}
+		delete(overrides)
 	}
 }
 
