@@ -1916,44 +1916,31 @@ sem_evaluate_unary :: proc(
 	pos := node_position(s.ast, op_idx)
 	csv := sem_evaluate_value(s, child_idx)
 
-	if _, ok := csv.(Unresolved_SV); ok do return Unresolved_SV{}
-
 	switch op_kind {
 	case .Subtract:
-		if iv, ok := csv.(Integer_SV); ok {
-			iv.negative = true
-			return iv
+		switch v in csv {
+		case Integer_SV:
+			return Integer_SV{content = v.content, kind = v.kind, negative = true}
+		case Float_SV:
+			return Float_SV{content = -v.content, kind = v.kind}
+		case Unresolved_SV:
+			return csv
+		case bool, Span, Node_Index, Ref_SV:
+			sem_error(s, "Cannot negate anything other than int or float", .Invalid_operator, pos)
 		}
-		if fv, ok := csv.(Float_SV); ok {
-			fv.content = -fv.content
-			return fv
-		}
-		sem_error(s, "Cannot negate anything other than int or float", .Invalid_operator, pos)
 	case .Not:
-		if bv, ok := csv.(bool); ok {
-			return bool(!bv)
+		switch v in csv {
+		case bool:
+			return bool(!v)
+		case Integer_SV:
+			return Integer_SV{content = ~v.content, kind = v.kind, negative = v.negative}
+		case Unresolved_SV:
+			return csv
+		case Float_SV, Span, Node_Index, Ref_SV:
 		}
-		if iv, ok := csv.(Integer_SV); ok {
-			iv.content = ~iv.content
-			return iv
-		}
-	case .Add,
-	     .Multiply,
-	     .Divide,
-	     .Mod,
-	     .Equal,
-	     .Less,
-	     .Greater,
-	     .NotEqual,
-	     .LessEqual,
-	     .GreaterEqual,
-	     .And,
-	     .Or,
-	     .Xor,
-	     .RShift,
-	     .LShift:
+	case .Add, .Multiply, .Divide, .Mod, .Equal, .Less, .Greater,
+	     .NotEqual, .LessEqual, .GreaterEqual, .And, .Or, .Xor, .RShift, .LShift:
 		sem_error(s, "Operator should not be used as unary", .Invalid_operator, pos)
-		return csv
 	}
 	return csv
 }
@@ -1965,53 +1952,44 @@ sem_fold_math :: proc(
 	pos: Position,
 	s: ^Semantic,
 ) -> Static_Value {
-	li, l_int := lsv.(Integer_SV)
-	ri, r_int := rsv.(Integer_SV)
-	if l_int && r_int {
-		result := Integer_SV {
-			kind = li.kind if li.kind != .none else ri.kind,
+	switch l in lsv {
+	case Integer_SV:
+		switch r in rsv {
+		case Integer_SV:
+			result := Integer_SV{kind = l.kind if l.kind != .none else r.kind}
+			#partial switch op {
+			case .Add:      result.content = l.content + r.content
+			case .Subtract: result.content = l.content - r.content
+			case .Multiply: result.content = l.content * r.content
+			case .Divide:   if r.content != 0 do result.content = l.content / r.content
+			case .Mod:      if r.content != 0 do result.content = l.content % r.content
+			}
+			return result
+		case Float_SV, bool, Span, Node_Index, Ref_SV, Unresolved_SV:
 		}
-		#partial switch op {
-		case .Add:
-			result.content = li.content + ri.content
-		case .Subtract:
-			result.content = li.content - ri.content
-		case .Multiply:
-			result.content = li.content * ri.content
-		case .Divide:
-			if ri.content != 0 do result.content = li.content / ri.content
-		case .Mod:
-			if ri.content != 0 do result.content = li.content % ri.content
+	case Float_SV:
+		switch r in rsv {
+		case Float_SV:
+			result := Float_SV{kind = l.kind if l.kind != .none else r.kind}
+			#partial switch op {
+			case .Add:      result.content = l.content + r.content
+			case .Subtract: result.content = l.content - r.content
+			case .Multiply: result.content = l.content * r.content
+			case .Divide:   if r.content != 0 do result.content = l.content / r.content
+			case .Mod:
+				sem_error(s, "Mod is only allowed with integers", .Invalid_operator, pos)
+				return nil
+			}
+			return result
+		case Integer_SV, bool, Span, Node_Index, Ref_SV, Unresolved_SV:
 		}
-		return result
+	case Node_Index:
+		if op == .Add do return lsv
+	case bool, Span, Ref_SV, Unresolved_SV:
 	}
 
-	lf, l_flt := lsv.(Float_SV)
-	rf, r_flt := rsv.(Float_SV)
-	if l_flt && r_flt {
-		result := Float_SV {
-			kind = lf.kind if lf.kind != .none else rf.kind,
-		}
-		#partial switch op {
-		case .Add:
-			result.content = lf.content + rf.content
-		case .Subtract:
-			result.content = lf.content - rf.content
-		case .Multiply:
-			result.content = lf.content * rf.content
-		case .Divide:
-			if rf.content != 0 do result.content = lf.content / rf.content
-		case .Mod:
-			sem_error(s, "Mod is only allowed with integers", .Invalid_operator, pos)
-			return nil
-		}
-		return result
-	}
-
-	_, l_scope := lsv.(Node_Index)
-	_, r_scope := rsv.(Node_Index)
-	if (l_scope || r_scope) && op == .Add {
-		return lsv if l_scope else rsv
+	if _, ok := rsv.(Node_Index); ok && op == .Add {
+		return rsv
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)
@@ -2025,41 +2003,29 @@ sem_fold_bitwise :: proc(
 	pos: Position,
 	s: ^Semantic,
 ) -> Static_Value {
-	li, l_int := lsv.(Integer_SV)
-	ri, r_int := rsv.(Integer_SV)
-	if l_int && r_int {
-		result := Integer_SV {
-			kind = li.kind if li.kind != .none else ri.kind,
+	switch l in lsv {
+	case Integer_SV:
+		if r, ok := rsv.(Integer_SV); ok {
+			result := Integer_SV{kind = l.kind if l.kind != .none else r.kind}
+			#partial switch op {
+			case .And: result.content = l.content & r.content
+			case .Or:  result.content = l.content | r.content
+			case .Xor: result.content = l.content ~ r.content
+			}
+			return result
 		}
-		#partial switch op {
-		case .And:
-			result.content = li.content & ri.content
-		case .Or:
-			result.content = li.content | ri.content
-		case .Xor:
-			result.content = li.content ~ ri.content
+	case bool:
+		if r, ok := rsv.(bool); ok {
+			#partial switch op {
+			case .And: return bool(l && r)
+			case .Or:  return bool(l || r)
+			case .Xor: return bool(l ~ r)
+			}
 		}
-		return result
+	case Float_SV, Span, Node_Index, Ref_SV, Unresolved_SV:
 	}
 
-	lb, l_bool := lsv.(bool)
-	rb, r_bool := rsv.(bool)
-	if l_bool && r_bool {
-		#partial switch op {
-		case .And:
-			return bool(lb && rb)
-		case .Or:
-			return bool(lb || rb)
-		case .Xor:
-			return bool(lb ~ rb)
-		}
-	}
-
-	_, l_scope := lsv.(Node_Index)
-	_, r_scope := rsv.(Node_Index)
-	_, l_unresolved := lsv.(Unresolved_SV)
-	_, r_unresolved := rsv.(Unresolved_SV)
-	if (op == .Or || op == .And) && (l_scope || l_unresolved) && (r_scope || r_unresolved) {
+	if op == .Or || op == .And {
 		return Unresolved_SV{}
 	}
 
@@ -2076,34 +2042,28 @@ sem_fold_comparison :: proc(
 ) -> Static_Value {
 	sem_cmp :: #force_inline proc(a, b: $T, op: Operator_Kind) -> bool {
 		#partial switch op {
-		case .Less:
-			return a < b
-		case .Greater:
-			return a > b
-		case .LessEqual:
-			return a <= b
-		case .GreaterEqual:
-			return a >= b
+		case .Less:         return a < b
+		case .Greater:      return a > b
+		case .LessEqual:    return a <= b
+		case .GreaterEqual: return a >= b
 		}
 		return false
 	}
 
-	li, l_int := lsv.(Integer_SV)
-	ri, r_int := rsv.(Integer_SV)
-	lf, l_flt := lsv.(Float_SV)
-	rf, r_flt := rsv.(Float_SV)
-
-	if l_int && r_int {
-		return bool(sem_cmp(li.content, ri.content, op))
-	}
-	if l_flt && r_flt {
-		return bool(sem_cmp(lf.content, rf.content, op))
-	}
-	if l_int && r_flt {
-		return bool(sem_cmp(f64(li.content), rf.content, op))
-	}
-	if l_flt && r_int {
-		return bool(sem_cmp(lf.content, f64(ri.content), op))
+	switch l in lsv {
+	case Integer_SV:
+		switch r in rsv {
+		case Integer_SV: return bool(sem_cmp(l.content, r.content, op))
+		case Float_SV:   return bool(sem_cmp(f64(l.content), r.content, op))
+		case bool, Span, Node_Index, Ref_SV, Unresolved_SV:
+		}
+	case Float_SV:
+		switch r in rsv {
+		case Float_SV:   return bool(sem_cmp(l.content, r.content, op))
+		case Integer_SV: return bool(sem_cmp(l.content, f64(r.content), op))
+		case bool, Span, Node_Index, Ref_SV, Unresolved_SV:
+		}
+	case bool, Span, Node_Index, Ref_SV, Unresolved_SV:
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)
@@ -2157,28 +2117,20 @@ sem_fold_shift :: proc(
 	pos: Position,
 	s: ^Semantic,
 ) -> Static_Value {
-	li, l_int := lsv.(Integer_SV)
-	ri, r_int := rsv.(Integer_SV)
-	if l_int && r_int {
-		result := Integer_SV {
-			kind     = li.kind,
-			negative = li.negative,
+	switch l in lsv {
+	case Integer_SV:
+		if r, ok := rsv.(Integer_SV); ok {
+			result := Integer_SV{kind = l.kind, negative = l.negative}
+			#partial switch op {
+			case .LShift: result.content = l.content << r.content
+			case .RShift: result.content = l.content >> r.content
+			}
+			return result
 		}
-		#partial switch op {
-		case .LShift:
-			result.content = li.content << ri.content
-		case .RShift:
-			result.content = li.content >> ri.content
-		}
-		return result
+	case Float_SV, bool, Span, Node_Index, Ref_SV, Unresolved_SV:
 	}
 
-	sem_error(
-		s,
-		fmt.tprintf("Shift requires integer operands, got %s", op),
-		.Invalid_operator,
-		pos,
-	)
+	sem_error(s, "Shift requires integer operands", .Invalid_operator, pos)
 	return nil
 }
 
