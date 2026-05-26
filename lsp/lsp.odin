@@ -230,8 +230,10 @@ read_message :: proc() -> union {
 
 json_to_int :: proc(v: json.Value) -> int {
 	#partial switch val in v {
-	case json.Integer: return int(val)
-	case json.Float:   return int(val)
+	case json.Integer:
+		return int(val)
+	case json.Float:
+		return int(val)
 	}
 	return 0
 }
@@ -908,7 +910,7 @@ find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_In
  * ====================================================================== */
 
 COMPLETION_KIND_VARIABLE :: 6
-COMPLETION_KIND_MODULE :: 9    // scope-valued bindings (no parens)
+COMPLETION_KIND_MODULE :: 9 // scope-valued bindings (no parens)
 COMPLETION_KIND_KEYWORD :: 14
 COMPLETION_KIND_PROPERTY :: 10
 COMPLETION_KIND_EVENT :: 23
@@ -1015,23 +1017,23 @@ node_to_scope_id :: proc(
 ) -> compiler.Scope_Id {
 	ns := &sem.node_sems[node]
 
-	if ns.value_kind == .Scope {
-		sid, ok := compiler.sem_find_scope(sem, ns.value.scope)
+	if scope_node, is_scope := ns.value.(compiler.Node_Index); is_scope {
+		sid, ok := compiler.sem_find_scope(sem, scope_node)
 		if ok do return sid
 	}
 
-	if ns.value_kind == .Ref {
-		entry := &sem.bindings[ns.value.ref]
-		if entry.value_kind == .Scope {
-			sid, ok := compiler.sem_find_scope(sem, entry.value.scope)
+	if ref, is_ref := ns.value.(compiler.Ref_SV); is_ref {
+		entry := &sem.bindings[ref.binding]
+		if scope_node, is_scope := entry.value.(compiler.Node_Index); is_scope {
+			sid, ok := compiler.sem_find_scope(sem, scope_node)
 			if ok do return sid
 		}
 	}
 
 	if ns.ref_binding != compiler.INVALID_BINDING {
 		entry := &sem.bindings[ns.ref_binding]
-		if entry.value_kind == .Scope {
-			sid, ok := compiler.sem_find_scope(sem, entry.value.scope)
+		if scope_node, is_scope := entry.value.(compiler.Node_Index); is_scope {
+			sid, ok := compiler.sem_find_scope(sem, scope_node)
 			if ok do return sid
 		}
 	}
@@ -1139,7 +1141,7 @@ make_completion_item :: proc(name: string, entry: ^compiler.Binding_Entry) -> js
 	kind := COMPLETION_KIND_VARIABLE
 	#partial switch entry.kind {
 	case .Pointing_Push:
-		if entry.value_kind == .Scope {
+		if _, is_scope := entry.value.(compiler.Node_Index); is_scope {
 			kind = COMPLETION_KIND_MODULE
 		}
 	case .Pointing_Pull:
@@ -1155,7 +1157,7 @@ make_completion_item :: proc(name: string, entry: ^compiler.Binding_Entry) -> js
 	}
 	item["kind"] = json.Integer(kind)
 
-	detail := binding_kind_label(entry.kind, entry.value_kind)
+	detail := binding_kind_label(entry.kind, entry.value)
 	if detail != "" {
 		item["detail"] = json.String(detail)
 	}
@@ -1163,27 +1165,45 @@ make_completion_item :: proc(name: string, entry: ^compiler.Binding_Entry) -> js
 	return json.Object(item)
 }
 
-binding_kind_label :: proc(kind: compiler.Sem_Binding_Kind, vk: compiler.Value_Kind) -> string {
+binding_kind_label :: proc(kind: compiler.Sem_Binding_Kind, sv: compiler.Static_Value) -> string {
 	switch kind {
 	case .Pointing_Push:
-		#partial switch vk {
-		case .Scope:          return "scope (->)"
-		case .Integer:        return "integer (->)"
-		case .Float:          return "float (->)"
-		case .Bool:           return "bool (->)"
-		case .String_Literal: return "string (->)"
-		case .Builtin:        return "type (->)"
-		case:                 return "binding (->)"
+		switch _ in sv {
+		case compiler.Node_Index:
+			return "scope (->)"
+		case compiler.Integer_SV:
+			return "integer (->)"
+		case compiler.Float_SV:
+			return "float (->)"
+		case bool:
+			return "bool (->)"
+		case compiler.Span:
+			return "string (->)"
+		case compiler.Symbolic_SV:
+			return "type (->)"
+		case compiler.Ref_SV:
+			return "binding (->)"
+		case:
+			return "binding (->)"
 		}
-	case .Pointing_Pull:  return "pull (<-)"
-	case .Event_Push:     return "event push (>-)"
-	case .Event_Pull:     return "event pull (-<)"
-	case .Resonance_Push: return "resonance (>>-)"
-	case .Resonance_Pull: return "resonance (-<<)"
-	case .Reactive_Push:  return "reactive (>>=)"
-	case .Reactive_Pull:  return "reactive (=<<)"
-	case .Product:        return "production (->)"
-	case .Expand:         return "expand (...)"
+	case .Pointing_Pull:
+		return "pull (<-)"
+	case .Event_Push:
+		return "event push (>-)"
+	case .Event_Pull:
+		return "event pull (-<)"
+	case .Resonance_Push:
+		return "resonance (>>-)"
+	case .Resonance_Pull:
+		return "resonance (-<<)"
+	case .Reactive_Push:
+		return "reactive (>>=)"
+	case .Reactive_Pull:
+		return "reactive (=<<)"
+	case .Product:
+		return "production (->)"
+	case .Expand:
+		return "expand (...)"
 	}
 	return ""
 }

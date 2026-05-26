@@ -50,16 +50,16 @@ Status :: enum {
  * Cache stores compilation data for a single file
  */
 Cache :: struct {
-	path:            string,
-	semantic:        ^Semantic,
-	status:          Status,
-	last_modified:   time.Time,
-	arena:           vmem.Arena,
-	allocator:       mem.Allocator,
-	mutex:           sync.Mutex,
-	parse_errors:    [dynamic]Parse_Error,
-	analyze_errors:  [dynamic]Analyzer_Error,
-	analyze_warnings:[dynamic]Analyzer_Error,
+	path:             string,
+	semantic:         ^Semantic,
+	status:           Status,
+	last_modified:    time.Time,
+	arena:            vmem.Arena,
+	allocator:        mem.Allocator,
+	mutex:            sync.Mutex,
+	parse_errors:     [dynamic]Parse_Error,
+	analyze_errors:   [dynamic]Analyzer_Error,
+	analyze_warnings: [dynamic]Analyzer_Error,
 }
 
 /*
@@ -179,7 +179,10 @@ resolve_entry :: proc() -> bool {
 
 		// Display user time breakdown
 		user_time :=
-			timing_data.file_read_time + timing_data.parsing_time + timing_data.analysis_time + timing_data.reduce_time
+			timing_data.file_read_time +
+			timing_data.parsing_time +
+			timing_data.analysis_time +
+			timing_data.reduce_time
 		fmt.printf(
 			"User processing time: %v (%.2f%%)\n",
 			user_time,
@@ -463,7 +466,12 @@ process_filenode_flat :: proc(idx: Node_Index, parser: ^Parser) {
 	_process_node_flat(idx, parser, dir_path, &segments)
 }
 
-_process_node_flat :: proc(idx: Node_Index, parser: ^Parser, dir_path: string, segments: ^[dynamic]string) {
+_process_node_flat :: proc(
+	idx: Node_Index,
+	parser: ^Parser,
+	dir_path: string,
+	segments: ^[dynamic]string,
+) {
 	if idx == INVALID_NODE do return
 	n_kind := parser.node_kinds[idx]
 	n_data := parser.node_data[idx]

@@ -73,18 +73,55 @@ Sem_Flag :: enum u16 {
 	Has_Error,
 	In_Progress,
 }
-Sem_Flags :: bit_set[Sem_Flag; u16]
+Sem_Flags :: bit_set[Sem_Flag;u16]
 
-Value_Kind :: enum u8 {
-	None,
-	Integer,
-	Float,
-	Bool,
-	String_Literal,
-	Scope,
-	Ref,
-	Builtin,
-	Symbolic,
+Integer_SV :: struct {
+	content:  u64,
+	kind:     IntegerKind,
+	negative: bool,
+}
+
+Float_SV :: struct {
+	content: f64,
+	kind:    FloatKind,
+}
+
+Ref_SV :: struct {
+	binding: Binding_Id,
+}
+
+Symbolic_SV :: struct {
+	builtin: Builtin_Id,
+}
+
+Static_Value :: union {
+	Integer_SV,
+	Float_SV,
+	bool,
+	Span,
+	Node_Index,
+	Ref_SV,
+	Symbolic_SV,
+}
+
+sv_kind_name :: proc(sv: Static_Value) -> string {
+	switch _ in sv {
+	case Integer_SV:
+		return "integer"
+	case Float_SV:
+		return "float"
+	case bool:
+		return "bool"
+	case Span:
+		return "string"
+	case Node_Index:
+		return "scope"
+	case Ref_SV:
+		return "ref"
+	case Symbolic_SV:
+		return "symbolic"
+	}
+	return "none"
 }
 
 Builtin_Id :: enum u8 {
@@ -104,29 +141,7 @@ Builtin_Id :: enum u8 {
 	B_String,
 }
 
-Static_Value :: struct #raw_union {
-	integer: Integer_SV,
-	float_v: Float_SV,
-	bool_v:  bool,
-	str_span: Span,
-	scope:   Node_Index,
-	ref:     Binding_Id,
-	builtin: Builtin_Id,
-}
-
-Integer_SV :: struct {
-	content:  u64,
-	kind:     IntegerKind,
-	negative: bool,
-}
-
-Float_SV :: struct {
-	content: f64,
-	kind:    FloatKind,
-}
-
 Node_Sem :: struct {
-	value_kind:  Value_Kind,
 	value:       Static_Value,
 	flags:       Sem_Flags,
 	scope_id:    Scope_Id,
@@ -162,27 +177,24 @@ Binding_Entry :: struct {
 	value_node:      Node_Index,
 	constraint_node: Node_Index,
 	scope_id:        Scope_Id,
-	value_kind:      Value_Kind,
 	value:           Static_Value,
 	flags:           Sem_Flags,
 }
 
 Semantic :: struct {
-	ast:            ^Ast,
-	node_sems:      []Node_Sem,
-	node_to_scope:  []Scope_Id,
-	scopes:         [dynamic]Scope_Info,
-	bindings:       [dynamic]Binding_Entry,
-	scope_stack:    [dynamic]Scope_Id,
-	errors:         [dynamic]Analyzer_Error,
-	warnings:       [dynamic]Analyzer_Error,
-	builtin_scope:    Scope_Id,
-	pending_commit:   Binding_Id,
-	pending_scope:    Scope_Id,
+	ast:           ^Ast,
+	node_sems:     []Node_Sem,
+	node_to_scope: []Scope_Id,
+	scopes:        [dynamic]Scope_Info,
+	bindings:      [dynamic]Binding_Entry,
+	scope_stack:   [dynamic]Scope_Id,
+	errors:        [dynamic]Analyzer_Error,
+	warnings:      [dynamic]Analyzer_Error,
+	builtin_scope: Scope_Id,
 }
 
 /* ======================================================================
- * SECTION 2: BUILTINS
+ * SECTION 2b: BUILTINS
  * ====================================================================== */
 
 Builtin_Def :: struct {
@@ -196,19 +208,19 @@ Builtin_Def :: struct {
 	is_string: bool,
 }
 
-BUILTIN_DEFS :: [14]Builtin_Def{
-	{name = "u8",     id = .B_U8,     int_kind = .u8,   is_int = true},
-	{name = "i8",     id = .B_I8,     int_kind = .i8,   is_int = true},
-	{name = "u16",    id = .B_U16,    int_kind = .u16,  is_int = true},
-	{name = "i16",    id = .B_I16,    int_kind = .i16,  is_int = true},
-	{name = "u32",    id = .B_U32,    int_kind = .u32,  is_int = true},
-	{name = "i32",    id = .B_I32,    int_kind = .i32,  is_int = true},
-	{name = "u64",    id = .B_U64,    int_kind = .u64,  is_int = true},
-	{name = "i64",    id = .B_I64,    int_kind = .i64,  is_int = true},
-	{name = "f32",    id = .B_F32,    flt_kind = .f32,  is_float = true},
-	{name = "f64",    id = .B_F64,    flt_kind = .f64,  is_float = true},
-	{name = "bool",   id = .B_Bool,   is_bool = true},
-	{name = "char",   id = .B_Char,   int_kind = .u8,   is_int = true},
+BUILTIN_DEFS :: [14]Builtin_Def {
+	{name = "u8", id = .B_U8, int_kind = .u8, is_int = true},
+	{name = "i8", id = .B_I8, int_kind = .i8, is_int = true},
+	{name = "u16", id = .B_U16, int_kind = .u16, is_int = true},
+	{name = "i16", id = .B_I16, int_kind = .i16, is_int = true},
+	{name = "u32", id = .B_U32, int_kind = .u32, is_int = true},
+	{name = "i32", id = .B_I32, int_kind = .i32, is_int = true},
+	{name = "u64", id = .B_U64, int_kind = .u64, is_int = true},
+	{name = "i64", id = .B_I64, int_kind = .i64, is_int = true},
+	{name = "f32", id = .B_F32, flt_kind = .f32, is_float = true},
+	{name = "f64", id = .B_F64, flt_kind = .f64, is_float = true},
+	{name = "bool", id = .B_Bool, is_bool = true},
+	{name = "char", id = .B_Char, int_kind = .u8, is_int = true},
 	{name = "String", id = .B_String, is_string = true},
 	{},
 }
@@ -228,16 +240,15 @@ init_sem_builtins :: proc(s: ^Semantic) {
 	for def in BUILTIN_DEFS {
 		if def.id == .None do break
 		entry := Binding_Entry {
-			node            = INVALID_NODE,
-			name            = EMPTY_SPAN,
-			kind            = .Pointing_Push,
-			value_node      = INVALID_NODE,
+			node = INVALID_NODE,
+			name = EMPTY_SPAN,
+			kind = .Pointing_Push,
+			value_node = INVALID_NODE,
 			constraint_node = INVALID_NODE,
-			scope_id        = s.builtin_scope,
-			value_kind      = .Builtin,
-			flags           = {.Has_Value},
+			scope_id = s.builtin_scope,
+			value = Symbolic_SV{builtin = def.id},
+			flags = {.Has_Value},
 		}
-		entry.value.builtin = def.id
 		append(&s.bindings, entry)
 		count += 1
 	}
@@ -259,26 +270,21 @@ builtin_def_by_id :: #force_inline proc(id: Builtin_Id) -> Builtin_Def {
 	return {}
 }
 
-builtin_default_value :: proc(id: Builtin_Id) -> (Value_Kind, Static_Value) {
+builtin_default_value :: proc(id: Builtin_Id) -> Static_Value {
 	def := builtin_def_by_id(id)
-	sv: Static_Value
 	if def.is_int {
-		sv.integer = Integer_SV{content = 0, kind = def.int_kind}
-		return .Integer, sv
+		return Integer_SV{content = 0, kind = def.int_kind}
 	}
 	if def.is_float {
-		sv.float_v = Float_SV{content = 0.0, kind = def.flt_kind}
-		return .Float, sv
+		return Float_SV{content = 0.0, kind = def.flt_kind}
 	}
 	if def.is_bool {
-		sv.bool_v = false
-		return .Bool, sv
+		return bool(false)
 	}
 	if def.is_string {
-		sv.str_span = EMPTY_SPAN
-		return .String_Literal, sv
+		return EMPTY_SPAN
 	}
-	return .None, sv
+	return nil
 }
 
 /* ======================================================================
@@ -291,15 +297,14 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	s := new(Semantic)
 	s.ast = ast
 	s.node_sems = make([]Node_Sem, len(ast.node_kinds))
-	for &ns in s.node_sems { ns.ref_binding = INVALID_BINDING }
+	for &ns in s.node_sems {ns.ref_binding = INVALID_BINDING}
 	s.node_to_scope = make([]Scope_Id, len(ast.node_kinds))
-	for &v in s.node_to_scope { v = INVALID_SCOPE }
+	for &v in s.node_to_scope {v = INVALID_SCOPE}
 	s.scopes = make([dynamic]Scope_Info, 0, 32)
 	s.bindings = make([dynamic]Binding_Entry, 0, 128)
 	s.scope_stack = make([dynamic]Scope_Id, 0, 16)
 	s.errors = make([dynamic]Analyzer_Error, 0)
 	s.warnings = make([dynamic]Analyzer_Error, 0)
-	s.pending_commit = INVALID_BINDING
 
 	init_sem_builtins(s)
 
@@ -318,10 +323,14 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 
 	root_idx := ast_root(ast)
 	if node_kind(ast, root_idx) == .ScopeNode {
-		sem_process_scope(s, root_id, root_idx)
+		for child in node_children(ast, root_idx) {
+			sem_walk(s, child)
+		}
 	} else {
 		sem_error(s, "Root should be a scope", .Default, node_position(ast, root_idx))
 	}
+
+	sem_finalize_scope(s, root_id)
 
 	pop(&s.scope_stack)
 	pop(&s.scope_stack)
@@ -350,10 +359,6 @@ sem_current_scope :: #force_inline proc(s: ^Semantic) -> Scope_Id {
 }
 
 sem_push_scope :: proc(s: ^Semantic, node: Node_Index) -> Scope_Id {
-	if s.pending_commit != INVALID_BINDING {
-		sem_commit_binding(s, s.pending_scope, s.pending_commit)
-		s.pending_commit = INVALID_BINDING
-	}
 	parent := sem_current_scope(s)
 	scope := Scope_Info {
 		node          = node,
@@ -380,81 +385,19 @@ sem_add_binding :: proc(s: ^Semantic, entry: Binding_Entry) -> Binding_Id {
 	append(&s.bindings, entry)
 	scope_id := sem_current_scope(s)
 	s.scopes[scope_id].binding_count += 1
+	if entry.name != EMPTY_SPAN {
+		name := s.ast.source[entry.name.start:entry.name.end]
+		s.scopes[scope_id].names[name] = id
+	}
 	return id
 }
 
-sem_commit_binding :: proc(s: ^Semantic, scope_id: Scope_Id, bid: Binding_Id) {
-	entry := &s.bindings[bid]
-	if entry.name != EMPTY_SPAN {
-		name := s.ast.source[entry.name.start:entry.name.end]
-		s.scopes[scope_id].names[name] = bid
-	}
-}
-
 /* ======================================================================
- * SECTION 5: SINGLE-PASS SCOPE PROCESSING (register + evaluate top-down)
+ * SECTION 5: WALK
  * ====================================================================== */
 
-sem_process_scope :: proc(s: ^Semantic, scope_id: Scope_Id, scope_node: Node_Index) {
-	ast := s.ast
-	scope := &s.scopes[scope_id]
-	flags: Sem_Flags
-
-	has_product := false
-	has_pull := false
-	has_effect := false
-	all_static := true
-
-	for child in node_children(ast, scope_node) {
-		bid := sem_register_child(s, child)
-		if bid == INVALID_BINDING do continue
-
-		s.pending_commit = bid
-		s.pending_scope = scope_id
-
-		entry := &s.bindings[bid]
-		sem_evaluate_binding(s, entry)
-
-		s.pending_commit = INVALID_BINDING
-		sem_commit_binding(s, scope_id, bid)
-
-		#partial switch entry.kind {
-		case .Product:
-			has_product = true
-		case .Pointing_Pull:
-			has_pull = true
-		case .Event_Push, .Event_Pull:
-			has_effect = true
-		case .Resonance_Push, .Resonance_Pull:
-			has_effect = true
-		}
-
-		if .Has_Value not_in entry.flags {
-			all_static = false
-		}
-		if .Self_Referential in entry.flags {
-			flags |= {.Self_Referential}
-		}
-	}
-
-	if has_product do flags |= {.Contains_Product}
-	if has_pull do flags |= {.Contains_Pull}
-
-	if has_product && !has_pull && !has_effect &&
-	   .Self_Referential not_in flags && all_static {
-		flags |= {.Is_Collapsible, .Is_Pure}
-	}
-
-	scope.flags = flags
-
-	if scope.node != INVALID_NODE {
-		sem := &s.node_sems[scope.node]
-		sem.flags |= flags
-	}
-}
-
-sem_register_child :: proc(s: ^Semantic, idx: Node_Index) -> Binding_Id {
-	if idx == INVALID_NODE do return INVALID_BINDING
+sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
+	if idx == INVALID_NODE do return
 	ast := s.ast
 	kind := node_kind(ast, idx)
 
@@ -519,7 +462,6 @@ sem_register_child :: proc(s: ^Semantic, idx: Node_Index) -> Binding_Id {
 		}
 		sem_add_binding(s, entry)
 	}
-	return Binding_Id(len(s.bindings) - 1)
 }
 
 /* ======================================================================
@@ -718,9 +660,62 @@ sem_extract_name :: proc(s: ^Semantic, idx: Node_Index, entry: ^Binding_Entry) {
 	}
 }
 
+/* ======================================================================
+ * SECTION 7: FINALIZE SCOPE
+ * ====================================================================== */
+
+sem_finalize_scope :: proc(s: ^Semantic, scope_id: Scope_Id) {
+	scope := &s.scopes[scope_id]
+	first := u32(scope.first_binding)
+	count := scope.binding_count
+	flags: Sem_Flags
+
+	has_product := false
+	has_pull := false
+	has_effect := false
+	all_static := true
+
+	for i in first ..< first + count {
+		entry := &s.bindings[i]
+
+		sem_evaluate_binding(s, entry)
+
+		#partial switch entry.kind {
+		case .Product:
+			has_product = true
+		case .Pointing_Pull:
+			has_pull = true
+		case .Event_Push, .Event_Pull:
+			has_effect = true
+		case .Resonance_Push, .Resonance_Pull:
+			has_effect = true
+		}
+
+		if .Has_Value not_in entry.flags {
+			all_static = false
+		}
+		if .Self_Referential in entry.flags {
+			flags |= {.Self_Referential}
+		}
+	}
+
+	if has_product do flags |= {.Contains_Product}
+	if has_pull do flags |= {.Contains_Pull}
+
+	if has_product && !has_pull && !has_effect && .Self_Referential not_in flags && all_static {
+		flags |= {.Is_Collapsible, .Is_Pure}
+	}
+
+	scope.flags = flags
+
+	if scope.node != INVALID_NODE {
+		sem := &s.node_sems[scope.node]
+		sem.flags |= flags
+	}
+}
+
 sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.value_node == INVALID_NODE && entry.constraint_node == INVALID_NODE {
-		entry.value_kind = .None
 		entry.flags |= {.Has_Value}
 		return
 	}
@@ -730,20 +725,18 @@ sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	}
 
 	if entry.value_node != INVALID_NODE {
-		vk, sv := sem_evaluate_value(s, entry.value_node)
-		entry.value_kind = vk
+		sv := sem_evaluate_value(s, entry.value_node)
 		entry.value = sv
-		if vk != .None {
+		if sv != nil {
 			entry.flags |= {.Has_Value}
 		}
-		if vk == .Symbolic {
+		if sv_is_symbolic(sv) {
 			entry.flags |= {.Self_Referential}
 		}
 	} else if .Has_Constraint in entry.flags {
-		vk, sv := sem_resolve_default(s, entry.constraint_node)
-		entry.value_kind = vk
+		sv := sem_resolve_default(s, entry.constraint_node)
 		entry.value = sv
-		if vk != .None {
+		if sv != nil {
 			entry.flags |= {.Has_Value}
 		}
 	}
@@ -754,8 +747,9 @@ sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 }
 
 sem_evaluate_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
-	vk, _ := sem_evaluate_value(s, entry.constraint_node)
-	if vk == .Scope || vk == .Builtin {
+	sv := sem_evaluate_value(s, entry.constraint_node)
+	_, is_scope := sv.(Node_Index)
+	if is_scope || sv_is_symbolic(sv) {
 		entry.flags |= {.Has_Constraint}
 	}
 }
@@ -770,24 +764,31 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 			left_idx := node_operator_left(ast, constraint_node)
 			right_idx := node_operator_right(ast, constraint_node)
 			sep := " | " if op == .Or else " & "
-			return fmt.tprintf("%s%s%s", sem_constraint_name(s, left_idx), sep, sem_constraint_name(s, right_idx))
+			return fmt.tprintf(
+				"%s%s%s",
+				sem_constraint_name(s, left_idx),
+				sep,
+				sem_constraint_name(s, right_idx),
+			)
 		}
 	}
 
 	csem := s.node_sems[constraint_node]
 
-	if csem.value_kind == .Symbolic && csem.ref_binding != INVALID_BINDING {
+	if sv_is_symbolic(csem.value) && csem.ref_binding != INVALID_BINDING {
 		ref_entry := &s.bindings[csem.ref_binding]
 		if ref_entry.value_node != INVALID_NODE {
 			return sem_constraint_name(s, ref_entry.value_node)
 		}
 	}
 
-	if csem.value_kind == .Builtin {
-		return builtin_def_by_id(csem.value.builtin).name
+	bid, is_builtin := resolve_builtin_constraint(csem.value)
+	if is_builtin {
+		return builtin_def_by_id(bid).name
 	}
-	if csem.value_kind == .Scope {
-		scope_id, sok := sem_find_scope(s, csem.value.scope)
+
+	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
+		scope_id, sok := sem_find_scope(s, scope_node)
 		if sok {
 			scope := s.scopes[scope_id]
 			first := u32(scope.first_binding)
@@ -797,7 +798,8 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 				if e.kind != .Product do continue
 				if .Has_Constraint in e.flags && e.constraint_node != INVALID_NODE {
 					append(&parts, sem_constraint_name(s, e.constraint_node))
-				} else if e.value_node != INVALID_NODE && node_kind(ast, e.value_node) == .Constraint {
+				} else if e.value_node != INVALID_NODE &&
+				   node_kind(ast, e.value_node) == .Constraint {
 					cleft := node_left(ast, e.value_node)
 					if cleft != INVALID_NODE {
 						append(&parts, sem_constraint_name(s, cleft))
@@ -813,42 +815,44 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 	return "unknown"
 }
 
-sem_value_kind_name :: proc(vk: Value_Kind) -> string {
-	switch vk {
-	case .Integer:        return "integer"
-	case .Float:          return "float"
-	case .Bool:           return "bool"
-	case .String_Literal: return "string"
-	case .Scope:          return "scope"
-	case .Builtin:        return "type"
-	case .Ref:            return "ref"
-	case .Symbolic:       return "symbolic"
-	case .None:           return "none"
-	}
-	return "unknown"
+resolve_builtin_constraint :: proc(sv: Static_Value) -> (Builtin_Id, bool) {
+	sym, ok := sv.(Symbolic_SV)
+	if !ok do return .None, false
+	return sym.builtin, sym.builtin != .None
 }
 
 Constraint_Override :: struct {
 	binding_id: Binding_Id,
-	value_kind: Value_Kind,
 	value:      Static_Value,
 	node:       Node_Index,
 }
 
 sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.constraint_node == INVALID_NODE do return
-	if entry.value_kind == .Symbolic || entry.value_kind == .Ref do return
-	if entry.value_kind == .None do return
+	if sv_is_symbolic(entry.value) do return
+	if _, is_ref := entry.value.(Ref_SV); is_ref do return
+	if entry.value == nil do return
 
 	ast := s.ast
 	if node_kind(ast, entry.constraint_node) == .Operator {
 		op := node_operator_kind(ast, entry.constraint_node)
 		if op == .Or || op == .And {
 			if sem_check_compound(s, entry.constraint_node, entry) do return
-			binding_name := sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
+			binding_name :=
+				sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
 			pos := node_position(ast, entry.node)
 			cname := sem_constraint_name(s, entry.constraint_node)
-			sem_error(s, fmt.tprintf("'%s' expected %s, got %s", binding_name, cname, sem_value_kind_name(entry.value_kind)), .Constraint_Violation, pos)
+			sem_error(
+				s,
+				fmt.tprintf(
+					"'%s' expected %s, got %s",
+					binding_name,
+					cname,
+					sv_kind_name(entry.value),
+				),
+				.Constraint_Violation,
+				pos,
+			)
 			return
 		}
 	}
@@ -856,41 +860,68 @@ sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	csem := s.node_sems[entry.constraint_node]
 	binding_name := sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
 
-	if csem.value_kind == .Symbolic {
+	if sv_is_symbolic(csem.value) {
 		compound_node := sem_find_compound_node(s, entry.constraint_node)
 		if compound_node != INVALID_NODE {
 			if sem_check_compound(s, compound_node, entry) do return
 			pos := node_position(ast, entry.node)
 			cname := sem_constraint_name(s, compound_node)
-			sem_error(s, fmt.tprintf("'%s' expected %s, got %s", binding_name, cname, sem_value_kind_name(entry.value_kind)), .Constraint_Violation, pos)
+			sem_error(
+				s,
+				fmt.tprintf(
+					"'%s' expected %s, got %s",
+					binding_name,
+					cname,
+					sv_kind_name(entry.value),
+				),
+				.Constraint_Violation,
+				pos,
+			)
 			return
 		}
 	}
 
-	if csem.value_kind == .Builtin {
-		if sem_check_builtin(s, csem.value.builtin, entry) do return
+	if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
+		if sem_check_builtin(s, bid, entry) do return
 		pos := node_position(ast, entry.node)
-		cname := builtin_def_by_id(csem.value.builtin).name
-		sem_error(s, fmt.tprintf("'%s' expected %s, got %s", binding_name, cname, sem_value_kind_name(entry.value_kind)), .Constraint_Violation, pos)
-		dvk, dsv := builtin_default_value(csem.value.builtin)
-		entry.value_kind = dvk
-		entry.value = dsv
+		cname := builtin_def_by_id(bid).name
+		sem_error(
+			s,
+			fmt.tprintf(
+				"'%s' expected %s, got %s",
+				binding_name,
+				cname,
+				sv_kind_name(entry.value),
+			),
+			.Constraint_Violation,
+			pos,
+		)
+		entry.value = builtin_default_value(bid)
 		return
 	}
 
-	if csem.value_kind == .Scope {
+	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
 		overrides := sem_extract_carve_overrides(s, entry.constraint_node)
-		if sem_check_by_scope(s, csem.value.scope, entry.value_kind, entry.value, overrides[:]) do return
+		if sem_check_by_scope(s, scope_node, entry.value, overrides[:]) do return
 		errors_before := len(s.errors)
-		sem_check_by_scope(s, csem.value.scope, entry.value_kind, entry.value, overrides[:], true)
+		sem_check_by_scope(s, scope_node, entry.value, overrides[:], true)
 		if len(s.errors) == errors_before {
 			pos := node_position(ast, entry.node)
 			cname := sem_constraint_name(s, entry.constraint_node)
-				sem_error(s, fmt.tprintf("'%s' expected %s, got %s", binding_name, cname, sem_value_kind_name(entry.value_kind)), .Constraint_Violation, pos)
+			sem_error(
+				s,
+				fmt.tprintf(
+					"'%s' expected %s, got %s",
+					binding_name,
+					cname,
+					sv_kind_name(entry.value),
+				),
+				.Constraint_Violation,
+				pos,
+			)
 		}
-		dvk, dsv := sem_resolve_default(s, entry.constraint_node)
-		if dvk != .None {
-			entry.value_kind = dvk
+		dsv := sem_resolve_default(s, entry.constraint_node)
+		if dsv != nil {
 			entry.value = dsv
 		}
 		return
@@ -917,7 +948,11 @@ sem_find_compound_node :: proc(s: ^Semantic, node: Node_Index) -> Node_Index {
 	return INVALID_NODE
 }
 
-sem_check_compound :: proc(s: ^Semantic, constraint_node: Node_Index, entry: ^Binding_Entry) -> bool {
+sem_check_compound :: proc(
+	s: ^Semantic,
+	constraint_node: Node_Index,
+	entry: ^Binding_Entry,
+) -> bool {
 	ast := s.ast
 	if node_kind(ast, constraint_node) != .Operator do return false
 
@@ -926,15 +961,25 @@ sem_check_compound :: proc(s: ^Semantic, constraint_node: Node_Index, entry: ^Bi
 	right_idx := node_operator_right(ast, constraint_node)
 
 	if op == .Or {
-		return sem_check_constraint_node(s, left_idx, entry) || sem_check_constraint_node(s, right_idx, entry)
+		return(
+			sem_check_constraint_node(s, left_idx, entry) ||
+			sem_check_constraint_node(s, right_idx, entry) \
+		)
 	}
 	if op == .And {
-		return sem_check_constraint_node(s, left_idx, entry) && sem_check_constraint_node(s, right_idx, entry)
+		return(
+			sem_check_constraint_node(s, left_idx, entry) &&
+			sem_check_constraint_node(s, right_idx, entry) \
+		)
 	}
 	return false
 }
 
-sem_check_constraint_node :: proc(s: ^Semantic, constraint_node: Node_Index, entry: ^Binding_Entry) -> bool {
+sem_check_constraint_node :: proc(
+	s: ^Semantic,
+	constraint_node: Node_Index,
+	entry: ^Binding_Entry,
+) -> bool {
 	if constraint_node == INVALID_NODE do return false
 	ast := s.ast
 
@@ -947,32 +992,45 @@ sem_check_constraint_node :: proc(s: ^Semantic, constraint_node: Node_Index, ent
 
 	csem := s.node_sems[constraint_node]
 
-	if csem.value_kind == .Symbolic {
+	if sv_is_symbolic(csem.value) {
 		compound_node := sem_find_compound_node(s, constraint_node)
 		if compound_node != INVALID_NODE {
 			return sem_check_compound(s, compound_node, entry)
 		}
 	}
 
-	if csem.value_kind == .Builtin {
-		test_entry := Binding_Entry{ value_kind = entry.value_kind, value = entry.value }
-		return sem_check_builtin(s, csem.value.builtin, &test_entry)
+	if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
+		test_entry := Binding_Entry {
+			value = entry.value,
+		}
+		return sem_check_builtin(s, bid, &test_entry)
 	}
 
-	if csem.value_kind == .Scope {
+	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
 		overrides := sem_extract_carve_overrides(s, constraint_node)
-		if entry.value_kind == .Scope && entry.value_node != INVALID_NODE {
-			if sem_check_scope_against_carve_constraint(s, entry.value_node, constraint_node, overrides[:]) {
+		if _, val_is_scope := entry.value.(Node_Index);
+		   val_is_scope && entry.value_node != INVALID_NODE {
+			if sem_check_scope_against_carve_constraint(
+				s,
+				entry.value_node,
+				constraint_node,
+				overrides[:],
+			) {
 				return true
 			}
 		}
-		return sem_check_by_scope(s, csem.value.scope, entry.value_kind, entry.value, overrides[:])
+		return sem_check_by_scope(s, scope_node, entry.value, overrides[:])
 	}
 
 	return false
 }
 
-sem_check_scope_against_carve_constraint :: proc(s: ^Semantic, value_node: Node_Index, constraint_node: Node_Index, constraint_overrides: []Constraint_Override) -> bool {
+sem_check_scope_against_carve_constraint :: proc(
+	s: ^Semantic,
+	value_node: Node_Index,
+	constraint_node: Node_Index,
+	constraint_overrides: []Constraint_Override,
+) -> bool {
 	ast := s.ast
 	if constraint_node == INVALID_NODE do return false
 
@@ -981,8 +1039,8 @@ sem_check_scope_against_carve_constraint :: proc(s: ^Semantic, value_node: Node_
 		con_source_node = node_carve_source(ast, constraint_node)
 	}
 	con_sem := s.node_sems[con_source_node]
-	if con_sem.value_kind != .Scope do return false
-	con_scope_node := con_sem.value.scope
+	con_scope_node, con_is_scope := con_sem.value.(Node_Index)
+	if !con_is_scope do return false
 
 	val_node := value_node
 	val_overrides: [dynamic]Constraint_Override
@@ -991,32 +1049,52 @@ sem_check_scope_against_carve_constraint :: proc(s: ^Semantic, value_node: Node_
 		val_overrides = sem_extract_carve_overrides(s, val_node)
 		val_source := node_carve_source(ast, val_node)
 		val_sem := s.node_sems[val_source]
-		if val_sem.value_kind == .Scope && val_sem.value.scope == con_scope_node {
-			return sem_check_carve_overrides_compatible(s, con_scope_node, val_overrides[:], constraint_overrides)
+		if val_scope_node, vs_ok := val_sem.value.(Node_Index);
+		   vs_ok && val_scope_node == con_scope_node {
+			return sem_check_carve_overrides_compatible(
+				s,
+				con_scope_node,
+				val_overrides[:],
+				constraint_overrides,
+			)
 		}
 	} else if node_kind(ast, val_node) == .Identifier {
 		val_sem := s.node_sems[val_node]
-		if val_sem.value_kind == .Scope {
-			return sem_check_scope_productions_compatible(s, val_sem.value.scope, con_scope_node, constraint_overrides)
+		if val_scope_node, vs_ok := val_sem.value.(Node_Index); vs_ok {
+			return sem_check_scope_productions_compatible(
+				s,
+				val_scope_node,
+				con_scope_node,
+				constraint_overrides,
+			)
 		}
 	}
 
 	return false
 }
 
-sem_check_carve_overrides_compatible :: proc(s: ^Semantic, scope_node: Node_Index, val_overrides: []Constraint_Override, con_overrides: []Constraint_Override) -> bool {
+sem_check_carve_overrides_compatible :: proc(
+	s: ^Semantic,
+	scope_node: Node_Index,
+	val_overrides: []Constraint_Override,
+	con_overrides: []Constraint_Override,
+) -> bool {
 	for co in con_overrides {
 		found := false
 		for vo in val_overrides {
 			if vo.binding_id == co.binding_id {
 				found = true
-				if co.value_kind == .Builtin {
-					test_entry := Binding_Entry{ value_kind = vo.value_kind, value = vo.value }
-					if !sem_check_builtin(s, co.value.builtin, &test_entry) do return false
-				} else if co.value_kind == .Scope {
-					if vo.value_kind != .Scope do return false
-				} else if co.value_kind != vo.value_kind {
-					return false
+				if co_bid, co_builtin := resolve_builtin_constraint(co.value); co_builtin {
+					test_entry := Binding_Entry {
+						value = vo.value,
+					}
+					if !sem_check_builtin(s, co_bid, &test_entry) do return false
+				} else if _, co_scope := co.value.(Node_Index); co_scope {
+					if _, vo_scope := vo.value.(Node_Index); !vo_scope do return false
+				} else {
+					co_kind := sv_kind_name(co.value)
+					vo_kind := sv_kind_name(vo.value)
+					if co_kind != vo_kind do return false
 				}
 				break
 			}
@@ -1026,7 +1104,12 @@ sem_check_carve_overrides_compatible :: proc(s: ^Semantic, scope_node: Node_Inde
 	return true
 }
 
-sem_check_scope_productions_compatible :: proc(s: ^Semantic, val_scope_node: Node_Index, con_scope_node: Node_Index, con_overrides: []Constraint_Override) -> bool {
+sem_check_scope_productions_compatible :: proc(
+	s: ^Semantic,
+	val_scope_node: Node_Index,
+	con_scope_node: Node_Index,
+	con_overrides: []Constraint_Override,
+) -> bool {
 	val_scope_id, vok := sem_find_scope(s, val_scope_node)
 	if !vok do return false
 	con_scope_id, cok := sem_find_scope(s, con_scope_node)
@@ -1042,7 +1125,11 @@ sem_check_scope_productions_compatible :: proc(s: ^Semantic, val_scope_node: Nod
 		if .Has_Constraint not_in ce.flags do continue
 		if ce.constraint_node == INVALID_NODE do continue
 
-		resolved_vk, resolved_sv, _, resolved := sem_resolve_constraint_with_overrides(s, ce.constraint_node, con_overrides)
+		resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
+			s,
+			ce.constraint_node,
+			con_overrides,
+		)
 
 		vfirst := u32(val_scope.first_binding)
 		for vi in vfirst ..< vfirst + val_scope.binding_count {
@@ -1051,15 +1138,19 @@ sem_check_scope_productions_compatible :: proc(s: ^Semantic, val_scope_node: Nod
 			if .Has_Value not_in ve.flags do continue
 
 			if resolved {
-				if resolved_vk == .Builtin {
-					test_entry := Binding_Entry{ value_kind = ve.value_kind, value = ve.value }
-					if !sem_check_builtin(s, resolved_sv.builtin, &test_entry) do return false
+				if bid, is_builtin := resolve_builtin_constraint(resolved_sv); is_builtin {
+					test_entry := Binding_Entry {
+						value = ve.value,
+					}
+					if !sem_check_builtin(s, bid, &test_entry) do return false
 				}
 			} else {
 				csem := s.node_sems[ce.constraint_node]
-				if csem.value_kind == .Builtin {
-					test_entry := Binding_Entry{ value_kind = ve.value_kind, value = ve.value }
-					if !sem_check_builtin(s, csem.value.builtin, &test_entry) do return false
+				if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
+					test_entry := Binding_Entry {
+						value = ve.value,
+					}
+					if !sem_check_builtin(s, bid, &test_entry) do return false
 				}
 			}
 		}
@@ -1068,17 +1159,21 @@ sem_check_scope_productions_compatible :: proc(s: ^Semantic, val_scope_node: Nod
 	return true
 }
 
-sem_extract_carve_overrides :: proc(s: ^Semantic, constraint_node: Node_Index) -> [dynamic]Constraint_Override {
+sem_extract_carve_overrides :: proc(
+	s: ^Semantic,
+	constraint_node: Node_Index,
+) -> [dynamic]Constraint_Override {
 	overrides := make([dynamic]Constraint_Override, 0, 4)
 	if constraint_node == INVALID_NODE do return overrides
 	ast := s.ast
 	if node_kind(ast, constraint_node) != .Carve do return overrides
 
 	source_idx := node_carve_source(ast, constraint_node)
-	svk, ssv := s.node_sems[source_idx].value_kind, s.node_sems[source_idx].value
-	if svk != .Scope do return overrides
+	ssv := s.node_sems[source_idx].value
+	scope_node, is_scope := ssv.(Node_Index)
+	if !is_scope do return overrides
 
-	target_scope_id, ok := sem_find_scope(s, ssv.scope)
+	target_scope_id, ok := sem_find_scope(s, scope_node)
 	if !ok do return overrides
 
 	positional_idx: i16 = 0
@@ -1093,14 +1188,24 @@ sem_extract_carve_overrides :: proc(s: ^Semantic, constraint_node: Node_Index) -
 				bid, found := sem_resolve_in_scope(s, target_scope_id, name)
 				if found && to_idx != INVALID_NODE {
 					child_sem := s.node_sems[to_idx]
-					append(&overrides, Constraint_Override{binding_id = bid, value_kind = child_sem.value_kind, value = child_sem.value, node = to_idx})
+					append(
+						&overrides,
+						Constraint_Override {
+							binding_id = bid,
+							value = child_sem.value,
+							node = to_idx,
+						},
+					)
 				}
 			}
 		case:
 			child_sem := s.node_sems[child]
 			bid, found := sem_resolve_by_index(s, target_scope_id, positional_idx)
 			if found {
-				append(&overrides, Constraint_Override{binding_id = bid, value_kind = child_sem.value_kind, value = child_sem.value, node = child})
+				append(
+					&overrides,
+					Constraint_Override{binding_id = bid, value = child_sem.value, node = child},
+				)
 			}
 			positional_idx += 1
 		}
@@ -1112,18 +1217,22 @@ sem_check_builtin :: proc(s: ^Semantic, bid: Builtin_Id, entry: ^Binding_Entry) 
 	def := builtin_def_by_id(bid)
 
 	if def.is_int {
-		if entry.value_kind != .Integer do return false
-		return sem_check_int(&entry.value.integer, def.int_kind)
+		iv, ok := entry.value.(Integer_SV)
+		if !ok do return false
+		return sem_check_int(&iv, def.int_kind)
 	}
 	if def.is_float {
-		if entry.value_kind != .Float do return false
-		return sem_check_float(&entry.value.float_v, def.flt_kind)
+		fv, ok := entry.value.(Float_SV)
+		if !ok do return false
+		return sem_check_float(&fv, def.flt_kind)
 	}
 	if def.is_bool {
-		return entry.value_kind == .Bool
+		_, ok := entry.value.(bool)
+		return ok
 	}
 	if def.is_string {
-		return entry.value_kind == .String_Literal
+		_, ok := entry.value.(Span)
+		return ok
 	}
 	return false
 }
@@ -1131,15 +1240,24 @@ sem_check_builtin :: proc(s: ^Semantic, bid: Builtin_Id, entry: ^Binding_Entry) 
 sem_check_int :: proc(val: ^Integer_SV, constr_kind: IntegerKind) -> bool {
 	if val.kind == .none {
 		switch constr_kind {
-		case .none:  return true
-		case .u8:    if !val.negative && val.content < 256        { val.kind = .u8;  return true }; return false
-		case .i8:    if val.content < 128                         { val.kind = .i8;  return true }; return false
-		case .u16:   if !val.negative && val.content < 65536      { val.kind = .u16; return true }; return false
-		case .i16:   if val.content < 32768                       { val.kind = .i16; return true }; return false
-		case .u32:   if !val.negative && val.content < 4294967296 { val.kind = .u32; return true }; return false
-		case .i32:   if val.content < 2147483648                  { val.kind = .i32; return true }; return false
-		case .u64:   if !val.negative                             { val.kind = .u64; return true }; return false
-		case .i64:   val.kind = .i64; return true
+		case .none:
+			return true
+		case .u8:
+			if !val.negative && val.content < 256 {val.kind = .u8;return true};return false
+		case .i8:
+			if val.content < 128 {val.kind = .i8;return true};return false
+		case .u16:
+			if !val.negative && val.content < 65536 {val.kind = .u16;return true};return false
+		case .i16:
+			if val.content < 32768 {val.kind = .i16;return true};return false
+		case .u32:
+			if !val.negative && val.content < 4294967296 {val.kind = .u32;return true};return false
+		case .i32:
+			if val.content < 2147483648 {val.kind = .i32;return true};return false
+		case .u64:
+			if !val.negative {val.kind = .u64;return true};return false
+		case .i64:
+			val.kind = .i64;return true
 		}
 	}
 	return constr_kind == .none || constr_kind == val.kind
@@ -1169,7 +1287,13 @@ sem_check_float :: proc(val: ^Float_SV, constr_kind: FloatKind) -> bool {
 	return false
 }
 
-sem_check_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_Kind, sv: Static_Value, overrides: []Constraint_Override = {}, report: bool = false) -> bool {
+sem_check_by_scope :: proc(
+	s: ^Semantic,
+	scope_node: Node_Index,
+	sv: Static_Value,
+	overrides: []Constraint_Override = {},
+	report: bool = false,
+) -> bool {
 	scope_id, ok := sem_find_scope(s, scope_node)
 	if !ok do return false
 
@@ -1183,62 +1307,92 @@ sem_check_by_scope :: proc(s: ^Semantic, scope_node: Node_Index, vk: Value_Kind,
 		has_product = true
 
 		if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
-			resolved_vk, resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(s, entry.constraint_node, overrides)
+			resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
+				s,
+				entry.constraint_node,
+				overrides,
+			)
 			if resolved {
-				if resolved_vk == .Symbolic && resolved_node != INVALID_NODE {
-					test_entry := Binding_Entry{ value_kind = vk, value = sv }
+				if sv_is_symbolic(resolved_sv) && resolved_node != INVALID_NODE {
+					test_entry := Binding_Entry {
+						value = sv,
+					}
 					if sem_check_constraint_node(s, resolved_node, &test_entry) do return true
-				} else if resolved_vk == .Builtin {
-					test_entry := Binding_Entry{ value_kind = vk, value = sv }
-					if sem_check_builtin(s, resolved_sv.builtin, &test_entry) do return true
-				} else if resolved_vk == .Scope {
-					if sem_check_by_scope(s, resolved_sv.scope, vk, sv, overrides, report) do return true
+				} else if bid, is_builtin := resolve_builtin_constraint(resolved_sv); is_builtin {
+					test_entry := Binding_Entry {
+						value = sv,
+					}
+					if sem_check_builtin(s, bid, &test_entry) do return true
+				} else if _, is_scope := resolved_sv.(Node_Index); is_scope {
+					rs_node, _ := resolved_sv.(Node_Index)
+					if sem_check_by_scope(s, rs_node, sv, overrides, report) do return true
 				}
 			} else {
-				test_entry := Binding_Entry{ value_kind = vk, value = sv }
+				test_entry := Binding_Entry {
+					value = sv,
+				}
 				if sem_check_constraint_node(s, entry.constraint_node, &test_entry) do return true
 			}
 		} else if .Has_Value in entry.flags {
-			if entry.value_kind == .Scope && vk == .Scope {
+			_, entry_is_scope := entry.value.(Node_Index)
+			_, sv_is_scope_v := sv.(Node_Index)
+			if entry_is_scope && sv_is_scope_v {
 				product_overrides := overrides
 				own_overrides: [dynamic]Constraint_Override
-				if entry.value_node != INVALID_NODE && node_kind(s.ast, entry.value_node) == .Carve {
+				if entry.value_node != INVALID_NODE &&
+				   node_kind(s.ast, entry.value_node) == .Carve {
 					own_overrides = sem_extract_carve_overrides(s, entry.value_node)
 					product_overrides = own_overrides[:]
 				}
-				if sem_check_scope_structural(s, sv.scope, entry.value.scope, product_overrides, report) do return true
+				sv_scope, _ := sv.(Node_Index)
+				entry_scope, _ := entry.value.(Node_Index)
+				if sem_check_scope_structural(s, sv_scope, entry_scope, product_overrides, report) do return true
 			} else {
-				if sem_check_by_value(entry.value_kind, entry.value, vk, sv) do return true
+				if sem_check_by_value(entry.value, sv) do return true
 			}
 		}
 	}
 
 	if !has_product {
-		if vk == .Scope {
-			return sem_check_scope_structural(s, sv.scope, scope_node, overrides, report)
+		if sv_scope, is_scope := sv.(Node_Index); is_scope {
+			return sem_check_scope_structural(s, sv_scope, scope_node, overrides, report)
 		}
 		return false
 	}
 	return false
 }
 
-sem_resolve_constraint_with_overrides :: proc(s: ^Semantic, constraint_node: Node_Index, overrides: []Constraint_Override) -> (Value_Kind, Static_Value, Node_Index, bool) {
-	if constraint_node == INVALID_NODE do return .None, {}, INVALID_NODE, false
+sem_resolve_constraint_with_overrides :: proc(
+	s: ^Semantic,
+	constraint_node: Node_Index,
+	overrides: []Constraint_Override,
+) -> (
+	Static_Value,
+	Node_Index,
+	bool,
+) {
+	if constraint_node == INVALID_NODE do return nil, INVALID_NODE, false
 
 	csem := s.node_sems[constraint_node]
 
 	if csem.ref_binding != INVALID_BINDING {
 		for ov in overrides {
 			if ov.binding_id == csem.ref_binding {
-				return ov.value_kind, ov.value, ov.node, true
+				return ov.value, ov.node, true
 			}
 		}
 	}
 
-	return .None, {}, INVALID_NODE, false
+	return nil, INVALID_NODE, false
 }
 
-sem_check_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, constraint_scope_node: Node_Index, overrides: []Constraint_Override, report: bool = false) -> bool {
+sem_check_scope_structural :: proc(
+	s: ^Semantic,
+	value_scope_node: Node_Index,
+	constraint_scope_node: Node_Index,
+	overrides: []Constraint_Override,
+	report: bool = false,
+) -> bool {
 	val_scope_id, vok := sem_find_scope(s, value_scope_node)
 	if !vok do return true
 
@@ -1253,7 +1407,7 @@ sem_check_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, c
 	cfirst := u32(con_scope.first_binding)
 	for i in cfirst ..< cfirst + con_scope.binding_count {
 		e := &s.bindings[i]
-		if e.kind == .Expand { has_expand = true; continue }
+		if e.kind == .Expand {has_expand = true;continue}
 		if e.kind == .Product do continue
 		con_element_count += 1
 	}
@@ -1269,7 +1423,8 @@ sem_check_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, c
 		return val_element_count == 0
 	}
 
-	element_constraint_vk, element_constraint_sv, element_constraint_node, has_element_constraint := sem_find_element_constraint(s, con_scope_id, overrides)
+	element_constraint_sv, element_constraint_node, has_element_constraint :=
+		sem_find_element_constraint(s, con_scope_id, overrides)
 
 	if !has_element_constraint do return true
 
@@ -1287,13 +1442,16 @@ sem_check_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, c
 		}
 
 		ok := true
-		if element_constraint_vk == .Symbolic && element_constraint_node != INVALID_NODE {
+		if sv_is_symbolic(element_constraint_sv) && element_constraint_node != INVALID_NODE {
 			ok = sem_check_constraint_node(s, element_constraint_node, val_entry)
-		} else if element_constraint_vk == .Builtin {
-			test_entry := Binding_Entry{ value_kind = val_entry.value_kind, value = val_entry.value }
-			ok = sem_check_builtin(s, element_constraint_sv.builtin, &test_entry)
-		} else if element_constraint_vk == .Scope {
-			ok = sem_check_by_scope(s, element_constraint_sv.scope, val_entry.value_kind, val_entry.value, overrides)
+		} else if bid, is_builtin := resolve_builtin_constraint(element_constraint_sv);
+		   is_builtin {
+			test_entry := Binding_Entry {
+					value = val_entry.value,
+				}
+			ok = sem_check_builtin(s, bid, &test_entry)
+		} else if ec_scope, is_scope := element_constraint_sv.(Node_Index); is_scope {
+			ok = sem_check_by_scope(s, ec_scope, val_entry.value, overrides)
 		}
 
 		if !ok {
@@ -1302,13 +1460,24 @@ sem_check_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, c
 				cname: string
 				if element_constraint_node != INVALID_NODE {
 					cname = sem_constraint_name(s, element_constraint_node)
-				} else if element_constraint_vk == .Builtin {
-					cname = builtin_def_by_id(element_constraint_sv.builtin).name
+				} else if bid, is_builtin := resolve_builtin_constraint(element_constraint_sv);
+				   is_builtin {
+					cname = builtin_def_by_id(bid).name
 				} else {
 					cname = "scope"
 				}
-				val_str := sem_value_str(s, val_entry.value_kind, val_entry.value)
-				sem_error(s, fmt.tprintf("expected %s, got %s (%s)", cname, sem_value_kind_name(val_entry.value_kind), val_str), .Constraint_Violation, node_position(s.ast, val_entry.node))
+				val_str := sem_value_str(s, val_entry.value)
+				sem_error(
+					s,
+					fmt.tprintf(
+						"expected %s, got %s (%s)",
+						cname,
+						sv_kind_name(val_entry.value),
+						val_str,
+					),
+					.Constraint_Violation,
+					node_position(s.ast, val_entry.node),
+				)
 			}
 			if !report do return false
 		}
@@ -1316,7 +1485,15 @@ sem_check_scope_structural :: proc(s: ^Semantic, value_scope_node: Node_Index, c
 	return all_ok
 }
 
-sem_find_element_constraint :: proc(s: ^Semantic, scope_id: Scope_Id, overrides: []Constraint_Override) -> (Value_Kind, Static_Value, Node_Index, bool) {
+sem_find_element_constraint :: proc(
+	s: ^Semantic,
+	scope_id: Scope_Id,
+	overrides: []Constraint_Override,
+) -> (
+	Static_Value,
+	Node_Index,
+	bool,
+) {
 	scope := s.scopes[scope_id]
 	first := u32(scope.first_binding)
 
@@ -1326,45 +1503,54 @@ sem_find_element_constraint :: proc(s: ^Semantic, scope_id: Scope_Id, overrides:
 		if .Has_Constraint not_in entry.flags do continue
 		if entry.constraint_node == INVALID_NODE do continue
 
-		resolved_vk, resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(s, entry.constraint_node, overrides)
+		resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
+			s,
+			entry.constraint_node,
+			overrides,
+		)
 		if resolved {
-			return resolved_vk, resolved_sv, resolved_node, true
+			return resolved_sv, resolved_node, true
 		}
 
 		csem := s.node_sems[entry.constraint_node]
-		if csem.value_kind == .Builtin || csem.value_kind == .Scope {
-			return csem.value_kind, csem.value, entry.constraint_node, true
+		_, is_scope := csem.value.(Node_Index)
+		if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin || is_scope {
+			return csem.value, entry.constraint_node, true
 		}
 	}
 
-	return .None, {}, INVALID_NODE, false
+	return nil, INVALID_NODE, false
 }
 
-sem_check_by_value :: proc(constr_vk: Value_Kind, constr_sv: Static_Value, val_vk: Value_Kind, val_sv: Static_Value) -> bool {
-	if constr_vk != val_vk do return false
-	switch constr_vk {
-	case .Integer:
-		copy := val_sv.integer
-		return sem_check_int(&copy, constr_sv.integer.kind)
-	case .Float:
-		copy := val_sv.float_v
-		return sem_check_float(&copy, constr_sv.float_v.kind)
-	case .Bool:
+sem_check_by_value :: proc(constr_sv: Static_Value, val_sv: Static_Value) -> bool {
+	if sv_kind_name(constr_sv) != sv_kind_name(val_sv) do return false
+	switch c in constr_sv {
+	case Integer_SV:
+		v, ok := val_sv.(Integer_SV)
+		if !ok do return false
+		copy := v
+		return sem_check_int(&copy, c.kind)
+	case Float_SV:
+		v, ok := val_sv.(Float_SV)
+		if !ok do return false
+		copy := v
+		return sem_check_float(&copy, c.kind)
+	case bool:
 		return true
-	case .String_Literal:
+	case Span:
 		return true
-	case .Scope:
+	case Node_Index:
 		return true
-	case .None:
+	case Ref_SV:
 		return true
-	case .Ref, .Symbolic, .Builtin:
+	case Symbolic_SV:
 		return true
 	}
-	return false
+	return true
 }
 
-sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> (Value_Kind, Static_Value) {
-	if constraint_node == INVALID_NODE do return .None, {}
+sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> Static_Value {
+	if constraint_node == INVALID_NODE do return nil
 
 	ast := s.ast
 	if node_kind(ast, constraint_node) == .Operator {
@@ -1376,27 +1562,24 @@ sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> (Value
 	}
 
 	sem := s.node_sems[constraint_node]
-	if sem.value_kind == .Builtin {
-		return builtin_default_value(sem.value.builtin)
+	if bid, is_builtin := resolve_builtin_constraint(sem.value); is_builtin {
+		return builtin_default_value(bid)
 	}
 
-	if sem.value_kind == .Scope {
-		scope_node := sem.value.scope
+	if scope_node, is_scope := sem.value.(Node_Index); is_scope {
 		scope_id, ok := sem_find_scope(s, scope_node)
-		if !ok do return .None, {}
+		if !ok do return nil
 		scope := s.scopes[scope_id]
 		first := u32(scope.first_binding)
 		for i in first ..< first + scope.binding_count {
 			if s.bindings[i].kind == .Product {
-				return s.bindings[i].value_kind, s.bindings[i].value
+				return s.bindings[i].value
 			}
 		}
-		sv: Static_Value
-		sv.scope = scope_node
-		return .Scope, sv
+		return Node_Index(scope_node)
 	}
 
-	return .None, {}
+	return nil
 }
 
 sem_find_scope :: #force_inline proc(s: ^Semantic, node: Node_Index) -> (Scope_Id, bool) {
@@ -1409,18 +1592,18 @@ sem_find_scope :: #force_inline proc(s: ^Semantic, node: Node_Index) -> (Scope_I
  * SECTION 8: VALUE EVALUATION
  * ====================================================================== */
 
-sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
-	if idx == INVALID_NODE do return .None, {}
+sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
+	if idx == INVALID_NODE do return nil
 
 	sem := &s.node_sems[idx]
 
 	if .Has_Value in sem.flags {
-		return sem.value_kind, sem.value
+		return sem.value
 	}
 
 	if .In_Progress in sem.flags {
 		sem.flags |= {.Self_Referential}
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	}
 
 	sem.flags |= {.In_Progress}
@@ -1429,63 +1612,71 @@ sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 	ast := s.ast
 	kind := node_kind(ast, idx)
 
-	vk: Value_Kind
 	sv: Static_Value
 
 	#partial switch kind {
 	case .Literal:
-		vk, sv = sem_evaluate_literal(s, idx)
+		sv = sem_evaluate_literal(s, idx)
 	case .Identifier:
-		vk, sv = sem_evaluate_identifier(s, idx)
+		sv = sem_evaluate_identifier(s, idx)
 	case .ScopeNode:
 		if .Has_Value not_in sem.flags {
 			scope_id := sem_push_scope(s, idx)
-			sem_process_scope(s, scope_id, idx)
+			for child in node_children(ast, idx) {
+				sem_walk(s, child)
+			}
+			sem_finalize_scope(s, scope_id)
 			sem_pop_scope(s)
 		}
-		sv.scope = idx
-		vk = .Scope
+		sv = Node_Index(idx)
 	case .Operator:
-		vk, sv = sem_evaluate_operator(s, idx)
+		sv = sem_evaluate_operator(s, idx)
 	case .Property:
-		vk, sv = sem_evaluate_property(s, idx)
+		sv = sem_evaluate_property(s, idx)
 	case .Range:
-		vk, sv = sem_evaluate_range(s, idx)
+		sv = sem_evaluate_range(s, idx)
 	case .Carve:
-		vk, sv = sem_evaluate_carve(s, idx)
+		sv = sem_evaluate_carve(s, idx)
 	case .Execute:
-		vk, sv = sem_evaluate_execute(s, idx)
+		sv = sem_evaluate_execute(s, idx)
 	case .Pattern:
-		vk, sv = sem_evaluate_pattern(s, idx)
+		sv = sem_evaluate_pattern(s, idx)
 	case .CompileTime:
 		operand := node_unary_operand(ast, idx)
-		vk, sv = sem_evaluate_value(s, operand)
+		sv = sem_evaluate_value(s, operand)
 	case .Constraint:
 		constraint_idx := node_left(ast, idx)
-		vk, sv = sem_evaluate_value(s, constraint_idx)
-		if vk == .Scope || vk == .Builtin {
-			dvk, dsv := sem_resolve_default(s, constraint_idx)
-			if dvk != .None {
-				vk = dvk
+		sv = sem_evaluate_value(s, constraint_idx)
+		_, is_scope := sv.(Node_Index)
+		if is_scope || sv_is_symbolic(sv) {
+			dsv := sem_resolve_default(s, constraint_idx)
+			if dsv != nil {
 				sv = dsv
 			}
 		}
 	case .External:
-		vk = .Symbolic
+		sv = Symbolic_SV{}
 	case .Expand:
 		operand := node_unary_operand(ast, idx)
-		vk, sv = sem_evaluate_value(s, operand)
+		sv = sem_evaluate_value(s, operand)
 	case .Enforce:
-		vk = .Symbolic
-	case .EventPull, .EventPush, .ResonancePush, .ResonancePull,
-	     .ReactivePush, .ReactivePull, .Pointing, .PointingPull, .Product:
+		sv = Symbolic_SV{}
+	case .EventPull,
+	     .EventPush,
+	     .ResonancePush,
+	     .ResonancePull,
+	     .ReactivePush,
+	     .ReactivePull,
+	     .Pointing,
+	     .PointingPull,
+	     .Product:
 		sem_error(
 			s,
 			"Cannot use a binding definition as a binding value",
 			.Invalid_Binding_Value,
 			node_position(ast, idx),
 		)
-		return .None, {}
+		return nil
 	case .Branch:
 		sem_error(
 			s,
@@ -1493,64 +1684,68 @@ sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 			.Invalid_Binding_Value,
 			node_position(ast, idx),
 		)
-		return .None, {}
+		return nil
 	}
 
-	sem.value_kind = vk
 	sem.value = sv
-	if vk != .None {
+	if sv != nil {
 		sem.flags |= {.Has_Value}
 	}
-	return vk, sv
+	return sv
 }
 
 /* ======================================================================
  * SECTION 9: LITERAL EVALUATION
  * ====================================================================== */
 
-sem_evaluate_literal :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_literal :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	lit_kind := node_literal_kind(ast, idx)
 	text := node_text(ast, idx)
-	sv: Static_Value
 
 	switch lit_kind {
 	case .Integer:
 		content, ok := strconv.parse_int(text)
-		if ok do sv.integer.content = u64(content)
-		sv.integer.kind = .none
-		return .Integer, sv
+		isv := Integer_SV {
+			kind = .none,
+		}
+		if ok do isv.content = u64(content)
+		return isv
 	case .Float:
 		content, ok := strconv.parse_f64(text)
-		if ok do sv.float_v.content = content
-		sv.float_v.kind = .none
-		return .Float, sv
+		fsv := Float_SV {
+			kind = .none,
+		}
+		if ok do fsv.content = content
+		return fsv
 	case .String:
-		sv.str_span = node_span(ast, idx)
-		return .String_Literal, sv
+		return node_span(ast, idx)
 	case .Bool:
-		sv.bool_v = text == "true"
-		return .Bool, sv
+		return bool(text == "true")
 	case .Hexadecimal:
 		hex_text := text
 		if len(hex_text) > 2 && hex_text[0] == '0' && (hex_text[1] == 'x' || hex_text[1] == 'X') {
 			hex_text = hex_text[2:]
 		}
 		content, ok := strconv.parse_int(hex_text, 16)
-		if ok do sv.integer.content = u64(content)
-		sv.integer.kind = .none
-		return .Integer, sv
+		isv := Integer_SV {
+			kind = .none,
+		}
+		if ok do isv.content = u64(content)
+		return isv
 	case .Binary:
 		bin_text := text
 		if len(bin_text) > 2 && bin_text[0] == '0' && (bin_text[1] == 'b' || bin_text[1] == 'B') {
 			bin_text = bin_text[2:]
 		}
 		content, ok := strconv.parse_int(bin_text, 2)
-		if ok do sv.integer.content = u64(content)
-		sv.integer.kind = .none
-		return .Integer, sv
+		isv := Integer_SV {
+			kind = .none,
+		}
+		if ok do isv.content = u64(content)
+		return isv
 	}
-	return .None, {}
+	return nil
 }
 
 /* ======================================================================
@@ -1582,7 +1777,15 @@ sem_resolve_symbol :: proc(s: ^Semantic, name: string, ordinal: i16 = -1) -> (Bi
 	return INVALID_BINDING, false
 }
 
-sem_resolve_by_ordinal :: proc(s: ^Semantic, scope_id: Scope_Id, name: string, ordinal: i16) -> (Binding_Id, bool) {
+sem_resolve_by_ordinal :: proc(
+	s: ^Semantic,
+	scope_id: Scope_Id,
+	name: string,
+	ordinal: i16,
+) -> (
+	Binding_Id,
+	bool,
+) {
 	scope := s.scopes[scope_id]
 	first := u32(scope.first_binding)
 	occurrence: i16 = 0
@@ -1607,16 +1810,18 @@ sem_resolve_by_index :: proc(s: ^Semantic, scope_id: Scope_Id, index: i16) -> (B
 	pos: i16 = 0
 	for i in first ..< first + scope.binding_count {
 		entry := &s.bindings[i]
-		if entry.kind == .Expand && entry.value_kind == .Scope {
-			expanded_id, ok := sem_find_scope(s, entry.value.scope)
-			if ok {
-				expanded_count := i16(s.scopes[expanded_id].binding_count)
-				if index < pos + expanded_count {
-					return sem_resolve_by_index(s, expanded_id, index - pos)
+		if entry.kind == .Expand {
+			if scope_node, is_scope := entry.value.(Node_Index); is_scope {
+				expanded_id, ok := sem_find_scope(s, scope_node)
+				if ok {
+					expanded_count := i16(s.scopes[expanded_id].binding_count)
+					if index < pos + expanded_count {
+						return sem_resolve_by_index(s, expanded_id, index - pos)
+					}
+					pos += expanded_count
 				}
-				pos += expanded_count
+				continue
 			}
-			continue
 		}
 		if entry.kind == .Product do continue
 		if pos == index {
@@ -1639,7 +1844,14 @@ sem_resolve_builtin_binding :: proc(s: ^Semantic, name: string) -> (Binding_Id, 
 	return INVALID_BINDING, false
 }
 
-sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> (Binding_Id, bool) {
+sem_resolve_in_scope :: proc(
+	s: ^Semantic,
+	scope_id: Scope_Id,
+	name: string,
+) -> (
+	Binding_Id,
+	bool,
+) {
 	if bid, ok := s.scopes[scope_id].names[name]; ok {
 		return bid, true
 	}
@@ -1648,11 +1860,13 @@ sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> 
 	first := u32(scope.first_binding)
 	for i in first ..< first + scope.binding_count {
 		entry := &s.bindings[i]
-		if entry.kind == .Expand && entry.value_kind == .Scope {
-			expanded_id, ok := sem_find_scope(s, entry.value.scope)
-			if ok {
-				bid, found := sem_resolve_in_scope(s, expanded_id, name)
-				if found do return bid, true
+		if entry.kind == .Expand {
+			if scope_node, is_scope := entry.value.(Node_Index); is_scope {
+				expanded_id, ok := sem_find_scope(s, scope_node)
+				if ok {
+					bid, found := sem_resolve_in_scope(s, expanded_id, name)
+					if found do return bid, true
+				}
 			}
 		}
 	}
@@ -1660,7 +1874,7 @@ sem_resolve_in_scope :: proc(s: ^Semantic, scope_id: Scope_Id, name: string) -> 
 	return INVALID_BINDING, false
 }
 
-sem_evaluate_identifier :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_identifier :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	name := node_name_str(ast, idx)
 	ordinal := node_ordinal(ast, idx)
@@ -1673,27 +1887,25 @@ sem_evaluate_identifier :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, S
 			.Undefined_Identifier,
 			node_position(ast, idx),
 		)
-		return .None, {}
+		return nil
 	}
 
 	s.node_sems[idx].ref_binding = bid
 
 	entry := &s.bindings[bid]
-	sv: Static_Value
-	sv.ref = bid
 
 	if .Has_Value in entry.flags {
-		return entry.value_kind, entry.value
+		return entry.value
 	}
 
-	return .Ref, sv
+	return Ref_SV{binding = bid}
 }
 
 /* ======================================================================
  * SECTION 11: OPERATOR EVALUATION
  * ====================================================================== */
 
-sem_evaluate_operator :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_operator :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	op_kind := node_operator_kind(ast, idx)
 	left_idx := node_operator_left(ast, idx)
@@ -1707,38 +1919,34 @@ sem_evaluate_operator :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 		return sem_evaluate_unary(s, idx, left_idx, op_kind)
 	}
 	if left_idx == INVALID_NODE && right_idx == INVALID_NODE {
-		return .None, {}
+		return nil
 	}
 
-	lvk, lsv := sem_evaluate_value(s, left_idx)
-	rvk, rsv := sem_evaluate_value(s, right_idx)
+	lsv := sem_evaluate_value(s, left_idx)
+	rsv := sem_evaluate_value(s, right_idx)
 
-	if lvk == .Symbolic || rvk == .Symbolic {
-		return .Symbolic, {}
-	}
-
-	if lvk == .Scope && rvk == .Scope && op_kind == .Add {
-		return sem_merge_scopes(s, idx, lsv.scope, rsv.scope)
+	if sv_is_symbolic(lsv) || sv_is_symbolic(rsv) {
+		return Symbolic_SV{}
 	}
 
 	#partial switch op_kind {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:
-		return sem_fold_math(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_math(lsv, rsv, op_kind, pos, s)
 	case .And, .Or, .Xor:
-		return sem_fold_bitwise(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_bitwise(lsv, rsv, op_kind, pos, s)
 	case .Less, .Greater, .LessEqual, .GreaterEqual:
-		return sem_fold_comparison(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_comparison(lsv, rsv, op_kind, pos, s)
 	case .Equal:
-		return sem_fold_equality(lvk, lsv, rvk, rsv, false, pos, s)
+		return sem_fold_equality(lsv, rsv, false, pos, s)
 	case .NotEqual:
-		return sem_fold_equality(lvk, lsv, rvk, rsv, true, pos, s)
+		return sem_fold_equality(lsv, rsv, true, pos, s)
 	case .LShift, .RShift:
-		return sem_fold_shift(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_shift(lsv, rsv, op_kind, pos, s)
 	case .Not:
 		sem_error(s, "Cannot use not as binary operator", .Invalid_operator, pos)
-		return .None, {}
+		return nil
 	}
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
 sem_evaluate_unary :: proc(
@@ -1746,283 +1954,281 @@ sem_evaluate_unary :: proc(
 	op_idx: Node_Index,
 	child_idx: Node_Index,
 	op_kind: Operator_Kind,
-) -> (Value_Kind, Static_Value) {
+) -> Static_Value {
 	pos := node_position(s.ast, op_idx)
-	cvk, csv := sem_evaluate_value(s, child_idx)
+	csv := sem_evaluate_value(s, child_idx)
 
-	if cvk == .Symbolic do return .Symbolic, {}
-
-	sv: Static_Value
+	if sv_is_symbolic(csv) do return Symbolic_SV{}
 
 	switch op_kind {
 	case .Subtract:
-		if cvk == .Integer {
-			sv.integer = csv.integer
-			sv.integer.negative = true
-			return .Integer, sv
+		if iv, ok := csv.(Integer_SV); ok {
+			iv.negative = true
+			return iv
 		}
-		if cvk == .Float {
-			sv.float_v = csv.float_v
-			sv.float_v.content = -csv.float_v.content
-			return .Float, sv
+		if fv, ok := csv.(Float_SV); ok {
+			fv.content = -fv.content
+			return fv
 		}
 		sem_error(s, "Cannot negate anything other than int or float", .Invalid_operator, pos)
 	case .Not:
-		if cvk == .Bool {
-			sv.bool_v = !csv.bool_v
-			return .Bool, sv
+		if bv, ok := csv.(bool); ok {
+			return bool(!bv)
 		}
-		if cvk == .Integer {
-			sv.integer = csv.integer
-			sv.integer.content = ~csv.integer.content
-			return .Integer, sv
+		if iv, ok := csv.(Integer_SV); ok {
+			iv.content = ~iv.content
+			return iv
 		}
-	case .Add, .Multiply, .Divide, .Mod, .Equal, .Less, .Greater, .NotEqual,
-	     .LessEqual, .GreaterEqual, .And, .Or, .Xor, .RShift, .LShift:
+	case .Add,
+	     .Multiply,
+	     .Divide,
+	     .Mod,
+	     .Equal,
+	     .Less,
+	     .Greater,
+	     .NotEqual,
+	     .LessEqual,
+	     .GreaterEqual,
+	     .And,
+	     .Or,
+	     .Xor,
+	     .RShift,
+	     .LShift:
 		sem_error(s, "Operator should not be used as unary", .Invalid_operator, pos)
-		return cvk, csv
+		return csv
 	}
-	return cvk, csv
-}
-
-sem_merge_scopes :: proc(s: ^Semantic, op_node: Node_Index, left_node: Node_Index, right_node: Node_Index) -> (Value_Kind, Static_Value) {
-	scope := Scope_Info {
-		node          = op_node,
-		parent        = sem_current_scope(s),
-		first_binding = Binding_Id(len(s.bindings)),
-		binding_count = 0,
-		flags         = {},
-	}
-	scope_id := Scope_Id(len(s.scopes))
-	append(&s.scopes, scope)
-	s.node_to_scope[op_node] = scope_id
-
-	left_entry := Binding_Entry {
-		node       = INVALID_NODE,
-		name       = EMPTY_SPAN,
-		kind       = .Expand,
-		value_node = left_node,
-		value_kind = .Scope,
-		scope_id   = scope_id,
-		flags      = {.Has_Value},
-	}
-	left_entry.value.scope = left_node
-	append(&s.bindings, left_entry)
-	s.scopes[scope_id].binding_count += 1
-
-	right_entry := Binding_Entry {
-		node       = INVALID_NODE,
-		name       = EMPTY_SPAN,
-		kind       = .Expand,
-		value_node = right_node,
-		value_kind = .Scope,
-		scope_id   = scope_id,
-		flags      = {.Has_Value},
-	}
-	right_entry.value.scope = right_node
-	append(&s.bindings, right_entry)
-	s.scopes[scope_id].binding_count += 1
-
-	sv: Static_Value
-	sv.scope = op_node
-	return .Scope, sv
+	return csv
 }
 
 sem_fold_math :: proc(
-	lvk: Value_Kind, lsv: Static_Value,
-	rvk: Value_Kind, rsv: Static_Value,
+	lsv: Static_Value,
+	rsv: Static_Value,
 	op: Operator_Kind,
 	pos: Position,
 	s: ^Semantic,
-) -> (Value_Kind, Static_Value) {
-	sv: Static_Value
-
-	if lvk == .Integer && rvk == .Integer {
-		l := lsv.integer
-		r := rsv.integer
-		sv.integer.kind = l.kind if l.kind != .none else r.kind
-		#partial switch op {
-		case .Add:      sv.integer.content = l.content + r.content
-		case .Subtract: sv.integer.content = l.content - r.content
-		case .Multiply: sv.integer.content = l.content * r.content
-		case .Divide:
-			if r.content != 0 do sv.integer.content = l.content / r.content
-		case .Mod:
-			if r.content != 0 do sv.integer.content = l.content % r.content
+) -> Static_Value {
+	li, l_int := lsv.(Integer_SV)
+	ri, r_int := rsv.(Integer_SV)
+	if l_int && r_int {
+		result := Integer_SV {
+			kind = li.kind if li.kind != .none else ri.kind,
 		}
-		return .Integer, sv
+		#partial switch op {
+		case .Add:
+			result.content = li.content + ri.content
+		case .Subtract:
+			result.content = li.content - ri.content
+		case .Multiply:
+			result.content = li.content * ri.content
+		case .Divide:
+			if ri.content != 0 do result.content = li.content / ri.content
+		case .Mod:
+			if ri.content != 0 do result.content = li.content % ri.content
+		}
+		return result
 	}
 
-	if lvk == .Float && rvk == .Float {
-		l := lsv.float_v
-		r := rsv.float_v
-		sv.float_v.kind = l.kind if l.kind != .none else r.kind
+	lf, l_flt := lsv.(Float_SV)
+	rf, r_flt := rsv.(Float_SV)
+	if l_flt && r_flt {
+		result := Float_SV {
+			kind = lf.kind if lf.kind != .none else rf.kind,
+		}
 		#partial switch op {
-		case .Add:      sv.float_v.content = l.content + r.content
-		case .Subtract: sv.float_v.content = l.content - r.content
-		case .Multiply: sv.float_v.content = l.content * r.content
+		case .Add:
+			result.content = lf.content + rf.content
+		case .Subtract:
+			result.content = lf.content - rf.content
+		case .Multiply:
+			result.content = lf.content * rf.content
 		case .Divide:
-			if r.content != 0 do sv.float_v.content = l.content / r.content
+			if rf.content != 0 do result.content = lf.content / rf.content
 		case .Mod:
 			sem_error(s, "Mod is only allowed with integers", .Invalid_operator, pos)
-			return .None, {}
+			return nil
 		}
-		return .Float, sv
+		return result
 	}
 
-	if (lvk == .Scope || rvk == .Scope) && op == .Add {
-		return .Scope, lsv if lvk == .Scope else rsv
+	_, l_scope := lsv.(Node_Index)
+	_, r_scope := rsv.(Node_Index)
+	if (l_scope || r_scope) && op == .Add {
+		return lsv if l_scope else rsv
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)
-	return .None, {}
+	return nil
 }
 
 sem_fold_bitwise :: proc(
-	lvk: Value_Kind, lsv: Static_Value,
-	rvk: Value_Kind, rsv: Static_Value,
+	lsv: Static_Value,
+	rsv: Static_Value,
 	op: Operator_Kind,
 	pos: Position,
 	s: ^Semantic,
-) -> (Value_Kind, Static_Value) {
-	sv: Static_Value
-
-	if lvk == .Integer && rvk == .Integer {
-		l := lsv.integer
-		r := rsv.integer
-		sv.integer.kind = l.kind if l.kind != .none else r.kind
-		#partial switch op {
-		case .And: sv.integer.content = l.content & r.content
-		case .Or:  sv.integer.content = l.content | r.content
-		case .Xor: sv.integer.content = l.content ~ r.content
+) -> Static_Value {
+	li, l_int := lsv.(Integer_SV)
+	ri, r_int := rsv.(Integer_SV)
+	if l_int && r_int {
+		result := Integer_SV {
+			kind = li.kind if li.kind != .none else ri.kind,
 		}
-		return .Integer, sv
+		#partial switch op {
+		case .And:
+			result.content = li.content & ri.content
+		case .Or:
+			result.content = li.content | ri.content
+		case .Xor:
+			result.content = li.content ~ ri.content
+		}
+		return result
 	}
 
-	if lvk == .Bool && rvk == .Bool {
+	lb, l_bool := lsv.(bool)
+	rb, r_bool := rsv.(bool)
+	if l_bool && r_bool {
 		#partial switch op {
-		case .And: sv.bool_v = lsv.bool_v && rsv.bool_v
-		case .Or:  sv.bool_v = lsv.bool_v || rsv.bool_v
-		case .Xor: sv.bool_v = lsv.bool_v ~ rsv.bool_v
+		case .And:
+			return bool(lb && rb)
+		case .Or:
+			return bool(lb || rb)
+		case .Xor:
+			return bool(lb ~ rb)
 		}
-		return .Bool, sv
 	}
 
-	if (op == .Or || op == .And) && (lvk == .Builtin || lvk == .Scope) && (rvk == .Builtin || rvk == .Scope) {
-		return .Symbolic, {}
+	_, l_scope := lsv.(Node_Index)
+	_, r_scope := rsv.(Node_Index)
+	l_sym := sv_is_symbolic(lsv)
+	r_sym := sv_is_symbolic(rsv)
+	if (op == .Or || op == .And) && (l_scope || l_sym) && (r_scope || r_sym) {
+		return Symbolic_SV{}
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)
-	return .None, {}
+	return nil
 }
 
 sem_fold_comparison :: proc(
-	lvk: Value_Kind, lsv: Static_Value,
-	rvk: Value_Kind, rsv: Static_Value,
+	lsv: Static_Value,
+	rsv: Static_Value,
 	op: Operator_Kind,
 	pos: Position,
 	s: ^Semantic,
-) -> (Value_Kind, Static_Value) {
-	sv: Static_Value
-
+) -> Static_Value {
 	sem_cmp :: #force_inline proc(a, b: $T, op: Operator_Kind) -> bool {
 		#partial switch op {
-		case .Less:         return a < b
-		case .Greater:      return a > b
-		case .LessEqual:    return a <= b
-		case .GreaterEqual: return a >= b
+		case .Less:
+			return a < b
+		case .Greater:
+			return a > b
+		case .LessEqual:
+			return a <= b
+		case .GreaterEqual:
+			return a >= b
 		}
 		return false
 	}
 
-	if lvk == .Integer && rvk == .Integer {
-		sv.bool_v = sem_cmp(lsv.integer.content, rsv.integer.content, op)
-		return .Bool, sv
+	li, l_int := lsv.(Integer_SV)
+	ri, r_int := rsv.(Integer_SV)
+	lf, l_flt := lsv.(Float_SV)
+	rf, r_flt := rsv.(Float_SV)
+
+	if l_int && r_int {
+		return bool(sem_cmp(li.content, ri.content, op))
 	}
-	if lvk == .Float && rvk == .Float {
-		sv.bool_v = sem_cmp(lsv.float_v.content, rsv.float_v.content, op)
-		return .Bool, sv
+	if l_flt && r_flt {
+		return bool(sem_cmp(lf.content, rf.content, op))
 	}
-	if lvk == .Integer && rvk == .Float {
-		sv.bool_v = sem_cmp(f64(lsv.integer.content), rsv.float_v.content, op)
-		return .Bool, sv
+	if l_int && r_flt {
+		return bool(sem_cmp(f64(li.content), rf.content, op))
 	}
-	if lvk == .Float && rvk == .Integer {
-		sv.bool_v = sem_cmp(lsv.float_v.content, f64(rsv.integer.content), op)
-		return .Bool, sv
+	if l_flt && r_int {
+		return bool(sem_cmp(lf.content, f64(ri.content), op))
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)
-	return .None, {}
+	return nil
 }
 
 sem_fold_equality :: proc(
-	lvk: Value_Kind, lsv: Static_Value,
-	rvk: Value_Kind, rsv: Static_Value,
+	lsv: Static_Value,
+	rsv: Static_Value,
 	negate: bool,
 	pos: Position,
 	s: ^Semantic,
-) -> (Value_Kind, Static_Value) {
-	sv: Static_Value
+) -> Static_Value {
 	equal := false
 
-	if lvk != rvk {
+	lk := sv_kind_name(lsv)
+	rk := sv_kind_name(rsv)
+	if lk != rk {
 		equal = false
 	} else {
-		switch lvk {
-		case .Integer:
-			equal = lsv.integer.content == rsv.integer.content
-		case .Float:
-			equal = lsv.float_v.content == rsv.float_v.content
-		case .Bool:
-			equal = lsv.bool_v == rsv.bool_v
-		case .String_Literal:
-			l := sem_span_str(s.ast, lsv.str_span)
-			r := sem_span_str(s.ast, rsv.str_span)
+		switch l in lsv {
+		case Integer_SV:
+			r, _ := rsv.(Integer_SV)
+			equal = l.content == r.content
+		case Float_SV:
+			r, _ := rsv.(Float_SV)
+			equal = l.content == r.content
+		case bool:
+			r, _ := rsv.(bool)
 			equal = l == r
-		case .Scope:
-			equal = lsv.scope == rsv.scope
-		case .Builtin:
-			equal = lsv.builtin == rsv.builtin
-		case .None:
-			equal = true
-		case .Ref, .Symbolic:
-			return .Symbolic, {}
+		case Span:
+			r, _ := rsv.(Span)
+			equal = sem_span_str(s.ast, l) == sem_span_str(s.ast, r)
+		case Node_Index:
+			r, _ := rsv.(Node_Index)
+			equal = l == r
+		case Ref_SV:
+			return Symbolic_SV{}
+		case Symbolic_SV:
+			return Symbolic_SV{}
 		}
 	}
 
-	sv.bool_v = equal ~ negate
-	return .Bool, sv
+	return bool(equal ~ negate)
 }
 
 sem_fold_shift :: proc(
-	lvk: Value_Kind, lsv: Static_Value,
-	rvk: Value_Kind, rsv: Static_Value,
+	lsv: Static_Value,
+	rsv: Static_Value,
 	op: Operator_Kind,
 	pos: Position,
 	s: ^Semantic,
-) -> (Value_Kind, Static_Value) {
-	sv: Static_Value
-
-	if lvk == .Integer && rvk == .Integer {
-		sv.integer.kind = lsv.integer.kind
-		sv.integer.negative = lsv.integer.negative
-		#partial switch op {
-		case .LShift: sv.integer.content = lsv.integer.content << rsv.integer.content
-		case .RShift: sv.integer.content = lsv.integer.content >> rsv.integer.content
+) -> Static_Value {
+	li, l_int := lsv.(Integer_SV)
+	ri, r_int := rsv.(Integer_SV)
+	if l_int && r_int {
+		result := Integer_SV {
+			kind     = li.kind,
+			negative = li.negative,
 		}
-		return .Integer, sv
+		#partial switch op {
+		case .LShift:
+			result.content = li.content << ri.content
+		case .RShift:
+			result.content = li.content >> ri.content
+		}
+		return result
 	}
 
-	sem_error(s, fmt.tprintf("Shift requires integer operands, got %s", op), .Invalid_operator, pos)
-	return .None, {}
+	sem_error(
+		s,
+		fmt.tprintf("Shift requires integer operands, got %s", op),
+		.Invalid_operator,
+		pos,
+	)
+	return nil
 }
 
 /* ======================================================================
  * SECTION 12: PROPERTY EVALUATION
  * ====================================================================== */
 
-sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	prop_idx := node_right(ast, idx)
 	source_idx := node_left(ast, idx)
@@ -2033,16 +2239,16 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 			sem_evaluate_value(s, source_idx)
 		}
 		sem_error(s, "Invalid property access without identifier", .Invalid_Property_Access, pos)
-		return .None, {}
+		return nil
 	}
 
 	prop_name := node_name_str(ast, prop_idx)
 	prop_ordinal := node_ordinal(ast, prop_idx)
 
 	if source_idx != INVALID_NODE {
-		svk, ssv := sem_evaluate_value(s, source_idx)
-		if svk == .Scope {
-			scope_id, ok := sem_find_scope(s, ssv.scope)
+		ssv := sem_evaluate_value(s, source_idx)
+		if scope_node, is_scope := ssv.(Node_Index); is_scope {
+			scope_id, ok := sem_find_scope(s, scope_node)
 			if ok {
 				bid: Binding_Id
 				found: bool
@@ -2055,19 +2261,17 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 					s.node_sems[prop_idx].ref_binding = bid
 					entry := &s.bindings[bid]
 					if .Has_Value in entry.flags {
-						return entry.value_kind, entry.value
+						return entry.value
 					}
-					sv: Static_Value
-					sv.ref = bid
-					return .Ref, sv
+					return Ref_SV{binding = bid}
 				}
 			}
 		}
-		if svk == .Builtin {
-			return .Symbolic, {}
+		if sv_is_symbolic(ssv) || ssv == nil {
+			return Symbolic_SV{}
 		}
-		if svk == .Symbolic || svk == .Ref {
-			return .Symbolic, {}
+		if _, is_ref := ssv.(Ref_SV); is_ref {
+			return Symbolic_SV{}
 		}
 		if node_kind(ast, source_idx) == .Identifier {
 			ref_bid := s.node_sems[source_idx].ref_binding
@@ -2081,20 +2285,23 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 					e := &s.bindings[i]
 					if e.name == EMPTY_SPAN do continue
 					if sem_span_str(ast, e.name) != ref_name do continue
-					scopes_to_check: [2]struct{node: Node_Index, ok: bool}
+					scopes_to_check: [2]struct {
+						node: Node_Index,
+						ok:   bool,
+					}
 					count := 0
-					if e.value_kind == .Scope {
-						scopes_to_check[count] = {e.value.scope, true}
+					if e_scope, e_is_scope := e.value.(Node_Index); e_is_scope {
+						scopes_to_check[count] = {e_scope, true}
 						count += 1
 					}
 					if .Has_Constraint in e.flags && e.constraint_node != INVALID_NODE {
-						cvk, csv := sem_evaluate_value(s, e.constraint_node)
-						if cvk == .Scope {
-							scopes_to_check[count] = {csv.scope, true}
+						csv := sem_evaluate_value(s, e.constraint_node)
+						if c_scope, c_is_scope := csv.(Node_Index); c_is_scope {
+							scopes_to_check[count] = {c_scope, true}
 							count += 1
 						}
 					}
-					for ci in 0..<count {
+					for ci in 0 ..< count {
 						sc := scopes_to_check[ci]
 						if !sc.ok do continue
 						sid, sok := sem_find_scope(s, sc.node)
@@ -2110,11 +2317,9 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 							s.node_sems[prop_idx].ref_binding = bid
 							entry := &s.bindings[bid]
 							if .Has_Value in entry.flags {
-								return entry.value_kind, entry.value
+								return entry.value
 							}
-							sv: Static_Value
-							sv.ref = bid
-							return .Ref, sv
+							return Ref_SV{binding = bid}
 						}
 					}
 				}
@@ -2133,28 +2338,30 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 			s.node_sems[prop_idx].ref_binding = bid
 			entry := &s.bindings[bid]
 			if .Has_Value in entry.flags {
-				return entry.value_kind, entry.value
+				return entry.value
 			}
 		}
 	}
 
 	sem_error(s, fmt.tprintf("There is no property %s", prop_name), .Invalid_Property_Access, pos)
-	return .None, {}
+	return nil
 }
 
 /* ======================================================================
  * SECTION 13: RANGE EVALUATION
  * ====================================================================== */
 
-sem_evaluate_range :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_range :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	start_idx := node_left(ast, idx)
 	end_idx := node_right(ast, idx)
 
-	svk, _ := sem_evaluate_value(s, start_idx)
-	evk, _ := sem_evaluate_value(s, end_idx)
+	ssv := sem_evaluate_value(s, start_idx)
+	esv := sem_evaluate_value(s, end_idx)
 
-	if svk != .Integer || evk != .Integer {
+	_, s_int := ssv.(Integer_SV)
+	_, e_int := esv.(Integer_SV)
+	if !s_int || !e_int {
 		sem_error(
 			s,
 			"Trying to create a range with a non integer value",
@@ -2163,36 +2370,71 @@ sem_evaluate_range :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 		)
 	}
 
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
 /* ======================================================================
  * SECTION 14: CARVE EVALUATION
  * ====================================================================== */
 
-sem_check_carve_override :: proc(s: ^Semantic, target_entry: ^Binding_Entry, vk: Value_Kind, sv: Static_Value, name: string, pos: Position) {
-	if vk == .Symbolic || vk == .Ref || vk == .None do return
+sem_check_carve_override :: proc(
+	s: ^Semantic,
+	target_entry: ^Binding_Entry,
+	sv: Static_Value,
+	name: string,
+	pos: Position,
+) {
+	if sv_is_symbolic(sv) do return
+	if _, is_ref := sv.(Ref_SV); is_ref do return
+	if sv == nil do return
 	if .Has_Constraint not_in target_entry.flags do return
 	if target_entry.constraint_node == INVALID_NODE do return
 
 	csem := s.node_sems[target_entry.constraint_node]
-	if csem.value_kind == .Builtin {
-		test_entry := Binding_Entry{ value_kind = vk, value = sv }
-		if !sem_check_builtin(s, csem.value.builtin, &test_entry) {
-			cname := builtin_def_by_id(csem.value.builtin).name
-			sem_error(s, fmt.tprintf("carve override '%s' expected %s, got %s", name, cname, sem_value_kind_name(vk)), .Constraint_Violation, pos)
+	if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
+		test_entry := Binding_Entry {
+			value = sv,
 		}
-	} else if csem.value_kind == .Scope {
-		overrides := sem_extract_carve_overrides(s, target_entry.constraint_node)
-		if !sem_check_by_scope(s, csem.value.scope, vk, sv, overrides[:]) {
-			cname := sem_constraint_name(s, target_entry.constraint_node)
-			sem_error(s, fmt.tprintf("carve override '%s' expected %s, got %s", name, cname, sem_value_kind_name(vk)), .Constraint_Violation, pos)
+		if !sem_check_builtin(s, bid, &test_entry) {
+			cname := builtin_def_by_id(bid).name
+			sem_error(
+				s,
+				fmt.tprintf(
+					"carve override '%s' expected %s, got %s",
+					name,
+					cname,
+					sv_kind_name(sv),
+				),
+				.Constraint_Violation,
+				pos,
+			)
 		}
-		delete(overrides)
+	} else if scope_node, is_scope := csem.value.(Node_Index); is_scope {
+		if !sem_check_by_scope(s, scope_node, sv) {
+			sem_error(
+				s,
+				fmt.tprintf(
+					"carve override '%s' expected scope constraint, got %s",
+					name,
+					sv_kind_name(sv),
+				),
+				.Constraint_Violation,
+				pos,
+			)
+		}
 	}
 }
 
-sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_id: Scope_Id = INVALID_SCOPE) -> [dynamic]Carve_Override_Entry {
+Carve_Override_Entry :: struct {
+	binding_id: Binding_Id,
+	value:      Static_Value,
+}
+
+sem_evaluate_carve_children :: proc(
+	s: ^Semantic,
+	idx: Node_Index,
+	target_scope_id: Scope_Id = INVALID_SCOPE,
+) -> [dynamic]Carve_Override_Entry {
 	ast := s.ast
 	positional_idx: i16 = 0
 	collected := make([dynamic]Carve_Override_Entry, 0, 4)
@@ -2203,12 +2445,13 @@ sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_
 		case .Pointing, .PointingPull:
 			from_idx := node_left(ast, child)
 			to_idx := node_right(ast, child)
-			vk: Value_Kind
 			sv: Static_Value
 			if to_idx != INVALID_NODE {
-				vk, sv = sem_evaluate_value(s, to_idx)
+				sv = sem_evaluate_value(s, to_idx)
 			}
-			if target_scope_id != INVALID_SCOPE && from_idx != INVALID_NODE && node_kind(ast, from_idx) == .Identifier {
+			if target_scope_id != INVALID_SCOPE &&
+			   from_idx != INVALID_NODE &&
+			   node_kind(ast, from_idx) == .Identifier {
 				name := node_name_str(ast, from_idx)
 				ordinal := node_ordinal(ast, from_idx)
 				bid: Binding_Id
@@ -2220,27 +2463,39 @@ sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_
 				}
 				if !found {
 					label := name if name != "" else fmt.tprintf("#%d", ordinal)
-					sem_error(s, fmt.tprintf("Unknown override '%s' in carve", label), .Undefined_Identifier, node_position(ast, from_idx))
+					sem_error(
+						s,
+						fmt.tprintf("Unknown override '%s' in carve", label),
+						.Undefined_Identifier,
+						node_position(ast, from_idx),
+					)
 				} else {
 					s.node_sems[from_idx].ref_binding = bid
 				}
 				if found && to_idx != INVALID_NODE {
-					sem_check_carve_override(s, &s.bindings[bid], vk, sv, name, node_position(ast, child))
-					if vk != .Symbolic && vk != .None {
-						append(&collected, Carve_Override_Entry{binding_id = bid, value_kind = vk, value = sv})
+					sem_check_carve_override(
+						s,
+						&s.bindings[bid],
+						sv,
+						name,
+						node_position(ast, child),
+					)
+					if !sv_is_symbolic(sv) && sv != nil {
+						append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
 					}
 				}
 			}
 		case:
-			vk, sv := sem_evaluate_value(s, child)
+			sv := sem_evaluate_value(s, child)
 			if target_scope_id != INVALID_SCOPE {
 				bid, found := sem_resolve_by_index(s, target_scope_id, positional_idx)
 				if found {
 					target_entry := &s.bindings[bid]
-					name := sem_span_str(ast, target_entry.name) if target_entry.name != EMPTY_SPAN else fmt.tprintf("#%d", positional_idx)
-					sem_check_carve_override(s, target_entry, vk, sv, name, node_position(ast, child))
-					if vk != .Symbolic && vk != .None {
-						append(&collected, Carve_Override_Entry{binding_id = bid, value_kind = vk, value = sv})
+					name :=
+						sem_span_str(ast, target_entry.name) if target_entry.name != EMPTY_SPAN else fmt.tprintf("#%d", positional_idx)
+					sem_check_carve_override(s, target_entry, sv, name, node_position(ast, child))
+					if !sv_is_symbolic(sv) && sv != nil {
+						append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
 					}
 				}
 				positional_idx += 1
@@ -2250,41 +2505,45 @@ sem_evaluate_carve_children :: proc(s: ^Semantic, idx: Node_Index, target_scope_
 	return collected
 }
 
-sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	source_idx := node_carve_source(ast, idx)
 	pos := node_position(ast, idx)
 
-	tvk, tsv := sem_evaluate_value(s, source_idx)
+	tsv := sem_evaluate_value(s, source_idx)
 
-	if tvk == .Symbolic {
-		return .Symbolic, {}
+	if sv_is_symbolic(tsv) {
+		return Symbolic_SV{}
 	}
 
-	if tvk == .Builtin {
-		overrides := sem_evaluate_carve_children(s, idx)
-		delete(overrides)
-		return .Builtin, tsv
-	}
+	_, is_scope := tsv.(Node_Index)
+	_, is_ref := tsv.(Ref_SV)
 
-	if tvk != .Scope && tvk != .Ref {
+	if !is_scope && !is_ref {
 		overrides := sem_evaluate_carve_children(s, idx)
 		delete(overrides)
-		if tvk == .None {
-			sem_error(s, "Trying to carve an element that does not resolve to a scope", .Invalid_Carve, pos)
+		if tsv == nil {
+			sem_error(
+				s,
+				"Trying to carve an element that does not resolve to a scope",
+				.Invalid_Carve,
+				pos,
+			)
 		}
-		return tvk, tsv
+		return tsv
 	}
 
-	target_node := tsv.scope
-	if tvk == .Ref {
-		entry := &s.bindings[tsv.ref]
-		if entry.value_kind == .Scope {
-			target_node = entry.value.scope
+	target_node: Node_Index
+	if scope_node, s_ok := tsv.(Node_Index); s_ok {
+		target_node = scope_node
+	} else if ref, r_ok := tsv.(Ref_SV); r_ok {
+		entry := &s.bindings[ref.binding]
+		if e_scope, e_ok := entry.value.(Node_Index); e_ok {
+			target_node = e_scope
 		} else {
 			overrides := sem_evaluate_carve_children(s, idx)
 			delete(overrides)
-			return entry.value_kind, entry.value
+			return entry.value
 		}
 	}
 
@@ -2292,7 +2551,7 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 	if !ok {
 		overrides := sem_evaluate_carve_children(s, idx)
 		delete(overrides)
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	}
 
 	target_flags := s.scopes[target_scope_id].flags
@@ -2301,7 +2560,7 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 
 	if .Self_Referential in target_flags {
 		delete(overrides)
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	}
 
 	if len(overrides) > 0 {
@@ -2309,16 +2568,14 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 	}
 	delete(overrides)
 
-	sv: Static_Value
-	sv.scope = target_node
-	return .Scope, sv
+	return Node_Index(target_node)
 }
 
 sem_apply_carve_overlay :: proc(
 	s: ^Semantic,
 	target_scope_id: Scope_Id,
 	carve_node: Node_Index,
-) -> (Value_Kind, Static_Value) {
+) -> Static_Value {
 	scope := s.scopes[target_scope_id]
 	first := u32(scope.first_binding)
 
@@ -2326,30 +2583,30 @@ sem_apply_carve_overlay :: proc(
 		entry := &s.bindings[i]
 		if entry.kind == .Product {
 			if .Has_Value in entry.flags {
-				return entry.value_kind, entry.value
+				return entry.value
 			}
 		}
 	}
 
-	return .None, {}
+	return nil
 }
 
 /* ======================================================================
  * SECTION 15: EXECUTE EVALUATION
  * ====================================================================== */
 
-sem_evaluate_execute :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_execute :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	target_idx := node_execute_target(ast, idx)
 
-	tvk, tsv := sem_evaluate_value(s, target_idx)
+	tsv := sem_evaluate_value(s, target_idx)
 
-	if tvk == .Symbolic {
-		return .Symbolic, {}
+	if sv_is_symbolic(tsv) {
+		return Symbolic_SV{}
 	}
 
-	if tvk == .Scope {
-		scope_id, ok := sem_find_scope(s, tsv.scope)
+	if scope_node, is_scope := tsv.(Node_Index); is_scope {
+		scope_id, ok := sem_find_scope(s, scope_node)
 		if ok {
 			scope := s.scopes[scope_id]
 			if .Is_Collapsible in scope.flags {
@@ -2358,7 +2615,7 @@ sem_evaluate_execute :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Stat
 					entry := &s.bindings[i]
 					if entry.kind == .Product {
 						if .Has_Value in entry.flags {
-							return entry.value_kind, entry.value
+							return entry.value
 						}
 					}
 				}
@@ -2366,62 +2623,65 @@ sem_evaluate_execute :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Stat
 		}
 	}
 
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
 /* ======================================================================
  * SECTION 16: PATTERN EVALUATION
  * ====================================================================== */
 
-sem_evaluate_pattern :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static_Value) {
+sem_evaluate_pattern :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	ast := s.ast
 	target_idx := node_pattern_target(ast, idx)
 	branches := node_pattern_branches(ast, idx)
 
-	tvk, tsv := sem_evaluate_value(s, target_idx)
+	tsv := sem_evaluate_value(s, target_idx)
 
 	i := 0
 	for i < len(branches) {
 		pattern_idx := Node_Index(branches[i])
 		product_idx := Node_Index(branches[i + 1]) if i + 1 < len(branches) else INVALID_NODE
 
-		if sem_pattern_matches(s, tvk, tsv, pattern_idx) {
+		if sem_pattern_matches(s, tsv, pattern_idx) {
 			if product_idx != INVALID_NODE {
 				return sem_evaluate_value(s, product_idx)
 			}
-			return tvk, tsv
+			return tsv
 		}
 		i += 2
 	}
 
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
-sem_pattern_matches :: proc(
-	s: ^Semantic,
-	tvk: Value_Kind,
-	tsv: Static_Value,
-	pattern_idx: Node_Index,
-) -> bool {
+sem_pattern_matches :: proc(s: ^Semantic, tsv: Static_Value, pattern_idx: Node_Index) -> bool {
 	if pattern_idx == INVALID_NODE do return true
 	ast := s.ast
 	pat_kind := node_kind(ast, pattern_idx)
 
 	#partial switch pat_kind {
 	case .Literal:
-		pvk, psv := sem_evaluate_literal(s, pattern_idx)
-		if pvk != tvk do return false
-		switch pvk {
-		case .Integer:      return tsv.integer.content == psv.integer.content
-		case .Float:        return tsv.float_v.content == psv.float_v.content
-		case .Bool:         return tsv.bool_v == psv.bool_v
-		case .String_Literal:
-			return sem_span_str(ast, tsv.str_span) == sem_span_str(ast, psv.str_span)
-		case .None, .Scope, .Ref, .Builtin, .Symbolic:
+		psv := sem_evaluate_literal(s, pattern_idx)
+		if sv_kind_name(tsv) != sv_kind_name(psv) do return false
+		switch p in psv {
+		case Integer_SV:
+			t, ok := tsv.(Integer_SV)
+			return ok && t.content == p.content
+		case Float_SV:
+			t, ok := tsv.(Float_SV)
+			return ok && t.content == p.content
+		case bool:
+			t, ok := tsv.(bool)
+			return ok && t == p
+		case Span:
+			t, ok := tsv.(Span)
+			return ok && sem_span_str(ast, t) == sem_span_str(ast, p)
+		case Node_Index, Ref_SV, Symbolic_SV:
 			return false
 		}
 	case .ScopeNode:
-		return tvk == .Scope
+		_, ok := tsv.(Node_Index)
+		return ok
 	case .Identifier:
 		return true
 	}
@@ -2433,13 +2693,12 @@ sem_pattern_matches :: proc(
  * SECTION 16b: CARVE SCOPE VERIFICATION
  * ====================================================================== */
 
-Carve_Override_Entry :: struct {
-	binding_id: Binding_Id,
-	value_kind: Value_Kind,
-	value:      Static_Value,
-}
-
-sem_verify_carve_scope :: proc(s: ^Semantic, target_scope_id: Scope_Id, overrides: []Carve_Override_Entry, carve_pos: Position) {
+sem_verify_carve_scope :: proc(
+	s: ^Semantic,
+	target_scope_id: Scope_Id,
+	overrides: []Carve_Override_Entry,
+	carve_pos: Position,
+) {
 	scope := s.scopes[target_scope_id]
 	first := u32(scope.first_binding)
 
@@ -2450,11 +2709,17 @@ sem_verify_carve_scope :: proc(s: ^Semantic, target_scope_id: Scope_Id, override
 		if entry.kind != .Product do continue
 		if entry.value_node == INVALID_NODE do continue
 
-		vk, sv := sem_vcarve_eval(s, entry.value_node, target_scope_id, overrides)
-		if vk == .None || vk == .Symbolic do continue
+		sv := sem_vcarve_eval(s, entry.value_node, target_scope_id, overrides)
+		if sv == nil || sv_is_symbolic(sv) do continue
 
 		if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
-			test_entry := Binding_Entry{value_kind = vk, value = sv, constraint_node = entry.constraint_node, node = entry.node, name = entry.name, flags = entry.flags}
+			test_entry := Binding_Entry {
+				value           = sv,
+				constraint_node = entry.constraint_node,
+				node            = entry.node,
+				name            = entry.name,
+				flags           = entry.flags,
+			}
 			sem_check_constraint(s, &test_entry)
 		}
 	}
@@ -2464,9 +2729,15 @@ sem_verify_carve_scope :: proc(s: ^Semantic, target_scope_id: Scope_Id, override
 	}
 }
 
-sem_vcarve_eval :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_Id, overrides: []Carve_Override_Entry, depth: int = 0) -> (Value_Kind, Static_Value) {
-	if idx == INVALID_NODE do return .None, {}
-	if depth > 64 do return .Symbolic, {}
+sem_vcarve_eval :: proc(
+	s: ^Semantic,
+	idx: Node_Index,
+	scope_id: Scope_Id,
+	overrides: []Carve_Override_Entry,
+	depth: int = 0,
+) -> Static_Value {
+	if idx == INVALID_NODE do return nil
+	if depth > 64 do return Symbolic_SV{}
 
 	ast := s.ast
 	kind := node_kind(ast, idx)
@@ -2481,23 +2752,21 @@ sem_vcarve_eval :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_Id, overr
 	case .Property:
 		return sem_vcarve_eval_property(s, idx, scope_id, overrides, depth)
 	case .ScopeNode:
-		sv: Static_Value
-		sv.scope = idx
-		return .Scope, sv
+		return Node_Index(idx)
 	case .Carve:
 		nsem := s.node_sems[idx]
 		if .Has_Value in nsem.flags {
-			return nsem.value_kind, nsem.value
+			return nsem.value
 		}
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	case .Execute:
 		nsem := s.node_sems[idx]
 		if .Has_Value in nsem.flags {
-			return nsem.value_kind, nsem.value
+			return nsem.value
 		}
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	case .Pattern:
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	case .CompileTime:
 		operand := node_unary_operand(ast, idx)
 		return sem_vcarve_eval(s, operand, scope_id, overrides, depth + 1)
@@ -2508,31 +2777,42 @@ sem_vcarve_eval :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_Id, overr
 
 	nsem := s.node_sems[idx]
 	if .Has_Value in nsem.flags {
-		return nsem.value_kind, nsem.value
+		return nsem.value
 	}
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
-sem_vcarve_eval_identifier :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_Id, overrides: []Carve_Override_Entry) -> (Value_Kind, Static_Value) {
+sem_vcarve_eval_identifier :: proc(
+	s: ^Semantic,
+	idx: Node_Index,
+	scope_id: Scope_Id,
+	overrides: []Carve_Override_Entry,
+) -> Static_Value {
 	ref_bid := s.node_sems[idx].ref_binding
 	if ref_bid == INVALID_BINDING {
-		return .Symbolic, {}
+		return Symbolic_SV{}
 	}
 
 	for ov in overrides {
 		if ov.binding_id == ref_bid {
-			return ov.value_kind, ov.value
+			return ov.value
 		}
 	}
 
 	entry := &s.bindings[ref_bid]
 	if .Has_Value in entry.flags {
-		return entry.value_kind, entry.value
+		return entry.value
 	}
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
-sem_vcarve_eval_operator :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_Id, overrides: []Carve_Override_Entry, depth: int) -> (Value_Kind, Static_Value) {
+sem_vcarve_eval_operator :: proc(
+	s: ^Semantic,
+	idx: Node_Index,
+	scope_id: Scope_Id,
+	overrides: []Carve_Override_Entry,
+	depth: int,
+) -> Static_Value {
 	ast := s.ast
 	op_kind := node_operator_kind(ast, idx)
 	left_idx := node_operator_left(ast, idx)
@@ -2540,91 +2820,115 @@ sem_vcarve_eval_operator :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_
 	pos := node_position(ast, idx)
 
 	if left_idx == INVALID_NODE && right_idx != INVALID_NODE {
-		cvk, csv := sem_vcarve_eval(s, right_idx, scope_id, overrides, depth + 1)
-		if cvk == .Symbolic do return .Symbolic, {}
-		return sem_vcarve_check_unary(s, cvk, csv, op_kind, pos)
+		csv := sem_vcarve_eval(s, right_idx, scope_id, overrides, depth + 1)
+		if sv_is_symbolic(csv) do return Symbolic_SV{}
+		return sem_vcarve_check_unary(s, csv, op_kind, pos)
 	}
 	if right_idx == INVALID_NODE && left_idx != INVALID_NODE {
-		cvk, csv := sem_vcarve_eval(s, left_idx, scope_id, overrides, depth + 1)
-		if cvk == .Symbolic do return .Symbolic, {}
-		return sem_vcarve_check_unary(s, cvk, csv, op_kind, pos)
+		csv := sem_vcarve_eval(s, left_idx, scope_id, overrides, depth + 1)
+		if sv_is_symbolic(csv) do return Symbolic_SV{}
+		return sem_vcarve_check_unary(s, csv, op_kind, pos)
 	}
 	if left_idx == INVALID_NODE && right_idx == INVALID_NODE {
-		return .None, {}
+		return nil
 	}
 
-	lvk, lsv := sem_vcarve_eval(s, left_idx, scope_id, overrides, depth + 1)
-	rvk, rsv := sem_vcarve_eval(s, right_idx, scope_id, overrides, depth + 1)
+	lsv := sem_vcarve_eval(s, left_idx, scope_id, overrides, depth + 1)
+	rsv := sem_vcarve_eval(s, right_idx, scope_id, overrides, depth + 1)
 
-	if lvk == .Symbolic || rvk == .Symbolic {
-		return .Symbolic, {}
+	if sv_is_symbolic(lsv) || sv_is_symbolic(rsv) {
+		return Symbolic_SV{}
 	}
 
 	#partial switch op_kind {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:
-		return sem_fold_math(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_math(lsv, rsv, op_kind, pos, s)
 	case .And, .Or, .Xor:
-		return sem_fold_bitwise(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_bitwise(lsv, rsv, op_kind, pos, s)
 	case .Less, .Greater, .LessEqual, .GreaterEqual:
-		return sem_fold_comparison(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_comparison(lsv, rsv, op_kind, pos, s)
 	case .Equal:
-		return sem_fold_equality(lvk, lsv, rvk, rsv, false, pos, s)
+		return sem_fold_equality(lsv, rsv, false, pos, s)
 	case .NotEqual:
-		return sem_fold_equality(lvk, lsv, rvk, rsv, true, pos, s)
+		return sem_fold_equality(lsv, rsv, true, pos, s)
 	case .LShift, .RShift:
-		return sem_fold_shift(lvk, lsv, rvk, rsv, op_kind, pos, s)
+		return sem_fold_shift(lsv, rsv, op_kind, pos, s)
 	}
-	return .Symbolic, {}
+	return Symbolic_SV{}
 }
 
-sem_vcarve_check_unary :: proc(s: ^Semantic, cvk: Value_Kind, csv: Static_Value, op_kind: Operator_Kind, pos: Position) -> (Value_Kind, Static_Value) {
-	sv: Static_Value
+sem_vcarve_check_unary :: proc(
+	s: ^Semantic,
+	csv: Static_Value,
+	op_kind: Operator_Kind,
+	pos: Position,
+) -> Static_Value {
 	switch op_kind {
 	case .Subtract:
-		if cvk == .Integer {
-			sv.integer = csv.integer
-			sv.integer.negative = true
-			return .Integer, sv
+		if iv, ok := csv.(Integer_SV); ok {
+			iv.negative = true
+			return iv
 		}
-		if cvk == .Float {
-			sv.float_v = csv.float_v
-			sv.float_v.content = -csv.float_v.content
-			return .Float, sv
+		if fv, ok := csv.(Float_SV); ok {
+			fv.content = -fv.content
+			return fv
 		}
-		sem_error(s, fmt.tprintf("carve result: cannot negate %s", sem_value_kind_name(cvk)), .Constraint_Violation, pos)
+		sem_error(
+			s,
+			fmt.tprintf("carve result: cannot negate %s", sv_kind_name(csv)),
+			.Constraint_Violation,
+			pos,
+		)
 	case .Not:
-		if cvk == .Bool {
-			sv.bool_v = !csv.bool_v
-			return .Bool, sv
+		if bv, ok := csv.(bool); ok {
+			return bool(!bv)
 		}
-		if cvk == .Integer {
-			sv.integer = csv.integer
-			sv.integer.content = ~csv.integer.content
-			return .Integer, sv
+		if iv, ok := csv.(Integer_SV); ok {
+			iv.content = ~iv.content
+			return iv
 		}
-	case .Add, .Multiply, .Divide, .Mod, .Equal, .Less, .Greater, .NotEqual,
-	     .LessEqual, .GreaterEqual, .And, .Or, .Xor, .RShift, .LShift:
-		return cvk, csv
+	case .Add,
+	     .Multiply,
+	     .Divide,
+	     .Mod,
+	     .Equal,
+	     .Less,
+	     .Greater,
+	     .NotEqual,
+	     .LessEqual,
+	     .GreaterEqual,
+	     .And,
+	     .Or,
+	     .Xor,
+	     .RShift,
+	     .LShift:
+		return csv
 	}
-	return cvk, csv
+	return csv
 }
 
-sem_vcarve_eval_property :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_Id, overrides: []Carve_Override_Entry, depth: int) -> (Value_Kind, Static_Value) {
+sem_vcarve_eval_property :: proc(
+	s: ^Semantic,
+	idx: Node_Index,
+	scope_id: Scope_Id,
+	overrides: []Carve_Override_Entry,
+	depth: int,
+) -> Static_Value {
 	ast := s.ast
 	prop_idx := node_right(ast, idx)
 	source_idx := node_left(ast, idx)
 	pos := node_position(ast, idx)
 
 	if prop_idx == INVALID_NODE || node_kind(ast, prop_idx) != .Identifier {
-		return .None, {}
+		return nil
 	}
 
 	prop_name := node_name_str(ast, prop_idx)
 	prop_ordinal := node_ordinal(ast, prop_idx)
 
-	if source_idx == INVALID_NODE do return .None, {}
+	if source_idx == INVALID_NODE do return nil
 
-	svk, ssv := sem_vcarve_eval(s, source_idx, scope_id, overrides, depth + 1)
+	ssv := sem_vcarve_eval(s, source_idx, scope_id, overrides, depth + 1)
 
 	source_name := ""
 	if node_kind(ast, source_idx) == .Identifier {
@@ -2632,21 +2936,42 @@ sem_vcarve_eval_property :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_
 	}
 	prop_label := prop_name if prop_name != "" else fmt.tprintf("#%d", prop_ordinal)
 
-	if svk == .Symbolic do return .Symbolic, {}
+	if sv_is_symbolic(ssv) do return Symbolic_SV{}
 
-	if svk != .Scope {
-		if svk != .None && svk != .Ref {
+	scope_node, is_scope := ssv.(Node_Index)
+	if !is_scope {
+		_, is_ref := ssv.(Ref_SV)
+		if ssv != nil && !is_ref {
 			if source_name != "" {
-				sem_error(s, fmt.tprintf("'%s' should have property '%s' but got %s", source_name, prop_label, sem_value_kind_name(svk)), .Constraint_Violation, pos)
+				sem_error(
+					s,
+					fmt.tprintf(
+						"'%s' should have property '%s' but got %s",
+						source_name,
+						prop_label,
+						sv_kind_name(ssv),
+					),
+					.Constraint_Violation,
+					pos,
+				)
 			} else {
-				sem_error(s, fmt.tprintf("cannot access property '%s' on %s", prop_label, sem_value_kind_name(svk)), .Constraint_Violation, pos)
+				sem_error(
+					s,
+					fmt.tprintf(
+						"cannot access property '%s' on %s",
+						prop_label,
+						sv_kind_name(ssv),
+					),
+					.Constraint_Violation,
+					pos,
+				)
 			}
 		}
-		return .None, {}
+		return nil
 	}
 
-	sid, ok := sem_find_scope(s, ssv.scope)
-	if !ok do return .Symbolic, {}
+	sid, ok := sem_find_scope(s, scope_node)
+	if !ok do return Symbolic_SV{}
 
 	bid: Binding_Id
 	found: bool
@@ -2658,34 +2983,42 @@ sem_vcarve_eval_property :: proc(s: ^Semantic, idx: Node_Index, scope_id: Scope_
 
 	if !found {
 		if source_name != "" {
-			sem_error(s, fmt.tprintf("'%s' should have property '%s'", source_name, prop_label), .Constraint_Violation, pos)
+			sem_error(
+				s,
+				fmt.tprintf("'%s' should have property '%s'", source_name, prop_label),
+				.Constraint_Violation,
+				pos,
+			)
 		} else {
 			sem_error(s, fmt.tprintf("no property '%s'", prop_label), .Constraint_Violation, pos)
 		}
-		return .None, {}
+		return nil
 	}
 
 	for ov in overrides {
 		if ov.binding_id == bid {
-			return ov.value_kind, ov.value
+			return ov.value
 		}
 	}
 
 	entry := &s.bindings[bid]
 	if .Has_Value in entry.flags {
-		return entry.value_kind, entry.value
+		return entry.value
 	}
 
-	sv: Static_Value
-	sv.ref = bid
-	return .Ref, sv
+	return Ref_SV{binding = bid}
 }
 
 /* ======================================================================
  * SECTION 17: ERROR REPORTING
  * ====================================================================== */
 
-sem_error :: proc(s: ^Semantic, message: string, error_type: Analyzer_Error_Type, position: Position) {
+sem_error :: proc(
+	s: ^Semantic,
+	message: string,
+	error_type: Analyzer_Error_Type,
+	position: Position,
+) {
 	error := Analyzer_Error {
 		type     = error_type,
 		message  = message,
@@ -2694,7 +3027,12 @@ sem_error :: proc(s: ^Semantic, message: string, error_type: Analyzer_Error_Type
 	append(&s.errors, error)
 }
 
-sem_warning :: proc(s: ^Semantic, message: string, error_type: Analyzer_Error_Type, position: Position) {
+sem_warning :: proc(
+	s: ^Semantic,
+	message: string,
+	error_type: Analyzer_Error_Type,
+	position: Position,
+) {
 	warning := Analyzer_Error {
 		type     = error_type,
 		message  = message,
@@ -2746,7 +3084,7 @@ debug_sem_scopes :: proc(s: ^Semantic) {
 			if name == "" do name = "<anon>"
 			fmt.eprintf("    [%d] %s '%s'", j, sem_binding_kind_str(entry.kind), name)
 			if .Has_Constraint in entry.flags do fmt.eprintf(" (constrained)")
-			fmt.eprintf(" = %s", sem_value_str(s, entry.value_kind, entry.value))
+			fmt.eprintf(" = %s", sem_value_str(s, entry.value))
 			if .Self_Referential in entry.flags do fmt.eprintf(" [SELF_REF]")
 			fmt.eprintln()
 		}
@@ -2756,35 +3094,49 @@ debug_sem_scopes :: proc(s: ^Semantic) {
 
 sem_binding_kind_str :: proc(kind: Sem_Binding_Kind) -> string {
 	switch kind {
-	case .Pointing_Push:  return "->"
-	case .Pointing_Pull:  return "<-"
-	case .Event_Push:     return ">-"
-	case .Event_Pull:     return "-<"
-	case .Resonance_Push: return ">>-"
-	case .Resonance_Pull: return "-<<"
-	case .Reactive_Push:  return ">>="
-	case .Reactive_Pull:  return "=<<"
-	case .Expand:         return "expand"
-	case .Product:        return "product"
+	case .Pointing_Push:
+		return "->"
+	case .Pointing_Pull:
+		return "<-"
+	case .Event_Push:
+		return ">-"
+	case .Event_Pull:
+		return "-<"
+	case .Resonance_Push:
+		return ">>-"
+	case .Resonance_Pull:
+		return "-<<"
+	case .Reactive_Push:
+		return ">>="
+	case .Reactive_Pull:
+		return "=<<"
+	case .Expand:
+		return "expand"
+	case .Product:
+		return "product"
 	}
 	return "?"
 }
 
-sem_value_str :: proc(s: ^Semantic, vk: Value_Kind, sv: Static_Value) -> string {
-	switch vk {
-	case .None:           return "none"
-	case .Integer:
-		if sv.integer.negative {
-			return fmt.tprintf("-%d", sv.integer.content)
+sem_value_str :: proc(s: ^Semantic, sv: Static_Value) -> string {
+	switch v in sv {
+	case Integer_SV:
+		if v.negative {
+			return fmt.tprintf("-%d", v.content)
 		}
-		return fmt.tprintf("%d", sv.integer.content)
-	case .Float:          return fmt.tprintf("%g", sv.float_v.content)
-	case .Bool:           return fmt.tprintf("%t", sv.bool_v)
-	case .String_Literal: return fmt.tprintf("\"%s\"", sem_span_str(s.ast, sv.str_span))
-	case .Scope:          return fmt.tprintf("scope@%d", sv.scope)
-	case .Ref:            return fmt.tprintf("ref@%d", sv.ref)
-	case .Builtin:        return fmt.tprintf("builtin(%v)", sv.builtin)
-	case .Symbolic:       return "symbolic"
+		return fmt.tprintf("%d", v.content)
+	case Float_SV:
+		return fmt.tprintf("%g", v.content)
+	case bool:
+		return fmt.tprintf("%t", v)
+	case Span:
+		return fmt.tprintf("\"%s\"", sem_span_str(s.ast, v))
+	case Node_Index:
+		return fmt.tprintf("scope@%d", v)
+	case Ref_SV:
+		return fmt.tprintf("ref@%d", v.binding)
+	case Symbolic_SV:
+		return "symbolic"
 	}
-	return "?"
+	return "none"
 }
