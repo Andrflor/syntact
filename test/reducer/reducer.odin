@@ -41,7 +41,7 @@ run_reducer_test :: proc(path: string, t: ^testing.T) {
 	compiler.analyze(cache, ast)
 
 	result := compiler.reduce(cache.semantic, ast)
-	actual := compiler.reduced_to_string(result)
+	actual := compiler.reduced_to_string(result, cache.semantic, ast)
 
 	if actual != tc.expect {
 		msg = fmt.tprintf(
