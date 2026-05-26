@@ -90,9 +90,7 @@ Ref_SV :: struct {
 	binding: Binding_Id,
 }
 
-Symbolic_SV :: struct {
-	builtin: Builtin_Id,
-}
+Unresolved_SV :: struct {}
 
 Static_Value :: union {
 	Integer_SV,
@@ -101,11 +99,11 @@ Static_Value :: union {
 	Span,
 	Node_Index,
 	Ref_SV,
-	Symbolic_SV,
+	Unresolved_SV,
 }
 
 sv_kind_name :: proc(sv: Static_Value) -> string {
-	switch _ in sv {
+	#partial switch _ in sv {
 	case Integer_SV:
 		return "integer"
 	case Float_SV:
@@ -118,27 +116,41 @@ sv_kind_name :: proc(sv: Static_Value) -> string {
 		return "scope"
 	case Ref_SV:
 		return "ref"
-	case Symbolic_SV:
-		return "symbolic"
+	case Unresolved_SV:
+		return "unresolved"
 	}
 	return "none"
 }
 
-Builtin_Id :: enum u8 {
-	None,
-	B_U8,
-	B_I8,
-	B_U16,
-	B_I16,
-	B_U32,
-	B_I32,
-	B_U64,
-	B_I64,
-	B_F32,
-	B_F64,
-	B_Bool,
-	B_Char,
-	B_String,
+sv_constraint_name :: proc(sv: Static_Value) -> string {
+	switch v in sv {
+	case Integer_SV:
+		switch v.kind {
+		case .u8:  return "u8"
+		case .i8:  return "i8"
+		case .u16: return "u16"
+		case .i16: return "i16"
+		case .u32: return "u32"
+		case .i32: return "i32"
+		case .u64: return "u64"
+		case .i64: return "i64"
+		case .none: return "integer"
+		}
+	case Float_SV:
+		switch v.kind {
+		case .f32:  return "f32"
+		case .f64:  return "f64"
+		case .none: return "float"
+		}
+	case bool:
+		return "bool"
+	case Span:
+		return "String"
+	case Node_Index:
+		return "scope"
+	case Ref_SV, Unresolved_SV:
+	}
+	return ""
 }
 
 Node_Sem :: struct {
@@ -197,32 +209,35 @@ Semantic :: struct {
  * SECTION 2b: BUILTINS
  * ====================================================================== */
 
-Builtin_Def :: struct {
-	name:      string,
-	id:        Builtin_Id,
-	int_kind:  IntegerKind,
-	flt_kind:  FloatKind,
-	is_int:    bool,
-	is_float:  bool,
-	is_bool:   bool,
-	is_string: bool,
+BUILTIN_NAMES :: [13]string {
+	"u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64",
+	"f32", "f64", "bool", "char", "String",
 }
 
-BUILTIN_DEFS :: [14]Builtin_Def {
-	{name = "u8", id = .B_U8, int_kind = .u8, is_int = true},
-	{name = "i8", id = .B_I8, int_kind = .i8, is_int = true},
-	{name = "u16", id = .B_U16, int_kind = .u16, is_int = true},
-	{name = "i16", id = .B_I16, int_kind = .i16, is_int = true},
-	{name = "u32", id = .B_U32, int_kind = .u32, is_int = true},
-	{name = "i32", id = .B_I32, int_kind = .i32, is_int = true},
-	{name = "u64", id = .B_U64, int_kind = .u64, is_int = true},
-	{name = "i64", id = .B_I64, int_kind = .i64, is_int = true},
-	{name = "f32", id = .B_F32, flt_kind = .f32, is_float = true},
-	{name = "f64", id = .B_F64, flt_kind = .f64, is_float = true},
-	{name = "bool", id = .B_Bool, is_bool = true},
-	{name = "char", id = .B_Char, int_kind = .u8, is_int = true},
-	{name = "String", id = .B_String, is_string = true},
-	{},
+builtin_default_value :: proc(name: string) -> Static_Value {
+	switch name {
+	case "u8":     return Integer_SV{kind = .u8}
+	case "i8":     return Integer_SV{kind = .i8}
+	case "u16":    return Integer_SV{kind = .u16}
+	case "i16":    return Integer_SV{kind = .i16}
+	case "u32":    return Integer_SV{kind = .u32}
+	case "i32":    return Integer_SV{kind = .i32}
+	case "u64":    return Integer_SV{kind = .u64}
+	case "i64":    return Integer_SV{kind = .i64}
+	case "f32":    return Float_SV{kind = .f32}
+	case "f64":    return Float_SV{kind = .f64}
+	case "bool":   return bool(false)
+	case "char":   return Integer_SV{kind = .u8}
+	case "String": return EMPTY_SPAN
+	}
+	return nil
+}
+
+is_builtin_name :: #force_inline proc(name: string) -> bool {
+	for n in BUILTIN_NAMES {
+		if n == name do return true
+	}
+	return false
 }
 
 init_sem_builtins :: proc(s: ^Semantic) {
@@ -236,55 +251,19 @@ init_sem_builtins :: proc(s: ^Semantic) {
 	s.builtin_scope = Scope_Id(len(s.scopes))
 	append(&s.scopes, builtin_scope)
 
-	count: u32 = 0
-	for def in BUILTIN_DEFS {
-		if def.id == .None do break
-		entry := Binding_Entry {
-			node = INVALID_NODE,
-			name = EMPTY_SPAN,
-			kind = .Pointing_Push,
-			value_node = INVALID_NODE,
+	for name in BUILTIN_NAMES {
+		append(&s.bindings, Binding_Entry{
+			node            = INVALID_NODE,
+			name            = EMPTY_SPAN,
+			kind            = .Pointing_Push,
+			value_node      = INVALID_NODE,
 			constraint_node = INVALID_NODE,
-			scope_id = s.builtin_scope,
-			value = Symbolic_SV{builtin = def.id},
-			flags = {.Has_Value},
-		}
-		append(&s.bindings, entry)
-		count += 1
+			scope_id        = s.builtin_scope,
+			value           = builtin_default_value(name),
+			flags           = {.Has_Value},
+		})
 	}
-	s.scopes[s.builtin_scope].binding_count = count
-}
-
-resolve_builtin_by_name :: #force_inline proc(name: string) -> (Builtin_Id, bool) {
-	for def in BUILTIN_DEFS {
-		if def.id == .None do break
-		if def.name == name do return def.id, true
-	}
-	return .None, false
-}
-
-builtin_def_by_id :: #force_inline proc(id: Builtin_Id) -> Builtin_Def {
-	for def in BUILTIN_DEFS {
-		if def.id == id do return def
-	}
-	return {}
-}
-
-builtin_default_value :: proc(id: Builtin_Id) -> Static_Value {
-	def := builtin_def_by_id(id)
-	if def.is_int {
-		return Integer_SV{content = 0, kind = def.int_kind}
-	}
-	if def.is_float {
-		return Float_SV{content = 0.0, kind = def.flt_kind}
-	}
-	if def.is_bool {
-		return bool(false)
-	}
-	if def.is_string {
-		return EMPTY_SPAN
-	}
-	return nil
+	s.scopes[s.builtin_scope].binding_count = u32(len(BUILTIN_NAMES))
 }
 
 /* ======================================================================
@@ -730,7 +709,7 @@ sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 		if sv != nil {
 			entry.flags |= {.Has_Value}
 		}
-		if sv_is_symbolic(sv) {
+		if _, ok := sv.(Unresolved_SV); ok {
 			entry.flags |= {.Self_Referential}
 		}
 	} else if .Has_Constraint in entry.flags {
@@ -748,9 +727,10 @@ sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 
 sem_evaluate_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	sv := sem_evaluate_value(s, entry.constraint_node)
-	_, is_scope := sv.(Node_Index)
-	if is_scope || sv_is_symbolic(sv) {
+	#partial switch _ in sv {
+	case Integer_SV, Float_SV, bool, Span, Node_Index, Unresolved_SV:
 		entry.flags |= {.Has_Constraint}
+	case Ref_SV:
 	}
 }
 
@@ -775,17 +755,15 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 
 	csem := s.node_sems[constraint_node]
 
-	if sv_is_symbolic(csem.value) && csem.ref_binding != INVALID_BINDING {
+	if _, ok := csem.value.(Unresolved_SV); ok && csem.ref_binding != INVALID_BINDING {
 		ref_entry := &s.bindings[csem.ref_binding]
 		if ref_entry.value_node != INVALID_NODE {
 			return sem_constraint_name(s, ref_entry.value_node)
 		}
 	}
 
-	bid, is_builtin := resolve_builtin_constraint(csem.value)
-	if is_builtin {
-		return builtin_def_by_id(bid).name
-	}
+	cname := sv_constraint_name(csem.value)
+	if cname != "" do return cname
 
 	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
 		scope_id, sok := sem_find_scope(s, scope_node)
@@ -815,10 +793,26 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 	return "unknown"
 }
 
-resolve_builtin_constraint :: proc(sv: Static_Value) -> (Builtin_Id, bool) {
-	sym, ok := sv.(Symbolic_SV)
-	if !ok do return .None, false
-	return sym.builtin, sym.builtin != .None
+sem_check_value_against_constraint :: proc(s: ^Semantic, constraint_sv: Static_Value, entry: ^Binding_Entry) -> bool {
+	#partial switch csv in constraint_sv {
+	case Integer_SV:
+		iv, ok := entry.value.(Integer_SV)
+		if !ok do return false
+		return sem_check_int(&iv, csv.kind)
+	case Float_SV:
+		fv, ok := entry.value.(Float_SV)
+		if !ok do return false
+		return sem_check_float(&fv, csv.kind)
+	case bool:
+		_, ok := entry.value.(bool)
+		return ok
+	case Span:
+		_, ok := entry.value.(Span)
+		return ok
+	case Node_Index, Ref_SV, Unresolved_SV:
+		return false
+	}
+	return false
 }
 
 Constraint_Override :: struct {
@@ -829,7 +823,7 @@ Constraint_Override :: struct {
 
 sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.constraint_node == INVALID_NODE do return
-	if sv_is_symbolic(entry.value) do return
+	if _, ok := entry.value.(Unresolved_SV); ok do return
 	if _, is_ref := entry.value.(Ref_SV); is_ref do return
 	if entry.value == nil do return
 
@@ -860,7 +854,7 @@ sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	csem := s.node_sems[entry.constraint_node]
 	binding_name := sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
 
-	if sv_is_symbolic(csem.value) {
+	if _, ok := csem.value.(Unresolved_SV); ok {
 		compound_node := sem_find_compound_node(s, entry.constraint_node)
 		if compound_node != INVALID_NODE {
 			if sem_check_compound(s, compound_node, entry) do return
@@ -881,10 +875,11 @@ sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 		}
 	}
 
-	if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
-		if sem_check_builtin(s, bid, entry) do return
+	#partial switch _ in csem.value {
+	case Integer_SV, Float_SV, bool, Span:
+		if sem_check_value_against_constraint(s, csem.value, entry) do return
 		pos := node_position(ast, entry.node)
-		cname := builtin_def_by_id(bid).name
+		cname := sv_constraint_name(csem.value)
 		sem_error(
 			s,
 			fmt.tprintf(
@@ -896,8 +891,9 @@ sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 			.Constraint_Violation,
 			pos,
 		)
-		entry.value = builtin_default_value(bid)
+		entry.value = csem.value
 		return
+	case Node_Index, Ref_SV, Unresolved_SV:
 	}
 
 	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
@@ -992,18 +988,20 @@ sem_check_constraint_node :: proc(
 
 	csem := s.node_sems[constraint_node]
 
-	if sv_is_symbolic(csem.value) {
+	if _, ok := csem.value.(Unresolved_SV); ok {
 		compound_node := sem_find_compound_node(s, constraint_node)
 		if compound_node != INVALID_NODE {
 			return sem_check_compound(s, compound_node, entry)
 		}
 	}
 
-	if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
+	#partial switch _ in csem.value {
+	case Integer_SV, Float_SV, bool, Span:
 		test_entry := Binding_Entry {
 			value = entry.value,
 		}
-		return sem_check_builtin(s, bid, &test_entry)
+		return sem_check_value_against_constraint(s, csem.value, &test_entry)
+	case:
 	}
 
 	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
@@ -1084,14 +1082,13 @@ sem_check_carve_overrides_compatible :: proc(
 		for vo in val_overrides {
 			if vo.binding_id == co.binding_id {
 				found = true
-				if co_bid, co_builtin := resolve_builtin_constraint(co.value); co_builtin {
-					test_entry := Binding_Entry {
-						value = vo.value,
-					}
-					if !sem_check_builtin(s, co_bid, &test_entry) do return false
-				} else if _, co_scope := co.value.(Node_Index); co_scope {
+				#partial switch _ in co.value {
+				case Integer_SV, Float_SV, bool, Span:
+					test_entry := Binding_Entry{value = vo.value}
+					if !sem_check_value_against_constraint(s, co.value, &test_entry) do return false
+				case Node_Index:
 					if _, vo_scope := vo.value.(Node_Index); !vo_scope do return false
-				} else {
+				case:
 					co_kind := sv_kind_name(co.value)
 					vo_kind := sv_kind_name(vo.value)
 					if co_kind != vo_kind do return false
@@ -1137,21 +1134,12 @@ sem_check_scope_productions_compatible :: proc(
 			if ve.kind == .Product || ve.kind == .Expand do continue
 			if .Has_Value not_in ve.flags do continue
 
-			if resolved {
-				if bid, is_builtin := resolve_builtin_constraint(resolved_sv); is_builtin {
-					test_entry := Binding_Entry {
-						value = ve.value,
-					}
-					if !sem_check_builtin(s, bid, &test_entry) do return false
-				}
-			} else {
-				csem := s.node_sems[ce.constraint_node]
-				if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
-					test_entry := Binding_Entry {
-						value = ve.value,
-					}
-					if !sem_check_builtin(s, bid, &test_entry) do return false
-				}
+			csv := resolved_sv if resolved else s.node_sems[ce.constraint_node].value
+			#partial switch _ in csv {
+			case Integer_SV, Float_SV, bool, Span:
+				test_entry := Binding_Entry{value = ve.value}
+				if !sem_check_value_against_constraint(s, csv, &test_entry) do return false
+			case:
 			}
 		}
 	}
@@ -1211,30 +1199,6 @@ sem_extract_carve_overrides :: proc(
 		}
 	}
 	return overrides
-}
-
-sem_check_builtin :: proc(s: ^Semantic, bid: Builtin_Id, entry: ^Binding_Entry) -> bool {
-	def := builtin_def_by_id(bid)
-
-	if def.is_int {
-		iv, ok := entry.value.(Integer_SV)
-		if !ok do return false
-		return sem_check_int(&iv, def.int_kind)
-	}
-	if def.is_float {
-		fv, ok := entry.value.(Float_SV)
-		if !ok do return false
-		return sem_check_float(&fv, def.flt_kind)
-	}
-	if def.is_bool {
-		_, ok := entry.value.(bool)
-		return ok
-	}
-	if def.is_string {
-		_, ok := entry.value.(Span)
-		return ok
-	}
-	return false
 }
 
 sem_check_int :: proc(val: ^Integer_SV, constr_kind: IntegerKind) -> bool {
@@ -1313,24 +1277,20 @@ sem_check_by_scope :: proc(
 				overrides,
 			)
 			if resolved {
-				if sv_is_symbolic(resolved_sv) && resolved_node != INVALID_NODE {
-					test_entry := Binding_Entry {
-						value = sv,
+				test_entry := Binding_Entry{value = sv}
+				#partial switch rsv in resolved_sv {
+				case Unresolved_SV:
+					if resolved_node != INVALID_NODE {
+						if sem_check_constraint_node(s, resolved_node, &test_entry) do return true
 					}
-					if sem_check_constraint_node(s, resolved_node, &test_entry) do return true
-				} else if bid, is_builtin := resolve_builtin_constraint(resolved_sv); is_builtin {
-					test_entry := Binding_Entry {
-						value = sv,
-					}
-					if sem_check_builtin(s, bid, &test_entry) do return true
-				} else if _, is_scope := resolved_sv.(Node_Index); is_scope {
-					rs_node, _ := resolved_sv.(Node_Index)
-					if sem_check_by_scope(s, rs_node, sv, overrides, report) do return true
+				case Integer_SV, Float_SV, bool, Span:
+					if sem_check_value_against_constraint(s, resolved_sv, &test_entry) do return true
+				case Node_Index:
+					if sem_check_by_scope(s, rsv, sv, overrides, report) do return true
+				case Ref_SV:
 				}
 			} else {
-				test_entry := Binding_Entry {
-					value = sv,
-				}
+				test_entry := Binding_Entry{value = sv}
 				if sem_check_constraint_node(s, entry.constraint_node, &test_entry) do return true
 			}
 		} else if .Has_Value in entry.flags {
@@ -1442,30 +1402,27 @@ sem_check_scope_structural :: proc(
 		}
 
 		ok := true
-		if sv_is_symbolic(element_constraint_sv) && element_constraint_node != INVALID_NODE {
-			ok = sem_check_constraint_node(s, element_constraint_node, val_entry)
-		} else if bid, is_builtin := resolve_builtin_constraint(element_constraint_sv);
-		   is_builtin {
-			test_entry := Binding_Entry {
-					value = val_entry.value,
-				}
-			ok = sem_check_builtin(s, bid, &test_entry)
-		} else if ec_scope, is_scope := element_constraint_sv.(Node_Index); is_scope {
-			ok = sem_check_by_scope(s, ec_scope, val_entry.value, overrides)
+		#partial switch ecsv in element_constraint_sv {
+		case Unresolved_SV:
+			if element_constraint_node != INVALID_NODE {
+				ok = sem_check_constraint_node(s, element_constraint_node, val_entry)
+			}
+		case Integer_SV, Float_SV, bool, Span:
+			test_entry := Binding_Entry{value = val_entry.value}
+			ok = sem_check_value_against_constraint(s, element_constraint_sv, &test_entry)
+		case Node_Index:
+			ok = sem_check_by_scope(s, ecsv, val_entry.value, overrides)
+		case Ref_SV:
 		}
 
 		if !ok {
 			all_ok = false
 			if report && val_entry.node != INVALID_NODE {
-				cname: string
-				if element_constraint_node != INVALID_NODE {
+				cname := sv_constraint_name(element_constraint_sv)
+				if cname == "" && element_constraint_node != INVALID_NODE {
 					cname = sem_constraint_name(s, element_constraint_node)
-				} else if bid, is_builtin := resolve_builtin_constraint(element_constraint_sv);
-				   is_builtin {
-					cname = builtin_def_by_id(bid).name
-				} else {
-					cname = "scope"
 				}
+				if cname == "" do cname = "scope"
 				val_str := sem_value_str(s, val_entry.value)
 				sem_error(
 					s,
@@ -1513,9 +1470,10 @@ sem_find_element_constraint :: proc(
 		}
 
 		csem := s.node_sems[entry.constraint_node]
-		_, is_scope := csem.value.(Node_Index)
-		if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin || is_scope {
+		#partial switch _ in csem.value {
+		case Integer_SV, Float_SV, bool, Span, Node_Index:
 			return csem.value, entry.constraint_node, true
+		case:
 		}
 	}
 
@@ -1543,7 +1501,7 @@ sem_check_by_value :: proc(constr_sv: Static_Value, val_sv: Static_Value) -> boo
 		return true
 	case Ref_SV:
 		return true
-	case Symbolic_SV:
+	case Unresolved_SV:
 		return true
 	}
 	return true
@@ -1562,8 +1520,10 @@ sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> Static
 	}
 
 	sem := s.node_sems[constraint_node]
-	if bid, is_builtin := resolve_builtin_constraint(sem.value); is_builtin {
-		return builtin_default_value(bid)
+	#partial switch _ in sem.value {
+	case Integer_SV, Float_SV, bool, Span:
+		return sem.value
+	case:
 	}
 
 	if scope_node, is_scope := sem.value.(Node_Index); is_scope {
@@ -1603,7 +1563,7 @@ sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 
 	if .In_Progress in sem.flags {
 		sem.flags |= {.Self_Referential}
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	}
 
 	sem.flags |= {.In_Progress}
@@ -1647,20 +1607,20 @@ sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	case .Constraint:
 		constraint_idx := node_left(ast, idx)
 		sv = sem_evaluate_value(s, constraint_idx)
-		_, is_scope := sv.(Node_Index)
-		if is_scope || sv_is_symbolic(sv) {
+		#partial switch _ in sv {
+		case Node_Index, Unresolved_SV:
 			dsv := sem_resolve_default(s, constraint_idx)
 			if dsv != nil {
 				sv = dsv
 			}
 		}
 	case .External:
-		sv = Symbolic_SV{}
+		sv = Unresolved_SV{}
 	case .Expand:
 		operand := node_unary_operand(ast, idx)
 		sv = sem_evaluate_value(s, operand)
 	case .Enforce:
-		sv = Symbolic_SV{}
+		sv = Unresolved_SV{}
 	case .EventPull,
 	     .EventPush,
 	     .ResonancePush,
@@ -1835,9 +1795,8 @@ sem_resolve_by_index :: proc(s: ^Semantic, scope_id: Scope_Id, index: i16) -> (B
 sem_resolve_builtin_binding :: proc(s: ^Semantic, name: string) -> (Binding_Id, bool) {
 	scope := s.scopes[s.builtin_scope]
 	first := u32(scope.first_binding)
-	for def, i in BUILTIN_DEFS {
-		if def.id == .None do break
-		if def.name == name {
+	for bname, i in BUILTIN_NAMES {
+		if bname == name {
 			return Binding_Id(first + u32(i)), true
 		}
 	}
@@ -1925,9 +1884,8 @@ sem_evaluate_operator :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	lsv := sem_evaluate_value(s, left_idx)
 	rsv := sem_evaluate_value(s, right_idx)
 
-	if sv_is_symbolic(lsv) || sv_is_symbolic(rsv) {
-		return Symbolic_SV{}
-	}
+	if _, ok := lsv.(Unresolved_SV); ok do return Unresolved_SV{}
+	if _, ok := rsv.(Unresolved_SV); ok do return Unresolved_SV{}
 
 	#partial switch op_kind {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:
@@ -1946,7 +1904,7 @@ sem_evaluate_operator :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 		sem_error(s, "Cannot use not as binary operator", .Invalid_operator, pos)
 		return nil
 	}
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 sem_evaluate_unary :: proc(
@@ -1958,7 +1916,7 @@ sem_evaluate_unary :: proc(
 	pos := node_position(s.ast, op_idx)
 	csv := sem_evaluate_value(s, child_idx)
 
-	if sv_is_symbolic(csv) do return Symbolic_SV{}
+	if _, ok := csv.(Unresolved_SV); ok do return Unresolved_SV{}
 
 	switch op_kind {
 	case .Subtract:
@@ -2099,10 +2057,10 @@ sem_fold_bitwise :: proc(
 
 	_, l_scope := lsv.(Node_Index)
 	_, r_scope := rsv.(Node_Index)
-	l_sym := sv_is_symbolic(lsv)
-	r_sym := sv_is_symbolic(rsv)
-	if (op == .Or || op == .And) && (l_scope || l_sym) && (r_scope || r_sym) {
-		return Symbolic_SV{}
+	_, l_unresolved := lsv.(Unresolved_SV)
+	_, r_unresolved := rsv.(Unresolved_SV)
+	if (op == .Or || op == .And) && (l_scope || l_unresolved) && (r_scope || r_unresolved) {
+		return Unresolved_SV{}
 	}
 
 	sem_error(s, fmt.tprintf("Incompatible types for %s", op), .Invalid_operator, pos)
@@ -2183,9 +2141,9 @@ sem_fold_equality :: proc(
 			r, _ := rsv.(Node_Index)
 			equal = l == r
 		case Ref_SV:
-			return Symbolic_SV{}
-		case Symbolic_SV:
-			return Symbolic_SV{}
+			return Unresolved_SV{}
+		case Unresolved_SV:
+			return Unresolved_SV{}
 		}
 	}
 
@@ -2267,11 +2225,10 @@ sem_evaluate_property :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 				}
 			}
 		}
-		if sv_is_symbolic(ssv) || ssv == nil {
-			return Symbolic_SV{}
-		}
+		if ssv == nil do return Unresolved_SV{}
+		if _, ok := ssv.(Unresolved_SV); ok do return Unresolved_SV{}
 		if _, is_ref := ssv.(Ref_SV); is_ref {
-			return Symbolic_SV{}
+			return Unresolved_SV{}
 		}
 		if node_kind(ast, source_idx) == .Identifier {
 			ref_bid := s.node_sems[source_idx].ref_binding
@@ -2370,7 +2327,7 @@ sem_evaluate_range :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 		)
 	}
 
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 /* ======================================================================
@@ -2384,19 +2341,18 @@ sem_check_carve_override :: proc(
 	name: string,
 	pos: Position,
 ) {
-	if sv_is_symbolic(sv) do return
+	if _, ok := sv.(Unresolved_SV); ok do return
 	if _, is_ref := sv.(Ref_SV); is_ref do return
 	if sv == nil do return
 	if .Has_Constraint not_in target_entry.flags do return
 	if target_entry.constraint_node == INVALID_NODE do return
 
 	csem := s.node_sems[target_entry.constraint_node]
-	if bid, is_builtin := resolve_builtin_constraint(csem.value); is_builtin {
-		test_entry := Binding_Entry {
-			value = sv,
-		}
-		if !sem_check_builtin(s, bid, &test_entry) {
-			cname := builtin_def_by_id(bid).name
+	#partial switch _ in csem.value {
+	case Integer_SV, Float_SV, bool, Span:
+		test_entry := Binding_Entry{value = sv}
+		if !sem_check_value_against_constraint(s, csem.value, &test_entry) {
+			cname := sv_constraint_name(csem.value)
 			sem_error(
 				s,
 				fmt.tprintf(
@@ -2409,7 +2365,9 @@ sem_check_carve_override :: proc(
 				pos,
 			)
 		}
-	} else if scope_node, is_scope := csem.value.(Node_Index); is_scope {
+	case:
+	}
+	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
 		if !sem_check_by_scope(s, scope_node, sv) {
 			sem_error(
 				s,
@@ -2480,8 +2438,10 @@ sem_evaluate_carve_children :: proc(
 						name,
 						node_position(ast, child),
 					)
-					if !sv_is_symbolic(sv) && sv != nil {
-						append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
+					if sv != nil {
+						if _, uok := sv.(Unresolved_SV); !uok {
+							append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
+						}
 					}
 				}
 			}
@@ -2494,8 +2454,10 @@ sem_evaluate_carve_children :: proc(
 					name :=
 						sem_span_str(ast, target_entry.name) if target_entry.name != EMPTY_SPAN else fmt.tprintf("#%d", positional_idx)
 					sem_check_carve_override(s, target_entry, sv, name, node_position(ast, child))
-					if !sv_is_symbolic(sv) && sv != nil {
-						append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
+					if sv != nil {
+						if _, uok := sv.(Unresolved_SV); !uok {
+							append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
+						}
 					}
 				}
 				positional_idx += 1
@@ -2512,8 +2474,8 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 
 	tsv := sem_evaluate_value(s, source_idx)
 
-	if sv_is_symbolic(tsv) {
-		return Symbolic_SV{}
+	if _, ok := tsv.(Unresolved_SV); ok {
+		return Unresolved_SV{}
 	}
 
 	_, is_scope := tsv.(Node_Index)
@@ -2551,7 +2513,7 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 	if !ok {
 		overrides := sem_evaluate_carve_children(s, idx)
 		delete(overrides)
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	}
 
 	target_flags := s.scopes[target_scope_id].flags
@@ -2560,7 +2522,7 @@ sem_evaluate_carve :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 
 	if .Self_Referential in target_flags {
 		delete(overrides)
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	}
 
 	if len(overrides) > 0 {
@@ -2601,8 +2563,8 @@ sem_evaluate_execute :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 
 	tsv := sem_evaluate_value(s, target_idx)
 
-	if sv_is_symbolic(tsv) {
-		return Symbolic_SV{}
+	if _, ok := tsv.(Unresolved_SV); ok {
+		return Unresolved_SV{}
 	}
 
 	if scope_node, is_scope := tsv.(Node_Index); is_scope {
@@ -2623,7 +2585,7 @@ sem_evaluate_execute :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 		}
 	}
 
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 /* ======================================================================
@@ -2651,7 +2613,7 @@ sem_evaluate_pattern :: proc(s: ^Semantic, idx: Node_Index) -> Static_Value {
 		i += 2
 	}
 
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 sem_pattern_matches :: proc(s: ^Semantic, tsv: Static_Value, pattern_idx: Node_Index) -> bool {
@@ -2676,7 +2638,7 @@ sem_pattern_matches :: proc(s: ^Semantic, tsv: Static_Value, pattern_idx: Node_I
 		case Span:
 			t, ok := tsv.(Span)
 			return ok && sem_span_str(ast, t) == sem_span_str(ast, p)
-		case Node_Index, Ref_SV, Symbolic_SV:
+		case Node_Index, Ref_SV, Unresolved_SV:
 			return false
 		}
 	case .ScopeNode:
@@ -2710,7 +2672,8 @@ sem_verify_carve_scope :: proc(
 		if entry.value_node == INVALID_NODE do continue
 
 		sv := sem_vcarve_eval(s, entry.value_node, target_scope_id, overrides)
-		if sv == nil || sv_is_symbolic(sv) do continue
+		if sv == nil do continue
+		if _, uok := sv.(Unresolved_SV); uok do continue
 
 		if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
 			test_entry := Binding_Entry {
@@ -2737,7 +2700,7 @@ sem_vcarve_eval :: proc(
 	depth: int = 0,
 ) -> Static_Value {
 	if idx == INVALID_NODE do return nil
-	if depth > 64 do return Symbolic_SV{}
+	if depth > 64 do return Unresolved_SV{}
 
 	ast := s.ast
 	kind := node_kind(ast, idx)
@@ -2758,15 +2721,15 @@ sem_vcarve_eval :: proc(
 		if .Has_Value in nsem.flags {
 			return nsem.value
 		}
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	case .Execute:
 		nsem := s.node_sems[idx]
 		if .Has_Value in nsem.flags {
 			return nsem.value
 		}
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	case .Pattern:
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	case .CompileTime:
 		operand := node_unary_operand(ast, idx)
 		return sem_vcarve_eval(s, operand, scope_id, overrides, depth + 1)
@@ -2779,7 +2742,7 @@ sem_vcarve_eval :: proc(
 	if .Has_Value in nsem.flags {
 		return nsem.value
 	}
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 sem_vcarve_eval_identifier :: proc(
@@ -2790,7 +2753,7 @@ sem_vcarve_eval_identifier :: proc(
 ) -> Static_Value {
 	ref_bid := s.node_sems[idx].ref_binding
 	if ref_bid == INVALID_BINDING {
-		return Symbolic_SV{}
+		return Unresolved_SV{}
 	}
 
 	for ov in overrides {
@@ -2803,7 +2766,7 @@ sem_vcarve_eval_identifier :: proc(
 	if .Has_Value in entry.flags {
 		return entry.value
 	}
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 sem_vcarve_eval_operator :: proc(
@@ -2821,12 +2784,12 @@ sem_vcarve_eval_operator :: proc(
 
 	if left_idx == INVALID_NODE && right_idx != INVALID_NODE {
 		csv := sem_vcarve_eval(s, right_idx, scope_id, overrides, depth + 1)
-		if sv_is_symbolic(csv) do return Symbolic_SV{}
+		if _, ok := csv.(Unresolved_SV); ok do return Unresolved_SV{}
 		return sem_vcarve_check_unary(s, csv, op_kind, pos)
 	}
 	if right_idx == INVALID_NODE && left_idx != INVALID_NODE {
 		csv := sem_vcarve_eval(s, left_idx, scope_id, overrides, depth + 1)
-		if sv_is_symbolic(csv) do return Symbolic_SV{}
+		if _, ok := csv.(Unresolved_SV); ok do return Unresolved_SV{}
 		return sem_vcarve_check_unary(s, csv, op_kind, pos)
 	}
 	if left_idx == INVALID_NODE && right_idx == INVALID_NODE {
@@ -2836,9 +2799,8 @@ sem_vcarve_eval_operator :: proc(
 	lsv := sem_vcarve_eval(s, left_idx, scope_id, overrides, depth + 1)
 	rsv := sem_vcarve_eval(s, right_idx, scope_id, overrides, depth + 1)
 
-	if sv_is_symbolic(lsv) || sv_is_symbolic(rsv) {
-		return Symbolic_SV{}
-	}
+	if _, ok := lsv.(Unresolved_SV); ok do return Unresolved_SV{}
+	if _, ok := rsv.(Unresolved_SV); ok do return Unresolved_SV{}
 
 	#partial switch op_kind {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:
@@ -2854,7 +2816,7 @@ sem_vcarve_eval_operator :: proc(
 	case .LShift, .RShift:
 		return sem_fold_shift(lsv, rsv, op_kind, pos, s)
 	}
-	return Symbolic_SV{}
+	return Unresolved_SV{}
 }
 
 sem_vcarve_check_unary :: proc(
@@ -2936,7 +2898,7 @@ sem_vcarve_eval_property :: proc(
 	}
 	prop_label := prop_name if prop_name != "" else fmt.tprintf("#%d", prop_ordinal)
 
-	if sv_is_symbolic(ssv) do return Symbolic_SV{}
+	if _, ok := ssv.(Unresolved_SV); ok do return Unresolved_SV{}
 
 	scope_node, is_scope := ssv.(Node_Index)
 	if !is_scope {
@@ -2971,7 +2933,7 @@ sem_vcarve_eval_property :: proc(
 	}
 
 	sid, ok := sem_find_scope(s, scope_node)
-	if !ok do return Symbolic_SV{}
+	if !ok do return Unresolved_SV{}
 
 	bid: Binding_Id
 	found: bool
@@ -3135,7 +3097,7 @@ sem_value_str :: proc(s: ^Semantic, sv: Static_Value) -> string {
 		return fmt.tprintf("scope@%d", v)
 	case Ref_SV:
 		return fmt.tprintf("ref@%d", v.binding)
-	case Symbolic_SV:
+	case Unresolved_SV:
 		return "symbolic"
 	}
 	return "none"

@@ -1078,11 +1078,10 @@ collect_scope_completions :: proc(
 		sid = sem.scopes[sid].parent
 	}
 
-	for def in compiler.BUILTIN_DEFS {
-		if def.id == .None do break
-		if def.name in seen do continue
+	for bname in compiler.BUILTIN_NAMES {
+		if bname in seen do continue
 		item := make(map[string]json.Value)
-		item["label"] = json.String(def.name)
+		item["label"] = json.String(bname)
 		item["kind"] = json.Integer(COMPLETION_KIND_CLASS)
 		append(items, json.Object(item))
 	}
@@ -1179,7 +1178,7 @@ binding_kind_label :: proc(kind: compiler.Sem_Binding_Kind, sv: compiler.Static_
 			return "bool (->)"
 		case compiler.Span:
 			return "string (->)"
-		case compiler.Symbolic_SV:
+		case compiler.Unresolved_SV:
 			return "type (->)"
 		case compiler.Ref_SV:
 			return "binding (->)"
@@ -1290,8 +1289,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		#partial switch kind {
 		case .Identifier:
 			name := compiler.node_name_str(ast, idx)
-			_, is_builtin := compiler.resolve_builtin_by_name(name)
-			if is_builtin {
+			if compiler.is_builtin_name(name) {
 				tok_type = int(Sem_Token_Type.Class)
 			} else {
 				pk := parent_kind[i]
