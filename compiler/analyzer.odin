@@ -126,21 +126,33 @@ sv_constraint_name :: proc(sv: Static_Value) -> string {
 	switch v in sv {
 	case Integer_SV:
 		switch v.kind {
-		case .u8:  return "u8"
-		case .i8:  return "i8"
-		case .u16: return "u16"
-		case .i16: return "i16"
-		case .u32: return "u32"
-		case .i32: return "i32"
-		case .u64: return "u64"
-		case .i64: return "i64"
-		case .none: return "integer"
+		case .u8:
+			return "u8"
+		case .i8:
+			return "i8"
+		case .u16:
+			return "u16"
+		case .i16:
+			return "i16"
+		case .u32:
+			return "u32"
+		case .i32:
+			return "i32"
+		case .u64:
+			return "u64"
+		case .i64:
+			return "i64"
+		case .none:
+			return "integer"
 		}
 	case Float_SV:
 		switch v.kind {
-		case .f32:  return "f32"
-		case .f64:  return "f64"
-		case .none: return "float"
+		case .f32:
+			return "f32"
+		case .f64:
+			return "f64"
+		case .none:
+			return "float"
 		}
 	case bool:
 		return "bool"
@@ -210,34 +222,51 @@ Semantic :: struct {
  * ====================================================================== */
 
 BUILTIN_NAMES :: [13]string {
-	"u8", "i8", "u16", "i16", "u32", "i32", "u64", "i64",
-	"f32", "f64", "bool", "char", "String",
+	"u8",
+	"i8",
+	"u16",
+	"i16",
+	"u32",
+	"i32",
+	"u64",
+	"i64",
+	"f32",
+	"f64",
+	"bool",
+	"char",
+	"String",
 }
 
 builtin_default_value :: proc(name: string) -> Static_Value {
 	switch name {
-	case "u8":     return Integer_SV{kind = .u8}
-	case "i8":     return Integer_SV{kind = .i8}
-	case "u16":    return Integer_SV{kind = .u16}
-	case "i16":    return Integer_SV{kind = .i16}
-	case "u32":    return Integer_SV{kind = .u32}
-	case "i32":    return Integer_SV{kind = .i32}
-	case "u64":    return Integer_SV{kind = .u64}
-	case "i64":    return Integer_SV{kind = .i64}
-	case "f32":    return Float_SV{kind = .f32}
-	case "f64":    return Float_SV{kind = .f64}
-	case "bool":   return bool(false)
-	case "char":   return Integer_SV{kind = .u8}
-	case "String": return EMPTY_SPAN
+	case "u8":
+		return Integer_SV{kind = .u8}
+	case "i8":
+		return Integer_SV{kind = .i8}
+	case "u16":
+		return Integer_SV{kind = .u16}
+	case "i16":
+		return Integer_SV{kind = .i16}
+	case "u32":
+		return Integer_SV{kind = .u32}
+	case "i32":
+		return Integer_SV{kind = .i32}
+	case "u64":
+		return Integer_SV{kind = .u64}
+	case "i64":
+		return Integer_SV{kind = .i64}
+	case "f32":
+		return Float_SV{kind = .f32}
+	case "f64":
+		return Float_SV{kind = .f64}
+	case "bool":
+		return bool(false)
+	case "char":
+		return Integer_SV{kind = .u8}
+	case "String":
+		return EMPTY_SPAN
 	}
 	return nil
-}
-
-is_builtin_name :: #force_inline proc(name: string) -> bool {
-	for n in BUILTIN_NAMES {
-		if n == name do return true
-	}
-	return false
 }
 
 init_sem_builtins :: proc(s: ^Semantic) {
@@ -252,16 +281,19 @@ init_sem_builtins :: proc(s: ^Semantic) {
 	append(&s.scopes, builtin_scope)
 
 	for name in BUILTIN_NAMES {
-		append(&s.bindings, Binding_Entry{
-			node            = INVALID_NODE,
-			name            = EMPTY_SPAN,
-			kind            = .Pointing_Push,
-			value_node      = INVALID_NODE,
-			constraint_node = INVALID_NODE,
-			scope_id        = s.builtin_scope,
-			value           = builtin_default_value(name),
-			flags           = {.Has_Value},
-		})
+		append(
+			&s.bindings,
+			Binding_Entry {
+				node = INVALID_NODE,
+				name = EMPTY_SPAN,
+				kind = .Pointing_Push,
+				value_node = INVALID_NODE,
+				constraint_node = INVALID_NODE,
+				scope_id = s.builtin_scope,
+				value = builtin_default_value(name),
+				flags = {.Has_Value},
+			},
+		)
 	}
 	s.scopes[s.builtin_scope].binding_count = u32(len(BUILTIN_NAMES))
 }
@@ -793,7 +825,11 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 	return "unknown"
 }
 
-sem_check_value_against_constraint :: proc(s: ^Semantic, constraint_sv: Static_Value, entry: ^Binding_Entry) -> bool {
+sem_check_value_against_constraint :: proc(
+	s: ^Semantic,
+	constraint_sv: Static_Value,
+	entry: ^Binding_Entry,
+) -> bool {
 	#partial switch csv in constraint_sv {
 	case Integer_SV:
 		iv, ok := entry.value.(Integer_SV)
@@ -1084,7 +1120,9 @@ sem_check_carve_overrides_compatible :: proc(
 				found = true
 				#partial switch _ in co.value {
 				case Integer_SV, Float_SV, bool, Span:
-					test_entry := Binding_Entry{value = vo.value}
+					test_entry := Binding_Entry {
+						value = vo.value,
+					}
 					if !sem_check_value_against_constraint(s, co.value, &test_entry) do return false
 				case Node_Index:
 					if _, vo_scope := vo.value.(Node_Index); !vo_scope do return false
@@ -1137,7 +1175,9 @@ sem_check_scope_productions_compatible :: proc(
 			csv := resolved_sv if resolved else s.node_sems[ce.constraint_node].value
 			#partial switch _ in csv {
 			case Integer_SV, Float_SV, bool, Span:
-				test_entry := Binding_Entry{value = ve.value}
+				test_entry := Binding_Entry {
+					value = ve.value,
+				}
 				if !sem_check_value_against_constraint(s, csv, &test_entry) do return false
 			case:
 			}
@@ -1270,14 +1310,16 @@ sem_check_by_scope :: proc(
 		if entry.kind != .Product do continue
 		has_product = true
 
-		if .Has_Constraint in entry.flags && entry.constraint_node != INVALID_NODE {
+		if entry.constraint_node != INVALID_NODE {
 			resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
 				s,
 				entry.constraint_node,
 				overrides,
 			)
 			if resolved {
-				test_entry := Binding_Entry{value = sv}
+				test_entry := Binding_Entry {
+					value = sv,
+				}
 				#partial switch rsv in resolved_sv {
 				case Unresolved_SV:
 					if resolved_node != INVALID_NODE {
@@ -1290,26 +1332,13 @@ sem_check_by_scope :: proc(
 				case Ref_SV:
 				}
 			} else {
-				test_entry := Binding_Entry{value = sv}
+				test_entry := Binding_Entry {
+					value = sv,
+				}
 				if sem_check_constraint_node(s, entry.constraint_node, &test_entry) do return true
 			}
-		} else if .Has_Value in entry.flags {
-			_, entry_is_scope := entry.value.(Node_Index)
-			_, sv_is_scope_v := sv.(Node_Index)
-			if entry_is_scope && sv_is_scope_v {
-				product_overrides := overrides
-				own_overrides: [dynamic]Constraint_Override
-				if entry.value_node != INVALID_NODE &&
-				   node_kind(s.ast, entry.value_node) == .Carve {
-					own_overrides = sem_extract_carve_overrides(s, entry.value_node)
-					product_overrides = own_overrides[:]
-				}
-				sv_scope, _ := sv.(Node_Index)
-				entry_scope, _ := entry.value.(Node_Index)
-				if sem_check_scope_structural(s, sv_scope, entry_scope, product_overrides, report) do return true
-			} else {
-				if sem_check_by_value(entry.value, sv) do return true
-			}
+		} else if entry.value_node != INVALID_NODE {
+			if sem_check_product_value(s, entry.value_node, sv, overrides, report) do return true
 		}
 	}
 
@@ -1318,6 +1347,43 @@ sem_check_by_scope :: proc(
 			return sem_check_scope_structural(s, sv_scope, scope_node, overrides, report)
 		}
 		return false
+	}
+	return false
+}
+
+sem_check_product_value :: proc(
+	s: ^Semantic,
+	product_node: Node_Index,
+	sv: Static_Value,
+	overrides: []Constraint_Override,
+	report: bool = false,
+) -> bool {
+	ast := s.ast
+	kind := node_kind(ast, product_node)
+
+	#partial switch kind {
+	case .Carve:
+		sv_scope, sv_is_scope := sv.(Node_Index)
+		if !sv_is_scope do return false
+		return sem_check_scope_against_carve_constraint(s, sv_scope, product_node, overrides)
+	case .ScopeNode:
+		sv_scope, sv_is_scope := sv.(Node_Index)
+		if !sv_is_scope do return false
+		psem := s.node_sems[product_node]
+		if pscope, ok := psem.value.(Node_Index); ok {
+			return sem_check_scope_structural(s, sv_scope, pscope, overrides, report)
+		}
+	case:
+		psem := s.node_sems[product_node]
+		#partial switch pv in psem.value {
+		case Integer_SV, Float_SV, bool, Span:
+			return sem_check_value_against_constraint(s, psem.value, &Binding_Entry{value = sv})
+		case Node_Index:
+			sv_scope, sv_is_scope := sv.(Node_Index)
+			if !sv_is_scope do return false
+			return sem_check_scope_structural(s, sv_scope, pv, overrides, report)
+		case Ref_SV, Unresolved_SV:
+		}
 	}
 	return false
 }
@@ -1408,7 +1474,9 @@ sem_check_scope_structural :: proc(
 				ok = sem_check_constraint_node(s, element_constraint_node, val_entry)
 			}
 		case Integer_SV, Float_SV, bool, Span:
-			test_entry := Binding_Entry{value = val_entry.value}
+			test_entry := Binding_Entry {
+					value = val_entry.value,
+				}
 			ok = sem_check_value_against_constraint(s, element_constraint_sv, &test_entry)
 		case Node_Index:
 			ok = sem_check_by_scope(s, ecsv, val_entry.value, overrides)
@@ -1480,32 +1548,6 @@ sem_find_element_constraint :: proc(
 	return nil, INVALID_NODE, false
 }
 
-sem_check_by_value :: proc(constr_sv: Static_Value, val_sv: Static_Value) -> bool {
-	if sv_kind_name(constr_sv) != sv_kind_name(val_sv) do return false
-	switch c in constr_sv {
-	case Integer_SV:
-		v, ok := val_sv.(Integer_SV)
-		if !ok do return false
-		copy := v
-		return sem_check_int(&copy, c.kind)
-	case Float_SV:
-		v, ok := val_sv.(Float_SV)
-		if !ok do return false
-		copy := v
-		return sem_check_float(&copy, c.kind)
-	case bool:
-		return true
-	case Span:
-		return true
-	case Node_Index:
-		return true
-	case Ref_SV:
-		return true
-	case Unresolved_SV:
-		return true
-	}
-	return true
-}
 
 sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> Static_Value {
 	if constraint_node == INVALID_NODE do return nil
@@ -1938,8 +1980,21 @@ sem_evaluate_unary :: proc(
 			return csv
 		case Float_SV, Span, Node_Index, Ref_SV:
 		}
-	case .Add, .Multiply, .Divide, .Mod, .Equal, .Less, .Greater,
-	     .NotEqual, .LessEqual, .GreaterEqual, .And, .Or, .Xor, .RShift, .LShift:
+	case .Add,
+	     .Multiply,
+	     .Divide,
+	     .Mod,
+	     .Equal,
+	     .Less,
+	     .Greater,
+	     .NotEqual,
+	     .LessEqual,
+	     .GreaterEqual,
+	     .And,
+	     .Or,
+	     .Xor,
+	     .RShift,
+	     .LShift:
 		sem_error(s, "Operator should not be used as unary", .Invalid_operator, pos)
 	}
 	return csv
@@ -1956,13 +2011,20 @@ sem_fold_math :: proc(
 	case Integer_SV:
 		switch r in rsv {
 		case Integer_SV:
-			result := Integer_SV{kind = l.kind if l.kind != .none else r.kind}
+			result := Integer_SV {
+				kind = l.kind if l.kind != .none else r.kind,
+			}
 			#partial switch op {
-			case .Add:      result.content = l.content + r.content
-			case .Subtract: result.content = l.content - r.content
-			case .Multiply: result.content = l.content * r.content
-			case .Divide:   if r.content != 0 do result.content = l.content / r.content
-			case .Mod:      if r.content != 0 do result.content = l.content % r.content
+			case .Add:
+				result.content = l.content + r.content
+			case .Subtract:
+				result.content = l.content - r.content
+			case .Multiply:
+				result.content = l.content * r.content
+			case .Divide:
+				if r.content != 0 do result.content = l.content / r.content
+			case .Mod:
+				if r.content != 0 do result.content = l.content % r.content
 			}
 			return result
 		case Float_SV, bool, Span, Node_Index, Ref_SV, Unresolved_SV:
@@ -1970,12 +2032,18 @@ sem_fold_math :: proc(
 	case Float_SV:
 		switch r in rsv {
 		case Float_SV:
-			result := Float_SV{kind = l.kind if l.kind != .none else r.kind}
+			result := Float_SV {
+				kind = l.kind if l.kind != .none else r.kind,
+			}
 			#partial switch op {
-			case .Add:      result.content = l.content + r.content
-			case .Subtract: result.content = l.content - r.content
-			case .Multiply: result.content = l.content * r.content
-			case .Divide:   if r.content != 0 do result.content = l.content / r.content
+			case .Add:
+				result.content = l.content + r.content
+			case .Subtract:
+				result.content = l.content - r.content
+			case .Multiply:
+				result.content = l.content * r.content
+			case .Divide:
+				if r.content != 0 do result.content = l.content / r.content
 			case .Mod:
 				sem_error(s, "Mod is only allowed with integers", .Invalid_operator, pos)
 				return nil
@@ -2006,20 +2074,28 @@ sem_fold_bitwise :: proc(
 	switch l in lsv {
 	case Integer_SV:
 		if r, ok := rsv.(Integer_SV); ok {
-			result := Integer_SV{kind = l.kind if l.kind != .none else r.kind}
+			result := Integer_SV {
+				kind = l.kind if l.kind != .none else r.kind,
+			}
 			#partial switch op {
-			case .And: result.content = l.content & r.content
-			case .Or:  result.content = l.content | r.content
-			case .Xor: result.content = l.content ~ r.content
+			case .And:
+				result.content = l.content & r.content
+			case .Or:
+				result.content = l.content | r.content
+			case .Xor:
+				result.content = l.content ~ r.content
 			}
 			return result
 		}
 	case bool:
 		if r, ok := rsv.(bool); ok {
 			#partial switch op {
-			case .And: return bool(l && r)
-			case .Or:  return bool(l || r)
-			case .Xor: return bool(l ~ r)
+			case .And:
+				return bool(l && r)
+			case .Or:
+				return bool(l || r)
+			case .Xor:
+				return bool(l ~ r)
 			}
 		}
 	case Float_SV, Span, Node_Index, Ref_SV, Unresolved_SV:
@@ -2042,10 +2118,14 @@ sem_fold_comparison :: proc(
 ) -> Static_Value {
 	sem_cmp :: #force_inline proc(a, b: $T, op: Operator_Kind) -> bool {
 		#partial switch op {
-		case .Less:         return a < b
-		case .Greater:      return a > b
-		case .LessEqual:    return a <= b
-		case .GreaterEqual: return a >= b
+		case .Less:
+			return a < b
+		case .Greater:
+			return a > b
+		case .LessEqual:
+			return a <= b
+		case .GreaterEqual:
+			return a >= b
 		}
 		return false
 	}
@@ -2053,14 +2133,18 @@ sem_fold_comparison :: proc(
 	switch l in lsv {
 	case Integer_SV:
 		switch r in rsv {
-		case Integer_SV: return bool(sem_cmp(l.content, r.content, op))
-		case Float_SV:   return bool(sem_cmp(f64(l.content), r.content, op))
+		case Integer_SV:
+			return bool(sem_cmp(l.content, r.content, op))
+		case Float_SV:
+			return bool(sem_cmp(f64(l.content), r.content, op))
 		case bool, Span, Node_Index, Ref_SV, Unresolved_SV:
 		}
 	case Float_SV:
 		switch r in rsv {
-		case Float_SV:   return bool(sem_cmp(l.content, r.content, op))
-		case Integer_SV: return bool(sem_cmp(l.content, f64(r.content), op))
+		case Float_SV:
+			return bool(sem_cmp(l.content, r.content, op))
+		case Integer_SV:
+			return bool(sem_cmp(l.content, f64(r.content), op))
 		case bool, Span, Node_Index, Ref_SV, Unresolved_SV:
 		}
 	case bool, Span, Node_Index, Ref_SV, Unresolved_SV:
@@ -2120,10 +2204,15 @@ sem_fold_shift :: proc(
 	switch l in lsv {
 	case Integer_SV:
 		if r, ok := rsv.(Integer_SV); ok {
-			result := Integer_SV{kind = l.kind, negative = l.negative}
+			result := Integer_SV {
+				kind     = l.kind,
+				negative = l.negative,
+			}
 			#partial switch op {
-			case .LShift: result.content = l.content << r.content
-			case .RShift: result.content = l.content >> r.content
+			case .LShift:
+				result.content = l.content << r.content
+			case .RShift:
+				result.content = l.content >> r.content
 			}
 			return result
 		}
@@ -2302,7 +2391,9 @@ sem_check_carve_override :: proc(
 	csem := s.node_sems[target_entry.constraint_node]
 	#partial switch _ in csem.value {
 	case Integer_SV, Float_SV, bool, Span:
-		test_entry := Binding_Entry{value = sv}
+		test_entry := Binding_Entry {
+			value = sv,
+		}
 		if !sem_check_value_against_constraint(s, csem.value, &test_entry) {
 			cname := sv_constraint_name(csem.value)
 			sem_error(
