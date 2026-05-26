@@ -874,7 +874,7 @@ static_to_reduced :: proc(sv: Static_Value, ast: ^Ast) -> Reduced_Value {
 	case Node_Index:
 		rv.kind = .Scope
 		rv.data.scope = v
-	case Ref_SV, Symbolic_SV:
+	case Ref_SV, Unresolved_SV:
 		rv.kind = .None
 	}
 	return rv
@@ -1041,7 +1041,7 @@ write_binding_value :: proc(
 			fmt.sbprintf(b, "\"%s\"", sem_span_str(ast, v))
 		case Node_Index:
 			strings.write_string(b, scope_to_string(v, sem, ast, depth + 1))
-		case Ref_SV, Symbolic_SV:
+		case Ref_SV, Unresolved_SV:
 			if entry.value_node != INVALID_NODE {
 				text := node_text(ast, entry.value_node)
 				if text != "" {
