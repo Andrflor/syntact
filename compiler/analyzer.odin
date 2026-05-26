@@ -828,6 +828,7 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 sem_check_structural :: proc(
 	s: ^Semantic,
 	val: Static_Value,
+	val_node: Node_Index,
 	constraint_node: Node_Index,
 	overrides: []Constraint_Override = {},
 ) -> bool {
@@ -839,12 +840,12 @@ sem_check_structural :: proc(
 		left := node_operator_left(ast, constraint_node)
 		right := node_operator_right(ast, constraint_node)
 		if op == .Or {
-			return sem_check_structural(s, val, left, overrides) ||
-				sem_check_structural(s, val, right, overrides)
+			return sem_check_structural(s, val, val_node, left, overrides) ||
+				sem_check_structural(s, val, val_node, right, overrides)
 		}
 		if op == .And {
-			return sem_check_structural(s, val, left, overrides) &&
-				sem_check_structural(s, val, right, overrides)
+			return sem_check_structural(s, val, val_node, left, overrides) &&
+				sem_check_structural(s, val, val_node, right, overrides)
 		}
 	}
 
@@ -853,7 +854,7 @@ sem_check_structural :: proc(
 	if _, ok := csem.value.(Unresolved_SV); ok {
 		compound_node := sem_find_compound_node(s, constraint_node)
 		if compound_node != INVALID_NODE {
-			return sem_check_structural(s, val, compound_node, overrides)
+			return sem_check_structural(s, val, val_node, compound_node, overrides)
 		}
 	}
 
@@ -863,19 +864,20 @@ sem_check_structural :: proc(
 			if ov.binding_id == csem.ref_binding {
 				con_sv = ov.value
 				if ov.node != INVALID_NODE {
-					return sem_check_structural(s, val, ov.node, overrides)
+					return sem_check_structural(s, val, val_node, ov.node, overrides)
 				}
 				break
 			}
 		}
 	}
 
-	return sem_check_sv_compatible(s, val, con_sv, constraint_node, overrides)
+	return sem_check_sv_compatible(s, val, val_node, con_sv, constraint_node, overrides)
 }
 
 sem_check_sv_compatible :: proc(
 	s: ^Semantic,
 	val: Static_Value,
+	val_node: Node_Index,
 	con: Static_Value,
 	constraint_node: Node_Index,
 	overrides: []Constraint_Override,
@@ -898,7 +900,7 @@ sem_check_sv_compatible :: proc(
 		_, ok := val.(Span)
 		return ok
 	case Node_Index:
-		return sem_check_scope_compatible(s, val, cv, constraint_node, overrides)
+		return sem_check_scope_compatible(s, val, val_node, cv, constraint_node, overrides)
 	case Ref_SV, Unresolved_SV:
 	}
 	return false
@@ -907,6 +909,7 @@ sem_check_sv_compatible :: proc(
 sem_check_scope_compatible :: proc(
 	s: ^Semantic,
 	val: Static_Value,
+	val_node: Node_Index,
 	con_scope_node: Node_Index,
 	constraint_node: Node_Index,
 	overrides: []Constraint_Override,
@@ -933,14 +936,15 @@ sem_check_scope_compatible :: proc(
 		entry := &s.bindings[i]
 		if entry.kind == .Product {
 			has_product = true
-			if sem_check_production(s, val, entry, merged[:]) do return true
+			if sem_check_production(s, val, val_node, entry, merged[:]) do return true
 		}
 	}
 
 	if !has_product {
 		val_scope, val_is_scope := val.(Node_Index)
 		if !val_is_scope do return false
-		return sem_check_bindings_structural(s, val_scope, con_scope_node, merged[:])
+		val_overrides := sem_extract_carve_overrides(s, val_node)
+		return sem_check_bindings_structural(s, val_scope, val_overrides[:], con_scope_node, merged[:])
 	}
 
 	return false
@@ -949,23 +953,32 @@ sem_check_scope_compatible :: proc(
 sem_check_production :: proc(
 	s: ^Semantic,
 	val: Static_Value,
+	val_node: Node_Index,
 	prod: ^Binding_Entry,
 	overrides: []Constraint_Override,
 ) -> bool {
 	if prod.constraint_node != INVALID_NODE {
-		return sem_check_structural(s, val, prod.constraint_node, overrides)
+		return sem_check_structural(s, val, val_node, prod.constraint_node, overrides)
 	}
 	if prod.value_node != INVALID_NODE {
-		return sem_check_structural(s, val, prod.value_node, overrides)
+		return sem_check_structural(s, val, val_node, prod.value_node, overrides)
 	}
 	return false
+}
+
+sem_resolve_with_overrides :: proc(s: ^Semantic, bid: Binding_Id, overrides: []Constraint_Override) -> (Static_Value, Node_Index, bool) {
+	for ov in overrides {
+		if ov.binding_id == bid do return ov.value, ov.node, true
+	}
+	return nil, INVALID_NODE, false
 }
 
 sem_check_bindings_structural :: proc(
 	s: ^Semantic,
 	val_scope_node: Node_Index,
+	val_overrides: []Constraint_Override,
 	con_scope_node: Node_Index,
-	overrides: []Constraint_Override,
+	con_overrides: []Constraint_Override,
 ) -> bool {
 	val_scope_id, vok := sem_find_scope(s, val_scope_node)
 	if !vok do return false
@@ -975,8 +988,10 @@ sem_check_bindings_structural :: proc(
 	con_scope := s.scopes[con_scope_id]
 	val_scope := s.scopes[val_scope_id]
 
-	con_binds: [dynamic]^Binding_Entry
-	val_binds: [dynamic]^Binding_Entry
+	Bind_Ref :: struct { id: Binding_Id, entry: ^Binding_Entry }
+
+	con_binds: [dynamic]Bind_Ref
+	val_binds: [dynamic]Bind_Ref
 	has_expand := false
 
 	cfirst := u32(con_scope.first_binding)
@@ -984,14 +999,14 @@ sem_check_bindings_structural :: proc(
 		e := &s.bindings[i]
 		if e.kind == .Expand {has_expand = true;continue}
 		if e.kind == .Product do continue
-		append(&con_binds, e)
+		append(&con_binds, Bind_Ref{Binding_Id(i), e})
 	}
 
 	vfirst := u32(val_scope.first_binding)
 	for i in vfirst ..< vfirst + val_scope.binding_count {
 		e := &s.bindings[i]
 		if e.kind == .Product || e.kind == .Expand do continue
-		append(&val_binds, e)
+		append(&val_binds, Bind_Ref{Binding_Id(i), e})
 	}
 
 	if !has_expand && len(con_binds) != len(val_binds) {
@@ -1003,13 +1018,27 @@ sem_check_bindings_structural :: proc(
 	}
 
 	for vi in 0 ..< len(val_binds) {
-		ce := con_binds[vi % len(con_binds)]
+		ci := vi % len(con_binds)
+		cb := con_binds[ci]
+		vb := val_binds[vi]
 
-		if ce.constraint_node != INVALID_NODE {
-			if !sem_check_structural(s, val_binds[vi].value, ce.constraint_node, overrides) do return false
+		val_sv := vb.entry.value
+		val_vn := vb.entry.value_node
+		if ov_sv, ov_node, ok := sem_resolve_with_overrides(s, vb.id, val_overrides); ok {
+			val_sv = ov_sv
+			val_vn = ov_node
+		}
+
+		if cb.entry.constraint_node != INVALID_NODE {
+			if !sem_check_structural(s, val_sv, val_vn, cb.entry.constraint_node, con_overrides) do return false
 		} else {
-			vn := ce.value_node if ce.value_node != INVALID_NODE else INVALID_NODE
-			if !sem_check_sv_compatible(s, val_binds[vi].value, ce.value, vn, overrides) do return false
+			con_sv := cb.entry.value
+			con_vn := cb.entry.value_node
+			if ov_sv, ov_node, ok := sem_resolve_with_overrides(s, cb.id, con_overrides); ok {
+				con_sv = ov_sv
+				con_vn = ov_node
+			}
+			if !sem_check_sv_compatible(s, val_sv, val_vn, con_sv, con_vn, con_overrides) do return false
 		}
 	}
 
@@ -1028,7 +1057,7 @@ sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if _, is_ref := entry.value.(Ref_SV); is_ref do return
 	if entry.value == nil do return
 
-	if sem_check_structural(s, entry.value, entry.constraint_node) do return
+	if sem_check_structural(s, entry.value, entry.value_node, entry.constraint_node) do return
 
 	ast := s.ast
 	binding_name := sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
@@ -2007,6 +2036,7 @@ sem_check_carve_override :: proc(
 	s: ^Semantic,
 	target_entry: ^Binding_Entry,
 	sv: Static_Value,
+	sv_node: Node_Index,
 	name: string,
 	pos: Position,
 ) {
@@ -2016,7 +2046,7 @@ sem_check_carve_override :: proc(
 	if .Has_Constraint not_in target_entry.flags do return
 	if target_entry.constraint_node == INVALID_NODE do return
 
-	if !sem_check_structural(s, sv, target_entry.constraint_node) {
+	if !sem_check_structural(s, sv, sv_node, target_entry.constraint_node) {
 		cname := sem_constraint_name(s, target_entry.constraint_node)
 		sem_error(
 			s,
@@ -2084,6 +2114,7 @@ sem_evaluate_carve_children :: proc(
 						s,
 						&s.bindings[bid],
 						sv,
+						to_idx,
 						name,
 						node_position(ast, child),
 					)
@@ -2102,7 +2133,7 @@ sem_evaluate_carve_children :: proc(
 					target_entry := &s.bindings[bid]
 					name :=
 						sem_span_str(ast, target_entry.name) if target_entry.name != EMPTY_SPAN else fmt.tprintf("#%d", positional_idx)
-					sem_check_carve_override(s, target_entry, sv, name, node_position(ast, child))
+					sem_check_carve_override(s, target_entry, sv, child, name, node_position(ast, child))
 					if sv != nil {
 						if _, uok := sv.(Unresolved_SV); !uok {
 							append(&collected, Carve_Override_Entry{binding_id = bid, value = sv})
