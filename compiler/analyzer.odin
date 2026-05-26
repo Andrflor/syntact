@@ -825,30 +825,195 @@ sem_constraint_name :: proc(s: ^Semantic, constraint_node: Node_Index) -> string
 	return "unknown"
 }
 
-sem_check_value_against_constraint :: proc(
+sem_check_structural :: proc(
 	s: ^Semantic,
-	constraint_sv: Static_Value,
-	entry: ^Binding_Entry,
+	val: Static_Value,
+	constraint_node: Node_Index,
+	overrides: []Constraint_Override = {},
 ) -> bool {
-	#partial switch csv in constraint_sv {
+	if constraint_node == INVALID_NODE do return false
+	ast := s.ast
+
+	if node_kind(ast, constraint_node) == .Operator {
+		op := node_operator_kind(ast, constraint_node)
+		left := node_operator_left(ast, constraint_node)
+		right := node_operator_right(ast, constraint_node)
+		if op == .Or {
+			return sem_check_structural(s, val, left, overrides) ||
+				sem_check_structural(s, val, right, overrides)
+		}
+		if op == .And {
+			return sem_check_structural(s, val, left, overrides) &&
+				sem_check_structural(s, val, right, overrides)
+		}
+	}
+
+	csem := s.node_sems[constraint_node]
+
+	if _, ok := csem.value.(Unresolved_SV); ok {
+		compound_node := sem_find_compound_node(s, constraint_node)
+		if compound_node != INVALID_NODE {
+			return sem_check_structural(s, val, compound_node, overrides)
+		}
+	}
+
+	con_sv := csem.value
+	if csem.ref_binding != INVALID_BINDING {
+		for ov in overrides {
+			if ov.binding_id == csem.ref_binding {
+				con_sv = ov.value
+				if ov.node != INVALID_NODE {
+					return sem_check_structural(s, val, ov.node, overrides)
+				}
+				break
+			}
+		}
+	}
+
+	return sem_check_sv_compatible(s, val, con_sv, constraint_node, overrides)
+}
+
+sem_check_sv_compatible :: proc(
+	s: ^Semantic,
+	val: Static_Value,
+	con: Static_Value,
+	constraint_node: Node_Index,
+	overrides: []Constraint_Override,
+) -> bool {
+	#partial switch cv in con {
 	case Integer_SV:
-		iv, ok := entry.value.(Integer_SV)
+		iv, ok := val.(Integer_SV)
 		if !ok do return false
-		return sem_check_int(&iv, csv.kind)
+		copy := iv
+		return sem_check_int(&copy, cv.kind)
 	case Float_SV:
-		fv, ok := entry.value.(Float_SV)
+		fv, ok := val.(Float_SV)
 		if !ok do return false
-		return sem_check_float(&fv, csv.kind)
+		copy := fv
+		return sem_check_float(&copy, cv.kind)
 	case bool:
-		_, ok := entry.value.(bool)
+		_, ok := val.(bool)
 		return ok
 	case Span:
-		_, ok := entry.value.(Span)
+		_, ok := val.(Span)
 		return ok
-	case Node_Index, Ref_SV, Unresolved_SV:
-		return false
+	case Node_Index:
+		return sem_check_scope_compatible(s, val, cv, constraint_node, overrides)
+	case Ref_SV, Unresolved_SV:
 	}
 	return false
+}
+
+sem_check_scope_compatible :: proc(
+	s: ^Semantic,
+	val: Static_Value,
+	con_scope_node: Node_Index,
+	constraint_node: Node_Index,
+	overrides: []Constraint_Override,
+) -> bool {
+	scope_id, ok := sem_find_scope(s, con_scope_node)
+	if !ok do return false
+
+	con_overrides := sem_extract_carve_overrides(s, constraint_node)
+	merged := make([dynamic]Constraint_Override, 0, len(overrides) + len(con_overrides))
+	for o in con_overrides do append(&merged, o)
+	for o in overrides {
+		found := false
+		for co in con_overrides {
+			if co.binding_id == o.binding_id {found = true;break}
+		}
+		if !found do append(&merged, o)
+	}
+
+	scope := s.scopes[scope_id]
+	first := u32(scope.first_binding)
+
+	has_product := false
+	for i in first ..< first + scope.binding_count {
+		entry := &s.bindings[i]
+		if entry.kind == .Product {
+			has_product = true
+			if sem_check_production(s, val, entry, merged[:]) do return true
+		}
+	}
+
+	if !has_product {
+		val_scope, val_is_scope := val.(Node_Index)
+		if !val_is_scope do return false
+		return sem_check_bindings_structural(s, val_scope, con_scope_node, merged[:])
+	}
+
+	return false
+}
+
+sem_check_production :: proc(
+	s: ^Semantic,
+	val: Static_Value,
+	prod: ^Binding_Entry,
+	overrides: []Constraint_Override,
+) -> bool {
+	if prod.constraint_node != INVALID_NODE {
+		return sem_check_structural(s, val, prod.constraint_node, overrides)
+	}
+	if prod.value_node != INVALID_NODE {
+		return sem_check_structural(s, val, prod.value_node, overrides)
+	}
+	return false
+}
+
+sem_check_bindings_structural :: proc(
+	s: ^Semantic,
+	val_scope_node: Node_Index,
+	con_scope_node: Node_Index,
+	overrides: []Constraint_Override,
+) -> bool {
+	val_scope_id, vok := sem_find_scope(s, val_scope_node)
+	if !vok do return false
+	con_scope_id, cok := sem_find_scope(s, con_scope_node)
+	if !cok do return false
+
+	con_scope := s.scopes[con_scope_id]
+	val_scope := s.scopes[val_scope_id]
+
+	con_binds: [dynamic]^Binding_Entry
+	val_binds: [dynamic]^Binding_Entry
+	has_expand := false
+
+	cfirst := u32(con_scope.first_binding)
+	for i in cfirst ..< cfirst + con_scope.binding_count {
+		e := &s.bindings[i]
+		if e.kind == .Expand {has_expand = true;continue}
+		if e.kind == .Product do continue
+		append(&con_binds, e)
+	}
+
+	vfirst := u32(val_scope.first_binding)
+	for i in vfirst ..< vfirst + val_scope.binding_count {
+		e := &s.bindings[i]
+		if e.kind == .Product || e.kind == .Expand do continue
+		append(&val_binds, e)
+	}
+
+	if !has_expand && len(con_binds) != len(val_binds) {
+		return false
+	}
+
+	if has_expand && len(con_binds) == 0 {
+		return true
+	}
+
+	for vi in 0 ..< len(val_binds) {
+		ce := con_binds[vi % len(con_binds)]
+
+		if ce.constraint_node != INVALID_NODE {
+			if !sem_check_structural(s, val_binds[vi].value, ce.constraint_node, overrides) do return false
+		} else {
+			vn := ce.value_node if ce.value_node != INVALID_NODE else INVALID_NODE
+			if !sem_check_sv_compatible(s, val_binds[vi].value, ce.value, vn, overrides) do return false
+		}
+	}
+
+	return true
 }
 
 Constraint_Override :: struct {
@@ -863,100 +1028,27 @@ sem_check_constraint :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if _, is_ref := entry.value.(Ref_SV); is_ref do return
 	if entry.value == nil do return
 
+	if sem_check_structural(s, entry.value, entry.constraint_node) do return
+
 	ast := s.ast
-	if node_kind(ast, entry.constraint_node) == .Operator {
-		op := node_operator_kind(ast, entry.constraint_node)
-		if op == .Or || op == .And {
-			if sem_check_compound(s, entry.constraint_node, entry) do return
-			binding_name :=
-				sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
-			pos := node_position(ast, entry.node)
-			cname := sem_constraint_name(s, entry.constraint_node)
-			sem_error(
-				s,
-				fmt.tprintf(
-					"'%s' expected %s, got %s",
-					binding_name,
-					cname,
-					sv_kind_name(entry.value),
-				),
-				.Constraint_Violation,
-				pos,
-			)
-			return
-		}
-	}
-
-	csem := s.node_sems[entry.constraint_node]
 	binding_name := sem_span_str(ast, entry.name) if entry.name != EMPTY_SPAN else "<anonymous>"
+	pos := node_position(ast, entry.node)
+	cname := sem_constraint_name(s, entry.constraint_node)
+	sem_error(
+		s,
+		fmt.tprintf(
+			"'%s' expected %s, got %s",
+			binding_name,
+			cname,
+			sv_kind_name(entry.value),
+		),
+		.Constraint_Violation,
+		pos,
+	)
 
-	if _, ok := csem.value.(Unresolved_SV); ok {
-		compound_node := sem_find_compound_node(s, entry.constraint_node)
-		if compound_node != INVALID_NODE {
-			if sem_check_compound(s, compound_node, entry) do return
-			pos := node_position(ast, entry.node)
-			cname := sem_constraint_name(s, compound_node)
-			sem_error(
-				s,
-				fmt.tprintf(
-					"'%s' expected %s, got %s",
-					binding_name,
-					cname,
-					sv_kind_name(entry.value),
-				),
-				.Constraint_Violation,
-				pos,
-			)
-			return
-		}
-	}
-
-	#partial switch _ in csem.value {
-	case Integer_SV, Float_SV, bool, Span:
-		if sem_check_value_against_constraint(s, csem.value, entry) do return
-		pos := node_position(ast, entry.node)
-		cname := sv_constraint_name(csem.value)
-		sem_error(
-			s,
-			fmt.tprintf(
-				"'%s' expected %s, got %s",
-				binding_name,
-				cname,
-				sv_kind_name(entry.value),
-			),
-			.Constraint_Violation,
-			pos,
-		)
-		entry.value = csem.value
-		return
-	case Node_Index, Ref_SV, Unresolved_SV:
-	}
-
-	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
-		overrides := sem_extract_carve_overrides(s, entry.constraint_node)
-		if sem_check_by_scope(s, scope_node, entry.value, overrides[:]) do return
-		errors_before := len(s.errors)
-		sem_check_by_scope(s, scope_node, entry.value, overrides[:], true)
-		if len(s.errors) == errors_before {
-			pos := node_position(ast, entry.node)
-			cname := sem_constraint_name(s, entry.constraint_node)
-			sem_error(
-				s,
-				fmt.tprintf(
-					"'%s' expected %s, got %s",
-					binding_name,
-					cname,
-					sv_kind_name(entry.value),
-				),
-				.Constraint_Violation,
-				pos,
-			)
-		}
-		dsv := sem_resolve_default(s, entry.constraint_node)
-		if dsv != nil {
-			entry.value = dsv
-		}
-		return
+	dsv := sem_resolve_default(s, entry.constraint_node)
+	if dsv != nil {
+		entry.value = dsv
 	}
 }
 
@@ -980,212 +1072,6 @@ sem_find_compound_node :: proc(s: ^Semantic, node: Node_Index) -> Node_Index {
 	return INVALID_NODE
 }
 
-sem_check_compound :: proc(
-	s: ^Semantic,
-	constraint_node: Node_Index,
-	entry: ^Binding_Entry,
-) -> bool {
-	ast := s.ast
-	if node_kind(ast, constraint_node) != .Operator do return false
-
-	op := node_operator_kind(ast, constraint_node)
-	left_idx := node_operator_left(ast, constraint_node)
-	right_idx := node_operator_right(ast, constraint_node)
-
-	if op == .Or {
-		return(
-			sem_check_constraint_node(s, left_idx, entry) ||
-			sem_check_constraint_node(s, right_idx, entry) \
-		)
-	}
-	if op == .And {
-		return(
-			sem_check_constraint_node(s, left_idx, entry) &&
-			sem_check_constraint_node(s, right_idx, entry) \
-		)
-	}
-	return false
-}
-
-sem_check_constraint_node :: proc(
-	s: ^Semantic,
-	constraint_node: Node_Index,
-	entry: ^Binding_Entry,
-) -> bool {
-	if constraint_node == INVALID_NODE do return false
-	ast := s.ast
-
-	if node_kind(ast, constraint_node) == .Operator {
-		op := node_operator_kind(ast, constraint_node)
-		if op == .Or || op == .And {
-			return sem_check_compound(s, constraint_node, entry)
-		}
-	}
-
-	csem := s.node_sems[constraint_node]
-
-	if _, ok := csem.value.(Unresolved_SV); ok {
-		compound_node := sem_find_compound_node(s, constraint_node)
-		if compound_node != INVALID_NODE {
-			return sem_check_compound(s, compound_node, entry)
-		}
-	}
-
-	#partial switch _ in csem.value {
-	case Integer_SV, Float_SV, bool, Span:
-		test_entry := Binding_Entry {
-			value = entry.value,
-		}
-		return sem_check_value_against_constraint(s, csem.value, &test_entry)
-	case:
-	}
-
-	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
-		overrides := sem_extract_carve_overrides(s, constraint_node)
-		if _, val_is_scope := entry.value.(Node_Index);
-		   val_is_scope && entry.value_node != INVALID_NODE {
-			if sem_check_scope_against_carve_constraint(
-				s,
-				entry.value_node,
-				constraint_node,
-				overrides[:],
-			) {
-				return true
-			}
-		}
-		return sem_check_by_scope(s, scope_node, entry.value, overrides[:])
-	}
-
-	return false
-}
-
-sem_check_scope_against_carve_constraint :: proc(
-	s: ^Semantic,
-	value_node: Node_Index,
-	constraint_node: Node_Index,
-	constraint_overrides: []Constraint_Override,
-) -> bool {
-	ast := s.ast
-	if constraint_node == INVALID_NODE do return false
-
-	con_source_node := constraint_node
-	if node_kind(ast, constraint_node) == .Carve {
-		con_source_node = node_carve_source(ast, constraint_node)
-	}
-	con_sem := s.node_sems[con_source_node]
-	con_scope_node, con_is_scope := con_sem.value.(Node_Index)
-	if !con_is_scope do return false
-
-	val_node := value_node
-	val_overrides: [dynamic]Constraint_Override
-
-	if node_kind(ast, val_node) == .Carve {
-		val_overrides = sem_extract_carve_overrides(s, val_node)
-		val_source := node_carve_source(ast, val_node)
-		val_sem := s.node_sems[val_source]
-		if val_scope_node, vs_ok := val_sem.value.(Node_Index);
-		   vs_ok && val_scope_node == con_scope_node {
-			return sem_check_carve_overrides_compatible(
-				s,
-				con_scope_node,
-				val_overrides[:],
-				constraint_overrides,
-			)
-		}
-	} else if node_kind(ast, val_node) == .Identifier {
-		val_sem := s.node_sems[val_node]
-		if val_scope_node, vs_ok := val_sem.value.(Node_Index); vs_ok {
-			return sem_check_scope_productions_compatible(
-				s,
-				val_scope_node,
-				con_scope_node,
-				constraint_overrides,
-			)
-		}
-	}
-
-	return false
-}
-
-sem_check_carve_overrides_compatible :: proc(
-	s: ^Semantic,
-	scope_node: Node_Index,
-	val_overrides: []Constraint_Override,
-	con_overrides: []Constraint_Override,
-) -> bool {
-	for co in con_overrides {
-		found := false
-		for vo in val_overrides {
-			if vo.binding_id == co.binding_id {
-				found = true
-				#partial switch _ in co.value {
-				case Integer_SV, Float_SV, bool, Span:
-					test_entry := Binding_Entry {
-						value = vo.value,
-					}
-					if !sem_check_value_against_constraint(s, co.value, &test_entry) do return false
-				case Node_Index:
-					if _, vo_scope := vo.value.(Node_Index); !vo_scope do return false
-				case:
-					co_kind := sv_kind_name(co.value)
-					vo_kind := sv_kind_name(vo.value)
-					if co_kind != vo_kind do return false
-				}
-				break
-			}
-		}
-		if !found do return false
-	}
-	return true
-}
-
-sem_check_scope_productions_compatible :: proc(
-	s: ^Semantic,
-	val_scope_node: Node_Index,
-	con_scope_node: Node_Index,
-	con_overrides: []Constraint_Override,
-) -> bool {
-	val_scope_id, vok := sem_find_scope(s, val_scope_node)
-	if !vok do return false
-	con_scope_id, cok := sem_find_scope(s, con_scope_node)
-	if !cok do return false
-
-	con_scope := s.scopes[con_scope_id]
-	val_scope := s.scopes[val_scope_id]
-
-	cfirst := u32(con_scope.first_binding)
-	for ci in cfirst ..< cfirst + con_scope.binding_count {
-		ce := &s.bindings[ci]
-		if ce.kind == .Product || ce.kind == .Expand do continue
-		if .Has_Constraint not_in ce.flags do continue
-		if ce.constraint_node == INVALID_NODE do continue
-
-		resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
-			s,
-			ce.constraint_node,
-			con_overrides,
-		)
-
-		vfirst := u32(val_scope.first_binding)
-		for vi in vfirst ..< vfirst + val_scope.binding_count {
-			ve := &s.bindings[vi]
-			if ve.kind == .Product || ve.kind == .Expand do continue
-			if .Has_Value not_in ve.flags do continue
-
-			csv := resolved_sv if resolved else s.node_sems[ce.constraint_node].value
-			#partial switch _ in csv {
-			case Integer_SV, Float_SV, bool, Span:
-				test_entry := Binding_Entry {
-					value = ve.value,
-				}
-				if !sem_check_value_against_constraint(s, csv, &test_entry) do return false
-			case:
-			}
-		}
-	}
-
-	return true
-}
 
 sem_extract_carve_overrides :: proc(
 	s: ^Semantic,
@@ -1290,264 +1176,6 @@ sem_check_float :: proc(val: ^Float_SV, constr_kind: FloatKind) -> bool {
 	}
 	return false
 }
-
-sem_check_by_scope :: proc(
-	s: ^Semantic,
-	scope_node: Node_Index,
-	sv: Static_Value,
-	overrides: []Constraint_Override = {},
-	report: bool = false,
-) -> bool {
-	scope_id, ok := sem_find_scope(s, scope_node)
-	if !ok do return false
-
-	scope := s.scopes[scope_id]
-	first := u32(scope.first_binding)
-	has_product := false
-
-	for i in first ..< first + scope.binding_count {
-		entry := &s.bindings[i]
-		if entry.kind != .Product do continue
-		has_product = true
-
-		if entry.constraint_node != INVALID_NODE {
-			resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
-				s,
-				entry.constraint_node,
-				overrides,
-			)
-			if resolved {
-				test_entry := Binding_Entry {
-					value = sv,
-				}
-				#partial switch rsv in resolved_sv {
-				case Unresolved_SV:
-					if resolved_node != INVALID_NODE {
-						if sem_check_constraint_node(s, resolved_node, &test_entry) do return true
-					}
-				case Integer_SV, Float_SV, bool, Span:
-					if sem_check_value_against_constraint(s, resolved_sv, &test_entry) do return true
-				case Node_Index:
-					if sem_check_by_scope(s, rsv, sv, overrides, report) do return true
-				case Ref_SV:
-				}
-			} else {
-				test_entry := Binding_Entry {
-					value = sv,
-				}
-				if sem_check_constraint_node(s, entry.constraint_node, &test_entry) do return true
-			}
-		} else if entry.value_node != INVALID_NODE {
-			if sem_check_product_value(s, entry.value_node, sv, overrides, report) do return true
-		}
-	}
-
-	if !has_product {
-		if sv_scope, is_scope := sv.(Node_Index); is_scope {
-			return sem_check_scope_structural(s, sv_scope, scope_node, overrides, report)
-		}
-		return false
-	}
-	return false
-}
-
-sem_check_product_value :: proc(
-	s: ^Semantic,
-	product_node: Node_Index,
-	sv: Static_Value,
-	overrides: []Constraint_Override,
-	report: bool = false,
-) -> bool {
-	ast := s.ast
-	kind := node_kind(ast, product_node)
-
-	#partial switch kind {
-	case .Carve:
-		sv_scope, sv_is_scope := sv.(Node_Index)
-		if !sv_is_scope do return false
-		return sem_check_scope_against_carve_constraint(s, sv_scope, product_node, overrides)
-	case .ScopeNode:
-		sv_scope, sv_is_scope := sv.(Node_Index)
-		if !sv_is_scope do return false
-		psem := s.node_sems[product_node]
-		if pscope, ok := psem.value.(Node_Index); ok {
-			return sem_check_scope_structural(s, sv_scope, pscope, overrides, report)
-		}
-	case:
-		psem := s.node_sems[product_node]
-		#partial switch pv in psem.value {
-		case Integer_SV, Float_SV, bool, Span:
-			return sem_check_value_against_constraint(s, psem.value, &Binding_Entry{value = sv})
-		case Node_Index:
-			sv_scope, sv_is_scope := sv.(Node_Index)
-			if !sv_is_scope do return false
-			return sem_check_scope_structural(s, sv_scope, pv, overrides, report)
-		case Ref_SV, Unresolved_SV:
-		}
-	}
-	return false
-}
-
-sem_resolve_constraint_with_overrides :: proc(
-	s: ^Semantic,
-	constraint_node: Node_Index,
-	overrides: []Constraint_Override,
-) -> (
-	Static_Value,
-	Node_Index,
-	bool,
-) {
-	if constraint_node == INVALID_NODE do return nil, INVALID_NODE, false
-
-	csem := s.node_sems[constraint_node]
-
-	if csem.ref_binding != INVALID_BINDING {
-		for ov in overrides {
-			if ov.binding_id == csem.ref_binding {
-				return ov.value, ov.node, true
-			}
-		}
-	}
-
-	return nil, INVALID_NODE, false
-}
-
-sem_check_scope_structural :: proc(
-	s: ^Semantic,
-	value_scope_node: Node_Index,
-	constraint_scope_node: Node_Index,
-	overrides: []Constraint_Override,
-	report: bool = false,
-) -> bool {
-	val_scope_id, vok := sem_find_scope(s, value_scope_node)
-	if !vok do return true
-
-	con_scope_id, cok := sem_find_scope(s, constraint_scope_node)
-	if !cok do return true
-
-	con_scope := s.scopes[con_scope_id]
-	val_scope_tmp := s.scopes[val_scope_id]
-
-	con_element_count: u32 = 0
-	has_expand := false
-	cfirst := u32(con_scope.first_binding)
-	for i in cfirst ..< cfirst + con_scope.binding_count {
-		e := &s.bindings[i]
-		if e.kind == .Expand {has_expand = true;continue}
-		if e.kind == .Product do continue
-		con_element_count += 1
-	}
-
-	val_element_count: u32 = 0
-	vfirst_tmp := u32(val_scope_tmp.first_binding)
-	for i in vfirst_tmp ..< vfirst_tmp + val_scope_tmp.binding_count {
-		e := &s.bindings[i]
-		if e.kind != .Product && e.kind != .Expand do val_element_count += 1
-	}
-
-	if con_element_count == 0 && !has_expand {
-		return val_element_count == 0
-	}
-
-	element_constraint_sv, element_constraint_node, has_element_constraint :=
-		sem_find_element_constraint(s, con_scope_id, overrides)
-
-	if !has_element_constraint do return true
-
-	val_scope := s.scopes[val_scope_id]
-	vfirst := u32(val_scope.first_binding)
-	all_ok := true
-
-	for i in vfirst ..< vfirst + val_scope.binding_count {
-		val_entry := &s.bindings[i]
-		if val_entry.kind == .Product || val_entry.kind == .Expand do continue
-		if .Has_Value not_in val_entry.flags do continue
-
-		if .Has_Constraint in val_entry.flags && val_entry.constraint_node != INVALID_NODE {
-			continue
-		}
-
-		ok := true
-		#partial switch ecsv in element_constraint_sv {
-		case Unresolved_SV:
-			if element_constraint_node != INVALID_NODE {
-				ok = sem_check_constraint_node(s, element_constraint_node, val_entry)
-			}
-		case Integer_SV, Float_SV, bool, Span:
-			test_entry := Binding_Entry {
-					value = val_entry.value,
-				}
-			ok = sem_check_value_against_constraint(s, element_constraint_sv, &test_entry)
-		case Node_Index:
-			ok = sem_check_by_scope(s, ecsv, val_entry.value, overrides)
-		case Ref_SV:
-		}
-
-		if !ok {
-			all_ok = false
-			if report && val_entry.node != INVALID_NODE {
-				cname := sv_constraint_name(element_constraint_sv)
-				if cname == "" && element_constraint_node != INVALID_NODE {
-					cname = sem_constraint_name(s, element_constraint_node)
-				}
-				if cname == "" do cname = "scope"
-				val_str := sem_value_str(s, val_entry.value)
-				sem_error(
-					s,
-					fmt.tprintf(
-						"expected %s, got %s (%s)",
-						cname,
-						sv_kind_name(val_entry.value),
-						val_str,
-					),
-					.Constraint_Violation,
-					node_position(s.ast, val_entry.node),
-				)
-			}
-			if !report do return false
-		}
-	}
-	return all_ok
-}
-
-sem_find_element_constraint :: proc(
-	s: ^Semantic,
-	scope_id: Scope_Id,
-	overrides: []Constraint_Override,
-) -> (
-	Static_Value,
-	Node_Index,
-	bool,
-) {
-	scope := s.scopes[scope_id]
-	first := u32(scope.first_binding)
-
-	for i in first ..< first + scope.binding_count {
-		entry := &s.bindings[i]
-		if entry.kind == .Product || entry.kind == .Expand do continue
-		if .Has_Constraint not_in entry.flags do continue
-		if entry.constraint_node == INVALID_NODE do continue
-
-		resolved_sv, resolved_node, resolved := sem_resolve_constraint_with_overrides(
-			s,
-			entry.constraint_node,
-			overrides,
-		)
-		if resolved {
-			return resolved_sv, resolved_node, true
-		}
-
-		csem := s.node_sems[entry.constraint_node]
-		#partial switch _ in csem.value {
-		case Integer_SV, Float_SV, bool, Span, Node_Index:
-			return csem.value, entry.constraint_node, true
-		case:
-		}
-	}
-
-	return nil, INVALID_NODE, false
-}
-
 
 sem_resolve_default :: proc(s: ^Semantic, constraint_node: Node_Index) -> Static_Value {
 	if constraint_node == INVALID_NODE do return nil
@@ -2388,41 +2016,19 @@ sem_check_carve_override :: proc(
 	if .Has_Constraint not_in target_entry.flags do return
 	if target_entry.constraint_node == INVALID_NODE do return
 
-	csem := s.node_sems[target_entry.constraint_node]
-	#partial switch _ in csem.value {
-	case Integer_SV, Float_SV, bool, Span:
-		test_entry := Binding_Entry {
-			value = sv,
-		}
-		if !sem_check_value_against_constraint(s, csem.value, &test_entry) {
-			cname := sv_constraint_name(csem.value)
-			sem_error(
-				s,
-				fmt.tprintf(
-					"carve override '%s' expected %s, got %s",
-					name,
-					cname,
-					sv_kind_name(sv),
-				),
-				.Constraint_Violation,
-				pos,
-			)
-		}
-	case:
-	}
-	if scope_node, is_scope := csem.value.(Node_Index); is_scope {
-		if !sem_check_by_scope(s, scope_node, sv) {
-			sem_error(
-				s,
-				fmt.tprintf(
-					"carve override '%s' expected scope constraint, got %s",
-					name,
-					sv_kind_name(sv),
-				),
-				.Constraint_Violation,
-				pos,
-			)
-		}
+	if !sem_check_structural(s, sv, target_entry.constraint_node) {
+		cname := sem_constraint_name(s, target_entry.constraint_node)
+		sem_error(
+			s,
+			fmt.tprintf(
+				"carve override '%s' expected %s, got %s",
+				name,
+				cname,
+				sv_kind_name(sv),
+			),
+			.Constraint_Violation,
+			pos,
+		)
 	}
 }
 
