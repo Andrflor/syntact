@@ -315,14 +315,10 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 
 	root_idx := ast_root(ast)
 	if node_kind(ast, root_idx) == .ScopeNode {
-		for child in node_children(ast, root_idx) {
-			sem_walk(s, child)
-		}
+		sem_process_scope(s, root_id, root_idx)
 	} else {
 		sem_error(s, "Root should be a scope", .Default, node_position(ast, root_idx))
 	}
-
-	sem_finalize_scope(s, root_id)
 
 	pop(&s.scope_stack)
 	pop(&s.scope_stack)
@@ -385,11 +381,63 @@ sem_add_binding :: proc(s: ^Semantic, entry: Binding_Entry) -> Binding_Id {
 }
 
 /* ======================================================================
- * SECTION 5: WALK
+ * SECTION 5: SINGLE-PASS SCOPE PROCESSING (register + evaluate top-down)
  * ====================================================================== */
 
-sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
-	if idx == INVALID_NODE do return
+sem_process_scope :: proc(s: ^Semantic, scope_id: Scope_Id, scope_node: Node_Index) {
+	ast := s.ast
+	scope := &s.scopes[scope_id]
+	flags: Sem_Flags
+
+	has_product := false
+	has_pull := false
+	has_effect := false
+	all_static := true
+
+	for child in node_children(ast, scope_node) {
+		bid := sem_register_child(s, child)
+		if bid == INVALID_BINDING do continue
+
+		entry := &s.bindings[bid]
+		sem_evaluate_binding(s, entry)
+
+		#partial switch entry.kind {
+		case .Product:
+			has_product = true
+		case .Pointing_Pull:
+			has_pull = true
+		case .Event_Push, .Event_Pull:
+			has_effect = true
+		case .Resonance_Push, .Resonance_Pull:
+			has_effect = true
+		}
+
+		if .Has_Value not_in entry.flags {
+			all_static = false
+		}
+		if .Self_Referential in entry.flags {
+			flags |= {.Self_Referential}
+		}
+	}
+
+	if has_product do flags |= {.Contains_Product}
+	if has_pull do flags |= {.Contains_Pull}
+
+	if has_product && !has_pull && !has_effect &&
+	   .Self_Referential not_in flags && all_static {
+		flags |= {.Is_Collapsible, .Is_Pure}
+	}
+
+	scope.flags = flags
+
+	if scope.node != INVALID_NODE {
+		sem := &s.node_sems[scope.node]
+		sem.flags |= flags
+	}
+}
+
+sem_register_child :: proc(s: ^Semantic, idx: Node_Index) -> Binding_Id {
+	if idx == INVALID_NODE do return INVALID_BINDING
 	ast := s.ast
 	kind := node_kind(ast, idx)
 
@@ -454,6 +502,7 @@ sem_walk :: proc(s: ^Semantic, idx: Node_Index) {
 		}
 		sem_add_binding(s, entry)
 	}
+	return Binding_Id(len(s.bindings) - 1)
 }
 
 /* ======================================================================
@@ -653,59 +702,8 @@ sem_extract_name :: proc(s: ^Semantic, idx: Node_Index, entry: ^Binding_Entry) {
 }
 
 /* ======================================================================
- * SECTION 7: FINALIZE SCOPE
+ * SECTION 7: (removed — merged into sem_process_scope)
  * ====================================================================== */
-
-sem_finalize_scope :: proc(s: ^Semantic, scope_id: Scope_Id) {
-	scope := &s.scopes[scope_id]
-	first := u32(scope.first_binding)
-	count := scope.binding_count
-	flags: Sem_Flags
-
-	has_product := false
-	has_pull := false
-	has_effect := false
-	all_static := true
-
-	for i in first ..< first + count {
-		entry := &s.bindings[i]
-
-		sem_evaluate_binding(s, entry)
-
-		#partial switch entry.kind {
-		case .Product:
-			has_product = true
-		case .Pointing_Pull:
-			has_pull = true
-		case .Event_Push, .Event_Pull:
-			has_effect = true
-		case .Resonance_Push, .Resonance_Pull:
-			has_effect = true
-		}
-
-		if .Has_Value not_in entry.flags {
-			all_static = false
-		}
-		if .Self_Referential in entry.flags {
-			flags |= {.Self_Referential}
-		}
-	}
-
-	if has_product do flags |= {.Contains_Product}
-	if has_pull do flags |= {.Contains_Pull}
-
-	if has_product && !has_pull && !has_effect &&
-	   .Self_Referential not_in flags && all_static {
-		flags |= {.Is_Collapsible, .Is_Pure}
-	}
-
-	scope.flags = flags
-
-	if scope.node != INVALID_NODE {
-		sem := &s.node_sems[scope.node]
-		sem.flags |= flags
-	}
-}
 
 sem_evaluate_binding :: proc(s: ^Semantic, entry: ^Binding_Entry) {
 	if entry.value_node == INVALID_NODE && entry.constraint_node == INVALID_NODE {
@@ -1429,10 +1427,7 @@ sem_evaluate_value :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Static
 	case .ScopeNode:
 		if .Has_Value not_in sem.flags {
 			scope_id := sem_push_scope(s, idx)
-			for child in node_children(ast, idx) {
-				sem_walk(s, child)
-			}
-			sem_finalize_scope(s, scope_id)
+			sem_process_scope(s, scope_id, idx)
 			sem_pop_scope(s)
 		}
 		sv.scope = idx
@@ -1709,6 +1704,10 @@ sem_evaluate_operator :: proc(s: ^Semantic, idx: Node_Index) -> (Value_Kind, Sta
 		return .Symbolic, {}
 	}
 
+	if lvk == .Scope && rvk == .Scope && op_kind == .Add {
+		return sem_merge_scopes(s, idx, lsv.scope, rsv.scope)
+	}
+
 	#partial switch op_kind {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:
 		return sem_fold_math(lvk, lsv, rvk, rsv, op_kind, pos, s)
@@ -1771,6 +1770,49 @@ sem_evaluate_unary :: proc(
 		return cvk, csv
 	}
 	return cvk, csv
+}
+
+sem_merge_scopes :: proc(s: ^Semantic, op_node: Node_Index, left_node: Node_Index, right_node: Node_Index) -> (Value_Kind, Static_Value) {
+	scope := Scope_Info {
+		node          = op_node,
+		parent        = sem_current_scope(s),
+		first_binding = Binding_Id(len(s.bindings)),
+		binding_count = 0,
+		flags         = {},
+	}
+	scope_id := Scope_Id(len(s.scopes))
+	append(&s.scopes, scope)
+	s.node_to_scope[op_node] = scope_id
+
+	left_entry := Binding_Entry {
+		node       = INVALID_NODE,
+		name       = EMPTY_SPAN,
+		kind       = .Expand,
+		value_node = left_node,
+		value_kind = .Scope,
+		scope_id   = scope_id,
+		flags      = {.Has_Value},
+	}
+	left_entry.value.scope = left_node
+	append(&s.bindings, left_entry)
+	s.scopes[scope_id].binding_count += 1
+
+	right_entry := Binding_Entry {
+		node       = INVALID_NODE,
+		name       = EMPTY_SPAN,
+		kind       = .Expand,
+		value_node = right_node,
+		value_kind = .Scope,
+		scope_id   = scope_id,
+		flags      = {.Has_Value},
+	}
+	right_entry.value.scope = right_node
+	append(&s.bindings, right_entry)
+	s.scopes[scope_id].binding_count += 1
+
+	sv: Static_Value
+	sv.scope = op_node
+	return .Scope, sv
 }
 
 sem_fold_math :: proc(
