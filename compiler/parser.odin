@@ -208,140 +208,7 @@ span_to_position :: #force_inline proc(ast: ^Ast, offset: u32) -> Position {
 }
 
 /* ======================================================================
- * SECTION 2: AST ACCESSOR API
- * ====================================================================== */
-
-node_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Kind {
-	return ast.node_kinds[idx]
-}
-
-node_span :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Span {
-	return ast.node_spans[idx]
-}
-
-node_data :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Data {
-	return ast.node_data[idx]
-}
-
-node_position :: proc(ast: ^Ast, idx: Node_Index) -> Position {
-	return span_to_position(ast, ast.node_spans[idx].start)
-}
-
-node_text :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.node_spans[idx]
-	return ast.source[s.start:s.end]
-}
-
-node_left :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].binary.left
-}
-
-node_right :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].binary.right
-}
-
-node_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
-	r := ast.node_data[idx].scope
-	if r.len == 0 do return nil
-	return ast.extra[r.start:r.start + r.len]
-}
-
-node_carve_source :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].carve.source
-}
-
-node_carve_children :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
-	r := ast.node_data[idx].carve.children
-	if r.len == 0 do return nil
-	return ast.extra[r.start:r.start + r.len]
-}
-
-node_pattern_target :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].pattern.target
-}
-
-node_pattern_branches :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
-	r := ast.node_data[idx].pattern.branches
-	if r.len == 0 do return nil
-	return ast.extra[r.start:r.start + r.len]
-}
-
-node_execute_target :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].execute.target
-}
-
-node_execute_wrappers :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> []u8 {
-	r := ast.node_data[idx].execute.wrappers
-	if r.len == 0 do return nil
-	return ast.extra_u8[r.start:r.start + r.len]
-}
-
-node_operator_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Operator_Kind {
-	return ast.node_data[idx].operator.kind
-}
-
-node_operator_left :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].operator.left
-}
-
-node_operator_right :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].operator.right
-}
-
-node_unary_operand :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].unary.operand
-}
-
-node_name_span :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Span {
-	return ast.node_data[idx].identifier.name
-}
-
-node_name_str :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.node_data[idx].identifier.name
-	if s.start == s.end do return ""
-	return ast.source[s.start:s.end]
-}
-
-node_capture_str :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.node_data[idx].identifier.capture
-	if s.start == s.end do return ""
-	return ast.source[s.start:s.end]
-}
-
-node_ordinal :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> i16 {
-	return ast.node_data[idx].identifier.ordinal
-}
-
-node_literal_kind :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Literal_Kind {
-	return ast.node_data[idx].literal.kind
-}
-
-node_external_name :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.node_data[idx].external.name
-	if s.start == s.end do return ""
-	return ast.source[s.start:s.end]
-}
-
-node_external_scope :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].external.scope
-}
-
-node_event_pull_from :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].event_pull.from
-}
-
-node_event_pull_to :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> Node_Index {
-	return ast.node_data[idx].event_pull.to
-}
-
-node_event_pull_catch :: #force_inline proc(ast: ^Ast, idx: Node_Index) -> string {
-	s := ast.node_data[idx].event_pull.catch_span
-	if s.start == s.end do return ""
-	return ast.source[s.start:s.end]
-}
-
-/* ======================================================================
- * SECTION 3: TOKEN DEFINITIONS AND LEXER
+ * SECTION 2: TOKEN DEFINITIONS AND LEXER
  * ====================================================================== */
 
 Token_Kind :: enum u8 {
@@ -917,7 +784,7 @@ scan_number :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
 
 
 /* ======================================================================
- * SECTION 4: PARSER
+ * SECTION 3: PARSER
  * ====================================================================== */
 
 Precedence :: enum {
@@ -1330,13 +1197,7 @@ add_extra_u8 :: proc(p: ^Parser, wrappers: []u8) -> Index_Range {
 }
 
 /* ======================================================================
- * SECTION 5: PARSE RULES TABLE
- * ====================================================================== */
-
-/* (parse rule tables are initialized in init_parse_tables above) */
-
-/* ======================================================================
- * SECTION 6: MAIN PARSE ENTRY POINTS
+ * SECTION 5: MAIN PARSE ENTRY POINTS
  * ====================================================================== */
 
 parse :: proc(cache: ^Cache, source: string) -> (^Ast, bool) {
@@ -1471,7 +1332,7 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 }
 
 /* ======================================================================
- * SECTION 7: PARSE FUNCTIONS
+ * SECTION 6: PARSE FUNCTIONS
  * ====================================================================== */
 
 parse_literal :: proc(parser: ^Parser) -> Node_Index {
@@ -2879,7 +2740,7 @@ init_ident_tables :: proc "contextless" () {
 
 
 /* ======================================================================
- * SECTION 9: DEBUG UTILITIES
+ * SECTION 8: DEBUG UTILITIES
  * ====================================================================== */
 
 print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
