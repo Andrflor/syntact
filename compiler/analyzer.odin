@@ -75,6 +75,7 @@ Product_Type :: struct {
 }
 
 Scope_Type :: struct {
+	parent: ^Scope_Type,
 	names:  [dynamic]string,
 	types:  [dynamic]Type,
 	kind:   [dynamic]Binding_Kind,
@@ -86,7 +87,23 @@ Execute_Type :: struct {
 }
 
 Carve_Type :: struct {
-	target: ^Scope_Type,
+	target:     ^Scope_Type,
+	references: [dynamic]Reference,
+	values:     [dynamic]Type,
+}
+
+Reference :: struct {
+	name:  Maybe(string),
+	index: Maybe(u64),
+}
+
+Reference_Type :: struct {
+	target:    ^Type,
+	reference: ^Reference,
+}
+
+Mention_Type :: struct {
+	target: ^Type,
 }
 
 Integer_Type :: struct {
@@ -128,6 +145,10 @@ String_Type :: struct {
 
 None_Type :: struct {}
 
+Unknown_Type :: struct {}
+
+Invalid_Type :: struct {}
+
 Type :: union {
 	Sum_Type,
 	Product_Type,
@@ -136,12 +157,20 @@ Type :: union {
 	Scope_Type,
 	Integer_Type,
 	Float_Type,
+	Execute_Type,
+	Range_Type,
 	Bool_Type,
 	None_Type,
+	Invalid_Type,
+	Unknown_Type,
+	Carve_Type,
+	Mention_Type,
+	Reference_Type,
 }
 
 Analyzer :: struct {
 	ast:      ^Ast,
+	scope:    ^Scope_Type,
 	errors:   [dynamic]Analyzer_Error,
 	warnings: [dynamic]Analyzer_Error,
 }
@@ -169,7 +198,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	return len(a.errors) == 0
 }
 
-walk :: proc(a: ^Analyzer, idx: Node_Index) {
+walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> Type {
 	ast := a.ast
 	kind := ast.node_kinds[idx]
 	data := ast.node_data[idx]
@@ -184,37 +213,27 @@ walk :: proc(a: ^Analyzer, idx: Node_Index) {
 			walk(a, child)
 		}
 
-	case .Pointing:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .PointingPull:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .EventPush:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .EventPull:
-		walk(a, data.event_pull.from)
-		walk(a, data.event_pull.to)
-
-	case .ResonancePush:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .ResonancePull:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .ReactivePush:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .ReactivePull:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
+	case .Pointing ||
+	     .PointingPull ||
+	     .EventPush ||
+	     .EventPull ||
+	     .ResonancePush ||
+	     .ResonancePull ||
+	     .ReactivePush ||
+	     .ReactivePull:
+		left := data.binary.left
+		switch left {
+		case .Constraint:
+		case .Identifier:
+		case:
+			sem_error(
+				a,
+				"Error baby",
+				U,
+				// GEt position baby,
+			)
+		}
+		right := data.binary.right
 
 	case .Product:
 		walk(a, data.unary.operand)
@@ -283,110 +302,6 @@ walk :: proc(a: ^Analyzer, idx: Node_Index) {
 
 	}
 }
-
-sem_check_int :: proc(val: ^Integer_SV, constr_kind: IntegerKind) -> bool {
-	if val.kind == .none {
-		switch constr_kind {
-		case .none:
-			return true
-		case .u8:
-			if !val.negative && val.content < 256 {val.kind = .u8;return true};return false
-		case .i8:
-			if val.content < 128 {val.kind = .i8;return true};return false
-		case .u16:
-			if !val.negative && val.content < 65536 {val.kind = .u16;return true};return false
-		case .i16:
-			if val.content < 32768 {val.kind = .i16;return true};return false
-		case .u32:
-			if !val.negative && val.content < 4294967296 {val.kind = .u32;return true};return false
-		case .i32:
-			if val.content < 2147483648 {val.kind = .i32;return true};return false
-		case .u64:
-			if !val.negative {val.kind = .u64;return true};return false
-		case .i64:
-			val.kind = .i64;return true
-		}
-	}
-	return constr_kind == .none || constr_kind == val.kind
-}
-
-sem_check_float :: proc(val: ^Float_SV, constr_kind: FloatKind) -> bool {
-	switch val.kind {
-	case .none:
-		#partial switch constr_kind {
-		case .f32:
-			if val.content < (1 << 24) {
-				val.kind = .f32
-				return true
-			}
-			return false
-		case .f64:
-			val.kind = .f64
-			return true
-		case:
-			return true
-		}
-	case .f32:
-		return constr_kind == .none || constr_kind == .f32
-	case .f64:
-		return constr_kind == .none || constr_kind == .f64
-	}
-	return false
-}
-
-/* ======================================================================
- * SECTION 9: LITERAL EVALUATION
- * ====================================================================== */
-
-sem_anotate_literal :: proc(s: ^Analyzer, idx: Node_Index) -> Binding_Value {
-	ast := s.ast
-	lit_kind := ast.node_data[idx].literal.kind
-
-	switch lit_kind {
-	case .Integer:
-		content, ok := strconv.parse_int(text)
-		isv := Integer_SV {
-			kind = .none,
-		}
-		if ok do isv.content = u64(content)
-		return isv
-	case .Float:
-		content, ok := strconv.parse_f64(text)
-		fsv := Float_SV {
-			kind = .none,
-		}
-		if ok do fsv.content = content
-		return fsv
-	case .String:
-		return node_span(ast, idx)
-	case .Bool:
-		return bool(text == "true")
-	case .Hexadecimal:
-		hex_text := text
-		if len(hex_text) > 2 && hex_text[0] == '0' && (hex_text[1] == 'x' || hex_text[1] == 'X') {
-			hex_text = hex_text[2:]
-		}
-		content, ok := strconv.parse_int(hex_text, 16)
-		isv := Integer_SV {
-			kind = .none,
-		}
-		if ok do isv.content = u64(content)
-		return isv
-	case .Binary:
-		bin_text := text
-		if len(bin_text) > 2 && bin_text[0] == '0' && (bin_text[1] == 'b' || bin_text[1] == 'B') {
-			bin_text = bin_text[2:]
-		}
-		content, ok := strconv.parse_int(bin_text, 2)
-		isv := Integer_SV {
-			kind = .none,
-		}
-		if ok do isv.content = u64(content)
-		return isv
-	}
-	return nil
-}
-
 /* ======================================================================
  * SECTION 17: ERROR REPORTING
  * ====================================================================== */
@@ -436,53 +351,4 @@ debug_sem_errors :: proc(s: ^Analyzer) {
 		)
 	}
 	fmt.eprintln()
-}
-
-sem_binding_kind_str :: proc(kind: Sem_Binding_Kind) -> string {
-	switch kind {
-	case .Pointing_Push:
-		return "->"
-	case .Pointing_Pull:
-		return "<-"
-	case .Event_Push:
-		return ">-"
-	case .Event_Pull:
-		return "-<"
-	case .Resonance_Push:
-		return ">>-"
-	case .Resonance_Pull:
-		return "-<<"
-	case .Reactive_Push:
-		return ">>="
-	case .Reactive_Pull:
-		return "=<<"
-	case .Expand:
-		return "expand"
-	case .Product:
-		return "product"
-	}
-	return "?"
-}
-
-sem_value_str :: proc(s: ^Analyzer, sv: Binding_Value) -> string {
-	switch v in sv {
-	case Integer_SV:
-		if v.negative {
-			return fmt.tprintf("-%d", v.content)
-		}
-		return fmt.tprintf("%d", v.content)
-	case Float_SV:
-		return fmt.tprintf("%g", v.content)
-	case bool:
-		return fmt.tprintf("%t", v)
-	case Span:
-		return fmt.tprintf("\"%s\"", sem_span_str(s.ast, v))
-	case Node_Index:
-		return fmt.tprintf("scope@%d", v)
-	case Ref_SV:
-		return fmt.tprintf("ref@%d", v.binding)
-	case Unresolved_SV:
-		return "symbolic"
-	}
-	return "none"
 }
