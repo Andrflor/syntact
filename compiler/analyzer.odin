@@ -8,8 +8,8 @@ import "core:strings"
  * SECTION 1: SHARED TYPES
  * ====================================================================== */
 Segment :: struct {
-	lo: Maybe(i64),  // nil = -∞
-	hi: Maybe(i64),  // nil = +∞
+	lo: Maybe(i64), // nil = -∞
+	hi: Maybe(i64), // nil = +∞
 }
 
 FloatKind :: enum {
@@ -110,7 +110,8 @@ Mention_Type :: struct {
 }
 
 Integer_Type :: struct {
-	segments: []Segment,
+	segments:      []Segment,
+	default_value: Maybe(i64),
 }
 
 Float_Type :: struct {
@@ -249,7 +250,15 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	}
 }
 
-scope_append :: proc(a: ^Analyzer, scope: ^Scope_Type, name: string, constraint: ^Type, bk: Binding_Kind, value: ^Type, node: Node_Index) {
+scope_append :: proc(
+	a: ^Analyzer,
+	scope: ^Scope_Type,
+	name: string,
+	constraint: ^Type,
+	bk: Binding_Kind,
+	value: ^Type,
+	node: Node_Index,
+) {
 	append(&scope.names, name)
 	append(&scope.types, constraint)
 	append(&scope.kind, bk)
@@ -272,14 +281,23 @@ scope_append :: proc(a: ^Analyzer, scope: ^Scope_Type, name: string, constraint:
 		if !vf_ok {
 			sem_error(
 				a,
-				fmt.tprintf("'%s' has constraint %s but its value could not be resolved", display, pretty_segments(cf)),
+				fmt.tprintf(
+					"'%s' has constraint %s but its value could not be resolved",
+					display,
+					pretty_segments(cf),
+				),
 				.Constraint_Violation,
 				node_pos(a, node),
 			)
 		} else if !segments_satisfies(vf, cf) {
 			sem_error(
 				a,
-				fmt.tprintf("'%s' value %s does not fit in %s", display, pretty_segments(vf), pretty_segments(cf)),
+				fmt.tprintf(
+					"'%s' value %s does not fit in %s",
+					display,
+					pretty_segments(vf),
+					pretty_segments(cf),
+				),
 				.Constraint_Violation,
 				node_pos(a, node),
 			)
@@ -287,7 +305,15 @@ scope_append :: proc(a: ^Analyzer, scope: ^Scope_Type, name: string, constraint:
 	}
 }
 
-scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> (^Scope_Type, int) {
+scope_resolve :: proc(
+	scope: ^Scope_Type,
+	name: string,
+	ordinal: i16,
+	last: bool,
+) -> (
+	^Scope_Type,
+	int,
+) {
 	if ordinal >= 0 {
 		if name == "" {
 			if int(ordinal) < len(scope.values) {
@@ -348,7 +374,36 @@ default_value :: proc(t: ^Type) -> ^Type {
 		}
 		break
 	}
+	def := type_default(target)
+	if def != nil do return def
 	return t
+}
+
+type_default :: proc(t: ^Type) -> ^Type {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Integer_Type:
+		d, d_ok := v.default_value.(i64)
+		if d_ok {
+			result := new(Type)
+			result^ = make_int_const(d)
+			return result
+		}
+	case Product_Type:
+		return type_default(v.left)
+	case Sum_Type:
+		return type_default(v.left)
+	case Negate_Type:
+	case Mention_Type:
+		if v.match_scope != nil && v.match_index >= 0 {
+			return type_default(v.match_scope.values[v.match_index])
+		}
+	case Reference_Type:
+		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+			return type_default(v.reference.match_scope.values[v.reference.match_index])
+		}
+	}
+	return nil
 }
 
 follow :: proc(t: ^Type) -> ^Type {
@@ -664,9 +719,36 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 
 				val := walk(a, current_scope, val_idx)
+				if carve_scope != nil && carve_index >= 0 {
+					cf := carve_scope.constraint_folds[carve_index]
+					if cf != nil {
+						vf, vf_ok := fold_to_segments(val).([]Segment)
+						if !vf_ok {
+							vf, vf_ok = fold_constraint(val).([]Segment)
+						}
+						if vf_ok && !segments_satisfies(vf, cf) {
+							sem_error(
+								a,
+								fmt.tprintf(
+									"carve '%s' value %s does not fit in %s",
+									cname,
+									pretty_segments(vf),
+									pretty_segments(cf),
+								),
+								.Constraint_Violation,
+								node_pos(a, val_idx),
+							)
+						}
+					}
+				}
 				append(
 					&refs,
-					Reference{cname, cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil, carve_scope, carve_index},
+					Reference {
+						cname,
+						cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
+						carve_scope,
+						carve_index,
+					},
 				)
 				append(&vals, val)
 			} else {
@@ -688,6 +770,27 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 
 				val := walk(a, current_scope, child)
+				if carve_scope != nil && carve_index >= 0 {
+					cf := carve_scope.constraint_folds[carve_index]
+					if cf != nil {
+						vf, vf_ok := fold_to_segments(val).([]Segment)
+						if !vf_ok {
+							vf, vf_ok = fold_constraint(val).([]Segment)
+						}
+						if vf_ok && !segments_satisfies(vf, cf) {
+							sem_error(
+								a,
+								fmt.tprintf(
+									"positional carve value %s does not fit in %s",
+									pretty_segments(vf),
+									pretty_segments(cf),
+								),
+								.Constraint_Violation,
+								node_pos(a, child),
+							)
+						}
+					}
+				}
 				append(&refs, Reference{nil, nil, carve_scope, carve_index})
 				append(&vals, val)
 				positional_idx += 1
@@ -758,9 +861,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	case .Integer:
 		val, ok := strconv.parse_u64_of_base(text, 10)
 		if ok {
-			segs := make([]Segment, 1)
-			segs[0] = Segment{i64(val), i64(val)}
-			result^ = Integer_Type{segs}
+			result^ = make_int_const(i64(val))
 		} else {
 			result^ = Invalid_Type{}
 		}
@@ -768,9 +869,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 		raw := len(text) > 2 ? text[2:] : text
 		val, ok := strconv.parse_u64_of_base(raw, 16)
 		if ok {
-			segs := make([]Segment, 1)
-			segs[0] = Segment{i64(val), i64(val)}
-			result^ = Integer_Type{segs}
+			result^ = make_int_const(i64(val))
 		} else {
 			result^ = Invalid_Type{}
 		}
@@ -778,9 +877,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 		raw := len(text) > 2 ? text[2:] : text
 		val, ok := strconv.parse_u64_of_base(raw, 2)
 		if ok {
-			segs := make([]Segment, 1)
-			segs[0] = Segment{i64(val), i64(val)}
-			result^ = Integer_Type{segs}
+			result^ = make_int_const(i64(val))
 		} else {
 			result^ = Invalid_Type{}
 		}
@@ -799,11 +896,25 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 make_int_range :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> Integer_Type {
 	segs := make([]Segment, 1)
 	segs[0] = Segment{lo, hi}
-	return Integer_Type{segs}
+	return Integer_Type{segs, default_for_segments(segs)}
 }
 
 make_int_const :: proc(val: i64) -> Integer_Type {
 	return make_int_range(val, val)
+}
+
+default_for_segments :: proc(segs: []Segment) -> Maybe(i64) {
+	if len(segs) == 0 do return nil
+	for seg in segs {
+		lo, lo_ok := seg.lo.(i64)
+		hi, hi_ok := seg.hi.(i64)
+		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return i64(0)
+	}
+	lo, lo_ok := segs[0].lo.(i64)
+	if lo_ok do return lo
+	hi, hi_ok := segs[len(segs) - 1].hi.(i64)
+	if hi_ok do return hi
+	return i64(0)
 }
 
 resolve_builtin :: proc(name: string) -> ^Type {
@@ -895,52 +1006,18 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	segs, segs_ok := fold_to_segments(t).([]Segment)
 	if segs_ok {
 		tf := new(Type)
-		tf^ = Integer_Type{segs}
+		tf^ = Integer_Type{segs, default_for_segments(segs)}
 		comp.type_fold = tf
 	} else {
-		sem_error(a, "Cannot fold type: operands must be integers", .Invalid_operator, node_pos(a, node))
+		sem_error(
+			a,
+			"Cannot fold type: operands must be integers",
+			.Invalid_operator,
+			node_pos(a, node),
+		)
 	}
 }
 
-validate_type :: proc(type: ^Type) {
-	if (type == nil) {
-		return
-	}
-	switch t in type {
-	case Sum_Type:
-		validate_type(t.left)
-		validate_type(t.right)
-	case Product_Type:
-		validate_type(t.left)
-		validate_type(t.right)
-	case Negate_Type:
-		validate_type(t.operand)
-	case Compose_Type:
-		check_operator_compat(t.left, t.right, t.operator)
-	case Scope_Type:
-		for i := 0; i < len(t.types); i += 1 {
-			compare_types(t.types[i], t.values[i])
-		}
-	case String_Type:
-	case Integer_Type:
-	case Float_Type:
-	case Execute_Type:
-		validate_type(t.target)
-	case Range_Type:
-	case Bool_Type:
-	case None_Type:
-	case Invalid_Type:
-	case Unknown_Type:
-	case Mention_Type:
-	case Reference_Type:
-	case Carve_Type:
-	}
-}
-
-check_carve_possible :: proc(target: ^Type, reference: ^Reference) {}
-check_range_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
-check_operator_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
-compare_types :: proc(constraint: ^Type, concrete: ^Type) {}
 
 /* ======================================================================
  * SECTION 17: ERROR REPORTING
