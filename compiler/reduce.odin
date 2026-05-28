@@ -31,7 +31,7 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 			idx, has_idx := v.reference.index.(u64)
 			if has_name || has_idx {
 				ordinal: i16 = has_idx ? i16(idx) : -1
-				resolved := scope_resolve(&s, has_name ? name : "", ordinal, true)
+				resolved, _ := scope_resolve(&s, has_name ? name : "", ordinal, true)
 				if resolved != nil {
 					return reduce_value(resolved)
 				}
