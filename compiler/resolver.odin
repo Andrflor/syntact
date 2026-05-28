@@ -51,7 +51,7 @@ Status :: enum {
  */
 Cache :: struct {
 	path:             string,
-	semantic:         ^Semantic,
+	scope:            ^Scope_Type,
 	status:           Status,
 	last_modified:    time.Time,
 	arena:            vmem.Arena,
@@ -429,13 +429,18 @@ process_cache_task :: proc(task: thread.Task) {
 				cache.status,
 			)
 		}
+		if resolver.options.print_ir && cache.scope != nil {
+			print_type_value(cache.scope^)
+			fmt.println()
+		}
+
 		if !resolver.options.analyze_only && analyze_ok {
 			reduce_start: time.Time
 			if resolver.options.timing {
 				reduce_start = time.now()
 			}
 
-			result := reduce(cache.semantic, ast)
+			result := reduce(cache.scope)
 
 			if resolver.options.timing {
 				reduce_duration := time.diff(reduce_start, time.now())
@@ -445,7 +450,8 @@ process_cache_task :: proc(task: thread.Task) {
 				}
 			}
 
-			print_reduced(result, cache.semantic, ast)
+			print_type(result)
+			fmt.println()
 		}
 	} else if resolver.options.verbose {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)

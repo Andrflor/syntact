@@ -77,9 +77,9 @@ Product_Type :: struct {
 Scope_Type :: struct {
 	parent: ^Scope_Type,
 	names:  [dynamic]string,
-	types:  [dynamic]Type,
+	types:  [dynamic]^Type,
 	kind:   [dynamic]Binding_Kind,
-	values: [dynamic]Type,
+	values: [dynamic]^Type,
 }
 
 Execute_Type :: struct {
@@ -89,12 +89,13 @@ Execute_Type :: struct {
 Carve_Type :: struct {
 	target:     ^Scope_Type,
 	references: [dynamic]Reference,
-	values:     [dynamic]Type,
+	values:     [dynamic]^Type,
 }
 
 Reference :: struct {
 	name:  Maybe(string),
 	index: Maybe(u64),
+	match: ^Type,
 }
 
 Reference_Type :: struct {
@@ -103,6 +104,7 @@ Reference_Type :: struct {
 }
 
 Mention_Type :: struct {
+	name:   string,
 	target: ^Type,
 }
 
@@ -181,15 +183,22 @@ Analyzer :: struct {
 analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	a := Analyzer {
 		ast      = ast,
+		scope    = new(Scope_Type),
 		errors   = make([dynamic]Analyzer_Error, 0),
 		warnings = make([dynamic]Analyzer_Error, 0),
 	}
 
 	root := ast_root(ast)
-	walk(&a, root)
+	root_data := ast.node_data[root]
+	r := root_data.scope
+	children := ast.extra[r.start:][:r.len]
+	for child in children {
+		walk(&a, a.scope, child)
+	}
 
-	cache.analyze_errors = a.errors[:]
-	cache.analyze_warnings = a.warnings[:]
+	cache.scope = a.scope
+	cache.analyze_errors = a.errors
+	cache.analyze_warnings = a.warnings
 
 	if resolver.options.print_errors && len(a.errors) > 0 {
 		debug_sem_errors(&a)
@@ -198,110 +207,511 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	return len(a.errors) == 0
 }
 
-walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> Type {
+span_str :: proc(ast: ^Ast, s: Span) -> string {
+	return ast.source[s.start:s.end]
+}
+
+node_pos :: proc(a: ^Analyzer, idx: Node_Index) -> Position {
+	return span_to_position(a.ast, a.ast.node_spans[idx].start)
+}
+
+binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
+	#partial switch kind {
+	case .Pointing:
+		return .Pointing_Push
+	case .PointingPull:
+		return .Pointing_Pull
+	case .EventPush:
+		return .Event_Push
+	case .EventPull:
+		return .Event_Pull
+	case .ResonancePush:
+		return .Resonance_Push
+	case .ResonancePull:
+		return .Resonance_Pull
+	case .ReactivePush:
+		return .Reactive_Push
+	case .ReactivePull:
+		return .Reactive_Pull
+	case:
+		return .Pointing_Push
+	}
+}
+
+scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> ^Type {
+	if ordinal >= 0 {
+		count := 0
+		for i := 0; i < len(scope.names); i += 1 {
+			if scope.names[i] == name {
+				if count == int(ordinal) {
+					return scope.values[i]
+				}
+				count += 1
+			}
+		}
+		return nil
+	}
+
+	if last {
+		for i := len(scope.names) - 1; i >= 0; i -= 1 {
+			if scope.names[i] == name {
+				return scope.values[i]
+			}
+		}
+	} else {
+		for i := 0; i < len(scope.names); i += 1 {
+			if scope.names[i] == name {
+				return scope.values[i]
+			}
+		}
+	}
+
+	if scope.parent != nil {
+		return scope_resolve(scope.parent, name, ordinal, last)
+	}
+	return nil
+}
+
+default_value :: proc(t: ^Type) -> ^Type {
+	if t == nil do return t
+	target := follow(t)
+	#partial switch &v in target^ {
+	case Scope_Type:
+		for i := 0; i < len(v.kind); i += 1 {
+			if v.kind[i] == .Product {
+				return v.values[i]
+			}
+		}
+	}
+	return t
+}
+
+follow :: proc(t: ^Type) -> ^Type {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Mention_Type:
+		return follow(v.target)
+	case Reference_Type:
+		return follow(v.reference.match)
+	}
+	return t
+}
+
+walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+	if idx == INVALID_NODE {
+		result := new(Type)
+		result^ = None_Type{}
+		return result
+	}
 	ast := a.ast
 	kind := ast.node_kinds[idx]
 	data := ast.node_data[idx]
 
-	switch kind {
+	#partial switch kind {
 
 	case .ScopeNode:
+		scope := new(Scope_Type)
+		scope.parent = current_scope
 		r := data.scope
 		children := ast.extra[r.start:][:r.len]
-
 		for child in children {
-			walk(a, child)
+			walk(a, scope, child)
+		}
+		result := new(Type)
+		result^ = scope^
+		return result
+
+	case .Pointing,
+	     .PointingPull,
+	     .EventPush,
+	     .EventPull,
+	     .ResonancePush,
+	     .ResonancePull,
+	     .ReactivePush,
+	     .ReactivePull:
+		left_idx := data.binary.left
+		right_idx := data.binary.right
+		bk := binding_kind_from_node(kind)
+
+		name := ""
+		constraint: ^Type = nil
+		left_kind := ast.node_kinds[left_idx]
+
+		if left_kind == .Constraint {
+			cdata := ast.node_data[left_idx]
+			constraint_idx := cdata.binary.left
+			name_idx := cdata.binary.right
+			constraint = walk(a, current_scope, constraint_idx)
+			if name_idx != INVALID_NODE {
+				nk := ast.node_kinds[name_idx]
+				if nk == .Identifier {
+					name = span_str(ast, ast.node_data[name_idx].identifier.name)
+				} else if nk == .Carve {
+					// constraint:name{carves} — le carve source est le nom
+					csrc := ast.node_data[name_idx].carve.source
+					if ast.node_kinds[csrc] == .Identifier {
+						name = span_str(ast, ast.node_data[csrc].identifier.name)
+					}
+				}
+			}
+		} else if left_kind == .Identifier {
+			name = span_str(ast, ast.node_data[left_idx].identifier.name)
+		} else {
+			sem_error(a, "Invalid binding name", .Invalid_Binding_Name, node_pos(a, left_idx))
 		}
 
-	case .Pointing ||
-	     .PointingPull ||
-	     .EventPush ||
-	     .EventPull ||
-	     .ResonancePush ||
-	     .ResonancePull ||
-	     .ReactivePush ||
-	     .ReactivePull:
-		left := data.binary.left
-		switch left {
-		case .Constraint:
-		case .Identifier:
-		case:
-			sem_error(
-				a,
-				"Error baby",
-				U,
-				// GEt position baby,
-			)
-		}
-		right := data.binary.right
+		value := walk(a, current_scope, right_idx)
+		append(&current_scope.names, name)
+		append(&current_scope.types, constraint)
+		append(&current_scope.kind, bk)
+		append(&current_scope.values, value)
+		return value
 
 	case .Product:
-		walk(a, data.unary.operand)
+		value := walk(a, current_scope, data.unary.operand)
+		append(&current_scope.names, "")
+		append(&current_scope.types, nil)
+		append(&current_scope.kind, Binding_Kind.Product)
+		append(&current_scope.values, value)
+		return value
 
 	case .Expand:
-		walk(a, data.unary.operand)
+		value := walk(a, current_scope, data.unary.operand)
+		append(&current_scope.names, "")
+		append(&current_scope.types, nil)
+		append(&current_scope.kind, Binding_Kind.Expand)
+		append(&current_scope.values, value)
+		return value
 
 	case .CompileTime:
-		walk(a, data.unary.operand)
+		return walk(a, current_scope, data.unary.operand)
 
 	case .Constraint:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
+		constraint := walk(a, current_scope, data.binary.left)
+		if data.binary.right != INVALID_NODE {
+			value := walk(a, current_scope, data.binary.right)
+			append(&current_scope.names, "")
+			append(&current_scope.types, constraint)
+			append(&current_scope.kind, Binding_Kind.Pointing_Push)
+			append(&current_scope.values, value)
+			return value
+		}
+		value := default_value(constraint)
+		append(&current_scope.names, "")
+		append(&current_scope.types, constraint)
+		append(&current_scope.kind, Binding_Kind.Pointing_Push)
+		append(&current_scope.values, value)
+		return value
 
 	case .Property:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
+		target := walk(a, current_scope, data.binary.left)
+		right_idx := data.binary.right
+		prop_name := span_str(ast, ast.node_data[right_idx].identifier.name)
+		prop_ordinal := ast.node_data[right_idx].identifier.ordinal
 
-	case .Enforce:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .Range:
-		walk(a, data.binary.left)
-		walk(a, data.binary.right)
-
-	case .Operator:
-		walk(a, data.operator.left)
-		walk(a, data.operator.right)
-
-	case .Carve:
-		walk(a, data.carve.source)
-		r := data.carve.children
-		carve_children := ast.extra[r.start:][:r.len]
-		for child in carve_children {
-			walk(a, child)
+		resolved: ^Type = nil
+		resolved_target := follow(target)
+		#partial switch &t in resolved_target^ {
+		case Scope_Type:
+			resolved = scope_resolve(&t, prop_name, prop_ordinal, true)
 		}
 
-	case .Pattern:
-		walk(a, data.pattern.target)
-		r := data.pattern.branches
-		branches := ast.extra[r.start:][:r.len]
-		for i := 0; i < len(branches); i += 2 {
-			walk(a, branches[i])
-			if i + 1 < len(branches) {
-				walk(a, branches[i + 1])
+		if resolved == nil {
+			sem_error(
+				a,
+				fmt.tprintf("Cannot resolve property '%s'", prop_name),
+				.Invalid_Property_Access,
+				node_pos(a, right_idx),
+			)
+			result := new(Type)
+			result^ = Invalid_Type{}
+			return result
+		}
+
+		ref := new(Reference)
+		ref^ = Reference {
+			prop_name,
+			prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
+			resolved,
+		}
+		result := new(Type)
+		result^ = Reference_Type{target, ref}
+		return result
+
+	case .Enforce:
+		left := walk(a, current_scope, data.binary.left)
+		right := walk(a, current_scope, data.binary.right)
+		result := new(Type)
+		result^ = Sum_Type{left, right}
+		return result
+
+	case .Range:
+		left := walk(a, current_scope, data.binary.left)
+		right := walk(a, current_scope, data.binary.right)
+		result := new(Type)
+		result^ = Range_Type{left, right}
+		return result
+
+	case .Operator:
+		left := walk(a, current_scope, data.operator.left)
+		right := walk(a, current_scope, data.operator.right)
+		result := new(Type)
+		result^ = Compose_Type{left, right, data.operator.kind}
+		return result
+
+	case .Carve:
+		source := walk(a, current_scope, data.carve.source)
+		r := data.carve.children
+		carve_children := ast.extra[r.start:][:r.len]
+
+		src_scope: ^Scope_Type = nil
+		resolved_source := follow(source)
+		#partial switch &s in resolved_source^ {
+		case Scope_Type:
+			src_scope = &s
+		}
+
+		refs := make([dynamic]Reference)
+		vals := make([dynamic]^Type)
+
+		positional_idx := 0
+		for child in carve_children {
+			child_kind := ast.node_kinds[child]
+			child_data := ast.node_data[child]
+
+			if child_kind == .Pointing || child_kind == .PointingPull {
+				name_idx := child_data.binary.left
+				val_idx := child_data.binary.right
+				cname := ""
+				cordinal: i16 = -1
+
+				if ast.node_kinds[name_idx] == .Identifier {
+					cname = span_str(ast, ast.node_data[name_idx].identifier.name)
+					cordinal = ast.node_data[name_idx].identifier.ordinal
+				}
+
+				matched: ^Type = nil
+				if src_scope != nil {
+					matched = scope_resolve(src_scope, cname, cordinal, false)
+				}
+				if matched == nil {
+					sem_error(
+						a,
+						fmt.tprintf("Cannot resolve '%s' in carve target", cname),
+						.Invalid_Carve,
+						node_pos(a, name_idx),
+					)
+				}
+
+				val := walk(a, current_scope, val_idx)
+				append(
+					&refs,
+					Reference{cname, cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil, matched},
+				)
+				append(&vals, val)
+			} else {
+				// positional carve — match par position dans le scope target
+				matched: ^Type = nil
+				cname := ""
+				if src_scope != nil && positional_idx < len(src_scope.names) {
+					cname = src_scope.names[positional_idx]
+					matched = src_scope.values[positional_idx]
+				}
+				if matched == nil {
+					sem_error(a, "Positional carve out of range", .Invalid_Carve, node_pos(a, child))
+				}
+
+				val := walk(a, current_scope, child)
+				append(&refs, Reference{cname, nil, matched})
+				append(&vals, val)
+				positional_idx += 1
 			}
 		}
 
+		result := new(Type)
+		result^ = Carve_Type{src_scope, refs, vals}
+		return result
+
+	case .Pattern:
+		target := walk(a, current_scope, data.pattern.target)
+		_ = target
+		r := data.pattern.branches
+		branches := ast.extra[r.start:][:r.len]
+		for i := 0; i < len(branches); i += 2 {
+			walk(a, current_scope, branches[i])
+			if i + 1 < len(branches) {
+				walk(a, current_scope, branches[i + 1])
+			}
+		}
+		result := new(Type)
+		result^ = Unknown_Type{}
+		return result
+
 	case .Execute:
-		walk(a, data.execute.target)
+		target := walk(a, current_scope, data.execute.target)
+		result := new(Type)
+		result^ = Execute_Type{target}
+		return result
 
 	case .External:
-		walk(a, data.external.scope)
+		result := new(Type)
+		result^ = Unknown_Type{}
+		return result
 
 	case .Literal:
-	// feuille
+		return walk_literal(a, idx)
 
 	case .Identifier:
-	// feuille
+		return walk_identifier(a, current_scope, idx)
 
 	case .Branch:
-	// pas utilisé directement, inline dans Pattern
+		result := new(Type)
+		result^ = Unknown_Type{}
+		return result
 
 	case .Unknown:
-
+		result := new(Type)
+		result^ = Unknown_Type{}
+		return result
 	}
+
+	result := new(Type)
+	result^ = Unknown_Type{}
+	return result
 }
+
+walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
+	ast := a.ast
+	data := ast.node_data[idx]
+	span := ast.node_spans[idx]
+	text := ast.source[span.start:span.end]
+
+	result := new(Type)
+
+	switch data.literal.kind {
+	case .Integer:
+		val, ok := strconv.parse_u64_of_base(text, 10)
+		result^ = Integer_Type{.none, ok ? Integer_Data{val, false} : nil, nil}
+	case .Hexadecimal:
+		raw := len(text) > 2 ? text[2:] : text
+		val, ok := strconv.parse_u64_of_base(raw, 16)
+		result^ = Integer_Type{.none, ok ? Integer_Data{val, false} : nil, nil}
+	case .Binary:
+		raw := len(text) > 2 ? text[2:] : text
+		val, ok := strconv.parse_u64_of_base(raw, 2)
+		result^ = Integer_Type{.none, ok ? Integer_Data{val, false} : nil, nil}
+	case .Float:
+		val, ok := strconv.parse_f64(text)
+		result^ = Float_Type{.none, ok ? val : nil, nil}
+	case .String:
+		result^ = String_Type{text, nil}
+	case .Bool:
+		result^ = Bool_Type{text == "true"}
+	}
+
+	return result
+}
+
+resolve_builtin :: proc(name: string) -> ^Type {
+	result := new(Type)
+	switch name {
+	case "u8":     result^ = Integer_Type{.u8, nil, nil}
+	case "i8":     result^ = Integer_Type{.i8, nil, nil}
+	case "u16":    result^ = Integer_Type{.u16, nil, nil}
+	case "i16":    result^ = Integer_Type{.i16, nil, nil}
+	case "u32":    result^ = Integer_Type{.u32, nil, nil}
+	case "i32":    result^ = Integer_Type{.i32, nil, nil}
+	case "u64":    result^ = Integer_Type{.u64, nil, nil}
+	case "i64":    result^ = Integer_Type{.i64, nil, nil}
+	case "f32":    result^ = Float_Type{.f32, nil, nil}
+	case "f64":    result^ = Float_Type{.f64, nil, nil}
+	case "Int":    result^ = Integer_Type{.none, nil, nil}
+	case "Float":  result^ = Float_Type{.none, nil, nil}
+	case "String": result^ = String_Type{nil, nil}
+	case "Bool":   result^ = Bool_Type{}
+	case "None":   result^ = None_Type{}
+	case:
+		free(result)
+		return nil
+	}
+	return result
+}
+
+walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+	ast := a.ast
+	data := ast.node_data[idx]
+	name := span_str(ast, data.identifier.name)
+	ordinal := data.identifier.ordinal
+
+	resolved := scope_resolve(scope, name, ordinal, true)
+	if resolved != nil {
+		result := new(Type)
+		result^ = Mention_Type{name, resolved}
+		return result
+	}
+
+	if ordinal < 0 {
+		builtin := resolve_builtin(name)
+		if builtin != nil do return builtin
+	}
+
+	sem_error(
+		a,
+		fmt.tprintf("Undefined identifier '%s'", name),
+		.Undefined_Identifier,
+		node_pos(a, idx),
+	)
+	result := new(Type)
+	result^ = Invalid_Type{}
+	return result
+}
+
+
+// validate_type :: proc(type: ^Type) {
+// 	if (type == nil) {
+// 		return
+// 	}
+// 	switch t in type {
+// 	case Sum_Type:
+// 		validate_type(t.left)
+// 		validate_type(t.right)
+// 	case Product_Type:
+// 		validate_type(t.left)
+// 		validate_type(t.right)
+// 	case Compose_Type:
+// 		check_operator_compat(t.left, t.right, t.operator)
+// 	case Scope_Type:
+// 		for i := 0; i < len(t.types); i += 1 {
+// 			compare_types(t.types[i], t.values[i])
+// 		}
+// 	case String_Type:
+// 		validate_type(t.strict_type)
+// 	case Integer_Type:
+// 		validate_type(t.strict_type)
+// 	case Float_Type:
+// 		validate_type(t.strict_type)
+// 	case Execute_Type:
+// 		validate_type(target)
+// 	case Range_Type:
+// 		check_range_compat(t.left, t.right)
+// 	case Bool_Type:
+// 	case None_Type:
+// 	case Invalid_Type:
+// 	case Unknown_Type:
+// 	case Mention_Type:
+// 	case Reference_Type:
+// 		check_reference_exists(t.target, t.reference)
+// 	case Carve_Type:
+// 		check_carve_possible(t.target, t.reference)
+// 	}
+// }
+
+// check_reference_exists :: proc(target: ^Type, reference: ^Reference) {}
+// check_carve_possible :: proc(target: ^Type, reference: ^Reference) {}
+// check_range_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
+// check_operator_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
+// compare_types :: proc(constraint: ^Type, concrete: ^Type) {}
+
 /* ======================================================================
  * SECTION 17: ERROR REPORTING
  * ====================================================================== */
