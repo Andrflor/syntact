@@ -257,7 +257,13 @@ scope_append :: proc(scope: ^Scope_Type, name: string, constraint: ^Type, bk: Bi
 
 	vf, vf_ok := fold_to_segments(value).([]Segment)
 	if !vf_ok && constraint != nil {
-		vf, vf_ok = fold_constraint(constraint).([]Segment)
+		is_unknown := false
+		if value != nil {
+			_, is_unknown = value^.(Unknown_Type)
+		}
+		if is_unknown {
+			vf, vf_ok = fold_constraint(constraint).([]Segment)
+		}
 	}
 	append(&scope.type_folds, vf_ok ? vf : nil)
 
