@@ -1228,15 +1228,13 @@ print_segments :: proc(t: ^Type) {
 		fmt.print("none")
 		return
 	}
-	segs, ok := fold_to_segments(t).([]Segment)
-	if ok {
-		for seg, i in segs {
+	#partial switch v in t^ {
+	case Integer_Type:
+		for seg, i in v.segments {
 			if i > 0 do fmt.print(", ")
-			print_segment_raw(seg)
+			print_range_inline(seg)
 		}
 		return
-	}
-	#partial switch v in t^ {
 	case Float_Type:
 		f, f_ok := v.value.(f64)
 		if f_ok {
@@ -1309,30 +1307,33 @@ builtin_alias :: proc(seg: Segment) -> string {
 }
 
 print_segments_inline :: proc(segs: []Segment) {
+	if len(segs) == 1 {
+		name, name_ok := builtin_name(segs[0]).(string)
+		if name_ok {
+			fmt.printf("[%s]", name)
+			return
+		}
+	}
 	fmt.print("[")
 	for seg, i in segs {
-		if i > 0 do fmt.print(", ")
-		print_segment_raw(seg)
+		if i > 0 do fmt.print(" | ")
+		print_range_inline(seg)
 	}
 	fmt.print("]")
 }
 
-print_segment_raw :: proc(seg: Segment) {
+
+
+print_range_inline :: proc(seg: Segment) {
 	lo, lo_ok := seg.lo.(i64)
 	hi, hi_ok := seg.hi.(i64)
-	fmt.print("{")
-	if lo_ok {
+	if lo_ok && hi_ok && lo == hi {
 		fmt.print(lo)
-	} else {
-		fmt.print("-inf")
+		return
 	}
-	fmt.print(", ")
-	if hi_ok {
-		fmt.print(hi)
-	} else {
-		fmt.print("inf")
-	}
-	fmt.print("}")
+	if lo_ok do fmt.print(lo)
+	fmt.print("..")
+	if hi_ok do fmt.print(hi)
 }
 
 print_segment :: proc(seg: Segment) {
