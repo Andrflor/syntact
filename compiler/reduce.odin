@@ -519,23 +519,26 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			}
 			has_tf := i < len(v.type_folds) && v.type_folds[i] != nil
 			has_cf := i < len(v.constraint_folds) && v.constraint_folds[i] != nil
-			if has_tf || has_cf {
-				fmt.print("  ")
+			fmt.print("  ")
+			if has_cf {
+				fmt.print("c:")
+				print_segments_inline(v.constraint_folds[i])
+				fmt.print(" ")
+			}
+			if has_tf {
+				fmt.print("t:")
+				print_segments_inline(v.type_folds[i])
+				fmt.print(" ")
+			}
+			if has_cf {
 				if has_tf {
-					fmt.print("t:")
-					print_segments_inline(v.type_folds[i])
-				}
-				if has_cf {
-					if has_tf do fmt.print(" ")
-					fmt.print("c:")
-					print_segments_inline(v.constraint_folds[i])
-				}
-				if has_tf && has_cf {
 					if segments_satisfies(v.type_folds[i], v.constraint_folds[i]) {
-						fmt.print(" v")
+						fmt.print("v")
 					} else {
-						fmt.print(" x")
+						fmt.print("x")
 					}
+				} else {
+					fmt.print("x")
 				}
 			}
 			fmt.println()
@@ -864,7 +867,7 @@ maybe_le :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> bool {
 maybe_le_hi :: proc(a, b: Maybe(i64)) -> bool {
 	a_val, a_ok := a.(i64)
 	b_val, b_ok := b.(i64)
-	if !a_ok do return false  // +inf <= anything? no (except +inf)
+	if !a_ok do return !b_ok  // +inf <= +inf is true, +inf <= finite is false
 	if !b_ok do return true   // anything <= +inf
 	return a_val <= b_val
 }
