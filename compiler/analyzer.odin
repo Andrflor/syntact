@@ -97,9 +97,10 @@ Carve_Type :: struct {
 }
 
 Reference :: struct {
-	name:  Maybe(string),
-	index: Maybe(u64),
-	match: ^Type,
+	name:       Maybe(string),
+	index:      Maybe(u64),
+	match:      ^Type,
+	constraint: ^Type,
 }
 
 Reference_Type :: struct {
@@ -108,8 +109,9 @@ Reference_Type :: struct {
 }
 
 Mention_Type :: struct {
-	name:   string,
-	target: ^Type,
+	name:       string,
+	target:     ^Type,
+	constraint: ^Type,
 }
 
 Integer_Type :: struct {
@@ -263,36 +265,36 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	}
 }
 
-scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> ^Type {
+scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> (^Type, ^Type) {
 	if ordinal >= 0 {
 		if name == "" {
 			if int(ordinal) < len(scope.values) {
-				return scope.values[int(ordinal)]
+				return scope.values[int(ordinal)], scope.types[int(ordinal)]
 			}
-			return nil
+			return nil, nil
 		}
 		count := 0
 		for i := 0; i < len(scope.names); i += 1 {
 			if scope.names[i] == name {
 				if count == int(ordinal) {
-					return scope.values[i]
+					return scope.values[i], scope.types[i]
 				}
 				count += 1
 			}
 		}
-		return nil
+		return nil, nil
 	}
 
 	if last {
 		for i := len(scope.names) - 1; i >= 0; i -= 1 {
 			if scope.names[i] == name {
-				return scope.values[i]
+				return scope.values[i], scope.types[i]
 			}
 		}
 	} else {
 		for i := 0; i < len(scope.names); i += 1 {
 			if scope.names[i] == name {
-				return scope.values[i]
+				return scope.values[i], scope.types[i]
 			}
 		}
 	}
@@ -300,7 +302,7 @@ scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool
 	if scope.parent != nil {
 		return scope_resolve(scope.parent, name, ordinal, last)
 	}
-	return nil
+	return nil, nil
 }
 
 default_value :: proc(t: ^Type) -> ^Type {
@@ -532,12 +534,13 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		prop_ordinal := ast.node_data[right_idx].identifier.ordinal
 
 		resolved: ^Type = nil
+		resolved_constraint: ^Type = nil
 		resolved_target := follow(target)
 		prop_target := resolved_target
 		for {
 			#partial switch &t in prop_target^ {
 			case Scope_Type:
-				resolved = scope_resolve(&t, prop_name, prop_ordinal, true)
+				resolved, resolved_constraint = scope_resolve(&t, prop_name, prop_ordinal, true)
 			case Carve_Type:
 				if t.source != nil {
 					prop_target = follow(t.source)
@@ -564,6 +567,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			prop_name,
 			prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
 			resolved_target,
+			resolved_constraint,
 		}
 		result := new(Type)
 		result^ = Reference_Type{target, ref}
@@ -643,8 +647,9 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 
 				matched: ^Type = nil
+				matched_constraint: ^Type = nil
 				if src_scope != nil {
-					matched = scope_resolve(src_scope, cname, cordinal, false)
+					matched, matched_constraint = scope_resolve(src_scope, cname, cordinal, false)
 				}
 				if matched == nil {
 					sem_error(
@@ -658,15 +663,17 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				val := walk(a, current_scope, val_idx)
 				append(
 					&refs,
-					Reference{cname, cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil, matched},
+					Reference{cname, cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil, matched, matched_constraint},
 				)
 				append(&vals, val)
 			} else {
 				matched: ^Type = nil
+				matched_constraint: ^Type = nil
 				cname := ""
 				if src_scope != nil && positional_idx < len(src_scope.names) {
 					cname = src_scope.names[positional_idx]
 					matched = src_scope.values[positional_idx]
+					matched_constraint = src_scope.types[positional_idx]
 				}
 				if matched == nil {
 					sem_error(
@@ -678,7 +685,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 
 				val := walk(a, current_scope, child)
-				append(&refs, Reference{nil, nil, matched})
+				append(&refs, Reference{nil, nil, matched, matched_constraint})
 				append(&vals, val)
 				positional_idx += 1
 			}
@@ -814,7 +821,7 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 	name := span_str(ast, data.identifier.name)
 	ordinal := data.identifier.ordinal
 
-	resolved := scope_resolve(scope, name, ordinal, true)
+	resolved, resolved_constraint := scope_resolve(scope, name, ordinal, true)
 	if resolved != nil {
 		if ordinal >= 0 {
 			ref := new(Reference)
@@ -822,13 +829,14 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 				name != "" ? Maybe(string)(name) : nil,
 				Maybe(u64)(u64(ordinal)),
 				resolved,
+				resolved_constraint,
 			}
 			result := new(Type)
 			result^ = Reference_Type{nil, ref}
 			return result
 		}
 		result := new(Type)
-		result^ = Mention_Type{name, resolved}
+		result^ = Mention_Type{name, resolved, resolved_constraint}
 		return result
 	}
 
