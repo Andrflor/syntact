@@ -92,10 +92,10 @@ Carve_Type :: struct {
 }
 
 Reference :: struct {
-	name:       Maybe(string),
-	index:      Maybe(u64),
-	match:      ^Type,
-	constraint: ^Type,
+	name:        Maybe(string),
+	index:       Maybe(u64),
+	match_scope: ^Scope_Type,
+	match_index: int,
 }
 
 Reference_Type :: struct {
@@ -104,9 +104,9 @@ Reference_Type :: struct {
 }
 
 Mention_Type :: struct {
-	name:       string,
-	target:     ^Type,
-	constraint: ^Type,
+	name:        string,
+	match_scope: ^Scope_Type,
+	match_index: int,
 }
 
 Integer_Type :: struct {
@@ -203,7 +203,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 			walk(&a, a.scope, child)
 		case:
 			value := walk(&a, a.scope, child)
-			scope_append(a.scope, "", nil, .Pointing_Push, value)
+			scope_append(&a, a.scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
 
@@ -249,58 +249,74 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	}
 }
 
-scope_append :: proc(scope: ^Scope_Type, name: string, constraint: ^Type, bk: Binding_Kind, value: ^Type) {
+scope_append :: proc(a: ^Analyzer, scope: ^Scope_Type, name: string, constraint: ^Type, bk: Binding_Kind, value: ^Type, node: Node_Index) {
 	append(&scope.names, name)
 	append(&scope.types, constraint)
 	append(&scope.kind, bk)
 	append(&scope.values, value)
 
 	vf, vf_ok := fold_to_segments(value).([]Segment)
+	if !vf_ok {
+		vf, vf_ok = fold_constraint(value).([]Segment)
+	}
 	if !vf_ok && constraint != nil {
-		is_unknown := false
-		if value != nil {
-			_, is_unknown = value^.(Unknown_Type)
-		}
-		if is_unknown {
-			vf, vf_ok = fold_constraint(constraint).([]Segment)
-		}
+		vf, vf_ok = fold_constraint(constraint).([]Segment)
 	}
 	append(&scope.type_folds, vf_ok ? vf : nil)
 
 	cf, cf_ok := fold_constraint(constraint).([]Segment)
 	append(&scope.constraint_folds, cf_ok ? cf : nil)
+
+	if cf_ok {
+		display := name != "" ? name : "<production>"
+		if !vf_ok {
+			sem_error(
+				a,
+				fmt.tprintf("'%s' has constraint %s but its value could not be resolved", display, pretty_segments(cf)),
+				.Constraint_Violation,
+				node_pos(a, node),
+			)
+		} else if !segments_satisfies(vf, cf) {
+			sem_error(
+				a,
+				fmt.tprintf("'%s' value %s does not fit in %s", display, pretty_segments(vf), pretty_segments(cf)),
+				.Constraint_Violation,
+				node_pos(a, node),
+			)
+		}
+	}
 }
 
-scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> (^Type, ^Type) {
+scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> (^Scope_Type, int) {
 	if ordinal >= 0 {
 		if name == "" {
 			if int(ordinal) < len(scope.values) {
-				return scope.values[int(ordinal)], scope.types[int(ordinal)]
+				return scope, int(ordinal)
 			}
-			return nil, nil
+			return nil, -1
 		}
 		count := 0
 		for i := 0; i < len(scope.names); i += 1 {
 			if scope.names[i] == name {
 				if count == int(ordinal) {
-					return scope.values[i], scope.types[i]
+					return scope, i
 				}
 				count += 1
 			}
 		}
-		return nil, nil
+		return nil, -1
 	}
 
 	if last {
 		for i := len(scope.names) - 1; i >= 0; i -= 1 {
 			if scope.names[i] == name {
-				return scope.values[i], scope.types[i]
+				return scope, i
 			}
 		}
 	} else {
 		for i := 0; i < len(scope.names); i += 1 {
 			if scope.names[i] == name {
-				return scope.values[i], scope.types[i]
+				return scope, i
 			}
 		}
 	}
@@ -308,7 +324,7 @@ scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool
 	if scope.parent != nil {
 		return scope_resolve(scope.parent, name, ordinal, last)
 	}
-	return nil, nil
+	return nil, -1
 }
 
 default_value :: proc(t: ^Type) -> ^Type {
@@ -339,9 +355,13 @@ follow :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Mention_Type:
-		return follow(v.target)
+		if v.match_scope != nil && v.match_index >= 0 {
+			return follow(v.match_scope.values[v.match_index])
+		}
 	case Reference_Type:
-		return follow(v.reference.match)
+		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+			return follow(v.reference.match_scope.values[v.reference.match_index])
+		}
 	}
 	return t
 }
@@ -380,7 +400,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				walk(a, scope, child)
 			case:
 				value := walk(a, scope, child)
-				scope_append(scope, "", nil, .Pointing_Push, value)
+				scope_append(a, scope, "", nil, .Pointing_Push, value, child)
 			}
 		}
 		result := new(Type)
@@ -433,7 +453,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				parent = current_scope,
 			}
 			scope := &result.(Scope_Type)
-			scope_append(current_scope, name, constraint, bk, result)
+			scope_append(a, current_scope, name, constraint, bk, result, idx)
 
 			rdata := ast.node_data[right_idx]
 			r := rdata.scope
@@ -455,18 +475,18 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					walk(a, scope, child)
 				case:
 					val := walk(a, scope, child)
-					scope_append(scope, "", nil, .Pointing_Push, val)
+					scope_append(a, scope, "", nil, .Pointing_Push, val, child)
 				}
 			}
 			return result
 		}
 		value := walk(a, current_scope, right_idx)
-		scope_append(current_scope, name, constraint, bk, value)
+		scope_append(a, current_scope, name, constraint, bk, value, idx)
 		return value
 
 	case .Product:
 		value := walk(a, current_scope, data.unary.operand)
-		scope_append(current_scope, "", nil, .Product, value)
+		scope_append(a, current_scope, "", nil, .Product, value, idx)
 		return value
 
 	case .Expand:
@@ -481,11 +501,11 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			} else {
 				value = default_value(constraint)
 			}
-			scope_append(current_scope, "", constraint, .Expand, value)
+			scope_append(a, current_scope, "", constraint, .Expand, value, idx)
 			return value
 		}
 		value := walk(a, current_scope, operand_idx)
-		scope_append(current_scope, "", nil, .Expand, value)
+		scope_append(a, current_scope, "", nil, .Expand, value, idx)
 		return value
 
 	case .CompileTime:
@@ -506,7 +526,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 			}
 		}
-		scope_append(current_scope, name, constraint, .Pointing_Push, value)
+		scope_append(a, current_scope, name, constraint, .Pointing_Push, value, idx)
 		return value
 
 	case .Property:
@@ -515,14 +535,14 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		prop_name := span_str(ast, ast.node_data[right_idx].identifier.name)
 		prop_ordinal := ast.node_data[right_idx].identifier.ordinal
 
-		resolved: ^Type = nil
-		resolved_constraint: ^Type = nil
+		prop_scope: ^Scope_Type = nil
+		prop_index := -1
 		resolved_target := follow(target)
 		prop_target := resolved_target
 		for {
 			#partial switch &t in prop_target^ {
 			case Scope_Type:
-				resolved, resolved_constraint = scope_resolve(&t, prop_name, prop_ordinal, true)
+				prop_scope, prop_index = scope_resolve(&t, prop_name, prop_ordinal, true)
 			case Carve_Type:
 				if t.source != nil {
 					prop_target = follow(t.source)
@@ -532,7 +552,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			break
 		}
 
-		if resolved == nil {
+		if prop_scope == nil {
 			sem_error(
 				a,
 				fmt.tprintf("Cannot resolve property '%s'", prop_name),
@@ -548,8 +568,8 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		ref^ = Reference {
 			prop_name,
 			prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
-			resolved_target,
-			resolved_constraint,
+			prop_scope,
+			prop_index,
 		}
 		result := new(Type)
 		result^ = Reference_Type{target, ref}
@@ -585,7 +605,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			result^ = Negate_Type{right}
 		case:
 			result^ = Compose_Type{left, right, data.operator.kind, nil}
-			fold_compose(a, result, node_pos(a, idx))
+			fold_compose(a, result, idx)
 		}
 		return result
 
@@ -629,12 +649,12 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					cordinal = ast.node_data[name_idx].identifier.ordinal
 				}
 
-				matched: ^Type = nil
-				matched_constraint: ^Type = nil
+				carve_scope: ^Scope_Type = nil
+				carve_index := -1
 				if src_scope != nil {
-					matched, matched_constraint = scope_resolve(src_scope, cname, cordinal, false)
+					carve_scope, carve_index = scope_resolve(src_scope, cname, cordinal, false)
 				}
-				if matched == nil {
+				if carve_scope == nil {
 					sem_error(
 						a,
 						fmt.tprintf("Cannot resolve '%s' in carve target", cname),
@@ -646,19 +666,19 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				val := walk(a, current_scope, val_idx)
 				append(
 					&refs,
-					Reference{cname, cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil, matched, matched_constraint},
+					Reference{cname, cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil, carve_scope, carve_index},
 				)
 				append(&vals, val)
 			} else {
-				matched: ^Type = nil
-				matched_constraint: ^Type = nil
+				carve_scope: ^Scope_Type = nil
+				carve_index := -1
 				cname := ""
 				if src_scope != nil && positional_idx < len(src_scope.names) {
 					cname = src_scope.names[positional_idx]
-					matched = src_scope.values[positional_idx]
-					matched_constraint = src_scope.types[positional_idx]
+					carve_scope = src_scope
+					carve_index = positional_idx
 				}
-				if matched == nil {
+				if carve_scope == nil {
 					sem_error(
 						a,
 						"Positional carve out of range",
@@ -668,7 +688,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 
 				val := walk(a, current_scope, child)
-				append(&refs, Reference{nil, nil, matched, matched_constraint})
+				append(&refs, Reference{nil, nil, carve_scope, carve_index})
 				append(&vals, val)
 				positional_idx += 1
 			}
@@ -832,22 +852,22 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 	name := span_str(ast, data.identifier.name)
 	ordinal := data.identifier.ordinal
 
-	resolved, resolved_constraint := scope_resolve(scope, name, ordinal, true)
-	if resolved != nil {
+	res_scope, res_index := scope_resolve(scope, name, ordinal, true)
+	if res_scope != nil {
 		if ordinal >= 0 {
 			ref := new(Reference)
 			ref^ = Reference {
 				name != "" ? Maybe(string)(name) : nil,
 				Maybe(u64)(u64(ordinal)),
-				resolved,
-				resolved_constraint,
+				res_scope,
+				res_index,
 			}
 			result := new(Type)
 			result^ = Reference_Type{nil, ref}
 			return result
 		}
 		result := new(Type)
-		result^ = Mention_Type{name, resolved, resolved_constraint}
+		result^ = Mention_Type{name, res_scope, res_index}
 		return result
 	}
 
@@ -868,7 +888,7 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 }
 
 
-fold_compose :: proc(a: ^Analyzer, t: ^Type, pos: Position) {
+fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if t == nil do return
 	comp, ok := &t^.(Compose_Type)
 	if !ok do return
@@ -878,7 +898,7 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, pos: Position) {
 		tf^ = Integer_Type{segs}
 		comp.type_fold = tf
 	} else {
-		sem_error(a, "Cannot fold type: operands must be integers", .Invalid_operator, pos)
+		sem_error(a, "Cannot fold type: operands must be integers", .Invalid_operator, node_pos(a, node))
 	}
 }
 
