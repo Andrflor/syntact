@@ -265,6 +265,9 @@ scope_append :: proc(
 	append(&scope.values, value)
 
 	vf, vf_ok := fold_to_segments(value).([]Segment)
+	if !vf_ok {
+		vf, vf_ok = fold_constraint(value).([]Segment)
+	}
 	if !vf_ok && constraint != nil {
 		is_unknown := false
 		if value != nil {
