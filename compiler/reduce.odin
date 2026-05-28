@@ -467,7 +467,9 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			}
 			switch v.kind[i] {
 			case .Pointing_Push:
-				fmt.print(" -> ")
+				if has_name || has_constraint {
+					fmt.print(" -> ")
+				}
 				print_type(v.values[i], depth + 1)
 			case .Pointing_Pull:
 				fmt.print(" <- ")
@@ -556,7 +558,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			if i > 0 do fmt.print(", ")
 			ref := v.references[i]
 			n, n_ok := ref.name.(string)
-			if n_ok do fmt.printf("%s -> ", n)
+			if n_ok && n != "" do fmt.printf("%s -> ", n)
 			print_type(v.values[i], depth)
 		}
 		fmt.print("}")
