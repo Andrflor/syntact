@@ -2743,6 +2743,48 @@ init_ident_tables :: proc "contextless" () {
  * SECTION 8: DEBUG UTILITIES
  * ====================================================================== */
 
+node_text :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.node_spans[idx]
+	return ast.source[s.start:s.end]
+}
+
+node_name_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.node_data[idx].identifier.name
+	return ast.source[s.start:s.end]
+}
+
+node_capture_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.node_data[idx].identifier.capture
+	if s == EMPTY_SPAN do return ""
+	return ast.source[s.start:s.end]
+}
+
+node_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
+	r := ast.node_data[idx].scope
+	return ast.extra[r.start:][:r.len]
+}
+
+node_carve_children :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
+	r := ast.node_data[idx].carve.children
+	return ast.extra[r.start:][:r.len]
+}
+
+node_pattern_branches :: proc(ast: ^Ast, idx: Node_Index) -> []Node_Index {
+	r := ast.node_data[idx].pattern.branches
+	return ast.extra[r.start:][:r.len]
+}
+
+node_execute_wrappers :: proc(ast: ^Ast, idx: Node_Index) -> []u8 {
+	r := ast.node_data[idx].execute.wrappers
+	return ast.extra_u8[r.start:][:r.len]
+}
+
+node_event_pull_catch :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.node_data[idx].event_pull.catch_span
+	if s == EMPTY_SPAN do return ""
+	return ast.source[s.start:s.end]
+}
+
 print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 	if idx == INVALID_NODE do return
 
