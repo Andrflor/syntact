@@ -1,12 +1,19 @@
 package compiler
 
 import "core:fmt"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 
 reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
+			tf := scope.type_folds[i]
+			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
+				result := new(Type)
+				result^ = Integer_Type{tf}
+				return result
+			}
 			return reduce_value(scope.values[i])
 		}
 	}
@@ -28,22 +35,29 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	case Carve_Type:
 		return reduce_value(carve(v))
 	case Mention_Type:
-		return reduce_value(v.target)
-	case Reference_Type:
-		reduced := reduce_value(v.reference.match)
-		#partial switch &s in reduced^ {
-		case Scope_Type:
-			name, has_name := v.reference.name.(string)
-			idx, has_idx := v.reference.index.(u64)
-			if has_name || has_idx {
-				ordinal: i16 = has_idx ? i16(idx) : -1
-				resolved, _ := scope_resolve(&s, has_name ? name : "", ordinal, true)
-				if resolved != nil {
-					return reduce_value(resolved)
-				}
+		if v.match_scope != nil && v.match_index >= 0 {
+			tf := v.match_scope.type_folds[v.match_index]
+			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
+				result := new(Type)
+				result^ = Integer_Type{tf}
+				return result
 			}
+			return reduce_value(v.match_scope.values[v.match_index])
 		}
-		return reduced
+	case Reference_Type:
+		ref := v.reference
+		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+			tf := ref.match_scope.type_folds[ref.match_index]
+			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
+				result := new(Type)
+				result^ = Integer_Type{tf}
+				return result
+			}
+			return reduce_value(ref.match_scope.values[ref.match_index])
+		}
+		if v.target != nil {
+			return reduce_value(v.target)
+		}
 	case Sum_Type:
 	case Product_Type:
 	case Negate_Type:
@@ -101,14 +115,8 @@ carve :: proc(value: Carve_Type) -> ^Type {
 	for i := 0; i < len(value.references); i += 1 {
 		ref := &value.references[i]
 		val := value.values[i]
-		if ref.match != nil {
-			ref.match^ = val^
-		}
-		for j := 0; j < len(scope.values); j += 1 {
-			if scope.values[j] == ref.match {
-				scope.values[j] = val
-				break
-			}
+		if ref.match_scope != nil && ref.match_index >= 0 && ref.match_index < len(scope.values) {
+			scope.values[ref.match_index] = val
 		}
 	}
 
@@ -132,11 +140,7 @@ patch_type :: proc(t: ^Type, old: ^Type, replacement: ^Type) -> ^Type {
 		v.right = patch_type(v.right, old, replacement)
 	case Reference_Type:
 		v.target = patch_type(v.target, old, replacement)
-		if v.reference != nil && v.reference.match == old {
-			v.reference.match = replacement
-		}
 	case Mention_Type:
-		v.target = patch_type(v.target, old, replacement)
 	case Execute_Type:
 		v.target = patch_type(v.target, old, replacement)
 	case Range_Type:
@@ -160,9 +164,13 @@ patch_type :: proc(t: ^Type, old: ^Type, replacement: ^Type) -> ^Type {
 // --- integer helpers ---
 
 int_is_concrete :: proc(t: Integer_Type) -> bool {
-	if len(t.segments) != 1 do return false
-	lo, lo_ok := t.segments[0].lo.(i64)
-	hi, hi_ok := t.segments[0].hi.(i64)
+	return segs_is_concrete(t.segments)
+}
+
+segs_is_concrete :: proc(segs: []Segment) -> bool {
+	if len(segs) != 1 do return false
+	lo, lo_ok := segs[0].lo.(i64)
+	hi, hi_ok := segs[0].hi.(i64)
 	return lo_ok && hi_ok && lo == hi
 }
 
@@ -261,9 +269,12 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		a := int_value(li)
 		b := int_value(ri)
 		#partial switch op {
-		case .Add:      return make_int_result(a + b)
-		case .Subtract: return make_int_result(a - b)
-		case .Multiply: return make_int_result(a * b)
+		case .Add:
+			return make_int_result(a + b)
+		case .Subtract:
+			return make_int_result(a - b)
+		case .Multiply:
+			return make_int_result(a * b)
 		case .Divide:
 			if b != 0 do return make_int_result(a / b)
 		case .Mod:
@@ -292,9 +303,7 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 			ls, ls_ok := lv.(String_Type)
 			rs, rs_ok := rv.(String_Type)
 			if ls_ok && rs_ok {
-				return String_Type {
-					strings.concatenate({ls.value.(string), rs.value.(string)}),
-				}
+				return String_Type{strings.concatenate({ls.value.(string), rs.value.(string)})}
 			}
 		}
 		return nil
@@ -372,20 +381,28 @@ compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 
 i64_cmp :: proc(a, b: i64, op: Operator_Kind) -> bool {
 	#partial switch op {
-	case .Less:         return a < b
-	case .Greater:      return a > b
-	case .LessEqual:    return a <= b
-	case .GreaterEqual: return a >= b
+	case .Less:
+		return a < b
+	case .Greater:
+		return a > b
+	case .LessEqual:
+		return a <= b
+	case .GreaterEqual:
+		return a >= b
 	}
 	return false
 }
 
 float_cmp :: proc(a, b: f64, op: Operator_Kind) -> bool {
 	#partial switch op {
-	case .Less:         return a < b
-	case .Greater:      return a > b
-	case .LessEqual:    return a <= b
-	case .GreaterEqual: return a >= b
+	case .Less:
+		return a < b
+	case .Greater:
+		return a > b
+	case .LessEqual:
+		return a <= b
+	case .GreaterEqual:
+		return a >= b
 	}
 	return false
 }
@@ -402,17 +419,23 @@ compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		b := int_value(r)
 		val: i64
 		#partial switch op {
-		case .BitAnd: val = a & b
-		case .BitOr:  val = a | b
-		case .Xor:    val = a ~ b
+		case .BitAnd:
+			val = a & b
+		case .BitOr:
+			val = a | b
+		case .Xor:
+			val = a ~ b
 		}
 		return make_int_result(val)
 	case Bool_Type:
 		r := rv.(Bool_Type)
 		#partial switch op {
-		case .BitAnd: return Bool_Type{l.value && r.value}
-		case .BitOr:  return Bool_Type{l.value || r.value}
-		case .Xor:    return Bool_Type{l.value ~ r.value}
+		case .BitAnd:
+			return Bool_Type{l.value && r.value}
+		case .BitOr:
+			return Bool_Type{l.value || r.value}
+		case .Xor:
+			return Bool_Type{l.value ~ r.value}
 		}
 	}
 	return nil
@@ -540,6 +563,8 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 				} else {
 					fmt.print("x")
 				}
+			} else if has_tf {
+				fmt.print("v")
 			}
 			fmt.println()
 		}
@@ -629,8 +654,8 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 	case Mention_Type:
 		if v.name != "" {
 			fmt.print(v.name)
-		} else {
-			print_type(v.target, depth)
+		} else if v.match_scope != nil && v.match_index >= 0 {
+			print_type(v.match_scope.values[v.match_index], depth)
 		}
 
 	case Reference_Type:
@@ -638,7 +663,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		n, n_ok := ref.name.(string)
 		idx, idx_ok := ref.index.(u64)
 		has_target := v.target != nil
-		is_self_ref := n_ok && n == ""&& !idx_ok
+		is_self_ref := n_ok && n == "" && !idx_ok
 
 		if is_self_ref {
 			print_type(v.target, depth)
@@ -674,14 +699,22 @@ builtin_name :: proc(seg: Segment) -> Maybe(string) {
 	if !lo_ok && !hi_ok do return "Int"
 	if !lo_ok || !hi_ok do return nil
 	switch {
-	case lo == 0 && hi == 255:                    return "u8"
-	case lo == -128 && hi == 127:                  return "i8"
-	case lo == 0 && hi == 65535:                   return "u16"
-	case lo == -32768 && hi == 32767:              return "i16"
-	case lo == 0 && hi == 4294967295:              return "u32"
-	case lo == -2147483648 && hi == 2147483647:    return "i32"
-	case lo == 0 && hi == 9223372036854775807:     return "u64"
-	case lo == -9223372036854775808 && hi == 9223372036854775807: return "i64"
+	case lo == 0 && hi == 255:
+		return "u8"
+	case lo == -128 && hi == 127:
+		return "i8"
+	case lo == 0 && hi == 65535:
+		return "u16"
+	case lo == -32768 && hi == 32767:
+		return "i16"
+	case lo == 0 && hi == 4294967295:
+		return "u32"
+	case lo == -2147483648 && hi == 2147483647:
+		return "i32"
+	case lo == 0 && hi == 9223372036854775807:
+		return "u64"
+	case lo == -9223372036854775808 && hi == 9223372036854775807:
+		return "i64"
 	}
 	return nil
 }
@@ -728,9 +761,26 @@ fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
 		if !inner_ok do return nil
 		return segments_negate(inner)
 	case Mention_Type:
-		return fold_constraint(v.target)
+		if v.match_scope != nil && v.match_index >= 0 {
+			if v.match_scope.constraint_folds[v.match_index] != nil {
+				return v.match_scope.constraint_folds[v.match_index]
+			}
+			if v.match_scope.type_folds[v.match_index] != nil {
+				return v.match_scope.type_folds[v.match_index]
+			}
+			return fold_constraint(v.match_scope.values[v.match_index])
+		}
 	case Reference_Type:
-		return fold_constraint(v.reference.match)
+		ref := v.reference
+		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+			if ref.match_scope.constraint_folds[ref.match_index] != nil {
+				return ref.match_scope.constraint_folds[ref.match_index]
+			}
+			if ref.match_scope.type_folds[ref.match_index] != nil {
+				return ref.match_scope.type_folds[ref.match_index]
+			}
+			return fold_constraint(ref.match_scope.values[ref.match_index])
+		}
 	}
 	return nil
 }
@@ -742,9 +792,9 @@ segments_union :: proc(a, b: []Segment) -> []Segment {
 	for i < len(a) || j < len(b) {
 		seg: Segment
 		if i < len(a) && (j >= len(b) || seg_lo(a[i]) <= seg_lo(b[j])) {
-			seg = a[i]; i += 1
+			seg = a[i];i += 1
 		} else {
-			seg = b[j]; j += 1
+			seg = b[j];j += 1
 		}
 		if len(merged) > 0 && segments_overlap_or_adjacent(merged[len(merged) - 1], seg) {
 			merged[len(merged) - 1] = segment_merge(merged[len(merged) - 1], seg)
@@ -802,6 +852,25 @@ segments_negate :: proc(segs: []Segment) -> []Segment {
 	return result[:]
 }
 
+segments_normalize :: proc(segs: []Segment) -> []Segment {
+	if len(segs) <= 1 do return segs
+	sorted := make([]Segment, len(segs))
+	copy(sorted, segs)
+	slice.sort_by(sorted, proc(a, b: Segment) -> bool {
+		return seg_lo(a) < seg_lo(b)
+	})
+	result := make([dynamic]Segment)
+	append(&result, sorted[0])
+	for i := 1; i < len(sorted); i += 1 {
+		if segments_overlap_or_adjacent(result[len(result) - 1], sorted[i]) {
+			result[len(result) - 1] = segment_merge(result[len(result) - 1], sorted[i])
+		} else {
+			append(&result, sorted[i])
+		}
+	}
+	return result[:]
+}
+
 // helpers for Maybe(i64) comparison
 seg_lo :: proc(s: Segment) -> i64 {
 	lo, ok := s.lo.(i64)
@@ -811,8 +880,8 @@ seg_lo :: proc(s: Segment) -> i64 {
 segments_overlap_or_adjacent :: proc(a, b: Segment) -> bool {
 	a_hi, a_ok := a.hi.(i64)
 	b_lo, b_ok := b.lo.(i64)
-	if !a_ok do return true  // a goes to +inf
-	if !b_ok do return true  // b starts at -inf
+	if !a_ok do return true // a goes to +inf
+	if !b_ok do return true // b starts at -inf
 	return a_hi >= b_lo - 1
 }
 
@@ -824,16 +893,16 @@ segment_merge :: proc(a, b: Segment) -> Segment {
 max_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
 	a_val, a_ok := a.(i64)
 	b_val, b_ok := b.(i64)
-	if !a_ok do return b  // -inf < anything, take b
-	if !b_ok do return a  // -inf < anything, take a
+	if !a_ok do return b // -inf < anything, take b
+	if !b_ok do return a // -inf < anything, take a
 	return max(a_val, b_val)
 }
 
 min_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
 	a_val, a_ok := a.(i64)
 	b_val, b_ok := b.(i64)
-	if !a_ok do return a  // -inf is smallest
-	if !b_ok do return b  // -inf is smallest
+	if !a_ok do return a // -inf is smallest
+	if !b_ok do return b // -inf is smallest
 	return min(a_val, b_val)
 }
 
@@ -841,16 +910,16 @@ min_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
 max_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
 	a_val, a_ok := a.(i64)
 	b_val, b_ok := b.(i64)
-	if !a_ok do return a  // +inf is largest
-	if !b_ok do return b  // +inf is largest
+	if !a_ok do return a // +inf is largest
+	if !b_ok do return b // +inf is largest
 	return max(a_val, b_val)
 }
 
 min_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
 	a_val, a_ok := a.(i64)
 	b_val, b_ok := b.(i64)
-	if !a_ok do return b  // +inf > anything, take b
-	if !b_ok do return a  // +inf > anything, take a
+	if !a_ok do return b // +inf > anything, take b
+	if !b_ok do return a // +inf > anything, take a
 	return min(a_val, b_val)
 }
 
@@ -858,8 +927,8 @@ min_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
 maybe_le :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> bool {
 	lo_val, lo_ok := lo.(i64)
 	hi_val, hi_ok := hi.(i64)
-	if !lo_ok do return true   // -inf <= anything
-	if !hi_ok do return true   // anything <= +inf
+	if !lo_ok do return true // -inf <= anything
+	if !hi_ok do return true // anything <= +inf
 	return lo_val <= hi_val
 }
 
@@ -867,8 +936,8 @@ maybe_le :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> bool {
 maybe_le_hi :: proc(a, b: Maybe(i64)) -> bool {
 	a_val, a_ok := a.(i64)
 	b_val, b_ok := b.(i64)
-	if !a_ok do return !b_ok  // +inf <= +inf is true, +inf <= finite is false
-	if !b_ok do return true   // anything <= +inf
+	if !a_ok do return !b_ok // +inf <= +inf is true, +inf <= finite is false
+	if !b_ok do return true // anything <= +inf
 	return a_val <= b_val
 }
 
@@ -958,17 +1027,38 @@ fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
 		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
 		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
 		if !left_ok || !right_ok do return nil
-		if len(left_segs) != 1 || len(right_segs) != 1 do return nil
-		return fold_arith_segments(left_segs[0], right_segs[0], v.operator)
+		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
+		result := make([dynamic]Segment)
+		for ls in left_segs {
+			for rs in right_segs {
+				pair, pair_ok := fold_arith_segments(ls, rs, v.operator).([]Segment)
+				if !pair_ok do return nil
+				for s in pair {
+					append(&result, s)
+				}
+			}
+		}
+		return segments_normalize(result[:])
 	case Mention_Type:
-		segs, ok := fold_to_segments(v.target).([]Segment)
-		if ok do return segs
-		if v.constraint != nil do return fold_to_segments(v.constraint)
+		if v.match_scope != nil && v.match_index >= 0 {
+			if v.match_scope.type_folds[v.match_index] != nil {
+				return v.match_scope.type_folds[v.match_index]
+			}
+			if v.match_scope.constraint_folds[v.match_index] != nil {
+				return v.match_scope.constraint_folds[v.match_index]
+			}
+		}
 		return nil
 	case Reference_Type:
-		segs, ok := fold_to_segments(v.reference.match).([]Segment)
-		if ok do return segs
-		if v.reference.constraint != nil do return fold_to_segments(v.reference.constraint)
+		ref := v.reference
+		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+			if ref.match_scope.type_folds[ref.match_index] != nil {
+				return ref.match_scope.type_folds[ref.match_index]
+			}
+			if ref.match_scope.constraint_folds[ref.match_index] != nil {
+				return ref.match_scope.constraint_folds[ref.match_index]
+			}
+		}
 		return nil
 	}
 	return nil
@@ -1015,10 +1105,16 @@ fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment
 		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
 		return segs
 	case .Mod:
-		if !b_lo_ok || !b_hi_ok do return nil
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if b_lo == 0 && b_hi == 0 do return nil
-		abs_max := max(abs(b_lo), abs(b_hi))
-		segs[0] = Segment{-(abs_max - 1), abs_max - 1}
+		bl := b_lo == 0 ? i64(1) : b_lo
+		bh := b_hi == 0 ? i64(-1) : b_hi
+		if bl > bh do return nil
+		p1 := a_lo %% bl
+		p2 := a_lo %% bh
+		p3 := a_hi %% bl
+		p4 := a_hi %% bh
+		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
 		return segs
 	case .LShift:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
@@ -1112,6 +1208,50 @@ print_segments :: proc(t: ^Type) {
 	}
 }
 
+pretty_segments :: proc(segs: []Segment) -> string {
+	if len(segs) == 1 {
+		alias := builtin_alias(segs[0])
+		if alias != "" do return alias
+	}
+	b := strings.builder_make()
+	for seg, i in segs {
+		if i > 0 do strings.write_string(&b, " | ")
+		lo, lo_ok := seg.lo.(i64)
+		hi, hi_ok := seg.hi.(i64)
+		if lo_ok && hi_ok && lo == hi {
+			strings.write_string(&b, fmt.tprintf("%d", lo))
+		} else {
+			if lo_ok {
+				strings.write_string(&b, fmt.tprintf("%d", lo))
+			} else {
+				strings.write_string(&b, "-inf")
+			}
+			strings.write_string(&b, "..")
+			if hi_ok {
+				strings.write_string(&b, fmt.tprintf("%d", hi))
+			} else {
+				strings.write_string(&b, "inf")
+			}
+		}
+	}
+	return strings.to_string(b)
+}
+
+builtin_alias :: proc(seg: Segment) -> string {
+	lo, lo_ok := seg.lo.(i64)
+	hi, hi_ok := seg.hi.(i64)
+	if !lo_ok || !hi_ok do return ""
+	if lo == 0 && hi == 255 do return "u8"
+	if lo == -128 && hi == 127 do return "i8"
+	if lo == 0 && hi == 65535 do return "u16"
+	if lo == -32768 && hi == 32767 do return "i16"
+	if lo == 0 && hi == 4294967295 do return "u32"
+	if lo == -2147483648 && hi == 2147483647 do return "i32"
+	if lo == 0 && hi == 9223372036854775807 do return "u64"
+	if lo == -9223372036854775808 && hi == 9223372036854775807 do return "i64"
+	return ""
+}
+
 print_segments_inline :: proc(segs: []Segment) {
 	fmt.print("[")
 	for seg, i in segs {
@@ -1171,7 +1311,7 @@ op_symbol :: proc(op: Operator_Kind) -> string {
 	case .Divide:
 		return "/"
 	case .Mod:
-		return "%%"
+		return "%"
 	case .Equal:
 		return "=="
 	case .NotEqual:
