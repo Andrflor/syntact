@@ -40,6 +40,7 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		return reduced
 	case Sum_Type:
 	case Product_Type:
+	case Negate_Type:
 	case Scope_Type:
 	case String_Type:
 	case Integer_Type:
@@ -154,7 +155,7 @@ compose :: proc(value: Compose_Type) -> ^Type {
 
 	result := new(Type)
 
-	switch value.operator {
+	#partial switch value.operator {
 	case .Add:
 		result^ = compose_arith(lv, rv, .Add)
 	case .Subtract:
@@ -177,13 +178,13 @@ compose :: proc(value: Compose_Type) -> ^Type {
 		result^ = compose_ord(lv, rv, .LessEqual)
 	case .GreaterEqual:
 		result^ = compose_ord(lv, rv, .GreaterEqual)
-	case .And:
-		result^ = compose_bitlogic(lv, rv, .And)
-	case .Or:
-		result^ = compose_bitlogic(lv, rv, .Or)
+	case .BitAnd:
+		result^ = compose_bitlogic(lv, rv, .BitAnd)
+	case .BitOr:
+		result^ = compose_bitlogic(lv, rv, .BitOr)
 	case .Xor:
 		result^ = compose_bitlogic(lv, rv, .Xor)
-	case .Not:
+	case .BitNot, .Not:
 		#partial switch l in lv {
 		case Integer_Type:
 			result^ = int_unary_not(l)
@@ -469,17 +470,17 @@ compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		rd := r.value.(Integer_Data)
 		val: u64
 		#partial switch op {
-		case .And: val = ld.value & rd.value
-		case .Or:  val = ld.value | rd.value
-		case .Xor: val = ld.value ~ rd.value
+		case .BitAnd: val = ld.value & rd.value
+		case .BitOr:  val = ld.value | rd.value
+		case .Xor:    val = ld.value ~ rd.value
 		}
 		return Integer_Type{kind, Integer_Data{val, false}, nil}
 	case Bool_Type:
 		r := rv.(Bool_Type)
 		#partial switch op {
-		case .And: return Bool_Type{l.value && r.value}
-		case .Or:  return Bool_Type{l.value || r.value}
-		case .Xor: return Bool_Type{l.value ~ r.value}
+		case .BitAnd: return Bool_Type{l.value && r.value}
+		case .BitOr:  return Bool_Type{l.value || r.value}
+		case .Xor:    return Bool_Type{l.value ~ r.value}
 		}
 	}
 	return nil
@@ -622,8 +623,12 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		print_type(v.right, depth)
 
 	case Compose_Type:
-		print_type(v.left, depth)
-		fmt.printf(" %s ", op_symbol(v.operator))
+		if v.left != nil {
+			print_type(v.left, depth)
+			fmt.printf(" %s ", op_symbol(v.operator))
+		} else {
+			fmt.printf("%s", op_symbol(v.operator))
+		}
 		print_type(v.right, depth)
 
 	case Execute_Type:
@@ -653,6 +658,10 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		print_type(v.left, depth)
 		fmt.print(" & ")
 		print_type(v.right, depth)
+
+	case Negate_Type:
+		fmt.print("~")
+		print_type(v.operand, depth)
 
 	case Mention_Type:
 		if v.name != "" {
@@ -727,7 +736,13 @@ op_symbol :: proc(op: Operator_Kind) -> string {
 	case .Xor:
 		return "^"
 	case .Not:
-		return "!"
+		return "~"
+	case .BitAnd:
+		return "[&]"
+	case .BitOr:
+		return "[|]"
+	case .BitNot:
+		return "[~]"
 	case .LShift:
 		return "<<"
 	case .RShift:
