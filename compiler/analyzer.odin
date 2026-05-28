@@ -454,6 +454,10 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		#partial switch &t in resolved_target^ {
 		case Scope_Type:
 			resolved = scope_resolve(&t, prop_name, prop_ordinal, true)
+		case Carve_Type:
+			if t.target != nil {
+				resolved = scope_resolve(t.target, prop_name, prop_ordinal, true)
+			}
 		}
 
 		if resolved == nil {
