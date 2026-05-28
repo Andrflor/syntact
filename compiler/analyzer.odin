@@ -260,6 +260,12 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 
 scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> ^Type {
 	if ordinal >= 0 {
+		if name == "" {
+			if int(ordinal) < len(scope.values) {
+				return scope.values[int(ordinal)]
+			}
+			return nil
+		}
 		count := 0
 		for i := 0; i < len(scope.names); i += 1 {
 			if scope.names[i] == name {
@@ -295,13 +301,23 @@ scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool
 default_value :: proc(t: ^Type) -> ^Type {
 	if t == nil do return t
 	target := follow(t)
-	#partial switch &v in target^ {
-	case Scope_Type:
-		for i := 0; i < len(v.kind); i += 1 {
-			if v.kind[i] == .Product {
-				return v.values[i]
+	cur := target
+	for {
+		#partial switch &v in cur^ {
+		case Scope_Type:
+			for i := 0; i < len(v.kind); i += 1 {
+				if v.kind[i] == .Product {
+					return v.values[i]
+				}
+			}
+			return t
+		case Carve_Type:
+			if v.source != nil {
+				cur = follow(v.source)
+				continue
 			}
 		}
+		break
 	}
 	return t
 }
@@ -400,6 +416,44 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			sem_error(a, "Invalid binding name", .Invalid_Binding_Name, node_pos(a, left_idx))
 		}
 
+		right_kind := ast.node_kinds[right_idx]
+		if right_kind == .ScopeNode {
+			result := new(Type)
+			result^ = Scope_Type{parent = current_scope}
+			scope := &result.(Scope_Type)
+			append(&current_scope.names, name)
+			append(&current_scope.types, constraint)
+			append(&current_scope.kind, bk)
+			append(&current_scope.values, result)
+
+			rdata := ast.node_data[right_idx]
+			r := rdata.scope
+			scope_children := ast.extra[r.start:][:r.len]
+			for child in scope_children {
+				child_kind := ast.node_kinds[child]
+				#partial switch child_kind {
+				case .Pointing,
+				     .PointingPull,
+				     .EventPush,
+				     .EventPull,
+				     .ResonancePush,
+				     .ResonancePull,
+				     .ReactivePush,
+				     .ReactivePull,
+				     .Product,
+				     .Expand,
+				     .Constraint:
+					walk(a, scope, child)
+				case:
+					val := walk(a, scope, child)
+					append(&scope.names, "")
+					append(&scope.types, nil)
+					append(&scope.kind, Binding_Kind.Pointing_Push)
+					append(&scope.values, val)
+				}
+			}
+			return result
+		}
 		value := walk(a, current_scope, right_idx)
 		append(&current_scope.names, name)
 		append(&current_scope.types, constraint)
@@ -416,7 +470,24 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		return value
 
 	case .Expand:
-		value := walk(a, current_scope, data.unary.operand)
+		operand_idx := data.unary.operand
+		constraint: ^Type = nil
+		if ast.node_kinds[operand_idx] == .Constraint {
+			cdata := ast.node_data[operand_idx]
+			constraint = walk(a, current_scope, cdata.binary.left)
+			value: ^Type = nil
+			if cdata.binary.right != INVALID_NODE {
+				value = walk(a, current_scope, cdata.binary.right)
+			} else {
+				value = default_value(constraint)
+			}
+			append(&current_scope.names, "")
+			append(&current_scope.types, constraint)
+			append(&current_scope.kind, Binding_Kind.Expand)
+			append(&current_scope.values, value)
+			return value
+		}
+		value := walk(a, current_scope, operand_idx)
 		append(&current_scope.names, "")
 		append(&current_scope.types, nil)
 		append(&current_scope.kind, Binding_Kind.Expand)
@@ -428,16 +499,20 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 
 	case .Constraint:
 		constraint := walk(a, current_scope, data.binary.left)
-		if data.binary.right != INVALID_NODE {
-			value := walk(a, current_scope, data.binary.right)
-			append(&current_scope.names, "")
-			append(&current_scope.types, constraint)
-			append(&current_scope.kind, Binding_Kind.Pointing_Push)
-			append(&current_scope.values, value)
-			return value
-		}
 		value := default_value(constraint)
-		append(&current_scope.names, "")
+		name := ""
+		if data.binary.right != INVALID_NODE {
+			right_kind := ast.node_kinds[data.binary.right]
+			if right_kind == .Identifier {
+				name = span_str(ast, ast.node_data[data.binary.right].identifier.name)
+			} else if right_kind == .Carve {
+				csrc := ast.node_data[data.binary.right].carve.source
+				if ast.node_kinds[csrc] == .Identifier {
+					name = span_str(ast, ast.node_data[csrc].identifier.name)
+				}
+			}
+		}
+		append(&current_scope.names, name)
 		append(&current_scope.types, constraint)
 		append(&current_scope.kind, Binding_Kind.Pointing_Push)
 		append(&current_scope.values, value)
@@ -584,7 +659,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 
 				val := walk(a, current_scope, child)
-				append(&refs, Reference{cname, nil, matched})
+				append(&refs, Reference{nil, nil, matched})
 				append(&vals, val)
 				positional_idx += 1
 			}

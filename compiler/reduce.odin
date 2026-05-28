@@ -516,51 +516,64 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 
 	switch v in t {
 	case Scope_Type:
+		if len(v.names) == 0 {
+			fmt.print("{}")
+			break
+		}
 		fmt.println("{")
 		for i := 0; i < len(v.names); i += 1 {
 			indent(depth + 1)
 			has_constraint := v.types[i] != nil
 			has_name := v.names[i] != ""
-			if has_constraint {
-				print_type(v.types[i], depth + 1)
-				fmt.print(":")
-			}
-			if has_name {
-				fmt.print(v.names[i])
-			}
-			switch v.kind[i] {
-			case .Pointing_Push:
-				if has_name || has_constraint {
-					fmt.print(" -> ")
-				}
-				print_type(v.values[i], depth + 1)
-			case .Pointing_Pull:
-				fmt.print(" <- ")
-				print_type(v.values[i], depth + 1)
-			case .Event_Push:
-				fmt.print(" >- ")
-				print_type(v.values[i], depth + 1)
-			case .Event_Pull:
-				fmt.print(" -< ")
-				print_type(v.values[i], depth + 1)
-			case .Resonance_Push:
-				fmt.print(" >>- ")
-				print_type(v.values[i], depth + 1)
-			case .Resonance_Pull:
-				fmt.print(" -<< ")
-				print_type(v.values[i], depth + 1)
-			case .Reactive_Push:
-				fmt.print(" >>= ")
-				print_type(v.values[i], depth + 1)
-			case .Reactive_Pull:
-				fmt.print(" =<< ")
-				print_type(v.values[i], depth + 1)
-			case .Expand:
+			if v.kind[i] == .Expand {
 				fmt.print("...")
-				print_type(v.values[i], depth + 1)
-			case .Product:
-				fmt.print("-> ")
-				print_type(v.values[i], depth + 1)
+				if has_constraint {
+					print_type(v.types[i], depth + 1)
+					fmt.print(": -> ")
+					print_type(v.values[i], depth + 1)
+				} else {
+					print_type(v.values[i], depth + 1)
+				}
+			} else {
+				if has_constraint {
+					print_type(v.types[i], depth + 1)
+					fmt.print(":")
+				}
+				if has_name {
+					fmt.print(v.names[i])
+				}
+				switch v.kind[i] {
+				case .Pointing_Push:
+					if has_name || has_constraint {
+						fmt.print(" -> ")
+					}
+					print_type(v.values[i], depth + 1)
+				case .Pointing_Pull:
+					fmt.print(" <- ")
+					print_type(v.values[i], depth + 1)
+				case .Event_Push:
+					fmt.print(" >- ")
+					print_type(v.values[i], depth + 1)
+				case .Event_Pull:
+					fmt.print(" -< ")
+					print_type(v.values[i], depth + 1)
+				case .Resonance_Push:
+					fmt.print(" >>- ")
+					print_type(v.values[i], depth + 1)
+				case .Resonance_Pull:
+					fmt.print(" -<< ")
+					print_type(v.values[i], depth + 1)
+				case .Reactive_Push:
+					fmt.print(" >>= ")
+					print_type(v.values[i], depth + 1)
+				case .Reactive_Pull:
+					fmt.print(" =<< ")
+					print_type(v.values[i], depth + 1)
+				case .Expand:
+				case .Product:
+					fmt.print("-> ")
+					print_type(v.values[i], depth + 1)
+				}
 			}
 			fmt.println()
 		}
