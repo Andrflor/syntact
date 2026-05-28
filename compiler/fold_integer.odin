@@ -5,27 +5,27 @@ import "core:strings"
 
 
 int_is_concrete :: #force_inline proc(t: Integer_Type) -> bool {
-	return segs_is_concrete(t.segments)
+	return integer_intervals_is_concrete(t.integer_intervals)
 }
 
 
-segs_is_concrete :: #force_inline proc(segs: []Segment) -> bool {
-	if len(segs) != 1 do return false
-	lo, lo_ok := segs[0].lo.(i64)
-	hi, hi_ok := segs[0].hi.(i64)
+integer_intervals_is_concrete :: #force_inline proc(integer_intervals: []Integer_Interval) -> bool {
+	if len(integer_intervals) != 1 do return false
+	lo, lo_ok := integer_intervals[0].lo.(i64)
+	hi, hi_ok := integer_intervals[0].hi.(i64)
 	return lo_ok && hi_ok && lo == hi
 }
 
 
 int_value :: #force_inline proc(t: Integer_Type) -> i64 {
-	return t.segments[0].lo.(i64)
+	return t.integer_intervals[0].lo.(i64)
 }
 
 
 make_int_result :: #force_inline proc(val: i64) -> Type {
-	segs := make([]Segment, 1)
-	segs[0] = Segment{val, val}
-	return Integer_Type{segs, val}
+	integer_intervals := make([]Integer_Interval, 1)
+	integer_intervals[0] = Integer_Interval{val, val}
+	return Integer_Type{integer_intervals, val}
 }
 
 
@@ -33,24 +33,24 @@ int_to_f64 :: #force_inline proc(i: Integer_Type) -> f64 {
 	return f64(int_value(i))
 }
 
-// --- segment fold ---
+// --- integer interval fold ---
 
-fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
+fold_to_integer_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
 				if v.type_folds[i] != nil do return v.type_folds[i]
-				return fold_to_segments(v.values[i])
+				return fold_to_integer_intervals(v.values[i])
 			}
 		}
 		return nil
 	case Integer_Type:
-		return v.segments
+		return v.integer_intervals
 	case Range_Type:
-		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
-		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
+		left_segs, left_ok := fold_to_integer_intervals(v.left).([]Integer_Interval)
+		right_segs, right_ok := fold_to_integer_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
 		lo: Maybe(i64) = nil
@@ -61,62 +61,62 @@ fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
 		if right_ok && len(right_segs) > 0 {
 			hi = right_segs[len(right_segs) - 1].hi
 		}
-		segs := make([]Segment, 1)
-		segs[0] = Segment{lo, hi}
-		return segs
+		integer_intervals := make([]Integer_Interval, 1)
+		integer_intervals[0] = Integer_Interval{lo, hi}
+		return integer_intervals
 	case Compose_Type:
 		if v.type_fold != nil {
-			return fold_to_segments(v.type_fold)
+			return fold_to_integer_intervals(v.type_fold)
 		}
 		if v.left == nil {
-			right_segs, right_ok := fold_to_segments(v.right).([]Segment)
+			right_segs, right_ok := fold_to_integer_intervals(v.right).([]Integer_Interval)
 			if !right_ok do return nil
 			#partial switch v.operator {
 			case .Greater:
 				hi, hi_ok := right_segs[0].hi.(i64)
 				if !hi_ok do return nil
-				segs := make([]Segment, 1)
-				segs[0] = Segment{hi + 1, nil}
-				return segs
+				integer_intervals := make([]Integer_Interval, 1)
+				integer_intervals[0] = Integer_Interval{hi + 1, nil}
+				return integer_intervals
 			case .GreaterEqual:
-				segs := make([]Segment, 1)
-				segs[0] = Segment{right_segs[0].lo, nil}
-				return segs
+				integer_intervals := make([]Integer_Interval, 1)
+				integer_intervals[0] = Integer_Interval{right_segs[0].lo, nil}
+				return integer_intervals
 			case .Less:
 				lo, lo_ok := right_segs[0].lo.(i64)
 				if !lo_ok do return nil
-				segs := make([]Segment, 1)
-				segs[0] = Segment{nil, lo - 1}
-				return segs
+				integer_intervals := make([]Integer_Interval, 1)
+				integer_intervals[0] = Integer_Interval{nil, lo - 1}
+				return integer_intervals
 			case .LessEqual:
-				segs := make([]Segment, 1)
-				segs[0] = Segment{nil, right_segs[0].hi}
-				return segs
+				integer_intervals := make([]Integer_Interval, 1)
+				integer_intervals[0] = Integer_Interval{nil, right_segs[0].hi}
+				return integer_intervals
 			case .Subtract:
 				lo, lo_ok := right_segs[0].lo.(i64)
 				hi, hi_ok := right_segs[0].hi.(i64)
 				if !lo_ok || !hi_ok do return nil
-				segs := make([]Segment, 1)
-				segs[0] = Segment{-hi, -lo}
-				return segs
+				integer_intervals := make([]Integer_Interval, 1)
+				integer_intervals[0] = Integer_Interval{-hi, -lo}
+				return integer_intervals
 			}
 			return nil
 		}
-		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
-		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
+		left_segs, left_ok := fold_to_integer_intervals(v.left).([]Integer_Interval)
+		right_segs, right_ok := fold_to_integer_intervals(v.right).([]Integer_Interval)
 		if !left_ok || !right_ok do return nil
 		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
-		result := make([dynamic]Segment)
+		result := make([dynamic]Integer_Interval)
 		for ls in left_segs {
 			for rs in right_segs {
-				pair, pair_ok := fold_arith_segments(ls, rs, v.operator).([]Segment)
+				pair, pair_ok := fold_arith_integer_intervals(ls, rs, v.operator).([]Integer_Interval)
 				if !pair_ok do return nil
 				for s in pair {
 					append(&result, s)
 				}
 			}
 		}
-		return segments_normalize(result[:])
+		return integer_intervals_normalize(result[:])
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if v.match_scope.type_folds[v.match_index] != nil {
@@ -145,7 +145,7 @@ fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
 	return nil
 }
 
-fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
+fold_constraint :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
@@ -157,10 +157,10 @@ fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
 		}
 		return nil
 	case Integer_Type:
-		return v.segments
+		return v.integer_intervals
 	case Range_Type:
-		left_segs, left_ok := fold_constraint(v.left).([]Segment)
-		right_segs, right_ok := fold_constraint(v.right).([]Segment)
+		left_segs, left_ok := fold_constraint(v.left).([]Integer_Interval)
+		right_segs, right_ok := fold_constraint(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
 		lo: Maybe(i64) = nil
@@ -171,29 +171,29 @@ fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
 		if right_ok && len(right_segs) > 0 {
 			hi = right_segs[len(right_segs) - 1].hi
 		}
-		segs := make([]Segment, 1)
-		segs[0] = Segment{lo, hi}
-		return segs
+		integer_intervals := make([]Integer_Interval, 1)
+		integer_intervals[0] = Integer_Interval{lo, hi}
+		return integer_intervals
 	case Compose_Type:
 		if v.type_fold != nil {
 			return fold_constraint(v.type_fold)
 		}
-		return fold_to_segments(t)
+		return fold_to_integer_intervals(t)
 	case Sum_Type:
-		left, left_ok := fold_constraint(v.left).([]Segment)
-		right, right_ok := fold_constraint(v.right).([]Segment)
+		left, left_ok := fold_constraint(v.left).([]Integer_Interval)
+		right, right_ok := fold_constraint(v.right).([]Integer_Interval)
 		if !left_ok do return right_ok ? right : nil
 		if !right_ok do return left
-		return segments_union(left, right)
+		return integer_intervals_union(left, right)
 	case Product_Type:
-		left, left_ok := fold_constraint(v.left).([]Segment)
-		right, right_ok := fold_constraint(v.right).([]Segment)
+		left, left_ok := fold_constraint(v.left).([]Integer_Interval)
+		right, right_ok := fold_constraint(v.right).([]Integer_Interval)
 		if !left_ok || !right_ok do return nil
-		return segments_intersect(left, right)
+		return integer_intervals_intersect(left, right)
 	case Negate_Type:
-		inner, inner_ok := fold_constraint(v.operand).([]Segment)
+		inner, inner_ok := fold_constraint(v.operand).([]Integer_Interval)
 		if !inner_ok do return nil
-		return segments_negate(inner)
+		return integer_intervals_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if v.match_scope.constraint_folds[v.match_index] != nil {
@@ -219,7 +219,7 @@ fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
 	return nil
 }
 
-carve_fold_lookup :: proc(t: ^Type, index: int) -> []Segment {
+carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 	if t == nil do return nil
 	target := t
 	for {
@@ -227,9 +227,9 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Segment {
 		case Carve_Type:
 			for i := 0; i < len(v.references); i += 1 {
 				if v.references[i].match_index == index {
-					segs, ok := fold_to_segments(v.values[i]).([]Segment)
-					if ok do return segs
-					segs2, ok2 := fold_constraint(v.values[i]).([]Segment)
+					integer_intervals, ok := fold_to_integer_intervals(v.values[i]).([]Integer_Interval)
+					if ok do return integer_intervals
+					segs2, ok2 := fold_constraint(v.values[i]).([]Integer_Interval)
 					if ok2 do return segs2
 					return nil
 				}
@@ -247,35 +247,35 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Segment {
 	return nil
 }
 
-// --- segment arithmetic ---
+// --- integer interval arithmetic ---
 
-fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment) {
+fold_arith_integer_intervals :: proc(a, b: Integer_Interval, op: Operator_Kind) -> Maybe([]Integer_Interval) {
 	a_lo, a_lo_ok := a.lo.(i64)
 	a_hi, a_hi_ok := a.hi.(i64)
 	b_lo, b_lo_ok := b.lo.(i64)
 	b_hi, b_hi_ok := b.hi.(i64)
 
-	segs := make([]Segment, 1)
+	integer_intervals := make([]Integer_Interval, 1)
 
 	#partial switch op {
 	case .Add:
 		lo: Maybe(i64) = a_lo_ok && b_lo_ok ? a_lo + b_lo : nil
 		hi: Maybe(i64) = a_hi_ok && b_hi_ok ? a_hi + b_hi : nil
-		segs[0] = Segment{lo, hi}
-		return segs
+		integer_intervals[0] = Integer_Interval{lo, hi}
+		return integer_intervals
 	case .Subtract:
 		lo: Maybe(i64) = a_lo_ok && b_hi_ok ? a_lo - b_hi : nil
 		hi: Maybe(i64) = a_hi_ok && b_lo_ok ? a_hi - b_lo : nil
-		segs[0] = Segment{lo, hi}
-		return segs
+		integer_intervals[0] = Integer_Interval{lo, hi}
+		return integer_intervals
 	case .Multiply:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		p1 := a_lo * b_lo
 		p2 := a_lo * b_hi
 		p3 := a_hi * b_lo
 		p4 := a_hi * b_hi
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
+		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return integer_intervals
 	case .Divide:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if b_lo == 0 && b_hi == 0 do return nil
@@ -286,8 +286,8 @@ fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment
 		p2 := a_lo / bh
 		p3 := a_hi / bl
 		p4 := a_hi / bh
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
+		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return integer_intervals
 	case .Mod:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if b_lo == 0 && b_hi == 0 do return nil
@@ -298,8 +298,8 @@ fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment
 		p2 := a_lo %% bh
 		p3 := a_hi %% bl
 		p4 := a_hi %% bh
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
+		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return integer_intervals
 	case .LShift:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if b_lo < 0 || b_hi >= 64 do return nil
@@ -307,8 +307,8 @@ fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment
 		p2 := a_lo << u64(b_hi)
 		p3 := a_hi << u64(b_lo)
 		p4 := a_hi << u64(b_hi)
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
+		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return integer_intervals
 	case .RShift:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if b_lo < 0 || b_hi >= 64 do return nil
@@ -316,62 +316,62 @@ fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment
 		p2 := a_lo >> u64(b_hi)
 		p3 := a_hi >> u64(b_lo)
 		p4 := a_hi >> u64(b_hi)
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
+		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return integer_intervals
 	case .BitAnd:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if a_lo == a_hi && b_lo == b_hi {
 			val := a_lo & b_lo
-			segs[0] = Segment{val, val}
-			return segs
+			integer_intervals[0] = Integer_Interval{val, val}
+			return integer_intervals
 		}
-		segs[0] = Segment{i64(0), min(a_hi, b_hi)}
-		return segs
+		integer_intervals[0] = Integer_Interval{i64(0), min(a_hi, b_hi)}
+		return integer_intervals
 	case .BitOr:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if a_lo == a_hi && b_lo == b_hi {
 			val := a_lo | b_lo
-			segs[0] = Segment{val, val}
-			return segs
+			integer_intervals[0] = Integer_Interval{val, val}
+			return integer_intervals
 		}
-		segs[0] = Segment{max(a_lo, b_lo), max(a_hi, b_hi)}
-		return segs
+		integer_intervals[0] = Integer_Interval{max(a_lo, b_lo), max(a_hi, b_hi)}
+		return integer_intervals
 	case .Xor:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if a_lo == a_hi && b_lo == b_hi {
 			val := a_lo ~ b_lo
-			segs[0] = Segment{val, val}
-			return segs
+			integer_intervals[0] = Integer_Interval{val, val}
+			return integer_intervals
 		}
-		segs[0] = Segment{i64(0), max(a_hi, b_hi)}
-		return segs
+		integer_intervals[0] = Integer_Interval{i64(0), max(a_hi, b_hi)}
+		return integer_intervals
 	}
 	return nil
 }
 
-// --- segment set operations ---
+// --- integer interval set operations ---
 
-segments_union :: proc(a, b: []Segment) -> []Segment {
-	merged := make([dynamic]Segment)
+integer_intervals_union :: proc(a, b: []Integer_Interval) -> []Integer_Interval {
+	merged := make([dynamic]Integer_Interval)
 	i, j := 0, 0
 	for i < len(a) || j < len(b) {
-		seg: Segment
-		if i < len(a) && (j >= len(b) || seg_lo(a[i]) <= seg_lo(b[j])) {
-			seg = a[i];i += 1
+		interval: Integer_Interval
+		if i < len(a) && (j >= len(b) || interval_lo(a[i]) <= interval_lo(b[j])) {
+			interval = a[i];i += 1
 		} else {
-			seg = b[j];j += 1
+			interval = b[j];j += 1
 		}
-		if len(merged) > 0 && segments_overlap_or_adjacent(merged[len(merged) - 1], seg) {
-			merged[len(merged) - 1] = segment_merge(merged[len(merged) - 1], seg)
+		if len(merged) > 0 && integer_intervals_overlap_or_adjacent(merged[len(merged) - 1], interval) {
+			merged[len(merged) - 1] = integer_interval_merge(merged[len(merged) - 1], interval)
 		} else {
-			append(&merged, seg)
+			append(&merged, interval)
 		}
 	}
 	return merged[:]
 }
 
-segments_intersect :: proc(a, b: []Segment) -> []Segment {
-	result := make([dynamic]Segment)
+integer_intervals_intersect :: proc(a, b: []Integer_Interval) -> []Integer_Interval {
+	result := make([dynamic]Integer_Interval)
 	j := 0
 	for i := 0; i < len(a); i += 1 {
 		for j < len(b) && !maybe_le(a[i].lo, b[j].hi) {
@@ -381,22 +381,22 @@ segments_intersect :: proc(a, b: []Segment) -> []Segment {
 			lo := max_lo(a[i].lo, b[k].lo)
 			hi := min_hi(a[i].hi, b[k].hi)
 			if maybe_le(lo, hi) {
-				append(&result, Segment{lo, hi})
+				append(&result, Integer_Interval{lo, hi})
 			}
 		}
 	}
 	return result[:]
 }
 
-segments_negate :: proc(segs: []Segment) -> []Segment {
-	result := make([dynamic]Segment)
+integer_intervals_negate :: proc(integer_intervals: []Integer_Interval) -> []Integer_Interval {
+	result := make([dynamic]Integer_Interval)
 	prev_hi: Maybe(i64) = nil
-	for seg in segs {
-		lo, lo_ok := seg.lo.(i64)
+	for interval in integer_intervals {
+		lo, lo_ok := interval.lo.(i64)
 		if lo_ok {
-			append(&result, Segment{prev_hi, lo - 1})
+			append(&result, Integer_Interval{prev_hi, lo - 1})
 		}
-		hi, hi_ok := seg.hi.(i64)
+		hi, hi_ok := interval.hi.(i64)
 		if hi_ok {
 			prev_hi = hi + 1
 		} else {
@@ -404,29 +404,29 @@ segments_negate :: proc(segs: []Segment) -> []Segment {
 		}
 	}
 	if prev_hi != nil {
-		append(&result, Segment{prev_hi, nil})
+		append(&result, Integer_Interval{prev_hi, nil})
 	}
 	return result[:]
 }
 
-segments_normalize :: proc(segs: []Segment) -> []Segment {
-	if len(segs) <= 1 do return segs
-	sorted := make([]Segment, len(segs))
-	copy(sorted, segs)
+integer_intervals_normalize :: proc(integer_intervals: []Integer_Interval) -> []Integer_Interval {
+	if len(integer_intervals) <= 1 do return integer_intervals
+	sorted := make([]Integer_Interval, len(integer_intervals))
+	copy(sorted, integer_intervals)
 	for i := 1; i < len(sorted); i += 1 {
 		key := sorted[i]
 		j := i - 1
-		for j >= 0 && seg_lo(sorted[j]) > seg_lo(key) {
+		for j >= 0 && interval_lo(sorted[j]) > interval_lo(key) {
 			sorted[j + 1] = sorted[j]
 			j -= 1
 		}
 		sorted[j + 1] = key
 	}
-	merged := make([dynamic]Segment)
+	merged := make([dynamic]Integer_Interval)
 	append(&merged, sorted[0])
 	for i := 1; i < len(sorted); i += 1 {
-		if segments_overlap_or_adjacent(merged[len(merged) - 1], sorted[i]) {
-			merged[len(merged) - 1] = segment_merge(merged[len(merged) - 1], sorted[i])
+		if integer_intervals_overlap_or_adjacent(merged[len(merged) - 1], sorted[i]) {
+			merged[len(merged) - 1] = integer_interval_merge(merged[len(merged) - 1], sorted[i])
 		} else {
 			append(&merged, sorted[i])
 		}
@@ -434,7 +434,7 @@ segments_normalize :: proc(segs: []Segment) -> []Segment {
 	return merged[:]
 }
 
-segments_satisfies :: proc(value_segs, constraint_segs: []Segment) -> bool {
+integer_intervals_satisfy :: proc(value_segs, constraint_segs: []Integer_Interval) -> bool {
 	if value_segs == nil || constraint_segs == nil do return false
 	for vs in value_segs {
 		found := false
@@ -449,16 +449,16 @@ segments_satisfies :: proc(value_segs, constraint_segs: []Segment) -> bool {
 	return true
 }
 
-// --- segment helpers ---
+// --- integer interval helpers ---
 
 
-seg_lo :: #force_inline proc(s: Segment) -> i64 {
+interval_lo :: #force_inline proc(s: Integer_Interval) -> i64 {
 	lo, ok := s.lo.(i64)
 	return ok ? lo : min(i64)
 }
 
 
-segments_overlap_or_adjacent :: #force_inline proc(a, b: Segment) -> bool {
+integer_intervals_overlap_or_adjacent :: #force_inline proc(a, b: Integer_Interval) -> bool {
 	a_hi, a_ok := a.hi.(i64)
 	b_lo, b_ok := b.lo.(i64)
 	if !a_ok do return true
@@ -467,8 +467,8 @@ segments_overlap_or_adjacent :: #force_inline proc(a, b: Segment) -> bool {
 }
 
 
-segment_merge :: #force_inline proc(a, b: Segment) -> Segment {
-	return Segment{min_lo(a.lo, b.lo), max_hi(a.hi, b.hi)}
+integer_interval_merge :: #force_inline proc(a, b: Integer_Interval) -> Integer_Interval {
+	return Integer_Interval{min_lo(a.lo, b.lo), max_hi(a.hi, b.hi)}
 }
 
 
@@ -526,9 +526,9 @@ maybe_le_hi :: #force_inline proc(a, b: Maybe(i64)) -> bool {
 
 // --- builtin names ---
 
-builtin_name :: proc(seg: Segment) -> Maybe(string) {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
+builtin_name :: proc(interval: Integer_Interval) -> Maybe(string) {
+	lo, lo_ok := interval.lo.(i64)
+	hi, hi_ok := interval.hi.(i64)
 	if !lo_ok && !hi_ok do return "Int"
 	if !lo_ok || !hi_ok do return nil
 	switch {
@@ -552,9 +552,9 @@ builtin_name :: proc(seg: Segment) -> Maybe(string) {
 	return nil
 }
 
-builtin_alias :: proc(seg: Segment) -> string {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
+builtin_alias :: proc(interval: Integer_Interval) -> string {
+	lo, lo_ok := interval.lo.(i64)
+	hi, hi_ok := interval.hi.(i64)
 	if !lo_ok || !hi_ok do return ""
 	if lo == 0 && hi == 255 do return "u8"
 	if lo == -128 && hi == 127 do return "i8"
@@ -567,16 +567,16 @@ builtin_alias :: proc(seg: Segment) -> string {
 	return ""
 }
 
-pretty_segments :: proc(segs: []Segment) -> string {
-	if len(segs) == 1 {
-		alias := builtin_alias(segs[0])
+pretty_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> string {
+	if len(integer_intervals) == 1 {
+		alias := builtin_alias(integer_intervals[0])
 		if alias != "" do return alias
 	}
 	b := strings.builder_make()
-	for seg, i in segs {
+	for interval, i in integer_intervals {
 		if i > 0 do strings.write_string(&b, " | ")
-		lo, lo_ok := seg.lo.(i64)
-		hi, hi_ok := seg.hi.(i64)
+		lo, lo_ok := interval.lo.(i64)
+		hi, hi_ok := interval.hi.(i64)
 		if lo_ok && hi_ok && lo == hi {
 			strings.write_string(&b, fmt.tprintf("%d", lo))
 		} else {

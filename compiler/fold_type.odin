@@ -6,10 +6,10 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if t == nil do return
 	comp, ok := &t^.(Compose_Type)
 	if !ok do return
-	segs, segs_ok := fold_to_segments(t).([]Segment)
+	integer_intervals, segs_ok := fold_to_integer_intervals(t).([]Integer_Interval)
 	if segs_ok {
 		tf := new(Type)
-		tf^ = Integer_Type{segs, default_for_segments(segs)}
+		tf^ = Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
 		comp.type_fold = tf
 	} else {
 		sem_error(
@@ -210,17 +210,17 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			fmt.print("  ")
 			if has_cf {
 				fmt.print("c:")
-				print_segments_inline(v.constraint_folds[i])
+				print_integer_intervals_inline(v.constraint_folds[i])
 				fmt.print(" ")
 			}
 			if has_tf {
 				fmt.print("t:")
-				print_segments_inline(v.type_folds[i])
+				print_integer_intervals_inline(v.type_folds[i])
 				fmt.print(" ")
 			}
 			if has_cf {
 				if has_tf {
-					if segments_satisfies(v.type_folds[i], v.constraint_folds[i]) {
+					if integer_intervals_satisfy(v.type_folds[i], v.constraint_folds[i]) {
 						fmt.print("v")
 					} else {
 						fmt.print("x")
@@ -239,12 +239,12 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 	case Integer_Type:
 		if int_is_concrete(v) {
 			fmt.print(int_value(v))
-		} else if len(v.segments) == 1 {
-			print_segment(v.segments[0])
+		} else if len(v.integer_intervals) == 1 {
+			print_integer_interval(v.integer_intervals[0])
 		} else {
-			for seg, i in v.segments {
+			for interval, i in v.integer_intervals {
 				if i > 0 do fmt.print(" | ")
-				print_segment(seg)
+				print_integer_interval(interval)
 			}
 		}
 
@@ -358,16 +358,16 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 	}
 }
 
-print_segments :: proc(t: ^Type) {
+print_integer_intervals :: proc(t: ^Type) {
 	if t == nil {
 		fmt.print("none")
 		return
 	}
 	#partial switch v in t^ {
 	case Integer_Type:
-		for seg, i in v.segments {
+		for interval, i in v.integer_intervals {
 			if i > 0 do fmt.print(", ")
-			print_range_inline(seg)
+			print_range_inline(interval)
 		}
 		return
 	case Float_Type:
@@ -397,25 +397,25 @@ print_segments :: proc(t: ^Type) {
 	}
 }
 
-print_segments_inline :: proc(segs: []Segment) {
-	if len(segs) == 1 {
-		name, name_ok := builtin_name(segs[0]).(string)
+print_integer_intervals_inline :: proc(integer_intervals: []Integer_Interval) {
+	if len(integer_intervals) == 1 {
+		name, name_ok := builtin_name(integer_intervals[0]).(string)
 		if name_ok {
 			fmt.printf("[%s]", name)
 			return
 		}
 	}
 	fmt.print("[")
-	for seg, i in segs {
+	for interval, i in integer_intervals {
 		if i > 0 do fmt.print(" | ")
-		print_range_inline(seg)
+		print_range_inline(interval)
 	}
 	fmt.print("]")
 }
 
-print_range_inline :: proc(seg: Segment) {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
+print_range_inline :: proc(interval: Integer_Interval) {
+	lo, lo_ok := interval.lo.(i64)
+	hi, hi_ok := interval.hi.(i64)
 	if lo_ok && hi_ok && lo == hi {
 		fmt.print(lo)
 		return
@@ -425,13 +425,13 @@ print_range_inline :: proc(seg: Segment) {
 	if hi_ok do fmt.print(hi)
 }
 
-print_segment :: proc(seg: Segment) {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
+print_integer_interval :: proc(interval: Integer_Interval) {
+	lo, lo_ok := interval.lo.(i64)
+	hi, hi_ok := interval.hi.(i64)
 	if lo_ok && hi_ok && lo == hi {
 		fmt.print(lo)
 	} else {
-		name, name_ok := builtin_name(seg).(string)
+		name, name_ok := builtin_name(interval).(string)
 		if name_ok {
 			fmt.print(name)
 			return

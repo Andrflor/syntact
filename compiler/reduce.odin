@@ -8,7 +8,7 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
 			tf := scope.type_folds[i]
-			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
+			if tf != nil && len(tf) == 1 && integer_intervals_is_concrete(tf) {
 				result := new(Type)
 				result^ = Integer_Type{tf, tf[0].lo.(i64)}
 				return result
@@ -106,8 +106,8 @@ carve :: proc(value: Carve_Type) -> ^Type {
 	scope.types = make([dynamic]^Type, len(src.types))
 	scope.kind = make([dynamic]Binding_Kind, len(src.kind))
 	scope.values = make([dynamic]^Type, len(src.values))
-	scope.type_folds = make([dynamic][]Segment, len(src.type_folds))
-	scope.constraint_folds = make([dynamic][]Segment, len(src.constraint_folds))
+	scope.type_folds = make([dynamic][]Integer_Interval, len(src.type_folds))
+	scope.constraint_folds = make([dynamic][]Integer_Interval, len(src.constraint_folds))
 
 	for i := 0; i < len(src.names); i += 1 {
 		scope.names[i] = src.names[i]
@@ -123,9 +123,9 @@ carve :: proc(value: Carve_Type) -> ^Type {
 		val := value.values[i]
 		if ref.match_scope != nil && ref.match_index >= 0 && ref.match_index < len(scope.values) {
 			scope.values[ref.match_index] = val
-			vf, vf_ok := fold_to_segments(val).([]Segment)
+			vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
 			if !vf_ok {
-				vf, vf_ok = fold_constraint(val).([]Segment)
+				vf, vf_ok = fold_constraint(val).([]Integer_Interval)
 			}
 			scope.type_folds[ref.match_index] = vf_ok ? vf : nil
 		}

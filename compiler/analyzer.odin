@@ -7,7 +7,7 @@ import "core:strings"
 /* ======================================================================
  * SECTION 1: SHARED TYPES
  * ====================================================================== */
-Segment :: struct {
+Integer_Interval :: struct {
 	lo: Maybe(i64), // nil = -∞
 	hi: Maybe(i64), // nil = +∞
 }
@@ -77,8 +77,8 @@ Scope_Type :: struct {
 	types:            [dynamic]^Type,
 	kind:             [dynamic]Binding_Kind,
 	values:           [dynamic]^Type,
-	type_folds:       [dynamic][]Segment,
-	constraint_folds: [dynamic][]Segment,
+	type_folds:       [dynamic][]Integer_Interval,
+	constraint_folds: [dynamic][]Integer_Interval,
 }
 
 Execute_Type :: struct {
@@ -110,7 +110,7 @@ Mention_Type :: struct {
 }
 
 Integer_Type :: struct {
-	segments:      []Segment,
+	integer_intervals:      []Integer_Interval,
 	default_value: Maybe(i64),
 }
 
@@ -264,9 +264,9 @@ scope_append :: proc(
 	append(&scope.kind, bk)
 	append(&scope.values, value)
 
-	vf, vf_ok := fold_to_segments(value).([]Segment)
+	vf, vf_ok := fold_to_integer_intervals(value).([]Integer_Interval)
 	if !vf_ok {
-		vf, vf_ok = fold_constraint(value).([]Segment)
+		vf, vf_ok = fold_constraint(value).([]Integer_Interval)
 	}
 	if !vf_ok && constraint != nil {
 		is_unknown := false
@@ -274,12 +274,12 @@ scope_append :: proc(
 			_, is_unknown = value^.(Unknown_Type)
 		}
 		if is_unknown {
-			vf, vf_ok = fold_constraint(constraint).([]Segment)
+			vf, vf_ok = fold_constraint(constraint).([]Integer_Interval)
 		}
 	}
 	append(&scope.type_folds, vf_ok ? vf : nil)
 
-	cf, cf_ok := fold_constraint(constraint).([]Segment)
+	cf, cf_ok := fold_constraint(constraint).([]Integer_Interval)
 	append(&scope.constraint_folds, cf_ok ? cf : nil)
 
 	if cf_ok {
@@ -290,19 +290,19 @@ scope_append :: proc(
 				fmt.tprintf(
 					"'%s' has constraint %s but its value could not be resolved",
 					display,
-					pretty_segments(cf),
+					pretty_integer_intervals(cf),
 				),
 				.Constraint_Violation,
 				node_pos(a, node),
 			)
-		} else if !segments_satisfies(vf, cf) {
+		} else if !integer_intervals_satisfy(vf, cf) {
 			sem_error(
 				a,
 				fmt.tprintf(
 					"'%s' value %s does not fit in %s",
 					display,
-					pretty_segments(vf),
-					pretty_segments(cf),
+					pretty_integer_intervals(vf),
+					pretty_integer_intervals(cf),
 				),
 				.Constraint_Violation,
 				node_pos(a, node),
@@ -731,18 +731,18 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope != nil && carve_index >= 0 {
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
-						vf, vf_ok := fold_to_segments(val).([]Segment)
+						vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
 						if !vf_ok {
-							vf, vf_ok = fold_constraint(val).([]Segment)
+							vf, vf_ok = fold_constraint(val).([]Integer_Interval)
 						}
-						if vf_ok && !segments_satisfies(vf, cf) {
+						if vf_ok && !integer_intervals_satisfy(vf, cf) {
 							sem_error(
 								a,
 								fmt.tprintf(
 									"carve '%s' value %s does not fit in %s",
 									cname,
-									pretty_segments(vf),
-									pretty_segments(cf),
+									pretty_integer_intervals(vf),
+									pretty_integer_intervals(cf),
 								),
 								.Constraint_Violation,
 								node_pos(a, val_idx),
@@ -782,17 +782,17 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope != nil && carve_index >= 0 {
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
-						vf, vf_ok := fold_to_segments(val).([]Segment)
+						vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
 						if !vf_ok {
-							vf, vf_ok = fold_constraint(val).([]Segment)
+							vf, vf_ok = fold_constraint(val).([]Integer_Interval)
 						}
-						if vf_ok && !segments_satisfies(vf, cf) {
+						if vf_ok && !integer_intervals_satisfy(vf, cf) {
 							sem_error(
 								a,
 								fmt.tprintf(
 									"positional carve value %s does not fit in %s",
-									pretty_segments(vf),
-									pretty_segments(cf),
+									pretty_integer_intervals(vf),
+									pretty_integer_intervals(cf),
 								),
 								.Constraint_Violation,
 								node_pos(a, child),
@@ -903,25 +903,25 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 }
 
 make_int_range :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> Integer_Type {
-	segs := make([]Segment, 1)
-	segs[0] = Segment{lo, hi}
-	return Integer_Type{segs, default_for_segments(segs)}
+	integer_intervals := make([]Integer_Interval, 1)
+	integer_intervals[0] = Integer_Interval{lo, hi}
+	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
 }
 
 make_int_const :: proc(val: i64) -> Integer_Type {
 	return make_int_range(val, val)
 }
 
-default_for_segments :: proc(segs: []Segment) -> Maybe(i64) {
-	if len(segs) == 0 do return nil
-	for seg in segs {
-		lo, lo_ok := seg.lo.(i64)
-		hi, hi_ok := seg.hi.(i64)
+default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i64) {
+	if len(integer_intervals) == 0 do return nil
+	for interval in integer_intervals {
+		lo, lo_ok := interval.lo.(i64)
+		hi, hi_ok := interval.hi.(i64)
 		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return i64(0)
 	}
-	lo, lo_ok := segs[0].lo.(i64)
+	lo, lo_ok := integer_intervals[0].lo.(i64)
 	if lo_ok do return lo
-	hi, hi_ok := segs[len(segs) - 1].hi.(i64)
+	hi, hi_ok := integer_intervals[len(integer_intervals) - 1].hi.(i64)
 	if hi_ok do return hi
 	return i64(0)
 }
@@ -934,9 +934,9 @@ make_type_scope :: proc(inner: Type) -> ^Type {
 	append(&scope.types, nil)
 	append(&scope.kind, Binding_Kind.Product)
 	append(&scope.values, val)
-	vf, vf_ok := fold_to_segments(val).([]Segment)
+	vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
 	if !vf_ok {
-		vf, vf_ok = fold_constraint(val).([]Segment)
+		vf, vf_ok = fold_constraint(val).([]Integer_Interval)
 	}
 	append(&scope.type_folds, vf_ok ? vf : nil)
 	append(&scope.constraint_folds, nil)
