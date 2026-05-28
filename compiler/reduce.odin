@@ -55,7 +55,12 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 
 
 execute :: proc(value: Execute_Type) -> ^Type {
-	return reduce(&value.target.(Scope_Type))
+	reduced := reduce_value(value.target)
+	#partial switch &s in reduced^ {
+	case Scope_Type:
+		return reduce(&s)
+	}
+	return reduced
 }
 
 
