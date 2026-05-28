@@ -7,16 +7,9 @@ import "core:strings"
 /* ======================================================================
  * SECTION 1: SHARED TYPES
  * ====================================================================== */
-IntegerKind :: enum {
-	none,
-	u8,
-	i8,
-	u16,
-	i16,
-	u32,
-	i32,
-	u64,
-	i64,
+Segment :: struct {
+	lo: Maybe(i64),  // nil = -∞
+	hi: Maybe(i64),  // nil = +∞
 }
 
 FloatKind :: enum {
@@ -115,26 +108,19 @@ Mention_Type :: struct {
 }
 
 Integer_Type :: struct {
-	kind:        IntegerKind,
-	value:       Maybe(Integer_Data),
-	strict_type: ^Type,
-}
-
-Integer_Data :: struct {
-	value:    u64,
-	negative: bool,
+	segments: []Segment,
 }
 
 Float_Type :: struct {
-	kind:        FloatKind,
-	value:       Maybe(f64),
-	strict_type: ^Type,
+	kind:  FloatKind,
+	value: Maybe(f64),
 }
 
 Compose_Type :: struct {
-	left:     ^Type,
-	right:    ^Type,
-	operator: Operator_Kind,
+	left:      ^Type,
+	right:     ^Type,
+	operator:  Operator_Kind,
+	type_fold: ^Type,
 }
 
 Range_Type :: struct {
@@ -147,8 +133,7 @@ Bool_Type :: struct {
 }
 
 String_Type :: struct {
-	value:       Maybe(string),
-	strict_type: ^Type,
+	value: Maybe(string),
 }
 
 None_Type :: struct {}
@@ -602,7 +587,8 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		case .Not:
 			result^ = Negate_Type{right}
 		case:
-			result^ = Compose_Type{left, right, data.operator.kind}
+			result^ = Compose_Type{left, right, data.operator.kind, nil}
+			fold_compose(a, result, node_pos(a, idx))
 		}
 		return result
 
@@ -754,20 +740,38 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	switch data.literal.kind {
 	case .Integer:
 		val, ok := strconv.parse_u64_of_base(text, 10)
-		result^ = Integer_Type{.none, ok ? Integer_Data{val, false} : nil, nil}
+		if ok {
+			segs := make([]Segment, 1)
+			segs[0] = Segment{i64(val), i64(val)}
+			result^ = Integer_Type{segs}
+		} else {
+			result^ = Invalid_Type{}
+		}
 	case .Hexadecimal:
 		raw := len(text) > 2 ? text[2:] : text
 		val, ok := strconv.parse_u64_of_base(raw, 16)
-		result^ = Integer_Type{.none, ok ? Integer_Data{val, false} : nil, nil}
+		if ok {
+			segs := make([]Segment, 1)
+			segs[0] = Segment{i64(val), i64(val)}
+			result^ = Integer_Type{segs}
+		} else {
+			result^ = Invalid_Type{}
+		}
 	case .Binary:
 		raw := len(text) > 2 ? text[2:] : text
 		val, ok := strconv.parse_u64_of_base(raw, 2)
-		result^ = Integer_Type{.none, ok ? Integer_Data{val, false} : nil, nil}
+		if ok {
+			segs := make([]Segment, 1)
+			segs[0] = Segment{i64(val), i64(val)}
+			result^ = Integer_Type{segs}
+		} else {
+			result^ = Invalid_Type{}
+		}
 	case .Float:
 		val, ok := strconv.parse_f64(text)
-		result^ = Float_Type{.none, ok ? val : nil, nil}
+		result^ = Float_Type{.none, ok ? val : nil}
 	case .String:
-		result^ = String_Type{text, nil}
+		result^ = String_Type{text}
 	case .Bool:
 		result^ = Bool_Type{text == "true"}
 	}
@@ -775,35 +779,45 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	return result
 }
 
+make_int_range :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> Integer_Type {
+	segs := make([]Segment, 1)
+	segs[0] = Segment{lo, hi}
+	return Integer_Type{segs}
+}
+
+make_int_const :: proc(val: i64) -> Integer_Type {
+	return make_int_range(val, val)
+}
+
 resolve_builtin :: proc(name: string) -> ^Type {
 	result := new(Type)
 	switch name {
 	case "u8":
-		result^ = Integer_Type{.u8, nil, nil}
+		result^ = make_int_range(0, 255)
 	case "i8":
-		result^ = Integer_Type{.i8, nil, nil}
+		result^ = make_int_range(-128, 127)
 	case "u16":
-		result^ = Integer_Type{.u16, nil, nil}
+		result^ = make_int_range(0, 65535)
 	case "i16":
-		result^ = Integer_Type{.i16, nil, nil}
+		result^ = make_int_range(-32768, 32767)
 	case "u32":
-		result^ = Integer_Type{.u32, nil, nil}
+		result^ = make_int_range(0, 4294967295)
 	case "i32":
-		result^ = Integer_Type{.i32, nil, nil}
+		result^ = make_int_range(-2147483648, 2147483647)
 	case "u64":
-		result^ = Integer_Type{.u64, nil, nil}
+		result^ = make_int_range(0, 9223372036854775807)
 	case "i64":
-		result^ = Integer_Type{.i64, nil, nil}
+		result^ = make_int_range(-9223372036854775808, 9223372036854775807)
 	case "f32":
-		result^ = Float_Type{.f32, nil, nil}
+		result^ = Float_Type{.f32, nil}
 	case "f64":
-		result^ = Float_Type{.f64, nil, nil}
+		result^ = Float_Type{.f64, nil}
 	case "Int":
-		result^ = Integer_Type{.none, nil, nil}
+		result^ = make_int_range(nil, nil)
 	case "Float":
-		result^ = Float_Type{.none, nil, nil}
+		result^ = Float_Type{.none, nil}
 	case "String":
-		result^ = String_Type{nil, nil}
+		result^ = String_Type{nil}
 	case "Bool":
 		result^ = Bool_Type{}
 	case "None":
@@ -857,6 +871,20 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 }
 
 
+fold_compose :: proc(a: ^Analyzer, t: ^Type, pos: Position) {
+	if t == nil do return
+	comp, ok := &t^.(Compose_Type)
+	if !ok do return
+	segs, segs_ok := fold_to_segments(t).([]Segment)
+	if segs_ok {
+		tf := new(Type)
+		tf^ = Integer_Type{segs}
+		comp.type_fold = tf
+	} else {
+		sem_error(a, "Cannot fold type: operands must be integers", .Invalid_operator, pos)
+	}
+}
+
 validate_type :: proc(type: ^Type) {
 	if (type == nil) {
 		return
@@ -877,11 +905,8 @@ validate_type :: proc(type: ^Type) {
 			compare_types(t.types[i], t.values[i])
 		}
 	case String_Type:
-		validate_type(t.strict_type)
 	case Integer_Type:
-		validate_type(t.strict_type)
 	case Float_Type:
-		validate_type(t.strict_type)
 	case Execute_Type:
 		validate_type(t.target)
 	case Range_Type:

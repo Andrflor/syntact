@@ -18,6 +18,12 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	case Execute_Type:
 		return reduce_value(execute(v))
 	case Compose_Type:
+		if v.type_fold != nil {
+			tf, tf_ok := v.type_fold^.(Integer_Type)
+			if tf_ok && int_is_concrete(tf) {
+				return v.type_fold
+			}
+		}
 		return reduce_value(compose(v))
 	case Carve_Type:
 		return reduce_value(carve(v))
@@ -147,10 +153,35 @@ patch_type :: proc(t: ^Type, old: ^Type, replacement: ^Type) -> ^Type {
 	return t
 }
 
+// --- integer helpers ---
+
+int_is_concrete :: proc(t: Integer_Type) -> bool {
+	if len(t.segments) != 1 do return false
+	lo, lo_ok := t.segments[0].lo.(i64)
+	hi, hi_ok := t.segments[0].hi.(i64)
+	return lo_ok && hi_ok && lo == hi
+}
+
+int_value :: proc(t: Integer_Type) -> i64 {
+	return t.segments[0].lo.(i64)
+}
+
+make_int_result :: proc(val: i64) -> Type {
+	segs := make([]Segment, 1)
+	segs[0] = Segment{val, val}
+	return Integer_Type{segs}
+}
+
+int_to_f64 :: proc(i: Integer_Type) -> f64 {
+	return f64(int_value(i))
+}
+
+// --- compose dispatch ---
+
 compose :: proc(value: Compose_Type) -> ^Type {
-	left := reduce_value(value.left)
+	left := value.left != nil ? reduce_value(value.left) : nil
 	right := value.right != nil ? reduce_value(value.right) : nil
-	lv := left^
+	lv: Type = left != nil ? left^ : nil
 	rv: Type = right != nil ? right^ : nil
 
 	result := new(Type)
@@ -187,7 +218,9 @@ compose :: proc(value: Compose_Type) -> ^Type {
 	case .BitNot, .Not:
 		#partial switch l in lv {
 		case Integer_Type:
-			result^ = int_unary_not(l)
+			if int_is_concrete(l) {
+				result^ = make_int_result(~int_value(l))
+			}
 		case Bool_Type:
 			result^ = Bool_Type{!l.value}
 		}
@@ -200,84 +233,6 @@ compose :: proc(value: Compose_Type) -> ^Type {
 	return result
 }
 
-// --- int kind promotion ---
-
-int_kind_signed :: proc(k: IntegerKind) -> bool {
-	#partial switch k {
-	case .i8, .i16, .i32, .i64:
-		return true
-	}
-	return false
-}
-
-int_kind_size :: proc(k: IntegerKind) -> u8 {
-	#partial switch k {
-	case .u8, .i8:
-		return 1
-	case .u16, .i16:
-		return 2
-	case .u32, .i32:
-		return 4
-	case .u64, .i64:
-		return 8
-	}
-	return 0
-}
-
-signed_kind_for_size :: proc(s: u8) -> IntegerKind {
-	switch s {
-	case 1:
-		return .i8
-	case 2:
-		return .i16
-	case 4:
-		return .i32
-	}
-	return .i64
-}
-
-unsigned_kind_for_size :: proc(s: u8) -> IntegerKind {
-	switch s {
-	case 1:
-		return .u8
-	case 2:
-		return .u16
-	case 4:
-		return .u32
-	}
-	return .u64
-}
-
-promote_int_kind :: proc(a, b: IntegerKind) -> IntegerKind {
-	if a == .none do return b
-	if b == .none do return a
-	sa := int_kind_size(a)
-	sb := int_kind_size(b)
-	signed := int_kind_signed(a) || int_kind_signed(b)
-	size := max(sa, sb)
-	// u32 + i32 -> i64 pour pas perdre le range
-	if signed {
-		ua := !int_kind_signed(a)
-		ub := !int_kind_signed(b)
-		if (ua && sa >= size) || (ub && sb >= size) {
-			size = min(size * 2, 8)
-		}
-	}
-	return signed ? signed_kind_for_size(size) : unsigned_kind_for_size(size)
-}
-
-promote_float_kind :: proc(a, b: FloatKind) -> FloatKind {
-	if a == .none do return b
-	if b == .none do return a
-	if a == .f64 || b == .f64 do return .f64
-	return .f32
-}
-
-int_to_f64 :: proc(i: Integer_Type) -> f64 {
-	d := i.value.(Integer_Data)
-	return d.negative ? -f64(d.value) : f64(d.value)
-}
-
 // --- arithmetic (int+int, float+float, int+float, string+string) ---
 
 compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
@@ -286,8 +241,31 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	lf, lf_ok := lv.(Float_Type)
 	rf, rf_ok := rv.(Float_Type)
 
-	if li_ok && ri_ok {
-		return int_arith(li, ri, op)
+	// unary minus: -x = 0 - x
+	if lv == nil && op == .Subtract {
+		if ri_ok && int_is_concrete(ri) {
+			return make_int_result(-int_value(ri))
+		}
+		if rf_ok {
+			f := rf.value.(f64)
+			return Float_Type{rf.kind, -f}
+		}
+		return nil
+	}
+
+	if li_ok && ri_ok && int_is_concrete(li) && int_is_concrete(ri) {
+		a := int_value(li)
+		b := int_value(ri)
+		#partial switch op {
+		case .Add:      return make_int_result(a + b)
+		case .Subtract: return make_int_result(a - b)
+		case .Multiply: return make_int_result(a * b)
+		case .Divide:
+			if b != 0 do return make_int_result(a / b)
+		case .Mod:
+			if b != 0 do return make_int_result(a % b)
+		}
+		return nil
 	}
 
 	fl, fr: f64
@@ -297,11 +275,11 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		fl = lf.value.(f64)
 		fr = rf.value.(f64)
 		fk = promote_float_kind(lf.kind, rf.kind)
-	} else if lf_ok && ri_ok {
+	} else if lf_ok && ri_ok && int_is_concrete(ri) {
 		fl = lf.value.(f64)
 		fr = int_to_f64(ri)
 		fk = lf.kind == .none ? .f64 : lf.kind
-	} else if li_ok && rf_ok {
+	} else if li_ok && rf_ok && int_is_concrete(li) {
 		fl = int_to_f64(li)
 		fr = rf.value.(f64)
 		fk = rf.kind == .none ? .f64 : rf.kind
@@ -312,7 +290,6 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 			if ls_ok && rs_ok {
 				return String_Type {
 					strings.concatenate({ls.value.(string), rs.value.(string)}),
-					nil,
 				}
 			}
 		}
@@ -321,61 +298,22 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 
 	#partial switch op {
 	case .Add:
-		return Float_Type{fk, fl + fr, nil}
+		return Float_Type{fk, fl + fr}
 	case .Subtract:
-		return Float_Type{fk, fl - fr, nil}
+		return Float_Type{fk, fl - fr}
 	case .Multiply:
-		return Float_Type{fk, fl * fr, nil}
+		return Float_Type{fk, fl * fr}
 	case .Divide:
-		return Float_Type{fk, fl / fr, nil}
+		return Float_Type{fk, fl / fr}
 	}
 	return nil
 }
 
-int_arith :: proc(l, r: Integer_Type, op: Operator_Kind) -> Type {
-	kind := promote_int_kind(l.kind, r.kind)
-	ld := l.value.(Integer_Data)
-	rd := r.value.(Integer_Data)
-
-	#partial switch op {
-	case .Add:      return int_add(ld, rd, kind)
-	case .Subtract: return int_sub(ld, rd, kind)
-	case .Multiply: return int_mul(ld, rd, kind)
-	case .Divide:   return int_div(ld, rd, kind)
-	case .Mod:      return int_mod(ld, rd, kind)
-	}
-	return nil
-}
-
-int_add :: proc(a, b: Integer_Data, kind: IntegerKind) -> Integer_Type {
-	if a.negative == b.negative {
-		return Integer_Type{kind, Integer_Data{a.value + b.value, a.negative}, nil}
-	}
-	if a.value >= b.value {
-		return Integer_Type{kind, Integer_Data{a.value - b.value, a.negative}, nil}
-	}
-	return Integer_Type{kind, Integer_Data{b.value - a.value, b.negative}, nil}
-}
-
-int_sub :: proc(a, b: Integer_Data, kind: IntegerKind) -> Integer_Type {
-	return int_add(a, Integer_Data{b.value, !b.negative}, kind)
-}
-
-int_mul :: proc(a, b: Integer_Data, kind: IntegerKind) -> Integer_Type {
-	return Integer_Type{kind, Integer_Data{a.value * b.value, a.negative != b.negative}, nil}
-}
-
-int_div :: proc(a, b: Integer_Data, kind: IntegerKind) -> Integer_Type {
-	return Integer_Type{kind, Integer_Data{a.value / b.value, a.negative != b.negative}, nil}
-}
-
-int_mod :: proc(a, b: Integer_Data, kind: IntegerKind) -> Integer_Type {
-	return Integer_Type{kind, Integer_Data{a.value % b.value, a.negative}, nil}
-}
-
-int_unary_not :: proc(l: Integer_Type) -> Integer_Type {
-	d := l.value.(Integer_Data)
-	return Integer_Type{l.kind, Integer_Data{~d.value, d.negative}, nil}
+promote_float_kind :: proc(a, b: FloatKind) -> FloatKind {
+	if a == .none do return b
+	if b == .none do return a
+	if a == .f64 || b == .f64 do return .f64
+	return .f32
 }
 
 // --- equality ---
@@ -383,13 +321,11 @@ int_unary_not :: proc(l: Integer_Type) -> Integer_Type {
 compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 	#partial switch l in lv {
 	case Integer_Type:
+		if !int_is_concrete(l) do return Bool_Type{false}
 		r_i, r_i_ok := rv.(Integer_Type)
 		r_f, r_f_ok := rv.(Float_Type)
-		if r_i_ok {
-			ld := l.value.(Integer_Data)
-			rd := r_i.value.(Integer_Data)
-			same := ld.value == rd.value && ld.negative == rd.negative
-			return Bool_Type{eq == same}
+		if r_i_ok && int_is_concrete(r_i) {
+			return Bool_Type{eq == (int_value(l) == int_value(r_i))}
 		}
 		if r_f_ok {
 			return Bool_Type{eq == (int_to_f64(l) == r_f.value.(f64))}
@@ -399,7 +335,7 @@ compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 		r_i, r_i_ok := rv.(Integer_Type)
 		lf := l.value.(f64)
 		if r_f_ok do return Bool_Type{eq == (lf == r_f.value.(f64))}
-		if r_i_ok do return Bool_Type{eq == (lf == int_to_f64(r_i))}
+		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{eq == (lf == int_to_f64(r_i))}
 	case Bool_Type:
 		r := rv.(Bool_Type)
 		return Bool_Type{eq == (l.value == r.value)}
@@ -415,36 +351,27 @@ compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 	#partial switch l in lv {
 	case Integer_Type:
+		if !int_is_concrete(l) do return Bool_Type{false}
 		r_i, r_i_ok := rv.(Integer_Type)
 		r_f, r_f_ok := rv.(Float_Type)
-		if r_i_ok do return Bool_Type{int_cmp(l.value.(Integer_Data), r_i.value.(Integer_Data), op)}
+		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{i64_cmp(int_value(l), int_value(r_i), op)}
 		if r_f_ok do return Bool_Type{float_cmp(int_to_f64(l), r_f.value.(f64), op)}
 	case Float_Type:
 		r_f, r_f_ok := rv.(Float_Type)
 		r_i, r_i_ok := rv.(Integer_Type)
 		lf := l.value.(f64)
 		if r_f_ok do return Bool_Type{float_cmp(lf, r_f.value.(f64), op)}
-		if r_i_ok do return Bool_Type{float_cmp(lf, int_to_f64(r_i), op)}
+		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{float_cmp(lf, int_to_f64(r_i), op)}
 	}
 	return Bool_Type{false}
 }
 
-int_cmp :: proc(a, b: Integer_Data, op: Operator_Kind) -> bool {
-	if a.negative != b.negative {
-		a_less := a.negative
-		#partial switch op {
-		case .Less:         return a_less
-		case .Greater:      return !a_less
-		case .LessEqual:    return a_less
-		case .GreaterEqual: return !a_less
-		}
-	}
-	flip := a.negative
+i64_cmp :: proc(a, b: i64, op: Operator_Kind) -> bool {
 	#partial switch op {
-	case .Less:         return flip ? a.value > b.value : a.value < b.value
-	case .Greater:      return flip ? a.value < b.value : a.value > b.value
-	case .LessEqual:    return flip ? a.value >= b.value : a.value <= b.value
-	case .GreaterEqual: return flip ? a.value <= b.value : a.value >= b.value
+	case .Less:         return a < b
+	case .Greater:      return a > b
+	case .LessEqual:    return a <= b
+	case .GreaterEqual: return a >= b
 	}
 	return false
 }
@@ -464,17 +391,18 @@ float_cmp :: proc(a, b: f64, op: Operator_Kind) -> bool {
 compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	#partial switch l in lv {
 	case Integer_Type:
-		r := rv.(Integer_Type)
-		kind := promote_int_kind(l.kind, r.kind)
-		ld := l.value.(Integer_Data)
-		rd := r.value.(Integer_Data)
-		val: u64
+		if !int_is_concrete(l) do return nil
+		r, r_ok := rv.(Integer_Type)
+		if !r_ok || !int_is_concrete(r) do return nil
+		a := int_value(l)
+		b := int_value(r)
+		val: i64
 		#partial switch op {
-		case .BitAnd: val = ld.value & rd.value
-		case .BitOr:  val = ld.value | rd.value
-		case .Xor:    val = ld.value ~ rd.value
+		case .BitAnd: val = a & b
+		case .BitOr:  val = a | b
+		case .Xor:    val = a ~ b
 		}
-		return Integer_Type{kind, Integer_Data{val, false}, nil}
+		return make_int_result(val)
 	case Bool_Type:
 		r := rv.(Bool_Type)
 		#partial switch op {
@@ -486,21 +414,25 @@ compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	return nil
 }
 
-// --- shift (entier positif à droite, garanti par l'analyzer) ---
+// --- shift ---
 
 compose_shift :: proc(lv, rv: Type, is_left: bool) -> Type {
-	l := lv.(Integer_Type)
-	r := rv.(Integer_Type)
-	ld := l.value.(Integer_Data)
-	rd := r.value.(Integer_Data)
+	l, l_ok := lv.(Integer_Type)
+	r, r_ok := rv.(Integer_Type)
+	if !l_ok || !r_ok do return nil
+	if !int_is_concrete(l) || !int_is_concrete(r) do return nil
+	a := int_value(l)
+	b := int_value(r)
+	if b < 0 || b >= 64 do return nil
 
-	val: u64
+	val: i64
+	ub := u64(b)
 	if is_left {
-		val = ld.value << rd.value
+		val = i64(u64(a) << ub)
 	} else {
-		val = ld.value >> rd.value
+		val = i64(u64(a) >> ub)
 	}
-	return Integer_Type{l.kind, Integer_Data{val, ld.negative}, nil}
+	return make_int_result(val)
 }
 
 // --- print ---
@@ -581,18 +513,35 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 					print_type(v.values[i], depth + 1)
 				}
 			}
+			fmt.print(" [")
+			segs, segs_ok := fold_to_segments(v.values[i]).([]Segment)
+			if !segs_ok && v.types[i] != nil {
+				segs, segs_ok = fold_to_segments(v.types[i]).([]Segment)
+			}
+			if segs_ok {
+				for seg, si in segs {
+					if si > 0 do fmt.print(", ")
+					print_segment_raw(seg)
+				}
+			} else {
+				print_segments(v.values[i])
+			}
+			fmt.print("]")
 			fmt.println()
 		}
 		indent(depth)
 		fmt.print("}")
 
 	case Integer_Type:
-		d, ok := v.value.(Integer_Data)
-		if ok {
-			if d.negative do fmt.print("-")
-			fmt.print(d.value)
+		if int_is_concrete(v) {
+			fmt.print(int_value(v))
+		} else if len(v.segments) == 1 {
+			print_segment(v.segments[0])
 		} else {
-			print_int_kind(v.kind)
+			for seg, i in v.segments {
+				if i > 0 do fmt.print(" | ")
+				print_segment(seg)
+			}
 		}
 
 	case Float_Type:
@@ -705,6 +654,218 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 	}
 }
 
+builtin_name :: proc(seg: Segment) -> Maybe(string) {
+	lo, lo_ok := seg.lo.(i64)
+	hi, hi_ok := seg.hi.(i64)
+	if !lo_ok && !hi_ok do return "Int"
+	if !lo_ok || !hi_ok do return nil
+	switch {
+	case lo == 0 && hi == 255:                    return "u8"
+	case lo == -128 && hi == 127:                  return "i8"
+	case lo == 0 && hi == 65535:                   return "u16"
+	case lo == -32768 && hi == 32767:              return "i16"
+	case lo == 0 && hi == 4294967295:              return "u32"
+	case lo == -2147483648 && hi == 2147483647:    return "i32"
+	case lo == 0 && hi == 9223372036854775807:     return "u64"
+	case lo == -9223372036854775808 && hi == 9223372036854775807: return "i64"
+	}
+	return nil
+}
+
+fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Integer_Type:
+		return v.segments
+	case Range_Type:
+		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
+		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
+		lo: Maybe(i64) = nil
+		hi: Maybe(i64) = nil
+		if left_ok && len(left_segs) > 0 {
+			lo = left_segs[0].lo
+		}
+		if right_ok && len(right_segs) > 0 {
+			hi = right_segs[len(right_segs) - 1].hi
+		}
+		segs := make([]Segment, 1)
+		segs[0] = Segment{lo, hi}
+		return segs
+	case Compose_Type:
+		if v.type_fold != nil {
+			return fold_to_segments(v.type_fold)
+		}
+		if v.left == nil {
+			// unary
+			right_segs, right_ok := fold_to_segments(v.right).([]Segment)
+			if !right_ok do return nil
+			#partial switch v.operator {
+			case .Greater:
+				// >X = X+1..inf
+				hi, hi_ok := right_segs[0].hi.(i64)
+				if !hi_ok do return nil
+				segs := make([]Segment, 1)
+				segs[0] = Segment{hi + 1, nil}
+				return segs
+			case .GreaterEqual:
+				// >=X = X..inf
+				segs := make([]Segment, 1)
+				segs[0] = Segment{right_segs[0].lo, nil}
+				return segs
+			case .Less:
+				// <X = -inf..X-1
+				lo, lo_ok := right_segs[0].lo.(i64)
+				if !lo_ok do return nil
+				segs := make([]Segment, 1)
+				segs[0] = Segment{nil, lo - 1}
+				return segs
+			case .LessEqual:
+				// <=X = -inf..X
+				segs := make([]Segment, 1)
+				segs[0] = Segment{nil, right_segs[0].hi}
+				return segs
+			case .Subtract:
+				// -X = negate
+				lo, lo_ok := right_segs[0].lo.(i64)
+				hi, hi_ok := right_segs[0].hi.(i64)
+				if !lo_ok || !hi_ok do return nil
+				segs := make([]Segment, 1)
+				segs[0] = Segment{-hi, -lo}
+				return segs
+			}
+			return nil
+		}
+		// binary compose
+		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
+		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
+		if !left_ok || !right_ok do return nil
+		if len(left_segs) != 1 || len(right_segs) != 1 do return nil
+		return fold_arith_segments(left_segs[0], right_segs[0], v.operator)
+	case Mention_Type:
+		segs, ok := fold_to_segments(v.target).([]Segment)
+		if ok do return segs
+		if v.constraint != nil do return fold_to_segments(v.constraint)
+		return nil
+	case Reference_Type:
+		segs, ok := fold_to_segments(v.reference.match).([]Segment)
+		if ok do return segs
+		if v.reference.constraint != nil do return fold_to_segments(v.reference.constraint)
+		return nil
+	}
+	return nil
+}
+
+fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment) {
+	a_lo, a_lo_ok := a.lo.(i64)
+	a_hi, a_hi_ok := a.hi.(i64)
+	b_lo, b_lo_ok := b.lo.(i64)
+	b_hi, b_hi_ok := b.hi.(i64)
+
+	segs := make([]Segment, 1)
+
+	#partial switch op {
+	case .Add:
+		lo: Maybe(i64) = a_lo_ok && b_lo_ok ? a_lo + b_lo : nil
+		hi: Maybe(i64) = a_hi_ok && b_hi_ok ? a_hi + b_hi : nil
+		segs[0] = Segment{lo, hi}
+		return segs
+	case .Subtract:
+		lo: Maybe(i64) = a_lo_ok && b_hi_ok ? a_lo - b_hi : nil
+		hi: Maybe(i64) = a_hi_ok && b_lo_ok ? a_hi - b_lo : nil
+		segs[0] = Segment{lo, hi}
+		return segs
+	case .Multiply:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		p1 := a_lo * b_lo
+		p2 := a_lo * b_hi
+		p3 := a_hi * b_lo
+		p4 := a_hi * b_hi
+		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return segs
+	}
+	return nil
+}
+
+print_segments :: proc(t: ^Type) {
+	if t == nil {
+		fmt.print("none")
+		return
+	}
+	segs, ok := fold_to_segments(t).([]Segment)
+	if ok {
+		for seg, i in segs {
+			if i > 0 do fmt.print(", ")
+			print_segment_raw(seg)
+		}
+		return
+	}
+	#partial switch v in t^ {
+	case Float_Type:
+		f, f_ok := v.value.(f64)
+		if f_ok {
+			fmt.printf("{%v, %v}", f, f)
+		} else {
+			print_float_kind(v.kind)
+		}
+	case String_Type:
+		s, s_ok := v.value.(string)
+		if s_ok {
+			fmt.printf("{\"%s\", \"%s\"}", s, s)
+		} else {
+			fmt.print("String")
+		}
+	case Bool_Type:
+		fmt.printf("{%s, %s}", v.value ? "true" : "false", v.value ? "true" : "false")
+	case Unknown_Type:
+		fmt.print("??")
+	case None_Type:
+		fmt.print("none")
+	case Scope_Type:
+		fmt.print("scope")
+	case:
+		fmt.print("?")
+	}
+}
+
+print_segment_raw :: proc(seg: Segment) {
+	lo, lo_ok := seg.lo.(i64)
+	hi, hi_ok := seg.hi.(i64)
+	fmt.print("{")
+	if lo_ok {
+		fmt.print(lo)
+	} else {
+		fmt.print("-inf")
+	}
+	fmt.print(", ")
+	if hi_ok {
+		fmt.print(hi)
+	} else {
+		fmt.print("inf")
+	}
+	fmt.print("}")
+}
+
+print_segment :: proc(seg: Segment) {
+	lo, lo_ok := seg.lo.(i64)
+	hi, hi_ok := seg.hi.(i64)
+	if lo_ok && hi_ok && lo == hi {
+		fmt.print(lo)
+	} else {
+		name, name_ok := builtin_name(seg).(string)
+		if name_ok {
+			fmt.print(name)
+			return
+		}
+		if lo_ok {
+			fmt.print(lo)
+		}
+		fmt.print("..")
+		if hi_ok {
+			fmt.print(hi)
+		}
+	}
+}
+
 op_symbol :: proc(op: Operator_Kind) -> string {
 	switch op {
 	case .Add:
@@ -749,29 +910,6 @@ op_symbol :: proc(op: Operator_Kind) -> string {
 		return ">>"
 	}
 	return "?"
-}
-
-print_int_kind :: proc(k: IntegerKind) {
-	switch k {
-	case .none:
-		fmt.print("Int")
-	case .u8:
-		fmt.print("u8")
-	case .i8:
-		fmt.print("i8")
-	case .u16:
-		fmt.print("u16")
-	case .i16:
-		fmt.print("i16")
-	case .u32:
-		fmt.print("u32")
-	case .i32:
-		fmt.print("i32")
-	case .u64:
-		fmt.print("u64")
-	case .i64:
-		fmt.print("i64")
-	}
 }
 
 print_float_kind :: proc(k: FloatKind) {
