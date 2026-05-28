@@ -650,6 +650,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		right := walk(a, current_scope, data.binary.right)
 		result := new(Type)
 		result^ = Range_Type{left, right}
+		fold_range(a, result, idx)
 		return result
 
 	case .Operator:
@@ -1024,24 +1025,6 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 }
 
 
-fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
-	if t == nil do return
-	comp, ok := &t^.(Compose_Type)
-	if !ok do return
-	segs, segs_ok := fold_to_segments(t).([]Segment)
-	if segs_ok {
-		tf := new(Type)
-		tf^ = Integer_Type{segs, default_for_segments(segs)}
-		comp.type_fold = tf
-	} else {
-		sem_error(
-			a,
-			"Cannot fold type: operands must be integers",
-			.Invalid_operator,
-			node_pos(a, node),
-		)
-	}
-}
 
 
 /* ======================================================================

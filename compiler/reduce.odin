@@ -1,7 +1,6 @@
 package compiler
 
 import "core:fmt"
-import "core:slice"
 import "core:strconv"
 import "core:strings"
 
@@ -21,59 +20,67 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 }
 
 reduce_value :: proc(value: ^Type) -> ^Type {
-	switch v in value {
+	switch &v in value {
 	case Execute_Type:
 		return reduce_value(execute(v))
 	case Compose_Type:
 		if v.type_fold != nil {
 			tf, tf_ok := v.type_fold^.(Integer_Type)
 			if tf_ok && int_is_concrete(tf) {
-				return v.type_fold
-			}
-		}
-		return reduce_value(compose(v))
-	case Carve_Type:
-		return reduce_value(carve(v))
-	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
-			tf := v.match_scope.type_folds[v.match_index]
-			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
 				result := new(Type)
-				result^ = Integer_Type{tf, tf[0].lo.(i64)}
+				result^ = make_int_result(int_value(tf))
 				return result
 			}
+		}
+		return compose(v)
+	case Carve_Type:
+		return carve(v)
+	case Mention_Type:
+		if v.match_scope != nil && v.match_index >= 0 {
 			return reduce_value(v.match_scope.values[v.match_index])
 		}
 	case Reference_Type:
 		ref := v.reference
-		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			tf := ref.match_scope.type_folds[ref.match_index]
-			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
-				result := new(Type)
-				result^ = Integer_Type{tf, tf[0].lo.(i64)}
-				return result
-			}
-			return reduce_value(ref.match_scope.values[ref.match_index])
-		}
+		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return value
+		target := ref.match_scope.values[ref.match_index]
 		if v.target != nil {
-			return reduce_value(v.target)
+			#partial switch &cv in v.target^ {
+			case Carve_Type:
+				for i := 0; i < len(cv.references); i += 1 {
+					if cv.references[i].match_index == ref.match_index {
+						return reduce_value(cv.values[i])
+					}
+				}
+			}
 		}
-	case Sum_Type:
-	case Product_Type:
-	case Negate_Type:
+		return reduce_value(target)
 	case Scope_Type:
-	case String_Type:
+		return reduce(&v)
 	case Integer_Type:
+		return value
 	case Float_Type:
-	case Range_Type:
+		return value
+	case String_Type:
+		return value
 	case Bool_Type:
+		return value
+	case Range_Type:
+		return value
 	case None_Type:
+		return value
 	case Invalid_Type:
+		return value
 	case Unknown_Type:
+		return value
+	case Sum_Type:
+		return value
+	case Product_Type:
+		return value
+	case Negate_Type:
+		return value
 	}
 	return value
 }
-
 
 execute :: proc(value: Execute_Type) -> ^Type {
 	reduced := reduce_value(value.target)
@@ -83,7 +90,6 @@ execute :: proc(value: Execute_Type) -> ^Type {
 	}
 	return reduced
 }
-
 
 carve :: proc(value: Carve_Type) -> ^Type {
 	reduced_source := reduce_value(value.source)
@@ -166,33 +172,6 @@ patch_type :: proc(t: ^Type, old: ^Type, replacement: ^Type) -> ^Type {
 	return t
 }
 
-// --- integer helpers ---
-
-int_is_concrete :: proc(t: Integer_Type) -> bool {
-	return segs_is_concrete(t.segments)
-}
-
-segs_is_concrete :: proc(segs: []Segment) -> bool {
-	if len(segs) != 1 do return false
-	lo, lo_ok := segs[0].lo.(i64)
-	hi, hi_ok := segs[0].hi.(i64)
-	return lo_ok && hi_ok && lo == hi
-}
-
-int_value :: proc(t: Integer_Type) -> i64 {
-	return t.segments[0].lo.(i64)
-}
-
-make_int_result :: proc(val: i64) -> Type {
-	segs := make([]Segment, 1)
-	segs[0] = Segment{val, val}
-	return Integer_Type{segs, val}
-}
-
-int_to_f64 :: proc(i: Integer_Type) -> f64 {
-	return f64(int_value(i))
-}
-
 // --- compose dispatch ---
 
 compose :: proc(value: Compose_Type) -> ^Type {
@@ -250,15 +229,12 @@ compose :: proc(value: Compose_Type) -> ^Type {
 	return result
 }
 
-// --- arithmetic (int+int, float+float, int+float, string+string) ---
-
 compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	li, li_ok := lv.(Integer_Type)
 	ri, ri_ok := rv.(Integer_Type)
 	lf, lf_ok := lv.(Float_Type)
 	rf, rf_ok := rv.(Float_Type)
 
-	// unary minus: -x = 0 - x
 	if lv == nil && op == .Subtract {
 		if ri_ok && int_is_concrete(ri) {
 			return make_int_result(-int_value(ri))
@@ -327,14 +303,13 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	return nil
 }
 
-promote_float_kind :: proc(a, b: FloatKind) -> FloatKind {
+
+promote_float_kind :: #force_inline proc(a, b: FloatKind) -> FloatKind {
 	if a == .none do return b
 	if b == .none do return a
 	if a == .f64 || b == .f64 do return .f64
 	return .f32
 }
-
-// --- equality ---
 
 compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 	#partial switch l in lv {
@@ -364,8 +339,6 @@ compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 	return Bool_Type{false}
 }
 
-// --- ordering ---
-
 compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 	#partial switch l in lv {
 	case Integer_Type:
@@ -384,7 +357,8 @@ compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 	return Bool_Type{false}
 }
 
-i64_cmp :: proc(a, b: i64, op: Operator_Kind) -> bool {
+
+i64_cmp :: #force_inline proc(a, b: i64, op: Operator_Kind) -> bool {
 	#partial switch op {
 	case .Less:
 		return a < b
@@ -398,7 +372,8 @@ i64_cmp :: proc(a, b: i64, op: Operator_Kind) -> bool {
 	return false
 }
 
-float_cmp :: proc(a, b: f64, op: Operator_Kind) -> bool {
+
+float_cmp :: #force_inline proc(a, b: f64, op: Operator_Kind) -> bool {
 	#partial switch op {
 	case .Less:
 		return a < b
@@ -411,8 +386,6 @@ float_cmp :: proc(a, b: f64, op: Operator_Kind) -> bool {
 	}
 	return false
 }
-
-// --- bitwise / logic ---
 
 compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	#partial switch l in lv {
@@ -446,8 +419,6 @@ compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	return nil
 }
 
-// --- shift ---
-
 compose_shift :: proc(lv, rv: Type, is_left: bool) -> Type {
 	l, l_ok := lv.(Integer_Type)
 	r, r_ok := rv.(Integer_Type)
@@ -465,951 +436,4 @@ compose_shift :: proc(lv, rv: Type, is_left: bool) -> Type {
 		val = i64(u64(a) >> ub)
 	}
 	return make_int_result(val)
-}
-
-// --- print ---
-
-print_type :: proc(t: ^Type, depth: int = 0) {
-	if t == nil {
-		fmt.print("none")
-		return
-	}
-	print_type_value(t^, depth)
-}
-
-print_type_value :: proc(t: Type, depth: int = 0) {
-	indent :: proc(d: int) {
-		for _ in 0 ..< d {
-			fmt.print("  ")
-		}
-	}
-
-	switch v in t {
-	case Scope_Type:
-		if len(v.names) == 0 {
-			fmt.print("{}")
-			break
-		}
-		if len(v.names) == 1 && v.kind[0] == .Product && v.names[0] == "" && v.types[0] == nil {
-			print_type(v.values[0], depth)
-			break
-		}
-		fmt.println("{")
-		for i := 0; i < len(v.names); i += 1 {
-			indent(depth + 1)
-			has_constraint := v.types[i] != nil
-			has_name := v.names[i] != ""
-			if v.kind[i] == .Expand {
-				fmt.print("...")
-				if has_constraint {
-					print_type(v.types[i], depth + 1)
-					fmt.print(": -> ")
-					print_type(v.values[i], depth + 1)
-				} else {
-					print_type(v.values[i], depth + 1)
-				}
-			} else {
-				if has_constraint {
-					print_type(v.types[i], depth + 1)
-					fmt.print(":")
-				}
-				if has_name {
-					fmt.print(v.names[i])
-				}
-				switch v.kind[i] {
-				case .Pointing_Push:
-					if has_name || has_constraint {
-						fmt.print(" -> ")
-					}
-					print_type(v.values[i], depth + 1)
-				case .Pointing_Pull:
-					fmt.print(" <- ")
-					print_type(v.values[i], depth + 1)
-				case .Event_Push:
-					fmt.print(" >- ")
-					print_type(v.values[i], depth + 1)
-				case .Event_Pull:
-					fmt.print(" -< ")
-					print_type(v.values[i], depth + 1)
-				case .Resonance_Push:
-					fmt.print(" >>- ")
-					print_type(v.values[i], depth + 1)
-				case .Resonance_Pull:
-					fmt.print(" -<< ")
-					print_type(v.values[i], depth + 1)
-				case .Reactive_Push:
-					fmt.print(" >>= ")
-					print_type(v.values[i], depth + 1)
-				case .Reactive_Pull:
-					fmt.print(" =<< ")
-					print_type(v.values[i], depth + 1)
-				case .Expand:
-				case .Product:
-					fmt.print("-> ")
-					print_type(v.values[i], depth + 1)
-				}
-			}
-			has_tf := i < len(v.type_folds) && v.type_folds[i] != nil
-			has_cf := i < len(v.constraint_folds) && v.constraint_folds[i] != nil
-			fmt.print("  ")
-			if has_cf {
-				fmt.print("c:")
-				print_segments_inline(v.constraint_folds[i])
-				fmt.print(" ")
-			}
-			if has_tf {
-				fmt.print("t:")
-				print_segments_inline(v.type_folds[i])
-				fmt.print(" ")
-			}
-			if has_cf {
-				if has_tf {
-					if segments_satisfies(v.type_folds[i], v.constraint_folds[i]) {
-						fmt.print("v")
-					} else {
-						fmt.print("x")
-					}
-				} else {
-					fmt.print("x")
-				}
-			} else if has_tf {
-				fmt.print("v")
-			}
-			fmt.println()
-		}
-		indent(depth)
-		fmt.print("}")
-
-	case Integer_Type:
-		if int_is_concrete(v) {
-			fmt.print(int_value(v))
-		} else if len(v.segments) == 1 {
-			print_segment(v.segments[0])
-		} else {
-			for seg, i in v.segments {
-				if i > 0 do fmt.print(" | ")
-				print_segment(seg)
-			}
-		}
-
-	case Float_Type:
-		f, ok := v.value.(f64)
-		if ok {
-			fmt.printf("%v", f)
-		} else {
-			print_float_kind(v.kind)
-		}
-
-	case String_Type:
-		s, ok := v.value.(string)
-		if ok {
-			fmt.printf("\"%s\"", s)
-		} else {
-			fmt.print("String")
-		}
-
-	case Bool_Type:
-		fmt.print(v.value ? "true" : "false")
-
-	case None_Type:
-		fmt.print("none")
-
-	case Range_Type:
-		print_type(v.left, depth)
-		fmt.print("..")
-		print_type(v.right, depth)
-
-	case Compose_Type:
-		if v.left != nil {
-			print_type(v.left, depth)
-			fmt.printf(" %s ", op_symbol(v.operator))
-		} else {
-			fmt.printf("%s", op_symbol(v.operator))
-		}
-		print_type(v.right, depth)
-
-	case Execute_Type:
-		print_type(v.target, depth)
-		fmt.print("!")
-
-	case Carve_Type:
-		if v.source != nil {
-			print_type(v.source, depth)
-		}
-		fmt.print("{")
-		for i := 0; i < len(v.references); i += 1 {
-			if i > 0 do fmt.print(", ")
-			ref := v.references[i]
-			n, n_ok := ref.name.(string)
-			if n_ok && n != "" do fmt.printf("%s -> ", n)
-			print_type(v.values[i], depth)
-		}
-		fmt.print("}")
-
-	case Sum_Type:
-		print_type(v.left, depth)
-		fmt.print(" | ")
-		print_type(v.right, depth)
-
-	case Product_Type:
-		print_type(v.left, depth)
-		fmt.print(" & ")
-		print_type(v.right, depth)
-
-	case Negate_Type:
-		fmt.print("~")
-		print_type(v.operand, depth)
-
-	case Mention_Type:
-		if v.name != "" {
-			fmt.print(v.name)
-		} else if v.match_scope != nil && v.match_index >= 0 {
-			print_type(v.match_scope.values[v.match_index], depth)
-		}
-
-	case Reference_Type:
-		ref := v.reference
-		n, n_ok := ref.name.(string)
-		idx, idx_ok := ref.index.(u64)
-		has_target := v.target != nil
-		is_self_ref := n_ok && n == "" && !idx_ok
-
-		if is_self_ref {
-			print_type(v.target, depth)
-		} else if has_target {
-			print_type(v.target, depth)
-			fmt.print(".")
-			if n_ok && n != "" {
-				fmt.print(n)
-			}
-			if idx_ok {
-				fmt.printf("#%d", idx)
-			}
-		} else {
-			if n_ok && n != "" {
-				fmt.print(n)
-			}
-			if idx_ok {
-				fmt.printf("#%d", idx)
-			}
-		}
-
-	case Invalid_Type:
-		fmt.print("<invalid>")
-
-	case Unknown_Type:
-		fmt.print("??")
-	}
-}
-
-builtin_name :: proc(seg: Segment) -> Maybe(string) {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
-	if !lo_ok && !hi_ok do return "Int"
-	if !lo_ok || !hi_ok do return nil
-	switch {
-	case lo == 0 && hi == 255:
-		return "u8"
-	case lo == -128 && hi == 127:
-		return "i8"
-	case lo == 0 && hi == 65535:
-		return "u16"
-	case lo == -32768 && hi == 32767:
-		return "i16"
-	case lo == 0 && hi == 4294967295:
-		return "u32"
-	case lo == -2147483648 && hi == 2147483647:
-		return "i32"
-	case lo == 0 && hi == 9223372036854775807:
-		return "u64"
-	case lo == -9223372036854775808 && hi == 9223372036854775807:
-		return "i64"
-	}
-	return nil
-}
-
-// --- constraint folding (set logic: union, intersection, negation) ---
-
-fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
-	if t == nil do return nil
-	#partial switch v in t^ {
-	case Scope_Type:
-		for i := 0; i < len(v.kind); i += 1 {
-			if v.kind[i] == .Product {
-				if v.type_folds[i] != nil do return v.type_folds[i]
-				return fold_constraint(v.values[i])
-			}
-		}
-		return nil
-	case Integer_Type:
-		return v.segments
-	case Range_Type:
-		left_segs, left_ok := fold_constraint(v.left).([]Segment)
-		right_segs, right_ok := fold_constraint(v.right).([]Segment)
-		lo: Maybe(i64) = nil
-		hi: Maybe(i64) = nil
-		if left_ok && len(left_segs) > 0 {
-			lo = left_segs[0].lo
-		}
-		if right_ok && len(right_segs) > 0 {
-			hi = right_segs[len(right_segs) - 1].hi
-		}
-		segs := make([]Segment, 1)
-		segs[0] = Segment{lo, hi}
-		return segs
-	case Compose_Type:
-		if v.type_fold != nil {
-			return fold_constraint(v.type_fold)
-		}
-		return fold_to_segments(t)
-	case Sum_Type:
-		left, left_ok := fold_constraint(v.left).([]Segment)
-		right, right_ok := fold_constraint(v.right).([]Segment)
-		if !left_ok do return right_ok ? right : nil
-		if !right_ok do return left
-		return segments_union(left, right)
-	case Product_Type:
-		left, left_ok := fold_constraint(v.left).([]Segment)
-		right, right_ok := fold_constraint(v.right).([]Segment)
-		if !left_ok || !right_ok do return nil
-		return segments_intersect(left, right)
-	case Negate_Type:
-		inner, inner_ok := fold_constraint(v.operand).([]Segment)
-		if !inner_ok do return nil
-		return segments_negate(inner)
-	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
-			if v.match_scope.constraint_folds[v.match_index] != nil {
-				return v.match_scope.constraint_folds[v.match_index]
-			}
-			if v.match_scope.type_folds[v.match_index] != nil {
-				return v.match_scope.type_folds[v.match_index]
-			}
-			return fold_constraint(v.match_scope.values[v.match_index])
-		}
-	case Reference_Type:
-		ref := v.reference
-		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			if ref.match_scope.constraint_folds[ref.match_index] != nil {
-				return ref.match_scope.constraint_folds[ref.match_index]
-			}
-			if ref.match_scope.type_folds[ref.match_index] != nil {
-				return ref.match_scope.type_folds[ref.match_index]
-			}
-			return fold_constraint(ref.match_scope.values[ref.match_index])
-		}
-	}
-	return nil
-}
-
-// merge two sorted segment lists into their union
-segments_union :: proc(a, b: []Segment) -> []Segment {
-	merged := make([dynamic]Segment)
-	i, j := 0, 0
-	for i < len(a) || j < len(b) {
-		seg: Segment
-		if i < len(a) && (j >= len(b) || seg_lo(a[i]) <= seg_lo(b[j])) {
-			seg = a[i];i += 1
-		} else {
-			seg = b[j];j += 1
-		}
-		if len(merged) > 0 && segments_overlap_or_adjacent(merged[len(merged) - 1], seg) {
-			merged[len(merged) - 1] = segment_merge(merged[len(merged) - 1], seg)
-		} else {
-			append(&merged, seg)
-		}
-	}
-	return merged[:]
-}
-
-// intersect two sorted segment lists
-segments_intersect :: proc(a, b: []Segment) -> []Segment {
-	result := make([dynamic]Segment)
-	i, j := 0, 0
-	for i < len(a) && j < len(b) {
-		lo := max_lo(a[i].lo, b[j].lo)
-		hi := min_hi(a[i].hi, b[j].hi)
-		if maybe_le(lo, hi) {
-			append(&result, Segment{lo, hi})
-		}
-		if maybe_le_hi(a[i].hi, b[j].hi) {
-			i += 1
-		} else {
-			j += 1
-		}
-	}
-	return result[:]
-}
-
-// negate segments (complement within -inf..+inf)
-segments_negate :: proc(segs: []Segment) -> []Segment {
-	result := make([dynamic]Segment)
-	prev_hi: Maybe(i64) = nil // starts at -inf
-	for seg in segs {
-		lo := seg.lo
-		if lo != nil {
-			lo_val := lo.(i64)
-			new_hi: Maybe(i64) = lo_val - 1
-			if maybe_le(prev_hi, new_hi) {
-				append(&result, Segment{prev_hi, new_hi})
-			}
-		} else {
-			// seg starts at -inf, skip gap
-		}
-		hi := seg.hi
-		if hi != nil {
-			prev_hi = hi.(i64) + 1
-		} else {
-			prev_hi = nil // +inf, nothing after
-			return result[:]
-		}
-	}
-	// gap from prev_hi to +inf
-	append(&result, Segment{prev_hi, nil})
-	return result[:]
-}
-
-segments_normalize :: proc(segs: []Segment) -> []Segment {
-	if len(segs) <= 1 do return segs
-	sorted := make([]Segment, len(segs))
-	copy(sorted, segs)
-	slice.sort_by(sorted, proc(a, b: Segment) -> bool {
-		return seg_lo(a) < seg_lo(b)
-	})
-	result := make([dynamic]Segment)
-	append(&result, sorted[0])
-	for i := 1; i < len(sorted); i += 1 {
-		if segments_overlap_or_adjacent(result[len(result) - 1], sorted[i]) {
-			result[len(result) - 1] = segment_merge(result[len(result) - 1], sorted[i])
-		} else {
-			append(&result, sorted[i])
-		}
-	}
-	return result[:]
-}
-
-// helpers for Maybe(i64) comparison
-seg_lo :: proc(s: Segment) -> i64 {
-	lo, ok := s.lo.(i64)
-	return ok ? lo : min(i64)
-}
-
-segments_overlap_or_adjacent :: proc(a, b: Segment) -> bool {
-	a_hi, a_ok := a.hi.(i64)
-	b_lo, b_ok := b.lo.(i64)
-	if !a_ok do return true // a goes to +inf
-	if !b_ok do return true // b starts at -inf
-	return a_hi >= b_lo - 1
-}
-
-segment_merge :: proc(a, b: Segment) -> Segment {
-	return Segment{min_lo(a.lo, b.lo), max_hi(a.hi, b.hi)}
-}
-
-// for lo bounds: nil = -inf
-max_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
-	a_val, a_ok := a.(i64)
-	b_val, b_ok := b.(i64)
-	if !a_ok do return b // -inf < anything, take b
-	if !b_ok do return a // -inf < anything, take a
-	return max(a_val, b_val)
-}
-
-min_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
-	a_val, a_ok := a.(i64)
-	b_val, b_ok := b.(i64)
-	if !a_ok do return a // -inf is smallest
-	if !b_ok do return b // -inf is smallest
-	return min(a_val, b_val)
-}
-
-// for hi bounds: nil = +inf
-max_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
-	a_val, a_ok := a.(i64)
-	b_val, b_ok := b.(i64)
-	if !a_ok do return a // +inf is largest
-	if !b_ok do return b // +inf is largest
-	return max(a_val, b_val)
-}
-
-min_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
-	a_val, a_ok := a.(i64)
-	b_val, b_ok := b.(i64)
-	if !a_ok do return b // +inf > anything, take b
-	if !b_ok do return a // +inf > anything, take a
-	return min(a_val, b_val)
-}
-
-// lo <= hi comparison (nil lo = -inf, nil hi = +inf)
-maybe_le :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> bool {
-	lo_val, lo_ok := lo.(i64)
-	hi_val, hi_ok := hi.(i64)
-	if !lo_ok do return true // -inf <= anything
-	if !hi_ok do return true // anything <= +inf
-	return lo_val <= hi_val
-}
-
-// hi <= hi comparison (nil = +inf)
-maybe_le_hi :: proc(a, b: Maybe(i64)) -> bool {
-	a_val, a_ok := a.(i64)
-	b_val, b_ok := b.(i64)
-	if !a_ok do return !b_ok // +inf <= +inf is true, +inf <= finite is false
-	if !b_ok do return true // anything <= +inf
-	return a_val <= b_val
-}
-
-// A ⊆ B : every segment of A is contained in some segment of B
-segments_satisfies :: proc(value_segs, constraint_segs: []Segment) -> bool {
-	if value_segs == nil || constraint_segs == nil do return false
-	for vs in value_segs {
-		found := false
-		for cs in constraint_segs {
-			// vs.lo >= cs.lo && vs.hi <= cs.hi
-			if maybe_le(cs.lo, vs.lo) && maybe_le_hi(vs.hi, cs.hi) {
-				found = true
-				break
-			}
-		}
-		if !found do return false
-	}
-	return true
-}
-
-// --- value folding (arithmetic propagation) ---
-
-carve_fold_lookup :: proc(t: ^Type, index: int) -> []Segment {
-	if t == nil do return nil
-	target := t
-	for {
-		#partial switch v in target^ {
-		case Carve_Type:
-			for i := 0; i < len(v.references); i += 1 {
-				if v.references[i].match_index == index {
-					segs, ok := fold_to_segments(v.values[i]).([]Segment)
-					if ok do return segs
-					segs2, ok2 := fold_constraint(v.values[i]).([]Segment)
-					if ok2 do return segs2
-					return nil
-				}
-			}
-			target = v.source
-			continue
-		case Mention_Type:
-			if v.match_scope != nil && v.match_index >= 0 {
-				target = v.match_scope.values[v.match_index]
-				continue
-			}
-		}
-		break
-	}
-	return nil
-}
-
-fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
-	if t == nil do return nil
-	#partial switch v in t^ {
-	case Scope_Type:
-		for i := 0; i < len(v.kind); i += 1 {
-			if v.kind[i] == .Product {
-				if v.type_folds[i] != nil do return v.type_folds[i]
-				return fold_to_segments(v.values[i])
-			}
-		}
-		return nil
-	case Integer_Type:
-		return v.segments
-	case Range_Type:
-		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
-		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
-		lo: Maybe(i64) = nil
-		hi: Maybe(i64) = nil
-		if left_ok && len(left_segs) > 0 {
-			lo = left_segs[0].lo
-		}
-		if right_ok && len(right_segs) > 0 {
-			hi = right_segs[len(right_segs) - 1].hi
-		}
-		segs := make([]Segment, 1)
-		segs[0] = Segment{lo, hi}
-		return segs
-	case Compose_Type:
-		if v.type_fold != nil {
-			return fold_to_segments(v.type_fold)
-		}
-		if v.left == nil {
-			// unary
-			right_segs, right_ok := fold_to_segments(v.right).([]Segment)
-			if !right_ok do return nil
-			#partial switch v.operator {
-			case .Greater:
-				// >X = X+1..inf
-				hi, hi_ok := right_segs[0].hi.(i64)
-				if !hi_ok do return nil
-				segs := make([]Segment, 1)
-				segs[0] = Segment{hi + 1, nil}
-				return segs
-			case .GreaterEqual:
-				// >=X = X..inf
-				segs := make([]Segment, 1)
-				segs[0] = Segment{right_segs[0].lo, nil}
-				return segs
-			case .Less:
-				// <X = -inf..X-1
-				lo, lo_ok := right_segs[0].lo.(i64)
-				if !lo_ok do return nil
-				segs := make([]Segment, 1)
-				segs[0] = Segment{nil, lo - 1}
-				return segs
-			case .LessEqual:
-				// <=X = -inf..X
-				segs := make([]Segment, 1)
-				segs[0] = Segment{nil, right_segs[0].hi}
-				return segs
-			case .Subtract:
-				// -X = negate
-				lo, lo_ok := right_segs[0].lo.(i64)
-				hi, hi_ok := right_segs[0].hi.(i64)
-				if !lo_ok || !hi_ok do return nil
-				segs := make([]Segment, 1)
-				segs[0] = Segment{-hi, -lo}
-				return segs
-			}
-			return nil
-		}
-		// binary compose
-		left_segs, left_ok := fold_to_segments(v.left).([]Segment)
-		right_segs, right_ok := fold_to_segments(v.right).([]Segment)
-		if !left_ok || !right_ok do return nil
-		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
-		result := make([dynamic]Segment)
-		for ls in left_segs {
-			for rs in right_segs {
-				pair, pair_ok := fold_arith_segments(ls, rs, v.operator).([]Segment)
-				if !pair_ok do return nil
-				for s in pair {
-					append(&result, s)
-				}
-			}
-		}
-		return segments_normalize(result[:])
-	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
-			if v.match_scope.type_folds[v.match_index] != nil {
-				return v.match_scope.type_folds[v.match_index]
-			}
-			if v.match_scope.constraint_folds[v.match_index] != nil {
-				return v.match_scope.constraint_folds[v.match_index]
-			}
-		}
-		return nil
-	case Reference_Type:
-		ref := v.reference
-		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-		if v.target != nil {
-			carve_segs := carve_fold_lookup(v.target, ref.match_index)
-			if carve_segs != nil do return carve_segs
-		}
-		if ref.match_scope.type_folds[ref.match_index] != nil {
-			return ref.match_scope.type_folds[ref.match_index]
-		}
-		if ref.match_scope.constraint_folds[ref.match_index] != nil {
-			return ref.match_scope.constraint_folds[ref.match_index]
-		}
-		return nil
-	}
-	return nil
-}
-
-fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment) {
-	a_lo, a_lo_ok := a.lo.(i64)
-	a_hi, a_hi_ok := a.hi.(i64)
-	b_lo, b_lo_ok := b.lo.(i64)
-	b_hi, b_hi_ok := b.hi.(i64)
-
-	segs := make([]Segment, 1)
-
-	#partial switch op {
-	case .Add:
-		lo: Maybe(i64) = a_lo_ok && b_lo_ok ? a_lo + b_lo : nil
-		hi: Maybe(i64) = a_hi_ok && b_hi_ok ? a_hi + b_hi : nil
-		segs[0] = Segment{lo, hi}
-		return segs
-	case .Subtract:
-		lo: Maybe(i64) = a_lo_ok && b_hi_ok ? a_lo - b_hi : nil
-		hi: Maybe(i64) = a_hi_ok && b_lo_ok ? a_hi - b_lo : nil
-		segs[0] = Segment{lo, hi}
-		return segs
-	case .Multiply:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		p1 := a_lo * b_lo
-		p2 := a_lo * b_hi
-		p3 := a_hi * b_lo
-		p4 := a_hi * b_hi
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
-	case .Divide:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo == 0 && b_hi == 0 do return nil
-		// avoid division by zero in range
-		bl := b_lo == 0 ? i64(1) : b_lo
-		bh := b_hi == 0 ? i64(-1) : b_hi
-		if bl > bh do return nil
-		p1 := a_lo / bl
-		p2 := a_lo / bh
-		p3 := a_hi / bl
-		p4 := a_hi / bh
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
-	case .Mod:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo == 0 && b_hi == 0 do return nil
-		bl := b_lo == 0 ? i64(1) : b_lo
-		bh := b_hi == 0 ? i64(-1) : b_hi
-		if bl > bh do return nil
-		p1 := a_lo %% bl
-		p2 := a_lo %% bh
-		p3 := a_hi %% bl
-		p4 := a_hi %% bh
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
-	case .LShift:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo < 0 || b_hi >= 64 do return nil
-		p1 := a_lo << u64(b_lo)
-		p2 := a_lo << u64(b_hi)
-		p3 := a_hi << u64(b_lo)
-		p4 := a_hi << u64(b_hi)
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
-	case .RShift:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo < 0 || b_hi >= 64 do return nil
-		p1 := a_lo >> u64(b_lo)
-		p2 := a_lo >> u64(b_hi)
-		p3 := a_hi >> u64(b_lo)
-		p4 := a_hi >> u64(b_hi)
-		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
-		return segs
-	case .BitAnd:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if a_lo == a_hi && b_lo == b_hi {
-			val := a_lo & b_lo
-			segs[0] = Segment{val, val}
-			return segs
-		}
-		// conservative: result is between 0 and min of the two maxes
-		segs[0] = Segment{i64(0), min(a_hi, b_hi)}
-		return segs
-	case .BitOr:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if a_lo == a_hi && b_lo == b_hi {
-			val := a_lo | b_lo
-			segs[0] = Segment{val, val}
-			return segs
-		}
-		segs[0] = Segment{max(a_lo, b_lo), max(a_hi, b_hi)}
-		return segs
-	case .Xor:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if a_lo == a_hi && b_lo == b_hi {
-			val := a_lo ~ b_lo
-			segs[0] = Segment{val, val}
-			return segs
-		}
-		// conservative
-		segs[0] = Segment{i64(0), max(a_hi, b_hi)}
-		return segs
-	}
-	return nil
-}
-
-print_segments :: proc(t: ^Type) {
-	if t == nil {
-		fmt.print("none")
-		return
-	}
-	#partial switch v in t^ {
-	case Integer_Type:
-		for seg, i in v.segments {
-			if i > 0 do fmt.print(", ")
-			print_range_inline(seg)
-		}
-		return
-	case Float_Type:
-		f, f_ok := v.value.(f64)
-		if f_ok {
-			fmt.printf("{%v, %v}", f, f)
-		} else {
-			print_float_kind(v.kind)
-		}
-	case String_Type:
-		s, s_ok := v.value.(string)
-		if s_ok {
-			fmt.printf("{\"%s\", \"%s\"}", s, s)
-		} else {
-			fmt.print("String")
-		}
-	case Bool_Type:
-		fmt.printf("{%s, %s}", v.value ? "true" : "false", v.value ? "true" : "false")
-	case Unknown_Type:
-		fmt.print("??")
-	case None_Type:
-		fmt.print("none")
-	case Scope_Type:
-		fmt.print("scope")
-	case:
-		fmt.print("?")
-	}
-}
-
-pretty_segments :: proc(segs: []Segment) -> string {
-	if len(segs) == 1 {
-		alias := builtin_alias(segs[0])
-		if alias != "" do return alias
-	}
-	b := strings.builder_make()
-	for seg, i in segs {
-		if i > 0 do strings.write_string(&b, " | ")
-		lo, lo_ok := seg.lo.(i64)
-		hi, hi_ok := seg.hi.(i64)
-		if lo_ok && hi_ok && lo == hi {
-			strings.write_string(&b, fmt.tprintf("%d", lo))
-		} else {
-			if lo_ok {
-				strings.write_string(&b, fmt.tprintf("%d", lo))
-			} else {
-				strings.write_string(&b, "-inf")
-			}
-			strings.write_string(&b, "..")
-			if hi_ok {
-				strings.write_string(&b, fmt.tprintf("%d", hi))
-			} else {
-				strings.write_string(&b, "inf")
-			}
-		}
-	}
-	return strings.to_string(b)
-}
-
-builtin_alias :: proc(seg: Segment) -> string {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
-	if !lo_ok || !hi_ok do return ""
-	if lo == 0 && hi == 255 do return "u8"
-	if lo == -128 && hi == 127 do return "i8"
-	if lo == 0 && hi == 65535 do return "u16"
-	if lo == -32768 && hi == 32767 do return "i16"
-	if lo == 0 && hi == 4294967295 do return "u32"
-	if lo == -2147483648 && hi == 2147483647 do return "i32"
-	if lo == 0 && hi == 9223372036854775807 do return "u64"
-	if lo == -9223372036854775808 && hi == 9223372036854775807 do return "i64"
-	return ""
-}
-
-print_segments_inline :: proc(segs: []Segment) {
-	if len(segs) == 1 {
-		name, name_ok := builtin_name(segs[0]).(string)
-		if name_ok {
-			fmt.printf("[%s]", name)
-			return
-		}
-	}
-	fmt.print("[")
-	for seg, i in segs {
-		if i > 0 do fmt.print(" | ")
-		print_range_inline(seg)
-	}
-	fmt.print("]")
-}
-
-
-
-print_range_inline :: proc(seg: Segment) {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
-	if lo_ok && hi_ok && lo == hi {
-		fmt.print(lo)
-		return
-	}
-	if lo_ok do fmt.print(lo)
-	fmt.print("..")
-	if hi_ok do fmt.print(hi)
-}
-
-print_segment :: proc(seg: Segment) {
-	lo, lo_ok := seg.lo.(i64)
-	hi, hi_ok := seg.hi.(i64)
-	if lo_ok && hi_ok && lo == hi {
-		fmt.print(lo)
-	} else {
-		name, name_ok := builtin_name(seg).(string)
-		if name_ok {
-			fmt.print(name)
-			return
-		}
-		if lo_ok {
-			fmt.print(lo)
-		}
-		fmt.print("..")
-		if hi_ok {
-			fmt.print(hi)
-		}
-	}
-}
-
-op_symbol :: proc(op: Operator_Kind) -> string {
-	switch op {
-	case .Add:
-		return "+"
-	case .Subtract:
-		return "-"
-	case .Multiply:
-		return "*"
-	case .Divide:
-		return "/"
-	case .Mod:
-		return "%"
-	case .Equal:
-		return "=="
-	case .NotEqual:
-		return "!="
-	case .Less:
-		return "<"
-	case .Greater:
-		return ">"
-	case .LessEqual:
-		return "<="
-	case .GreaterEqual:
-		return ">="
-	case .And:
-		return "&"
-	case .Or:
-		return "|"
-	case .Xor:
-		return "^"
-	case .Not:
-		return "~"
-	case .BitAnd:
-		return "[&]"
-	case .BitOr:
-		return "[|]"
-	case .BitNot:
-		return "[~]"
-	case .LShift:
-		return "<<"
-	case .RShift:
-		return ">>"
-	}
-	return "?"
-}
-
-print_float_kind :: proc(k: FloatKind) {
-	switch k {
-	case .none:
-		fmt.print("Float")
-	case .f32:
-		fmt.print("f32")
-	case .f64:
-		fmt.print("f64")
-	}
 }
