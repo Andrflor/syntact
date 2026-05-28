@@ -74,6 +74,10 @@ Product_Type :: struct {
 	right: ^Type,
 }
 
+Negate_Type :: struct {
+	operand: ^Type,
+}
+
 Scope_Type :: struct {
 	parent: ^Scope_Type,
 	names:  [dynamic]string,
@@ -154,6 +158,7 @@ Invalid_Type :: struct {}
 Type :: union {
 	Sum_Type,
 	Product_Type,
+	Negate_Type,
 	Compose_Type,
 	String_Type,
 	Scope_Type,
@@ -419,7 +424,9 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		right_kind := ast.node_kinds[right_idx]
 		if right_kind == .ScopeNode {
 			result := new(Type)
-			result^ = Scope_Type{parent = current_scope}
+			result^ = Scope_Type {
+				parent = current_scope,
+			}
 			scope := &result.(Scope_Type)
 			append(&current_scope.names, name)
 			append(&current_scope.types, constraint)
@@ -577,10 +584,22 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		return result
 
 	case .Operator:
-		left := walk(a, current_scope, data.operator.left)
+		left: ^Type = nil
+		if data.operator.left != INVALID_NODE {
+			left = walk(a, current_scope, data.operator.left)
+		}
 		right := walk(a, current_scope, data.operator.right)
 		result := new(Type)
-		result^ = Compose_Type{left, right, data.operator.kind}
+		#partial switch data.operator.kind {
+		case .And:
+			result^ = Product_Type{left, right}
+		case .Or:
+			result^ = Sum_Type{left, right}
+		case .Not:
+			result^ = Negate_Type{right}
+		case:
+			result^ = Compose_Type{left, right, data.operator.kind}
+		}
 		return result
 
 	case .Carve:
@@ -830,50 +849,48 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 }
 
 
-// validate_type :: proc(type: ^Type) {
-// 	if (type == nil) {
-// 		return
-// 	}
-// 	switch t in type {
-// 	case Sum_Type:
-// 		validate_type(t.left)
-// 		validate_type(t.right)
-// 	case Product_Type:
-// 		validate_type(t.left)
-// 		validate_type(t.right)
-// 	case Compose_Type:
-// 		check_operator_compat(t.left, t.right, t.operator)
-// 	case Scope_Type:
-// 		for i := 0; i < len(t.types); i += 1 {
-// 			compare_types(t.types[i], t.values[i])
-// 		}
-// 	case String_Type:
-// 		validate_type(t.strict_type)
-// 	case Integer_Type:
-// 		validate_type(t.strict_type)
-// 	case Float_Type:
-// 		validate_type(t.strict_type)
-// 	case Execute_Type:
-// 		validate_type(target)
-// 	case Range_Type:
-// 		check_range_compat(t.left, t.right)
-// 	case Bool_Type:
-// 	case None_Type:
-// 	case Invalid_Type:
-// 	case Unknown_Type:
-// 	case Mention_Type:
-// 	case Reference_Type:
-// 		check_reference_exists(t.target, t.reference)
-// 	case Carve_Type:
-// 		check_carve_possible(t.target, t.reference)
-// 	}
-// }
+validate_type :: proc(type: ^Type) {
+	if (type == nil) {
+		return
+	}
+	switch t in type {
+	case Sum_Type:
+		validate_type(t.left)
+		validate_type(t.right)
+	case Product_Type:
+		validate_type(t.left)
+		validate_type(t.right)
+	case Negate_Type:
+		validate_type(t.operand)
+	case Compose_Type:
+		check_operator_compat(t.left, t.right, t.operator)
+	case Scope_Type:
+		for i := 0; i < len(t.types); i += 1 {
+			compare_types(t.types[i], t.values[i])
+		}
+	case String_Type:
+		validate_type(t.strict_type)
+	case Integer_Type:
+		validate_type(t.strict_type)
+	case Float_Type:
+		validate_type(t.strict_type)
+	case Execute_Type:
+		validate_type(t.target)
+	case Range_Type:
+	case Bool_Type:
+	case None_Type:
+	case Invalid_Type:
+	case Unknown_Type:
+	case Mention_Type:
+	case Reference_Type:
+	case Carve_Type:
+	}
+}
 
-// check_reference_exists :: proc(target: ^Type, reference: ^Reference) {}
-// check_carve_possible :: proc(target: ^Type, reference: ^Reference) {}
-// check_range_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
-// check_operator_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
-// compare_types :: proc(constraint: ^Type, concrete: ^Type) {}
+check_carve_possible :: proc(target: ^Type, reference: ^Reference) {}
+check_range_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
+check_operator_compat :: proc(left: ^Type, right: ^Type, operator: Operator_Kind) {}
+compare_types :: proc(constraint: ^Type, concrete: ^Type) {}
 
 /* ======================================================================
  * SECTION 17: ERROR REPORTING

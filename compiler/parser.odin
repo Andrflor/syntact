@@ -71,6 +71,9 @@ Operator_Kind :: enum u8 {
 	Or,
 	Xor,
 	Not,
+	BitAnd,
+	BitOr,
+	BitNot,
 	RShift,
 	LShift,
 }
@@ -270,6 +273,9 @@ Token_Kind :: enum u8 {
 	Or,
 	Xor,
 	Not,
+	BitAnd,
+	BitOr,
+	BitNot,
 	RShift,
 	LShift,
 }
@@ -472,8 +478,23 @@ lex_single_not :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offse
 	return Token{.Not, Span{s, s + 1}, f}}
 lex_single_slash :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.Slash, Span{s, s + 1}, f}}
-lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
-	return Token{.LeftBracket, Span{s, s + 1}, f}}
+lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
+	if s + 2 < l.source_len && l.src[s + 2] == ']' {
+		switch l.src[s + 1] {
+		case '&':
+			l.offset = s + 3
+			return Token{.BitAnd, Span{s, s + 3}, f}
+		case '|':
+			l.offset = s + 3
+			return Token{.BitOr, Span{s, s + 3}, f}
+		case '~':
+			l.offset = s + 3
+			return Token{.BitNot, Span{s, s + 3}, f}
+		}
+	}
+	l.offset = s + 1
+	return Token{.LeftBracket, Span{s, s + 1}, f}
+}
 
 lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	sb := start == 0 || IS_SPACE[l.src[start - 1]]
@@ -855,6 +876,7 @@ init_parse_tables :: proc "contextless" () {
 
 	prefix_table[.Execute] = parse_execute_prefix
 	prefix_table[.Not] = parse_unary
+	prefix_table[.BitNot] = parse_unary
 	prefix_table[.Minus] = parse_unary
 	prefix_table[.Equal] = parse_prefix_comparison
 	prefix_table[.NotEqual] = parse_prefix_comparison
@@ -892,6 +914,8 @@ init_parse_tables :: proc "contextless" () {
 	infix_table[.And] = parse_binary
 	infix_table[.Or] = parse_bit_or
 	infix_table[.Xor] = parse_binary
+	infix_table[.BitAnd] = parse_binary
+	infix_table[.BitOr] = parse_binary
 	infix_table[.RShift] = parse_binary
 	infix_table[.LShift] = parse_binary
 	infix_table[.Plus] = parse_binary
@@ -950,6 +974,9 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.And] = .AND
 	prec_table[.Or] = .OR
 	prec_table[.Xor] = .AND
+	prec_table[.BitAnd] = .AND
+	prec_table[.BitOr] = .OR
+	prec_table[.BitNot] = .UNARY
 	prec_table[.RShift] = .SHIFT
 	prec_table[.LShift] = .SHIFT
 
@@ -1613,6 +1640,10 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		op_kind = .Or
 	case .Xor:
 		op_kind = .Xor
+	case .BitAnd:
+		op_kind = .BitAnd
+	case .BitOr:
+		op_kind = .BitOr
 	case .Equal:
 		op_kind = .Equal
 	case .NotEqual:
@@ -1660,6 +1691,8 @@ parse_unary :: proc(parser: ^Parser) -> Node_Index {
 		op_kind = .Subtract
 	case .Not:
 		op_kind = .Not
+	case .BitNot:
+		op_kind = .BitNot
 	case:
 		error_at_current(parser, "Unexpected unary operator")
 		return INVALID_NODE
@@ -2680,6 +2713,7 @@ IS_EXPRESSION_START: [Token_Kind]bool = #partial {
 	.LeftParenNoSpace   = true,
 	.At                 = true,
 	.Not                = true,
+	.BitNot             = true,
 	.Minus              = true,
 	.PointingPull       = true,
 	.EventPush          = true,
