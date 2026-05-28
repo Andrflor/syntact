@@ -193,7 +193,27 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	r := root_data.scope
 	children := ast.extra[r.start:][:r.len]
 	for child in children {
-		walk(&a, a.scope, child)
+		child_kind := ast.node_kinds[child]
+		#partial switch child_kind {
+		case .Pointing,
+		     .PointingPull,
+		     .EventPush,
+		     .EventPull,
+		     .ResonancePush,
+		     .ResonancePull,
+		     .ReactivePush,
+		     .ReactivePull,
+		     .Product,
+		     .Expand,
+		     .Constraint:
+			walk(&a, a.scope, child)
+		case:
+			value := walk(&a, a.scope, child)
+			append(&a.scope.names, "")
+			append(&a.scope.types, nil)
+			append(&a.scope.kind, Binding_Kind.Pointing_Push)
+			append(&a.scope.values, value)
+		}
 	}
 
 	cache.scope = a.scope
@@ -315,7 +335,27 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		r := data.scope
 		children := ast.extra[r.start:][:r.len]
 		for child in children {
-			walk(a, scope, child)
+			child_kind := ast.node_kinds[child]
+			#partial switch child_kind {
+			case .Pointing,
+			     .PointingPull,
+			     .EventPush,
+			     .EventPull,
+			     .ResonancePush,
+			     .ResonancePull,
+			     .ReactivePush,
+			     .ReactivePull,
+			     .Product,
+			     .Expand,
+			     .Constraint:
+				walk(a, scope, child)
+			case:
+				value := walk(a, scope, child)
+				append(&scope.names, "")
+				append(&scope.types, nil)
+				append(&scope.kind, Binding_Kind.Pointing_Push)
+				append(&scope.values, value)
+			}
 		}
 		result := new(Type)
 		result^ = scope^
@@ -518,7 +558,12 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					matched = src_scope.values[positional_idx]
 				}
 				if matched == nil {
-					sem_error(a, "Positional carve out of range", .Invalid_Carve, node_pos(a, child))
+					sem_error(
+						a,
+						"Positional carve out of range",
+						.Invalid_Carve,
+						node_pos(a, child),
+					)
 				}
 
 				val := walk(a, current_scope, child)
@@ -615,21 +660,36 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 resolve_builtin :: proc(name: string) -> ^Type {
 	result := new(Type)
 	switch name {
-	case "u8":     result^ = Integer_Type{.u8, nil, nil}
-	case "i8":     result^ = Integer_Type{.i8, nil, nil}
-	case "u16":    result^ = Integer_Type{.u16, nil, nil}
-	case "i16":    result^ = Integer_Type{.i16, nil, nil}
-	case "u32":    result^ = Integer_Type{.u32, nil, nil}
-	case "i32":    result^ = Integer_Type{.i32, nil, nil}
-	case "u64":    result^ = Integer_Type{.u64, nil, nil}
-	case "i64":    result^ = Integer_Type{.i64, nil, nil}
-	case "f32":    result^ = Float_Type{.f32, nil, nil}
-	case "f64":    result^ = Float_Type{.f64, nil, nil}
-	case "Int":    result^ = Integer_Type{.none, nil, nil}
-	case "Float":  result^ = Float_Type{.none, nil, nil}
-	case "String": result^ = String_Type{nil, nil}
-	case "Bool":   result^ = Bool_Type{}
-	case "None":   result^ = None_Type{}
+	case "u8":
+		result^ = Integer_Type{.u8, nil, nil}
+	case "i8":
+		result^ = Integer_Type{.i8, nil, nil}
+	case "u16":
+		result^ = Integer_Type{.u16, nil, nil}
+	case "i16":
+		result^ = Integer_Type{.i16, nil, nil}
+	case "u32":
+		result^ = Integer_Type{.u32, nil, nil}
+	case "i32":
+		result^ = Integer_Type{.i32, nil, nil}
+	case "u64":
+		result^ = Integer_Type{.u64, nil, nil}
+	case "i64":
+		result^ = Integer_Type{.i64, nil, nil}
+	case "f32":
+		result^ = Float_Type{.f32, nil, nil}
+	case "f64":
+		result^ = Float_Type{.f64, nil, nil}
+	case "Int":
+		result^ = Integer_Type{.none, nil, nil}
+	case "Float":
+		result^ = Float_Type{.none, nil, nil}
+	case "String":
+		result^ = String_Type{nil, nil}
+	case "Bool":
+		result^ = Bool_Type{}
+	case "None":
+		result^ = None_Type{}
 	case:
 		free(result)
 		return nil
