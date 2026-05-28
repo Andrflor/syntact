@@ -24,7 +24,20 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	case Mention_Type:
 		return reduce_value(v.target)
 	case Reference_Type:
-		return reduce_value(v.reference.match)
+		reduced := reduce_value(v.reference.match)
+		#partial switch &s in reduced^ {
+		case Scope_Type:
+			name, has_name := v.reference.name.(string)
+			idx, has_idx := v.reference.index.(u64)
+			if has_name || has_idx {
+				ordinal: i16 = has_idx ? i16(idx) : -1
+				resolved := scope_resolve(&s, has_name ? name : "", ordinal, true)
+				if resolved != nil {
+					return reduce_value(resolved)
+				}
+			}
+		}
+		return reduced
 	case Sum_Type:
 	case Product_Type:
 	case Scope_Type:
@@ -47,7 +60,14 @@ execute :: proc(value: Execute_Type) -> ^Type {
 
 
 carve :: proc(value: Carve_Type) -> ^Type {
-	src := value.target
+	reduced_source := reduce_value(value.source)
+	src: ^Scope_Type = nil
+	#partial switch &s in reduced_source^ {
+	case Scope_Type:
+		src = &s
+	}
+	if src == nil do return reduced_source
+
 	scope := new(Scope_Type)
 	scope.parent = src.parent
 	scope.names = make([dynamic]string, len(src.names))
@@ -65,6 +85,9 @@ carve :: proc(value: Carve_Type) -> ^Type {
 	for i := 0; i < len(value.references); i += 1 {
 		ref := &value.references[i]
 		val := value.values[i]
+		if ref.match != nil {
+			ref.match^ = val^
+		}
 		for j := 0; j < len(scope.values); j += 1 {
 			if scope.values[j] == ref.match {
 				scope.values[j] = val
@@ -76,6 +99,46 @@ carve :: proc(value: Carve_Type) -> ^Type {
 	result := new(Type)
 	result^ = scope^
 	return result
+}
+
+patch_refs :: proc(scope: ^Scope_Type, old: ^Type, replacement: ^Type) {
+	for i := 0; i < len(scope.values); i += 1 {
+		scope.values[i] = patch_type(scope.values[i], old, replacement)
+	}
+}
+
+patch_type :: proc(t: ^Type, old: ^Type, replacement: ^Type) -> ^Type {
+	if t == nil do return nil
+	if t == old do return replacement
+	#partial switch &v in t^ {
+	case Compose_Type:
+		v.left = patch_type(v.left, old, replacement)
+		v.right = patch_type(v.right, old, replacement)
+	case Reference_Type:
+		v.target = patch_type(v.target, old, replacement)
+		if v.reference != nil && v.reference.match == old {
+			v.reference.match = replacement
+		}
+	case Mention_Type:
+		v.target = patch_type(v.target, old, replacement)
+	case Execute_Type:
+		v.target = patch_type(v.target, old, replacement)
+	case Range_Type:
+		v.left = patch_type(v.left, old, replacement)
+		v.right = patch_type(v.right, old, replacement)
+	case Sum_Type:
+		v.left = patch_type(v.left, old, replacement)
+		v.right = patch_type(v.right, old, replacement)
+	case Product_Type:
+		v.left = patch_type(v.left, old, replacement)
+		v.right = patch_type(v.right, old, replacement)
+	case Carve_Type:
+		v.source = patch_type(v.source, old, replacement)
+		for i := 0; i < len(v.values); i += 1 {
+			v.values[i] = patch_type(v.values[i], old, replacement)
+		}
+	}
+	return t
 }
 
 compose :: proc(value: Compose_Type) -> ^Type {
@@ -550,8 +613,8 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		fmt.print("!")
 
 	case Carve_Type:
-		if v.target != nil {
-			print_type_value(v.target^, depth)
+		if v.source != nil {
+			print_type(v.source, depth)
 		}
 		fmt.print("{")
 		for i := 0; i < len(v.references); i += 1 {
@@ -581,11 +644,31 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		}
 
 	case Reference_Type:
-		print_type(v.target, depth)
-		fmt.print(".")
 		ref := v.reference
 		n, n_ok := ref.name.(string)
-		if n_ok do fmt.print(n)
+		idx, idx_ok := ref.index.(u64)
+		has_target := v.target != nil
+		is_self_ref := n_ok && n == ""&& !idx_ok
+
+		if is_self_ref {
+			print_type(v.target, depth)
+		} else if has_target {
+			print_type(v.target, depth)
+			fmt.print(".")
+			if n_ok && n != "" {
+				fmt.print(n)
+			}
+			if idx_ok {
+				fmt.printf("#%d", idx)
+			}
+		} else {
+			if n_ok && n != "" {
+				fmt.print(n)
+			}
+			if idx_ok {
+				fmt.printf("#%d", idx)
+			}
+		}
 
 	case Invalid_Type:
 		fmt.print("<invalid>")

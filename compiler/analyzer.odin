@@ -87,7 +87,7 @@ Execute_Type :: struct {
 }
 
 Carve_Type :: struct {
-	target:     ^Scope_Type,
+	source:     ^Type,
 	references: [dynamic]Reference,
 	values:     [dynamic]^Type,
 }
@@ -451,13 +451,18 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 
 		resolved: ^Type = nil
 		resolved_target := follow(target)
-		#partial switch &t in resolved_target^ {
-		case Scope_Type:
-			resolved = scope_resolve(&t, prop_name, prop_ordinal, true)
-		case Carve_Type:
-			if t.target != nil {
-				resolved = scope_resolve(t.target, prop_name, prop_ordinal, true)
+		prop_target := resolved_target
+		for {
+			#partial switch &t in prop_target^ {
+			case Scope_Type:
+				resolved = scope_resolve(&t, prop_name, prop_ordinal, true)
+			case Carve_Type:
+				if t.source != nil {
+					prop_target = follow(t.source)
+					continue
+				}
 			}
+			break
 		}
 
 		if resolved == nil {
@@ -476,7 +481,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		ref^ = Reference {
 			prop_name,
 			prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
-			resolved,
+			resolved_target,
 		}
 		result := new(Type)
 		result^ = Reference_Type{target, ref}
@@ -510,9 +515,18 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 
 		src_scope: ^Scope_Type = nil
 		resolved_source := follow(source)
-		#partial switch &s in resolved_source^ {
-		case Scope_Type:
-			src_scope = &s
+		src_target := resolved_source
+		for {
+			#partial switch &s in src_target^ {
+			case Scope_Type:
+				src_scope = &s
+			case Carve_Type:
+				if s.source != nil {
+					src_target = follow(s.source)
+					continue
+				}
+			}
+			break
 		}
 
 		refs := make([dynamic]Reference)
@@ -554,7 +568,6 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				)
 				append(&vals, val)
 			} else {
-				// positional carve — match par position dans le scope target
 				matched: ^Type = nil
 				cname := ""
 				if src_scope != nil && positional_idx < len(src_scope.names) {
@@ -578,7 +591,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		}
 
 		result := new(Type)
-		result^ = Carve_Type{src_scope, refs, vals}
+		result^ = Carve_Type{source, refs, vals}
 		return result
 
 	case .Pattern:
@@ -709,6 +722,17 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 
 	resolved := scope_resolve(scope, name, ordinal, true)
 	if resolved != nil {
+		if ordinal >= 0 {
+			ref := new(Reference)
+			ref^ = Reference {
+				name != "" ? Maybe(string)(name) : nil,
+				Maybe(u64)(u64(ordinal)),
+				resolved,
+			}
+			result := new(Type)
+			result^ = Reference_Type{nil, ref}
+			return result
+		}
 		result := new(Type)
 		result^ = Mention_Type{name, resolved}
 		return result
