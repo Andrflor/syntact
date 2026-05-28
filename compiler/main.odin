@@ -26,8 +26,7 @@ Options :: struct {
 	input_path:         string, // Path to input file
 	output_path:        string, // Path to output file
 	print_ast:          bool, // Toggle AST printing
-	print_symbol_table: bool, // Toggle symbol table printing
-	print_scope_graph:  bool, // Toggle scope graph printing
+	print_ir:           bool, // Toggle IR printing (analyzer output)
 	parse_only:         bool, // Skip analysis and code generation
 	analyze_only:       bool, // Skip code generation
 	verbose:            bool, // Enable verbose logging
@@ -60,10 +59,8 @@ parse_args :: proc() -> Options {
 				}
 			case "--ast":
 				options.print_ast = true
-			case "--symbols", "--symbol-table":
-				options.print_symbol_table = true
-			case "--scopes", "--scope-graph":
-				options.print_scope_graph = true
+			case "--ir":
+				options.print_ir = true
 			case "--parse-only":
 				options.parse_only = true
 			case "--analyze-only":
@@ -117,8 +114,7 @@ print_usage :: proc() {
 	fmt.println("Options:")
 	fmt.println("  -o, --output FILE       Specify output file")
 	fmt.println("  --ast                   Print the AST")
-	fmt.println("  --symbols               Print the symbol table")
-	fmt.println("  --scopes                Print the scope graph")
+	fmt.println("  --ir                    Print the IR (analyzer output)")
 	fmt.println("  --parse-only            Only parse, don't analyze")
 	fmt.println("  --analyze-only          Only parse and analyze, don't generate code")
 	// fmt.println("  --no-cache              Disable compilation cache")
