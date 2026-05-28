@@ -265,11 +265,14 @@ scope_append :: proc(
 	append(&scope.values, value)
 
 	vf, vf_ok := fold_to_segments(value).([]Segment)
-	if !vf_ok {
-		vf, vf_ok = fold_constraint(value).([]Segment)
-	}
 	if !vf_ok && constraint != nil {
-		vf, vf_ok = fold_constraint(constraint).([]Segment)
+		is_unknown := false
+		if value != nil {
+			_, is_unknown = value^.(Unknown_Type)
+		}
+		if is_unknown {
+			vf, vf_ok = fold_constraint(constraint).([]Segment)
+		}
 	}
 	append(&scope.type_folds, vf_ok ? vf : nil)
 
@@ -362,6 +365,8 @@ default_value :: proc(t: ^Type) -> ^Type {
 		case Scope_Type:
 			for i := 0; i < len(v.kind); i += 1 {
 				if v.kind[i] == .Product {
+					def := type_default(v.values[i])
+					if def != nil do return def
 					return v.values[i]
 				}
 			}
@@ -917,44 +922,61 @@ default_for_segments :: proc(segs: []Segment) -> Maybe(i64) {
 	return i64(0)
 }
 
-resolve_builtin :: proc(name: string) -> ^Type {
+make_type_scope :: proc(inner: Type) -> ^Type {
+	val := new(Type)
+	val^ = inner
+	scope := new(Scope_Type)
+	append(&scope.names, "")
+	append(&scope.types, nil)
+	append(&scope.kind, Binding_Kind.Product)
+	append(&scope.values, val)
+	vf, vf_ok := fold_to_segments(val).([]Segment)
+	if !vf_ok {
+		vf, vf_ok = fold_constraint(val).([]Segment)
+	}
+	append(&scope.type_folds, vf_ok ? vf : nil)
+	append(&scope.constraint_folds, nil)
 	result := new(Type)
+	result^ = scope^
+	return result
+}
+
+resolve_builtin :: proc(name: string) -> ^Type {
 	switch name {
 	case "u8":
-		result^ = make_int_range(0, 255)
+		return make_type_scope(make_int_range(0, 255))
 	case "i8":
-		result^ = make_int_range(-128, 127)
+		return make_type_scope(make_int_range(-128, 127))
 	case "u16":
-		result^ = make_int_range(0, 65535)
+		return make_type_scope(make_int_range(0, 65535))
 	case "i16":
-		result^ = make_int_range(-32768, 32767)
+		return make_type_scope(make_int_range(-32768, 32767))
 	case "u32":
-		result^ = make_int_range(0, 4294967295)
+		return make_type_scope(make_int_range(0, 4294967295))
 	case "i32":
-		result^ = make_int_range(-2147483648, 2147483647)
+		return make_type_scope(make_int_range(-2147483648, 2147483647))
 	case "u64":
-		result^ = make_int_range(0, 9223372036854775807)
+		return make_type_scope(make_int_range(0, 9223372036854775807))
 	case "i64":
-		result^ = make_int_range(-9223372036854775808, 9223372036854775807)
+		return make_type_scope(make_int_range(-9223372036854775808, 9223372036854775807))
 	case "f32":
-		result^ = Float_Type{.f32, nil}
+		return make_type_scope(Float_Type{.f32, nil})
 	case "f64":
-		result^ = Float_Type{.f64, nil}
+		return make_type_scope(Float_Type{.f64, nil})
 	case "Int":
-		result^ = make_int_range(nil, nil)
+		return make_type_scope(make_int_range(nil, nil))
 	case "Float":
-		result^ = Float_Type{.none, nil}
+		return make_type_scope(Float_Type{.none, nil})
 	case "String":
-		result^ = String_Type{nil}
+		return make_type_scope(String_Type{nil})
 	case "Bool":
-		result^ = Bool_Type{}
+		return make_type_scope(Bool_Type{})
 	case "None":
-		result^ = None_Type{}
+		return make_type_scope(None_Type{})
 	case:
-		free(result)
 		return nil
 	}
-	return result
+	return nil
 }
 
 walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {

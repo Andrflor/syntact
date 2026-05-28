@@ -11,7 +11,7 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 			tf := scope.type_folds[i]
 			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
 				result := new(Type)
-				result^ = Integer_Type{tf}
+				result^ = Integer_Type{tf, tf[0].lo.(i64)}
 				return result
 			}
 			return reduce_value(scope.values[i])
@@ -39,7 +39,7 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 			tf := v.match_scope.type_folds[v.match_index]
 			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
 				result := new(Type)
-				result^ = Integer_Type{tf}
+				result^ = Integer_Type{tf, tf[0].lo.(i64)}
 				return result
 			}
 			return reduce_value(v.match_scope.values[v.match_index])
@@ -50,7 +50,7 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 			tf := ref.match_scope.type_folds[ref.match_index]
 			if tf != nil && len(tf) == 1 && segs_is_concrete(tf) {
 				result := new(Type)
-				result^ = Integer_Type{tf}
+				result^ = Integer_Type{tf, tf[0].lo.(i64)}
 				return result
 			}
 			return reduce_value(ref.match_scope.values[ref.match_index])
@@ -117,6 +117,11 @@ carve :: proc(value: Carve_Type) -> ^Type {
 		val := value.values[i]
 		if ref.match_scope != nil && ref.match_index >= 0 && ref.match_index < len(scope.values) {
 			scope.values[ref.match_index] = val
+			vf, vf_ok := fold_to_segments(val).([]Segment)
+			if !vf_ok {
+				vf, vf_ok = fold_constraint(val).([]Segment)
+			}
+			scope.type_folds[ref.match_index] = vf_ok ? vf : nil
 		}
 	}
 
@@ -181,7 +186,7 @@ int_value :: proc(t: Integer_Type) -> i64 {
 make_int_result :: proc(val: i64) -> Type {
 	segs := make([]Segment, 1)
 	segs[0] = Segment{val, val}
-	return Integer_Type{segs}
+	return Integer_Type{segs, val}
 }
 
 int_to_f64 :: proc(i: Integer_Type) -> f64 {
@@ -485,6 +490,10 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			fmt.print("{}")
 			break
 		}
+		if len(v.names) == 1 && v.kind[0] == .Product && v.names[0] == "" && v.types[0] == nil {
+			print_type(v.values[0], depth)
+			break
+		}
 		fmt.println("{")
 		for i := 0; i < len(v.names); i += 1 {
 			indent(depth + 1)
@@ -724,6 +733,14 @@ builtin_name :: proc(seg: Segment) -> Maybe(string) {
 fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
 	if t == nil do return nil
 	#partial switch v in t^ {
+	case Scope_Type:
+		for i := 0; i < len(v.kind); i += 1 {
+			if v.kind[i] == .Product {
+				if v.type_folds[i] != nil do return v.type_folds[i]
+				return fold_constraint(v.values[i])
+			}
+		}
+		return nil
 	case Integer_Type:
 		return v.segments
 	case Range_Type:
@@ -960,9 +977,45 @@ segments_satisfies :: proc(value_segs, constraint_segs: []Segment) -> bool {
 
 // --- value folding (arithmetic propagation) ---
 
+carve_fold_lookup :: proc(t: ^Type, index: int) -> []Segment {
+	if t == nil do return nil
+	target := t
+	for {
+		#partial switch v in target^ {
+		case Carve_Type:
+			for i := 0; i < len(v.references); i += 1 {
+				if v.references[i].match_index == index {
+					segs, ok := fold_to_segments(v.values[i]).([]Segment)
+					if ok do return segs
+					segs2, ok2 := fold_constraint(v.values[i]).([]Segment)
+					if ok2 do return segs2
+					return nil
+				}
+			}
+			target = v.source
+			continue
+		case Mention_Type:
+			if v.match_scope != nil && v.match_index >= 0 {
+				target = v.match_scope.values[v.match_index]
+				continue
+			}
+		}
+		break
+	}
+	return nil
+}
+
 fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
 	if t == nil do return nil
 	#partial switch v in t^ {
+	case Scope_Type:
+		for i := 0; i < len(v.kind); i += 1 {
+			if v.kind[i] == .Product {
+				if v.type_folds[i] != nil do return v.type_folds[i]
+				return fold_to_segments(v.values[i])
+			}
+		}
+		return nil
 	case Integer_Type:
 		return v.segments
 	case Range_Type:
@@ -1051,13 +1104,16 @@ fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
 		return nil
 	case Reference_Type:
 		ref := v.reference
-		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			if ref.match_scope.type_folds[ref.match_index] != nil {
-				return ref.match_scope.type_folds[ref.match_index]
-			}
-			if ref.match_scope.constraint_folds[ref.match_index] != nil {
-				return ref.match_scope.constraint_folds[ref.match_index]
-			}
+		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
+		if v.target != nil {
+			carve_segs := carve_fold_lookup(v.target, ref.match_index)
+			if carve_segs != nil do return carve_segs
+		}
+		if ref.match_scope.type_folds[ref.match_index] != nil {
+			return ref.match_scope.type_folds[ref.match_index]
+		}
+		if ref.match_scope.constraint_folds[ref.match_index] != nil {
+			return ref.match_scope.constraint_folds[ref.match_index]
 		}
 		return nil
 	}
