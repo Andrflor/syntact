@@ -72,11 +72,13 @@ Negate_Type :: struct {
 }
 
 Scope_Type :: struct {
-	parent: ^Scope_Type,
-	names:  [dynamic]string,
-	types:  [dynamic]^Type,
-	kind:   [dynamic]Binding_Kind,
-	values: [dynamic]^Type,
+	parent:           ^Scope_Type,
+	names:            [dynamic]string,
+	types:            [dynamic]^Type,
+	kind:             [dynamic]Binding_Kind,
+	values:           [dynamic]^Type,
+	type_folds:       [dynamic][]Segment,
+	constraint_folds: [dynamic][]Segment,
 }
 
 Execute_Type :: struct {
@@ -201,10 +203,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 			walk(&a, a.scope, child)
 		case:
 			value := walk(&a, a.scope, child)
-			append(&a.scope.names, "")
-			append(&a.scope.types, nil)
-			append(&a.scope.kind, Binding_Kind.Pointing_Push)
-			append(&a.scope.values, value)
+			scope_append(a.scope, "", nil, .Pointing_Push, value)
 		}
 	}
 
@@ -248,6 +247,22 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	case:
 		return .Pointing_Push
 	}
+}
+
+scope_append :: proc(scope: ^Scope_Type, name: string, constraint: ^Type, bk: Binding_Kind, value: ^Type) {
+	append(&scope.names, name)
+	append(&scope.types, constraint)
+	append(&scope.kind, bk)
+	append(&scope.values, value)
+
+	vf, vf_ok := fold_to_segments(value).([]Segment)
+	if !vf_ok && constraint != nil {
+		vf, vf_ok = fold_constraint(constraint).([]Segment)
+	}
+	append(&scope.type_folds, vf_ok ? vf : nil)
+
+	cf, cf_ok := fold_constraint(constraint).([]Segment)
+	append(&scope.constraint_folds, cf_ok ? cf : nil)
 }
 
 scope_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16, last: bool) -> (^Type, ^Type) {
@@ -359,10 +374,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				walk(a, scope, child)
 			case:
 				value := walk(a, scope, child)
-				append(&scope.names, "")
-				append(&scope.types, nil)
-				append(&scope.kind, Binding_Kind.Pointing_Push)
-				append(&scope.values, value)
+				scope_append(scope, "", nil, .Pointing_Push, value)
 			}
 		}
 		result := new(Type)
@@ -415,10 +427,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				parent = current_scope,
 			}
 			scope := &result.(Scope_Type)
-			append(&current_scope.names, name)
-			append(&current_scope.types, constraint)
-			append(&current_scope.kind, bk)
-			append(&current_scope.values, result)
+			scope_append(current_scope, name, constraint, bk, result)
 
 			rdata := ast.node_data[right_idx]
 			r := rdata.scope
@@ -440,27 +449,18 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					walk(a, scope, child)
 				case:
 					val := walk(a, scope, child)
-					append(&scope.names, "")
-					append(&scope.types, nil)
-					append(&scope.kind, Binding_Kind.Pointing_Push)
-					append(&scope.values, val)
+					scope_append(scope, "", nil, .Pointing_Push, val)
 				}
 			}
 			return result
 		}
 		value := walk(a, current_scope, right_idx)
-		append(&current_scope.names, name)
-		append(&current_scope.types, constraint)
-		append(&current_scope.kind, bk)
-		append(&current_scope.values, value)
+		scope_append(current_scope, name, constraint, bk, value)
 		return value
 
 	case .Product:
 		value := walk(a, current_scope, data.unary.operand)
-		append(&current_scope.names, "")
-		append(&current_scope.types, nil)
-		append(&current_scope.kind, Binding_Kind.Product)
-		append(&current_scope.values, value)
+		scope_append(current_scope, "", nil, .Product, value)
 		return value
 
 	case .Expand:
@@ -475,17 +475,11 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			} else {
 				value = default_value(constraint)
 			}
-			append(&current_scope.names, "")
-			append(&current_scope.types, constraint)
-			append(&current_scope.kind, Binding_Kind.Expand)
-			append(&current_scope.values, value)
+			scope_append(current_scope, "", constraint, .Expand, value)
 			return value
 		}
 		value := walk(a, current_scope, operand_idx)
-		append(&current_scope.names, "")
-		append(&current_scope.types, nil)
-		append(&current_scope.kind, Binding_Kind.Expand)
-		append(&current_scope.values, value)
+		scope_append(current_scope, "", nil, .Expand, value)
 		return value
 
 	case .CompileTime:
@@ -506,10 +500,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 			}
 		}
-		append(&current_scope.names, name)
-		append(&current_scope.types, constraint)
-		append(&current_scope.kind, Binding_Kind.Pointing_Push)
-		append(&current_scope.values, value)
+		scope_append(current_scope, name, constraint, .Pointing_Push, value)
 		return value
 
 	case .Property:

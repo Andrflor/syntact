@@ -86,12 +86,16 @@ carve :: proc(value: Carve_Type) -> ^Type {
 	scope.types = make([dynamic]^Type, len(src.types))
 	scope.kind = make([dynamic]Binding_Kind, len(src.kind))
 	scope.values = make([dynamic]^Type, len(src.values))
+	scope.type_folds = make([dynamic][]Segment, len(src.type_folds))
+	scope.constraint_folds = make([dynamic][]Segment, len(src.constraint_folds))
 
 	for i := 0; i < len(src.names); i += 1 {
 		scope.names[i] = src.names[i]
 		scope.types[i] = src.types[i]
 		scope.kind[i] = src.kind[i]
 		scope.values[i] = src.values[i]
+		if i < len(src.type_folds) do scope.type_folds[i] = src.type_folds[i]
+		if i < len(src.constraint_folds) do scope.constraint_folds[i] = src.constraint_folds[i]
 	}
 
 	for i := 0; i < len(value.references); i += 1 {
@@ -513,20 +517,27 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 					print_type(v.values[i], depth + 1)
 				}
 			}
-			fmt.print(" [")
-			segs, segs_ok := fold_to_segments(v.values[i]).([]Segment)
-			if !segs_ok && v.types[i] != nil {
-				segs, segs_ok = fold_to_segments(v.types[i]).([]Segment)
-			}
-			if segs_ok {
-				for seg, si in segs {
-					if si > 0 do fmt.print(", ")
-					print_segment_raw(seg)
+			has_tf := i < len(v.type_folds) && v.type_folds[i] != nil
+			has_cf := i < len(v.constraint_folds) && v.constraint_folds[i] != nil
+			if has_tf || has_cf {
+				fmt.print("  ")
+				if has_tf {
+					fmt.print("t:")
+					print_segments_inline(v.type_folds[i])
 				}
-			} else {
-				print_segments(v.values[i])
+				if has_cf {
+					if has_tf do fmt.print(" ")
+					fmt.print("c:")
+					print_segments_inline(v.constraint_folds[i])
+				}
+				if has_tf && has_cf {
+					if segments_satisfies(v.type_folds[i], v.constraint_folds[i]) {
+						fmt.print(" v")
+					} else {
+						fmt.print(" x")
+					}
+				}
 			}
-			fmt.print("]")
 			fmt.println()
 		}
 		indent(depth)
@@ -672,6 +683,211 @@ builtin_name :: proc(seg: Segment) -> Maybe(string) {
 	return nil
 }
 
+// --- constraint folding (set logic: union, intersection, negation) ---
+
+fold_constraint :: proc(t: ^Type) -> Maybe([]Segment) {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Integer_Type:
+		return v.segments
+	case Range_Type:
+		left_segs, left_ok := fold_constraint(v.left).([]Segment)
+		right_segs, right_ok := fold_constraint(v.right).([]Segment)
+		lo: Maybe(i64) = nil
+		hi: Maybe(i64) = nil
+		if left_ok && len(left_segs) > 0 {
+			lo = left_segs[0].lo
+		}
+		if right_ok && len(right_segs) > 0 {
+			hi = right_segs[len(right_segs) - 1].hi
+		}
+		segs := make([]Segment, 1)
+		segs[0] = Segment{lo, hi}
+		return segs
+	case Compose_Type:
+		if v.type_fold != nil {
+			return fold_constraint(v.type_fold)
+		}
+		return fold_to_segments(t)
+	case Sum_Type:
+		left, left_ok := fold_constraint(v.left).([]Segment)
+		right, right_ok := fold_constraint(v.right).([]Segment)
+		if !left_ok do return right_ok ? right : nil
+		if !right_ok do return left
+		return segments_union(left, right)
+	case Product_Type:
+		left, left_ok := fold_constraint(v.left).([]Segment)
+		right, right_ok := fold_constraint(v.right).([]Segment)
+		if !left_ok || !right_ok do return nil
+		return segments_intersect(left, right)
+	case Negate_Type:
+		inner, inner_ok := fold_constraint(v.operand).([]Segment)
+		if !inner_ok do return nil
+		return segments_negate(inner)
+	case Mention_Type:
+		return fold_constraint(v.target)
+	case Reference_Type:
+		return fold_constraint(v.reference.match)
+	}
+	return nil
+}
+
+// merge two sorted segment lists into their union
+segments_union :: proc(a, b: []Segment) -> []Segment {
+	merged := make([dynamic]Segment)
+	i, j := 0, 0
+	for i < len(a) || j < len(b) {
+		seg: Segment
+		if i < len(a) && (j >= len(b) || seg_lo(a[i]) <= seg_lo(b[j])) {
+			seg = a[i]; i += 1
+		} else {
+			seg = b[j]; j += 1
+		}
+		if len(merged) > 0 && segments_overlap_or_adjacent(merged[len(merged) - 1], seg) {
+			merged[len(merged) - 1] = segment_merge(merged[len(merged) - 1], seg)
+		} else {
+			append(&merged, seg)
+		}
+	}
+	return merged[:]
+}
+
+// intersect two sorted segment lists
+segments_intersect :: proc(a, b: []Segment) -> []Segment {
+	result := make([dynamic]Segment)
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		lo := max_lo(a[i].lo, b[j].lo)
+		hi := min_hi(a[i].hi, b[j].hi)
+		if maybe_le(lo, hi) {
+			append(&result, Segment{lo, hi})
+		}
+		if maybe_le_hi(a[i].hi, b[j].hi) {
+			i += 1
+		} else {
+			j += 1
+		}
+	}
+	return result[:]
+}
+
+// negate segments (complement within -inf..+inf)
+segments_negate :: proc(segs: []Segment) -> []Segment {
+	result := make([dynamic]Segment)
+	prev_hi: Maybe(i64) = nil // starts at -inf
+	for seg in segs {
+		lo := seg.lo
+		if lo != nil {
+			lo_val := lo.(i64)
+			new_hi: Maybe(i64) = lo_val - 1
+			if maybe_le(prev_hi, new_hi) {
+				append(&result, Segment{prev_hi, new_hi})
+			}
+		} else {
+			// seg starts at -inf, skip gap
+		}
+		hi := seg.hi
+		if hi != nil {
+			prev_hi = hi.(i64) + 1
+		} else {
+			prev_hi = nil // +inf, nothing after
+			return result[:]
+		}
+	}
+	// gap from prev_hi to +inf
+	append(&result, Segment{prev_hi, nil})
+	return result[:]
+}
+
+// helpers for Maybe(i64) comparison
+seg_lo :: proc(s: Segment) -> i64 {
+	lo, ok := s.lo.(i64)
+	return ok ? lo : min(i64)
+}
+
+segments_overlap_or_adjacent :: proc(a, b: Segment) -> bool {
+	a_hi, a_ok := a.hi.(i64)
+	b_lo, b_ok := b.lo.(i64)
+	if !a_ok do return true  // a goes to +inf
+	if !b_ok do return true  // b starts at -inf
+	return a_hi >= b_lo - 1
+}
+
+segment_merge :: proc(a, b: Segment) -> Segment {
+	return Segment{min_lo(a.lo, b.lo), max_hi(a.hi, b.hi)}
+}
+
+// for lo bounds: nil = -inf
+max_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
+	a_val, a_ok := a.(i64)
+	b_val, b_ok := b.(i64)
+	if !a_ok do return b  // -inf < anything, take b
+	if !b_ok do return a  // -inf < anything, take a
+	return max(a_val, b_val)
+}
+
+min_lo :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
+	a_val, a_ok := a.(i64)
+	b_val, b_ok := b.(i64)
+	if !a_ok do return a  // -inf is smallest
+	if !b_ok do return b  // -inf is smallest
+	return min(a_val, b_val)
+}
+
+// for hi bounds: nil = +inf
+max_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
+	a_val, a_ok := a.(i64)
+	b_val, b_ok := b.(i64)
+	if !a_ok do return a  // +inf is largest
+	if !b_ok do return b  // +inf is largest
+	return max(a_val, b_val)
+}
+
+min_hi :: proc(a, b: Maybe(i64)) -> Maybe(i64) {
+	a_val, a_ok := a.(i64)
+	b_val, b_ok := b.(i64)
+	if !a_ok do return b  // +inf > anything, take b
+	if !b_ok do return a  // +inf > anything, take a
+	return min(a_val, b_val)
+}
+
+// lo <= hi comparison (nil lo = -inf, nil hi = +inf)
+maybe_le :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> bool {
+	lo_val, lo_ok := lo.(i64)
+	hi_val, hi_ok := hi.(i64)
+	if !lo_ok do return true   // -inf <= anything
+	if !hi_ok do return true   // anything <= +inf
+	return lo_val <= hi_val
+}
+
+// hi <= hi comparison (nil = +inf)
+maybe_le_hi :: proc(a, b: Maybe(i64)) -> bool {
+	a_val, a_ok := a.(i64)
+	b_val, b_ok := b.(i64)
+	if !a_ok do return false  // +inf <= anything? no (except +inf)
+	if !b_ok do return true   // anything <= +inf
+	return a_val <= b_val
+}
+
+// A ⊆ B : every segment of A is contained in some segment of B
+segments_satisfies :: proc(value_segs, constraint_segs: []Segment) -> bool {
+	if value_segs == nil || constraint_segs == nil do return false
+	for vs in value_segs {
+		found := false
+		for cs in constraint_segs {
+			// vs.lo >= cs.lo && vs.hi <= cs.hi
+			if maybe_le(cs.lo, vs.lo) && maybe_le_hi(vs.hi, cs.hi) {
+				found = true
+				break
+			}
+		}
+		if !found do return false
+	}
+	return true
+}
+
+// --- value folding (arithmetic propagation) ---
+
 fold_to_segments :: proc(t: ^Type) -> Maybe([]Segment) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -782,6 +998,72 @@ fold_arith_segments :: proc(a, b: Segment, op: Operator_Kind) -> Maybe([]Segment
 		p4 := a_hi * b_hi
 		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
 		return segs
+	case .Divide:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		if b_lo == 0 && b_hi == 0 do return nil
+		// avoid division by zero in range
+		bl := b_lo == 0 ? i64(1) : b_lo
+		bh := b_hi == 0 ? i64(-1) : b_hi
+		if bl > bh do return nil
+		p1 := a_lo / bl
+		p2 := a_lo / bh
+		p3 := a_hi / bl
+		p4 := a_hi / bh
+		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return segs
+	case .Mod:
+		if !b_lo_ok || !b_hi_ok do return nil
+		if b_lo == 0 && b_hi == 0 do return nil
+		abs_max := max(abs(b_lo), abs(b_hi))
+		segs[0] = Segment{-(abs_max - 1), abs_max - 1}
+		return segs
+	case .LShift:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		if b_lo < 0 || b_hi >= 64 do return nil
+		p1 := a_lo << u64(b_lo)
+		p2 := a_lo << u64(b_hi)
+		p3 := a_hi << u64(b_lo)
+		p4 := a_hi << u64(b_hi)
+		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return segs
+	case .RShift:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		if b_lo < 0 || b_hi >= 64 do return nil
+		p1 := a_lo >> u64(b_lo)
+		p2 := a_lo >> u64(b_hi)
+		p3 := a_hi >> u64(b_lo)
+		p4 := a_hi >> u64(b_hi)
+		segs[0] = Segment{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		return segs
+	case .BitAnd:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		if a_lo == a_hi && b_lo == b_hi {
+			val := a_lo & b_lo
+			segs[0] = Segment{val, val}
+			return segs
+		}
+		// conservative: result is between 0 and min of the two maxes
+		segs[0] = Segment{i64(0), min(a_hi, b_hi)}
+		return segs
+	case .BitOr:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		if a_lo == a_hi && b_lo == b_hi {
+			val := a_lo | b_lo
+			segs[0] = Segment{val, val}
+			return segs
+		}
+		segs[0] = Segment{max(a_lo, b_lo), max(a_hi, b_hi)}
+		return segs
+	case .Xor:
+		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
+		if a_lo == a_hi && b_lo == b_hi {
+			val := a_lo ~ b_lo
+			segs[0] = Segment{val, val}
+			return segs
+		}
+		// conservative
+		segs[0] = Segment{i64(0), max(a_hi, b_hi)}
+		return segs
 	}
 	return nil
 }
@@ -825,6 +1107,15 @@ print_segments :: proc(t: ^Type) {
 	case:
 		fmt.print("?")
 	}
+}
+
+print_segments_inline :: proc(segs: []Segment) {
+	fmt.print("[")
+	for seg, i in segs {
+		if i > 0 do fmt.print(", ")
+		print_segment_raw(seg)
+	}
+	fmt.print("]")
 }
 
 print_segment_raw :: proc(seg: Segment) {
