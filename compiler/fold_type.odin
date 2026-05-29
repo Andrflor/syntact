@@ -9,7 +9,11 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	integer_intervals, segs_ok := fold_to_integer_intervals(t).([]Integer_Interval)
 	if segs_ok {
 		tf := new(Type)
-		tf^ = Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
+		tf^ = Integer_Type {
+			integer_intervals,
+			true,
+			default_for_integer_intervals(integer_intervals),
+		}
 		comp.type_fold = tf
 	} else {
 		sem_error(
@@ -414,8 +418,8 @@ print_integer_intervals_inline :: proc(integer_intervals: []Integer_Interval) {
 }
 
 print_range_inline :: proc(interval: Integer_Interval) {
-	lo, lo_ok := interval.lo.(i64)
-	hi, hi_ok := interval.hi.(i64)
+	lo, lo_ok := interval.lo.(i128)
+	hi, hi_ok := interval.hi.(i128)
 	if lo_ok && hi_ok && lo == hi {
 		fmt.print(lo)
 		return
@@ -426,8 +430,8 @@ print_range_inline :: proc(interval: Integer_Interval) {
 }
 
 print_integer_interval :: proc(interval: Integer_Interval) {
-	lo, lo_ok := interval.lo.(i64)
-	hi, hi_ok := interval.hi.(i64)
+	lo, lo_ok := interval.lo.(i128)
+	hi, hi_ok := interval.hi.(i128)
 	if lo_ok && hi_ok && lo == hi {
 		fmt.print(lo)
 	} else {
