@@ -1,5 +1,6 @@
 package compiler
 
+import "base:runtime"
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
@@ -8,8 +9,8 @@ import "core:strings"
  * SECTION 1: SHARED TYPES
  * ====================================================================== */
 Integer_Interval :: struct {
-	lo: Maybe(i64), // nil = -∞
-	hi: Maybe(i64), // nil = +∞
+	lo: Maybe(i128), // nil = -∞
+	hi: Maybe(i128), // nil = +∞
 }
 
 FloatKind :: enum {
@@ -110,8 +111,9 @@ Mention_Type :: struct {
 }
 
 Integer_Type :: struct {
-	integer_intervals:      []Integer_Interval,
-	default_value: Maybe(i64),
+	integer_intervals: []Integer_Interval,
+	meta:              bool,
+	default_value:     Maybe(i128),
 }
 
 Float_Type :: struct {
@@ -391,7 +393,7 @@ type_default :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Integer_Type:
-		d, d_ok := v.default_value.(i64)
+		d, d_ok := v.default_value.(i128)
 		if d_ok {
 			result := new(Type)
 			result^ = make_int_const(d)
@@ -870,7 +872,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	case .Integer:
 		val, ok := strconv.parse_u64_of_base(text, 10)
 		if ok {
-			result^ = make_int_const(i64(val))
+			result^ = make_int_const(i128(val))
 		} else {
 			result^ = Invalid_Type{}
 		}
@@ -878,7 +880,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 		raw := len(text) > 2 ? text[2:] : text
 		val, ok := strconv.parse_u64_of_base(raw, 16)
 		if ok {
-			result^ = make_int_const(i64(val))
+			result^ = make_int_const(i128(val))
 		} else {
 			result^ = Invalid_Type{}
 		}
@@ -886,7 +888,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 		raw := len(text) > 2 ? text[2:] : text
 		val, ok := strconv.parse_u64_of_base(raw, 2)
 		if ok {
-			result^ = make_int_const(i64(val))
+			result^ = make_int_const(i128(val))
 		} else {
 			result^ = Invalid_Type{}
 		}
@@ -902,85 +904,51 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	return result
 }
 
-make_int_range :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> Integer_Type {
+make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128), meta := true) -> Integer_Type {
 	integer_intervals := make([]Integer_Interval, 1)
 	integer_intervals[0] = Integer_Interval{lo, hi}
-	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
+	return Integer_Type{integer_intervals, meta, default_for_integer_intervals(integer_intervals)}
 }
 
-make_int_const :: proc(val: i64) -> Integer_Type {
-	return make_int_range(val, val)
+make_int_const :: proc(val: i128) -> Integer_Type {
+	return make_int_range(val, val, false)
 }
 
-default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i64) {
+default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {
 	if len(integer_intervals) == 0 do return nil
 	for interval in integer_intervals {
-		lo, lo_ok := interval.lo.(i64)
-		hi, hi_ok := interval.hi.(i64)
-		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return i64(0)
+		lo, lo_ok := interval.lo.(i128)
+		hi, hi_ok := interval.hi.(i128)
+		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return i128(0)
 	}
-	lo, lo_ok := integer_intervals[0].lo.(i64)
+	lo, lo_ok := integer_intervals[0].lo.(i128)
 	if lo_ok do return lo
-	hi, hi_ok := integer_intervals[len(integer_intervals) - 1].hi.(i64)
+	hi, hi_ok := integer_intervals[len(integer_intervals) - 1].hi.(i128)
 	if hi_ok do return hi
-	return i64(0)
+	return i128(0)
 }
 
-make_type_scope :: proc(inner: Type) -> ^Type {
-	val := new(Type)
-	val^ = inner
-	scope := new(Scope_Type)
-	append(&scope.names, "")
-	append(&scope.types, nil)
-	append(&scope.kind, Binding_Kind.Product)
-	append(&scope.values, val)
-	vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
-	if !vf_ok {
-		vf, vf_ok = fold_constraint(val).([]Integer_Interval)
-	}
-	append(&scope.type_folds, vf_ok ? vf : nil)
-	append(&scope.constraint_folds, nil)
-	result := new(Type)
-	result^ = scope^
-	return result
-}
 
-resolve_builtin :: proc(name: string) -> ^Type {
-	switch name {
-	case "u8":
-		return make_type_scope(make_int_range(0, 255))
-	case "i8":
-		return make_type_scope(make_int_range(-128, 127))
-	case "u16":
-		return make_type_scope(make_int_range(0, 65535))
-	case "i16":
-		return make_type_scope(make_int_range(-32768, 32767))
-	case "u32":
-		return make_type_scope(make_int_range(0, 4294967295))
-	case "i32":
-		return make_type_scope(make_int_range(-2147483648, 2147483647))
-	case "u64":
-		return make_type_scope(make_int_range(0, 9223372036854775807))
-	case "i64":
-		return make_type_scope(make_int_range(-9223372036854775808, 9223372036854775807))
-	case "f32":
-		return make_type_scope(Float_Type{.f32, nil})
-	case "f64":
-		return make_type_scope(Float_Type{.f64, nil})
-	case "Int":
-		return make_type_scope(make_int_range(nil, nil))
-	case "Float":
-		return make_type_scope(Float_Type{.none, nil})
-	case "String":
-		return make_type_scope(String_Type{nil})
-	case "Bool":
-		return make_type_scope(Bool_Type{})
-	case "None":
-		return make_type_scope(None_Type{})
-	case:
-		return nil
-	}
-	return nil
+builtins: map[string]Type
+
+@(init)
+init_builtins :: proc "contextless" () {
+	context = runtime.default_context()
+	builtins["u8"] = make_int_range(0, 255)
+	builtins["i8"] = make_int_range(-128, 127)
+	builtins["u16"] = make_int_range(0, 65535)
+	builtins["i16"] = make_int_range(-32768, 32767)
+	builtins["u32"] = make_int_range(0, 4294967295)
+	builtins["i32"] = make_int_range(-2147483648, 2147483647)
+	builtins["u64"] = make_int_range(0, 18446744073709551615)
+	builtins["i64"] = make_int_range(-9223372036854775808, 9223372036854775807)
+	builtins["f32"] = Float_Type{.f32, nil}
+	builtins["f64"] = Float_Type{.f64, nil}
+	builtins["Int"] = make_int_range(nil, nil)
+	builtins["Float"] = Float_Type{.none, nil}
+	builtins["String"] = String_Type{nil}
+	builtins["Bool"] = Bool_Type{}
+	builtins["None"] = None_Type{}
 }
 
 walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {
@@ -1009,8 +977,11 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 	}
 
 	if ordinal < 0 {
-		builtin := resolve_builtin(name)
-		if builtin != nil do return builtin
+		if builtin, ok := builtins[name]; ok {
+			result := new(Type)
+			result^ = builtin
+			return result
+		}
 	}
 
 	sem_error(
@@ -1023,8 +994,6 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 	result^ = Invalid_Type{}
 	return result
 }
-
-
 
 
 /* ======================================================================

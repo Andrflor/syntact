@@ -10,7 +10,7 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 			tf := scope.type_folds[i]
 			if tf != nil && len(tf) == 1 && integer_intervals_is_concrete(tf) {
 				result := new(Type)
-				result^ = Integer_Type{tf, tf[0].lo.(i64)}
+				result^ = Integer_Type{tf, false, tf[0].lo.(i128)}
 				return result
 			}
 			return reduce_value(scope.values[i])
@@ -345,7 +345,7 @@ compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 		if !int_is_concrete(l) do return Bool_Type{false}
 		r_i, r_i_ok := rv.(Integer_Type)
 		r_f, r_f_ok := rv.(Float_Type)
-		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{i64_cmp(int_value(l), int_value(r_i), op)}
+		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{i128_cmp(int_value(l), int_value(r_i), op)}
 		if r_f_ok do return Bool_Type{float_cmp(int_to_f64(l), r_f.value.(f64), op)}
 	case Float_Type:
 		r_f, r_f_ok := rv.(Float_Type)
@@ -358,7 +358,7 @@ compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 }
 
 
-i64_cmp :: #force_inline proc(a, b: i64, op: Operator_Kind) -> bool {
+i128_cmp :: #force_inline proc(a, b: i128, op: Operator_Kind) -> bool {
 	#partial switch op {
 	case .Less:
 		return a < b
@@ -395,7 +395,7 @@ compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		if !r_ok || !int_is_concrete(r) do return nil
 		a := int_value(l)
 		b := int_value(r)
-		val: i64
+		val: i128
 		#partial switch op {
 		case .BitAnd:
 			val = a & b
@@ -426,14 +426,14 @@ compose_shift :: proc(lv, rv: Type, is_left: bool) -> Type {
 	if !int_is_concrete(l) || !int_is_concrete(r) do return nil
 	a := int_value(l)
 	b := int_value(r)
-	if b < 0 || b >= 64 do return nil
+	if b < 0 || b >= 128 do return nil
 
-	val: i64
+	val: i128
 	ub := u64(b)
 	if is_left {
-		val = i64(u64(a) << ub)
+		val = i128(u128(a) << ub)
 	} else {
-		val = i64(u64(a) >> ub)
+		val = i128(u128(a) >> ub)
 	}
 	return make_int_result(val)
 }
