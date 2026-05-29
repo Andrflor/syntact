@@ -47,10 +47,37 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 				}
 				return make_producer_scope_multi(folded[:])
 			}
+		case Mention_Type:
+			if v.match_scope != nil && v.match_index >= 0 {
+				return fold_constraint_target(v.match_scope, v.match_index)
+			}
+		case Reference_Type:
+			ref := v.reference
+			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+				return fold_constraint_target(ref.match_scope, ref.match_index)
+			}
 		}
 	}
 	if r := fold_constraint_integer(t); r != nil do return r
 	return nil
+}
+
+// fold_constraint_target folds the value at scope[i] when it is used as a
+// constraint. If that value is Unknown (??), the constraint is only resolvable
+// when the Unknown's type is a single concrete value: a singleton constraint
+// fold becomes that value, anything else stays Unknown (which never satisfies).
+fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
+	value := scope.values[i]
+	if value != nil {
+		if _, is_unknown := value^.(Unknown_Type); is_unknown {
+			ty := scope.constraint_folds[i]
+			if ty != nil && fold_is_concrete_value(ty) do return ty
+			r := new(Type)
+			r^ = Unknown_Type{}
+			return r
+		}
+	}
+	return fold_constraint(value)
 }
 
 // fold_value_type yields the TYPE of a value (the RIGHT side, a typeof).

@@ -277,32 +277,15 @@ scope_append :: proc(
 
 	// An unfilled value (??) is legitimate under a constraint: there is no value
 	// to prove yet. Its type_fold stays nil — so if it is later used AS a
-	// constraint, fold_constraint hits the Unknown and fails (not resolvable).
+	// constraint, fold_constraint hits the Unknown and reports it then.
 	if value != nil {
 		if _, is_unknown := value^.(Unknown_Type); is_unknown do return
-	}
-
-	display := name != "" ? name : "<production>"
-
-	// A constraint is present in the source but did not resolve to a static
-	// value (e.g. it references an Unknown whose type is not a singleton).
-	// A constraint must be statically known, so this is an error in itself.
-	if constraint != nil && fc == nil {
-		sem_error(
-			a,
-			fmt.tprintf(
-				"'%s' cannot be type-checked: its constraint is not statically resolvable",
-				display,
-			),
-			.Invalid_Constraint,
-			node_pos(a, node),
-		)
-		return
 	}
 
 	// No imposed constraint → nothing to prove.
 	if fc == nil do return
 
+	display := name != "" ? name : "<production>"
 	if ft == nil {
 		sem_error(
 			a,
