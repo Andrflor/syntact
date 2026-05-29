@@ -126,7 +126,7 @@ carve :: proc(value: Carve_Type) -> ^Type {
 		val := value.values[i]
 		if ref.match_scope != nil && ref.match_index >= 0 && ref.match_index < len(scope.values) {
 			scope.values[ref.match_index] = val
-			scope.type_folds[ref.match_index] = fold_type(val)
+			scope.type_folds[ref.match_index] = fold_value_type(val)
 		}
 	}
 

@@ -203,9 +203,6 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				if s, ok := stored_fold_intervals(v.type_folds[i]).([]Integer_Interval); ok {
-					return s
-				}
 				return fold_constraint_intervals(v.values[i])
 			}
 		}
@@ -249,24 +246,14 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		if !inner_ok do return nil
 		return integer_intervals_negate(inner)
 	case Mention_Type:
+		// A constraint folds the VALUE of its target, never the target's type.
+		// An Unknown value has no case here → nil → not statically resolvable.
 		if v.match_scope != nil && v.match_index >= 0 {
-			if s, ok := stored_fold_intervals(v.match_scope.constraint_folds[v.match_index]).([]Integer_Interval); ok {
-				return s
-			}
-			if s, ok := stored_fold_intervals(v.match_scope.type_folds[v.match_index]).([]Integer_Interval); ok {
-				return s
-			}
 			return fold_constraint_intervals(v.match_scope.values[v.match_index])
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			if s, ok := stored_fold_intervals(ref.match_scope.constraint_folds[ref.match_index]).([]Integer_Interval); ok {
-				return s
-			}
-			if s, ok := stored_fold_intervals(ref.match_scope.type_folds[ref.match_index]).([]Integer_Interval); ok {
-				return s
-			}
 			return fold_constraint_intervals(ref.match_scope.values[ref.match_index])
 		}
 	}

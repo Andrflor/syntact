@@ -265,25 +265,44 @@ scope_append :: proc(
 	append(&scope.kind, bk)
 	append(&scope.values, value)
 
-	// ft: the constraint derived from what the value produces (its envelope).
-	// fc: the constraint imposed by this binding, which must resolve statically.
-	ft := fold_type(value)
+	// ft: the TYPE of the value (right side, a typeof) — a concrete singleton
+	//     stays itself, a set becomes its producer scope {-> set}.
+	// fc: the VALUE of the imposed constraint (left side) — the set the value
+	//     must fall into. Must resolve statically.
+	ft := fold_value_type(value)
 	fc := fold_constraint(constraint)
 
-	// when the value is unknown but a constraint is given, the binding's
-	// envelope *is* the constraint (e.g. an unfilled parameter).
-	if ft == nil && value != nil {
-		if _, is_unknown := value^.(Unknown_Type); is_unknown {
-			ft = fc
-		}
-	}
 	append(&scope.type_folds, ft)
 	append(&scope.constraint_folds, fc)
+
+	// An unfilled value (??) is legitimate under a constraint: there is no value
+	// to prove yet. Its type_fold stays nil — so if it is later used AS a
+	// constraint, fold_constraint hits the Unknown and fails (not resolvable).
+	if value != nil {
+		if _, is_unknown := value^.(Unknown_Type); is_unknown do return
+	}
+
+	display := name != "" ? name : "<production>"
+
+	// A constraint is present in the source but did not resolve to a static
+	// value (e.g. it references an Unknown whose type is not a singleton).
+	// A constraint must be statically known, so this is an error in itself.
+	if constraint != nil && fc == nil {
+		sem_error(
+			a,
+			fmt.tprintf(
+				"'%s' cannot be type-checked: its constraint is not statically resolvable",
+				display,
+			),
+			.Invalid_Constraint,
+			node_pos(a, node),
+		)
+		return
+	}
 
 	// No imposed constraint → nothing to prove.
 	if fc == nil do return
 
-	display := name != "" ? name : "<production>"
 	if ft == nil {
 		sem_error(
 			a,
@@ -396,6 +415,9 @@ type_default :: proc(t: ^Type) -> ^Type {
 			result^ = make_int_const(d)
 			return result
 		}
+	case Range_Type:
+		// Default of a range is its lower bound (the first value in the interval).
+		return type_default(v.left)
 	case Product_Type:
 		return type_default(v.left)
 	case Sum_Type:
@@ -730,7 +752,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope != nil && carve_index >= 0 {
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
-						vf := fold_type(val)
+						vf := fold_value_type(val)
 						if vf != nil && !satisfy(vf, cf) {
 							sem_error(
 								a,
@@ -778,7 +800,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope != nil && carve_index >= 0 {
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
-						vf := fold_type(val)
+						vf := fold_value_type(val)
 						if vf != nil && !satisfy(vf, cf) {
 							sem_error(
 								a,
