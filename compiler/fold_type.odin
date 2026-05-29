@@ -15,26 +15,159 @@ import "core:fmt"
 // To add a domain (float, string), give it fold_*_<domain>/<domain>_satisfy/
 // <domain>_to_string and add a case here.
 
-fold_type :: proc(t: ^Type) -> ^Type {
-	if r := fold_type_integer(t); r != nil do return r
-	return nil
-}
+// A binding `constraint : … -> value` is checked by matching the *type* of the
+// value against the *value* of the constraint:
+//
+//   - LEFT of `:` (the constraint) folds to its VALUE — the set it denotes.
+//     u8 -> Integer_Type{0..255}. That is fold_constraint.
+//   - RIGHT of `->` (the value) folds to its TYPE (a typeof). A concrete
+//     singleton (10, or 5..5) is its own type: Integer_Type{10,10}. A set
+//     (u8, 1..2, >=20) is NOT a value, so its type is the producer scope
+//     {-> set}. That is fold_value_type. The value/set split is SEMANTIC:
+//     singleton (hi==lo) -> value, otherwise -> producer.
+//
+// satisfy then proves fold_value_type(value) fits fold_constraint(constraint).
 
+// fold_constraint folds the imposed constraint to the set the value must fall
+// into (the LEFT side). A producer scope {-> X} is NOT flattened: its value is
+// the producer of fold_constraint(X), mirroring fold_value_type on the right so
+// {->u8} (constraint) matches u8 (value). A plain (non-producer) scope keeps
+// its shape. Returns nil when it cannot be resolved statically.
 fold_constraint :: proc(t: ^Type) -> ^Type {
+	if t != nil {
+		#partial switch v in t^ {
+		case Scope_Type:
+			prods := scope_productions(v)
+			if len(prods) > 0 {
+				folded := make([dynamic]^Type, 0, len(prods))
+				for p in prods {
+					fp := fold_constraint(p)
+					if fp == nil do return nil
+					append(&folded, fp)
+				}
+				return make_producer_scope_multi(folded[:])
+			}
+		}
+	}
 	if r := fold_constraint_integer(t); r != nil do return r
 	return nil
 }
 
-// satisfy proves the folded value ft fits inside the folded constraint fc.
-// Dispatches on the constraint's domain; cross-domain never satisfies.
+// fold_value_type yields the TYPE of a value (the RIGHT side, a typeof).
+// Singleton -> the value itself; any wider set -> the producer scope {-> set}.
+fold_value_type :: proc(t: ^Type) -> ^Type {
+	// A producer scope {-> X} on the right is itself a value of a higher meta
+	// level: its type is the producer of fold_value_type(X). This mirrors
+	// fold_constraint on the left so {->X} matches across sides.
+	if t != nil {
+		#partial switch v in t^ {
+		case Scope_Type:
+			prods := scope_productions(v)
+			if len(prods) > 0 {
+				folded := make([dynamic]^Type, 0, len(prods))
+				for p in prods {
+					fp := fold_value_type(p)
+					if fp == nil do return nil
+					append(&folded, fp)
+				}
+				return make_producer_scope_multi(folded[:])
+			}
+		}
+	}
+	// Envelope of the value. fold_type_integer covers concrete values and
+	// arithmetic; sets built with ~ | & only resolve through the constraint
+	// fold, so fall back to it for those.
+	env := fold_type_integer(t)
+	if env == nil do env = fold_constraint_integer(t)
+	if env == nil do return nil
+	if fold_is_concrete_value(env) do return env
+	return make_producer_scope(env)
+}
+
+// fold_is_concrete_value reports whether a folded ^Type denotes one concrete
+// value (a singleton) rather than a set/range. Domain dispatch.
+fold_is_concrete_value :: proc(t: ^Type) -> bool {
+	if t == nil do return false
+	#partial switch v in t^ {
+	case Integer_Type:
+		return integer_intervals_is_concrete(v.integer_intervals)
+	}
+	return false
+}
+
+// make_producer_scope builds the scope {-> produces} — the type of a set, one
+// meta level up. Reuses Scope_Type (a single .Product binding).
+make_producer_scope :: proc(produces: ^Type) -> ^Type {
+	if produces == nil do return nil
+	return make_producer_scope_multi([]^Type{produces})
+}
+
+// make_producer_scope_multi builds a producer scope with one .Product binding
+// per element of produces (preserving order).
+make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
+	scope := new(Scope_Type)
+	for p in produces {
+		append(&scope.names, "")
+		append(&scope.types, nil)
+		append(&scope.kind, Binding_Kind.Product)
+		append(&scope.values, p)
+		append(&scope.type_folds, nil)
+		append(&scope.constraint_folds, nil)
+	}
+	r := new(Type)
+	r^ = scope^
+	return r
+}
+
+// satisfy proves the folded value ft (a typeof) fits the folded constraint fc.
+//
+//   - ft Integer_Type vs fc Integer_Type : a concrete value against a set →
+//     membership (10 ∈ u8). u8:a -> 10 ✅.
+//   - ft Scope (producer) vs fc Integer_Type : a set is not a member of a set →
+//     fail. u8:a -> u8 ❌ (u8 is not of type u8).
+//   - ft Scope vs fc Scope : two producers → match their productions in order.
+//     {->u8}:a -> u8 ✅.
 satisfy :: proc(ft, fc: ^Type) -> bool {
 	if ft == nil || fc == nil do return false
 	#partial switch f in fc^ {
 	case Integer_Type:
 		v, ok := ft^.(Integer_Type)
 		return ok && integer_satisfy(v, f)
+	case Scope_Type:
+		v, ok := ft^.(Scope_Type)
+		if !ok do return false
+		return scope_satisfy(v, f)
 	}
 	return false
+}
+
+// scope_satisfy matches two scopes: if both expose productions, every
+// constraint production must be satisfied by the matching value production (by
+// order). Otherwise it falls back to shape matching (same field names/arity).
+scope_satisfy :: proc(vs, cs: Scope_Type) -> bool {
+	v_prods := scope_productions(vs)
+	c_prods := scope_productions(cs)
+	if len(c_prods) > 0 || len(v_prods) > 0 {
+		if len(v_prods) != len(c_prods) do return false
+		for i in 0 ..< len(c_prods) {
+			if !satisfy(v_prods[i], c_prods[i]) do return false
+		}
+		return true
+	}
+	// No productions: match the shape (names + arity).
+	if len(vs.names) != len(cs.names) do return false
+	for i in 0 ..< len(cs.names) {
+		if vs.names[i] != cs.names[i] do return false
+	}
+	return true
+}
+
+scope_productions :: proc(s: Scope_Type) -> [dynamic]^Type {
+	out := make([dynamic]^Type, 0, len(s.kind))
+	for i in 0 ..< len(s.kind) {
+		if s.kind[i] == .Product do append(&out, s.values[i])
+	}
+	return out
 }
 
 // type_to_string renders a folded ^Type for error messages.
@@ -51,7 +184,9 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if t == nil do return
 	comp, ok := &t^.(Compose_Type)
 	if !ok do return
-	folded := fold_type(t)
+	// fold_compose stores the raw numeric envelope of the arithmetic (a value),
+	// not its typeof — the envelope is consumed by further interval arithmetic.
+	folded := fold_type_integer(t)
 	if folded != nil {
 		comp.type_fold = folded
 	} else {
@@ -190,7 +325,15 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			break
 		}
 		if len(v.names) == 1 && v.kind[0] == .Product && v.names[0] == "" && v.types[0] == nil {
+			// Root scope (the file): collapse to its sole production.
+			if depth == 0 {
+				print_type(v.values[0], depth)
+				break
+			}
+			// Nested single-production scope = a producer {->X}: print inline.
+			fmt.print("{->")
 			print_type(v.values[0], depth)
+			fmt.print("}")
 			break
 		}
 		fmt.println("{")
