@@ -78,8 +78,8 @@ Scope_Type :: struct {
 	types:            [dynamic]^Type,
 	kind:             [dynamic]Binding_Kind,
 	values:           [dynamic]^Type,
-	type_folds:       [dynamic][]Integer_Interval,
-	constraint_folds: [dynamic][]Integer_Interval,
+	type_folds:       [dynamic]^Type,
+	constraint_folds: [dynamic]^Type,
 }
 
 Execute_Type :: struct {
@@ -112,7 +112,6 @@ Mention_Type :: struct {
 
 Integer_Type :: struct {
 	integer_intervals: []Integer_Interval,
-	meta:              bool,
 	default_value:     Maybe(i128),
 }
 
@@ -266,50 +265,48 @@ scope_append :: proc(
 	append(&scope.kind, bk)
 	append(&scope.values, value)
 
-	vf, vf_ok := fold_to_integer_intervals(value).([]Integer_Interval)
-	if !vf_ok {
-		vf, vf_ok = fold_constraint(value).([]Integer_Interval)
-	}
-	if !vf_ok && constraint != nil {
-		is_unknown := false
-		if value != nil {
-			_, is_unknown = value^.(Unknown_Type)
-		}
-		if is_unknown {
-			vf, vf_ok = fold_constraint(constraint).([]Integer_Interval)
-		}
-	}
-	append(&scope.type_folds, vf_ok ? vf : nil)
+	// ft: the constraint derived from what the value produces (its envelope).
+	// fc: the constraint imposed by this binding, which must resolve statically.
+	ft := fold_type(value)
+	fc := fold_constraint(constraint)
 
-	cf, cf_ok := fold_constraint(constraint).([]Integer_Interval)
-	append(&scope.constraint_folds, cf_ok ? cf : nil)
-
-	if cf_ok {
-		display := name != "" ? name : "<production>"
-		if !vf_ok {
-			sem_error(
-				a,
-				fmt.tprintf(
-					"'%s' has constraint %s but its value could not be resolved",
-					display,
-					pretty_integer_intervals(cf),
-				),
-				.Constraint_Violation,
-				node_pos(a, node),
-			)
-		} else if !integer_intervals_satisfy(vf, cf) {
-			sem_error(
-				a,
-				fmt.tprintf(
-					"'%s' value %s does not fit in %s",
-					display,
-					pretty_integer_intervals(vf),
-					pretty_integer_intervals(cf),
-				),
-				.Constraint_Violation,
-				node_pos(a, node),
-			)
+	// when the value is unknown but a constraint is given, the binding's
+	// envelope *is* the constraint (e.g. an unfilled parameter).
+	if ft == nil && value != nil {
+		if _, is_unknown := value^.(Unknown_Type); is_unknown {
+			ft = fc
 		}
+	}
+	append(&scope.type_folds, ft)
+	append(&scope.constraint_folds, fc)
+
+	// No imposed constraint → nothing to prove.
+	if fc == nil do return
+
+	display := name != "" ? name : "<production>"
+	if ft == nil {
+		sem_error(
+			a,
+			fmt.tprintf(
+				"'%s' has constraint %s but its value could not be resolved",
+				display,
+				type_to_string(fc),
+			),
+			.Constraint_Violation,
+			node_pos(a, node),
+		)
+	} else if !satisfy(ft, fc) {
+		sem_error(
+			a,
+			fmt.tprintf(
+				"'%s' value %s does not fit in %s",
+				display,
+				type_to_string(ft),
+				type_to_string(fc),
+			),
+			.Constraint_Violation,
+			node_pos(a, node),
+		)
 	}
 }
 
@@ -733,18 +730,15 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope != nil && carve_index >= 0 {
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
-						vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
-						if !vf_ok {
-							vf, vf_ok = fold_constraint(val).([]Integer_Interval)
-						}
-						if vf_ok && !integer_intervals_satisfy(vf, cf) {
+						vf := fold_type(val)
+						if vf != nil && !satisfy(vf, cf) {
 							sem_error(
 								a,
 								fmt.tprintf(
 									"carve '%s' value %s does not fit in %s",
 									cname,
-									pretty_integer_intervals(vf),
-									pretty_integer_intervals(cf),
+									type_to_string(vf),
+									type_to_string(cf),
 								),
 								.Constraint_Violation,
 								node_pos(a, val_idx),
@@ -784,17 +778,14 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope != nil && carve_index >= 0 {
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
-						vf, vf_ok := fold_to_integer_intervals(val).([]Integer_Interval)
-						if !vf_ok {
-							vf, vf_ok = fold_constraint(val).([]Integer_Interval)
-						}
-						if vf_ok && !integer_intervals_satisfy(vf, cf) {
+						vf := fold_type(val)
+						if vf != nil && !satisfy(vf, cf) {
 							sem_error(
 								a,
 								fmt.tprintf(
 									"positional carve value %s does not fit in %s",
-									pretty_integer_intervals(vf),
-									pretty_integer_intervals(cf),
+									type_to_string(vf),
+									type_to_string(cf),
 								),
 								.Constraint_Violation,
 								node_pos(a, child),
@@ -904,14 +895,14 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	return result
 }
 
-make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128), meta := true) -> Integer_Type {
+make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128)) -> Integer_Type {
 	integer_intervals := make([]Integer_Interval, 1)
 	integer_intervals[0] = Integer_Interval{lo, hi}
-	return Integer_Type{integer_intervals, meta, default_for_integer_intervals(integer_intervals)}
+	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
 }
 
 make_int_const :: proc(val: i128) -> Integer_Type {
-	return make_int_range(val, val, false)
+	return make_int_range(val, val)
 }
 
 default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {

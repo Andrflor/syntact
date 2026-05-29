@@ -2,19 +2,58 @@ package compiler
 
 import "core:fmt"
 
+// --- generic fold (domain-agnostic dispatch) ---
+//
+// fold_type derives the constraint a value *produces* (its envelope): for `5`
+// it is `5..5`, for `a + b` the envelope of the sum, for a reference the
+// target's. fold_constraint resolves the constraint a binding *imposes*; it
+// must reduce to a closed, compile-time-known object. Both return a reduced
+// ^Type or nil when the form cannot be resolved statically.
+//
+// satisfy(ft, fc) proves ft ⊆ fc. These three functions are pure dispatch —
+// every domain-specific operation lives in its domain file (fold_integer.odin).
+// To add a domain (float, string), give it fold_*_<domain>/<domain>_satisfy/
+// <domain>_to_string and add a case here.
+
+fold_type :: proc(t: ^Type) -> ^Type {
+	if r := fold_type_integer(t); r != nil do return r
+	return nil
+}
+
+fold_constraint :: proc(t: ^Type) -> ^Type {
+	if r := fold_constraint_integer(t); r != nil do return r
+	return nil
+}
+
+// satisfy proves the folded value ft fits inside the folded constraint fc.
+// Dispatches on the constraint's domain; cross-domain never satisfies.
+satisfy :: proc(ft, fc: ^Type) -> bool {
+	if ft == nil || fc == nil do return false
+	#partial switch f in fc^ {
+	case Integer_Type:
+		v, ok := ft^.(Integer_Type)
+		return ok && integer_satisfy(v, f)
+	}
+	return false
+}
+
+// type_to_string renders a folded ^Type for error messages.
+type_to_string :: proc(t: ^Type) -> string {
+	if t == nil do return "<unresolved>"
+	#partial switch v in t^ {
+	case Integer_Type:
+		return integer_to_string(v)
+	}
+	return "<value>"
+}
+
 fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if t == nil do return
 	comp, ok := &t^.(Compose_Type)
 	if !ok do return
-	integer_intervals, segs_ok := fold_to_integer_intervals(t).([]Integer_Interval)
-	if segs_ok {
-		tf := new(Type)
-		tf^ = Integer_Type {
-			integer_intervals,
-			true,
-			default_for_integer_intervals(integer_intervals),
-		}
-		comp.type_fold = tf
+	folded := fold_type(t)
+	if folded != nil {
+		comp.type_fold = folded
 	} else {
 		sem_error(
 			a,
@@ -214,17 +253,17 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			fmt.print("  ")
 			if has_cf {
 				fmt.print("c:")
-				print_integer_intervals_inline(v.constraint_folds[i])
+				print_fold_inline(v.constraint_folds[i])
 				fmt.print(" ")
 			}
 			if has_tf {
 				fmt.print("t:")
-				print_integer_intervals_inline(v.type_folds[i])
+				print_fold_inline(v.type_folds[i])
 				fmt.print(" ")
 			}
 			if has_cf {
 				if has_tf {
-					if integer_intervals_satisfy(v.type_folds[i], v.constraint_folds[i]) {
+					if satisfy(v.type_folds[i], v.constraint_folds[i]) {
 						fmt.print("v")
 					} else {
 						fmt.print("x")
@@ -399,6 +438,21 @@ print_integer_intervals :: proc(t: ^Type) {
 	case:
 		fmt.print("?")
 	}
+}
+
+// print_fold_inline renders a folded ^Type (as stored in type_folds /
+// constraint_folds) for the --ir dump. Domain dispatch.
+print_fold_inline :: proc(t: ^Type) {
+	if t == nil {
+		fmt.print("[?]")
+		return
+	}
+	#partial switch v in t^ {
+	case Integer_Type:
+		print_integer_intervals_inline(v.integer_intervals)
+		return
+	}
+	fmt.print("[?]")
 }
 
 print_integer_intervals_inline :: proc(integer_intervals: []Integer_Interval) {

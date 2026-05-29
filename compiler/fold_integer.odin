@@ -27,7 +27,7 @@ int_value :: #force_inline proc(t: Integer_Type) -> i128 {
 make_int_result :: #force_inline proc(val: i128) -> Type {
 	integer_intervals := make([]Integer_Interval, 1)
 	integer_intervals[0] = Integer_Interval{val, val}
-	return Integer_Type{integer_intervals, false, val}
+	return Integer_Type{integer_intervals, val}
 }
 
 
@@ -35,24 +35,70 @@ int_to_f64 :: #force_inline proc(i: Integer_Type) -> f64 {
 	return f64(int_value(i))
 }
 
+// --- integer domain entry points (return reduced ^Type / bool / string) ---
+
+// fold_type_integer derives the integer envelope a value produces and wraps it
+// in an Integer_Type, or nil if the value is not integer-foldable.
+fold_type_integer :: proc(t: ^Type) -> ^Type {
+	segs, ok := fold_type_intervals(t).([]Integer_Interval)
+	if !ok do return nil
+	return wrap_integer_intervals(segs)
+}
+
+// fold_constraint_integer resolves an integer constraint to a closed
+// Integer_Type, or nil if it cannot be resolved statically.
+fold_constraint_integer :: proc(t: ^Type) -> ^Type {
+	segs, ok := fold_constraint_intervals(t).([]Integer_Interval)
+	if !ok do return nil
+	return wrap_integer_intervals(segs)
+}
+
+wrap_integer_intervals :: proc(segs: []Integer_Interval) -> ^Type {
+	r := new(Type)
+	r^ = Integer_Type{segs, default_for_integer_intervals(segs)}
+	return r
+}
+
+// integer_satisfy proves ft ⊆ fc when both are integer-domain Integer_Types.
+integer_satisfy :: proc(ft, fc: Integer_Type) -> bool {
+	return integer_intervals_satisfy(ft.integer_intervals, fc.integer_intervals)
+}
+
+integer_to_string :: proc(t: Integer_Type) -> string {
+	return pretty_integer_intervals(t.integer_intervals)
+}
+
+// stored_fold_intervals extracts the interval payload from a folded ^Type as
+// cached in type_folds / constraint_folds (always an Integer_Type today).
+stored_fold_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Integer_Type:
+		return v.integer_intervals
+	}
+	return nil
+}
+
 // --- integer interval fold ---
 
-fold_to_integer_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
+fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				if v.type_folds[i] != nil do return v.type_folds[i]
-				return fold_to_integer_intervals(v.values[i])
+				if s, ok := stored_fold_intervals(v.type_folds[i]).([]Integer_Interval); ok {
+					return s
+				}
+				return fold_type_intervals(v.values[i])
 			}
 		}
 		return nil
 	case Integer_Type:
 		return v.integer_intervals
 	case Range_Type:
-		left_segs, left_ok := fold_to_integer_intervals(v.left).([]Integer_Interval)
-		right_segs, right_ok := fold_to_integer_intervals(v.right).([]Integer_Interval)
+		left_segs, left_ok := fold_type_intervals(v.left).([]Integer_Interval)
+		right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
 		lo: Maybe(i128) = nil
@@ -68,10 +114,10 @@ fold_to_integer_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		return integer_intervals
 	case Compose_Type:
 		if v.type_fold != nil {
-			return fold_to_integer_intervals(v.type_fold)
+			return fold_type_intervals(v.type_fold)
 		}
 		if v.left == nil {
-			right_segs, right_ok := fold_to_integer_intervals(v.right).([]Integer_Interval)
+			right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
 			if !right_ok do return nil
 			#partial switch v.operator {
 			case .Greater:
@@ -104,8 +150,8 @@ fold_to_integer_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 			}
 			return nil
 		}
-		left_segs, left_ok := fold_to_integer_intervals(v.left).([]Integer_Interval)
-		right_segs, right_ok := fold_to_integer_intervals(v.right).([]Integer_Interval)
+		left_segs, left_ok := fold_type_intervals(v.left).([]Integer_Interval)
+		right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
 		if !left_ok || !right_ok do return nil
 		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
 		result := make([dynamic]Integer_Interval)
@@ -125,11 +171,11 @@ fold_to_integer_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		return integer_intervals_normalize(result[:])
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if v.match_scope.type_folds[v.match_index] != nil {
-				return v.match_scope.type_folds[v.match_index]
+			if s, ok := stored_fold_intervals(v.match_scope.type_folds[v.match_index]).([]Integer_Interval); ok {
+				return s
 			}
-			if v.match_scope.constraint_folds[v.match_index] != nil {
-				return v.match_scope.constraint_folds[v.match_index]
+			if s, ok := stored_fold_intervals(v.match_scope.constraint_folds[v.match_index]).([]Integer_Interval); ok {
+				return s
 			}
 		}
 		return nil
@@ -140,33 +186,35 @@ fold_to_integer_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 			carve_segs := carve_fold_lookup(v.target, ref.match_index)
 			if carve_segs != nil do return carve_segs
 		}
-		if ref.match_scope.type_folds[ref.match_index] != nil {
-			return ref.match_scope.type_folds[ref.match_index]
+		if s, ok := stored_fold_intervals(ref.match_scope.type_folds[ref.match_index]).([]Integer_Interval); ok {
+			return s
 		}
-		if ref.match_scope.constraint_folds[ref.match_index] != nil {
-			return ref.match_scope.constraint_folds[ref.match_index]
+		if s, ok := stored_fold_intervals(ref.match_scope.constraint_folds[ref.match_index]).([]Integer_Interval); ok {
+			return s
 		}
 		return nil
 	}
 	return nil
 }
 
-fold_constraint :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
+fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				if v.type_folds[i] != nil do return v.type_folds[i]
-				return fold_constraint(v.values[i])
+				if s, ok := stored_fold_intervals(v.type_folds[i]).([]Integer_Interval); ok {
+					return s
+				}
+				return fold_constraint_intervals(v.values[i])
 			}
 		}
 		return nil
 	case Integer_Type:
 		return v.integer_intervals
 	case Range_Type:
-		left_segs, left_ok := fold_constraint(v.left).([]Integer_Interval)
-		right_segs, right_ok := fold_constraint(v.right).([]Integer_Interval)
+		left_segs, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
+		right_segs, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
 		lo: Maybe(i128) = nil
@@ -182,44 +230,44 @@ fold_constraint :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		return integer_intervals
 	case Compose_Type:
 		if v.type_fold != nil {
-			return fold_constraint(v.type_fold)
+			return fold_constraint_intervals(v.type_fold)
 		}
-		return fold_to_integer_intervals(t)
+		return fold_type_intervals(t)
 	case Sum_Type:
-		left, left_ok := fold_constraint(v.left).([]Integer_Interval)
-		right, right_ok := fold_constraint(v.right).([]Integer_Interval)
+		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
+		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if !left_ok do return right_ok ? right : nil
 		if !right_ok do return left
 		return integer_intervals_union(left, right)
 	case Product_Type:
-		left, left_ok := fold_constraint(v.left).([]Integer_Interval)
-		right, right_ok := fold_constraint(v.right).([]Integer_Interval)
+		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
+		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if !left_ok || !right_ok do return nil
 		return integer_intervals_intersect(left, right)
 	case Negate_Type:
-		inner, inner_ok := fold_constraint(v.operand).([]Integer_Interval)
+		inner, inner_ok := fold_constraint_intervals(v.operand).([]Integer_Interval)
 		if !inner_ok do return nil
 		return integer_intervals_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if v.match_scope.constraint_folds[v.match_index] != nil {
-				return v.match_scope.constraint_folds[v.match_index]
+			if s, ok := stored_fold_intervals(v.match_scope.constraint_folds[v.match_index]).([]Integer_Interval); ok {
+				return s
 			}
-			if v.match_scope.type_folds[v.match_index] != nil {
-				return v.match_scope.type_folds[v.match_index]
+			if s, ok := stored_fold_intervals(v.match_scope.type_folds[v.match_index]).([]Integer_Interval); ok {
+				return s
 			}
-			return fold_constraint(v.match_scope.values[v.match_index])
+			return fold_constraint_intervals(v.match_scope.values[v.match_index])
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			if ref.match_scope.constraint_folds[ref.match_index] != nil {
-				return ref.match_scope.constraint_folds[ref.match_index]
+			if s, ok := stored_fold_intervals(ref.match_scope.constraint_folds[ref.match_index]).([]Integer_Interval); ok {
+				return s
 			}
-			if ref.match_scope.type_folds[ref.match_index] != nil {
-				return ref.match_scope.type_folds[ref.match_index]
+			if s, ok := stored_fold_intervals(ref.match_scope.type_folds[ref.match_index]).([]Integer_Interval); ok {
+				return s
 			}
-			return fold_constraint(ref.match_scope.values[ref.match_index])
+			return fold_constraint_intervals(ref.match_scope.values[ref.match_index])
 		}
 	}
 	return nil
@@ -233,11 +281,11 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 		case Carve_Type:
 			for i := 0; i < len(v.references); i += 1 {
 				if v.references[i].match_index == index {
-					integer_intervals, ok := fold_to_integer_intervals(
+					integer_intervals, ok := fold_type_intervals(
 						v.values[i],
 					).([]Integer_Interval)
 					if ok do return integer_intervals
-					segs2, ok2 := fold_constraint(v.values[i]).([]Integer_Interval)
+					segs2, ok2 := fold_constraint_intervals(v.values[i]).([]Integer_Interval)
 					if ok2 do return segs2
 					return nil
 				}
