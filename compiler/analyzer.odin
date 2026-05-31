@@ -650,8 +650,17 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		return result
 
 	case .Range:
-		left := walk(a, current_scope, data.binary.left)
-		right := walk(a, current_scope, data.binary.right)
+		// An absent bound (prefix `..hi` / postfix `lo..`) stays nil — it means
+		// "no bound", not the value `none`. walk(INVALID_NODE) would yield a
+		// None_Type, which fold_range and the printer would mistake for a real bound.
+		left: ^Type = nil
+		if data.binary.left != INVALID_NODE {
+			left = walk(a, current_scope, data.binary.left)
+		}
+		right: ^Type = nil
+		if data.binary.right != INVALID_NODE {
+			right = walk(a, current_scope, data.binary.right)
+		}
 		result := new(Type)
 		result^ = Range_Type{left, right}
 		fold_range(a, result, idx)
