@@ -75,9 +75,9 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		return value
 	case Unknown_Type:
 		return value
-	case Sum_Type:
+	case Or_Type:
 		return value
-	case Product_Type:
+	case And_Type:
 		return value
 	case Negate_Type:
 		return value
@@ -156,10 +156,10 @@ patch_type :: proc(t: ^Type, old: ^Type, replacement: ^Type) -> ^Type {
 	case Range_Type:
 		v.left = patch_type(v.left, old, replacement)
 		v.right = patch_type(v.right, old, replacement)
-	case Sum_Type:
+	case Or_Type:
 		v.left = patch_type(v.left, old, replacement)
 		v.right = patch_type(v.right, old, replacement)
-	case Product_Type:
+	case And_Type:
 		v.left = patch_type(v.left, old, replacement)
 		v.right = patch_type(v.right, old, replacement)
 	case Carve_Type:

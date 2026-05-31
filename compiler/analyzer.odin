@@ -58,12 +58,12 @@ Binding_Kind :: enum u8 {
 	Product,
 }
 
-Sum_Type :: struct {
+Or_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
 }
 
-Product_Type :: struct {
+And_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
 }
@@ -147,8 +147,8 @@ Unknown_Type :: struct {}
 Invalid_Type :: struct {}
 
 Type :: union {
-	Sum_Type,
-	Product_Type,
+	Or_Type,
+	And_Type,
 	Negate_Type,
 	Compose_Type,
 	String_Type,
@@ -401,9 +401,9 @@ type_default :: proc(t: ^Type) -> ^Type {
 	case Range_Type:
 		// Default of a range is its lower bound (the first value in the interval).
 		return type_default(v.left)
-	case Product_Type:
+	case And_Type:
 		return type_default(v.left)
-	case Sum_Type:
+	case Or_Type:
 		return type_default(v.left)
 	case Negate_Type:
 	case Mention_Type:
@@ -646,7 +646,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		left := walk(a, current_scope, data.binary.left)
 		right := walk(a, current_scope, data.binary.right)
 		result := new(Type)
-		result^ = Sum_Type{left, right}
+		result^ = Or_Type{left, right}
 		return result
 
 	case .Range:
@@ -666,9 +666,9 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		result := new(Type)
 		#partial switch data.operator.kind {
 		case .And:
-			result^ = Product_Type{left, right}
+			result^ = And_Type{left, right}
 		case .Or:
-			result^ = Sum_Type{left, right}
+			result^ = Or_Type{left, right}
 		case .Not:
 			result^ = Negate_Type{right}
 		case:
