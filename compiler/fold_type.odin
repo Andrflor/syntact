@@ -102,6 +102,15 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			// itself — its bindings already carry their folds from analysis.
 			// scope_satisfy compares each binding's constraint against value.
 			return t
+		case Mention_Type:
+			if v.match_scope != nil && v.match_index >= 0 {
+				return fold_value_type(v.match_scope.values[v.match_index])
+			}
+		case Reference_Type:
+			ref := v.reference
+			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+				return fold_value_type(ref.match_scope.values[ref.match_index])
+			}
 		}
 	}
 	// Envelope of the value. fold_type_integer covers concrete values and
