@@ -177,11 +177,22 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	v, ok := fc^.(Scope_Type)
 	if ok {
 		hasProd := false
+		// A constraint root with productions is a sum: the value satisfies it
+		// if it matches AT LEAST ONE production. Each production IS the target
+		// constraint (the content the value must be). The value fold ft carries
+		// one extra producer level for sets ({->u8}) but not for singletons
+		// (10) — so compare the production against ft's content: ft's own
+		// production when ft is a producer, ft itself otherwise.
+		ft_content := ft
+		if vt, vt_ok := ft^.(Scope_Type); vt_ok {
+			prods := scope_productions(vt)
+			if len(prods) == 1 do ft_content = prods[0]
+		}
 		for i := 0; i < len(v.kind); i += 1 {
 
 			if (v.kind[i] == .Product) {
 				hasProd = true
-				if (satisfy(make_producer_scope(v.values[i]), ft)) {
+				if (satisfy(v.values[i], ft_content)) {
 					return true
 				}
 			}
