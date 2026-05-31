@@ -171,10 +171,14 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		return integer_intervals_normalize(result[:])
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if s, ok := stored_fold_intervals(v.match_scope.type_folds[v.match_index]).([]Integer_Interval); ok {
+			if s, ok := stored_fold_intervals(
+				   v.match_scope.type_folds[v.match_index],
+			   ).([]Integer_Interval); ok {
 				return s
 			}
-			if s, ok := stored_fold_intervals(v.match_scope.constraint_folds[v.match_index]).([]Integer_Interval); ok {
+			if s, ok := stored_fold_intervals(
+				   v.match_scope.constraint_folds[v.match_index],
+			   ).([]Integer_Interval); ok {
 				return s
 			}
 		}
@@ -186,10 +190,14 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 			carve_segs := carve_fold_lookup(v.target, ref.match_index)
 			if carve_segs != nil do return carve_segs
 		}
-		if s, ok := stored_fold_intervals(ref.match_scope.type_folds[ref.match_index]).([]Integer_Interval); ok {
+		if s, ok := stored_fold_intervals(
+			   ref.match_scope.type_folds[ref.match_index],
+		   ).([]Integer_Interval); ok {
 			return s
 		}
-		if s, ok := stored_fold_intervals(ref.match_scope.constraint_folds[ref.match_index]).([]Integer_Interval); ok {
+		if s, ok := stored_fold_intervals(
+			   ref.match_scope.constraint_folds[ref.match_index],
+		   ).([]Integer_Interval); ok {
 			return s
 		}
 		return nil
@@ -203,7 +211,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return fold_constraint_intervals(v.values[i])
+				return old_constraint_intervals(v.values[i])
 			}
 		}
 		return nil
@@ -230,13 +238,13 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 			return fold_constraint_intervals(v.type_fold)
 		}
 		return fold_type_intervals(t)
-	case Sum_Type:
+	case Or_Type:
 		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
 		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if !left_ok do return right_ok ? right : nil
 		if !right_ok do return left
 		return integer_intervals_union(left, right)
-	case Product_Type:
+	case And_Type:
 		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
 		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if !left_ok || !right_ok do return nil
@@ -268,9 +276,7 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 		case Carve_Type:
 			for i := 0; i < len(v.references); i += 1 {
 				if v.references[i].match_index == index {
-					integer_intervals, ok := fold_type_intervals(
-						v.values[i],
-					).([]Integer_Interval)
+					integer_intervals, ok := fold_type_intervals(v.values[i]).([]Integer_Interval)
 					if ok do return integer_intervals
 					segs2, ok2 := fold_constraint_intervals(v.values[i]).([]Integer_Interval)
 					if ok2 do return segs2
