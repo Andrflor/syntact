@@ -60,7 +60,7 @@ wrap_integer_intervals :: proc(segs: []Integer_Interval) -> ^Type {
 }
 
 // integer_satisfy proves ft ⊆ fc when both are integer-domain Integer_Types.
-integer_satisfy :: proc(ft, fc: Integer_Type) -> bool {
+integer_satisfy :: proc(fc, ft: Integer_Type) -> bool {
 	return integer_intervals_satisfy(ft.integer_intervals, fc.integer_intervals)
 }
 

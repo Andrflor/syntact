@@ -62,7 +62,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			return r
 		case Or_Type:
 			r := new(Type)
-			r^ = And_Type{fold_constraint(v.left), fold_constraint(v.right)}
+			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
 		}
 	}
@@ -169,11 +169,15 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	#partial switch f in fc^ {
 	case Integer_Type:
 		v, ok := ft^.(Integer_Type)
-		return ok && integer_satisfy(v, f)
+		return ok && integer_satisfy(f, v)
 	case Scope_Type:
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
-		return scope_satisfy(v, f)
+		return scope_satisfy(f, v)
+	case And_Type:
+		return satisfy(f.left, ft) && satisfy(f.right, ft)
+	case Or_Type:
+		return satisfy(f.left, ft) || satisfy(f.right, ft)
 	}
 	return false
 }
@@ -181,7 +185,7 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 // scope_satisfy matches two scopes: if both expose productions, every
 // constraint production must be satisfied by the matching value production (by
 // order). Otherwise it falls back to shape matching (same field names/arity).
-scope_satisfy :: proc(vs, cs: Scope_Type) -> bool {
+scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 	v_prods := scope_productions(vs)
 	c_prods := scope_productions(cs)
 	if len(c_prods) > 0 || len(v_prods) > 0 {
