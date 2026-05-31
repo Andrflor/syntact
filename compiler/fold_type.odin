@@ -56,6 +56,14 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
+		case And_Type:
+			r := new(Type)
+			r^ = And_Type{fold_constraint(v.left), fold_constraint(v.right)}
+			return r
+		case Or_Type:
+			r := new(Type)
+			r^ = And_Type{fold_constraint(v.left), fold_constraint(v.right)}
+			return r
 		}
 	}
 	if r := fold_constraint_integer(t); r != nil do return r
@@ -291,7 +299,7 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 	case String_Type:
 		return .String
 	case None_Type:
-		return .None
+		return .Invalid
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
@@ -486,9 +494,9 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		fmt.print("none")
 
 	case Range_Type:
-		print_type(v.left, depth)
+		if v.left != nil do print_type(v.left, depth)
 		fmt.print("..")
-		print_type(v.right, depth)
+		if v.right != nil do print_type(v.right, depth)
 
 	case Compose_Type:
 		if v.left != nil {
@@ -517,12 +525,12 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		}
 		fmt.print("}")
 
-	case Sum_Type:
+	case Or_Type:
 		print_type(v.left, depth)
 		fmt.print(" | ")
 		print_type(v.right, depth)
 
-	case Product_Type:
+	case And_Type:
 		print_type(v.left, depth)
 		fmt.print(" & ")
 		print_type(v.right, depth)
@@ -574,10 +582,6 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 }
 
 print_integer_intervals :: proc(t: ^Type) {
-	if t == nil {
-		fmt.print("none")
-		return
-	}
 	#partial switch v in t^ {
 	case Integer_Type:
 		for interval, i in v.integer_intervals {

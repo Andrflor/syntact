@@ -211,7 +211,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return old_constraint_intervals(v.values[i])
+				return fold_constraint_intervals(v.values[i])
 			}
 		}
 		return nil
