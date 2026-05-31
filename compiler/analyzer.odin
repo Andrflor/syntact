@@ -265,12 +265,12 @@ scope_append :: proc(
 	append(&scope.kind, bk)
 	append(&scope.values, value)
 
-	// ft: the TYPE of the value (right side, a typeof) — a concrete singleton
-	//     stays itself, a set becomes its producer scope {-> set}.
 	// fc: the VALUE of the imposed constraint (left side) — the set the value
 	//     must fall into. Must resolve statically.
-	ft := fold_value_type(value)
+	// ft: the TYPE of the value (right side, a typeof) — a concrete singleton
+	//     stays itself, a set becomes its producer scope {-> set}.
 	fc := fold_constraint(constraint)
+	ft := fold_value_type(value)
 
 	append(&scope.type_folds, ft)
 	append(&scope.constraint_folds, fc)
@@ -297,7 +297,7 @@ scope_append :: proc(
 			.Constraint_Violation,
 			node_pos(a, node),
 		)
-	} else if !satisfy(ft, fc) {
+	} else if !satisfy(fc, ft) {
 		sem_error(
 			a,
 			fmt.tprintf(
@@ -736,7 +736,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
 						vf := fold_value_type(val)
-						if vf != nil && !satisfy(vf, cf) {
+						if vf != nil && !satisfy(cf, vf) {
 							sem_error(
 								a,
 								fmt.tprintf(
@@ -784,7 +784,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
 						vf := fold_value_type(val)
-						if vf != nil && !satisfy(vf, cf) {
+						if vf != nil && !satisfy(cf, vf) {
 							sem_error(
 								a,
 								fmt.tprintf(

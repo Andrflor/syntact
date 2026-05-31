@@ -10,7 +10,7 @@ import "core:fmt"
 // must reduce to a closed, compile-time-known object. Both return a reduced
 // ^Type or nil when the form cannot be resolved statically.
 //
-// satisfy(ft, fc) proves ft ⊆ fc. These three functions are pure dispatch —
+// satisfy(fc, ft) proves ft ⊆ fc. These three functions are pure dispatch —
 // every domain-specific operation lives in its domain file (fold_integer.odin).
 // To add a domain (float, string), give it fold_*_<domain>/<domain>_satisfy/
 // <domain>_to_string and add a case here.
@@ -147,15 +147,17 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 }
 
 // satisfy proves the folded value ft (a typeof) fits the folded constraint fc.
+// fc is on the LEFT, ft on the RIGHT — mirroring the language, where the
+// constraint sits left of `:` and the value right of `->`.
 //
-//   - ft Integer_Type vs fc Integer_Type : a concrete value against a set →
+//   - fc Integer_Type vs ft Integer_Type : a concrete value against a set →
 //     membership (10 ∈ u8). u8:a -> 10 ✅.
-//   - ft Scope (producer) vs fc Integer_Type : a set is not a member of a set →
+//   - fc Integer_Type vs ft Scope (producer) : a set is not a member of a set →
 //     fail. u8:a -> u8 ❌ (u8 is not of type u8).
-//   - ft Scope vs fc Scope : two producers → match their productions in order.
+//   - fc Scope vs ft Scope : two producers → match their productions in order.
 //     {->u8}:a -> u8 ✅.
-satisfy :: proc(ft, fc: ^Type) -> bool {
-	if ft == nil || fc == nil do return false
+satisfy :: proc(fc, ft: ^Type) -> bool {
+	if fc == nil || ft == nil do return false
 	#partial switch f in fc^ {
 	case Integer_Type:
 		v, ok := ft^.(Integer_Type)
@@ -177,7 +179,7 @@ scope_satisfy :: proc(vs, cs: Scope_Type) -> bool {
 	if len(c_prods) > 0 || len(v_prods) > 0 {
 		if len(v_prods) != len(c_prods) do return false
 		for i in 0 ..< len(c_prods) {
-			if !satisfy(v_prods[i], c_prods[i]) do return false
+			if !satisfy(c_prods[i], v_prods[i]) do return false
 		}
 		return true
 	}
@@ -433,7 +435,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			}
 			if has_cf {
 				if has_tf {
-					if satisfy(v.type_folds[i], v.constraint_folds[i]) {
+					if satisfy(v.constraint_folds[i], v.type_folds[i]) {
 						fmt.print("v")
 					} else {
 						fmt.print("x")
