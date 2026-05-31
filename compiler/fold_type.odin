@@ -37,16 +37,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		#partial switch v in t^ {
 		case Scope_Type:
-			prods := scope_productions(v)
-			if len(prods) > 0 {
-				folded := make([dynamic]^Type, 0, len(prods))
-				for p in prods {
-					fp := fold_constraint(p)
-					if fp == nil do return nil
-					append(&folded, fp)
-				}
-				return make_producer_scope_multi(folded[:])
-			}
+			return t
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
 				return fold_constraint_target(v.match_scope, v.match_index)
@@ -168,11 +159,9 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	if fc == nil || ft == nil do return false
 	#partial switch f in fc^ {
 	case Integer_Type:
-		fmt.println("Integer type")
 		v, ok := ft^.(Integer_Type)
 		return ok && integer_satisfy(f, v)
 	case Scope_Type:
-		fmt.println("Scope type")
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
 		return scope_satisfy(f, v)
@@ -192,10 +181,7 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 			if (v.kind[i] == .Product) {
 				hasProd = true
-				fmt.println("Checking binding %i", i)
-				print_type(v.values[i])
-				print_type(ft)
-				if (satisfy(v.values[i], ft)) {
+				if (satisfy(make_producer_scope(v.values[i]), ft)) {
 					return true
 				}
 			}
@@ -213,6 +199,9 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 	for i in 0 ..< len(cs.names) {
 		if vs.names[i] != cs.names[i] do return false
 		if vs.kind[i] != cs.kind[i] do return false
+		// Match the binding CONTENT, not just its shape: a producer of u8
+		// ({->u8}) must not satisfy a producer of a producer ({->{->u8}}).
+		if !satisfy(cs.values[i], vs.values[i]) do return false
 	}
 	return true
 }
@@ -461,7 +450,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			}
 			if has_cf {
 				if has_tf {
-					if satisfy(v.constraint_folds[i], v.type_folds[i]) {
+					if satisfy_root(v.constraint_folds[i], v.type_folds[i]) {
 						fmt.print("v")
 					} else {
 						fmt.print("x")
