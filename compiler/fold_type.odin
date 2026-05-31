@@ -168,9 +168,11 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	if fc == nil || ft == nil do return false
 	#partial switch f in fc^ {
 	case Integer_Type:
+		fmt.println("Integer type")
 		v, ok := ft^.(Integer_Type)
 		return ok && integer_satisfy(f, v)
 	case Scope_Type:
+		fmt.println("Scope type")
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
 		return scope_satisfy(f, v)
@@ -182,23 +184,35 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	return false
 }
 
-// scope_satisfy matches two scopes: if both expose productions, every
-// constraint production must be satisfied by the matching value production (by
-// order). Otherwise it falls back to shape matching (same field names/arity).
-scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
-	v_prods := scope_productions(vs)
-	c_prods := scope_productions(cs)
-	if len(c_prods) > 0 || len(v_prods) > 0 {
-		if len(v_prods) != len(c_prods) do return false
-		for i in 0 ..< len(c_prods) {
-			if !satisfy(c_prods[i], v_prods[i]) do return false
+satisfy_root :: proc(fc, ft: ^Type) -> bool {
+	v, ok := fc^.(Scope_Type)
+	if ok {
+		hasProd := false
+		for i := 0; i < len(v.kind); i += 1 {
+
+			if (v.kind[i] == .Product) {
+				hasProd = true
+				fmt.println("Checking binding %i", i)
+				print_type(v.values[i])
+				print_type(ft)
+				if (satisfy(v.values[i], ft)) {
+					return true
+				}
+			}
 		}
-		return true
+		if (hasProd) {
+			return false
+		}
 	}
-	// No productions: match the shape (names + arity).
+	return satisfy(fc, ft)
+}
+
+
+scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 	if len(vs.names) != len(cs.names) do return false
 	for i in 0 ..< len(cs.names) {
 		if vs.names[i] != cs.names[i] do return false
+		if vs.kind[i] != cs.kind[i] do return false
 	}
 	return true
 }

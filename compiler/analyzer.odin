@@ -276,7 +276,6 @@ typecheck :: proc(
 	value: ^Type,
 	node: Node_Index,
 ) {
-
 	// fc: the VALUE of the imposed constraint (left side) — the set the value
 	//     must fall into. Must resolve statically.
 	// ft: the TYPE of the value (right side, a typeof) — a concrete singleton
@@ -309,7 +308,7 @@ typecheck :: proc(
 			.Constraint_Violation,
 			node_pos(a, node),
 		)
-	} else if !satisfy(fc, ft) {
+	} else if !satisfy_root(fc, ft) {
 		sem_error(
 			a,
 			fmt.tprintf(
@@ -765,7 +764,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
 						vf := fold_value_type(val)
-						if vf != nil && !satisfy(cf, vf) {
+						if vf != nil && !satisfy_root(cf, vf) {
 							sem_error(
 								a,
 								fmt.tprintf(
@@ -813,7 +812,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					cf := carve_scope.constraint_folds[carve_index]
 					if cf != nil {
 						vf := fold_value_type(val)
-						if vf != nil && !satisfy(cf, vf) {
+						if vf != nil && !satisfy_root(cf, vf) {
 							sem_error(
 								a,
 								fmt.tprintf(
