@@ -98,6 +98,10 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 				}
 				return make_producer_scope_multi(folded[:])
 			}
+			// Structural scope (named bindings, no production): its type is
+			// itself — its bindings already carry their folds from analysis.
+			// scope_satisfy compares each binding's constraint against value.
+			return t
 		}
 	}
 	// Envelope of the value. fold_type_integer covers concrete values and
@@ -210,9 +214,24 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 	for i in 0 ..< len(cs.names) {
 		if vs.names[i] != cs.names[i] do return false
 		if vs.kind[i] != cs.kind[i] do return false
-		// Match the binding CONTENT, not just its shape: a producer of u8
-		// ({->u8}) must not satisfy a producer of a producer ({->{->u8}}).
-		if !satisfy(cs.values[i], vs.values[i]) do return false
+
+		if cs.kind[i] == .Product {
+			// Producer binding: match the produced CONTENT, not just shape —
+			// a producer of u8 ({->u8}) must not satisfy a producer of a
+			// producer ({->{->u8}}).
+			if !satisfy(cs.values[i], vs.values[i]) do return false
+			continue
+		}
+
+		// Structural binding (named): structural coloring. The constraint
+		// colored onto cs's binding (u8 on x) must be satisfied by vs's value
+		// (10 on x). Each side carries its fold from analysis: cs the
+		// constraint fold, vs the value type fold. A side with no constraint
+		// (plain `x -> 10`) imposes nothing → skip.
+		cc := i < len(cs.constraint_folds) ? cs.constraint_folds[i] : nil
+		if cc == nil do continue
+		vt := i < len(vs.type_folds) ? vs.type_folds[i] : nil
+		if !satisfy_root(cc, vt) do return false
 	}
 	return true
 }

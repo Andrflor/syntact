@@ -286,13 +286,6 @@ typecheck :: proc(
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, ft)
 
-	// An unfilled value (??) is legitimate under a constraint: there is no value
-	// to prove yet. Its type_fold stays nil — so if it is later used AS a
-	// constraint, fold_constraint hits the Unknown and reports it then.
-	if value != nil {
-		if _, is_unknown := value^.(Unknown_Type); is_unknown do return
-	}
-
 	// No imposed constraint → nothing to prove.
 	if fc == nil do return
 
