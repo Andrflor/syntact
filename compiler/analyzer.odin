@@ -205,7 +205,8 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 			walk(&a, a.scope, child)
 		case:
 			value := walk(&a, a.scope, child)
-			scope_append(&a, a.scope, "", nil, .Pointing_Push, value, child)
+			scope_append(&a, a.scope, "", nil, .Pointing_Push, value)
+			typecheck(&a, a.scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
 
@@ -258,12 +259,23 @@ scope_append :: proc(
 	constraint: ^Type,
 	bk: Binding_Kind,
 	value: ^Type,
-	node: Node_Index,
 ) {
 	append(&scope.names, name)
 	append(&scope.types, constraint)
 	append(&scope.kind, bk)
 	append(&scope.values, value)
+
+}
+
+typecheck :: proc(
+	a: ^Analyzer,
+	scope: ^Scope_Type,
+	name: string,
+	constraint: ^Type,
+	bk: Binding_Kind,
+	value: ^Type,
+	node: Node_Index,
+) {
 
 	// fc: the VALUE of the imposed constraint (left side) — the set the value
 	//     must fall into. Must resolve statically.
@@ -272,8 +284,8 @@ scope_append :: proc(
 	fc := fold_constraint(constraint)
 	ft := fold_value_type(value)
 
-	append(&scope.type_folds, ft)
 	append(&scope.constraint_folds, fc)
+	append(&scope.type_folds, ft)
 
 	// An unfilled value (??) is legitimate under a constraint: there is no value
 	// to prove yet. Its type_fold stays nil — so if it is later used AS a
@@ -467,7 +479,8 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				walk(a, scope, child)
 			case:
 				value := walk(a, scope, child)
-				scope_append(a, scope, "", nil, .Pointing_Push, value, child)
+				scope_append(a, scope, "", nil, .Pointing_Push, value)
+				typecheck(a, scope, "", nil, .Pointing_Push, value, child)
 			}
 		}
 		result := new(Type)
@@ -520,7 +533,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				parent = current_scope,
 			}
 			scope := &result.(Scope_Type)
-			scope_append(a, current_scope, name, constraint, bk, result, idx)
+			scope_append(a, current_scope, name, constraint, bk, result)
 
 			rdata := ast.node_data[right_idx]
 			r := rdata.scope
@@ -542,18 +555,22 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 					walk(a, scope, child)
 				case:
 					val := walk(a, scope, child)
-					scope_append(a, scope, "", nil, .Pointing_Push, val, child)
+					scope_append(a, scope, "", nil, .Pointing_Push, val)
+					typecheck(a, scope, "", nil, .Pointing_Push, val, child)
 				}
 			}
+			typecheck(a, current_scope, name, constraint, bk, result, idx)
 			return result
 		}
 		value := walk(a, current_scope, right_idx)
-		scope_append(a, current_scope, name, constraint, bk, value, idx)
+		scope_append(a, current_scope, name, constraint, bk, value)
+		typecheck(a, current_scope, name, constraint, bk, value, idx)
 		return value
 
 	case .Product:
 		value := walk(a, current_scope, data.unary.operand)
-		scope_append(a, current_scope, "", nil, .Product, value, idx)
+		scope_append(a, current_scope, "", nil, .Product, value)
+		typecheck(a, current_scope, "", nil, .Product, value, idx)
 		return value
 
 	case .Expand:
@@ -568,11 +585,13 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			} else {
 				value = default_value(constraint)
 			}
-			scope_append(a, current_scope, "", constraint, .Expand, value, idx)
+			scope_append(a, current_scope, "", constraint, .Expand, value)
+			typecheck(a, current_scope, "", constraint, .Expand, value, idx)
 			return value
 		}
 		value := walk(a, current_scope, operand_idx)
-		scope_append(a, current_scope, "", nil, .Expand, value, idx)
+		scope_append(a, current_scope, "", nil, .Expand, value)
+		typecheck(a, current_scope, "", nil, .Expand, value, idx)
 		return value
 
 	case .CompileTime:
@@ -593,7 +612,8 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 			}
 		}
-		scope_append(a, current_scope, name, constraint, .Pointing_Push, value, idx)
+		scope_append(a, current_scope, name, constraint, .Pointing_Push, value)
+		typecheck(a, current_scope, name, constraint, .Pointing_Push, value, idx)
 		return value
 
 	case .Property:
