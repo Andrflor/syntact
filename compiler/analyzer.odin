@@ -18,6 +18,19 @@ Float_Interval :: struct {
 	hi: Maybe(f64), // nil = +∞
 }
 
+// Un intervalle string unifie char et string. La sémantique du range
+// dépend du quotation porté par la borne :
+//   .simple   ('…') + contenu 0/1 char → ordinal (codepoints lo..hi)
+//   .simple   ('abc')                  → string mode
+//   .double   ("…")                    → positionnel : lo = préfixe, hi = suffixe
+//   .backtick (`…`)                    → positionnel raw (pas d'échappement)
+// Borne nil = ouverte (préfixe/suffixe vide, ou ±∞ ordinal).
+String_Interval :: struct {
+	lo:        Maybe(string),
+	hi:        Maybe(string),
+	quotation: String_Quotation,
+}
+
 FloatKind :: enum {
 	none,
 	f32,
@@ -143,7 +156,9 @@ Bool_Type :: struct {
 }
 
 String_Type :: struct {
-	value: Maybe(string),
+	string_intervals:  []String_Interval,
+	default_value:     Maybe(string),
+	default_quotation: String_Quotation,
 }
 
 None_Type :: struct {}
@@ -937,7 +952,9 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 			result^ = Invalid_Type{}
 		}
 	case .String:
-		result^ = String_Type{text}
+		quotation := data.literal.quotation
+		decoded := decode_string_literal(text, quotation)
+		result^ = make_string_const(decoded, quotation)
 	case .Bool:
 		result^ = Bool_Type{text == "true"}
 	}
@@ -1013,7 +1030,7 @@ init_builtins :: proc "contextless" () {
 	builtins["f64"] = make_float_range(nil, nil, .f64)
 	builtins["Int"] = make_int_range(nil, nil)
 	builtins["Float"] = make_float_range(nil, nil, .none)
-	builtins["String"] = String_Type{nil}
+	builtins["String"] = make_string_any()
 	builtins["Bool"] = Bool_Type{}
 	builtins["None"] = None_Type{}
 }

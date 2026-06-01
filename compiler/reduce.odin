@@ -281,8 +281,9 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		if op == .Add {
 			ls, ls_ok := lv.(String_Type)
 			rs, rs_ok := rv.(String_Type)
-			if ls_ok && rs_ok {
-				return String_Type{strings.concatenate({ls.value.(string), rs.value.(string)})}
+			if ls_ok && rs_ok && string_is_concrete(ls) && string_is_concrete(rs) {
+				joined := strings.concatenate({string_value(ls), string_value(rs)})
+				return make_string_const(joined, .double)
 			}
 		}
 		return nil
@@ -333,7 +334,10 @@ compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 		return Bool_Type{eq == (l.value == r.value)}
 	case String_Type:
 		r := rv.(String_Type)
-		return Bool_Type{eq == (l.value.(string) == r.value.(string))}
+		if string_is_concrete(l) && string_is_concrete(r) {
+			return Bool_Type{eq == (string_value(l) == string_value(r))}
+		}
+		return Bool_Type{!eq}
 	}
 	return Bool_Type{false}
 }
