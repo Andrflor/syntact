@@ -101,14 +101,10 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
-		lo: Maybe(i128) = nil
-		hi: Maybe(i128) = nil
-		if left_ok && len(left_segs) > 0 {
-			lo = left_segs[0].lo
-		}
-		if right_ok && len(right_segs) > 0 {
-			hi = right_segs[len(right_segs) - 1].hi
-		}
+		// Un range (éventuellement chaîné comme `10..0..30`) couvre le span de
+		// TOUTES ses bornes : lo = min global, hi = max global. Les sous-ranges
+		// ayant déjà été foldés en leur span, il suffit de fusionner.
+		lo, hi := range_span_bounds(left_segs, right_segs)
 		integer_intervals := make([]Integer_Interval, 1)
 		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
@@ -222,14 +218,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		right_segs, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
-		lo: Maybe(i128) = nil
-		hi: Maybe(i128) = nil
-		if left_ok && len(left_segs) > 0 {
-			lo = left_segs[0].lo
-		}
-		if right_ok && len(right_segs) > 0 {
-			hi = right_segs[len(right_segs) - 1].hi
-		}
+		lo, hi := range_span_bounds(left_segs, right_segs)
 		integer_intervals := make([]Integer_Interval, 1)
 		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
@@ -294,6 +283,50 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 		break
 	}
 	return nil
+}
+
+// Span d'un range pour la contrainte. En Syntact l'ordre des bornes ne change
+// que le défaut, jamais l'enveloppe : `10..0` ≡ `0..10`, et un range chaîné
+// `10..0..30` ≡ `0..30` (défaut 10). On prend donc le min global de tous les `lo`
+// et le max global de tous les `hi` des segments des deux côtés (les sous-ranges
+// ayant déjà été foldés en leur propre span). Une borne ouverte (±∞) domine.
+range_span_bounds :: proc(left_segs, right_segs: []Integer_Interval) -> (Maybe(i128), Maybe(i128)) {
+	lo: Maybe(i128) = nil
+	hi: Maybe(i128) = nil
+	lo_set := false
+	hi_set := false
+	consider :: proc(segs: []Integer_Interval, lo: ^Maybe(i128), hi: ^Maybe(i128), lo_set, hi_set: ^bool) {
+		for s in segs {
+			if l, ok := s.lo.(i128); ok {
+				if !lo_set^ {
+					lo^ = l
+					lo_set^ = true
+				} else if cur, cok := lo^.(i128); cok && l < cur {
+					lo^ = l
+				}
+			} else {
+				lo^ = nil
+				lo_set^ = true
+			}
+			if h, ok := s.hi.(i128); ok {
+				if !hi_set^ {
+					hi^ = h
+					hi_set^ = true
+				} else if cur, cok := hi^.(i128); cok && h > cur {
+					hi^ = h
+				}
+			} else {
+				hi^ = nil
+				hi_set^ = true
+			}
+		}
+	}
+	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
+	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
+	// Une fois une borne marquée ouverte (nil + set), elle ne doit pas être
+	// rétrécie par un segment ultérieur : le rétrécissement ci-dessus ne touche
+	// que les bornes concrètes, donc nil reste nil. OK.
+	return lo, hi
 }
 
 // --- integer interval arithmetic ---

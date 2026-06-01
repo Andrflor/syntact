@@ -371,6 +371,15 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 		return .String
 	case None_Type:
 		return .Invalid
+	case Range_Type:
+		// Range chaîné (`10..0..30`) : la famille est celle de ses bornes.
+		lk := range_operand_kind(follow(v.left))
+		rk := range_operand_kind(follow(v.right))
+		if lk == .Invalid || rk == .Invalid do return .Invalid
+		if lk == .None do return rk
+		if rk == .None do return lk
+		if lk != rk do return .Invalid
+		return lk
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {

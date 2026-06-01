@@ -124,10 +124,7 @@ fold_type_float_intervals :: proc(
 		right_segs, right_kind, right_ok := fold_type_float_intervals(v.right)
 		if v.left != nil && !left_ok do return nil, .none, false
 		if v.right != nil && !right_ok do return nil, .none, false
-		lo: Maybe(f64) = nil
-		hi: Maybe(f64) = nil
-		if left_ok && len(left_segs) > 0 do lo = left_segs[0].lo
-		if right_ok && len(right_segs) > 0 do hi = right_segs[len(right_segs) - 1].hi
+		lo, hi := range_span_float_bounds(left_segs, right_segs)
 		float_intervals := make([]Float_Interval, 1)
 		float_intervals[0] = Float_Interval{lo, hi}
 		return float_intervals, promote_float_kind(left_kind, right_kind), true
@@ -232,10 +229,7 @@ fold_constraint_float_intervals :: proc(
 		right_segs, right_kind, right_ok := fold_constraint_float_intervals(v.right)
 		if v.left != nil && !left_ok do return nil, .none, false
 		if v.right != nil && !right_ok do return nil, .none, false
-		lo: Maybe(f64) = nil
-		hi: Maybe(f64) = nil
-		if left_ok && len(left_segs) > 0 do lo = left_segs[0].lo
-		if right_ok && len(right_segs) > 0 do hi = right_segs[len(right_segs) - 1].hi
+		lo, hi := range_span_float_bounds(left_segs, right_segs)
 		float_intervals := make([]Float_Interval, 1)
 		float_intervals[0] = Float_Interval{lo, hi}
 		return float_intervals, promote_float_kind(left_kind, right_kind), true
@@ -378,6 +372,45 @@ float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Int
 		append(&result, Float_Interval{prev_hi, nil})
 	}
 	return result[:]
+}
+
+// Comme range_span_bounds côté entier : span de toutes les bornes (chaîne incluse),
+// l'ordre ne changeant que le défaut. `10.0..0.0` ≡ `0.0..10.0`, `10.0..0.0..30.0`
+// ≡ `0.0..30.0`. min global des `lo`, max global des `hi` ; une borne ouverte domine.
+range_span_float_bounds :: proc(left_segs, right_segs: []Float_Interval) -> (Maybe(f64), Maybe(f64)) {
+	lo: Maybe(f64) = nil
+	hi: Maybe(f64) = nil
+	lo_set := false
+	hi_set := false
+	consider :: proc(segs: []Float_Interval, lo: ^Maybe(f64), hi: ^Maybe(f64), lo_set, hi_set: ^bool) {
+		for s in segs {
+			if l, ok := s.lo.(f64); ok {
+				if !lo_set^ {
+					lo^ = l
+					lo_set^ = true
+				} else if cur, cok := lo^.(f64); cok && l < cur {
+					lo^ = l
+				}
+			} else {
+				lo^ = nil
+				lo_set^ = true
+			}
+			if h, ok := s.hi.(f64); ok {
+				if !hi_set^ {
+					hi^ = h
+					hi_set^ = true
+				} else if cur, cok := hi^.(f64); cok && h > cur {
+					hi^ = h
+				}
+			} else {
+				hi^ = nil
+				hi_set^ = true
+			}
+		}
+	}
+	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
+	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
+	return lo, hi
 }
 
 float_intervals_normalize :: proc(float_intervals: []Float_Interval) -> []Float_Interval {
