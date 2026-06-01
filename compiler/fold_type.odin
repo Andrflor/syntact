@@ -57,11 +57,33 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
 		case Negate_Type:
-			// La négation ORDINALE (codepoints entiers ou char ordinal) se développe
-			// en intervalles — son complément est représentable. La négation
-			// POSITIONNELLE (~"foo"..", ~(finit par '_')) ne l'est pas : on garde le
-			// Negate_Type symbolique et satisfy l'interprète comme NOT satisfy(content).
+			// Normalisation De Morgan dans la même passe : on pousse ~ vers les
+			// feuilles et on collapse les ~~. Le résultat reste foldé par cette
+			// même fonction, donc l'arbre n'a jamais de ~ empilé sur un &/|/~.
+			//   ~~X      → X
+			//   ~(A & B) → ~A | ~B
+			//   ~(A | B) → ~A & ~B
+			// Une feuille ~range / ~literal tombe dans les probes domaine ci-dessous
+			// (complément d'intervalles pour l'ordinal/numérique) ou reste symbolique
+			// (négation positionnelle string), géré par satisfy.
+			inner := follow(v.operand)
+			if inner != nil {
+				#partial switch iv in inner^ {
+				case Negate_Type:
+					return fold_constraint(iv.operand) // ~~X → X
+				case And_Type:
+					r := new(Type)
+					r^ = Or_Type{fold_constraint(negated(iv.left)), fold_constraint(negated(iv.right))}
+					return r
+				case Or_Type:
+					r := new(Type)
+					r^ = And_Type{fold_constraint(negated(iv.left)), fold_constraint(negated(iv.right))}
+					return r
+				}
+			}
+			// Feuille négative : complément numérique si possible, sinon symbolique.
 			if r := fold_constraint_integer(t); r != nil do return r
+			if r := fold_constraint_float(t); r != nil do return r
 			if neg := negate_ordinal_string(v.operand); neg != nil do return neg
 			r := new(Type)
 			r^ = Negate_Type{fold_constraint(v.operand)}
@@ -74,12 +96,20 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			return fold_constraint_string(t)
 		}
 	}
-	// Range_Type / Compose_Type / Negate_Type are domain-ambiguous: their family
-	// is decided by their operands, not their tag. Try integer, then float, then string.
+	// Range_Type / Compose_Type are domain-ambiguous: their family is decided by
+	// their operands, not their tag. Try integer, then float, then string.
 	if r := fold_constraint_integer(t); r != nil do return r
 	if r := fold_constraint_float(t); r != nil do return r
 	if r := fold_constraint_string(t); r != nil do return r
 	return nil
+}
+
+// negated : enveloppe un ^Type dans un Negate_Type (pour réécrire De Morgan à la
+// volée). fold_constract le re-normalisera (un ~ sur un & redescend, etc.).
+negated :: proc(t: ^Type) -> ^Type {
+	r := new(Type)
+	r^ = Negate_Type{t}
+	return r
 }
 
 // fold_constraint_target folds the value at scope[i] when it is used as a
@@ -319,6 +349,91 @@ type_to_string :: proc(t: ^Type) -> string {
 		return strings.to_string(b)
 	}
 	return "<value>"
+}
+
+// ===========================================================================
+// DÉFAUT — la valeur concrète qu'une contrainte produit quand aucune valeur
+// n'est donnée (`u8:a` → a vaut 0). Le défaut se calcule TOUJOURS sur les
+// intervalles finals du fold, jamais sur la structure brute : ~10, ..9|11.. et
+// ~(~10&~20) suivent le même chemin et donnent des défauts cohérents.
+// ===========================================================================
+
+// default_value : la value concrète à poser quand une binding n'a pas de `->`.
+// Suit le scope/carve jusqu'à une production, puis matérialise son défaut.
+default_value :: proc(t: ^Type) -> ^Type {
+	if t == nil do return t
+	target := follow(t)
+	cur := target
+	for {
+		#partial switch &v in cur^ {
+		case Scope_Type:
+			for i := 0; i < len(v.kind); i += 1 {
+				if v.kind[i] == .Product {
+					def := type_default(v.values[i])
+					if def != nil do return def
+					return v.values[i]
+				}
+			}
+			return t
+		case Carve_Type:
+			if v.source != nil {
+				cur = follow(v.source)
+				continue
+			}
+		}
+		break
+	}
+	def := type_default(target)
+	if def != nil do return def
+	return t
+}
+
+// type_default : matérialise le défaut d'un type en une value concrète.
+// On fold la contrainte en intervalles (ce qui réduit récursivement Range / And /
+// Or / Negate / Compose, et calcule le default_value de l'ensemble), puis on lit
+// ce default_value. Aucune lecture de structure brute : l'écriture n'influe pas.
+type_default :: proc(t: ^Type) -> ^Type {
+	if t == nil do return nil
+	// Mention/Reference : le défaut est celui de la valeur ciblée.
+	#partial switch v in t^ {
+	case Mention_Type:
+		if v.match_scope != nil && v.match_index >= 0 {
+			return type_default(v.match_scope.values[v.match_index])
+		}
+	case Reference_Type:
+		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+			return type_default(v.reference.match_scope.values[v.reference.match_index])
+		}
+	}
+	// Domaines : on fold en intervalles et on lit le default_value calculé dessus.
+	if folded := fold_constraint_integer(t); folded != nil {
+		if it, ok := folded^.(Integer_Type); ok {
+			if d, ok2 := it.default_value.(i128); ok2 {
+				r := new(Type)
+				r^ = make_int_const(d)
+				return r
+			}
+		}
+	}
+	if folded := fold_constraint_float(t); folded != nil {
+		if ft, ok := folded^.(Float_Type); ok {
+			if d, ok2 := ft.default_value.(f64); ok2 {
+				r := new(Type)
+				r^ = make_float_const(d)
+				return r
+			}
+		}
+	}
+	if folded := fold_constraint_string(t); folded != nil {
+		if st, ok := folded^.(String_Type); ok {
+			if d, ok2 := st.default_value.(string); ok2 {
+				r := new(Type)
+				r^ = make_string_const(d, st.default_quotation)
+				return r
+			}
+		}
+	}
+	return nil
 }
 
 fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {

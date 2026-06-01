@@ -43,6 +43,33 @@ make_float_result :: #force_inline proc(val: f64, kind: FloatKind = .none) -> Ty
 	return Float_Type{float_intervals, kind, val}
 }
 
+
+make_float_range :: proc(lo: Maybe(f64), hi: Maybe(f64), kind: FloatKind = .none) -> Float_Type {
+	float_intervals := make([]Float_Interval, 1)
+	float_intervals[0] = Float_Interval{lo, hi}
+	return Float_Type{float_intervals, kind, default_for_float_intervals(float_intervals)}
+}
+
+
+make_float_const :: proc(val: f64) -> Float_Type {
+	return make_float_range(val, val)
+}
+
+
+default_for_float_intervals :: proc(float_intervals: []Float_Interval) -> Maybe(f64) {
+	if len(float_intervals) == 0 do return nil
+	for interval in float_intervals {
+		lo, lo_ok := interval.lo.(f64)
+		hi, hi_ok := interval.hi.(f64)
+		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return f64(0)
+	}
+	lo, lo_ok := float_intervals[0].lo.(f64)
+	if lo_ok do return lo
+	hi, hi_ok := float_intervals[len(float_intervals) - 1].hi.(f64)
+	if hi_ok do return hi
+	return f64(0)
+}
+
 // float_kind_compatible reports whether a value of kind `vk` may be colored by
 // a constraint of kind `ck`. Equal kinds match; .none on either side matches.
 float_kind_compatible :: #force_inline proc(ck, vk: FloatKind) -> bool {

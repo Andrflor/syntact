@@ -31,6 +31,38 @@ make_int_result :: #force_inline proc(val: i128) -> Type {
 }
 
 
+make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128)) -> Integer_Type {
+	integer_intervals := make([]Integer_Interval, 1)
+	integer_intervals[0] = Integer_Interval{lo, hi}
+	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
+}
+
+
+make_int_const :: proc(val: i128) -> Integer_Type {
+	return make_int_range(val, val)
+}
+
+
+// Le défaut ne dépend QUE des intervalles finals, jamais de l'écriture qui les a
+// produits : ~10 ≡ ..9|11.. donnent le même défaut. Règle : la première borne
+// FINIE rencontrée en parcourant (lo₁, hi₁, lo₂, hi₂, …) — toujours un élément
+// réel de l'ensemble.
+//   u8 [0..255]    → 0   (lo₁)
+//   ~10 [..9|11..] → 9   (lo₁=−∞ ignoré, hi₁)
+//   ..10 [..10]    → 10  (hi₁)
+//   5.. [5..]      → 5   (lo₁)
+//   ~0 [..-1|1..]  → -1  (hi₁, et −1 ∈ ~0 ✓)
+// Ensemble totalement ouvert (.. = ℤ) : aucune borne finie → 0.
+default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {
+	if len(integer_intervals) == 0 do return nil
+	for interval in integer_intervals {
+		if lo, ok := interval.lo.(i128); ok do return lo
+		if hi, ok := interval.hi.(i128); ok do return hi
+	}
+	return i128(0)
+}
+
+
 int_to_f64 :: #force_inline proc(i: Integer_Type) -> f64 {
 	return f64(int_value(i))
 }

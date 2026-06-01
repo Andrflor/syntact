@@ -398,71 +398,6 @@ scope_resolve :: proc(
 	return nil, -1
 }
 
-default_value :: proc(t: ^Type) -> ^Type {
-	if t == nil do return t
-	target := follow(t)
-	cur := target
-	for {
-		#partial switch &v in cur^ {
-		case Scope_Type:
-			for i := 0; i < len(v.kind); i += 1 {
-				if v.kind[i] == .Product {
-					def := type_default(v.values[i])
-					if def != nil do return def
-					return v.values[i]
-				}
-			}
-			return t
-		case Carve_Type:
-			if v.source != nil {
-				cur = follow(v.source)
-				continue
-			}
-		}
-		break
-	}
-	def := type_default(target)
-	if def != nil do return def
-	return t
-}
-
-type_default :: proc(t: ^Type) -> ^Type {
-	if t == nil do return nil
-	#partial switch v in t^ {
-	case Integer_Type:
-		d, d_ok := v.default_value.(i128)
-		if d_ok {
-			result := new(Type)
-			result^ = make_int_const(d)
-			return result
-		}
-	case Float_Type:
-		d, d_ok := v.default_value.(f64)
-		if d_ok {
-			result := new(Type)
-			result^ = make_float_const(d)
-			return result
-		}
-	case Range_Type:
-		// Default of a range is its lower bound (the first value in the interval).
-		return type_default(v.left)
-	case And_Type:
-		return type_default(v.left)
-	case Or_Type:
-		return type_default(v.left)
-	case Negate_Type:
-	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
-			return type_default(v.match_scope.values[v.match_index])
-		}
-	case Reference_Type:
-		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
-			return type_default(v.reference.match_scope.values[v.reference.match_index])
-		}
-	}
-	return nil
-}
-
 follow :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -615,11 +550,15 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 			value: ^Type = nil
 			if cdata.binary.right != INVALID_NODE {
 				value = walk(a, current_scope, cdata.binary.right)
+				scope_append(a, current_scope, "", constraint, .Expand, value)
+				typecheck(a, current_scope, "", constraint, .Expand, value, idx)
 			} else {
-				value = default_value(constraint)
+				fc := fold_constraint(constraint)
+				value := default_value(fc)
+				scope_append(a, current_scope, "", constraint, .Expand, value)
+				append(&current_scope.constraint_folds, fc)
+				append(&current_scope.type_folds, value)
 			}
-			scope_append(a, current_scope, "", constraint, .Expand, value)
-			typecheck(a, current_scope, "", constraint, .Expand, value, idx)
 			return value
 		}
 		value := walk(a, current_scope, operand_idx)
@@ -632,7 +571,6 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 
 	case .Constraint:
 		constraint := walk(a, current_scope, data.binary.left)
-		value := default_value(constraint)
 		name := ""
 		if data.binary.right != INVALID_NODE {
 			right_kind := ast.node_kinds[data.binary.right]
@@ -645,8 +583,12 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				}
 			}
 		}
+		fc := fold_constraint(constraint)
+		value := default_value(fc)
 		scope_append(a, current_scope, name, constraint, .Pointing_Push, value)
-		typecheck(a, current_scope, name, constraint, .Pointing_Push, value, idx)
+		append(&current_scope.constraint_folds, fc)
+		append(&current_scope.type_folds, value)
+
 		return value
 
 	case .Property:
@@ -968,56 +910,6 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	return result
 }
 
-make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128)) -> Integer_Type {
-	integer_intervals := make([]Integer_Interval, 1)
-	integer_intervals[0] = Integer_Interval{lo, hi}
-	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
-}
-
-
-make_int_const :: proc(val: i128) -> Integer_Type {
-	return make_int_range(val, val)
-}
-
-default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {
-	if len(integer_intervals) == 0 do return nil
-	for interval in integer_intervals {
-		lo, lo_ok := interval.lo.(i128)
-		hi, hi_ok := interval.hi.(i128)
-		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return i128(0)
-	}
-	lo, lo_ok := integer_intervals[0].lo.(i128)
-	if lo_ok do return lo
-	hi, hi_ok := integer_intervals[len(integer_intervals) - 1].hi.(i128)
-	if hi_ok do return hi
-	return i128(0)
-}
-
-make_float_range :: proc(lo: Maybe(f64), hi: Maybe(f64), kind: FloatKind = .none) -> Float_Type {
-	float_intervals := make([]Float_Interval, 1)
-	float_intervals[0] = Float_Interval{lo, hi}
-	return Float_Type{float_intervals, kind, default_for_float_intervals(float_intervals)}
-}
-
-
-make_float_const :: proc(val: f64) -> Float_Type {
-	return make_float_range(val, val)
-}
-
-default_for_float_intervals :: proc(float_intervals: []Float_Interval) -> Maybe(f64) {
-	if len(float_intervals) == 0 do return nil
-	for interval in float_intervals {
-		lo, lo_ok := interval.lo.(f64)
-		hi, hi_ok := interval.hi.(f64)
-		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return f64(0)
-	}
-	lo, lo_ok := float_intervals[0].lo.(f64)
-	if lo_ok do return lo
-	hi, hi_ok := float_intervals[len(float_intervals) - 1].hi.(f64)
-	if hi_ok do return hi
-	return f64(0)
-}
-
 
 builtins: map[string]Type
 
@@ -1074,12 +966,7 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 		}
 	}
 
-	sem_error(
-		a,
-		fmt.tprintf("'%s' is not defined", name),
-		.Undefined_Identifier,
-		node_pos(a, idx),
-	)
+	sem_error(a, fmt.tprintf("'%s' is not defined", name), .Undefined_Identifier, node_pos(a, idx))
 	result := new(Type)
 	result^ = Invalid_Type{}
 	return result
