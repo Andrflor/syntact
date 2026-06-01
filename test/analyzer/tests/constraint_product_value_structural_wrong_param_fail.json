@@ -2,5 +2,5 @@
   "name": "Product value structural wrong param fail",
   "description": "-> Array{u8} as value production, Irrr{f32} has same structure but wrong param",
   "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nU8OrArrayU8 -> {\n  -> u8:\n  -> Array{u8}\n}\n\nIrrr -> {\n  T -> {}\n  -> {}\n  -> {T: ...Irrr:}\n}\n\nArray{U8OrArrayU8}:array -> {1 2 Irrr{f32}}",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

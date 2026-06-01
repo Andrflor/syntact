@@ -2,5 +2,5 @@
   "name": "Typecheck u8 string mismatch",
   "description": "u8:a -> '' is invalid, string cannot be assigned to u8",
   "source": "u8:a -> ''",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

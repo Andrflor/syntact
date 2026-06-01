@@ -2,5 +2,5 @@
   "name": "Product constraint carve fail",
   "description": "-> Array{u8}: is a constraint production. Array{u8} is a scope value, not a concrete value satisfying the constraint. It should fail.",
   "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> String:\n  -> u8:\n  -> Array{u8}:\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 Array{u8}}",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

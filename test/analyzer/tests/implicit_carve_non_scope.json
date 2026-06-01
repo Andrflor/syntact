@@ -2,5 +2,5 @@
   "name": "Implicit carve non scope property access",
   "description": "Carving with integer when body uses property access should fail",
   "source": "first -> {\n  arr -> {42}\n  -> arr.#0\n}\n-> first{arr -> 5}!",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

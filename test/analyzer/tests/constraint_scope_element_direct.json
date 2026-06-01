@@ -2,5 +2,5 @@
   "name": "Constraint scope element in direct f32",
   "description": "f32:a -> {} should fail, scope does not satisfy f32",
   "source": "f32:a -> {}",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

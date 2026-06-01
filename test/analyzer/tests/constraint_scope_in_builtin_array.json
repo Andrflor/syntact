@@ -2,5 +2,5 @@
   "name": "Constraint scope in builtin array",
   "description": "Array{f32}:a -> {0.1 {}} should fail, scope does not satisfy f32 constraint",
   "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nArray{f32}:a -> {0.1 {}}",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }
