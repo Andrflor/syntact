@@ -25,10 +25,16 @@ Float_Interval :: struct {
 //   .double   ("…")                    → positionnel : lo = préfixe, hi = suffixe
 //   .backtick (`…`)                    → positionnel raw (pas d'échappement)
 // Borne nil = ouverte (préfixe/suffixe vide, ou ±∞ ordinal).
+//
+// `count` porte la répétition (`*`). Défaut {1..1}. En mode ordinal il compte
+// le nombre de chars indépendants dans [lo,hi] ('a'..'z'*3 ≡ [a-z]{3}) ; en
+// concret il compte les répétitions de la string ("ab"*3 ≡ "ababab"). Réutilise
+// toute l'arithmétique d'Integer_Type (multiplication, union, intersection).
 String_Interval :: struct {
 	lo:        Maybe(string),
 	hi:        Maybe(string),
 	quotation: String_Quotation,
+	count:     Integer_Type,
 }
 
 FloatKind :: enum {
