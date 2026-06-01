@@ -2,5 +2,5 @@
   "name": "Typecheck bool int mismatch",
   "description": "bool:a -> 42 is invalid, integer cannot be assigned to bool",
   "source": "bool:a -> 42",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

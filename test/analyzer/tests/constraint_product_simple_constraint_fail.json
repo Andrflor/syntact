@@ -2,5 +2,5 @@
   "name": "Product simple constraint fail",
   "description": "Scope with -> String: and -> u8: productions, float does not satisfy either",
   "source": "F32ORString -> {\n  -> String:\n  -> u8:\n}\n\nF32ORString:a -> 2.0",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

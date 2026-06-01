@@ -299,14 +299,12 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if folded == nil do folded = fold_type_float(t)
 	if folded != nil {
 		comp.type_fold = folded
-	} else {
-		sem_error(
-			a,
-			"Cannot fold type: operands must be integers or floats",
-			.Invalid_operator,
-			node_pos(a, node),
-		)
+		return
 	}
+	// The fold failed. Hand off to the diagnostic layer, which inspects the
+	// operands and emits a precise, author-facing explanation (incompatible
+	// families, mismatched float colors, non-numeric operand, …).
+	diagnose_compose(a, comp^, node)
 }
 
 fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
@@ -323,7 +321,7 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if left_kind == .Invalid {
 		sem_error(
 			a,
-			"Invalid range: left side must be an integer, float, or string",
+			fmt.tprintf("invalid range: left bound %s is not an integer, float, or string", describe_value(left_resolved)),
 			.Invalid_Range,
 			node_pos(a, node),
 		)
@@ -332,7 +330,7 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if right_kind == .Invalid {
 		sem_error(
 			a,
-			"Invalid range: right side must be an integer, float, or string",
+			fmt.tprintf("invalid range: right bound %s is not an integer, float, or string", describe_value(right_resolved)),
 			.Invalid_Range,
 			node_pos(a, node),
 		)
@@ -343,9 +341,9 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 		sem_error(
 			a,
 			fmt.tprintf(
-				"Invalid range: mismatched types (%s .. %s)",
-				range_kind_name(left_kind),
-				range_kind_name(right_kind),
+				"invalid range %s..%s: both bounds must be the same family",
+				describe_value(left_resolved),
+				describe_value(right_resolved),
 			),
 			.Invalid_Range,
 			node_pos(a, node),
@@ -546,7 +544,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 
 	case Float_Type:
 		if float_is_concrete(v) {
-			fmt.print(float_value(v))
+			fmt.print(float_display(float_value(v)))
 		} else if len(v.float_intervals) == 1 {
 			print_float_interval(v.float_intervals[0], v.kind)
 		} else {
@@ -719,16 +717,16 @@ print_float_interval :: proc(interval: Float_Interval, kind: FloatKind) {
 	lo, lo_ok := interval.lo.(f64)
 	hi, hi_ok := interval.hi.(f64)
 	if lo_ok && hi_ok && lo == hi {
-		fmt.print(lo)
+		fmt.print(float_display(lo))
 		return
 	}
 	if !lo_ok && !hi_ok {
 		print_float_kind(kind)
 		return
 	}
-	if lo_ok do fmt.print(lo)
+	if lo_ok do fmt.print(float_display(lo))
 	fmt.print("..")
-	if hi_ok do fmt.print(hi)
+	if hi_ok do fmt.print(float_display(hi))
 }
 
 print_integer_intervals_inline :: proc(integer_intervals: []Integer_Interval) {

@@ -2,5 +2,5 @@
   "name": "Typecheck char overflow",
   "description": "char:a -> 256 is invalid, char is u8 and 256 overflows",
   "source": "char:a -> 256",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

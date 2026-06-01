@@ -29,7 +29,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Binding_Name,
 	Invalid_Carve,
 	Invalid_Property_Access,
-	Constraint_Violation,
+	Constraint_Mismatch,
 	Invalid_Constraint,
 	Invalid_Constraint_Name,
 	Invalid_Constraint_Value,
@@ -190,6 +190,13 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 		warnings = make([dynamic]Analyzer_Error, 0),
 	}
 
+	// Expose the analyzer through the context so deep fold helpers can emit
+	// precise, source-anchored diagnostics without threading ^Analyzer through
+	// every signature. Restored on exit (analyze can be called per-file).
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &a
+	defer context.user_ptr = prev_user_ptr
+
 	root := ast_root(ast)
 	root_data := ast.node_data[root]
 	r := root_data.scope
@@ -295,28 +302,28 @@ typecheck :: proc(
 	// No imposed constraint → nothing to prove.
 	if fc == nil do return
 
-	display := name != "" ? name : "<production>"
+	display := name != "" ? fmt.tprintf("'%s'", name) : "the production"
 	if ft == nil {
 		sem_error(
 			a,
 			fmt.tprintf(
-				"'%s' has constraint %s but its value could not be resolved",
+				"%s is colored by %s but its value cannot be resolved",
 				display,
-				type_to_string(fc),
+				describe_type(fc),
 			),
-			.Constraint_Violation,
+			.Constraint_Mismatch,
 			node_pos(a, node),
 		)
 	} else if !satisfy_root(fc, ft) {
 		sem_error(
 			a,
 			fmt.tprintf(
-				"'%s' value %s does not fit in %s",
+				"constraint mismatch: %s does not satisfy %s on %s",
+				describe_type(ft),
+				describe_type(fc),
 				display,
-				type_to_string(ft),
-				type_to_string(fc),
 			),
-			.Constraint_Violation,
+			.Constraint_Mismatch,
 			node_pos(a, node),
 		)
 	}
@@ -528,7 +535,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		} else if left_kind == .Identifier {
 			name = span_str(ast, ast.node_data[left_idx].identifier.name)
 		} else {
-			sem_error(a, "Invalid binding name", .Invalid_Binding_Name, node_pos(a, left_idx))
+			sem_error(a, "invalid binding name", .Invalid_Binding_Name, node_pos(a, left_idx))
 		}
 
 		right_kind := ast.node_kinds[right_idx]
@@ -647,7 +654,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		if prop_scope == nil {
 			sem_error(
 				a,
-				fmt.tprintf("Cannot resolve property '%s'", prop_name),
+				fmt.tprintf("property '%s' does not exist", prop_name),
 				.Invalid_Property_Access,
 				node_pos(a, right_idx),
 			)
@@ -759,7 +766,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope == nil {
 					sem_error(
 						a,
-						fmt.tprintf("Cannot resolve '%s' in carve target", cname),
+						fmt.tprintf("'%s' does not exist in the carved scope", cname),
 						.Invalid_Carve,
 						node_pos(a, name_idx),
 					)
@@ -774,12 +781,12 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 							sem_error(
 								a,
 								fmt.tprintf(
-									"carve '%s' value %s does not fit in %s",
+									"constraint mismatch in carve '%s': %s does not satisfy %s",
 									cname,
-									type_to_string(vf),
-									type_to_string(cf),
+									describe_type(vf),
+									describe_type(cf),
 								),
-								.Constraint_Violation,
+								.Constraint_Mismatch,
 								node_pos(a, val_idx),
 							)
 						}
@@ -807,7 +814,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if carve_scope == nil {
 					sem_error(
 						a,
-						"Positional carve out of range",
+						"positional carve out of range: the scope has fewer fields",
 						.Invalid_Carve,
 						node_pos(a, child),
 					)
@@ -822,11 +829,11 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 							sem_error(
 								a,
 								fmt.tprintf(
-									"positional carve value %s does not fit in %s",
-									type_to_string(vf),
-									type_to_string(cf),
+									"constraint mismatch in positional carve: %s does not satisfy %s",
+									describe_type(vf),
+									describe_type(cf),
 								),
-								.Constraint_Violation,
+								.Constraint_Mismatch,
 								node_pos(a, child),
 							)
 						}
@@ -1046,7 +1053,7 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 
 	sem_error(
 		a,
-		fmt.tprintf("Undefined identifier '%s'", name),
+		fmt.tprintf("'%s' is not defined", name),
 		.Undefined_Identifier,
 		node_pos(a, idx),
 	)
@@ -1059,6 +1066,12 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 /* ======================================================================
  * SECTION 17: ERROR REPORTING
  * ====================================================================== */
+
+// current_analyzer fetches the in-flight analyzer from the context (set at the
+// top of analyze()). Returns nil outside an analysis pass.
+current_analyzer :: #force_inline proc() -> ^Analyzer {
+	return cast(^Analyzer)context.user_ptr
+}
 
 sem_error :: proc(
 	s: ^Analyzer,

@@ -2,5 +2,5 @@
   "name": "Typecheck u8 bool mismatch",
   "description": "u8:a -> true is invalid, bool cannot be assigned to u8",
   "source": "u8:a -> true",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }

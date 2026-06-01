@@ -32,7 +32,7 @@ error_type_from_string :: proc(s: string) -> (compiler.Analyzer_Error_Type, bool
 	case "Invalid_Binding_Name":    return .Invalid_Binding_Name, true
 	case "Invalid_Carve":           return .Invalid_Carve, true
 	case "Invalid_Property_Access": return .Invalid_Property_Access, true
-	case "Constraint_Violation":     return .Constraint_Violation, true
+	case "Constraint_Mismatch":     return .Constraint_Mismatch, true
 	case "Invalid_Constraint":      return .Invalid_Constraint, true
 	case "Invalid_Constraint_Name": return .Invalid_Constraint_Name, true
 	case "Invalid_Constraint_Value": return .Invalid_Constraint_Value, true

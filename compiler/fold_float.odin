@@ -172,6 +172,9 @@ fold_type_float_intervals :: proc(
 		left_segs, left_kind, left_ok := fold_type_float_intervals(v.left)
 		right_segs, right_kind, right_ok := fold_type_float_intervals(v.right)
 		if !left_ok || !right_ok do return nil, .none, false
+		// Two floats only combine if their colors are compatible (f32 vs f64
+		// don't). An incompatible pair fails the fold → diagnose_compose explains.
+		if !float_kind_compatible(left_kind, right_kind) do return nil, .none, false
 		if len(left_segs) == 0 || len(right_segs) == 0 do return nil, .none, false
 		result := make([dynamic]Float_Interval)
 		for ls in left_segs {
@@ -494,7 +497,21 @@ float_maybe_le_hi :: #force_inline proc(a, b: Maybe(f64)) -> bool {
 // --- pretty printing ---
 
 float_format :: proc(b: ^strings.Builder, f: f64) {
-	strings.write_string(b, fmt.tprintf("%v", f))
+	strings.write_string(b, float_display(f))
+}
+
+// float_display renders a float so it always reads as a float — a whole value
+// like 4.0 prints "4.0", never "4" (which would look like an integer).
+float_display :: proc(f: f64) -> string {
+	s := fmt.tprintf("%v", f)
+	if strings.index_byte(s, '.') < 0 &&
+	   strings.index_byte(s, 'e') < 0 &&
+	   strings.index_byte(s, 'E') < 0 &&
+	   strings.index_byte(s, 'n') < 0 && // nan
+	   strings.index_byte(s, 'i') < 0 { 	// inf
+		return strings.concatenate({s, ".0"})
+	}
+	return s
 }
 
 pretty_float_intervals :: proc(float_intervals: []Float_Interval, kind: FloatKind) -> string {

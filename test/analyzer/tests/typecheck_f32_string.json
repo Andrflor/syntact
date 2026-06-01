@@ -2,5 +2,5 @@
   "name": "Typecheck f32 string mismatch",
   "description": "f32:a -> 'hello' is invalid, string cannot be assigned to f32",
   "source": "f32:a -> 'hello'",
-  "expect_errors": ["Constraint_Violation"]
+  "expect_errors": ["Constraint_Mismatch"]
 }
