@@ -13,6 +13,11 @@ Integer_Interval :: struct {
 	hi: Maybe(i128), // nil = +∞
 }
 
+Float_Interval :: struct {
+	lo: Maybe(f64), // nil = -∞
+	hi: Maybe(f64), // nil = +∞
+}
+
 FloatKind :: enum {
 	none,
 	f32,
@@ -116,8 +121,9 @@ Integer_Type :: struct {
 }
 
 Float_Type :: struct {
-	kind:  FloatKind,
-	value: Maybe(f64),
+	float_intervals: []Float_Interval,
+	kind:            FloatKind,
+	default_value:   Maybe(f64),
 }
 
 Compose_Type :: struct {
@@ -400,6 +406,13 @@ type_default :: proc(t: ^Type) -> ^Type {
 		if d_ok {
 			result := new(Type)
 			result^ = make_int_const(d)
+			return result
+		}
+	case Float_Type:
+		d, d_ok := v.default_value.(f64)
+		if d_ok {
+			result := new(Type)
+			result^ = make_float_const(d)
 			return result
 		}
 	case Range_Type:
@@ -911,7 +924,11 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 		}
 	case .Float:
 		val, ok := strconv.parse_f64(text)
-		result^ = Float_Type{.none, ok ? val : nil}
+		if ok {
+			result^ = make_float_const(val)
+		} else {
+			result^ = Invalid_Type{}
+		}
 	case .String:
 		result^ = String_Type{text}
 	case .Bool:
@@ -926,6 +943,7 @@ make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128)) -> Integer_Type {
 	integer_intervals[0] = Integer_Interval{lo, hi}
 	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
 }
+
 
 make_int_const :: proc(val: i128) -> Integer_Type {
 	return make_int_range(val, val)
@@ -945,6 +963,31 @@ default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> 
 	return i128(0)
 }
 
+make_float_range :: proc(lo: Maybe(f64), hi: Maybe(f64), kind: FloatKind = .none) -> Float_Type {
+	float_intervals := make([]Float_Interval, 1)
+	float_intervals[0] = Float_Interval{lo, hi}
+	return Float_Type{float_intervals, kind, default_for_float_intervals(float_intervals)}
+}
+
+
+make_float_const :: proc(val: f64) -> Float_Type {
+	return make_float_range(val, val)
+}
+
+default_for_float_intervals :: proc(float_intervals: []Float_Interval) -> Maybe(f64) {
+	if len(float_intervals) == 0 do return nil
+	for interval in float_intervals {
+		lo, lo_ok := interval.lo.(f64)
+		hi, hi_ok := interval.hi.(f64)
+		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return f64(0)
+	}
+	lo, lo_ok := float_intervals[0].lo.(f64)
+	if lo_ok do return lo
+	hi, hi_ok := float_intervals[len(float_intervals) - 1].hi.(f64)
+	if hi_ok do return hi
+	return f64(0)
+}
+
 
 builtins: map[string]Type
 
@@ -959,10 +1002,10 @@ init_builtins :: proc "contextless" () {
 	builtins["i32"] = make_int_range(-2147483648, 2147483647)
 	builtins["u64"] = make_int_range(0, 18446744073709551615)
 	builtins["i64"] = make_int_range(-9223372036854775808, 9223372036854775807)
-	builtins["f32"] = Float_Type{.f32, nil}
-	builtins["f64"] = Float_Type{.f64, nil}
+	builtins["f32"] = make_float_range(nil, nil, .f32)
+	builtins["f64"] = make_float_range(nil, nil, .f64)
 	builtins["Int"] = make_int_range(nil, nil)
-	builtins["Float"] = Float_Type{.none, nil}
+	builtins["Float"] = make_float_range(nil, nil, .none)
 	builtins["String"] = String_Type{nil}
 	builtins["Bool"] = Bool_Type{}
 	builtins["None"] = None_Type{}
