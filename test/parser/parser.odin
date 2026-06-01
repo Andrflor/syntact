@@ -42,9 +42,61 @@ find_node_at_position :: proc(pos_map: ^Position_Map, char_pos: int) -> (^compil
 	return found_ast, found_idx
 }
 
+// ---------- AST accessors (read the SOA arrays directly) ----------
+// The compiler no longer exposes node_left/node_right/etc.; the AST is a flat
+// SOA (node_kinds + node_data raw_union). These thin helpers read it directly
+// so the harness stays self-contained and decoupled from the compiler's API.
+
+nkind :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Kind {
+	return ast.node_kinds[idx]
+}
+nbin_left :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].binary.left
+}
+nbin_right :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].binary.right
+}
+nunary :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].unary.operand
+}
+nliteral_kind :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Literal_Kind {
+	return ast.node_data[idx].literal.kind
+}
+nop_kind :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Operator_Kind {
+	return ast.node_data[idx].operator.kind
+}
+nop_left :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].operator.left
+}
+nop_right :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].operator.right
+}
+ncarve_source :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].carve.source
+}
+nexec_target :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].execute.target
+}
+npattern_target :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].pattern.target
+}
+nextern_scope :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].external.scope
+}
+nextern_name :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
+	s := ast.node_data[idx].external.name
+	return ast.source[s.start:s.end]
+}
+nevt_from :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].event_pull.from
+}
+nevt_to :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].event_pull.to
+}
+
 ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 	if idx == compiler.INVALID_NODE do return "nil"
-	kind := compiler.node_kind(ast, idx)
+	kind := nkind(ast, idx)
 	switch kind {
 	case .Identifier:
 		cap := compiler.node_capture_str(ast, idx)
@@ -54,31 +106,31 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 		}
 		return fmt.tprintf("Identifier(%s)", name)
 	case .Literal:
-		lk := compiler.node_literal_kind(ast, idx)
+		lk := nliteral_kind(ast, idx)
 		text := compiler.node_text(ast, idx)
 		return fmt.tprintf("Literal(%v,%s)", lk, text)
 	case .Pointing:
-		return fmt.tprintf("Pointing(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("Pointing(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .PointingPull:
-		return fmt.tprintf("PointingPull(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("PointingPull(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .EventPush:
-		return fmt.tprintf("EventPush(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("EventPush(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .EventPull:
 		catch_str := compiler.node_event_pull_catch(ast, idx)
 		return fmt.tprintf(
 			"EventPull(%s,%s,%s)",
 			catch_str,
-			ast_to_string(ast, compiler.node_event_pull_from(ast, idx)),
-			ast_to_string(ast, compiler.node_event_pull_to(ast, idx)),
+			ast_to_string(ast, nevt_from(ast, idx)),
+			ast_to_string(ast, nevt_to(ast, idx)),
 		)
 	case .ResonancePush:
-		return fmt.tprintf("ResonancePush(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("ResonancePush(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .ResonancePull:
-		return fmt.tprintf("ResonancePull(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("ResonancePull(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .ReactivePush:
-		return fmt.tprintf("ReactivePush(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("ReactivePush(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .ReactivePull:
-		return fmt.tprintf("ReactivePull(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("ReactivePull(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .ScopeNode:
 		children := compiler.node_children(ast, idx)
 		if len(children) == 0 do return "Scope[]"
@@ -93,25 +145,25 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 		for child in carve_children {
 			append(&ov, ast_to_string(ast, child))
 		}
-		return fmt.tprintf("Carve(%s,[%s])", ast_to_string(ast, compiler.node_carve_source(ast, idx)), strings.join(ov[:], ","))
+		return fmt.tprintf("Carve(%s,[%s])", ast_to_string(ast, ncarve_source(ast, idx)), strings.join(ov[:], ","))
 	case .Property:
-		return fmt.tprintf("Property(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("Property(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Operator:
 		return fmt.tprintf(
 			"Operator(%v,%s,%s)",
-			compiler.node_operator_kind(ast, idx),
-			ast_to_string(ast, compiler.node_operator_left(ast, idx)),
-			ast_to_string(ast, compiler.node_operator_right(ast, idx)),
+			nop_kind(ast, idx),
+			ast_to_string(ast, nop_left(ast, idx)),
+			ast_to_string(ast, nop_right(ast, idx)),
 		)
 	case .Execute:
 		wrappers := compiler.node_execute_wrappers(ast, idx)
 		ws := make([dynamic]string)
 		for w in wrappers do append(&ws, fmt.tprintf("%v", compiler.ExecutionWrapper(w)))
-		return fmt.tprintf("Execute(%s,[%s])", ast_to_string(ast, compiler.node_execute_target(ast, idx)), strings.join(ws[:], ","))
+		return fmt.tprintf("Execute(%s,[%s])", ast_to_string(ast, nexec_target(ast, idx)), strings.join(ws[:], ","))
 	case .CompileTime:
-		return fmt.tprintf("CompileTime(%s)", ast_to_string(ast, compiler.node_unary_operand(ast, idx)))
+		return fmt.tprintf("CompileTime(%s)", ast_to_string(ast, nunary(ast, idx)))
 	case .Range:
-		return fmt.tprintf("Range(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("Range(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Pattern:
 		branches := compiler.node_pattern_branches(ast, idx)
 		bs := make([dynamic]string)
@@ -120,21 +172,21 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 			product := branches[i + 1] if i + 1 < len(branches) else compiler.INVALID_NODE
 			append(&bs, fmt.tprintf("Branch(%s,%s)", ast_to_string(ast, source), ast_to_string(ast, product)))
 		}
-		return fmt.tprintf("Pattern(%s,[%s])", ast_to_string(ast, compiler.node_pattern_target(ast, idx)), strings.join(bs[:], ","))
+		return fmt.tprintf("Pattern(%s,[%s])", ast_to_string(ast, npattern_target(ast, idx)), strings.join(bs[:], ","))
 	case .Constraint:
-		return fmt.tprintf("Constraint(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("Constraint(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Product:
-		return fmt.tprintf("Product(%s)", ast_to_string(ast, compiler.node_unary_operand(ast, idx)))
+		return fmt.tprintf("Product(%s)", ast_to_string(ast, nunary(ast, idx)))
 	case .Expand:
-		return fmt.tprintf("Expand(%s)", ast_to_string(ast, compiler.node_unary_operand(ast, idx)))
+		return fmt.tprintf("Expand(%s)", ast_to_string(ast, nunary(ast, idx)))
 	case .External:
-		return fmt.tprintf("External(%s,%s)", compiler.node_external_name(ast, idx), ast_to_string(ast, compiler.node_external_scope(ast, idx)))
+		return fmt.tprintf("External(%s,%s)", nextern_name(ast, idx), ast_to_string(ast, nextern_scope(ast, idx)))
 	case .Unknown:
 		return "Unknown"
 	case .Enforce:
-		return fmt.tprintf("Enforce(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("Enforce(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Branch:
-		return fmt.tprintf("Branch(%s,%s)", ast_to_string(ast, compiler.node_left(ast, idx)), ast_to_string(ast, compiler.node_right(ast, idx)))
+		return fmt.tprintf("Branch(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	}
 	return fmt.tprintf("UnhandledNode(%v)", kind)
 }
@@ -175,38 +227,38 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 		search_start = actual_pos + 1
 	}
 
-	kind := compiler.node_kind(ast, idx)
+	kind := nkind(ast, idx)
 	switch kind {
 	case .Pointing, .PointingPull, .EventPush, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull, .Property, .Constraint, .Range, .Enforce, .Branch:
-		walk_all_nodes(ast, compiler.node_left(ast, idx), full_string, pos_map)
-		walk_all_nodes(ast, compiler.node_right(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nbin_left(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nbin_right(ast, idx), full_string, pos_map)
 	case .EventPull:
-		walk_all_nodes(ast, compiler.node_event_pull_from(ast, idx), full_string, pos_map)
-		walk_all_nodes(ast, compiler.node_event_pull_to(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nevt_from(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nevt_to(ast, idx), full_string, pos_map)
 	case .ScopeNode:
 		for child in compiler.node_children(ast, idx) {
 			walk_all_nodes(ast, child, full_string, pos_map)
 		}
 	case .Carve:
-		walk_all_nodes(ast, compiler.node_carve_source(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, ncarve_source(ast, idx), full_string, pos_map)
 		for child in compiler.node_carve_children(ast, idx) {
 			walk_all_nodes(ast, child, full_string, pos_map)
 		}
 	case .Operator:
-		walk_all_nodes(ast, compiler.node_operator_left(ast, idx), full_string, pos_map)
-		walk_all_nodes(ast, compiler.node_operator_right(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nop_left(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nop_right(ast, idx), full_string, pos_map)
 	case .Execute:
-		walk_all_nodes(ast, compiler.node_execute_target(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nexec_target(ast, idx), full_string, pos_map)
 	case .CompileTime, .Product, .Expand:
-		walk_all_nodes(ast, compiler.node_unary_operand(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nunary(ast, idx), full_string, pos_map)
 	case .Pattern:
-		walk_all_nodes(ast, compiler.node_pattern_target(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, npattern_target(ast, idx), full_string, pos_map)
 		branches := compiler.node_pattern_branches(ast, idx)
 		for b in branches {
 			walk_all_nodes(ast, b, full_string, pos_map)
 		}
 	case .External:
-		walk_all_nodes(ast, compiler.node_external_scope(ast, idx), full_string, pos_map)
+		walk_all_nodes(ast, nextern_scope(ast, idx), full_string, pos_map)
 	case .Identifier, .Literal, .Unknown:
 	}
 }
@@ -278,7 +330,7 @@ run_test :: proc(path: string, t: ^testing.T) {
 			found_ast, found_idx := find_node_at_position(&pos_map, first_diff)
 			position := compiler.Position{line = 1, column = 1}
 			if found_ast != nil && found_idx != compiler.INVALID_NODE {
-				position = compiler.node_position(found_ast, found_idx)
+				position = compiler.span_to_position(found_ast, found_ast.node_spans[found_idx].start)
 			}
 			msg = strings.concatenate(
 				{
