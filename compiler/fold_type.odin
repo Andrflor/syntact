@@ -56,6 +56,16 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			r := new(Type)
 			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
+		case Negate_Type:
+			// La négation ORDINALE (codepoints entiers ou char ordinal) se développe
+			// en intervalles — son complément est représentable. La négation
+			// POSITIONNELLE (~"foo"..", ~(finit par '_')) ne l'est pas : on garde le
+			// Negate_Type symbolique et satisfy l'interprète comme NOT satisfy(content).
+			if r := fold_constraint_integer(t); r != nil do return r
+			if neg := negate_ordinal_string(v.operand); neg != nil do return neg
+			r := new(Type)
+			r^ = Negate_Type{fold_constraint(v.operand)}
+			return r
 		case Integer_Type:
 			return fold_constraint_integer(t)
 		case Float_Type:
@@ -219,6 +229,11 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 		return satisfy(f.left, ft) && satisfy(f.right, ft)
 	case Or_Type:
 		return satisfy(f.left, ft) || satisfy(f.right, ft)
+	case Negate_Type:
+		// value ⊆ ~X  ⟺  value n'est pas dans X. Décidable et exact pour une value
+		// concrète : ~(finit par '_') accepte 'identifier', rejette 'foo_'. Gère la
+		// négation positionnelle/mixte que le fold ne développe pas en intervalles.
+		return !satisfy(f.operand, ft)
 	}
 	return false
 }

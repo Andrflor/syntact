@@ -745,6 +745,24 @@ string_intervals_negate :: proc(segs: []String_Interval) -> []String_Interval {
 }
 
 
+// negate_ordinal_string : développe ~X en intervalles SEULEMENT si X fold en une
+// string ordinale pure (chaque segment ordinal, count 1, complément représentable
+// en codepoints). Sinon nil → la négation reste symbolique (Negate_Type) et est
+// traitée au niveau satisfy comme NOT satisfy(X). Évite de "rater" silencieusement
+// les négations positionnelles comme aujourd'hui.
+negate_ordinal_string :: proc(content: ^Type) -> ^Type {
+	segs, ok := fold_string_intervals(content, true).([]String_Interval)
+	if !ok || len(segs) == 0 do return nil
+	for s in segs {
+		if string_interval_mode(s) != .ordinal do return nil
+		if !count_is_one(s.count) do return nil
+	}
+	neg := string_intervals_negate(segs)
+	if len(neg) == 0 do return nil
+	return wrap_string_intervals(neg)
+}
+
+
 // ===========================================================================
 // CONCATÉNATION — + sur strings/chars
 // ===========================================================================
