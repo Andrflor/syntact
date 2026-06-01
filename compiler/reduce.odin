@@ -238,9 +238,8 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		if ri_ok && int_is_concrete(ri) {
 			return make_int_result(-int_value(ri))
 		}
-		if rf_ok {
-			f := rf.value.(f64)
-			return Float_Type{rf.kind, -f}
+		if rf_ok && float_is_concrete(rf) {
+			return make_float_result(-float_value(rf), rf.kind)
 		}
 		return nil
 	}
@@ -266,18 +265,18 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 	fl, fr: f64
 	fk: FloatKind
 
-	if lf_ok && rf_ok {
-		fl = lf.value.(f64)
-		fr = rf.value.(f64)
+	if lf_ok && rf_ok && float_is_concrete(lf) && float_is_concrete(rf) {
+		fl = float_value(lf)
+		fr = float_value(rf)
 		fk = promote_float_kind(lf.kind, rf.kind)
-	} else if lf_ok && ri_ok && int_is_concrete(ri) {
-		fl = lf.value.(f64)
+	} else if lf_ok && float_is_concrete(lf) && ri_ok && int_is_concrete(ri) {
+		fl = float_value(lf)
 		fr = int_to_f64(ri)
-		fk = lf.kind == .none ? .f64 : lf.kind
-	} else if li_ok && rf_ok && int_is_concrete(li) {
+		fk = lf.kind
+	} else if li_ok && int_is_concrete(li) && rf_ok && float_is_concrete(rf) {
 		fl = int_to_f64(li)
-		fr = rf.value.(f64)
-		fk = rf.kind == .none ? .f64 : rf.kind
+		fr = float_value(rf)
+		fk = rf.kind
 	} else {
 		if op == .Add {
 			ls, ls_ok := lv.(String_Type)
@@ -291,13 +290,13 @@ compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 
 	#partial switch op {
 	case .Add:
-		return Float_Type{fk, fl + fr}
+		return make_float_result(fl + fr, fk)
 	case .Subtract:
-		return Float_Type{fk, fl - fr}
+		return make_float_result(fl - fr, fk)
 	case .Multiply:
-		return Float_Type{fk, fl * fr}
+		return make_float_result(fl * fr, fk)
 	case .Divide:
-		return Float_Type{fk, fl / fr}
+		return make_float_result(fl / fr, fk)
 	}
 	return nil
 }
@@ -319,14 +318,15 @@ compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 		if r_i_ok && int_is_concrete(r_i) {
 			return Bool_Type{eq == (int_value(l) == int_value(r_i))}
 		}
-		if r_f_ok {
-			return Bool_Type{eq == (int_to_f64(l) == r_f.value.(f64))}
+		if r_f_ok && float_is_concrete(r_f) {
+			return Bool_Type{eq == (int_to_f64(l) == float_value(r_f))}
 		}
 	case Float_Type:
+		if !float_is_concrete(l) do return Bool_Type{false}
 		r_f, r_f_ok := rv.(Float_Type)
 		r_i, r_i_ok := rv.(Integer_Type)
-		lf := l.value.(f64)
-		if r_f_ok do return Bool_Type{eq == (lf == r_f.value.(f64))}
+		lf := float_value(l)
+		if r_f_ok && float_is_concrete(r_f) do return Bool_Type{eq == (lf == float_value(r_f))}
 		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{eq == (lf == int_to_f64(r_i))}
 	case Bool_Type:
 		r := rv.(Bool_Type)
@@ -345,12 +345,13 @@ compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 		r_i, r_i_ok := rv.(Integer_Type)
 		r_f, r_f_ok := rv.(Float_Type)
 		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{i128_cmp(int_value(l), int_value(r_i), op)}
-		if r_f_ok do return Bool_Type{float_cmp(int_to_f64(l), r_f.value.(f64), op)}
+		if r_f_ok && float_is_concrete(r_f) do return Bool_Type{float_cmp(int_to_f64(l), float_value(r_f), op)}
 	case Float_Type:
+		if !float_is_concrete(l) do return Bool_Type{false}
 		r_f, r_f_ok := rv.(Float_Type)
 		r_i, r_i_ok := rv.(Integer_Type)
-		lf := l.value.(f64)
-		if r_f_ok do return Bool_Type{float_cmp(lf, r_f.value.(f64), op)}
+		lf := float_value(l)
+		if r_f_ok && float_is_concrete(r_f) do return Bool_Type{float_cmp(lf, float_value(r_f), op)}
 		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{float_cmp(lf, int_to_f64(r_i), op)}
 	}
 	return Bool_Type{false}

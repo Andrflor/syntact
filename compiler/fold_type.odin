@@ -55,9 +55,16 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			r := new(Type)
 			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
+		case Integer_Type:
+			return fold_constraint_integer(t)
+		case Float_Type:
+			return fold_constraint_float(t)
 		}
 	}
+	// Range_Type / Compose_Type / Negate_Type are domain-ambiguous: their family
+	// is decided by their operands, not their tag. Try integer, then float.
 	if r := fold_constraint_integer(t); r != nil do return r
+	if r := fold_constraint_float(t); r != nil do return r
 	return nil
 }
 
@@ -111,13 +118,25 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 				return fold_value_type(ref.match_scope.values[ref.match_index])
 			}
+		case Integer_Type:
+			return value_type_envelope(fold_type_integer(t))
+		case Float_Type:
+			return value_type_envelope(fold_type_float(t))
 		}
 	}
-	// Envelope of the value. fold_type_integer covers concrete values and
-	// arithmetic; sets built with ~ | & only resolve through the constraint
-	// fold, so fall back to it for those.
+	// Range/Compose/Negate are domain-ambiguous (family decided by operands),
+	// and sets built with ~ | & only resolve through the constraint fold — so
+	// probe each domain in turn.
 	env := fold_type_integer(t)
 	if env == nil do env = fold_constraint_integer(t)
+	if env == nil do env = fold_type_float(t)
+	if env == nil do env = fold_constraint_float(t)
+	return value_type_envelope(env)
+}
+
+// value_type_envelope wraps a folded numeric envelope as a typeof: a singleton
+// is its own value, any wider set becomes the producer scope {-> set}.
+value_type_envelope :: proc(env: ^Type) -> ^Type {
 	if env == nil do return nil
 	if fold_is_concrete_value(env) do return env
 	return make_producer_scope(env)
@@ -130,6 +149,8 @@ fold_is_concrete_value :: proc(t: ^Type) -> bool {
 	#partial switch v in t^ {
 	case Integer_Type:
 		return integer_intervals_is_concrete(v.integer_intervals)
+	case Float_Type:
+		return float_intervals_is_concrete(v.float_intervals)
 	}
 	return false
 }
@@ -174,6 +195,9 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case Integer_Type:
 		v, ok := ft^.(Integer_Type)
 		return ok && integer_satisfy(f, v)
+	case Float_Type:
+		v, ok := ft^.(Float_Type)
+		return ok && float_satisfy(f, v)
 	case Scope_Type:
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
@@ -259,6 +283,8 @@ type_to_string :: proc(t: ^Type) -> string {
 	#partial switch v in t^ {
 	case Integer_Type:
 		return integer_to_string(v)
+	case Float_Type:
+		return float_to_string(v)
 	}
 	return "<value>"
 }
@@ -270,12 +296,13 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	// fold_compose stores the raw numeric envelope of the arithmetic (a value),
 	// not its typeof — the envelope is consumed by further interval arithmetic.
 	folded := fold_type_integer(t)
+	if folded == nil do folded = fold_type_float(t)
 	if folded != nil {
 		comp.type_fold = folded
 	} else {
 		sem_error(
 			a,
-			"Cannot fold type: operands must be integers",
+			"Cannot fold type: operands must be integers or floats",
 			.Invalid_operator,
 			node_pos(a, node),
 		)
@@ -518,11 +545,15 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		}
 
 	case Float_Type:
-		f, ok := v.value.(f64)
-		if ok {
-			fmt.printf("%v", f)
+		if float_is_concrete(v) {
+			fmt.print(float_value(v))
+		} else if len(v.float_intervals) == 1 {
+			print_float_interval(v.float_intervals[0], v.kind)
 		} else {
-			print_float_kind(v.kind)
+			for interval, i in v.float_intervals {
+				if i > 0 do fmt.print(" | ")
+				print_float_interval(interval, v.kind)
+			}
 		}
 
 	case String_Type:
@@ -636,8 +667,8 @@ print_integer_intervals :: proc(t: ^Type) {
 		}
 		return
 	case Float_Type:
-		f, f_ok := v.value.(f64)
-		if f_ok {
+		if float_is_concrete(v) {
+			f := float_value(v)
 			fmt.printf("{%v, %v}", f, f)
 		} else {
 			print_float_kind(v.kind)
@@ -673,8 +704,31 @@ print_fold_inline :: proc(t: ^Type) {
 	case Integer_Type:
 		print_integer_intervals_inline(v.integer_intervals)
 		return
+	case Float_Type:
+		print_float_intervals_inline(v.float_intervals, v.kind)
+		return
 	}
 	fmt.print("[?]")
+}
+
+print_float_intervals_inline :: proc(float_intervals: []Float_Interval, kind: FloatKind) {
+	fmt.printf("[%s]", pretty_float_intervals(float_intervals, kind))
+}
+
+print_float_interval :: proc(interval: Float_Interval, kind: FloatKind) {
+	lo, lo_ok := interval.lo.(f64)
+	hi, hi_ok := interval.hi.(f64)
+	if lo_ok && hi_ok && lo == hi {
+		fmt.print(lo)
+		return
+	}
+	if !lo_ok && !hi_ok {
+		print_float_kind(kind)
+		return
+	}
+	if lo_ok do fmt.print(lo)
+	fmt.print("..")
+	if hi_ok do fmt.print(hi)
 }
 
 print_integer_intervals_inline :: proc(integer_intervals: []Integer_Interval) {
