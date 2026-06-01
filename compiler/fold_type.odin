@@ -372,13 +372,19 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 	case None_Type:
 		return .Invalid
 	case Range_Type:
-		// Range chaîné (`10..0..30`) : la famille est celle de ses bornes.
+		// Range chaîné (`10..0..30`) : la famille est celle de ses bornes. Si les
+		// deux bornes sont elles-mêmes des scalaires invalides, le sous-range est
+		// invalide ; mais une incohérence de famille INTERNE (`0..30.0`) a déjà été
+		// signalée par le propre appel fold_range du sous-range — on ne la re-signale
+		// pas au parent, on renvoie sa famille représentative (celle de left, le
+		// défaut) pour ne pas produire un message trompeur "right bound not a ...".
 		lk := range_operand_kind(follow(v.left))
 		rk := range_operand_kind(follow(v.right))
-		if lk == .Invalid || rk == .Invalid do return .Invalid
+		if lk == .Invalid && rk == .Invalid do return .Invalid
 		if lk == .None do return rk
 		if rk == .None do return lk
-		if lk != rk do return .Invalid
+		if lk == .Invalid do return rk
+		if rk == .Invalid do return lk
 		return lk
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
