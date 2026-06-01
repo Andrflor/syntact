@@ -103,8 +103,9 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		if v.right != nil && !right_ok do return nil
 		// Un range (éventuellement chaîné comme `10..0..30`) couvre le span de
 		// TOUTES ses bornes : lo = min global, hi = max global. Les sous-ranges
-		// ayant déjà été foldés en leur span, il suffit de fusionner.
-		lo, hi := range_span_bounds(left_segs, right_segs)
+		// ayant déjà été foldés en leur span, il suffit de fusionner. Une borne
+		// absente (`5..`, `..10`) = ouverte à l'infini de ce côté.
+		lo, hi := range_span_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		integer_intervals := make([]Integer_Interval, 1)
 		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
@@ -218,7 +219,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		right_segs, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
-		lo, hi := range_span_bounds(left_segs, right_segs)
+		lo, hi := range_span_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		integer_intervals := make([]Integer_Interval, 1)
 		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
@@ -290,7 +291,11 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 // `10..0..30` ≡ `0..30` (défaut 10). On prend donc le min global de tous les `lo`
 // et le max global de tous les `hi` des segments des deux côtés (les sous-ranges
 // ayant déjà été foldés en leur propre span). Une borne ouverte (±∞) domine.
-range_span_bounds :: proc(left_segs, right_segs: []Integer_Interval) -> (Maybe(i128), Maybe(i128)) {
+range_span_bounds :: proc(
+	left_segs, right_segs: []Integer_Interval,
+	left_open := false,
+	right_open := false,
+) -> (Maybe(i128), Maybe(i128)) {
 	lo: Maybe(i128) = nil
 	hi: Maybe(i128) = nil
 	lo_set := false
@@ -323,9 +328,11 @@ range_span_bounds :: proc(left_segs, right_segs: []Integer_Interval) -> (Maybe(i
 	}
 	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
 	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
-	// Une fois une borne marquée ouverte (nil + set), elle ne doit pas être
-	// rétrécie par un segment ultérieur : le rétrécissement ci-dessus ne touche
-	// que les bornes concrètes, donc nil reste nil. OK.
+	// Une borne absente dans la source (`5..`, `..10`) signifie ouverte à l'infini
+	// de ce côté : `5..` = 5..+∞, `..10` = -∞..10. Sans cette info, un range ouvert
+	// à droite serait pris pour le span concret de sa seule borne (5..5).
+	if left_open do lo = nil
+	if right_open do hi = nil
 	return lo, hi
 }
 

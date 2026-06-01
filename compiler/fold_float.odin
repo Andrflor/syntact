@@ -124,7 +124,7 @@ fold_type_float_intervals :: proc(
 		right_segs, right_kind, right_ok := fold_type_float_intervals(v.right)
 		if v.left != nil && !left_ok do return nil, .none, false
 		if v.right != nil && !right_ok do return nil, .none, false
-		lo, hi := range_span_float_bounds(left_segs, right_segs)
+		lo, hi := range_span_float_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		float_intervals := make([]Float_Interval, 1)
 		float_intervals[0] = Float_Interval{lo, hi}
 		return float_intervals, promote_float_kind(left_kind, right_kind), true
@@ -229,7 +229,7 @@ fold_constraint_float_intervals :: proc(
 		right_segs, right_kind, right_ok := fold_constraint_float_intervals(v.right)
 		if v.left != nil && !left_ok do return nil, .none, false
 		if v.right != nil && !right_ok do return nil, .none, false
-		lo, hi := range_span_float_bounds(left_segs, right_segs)
+		lo, hi := range_span_float_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		float_intervals := make([]Float_Interval, 1)
 		float_intervals[0] = Float_Interval{lo, hi}
 		return float_intervals, promote_float_kind(left_kind, right_kind), true
@@ -377,7 +377,11 @@ float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Int
 // Comme range_span_bounds côté entier : span de toutes les bornes (chaîne incluse),
 // l'ordre ne changeant que le défaut. `10.0..0.0` ≡ `0.0..10.0`, `10.0..0.0..30.0`
 // ≡ `0.0..30.0`. min global des `lo`, max global des `hi` ; une borne ouverte domine.
-range_span_float_bounds :: proc(left_segs, right_segs: []Float_Interval) -> (Maybe(f64), Maybe(f64)) {
+range_span_float_bounds :: proc(
+	left_segs, right_segs: []Float_Interval,
+	left_open := false,
+	right_open := false,
+) -> (Maybe(f64), Maybe(f64)) {
 	lo: Maybe(f64) = nil
 	hi: Maybe(f64) = nil
 	lo_set := false
@@ -410,6 +414,9 @@ range_span_float_bounds :: proc(left_segs, right_segs: []Float_Interval) -> (May
 	}
 	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
 	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
+	// Borne absente dans la source = ouverte à l'infini de ce côté.
+	if left_open do lo = nil
+	if right_open do hi = nil
 	return lo, hi
 }
 
