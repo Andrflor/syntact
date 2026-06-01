@@ -1,6 +1,7 @@
 package compiler
 
 import "core:fmt"
+import "core:strings"
 
 // --- generic fold (domain-agnostic dispatch) ---
 //
@@ -59,12 +60,15 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			return fold_constraint_integer(t)
 		case Float_Type:
 			return fold_constraint_float(t)
+		case String_Type:
+			return fold_constraint_string(t)
 		}
 	}
 	// Range_Type / Compose_Type / Negate_Type are domain-ambiguous: their family
-	// is decided by their operands, not their tag. Try integer, then float.
+	// is decided by their operands, not their tag. Try integer, then float, then string.
 	if r := fold_constraint_integer(t); r != nil do return r
 	if r := fold_constraint_float(t); r != nil do return r
+	if r := fold_constraint_string(t); r != nil do return r
 	return nil
 }
 
@@ -122,6 +126,8 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			return value_type_envelope(fold_type_integer(t))
 		case Float_Type:
 			return value_type_envelope(fold_type_float(t))
+		case String_Type:
+			return value_type_envelope(fold_type_string(t))
 		}
 	}
 	// Range/Compose/Negate are domain-ambiguous (family decided by operands),
@@ -131,6 +137,8 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 	if env == nil do env = fold_constraint_integer(t)
 	if env == nil do env = fold_type_float(t)
 	if env == nil do env = fold_constraint_float(t)
+	if env == nil do env = fold_type_string(t)
+	if env == nil do env = fold_constraint_string(t)
 	return value_type_envelope(env)
 }
 
@@ -151,6 +159,8 @@ fold_is_concrete_value :: proc(t: ^Type) -> bool {
 		return integer_intervals_is_concrete(v.integer_intervals)
 	case Float_Type:
 		return float_intervals_is_concrete(v.float_intervals)
+	case String_Type:
+		return string_is_concrete(v)
 	}
 	return false
 }
@@ -198,6 +208,9 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case Float_Type:
 		v, ok := ft^.(Float_Type)
 		return ok && float_satisfy(f, v)
+	case String_Type:
+		v, ok := ft^.(String_Type)
+		return ok && string_satisfy(f, v)
 	case Scope_Type:
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
@@ -285,6 +298,10 @@ type_to_string :: proc(t: ^Type) -> string {
 		return integer_to_string(v)
 	case Float_Type:
 		return float_to_string(v)
+	case String_Type:
+		b := strings.builder_make()
+		write_string_desc(&b, v)
+		return strings.to_string(b)
 	}
 	return "<value>"
 }
@@ -297,6 +314,7 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	// not its typeof — the envelope is consumed by further interval arithmetic.
 	folded := fold_type_integer(t)
 	if folded == nil do folded = fold_type_float(t)
+	if folded == nil do folded = fold_type_string(t)
 	if folded != nil {
 		comp.type_fold = folded
 		return
@@ -570,12 +588,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		}
 
 	case String_Type:
-		s, ok := v.value.(string)
-		if ok {
-			fmt.printf("\"%s\"", s)
-		} else {
-			fmt.print("String")
-		}
+		print_string_type(v)
 
 	case Bool_Type:
 		fmt.print(v.value ? "true" : "false")
@@ -687,12 +700,7 @@ print_integer_intervals :: proc(t: ^Type) {
 			print_float_kind(v.kind)
 		}
 	case String_Type:
-		s, s_ok := v.value.(string)
-		if s_ok {
-			fmt.printf("{\"%s\", \"%s\"}", s, s)
-		} else {
-			fmt.print("String")
-		}
+		print_string_type(v)
 	case Bool_Type:
 		fmt.printf("{%s, %s}", v.value ? "true" : "false", v.value ? "true" : "false")
 	case Unknown_Type:

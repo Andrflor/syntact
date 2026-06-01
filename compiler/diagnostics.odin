@@ -115,8 +115,7 @@ describe_value :: proc(t: ^Type) -> string {
 		if v.kind == .none do return "a float"
 		return strings.concatenate({"color ", float_kind_name(v.kind)})
 	case String_Type:
-		s, ok := v.value.(string)
-		if ok do return strings.concatenate({"string \"", s, "\""})
+		if string_is_concrete(v) do return strings.concatenate({"string \"", string_value(v), "\""})
 		return "a string"
 	case Bool_Type:
 		return v.value ? "true" : "false"
@@ -162,14 +161,7 @@ write_type_desc :: proc(b: ^strings.Builder, t: ^Type) {
 	case Float_Type:
 		strings.write_string(b, float_to_string(v))
 	case String_Type:
-		s, ok := v.value.(string)
-		if ok {
-			strings.write_byte(b, '"')
-			strings.write_string(b, s)
-			strings.write_byte(b, '"')
-		} else {
-			strings.write_string(b, "string")
-		}
+		write_string_desc(b, v)
 	case Bool_Type:
 		strings.write_string(b, v.value ? "true" : "false")
 	case Scope_Type:
