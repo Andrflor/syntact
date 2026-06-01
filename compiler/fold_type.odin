@@ -49,10 +49,17 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
 		case And_Type:
+			// Réduction numérique pure (intersection) si possible — ..9 & 11.. etc.
+			// Symbolique sinon : familles mixtes (String & Int), négation
+			// positionnelle (pattern & ~(finit par '_')), scopes.
+			if r := fold_constraint_integer(t); r != nil do return r
+			if r := fold_constraint_float(t); r != nil do return r
 			r := new(Type)
 			r^ = And_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
 		case Or_Type:
+			if r := fold_constraint_integer(t); r != nil do return r
+			if r := fold_constraint_float(t); r != nil do return r
 			r := new(Type)
 			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
@@ -72,13 +79,15 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 				case Negate_Type:
 					return fold_constraint(iv.operand) // ~~X → X
 				case And_Type:
+					// De Morgan : ~(A & B) → ~A | ~B. On reconstruit l'arbre non foldé
+					// et on le repasse à fold_constraint, qui réduira l'Or en intervalles.
 					r := new(Type)
-					r^ = Or_Type{fold_constraint(negated(iv.left)), fold_constraint(negated(iv.right))}
-					return r
+					r^ = Or_Type{negated(iv.left), negated(iv.right)}
+					return fold_constraint(r)
 				case Or_Type:
 					r := new(Type)
-					r^ = And_Type{fold_constraint(negated(iv.left)), fold_constraint(negated(iv.right))}
-					return r
+					r^ = And_Type{negated(iv.left), negated(iv.right)}
+					return fold_constraint(r)
 				}
 			}
 			// Feuille négative : complément numérique si possible, sinon symbolique.
