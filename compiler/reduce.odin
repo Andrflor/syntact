@@ -76,13 +76,28 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	case Unknown_Type:
 		return value
 	case Or_Type:
-		return value
+		return reduce_set_op(value)
 	case And_Type:
-		return value
+		return reduce_set_op(value)
 	case Negate_Type:
-		return value
+		return reduce_set_op(value)
 	}
 	return value
+}
+
+// reduce_set_op materializes a |/&/~ expression to a concrete value. `&`/`|`/`~`
+// are set operations over domains, not runtime logic operators: the reduced
+// value is the DEFAULT of the resulting domain (true|false -> true, true&false
+// -> none, ~true -> false). We fold the constraint, then lay down its default;
+// an empty intersection folds to None. If the fold cannot resolve the domain
+// statically (mixed families, symbolic negation), the expression stays as is.
+reduce_set_op :: proc(value: ^Type) -> ^Type {
+	folded := fold_constraint(value)
+	if folded == nil do return value
+	if _, is_none := folded^.(None_Type); is_none do return folded
+	def := default_value(folded)
+	if def != nil do return def
+	return folded
 }
 
 execute :: proc(value: Execute_Type) -> ^Type {
