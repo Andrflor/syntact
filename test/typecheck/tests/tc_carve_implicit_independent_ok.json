@@ -1,0 +1,1 @@
+{ "name": "tc_carve_implicit_independent_ok", "description": "carving x is fine when the constrained field does not reference it", "source": "a -> {\n  x -> 0\n  u8:y -> 0\n}\nb -> a{x -> -11}", "expect_errors": [] }

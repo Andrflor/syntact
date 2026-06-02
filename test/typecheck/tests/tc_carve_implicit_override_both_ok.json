@@ -1,0 +1,1 @@
+{ "name": "tc_carve_implicit_override_both_ok", "description": "overriding both x and y breaks the implicit link, so it stays valid", "source": "a -> {\n  x -> 0\n  u8:y -> x\n}\nb -> a{x -> -11, y -> 2}", "expect_errors": [] }

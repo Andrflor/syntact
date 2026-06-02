@@ -94,22 +94,27 @@ test_def_int_lit_17 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_def_scope_xy_18 :: proc(t: ^testing.T) {
+test_def_carve_18 :: proc(t: ^testing.T) {
+	run_default_test("tests/def_carve.json", t)
+}
+
+@(test)
+test_def_scope_xy_19 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_scope_xy.json", t)
 }
 
 @(test)
-test_def_demorgan_19 :: proc(t: ^testing.T) {
+test_def_demorgan_20 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_demorgan.json", t)
 }
 
 @(test)
-test_def_produ8_20 :: proc(t: ^testing.T) {
+test_def_produ8_21 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_produ8.json", t)
 }
 
 @(test)
-test_def_open_lo_21 :: proc(t: ^testing.T) {
+test_def_open_lo_22 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_open_lo.json", t)
 }
 

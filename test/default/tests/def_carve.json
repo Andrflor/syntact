@@ -1,0 +1,1 @@
+{ "name": "def_carve", "description": "default of a carve constraint = default of resulting scope", "source": "a -> {u8:d}\na{d -> 200}:g", "binding": "g", "expect": "{d -> 200}" }
