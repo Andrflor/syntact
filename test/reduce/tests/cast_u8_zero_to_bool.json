@@ -1,0 +1,6 @@
+{
+  "name": "cast_u8_zero_to_bool",
+  "description": "0 reinterpreted as bool is false",
+  "source": "u8:a -> 0\nb -> a::bool\n-> b",
+  "expect": "false"
+}

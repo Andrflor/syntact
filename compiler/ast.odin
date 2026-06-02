@@ -81,6 +81,7 @@ Operator_Kind :: enum u8 {
 	BitNot,
 	RShift,
 	LShift,
+	Cast, // `::` — raw binary reinterpret-cast of `left` into `right`'s layout
 }
 
 ExecutionWrapper :: enum u8 {

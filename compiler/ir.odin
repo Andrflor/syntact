@@ -180,6 +180,23 @@ Compose_Type :: struct {
 	type_fold: ^Type,
 }
 
+// `value :: target` — a raw binary reinterpret-cast. Unlike `&` (which narrows
+// by intersection and can fail to prove), `::` forces `value`'s bits into the
+// target's layout: pad/cut to the target width (zero-extend if the source domain
+// is unsigned, sign-extend if signed; truncate the high bits when narrowing),
+// THEN reinterpret the resulting bit pattern under the target's signedness.
+// e.g. `i8 -1 :: u8` -> 255 (bits 0xFF read unsigned); `u8 200 :: i16` -> 200
+// (zero-extended 0x00C8 read signed). The result always lands inside the target,
+// so `::` never raises a Constraint_Mismatch — it can only fail statically with
+// Invalid_Cast when the target has no canonical binary layout (a non-zero-based
+// range like 10..37, an open range `>10`, a sum/product, or unbounded `int`).
+// `type_fold` caches the resulting concrete value/envelope once fold_cast resolves.
+Cast_Type :: struct {
+	value:     ^Type,
+	target:    ^Type,
+	type_fold: ^Type,
+}
+
 // `lo..hi`. Either bound may be nil (prefix `..hi` / postfix `lo..`), meaning
 // "unbounded on that side" — NOT the value `none`. Folded by fold_range().
 Range_Type :: struct {
@@ -213,6 +230,7 @@ Type :: union {
 	And_Type,
 	Negate_Type,
 	Compose_Type,
+	Cast_Type,
 	String_Type,
 	Scope_Type,
 	Integer_Type,
@@ -311,6 +329,14 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		st := new(Type)
 		st^ = sub^
 		write_value(b, st)
+	case Cast_Type:
+		// A cast's value is its folded result (the reinterpreted bits laid into
+		// the target). If the fold resolved, render that; otherwise show it raw.
+		if v.type_fold != nil {
+			write_value(b, v.type_fold)
+		} else {
+			strings.write_string(b, type_to_string(t))
+		}
 	case:
 		strings.write_string(b, type_to_string(t))
 	}
@@ -483,6 +509,11 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			fmt.printf("%s", op_symbol(v.operator))
 		}
 		print_type(v.right, depth)
+
+	case Cast_Type:
+		print_type(v.value, depth)
+		fmt.print(" :: ")
+		print_type(v.target, depth)
 
 	case Execute_Type:
 		print_type(v.target, depth)
@@ -717,6 +748,8 @@ op_symbol :: proc(op: Operator_Kind) -> string {
 		return "<<"
 	case .RShift:
 		return ">>"
+	case .Cast:
+		return "::"
 	}
 	return "?"
 }

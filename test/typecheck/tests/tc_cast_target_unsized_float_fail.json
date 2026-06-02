@@ -1,0 +1,1 @@
+{ "name": "tc_cast_target_unsized_float_fail", "description": "unsized float has no fixed width, so it is not a valid cast target", "source": "a -> 5::float", "expect_errors": ["Invalid_Cast"] }

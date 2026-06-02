@@ -1,0 +1,1 @@
+{ "name": "tc_cast_target_unbounded_int_fail", "description": "unbounded int has no fixed width, so it is not a valid cast target", "source": "a -> 5::int", "expect_errors": ["Invalid_Cast"] }

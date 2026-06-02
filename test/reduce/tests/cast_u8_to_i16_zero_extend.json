@@ -1,0 +1,6 @@
+{
+  "name": "cast_u8_to_i16_zero_extend",
+  "description": "u8 200 zero-extended into i16 stays 200",
+  "source": "u8:a -> 200\ni16:b -> a::i16\n-> b",
+  "expect": "200"
+}

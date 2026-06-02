@@ -1,0 +1,6 @@
+{
+  "name": "cast_bool_true_to_u8",
+  "description": "true reinterpreted as u8 is 1",
+  "source": "b -> true::u8\n-> b",
+  "expect": "1"
+}

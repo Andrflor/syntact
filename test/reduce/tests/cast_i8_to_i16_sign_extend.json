@@ -1,0 +1,6 @@
+{
+  "name": "cast_i8_to_i16_sign_extend",
+  "description": "i8 -1 sign-extended into i16 stays -1",
+  "source": "i8:a -> -1\ni16:b -> a::i16\n-> b",
+  "expect": "-1"
+}

@@ -1,0 +1,1 @@
+{ "name": "tc_cast_cross_domain_float_to_i32_ok", "description": "f32 bits reinterpreted into i32 land in i32", "source": "f32:a -> 1.0\ni32:b -> a::i32", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_cast_cross_domain_string_to_u8_ok", "description": "a char reinterpreted into u8 lands in u8", "source": "u8:c -> 'A'::u8", "expect_errors": [] }

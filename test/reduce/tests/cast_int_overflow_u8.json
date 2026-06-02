@@ -1,0 +1,6 @@
+{
+  "name": "cast_int_overflow_u8",
+  "description": "(200+100)::u8 wraps to 44 by binary truncation",
+  "source": "u8:a -> 200\nu8:b -> 100\nu8:c -> (a+b)::u8\n-> c",
+  "expect": "44"
+}

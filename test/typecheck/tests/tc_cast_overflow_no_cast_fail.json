@@ -1,0 +1,1 @@
+{ "name": "tc_cast_overflow_no_cast_fail", "description": "without ::u8 the sum 0..510 does not satisfy u8", "source": "u8:a -> 200\nu8:b -> 100\nu8:c -> a+b", "expect_errors": ["Constraint_Mismatch"] }

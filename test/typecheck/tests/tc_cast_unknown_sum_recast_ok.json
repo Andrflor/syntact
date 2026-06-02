@@ -1,0 +1,1 @@
+{ "name": "tc_cast_unknown_sum_recast_ok", "description": "(a+b)::u8 forces the unknown sum back into u8", "source": "u8:a -> ??::u8\nu8:b -> ??::u8\nu8:c -> (a+b)::u8", "expect_errors": [] }

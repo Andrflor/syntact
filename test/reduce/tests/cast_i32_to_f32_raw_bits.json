@@ -1,0 +1,6 @@
+{
+  "name": "cast_i32_to_f32_raw_bits",
+  "description": "i32 0x3F800000 reinterpreted as f32 is 1.0",
+  "source": "i32:a -> 1065353216\nf32:b -> a::f32\n-> b",
+  "expect": "1.0"
+}
