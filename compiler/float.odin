@@ -592,7 +592,7 @@ pretty_float_intervals :: proc(float_intervals: []Float_Interval, kind: FloatKin
 		if !lo_ok && !hi_ok {
 			switch kind {
 			case .none:
-				strings.write_string(&b, "Float")
+				strings.write_string(&b, "float")
 			case .f32:
 				strings.write_string(&b, "f32")
 			case .f64:

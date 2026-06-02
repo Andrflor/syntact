@@ -136,7 +136,7 @@ float_kind_name :: proc(k: FloatKind) -> string {
 	case .f64:
 		return "f64"
 	case .none:
-		return "Float"
+		return "float"
 	}
 	return "Float"
 }

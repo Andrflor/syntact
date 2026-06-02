@@ -657,7 +657,7 @@ maybe_le_hi :: #force_inline proc(a, b: Maybe(i128)) -> bool {
 builtin_name :: proc(interval: Integer_Interval) -> Maybe(string) {
 	lo, lo_ok := interval.lo.(i128)
 	hi, hi_ok := interval.hi.(i128)
-	if !lo_ok && !hi_ok do return "Int"
+	if !lo_ok && !hi_ok do return "int"
 	if !lo_ok || !hi_ok do return nil
 	switch {
 	case lo == 0 && hi == 255:
