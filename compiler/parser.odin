@@ -4,9 +4,22 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 
-/* ======================================================================
- * SECTION 1: FUNDAMENTAL TYPES
- * ====================================================================== */
+// Lexer + parser for Syntact. Pipeline: bytes → tokens (a table-driven lexer,
+// one handler per leading byte) → a flat, arena-allocated AST consumed by the
+// analyzer. The parser is a single-pass Pratt parser (prefix/infix dispatch
+// tables keyed by token, ordered by `Precedence`).
+//
+// AST layout — structure-of-arrays, NOT a tree of pointers. Every node is one
+// `Node_Index` (a distinct u32) into four parallel arrays:
+//   node_kinds[i]  the Node_Kind tag        node_data[i]   its payload (a raw union)
+//   node_spans[i]  its source span          (kind selects which union field is live)
+// A node's children are not inlined: a `Node_Data` holds child `Node_Index`es
+// directly (binary/unary) or an `Index_Range` into the shared `extra` array for
+// variable-arity children (scope bodies, carve overrides, pattern branches).
+// `INVALID_NODE` is the absent-child sentinel. This keeps nodes fixed-size and
+// cache-dense, and lets the whole AST be freed as one arena.
+
+// --- fundamental types ---
 
 Span :: struct {
 	start: u32,
@@ -16,8 +29,10 @@ Span :: struct {
 EMPTY_SPAN :: Span{0, 0}
 
 Node_Index :: distinct u32
-INVALID_NODE :: Node_Index(0xFFFFFFFF)
+INVALID_NODE :: Node_Index(0xFFFFFFFF) // absent child / no node
 
+// The AST node tags. Most map one-to-one to a Syntact form; the four push/pull
+// pairs are the directional binding operators (see Binding_Kind in analyzer.odin).
 Node_Kind :: enum u8 {
 	Pointing,
 	PointingPull,
@@ -85,6 +100,9 @@ ExecutionWrapper :: enum u8 {
 	GPU,
 }
 
+// A slice of the shared `extra` array — how variable-arity children are stored
+// (scope bodies, carve overrides, pattern branches, execute wrappers) without
+// growing the fixed-size node.
 Index_Range :: struct {
 	start: u32,
 	len:   u32,
@@ -92,11 +110,14 @@ Index_Range :: struct {
 
 EMPTY_RANGE :: Index_Range{0, 0}
 
+// Two-child node (binding sides, property `a.b`, range bounds, …). Either side
+// may be INVALID_NODE for the half-open forms (`->v`, `.b`, `lo..`).
 Binary_Data :: struct {
 	left:  Node_Index,
 	right: Node_Index,
 }
 
+// One-child node (product `->`, expand `+`, compile-time, unary operators).
 Unary_Data :: struct {
 	operand: Node_Index,
 }
@@ -112,31 +133,40 @@ Literal_Data :: struct {
 	quotation: String_Quotation, // only meaningful when kind == .String
 }
 
+// An identifier reference. `ordinal` < 0 means "no `#n` suffix" (resolve by
+// position, not occurrence); `capture` is the optional `(…)` capture span.
 Identifier_Data :: struct {
 	name:    Span,
 	capture: Span,
 	ordinal: i16,
 }
 
+// A scope literal `{ … }` — its children are the Index_Range into `extra`.
 Scope_Data :: struct {
 	using _: Index_Range,
 }
 
+// `source{ … }` — `source` is the scope being carved, `children` the overrides.
 Carve_Data :: struct {
 	source:   Node_Index,
 	children: Index_Range,
 }
 
+// `target ? { … }` — `branches` stores (condition, result) as consecutive pairs
+// in `extra`, so branch k is at extra[start + 2k] / extra[start + 2k + 1].
 Pattern_Data :: struct {
 	target:   Node_Index,
 	branches: Index_Range,
 }
 
+// `target!` — `wrappers` are the optional execution-context wrappers (threading,
+// GPU, …) the collapse runs under.
 Execute_Data :: struct {
 	target:   Node_Index,
 	wrappers: Index_Range,
 }
 
+// An operator application. Unary operators leave `left` == INVALID_NODE.
 Operator_Node_Data :: struct {
 	kind:  Operator_Kind,
 	left:  Node_Index,
@@ -154,6 +184,9 @@ EventPull_Data :: struct {
 	catch_span: Span,
 }
 
+// The payload for one node. A raw union: zero tag of its own — `node_kinds[i]`
+// is the discriminant that says which field is live for node i. Sizing the node
+// to the largest variant is what keeps `node_data` a flat, indexable array.
 Node_Data :: struct #raw_union {
 	binary:     Binary_Data,
 	unary:      Unary_Data,
@@ -168,6 +201,10 @@ Node_Data :: struct #raw_union {
 	event_pull: EventPull_Data,
 }
 
+// The parsed program. The first four arrays are the SOA node store (indexed by
+// Node_Index); `extra` holds variable-arity children (Index_Range slices into it)
+// and `extra_u8` byte-sized side data. `line_starts` is a lazily-built offset →
+// (line, col) index, computed once on first position query (see ensure_line_starts).
 Ast :: struct {
 	source:               string,
 	node_kinds:           []Node_Kind,
@@ -185,6 +222,9 @@ Position :: struct {
 	offset: int,
 }
 
+// ensure_line_starts builds the offset-of-each-line-start table on demand and
+// memoizes it. Diagnostics are rare relative to parsing, so we pay this O(n) scan
+// only when the first position is actually requested.
 ensure_line_starts :: #force_inline proc(ast: ^Ast) {
 	if ast.line_starts_computed do return
 	ast.line_starts_computed = true
@@ -199,6 +239,9 @@ ensure_line_starts :: #force_inline proc(ast: ^Ast) {
 	}
 }
 
+// span_to_position maps a byte offset to (line, column) by binary-searching the
+// line-start table for the greatest start ≤ offset. The `+1` in the midpoint
+// biases the search upward so it converges on that lower bound rather than oscillating.
 span_to_position :: #force_inline proc(ast: ^Ast, offset: u32) -> Position {
 	ensure_line_starts(ast)
 	lo, hi := 0, len(ast.line_starts) - 1
@@ -217,9 +260,16 @@ span_to_position :: #force_inline proc(ast: ^Ast, offset: u32) -> Position {
 	}
 }
 
-/* ======================================================================
- * SECTION 2: TOKEN DEFINITIONS AND LEXER
- * ====================================================================== */
+// --- tokens and lexer ---
+//
+// Syntact is whitespace-sensitive: the same byte lexes to different tokens
+// depending on the spaces around it (`{` opens a scope, `{` glued to an operand
+// opens a carve; `:` is a constraint bind or a plain colon by its neighbours).
+// The lexer therefore tracks surrounding-space facts both as per-token `flags`
+// (was there a space/newline/comma before this token?) and, for the operators
+// where it matters, by peeking at adjacent bytes. Dispatch is table-driven:
+// LEX_DISPATCH[leading byte] picks the handler, and small PAIR_* tables resolve
+// multi-byte operators without nested branching.
 
 Token_Kind :: enum u8 {
 	Invalid,
@@ -287,10 +337,15 @@ Token_Kind :: enum u8 {
 	LShift,
 }
 
+// Trivia facts about what preceded a token, packed as bit positions into the
+// token's `flags` byte. The parser reads these to make grammar decisions a pure
+// token stream can't: a `Separator_Before` (newline or comma) ends a binding
+// even with no explicit terminator, and a `Space_Before` distinguishes an infix
+// operator from a prefix one.
 Token_Flags :: enum u8 {
 	Line_Before      = 0,
 	Space_Before     = 1,
-	Separator_Before = 2,
+	Separator_Before = 2, // newline or comma — a soft statement boundary
 }
 
 Token :: struct {
@@ -336,6 +391,8 @@ peek_char :: #force_inline proc(l: ^Lexer, n: u32 = 1) -> u8 {
 	return l.src[pos]
 }
 
+// has_space_before reports whether the byte just before the cursor is a space —
+// the primitive behind the {/{carve and (/(call distinctions.
 has_space_before :: #force_inline proc(l: ^Lexer) -> bool {
 	return l.offset > 0 && IS_SPACE[l.src[l.offset - 1]]
 }
@@ -347,6 +404,10 @@ has_space_after_char :: #force_inline proc(l: ^Lexer, char: u8) -> bool {
 	return false
 }
 
+// skip_trivia advances past spaces, newlines and commas, returning the trivia
+// flags to stamp on the next token. Newline and comma are folded together as
+// Separator_Before: both are soft statement boundaries in Syntact, so the parser
+// treats `a\nb` and `a, b` identically.
 skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
 	flags: u8 = 0
 	src := l.src
@@ -369,15 +430,22 @@ skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
 	return flags
 }
 
+// One handler per possible leading byte. Indexing a 256-entry table beats a long
+// switch: the hot loop is a single load + indirect call, branch-predictor-friendly.
 Lex_Handler :: #type proc(l: ^Lexer, start: u32, flags: u8) -> Token
 
 LEX_DISPATCH: [256]Lex_Handler
 
+// Resolves a two-byte operator from its second byte: `len` 0 means "no pair, the
+// leading byte stands alone", otherwise (kind, len) is the combined token.
 Pair_Result :: struct {
 	kind: Token_Kind,
 	len:  u8,
 }
 
+// Second-byte lookup tables, one per multi-byte-starting operator. e.g. PAIR_MINUS['>']
+// = {.PointingPush, 2} turns `->` into one token; a 3-byte form like `-<<` is
+// handled by the handler peeking one byte further (see lex_minus).
 PAIR_LESS: [256]Pair_Result
 PAIR_GREATER: [256]Pair_Result
 PAIR_MINUS: [256]Pair_Result
@@ -385,8 +453,13 @@ PAIR_BANG: [256]Pair_Result
 PAIR_QUESTION: [256]Pair_Result
 PAIR_ZERO: [256]Pair_Result
 
+// `:` disambiguated by [space-before][space-after]. ` : ` (spaces both sides) is
+// a plain Colon; glued forms are the constraint-bind family. See lex_colon.
 COLON_TABLE: [2][2]Token_Kind
 
+// init_lex_dispatch wires every byte to its handler and fills the PAIR_*/COLON
+// tables. Runs once at startup (@init). Bytes with no entry fall through to
+// lex_invalid.
 @(init)
 init_lex_dispatch :: proc "contextless" () {
 	for i in 0 ..< 256 {LEX_DISPATCH[i] = lex_invalid}
@@ -462,6 +535,7 @@ lex_single_rbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.
 	return Token{.RightBracket, Span{s, s + 1}, f}}
 lex_single_rparen :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.RightParen, Span{s, s + 1}, f}}
+// `=` is single, except `=<<` which is the reactive-pull operator.
 lex_single_equal :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	if s + 2 < l.source_len && l.src[s + 1] == '<' && l.src[s + 2] == '<' {
 		l.offset = s + 3
@@ -485,6 +559,9 @@ lex_single_not :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offse
 	return Token{.Not, Span{s, s + 1}, f}}
 lex_single_slash :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.Slash, Span{s, s + 1}, f}}
+// `[` is a left bracket, except the bracketed bitwise operators `[&]`, `[|]`,
+// `[~]` — three-byte tokens that keep the bitwise ops visually distinct from the
+// set-algebra `&`/`|`/`~`.
 lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	if s + 2 < l.source_len && l.src[s + 2] == ']' {
 		switch l.src[s + 1] {
@@ -503,6 +580,9 @@ lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	return Token{.LeftBracket, Span{s, s + 1}, f}
 }
 
+// `{` with a space before it opens a fresh scope; glued to an operand (`x{…}`)
+// it opens a carve of that operand. The parser keys the carve infix rule on
+// LeftBraceCarve, so the distinction is decided here, at the byte.
 lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	sb := start == 0 || IS_SPACE[l.src[start - 1]]
 	l.offset = start + 1
@@ -513,6 +593,8 @@ lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	}
 }
 
+// Same space rule as `{`: a glued `(` (LeftParenNoSpace) binds tightly to the
+// preceding operand (it can start a call/group on it), a spaced `(` is a plain group.
 lex_lparen :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	sb := start == 0 || IS_SPACE[l.src[start - 1]]
 	l.offset = start + 1
@@ -523,6 +605,7 @@ lex_lparen :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	}
 }
 
+// `!` is the collapse operator (Execute), unless followed by `=` to form `!=`.
 lex_bang :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
 	p := PAIR_BANG[nc]
@@ -532,6 +615,11 @@ lex_bang :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
 }
 
+// `:` is structural coloring, and its exact flavor depends on whitespace.
+// COLON_TABLE[space_before][space_after] picks among ConstraintBind (`c:x`),
+// ConstraintFromNone (` :x`), ConstraintToNone (`c: `), and plain Colon (` : `).
+// `sa` is the byte immediately after the `:`; a bare `c:x` therefore stays a
+// tight constraint bind.
 lex_colon :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
 	sb := u8(start > 0 && IS_SPACE[src[start - 1]])
@@ -563,6 +651,9 @@ lex_less :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
 }
 
+// `>` resolves via PAIR_GREATER to `>=`/`>>`/`>-`, but `>>` is only the start of
+// the three-byte resonance/reactivity push operators: `>>-` (ResonancePush) and
+// `>>=` (ReactivePush). Peek the third byte before settling for RShift.
 lex_greater :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
 	p := PAIR_GREATER[nc]
@@ -583,6 +674,8 @@ lex_greater :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
 }
 
+// `-` resolves via PAIR_MINUS to `->`/`-<`, but `-<` extends to the three-byte
+// `-<<` (ResonancePull). Same one-byte lookahead as lex_greater.
 lex_minus :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
 	p := PAIR_MINUS[nc]
@@ -596,6 +689,9 @@ lex_minus :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
 }
 
+// A leading `0` may introduce a radix prefix (`0x`/`0X`, `0b`/`0B`); PAIR_ZERO
+// recognizes the prefix byte and routes to the matching scanner, else it's a
+// plain decimal number.
 lex_zero :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
 	p := PAIR_ZERO[nc]
@@ -604,6 +700,14 @@ lex_zero :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return scan_number(l, start, flags)
 }
 
+// The dot family is the most context-sensitive token. `...` is always Ellipsis.
+// `..` is a range, but its precise kind tells the parser whether each side has an
+// operand: with a value-delimiter on both sides it's a DoubleDot (both bounds
+// present, `a..b`), only before → PrefixRange (`..b`), only after → PostfixRange
+// (`a..`), neither → bare Range. A single `.` is the same idea for member access:
+// delimiters both sides → Dot, otherwise the half-open Property{From,To}None
+// forms. "Delimiter" here means a byte that can't be part of an operand, so the
+// lexer can tell `a.b` (property) from `a. ` / `.b` without parser feedback.
 lex_dot :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
 	slen := l.source_len
@@ -633,6 +737,11 @@ lex_dot :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = kind, span = Span{start, off}, flags = flags}
 }
 
+// An identifier run, with two special cases folded in: the literals `true`/
+// `false` lex as Bool_Literal (Syntact has no keywords otherwise), and a trailing
+// `#<digits>` is consumed as part of the identifier — it is the ordinal selector
+// that picks among same-name bindings (`a#1`). The ordinal is split back out at
+// parse time (parse_identifier).
 lex_ident :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
 	slen := l.source_len
@@ -667,6 +776,8 @@ lex_ident :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = .Identifier, span = Span{start, off}, flags = flags}
 }
 
+// A bare `#<digits>` (no leading identifier) is an anonymous ordinal selector,
+// lexed as an Identifier whose name span is just the `#n`. A lone `#` is invalid.
 lex_hash :: proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
 	slen := l.source_len
@@ -687,6 +798,12 @@ lex_invalid :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = .Invalid, span = Span{start, start + 1}, flags = flags}
 }
 
+// next_token is the lexer's pull interface: skip trivia (recording its flags),
+// skip comments, then dispatch on the leading byte. Comments are not tokens — a
+// `//` line comment runs to the newline, and `/* … */` block comments nest (the
+// `depth` counter), so a commented-out region containing comments closes cleanly.
+// After skipping either kind we loop back to re-skip trivia, since a comment may
+// be followed by more whitespace or another comment.
 next_token :: proc(l: ^Lexer) -> Token {
 	flags: u8
 	src := l.src
@@ -737,6 +854,11 @@ next_token :: proc(l: ^Lexer) -> Token {
 	return LEX_DISPATCH[src[off]](l, off, flags)
 }
 
+// scan_string consumes a quoted literal up to the matching delimiter. The
+// delimiter byte (`'`, `"`, or backtick) is preserved in the span so the parser
+// can recover the quotation kind. In non-raw modes `\x` escapes skip two bytes
+// so an escaped delimiter doesn't end the string; backtick is raw, so `\` is
+// literal. An unterminated literal returns Invalid.
 scan_string :: proc(l: ^Lexer, start: u32, f: u8) -> Token {
 	src := l.src
 	slen := l.source_len
@@ -791,6 +913,10 @@ scan_binary :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
 	return Token{kind = .Binary, span = Span{start, l.offset}, flags = f}
 }
 
+// scan_number reads a decimal run; a `.` followed by another digit turns it into
+// a Float. The digit lookahead is what keeps `1.foo` (member access on `1`) and
+// `1..2` (a range) from being mis-scanned as floats — a `.` not followed by a
+// digit is left for lex_dot.
 scan_number :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
 	src := l.src
 	slen := l.source_len
@@ -812,10 +938,18 @@ scan_number :: #force_inline proc(l: ^Lexer, start: u32, f: u8) -> Token {
 }
 
 
-/* ======================================================================
- * SECTION 3: PARSER
- * ====================================================================== */
+// --- parser (Pratt / precedence-climbing) ---
+//
+// A token-keyed Pratt parser. Each token may register a prefix handler (it can
+// start an expression — a literal, `-x`, `(…)`), an infix handler (it continues
+// one — `a + b`, `a.b`, `a{…}`), and a left binding power in `prec_table`. The
+// core loop (parse_expression) parses a prefix, then folds infix operators while
+// their precedence exceeds the caller's, so binding tightness is data, not code.
 
+// Binding powers, weakest to tightest. parse_expression keeps consuming infix
+// operators whose prec_table entry is strictly higher than the precedence it was
+// invoked with; an infix handler that wants right-associativity recurses at its
+// own level rather than level+1 (see parse_binary).
 Precedence :: enum {
 	NONE = 0,
 	POINTING,
@@ -854,13 +988,19 @@ Parse_Error :: struct {
 	found:    Token_Kind,
 }
 
+// A prefix handler parses a token that begins an expression; an infix handler
+// extends an already-parsed `left` with the current operator token.
 Prefix_Proc :: proc(parser: ^Parser) -> Node_Index
 Infix_Proc :: proc(parser: ^Parser, left: Node_Index) -> Node_Index
 
+// The Pratt dispatch tables, indexed by Token_Kind. A token may appear in both
+// prefix_table and infix_table (e.g. `-` is unary negate and binary subtract);
+// prec_table gives its infix binding power. Unset entries are nil/NONE.
 prefix_table: [Token_Kind]Prefix_Proc
 infix_table: [Token_Kind]Infix_Proc
 prec_table: [Token_Kind]Precedence
 
+// init_parse_tables populates the dispatch tables once at startup (@init).
 @(init)
 init_parse_tables :: proc "contextless" () {
 	prefix_table[.Integer] = parse_literal
@@ -1020,6 +1160,8 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Ellipsis] = .PRIMARY
 }
 
+// grow_buffer doubles a slice's capacity in place. Geometric growth keeps the
+// amortized cost of the many small appends during parsing O(1) per element.
 grow_buffer :: proc($T: typeid, buf: ^[]T, current_len: int) {
 	old := buf^
 	new_cap := len(old) * 2
@@ -1029,6 +1171,11 @@ grow_buffer :: proc($T: typeid, buf: ^[]T, current_len: int) {
 	buf^ = new_buf
 }
 
+// A stack-discipline staging area for variable-arity children. A handler that
+// collects an unknown number of children (scope body, carve overrides, …)
+// records a checkpoint with scratch_begin, appends as it goes, then scratch_end
+// hands back the slice to flush into `extra` and scratch_reset rewinds. Nesting
+// works because every level only ever rewinds to its own checkpoint.
 Scratch_Buffer :: struct {
 	items: []Node_Index,
 	count: int,
@@ -1073,6 +1220,11 @@ Parser :: struct {
 	scratch:        Scratch_Buffer,
 }
 
+// init_parser allocates the SOA node store up front, sized from the source
+// length so the common case never reallocates. The bytes-per-node ratio shrinks
+// as files grow (larger files are denser in operators per byte, so fewer nodes
+// per byte); the buckets are tuned guesses, and grow_buffer covers any underestimate.
+// It also primes the two-token lookahead (current + peek).
 init_parser :: proc(parser: ^Parser, cache: ^Cache, source: string) {
 	parser.source = source
 	parser.file_cache = cache
@@ -1162,6 +1314,11 @@ error_at :: proc(
 	append(&parser.errors, error)
 }
 
+// synchronize is panic-mode recovery: after an error it skips tokens until it
+// reaches a likely statement boundary (a separator, a `}`, or a binding operator),
+// so one syntax error doesn't cascade into a flood. The offset/kind guard at the
+// bottom is a safety net — if advance_token fails to make progress (a stuck
+// token), it force-advances once so the loop can never spin forever.
 synchronize :: proc(parser: ^Parser) {
 	parser.panic_mode = false
 	start_offset := parser.current_token.span.start
@@ -1186,6 +1343,8 @@ synchronize :: proc(parser: ^Parser) {
 	}
 }
 
+// add_node appends one node to the SOA store and returns its index — the single
+// constructor for every AST node. The three parallel arrays grow together.
 add_node :: #force_inline proc(
 	p: ^Parser,
 	kind: Node_Kind,
@@ -1205,6 +1364,8 @@ add_node :: #force_inline proc(
 	return Node_Index(i)
 }
 
+// add_extra flushes a batch of child indices (typically a scratch slice) into the
+// shared `extra` array and returns the Index_Range a parent node stores to find them.
 add_extra :: proc(p: ^Parser, indices: []Node_Index) -> Index_Range {
 	start := p.extra_count
 	needed := p.extra_count + u32(len(indices))
@@ -1231,10 +1392,12 @@ add_extra_u8 :: proc(p: ^Parser, wrappers: []u8) -> Index_Range {
 	return Index_Range{start = start, len = u32(len(wrappers))}
 }
 
-/* ======================================================================
- * SECTION 5: MAIN PARSE ENTRY POINTS
- * ====================================================================== */
+// --- entry points and the core expression loop ---
 
+// parse is the top-level entry: it parses statements until EOF, gathering them as
+// the children of a synthetic root ScopeNode (the file *is* a scope). The parsed
+// arrays are sliced down to their used length into a freshly allocated Ast. The
+// boolean reports whether parsing was error-free.
 parse :: proc(cache: ^Cache, source: string) -> (^Ast, bool) {
 	parser: Parser
 	init_parser(&parser, cache, source)
@@ -1312,6 +1475,10 @@ parse_statement :: proc(parser: ^Parser) -> Node_Index {
 	return expr
 }
 
+// The arithmetic/logical operators that may continue an expression across a soft
+// separator. A line break before, say, `+` still means `a\n+ b`, but a line break
+// before a binding `->` ends the statement — see the Separator_Before check in
+// parse_expression. Only these few operators are allowed to "reach back".
 is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
 	#partial switch kind {
 	case .Plus, .Minus, .Asterisk, .Slash, .Percent, .And, .Or:
@@ -1320,6 +1487,15 @@ is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
 	return false
 }
 
+// The Pratt core. Parse a prefix, then fold infix operators while their binding
+// power is ≥ `precedence`. Three guards shape Syntact-specific behavior:
+//   * a separator before a non-arithmetic operator ends the expression (so a
+//     newline terminates a binding but not `a\n+ b`);
+//   * a `->` is not chained onto an existing Product/Pointing left (those forms
+//     already consumed their right side);
+//   * a glued `(` after a *named* identifier is left for a later rule, but a
+//     glued `(` after an anonymous identifier breaks out (avoids a spurious call).
+// A missing prefix handler skips the stray token and retries rather than aborting.
 parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node_Index {
 	if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
 		return INVALID_NODE
@@ -1366,10 +1542,16 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 	return left
 }
 
-/* ======================================================================
- * SECTION 6: PARSE FUNCTIONS
- * ====================================================================== */
+// --- parse handlers ---
+//
+// One handler per grammar form, registered in the prefix/infix tables. Prefix
+// handlers run on the current token; infix handlers receive the already-parsed
+// `left`. Most are mechanical (advance, build a Node_Data, add_node); the comments
+// below flag the ones whose control flow encodes a real grammar decision.
 
+// For a string literal the surrounding quotes are stripped from the span and the
+// quotation kind is recovered from the opening byte (it drives ordinal vs
+// positional semantics later). Other literals keep their span verbatim.
 parse_literal :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	data: Node_Data
@@ -1417,6 +1599,10 @@ parse_literal :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Literal, data, span)
 }
 
+// parse_identifier splits the lexer's combined `name#n` token back into a name
+// span and an ordinal (the occurrence selector; -1 when absent), then optionally
+// consumes a glued `(capture)`. The capture must be a single identifier in
+// parens, matched by the current+peek lookahead.
 parse_identifier :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	name_span := span
@@ -1461,6 +1647,9 @@ parse_identifier :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Identifier, data, full_span)
 }
 
+// parse_scope parses a `{ … }` literal: statements collected via the scratch
+// buffer until the closing `}`, flushed into `extra`. It recovers in place
+// (synchronize on panic) so one bad statement doesn't abandon the whole scope.
 parse_scope :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -1505,6 +1694,9 @@ parse_scope :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .ScopeNode, data, Span{span_start, span_end})
 }
 
+// parse_carve handles the infix `left{ … }` (a LeftBraceCarve glued to `left`):
+// the overrides inside the braces are parsed like a scope body, with `left` kept
+// as the carve source.
 parse_carve :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -1535,6 +1727,10 @@ parse_carve :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .Carve, data, Span{span_start, span_end})
 }
 
+// parse_grouping handles a spaced `( … )`. A lone identifier in parens, `(x)`, is
+// a capture (an identifier node with an empty name and `x` as the capture), not a
+// grouping — checked first. Otherwise the parens just bracket a sub-expression
+// and contribute no node of their own; `()` is empty → INVALID_NODE.
 parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -1570,6 +1766,9 @@ parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 	return expr
 }
 
+// A leading `!` is overloaded. With no expression following it is a bare collapse
+// (Execute with no target — collapse of the enclosing scope). Followed by an
+// expression it is the compile-time marker on that operand (CompileTime node).
 parse_execute_prefix :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	advance_token(parser)
@@ -1603,6 +1802,10 @@ parse_execute :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .Execute, data, Span{parser.node_spans[left].start, span.end})
 }
 
+// A prefix `->` is the scope's production. With nothing after it (end of scope,
+// EOF, or a separator) it is a bare Product (operand INVALID_NODE); otherwise it
+// produces the following expression. A separator after `->` thus terminates it,
+// matching how bindings end at a soft boundary.
 parse_product_prefix :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -1627,6 +1830,10 @@ parse_product_prefix :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Product, data, Span{span_start, parser.node_spans[to].end})
 }
 
+// The generic infix operator handler. It recurses at `prec + 1`, which makes
+// every binary operator left-associative (`a - b - c` parses as `(a - b) - c`):
+// the right operand only absorbs operators strictly tighter than this one. The
+// switch maps the operator token to its Operator_Kind.
 parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
 	token_kind := parser.current_token.kind
@@ -1692,6 +1899,9 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .Operator, data, Span{span_start, parser.node_spans[right].end})
 }
 
+// Prefix `-`, `~`, `!` (logical not). Modeled as an Operator node with
+// left == INVALID_NODE; recursing at UNARY level gives the standard
+// "unary binds tighter than the binary forms" behavior.
 parse_unary :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	token_kind := parser.current_token.kind
@@ -1725,6 +1935,9 @@ parse_unary :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Operator, data, Span{span_start, parser.node_spans[operand].end})
 }
 
+// `left.name`. If no identifier follows (or one follows across a separator), it
+// is a property access with a missing name (right == INVALID_NODE) — kept as a
+// node so the analyzer can report it precisely rather than the parser guessing.
 parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
 	dot_span_end := parser.current_token.span.end
@@ -1751,6 +1964,9 @@ parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .Property, data, Span{span_start, prop_span.end})
 }
 
+// The half-open property forms the lexer already disambiguated: `.name` (prefix,
+// source is none → PropertyFromNone) and `left.` (postfix → PropertyToNone, below).
+// Both build a Property node with the missing side set to INVALID_NODE.
 parse_property_from_none :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -1783,6 +1999,12 @@ parse_property_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Index 
 	return add_node(parser, .Property, data, Span{span_start, parser.current_token.span.start})
 }
 
+// The constraint-bind family `constraint : name`. The three variants
+// (bind / from_none / to_none) differ only in which side is present, matching the
+// lexer's whitespace-driven colon kinds. The name parses at just-above-CALL
+// precedence so it stays a single tight operand and doesn't swallow following
+// operators. A trailing `name{…}` is folded in as a carve on the constraint node,
+// supporting `constraint : name{ overrides }`.
 parse_constraint_bind :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
 	advance_token(parser)
@@ -1864,6 +2086,10 @@ parse_constraint_to_none :: proc(parser: ^Parser, left: Node_Index) -> Node_Inde
 	return node
 }
 
+// Handlers for the ill-spaced `.`/`:` tokens (a space on only the wrong side).
+// The lexer still emits a token so the parser can point at the exact spot and
+// give an actionable message rather than a generic "unexpected token". The infix
+// variants clear panic_mode and return `left` so recovery continues from there.
 parse_invalid_property :: proc(parser: ^Parser) -> Node_Index {
 	error_at_current(
 		parser,
@@ -1902,6 +2128,13 @@ parse_invalid_constraint_infix :: proc(parser: ^Parser, left: Node_Index) -> Nod
 	return left
 }
 
+// The directional binding operators (pointing / event / resonance / reactive)
+// all share this shape, repeated below in prefix and infix forms: optionally
+// parse a right-hand value at ASSIGNMENT precedence, stopping at a scope end, EOF,
+// or a separator (so `a ->\nb` does not pull `b` into the binding). The prefix
+// form leaves `left` == INVALID_NODE (the push/pull has no left operand); the
+// infix form uses the parsed `left`. Only the Node_Kind/data field differs per
+// operator. The event-pull pair additionally captures an optional catch name.
 parse_pointing_push :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
 	advance_token(parser)
@@ -2261,6 +2494,11 @@ parse_reactive_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .ReactivePull, data, Span{span_start, span_end})
 }
 
+// The range family, one handler per lexer range kind (the lexer already decided
+// which bounds are present from the surrounding delimiters): `..` empty (both
+// bounds open), `..hi` prefix, `lo..` postfix, `lo..hi` full. Every Range node
+// uses INVALID_NODE for an absent bound — the analyzer reads that as "unbounded
+// on that side", distinct from a bound whose value is none.
 parse_empty_range :: proc(parser: ^Parser) -> Node_Index {
 	span := parser.current_token.span
 	advance_token(parser)
@@ -2330,6 +2568,9 @@ parse_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .Range, data, Span{span_start, span_end})
 }
 
+// A comparison operator used in prefix position (`>= 0`, `< 10`) — a constraint
+// shorthand for "the set of values satisfying this comparison". Built as an
+// Operator node with no left operand.
 parse_prefix_comparison :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	token_kind := parser.current_token.kind
@@ -2369,6 +2610,10 @@ parse_prefix_comparison :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Operator, data, Span{span_start, parser.node_spans[operand].end})
 }
 
+// `target ? …` has two shapes. Braced (`target ? { … }`) collects branches via
+// parse_branch; inline (`target ? expr`) is sugar for a single branch. Both store
+// branches as flat (source, product) pairs in `extra`, so the inline form pushes
+// (expr, INVALID_NODE). The pair layout is what node_pattern_branches walks.
 parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
 	advance_token(parser)
@@ -2416,6 +2661,10 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return add_node(parser, .Pattern, data, Span{span_start, span_end})
 }
 
+// One pattern branch, returned as a (source, product) pair. A leading `->`
+// branch has no source (the default/fallthrough). Otherwise the source is parsed,
+// and a `-> product` is optional — a source with no product is a guard that
+// produces nothing. A non-expression token is skipped to keep the branch loop moving.
 parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: Node_Index) {
 	if !IS_EXPRESSION_START[parser.current_token.kind] {
 		advance_token(parser)
@@ -2468,6 +2717,8 @@ parse_unknown :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Unknown, data, span)
 }
 
+// `+expr` / `...expr` — the expand (extension) prefix. Parsed at CONSTRAINT
+// precedence so it captures the constrained operand but not looser operators.
 parse_expansion :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -2485,6 +2736,9 @@ parse_expansion :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Expand, data, Span{span_start, parser.node_spans[target].end})
 }
 
+// `@name.a.b` — an external reference. The `@name` is the External node; any
+// trailing `.a.b` is folded into a chain of Property nodes over it, so externals
+// support member access just like ordinary values.
 parse_reference :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	advance_token(parser)
@@ -2533,6 +2787,11 @@ parse_reference :: proc(parser: ^Parser) -> Node_Index {
 	return current
 }
 
+// `|`, `<`, `[`, `(` are each ambiguous: they may begin an execution-wrapper
+// chain (`x<!>`, `x[!]`, `x|!|`, `x(!)`) or be their ordinary selves (bit-or,
+// less-than, a bracket error, a grouping). Each handler speculatively tries the
+// wrapped-execute parse first (which backtracks on failure) and falls back to the
+// ordinary meaning if it isn't a wrapper.
 parse_bit_or :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	if node, is_execution := try_parse_wrapped_execute(parser, left); is_execution {
 		return node
@@ -2581,6 +2840,17 @@ parse_left_paren :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	return left
 }
 
+// Speculatively parse a wrapped collapse: `left` followed by nested execution-
+// context brackets enclosing exactly one `!` (e.g. `left<[!]>` runs the collapse
+// threaded then parallel). It is a small bracket-matching state machine: each
+// opener pushes its kind and a wrapper code, each closer must match the top of
+// the stack, and exactly one `!` must appear with the stack balanced. Any
+// mismatch — wrong closer, depth overflow, no `!`, leftover open brackets — is
+// not an error: we snapshot the lexer/token/node-count on entry and `restore` it,
+// returning false so the caller falls back to the ordinary operator. Success
+// emits one Execute node carrying the wrapper sequence. The snapshot of
+// node_count matters because speculative parsing may have appended nodes that
+// must be discarded on backtrack.
 try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_Index, bool) {
 	MAX_WRAPPER_DEPTH :: 8
 	original_offset := parser.lexer.offset
@@ -2706,10 +2976,10 @@ try_parse_wrapped_execute :: proc(parser: ^Parser, left: Node_Index) -> (Node_In
 	return add_node(parser, .Execute, data, span), true
 }
 
-/* ======================================================================
- * SECTION 8: UTILITY FUNCTIONS
- * ====================================================================== */
+// --- lookup tables ---
 
+// The tokens that can begin an execution-wrapper chain — the openers
+// try_parse_wrapped_execute speculates on.
 IS_EXECUTION_PATTERN_START: [Token_Kind]bool = #partial {
 	.Execute     = true,
 	.LeftParen   = true,
@@ -2718,6 +2988,9 @@ IS_EXECUTION_PATTERN_START: [Token_Kind]bool = #partial {
 	.Or          = true,
 }
 
+// The tokens that can start an expression. Handlers consult this to decide
+// whether an optional operand follows (e.g. `->` with vs. without a value) rather
+// than each re-listing the set. Membership = "has a prefix handler or begins one".
 IS_EXPRESSION_START: [Token_Kind]bool = #partial {
 	.Identifier         = true,
 	.Integer            = true,
@@ -2759,6 +3032,11 @@ IS_EXPRESSION_START: [Token_Kind]bool = #partial {
 	.PropertyFromNone   = true,
 }
 
+// Byte-classification tables for the lexer, filled once at startup. The two delim
+// tables encode the whitespace-sensitivity rules: IS_BEFORE_DELIM / IS_AFTER_DELIM
+// mark bytes that cannot be part of an operand, which is how lex_dot tells `a.b`
+// (property) from `a. `/`.b` without parser feedback. They are deliberately not
+// identical — a `{` may precede an operand but a `}` may follow one.
 IDENT_START: [256]bool
 IDENT_CONTINUE: [256]bool
 IS_SPACE: [256]bool
@@ -2791,9 +3069,12 @@ init_ident_tables :: proc "contextless" () {
 }
 
 
-/* ======================================================================
- * SECTION 8: DEBUG UTILITIES
- * ====================================================================== */
+// --- AST accessors and debug output ---
+//
+// The node_* helpers are the public way to read a node's payload: they hide the
+// raw-union field selection and resolve Index_Ranges back into `extra` slices, so
+// callers (analyzer, printer) never index the union directly. print_ast renders
+// the tree for `--ast`.
 
 node_text :: proc(ast: ^Ast, idx: Node_Index) -> string {
 	s := ast.node_spans[idx]
@@ -3144,6 +3425,9 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 	}
 }
 
+// ast_root returns the root ScopeNode. It is always the last node added — parse()
+// builds children bottom-up and appends the wrapping scope last — so the highest
+// index is the root.
 ast_root :: #force_inline proc(ast: ^Ast) -> Node_Index {
 	return Node_Index(len(ast.node_kinds) - 1)
 }
