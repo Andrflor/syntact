@@ -5,8 +5,21 @@
 ## Core principle: effects live only in handlers
 
 - Everything in pure Syntact folds toward **singletons** (structural reduction).
-- An **event handler** (`-<`) is the **only** place allowed to be effectful — the only place where a fold may legitimately stop on a non-singleton.
-- An effect has **no reified trace**. The trace is implicit: a frontier produces a non-singleton type (e.g. `??:u8`), so the value cannot fold to a point, so the compiler sees the compute path *for free*. Non-singleton **is** the effect marker.
+- An **event handler** (`-<`) is the **only** place allowed to be effectful — the only place where a fold may legitimately stop without fully reducing.
+- An effect is marked by **provenance, not by the shape of the result**. The marker is *crossing the external frontier* (`<lib>`, `<asm>`, a syscall), not "the production is non-singleton".
+
+### The effect marker is the frontier, not non-singleton-ness
+
+An earlier draft said "a non-singleton production **is** the effect marker". **That is wrong.** Counter-examples:
+
+- A void / no-return external still produces an effect. In C, a `void` function (e.g. `close(fd)` for its side effect) has no meaningful return yet absolutely performs an effect. Its production might fold to `none` / a singleton, and the effect must **still** be lifted.
+- A singleton-returning external still produces an effect. An external could return a constant (or a value the compiler happens to narrow to a singleton). The effect — the call across the boundary — is unchanged. Folding the *result* to a point must not erase the *act* of calling.
+
+So the rule is:
+
+> An **effect is lifted whenever a collapse crosses the external frontier** (`target!` where `target` resolves into a `<lib>`/`<asm>` leaf), **regardless of whether the production is singleton, non-singleton, or void.**
+
+The non-singleton-ness of `??::T` is a *consequence* (the value genuinely isn't computable at compile time), **not** the definition. The compiler must tag the external leaf itself (its provenance is `<lib>`/`<asm>`) and propagate "this collapse is an effectful call" from that tag — not infer it from `fold` failing to reach a point. A singleton return or a void return does not cancel the effect.
 
 ## External boundary: `<lib>{ ... }`
 
@@ -16,17 +29,18 @@ A linked external library is declared as a normal scope whose production points 
 kernel -> <kernel.so>{
   write -> {
     u8:a  u8:b
-    -> ??:u8
+    -> ??::u8
   }
   read -> {
     i32:fd  usize:len
-    -> isize:
+    -> ??::isize
   }
 }
 ```
 
 - `<kernel.so>` = provenance, maps 1:1 to one import descriptor (PE `IMAGE_IMPORT_DESCRIPTOR` / ELF `DT_NEEDED`).
-- Each symbol is an **ordinary scope**: input bindings are colored constraints, the production is a colored type. The body is "empty" — its production is a *type*, not a value. That is what makes it an external leaf.
+- Each symbol is an **ordinary scope**: input bindings are colored constraints, the production is an **unknown cast into the result layout** (`??::T`). The body is "empty" — its production is `??` (an unknown value) forced into a layout `T`, not a concrete value. That is what makes it an external leaf: the value is not computable in pure Syntact, only its *layout* is known.
+- Why `??::T` and **not** `T:` — `T:` (e.g. `isize:`) is a **colored binding** (a constraint on a named field), not a production. A bare production line `-> isize` would name the *constraint* `isize` as the produced value, and `-> isize:` is malformed (colon with no name/value). What we mean is "the produced value is an unknown bit pattern interpreted in layout `T`", which is exactly the raw-cast `??::T`. Note `isize`/`usize` are not yet builtins in Syntact (would need defining as arch-width int aliases), but the form is the same as `??::u8`.
 - **Provenance lives in the code, not in an external build system.** Goal: source is self-sufficient, compiler knows what to link. No Makefile/linker-config dance. (Long-term: compiler is its own toolchain, à la Zig — embeds assembler+linker. Short-term: emit textual `.s` and shell out to `as`/`ld`, internalize later.)
 
 ### Calling an external = ordinary scope algebra
@@ -41,7 +55,7 @@ b4 -> kernel.write{b->4}  // PARTIAL carve, NO collapse — pure data, no effect
 b4!                       // collapse here → effect happens HERE, only now
 ```
 
-**Carving an external does not execute it.** The effect occurs only at `!`. A partially-applied external is just another scope. Consistent with "effectful only in a handler": the collapse of an external is the one collapse that cannot fold (production is non-singleton `??:T`), so codegen must emit the external call.
+**Carving an external does not execute it.** The effect occurs only at `!`. A partially-applied external is just another scope. Consistent with "effectful only in a handler": the collapse of an external is an effectful call **because the target is an external leaf** (`<lib>`/`<asm>` provenance), so codegen must emit the external call — *not* because its production fails to fold. Even if the production were a singleton or void, the collapse still emits the call.
 
 ## Cast `::` (already implemented in parse/analyze)
 
@@ -71,12 +85,12 @@ b4!                       // collapse here → effect happens HERE, only now
 ## CString as a constraint (content), not a representation
 
 ```syntact
-CString -> (anyChar & ~'\0').. + '\0'   // chars-non-null repeated, then a final \0
+CString -> (~'\0').. + '\0'   // any-non-null-char repeated, then a final \0
 ```
 
+- `~'\0'` is already "any single non-null char": the complement is taken over the char-domain universe directly, so no `''` is needed. `..` repeats it, `+ '\0'` appends the terminator.
 - This is a **content constraint**: a String satisfying it IS a well-formed cstring (no interior null). Good for coloring a frontier and *statically proving* a string is safe to pass to a C API.
 - It does **NOT** capture representation (the "it's an address" part) — that is handled by the size rule above + marshalling.
-- **Open / to clarify:** `''` semantics. `''..` ≡ `String` (all strings) per constraints.md. For "any single non-null char" we need the char-domain universe, not the empty string. Likely want `(.. & ~'\0')` in the char domain, or an `anyChar` alias. Verify against `string.odin`.
 
 ## ASM inline — DEFERRED (after lib-linking path works)
 
@@ -85,7 +99,7 @@ Form sketch (not final):
 ```syntact
 my_write -> <asm[x64]>{
   u8:a  u8:b
-  -> ??:u8
+  -> ??::u8
   ---
   mov rax, 1
   syscall
@@ -98,7 +112,7 @@ Inline asm is **harder than a linked symbol** because there is no standard ABI t
 |---|---|
 | Template | which instructions |
 | Inputs | which bindings → which registers |
-| Outputs | which register → the production (`: isize`) |
+| Outputs | which register → the production (`??::isize`) |
 | **Clobbers** | which registers/memory the asm destroys ← **the easily-forgotten one** |
 
 - **Recommendation:** start with a **fixed convention** (bindings → rdi/rsi/rdx…, return → rax, System V clobbers), no per-binding mapping. Adding explicit `binding -> reg` mapping later is a superset, non-breaking.
@@ -126,7 +140,6 @@ The boundary is **one language abstraction**; the backend lowers per target:
 - **`::` widening:** sign-extend vs zero-extend vs by-source-signedness.
 - **`argv` retrieval:** kernel puts `argc`/`argv` on the stack at `_start` (NOT a syscall). Options: a pre-filled root scope (`args` binding on the file scope, marshalled once at startup) vs an "intrinsic" external. Note: it's stack-reading, not a syscall instruction — a special kind of external.
 - **String marshalling:** materialize a String-value into bytes for the frontier — `(ptr, len)` two-register form vs cstring (`\0`-terminated, one register). Plus sret for large returns.
-- **`anyChar` / `''` semantics** for the CString constraint (see above).
 
 ## Build order (agreed)
 
@@ -137,4 +150,4 @@ The boundary is **one language abstraction**; the backend lowers per target:
 5. codegen: emit asm + link lib → executable (textual `.s` + external `as`/`ld` first, internalize later)
 6. asm inline — last, when needed
 
-External (`<lib>`) and reducer meet cleanly: an external collapse is the only collapse that does NOT fold (non-singleton `??:T`); the reducer leaves it as an "external call" node, codegen turns it into `call [linked symbol]`.
+External (`<lib>`) and reducer meet cleanly: an external collapse is recognized **by its target's provenance** (`<lib>`/`<asm>` leaf), not by whether its production folds; the reducer leaves it as an "external call" node — even when the production is a singleton or void — and codegen turns it into `call [linked symbol]`.
