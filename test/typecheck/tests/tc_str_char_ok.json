@@ -1,0 +1,1 @@
+{ "name": "tc_str_char_ok", "description": "'a' accepts 'a'", "source": "'a':a -> 'a'", "expect_errors": [] }

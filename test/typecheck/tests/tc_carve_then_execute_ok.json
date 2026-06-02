@@ -1,0 +1,1 @@
+{"name": "tc_carve_then_execute_ok", "description": "carve then collapse reduces through production", "source": "a -> {u8:d -> 1\n-> d}\nu8:r -> a{d->5}!", "expect_errors": []}

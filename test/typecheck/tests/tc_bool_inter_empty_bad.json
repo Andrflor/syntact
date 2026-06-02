@@ -1,0 +1,1 @@
+{ "name": "tc_bool_inter_empty_bad", "description": "(true&false) is empty, rejects true", "source": "(true&false):a -> true", "expect_errors": ["Constraint_Mismatch"] }

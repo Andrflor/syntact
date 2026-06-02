@@ -1,0 +1,1 @@
+{ "name": "tc_bool_union_true_ok", "description": "(true|false) accepts true", "source": "(true|false):a -> true", "expect_errors": [] }

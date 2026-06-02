@@ -1,0 +1,1 @@
+{ "name": "tc_str_char_bad", "description": "'a' rejects 'b'", "source": "'a':a -> 'b'", "expect_errors": ["Constraint_Mismatch"] }

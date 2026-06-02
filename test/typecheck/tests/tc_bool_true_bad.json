@@ -1,0 +1,1 @@
+{ "name": "tc_bool_true_bad", "description": "true rejects false", "source": "true:a -> false", "expect_errors": ["Constraint_Mismatch"] }

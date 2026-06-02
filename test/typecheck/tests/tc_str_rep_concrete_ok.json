@@ -1,0 +1,1 @@
+{ "name": "tc_str_rep_concrete_ok", "description": "ab*3 folds ababab", "source": "(\"ab\"*3):a -> \"ababab\"", "expect_errors": [] }

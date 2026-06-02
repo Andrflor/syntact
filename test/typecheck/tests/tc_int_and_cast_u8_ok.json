@@ -1,0 +1,1 @@
+{ "name": "tc_int_and_cast_u8_ok", "description": "(u8+u8)&u8 truncates into u8", "source": "u8:a\nu8:b\nu8:c -> (a+b)&u8", "expect_errors": [] }

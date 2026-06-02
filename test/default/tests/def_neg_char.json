@@ -1,0 +1,1 @@
+{ "name": "def_neg_char", "description": "default of ~'A' is the char before A", "source": "(~'A'):a", "binding": "a", "expect": "'@'" }

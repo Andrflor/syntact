@@ -1,0 +1,1 @@
+{ "name": "tc_ident_no_trail_ok", "description": "identifier accepts abc", "source": "(('a'..'z'|'_')*1.. & ~(''*0.. + '_')):a -> \"abc\"", "expect_errors": [] }

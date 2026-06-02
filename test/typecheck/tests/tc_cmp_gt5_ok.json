@@ -1,0 +1,1 @@
+{ "name": "tc_cmp_gt5_ok", "description": ">5 accepts 6", "source": "(>5):a -> 6", "expect_errors": [] }

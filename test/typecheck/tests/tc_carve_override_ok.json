@@ -1,0 +1,1 @@
+{"name": "tc_carve_override_ok", "description": "carving d->5 satisfies u8:d", "source": "a -> {u8:d}\ng -> a{d->5}", "expect_errors": []}

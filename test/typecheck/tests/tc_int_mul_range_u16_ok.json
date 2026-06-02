@@ -1,0 +1,1 @@
+{ "name": "tc_int_mul_range_u16_ok", "description": "0..100*0..100=0..10000 within u16", "source": "0..100:a\n0..100:b\nu16:c -> a*b", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_cmp_le100_bad", "description": "<=100 rejects 101", "source": "(<=100):a -> 101", "expect_errors": ["Constraint_Mismatch"] }

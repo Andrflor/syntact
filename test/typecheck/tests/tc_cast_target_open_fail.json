@@ -1,0 +1,1 @@
+{"name": "tc_cast_target_open_fail", "description": "cast to open range has no layout", "source": "u8:a -> 5\nb -> a::(5..)", "expect_errors": ["Invalid_Cast"]}

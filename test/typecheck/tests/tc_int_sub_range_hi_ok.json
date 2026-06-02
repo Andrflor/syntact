@@ -1,0 +1,1 @@
+{ "name": "tc_int_sub_range_hi_ok", "description": "(5..10)-(1..2)=3..9 accepts 9", "source": "((5..10)-(1..2)):a -> 9", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_bool_inter_same_ok", "description": "(true&true) accepts true", "source": "(true&true):a -> true", "expect_errors": [] }

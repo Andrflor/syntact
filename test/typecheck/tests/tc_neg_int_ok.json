@@ -1,0 +1,1 @@
+{ "name": "tc_neg_int_ok", "description": "~5 accepts 6", "source": "(~5):a -> 6", "expect_errors": [] }

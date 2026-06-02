@@ -1,0 +1,1 @@
+{"name": "tc_cast_f64_to_f32_ok", "description": "f64 1.0 converts to f32 1.0", "source": "f64:a -> 1.0\nf32:b -> a::f32", "expect_errors": []}

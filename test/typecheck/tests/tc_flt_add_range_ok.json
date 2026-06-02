@@ -1,0 +1,1 @@
+{ "name": "tc_flt_add_range_ok", "description": "(1.0..2.0)+(1.0..1.0)=2.0..3.0 accepts 2.5", "source": "((1.0..2.0)+(1.0..1.0)):a -> 2.5", "expect_errors": [] }

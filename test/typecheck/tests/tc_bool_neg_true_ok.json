@@ -1,0 +1,1 @@
+{ "name": "tc_bool_neg_true_ok", "description": "~true accepts false", "source": "~true:a -> false", "expect_errors": [] }

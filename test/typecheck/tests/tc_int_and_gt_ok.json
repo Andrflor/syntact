@@ -1,0 +1,1 @@
+{ "name": "tc_int_and_gt_ok", "description": "u8 & >10 = 11..255 accepts 11", "source": "(u8 & >10):a -> 11", "expect_errors": [] }

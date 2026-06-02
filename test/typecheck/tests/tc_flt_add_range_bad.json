@@ -1,0 +1,1 @@
+{ "name": "tc_flt_add_range_bad", "description": "(1.0..2.0)+(1.0..1.0)=2.0..3.0 rejects 1.5", "source": "((1.0..2.0)+(1.0..1.0)):a -> 1.5", "expect_errors": ["Constraint_Mismatch"] }

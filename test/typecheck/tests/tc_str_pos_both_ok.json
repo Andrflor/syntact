@@ -1,0 +1,1 @@
+{ "name": "tc_str_pos_both_ok", "description": "he..lo accepts hello", "source": "\"he\"..\"lo\":a -> \"hello\"", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{"name": "def_str_concat", "description": "default of (\"jwt\"+\"@\") is \"jwt@\"", "source": "(\"jwt\"+\"@\"):a", "binding": "a", "expect": "\"jwt@\""}

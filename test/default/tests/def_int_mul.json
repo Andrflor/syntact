@@ -1,0 +1,1 @@
+{"name": "def_int_mul", "description": "default of (5*3) is 15", "source": "(5*3):a", "binding": "a", "expect": "15"}

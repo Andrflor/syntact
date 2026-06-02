@@ -1,0 +1,1 @@
+{ "name": "tc_neg_ord_range_bad", "description": "~'a'..'z' rejects 'm'", "source": "(~'a'..'z'):a -> 'm'", "expect_errors": ["Constraint_Mismatch"] }

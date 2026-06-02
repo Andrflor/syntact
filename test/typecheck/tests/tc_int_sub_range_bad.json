@@ -1,0 +1,1 @@
+{ "name": "tc_int_sub_range_bad", "description": "(5..10)-(1..2)=3..9 rejects 2", "source": "((5..10)-(1..2)):a -> 2", "expect_errors": ["Constraint_Mismatch"] }

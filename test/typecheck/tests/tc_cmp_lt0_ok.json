@@ -1,0 +1,1 @@
+{ "name": "tc_cmp_lt0_ok", "description": "<0 accepts -1", "source": "(<0):a -> -1", "expect_errors": [] }

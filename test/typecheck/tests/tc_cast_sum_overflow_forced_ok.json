@@ -1,0 +1,1 @@
+{"name": "tc_cast_sum_overflow_forced_ok", "description": "(a+b)::u8 forces overflow into u8", "source": "u8:a -> 200\nu8:b -> 100\nu8:c -> (a+b)::u8", "expect_errors": []}

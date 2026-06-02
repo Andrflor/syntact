@@ -1,0 +1,1 @@
+{"name": "def_int_sub", "description": "default of (10-3) is 7", "source": "(10-3):a", "binding": "a", "expect": "7"}

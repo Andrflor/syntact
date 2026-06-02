@@ -1,0 +1,1 @@
+{ "name": "tc_neg_str_exact_bad", "description": "not exactly piro rejects piro", "source": "(~\"piro\"):a -> \"piro\"", "expect_errors": ["Constraint_Mismatch"] }

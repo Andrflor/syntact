@@ -1,0 +1,1 @@
+{ "name": "tc_flt_sub_concrete_ok", "description": "3.0-1.0 folds to 2.0", "source": "(3.0-1.0):a -> 2.0", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_int_and_empty_bad", "description": "0&1 is None, rejects 0", "source": "(0&1):a -> 0", "expect_errors": ["Constraint_Mismatch"] }

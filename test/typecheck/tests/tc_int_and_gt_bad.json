@@ -1,0 +1,1 @@
+{ "name": "tc_int_and_gt_bad", "description": "u8 & >10 = 11..255 rejects 10", "source": "(u8 & >10):a -> 10", "expect_errors": ["Constraint_Mismatch"] }

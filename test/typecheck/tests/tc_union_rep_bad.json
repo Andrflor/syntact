@@ -1,0 +1,1 @@
+{ "name": "tc_union_rep_bad", "description": "union rep rejects a0b", "source": "(('a'..'z'|'-')*1..):a -> \"a0b\"", "expect_errors": ["Constraint_Mismatch"] }

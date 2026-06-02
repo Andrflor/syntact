@@ -1,0 +1,1 @@
+{ "name": "tc_int_add_concrete_ok", "description": "200+50=250 within u8", "source": "u8:a -> 200\nu8:b -> 50\nu8:c -> a+b", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_pos_prefix_bad", "description": "jwt prefix rejects foo", "source": "\"jwt\"..:a -> \"foo\"", "expect_errors": ["Constraint_Mismatch"] }

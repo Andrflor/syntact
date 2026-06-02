@@ -1,0 +1,1 @@
+{"name": "tc_cast_u8_to_f32_ok", "description": "u8 reinterpreted into f32", "source": "u8:a -> 200\nf32:b -> a::f32", "expect_errors": []}

@@ -1,0 +1,1 @@
+{ "name": "tc_int_mixed_sign_u16_bad", "description": "u8+i8 has negatives, not within u16", "source": "u8:a\ni8:b\nu16:c -> a+b", "expect_errors": ["Constraint_Mismatch"] }

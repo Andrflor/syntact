@@ -1,0 +1,1 @@
+{ "name": "tc_int_add_overflow_bad", "description": "200+50+10=260 exceeds u8", "source": "u8:a -> 200\nu8:b -> 50\nu8:c -> a+b+10", "expect_errors": ["Constraint_Mismatch"] }

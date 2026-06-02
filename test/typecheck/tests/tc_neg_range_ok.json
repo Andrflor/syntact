@@ -1,0 +1,1 @@
+{ "name": "tc_neg_range_ok", "description": "~(0..10) accepts 11", "source": "(~(0..10)):a -> 11", "expect_errors": [] }

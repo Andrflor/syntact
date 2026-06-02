@@ -1,0 +1,1 @@
+{ "name": "tc_ident_no_trail_bad", "description": "identifier rejects abc_", "source": "(('a'..'z'|'_')*1.. & ~(''*0.. + '_')):a -> \"abc_\"", "expect_errors": ["Constraint_Mismatch"] }

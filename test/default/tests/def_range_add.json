@@ -1,0 +1,1 @@
+{"name": "def_range_add", "description": "default of ((1..10)+(1..5))=2..15 is 2", "source": "((1..10)+(1..5)):a", "binding": "a", "expect": "2"}

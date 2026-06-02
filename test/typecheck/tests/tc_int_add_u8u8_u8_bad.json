@@ -1,0 +1,1 @@
+{ "name": "tc_int_add_u8u8_u8_bad", "description": "u8+u8=0..510 exceeds u8", "source": "u8:a\nu8:b\nu8:c -> a+b", "expect_errors": ["Constraint_Mismatch"] }

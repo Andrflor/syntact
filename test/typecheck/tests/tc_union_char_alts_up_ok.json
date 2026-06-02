@@ -1,0 +1,1 @@
+{ "name": "tc_union_char_alts_up_ok", "description": "'a'..'z'|'A'..'Z'|'-' accepts 'Q'", "source": "('a'..'z'|'A'..'Z'|'-'):a -> 'Q'", "expect_errors": [] }

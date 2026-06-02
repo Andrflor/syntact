@@ -1,0 +1,1 @@
+{ "name": "tc_int_sub_u8u8_u8_bad", "description": "u8-u8 has negatives, not within u8", "source": "u8:a\nu8:b\nu8:c -> a-b", "expect_errors": ["Constraint_Mismatch"] }

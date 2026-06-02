@@ -1,0 +1,1 @@
+{ "name": "def_char_ord", "description": "default of 'a'..'z' is 'a' (low bound)", "source": "'a'..'z':a", "binding": "a", "expect": "'a'" }

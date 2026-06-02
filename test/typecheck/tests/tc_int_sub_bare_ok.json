@@ -1,0 +1,1 @@
+{ "name": "tc_int_sub_bare_ok", "description": "bare 10-3 should color a (currently parser bug)", "source": "10-3:a -> 7", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_pos_both_bad", "description": "he..lo rejects halt", "source": "\"he\"..\"lo\":a -> \"halt\"", "expect_errors": ["Constraint_Mismatch"] }
