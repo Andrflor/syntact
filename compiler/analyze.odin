@@ -56,6 +56,11 @@ Analyzer :: struct {
 	scope:    ^Scope_Type,
 	errors:   [dynamic]Analyzer_Error,
 	warnings: [dynamic]Analyzer_Error,
+	// While walking a carve's override values, this points at the scope being
+	// carved so a source-none property (`.x`, a self-mention) resolves against
+	// the carved scope's *original* fields. nil outside a carve override. Saved
+	// and restored around each override walk so nested carves nest correctly.
+	carved_scope: ^Scope_Type,
 }
 
 // --- analyzer core ---
@@ -272,6 +277,37 @@ scope_resolve :: proc(
 
 	if scope.parent != nil {
 		return scope_resolve(scope.parent, name, ordinal, last)
+	}
+	return nil, -1
+}
+
+// self_resolve locates a field for a self-mention (`.x` / `.#0` / `.x#0`) in the
+// scope being carved. Unlike scope_resolve it never walks up to the parent: `.`
+// names *this* scope, so a missing field is an error, not a parent lookup. With
+// no ordinal it takes the first occurrence (the carve default-target rule).
+self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
+	if ordinal >= 0 {
+		if name == "" {
+			if int(ordinal) < len(scope.values) {
+				return scope, int(ordinal)
+			}
+			return nil, -1
+		}
+		count := 0
+		for i := 0; i < len(scope.names); i += 1 {
+			if scope.names[i] == name {
+				if count == int(ordinal) {
+					return scope, i
+				}
+				count += 1
+			}
+		}
+		return nil, -1
+	}
+	for i := 0; i < len(scope.names); i += 1 {
+		if scope.names[i] == name {
+			return scope, i
+		}
 	}
 	return nil, -1
 }
@@ -564,10 +600,51 @@ walk_constraint :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, 
 walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
-	target := walk(a, current_scope, data.binary.left)
 	right_idx := data.binary.right
 	prop_name := span_str(ast, ast.node_data[right_idx].identifier.name)
 	prop_ordinal := ast.node_data[right_idx].identifier.ordinal
+
+	// Source-none property (`.x`, written with no left side) is a self-mention:
+	// inside a carve override it refers to a field of the carved scope, reading
+	// its *original* value (before any of this carve's overrides). Resolve it
+	// directly against self_scope, with no parent walk-up — `.` names this scope.
+	if data.binary.left == INVALID_NODE {
+		if a.carved_scope == nil {
+			sem_error(
+				a,
+				fmt.tprintf("'.%s' is only valid inside a carve override", prop_name),
+				.Invalid_Property_Access,
+				node_pos(a, right_idx),
+			)
+			result := new(Type)
+			result^ = Invalid_Type{}
+			return result
+		}
+		s_scope, s_index := self_resolve(a.carved_scope, prop_name, prop_ordinal)
+		if s_scope == nil {
+			sem_error(
+				a,
+				fmt.tprintf("'.%s' does not exist in the carved scope", prop_name),
+				.Invalid_Property_Access,
+				node_pos(a, right_idx),
+			)
+			result := new(Type)
+			result^ = Invalid_Type{}
+			return result
+		}
+		ref := new(Reference)
+		ref^ = Reference {
+			prop_name,
+			prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
+			s_scope,
+			s_index,
+		}
+		result := new(Type)
+		result^ = Reference_Type{nil, ref}
+		return result
+	}
+
+	target := walk(a, current_scope, data.binary.left)
 
 	prop_scope: ^Scope_Type = nil
 	prop_index := -1
@@ -695,6 +772,13 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 
 	refs := make([dynamic]Reference)
 	vals := make([dynamic]^Type)
+
+	// While walking override values, a source-none property (`.x`) is a
+	// self-mention into the carved scope. Point carved_scope at it and restore
+	// the outer one afterwards so nested carves resolve `.` against the nearest.
+	saved_carved := a.carved_scope
+	a.carved_scope = src_scope
+	defer a.carved_scope = saved_carved
 
 	positional_idx := 0
 	for child in carve_children {
