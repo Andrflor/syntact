@@ -1,4 +1,4 @@
-package parser_test
+package parse_test
 
 import compiler "../../compiler"
 

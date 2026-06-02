@@ -1,5 +1,5 @@
 // +build ignore
-package parser_test
+package parse_test
 
 import "core:os"
 import "core:path/filepath"
@@ -28,7 +28,7 @@ main :: proc() {
 
 	out := make([dynamic]u8, context.temp_allocator)
 	append(&out, "// AUTO-GENERATED. DO NOT EDIT.\n")
-	append(&out, "package parser_test\n\n")
+	append(&out, "package parse_test\n\n")
 	append(&out, "import \"core:testing\"\n\n")
 
 	for i := 0; i < len(files); i += 1 {
