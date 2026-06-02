@@ -124,6 +124,11 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			return fold_constraint_string(t)
 		case Bool_Type:
 			return fold_constraint_bool(t)
+		case Cast_Type:
+			// The envelope a `::` produces is exactly its target — the cast forces
+			// the value into the target's layout, so the result always lands there.
+			if v.type_fold != nil do return fold_constraint(v.type_fold)
+			return fold_constraint(v.target)
 		}
 	}
 	// Range_Type / Compose_Type are domain-ambiguous: their family is decided by
@@ -218,6 +223,13 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			return value_type_envelope(fold_type_string(t))
 		case Bool_Type:
 			return value_type_envelope(fold_type_bool(t))
+		case Cast_Type:
+			// A cast's value type is its concrete folded result when the source was
+			// concrete, otherwise the target itself — the cast forces the value into
+			// the target's layout, so the target IS the value's envelope (not wrapped
+			// in a producer scope: it already denotes the set the value lives in).
+			if v.type_fold != nil do return fold_value_type(v.type_fold)
+			return fold_constraint(v.target)
 		}
 	}
 	// Range/Compose/Negate are domain-ambiguous (family decided by operands),
@@ -533,6 +545,266 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	// operands and emits a precise, author-facing explanation (incompatible
 	// families, mismatched float colors, non-numeric operand, …).
 	diagnose_compose(a, comp^, node)
+}
+
+// fold_cast resolves a `value :: target` raw binary reinterpret-cast. The cast
+// is domain-agnostic: it extracts the source value's raw bit pattern (integer
+// two's-complement, IEEE-754 float bits, bool 0/1, string/char bytes — all
+// little-endian), pads/cuts those bits to the target's width (zero/sign-extend
+// per the source signedness, truncate the high bits when narrowing), then
+// reinterprets the resulting pattern under the target domain. The result always
+// lands inside the target, so `::` never raises a Constraint_Mismatch — it can
+// only fail statically with Invalid_Cast when the TARGET has no binary layout (a
+// non-zero-based range like 10..37, an open range `>10`, a sum/product, or
+// unbounded int/float). When the source is a single concrete value, fold_cast
+// computes the exact reinterpreted value into `type_fold`; otherwise type_fold
+// stays nil and the constraint/value folds fall back to the target envelope.
+fold_cast :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
+	if t == nil do return
+	cast_t, ok := &t^.(Cast_Type)
+	if !ok do return
+
+	target_fold := fold_constraint(cast_t.target)
+	target, has_layout := cast_target(target_fold)
+	if !has_layout {
+		sem_error(
+			a,
+			fmt.tprintf(
+				"invalid cast: %s has no binary layout to cast into (the target must be a fixed-width type like u8/i32/f64/bool/char or a string, not an open range, union, or unbounded int/float)",
+				describe_value(target_fold),
+			),
+			.Invalid_Cast,
+			node_pos(a, node),
+		)
+		return
+	}
+
+	// Concrete-source fast path: extract its bits and reinterpret into the target.
+	// A value bound under a sized float color (`f32:a -> 1.0`) carries that width
+	// in its CONSTRAINT, not its (unsized) value fold — pass the constraint so the
+	// extractor can recolor the bits to the source's real width.
+	src_fold := fold_value_type(cast_t.value)
+	src_color := source_color(cast_t.value)
+	if repr, is_concrete := cast_to_bits(src_fold, src_color); is_concrete {
+		result := cast_from_bits(repr, target)
+		if result != nil do cast_t.type_fold = result
+	}
+}
+
+// Cast_Target_Kind names the domain a `::` lands in. Each carries the layout
+// needed to lay bits back down.
+Cast_Target_Kind :: enum {
+	Integer,
+	Float,
+	Bool,
+	String,
+}
+
+Cast_Target :: struct {
+	kind:       Cast_Target_Kind,
+	width:      uint,      // bit width for Integer/Float/Bool; ignored for String
+	signed:     bool,      // Integer signedness
+	float_kind: FloatKind, // for Float (f32 -> 32 bits, f64 -> 64 bits)
+}
+
+// cast_target derives the target domain + binary layout of a folded constraint,
+// if it has one. Fixed-width integer builtins, f32/f64, bool, and string qualify;
+// open ranges, arbitrary intervals, unions, and unbounded int/float do not.
+cast_target :: proc(target_fold: ^Type) -> (Cast_Target, bool) {
+	if target_fold == nil do return {}, false
+	#partial switch v in target_fold^ {
+	case Integer_Type:
+		if len(v.integer_intervals) == 1 {
+			if lay, ok := int_layout(v.integer_intervals[0]); ok {
+				return {kind = .Integer, width = lay.bits, signed = lay.signed}, true
+			}
+		}
+	case Float_Type:
+		// Only the sized colors (f32/f64) have a layout; unsized `float` does not.
+		switch v.kind {
+		case .f32:
+			return {kind = .Float, width = 32, float_kind = .f32}, true
+		case .f64:
+			return {kind = .Float, width = 64, float_kind = .f64}, true
+		case .none:
+		}
+	case Bool_Type:
+		// bool is a 1-bit domain; we lay it down in a byte's worth of pattern.
+		return {kind = .Bool, width = 8}, true
+	case String_Type:
+		// A string target has no fixed width — it absorbs the source bytes as is.
+		return {kind = .String}, true
+	}
+	return {}, false
+}
+
+// source_color resolves the COLOR (declared constraint) of a cast's source
+// expression — distinct from its value. For `u8:a -> 65`, the value of `a` folds
+// to 65 but its color is u8; the raw cast needs the color to know the source's
+// bit width. Follows a Mention/Reference to its binding's `constraint_folds`
+// slot; for a non-reference expression it falls back to its constraint fold.
+source_color :: proc(value: ^Type) -> ^Type {
+	if value == nil do return nil
+	#partial switch v in value^ {
+	case Mention_Type:
+		if v.match_scope != nil && v.match_index >= 0 {
+			cf := v.match_scope.constraint_folds[v.match_index]
+			if cf != nil do return cf
+		}
+	case Reference_Type:
+		ref := v.reference
+		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+			cf := ref.match_scope.constraint_folds[ref.match_index]
+			if cf != nil do return cf
+		}
+	}
+	return fold_constraint(value)
+}
+
+// colored_float_kind reads the FloatKind of a folded constraint (f32/f64), or
+// .none if the constraint is not a sized float. Peels a producer scope `{->X}`
+// that fold_constraint may wrap a value-typed color in.
+colored_float_kind :: proc(color: ^Type) -> FloatKind {
+	c := unwrap_producer(color)
+	if c == nil do return .none
+	#partial switch v in c^ {
+	case Float_Type:
+		return v.kind
+	}
+	return .none
+}
+
+// colored_int_layout reads the fixed-width layout of a folded int constraint.
+colored_int_layout :: proc(color: ^Type) -> (Int_Layout, bool) {
+	c := unwrap_producer(color)
+	if c == nil do return {}, false
+	#partial switch v in c^ {
+	case Integer_Type:
+		if len(v.integer_intervals) == 1 {
+			return int_layout(v.integer_intervals[0])
+		}
+	}
+	return {}, false
+}
+
+// unwrap_producer peels a single producer scope `{-> X}` down to X. fold_constraint
+// of a value-typed binding can yield such a wrapper around the real domain leaf.
+unwrap_producer :: proc(t: ^Type) -> ^Type {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Scope_Type:
+		prods := scope_productions(v)
+		if len(prods) == 1 do return prods[0]
+	}
+	return t
+}
+
+// cast_to_bits extracts the raw little-endian bit pattern of a concrete value of
+// any domain, plus its source width/signedness (used to extend or truncate).
+// `src_color` is the source's folded constraint, consulted when the value fold is
+// unsized (a bare literal under a sized color): `f32:a -> 1.0` carries f32 in its
+// constraint, so the float case reads its width from there. Returns ok=false when
+// the source is not a single concrete value.
+cast_to_bits :: proc(src_fold: ^Type, src_color: ^Type = nil) -> (Bit_Repr, bool) {
+	if src_fold == nil do return {}, false
+	#partial switch v in src_fold^ {
+	case Integer_Type:
+		if int_is_concrete(v) {
+			width: uint = 128
+			signed := true
+			// Prefer the value's own builtin width; fall back to the constraint
+			// color for a bare literal under a sized int (`u8:a -> 65`).
+			if len(v.integer_intervals) == 1 {
+				if lay, ok := int_layout(v.integer_intervals[0]); ok {
+					width, signed = lay.bits, lay.signed
+				} else if lay2, ok2 := colored_int_layout(src_color); ok2 {
+					width, signed = lay2.bits, lay2.signed
+				}
+			}
+			return {bits = transmute(u128)int_value(v), width = width, signed = signed}, true
+		}
+	case Float_Type:
+		if float_is_concrete(v) {
+			val := float_value(v)
+			// Prefer the value's own color; fall back to the constraint color for
+			// an unsized literal bound under f32/f64.
+			kind := v.kind
+			if kind == .none do kind = colored_float_kind(src_color)
+			switch kind {
+			case .f32:
+				return {bits = u128(transmute(u32)f32(val)), width = 32, signed = false, from_float = val}, true
+			case .f64, .none:
+				// An unsized literal carries f64 bits.
+				return {bits = u128(transmute(u64)val), width = 64, signed = false, from_float = val}, true
+			}
+		}
+	case Bool_Type:
+		if bool_is_concrete(v) {
+			b: u128 = bool_value(v) ? 1 : 0
+			return {bits = b, width = 8, signed = false}, true
+		}
+	case String_Type:
+		if string_is_concrete(v) {
+			s := string_value(v)
+			// Little-endian: first byte is the low-order byte. Cap at 16 bytes
+			// (128 bits) — wider strings keep their low 16 bytes.
+			bits: u128 = 0
+			n := min(len(s), 16)
+			for i := 0; i < n; i += 1 {
+				bits |= u128(s[i]) << uint(8 * i)
+			}
+			return {bits = bits, width = uint(8 * len(s)), signed = false}, true
+		}
+	}
+	return {}, false
+}
+
+// cast_from_bits resizes a source bit pattern to the target width and lays it
+// back down in the target domain, producing a concrete ^Type. Returns nil when
+// the result cannot be materialized.
+cast_from_bits :: proc(repr: Bit_Repr, target: Cast_Target) -> ^Type {
+	r := new(Type)
+	switch target.kind {
+	case .Integer:
+		val := bits_reinterpret_int(repr, target.width, target.signed)
+		r^ = make_int_result(val)
+	case .Float:
+		// float -> float is a VALUE conversion (IEEE rounding), not a bit
+		// transmute: f64 1.0 :: f32 -> 1.0f. Other sources (int/bool/string) are
+		// reinterpreted bit-for-bit into the target float's layout.
+		if fv, is_float := repr.from_float.(f64); is_float {
+			switch target.float_kind {
+			case .f32:
+				r^ = make_float_result(f64(f32(fv)), .f32)
+			case .f64, .none:
+				r^ = make_float_result(fv, .f64)
+			}
+		} else {
+			bits := resize_bits(repr.bits, repr.width, repr.signed, target.width)
+			switch target.float_kind {
+			case .f32:
+				f := f64(transmute(f32)u32(bits & 0xFFFFFFFF))
+				r^ = make_float_result(f, .f32)
+			case .f64, .none:
+				f := transmute(f64)u64(bits)
+				r^ = make_float_result(f, .f64)
+			}
+		}
+	case .Bool:
+		// Any non-zero pattern reads as true; zero reads as false.
+		bits := resize_bits(repr.bits, repr.width, repr.signed, target.width)
+		r^ = make_bool_const(bits != 0)
+	case .String:
+		// Reinterpret the source bytes (little-endian) back into a string.
+		bits := repr.bits
+		n := (repr.width + 7) / 8
+		buf := make([]u8, n)
+		for i: uint = 0; i < n; i += 1 {
+			buf[i] = u8((bits >> uint(8 * i)) & 0xFF)
+		}
+		r^ = make_string_const(string(buf), .double)
+	}
+	return r
 }
 
 fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {

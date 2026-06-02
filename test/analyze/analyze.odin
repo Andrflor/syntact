@@ -54,6 +54,7 @@ error_type_from_string :: proc(s: string) -> (compiler.Analyzer_Error_Type, bool
 	case "Invalid_Execute":         return .Invalid_Execute, true
 	case "Invalid_operator":        return .Invalid_operator, true
 	case "Invalid_Range":           return .Invalid_Range, true
+	case "Invalid_Cast":            return .Invalid_Cast, true
 	case "Infinite_Recursion":      return .Infinite_Recursion, true
 	case "Default":                 return .Default, true
 	}

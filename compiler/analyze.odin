@@ -37,6 +37,7 @@ Analyzer_Error_Type :: enum {
 	Invalid_Execute,
 	Invalid_operator,
 	Invalid_Range,
+	Invalid_Cast,
 	Infinite_Recursion,
 	Default,
 }
@@ -734,6 +735,10 @@ walk_operator :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 		result^ = Or_Type{left, right}
 	case .Not:
 		result^ = Negate_Type{right}
+	case .Cast:
+		// `left :: right` — raw reinterpret-cast of `left` into `right`'s layout.
+		result^ = Cast_Type{left, right, nil}
+		fold_cast(a, result, idx)
 	case:
 		result^ = Compose_Type{left, right, data.operator.kind, nil}
 		fold_compose(a, result, idx)

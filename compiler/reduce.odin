@@ -36,6 +36,11 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 			}
 		}
 		return compose(v)
+	case Cast_Type:
+		// A cast reduces to its precomputed reinterpreted value when the source
+		// was concrete; otherwise it stays as is (symbolic over an Unknown source).
+		if v.type_fold != nil do return reduce_value(v.type_fold)
+		return value
 	case Carve_Type:
 		return carve(v)
 	case Mention_Type:

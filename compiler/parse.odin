@@ -56,6 +56,7 @@ Token_Kind :: enum u8 {
 	ConstraintFromNone,
 	ConstraintToNone,
 	Colon,
+	Cast, // `::` — raw binary reinterpret-cast into the target's layout
 	Question,
 	DoubleQuestion,
 	QuestionExclamation,
@@ -371,9 +372,14 @@ lex_bang :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 // COLON_TABLE[space_before][space_after] picks among ConstraintBind (`c:x`),
 // ConstraintFromNone (` :x`), ConstraintToNone (`c: `), and plain Colon (` : `).
 // `sa` is the byte immediately after the `:`; a bare `c:x` therefore stays a
-// tight constraint bind.
+// tight constraint bind. `::` is intercepted first: it is the raw-cast operator,
+// a single two-byte token regardless of surrounding whitespace.
 lex_colon :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	src := l.src
+	if start + 1 < l.source_len && src[start + 1] == ':' {
+		l.offset = start + 2
+		return Token{kind = .Cast, span = Span{start, start + 2}, flags = flags}
+	}
 	sb := u8(start > 0 && IS_SPACE[src[start - 1]])
 	sa := u8(
 		start < l.source_len &&
@@ -808,6 +814,7 @@ init_parse_tables :: proc "contextless" () {
 	infix_table[.ConstraintBind] = parse_constraint_bind
 	infix_table[.ConstraintToNone] = parse_constraint_to_none
 	infix_table[.Colon] = parse_invalid_constraint_infix
+	infix_table[.Cast] = parse_binary
 	infix_table[.Question] = parse_pattern
 	infix_table[.Execute] = parse_execute
 	infix_table[.Minus] = parse_binary
@@ -864,6 +871,9 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.ConstraintFromNone] = .CONSTRAINT
 	prec_table[.ConstraintToNone] = .CONSTRAINT
 	prec_table[.Colon] = .CONSTRAINT
+	// `::` binds tighter than arithmetic — `a+b::u8` parses as `a+(b::u8)`,
+	// so casting the sum requires explicit parens: `(a+b)::u8`.
+	prec_table[.Cast] = .CONSTRAINT
 
 	prec_table[.Question] = .PATTERN
 	prec_table[.Execute] = .CALL
@@ -1637,6 +1647,8 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		op_kind = .LShift
 	case .RShift:
 		op_kind = .RShift
+	case .Cast:
+		op_kind = .Cast
 	case:
 		error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", token_kind))
 		return INVALID_NODE

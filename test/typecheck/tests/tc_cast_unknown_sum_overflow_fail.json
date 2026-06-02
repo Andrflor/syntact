@@ -1,0 +1,1 @@
+{ "name": "tc_cast_unknown_sum_overflow_fail", "description": "two unknown u8 added can leave u8; the sum fails without a cast", "source": "u8:a -> ??::u8\nu8:b -> ??::u8\nu8:c -> a+b", "expect_errors": ["Constraint_Mismatch"] }

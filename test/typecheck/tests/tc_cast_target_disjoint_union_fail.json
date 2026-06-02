@@ -1,0 +1,1 @@
+{ "name": "tc_cast_target_disjoint_union_fail", "description": "a disjoint union (two intervals) has no single binary layout", "source": "a -> 5::(0..10|1000..2000)", "expect_errors": ["Invalid_Cast"] }

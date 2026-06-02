@@ -1,0 +1,1 @@
+{ "name": "tc_cast_overflow_into_u8_ok", "description": "(a+b) can overflow u8 but ::u8 forces it back in, so u8:c is satisfied", "source": "u8:a -> 200\nu8:b -> 100\nu8:c -> (a+b)::u8", "expect_errors": [] }

@@ -1,0 +1,6 @@
+{
+  "name": "cast_i8_neg_to_u8",
+  "description": "i8 -1 reinterpreted as u8 is 255 (bits 0xFF)",
+  "source": "i8:a -> -1\nu8:b -> a::u8\n-> b",
+  "expect": "255"
+}

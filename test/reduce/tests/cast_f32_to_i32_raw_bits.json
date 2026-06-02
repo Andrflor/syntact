@@ -1,0 +1,6 @@
+{
+  "name": "cast_f32_to_i32_raw_bits",
+  "description": "f32 1.0 reinterpreted as i32 is its IEEE-754 bits",
+  "source": "f32:a -> 1.0\ni32:b -> a::i32\n-> b",
+  "expect": "1065353216"
+}

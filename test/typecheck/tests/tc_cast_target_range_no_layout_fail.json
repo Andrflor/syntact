@@ -1,0 +1,1 @@
+{ "name": "tc_cast_target_range_no_layout_fail", "description": "a non-zero-based range like 10..37 has no binary layout to cast into", "source": "a -> 5::10..37", "expect_errors": ["Invalid_Cast"] }

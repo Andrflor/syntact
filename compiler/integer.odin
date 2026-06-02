@@ -695,6 +695,98 @@ builtin_alias :: proc(interval: Integer_Interval) -> string {
 	return ""
 }
 
+// Binary layout (bit width + signedness) of a single integer interval, used by
+// the raw cast `::`. Only the fixed-width builtins (u8/i8/…/u64/i64) have a
+// canonical layout; everything else (unbounded `int`, an arbitrary range like
+// 10..37, a multi-interval union) returns ok=false — the cast then has no target
+// to lay bits into and is an Invalid_Cast.
+Int_Layout :: struct {
+	bits:   uint, // 8, 16, 32, 64
+	signed: bool,
+}
+
+int_layout :: proc(interval: Integer_Interval) -> (Int_Layout, bool) {
+	lo, lo_ok := interval.lo.(i128)
+	hi, hi_ok := interval.hi.(i128)
+	if !lo_ok || !hi_ok do return {}, false
+	switch {
+	case lo == 0 && hi == 255:
+		return {8, false}, true
+	case lo == -128 && hi == 127:
+		return {8, true}, true
+	case lo == 0 && hi == 65535:
+		return {16, false}, true
+	case lo == -32768 && hi == 32767:
+		return {16, true}, true
+	case lo == 0 && hi == 4294967295:
+		return {32, false}, true
+	case lo == -2147483648 && hi == 2147483647:
+		return {32, true}, true
+	case lo == 0 && hi == 18446744073709551615:
+		return {64, false}, true
+	case lo == -9223372036854775808 && hi == 9223372036854775807:
+		return {64, true}, true
+	}
+	return {}, false
+}
+
+// Bit_Repr is the raw little-endian bit pattern of a concrete value of ANY
+// domain, with the width and signedness needed to extend or truncate it. The
+// `::` raw cast works entirely in this representation: cast_to_bits produces it,
+// resize_bits adapts the width, and cast_from_bits lays it back down (see
+// type.odin). `bits` holds the value's low `width` bits; bits above `width` are
+// don't-care. `from_float` is set when the source is itself a float value: a
+// float->float cast then converts the VALUE (IEEE rounding) rather than
+// transmuting bits, so `f64 1.0 :: f32` yields 1.0f, not bit-truncated noise.
+Bit_Repr :: struct {
+	bits:       u128,
+	width:      uint,
+	signed:     bool,
+	from_float: Maybe(f64),
+}
+
+// resize_bits pads or cuts a `from_width`-wide pattern to `to_width`: sign-extend
+// when the source is signed and its top bit is set, zero-extend otherwise, and
+// truncate the high bits when narrowing. Returns the `to_width`-wide pattern.
+resize_bits :: proc(bits: u128, from_width: uint, from_signed: bool, to_width: uint) -> u128 {
+	b := bits
+	// Isolate the source's bit pattern (clear any fill above from_width).
+	if from_width < 128 {
+		b &= (u128(1) << from_width) - 1
+	}
+	if to_width < from_width {
+		// Narrowing: cut the high bits.
+		if to_width < 128 {
+			b &= (u128(1) << to_width) - 1
+		}
+	} else if to_width > from_width {
+		// Widening: sign-extend a signed source whose top bit is set.
+		if from_signed && from_width < 128 {
+			sign_bit := u128(1) << (from_width - 1)
+			if b & sign_bit != 0 {
+				fill := ~((u128(1) << from_width) - 1)
+				if to_width < 128 do fill &= (u128(1) << to_width) - 1
+				b |= fill
+			}
+		}
+	}
+	return b
+}
+
+// bits_reinterpret_int resizes a source pattern to `to_width`, then reads it as a
+// two's-complement integer of the target signedness.
+bits_reinterpret_int :: proc(repr: Bit_Repr, to_width: uint, to_signed: bool) -> i128 {
+	b := resize_bits(repr.bits, repr.width, repr.signed, to_width)
+	if to_signed && to_width < 128 {
+		sign_bit := u128(1) << (to_width - 1)
+		if b & sign_bit != 0 {
+			// Negative under two's complement: subtract 2^width.
+			return i128(b) - i128(u128(1) << to_width)
+		}
+	}
+	return i128(b)
+}
+
 pretty_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> string {
 	if len(integer_intervals) == 1 {
 		alias := builtin_alias(integer_intervals[0])

@@ -1,0 +1,6 @@
+{
+  "name": "cast_f64_to_f32_value",
+  "description": "f64 1.0 cast to f32 is a value conversion -> 1.0",
+  "source": "b -> (1.0::f64)::f32\n-> b",
+  "expect": "1.0"
+}
