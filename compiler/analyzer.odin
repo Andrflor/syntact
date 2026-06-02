@@ -158,7 +158,8 @@ Range_Type :: struct {
 }
 
 Bool_Type :: struct {
-	value: bool,
+	value:   Maybe(bool),
+	default: bool,
 }
 
 String_Type :: struct {
@@ -904,7 +905,7 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 		decoded := decode_string_literal(text, quotation)
 		result^ = make_string_const(decoded, quotation)
 	case .Bool:
-		result^ = Bool_Type{text == "true"}
+		result^ = make_bool_const(text == "true")
 	}
 
 	return result
@@ -929,7 +930,7 @@ init_builtins :: proc "contextless" () {
 	builtins["Int"] = make_int_range(nil, nil)
 	builtins["Float"] = make_float_range(nil, nil, .none)
 	builtins["String"] = make_string_any()
-	builtins["Bool"] = Bool_Type{}
+	builtins["Bool"] = make_bool_any()
 	builtins["None"] = None_Type{}
 }
 

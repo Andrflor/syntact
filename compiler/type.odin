@@ -54,12 +54,14 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// negation (pattern & ~(ends with '_')), scopes.
 			if r := fold_constraint_integer(t); r != nil do return r
 			if r := fold_constraint_float(t); r != nil do return r
+			if r := fold_constraint_bool(t); r != nil do return r
 			r := new(Type)
 			r^ = And_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
 		case Or_Type:
 			if r := fold_constraint_integer(t); r != nil do return r
 			if r := fold_constraint_float(t); r != nil do return r
+			if r := fold_constraint_bool(t); r != nil do return r
 			r := new(Type)
 			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
@@ -93,6 +95,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// Negative leaf: numeric complement if possible, otherwise symbolic.
 			if r := fold_constraint_integer(t); r != nil do return r
 			if r := fold_constraint_float(t); r != nil do return r
+			if r := fold_constraint_bool(t); r != nil do return r
 			if neg := negate_ordinal_string(v.operand); neg != nil do return neg
 			r := new(Type)
 			r^ = Negate_Type{fold_constraint(v.operand)}
@@ -103,13 +106,16 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			return fold_constraint_float(t)
 		case String_Type:
 			return fold_constraint_string(t)
+		case Bool_Type:
+			return fold_constraint_bool(t)
 		}
 	}
 	// Range_Type / Compose_Type are domain-ambiguous: their family is decided by
-	// their operands, not their tag. Try integer, then float, then string.
+	// their operands, not their tag. Try integer, then float, then string, bool.
 	if r := fold_constraint_integer(t); r != nil do return r
 	if r := fold_constraint_float(t); r != nil do return r
 	if r := fold_constraint_string(t); r != nil do return r
+	if r := fold_constraint_bool(t); r != nil do return r
 	return nil
 }
 
@@ -177,6 +183,8 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			return value_type_envelope(fold_type_float(t))
 		case String_Type:
 			return value_type_envelope(fold_type_string(t))
+		case Bool_Type:
+			return value_type_envelope(fold_type_bool(t))
 		}
 	}
 	// Range/Compose/Negate are domain-ambiguous (family decided by operands),
@@ -188,6 +196,8 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 	if env == nil do env = fold_constraint_float(t)
 	if env == nil do env = fold_type_string(t)
 	if env == nil do env = fold_constraint_string(t)
+	if env == nil do env = fold_type_bool(t)
+	if env == nil do env = fold_constraint_bool(t)
 	return value_type_envelope(env)
 }
 
@@ -210,6 +220,8 @@ fold_is_concrete_value :: proc(t: ^Type) -> bool {
 		return float_intervals_is_concrete(v.float_intervals)
 	case String_Type:
 		return string_is_concrete(v)
+	case Bool_Type:
+		return bool_is_concrete(v)
 	}
 	return false
 }
@@ -260,6 +272,9 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case String_Type:
 		v, ok := ft^.(String_Type)
 		return ok && string_satisfy(f, v)
+	case Bool_Type:
+		v, ok := ft^.(Bool_Type)
+		return ok && bool_satisfy(f, v)
 	case Scope_Type:
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
@@ -383,7 +398,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 	case String_Type:
 		write_string_desc(b, v)
 	case Bool_Type:
-		strings.write_string(b, v.value ? "true" : "false")
+		write_bool_desc(b, v)
 	case None_Type:
 		strings.write_string(b, "none")
 	case Unknown_Type:
@@ -491,6 +506,15 @@ type_default :: proc(t: ^Type) -> ^Type {
 				r^ = make_string_const(d, st.default_quotation)
 				return r
 			}
+		}
+	}
+	if folded := fold_constraint_bool(t); folded != nil {
+		// The default of a boolean domain is its first source term, materialized
+		// as a concrete boolean value. The empty set folds to None (handled above).
+		if bt, ok := folded^.(Bool_Type); ok {
+			r := new(Type)
+			r^ = make_bool_const(bt.default)
+			return r
 		}
 	}
 	return nil
@@ -781,7 +805,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		print_string_type(v)
 
 	case Bool_Type:
-		fmt.print(v.value ? "true" : "false")
+		fmt.print(bool_to_string(v))
 
 	case None_Type:
 		fmt.print("none")
@@ -892,7 +916,7 @@ print_integer_intervals :: proc(t: ^Type) {
 	case String_Type:
 		print_string_type(v)
 	case Bool_Type:
-		fmt.printf("{%s, %s}", v.value ? "true" : "false", v.value ? "true" : "false")
+		fmt.print(bool_to_string(v))
 	case Unknown_Type:
 		fmt.print("??")
 	case None_Type:

@@ -217,7 +217,9 @@ compose :: proc(value: Compose_Type) -> ^Type {
 				result^ = make_int_result(~int_value(l))
 			}
 		case Bool_Type:
-			result^ = Bool_Type{!l.value}
+			if bool_is_concrete(l) {
+				result^ = make_bool_const(!bool_value(l))
+			}
 		}
 	case .LShift:
 		result^ = compose_shift(lv, rv, true)
@@ -313,52 +315,55 @@ promote_float_kind :: #force_inline proc(a, b: FloatKind) -> FloatKind {
 compose_eq :: proc(lv, rv: Type, eq: bool) -> Bool_Type {
 	#partial switch l in lv {
 	case Integer_Type:
-		if !int_is_concrete(l) do return Bool_Type{false}
+		if !int_is_concrete(l) do return make_bool_const(false)
 		r_i, r_i_ok := rv.(Integer_Type)
 		r_f, r_f_ok := rv.(Float_Type)
 		if r_i_ok && int_is_concrete(r_i) {
-			return Bool_Type{eq == (int_value(l) == int_value(r_i))}
+			return make_bool_const(eq == (int_value(l) == int_value(r_i)))
 		}
 		if r_f_ok && float_is_concrete(r_f) {
-			return Bool_Type{eq == (int_to_f64(l) == float_value(r_f))}
+			return make_bool_const(eq == (int_to_f64(l) == float_value(r_f)))
 		}
 	case Float_Type:
-		if !float_is_concrete(l) do return Bool_Type{false}
+		if !float_is_concrete(l) do return make_bool_const(false)
 		r_f, r_f_ok := rv.(Float_Type)
 		r_i, r_i_ok := rv.(Integer_Type)
 		lf := float_value(l)
-		if r_f_ok && float_is_concrete(r_f) do return Bool_Type{eq == (lf == float_value(r_f))}
-		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{eq == (lf == int_to_f64(r_i))}
+		if r_f_ok && float_is_concrete(r_f) do return make_bool_const(eq == (lf == float_value(r_f)))
+		if r_i_ok && int_is_concrete(r_i) do return make_bool_const(eq == (lf == int_to_f64(r_i)))
 	case Bool_Type:
 		r := rv.(Bool_Type)
-		return Bool_Type{eq == (l.value == r.value)}
+		if bool_is_concrete(l) && bool_is_concrete(r) {
+			return make_bool_const(eq == (bool_value(l) == bool_value(r)))
+		}
+		return make_bool_const(false)
 	case String_Type:
 		r := rv.(String_Type)
 		if string_is_concrete(l) && string_is_concrete(r) {
-			return Bool_Type{eq == (string_value(l) == string_value(r))}
+			return make_bool_const(eq == (string_value(l) == string_value(r)))
 		}
-		return Bool_Type{!eq}
+		return make_bool_const(!eq)
 	}
-	return Bool_Type{false}
+	return make_bool_const(false)
 }
 
 compose_ord :: proc(lv, rv: Type, op: Operator_Kind) -> Bool_Type {
 	#partial switch l in lv {
 	case Integer_Type:
-		if !int_is_concrete(l) do return Bool_Type{false}
+		if !int_is_concrete(l) do return make_bool_const(false)
 		r_i, r_i_ok := rv.(Integer_Type)
 		r_f, r_f_ok := rv.(Float_Type)
-		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{i128_cmp(int_value(l), int_value(r_i), op)}
-		if r_f_ok && float_is_concrete(r_f) do return Bool_Type{float_cmp(int_to_f64(l), float_value(r_f), op)}
+		if r_i_ok && int_is_concrete(r_i) do return make_bool_const(i128_cmp(int_value(l), int_value(r_i), op))
+		if r_f_ok && float_is_concrete(r_f) do return make_bool_const(float_cmp(int_to_f64(l), float_value(r_f), op))
 	case Float_Type:
-		if !float_is_concrete(l) do return Bool_Type{false}
+		if !float_is_concrete(l) do return make_bool_const(false)
 		r_f, r_f_ok := rv.(Float_Type)
 		r_i, r_i_ok := rv.(Integer_Type)
 		lf := float_value(l)
-		if r_f_ok && float_is_concrete(r_f) do return Bool_Type{float_cmp(lf, float_value(r_f), op)}
-		if r_i_ok && int_is_concrete(r_i) do return Bool_Type{float_cmp(lf, int_to_f64(r_i), op)}
+		if r_f_ok && float_is_concrete(r_f) do return make_bool_const(float_cmp(lf, float_value(r_f), op))
+		if r_i_ok && int_is_concrete(r_i) do return make_bool_const(float_cmp(lf, int_to_f64(r_i), op))
 	}
-	return Bool_Type{false}
+	return make_bool_const(false)
 }
 
 
@@ -411,13 +416,17 @@ compose_bitlogic :: proc(lv, rv: Type, op: Operator_Kind) -> Type {
 		return make_int_result(val)
 	case Bool_Type:
 		r := rv.(Bool_Type)
-		#partial switch op {
-		case .BitAnd:
-			return Bool_Type{l.value && r.value}
-		case .BitOr:
-			return Bool_Type{l.value || r.value}
-		case .Xor:
-			return Bool_Type{l.value ~ r.value}
+		if bool_is_concrete(l) && bool_is_concrete(r) {
+			a := bool_value(l)
+			b := bool_value(r)
+			#partial switch op {
+			case .BitAnd:
+				return make_bool_const(a && b)
+			case .BitOr:
+				return make_bool_const(a || b)
+			case .Xor:
+				return make_bool_const(a ~ b)
+			}
 		}
 	}
 	return nil
