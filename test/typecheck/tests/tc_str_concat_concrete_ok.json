@@ -1,0 +1,1 @@
+{ "name": "tc_str_concat_concrete_ok", "description": "jwt+@ folds", "source": "(\"jwt\"+\"@\"):a -> \"jwt@\"", "expect_errors": [] }

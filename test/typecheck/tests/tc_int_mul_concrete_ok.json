@@ -1,0 +1,1 @@
+{ "name": "tc_int_mul_concrete_ok", "description": "5*3 folds to 15", "source": "(5*3):a -> 15", "expect_errors": [] }

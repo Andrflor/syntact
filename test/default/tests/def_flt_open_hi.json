@@ -1,0 +1,1 @@
+{ "name": "def_flt_open_hi", "description": "default of ..0.0 is 0.0", "source": "(..0.0):a", "binding": "a", "expect": "0.0" }

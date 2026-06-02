@@ -1,0 +1,1 @@
+{"name": "tc_cast_char_to_u8_ok", "description": "char 'A' cast to u8", "source": "'A':a -> 'A'\nu8:b -> a::u8", "expect_errors": []}

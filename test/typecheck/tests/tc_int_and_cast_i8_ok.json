@@ -1,0 +1,1 @@
+{ "name": "tc_int_and_cast_i8_ok", "description": "(u8-u8)&i8 casts into i8", "source": "u8:a\nu8:b\ni8:c -> (a-b)&i8", "expect_errors": [] }

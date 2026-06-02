@@ -1,0 +1,1 @@
+{"name": "def_str_rep", "description": "default of (\"ab\"*3) is \"ababab\" (repetition materialized)", "source": "(\"ab\"*3):a", "binding": "a", "expect": "\"ababab\""}

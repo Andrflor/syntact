@@ -1,0 +1,1 @@
+{ "name": "tc_flt_range_bad", "description": "1.0..3.5 rejects 4.0", "source": "(1.0..3.5):a -> 4.0", "expect_errors": ["Constraint_Mismatch"] }

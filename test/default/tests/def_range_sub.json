@@ -1,0 +1,1 @@
+{"name": "def_range_sub", "description": "default of ((5..10)-(1..2))=3..9 is 3", "source": "((5..10)-(1..2)):a", "binding": "a", "expect": "3"}

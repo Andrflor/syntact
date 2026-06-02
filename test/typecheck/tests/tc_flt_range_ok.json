@@ -1,0 +1,1 @@
+{ "name": "tc_flt_range_ok", "description": "1.0..3.5 accepts 2.0", "source": "(1.0..3.5):a -> 2.0", "expect_errors": [] }

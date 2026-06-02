@@ -1,0 +1,1 @@
+{ "name": "tc_int_sub_concrete_ok", "description": "10-3 folds to 7", "source": "(10-3):a -> 7", "expect_errors": [] }

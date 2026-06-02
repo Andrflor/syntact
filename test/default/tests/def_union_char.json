@@ -1,0 +1,1 @@
+{"name": "def_union_char", "description": "default of ('a'..'z'|'A'..'Z'|'-') is 'a' (first term)", "source": "('a'..'z'|'A'..'Z'|'-'):a", "binding": "a", "expect": "'a'"}

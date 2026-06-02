@@ -1,0 +1,1 @@
+{ "name": "def_bool_union_tf", "description": "default of (true|false) is true (left)", "source": "(true|false):a", "binding": "a", "expect": "true" }

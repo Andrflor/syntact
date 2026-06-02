@@ -1,0 +1,1 @@
+{ "name": "tc_str_rep_exact_ok", "description": "az*3 accepts abc", "source": "('a'..'z'*3):a -> \"abc\"", "expect_errors": [] }

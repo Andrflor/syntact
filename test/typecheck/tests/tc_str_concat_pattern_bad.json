@@ -1,0 +1,1 @@
+{ "name": "tc_str_concat_pattern_bad", "description": "az+@+az rejects aXz", "source": "('a'..'z'+'@'+'a'..'z'):a -> \"aXz\"", "expect_errors": ["Constraint_Mismatch"] }

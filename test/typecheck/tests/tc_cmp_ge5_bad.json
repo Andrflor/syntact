@@ -1,0 +1,1 @@
+{ "name": "tc_cmp_ge5_bad", "description": ">=5 rejects 4", "source": "(>=5):a -> 4", "expect_errors": ["Constraint_Mismatch"] }

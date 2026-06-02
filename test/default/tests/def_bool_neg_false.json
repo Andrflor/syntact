@@ -1,0 +1,1 @@
+{ "name": "def_bool_neg_false", "description": "default of ~false is true", "source": "~false:a", "binding": "a", "expect": "true" }

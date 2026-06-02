@@ -1,0 +1,1 @@
+{ "name": "tc_int_mixed_sign_i16_ok", "description": "u8+i8=-128..382 within i16", "source": "u8:a\ni8:b\ni16:c -> a+b", "expect_errors": [] }

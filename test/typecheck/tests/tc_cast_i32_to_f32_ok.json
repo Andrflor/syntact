@@ -1,0 +1,1 @@
+{"name": "tc_cast_i32_to_f32_ok", "description": "i32 reinterpreted as f32 lands in f32", "source": "i32:a -> 1\nf32:b -> a::f32", "expect_errors": []}

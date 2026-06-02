@@ -1,0 +1,1 @@
+{"name": "def_concat_pattern", "description": "default of ('a'..'z'+'@'+'a'..'z') is \"a@a\"", "source": "('a'..'z'+'@'+'a'..'z'):a", "binding": "a", "expect": "\"a@a\""}

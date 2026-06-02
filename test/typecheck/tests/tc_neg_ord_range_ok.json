@@ -1,0 +1,1 @@
+{ "name": "tc_neg_ord_range_ok", "description": "~'a'..'z' accepts '0'", "source": "(~'a'..'z'):a -> '0'", "expect_errors": [] }

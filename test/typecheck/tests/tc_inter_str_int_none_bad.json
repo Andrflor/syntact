@@ -1,0 +1,1 @@
+{ "name": "tc_inter_str_int_none_bad", "description": "string & >10 is None", "source": "(string & >10):a -> 5", "expect_errors": ["Constraint_Mismatch"] }

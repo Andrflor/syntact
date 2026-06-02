@@ -1,0 +1,1 @@
+{ "name": "tc_union_rep_ok", "description": "union rep accepts a-b", "source": "(('a'..'z'|'-')*1..):a -> \"a-b\"", "expect_errors": [] }

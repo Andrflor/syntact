@@ -1,0 +1,1 @@
+{ "name": "def_cmp_ge5", "description": "default of >=5 is 5", "source": "(>=5):a", "binding": "a", "expect": "5" }

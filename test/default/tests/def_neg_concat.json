@@ -1,0 +1,1 @@
+{"name": "def_neg_concat", "description": "default of (~\"piro\" + 0-9*0..) is \"\" (empty prefix + zero digits)", "source": "(~\"piro\" + '0'..'9'*0..):a", "binding": "a", "expect": "\"\""}

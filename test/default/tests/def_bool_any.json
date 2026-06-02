@@ -1,0 +1,1 @@
+{ "name": "def_bool_any", "description": "default of bool is false (zero value)", "source": "bool:a", "binding": "a", "expect": "false" }

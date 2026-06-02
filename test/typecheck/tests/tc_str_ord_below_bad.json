@@ -1,0 +1,1 @@
+{ "name": "tc_str_ord_below_bad", "description": "'a'..'z' rejects 'A' (below)", "source": "'a'..'z':a -> 'A'", "expect_errors": ["Constraint_Mismatch"] }

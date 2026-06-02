@@ -1,0 +1,1 @@
+{ "name": "tc_int_add_u8u8_u16_ok", "description": "u8+u8=0..510 within u16", "source": "u8:a\nu8:b\nu16:c -> a+b", "expect_errors": [] }

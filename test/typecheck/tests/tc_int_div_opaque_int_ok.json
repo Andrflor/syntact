@@ -1,0 +1,1 @@
+{ "name": "tc_int_div_opaque_int_ok", "description": "10/3 opaque, satisfies int", "source": "(10/3):a -> 3", "expect_errors": [] }

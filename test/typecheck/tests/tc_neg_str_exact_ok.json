@@ -1,0 +1,1 @@
+{ "name": "tc_neg_str_exact_ok", "description": "not exactly piro accepts pira", "source": "(~\"piro\"):a -> \"pira\"", "expect_errors": [] }

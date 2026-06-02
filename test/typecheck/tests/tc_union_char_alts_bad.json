@@ -1,0 +1,1 @@
+{ "name": "tc_union_char_alts_bad", "description": "'a'..'z'|'A'..'Z'|'-' rejects '0'", "source": "('a'..'z'|'A'..'Z'|'-'):a -> '0'", "expect_errors": ["Constraint_Mismatch"] }

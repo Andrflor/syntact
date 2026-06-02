@@ -1,0 +1,1 @@
+{"name": "def_neg_str", "description": "default of (~\"piro\") is \"\" (empty, != piro)", "source": "(~\"piro\"):a", "binding": "a", "expect": "\"\""}

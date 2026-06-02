@@ -1,0 +1,1 @@
+{ "name": "tc_cmp_gt6f_bad", "description": ">6.0 strict rejects 6.0", "source": "(>6.0):a -> 6.0", "expect_errors": ["Constraint_Mismatch"] }

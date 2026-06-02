@@ -1,0 +1,1 @@
+{"name": "tc_execute_none_ok", "description": "no production collapses to none", "source": "s -> { x -> 1 }\nnone:a -> s!", "expect_errors": []}

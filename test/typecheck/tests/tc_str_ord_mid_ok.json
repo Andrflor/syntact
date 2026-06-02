@@ -1,0 +1,1 @@
+{ "name": "tc_str_ord_mid_ok", "description": "'a'..'z' accepts 'm'", "source": "'a'..'z':a -> 'm'", "expect_errors": [] }

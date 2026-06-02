@@ -1,0 +1,1 @@
+{ "name": "tc_str_pos_prefix_ok", "description": "jwt prefix accepts jwtfoo", "source": "\"jwt\"..:a -> \"jwtfoo\"", "expect_errors": [] }

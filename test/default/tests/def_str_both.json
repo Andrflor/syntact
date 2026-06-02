@@ -1,0 +1,1 @@
+{"name": "def_str_both", "description": "default of he..lo is he", "source": "\"he\"..\"lo\":a", "binding": "a", "expect": "\"he\""}

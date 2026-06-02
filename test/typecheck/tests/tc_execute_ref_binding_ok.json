@@ -1,0 +1,1 @@
+{"name": "tc_execute_ref_binding_ok", "description": "production references inner binding", "source": "s -> { u8:x -> 5\n-> x }\nu8:a -> s!", "expect_errors": []}

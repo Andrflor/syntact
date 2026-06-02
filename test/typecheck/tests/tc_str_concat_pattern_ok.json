@@ -1,0 +1,1 @@
+{ "name": "tc_str_concat_pattern_ok", "description": "az+@+az accepts a@z", "source": "('a'..'z'+'@'+'a'..'z'):a -> \"a@z\"", "expect_errors": [] }
