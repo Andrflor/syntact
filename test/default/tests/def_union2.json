@@ -1,0 +1,1 @@
+{ "name": "def_union2", "description": "0..10|20..30 déf 0", "source": "(0..10 | 20..30):a", "binding": "a", "expect": "0" }

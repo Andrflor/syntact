@@ -1,0 +1,1 @@
+{ "name": "def_range_lo", "description": "10..20 défaut 10", "source": "10..20:a", "binding": "a", "expect": "10" }

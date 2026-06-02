@@ -1,0 +1,1 @@
+{ "name": "tc_neg10_bad", "description": "~10 rejette 10", "source": "~10:a -> 10", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_ord_char_ok", "description": "a..z ordinal acc b", "source": "'a'..'z':c -> 'b'", "expect_errors": [] }

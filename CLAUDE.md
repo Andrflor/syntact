@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Language convention
+
+All code-facing content **must be written in English**: comments, error messages, identifiers, and documentation (this file, `README.md`, etc.). Conversations with the maintainer may happen in another language, but that must never leak into the codebase or its documentation.
+
 ## Project overview
 
 Bootstrap compiler for **Syntact**, an experimental language where everything is a scope and execution is structural reduction. The compiler is written in Odin and targets x86-64 Linux. Syntact has no functions, classes, modules, or types as primitives — only scopes manipulated via binding, carving, extension, collapse, patterns, constraints, and (planned) effects/resonance/reactivity. See `README.md` for the full language design and `constraints.md` for the constraint/range system the analyzer implements.

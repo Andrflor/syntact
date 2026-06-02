@@ -1,0 +1,1 @@
+{ "name": "tc_cross_str_int", "description": "u8 rej string", "source": "u8:c -> \"hello\"", "expect_errors": ["Constraint_Mismatch"] }

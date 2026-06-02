@@ -1,0 +1,1 @@
+{ "name": "tc_rep_exact_bad", "description": "a..z*3 rej ab", "source": "('a'..'z'*3):c -> 'ab'", "expect_errors": ["Constraint_Mismatch"] }

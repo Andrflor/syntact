@@ -1,0 +1,1 @@
+{ "name": "def_neg0", "description": "~0 défaut -1", "source": "~0:a", "binding": "a", "expect": "-1" }

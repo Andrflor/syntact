@@ -1,0 +1,1 @@
+{ "name": "tc_neg_ord_ok", "description": "~a..z acc B", "source": "~'a'..'z':c -> 'B'", "expect_errors": [] }

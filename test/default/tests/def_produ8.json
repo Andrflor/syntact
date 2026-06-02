@@ -1,0 +1,1 @@
+{ "name": "def_produ8", "description": "{->u8}:a défaut 0", "source": "{->u8}:a", "binding": "a", "expect": "0" }

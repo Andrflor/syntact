@@ -18,18 +18,18 @@ Float_Interval :: struct {
 	hi: Maybe(f64), // nil = +∞
 }
 
-// Un intervalle string unifie char et string. La sémantique du range
-// dépend du quotation porté par la borne :
-//   .simple   ('…') + contenu 0/1 char → ordinal (codepoints lo..hi)
+// A string interval unifies char and string. The semantics of the range
+// depend on the quotation carried by the bound:
+//   .simple   ('…') + content 0/1 char → ordinal (codepoints lo..hi)
 //   .simple   ('abc')                  → string mode
-//   .double   ("…")                    → positionnel : lo = préfixe, hi = suffixe
-//   .backtick (`…`)                    → positionnel raw (pas d'échappement)
-// Borne nil = ouverte (préfixe/suffixe vide, ou ±∞ ordinal).
+//   .double   ("…")                    → positional: lo = prefix, hi = suffix
+//   .backtick (`…`)                    → raw positional (no escaping)
+// nil bound = open (empty prefix/suffix, or ±∞ ordinal).
 //
-// `count` porte la répétition (`*`). Défaut {1..1}. En mode ordinal il compte
-// le nombre de chars indépendants dans [lo,hi] ('a'..'z'*3 ≡ [a-z]{3}) ; en
-// concret il compte les répétitions de la string ("ab"*3 ≡ "ababab"). Réutilise
-// toute l'arithmétique d'Integer_Type (multiplication, union, intersection).
+// `count` carries the repetition (`*`). Default {1..1}. In ordinal mode it counts
+// the number of independent chars in [lo,hi] ('a'..'z'*3 ≡ [a-z]{3}); in
+// concrete mode it counts the repetitions of the string ("ab"*3 ≡ "ababab"). It reuses
+// all of Integer_Type's arithmetic (multiplication, union, intersection).
 String_Interval :: struct {
 	lo:        Maybe(string),
 	hi:        Maybe(string),
@@ -481,7 +481,7 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 				if nk == .Identifier {
 					name = span_str(ast, ast.node_data[name_idx].identifier.name)
 				} else if nk == .Carve {
-					// constraint:name{carves} — le carve source est le nom
+					// constraint:name{carves} — the carve source is the name
 					csrc := ast.node_data[name_idx].carve.source
 					if ast.node_kinds[csrc] == .Identifier {
 						name = span_str(ast, ast.node_data[csrc].identifier.name)

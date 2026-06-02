@@ -5,17 +5,17 @@ import "core:strings"
 import "core:unicode/utf8"
 
 // ============================================================================
-// Famille string/char — modèle unifié sur []String_Interval.
+// string/char family — unified model over []String_Interval.
 //
-// Un String_Interval porte ses bornes (lo, hi: Maybe(string)) et le quotation
-// d'origine. La sémantique du range dérive du quotation + de la longueur des
-// bornes (cf. String_Interval dans analyzer.odin) :
-//   .simple   + borne(s) de longueur ≤ 1 → ordinal  (codepoints)
-//   .simple   + borne plus longue         → string mode
-//   .double / .backtick                   → positionnel (préfixe..suffixe)
+// A String_Interval carries its bounds (lo, hi: Maybe(string)) and the original
+// quotation. The range semantics derive from the quotation + the length of the
+// bounds (cf. String_Interval in analyzer.odin):
+//   .simple   + bound(s) of length ≤ 1 → ordinal  (codepoints)
+//   .simple   + a longer bound          → string mode
+//   .double / .backtick                 → positional (prefix..suffix)
 //
-// Calqué sur fold_integer.odin / fold_float.odin : un Type concret est un
-// intervalle dégénéré (lo == hi) à un seul segment.
+// Modeled on fold_integer.odin / fold_float.odin: a concrete Type is a
+// degenerate interval (lo == hi) with a single segment.
 // ============================================================================
 
 
@@ -23,8 +23,8 @@ import "core:unicode/utf8"
 // Construction
 // ---------------------------------------------------------------------------
 
-// count_one : la répétition par défaut {1..1} (une occurrence). Réutilisée
-// partout où un String_Interval n'a pas de `*` explicite.
+// count_one : the default repetition {1..1} (one occurrence). Reused
+// everywhere a String_Interval has no explicit `*`.
 count_one :: proc() -> Integer_Type {
 	segs := make([]Integer_Interval, 1)
 	segs[0] = Integer_Interval{i128(1), i128(1)}
@@ -32,7 +32,7 @@ count_one :: proc() -> Integer_Type {
 }
 
 
-// count_is_one : true si le count est exactement {1..1} (pas de répétition).
+// count_is_one : true if the count is exactly {1..1} (no repetition).
 count_is_one :: proc(c: Integer_Type) -> bool {
 	if len(c.integer_intervals) != 1 do return false
 	lo, lo_ok := c.integer_intervals[0].lo.(i128)
@@ -41,8 +41,8 @@ count_is_one :: proc(c: Integer_Type) -> bool {
 }
 
 
-// Valeur string concrète (dégénérée) : lo == hi. Le default est la valeur
-// elle-même, comme make_int_result/make_float_result.
+// Concrete (degenerate) string value: lo == hi. The default is the value
+// itself, like make_int_result/make_float_result.
 make_string_const :: proc(value: string, quotation: String_Quotation) -> Type {
 	intervals := make([]String_Interval, 1)
 	intervals[0] = String_Interval{value, value, quotation, count_one()}
@@ -50,8 +50,8 @@ make_string_const :: proc(value: string, quotation: String_Quotation) -> Type {
 }
 
 
-// `String` builtin = toutes les strings = un intervalle positionnel ouvert.
-// Default = la string vide (borne basse ouverte du positionnel).
+// `String` builtin = all strings = an open positional interval.
+// Default = the empty string (the open lower bound of the positional).
 make_string_any :: proc() -> Type {
 	intervals := make([]String_Interval, 1)
 	intervals[0] = String_Interval{nil, nil, .double, count_one()}
@@ -60,7 +60,7 @@ make_string_any :: proc() -> Type {
 
 
 // ---------------------------------------------------------------------------
-// Prédicats
+// Predicates
 // ---------------------------------------------------------------------------
 
 string_is_concrete :: #force_inline proc(t: String_Type) -> bool {
@@ -69,22 +69,22 @@ string_is_concrete :: #force_inline proc(t: String_Type) -> bool {
 }
 
 
-// Valeur concrète, répétition dépliée. Présuppose string_is_concrete(t).
+// Concrete value, repetition unfolded. Presupposes string_is_concrete(t).
 string_value :: #force_inline proc(t: String_Type) -> string {
 	return string_interval_concrete_value(t.string_intervals[0])
 }
 
 
-// Mode sémantique d'un intervalle (cf. en-tête). Dérivé de quotation + longueur
-// des bornes. Une borne ordinale est un char unique (rune) ; tout le reste est
-// positionnel (préfixe/suffixe). La string vide compte comme borne ouverte.
+// Semantic mode of an interval (cf. header). Derived from quotation + length of
+// the bounds. An ordinal bound is a single char (rune); everything else is
+// positional (prefix/suffix). The empty string counts as an open bound.
 String_Mode :: enum {
-	ordinal,    // 'a'..'z' : un char, codepoint dans [lo, hi]
-	positional, // "p".."s" : commence par p, finit par s
+	ordinal,    // 'a'..'z' : one char, codepoint in [lo, hi]
+	positional, // "p".."s" : starts with p, ends with s
 }
 
 
-// rune_count_le_one : true si la string est vide ou d'un seul codepoint.
+// rune_count_le_one : true if the string is empty or a single codepoint.
 rune_count_le_one :: proc(s: string) -> bool {
 	count := 0
 	for _ in s {
@@ -95,7 +95,7 @@ rune_count_le_one :: proc(s: string) -> bool {
 }
 
 
-// first_rune renvoie le premier codepoint d'une string non vide.
+// first_rune returns the first codepoint of a non-empty string.
 first_rune :: proc(s: string) -> rune {
 	for r in s do return r
 	return 0
@@ -104,15 +104,15 @@ first_rune :: proc(s: string) -> rune {
 
 string_interval_mode :: proc(iv: String_Interval) -> String_Mode {
 	if iv.quotation != .simple do return .positional
-	// simple : ordinal seulement si les deux bornes présentes sont ≤ 1 char.
+	// simple : ordinal only if both present bounds are ≤ 1 char.
 	if lo, ok := iv.lo.(string); ok && !rune_count_le_one(lo) do return .positional
 	if hi, ok := iv.hi.(string); ok && !rune_count_le_one(hi) do return .positional
 	return .ordinal
 }
 
 
-// Concret = bornes égales ET count fixe concret (une seule longueur connue).
-// "ab"*3 est concret (déplie en "ababab") ; "ab"*2..3 ne l'est pas.
+// Concrete = equal bounds AND a fixed concrete count (a single known length).
+// "ab"*3 is concrete (unfolds to "ababab"); "ab"*2..3 is not.
 string_interval_is_concrete :: #force_inline proc(iv: String_Interval) -> bool {
 	lo, lo_ok := iv.lo.(string)
 	hi, hi_ok := iv.hi.(string)
@@ -121,8 +121,8 @@ string_interval_is_concrete :: #force_inline proc(iv: String_Interval) -> bool {
 }
 
 
-// Valeur concrète dépliée : la string littérale que l'intervalle dénote, en
-// répétant `count` fois. Présuppose string_interval_is_concrete(iv).
+// Unfolded concrete value: the string literal the interval denotes, repeated
+// `count` times. Presupposes string_interval_is_concrete(iv).
 string_interval_concrete_value :: proc(iv: String_Interval) -> string {
 	base := iv.lo.(string)
 	n := int(int_value(iv.count))
@@ -134,7 +134,7 @@ string_interval_concrete_value :: proc(iv: String_Interval) -> string {
 
 
 // ---------------------------------------------------------------------------
-// Impression
+// Printing
 // ---------------------------------------------------------------------------
 
 string_quote_pair :: #force_inline proc(q: String_Quotation) -> (open: rune, close: rune) {
@@ -161,14 +161,14 @@ print_string_interval :: proc(iv: String_Interval) {
 		fmt.print("..")
 		if hi_ok do fmt.printf("%r%s%r", open, hi, close)
 	}
-	// Répétition : suffixe `* count` si ce n'est pas la valeur par défaut {1..1}.
+	// Repetition: suffix `* count` if it is not the default value {1..1}.
 	if !count_is_one(iv.count) {
 		fmt.printf(" * %s", pretty_integer_intervals(iv.count.integer_intervals))
 	}
 }
 
 
-// Rend un String_Type dans un builder pour les messages de diagnostic.
+// Renders a String_Type into a builder for diagnostic messages.
 write_string_desc :: proc(b: ^strings.Builder, t: String_Type) {
 	if string_is_concrete(t) {
 		open, close := string_quote_pair(t.string_intervals[0].quotation)
@@ -191,7 +191,7 @@ write_string_desc :: proc(b: ^strings.Builder, t: String_Type) {
 
 
 print_string_type :: proc(t: String_Type) {
-	// Cas "String" : intervalle unique entièrement ouvert.
+	// "String" case: a single fully open interval.
 	if len(t.string_intervals) == 1 {
 		iv := t.string_intervals[0]
 		_, lo_ok := iv.lo.(string)
@@ -209,10 +209,10 @@ print_string_type :: proc(t: String_Type) {
 
 
 // ---------------------------------------------------------------------------
-// Décodage des échappements selon le quotation.
-//   .simple / .double : \n \t \r \0 \\ \' \" \` interprétés
-//   .backtick         : brut, aucun échappement
-// Le texte reçu est déjà débarrassé des délimiteurs par le parser.
+// Decoding of escapes according to the quotation.
+//   .simple / .double : \n \t \r \0 \\ \' \" \` interpreted
+//   .backtick         : raw, no escapes
+// The received text has already been stripped of delimiters by the parser.
 // ---------------------------------------------------------------------------
 
 decode_string_literal :: proc(text: string, quotation: String_Quotation) -> string {
@@ -220,7 +220,7 @@ decode_string_literal :: proc(text: string, quotation: String_Quotation) -> stri
 		return text
 	}
 	if strings.index_byte(text, '\\') < 0 {
-		return text // pas d'échappement : rien à décoder
+		return text // no escape: nothing to decode
 	}
 
 	b := strings.builder_make()
@@ -247,7 +247,7 @@ decode_string_literal :: proc(text: string, quotation: String_Quotation) -> stri
 			case '`':
 				strings.write_byte(&b, '`')
 			case:
-				// échappement inconnu : on conserve la séquence telle quelle
+				// unknown escape: keep the sequence as is
 				strings.write_byte(&b, '\\')
 				strings.write_byte(&b, next)
 			}
@@ -262,7 +262,7 @@ decode_string_literal :: proc(text: string, quotation: String_Quotation) -> stri
 
 
 // ===========================================================================
-// ENTRÉES DOMAINE — miroir de fold_type_integer / fold_constraint_integer.
+// DOMAIN ENTRY POINTS — mirror of fold_type_integer / fold_constraint_integer.
 // ===========================================================================
 
 wrap_string_intervals :: proc(segs: []String_Interval) -> ^Type {
@@ -280,14 +280,14 @@ default_for_string_intervals :: proc(segs: []String_Interval) -> (Maybe(string),
 	return "", iv.quotation
 }
 
-// fold_type_string : enveloppe string produite par une valeur, ou nil.
+// fold_type_string : string envelope produced by a value, or nil.
 fold_type_string :: proc(t: ^Type) -> ^Type {
 	segs, ok := fold_string_intervals(t, false).([]String_Interval)
 	if !ok do return nil
 	return wrap_string_intervals(segs)
 }
 
-// fold_constraint_string : contrainte string résolue, ou nil.
+// fold_constraint_string : resolved string constraint, or nil.
 fold_constraint_string :: proc(t: ^Type) -> ^Type {
 	segs, ok := fold_string_intervals(t, true).([]String_Interval)
 	if !ok do return nil
@@ -303,10 +303,10 @@ stored_string_intervals :: proc(t: ^Type) -> Maybe([]String_Interval) {
 	return nil
 }
 
-// fold_string_intervals : ramène un ^Type à ses segments string. `as_constraint`
-// distingue le fold de la valeur (la string que produit l'expression) du fold de
-// la contrainte (le set imposé) — la différence se voit sur Mention/Reference où
-// la contrainte suit la VALEUR de la cible, pas son type.
+// fold_string_intervals : reduces a ^Type to its string segments. `as_constraint`
+// distinguishes the value fold (the string the expression produces) from the
+// constraint fold (the imposed set) — the difference shows up on
+// Mention/Reference where the constraint follows the target's VALUE, not its type.
 fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_Interval) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -336,9 +336,9 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 			return string_intervals_concat(lseg, rseg)
 		}
 		if v.operator == .Multiply {
-			// string * entier : répétition. Le membre gauche est string, le droit
-			// un entier (range) ≥ 0. On multiplie le count de chaque segment string
-			// par le multiplicateur via l'arithmétique entière existante.
+			// string * integer : repetition. The left operand is string, the right
+			// an integer (range) ≥ 0. We multiply the count of each string segment
+			// by the multiplier via the existing integer arithmetic.
 			lseg, l_ok := fold_string_intervals(v.left, as_constraint).([]String_Interval)
 			if !l_ok do return nil
 			mult, m_ok := fold_type_intervals(v.right).([]Integer_Interval)
@@ -347,10 +347,11 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 		}
 		return nil
 	case Or_Type:
+		// Folds to string ONLY if both branches do (otherwise mixed → failure,
+		// symbolic + satisfy per branch).
 		lseg, l_ok := fold_string_intervals(v.left, as_constraint).([]String_Interval)
 		rseg, r_ok := fold_string_intervals(v.right, as_constraint).([]String_Interval)
-		if !l_ok do return r_ok ? rseg : nil
-		if !r_ok do return lseg
+		if !l_ok || !r_ok do return nil
 		return string_intervals_union(lseg, rseg)
 	case And_Type:
 		lseg, l_ok := fold_string_intervals(v.left, as_constraint).([]String_Interval)
@@ -393,10 +394,10 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 }
 
 
-// fold_string_range : assemble un range string à partir des segments des deux
-// bornes. Un range a une borne basse (lo du segment gauche) et une borne haute
-// (hi du segment droit). Le quotation provient des bornes ; ordinal vs
-// positionnel se dérive ensuite via string_interval_mode.
+// fold_string_range : assembles a string range from the segments of both
+// bounds. A range has a lower bound (lo of the left segment) and an upper bound
+// (hi of the right segment). The quotation comes from the bounds; ordinal vs
+// positional is then derived via string_interval_mode.
 fold_string_range :: proc(lseg, rseg: []String_Interval) -> []String_Interval {
 	lo: Maybe(string) = nil
 	hi: Maybe(string) = nil
@@ -418,29 +419,29 @@ fold_string_range :: proc(lseg, rseg: []String_Interval) -> []String_Interval {
 
 
 // ===========================================================================
-// SATISFIES — le contrat. Prouver que value ⊆ constraint.
+// SATISFIES — the contract. Prove that value ⊆ constraint.
 // ===========================================================================
 
-// string_interval_satisfy : vrai si TOUTES les strings décrites par `v` sont
-// aussi décrites par `c`. v est la valeur (gauche du ->), c la contrainte.
+// string_interval_satisfy : true if ALL the strings described by `v` are also
+// described by `c`. v is the value (left of ->), c the constraint.
 //
-// Deux axes orthogonaux : le PATTERN (bornes + mode) et le COUNT (répétition,
-// = longueur de la séquence). La répétition ne change pas le mode ni le pattern,
-// elle dit juste « combien de fois ».
+// Two orthogonal axes: the PATTERN (bounds + mode) and the COUNT (repetition,
+// = length of the sequence). Repetition changes neither the mode nor the
+// pattern, it just says "how many times".
 string_interval_satisfy :: proc(v, c: String_Interval) -> bool {
 	c_simple := count_is_one(c.count)
 	v_simple := count_is_one(v.count)
 
-	// Sans répétition côté contrainte : pattern pur. (Le régime répété est géré
-	// en amont par sequence_satisfy, qui ne passe pas par ici.) Si la value porte
-	// une répétition mais pas la contrainte, seule une value concrète dépliable
-	// peut satisfaire — string_interval_is_concrete gère le dépliage.
+	// No repetition on the constraint side: pure pattern. (The repeated regime is
+	// handled upstream by sequence_satisfy, which does not go through here.) If
+	// the value carries a repetition but the constraint does not, only a concrete
+	// unfoldable value can satisfy — string_interval_is_concrete handles the unfolding.
 	if c_simple {
 		if v_simple {
 			return string_pattern_satisfy(v, c)
 		}
-		// value répétée, contrainte simple : ne vaut que si la value déplie en une
-		// valeur concrète unique qui satisfait le pattern.
+		// repeated value, simple constraint: holds only if the value unfolds to a
+		// single concrete value that satisfies the pattern.
 		if string_interval_is_concrete(v) {
 			s := string_interval_concrete_value(v)
 			concrete := String_Interval{s, s, v.quotation, count_one()}
@@ -449,13 +450,13 @@ string_interval_satisfy :: proc(v, c: String_Interval) -> bool {
 		return false
 	}
 
-	// Contrainte répétée hors séquence (ne devrait pas arriver via le dispatcher).
+	// Repeated constraint outside a sequence (should not happen via the dispatcher).
 	return false
 }
 
 
-// string_pattern_satisfy : satisfiabilité du PATTERN seul (count = 1 des deux
-// côtés). C'est la logique ordinal/positionnel pure.
+// string_pattern_satisfy : satisfiability of the PATTERN alone (count = 1 on
+// both sides). This is the pure ordinal/positional logic.
 string_pattern_satisfy :: proc(v, c: String_Interval) -> bool {
 	vmode := string_interval_mode(v)
 	cmode := string_interval_mode(c)
@@ -502,17 +503,17 @@ string_pattern_satisfy :: proc(v, c: String_Interval) -> bool {
 }
 
 
-// ordinal_within : [vlo, vhi] ⊆ [clo, chi] sur les codepoints du premier char.
-// Une borne nil côté contrainte = ouverte (±∞). Côté valeur, nil = ±∞ aussi,
-// qui ne peut être contenu que dans une contrainte ouverte du même côté.
+// ordinal_within : [vlo, vhi] ⊆ [clo, chi] over the codepoints of the first char.
+// A nil bound on the constraint side = open (±∞). On the value side, nil = ±∞
+// too, which can only be contained in an open constraint on the same side.
 ordinal_within :: proc(vlo, vhi, clo, chi: Maybe(string)) -> bool {
-	// Borne basse : clo (si présente) doit être ≤ vlo.
+	// Lower bound: clo (if present) must be ≤ vlo.
 	if clo_s, ok := clo.(string); ok && clo_s != "" {
 		vlo_s, vok := vlo.(string)
-		if !vok || vlo_s == "" do return false // value ouverte en bas, contrainte non
+		if !vok || vlo_s == "" do return false // value open below, constraint not
 		if first_rune(vlo_s) < first_rune(clo_s) do return false
 	}
-	// Borne haute : chi (si présente) doit être ≥ vhi.
+	// Upper bound: chi (if present) must be ≥ vhi.
 	if chi_s, ok := chi.(string); ok && chi_s != "" {
 		vhi_s, vok := vhi.(string)
 		if !vok || vhi_s == "" do return false
@@ -522,16 +523,16 @@ ordinal_within :: proc(vlo, vhi, clo, chi: Maybe(string)) -> bool {
 }
 
 
-// string_intervals_satisfy : prouve value ⊆ constraint.
+// string_intervals_satisfy : proves value ⊆ constraint.
 //
-// Deux régimes :
-//   1. La contrainte contient une RÉPÉTITION (au moins un segment count ≠ 1).
-//      Alors la contrainte décrit une SÉQUENCE : la concaténation de `count`
-//      éléments, chaque élément ∈ union des segments. Une value concrète est
-//      vérifiée char-par-char contre cette union, longueur ∈ count. Ex:
-//      ('a'..'z'|'-')*1.. accepte "a-b" (chaque char dans un segment, len≥1).
-//   2. Pas de répétition : chaque segment de value ⊆ au moins un segment de
-//      constraint (membership classique).
+// Two regimes:
+//   1. The constraint contains a REPETITION (at least one segment with count ≠ 1).
+//      Then the constraint describes a SEQUENCE: the concatenation of `count`
+//      elements, each element ∈ union of the segments. A concrete value is
+//      checked char-by-char against this union, length ∈ count. Ex:
+//      ('a'..'z'|'-')*1.. accepts "a-b" (each char in a segment, len≥1).
+//   2. No repetition: each value segment ⊆ at least one constraint segment
+//      (classic membership).
 string_intervals_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool {
 	if value_segs == nil || constraint_segs == nil do return false
 
@@ -553,19 +554,19 @@ string_intervals_satisfy :: proc(value_segs, constraint_segs: []String_Interval)
 }
 
 
-// constraint_has_repeat : au moins un segment porte un count ≠ {1..1}.
+// constraint_has_repeat : at least one segment carries a count ≠ {1..1}.
 constraint_has_repeat :: proc(segs: []String_Interval) -> bool {
 	for s in segs do if !count_is_one(s.count) do return true
 	return false
 }
 
 
-// sequence_satisfy : la contrainte est une séquence répétée. Tous ses segments
-// partagent la même répétition logique (un pattern * count). On vérifie que la
-// value (concrète) est une concaténation de chars chacun ∈ union des éléments,
-// avec une longueur autorisée par le count combiné des segments.
+// sequence_satisfy : the constraint is a repeated sequence. All its segments
+// share the same logical repetition (a pattern * count). We check that the
+// (concrete) value is a concatenation of chars each ∈ union of the elements,
+// with a length allowed by the combined count of the segments.
 sequence_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool {
-	// Le count global autorisé = union des counts de tous les segments.
+	// The global allowed count = union of the counts of all the segments.
 	count_union := make([dynamic]Integer_Interval)
 	for cs in constraint_segs {
 		for ci in cs.count.integer_intervals do append(&count_union, ci)
@@ -573,9 +574,9 @@ sequence_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool
 	allowed := integer_intervals_normalize(count_union[:])
 
 	for vs in value_segs {
-		// Chaque segment de value doit être une séquence valide.
+		// Each value segment must be a valid sequence.
 		if !string_interval_is_concrete(vs) {
-			// Value répétée ordinale : ses chars ⊆ union des éléments, count ⊆ allowed.
+			// Ordinal repeated value: its chars ⊆ union of the elements, count ⊆ allowed.
 			if string_interval_mode(vs) == .ordinal {
 				if !ordinal_in_element_union(vs.lo, vs.hi, constraint_segs) do return false
 				if !integer_intervals_satisfy(vs.count.integer_intervals, allowed) do return false
@@ -586,7 +587,7 @@ sequence_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool
 		s := string_interval_concrete_value(vs)
 		n := rune_count(s)
 		if !int_in_intervals(i128(n), allowed) do return false
-		// Chaque char ∈ au moins un élément (borne ordinale) des segments.
+		// Each char ∈ at least one element (ordinal bound) of the segments.
 		for r in s {
 			rs := rune_to_string(r)
 			if !char_in_element_union(rs, constraint_segs) do return false
@@ -596,14 +597,14 @@ sequence_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool
 }
 
 
-// char_in_element_union : le char `rs` appartient-il à l'élément (bornes
-// ordinales) d'au moins un segment de la contrainte ?
+// char_in_element_union : does the char `rs` belong to the element (ordinal
+// bounds) of at least one segment of the constraint?
 char_in_element_union :: proc(rs: string, segs: []String_Interval) -> bool {
 	for cs in segs {
 		if string_interval_mode(cs) == .ordinal {
 			if ordinal_within(rs, rs, cs.lo, cs.hi) do return true
 		} else if string_interval_is_concrete(cs) {
-			// élément concret de longueur 1 : comparaison directe
+			// concrete element of length 1: direct comparison
 			base := cs.lo.(string)
 			if rune_count_le_one(base) && base == rs do return true
 		}
@@ -612,8 +613,8 @@ char_in_element_union :: proc(rs: string, segs: []String_Interval) -> bool {
 }
 
 
-// ordinal_in_element_union : la plage [lo,hi] est-elle incluse dans l'élément
-// ordinal d'un seul segment (cas value = range de chars répété) ?
+// ordinal_in_element_union : is the range [lo,hi] contained in the ordinal
+// element of a single segment (case value = repeated range of chars)?
 ordinal_in_element_union :: proc(lo, hi: Maybe(string), segs: []String_Interval) -> bool {
 	for cs in segs {
 		if string_interval_mode(cs) != .ordinal do continue
@@ -629,12 +630,12 @@ string_satisfy :: proc(fc, ft: String_Type) -> bool {
 
 
 // ===========================================================================
-// OPÉRATIONS D'ENSEMBLE — | (union), & (intersection), ~ (négation)
+// SET OPERATIONS — | (union), & (intersection), ~ (negation)
 // ===========================================================================
 
-// Union : on concatène simplement les segments (les ensembles string ne se
-// "fusionnent" pas aussi proprement que les entiers ; on garde la liste, le
-// satisfy parcourt tous les segments de toute façon). On déduplique l'identique.
+// Union : we simply concatenate the segments (string sets do not "merge" as
+// cleanly as integers; we keep the list, and satisfy walks all the segments
+// anyway). We deduplicate identical ones.
 string_intervals_union :: proc(a, b: []String_Interval) -> []String_Interval {
 	result := make([dynamic]String_Interval)
 	add :: proc(result: ^[dynamic]String_Interval, iv: String_Interval) {
@@ -649,8 +650,8 @@ string_intervals_union :: proc(a, b: []String_Interval) -> []String_Interval {
 }
 
 
-// Intersection : produit cartésien segment×segment, en gardant les paires dont
-// l'intersection est non vide.
+// Intersection : cartesian product segment×segment, keeping the pairs whose
+// intersection is non-empty.
 string_intervals_intersect :: proc(a, b: []String_Interval) -> []String_Interval {
 	result := make([dynamic]String_Interval)
 	for x in a {
@@ -664,8 +665,8 @@ string_intervals_intersect :: proc(a, b: []String_Interval) -> []String_Interval
 }
 
 
-// Intersection de deux intervalles. Renvoie ok=false si vide (None). Le count du
-// résultat est l'intersection des counts (axe longueur orthogonal au pattern).
+// Intersection of two intervals. Returns ok=false if empty (None). The count of
+// the result is the intersection of the counts (length axis orthogonal to the pattern).
 string_interval_intersect :: proc(x, y: String_Interval) -> (String_Interval, bool) {
 	xm := string_interval_mode(x)
 	ym := string_interval_mode(y)
@@ -674,7 +675,7 @@ string_interval_intersect :: proc(x, y: String_Interval) -> (String_Interval, bo
 	if len(count_segs) == 0 do return {}, false
 	count := Integer_Type{count_segs, default_for_integer_intervals(count_segs)}
 
-	// Deux ordinaux : intersection des plages de codepoints.
+	// Two ordinals: intersection of the codepoint ranges.
 	if xm == .ordinal && ym == .ordinal {
 		lo := ordinal_max_lo(x.lo, y.lo)
 		hi := ordinal_min_hi(x.hi, y.hi)
@@ -682,11 +683,11 @@ string_interval_intersect :: proc(x, y: String_Interval) -> (String_Interval, bo
 		return String_Interval{lo, hi, .simple, count}, true
 	}
 
-	// Au moins un concret : l'intersection est ce concret s'il satisfait l'autre.
+	// At least one concrete: the intersection is that concrete if it satisfies the other.
 	if string_interval_is_concrete(x) && string_interval_satisfy(x, y) do return {x.lo, x.hi, x.quotation, count}, true
 	if string_interval_is_concrete(y) && string_interval_satisfy(y, x) do return {y.lo, y.hi, y.quotation, count}, true
 
-	// Deux positionnels : combiner préfixe le plus long compatible et suffixe.
+	// Two positionals: combine the longest compatible prefix and suffix.
 	if xm == .positional && ym == .positional {
 		pre, pre_ok := longest_compatible(x.lo, y.lo, true)
 		if !pre_ok do return {}, false
@@ -696,14 +697,14 @@ string_interval_intersect :: proc(x, y: String_Interval) -> (String_Interval, bo
 		return String_Interval{pre, suf, q, count}, true
 	}
 
-	// Mélange ordinal/positionnel non concret : conservativement vide.
+	// Non-concrete ordinal/positional mix: conservatively empty.
 	return {}, false
 }
 
 
-// longest_compatible : pour deux préfixes (is_prefix=true) ou suffixes, l'un doit
-// être affixe de l'autre ; on renvoie le plus contraignant (le plus long). Si
-// aucun n'est affixe de l'autre, intersection vide.
+// longest_compatible : for two prefixes (is_prefix=true) or suffixes, one must
+// be an affix of the other; we return the most constraining (the longest). If
+// neither is an affix of the other, the intersection is empty.
 longest_compatible :: proc(a, b: Maybe(string), is_prefix: bool) -> (Maybe(string), bool) {
 	as_, a_ok := a.(string)
 	bs_, b_ok := b.(string)
@@ -720,22 +721,22 @@ longest_compatible :: proc(a, b: Maybe(string), is_prefix: bool) -> (Maybe(strin
 }
 
 
-// Négation ordinale : ~'A'..'Z' = chars hors [A, Z]. On ne nie proprement que
-// l'ordinal (les bornes positionnelles ne se nient pas en intervalles simples).
+// Ordinal negation : ~'A'..'Z' = chars outside [A, Z]. We only cleanly negate
+// the ordinal (positional bounds don't negate into simple intervals).
 string_intervals_negate :: proc(segs: []String_Interval) -> []String_Interval {
 	result := make([dynamic]String_Interval)
 	for iv in segs {
 		if string_interval_mode(iv) != .ordinal do continue
 		lo, lo_ok := iv.lo.(string)
 		hi, hi_ok := iv.hi.(string)
-		// avant la borne basse
+		// before the lower bound
 		if lo_ok && lo != "" {
 			r := first_rune(lo)
 			if r > 0 {
 				append(&result, String_Interval{nil, rune_to_string(r - 1), .simple, count_one()})
 			}
 		}
-		// après la borne haute
+		// after the upper bound
 		if hi_ok && hi != "" {
 			r := first_rune(hi)
 			append(&result, String_Interval{rune_to_string(r + 1), nil, .simple, count_one()})
@@ -745,11 +746,11 @@ string_intervals_negate :: proc(segs: []String_Interval) -> []String_Interval {
 }
 
 
-// negate_ordinal_string : développe ~X en intervalles SEULEMENT si X fold en une
-// string ordinale pure (chaque segment ordinal, count 1, complément représentable
-// en codepoints). Sinon nil → la négation reste symbolique (Negate_Type) et est
-// traitée au niveau satisfy comme NOT satisfy(X). Évite de "rater" silencieusement
-// les négations positionnelles comme aujourd'hui.
+// negate_ordinal_string : expands ~X into intervals ONLY if X folds into a pure
+// ordinal string (each segment ordinal, count 1, complement representable in
+// codepoints). Otherwise nil → the negation stays symbolic (Negate_Type) and is
+// handled at the satisfy level as NOT satisfy(X). Avoids silently "missing"
+// positional negations as it does today.
 negate_ordinal_string :: proc(content: ^Type) -> ^Type {
 	segs, ok := fold_string_intervals(content, true).([]String_Interval)
 	if !ok || len(segs) == 0 do return nil
@@ -764,11 +765,11 @@ negate_ordinal_string :: proc(content: ^Type) -> ^Type {
 
 
 // ===========================================================================
-// CONCATÉNATION — + sur strings/chars
+// CONCATENATION — + on strings/chars
 // ===========================================================================
 
-// string_intervals_concat : a + b. Deux concrètes → concaténation concrète.
-// Sinon, pattern positionnel "commence par préfixe(a), finit par suffixe(b)".
+// string_intervals_concat : a + b. Two concretes → concrete concatenation.
+// Otherwise, positional pattern "starts with prefix(a), ends with suffix(b)".
 string_intervals_concat :: proc(a, b: []String_Interval) -> []String_Interval {
 	if len(a) == 1 && len(b) == 1 {
 		x := a[0]
@@ -780,8 +781,8 @@ string_intervals_concat :: proc(a, b: []String_Interval) -> []String_Interval {
 			res[0] = String_Interval{joined, joined, q, count_one()}
 			return res
 		}
-		// Pattern : préfixe = ce que a garantit en tête, suffixe = ce que b
-		// garantit en fin. Le résultat commence par prefix(a), finit par suffix(b).
+		// Pattern : prefix = what a guarantees at the head, suffix = what b
+		// guarantees at the end. The result starts with prefix(a), ends with suffix(b).
 		pre := concat_prefix(x)
 		suf := concat_suffix(y)
 		res := make([]String_Interval, 1)
@@ -793,12 +794,12 @@ string_intervals_concat :: proc(a, b: []String_Interval) -> []String_Interval {
 
 
 // ===========================================================================
-// RÉPÉTITION — * sur strings/chars
+// REPETITION — * on strings/chars
 // ===========================================================================
 
-// string_intervals_repeat : multiplie le count de chaque segment string par le
-// multiplicateur entier `mult` (réutilise l'arithmétique d'intervalles entiers).
-// Le multiplicateur doit être ≥ 0 partout ; sinon nil (→ erreur en amont via
+// string_intervals_repeat : multiplies the count of each string segment by the
+// integer multiplier `mult` (reuses the integer interval arithmetic). The
+// multiplier must be ≥ 0 everywhere; otherwise nil (→ error upstream via
 // string_repeat_mult_valid).
 string_intervals_repeat :: proc(segs: []String_Interval, mult: []Integer_Interval) -> []String_Interval {
 	if !string_repeat_mult_valid(mult) do return nil
@@ -822,10 +823,10 @@ string_intervals_repeat :: proc(segs: []String_Interval, mult: []Integer_Interva
 }
 
 
-// count_mul : multiplication de deux intervalles de count, tous deux ≥ 0. Les
-// bornes hautes peuvent être ouvertes (+∞). Les bornes basses sont toujours
-// finies ≥ 0 (garanties par string_repeat_mult_valid + count par défaut). Donc
-// [a,b]*[c,d] = [a*c, b*d] avec ∞ absorbant en haut (sauf si l'autre vaut 0).
+// count_mul : multiplication of two count intervals, both ≥ 0. The upper bounds
+// may be open (+∞). The lower bounds are always finite ≥ 0 (guaranteed by
+// string_repeat_mult_valid + the default count). So [a,b]*[c,d] = [a*c, b*d]
+// with ∞ absorbing at the top (unless the other equals 0).
 count_mul :: proc(x, y: Integer_Interval) -> Integer_Interval {
 	xlo := x.lo.(i128) or_else 0
 	ylo := y.lo.(i128) or_else 0
@@ -833,9 +834,9 @@ count_mul :: proc(x, y: Integer_Interval) -> Integer_Interval {
 
 	xhi, xhi_ok := x.hi.(i128)
 	yhi, yhi_ok := y.hi.(i128)
-	// Borne haute : ∞ si l'un des deux est ouvert ET l'autre n'est pas borné à 0.
+	// Upper bound: ∞ if one of the two is open AND the other is not bounded to 0.
 	if !xhi_ok || !yhi_ok {
-		// ouvert * 0 = 0 (si l'autre a hi=0) ; sinon ∞.
+		// open * 0 = 0 (if the other has hi=0); otherwise ∞.
 		if xhi_ok && xhi == 0 do return Integer_Interval{lo, i128(0)}
 		if yhi_ok && yhi == 0 do return Integer_Interval{lo, i128(0)}
 		return Integer_Interval{lo, nil}
@@ -844,33 +845,33 @@ count_mul :: proc(x, y: Integer_Interval) -> Integer_Interval {
 }
 
 
-// string_repeat_mult_valid : le multiplicateur d'une répétition string doit être
-// un entier (range) ≥ 0 — pas de borne basse négative.
+// string_repeat_mult_valid : the multiplier of a string repetition must be an
+// integer (range) ≥ 0 — no negative lower bound.
 string_repeat_mult_valid :: proc(mult: []Integer_Interval) -> bool {
 	if len(mult) == 0 do return false
 	for m in mult {
 		lo, lo_ok := m.lo.(i128)
-		if !lo_ok do return false // borne basse ouverte (-∞) : peut être négatif
+		if !lo_ok do return false // open lower bound (-∞): may be negative
 		if lo < 0 do return false
 	}
 	return true
 }
 
 
-// Le préfixe garanti d'un intervalle utilisé comme membre gauche d'une concat.
+// The guaranteed prefix of an interval used as the left operand of a concat.
 concat_prefix :: proc(iv: String_Interval) -> Maybe(string) {
 	if string_interval_is_concrete(iv) do return iv.lo
 	switch string_interval_mode(iv) {
 	case .positional:
-		return iv.lo // commence par iv.lo
+		return iv.lo // starts with iv.lo
 	case .ordinal:
-		return nil // char variable : aucun préfixe littéral garanti
+		return nil // variable char: no guaranteed literal prefix
 	}
 	return nil
 }
 
 
-// Le suffixe garanti d'un intervalle utilisé comme membre droit d'une concat.
+// The guaranteed suffix of an interval used as the right operand of a concat.
 concat_suffix :: proc(iv: String_Interval) -> Maybe(string) {
 	if string_interval_is_concrete(iv) do return iv.hi
 	switch string_interval_mode(iv) {
@@ -884,14 +885,14 @@ concat_suffix :: proc(iv: String_Interval) -> Maybe(string) {
 
 
 // ===========================================================================
-// Helpers ordinaux / divers
+// Ordinal / miscellaneous helpers
 // ===========================================================================
 
 string_interval_equal :: proc(a, b: String_Interval) -> bool {
 	if !(maybe_string_eq(a.lo, b.lo) && maybe_string_eq(a.hi, b.hi) && a.quotation == b.quotation) {
 		return false
 	}
-	// counts égaux : même longueur de segments, mêmes bornes.
+	// equal counts: same segment length, same bounds.
 	if len(a.count.integer_intervals) != len(b.count.integer_intervals) do return false
 	for i in 0 ..< len(a.count.integer_intervals) {
 		ai := a.count.integer_intervals[i]
@@ -922,7 +923,7 @@ rune_to_string :: proc(r: rune) -> string {
 	return strings.clone(string(bytes[:n]))
 }
 
-// ordinal_max_lo / ordinal_min_hi : bornes de codepoint, nil = ouverte.
+// ordinal_max_lo / ordinal_min_hi : codepoint bounds, nil = open.
 ordinal_max_lo :: proc(a, b: Maybe(string)) -> Maybe(string) {
 	as_, a_ok := a.(string)
 	bs_, b_ok := b.(string)
@@ -939,14 +940,14 @@ ordinal_min_hi :: proc(a, b: Maybe(string)) -> Maybe(string) {
 	return first_rune(as_) <= first_rune(bs_) ? a : b
 }
 
-// rune_count : nombre de codepoints d'une string.
+// rune_count : number of codepoints in a string.
 rune_count :: proc(s: string) -> int {
 	n := 0
 	for _ in s do n += 1
 	return n
 }
 
-// int_in_intervals : val ∈ un des segments entiers.
+// int_in_intervals : val ∈ one of the integer segments.
 int_in_intervals :: proc(val: i128, segs: []Integer_Interval) -> bool {
 	for s in segs {
 		lo_ok := true

@@ -1,0 +1,1 @@
+{ "name": "def_i8", "description": "i8 défaut -128", "source": "i8:a", "binding": "a", "expect": "-128" }

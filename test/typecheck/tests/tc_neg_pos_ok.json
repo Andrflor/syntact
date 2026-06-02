@@ -1,0 +1,1 @@
+{ "name": "tc_neg_pos_ok", "description": "~(finit _) acc ident", "source": "~(\"\".. + '_'):id -> 'identifier'", "expect_errors": [] }

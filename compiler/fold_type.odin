@@ -49,9 +49,9 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
 		case And_Type:
-			// Réduction numérique pure (intersection) si possible — ..9 & 11.. etc.
-			// Symbolique sinon : familles mixtes (String & Int), négation
-			// positionnelle (pattern & ~(finit par '_')), scopes.
+			// Pure numeric reduction (intersection) if possible — ..9 & 11.. etc.
+			// Symbolic otherwise: mixed families (String & Int), positional
+			// negation (pattern & ~(ends with '_')), scopes.
 			if r := fold_constraint_integer(t); r != nil do return r
 			if r := fold_constraint_float(t); r != nil do return r
 			r := new(Type)
@@ -64,23 +64,23 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
 			return r
 		case Negate_Type:
-			// Normalisation De Morgan dans la même passe : on pousse ~ vers les
-			// feuilles et on collapse les ~~. Le résultat reste foldé par cette
-			// même fonction, donc l'arbre n'a jamais de ~ empilé sur un &/|/~.
+			// De Morgan normalization in the same pass: we push ~ toward the
+			// leaves and collapse the ~~. The result stays folded by this same
+			// function, so the tree never has a ~ stacked on a &/|/~.
 			//   ~~X      → X
 			//   ~(A & B) → ~A | ~B
 			//   ~(A | B) → ~A & ~B
-			// Une feuille ~range / ~literal tombe dans les probes domaine ci-dessous
-			// (complément d'intervalles pour l'ordinal/numérique) ou reste symbolique
-			// (négation positionnelle string), géré par satisfy.
+			// A ~range / ~literal leaf falls into the domain probes below
+			// (interval complement for ordinal/numeric) or stays symbolic
+			// (positional string negation), handled by satisfy.
 			inner := follow(v.operand)
 			if inner != nil {
 				#partial switch iv in inner^ {
 				case Negate_Type:
 					return fold_constraint(iv.operand) // ~~X → X
 				case And_Type:
-					// De Morgan : ~(A & B) → ~A | ~B. On reconstruit l'arbre non foldé
-					// et on le repasse à fold_constraint, qui réduira l'Or en intervalles.
+					// De Morgan : ~(A & B) → ~A | ~B. We rebuild the unfolded tree
+					// and pass it back to fold_constraint, which will reduce the Or into intervals.
 					r := new(Type)
 					r^ = Or_Type{negated(iv.left), negated(iv.right)}
 					return fold_constraint(r)
@@ -90,7 +90,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 					return fold_constraint(r)
 				}
 			}
-			// Feuille négative : complément numérique si possible, sinon symbolique.
+			// Negative leaf: numeric complement if possible, otherwise symbolic.
 			if r := fold_constraint_integer(t); r != nil do return r
 			if r := fold_constraint_float(t); r != nil do return r
 			if neg := negate_ordinal_string(v.operand); neg != nil do return neg
@@ -113,8 +113,8 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 	return nil
 }
 
-// negated : enveloppe un ^Type dans un Negate_Type (pour réécrire De Morgan à la
-// volée). fold_constract le re-normalisera (un ~ sur un & redescend, etc.).
+// negated : wraps a ^Type in a Negate_Type (to rewrite De Morgan on the fly).
+// fold_constraint will re-normalize it (a ~ on a & descends again, etc.).
 negated :: proc(t: ^Type) -> ^Type {
 	r := new(Type)
 	r^ = Negate_Type{t}
@@ -269,9 +269,9 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case Or_Type:
 		return satisfy(f.left, ft) || satisfy(f.right, ft)
 	case Negate_Type:
-		// value ⊆ ~X  ⟺  value n'est pas dans X. Décidable et exact pour une value
-		// concrète : ~(finit par '_') accepte 'identifier', rejette 'foo_'. Gère la
-		// négation positionnelle/mixte que le fold ne développe pas en intervalles.
+		// value ⊆ ~X  ⟺  value is not in X. Decidable and exact for a concrete
+		// value: ~(ends with '_') accepts 'identifier', rejects 'foo_'. Handles the
+		// positional/mixed negation that the fold does not expand into intervals.
 		return !satisfy(f.operand, ft)
 	}
 	return false
@@ -360,15 +360,66 @@ type_to_string :: proc(t: ^Type) -> string {
 	return "<value>"
 }
 
+// value_to_string : compact rendering of a concrete VALUE (result of a default
+// or a reduction) for the tests. Handles scopes recursively: a scope is rendered
+// {p0, p1, …} with its productions, {name->val, …} with its bindings.
+value_to_string :: proc(t: ^Type) -> string {
+	if t == nil do return "<nil>"
+	b := strings.builder_make()
+	write_value(&b, t)
+	return strings.to_string(b)
+}
+
+write_value :: proc(b: ^strings.Builder, t: ^Type) {
+	if t == nil {
+		strings.write_string(b, "<nil>")
+		return
+	}
+	#partial switch v in t^ {
+	case Integer_Type:
+		strings.write_string(b, integer_to_string(v))
+	case Float_Type:
+		strings.write_string(b, float_to_string(v))
+	case String_Type:
+		write_string_desc(b, v)
+	case Bool_Type:
+		strings.write_string(b, v.value ? "true" : "false")
+	case None_Type:
+		strings.write_string(b, "none")
+	case Unknown_Type:
+		strings.write_string(b, "??")
+	case Scope_Type:
+		strings.write_byte(b, '{')
+		first := true
+		for i := 0; i < len(v.kind); i += 1 {
+			if !first do strings.write_string(b, ", ")
+			first = false
+			if v.kind[i] == .Product {
+				strings.write_string(b, "-> ")
+				write_value(b, v.values[i])
+			} else {
+				if v.names[i] != "" {
+					strings.write_string(b, v.names[i])
+					strings.write_string(b, " -> ")
+				}
+				write_value(b, v.values[i])
+			}
+		}
+		strings.write_byte(b, '}')
+	case:
+		strings.write_string(b, type_to_string(t))
+	}
+}
+
 // ===========================================================================
-// DÉFAUT — la valeur concrète qu'une contrainte produit quand aucune valeur
-// n'est donnée (`u8:a` → a vaut 0). Le défaut se calcule TOUJOURS sur les
-// intervalles finals du fold, jamais sur la structure brute : ~10, ..9|11.. et
-// ~(~10&~20) suivent le même chemin et donnent des défauts cohérents.
+// DEFAULT — the concrete value a constraint produces when no value is given
+// (`u8:a` → a equals 0). The default is ALWAYS computed on the final fold
+// intervals, never on the raw structure: ~10, ..9|11.. and ~(~10&~20) follow the
+// same path and yield consistent defaults.
 // ===========================================================================
 
-// default_value : la value concrète à poser quand une binding n'a pas de `->`.
-// Suit le scope/carve jusqu'à une production, puis matérialise son défaut.
+// default_value : the concrete value to lay down when a binding has no `->`.
+// Follows the scope/carve down to a production, then materializes its default.
 default_value :: proc(t: ^Type) -> ^Type {
 	if t == nil do return t
 	target := follow(t)
@@ -397,13 +448,13 @@ default_value :: proc(t: ^Type) -> ^Type {
 	return t
 }
 
-// type_default : matérialise le défaut d'un type en une value concrète.
-// On fold la contrainte en intervalles (ce qui réduit récursivement Range / And /
-// Or / Negate / Compose, et calcule le default_value de l'ensemble), puis on lit
-// ce default_value. Aucune lecture de structure brute : l'écriture n'influe pas.
+// type_default : materializes the default of a type into a concrete value.
+// We fold the constraint into intervals (which recursively reduces Range / And /
+// Or / Negate / Compose, and computes the default_value of the set), then read
+// that default_value. No reading of raw structure: the syntax has no effect.
 type_default :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
-	// Mention/Reference : le défaut est celui de la valeur ciblée.
+	// Mention/Reference : the default is that of the targeted value.
 	#partial switch v in t^ {
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
@@ -414,7 +465,7 @@ type_default :: proc(t: ^Type) -> ^Type {
 			return type_default(v.reference.match_scope.values[v.reference.match_index])
 		}
 	}
-	// Domaines : on fold en intervalles et on lit le default_value calculé dessus.
+	// Domains: we fold into intervals and read the default_value computed on them.
 	if folded := fold_constraint_integer(t); folded != nil {
 		if it, ok := folded^.(Integer_Type); ok {
 			if d, ok2 := it.default_value.(i128); ok2 {
@@ -529,12 +580,12 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 	case None_Type:
 		return .Invalid
 	case Range_Type:
-		// Range chaîné (`10..0..30`) : la famille est celle de ses bornes. Si les
-		// deux bornes sont elles-mêmes des scalaires invalides, le sous-range est
-		// invalide ; mais une incohérence de famille INTERNE (`0..30.0`) a déjà été
-		// signalée par le propre appel fold_range du sous-range — on ne la re-signale
-		// pas au parent, on renvoie sa famille représentative (celle de left, le
-		// défaut) pour ne pas produire un message trompeur "right bound not a ...".
+		// Chained range (`10..0..30`) : the family is that of its bounds. If both
+		// bounds are themselves invalid scalars, the sub-range is invalid; but an
+		// INTERNAL family inconsistency (`0..30.0`) has already been reported by the
+		// sub-range's own fold_range call — we do not re-report it to the parent, we
+		// return its representative family (that of left, the default) so as not to
+		// produce a misleading "right bound not a ..." message.
 		lk := range_operand_kind(follow(v.left))
 		rk := range_operand_kind(follow(v.right))
 		if lk == .Invalid && rk == .Invalid do return .Invalid

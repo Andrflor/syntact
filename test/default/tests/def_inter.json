@@ -1,0 +1,1 @@
+{ "name": "def_inter", "description": "u8&100.. défaut 100", "source": "(u8 & 100..):a", "binding": "a", "expect": "100" }

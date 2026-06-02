@@ -1,0 +1,1 @@
+{ "name": "def_f32", "description": "f32 défaut 0", "source": "f32:a", "binding": "a", "expect": "0.0" }

@@ -1,0 +1,1 @@
+{ "name": "tc_u8_ok", "description": "u8 accepte 10", "source": "u8:a -> 10", "expect_errors": [] }

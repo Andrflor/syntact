@@ -1,0 +1,1 @@
+{ "name": "def_prodopen", "description": "{->10..}:a défaut 10", "source": "{->10..}:a", "binding": "a", "expect": "10" }

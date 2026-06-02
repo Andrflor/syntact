@@ -1,0 +1,1 @@
+{ "name": "tc_ident_ok", "description": "identifiant acc my-var", "source": "(('a'..'z'|'A'..'Z'|'-'|'_')*1.. & ~(\"\".. + '_')):id -> 'my-var'", "expect_errors": [] }

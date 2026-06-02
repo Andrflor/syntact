@@ -1,0 +1,1 @@
+{ "name": "tc_demorgan_ok", "description": "~(~10&~20) acc 10", "source": "~(~10 & ~20):a -> 10", "expect_errors": [] }
