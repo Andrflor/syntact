@@ -6,8 +6,18 @@ import "core:encoding/json"
 import "core:fmt"
 import vmem "core:mem/virtual"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:testing"
+
+// Resolve a test-relative path (e.g. "tests/foo.json") against the directory of
+// this source file, so the suite runs regardless of the current working
+// directory. #location().file_path is the absolute path baked in at compile time.
+test_path :: proc(rel: string) -> string {
+	dir := filepath.dir(#location().file_path)
+	joined, _ := filepath.join({dir, rel}, context.allocator)
+	return joined
+}
 
 Typecheck_Test_Case :: struct {
 	name:          string         `json:"name"`,
@@ -16,7 +26,8 @@ Typecheck_Test_Case :: struct {
 	expect_errors: []string       `json:"expect_errors"`,
 }
 
-load_typecheck_test_file :: proc(path: string) -> (Typecheck_Test_Case, bool, string) {
+load_typecheck_test_file :: proc(rel: string) -> (Typecheck_Test_Case, bool, string) {
+	path := test_path(rel)
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
 	tc: Typecheck_Test_Case

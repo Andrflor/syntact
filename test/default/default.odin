@@ -6,7 +6,17 @@ import "core:encoding/json"
 import "core:fmt"
 import vmem "core:mem/virtual"
 import "core:os"
+import "core:path/filepath"
 import "core:testing"
+
+// Resolve a test-relative path (e.g. "tests/foo.json") against the directory of
+// this source file, so the suite runs regardless of the current working
+// directory. #location().file_path is the absolute path baked in at compile time.
+test_path :: proc(rel: string) -> string {
+	dir := filepath.dir(#location().file_path)
+	joined, _ := filepath.join({dir, rel}, context.allocator)
+	return joined
+}
 
 // A "default" suite checks the DEFAULT value a binding receives when no explicit
 // value is given (`u8:a` → a is 0). We analyze, find the binding by name in the
@@ -20,7 +30,8 @@ Default_Test_Case :: struct {
 	expect:      string `json:"expect"`,  // expected default, rendered compactly
 }
 
-load_default_test_file :: proc(path: string) -> (Default_Test_Case, bool, string) {
+load_default_test_file :: proc(rel: string) -> (Default_Test_Case, bool, string) {
+	path := test_path(rel)
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
 	tc: Default_Test_Case
