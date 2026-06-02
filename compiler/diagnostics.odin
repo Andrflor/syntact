@@ -118,7 +118,7 @@ describe_value :: proc(t: ^Type) -> string {
 		if string_is_concrete(v) do return strings.concatenate({"string \"", string_value(v), "\""})
 		return "a string"
 	case Bool_Type:
-		return v.value ? "true" : "false"
+		return bool_to_string(v)
 	case Scope_Type:
 		return "a scope"
 	case Unknown_Type:
@@ -163,7 +163,7 @@ write_type_desc :: proc(b: ^strings.Builder, t: ^Type) {
 	case String_Type:
 		write_string_desc(b, v)
 	case Bool_Type:
-		strings.write_string(b, v.value ? "true" : "false")
+		write_bool_desc(b, v)
 	case Scope_Type:
 		prods := scope_productions(v)
 		if len(prods) == 1 && len(v.names) == 1 {
