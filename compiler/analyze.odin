@@ -3,7 +3,6 @@ package compiler
 import "base:runtime"
 import "core:fmt"
 import "core:strconv"
-import "core:strings"
 
 // The analyzer turns the parser's flat AST into a tree of `Type` — the single
 // union every form in Syntact resolves to. Syntact has no type system: a `Type`
@@ -17,43 +16,10 @@ import "core:strings"
 // as the recursive backbone — a scope is parallel `[dynamic]` arrays indexed by
 // binding ordinal. References never copy a value; they carry (scope, index) back
 // to the definition and are chased lazily by `follow()`.
-
-// --- shared interval types (the domain payloads carried inside a Type) ---
-
-Integer_Interval :: struct {
-	lo: Maybe(i128), // nil = -∞
-	hi: Maybe(i128), // nil = +∞
-}
-
-Float_Interval :: struct {
-	lo: Maybe(f64), // nil = -∞
-	hi: Maybe(f64), // nil = +∞
-}
-
-// A string interval unifies char and string. The semantics of the range
-// depend on the quotation carried by the bound:
-//   .simple   ('…') + content 0/1 char → ordinal (codepoints lo..hi)
-//   .simple   ('abc')                  → string mode
-//   .double   ("…")                    → positional: lo = prefix, hi = suffix
-//   .backtick (`…`)                    → raw positional (no escaping)
-// nil bound = open (empty prefix/suffix, or ±∞ ordinal).
 //
-// `count` carries the repetition (`*`). Default {1..1}. In ordinal mode it counts
-// the number of independent chars in [lo,hi] ('a'..'z'*3 ≡ [a-z]{3}); in
-// concrete mode it counts the repetitions of the string ("ab"*3 ≡ "ababab"). It reuses
-// all of Integer_Type's arithmetic (multiplication, union, intersection).
-String_Interval :: struct {
-	lo:        Maybe(string),
-	hi:        Maybe(string),
-	quotation: String_Quotation,
-	count:     Integer_Type,
-}
-
-FloatKind :: enum {
-	none,
-	f32,
-	f64,
-}
+// The IR data model this file builds — `Type` and all its variants, the domain
+// interval payloads, `Binding_Kind` — lives in ir.odin. This file holds the
+// analyzer state, the diagnostics (`Analyzer_Error*`), and the AST→IR logic.
 
 Analyzer_Error_Type :: enum {
 	Undefined_Identifier,
@@ -81,185 +47,6 @@ Analyzer_Error :: struct {
 	position: Position,
 }
 
-// How a binding connects a name to its value inside a scope. The four
-// push/pull pairs mirror Syntact's directional operators (`->`/`<-`, `>-`/`-<`,
-// `>>-`/`-<<`, `>>=`/`=<<`); only the pointing pair is fully exercised today —
-// events, resonance and reactivity are recorded but not yet reduced. `Expand`
-// is `+{}` extension, `Product` is the scope's `->`-less production (what
-// collapse `!` reduces through).
-Binding_Kind :: enum u8 {
-	Pointing_Push,
-	Pointing_Pull,
-	Event_Push,
-	Event_Pull,
-	Resonance_Push,
-	Resonance_Pull,
-	Reactive_Push,
-	Reactive_Pull,
-	Expand,
-	Product,
-}
-
-// --- the Type union and its variants ---
-//
-// The variants split into three groups:
-//   * connective shapes — Or/And/Negate (the `|`/`&`/~` constraint algebra),
-//     Compose (arithmetic), Range — that combine other Types symbolically until
-//     a fold collapses them to a domain (see type.odin / integer.odin / …);
-//   * domain leaves — Integer/Float/String/Bool — carrying concrete interval
-//     sets plus the default the scope produces when collapsed bare;
-//   * structural shapes — Scope/Carve/Execute and the two indirections
-//     (Mention/Reference) that point back at a binding rather than copying it.
-// None/Unknown/Invalid are the absence, the not-yet-resolved, and the
-// already-errored sentinels; they fold to nothing and never satisfy a constraint.
-
-// `A | B` (sum) and `A & B` (product/intersection — also the explicit cast).
-Or_Type :: struct {
-	left:  ^Type,
-	right: ^Type,
-}
-
-And_Type :: struct {
-	left:  ^Type,
-	right: ^Type,
-}
-
-// `~X` — set complement. Pushed toward the leaves by De Morgan during folding.
-Negate_Type :: struct {
-	operand: ^Type,
-}
-
-// The recursive backbone. A scope is its bindings stored column-wise, indexed by
-// ordinal — same-name bindings coexist (`#0`, `#1`, …). For binding i:
-//   names[i]            the bound name ("" for anonymous / positional / product)
-//   types[i]            the imposed constraint, unfolded (nil if none)
-//   kind[i]             the Binding_Kind connecting name to value
-//   values[i]           the bound value, unfolded
-//   constraint_folds[i] types[i] resolved to its set (the LEFT of `:`) — cached
-//   type_folds[i]       values[i] folded to its typeof (the RIGHT of `->`) — cached
-// The two *_folds arrays are filled by typecheck() and reused by reduce.odin so
-// the proof is computed once. `parent` chains lexical scopes for name lookup.
-Scope_Type :: struct {
-	parent:           ^Scope_Type,
-	names:            [dynamic]string,
-	types:            [dynamic]^Type,
-	kind:             [dynamic]Binding_Kind,
-	values:           [dynamic]^Type,
-	type_folds:       [dynamic]^Type,
-	constraint_folds: [dynamic]^Type,
-}
-
-// `scope!` — collapse: reduce `target` through its Product binding.
-Execute_Type :: struct {
-	target: ^Type,
-}
-
-// `source{ name -> v, … }` — derive a new scope from `source` by overriding
-// some of its bindings. Each `references[i]` locates the overridden field in
-// the source scope; `values[i]` is the replacement. Unmentioned fields are
-// inherited, so the carve stores only the diff, not a full copy of the source.
-Carve_Type :: struct {
-	source:     ^Type,
-	references: [dynamic]Reference,
-	values:     [dynamic]^Type,
-}
-
-// A resolved pointer to a specific binding: (match_scope, match_index) is the
-// definition site; name/index record how it was written (name and/or ordinal)
-// for diagnostics. Used both inside carves and inside Reference_Type.
-Reference :: struct {
-	name:        Maybe(string),
-	index:       Maybe(u64),
-	match_scope: ^Scope_Type,
-	match_index: int,
-}
-
-// An ordinal/property reference (`a#1`, `a.b`). `target` is the expression it
-// was reached through (nil for a bare ordinal); `reference` is the resolved site.
-Reference_Type :: struct {
-	target:    ^Type,
-	reference: ^Reference,
-}
-
-// A plain by-name reference (`a`). Unlike Reference_Type it is the common,
-// ordinal-less case; follow() chases it to the bound value on demand.
-Mention_Type :: struct {
-	name:        string,
-	match_scope: ^Scope_Type,
-	match_index: int,
-}
-
-// Integer domain leaf: a normalized set of intervals (e.g. u8 = 0..255) plus the
-// value the scope produces bare. See integer.odin for the interval algebra.
-Integer_Type :: struct {
-	integer_intervals: []Integer_Interval,
-	default_value:     Maybe(i128),
-}
-
-// Float domain leaf. `kind` tracks the family (f32/f64/unsized) since intervals
-// alone don't distinguish precision. See float.odin.
-Float_Type :: struct {
-	float_intervals: []Float_Interval,
-	kind:            FloatKind,
-	default_value:   Maybe(f64),
-}
-
-// Arithmetic `left <op> right` (`+`, `-`, `*`, …). Kept symbolic until folded;
-// `type_fold` caches the resulting envelope once fold_compose() resolves it.
-Compose_Type :: struct {
-	left:      ^Type,
-	right:     ^Type,
-	operator:  Operator_Kind,
-	type_fold: ^Type,
-}
-
-// `lo..hi`. Either bound may be nil (prefix `..hi` / postfix `lo..`), meaning
-// "unbounded on that side" — NOT the value `none`. Folded by fold_range().
-Range_Type :: struct {
-	left:  ^Type,
-	right: ^Type,
-}
-
-// Bool domain leaf. `value` is set for a concrete true/false; nil means the open
-// set {true, false} (i.e. the `Bool` constraint), with `default` the bare value.
-Bool_Type :: struct {
-	value:   Maybe(bool),
-	default: bool,
-}
-
-// String/char domain leaf — a set of String_Intervals (see above for how the
-// quotation drives ordinal vs positional semantics). See string.odin.
-String_Type :: struct {
-	string_intervals:  []String_Interval,
-	default_value:     Maybe(string),
-	default_quotation: String_Quotation,
-}
-
-None_Type :: struct {} // the explicit absence of a value (`none`)
-
-Unknown_Type :: struct {} // not yet resolvable (externals, patterns, branches)
-
-Invalid_Type :: struct {} // an error was already reported here; folds to nothing
-
-Type :: union {
-	Or_Type,
-	And_Type,
-	Negate_Type,
-	Compose_Type,
-	String_Type,
-	Scope_Type,
-	Integer_Type,
-	Float_Type,
-	Execute_Type,
-	Range_Type,
-	Bool_Type,
-	None_Type,
-	Invalid_Type,
-	Unknown_Type,
-	Carve_Type,
-	Mention_Type,
-	Reference_Type,
-}
 
 // Per-file analysis state. `scope` is the root scope being built; errors and
 // warnings accumulate as `walk()` recurses. Reachable from deep fold helpers via
