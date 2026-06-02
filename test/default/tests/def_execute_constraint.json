@@ -1,0 +1,1 @@
+{ "name": "def_execute_constraint", "description": "default of a collapse constraint = default of its production (u8 -> 0)", "source": "limit -> { -> u8 }\nlimit!:a", "binding": "a", "expect": "0" }

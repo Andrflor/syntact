@@ -1,0 +1,1 @@
+{ "name": "tc_execute_value_fail", "description": "collapse value 300 exceeds u8", "source": "s -> { -> 300 }\nu8:a -> s!", "expect_errors": ["Constraint_Mismatch"] }

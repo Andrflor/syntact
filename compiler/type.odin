@@ -54,6 +54,16 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
+		case Execute_Type:
+			// `target!` as a constraint folds to the constraint of the production
+			// the collapse reduces through (the first .Product of the target). A
+			// scope with no production collapses to `none`.
+			prod, resolved := execute_production(v.target)
+			if prod == nil {
+				if resolved do return new_type(None_Type{})
+				return nil
+			}
+			return fold_constraint(prod)
 		case And_Type:
 			// Pure numeric reduction (intersection) if possible — ..9 & 11.. etc.
 			// Symbolic otherwise: mixed families (String & Int), positional
@@ -190,6 +200,16 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 				return fold_value_type(ref.match_scope.values[ref.match_index])
 			}
+		case Execute_Type:
+			// `target!` produces the value of the production the collapse reduces
+			// through (the first .Product of the target). A scope with no
+			// production collapses to `none`.
+			prod, resolved := execute_production(v.target)
+			if prod == nil {
+				if resolved do return new_type(None_Type{})
+				return nil
+			}
+			return fold_value_type(prod)
 		case Integer_Type:
 			return value_type_envelope(fold_type_integer(t))
 		case Float_Type:
@@ -370,6 +390,36 @@ scope_productions :: proc(s: Scope_Type) -> [dynamic]^Type {
 		if s.kind[i] == .Product do append(&out, s.values[i])
 	}
 	return out
+}
+
+// execute_production resolves the target of a collapse (`target!`) down to the
+// FIRST production it reduces through, mirroring reduce()/execute(): follow the
+// target to a scope (peeling a carve), then return its first .Product value.
+//
+// `resolved` distinguishes the two empty cases for the caller: when the target
+// resolves to a scope but that scope has NO production, the collapse yields
+// `none` (resolved=true, prod=nil); when the target does not resolve to a scope
+// at all, the collapse cannot be folded statically (resolved=false).
+execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
+	cur := follow(t)
+	for cur != nil {
+		#partial switch &v in cur^ {
+		case Scope_Type:
+			for i := 0; i < len(v.kind); i += 1 {
+				if v.kind[i] == .Product do return v.values[i], true
+			}
+			return nil, true
+		case Carve_Type:
+			sub := fold_carve(cur)
+			if sub == nil do return nil, false
+			for i := 0; i < len(sub.kind); i += 1 {
+				if sub.kind[i] == .Product do return sub.values[i], true
+			}
+			return nil, true
+		}
+		break
+	}
+	return nil, false
 }
 
 // ===========================================================================

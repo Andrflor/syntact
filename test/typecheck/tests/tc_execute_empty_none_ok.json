@@ -1,0 +1,1 @@
+{ "name": "tc_execute_empty_none_ok", "description": "collapse of a scope with no production yields none; satisfies none", "source": "s -> { x -> 1 }\nnone:a -> s!", "expect_errors": [] }

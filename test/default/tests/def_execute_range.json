@@ -1,0 +1,1 @@
+{ "name": "def_execute_range", "description": "default of a collapse constraint = default of its production (5.. -> 5)", "source": "limit -> { -> 5.. }\nlimit!:a", "binding": "a", "expect": "5" }

@@ -1,0 +1,1 @@
+{ "name": "tc_execute_constraint_fail", "description": "collapse as constraint folds to u8; 300 does not satisfy it", "source": "limit -> { -> u8 }\nlimit!:a -> 300", "expect_errors": ["Constraint_Mismatch"] }
