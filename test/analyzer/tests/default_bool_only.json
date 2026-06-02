@@ -1,0 +1,6 @@
+{
+  "name": "Default bool only no value",
+  "description": "bool:a with no value gets its default (false), no error",
+  "source": "bool:a",
+  "expect_errors": []
+}

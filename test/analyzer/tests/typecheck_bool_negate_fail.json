@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck bool negate mismatch",
+  "description": "~true:a -> true is invalid, true is not in the complement {false}",
+  "source": "~true:a -> true",
+  "expect_errors": ["Constraint_Mismatch"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck bool singleton mismatch",
+  "description": "true:a -> false is invalid, false is not a member of the singleton {true}",
+  "source": "true:a -> false",
+  "expect_errors": ["Constraint_Mismatch"]
+}

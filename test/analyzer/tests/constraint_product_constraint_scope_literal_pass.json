@@ -1,6 +1,6 @@
 {
   "name": "Product constraint scope literal pass",
   "description": "-> Array{u8}: as constraint production, {2} satisfies Array{u8} because all elements are u8",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> String:\n  -> u8:\n  -> Array{u8}:\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 {2}}",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> string:\n  -> u8:\n  -> Array{u8}:\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 {2}}",
   "expect_errors": []
 }

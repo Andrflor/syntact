@@ -1,6 +1,6 @@
 {
-  "name": "Typecheck String int mismatch",
-  "description": "String:a -> 42 is invalid, integer cannot be assigned to String",
-  "source": "String:a -> 42",
+  "name": "Typecheck string int mismatch",
+  "description": "string:a -> 42 is invalid, integer cannot be assigned to string",
+  "source": "string:a -> 42",
   "expect_errors": ["Constraint_Mismatch"]
 }

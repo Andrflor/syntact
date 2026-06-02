@@ -1,0 +1,6 @@
+{
+  "name": "Default bool true first",
+  "description": "(true|false):a with no value defaults to true (first union term), no error",
+  "source": "(true|false):a",
+  "expect_errors": []
+}
