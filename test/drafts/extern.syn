@@ -1,0 +1,7 @@
+// this is how you declare an external dependency in syntact no fluff...
+kernel -> <kernel.so>{
+  write -> {
+    u8:a  u8:b
+    -> ??:u8
+  }
+}
