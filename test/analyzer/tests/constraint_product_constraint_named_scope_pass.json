@@ -1,6 +1,6 @@
 {
   "name": "Product constraint named scope fail",
   "description": "-> Array{u8}: is a constraint. ArrayU8 is a scope template, not a concrete scope with u8 elements.",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> String:\n  -> u8:\n  -> Array{u8}:\n}\n\nArrayU8 -> {\n  T -> u8\n  -> {}\n  -> {T: ...Array:}\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 ArrayU8}",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> string:\n  -> u8:\n  -> Array{u8}:\n}\n\nArrayU8 -> {\n  T -> u8\n  -> {}\n  -> {T: ...Array:}\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 ArrayU8}",
   "expect_errors": ["Constraint_Mismatch"]
 }

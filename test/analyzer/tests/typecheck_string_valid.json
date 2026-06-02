@@ -1,6 +1,6 @@
 {
-  "name": "Typecheck String valid",
-  "description": "String:a -> 'hello' is valid",
-  "source": "String:a -> 'hello'",
+  "name": "Typecheck string valid",
+  "description": "string:a -> 'hello' is valid",
+  "source": "string:a -> 'hello'",
   "expect_errors": []
 }

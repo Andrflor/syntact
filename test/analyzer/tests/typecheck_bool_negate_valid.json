@@ -1,0 +1,6 @@
+{
+  "name": "Typecheck bool negate valid",
+  "description": "~true:a -> false is valid, the complement of {true} is {false}",
+  "source": "~true:a -> false",
+  "expect_errors": []
+}

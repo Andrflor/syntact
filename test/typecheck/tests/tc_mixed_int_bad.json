@@ -1,1 +1,1 @@
-{ "name": "tc_mixed_int_bad", "description": "String|f32 rej int", "source": "(String|f32):b -> 5", "expect_errors": ["Constraint_Mismatch"] }
+{ "name": "tc_mixed_int_bad", "description": "string|f32 rej int", "source": "(string|f32):b -> 5", "expect_errors": ["Constraint_Mismatch"] }

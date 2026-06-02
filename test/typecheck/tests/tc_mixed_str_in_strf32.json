@@ -1,1 +1,1 @@
-{ "name": "tc_mixed_str_in_strf32", "description": "String|f32 acc string", "source": "(String|f32):b -> \"hi\"", "expect_errors": [] }
+{ "name": "tc_mixed_str_in_strf32", "description": "string|f32 acc string", "source": "(string|f32):b -> \"hi\"", "expect_errors": [] }

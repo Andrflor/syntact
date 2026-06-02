@@ -1,1 +1,1 @@
-{ "name": "tc_mixed_strint_str", "description": "String|u8 acc string", "source": "(String|u8):b -> \"hi\"", "expect_errors": [] }
+{ "name": "tc_mixed_strint_str", "description": "string|u8 acc string", "source": "(string|u8):b -> \"hi\"", "expect_errors": [] }

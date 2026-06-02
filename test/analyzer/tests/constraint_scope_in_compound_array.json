@@ -1,6 +1,6 @@
 {
   "name": "Constraint scope in compound array",
-  "description": "Array{F32ORString}:a -> {0.1 {}} should fail, scope satisfies neither f32 nor String",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> f32:\n  -> String:\n}\n\nArray{F32ORString}:a -> {0.1 {}}",
+  "description": "Array{F32ORString}:a -> {0.1 {}} should fail, scope satisfies neither f32 nor string",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> f32:\n  -> string:\n}\n\nArray{F32ORString}:a -> {0.1 {}}",
   "expect_errors": ["Constraint_Mismatch"]
 }

@@ -1,6 +1,6 @@
 {
-  "name": "Constraint scope vs String",
-  "description": "String:a -> {} should fail, scope does not satisfy String",
-  "source": "String:a -> {}",
+  "name": "Constraint scope vs string",
+  "description": "string:a -> {} should fail, scope does not satisfy string",
+  "source": "string:a -> {}",
   "expect_errors": ["Constraint_Mismatch"]
 }
