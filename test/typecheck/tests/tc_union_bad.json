@@ -1,0 +1,1 @@
+{ "name": "tc_union_bad", "description": "10..40|2..3 rej 5", "source": "(10..40 | 2..3):a -> 5", "expect_errors": ["Constraint_Mismatch"] }

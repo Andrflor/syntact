@@ -1,0 +1,1 @@
+{ "name": "tc_u8_overflow", "description": "u8 rejette 300", "source": "u8:a -> 300", "expect_errors": ["Constraint_Mismatch"] }

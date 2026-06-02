@@ -102,14 +102,14 @@ Unary_Data :: struct {
 }
 
 String_Quotation :: enum u8 {
-	simple,   // '…'  — char/ordinal selon longueur
-	double,   // "…"  — string positionnel, échappements interprétés
-	backtick, // `…`  — raw string positionnel, pas d'échappement
+	simple,   // '…'  — char/ordinal depending on length
+	double,   // "…"  — positional string, escapes interpreted
+	backtick, // `…`  — raw positional string, no escaping
 }
 
 Literal_Data :: struct {
 	kind:      Literal_Kind,
-	quotation: String_Quotation, // significatif seulement quand kind == .String
+	quotation: String_Quotation, // only meaningful when kind == .String
 }
 
 Identifier_Data :: struct {
@@ -741,7 +741,7 @@ scan_string :: proc(l: ^Lexer, start: u32, f: u8) -> Token {
 	src := l.src
 	slen := l.source_len
 	delimiter := src[l.offset]
-	raw := delimiter == '`' // backtick = raw : '\' n'est pas un échappement
+	raw := delimiter == '`' // backtick = raw: '\' is not an escape
 	l.offset += 1
 	for l.offset < slen {
 		current := src[l.offset]

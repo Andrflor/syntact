@@ -266,10 +266,12 @@ fold_constraint_float_intervals :: proc(
 		}
 		return fold_type_float_intervals(t)
 	case Or_Type:
+		// An Or folds to float ONLY if BOTH branches are float. Otherwise
+		// (String | f32) it is mixed: we fail to let fold_constraint keep it
+		// symbolic, and satisfy(Or) will test each branch in its own domain.
 		left, left_kind, left_ok := fold_constraint_float_intervals(v.left)
 		right, right_kind, right_ok := fold_constraint_float_intervals(v.right)
-		if !left_ok do return right, right_kind, right_ok
-		if !right_ok do return left, left_kind, true
+		if !left_ok || !right_ok do return nil, .none, false
 		return float_intervals_union(left, right), promote_float_kind(left_kind, right_kind), true
 	case And_Type:
 		left, left_kind, left_ok := fold_constraint_float_intervals(v.left)
@@ -401,9 +403,10 @@ float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Int
 	return result[:]
 }
 
-// Comme range_span_bounds côté entier : span de toutes les bornes (chaîne incluse),
-// l'ordre ne changeant que le défaut. `10.0..0.0` ≡ `0.0..10.0`, `10.0..0.0..30.0`
-// ≡ `0.0..30.0`. min global des `lo`, max global des `hi` ; une borne ouverte domine.
+// Like range_span_bounds on the integer side: span of all the bounds (chain
+// included), the order only changing the default. `10.0..0.0` ≡ `0.0..10.0`,
+// `10.0..0.0..30.0` ≡ `0.0..30.0`. Global min of the `lo`, global max of the
+// `hi`; an open bound dominates.
 range_span_float_bounds :: proc(
 	left_segs, right_segs: []Float_Interval,
 	left_open := false,
@@ -441,7 +444,7 @@ range_span_float_bounds :: proc(
 	}
 	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
 	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
-	// Borne absente dans la source = ouverte à l'infini de ce côté.
+	// A bound missing in the source = open to infinity on that side.
 	if left_open do lo = nil
 	if right_open do hi = nil
 	return lo, hi

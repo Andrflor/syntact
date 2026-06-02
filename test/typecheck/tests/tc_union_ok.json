@@ -1,0 +1,1 @@
+{ "name": "tc_union_ok", "description": "10..40|2..3 acc 3", "source": "(10..40 | 2..3):a -> 3", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_prod_ok", "description": "{->10} acc 10", "source": "{->10}:a -> 10", "expect_errors": [] }

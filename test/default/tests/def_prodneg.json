@@ -1,0 +1,1 @@
+{ "name": "def_prodneg", "description": "{->~10}:a défaut 9", "source": "{->~10}:a", "binding": "a", "expect": "9" }

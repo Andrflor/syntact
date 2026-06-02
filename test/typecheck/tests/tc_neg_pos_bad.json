@@ -1,0 +1,1 @@
+{ "name": "tc_neg_pos_bad", "description": "~(finit _) rej foo_", "source": "~(\"\".. + '_'):id -> 'foo_'", "expect_errors": ["Constraint_Mismatch"] }

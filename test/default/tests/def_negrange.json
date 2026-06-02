@@ -1,0 +1,1 @@
+{ "name": "def_negrange", "description": "~(0..10) défaut -1", "source": "~(0..10):a", "binding": "a", "expect": "-1" }

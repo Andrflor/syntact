@@ -43,16 +43,16 @@ make_int_const :: proc(val: i128) -> Integer_Type {
 }
 
 
-// Le défaut ne dépend QUE des intervalles finals, jamais de l'écriture qui les a
-// produits : ~10 ≡ ..9|11.. donnent le même défaut. Règle : la première borne
-// FINIE rencontrée en parcourant (lo₁, hi₁, lo₂, hi₂, …) — toujours un élément
-// réel de l'ensemble.
+// The default depends ONLY on the final intervals, never on the syntax that
+// produced them: ~10 ≡ ..9|11.. yield the same default. Rule: the first FINITE
+// bound encountered while scanning (lo₁, hi₁, lo₂, hi₂, …) — always a real
+// element of the set.
 //   u8 [0..255]    → 0   (lo₁)
-//   ~10 [..9|11..] → 9   (lo₁=−∞ ignoré, hi₁)
+//   ~10 [..9|11..] → 9   (lo₁=−∞ skipped, hi₁)
 //   ..10 [..10]    → 10  (hi₁)
 //   5.. [5..]      → 5   (lo₁)
-//   ~0 [..-1|1..]  → -1  (hi₁, et −1 ∈ ~0 ✓)
-// Ensemble totalement ouvert (.. = ℤ) : aucune borne finie → 0.
+//   ~0 [..-1|1..]  → -1  (hi₁, and −1 ∈ ~0 ✓)
+// Fully open set (.. = ℤ): no finite bound → 0.
 default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {
 	if len(integer_intervals) == 0 do return nil
 	for interval in integer_intervals {
@@ -133,10 +133,10 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
-		// Un range (éventuellement chaîné comme `10..0..30`) couvre le span de
-		// TOUTES ses bornes : lo = min global, hi = max global. Les sous-ranges
-		// ayant déjà été foldés en leur span, il suffit de fusionner. Une borne
-		// absente (`5..`, `..10`) = ouverte à l'infini de ce côté.
+		// A range (possibly chained like `10..0..30`) covers the span of ALL
+		// its bounds: lo = global min, hi = global max. Since sub-ranges have
+		// already been folded into their span, merging is enough. A missing
+		// bound (`5..`, `..10`) = open to infinity on that side.
 		lo, hi := range_span_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		integer_intervals := make([]Integer_Interval, 1)
 		integer_intervals[0] = Integer_Interval{lo, hi}
@@ -261,10 +261,12 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		}
 		return fold_type_intervals(t)
 	case Or_Type:
+		// An Or folds to integer intervals ONLY if BOTH branches do. Otherwise
+		// (String | u8) it is mixed → failure, fold_constraint keeps it symbolic
+		// and satisfy tests each branch in its own domain.
 		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
 		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
-		if !left_ok do return right_ok ? right : nil
-		if !right_ok do return left
+		if !left_ok || !right_ok do return nil
 		return integer_intervals_union(left, right)
 	case And_Type:
 		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
@@ -318,11 +320,12 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 	return nil
 }
 
-// Span d'un range pour la contrainte. En Syntact l'ordre des bornes ne change
-// que le défaut, jamais l'enveloppe : `10..0` ≡ `0..10`, et un range chaîné
-// `10..0..30` ≡ `0..30` (défaut 10). On prend donc le min global de tous les `lo`
-// et le max global de tous les `hi` des segments des deux côtés (les sous-ranges
-// ayant déjà été foldés en leur propre span). Une borne ouverte (±∞) domine.
+// Span of a range for the constraint. In Syntact the order of bounds only
+// changes the default, never the envelope: `10..0` ≡ `0..10`, and a chained
+// range `10..0..30` ≡ `0..30` (default 10). So we take the global min of all the
+// `lo` and the global max of all the `hi` across the segments on both sides (the
+// sub-ranges having already been folded into their own span). An open bound
+// (±∞) dominates.
 range_span_bounds :: proc(
 	left_segs, right_segs: []Integer_Interval,
 	left_open := false,
@@ -360,9 +363,9 @@ range_span_bounds :: proc(
 	}
 	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
 	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
-	// Une borne absente dans la source (`5..`, `..10`) signifie ouverte à l'infini
-	// de ce côté : `5..` = 5..+∞, `..10` = -∞..10. Sans cette info, un range ouvert
-	// à droite serait pris pour le span concret de sa seule borne (5..5).
+	// A bound missing in the source (`5..`, `..10`) means open to infinity on
+	// that side: `5..` = 5..+∞, `..10` = -∞..10. Without this info, a range open
+	// on the right would be mistaken for the concrete span of its single bound (5..5).
 	if left_open do lo = nil
 	if right_open do hi = nil
 	return lo, hi

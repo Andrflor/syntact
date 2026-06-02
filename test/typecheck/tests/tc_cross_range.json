@@ -1,0 +1,1 @@
+{ "name": "tc_cross_range", "description": "a..3 invalid range", "source": "-> 'a'..3", "expect_errors": ["Invalid_Range"] }

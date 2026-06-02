@@ -1,0 +1,1 @@
+{ "name": "tc_ident_bad", "description": "identifiant rej bad_", "source": "(('a'..'z'|'A'..'Z'|'-'|'_')*1.. & ~(\"\".. + '_')):id -> 'bad_'", "expect_errors": ["Constraint_Mismatch"] }

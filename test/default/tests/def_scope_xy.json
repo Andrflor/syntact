@@ -1,0 +1,1 @@
+{ "name": "def_scope_xy", "description": "{u8:x,u8:y}:a défaut", "source": "{u8:x, u8:y}:a", "binding": "a", "expect": "{x -> 0, y -> 0}" }

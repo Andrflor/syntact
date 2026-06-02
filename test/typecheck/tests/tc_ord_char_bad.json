@@ -1,0 +1,1 @@
+{ "name": "tc_ord_char_bad", "description": "a..z ordinal rej B", "source": "'a'..'z':c -> 'B'", "expect_errors": ["Constraint_Mismatch"] }

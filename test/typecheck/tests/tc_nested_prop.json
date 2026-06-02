@@ -1,0 +1,1 @@
+{ "name": "tc_nested_prop", "description": "a.b nested", "source": "a -> {\n u8:b -> 10\n}\na.b", "expect_errors": [] }

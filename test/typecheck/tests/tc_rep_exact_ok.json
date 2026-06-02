@@ -1,0 +1,1 @@
+{ "name": "tc_rep_exact_ok", "description": "a..z*3 acc abc", "source": "('a'..'z'*3):c -> 'abc'", "expect_errors": [] }

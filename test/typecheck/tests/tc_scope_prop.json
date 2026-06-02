@@ -1,0 +1,1 @@
+{ "name": "tc_scope_prop", "description": "pack.x property", "source": "pack -> {u8:x, u8:y}\npack.x", "expect_errors": [] }
