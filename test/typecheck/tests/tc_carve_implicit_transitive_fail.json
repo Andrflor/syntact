@@ -1,0 +1,1 @@
+{ "name": "tc_carve_implicit_transitive_fail", "description": "the implicit constraint propagates transitively through y -> z -> x", "source": "a -> {\n  x -> 0\n  z -> x\n  u8:y -> z\n}\nb -> a{x -> -11}", "expect_errors": ["Constraint_Mismatch"] }

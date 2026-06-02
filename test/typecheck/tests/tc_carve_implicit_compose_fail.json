@@ -1,0 +1,1 @@
+{ "name": "tc_carve_implicit_compose_fail", "description": "carving x makes x+y leave u8, violating u8:z -> x+y", "source": "a -> {\n  x -> 0\n  u8:y -> 0\n  u8:z -> x+y\n}\nb -> a{x -> -11}", "expect_errors": ["Constraint_Mismatch"] }
