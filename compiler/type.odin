@@ -1064,7 +1064,7 @@ op_symbol :: proc(op: Operator_Kind) -> string {
 print_float_kind :: proc(k: FloatKind) {
 	switch k {
 	case .none:
-		fmt.print("Float")
+		fmt.print("float")
 	case .f32:
 		fmt.print("f32")
 	case .f64:

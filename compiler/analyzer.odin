@@ -5,9 +5,21 @@ import "core:fmt"
 import "core:strconv"
 import "core:strings"
 
-/* ======================================================================
- * SECTION 1: SHARED TYPES
- * ====================================================================== */
+// The analyzer turns the parser's flat AST into a tree of `Type` — the single
+// union every form in Syntact resolves to. Syntact has no type system: a `Type`
+// is the static *shape* of a value or a constraint, and the analyzer's job is to
+// prove, for every binding `c : … -> v`, that the value v falls inside the set
+// the constraint c denotes (`fold_value_type(v) ⊆ fold_constraint(c)`). The
+// proof itself lives in the domain files (integer/float/string/bool) and is
+// dispatched from type.odin; this file only builds the tree and asks.
+//
+// Layout: an arena of `^Type` nodes (each its own `new(Type)`), with `Scope_Type`
+// as the recursive backbone — a scope is parallel `[dynamic]` arrays indexed by
+// binding ordinal. References never copy a value; they carry (scope, index) back
+// to the definition and are chased lazily by `follow()`.
+
+// --- shared interval types (the domain payloads carried inside a Type) ---
+
 Integer_Interval :: struct {
 	lo: Maybe(i128), // nil = -∞
 	hi: Maybe(i128), // nil = +∞
@@ -69,6 +81,12 @@ Analyzer_Error :: struct {
 	position: Position,
 }
 
+// How a binding connects a name to its value inside a scope. The four
+// push/pull pairs mirror Syntact's directional operators (`->`/`<-`, `>-`/`-<`,
+// `>>-`/`-<<`, `>>=`/`=<<`); only the pointing pair is fully exercised today —
+// events, resonance and reactivity are recorded but not yet reduced. `Expand`
+// is `+{}` extension, `Product` is the scope's `->`-less production (what
+// collapse `!` reduces through).
 Binding_Kind :: enum u8 {
 	Pointing_Push,
 	Pointing_Pull,
@@ -82,6 +100,20 @@ Binding_Kind :: enum u8 {
 	Product,
 }
 
+// --- the Type union and its variants ---
+//
+// The variants split into three groups:
+//   * connective shapes — Or/And/Negate (the `|`/`&`/~` constraint algebra),
+//     Compose (arithmetic), Range — that combine other Types symbolically until
+//     a fold collapses them to a domain (see type.odin / integer.odin / …);
+//   * domain leaves — Integer/Float/String/Bool — carrying concrete interval
+//     sets plus the default the scope produces when collapsed bare;
+//   * structural shapes — Scope/Carve/Execute and the two indirections
+//     (Mention/Reference) that point back at a binding rather than copying it.
+// None/Unknown/Invalid are the absence, the not-yet-resolved, and the
+// already-errored sentinels; they fold to nothing and never satisfy a constraint.
+
+// `A | B` (sum) and `A & B` (product/intersection — also the explicit cast).
 Or_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
@@ -92,10 +124,21 @@ And_Type :: struct {
 	right: ^Type,
 }
 
+// `~X` — set complement. Pushed toward the leaves by De Morgan during folding.
 Negate_Type :: struct {
 	operand: ^Type,
 }
 
+// The recursive backbone. A scope is its bindings stored column-wise, indexed by
+// ordinal — same-name bindings coexist (`#0`, `#1`, …). For binding i:
+//   names[i]            the bound name ("" for anonymous / positional / product)
+//   types[i]            the imposed constraint, unfolded (nil if none)
+//   kind[i]             the Binding_Kind connecting name to value
+//   values[i]           the bound value, unfolded
+//   constraint_folds[i] types[i] resolved to its set (the LEFT of `:`) — cached
+//   type_folds[i]       values[i] folded to its typeof (the RIGHT of `->`) — cached
+// The two *_folds arrays are filled by typecheck() and reused by reduce.odin so
+// the proof is computed once. `parent` chains lexical scopes for name lookup.
 Scope_Type :: struct {
 	parent:           ^Scope_Type,
 	names:            [dynamic]string,
@@ -106,16 +149,24 @@ Scope_Type :: struct {
 	constraint_folds: [dynamic]^Type,
 }
 
+// `scope!` — collapse: reduce `target` through its Product binding.
 Execute_Type :: struct {
 	target: ^Type,
 }
 
+// `source{ name -> v, … }` — derive a new scope from `source` by overriding
+// some of its bindings. Each `references[i]` locates the overridden field in
+// the source scope; `values[i]` is the replacement. Unmentioned fields are
+// inherited, so the carve stores only the diff, not a full copy of the source.
 Carve_Type :: struct {
 	source:     ^Type,
 	references: [dynamic]Reference,
 	values:     [dynamic]^Type,
 }
 
+// A resolved pointer to a specific binding: (match_scope, match_index) is the
+// definition site; name/index record how it was written (name and/or ordinal)
+// for diagnostics. Used both inside carves and inside Reference_Type.
 Reference :: struct {
 	name:        Maybe(string),
 	index:       Maybe(u64),
@@ -123,28 +174,38 @@ Reference :: struct {
 	match_index: int,
 }
 
+// An ordinal/property reference (`a#1`, `a.b`). `target` is the expression it
+// was reached through (nil for a bare ordinal); `reference` is the resolved site.
 Reference_Type :: struct {
 	target:    ^Type,
 	reference: ^Reference,
 }
 
+// A plain by-name reference (`a`). Unlike Reference_Type it is the common,
+// ordinal-less case; follow() chases it to the bound value on demand.
 Mention_Type :: struct {
 	name:        string,
 	match_scope: ^Scope_Type,
 	match_index: int,
 }
 
+// Integer domain leaf: a normalized set of intervals (e.g. u8 = 0..255) plus the
+// value the scope produces bare. See integer.odin for the interval algebra.
 Integer_Type :: struct {
 	integer_intervals: []Integer_Interval,
 	default_value:     Maybe(i128),
 }
 
+// Float domain leaf. `kind` tracks the family (f32/f64/unsized) since intervals
+// alone don't distinguish precision. See float.odin.
 Float_Type :: struct {
 	float_intervals: []Float_Interval,
 	kind:            FloatKind,
 	default_value:   Maybe(f64),
 }
 
+// Arithmetic `left <op> right` (`+`, `-`, `*`, …). Kept symbolic until folded;
+// `type_fold` caches the resulting envelope once fold_compose() resolves it.
 Compose_Type :: struct {
 	left:      ^Type,
 	right:     ^Type,
@@ -152,27 +213,33 @@ Compose_Type :: struct {
 	type_fold: ^Type,
 }
 
+// `lo..hi`. Either bound may be nil (prefix `..hi` / postfix `lo..`), meaning
+// "unbounded on that side" — NOT the value `none`. Folded by fold_range().
 Range_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
 }
 
+// Bool domain leaf. `value` is set for a concrete true/false; nil means the open
+// set {true, false} (i.e. the `Bool` constraint), with `default` the bare value.
 Bool_Type :: struct {
 	value:   Maybe(bool),
 	default: bool,
 }
 
+// String/char domain leaf — a set of String_Intervals (see above for how the
+// quotation drives ordinal vs positional semantics). See string.odin.
 String_Type :: struct {
 	string_intervals:  []String_Interval,
 	default_value:     Maybe(string),
 	default_quotation: String_Quotation,
 }
 
-None_Type :: struct {}
+None_Type :: struct {} // the explicit absence of a value (`none`)
 
-Unknown_Type :: struct {}
+Unknown_Type :: struct {} // not yet resolvable (externals, patterns, branches)
 
-Invalid_Type :: struct {}
+Invalid_Type :: struct {} // an error was already reported here; folds to nothing
 
 Type :: union {
 	Or_Type,
@@ -194,6 +261,9 @@ Type :: union {
 	Reference_Type,
 }
 
+// Per-file analysis state. `scope` is the root scope being built; errors and
+// warnings accumulate as `walk()` recurses. Reachable from deep fold helpers via
+// context.user_ptr (see current_analyzer) so they can report without threading it.
 Analyzer :: struct {
 	ast:      ^Ast,
 	scope:    ^Scope_Type,
@@ -201,9 +271,12 @@ Analyzer :: struct {
 	warnings: [dynamic]Analyzer_Error,
 }
 
-/* ======================================================================
- * SECTION 3: ANALYZER CORE
- * ====================================================================== */
+// --- analyzer core ---
+
+// analyze is the entry point: it walks the root scope's children into the root
+// Scope_Type, leaving the result and any diagnostics in `cache`. A bare child
+// (not a binding/constraint) is treated as an anonymous Pointing_Push so it still
+// gets recorded and constraint-checked. Returns true iff no errors were emitted.
 analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	a := Analyzer {
 		ast      = ast,
@@ -287,6 +360,10 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	}
 }
 
+// scope_append records one binding by pushing onto the four parallel columns in
+// lockstep, so every column stays indexed by the same ordinal. The two *_folds
+// columns are filled separately by typecheck() (or, for the bare-constraint
+// forms, inline) — never here.
 scope_append :: proc(
 	a: ^Analyzer,
 	scope: ^Scope_Type,
@@ -302,6 +379,11 @@ scope_append :: proc(
 
 }
 
+// typecheck performs the constraint proof for one binding and caches both folds
+// onto the scope. It is the only place a Constraint_Mismatch is raised in the
+// normal binding path (carves do their own inline). The fc/ft split below is the
+// whole game: the constraint denotes a SET, the value denotes its own TYPE, and
+// we must show the latter is a subset of the former.
 typecheck :: proc(
 	a: ^Analyzer,
 	scope: ^Scope_Type,
@@ -351,6 +433,14 @@ typecheck :: proc(
 	}
 }
 
+// scope_resolve maps a name (and optional ordinal) to its defining (scope, index),
+// walking up the `parent` chain on miss. Same-name bindings are a feature, so the
+// disambiguation rule matters:
+//   * ordinal >= 0  — pick the ordinal-th binding of that name (`a#0`, `a#1`, …);
+//     an empty name with an ordinal indexes positionally into the scope.
+//   * ordinal < 0   — pick by position: `last` chooses the most recent occurrence
+//     (property access `.`), otherwise the first (carve `{}` default target).
+// Returns (nil, -1) when the name is not in scope nor any ancestor.
 scope_resolve :: proc(
 	scope: ^Scope_Type,
 	name: string,
@@ -399,6 +489,10 @@ scope_resolve :: proc(
 	return nil, -1
 }
 
+// follow chases indirections (Mention/Reference) to the value they ultimately
+// bind, transitively (a reference to a reference resolves through). A non-pointer
+// Type, or a dangling/unresolved indirection, is returned unchanged — callers can
+// switch on the result without special-casing references.
 follow :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -414,6 +508,11 @@ follow :: proc(t: ^Type) -> ^Type {
 	return t
 }
 
+// walk is the AST → Type recursion: given a node, build and return its `^Type`,
+// appending bindings to `current_scope` along the way. Binding/constraint nodes
+// have side effects (they register into the scope) and return the bound value;
+// expression nodes are pure and just return their shape. INVALID_NODE → None_Type.
+// Anything not yet modeled (externals, patterns, branches) folds to Unknown_Type.
 walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	if idx == INVALID_NODE {
 		result := new(Type)
@@ -456,6 +555,11 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		result^ = scope^
 		return result
 
+	// A directional binding `lhs <op> rhs`. The left side is either a bare name,
+	// or a `constraint : name` form (so we extract both the imposed constraint and
+	// the bound name). The right side is the value; when it is a scope literal we
+	// build the child Scope_Type in place and register the binding *before*
+	// walking the body, so the body can refer back to the binding being defined.
 	case .Pointing,
 	     .PointingPull,
 	     .EventPush,
@@ -542,6 +646,9 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		typecheck(a, current_scope, "", nil, .Product, value, idx)
 		return value
 
+	// `+{…}` extension. A constrained-but-valueless expand (`+{u8:}`) materializes
+	// the constraint's default as the value and caches the folds directly, since
+	// there is no value expression to run typecheck() against.
 	case .Expand:
 		operand_idx := data.unary.operand
 		constraint: ^Type = nil
@@ -570,6 +677,10 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 	case .CompileTime:
 		return walk(a, current_scope, data.unary.operand)
 
+	// A bare constraint `c : name` with no `-> value`. It still introduces a
+	// binding: the value is the constraint's default element, and the folds are
+	// cached inline (there is nothing to prove — the value is by construction the
+	// constraint's own default, hence trivially inside it).
 	case .Constraint:
 		constraint := walk(a, current_scope, data.binary.left)
 		name := ""
@@ -592,6 +703,10 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 
 		return value
 
+	// `target.prop` — resolve `prop` against the scope `target` denotes. The loop
+	// peels through Carve_Types to their source, so a property of a carved scope
+	// resolves against the underlying scope's fields. Property access takes the
+	// *last* occurrence of the name (last=true), per the same-name rule.
 	case .Property:
 		target := walk(a, current_scope, data.binary.left)
 		right_idx := data.binary.right
@@ -662,6 +777,10 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		fold_range(a, result, idx)
 		return result
 
+	// An operator node. The set-algebra operators (`&`, `|`, ~) become symbolic
+	// And/Or/Negate nodes that the constraint folder reduces later; every other
+	// operator is arithmetic and is folded eagerly into a Compose_Type's envelope
+	// here so a constraint mismatch surfaces at the operation, not downstream.
 	case .Operator:
 		left: ^Type = nil
 		if data.operator.left != INVALID_NODE {
@@ -682,6 +801,12 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		}
 		return result
 
+	// `source{ … }` — derive a new scope from `source`. We first resolve `source`
+	// down to the underlying Scope_Type (peeling carves-of-carves) so each
+	// override can be located in it. Overrides come in two forms, handled in the
+	// loop: named (`name -> v`, resolved by name, FIRST occurrence) and positional
+	// (a bare value, matched to the next field by index). Each override is
+	// constraint-checked against the field it replaces.
 	case .Carve:
 		source := walk(a, current_scope, data.carve.source)
 		r := data.carve.children
@@ -813,6 +938,9 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		result^ = Carve_Type{source, refs, vals}
 		return result
 
+	// `target ? { cond -> branch, … }` — pattern match. We still walk the target
+	// and every branch so their bindings and constraints are checked, but the
+	// match result itself is not statically resolved yet, so it folds to Unknown.
 	case .Pattern:
 		target := walk(a, current_scope, data.pattern.target)
 		_ = target
@@ -828,12 +956,15 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		result^ = Unknown_Type{}
 		return result
 
+	// `target!` — collapse. Recorded as an Execute_Type; the actual reduction
+	// through the target's Product happens later in reduce.odin.
 	case .Execute:
 		target := walk(a, current_scope, data.execute.target)
 		result := new(Type)
 		result^ = Execute_Type{target}
 		return result
 
+	// `@name` — an external. Opaque to static analysis, so Unknown_Type.
 	case .External:
 		result := new(Type)
 		result^ = Unknown_Type{}
@@ -861,6 +992,11 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 	return result
 }
 
+// walk_literal turns a literal token into its degenerate single-element domain
+// set: `5` becomes the integer interval 5..5, `"hi"` the string singleton, etc.
+// A concrete literal is its own type — the value/set split (see type.odin) treats
+// a singleton as a value. An unparseable literal yields Invalid_Type rather than
+// crashing; the parse error is already reported upstream.
 walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
@@ -912,6 +1048,11 @@ walk_literal :: proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 }
 
 
+// The built-in constraints, resolved by name when no binding shadows them. They
+// are nothing special — just pre-built domain sets: `u8` is the interval 0..255,
+// `Int` the unbounded integer line, `Bool` the open {true,false}, and so on. A
+// user binding of the same name wins (checked first in walk_identifier), so these
+// are not keywords — only defaults.
 builtins: map[string]Type
 
 @(init)
@@ -927,13 +1068,17 @@ init_builtins :: proc "contextless" () {
 	builtins["i64"] = make_int_range(-9223372036854775808, 9223372036854775807)
 	builtins["f32"] = make_float_range(nil, nil, .f32)
 	builtins["f64"] = make_float_range(nil, nil, .f64)
-	builtins["Int"] = make_int_range(nil, nil)
-	builtins["Float"] = make_float_range(nil, nil, .none)
-	builtins["String"] = make_string_any()
-	builtins["Bool"] = make_bool_any()
-	builtins["None"] = None_Type{}
+	builtins["int"] = make_int_range(nil, nil)
+	builtins["float"] = make_float_range(nil, nil, .none)
+	builtins["string"] = make_string_any()
+	builtins["bool"] = make_bool_any()
+	builtins["none"] = None_Type{}
 }
 
+// walk_identifier resolves a name reference. A scope binding wins over a builtin;
+// an ordinal'd reference (`a#1`) produces a Reference_Type (it must carry the
+// ordinal), a plain name produces the lighter Mention_Type. A name that is
+// neither bound nor builtin is an Undefined_Identifier and folds to Invalid_Type.
 walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
@@ -974,9 +1119,7 @@ walk_identifier :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^T
 }
 
 
-/* ======================================================================
- * SECTION 17: ERROR REPORTING
- * ====================================================================== */
+// --- error reporting ---
 
 // current_analyzer fetches the in-flight analyzer from the context (set at the
 // top of analyze()). Returns nil outside an analysis pass.
@@ -1012,9 +1155,7 @@ sem_warning :: proc(
 	append(&s.warnings, warning)
 }
 
-/* ======================================================================
- * SECTION 18: DEBUG OUTPUT
- * ====================================================================== */
+// --- debug output ---
 
 debug_sem_errors :: proc(s: ^Analyzer) {
 	fmt.eprintln("=== SEMANTIC ERRORS ===")

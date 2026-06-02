@@ -182,7 +182,7 @@ write_string_desc :: proc(b: ^strings.Builder, t: String_Type) {
 		_, lo_ok := iv.lo.(string)
 		_, hi_ok := iv.hi.(string)
 		if !lo_ok && !hi_ok {
-			strings.write_string(b, "String")
+			strings.write_string(b, "string")
 			return
 		}
 	}
@@ -191,13 +191,13 @@ write_string_desc :: proc(b: ^strings.Builder, t: String_Type) {
 
 
 print_string_type :: proc(t: String_Type) {
-	// "String" case: a single fully open interval.
+	// "string" case: a single fully open interval.
 	if len(t.string_intervals) == 1 {
 		iv := t.string_intervals[0]
 		_, lo_ok := iv.lo.(string)
 		_, hi_ok := iv.hi.(string)
 		if !lo_ok && !hi_ok {
-			fmt.print("String")
+			fmt.print("string")
 			return
 		}
 	}

@@ -72,8 +72,9 @@ bool_has_false :: proc(t: Bool_Type) -> bool {
 
 bool_to_string :: proc(t: Bool_Type) -> string {
 	if v, ok := t.value.(bool); ok do return v ? "true" : "false"
-	// Full domain: print in default-first order so the source order is visible.
-	return t.default ? "true|false" : "false|true"
+	// Full domain {true,false}. Print the `bool` builtin (default false) plainly;
+	// a reordered domain (default true) shows its default-first source order.
+	return t.default ? "true|false" : "bool"
 }
 
 write_bool_desc :: proc(b: ^strings.Builder, t: Bool_Type) {
