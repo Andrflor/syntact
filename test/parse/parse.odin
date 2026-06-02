@@ -7,8 +7,18 @@ import "core:fmt"
 import "core:log"
 import vmem "core:mem/virtual"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:testing"
+
+// Resolve a test-relative path (e.g. "tests/foo.json") against the directory of
+// this source file, so the suite runs regardless of the current working
+// directory. #location().file_path is the absolute path baked in at compile time.
+test_path :: proc(rel: string) -> string {
+	dir := filepath.dir(#location().file_path)
+	joined, _ := filepath.join({dir, rel}, context.allocator)
+	return joined
+}
 
 // ---------- Test case ----------
 Test_Case :: struct {
@@ -298,7 +308,8 @@ show_source_context :: proc(source: string, position: compiler.Position) -> stri
 
 
 // ---------- IO ----------
-load_test_file :: proc(path: string) -> (Test_Case, bool, string) {
+load_test_file :: proc(rel: string) -> (Test_Case, bool, string) {
+	path := test_path(rel)
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
 	tc: Test_Case

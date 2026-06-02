@@ -32,7 +32,7 @@ The compiler is mid-rewrite around a new constraint/`Type` system. Know what bui
 
 The test directories and the compiler files were renamed off the agent-noun convention: `parser`→`parse`, `analyzer`→`analyze`, `resolver`→`resolve`, `reducer`→`reduce` (the entry procs `parse`/`analyze`/`reduce` were already named that way). The compiler-internal `resolver` global, the `Resolver` type, and `resolve_entry()` keep their names.
 
-Every test harness loads its `tests/*.json` via a path **relative to the current working directory**, so run each suite from inside its own directory: `cd test/analyze && odin test .` (likewise `test/typecheck`, `test/reduce`, `test/parse`). Running `odin test test/analyze` from the repo root compiles but fails every case with "Failed to read test file".
+Every test harness resolves its `tests/*.json` **relative to its own source directory** (via a `test_path` helper that joins `filepath.dir(#location().file_path)` — an absolute path baked in at compile time — with the relative path), so each suite runs from anywhere: `odin test test/analyze` from the repo root and `cd test/analyze && odin test .` both work (likewise `test/typecheck`, `test/reduce`, `test/parse`, `test/default`).
 
 When asked to "run the tests", default to `test/analyze` and `test/typecheck` unless told otherwise. Verify the LSP compile before assuming it — it is stale.
 
@@ -52,11 +52,11 @@ odin build compiler -out:compiler/compiler
 ./compiler/compiler input.syn -t              # timing info (parse/analyze/reduce)
 ./compiler/compiler input.syn -v              # verbose pipeline logging
 
-# Run the analyzer test suite (run from inside the directory — see "Current state")
-cd test/analyze && odin test . && cd -
+# Run the analyzer test suite (works from the repo root now — paths resolve to the source dir)
+odin test test/analyze
 
 # Run a single analyzer test by name (name is test_<stem>_<index> — find it in generated_tests.odin)
-cd test/analyze && odin test . -test-name test_constraint_builtin_array_valid_0 && cd -
+odin test test/analyze -test-name test_constraint_builtin_array_valid_0
 ```
 
 ### Regenerating test harnesses
@@ -99,7 +99,7 @@ Key conventions:
 
 ### test/ package — four independent harnesses
 
-`test/parse/`, `test/analyze/`, `test/typecheck/`, `test/reduce/` are separate Odin test packages (packages `parse_test`/`analyze_test`/`typecheck_test`/`reduce_test`), each with `tests/*.json`, a `generated_tests.odin`, a `generator.odin`, and a runner. Run each **from inside its own directory** (`cd test/<category> && odin test .`) — the runner reads `tests/*.json` relative to the CWD.
+`test/parse/`, `test/analyze/`, `test/typecheck/`, `test/reduce/`, `test/default/` are separate Odin test packages (packages `parse_test`/`analyze_test`/`typecheck_test`/`reduce_test`/`default_test`), each with `tests/*.json`, a `generated_tests.odin`, a `generator.odin`, and a runner. Run each with `odin test test/<category>` from the repo root (or `cd test/<category> && odin test .`) — the runner's `test_path` helper resolves `tests/*.json` against its own source directory, so the CWD no longer matters. The `generator.odin` regeneration step, by contrast, still reads/writes relative to the CWD and must run from inside the category directory.
 
 - **parse** — JSON has `expect`, a serialized AST like `Scope[Operator(Add,Literal(Integer,1),Literal(Integer,2))]`. *Builds and runs* (1239 cases; ~10 fail on error-recovery / ambiguous-pattern cases).
 - **analyze** — JSON has `expect_errors: []string` of `Analyzer_Error_Type` names (empty array = must analyze cleanly). The runner parses, analyzes, and compares the error list. *Builds and runs.*
