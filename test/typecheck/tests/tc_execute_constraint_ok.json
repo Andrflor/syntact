@@ -1,0 +1,1 @@
+{ "name": "tc_execute_constraint_ok", "description": "collapse as constraint folds to its production's set; 200 satisfies u8", "source": "limit -> { -> u8 }\nlimit!:a -> 200", "expect_errors": [] }

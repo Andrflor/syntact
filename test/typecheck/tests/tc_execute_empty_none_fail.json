@@ -1,0 +1,1 @@
+{ "name": "tc_execute_empty_none_fail", "description": "collapse of a scope with no production yields none; does not satisfy u8", "source": "s -> { x -> 1 }\nu8:a -> s!", "expect_errors": ["Constraint_Mismatch"] }

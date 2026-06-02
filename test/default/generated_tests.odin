@@ -54,67 +54,77 @@ test_def_neg0_9 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_def_open_hi_10 :: proc(t: ^testing.T) {
+test_def_execute_constraint_10 :: proc(t: ^testing.T) {
+	run_default_test("tests/def_execute_constraint.json", t)
+}
+
+@(test)
+test_def_open_hi_11 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_open_hi.json", t)
 }
 
 @(test)
-test_def_prod10_11 :: proc(t: ^testing.T) {
+test_def_prod10_12 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_prod10.json", t)
 }
 
 @(test)
-test_def_ge5_12 :: proc(t: ^testing.T) {
+test_def_ge5_13 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_ge5.json", t)
 }
 
 @(test)
-test_def_prodneg_13 :: proc(t: ^testing.T) {
+test_def_prodneg_14 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_prodneg.json", t)
 }
 
 @(test)
-test_def_prodopen_14 :: proc(t: ^testing.T) {
+test_def_execute_range_15 :: proc(t: ^testing.T) {
+	run_default_test("tests/def_execute_range.json", t)
+}
+
+@(test)
+test_def_prodopen_16 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_prodopen.json", t)
 }
 
 @(test)
-test_def_gt10_15 :: proc(t: ^testing.T) {
+test_def_gt10_17 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_gt10.json", t)
 }
 
 @(test)
-test_def_negrange_16 :: proc(t: ^testing.T) {
+test_def_negrange_18 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_negrange.json", t)
 }
 
 @(test)
-test_def_int_lit_17 :: proc(t: ^testing.T) {
+test_def_int_lit_19 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_int_lit.json", t)
 }
 
 @(test)
-test_def_carve_18 :: proc(t: ^testing.T) {
+test_def_carve_20 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_carve.json", t)
 }
 
 @(test)
-test_def_scope_xy_19 :: proc(t: ^testing.T) {
+test_def_scope_xy_21 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_scope_xy.json", t)
 }
 
 @(test)
-test_def_demorgan_20 :: proc(t: ^testing.T) {
+test_def_demorgan_22 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_demorgan.json", t)
 }
 
 @(test)
-test_def_produ8_21 :: proc(t: ^testing.T) {
+test_def_produ8_23 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_produ8.json", t)
 }
 
 @(test)
-test_def_open_lo_22 :: proc(t: ^testing.T) {
+test_def_open_lo_24 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_open_lo.json", t)
 }
 
