@@ -885,7 +885,44 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 
 	result := new(Type)
 	result^ = Carve_Type{source, refs, vals}
+
+	// Implicit constraints: substituting an override can break a constraint on
+	// another field that (transitively) references it — `u8:z -> x+y` no longer
+	// fits u8 once x is carved out of range. fold_carve materializes the
+	// substituted scope; we re-prove every colored binding against its now-
+	// substituted value and report the mismatch at the carve site.
+	recheck_carve(a, result, idx)
+
 	return result
+}
+
+// recheck_carve folds a carve to its substituted scope and re-proves each
+// colored binding (constraint vs the substituted value's fold). The per-field
+// inline check above only covers the directly-overridden fields; this covers the
+// implicit constraints — fields whose value depends on what was carved.
+recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
+	sub := fold_carve(carve)
+	if sub == nil do return
+	for i in 0 ..< len(sub.names) {
+		fc := i < len(sub.constraint_folds) ? sub.constraint_folds[i] : nil
+		if fc == nil do continue
+		ft := fold_value_type(sub.values[i])
+		if ft == nil do continue // unresolved value: not a definite violation here
+		if !satisfy_root(fc, ft) {
+			display := sub.names[i] != "" ? fmt.tprintf("'%s'", sub.names[i]) : "the production"
+			sem_error(
+				a,
+				fmt.tprintf(
+					"implicit constraint mismatch: %s does not satisfy %s on %s after carve",
+					describe_type(ft),
+					describe_type(fc),
+					display,
+				),
+				.Constraint_Mismatch,
+				node_pos(a, node),
+			)
+		}
+	}
 }
 
 // `target ? { cond -> branch, … }` — pattern match. We still walk the target

@@ -300,6 +300,17 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 			}
 		}
 		strings.write_byte(b, '}')
+	case Carve_Type:
+		// The default of a carve is the default of its resulting scope: fold the
+		// substitution, then render the substituted scope like any other.
+		sub := fold_carve(t)
+		if sub == nil {
+			strings.write_string(b, type_to_string(t))
+			return
+		}
+		st := new(Type)
+		st^ = sub^
+		write_value(b, st)
 	case:
 		strings.write_string(b, type_to_string(t))
 	}

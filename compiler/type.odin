@@ -38,6 +38,13 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 		#partial switch v in t^ {
 		case Scope_Type:
 			return t
+		case Carve_Type:
+			// A carve used as a constraint folds to its substituted scope.
+			sub := fold_carve(t)
+			if sub == nil do return nil
+			r := new(Type)
+			r^ = sub^
+			return r
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
 				return fold_constraint_target(v.match_scope, v.match_index)
@@ -167,6 +174,13 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			// itself — its bindings already carry their folds from analysis.
 			// scope_satisfy compares each binding's constraint against value.
 			return t
+		case Carve_Type:
+			// A carve folds to the substituted scope, then to that scope's type.
+			sub := fold_carve(t)
+			if sub == nil do return nil
+			st := new(Type)
+			st^ = sub^
+			return fold_value_type(st)
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
 				return fold_value_type(v.match_scope.values[v.match_index])
@@ -586,4 +600,186 @@ range_kind_name :: #force_inline proc(kind: Range_Operand_Kind) -> string {
 		return "invalid"
 	}
 	return "unknown"
+}
+
+// ===========================================================================
+// CARVE — fold a carve to the substituted scope it derives.
+//
+// `source{ name -> v, … }` is resolved by materializing the override: copy the
+// source scope, write each override value into the field it targets, then
+// REPOINT every reference that named the source scope so it names the copy
+// instead. Because references are (match_scope, match_index), repointing the
+// scope pointer is enough — a sibling mention `z -> x` now reads the copy's new
+// x, so the substitution cascades for free, including transitively (`y -> z -> x`).
+// The folds are stale on the copy (values changed); the caller re-typechecks.
+//
+// fold_carve is PURE: it builds and returns the substituted scope (or nil if the
+// source does not resolve to a scope). The Constraint_Mismatch is raised by the
+// analyzer (walk_carve), which holds the source position — type.odin answers
+// yes/no, analyze.odin explains why. Used by fold_type and fold_constraint.
+// ===========================================================================
+
+// fold_carve materializes the carve `t` into its substituted Scope_Type, or nil
+// when the source can't be reduced to a scope.
+fold_carve :: proc(t: ^Type) -> ^Scope_Type {
+	carve, ok := &t^.(Carve_Type)
+	if !ok do return nil
+
+	// Resolve the source down to its underlying Scope_Type, peeling nested carves.
+	src: ^Scope_Type = nil
+	cur := follow(carve.source)
+	for cur != nil {
+		#partial switch &s in cur^ {
+		case Scope_Type:
+			src = &s
+		case Carve_Type:
+			// A carve of a carve: fold the inner one first so we substitute onto
+			// the already-substituted scope.
+			src = fold_carve(cur)
+		}
+		break
+	}
+	if src == nil do return nil
+
+	copy := scope_clone(src)
+
+	// Apply each override: write the new value into the field it targets, and
+	// refresh its cached type_fold — the integer/float/... folders read a
+	// mention's fold from the SCOPE's type_folds, not by re-folding its value,
+	// so a stale fold here would hide the substitution from sibling mentions.
+	for i in 0 ..< len(carve.references) {
+		ref := carve.references[i]
+		if ref.match_index >= 0 && ref.match_index < len(copy.values) {
+			copy.values[ref.match_index] = carve.values[i]
+			if ref.match_index < len(copy.type_folds) {
+				copy.type_folds[ref.match_index] = fold_value_type(carve.values[i])
+			}
+		}
+	}
+
+	// Repoint every reference that named the source scope so it names the copy:
+	// sibling mentions now read the substituted values, cascading transitively.
+	for i in 0 ..< len(copy.values) {
+		copy.values[i] = repoint(copy.values[i], src, copy)
+	}
+
+	return copy
+}
+
+// scope_clone copies a scope's columns into a fresh Scope_Type so overrides and
+// repointing don't mutate the shared source. The element ^Types are shared until
+// repoint() copies-on-write the ones it actually rewrites; parent is preserved.
+scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
+	dst := new(Scope_Type)
+	dst.parent = src.parent
+	for n in src.names do append(&dst.names, n)
+	for ty in src.types do append(&dst.types, ty)
+	for k in src.kind do append(&dst.kind, k)
+	for v in src.values do append(&dst.values, v)
+	for f in src.type_folds do append(&dst.type_folds, f)
+	for f in src.constraint_folds do append(&dst.constraint_folds, f)
+	return dst
+}
+
+// repoint rewrites, copy-on-write, every Mention/Reference inside `t` whose
+// match_scope is `old` to point at `dst` instead, descending through composite
+// types and nested scopes. A node is cloned only when a descendant changed, so
+// the source's ^Types are never mutated and unchanged subtrees stay shared.
+repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
+	if t == nil do return t
+	#partial switch &v in t^ {
+	case Mention_Type:
+		if v.match_scope == old {
+			return new_type(Mention_Type{v.name, dst, v.match_index})
+		}
+	case Reference_Type:
+		// Repoint the resolved site and the target expression it was reached through.
+		ref := v.reference
+		nt := repoint(v.target, old, dst)
+		if ref != nil && ref.match_scope == old {
+			nref := new(Reference)
+			nref^ = Reference{ref.name, ref.index, dst, ref.match_index}
+			return new_type(Reference_Type{nt, nref})
+		}
+		if nt != v.target {
+			return new_type(Reference_Type{nt, ref})
+		}
+	case Compose_Type:
+		l := repoint(v.left, old, dst)
+		r := repoint(v.right, old, dst)
+		if l != v.left || r != v.right {
+			return new_type(Compose_Type{l, r, v.operator, nil})
+		}
+	case Or_Type:
+		l := repoint(v.left, old, dst)
+		r := repoint(v.right, old, dst)
+		if l != v.left || r != v.right {
+			return new_type(Or_Type{l, r})
+		}
+	case And_Type:
+		l := repoint(v.left, old, dst)
+		r := repoint(v.right, old, dst)
+		if l != v.left || r != v.right {
+			return new_type(And_Type{l, r})
+		}
+	case Range_Type:
+		l := repoint(v.left, old, dst)
+		r := repoint(v.right, old, dst)
+		if l != v.left || r != v.right {
+			return new_type(Range_Type{l, r})
+		}
+	case Negate_Type:
+		o := repoint(v.operand, old, dst)
+		if o != v.operand {
+			return new_type(Negate_Type{o})
+		}
+	case Execute_Type:
+		tg := repoint(v.target, old, dst)
+		if tg != v.target {
+			return new_type(Execute_Type{tg})
+		}
+	case Carve_Type:
+		s := repoint(v.source, old, dst)
+		changed := s != v.source
+		vals := make([dynamic]^Type, 0, len(v.values))
+		for cv in v.values {
+			nv := repoint(cv, old, dst)
+			if nv != cv do changed = true
+			append(&vals, nv)
+		}
+		if changed {
+			refs := make([dynamic]Reference, 0, len(v.references))
+			for rf in v.references do append(&refs, rf)
+			return new_type(Carve_Type{s, refs, vals})
+		}
+	case Scope_Type:
+		// A nested scope may reference the carved one; descend into its values
+		// and parent chain. Clone the scope only if something below changed.
+		changed := false
+		new_vals := make([dynamic]^Type, 0, len(v.values))
+		for sv in v.values {
+			nv := repoint(sv, old, dst)
+			if nv != sv do changed = true
+			append(&new_vals, nv)
+		}
+		new_parent := v.parent == old ? dst : v.parent
+		if new_parent != v.parent do changed = true
+		if changed {
+			ns := scope_clone(&v)
+			ns.parent = new_parent
+			delete(ns.values)
+			ns.values = new_vals
+			r := new(Type)
+			r^ = ns^
+			return r
+		}
+	}
+	return t
+}
+
+// new_type boxes a Type value into a fresh ^Type.
+new_type :: proc(v: Type) -> ^Type {
+	r := new(Type)
+	r^ = v
+	return r
 }
