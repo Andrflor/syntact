@@ -1,4 +1,4 @@
-package analyzer_test
+package analyze_test
 
 import compiler "../../compiler"
 
@@ -9,17 +9,17 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 
-Analyzer_Test_Case :: struct {
+Analyze_Test_Case :: struct {
 	name:          string         `json:"name"`,
 	description:   string         `json:"description"`,
 	source:        string         `json:"source"`,
 	expect_errors: []string       `json:"expect_errors"`,
 }
 
-load_analyzer_test_file :: proc(path: string) -> (Analyzer_Test_Case, bool, string) {
+load_analyze_test_file :: proc(path: string) -> (Analyze_Test_Case, bool, string) {
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return {}, false, fmt.tprintf("Failed to read test file: %s", path)
-	tc: Analyzer_Test_Case
+	tc: Analyze_Test_Case
 	if err := json.unmarshal(data, &tc); err != nil {
 		return {}, false, fmt.tprintf("Failed to parse JSON in %s: %v", path, err)
 	}
@@ -49,12 +49,12 @@ error_type_from_string :: proc(s: string) -> (compiler.Analyzer_Error_Type, bool
 	return .Default, false
 }
 
-run_analyzer_test :: proc(path: string, t: ^testing.T) {
+run_analyze_test :: proc(path: string, t: ^testing.T) {
 	arena: vmem.Arena
 	defer vmem.arena_destroy(&arena)
 	context.allocator = vmem.arena_allocator(&arena)
 
-	tc, ok, msg := load_analyzer_test_file(path)
+	tc, ok, msg := load_analyze_test_file(path)
 	if !ok {
 		testing.expectf(t, false, "%s", msg)
 		return

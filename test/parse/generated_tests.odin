@@ -1,5 +1,5 @@
 // AUTO-GENERATED. DO NOT EDIT.
-package parser_test
+package parse_test
 
 import "core:testing"
 
