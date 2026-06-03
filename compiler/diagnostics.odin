@@ -240,7 +240,7 @@ is_numeric_family :: #force_inline proc(f: Family) -> bool {
 // emits the most specific, author-facing error it can. The operator is
 // arithmetic/bitwise (Set/`~` operators never reach here).
 diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
-	pos := node_pos(a, node)
+	span := node_span(a, node)
 	sym := op_symbol(comp.operator)
 
 	// Unary form (no left operand).
@@ -248,10 +248,10 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
 		rf := family_of(comp.right)
 		if rf == .Integer || rf == .Float do return
 		if rf == .Unknown {
-			diag_unknown(a, sym, pos)
+			diag_unknown(a, sym, span)
 			return
 		}
-		diag(a, pos, fmt.tprintf("'%s' expects a number, not %s", sym, describe_value(comp.right)))
+		diag(a, span, fmt.tprintf("'%s' expects a number, not %s", sym, describe_value(comp.right)))
 		return
 	}
 
@@ -259,7 +259,7 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
 	rf := family_of(comp.right)
 
 	if lf == .Unknown || rf == .Unknown {
-		diag_unknown(a, sym, pos)
+		diag_unknown(a, sym, span)
 		return
 	}
 
@@ -267,7 +267,7 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
 	if (lf == .Integer && rf == .Float) || (lf == .Float && rf == .Integer) {
 		diag(
 			a,
-			pos,
+			span,
 			fmt.tprintf(
 				"type mismatch: cannot %s %s and %s without a cast — color the integer (e.g. 'f64:x -> ...' or write it as a float '0.0')",
 				op_verb(comp.operator),
@@ -285,7 +285,7 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
 		if !float_kind_compatible(lk, rk) {
 			diag(
 				a,
-				pos,
+				span,
 				fmt.tprintf(
 					"type mismatch: cannot %s %s and %s — float colors %s and %s differ",
 					op_verb(comp.operator),
@@ -297,37 +297,37 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
 			)
 			return
 		}
-		diag_open_or_divzero(a, comp, pos)
+		diag_open_or_divzero(a, comp, span)
 		return
 	}
 
 	// Non-numeric operand (string, bool, scope…).
 	if !is_numeric_family(lf) {
-		diag(a, pos, fmt.tprintf("'%s' expects numbers; left operand is %s", sym, describe_value(comp.left)))
+		diag(a, span, fmt.tprintf("'%s' expects numbers; left operand is %s", sym, describe_value(comp.left)))
 		return
 	}
 	if !is_numeric_family(rf) {
-		diag(a, pos, fmt.tprintf("'%s' expects numbers; right operand is %s", sym, describe_value(comp.right)))
+		diag(a, span, fmt.tprintf("'%s' expects numbers; right operand is %s", sym, describe_value(comp.right)))
 		return
 	}
 
-	diag_open_or_divzero(a, comp, pos)
+	diag_open_or_divzero(a, comp, span)
 }
 
-diag_open_or_divzero :: proc(a: ^Analyzer, comp: Compose_Type, pos: Position) {
+diag_open_or_divzero :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 	if comp.operator == .Divide || comp.operator == .Mod {
-		diag(a, pos, fmt.tprintf("cannot %s %s by %s: the divisor may be zero", op_verb(comp.operator), describe_value(comp.left), describe_value(comp.right)))
+		diag(a, span, fmt.tprintf("cannot %s %s by %s: the divisor may be zero", op_verb(comp.operator), describe_value(comp.left), describe_value(comp.right)))
 		return
 	}
-	diag(a, pos, fmt.tprintf("cannot %s %s and %s at compile time", op_verb(comp.operator), describe_value(comp.left), describe_value(comp.right)))
+	diag(a, span, fmt.tprintf("cannot %s %s and %s at compile time", op_verb(comp.operator), describe_value(comp.left), describe_value(comp.right)))
 }
 
-diag_unknown :: proc(a: ^Analyzer, sym: string, pos: Position) {
-	diag(a, pos, fmt.tprintf("'%s' has an unknown operand (??) that cannot be computed at compile time", sym))
+diag_unknown :: proc(a: ^Analyzer, sym: string, span: Span) {
+	diag(a, span, fmt.tprintf("'%s' has an unknown operand (??) that cannot be computed at compile time", sym))
 }
 
-diag :: #force_inline proc(a: ^Analyzer, pos: Position, msg: string) {
-	sem_error(a, msg, .Invalid_operator, pos)
+diag :: #force_inline proc(a: ^Analyzer, span: Span, msg: string) {
+	sem_error(a, msg, .Invalid_operator, span)
 }
 
 op_verb :: proc(op: Operator_Kind) -> string {

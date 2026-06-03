@@ -713,7 +713,7 @@ fold_cast :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 				describe_value(target_fold),
 			),
 			.Invalid_Cast,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 		return
 	}
@@ -962,7 +962,7 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 			a,
 			fmt.tprintf("invalid range: left bound %s is not an integer, float, or string", describe_value(left_resolved)),
 			.Invalid_Range,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 		return
 	}
@@ -971,7 +971,7 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 			a,
 			fmt.tprintf("invalid range: right bound %s is not an integer, float, or string", describe_value(right_resolved)),
 			.Invalid_Range,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 		return
 	}
@@ -985,7 +985,7 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 				describe_value(right_resolved),
 			),
 			.Invalid_Range,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 	}
 }
