@@ -86,8 +86,27 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		return reduce_set_op(value)
 	case Negate_Type:
 		return reduce_set_op(value)
+	case Pattern_Type:
+		return reduce_pattern(v)
 	}
 	return value
+}
+
+// reduce_pattern collapses a pattern to the product of the FIRST branch whose
+// match fires for the reduced target — mirroring the in-order branch semantics.
+// When no branch fires (or the target can't be reduced), the pattern stays as is.
+reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
+	ft := fold_value_type(p.target)
+	if ft != nil {
+		for branch in p.branches {
+			if branch_can_match(branch, ft) {
+				return reduce_value(branch.product)
+			}
+		}
+	}
+	r := new(Type)
+	r^ = p
+	return r
 }
 
 // reduce_set_op materializes a |/&/~ expression to a concrete value. `&`/`|`/`~`

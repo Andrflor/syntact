@@ -46,6 +46,11 @@ Analyzer_Error_Type :: enum {
 	// cannot be proven. Distinct from Constraint_Mismatch (the value fails a
 	// known constraint) — here the constraint itself is not solvable.
 	Insoluble_Constraint,
+	// A pattern (`target ? { … }`) whose branches do not cover the whole target:
+	// the union of the branch matches misses some target values and there is no
+	// empty-arrow (`->`) default branch. Without a covering branch a target value
+	// could fall through unmatched, so the pattern is rejected at compile time.
+	Non_Exhaustive_Pattern,
 	Default,
 }
 
@@ -310,6 +315,16 @@ constraint_depends_on_unknown :: proc(t: ^Type, depth := 0) -> bool {
 			if constraint_depends_on_unknown(val, depth + 1) do return true
 		}
 		return false
+	case Pattern_Type:
+		// A pattern-shaped constraint is insoluble if its target or any branch
+		// match/product depends on an unknown — the selected branch would not be
+		// statically determinable.
+		if constraint_depends_on_unknown(v.target, depth + 1) do return true
+		for branch in v.branches {
+			if constraint_depends_on_unknown(branch.match, depth + 1) do return true
+			if constraint_depends_on_unknown(branch.product, depth + 1) do return true
+		}
+		return false
 	case Integer_Type, Float_Type, String_Type, Bool_Type, None_Type, Invalid_Type:
 		return false
 	}
@@ -493,6 +508,12 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 make_unknown :: #force_inline proc() -> ^Type {
 	result := new(Type)
 	result^ = Unknown_Type{}
+	return result
+}
+
+make_none :: #force_inline proc() -> ^Type {
+	result := new(Type)
+	result^ = None_Type{}
 	return result
 }
 
@@ -1020,23 +1041,74 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
 	}
 }
 
-// `target ? { cond -> branch, … }` — pattern match. We still walk the target
-// and every branch so their bindings and constraints are checked, but the
-// match result itself is not statically resolved yet, so it folds to Unknown.
+// `target ? { match -> product, … }` — pattern match. We walk the target and
+// every branch (so their bindings and constraints are checked), build a
+// Pattern_Type from the (match, product) pairs, and prove the branches cover the
+// target (raising Non_Exhaustive_Pattern otherwise). The Pattern_Type then folds
+// to one branch as a constraint, or the union of reachable branches as a value
+// (see pattern.odin / fold_constraint_pattern / fold_type_pattern).
+//
+// A branch source carries its MODE in its syntax: `=v -> …` (value match) parses
+// as a unary `=` operator (Equal with no left side), which we peel here so the
+// branch holds the bare value plus value_match=true. `c -> …` (typecheck match)
+// keeps the constraint as-is. A leading `-> p` is the default branch (match nil).
 walk_pattern :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	target := walk(a, current_scope, data.pattern.target)
-	_ = target
 	r := data.pattern.branches
-	branches := ast.extra[r.start:][:r.len]
-	for i := 0; i < len(branches); i += 2 {
-		walk(a, current_scope, branches[i])
-		if i + 1 < len(branches) {
-			walk(a, current_scope, branches[i + 1])
+	branch_nodes := ast.extra[r.start:][:r.len]
+
+	branches := make([dynamic]Pattern_Branch, 0, len(branch_nodes) / 2)
+	for i := 0; i < len(branch_nodes); i += 2 {
+		match_idx := branch_nodes[i]
+		product_idx := i + 1 < len(branch_nodes) ? branch_nodes[i + 1] : INVALID_NODE
+
+		match: ^Type = nil
+		value_match := false
+		if match_idx != INVALID_NODE {
+			// Peel a unary `=v` (value-match mode): the parser builds it as an Equal
+			// operator with no left operand. Walk the inner operand as the bare match
+			// value and flag the branch as a value match.
+			mk := ast.node_kinds[match_idx]
+			if mk == .Operator {
+				op := ast.node_data[match_idx].operator
+				if op.kind == .Equal && op.left == INVALID_NODE {
+					value_match = true
+					match = walk(a, current_scope, op.right)
+				}
+			}
+			if match == nil {
+				match = walk(a, current_scope, match_idx)
+			}
 		}
+
+		product: ^Type = nil
+		if product_idx != INVALID_NODE {
+			product = walk(a, current_scope, product_idx)
+		} else {
+			product = make_none()
+		}
+
+		append(&branches, build_pattern_branch(match, product, value_match))
 	}
-	return make_unknown()
+
+	result := new(Type)
+	result^ = Pattern_Type{target, branches[:]}
+
+	// Exhaustiveness: the branches must cover the whole target (a covering union of
+	// matches, or an empty-arrow default). A non-exhaustive pattern could let a
+	// target value fall through unmatched.
+	if !pattern_is_exhaustive(result.(Pattern_Type)) {
+		sem_error(
+			a,
+			"non-exhaustive pattern: the branches do not cover every value of the target (add a covering branch or an empty `->` default)",
+			.Non_Exhaustive_Pattern,
+			node_pos(a, idx),
+		)
+	}
+
+	return result
 }
 
 // `target!` — collapse. Recorded as an Execute_Type; the actual reduction

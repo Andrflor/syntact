@@ -129,6 +129,10 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// the value into the target's layout, so the result always lands there.
 			if v.type_fold != nil do return fold_constraint(v.type_fold)
 			return fold_constraint(v.target)
+		case Pattern_Type:
+			// A pattern as a constraint resolves to ONE branch — the first whose
+			// match the target satisfies (see fold_constraint_pattern).
+			return fold_constraint_pattern(t)
 		}
 	}
 	// Range_Type / Compose_Type are domain-ambiguous: their family is decided by
@@ -241,6 +245,10 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			// envelope; they fall through to the domain probes below.)
 			if env := fold_type_integer(t); env != nil do return env
 			if env := fold_type_float(t); env != nil do return env
+		case Pattern_Type:
+			// A pattern as a value resolves to the COMBINED type of every reachable
+			// branch (an Or of their products — see fold_type_pattern).
+			return fold_type_pattern(t)
 		}
 	}
 	// Range/Compose/Negate are domain-ambiguous (family decided by operands),

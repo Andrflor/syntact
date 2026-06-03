@@ -287,6 +287,7 @@ Type :: union {
 	Carve_Type,
 	Mention_Type,
 	Reference_Type,
+	Pattern_Type,
 }
 
 
@@ -628,6 +629,22 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 				fmt.printf("#%d", idx)
 			}
 		}
+
+	case Pattern_Type:
+		if v.target != nil do print_type(v.target, depth)
+		fmt.print(" ? {")
+		for branch, i in v.branches {
+			if i > 0 do fmt.print(", ")
+			if branch.match == nil {
+				fmt.print("-> ")
+			} else {
+				if branch.value_match do fmt.print("=")
+				print_type(branch.match, depth)
+				fmt.print(" -> ")
+			}
+			print_type(branch.product, depth)
+		}
+		fmt.print("}")
 
 	case Invalid_Type:
 		fmt.print("<invalid>")
