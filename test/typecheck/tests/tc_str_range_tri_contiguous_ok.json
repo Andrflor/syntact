@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_tri_contiguous_ok", "description": "\"ab\"..\"cd\"..\"ef\" accepts \"abcdef\" (cd present between)", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"abcdef\"", "expect_errors": [] }

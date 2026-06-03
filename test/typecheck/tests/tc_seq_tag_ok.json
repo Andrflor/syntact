@@ -1,0 +1,1 @@
+{ "name": "tc_seq_tag_ok", "description": "\"<\" + 'a'..'z'*1.. + \">\" accepts \"<div>\"", "source": "(\"<\" + 'a'..'z'*1.. + \">\"):s -> \"<div>\"", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_seq_two_classes_short_bad", "description": "rejects \"ab12\" (only 2 digits, needs 3)", "source": "('a'..'z'*2 + '0'..'9'*3):s -> \"ab12\"", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_seq_two_classes_ok", "description": "'a'..'z'*2 + '0'..'9'*3 accepts \"ab123\" (2 letters then 3 digits)", "source": "('a'..'z'*2 + '0'..'9'*3):s -> \"ab123\"", "expect_errors": [] }

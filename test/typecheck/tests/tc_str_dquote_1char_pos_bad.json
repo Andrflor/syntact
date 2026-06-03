@@ -1,0 +1,1 @@
+{ "name": "tc_str_dquote_1char_pos_bad", "description": "\"a\"..\"z\" positional rejects \"abc\" (does not end with z)", "source": "\"a\"..\"z\":s -> \"abc\"", "expect_errors": ["Constraint_Mismatch"] }

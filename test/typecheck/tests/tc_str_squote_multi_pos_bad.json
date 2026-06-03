@@ -1,0 +1,1 @@
+{ "name": "tc_str_squote_multi_pos_bad", "description": "single-quote multi-char positional: 'ab'..'cd' rejects a value not ending with cd", "source": "'ab'..'cd':s -> 'abc'", "expect_errors": ["Constraint_Mismatch"] }

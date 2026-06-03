@@ -1,0 +1,1 @@
+{ "name": "tc_str_dquote_1char_pos_az_ok", "description": "\"a\"..\"z\" accepts \"az\" (a then z)", "source": "\"a\"..\"z\":s -> \"az\"", "expect_errors": [] }

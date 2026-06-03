@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_range_bad", "description": "`a`..`z` rejects a string not ending with z", "source": "`a`..`z`:s -> `abc`", "expect_errors": ["Constraint_Mismatch"] }

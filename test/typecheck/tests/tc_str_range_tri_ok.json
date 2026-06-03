@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_tri_ok", "description": "\"ab\"..\"cd\"..\"ef\": starts with ab, contains cd, ends with ef", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"abXcdYef\"", "expect_errors": [] }

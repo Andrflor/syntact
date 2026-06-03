@@ -1,0 +1,1 @@
+{ "name": "tc_str_squote_multi_pos_ok", "description": "single-quote multi-char is positional: 'ab'..'cd' starts ab ends cd", "source": "'ab'..'cd':s -> 'abXcd'", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_pos_noprefix_bad", "description": "\"abc\"..\"xyz\" rejects \"def\" (neither starts with abc nor ends with xyz)", "source": "\"abc\"..\"xyz\":s -> \"def\"", "expect_errors": ["Constraint_Mismatch"] }

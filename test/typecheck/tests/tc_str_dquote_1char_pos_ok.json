@@ -1,0 +1,1 @@
+{ "name": "tc_str_dquote_1char_pos_ok", "description": "\"a\"..\"z\" is positional (double quote): starts a, ends z — accepts \"amz\"", "source": "\"a\"..\"z\":s -> \"amz\"", "expect_errors": [] }
