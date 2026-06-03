@@ -531,6 +531,14 @@ make_none :: #force_inline proc() -> ^Type {
 	return result
 }
 
+// make_invalid : the "an error is already reported / this folds to nothing"
+// sentinel. Distinct from None_Type, which is the LEGITIMATE value `none`.
+make_invalid :: #force_inline proc() -> ^Type {
+	result := new(Type)
+	result^ = Invalid_Type{}
+	return result
+}
+
 walk_scope_node :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
@@ -579,6 +587,7 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 
 	name := ""
 	constraint: ^Type = nil
+	if left_idx == INVALID_NODE do return make_invalid() // malformed binding (parse error)
 	left_kind := ast.node_kinds[left_idx]
 
 	if left_kind == .Constraint {
@@ -604,6 +613,7 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 		sem_error(a, "invalid binding name", .Invalid_Binding_Name, node_span(a, left_idx))
 	}
 
+	if right_idx == INVALID_NODE do return make_invalid() // malformed binding (parse error)
 	right_kind := ast.node_kinds[right_idx]
 	if right_kind == .ScopeNode {
 		result := new(Type)
@@ -776,7 +786,7 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 	prop_index := -1
 	resolved_target := follow(target)
 	prop_target := resolved_target
-	for {
+	for prop_target != nil {
 		#partial switch &t in prop_target^ {
 		case Scope_Type:
 			prop_scope, prop_index = scope_resolve(&t, prop_name, prop_ordinal, true)
@@ -887,7 +897,7 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 	src_scope: ^Scope_Type = nil
 	resolved_source := follow(source)
 	src_target := resolved_source
-	for {
+	for src_target != nil {
 		#partial switch &s in src_target^ {
 		case Scope_Type:
 			src_scope = &s
