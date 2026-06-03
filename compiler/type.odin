@@ -230,6 +230,17 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			// in a producer scope: it already denotes the set the value lives in).
 			if v.type_fold != nil do return fold_value_type(v.type_fold)
 			return fold_constraint(v.target)
+		case Compose_Type:
+			// An arithmetic expression (`a+b`, `a*b`, …) is a computed VALUE, not a
+			// reified type: its envelope is the set of results it can produce, and
+			// the proof is `envelope ⊆ constraint` (constraints.md: `u8 + u8` ∈ u16).
+			// So return the numeric envelope directly, UNWRAPPED — mirroring Cast_Type
+			// above. Wrapping it in a producer scope would make a perfectly-bounded
+			// `0..510` fail to satisfy a widened `u16` by the self-match rule, which
+			// is exactly what we must avoid. (String/bool composes have no interval
+			// envelope; they fall through to the domain probes below.)
+			if env := fold_type_integer(t); env != nil do return env
+			if env := fold_type_float(t); env != nil do return env
 		}
 	}
 	// Range/Compose/Negate are domain-ambiguous (family decided by operands),
