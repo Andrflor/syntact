@@ -188,6 +188,29 @@ Float_Type :: struct {
 	default_value:   Maybe(f64),
 }
 
+// Pattern domain leaft. A pattern is assesed on something
+// In order to typechek the pattern must be exhaustve
+// So union of the match in the pattern should tpyecheck with the type_fold of target
+// Or one pattern_branch need a empty arrow
+// Branch are always considered in order
+// When fold the pattern_type resolve to the according product of it's branch
+// When fold_constraint is calledd it must resolve to one branch
+// When fold_type is called it can resolve to multiple branches and the combined type is atributed
+Pattern_Type :: struct {
+	target:   ^Type,
+	branches: []Pattern_Branch,
+}
+
+// Pattern branch, nil match mean match anything
+// There is two pattern mode one prefixed with a = unary value pattern check
+// And one witout the = wich is a typechek
+Pattern_Branch :: struct {
+	value_match: bool,
+	match:       ^Type,
+	product:     ^Type,
+}
+
+
 // Arithmetic `left <op> right` (`+`, `-`, `*`, …). Kept symbolic until folded;
 // `type_fold` caches the resulting envelope once fold_compose() resolves it.
 Compose_Type :: struct {
