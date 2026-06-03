@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_untyped", "description": "an untyped unknown ?? used as a constraint — insoluble", "source": "a -> ??\na:b -> 10", "expect_errors": ["Insoluble_Constraint"] }

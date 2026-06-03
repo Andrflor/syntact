@@ -1,0 +1,1 @@
+{ "name": "tc_ref_nested_mix_bad", "description": "((A & >5) | (B & <0)) rejects 3 (gap: not >5, not <0)", "source": "A -> 0..100\nB -> i8\n((A & >5) | (B & <0)):c -> 3", "expect_errors": ["Constraint_Mismatch"] }

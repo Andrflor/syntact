@@ -1,0 +1,1 @@
+{ "name": "tc_str_concat_lit_class_ok", "description": "(\"id_\" + '0'..'9'*1..) accepts id_42", "source": "(\"id_\" + '0'..'9'*1..):s -> \"id_42\"", "expect_errors": [] }

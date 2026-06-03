@@ -1,0 +1,1 @@
+{ "name": "tc_refchain_constraint_bad", "description": "A->u8, B->A, B as a constraint rejects 300", "source": "A -> u8\nB -> A\nB:c -> 300", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_class_literal_ok", "description": "('a'..'z'*1.. | \"NULL\") accepts the literal alternative", "source": "(('a'..'z'*1..) | \"NULL\"):s -> \"NULL\"", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_ref_neg_singleton_bad2", "description": "A->5, ~A rejects 5", "source": "A -> 5\n(~A):c -> 5", "expect_errors": ["Constraint_Mismatch"] }

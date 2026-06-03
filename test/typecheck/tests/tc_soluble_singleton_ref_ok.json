@@ -1,0 +1,1 @@
+{ "name": "tc_soluble_singleton_ref_ok", "description": "a reference to a concrete singleton is a solvable constraint", "source": "a -> 5\na:b -> 5", "expect_errors": [] }

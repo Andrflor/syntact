@@ -1,0 +1,1 @@
+{ "name": "tc_ref_arith_nested_bad", "description": "A->200, B->100, u8:c -> A+B overflows", "source": "A -> 200\nB -> 100\nu8:c -> A+B", "expect_errors": ["Constraint_Mismatch"] }

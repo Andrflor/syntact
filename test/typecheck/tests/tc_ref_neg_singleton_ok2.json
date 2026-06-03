@@ -1,0 +1,1 @@
+{ "name": "tc_ref_neg_singleton_ok2", "description": "A->5, ~A accepts 6", "source": "A -> 5\n(~A):c -> 6", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_direct", "description": "??::u8 as a direct constraint is one indeterminate element, not the set u8 — insoluble", "source": "??::u8:a -> 10", "expect_errors": ["Insoluble_Constraint"] }

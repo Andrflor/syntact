@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_multi_bad", "description": "(\"http\"|\"https\"|\"ftp\") rejects ws", "source": "(\"http\"|\"https\"|\"ftp\"):s -> \"ws\"", "expect_errors": ["Constraint_Mismatch"] }

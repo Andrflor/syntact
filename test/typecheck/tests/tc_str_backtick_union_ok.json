@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_union_ok", "description": "a union of backtick strings accepts a branch", "source": "(`get`|`post`|`put`):s -> `post`", "expect_errors": [] }

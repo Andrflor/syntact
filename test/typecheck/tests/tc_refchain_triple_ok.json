@@ -1,0 +1,1 @@
+{ "name": "tc_refchain_triple_ok", "description": "three-deep reference chain as a constraint", "source": "A -> 0..50\nB -> A\nC -> B\nC:d -> 25", "expect_errors": [] }

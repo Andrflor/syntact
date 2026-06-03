@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_multi_ok", "description": "(\"http\"|\"https\"|\"ftp\") accepts https", "source": "(\"http\"|\"https\"|\"ftp\"):s -> \"https\"", "expect_errors": [] }

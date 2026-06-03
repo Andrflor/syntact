@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_colored_binding", "description": "a colored typed-unknown used as a constraint — still insoluble (the value is unknown)", "source": "u8:a -> ??::u8\na:b -> 10", "expect_errors": ["Insoluble_Constraint"] }

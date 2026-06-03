@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_range", "description": "(??::u8..10) — a range bound is unknown, insoluble", "source": "(??::u8..10):b -> 5", "expect_errors": ["Insoluble_Constraint"] }

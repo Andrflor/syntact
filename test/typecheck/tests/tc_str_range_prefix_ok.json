@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_prefix_ok", "description": "\"jwt\".. accepts a string starting with jwt", "source": "\"jwt\"..:s -> \"jwt-token\"", "expect_errors": [] }

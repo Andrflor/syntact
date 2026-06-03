@@ -1,0 +1,1 @@
+{ "name": "tc_ref_union_singletons_ok", "description": "A->5, B->10, (A|B) accepts 10", "source": "A -> 5\nB -> 10\n(A|B):c -> 10", "expect_errors": [] }

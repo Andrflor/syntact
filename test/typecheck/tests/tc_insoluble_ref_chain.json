@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_ref_chain", "description": "a reference chain ending in ?? is insoluble (followed transitively)", "source": "a -> ??::u8\nC -> a\nC:b -> 10", "expect_errors": ["Insoluble_Constraint"] }

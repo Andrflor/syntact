@@ -1,0 +1,1 @@
+{ "name": "tc_ref_prop_arith_bad", "description": "u8:c -> P.x + 200 where P.x=100 overflows u8", "source": "P -> {u8:x -> 100}\nu8:c -> P.x + 200", "expect_errors": ["Constraint_Mismatch"] }

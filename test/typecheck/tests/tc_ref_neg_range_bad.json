@@ -1,0 +1,1 @@
+{ "name": "tc_ref_neg_range_bad", "description": "A->0..10, ~A rejects 5", "source": "A -> 0..10\n(~A):c -> 5", "expect_errors": ["Constraint_Mismatch"] }

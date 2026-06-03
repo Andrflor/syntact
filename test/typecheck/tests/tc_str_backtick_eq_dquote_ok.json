@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_eq_dquote_ok", "description": "backtick and double-quote with the same content are the same string", "source": "`hi`:s -> \"hi\"", "expect_errors": [] }

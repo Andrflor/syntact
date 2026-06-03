@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_exact_bad", "description": "a backtick string rejects a different value", "source": "`hello`:s -> `world`", "expect_errors": ["Constraint_Mismatch"] }
