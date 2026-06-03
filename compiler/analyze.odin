@@ -1052,6 +1052,25 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 	result := new(Type)
 	result^ = Carve_Type{source, refs, vals}
 
+	// Pull unification conflict: a pull mentioned in two fields' constraints
+	// (`data{e}:somedata` + `data{e}:someother`) carved with values that disagree
+	// (`a{data{6} data{3}}` → e = 6 then 3) is an error — all bindings of a pull
+	// must agree on one value.
+	if conflict, has := carve_pull_conflict(result); has {
+		display := conflict.pull_name != "" ? fmt.tprintf("'%s'", conflict.pull_name) : "a pull"
+		sem_error(
+			a,
+			fmt.tprintf(
+				"pull conflict: %s is unified to both %s and %s in this carve",
+				display,
+				describe_type(fold_value_type(conflict.first)),
+				describe_type(fold_value_type(conflict.second)),
+			),
+			.Constraint_Mismatch,
+			node_span(a, idx),
+		)
+	}
+
 	// Implicit constraints: substituting an override can break a constraint on
 	// another field that (transitively) references it — `u8:z -> x+y` no longer
 	// fits u8 once x is carved out of range. fold_carve materializes the
