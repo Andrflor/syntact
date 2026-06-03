@@ -405,6 +405,20 @@ scope_resolve :: proc(
 // scope being carved. Unlike scope_resolve it never walks up to the parent: `.`
 // names *this* scope, so a missing field is an error, not a parent lookup. With
 // no ordinal it takes the first occurrence (the carve default-target rule).
+// nth_pointing_push returns the index of the k-th Pointing_Push binding in `scope`
+// (0-based), or -1 if there are fewer than k+1. Used by positional carves, which
+// only target the pushable (`->`) fields.
+nth_pointing_push :: proc(scope: ^Scope_Type, k: int) -> int {
+	count := 0
+	for i := 0; i < len(scope.kind); i += 1 {
+		if scope.kind[i] == .Pointing_Push {
+			if count == k do return i
+			count += 1
+		}
+	}
+	return -1
+}
+
 self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
 	if ordinal >= 0 {
 		if name == "" {
@@ -984,15 +998,23 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 			carve_scope: ^Scope_Type = nil
 			carve_index := -1
 			cname := ""
-			if src_scope != nil && positional_idx < len(src_scope.names) {
-				cname = src_scope.names[positional_idx]
-				carve_scope = src_scope
-				carve_index = positional_idx
+			// A positional carve targets ONLY the Pointing_Push fields, in order —
+			// pulls/events/resonance/reactive/products/expands are not positional
+			// parameters (a pull is extracted, and the others are carved by name with
+			// their own operator). So the k-th positional value goes to the k-th
+			// Pointing_Push field, skipping everything else.
+			if src_scope != nil {
+				idx := nth_pointing_push(src_scope, positional_idx)
+				if idx >= 0 {
+					cname = src_scope.names[idx]
+					carve_scope = src_scope
+					carve_index = idx
+				}
 			}
 			if carve_scope == nil {
 				sem_error(
 					a,
-					"positional carve out of range: the scope has fewer fields",
+					"positional carve out of range: the scope has fewer pushable (->)  fields",
 					.Invalid_Carve,
 					node_span(a, child),
 				)
