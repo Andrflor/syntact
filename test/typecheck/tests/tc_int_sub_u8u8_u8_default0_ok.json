@@ -1,1 +1,1 @@
-{ "name": "tc_int_sub_u8u8_u8_bad", "description": "u8-u8 has negatives, not within u8", "source": "u8:a\nu8:b\nu8:c -> a-b", "expect_errors": ["Constraint_Mismatch"] }
+{"name": "tc_int_sub_u8u8_u8_default0_ok", "description": "bare u8:a/u8:b default to 0, so a-b = 0 which satisfies u8", "source": "u8:a\nu8:b\nu8:c -> a-b", "expect_errors": []}

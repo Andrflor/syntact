@@ -1,1 +1,1 @@
-{ "name": "tc_int_add_u8u8_u8_bad", "description": "u8+u8=0..510 exceeds u8", "source": "u8:a\nu8:b\nu8:c -> a+b", "expect_errors": ["Constraint_Mismatch"] }
+{"name": "tc_int_add_u8u8_u8_default0_ok", "description": "bare u8:a/u8:b default to the concrete 0, so a+b = 0 which satisfies u8 (range overflow needs ??::u8, see tc_unk_*)", "source": "u8:a\nu8:b\nu8:c -> a+b", "expect_errors": []}

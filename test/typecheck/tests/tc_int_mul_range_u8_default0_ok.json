@@ -1,1 +1,1 @@
-{ "name": "tc_int_mul_range_u8_bad", "description": "0..100*0..100=0..10000 exceeds u8", "source": "0..100:a\n0..100:b\nu8:c -> a*b", "expect_errors": ["Constraint_Mismatch"] }
+{"name": "tc_int_mul_range_u8_default0_ok", "description": "bare 0..100:a/0..100:b default to 0, so a*b = 0 which satisfies u8", "source": "0..100:a\n0..100:b\nu8:c -> a*b", "expect_errors": []}

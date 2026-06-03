@@ -1,1 +1,0 @@
-{ "name": "tc_str_rep_bare_ok", "description": "bare az*3 should color a (currently parser bug)", "source": "'a'..'z'*3:a -> \"abc\"", "expect_errors": [] }
