@@ -1,1 +1,1 @@
-{ "name": "tc_scope_calc_range_field_ok", "description": "y=x+x fits u16 when x=200 (400)", "source": "{\n  u8:x -> 200\n  u16:y -> x+x\n}:a", "expect_errors": [] }
+{ "name": "tc_scope_calc_range_field_ok", "description": "x is a typed unknown (any u8), y=x+x spans 0..510 which fits u16", "source": "{\n  u8:x -> ??::u8\n  u16:y -> x+x\n}:a", "expect_errors": [] }
