@@ -482,6 +482,7 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 		cc := i < len(cs.constraint_folds) ? cs.constraint_folds[i] : nil
 		if cc == nil do continue
 		vt := i < len(vs.type_folds) ? vs.type_folds[i] : nil
+		if vt == nil do return false // unresolved value can't satisfy a constraint
 		if !satisfy_root(cc, vt) do return false
 	}
 	return true

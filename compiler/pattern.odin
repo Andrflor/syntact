@@ -47,7 +47,11 @@ branch_covers :: proc(branch: Pattern_Branch, ft: ^Type) -> bool {
 	if ft == nil do return false
 	mc := branch_match_cover(branch)
 	if mc == nil do return false
-	return satisfy_root(fold_constraint(mc), ft)
+	// A match that does not fold to a constraint set (e.g. a comparison `2>2`,
+	// which is not a static set) covers nothing — don't hand a nil to satisfy_root.
+	fc := fold_constraint(mc)
+	if fc == nil do return false
+	return satisfy_root(fc, ft)
 }
 
 // branch_can_match is the in-order firing test: a branch fires for `ft` iff it
@@ -151,6 +155,9 @@ pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 	if cover == nil do return false
 	fc := fold_constraint(cover)
 	ft := fold_value_type(p.target)
+	// A match or target that does not resolve to a static set (e.g. a comparison
+	// `2>2`) can't prove coverage — and must not reach satisfy_root with a nil.
+	if fc == nil || ft == nil do return false
 	return satisfy_root(fc, ft)
 }
 

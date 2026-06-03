@@ -4,6 +4,7 @@ import "../compiler"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 
@@ -1225,9 +1226,9 @@ handle_semantic_tokens :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	}
 
 	doc := &server.documents[uri]
-	cache := compiler.Cache{}
-	ast, _ := compiler.parse(&cache, doc.content)
-
+	// Reuse the AST already parsed by analyze_and_publish — re-parsing on every
+	// semanticTokens request doubles the work on a large file.
+	ast := doc.ast
 	if ast == nil {
 		result := make(map[string]json.Value)
 		result["data"] = json.Array(make([dynamic]json.Value))
@@ -1239,7 +1240,6 @@ handle_semantic_tokens :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	defer delete(tokens)
 
 	collect_semantic_tokens(ast, &tokens)
-
 	sort_sem_tokens(tokens[:])
 
 	data := make([dynamic]json.Value, 0, len(tokens) * 5)
@@ -1268,365 +1268,149 @@ handle_semantic_tokens :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	send_response(msg.id, json.Object(result))
 }
 
+// collect_semantic_tokens classifies the document in ONE lexer pass. The compiler
+// already has a lexer that yields every token with its kind + span, so there is no
+// need to walk the AST or re-scan the source: each token maps to a semantic type
+// by its kind. The only context needed is for identifiers — an identifier directly
+// FOLLOWED by a binding/constraint operator (`->`, `:`, `>-`, …) is a declaration;
+// otherwise it is a use. Builtins (u8, string, …) are types. Comments are skipped
+// by the lexer, so they are scanned separately (cheap, single linear pass).
 collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
 	compiler.ensure_line_starts(ast)
-	node_count := len(ast.node_kinds)
 
-	parent_kind := make([]compiler.Node_Kind, node_count)
-	defer delete(parent_kind)
-	is_left := make([]bool, node_count)
-	defer delete(is_left)
-	build_token_parent_map(ast, parent_kind, is_left)
+	emit :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token, span: compiler.Span, type: Sem_Token_Type, mod := 0) {
+		if span.end <= span.start do return
+		pos := compiler.span_to_position(ast, span.start)
+		append(tokens, Raw_Sem_Token {
+			line       = pos.line - 1,
+			start_char = pos.column - 1,
+			length     = int(span.end - span.start),
+			type       = int(type),
+			modifiers  = mod,
+		})
+	}
 
-	for i := 0; i < node_count; i += 1 {
-		idx := compiler.Node_Index(i)
-		kind := ast.node_kinds[i]
-		span := ast.node_spans[i]
-		if span.start == span.end do continue
+	lexer: compiler.Lexer
+	compiler.init_lexer(&lexer, ast.source)
+	prev := compiler.next_token(&lexer)
+	for prev.kind != .EOF {
+		cur := prev
+		next := compiler.next_token(&lexer)
 
-		tok_type := -1
-		tok_mod := 0
-
-		#partial switch kind {
+		#partial switch cur.kind {
 		case .Identifier:
-			name := compiler.node_name_str(ast, idx)
+			name := ast.source[cur.span.start:cur.span.end]
 			if is_builtin(name) {
-				tok_type = int(Sem_Token_Type.Class)
+				emit(ast, tokens, cur.span, .Class)
+			} else if token_is_decl_op(next.kind) {
+				emit(ast, tokens, cur.span, decl_token_type(next.kind), 1)
 			} else {
-				pk := parent_kind[i]
-				left := is_left[i]
-				#partial switch pk {
-				case .Pointing, .PointingPull:
-					if left {
-						tok_type = int(Sem_Token_Type.Function)
-						tok_mod = 1
-					} else {
-						tok_type = int(Sem_Token_Type.Variable)
-					}
-				case .EventPush, .EventPull:
-					tok_type = int(Sem_Token_Type.Event)
-				case .ResonancePush, .ResonancePull:
-					tok_type = int(Sem_Token_Type.Event)
-				case .ReactivePush, .ReactivePull:
-					tok_type = int(Sem_Token_Type.Event)
-				case .Constraint:
-					if left {
-						tok_type = int(Sem_Token_Type.Type)
-					} else {
-						tok_type = int(Sem_Token_Type.Variable)
-					}
-				case .Property:
-					if left {
-						tok_type = int(Sem_Token_Type.Variable)
-					} else {
-						tok_type = int(Sem_Token_Type.Property)
-					}
-				case .Execute:
-					tok_type = int(Sem_Token_Type.Function)
-				case .External:
-					tok_type = int(Sem_Token_Type.Namespace)
-				case .Pattern:
-					tok_type = int(Sem_Token_Type.Variable)
-				case:
-					tok_type = int(Sem_Token_Type.Variable)
-				}
+				emit(ast, tokens, cur.span, .Variable)
 			}
-			name_span := name_span(ast, idx)
-			if name_span.start != name_span.end {
-				span = name_span
-			}
-
-		case .Literal:
-			lit_kind := node_literal_kind(ast, idx)
-			#partial switch lit_kind {
-			case .Integer, .Float, .Hexadecimal, .Binary:
-				tok_type = int(Sem_Token_Type.Number)
-			case .String:
-				tok_type = int(Sem_Token_Type.String)
-				start_pos := compiler.span_to_position(ast, span.start > 0 ? span.start - 1 : 0)
-				length := int(span.end - span.start) + 2
-				append(
-					tokens,
-					Raw_Sem_Token {
-						line = start_pos.line - 1,
-						start_char = start_pos.column - 1,
-						length = length,
-						type = tok_type,
-						modifiers = 0,
-					},
-				)
-				continue
-			case .Bool:
-				tok_type = int(Sem_Token_Type.Keyword)
-			}
-
-		case .Operator:
-			emit_operator_tokens(ast, idx, tokens)
-			continue
-
-		case:
-			continue
+		case .Integer, .Float, .Hexadecimal, .Binary:
+			emit(ast, tokens, cur.span, .Number)
+		case .String_Literal:
+			emit(ast, tokens, cur.span, .String)
+		case .Bool_Literal:
+			emit(ast, tokens, cur.span, .Keyword)
+		case .At:
+			emit(ast, tokens, cur.span, .Decorator)
+		case .Execute, .QuestionExclamation:
+			emit(ast, tokens, cur.span, .Function)
+		case .Question, .DoubleQuestion:
+			emit(ast, tokens, cur.span, .Keyword)
+		case .PointingPush, .PointingPull, .EventPush, .EventPull, .ResonancePush,
+		     .ResonancePull, .ReactivePush, .ReactivePull:
+			emit(ast, tokens, cur.span, .Keyword)
+		case .Colon, .Cast, .ConstraintBind, .ConstraintFromNone, .ConstraintToNone:
+			emit(ast, tokens, cur.span, .TypeParameter)
+		case .PropertyAccess, .PropertyFromNone, .PropertyToNone, .Dot:
+			emit(ast, tokens, cur.span, .Property)
+		case .Plus, .Minus, .Asterisk, .Slash, .Percent, .Equal, .NotEqual, .Less,
+		     .Greater, .LessEqual, .GreaterEqual, .And, .Or, .Xor, .Not, .RShift,
+		     .LShift, .BitAnd, .BitOr, .BitNot, .Range, .PrefixRange, .PostfixRange,
+		     .DoubleDot, .Ellipsis:
+			emit(ast, tokens, cur.span, .Operator)
 		}
 
-		if tok_type < 0 do continue
-
-		start_pos := compiler.span_to_position(ast, span.start)
-		length := int(span.end - span.start)
-
-		append(
-			tokens,
-			Raw_Sem_Token {
-				line = start_pos.line - 1,
-				start_char = start_pos.column - 1,
-				length = length,
-				type = tok_type,
-				modifiers = tok_mod,
-			},
-		)
+		prev = next
 	}
 
-	emit_punctuation_tokens(ast, tokens)
+	emit_comment_tokens(ast, tokens)
 }
 
-build_token_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, is_left: []bool) {
-	node_count := len(ast.node_kinds)
-	for i := 0; i < node_count; i += 1 {
-		idx := compiler.Node_Index(i)
-		kind := ast.node_kinds[i]
-
-		mark_binary :: proc(
-			ast: ^compiler.Ast,
-			idx: compiler.Node_Index,
-			kind: compiler.Node_Kind,
-			parent_kind: []compiler.Node_Kind,
-			is_left: []bool,
-			node_count: int,
-		) {
-			left := node_left(ast, idx)
-			right := node_right(ast, idx)
-			if left != compiler.INVALID_NODE && int(left) < node_count {
-				parent_kind[left] = kind
-				is_left[left] = true
-			}
-			if right != compiler.INVALID_NODE && int(right) < node_count {
-				parent_kind[right] = kind
-			}
-		}
-
-		#partial switch kind {
-		case .Pointing,
-		     .PointingPull,
-		     .ResonancePush,
-		     .ResonancePull,
-		     .ReactivePush,
-		     .ReactivePull,
-		     .EventPush:
-			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
-		case .EventPull:
-			d := ast.node_data[i].event_pull
-			if d.from != compiler.INVALID_NODE && int(d.from) < node_count {
-				parent_kind[d.from] = kind
-				is_left[d.from] = true
-			}
-			if d.to != compiler.INVALID_NODE && int(d.to) < node_count {
-				parent_kind[d.to] = kind
-			}
-		case .Constraint:
-			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
-		case .Property:
-			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
-		case .Execute:
-			target := node_execute_target(ast, idx)
-			if target != compiler.INVALID_NODE && int(target) < node_count {
-				parent_kind[target] = kind
-				is_left[target] = true
-			}
-		case .External:
-			d := ast.node_data[i].external
-			if d.scope != compiler.INVALID_NODE && int(d.scope) < node_count {
-				parent_kind[d.scope] = kind
-			}
-		case .Pattern:
-			target := node_pattern_target(ast, idx)
-			if target != compiler.INVALID_NODE && int(target) < node_count {
-				parent_kind[target] = kind
-			}
-		case .Operator:
-			left := node_operator_left(ast, idx)
-			right := node_operator_right(ast, idx)
-			if left != compiler.INVALID_NODE && int(left) < node_count {
-				parent_kind[left] = kind
-			}
-			if right != compiler.INVALID_NODE && int(right) < node_count {
-				parent_kind[right] = kind
-			}
-		}
+// token_is_decl_op reports whether `k`, directly following an identifier, marks
+// that identifier as a DECLARATION.
+token_is_decl_op :: proc(k: compiler.Token_Kind) -> bool {
+	#partial switch k {
+	case .PointingPush, .PointingPull, .EventPush, .EventPull, .ResonancePush,
+	     .ResonancePull, .ReactivePush, .ReactivePull, .Colon, .ConstraintBind,
+	     .ConstraintToNone:
+		return true
 	}
+	return false
 }
 
-emit_operator_tokens :: proc(
-	ast: ^compiler.Ast,
-	idx: compiler.Node_Index,
-	tokens: ^[dynamic]Raw_Sem_Token,
-) {
-	span := node_span(ast, idx)
-	left := node_operator_left(ast, idx)
-	right := node_operator_right(ast, idx)
-
-	left_end := ast.node_spans[left].end if left != compiler.INVALID_NODE else span.start
-	right_start := ast.node_spans[right].start if right != compiler.INVALID_NODE else span.end
-
-	if left_end < right_start {
-		src := ast.source[left_end:right_start]
-		op_start: u32 = 0
-		op_end: u32 = u32(len(src))
-		for j: u32 = 0; j < u32(len(src)); j += 1 {
-			if src[j] != ' ' && src[j] != '\t' && src[j] != '\n' && src[j] != '\r' {
-				op_start = j
-				break
-			}
-		}
-		for j := u32(len(src)); j > op_start; j -= 1 {
-			if src[j - 1] != ' ' &&
-			   src[j - 1] != '\t' &&
-			   src[j - 1] != '\n' &&
-			   src[j - 1] != '\r' {
-				op_end = j
-				break
-			}
-		}
-		actual_start := left_end + op_start
-		actual_end := left_end + op_end
-		if actual_start < actual_end {
-			pos := compiler.span_to_position(ast, actual_start)
-			append(
-				tokens,
-				Raw_Sem_Token {
-					line = pos.line - 1,
-					start_char = pos.column - 1,
-					length = int(actual_end - actual_start),
-					type = int(Sem_Token_Type.Operator),
-					modifiers = 0,
-				},
-			)
-		}
+// decl_token_type picks the semantic type for an identifier declared with `k`:
+// a constraint-colored name (`u8:x`) is a Type, an event/resonance/reactive binding
+// an Event, a plain pointing binding a Function.
+decl_token_type :: proc(k: compiler.Token_Kind) -> Sem_Token_Type {
+	#partial switch k {
+	case .Colon, .ConstraintBind, .ConstraintToNone:
+		return .Type
+	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
+		return .Event
 	}
+	return .Function
 }
 
+// emit_comment_tokens scans `//` line and `/* */` (nesting) block comments — the
+// lexer skips them, so they carry no token. One linear pass over the source.
 emit_comment_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
 	src := ast.source
 	slen := len(src)
 	i := 0
 	for i < slen - 1 {
+		start := i
+		end := -1
 		if src[i] == '/' && src[i + 1] == '/' {
-			start := u32(i)
-			end := i + 2
-			for end < slen && src[end] != '\n' {
-				end += 1
+			end = i + 2
+			for end < slen && src[end] != '\n' do end += 1
+		} else if src[i] == '/' && src[i + 1] == '*' {
+			depth := 1
+			end = i + 2
+			for end < slen - 1 && depth > 0 {
+				if src[end] == '/' && src[end + 1] == '*' {
+					depth += 1;end += 2
+				} else if src[end] == '*' && src[end + 1] == '/' {
+					depth -= 1;end += 2
+				} else {
+					end += 1
+				}
 			}
-			pos := compiler.span_to_position(ast, start)
-			append(
-				tokens,
-				Raw_Sem_Token {
-					line = pos.line - 1,
-					start_char = pos.column - 1,
-					length = end - i,
-					type = int(Sem_Token_Type.Comment),
-					modifiers = 0,
-				},
-			)
-			i = end
-		} else {
+		}
+		if end < 0 {
 			i += 1
+			continue
 		}
+		pos := compiler.span_to_position(ast, u32(start))
+		append(tokens, Raw_Sem_Token {
+			line       = pos.line - 1,
+			start_char = pos.column - 1,
+			length     = end - start,
+			type       = int(Sem_Token_Type.Comment),
+			modifiers  = 0,
+		})
+		i = end
 	}
 }
 
-emit_punctuation_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
-	emit_comment_tokens(ast, tokens)
-
-	lexer: compiler.Lexer
-	compiler.init_lexer(&lexer, ast.source)
-
-	for {
-		tok := compiler.next_token(&lexer)
-		if tok.kind == .EOF do break
-
-		tok_type := -1
-		#partial switch tok.kind {
-		case .PointingPush:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .PointingPull:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .EventPush:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .EventPull:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .ResonancePush:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .ResonancePull:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .ReactivePush:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .ReactivePull:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .Question:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .DoubleQuestion:
-			tok_type = int(Sem_Token_Type.Keyword)
-		case .QuestionExclamation:
-			tok_type = int(Sem_Token_Type.Modifier)
-		case .Execute:
-			tok_type = int(Sem_Token_Type.Function)
-		case .At:
-			tok_type = int(Sem_Token_Type.Decorator)
-		case .Ellipsis:
-			tok_type = int(Sem_Token_Type.Decorator)
-		case .ConstraintBind, .ConstraintFromNone, .ConstraintToNone:
-			tok_type = int(Sem_Token_Type.TypeParameter)
-		case .PropertyAccess, .PropertyFromNone, .PropertyToNone:
-			tok_type = int(Sem_Token_Type.Property)
-		case .Plus, .Minus, .Asterisk, .Slash, .Percent:
-			tok_type = int(Sem_Token_Type.Operator)
-		case .Equal, .NotEqual, .Less, .Greater, .LessEqual, .GreaterEqual:
-			tok_type = int(Sem_Token_Type.Operator)
-		case .And, .Or, .Xor, .Not, .RShift, .LShift:
-			tok_type = int(Sem_Token_Type.Operator)
-		case .Range, .PrefixRange, .PostfixRange, .DoubleDot:
-			tok_type = int(Sem_Token_Type.Operator)
-		}
-
-		if tok_type < 0 do continue
-
-		pos := compiler.span_to_position(ast, tok.span.start)
-		length := int(tok.span.end - tok.span.start)
-
-		append(
-			tokens,
-			Raw_Sem_Token {
-				line = pos.line - 1,
-				start_char = pos.column - 1,
-				length = length,
-				type = tok_type,
-				modifiers = 0,
-			},
-		)
-	}
-}
-
+// sort_sem_tokens orders tokens by (line, start_char). Uses the stdlib introsort
+// (O(n log n)) — the old insertion sort was O(n²) and made a large file (giga.syn,
+// ~1M tokens) take minutes, so semantic highlighting never arrived.
 sort_sem_tokens :: proc(tokens: []Raw_Sem_Token) {
-	for i := 1; i < len(tokens); i += 1 {
-		key := tokens[i]
-		j := i - 1
-		for j >= 0 && sem_token_greater(tokens[j], key) {
-			tokens[j + 1] = tokens[j]
-			j -= 1
-		}
-		tokens[j + 1] = key
-	}
-}
-
-sem_token_greater :: proc(a, b: Raw_Sem_Token) -> bool {
-	if a.line != b.line do return a.line > b.line
-	return a.start_char > b.start_char
+	slice.sort_by(tokens, proc(a, b: Raw_Sem_Token) -> bool {
+		if a.line != b.line do return a.line < b.line
+		return a.start_char < b.start_char
+	})
 }
