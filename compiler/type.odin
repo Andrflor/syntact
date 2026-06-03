@@ -507,6 +507,26 @@ type_default :: proc(t: ^Type) -> ^Type {
 		// finite bound coincides with the left term's default, so this is consistent.)
 		if d := type_default(v.left); d != nil do return d
 		if d := type_default(v.right); d != nil do return d
+	case Negate_Type:
+		// The default of a STRING negation is the first string that does NOT match
+		// the negated operand. Strings are ordered shortest-first, so try "", then
+		// "a", "aa", … and pick the first one outside the operand. (Integer/char
+		// negations fold into intervals below and have a numeric default; this only
+		// kicks in when the operand is a positional string pattern that does not
+		// fold — `~"piro"` → "".)
+		inner := fold_constraint(v.operand)
+		if inner != nil {
+			if _, is_str := inner^.(String_Type); is_str {
+				candidates := []string{"", "a", "aa", "b"}
+				for cand in candidates {
+					cv := new(Type)
+					cv^ = make_string_const(cand, .double)
+					if !satisfy(inner, cv) {
+						return cv
+					}
+				}
+			}
+		}
 	}
 	// Domains: we fold into intervals and read the default_value computed on them.
 	if folded := fold_constraint_integer(t); folded != nil {

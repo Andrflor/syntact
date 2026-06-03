@@ -284,25 +284,39 @@ default_for_string_intervals :: proc(
 	is_sequence := false,
 ) -> (Maybe(string), String_Quotation) {
 	if len(segs) == 0 do return nil, .double
-	// A sequence's default is the concatenation of each segment's default, each
-	// repeated by the low bound of its count (so 'a'..'z'*0.. contributes nothing).
+
+	// One segment's default string: its low bound (or high if no low), repeated by
+	// the LOW bound of its count ("ab"*3 → "ababab", 'a'..'z'*0.. → "").
+	seg_default :: proc(iv: String_Interval) -> string {
+		base: string = ""
+		if lo, ok := iv.lo.(string); ok do base = lo
+		else if hi, ok2 := iv.hi.(string); ok2 do base = hi
+		n := 1
+		if len(iv.count.integer_intervals) > 0 {
+			if lo, ok := iv.count.integer_intervals[0].lo.(i128); ok do n = int(lo)
+		}
+		if n <= 0 do return ""
+		if n == 1 do return base
+		b := strings.builder_make()
+		for _ in 0 ..< n do strings.write_string(&b, base)
+		return strings.to_string(b)
+	}
+
+	// A sequence concatenates every segment's default in order; a union (or a lone
+	// segment) takes the first term's default. A concatenation is a multi-char
+	// STRING, so it renders with double quotes even when a part was a single char
+	// ('a'..'z' + '@' + 'a'..'z' → "a@a", not 'a@a') — unless every part is backtick.
 	if is_sequence {
 		b := strings.builder_make()
-		q := segs[0].quotation
+		all_backtick := true
 		for iv in segs {
-			base: string = ""
-			if lo, ok := iv.lo.(string); ok do base = lo
-			else if hi, ok2 := iv.hi.(string); ok2 do base = hi
-			n := 0
-			if lo, ok := iv.count.integer_intervals[0].lo.(i128); ok do n = int(lo)
-			for _ in 0 ..< n do strings.write_string(&b, base)
+			strings.write_string(&b, seg_default(iv))
+			if iv.quotation != .backtick do all_backtick = false
 		}
+		q := all_backtick ? String_Quotation.backtick : .double
 		return strings.to_string(b), q
 	}
-	iv := segs[0]
-	if lo, ok := iv.lo.(string); ok do return lo, iv.quotation
-	if hi, ok := iv.hi.(string); ok do return hi, iv.quotation
-	return "", iv.quotation
+	return seg_default(segs[0]), segs[0].quotation
 }
 
 // fold_type_string : string envelope produced by a value, or nil.
