@@ -498,10 +498,24 @@ type_default :: proc(t: ^Type) -> ^Type {
 		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
 			return type_default(v.reference.match_scope.values[v.reference.match_index])
 		}
+	case Or_Type:
+		// The default of a union is the default of its FIRST term (the left branch),
+		// recursively. This is the only rule that spans families: `(u8|string)`
+		// defaults to 0 (the u8), `(string|u8)` to "" (the string) — the single-
+		// domain folds below cannot reduce a cross-family union, so we must pick the
+		// first term here. (A same-family union folds fine below too, and its first
+		// finite bound coincides with the left term's default, so this is consistent.)
+		if d := type_default(v.left); d != nil do return d
+		if d := type_default(v.right); d != nil do return d
 	}
 	// Domains: we fold into intervals and read the default_value computed on them.
 	if folded := fold_constraint_integer(t); folded != nil {
 		if it, ok := folded^.(Integer_Type); ok {
+			// An integer fold with no intervals is the EMPTY SET (`~(~10|~20)` =
+			// {10}&{20} = ∅): nothing satisfies it, so its default is `none`.
+			if len(it.integer_intervals) == 0 {
+				return new_type(None_Type{})
+			}
 			if d, ok2 := it.default_value.(i128); ok2 {
 				r := new(Type)
 				r^ = make_int_const(d)
@@ -994,6 +1008,23 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	// sibling mentions now read the substituted values, cascading transitively.
 	for i in 0 ..< len(copy.values) {
 		copy.values[i] = repoint(copy.values[i], src, copy)
+	}
+
+	// Refresh the cached fold of every DEPENDENT field — one whose value still
+	// references another field (`y -> x+1`). After repointing, its value reads the
+	// substituted `x`, but its type_fold still holds the pre-carve result; recompute
+	// it so the materialized default (and any sibling reading it) sees `y = 101`.
+	// Overridden fields were already refreshed above; concrete values are unchanged
+	// by repoint, so re-folding them is harmless.
+	overridden := make(map[int]bool)
+	for ref in carve.references do overridden[ref.match_index] = true
+	for i in 0 ..< len(copy.values) {
+		if overridden[i] do continue
+		if i < len(copy.type_folds) {
+			if nf := fold_value_type(copy.values[i]); nf != nil {
+				copy.type_folds[i] = nf
+			}
+		}
 	}
 
 	return copy
