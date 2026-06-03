@@ -36,33 +36,22 @@ build_pattern_branch :: proc(match: ^Type, product: ^Type, value_match: bool) ->
 	return Pattern_Branch{value_match = value_match, match = match, product = product}
 }
 
-// branch_match_constraint folds a branch's match to the constraint SET it tests
-// against — the same for both modes: a value match `=5` tests the singleton {5},
-// a typecheck match `u8` tests the set 0..255. Returns nil for a default branch
-// or an unresolved match.
-branch_match_constraint :: proc(branch: Pattern_Branch) -> ^Type {
-	if branch.match == nil do return nil
-	return fold_constraint(branch.match)
-}
-
-// branch_covers reports whether a branch fully ABSORBS the target's folded type
-// `ft` — i.e. the target's type_fold ⊆ this branch's match set. When true, every
-// target value lands in this branch, so later branches are dead (the first
-// covering branch wins, in order). A default branch (nil match) covers everything.
-// This is the predicate the in-order single-branch selection, fold_type, and the
-// runtime reduction all use. It is the SAME pure set-inclusion as exhaustiveness
-// (set_subset, not satisfy_root) so a set match `=0..` covers a set target `0..`.
+// branch_covers reports whether a branch fully ABSORBS the target — i.e. the
+// target's type_fold satisfies this branch's match (a typecheck branch `M` taken
+// as M, a value branch `=v` taken as the producer `{-> v}`). When true, EVERY
+// target value lands in this branch, so it fires deterministically and later
+// branches are dead. A default branch (nil match) covers everything. This is the
+// ordinary binding proof satisfy_root(fc, ft) run for a single branch's match.
 branch_covers :: proc(branch: Pattern_Branch, ft: ^Type) -> bool {
 	if branch.match == nil do return true // default covers everything
 	if ft == nil do return false
-	mc := branch_match_constraint(branch)
+	mc := branch_match_cover(branch)
 	if mc == nil do return false
-	return set_subset(ft, mc)
+	return satisfy_root(fold_constraint(mc), ft)
 }
 
 // branch_can_match is the in-order firing test: a branch fires for `ft` iff it
-// covers it (its match set contains the whole target type). Kept as a thin alias
-// over branch_covers so callers read intent-first.
+// covers it. Thin alias over branch_covers so callers read intent-first.
 branch_can_match :: proc(branch: Pattern_Branch, ft: ^Type) -> bool {
 	return branch_covers(branch, ft)
 }
@@ -90,59 +79,69 @@ fold_constraint_pattern :: proc(t: ^Type) -> ^Type {
 	return nil
 }
 
-// fold_type_pattern resolves a pattern used as a VALUE to the COMBINED type of
-// every branch the target can reach (an Or of their products, in order). With a
-// statically-known target only the reachable branches contribute; with one
-// reachable branch it collapses to that product's type.
+// fold_type_pattern resolves a pattern used as a VALUE to its product type.
+//
+// Two cases, per the spec:
+//   * If ONE branch fully COVERS the target, we know AT COMPILE TIME which branch
+//     fires (the first such branch, in order) — the fold is exactly its product.
+//   * Otherwise we cannot tell statically which branch will fire, so the value is
+//     the COMBINED type of every branch's product: an Or, left-folded in order.
+//     (e.g. target u8, branches `0..120 -> ""`, `22..255 -> 10` — neither covers
+//     u8 alone, so the type is `"" | 10`.)
 fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	p, ok := t^.(Pattern_Type)
 	if !ok do return nil
 	ft := pattern_target_fold(p)
 	if ft == nil do return nil
 
-	reachable := make([dynamic]^Type, 0, len(p.branches))
+	// Deterministic case: the first branch that covers the whole target wins.
 	for branch in p.branches {
-		// In-order semantics: the FIRST branch that fully COVERS the target wins and
-		// makes every later branch dead. For a statically-known (singleton) target a
-		// branch fires iff it covers, so the first covering branch is the only
-		// reachable product — an exact fold. Stop there.
 		if branch_covers(branch, ft) {
-			pf := fold_value_type(branch.product)
-			if pf != nil do append(&reachable, pf)
-			break
+			return fold_value_type(branch.product)
 		}
 	}
-	if len(reachable) == 0 do return nil
-	if len(reachable) == 1 do return reachable[0]
-	// Combine the reachable products into a union type, left-folded in order.
-	combined := reachable[0]
-	for i := 1; i < len(reachable); i += 1 {
-		combined = new_type(Or_Type{combined, reachable[i]})
+
+	// Non-deterministic case: combine every branch's product into one Or type.
+	combined: ^Type = nil
+	for branch in p.branches {
+		pf := fold_value_type(branch.product)
+		if pf == nil do continue
+		if combined == nil {
+			combined = pf
+		} else {
+			combined = new_type(Or_Type{combined, pf})
+		}
 	}
 	return combined
 }
 
+// branch_match_cover yields the match a branch contributes to the coverage union.
+// A typecheck branch `M` contributes M as-is (a type). A value branch `=v`
+// contributes `{-> v}` — v bundled in a producer scope, because `=v` means "the
+// value IS v", exactly what a producer constraint expresses. A default branch
+// (nil match) returns nil. This is the ONLY place the two modes differ.
+branch_match_cover :: proc(branch: Pattern_Branch) -> ^Type {
+	if branch.match == nil do return nil
+	if branch.value_match do return make_producer_scope(branch.match)
+	return branch.match
+}
+
 // pattern_is_exhaustive reports whether the pattern covers its whole target.
 // A pattern is exhaustive when EITHER a branch is the empty-arrow default
-// (match == nil), OR the union of every branch's match covers the target's type.
-//
-// The union check is exact only for the cases the satisfy machinery decides: we
-// prove the target's type satisfies the OR of all branch matches (each match
-// folded to its constraint set). When the target can't be folded, we treat the
-// pattern as non-exhaustive unless a default is present (we cannot prove cover).
+// (match == nil), OR the OR of all branch matches typechecks against the target —
+// i.e. fold_value_type(target) satisfies fold_constraint(Or of matches). This is
+// just the ordinary binding proof `satisfy_root(fc, ft)` run against the union the
+// branches build: a value branch `=v` enters the union as `{-> v}`, a typecheck
+// branch `M` as M. So `(0..120 | 22..255)` covers a u8 target exactly as the
+// binding `(0..120 | 22..255):data -> ??::u8` typechecks.
 pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 	for branch in p.branches {
 		if branch.match == nil do return true // empty-arrow default covers everything
 	}
-	ft := pattern_target_fold(p)
-	if ft == nil do return false
-
-	// Build the union of all branch matches (their constraint sets) and prove the
-	// target's type falls inside it. Value-mode matches contribute their singleton.
 	cover: ^Type = nil
 	for branch in p.branches {
-		mc := fold_constraint(branch.match)
-		if mc == nil do return false // an unresolved match: cannot prove cover
+		mc := branch_match_cover(branch)
+		if mc == nil do continue
 		if cover == nil {
 			cover = mc
 		} else {
@@ -150,47 +149,9 @@ pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 		}
 	}
 	if cover == nil do return false
-	return set_subset(ft, cover)
-}
-
-// set_subset proves `sub ⊆ sup` as a PURE set inclusion — every value of sub is
-// in sup. Unlike satisfy_root it does NOT apply the self-match rule (a set DOES
-// cover an equal set here), because pattern exhaustiveness is exactly "is the
-// target's type_fold contained in the union of the branch matches" — a typecheck
-// in reverse where `0..` must be coverable by `=0..`. Producer-scope wrappers are
-// peeled so a match set compares interval-to-interval. Domain dispatch; a union on
-// either side splits; cross-family → false.
-set_subset :: proc(sub, sup: ^Type) -> bool {
-	if sub == nil || sup == nil do return false
-	s := unwrap_producer(sub)
-	p := unwrap_producer(sup)
-	#partial switch sv in s^ {
-	case Integer_Type:
-		if pv, ok := p^.(Integer_Type); ok {
-			return integer_intervals_satisfy(sv.integer_intervals, pv.integer_intervals)
-		}
-	case Float_Type:
-		if pv, ok := p^.(Float_Type); ok {
-			return float_intervals_satisfy(sv.float_intervals, pv.float_intervals)
-		}
-	case String_Type:
-		if pv, ok := p^.(String_Type); ok {
-			return string_intervals_satisfy(sv.string_intervals, pv.string_intervals)
-		}
-	case Bool_Type:
-		if pv, ok := p^.(Bool_Type); ok {
-			return bool_satisfy(pv, sv) // bool_satisfy(constraint, value) proves value ⊆ constraint
-		}
-	case None_Type:
-		return true // the empty set is a subset of anything
-	case Or_Type:
-		return set_subset(sv.left, sup) && set_subset(sv.right, sup)
-	}
-	// A union on the sup side: the sub must fall entirely in one of the parts.
-	if pv, ok := p^.(Or_Type); ok {
-		return set_subset(sub, pv.left) || set_subset(sub, pv.right)
-	}
-	return false
+	fc := fold_constraint(cover)
+	ft := fold_value_type(p.target)
+	return satisfy_root(fc, ft)
 }
 
 // describe_pattern renders a compact pattern for diagnostics.
