@@ -333,11 +333,23 @@ lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	return Token{.LeftBracket, Span{s, s + 1}, f}
 }
 
+// is_detached reports whether the byte before `start` separates the `(`/`{` from
+// the preceding operand, so it is NOT glued (no carve / no capture). A glue is
+// broken by a space (IS_SPACE) OR by a soft statement boundary — a newline or a
+// comma — exactly the separators skip_trivia folds into Separator_Before. Without
+// the newline/comma case, `x -> u8\n(C | string)` would mis-read the `(` as a
+// capture on `u8` (`u8(C)`), and `x -> u8\n{…}` as a carve.
+is_detached :: #force_inline proc(l: ^Lexer, start: u32) -> bool {
+	if start == 0 do return true
+	c := l.src[start - 1]
+	return IS_SPACE[c] || c == '\n' || c == ','
+}
+
 // `{` with a space before it opens a fresh scope; glued to an operand (`x{…}`)
 // it opens a carve of that operand. The parser keys the carve infix rule on
 // LeftBraceCarve, so the distinction is decided here, at the byte.
 lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
-	sb := start == 0 || IS_SPACE[l.src[start - 1]]
+	sb := is_detached(l, start)
 	l.offset = start + 1
 	return Token {
 		kind = sb ? .LeftBrace : .LeftBraceCarve,
@@ -349,7 +361,7 @@ lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 // Same space rule as `{`: a glued `(` (LeftParenNoSpace) binds tightly to the
 // preceding operand (it can start a call/group on it), a spaced `(` is a plain group.
 lex_lparen :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
-	sb := start == 0 || IS_SPACE[l.src[start - 1]]
+	sb := is_detached(l, start)
 	l.offset = start + 1
 	return Token {
 		kind = sb ? .LeftParen : .LeftParenNoSpace,

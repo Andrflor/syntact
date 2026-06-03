@@ -1,1 +1,1 @@
-{ "name": "tc_insoluble_arith_operand", "description": "arithmetic on an unknown operand cannot fold: rejected as Invalid_operator (insolubility detected at fold time)", "source": "a -> ??::u8\n(a+10):b -> 20", "expect_errors": ["Invalid_operator"] }
+{ "name": "tc_insoluble_arith_operand", "description": "arithmetic on an unknown operand in a constraint is insoluble (the constraint depends on ??)", "source": "a -> ??::u8\n(a+10):b -> 20", "expect_errors": ["Insoluble_Constraint"] }
