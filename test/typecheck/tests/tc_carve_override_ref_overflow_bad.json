@@ -1,1 +1,1 @@
-{ "name": "tc_carve_override_ref_overflow_bad", "description": "carve override is a reference that overflows the field", "source": "k -> 300\nBase -> {u8:x}\ng -> Base{x->k}", "expect_errors": ["Constraint_Mismatch", "Constraint_Mismatch"] }
+{"name": "tc_carve_override_ref_overflow_bad", "description": "carve override is a reference that overflows the field", "source": "k -> 300\nBase -> {u8:x}\ng -> Base{x->k}", "expect_errors": ["Constraint_Mismatch"]}

@@ -1088,7 +1088,16 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
 	sub := fold_carve(carve)
 	if sub == nil do return
+	// Fields DIRECTLY overridden by the carve are already proven inline by
+	// walk_carve (the explicit "constraint mismatch in carve 'x'") — skip them here
+	// so a direct violation isn't reported twice as a (mislabeled) "implicit" one.
+	// recheck_carve only covers the DEPENDENT fields (value references a carved one).
+	overridden := make(map[int]bool)
+	if cv, ok := carve^.(Carve_Type); ok {
+		for ref in cv.references do overridden[ref.match_index] = true
+	}
 	for i in 0 ..< len(sub.names) {
+		if overridden[i] do continue
 		fc := i < len(sub.constraint_folds) ? sub.constraint_folds[i] : nil
 		if fc == nil do continue
 		ft := fold_value_type(sub.values[i])

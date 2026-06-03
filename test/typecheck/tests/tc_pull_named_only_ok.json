@@ -1,0 +1,1 @@
+{"name": "tc_pull_named_only_ok", "description": "carving a pull by name (a{e<-7}) is fine", "source": "a -> { u8:e <- 2\n-> e }\nb -> a{e<-7}\n-> b", "expect_errors": []}

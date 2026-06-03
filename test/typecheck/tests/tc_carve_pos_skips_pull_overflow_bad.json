@@ -1,0 +1,1 @@
+{"name": "tc_carve_pos_skips_pull_overflow_bad", "description": "positional carve onto the first push field: 300 overflows u8 (inline + implicit recheck = two mismatches)", "source": "base -> { u8:a -> 1\nx <- 0 }\nc -> base{300}\n-> c.a", "expect_errors": ["Constraint_Mismatch"]}

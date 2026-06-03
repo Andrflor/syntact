@@ -1,0 +1,1 @@
+{"name": "def_carve_pos_single_push", "description": "positional carve onto the only push field (after a pull): base{99}.a = 99", "source": "base -> { x <- 0\nu8:a -> 1 }\nr -> base{99}.a", "binding": "r", "expect": "99"}

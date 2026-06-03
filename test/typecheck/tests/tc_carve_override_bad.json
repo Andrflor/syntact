@@ -1,1 +1,1 @@
-{"name": "tc_carve_override_bad", "description": "carving d->300 violates u8:d (direct + implicit mismatch)", "source": "a -> {u8:d}\ng -> a{d->300}", "expect_errors": ["Constraint_Mismatch", "Constraint_Mismatch"]}
+{"name": "tc_carve_override_bad", "description": "carving d->300 violates u8:d (direct + implicit mismatch)", "source": "a -> {u8:d}\ng -> a{d->300}", "expect_errors": ["Constraint_Mismatch"]}

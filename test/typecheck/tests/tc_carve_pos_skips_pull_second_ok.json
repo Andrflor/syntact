@@ -1,0 +1,1 @@
+{"name": "tc_carve_pos_skips_pull_second_ok", "description": "a pull between two pushes is skipped: {10,20} fills a then b", "source": "base -> { u8:a -> 1\nx <- 0\nu8:b -> 2 }\nc -> base{10, 20}\n-> c", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "tc_pull_conflict_bad", "description": "two fields sharing pull e carved with data{6} then data{3}: pull conflict (e cannot be 6 and 3)", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\ndata{e}:t\n-> e }\nb -> a{data{6} data{3}}\n-> b", "expect_errors": ["Constraint_Mismatch"]}

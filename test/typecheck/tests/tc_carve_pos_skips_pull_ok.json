@@ -1,0 +1,1 @@
+{"name": "tc_carve_pos_skips_pull_ok", "description": "positional carve targets only Pointing_Push fields: a leading pull (<-) is skipped, so {9} assigns the first push", "source": "base -> { x <- 0\nu8:a -> 1 }\nc -> base{9}\n-> c.a", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "tc_pull_named_vs_struct_conflict_bad", "description": "naming the pull e<-4 then carving data{6} (which forces e=6) conflicts: 4 vs 6", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\n-> e }\nb -> a{e<-4 data{6}}\n-> b", "expect_errors": ["Constraint_Mismatch"]}

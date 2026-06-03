@@ -1,0 +1,1 @@
+{"name": "def_pull_unify_carve", "description": "carving data{6} unifies the pull e to 6: a{data{6}}! = 6", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\n-> e }\nr -> a{data{6}}!", "binding": "r", "expect": "6"}
