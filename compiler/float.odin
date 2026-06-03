@@ -26,6 +26,7 @@ float_is_concrete :: #force_inline proc(t: Float_Type) -> bool {
 
 float_intervals_is_concrete :: #force_inline proc(float_intervals: []Float_Interval) -> bool {
 	if len(float_intervals) != 1 do return false
+	if float_intervals[0].lo_open || float_intervals[0].hi_open do return false
 	lo, lo_ok := float_intervals[0].lo.(f64)
 	hi, hi_ok := float_intervals[0].hi.(f64)
 	return lo_ok && hi_ok && lo == hi
@@ -39,14 +40,14 @@ float_value :: #force_inline proc(t: Float_Type) -> f64 {
 
 make_float_result :: #force_inline proc(val: f64, kind: FloatKind = .none) -> Type {
 	float_intervals := make([]Float_Interval, 1)
-	float_intervals[0] = Float_Interval{val, val}
+	float_intervals[0] = Float_Interval{val, val, false, false}
 	return Float_Type{float_intervals, kind, val}
 }
 
 
 make_float_range :: proc(lo: Maybe(f64), hi: Maybe(f64), kind: FloatKind = .none) -> Float_Type {
 	float_intervals := make([]Float_Interval, 1)
-	float_intervals[0] = Float_Interval{lo, hi}
+	float_intervals[0] = Float_Interval{lo, hi, false, false}
 	return Float_Type{float_intervals, kind, default_for_float_intervals(float_intervals)}
 }
 
@@ -61,7 +62,11 @@ default_for_float_intervals :: proc(float_intervals: []Float_Interval) -> Maybe(
 	for interval in float_intervals {
 		lo, lo_ok := interval.lo.(f64)
 		hi, hi_ok := interval.hi.(f64)
-		if (!lo_ok || lo <= 0) && (!hi_ok || hi >= 0) do return f64(0)
+		// 0 is the default iff it is actually in the interval; an open bound
+		// exactly at 0 excludes it (e.g. `>0` does not contain 0).
+		lo_ok_for_zero := !lo_ok || lo < 0 || (lo == 0 && !interval.lo_open)
+		hi_ok_for_zero := !hi_ok || hi > 0 || (hi == 0 && !interval.hi_open)
+		if lo_ok_for_zero && hi_ok_for_zero do return f64(0)
 	}
 	lo, lo_ok := float_intervals[0].lo.(f64)
 	if lo_ok do return lo
@@ -153,7 +158,7 @@ fold_type_float_intervals :: proc(
 		if v.right != nil && !right_ok do return nil, .none, false
 		lo, hi := range_span_float_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		float_intervals := make([]Float_Interval, 1)
-		float_intervals[0] = Float_Interval{lo, hi}
+		float_intervals[0] = Float_Interval{lo, hi, false, false}
 		return float_intervals, promote_float_kind(left_kind, right_kind), true
 	case Compose_Type:
 		if v.type_fold != nil {
@@ -166,29 +171,33 @@ fold_type_float_intervals :: proc(
 			case .Greater:
 				hi, hi_ok := right_segs[0].hi.(f64)
 				if !hi_ok do return nil, .none, false
+				// `>x` is the open interval (x, +∞): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
-				float_intervals[0] = Float_Interval{hi, nil}
+				float_intervals[0] = Float_Interval{hi, nil, true, false}
 				return float_intervals, right_kind, true
 			case .GreaterEqual:
 				float_intervals := make([]Float_Interval, 1)
-				float_intervals[0] = Float_Interval{right_segs[0].lo, nil}
+				float_intervals[0] = Float_Interval{right_segs[0].lo, nil, false, false}
 				return float_intervals, right_kind, true
 			case .Less:
 				lo, lo_ok := right_segs[0].lo.(f64)
 				if !lo_ok do return nil, .none, false
+				// `<x` is the open interval (-∞, x): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
-				float_intervals[0] = Float_Interval{nil, lo}
+				float_intervals[0] = Float_Interval{nil, lo, false, true}
 				return float_intervals, right_kind, true
 			case .LessEqual:
 				float_intervals := make([]Float_Interval, 1)
-				float_intervals[0] = Float_Interval{nil, right_segs[0].hi}
+				float_intervals[0] = Float_Interval{nil, right_segs[0].hi, false, false}
 				return float_intervals, right_kind, true
 			case .Subtract:
 				lo, lo_ok := right_segs[0].lo.(f64)
 				hi, hi_ok := right_segs[0].hi.(f64)
 				if !lo_ok || !hi_ok do return nil, .none, false
+				// arithmetic negation mirrors the interval: the old hi (with its
+				// openness) becomes the new lo, and vice versa.
 				float_intervals := make([]Float_Interval, 1)
-				float_intervals[0] = Float_Interval{-hi, -lo}
+				float_intervals[0] = Float_Interval{-hi, -lo, right_segs[0].hi_open, right_segs[0].lo_open}
 				return float_intervals, right_kind, true
 			}
 			return nil, .none, false
@@ -258,7 +267,7 @@ fold_constraint_float_intervals :: proc(
 		if v.right != nil && !right_ok do return nil, .none, false
 		lo, hi := range_span_float_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
 		float_intervals := make([]Float_Interval, 1)
-		float_intervals[0] = Float_Interval{lo, hi}
+		float_intervals[0] = Float_Interval{lo, hi, false, false}
 		return float_intervals, promote_float_kind(left_kind, right_kind), true
 	case Compose_Type:
 		if v.type_fold != nil {
@@ -314,12 +323,14 @@ fold_arith_float_intervals :: proc(
 	case .Add:
 		lo: Maybe(f64) = a_lo_ok && b_lo_ok ? a_lo + b_lo : nil
 		hi: Maybe(f64) = a_hi_ok && b_hi_ok ? a_hi + b_hi : nil
-		float_intervals[0] = Float_Interval{lo, hi}
+		// a sum bound is exclusive if either contributing bound is exclusive
+		float_intervals[0] = Float_Interval{lo, hi, a.lo_open || b.lo_open, a.hi_open || b.hi_open}
 		return float_intervals
 	case .Subtract:
 		lo: Maybe(f64) = a_lo_ok && b_hi_ok ? a_lo - b_hi : nil
 		hi: Maybe(f64) = a_hi_ok && b_lo_ok ? a_hi - b_lo : nil
-		float_intervals[0] = Float_Interval{lo, hi}
+		// subtraction pairs a's lo with b's hi (and vice versa)
+		float_intervals[0] = Float_Interval{lo, hi, a.lo_open || b.hi_open, a.hi_open || b.lo_open}
 		return float_intervals
 	case .Multiply:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
@@ -327,7 +338,9 @@ fold_arith_float_intervals :: proc(
 		p2 := a_lo * b_hi
 		p3 := a_hi * b_lo
 		p4 := a_hi * b_hi
-		float_intervals[0] = Float_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		// conservative: an exclusive operand bound makes both result bounds exclusive
+		any_open := a.lo_open || a.hi_open || b.lo_open || b.hi_open
+		float_intervals[0] = Float_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4), any_open, any_open}
 		return float_intervals
 	case .Divide:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
@@ -336,7 +349,8 @@ fold_arith_float_intervals :: proc(
 		p2 := a_lo / b_hi
 		p3 := a_hi / b_lo
 		p4 := a_hi / b_hi
-		float_intervals[0] = Float_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		any_open := a.lo_open || a.hi_open || b.lo_open || b.hi_open
+		float_intervals[0] = Float_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4), any_open, any_open}
 		return float_intervals
 	}
 	return nil
@@ -367,38 +381,77 @@ float_intervals_intersect :: proc(a, b: []Float_Interval) -> []Float_Interval {
 	result := make([dynamic]Float_Interval)
 	for i := 0; i < len(a); i += 1 {
 		for k := 0; k < len(b); k += 1 {
-			lo := float_max_lo(a[i].lo, b[k].lo)
-			hi := float_min_hi(a[i].hi, b[k].hi)
-			if float_maybe_le(lo, hi) {
-				append(&result, Float_Interval{lo, hi})
+			lo, lo_open := float_intersect_lo(a[i], b[k])
+			hi, hi_open := float_intersect_hi(a[i], b[k])
+			seg := Float_Interval{lo, hi, lo_open, hi_open}
+			if float_interval_nonempty(seg) {
+				append(&result, seg)
 			}
 		}
 	}
 	return result[:]
 }
 
+// float_intersect_lo picks the higher (more restrictive) lower bound for an
+// intersection; on a tie it is open if either side excluded the point.
+float_intersect_lo :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), bool) {
+	av, a_ok := a.lo.(f64)
+	bv, b_ok := b.lo.(f64)
+	if !a_ok do return b.lo, b.lo_open
+	if !b_ok do return a.lo, a.lo_open
+	if av > bv do return a.lo, a.lo_open
+	if bv > av do return b.lo, b.lo_open
+	return a.lo, a.lo_open || b.lo_open
+}
+
+float_intersect_hi :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), bool) {
+	av, a_ok := a.hi.(f64)
+	bv, b_ok := b.hi.(f64)
+	if !a_ok do return b.hi, b.hi_open
+	if !b_ok do return a.hi, a.hi_open
+	if av < bv do return a.hi, a.hi_open
+	if bv < av do return b.hi, b.hi_open
+	return a.hi, a.hi_open || b.hi_open
+}
+
+// float_interval_nonempty reports whether the interval contains any point.
+// With open bounds, lo == hi is empty (e.g. (x, x] holds nothing).
+float_interval_nonempty :: #force_inline proc(s: Float_Interval) -> bool {
+	lo, lo_ok := s.lo.(f64)
+	hi, hi_ok := s.hi.(f64)
+	if !lo_ok || !hi_ok do return true
+	if lo < hi do return true
+	if lo > hi do return false
+	return !s.lo_open && !s.hi_open
+}
+
 // float_intervals_negate mirrors the integer negate but over the real line —
 // there is no +1/-1 adjacency for floats, so the complement of [lo, hi] is
-// (-∞, lo) ∪ (hi, +∞). We keep closed bounds (lo / hi) as the cut points; the
-// resulting intervals are the open-ended complement, which is sufficient for
-// the subset checks the analyzer performs.
+// (-∞, lo) ∪ (hi, +∞). The cut points (lo / hi) carry over, but their open/closed
+// status flips: a point included in the source is excluded from the complement
+// and vice versa, so a closed source bound becomes an open complement bound.
 float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Interval {
 	result := make([dynamic]Float_Interval)
 	prev_hi: Maybe(f64) = nil
+	prev_hi_open := false
 	for interval in float_intervals {
 		lo, lo_ok := interval.lo.(f64)
 		if lo_ok {
-			append(&result, Float_Interval{prev_hi, lo})
+			// upper bound of this complement piece is the source's lo, with
+			// flipped openness; lower bound is the previous source hi (flipped).
+			append(&result, Float_Interval{prev_hi, lo, prev_hi_open, !interval.lo_open})
 		}
 		hi, hi_ok := interval.hi.(f64)
 		if hi_ok {
 			prev_hi = hi
+			prev_hi_open = !interval.hi_open
 		} else {
 			prev_hi = nil
+			prev_hi_open = false
 		}
 	}
 	if prev_hi != nil {
-		append(&result, Float_Interval{prev_hi, nil})
+		append(&result, Float_Interval{prev_hi, nil, prev_hi_open, false})
 	}
 	return result[:]
 }
@@ -480,7 +533,7 @@ float_intervals_satisfy :: proc(value_segs, constraint_segs: []Float_Interval) -
 	for vs in value_segs {
 		found := false
 		for cs in constraint_segs {
-			if float_maybe_le(cs.lo, vs.lo) && float_maybe_le_hi(vs.hi, cs.hi) {
+			if float_lo_contains(cs, vs) && float_hi_contains(cs, vs) {
 				found = true
 				break
 			}
@@ -488,6 +541,33 @@ float_intervals_satisfy :: proc(value_segs, constraint_segs: []Float_Interval) -
 		if !found do return false
 	}
 	return true
+}
+
+// float_lo_contains reports whether the constraint's lower bound admits every
+// point of the value interval's lower side. A closed constraint bound `cs.lo`
+// admits values down to and including `cs.lo`; an open one (e.g. `>x`) excludes
+// `cs.lo` itself, so the value's own lower bound must lie strictly above it —
+// unless the value bound is open at the very same point (`(x` ⊆ `(x`).
+float_lo_contains :: #force_inline proc(cs, vs: Float_Interval) -> bool {
+	cl, cl_ok := cs.lo.(f64)
+	if !cl_ok do return true // constraint open to -∞ admits any lower bound
+	vl, vl_ok := vs.lo.(f64)
+	if !vl_ok do return false // value extends to -∞, constraint does not
+	if cl < vl do return true
+	if cl > vl do return false
+	// cl == vl: fine unless the constraint excludes the point while the value includes it
+	return !cs.lo_open || vs.lo_open
+}
+
+// float_hi_contains mirrors float_lo_contains for the upper bound.
+float_hi_contains :: #force_inline proc(cs, vs: Float_Interval) -> bool {
+	ch, ch_ok := cs.hi.(f64)
+	if !ch_ok do return true // constraint open to +∞ admits any upper bound
+	vh, vh_ok := vs.hi.(f64)
+	if !vh_ok do return false // value extends to +∞, constraint does not
+	if ch > vh do return true
+	if ch < vh do return false
+	return !cs.hi_open || vs.hi_open
 }
 
 // --- float interval helpers ---
@@ -503,12 +583,41 @@ float_intervals_overlap :: #force_inline proc(a, b: Float_Interval) -> bool {
 	b_lo, b_ok := b.lo.(f64)
 	if !a_ok do return true
 	if !b_ok do return true
-	return a_hi >= b_lo
+	if a_hi > b_lo do return true
+	// they only touch at the shared point a_hi == b_lo: that closes the gap
+	// only if at least one side actually includes the point.
+	if a_hi == b_lo do return !a.hi_open || !b.lo_open
+	return false
 }
 
 
 float_interval_merge :: #force_inline proc(a, b: Float_Interval) -> Float_Interval {
-	return Float_Interval{float_min_lo(a.lo, b.lo), float_max_hi(a.hi, b.hi)}
+	lo, lo_open := float_merge_lo(a, b)
+	hi, hi_open := float_merge_hi(a, b)
+	return Float_Interval{lo, hi, lo_open, hi_open}
+}
+
+// float_merge_lo picks the lower of the two lower bounds for a union, carrying
+// that bound's openness; when both bounds coincide, the union includes the point
+// if either side did (the less restrictive — closed — wins).
+float_merge_lo :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), bool) {
+	av, a_ok := a.lo.(f64)
+	bv, b_ok := b.lo.(f64)
+	if !a_ok do return nil, false
+	if !b_ok do return nil, false
+	if av < bv do return a.lo, a.lo_open
+	if bv < av do return b.lo, b.lo_open
+	return a.lo, a.lo_open && b.lo_open
+}
+
+float_merge_hi :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), bool) {
+	av, a_ok := a.hi.(f64)
+	bv, b_ok := b.hi.(f64)
+	if !a_ok do return nil, false
+	if !b_ok do return nil, false
+	if av > bv do return a.hi, a.hi_open
+	if bv > av do return b.hi, b.hi_open
+	return a.hi, a.hi_open && b.hi_open
 }
 
 
@@ -609,16 +718,26 @@ pretty_float_intervals :: proc(float_intervals: []Float_Interval, kind: FloatKin
 		if i > 0 do strings.write_string(&b, " | ")
 		lo, lo_ok := interval.lo.(f64)
 		hi, hi_ok := interval.hi.(f64)
-		if lo_ok && hi_ok && lo == hi {
+		if lo_ok && hi_ok && lo == hi && !interval.lo_open && !interval.hi_open {
 			float_format(&b, lo)
+		} else if lo_ok && !hi_ok && interval.lo_open {
+			// open lower half-line, rendered in source `>x` form
+			strings.write_string(&b, ">")
+			float_format(&b, lo)
+		} else if hi_ok && !lo_ok && interval.hi_open {
+			// open upper half-line, rendered in source `<x` form
+			strings.write_string(&b, "<")
+			float_format(&b, hi)
 		} else {
 			if lo_ok {
+				if interval.lo_open do strings.write_string(&b, ">")
 				float_format(&b, lo)
 			} else {
 				strings.write_string(&b, "-inf")
 			}
 			strings.write_string(&b, "..")
 			if hi_ok {
+				if interval.hi_open do strings.write_string(&b, "<")
 				float_format(&b, hi)
 			} else {
 				strings.write_string(&b, "inf")
