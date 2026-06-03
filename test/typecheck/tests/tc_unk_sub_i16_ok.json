@@ -1,0 +1,1 @@
+{ "name": "tc_unk_sub_i16_ok", "description": "typed-unknown u8 minus u8 spans -255..255 which fits i16", "source": "u8:a -> ??::u8\nu8:b -> ??::u8\ni16:c -> a-b", "expect_errors": [] }

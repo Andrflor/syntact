@@ -1,1 +1,1 @@
-{ "name": "tc_scope_calc_range_field_bad", "description": "y=x+x overflows u8 when x=200 (400)", "source": "{\n  u8:x -> 200\n  u8:y -> x+x\n}:a", "expect_errors": ["Constraint_Mismatch"] }
+{ "name": "tc_scope_calc_range_field_bad", "description": "x is a typed unknown (any u8), so y=x+x spans 0..510 and overflows u8", "source": "{\n  u8:x -> ??::u8\n  u8:y -> x+x\n}:a", "expect_errors": ["Constraint_Mismatch"] }

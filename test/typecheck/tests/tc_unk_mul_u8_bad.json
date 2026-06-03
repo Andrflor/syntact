@@ -1,0 +1,1 @@
+{ "name": "tc_unk_mul_u8_bad", "description": "typed-unknown u8 times u8 spans 0..65025, overflow u8", "source": "u8:a -> ??::u8\nu8:b -> ??::u8\nu8:c -> a*b", "expect_errors": ["Constraint_Mismatch"] }
