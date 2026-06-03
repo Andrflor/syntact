@@ -188,7 +188,7 @@ Float_Type :: struct {
 	default_value:   Maybe(f64),
 }
 
-// Pattern domain leaft. A pattern is assesed on something
+// Pattern domain leaf. A pattern is assesed on something
 // In order to typechek the pattern must be exhaustve
 // So union of the match in the pattern should tpyecheck with the type_fold of target
 // Or one pattern_branch need a empty arrow

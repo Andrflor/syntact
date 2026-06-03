@@ -148,7 +148,47 @@ pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 		}
 	}
 	if cover == nil do return false
-	return satisfy_root(cover, ft)
+	return set_subset(ft, cover)
+}
+
+// set_subset proves `sub ⊆ sup` as a PURE set inclusion — every value of sub is
+// in sup. Unlike satisfy_root it does NOT apply the self-match rule (a set DOES
+// cover an equal set here), because pattern exhaustiveness is exactly "is the
+// target's type_fold contained in the union of the branch matches" — a typecheck
+// in reverse where `0..` must be coverable by `=0..`. Producer-scope wrappers are
+// peeled so a match set compares interval-to-interval. Domain dispatch; a union on
+// either side splits; cross-family → false.
+set_subset :: proc(sub, sup: ^Type) -> bool {
+	if sub == nil || sup == nil do return false
+	s := unwrap_producer(sub)
+	p := unwrap_producer(sup)
+	#partial switch sv in s^ {
+	case Integer_Type:
+		if pv, ok := p^.(Integer_Type); ok {
+			return integer_intervals_satisfy(sv.integer_intervals, pv.integer_intervals)
+		}
+	case Float_Type:
+		if pv, ok := p^.(Float_Type); ok {
+			return float_intervals_satisfy(sv.float_intervals, pv.float_intervals)
+		}
+	case String_Type:
+		if pv, ok := p^.(String_Type); ok {
+			return string_intervals_satisfy(sv.string_intervals, pv.string_intervals)
+		}
+	case Bool_Type:
+		if pv, ok := p^.(Bool_Type); ok {
+			return bool_satisfy(pv, sv) // bool_satisfy(constraint, value) proves value ⊆ constraint
+		}
+	case None_Type:
+		return true // the empty set is a subset of anything
+	case Or_Type:
+		return set_subset(sv.left, sup) && set_subset(sv.right, sup)
+	}
+	// A union on the sup side: the sub must fall entirely in one of the parts.
+	if pv, ok := p^.(Or_Type); ok {
+		return set_subset(sub, pv.left) || set_subset(sub, pv.right)
+	}
+	return false
 }
 
 // describe_pattern renders a compact pattern for diagnostics.
