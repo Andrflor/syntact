@@ -1119,6 +1119,13 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
 		if ref.match_index >= 0 && ref.match_index < len(copy.values) {
+			// PULL UNIFICATION: if this field's constraint mentions a pull (e.g.
+			// `data{e}:somedata`), unify the supplied value (`data{6}`) against that
+			// constraint to resolve the pull (`e = 6`) and write it into the pull's
+			// binding in the copy — so `-> e` and every other mention of e read 6.
+			if ref.match_index < len(copy.types) && copy.types[ref.match_index] != nil {
+				unify_pull(copy.types[ref.match_index], carve.values[i], copy, src)
+			}
 			copy.values[ref.match_index] = carve.values[i]
 			if ref.match_index < len(copy.type_folds) {
 				copy.type_folds[ref.match_index] = fold_value_type(carve.values[i])
@@ -1150,6 +1157,63 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	}
 
 	return copy
+}
+
+// unify_pull resolves PULL variables by matching a field's CONSTRAINT (which may
+// mention pulls, e.g. `data{e}`) against the VALUE supplied for that field (e.g.
+// `data{6}`), and writes the resolved value into the pull's binding in `copy`. It
+// descends structurally:
+//   * constraint is a Mention of a PULL binding (kind .Pointing_Pull) in `src`
+//     → bind that pull to `value` (write into copy at the pull's index).
+//   * both are carves of the same source → unify override-by-override (the slot a
+//     constraint override targets is matched to the value override at the same slot).
+//   * both are scopes → unify field-by-field by position.
+// `src` is the original (pre-clone) scope, used to recognize a mention as a pull
+// and to map its index into `copy` (same column order).
+unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
+	if constraint == nil || value == nil do return
+
+	// A mention of a pull on the constraint side: bind it to the value.
+	if m, ok := constraint^.(Mention_Type); ok {
+		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(copy.kind) {
+			if copy.kind[m.match_index] == .Pointing_Pull {
+				copy.values[m.match_index] = value
+				if m.match_index < len(copy.type_folds) {
+					copy.type_folds[m.match_index] = fold_value_type(value)
+				}
+			}
+		}
+		return
+	}
+
+	// Two carves: unify each constraint override against the value override that
+	// targets the same source slot.
+	if cc, c_ok := &constraint^.(Carve_Type); c_ok {
+		vc, v_ok := &value^.(Carve_Type)
+		if v_ok {
+			for ci in 0 ..< len(cc.references) {
+				slot := cc.references[ci].match_index
+				// find the value override hitting the same slot
+				for vi in 0 ..< len(vc.references) {
+					if vc.references[vi].match_index == slot {
+						unify_pull(cc.values[ci], vc.values[vi], copy, src)
+						break
+					}
+				}
+			}
+		}
+		return
+	}
+
+	// Two scopes: unify field-by-field by position.
+	if cs, c_ok := &constraint^.(Scope_Type); c_ok {
+		if vs, v_ok := &value^.(Scope_Type); v_ok {
+			n := min(len(cs.values), len(vs.values))
+			for i in 0 ..< n {
+				unify_pull(cs.values[i], vs.values[i], copy, src)
+			}
+		}
+	}
 }
 
 // scope_clone copies a scope's columns into a fresh Scope_Type so overrides and
