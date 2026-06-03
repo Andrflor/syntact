@@ -326,15 +326,20 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		for i := 0; i < len(v.kind); i += 1 {
 			if !first do strings.write_string(b, ", ")
 			first = false
+			// Prefer the field's cached concrete fold over its raw value: a computed
+			// field (`y -> x+10`) keeps `x + 10` in values[i] but its materialized
+			// result (15) in type_folds[i]. Mirrors the default-suite runner.
+			fv := v.values[i]
+			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
 			if v.kind[i] == .Product {
 				strings.write_string(b, "-> ")
-				write_value(b, v.values[i])
+				write_value(b, fv)
 			} else {
 				if v.names[i] != "" {
 					strings.write_string(b, v.names[i])
 					strings.write_string(b, " -> ")
 				}
-				write_value(b, v.values[i])
+				write_value(b, fv)
 			}
 		}
 		strings.write_byte(b, '}')
