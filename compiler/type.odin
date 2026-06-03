@@ -326,6 +326,14 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 //     {->u8}:a -> u8 ✅.
 satisfy :: proc(fc, ft: ^Type) -> bool {
 	if fc == nil || ft == nil do return false
+	// A union on the VALUE side (ft) — a type `a | b` satisfies the constraint fc
+	// iff BOTH a and b do (every value the union can take must fall inside fc). This
+	// mirrors the Or case on the constraint side below, but conjunctively. Checked
+	// first so it applies whatever fc is (e.g. a pattern's combined product type
+	// `"" | 10` proving against the color `"" | 10`).
+	if vor, ok := ft^.(Or_Type); ok {
+		return satisfy(fc, vor.left) && satisfy(fc, vor.right)
+	}
 	#partial switch f in fc^ {
 	case Integer_Type:
 		v, ok := ft^.(Integer_Type)
