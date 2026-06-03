@@ -132,11 +132,17 @@ LSP_Server :: struct {
 }
 
 Document :: struct {
-	uri:      string,
-	version:  int,
-	content:  string,
-	ast:      ^compiler.Ast,
-	semantic: ^compiler.Semantic,
+	uri:     string,
+	version: int,
+	content: string,
+	ast:     ^compiler.Ast,
+	// The new analyzer has no `Semantic`; analysis lands in a Cache (root scope +
+	// parse/analyze diagnostics). `scope` is `cache.scope` after analyze().
+	cache:   ^compiler.Cache,
+	scope:   ^compiler.Scope_Type,
+	// Cursor→name resolution is lexical over the AST; the parent map is rebuilt on
+	// each (re)analysis and reused by definition/references/rename/completion.
+	parents: Parent_Map,
 }
 
 /* ======================================================================
@@ -291,8 +297,20 @@ write_json_string :: proc(b: ^strings.Builder, s: string) {
 			strings.write_string(b, "\\r")
 		case '\t':
 			strings.write_string(b, "\\t")
+		case '\b':
+			strings.write_string(b, "\\b")
+		case '\f':
+			strings.write_string(b, "\\f")
 		case:
-			strings.write_rune(b, c)
+			// JSON requires every control character (U+0000..U+001F) to be escaped
+			// as \u00XX — an unescaped one (e.g. a NUL from a `'\0'`-derived type
+			// string, or a non-printable char in a hover/completion detail) yields
+			// "Invalid string" in the client. Other runes pass through as UTF-8.
+			if c < 0x20 {
+				fmt.sbprintf(b, "\\u%04x", int(c))
+			} else {
+				strings.write_rune(b, c)
+			}
 		}
 	}
 	strings.write_byte(b, '"')
@@ -363,7 +381,7 @@ handle_request :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	case "textDocument/semanticTokens/full":
 		handle_semantic_tokens(server, msg)
 	case "textDocument/hover":
-		send_response(msg.id, json.Null{})
+		handle_hover(server, msg)
 	case "textDocument/definition":
 		handle_definition(server, msg)
 	case "textDocument/references":
@@ -428,6 +446,7 @@ handle_initialize :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	capabilities["definitionProvider"] = json.Boolean(true)
 	capabilities["referencesProvider"] = json.Boolean(true)
 	capabilities["renameProvider"] = json.Boolean(true)
+	capabilities["hoverProvider"] = json.Boolean(true)
 
 	trigger_chars := make([dynamic]json.Value)
 	append(&trigger_chars, json.String("."))
@@ -537,25 +556,21 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	if uri not_in server.documents do return
 	doc := &server.documents[uri]
 
-	cache := compiler.Cache{}
+	cache := new(compiler.Cache)
 
-	ast, parse_ok := compiler.parse(&cache, doc.content)
+	ast, parse_ok := compiler.parse(cache, doc.content)
 	doc.ast = ast
-	doc.semantic = nil
+	doc.cache = cache
+	doc.scope = nil
 
 	diagnostics := make([dynamic]Diagnostic, 0, len(cache.parse_errors) + 16)
 	defer delete(diagnostics)
 
 	for err in cache.parse_errors {
-		start_pos := compiler.span_to_position(ast, err.span.start)
-		end_pos := compiler.span_to_position(ast, err.span.end)
 		append(
 			&diagnostics,
 			Diagnostic {
-				range = Range {
-					start = Position{line = start_pos.line - 1, character = start_pos.column - 1},
-					end = Position{line = end_pos.line - 1, character = end_pos.column - 1},
-				},
+				range = span_range(ast, err.span),
 				severity = 1,
 				source = "syn-parse",
 				message = err.message,
@@ -563,24 +578,21 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		)
 	}
 
+	if ast != nil {
+		// Build the lexical parent map regardless of analysis success — it powers
+		// definition/references even when analysis bailed on an error.
+		doc.parents = build_parent_map(ast)
+	}
+
 	if ast != nil && parse_ok {
-		compiler.analyze(&cache, ast)
-		doc.semantic = cache.semantic
+		compiler.analyze(cache, ast)
+		doc.scope = cache.scope
 
 		for err in cache.analyze_errors {
 			append(
 				&diagnostics,
 				Diagnostic {
-					range = Range {
-						start = Position {
-							line = err.position.line - 1,
-							character = err.position.column - 1,
-						},
-						end = Position {
-							line = err.position.line - 1,
-							character = err.position.column - 1,
-						},
-					},
+					range = span_range(ast, err.span),
 					severity = 1,
 					source = "syn-analyze",
 					message = err.message,
@@ -592,16 +604,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 			append(
 				&diagnostics,
 				Diagnostic {
-					range = Range {
-						start = Position {
-							line = warn.position.line - 1,
-							character = warn.position.column - 1,
-						},
-						end = Position {
-							line = warn.position.line - 1,
-							character = warn.position.column - 1,
-						},
-					},
+					range = span_range(ast, warn.span),
 					severity = 2,
 					source = "syn-analyze",
 					message = warn.message,
@@ -611,6 +614,28 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	}
 
 	publish_diagnostics(uri, diagnostics[:])
+}
+
+// span_range converts a compiler Span (byte range) to an LSP range (0-based
+// line/char), resolving both ends via the AST's line table. This is all the LSP
+// needs now that every error — parse AND analyze — carries the offending node's
+// span (see Analyzer_Error.span / Parse_Error.span). The end is trimmed back over
+// any trailing whitespace/newline the parser may have folded into the span (which
+// happens for the last statement before EOF), so the highlight never bleeds onto
+// the next line.
+span_range :: proc(ast: ^compiler.Ast, span: compiler.Span) -> Range {
+	end := span.end
+	for end > span.start && int(end - 1) < len(ast.source) {
+		c := ast.source[end - 1]
+		if c == '\n' || c == '\r' || c == ' ' || c == '\t' do end -= 1
+		else do break
+	}
+	s := compiler.span_to_position(ast, span.start)
+	e := compiler.span_to_position(ast, end)
+	return Range {
+		start = Position{line = s.line - 1, character = s.column - 1},
+		end = Position{line = e.line - 1, character = e.column - 1},
+	}
 }
 
 publish_diagnostics :: proc(uri: string, diagnostics: []Diagnostic) {
@@ -652,19 +677,14 @@ publish_diagnostics :: proc(uri: string, diagnostics: []Diagnostic) {
  * ====================================================================== */
 
 handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	uri, bid, _, doc, ok := resolve_binding_at(server, msg.params)
-	if !ok {
+	uri, decl, _, doc, ok := resolve_binding_at(server, msg.params)
+	if !ok || decl == compiler.INVALID_NODE {
 		send_response(msg.id, json.Null{})
 		return
 	}
 
 	ast := doc.ast
-	sem := doc.semantic
-	entry := &sem.bindings[bid]
-	def_span := entry.name
-	if def_span.start == def_span.end && entry.node != compiler.INVALID_NODE {
-		def_span = ast.node_spans[entry.node]
-	}
+	def_span := name_span(ast, decl)
 	if def_span.start == def_span.end {
 		send_response(msg.id, json.Null{})
 		return
@@ -675,16 +695,88 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	send_response(msg.id, make_location(uri, def_start, def_end))
 }
 
+// handle_hover renders the identifier under the cursor: its name and its folded
+// type/constraint (the declared color, else the value's type). Resolution uses the
+// analyzed Scope_Type — find the enclosing scope by position, resolve the name,
+// and describe its constraint/type fold. A builtin name shows its constraint set.
+handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
+	uri, _, use, doc, ok := resolve_binding_at(server, msg.params)
+	if !ok || use == compiler.INVALID_NODE {
+		send_response(msg.id, json.Null{})
+		return
+	}
+	_ = uri
+	ast := doc.ast
+	name := compiler.node_name_str(ast, use)
+	if name == "" {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	detail := hover_detail(doc, use, name)
+	if detail == "" {
+		send_response(msg.id, json.Null{})
+		return
+	}
+
+	// Render as a markdown code block.
+	contents := make(map[string]json.Value)
+	contents["kind"] = json.String("markdown")
+	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", detail))
+
+	result := make(map[string]json.Value)
+	result["contents"] = json.Object(contents)
+	send_response(msg.id, json.Object(result))
+}
+
+// hover_detail builds the hover string for `name` at the cursor: "name : <type>"
+// from the binding's constraint/type fold in the enclosing analyzed scope, or
+// "name : <builtin set>" for a builtin, or just the name when nothing resolves.
+hover_detail :: proc(doc: ^Document, use: compiler.Node_Index, name: string) -> string {
+	ast := doc.ast
+	if doc.scope != nil {
+		enc := scope_type_at(ast, doc.parents, doc.scope, ast.node_spans[use].start)
+		if enc != nil {
+			if s, idx := compiler.scope_resolve(enc, name, -1, true); s != nil {
+				op := binding_kind_symbol(s.kind[idx])
+				t: ^compiler.Type = nil
+				if idx < len(s.constraint_folds) && s.constraint_folds[idx] != nil {
+					t = s.constraint_folds[idx]
+				} else if idx < len(s.type_folds) && s.type_folds[idx] != nil {
+					t = s.type_folds[idx]
+				}
+				if t != nil {
+					return fmt.tprintf("%s %s %s", name, op, compiler.describe_type(t))
+				}
+				return fmt.tprintf("%s %s", name, op)
+			}
+		}
+	}
+	// Builtin: show the set it denotes.
+	if bt, is_b := compiler.builtins[name]; is_b {
+		bt_copy := bt
+		return fmt.tprintf("%s : %s", name, compiler.describe_type(&bt_copy))
+	}
+	return ""
+}
+
+// resolve_binding_at maps a cursor to the identifier under it (`use`) and the
+// identifier that declares its name (`decl`), resolved LEXICALLY over the AST. A
+// declaration resolves to itself. Returns ok=false when the cursor is not on a
+// resolvable identifier.
 resolve_binding_at :: proc(
 	server: ^LSP_Server,
 	params: json.Value,
 ) -> (
 	uri: string,
-	bid: compiler.Binding_Id,
-	node: compiler.Node_Index,
+	decl: compiler.Node_Index,
+	use: compiler.Node_Index,
 	doc: ^Document,
 	ok: bool,
 ) {
+	decl = compiler.INVALID_NODE
+	use = compiler.INVALID_NODE
+
 	p, p_ok := params.(json.Object)
 	if !p_ok do return
 
@@ -699,8 +791,7 @@ resolve_binding_at :: proc(
 
 	d := &server.documents[u]
 	ast := d.ast
-	sem := d.semantic
-	if ast == nil || sem == nil do return
+	if ast == nil do return
 
 	compiler.ensure_line_starts(ast)
 	offset := lsp_pos_to_offset(ast, line, char)
@@ -710,58 +801,37 @@ resolve_binding_at :: proc(
 	if target == compiler.INVALID_NODE do return
 	if ast.node_kinds[target] != .Identifier do return
 
-	b := sem.node_sems[target].ref_binding
-	if b == compiler.INVALID_BINDING {
-		name_span := compiler.node_name_span(ast, target)
-		if name_span.start == name_span.end do name_span = ast.node_spans[target]
-		for i := 0; i < len(sem.bindings); i += 1 {
-			entry := &sem.bindings[i]
-			if entry.name.start == name_span.start && entry.name.end == name_span.end {
-				b = compiler.Binding_Id(i)
-				break
-			}
-		}
-		if b == compiler.INVALID_BINDING do return
+	dn := resolve_definition(ast, d.parents, target)
+	if dn == compiler.INVALID_NODE {
+		// The name is undeclared in scope (a builtin like u8, or an undefined id).
+		// Treat the identifier itself as both use and (self-)declaration so rename
+		// at least scopes to same-name uses; definition will return nothing useful.
+		dn = target
 	}
-
-	return u, b, target, d, true
+	return u, dn, target, d, true
 }
 
 find_all_ref_locations :: proc(
 	uri: string,
 	doc: ^Document,
-	bid: compiler.Binding_Id,
+	decl: compiler.Node_Index,
 	include_decl: bool,
 ) -> [dynamic]json.Value {
 	ast := doc.ast
-	sem := doc.semantic
 	locations := make([dynamic]json.Value, 0, 16)
+	if decl == compiler.INVALID_NODE do return locations
 
-	if include_decl {
-		entry := &sem.bindings[bid]
-		decl_span := entry.name
-		if decl_span.start != decl_span.end {
-			ds := compiler.span_to_position(ast, decl_span.start)
-			de := compiler.span_to_position(ast, decl_span.end)
-			append(&locations, make_location(uri, ds, de))
-		}
-	}
+	name := compiler.node_name_str(ast, decl)
+	refs := all_references(ast, doc.parents, name, decl)
 
-	for i := 0; i < len(sem.node_sems); i += 1 {
-		ns := &sem.node_sems[i]
-		if ns.ref_binding != bid do continue
-		if ast.node_kinds[i] != .Identifier do continue
-
-		idx := compiler.Node_Index(i)
-		span := compiler.node_name_span(ast, idx)
-		if span.start == span.end do span = ast.node_spans[i]
+	for idx in refs {
+		if !include_decl && idx == decl do continue
+		span := name_span(ast, idx)
 		if span.start == span.end do continue
-
 		s := compiler.span_to_position(ast, span.start)
 		e := compiler.span_to_position(ast, span.end)
 		append(&locations, make_location(uri, s, e))
 	}
-
 	return locations
 }
 
@@ -770,7 +840,7 @@ find_all_ref_locations :: proc(
  * ====================================================================== */
 
 handle_references :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	uri, bid, _, doc, ok := resolve_binding_at(server, msg.params)
+	uri, decl, _, doc, ok := resolve_binding_at(server, msg.params)
 	if !ok {
 		send_response(msg.id, json.Null{})
 		return
@@ -785,7 +855,7 @@ handle_references :: proc(server: ^LSP_Server, msg: LSP_Message) {
 		}
 	}
 
-	locations := find_all_ref_locations(uri, doc, bid, include_decl)
+	locations := find_all_ref_locations(uri, doc, decl, include_decl)
 	send_response(msg.id, json.Array(locations))
 }
 
@@ -794,15 +864,14 @@ handle_references :: proc(server: ^LSP_Server, msg: LSP_Message) {
  * ====================================================================== */
 
 handle_prepare_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	_, _, node, doc, ok := resolve_binding_at(server, msg.params)
-	if !ok {
+	_, _, use, doc, ok := resolve_binding_at(server, msg.params)
+	if !ok || use == compiler.INVALID_NODE {
 		send_error_response(msg.id, -32602, "Cannot rename this element")
 		return
 	}
 
 	ast := doc.ast
-	span := compiler.node_name_span(ast, node)
-	if span.start == span.end do span = ast.node_spans[node]
+	span := name_span(ast, use)
 
 	s := compiler.span_to_position(ast, span.start)
 	e := compiler.span_to_position(ast, span.end)
@@ -827,7 +896,7 @@ handle_prepare_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
 }
 
 handle_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	uri, bid, _, doc, ok := resolve_binding_at(server, msg.params)
+	uri, decl, _, doc, ok := resolve_binding_at(server, msg.params)
 	if !ok {
 		send_error_response(msg.id, -32602, "Cannot rename this element")
 		return
@@ -844,7 +913,7 @@ handle_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
 		return
 	}
 
-	locations := find_all_ref_locations(uri, doc, bid, true)
+	locations := find_all_ref_locations(uri, doc, decl, true)
 
 	edits := make([dynamic]json.Value, 0, len(locations))
 	for loc in locations {
@@ -883,9 +952,16 @@ make_location :: proc(uri: string, start, end: compiler.Position) -> json.Value 
 	return json.Object(result)
 }
 
+// lsp_pos_to_offset maps an LSP (line, character) to a source byte offset. The
+// result is CLAMPED to [0, len(source)] — an editor can place the cursor past the
+// last column or at end-of-file (e.g. when triggering completion), and an
+// unclamped offset would index out of bounds on the next `source[offset]` access.
 lsp_pos_to_offset :: proc(ast: ^compiler.Ast, line, char: int) -> int {
 	if line < 0 || line >= len(ast.line_starts) do return -1
-	return int(ast.line_starts[line]) + char
+	off := int(ast.line_starts[line]) + char
+	if off < 0 do off = 0
+	if off > len(ast.source) do off = len(ast.source)
+	return off
 }
 
 find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
@@ -940,9 +1016,8 @@ handle_completion :: proc(server: ^LSP_Server, msg: LSP_Message) {
 
 	doc := &server.documents[uri]
 	ast := doc.ast
-	sem := doc.semantic
 
-	if ast == nil || sem == nil {
+	if ast == nil {
 		send_empty_completion(msg.id)
 		return
 	}
@@ -959,9 +1034,9 @@ handle_completion :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	is_dot := offset > 0 && ast.source[offset - 1] == '.'
 
 	if is_dot {
-		collect_property_completions(ast, sem, u32(offset), &items)
+		collect_property_completions(doc, u32(offset), &items)
 	} else {
-		collect_scope_completions(ast, sem, u32(offset), &items)
+		collect_scope_completions(doc, u32(offset), &items)
 	}
 
 	result := make(map[string]json.Value)
@@ -977,19 +1052,20 @@ send_empty_completion :: proc(id: Maybe(json.Value)) {
 	send_response(id, json.Object(result))
 }
 
-collect_property_completions :: proc(
-	ast: ^compiler.Ast,
-	sem: ^compiler.Semantic,
-	offset: u32,
-	items: ^[dynamic]json.Value,
-) {
+// collect_property_completions : after `expr.`, complete the bindings of the
+// scope `expr` denotes. We resolve `expr` (the dot's source identifier) to its
+// declaration value via the analyzed Scope_Type, peel it to a Scope_Type, and list
+// its named fields.
+collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
+	ast := doc.ast
+	if doc.scope == nil do return
 	source_node := find_dot_source(ast, offset)
 	if source_node == compiler.INVALID_NODE do return
+	if ast.node_kinds[source_node] != .Identifier do return
 
-	scope_id := node_to_scope_id(ast, sem, source_node)
-	if scope_id != compiler.INVALID_SCOPE {
-		add_scope_bindings(ast, sem, scope_id, items)
-	}
+	target := scope_of_identifier(doc, source_node)
+	if target == nil do return
+	add_scope_bindings(ast, target, items)
 }
 
 find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
@@ -1007,78 +1083,45 @@ find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index 
 		}
 	}
 	if best == compiler.INVALID_NODE do return compiler.INVALID_NODE
-	return compiler.node_left(ast, best)
+	return node_left(ast, best)
 }
 
-node_to_scope_id :: proc(
-	ast: ^compiler.Ast,
-	sem: ^compiler.Semantic,
-	node: compiler.Node_Index,
-) -> compiler.Scope_Id {
-	ns := &sem.node_sems[node]
-
-	if scope_node, is_scope := ns.value.(compiler.Node_Index); is_scope {
-		sid, ok := compiler.sem_find_scope(sem, scope_node)
-		if ok do return sid
-	}
-
-	if ref, is_ref := ns.value.(compiler.Ref_SV); is_ref {
-		entry := &sem.bindings[ref.binding]
-		if scope_node, is_scope := entry.value.(compiler.Node_Index); is_scope {
-			sid, ok := compiler.sem_find_scope(sem, scope_node)
-			if ok do return sid
-		}
-	}
-
-	if ns.ref_binding != compiler.INVALID_BINDING {
-		entry := &sem.bindings[ns.ref_binding]
-		if scope_node, is_scope := entry.value.(compiler.Node_Index); is_scope {
-			sid, ok := compiler.sem_find_scope(sem, scope_node)
-			if ok do return sid
-		}
-	}
-
-	bid := sem.node_sems[node].ref_binding
-	if bid != compiler.INVALID_BINDING {
-		entry := &sem.bindings[bid]
-		if entry.value_node != compiler.INVALID_NODE {
-			vn := entry.value_node
-			if ast.node_kinds[vn] == .ScopeNode {
-				sid, ok := compiler.sem_find_scope(sem, vn)
-				if ok do return sid
-			}
-		}
-	}
-
-	return compiler.INVALID_SCOPE
+// scope_of_identifier resolves the identifier `ident` to the Scope_Type its value
+// denotes (peeling Mention/Reference/Carve and `follow`), for property completion.
+// Returns nil when it is not scope-valued. Resolution is lexical: find the binding
+// in the enclosing analyzed scope by name, then follow its value to a scope.
+scope_of_identifier :: proc(doc: ^Document, ident: compiler.Node_Index) -> ^compiler.Scope_Type {
+	ast := doc.ast
+	name := compiler.node_name_str(ast, ident)
+	if name == "" do return nil
+	enc := scope_type_at(ast, doc.parents, doc.scope, ast.node_spans[ident].start)
+	if enc == nil do return nil
+	s, idx := compiler.scope_resolve(enc, name, -1, true)
+	if s == nil do return nil
+	val := compiler.follow(s.values[idx])
+	if val == nil do return nil
+	if sc, ok := &val.(compiler.Scope_Type); ok do return sc
+	return nil
 }
 
-collect_scope_completions :: proc(
-	ast: ^compiler.Ast,
-	sem: ^compiler.Semantic,
-	offset: u32,
-	items: ^[dynamic]json.Value,
-) {
+collect_scope_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
+	ast := doc.ast
 	seen := make(map[string]bool)
 	defer delete(seen)
 
-	scope_id := find_scope_at_offset(ast, sem, offset)
-	sid := scope_id
-	for sid != compiler.INVALID_SCOPE {
-		scope := &sem.scopes[sid]
-		first := u32(scope.first_binding)
-		for i in first ..< first + scope.binding_count {
-			entry := &sem.bindings[i]
-			if entry.name == compiler.EMPTY_SPAN do continue
-			name := ast.source[entry.name.start:entry.name.end]
+	scope := scope_type_at(ast, doc.parents, doc.scope, offset)
+	for scope != nil {
+		for i := 0; i < len(scope.names); i += 1 {
+			name := scope.names[i]
+			if name == "" do continue
 			if name in seen do continue
 			seen[name] = true
-			append(items, make_completion_item(name, entry))
+			append(items, make_completion_item(scope, i))
 		}
-		sid = sem.scopes[sid].parent
+		scope = scope.parent
 	}
 
-	for bname in compiler.BUILTIN_NAMES {
+	for bname in compiler.builtins {
 		if bname in seen do continue
 		item := make(map[string]json.Value)
 		item["label"] = json.String(bname)
@@ -1087,122 +1130,80 @@ collect_scope_completions :: proc(
 	}
 }
 
-find_scope_at_offset :: proc(
-	ast: ^compiler.Ast,
-	sem: ^compiler.Semantic,
-	offset: u32,
-) -> compiler.Scope_Id {
-	best_scope := compiler.Scope_Id(0)
-	best_size := max(u32)
-
-	for i := 0; i < len(sem.scopes); i += 1 {
-		scope := &sem.scopes[i]
-		if scope.node == compiler.INVALID_NODE {
-			if i == 0 {
-				best_scope = compiler.Scope_Id(i)
-			}
-			continue
-		}
-		span := ast.node_spans[scope.node]
-		if span.start <= offset && offset <= span.end {
-			size := span.end - span.start
-			if size < best_size {
-				best_size = size
-				best_scope = compiler.Scope_Id(i)
-			}
-		}
-	}
-
-	return best_scope
-}
-
-add_scope_bindings :: proc(
-	ast: ^compiler.Ast,
-	sem: ^compiler.Semantic,
-	scope_id: compiler.Scope_Id,
-	items: ^[dynamic]json.Value,
-) {
-	scope := &sem.scopes[scope_id]
-	first := u32(scope.first_binding)
-	for i in first ..< first + scope.binding_count {
-		entry := &sem.bindings[i]
-		if entry.name == compiler.EMPTY_SPAN do continue
-		name := ast.source[entry.name.start:entry.name.end]
-		append(items, make_completion_item(name, entry))
+add_scope_bindings :: proc(ast: ^compiler.Ast, scope: ^compiler.Scope_Type, items: ^[dynamic]json.Value) {
+	for i := 0; i < len(scope.names); i += 1 {
+		if scope.names[i] == "" do continue
+		append(items, make_completion_item(scope, i))
 	}
 }
 
-make_completion_item :: proc(name: string, entry: ^compiler.Binding_Entry) -> json.Value {
+// make_completion_item builds a completion item for binding `i` of `scope`, with a
+// kind from the binding kind / value shape and a detail string from the folded type.
+make_completion_item :: proc(scope: ^compiler.Scope_Type, i: int) -> json.Value {
 	item := make(map[string]json.Value)
-	item["label"] = json.String(name)
-	item["insertTextFormat"] = json.Integer(1) // plain text, not snippet
+	item["label"] = json.String(scope.names[i])
+	item["insertTextFormat"] = json.Integer(1) // plain text
 
-	kind := COMPLETION_KIND_VARIABLE
-	#partial switch entry.kind {
+	kind := scope.kind[i]
+	value := scope.values[i]
+	ckind := COMPLETION_KIND_VARIABLE
+	#partial switch kind {
 	case .Pointing_Push:
-		if _, is_scope := entry.value.(compiler.Node_Index); is_scope {
-			kind = COMPLETION_KIND_MODULE
+		if value != nil {
+			if _, is_scope := compiler.follow(value).(compiler.Scope_Type); is_scope {
+				ckind = COMPLETION_KIND_MODULE
+			}
 		}
-	case .Pointing_Pull:
-		kind = COMPLETION_KIND_VARIABLE
-	case .Event_Push, .Event_Pull:
-		kind = COMPLETION_KIND_EVENT
-	case .Resonance_Push, .Resonance_Pull:
-		kind = COMPLETION_KIND_EVENT
-	case .Reactive_Push, .Reactive_Pull:
-		kind = COMPLETION_KIND_EVENT
+	case .Event_Push, .Event_Pull, .Resonance_Push, .Resonance_Pull,
+	     .Reactive_Push, .Reactive_Pull:
+		ckind = COMPLETION_KIND_EVENT
 	case .Product:
-		kind = COMPLETION_KIND_PROPERTY
+		ckind = COMPLETION_KIND_PROPERTY
 	}
-	item["kind"] = json.Integer(kind)
+	item["kind"] = json.Integer(ckind)
 
-	detail := binding_kind_label(entry.kind, entry.value)
-	if detail != "" {
-		item["detail"] = json.String(detail)
-	}
-
+	detail := binding_detail(scope, i)
+	if detail != "" do item["detail"] = json.String(detail)
 	return json.Object(item)
 }
 
-binding_kind_label :: proc(kind: compiler.Sem_Binding_Kind, sv: compiler.Static_Value) -> string {
+// binding_detail renders a short type/kind description for a binding: its folded
+// type (constraint or value) plus the directional operator symbol.
+binding_detail :: proc(scope: ^compiler.Scope_Type, i: int) -> string {
+	op := binding_kind_symbol(scope.kind[i])
+	// Prefer the constraint fold (the declared color), else the value type fold.
+	t: ^compiler.Type = nil
+	if i < len(scope.constraint_folds) && scope.constraint_folds[i] != nil {
+		t = scope.constraint_folds[i]
+	} else if i < len(scope.type_folds) && scope.type_folds[i] != nil {
+		t = scope.type_folds[i]
+	}
+	if t == nil do return op
+	return compiler.describe_type(t)
+}
+
+binding_kind_symbol :: proc(kind: compiler.Binding_Kind) -> string {
 	switch kind {
 	case .Pointing_Push:
-		switch _ in sv {
-		case compiler.Node_Index:
-			return "scope (->)"
-		case compiler.Integer_SV:
-			return "integer (->)"
-		case compiler.Float_SV:
-			return "float (->)"
-		case bool:
-			return "bool (->)"
-		case compiler.Span:
-			return "string (->)"
-		case compiler.Unresolved_SV:
-			return "type (->)"
-		case compiler.Ref_SV:
-			return "binding (->)"
-		case:
-			return "binding (->)"
-		}
+		return "->"
 	case .Pointing_Pull:
-		return "pull (<-)"
+		return "<-"
 	case .Event_Push:
-		return "event push (>-)"
+		return ">-"
 	case .Event_Pull:
-		return "event pull (-<)"
+		return "-<"
 	case .Resonance_Push:
-		return "resonance (>>-)"
+		return ">>-"
 	case .Resonance_Pull:
-		return "resonance (-<<)"
+		return "-<<"
 	case .Reactive_Push:
-		return "reactive (>>=)"
+		return ">>="
 	case .Reactive_Pull:
-		return "reactive (=<<)"
-	case .Product:
-		return "production (->)"
+		return "=<<"
 	case .Expand:
-		return "expand (...)"
+		return "..."
+	case .Product:
+		return "->"
 	}
 	return ""
 }
@@ -1275,7 +1276,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 	defer delete(parent_kind)
 	is_left := make([]bool, node_count)
 	defer delete(is_left)
-	build_parent_map(ast, parent_kind, is_left)
+	build_token_parent_map(ast, parent_kind, is_left)
 
 	for i := 0; i < node_count; i += 1 {
 		idx := compiler.Node_Index(i)
@@ -1289,7 +1290,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		#partial switch kind {
 		case .Identifier:
 			name := compiler.node_name_str(ast, idx)
-			if compiler.is_builtin_name(name) {
+			if is_builtin(name) {
 				tok_type = int(Sem_Token_Type.Class)
 			} else {
 				pk := parent_kind[i]
@@ -1330,13 +1331,13 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 					tok_type = int(Sem_Token_Type.Variable)
 				}
 			}
-			name_span := compiler.node_name_span(ast, idx)
+			name_span := name_span(ast, idx)
 			if name_span.start != name_span.end {
 				span = name_span
 			}
 
 		case .Literal:
-			lit_kind := compiler.node_literal_kind(ast, idx)
+			lit_kind := node_literal_kind(ast, idx)
 			#partial switch lit_kind {
 			case .Integer, .Float, .Hexadecimal, .Binary:
 				tok_type = int(Sem_Token_Type.Number)
@@ -1387,7 +1388,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 	emit_punctuation_tokens(ast, tokens)
 }
 
-build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, is_left: []bool) {
+build_token_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, is_left: []bool) {
 	node_count := len(ast.node_kinds)
 	for i := 0; i < node_count; i += 1 {
 		idx := compiler.Node_Index(i)
@@ -1401,8 +1402,8 @@ build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, 
 			is_left: []bool,
 			node_count: int,
 		) {
-			left := compiler.node_left(ast, idx)
-			right := compiler.node_right(ast, idx)
+			left := node_left(ast, idx)
+			right := node_right(ast, idx)
 			if left != compiler.INVALID_NODE && int(left) < node_count {
 				parent_kind[left] = kind
 				is_left[left] = true
@@ -1435,7 +1436,7 @@ build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, 
 		case .Property:
 			mark_binary(ast, idx, kind, parent_kind, is_left, node_count)
 		case .Execute:
-			target := compiler.node_execute_target(ast, idx)
+			target := node_execute_target(ast, idx)
 			if target != compiler.INVALID_NODE && int(target) < node_count {
 				parent_kind[target] = kind
 				is_left[target] = true
@@ -1446,13 +1447,13 @@ build_parent_map :: proc(ast: ^compiler.Ast, parent_kind: []compiler.Node_Kind, 
 				parent_kind[d.scope] = kind
 			}
 		case .Pattern:
-			target := compiler.node_pattern_target(ast, idx)
+			target := node_pattern_target(ast, idx)
 			if target != compiler.INVALID_NODE && int(target) < node_count {
 				parent_kind[target] = kind
 			}
 		case .Operator:
-			left := compiler.node_operator_left(ast, idx)
-			right := compiler.node_operator_right(ast, idx)
+			left := node_operator_left(ast, idx)
+			right := node_operator_right(ast, idx)
 			if left != compiler.INVALID_NODE && int(left) < node_count {
 				parent_kind[left] = kind
 			}
@@ -1468,9 +1469,9 @@ emit_operator_tokens :: proc(
 	idx: compiler.Node_Index,
 	tokens: ^[dynamic]Raw_Sem_Token,
 ) {
-	span := compiler.node_span(ast, idx)
-	left := compiler.node_operator_left(ast, idx)
-	right := compiler.node_operator_right(ast, idx)
+	span := node_span(ast, idx)
+	left := node_operator_left(ast, idx)
+	right := node_operator_right(ast, idx)
 
 	left_end := ast.node_spans[left].end if left != compiler.INVALID_NODE else span.start
 	right_start := ast.node_spans[right].start if right != compiler.INVALID_NODE else span.end

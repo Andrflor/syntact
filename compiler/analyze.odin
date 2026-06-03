@@ -57,6 +57,11 @@ Analyzer_Error_Type :: enum {
 Analyzer_Error :: struct {
 	type:     Analyzer_Error_Type,
 	message:  string,
+	// `span` is the source byte range to underline; `position` is its start
+	// resolved to (line, column, offset). Both are filled at creation by sem_error
+	// from the offending node's span — mirroring Parse_Error — so every consumer
+	// (LSP, debug printing) reads them directly without recomputing.
+	span:     Span,
 	position: Position,
 }
 
@@ -136,6 +141,12 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 
 span_str :: proc(ast: ^Ast, s: Span) -> string {
 	return ast.source[s.start:s.end]
+}
+
+// node_span returns the source byte range of node `idx` — what sem_error now
+// takes, so the error carries the range to underline (not just a point).
+node_span :: proc(a: ^Analyzer, idx: Node_Index) -> Span {
+	return a.ast.node_spans[idx]
 }
 
 node_pos :: proc(a: ^Analyzer, idx: Node_Index) -> Position {
@@ -227,7 +238,7 @@ typecheck :: proc(
 				display,
 			),
 			.Insoluble_Constraint,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 		return
 	}
@@ -244,7 +255,7 @@ typecheck :: proc(
 				describe_type(fc),
 			),
 			.Constraint_Mismatch,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 	} else if !satisfy_root(fc, ft) {
 		sem_error(
@@ -256,7 +267,7 @@ typecheck :: proc(
 				display,
 			),
 			.Constraint_Mismatch,
-			node_pos(a, node),
+			node_span(a, node),
 		)
 	}
 }
@@ -590,7 +601,7 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 	} else if left_kind == .Identifier {
 		name = span_str(ast, ast.node_data[left_idx].identifier.name)
 	} else {
-		sem_error(a, "invalid binding name", .Invalid_Binding_Name, node_pos(a, left_idx))
+		sem_error(a, "invalid binding name", .Invalid_Binding_Name, node_span(a, left_idx))
 	}
 
 	right_kind := ast.node_kinds[right_idx]
@@ -729,7 +740,7 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 				a,
 				fmt.tprintf("'.%s' is only valid inside a carve override", prop_name),
 				.Invalid_Property_Access,
-				node_pos(a, right_idx),
+				node_span(a, right_idx),
 			)
 			result := new(Type)
 			result^ = Invalid_Type{}
@@ -741,7 +752,7 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 				a,
 				fmt.tprintf("'.%s' does not exist in the carved scope", prop_name),
 				.Invalid_Property_Access,
-				node_pos(a, right_idx),
+				node_span(a, right_idx),
 			)
 			result := new(Type)
 			result^ = Invalid_Type{}
@@ -783,7 +794,7 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 			a,
 			fmt.tprintf("property '%s' does not exist", prop_name),
 			.Invalid_Property_Access,
-			node_pos(a, right_idx),
+			node_span(a, right_idx),
 		)
 		result := new(Type)
 		result^ = Invalid_Type{}
@@ -925,7 +936,7 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 					a,
 					fmt.tprintf("'%s' does not exist in the carved scope", cname),
 					.Invalid_Carve,
-					node_pos(a, name_idx),
+					node_span(a, name_idx),
 				)
 			}
 
@@ -944,7 +955,7 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 								describe_type(cf),
 							),
 							.Constraint_Mismatch,
-							node_pos(a, val_idx),
+							node_span(a, val_idx),
 						)
 					}
 				}
@@ -973,7 +984,7 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 					a,
 					"positional carve out of range: the scope has fewer fields",
 					.Invalid_Carve,
-					node_pos(a, child),
+					node_span(a, child),
 				)
 			}
 
@@ -991,7 +1002,7 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 								describe_type(cf),
 							),
 							.Constraint_Mismatch,
-							node_pos(a, child),
+							node_span(a, child),
 						)
 					}
 				}
@@ -1038,7 +1049,7 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
 					display,
 				),
 				.Constraint_Mismatch,
-				node_pos(a, node),
+				node_span(a, node),
 			)
 		}
 	}
@@ -1107,7 +1118,7 @@ walk_pattern :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 			a,
 			"non-exhaustive pattern: the branches do not cover every value of the target (add a covering branch or an empty `->` default)",
 			.Non_Exhaustive_Pattern,
-			node_pos(a, idx),
+			node_span(a, idx),
 		)
 	}
 
@@ -1257,7 +1268,7 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 		}
 	}
 
-	sem_error(a, fmt.tprintf("'%s' is not defined", name), .Undefined_Identifier, node_pos(a, idx))
+	sem_error(a, fmt.tprintf("'%s' is not defined", name), .Undefined_Identifier, node_span(a, idx))
 	result := new(Type)
 	result^ = Invalid_Type{}
 	return result
@@ -1272,16 +1283,20 @@ current_analyzer :: #force_inline proc() -> ^Analyzer {
 	return cast(^Analyzer)context.user_ptr
 }
 
+// sem_error / sem_warning take the offending node's SPAN and resolve its start to
+// a Position once, here — so an Analyzer_Error always carries both the byte range
+// (to underline) and its (line, column) (to print), like Parse_Error.
 sem_error :: proc(
 	s: ^Analyzer,
 	message: string,
 	error_type: Analyzer_Error_Type,
-	position: Position,
+	span: Span,
 ) {
 	error := Analyzer_Error {
 		type     = error_type,
 		message  = message,
-		position = position,
+		span     = span,
+		position = span_to_position(s.ast, span.start),
 	}
 	append(&s.errors, error)
 }
@@ -1290,12 +1305,13 @@ sem_warning :: proc(
 	s: ^Analyzer,
 	message: string,
 	error_type: Analyzer_Error_Type,
-	position: Position,
+	span: Span,
 ) {
 	warning := Analyzer_Error {
 		type     = error_type,
 		message  = message,
-		position = position,
+		span     = span,
+		position = span_to_position(s.ast, span.start),
 	}
 	append(&s.warnings, warning)
 }
