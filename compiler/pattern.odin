@@ -45,21 +45,23 @@ branch_match_constraint :: proc(branch: Pattern_Branch) -> ^Type {
 	return fold_constraint(branch.match)
 }
 
-// branch_covers reports whether a branch fully ABSORBS the target's folded value
-// `ft` — i.e. ft ⊆ match. When true, every target value lands in this branch, so
-// later branches are dead (the first covering branch wins, in order). A default
-// branch (nil match) covers everything. This is the predicate both the in-order
-// single-branch selection and the runtime reduction use.
+// branch_covers reports whether a branch fully ABSORBS the target's folded type
+// `ft` — i.e. the target's type_fold ⊆ this branch's match set. When true, every
+// target value lands in this branch, so later branches are dead (the first
+// covering branch wins, in order). A default branch (nil match) covers everything.
+// This is the predicate the in-order single-branch selection, fold_type, and the
+// runtime reduction all use. It is the SAME pure set-inclusion as exhaustiveness
+// (set_subset, not satisfy_root) so a set match `=0..` covers a set target `0..`.
 branch_covers :: proc(branch: Pattern_Branch, ft: ^Type) -> bool {
 	if branch.match == nil do return true // default covers everything
 	if ft == nil do return false
 	mc := branch_match_constraint(branch)
 	if mc == nil do return false
-	return satisfy_root(mc, ft)
+	return set_subset(ft, mc)
 }
 
 // branch_can_match is the in-order firing test: a branch fires for `ft` iff it
-// covers it (its match set contains the whole target value). Kept as a thin alias
+// covers it (its match set contains the whole target type). Kept as a thin alias
 // over branch_covers so callers read intent-first.
 branch_can_match :: proc(branch: Pattern_Branch, ft: ^Type) -> bool {
 	return branch_covers(branch, ft)

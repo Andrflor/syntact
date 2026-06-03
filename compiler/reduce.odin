@@ -93,8 +93,10 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 }
 
 // reduce_pattern collapses a pattern to the product of the FIRST branch whose
-// match fires for the reduced target — mirroring the in-order branch semantics.
-// When no branch fires (or the target can't be reduced), the pattern stays as is.
+// match fires for the target — the in-order branch semantics. A pattern that
+// passed exhaustiveness ALWAYS has a firing branch, so the fallback below is
+// unreachable in practice; if we ever hit it we return Invalid_Type rather than
+// leak the Pattern_Type itself — a pattern must never survive into a reduced value.
 reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	ft := fold_value_type(p.target)
 	if ft != nil {
@@ -105,7 +107,7 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 		}
 	}
 	r := new(Type)
-	r^ = p
+	r^ = Invalid_Type{}
 	return r
 }
 
