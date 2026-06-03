@@ -1,0 +1,1 @@
+{"name": "def_pat_bool_product", "description": "deterministic pattern product is true -> default true", "source": "r -> 5 ? {\n  u8 -> true\n  -> false\n}", "binding": "r", "expect": "true"}

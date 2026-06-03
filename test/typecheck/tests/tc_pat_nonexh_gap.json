@@ -1,0 +1,1 @@
+{ "name": "tc_pat_nonexh_gap", "description": "ranges leave a gap (201..255 uncovered): non-exhaustive", "source": "a -> ??::u8\nr -> a ? {\n  0..120 -> 1\n  22..200 -> 2\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_pat_insoluble_target_unknown", "description": "pattern as constraint with a bare-unknown target is insoluble", "source": "x -> ??\n(x ? { u8 -> u8  -> int }):a -> 5\n-> a", "expect_errors": ["Insoluble_Constraint"] }

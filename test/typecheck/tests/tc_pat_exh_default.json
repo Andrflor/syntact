@@ -1,0 +1,1 @@
+{ "name": "tc_pat_exh_default", "description": "pattern with empty-arrow default is always exhaustive", "source": "r -> 5 ? {\n  =7 -> 1\n  -> 0\n}\n-> r", "expect_errors": [] }

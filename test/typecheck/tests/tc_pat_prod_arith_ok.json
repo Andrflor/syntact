@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_arith_ok", "description": "arithmetic product 10+20=30 satisfies u8 binding", "source": "u8:r -> 5 ? {\n  u8 -> 10+20\n  -> 0\n}\n-> r", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{"name": "def_pat_typecheck_u8", "description": "pattern target 5, typecheck u8 covers, product 42 -> default 42", "source": "r -> 5 ? {\n  u8 -> 42\n  -> 0\n}", "binding": "r", "expect": "42"}

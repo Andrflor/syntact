@@ -1,0 +1,1 @@
+{"name": "def_pat_string_product", "description": "deterministic pattern product is a string -> default \"hi\"", "source": "r -> 5 ? {\n  u8 -> \"hi\"\n  -> \"\"\n}", "binding": "r", "expect": "\"hi\""}

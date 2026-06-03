@@ -1,0 +1,1 @@
+{"name": "def_pat_value_default_branch", "description": "pattern target 5, =7 misses, default -> 0 fires -> default 0", "source": "r -> 5 ? {\n  =7 -> 100\n  -> 0\n}", "binding": "r", "expect": "0"}

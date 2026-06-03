@@ -1,0 +1,1 @@
+{"name": "def_pat_typecheck_order", "description": "in-order: u8 (covers) fires before later branches -> product 11", "source": "r -> 5 ? {\n  u8 -> 11\n  =5 -> 22\n  -> 0\n}", "binding": "r", "expect": "11"}

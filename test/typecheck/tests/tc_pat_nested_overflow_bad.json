@@ -1,0 +1,1 @@
+{ "name": "tc_pat_nested_overflow_bad", "description": "nested pattern product 300 overflows u8 binding", "source": "u8:r -> 5 ? {\n  =5 -> (5 ? { =5 -> 300  -> 0 })\n  -> 0\n}\n-> r", "expect_errors": ["Constraint_Mismatch"] }

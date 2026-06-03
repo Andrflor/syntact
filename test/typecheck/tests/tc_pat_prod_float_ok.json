@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_float_ok", "description": "deterministic float product satisfies f64 binding", "source": "f64:r -> 5 ? {\n  u8 -> 1.5\n  -> 0.0\n}\n-> r", "expect_errors": [] }

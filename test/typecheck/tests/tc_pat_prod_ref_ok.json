@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_ref_ok", "description": "reference product satisfies binding color", "source": "k -> 99\nu8:r -> 5 ? {\n  u8 -> k\n  -> 0\n}\n-> r", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{"name": "tc_pat_combined_bool_string_bad", "description": "combined product (true | x-string) violates bool-only binding", "source": "a -> ??::u8\nbool:r -> a ? {\n  0..120 -> true\n  22..255 -> \"x\"\n}\n-> r", "expect_errors": ["Constraint_Mismatch"]}

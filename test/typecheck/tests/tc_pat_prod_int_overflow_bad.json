@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_int_overflow_bad", "description": "deterministic int product 300 violates u8 binding", "source": "u8:r -> 5 ? {\n  u8 -> 300\n  -> 0\n}\n-> r", "expect_errors": ["Constraint_Mismatch"] }

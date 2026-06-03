@@ -1,0 +1,1 @@
+{ "name": "tc_pat_two_values_nonexh", "description": "two value matches =5 =6 do not cover open u8: non-exhaustive", "source": "a -> ??::u8\nr -> a ? {\n  =5 -> 1\n  =6 -> 2\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"] }

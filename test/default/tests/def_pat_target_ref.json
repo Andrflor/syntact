@@ -1,0 +1,1 @@
+{"name": "def_pat_target_ref", "description": "pattern target via ref to a u8:x->5; u8 branch covers, product 9", "source": "u8:x -> 5\nr -> x ? {\n  u8 -> 9\n  -> 0\n}", "binding": "r", "expect": "9"}

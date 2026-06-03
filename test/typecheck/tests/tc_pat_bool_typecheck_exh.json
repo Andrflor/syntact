@@ -1,0 +1,1 @@
+{ "name": "tc_pat_bool_typecheck_exh", "description": "bool target: typecheck branch bool covers the whole domain", "source": "b -> ??::bool\nr -> b ? {\n  bool -> 1\n}\n-> r", "expect_errors": [] }

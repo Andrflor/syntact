@@ -1,0 +1,1 @@
+{"name": "def_pat_target_execute", "description": "pattern target is a collapse P! = 7; value =7 fires -> product 1", "source": "P -> {-> 7}\nr -> P! ? {\n  =7 -> 1\n  -> 0\n}", "binding": "r", "expect": "1"}

@@ -1,0 +1,1 @@
+{"name": "def_pat_float_product", "description": "deterministic pattern product is 1.5 -> default 1.5", "source": "r -> 5 ? {\n  u8 -> 1.5\n  -> 0.0\n}", "binding": "r", "expect": "1.5"}

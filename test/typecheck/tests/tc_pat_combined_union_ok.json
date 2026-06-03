@@ -1,0 +1,1 @@
+{"name": "tc_pat_combined_union_ok", "description": "non-deterministic combined product type (empty-string | 10) satisfies (string | u8) binding", "source": "a -> ??::u8\n(string|u8):r -> a ? {\n  0..120 -> \"\"\n  22..255 -> 10\n}\n-> r", "expect_errors": []}

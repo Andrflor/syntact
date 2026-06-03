@@ -1,0 +1,1 @@
+{ "name": "tc_pat_float_value_nonexh", "description": "f64 target: single value =1.0 does not cover f64: non-exhaustive", "source": "x -> ??::f64\nr -> x ? {\n  =1.0 -> 2.0\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_pat_exh_union_covers", "description": "two ranges whose union covers u8 target: 0..120 | 22..255 = 0..255 exhaustive", "source": "a -> ??::u8\nr -> a ? {\n  0..120 -> 1\n  22..255 -> 2\n}\n-> r", "expect_errors": [] }
