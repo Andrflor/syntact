@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_word_seq_digits_ok", "description": "~\"piro\" + digits accepts \"x42\" (non-piro prefix, then digits)", "source": "(~\"piro\" + '0'..'9' * 0..):s -> \"x42\"", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "tc_str_tri_range_url_ok", "description": "three-bound url-like range: starts http, contains api, ends com", "source": "\"http\"..\"api\"..\"com\":s -> \"http://api.com\"", "expect_errors": []}

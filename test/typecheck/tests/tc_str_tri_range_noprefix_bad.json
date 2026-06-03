@@ -1,0 +1,1 @@
+{"name": "tc_str_tri_range_noprefix_bad", "description": "\"ab\"..\"cd\"..\"ef\" rejects \"xycdef\" (wrong prefix)", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"xycdef\"", "expect_errors": ["Constraint_Mismatch"]}

@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_ord_seq_short_ok", "description": "~'\\0'*0.. + '\\0' accepts just a null (zero non-null chars then null)", "source": "(~'\\0' * 0.. + '\\0'):s -> '\\0'", "expect_errors": []}

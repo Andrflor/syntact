@@ -1,0 +1,1 @@
+{"name": "def_str_tri_range", "description": "default of \"ab\"..\"cd\"..\"ef\" is its prefix \"ab\"", "source": "\"ab\"..\"cd\"..\"ef\":s", "binding": "s", "expect": "\"ab\""}

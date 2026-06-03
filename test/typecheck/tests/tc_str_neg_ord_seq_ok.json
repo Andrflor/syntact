@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_ord_seq_ok", "description": "~'\\0'*0.. + '\\0' : zero-or-more non-null chars then a null \u2014 accepts plopa\\0 (user example, corrected form)", "source": "(~'\\0' * 0.. + '\\0'):s -> 'plopa\\0'", "expect_errors": []}

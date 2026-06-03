@@ -1,0 +1,1 @@
+{"name": "tc_str_tri_range_nomid_bad", "description": "\"ab\"..\"cd\"..\"ef\" rejects \"abef\" (missing the required middle cd)", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"abef\"", "expect_errors": ["Constraint_Mismatch"]}

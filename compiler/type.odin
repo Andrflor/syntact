@@ -159,6 +159,22 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// A pattern as a constraint resolves to ONE branch — the first whose
 			// match the target satisfies (see fold_constraint_pattern).
 			return fold_constraint_pattern(t)
+		case Compose_Type:
+			// A string concatenation `+` that is an ordered SEQUENCE (did not collapse
+			// to a concrete literal) keeps its Compose shape as the constraint — satisfy
+			// matches the value in order (string_compose_satisfy). Only when it is NOT a
+			// string sequence do we fall through to the numeric/string union folds.
+			if v.operator == .Add {
+				if _, ok := fold_string_sequence(t, true).([]String_Interval); ok {
+					if fold_constraint_string(t) == nil do return t
+				}
+			}
+		case Range_Type:
+			// A THREE-bound string range `"ab".."cd".."ef"` (a Range whose right is
+			// itself a Range) means: starts with "ab", CONTAINS "cd", ends with "ef".
+			// The flat string fold loses the middle, so keep the Range_Type itself as
+			// the constraint and let satisfy enforce all three (string_tri_range_satisfy).
+			if string_is_tri_range(t) do return t
 		}
 	}
 	// Range_Type / Compose_Type are domain-ambiguous: their family is decided by
@@ -359,6 +375,22 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 		return satisfy(fc, vor.left) && satisfy(fc, vor.right)
 	}
 	#partial switch f in fc^ {
+	case Compose_Type:
+		// A string concatenation `+` kept as a Compose is an ordered SEQUENCE
+		// constraint: the value (a concrete string) must split, left to right, into
+		// the sequence's segments in order (string_compose_satisfy).
+		if f.operator == .Add {
+			vt, ok := ft^.(String_Type)
+			if !ok do return false
+			return string_compose_satisfy(fc, vt)
+		}
+		return false
+	case Range_Type:
+		// A three-bound string range kept raw (`"ab".."cd".."ef"`): the value must
+		// start with the prefix, contain the middle, and end with the suffix.
+		vt, ok := ft^.(String_Type)
+		if !ok do return false
+		return string_tri_range_satisfy(fc, vt)
 	case Integer_Type:
 		v, ok := ft^.(Integer_Type)
 		return ok && integer_satisfy(f, v)
@@ -538,6 +570,14 @@ type_default :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
 	// Mention/Reference : the default is that of the targeted value.
 	#partial switch v in t^ {
+	case Compose_Type:
+		// A string concatenation `+` kept as an ordered SEQUENCE (not flattened):
+		// its default is the in-order concatenation of each segment's default
+		// ('a'..'z' + '@' + 'a'..'z' → "a@a"). string_sequence_default returns nil
+		// when the compose is not a string sequence, so we fall through.
+		if v.operator == .Add {
+			if d := string_sequence_default(t); d != nil do return d
+		}
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			return type_default(v.match_scope.values[v.match_index])
@@ -633,6 +673,12 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if folded != nil {
 		comp.type_fold = folded
 		return
+	}
+	// A string concatenation `+` that did NOT collapse to a concrete literal is an
+	// ORDERED SEQUENCE (`'a'..'z'*1.. + "@"`): it stays a Compose_Type and is matched
+	// in order at satisfy time (string_compose_satisfy). It is valid — no diagnostic.
+	if comp.operator == .Add {
+		if _, ok := fold_string_sequence(t, true).([]String_Interval); ok do return
 	}
 	// The fold failed. Hand off to the diagnostic layer, which inspects the
 	// operands and emits a precise, author-facing explanation (incompatible
@@ -995,6 +1041,13 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
 			return range_operand_kind(v.reference.match_scope.values[v.reference.match_index])
 		}
+		return .Invalid
+	case Negate_Type, And_Type, Or_Type:
+		// A set-algebra bound (`~'\0'`, `'a'..'z' & ~'m'`): its family is whatever it
+		// folds to. Probe the domains in turn so `(~'\0')..` reads as a String range.
+		if fold_constraint_integer(t) != nil do return .Integer
+		if fold_constraint_float(t) != nil do return .Float
+		if fold_constraint_string(t) != nil do return .String
 		return .Invalid
 	}
 	return .Invalid

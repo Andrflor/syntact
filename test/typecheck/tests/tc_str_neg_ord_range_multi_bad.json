@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_ord_range_multi_bad", "description": "(~'\\0').. is ONE char (an ordinal range, not a repetition) \u2014 rejects two chars 'ab'", "source": "((~'\\0')..):s -> 'ab'", "expect_errors": ["Constraint_Mismatch"]}

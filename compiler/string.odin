@@ -7,16 +7,20 @@ import "core:unicode/utf8"
 // ============================================================================
 // string/char family — unified model over []String_Interval.
 //
-// A String_Interval carries its bounds (lo, hi: Maybe(string)) and the original
-// quotation. The MODE is decided by string_interval_mode (see String_Interval in
-// ir.odin for the full rule):
-//   ORDINAL    only when .simple AND every present bound is ≤ 1 codepoint
-//              ('a'..'z' = any single char in [lo,hi]).
-//   POSITIONAL every other case (lo = prefix, hi = suffix): .double "a".."z"
-//              (positional even for 1-char bounds!), .backtick `a`..`z`, and
-//              .simple multi-char 'ab'..'cd'.
-// So `"a".."z"` is positional (starts a, ends z), NOT ordinal — only single-quote
-// single-char bounds are ordinal.
+// A String_Interval carries its bounds (lo, hi: Maybe(string)) and an `ordinal`
+// flag that IS the mode (set once at construction by quotation_is_ordinal):
+//   ORDINAL    (ordinal=true): a codepoint range — 'a'..'z' = any single char in
+//              [lo,hi]. A single-quote literal ≤ 1 codepoint.
+//   POSITIONAL (ordinal=false): lo = required prefix, hi = required suffix —
+//              "a".."z" = starts with a, ends with z (positional even for 1-char
+//              bounds!), and any double-quote / multi-char literal.
+// So `"a".."z"` is positional, NOT ordinal — only single-quote single-char bounds
+// are ordinal. The rest of the file reads `iv.ordinal` and never a quotation.
+//
+// A []String_Interval is always a UNION of alternatives. The ordered concatenation
+// `+` is NOT flattened here: it stays a Compose_Type and is matched in order at
+// satisfy time (fold_string_sequence / string_compose_satisfy). A three-bound range
+// `"ab".."cd".."ef"` likewise stays a raw Range_Type (string_tri_range_satisfy).
 //
 // Modeled on fold_integer.odin / fold_float.odin: a concrete Type is a
 // degenerate interval (lo == hi) with a single segment.
@@ -45,12 +49,42 @@ count_is_one :: proc(c: Integer_Type) -> bool {
 }
 
 
+// count_negation_sentinel : the impossible count {-1..-1} used to TAG a sequence
+// segment as a POSITIONAL word-negation (`~"piro"`). A real repetition count is
+// always ≥ 0, so -1 never collides; seg_is_negation reads it back. The segment's
+// lo carries the negated word.
+count_negation_sentinel :: proc() -> Integer_Type {
+	segs := make([]Integer_Interval, 1)
+	segs[0] = Integer_Interval{i128(-1), i128(-1)}
+	return Integer_Type{segs, i128(-1)}
+}
+
+
+// seg_is_negation : true if the segment is the word-negation sentinel.
+seg_is_negation :: proc(seg: String_Interval) -> bool {
+	if len(seg.count.integer_intervals) != 1 do return false
+	lo, lo_ok := seg.count.integer_intervals[0].lo.(i128)
+	hi, hi_ok := seg.count.integer_intervals[0].hi.(i128)
+	return lo_ok && hi_ok && lo == -1 && hi == -1
+}
+
+
+// quotation_is_ordinal : the ORDINAL/positional decision is made ONCE, at literal
+// construction, from the quotation and the bound length — a single-quote (.simple)
+// literal whose value is ≤ 1 codepoint is an ordinal char ('a'); everything else
+// (double/backtick quotes, multi-char single quotes) is positional. The result is
+// stored in String_Interval.ordinal so the rest of the file never re-derives it
+// from a quotation (which the interval no longer carries).
+quotation_is_ordinal :: proc(value: string, quotation: String_Quotation) -> bool {
+	return quotation == .simple && rune_count_le_one(value)
+}
+
 // Concrete (degenerate) string value: lo == hi. The default is the value
 // itself, like make_int_result/make_float_result.
 make_string_const :: proc(value: string, quotation: String_Quotation) -> Type {
 	intervals := make([]String_Interval, 1)
-	intervals[0] = String_Interval{value, value, quotation, count_one()}
-	return String_Type{intervals, value, quotation, false}
+	intervals[0] = String_Interval{value, value, quotation_is_ordinal(value, quotation), count_one()}
+	return String_Type{intervals, value, quotation}
 }
 
 
@@ -58,8 +92,8 @@ make_string_const :: proc(value: string, quotation: String_Quotation) -> Type {
 // Default = the empty string (the open lower bound of the positional).
 make_string_any :: proc() -> Type {
 	intervals := make([]String_Interval, 1)
-	intervals[0] = String_Interval{nil, nil, .double, count_one()}
-	return String_Type{intervals, "", .double, false}
+	intervals[0] = String_Interval{nil, nil, false, count_one()}
+	return String_Type{intervals, "", .double}
 }
 
 
@@ -109,12 +143,12 @@ first_rune :: proc(s: string) -> rune {
 }
 
 
+// The mode is now carried DIRECTLY by the interval's `ordinal` flag (set at
+// construction by quotation_is_ordinal), not re-derived from a quotation. An
+// ordinal interval is a codepoint range ('a'..'z'); a positional one is a
+// prefix/suffix pattern ("a".."z").
 string_interval_mode :: proc(iv: String_Interval) -> String_Mode {
-	if iv.quotation != .simple do return .positional
-	// simple : ordinal only if both present bounds are ≤ 1 char.
-	if lo, ok := iv.lo.(string); ok && !rune_count_le_one(lo) do return .positional
-	if hi, ok := iv.hi.(string); ok && !rune_count_le_one(hi) do return .positional
-	return .ordinal
+	return iv.ordinal ? .ordinal : .positional
 }
 
 
@@ -157,8 +191,14 @@ string_quote_pair :: #force_inline proc(q: String_Quotation) -> (open: rune, clo
 }
 
 
+// interval_quote : the quote to render an interval with, derived from its mode —
+// an ordinal char prints single-quoted ('a'), a positional string double-quoted.
+interval_quote :: proc(iv: String_Interval) -> String_Quotation {
+	return iv.ordinal ? String_Quotation.simple : .double
+}
+
 print_string_interval :: proc(iv: String_Interval) {
-	open, close := string_quote_pair(iv.quotation)
+	open, close := string_quote_pair(interval_quote(iv))
 	lo, lo_ok := iv.lo.(string)
 	hi, hi_ok := iv.hi.(string)
 	if lo_ok && hi_ok && lo == hi {
@@ -178,7 +218,7 @@ print_string_interval :: proc(iv: String_Interval) {
 // Renders a String_Type into a builder for diagnostic messages.
 write_string_desc :: proc(b: ^strings.Builder, t: String_Type) {
 	if string_is_concrete(t) {
-		open, close := string_quote_pair(t.string_intervals[0].quotation)
+		open, close := string_quote_pair(interval_quote(t.string_intervals[0]))
 		strings.write_rune(b, open)
 		strings.write_string(b, string_value(t))
 		strings.write_rune(b, close)
@@ -272,67 +312,54 @@ decode_string_literal :: proc(text: string, quotation: String_Quotation) -> stri
 // DOMAIN ENTRY POINTS — mirror of fold_type_integer / fold_constraint_integer.
 // ===========================================================================
 
-wrap_string_intervals :: proc(segs: []String_Interval, is_sequence := false) -> ^Type {
+// A folded []String_Interval is ALWAYS a UNION of alternatives now (the `|`
+// case). The ordered concatenation (`+`) is NOT flattened here — it stays a
+// Compose_Type and is matched as an ordered sequence at satisfy time (see
+// string_compose_satisfy / fold_string_sequence). So this wrapper has no
+// is_sequence knob: a String_Type's segments are always read as a union.
+wrap_string_intervals :: proc(segs: []String_Interval) -> ^Type {
 	r := new(Type)
-	def, def_q := default_for_string_intervals(segs, is_sequence)
-	r^ = String_Type{segs, def, def_q, is_sequence}
+	def, def_q := default_for_string_intervals(segs)
+	r^ = String_Type{segs, def, def_q}
 	return r
 }
 
-default_for_string_intervals :: proc(
-	segs: []String_Interval,
-	is_sequence := false,
-) -> (Maybe(string), String_Quotation) {
+// seg_default : one segment's default string — its low bound (or high if no low),
+// repeated by the LOW bound of its count ("ab"*3 → "ababab", 'a'..'z'*0.. → "").
+seg_default :: proc(iv: String_Interval) -> string {
+	base: string = ""
+	if lo, ok := iv.lo.(string); ok do base = lo
+	else if hi, ok2 := iv.hi.(string); ok2 do base = hi
+	n := 1
+	if len(iv.count.integer_intervals) > 0 {
+		if lo, ok := iv.count.integer_intervals[0].lo.(i128); ok do n = int(lo)
+	}
+	if n <= 0 do return ""
+	if n == 1 do return base
+	b := strings.builder_make()
+	for _ in 0 ..< n do strings.write_string(&b, base)
+	return strings.to_string(b)
+}
+
+// The default of a UNION (the only thing a []String_Interval is) is the first
+// term's default, rendered with that term's quote (ordinal → single, else double).
+default_for_string_intervals :: proc(segs: []String_Interval) -> (Maybe(string), String_Quotation) {
 	if len(segs) == 0 do return nil, .double
-
-	// One segment's default string: its low bound (or high if no low), repeated by
-	// the LOW bound of its count ("ab"*3 → "ababab", 'a'..'z'*0.. → "").
-	seg_default :: proc(iv: String_Interval) -> string {
-		base: string = ""
-		if lo, ok := iv.lo.(string); ok do base = lo
-		else if hi, ok2 := iv.hi.(string); ok2 do base = hi
-		n := 1
-		if len(iv.count.integer_intervals) > 0 {
-			if lo, ok := iv.count.integer_intervals[0].lo.(i128); ok do n = int(lo)
-		}
-		if n <= 0 do return ""
-		if n == 1 do return base
-		b := strings.builder_make()
-		for _ in 0 ..< n do strings.write_string(&b, base)
-		return strings.to_string(b)
-	}
-
-	// A sequence concatenates every segment's default in order; a union (or a lone
-	// segment) takes the first term's default. A concatenation is a multi-char
-	// STRING, so it renders with double quotes even when a part was a single char
-	// ('a'..'z' + '@' + 'a'..'z' → "a@a", not 'a@a') — unless every part is backtick.
-	if is_sequence {
-		b := strings.builder_make()
-		all_backtick := true
-		for iv in segs {
-			strings.write_string(&b, seg_default(iv))
-			if iv.quotation != .backtick do all_backtick = false
-		}
-		q := all_backtick ? String_Quotation.backtick : .double
-		return strings.to_string(b), q
-	}
-	return seg_default(segs[0]), segs[0].quotation
+	return seg_default(segs[0]), interval_quote(segs[0])
 }
 
 // fold_type_string : string envelope produced by a value, or nil.
 fold_type_string :: proc(t: ^Type) -> ^Type {
-	is_seq := false
-	segs, ok := fold_string_intervals(t, false, &is_seq).([]String_Interval)
+	segs, ok := fold_string_intervals(t, false).([]String_Interval)
 	if !ok do return nil
-	return wrap_string_intervals(segs, is_seq)
+	return wrap_string_intervals(segs)
 }
 
 // fold_constraint_string : resolved string constraint, or nil.
 fold_constraint_string :: proc(t: ^Type) -> ^Type {
-	is_seq := false
-	segs, ok := fold_string_intervals(t, true, &is_seq).([]String_Interval)
+	segs, ok := fold_string_intervals(t, true).([]String_Interval)
 	if !ok do return nil
-	return wrap_string_intervals(segs, is_seq)
+	return wrap_string_intervals(segs)
 }
 
 stored_string_intervals :: proc(t: ^Type) -> Maybe([]String_Interval) {
@@ -348,13 +375,12 @@ stored_string_intervals :: proc(t: ^Type) -> Maybe([]String_Interval) {
 // distinguishes the value fold (the string the expression produces) from the
 // constraint fold (the imposed set) — the difference shows up on
 // Mention/Reference where the constraint follows the target's VALUE, not its type.
-// `seq` (optional out-param) is set to true when the TOP-LEVEL result is an
-// ordered concatenation (`+`) rather than a union — see String_Type.is_sequence.
-fold_string_intervals :: proc(t: ^Type, as_constraint: bool, seq: ^bool = nil) -> Maybe([]String_Interval) {
+// A `+` concatenation does NOT fold to a flat union here (it stays a Compose_Type,
+// matched in order — see fold_string_sequence); only its concrete collapse does.
+fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_Interval) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case String_Type:
-		if seq != nil && v.is_sequence do seq^ = true
 		return v.string_intervals
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
@@ -377,11 +403,22 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool, seq: ^bool = nil) -
 			lseg, l_ok := fold_string_intervals(v.left, as_constraint).([]String_Interval)
 			rseg, r_ok := fold_string_intervals(v.right, as_constraint).([]String_Interval)
 			if !l_ok || !r_ok do return nil
-			// `+` builds an ORDERED sequence: keep the left segments followed by the
-			// right ones (string_intervals_concat folds the concrete-only case).
-			joined, is_seq := string_intervals_concat(lseg, rseg)
-			if seq != nil && is_seq do seq^ = true
-			return joined
+			// `+` of TWO CONCRETE single segments folds to one concrete literal
+			// ("jw" + "t" → "jwt").
+			if joined, ok := string_concat_concrete(lseg, rseg); ok {
+				return joined
+			}
+			// A purely POSITIONAL `+` (every segment a concrete/prefix/suffix, no
+			// ordinal class and no repetition) flattens to the legacy {prefix, suffix}
+			// positional interval — negation/intersection/default need a String_Type
+			// here (`~("".. + '_')`, `'a'..'z'+'@'+'a'..'z'`). A `+` that carries an
+			// ordinal CLASS or a repetition is an ORDERED SEQUENCE we do NOT flatten:
+			// it stays a Compose_Type and is matched in order by string_compose_satisfy
+			// (fold_constraint keeps the raw Compose). Returning nil signals that.
+			if positional_concat(lseg, rseg) {
+				return concat_positional_fold(lseg, rseg)
+			}
+			return nil
 		}
 		if v.operator == .Multiply {
 			// string * integer : repetition. The left operand is string, the right
@@ -409,7 +446,14 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool, seq: ^bool = nil) -
 	case Negate_Type:
 		inner, ok := fold_string_intervals(v.operand, as_constraint).([]String_Interval)
 		if !ok do return nil
-		return string_intervals_negate(inner)
+		neg := string_intervals_negate(inner)
+		// An ORDINAL negation expands to codepoint-complement intervals (~'a'..'z').
+		// A POSITIONAL negation (~"x", ~"piro") has no interval form — negate yields
+		// an empty list. Returning nil (not []) lets a `+` keep it as a segment-
+		// negation in the ordered sequence (fold_string_sequence), and keeps a bare
+		// `~"x"` symbolic so satisfy handles it as NOT satisfy(x).
+		if len(neg) == 0 do return nil
+		return neg
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if as_constraint {
@@ -442,26 +486,31 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool, seq: ^bool = nil) -
 }
 
 
-// fold_string_range : assembles a string range from the segments of both
-// bounds. A range has a lower bound (lo of the left segment) and an upper bound
-// (hi of the right segment). The quotation comes from the bounds; ordinal vs
-// positional is then derived via string_interval_mode.
+// fold_string_range : assembles a string range from the segments of both bounds.
+// Lower bound = lo of the left segment, upper bound = hi of the right segment. The
+// result is ORDINAL iff both bounds are ordinal single chars ('a'..'z'); any
+// positional (double-quote / multi-char) bound makes it positional ("a".."z").
 fold_string_range :: proc(lseg, rseg: []String_Interval) -> []String_Interval {
 	lo: Maybe(string) = nil
 	hi: Maybe(string) = nil
-	q: String_Quotation = .double
-	got_q := false
+	l_ord := false
+	r_ord := false
+	got_l := false
+	got_r := false
 	if len(lseg) > 0 {
 		lo = lseg[0].lo
-		q = lseg[0].quotation
-		got_q = true
+		l_ord = lseg[0].ordinal
+		got_l = true
 	}
 	if len(rseg) > 0 {
 		hi = rseg[0].hi
-		if !got_q do q = rseg[0].quotation
+		r_ord = rseg[0].ordinal
+		got_r = true
 	}
+	// Ordinal only when every PRESENT bound is ordinal.
+	ordinal := (!got_l || l_ord) && (!got_r || r_ord) && (got_l || got_r)
 	res := make([]String_Interval, 1)
-	res[0] = String_Interval{lo, hi, q, count_one()}
+	res[0] = String_Interval{lo, hi, ordinal, count_one()}
 	return res
 }
 
@@ -492,7 +541,7 @@ string_interval_satisfy :: proc(v, c: String_Interval) -> bool {
 		// single concrete value that satisfies the pattern.
 		if string_interval_is_concrete(v) {
 			s := string_interval_concrete_value(v)
-			concrete := String_Interval{s, s, v.quotation, count_one()}
+			concrete := String_Interval{s, s, v.ordinal, count_one()}
 			return string_pattern_satisfy(concrete, c)
 		}
 		return false
@@ -715,6 +764,22 @@ seq_match :: proc(rest: string, segs: []String_Interval, si: int) -> bool {
 		return len(rest) == 0 // all segments consumed iff nothing is left
 	}
 	seg := segs[si]
+
+	// Segment-negation (`~"piro" + …`): consume a VARIABLE-length prefix that is NOT
+	// the negated word, then recurse on the rest. We try every split point (0 bytes
+	// up to the whole remainder) and accept the first where the consumed prefix is
+	// not the negated word AND the remaining segments match. The negated word lives
+	// in seg.lo; seg.hi is unused.
+	if seg_is_negation(seg) {
+		neg_word, _ := seg.lo.(string)
+		for cut := 0; cut <= len(rest); cut += 1 {
+			prefix := rest[:cut]
+			if prefix == neg_word do continue // the forbidden word: skip this split
+			if seq_match(rest[cut:], segs, si + 1) do return true
+		}
+		return false
+	}
+
 	lo_n, hi_n := seg_count_bounds(seg)
 
 	// Enumerate occurrence counts k from lo_n upward; for each, consume k elements
@@ -775,22 +840,6 @@ seg_consume_one :: proc(rest: string, seg: String_Interval) -> int {
 }
 
 
-// char_in_element_union : does the char `rs` belong to the element (ordinal
-// bounds) of at least one segment of the constraint?
-char_in_element_union :: proc(rs: string, segs: []String_Interval) -> bool {
-	for cs in segs {
-		if string_interval_mode(cs) == .ordinal {
-			if ordinal_within(rs, rs, cs.lo, cs.hi) do return true
-		} else if string_interval_is_concrete(cs) {
-			// concrete element of length 1: direct comparison
-			base := cs.lo.(string)
-			if rune_count_le_one(base) && base == rs do return true
-		}
-	}
-	return false
-}
-
-
 // ordinal_in_element_union : is the range [lo,hi] contained in the ordinal
 // element of a single segment (case value = repeated range of chars)?
 ordinal_in_element_union :: proc(lo, hi: Maybe(string), segs: []String_Interval) -> bool {
@@ -802,14 +851,79 @@ ordinal_in_element_union :: proc(lo, hi: Maybe(string), segs: []String_Interval)
 }
 
 
+// string_satisfy : the constraint is a UNION of alternatives (a folded
+// String_Type). value ⊆ constraint via string_intervals_satisfy. The ordered
+// concatenation (`+`) does NOT come here — it stays a Compose_Type and is handled
+// by string_compose_satisfy (called from satisfy in type.odin).
 string_satisfy :: proc(fc, ft: String_Type) -> bool {
-	// When the constraint is an ordered concatenation (`+`), match the value as a
-	// SEQUENCE: it must split into consecutive pieces matching each segment in
-	// order. Otherwise the segments are a union of alternatives.
-	if fc.is_sequence {
-		return string_value_satisfies_sequence(ft, fc.string_intervals)
-	}
 	return string_intervals_satisfy(ft.string_intervals, fc.string_intervals)
+}
+
+// string_sequence_default : the materialized default of a `+` string sequence —
+// the in-order concatenation of each segment's default. Returns nil when `t` is
+// not a string sequence (so type_default can fall through to other domains).
+string_sequence_default :: proc(t: ^Type) -> ^Type {
+	segs, ok := fold_string_sequence(t, true).([]String_Interval)
+	if !ok || len(segs) == 0 do return nil
+	b := strings.builder_make()
+	for iv in segs do strings.write_string(&b, seg_default(iv))
+	r := new(Type)
+	r^ = make_string_const(strings.to_string(b), .double)
+	return r
+}
+
+// string_compose_satisfy : the constraint is a string concatenation `+` kept as a
+// Compose_Type (an ORDERED SEQUENCE). The value (a concrete string) must split,
+// left to right, into the sequence's segments in order. `fc` is the ^Type Compose.
+string_compose_satisfy :: proc(fc: ^Type, ft: String_Type) -> bool {
+	segs, ok := fold_string_sequence(fc, true).([]String_Interval)
+	if !ok do return false
+	return string_value_satisfies_sequence(ft, segs)
+}
+
+// string_is_tri_range : true when `t` is a THREE-bound STRING range — a Range_Type
+// whose right operand is itself a Range_Type, and whose bounds fold to strings.
+// `"ab".."cd".."ef"` = Range{ab, Range{cd, ef}}.
+string_is_tri_range :: proc(t: ^Type) -> bool {
+	r, ok := t^.(Range_Type)
+	if !ok || r.left == nil || r.right == nil do return false
+	_, inner_is_range := follow(r.right)^.(Range_Type)
+	if !inner_is_range do return false
+	// All three bounds must be strings (so this is a string tri-range, not numeric).
+	return fold_constraint_string(t) != nil
+}
+
+// string_tri_range_bounds : the (prefix, middle, suffix) literals of a three-bound
+// string range. prefix = lo of left, middle = lo of inner-left, suffix = hi of
+// inner-right. Each may be empty (open bound).
+string_tri_range_bounds :: proc(t: ^Type) -> (prefix, middle, suffix: string) {
+	r := t^.(Range_Type)
+	inner := follow(r.right)^.(Range_Type)
+	str_bound :: proc(t: ^Type, want_lo: bool) -> string {
+		if t == nil do return ""
+		segs, ok := fold_string_intervals(t, true).([]String_Interval)
+		if !ok || len(segs) == 0 do return ""
+		b: Maybe(string) = want_lo ? segs[0].lo : segs[0].hi
+		if s, sok := b.(string); sok do return s
+		return ""
+	}
+	prefix = str_bound(r.left, true)
+	middle = str_bound(inner.left, true)
+	suffix = str_bound(inner.right, false)
+	return
+}
+
+// string_tri_range_satisfy : a concrete value satisfies `"ab".."cd".."ef"` iff it
+// starts with "ab", CONTAINS "cd" (anywhere between prefix and suffix), and ends
+// with "ef". Only a concrete value can be checked.
+string_tri_range_satisfy :: proc(fc: ^Type, ft: String_Type) -> bool {
+	if !string_is_concrete(ft) do return false
+	s := string_value(ft)
+	prefix, middle, suffix := string_tri_range_bounds(fc)
+	if prefix != "" && !strings.has_prefix(s, prefix) do return false
+	if suffix != "" && !strings.has_suffix(s, suffix) do return false
+	if middle != "" && !strings.contains(s, middle) do return false
+	return true
 }
 
 
@@ -864,12 +978,12 @@ string_interval_intersect :: proc(x, y: String_Interval) -> (String_Interval, bo
 		lo := ordinal_max_lo(x.lo, y.lo)
 		hi := ordinal_min_hi(x.hi, y.hi)
 		if !ordinal_lo_le_hi(lo, hi) do return {}, false
-		return String_Interval{lo, hi, .simple, count}, true
+		return String_Interval{lo, hi, true, count}, true
 	}
 
 	// At least one concrete: the intersection is that concrete if it satisfies the other.
-	if string_interval_is_concrete(x) && string_interval_satisfy(x, y) do return {x.lo, x.hi, x.quotation, count}, true
-	if string_interval_is_concrete(y) && string_interval_satisfy(y, x) do return {y.lo, y.hi, y.quotation, count}, true
+	if string_interval_is_concrete(x) && string_interval_satisfy(x, y) do return {x.lo, x.hi, x.ordinal, count}, true
+	if string_interval_is_concrete(y) && string_interval_satisfy(y, x) do return {y.lo, y.hi, y.ordinal, count}, true
 
 	// Two positionals: combine the longest compatible prefix and suffix.
 	if xm == .positional && ym == .positional {
@@ -877,8 +991,7 @@ string_interval_intersect :: proc(x, y: String_Interval) -> (String_Interval, bo
 		if !pre_ok do return {}, false
 		suf, suf_ok := longest_compatible(x.hi, y.hi, false)
 		if !suf_ok do return {}, false
-		q := x.quotation == .backtick || y.quotation == .backtick ? String_Quotation.backtick : .double
-		return String_Interval{pre, suf, q, count}, true
+		return String_Interval{pre, suf, false, count}, true
 	}
 
 	// Non-concrete ordinal/positional mix: conservatively empty.
@@ -917,13 +1030,13 @@ string_intervals_negate :: proc(segs: []String_Interval) -> []String_Interval {
 		if lo_ok && lo != "" {
 			r := first_rune(lo)
 			if r > 0 {
-				append(&result, String_Interval{nil, rune_to_string(r - 1), .simple, count_one()})
+				append(&result, String_Interval{nil, rune_to_string(r - 1), true, count_one()})
 			}
 		}
 		// after the upper bound
 		if hi_ok && hi != "" {
 			r := first_rune(hi)
-			append(&result, String_Interval{rune_to_string(r + 1), nil, .simple, count_one()})
+			append(&result, String_Interval{rune_to_string(r + 1), nil, true, count_one()})
 		}
 	}
 	return result[:]
@@ -952,63 +1065,95 @@ negate_ordinal_string :: proc(content: ^Type) -> ^Type {
 // CONCATENATION — + on strings/chars
 // ===========================================================================
 
-// string_intervals_concat : a + b. Two concretes → concrete concatenation.
-// Otherwise, positional pattern "starts with prefix(a), ends with suffix(b)".
-// string_intervals_concat builds `a + b`. Two outcomes:
-//   - both sides a single CONCRETE segment → fold into one concrete literal
-//     ("jw" + "t" → "jwt"); not a sequence (it is a plain value).
-//   - otherwise → an ORDERED SEQUENCE: the left segments followed by the right
-//     ones, returned with is_seq = true. "id_" + '0'..'9'*1.. becomes the two
-//     segments [{"id_"}, {'0'..'9' *1..}] which the sequence matcher checks in
-//     order. (The old code collapsed this to {prefix, suffix}, dropping the digit
-//     constraint — that was the bug.)
-string_intervals_concat :: proc(a, b: []String_Interval) -> (segs: []String_Interval, is_seq: bool) {
-	if len(a) == 1 && len(b) == 1 {
-		x := a[0]
-		y := b[0]
-		if string_interval_is_concrete(x) && string_interval_is_concrete(y) {
-			joined := strings.concatenate({string_interval_concrete_value(x), string_interval_concrete_value(y)})
-			q := x.quotation == .backtick || y.quotation == .backtick ? String_Quotation.backtick : .double
-			res := make([]String_Interval, 1)
-			res[0] = String_Interval{joined, joined, q, count_one()}
-			return res, false
-		}
-	}
-	// A sequence is only needed when it captures a constraint that the old
-	// {prefix, suffix} positional fold would LOSE: a segment that is an ordinal
-	// class (one char in a range) and/or carries a repetition count. Such a
-	// segment must be matched positionally in order ("id_" then one-or-more
-	// digits). When every segment is a pure positional/concrete prefix-or-suffix
-	// (e.g. ""..  +  '_'), fall back to the legacy {prefix(a), suffix(b)} interval
-	// so negation/intersection over it keep working (`~("".. + '_')`).
-	all := make([dynamic]String_Interval, 0, len(a) + len(b))
-	for iv in a do append(&all, iv)
-	for iv in b do append(&all, iv)
-	needs_sequence := false
-	for iv in all {
-		// A repetition (count ≠ 1) always needs the sequence. An ordinal CLASS
-		// (a real char range like '0'..'9', i.e. lo != hi) also does. But a single
-		// concrete char ('_', lo == hi, count 1) is just a literal and stays in the
-		// positional fold — so `~("".. + '_')` keeps its old prefix/suffix shape.
-		if !count_is_one(iv.count) {
-			needs_sequence = true
-			break
-		}
-		if string_interval_mode(iv) == .ordinal && !string_interval_is_concrete(iv) {
-			needs_sequence = true
-			break
-		}
-	}
-	if needs_sequence do return all[:], true
+// string_concat_concrete : `a + b` when BOTH sides are a single concrete segment
+// → one concrete literal ("jw" + "t" → "jwt"). Returns ok=false otherwise (a
+// non-concrete `+` is an ordered sequence kept symbolic, see fold_string_sequence).
+string_concat_concrete :: proc(a, b: []String_Interval) -> ([]String_Interval, bool) {
+	if len(a) != 1 || len(b) != 1 do return nil, false
+	x := a[0]
+	y := b[0]
+	if !string_interval_is_concrete(x) || !string_interval_is_concrete(y) do return nil, false
+	joined := strings.concatenate({string_interval_concrete_value(x), string_interval_concrete_value(y)})
+	res := make([]String_Interval, 1)
+	// A concatenation is a multi-char STRING → positional (not ordinal).
+	res[0] = String_Interval{joined, joined, false, count_one()}
+	return res, true
+}
 
-	if len(a) == 1 && len(b) == 1 {
-		pre := concat_prefix(a[0])
-		suf := concat_suffix(b[0])
-		res := make([]String_Interval, 1)
-		res[0] = String_Interval{pre, suf, .double, count_one()}
-		return res, false
+// positional_concat : true when a `+` is PURELY positional — every operand
+// segment is a concrete literal or a prefix/suffix pattern with no ordinal class
+// and no repetition. Such a concat is just "starts with …, ends with …" and folds
+// to a single positional interval (legacy), so negation/intersection keep working.
+// A single ordinal class ('a'..'z') or any repetition makes it an ordered sequence.
+positional_concat :: proc(a, b: []String_Interval) -> bool {
+	check :: proc(segs: []String_Interval) -> bool {
+		for iv in segs {
+			if !count_is_one(iv.count) do return false
+			if iv.ordinal && !string_interval_is_concrete(iv) do return false
+		}
+		return true
 	}
-	return all[:], false
+	return check(a) && check(b)
+}
+
+// concat_positional_fold : the legacy {prefix(a), suffix(b)} positional interval
+// for a purely positional `a + b`. prefix = guaranteed prefix of the left side,
+// suffix = guaranteed suffix of the right side.
+concat_positional_fold :: proc(a, b: []String_Interval) -> []String_Interval {
+	pre: Maybe(string) = nil
+	suf: Maybe(string) = nil
+	if len(a) == 1 do pre = concat_prefix(a[0])
+	if len(b) == 1 do suf = concat_suffix(b[0])
+	res := make([]String_Interval, 1)
+	res[0] = String_Interval{pre, suf, false, count_one()}
+	return res
+}
+
+// fold_string_sequence : the ORDERED list of segments of a `+` chain, left to
+// right, WITHOUT flattening into a union. `"id_" + '0'..'9'*1..` → [{"id_"},
+// {'0'..'9' *1..}]. Each operand may itself be a `+` (associativity), a single
+// interval, or a union (kept as one alternative-group segment — rare). Returns nil
+// when an operand is not a string. This is what the sequence matcher walks.
+fold_string_sequence :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_Interval) {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Compose_Type:
+		if v.operator == .Add {
+			lseg, l_ok := fold_string_sequence(v.left, as_constraint).([]String_Interval)
+			rseg, r_ok := fold_string_sequence(v.right, as_constraint).([]String_Interval)
+			if !l_ok || !r_ok do return nil
+			all := make([dynamic]String_Interval, 0, len(lseg) + len(rseg))
+			for iv in lseg do append(&all, iv)
+			for iv in rseg do append(&all, iv)
+			return all[:]
+		}
+		if v.operator == .Multiply {
+			lseg, l_ok := fold_string_sequence(v.left, as_constraint).([]String_Interval)
+			if !l_ok do return nil
+			mult, m_ok := fold_type_intervals(v.right).([]Integer_Interval)
+			if !m_ok do return nil
+			return string_intervals_repeat(lseg, mult)
+		}
+		return nil
+	case Negate_Type:
+		// A negation operand of a sequence (`~"piro" + …`). If it folds cleanly into
+		// ordinal complement intervals (a char negation like `~'0'..'9'`), use those —
+		// they are consumable as ordinary ordinal segments. Otherwise (a POSITIONAL
+		// word negation like `~"piro"`) we keep it as a SEGMENT-NEGATION sentinel: a
+		// String_Interval whose lo is the negated word and whose count is the
+		// impossible {-1..-1}, recognized by seg_is_negation / seg_consume below. It
+		// matches a variable-length prefix that is NOT the negated word.
+		if neg := negate_ordinal_string(v.operand); neg != nil {
+			return fold_string_intervals(neg, as_constraint)
+		}
+		inner, ok := fold_string_intervals(v.operand, as_constraint).([]String_Interval)
+		if !ok || len(inner) == 0 do return nil
+		segs := make([]String_Interval, len(inner))
+		for iv, i in inner do segs[i] = String_Interval{iv.lo, iv.hi, iv.ordinal, count_negation_sentinel()}
+		return segs
+	}
+	// A non-Compose operand folds to its (union) segments — one sequence element.
+	return fold_string_intervals(t, as_constraint)
 }
 
 
@@ -1034,7 +1179,7 @@ string_intervals_repeat :: proc(segs: []String_Interval, mult: []Integer_Interva
 		result[i] = String_Interval {
 			iv.lo,
 			iv.hi,
-			iv.quotation,
+			iv.ordinal,
 			Integer_Type{norm, default_for_integer_intervals(norm)},
 		}
 	}
@@ -1108,7 +1253,7 @@ concat_suffix :: proc(iv: String_Interval) -> Maybe(string) {
 // ===========================================================================
 
 string_interval_equal :: proc(a, b: String_Interval) -> bool {
-	if !(maybe_string_eq(a.lo, b.lo) && maybe_string_eq(a.hi, b.hi) && a.quotation == b.quotation) {
+	if !(maybe_string_eq(a.lo, b.lo) && maybe_string_eq(a.hi, b.hi) && a.ordinal == b.ordinal) {
 		return false
 	}
 	// equal counts: same segment length, same bounds.

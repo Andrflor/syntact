@@ -1,0 +1,1 @@
+{"name": "tc_str_tri_range_contains_ok", "description": "\"ab\"..\"cd\"..\"ef\" : starts ab, contains cd, ends ef \u2014 accepts \"abcdef\"", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"abcdef\"", "expect_errors": []}
