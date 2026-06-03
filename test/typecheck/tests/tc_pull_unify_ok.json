@@ -1,0 +1,1 @@
+{"name": "tc_pull_unify_ok", "description": "carving a field whose constraint mentions a pull (data{e}:s) with data{6} unifies the pull e=6: no error", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\n-> e }\nb -> a{data{6}}\n-> b", "expect_errors": []}

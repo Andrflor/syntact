@@ -1,0 +1,1 @@
+{"name": "tc_carve_pos_only_pull_out_of_range_bad", "description": "a scope whose only field is a pull has no positional slot: {9} is out of range", "source": "base -> { x <- 0 }\nc -> base{9}\n-> c", "expect_errors": ["Invalid_Carve"]}

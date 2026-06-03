@@ -1,0 +1,1 @@
+{"name": "tc_pull_two_independent_ok", "description": "two distinct pulls e and f bound to different values is not a conflict", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\nu8:f <- 3\ndata{e}:s\ndata{f}:t\n-> e }\nb -> a{data{6} data{9}}\n-> b", "expect_errors": []}

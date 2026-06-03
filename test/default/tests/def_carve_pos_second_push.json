@@ -1,0 +1,1 @@
+{"name": "def_carve_pos_second_push", "description": "positional carve skips a middle pull: base{10,20}.b = 20", "source": "base -> { u8:a -> 1\nx <- 0\nu8:b -> 2 }\nr -> base{10, 20}.b", "binding": "r", "expect": "20"}

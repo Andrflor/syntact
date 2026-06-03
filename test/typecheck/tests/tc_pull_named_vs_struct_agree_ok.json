@@ -1,0 +1,1 @@
+{"name": "tc_pull_named_vs_struct_agree_ok", "description": "naming the pull e<-6 and carving data{6} agree: e=6, no conflict", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\n-> e }\nb -> a{e<-6 data{6}}\n-> b", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "def_pull_named_carve", "description": "carving the pull by name a{e<-7} sets e to 7", "source": "a -> { u8:e <- 2\n-> e }\nr -> a{e<-7}!", "binding": "r", "expect": "7"}

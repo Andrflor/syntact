@@ -1249,8 +1249,18 @@ carve_pull_conflict :: proc(t: ^Type) -> (Pull_Conflict, bool) {
 	bound := make(map[int][dynamic]^Type)
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
-		if ref.match_index < 0 || ref.match_index >= len(src.types) do continue
-		gather_pull_bindings(src.types[ref.match_index], carve.values[i], src, &bound)
+		if ref.match_index < 0 || ref.match_index >= len(src.kind) do continue
+		// A direct override of the pull binding itself (`e<-4`) is a binding too.
+		if src.kind[ref.match_index] == .Pointing_Pull {
+			list := bound[ref.match_index] or_else make([dynamic]^Type)
+			append(&list, carve.values[i])
+			bound[ref.match_index] = list
+			continue
+		}
+		// An override of a field whose constraint mentions a pull (`data{e}:s`).
+		if ref.match_index < len(src.types) {
+			gather_pull_bindings(src.types[ref.match_index], carve.values[i], src, &bound)
+		}
 	}
 
 	for idx, vals in bound {

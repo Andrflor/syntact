@@ -1,0 +1,1 @@
+{"name": "tc_pull_three_last_diverges_bad", "description": "three fields sharing e: data{5} data{5} data{9} conflicts on the last", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\ndata{e}:t\ndata{e}:u\n-> e }\nb -> a{data{5} data{5} data{9}}\n-> b", "expect_errors": ["Constraint_Mismatch"]}

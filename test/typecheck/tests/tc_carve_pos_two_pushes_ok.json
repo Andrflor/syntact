@@ -1,0 +1,1 @@
+{"name": "tc_carve_pos_two_pushes_ok", "description": "two positional values fill the two push fields in order", "source": "base -> { u8:a -> 1\nu8:b -> 2 }\nc -> base{9, 9}\n-> c", "expect_errors": []}

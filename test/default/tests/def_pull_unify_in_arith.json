@@ -1,0 +1,1 @@
+{"name": "def_pull_unify_in_arith", "description": "a pull used in an arithmetic constraint: y -> e+1 with e<-5 gives 6", "source": "a -> { u8:e <- 2\nu8:y -> e + 1\n-> y }\nr -> a{e<-5}!", "binding": "r", "expect": "6"}

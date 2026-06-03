@@ -1,0 +1,1 @@
+{"name": "def_pull_default", "description": "a pull with no carve keeps its default: -> e collapses to 2", "source": "a -> { u8:e <- 2\n-> e }\nr -> a!", "binding": "r", "expect": "2"}

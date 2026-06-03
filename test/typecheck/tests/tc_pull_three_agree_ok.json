@@ -1,0 +1,1 @@
+{"name": "tc_pull_three_agree_ok", "description": "three fields sharing e, all carved with data{5}: consistent", "source": "data -> { u8:x -> 0 }\na -> { u8:e <- 2\ndata{e}:s\ndata{e}:t\ndata{e}:u\n-> e }\nb -> a{data{5} data{5} data{5}}\n-> b", "expect_errors": []}
