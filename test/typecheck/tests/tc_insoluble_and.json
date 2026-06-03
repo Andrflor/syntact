@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_and", "description": "(??::u8 & >10) — the & operand is unknown, insoluble", "source": "(??::u8 & >10):b -> 11", "expect_errors": ["Insoluble_Constraint"] }

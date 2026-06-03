@@ -1,0 +1,1 @@
+{ "name": "tc_ref_nested_mix_ok", "description": "((A & >5) | (B & <0)) with A->0..100,B->i8 accepts 50", "source": "A -> 0..100\nB -> i8\n((A & >5) | (B & <0)):c -> 50", "expect_errors": [] }

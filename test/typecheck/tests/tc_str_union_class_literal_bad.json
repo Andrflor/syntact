@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_class_literal_bad", "description": "('a'..'z'*1.. | \"NULL\") rejects an uppercase word that is not NULL", "source": "(('a'..'z'*1..) | \"NULL\"):s -> \"HELLO\"", "expect_errors": ["Constraint_Mismatch"] }

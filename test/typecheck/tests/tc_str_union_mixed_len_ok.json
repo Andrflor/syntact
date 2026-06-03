@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_mixed_len_ok", "description": "(\"a\"|\"bb\"|\"ccc\") accepts the 2-char branch", "source": "(\"a\"|\"bb\"|\"ccc\"):s -> \"bb\"", "expect_errors": [] }

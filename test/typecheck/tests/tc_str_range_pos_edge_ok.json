@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_pos_edge_ok", "description": "\"abc\"..\"xyz\" accepts \"abz\"", "source": "\"abc\"..\"xyz\":s -> \"abz\"", "expect_errors": [] }

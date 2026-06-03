@@ -1,0 +1,1 @@
+{ "name": "tc_ref_arith_nested_ok", "description": "A->100, B->50, u8:c -> A+B fits", "source": "A -> 100\nB -> 50\nu8:c -> A+B", "expect_errors": [] }

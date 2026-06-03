@@ -1,0 +1,1 @@
+{ "name": "tc_ref_union_singletons_bad", "description": "A->5, B->10, (A|B) rejects 7", "source": "A -> 5\nB -> 10\n(A|B):c -> 7", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_nested_compose", "description": "deeply nested composition hiding a ?? is still caught", "source": "a -> ??::u8\n(((u8 & >5) | (a & <100))):b -> 11", "expect_errors": ["Insoluble_Constraint"] }

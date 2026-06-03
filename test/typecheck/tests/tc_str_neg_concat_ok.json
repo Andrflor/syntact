@@ -1,0 +1,1 @@
+{ "name": "tc_str_neg_concat_ok", "description": "(~\"piro\" + 0-9*0..) accepts \"pira\" (not piro, zero trailing digits)", "source": "(~\"piro\" + '0'..'9' * 0..):str -> \"pira\"", "expect_errors": [] }

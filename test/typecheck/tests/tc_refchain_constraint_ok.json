@@ -1,0 +1,1 @@
+{ "name": "tc_refchain_constraint_ok", "description": "A->u8, B->A, B as a constraint accepts 200", "source": "A -> u8\nB -> A\nB:c -> 200", "expect_errors": [] }

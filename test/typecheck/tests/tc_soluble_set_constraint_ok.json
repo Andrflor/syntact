@@ -1,0 +1,1 @@
+{ "name": "tc_soluble_set_constraint_ok", "description": "a known set (u8) as a constraint, value in range", "source": "C -> u8\nC:b -> 200", "expect_errors": [] }

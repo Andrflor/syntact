@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_class_literal_class_ok", "description": "('a'..'z'*1.. | \"NULL\") accepts a lowercase word", "source": "(('a'..'z'*1..) | \"NULL\"):s -> \"hello\"", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_range_ok", "description": "backtick positional range `a`..`z` accepts a string in-between", "source": "`a`..`z`:s -> `m`", "expect_errors": [] }

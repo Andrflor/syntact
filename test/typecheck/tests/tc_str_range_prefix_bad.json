@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_prefix_bad", "description": "\"jwt\".. rejects a string not starting with jwt", "source": "\"jwt\"..:s -> \"abc\"", "expect_errors": ["Constraint_Mismatch"] }

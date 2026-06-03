@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_scope_field", "description": "a scope-shaped constraint with an unknown field value is insoluble", "source": "Shape -> {x -> ??::u8}\nShape:b -> {x -> 5}", "expect_errors": ["Insoluble_Constraint"] }

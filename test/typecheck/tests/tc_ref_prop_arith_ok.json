@@ -1,0 +1,1 @@
+{ "name": "tc_ref_prop_arith_ok", "description": "u8:c -> P.x + 10 where P.x=5 fits u8", "source": "P -> {u8:x -> 5}\nu8:c -> P.x + 10", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_in_string_ok", "description": "a backtick literal is a string, satisfies the string builtin", "source": "string:s -> `raw text`", "expect_errors": [] }

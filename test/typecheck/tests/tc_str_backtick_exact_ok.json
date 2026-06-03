@@ -1,0 +1,1 @@
+{ "name": "tc_str_backtick_exact_ok", "description": "a backtick string is an exact string literal, satisfies itself", "source": "`hello`:s -> `hello`", "expect_errors": [] }

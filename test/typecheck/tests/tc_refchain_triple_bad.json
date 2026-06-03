@@ -1,0 +1,1 @@
+{ "name": "tc_refchain_triple_bad", "description": "three-deep reference chain rejects out-of-range", "source": "A -> 0..50\nB -> A\nC -> B\nC:d -> 99", "expect_errors": ["Constraint_Mismatch"] }

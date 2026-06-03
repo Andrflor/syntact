@@ -1,0 +1,1 @@
+{ "name": "tc_str_concat_lit_class_bad", "description": "(\"id_\" + '0'..'9'*1..) rejects a non-digit suffix", "source": "(\"id_\" + '0'..'9'*1..):s -> \"id_xy\"", "expect_errors": ["Constraint_Mismatch"] }

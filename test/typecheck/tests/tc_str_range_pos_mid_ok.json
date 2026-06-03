@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_pos_mid_ok", "description": "\"abc\"..\"xyz\" positional accepts \"def\" (between abc and xyz)", "source": "\"abc\"..\"xyz\":s -> \"def\"", "expect_errors": [] }

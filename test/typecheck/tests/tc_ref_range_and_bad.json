@@ -1,0 +1,1 @@
+{ "name": "tc_ref_range_and_bad", "description": "A->10..20, (A & >15) rejects 12", "source": "A -> 10..20\n(A & >15):c -> 12", "expect_errors": ["Constraint_Mismatch"] }

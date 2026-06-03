@@ -1,0 +1,1 @@
+{ "name": "tc_insoluble_via_binding", "description": "a typed-unknown bound, then used as a constraint — insoluble", "source": "a -> ??::u8\na:b -> 10", "expect_errors": ["Insoluble_Constraint"] }
