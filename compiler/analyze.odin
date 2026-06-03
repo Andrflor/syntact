@@ -475,9 +475,9 @@ follow :: proc(t: ^Type) -> ^Type {
 // hold the per-kind logic; walk only owns the INVALID_NODE guard and the fallback.
 walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	if idx == INVALID_NODE {
-		result := new(Type)
-		result^ = None_Type{}
-		return result
+		// A missing node (incomplete source while typing) is INVALID, not the
+		// legitimate value `none`.
+		return make_invalid()
 	}
 	kind := a.ast.node_kinds[idx]
 
@@ -751,6 +751,10 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 	ast := a.ast
 	data := ast.node_data[idx]
 	right_idx := data.binary.right
+	// `a.` while typing: the property name node is missing. Don't index it.
+	if right_idx == INVALID_NODE || ast.node_kinds[right_idx] != .Identifier {
+		return make_invalid()
+	}
 	prop_name := span_str(ast, ast.node_data[right_idx].identifier.name)
 	prop_ordinal := ast.node_data[right_idx].identifier.ordinal
 
