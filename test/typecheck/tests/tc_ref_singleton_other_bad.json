@@ -1,0 +1,1 @@
+{ "name": "tc_ref_singleton_other_bad", "description": "ref-to-singleton-as-type rejects a different value", "source": "C -> 5\nC:a -> 6", "expect_errors": ["Constraint_Mismatch"] }

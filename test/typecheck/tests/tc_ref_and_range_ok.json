@@ -1,0 +1,1 @@
+{ "name": "tc_ref_and_range_ok", "description": "(C & >10) accepts 11 where C=u8", "source": "C -> u8\n(C & >10):a -> 11", "expect_errors": [] }

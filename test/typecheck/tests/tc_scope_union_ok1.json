@@ -1,0 +1,1 @@
+{ "name": "tc_scope_union_ok1", "description": "({u8:x} | {u8:x, u8:y}) accepts the single-field shape", "source": "({u8:x} | {u8:x, u8:y}):a -> {x -> 5}", "expect_errors": [] }

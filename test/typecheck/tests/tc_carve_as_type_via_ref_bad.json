@@ -1,0 +1,1 @@
+{ "name": "tc_carve_as_type_via_ref_bad", "description": "ref-to-carve as type rejects an overflowing field", "source": "Base -> {u8:x}\nNarrowed -> Base{x->5}\nNarrowed:a -> {x -> 300}", "expect_errors": ["Constraint_Mismatch"] }

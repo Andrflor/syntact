@@ -1,0 +1,1 @@
+{ "name": "tc_scope_shape_calc_bad", "description": "{u8:x, u8:y} rejects a value whose computed y overflows", "source": "{u8:x, u8:y}:a -> {x -> 200, y -> x+100}", "expect_errors": ["Constraint_Mismatch"] }

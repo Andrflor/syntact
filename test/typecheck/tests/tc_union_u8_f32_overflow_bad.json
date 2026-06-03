@@ -1,0 +1,1 @@
+{ "name": "tc_union_u8_f32_overflow_bad", "description": "(u8|f32) rejects an int above u8 (not a float either)", "source": "(u8|f32):b -> 300", "expect_errors": ["Constraint_Mismatch"] }

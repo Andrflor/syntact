@@ -1,0 +1,1 @@
+{ "name": "def_ref_as_type", "description": "default of a binding typed by a reference = default of the referenced set (u8 -> 0)", "source": "C -> u8\nC:a", "binding": "a", "expect": "0" }

@@ -1,0 +1,1 @@
+{ "name": "tc_carve_override_is_ref_ok", "description": "carve override value is itself a reference", "source": "k -> 50\nBase -> {u8:x}\ng -> Base{x->k}", "expect_errors": [] }

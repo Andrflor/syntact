@@ -1,0 +1,1 @@
+{ "name": "tc_scope_field_union_bad", "description": "{(u8|string):x} rejects {x->3.0}", "source": "{(u8|string):x}:a -> {x -> 3.0}", "expect_errors": ["Constraint_Mismatch"] }

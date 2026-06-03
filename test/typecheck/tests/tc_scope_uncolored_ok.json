@@ -1,0 +1,1 @@
+{ "name": "tc_scope_uncolored_ok", "description": "an uncolored field (no constraint) imposes nothing on the value", "source": "{x -> 1}:a -> {x -> 9999}", "expect_errors": [] }

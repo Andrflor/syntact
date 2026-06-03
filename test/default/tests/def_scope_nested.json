@@ -1,0 +1,1 @@
+{ "name": "def_scope_nested", "description": "default of {{u8:x}:inner} is {inner -> {x -> 0}}", "source": "{ {u8:x}:inner }:a", "binding": "a", "expect": "{inner -> {x -> 0}}" }

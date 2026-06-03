@@ -1,0 +1,1 @@
+{ "name": "tc_comp_negrange_or_pt_ok5", "description": "(~(0..10) | 5) accepts 5 (the carved-back point)", "source": "(~(0..10) | 5):a -> 5", "expect_errors": [] }

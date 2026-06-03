@@ -1,0 +1,1 @@
+{ "name": "def_neg_triple", "description": "~~~10 == ~10 default 9", "source": "(~~~10):a", "binding": "a", "expect": "9" }

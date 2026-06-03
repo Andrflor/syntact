@@ -1,0 +1,1 @@
+{ "name": "def_neg_or_negs", "description": "~(~10|~20) = {10}&{20} = none (empty set)", "source": "(~(~10 | ~20)):a", "binding": "a", "expect": "none" }

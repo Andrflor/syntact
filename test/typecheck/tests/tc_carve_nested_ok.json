@@ -1,0 +1,1 @@
+{ "name": "tc_carve_nested_ok", "description": "carve of a carve (two successive overrides)", "source": "Base -> {u8:x, u8:y}\nMid -> Base{x->10}\ng -> Mid{y->20}", "expect_errors": [] }

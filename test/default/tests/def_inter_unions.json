@@ -1,0 +1,1 @@
+{ "name": "def_inter_unions", "description": "((0..10|50..60) & 5..55) = 5..10|50..55 default 5", "source": "((0..10|50..60) & 5..55):a", "binding": "a", "expect": "5" }

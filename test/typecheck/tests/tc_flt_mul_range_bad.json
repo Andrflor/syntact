@@ -1,0 +1,1 @@
+{ "name": "tc_flt_mul_range_bad", "description": "(0.0..10.0)*(0.0..2.0) = 0.0..20.0 rejects 25.0", "source": "((0.0..10.0)*(0.0..2.0)):a -> 25.0", "expect_errors": ["Constraint_Mismatch"] }

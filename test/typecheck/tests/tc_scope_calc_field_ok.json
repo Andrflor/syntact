@@ -1,0 +1,1 @@
+{ "name": "tc_scope_calc_field_ok", "description": "computed field y=x+10 fits u8 when x=5", "source": "{\n  u8:x -> 5\n  u8:y -> x+10\n}:a", "expect_errors": [] }

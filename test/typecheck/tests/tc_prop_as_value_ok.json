@@ -1,0 +1,1 @@
+{ "name": "tc_prop_as_value_ok", "description": "bind a property value under a constraint, fits", "source": "pack -> {u8:x -> 42}\nu8:r -> pack.x", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_flt_neg_bad", "description": "~5.0 rejects 5.0", "source": "(~5.0):a -> 5.0", "expect_errors": ["Constraint_Mismatch"] }

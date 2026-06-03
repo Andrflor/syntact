@@ -1,0 +1,1 @@
+{ "name": "tc_execute_of_carve_ok", "description": "collapse a carved scope through its production", "source": "Base -> {u8:x -> 1\n -> x}\nu8:r -> Base{x->5}!", "expect_errors": [] }

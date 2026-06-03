@@ -1,0 +1,1 @@
+{ "name": "def_execute_via_ref", "description": "default of collapsing a referenced producer of a concrete value", "source": "P -> { u8:x -> 42\n -> x }\nQ -> P\nQ!:a", "binding": "a", "expect": "42" }

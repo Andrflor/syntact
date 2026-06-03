@@ -1,0 +1,1 @@
+{ "name": "def_carve_ref_override", "description": "default of a carve whose override is a reference k=50", "source": "k -> 50\nBase -> {u8:x}\nBase{x->k}:g", "binding": "g", "expect": "{x -> 50}" }

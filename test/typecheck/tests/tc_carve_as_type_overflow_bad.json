@@ -1,0 +1,1 @@
+{ "name": "tc_carve_as_type_overflow_bad", "description": "carve-as-type rejects a value whose field overflows the substituted constraint", "source": "Base -> {u8:x}\nBase{x->5}:a -> {x -> 300}", "expect_errors": ["Constraint_Mismatch"] }

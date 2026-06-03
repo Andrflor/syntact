@@ -1,0 +1,1 @@
+{ "name": "tc_cast_target_neg_union_fail", "description": "casting into a negation has no fixed layout", "source": "a -> 5::(~10)", "expect_errors": ["Invalid_Cast"] }

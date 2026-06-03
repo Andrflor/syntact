@@ -1,0 +1,1 @@
+{ "name": "tc_cast_target_bool_ok", "description": "int reinterpreted into bool target lands", "source": "u8:a -> 1\nbool:b -> a::bool", "expect_errors": [] }

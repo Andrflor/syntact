@@ -1,0 +1,1 @@
+{ "name": "tc_execute_ref_producer_bad", "description": "collapse a referenced producer whose concrete product overflows u8", "source": "P -> { x -> 300\n -> x }\nu8:a -> P!", "expect_errors": ["Constraint_Mismatch"] }

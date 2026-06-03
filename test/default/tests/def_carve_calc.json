@@ -1,0 +1,1 @@
+{ "name": "def_carve_calc", "description": "carve override propagates into computed field y=x+1", "source": "a -> {u8:x -> 0, u8:y -> x+1}\na{x -> 100}:g", "binding": "g", "expect": "{x -> 100, y -> 101}" }

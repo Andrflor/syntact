@@ -1,0 +1,1 @@
+{ "name": "tc_self_ref_set_bad", "description": "ref to a set used as type, value=the ref → set vs set fails", "source": "C -> u8\nC:a -> C", "expect_errors": ["Constraint_Mismatch"] }

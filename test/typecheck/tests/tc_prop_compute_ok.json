@@ -1,0 +1,1 @@
+{ "name": "tc_prop_compute_ok", "description": "use pack.x in a constrained computation, fits", "source": "pack -> {u8:x -> 100}\nu8:r -> pack.x + 50", "expect_errors": [] }

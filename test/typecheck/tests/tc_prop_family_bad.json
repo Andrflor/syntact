@@ -1,0 +1,1 @@
+{ "name": "tc_prop_family_bad", "description": "property of string family rejected by u8 constraint", "source": "pack -> {string:s -> \"hi\"}\nu8:r -> pack.s", "expect_errors": ["Constraint_Mismatch"] }

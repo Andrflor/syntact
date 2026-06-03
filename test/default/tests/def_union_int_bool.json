@@ -1,0 +1,1 @@
+{ "name": "def_union_int_bool", "description": "default of (u8|bool) follows first term = 0", "source": "(u8|bool):a", "binding": "a", "expect": "0" }

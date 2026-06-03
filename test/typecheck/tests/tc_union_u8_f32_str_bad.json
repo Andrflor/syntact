@@ -1,0 +1,1 @@
+{ "name": "tc_union_u8_f32_str_bad", "description": "(u8|f32) rejects a string", "source": "(u8|f32):b -> \"hi\"", "expect_errors": ["Constraint_Mismatch"] }

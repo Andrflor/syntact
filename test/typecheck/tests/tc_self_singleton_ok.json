@@ -1,0 +1,1 @@
+{ "name": "tc_self_singleton_ok", "description": "a singleton satisfies itself: 5:a -> 5", "source": "5:a -> 5", "expect_errors": [] }

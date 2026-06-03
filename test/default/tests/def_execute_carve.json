@@ -1,0 +1,1 @@
+{ "name": "def_execute_carve", "description": "default of collapsing a carve whose product is the overridden field", "source": "Base -> {u8:x -> 5\n -> x}\nBase{x->9}!:a", "binding": "a", "expect": "9" }

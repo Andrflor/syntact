@@ -1,0 +1,1 @@
+{ "name": "tc_carve_impl_dep_bad", "description": "carving x breaks the dependent colored field y -> x", "source": "Base -> {x -> 0, u8:y -> x}\ng -> Base{x -> -11}", "expect_errors": ["Constraint_Mismatch"] }

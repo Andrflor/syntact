@@ -1,0 +1,1 @@
+{ "name": "tc_union_u8_f32_float_ok", "description": "(u8|f32) accepts a float", "source": "(u8|f32):b -> 3.0", "expect_errors": [] }

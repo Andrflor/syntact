@@ -1,0 +1,1 @@
+{ "name": "tc_comp_inter_unions_bad2", "description": "((0..10|50..60) & 5..55) rejects 58 (above 55)", "source": "((0..10|50..60) & 5..55):a -> 58", "expect_errors": ["Constraint_Mismatch"] }

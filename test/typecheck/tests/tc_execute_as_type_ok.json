@@ -1,0 +1,1 @@
+{ "name": "tc_execute_as_type_ok", "description": "P! used as the constraint of a binding accepts a value in the produced set", "source": "P -> { -> u8 }\nP!:a -> 200", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_scope_shape_calc_ok", "description": "{u8:x, u8:y} accepts a value whose y is computed and in range", "source": "{u8:x, u8:y}:a -> {x -> 100, y -> x+50}", "expect_errors": [] }

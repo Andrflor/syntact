@@ -1,0 +1,1 @@
+{ "name": "def_cast_neg_to_u8", "description": "default of (-1::u8) reinterprets -1 as u8 = 255", "source": "(-1::u8):a", "binding": "a", "expect": "255" }

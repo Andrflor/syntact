@@ -1,0 +1,1 @@
+{ "name": "tc_self_string_set_bad", "description": "string (the whole family) does not satisfy itself", "source": "string:a -> string", "expect_errors": ["Constraint_Mismatch"] }

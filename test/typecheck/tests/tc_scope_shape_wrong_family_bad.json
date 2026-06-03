@@ -1,0 +1,1 @@
+{ "name": "tc_scope_shape_wrong_family_bad", "description": "{u8:x} rejects {x -> \"hi\"} (family mismatch)", "source": "{u8:x}:a -> {x -> \"hi\"}", "expect_errors": ["Constraint_Mismatch"] }

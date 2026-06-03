@@ -1,0 +1,1 @@
+{ "name": "tc_ref_or_family_ok", "description": "(C | string) accepts a string where C=u8", "source": "C -> u8\n(C | string):a -> \"hi\"", "expect_errors": [] }

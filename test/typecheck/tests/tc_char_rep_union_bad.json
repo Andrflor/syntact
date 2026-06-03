@@ -1,0 +1,1 @@
+{ "name": "tc_char_rep_union_bad", "description": "alnum*2..4 rejects an uppercase char", "source": "(('a'..'z' | '0'..'9')*2..4):a -> \"aB1\"", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_comp_and_or_ok_hi", "description": "((u8 & >10)|(i8 & <0)) accepts 50", "source": "((u8 & >10) | (i8 & <0)):a -> 50", "expect_errors": [] }

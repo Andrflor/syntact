@@ -1,0 +1,1 @@
+{ "name": "def_cast_f64_to_f32", "description": "default of (1.0::f32) is value-converted 1.0", "source": "(1.0::f32):a", "binding": "a", "expect": "1.0" }

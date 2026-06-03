@@ -1,0 +1,1 @@
+{ "name": "def_scope_field_range", "description": "default of {10..20:x} is {x -> 10}", "source": "{10..20:x}:a", "binding": "a", "expect": "{x -> 10}" }

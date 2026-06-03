@@ -1,0 +1,1 @@
+{ "name": "tc_union_bool_int_ok", "description": "(bool|u8) accepts true", "source": "(bool|u8):b -> true", "expect_errors": [] }

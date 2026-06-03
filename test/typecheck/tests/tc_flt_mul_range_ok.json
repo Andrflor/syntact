@@ -1,0 +1,1 @@
+{ "name": "tc_flt_mul_range_ok", "description": "(0.0..10.0)*(0.0..2.0) = 0.0..20.0 accepts 15.0", "source": "((0.0..10.0)*(0.0..2.0)):a -> 15.0", "expect_errors": [] }

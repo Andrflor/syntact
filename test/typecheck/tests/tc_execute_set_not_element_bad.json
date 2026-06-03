@@ -1,0 +1,1 @@
+{ "name": "tc_execute_set_not_element_bad", "description": "collapsing a producer of u8 yields the SET u8, which does not satisfy u8 as a value", "source": "P -> { -> u8 }\nu8:a -> P!", "expect_errors": ["Constraint_Mismatch"] }

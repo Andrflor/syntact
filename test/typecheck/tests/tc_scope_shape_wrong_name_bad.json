@@ -1,0 +1,1 @@
+{ "name": "tc_scope_shape_wrong_name_bad", "description": "{u8:x} rejects {y -> 5} (name mismatch)", "source": "{u8:x}:a -> {y -> 5}", "expect_errors": ["Constraint_Mismatch"] }

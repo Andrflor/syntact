@@ -1,0 +1,1 @@
+{ "name": "tc_scope_shape_overflow_bad", "description": "{u8:x} rejects {x -> 300}", "source": "{u8:x}:a -> {x -> 300}", "expect_errors": ["Constraint_Mismatch"] }

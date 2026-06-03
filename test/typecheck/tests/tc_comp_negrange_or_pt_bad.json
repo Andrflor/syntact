@@ -1,0 +1,1 @@
+{ "name": "tc_comp_negrange_or_pt_bad", "description": "(~(0..10) | 5) rejects 7 (in 0..10, not 5)", "source": "(~(0..10) | 5):a -> 7", "expect_errors": ["Constraint_Mismatch"] }

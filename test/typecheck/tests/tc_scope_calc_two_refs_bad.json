@@ -1,0 +1,1 @@
+{ "name": "tc_scope_calc_two_refs_bad", "description": "z = x+y overflows u8 when x=200,y=100", "source": "{\n  u8:x -> 200\n  u8:y -> 100\n  u8:z -> x+y\n}:a", "expect_errors": ["Constraint_Mismatch"] }

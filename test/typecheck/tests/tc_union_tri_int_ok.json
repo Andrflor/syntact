@@ -1,0 +1,1 @@
+{ "name": "tc_union_tri_int_ok", "description": "(string|u8|f32) accepts int", "source": "(string|u8|f32):b -> 7", "expect_errors": [] }

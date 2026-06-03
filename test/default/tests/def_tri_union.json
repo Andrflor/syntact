@@ -1,0 +1,1 @@
+{ "name": "def_tri_union", "description": "(0..10|50..60|100..110) default 0 (first low bound)", "source": "(0..10|50..60|100..110):a", "binding": "a", "expect": "0" }

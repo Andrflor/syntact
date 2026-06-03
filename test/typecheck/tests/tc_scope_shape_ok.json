@@ -1,0 +1,1 @@
+{ "name": "tc_scope_shape_ok", "description": "{u8:x} accepts {x -> 5}", "source": "{u8:x}:a -> {x -> 5}", "expect_errors": [] }

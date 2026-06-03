@@ -1,0 +1,1 @@
+{ "name": "tc_scope_calc_mul_bad", "description": "y = x*x overflows u8 when x=20 (400)", "source": "{\n  u8:x -> 20\n  u8:y -> x*x\n}:a", "expect_errors": ["Constraint_Mismatch"] }

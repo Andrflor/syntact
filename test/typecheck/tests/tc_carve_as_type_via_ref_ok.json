@@ -1,0 +1,1 @@
+{ "name": "tc_carve_as_type_via_ref_ok", "description": "a reference to a carve, used as a type", "source": "Base -> {u8:x}\nNarrowed -> Base{x->5}\nNarrowed:a -> {x -> 5}", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "def_carve_two", "description": "carve overriding both fields: default = substituted scope", "source": "a -> {u8:x, u8:y}\na{x -> 10, y -> 20}:g", "binding": "g", "expect": "{x -> 10, y -> 20}" }

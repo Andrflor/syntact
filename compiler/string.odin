@@ -585,15 +585,58 @@ sequence_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool
 			return false
 		}
 		s := string_interval_concrete_value(vs)
-		n := rune_count(s)
-		if !int_in_intervals(i128(n), allowed) do return false
-		// Each char ∈ at least one element (ordinal bound) of the segments.
-		for r in s {
-			rs := rune_to_string(r)
-			if !char_in_element_union(rs, constraint_segs) do return false
-		}
+		if !concrete_in_sequence(s, constraint_segs, allowed) do return false
 	}
 	return true
+}
+
+
+// concrete_in_sequence : a concrete string `s` satisfies a repeated sequence
+// (the constraint segments, each a `pattern * count`) iff it splits into `k`
+// consecutive elements with `k ∈ allowed` and every element matching one of the
+// segment patterns. `count` is the number of ELEMENTS, not of chars: "ab"*3 is
+// 3 elements of "ab" (6 chars), while 'a'..'z'*3 is 3 elements of one char.
+//
+// We greedily consume one element at a time. At each position we try every
+// segment element; an ordinal element consumes one codepoint, a concrete
+// element consumes its own length. The greedy walk is exact when all elements
+// of a given length agree (the common case); the empty string is the k=0 match.
+concrete_in_sequence :: proc(s: string, segs: []String_Interval, allowed: []Integer_Interval) -> bool {
+	rest := s
+	k := 0
+	for len(rest) > 0 {
+		consumed := consume_one_element(rest, segs)
+		if consumed == 0 do return false // no element matches the head
+		rest = rest[consumed:]
+		k += 1
+	}
+	return int_in_intervals(i128(k), allowed)
+}
+
+
+// consume_one_element : matches the head of `rest` against the element of one
+// segment and returns the number of BYTES consumed (0 = no match). Concrete
+// multi-char elements ("ab") are matched as a literal prefix; ordinal/1-char
+// elements consume a single codepoint.
+consume_one_element :: proc(rest: string, segs: []String_Interval) -> int {
+	for cs in segs {
+		// The ELEMENT is the pattern (lo..hi) WITHOUT the repetition count, so we
+		// read cs.lo/cs.hi directly — string_interval_concrete_value would unfold
+		// the count and give the whole sequence ("ab"*3 → "ababab"), not "ab".
+		if string_interval_mode(cs) == .ordinal {
+			r := first_rune(rest)
+			rs := rune_to_string(r)
+			if ordinal_within(rs, rs, cs.lo, cs.hi) do return len(rs)
+			continue
+		}
+		// Positional element: a concrete literal element matches as a prefix.
+		lo, lo_ok := cs.lo.(string)
+		hi, hi_ok := cs.hi.(string)
+		if lo_ok && hi_ok && lo == hi && lo != "" {
+			if strings.has_prefix(rest, lo) do return len(lo)
+		}
+	}
+	return 0
 }
 
 

@@ -1,0 +1,1 @@
+{ "name": "tc_self_char_singleton_ok", "description": "a char singleton satisfies itself", "source": "'a':a -> 'a'", "expect_errors": [] }

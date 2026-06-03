@@ -1,0 +1,1 @@
+{ "name": "tc_self_range_bad", "description": "0..10 does not satisfy itself (still a set)", "source": "0..10:a -> 0..10", "expect_errors": ["Constraint_Mismatch"] }

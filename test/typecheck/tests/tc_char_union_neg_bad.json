@@ -1,0 +1,1 @@
+{ "name": "tc_char_union_neg_bad", "description": "('a'..'z' & ~'m') rejects 'm'", "source": "('a'..'z' & ~'m'):a -> 'm'", "expect_errors": ["Constraint_Mismatch"] }

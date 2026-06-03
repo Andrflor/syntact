@@ -1,0 +1,1 @@
+{ "name": "tc_scope_nested_bad", "description": "nested scope field rejects overflowing inner.x", "source": "{ {u8:x}:inner }:a -> { inner -> {x -> 300} }", "expect_errors": ["Constraint_Mismatch"] }

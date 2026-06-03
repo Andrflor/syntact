@@ -1,0 +1,1 @@
+{ "name": "def_neg_union", "description": "default of ~(5|10) = complement of {5,10} = ..4|6..9|11.. first finite bound hi of ..4 = 4", "source": "(~(5|10)):a", "binding": "a", "expect": "4" }
