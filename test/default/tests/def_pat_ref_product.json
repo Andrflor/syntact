@@ -1,0 +1,1 @@
+{"name": "def_pat_ref_product", "description": "deterministic pattern product is a reference to 99 -> default 99", "source": "k -> 99\nr -> 5 ? {\n  u8 -> k\n  -> 0\n}", "binding": "r", "expect": "99"}

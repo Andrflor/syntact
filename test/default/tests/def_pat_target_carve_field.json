@@ -1,0 +1,1 @@
+{"name": "def_pat_target_carve_field", "description": "pattern target is carved field C.x = 10; value =10 fires -> product 2", "source": "Base -> {u8:x -> 5}\nC -> Base{x -> 10}\nr -> C.x ? {\n  =10 -> 2\n  -> 0\n}", "binding": "r", "expect": "2"}

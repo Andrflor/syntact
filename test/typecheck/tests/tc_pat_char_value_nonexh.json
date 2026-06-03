@@ -1,0 +1,1 @@
+{ "name": "tc_pat_char_value_nonexh", "description": "char value =b does not cover char target a: non-exhaustive", "source": "r -> 'a' ? {\n  ='b' -> 1\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"] }

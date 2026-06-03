@@ -1,0 +1,1 @@
+{"name": "def_pat_first_match_wins", "description": "in-order: =5 and =5 both match singleton 5; first product 1 wins", "source": "r -> 5 ? {\n  =5 -> 1\n  =5 -> 2\n  -> 0\n}", "binding": "r", "expect": "1"}

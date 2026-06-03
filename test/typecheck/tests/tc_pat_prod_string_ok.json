@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_string_ok", "description": "deterministic string product satisfies string binding", "source": "string:r -> 5 ? {\n  u8 -> \"hi\"\n  -> \"\"\n}\n-> r", "expect_errors": [] }

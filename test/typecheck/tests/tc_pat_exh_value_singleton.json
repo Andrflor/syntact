@@ -1,0 +1,1 @@
+{ "name": "tc_pat_exh_value_singleton", "description": "value =5 covers singleton target 5: exhaustive", "source": "r -> 5 ? {\n  =5 -> 1\n}\n-> r", "expect_errors": [] }

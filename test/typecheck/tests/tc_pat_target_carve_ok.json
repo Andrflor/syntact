@@ -1,0 +1,1 @@
+{ "name": "tc_pat_target_carve_ok", "description": "target is a carved field (concrete 10); value =10 covers it", "source": "Base -> {u8:x -> 5}\nC -> Base{x -> 10}\nr -> C.x ? {\n  =10 -> 1\n}\n-> r", "expect_errors": [] }

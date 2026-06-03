@@ -1,0 +1,1 @@
+{"name": "tc_pat_prod_set_bad", "description": "a branch product that is a SET (~10 & u8) is not a scalar value, so it does not satisfy a scalar u8 binding", "source": "u8:r -> 5 ? {\n  u8 -> (~10 & u8)\n  -> 0\n}\n-> r", "expect_errors": ["Constraint_Mismatch"]}

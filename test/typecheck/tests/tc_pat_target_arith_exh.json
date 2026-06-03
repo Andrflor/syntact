@@ -1,0 +1,1 @@
+{ "name": "tc_pat_target_arith_exh", "description": "target u8+u8 (envelope 0..510), branch u16 covers it: exhaustive", "source": "a -> ??::u8\nb -> ??::u8\nr -> (a+b) ? {\n  u16 -> 1\n}\n-> r", "expect_errors": [] }

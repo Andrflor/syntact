@@ -1,0 +1,1 @@
+{ "name": "tc_pat_exh_typecheck_full", "description": "typecheck branch u8 covers a u8 target: exhaustive", "source": "a -> ??::u8\nr -> a ? {\n  u8 -> 1\n}\n-> r", "expect_errors": [] }

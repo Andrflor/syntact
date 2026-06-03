@@ -1,0 +1,1 @@
+{ "name": "tc_pat_default_first", "description": "default branch first makes the pattern exhaustive regardless of other matches", "source": "a -> ??::u8\nr -> a ? {\n  -> 0\n  =5 -> 1\n}\n-> r", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{"name": "def_pat_nested", "description": "nested pattern: outer =5 fires, inner =5 fires -> default 7", "source": "r -> 5 ? {\n  =5 -> (5 ? { =5 -> 7  -> 0 })\n  -> 0\n}", "binding": "r", "expect": "7"}

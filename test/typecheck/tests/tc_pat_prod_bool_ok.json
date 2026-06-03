@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_bool_ok", "description": "deterministic bool product satisfies bool binding", "source": "bool:r -> 5 ? {\n  u8 -> true\n  -> false\n}\n-> r", "expect_errors": [] }

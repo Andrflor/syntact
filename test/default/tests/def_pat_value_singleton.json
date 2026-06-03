@@ -1,0 +1,1 @@
+{"name": "def_pat_value_singleton", "description": "pattern target 5, value =5 fires, product 100 -> default 100", "source": "r -> 5 ? {\n  =5 -> 100\n  -> 0\n}", "binding": "r", "expect": "100"}

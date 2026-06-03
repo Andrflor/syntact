@@ -1,0 +1,1 @@
+{ "name": "tc_pat_bool_exh", "description": "bool target: =true | =false covers the whole bool domain: exhaustive", "source": "b -> ??::bool\nr -> b ? {\n  =true -> 1\n  =false -> 2\n}\n-> r", "expect_errors": [] }

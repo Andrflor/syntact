@@ -208,9 +208,6 @@ typecheck :: proc(
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, ft)
 
-	// No imposed constraint → nothing to prove.
-	if fc == nil do return
-
 	display := name != "" ? fmt.tprintf("'%s'", name) : "the production"
 
 	// A constraint must denote a statically-known SET. If it depends on an unknown
@@ -218,8 +215,11 @@ typecheck :: proc(
 	// composition — it cannot be solved at compile time. `u8` is fine (the set
 	// 0..255); `??::u8` is one indeterminate u8 element, so `??::u8:a -> 10` is
 	// insoluble. This is checked on the raw constraint tree (following references)
-	// so a `??` buried under &/|/~/+/range/carve/execute is caught too.
-	if constraint_depends_on_unknown(constraint) {
+	// so a `??` buried under &/|/~/+/range/carve/execute/pattern is caught too.
+	// Checked BEFORE the `fc == nil` bail: an insoluble constraint (e.g. a pattern
+	// whose target is a bare `??`) folds to nil, but the right diagnosis is
+	// Insoluble_Constraint, not a silent skip.
+	if constraint != nil && constraint_depends_on_unknown(constraint) {
 		sem_error(
 			a,
 			fmt.tprintf(
@@ -231,6 +231,9 @@ typecheck :: proc(
 		)
 		return
 	}
+
+	// No imposed constraint → nothing to prove.
+	if fc == nil do return
 
 	if ft == nil {
 		sem_error(

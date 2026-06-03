@@ -1,0 +1,1 @@
+{"name": "tc_pat_combined_union_bad", "description": "combined product type (empty-string | 10) violates string-only binding (10 not a string)", "source": "a -> ??::u8\nstring:r -> a ? {\n  0..120 -> \"\"\n  22..255 -> 10\n}\n-> r", "expect_errors": ["Constraint_Mismatch"]}

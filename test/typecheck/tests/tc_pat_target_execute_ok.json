@@ -1,0 +1,1 @@
+{ "name": "tc_pat_target_execute_ok", "description": "target is a collapse P! producing 7; value =7 covers it", "source": "P -> {-> 7}\nr -> P! ? {\n  =7 -> 1\n}\n-> r", "expect_errors": [] }

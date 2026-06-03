@@ -28,6 +28,32 @@ import "core:fmt"
 //
 // satisfy then proves fold_value_type(value) fits fold_constraint(constraint).
 
+// reference_effective_value resolves the VALUE a Reference_Type denotes, honoring
+// a carve in its target. A property reference `C.x` carries target = `C` (the
+// carve) and a reference site pointing at the ORIGINAL field in the source scope.
+// Reading the site directly yields the pre-carve value (5), missing the override
+// (10). So when the target resolves to a carve that overrides this exact field,
+// return the override's value instead — mirroring reduce_value's Reference case.
+reference_effective_value :: proc(v: Reference_Type) -> ^Type {
+	ref := v.reference
+	if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
+	original := ref.match_scope.values[ref.match_index]
+	if v.target != nil {
+		cur := follow(v.target)
+		if cur != nil {
+			#partial switch &cv in cur^ {
+			case Carve_Type:
+				for i := 0; i < len(cv.references); i += 1 {
+					if cv.references[i].match_index == ref.match_index {
+						return cv.values[i]
+					}
+				}
+			}
+		}
+	}
+	return original
+}
+
 // fold_constraint folds the imposed constraint to the set the value must fall
 // into (the LEFT side). A producer scope {-> X} is NOT flattened: its value is
 // the producer of fold_constraint(X), mirroring fold_value_type on the right so
@@ -205,10 +231,8 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 				return fold_value_type(v.match_scope.values[v.match_index])
 			}
 		case Reference_Type:
-			ref := v.reference
-			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-				return fold_value_type(ref.match_scope.values[ref.match_index])
-			}
+			eff := reference_effective_value(v)
+			if eff != nil do return fold_value_type(eff)
 		case Execute_Type:
 			// `target!` produces the value of the production the collapse reduces
 			// through (the first .Product of the target). A scope with no
@@ -383,7 +407,15 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 			if (v.kind[i] == .Product) {
 				hasProd = true
-				if (satisfy(v.values[i], ft_content)) {
+				// The production may be stored RAW (a Range_Type `0..`, a Mention,
+				// …) when the producer scope was not built by a fold — e.g. the
+				// literal `{->0..}`. fold_constraint normalizes it to its domain set
+				// (0..inf) so the comparison below is interval-against-interval, not
+				// Range-against-Integer (which `satisfy` cannot match). A builtin
+				// like `u8` is already an Integer, so folding is idempotent there.
+				prod := fold_constraint(v.values[i])
+				if prod == nil do prod = v.values[i]
+				if (satisfy(prod, ft_content)) {
 					return true
 				}
 			}

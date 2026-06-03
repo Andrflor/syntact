@@ -1,0 +1,1 @@
+{ "name": "tc_pat_target_ref_ok", "description": "target via reference; typecheck branch covers its color", "source": "u8:x -> 5\nr -> x ? {\n  u8 -> 1\n}\n-> r", "expect_errors": [] }

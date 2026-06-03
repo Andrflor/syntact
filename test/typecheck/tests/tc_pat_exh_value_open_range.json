@@ -1,0 +1,1 @@
+{ "name": "tc_pat_exh_value_open_range", "description": "value match =0.. covers an open 0.. target: exhaustive", "source": "r -> (0..) ? {\n  =0.. -> 1\n}\n-> r", "expect_errors": [] }

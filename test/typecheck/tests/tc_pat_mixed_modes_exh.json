@@ -1,0 +1,1 @@
+{ "name": "tc_pat_mixed_modes_exh", "description": "mixed value + typecheck branches whose union covers u8: exhaustive", "source": "a -> ??::u8\nr -> a ? {\n  =0..120 -> 1\n  121..255 -> 2\n}\n-> r", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_pat_mixed_modes_gap", "description": "mixed modes leave gap 121..200 uncovered: non-exhaustive", "source": "a -> ??::u8\nr -> a ? {\n  =0..120 -> 1\n  201..255 -> 2\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"] }

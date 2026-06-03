@@ -1,0 +1,1 @@
+{ "name": "tc_pat_prod_ref_overflow_bad", "description": "reference to 300 overflows u8 binding product", "source": "k -> 300\nu8:r -> 5 ? {\n  u8 -> k\n  -> 0\n}\n-> r", "expect_errors": ["Constraint_Mismatch"] }

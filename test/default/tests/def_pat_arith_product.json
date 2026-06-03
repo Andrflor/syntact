@@ -1,0 +1,1 @@
+{"name": "def_pat_arith_product", "description": "deterministic pattern product 10+20 -> default 30", "source": "r -> 5 ? {\n  u8 -> 10+20\n  -> 0\n}", "binding": "r", "expect": "30"}

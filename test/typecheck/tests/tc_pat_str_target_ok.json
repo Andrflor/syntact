@@ -1,0 +1,1 @@
+{ "name": "tc_pat_str_target_ok", "description": "string target, string typecheck branch covers: exhaustive, product ok", "source": "string:r -> \"hi\" ? {\n  string -> \"yo\"\n  -> \"\"\n}\n-> r", "expect_errors": [] }

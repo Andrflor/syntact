@@ -1,0 +1,1 @@
+{ "name": "tc_pat_nested_ok", "description": "nested pattern as a branch product satisfies u8 binding", "source": "u8:r -> 5 ? {\n  =5 -> (5 ? { =5 -> 7  -> 0 })\n  -> 0\n}\n-> r", "expect_errors": [] }

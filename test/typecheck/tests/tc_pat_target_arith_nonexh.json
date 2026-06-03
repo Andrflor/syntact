@@ -1,0 +1,1 @@
+{ "name": "tc_pat_target_arith_nonexh", "description": "target u8+u8 (0..510), branch u8 does NOT cover 256..510: non-exhaustive", "source": "a -> ??::u8\nb -> ??::u8\nr -> (a+b) ? {\n  u8 -> 1\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"] }

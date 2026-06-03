@@ -1,0 +1,1 @@
+{"name": "def_pat_cast_product", "description": "deterministic pattern product 300::u8 = 44 -> default 44", "source": "r -> 5 ? {\n  u8 -> 300::u8\n  -> 0\n}", "binding": "r", "expect": "44"}
