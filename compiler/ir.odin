@@ -25,18 +25,33 @@ Float_Interval :: struct {
 	hi_open: bool, // true = exclusive upper bound, e.g. `<x` is (-∞, x)
 }
 
-// A string interval unifies char and string. The semantics of the range
-// depend on the quotation carried by the bound:
-//   .simple   ('…') + content 0/1 char → ordinal (codepoints lo..hi)
-//   .simple   ('abc')                  → string mode
-//   .double   ("…")                    → positional: lo = prefix, hi = suffix
-//   .backtick (`…`)                    → raw positional (no escaping)
-// nil bound = open (empty prefix/suffix, or ±∞ ordinal).
+// A string interval unifies char and string. The interval's MODE (see
+// string_interval_mode) is decided purely by quotation + bound length:
+//   ORDINAL    only when quotation is .simple ('…') AND every present bound is
+//              ≤ 1 codepoint: 'a'..'z' = any single char with codepoint in [lo,hi].
+//   POSITIONAL every other case — lo = required prefix, hi = required suffix:
+//                .double  ("a".."z")   → starts with "a", ends with "z"  (even 1 char!)
+//                .backtick (`a`..`z`)  → same, raw (no escaping in the literal)
+//                .simple multi-char ('ab'..'cd') → starts with "ab", ends with "cd"
+// So the quote alone does NOT pick the mode: only a single-char single-quote
+// bound is ordinal; "a".."z" is positional (prefix a, suffix z), not ordinal.
+// nil bound = open (no prefix / no suffix, or ±∞ ordinal). A three-bound chain
+// "ab".."cd".."ef" means: starts with ab, ends with ef, and contains cd between.
 //
-// `count` carries the repetition (`*`). Default {1..1}. In ordinal mode it counts
-// the number of independent chars in [lo,hi] ('a'..'z'*3 ≡ [a-z]{3}); in
-// concrete mode it counts the repetitions of the string ("ab"*3 ≡ "ababab"). It reuses
-// all of Integer_Type's arithmetic (multiplication, union, intersection).
+// `count` carries the repetition (`*`). Default {1..1}. For an ordinal element it
+// is the number of chars ('a'..'z'*3 = 3 single chars each in [a-z]); for a
+// concrete element it is the number of repetitions of that literal ("ab"*3 =
+// "ababab"). It reuses all of Integer_Type's arithmetic (so the count can itself
+// be a range: 'a'..'z'*2..4 = 2 to 4 letters).
+//
+// A []String_Interval is read in one of two ways, told apart by String_Type's
+// `is_sequence` flag:
+//   UNION (is_sequence = false, the default, built by `|`): a value matches if it
+//     satisfies AT LEAST ONE segment.
+//   SEQUENCE (is_sequence = true, built by `+`): the segments are an ORDERED
+//     concatenation — a concrete value must split into consecutive pieces matching
+//     segment 0, then segment 1, … in order ("id_" + '0'..'9'*1.. = the prefix
+//     "id_" followed by one-or-more digits).
 String_Interval :: struct {
 	lo:        Maybe(string),
 	hi:        Maybe(string),
@@ -219,6 +234,9 @@ String_Type :: struct {
 	string_intervals:  []String_Interval,
 	default_value:     Maybe(string),
 	default_quotation: String_Quotation,
+	// When true the segments are an ORDERED concatenation (built by `+`) rather
+	// than a union of alternatives (`|`). See the String_Interval header above.
+	is_sequence:       bool,
 }
 
 None_Type :: struct {} // the explicit absence of a value (`none`)

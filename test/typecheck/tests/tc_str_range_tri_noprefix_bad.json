@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_tri_noprefix_bad", "description": "\"ab\"..\"cd\"..\"ef\" rejects \"Xcdef\" (missing the ab prefix)", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"Xcdef\"", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_str_neg_plus_lit_ok", "description": "(~\"x\" + \"y\") accepts \"zy\" (not x, then y)", "source": "(~\"x\" + \"y\"):s -> \"zy\"", "expect_errors": [] }

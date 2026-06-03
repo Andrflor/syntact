@@ -1,0 +1,1 @@
+{ "name": "tc_str_neg_plus_lit_bad", "description": "(~\"x\" + \"y\") rejects \"xy\" (starts with the negated x)", "source": "(~\"x\" + \"y\"):s -> \"xy\"", "expect_errors": ["Constraint_Mismatch"] }

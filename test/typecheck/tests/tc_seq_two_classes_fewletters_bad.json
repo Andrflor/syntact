@@ -1,0 +1,1 @@
+{ "name": "tc_seq_two_classes_fewletters_bad", "description": "rejects \"a123\" (only 1 letter, needs 2)", "source": "('a'..'z'*2 + '0'..'9'*3):s -> \"a123\"", "expect_errors": ["Constraint_Mismatch"] }

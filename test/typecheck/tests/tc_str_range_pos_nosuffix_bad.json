@@ -1,0 +1,1 @@
+{ "name": "tc_str_range_pos_nosuffix_bad", "description": "\"abc\"..\"xyz\" rejects \"abz\" (starts with abc but does not end with xyz)", "source": "\"abc\"..\"xyz\":s -> \"abz\"", "expect_errors": ["Constraint_Mismatch"] }

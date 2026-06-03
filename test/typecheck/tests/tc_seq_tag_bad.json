@@ -1,0 +1,1 @@
+{ "name": "tc_seq_tag_bad", "description": "rejects \"<div \" (missing the closing >)", "source": "(\"<\" + 'a'..'z'*1.. + \">\"):s -> \"<div \"", "expect_errors": ["Constraint_Mismatch"] }

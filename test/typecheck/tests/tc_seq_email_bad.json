@@ -1,0 +1,1 @@
+{ "name": "tc_seq_email_bad", "description": "rejects \"foo@bar.org\" (wrong suffix, not .com)", "source": "('a'..'z'*1.. + \"@\" + 'a'..'z'*1.. + \".com\"):s -> \"foo@bar.org\"", "expect_errors": ["Constraint_Mismatch"] }

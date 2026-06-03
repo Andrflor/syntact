@@ -1,0 +1,1 @@
+{ "name": "tc_seq_range_count_bad", "description": "rejects \"abcd1\" (4 letters exceeds the 1..3 cap)", "source": "('a'..'z'*1..3 + '0'..'9'*1..):s -> \"abcd1\"", "expect_errors": ["Constraint_Mismatch"] }

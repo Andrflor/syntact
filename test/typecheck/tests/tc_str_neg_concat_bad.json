@@ -1,1 +1,1 @@
-{ "name": "tc_str_neg_concat_bad", "description": "(~\"piro\" + 0-9*0..) rejects \"piro\" (exactly the negated prefix, zero digits)", "source": "(~\"piro\" + '0'..'9' * 0..):str -> \"piro\"", "expect_errors": ["Constraint_Mismatch"] }
+{ "name": "tc_str_neg_concat_bad", "description": "(~\"piro\" + 0-9*0..) rejects \"piro\" (exactly the negated prefix, zero digits)", "source": "(~\"piro\" + '0'..'9' * 0..):s -> \"piro\"", "expect_errors": ["Constraint_Mismatch"] }
