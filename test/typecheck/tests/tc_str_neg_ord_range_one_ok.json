@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_ord_range_one_ok", "description": "(~'\\0').. is an ordinal range (one char with codepoint >= 1) \u2014 accepts a single 'a'", "source": "((~'\\0')..):s -> 'a'", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "tc_str_tri_range_middle_ok", "description": "\"ab\"..\"cd\"..\"ef\" accepts \"abXcdYef\" (cd appears between prefix and suffix)", "source": "\"ab\"..\"cd\"..\"ef\":s -> \"abXcdYef\"", "expect_errors": []}

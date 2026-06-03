@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_ord_class_ok", "description": "~'a'..'z'*1.. : one-or-more non-lowercase chars \u2014 accepts \"123\"", "source": "(~'a'..'z' * 1..):s -> \"123\"", "expect_errors": []}

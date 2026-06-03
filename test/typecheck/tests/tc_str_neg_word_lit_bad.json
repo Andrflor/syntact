@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_word_lit_bad", "description": "~\"x\" + \"y\" rejects \"xy\" (starts with the forbidden x)", "source": "(~\"x\" + \"y\"):s -> \"xy\"", "expect_errors": ["Constraint_Mismatch"]}

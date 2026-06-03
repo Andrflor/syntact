@@ -1,0 +1,1 @@
+{"name": "def_str_neg_word_seq", "description": "default of (~\"x\" + \"y\") is \"y\" (empty non-x prefix + the y literal)", "source": "(~\"x\" + \"y\"):s", "binding": "s", "expect": "\"y\""}

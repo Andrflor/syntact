@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_word_seq_ok", "description": "~\"piro\" + digits : a non-piro prefix then optional digits \u2014 accepts \"pira\"", "source": "(~\"piro\" + '0'..'9' * 0..):s -> \"pira\"", "expect_errors": []}

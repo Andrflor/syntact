@@ -1,0 +1,1 @@
+{"name": "tc_str_tri_range_url_bad", "description": "three-bound url-like range rejects a value missing the middle \"api\"", "source": "\"http\"..\"api\"..\"com\":s -> \"http://x.com\"", "expect_errors": ["Constraint_Mismatch"]}

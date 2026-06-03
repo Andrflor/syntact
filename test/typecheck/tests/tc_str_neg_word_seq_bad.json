@@ -1,0 +1,1 @@
+{"name": "tc_str_neg_word_seq_bad", "description": "~\"piro\" + digits rejects \"piro\" itself (the forbidden word, no digits)", "source": "(~\"piro\" + '0'..'9' * 0..):s -> \"piro\"", "expect_errors": ["Constraint_Mismatch"]}
