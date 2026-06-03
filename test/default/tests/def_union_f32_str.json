@@ -1,0 +1,1 @@
+{ "name": "def_union_f32_str", "description": "default of (f32|string) follows first term = 0.0", "source": "(f32|string):a", "binding": "a", "expect": "0.0" }

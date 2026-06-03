@@ -1,0 +1,1 @@
+{ "name": "tc_execute_ref_producer_ok", "description": "collapse a referenced producer of a concrete value, fits u8", "source": "P -> { u8:x -> 200\n -> x }\nu8:a -> P!", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "def_neg_and_negs", "description": "~5 & ~10 = all except 5,10; first finite bound = 4 (hi of ..4)", "source": "(~5 & ~10):a", "binding": "a", "expect": "4" }

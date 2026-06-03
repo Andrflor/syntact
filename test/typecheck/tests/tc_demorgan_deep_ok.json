@@ -1,0 +1,1 @@
+{ "name": "tc_demorgan_deep_ok", "description": "~(~(0..10) | 20) = (0..10) & ~20 accepts 5", "source": "(~(~(0..10) | 20)):a -> 5", "expect_errors": [] }

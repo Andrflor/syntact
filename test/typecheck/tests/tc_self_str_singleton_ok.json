@@ -1,0 +1,1 @@
+{ "name": "tc_self_str_singleton_ok", "description": "an exact string satisfies itself", "source": "\"hi\":a -> \"hi\"", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_union_char_int_bad", "description": "(0..9|'a'..'z') rejects uppercase char", "source": "(0..9|'a'..'z'):b -> 'Z'", "expect_errors": ["Constraint_Mismatch"] }

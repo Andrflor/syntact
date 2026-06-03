@@ -1,0 +1,1 @@
+{ "name": "tc_union_char_int_char_ok", "description": "(0..9|'a'..'z') accepts a digit", "source": "(0..9|'a'..'z'):b -> 5", "expect_errors": [] }

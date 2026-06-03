@@ -1,0 +1,1 @@
+{ "name": "tc_self_bool_singleton_ok", "description": "true satisfies itself", "source": "true:a -> true", "expect_errors": [] }

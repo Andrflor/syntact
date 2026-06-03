@@ -1,0 +1,1 @@
+{ "name": "tc_comp_double_and_bad_hi", "description": "(0..100 & >50 & <80) rejects 80", "source": "(0..100 & >50 & <80):a -> 80", "expect_errors": ["Constraint_Mismatch"] }

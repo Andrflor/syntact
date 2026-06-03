@@ -1,0 +1,1 @@
+{ "name": "tc_neg_or_self_ok", "description": "(~5 | 5) covers all ints, accepts 5", "source": "(~5 | 5):a -> 5", "expect_errors": [] }

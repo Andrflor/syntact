@@ -1,0 +1,1 @@
+{ "name": "def_union_str_int", "description": "default of (string|u8) is the first term (string) default = empty string", "source": "(string|u8):a", "binding": "a", "expect": "\"\"" }

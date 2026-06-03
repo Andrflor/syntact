@@ -1,0 +1,1 @@
+{ "name": "tc_self_ref_singleton_ok", "description": "ref to a singleton used as type, value=the ref → singleton matches", "source": "C -> 5\nC:a -> C", "expect_errors": [] }

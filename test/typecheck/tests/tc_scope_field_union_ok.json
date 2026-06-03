@@ -1,0 +1,1 @@
+{ "name": "tc_scope_field_union_ok", "description": "{(u8|string):x} accepts {x->\"hi\"}", "source": "{(u8|string):x}:a -> {x -> \"hi\"}", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_prop_compute_bad", "description": "pack.x + 200 overflows u8", "source": "pack -> {u8:x -> 100}\nu8:r -> pack.x + 200", "expect_errors": ["Constraint_Mismatch"] }

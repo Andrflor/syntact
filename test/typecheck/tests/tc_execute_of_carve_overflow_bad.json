@@ -1,0 +1,1 @@
+{ "name": "tc_execute_of_carve_overflow_bad", "description": "collapse of a carve whose override overflows: inline + implicit recheck on x, then the product overflows r", "source": "Base -> {u8:x -> 1\n -> x}\nu8:r -> Base{x->300}!", "expect_errors": ["Constraint_Mismatch", "Constraint_Mismatch", "Constraint_Mismatch"] }

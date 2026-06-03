@@ -1,0 +1,1 @@
+{ "name": "tc_neg_triple_ok", "description": "~~~10 == ~10 accepts 9", "source": "(~~~10):a -> 9", "expect_errors": [] }

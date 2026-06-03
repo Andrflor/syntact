@@ -1,0 +1,1 @@
+{ "name": "tc_cast_bool_to_u8_ok", "description": "bool reinterpreted into u8 lands", "source": "true:a -> true\nu8:b -> a::u8", "expect_errors": [] }

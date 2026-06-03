@@ -1,0 +1,1 @@
+{ "name": "tc_ref_or_family_bad", "description": "(C | string) rejects a float (neither u8 nor string)", "source": "C -> u8\n(C | string):a -> 3.0", "expect_errors": ["Constraint_Mismatch"] }

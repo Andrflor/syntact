@@ -1,0 +1,1 @@
+{ "name": "tc_scope_nested_ok", "description": "nested scope field {u8:x}:inner accepts a matching nested value", "source": "{ {u8:x}:inner }:a -> { inner -> {x -> 5} }", "expect_errors": [] }

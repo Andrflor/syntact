@@ -1,0 +1,1 @@
+{ "name": "tc_char_rep_union_ok", "description": "('a'..'z' | '0'..'9')*2..4 accepts mixed alnum", "source": "(('a'..'z' | '0'..'9')*2..4):a -> \"a1b\"", "expect_errors": [] }

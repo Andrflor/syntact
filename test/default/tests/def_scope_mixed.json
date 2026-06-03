@@ -1,0 +1,1 @@
+{ "name": "def_scope_mixed", "description": "default of {u8:x, string:y} is {x -> 0, y -> \"\"}", "source": "{u8:x, string:y}:a", "binding": "a", "expect": "{x -> 0, y -> \"\"}" }

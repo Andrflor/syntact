@@ -1,0 +1,1 @@
+{ "name": "tc_scope_two_missing_bad", "description": "{u8:x, u8:y} rejects {x->1} (arity mismatch)", "source": "{u8:x, u8:y}:a -> {x -> 1}", "expect_errors": ["Constraint_Mismatch"] }

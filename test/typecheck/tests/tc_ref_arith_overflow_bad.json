@@ -1,0 +1,1 @@
+{ "name": "tc_ref_arith_overflow_bad", "description": "A+B under u8 where A=200,B=100 overflows", "source": "A -> 200\nB -> 100\nu8:r -> A + B", "expect_errors": ["Constraint_Mismatch"] }

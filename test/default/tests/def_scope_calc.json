@@ -1,0 +1,1 @@
+{ "name": "def_scope_calc", "description": "default of {u8:x->5, u8:y->x+10} is {x -> 5, y -> 15}", "source": "{u8:x -> 5, u8:y -> x+10}:a", "binding": "a", "expect": "{x -> 5, y -> 15}" }

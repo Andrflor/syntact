@@ -1,0 +1,1 @@
+{ "name": "tc_comp_tri_union_gap_bad", "description": "(0..10|50..60|100..110) rejects 30", "source": "(0..10|50..60|100..110):a -> 30", "expect_errors": ["Constraint_Mismatch"] }

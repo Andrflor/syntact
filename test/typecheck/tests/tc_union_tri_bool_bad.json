@@ -1,0 +1,1 @@
+{ "name": "tc_union_tri_bool_bad", "description": "(string|u8|f32) rejects bool", "source": "(string|u8|f32):b -> true", "expect_errors": ["Constraint_Mismatch"] }

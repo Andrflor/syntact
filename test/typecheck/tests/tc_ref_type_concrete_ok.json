@@ -1,0 +1,1 @@
+{ "name": "tc_ref_type_concrete_ok", "description": "ref-as-type accepts a concrete element in its set", "source": "C -> u8\nC:a -> 200", "expect_errors": [] }

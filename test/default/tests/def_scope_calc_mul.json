@@ -1,0 +1,1 @@
+{ "name": "def_scope_calc_mul", "description": "default of {u8:x->3, u16:y->x*x} is {x -> 3, y -> 9}", "source": "{u8:x -> 3, u16:y -> x*x}:a", "binding": "a", "expect": "{x -> 3, y -> 9}" }

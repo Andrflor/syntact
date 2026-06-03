@@ -1,0 +1,1 @@
+{ "name": "def_carve_both", "description": "default of a carve overriding both fields", "source": "Base -> {u8:x, u8:y}\nBase{x->10, y->20}:g", "binding": "g", "expect": "{x -> 10, y -> 20}" }

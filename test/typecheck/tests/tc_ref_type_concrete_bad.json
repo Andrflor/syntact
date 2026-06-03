@@ -1,0 +1,1 @@
+{ "name": "tc_ref_type_concrete_bad", "description": "ref-as-type rejects a concrete element outside its set", "source": "C -> u8\nC:a -> 300", "expect_errors": ["Constraint_Mismatch"] }

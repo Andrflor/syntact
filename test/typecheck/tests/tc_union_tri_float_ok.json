@@ -1,0 +1,1 @@
+{ "name": "tc_union_tri_float_ok", "description": "(string|u8|f32) accepts float", "source": "(string|u8|f32):b -> 2.5", "expect_errors": [] }

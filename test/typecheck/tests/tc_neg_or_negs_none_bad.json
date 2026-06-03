@@ -1,0 +1,1 @@
+{ "name": "tc_neg_or_negs_none_bad", "description": "~(~10|~20) = {10}&{20} = none, rejects 10", "source": "(~(~10 | ~20)):a -> 10", "expect_errors": ["Constraint_Mismatch"] }

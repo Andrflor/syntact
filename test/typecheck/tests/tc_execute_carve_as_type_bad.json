@@ -1,0 +1,1 @@
+{ "name": "tc_execute_carve_as_type_bad", "description": "collapse-of-carve as constraint rejects a value outside the produced set", "source": "Base -> {u8:x -> 1\n -> x}\nBase{x->200}!:a -> 300", "expect_errors": ["Constraint_Mismatch"] }

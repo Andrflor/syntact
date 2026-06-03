@@ -1,0 +1,1 @@
+{ "name": "tc_carve_impl_dep_compensated_ok", "description": "overriding both keeps the dependent field valid", "source": "Base -> {x -> 0, u8:y -> x}\ng -> Base{x -> -11, y -> 5}", "expect_errors": [] }

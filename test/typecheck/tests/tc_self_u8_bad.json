@@ -1,0 +1,1 @@
+{ "name": "tc_self_u8_bad", "description": "u8 (a set) does not satisfy itself: u8:a -> u8 is a set, not an element", "source": "u8:a -> u8", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_carve_value_ok", "description": "carving a scope, override in range", "source": "Base -> {u8:x}\ng -> Base{x->5}", "expect_errors": [] }

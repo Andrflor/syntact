@@ -1,0 +1,1 @@
+{ "name": "tc_comp_tri_union_mid_ok", "description": "(0..10|50..60|100..110) accepts 55", "source": "(0..10|50..60|100..110):a -> 55", "expect_errors": [] }

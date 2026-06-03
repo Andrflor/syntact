@@ -1,0 +1,1 @@
+{ "name": "tc_scope_calc_mul_ok", "description": "y = x*x fits u16 when x=20 (400)", "source": "{\n  u8:x -> 20\n  u16:y -> x*x\n}:a", "expect_errors": [] }

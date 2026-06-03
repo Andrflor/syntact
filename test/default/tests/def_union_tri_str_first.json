@@ -1,0 +1,1 @@
+{ "name": "def_union_tri_str_first", "description": "default of (string|u8|f32) follows first term = empty string", "source": "(string|u8|f32):a", "binding": "a", "expect": "\"\"" }

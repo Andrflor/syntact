@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_pat_ok", "description": "(\"abc\" | \"xyz\") accepts xyz", "source": "(\"abc\" | \"xyz\"):a -> \"xyz\"", "expect_errors": [] }

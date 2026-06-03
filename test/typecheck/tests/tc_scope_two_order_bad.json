@@ -1,0 +1,1 @@
+{ "name": "tc_scope_two_order_bad", "description": "{u8:x, string:y} rejects swapped order {y first}", "source": "{u8:x, string:y}:a -> {y -> \"hi\", x -> 1}", "expect_errors": ["Constraint_Mismatch"] }

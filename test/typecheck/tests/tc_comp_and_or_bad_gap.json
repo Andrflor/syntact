@@ -1,0 +1,1 @@
+{ "name": "tc_comp_and_or_bad_gap", "description": "((u8 & >10)|(i8 & <0)) rejects 5 (gap 0..10)", "source": "((u8 & >10) | (i8 & <0)):a -> 5", "expect_errors": ["Constraint_Mismatch"] }

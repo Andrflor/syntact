@@ -1,0 +1,1 @@
+{ "name": "tc_char_union_neg_ok", "description": "('a'..'z' & ~'m') accepts 'b'", "source": "('a'..'z' & ~'m'):a -> 'b'", "expect_errors": [] }

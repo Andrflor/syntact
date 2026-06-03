@@ -1,0 +1,1 @@
+{ "name": "def_scope_bool", "description": "default of {bool:b, u8:n} is {b -> false, n -> 0}", "source": "{bool:b, u8:n}:a", "binding": "a", "expect": "{b -> false, n -> 0}" }

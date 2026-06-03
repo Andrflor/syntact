@@ -1,0 +1,1 @@
+{ "name": "tc_scope_two_extra_bad", "description": "{u8:x} rejects {x->1, y->2} (extra field)", "source": "{u8:x}:a -> {x -> 1, y -> 2}", "expect_errors": ["Constraint_Mismatch"] }

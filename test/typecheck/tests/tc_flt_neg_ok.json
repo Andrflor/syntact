@@ -1,0 +1,1 @@
+{ "name": "tc_flt_neg_ok", "description": "~5.0 accepts 6.0", "source": "(~5.0):a -> 6.0", "expect_errors": [] }

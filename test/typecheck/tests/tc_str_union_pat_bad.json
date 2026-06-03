@@ -1,0 +1,1 @@
+{ "name": "tc_str_union_pat_bad", "description": "(\"abc\" | \"xyz\") rejects def", "source": "(\"abc\" | \"xyz\"):a -> \"def\"", "expect_errors": ["Constraint_Mismatch"] }

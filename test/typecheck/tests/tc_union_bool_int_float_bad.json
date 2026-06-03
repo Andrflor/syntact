@@ -1,0 +1,1 @@
+{ "name": "tc_union_bool_int_float_bad", "description": "(bool|u8) rejects a float", "source": "(bool|u8):b -> 1.5", "expect_errors": ["Constraint_Mismatch"] }

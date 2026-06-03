@@ -1,0 +1,1 @@
+{ "name": "tc_cast_neg_into_u8_ok", "description": "i8 negative reinterpreted into u8 always lands", "source": "i8:a -> -1\nu8:b -> a::u8", "expect_errors": [] }

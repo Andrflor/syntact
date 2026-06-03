@@ -1,0 +1,1 @@
+{ "name": "tc_flt_union_bad", "description": "(0.0..1.0 | 10.0..20.0) rejects 5.0", "source": "(0.0..1.0 | 10.0..20.0):a -> 5.0", "expect_errors": ["Constraint_Mismatch"] }

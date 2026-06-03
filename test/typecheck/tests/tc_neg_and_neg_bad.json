@@ -1,0 +1,1 @@
+{ "name": "tc_neg_and_neg_bad", "description": "~(u8 & ~5): 7 is inside (u8 except 5) so rejected", "source": "(~(u8 & ~5)):a -> 7", "expect_errors": ["Constraint_Mismatch"] }

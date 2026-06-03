@@ -1,0 +1,1 @@
+{ "name": "tc_comp_inter_unions_ok", "description": "((0..10|50..60) & 5..55) accepts 8", "source": "((0..10|50..60) & 5..55):a -> 8", "expect_errors": [] }

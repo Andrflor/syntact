@@ -1,0 +1,1 @@
+{ "name": "def_ref_as_type_range", "description": "default of a binding typed by a referenced range 10..20 = 10", "source": "C -> 10..20\nC:a", "binding": "a", "expect": "10" }

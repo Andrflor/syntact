@@ -1,0 +1,1 @@
+{ "name": "tc_union_u8_f32_int_ok", "description": "(u8|f32) accepts an int in u8 range", "source": "(u8|f32):b -> 5", "expect_errors": [] }

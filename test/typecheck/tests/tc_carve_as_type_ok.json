@@ -1,0 +1,1 @@
+{ "name": "tc_carve_as_type_ok", "description": "a carve used as a constraint accepts a scope matching the substituted shape", "source": "Base -> {u8:x}\nBase{x->5}:a -> {x -> 5}", "expect_errors": [] }

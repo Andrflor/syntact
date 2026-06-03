@@ -1,0 +1,1 @@
+{ "name": "tc_demorgan_deep_bad", "description": "~(~(0..10) | 20) rejects 20", "source": "(~(~(0..10) | 20)):a -> 20", "expect_errors": ["Constraint_Mismatch"] }

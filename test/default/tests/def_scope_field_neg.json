@@ -1,0 +1,1 @@
+{ "name": "def_scope_field_neg", "description": "default of {~10:x} is {x -> 9}", "source": "{~10:x}:a", "binding": "a", "expect": "{x -> 9}" }

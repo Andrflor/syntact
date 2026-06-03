@@ -1,0 +1,1 @@
+{ "name": "tc_carve_property_ok", "description": "property of a carved scope reads the substituted value", "source": "Base -> {u8:x -> 1, u8:y -> 2}\ng -> Base{x -> 9}\nu8:r -> g.x", "expect_errors": [] }

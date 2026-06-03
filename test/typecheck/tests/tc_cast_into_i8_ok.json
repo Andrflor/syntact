@@ -1,0 +1,1 @@
+{ "name": "tc_cast_into_i8_ok", "description": "u8 reinterpreted into i8 always lands (raw cast)", "source": "u8:a -> 200\ni8:b -> a::i8", "expect_errors": [] }

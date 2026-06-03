@@ -1,0 +1,1 @@
+{ "name": "tc_execute_as_type_bad", "description": "P! as constraint rejects a value outside the produced set", "source": "P -> { -> u8 }\nP!:a -> 300", "expect_errors": ["Constraint_Mismatch"] }

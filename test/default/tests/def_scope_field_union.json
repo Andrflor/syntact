@@ -1,0 +1,1 @@
+{ "name": "def_scope_field_union", "description": "default of {(u8|string):x} follows first term u8 = {x -> 0}", "source": "{(u8|string):x}:a", "binding": "a", "expect": "{x -> 0}" }

@@ -1,0 +1,1 @@
+{ "name": "tc_execute_carve_as_type_ok", "description": "the collapse of a carve used as a constraint", "source": "Base -> {u8:x -> 1\n -> x}\nBase{x->200}!:a -> 200", "expect_errors": [] }

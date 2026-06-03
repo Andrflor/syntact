@@ -1,0 +1,1 @@
+{ "name": "def_carve_via_ref", "description": "default of a reference to a carve = substituted scope {x -> 7}", "source": "Base -> {u8:x}\nN -> Base{x->7}\nN:g", "binding": "g", "expect": "{x -> 7}" }

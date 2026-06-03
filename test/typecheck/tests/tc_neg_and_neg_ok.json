@@ -1,0 +1,1 @@
+{ "name": "tc_neg_and_neg_ok", "description": "~(u8 & ~5) = complement of (u8 except 5); 5 is outside that set so accepted", "source": "(~(u8 & ~5)):a -> 5", "expect_errors": [] }

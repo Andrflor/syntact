@@ -1,0 +1,1 @@
+{ "name": "def_carve_nested", "description": "default of a carve of a carve", "source": "Base -> {u8:x, u8:y}\nMid -> Base{x->10}\nMid{y->20}:g", "binding": "g", "expect": "{x -> 10, y -> 20}" }

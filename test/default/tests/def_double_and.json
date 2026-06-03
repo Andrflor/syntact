@@ -1,0 +1,1 @@
+{ "name": "def_double_and", "description": "(0..100 & >50 & <80) = 51..79 default 51", "source": "(0..100 & >50 & <80):a", "binding": "a", "expect": "51" }

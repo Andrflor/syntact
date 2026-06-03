@@ -1,0 +1,1 @@
+{ "name": "tc_carve_property_compute_bad", "description": "computing on a carved property can overflow", "source": "Base -> {u8:x -> 1}\ng -> Base{x -> 200}\nu8:r -> g.x + 100", "expect_errors": ["Constraint_Mismatch"] }

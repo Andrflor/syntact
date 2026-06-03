@@ -1,0 +1,1 @@
+{ "name": "tc_cast_then_overflow_ok", "description": "cast result satisfies its own target even though source overflows it", "source": "u8:a -> 200\nu8:b -> 200\nu8:c -> (a+b)::u8", "expect_errors": [] }

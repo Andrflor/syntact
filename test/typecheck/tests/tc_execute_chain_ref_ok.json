@@ -1,0 +1,1 @@
+{ "name": "tc_execute_chain_ref_ok", "description": "P referenced by Q, collapse Q to a concrete product", "source": "P -> { u8:x -> 42\n -> x }\nQ -> P\nu8:a -> Q!", "expect_errors": [] }
