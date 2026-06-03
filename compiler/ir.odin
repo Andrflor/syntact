@@ -19,8 +19,10 @@ Integer_Interval :: struct {
 }
 
 Float_Interval :: struct {
-	lo: Maybe(f64), // nil = -∞
-	hi: Maybe(f64), // nil = +∞
+	lo:      Maybe(f64), // nil = -∞
+	hi:      Maybe(f64), // nil = +∞
+	lo_open: bool, // true = exclusive lower bound, e.g. `>x` is (x, +∞)
+	hi_open: bool, // true = exclusive upper bound, e.g. `<x` is (-∞, x)
 }
 
 // A string interval unifies char and string. The semantics of the range
@@ -644,7 +646,7 @@ print_float_intervals_inline :: proc(float_intervals: []Float_Interval, kind: Fl
 print_float_interval :: proc(interval: Float_Interval, kind: FloatKind) {
 	lo, lo_ok := interval.lo.(f64)
 	hi, hi_ok := interval.hi.(f64)
-	if lo_ok && hi_ok && lo == hi {
+	if lo_ok && hi_ok && lo == hi && !interval.lo_open && !interval.hi_open {
 		fmt.print(float_display(lo))
 		return
 	}
@@ -652,9 +654,15 @@ print_float_interval :: proc(interval: Float_Interval, kind: FloatKind) {
 		print_float_kind(kind)
 		return
 	}
-	if lo_ok do fmt.print(float_display(lo))
+	if lo_ok {
+		if interval.lo_open do fmt.print(">")
+		fmt.print(float_display(lo))
+	}
 	fmt.print("..")
-	if hi_ok do fmt.print(float_display(hi))
+	if hi_ok {
+		if interval.hi_open do fmt.print("<")
+		fmt.print(float_display(hi))
+	}
 }
 
 print_integer_intervals_inline :: proc(integer_intervals: []Integer_Interval) {
