@@ -6,7 +6,7 @@
 
 Syntact is an experimental general-purpose programming language built around one primitive: the **scope**.
 
-A scope is complete structured data. It can contain bindings, defaults, productions, constraints, patterns, handlers, and other scopes. It can be inspected, carved, extended, matched, expanded, and collapsed. It is not a function, an object, a class, a struct, a module, a record, or an instance — although it can replace all of them.
+A scope is complete structured data. It can contain bindings, defaults, productions, constraints, patterns, handlers, and other scopes. It can be inspected, carved, matched, expanded, and collapsed. It is not a function, an object, a class, a struct, a module, a record, or an instance — although it can replace all of them.
 
 The central idea is this:
 
@@ -109,7 +109,6 @@ A scope is not a function, object, module, record, class, or type. Those are pro
 | `square!` | call/eval | collapse |
 | `Point:p` | declaration of variable p | binding colored by `Point` — the constraint propagates structurally |
 | `box.x` | field access | projection through current view |
-| `User+{...}` | inheritance | structural extension |
 | `Log -< e {...}` | callback/listener | nominal effect handler |
 | `value >>- Change` | mutable variable | resonant binding driven by nominal event |
 | `value -<< e.value` | assignment | resonant update inside handler |
@@ -127,7 +126,7 @@ The analogies in the middle column help you start reading code. They are not wha
 3. A name is a projection, not an identity.
 4. Access resolves a name through the current view.
 5. Carving derives a new scope by targeting existing structural occurrences.
-6. Extension explicitly adds new structure.
+6. A scope is closed: carving refines existing bindings, it never adds new ones.
 7. Collapse reduces a scope through its production.
 8. Shapes are scopes used as structural constraints.
 9. Patterns are scopes used analytically.
@@ -168,7 +167,6 @@ scope      complete structured data
 binding    directed relation inside a scope
 production what a scope yields when collapsed
 carving    derivation of existing structure
-extension  explicit addition of new structure
 shape      scope used as constraint
 pattern    shape used analytically
 collapse   explicit reduction
@@ -237,7 +235,7 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [Collapse](#collapse)
 * [Execution patterns](#execution-patterns)
 * [Carving](#carving)
-* [Extension](#extension)
+* [Carving is closed](#carving-is-closed)
 * [Defaults and completeness](#defaults-and-completeness)
 * [No null, no uninitialized state](#no-null-no-uninitialized-state)
 * [Algebraic immutability](#algebraic-immutability)
@@ -250,6 +248,7 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [Scope algebra](#scope-algebra)
 * [Pull bindings and genericity](#pull-bindings-and-genericity)
 * [Effects as nominal events](#effects-as-nominal-events)
+* [The external boundary](#the-external-boundary)
 * [Handlers as compile-time dependency injection](#handlers-as-compile-time-dependency-injection)
 * [Resonance](#resonance)
 * [Reactivity](#reactivity)
@@ -685,24 +684,11 @@ then collapse the derived scope
 
 ---
 
-## Extension
+## Carving is closed
 
-Carving changes existing structure. It should not silently add new structure.
+Carving refines existing structure. It never adds new structure.
 
-If a binding does not exist yet, use extension:
-
-```syntact
-User -> {
-  String:name
-  u8:age
-}
-
-AdminUser -> User+{
-  role -> "admin"
-}
-```
-
-If the binding already exists, use carving:
+A scope is closed: its set of bindings is fixed the moment it is written. Carving can target any binding that already exists and derive a new scope with a different value, but it cannot introduce a binding that was not there.
 
 ```syntact
 Role -> {
@@ -717,21 +703,21 @@ User -> {
 }
 
 AdminUser -> User{
-  role -> "admin"
+  role -> "admin" // refines the existing `role` binding
 }
 ```
 
-This distinction protects the algebra. A typo should not create a new field by accident.
+Targeting a name that does not exist is an error, not a silent addition. This protects the algebra: a typo cannot quietly grow a scope.
 
 ```syntact
 User{
-  raole -> "admin" // invalid if `raole` does not exist
+  raole -> "admin" // error: `raole` is not a binding of User
 }
 ```
 
-`{...}` means derivation or refinement of existing structure.
+If you need a different shape, you write a different scope. A scope is complete *and* closed: you carve what is there, you do not bolt on what is not.
 
-`+{...}` means explicit structural extension.
+`{...}` means derivation or refinement of existing structure. There is no extension operator — there is no way to add a binding to an existing scope.
 
 ---
 
@@ -1254,19 +1240,6 @@ MediumCircle -> Circle{radius?(>=10 & <50)}
 BigCircle -> Circle{radius?>=50}
 ```
 
-Structural extension:
-
-```syntact
-User -> {
-  String:name
-  u8:age
-}
-
-AdminUser -> User+{
-  role -> "admin"
-}
-```
-
 Structural override:
 
 ```syntact
@@ -1286,7 +1259,7 @@ AdminUser -> User{
 }
 ```
 
-The goal is closure: construction, derivation, extension, matching, destructuring, refinement, and expansion should be explained by the same algebra, not by separate feature systems.
+The goal is closure: construction, derivation, matching, destructuring, refinement, and expansion should be explained by the same algebra, not by separate feature systems.
 
 ### Grammars as shapes
 
@@ -1499,6 +1472,77 @@ program -> {
 Handlers are scoped. The first visible handler handles the event. After handling, execution resumes at the point where the event was emitted.
 
 This is Syntact's version of algebraic effects. They are called events because they are emitted and handled, but they are not callbacks, observers, or pub/sub messages.
+
+---
+
+## The external boundary
+
+Pure Syntact reduces toward singletons. But a real program eventually has to talk to something it cannot reduce: the kernel, a linked library, the hardware. That is the **external boundary**, and it is not a special feature — it is just a scope whose production points *outside*.
+
+```syntact
+kernel -> <kernel.so>{
+  write -> {
+    u8:a  u8:b
+    -> ??::u8
+  }
+  read -> {
+    i32:fd  usize:len
+    -> ??::isize
+  }
+}
+```
+
+`<kernel.so>` is **provenance**: it tells the compiler where the scope's leaves come from, and maps directly to one import descriptor. Everything inside is an ordinary scope. `write` is a scope with colored input bindings (`u8:a`, `u8:b`) and a production `-> ??::u8`.
+
+That production is the key. `??` is an unknown value; `::u8` forces it into the `u8` layout. So `??::u8` reads as *"a value that is not computable in pure Syntact, but whose layout is known to be u8"*. The body is structurally empty — only the shape of the result is known, not the result. That is exactly what makes a leaf external.
+
+### Calling an external is ordinary scope algebra
+
+Because `write` is just a scope, there is no special call syntax. Carving and collapse do the work, the same as everywhere else:
+
+```syntact
+kernel.write              // projection — the scope, not executed
+kernel.write{2, 3}!       // positional carve (a <- 2, b <- 3), then collapse
+kernel.write{a -> 2 b -> 6}! // nominal carve, then collapse
+
+partial -> kernel.write{b -> 4}  // partial carve, NO collapse — pure data, no effect
+partial!                         // collapse here → the effect happens here, only now
+```
+
+**Carving an external does not execute it.** A partially-applied external is just another scope — pure data. The effect happens at `!`, and only there. This is consistent with the rest of the language: effects live at collapse points.
+
+### The effect marker is the frontier, not the result
+
+An external collapse is effectful **because the target is an external leaf**, not because its production fails to reduce to a point. This matters:
+
+- A `void`/no-return external (e.g. closing a handle for its side effect) still performs an effect, even though its result folds to `none`.
+- An external returning a constant still performs an effect — the *act* of crossing the boundary is the effect, not the shape of what comes back.
+
+So the rule is: an effect is lifted whenever a collapse crosses the external frontier, regardless of whether the production is singleton, non-singleton, or void.
+
+### No glue
+
+This is where the one-world model pays off. In a language with a boxed runtime, calling a C library means writing a translation layer — unwrapping objects, marshalling, refcounting — for every binding, maintained by hand. That glue exists because there are *two* representations that do not speak to each other.
+
+Syntact has one representation. A String, an array, a scope are *values* in the machine layout, not boxed objects — there is no pointer type in the pure language; the pointer only appears in boundary codegen, derived mechanically by a size rule (a value larger than a register is passed by address, otherwise by value). So there is nothing to translate. You declare the provenance, color the signatures, and the library is a scope you carve and collapse like any other.
+
+You can even prove safety *at* the frontier. A C string is "any non-null char, then a terminator", which is a content constraint:
+
+```syntact
+CString -> (~'\0').. + '\0'
+```
+
+A String satisfying `CString` is statically known to be a well-formed C string — no interior null — *before* it ever crosses the boundary.
+
+### Writing a library in Syntact
+
+The same shape works in reverse. An external library is a scope whose production points out; a library *written in Syntact* is a scope whose production reduces *in*. They are the same object, seen from two sides — there is no separate notion of "a library".
+
+So you do not need to drop into C for the fast path. A Syntact library is structure that folds: when its inputs are known it reduces to a singleton at compile time, and when they are not it reduces to its op-minimal symbolic form. It reaches codegen already optimized by construction, it is inspectable instead of being an opaque blob, it specializes at the call site through carving, and it cross-compiles by an arch flag instead of shipping one binary per platform. There is nothing to bundle.
+
+The external boundary is therefore the *exception* — reserved for code you do not control (the kernel, a proprietary `.so`). Everything else is written in Syntact: pure, reducible, optimized by reduction.
+
+> Note: the external boundary is design, not yet implemented. The `<lib>{}` provenance form, `::` raw casts, and the `??` unknown describe where the language is going; the cast and the unknown already fold in the bootstrap compiler, the `<lib>{}` boundary does not parse yet.
 
 ---
 
@@ -1800,7 +1844,7 @@ Syntact blurs the line between programming and metaprogramming because a program
 
 In other languages, manipulating a class as data requires reflection, annotations, code generation, templates, macros, or compiler plugins.
 
-In Syntact, the “class” is a scope. You can carve it, extend it, inspect it, constrain with it, expand it, or collapse it with the same operators used everywhere else.
+In Syntact, the “class” is a scope. You can carve it, inspect it, constrain with it, expand it, or collapse it with the same operators used everywhere else.
 
 Many things that are metaprogramming elsewhere become ordinary programming:
 
@@ -2019,7 +2063,6 @@ In exchange, it tries to get:
 one world of data
 complete scopes by default
 structural derivation
-explicit extension
 explicit reduction
 structural shapes
 first-class patterns
@@ -2044,7 +2087,7 @@ The implementation should grow in layers. Each layer must be useful by itself.
 
 ### V0 — Core executable language
 
-Goal: prove that `scope + binding + carving + extension + collapse` works.
+Goal: prove that `scope + binding + carving + collapse` works.
 
 Include:
 
@@ -2055,7 +2098,6 @@ bindings with ->
 productions
 access with .
 carving with {...}
-extension with +{...}
 collapse with !
 primitive values
 basic static analysis
