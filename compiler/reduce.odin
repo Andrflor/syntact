@@ -82,7 +82,16 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) {
 			return reduce_value(v.type_fold)
 		}
-		return value
+		// A bare `??::u8` is an ATOM — the unknown itself; carry it as is. But a cast
+		// over a COMPOSITE source (`(a+b)::u8`) is a WRAPPER: reduce the inner
+		// expression and re-wrap, so the wrapped terms (and the cast) survive instead
+		// of collapsing the whole node to one opaque `??`.
+		if cast_is_atom(value) do return value
+		inner := reduce_value(v.value)
+		if inner == v.value do return value
+		wrapped := new(Type)
+		wrapped^ = Cast_Type{inner, v.target, nil}
+		return wrapped
 	case Carve_Type:
 		return reduce_carve(v)
 	case Mention_Type:
@@ -215,6 +224,40 @@ is_fixed_point :: proc(t: ^Type) -> bool {
 				continue
 			}
 			return false
+		}
+		return false
+	}
+	return false
+}
+
+// cast_is_atom reports whether a Cast node is a bare `??::T` ATOM — its source,
+// followed through aliases, bottoms out in the Unknown itself (the runtime input).
+// Such a cast IS the fixed point and is carried unreduced. A cast whose source is a
+// composite expression (`(a+b)::u8`) is NOT an atom: it is a width WRAPPER and must
+// have its inner expression reduced and the cast preserved around it.
+cast_is_atom :: proc(t: ^Type) -> bool {
+	ct, ok := &t.(Cast_Type)
+	if !ok do return false
+	cur := ct.value
+	for cur != nil {
+		#partial switch v in cur^ {
+		case Unknown_Type:
+			return true
+		case Mention_Type:
+			if v.match_scope != nil && v.match_index >= 0 {
+				cur = v.match_scope.values[v.match_index]
+				continue
+			}
+			return false
+		case Reference_Type:
+			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+				cur = v.reference.match_scope.values[v.reference.match_index]
+				continue
+			}
+			return false
+		case Cast_Type:
+			cur = v.value
+			continue
 		}
 		return false
 	}
@@ -385,11 +428,11 @@ flatten_sum :: proc(node: ^Type, coeff: i128, terms: ^[dynamic]Sum_Term, constan
 			// (2a-1) scaled by 3 → 6a − 3. The other factor must be the constant;
 			// the variable factor (`sub`) is flattened, never multiplied out against
 			// another variable.
-			if c, ok := int_of(v.left); ok {
+			if c, ok := coeff_of(v.left); ok {
 				flatten_sum(v.right, coeff * c, terms, constant)
 				return
 			}
-			if c, ok := int_of(v.right); ok {
+			if c, ok := coeff_of(v.right); ok {
 				flatten_sum(v.left, coeff * c, terms, constant)
 				return
 			}
@@ -468,6 +511,26 @@ int_of :: proc(t: ^Type) -> (i128, bool) {
 	#partial switch v in t^ {
 	case Integer_Type:
 		if int_is_concrete(v) do return int_value(v), true
+	}
+	return 0, false
+}
+
+// coeff_of returns the integer coefficient of a concrete numeric node for the
+// affine pass. Like int_of, but also accepts a whole-valued float constant (an
+// affine coefficient over a float base is a Float_Type, e.g. `2.0` in `2.0*x`),
+// so distribution/collection keeps working across the float domain. A non-integer
+// float (e.g. 2.5) is NOT a coefficient — the affine pass stays integer-monomial.
+coeff_of :: proc(t: ^Type) -> (i128, bool) {
+	if t == nil do return 0, false
+	#partial switch v in t^ {
+	case Integer_Type:
+		if int_is_concrete(v) do return int_value(v), true
+	case Float_Type:
+		if float_is_concrete(v) {
+			f := float_value(v)
+			i := i128(f)
+			if f64(i) == f do return i, true
+		}
 	}
 	return 0, false
 }
@@ -554,9 +617,43 @@ fold_const_into_add :: proc(node: ^Type, k: i128) -> ^Type {
 offset_node :: proc(sub: ^Type, delta: i128) -> ^Type {
 	if delta == 0 do return sub
 	if delta < 0 {
-		return dag_intern(Compose_Type{sub, new_type(make_int_result(-delta)), .Subtract, nil})
+		return dag_intern(Compose_Type{sub, affine_const(sub, -delta), .Subtract, nil})
 	}
-	return dag_intern(Compose_Type{sub, new_type(make_int_result(delta)), .Add, nil})
+	return dag_intern(Compose_Type{sub, affine_const(sub, delta), .Add, nil})
+}
+
+// node_float_kind reports whether a reduced node lives in the float domain, and
+// its FloatKind. A float `??::f64` is a Cast over a float target; a concrete
+// float / float Compose folds to a Float_Type. Mirrors machine_type_of's float
+// detection so an affine coefficient over a float base is itself a float.
+node_float_kind :: proc(node: ^Type) -> (FloatKind, bool) {
+	if node == nil do return .none, false
+	#partial switch v in node^ {
+	case Float_Type:
+		return v.kind, true
+	case Cast_Type:
+		if tgt, ok := cast_target(v.target); ok && tgt.kind == .Float {
+			return tgt.float_kind, true
+		}
+	case Compose_Type:
+		if env := fold_value_type(node); env != nil && env != node {
+			return node_float_kind(env)
+		}
+		if k, ok := node_float_kind(v.left); ok do return k, true
+		return node_float_kind(v.right)
+	}
+	return .none, false
+}
+
+// affine_const builds the integer/float literal `mag` matched to the base node's
+// domain: a float base yields a Float_Type coefficient (so `x+x+x` over `??::f64`
+// renders `3.0 * ??0`, and the native backend loads it as a float, not int bits),
+// otherwise an Integer_Type.
+affine_const :: proc(base: ^Type, mag: i128) -> ^Type {
+	if k, ok := node_float_kind(base); ok {
+		return new_type(make_float_result(f64(mag), k))
+	}
+	return new_type(make_int_result(mag))
 }
 
 // fold_const_into_mul folds `k` into a node that is itself a multiply by a
@@ -580,9 +677,9 @@ fold_const_into_mul :: proc(node: ^Type, k: i128) -> ^Type {
 // scale_node returns `coeff * sub`, collapsing the coeff into the node when it is
 // 0 or 1 (`0*x`→0, `1*x`→x). Constant on the left for canonical orientation.
 scale_node :: proc(sub: ^Type, coeff: i128) -> ^Type {
-	if coeff == 0 do return new_type(make_int_result(0))
+	if coeff == 0 do return affine_const(sub, 0)
 	if coeff == 1 do return sub
-	return dag_intern(Compose_Type{new_type(make_int_result(coeff)), sub, .Multiply, nil})
+	return dag_intern(Compose_Type{affine_const(sub, coeff), sub, .Multiply, nil})
 }
 
 // eval_concrete runs the existing concrete evaluators for one operator on already
@@ -698,7 +795,11 @@ dag_key :: proc(t: ^Type) -> string {
 		}
 		return fmt.aprintf("(%s%s%s)", lk, op_symbol(v.operator), rk)
 	case Cast_Type:
-		return fmt.aprintf("?%d", fixedpoint_id(t))
+		// A bare `??::T` atom keys by its fixed-point index; a width WRAPPER over a
+		// composite source keys by its inner structure plus the target so two distinct
+		// wrappers don't collide on one `?N`.
+		if cast_is_atom(t) do return fmt.aprintf("?%d", fixedpoint_id(t))
+		return fmt.aprintf("cast(%s,%s)", dag_key(v.value), type_to_string(v.target))
 	case Unknown_Type:
 		return fmt.aprintf("?%d", fixedpoint_id(t))
 	case Mention_Type:

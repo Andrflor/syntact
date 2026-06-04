@@ -1630,9 +1630,16 @@ imul_r32_r32 :: proc(dst: Register32, src: Register32) {
 // Fixed imul_r32_imm32 implementation
 imul_r32_imm32 :: proc(reg: Register32, imm: u32) {
 	// Same as imul_r32_r32_imm32 with dst = src = reg
-	need_rex := (u8(reg) & 0x8) != 0
-	rex: u8 = need_rex ? 0x45 : 0 // REX.R + REX.B for extended registers (was 0x41)
-	modrm := encode_modrm(3, u8(reg) & 0x7, u8(reg) & 0x7)
+	imul_r32_r32_imm32(reg, reg, imm)
+}
+
+// Signed multiply: dst = src * imm (3-operand, 32-bit). 69 /r id or 6B /r ib,
+// modrm reg=dst, rm=src — reads src and writes dst, so no copy of src is needed.
+imul_r32_r32_imm32 :: proc(dst: Register32, src: Register32, imm: u32) {
+	need_rex := (u8(dst) & 0x8) != 0 || (u8(src) & 0x8) != 0
+	// REX.R for an extended dst (modrm.reg), REX.B for an extended src (modrm.rm).
+	rex: u8 = 0x40 | ((u8(dst) & 0x8) >> 1) | ((u8(src) & 0x8) >> 3)
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src) & 0x7)
 	// Handle 8-bit immediate if possible
 	if imm <= 0x7F || imm >= 0xFFFFFF80 { 	// Signed 8-bit range
 		if need_rex {

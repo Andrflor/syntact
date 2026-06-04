@@ -3195,6 +3195,30 @@ testing_imul_r32_imm32 :: proc(t: ^testing.T) {
 }
 
 @(test)
+testing_imul_r32_r32_imm32 :: proc(t: ^testing.T) {
+	registers32 := get_all_registers32()
+	imm32Values := get_interesting_imm32_values()
+
+	for dst in registers32 {
+		for src in registers32 {
+			for imm in imm32Values {
+				asm_str := fmt.tprintf(
+					"imul %s, %s, %d",
+					register32_to_string(dst),
+					register32_to_string(src),
+					cast(i32)(imm),
+				)
+
+				buffer := ByteBuffer{}
+				context.user_ptr = &buffer
+				imul_r32_r32_imm32(dst, src, imm)
+				compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			}
+		}
+	}
+}
+
+@(test)
 testing_div_r32 :: proc(t: ^testing.T) {
 	registers32 := get_all_registers32()
 

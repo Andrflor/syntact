@@ -376,12 +376,18 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		write_value(b, st)
 	case Cast_Type:
 		// A cast's value is its folded result (the reinterpreted bits laid into the
-		// target) when the source was concrete. Otherwise it is a SURVIVING fixed
-		// point: render as `??N` (a stable index per distinct unknown).
+		// target) when the source was concrete. A bare `??::T` atom is a SURVIVING
+		// fixed point: render as `??N`. A width WRAPPER over a composite source
+		// (`(a+b)::u8`) renders the inner expression in parens, then `::target`.
 		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) {
 			write_value(b, v.type_fold)
-		} else {
+		} else if cast_is_atom(t) {
 			fmt.sbprintf(b, "??%d", fixedpoint_id(t))
+		} else {
+			strings.write_byte(b, '(')
+			write_value(b, v.value)
+			strings.write_string(b, ")::")
+			strings.write_string(b, type_to_string(v.target))
 		}
 	case Compose_Type:
 		// A SYMBOLIC reduced expression (a fixed point survived): the reducer emits a

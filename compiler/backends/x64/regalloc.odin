@@ -114,21 +114,14 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 
 		if len(free_regs) > 0 {
 			reg, has_pref := Register64{}, false
-			// 1) Physical preference (ret value → RDI/RSI): if that exact register
-			// is free, take it so the final mov-into-the-ABI-register elides.
-			if phys_pref[iv.vreg] > 0 {
-				want := Register64(u8(phys_pref[iv.vreg] - 1))
-				for fr, idx in free_regs {
-					if fr == want {
-						reg = fr; has_pref = true
-						ordered_remove(&free_regs, idx)
-						break
-					}
-				}
-			}
-			// 2) Biased coloring: reuse a move-related source's just-freed register
-			// so the emitter elides the copy.
-			if !has_pref && hint[iv.vreg] >= 0 {
+			// 1) Biased coloring: reuse a move-related source's just-freed register
+			// so the emitter elides the copy. This takes priority over the physical
+			// preference because coalescing erases a mov INSIDE the two-address op
+			// (x64 computes `dst op= src` in place, so dst must seed with operand `a`),
+			// whereas the physical preference only saves the single final move into
+			// the exit register — eliding the in-op copy is the bigger win, and for a
+			// NON-commutative op (sub/div) seeding the wrong operand forces TWO moves.
+			if hint[iv.vreg] >= 0 {
 				src := hint[iv.vreg]
 				if loc := locs[src]; loc.kind == .Register {
 					for fr, idx in free_regs {
@@ -137,6 +130,18 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 							ordered_remove(&free_regs, idx)
 							break
 						}
+					}
+				}
+			}
+			// 2) Physical preference (ret value → RDI/RSI): if that exact register
+			// is free, take it so the final mov-into-the-ABI-register elides.
+			if !has_pref && phys_pref[iv.vreg] > 0 {
+				want := Register64(u8(phys_pref[iv.vreg] - 1))
+				for fr, idx in free_regs {
+					if fr == want {
+						reg = fr; has_pref = true
+						ordered_remove(&free_regs, idx)
+						break
 					}
 				}
 			}
