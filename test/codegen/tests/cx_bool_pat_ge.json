@@ -1,0 +1,1 @@
+{ "name": "cx_bool_pat_ge", "description": "(a>=128)?bool", "source": "a -> ??::u8\n-> (a >= 128) ? { =true -> 5, =false -> 9 }", "args": [["0"], ["127"], ["128"], ["200"], ["255"]], "expect": ["9", "9", "5", "5", "5"], "kind": "int" }

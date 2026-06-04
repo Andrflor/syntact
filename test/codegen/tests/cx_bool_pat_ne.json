@@ -1,0 +1,1 @@
+{ "name": "cx_bool_pat_ne", "description": "(a!=0)?bool", "source": "a -> ??::u8\n-> (a != 0) ? { =true -> 1, =false -> 0 }", "args": [["0"], ["1"], ["100"], ["255"]], "expect": ["0", "1", "1", "1"], "kind": "int" }

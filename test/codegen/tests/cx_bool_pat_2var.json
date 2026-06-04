@@ -1,0 +1,1 @@
+{ "name": "cx_bool_pat_2var", "description": "(a>b)?bool", "source": "a -> ??::u8\nb -> ??::u8\n-> (a > b) ? { =true -> a, =false -> b }", "args": [["3", "5"], ["5", "3"], ["10", "10"], ["0", "255"], ["255", "0"]], "expect": ["5", "5", "10", "255", "255"], "kind": "int" }
