@@ -3,6 +3,7 @@ import "core:fmt"
 import vmem "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -34,6 +35,9 @@ Options :: struct {
 	print_errors:       bool,
 	no_cache:           bool,
 	evict_cache:        bool,
+	print_bytecode:     bool, // Toggle bytecode dump (--bc)
+	run_bytecode:       bool, // Interpret the lowered bytecode (--run)
+	run_args:           [dynamic]i64, // Positional ??N values fed to --run
 }
 /*
  * parse_args extracts command-line options
@@ -67,6 +71,10 @@ parse_args :: proc() -> Options {
 				options.analyze_only = true
 			case "--print-errors":
 				options.print_errors = true
+			case "--bc":
+				options.print_bytecode = true
+			case "--run":
+				options.run_bytecode = true
 			case "-v", "--verbose":
 				options.verbose = true
 			case "-t", "--timing":
@@ -86,14 +94,20 @@ parse_args :: proc() -> Options {
 				}
 			}
 		} else {
-			// Set input file
-			if input_path_set {
-				fmt.eprintln("Error: Only one input file can be specified")
-				print_usage()
-				os.exit(1)
+			if !input_path_set {
+				// First positional is the input file.
+				options.input_path = arg
+				input_path_set = true
+			} else {
+				// Further positionals are runtime ??N values for --run, parsed
+				// as integers (argv[slot]).
+				val, ok := strconv.parse_i64(arg)
+				if !ok {
+					fmt.eprintln("Error: runtime argument is not an integer:", arg)
+					os.exit(1)
+				}
+				append(&options.run_args, val)
 			}
-			options.input_path = arg
-			input_path_set = true
 		}
 		i += 1
 	}
@@ -109,7 +123,7 @@ parse_args :: proc() -> Options {
  * print_usage displays help information
  */
 print_usage :: proc() {
-	fmt.println("Usage: compiler [options] input_paths...")
+	fmt.println("Usage: compiler [options] input_path [args...]")
 	fmt.println("")
 	fmt.println("Options:")
 	fmt.println("  -o, --output FILE       Specify output file")
@@ -120,9 +134,14 @@ print_usage :: proc() {
 	// fmt.println("  --no-cache              Disable compilation cache")
 	// fmt.println("  --evict-cache           Clear compilation cache before starting")
 	fmt.println("  --print-errors          Print parse/analysis errors")
+	fmt.println("  --bc                    Lower the reduced result to bytecode and print it")
+	fmt.println("  --run                   Interpret the lowered bytecode (args... feed ??0, ??1, …)")
 	fmt.println("  -v, --verbose           Print verbose output")
 	fmt.println("  -t, --timing            Print timing information")
 	fmt.println("  -h, --help              Print this help message")
+	fmt.println("")
+	fmt.println("Trailing integer args are the runtime ??N fixed points for --run:")
+	fmt.println("  compiler prog.syn --run 7 3     # ??0 = 7, ??1 = 3")
 }
 
 /*
