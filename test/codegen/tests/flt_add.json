@@ -1,0 +1,1 @@
+{ "name": "flt_add", "description": "2.5+1.5", "source": "-> 2.5 + 1.5", "args": [], "expect": "4.0", "kind": "float" }

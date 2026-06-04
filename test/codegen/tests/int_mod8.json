@@ -1,0 +1,1 @@
+{ "name": "int_mod8", "description": "%8 and unsigned", "source": "a -> ??::u8\n-> a % 8", "args": ["100"], "expect": "4", "kind": "int" }

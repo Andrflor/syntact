@@ -1,0 +1,1 @@
+{ "name": "int_pattern", "description": "pattern range", "source": "n -> ??::u8\n-> n ? { 0..127 -> 10, 128..255 -> 20 }", "args": ["200"], "expect": "20", "kind": "int" }

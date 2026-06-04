@@ -1,0 +1,1 @@
+{ "name": "int_mul8", "description": "*8 shl", "source": "a -> ??::u8\n-> a*8", "args": ["10"], "expect": "80", "kind": "int" }

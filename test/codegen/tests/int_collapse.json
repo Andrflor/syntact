@@ -1,0 +1,1 @@
+{ "name": "int_collapse", "description": "collapse", "source": "s -> { -> 5+3 }\n-> s!", "args": [], "expect": "8", "kind": "int" }

@@ -1,0 +1,1 @@
+{ "name": "str_pattern", "description": "pattern->string", "source": "n -> 2\n-> n ? { =1 -> \"one\", =2 -> \"two\", 0..9 -> \"x\" }", "args": [], "expect": "two", "kind": "str" }

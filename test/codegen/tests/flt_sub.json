@@ -1,0 +1,1 @@
+{ "name": "flt_sub", "description": "1.5-0.5", "source": "-> 1.5 - 0.5", "args": [], "expect": "1.0", "kind": "float" }

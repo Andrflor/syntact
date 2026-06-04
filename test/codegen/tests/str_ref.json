@@ -1,0 +1,1 @@
+{ "name": "str_ref", "description": "string ref", "source": "a -> \"hello\"\n-> a", "args": [], "expect": "hello", "kind": "str" }

@@ -1,0 +1,1 @@
+{ "name": "int_mul3", "description": "*3 lea", "source": "a -> ??::u8\n-> a*3", "args": ["20"], "expect": "60", "kind": "int" }

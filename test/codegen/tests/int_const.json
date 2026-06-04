@@ -1,0 +1,1 @@
+{ "name": "int_const", "description": "constant 42", "source": "-> 42", "args": [], "expect": "42", "kind": "int" }

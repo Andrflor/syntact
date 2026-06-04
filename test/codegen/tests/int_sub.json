@@ -1,0 +1,1 @@
+{ "name": "int_sub", "description": "subtract", "source": "a -> ??::u8\n-> a - 3", "args": ["10"], "expect": "7", "kind": "int" }

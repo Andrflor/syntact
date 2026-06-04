@@ -400,6 +400,12 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> BC_Value {
 		dst = bc_fresh_value(l, .U8)
 		bc_emit(l, BC_Const{dst, bool_is_concrete(v) && bool_value(v) ? 1 : 0})
 
+	case None_Type:
+		// The empty set / absence of a value (e.g. `true & false`). Materializes
+		// as 0 (exit 0 / empty), the natural "nothing" result.
+		dst = bc_fresh_value(l, .I64)
+		bc_emit(l, BC_Const{dst, 0})
+
 	case String_Type:
 		if string_is_concrete(v) {
 			dst = bc_lower_string_const(l, string_value(v))

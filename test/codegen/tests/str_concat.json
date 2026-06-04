@@ -1,0 +1,1 @@
+{ "name": "str_concat", "description": "concat", "source": "-> \"foo\" + \"bar\"", "args": [], "expect": "foobar", "kind": "str" }
