@@ -72,6 +72,7 @@ TimingInfo :: struct {
 	parsing_time:     time.Duration, // Time spent parsing
 	analysis_time:    time.Duration, // Time spent analyzing
 	reduce_time:      time.Duration, // Time spent reducing
+	codegen_time:     time.Duration, // Time spent in codegen (lowering + backend)
 	file_read_time:   time.Duration, // Time spent reading files
 	thread_wait_time: time.Duration, // Time spent waiting for threads
 }
@@ -184,7 +185,8 @@ resolve_entry :: proc() -> bool {
 			timing_data.file_read_time +
 			timing_data.parsing_time +
 			timing_data.analysis_time +
-			timing_data.reduce_time
+			timing_data.reduce_time +
+			timing_data.codegen_time
 		fmt.printf(
 			"User processing time: %v (%.2f%%)\n",
 			user_time,
@@ -210,9 +212,14 @@ resolve_entry :: proc() -> bool {
 				f64(timing_data.analysis_time) / f64(timing_data.total_time) * 100,
 			)
 			fmt.printf(
-				"  └─ Reduce:       %v (%.2f%%)\n",
+				"  ├─ Reduce:       %v (%.2f%%)\n",
 				timing_data.reduce_time,
 				f64(timing_data.reduce_time) / f64(timing_data.total_time) * 100,
+			)
+			fmt.printf(
+				"  └─ Codegen:      %v (%.2f%%)\n",
+				timing_data.codegen_time,
+				f64(timing_data.codegen_time) / f64(timing_data.total_time) * 100,
 			)
 		}
 
@@ -457,6 +464,11 @@ process_cache_task :: proc(task: thread.Task) {
 			// it. Otherwise the reduced result is a VALUE rendered with
 			// value_to_string — the same path the reduce tests use.
 			if resolver.options.print_bytecode || resolver.options.run_bytecode || resolver.options.print_regalloc || resolver.options.emit_exe {
+				codegen_start: time.Time
+				if resolver.options.timing {
+					codegen_start = time.now()
+				}
+
 				prog := lower_to_bytecode(result)
 				if resolver.options.print_bytecode {
 					fmt.print(bc.bytecode_to_string(prog))
@@ -483,6 +495,14 @@ process_cache_task :: proc(task: thread.Task) {
 						fmt.eprintln("emit error:", msg)
 					} else {
 						fmt.printf("wrote executable: %s\n", out_path)
+					}
+				}
+
+				if resolver.options.timing {
+					codegen_duration := time.diff(codegen_start, time.now())
+					sync.atomic_add(&timing_data.codegen_time, codegen_duration)
+					if resolver.options.verbose {
+						fmt.printf("[TIMING] Codegen time for %s: %v\n", cache.path, codegen_duration)
 					}
 				}
 			} else {
