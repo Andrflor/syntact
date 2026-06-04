@@ -1,6 +1,6 @@
 {
   "name": "symbolic_factored_big",
-  "description": "Factored form not distributed with shared CSE",
+  "description": "Factored form not distributed with shared CSE (affine sub-sum canonical: vars then constant)",
   "source": "0..510:a -> ??::u8 *2\ne -> ??::u8\nb -> a*2\n-> (b+2 + 5*e)*14*e",
-  "expect": "14 * (4 * ??0 + 2 + 5 * ??1) * ??1"
+  "expect": "14 * (4 * ??0 + 5 * ??1 + 2) * ??1"
 }
