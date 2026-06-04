@@ -1,21 +1,15 @@
-package compiler
+package bytecode
 
 import "core:fmt"
+import "core:strings"
 
 // ============================================================================
-// BYTECODE INTERPRETER — the reference backend.
+// BYTECODE INTERPRETER — the reference backend, the oracle.
 //
-// The fastest way to validate the lowering (^Type → bytecode) in isolation,
-// before any machine backend exists: execute the BC_Program directly. Every
-// other backend (x64→ELF, arm64, wasm) must agree with this interpreter on every
-// program. `args` supplies the ??N fixed points positionally (args[slot]),
-// exactly as argv will at runtime — an arg is a string (argv is strings), parsed
-// to int or float per the consuming Load_Arg's domain.
-//
-// A virtual register holds a tagged value (int, float, or string pointer),
-// because the bytecode now spans integer, float, and concrete-string domains.
-// The arithmetic domain of an op is read from value_types[dst] (the Machine_Type
-// the lowering attached), so the same BC_Bin does integer add vs float add.
+// Executes a BC_Program directly over tagged values (i64/f64/string). Every
+// machine backend must agree with it on every program. `args` supplies the ??N
+// fixed points positionally (argv strings, parsed per each ??'s domain). Lives
+// in the neutral bytecode package — it depends on nothing from the compiler.
 // ============================================================================
 
 BC_Val :: union {
@@ -71,7 +65,6 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 				regs[int(v.dst)] = res
 			}
 		case BC_Cmp:
-			// Compare in the operands' domain (float if either operand is float).
 			if _, af := regs[int(v.a)].(f64); af {
 				regs[int(v.dst)] = interp_cmp_f(v.op, interp_f(regs[int(v.a)]), interp_f(regs[int(v.b)])) ? i64(1) : i64(0)
 			} else if _, bf := regs[int(v.b)].(f64); bf {
@@ -99,9 +92,6 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 	return {ok = false, error = "fell off end without ret"}
 }
 
-// interp_load_arg materializes a ??N from argv[slot] in the domain the Load_Arg
-// declares: a float ?? parses to f64, an integer ?? parses to i64 and is then
-// normalized (masked/sign-extended) by the bytecode that follows it.
 interp_load_arg :: proc(prog: ^BC_Program, v: BC_Load_Arg, args: []string) -> BC_Val {
 	raw := v.slot < len(args) ? args[v.slot] : ""
 	mt := prog.value_types[int(v.dst)]
@@ -109,20 +99,6 @@ interp_load_arg :: proc(prog: ^BC_Program, v: BC_Load_Arg, args: []string) -> BC
 		return interp_parse_f64(raw)
 	}
 	return interp_parse_i64(raw)
-}
-
-// print_interp_result renders the interpreter's result on the right channel:
-// a string is written verbatim (stdout), a float as a decimal, an integer plain.
-print_interp_result :: proc(r: BC_Interp_Result) {
-	if r.rtype == .Str {
-		fmt.println(r.svalue)
-		return
-	}
-	if mtype_is_float(r.rtype) {
-		fmt.println(float_display(r.fvalue))
-		return
-	}
-	fmt.println(r.value)
 }
 
 interp_result :: proc(prog: ^BC_Program, val: BC_Val) -> BC_Interp_Result {
@@ -135,6 +111,34 @@ interp_result :: proc(prog: ^BC_Program, val: BC_Val) -> BC_Interp_Result {
 		return {svalue = r, rtype = .Str, ok = true}
 	}
 	return {ok = true, rtype = prog.result_type}
+}
+
+// print_interp_result renders the result on the right channel.
+print_interp_result :: proc(r: BC_Interp_Result) {
+	if r.rtype == .Str {
+		fmt.println(r.svalue)
+		return
+	}
+	if mtype_is_float(r.rtype) {
+		fmt.println(interp_float_display(r.fvalue))
+		return
+	}
+	fmt.println(r.value)
+}
+
+// interp_float_display renders a float in compact form (always with a decimal
+// point: "4" → "4.0"). Self-contained so the interpreter needs nothing from the
+// compiler's float printing.
+interp_float_display :: proc(f: f64) -> string {
+	s := fmt.tprintf("%v", f)
+	if strings.index_byte(s, '.') < 0 &&
+	   strings.index_byte(s, 'e') < 0 &&
+	   strings.index_byte(s, 'E') < 0 &&
+	   strings.index_byte(s, 'n') < 0 &&
+	   strings.index_byte(s, 'i') < 0 {
+		return strings.concatenate({s, ".0"})
+	}
+	return s
 }
 
 // --- coercions -------------------------------------------------------------
@@ -182,7 +186,6 @@ interp_parse_i64 :: proc(s: string) -> i64 {
 }
 
 interp_parse_f64 :: proc(s: string) -> f64 {
-	// Integer part, optional fraction. Minimal; mirrors a small runtime atof.
 	whole: f64 = 0
 	frac: f64 = 0
 	scale: f64 = 1
@@ -212,7 +215,7 @@ interp_parse_f64 :: proc(s: string) -> f64 {
 
 // --- integer ops -----------------------------------------------------------
 
-interp_bin :: proc(op: Operator_Kind, a, b: i64) -> (i64, string) {
+interp_bin :: proc(op: BC_Op, a, b: i64) -> (i64, string) {
 	#partial switch op {
 	case .Add:
 		return a + b, ""
@@ -226,11 +229,11 @@ interp_bin :: proc(op: Operator_Kind, a, b: i64) -> (i64, string) {
 	case .Mod:
 		if b == 0 do return 0, "modulo by zero"
 		return a % b, ""
-	case .And, .BitAnd:
+	case .BitAnd:
 		return a & b, ""
-	case .Or, .BitOr:
+	case .BitOr:
 		return a | b, ""
-	case .Xor:
+	case .BitXor:
 		return a ~ b, ""
 	case .LShift:
 		return a << u64(b), ""
@@ -240,7 +243,7 @@ interp_bin :: proc(op: Operator_Kind, a, b: i64) -> (i64, string) {
 	return 0, "unsupported integer binary operator in bytecode interpreter"
 }
 
-interp_cmp :: proc(op: Operator_Kind, a, b: i64) -> bool {
+interp_cmp :: proc(op: BC_Op, a, b: i64) -> bool {
 	#partial switch op {
 	case .Equal:
 		return a == b
@@ -260,7 +263,7 @@ interp_cmp :: proc(op: Operator_Kind, a, b: i64) -> bool {
 
 // --- float ops -------------------------------------------------------------
 
-interp_bin_f :: proc(op: Operator_Kind, a, b: f64) -> (f64, string) {
+interp_bin_f :: proc(op: BC_Op, a, b: f64) -> (f64, string) {
 	#partial switch op {
 	case .Add:
 		return a + b, ""
@@ -274,7 +277,7 @@ interp_bin_f :: proc(op: Operator_Kind, a, b: f64) -> (f64, string) {
 	return 0, "unsupported float binary operator in bytecode interpreter"
 }
 
-interp_cmp_f :: proc(op: Operator_Kind, a, b: f64) -> bool {
+interp_cmp_f :: proc(op: BC_Op, a, b: f64) -> bool {
 	#partial switch op {
 	case .Equal:
 		return a == b

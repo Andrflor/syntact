@@ -9,6 +9,8 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:thread"
+import bc "bytecode"
+import x64 "backends/x64"
 import "core:time"
 
 /*
@@ -457,19 +459,19 @@ process_cache_task :: proc(task: thread.Task) {
 			if resolver.options.print_bytecode || resolver.options.run_bytecode || resolver.options.print_regalloc || resolver.options.emit_exe {
 				prog := lower_to_bytecode(result)
 				if resolver.options.print_bytecode {
-					fmt.print(bytecode_to_string(prog))
+					fmt.print(bc.bytecode_to_string(prog))
 				}
 				if prog != nil && prog.error != "" && !resolver.options.print_bytecode {
 					fmt.eprintln(prog.error)
 				}
 				if resolver.options.print_regalloc && (prog == nil || prog.error == "") {
-					alloc := allocate_registers(prog)
-					fmt.print(regalloc_to_string(prog, alloc))
+					alloc := x64.allocate_registers(prog)
+					fmt.print(x64.regalloc_to_string(prog, alloc))
 				}
 				if resolver.options.run_bytecode {
-					r := interp_bytecode(prog, resolver.options.run_args[:])
+					r := bc.interp_bytecode(prog, resolver.options.run_args[:])
 					if r.ok {
-						print_interp_result(r)
+						bc.print_interp_result(r)
 					} else {
 						fmt.eprintln("runtime error:", r.error)
 					}
@@ -477,7 +479,7 @@ process_cache_task :: proc(task: thread.Task) {
 				if resolver.options.emit_exe {
 					out_path := resolver.options.output_path
 					if out_path == "" do out_path = "a.out"
-					if msg := emit_executable(prog, out_path); msg != "" {
+					if msg := x64.emit_executable(prog, out_path); msg != "" {
 						fmt.eprintln("emit error:", msg)
 					} else {
 						fmt.printf("wrote executable: %s\n", out_path)

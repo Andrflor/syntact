@@ -58,6 +58,9 @@ parse_args :: proc() -> Options {
 			case "-o", "--output":
 				if i + 1 < len(os.args) {
 					options.output_path = os.args[i + 1]
+					// Specifying an output file means "produce an executable"
+					// (like gcc/odin), so -o implies --emit.
+					options.emit_exe = true
 					i += 1
 				} else {
 					fmt.eprintln("Error: Missing output file after", arg)
@@ -127,7 +130,7 @@ print_usage :: proc() {
 	fmt.println("Usage: compiler [options] input_path [args...]")
 	fmt.println("")
 	fmt.println("Options:")
-	fmt.println("  -o, --output FILE       Specify output file")
+	fmt.println("  -o, --output FILE       Emit an x64 ELF executable to FILE (implies --emit)")
 	fmt.println("  --ast                   Print the AST")
 	fmt.println("  --ir                    Print the IR (analyzer output)")
 	fmt.println("  --parse-only            Only parse, don't analyze")

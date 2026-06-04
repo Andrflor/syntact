@@ -1,10 +1,10 @@
-package compiler
+package x64_assembler
 
 import "core:os"
-import x64 "./backends/x64"
+import bc "../../bytecode"
 
 // emit_executable turns a lowered program into an executable file on disk.
-emit_executable :: proc(prog: ^BC_Program, path: string) -> string {
+emit_executable :: proc(prog: ^bc.BC_Program, path: string) -> string {
 	out, msg := emit_x64(prog)
 	if msg != "" do return msg
 	image := build_elf(out.code, out.rodata)
@@ -30,7 +30,7 @@ emit_executable :: proc(prog: ^BC_Program, path: string) -> string {
 //
 // Layout decision: ?? arguments live at a FIXED absolute address (ARGS_TABLE)
 // rather than relative to a call frame — simplest unambiguous contract for the
-// emitter's BC_Load_Arg (it reads [ARGS_TABLE + 8*slot]).
+// emitter's bc.BC_Load_Arg (it reads [ARGS_TABLE + 8*slot]).
 // ============================================================================
 
 ELF_BASE :: 0x400000
