@@ -120,13 +120,16 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	return value
 }
 
-// reduce_mention follows a name to its binding. If the binding's value is a fixed
-// point (an Unknown / unresolved cast) the mention IS a symbol — we keep it (so it
-// renders as `a`, not `??`). Otherwise we reduce the bound value through.
+// reduce_mention follows a name to its binding and reduces the bound value
+// through. If the value bottoms out in a fixed point we DON'T stop at this alias —
+// we follow to the ATOMIC `??` node (follow_to_fixedpoint) and return THAT, so
+// every route to the same unknown converges on one node and thus one `??N` index
+// (`c -> 2*n`, `e -> n` both reach n's `??`, so `c + e` collects). Otherwise we
+// reduce the bound value.
 reduce_mention :: proc(v: Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
 	bound := v.match_scope.values[v.match_index]
-	if is_fixed_point(bound) do return node
+	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
 	return reduce_value(bound)
 }
 
@@ -142,7 +145,7 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 			case Carve_Type:
 				for i := 0; i < len(cv.references); i += 1 {
 					if cv.references[i].match_index == ref.match_index {
-						if is_fixed_point(cv.values[i]) do return node
+						if is_fixed_point(cv.values[i]) do return follow_to_fixedpoint(cv.values[i])
 						return reduce_value(cv.values[i])
 					}
 				}
@@ -150,8 +153,39 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 		}
 	}
 	target := ref.match_scope.values[ref.match_index]
-	if is_fixed_point(target) do return node
+	if is_fixed_point(target) do return follow_to_fixedpoint(target)
 	return reduce_value(target)
+}
+
+// follow_to_fixedpoint chases a fixed-point value down THROUGH aliases to the
+// atomic `??` node (the Cast(Unknown)/Unknown itself), so all references to one
+// unknown share that single node — and therefore one fixedpoint_id. Stops at the
+// first Cast/Unknown; returns the input unchanged if no atom is found.
+follow_to_fixedpoint :: proc(t: ^Type) -> ^Type {
+	cur := t
+	for cur != nil {
+		#partial switch v in cur^ {
+		case Unknown_Type:
+			return cur
+		case Cast_Type:
+			if v.type_fold != nil && fold_is_concrete_value(v.type_fold) do return cur
+			return cur // the `??::u8` atom — key the symbol by THIS node
+		case Mention_Type:
+			if v.match_scope != nil && v.match_index >= 0 {
+				cur = v.match_scope.values[v.match_index]
+				continue
+			}
+			return t
+		case Reference_Type:
+			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+				cur = v.reference.match_scope.values[v.reference.match_index]
+				continue
+			}
+			return t
+		}
+		return t
+	}
+	return t
 }
 
 // is_fixed_point reports whether `t` ultimately denotes an UNKNOWN — a value the
@@ -232,13 +266,172 @@ reduce_compose :: proc(v: Compose_Type) -> ^Type {
 		}
 	}
 
-	// Algebraic simplification for the ring/commutative operators, then reassociate
-	// a constant up a chain (`(x*2)*2` → `x*4`, `(5*e)*14` → `70*e`).
+	// A binary +/- : COLLECT like terms across the whole sum chain — `k*x + m*x` →
+	// `(k+m)*x`, the constant folded, even when the two sides arrive already reduced
+	// from distinct references (`c + e`). This REDUCES operations (always a win); it
+	// is NOT distribution — products of sums stay factored.
+	if (v.operator == .Add || v.operator == .Subtract) && v.left != nil {
+		if collected := collect_sum(left, right, v.operator); collected != nil {
+			return collected
+		}
+	}
+
+	// Algebraic simplification for the multiply chain (`(x*2)*2` → `x*4`, `5*e*14` →
+	// `70*e`) and the unary minus / identities.
 	if simplified := simplify_arith(v.operator, left, right); simplified != nil {
 		return simplified
 	}
 
 	return dag_intern(Compose_Type{left, right, v.operator, nil})
+}
+
+// ============================================================================
+// SUM COLLECTION — gather a +/- chain's like terms (k*x + m*x → (k+m)*x), fold
+// the constant, and re-emit the minimal sum. This is purely ADDITIVE collection:
+// it never multiplies sums out (no distribution). A "term" is (coefficient, base)
+// where base is keyed by dag_key; the bare constant is collected separately.
+// ============================================================================
+
+Sum_Term :: struct {
+	coeff: i128,
+	base:  ^Type, // nil for the constant accumulator
+}
+
+// collect_sum reduces `left <op> right` (op is + or -) by flattening BOTH sides
+// into additive terms, summing coefficients of equal bases, and rebuilding the
+// minimal sum. Returns nil if nothing actually combined (so the caller keeps the
+// plain interned node and we don't churn).
+collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
+	terms: [dynamic]Sum_Term
+	constant: i128 = 0
+	flatten_sum(left, 1, &terms, &constant)
+	flatten_sum(right, op == .Subtract ? -1 : 1, &terms, &constant)
+
+	// Merge equal bases.
+	merged: [dynamic]Sum_Term
+	for t in terms {
+		found := false
+		for &m in merged {
+			if dag_key(m.base) == dag_key(t.base) {
+				m.coeff += t.coeff
+				found = true
+				break
+			}
+		}
+		if !found do append(&merged, t)
+	}
+	// Drop zero-coefficient terms.
+	kept: [dynamic]Sum_Term
+	for t in merged do if t.coeff != 0 do append(&kept, t)
+
+	// Only commit if we actually simplified: fewer terms than the naive split, or a
+	// constant folded in. The naive split has (#leaves) additive terms; if collection
+	// changed the count or produced a constant fusion, rebuild — else bail.
+	naive := count_sum_leaves(left) + count_sum_leaves(right)
+	if len(kept) + (constant != 0 ? 1 : 0) >= naive && !sum_has_constant_pair(left, right) {
+		// Nothing collapsed; let the plain path handle it (avoids infinite rebuild).
+		return nil
+	}
+
+	return rebuild_sum(kept[:], constant)
+}
+
+// flatten_sum decomposes `node` (scaled by `sign`) into additive terms appended to
+// `terms`, accumulating the bare constant into `constant`. It descends a +/- chain
+// and splits a `k * base` product into (k, base); anything else is a (sign, node)
+// term. It does NOT descend into products of non-constants (no distribution).
+flatten_sum :: proc(node: ^Type, sign: i128, terms: ^[dynamic]Sum_Term, constant: ^i128) {
+	if node == nil do return
+	if c, ok := int_of(node); ok {
+		constant^ += sign * c
+		return
+	}
+	#partial switch v in node^ {
+	case Compose_Type:
+		#partial switch v.operator {
+		case .Add:
+			flatten_sum(v.left, sign, terms, constant)
+			flatten_sum(v.right, sign, terms, constant)
+			return
+		case .Subtract:
+			if v.left == nil {
+				flatten_sum(v.right, -sign, terms, constant) // unary minus
+			} else {
+				flatten_sum(v.left, sign, terms, constant)
+				flatten_sum(v.right, -sign, terms, constant)
+			}
+			return
+		case .Multiply:
+			// k * base or base * k → a scaled term; otherwise an atomic term.
+			if c, ok := int_of(v.left); ok {
+				append(terms, Sum_Term{sign * c, v.right})
+				return
+			}
+			if c, ok := int_of(v.right); ok {
+				append(terms, Sum_Term{sign * c, v.left})
+				return
+			}
+		}
+	}
+	append(terms, Sum_Term{sign, node})
+}
+
+// count_sum_leaves counts the additive leaves of a +/- chain (a product or atom is
+// one leaf), to detect whether collection actually reduced the term count.
+count_sum_leaves :: proc(node: ^Type) -> int {
+	if node == nil do return 0
+	#partial switch v in node^ {
+	case Compose_Type:
+		if v.operator == .Add || v.operator == .Subtract {
+			l := v.left != nil ? count_sum_leaves(v.left) : 0
+			return l + count_sum_leaves(v.right)
+		}
+	}
+	return 1
+}
+
+// sum_has_constant_pair reports whether both sides contribute a bare constant (so
+// folding them is a genuine simplification even if term count is unchanged).
+sum_has_constant_pair :: proc(left, right: ^Type) -> bool {
+	return sum_constant_count(left) + sum_constant_count(right) >= 2
+}
+
+sum_constant_count :: proc(node: ^Type) -> int {
+	if node == nil do return 0
+	if _, ok := int_of(node); ok do return 1
+	#partial switch v in node^ {
+	case Compose_Type:
+		if v.operator == .Add || v.operator == .Subtract {
+			l := v.left != nil ? sum_constant_count(v.left) : 0
+			return l + sum_constant_count(v.right)
+		}
+	}
+	return 0
+}
+
+// rebuild_sum emits the minimal sum from collected terms + a constant: each term as
+// `coeff * base` (coeff 1 elided, negatives become subtractions), constant last.
+rebuild_sum :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
+	result: ^Type = nil
+	for t in terms {
+		mag := t.coeff < 0 ? -t.coeff : t.coeff
+		node := scale_node(t.base, mag) // mag>=1 here (zero terms dropped)
+		if result == nil {
+			result = t.coeff < 0 ? new_type(Compose_Type{nil, node, .Subtract, nil}) : node
+		} else {
+			op: Operator_Kind = t.coeff < 0 ? .Subtract : .Add
+			result = dag_intern(Compose_Type{result, node, op, nil})
+		}
+	}
+	if constant != 0 {
+		if result == nil {
+			result = new_type(make_int_result(constant))
+		} else {
+			result = offset_node(result, constant)
+		}
+	}
+	if result == nil do return new_type(make_int_result(0))
+	return result
 }
 
 // is_concrete_leaf reports whether a reduced ^Type is a single concrete value.

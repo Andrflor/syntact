@@ -66,6 +66,21 @@ pattern_target_fold :: proc(p: Pattern_Type) -> ^Type {
 	return fold_value_type(p.target)
 }
 
+// pattern_target_is_concrete reports whether a folded target value is a single
+// concrete value (a singleton) — directly, or wrapped in a producer scope `{-> v}`
+// (which fold_value_type builds for a value). A concrete target lets fold pick the
+// first matching branch in order; a set target does not.
+pattern_target_is_concrete :: proc(ft: ^Type) -> bool {
+	if ft == nil do return false
+	if fold_is_concrete_value(ft) do return true
+	#partial switch v in ft^ {
+	case Scope_Type:
+		prods := scope_productions(v)
+		if len(prods) == 1 do return fold_is_concrete_value(prods[0])
+	}
+	return false
+}
+
 // fold_constraint_pattern resolves a pattern used as a CONSTRAINT to a single
 // branch: the product of the FIRST branch whose match the target satisfies. When
 // the target itself can't be folded statically (e.g. an unknown), no branch can
@@ -98,13 +113,23 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	ft := pattern_target_fold(p)
 	if ft == nil do return nil
 
-	// Deterministic ONLY when the FIRST branch already covers the whole target: then
-	// it always fires, no later branch is reachable, and the fold is its product. A
-	// branch that covers (e.g. a default) but sits AFTER branches that intercept part
-	// of the target is NOT deterministic — earlier branches steal some target values,
-	// so the result is the combined type. (Bug if we returned the first *covering*
-	// branch's product: `?? : u8 ? {0..127 -> 0, -> 1}` would fold to `1`, dropping
-	// the `0` branch, instead of `0 | 1`.)
+	// When the target is a CONCRETE singleton we know its exact value, so we can run
+	// the branches in order and take the FIRST that matches — fully deterministic
+	// (`5 ? {=7 -> 100, -> 0}` fires the default → 0). branch_covers is exact here.
+	if pattern_target_is_concrete(ft) {
+		for branch in p.branches {
+			if branch_covers(branch, ft) {
+				return fold_value_type(branch.product)
+			}
+		}
+	}
+
+	// Otherwise the target is a SET (a range / `??`): deterministic ONLY when the
+	// FIRST branch already covers the whole target (it always fires, later branches
+	// dead). A branch that covers but sits AFTER branches intercepting part of the
+	// target is NOT deterministic — earlier branches steal some values, so the result
+	// is the combined type. (Bug if we returned the first *covering* branch: `?? :
+	// u8 ? {0..127 -> 0, -> 1}` would fold to `1`, dropping `0`, instead of `0 | 1`.)
 	if len(p.branches) > 0 && branch_covers(p.branches[0], ft) {
 		return fold_value_type(p.branches[0].product)
 	}
