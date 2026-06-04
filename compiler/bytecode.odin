@@ -52,9 +52,16 @@ machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 			return bc.mtype_for_int_value(i64(int_value(v)))
 		}
 		if len(v.integer_intervals) == 1 {
-			if lay, ok := int_layout(v.integer_intervals[0]); ok {
+			iv := v.integer_intervals[0]
+			if lay, ok := int_layout(iv); ok {
 				return bc.mtype_from_layout(lay.bits, lay.signed)
 			}
+			// Non-canonical range (e.g. -4..3566): the smallest type that contains
+			// it. Syntact knows this range by construction — no overflow analysis.
+			lo, hi: Maybe(i64)
+			if l, lok := iv.lo.?; lok do lo = i64(l)
+			if h, hok := iv.hi.?; hok do hi = i64(h)
+			return bc.mtype_for_range(lo, hi)
 		}
 		return .I64
 	case Float_Type:

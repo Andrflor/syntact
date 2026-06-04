@@ -176,6 +176,26 @@ fits_i32 :: proc(x: i64) -> bool {
 	return x >= -2147483648 && x <= 2147483647
 }
 
+// val_is_32bit reports whether value `v` is computed in 32-bit registers: its
+// machine type fits in 32 bits. Syntact knows the width by construction (the
+// reducer's range), so a 32-bit op is correct WITHOUT any overflow proof — an
+// i8/u8/i16/u16/i32/u32 result lives in 32 bits, and writing a 32-bit register
+// zero-extends the upper half automatically. We default the unknown/64-bit case
+// to 64-bit (safe).
+val_is_32bit :: proc(e: ^X64_Emit, v: int) -> bool {
+	mt := e.prog.value_types[v]
+	#partial switch mt {
+	case .U8, .I8, .U16, .I16, .U32, .I32:
+		return true
+	}
+	return false
+}
+
+// r32 converts a 64-bit register to its 32-bit counterpart (same encoding index).
+r32 :: proc(r: Register64) -> Register32 {
+	return Register32(u8(r))
+}
+
 // select_lea_roots scans the program and, for each value whose defining op is an
 // integer add/sub that match_address can fold profitably into a single LEA, marks
 // it a lea root and records its address mode. Values absorbed into a root (used
