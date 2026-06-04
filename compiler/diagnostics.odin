@@ -58,6 +58,11 @@ family_of :: proc(t: ^Type) -> Family {
 		lf := family_of(v.left)
 		if lf != .None && lf != .Unknown do return lf
 		return family_of(v.right)
+	case Cast_Type:
+		// A `value :: target` lands in the target's domain — so `??::u8` is an
+		// Integer family member, not an opaque "value". This lets a fixed point
+		// participate in arithmetic/comparison without a spurious Invalid_operator.
+		return family_of(v.target)
 	case Negate_Type:
 		return family_of(v.operand)
 	case Mention_Type:
