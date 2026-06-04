@@ -454,17 +454,33 @@ process_cache_task :: proc(task: thread.Task) {
 			// (the bridge every backend shares) and either dump it or interpret
 			// it. Otherwise the reduced result is a VALUE rendered with
 			// value_to_string — the same path the reduce tests use.
-			if resolver.options.print_bytecode || resolver.options.run_bytecode {
+			if resolver.options.print_bytecode || resolver.options.run_bytecode || resolver.options.print_regalloc || resolver.options.emit_exe {
 				prog := lower_to_bytecode(result)
 				if resolver.options.print_bytecode {
 					fmt.print(bytecode_to_string(prog))
 				}
+				if prog != nil && prog.error != "" && !resolver.options.print_bytecode {
+					fmt.eprintln(prog.error)
+				}
+				if resolver.options.print_regalloc && (prog == nil || prog.error == "") {
+					alloc := allocate_registers(prog)
+					fmt.print(regalloc_to_string(prog, alloc))
+				}
 				if resolver.options.run_bytecode {
 					r := interp_bytecode(prog, resolver.options.run_args[:])
 					if r.ok {
-						fmt.println(r.value)
+						print_interp_result(r)
 					} else {
 						fmt.eprintln("runtime error:", r.error)
+					}
+				}
+				if resolver.options.emit_exe {
+					out_path := resolver.options.output_path
+					if out_path == "" do out_path = "a.out"
+					if msg := emit_executable(prog, out_path); msg != "" {
+						fmt.eprintln("emit error:", msg)
+					} else {
+						fmt.printf("wrote executable: %s\n", out_path)
 					}
 				}
 			} else {

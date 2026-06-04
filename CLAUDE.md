@@ -50,6 +50,10 @@ odin build compiler -out:compiler/compiler
 ./compiler/compiler input.syn --ast           # print AST
 ./compiler/compiler input.syn --ir            # print analyzer output (Type tree of root scope)
 ./compiler/compiler input.syn --print-errors  # show parse/analysis errors
+./compiler/compiler input.syn --bc            # lower the reduced result to bytecode and print it
+./compiler/compiler input.syn --regalloc      # bytecode annotated with the linear-scan allocation
+./compiler/compiler input.syn --run 7 3       # interpret the bytecode; trailing args feed ??0, ??1, …
+./compiler/compiler input.syn --emit -o prog  # emit an x86-64 ELF executable, then: ./prog 7
 ./compiler/compiler input.syn -t              # timing info (parse/analyze/reduce)
 ./compiler/compiler input.syn -v              # verbose pipeline logging
 
@@ -71,7 +75,16 @@ cd test/analyze && odin run generator.odin -file && cd -
 
 ## Architecture
 
-Pipeline: **source → parser → analyzer (+ constraint folding) → reduce**. Code generation (`generate.odin`, `backends/`) is WIP / inactive.
+Pipeline: **source → parser → analyzer (+ constraint folding) → reduce → bytecode → backend**. The bytecode + backends are the new live codegen path (the old `generate.odin` is dead, written for a deleted API). Two backends run today: a reference **interpreter** (`--run`, the oracle every other backend is validated against) and an **x86-64 ELF emitter** (`--emit -o prog`, producing a runnable static executable). Strings/floats are lowered for the interpreter; the x64 emitter currently handles the integer/bool domain (exit-status output).
+
+The codegen bridge — what turns the reducer's output into machine code:
+- **bytecode.odin** (~720 lines) — The **target-neutral bytecode**, the bridge between `reduce()`'s `^Type` DAG and every backend. SSA-like virtual registers (`BC_Value` = vN, defined once), so the reducer's CSE survives for free (lowering memoizes by DAG node address — a shared node → one vN). `lower_to_bytecode(reduce(scope))` is the one hard maillon, written once. Instructions: `BC_Const`/`BC_Const_F`/`BC_Str_Const` (int/float/concrete-string constants — integer constants are NEUTRAL, folded to immediates at the backend), `BC_Load_Arg` (a ??N → argv[slot], slot = `fixedpoint_id`), `BC_Bin`/`BC_Cmp` (arith/compare, domain on `value_types`), `BC_Move` (pattern phi merge), `BC_Label_Def`/`BC_Jump`/`BC_Branch_Zero`, `BC_Ret`. Each `BC_Value` carries a `Machine_Type` (enum: U8/I8/…/I64/F32/F64/Str) derived ONCE from `fold_type`/`cast_target` via `machine_type_of` — Syntact fixes width+domain semantically (structural coloring), so the bytecode PRESERVES it (a u8 stays U8, f32 vs f64 follow declared precision). A ??::u8 is normalized ONCE at entry (mask `& 0xff` unsigned, `shl/sar` sign-extend signed), then no further masking (the analyzer proved the downstream in range). A symbolic string (`"hi "+??::string`) or unsized domain is REJECTED with a clear error (`prog.error`), never lowered to a wrong `const 0`. `--bc` dumps it.
+- **bc_interp.odin** (~330 lines) — The **reference interpreter**, the oracle: executes a `BC_Program` over tagged values (i64/f64/string), `--run a b …` feeding ??0, ??1, … as argv strings parsed per each `??`'s domain. Every machine backend must agree with it (validated: 35/35 cases — arithmetic, CSE, u8 masking, negatives, patterns, multi-arg, comparisons, div/mod). A concrete string result is written to stdout; a float as a decimal; an integer plain.
+- **x64_regalloc.odin** (~250 lines) — Liveness (`[def, last_use]`, one pass) + **linear-scan** allocation over the SSA vN. 10 allocatable GPRs (RAX/RDX reserved as the imul/idiv scratch pair, RCX as shift-count scratch, RSP/RBP the frame, RBX reserved); spill to `[rbp-offset]`. `--regalloc` dumps the bytecode annotated with each vN's location. (Written and validated by dump; the live x64 emitter currently uses a simpler stack-everything model — the linear-scan layers on next.)
+- **x64_emit.odin** (~300 lines) — The **x86-64 emitter**: `BC_Program` → `.text` bytes via the tested assembler in `backends/x64` (encodings validated against objdump). Stack-everything model (every vN at `[rbp-8*(vN+1)]`, RAX/RCX/RDX work registers), two-pass label resolution (placeholder rel32 then patch, rel32 = displacement from the jump's end), exit-status output via the exit syscall. Emits a runtime **arg stub** that parses `argv[1..]` as signed integers (inline atoi) into a fixed `ARGS_TABLE`, which `BC_Load_Arg` reads by absolute address. Adds `cqo` and the variable-shift / args-table accesses as raw bytes (the assembler lacks them). Float/string output not yet emitted (rejected with a message).
+- **x64_elf.odin** (~110 lines) — The **ELF64 writer**: `build_elf(code)` wraps the emitted code in a minimal static ET_EXEC (ELF header + one RWX PT_LOAD), entry at the code start, `p_memsz` extended to cover `ARGS_TABLE` (at `ELF_BASE + 0x100000`, a fixed address so the emitter knows it up front — no chicken-and-egg with code length). `emit_executable(prog, path)` lowers → emits → writes the file `chmod 0755`.
+
+The compiler-internal `Machine_Type` / constants-as-immediates decisions are documented in the memory files; the key rule is that **constants carry no type — they fold into immediates at the backend** (a u8 calc stays u8, a list element of u8 is one byte; never promoted for "speed", which would break layout or wrap semantics).
 
 ### compiler/ package
 
