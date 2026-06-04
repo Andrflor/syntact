@@ -98,14 +98,18 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	ft := pattern_target_fold(p)
 	if ft == nil do return nil
 
-	// Deterministic case: the first branch that covers the whole target wins.
-	for branch in p.branches {
-		if branch_covers(branch, ft) {
-			return fold_value_type(branch.product)
-		}
+	// Deterministic ONLY when the FIRST branch already covers the whole target: then
+	// it always fires, no later branch is reachable, and the fold is its product. A
+	// branch that covers (e.g. a default) but sits AFTER branches that intercept part
+	// of the target is NOT deterministic — earlier branches steal some target values,
+	// so the result is the combined type. (Bug if we returned the first *covering*
+	// branch's product: `?? : u8 ? {0..127 -> 0, -> 1}` would fold to `1`, dropping
+	// the `0` branch, instead of `0 | 1`.)
+	if len(p.branches) > 0 && branch_covers(p.branches[0], ft) {
+		return fold_value_type(p.branches[0].product)
 	}
 
-	// Non-deterministic case: combine every branch's product into one Or type.
+	// Non-deterministic: combine every branch's product into one Or type.
 	combined: ^Type = nil
 	for branch in p.branches {
 		pf := fold_value_type(branch.product)

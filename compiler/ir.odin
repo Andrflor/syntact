@@ -393,6 +393,29 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		// A surviving fixed point renders as `??N` — a stable index distinguishing
 		// the distinct unknowns the linker will resolve (`??0`, `??1`, …).
 		fmt.sbprintf(b, "??%d", fixedpoint_id(t))
+	case Pattern_Type:
+		// A pattern whose target is a fixed point survives reduction (the runtime
+		// selects the branch): render `target ? {match -> product, …}` with the
+		// target's `??N` and each branch's reduced product.
+		write_value(b, v.target)
+		strings.write_string(b, " ? {")
+		for branch, i in v.branches {
+			if i > 0 do strings.write_string(b, ", ")
+			if branch.match == nil {
+				strings.write_string(b, "-> ")
+			} else {
+				if branch.value_match do strings.write_byte(b, '=')
+				write_value(b, branch.match)
+				strings.write_string(b, " -> ")
+			}
+			write_value(b, branch.product)
+		}
+		strings.write_byte(b, '}')
+	case Range_Type:
+		// A branch match like `0..127` reduced inside a surviving pattern.
+		if v.left != nil do write_value(b, v.left)
+		strings.write_string(b, "..")
+		if v.right != nil do write_value(b, v.right)
 	case:
 		strings.write_string(b, type_to_string(t))
 	}
