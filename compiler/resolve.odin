@@ -450,8 +450,10 @@ process_cache_task :: proc(task: thread.Task) {
 				}
 			}
 
-			print_type(result)
-			fmt.println()
+			// A reduced result is a VALUE (concrete or a symbolic DAG over the
+			// surviving `??`), so render it with value_to_string — the same path the
+			// reduce tests use — not print_type (which dumps the IR type tree).
+			fmt.println(value_to_string(result))
 		}
 	} else if resolver.options.verbose {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)

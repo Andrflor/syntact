@@ -1,0 +1,6 @@
+{
+  "name": "Symbolic sum collects like terms",
+  "description": "a + a over a fixed point collects to 2 * a",
+  "source": "a -> ??::u8\n-> a + a",
+  "expect": "2 * ??0"
+}

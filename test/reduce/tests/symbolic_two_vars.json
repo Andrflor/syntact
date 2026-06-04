@@ -1,0 +1,6 @@
+{
+  "name": "Symbolic two fixed points",
+  "description": "a*2 + b*3 - 1 keeps both fixed points with constant last",
+  "source": "a -> ??::u8\nb -> ??::u8\n-> a*2 + b*3 - 1",
+  "expect": "2 * ??0 + 3 * ??1 - 1"
+}

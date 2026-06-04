@@ -1,0 +1,6 @@
+{
+  "name": "Symbolic constants fold around fixed point",
+  "description": "2 + a + 3 folds the constants to a + 5",
+  "source": "a -> ??::u8\n-> 2 + a + 3",
+  "expect": "??0 + 5"
+}
