@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_string_concat",
+  "description": "String fixed point survives as a segment",
+  "source": "s -> ??::string\n-> \"hi \" + s",
+  "expect": "\"hi \" + ??0"
+}

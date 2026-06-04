@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_f64_mul_add",
+  "description": "Float fixed point multiply and add",
+  "source": "x -> ??::f64\n-> x*2.0 + 1.0",
+  "expect": "??0 * 2.0 + 1.0"
+}

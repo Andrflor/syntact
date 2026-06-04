@@ -681,10 +681,32 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if comp.operator == .Add {
 		if _, ok := fold_string_sequence(t, true).([]String_Interval); ok do return
 	}
+	// A COMPARISON (`<`,`>`,`<=`,`>=`,`==`,`!=`) produces a BOOL, not a numeric
+	// envelope, so it never folds to an interval — that is expected, not an error.
+	// As long as its operands are compatible numeric families it is valid: it reduces
+	// to a concrete bool when both are concrete, or stays symbolic over a `??`. Leave
+	// it un-folded (no type_fold) and let the reducer handle it; only diagnose when an
+	// operand is genuinely non-numeric (caught below by diagnose_compose's family
+	// checks via the fallthrough for non-comparison ops).
+	if is_comparison_op(comp.operator) {
+		lf := family_of(comp.left)
+		rf := family_of(comp.right)
+		if is_numeric_family(lf) && is_numeric_family(rf) do return
+	}
 	// The fold failed. Hand off to the diagnostic layer, which inspects the
 	// operands and emits a precise, author-facing explanation (incompatible
 	// families, mismatched float colors, non-numeric operand, …).
 	diagnose_compose(a, comp^, node)
+}
+
+// is_comparison_op reports whether an operator yields a bool (an ordering or
+// equality test) rather than a numeric value.
+is_comparison_op :: proc(op: Operator_Kind) -> bool {
+	#partial switch op {
+	case .Less, .Greater, .LessEqual, .GreaterEqual, .Equal, .NotEqual:
+		return true
+	}
+	return false
 }
 
 // fold_cast resolves a `value :: target` raw binary reinterpret-cast. The cast

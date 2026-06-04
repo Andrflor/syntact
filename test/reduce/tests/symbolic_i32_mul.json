@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_i32_mul",
+  "description": "i32 fixed point multiply",
+  "source": "x -> ??::i32\n-> x*3",
+  "expect": "3 * ??0"
+}

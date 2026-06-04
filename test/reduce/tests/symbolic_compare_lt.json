@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_compare_lt",
+  "description": "Comparison over a fixed point stays symbolic",
+  "source": "n -> ??::u8\n-> n < 5",
+  "expect": "??0 < 5"
+}

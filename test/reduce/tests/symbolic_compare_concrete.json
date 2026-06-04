@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_compare_concrete",
+  "description": "Comparison of concretes evaluates",
+  "source": "-> 5 < 10",
+  "expect": "true"
+}
