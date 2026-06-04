@@ -153,8 +153,7 @@ emit_arg_stub :: proc(e: ^X64_Emit) {
 	// atoi(rdi) → rax  (inline)
 	emit_atoi(e)
 	// ARGS_TABLE[r14] = rax  → mov [base + r14*8], rax. base is absolute; load it.
-	write([]u8{0x49, 0xBB}) // movabs r11, ARGS_TABLE_VADDR
-	put_i64_bytes(e, i64(ARGS_TABLE_VADDR))
+	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR)) // ARGS_TABLE fits imm32 (<4GiB)
 	write([]u8{0x4B, 0x89, 0x04, 0xF3}) // mov [r11 + r14*8], rax
 	// r14++
 	write([]u8{0x49, 0xFF, 0xC6}) // inc r14
@@ -191,11 +190,14 @@ emit_atoi :: proc(e: ^X64_Emit) {
 	write([]u8{0x80, 0xF9, 0x39}) // cmp cl, '9'
 	write([]u8{0x7F}) // jg rel8 → end (patched)
 	jg_at := e.buf.len; write([]u8{0})
-	// acc = acc*10 + (cl-'0')
-	write([]u8{0x48, 0x6B, 0xC0, 0x0A}) // imul rax, rax, 10
-	write([]u8{0x48, 0x0F, 0xB6, 0xD1}) // movzx rdx, cl
-	write([]u8{0x48, 0x83, 0xEA, 0x30}) // sub rdx, '0'
-	write([]u8{0x48, 0x01, 0xD0}) // add rax, rdx
+	// acc = acc*10 + (cl - '0'), the hot path, in 3 fast ops (no imul):
+	//   movzx ecx, cl              ; digit (ascii) zero-extended
+	//   lea   eax, [rax+rax*4]     ; acc*5
+	//   lea   eax, [rcx+rax*2-'0'] ; acc*10 + digit - '0'  (fuses *2, +digit, -'0')
+	// 32-bit lea (no REX.W). imul (3 cycles) → two lea (1 cycle each).
+	write([]u8{0x0F, 0xB6, 0xC9}) // movzx ecx, cl
+	write([]u8{0x8D, 0x04, 0x80}) // lea eax, [rax+rax*4]
+	write([]u8{0x8D, 0x44, 0x41, 0xD0}) // lea eax, [rcx+rax*2-0x30]
 	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
 	// jmp dloop
 	write([]u8{0xEB})
@@ -294,28 +296,28 @@ emit_exit :: proc(e: ^X64_Emit, result: bc.BC_Value) {
 		// sys_write(1, ptr, len): rax=1, rdi=1, rsi=ptr, rdx=len.
 		load(e, .RSI, result) // rsi = string pointer
 		if l, ok := e.str_len[int(result)]; ok {
-			movabs_r64_imm64(.RDX, i64(l)) // rdx = length (immediate, known)
+			emit_load_imm_into(e, .RDX, i64(l)) // rdx = length (immediate, known)
 		} else {
 			xor_r64_r64(.RDX, .RDX)
 		}
-		movabs_r64_imm64(.RDI, 1) // fd = stdout
-		movabs_r64_imm64(.RAX, 1) // sys_write
+		emit_load_imm_into(e, .RDI, 1) // fd = stdout
+		emit_load_imm_into(e, .RAX, 1) // sys_write
 		syscall()
 		// exit(0)
 		xor_r64_r64(.RDI, .RDI)
-		movabs_r64_imm64(.RAX, 60)
+		emit_load_imm_into(e, .RAX, 60)
 		syscall()
 		return
 	}
 	if bc.mtype_is_float(e.prog.result_type) {
 		emit_print_float(e, result)
 		xor_r64_r64(.RDI, .RDI)
-		movabs_r64_imm64(.RAX, 60)
+		emit_load_imm_into(e, .RAX, 60)
 		syscall()
 		return
 	}
 	load(e, .RDI, result)
-	movabs_r64_imm64(.RAX, 60) // sys_exit
+	emit_load_imm_into(e, .RAX, 60) // sys_exit
 	syscall()
 }
 
@@ -458,7 +460,7 @@ emit_body :: proc(e: ^X64_Emit) -> string {
 		if _, ok := inst.(bc.BC_Load_Arg); ok {has_args = true; break}
 	}
 	if has_args {
-		movabs_r64_imm64(.RBX, i64(ARGS_TABLE_VADDR))
+		emit_load_imm_into(e, .RBX, i64(ARGS_TABLE_VADDR))
 	}
 
 	// Instruction selection: find address-mode (lea) roots and the values they
@@ -774,9 +776,9 @@ emit_print_char :: proc(e: ^X64_Emit, c: u8) {
 	// mov byte ptr [rsp-1], c ; lea rsi, [rsp-1] ; write(1, rsi, 1)
 	write([]u8{0xC6, 0x44, 0x24, 0xFF, c}) // mov byte [rsp-1], c
 	write([]u8{0x48, 0x8D, 0x74, 0x24, 0xFF}) // lea rsi, [rsp-1]
-	movabs_r64_imm64(.RDX, 1) // len 1
-	movabs_r64_imm64(.RDI, 1) // fd 1
-	movabs_r64_imm64(.RAX, 1) // sys_write
+	emit_load_imm_into(e, .RDX, 1) // len 1
+	emit_load_imm_into(e, .RDI, 1) // fd 1
+	emit_load_imm_into(e, .RAX, 1) // sys_write
 	syscall()
 }
 
@@ -812,8 +814,8 @@ emit_print_uint_in_rax :: proc(e: ^X64_Emit) {
 	// rdx = (rsp-1) - r9 + 1  = rsp - r9
 	write([]u8{0x48, 0x89, 0xE2}) // mov rdx, rsp
 	write([]u8{0x4C, 0x29, 0xCA}) // sub rdx, r9
-	movabs_r64_imm64(.RDI, 1)
-	movabs_r64_imm64(.RAX, 1)
+	emit_load_imm_into(e, .RDI, 1)
+	emit_load_imm_into(e, .RAX, 1)
 	syscall()
 }
 
@@ -840,9 +842,9 @@ emit_print_uint6 :: proc(e: ^X64_Emit) {
 	// write(1, r9+1, 6)
 	write([]u8{0x49, 0xFF, 0xC1}) // inc r9
 	write([]u8{0x4C, 0x89, 0xCE}) // mov rsi, r9
-	movabs_r64_imm64(.RDX, 6)
-	movabs_r64_imm64(.RDI, 1)
-	movabs_r64_imm64(.RAX, 1)
+	emit_load_imm_into(e, .RDX, 6)
+	emit_load_imm_into(e, .RDI, 1)
+	emit_load_imm_into(e, .RAX, 1)
 	syscall()
 }
 

@@ -75,11 +75,27 @@ match_addr_rec :: proc(e: ^X64_Emit, v: bc.BC_Value, am: ^X64_Address, absorbed:
 	#partial switch inst in e.prog.insts[pc] {
 	case bc.BC_Bin:
 		if inst.op == .Add {
-			// Dissolve the add: fold both sides into the mode. Keep `inst` as an
-			// absorbed intermediate (it won't be emitted; the lea covers it).
+			// The ROOT add must fold both sides (it's the lea). A NON-root reg+reg
+			// add PREFERS to stay a leaf (its value is in a register, costs one
+			// slot) — keeping `(v4)+(v6)` as two leaves → `lea (rsi,rdi)`. It only
+			// dissolves (costing two slots) if placing it as a leaf fails AND
+			// dissolving fits. Try leaf first, dissolve as fallback.
+			if !is_root {
+				saved_am := am^
+				if place_leaf(e, v, am) do return true
+				am^ = saved_am
+				saved_abs := len(absorbed)
+				if match_addr_rec(e, inst.a, am, absorbed, depth + 1, false) &&
+				   match_addr_rec(e, inst.b, am, absorbed, depth + 1, false) {
+					append(absorbed, int(v))
+					return true
+				}
+				am^ = saved_am
+				resize(absorbed, saved_abs)
+				return false
+			}
 			if !match_addr_rec(e, inst.a, am, absorbed, depth + 1, false) do return false
 			if !match_addr_rec(e, inst.b, am, absorbed, depth + 1, false) do return false
-			if !is_root do append(absorbed, int(v))
 			return true
 		}
 		return is_root ? false : place_leaf(e, v, am)
