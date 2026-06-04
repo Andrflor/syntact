@@ -1,6 +1,6 @@
-package compiler
+package x64_assembler
 
-import x64 "./backends/x64"
+import bc "../../bytecode"
 
 // ============================================================================
 // REGISTER ALLOCATION — linear-scan over the bytecode's SSA virtual registers.
@@ -27,7 +27,7 @@ Loc_Kind :: enum {
 
 VReg_Loc :: struct {
 	kind:   Loc_Kind,
-	reg:    x64.Register64, // valid when kind == Register
+	reg:    Register64, // valid when kind == Register
 	offset: int, // positive byte offset below rbp, when kind == Stack
 }
 
@@ -44,7 +44,7 @@ Reg_Alloc :: struct {
 // RSP/RBP are the stack frame. RBX is callee-saved; reserved for later use.
 // RCX is excluded too: variable shifts (shl/shr by a register) require the count
 // in CL, so the emitter keeps RCX free as the shift-count scratch.
-ALLOCATABLE_REGS := [?]x64.Register64{.RSI, .RDI, .R8, .R9, .R10, .R11, .R12, .R13, .R14, .R15}
+ALLOCATABLE_REGS := [?]Register64{.RSI, .RDI, .R8, .R9, .R10, .R11, .R12, .R13, .R14, .R15}
 
 // A live interval for one virtual register.
 Live_Interval :: struct {
@@ -54,7 +54,7 @@ Live_Interval :: struct {
 }
 
 // allocate_registers runs liveness + linear-scan over a lowered program.
-allocate_registers :: proc(prog: ^BC_Program) -> Reg_Alloc {
+allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	n := prog.value_count
 	locs := make([]VReg_Loc, n)
 
@@ -63,13 +63,13 @@ allocate_registers :: proc(prog: ^BC_Program) -> Reg_Alloc {
 
 	// Active intervals, kept sorted by increasing `end` so the earliest-expiring
 	// is reclaimed first. free_regs is the pool of currently-unused GPRs.
-	free_regs := make([dynamic]x64.Register64)
+	free_regs := make([dynamic]Register64)
 	defer delete(free_regs)
 	#reverse for r in ALLOCATABLE_REGS do append(&free_regs, r) // pop takes the last
 
 	active := make([dynamic]Live_Interval)
 	defer delete(active)
-	active_reg := make(map[int]x64.Register64) // vreg → its assigned reg, while active
+	active_reg := make(map[int]Register64) // vreg → its assigned reg, while active
 	defer delete(active_reg)
 
 	next_spill_offset := 0
@@ -117,7 +117,7 @@ allocate_registers :: proc(prog: ^BC_Program) -> Reg_Alloc {
 
 // compute_intervals does the single backward+forward liveness pass: a value's
 // def index is where it appears as a dst, its end index is its last use.
-compute_intervals :: proc(prog: ^BC_Program) -> [dynamic]Live_Interval {
+compute_intervals :: proc(prog: ^bc.BC_Program) -> [dynamic]Live_Interval {
 	n := prog.value_count
 	def := make([]int, n)
 	last := make([]int, n)
@@ -157,47 +157,47 @@ compute_intervals :: proc(prog: ^BC_Program) -> [dynamic]Live_Interval {
 }
 
 // bc_def returns the virtual register an instruction defines, if any.
-bc_def :: proc(inst: BC_Inst) -> (int, bool) {
+bc_def :: proc(inst: bc.BC_Inst) -> (int, bool) {
 	switch v in inst {
-	case BC_Const:
+	case bc.BC_Const:
 		return int(v.dst), true
-	case BC_Const_F:
+	case bc.BC_Const_F:
 		return int(v.dst), true
-	case BC_Str_Const:
+	case bc.BC_Str_Const:
 		return int(v.dst), true
-	case BC_Load_Arg:
+	case bc.BC_Load_Arg:
 		return int(v.dst), true
-	case BC_Bin:
+	case bc.BC_Bin:
 		return int(v.dst), true
-	case BC_Cmp:
+	case bc.BC_Cmp:
 		return int(v.dst), true
-	case BC_Move:
+	case bc.BC_Move:
 		return int(v.dst), true
-	case BC_Label_Def, BC_Jump, BC_Branch_Zero, BC_Ret:
+	case bc.BC_Label_Def, bc.BC_Jump, bc.BC_Branch_Zero, bc.BC_Ret:
 		return 0, false
 	}
 	return 0, false
 }
 
 // bc_uses returns the virtual registers an instruction reads.
-bc_uses :: proc(inst: BC_Inst) -> []int {
+bc_uses :: proc(inst: bc.BC_Inst) -> []int {
 	@(static) buf: [2]int
 	switch v in inst {
-	case BC_Const, BC_Const_F, BC_Str_Const, BC_Load_Arg, BC_Label_Def, BC_Jump:
+	case bc.BC_Const, bc.BC_Const_F, bc.BC_Str_Const, bc.BC_Load_Arg, bc.BC_Label_Def, bc.BC_Jump:
 		return buf[:0]
-	case BC_Bin:
+	case bc.BC_Bin:
 		buf[0] = int(v.a); buf[1] = int(v.b)
 		return buf[:2]
-	case BC_Cmp:
+	case bc.BC_Cmp:
 		buf[0] = int(v.a); buf[1] = int(v.b)
 		return buf[:2]
-	case BC_Move:
+	case bc.BC_Move:
 		buf[0] = int(v.src)
 		return buf[:1]
-	case BC_Branch_Zero:
+	case bc.BC_Branch_Zero:
 		buf[0] = int(v.cond)
 		return buf[:1]
-	case BC_Ret:
+	case bc.BC_Ret:
 		buf[0] = int(v.src)
 		return buf[:1]
 	}
@@ -208,8 +208,8 @@ bc_uses :: proc(inst: BC_Inst) -> []int {
 // before `point` to the free pool.
 expire_old :: proc(
 	active: ^[dynamic]Live_Interval,
-	active_reg: ^map[int]x64.Register64,
-	free_regs: ^[dynamic]x64.Register64,
+	active_reg: ^map[int]Register64,
+	free_regs: ^[dynamic]Register64,
 	point: int,
 ) {
 	i := 0

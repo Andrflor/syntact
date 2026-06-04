@@ -1,6 +1,8 @@
 package codegen_test
 
 import compiler "../../compiler"
+import bc "../../compiler/bytecode"
+import x64 "../../compiler/backends/x64"
 
 import "core:encoding/json"
 import "core:fmt"
@@ -138,7 +140,7 @@ run_case :: proc(path: string, t: ^testing.T) {
 	}
 
 	// --- 1. interpreter (oracle) ---
-	r := compiler.interp_bytecode(prog, tc.args)
+	r := bc.interp_bytecode(prog, tc.args)
 	testing.expectf(t, r.ok, "[%s] interp error: %s", tc.name, r.error)
 	if !r.ok do return
 
@@ -154,7 +156,7 @@ run_case :: proc(path: string, t: ^testing.T) {
 
 	// --- 2. native x64 ELF ---
 	exe := test_path(fmt.tprintf("tests/.out_%s", tc.name))
-	emsg := compiler.emit_executable(prog, exe)
+	emsg := x64.emit_executable(prog, exe)
 	testing.expectf(t, emsg == "", "[%s] emit error: %s", tc.name, emsg)
 	if emsg != "" do return
 	defer os.remove(exe)

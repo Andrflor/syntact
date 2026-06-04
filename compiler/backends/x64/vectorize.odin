@@ -1,4 +1,6 @@
-package compiler
+package x64_assembler
+
+import bc "../../bytecode"
 
 // ============================================================================
 // AUTO-VECTORIZATION — analysis, deliberately not yet emitting SIMD.
@@ -23,13 +25,13 @@ package compiler
 // map/fold over many ?? inputs, a list whose elements are runtime values, or the
 // planned effects/resonance/reactivity (see README) that fan one operation over
 // many cells. AT THAT POINT this pass should: detect a run of identical ops over
-// independent, contiguous values (same op, same Machine_Type, no cross-lane
+// independent, contiguous values (same op, same bc.Machine_Type, no cross-lane
 // dependency), pack them into an XMM/YMM register, emit the packed op
 // (paddd/psubd/pmulld for integers, addps/mulps for floats — the assembler in
 // backends/x64 already has the XMM/YMM encodings), and unpack the results.
 //
 // `vectorizable_run` is the detector stub the future pass will build on: it
-// reports a maximal run of BC_Bin with the same operator and machine type whose
+// reports a maximal run of bc.BC_Bin with the same operator and machine type whose
 // operands form independent lanes. It currently always returns an empty run,
 // because the lowering never produces such a run yet — kept so the entry point
 // and contract exist and the emitter can call it without a special case.
@@ -38,15 +40,15 @@ package compiler
 Vector_Run :: struct {
 	start: int, // first instruction index of the run
 	count: int, // number of lanes (0 = not vectorizable)
-	op:    Operator_Kind,
-	mt:    Machine_Type,
+	op:    bc.BC_Op,
+	mt:    bc.Machine_Type,
 }
 
 // vectorizable_run scans `prog.insts` from `at` for a maximal SIMD-able run.
 // Returns {count = 0} when none (the current, always-taken case).
-vectorizable_run :: proc(prog: ^BC_Program, at: int) -> Vector_Run {
-	// Contract for the future implementation: a run is k ≥ 4 consecutive BC_Bin
-	// with identical op + Machine_Type, whose (a, b) operands are pairwise
+vectorizable_run :: proc(prog: ^bc.BC_Program, at: int) -> Vector_Run {
+	// Contract for the future implementation: a run is k ≥ 4 consecutive bc.BC_Bin
+	// with identical op + bc.Machine_Type, whose (a, b) operands are pairwise
 	// independent lanes (no result of one feeding another). The structural
 	// reduction in reduce.odin currently coalesces such shapes into a scalar
 	// chain before they reach here, so no run exists.
