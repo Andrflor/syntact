@@ -181,6 +181,32 @@ mtype_for_int_value :: proc(x: i64) -> Machine_Type {
 	return .I64
 }
 
+// mtype_for_range returns the SMALLEST machine integer type whose value range
+// contains [lo, hi]. Syntact knows this range from the reducer's envelope, so the
+// width is determined BY CONSTRUCTION — no overflow analysis needed. A negative
+// lo forces a signed type; an all-nonneg range fits the smallest unsigned type.
+// nil bounds (±∞) fall back to I64.
+mtype_for_range :: proc(lo: Maybe(i64), hi: Maybe(i64)) -> Machine_Type {
+	l, lok := lo.?
+	h, hok := hi.?
+	if !lok || !hok do return .I64
+	if l >= 0 {
+		switch {
+		case h <= 255:        return .U8
+		case h <= 65535:      return .U16
+		case h <= 4294967295: return .U32
+		}
+		return .I64
+	}
+	// Signed: need both l and h to fit the signed type's [min, max].
+	switch {
+	case l >= -128 && h <= 127:               return .I8
+	case l >= -32768 && h <= 32767:           return .I16
+	case l >= -2147483648 && h <= 2147483647: return .I32
+	}
+	return .I64
+}
+
 // mtype_wider returns the wider of two machine types (used to pick an arithmetic
 // node's result width from its operands when the fold envelope is unavailable).
 mtype_wider :: proc(a, b: Machine_Type) -> Machine_Type {
