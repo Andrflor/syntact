@@ -358,6 +358,20 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 	result := bc_fresh_value(l, rt)
 
 	for branch in p.branches {
+		// A bool value-match (`=true`/`=false`): the target is 0/1, fire when it
+		// equals the branch's bool. Emit the conditional test so the branches don't
+		// fall through into one another.
+		if bval, is_bool := bc_branch_bool_value(branch); is_bool {
+			next := bc_fresh_label(l)
+			want := bc_fresh_value(l); bc_emit(l, bc.BC_Const{want, bval ? 1 : 0})
+			eq := bc_fresh_value(l, .U8); bc_emit(l, bc.BC_Cmp{eq, .Equal, target, want})
+			bc_emit(l, bc.BC_Branch_Zero{eq, next}) // target != bval → skip this branch
+			prod := bc_lower_value(l, branch.product)
+			bc_emit(l, bc.BC_Move{result, prod})
+			bc_emit(l, bc.BC_Jump{end})
+			bc_emit(l, bc.BC_Label_Def{next})
+			continue
+		}
 		lo, hi, ok := bc_branch_int_range(branch)
 		if !ok {
 			prod := bc_lower_value(l, branch.product)
@@ -379,6 +393,19 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 	}
 	bc_emit(l, bc.BC_Label_Def{end})
 	return result
+}
+
+// Extract a concrete bool from a value-match branch (`=true`/`=false`), if it is
+// one. Only a singleton Bool_Type qualifies — a full `{true,false}` is not a test.
+bc_branch_bool_value :: proc(branch: Pattern_Branch) -> (val: bool, ok: bool) {
+	if !branch.value_match || branch.match == nil do return false, false
+	folded := fold_value_type(branch.match)
+	if folded == nil do folded = branch.match
+	#partial switch b in folded^ {
+	case Bool_Type:
+		if v, has := b.value.?; has do return v, true
+	}
+	return false, false
 }
 
 // Extract a concrete integer [lo,hi] match from a pattern branch, if it is one.
