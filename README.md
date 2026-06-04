@@ -142,9 +142,9 @@ Come back to this list when a section feels surprising. Most surprises resolve t
 
 Syntact is in active development.
 
-The current bootstrap compiler is written in Odin. It parses, analyzes, and is being rebuilt around the current semantics. An LSP and a declarative test suite are also part of the project.
+The bootstrap compiler is written in Odin and runs the full pipeline end to end: **parse → analyze (constraint folding) → reduce → bytecode → native x86-64 ELF**. A Syntact program compiles to a runnable static executable. The analyzer proves constraints from value ranges (there is no type system, only structural coloring); the reducer collapses everything reducible — carving, collapse, references, patterns, and affine arithmetic — to a minimal form; a target-neutral bytecode then feeds an optimizing x64 backend (linear-scan allocation, register coalescing, LEA-based instruction selection, width-correct 32-bit arithmetic). An LSP (diagnostics, hover, go-to-definition, rename, completion) and six declarative test suites are part of the project.
 
-This README describes the design direction of the language, including features that are planned but not part of the first implementation. The implementation plan near the end separates the core from later layers such as events, resonance, full scope algebra, and proofs.
+This README describes the **design direction** of the language, including features that are planned but not yet implemented. The implementation plan near the end separates the working core from later layers such as events, resonance, full scope algebra, and proofs.
 
 ---
 
@@ -1975,6 +1975,38 @@ The collapse operator is therefore not just execution syntax. It is an optimizat
 
 The ambition is to write extremely high abstractions and pay only for the machine work that survives reduction.
 
+This is not just an aspiration — it is what the bootstrap compiler already does. A program that stacks dozens of multiplications, distributions, cancellations, and telescoping sums over three runtime arguments:
+
+```syntact
+a -> ??::u8 ; b -> ??::u8 ; c -> ??::u8
+t1 -> (a*7 + 3)*5            // and many more layers…
+u1 -> 2 * (t1 - 5*a)
+v1 -> u1 + a*9 - a*9 + 100 - 100
+// …seventeen lines of compounding arithmetic…
+-> big*2 - (big + 7) + 8
+```
+
+reduces to its minimal affine form `60·a + 78·b + 40·c`, and the x64 backend emits the arithmetic core a production C compiler at `-O3` would — all 32-bit, every multiply by a constant folded into `imul`/`lea`, the additions fused into address-mode `lea`, no spills, no wasted moves. The abstractions cost nothing; only the surviving computation is paid for.
+
+Benchmarked against the exact C equivalent (`return 60*a + 78*b + 40*c;`) on the same inputs:
+
+| | Syntact | gcc -O3 | clang -O3 |
+|---|---|---|---|
+| **arithmetic core** | `imul`+`lea`, 8 insns | equivalent | equivalent |
+| **binary size** | **472 B** | 15 976 B | 15 984 B |
+| **process startup** (hyperfine) | **152 µs** | 450 µs | 462 µs |
+| **compile time** — to a runnable executable (hyperfine `-N`) | **5.3 ms** | 36.9 ms | 52.1 ms |
+| **compile time** — front-end + optimizer only (`-c`, object, not yet runnable) | — | 24.3 ms | 26.9 ms |
+
+The generated arithmetic is **on par with -O3** — gcc/clang do not beat the LLVM-style instruction selector. Syntact's edge is structural: no ABI, no libc, a minimal static `_start` that parses argv inline and exits by syscall. So the binary is ~34× smaller and starts ~3× faster. (The startup gap is dominated by libc init and `strtol@plt` calls, which Syntact has neither of; a heavy compute loop would close it, since the arithmetic itself is equivalent.)
+
+On **compile time** Syntact produces a runnable ELF in ~5.3 ms — ~7× faster than gcc and ~10× faster than clang to their final executables. The fair reading is structural, not a smarter optimizer:
+
+- **Linking is a large slice of the gcc/clang number, not parsing.** Stopping at `-c` (object file, no link) drops gcc to 24.3 ms and clang to 26.9 ms — so the link step alone is ~12.6 ms for gcc and ~25.2 ms for clang (about half of clang's total). The front end is noise in both chains: C is not "bigger to parse" than Syntact. Syntact has no separate link step, no libc, no crt — its bytecode lowers straight to a monolithic static ELF.
+- **Even removing the link entirely, gcc/clang stay ~4.6–5.1× slower** (24–27 ms for an object that still needs linking, vs Syntact's 5.3 ms for a finished executable). That residual gap is their general-purpose machinery — a heavyweight IR (GIMPLE/RTL, LLVM IR) and optimization passes that run in full on even a trivial program, including overflow-absence proofs and general dataflow analysis. Syntact's reducer knows every value's range *by construction*, so there is no overflow proof to do, and there is no general IR between bytecode and ELF.
+
+So the compile-time win is the same architectural fact as the size and startup wins — no libc/link, range known by construction — not a cleverer optimizer.
+
 ---
 
 ## A small practical comparison
@@ -2126,6 +2158,8 @@ square -> {
 
 -> square{n -> 5}!
 ```
+
+**Status: done, and past "simple backend."** The bootstrap compiler runs parse → analyze → reduce → bytecode → native x86-64 ELF, with an optimizing backend (linear-scan + coalescing, LEA instruction selection, 32-bit-width arithmetic). Scopes, bindings, productions, access, carving, collapse, primitive values, and constraint analysis all work.
 
 ### V1 — Shapes and patterns
 

@@ -867,36 +867,77 @@ emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64,
 		if use32 {shl_r32_imm8(r32(w), u8(sh))} else {shl_r64_imm8(w, u8(sh))} // *2^k → shl
 		return true
 	}
-	// x*3 = lea w,[src+src*2]; x*5 = [src+src*4]; x*9 = [src+src*8].
-	scale: u8 = 0
-	switch k {
-	case 3: scale = 2
-	case 5: scale = 4
-	case 9: scale = 8
-	}
-	if scale != 0 {
-		base: Register64
-		if rx, ok := home_reg(e, x); ok && rx != .RBP && rx != .R13 {
-			base = rx
-		} else {
-			load(e, .RCX, x); base = .RCX
-		}
-		// lea w, [base + base*scale]
-		mem := MemoryAddress(AddressComponents{base = base, index = base, scale = scale})
-		if use32 {lea_r32_m(r32(w), mem)} else {lea_r64_m64(w, mem)}
+	// `*{3,5,9}` -> one lea [src + src*scale], scale = k-1 in {2,4,8}.
+	if k == 3 || k == 5 || k == 9 {
+		emit_lea_self(e, w, mul_base(e, x), u8(k - 1), use32)
 		return true
 	}
-	// Not reducible: imul w, x, k.
+
+	// Two-instruction decompositions, a la clang/LLVM (lea/shl: 1 cycle, two ports;
+	// beats imul's 3-cycle latency). Fallback to imul for constants that don't
+	// factor into <=2 lea/shl steps.
+	if lo, lf, ok := mul_pow2_lea(k); ok {
+		// k = 2^lo * {3,5,9}: shl the value by lo, then lea *lf.
+		load(e, w, x)
+		if use32 {shl_r32_imm8(r32(w), u8(lo))} else {shl_r64_imm8(w, u8(lo))}
+		emit_lea_self(e, w, w, u8(lf - 1), use32)
+		return true
+	}
+	if f1, f2, ok := mul_lea_lea(k); ok {
+		// k = f1 * f2 with f1,f2 in {3,5,9}: lea *f1 then lea *f2.
+		emit_lea_self(e, w, mul_base(e, x), u8(f1 - 1), use32)
+		emit_lea_self(e, w, w, u8(f2 - 1), use32)
+		return true
+	}
+
+	// Fallback: imul w, x, k.
 	load(e, w, x)
 	if fits_imm32(k) {
 		if use32 {
-			imul_r32_imm32(r32(w), u32(i32(k))) // imul r32, imm32 (w *= k)
+			imul_r32_imm32(r32(w), u32(i32(k)))
 		} else {
 			imul_r64_r64_imm32(w, w, u32(i32(k)))
 		}
 		return true
 	}
 	return false
+}
+
+// mul_base loads x into a register usable as a SIB base and returns it (x's home
+// if it can be a base, else RCX).
+mul_base :: proc(e: ^X64_Emit, x: bc.BC_Value) -> Register64 {
+	if rx, ok := home_reg(e, x); ok && rx != .RBP && rx != .R13 {
+		return rx
+	}
+	load(e, .RCX, x)
+	return .RCX
+}
+
+// emit_lea_self emits `lea w, [base + base*scale]` (= base * (scale+1)), 32/64-bit.
+emit_lea_self :: proc(e: ^X64_Emit, w, base: Register64, scale: u8, use32: bool) {
+	mem := MemoryAddress(AddressComponents{base = base, index = base, scale = scale})
+	if use32 {lea_r32_m(r32(w), mem)} else {lea_r64_m64(w, mem)}
+}
+
+// mul_pow2_lea: k = 2^lo * lf with lo >= 1 and lf in {3,5,9}.
+mul_pow2_lea :: proc(k: i64) -> (lo: int, lf: i64, ok: bool) {
+	v := k
+	lo = 0
+	for v % 2 == 0 {v /= 2; lo += 1}
+	if lo == 0 do return 0, 0, false
+	if v == 3 || v == 5 || v == 9 do return lo, v, true
+	return 0, 0, false
+}
+
+// mul_lea_lea: k = f1 * f2 with both in {3,5,9} (covers 9,15,25,27,45,81).
+mul_lea_lea :: proc(k: i64) -> (f1: i64, f2: i64, ok: bool) {
+	for a in ([3]i64{3, 5, 9}) {
+		if k % a == 0 {
+			b := k / a
+			if b == 3 || b == 5 || b == 9 do return a, b, true
+		}
+	}
+	return 0, 0, false
 }
 
 // dst_finish stores `w` into dst's slot if w isn't already dst's home register.
