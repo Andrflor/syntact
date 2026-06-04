@@ -2115,9 +2115,12 @@ The promise is not that everything becomes easy. The promise is that the hard th
 
 Syntact is too ambitious to build all at once.
 
-The implementation should grow in layers. Each layer must be useful by itself.
+The implementation grows in layers. Each layer must be useful by itself. The
+language is still in its initial development cycle, so the milestones are numbered
+under a single `v0` line — `v0` is the executable core, `v0.1`…`v0.5` add each
+layer on top — rather than as separate major versions.
 
-### V0 — Core executable language
+### v0 — Core executable language
 
 Goal: prove that `scope + binding + carving + collapse` works.
 
@@ -2161,7 +2164,7 @@ square -> {
 
 **Status: done, and past "simple backend."** The bootstrap compiler runs parse → analyze → reduce → bytecode → native x86-64 ELF, with an optimizing backend (linear-scan + coalescing, LEA instruction selection, 32-bit-width arithmetic). Scopes, bindings, productions, access, carving, collapse, primitive values, and constraint analysis all work.
 
-### V1 — Shapes and patterns
+### v0.1 — Shapes and patterns
 
 Goal: make Syntact useful for small real programs.
 
@@ -2192,7 +2195,13 @@ area -> {
 }
 ```
 
-### V2 — Nominal events
+**Status: mostly done.** Constraint coloring (`:`), primitive and user-defined
+shapes, pattern matching with `?` (typecheck and value branches, exhaustiveness),
+anonymous shaped bindings, set-algebra constraints (`&`/`|`/`~`), and ranges all
+work and compile to native code. Structural destructuring with capture
+(`Circle:{radius(r)}`) and full carve materialization are the remaining gaps.
+
+### v0.2 — Nominal events
 
 Goal: introduce Syntact's algebraic effects.
 
@@ -2224,7 +2233,7 @@ program -> {
 }
 ```
 
-### V3 — Resonance and reactivity
+### v0.3 — Resonance and reactivity
 
 Goal: model state, mutation, and derived bindings.
 
@@ -2241,7 +2250,7 @@ state abstractions as library scopes
 UI-friendly reactive patterns
 ```
 
-### V4 — Fuller scope algebra
+### v0.4 — Fuller scope algebra
 
 Goal: close the algebra.
 
@@ -2261,7 +2270,7 @@ module/scope algebra
 
 This is where `Email`, `Identifier`, `SmallCircle`, `weirdInt`, JSON grammars, and refined domain shapes become central.
 
-### V5 — Proofs
+### v0.5 — Proofs
 
 Goal: add compile-time obligations carefully.
 

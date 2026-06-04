@@ -98,7 +98,7 @@ Key conventions:
 
 `test/{parse,analyze,typecheck,reduce,default,codegen}/` are independent Odin test packages, each with `tests/*.json` + a generated runner. `odin test test/<cat>` runs from anywhere (a `test_path` helper resolves JSON against the source dir).
 
-- **codegen** — the **end-to-end** suite (44 cases, all pass). Each case (`source`+`args`+`expect`+`kind`) is checked against BOTH backends: the interpreter (the oracle) AND the native x64 (emit ELF → run via libc `popen` → compare exit-status/stdout). An interp/native divergence fails the case. Covers every domain + strength reductions, lea selection, 32-bit arithmetic, patterns, carve/collapse/refs/set-ops, strings, floats.
+- **codegen** — the **end-to-end** suite (85 cases, all pass; multi-combo: each case runs many `(args → expect)` pairs). Each case (`source`+`args`+`expect`+`kind`) is checked against BOTH backends: the interpreter (the oracle) AND the native x64 (emit ELF → run via libc `popen` → compare exit-status/stdout). An interp/native divergence fails the case. Covers every domain + strength reductions, lea selection, 32-bit arithmetic, patterns, carve/collapse/refs/set-ops, strings, floats.
 - **typecheck** — constraint-satisfaction (`expect_errors`): self-match, raw-cast `::`, composites, carve implicit-constraints, executes, references in `&`/`|`/`~`, patterns, string sequences/negation/tri-range. ~475 pass.
 - **analyze** — `expect_errors` of `Analyzer_Error_Type` names (empty = clean).
 - **reduce** — `expect` = the stringified reduced value (concrete `"25"` or symbolic `"11 * ??0 + 3 * ??1 - 4"`). ~12 fail on reducer/parser features not yet reimplemented (carve materialization, scope `+{}`) — gaps, not breakage.

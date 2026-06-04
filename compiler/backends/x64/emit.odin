@@ -6,14 +6,15 @@ import bc "../../bytecode"
 // x64 EMITTER — bytecode → x86-64 machine code (.text bytes).
 //
 // Consumes the target-neutral bc.BC_Program and emits x86-64 using the tested
-// assembler in backends/x64 (encodings validated against objdump). This first
-// emitter uses a simple, robust "stack-everything" model: every virtual register
-// vN lives at [rbp - 8*(vN+1)], loaded into a work register for each op and
-// stored back. It is correct and easy to validate against the interpreter; the
-// optimizing linear-scan allocator (x64_regalloc.odin) layers on top later.
+// assembler in backends/x64 (encodings validated against objdump). The linear-scan
+// allocator (regalloc.odin) runs FIRST: load/store/home_reg consult e.alloc, so a
+// value that lives in a register is read/written in place and only spilled values
+// touch the frame. The instruction selector (isel.odin) folds add/sub/scale trees
+// into single LEAs, and emit_bin applies strength reduction (shl/lea/magic-div).
 //
-// Work registers: RAX (primary), RCX (secondary / shift count), RDX (idiv high).
-// Result is returned via the exit-status syscall (integer programs).
+// Work registers kept free of the allocatable pool: RAX/RDX (the imul/idiv pair),
+// RCX (the shift count). Result is returned via the exit-status syscall (integer
+// programs), stdout for strings/floats.
 //
 // Labels are resolved in two passes: emit with placeholder rel32 offsets while
 // recording each jump's site and target label, then patch the offsets once every
@@ -444,17 +445,13 @@ emit_prologue :: proc(e: ^X64_Emit, frame: int) {
 	// locals (spills), and the float-print scratch lives in the red zone below
 	// rsp. So `push rbp ; mov rbp,rsp ; sub rsp,N` is dead — skip it entirely.
 	if e.alloc.stack_size == 0 do return
-	// push rbp ; mov rbp, rsp ; sub rsp, frame
+	// push rbp ; mov rbp, rsp ; sub rsp, frame. This only reserves the spill area;
+	// the ??N arguments are NOT in the frame — emit_arg_stub parses argv[1..] into
+	// the ARGS_TABLE before the prologue, and emit_load_arg reads each slot from
+	// there. The frame is purely for register spills under pressure.
 	push_r64(.RBP)
 	mov_r64_r64(.RBP, .RSP)
 	sub_r64_imm32(.RSP, u32(frame))
-
-	// Load each ??N from argv. The runtime entry stub (in the ELF) leaves the
-	// parsed integer arguments in a small table the prologue reads; for now the
-	// ELF stub parses argv[1..] into the first N stack slots BELOW our frame.
-	// See write_elf_exec: it pushes parsed args, then calls us. Here we assume
-	// the stub placed arg K at [rbp + 16 + 8*K] (above the saved rbp/return).
-	// (Wired in the ELF step.)
 }
 
 // emit_exit emits the program's return. For a string result: write(1, ptr, len)
