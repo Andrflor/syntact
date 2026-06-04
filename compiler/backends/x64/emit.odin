@@ -158,58 +158,101 @@ emit_arg_stub :: proc(e: ^X64_Emit) {
 	defer delete(is_float)
 
 	// --- generic atoi loop over all of argv[1..] ---
-	write([]u8{0x4C, 0x8B, 0x24, 0x24}) // mov r12, [rsp]      (argc)
-	write([]u8{0x4C, 0x8D, 0x6C, 0x24, 0x08}) // lea r13, [rsp+8]    (&argv[0])
-	write([]u8{0x4D, 0x31, 0xF6}) // xor r14, r14        (K=0)
+	rsp0 := MemoryAddress(AddressComponents{base = Register64.RSP}) // [rsp] = argc
+	argv0 := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = 8}) // &argv[0]
+	mov_r64_m64(.R12, rsp0) // r12 = argc
+	lea_r64_m64(.R13, argv0) // r13 = &argv[0]
+	xor_r64_r64(.R14, .R14) // K = 0
 	// Hoist the ARGS_TABLE base OUT of the loop — it's constant, and atoi clobbers
 	// only rax/rcx/rdx/r8, never r11. Loading it once instead of per-arg.
 	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR))
 
-	loop_start := e.buf.len
-	write([]u8{0x4C, 0x89, 0xF0}) // mov rax, r14
-	write([]u8{0x48, 0xFF, 0xC0}) // inc rax
-	write([]u8{0x4C, 0x39, 0xE0}) // cmp rax, r12
-	write([]u8{0x0F, 0x8D}) // jge done
-	jge_at := e.buf.len
-	write([]u8{0, 0, 0, 0})
+	loop_start := here(e)
+	mov_r64_r64(.RAX, .R14)
+	inc_r64(.RAX)
+	cmp_r64_r64(.RAX, .R12)
+	to_done := forward32(e, jge_rel32)
 
-	write([]u8{0x49, 0x8B, 0x7C, 0xC5, 0x00}) // mov rdi, [r13 + rax*8]
+	// rdi = argv[K+1] = [r13 + rax*8]
+	mov_r64_m64(.RDI, MemoryAddress(AddressComponents{base = Register64.R13, index = Register64.RAX, scale = 8}))
 	emit_atoi(e) // atoi(rdi) → rax
-	write([]u8{0x4B, 0x89, 0x04, 0xF3}) // mov [r11 + r14*8], rax
-	write([]u8{0x49, 0xFF, 0xC6}) // inc r14
-	write([]u8{0xE9}) // jmp loop_start
-	jat := e.buf.len
-	write([]u8{0, 0, 0, 0})
-	patch_rel32(e, jat, i32(loop_start - (jat + 4)))
+	// ARGS_TABLE[K] = rax → [r11 + r14*8]
+	mov_m64_r64(MemoryAddress(AddressComponents{base = Register64.R11, index = Register64.R14, scale = 8}), .RAX)
+	inc_r64(.R14)
+	back32(e, jmp_rel32, loop_start, 5) // jmp loop_start (5-byte rel32 jmp)
 
-	done := e.buf.len
-	patch_rel32(e, jge_at, i32(done - (jge_at + 4)))
+	bind32(e, to_done)
 
 	// --- float fixup: re-parse only the float slots with atof ---
 	if len(is_float) == 0 do return
 	// R11 still holds the ARGS_TABLE base from the loop. r13 = &argv[0], r12 = argc.
 	for slot, _ in is_float {
 		// Guard: skip if argv[slot+1] is missing (cmp r12, slot+1 ; jle skip).
-		write([]u8{0x49, 0x81, 0xFC}) // cmp r12, imm32
-		put_u32(e, u32(slot + 1))
-		write([]u8{0x0F, 0x8E}) // jle skip
-		jle_at := e.buf.len
-		write([]u8{0, 0, 0, 0})
+		cmp_r64_imm32(.R12, u32(slot + 1))
+		to_skip := forward32(e, jle_rel32)
 
-		write([]u8{0x49, 0x8B, 0xBD}) // mov rdi, [r13 + disp32]
-		put_u32(e, u32(8 * (slot + 1)))
+		mov_r64_m64(.RDI, MemoryAddress(AddressComponents{base = Register64.R13, displacement = i32(8 * (slot + 1))}))
 		emit_atof(e) // f64 bits → rax
 		emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR)) // atof may clobber; reload base
-		write([]u8{0x49, 0x89, 0x83}) // mov [r11 + disp32], rax
-		put_u32(e, u32(8 * slot))
+		mov_m64_r64(MemoryAddress(AddressComponents{base = Register64.R11, displacement = i32(8 * slot)}), .RAX)
 
-		skip := e.buf.len
-		patch_rel32(e, jle_at, i32(skip - (jle_at + 4)))
+		bind32(e, to_skip)
 	}
 }
 
 put_u32 :: proc(e: ^X64_Emit, v: u32) {
 	write([]u8{u8(v & 0xFF), u8((v >> 8) & 0xFF), u8((v >> 16) & 0xFF), u8((v >> 24) & 0xFF)})
+}
+
+// --- local rel8 labels -----------------------------------------------------
+//
+// Minimal forward/backward jump bookkeeping for self-contained code (atoi/atof):
+// short-range jumps inside one proc that don't go through the program's BC_Label
+// fixup table. The assembler's jcc procs write opcode+rel8 together, so a FORWARD
+// jump emits with rel8=0 then back-patches the displacement byte once the target
+// is bound; a BACKWARD jump computes the displacement up front (target known).
+//
+// `here()` is the current byte position (a backward target / a fixup's base).
+// `forward(jcc)` emits the jcc and returns the displacement byte's index to patch.
+// `bind(at)` patches a forward jump to land at the current position.
+// `back(jcc, target)` emits a jcc reaching an already-bound `target`.
+
+here :: #force_inline proc(e: ^X64_Emit) -> int {return e.buf.len}
+
+// forward emits a 1-byte-displacement jcc (via the assembler proc) with a 0
+// placeholder, and returns the index of that displacement byte to bind() later.
+forward :: proc(e: ^X64_Emit, jcc: proc(_: i8)) -> int {
+	jcc(0)
+	return e.buf.len - 1 // the rel8 byte the proc just wrote
+}
+
+// bind patches a forward jump's displacement so it lands at the current position.
+bind :: proc(e: ^X64_Emit, disp_at: int) {
+	e.buf.data[disp_at] = u8(i8(e.buf.len - (disp_at + 1)))
+}
+
+// back emits a jcc reaching an already-known target; the proc writes the correct
+// rel8 directly (no patching needed).
+back :: proc(e: ^X64_Emit, jcc: proc(_: i8), target: int) {
+	// after the 2-byte jcc, rip = (here+2); rel8 = target - (here+2).
+	jcc(i8(target - (e.buf.len + 2)))
+}
+
+// rel32 variants — for forward jumps whose distance may exceed a signed byte.
+forward32 :: proc(e: ^X64_Emit, jcc: proc(_: i32)) -> int {
+	jcc(0)
+	return e.buf.len - 4 // the 4-byte rel32 the proc just wrote
+}
+
+bind32 :: proc(e: ^X64_Emit, disp_at: int) {
+	patch_rel32(e, disp_at, i32(e.buf.len - (disp_at + 4)))
+}
+
+// back32 emits a rel32 jcc/jmp reaching an already-known target. The proc writes
+// opcode + rel32; rel32 = target - (rip after the instruction). jmp is 5 bytes
+// (1 opcode + 4), jcc is 6 (2 + 4) — pass the instruction's total length.
+back32 :: proc(e: ^X64_Emit, jcc: proc(_: i32), target: int, instr_len: int) {
+	jcc(i32(target - (e.buf.len + instr_len)))
 }
 
 // emit_atoi: parse the NUL-terminated string at rdi into rax (signed decimal).
@@ -219,41 +262,41 @@ put_u32 :: proc(e: ^X64_Emit, v: u32) {
 // load overlaps the current digit's arithmetic). acc=rax, sign=r8b.
 // Clobbers rax,rcx,rdx,r8,rdi.
 emit_atoi :: proc(e: ^X64_Emit) {
-	write([]u8{0x48, 0x31, 0xC0}) // xor rax, rax            (acc=0)
-	write([]u8{0x45, 0x31, 0xC0}) // xor r8, r8              (sign=0)
+	at_rdi := MemoryAddress(AddressComponents{base = Register64.RDI}) // [rdi]
+	dec_rcx := MemoryAddress(AddressComponents{base = Register64.RCX, displacement = -0x30}) // [rcx-'0']
+	xor_r64_r64(.RAX, .RAX) // acc = 0
+	xor_r64_r64(.R8, .R8) // sign = 0
 	// leading '-' : if [rdi]=='-', sign=1, rdi++.
-	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
-	write([]u8{0x80, 0xF9, 0x2D}) // cmp cl, '-'
-	write([]u8{0x75, 0x06}) // jne +6
-	write([]u8{0x41, 0xB0, 0x01}) // mov r8b, 1
-	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+	mov_r8_m8(.CL, at_rdi) // cl = [rdi]
+	cmp_r8_imm8(.CL, '-')
+	no_sign := forward(e, jne_rel8)
+	mov_r8_imm8(.R8B, 1) // sign = 1
+	inc_r64(.RDI)
+	bind(e, no_sign)
 
 	// First char + range check (peeled prologue so the loop tests before it loads).
-	write([]u8{0x0F, 0xB6, 0x0F}) // movzbl (rdi), ecx          (c)
-	write([]u8{0x8D, 0x51, 0xD0}) // lea edx, [rcx-0x30]        (d = c-'0')
-	write([]u8{0x80, 0xFA, 0x09}) // cmp dl, 9
-	write([]u8{0x0F, 0x87}) // ja end (unsigned: c<'0' wraps high)  rel32 (patched)
-	ja_at := e.buf.len; write([]u8{0, 0, 0, 0})
+	movzx_r32_m8(.RCX, at_rdi) // ecx = (c)
+	lea_r32_m(.EDX, dec_rcx) // edx = c-'0'
+	cmp_r8_imm8(.DL, 9)
+	to_end := forward32(e, ja_rel32) // c not a digit → end (unsigned wraps c<'0' high)
 
 	// digit loop body: acc = acc*10 + (c-'0'), then load + range-check the NEXT
 	// char at the bottom (pipelined). ecx holds the current ascii byte.
-	dloop := e.buf.len
-	write([]u8{0x8D, 0x04, 0x80}) // lea eax, [rax+rax*4]       (acc*5)
-	write([]u8{0x8D, 0x44, 0x41, 0xD0}) // lea eax, [rcx+rax*2-0x30]  (acc*10 + c - '0')
-	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
-	write([]u8{0x0F, 0xB6, 0x0F}) // movzbl (rdi), ecx          (next c)
-	write([]u8{0x8D, 0x51, 0xD0}) // lea edx, [rcx-0x30]        (next d)
-	write([]u8{0x80, 0xFA, 0x0A}) // cmp dl, 10
-	write([]u8{0x72}) // jb dloop (d < 10 → still a digit) rel8
-	back := e.buf.len; write([]u8{0})
-	e.buf.data[back] = u8(i8(dloop - (back + 1)))
+	dloop := here(e)
+	lea_r32_m(.EAX, MemoryAddress(AddressComponents{base = Register64.RAX, index = Register64.RAX, scale = 4})) // acc*5
+	lea_r32_m(.EAX, MemoryAddress(AddressComponents{base = Register64.RCX, index = Register64.RAX, scale = 2, displacement = -0x30})) // acc*10 + c - '0'
+	inc_r64(.RDI)
+	movzx_r32_m8(.RCX, at_rdi) // next c
+	lea_r32_m(.EDX, dec_rcx) // next d
+	cmp_r8_imm8(.DL, 10)
+	back(e, jb_rel8, dloop) // d < 10 → still a digit
 
-	// end: patch the prologue's `ja`, then apply sign.
-	end := e.buf.len
-	patch_rel32(e, ja_at, i32(end - (ja_at + 4)))
-	write([]u8{0x45, 0x84, 0xC0}) // test r8b, r8b
-	write([]u8{0x74, 0x03}) // jz +3
-	write([]u8{0x48, 0xF7, 0xD8}) // neg rax
+	// end: bind the prologue's range-check jump, then apply sign.
+	bind32(e, to_end)
+	test_r8_r8(.R8B, .R8B)
+	keep := forward(e, je_rel8) // sign==0 → skip neg
+	neg_r64(.RAX)
+	bind(e, keep)
 }
 
 // emit_atof: parse the NUL-terminated decimal string at rdi into the f64 BIT
@@ -264,72 +307,61 @@ emit_atoi :: proc(e: ^X64_Emit) {
 // parsing), so it favors clarity over cycle count. Clobbers rax,rcx,rdx,r8,r9,
 // r10,r15,xmm0,xmm1,xmm2.
 emit_atof :: proc(e: ^X64_Emit) {
+	at_rdi := MemoryAddress(AddressComponents{base = Register64.RDI}) // [rdi]
+	NEG30 :: u8(0xD0) // -0x30 as imm8 (add by it = sub 0x30)
+
 	// r8=sign(0/1), r9=ipart, r10=frac, r15=scale(=1, ×10 per frac digit).
-	write([]u8{0x45, 0x31, 0xC0}) // xor r8, r8     (sign=0)
-	write([]u8{0x4D, 0x31, 0xC9}) // xor r9, r9     (ipart=0)
-	write([]u8{0x4D, 0x31, 0xD2}) // xor r10, r10   (frac=0)
-	write([]u8{0x49, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00}) // mov r15, 1  (scale=1)
+	xor_r64_r64(.R8, .R8) // sign = 0
+	xor_r64_r64(.R9, .R9) // ipart = 0
+	xor_r64_r64(.R10, .R10) // frac = 0
+	emit_load_imm_into(e, .R15, 1) // scale = 1
 
 	// leading '-' ?
-	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
-	write([]u8{0x80, 0xF9, 0x2D}) // cmp cl, '-'
-	write([]u8{0x75, 0x06}) // jne +6
-	write([]u8{0x41, 0xB0, 0x01}) // mov r8b, 1
-	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+	mov_r8_m8(.CL, at_rdi)
+	cmp_r8_imm8(.CL, '-')
+	no_sign := forward(e, jne_rel8)
+	mov_r8_imm8(.R8B, 1) // sign = 1
+	inc_r64(.RDI)
+	bind(e, no_sign)
 
 	// integer-part loop: r9 = r9*10 + digit.
-	iloop := e.buf.len
-	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
-	write([]u8{0x80, 0xF9, 0x30}) // cmp cl, '0'
-	write([]u8{0x7C}) // jl rel8 → after int (patched)
-	i_jl := e.buf.len; write([]u8{0})
-	write([]u8{0x80, 0xF9, 0x39}) // cmp cl, '9'
-	write([]u8{0x7F}) // jg rel8 → after int
-	i_jg := e.buf.len; write([]u8{0})
-	// r9 = r9*10 + (cl-'0'). One-shot parse, not the hot path → plain imul.
-	write([]u8{0x0F, 0xB6, 0xC9}) // movzx ecx, cl
-	write([]u8{0x83, 0xE9, 0x30}) // sub ecx, 0x30        (digit value in rcx)
+	iloop := here(e)
+	mov_r8_m8(.CL, at_rdi)
+	cmp_r8_imm8(.CL, '0')
+	i_jl := forward(e, jl_rel8) // < '0' → after int
+	cmp_r8_imm8(.CL, '9')
+	i_jg := forward(e, jg_rel8) // > '9' → after int
+	movzx_r32_r8(.ECX, .CL)
+	add_r32_imm8(.ECX, NEG30) // ecx = digit (c - '0')
 	imul_r64_imm32(.R9, 10) // r9 *= 10
 	add_r64_r64(.R9, .RCX) // r9 += digit
-	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
-	write([]u8{0xEB}) // jmp iloop
-	i_back := e.buf.len; write([]u8{0})
-	e.buf.data[i_back] = u8(i8(iloop - (i_back + 1)))
-
-	after_int := e.buf.len
-	e.buf.data[i_jl] = u8(i8(after_int - (i_jl + 1)))
-	e.buf.data[i_jg] = u8(i8(after_int - (i_jg + 1)))
+	inc_r64(.RDI)
+	back(e, jmp_rel8, iloop)
+	bind(e, i_jl)
+	bind(e, i_jg)
 
 	// '.' ?  if [rdi]=='.', inc rdi and parse fraction; else skip.
-	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
-	write([]u8{0x80, 0xF9, 0x2E}) // cmp cl, '.'
-	write([]u8{0x75}) // jne rel8 → after frac
-	dot_jne := e.buf.len; write([]u8{0})
-	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+	mov_r8_m8(.CL, at_rdi)
+	cmp_r8_imm8(.CL, '.')
+	no_dot := forward(e, jne_rel8) // not '.' → after frac
+	inc_r64(.RDI)
 
-	floop := e.buf.len
-	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
-	write([]u8{0x80, 0xF9, 0x30}) // cmp cl, '0'
-	write([]u8{0x7C}) // jl → after frac
-	f_jl := e.buf.len; write([]u8{0})
-	write([]u8{0x80, 0xF9, 0x39}) // cmp cl, '9'
-	write([]u8{0x7F}) // jg → after frac
-	f_jg := e.buf.len; write([]u8{0})
-	// r10 = r10*10 + (cl-'0'); r15 *= 10.
-	write([]u8{0x0F, 0xB6, 0xC9}) // movzx ecx, cl
-	write([]u8{0x83, 0xE9, 0x30}) // sub ecx, 0x30        (digit value in rcx)
+	floop := here(e)
+	mov_r8_m8(.CL, at_rdi)
+	cmp_r8_imm8(.CL, '0')
+	f_jl := forward(e, jl_rel8)
+	cmp_r8_imm8(.CL, '9')
+	f_jg := forward(e, jg_rel8)
+	movzx_r32_r8(.ECX, .CL)
+	add_r32_imm8(.ECX, NEG30) // ecx = digit
 	imul_r64_imm32(.R10, 10) // r10 *= 10
 	add_r64_r64(.R10, .RCX) // r10 += digit
 	imul_r64_imm32(.R15, 10) // r15 *= 10
-	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
-	write([]u8{0xEB}) // jmp floop
-	f_back := e.buf.len; write([]u8{0})
-	e.buf.data[f_back] = u8(i8(floop - (f_back + 1)))
-
-	after_frac := e.buf.len
-	e.buf.data[dot_jne] = u8(i8(after_frac - (dot_jne + 1)))
-	e.buf.data[f_jl] = u8(i8(after_frac - (f_jl + 1)))
-	e.buf.data[f_jg] = u8(i8(after_frac - (f_jg + 1)))
+	inc_r64(.RDI)
+	back(e, jmp_rel8, floop)
+	bind(e, no_dot)
+	bind(e, f_jl)
+	bind(e, f_jg)
 
 	// value = ipart + frac/scale  (all in xmm0).
 	cvtsi2sd_xmm_r64(.XMM0, .R9) // xmm0 = (double)ipart
@@ -338,15 +370,13 @@ emit_atof :: proc(e: ^X64_Emit) {
 	divsd_xmm_xmm(.XMM1, .XMM2) // xmm1 = frac/scale
 	addsd_xmm_xmm(.XMM0, .XMM1) // xmm0 = ipart + frac/scale
 	// sign: if r8b, xmm0 = -xmm0  (flip sign bit).
-	write([]u8{0x45, 0x84, 0xC0}) // test r8b, r8b
-	write([]u8{0x74}) // jz → done
-	sgn_jz := e.buf.len; write([]u8{0})
+	test_r8_r8(.R8B, .R8B)
+	no_neg := forward(e, je_rel8) // sign==0 → done
 	movq_r64_xmm_bits(.RAX, .XMM0)
 	movabs_r64_imm64(.RCX, transmute(i64)u64(0x8000000000000000))
-	write([]u8{0x48, 0x31, 0xC8}) // xor rax, rcx   (flip sign bit)
+	xor_r64_r64(.RAX, .RCX) // flip the sign bit
 	movq_xmm_r64(.XMM0, .RAX)
-	done_sgn := e.buf.len
-	e.buf.data[sgn_jz] = u8(i8(done_sgn - (sgn_jz + 1)))
+	bind(e, no_neg)
 
 	movq_r64_xmm_bits(.RAX, .XMM0) // rax = f64 bits
 }
@@ -485,18 +515,15 @@ emit_print_float :: proc(e: ^X64_Emit, result: bc.BC_Value) {
 
 	// --- handle sign: test the sign bit of rax (bit 63). ---
 	movabs_r64_imm64(.RCX, transmute(i64)u64(0x8000000000000000))
-	write([]u8{0x48, 0x85, 0xC8}) // test rax, rcx
-	write([]u8{0x74}) // jz over_sign
-	jz_at := e.buf.len; write([]u8{0})
-	// print '-'
+	test_r64_r64(.RAX, .RCX)
+	over_sign := forward(e, je_rel8) // sign bit clear → skip '-'
 	emit_print_char(e, '-')
-	over_sign := e.buf.len
-	e.buf.data[jz_at] = u8(i8(over_sign - (jz_at + 1)))
+	bind(e, over_sign)
 
 	// abs: reload bits from the stable slot, clear the sign bit, into xmm0.
 	mov_r64_m64(.RAX, val_slot)
 	movabs_r64_imm64(.RCX, transmute(i64)u64(0x7FFFFFFFFFFFFFFF))
-	write([]u8{0x48, 0x21, 0xC8}) // and rax, rcx
+	and_r64_r64(.RAX, .RCX) // abs
 	movq_xmm_r64(.XMM0, .RAX)
 
 	// ipart = cvttsd2si rax, xmm0
@@ -506,7 +533,7 @@ emit_print_float :: proc(e: ^X64_Emit, result: bc.BC_Value) {
 	// frac: reload abs bits from the stable slot (print clobbered registers).
 	mov_r64_m64(.RAX, val_slot)
 	movabs_r64_imm64(.RCX, transmute(i64)u64(0x7FFFFFFFFFFFFFFF))
-	write([]u8{0x48, 0x21, 0xC8}) // and rax, rcx  (abs)
+	and_r64_r64(.RAX, .RCX) // abs
 	movq_xmm_r64(.XMM0, .RAX) // xmm0 = |value|
 	cvttsd2si_r64_xmm(.RAX, .XMM0)
 	cvtsi2sd_xmm_r64(.XMM1, .RAX)
@@ -939,10 +966,9 @@ emit_load_imm_rax :: proc(e: ^X64_Emit, v: i64) {
 // otherwise. Handles the REX.B prefix for the extended registers R8-R15.
 emit_load_imm_into :: proc(e: ^X64_Emit, reg: Register64, v: i64) {
 	if v >= 0 && v <= 0xFFFFFFFF {
-		// [REX.B] B8+rd id : mov r32, imm32 (upper 32 bits zeroed).
-		if (u8(reg) & 0x8) != 0 do write([]u8{0x41}) // REX.B for r8d..r15d
-		u := u32(v)
-		write([]u8{0xB8 | (u8(reg) & 0x7), u8(u), u8(u >> 8), u8(u >> 16), u8(u >> 24)})
+		// mov r32, imm32 zero-extends to 64 — shorter than movabs. The assembler's
+		// proc handles the REX.B prefix for r8d..r15d (r32 shares the r64 index).
+		mov_r32_imm32(r32(reg), u32(v))
 		return
 	}
 	movabs_r64_imm64(reg, v)
@@ -951,9 +977,11 @@ emit_load_imm_into :: proc(e: ^X64_Emit, reg: Register64, v: i64) {
 // emit_print_char writes a single byte to stdout. Uses the red zone: push the
 // char, write(1, rsp, 1), pop.
 emit_print_char :: proc(e: ^X64_Emit, c: u8) {
-	// mov byte ptr [rsp-1], c ; lea rsi, [rsp-1] ; write(1, rsi, 1)
-	write([]u8{0xC6, 0x44, 0x24, 0xFF, c}) // mov byte [rsp-1], c
-	write([]u8{0x48, 0x8D, 0x74, 0x24, 0xFF}) // lea rsi, [rsp-1]
+	rsp_m1 := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = -1})
+	// stage the char in a scratch byte, store it to [rsp-1], then write(1, rsp-1, 1).
+	mov_r8_imm8(.AL, c)
+	mov_m8_r8(rsp_m1, .AL)
+	lea_r64_m64(.RSI, rsp_m1)
 	emit_load_imm_into(e, .RDX, 1) // len 1
 	emit_load_imm_into(e, .RDI, 1) // fd 1
 	emit_load_imm_into(e, .RAX, 1) // sys_write
@@ -964,34 +992,27 @@ emit_print_char :: proc(e: ^X64_Emit, c: u8) {
 // leading zeros, "0" if zero). Builds digits backwards into [rsp-32..] then
 // write()s them. Clobbers rax,rcx,rdx,rsi,rdi,r8,r9.
 emit_print_uint_in_rax :: proc(e: ^X64_Emit) {
-	// r8 = rax (value) ; r9 = &buf_end = rsp-1 ; ten in rcx.
-	write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax
-	write([]u8{0x4C, 0x8D, 0x4C, 0x24, 0xE0}) // lea r9, [rsp-32]  (buffer start)
-	// We'll fill forward from a cursor and track count. Simpler: classic reverse.
-	// Use [rsp-1] downward as the digit area; r9 = cursor = rsp-1.
-	write([]u8{0x4C, 0x8D, 0x4C, 0x24, 0xFF}) // lea r9, [rsp-1]
+	at_r9 := MemoryAddress(AddressComponents{base = Register64.R9}) // [r9]
+	// r8 = value ; r9 = digit cursor = [rsp-1], filled backwards ; rcx = 10.
+	mov_r64_r64(.R8, .RAX)
+	lea_r64_m64(.R9, MemoryAddress(AddressComponents{base = Register64.RSP, displacement = -1}))
 	movabs_r64_imm64(.RCX, 10)
-	// loop: rdx:rax = r8 ; div rcx ; digit = rdx ; store; r8 = rax(quotient)
-	loop := e.buf.len
-	write([]u8{0x4C, 0x89, 0xC0}) // mov rax, r8
-	write([]u8{0x48, 0x31, 0xD2}) // xor rdx, rdx
-	write([]u8{0x48, 0xF7, 0xF1}) // div rcx  (unsigned)
-	write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax (quotient)
-	// dl += '0' ; store [r9], dl ; r9--
-	write([]u8{0x80, 0xC2, 0x30}) // add dl, '0'
-	write([]u8{0x41, 0x88, 0x11}) // mov [r9], dl
-	write([]u8{0x49, 0xFF, 0xC9}) // dec r9
-	// if r8 != 0 loop
-	write([]u8{0x4D, 0x85, 0xC0}) // test r8, r8
-	write([]u8{0x75}) // jnz loop
-	back := e.buf.len; write([]u8{0})
-	e.buf.data[back] = u8(i8(loop - (back + 1)))
-	// write(1, r9+1, (rsp-1)-(r9)) : rsi = r9+1 ; rdx = (rsp-1) - r9
-	write([]u8{0x49, 0xFF, 0xC1}) // inc r9  (now points at first digit)
-	write([]u8{0x4C, 0x89, 0xCE}) // mov rsi, r9
-	// rdx = (rsp-1) - r9 + 1  = rsp - r9
-	write([]u8{0x48, 0x89, 0xE2}) // mov rdx, rsp
-	write([]u8{0x4C, 0x29, 0xCA}) // sub rdx, r9
+	// loop: rdx:rax = r8 ; div rcx ; digit = rdx ; store ; r8 = quotient.
+	loop := here(e)
+	mov_r64_r64(.RAX, .R8)
+	xor_r64_r64(.RDX, .RDX)
+	div_r64(.RCX) // unsigned: rax = q, rdx = rem
+	mov_r64_r64(.R8, .RAX) // r8 = quotient
+	add_r8_imm8(.DL, '0') // digit ascii
+	mov_m8_r8(at_r9, .DL) // [r9] = digit
+	dec_r64(.R9)
+	test_r64_r64(.R8, .R8)
+	back(e, jne_rel8, loop) // quotient != 0 → keep dividing
+	// write(1, r9+1, rsp - (r9+1) ... = rsp-1-r9): rsi = r9+1 ; rdx = rsp - r9.
+	inc_r64(.R9) // now points at the first digit
+	mov_r64_r64(.RSI, .R9)
+	mov_r64_r64(.RDX, .RSP)
+	sub_r64_r64(.RDX, .R9)
 	emit_load_imm_into(e, .RDI, 1)
 	emit_load_imm_into(e, .RAX, 1)
 	syscall()
@@ -999,27 +1020,26 @@ emit_print_uint_in_rax :: proc(e: ^X64_Emit) {
 
 // emit_print_uint6 prints RAX as exactly 6 zero-padded decimal digits.
 emit_print_uint6 :: proc(e: ^X64_Emit) {
-	// r8 = value ; r9 = rsp-1 ; write 6 digits backwards.
-	write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax
-	write([]u8{0x4C, 0x8D, 0x4C, 0x24, 0xFF}) // lea r9, [rsp-1]
+	at_r9 := MemoryAddress(AddressComponents{base = Register64.R9}) // [r9]
+	// r8 = value ; r9 = rsp-1 cursor ; rsi = 6 (counter) ; write 6 digits backwards.
+	mov_r64_r64(.R8, .RAX)
+	lea_r64_m64(.R9, MemoryAddress(AddressComponents{base = Register64.RSP, displacement = -1}))
 	movabs_r64_imm64(.RCX, 10)
-	movabs_r64_imm64(.RSI, 6) // counter
-	loop := e.buf.len
-	write([]u8{0x4C, 0x89, 0xC0}) // mov rax, r8
-	write([]u8{0x48, 0x31, 0xD2}) // xor rdx, rdx
-	write([]u8{0x48, 0xF7, 0xF1}) // div rcx
-	write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax
-	write([]u8{0x80, 0xC2, 0x30}) // add dl, '0'
-	write([]u8{0x41, 0x88, 0x11}) // mov [r9], dl
-	write([]u8{0x49, 0xFF, 0xC9}) // dec r9
-	write([]u8{0x48, 0xFF, 0xCE}) // dec rsi
-	write([]u8{0x48, 0x85, 0xF6}) // test rsi, rsi
-	write([]u8{0x75}) // jnz loop
-	back := e.buf.len; write([]u8{0})
-	e.buf.data[back] = u8(i8(loop - (back + 1)))
+	movabs_r64_imm64(.RSI, 6)
+	loop := here(e)
+	mov_r64_r64(.RAX, .R8)
+	xor_r64_r64(.RDX, .RDX)
+	div_r64(.RCX)
+	mov_r64_r64(.R8, .RAX)
+	add_r8_imm8(.DL, '0')
+	mov_m8_r8(at_r9, .DL)
+	dec_r64(.R9)
+	dec_r64(.RSI)
+	test_r64_r64(.RSI, .RSI)
+	back(e, jne_rel8, loop) // 6 digits not done → loop
 	// write(1, r9+1, 6)
-	write([]u8{0x49, 0xFF, 0xC1}) // inc r9
-	write([]u8{0x4C, 0x89, 0xCE}) // mov rsi, r9
+	inc_r64(.R9)
+	mov_r64_r64(.RSI, .R9)
 	emit_load_imm_into(e, .RDX, 6)
 	emit_load_imm_into(e, .RDI, 1)
 	emit_load_imm_into(e, .RAX, 1)
