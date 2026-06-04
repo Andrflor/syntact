@@ -41,6 +41,14 @@ X64_Emit :: struct {
 	// load/store helpers consult it so a value that lives in a register is used
 	// directly — no store-then-reload through the stack.
 	alloc:         Reg_Alloc,
+	// def[v] = index of the instruction defining v (-1 if none); use_count[v] =
+	// number of operand uses. The instruction selector consults these to fold an
+	// address-mode pattern (lea) and to refuse folding a shared value.
+	def:           []int,
+	use_count:     []int,
+	// absorbed[v] = the value was dissolved into a parent lea's address mode (an
+	// intermediate +/-/index node), so the emitter must not emit it on its own.
+	absorbed:      []bool,
 }
 
 X64_Fixup :: struct {
@@ -67,6 +75,19 @@ emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 	defer delete(e.label_pos)
 	defer delete(e.fixups)
 	for i in 0 ..< prog.label_count do e.label_pos[i] = -1
+
+	// def / use_count / absorbed — for the instruction selector (lea folding).
+	e.def = make([]int, prog.value_count)
+	e.use_count = make([]int, prog.value_count)
+	e.absorbed = make([]bool, prog.value_count)
+	defer delete(e.def)
+	defer delete(e.use_count)
+	defer delete(e.absorbed)
+	for i in 0 ..< prog.value_count do e.def[i] = -1
+	for inst, pc in prog.insts {
+		if d, ok := bc_def(inst); ok do e.def[d] = pc
+		for u in bc_uses(inst) do e.use_count[u] += 1
+	}
 
 	// Linear-scan register allocation: values live in registers, only spilled
 	// ones touch the stack. load/store consult e.alloc.
@@ -369,9 +390,10 @@ emit_load_arg :: proc(e: ^X64_Emit, v: bc.BC_Load_Arg) {
 	rd, homed := home_reg(e, v.dst)
 	dst := homed ? rd : Register64.RAX
 
-	// r11 = &ARGS_TABLE[slot]
-	movabs_r64_imm64(.R11, i64(ARGS_TABLE_VADDR + 8 * v.slot))
-	mem := MemoryAddress(AddressComponents{base = Register64.R11})
+	// RBX holds the ARGS_TABLE base (loaded once in emit_body). Each arg is a
+	// displacement off it — `[rbx + 8*slot]` — instead of a 10-byte movabs of the
+	// full address per arg.
+	mem := MemoryAddress(AddressComponents{base = Register64.RBX, displacement = i32(8 * v.slot)})
 
 	if bc.mtype_is_float(mt) {
 		// Float ??: load the i64 the atoi produced, convert to f64 bits.
@@ -401,10 +423,45 @@ emit_load_arg :: proc(e: ^X64_Emit, v: bc.BC_Load_Arg) {
 	if !homed do store(e, v.dst, dst)
 }
 
+// emit_lea_root realizes a matched address mode as a single `lea dst, [mode]`.
+// The dst's home register receives the result (or RAX then store, if spilled).
+emit_lea_root :: proc(e: ^X64_Emit, dst: bc.BC_Value, am: X64_Address) {
+	rd, homed := home_reg(e, dst)
+	w := homed ? rd : Register64.RAX
+	lea_r64_m64(w, addr_to_mem(am))
+	if !homed do store(e, dst, w)
+}
+
 // --- body ------------------------------------------------------------------
 
 emit_body :: proc(e: ^X64_Emit) -> string {
+	// Load the ARGS_TABLE base into RBX once (it's reserved, never allocated), so
+	// every BC_Load_Arg is a cheap `[rbx + 8*slot]` displacement load rather than a
+	// 10-byte movabs of the full address each time.
+	has_args := false
 	for inst in e.prog.insts {
+		if _, ok := inst.(bc.BC_Load_Arg); ok {has_args = true; break}
+	}
+	if has_args {
+		movabs_r64_imm64(.RBX, i64(ARGS_TABLE_VADDR))
+	}
+
+	// Instruction selection: find address-mode (lea) roots and the values they
+	// absorb. An absorbed value is not emitted on its own; a root is emitted as a
+	// single lea.
+	roots := select_lea_roots(e)
+	defer delete(roots)
+
+	for inst in e.prog.insts {
+		if d, has_d := bc_def(inst); has_d {
+			// An intermediate node folded into a parent lea: don't emit it.
+			if e.absorbed[d] do continue
+			// A lea root: emit the whole matched address mode as one lea.
+			if am, is_root := roots[d]; is_root {
+				emit_lea_root(e, bc.BC_Value(d), am)
+				continue
+			}
+		}
 		switch v in inst {
 		case bc.BC_Const:
 			// A constant that genuinely lives in a register (e.g. `ret` of a bare
