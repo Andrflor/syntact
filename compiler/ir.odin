@@ -682,19 +682,150 @@ print_integer_intervals :: proc(t: ^Type) {
 // print_fold_inline renders a folded ^Type (as stored in type_folds /
 // constraint_folds) for the --ir dump. Domain dispatch.
 print_fold_inline :: proc(t: ^Type) {
+	fmt.print(fold_to_string(t))
+}
+
+// fold_to_string renders ANY ^Type compactly, on one line, for the `--ir` t:/c:
+// columns. Unlike the old print_fold_inline (which printed `[?]` for everything
+// but integers/floats), this covers every variant so the dump shows the real
+// structure — scopes, carves, pulls, patterns, casts, references, … Used only for
+// debugging output, so it favors readability over the exact source syntax.
+fold_to_string :: proc(t: ^Type) -> string {
+	b := strings.builder_make()
+	write_fold(&b, t)
+	return strings.to_string(b)
+}
+
+write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 	if t == nil {
-		fmt.print("[?]")
+		strings.write_string(b, "[?]")
 		return
 	}
-	#partial switch v in t^ {
+	switch v in t^ {
 	case Integer_Type:
-		print_integer_intervals_inline(v.integer_intervals)
-		return
+		// integer_to_string already renders a singleton as `6` and a set as `u8` /
+		// `0..255` — no brackets, so a default value shows as its concrete value.
+		strings.write_string(b, integer_to_string(v))
 	case Float_Type:
-		print_float_intervals_inline(v.float_intervals, v.kind)
-		return
+		strings.write_string(b, float_to_string(v))
+	case String_Type:
+		write_string_desc(b, v)
+	case Bool_Type:
+		strings.write_string(b, bool_to_string(v))
+	case None_Type:
+		strings.write_string(b, "none")
+	case Unknown_Type:
+		strings.write_string(b, "??")
+	case Invalid_Type:
+		strings.write_string(b, "<invalid>")
+	case Scope_Type:
+		strings.write_byte(b, '{')
+		for i := 0; i < len(v.kind); i += 1 {
+			if i > 0 do strings.write_string(b, ", ")
+			// An ANONYMOUS binding (no name — a production or a bare scope child)
+			// renders as JUST its value: it IS the value, not a named field. So a
+			// producer `{->X}` shows `{X}` and a `{T: T:}` default scope shows
+			// `{{}, {}}`. A named binding renders `name op value`.
+			if v.names[i] == "" {
+				write_fold(b, v.values[i])
+			} else {
+				strings.write_string(b, v.names[i])
+				strings.write_string(b, write_binding_op(v.kind[i]))
+				write_fold(b, v.values[i])
+			}
+		}
+		strings.write_byte(b, '}')
+	case Carve_Type:
+		write_fold(b, v.source)
+		strings.write_byte(b, '{')
+		for i := 0; i < len(v.references); i += 1 {
+			if i > 0 do strings.write_string(b, ", ")
+			if n, ok := v.references[i].name.(string); ok && n != "" {
+				strings.write_string(b, n)
+				strings.write_string(b, "->")
+			}
+			write_fold(b, v.values[i])
+		}
+		strings.write_byte(b, '}')
+	case Execute_Type:
+		write_fold(b, v.target)
+		strings.write_byte(b, '!')
+	case Mention_Type:
+		strings.write_string(b, v.name != "" ? v.name : "<mention>")
+	case Reference_Type:
+		if v.target != nil {
+			write_fold(b, v.target)
+			strings.write_byte(b, '.')
+		}
+		if v.reference != nil {
+			if n, ok := v.reference.name.(string); ok && n != "" do strings.write_string(b, n)
+			if idx, ok := v.reference.index.(u64); ok do fmt.sbprintf(b, "#%d", idx)
+		}
+	case Cast_Type:
+		write_fold(b, v.value)
+		strings.write_string(b, "::")
+		write_fold(b, v.target)
+	case Compose_Type:
+		if v.left != nil do write_fold(b, v.left)
+		fmt.sbprintf(b, " %s ", op_symbol(v.operator))
+		write_fold(b, v.right)
+	case Range_Type:
+		if v.left != nil do write_fold(b, v.left)
+		strings.write_string(b, "..")
+		if v.right != nil do write_fold(b, v.right)
+	case Or_Type:
+		write_fold(b, v.left)
+		strings.write_string(b, " | ")
+		write_fold(b, v.right)
+	case And_Type:
+		write_fold(b, v.left)
+		strings.write_string(b, " & ")
+		write_fold(b, v.right)
+	case Negate_Type:
+		strings.write_byte(b, '~')
+		write_fold(b, v.operand)
+	case Pattern_Type:
+		write_fold(b, v.target)
+		strings.write_string(b, " ? {")
+		for branch, i in v.branches {
+			if i > 0 do strings.write_string(b, ", ")
+			if branch.match != nil {
+				if branch.value_match do strings.write_byte(b, '=')
+				write_fold(b, branch.match)
+			}
+			strings.write_string(b, "->")
+			write_fold(b, branch.product)
+		}
+		strings.write_byte(b, '}')
 	}
-	fmt.print("[?]")
+}
+
+// write_binding_op renders the directional operator for a binding kind, used by
+// the compact fold dump.
+write_binding_op :: proc(k: Binding_Kind) -> string {
+	switch k {
+	case .Pointing_Push:
+		return "->"
+	case .Pointing_Pull:
+		return "<-"
+	case .Event_Push:
+		return ">-"
+	case .Event_Pull:
+		return "-<"
+	case .Resonance_Push:
+		return ">>-"
+	case .Resonance_Pull:
+		return "-<<"
+	case .Reactive_Push:
+		return ">>="
+	case .Reactive_Pull:
+		return "=<<"
+	case .Expand:
+		return "..."
+	case .Product:
+		return "->"
+	}
+	return "->"
 }
 
 print_float_intervals_inline :: proc(float_intervals: []Float_Interval, kind: FloatKind) {
