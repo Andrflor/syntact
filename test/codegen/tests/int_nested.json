@@ -1,1 +1,1 @@
-{ "name": "int_nested", "description": "(2+3)*(4+5)", "source": "-> (2+3)*(4+5)", "args": [], "expect": "45", "kind": "int" }
+{ "name": "int_nested", "description": "(2+3)*(4+5)", "source": "-> (2+3)*(4+5)", "args": [[]], "expect": ["45"], "kind": "int" }

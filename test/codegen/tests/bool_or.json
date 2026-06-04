@@ -1,1 +1,1 @@
-{ "name": "bool_or", "description": "true|false", "source": "-> true | false", "args": [], "expect": "1", "kind": "int" }
+{ "name": "bool_or", "description": "true|false", "source": "-> true | false", "args": [[]], "expect": ["1"], "kind": "int" }

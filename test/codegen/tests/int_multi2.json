@@ -1,1 +1,1 @@
-{ "name": "int_multi2", "description": "a+b two args", "source": "a -> ??::u8\nb -> ??::u8\n-> a+b", "args": ["10","20"], "expect": "30", "kind": "int" }
+{ "name": "int_multi2", "description": "a+b two args", "source": "a -> ??::u8\nb -> ??::u8\n-> a+b", "args": [["0", "0"], ["1", "2"], ["3", "5"], ["10", "20"], ["100", "100"], ["200", "200"], ["255", "1"], ["7", "42"]], "expect": ["0", "3", "8", "30", "200", "400", "256", "49"], "kind": "int" }

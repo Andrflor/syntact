@@ -1,1 +1,1 @@
-{ "name": "bool_true", "description": "bool true", "source": "-> true", "args": [], "expect": "1", "kind": "int" }
+{ "name": "bool_true", "description": "bool true", "source": "-> true", "args": [[]], "expect": ["1"], "kind": "int" }
