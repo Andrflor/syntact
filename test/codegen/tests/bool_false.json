@@ -1,0 +1,1 @@
+{ "name": "bool_false", "description": "bool false", "source": "-> false", "args": [], "expect": "0", "kind": "int" }

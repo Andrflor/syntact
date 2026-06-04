@@ -1,0 +1,1 @@
+{ "name": "int_imod", "description": "i32 %7", "source": "a -> ??::i32\n-> a % 7", "args": ["100"], "expect": "2", "kind": "int" }

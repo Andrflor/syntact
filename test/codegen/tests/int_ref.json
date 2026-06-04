@@ -1,0 +1,1 @@
+{ "name": "int_ref", "description": "ref chain", "source": "a -> 5\nb -> a\n-> b+1", "args": [], "expect": "6", "kind": "int" }

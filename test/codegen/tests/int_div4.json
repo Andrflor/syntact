@@ -1,0 +1,1 @@
+{ "name": "int_div4", "description": "/4 shr unsigned", "source": "a -> ??::u8\n-> a/4", "args": ["100"], "expect": "25", "kind": "int" }

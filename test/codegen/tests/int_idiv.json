@@ -1,0 +1,1 @@
+{ "name": "int_idiv", "description": "i32 /4 signed", "source": "a -> ??::i32\n-> a/4", "args": ["17"], "expect": "4", "kind": "int" }

@@ -1,0 +1,1 @@
+{ "name": "int_multi3", "description": "a+b+c", "source": "a -> ??::u8\nb -> ??::u8\nc -> ??::u8\n-> a+b+c", "args": ["1","2","3"], "expect": "6", "kind": "int" }

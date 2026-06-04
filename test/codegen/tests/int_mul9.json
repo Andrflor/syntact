@@ -1,0 +1,1 @@
+{ "name": "int_mul9", "description": "*9 lea", "source": "a -> ??::u8\n-> a*9", "args": ["10"], "expect": "90", "kind": "int" }

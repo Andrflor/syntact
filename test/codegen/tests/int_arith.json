@@ -1,0 +1,1 @@
+{ "name": "int_arith", "description": "(a*3-5)*2 i32", "source": "a -> ??::i32\n-> (a*3-5)*2", "args": ["4"], "expect": "14", "kind": "int" }

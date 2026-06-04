@@ -1,0 +1,1 @@
+{ "name": "int_carve", "description": "carve+collapse", "source": "b -> { u8:w -> 10\n -> w*4 }\n-> b{w -> 7}!", "args": [], "expect": "28", "kind": "int" }

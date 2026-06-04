@@ -1,0 +1,1 @@
+{ "name": "flt_mul", "description": "3.0*2.0", "source": "-> 3.0 * 2.0", "args": [], "expect": "6.0", "kind": "float" }

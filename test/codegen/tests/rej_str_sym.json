@@ -1,0 +1,1 @@
+{ "name": "rej_str_sym", "description": "symbolic string", "source": "name -> ??::string\n-> \"hi \" + name", "args": ["Bob"], "expect": "", "kind": "reject" }

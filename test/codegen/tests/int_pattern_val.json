@@ -1,0 +1,1 @@
+{ "name": "int_pattern_val", "description": "pattern =v", "source": "n -> ??::u8\n-> n ? { =0 -> 100, 0..255 -> 1 }", "args": ["0"], "expect": "100", "kind": "int" }

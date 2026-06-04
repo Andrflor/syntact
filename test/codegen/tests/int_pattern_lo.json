@@ -1,0 +1,1 @@
+{ "name": "int_pattern_lo", "description": "pattern low", "source": "n -> ??::u8\n-> n ? { 0..127 -> 10, 128..255 -> 20 }", "args": ["50"], "expect": "10", "kind": "int" }

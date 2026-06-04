@@ -1,0 +1,1 @@
+{ "name": "int_cmp_gt", "description": "a>100", "source": "a -> ??::u8\n-> a > 100", "args": ["150"], "expect": "1", "kind": "int" }

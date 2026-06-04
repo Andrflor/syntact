@@ -5,9 +5,9 @@ import x64 "./backends/x64"
 
 // emit_executable turns a lowered program into an executable file on disk.
 emit_executable :: proc(prog: ^BC_Program, path: string) -> string {
-	code, msg := emit_x64(prog)
+	out, msg := emit_x64(prog)
 	if msg != "" do return msg
-	image := build_elf(code)
+	image := build_elf(out.code, out.rodata)
 	if err := os.write_entire_file(path, image); err != nil {
 		return "could not write output file"
 	}
@@ -46,12 +46,12 @@ ELF_HEADERS :: ELF_HDR_SIZE + ELF_PH_SIZE
 ARGS_TABLE_VADDR :: ELF_BASE + 0x100000 // 1 MiB into the image
 ARGS_TABLE_MAX :: 64 // up to 64 ?? slots
 
-// build_elf assembles a full executable image from a code blob whose entry is at
-// the code's start. memsz extends to cover the fixed ARGS_TABLE.
-build_elf :: proc(code: []u8) -> []u8 {
-	code_vaddr := ELF_BASE + ELF_HEADERS
-	entry := code_vaddr
-	filesz := ELF_HEADERS + len(code)
+// build_elf assembles a full executable image: [ELF header][program header]
+// [rodata][code]. The entry point is the code (right after rodata). memsz extends
+// to cover the fixed ARGS_TABLE.
+build_elf :: proc(code: []u8, rodata: []u8) -> []u8 {
+	entry := ELF_BASE + ELF_HEADERS + len(rodata) // code starts after rodata
+	filesz := ELF_HEADERS + len(rodata) + len(code)
 	// memsz extends to cover the args table (zero-initialized tail of the segment).
 	memsz := (ARGS_TABLE_VADDR - ELF_BASE) + 8 * ARGS_TABLE_MAX
 
@@ -85,7 +85,8 @@ build_elf :: proc(code: []u8) -> []u8 {
 	put64(&buf, u64(memsz)) // p_memsz
 	put64(&buf, 0x1000) // p_align
 
-	// --- code ---
+	// --- rodata, then code ---
+	for b in rodata do append(&buf, b)
 	for b in code do append(&buf, b)
 
 	return buf[:]

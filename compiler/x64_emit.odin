@@ -27,6 +27,21 @@ X64_Emit :: struct {
 	label_pos:  []int,
 	// pending jump fixups: patch a rel32 at `at` to reach `label`.
 	fixups:     [dynamic]X64_Fixup,
+	// const_val[vN] holds the immediate when vN is an integer BC_Const, plus a
+	// parallel `is_const` flag — the basis for immediate folding and strength
+	// reduction (a constant operand becomes an imm / shift / lea, never a reg op).
+	const_val:  []i64,
+	is_const:   []bool,
+	// .rodata layout: rodata_off[id] is the byte offset of string id within the
+	// rodata blob, whose runtime base address is rodata_vaddr. Both are known
+	// BEFORE emitting code (they depend only on string lengths), so BC_Str_Const
+	// loads an absolute address with no fixup.
+	rodata_off:    []int,
+	rodata_vaddr:  int,
+	code_base_off: int,
+	// str_len[vN] is the byte length of the concrete string a Str_Const value
+	// holds, used by the string epilogue's write(1, ptr, len).
+	str_len:       map[int]int,
 }
 
 X64_Fixup :: struct {
@@ -34,34 +49,65 @@ X64_Fixup :: struct {
 	label: BC_Label,
 }
 
-// emit_x64 lowers a BC_Program to a flat .text byte slice. Returns nil + error if
-// the program carries a lowering error or uses an unsupported construct.
-emit_x64 :: proc(prog: ^BC_Program) -> ([]u8, string) {
-	if prog == nil do return nil, "no program"
-	if prog.error != "" do return nil, prog.error
-	if prog.result_type == .Str do return nil, "x64: string output not yet supported"
-	if mtype_is_float(prog.result_type) do return nil, "x64: float output not yet supported (exit-status is integer)"
+// X64_Output is the emitter's result: the code bytes plus the .rodata blob that
+// must precede the code in the image (string literals live there).
+X64_Output :: struct {
+	code:   []u8,
+	rodata: []u8,
+}
+
+// emit_x64 lowers a BC_Program to machine code + its .rodata blob. The image is
+// laid out [headers][rodata][code]; rodata offsets depend only on string lengths,
+// so they're known before emitting and BC_Str_Const loads absolute addresses.
+emit_x64 :: proc(prog: ^BC_Program) -> (X64_Output, string) {
+	if prog == nil do return {}, "no program"
+	if prog.error != "" do return {}, prog.error
 
 	e := X64_Emit{prog = prog}
 	e.label_pos = make([]int, prog.label_count)
+	e.const_val = make([]i64, prog.value_count)
+	e.is_const = make([]bool, prog.value_count)
 	defer delete(e.label_pos)
 	defer delete(e.fixups)
+	defer delete(e.const_val)
+	defer delete(e.is_const)
 	for i in 0 ..< prog.label_count do e.label_pos[i] = -1
+	for inst in prog.insts {
+		if c, ok := inst.(BC_Const); ok {
+			e.const_val[int(c.dst)] = c.imm
+			e.is_const[int(c.dst)] = true
+		}
+	}
 
-	// Run the assembler's procs against OUR buffer via context.user_ptr.
+	// Lay out .rodata: concatenated string bytes, each offset recorded. The blob
+	// sits right after the headers, so each string's runtime address is
+	// ELF_BASE + ELF_HEADERS + offset.
+	rodata_blob := make([dynamic]u8)
+	e.rodata_off = make([]int, len(prog.rodata))
+	defer delete(e.rodata_off)
+	for s, i in prog.rodata {
+		e.rodata_off[i] = len(rodata_blob)
+		for c in transmute([]u8)s do append(&rodata_blob, c)
+	}
+	e.rodata_vaddr = ELF_BASE + ELF_HEADERS
+
+	// Code follows the rodata blob in the image.
+	code_off := ELF_HEADERS + len(rodata_blob)
+	e.code_base_off = code_off
+
 	context.user_ptr = &e.buf
 
-	frame := 8 * prog.value_count + 16 // one slot per vN, 16-aligned headroom
+	frame := 8 * prog.value_count + 16
 	frame = (frame + 15) & ~int(15)
 
-	emit_arg_stub(&e) // parse argv[1..] → ARGS_TABLE
+	emit_arg_stub(&e)
 	emit_prologue(&e, frame)
-	if msg := emit_body(&e); msg != "" do return nil, msg
+	if msg := emit_body(&e); msg != "" do return {}, msg
 	patch_fixups(&e)
 
 	out := make([]u8, e.buf.len)
 	copy(out, e.buf.data[:e.buf.len])
-	return out, ""
+	return X64_Output{code = out, rodata = rodata_blob[:]}, ""
 }
 
 // emit_arg_stub parses each argv[1..] as a signed integer into ARGS_TABLE[slot].
@@ -195,11 +241,99 @@ emit_prologue :: proc(e: ^X64_Emit, frame: int) {
 	// (Wired in the ELF step.)
 }
 
-// emit_exit emits: mov rdi, <result reg> ; mov rax, 60 ; syscall
+// emit_exit emits the program's return. For a string result: write(1, ptr, len)
+// then exit(0). For an integer/bool result: exit(result & 0xff) via the status.
 emit_exit :: proc(e: ^X64_Emit, result: BC_Value) {
+	if e.prog.result_type == .Str {
+		// sys_write(1, ptr, len): rax=1, rdi=1, rsi=ptr, rdx=len.
+		load(e, .RSI, result) // rsi = string pointer
+		if l, ok := e.str_len[int(result)]; ok {
+			x64.movabs_r64_imm64(.RDX, i64(l)) // rdx = length (immediate, known)
+		} else {
+			x64.xor_r64_r64(.RDX, .RDX)
+		}
+		x64.movabs_r64_imm64(.RDI, 1) // fd = stdout
+		x64.movabs_r64_imm64(.RAX, 1) // sys_write
+		x64.syscall()
+		// exit(0)
+		x64.xor_r64_r64(.RDI, .RDI)
+		x64.movabs_r64_imm64(.RAX, 60)
+		x64.syscall()
+		return
+	}
+	if mtype_is_float(e.prog.result_type) {
+		emit_print_float(e, result)
+		x64.xor_r64_r64(.RDI, .RDI)
+		x64.movabs_r64_imm64(.RAX, 60)
+		x64.syscall()
+		return
+	}
 	load(e, .RDI, result)
 	x64.movabs_r64_imm64(.RAX, 60) // sys_exit
 	x64.syscall()
+}
+
+// emit_print_float writes a decimal rendering of the f64 in `result`'s slot to
+// stdout: optional '-', integer part, '.', then 6 fractional digits. Not a full
+// IEEE shortest-round-trip formatter — a simple fixed-6 form sufficient to
+// observe and validate float results. Builds the string in a stack buffer.
+emit_print_float :: proc(e: ^X64_Emit, result: BC_Value) {
+	// Strategy (all integer math after the initial truncation):
+	//   xmm0 = value ; if sign bit, emit '-' and xmm0 = -xmm0
+	//   ipart = (i64)xmm0   (cvttsd2si)
+	//   frac  = (xmm0 - ipart) * 1e6  rounded → 6 digits
+	// We render into a 32-byte buffer on the stack at [rbp-512] (within frame
+	// headroom is not guaranteed; use a dedicated red-zone-safe area below rsp).
+	// For simplicity we print integer part and 6 fraction digits via the helpers.
+
+	// Load value bits into xmm0.
+	load(e, .RAX, result)
+	x64.movq_xmm_r64(.XMM0, .RAX)
+
+	// --- handle sign: test the sign bit of rax (bit 63). ---
+	// if rax < 0 (as signed bits): print '-', and clear sign bit (abs).
+	// movabs rcx, 0x8000000000000000 ; test rax, rcx ; jz +; print '-'; andn
+	x64.movabs_r64_imm64(.RCX, transmute(i64)u64(0x8000000000000000))
+	// test rax, rcx
+	x64.write([]u8{0x48, 0x85, 0xC8}) // test rax, rcx
+	x64.write([]u8{0x74}) // jz over_sign
+	jz_at := e.buf.len; x64.write([]u8{0})
+	// print '-' : write(1, &minus, 1). Put '-' on stack via push.
+	emit_print_char(e, '-')
+	// abs: clear sign bit in rax, reload xmm0.
+	load(e, .RAX, result)
+	x64.movabs_r64_imm64(.RCX, transmute(i64)u64(0x7FFFFFFFFFFFFFFF))
+	x64.write([]u8{0x48, 0x21, 0xC8}) // and rax, rcx
+	x64.movq_xmm_r64(.XMM0, .RAX)
+	over_sign := e.buf.len
+	e.buf.data[jz_at] = u8(i8(over_sign - (jz_at + 1)))
+
+	// ipart = cvttsd2si rax, xmm0  → F2 48 0F 2C C0
+	x64.write([]u8{0xF2, 0x48, 0x0F, 0x2C, 0xC0})
+	// print ipart (signed-but-now-positive integer) via emit_print_uint.
+	emit_print_uint_in_rax(e)
+	// print '.'
+	emit_print_char(e, '.')
+	// frac digits: xmm1 = (double)ipart ; xmm0 = xmm0 - xmm1 ; xmm0 *= 1e6 ;
+	// rax = cvttsd2si xmm0 ; print 6 digits zero-padded.
+	// cvtsi2sd xmm1, rax(ipart)  → F2 48 0F 2A C8 (rax still holds ipart? no — it
+	// was consumed). Recompute ipart into rcx first.
+	// Simpler: reload value, recompute. Reload original (already abs'd is lost);
+	// to keep it correct we recompute from result and re-abs.
+	load(e, .RAX, result)
+	x64.movabs_r64_imm64(.RCX, transmute(i64)u64(0x7FFFFFFFFFFFFFFF))
+	x64.write([]u8{0x48, 0x21, 0xC8}) // and rax, rcx  (abs)
+	x64.movq_xmm_r64(.XMM0, .RAX) // xmm0 = |value|
+	x64.write([]u8{0xF2, 0x48, 0x0F, 0x2C, 0xC0}) // cvttsd2si rax, xmm0 (ipart)
+	x64.write([]u8{0xF2, 0x48, 0x0F, 0x2A, 0xC8}) // cvtsi2sd xmm1, rax (ipart→dbl)
+	x64.write([]u8{0xF2, 0x0F, 0x5C, 0xC1}) // subsd xmm0, xmm1  (fraction)
+	// xmm1 = 1e6
+	x64.movabs_r64_imm64(.RAX, transmute(i64)f64(1000000.0))
+	x64.movq_xmm_r64(.XMM1, .RAX)
+	x64.write([]u8{0xF2, 0x0F, 0x59, 0xC1}) // mulsd xmm0, xmm1
+	x64.write([]u8{0xF2, 0x48, 0x0F, 0x2C, 0xC0}) // cvttsd2si rax, xmm0 (frac int)
+	// print rax as exactly 6 digits, zero-padded.
+	emit_print_uint6(e)
 }
 
 // --- body ------------------------------------------------------------------
@@ -208,17 +342,32 @@ emit_body :: proc(e: ^X64_Emit) -> string {
 	for inst in e.prog.insts {
 		switch v in inst {
 		case BC_Const:
-			x64.movabs_r64_imm64(.RAX, v.imm)
+			emit_load_imm_rax(e, v.imm)
 			store(e, v.dst, .RAX)
 		case BC_Const_F:
-			return "x64: float not yet supported"
+			// Materialize the f64 bit pattern in RAX, store to the value's slot.
+			x64.movabs_r64_imm64(.RAX, transmute(i64)v.fimm)
+			store(e, v.dst, .RAX)
 		case BC_Str_Const:
-			return "x64: string not yet supported"
+			// Load the absolute address of the string's bytes in .rodata.
+			addr := e.rodata_vaddr + e.rodata_off[v.id]
+			x64.write([]u8{0x48, 0xB8}) // movabs rax, addr
+			put_i64_bytes(e, i64(addr))
+			store(e, v.dst, .RAX)
+			e.str_len[int(v.dst)] = len(v.bytes)
 		case BC_Load_Arg:
 			// The arg stub parsed arg K into ARGS_TABLE[K] (absolute address).
 			x64.write([]u8{0x48, 0xB8}) // movabs rax, addr
 			put_i64_bytes(e, i64(ARGS_TABLE_VADDR + 8 * v.slot))
 			x64.write([]u8{0x48, 0x8B, 0x00}) // mov rax, [rax]
+			if mtype_is_float(e.prog.value_types[int(v.dst)]) {
+				// A float ?? arrives as the integer atoi parsed; convert to f64
+				// bits (cvtsi2sd xmm0, rax ; movq rax, xmm0). NB: a decimal argv
+				// like "3.5" was truncated to 3 by the integer stub — native float
+				// args are whole numbers; the interpreter handles full decimals.
+				x64.write([]u8{0xF2, 0x48, 0x0F, 0x2A, 0xC0}) // cvtsi2sd xmm0, rax
+				emit_movq_rax_xmm0(e)
+			}
 			store(e, v.dst, .RAX)
 		case BC_Bin:
 			if msg := emit_bin(e, v); msg != "" do return msg
@@ -240,8 +389,82 @@ emit_body :: proc(e: ^X64_Emit) -> string {
 	return ""
 }
 
-// emit_bin: rax = a ; <op> rax, b(rcx) ; store dst.
+// emit_bin emits `dst = a op b`, applying immediate folding and strength
+// reduction: a constant operand becomes an immediate, a multiply/divide/mod by a
+// power of two becomes a shift/and, a multiply by 3/5/9 a single lea. The result
+// register is RAX, then stored to dst's slot.
 emit_bin :: proc(e: ^X64_Emit, v: BC_Bin) -> string {
+	// Float arithmetic goes through XMM (addsd/subsd/mulsd/divsd, scalar double).
+	if mtype_is_float(e.prog.value_types[int(v.dst)]) {
+		return emit_bin_float(e, v)
+	}
+
+	// For divide/mod strength reduction the dividend's signedness is what matters
+	// (an unsigned dividend makes /2^k → shr, %2^k → and valid). The result's
+	// Machine_Type may widen to i64 (an envelope without a canonical width), so we
+	// read the operand, not the dst.
+	unsigned := !mtype_signed(e.prog.value_types[int(v.a)])
+
+	// Try strength reduction when one operand is a constant.
+	a_const := e.is_const[int(v.a)]
+	b_const := e.is_const[int(v.b)]
+
+	#partial switch v.op {
+	case .Multiply:
+		// Commutative: put the constant on `k`, the variable on `x`.
+		if k, x, ok := bc_const_operand(e, v.a, v.b); ok {
+			if emit_mul_const(e, x, k) {store(e, v.dst, .RAX); return ""}
+		}
+	case .Add:
+		if k, x, ok := bc_const_operand(e, v.a, v.b); ok {
+			load(e, .RAX, x)
+			if k == 0 {store(e, v.dst, .RAX); return ""} // +0 elided
+			if fits_imm32(k) {
+				x64.add_r64_imm32(.RAX, u32(i32(k)))
+				store(e, v.dst, .RAX)
+				return ""
+			}
+		}
+	case .Subtract:
+		if b_const && !a_const {
+			load(e, .RAX, v.a)
+			k := e.const_val[int(v.b)]
+			if k == 0 {store(e, v.dst, .RAX); return ""} // -0 elided
+			if fits_imm32(k) {
+				x64.sub_r64_imm32(.RAX, u32(i32(k)))
+				store(e, v.dst, .RAX)
+				return ""
+			}
+		}
+	case .Divide:
+		if unsigned && b_const && !a_const {
+			if sh, ok := log2_exact(e.const_val[int(v.b)]); ok {
+				load(e, .RAX, v.a)
+				x64.shr_r64_imm8(.RAX, u8(sh)) // unsigned /2^k → shr
+				store(e, v.dst, .RAX)
+				return ""
+			}
+		}
+	case .Mod:
+		if unsigned && b_const && !a_const {
+			k := e.const_val[int(v.b)]
+			if _, ok := log2_exact(k); ok {
+				load(e, .RAX, v.a)
+				and_rax_imm(e, k - 1) // unsigned %2^k → and (k-1)
+				store(e, v.dst, .RAX)
+				return ""
+			}
+		}
+	case .And, .BitAnd:
+		if k, x, ok := bc_const_operand(e, v.a, v.b); ok {
+			load(e, .RAX, x)
+			and_rax_imm(e, k)
+			store(e, v.dst, .RAX)
+			return ""
+		}
+	}
+
+	// General path: rax = a ; op rax, rcx.
 	load(e, .RAX, v.a)
 	load(e, .RCX, v.b)
 	#partial switch v.op {
@@ -258,7 +481,6 @@ emit_bin :: proc(e: ^X64_Emit, v: BC_Bin) -> string {
 	case .Xor:
 		x64.xor_r64_r64(.RAX, .RCX)
 	case .Divide:
-		// cqo ; idiv rcx  → quotient in rax
 		emit_cqo(e)
 		x64.idiv_r64(.RCX)
 	case .Mod:
@@ -266,14 +488,223 @@ emit_bin :: proc(e: ^X64_Emit, v: BC_Bin) -> string {
 		x64.idiv_r64(.RCX)
 		x64.mov_r64_r64(.RAX, .RDX) // remainder in rdx
 	case .LShift:
-		emit_shift_cl(e, 0xE0) // shl rax, cl  (/4)
+		x64.mov_r64_r64(.RCX, .RCX) // (count already in rcx; CL is its low byte)
+		emit_shift_cl(e, 0xE0) // shl rax, cl
 	case .RShift:
-		emit_shift_cl(e, 0xF8) // sar rax, cl  (/7, arithmetic)
+		emit_shift_cl(e, 0xF8) // sar rax, cl  (arithmetic)
 	case:
 		return "x64: unsupported binary operator"
 	}
 	store(e, v.dst, .RAX)
 	return ""
+}
+
+// emit_bin_float emits a scalar-double op via XMM. Operand bits are loaded from
+// their stack slots into XMM0/XMM1, the SSE op runs, and the result bits go back.
+// f32 is computed in double then narrowed only at materialization (kept simple).
+emit_bin_float :: proc(e: ^X64_Emit, v: BC_Bin) -> string {
+	load(e, .RAX, v.a)
+	x64.movq_xmm_r64(.XMM0, .RAX) // xmm0 = a
+	load(e, .RAX, v.b)
+	x64.movq_xmm_r64(.XMM1, .RAX) // xmm1 = b
+	#partial switch v.op {
+	case .Add:
+		x64.write([]u8{0xF2, 0x0F, 0x58, 0xC1}) // addsd xmm0, xmm1
+	case .Subtract:
+		x64.write([]u8{0xF2, 0x0F, 0x5C, 0xC1}) // subsd xmm0, xmm1
+	case .Multiply:
+		x64.write([]u8{0xF2, 0x0F, 0x59, 0xC1}) // mulsd xmm0, xmm1
+	case .Divide:
+		x64.write([]u8{0xF2, 0x0F, 0x5E, 0xC1}) // divsd xmm0, xmm1
+	case:
+		return "x64: unsupported float operator"
+	}
+	// rax = bits(xmm0) ; store.
+	emit_movq_rax_xmm0(e)
+	store(e, v.dst, .RAX)
+	return ""
+}
+
+// movq rax, xmm0 : 66 48 0F 7E C0 (REX.W form moves all 64 bits).
+emit_movq_rax_xmm0 :: proc(e: ^X64_Emit) {
+	x64.write([]u8{0x66, 0x48, 0x0F, 0x7E, 0xC0})
+}
+
+// emit_load_imm_rax loads an immediate into RAX with the SHORTEST encoding:
+// `mov eax, imm32` (5 bytes, zero-extends to RAX) when the value fits in u32,
+// `movabs rax, imm64` (10 bytes) otherwise. A common immediate-folding win.
+emit_load_imm_rax :: proc(e: ^X64_Emit, v: i64) {
+	if v >= 0 && v <= 0xFFFFFFFF {
+		// B8 id : mov eax, imm32  (the upper 32 bits of RAX are zeroed)
+		u := u32(v)
+		x64.write([]u8{0xB8, u8(u), u8(u >> 8), u8(u >> 16), u8(u >> 24)})
+		return
+	}
+	x64.movabs_r64_imm64(.RAX, v)
+}
+
+// emit_print_char writes a single byte to stdout. Uses the red zone: push the
+// char, write(1, rsp, 1), pop.
+emit_print_char :: proc(e: ^X64_Emit, c: u8) {
+	// mov byte ptr [rsp-1], c ; lea rsi, [rsp-1] ; write(1, rsi, 1)
+	x64.write([]u8{0xC6, 0x44, 0x24, 0xFF, c}) // mov byte [rsp-1], c
+	x64.write([]u8{0x48, 0x8D, 0x74, 0x24, 0xFF}) // lea rsi, [rsp-1]
+	x64.movabs_r64_imm64(.RDX, 1) // len 1
+	x64.movabs_r64_imm64(.RDI, 1) // fd 1
+	x64.movabs_r64_imm64(.RAX, 1) // sys_write
+	x64.syscall()
+}
+
+// emit_print_uint_in_rax prints the unsigned integer in RAX as decimal (no
+// leading zeros, "0" if zero). Builds digits backwards into [rsp-32..] then
+// write()s them. Clobbers rax,rcx,rdx,rsi,rdi,r8,r9.
+emit_print_uint_in_rax :: proc(e: ^X64_Emit) {
+	// r8 = rax (value) ; r9 = &buf_end = rsp-1 ; ten in rcx.
+	x64.write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax
+	x64.write([]u8{0x4C, 0x8D, 0x4C, 0x24, 0xE0}) // lea r9, [rsp-32]  (buffer start)
+	// We'll fill forward from a cursor and track count. Simpler: classic reverse.
+	// Use [rsp-1] downward as the digit area; r9 = cursor = rsp-1.
+	x64.write([]u8{0x4C, 0x8D, 0x4C, 0x24, 0xFF}) // lea r9, [rsp-1]
+	x64.movabs_r64_imm64(.RCX, 10)
+	// loop: rdx:rax = r8 ; div rcx ; digit = rdx ; store; r8 = rax(quotient)
+	loop := e.buf.len
+	x64.write([]u8{0x4C, 0x89, 0xC0}) // mov rax, r8
+	x64.write([]u8{0x48, 0x31, 0xD2}) // xor rdx, rdx
+	x64.write([]u8{0x48, 0xF7, 0xF1}) // div rcx  (unsigned)
+	x64.write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax (quotient)
+	// dl += '0' ; store [r9], dl ; r9--
+	x64.write([]u8{0x80, 0xC2, 0x30}) // add dl, '0'
+	x64.write([]u8{0x41, 0x88, 0x11}) // mov [r9], dl
+	x64.write([]u8{0x49, 0xFF, 0xC9}) // dec r9
+	// if r8 != 0 loop
+	x64.write([]u8{0x4D, 0x85, 0xC0}) // test r8, r8
+	x64.write([]u8{0x75}) // jnz loop
+	back := e.buf.len; x64.write([]u8{0})
+	e.buf.data[back] = u8(i8(loop - (back + 1)))
+	// write(1, r9+1, (rsp-1)-(r9)) : rsi = r9+1 ; rdx = (rsp-1) - r9
+	x64.write([]u8{0x49, 0xFF, 0xC1}) // inc r9  (now points at first digit)
+	x64.write([]u8{0x4C, 0x89, 0xCE}) // mov rsi, r9
+	// rdx = (rsp-1) - r9 + 1  = rsp - r9
+	x64.write([]u8{0x48, 0x89, 0xE2}) // mov rdx, rsp
+	x64.write([]u8{0x4C, 0x29, 0xCA}) // sub rdx, r9
+	x64.movabs_r64_imm64(.RDI, 1)
+	x64.movabs_r64_imm64(.RAX, 1)
+	x64.syscall()
+}
+
+// emit_print_uint6 prints RAX as exactly 6 zero-padded decimal digits.
+emit_print_uint6 :: proc(e: ^X64_Emit) {
+	// r8 = value ; r9 = rsp-1 ; write 6 digits backwards.
+	x64.write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax
+	x64.write([]u8{0x4C, 0x8D, 0x4C, 0x24, 0xFF}) // lea r9, [rsp-1]
+	x64.movabs_r64_imm64(.RCX, 10)
+	x64.movabs_r64_imm64(.RSI, 6) // counter
+	loop := e.buf.len
+	x64.write([]u8{0x4C, 0x89, 0xC0}) // mov rax, r8
+	x64.write([]u8{0x48, 0x31, 0xD2}) // xor rdx, rdx
+	x64.write([]u8{0x48, 0xF7, 0xF1}) // div rcx
+	x64.write([]u8{0x49, 0x89, 0xC0}) // mov r8, rax
+	x64.write([]u8{0x80, 0xC2, 0x30}) // add dl, '0'
+	x64.write([]u8{0x41, 0x88, 0x11}) // mov [r9], dl
+	x64.write([]u8{0x49, 0xFF, 0xC9}) // dec r9
+	x64.write([]u8{0x48, 0xFF, 0xCE}) // dec rsi
+	x64.write([]u8{0x48, 0x85, 0xF6}) // test rsi, rsi
+	x64.write([]u8{0x75}) // jnz loop
+	back := e.buf.len; x64.write([]u8{0})
+	e.buf.data[back] = u8(i8(loop - (back + 1)))
+	// write(1, r9+1, 6)
+	x64.write([]u8{0x49, 0xFF, 0xC1}) // inc r9
+	x64.write([]u8{0x4C, 0x89, 0xCE}) // mov rsi, r9
+	x64.movabs_r64_imm64(.RDX, 6)
+	x64.movabs_r64_imm64(.RDI, 1)
+	x64.movabs_r64_imm64(.RAX, 1)
+	x64.syscall()
+}
+
+// emit_mul_const lowers x*k with strength reduction. Returns false if it falls
+// through to the general imul path (handled by the caller). Result in RAX.
+emit_mul_const :: proc(e: ^X64_Emit, x: BC_Value, k: i64) -> bool {
+	switch {
+	case k == 0:
+		x64.xor_r64_r64(.RAX, .RAX) // *0 → 0
+		return true
+	case k == 1:
+		load(e, .RAX, x) // *1 → identity
+		return true
+	case k == 2:
+		load(e, .RAX, x)
+		x64.shl_r64_imm8(.RAX, 1)
+		return true
+	}
+	if sh, ok := log2_exact(k); ok {
+		load(e, .RAX, x)
+		x64.shl_r64_imm8(.RAX, u8(sh)) // *2^k → shl
+		return true
+	}
+	// x*3 = lea rax,[rcx+rcx*2]; x*5 = [rcx+rcx*4]; x*9 = [rcx+rcx*8].
+	scale: u8 = 0
+	switch k {
+	case 3: scale = 2
+	case 5: scale = 4
+	case 9: scale = 8
+	}
+	if scale != 0 {
+		load(e, .RCX, x)
+		// lea rax, [rcx + rcx*scale]  (scale=2→*3, 4→*5, 8→*9)
+		emit_lea_rax_rcx_rcx(e, scale)
+		return true
+	}
+	// Not reducible: fall back to imul with the constant materialized.
+	load(e, .RAX, x)
+	if fits_imm32(k) {
+		x64.imul_r64_r64_imm32(.RAX, .RAX, u32(i32(k)))
+		return true
+	}
+	return false
+}
+
+// bc_const_operand: if exactly one of a/b is a constant, return (k, x) with k the
+// constant value and x the variable operand.
+bc_const_operand :: proc(e: ^X64_Emit, a, b: BC_Value) -> (k: i64, x: BC_Value, ok: bool) {
+	if e.is_const[int(a)] && !e.is_const[int(b)] do return e.const_val[int(a)], b, true
+	if e.is_const[int(b)] && !e.is_const[int(a)] do return e.const_val[int(b)], a, true
+	return 0, 0, false
+}
+
+// log2_exact returns the shift amount if k is a positive power of two.
+log2_exact :: proc(k: i64) -> (int, bool) {
+	if k <= 0 do return 0, false
+	if (k & (k - 1)) != 0 do return 0, false
+	sh := 0
+	v := k
+	for v > 1 {v >>= 1; sh += 1}
+	return sh, true
+}
+
+fits_imm32 :: proc(k: i64) -> bool {
+	return k >= -2147483648 && k <= 2147483647
+}
+
+// and_rax_imm: and rax, imm (imm32 if it fits, else via rcx).
+and_rax_imm :: proc(e: ^X64_Emit, k: i64) {
+	if fits_imm32(k) {
+		// REX.W 81 /4 id : and r/m64, imm32  → 48 81 E0 id
+		x64.write([]u8{0x48, 0x81, 0xE0})
+		u := transmute(u32)i32(k)
+		x64.write([]u8{u8(u), u8(u >> 8), u8(u >> 16), u8(u >> 24)})
+	} else {
+		x64.movabs_r64_imm64(.RCX, k)
+		x64.and_r64_r64(.RAX, .RCX)
+	}
+}
+
+// emit_lea_rax_rcx_rcx: lea rax, [rcx + rcx*scale]. scale ∈ {2,4,8} via SIB.
+emit_lea_rax_rcx_rcx :: proc(e: ^X64_Emit, scale: u8) {
+	ss: u8 = scale == 2 ? 1 : (scale == 4 ? 2 : 3) // log2(scale)
+	// REX.W=48, opcode 8D, modrm: mod=00 reg=rax(000) rm=100(SIB) → 0x04
+	// SIB: scale=ss base=rcx(001) index=rcx(001) → (ss<<6)|(001<<3)|001
+	sib := (ss << 6) | (0b001 << 3) | 0b001
+	x64.write([]u8{0x48, 0x8D, 0x04, sib})
 }
 
 // emit_cmp: rax = (a <op> b) ? 1 : 0 via cmp + setcc + movzx.

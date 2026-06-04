@@ -1,0 +1,1 @@
+{ "name": "flt_sym2", "description": "??f64+1 arg5", "source": "x -> ??::f64\n-> x + 1.0", "args": ["5"], "expect": "6.0", "kind": "float" }

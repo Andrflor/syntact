@@ -1,0 +1,1 @@
+{ "name": "int_u8_wrap2", "description": "u8 wrap 300", "source": "a -> ??::u8\n-> a + 1", "args": ["300"], "expect": "45", "kind": "int" }

@@ -1,0 +1,1 @@
+{ "name": "int_add_const", "description": "a+1 u8", "source": "a -> ??::u8\n-> a + 1", "args": ["7"], "expect": "8", "kind": "int" }

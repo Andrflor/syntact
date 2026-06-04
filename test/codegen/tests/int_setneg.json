@@ -1,0 +1,1 @@
+{ "name": "int_setneg", "description": "~10", "source": "-> ~10", "args": [], "expect": "9", "kind": "int" }

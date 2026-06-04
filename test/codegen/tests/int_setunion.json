@@ -1,0 +1,1 @@
+{ "name": "int_setunion", "description": "5|10", "source": "-> 5 | 10", "args": [], "expect": "5", "kind": "int" }

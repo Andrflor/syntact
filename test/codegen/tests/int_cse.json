@@ -1,0 +1,1 @@
+{ "name": "int_cse", "description": "(a+1)^2 CSE", "source": "a -> ??::u8\n-> (a+1)*(a+1)", "args": ["7"], "expect": "64", "kind": "int" }
