@@ -73,6 +73,19 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	for i in 0 ..< n do hint[i] = -1
 	build_move_hints(prog, hint)
 
+	// Physical-register preferences: a value consumed by a fixed-register sink
+	// (the ret value goes to RDI for the exit syscall / RSI for the string write)
+	// prefers that register, so the final mov-into-the-ABI-register elides. -1 =
+	// none; otherwise the index into ALLOCATABLE_REGS+ the register value.
+	phys_pref := make([]int, n) // stores u8(Register64)+1, 0 = none
+	defer delete(phys_pref)
+	for inst in prog.insts {
+		if r, ok := inst.(bc.BC_Ret); ok {
+			pref := prog.result_type == .Str ? Register64.RSI : Register64.RDI
+			phys_pref[int(r.src)] = int(u8(pref)) + 1
+		}
+	}
+
 	// Active intervals, kept sorted by increasing `end` so the earliest-expiring
 	// is reclaimed first. free_regs is the pool of currently-unused GPRs.
 	free_regs := make([dynamic]Register64)
@@ -96,14 +109,24 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 		expire_old(&active, &active_reg, &free_regs, iv.start + 1)
 
 		if len(free_regs) > 0 {
-			// Biased coloring: if this value is move-related to a source whose
-			// register just freed up (the source died), reuse that register so the
-			// emitter elides the copy. Else take any free register.
 			reg, has_pref := Register64{}, false
-			if hint[iv.vreg] >= 0 {
+			// 1) Physical preference (ret value → RDI/RSI): if that exact register
+			// is free, take it so the final mov-into-the-ABI-register elides.
+			if phys_pref[iv.vreg] > 0 {
+				want := Register64(u8(phys_pref[iv.vreg] - 1))
+				for fr, idx in free_regs {
+					if fr == want {
+						reg = fr; has_pref = true
+						ordered_remove(&free_regs, idx)
+						break
+					}
+				}
+			}
+			// 2) Biased coloring: reuse a move-related source's just-freed register
+			// so the emitter elides the copy.
+			if !has_pref && hint[iv.vreg] >= 0 {
 				src := hint[iv.vreg]
 				if loc := locs[src]; loc.kind == .Register {
-					// Is the source's register currently free (its interval expired)?
 					for fr, idx in free_regs {
 						if fr == loc.reg {
 							reg = fr; has_pref = true
