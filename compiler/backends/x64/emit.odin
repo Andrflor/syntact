@@ -404,21 +404,32 @@ emit_load_arg :: proc(e: ^X64_Emit, v: bc.BC_Load_Arg) {
 		return
 	}
 
-	// Integer: pick the load that also normalizes to the declared width.
+	// Integer: load + normalize to the declared width. When the value is computed
+	// in 32-bit registers (width ≤ 32), use the 32-bit movzx/movsx form — one byte
+	// shorter (no REX.W), and the 32-bit write zero-extends the upper half. Safe by
+	// construction (the value fits its declared width).
+	use32 := val_is_32bit(e, int(v.dst))
 	switch v.width {
 	case 8:
-		if v.signed {movsx_r64_m8(dst, mem)} else {movzx_r64_m8(dst, mem)}
+		if v.signed {
+			if use32 {movsx_r32_m8(dst, mem)} else {movsx_r64_m8(dst, mem)}
+		} else {
+			if use32 {movzx_r32_m8(dst, mem)} else {movzx_r64_m8(dst, mem)}
+		}
 	case 16:
-		if v.signed {movsx_r64_m16(dst, mem)} else {movzx_r64_m16(dst, mem)}
+		if v.signed {
+			if use32 {movsx_r32_m16(dst, mem)} else {movsx_r64_m16(dst, mem)}
+		} else {
+			if use32 {movzx_r32_m16(dst, mem)} else {movzx_r64_m16(dst, mem)}
+		}
 	case 32:
 		if v.signed {
-			movsxd_r64_m32(dst, mem) // load 32 bits, sign-extend to 64
+			movsxd_r64_m32(dst, mem) // sign-extend to 64 (i32 source may feed wider)
 		} else {
-			mov_r64d_m32(dst, mem) // load 32 bits, zero-extends to 64 automatically
+			mov_r64d_m32(dst, mem) // zero-extends to 64 automatically
 		}
 	case:
-		// 64-bit or unsized: load the full quadword, no normalization.
-		mov_r64_m64(dst, mem)
+		mov_r64_m64(dst, mem) // 64-bit / unsized
 	}
 	if !homed do store(e, v.dst, dst)
 }
@@ -428,7 +439,11 @@ emit_load_arg :: proc(e: ^X64_Emit, v: bc.BC_Load_Arg) {
 emit_lea_root :: proc(e: ^X64_Emit, dst: bc.BC_Value, am: X64_Address) {
 	rd, homed := home_reg(e, dst)
 	w := homed ? rd : Register64.RAX
-	lea_r64_m64(w, addr_to_mem(am))
+	if val_is_32bit(e, int(dst)) {
+		lea_r32_m(r32(w), addr_to_mem(am)) // 32-bit lea: no REX.W
+	} else {
+		lea_r64_m64(w, addr_to_mem(am))
+	}
 	if !homed do store(e, dst, w)
 }
 
@@ -563,19 +578,20 @@ emit_bin :: proc(e: ^X64_Emit, v: bc.BC_Bin) -> string {
 		load(e, work, v.a)
 	}
 
+	use32 := val_is_32bit(e, int(v.dst))
 	#partial switch v.op {
 	case .Add:
-		add_r64_r64(work, src)
+		if use32 {add_r32_r32(r32(work), r32(src))} else {add_r64_r64(work, src)}
 	case .Subtract:
-		sub_r64_r64(work, src)
+		if use32 {sub_r32_r32(r32(work), r32(src))} else {sub_r64_r64(work, src)}
 	case .Multiply:
-		imul_r64_r64(work, src)
+		if use32 {imul_r32_r32(r32(work), r32(src))} else {imul_r64_r64(work, src)}
 	case .BitAnd:
-		and_r64_r64(work, src)
+		if use32 {and_r32_r32(r32(work), r32(src))} else {and_r64_r64(work, src)}
 	case .BitOr:
-		or_r64_r64(work, src)
+		if use32 {or_r32_r32(r32(work), r32(src))} else {or_r64_r64(work, src)}
 	case .BitXor:
-		xor_r64_r64(work, src)
+		if use32 {xor_r32_r32(r32(work), r32(src))} else {xor_r64_r64(work, src)}
 	case:
 		return "x64: unsupported binary operator"
 	}
@@ -593,18 +609,19 @@ emit_bin_imm :: proc(e: ^X64_Emit, v: bc.BC_Bin_Imm) -> string {
 	}
 	unsigned := !bc.mtype_signed(e.prog.value_types[int(v.a)])
 	k := v.imm
+	use32 := val_is_32bit(e, int(v.dst))
 
 	w, w_homed := home_reg(e, v.dst)
 	if !w_homed do w = .RAX
 
 	#partial switch v.op {
 	case .Multiply:
-		if emit_mul_const_into(e, w, v.a, k) {dst_finish(e, v.dst, w, w_homed); return ""}
+		if emit_mul_const_into(e, w, v.a, k, use32) {dst_finish(e, v.dst, w, w_homed); return ""}
 	case .Add:
 		load(e, w, v.a)
 		if k != 0 {
 			if fits_imm32(k) {
-				add_r64_imm32(w, u32(i32(k)))
+				if use32 {add_r32_imm32(r32(w), u32(i32(k)))} else {add_r64_imm32(w, u32(i32(k)))}
 			} else {
 				movabs_r64_imm64(.RCX, k); add_r64_r64(w, .RCX)
 			}
@@ -615,7 +632,7 @@ emit_bin_imm :: proc(e: ^X64_Emit, v: bc.BC_Bin_Imm) -> string {
 		load(e, w, v.a)
 		if k != 0 {
 			if fits_imm32(k) {
-				sub_r64_imm32(w, u32(i32(k)))
+				if use32 {sub_r32_imm32(r32(w), u32(i32(k)))} else {sub_r64_imm32(w, u32(i32(k)))}
 			} else {
 				movabs_r64_imm64(.RCX, k); sub_r64_r64(w, .RCX)
 			}
@@ -834,10 +851,10 @@ emit_print_uint6 :: proc(e: ^X64_Emit) {
 // emit_mul_const_into lowers x*k with strength reduction, leaving the result in
 // `w`. Returns false (caller uses the general imul path) only for a constant too
 // large for an imm32 that isn't a power of two.
-emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64) -> bool {
+emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64, use32: bool) -> bool {
 	switch {
 	case k == 0:
-		xor_r64_r64(w, w) // *0 → 0
+		if use32 {xor_r32_r32(r32(w), r32(w))} else {xor_r64_r64(w, w)} // *0 → 0
 		return true
 	case k == 1:
 		load(e, w, x) // *1 → identity
@@ -845,7 +862,7 @@ emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64)
 	}
 	if sh, ok := log2_exact(k); ok {
 		load(e, w, x)
-		shl_r64_imm8(w, u8(sh)) // *2^k → shl
+		if use32 {shl_r32_imm8(r32(w), u8(sh))} else {shl_r64_imm8(w, u8(sh))} // *2^k → shl
 		return true
 	}
 	// x*3 = lea w,[src+src*2]; x*5 = [src+src*4]; x*9 = [src+src*8].
@@ -856,22 +873,25 @@ emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64)
 	case 9: scale = 8
 	}
 	if scale != 0 {
-		// LEA the result straight from x's home register when it has one usable as
-		// a SIB base — `lea w, [Rx + Rx*scale]`, no copy. RBP/R13 can't be a SIB
-		// base with mod=00 (that encoding means "no base"), so those fall back to
-		// loading x into RCX first.
+		base: Register64
 		if rx, ok := home_reg(e, x); ok && rx != .RBP && rx != .R13 {
-			emit_lea_reg_base_index(e, w, rx, scale)
+			base = rx
 		} else {
-			load(e, .RCX, x)
-			emit_lea_reg_base_index(e, w, .RCX, scale)
+			load(e, .RCX, x); base = .RCX
 		}
+		// lea w, [base + base*scale]
+		mem := MemoryAddress(AddressComponents{base = base, index = base, scale = scale})
+		if use32 {lea_r32_m(r32(w), mem)} else {lea_r64_m64(w, mem)}
 		return true
 	}
 	// Not reducible: imul w, x, k.
 	load(e, w, x)
 	if fits_imm32(k) {
-		imul_r64_r64_imm32(w, w, u32(i32(k)))
+		if use32 {
+			imul_r32_imm32(r32(w), u32(i32(k))) // imul r32, imm32 (w *= k)
+		} else {
+			imul_r64_r64_imm32(w, w, u32(i32(k)))
+		}
 		return true
 	}
 	return false
