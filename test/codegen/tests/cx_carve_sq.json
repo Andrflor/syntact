@@ -1,0 +1,1 @@
+{ "name": "cx_carve_sq", "description": "carve square+1", "source": "s -> { u8:n -> 0\n -> n*n + 1 }\n-> s{n -> 6}!", "args": [[]], "expect": ["37"], "kind": "int" }

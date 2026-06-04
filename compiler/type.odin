@@ -275,6 +275,14 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			if v.type_fold != nil do return fold_value_type(v.type_fold)
 			return fold_constraint(v.target)
 		case Compose_Type:
+			// A COMPARISON (`<`,`>`,`==`,…) is a VALUE of the bool domain: its typeof
+			// is `{true,false}`, regardless of whether the operands are concrete. This
+			// is the route pattern exhaustiveness (pattern_target_fold) and the bytecode
+			// machine type take, so returning a full Bool here is what makes
+			// `(a>50) ? { =true -> … =false -> … }` exhaustive and lowers a bool result.
+			if is_comparison_op(v.operator) {
+				return new_type(make_bool_any())
+			}
 			// An arithmetic expression (`a+b`, `a*b`, …) is a computed VALUE, not a
 			// reified type: its envelope is the set of results it can produce, and
 			// the proof is `envelope ⊆ constraint` (constraints.md: `u8 + u8` ∈ u16).
@@ -683,15 +691,18 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	}
 	// A COMPARISON (`<`,`>`,`<=`,`>=`,`==`,`!=`) produces a BOOL, not a numeric
 	// envelope, so it never folds to an interval — that is expected, not an error.
-	// As long as its operands are compatible numeric families it is valid: it reduces
-	// to a concrete bool when both are concrete, or stays symbolic over a `??`. Leave
-	// it un-folded (no type_fold) and let the reducer handle it; only diagnose when an
-	// operand is genuinely non-numeric (caught below by diagnose_compose's family
-	// checks via the fallthrough for non-comparison ops).
+	// Its TYPEOF is the bool domain `{true,false}`: fold to a full Bool so a pattern
+	// `=true -> … =false -> …` over it is exhaustive and the lowering carries a bool
+	// machine type. The concrete element (when both operands are concrete) is still
+	// computed by the reducer; this is only the static envelope. As long as the
+	// operands are compatible numeric families the comparison is valid.
 	if is_comparison_op(comp.operator) {
 		lf := family_of(comp.left)
 		rf := family_of(comp.right)
-		if is_numeric_family(lf) && is_numeric_family(rf) do return
+		if is_numeric_family(lf) && is_numeric_family(rf) {
+			comp.type_fold = new_type(make_bool_any())
+			return
+		}
 	}
 	// The fold failed. Hand off to the diagnostic layer, which inspects the
 	// operands and emits a precise, author-facing explanation (incompatible

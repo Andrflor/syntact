@@ -1,0 +1,1 @@
+{ "name": "cx_str_chain", "description": "4-way concat", "source": "-> \"foo\" + \"bar\" + \"baz\" + \"qux\"", "args": [[]], "expect": ["foobarbazqux"], "kind": "str" }

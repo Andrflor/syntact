@@ -1,0 +1,1 @@
+{ "name": "cx_flt_poly", "description": "x*x*x f64", "source": "x -> ??::f64\n-> x*x*x", "args": [["0"], ["1"], ["2"], ["2.5"], ["3"]], "expect": ["0.0", "1.0", "8.0", "15.625", "27.0"], "kind": "float" }

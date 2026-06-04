@@ -1,0 +1,1 @@
+{ "name": "cx_xor_self", "description": "a ^ a = 0", "source": "a -> ??::u8\n-> a ^ a", "args": [["0"], ["42"], ["255"]], "expect": ["0", "0", "0"], "kind": "int" }

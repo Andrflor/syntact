@@ -1,0 +1,1 @@
+{ "name": "cx_flt_sumsq", "description": "x*x+y*y f64", "source": "x -> ??::f64\ny -> ??::f64\n-> x*x + y*y", "args": [["0", "0"], ["3", "4"], ["1.5", "2.5"], ["2", "2"]], "expect": ["0.0", "25.0", "8.5", "8.0"], "kind": "float" }
