@@ -145,10 +145,9 @@ lower_to_bytecode :: proc(root: ^Type) -> ^bc.BC_Program {
 		prog.result_type = prog.value_types[result]
 	}
 	bc_emit(&l, bc.BC_Ret{result})
-
-	// Affine canonicalization: distribute / combine / canonicalize integer affine
-	// expressions to their minimal form (target-neutral, benefits every backend).
-	if prog.error == "" do bc.optimize_affine(prog)
+	// (Affine canonicalization is done UPSTREAM by the reducer, on the ^Type IR —
+	// see reduce.odin's collect_sum/flatten_sum. The bytecode is already minimal,
+	// so no bytecode-level affine pass is needed.)
 	return prog
 }
 

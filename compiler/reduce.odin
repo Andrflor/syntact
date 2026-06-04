@@ -324,56 +324,79 @@ collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
 	kept: [dynamic]Sum_Term
 	for t in merged do if t.coeff != 0 do append(&kept, t)
 
-	// Only commit if we actually simplified: fewer terms than the naive split, or a
-	// constant folded in. The naive split has (#leaves) additive terms; if collection
-	// changed the count or produced a constant fusion, rebuild — else bail.
-	naive := count_sum_leaves(left) + count_sum_leaves(right)
-	if len(kept) + (constant != 0 ? 1 : 0) >= naive && !sum_has_constant_pair(left, right) {
-		// Nothing collapsed; let the plain path handle it (avoids infinite rebuild).
+	rebuilt := rebuild_sum(kept[:], constant)
+
+	// Commit only if the canonical form is no MORE expensive than the original
+	// (operation-minimal: distributing 3*(2a-1)+5a → 11a-3 reduces the op count,
+	// so it commits; a form that would grow stays as-is). The original cost is the
+	// two operands plus the joining +/-; we compare node counts (Compose nodes).
+	orig := op_cost(left) + op_cost(right) + 1
+	if op_cost(rebuilt) > orig do return nil // would grow → keep the plain node
+	// Avoid pointless churn: if nothing structurally changed, bail.
+	if op_cost(rebuilt) == orig && len(kept) == count_sum_leaves(left) + count_sum_leaves(right) && constant == 0 {
 		return nil
 	}
-
-	return rebuild_sum(kept[:], constant)
+	return rebuilt
 }
 
-// flatten_sum decomposes `node` (scaled by `sign`) into additive terms appended to
-// `terms`, accumulating the bare constant into `constant`. It descends a +/- chain
-// and splits a `k * base` product into (k, base); anything else is a (sign, node)
-// term. It does NOT descend into products of non-constants (no distribution).
-flatten_sum :: proc(node: ^Type, sign: i128, terms: ^[dynamic]Sum_Term, constant: ^i128) {
+// op_cost counts the arithmetic Compose nodes in a reduced expression — its
+// operation count, used to decide whether canonicalization actually reduced work.
+op_cost :: proc(node: ^Type) -> int {
+	if node == nil do return 0
+	#partial switch v in node^ {
+	case Compose_Type:
+		return 1 + op_cost(v.left) + op_cost(v.right)
+	}
+	return 0
+}
+
+// flatten_sum decomposes `node` SCALED BY `coeff` into additive terms appended to
+// `terms`, accumulating the bare constant into `constant`. `coeff` is a full
+// integer coefficient (not just a ±1 sign), which is what enables DISTRIBUTION:
+// `coeff * base` recurses into `base` with the product coefficient, so
+// `3 * (2a - 1)` flattens to `6·a + (-3)`. A `const * sub` product distributes the
+// constant into the whole affine sub-form; a `var * var` product does NOT (it is
+// kept as one opaque atom — no distribution of the non-linear part, preserving
+// `(a+1)*(a+1)` and `a*a`).
+flatten_sum :: proc(node: ^Type, coeff: i128, terms: ^[dynamic]Sum_Term, constant: ^i128) {
 	if node == nil do return
 	if c, ok := int_of(node); ok {
-		constant^ += sign * c
+		constant^ += coeff * c
 		return
 	}
 	#partial switch v in node^ {
 	case Compose_Type:
 		#partial switch v.operator {
 		case .Add:
-			flatten_sum(v.left, sign, terms, constant)
-			flatten_sum(v.right, sign, terms, constant)
+			flatten_sum(v.left, coeff, terms, constant)
+			flatten_sum(v.right, coeff, terms, constant)
 			return
 		case .Subtract:
 			if v.left == nil {
-				flatten_sum(v.right, -sign, terms, constant) // unary minus
+				flatten_sum(v.right, -coeff, terms, constant) // unary minus
 			} else {
-				flatten_sum(v.left, sign, terms, constant)
-				flatten_sum(v.right, -sign, terms, constant)
+				flatten_sum(v.left, coeff, terms, constant)
+				flatten_sum(v.right, -coeff, terms, constant)
 			}
 			return
 		case .Multiply:
-			// k * base or base * k → a scaled term; otherwise an atomic term.
+			// `k * sub` (constant on either side): DISTRIBUTE k into sub by
+			// recursing with the product coefficient. So `3 * (2a-1)` → flatten
+			// (2a-1) scaled by 3 → 6a − 3. The other factor must be the constant;
+			// the variable factor (`sub`) is flattened, never multiplied out against
+			// another variable.
 			if c, ok := int_of(v.left); ok {
-				append(terms, Sum_Term{sign * c, v.right})
+				flatten_sum(v.right, coeff * c, terms, constant)
 				return
 			}
 			if c, ok := int_of(v.right); ok {
-				append(terms, Sum_Term{sign * c, v.left})
+				flatten_sum(v.left, coeff * c, terms, constant)
 				return
 			}
+			// var * var → an opaque atom (no distribution).
 		}
 	}
-	append(terms, Sum_Term{sign, node})
+	append(terms, Sum_Term{coeff, node})
 }
 
 // count_sum_leaves counts the additive leaves of a +/- chain (a product or atom is
