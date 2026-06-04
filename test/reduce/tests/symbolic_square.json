@@ -1,0 +1,6 @@
+{
+  "name": "Symbolic square as repeated factor",
+  "description": "a*a + a*a collects to 2 * a * a",
+  "source": "a -> ??::u8\n-> a*a + a*a",
+  "expect": "2 * ??0 * ??0"
+}

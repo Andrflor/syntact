@@ -1,0 +1,6 @@
+{
+  "name": "Symbolic factored form (no distribution)",
+  "description": "((a*2)+3-4)*3 keeps the factored structure with constants folded: 3 * (2 * ??0 - 1), NOT distributed",
+  "source": "a -> ??::u8\n-> ((a*2)+3-4)*3",
+  "expect": "3 * (2 * ??0 - 1)"
+}

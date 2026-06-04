@@ -41,11 +41,10 @@ import "core:strings"
 // if a concrete singleton, is the answer outright; otherwise we descend into the
 // product's value and reduce it symbolically.
 reduce :: proc(scope: ^Scope_Type) -> ^Type {
-	// Fresh per-reduction symbol bookkeeping, allocated in the CURRENT context (the
+	// Fresh per-reduction DAG bookkeeping, allocated in the CURRENT context (the
 	// test harness runs each case in its own arena that is destroyed afterward, so a
 	// map carried over from a previous reduce would dangle). Reset every call.
-	symbol_seq = make(map[rawptr]int)
-	symbol_seq_next = 0
+	dag_reset()
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
 			if i < len(scope.type_folds) {
@@ -202,38 +201,172 @@ reduce_scope :: proc(s: ^Scope_Type) -> ^Type {
 }
 
 // ============================================================================
-// COMPOSE — the symbolic arithmetic core.
+// COMPOSE — the symbolic arithmetic core (DAG + constant folding + CSE).
+//
+// The reduced form is NOT distributed: distributing a product of sums (`(4x+2+5e)
+// *14*e`) multiplies the number of terms and of multiplications, which is the
+// OPPOSITE of operation-minimal. Instead we keep the author's factored structure
+// and only:
+//   * FOLD CONSTANTS — both operands concrete → evaluate; chains of constants
+//     collapse (`5*e*14` → `70*e`, `a*2*2` with a=??*2 → `4*??`).
+//   * ELIMINATE IDENTITIES — `*1`/`1*`, `+0`/`0+`, `-0`, `x-x`→0, `*0`→0.
+//   * SHARE COMMON SUBEXPRESSIONS (CSE) — a structurally identical subexpression
+//     is interned to a single node (`dag_intern`), so `e` (and `(…)*e`) is built
+//     once and reused. The emitted DAG is what codegen wants: minimal mul/add with
+//     shared rebinds, not an expanded polynomial.
+// A surviving fixed point `??` is a leaf, indexed stably as `??0`, `??1`, … so two
+// DISTINCT unknowns are visibly distinct (the linker resolves each separately).
 // ============================================================================
 
-// reduce_compose partially evaluates an arithmetic node. For the ring operators
-// (`+ - *`) it normalizes the whole subtree into a canonical polynomial over the
-// surviving fixed points and emits the operation-minimal tree. For non-ring
-// operators it reduces the operands and, if both became concrete, evaluates;
-// otherwise it stays symbolic with reduced operands.
+// reduce_compose partially evaluates one arithmetic node: reduce the operands
+// (already interned/folded), then fold constants and apply the algebraic
+// identities, and finally intern the resulting node for CSE.
 reduce_compose :: proc(v: Compose_Type) -> ^Type {
-	#partial switch v.operator {
-	case .Add, .Subtract, .Multiply:
-		if poly, ok := build_poly(v); ok {
-			return poly_to_type(poly)
-		}
-	}
-	// Non-ring operator, or a polynomial we could not build: reduce operands and
-	// evaluate concretely if possible, else keep symbolic with reduced children.
 	left := v.left != nil ? reduce_value(v.left) : nil
 	right := v.right != nil ? reduce_value(v.right) : nil
+
+	// Constant fold: every concrete operand present → evaluate outright.
 	if (v.left == nil || is_concrete_leaf(left)) && is_concrete_leaf(right) {
 		if concrete := eval_concrete(v.operator, left, right); concrete != nil {
 			return concrete
 		}
 	}
-	r := new(Type)
-	r^ = Compose_Type{left, right, v.operator, nil}
-	return r
+
+	// Algebraic simplification for the ring/commutative operators, then reassociate
+	// a constant up a chain (`(x*2)*2` → `x*4`, `(5*e)*14` → `70*e`).
+	if simplified := simplify_arith(v.operator, left, right); simplified != nil {
+		return simplified
+	}
+
+	return dag_intern(Compose_Type{left, right, v.operator, nil})
 }
 
 // is_concrete_leaf reports whether a reduced ^Type is a single concrete value.
 is_concrete_leaf :: proc(t: ^Type) -> bool {
 	return fold_is_concrete_value(t)
+}
+
+// int_of returns the concrete i128 value of a node, if it is one.
+int_of :: proc(t: ^Type) -> (i128, bool) {
+	if t == nil do return 0, false
+	#partial switch v in t^ {
+	case Integer_Type:
+		if int_is_concrete(v) do return int_value(v), true
+	}
+	return 0, false
+}
+
+// simplify_arith applies the operation-minimal identities WITHOUT distributing,
+// and reassociates a constant up a `*`/`+` chain so constants coalesce. Returns
+// nil when no simplification applies (caller interns the plain node).
+simplify_arith :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
+	#partial switch op {
+	case .Multiply:
+		lc, l_ok := int_of(left)
+		rc, r_ok := int_of(right)
+		if l_ok && lc == 0 do return new_type(make_int_result(0)) // 0 * x
+		if r_ok && rc == 0 do return new_type(make_int_result(0)) // x * 0
+		if l_ok && lc == 1 do return right // 1 * x
+		if r_ok && rc == 1 do return left // x * 1
+		// Reassociate: (sub * k1) * k2 → sub * (k1*k2); k1 * (sub * k2) → sub*(k1*k2).
+		if r_ok {
+			if folded := fold_const_into_mul(left, rc); folded != nil do return folded
+		}
+		if l_ok {
+			if folded := fold_const_into_mul(right, lc); folded != nil do return folded
+		}
+		// Canonical orientation: constant on the LEFT (`2 * x`, not `x * 2`).
+		if r_ok && !l_ok {
+			return dag_intern(Compose_Type{right, left, .Multiply, nil})
+		}
+	case .Add:
+		lc, l_ok := int_of(left)
+		rc, r_ok := int_of(right)
+		if l_ok && lc == 0 do return right // 0 + x
+		if r_ok && rc == 0 do return left // x + 0
+		// x + x → 2 * x
+		if dag_key(left) == dag_key(right) {
+			return dag_intern(Compose_Type{new_type(make_int_result(2)), left, .Multiply, nil})
+		}
+		// Coalesce a constant into a sub-sum that already carries one
+		// (`(sub + 3) + (-4)` → `sub - 1`). Try both sides.
+		if r_ok {
+			if folded := fold_const_into_add(left, rc); folded != nil do return folded
+		}
+		if l_ok {
+			if folded := fold_const_into_add(right, lc); folded != nil do return folded
+		}
+	case .Subtract:
+		if left != nil {
+			rc, r_ok := int_of(right)
+			if r_ok && rc == 0 do return left // x - 0
+			if dag_key(left) == dag_key(right) {
+				return new_type(make_int_result(0)) // x - x → 0
+			}
+			// `(sub ± c) - k` → fold the constants by adding -k.
+			if r_ok {
+				if folded := fold_const_into_add(left, -rc); folded != nil do return folded
+			}
+		}
+	}
+	return nil
+}
+
+// fold_const_into_add coalesces the additive constant `k` into a node that is
+// itself `sub + c` or `sub - c` (or `c + sub`), returning `sub + (c+k)` rendered
+// as an add/subtract by sign. Returns nil when the node carries no foldable
+// constant. Does NOT distribute — it only merges adjacent additive constants.
+fold_const_into_add :: proc(node: ^Type, k: i128) -> ^Type {
+	if node == nil do return nil
+	#partial switch v in node^ {
+	case Compose_Type:
+		#partial switch v.operator {
+		case .Add:
+			if c, ok := int_of(v.right); ok do return offset_node(v.left, c + k)
+			if c, ok := int_of(v.left); ok do return offset_node(v.right, c + k)
+		case .Subtract:
+			if v.left != nil {
+				if c, ok := int_of(v.right); ok do return offset_node(v.left, -c + k) // (sub - c) + k
+			}
+		}
+	}
+	return nil
+}
+
+// offset_node returns `sub + delta`, dropping the term when delta is 0 and
+// rendering a negative delta as a subtraction (`sub - 1`).
+offset_node :: proc(sub: ^Type, delta: i128) -> ^Type {
+	if delta == 0 do return sub
+	if delta < 0 {
+		return dag_intern(Compose_Type{sub, new_type(make_int_result(-delta)), .Subtract, nil})
+	}
+	return dag_intern(Compose_Type{sub, new_type(make_int_result(delta)), .Add, nil})
+}
+
+// fold_const_into_mul folds `k` into a node that is itself a multiply by a
+// constant (`(sub * c)` or `(c * sub)`), returning `sub * (c*k)`; nil otherwise.
+fold_const_into_mul :: proc(node: ^Type, k: i128) -> ^Type {
+	if node == nil do return nil
+	#partial switch v in node^ {
+	case Compose_Type:
+		if v.operator == .Multiply {
+			if c, ok := int_of(v.left); ok {
+				return scale_node(v.right, c * k)
+			}
+			if c, ok := int_of(v.right); ok {
+				return scale_node(v.left, c * k)
+			}
+		}
+	}
+	return nil
+}
+
+// scale_node returns `coeff * sub`, collapsing the coeff into the node when it is
+// 0 or 1 (`0*x`→0, `1*x`→x). Constant on the left for canonical orientation.
+scale_node :: proc(sub: ^Type, coeff: i128) -> ^Type {
+	if coeff == 0 do return new_type(make_int_result(0))
+	if coeff == 1 do return sub
+	return dag_intern(Compose_Type{new_type(make_int_result(coeff)), sub, .Multiply, nil})
 }
 
 // eval_concrete runs the existing concrete evaluators for one operator on already
@@ -288,160 +421,83 @@ eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 }
 
 // ============================================================================
-// POLYNOMIAL — canonical sum-of-monomials over the fixed-point symbols.
+// DAG LAYER — interning (CSE), structural keys, fixed-point indexing.
 //
-// A Poly is a list of Terms; a Term is an integer coefficient times a Monomial.
-// A Monomial is the sorted product of symbol powers (the empty monomial = the
-// constant term). Symbols are keyed by identity (a named binding's site, or a
-// per-occurrence id for an anonymous `??`/opaque subexpression) so `a + a`
-// collects into `2*a` but two distinct `??` stay apart.
+// reduce_value follows names to their bound values and reduces through, so the
+// ONLY symbolic leaf that survives is the atomic fixed point (`??` / a `::`-cast
+// of one). dag_intern hash-conses every constructed node by its STRUCTURAL key,
+// so two equal subexpressions share one ^Type — the CSE that lets codegen compute
+// `e` (and any `(…)*e`) exactly once.
 // ============================================================================
 
-Symbol :: struct {
-	key:  string, // stable identity for collection
-	node: ^Type, // the original ^Type, for rendering (a Mention renders as `a`)
+// Interning table: structural key → the canonical ^Type for that shape. Reset per
+// reduce() (the test harness destroys its arena between cases — a carried-over map
+// would dangle). THREAD-LOCAL: the test runner reduces cases on multiple threads
+// concurrently, and a shared global map would data-race into corruption/segfault.
+@(thread_local) dag_table: map[string]^Type
+@(thread_local) fixedpoint_index: map[rawptr]int
+@(thread_local) fixedpoint_next: int
+
+dag_reset :: proc() {
+	dag_table = make(map[string]^Type)
+	fixedpoint_index = make(map[rawptr]int)
+	fixedpoint_next = 0
 }
 
-Factor :: struct {
-	sym:   Symbol,
-	power: int,
+// dag_intern returns the canonical node for a Compose shape: if an identical shape
+// was already built, the existing node is returned (sharing), else this one is
+// stored. Keys are by the operands' own structural keys, so sharing is transitive.
+dag_intern :: proc(c: Compose_Type) -> ^Type {
+	node := new(Type)
+	node^ = c
+	key := dag_key(node)
+	if existing, ok := dag_table[key]; ok do return existing
+	dag_table[key] = node
+	return node
 }
 
-Term :: struct {
-	coeff:    i128,
-	monomial: []Factor, // sorted by symbol key; empty = constant
-}
-
-Poly :: struct {
-	terms: [dynamic]Term,
-}
-
-// build_poly attempts to normalize a `+ - *` subtree into a Poly. It returns
-// ok=false if the subtree mixes in a non-integer concrete (a float/string — those
-// are not in the integer polynomial ring and fall back to the generic path).
-build_poly :: proc(v: Compose_Type) -> (Poly, bool) {
-	t := new(Type)
-	t^ = v
-	return expr_to_poly(t)
-}
-
-// expr_to_poly converts any reduced expression into a Poly. Concrete integers
-// become the constant term; fixed points become degree-1 monomials; `+ - *`
-// recurse; anything else (a non-ring op over a symbol, a float, …) becomes a
-// single opaque symbol of degree 1 — UNLESS it is a concrete non-integer, in
-// which case we bail (ok=false) so the caller keeps the generic concrete path.
-expr_to_poly :: proc(t: ^Type) -> (Poly, bool) {
-	if t == nil do return {}, false
-
-	#partial switch v in t^ {
-	case Compose_Type:
-		#partial switch v.operator {
-		case .Add, .Subtract:
-			if v.left == nil {
-				// Unary: `+x` -> x, `-x` -> negate.
-				rp, rok := expr_to_poly(v.right)
-				if !rok do return {}, false
-				if v.operator == .Subtract do return poly_neg(rp), true
-				return rp, true
-			}
-			// Visit LEFT first so symbols get appearance-ordered sequence numbers in
-			// source order (`a*2 + b*3` assigns a before b).
-			lp, lok := expr_to_poly(v.left)
-			if !lok do return {}, false
-			rp, rok := expr_to_poly(v.right)
-			if !rok do return {}, false
-			if v.operator == .Subtract do return poly_add(lp, poly_neg(rp)), true
-			return poly_add(lp, rp), true
-		case .Multiply:
-			lp, lok := expr_to_poly(v.left)
-			if !lok do return {}, false
-			rp, rok := expr_to_poly(v.right)
-			if !rok do return {}, false
-			return poly_mul(lp, rp), true
-		}
-		// Non-ring operator (`/`, comparisons, bit ops): reduce it, then treat the
-		// reduced node as an opaque symbol if it is still symbolic, or as a constant
-		// if it collapsed to an integer.
-		reduced := reduce_compose(v)
-		return leaf_to_poly(reduced)
-	}
-	return leaf_to_poly(t)
-}
-
-// leaf_to_poly turns a non-Compose reduced node into a Poly: a concrete integer is
-// the constant term, a TRUE fixed point a degree-1 symbol, a concrete non-integer
-// bails. A reference whose target is NOT a fixed point (e.g. `b -> a*2`) is NOT a
-// symbol — we FOLLOW it: reduce the bound value and re-polynomialize, so a chain of
-// reference-bound expressions distributes through (`b + 2` with `b -> a*2`,
-// `a -> ??::u8*2` becomes `4 * a + 2`, not the opaque symbol `b + 2`). Only a
-// reference that bottoms out in a `??` stays a symbol — and then keyed by its OWN
-// site so repeated mentions of the same name collect.
-leaf_to_poly :: proc(t: ^Type) -> (Poly, bool) {
-	if t == nil do return {}, false
+// dag_key is the structural identity of a reduced node: equal keys ⟺ equal value.
+// A concrete int is its number; a fixed point its stable index; a compose its
+// `op(leftkey,rightkey)`. Commutative ops (`+`,`*`) sort their operand keys so
+// `a+b` and `b+a` share. Used both for CSE and for the `x-x`/`x+x` identities.
+dag_key :: proc(t: ^Type) -> string {
+	if t == nil do return "_"
 	#partial switch v in t^ {
 	case Integer_Type:
-		if int_is_concrete(v) do return poly_const(int_value(v)), true
-		// A non-singleton integer envelope is a fixed point too (its concrete value
-		// is unknown): carry it as an opaque symbol.
-		return poly_symbol(make_symbol(t)), true
+		if int_is_concrete(v) do return fmt.aprintf("i%d", int_value(v))
+		return fmt.aprintf("I%s", integer_to_string(v))
 	case Float_Type:
-		return {}, false // floats are not in the integer ring
+		return fmt.aprintf("f%s", float_to_string(v))
 	case String_Type:
-		return {}, false
+		return fmt.aprintf("s%s", string_value(v))
 	case Bool_Type:
-		return {}, false
+		return fmt.aprintf("b%v", bool_is_concrete(v) ? bool_value(v) : false)
 	case None_Type:
-		return {}, false
-	case Mention_Type:
-		// Always FOLLOW a name to its bound value and re-polynomialize. A name is
-		// never itself a symbol — we want to SEE the `??` it bottoms out in, not the
-		// alias. `b -> a*2` distributes; `b -> a -> ??::u8` collapses to the `??::u8`
-		// atom (rendered `??::u8`), so two aliases of the same unknown collect.
-		if v.match_scope != nil && v.match_index >= 0 {
-			return expr_to_poly(reduce_value(v.match_scope.values[v.match_index]))
+		return "n"
+	case Compose_Type:
+		lk := dag_key(v.left)
+		rk := dag_key(v.right)
+		if v.operator == .Add || v.operator == .Multiply {
+			if lk > rk do lk, rk = rk, lk // commutative: canonical operand order
 		}
-		return poly_symbol(make_symbol(t)), true
+		return fmt.aprintf("(%s%s%s)", lk, op_symbol(v.operator), rk)
+	case Cast_Type:
+		return fmt.aprintf("?%d", fixedpoint_id(t))
+	case Unknown_Type:
+		return fmt.aprintf("?%d", fixedpoint_id(t))
+	case Mention_Type:
+		return fmt.aprintf("?%d", fixedpoint_id(t))
 	case Reference_Type:
-		eff := reference_effective_value(v)
-		if eff != nil do return expr_to_poly(reduce_value(eff))
-		return poly_symbol(make_symbol(t)), true
+		return fmt.aprintf("?%d", fixedpoint_id(t))
 	}
-	// Cast(??) / Unknown / opaque Compose: the atomic symbol. This is the only node
-	// that becomes a Symbol — the actual fixed point the runtime/linker resolves.
-	return poly_symbol(make_symbol(t)), true
+	return fmt.aprintf("@%p", t)
 }
 
-// --- symbol identity ---
-//
-// Symbols are ordered by FIRST APPEARANCE, not by address: a global sequence map
-// assigns each distinct fixed point a stable index the first time make_symbol sees
-// it, and the rendered key embeds that index (`s<seq>:…`). Sorting monomials by
-// key then yields a deterministic order independent of allocation/ASLR — `a*2 +
-// b*3` always renders with `a`'s term before `b`'s, whatever the heap layout.
-
-symbol_seq:      map[rawptr]int
-symbol_seq_next: int
-
-// symbol_index returns a stable, appearance-ordered index for a node identity.
-symbol_index :: proc(id: rawptr) -> int {
-	if idx, ok := symbol_seq[id]; ok do return idx
-	idx := symbol_seq_next
-	symbol_seq_next += 1
-	symbol_seq[id] = idx
-	return idx
-}
-
-// make_symbol derives a Symbol with a stable identity key from a node. The fixed
-// point a name bottoms out in is a single SHARED `^Type` (every mention of `a`
-// reduces to the same `??::u8` node), so we key by that node's ADDRESS — two
-// mentions of the same unknown then collect (`a + a` → `2 * ??::u8`), while two
-// distinct `??` (different nodes) stay apart.
-//
-// Keys must outlive the temp allocator (they index maps across many folds), so
-// they are heap-allocated (fmt.aprintf, not tprintf's transient buffer).
-make_symbol :: proc(node: ^Type) -> Symbol {
-	// The identity that decides collection (same id → same symbol). For a name it
-	// is the binding site, for an atomic `??` the node address.
+// fixedpoint_id assigns a stable, appearance-ordered index to a fixed point. Keyed
+// by node ADDRESS (every mention of the same `??` reduces to the same shared node)
+// so two mentions of one unknown share an index, two distinct `??` do not. The
+// index drives both CSE (same id → same key) and rendering (`??0`, `??1`).
+fixedpoint_id :: proc(node: ^Type) -> int {
 	id: rawptr = node
 	#partial switch v in node^ {
 	case Mention_Type:
@@ -454,196 +510,11 @@ make_symbol :: proc(node: ^Type) -> Symbol {
 			id = rawptr(uintptr(ref.match_scope) ~ uintptr(ref.match_index))
 		}
 	}
-	// Embed the appearance-ordered index so sort_by(key) is deterministic.
-	seq := symbol_index(id)
-	return Symbol{fmt.aprintf("s%08d:%p", seq, id), node}
-}
-
-// --- poly constructors ---
-
-poly_zero :: proc() -> Poly {
-	return Poly{make([dynamic]Term)}
-}
-
-poly_const :: proc(c: i128) -> Poly {
-	p := poly_zero()
-	if c != 0 do append(&p.terms, Term{c, {}})
-	return p
-}
-
-poly_symbol :: proc(s: Symbol) -> Poly {
-	p := poly_zero()
-	mono := make([]Factor, 1)
-	mono[0] = Factor{s, 1}
-	append(&p.terms, Term{1, mono})
-	return p
-}
-
-// --- poly arithmetic (collecting like monomials) ---
-
-poly_add :: proc(a, b: Poly) -> Poly {
-	out := poly_zero()
-	for t in a.terms do poly_accumulate(&out, t.coeff, t.monomial)
-	for t in b.terms do poly_accumulate(&out, t.coeff, t.monomial)
-	return out
-}
-
-poly_neg :: proc(a: Poly) -> Poly {
-	out := poly_zero()
-	for t in a.terms do poly_accumulate(&out, -t.coeff, t.monomial)
-	return out
-}
-
-poly_mul :: proc(a, b: Poly) -> Poly {
-	out := poly_zero()
-	for ta in a.terms {
-		for tb in b.terms {
-			poly_accumulate(&out, ta.coeff * tb.coeff, monomial_mul(ta.monomial, tb.monomial))
-		}
-	}
-	return out
-}
-
-// poly_accumulate adds `coeff * monomial` into p, merging with a like monomial and
-// dropping the term if the coefficient reaches zero.
-poly_accumulate :: proc(p: ^Poly, coeff: i128, monomial: []Factor) {
-	if coeff == 0 do return
-	mono := monomial_normalize(monomial)
-	key := monomial_key(mono)
-	for &t, i in p.terms {
-		if monomial_key(t.monomial) == key {
-			t.coeff += coeff
-			if t.coeff == 0 do ordered_remove(&p.terms, i)
-			return
-		}
-	}
-	append(&p.terms, Term{coeff, mono})
-}
-
-// monomial_mul concatenates two monomials and normalizes (combines powers).
-monomial_mul :: proc(a, b: []Factor) -> []Factor {
-	combined := make([dynamic]Factor, 0, len(a) + len(b))
-	for f in a do append(&combined, f)
-	for f in b do append(&combined, f)
-	return monomial_normalize(combined[:])
-}
-
-// monomial_normalize sorts factors by symbol key and sums the powers of repeats,
-// so `a*a` becomes `a^2` and the canonical key is order-independent.
-monomial_normalize :: proc(factors: []Factor) -> []Factor {
-	if len(factors) == 0 do return {}
-	collected := make(map[string]Factor)
-	order := make([dynamic]string)
-	for f in factors {
-		if f.power == 0 do continue
-		if existing, ok := collected[f.sym.key]; ok {
-			collected[f.sym.key] = Factor{existing.sym, existing.power + f.power}
-		} else {
-			collected[f.sym.key] = f
-			append(&order, f.sym.key)
-		}
-	}
-	slice.sort(order[:])
-	out := make([dynamic]Factor, 0, len(order))
-	for k in order {
-		f := collected[k]
-		if f.power != 0 do append(&out, f)
-	}
-	return out[:]
-}
-
-// monomial_key is the canonical string identity of a monomial (factors already
-// sorted by monomial_normalize). The empty monomial keys as "" (the constant).
-monomial_key :: proc(factors: []Factor) -> string {
-	if len(factors) == 0 do return ""
-	b := strings.builder_make()
-	for f, i in factors {
-		if i > 0 do strings.write_byte(&b, '*')
-		strings.write_string(&b, f.sym.key)
-		if f.power != 1 do fmt.sbprintf(&b, "^%d", f.power)
-	}
-	return strings.to_string(b)
-}
-
-// ============================================================================
-// POLY -> TYPE — emit the operation-minimal Compose tree.
-//
-// Order the terms for stable, readable output: symbolic terms first (sorted by
-// monomial key, then descending degree-ish), the constant last. A term renders as
-// `coeff * monomial` with the coefficient elided when it is 1 (or rendered as a
-// leading `-` and a subtraction when negative). The whole sum chains with `+`/`-`
-// so a negative term becomes a subtraction (`6*a - 3`, not `6*a + -3`).
-// ============================================================================
-
-poly_to_type :: proc(p: Poly) -> ^Type {
-	if len(p.terms) == 0 {
-		return new_type(make_int_result(0))
-	}
-
-	// Stable order: non-constant terms first (by monomial key), constant last.
-	terms := make([dynamic]Term, 0, len(p.terms))
-	for t in p.terms do if len(t.monomial) > 0 do append(&terms, t)
-	slice.sort_by(terms[:], proc(a, b: Term) -> bool {
-		return monomial_key(a.monomial) < monomial_key(b.monomial)
-	})
-	// Append the constant term (if any) at the end.
-	for t in p.terms do if len(t.monomial) == 0 do append(&terms, t)
-
-	result: ^Type = nil
-	for t, i in terms {
-		term_node, term_neg := term_to_type(t)
-		if result == nil {
-			if term_neg {
-				// Leading negative term: 0 - |term|, or just -|term| via unary.
-				result = new_type(Compose_Type{nil, term_node, .Subtract, nil})
-			} else {
-				result = term_node
-			}
-		} else {
-			op: Operator_Kind = term_neg ? .Subtract : .Add
-			result = new_type(Compose_Type{result, term_node, op, nil})
-		}
-		_ = i
-	}
-	if result == nil do return new_type(make_int_result(0))
-	return result
-}
-
-// term_to_type renders one term as `|coeff| * monomial` (coefficient elided when
-// 1) and reports whether the term is negative (so the caller subtracts it).
-term_to_type :: proc(t: Term) -> (^Type, bool) {
-	neg := t.coeff < 0
-	mag := neg ? -t.coeff : t.coeff
-
-	if len(t.monomial) == 0 {
-		// Pure constant: render its magnitude, the caller subtracts if negative.
-		return new_type(make_int_result(mag)), neg
-	}
-
-	mono := monomial_to_type(t.monomial)
-	if mag == 1 {
-		return mono, neg
-	}
-	coeff_node := new_type(make_int_result(mag))
-	return new_type(Compose_Type{coeff_node, mono, .Multiply, nil}), neg
-}
-
-// monomial_to_type renders a product of symbol powers as a chain of multiplies,
-// expanding a power `a^n` into `a * a * … * a` (n factors) so codegen sees plain
-// multiplications. Factors keep their original ^Type node (so a Mention renders
-// as its name).
-monomial_to_type :: proc(factors: []Factor) -> ^Type {
-	result: ^Type = nil
-	for f in factors {
-		for _ in 0 ..< f.power {
-			if result == nil {
-				result = f.sym.node
-			} else {
-				result = new_type(Compose_Type{result, f.sym.node, .Multiply, nil})
-			}
-		}
-	}
-	return result
+	if idx, ok := fixedpoint_index[id]; ok do return idx
+	idx := fixedpoint_next
+	fixedpoint_next += 1
+	fixedpoint_index[id] = idx
+	return idx
 }
 
 // ============================================================================

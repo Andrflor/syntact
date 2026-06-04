@@ -338,7 +338,8 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 	case None_Type:
 		strings.write_string(b, "none")
 	case Unknown_Type:
-		strings.write_string(b, "??")
+		// A surviving bare fixed point: `??N` (stable index).
+		fmt.sbprintf(b, "??%d", fixedpoint_id(t))
 	case Scope_Type:
 		strings.write_byte(b, '{')
 		first := true
@@ -376,38 +377,71 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 	case Cast_Type:
 		// A cast's value is its folded result (the reinterpreted bits laid into the
 		// target) when the source was concrete. Otherwise it is a SURVIVING fixed
-		// point (`??::u8`): render it raw as `value::target`, no spaces around `::`.
+		// point: render as `??N` (a stable index per distinct unknown).
 		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) {
 			write_value(b, v.type_fold)
 		} else {
-			write_value(b, v.value)
-			strings.write_string(b, "::")
-			write_value(b, v.target)
+			fmt.sbprintf(b, "??%d", fixedpoint_id(t))
 		}
 	case Compose_Type:
-		// A SYMBOLIC reduced expression (a fixed point survived): the reducer emits
-		// a normalized Compose tree over the surviving `??`. Render it as an infix
-		// expression so a partially-reduced program shows e.g. `6 * a - 3`.
-		if v.left != nil {
-			write_value(b, v.left)
-			fmt.sbprintf(b, " %s ", op_symbol(v.operator))
-		} else {
-			strings.write_string(b, op_symbol(v.operator))
-		}
-		write_value(b, v.right)
-	case Mention_Type:
-		// A surviving fixed point renders as the name it was bound to (`a`), not the
-		// `??` underneath it.
-		if v.name != "" {
-			strings.write_string(b, v.name)
-		} else if v.match_scope != nil && v.match_index >= 0 {
-			write_value(b, v.match_scope.values[v.match_index])
-		}
-	case Reference_Type:
-		strings.write_string(b, fold_to_string(t))
+		// A SYMBOLIC reduced expression (a fixed point survived): the reducer emits a
+		// factored Compose tree over the surviving `??`. Render it infix WITH
+		// PARENTHESES per operator precedence, so `(x+1)*y` is not mis-read as
+		// `x + 1 * y`.
+		write_compose_value(b, v)
+	case Mention_Type, Reference_Type:
+		// A surviving fixed point renders as `??N` — a stable index distinguishing
+		// the distinct unknowns the linker will resolve (`??0`, `??1`, …).
+		fmt.sbprintf(b, "??%d", fixedpoint_id(t))
 	case:
 		strings.write_string(b, type_to_string(t))
 	}
+}
+
+// op_prec ranks an operator for parenthesization: higher binds tighter.
+op_prec :: proc(op: Operator_Kind) -> int {
+	#partial switch op {
+	case .Multiply, .Divide, .Mod:
+		return 3
+	case .Add, .Subtract:
+		return 2
+	}
+	return 1
+}
+
+// write_compose_value renders a reduced arithmetic node infix, parenthesizing an
+// operand whose own operator binds LOOSER than this one (so a sum inside a product
+// gets parens). A Cast operand (`??::u8`) prints as `??N` via write_value.
+write_compose_value :: proc(b: ^strings.Builder, v: Compose_Type) {
+	if v.left == nil {
+		strings.write_string(b, op_symbol(v.operator))
+		write_operand_value(b, v.right, op_prec(v.operator))
+		return
+	}
+	write_operand_value(b, v.left, op_prec(v.operator))
+	fmt.sbprintf(b, " %s ", op_symbol(v.operator))
+	write_operand_value(b, v.right, op_prec(v.operator))
+}
+
+write_operand_value :: proc(b: ^strings.Builder, operand: ^Type, parent_prec: int) {
+	if operand != nil {
+		#partial switch ov in operand^ {
+		case Compose_Type:
+			if op_prec(ov.operator) < parent_prec {
+				strings.write_byte(b, '(')
+				write_value(b, operand)
+				strings.write_byte(b, ')')
+				return
+			}
+		case Cast_Type:
+			// A `??::u8` fixed point: render as ??N, not value::target.
+			if ov.type_fold == nil || !fold_is_concrete_value(ov.type_fold) {
+				fmt.sbprintf(b, "??%d", fixedpoint_id(operand))
+				return
+			}
+		}
+	}
+	write_value(b, operand)
 }
 
 // --- print ---

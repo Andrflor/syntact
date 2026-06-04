@@ -1,0 +1,6 @@
+{
+  "name": "Symbolic unit coefficient elided",
+  "description": "a*1 reduces to just a (coefficient 1 elided)",
+  "source": "a -> ??::u8\n-> a*1",
+  "expect": "??0"
+}
