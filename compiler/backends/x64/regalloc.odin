@@ -90,6 +90,19 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 		}
 	}
 
+	// commutative_def[v] is true when v is defined by a COMMUTATIVE op (add/mul/and/
+	// or/xor), where the result can land in ANY register — so honoring its physical
+	// preference (RDI for the exit value) costs nothing. A NON-commutative op
+	// (sub/div) computes `dst = a - b` in place and must seed dst with operand `a`;
+	// there the move-bias hint wins, since overriding it would force two shuffle movs.
+	commutative_def := make([]bool, n)
+	defer delete(commutative_def)
+	for inst in prog.insts {
+		if d, ok := bc_def(inst); ok {
+			commutative_def[d] = def_op_is_commutative(inst)
+		}
+	}
+
 	// Active intervals, kept sorted by increasing `end` so the earliest-expiring
 	// is reclaimed first. free_regs is the pool of currently-unused GPRs.
 	free_regs := make([dynamic]Register64)
@@ -114,14 +127,27 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 
 		if len(free_regs) > 0 {
 			reg, has_pref := Register64{}, false
-			// 1) Biased coloring: reuse a move-related source's just-freed register
-			// so the emitter elides the copy. This takes priority over the physical
-			// preference because coalescing erases a mov INSIDE the two-address op
-			// (x64 computes `dst op= src` in place, so dst must seed with operand `a`),
-			// whereas the physical preference only saves the single final move into
-			// the exit register — eliding the in-op copy is the bigger win, and for a
-			// NON-commutative op (sub/div) seeding the wrong operand forces TWO moves.
-			if hint[iv.vreg] >= 0 {
+			// A value can have BOTH a move-bias hint (reuse operand `a`'s dying
+			// register to elide the in-op copy) and a physical preference (the ret
+			// value wants RDI/RSI so the final mov into the exit register elides).
+			//
+			// The PHYS preference wins when present AND the defining op is commutative:
+			// the ret value (the only one with a phys pref) is consumed solely by the
+			// exit syscall, and an add/mul/lea can write RDI directly, so placing it
+			// there makes the final `mov rdi, x` vanish at no cost. For a NON-commutative
+			// def (sub/div), dst must seed operand `a` in place, so the move-bias hint
+			// wins instead — overriding it would force two shuffle movs.
+			if phys_pref[iv.vreg] > 0 && commutative_def[iv.vreg] {
+				want := Register64(u8(phys_pref[iv.vreg] - 1))
+				for fr, idx in free_regs {
+					if fr == want {
+						reg = fr; has_pref = true
+						ordered_remove(&free_regs, idx)
+						break
+					}
+				}
+			}
+			if !has_pref && hint[iv.vreg] >= 0 {
 				src := hint[iv.vreg]
 				if loc := locs[src]; loc.kind == .Register {
 					for fr, idx in free_regs {
@@ -133,8 +159,8 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 					}
 				}
 			}
-			// 2) Physical preference (ret value → RDI/RSI): if that exact register
-			// is free, take it so the final mov-into-the-ABI-register elides.
+			// Last resort before an arbitrary pick: a non-commutative ret value whose
+			// hint didn't land can still take RDI/RSI if free (saves the final mov).
 			if !has_pref && phys_pref[iv.vreg] > 0 {
 				want := Register64(u8(phys_pref[iv.vreg] - 1))
 				for fr, idx in free_regs {
@@ -178,6 +204,27 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	// 16-byte align the spill area for ABI-correct stack alignment.
 	stack_size := (next_spill_offset + 15) & ~int(15)
 	return Reg_Alloc{locs = locs, stack_size = stack_size}
+}
+
+// def_op_is_commutative reports whether the instruction defines its dst via a
+// commutative binary op (add/mul/and/or/xor) — operands interchangeable, so the
+// result may be written to any register. Non-commutative (sub/div/mod) and
+// non-binary defs return false.
+def_op_is_commutative :: proc(inst: bc.BC_Inst) -> bool {
+	op: bc.BC_Op
+	#partial switch v in inst {
+	case bc.BC_Bin:
+		op = v.op
+	case bc.BC_Bin_Imm:
+		op = v.op
+	case:
+		return false
+	}
+	#partial switch op {
+	case .Add, .Multiply, .BitAnd, .BitOr, .BitXor:
+		return true
+	}
+	return false
 }
 
 // build_move_hints fills hint[dst] with a move-related source register preference.
