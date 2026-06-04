@@ -1,7 +1,16 @@
 package compiler
 
 import "core:fmt"
+import "core:math"
 import "core:strings"
+
+// ext_mul multiplies over the extended reals, defining 0·∞ = 0 (the convention
+// that keeps a bounded factor times an unbounded one finite when the bound is 0).
+// Used by the interval Multiply so an unbounded `??::f64` factor folds.
+ext_mul :: proc(x, y: f64) -> f64 {
+	if x == 0 || y == 0 do return 0
+	return x * y
+}
 
 // fold_float.odin — the float domain, mirror of fold_integer.odin.
 //
@@ -341,14 +350,28 @@ fold_arith_float_intervals :: proc(
 		float_intervals[0] = Float_Interval{lo, hi, a.lo_open || b.hi_open, a.hi_open || b.lo_open}
 		return float_intervals
 	case .Multiply:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		p1 := a_lo * b_lo
-		p2 := a_lo * b_hi
-		p3 := a_hi * b_lo
-		p4 := a_hi * b_hi
-		// conservative: an exclusive operand bound makes both result bounds exclusive
+		// Multiply over EXTENDED reals: a missing bound is ±∞. The product interval is
+		// [min, max] of the four corner products, with ±∞ propagated. This lets an
+		// UNBOUNDED fixed point (`??::f64` = (-∞,+∞)) multiply by a constant and stay a
+		// (still unbounded) interval instead of failing the fold (which raised a
+		// spurious Invalid_operator). The reducer then keeps the expression symbolic.
+		al := a_lo_ok ? a_lo : math.inf_f64(-1)
+		ah := a_hi_ok ? a_hi : math.inf_f64(1)
+		bl := b_lo_ok ? b_lo : math.inf_f64(-1)
+		bh := b_hi_ok ? b_hi : math.inf_f64(1)
+		p1 := ext_mul(al, bl)
+		p2 := ext_mul(al, bh)
+		p3 := ext_mul(ah, bl)
+		p4 := ext_mul(ah, bh)
+		lo := min(p1, p2, p3, p4)
+		hi := max(p1, p2, p3, p4)
 		any_open := a.lo_open || a.hi_open || b.lo_open || b.hi_open
-		float_intervals[0] = Float_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4), any_open, any_open}
+		float_intervals[0] = Float_Interval {
+			math.is_inf(lo) ? nil : lo,
+			math.is_inf(hi) ? nil : hi,
+			any_open,
+			any_open,
+		}
 		return float_intervals
 	case .Divide:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil

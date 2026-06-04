@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_div_unknown",
+  "description": "Division by a constant over a fixed point stays symbolic",
+  "source": "n -> ??::u8\n-> n / 2",
+  "expect": "??0 / 2"
+}

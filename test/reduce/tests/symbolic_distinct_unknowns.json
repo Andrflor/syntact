@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_distinct_unknowns",
+  "description": "Distinct fixed points stay distinct",
+  "source": "a -> ??::u8\nb -> ??::u8\n-> a + b",
+  "expect": "??0 + ??1"
+}

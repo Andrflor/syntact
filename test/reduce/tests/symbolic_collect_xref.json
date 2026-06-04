@@ -1,0 +1,6 @@
+{
+  "name": "symbolic_collect_xref",
+  "description": "Additive collection across references",
+  "source": "n -> ??::u8\nc -> 2*n\ne -> n\n-> c + e",
+  "expect": "3 * ??0"
+}
