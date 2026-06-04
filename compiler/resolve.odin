@@ -450,10 +450,26 @@ process_cache_task :: proc(task: thread.Task) {
 				}
 			}
 
-			// A reduced result is a VALUE (concrete or a symbolic DAG over the
-			// surviving `??`), so render it with value_to_string — the same path the
-			// reduce tests use — not print_type (which dumps the IR type tree).
-			fmt.println(value_to_string(result))
+			// --bc / --run lower the reduced DAG to the target-neutral bytecode
+			// (the bridge every backend shares) and either dump it or interpret
+			// it. Otherwise the reduced result is a VALUE rendered with
+			// value_to_string — the same path the reduce tests use.
+			if resolver.options.print_bytecode || resolver.options.run_bytecode {
+				prog := lower_to_bytecode(result)
+				if resolver.options.print_bytecode {
+					fmt.print(bytecode_to_string(prog))
+				}
+				if resolver.options.run_bytecode {
+					r := interp_bytecode(prog, resolver.options.run_args[:])
+					if r.ok {
+						fmt.println(r.value)
+					} else {
+						fmt.eprintln("runtime error:", r.error)
+					}
+				}
+			} else {
+				fmt.println(value_to_string(result))
+			}
 		}
 	} else if resolver.options.verbose {
 		fmt.printf("[DEBUG] Analysis skipped for file: %s (analyze_only option)\n", cache.path)
