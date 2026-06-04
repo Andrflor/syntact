@@ -87,3 +87,15 @@ sar_r64_cl :: proc(reg: Register64) {
 	rex: u8 = 0x48 | ((u8(reg) & 0x8) >> 3)
 	write([]u8{rex, 0xD3, 0xF8 | (u8(reg) & 0x7)})
 }
+
+// sar_r64_imm8 : arithmetic shift right by an immediate (REX.W C1 /7 ib, or D1 /7
+// for a shift of 1). /7 is the SAR opcode extension.
+sar_r64_imm8 :: proc(reg: Register64, imm: u8) {
+	rex: u8 = 0x48 | ((u8(reg) & 0x8) >> 3)
+	modrm: u8 = 0xF8 | (u8(reg) & 0x7) // mod=11, /7, rm=reg
+	if imm == 1 {
+		write([]u8{rex, 0xD1, modrm})
+	} else {
+		write([]u8{rex, 0xC1, modrm, imm})
+	}
+}

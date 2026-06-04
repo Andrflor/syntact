@@ -197,13 +197,21 @@ mtype_wider :: proc(a, b: Machine_Type) -> Machine_Type {
 // Instructions.
 // ----------------------------------------------------------------------------
 
+// The bytecode uses DISTINCT mnemonics for the register and immediate forms of
+// an operation — like a real ISA (`add r,r` vs `add r,imm`). So a literal is an
+// immediate ON the instruction (BC_Bin_Imm), never a separate BC_Const value: a
+// constant doesn't occupy a virtual register or an instruction unless it is
+// genuinely live in one. The backend routes by mnemonic with no "is this a
+// constant?" inspection.
 BC_Inst :: union {
-	BC_Const, // dst = imm (integer/bool)
+	BC_Const, // dst = imm — a constant that must live in a register (rare: e.g. ret of a bare const)
 	BC_Const_F, // dst = fimm (float constant)
 	BC_Str_Const, // dst = pointer to a concrete string in .rodata
 	BC_Load_Arg, // dst = argv[slot] (a ??N fixed point), int/float domain
-	BC_Bin, // dst = a op b   (arithmetic / bitwise / shift) — domain on value_types
-	BC_Cmp, // dst = (a op b) ? 1 : 0   (comparison → 0/1)
+	BC_Bin, // dst = a op b      (reg op reg)
+	BC_Bin_Imm, // dst = a op #imm   (reg op immediate)
+	BC_Cmp, // dst = (a op b) ? 1 : 0     (reg cmp reg → 0/1)
+	BC_Cmp_Imm, // dst = (a op #imm) ? 1 : 0  (reg cmp immediate → 0/1)
 	BC_Move, // dst = src    (a phi merge — pattern branches write a common dst)
 	BC_Label_Def, // label: (a jump destination)
 	BC_Jump, // goto target
@@ -242,10 +250,27 @@ BC_Bin :: struct {
 	a, b: BC_Value,
 }
 
+// dst = a op #imm — the immediate form. `op` is non-commutative-aware: `a - #imm`
+// means a minus imm (imm is always the right operand), `a >> #imm` shifts a by
+// imm, etc. The lowering puts the literal here directly.
+BC_Bin_Imm :: struct {
+	dst: BC_Value,
+	op:  BC_Op,
+	a:   BC_Value,
+	imm: i64,
+}
+
 BC_Cmp :: struct {
 	dst:  BC_Value,
 	op:   BC_Op,
 	a, b: BC_Value,
+}
+
+BC_Cmp_Imm :: struct {
+	dst: BC_Value,
+	op:  BC_Op,
+	a:   BC_Value,
+	imm: i64,
 }
 
 BC_Move :: struct {
@@ -321,8 +346,12 @@ bc_inst_line :: proc(inst: BC_Inst, prog: ^BC_Program = nil) -> string {
 		return fmt.tprintf("  v%d = arg %d", int(v.dst), v.slot)
 	case BC_Bin:
 		return fmt.tprintf("  v%d = %s v%d v%d", int(v.dst), bc_op_symbol(v.op), int(v.a), int(v.b))
+	case BC_Bin_Imm:
+		return fmt.tprintf("  v%d = %s v%d #%d", int(v.dst), bc_op_symbol(v.op), int(v.a), v.imm)
 	case BC_Cmp:
 		return fmt.tprintf("  v%d = cmp%s v%d v%d", int(v.dst), bc_op_symbol(v.op), int(v.a), int(v.b))
+	case BC_Cmp_Imm:
+		return fmt.tprintf("  v%d = cmp%s v%d #%d", int(v.dst), bc_op_symbol(v.op), int(v.a), v.imm)
 	case BC_Move:
 		return fmt.tprintf("  v%d = move v%d", int(v.dst), int(v.src))
 	case BC_Label_Def:

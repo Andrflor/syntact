@@ -53,13 +53,25 @@ Live_Interval :: struct {
 	end:   int, // instruction index of its last use (inclusive)
 }
 
-// allocate_registers runs liveness + linear-scan over a lowered program.
+// allocate_registers runs liveness + linear-scan over a lowered program, with
+// move-biased coloring (Briggs): a value prefers the register of a move-related
+// operand that dies at its definition, so the copy elides in the emitter.
 allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	n := prog.value_count
 	locs := make([]VReg_Loc, n)
 
 	intervals := compute_intervals(prog)
 	defer delete(intervals)
+
+	// Move-bias hints: hint[dst] = a source vreg dst would like to share a
+	// register with. Set for `dst = a op b` when `a` dies at this instruction
+	// (its last use), and for `dst = move src`. Coalescing is then safe: the
+	// source's interval has expired (no interference), so reusing its register
+	// erases the copy. -1 = no hint.
+	hint := make([]int, n)
+	defer delete(hint)
+	for i in 0 ..< n do hint[i] = -1
+	build_move_hints(prog, hint)
 
 	// Active intervals, kept sorted by increasing `end` so the earliest-expiring
 	// is reclaimed first. free_regs is the pool of currently-unused GPRs.
@@ -76,11 +88,32 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 
 	for iv in intervals {
 		// Expire every active interval that ends before this one starts; return
-		// its register to the pool.
-		expire_old(&active, &active_reg, &free_regs, iv.start)
+		// its register to the pool. Use `iv.start + 1` so an operand whose LAST use
+		// is exactly at this instruction (end == iv.start) is also reclaimed — its
+		// value is read before the result is written, so the register is free to
+		// reuse for the result. This is what makes move-coalescing fire (a dies
+		// here → dst takes a's register → the copy vanishes).
+		expire_old(&active, &active_reg, &free_regs, iv.start + 1)
 
 		if len(free_regs) > 0 {
-			reg := pop(&free_regs)
+			// Biased coloring: if this value is move-related to a source whose
+			// register just freed up (the source died), reuse that register so the
+			// emitter elides the copy. Else take any free register.
+			reg, has_pref := Register64{}, false
+			if hint[iv.vreg] >= 0 {
+				src := hint[iv.vreg]
+				if loc := locs[src]; loc.kind == .Register {
+					// Is the source's register currently free (its interval expired)?
+					for fr, idx in free_regs {
+						if fr == loc.reg {
+							reg = fr; has_pref = true
+							ordered_remove(&free_regs, idx)
+							break
+						}
+					}
+				}
+			}
+			if !has_pref do reg = pop(&free_regs)
 			locs[iv.vreg] = VReg_Loc{kind = .Register, reg = reg}
 			active_reg[iv.vreg] = reg
 			insert_active(&active, iv)
@@ -113,6 +146,37 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	// 16-byte align the spill area for ABI-correct stack alignment.
 	stack_size := (next_spill_offset + 15) & ~int(15)
 	return Reg_Alloc{locs = locs, stack_size = stack_size}
+}
+
+// build_move_hints fills hint[dst] with a move-related source register preference.
+// For `dst = a op b`, if operand `a` makes its LAST use at this instruction (so
+// its live range ends and won't interfere), dst prefers a's register. For
+// `dst = move src`, dst prefers src's register. This is the bias that lets the
+// emitter's reg→reg copies (mov Rdst, Ra) collapse to nothing.
+build_move_hints :: proc(prog: ^bc.BC_Program, hint: []int) {
+	n := prog.value_count
+	last := make([]int, n)
+	defer delete(last)
+	for i in 0 ..< n do last[i] = -1
+	for inst, pc in prog.insts {
+		for u in bc_uses(inst) {
+			if u >= 0 do last[u] = pc
+		}
+	}
+	for inst, pc in prog.insts {
+		#partial switch v in inst {
+		case bc.BC_Bin:
+			// `a` is the operand the emitter seeds the dst register with. If a dies
+			// here, dst can take a's register.
+			if last[int(v.a)] == pc do hint[int(v.dst)] = int(v.a)
+		case bc.BC_Bin_Imm:
+			if last[int(v.a)] == pc do hint[int(v.dst)] = int(v.a)
+		case bc.BC_Cmp_Imm:
+			if last[int(v.a)] == pc do hint[int(v.dst)] = int(v.a)
+		case bc.BC_Move:
+			if last[int(v.src)] == pc do hint[int(v.dst)] = int(v.src)
+		}
+	}
 }
 
 // compute_intervals does the single backward+forward liveness pass: a value's
@@ -169,7 +233,11 @@ bc_def :: proc(inst: bc.BC_Inst) -> (int, bool) {
 		return int(v.dst), true
 	case bc.BC_Bin:
 		return int(v.dst), true
+	case bc.BC_Bin_Imm:
+		return int(v.dst), true
 	case bc.BC_Cmp:
+		return int(v.dst), true
+	case bc.BC_Cmp_Imm:
 		return int(v.dst), true
 	case bc.BC_Move:
 		return int(v.dst), true
@@ -188,9 +256,15 @@ bc_uses :: proc(inst: bc.BC_Inst) -> []int {
 	case bc.BC_Bin:
 		buf[0] = int(v.a); buf[1] = int(v.b)
 		return buf[:2]
+	case bc.BC_Bin_Imm:
+		buf[0] = int(v.a)
+		return buf[:1]
 	case bc.BC_Cmp:
 		buf[0] = int(v.a); buf[1] = int(v.b)
 		return buf[:2]
+	case bc.BC_Cmp_Imm:
+		buf[0] = int(v.a)
+		return buf[:1]
 	case bc.BC_Move:
 		buf[0] = int(v.src)
 		return buf[:1]

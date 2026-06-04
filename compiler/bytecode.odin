@@ -204,18 +204,7 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 		if bc_compose_is_string(node) {
 			dst = bc_fail(l, "codegen: symbolic string concatenation not yet supported (needs pattern capture)")
 		} else {
-			a := bc_lower_value(l, v.left)
-			b := bc_lower_value(l, v.right)
-			mt := machine_type_of(node)
-			if mt == .None do mt = bc.mtype_wider(l.prog.value_types[a], l.prog.value_types[b])
-			op := op_to_bc(v.operator)
-			if bc.bc_op_is_comparison(op) {
-				dst = bc_fresh_value(l, .U8)
-				bc_emit(l, bc.BC_Cmp{dst, op, a, b})
-			} else {
-				dst = bc_fresh_value(l, mt)
-				bc_emit(l, bc.BC_Bin{dst, op, a, b})
-			}
+			dst = bc_lower_compose(l, node, v)
 		}
 
 	case Pattern_Type:
@@ -229,47 +218,97 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	return dst
 }
 
-// A ??N fixed point → Load_Arg{slot: N}. fixedpoint_id gives the stable,
-// appearance-ordered index, which is exactly the argv position.
+// bc_const_int returns a node's value as an i64 when it is a concrete integer (a
+// literal the lowering can fold into an immediate), else ok=false.
+bc_const_int :: proc(node: ^Type) -> (i64, bool) {
+	if node == nil do return 0, false
+	#partial switch v in node^ {
+	case Integer_Type:
+		if int_is_concrete(v) do return i64(int_value(v)), true
+	}
+	return 0, false
+}
+
+// bc_lower_compose lowers an arithmetic/comparison node, choosing the IMMEDIATE
+// mnemonic (BC_Bin_Imm / BC_Cmp_Imm) when an operand is a concrete integer — so a
+// literal is an immediate on the instruction, never a separate BC_Const value.
+// For non-commutative ops (-, /, %, shifts) only the RIGHT operand may be the
+// immediate; for commutative ops either side works (the constant is normalized to
+// the immediate, the variable stays the register operand).
+bc_lower_compose :: proc(l: ^BC_Lower, node: ^Type, v: Compose_Type) -> bc.BC_Value {
+	op := op_to_bc(v.operator)
+	mt := machine_type_of(node)
+	cmp := bc.bc_op_is_comparison(op)
+
+	lk, l_const := bc_const_int(v.left)
+	rk, r_const := bc_const_int(v.right)
+
+	// Float operands never fold to an integer immediate — keep them register form.
+	is_float := bc.mtype_is_float(mt)
+	if is_float {l_const = false; r_const = false}
+
+	commutative := op == .Add || op == .Multiply || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Equal || op == .NotEqual
+
+	// Right operand constant: a op #rk — always valid (immediate is the right side).
+	if r_const && !l_const {
+		a := bc_lower_value(l, v.left)
+		return bc_emit_imm(l, node, op, a, rk, cmp, mt)
+	}
+	// Left operand constant on a commutative op: #lk op b  ==  b op #lk.
+	if l_const && !r_const && commutative {
+		b := bc_lower_value(l, v.right)
+		return bc_emit_imm(l, node, op, b, lk, cmp, mt)
+	}
+
+	// General register/register form (both variable, both constant — rare since
+	// the reducer folds const⊕const — or a left-constant non-commutative op).
+	a := bc_lower_value(l, v.left)
+	b := bc_lower_value(l, v.right)
+	if mt == .None do mt = bc.mtype_wider(l.prog.value_types[a], l.prog.value_types[b])
+	if cmp {
+		dst := bc_fresh_value(l, .U8)
+		bc_emit(l, bc.BC_Cmp{dst, op, a, b})
+		return dst
+	}
+	dst := bc_fresh_value(l, mt)
+	bc_emit(l, bc.BC_Bin{dst, op, a, b})
+	return dst
+}
+
+bc_emit_imm :: proc(l: ^BC_Lower, node: ^Type, op: bc.BC_Op, a: bc.BC_Value, imm: i64, cmp: bool, mt_in: bc.Machine_Type) -> bc.BC_Value {
+	mt := mt_in
+	if mt == .None do mt = l.prog.value_types[a]
+	if cmp {
+		dst := bc_fresh_value(l, .U8)
+		bc_emit(l, bc.BC_Cmp_Imm{dst, op, a, imm})
+		return dst
+	}
+	dst := bc_fresh_value(l, mt)
+	bc_emit(l, bc.BC_Bin_Imm{dst, op, a, imm})
+	return dst
+}
+
+// A ??N fixed point → ONE Load_Arg{slot, width, signed}. fixedpoint_id gives the
+// stable, appearance-ordered index = the argv position.
 //
-// The ??'s declared domain (its ::u8 / ::i32 envelope) is read here and the
-// value is NORMALIZED to that domain ONCE at entry: an unsigned u8 is masked
-// (`and 0xff`), a signed i8 sign-extended (`shl 56; sar 56`). After this single
-// normalization the analyzer has proven the downstream in range — no further
-// masking.
+// The Load_Arg ALONE carries the domain: normalizing a ??::u8 to 0..255 (or a
+// ??::i8 by sign-extension) is the LOAD's own semantics, not a separate mask. The
+// lowering emits nothing else — each backend realizes the domain its own way: x64
+// with a single movzx/movsx (load+extend), the interpreter by masking in
+// software. A bare/64-bit/float domain loads as-is.
 bc_lower_fixed_point :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	slot := fixedpoint_id(node)
 	mt := machine_type_of(node)
 
-	// A float ?? (??::f64 / ??::f32): load the argument as a double, no masking.
 	if bc.mtype_is_float(mt) {
-		raw := bc_fresh_value(l, mt)
-		bc_emit(l, bc.BC_Load_Arg{raw, slot, bc.mtype_bits(mt), true})
-		return raw
-	}
-
-	width, signed := bc_unknown_domain(node)
-
-	raw := bc_fresh_value(l, mt == .None ? .I64 : mt)
-	bc_emit(l, bc.BC_Load_Arg{raw, slot, width, signed})
-
-	// A 64-bit (or unsized) domain needs no normalization — argv is already i64.
-	if width == 0 || width >= 64 do return raw
-
-	if !signed {
-		mask := i64((u64(1) << width) - 1)
-		m := bc_fresh_value(l); bc_emit(l, bc.BC_Const{m, mask})
 		dst := bc_fresh_value(l, mt)
-		bc_emit(l, bc.BC_Bin{dst, .BitAnd, raw, m})
+		bc_emit(l, bc.BC_Load_Arg{dst, slot, bc.mtype_bits(mt), true})
 		return dst
 	}
 
-	shift := i64(64 - width)
-	s1 := bc_fresh_value(l); bc_emit(l, bc.BC_Const{s1, shift})
-	hi := bc_fresh_value(l); bc_emit(l, bc.BC_Bin{hi, .LShift, raw, s1})
-	s2 := bc_fresh_value(l); bc_emit(l, bc.BC_Const{s2, shift})
-	dst := bc_fresh_value(l, mt)
-	bc_emit(l, bc.BC_Bin{dst, .RShift, hi, s2})
+	width, signed := bc_unknown_domain(node)
+	dst := bc_fresh_value(l, mt == .None ? .I64 : mt)
+	bc_emit(l, bc.BC_Load_Arg{dst, slot, width, signed})
 	return dst
 }
 
