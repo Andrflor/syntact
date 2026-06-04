@@ -198,6 +198,18 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 			}
 		}
 		return integer_intervals_normalize(result[:])
+	case Cast_Type:
+		// `value :: target` produces the target's envelope: the cast forces the
+		// value's bits into the target's layout, so the result always lives in the
+		// target's set. When the source was concrete fold_cast cached the exact
+		// reinterpreted value in type_fold (`i8 -1 :: u8` → 255); otherwise the
+		// envelope is the WHOLE target (`??::u8` → 0..255). This makes the envelope
+		// of an inline cast match what a reference to a `:: `-bound binding yields,
+		// so `(??::u8)*2` folds to 0..510 just like `a->??::u8 ; a*2`.
+		if v.type_fold != nil {
+			return fold_type_intervals(v.type_fold)
+		}
+		return fold_constraint_intervals(v.target)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if s, ok := stored_fold_intervals(

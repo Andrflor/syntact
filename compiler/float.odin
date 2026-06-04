@@ -218,6 +218,14 @@ fold_type_float_intervals :: proc(
 			}
 		}
 		return float_intervals_normalize(result[:]), promote_float_kind(left_kind, right_kind), true
+	case Cast_Type:
+		// Mirror integer.odin: a `::` produces its target's envelope (the cached
+		// concrete value when the source was concrete, else the whole target), so an
+		// inline `(??::f64)*2.0` folds like a reference to a `::`-bound binding.
+		if v.type_fold != nil {
+			return fold_type_float_intervals(v.type_fold)
+		}
+		return fold_constraint_float_intervals(v.target)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if s, k, sok := stored_fold_float(v.match_scope.type_folds[v.match_index]); sok {
