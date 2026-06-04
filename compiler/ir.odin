@@ -374,13 +374,37 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		st^ = sub^
 		write_value(b, st)
 	case Cast_Type:
-		// A cast's value is its folded result (the reinterpreted bits laid into
-		// the target). If the fold resolved, render that; otherwise show it raw.
-		if v.type_fold != nil {
+		// A cast's value is its folded result (the reinterpreted bits laid into the
+		// target) when the source was concrete. Otherwise it is a SURVIVING fixed
+		// point (`??::u8`): render it raw as `value::target`, no spaces around `::`.
+		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) {
 			write_value(b, v.type_fold)
 		} else {
-			strings.write_string(b, type_to_string(t))
+			write_value(b, v.value)
+			strings.write_string(b, "::")
+			write_value(b, v.target)
 		}
+	case Compose_Type:
+		// A SYMBOLIC reduced expression (a fixed point survived): the reducer emits
+		// a normalized Compose tree over the surviving `??`. Render it as an infix
+		// expression so a partially-reduced program shows e.g. `6 * a - 3`.
+		if v.left != nil {
+			write_value(b, v.left)
+			fmt.sbprintf(b, " %s ", op_symbol(v.operator))
+		} else {
+			strings.write_string(b, op_symbol(v.operator))
+		}
+		write_value(b, v.right)
+	case Mention_Type:
+		// A surviving fixed point renders as the name it was bound to (`a`), not the
+		// `??` underneath it.
+		if v.name != "" {
+			strings.write_string(b, v.name)
+		} else if v.match_scope != nil && v.match_index >= 0 {
+			write_value(b, v.match_scope.values[v.match_index])
+		}
+	case Reference_Type:
+		strings.write_string(b, fold_to_string(t))
 	case:
 		strings.write_string(b, type_to_string(t))
 	}
@@ -556,7 +580,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 
 	case Cast_Type:
 		print_type(v.value, depth)
-		fmt.print(" :: ")
+		fmt.print("::")
 		print_type(v.target, depth)
 
 	case Execute_Type:
