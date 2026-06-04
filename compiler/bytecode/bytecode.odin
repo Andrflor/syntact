@@ -238,9 +238,9 @@ BC_Inst :: union {
 	BC_Bin_Imm, // dst = a op #imm   (reg op immediate)
 	BC_Cmp, // dst = (a op b) ? 1 : 0     (reg cmp reg → 0/1)
 	BC_Cmp_Imm, // dst = (a op #imm) ? 1 : 0  (reg cmp immediate → 0/1)
-	BC_Move, // dst = src    (a phi merge — pattern branches write a common dst)
+	BC_Move, // dst = src — a copy; reused as the phi/merge mechanism (several Moves into one dst). NOT pattern-specific: any merge point (pattern branch, loop-carried accumulator) writes a common dst this way
 	BC_Label_Def, // label: (a jump destination)
-	BC_Jump, // goto target
+	BC_Jump, // goto target — back-edge too, so the Label/Jump/Branch_Zero/Move set forms a full CFG: conditionals AND loops are expressible
 	BC_Branch_Zero, // if cond == 0 goto target
 	BC_Ret, // return src (becomes the program's result)
 }
