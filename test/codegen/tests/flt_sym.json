@@ -1,1 +1,1 @@
-{ "name": "flt_sym", "description": "??f64*2 arg10", "source": "x -> ??::f64\n-> x * 2.0", "args": ["10"], "expect": "20.0", "kind": "float" }
+{ "name": "flt_sym", "description": "??f64*2 arg10", "source": "x -> ??::f64\n-> x * 2.0", "args": [["0"], ["1"], ["2.5"], ["3.14"], ["10"], ["42.5"], ["100"]], "expect": ["0.0", "2.0", "5.0", "6.28", "20.0", "85.0", "200.0"], "kind": "float" }

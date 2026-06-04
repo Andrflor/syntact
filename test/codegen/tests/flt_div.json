@@ -1,1 +1,1 @@
-{ "name": "flt_div", "description": "10.0/4.0", "source": "-> 10.0 / 4.0", "args": [], "expect": "2.5", "kind": "float" }
+{ "name": "flt_div", "description": "10.0/4.0", "source": "-> 10.0 / 4.0", "args": [[]], "expect": ["2.5"], "kind": "float" }
