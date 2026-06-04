@@ -126,48 +126,74 @@ emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 	return X64_Output{code = out, rodata = rodata_blob[:]}, ""
 }
 
-// emit_arg_stub parses each argv[1..] as a signed integer into ARGS_TABLE[slot].
-// At process entry rsp -> argc, then the argv pointers. We loop K=0.. while
-// K+1 < argc, atoi(argv[K+1]) → ARGS_TABLE[K].
+// arg_slot_info collects, per arg slot, whether that slot is a FLOAT ?? (its
+// argv string must be parsed as a decimal, not an integer). Returns the highest
+// slot index seen + 1 (the count to parse) and the float-slot flags.
+arg_slot_info :: proc(e: ^X64_Emit) -> (count: int, is_float: map[int]bool) {
+	is_float = make(map[int]bool)
+	count = 0
+	for inst in e.prog.insts {
+		if la, ok := inst.(bc.BC_Load_Arg); ok {
+			if la.slot + 1 > count do count = la.slot + 1
+			if bc.mtype_is_float(e.prog.value_types[int(la.dst)]) {
+				is_float[la.slot] = true
+			}
+		}
+	}
+	return
+}
+
+// emit_arg_stub parses argv[1..] into ARGS_TABLE[slot]. Integer slots store the
+// signed integer (inline atoi); FLOAT slots store the f64 BIT PATTERN (inline
+// atof). Because each slot's domain (int vs float) is known at compile time, the
+// stub is UNROLLED — one parse block per slot, branchless on type — so a float
+// slot gets atof and an int slot atoi, with no per-slot type test at runtime.
 //
-// Registers: r12=argc, r13=&argv[0], r14=K (slot). Inner atoi uses rax/rcx/rsi/rdx.
+// At process entry rsp -> argc, then the argv pointers. argv[K+1] is the K-th
+// ??. A slot whose argv is missing (K+1 >= argc) is left zero.
+// Registers: r12=argc, r13=&argv[0]. Parse blocks clobber rax/rcx/rdx/rsi/rdi
+// + xmm0/xmm1 (float). R11 holds the ARGS_TABLE base.
 emit_arg_stub :: proc(e: ^X64_Emit) {
-	// r12 = argc = [rsp]
+	count, is_float := arg_slot_info(e)
+	defer delete(is_float)
+	if count == 0 do return
+
+	// r12 = argc = [rsp] ; r13 = &argv[0] = rsp+8 ; r11 = ARGS_TABLE base.
 	write([]u8{0x4C, 0x8B, 0x24, 0x24}) // mov r12, [rsp]
-	// r13 = rsp + 8  (&argv[0])
 	write([]u8{0x4C, 0x8D, 0x6C, 0x24, 0x08}) // lea r13, [rsp+8]
-	// r14 = 0
-	write([]u8{0x4D, 0x31, 0xF6}) // xor r14, r14
+	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR)) // ARGS_TABLE fits imm32
 
-	loop_start := e.buf.len
-	// rax = r14 + 1 ; cmp rax, r12 ; jge done
-	write([]u8{0x4C, 0x89, 0xF0}) // mov rax, r14
-	write([]u8{0x48, 0xFF, 0xC0}) // inc rax
-	write([]u8{0x4C, 0x39, 0xE0}) // cmp rax, r12
-	write([]u8{0x0F, 0x8D}) // jge rel32
-	jge_at := e.buf.len
-	write([]u8{0, 0, 0, 0})
+	for slot in 0 ..< count {
+		// Guard: if slot+1 >= argc, skip this slot (leaves table[slot]=0).
+		// cmp r12, imm(slot+1) ; jle skip
+		write([]u8{0x49, 0x81, 0xFC}) // cmp r12, imm32
+		put_u32(e, u32(slot + 1))
+		write([]u8{0x0F, 0x8E}) // jle rel32 → skip
+		jle_at := e.buf.len
+		write([]u8{0, 0, 0, 0})
 
-	// rdi = argv[r14+1] = [r13 + 8*rax]   (rax = r14+1 still)
-	write([]u8{0x49, 0x8B, 0x7C, 0xC5, 0x00}) // mov rdi, [r13 + rax*8 + 0]
-	// atoi(rdi) → rax  (inline)
-	emit_atoi(e)
-	// ARGS_TABLE[r14] = rax  → mov [base + r14*8], rax. base is absolute; load it.
-	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR)) // ARGS_TABLE fits imm32 (<4GiB)
-	write([]u8{0x4B, 0x89, 0x04, 0xF3}) // mov [r11 + r14*8], rax
-	// r14++
-	write([]u8{0x49, 0xFF, 0xC6}) // inc r14
-	// jmp loop_start
-	write([]u8{0xE9})
-	jat := e.buf.len
-	write([]u8{0, 0, 0, 0})
-	rel := i32(loop_start - (jat + 4))
-	patch_rel32(e, jat, rel)
+		// rdi = argv[slot+1] = [r13 + 8*(slot+1)]
+		write([]u8{0x49, 0x8B, 0xBD}) // mov rdi, [r13 + disp32]
+		put_u32(e, u32(8 * (slot + 1)))
 
-	// done:
-	done := e.buf.len
-	rel2 := i32(done - (jge_at + 4))
-	patch_rel32(e, jge_at, rel2)
+		if is_float[slot] {
+			emit_atof(e) // f64 bits → rax
+		} else {
+			emit_atoi(e) // signed int → rax
+		}
+
+		// ARGS_TABLE[slot] = rax → mov [r11 + disp32], rax
+		write([]u8{0x49, 0x89, 0x83}) // mov [r11 + disp32], rax
+		put_u32(e, u32(8 * slot))
+
+		// skip:
+		skip := e.buf.len
+		patch_rel32(e, jle_at, i32(skip - (jle_at + 4)))
+	}
+}
+
+put_u32 :: proc(e: ^X64_Emit, v: u32) {
+	write([]u8{u8(v & 0xFF), u8((v >> 8) & 0xFF), u8((v >> 16) & 0xFF), u8((v >> 24) & 0xFF)})
 }
 
 // emit_atoi: parse the NUL-terminated string at rdi into rax (signed decimal).
@@ -211,6 +237,101 @@ emit_atoi :: proc(e: ^X64_Emit) {
 	write([]u8{0x45, 0x84, 0xC0}) // test r8b, r8b
 	write([]u8{0x74, 0x03}) // jz +3
 	write([]u8{0x48, 0xF7, 0xD8}) // neg rax
+}
+
+// emit_atof: parse the NUL-terminated decimal string at rdi into the f64 BIT
+// PATTERN in rax. Handles a leading '-', an integer part, and an optional
+// '.'-fraction (`-3.14`, `42`, `.5`). Computed as
+//     value = (ipart + frac/scale) * sign,  scale = 10^(#frac digits)
+// in scalar SSE, then movq'd back to rax. Not the hot path (one-shot arg
+// parsing), so it favors clarity over cycle count. Clobbers rax,rcx,rdx,r8,r9,
+// r10,r15,xmm0,xmm1,xmm2.
+emit_atof :: proc(e: ^X64_Emit) {
+	// r8=sign(0/1), r9=ipart, r10=frac, r15=scale(=1, ×10 per frac digit).
+	write([]u8{0x45, 0x31, 0xC0}) // xor r8, r8     (sign=0)
+	write([]u8{0x4D, 0x31, 0xC9}) // xor r9, r9     (ipart=0)
+	write([]u8{0x4D, 0x31, 0xD2}) // xor r10, r10   (frac=0)
+	write([]u8{0x49, 0xC7, 0xC7, 0x01, 0x00, 0x00, 0x00}) // mov r15, 1  (scale=1)
+
+	// leading '-' ?
+	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
+	write([]u8{0x80, 0xF9, 0x2D}) // cmp cl, '-'
+	write([]u8{0x75, 0x06}) // jne +6
+	write([]u8{0x41, 0xB0, 0x01}) // mov r8b, 1
+	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+
+	// integer-part loop: r9 = r9*10 + digit.
+	iloop := e.buf.len
+	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
+	write([]u8{0x80, 0xF9, 0x30}) // cmp cl, '0'
+	write([]u8{0x7C}) // jl rel8 → after int (patched)
+	i_jl := e.buf.len; write([]u8{0})
+	write([]u8{0x80, 0xF9, 0x39}) // cmp cl, '9'
+	write([]u8{0x7F}) // jg rel8 → after int
+	i_jg := e.buf.len; write([]u8{0})
+	// r9 = r9*10 + (cl-'0'). One-shot parse, not the hot path → plain imul.
+	write([]u8{0x0F, 0xB6, 0xC9}) // movzx ecx, cl
+	write([]u8{0x83, 0xE9, 0x30}) // sub ecx, 0x30        (digit value in rcx)
+	imul_r64_imm32(.R9, 10) // r9 *= 10
+	add_r64_r64(.R9, .RCX) // r9 += digit
+	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+	write([]u8{0xEB}) // jmp iloop
+	i_back := e.buf.len; write([]u8{0})
+	e.buf.data[i_back] = u8(i8(iloop - (i_back + 1)))
+
+	after_int := e.buf.len
+	e.buf.data[i_jl] = u8(i8(after_int - (i_jl + 1)))
+	e.buf.data[i_jg] = u8(i8(after_int - (i_jg + 1)))
+
+	// '.' ?  if [rdi]=='.', inc rdi and parse fraction; else skip.
+	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
+	write([]u8{0x80, 0xF9, 0x2E}) // cmp cl, '.'
+	write([]u8{0x75}) // jne rel8 → after frac
+	dot_jne := e.buf.len; write([]u8{0})
+	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+
+	floop := e.buf.len
+	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
+	write([]u8{0x80, 0xF9, 0x30}) // cmp cl, '0'
+	write([]u8{0x7C}) // jl → after frac
+	f_jl := e.buf.len; write([]u8{0})
+	write([]u8{0x80, 0xF9, 0x39}) // cmp cl, '9'
+	write([]u8{0x7F}) // jg → after frac
+	f_jg := e.buf.len; write([]u8{0})
+	// r10 = r10*10 + (cl-'0'); r15 *= 10.
+	write([]u8{0x0F, 0xB6, 0xC9}) // movzx ecx, cl
+	write([]u8{0x83, 0xE9, 0x30}) // sub ecx, 0x30        (digit value in rcx)
+	imul_r64_imm32(.R10, 10) // r10 *= 10
+	add_r64_r64(.R10, .RCX) // r10 += digit
+	imul_r64_imm32(.R15, 10) // r15 *= 10
+	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
+	write([]u8{0xEB}) // jmp floop
+	f_back := e.buf.len; write([]u8{0})
+	e.buf.data[f_back] = u8(i8(floop - (f_back + 1)))
+
+	after_frac := e.buf.len
+	e.buf.data[dot_jne] = u8(i8(after_frac - (dot_jne + 1)))
+	e.buf.data[f_jl] = u8(i8(after_frac - (f_jl + 1)))
+	e.buf.data[f_jg] = u8(i8(after_frac - (f_jg + 1)))
+
+	// value = ipart + frac/scale  (all in xmm0).
+	cvtsi2sd_xmm_r64(.XMM0, .R9) // xmm0 = (double)ipart
+	cvtsi2sd_xmm_r64(.XMM1, .R10) // xmm1 = (double)frac
+	cvtsi2sd_xmm_r64(.XMM2, .R15) // xmm2 = (double)scale
+	divsd_xmm_xmm(.XMM1, .XMM2) // xmm1 = frac/scale
+	addsd_xmm_xmm(.XMM0, .XMM1) // xmm0 = ipart + frac/scale
+	// sign: if r8b, xmm0 = -xmm0  (flip sign bit).
+	write([]u8{0x45, 0x84, 0xC0}) // test r8b, r8b
+	write([]u8{0x74}) // jz → done
+	sgn_jz := e.buf.len; write([]u8{0})
+	movq_r64_xmm_bits(.RAX, .XMM0)
+	movabs_r64_imm64(.RCX, transmute(i64)u64(0x8000000000000000))
+	write([]u8{0x48, 0x31, 0xC8}) // xor rax, rcx   (flip sign bit)
+	movq_xmm_r64(.XMM0, .RAX)
+	done_sgn := e.buf.len
+	e.buf.data[sgn_jz] = u8(i8(done_sgn - (sgn_jz + 1)))
+
+	movq_r64_xmm_bits(.RAX, .XMM0) // rax = f64 bits
 }
 
 put_i64_bytes :: proc(e: ^X64_Emit, v: i64) {
@@ -398,10 +519,9 @@ emit_load_arg :: proc(e: ^X64_Emit, v: bc.BC_Load_Arg) {
 	mem := MemoryAddress(AddressComponents{base = Register64.RBX, displacement = i32(8 * v.slot)})
 
 	if bc.mtype_is_float(mt) {
-		// Float ??: load the i64 the atoi produced, convert to f64 bits.
-		mov_r64_m64(.RAX, mem)
-		cvtsi2sd_xmm_r64(.XMM0, .RAX)
-		movq_r64_xmm_bits(dst, .XMM0)
+		// Float ??: the arg stub already parsed the decimal (atof) and stored the
+		// f64 BIT PATTERN in the table — load it straight into the value's home.
+		mov_r64_m64(dst, mem)
 		if !homed do store(e, v.dst, .RAX)
 		return
 	}
