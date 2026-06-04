@@ -143,50 +143,64 @@ arg_slot_info :: proc(e: ^X64_Emit) -> (count: int, is_float: map[int]bool) {
 	return
 }
 
-// emit_arg_stub parses argv[1..] into ARGS_TABLE[slot]. Integer slots store the
-// signed integer (inline atoi); FLOAT slots store the f64 BIT PATTERN (inline
-// atof). Because each slot's domain (int vs float) is known at compile time, the
-// stub is UNROLLED — one parse block per slot, branchless on type — so a float
-// slot gets atof and an int slot atoi, with no per-slot type test at runtime.
+// emit_arg_stub parses argv[1..] into ARGS_TABLE[slot]. The common case (all
+// integer ??) is ONE compact generic loop running inline atoi over argv[1..] —
+// no per-slot unrolling, so the stub stays tiny. Only when the program has FLOAT
+// ?? slots do we add a small SECOND pass that re-parses just those slots with the
+// inline atof (overwriting their integer value with the f64 bit pattern). So a
+// float program pays only for its float slots; an integer program is unchanged.
 //
-// At process entry rsp -> argc, then the argv pointers. argv[K+1] is the K-th
-// ??. A slot whose argv is missing (K+1 >= argc) is left zero.
-// Registers: r12=argc, r13=&argv[0]. Parse blocks clobber rax/rcx/rdx/rsi/rdi
-// + xmm0/xmm1 (float). R11 holds the ARGS_TABLE base.
+// At process entry rsp -> argc, then the argv pointers; argv[K+1] is the K-th ??.
+// Registers: r12=argc, r13=&argv[0], r14=K. atoi/atof clobber rax/rcx/rdx/rsi/rdi
+// (+xmm for atof). R11 holds the ARGS_TABLE base.
 emit_arg_stub :: proc(e: ^X64_Emit) {
-	count, is_float := arg_slot_info(e)
+	_, is_float := arg_slot_info(e)
 	defer delete(is_float)
-	if count == 0 do return
 
-	// r12 = argc = [rsp] ; r13 = &argv[0] = rsp+8 ; r11 = ARGS_TABLE base.
-	write([]u8{0x4C, 0x8B, 0x24, 0x24}) // mov r12, [rsp]
-	write([]u8{0x4C, 0x8D, 0x6C, 0x24, 0x08}) // lea r13, [rsp+8]
-	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR)) // ARGS_TABLE fits imm32
+	// --- generic atoi loop over all of argv[1..] ---
+	write([]u8{0x4C, 0x8B, 0x24, 0x24}) // mov r12, [rsp]      (argc)
+	write([]u8{0x4C, 0x8D, 0x6C, 0x24, 0x08}) // lea r13, [rsp+8]    (&argv[0])
+	write([]u8{0x4D, 0x31, 0xF6}) // xor r14, r14        (K=0)
 
-	for slot in 0 ..< count {
-		// Guard: if slot+1 >= argc, skip this slot (leaves table[slot]=0).
-		// cmp r12, imm(slot+1) ; jle skip
+	loop_start := e.buf.len
+	write([]u8{0x4C, 0x89, 0xF0}) // mov rax, r14
+	write([]u8{0x48, 0xFF, 0xC0}) // inc rax
+	write([]u8{0x4C, 0x39, 0xE0}) // cmp rax, r12
+	write([]u8{0x0F, 0x8D}) // jge done
+	jge_at := e.buf.len
+	write([]u8{0, 0, 0, 0})
+
+	write([]u8{0x49, 0x8B, 0x7C, 0xC5, 0x00}) // mov rdi, [r13 + rax*8]
+	emit_atoi(e) // atoi(rdi) → rax
+	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR))
+	write([]u8{0x4B, 0x89, 0x04, 0xF3}) // mov [r11 + r14*8], rax
+	write([]u8{0x49, 0xFF, 0xC6}) // inc r14
+	write([]u8{0xE9}) // jmp loop_start
+	jat := e.buf.len
+	write([]u8{0, 0, 0, 0})
+	patch_rel32(e, jat, i32(loop_start - (jat + 4)))
+
+	done := e.buf.len
+	patch_rel32(e, jge_at, i32(done - (jge_at + 4)))
+
+	// --- float fixup: re-parse only the float slots with atof ---
+	if len(is_float) == 0 do return
+	// R11 still holds the ARGS_TABLE base from the loop. r13 = &argv[0], r12 = argc.
+	for slot, _ in is_float {
+		// Guard: skip if argv[slot+1] is missing (cmp r12, slot+1 ; jle skip).
 		write([]u8{0x49, 0x81, 0xFC}) // cmp r12, imm32
 		put_u32(e, u32(slot + 1))
-		write([]u8{0x0F, 0x8E}) // jle rel32 → skip
+		write([]u8{0x0F, 0x8E}) // jle skip
 		jle_at := e.buf.len
 		write([]u8{0, 0, 0, 0})
 
-		// rdi = argv[slot+1] = [r13 + 8*(slot+1)]
 		write([]u8{0x49, 0x8B, 0xBD}) // mov rdi, [r13 + disp32]
 		put_u32(e, u32(8 * (slot + 1)))
-
-		if is_float[slot] {
-			emit_atof(e) // f64 bits → rax
-		} else {
-			emit_atoi(e) // signed int → rax
-		}
-
-		// ARGS_TABLE[slot] = rax → mov [r11 + disp32], rax
+		emit_atof(e) // f64 bits → rax
+		emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR)) // atof may clobber; reload base
 		write([]u8{0x49, 0x89, 0x83}) // mov [r11 + disp32], rax
 		put_u32(e, u32(8 * slot))
 
-		// skip:
 		skip := e.buf.len
 		patch_rel32(e, jle_at, i32(skip - (jle_at + 4)))
 	}
@@ -1028,28 +1042,17 @@ emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64,
 		if use32 {shl_r32_imm8(r32(w), u8(sh))} else {shl_r64_imm8(w, u8(sh))} // *2^k → shl
 		return true
 	}
-	// `*{3,5,9}` -> one lea [src + src*scale], scale = k-1 in {2,4,8}.
+	// `*{3,5,9}` -> ONE lea [src + src*scale], scale = k-1 in {2,4,8}.
 	if k == 3 || k == 5 || k == 9 {
 		emit_lea_self(e, w, mul_base(e, x), u8(k - 1), use32)
 		return true
 	}
 
-	// Two-instruction decompositions, a la clang/LLVM (lea/shl: 1 cycle, two ports;
-	// beats imul's 3-cycle latency). Fallback to imul for constants that don't
-	// factor into <=2 lea/shl steps.
-	if lo, lf, ok := mul_pow2_lea(k); ok {
-		// k = 2^lo * {3,5,9}: shl the value by lo, then lea *lf.
-		load(e, w, x)
-		if use32 {shl_r32_imm8(r32(w), u8(lo))} else {shl_r64_imm8(w, u8(lo))}
-		emit_lea_self(e, w, w, u8(lf - 1), use32)
-		return true
-	}
-	if f1, f2, ok := mul_lea_lea(k); ok {
-		// k = f1 * f2 with f1,f2 in {3,5,9}: lea *f1 then lea *f2.
-		emit_lea_self(e, w, mul_base(e, x), u8(f1 - 1), use32)
-		emit_lea_self(e, w, w, u8(f2 - 1), use32)
-		return true
-	}
+	// Anything else → a single `imul dst, src, imm` (3 bytes for an imm8, one
+	// instruction). We deliberately do NOT decompose into shl+lea / lea+lea: a
+	// 2-instruction expansion is BIGGER (≥6 bytes) and no faster in practice than a
+	// single imul-imm — and it loses the coalesced destination. The one-instruction
+	// lea cases above (`*{3,5,9}`, `*2^k`) are the only wins worth taking.
 
 	// Fallback: imul w, x, k. imul-by-immediate is 3-operand (`imul dst, src, imm`
 	// reads src, writes dst), so when x already lives in a register we read it
@@ -1170,27 +1173,6 @@ mul_base :: proc(e: ^X64_Emit, x: bc.BC_Value) -> Register64 {
 emit_lea_self :: proc(e: ^X64_Emit, w, base: Register64, scale: u8, use32: bool) {
 	mem := MemoryAddress(AddressComponents{base = base, index = base, scale = scale})
 	if use32 {lea_r32_m(r32(w), mem)} else {lea_r64_m64(w, mem)}
-}
-
-// mul_pow2_lea: k = 2^lo * lf with lo >= 1 and lf in {3,5,9}.
-mul_pow2_lea :: proc(k: i64) -> (lo: int, lf: i64, ok: bool) {
-	v := k
-	lo = 0
-	for v % 2 == 0 {v /= 2; lo += 1}
-	if lo == 0 do return 0, 0, false
-	if v == 3 || v == 5 || v == 9 do return lo, v, true
-	return 0, 0, false
-}
-
-// mul_lea_lea: k = f1 * f2 with both in {3,5,9} (covers 9,15,25,27,45,81).
-mul_lea_lea :: proc(k: i64) -> (f1: i64, f2: i64, ok: bool) {
-	for a in ([3]i64{3, 5, 9}) {
-		if k % a == 0 {
-			b := k / a
-			if b == 3 || b == 5 || b == 9 do return a, b, true
-		}
-	}
-	return 0, 0, false
 }
 
 // dst_finish stores `w` into dst's slot if w isn't already dst's home register.
