@@ -64,6 +64,17 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 				if err != "" do return {ok = false, error = err}
 				regs[int(v.dst)] = res
 			}
+		case BC_Bin_Imm:
+			dst_mt := prog.value_types[int(v.dst)]
+			if mtype_is_float(dst_mt) {
+				res, err := interp_bin_f(v.op, interp_f(regs[int(v.a)]), f64(v.imm))
+				if err != "" do return {ok = false, error = err}
+				regs[int(v.dst)] = res
+			} else {
+				res, err := interp_bin(v.op, interp_i(regs[int(v.a)]), v.imm)
+				if err != "" do return {ok = false, error = err}
+				regs[int(v.dst)] = res
+			}
 		case BC_Cmp:
 			if _, af := regs[int(v.a)].(f64); af {
 				regs[int(v.dst)] = interp_cmp_f(v.op, interp_f(regs[int(v.a)]), interp_f(regs[int(v.b)])) ? i64(1) : i64(0)
@@ -71,6 +82,12 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 				regs[int(v.dst)] = interp_cmp_f(v.op, interp_f(regs[int(v.a)]), interp_f(regs[int(v.b)])) ? i64(1) : i64(0)
 			} else {
 				regs[int(v.dst)] = interp_cmp(v.op, interp_i(regs[int(v.a)]), interp_i(regs[int(v.b)])) ? i64(1) : i64(0)
+			}
+		case BC_Cmp_Imm:
+			if _, af := regs[int(v.a)].(f64); af {
+				regs[int(v.dst)] = interp_cmp_f(v.op, interp_f(regs[int(v.a)]), f64(v.imm)) ? i64(1) : i64(0)
+			} else {
+				regs[int(v.dst)] = interp_cmp(v.op, interp_i(regs[int(v.a)]), v.imm) ? i64(1) : i64(0)
 			}
 		case BC_Move:
 			regs[int(v.dst)] = regs[int(v.src)]
@@ -98,7 +115,19 @@ interp_load_arg :: proc(prog: ^BC_Program, v: BC_Load_Arg, args: []string) -> BC
 	if mtype_is_float(mt) {
 		return interp_parse_f64(raw)
 	}
-	return interp_parse_i64(raw)
+	// The Load_Arg normalizes to its domain: an unsigned u8/u16/u32 is masked to
+	// its low bits, a signed i8/i16/i32 is sign-extended. (This is the software
+	// equivalent of the backend's movzx/movsx — the mask lives IN the load.)
+	x := interp_parse_i64(raw)
+	if v.width == 0 || v.width >= 64 do return x
+	mask := i64((u64(1) << v.width) - 1)
+	x &= mask
+	if v.signed {
+		// Sign-extend: if the top bit of the width is set, set the high bits.
+		sign_bit := i64(1) << (v.width - 1)
+		if (x & sign_bit) != 0 do x |= ~mask
+	}
+	return x
 }
 
 interp_result :: proc(prog: ^BC_Program, val: BC_Val) -> BC_Interp_Result {
