@@ -161,6 +161,9 @@ emit_arg_stub :: proc(e: ^X64_Emit) {
 	write([]u8{0x4C, 0x8B, 0x24, 0x24}) // mov r12, [rsp]      (argc)
 	write([]u8{0x4C, 0x8D, 0x6C, 0x24, 0x08}) // lea r13, [rsp+8]    (&argv[0])
 	write([]u8{0x4D, 0x31, 0xF6}) // xor r14, r14        (K=0)
+	// Hoist the ARGS_TABLE base OUT of the loop — it's constant, and atoi clobbers
+	// only rax/rcx/rdx/r8, never r11. Loading it once instead of per-arg.
+	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR))
 
 	loop_start := e.buf.len
 	write([]u8{0x4C, 0x89, 0xF0}) // mov rax, r14
@@ -172,7 +175,6 @@ emit_arg_stub :: proc(e: ^X64_Emit) {
 
 	write([]u8{0x49, 0x8B, 0x7C, 0xC5, 0x00}) // mov rdi, [r13 + rax*8]
 	emit_atoi(e) // atoi(rdi) → rax
-	emit_load_imm_into(e, .R11, i64(ARGS_TABLE_VADDR))
 	write([]u8{0x4B, 0x89, 0x04, 0xF3}) // mov [r11 + r14*8], rax
 	write([]u8{0x49, 0xFF, 0xC6}) // inc r14
 	write([]u8{0xE9}) // jmp loop_start
@@ -211,43 +213,44 @@ put_u32 :: proc(e: ^X64_Emit, v: u32) {
 }
 
 // emit_atoi: parse the NUL-terminated string at rdi into rax (signed decimal).
-// rax=acc, cl=byte, sil=sign flag. Clobbers rax,rcx,rsi,rdx.
+// Matches clang/gcc -O3's hot loop: a single UNSIGNED range check per digit
+// (`d = c-'0' ; cmp $9 ; ja` — one compare, one branch, vs the naïve two), and
+// software pipelining (the NEXT char is loaded at the bottom of the body so its
+// load overlaps the current digit's arithmetic). acc=rax, sign=r8b.
+// Clobbers rax,rcx,rdx,r8,rdi.
 emit_atoi :: proc(e: ^X64_Emit) {
 	write([]u8{0x48, 0x31, 0xC0}) // xor rax, rax            (acc=0)
 	write([]u8{0x45, 0x31, 0xC0}) // xor r8, r8              (sign=0)
-	// check leading '-' : if [rdi]==0x2D, sign=1, rdi++
+	// leading '-' : if [rdi]=='-', sign=1, rdi++.
 	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
 	write([]u8{0x80, 0xF9, 0x2D}) // cmp cl, '-'
-	write([]u8{0x75, 0x06}) // jne +6 (skip sign setup)
+	write([]u8{0x75, 0x06}) // jne +6
 	write([]u8{0x41, 0xB0, 0x01}) // mov r8b, 1
 	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
-	// digit loop:
+
+	// First char + range check (peeled prologue so the loop tests before it loads).
+	write([]u8{0x0F, 0xB6, 0x0F}) // movzbl (rdi), ecx          (c)
+	write([]u8{0x8D, 0x51, 0xD0}) // lea edx, [rcx-0x30]        (d = c-'0')
+	write([]u8{0x80, 0xFA, 0x09}) // cmp dl, 9
+	write([]u8{0x0F, 0x87}) // ja end (unsigned: c<'0' wraps high)  rel32 (patched)
+	ja_at := e.buf.len; write([]u8{0, 0, 0, 0})
+
+	// digit loop body: acc = acc*10 + (c-'0'), then load + range-check the NEXT
+	// char at the bottom (pipelined). ecx holds the current ascii byte.
 	dloop := e.buf.len
-	write([]u8{0x8A, 0x0F}) // mov cl, [rdi]
-	write([]u8{0x80, 0xF9, 0x30}) // cmp cl, '0'
-	write([]u8{0x7C}) // jl rel8 → end (patched)
-	jl_at := e.buf.len; write([]u8{0})
-	write([]u8{0x80, 0xF9, 0x39}) // cmp cl, '9'
-	write([]u8{0x7F}) // jg rel8 → end (patched)
-	jg_at := e.buf.len; write([]u8{0})
-	// acc = acc*10 + (cl - '0'), the hot path, in 3 fast ops (no imul):
-	//   movzx ecx, cl              ; digit (ascii) zero-extended
-	//   lea   eax, [rax+rax*4]     ; acc*5
-	//   lea   eax, [rcx+rax*2-'0'] ; acc*10 + digit - '0'  (fuses *2, +digit, -'0')
-	// 32-bit lea (no REX.W). imul (3 cycles) → two lea (1 cycle each).
-	write([]u8{0x0F, 0xB6, 0xC9}) // movzx ecx, cl
-	write([]u8{0x8D, 0x04, 0x80}) // lea eax, [rax+rax*4]
-	write([]u8{0x8D, 0x44, 0x41, 0xD0}) // lea eax, [rcx+rax*2-0x30]
+	write([]u8{0x8D, 0x04, 0x80}) // lea eax, [rax+rax*4]       (acc*5)
+	write([]u8{0x8D, 0x44, 0x41, 0xD0}) // lea eax, [rcx+rax*2-0x30]  (acc*10 + c - '0')
 	write([]u8{0x48, 0xFF, 0xC7}) // inc rdi
-	// jmp dloop
-	write([]u8{0xEB})
-	back := e.buf.len
-	write([]u8{0})
+	write([]u8{0x0F, 0xB6, 0x0F}) // movzbl (rdi), ecx          (next c)
+	write([]u8{0x8D, 0x51, 0xD0}) // lea edx, [rcx-0x30]        (next d)
+	write([]u8{0x80, 0xFA, 0x0A}) // cmp dl, 10
+	write([]u8{0x72}) // jb dloop (d < 10 → still a digit) rel8
+	back := e.buf.len; write([]u8{0})
 	e.buf.data[back] = u8(i8(dloop - (back + 1)))
-	// end: patch the two forward jumps to here, then apply sign.
+
+	// end: patch the prologue's `ja`, then apply sign.
 	end := e.buf.len
-	e.buf.data[jl_at] = u8(i8(end - (jl_at + 1)))
-	e.buf.data[jg_at] = u8(i8(end - (jg_at + 1)))
+	patch_rel32(e, ja_at, i32(end - (ja_at + 4)))
 	write([]u8{0x45, 0x84, 0xC0}) // test r8b, r8b
 	write([]u8{0x74, 0x03}) // jz +3
 	write([]u8{0x48, 0xF7, 0xD8}) // neg rax

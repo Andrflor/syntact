@@ -369,6 +369,16 @@ collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
 
 	rebuilt := rebuild_sum(kept[:], constant)
 
+	// Common-factor extraction (LLVM Reassociate dual): `a*b + a*c` → `a*(b+c)`.
+	// Try it on the collected terms; keep it only if it lowers the op count (the
+	// same cost guard). This is what makes a sum of base-products beat staying
+	// expanded — gated so it never grows the expression.
+	if factored := factor_common(kept[:], constant); factored != nil {
+		if op_cost(factored) < op_cost(rebuilt) {
+			rebuilt = factored
+		}
+	}
+
 	// Commit only if the canonical form is no MORE expensive than the original
 	// (operation-minimal: distributing 3*(2a-1)+5a → 11a-3 reduces the op count,
 	// so it commits; a form that would grow stays as-is). The original cost is the
@@ -498,6 +508,145 @@ rebuild_sum :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
 	}
 	if result == nil do return new_type(make_int_result(0))
 	return result
+}
+
+// ============================================================================
+// COMMON-FACTOR EXTRACTION — the DUAL of sum collection, transposed from LLVM's
+// Reassociate::OptimizeAdd: `a*b + a*c` → `a*(b+c)`. Sum collection works the `+`
+// axis (coefficients of equal bases); this works the `*` axis (bases sharing a
+// factor). LLVM's two guards, reproduced exactly:
+//   1. a factor must occur in ≥ 2 terms (MaxOcc > 1) — else no gain,
+//   2. count occurrences PER TERM (a*a contributes `a` once to its term).
+// Like LLVM's Reassociate this does NOT model latency / instruction-level
+// parallelism: it factors on op-count alone (the out-of-order x86-64 core
+// recovers the parallelism). The op_cost guard in collect_sum still applies.
+// ============================================================================
+
+// mul_factors decomposes a base node into its flat list of multiplicative factors
+// (LLVM FindSingleUseMultiplyFactors): `a*b*c` → [a,b,c], a bare `??` → [itself].
+// Only a `var * var` Multiply is split; a `const * x` is not a multiply-of-bases.
+mul_factors :: proc(node: ^Type, out: ^[dynamic]^Type) {
+	if node != nil {
+		#partial switch v in node^ {
+		case Compose_Type:
+			if v.operator == .Multiply && v.left != nil {
+				// A constant operand means this isn't a pure base product (handled by
+				// the affine pass); keep the node whole.
+				_, lc := coeff_of(v.left)
+				_, rc := coeff_of(v.right)
+				if !lc && !rc {
+					mul_factors(v.left, out)
+					mul_factors(v.right, out)
+					return
+				}
+			}
+		}
+	}
+	append(out, node)
+}
+
+// remove_one_factor rebuilds a base product with ONE occurrence of `factor`
+// removed (by dag_key). Returns (residual, true) if the factor was present; the
+// residual is `1` (nil base → caller uses constant 1) when it was the only factor.
+remove_one_factor :: proc(base: ^Type, factor_key: string) -> (^Type, bool) {
+	factors: [dynamic]^Type
+	defer delete(factors)
+	mul_factors(base, &factors)
+	removed := false
+	kept: [dynamic]^Type
+	defer delete(kept)
+	for f in factors {
+		if !removed && dag_key(f) == factor_key {
+			removed = true
+			continue
+		}
+		append(&kept, f)
+	}
+	if !removed do return nil, false
+	if len(kept) == 0 do return nil, true // factor was the whole base → residual 1
+	prod := kept[0]
+	for i in 1 ..< len(kept) {
+		prod = dag_intern(Compose_Type{prod, kept[i], .Multiply, nil})
+	}
+	return prod, true
+}
+
+// factor_common attempts `Σ coeff_i·base_i (+ const)` → `factor·(Σ residual_i) +
+// (untouched terms) + const`, extracting the factor present in the most terms (≥2).
+// Returns nil when no factor occurs in ≥2 terms (LLVM's MaxOcc>1 guard).
+factor_common :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
+	if len(terms) < 2 do return nil
+
+	// Count, per term, how many terms contain each factor (keyed by dag_key).
+	occ: map[string]int
+	defer delete(occ)
+	rep: map[string]^Type // a representative node for each factor key
+	defer delete(rep)
+	for t in terms {
+		factors: [dynamic]^Type
+		mul_factors(t.base, &factors)
+		seen: map[string]bool // dedup within this term
+		for f in factors {
+			k := dag_key(f)
+			if seen[k] do continue
+			seen[k] = true
+			occ[k] += 1
+			rep[k] = f
+		}
+		delete(seen)
+		delete(factors)
+	}
+
+	// Pick the factor in the most terms; require ≥2 (else no gain).
+	best_key: string
+	best_occ := 1
+	for k, n in occ {
+		if n > best_occ {
+			best_occ = n
+			best_key = k
+		}
+	}
+	if best_occ < 2 do return nil
+	factor := rep[best_key]
+
+	// Split: terms that contain the factor → residuals (with coeff carried);
+	// the rest stay as ordinary terms.
+	residuals: [dynamic]Sum_Term
+	defer delete(residuals)
+	rest: [dynamic]Sum_Term
+	defer delete(rest)
+	for t in terms {
+		if res, ok := remove_one_factor(t.base, best_key); ok {
+			// residual base is `res` (or the constant 1 when nil), same coeff.
+			residuals = append_term(residuals, Sum_Term{t.coeff, res})
+		} else {
+			rest = append_term(rest, t)
+		}
+	}
+
+	// Build `factor * (Σ residuals)`. The residual sum is rebuilt (it may itself
+	// collect, e.g. b + b → 2b).
+	inner := rebuild_sum(residuals[:], 0)
+	product := dag_intern(Compose_Type{factor, inner, .Multiply, nil})
+
+	// Add back the untouched terms and the constant.
+	result := product
+	for t in rest {
+		mag := t.coeff < 0 ? -t.coeff : t.coeff
+		node := scale_node(t.base, mag)
+		op: Operator_Kind = t.coeff < 0 ? .Subtract : .Add
+		result = dag_intern(Compose_Type{result, node, op, nil})
+	}
+	if constant != 0 do result = offset_node(result, constant)
+	return result
+}
+
+// append_term is a tiny helper so factor_common reads linearly (Odin's append
+// returns the slice by value for dynamic arrays passed around).
+append_term :: proc(arr: [dynamic]Sum_Term, t: Sum_Term) -> [dynamic]Sum_Term {
+	a := arr
+	append(&a, t)
+	return a
 }
 
 // is_concrete_leaf reports whether a reduced ^Type is a single concrete value.
