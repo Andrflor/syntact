@@ -1,0 +1,1 @@
+{ "name": "cx_factor_keep_sq", "description": "(a+1)*(a+1) NON factorisé", "source": "a -> ??::u8\n-> (a+1)*(a+1)", "args": [["0"], ["1"], ["5"], ["10"], ["15"]], "expect": ["1", "4", "36", "121", "256"], "kind": "int" }
