@@ -39,6 +39,10 @@ Reg_Alloc :: struct {
 }
 
 // The general-purpose registers we hand out, in allocation-preference order.
+// R10 is EXCLUDED too: it's the dedicated scratch holding the ARGS_TABLE base
+// (loaded once, read by every Load_Arg). R10 is CALLER-saved and never a SysV
+// argument register, so this stays correct when the backend grows real functions
+// — unlike RBX (callee-saved), which would need save/restore in an ABI function.
 // RAX and RDX are deliberately EXCLUDED — they are the fixed scratch/clobber
 // pair for imul/idiv (idiv writes both), so the emitter always has them free.
 // RSP/RBP are the stack frame. RBX is callee-saved; reserved for later use.
