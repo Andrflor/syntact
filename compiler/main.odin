@@ -36,8 +36,10 @@ Options :: struct {
 	no_cache:           bool,
 	evict_cache:        bool,
 	print_bytecode:     bool, // Toggle bytecode dump (--bc)
+	print_regalloc:     bool, // Toggle register-allocation dump (--regalloc)
 	run_bytecode:       bool, // Interpret the lowered bytecode (--run)
-	run_args:           [dynamic]i64, // Positional ??N values fed to --run
+	emit_exe:           bool, // Emit an x64 ELF executable (--emit / -o)
+	run_args:           [dynamic]string, // Positional ??N values (argv strings) fed to --run
 }
 /*
  * parse_args extracts command-line options
@@ -73,8 +75,12 @@ parse_args :: proc() -> Options {
 				options.print_errors = true
 			case "--bc":
 				options.print_bytecode = true
+			case "--regalloc":
+				options.print_regalloc = true
 			case "--run":
 				options.run_bytecode = true
+			case "--emit":
+				options.emit_exe = true
 			case "-v", "--verbose":
 				options.verbose = true
 			case "-t", "--timing":
@@ -99,14 +105,9 @@ parse_args :: proc() -> Options {
 				options.input_path = arg
 				input_path_set = true
 			} else {
-				// Further positionals are runtime ??N values for --run, parsed
-				// as integers (argv[slot]).
-				val, ok := strconv.parse_i64(arg)
-				if !ok {
-					fmt.eprintln("Error: runtime argument is not an integer:", arg)
-					os.exit(1)
-				}
-				append(&options.run_args, val)
+				// Further positionals are runtime ??N values for --run, kept as
+				// argv strings (the interpreter parses each per its ?? domain).
+				append(&options.run_args, arg)
 			}
 		}
 		i += 1
@@ -135,6 +136,7 @@ print_usage :: proc() {
 	// fmt.println("  --evict-cache           Clear compilation cache before starting")
 	fmt.println("  --print-errors          Print parse/analysis errors")
 	fmt.println("  --bc                    Lower the reduced result to bytecode and print it")
+	fmt.println("  --regalloc              Print the bytecode annotated with register allocation")
 	fmt.println("  --run                   Interpret the lowered bytecode (args... feed ??0, ??1, …)")
 	fmt.println("  -v, --verbose           Print verbose output")
 	fmt.println("  -t, --timing            Print timing information")
