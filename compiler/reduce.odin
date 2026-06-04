@@ -534,16 +534,16 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 			}
 		}
 	}
-	// Fixed-point target: reduce each branch's product but keep the pattern shape
-	// so the runtime selects. (A pattern that passed exhaustiveness always has a
-	// firing branch at runtime.)
+	// Fixed-point target: the runtime selects the branch, so keep the pattern shape
+	// but reduce the target (to its `??N`) and each branch's product. (A pattern that
+	// passed exhaustiveness always has a firing branch at runtime.)
 	if ft != nil {
 		branches := make([]Pattern_Branch, len(p.branches))
 		for branch, i in p.branches {
 			branches[i] = Pattern_Branch{branch.value_match, branch.match, reduce_value(branch.product)}
 		}
 		r := new(Type)
-		r^ = Pattern_Type{p.target, branches}
+		r^ = Pattern_Type{reduce_value(p.target), branches}
 		return r
 	}
 	r := new(Type)
