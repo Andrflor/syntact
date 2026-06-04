@@ -657,6 +657,21 @@ emit_bin :: proc(e: ^X64_Emit, v: bc.BC_Bin) -> string {
 		return emit_bin_float(e, v)
 	}
 
+	// Peephole: `0 - b` is a single `neg`. The reducer can't fold a literal-zero
+	// left operand into the BC_Bin, so it arrives as a BC_Const here; turn the
+	// whole subtract into one `neg b` instead of `mov $0 ; sub`.
+	if v.op == .Subtract {
+		if k, ok := bc_const_of(e, v.a); ok && k == 0 {
+			use32 := val_is_32bit(e, int(v.dst))
+			rd, dst_in_reg := home_reg(e, v.dst)
+			w := dst_in_reg ? rd : Register64.RAX
+			load(e, w, v.b)
+			if use32 {neg_r32(r32(w))} else {neg_r64(w)}
+			if !dst_in_reg do store(e, v.dst, w)
+			return ""
+		}
+	}
+
 	#partial switch v.op {
 	case .Divide:
 		load(e, .RAX, v.a); load(e, .RCX, v.b)
@@ -738,6 +753,13 @@ emit_bin_imm :: proc(e: ^X64_Emit, v: bc.BC_Bin_Imm) -> string {
 
 	#partial switch v.op {
 	case .Multiply:
+		if k == -1 {
+			// `a * -1` is a single `neg` (vs `imul a,-1`).
+			load(e, w, v.a)
+			if use32 {neg_r32(r32(w))} else {neg_r64(w)}
+			dst_finish(e, v.dst, w, w_homed)
+			return ""
+		}
 		if emit_mul_const_into(e, w, v.a, k, use32) {dst_finish(e, v.dst, w, w_homed); return ""}
 	case .Add:
 		load(e, w, v.a)
@@ -777,13 +799,21 @@ emit_bin_imm :: proc(e: ^X64_Emit, v: bc.BC_Bin_Imm) -> string {
 		dst_finish(e, v.dst, w, w_homed)
 		return ""
 	case .Divide:
-		if unsigned {
+		if unsigned && k > 0 {
 			if sh, ok := log2_exact(k); ok {
 				load(e, w, v.a)
 				shr_r64_imm8(w, u8(sh))
 				dst_finish(e, v.dst, w, w_homed)
 				return ""
 			}
+			// Unsigned divide by a non-pow2 constant → multiply-high + shift
+			// (Granlund-Montgomery magic), replacing a ~20-40cy idiv. The dividend
+			// is zero-extended into a 64-bit register (BC_Load_Arg/32-bit writes
+			// already clear the upper half for an unsigned value), so the 64-bit
+			// magic is exact over the value's whole range.
+			emit_udiv_magic(e, w, v.a, k)
+			dst_finish(e, v.dst, w, w_homed)
+			return ""
 		}
 		// General signed/non-pow2 divide by an immediate: divisor in RCX.
 		load(e, .RAX, v.a)
@@ -792,13 +822,24 @@ emit_bin_imm :: proc(e: ^X64_Emit, v: bc.BC_Bin_Imm) -> string {
 		store(e, v.dst, .RAX)
 		return ""
 	case .Mod:
-		if unsigned {
+		if unsigned && k > 0 {
 			if _, ok := log2_exact(k); ok {
 				load(e, w, v.a)
 				and_reg_imm(e, w, k - 1)
 				dst_finish(e, v.dst, w, w_homed)
 				return ""
 			}
+			// a % k = a - (a / k) * k, with a / k via the magic sequence. Compute
+			// the quotient into RAX, q*k into RAX, then a - that. RCX/RDX are the
+			// magic scratch (idiv pair / shift count — never allocatable homes).
+			emit_udiv_magic(e, .RAX, v.a, k) // RAX = a / k
+			if fits_imm32(k) {imul_r64_r64_imm32(.RAX, .RAX, u32(i32(k)))} else {movabs_r64_imm64(.RCX, k); imul_r64_r64(.RAX, .RCX)} // RAX = q*k
+			load(e, w == .RAX ? .RCX : w, v.a) // bring a into a reg distinct from RAX
+			areg := w == .RAX ? Register64.RCX : w
+			sub_r64_r64(areg, .RAX) // areg = a - q*k
+			if areg != w do mov_r64_r64(w, areg)
+			dst_finish(e, v.dst, w, w_homed)
+			return ""
 		}
 		load(e, .RAX, v.a)
 		movabs_r64_imm64(.RCX, k)
@@ -1010,17 +1051,109 @@ emit_mul_const_into :: proc(e: ^X64_Emit, w: Register64, x: bc.BC_Value, k: i64,
 		return true
 	}
 
-	// Fallback: imul w, x, k.
-	load(e, w, x)
-	if fits_imm32(k) {
+	// Fallback: imul w, x, k. imul-by-immediate is 3-operand (`imul dst, src, imm`
+	// reads src, writes dst), so when x already lives in a register we read it
+	// straight as the source — no `mov w, x` seed. Only spilled x needs a load.
+	if !fits_imm32(k) {
+		return false
+	}
+	if rx, ok := home_reg(e, x); ok {
 		if use32 {
-			imul_r32_imm32(r32(w), u32(i32(k)))
+			imul_r32_r32_imm32(r32(w), r32(rx), u32(i32(k)))
 		} else {
-			imul_r64_r64_imm32(w, w, u32(i32(k)))
+			imul_r64_r64_imm32(w, rx, u32(i32(k)))
 		}
 		return true
 	}
-	return false
+	load(e, w, x)
+	if use32 {
+		imul_r32_r32_imm32(r32(w), r32(w), u32(i32(k)))
+	} else {
+		imul_r64_r64_imm32(w, w, u32(i32(k)))
+	}
+	return true
+}
+
+// --- unsigned division by a constant via multiply-high (magic) --------------
+//
+// Granlund-Montgomery: replace `n / d` (a slow idiv) by `(n * M) >> s`, reading
+// the high word of the 2^64-wide product. magicu64 derives M, the post-shift,
+// and whether the "add" correction step is needed, for a 64-bit unsigned
+// dividend. Syntact zero-extends the dividend to 64 bits (its range is known and
+// fits its width ≤ 32), so the 64-bit magic is exact over the value's range.
+//
+// magicu64 (Hacker's Delight §10-9, unsigned): returns (M, add, sh) such that
+//   q = n / d  ==  add ? ((MULHI(M,n) + ((n-MULHI(M,n))>>1)) >> (sh-1))
+//                      :  (MULHI(M,n) >> sh)
+// for every n in [0, 2^64). d must be > 0 and not a power of two (handled by the
+// shr fast-path before this is reached).
+magicu64 :: proc(d: i64) -> (M: u64, add: bool, sh: uint) {
+	ud := u64(d)
+	// nc = largest n (< 2^64) with n % d == d-1, i.e. ((2^64) / d)*d - 1.
+	nc := (~u64(0) / ud) * ud - 1
+	p: uint = 63
+	// Find the smallest p such that 2^p > nc*(d - 1 - (2^p-1)%d). Done with
+	// 128-bit-free arithmetic via the two running remainders q1/r1, q2/r2 (the
+	// standard Hacker's Delight loop, all in 64-bit with explicit carry checks).
+	q1 := u64(0x8000000000000000) / (nc + 1)
+	r1 := u64(0x8000000000000000) - q1 * (nc + 1)
+	q2 := (u64(0x7FFFFFFFFFFFFFFF)) / ud
+	r2 := (u64(0x7FFFFFFFFFFFFFFF)) - q2 * ud
+	delta: u64
+	for {
+		p += 1
+		if r1 >= (nc + 1) - r1 {
+			q1 = 2 * q1 + 1
+			r1 = 2 * r1 - (nc + 1)
+		} else {
+			q1 = 2 * q1
+			r1 = 2 * r1
+		}
+		if r2 + 1 >= ud - r2 {
+			if q2 >= 0x7FFFFFFFFFFFFFFF do add = true
+			q2 = 2 * q2 + 1
+			r2 = 2 * r2 + 1 - ud
+		} else {
+			if q2 >= 0x8000000000000000 do add = true
+			q2 = 2 * q2
+			r2 = 2 * r2 + 1
+		}
+		delta = ud - 1 - r2
+		if !(p < 128 && (q1 < delta || (q1 == delta && r1 == 0))) do break
+	}
+	M = q2 + 1
+	sh = p - 64
+	return
+}
+
+// emit_udiv_magic computes `w = a / k` for an unsigned dividend via the magic
+// sequence. Uses RAX/RDX (the mul output pair) and RCX (scratch) — none of which
+// is an allocatable home — so it never clobbers a live value other than its own
+// inputs. The dividend is zero-extended into RAX; `mul rcx` puts the product high
+// word in RDX.
+emit_udiv_magic :: proc(e: ^X64_Emit, w: Register64, a: bc.BC_Value, k: i64) {
+	M, add, sh := magicu64(k)
+	load(e, .RAX, a) // rax = n (zero-extended)
+	if add {
+		// t = MULHI(M, n) ; q = ((n - t) >> 1 + t) >> (sh-1). n is saved in the red
+		// zone [rsp-8] across the mul (which clobbers RAX/RDX); only RAX/RDX/RCX —
+		// none allocatable — are touched, so no live value is lost.
+		n_slot := AddressComponents{base = Register64.RSP, displacement = -8}
+		mov_m64_r64(n_slot, .RAX)             // save n
+		movabs_r64_imm64(.RCX, transmute(i64)M)
+		mul_r64(.RCX)                          // rdx:rax = n * M ; rdx = t (high)
+		mov_r64_m64(.RAX, n_slot)              // rax = n
+		sub_r64_r64(.RAX, .RDX)                // rax = n - t
+		shr_r64_imm8(.RAX, 1)                  // (n - t) >> 1
+		add_r64_r64(.RAX, .RDX)                // + t
+		if sh > 1 do shr_r64_imm8(.RAX, u8(sh - 1))
+		if w != .RAX do mov_r64_r64(w, .RAX)
+	} else {
+		movabs_r64_imm64(.RCX, transmute(i64)M)
+		mul_r64(.RCX)           // rdx:rax = n * M ; rdx = high word = MULHI
+		if sh > 0 do shr_r64_imm8(.RDX, u8(sh))
+		if w != .RDX do mov_r64_r64(w, .RDX)
+	}
 }
 
 // mul_base loads x into a register usable as a SIB base and returns it (x's home
@@ -1072,6 +1205,16 @@ dst_finish :: proc(e: ^X64_Emit, dst: bc.BC_Value, w: Register64, w_homed: bool)
 
 // bc_const_operand: if exactly one of a/b is a constant, return (k, x) with k the
 // constant value and x the variable operand.
+// bc_const_of returns the integer immediate a value was defined by, if it is a
+// BC_Const (used by peepholes like `0 - b` → neg). e.def[v] is the defining
+// instruction index (-1 if none).
+bc_const_of :: proc(e: ^X64_Emit, v: bc.BC_Value) -> (i64, bool) {
+	d := e.def[int(v)]
+	if d < 0 do return 0, false
+	if c, ok := e.prog.insts[d].(bc.BC_Const); ok do return c.imm, true
+	return 0, false
+}
+
 // log2_exact returns the shift amount if k is a positive power of two.
 log2_exact :: proc(k: i64) -> (int, bool) {
 	if k <= 0 do return 0, false
@@ -1138,7 +1281,9 @@ emit_cmp :: proc(e: ^X64_Emit, v: bc.BC_Cmp) {
 	case .GreaterEqual:
 		setge_r8(.AL)
 	}
-	movzx_r64_r8(.RAX, .AL)
+	// movzbl eax,al (not movzbq): a 32-bit write zero-extends to all 64 bits, so
+	// the bool (0/1) is correct and the encoding is one byte shorter (no REX.W).
+	movzx_r32_r8(.EAX, .AL)
 	store(e, v.dst, .RAX)
 }
 
@@ -1163,7 +1308,7 @@ emit_cmp_imm :: proc(e: ^X64_Emit, v: bc.BC_Cmp_Imm) {
 		cmp_r64_r64(.RAX, .RCX)
 	}
 	emit_cmp_setcc(v.op)
-	movzx_r64_r8(.RAX, .AL)
+	movzx_r32_r8(.EAX, .AL) // movzbl: zero-extends to 64, no REX.W
 	store(e, v.dst, .RAX)
 }
 

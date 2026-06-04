@@ -428,16 +428,29 @@ fold_arith_integer_intervals :: proc(
 		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
 		return integer_intervals
 	case .Mod:
+		// `a % b` is the truncated remainder (sign follows the dividend `a`), so its
+		// magnitude is bounded by both `|b| - 1` and `|a|`. Corner-sampling is INVALID
+		// here — `%` is not monotonic, so the four endpoints can all coincide (e.g.
+		// 0%3 = 255%3 = 0) and collapse a genuine [0,2] envelope to a false singleton 0,
+		// which the reducer would then treat as a concrete result. Derive the true
+		// envelope from the magnitude bound instead.
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
 		if b_lo == 0 && b_hi == 0 do return nil
-		bl := b_lo == 0 ? i128(1) : b_lo
-		bh := b_hi == 0 ? i128(-1) : b_hi
-		if bl > bh do return nil
-		p1 := a_lo %% bl
-		p2 := a_lo %% bh
-		p3 := a_hi %% bl
-		p4 := a_hi %% bh
-		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		max_b := max(abs(b_lo), abs(b_hi))
+		if max_b == 0 do return nil
+		m := max_b - 1
+		lo, hi: i128
+		if a_lo >= 0 {
+			lo = 0
+			hi = min(a_hi, m)
+		} else if a_hi <= 0 {
+			lo = max(a_lo, -m)
+			hi = 0
+		} else {
+			lo = max(a_lo, -m)
+			hi = min(a_hi, m)
+		}
+		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
 	case .LShift:
 		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil

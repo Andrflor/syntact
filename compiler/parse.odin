@@ -99,6 +99,7 @@ Token_Flags :: enum u8 {
 	Line_Before      = 0,
 	Space_Before     = 1,
 	Separator_Before = 2, // newline or comma — a soft statement boundary
+	Bad_Double_Equal = 3, // `==` — not a Syntact operator; recovered as a single `=`
 }
 
 Token :: struct {
@@ -288,11 +289,22 @@ lex_single_rbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.
 	return Token{.RightBracket, Span{s, s + 1}, f}}
 lex_single_rparen :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.RightParen, Span{s, s + 1}, f}}
-// `=` is single, except `=<<` which is the reactive-pull operator.
+// `=` is the equality operator; `==` is an accepted alternate spelling of the
+// same operator (collapsed to one Equal token so `a == b` is one Equal, not an
+// infix `=` over a prefix `=b`). `=<<` is the reactive-pull operator.
 lex_single_equal :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	if s + 2 < l.source_len && l.src[s + 1] == '<' && l.src[s + 2] == '<' {
 		l.offset = s + 3
 		return Token{kind = .ReactivePull, span = Span{s, s + 3}, flags = f}
+	}
+	// `==` is NOT a Syntact operator (equality is a single `=`). Lex it as one
+	// 2-byte Equal token flagged Bad_Double_Equal: the parser raises an error and
+	// recovers it as `=`, so the rest of the expression still parses.
+	if s + 1 < l.source_len && l.src[s + 1] == '=' {
+		flags := f
+		set_flag(&flags, .Bad_Double_Equal)
+		l.offset = s + 2
+		return Token{.Equal, Span{s, s + 2}, flags}
 	}
 	l.offset = s + 1
 	return Token{.Equal, Span{s, s + 1}, f}}
@@ -1611,8 +1623,15 @@ parse_product_prefix :: proc(parser: ^Parser) -> Node_Index {
 // switch maps the operator token to its Operator_Kind.
 parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	span_start := parser.node_spans[left].start
-	token_kind := parser.current_token.kind
+	op_token := parser.current_token
+	token_kind := op_token.kind
 	prec := prec_table[token_kind]
+	// `==` was lexed as a flagged Equal: report the error, then recover by treating
+	// it as a single `=` (equality) so the surrounding expression still parses.
+	if token_kind == .Equal && has_flag(op_token, .Bad_Double_Equal) {
+		error_at(parser, op_token, "`==` is not a Syntact operator; equality is a single `=`")
+		parser.panic_mode = false
+	}
 	advance_token(parser)
 
 	right := parse_expression(parser, Precedence(int(prec) + 1))

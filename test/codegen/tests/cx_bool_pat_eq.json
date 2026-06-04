@@ -1,1 +1,1 @@
-{ "name": "cx_bool_pat_eq", "description": "(a==7)?=true/=false", "source": "a -> ??::u8\n-> (a == 7) ? { =true -> 1, =false -> 0 }", "args": [["0"], ["7"], ["8"], ["6"], ["255"]], "expect": ["1", "0", "0", "0", "0"], "kind": "int" }
+{ "name": "cx_bool_pat_eq", "description": "(a=7)?=true/=false", "source": "a -> ??::u8\n-> (a = 7) ? { =true -> 1, =false -> 0 }", "args": [["0"], ["7"], ["8"], ["6"], ["255"]], "expect": ["0", "1", "0", "0", "0"], "kind": "int" }
