@@ -45,12 +45,15 @@ test_path :: proc(rel: string) -> string {
 	return joined
 }
 
+// A case is ONE program compiled ONCE, then validated against MANY input/output
+// combos. `args[i]` are the argv strings for combo i, `expect[i]` its expected
+// result. Every combo is checked on BOTH backends; all must match.
 Codegen_Test_Case :: struct {
 	name:        string `json:"name"`,
 	description: string `json:"description"`,
 	source:      string `json:"source"`,
-	args:        []string `json:"args"`,
-	expect:      string `json:"expect"`,
+	args:        [][]string `json:"args"`,
+	expect:      []string `json:"expect"`,
 	kind:        string `json:"kind"`, // "int" | "str" | "float" | "reject"
 }
 
@@ -139,9 +142,42 @@ run_case :: proc(path: string, t: ^testing.T) {
 		return
 	}
 
+	// The program is COMPILED ONCE. The native ELF is emitted once, then run per
+	// combo with different argv. Every (args, expect) pair is validated on BOTH
+	// backends; all must match.
+	if len(tc.args) != len(tc.expect) {
+		testing.expectf(
+			t, false,
+			"[%s] args/expect length mismatch: %d vs %d",
+			tc.name, len(tc.args), len(tc.expect),
+		)
+		return
+	}
+
+	exe := test_path(fmt.tprintf("tests/.out_%s", tc.name))
+	emsg := x64.emit_executable(prog, exe)
+	testing.expectf(t, emsg == "", "[%s] emit error: %s", tc.name, emsg)
+	if emsg != "" do return
+	defer os.remove(exe)
+
+	for combo in 0 ..< len(tc.args) {
+		run_combo(t, tc, prog, exe, tc.args[combo], tc.expect[combo], combo)
+	}
+}
+
+// run_combo validates ONE input/output pair against both backends.
+run_combo :: proc(
+	t: ^testing.T,
+	tc: Codegen_Test_Case,
+	prog: ^bc.BC_Program,
+	exe: string,
+	args: []string,
+	expect: string,
+	combo: int,
+) {
 	// --- 1. interpreter (oracle) ---
-	r := bc.interp_bytecode(prog, tc.args)
-	testing.expectf(t, r.ok, "[%s] interp error: %s", tc.name, r.error)
+	r := bc.interp_bytecode(prog, args)
+	testing.expectf(t, r.ok, "[%s #%d] interp error: %s", tc.name, combo, r.error)
 	if !r.ok do return
 
 	interp_str: string
@@ -154,14 +190,8 @@ run_case :: proc(path: string, t: ^testing.T) {
 		interp_str = fmt.tprintf("%d", r.value)
 	}
 
-	// --- 2. native x64 ELF ---
-	exe := test_path(fmt.tprintf("tests/.out_%s", tc.name))
-	emsg := x64.emit_executable(prog, exe)
-	testing.expectf(t, emsg == "", "[%s] emit error: %s", tc.name, emsg)
-	if emsg != "" do return
-	defer os.remove(exe)
-
-	argline := strings.join(tc.args, " ", context.temp_allocator)
+	// --- 2. native x64 ELF (same binary, fresh argv) ---
+	argline := strings.join(args, " ", context.temp_allocator)
 	cmd := fmt.tprintf("%s %s", exe, argline)
 	stdout, code := run_shell(cmd)
 
@@ -170,25 +200,26 @@ run_case :: proc(path: string, t: ^testing.T) {
 	case "int":
 		// interp prints the full integer; native is exit-status (value & 0xff).
 		want_native := 0
-		if v, vok := parse_int(tc.expect); vok do want_native = ((v % 256) + 256) % 256
+		if v, vok := parse_int(expect); vok do want_native = ((v % 256) + 256) % 256
 		testing.expectf(
-			t, interp_str == tc.expect,
-			"[%s] interp=%s expect=%s", tc.name, interp_str, tc.expect,
+			t, interp_str == expect,
+			"[%s #%d] args=%v interp=%s expect=%s", tc.name, combo, args, interp_str, expect,
 		)
 		testing.expectf(
 			t, code == want_native,
-			"[%s] native exit=%d expect=%d (val %s)", tc.name, code, want_native, tc.expect,
+			"[%s #%d] args=%v native exit=%d expect=%d (val %s)",
+			tc.name, combo, args, code, want_native, expect,
 		)
 	case "str":
 		got := strings.trim_right_space(stdout)
-		testing.expectf(t, interp_str == tc.expect, "[%s] interp str=%q expect=%q", tc.name, interp_str, tc.expect)
-		testing.expectf(t, got == tc.expect, "[%s] native str=%q expect=%q", tc.name, got, tc.expect)
+		testing.expectf(t, interp_str == expect, "[%s #%d] args=%v interp str=%q expect=%q", tc.name, combo, args, interp_str, expect)
+		testing.expectf(t, got == expect, "[%s #%d] args=%v native str=%q expect=%q", tc.name, combo, args, got, expect)
 	case "float":
-		ev, _ := parse_f64(tc.expect)
+		ev, _ := parse_f64(expect)
 		iv := r.fvalue
 		nv, _ := parse_f64(strings.trim_space(stdout))
-		testing.expectf(t, abs_f(iv - ev) < 1e-6, "[%s] interp float=%v expect=%v", tc.name, iv, ev)
-		testing.expectf(t, abs_f(nv - ev) < 1e-6, "[%s] native float=%v expect=%v", tc.name, nv, ev)
+		testing.expectf(t, abs_f(iv - ev) < 1e-6, "[%s #%d] args=%v interp float=%v expect=%v", tc.name, combo, args, iv, ev)
+		testing.expectf(t, abs_f(nv - ev) < 1e-6, "[%s #%d] args=%v native float=%v expect=%v", tc.name, combo, args, nv, ev)
 	}
 }
 

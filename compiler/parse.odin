@@ -314,7 +314,8 @@ lex_single_slash :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.off
 	return Token{.Slash, Span{s, s + 1}, f}}
 // `[` is a left bracket, except the bracketed bitwise operators `[&]`, `[|]`,
 // `[~]` — three-byte tokens that keep the bitwise ops visually distinct from the
-// set-algebra `&`/`|`/`~`.
+// set-algebra `&`/`|`/`~`. (`^`, `<<`, `>>` are direct — no set-op clash — so
+// they are NOT bracketed.)
 lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	if s + 2 < l.source_len && l.src[s + 2] == ']' {
 		switch l.src[s + 1] {

@@ -1,0 +1,1 @@
+{ "name": "cx_div_mod", "description": "i32 a/3 and %3 mixed", "source": "a -> ??::i32\n-> (a/3)*3 + (a%3)", "args": [["0"], ["7"], ["10"], ["100"], ["99"]], "expect": ["0", "7", "10", "100", "99"], "kind": "int" }

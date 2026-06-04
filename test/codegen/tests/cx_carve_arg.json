@@ -1,0 +1,1 @@
+{ "name": "cx_carve_arg", "description": "carve with ?? inside", "source": "s -> { u8:n -> 0\n -> n*3 + 1 }\na -> ??::u8\n-> s{n -> a}!", "args": [["0"], ["5"], ["10"], ["50"]], "expect": ["1", "16", "31", "151"], "kind": "int" }
