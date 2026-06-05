@@ -77,9 +77,12 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 		// also runs from other contexts (reduce, materialization) where this same
 		// Invalid would duplicate the diagnostic. Those still get the Invalid marker.
 		if a := current_analyzer(); a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
+			// Name the property by its identifier ('x') or, for an ordinal access, by
+			// its position (#0) — never an empty 'property ""'.
+			label := name != "" ? fmt.tprintf("'%s'", name) : fmt.tprintf("#%d", ordinal)
 			sem_error(
 				a,
-				fmt.tprintf("implicit constraint mismatch: property '%s' does not exist after carve substitution", name),
+				fmt.tprintf("implicit constraint mismatch: property %s does not exist after carve substitution", label),
 				.Constraint_Mismatch,
 				a.recheck_span,
 			)
@@ -744,7 +747,7 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	// The fold failed. Hand off to the diagnostic layer, which inspects the
 	// operands and emits a precise, author-facing explanation (incompatible
 	// families, mismatched float colors, non-numeric operand, …).
-	diagnose_compose(a, comp^, node)
+	diagnose_compose(a, comp^, node_span(a, node))
 }
 
 // is_comparison_op reports whether an operator yields a bool (an ordering or
@@ -1234,8 +1237,24 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	for i in 0 ..< len(copy.values) {
 		if overridden[i] do continue
 		if i < len(copy.type_folds) {
-			if nf := fold_value_type(copy.values[i]); nf != nil {
+			had_fold := copy.type_folds[i] != nil
+			nf := fold_value_type(copy.values[i])
+			if nf != nil {
 				copy.type_folds[i] = nf
+				continue
+			}
+			// The field folded BEFORE the carve but no longer does: the substitution
+			// forced an operator onto a wrong domain (`data + x` after `data ->
+			// "hello"`). Re-fold a Compose through the diagnostic layer — same precise
+			// error the initial walk gives ('+' expects numbers…) — anchored at the
+			// carve site. Only while rechecking (recheck_span set), so other fold_carve
+			// callers don't duplicate it.
+			if had_fold {
+				if a := current_analyzer(); a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
+					if comp, is_comp := copy.values[i].(Compose_Type); is_comp {
+						diagnose_compose(a, comp, a.recheck_span)
+					}
+				}
 			}
 		}
 	}
