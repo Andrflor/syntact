@@ -1,0 +1,1 @@
+{ "name": "def_scope_signed_mix", "description": "scope mixing all signed fields -> 0", "source": "{i8:a8, i16:a16, i32:a32, i64:a64, int:ai}:a", "binding": "a", "expect": "{a8 -> 0, a16 -> 0, a32 -> 0, a64 -> 0, ai -> 0}" }

@@ -1,0 +1,1 @@
+{ "name": "def_cast_0_i8", "description": "0::i8 singleton 0", "source": "(0::i8):a", "binding": "a", "expect": "0" }

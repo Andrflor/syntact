@@ -1,0 +1,1 @@
+{ "name": "def_i8_or_bool", "description": "(i8|bool) defaults to i8 = 0", "source": "(i8|bool):a", "binding": "a", "expect": "0" }

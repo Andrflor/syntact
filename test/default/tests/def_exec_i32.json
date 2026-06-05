@@ -1,0 +1,1 @@
+{ "name": "def_exec_i32", "description": "collapse producing i32 defaults to 0", "source": "limit -> { -> i32 }\nlimit!:a", "binding": "a", "expect": "0" }

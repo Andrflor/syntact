@@ -1,0 +1,1 @@
+{ "name": "def_prod_i32", "description": "production of i32 defaults to 0", "source": "{->i32}:a", "binding": "a", "expect": "0" }

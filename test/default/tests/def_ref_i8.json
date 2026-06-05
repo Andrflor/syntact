@@ -1,0 +1,1 @@
+{ "name": "def_ref_i8", "description": "ref to i8 defaults to 0", "source": "C -> i8\nC:a", "binding": "a", "expect": "0" }

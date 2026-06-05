@@ -1,0 +1,1 @@
+{ "name": "def_scope_i8", "description": "scope with i8 field defaults x->0", "source": "{i8:x}:a", "binding": "a", "expect": "{x -> 0}" }

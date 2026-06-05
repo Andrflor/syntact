@@ -1,0 +1,1 @@
+{ "name": "def_i8_and_sym", "description": "i8 & -5..5 contains 0", "source": "(i8 & -5..5):a", "binding": "a", "expect": "0" }

@@ -1,0 +1,1 @@
+{ "name": "def_cast_256_i8", "description": "256::i8 wraps to 0", "source": "(256::i8):a", "binding": "a", "expect": "0" }

@@ -1,0 +1,1 @@
+{ "name": "def_neg_i8_triple", "description": "~~~i8 = ~i8, first bound -129", "source": "(~~~i8):a", "binding": "a", "expect": "-129" }

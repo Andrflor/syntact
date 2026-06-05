@@ -1,0 +1,1 @@
+{ "name": "def_exec_i8", "description": "collapse producing i8 defaults to 0", "source": "limit -> { -> i8 }\nlimit!:a", "binding": "a", "expect": "0" }

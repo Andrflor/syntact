@@ -1,0 +1,1 @@
+{ "name": "def_ref_i32", "description": "ref to i32 defaults to 0", "source": "C -> i32\nC:a", "binding": "a", "expect": "0" }

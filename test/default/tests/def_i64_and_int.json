@@ -1,0 +1,1 @@
+{ "name": "def_i64_and_int", "description": "i64 & int = i64, contains 0", "source": "(i64 & int):a", "binding": "a", "expect": "0" }

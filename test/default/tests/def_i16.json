@@ -1,0 +1,1 @@
+{ "name": "def_i16", "description": "i16 defaults to 0", "source": "i16:a", "binding": "a", "expect": "0" }

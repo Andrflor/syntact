@@ -1,0 +1,1 @@
+{ "name": "def_i32_and_band", "description": "i32 & (-100..100) contains 0", "source": "(i32 & -100..100):a", "binding": "a", "expect": "0" }

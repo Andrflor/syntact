@@ -1,0 +1,1 @@
+{ "name": "def_neg_i8", "description": "~i8 = ..-129|128.. excludes 0, first bound -129", "source": "(~i8):a", "binding": "a", "expect": "-129" }
