@@ -55,6 +55,42 @@ reference_effective_value :: proc(v: Reference_Type) -> ^Type {
 	return original
 }
 
+// reresolve_property re-resolves a property access (`target.name`) after its
+// TARGET was substituted by a carve. The old Reference froze a `(scope, index)`
+// pair against the pre-carve target; once the target's value changes, that pair
+// is stale — the name must be looked up again in the NEW value. Returns the
+// freshly-resolved Reference, or an Invalid_Type if the property no longer exists
+// in the substituted target (`point{data -> {}}!` makes `data.x` invalid). `nt`
+// is the already-repointed target expression; `ref` carries the property name.
+reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
+	name, has_name := ref.name.(string)
+	if !has_name do return nil // not a name-keyed access: nothing to re-resolve
+	ordinal: i16 = -1
+	if o, ok := ref.index.(u64); ok do ordinal = i16(o)
+
+	// Same lookup walk_property uses — shared so substitution resolves identically.
+	prop_scope, prop_index := resolve_property_site(nt, name, ordinal)
+	if prop_scope == nil {
+		// The property is gone in the substituted target (`point{data -> {}}!` drops
+		// `data.x`): the carve broke an implicit constraint the body relied on.
+		// Only emit while a carve is being rechecked (recheck_span set) — fold_carve
+		// also runs from other contexts (reduce, materialization) where this same
+		// Invalid would duplicate the diagnostic. Those still get the Invalid marker.
+		if a := current_analyzer(); a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
+			sem_error(
+				a,
+				fmt.tprintf("implicit constraint mismatch: property '%s' does not exist after carve substitution", name),
+				.Constraint_Mismatch,
+				a.recheck_span,
+			)
+		}
+		return new_type(Invalid_Type{})
+	}
+	nref := new(Reference)
+	nref^ = Reference{ref.name, ref.index, prop_scope, prop_index}
+	return new_type(Reference_Type{nt, nref})
+}
+
 // fold_constraint folds the imposed constraint to the set the value must fall
 // into (the LEFT side). A producer scope {-> X} is NOT flattened: its value is
 // the producer of fold_constraint(X), mirroring fold_value_type on the right so
@@ -1401,6 +1437,18 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 		// Repoint the resolved site and the target expression it was reached through.
 		ref := v.reference
 		nt := repoint(v.target, old, dst)
+		// If the TARGET expression was substituted (`data.x` where `data` is carved),
+		// the frozen `(scope, index)` site is stale: re-resolve the property NAME in
+		// the new target value, so `point{data -> {}}!` re-points `data.x` against the
+		// empty scope and reports it gone. Only when the target actually changed and
+		// the reference is name-keyed (a property access, not a plain mention-ref).
+		if ref != nil && nt != v.target {
+			if _, has_name := ref.name.(string); has_name {
+				if rr := reresolve_property(nt, ref); rr != nil {
+					return rr
+				}
+			}
+		}
 		if ref != nil && ref.match_scope == old {
 			nref := new(Reference)
 			nref^ = Reference{ref.name, ref.index, dst, ref.match_index}

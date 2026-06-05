@@ -79,6 +79,10 @@ Analyzer :: struct {
 	// the carved scope's *original* fields. nil outside a carve override. Saved
 	// and restored around each override walk so nested carves nest correctly.
 	carved_scope: ^Scope_Type,
+	// Span of the carve being rechecked, so reresolve_property (in the fold layer,
+	// reached via the context) anchors its error at the carve site. Set around
+	// recheck_carve only.
+	recheck_span: Span,
 }
 
 // --- analyzer core ---
@@ -764,6 +768,29 @@ walk_constraint :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, 
 	return value
 }
 
+// resolve_property_site locates the field a `target.name` access lands on,
+// returning its (scope, index) or (nil, -1) when the property does not exist. It
+// follows `target` to its scope, peeling Carve_Types to their source, and takes
+// the LAST occurrence of the name (last=true), per the same-name rule. Shared by
+// walk_property (initial analysis) and reresolve_property (carve substitution) so
+// both resolve identically — the one place property lookup is defined.
+resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
+	prop_target := follow(target)
+	for prop_target != nil {
+		#partial switch &t in prop_target^ {
+		case Scope_Type:
+			return scope_resolve(&t, name, ordinal, true)
+		case Carve_Type:
+			if t.source != nil {
+				prop_target = follow(t.source)
+				continue
+			}
+		}
+		break
+	}
+	return nil, -1
+}
+
 // `target.prop` — resolve `prop` against the scope `target` denotes. The loop
 // peels through Carve_Types to their source, so a property of a carved scope
 // resolves against the underlying scope's fields. Property access takes the
@@ -821,22 +848,7 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 
 	target := walk(a, current_scope, data.binary.left)
 
-	prop_scope: ^Scope_Type = nil
-	prop_index := -1
-	resolved_target := follow(target)
-	prop_target := resolved_target
-	for prop_target != nil {
-		#partial switch &t in prop_target^ {
-		case Scope_Type:
-			prop_scope, prop_index = scope_resolve(&t, prop_name, prop_ordinal, true)
-		case Carve_Type:
-			if t.source != nil {
-				prop_target = follow(t.source)
-				continue
-			}
-		}
-		break
-	}
+	prop_scope, prop_index := resolve_property_site(target, prop_name, prop_ordinal)
 
 	if prop_scope == nil {
 		sem_error(
@@ -1107,6 +1119,9 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 // inline check above only covers the directly-overridden fields; this covers the
 // implicit constraints — fields whose value depends on what was carved.
 recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
+	saved_span := a.recheck_span
+	a.recheck_span = node_span(a, node)
+	defer a.recheck_span = saved_span
 	sub := fold_carve(carve)
 	if sub == nil do return
 	// Fields DIRECTLY overridden by the carve are already proven inline by
