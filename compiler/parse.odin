@@ -510,7 +510,14 @@ lex_dot :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 		   has_after {kind = .DoubleDot} else if has_before {kind = .PrefixRange} else if has_after {kind = .PostfixRange}
 		return Token{kind = kind, span = Span{start, off}, flags = flags}
 	}
-	bd := off == 0 || IS_BEFORE_DELIM[src[off - 1]]
+	// A `.` glued right after a pointing/event arrow (`->`, `=>`) is a source-none
+	// property, not a member access on the arrow: `z->.z` means `z -> (.z)`. The
+	// arrow's closing `>` is a left delimiter only in this two-byte form — a bare
+	// `>` (comparison) or an execute-close (`<!>`) keeps `.` as a property access
+	// (`Foo{...}<!>.bar`), so we check the byte before the `>` is `-` or `=`.
+	arrow_before :=
+		off >= 2 && src[off - 1] == '>' && (src[off - 2] == '-' || src[off - 2] == '=')
+	bd := off == 0 || IS_BEFORE_DELIM[src[off - 1]] || arrow_before
 	ad := (off + 1 >= slen) || (src[off] == '.' && off + 1 < slen && IS_SPACE[src[off + 1]])
 	off += 1
 	l.offset = off
