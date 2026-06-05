@@ -1,0 +1,1 @@
+{ "name": "tc_grammar_via_mention_ok", "description": "a repetition/concat grammar built from a NAMED char class (alpha -> 'a'..'z') folds through the mention: alpha*1.. + '@' + alpha*1.. + '.' + alpha*2.. accepts a matching string", "source": "alpha -> 'a'..'z'\n(alpha*1.. + '@' + alpha*1.. + '.' + alpha*2..):email -> \"foo@bar.com\"", "expect_errors": [] }

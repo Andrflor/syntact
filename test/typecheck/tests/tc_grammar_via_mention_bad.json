@@ -1,0 +1,1 @@
+{ "name": "tc_grammar_via_mention_bad", "description": "the same mention-built grammar rejects a string missing the '@' separator, proving the fold stays a real constraint (not permissive)", "source": "alpha -> 'a'..'z'\n(alpha*1.. + '@' + alpha*1..):email -> \"nobar\"", "expect_errors": ["Constraint_Mismatch"] }
