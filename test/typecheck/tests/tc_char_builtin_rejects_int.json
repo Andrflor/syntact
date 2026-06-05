@@ -1,0 +1,1 @@
+{ "name": "tc_char_builtin_rejects_int", "description": "char builtin is the single-codepoint string set, so a bare integer 65 does not satisfy it (use 65::char)", "source": "char:a -> 65", "expect_errors": ["Constraint_Mismatch"] }

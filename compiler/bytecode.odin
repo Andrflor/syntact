@@ -87,7 +87,7 @@ machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 				return tgt.float_kind == .f32 ? .F32 : .F64
 			case .Bool:
 				return .U8
-			case .String:
+			case .String, .Char:
 				return .Str
 			}
 		}

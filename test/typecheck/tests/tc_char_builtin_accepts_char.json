@@ -1,0 +1,1 @@
+{ "name": "tc_char_builtin_accepts_char", "description": "char builtin (any single codepoint) accepts a char literal 'A'", "source": "char:a -> 'A'", "expect_errors": [] }

@@ -97,6 +97,20 @@ make_string_any :: proc() -> Type {
 }
 
 
+// `char` builtin = any single Unicode codepoint = an ORDINAL interval spanning
+// '\x00'..'\U0010FFFF'. Its default is the low bound '\x00'. A single-quote char
+// literal ('A') satisfies it; an integer reinterpreted as a codepoint (65::char)
+// lands here. This is string-domain, NOT an integer alias.
+CHAR_MAX_CODEPOINT :: 0x10FFFF
+make_char_any :: proc() -> Type {
+	intervals := make([]String_Interval, 1)
+	lo := utf8.runes_to_string({rune(0)})
+	hi := utf8.runes_to_string({rune(CHAR_MAX_CODEPOINT)})
+	intervals[0] = String_Interval{lo, hi, true, count_one()}
+	return String_Type{intervals, lo, .simple}
+}
+
+
 // ---------------------------------------------------------------------------
 // Predicates
 // ---------------------------------------------------------------------------
