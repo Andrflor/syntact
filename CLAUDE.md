@@ -2,6 +2,14 @@
 
 Guidance for Claude Code when working in this repository.
 
+## ⚠️ GIT IS THE MAINTAINER'S — NEVER TOUCH IT
+
+**The maintainer manages ALL git operations.** Do NOT run `git stash`, `git checkout`, `git reset`, `git commit`, `git merge`, `git pop`, `git rebase`, or anything that mutates the working tree or git state — not even to "check before/after" a change. `git stash` in particular has corrupted the working tree here. Read-only inspection is fine only if explicitly asked. When unsure whether a change is good, **do NOT verify via git or by diffing states — just make the edit and write a report**; the maintainer decides if it's correct.
+
+## Don't pre-run the test suite to "check before/after"
+
+Do not run the test suite before a change to establish a baseline, nor immediately after just to self-validate, unless the maintainer asks. Make the edit, describe what it does and why, and report. The maintainer runs and judges the tests.
+
 ## Keeping this file current
 
 **Update this file with the changes you make.** If a change makes a statement here wrong — what builds, the file map of `compiler/`, the builtin names, the constraint/domain semantics, the test harnesses, or the conventions — fix it in the same change. A stale CLAUDE.md is a bug. Keep it **concise**: describe the current state, not the history of fixes.
