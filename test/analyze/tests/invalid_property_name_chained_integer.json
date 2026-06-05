@@ -1,0 +1,6 @@
+{
+  "name": "Invalid property name chained integer",
+  "description": "a.z.3 — the chained property tail must name a field, not an integer (the original cascade bug)",
+  "source": "a -> {\n  z -> {u8:a -> 0 u8:b -> 0}\n}\na.z.3",
+  "expect_errors": ["Invalid_Property_Access"]
+}

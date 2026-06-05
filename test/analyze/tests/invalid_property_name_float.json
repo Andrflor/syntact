@@ -1,0 +1,6 @@
+{
+  "name": "Invalid property name float",
+  "description": "a.1.5 — a float literal is not a property name",
+  "source": "a -> { b -> 5 }\na.1.5",
+  "expect_errors": ["Invalid_Property_Access"]
+}

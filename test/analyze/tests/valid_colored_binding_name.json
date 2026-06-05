@@ -1,0 +1,6 @@
+{
+  "name": "Valid colored binding name",
+  "description": "u8:a -> 0 — a colored binding whose name is an identifier is legal (regression guard for the constraint-name check)",
+  "source": "z -> {u8:a -> 0 u8:b -> 0}\nz.a",
+  "expect_errors": []
+}

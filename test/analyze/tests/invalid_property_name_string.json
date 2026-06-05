@@ -1,0 +1,6 @@
+{
+  "name": "Invalid property name string",
+  "description": "a.'x' — a string literal is not a property name",
+  "source": "a -> { b -> 5 }\na.'x'",
+  "expect_errors": ["Invalid_Property_Access"]
+}

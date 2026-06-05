@@ -1,0 +1,6 @@
+{
+  "name": "Invalid constraint name float arrow",
+  "description": "u8:1.5 -> 0 — a float literal cannot name a colored binding",
+  "source": "z -> {u8:1.5 -> 0}",
+  "expect_errors": ["Invalid_Constraint_Name"]
+}
