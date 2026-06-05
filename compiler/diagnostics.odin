@@ -244,8 +244,7 @@ is_numeric_family :: #force_inline proc(f: Family) -> bool {
 // envelope for an arithmetic/bitwise operation. It inspects the operands and
 // emits the most specific, author-facing error it can. The operator is
 // arithmetic/bitwise (Set/`~` operators never reach here).
-diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, node: Node_Index) {
-	span := node_span(a, node)
+diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 	sym := op_symbol(comp.operator)
 
 	// Unary form (no left operand).
