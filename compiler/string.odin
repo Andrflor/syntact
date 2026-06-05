@@ -479,6 +479,11 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 			if s, ok := stored_string_intervals(v.match_scope.constraint_folds[v.match_index]).([]String_Interval); ok {
 				return s
 			}
+			// The cached *_folds carry only an enveloping `{string}` for a bound
+			// ordinal range (`emailChar -> 'a'..'z'`), which loses the bounds a
+			// repetition/range needs. Fall back to the binding's actual VALUE so a
+			// mention into a class folds to its real intervals (`emailChar*1..`).
+			return fold_string_intervals(v.match_scope.values[v.match_index], false)
 		}
 		return nil
 	case Reference_Type:
@@ -493,6 +498,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 			if s, ok := stored_string_intervals(ref.match_scope.constraint_folds[ref.match_index]).([]String_Interval); ok {
 				return s
 			}
+			return fold_string_intervals(ref.match_scope.values[ref.match_index], false)
 		}
 		return nil
 	}
