@@ -978,10 +978,47 @@ walk_operator :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 // loop: named (`name -> v`, resolved by name, FIRST occurrence) and positional
 // (a bare value, matched to the next field by index). Each override is
 // constraint-checked against the field it replaces.
-walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+// carve_shorthand_field tells the shorthand carve-of-a-carved-field (`a{z{…}}`)
+// apart from a plain positional carve of a foreign scope (`a{data{6}}`). It fires
+// ONLY when the child is a `Carve` whose source is a bare identifier that names a
+// field of the scope being carved (src_scope) — then that field is the override
+// target. Otherwise (source not an identifier, or the name is not a carved field)
+// it returns ok=false and the child stays a positional value.
+carve_shorthand_field :: proc(
+	a: ^Analyzer,
+	src_scope: ^Scope_Type,
+	child: Node_Index,
+) -> (
+	scope: ^Scope_Type,
+	index: int,
+	ok: bool,
+) {
+	if src_scope == nil do return nil, -1, false
+	ast := a.ast
+	if ast.node_kinds[child] != .Carve do return nil, -1, false
+	src_node := ast.node_data[child].carve.source
+	if ast.node_kinds[src_node] != .Identifier do return nil, -1, false
+	cname := span_str(ast, ast.node_data[src_node].identifier.name)
+	cordinal := ast.node_data[src_node].identifier.ordinal
+	// self_resolve, NOT scope_resolve: the shorthand targets a DIRECT field of the
+	// carved scope only. scope_resolve walks up to the parent, which would wrongly
+	// claim a foreign top-level scope (`a{data{6}}`, `data` defined at the root) as a
+	// carved field and steal it from the positional-carve path.
+	fscope, fidx := self_resolve(src_scope, cname, cordinal)
+	if fscope == nil do return nil, -1, false
+	return fscope, fidx, true
+}
+
+// source_override, when non-nil, replaces the walk of `idx`'s source node. It is
+// used for the shorthand carve-of-a-carved-field (`a{z{a->2}}`): the inner
+// `z{a->2}`'s source `z` denotes the field of the scope being carved, so the
+// caller resolves it as a self-mention (a Reference_Type into the carved scope,
+// identical to `.z`) and threads it in here instead of letting `z` resolve as a
+// plain mention in the enclosing scope.
+walk_carve :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index, source_override: ^Type = nil) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
-	source := walk(a, current_scope, data.carve.source)
+	source := source_override != nil ? source_override : walk(a, current_scope, data.carve.source)
 	r := data.carve.children
 	carve_children := ast.extra[r.start:][:r.len]
 
@@ -1057,6 +1094,64 @@ walk_carve :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 							),
 							.Constraint_Mismatch,
 							node_span(a, val_idx),
+						)
+					}
+				}
+			}
+			append(
+				&refs,
+				Reference {
+					cname,
+					cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
+					carve_scope,
+					carve_index,
+				},
+			)
+			append(&vals, val)
+		} else if shorthand_field, shorthand_idx, ok :=
+			   carve_shorthand_field(a, src_scope, child); ok {
+			// Shorthand `a{z{a->2}}` == `a{z->.z{a->2}}`: a carve child `z{…}` whose
+			// source `z` NAMES A FIELD of the scope being carved targets that field and
+			// re-carves it. (A `data{6}` whose source is NOT a carved field is a plain
+			// positional carve — the value `data{6}` matched to the next push slot — and
+			// falls through to the positional branch below; that distinction is why the
+			// resolve happens in the guard, not here.) Walk the child carve with the
+			// field's Reference threaded in as its source (a self-mention into the carved
+			// scope, exactly what `.z` produces).
+			src_node := child_data.carve.source
+			cname := span_str(ast, ast.node_data[src_node].identifier.name)
+			cordinal := ast.node_data[src_node].identifier.ordinal
+			carve_scope := shorthand_field
+			carve_index := shorthand_idx
+
+			// The self-source for the inner carve: a Reference into the carved field,
+			// identical to what a `.z` property yields (see walk_property).
+			ref_self := new(Reference)
+			ref_self^ = Reference {
+				cname,
+				cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
+				carve_scope,
+				carve_index,
+			}
+			self_src := new(Type)
+			self_src^ = Reference_Type{nil, ref_self}
+
+			val := walk_carve(a, current_scope, child, self_src)
+			if carve_scope != nil && carve_index >= 0 {
+				cf := carve_scope.constraint_folds[carve_index]
+				if cf != nil {
+					vf := fold_value_type(val)
+					if vf != nil && !satisfy_root(cf, vf) {
+						sem_error(
+							a,
+							fmt.tprintf(
+								"constraint mismatch in carve '%s': %s does not satisfy %s",
+								cname,
+								describe_type(vf),
+								describe_type(cf),
+							),
+							.Constraint_Mismatch,
+							node_span(a, child),
 						)
 					}
 				}

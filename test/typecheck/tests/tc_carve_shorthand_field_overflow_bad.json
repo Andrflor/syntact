@@ -1,0 +1,1 @@
+{ "name": "tc_carve_shorthand_field_overflow_bad", "description": "the shorthand a{z{a->300}} still enforces the inner u8 constraint, like the long form", "source": "a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\na{z{a->300}}", "expect_errors": ["Constraint_Mismatch"] }
