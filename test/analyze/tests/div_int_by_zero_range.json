@@ -1,0 +1,6 @@
+{
+  "name": "Integer division by a divisor whose range includes zero",
+  "description": "100 / a with a:??::u8 (range 0..255 includes 0) must be rejected: idiv by 0 traps (#DE/SIGFPE), so the divisor must be proven non-zero",
+  "source": "a -> ??::u8\n-> 100 / a",
+  "expect_errors": ["Invalid_operator"]
+}

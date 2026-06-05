@@ -187,11 +187,13 @@ scope_append :: proc(
 	constraint: ^Type,
 	bk: Binding_Kind,
 	value: ^Type,
+	capture: string = "",
 ) {
 	append(&scope.names, name)
 	append(&scope.types, constraint)
 	append(&scope.kind, bk)
 	append(&scope.values, value)
+	append(&scope.captures, capture)
 
 }
 
@@ -358,6 +360,7 @@ scope_resolve :: proc(
 	name: string,
 	ordinal: i16,
 	last: bool,
+	allow_capture := false,
 ) -> (
 	^Scope_Type,
 	int,
@@ -395,8 +398,22 @@ scope_resolve :: proc(
 		}
 	}
 
+	// Capture fallback: a `(e)` capture is an INVISIBLE alias of its binding —
+	// not in `names` (so `.`/carve never see it), but referenceable by mention.
+	// Only the mention path (walk_identifier) sets allow_capture; property access
+	// and carve resolution leave it false, so a capture stays invisible to them.
+	// Searched after visible names in THIS scope, before walking to parent, so a
+	// visible name always wins and a capture stays scope-local.
+	if allow_capture {
+		for i := 0; i < len(scope.captures); i += 1 {
+			if scope.captures[i] == name {
+				return scope, i
+			}
+		}
+	}
+
 	if scope.parent != nil {
-		return scope_resolve(scope.parent, name, ordinal, last)
+		return scope_resolve(scope.parent, name, ordinal, last, allow_capture)
 	}
 	return nil, -1
 }
@@ -600,6 +617,7 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 	bk := binding_kind_from_node(kind)
 
 	name := ""
+	capture := ""
 	constraint: ^Type = nil
 	if left_idx == INVALID_NODE do return make_invalid() // malformed binding (parse error)
 	left_kind := ast.node_kinds[left_idx]
@@ -613,16 +631,19 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 			nk := ast.node_kinds[name_idx]
 			if nk == .Identifier {
 				name = span_str(ast, ast.node_data[name_idx].identifier.name)
+				capture = span_str(ast, ast.node_data[name_idx].identifier.capture)
 			} else if nk == .Carve {
 				// constraint:name{carves} — the carve source is the name
 				csrc := ast.node_data[name_idx].carve.source
 				if ast.node_kinds[csrc] == .Identifier {
 					name = span_str(ast, ast.node_data[csrc].identifier.name)
+					capture = span_str(ast, ast.node_data[csrc].identifier.capture)
 				}
 			}
 		}
 	} else if left_kind == .Identifier {
 		name = span_str(ast, ast.node_data[left_idx].identifier.name)
+		capture = span_str(ast, ast.node_data[left_idx].identifier.capture)
 	} else {
 		sem_error(a, "invalid binding name", .Invalid_Binding_Name, node_span(a, left_idx))
 	}
@@ -635,7 +656,7 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 			parent = current_scope,
 		}
 		scope := &result.(Scope_Type)
-		scope_append(a, current_scope, name, constraint, bk, result)
+		scope_append(a, current_scope, name, constraint, bk, result, capture)
 
 		rdata := ast.node_data[right_idx]
 		r := rdata.scope
@@ -665,7 +686,7 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 		return result
 	}
 	value := walk(a, current_scope, right_idx)
-	scope_append(a, current_scope, name, constraint, bk, value)
+	scope_append(a, current_scope, name, constraint, bk, value, capture)
 	typecheck(a, current_scope, name, constraint, bk, value, idx)
 	return value
 }
@@ -1305,7 +1326,7 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 	name := span_str(ast, data.identifier.name)
 	ordinal := data.identifier.ordinal
 
-	res_scope, res_index := scope_resolve(scope, name, ordinal, true)
+	res_scope, res_index := scope_resolve(scope, name, ordinal, true, allow_capture = true)
 	if res_scope != nil {
 		if ordinal >= 0 {
 			ref := new(Reference)

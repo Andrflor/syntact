@@ -416,16 +416,26 @@ fold_arith_integer_intervals :: proc(
 		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
 		return integer_intervals
 	case .Divide:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo == 0 && b_hi == 0 do return nil
-		bl := b_lo == 0 ? i128(1) : b_lo
-		bh := b_hi == 0 ? i128(-1) : b_hi
-		if bl > bh do return nil
-		p1 := a_lo / bl
-		p2 := a_lo / bh
-		p3 := a_hi / bl
-		p4 := a_hi / bh
-		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
+		// Integer `idiv` by 0 raises #DE → SIGFPE → the process is killed, so unlike
+		// IEEE float division the divisor MUST be proven non-zero. The proof is on the
+		// DIVISOR ONLY: its interval must be bounded and exclude 0 (`b_lo > 0` or
+		// `b_hi < 0`). Failing that → nil → an analysis error (caller diagnoses it).
+		// The DIVIDEND may be unbounded: |a/b| ≤ |a|, so an open dividend bound stays
+		// open in the quotient (handled like Multiply's extended-reals corners).
+		if !b_lo_ok || !b_hi_ok do return nil // divisor not statically bounded
+		if b_lo <= 0 && b_hi >= 0 do return nil // divisor range includes 0
+		// Divisor excludes 0. The quotient extremes sit at the corner combinations; a
+		// missing dividend bound (±∞) keeps that side open in the result.
+		lo, hi: Maybe(i128)
+		if a_lo_ok && a_hi_ok {
+			p1 := a_lo / b_lo
+			p2 := a_lo / b_hi
+			p3 := a_hi / b_lo
+			p4 := a_hi / b_hi
+			lo = min(p1, p2, p3, p4)
+			hi = max(p1, p2, p3, p4)
+		}
+		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
 	case .Mod:
 		// `a % b` is the truncated remainder (sign follows the dividend `a`), so its
@@ -434,21 +444,27 @@ fold_arith_integer_intervals :: proc(
 		// 0%3 = 255%3 = 0) and collapse a genuine [0,2] envelope to a false singleton 0,
 		// which the reducer would then treat as a concrete result. Derive the true
 		// envelope from the magnitude bound instead.
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo == 0 && b_hi == 0 do return nil
+		//
+		// Like Divide, `%` lowers to `idiv` and traps on a 0 divisor, so the DIVISOR
+		// must be proven bounded and non-zero (range excludes 0); the DIVIDEND may be
+		// unbounded (an open dividend bound just relaxes the `min(|a|, |b|-1)` clamp on
+		// that side to the full `|b|-1`).
+		if !b_lo_ok || !b_hi_ok do return nil // divisor not statically bounded
+		if b_lo <= 0 && b_hi >= 0 do return nil // divisor range includes 0
 		max_b := max(abs(b_lo), abs(b_hi))
-		if max_b == 0 do return nil
 		m := max_b - 1
-		lo, hi: i128
-		if a_lo >= 0 {
-			lo = 0
-			hi = min(a_hi, m)
-		} else if a_hi <= 0 {
-			lo = max(a_lo, -m)
-			hi = 0
+		lo, hi: Maybe(i128)
+		if a_lo_ok && a_lo >= 0 {
+			lo = i128(0)
+			hi = a_hi_ok ? min(a_hi, m) : m
+		} else if a_hi_ok && a_hi <= 0 {
+			lo = a_lo_ok ? max(a_lo, -m) : -m
+			hi = i128(0)
 		} else {
-			lo = max(a_lo, -m)
-			hi = min(a_hi, m)
+			// dividend straddles 0 (or is unbounded): remainder spans [-(|b|-1), |b|-1],
+			// clamped to whichever dividend bound is known.
+			lo = a_lo_ok ? max(a_lo, -m) : -m
+			hi = a_hi_ok ? min(a_hi, m) : m
 		}
 		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals

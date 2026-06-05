@@ -1,0 +1,6 @@
+{
+  "name": "Capture is invisible to property access",
+  "description": "obj.r must fail: a (r) capture is referenceable by mention within its scope but never via property access '.'",
+  "source": "obj -> {\n  u8:radius(r) -> 42\n}\n-> obj.r",
+  "expect_errors": ["Invalid_Property_Access"]
+}

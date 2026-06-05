@@ -1,0 +1,1 @@
+{ "name": "cx_div_u8_const", "description": "a/7 (u8) by a nonzero constant divisor", "source": "a -> ??::u8\n-> a / 7", "args": [["0"], ["14"], ["100"], ["255"]], "expect": ["0", "2", "14", "36"], "kind": "int" }

@@ -128,6 +128,12 @@ Scope_Type :: struct {
 	values:           [dynamic]^Type,
 	type_folds:       [dynamic]^Type,
 	constraint_folds: [dynamic]^Type,
+	// captures: a second, INVISIBLE name per binding (the `(e)` capture span).
+	// Parallel to the columns above: "" when a field has no capture. Unlike
+	// `names`, captures are NOT consulted by property access `.` or carving `{}`
+	// (those scan `names` only) — a capture is referenceable by mention within its
+	// own scope (and, for a pattern match, its branch production), nothing else.
+	captures:         [dynamic]string,
 }
 
 // `scope!` — collapse: reduce `target` through its Product binding.

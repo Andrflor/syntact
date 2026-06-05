@@ -1,0 +1,6 @@
+{
+  "name": "Float division by a nonzero constant is accepted",
+  "description": "x / 2.0 with x:??::f64 folds without error; the old spurious 'divisor may be zero' rejection is gone",
+  "source": "x -> ??::f64\n-> x / 2.0",
+  "expect_errors": []
+}
