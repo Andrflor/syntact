@@ -1,6 +1,7 @@
 package compiler
 
 import "core:fmt"
+import "core:unicode/utf8"
 
 // --- generic fold (domain-agnostic dispatch) ---
 //
@@ -771,6 +772,7 @@ Cast_Target_Kind :: enum {
 	Float,
 	Bool,
 	String,
+	Char,
 }
 
 Cast_Target :: struct {
@@ -805,7 +807,13 @@ cast_target :: proc(target_fold: ^Type) -> (Cast_Target, bool) {
 		// bool is a 1-bit domain; we lay it down in a byte's worth of pattern.
 		return {kind = .Bool, width = 8}, true
 	case String_Type:
-		// A string target has no fixed width — it absorbs the source bytes as is.
+		// `char` is the ordinal single-codepoint string (the only ordinal string
+		// builtin): a cast into it reads the source as a CODEPOINT NUMBER, not a
+		// byte transmute (65::char -> 'A'). Any other string target absorbs the
+		// source bytes as is.
+		if len(v.string_intervals) == 1 && v.string_intervals[0].ordinal {
+			return {kind = .Char}, true
+		}
 		return {kind = .String}, true
 	}
 	return {}, false
@@ -976,6 +984,13 @@ cast_from_bits :: proc(repr: Bit_Repr, target: Cast_Target) -> ^Type {
 			buf[i] = u8((bits >> uint(8 * i)) & 0xFF)
 		}
 		r^ = make_string_const(string(buf), .double)
+	case .Char:
+		// Read the source bits as a codepoint NUMBER and emit that one character
+		// (65::char -> 'A'). An out-of-range value wraps into the valid Unicode
+		// space so the result is always a single codepoint.
+		cp := rune(bits_reinterpret_int(repr, 32, false) & 0x1FFFFF)
+		if cp > CHAR_MAX_CODEPOINT do cp = rune(int(cp) % (CHAR_MAX_CODEPOINT + 1))
+		r^ = make_string_const(utf8.runes_to_string({cp}), .simple)
 	}
 	return r
 }

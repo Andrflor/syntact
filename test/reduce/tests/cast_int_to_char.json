@@ -1,0 +1,6 @@
+{
+  "name": "Cast int to char reinterprets the codepoint",
+  "description": "65::char reads the integer as a Unicode codepoint and yields the single character 'A'",
+  "source": "-> 65::char",
+  "expect": "'A'"
+}

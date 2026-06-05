@@ -1312,6 +1312,7 @@ init_builtins :: proc "contextless" () {
 	builtins["int"] = make_int_range(nil, nil)
 	builtins["float"] = make_float_range(nil, nil, .none)
 	builtins["string"] = make_string_any()
+	builtins["char"] = make_char_any()
 	builtins["bool"] = make_bool_any()
 	builtins["none"] = None_Type{}
 }
