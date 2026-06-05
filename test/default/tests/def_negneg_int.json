@@ -1,0 +1,1 @@
+{ "name": "def_negneg_int", "description": "~~int = int, contains 0", "source": "(~~int):a", "binding": "a", "expect": "0" }

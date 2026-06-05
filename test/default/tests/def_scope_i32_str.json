@@ -1,0 +1,1 @@
+{ "name": "def_scope_i32_str", "description": "scope i32,string fields", "source": "{i32:x, string:y}:a", "binding": "a", "expect": "{x -> 0, y -> \"\"}" }

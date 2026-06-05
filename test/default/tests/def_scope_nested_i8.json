@@ -1,0 +1,1 @@
+{ "name": "def_scope_nested_i8", "description": "nested scope with i8 field -> 0", "source": "{ {i8:x}:inner }:a", "binding": "a", "expect": "{inner -> {x -> 0}}" }

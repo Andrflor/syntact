@@ -1,0 +1,1 @@
+{ "name": "def_ref_i16", "description": "ref to i16 defaults to 0", "source": "C -> i16\nC:a", "binding": "a", "expect": "0" }

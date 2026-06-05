@@ -1,0 +1,1 @@
+{ "name": "def_i16_and_i32", "description": "i16 & i32 = i16, contains 0", "source": "(i16 & i32):a", "binding": "a", "expect": "0" }

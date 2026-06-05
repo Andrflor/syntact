@@ -1,0 +1,1 @@
+{ "name": "def_prod_i64", "description": "production of i64 defaults to 0", "source": "{->i64}:a", "binding": "a", "expect": "0" }

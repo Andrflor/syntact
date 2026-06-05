@@ -1,0 +1,1 @@
+{ "name": "def_carve_i8_keep", "description": "carve sets x, untouched i16 field stays 0", "source": "Base -> {i8:x, i16:y}\nBase{x->10}:g", "binding": "g", "expect": "{x -> 10, y -> 0}" }

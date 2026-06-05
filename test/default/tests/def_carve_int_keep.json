@@ -1,0 +1,1 @@
+{ "name": "def_carve_int_keep", "description": "carve int base, untouched stays 0", "source": "Base -> {int:x, i64:y}\nBase{y->5}:g", "binding": "g", "expect": "{x -> 0, y -> 5}" }

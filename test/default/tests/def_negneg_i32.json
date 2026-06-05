@@ -1,0 +1,1 @@
+{ "name": "def_negneg_i32", "description": "~~i32 = i32 set, contains 0", "source": "(~~i32):a", "binding": "a", "expect": "0" }

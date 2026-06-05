@@ -1,0 +1,1 @@
+{ "name": "def_i32_or_string", "description": "(i32|string) defaults to first term i32 = 0", "source": "(i32|string):a", "binding": "a", "expect": "0" }

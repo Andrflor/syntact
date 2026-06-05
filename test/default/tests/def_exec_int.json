@@ -1,0 +1,1 @@
+{ "name": "def_exec_int", "description": "collapse producing int defaults to 0", "source": "limit -> { -> int }\nlimit!:a", "binding": "a", "expect": "0" }

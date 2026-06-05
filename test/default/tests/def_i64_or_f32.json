@@ -1,0 +1,1 @@
+{ "name": "def_i64_or_f32", "description": "(i64|f32) defaults to i64 = 0", "source": "(i64|f32):a", "binding": "a", "expect": "0" }

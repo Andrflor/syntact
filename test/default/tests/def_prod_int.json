@@ -1,0 +1,1 @@
+{ "name": "def_prod_int", "description": "production of int defaults to 0", "source": "{->int}:a", "binding": "a", "expect": "0" }

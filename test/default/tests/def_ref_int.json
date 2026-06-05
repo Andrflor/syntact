@@ -1,0 +1,1 @@
+{ "name": "def_ref_int", "description": "ref to int defaults to 0", "source": "C -> int\nC:a", "binding": "a", "expect": "0" }

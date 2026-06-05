@@ -1,0 +1,1 @@
+{ "name": "def_arith_neg_lit", "description": "-7 literal default -7", "source": "(-7):a", "binding": "a", "expect": "-7" }
