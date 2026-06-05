@@ -1,0 +1,1 @@
+{ "name": "tc_carve_shorthand_field_ok", "description": "shorthand a{z{a->2}} is equivalent to a{z->.z{a->2}}: a carve child whose source names a carved field re-carves that field", "source": "a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\na{z{a->2}}", "expect_errors": [] }

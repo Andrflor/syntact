@@ -1,0 +1,1 @@
+{ "name": "tc_carve_shorthand_vs_positional_foreign_ok", "description": "a carve child whose source is a FOREIGN scope (not a field of the carved scope) stays a positional carve, not a shorthand: Pt{Box{1}} fills Pt's push slot with Box{1}", "source": "Box -> { u8:n -> 0 }\nPt -> { slot -> {u8:n->0} }\nPt{Box{1}}", "expect_errors": [] }

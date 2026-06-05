@@ -1,0 +1,1 @@
+{ "name": "tc_carve_shorthand_two_fields_ok", "description": "shorthand re-carves multiple inner fields at once: a{z{a->2 b->3}}", "source": "a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\na{z{a->2 b->3}}", "expect_errors": [] }
