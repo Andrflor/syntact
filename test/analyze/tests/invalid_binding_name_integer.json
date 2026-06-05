@@ -1,0 +1,6 @@
+{
+  "name": "Invalid binding name integer",
+  "description": "3 -> 5 — the left of a binding must be a name, not an integer literal",
+  "source": "3 -> 5",
+  "expect_errors": ["Invalid_Binding_Name"]
+}

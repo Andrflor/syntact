@@ -1,0 +1,6 @@
+{
+  "name": "Invalid constraint name integer",
+  "description": "u16:3 — the colored name of a constraint binding must be an identifier, not an integer (no arrow form)",
+  "source": "z -> {u8:a -> 0 u16:3}",
+  "expect_errors": ["Invalid_Constraint_Name"]
+}

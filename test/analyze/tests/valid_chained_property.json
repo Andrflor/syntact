@@ -1,0 +1,6 @@
+{
+  "name": "Valid chained property",
+  "description": "a.b.c — a chained property whose tail is a name is legal (regression guard for the property-name check)",
+  "source": "a -> { b -> { c -> 5 } }\na.b.c",
+  "expect_errors": []
+}

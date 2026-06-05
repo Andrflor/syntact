@@ -1,0 +1,6 @@
+{
+  "name": "Invalid binding name scope",
+  "description": "{plop} -> 23 — the left of a binding must be a name, not a scope literal",
+  "source": "{plop} -> 23",
+  "expect_errors": ["Invalid_Binding_Name"]
+}

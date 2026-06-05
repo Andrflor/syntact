@@ -1,0 +1,6 @@
+{
+  "name": "Invalid constraint name paren expr",
+  "description": "u8:(a) -> 0 — a parenthesized expression cannot name a colored binding",
+  "source": "z -> {u8:(a) -> 0}",
+  "expect_errors": ["Invalid_Constraint_Name"]
+}

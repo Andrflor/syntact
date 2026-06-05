@@ -1,0 +1,6 @@
+{
+  "name": "Valid plain binding name",
+  "description": "x -> 5 — a bare identifier on the left of a binding is legal (regression guard for the binding-name check)",
+  "source": "x -> 5\nx",
+  "expect_errors": []
+}

@@ -1,0 +1,1 @@
+{ "name": "tc_carve_self_property_ref_glued_ok", "description": "a source-none property glued right after a pointing arrow (z->.z) references the field of the scope being carved, then carves it", "source": "a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\na{z->.z{a->2}}", "expect_errors": [] }

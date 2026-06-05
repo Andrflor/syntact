@@ -1,0 +1,6 @@
+{
+  "name": "Valid colored binding capture",
+  "description": "u8:a(x) -> 0 — a colored binding name carrying a capture alias is legal (regression guard: the capture must not be mistaken for a non-identifier name)",
+  "source": "z -> {u8:a(x) -> 0}\nz.a",
+  "expect_errors": []
+}

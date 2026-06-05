@@ -1,0 +1,6 @@
+{
+  "name": "Invalid property name paren expr",
+  "description": "a.(b) — a parenthesized expression is not a property name",
+  "source": "a -> { b -> 5 }\na.(b)",
+  "expect_errors": ["Invalid_Property_Access"]
+}

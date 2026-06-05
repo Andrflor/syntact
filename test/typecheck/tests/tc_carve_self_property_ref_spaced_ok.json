@@ -1,0 +1,1 @@
+{ "name": "tc_carve_self_property_ref_spaced_ok", "description": "same self-property carve with a space before the dot (z -> .z) parses identically and is valid", "source": "a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\na{z -> .z{a->2}}", "expect_errors": [] }

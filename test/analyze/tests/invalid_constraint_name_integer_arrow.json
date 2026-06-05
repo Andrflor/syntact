@@ -1,0 +1,6 @@
+{
+  "name": "Invalid constraint name integer arrow",
+  "description": "u16:3 -> 0 — the colored name must be an identifier even when the binding has a value (arrow form, handled by walk_binding)",
+  "source": "z -> {u16:3 -> 0}",
+  "expect_errors": ["Invalid_Constraint_Name"]
+}

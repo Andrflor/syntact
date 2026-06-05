@@ -1,0 +1,1 @@
+{ "name": "tc_carve_self_property_ref_overflow_bad", "description": "carving the self-referenced sub-scope (.z) still enforces its inner constraint: a->300 overflows u8", "source": "a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\na{z->.z{a->300}}", "expect_errors": ["Constraint_Mismatch"] }

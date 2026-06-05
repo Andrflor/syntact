@@ -1,0 +1,6 @@
+{
+  "name": "Invalid property name integer",
+  "description": "a.3 — a property must name a field; an integer literal is not a name",
+  "source": "a -> { b -> 5 }\na.3",
+  "expect_errors": ["Invalid_Property_Access"]
+}
