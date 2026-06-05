@@ -1,0 +1,1 @@
+{ "name": "cx_flt_div_const", "description": "x/2.0 (f64) IEEE division by a nonzero constant", "source": "x -> ??::f64\n-> x / 2.0", "args": [["8.0"], ["5.0"], ["0.0"], ["3.0"]], "expect": ["4.0", "2.5", "0.0", "1.5"], "kind": "float" }

@@ -1,0 +1,6 @@
+{
+  "name": "Float division by a divisor whose range includes zero is accepted (IEEE)",
+  "description": "10.0 / x with x:??::f64 is NOT an error: IEEE float division never traps (x/0 -> inf, 0/0 -> NaN), matching Rust/Go/C/LLVM",
+  "source": "x -> ??::f64\n-> 10.0 / x",
+  "expect_errors": []
+}

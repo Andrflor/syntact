@@ -1367,6 +1367,7 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	for v in src.values do append(&dst.values, v)
 	for f in src.type_folds do append(&dst.type_folds, f)
 	for f in src.constraint_folds do append(&dst.constraint_folds, f)
+	for c in src.captures do append(&dst.captures, c)
 	return dst
 }
 

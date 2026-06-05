@@ -12,6 +12,16 @@ ext_mul :: proc(x, y: f64) -> f64 {
 	return x * y
 }
 
+// ext_div divides over the extended reals for interval bounds. The divisor `y` is
+// already known to exclude 0 here (the straddle case is handled separately), so the
+// only special values come from an unbounded dividend/divisor: a finite numerator
+// over an infinite denominator tends to 0, and an infinite numerator over a finite
+// denominator stays infinite (sign from the operands). Used by the interval Divide.
+ext_div :: proc(x, y: f64) -> f64 {
+	if math.is_inf(y) do return 0 // finite or ±∞ over ±∞ → 0 (envelope toward 0)
+	return x / y // y ≠ 0 guaranteed; ±∞/finite stays ±∞
+}
+
 // fold_float.odin — the float domain, mirror of fold_integer.odin.
 //
 // A Float_Type carries three things: a list of Float_Intervals (the numeric
@@ -374,14 +384,34 @@ fold_arith_float_intervals :: proc(
 		}
 		return float_intervals
 	case .Divide:
-		if !a_lo_ok || !a_hi_ok || !b_lo_ok || !b_hi_ok do return nil
-		if b_lo <= 0 && b_hi >= 0 do return nil // divisor interval straddles 0
-		p1 := a_lo / b_lo
-		p2 := a_lo / b_hi
-		p3 := a_hi / b_lo
-		p4 := a_hi / b_hi
+		// IEEE 754 float division NEVER traps: x/0 yields ±∞ and 0/0 yields NaN, so
+		// the divisor is never an error (matches Rust/Go/C/LLVM `fdiv`). Fold over
+		// EXTENDED reals like Multiply: a missing dividend bound is ±∞. When the
+		// divisor interval STRADDLES 0 the quotient spans both ±∞ half-lines, so the
+		// envelope is the whole line (-∞,+∞) — kept by leaving both bounds open.
+		al := a_lo_ok ? a_lo : math.inf_f64(-1)
+		ah := a_hi_ok ? a_hi : math.inf_f64(1)
 		any_open := a.lo_open || a.hi_open || b.lo_open || b.hi_open
-		float_intervals[0] = Float_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4), any_open, any_open}
+		if b_lo <= 0 && b_hi >= 0 {
+			float_intervals[0] = Float_Interval{nil, nil, true, true}
+			return float_intervals
+		}
+		// Divisor excludes 0: the four corner quotients bound the result. A missing
+		// divisor bound (±∞) drives the quotient toward 0, handled by ext_div.
+		bl := b_lo_ok ? b_lo : math.inf_f64(-1)
+		bh := b_hi_ok ? b_hi : math.inf_f64(1)
+		p1 := ext_div(al, bl)
+		p2 := ext_div(al, bh)
+		p3 := ext_div(ah, bl)
+		p4 := ext_div(ah, bh)
+		lo := min(p1, p2, p3, p4)
+		hi := max(p1, p2, p3, p4)
+		float_intervals[0] = Float_Interval {
+			math.is_inf(lo) ? nil : lo,
+			math.is_inf(hi) ? nil : hi,
+			any_open,
+			any_open,
+		}
 		return float_intervals
 	}
 	return nil

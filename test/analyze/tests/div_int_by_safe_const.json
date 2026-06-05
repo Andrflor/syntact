@@ -1,0 +1,6 @@
+{
+  "name": "Integer division by a nonzero constant divisor is accepted",
+  "description": "a / 5 with a:??::u8 is fine: the divisor excludes 0, the unbounded dividend is allowed",
+  "source": "a -> ??::u8\n-> a / 5",
+  "expect_errors": []
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Capture on an anonymous positional field",
+  "description": "A bare (v) capture keeps the field positional and adds the alias v; referencing v reads its value (7)",
+  "source": "obj -> {\n  (v) -> 7\n  -> v\n}\n-> obj!",
+  "expect": "7"
+}

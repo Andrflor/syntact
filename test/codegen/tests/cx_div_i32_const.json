@@ -1,0 +1,1 @@
+{ "name": "cx_div_i32_const", "description": "a/3 (i32, unbounded dividend) by a nonzero constant divisor", "source": "a -> ??::i32\n-> a / 3", "args": [["0"], ["9"], ["100"]], "expect": ["0", "3", "33"], "kind": "int" }

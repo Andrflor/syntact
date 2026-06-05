@@ -1,0 +1,6 @@
+{
+  "name": "Capture resolves to its field value",
+  "description": "A (r) capture on a field is an invisible alias of that binding; referencing r in the scope reads the field value (42)",
+  "source": "obj -> {\n  u8:radius(r) -> 42\n  -> r\n}\n-> obj!",
+  "expect": "42"
+}

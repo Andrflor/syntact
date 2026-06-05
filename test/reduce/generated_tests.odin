@@ -389,7 +389,17 @@ test_op_divide_76 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_scope_add_property_extension_77 :: proc(t: ^testing.T) {
+test_capture_resolves_value_77 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/capture_resolves_value.json", t)
+}
+
+@(test)
+test_capture_anonymous_field_78 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/capture_anonymous_field.json", t)
+}
+
+@(test)
+test_scope_add_property_extension_79 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/scope_add_property_extension.json", t)
 }
 
