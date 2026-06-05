@@ -644,12 +644,27 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 					capture = span_str(ast, ast.node_data[csrc].identifier.capture)
 				}
 			}
+			// `u16:3 -> v`, `u16:(a+b) -> v` — the colored name must resolve to
+			// an identifier; a literal/expression cannot name a binding.
+			if name == "" {
+				sem_error(
+					a,
+					"invalid constraint name: the colored name must be an identifier",
+					.Invalid_Constraint_Name,
+					node_span(a, name_idx),
+				)
+				return make_invalid()
+			}
 		}
 	} else if left_kind == .Identifier {
 		name = span_str(ast, ast.node_data[left_idx].identifier.name)
 		capture = span_str(ast, ast.node_data[left_idx].identifier.capture)
 	} else {
-		sem_error(a, "invalid binding name", .Invalid_Binding_Name, node_span(a, left_idx))
+		// `{plop} -> v`, `3 -> v`, `(a+b) -> v` — the left of a binding must
+		// name a binding (a bare identifier or a `constraint:name` form). A
+		// scope/literal/expression on the left is illegal, not an anonymous one.
+		sem_error(a, "invalid binding name: the left of a binding must be a name", .Invalid_Binding_Name, node_span(a, left_idx))
+		return make_invalid()
 	}
 
 	if right_idx == INVALID_NODE do return make_invalid() // malformed binding (parse error)
@@ -758,6 +773,18 @@ walk_constraint :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, 
 				name = span_str(ast, ast.node_data[csrc].identifier.name)
 			}
 		}
+		// `u16:3`, `u16:(a+b)`, … — a colored binding's name must be an
+		// identifier; a literal/expression cannot name a binding. Anything that
+		// left `name` empty here is illegal, not a silent anonymous binding.
+		if name == "" {
+			sem_error(
+				a,
+				"invalid constraint name: the colored name must be an identifier",
+				.Invalid_Constraint_Name,
+				node_span(a, data.binary.right),
+			)
+			return make_invalid()
+		}
 	}
 	fc := fold_constraint(constraint)
 	value := default_value(fc)
@@ -799,8 +826,21 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 	ast := a.ast
 	data := ast.node_data[idx]
 	right_idx := data.binary.right
-	// `a.` while typing: the property name node is missing. Don't index it.
-	if right_idx == INVALID_NODE || ast.node_kinds[right_idx] != .Identifier {
+	// `a.` while typing: the property name node is missing. An incomplete edit
+	// is not an error here — the LSP must tolerate it.
+	if right_idx == INVALID_NODE {
+		return make_invalid()
+	}
+	// `a.3`, `a.(b+c)` — the property side parsed but is not a name. A property
+	// must name a field; a literal/expression cannot. (Ordinals are `#n`, not
+	// `.n`.) An Invalid_Type with no diagnostic is always a bug.
+	if ast.node_kinds[right_idx] != .Identifier {
+		sem_error(
+			a,
+			"invalid property name: a property must name a field (ordinals are '#n')",
+			.Invalid_Property_Access,
+			node_span(a, right_idx),
+		)
 		return make_invalid()
 	}
 	prop_name := span_str(ast, ast.node_data[right_idx].identifier.name)

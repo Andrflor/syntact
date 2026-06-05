@@ -1739,8 +1739,9 @@ parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	dot_span_end := parser.current_token.span.end
 	advance_token(parser)
 
-	if parser.current_token.kind != .Identifier ||
-	   has_flag(parser.current_token, .Separator_Before) {
+	// `a. ` (separator before the next token) or `a.` at EOF: an incomplete
+	// edit, not an error — keep right = INVALID_NODE so the LSP tolerates it.
+	if has_flag(parser.current_token, .Separator_Before) {
 		data: Node_Data
 		data.binary = Binary_Data {
 			left  = left,
@@ -1749,7 +1750,12 @@ parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		return add_node(parser, .Property, data, Span{span_start, dot_span_end})
 	}
 
-	prop_id := parse_identifier(parser)
+	// `a.3`, `a.(…)`, `a."x"` — a token glued to the `.` that is not a name.
+	// The parser does NOT judge legality; it parses the glued operand as the
+	// property's right node so the analyzer (walk_property) reports it as an
+	// Invalid_Property_Access. Parsing it (rather than leaving the token in the
+	// stream) is what stops it leaking back into the scope as a stray member.
+	prop_id := parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
 	prop_span := parser.node_spans[prop_id]
 
 	data: Node_Data
