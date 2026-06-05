@@ -2,5 +2,5 @@
   "name": "Constraint f64 default",
   "description": "f64 constraint without value gets default 0.0",
   "source": "f64:x\n-> x",
-  "expect": "0.000"
+  "expect": "0.0"
 }
