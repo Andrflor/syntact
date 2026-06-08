@@ -1,6 +1,6 @@
 {
   "name": "Constraint builtin array valid",
   "description": "Array{f32}:a -> {0.1 2.0} should pass, all elements satisfy f32",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nArray{f32}:a -> {0.1 2.0}",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n\nArray{f32}:a -> {0.1 2.0}",
   "expect_errors": []
 }
