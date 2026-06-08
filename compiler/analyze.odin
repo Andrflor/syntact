@@ -472,15 +472,27 @@ self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_
 // Type, or a dangling/unresolved indirection, is returned unchanged — callers can
 // switch on the result without special-casing references.
 follow :: proc(t: ^Type) -> ^Type {
+	return follow_guarded(t, 0)
+}
+
+// follow_guarded is follow with a recursion depth budget: a self-referential
+// scope (`a -> b; b -> a`, or a constraint that mentions itself) forms a pointer
+// cycle in the Mention/Reference chain, which an unguarded follow would chase
+// forever. Past the budget we stop and return the node as-is — the termination
+// analysis (terminate.odin) is what proves/rejects such cycles; this is only the
+// net that keeps the analyzer itself from hanging. 64 matches the
+// constraint_depends_on_unknown guard above.
+follow_guarded :: proc(t: ^Type, depth: int) -> ^Type {
 	if t == nil do return nil
+	if depth > 64 do return t // cycle guard
 	#partial switch v in t^ {
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return follow(v.match_scope.values[v.match_index])
+			return follow_guarded(v.match_scope.values[v.match_index], depth + 1)
 		}
 	case Reference_Type:
 		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
-			return follow(v.reference.match_scope.values[v.reference.match_index])
+			return follow_guarded(v.reference.match_scope.values[v.reference.match_index], depth + 1)
 		}
 	}
 	return t
