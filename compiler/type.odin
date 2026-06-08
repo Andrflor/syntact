@@ -99,7 +99,22 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 // the producer of fold_constraint(X), mirroring fold_value_type on the right so
 // {->u8} (constraint) matches u8 (value). A plain (non-producer) scope keeps
 // its shape. Returns nil when it cannot be resolved statically.
+// Recursion net shared by fold_constraint / fold_value_type. A self-referential
+// scope (a constraint or value that mentions itself, e.g. `Array -> {…; -> {T:
+// ...Array:}}`) makes these two mutually descend forever. Past a generous depth we
+// bail to nil — the SAME signal both functions already return for an unresolvable
+// form, so every caller handles it. A plain int counter (not a map) is used on
+// purpose: it is THREAD_LOCAL and never allocates, so it cannot dangle across the
+// test runner's per-case arenas the way a carried-over map would. The limit is set
+// far above any real acyclic fold nesting; only a true cycle reaches it. This is
+// only the net — terminate.odin proves or rejects the recursion up front.
+@(thread_local) fold_depth: int
+FOLD_DEPTH_LIMIT :: 4096
+
 fold_constraint :: proc(t: ^Type) -> ^Type {
+	fold_depth += 1
+	defer { fold_depth -= 1 }
+	if fold_depth > FOLD_DEPTH_LIMIT do return nil
 	if t != nil {
 		#partial switch v in t^ {
 		case Scope_Type:
@@ -255,6 +270,9 @@ fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 // fold_value_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
 fold_value_type :: proc(t: ^Type) -> ^Type {
+	fold_depth += 1
+	defer { fold_depth -= 1 }
+	if fold_depth > FOLD_DEPTH_LIMIT do return nil
 	// A producer scope {-> X} on the right is itself a value of a higher meta
 	// level: its type is the producer of fold_value_type(X). This mirrors
 	// fold_constraint on the left so {->X} matches across sides.
@@ -468,6 +486,138 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	return false
 }
 
+// production_is_recursive reports whether a producer scope is the inductive step
+// of a recursive constraint — a head binding followed by an expand of a carve
+// (`{T: ...Array{T}}` folds to a scope whose last binding is `.Expand` over a
+// Carve_Type). Returns the head bindings' end index (the count of leading non-
+// expand bindings, each consuming one value element) and the expand's carve (the
+// constraint the REST of the value must satisfy). recursive=false when the shape
+// is anything else (a plain producer like `{}` or `{-> u8}`).
+production_is_recursive :: proc(
+	prod: ^Type,
+) -> (
+	head_count: int,
+	rest_carve: ^Type,
+	recursive: bool,
+) {
+	ps, ok := prod^.(Scope_Type)
+	if !ok do return 0, nil, false
+	// The last binding must be an expand over a carve (the `...Self{…}` tail); the
+	// bindings before it are the heads that each consume one leading value element.
+	n := len(ps.kind)
+	if n == 0 do return 0, nil, false
+	last := n - 1
+	if ps.kind[last] != .Expand do return 0, nil, false
+	// The tail carve (`...Array{T}:`) is the expand's COLORING — its constraint, not
+	// its value. A colored expand stores `Array{T}` in types[last] (the value side is
+	// just the default `{}`). Fall back to the value for an uncolored `...Array{T}`.
+	tail := ps.types[last] != nil ? follow(ps.types[last]) : follow(ps.values[last])
+	if _, is_carve := tail.(Carve_Type); !is_carve do return 0, nil, false
+	// Every binding before the expand is a head (a structural element to match in
+	// order). They must be non-expand, non-product (a colored slot like `T:`).
+	for i in 0 ..< last {
+		if ps.kind[i] == .Expand || ps.kind[i] == .Product do return 0, nil, false
+	}
+	return last, tail, true
+}
+
+// value_elements returns a scope value's positional elements (its pushed
+// bindings), in order — the list a recursive constraint consumes head-first. A
+// producer/expand binding is not a positional element and is skipped.
+value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
+	out := make([dynamic]^Type, 0, len(vs.kind))
+	for i in 0 ..< len(vs.kind) {
+		#partial switch vs.kind[i] {
+		case .Pointing_Push:
+			append(&out, vs.values[i])
+		}
+	}
+	return out
+}
+
+// satisfy_recursive proves a value scope against a recursive producer by INDUCTION
+// on the finite value (which strictly shrinks each step), exactly as written:
+// `{T: ...Array{T}}` consumes the first element against the head color (T, already
+// substituted by the carve), then proves the REST against the tail carve
+// (`Array{T}`) — recursing until the value is empty, which the base-case
+// production (`{}`) matches. The shrinking value IS the termination guard; a
+// pointer-cycle in the carve cannot diverge because each step removes an element.
+// head_constraint_in resolves a recursive production's head color (`T:`) against
+// the carved root scope, so a substituted parameter (T = f32) is seen instead of
+// the stale generic fold. If the head's raw constraint is a mention of a name bound
+// in root, fold root's binding for that name; otherwise fall back to the head's own
+// cached constraint_fold (a non-parametric color like a literal needs no lookup).
+head_constraint_in :: proc(root: Scope_Type, ps: Scope_Type, i: int) -> ^Type {
+	rt := i < len(ps.types) ? ps.types[i] : nil
+	if rt != nil {
+		name := ""
+		#partial switch m in rt^ {
+		case Mention_Type:
+			name = m.name
+		case Reference_Type:
+			if m.reference != nil {
+				if n, nok := m.reference.name.(string); nok do name = n
+			}
+		}
+		if name != "" {
+			for j in 0 ..< len(root.names) {
+				if root.names[j] == name {
+					return fold_constraint(root.values[j])
+				}
+			}
+		}
+	}
+	return i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil
+}
+
+satisfy_recursive :: proc(root: Scope_Type, head_count: int, prod: ^Type, vs: Scope_Type) -> bool {
+	ps, _ := prod^.(Scope_Type)
+	elems := value_elements(vs)
+	defer delete(elems)
+	// Not enough elements to fill the heads → this step cannot match; the base case
+	// (empty value) is matched by the sibling `{}` production, not here.
+	if len(elems) < head_count do return false
+	// Prove each leading element against its head color. The head colors by a
+	// mention of the PARAMETER (`T:`); after a carve that mention still points at
+	// the ORIGINAL scope (repoint did not reach into the nested production), so the
+	// cached constraint_fold holds the GENERIC `T` ({}), not the substituted one.
+	// Resolve the head's color in `root` instead — the carved scope where the
+	// parameter is bound to its argument (T = f32) — by name.
+	for i in 0 ..< head_count {
+		hc := head_constraint_in(root, ps, i)
+		if hc == nil do return false
+		ht := fold_value_type(elems[i])
+		if ht == nil do return false
+		if !satisfy_root(hc, ht) do return false
+	}
+	// The rest (elements past the heads) must satisfy the tail carve (`Array{T}:`).
+	// CRUCIAL: do NOT fold_constraint the carve — `Array{T}` is a RECURSIVE
+	// constraint; materializing it would unfold the inductive production forever
+	// (fold_carve re-folds `{T: ...Array{T}:}`, which re-contains `Array{T}`…). The
+	// tail is `self` with the SAME parameter, so its folded constraint IS `root`
+	// (the carved scope we are already proving against, `Array{f32}`). Reuse it
+	// directly — the finite, shrinking value is the termination guard, not a fold.
+	rest := new(Scope_Type)
+	for i in head_count ..< len(elems) {
+		append(&rest.names, "")
+		append(&rest.types, nil)
+		append(&rest.kind, Binding_Kind.Pointing_Push)
+		append(&rest.values, elems[i])
+		append(&rest.type_folds, fold_value_type(elems[i]))
+		append(&rest.constraint_folds, nil)
+		append(&rest.captures, "")
+	}
+	rest_ft := new(Type)
+	rest_ft^ = rest^
+	// rest_carve is `Self{T}` with the current parameter threaded through, so the
+	// constraint the rest must satisfy is the very scope we hold (`root`). Recurse
+	// through satisfy_root on root, which re-enters this function with one fewer
+	// element until the value is empty and the base-case `{}` production matches.
+	root_t := new(Type)
+	root_t^ = root
+	return satisfy_root(root_t, rest_ft)
+}
+
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	v, ok := fc^.(Scope_Type)
 	if ok {
@@ -487,6 +637,19 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 			if (v.kind[i] == .Product) {
 				hasProd = true
+				// An INDUCTIVE production (`{T: ...Self{T}}`) is proved by structural
+				// recursion on the value, not by a flat satisfy: consume the head
+				// element(s) against their color, then prove the rest against the
+				// tail carve. Routed only when the value side is a scope (a list of
+				// elements); a scalar value can never match a head+tail producer.
+				if hc, _, rec := production_is_recursive(v.values[i]); rec {
+					if vs, vs_ok := ft_content^.(Scope_Type); vs_ok {
+						if satisfy_recursive(v, hc, v.values[i], vs) {
+							return true
+						}
+					}
+					continue
+				}
 				// The production may be stored RAW (a Range_Type `0..`, a Mention,
 				// …) when the producer scope was not built by a fold — e.g. the
 				// literal `{->0..}`. fold_constraint normalizes it to its domain set

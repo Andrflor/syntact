@@ -71,6 +71,11 @@ singleton_shortcut :: proc(tf: ^Type) -> ^Type {
 // normalized Compose tree over the surviving fixed points) otherwise.
 reduce_value :: proc(value: ^Type) -> ^Type {
 	if value == nil do return nil
+	reduce_depth += 1
+	defer { reduce_depth -= 1 }
+	// Past the budget, stop descending and carry the node as-is — a symbolic atom,
+	// the same fallthrough this function uses for anything it can't evaluate.
+	if reduce_depth > REDUCE_DEPTH_LIMIT do return value
 	switch &v in value^ {
 	case Execute_Type:
 		return reduce_value(execute(v))
@@ -900,10 +905,21 @@ eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 @(thread_local) fixedpoint_index: map[rawptr]int
 @(thread_local) fixedpoint_next: int
 
+// Reduction recursion budget. A collapse of a self-referential scope with a
+// symbolic argument (`even{n->??}!` where the base case can't be statically
+// chosen) descends through execute → reduce → execute forever. Past the budget
+// reduce_value carries the node as-is (a symbolic atom), the same shape it returns
+// for any unresolved value. THREAD_LOCAL like the DAG tables; reset in reduce().
+// This is the net that keeps reduction from hanging — terminate.odin proves/rejects
+// the recursion up front so a well-formed program never reaches the limit.
+@(thread_local) reduce_depth: int
+REDUCE_DEPTH_LIMIT :: 512
+
 dag_reset :: proc() {
 	dag_table = make(map[string]^Type)
 	fixedpoint_index = make(map[rawptr]int)
 	fixedpoint_next = 0
+	reduce_depth = 0
 }
 
 // dag_intern returns the canonical node for a Compose shape: if an identical shape
