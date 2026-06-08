@@ -1,6 +1,6 @@
 {
   "name": "Product simple constraint pass",
-  "description": "Scope with -> string: and -> u8: productions, scalar values satisfy",
-  "source": "F32ORString -> {\n  -> string:\n  -> u8:\n}\n\nF32ORString:a -> 2\nF32ORString:b -> ''",
+  "description": "Scope with -> string and -> u8 productions, scalar values satisfy",
+  "source": "F32ORString -> {\n  -> string\n  -> u8\n}\n\nF32ORString:a -> 2\nF32ORString:b -> ''",
   "expect_errors": []
 }
