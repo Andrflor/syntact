@@ -1,1 +1,1 @@
-{ "name": "def_and_or", "description": "((u8 & >10)|(i8 & <0)) normalizes to -128..-1 | 11..255; first finite bound (lo of lowest interval) = -128", "source": "((u8 & >10) | (i8 & <0)):a", "binding": "a", "expect": "-128" }
+{ "name": "def_and_or", "description": "((u8 & >10)|(i8 & <0)) = 11..255 | -128..-1; default follows source order (left-first): left of | is (u8 & >10) whose default is 11 (u8's 0 narrowed out by >10), and 11 survives the union", "source": "((u8 & >10) | (i8 & <0)):a", "binding": "a", "expect": "11" }

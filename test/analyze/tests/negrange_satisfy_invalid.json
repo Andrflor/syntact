@@ -1,0 +1,6 @@
+{
+  "name": "Negative range satisfied invalid",
+  "description": "(-5..5) = [-5,5]; 9 is outside, so Constraint_Mismatch",
+  "source": "(-5..5):a -> 9",
+  "expect_errors": ["Constraint_Mismatch"]
+}

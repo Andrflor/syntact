@@ -1293,9 +1293,11 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 			return range_operand_kind(v.reference.match_scope.values[v.reference.match_index])
 		}
 		return .Invalid
-	case Negate_Type, And_Type, Or_Type:
-		// A set-algebra bound (`~'\0'`, `'a'..'z' & ~'m'`): its family is whatever it
-		// folds to. Probe the domains in turn so `(~'\0')..` reads as a String range.
+	case Negate_Type, And_Type, Or_Type, Compose_Type, Cast_Type:
+		// A computed bound: set-algebra (`~'\0'`, `'a'..'z' & ~'m'`), arithmetic
+		// (a unary `-5` is Subtract(none,5), or `1+2`), or a raw cast. Its family is
+		// whatever it folds to, so probe the domains in turn — `(-5)..5` reads as an
+		// Integer range, `(~'\0')..` as a String one.
 		if fold_constraint_integer(t) != nil do return .Integer
 		if fold_constraint_float(t) != nil do return .Float
 		if fold_constraint_string(t) != nil do return .String
