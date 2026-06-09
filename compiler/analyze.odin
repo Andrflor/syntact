@@ -472,30 +472,45 @@ self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_
 // Type, or a dangling/unresolved indirection, is returned unchanged — callers can
 // switch on the result without special-casing references.
 follow :: proc(t: ^Type) -> ^Type {
-	return follow_guarded(t, 0)
+	// A self-referential scope (`a -> b; b -> a`, or a constraint that mentions
+	// itself) forms a cycle in the Mention/Reference chain — chasing it unguarded
+	// would loop forever. The cycle is EXACT: it is re-visiting the same binding
+	// site (match_scope, match_index). We detect that precisely instead of clipping
+	// at a magic depth — a cycle is a valid construction, not an error, so we just
+	// stop at the node we'd revisit and return it as-is. The visited set is built
+	// lazily: a non-indirection (the common case) costs nothing.
+	cur := t
+	visited: map[Follow_Key]bool
+	defer if visited != nil do delete(visited)
+	for cur != nil {
+		key: Follow_Key
+		next: ^Type
+		#partial switch v in cur^ {
+		case Mention_Type:
+			if v.match_scope == nil || v.match_index < 0 do return cur
+			key = Follow_Key{v.match_scope, v.match_index}
+			next = v.match_scope.values[v.match_index]
+		case Reference_Type:
+			r := v.reference
+			if r == nil || r.match_scope == nil || r.match_index < 0 do return cur
+			key = Follow_Key{r.match_scope, r.match_index}
+			next = r.match_scope.values[r.match_index]
+		case:
+			return cur
+		}
+		if visited == nil do visited = make(map[Follow_Key]bool)
+		if key in visited do return cur // cycle: we'd revisit this exact binding
+		visited[key] = true
+		cur = next
+	}
+	return cur
 }
 
-// follow_guarded is follow with a recursion depth budget: a self-referential
-// scope (`a -> b; b -> a`, or a constraint that mentions itself) forms a pointer
-// cycle in the Mention/Reference chain, which an unguarded follow would chase
-// forever. Past the budget we stop and return the node as-is — the termination
-// analysis (terminate.odin) is what proves/rejects such cycles; this is only the
-// net that keeps the analyzer itself from hanging. 64 matches the
-// constraint_depends_on_unknown guard above.
-follow_guarded :: proc(t: ^Type, depth: int) -> ^Type {
-	if t == nil do return nil
-	if depth > 64 do return t // cycle guard
-	#partial switch v in t^ {
-	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
-			return follow_guarded(v.match_scope.values[v.match_index], depth + 1)
-		}
-	case Reference_Type:
-		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
-			return follow_guarded(v.reference.match_scope.values[v.reference.match_index], depth + 1)
-		}
-	}
-	return t
+// Follow_Key identifies a binding site: (definition scope, ordinal within it).
+// Re-visiting the same key while following indirections IS the cycle.
+Follow_Key :: struct {
+	scope: ^Scope_Type,
+	index: int,
 }
 
 // walk is the AST → Type recursion: given a node, build and return its `^Type`,
