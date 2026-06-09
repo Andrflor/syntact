@@ -1,0 +1,6 @@
+{
+  "name": "Colored production with explicit value mixed with a plain production",
+  "description": "`-> u8:3` is a single colored production (value 3 proven in u8), `-> 42` a plain production; the scope reduces to {-> 3, -> 42} with no doubled entries",
+  "source": "X -> {\n  -> u8:3\n  -> 42\n}\n-> X",
+  "expect": "{-> 3, -> 42}"
+}

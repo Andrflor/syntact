@@ -1,0 +1,6 @@
+{
+  "name": "Colored f32 production collapses to its default",
+  "description": "A scope whose sole production is `-> f32:` collapses to the f32 default 0.0",
+  "source": "X -> {\n  -> f32:\n}\n-> X!",
+  "expect": "0.0"
+}
