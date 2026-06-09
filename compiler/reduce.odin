@@ -72,11 +72,6 @@ singleton_shortcut :: proc(tf: ^Type) -> ^Type {
 // normalized Compose tree over the surviving fixed points) otherwise.
 reduce_value :: proc(value: ^Type) -> ^Type {
 	if value == nil do return nil
-	reduce_depth += 1
-	defer { reduce_depth -= 1 }
-	// Past the budget, stop descending and carry the node as-is — a symbolic atom,
-	// the same fallthrough this function uses for anything it can't evaluate.
-	if reduce_depth > REDUCE_DEPTH_LIMIT do return value
 	switch &v in value^ {
 	case Execute_Type:
 		return reduce_value(execute(v))
@@ -906,21 +901,10 @@ eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 @(thread_local) fixedpoint_index: map[rawptr]int
 @(thread_local) fixedpoint_next: int
 
-// Reduction recursion budget. A collapse of a self-referential scope with a
-// symbolic argument (`even{n->??}!` where the base case can't be statically
-// chosen) descends through execute → reduce → execute forever. Past the budget
-// reduce_value carries the node as-is (a symbolic atom), the same shape it returns
-// for any unresolved value. THREAD_LOCAL like the DAG tables; reset in reduce().
-// This is the net that keeps reduction from hanging — terminate.odin proves/rejects
-// the recursion up front so a well-formed program never reaches the limit.
-@(thread_local) reduce_depth: int
-REDUCE_DEPTH_LIMIT :: 512
-
 dag_reset :: proc() {
 	dag_table = make(map[string]^Type)
 	fixedpoint_index = make(map[rawptr]int)
 	fixedpoint_next = 0
-	reduce_depth = 0
 }
 
 // dag_intern returns the canonical node for a Compose shape: if an identical shape
@@ -1047,10 +1031,20 @@ reduce_set_op :: proc(value: ^Type) -> ^Type {
 }
 
 execute :: proc(value: Execute_Type) -> ^Type {
+	// If this collapse would re-enter a source scope already being unfolded, the
+	// recursion does not terminate statically (its pivot is a `??`, no base case
+	// chosen at compile time). Stop unfolding and keep the target symbolic — the
+	// runtime selects the branch. A cycle is not an error: see terminate.odin.
+	src := collapse_source(value.target)
+	if src != nil && collapse_would_recurse(src) {
+		return value.target
+	}
 	reduced := reduce_value(value.target)
 	if reduced == nil do return value.target
 	#partial switch &s in reduced^ {
 	case Scope_Type:
+		collapse_enter(src)
+		defer collapse_leave()
 		return reduce(&s)
 	}
 	return reduced

@@ -99,22 +99,16 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 // the producer of fold_constraint(X), mirroring fold_value_type on the right so
 // {->u8} (constraint) matches u8 (value). A plain (non-producer) scope keeps
 // its shape. Returns nil when it cannot be resolved statically.
-// Recursion net shared by fold_constraint / fold_value_type. A self-referential
-// scope (a constraint or value that mentions itself, e.g. `Array -> {…; -> {T:
-// ...Array:}}`) makes these two mutually descend forever. Past a generous depth we
-// bail to nil — the SAME signal both functions already return for an unresolvable
-// form, so every caller handles it. A plain int counter (not a map) is used on
-// purpose: it is THREAD_LOCAL and never allocates, so it cannot dangle across the
-// test runner's per-case arenas the way a carried-over map would. The limit is set
-// far above any real acyclic fold nesting; only a true cycle reaches it. This is
-// only the net — terminate.odin proves or rejects the recursion up front.
-@(thread_local) fold_depth: int
-FOLD_DEPTH_LIMIT :: 4096
-
+// fold_constraint / fold_value_type descend a constraint/value to its folded form.
+// A self-referential scope (a constraint that mentions itself, e.g. the inductive
+// `Array -> {…; -> {T: ...Array:}}`) is NOT a problem for these folds directly:
+// the recursive TYPECHECK is handled by satisfy_recursive, which deliberately does
+// NOT fold the recursive tail carve (the shrinking value is its termination guard,
+// see its comment). The only way fold itself would recurse forever is folding a
+// recursive carve — which no caller does. So no depth net is needed here; a cycle
+// in the language is detected exactly where it lives (follow's binding chain, the
+// collapse stack in terminate.odin), never by a magic counter.
 fold_constraint :: proc(t: ^Type) -> ^Type {
-	fold_depth += 1
-	defer { fold_depth -= 1 }
-	if fold_depth > FOLD_DEPTH_LIMIT do return nil
 	if t != nil {
 		#partial switch v in t^ {
 		case Scope_Type:
@@ -270,9 +264,6 @@ fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 // fold_value_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
 fold_value_type :: proc(t: ^Type) -> ^Type {
-	fold_depth += 1
-	defer { fold_depth -= 1 }
-	if fold_depth > FOLD_DEPTH_LIMIT do return nil
 	// A producer scope {-> X} on the right is itself a value of a higher meta
 	// level: its type is the producer of fold_value_type(X). This mirrors
 	// fold_constraint on the left so {->X} matches across sides.
