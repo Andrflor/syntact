@@ -1,0 +1,1 @@
+{ "name": "def_i8_and_negrange", "description": "i8 & -5..5 intersects to -5..5; i8's default 0 survives (0 in -5..5), left-first keeps it", "source": "(i8 & -5..5):a", "binding": "a", "expect": "0" }

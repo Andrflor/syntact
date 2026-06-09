@@ -1,0 +1,6 @@
+{
+  "name": "Negative range satisfied valid",
+  "description": "(-5..5) parses as (-5)..5; 3 is in [-5,5] so the constraint holds (regression: used to parse as -(5..5) = -5 and reject)",
+  "source": "(-5..5):a -> 3",
+  "expect_errors": []
+}

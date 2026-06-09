@@ -1,0 +1,1 @@
+{ "name": "def_neg_range_both", "description": "-10..-5 both bounds negative; default = first bound -10", "source": "(-10..-5):a", "binding": "a", "expect": "-10" }

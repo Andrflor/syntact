@@ -1710,10 +1710,14 @@ parse_unary :: proc(parser: ^Parser) -> Node_Index {
 	token_kind := parser.current_token.kind
 	advance_token(parser)
 
-	// A unary operator binds TIGHTER than range/shift: `-5..5` is `(-5)..5`, not
-	// `-(5..5)`. So its operand parses at CALL precedence (just the atom plus any
-	// call/member/group suffix), letting `..`, `<<`, etc. apply to the negated atom.
-	operand := parse_expression(parser, .CALL)
+	// Operand precedence depends on the operator. Arithmetic negation `-` binds
+	// TIGHTER than range/shift so `-5..5` is `(-5)..5`, not `-(5..5)`: it parses
+	// its operand at CALL (just the atom + call/member/group suffix), letting `..`
+	// and `<<` apply to the negated atom. The SET operators `~`/`!` instead keep
+	// the looser UNARY level so `~'a'..'z'` reads as `~('a'..'z')` — the negation
+	// of the whole character range, which is what the set algebra means.
+	operand_prec := token_kind == .Minus ? Precedence.CALL : Precedence.UNARY
+	operand := parse_expression(parser, operand_prec)
 	if operand == INVALID_NODE {
 		error_at_current(parser, "Expected expression after unary operator")
 		return INVALID_NODE

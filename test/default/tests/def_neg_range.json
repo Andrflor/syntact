@@ -1,0 +1,1 @@
+{ "name": "def_neg_range", "description": "-5..5 parses as (-5)..5, not -(5..5); default = first bound -5", "source": "(-5..5):a", "binding": "a", "expect": "-5" }

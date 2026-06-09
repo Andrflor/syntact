@@ -1,0 +1,6 @@
+{
+  "name": "Negative range lower bound",
+  "description": "(-5..5) includes its lower bound -5",
+  "source": "(-5..5):a -> -5",
+  "expect_errors": []
+}
