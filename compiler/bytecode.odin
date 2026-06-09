@@ -411,7 +411,8 @@ bc_branch_bool_value :: proc(branch: Pattern_Branch) -> (val: bool, ok: bool) {
 // Extract a concrete integer [lo,hi] match from a pattern branch, if it is one.
 bc_branch_int_range :: proc(branch: Pattern_Branch) -> (lo: i64, hi: i64, ok: bool) {
 	if branch.match == nil do return 0, 0, false
-	if ints, ok := fold_type_intervals(branch.match).?; ok {
+	if it, ok := fold_type_intervals(branch.match).?; ok {
+		ints := it.integer_intervals
 		if len(ints) == 1 {
 			if lo, has_lo := ints[0].lo.?; has_lo {
 				if hi, has_hi := ints[0].hi.?; has_hi {

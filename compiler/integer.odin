@@ -37,22 +37,32 @@ make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128)) -> Integer_Type {
 	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
 }
 
+// make_int_range_default builds a range with an EXPLICIT default (instead of the
+// structural first-bound fallback). Used for the signed builtins so `i8` defaults
+// to 0, not -128; the default then propagates through `&`/`|` like any other.
+make_int_range_default :: proc(lo: Maybe(i128), hi: Maybe(i128), def: i128) -> Integer_Type {
+	integer_intervals := make([]Integer_Interval, 1)
+	integer_intervals[0] = Integer_Interval{lo, hi}
+	return Integer_Type{integer_intervals, def}
+}
+
 
 make_int_const :: proc(val: i128) -> Integer_Type {
 	return make_int_range(val, val)
 }
 
 
-// The default depends ONLY on the final intervals, never on the syntax that
-// produced them: ~10 ≡ ..9|11.. yield the same default. Rule: the first FINITE
-// bound encountered while scanning (lo₁, hi₁, lo₂, hi₂, …) — always a real
-// element of the set.
-//   u8 [0..255]    → 0   (lo₁)
+// The STRUCTURAL fallback default, used only when no default was propagated from
+// the source `&`/`|` order: the first FINITE bound encountered while scanning
+// (lo₁, hi₁, lo₂, hi₂, …) — always a real element of the set.
 //   ~10 [..9|11..] → 9   (lo₁=−∞ skipped, hi₁)
 //   ..10 [..10]    → 10  (hi₁)
 //   5.. [5..]      → 5   (lo₁)
 //   ~0 [..-1|1..]  → -1  (hi₁, and −1 ∈ ~0 ✓)
 // Fully open set (.. = ℤ): no finite bound → 0.
+// NOTE: builtin signed families (i8/i16/i32/i64/int) carry an EXPLICIT 0 default
+// posted at construction (init_builtins), which then propagates; this fallback is
+// what an anonymous range with no carried default gets.
 default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {
 	if len(integer_intervals) == 0 do return nil
 	for interval in integer_intervals {
@@ -72,22 +82,20 @@ int_to_f64 :: #force_inline proc(i: Integer_Type) -> f64 {
 // fold_type_integer derives the integer envelope a value produces and wraps it
 // in an Integer_Type, or nil if the value is not integer-foldable.
 fold_type_integer :: proc(t: ^Type) -> ^Type {
-	segs, ok := fold_type_intervals(t).([]Integer_Interval)
+	it, ok := fold_type_intervals(t).(Integer_Type)
 	if !ok do return nil
-	return wrap_integer_intervals(segs)
+	r := new(Type)
+	r^ = it
+	return r
 }
 
 // fold_constraint_integer resolves an integer constraint to a closed
 // Integer_Type, or nil if it cannot be resolved statically.
 fold_constraint_integer :: proc(t: ^Type) -> ^Type {
-	segs, ok := fold_constraint_intervals(t).([]Integer_Interval)
+	it, ok := fold_constraint_intervals(t).(Integer_Type)
 	if !ok do return nil
-	return wrap_integer_intervals(segs)
-}
-
-wrap_integer_intervals :: proc(segs: []Integer_Interval) -> ^Type {
 	r := new(Type)
-	r^ = Integer_Type{segs, default_for_integer_intervals(segs)}
+	r^ = it
 	return r
 }
 
@@ -100,26 +108,31 @@ integer_to_string :: proc(t: Integer_Type) -> string {
 	return pretty_integer_intervals(t.integer_intervals)
 }
 
-// stored_fold_intervals extracts the interval payload from a folded ^Type as
-// cached in type_folds / constraint_folds (always an Integer_Type today).
-stored_fold_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
+// stored_fold_intervals extracts the Integer_Type payload (intervals + default)
+// from a folded ^Type as cached in type_folds / constraint_folds.
+stored_fold_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Integer_Type:
-		return v.integer_intervals
+		return v
 	}
 	return nil
 }
 
 // --- integer interval fold ---
 
-fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
+// fold_type_intervals returns the integer envelope a value produces, carried as
+// an Integer_Type (intervals + propagated default), or nil if not foldable. The
+// default follows the source `&`/`|` order through union/intersect (see
+// integer_type_union/intersect); structural nodes (range/arith/cast) recompute it
+// from their result.
+fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				if s, ok := stored_fold_intervals(v.type_folds[i]).([]Integer_Interval); ok {
+				if s, ok := stored_fold_intervals(v.type_folds[i]).(Integer_Type); ok {
 					return s
 				}
 				return fold_type_intervals(v.values[i])
@@ -127,61 +140,60 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		}
 		return nil
 	case Integer_Type:
-		return v.integer_intervals
+		return v
 	case Range_Type:
-		left_segs, left_ok := fold_type_intervals(v.left).([]Integer_Interval)
-		right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
+		left, left_ok := fold_type_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_type_intervals(v.right).(Integer_Type)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
 		// A range (possibly chained like `10..0..30`) covers the span of ALL
 		// its bounds: lo = global min, hi = global max. Since sub-ranges have
 		// already been folded into their span, merging is enough. A missing
 		// bound (`5..`, `..10`) = open to infinity on that side.
-		lo, hi := range_span_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
-		integer_intervals := make([]Integer_Interval, 1)
-		integer_intervals[0] = Integer_Interval{lo, hi}
-		return integer_intervals
+		lo, hi := range_span_bounds(left.integer_intervals, right.integer_intervals, v.left == nil, v.right == nil)
+		segs := make([]Integer_Interval, 1)
+		segs[0] = Integer_Interval{lo, hi}
+		return Integer_Type{segs, default_for_integer_intervals(segs)}
 	case Compose_Type:
 		if v.type_fold != nil {
 			return fold_type_intervals(v.type_fold)
 		}
 		if v.left == nil {
-			right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
+			right, right_ok := fold_type_intervals(v.right).(Integer_Type)
 			if !right_ok do return nil
+			right_segs := right.integer_intervals
+			segs := make([]Integer_Interval, 1)
 			#partial switch v.operator {
 			case .Greater:
 				hi, hi_ok := right_segs[0].hi.(i128)
 				if !hi_ok do return nil
-				integer_intervals := make([]Integer_Interval, 1)
-				integer_intervals[0] = Integer_Interval{hi + 1, nil}
-				return integer_intervals
+				segs[0] = Integer_Interval{hi + 1, nil}
+				return Integer_Type{segs, default_for_integer_intervals(segs)}
 			case .GreaterEqual:
-				integer_intervals := make([]Integer_Interval, 1)
-				integer_intervals[0] = Integer_Interval{right_segs[0].lo, nil}
-				return integer_intervals
+				segs[0] = Integer_Interval{right_segs[0].lo, nil}
+				return Integer_Type{segs, default_for_integer_intervals(segs)}
 			case .Less:
 				lo, lo_ok := right_segs[0].lo.(i128)
 				if !lo_ok do return nil
-				integer_intervals := make([]Integer_Interval, 1)
-				integer_intervals[0] = Integer_Interval{nil, lo - 1}
-				return integer_intervals
+				segs[0] = Integer_Interval{nil, lo - 1}
+				return Integer_Type{segs, default_for_integer_intervals(segs)}
 			case .LessEqual:
-				integer_intervals := make([]Integer_Interval, 1)
-				integer_intervals[0] = Integer_Interval{nil, right_segs[0].hi}
-				return integer_intervals
+				segs[0] = Integer_Interval{nil, right_segs[0].hi}
+				return Integer_Type{segs, default_for_integer_intervals(segs)}
 			case .Subtract:
 				lo, lo_ok := right_segs[0].lo.(i128)
 				hi, hi_ok := right_segs[0].hi.(i128)
 				if !lo_ok || !hi_ok do return nil
-				integer_intervals := make([]Integer_Interval, 1)
-				integer_intervals[0] = Integer_Interval{-hi, -lo}
-				return integer_intervals
+				segs[0] = Integer_Interval{-hi, -lo}
+				return Integer_Type{segs, default_for_integer_intervals(segs)}
 			}
 			return nil
 		}
-		left_segs, left_ok := fold_type_intervals(v.left).([]Integer_Interval)
-		right_segs, right_ok := fold_type_intervals(v.right).([]Integer_Interval)
+		left, left_ok := fold_type_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_type_intervals(v.right).(Integer_Type)
 		if !left_ok || !right_ok do return nil
+		left_segs := left.integer_intervals
+		right_segs := right.integer_intervals
 		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
 		result := make([dynamic]Integer_Interval)
 		for ls in left_segs {
@@ -197,7 +209,8 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 				}
 			}
 		}
-		return integer_intervals_normalize(result[:])
+		segs := integer_intervals_normalize(result[:])
+		return Integer_Type{segs, default_for_integer_intervals(segs)}
 	case Cast_Type:
 		// `value :: target` produces the target's envelope: the cast forces the
 		// value's bits into the target's layout, so the result always lives in the
@@ -214,12 +227,12 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		if v.match_scope != nil && v.match_index >= 0 {
 			if s, ok := stored_fold_intervals(
 				   v.match_scope.type_folds[v.match_index],
-			   ).([]Integer_Interval); ok {
+			   ).(Integer_Type); ok {
 				return s
 			}
 			if s, ok := stored_fold_intervals(
 				   v.match_scope.constraint_folds[v.match_index],
-			   ).([]Integer_Interval); ok {
+			   ).(Integer_Type); ok {
 				return s
 			}
 		}
@@ -228,17 +241,18 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		ref := v.reference
 		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
 		if v.target != nil {
-			carve_segs := carve_fold_lookup(v.target, ref.match_index)
-			if carve_segs != nil do return carve_segs
+			if carve_it, ok := carve_fold_lookup(v.target, ref.match_index).(Integer_Type); ok {
+				return carve_it
+			}
 		}
 		if s, ok := stored_fold_intervals(
 			   ref.match_scope.type_folds[ref.match_index],
-		   ).([]Integer_Interval); ok {
+		   ).(Integer_Type); ok {
 			return s
 		}
 		if s, ok := stored_fold_intervals(
 			   ref.match_scope.constraint_folds[ref.match_index],
-		   ).([]Integer_Interval); ok {
+		   ).(Integer_Type); ok {
 			return s
 		}
 		return nil
@@ -246,7 +260,10 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	return nil
 }
 
-fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
+// fold_constraint_intervals resolves an integer constraint to an Integer_Type
+// (intervals + default), or nil if not statically resolvable. `&`/`|` propagate
+// the default along the source order via integer_type_union/intersect.
+fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
@@ -257,16 +274,16 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 		}
 		return nil
 	case Integer_Type:
-		return v.integer_intervals
+		return v
 	case Range_Type:
-		left_segs, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
-		right_segs, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
+		left, left_ok := fold_constraint_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_constraint_intervals(v.right).(Integer_Type)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
-		lo, hi := range_span_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
-		integer_intervals := make([]Integer_Interval, 1)
-		integer_intervals[0] = Integer_Interval{lo, hi}
-		return integer_intervals
+		lo, hi := range_span_bounds(left.integer_intervals, right.integer_intervals, v.left == nil, v.right == nil)
+		segs := make([]Integer_Interval, 1)
+		segs[0] = Integer_Interval{lo, hi}
+		return Integer_Type{segs, default_for_integer_intervals(segs)}
 	case Compose_Type:
 		if v.type_fold != nil {
 			return fold_constraint_intervals(v.type_fold)
@@ -275,20 +292,21 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	case Or_Type:
 		// An Or folds to integer intervals ONLY if BOTH branches do. Otherwise
 		// (String | u8) it is mixed → failure, fold_constraint keeps it symbolic
-		// and satisfy tests each branch in its own domain.
-		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
-		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
+		// and satisfy tests each branch in its own domain. The default follows the
+		// LEFT branch (source order) when it survives the union.
+		left, left_ok := fold_constraint_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_constraint_intervals(v.right).(Integer_Type)
 		if !left_ok || !right_ok do return nil
-		return integer_intervals_union(left, right)
+		return integer_type_union(left, right)
 	case And_Type:
-		left, left_ok := fold_constraint_intervals(v.left).([]Integer_Interval)
-		right, right_ok := fold_constraint_intervals(v.right).([]Integer_Interval)
+		left, left_ok := fold_constraint_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_constraint_intervals(v.right).(Integer_Type)
 		if !left_ok || !right_ok do return nil
-		return integer_intervals_intersect(left, right)
+		return integer_type_intersect(left, right)
 	case Negate_Type:
-		inner, inner_ok := fold_constraint_intervals(v.operand).([]Integer_Interval)
+		inner, inner_ok := fold_constraint_intervals(v.operand).(Integer_Type)
 		if !inner_ok do return nil
-		return integer_intervals_negate(inner)
+		return integer_type_negate(inner)
 	case Mention_Type:
 		// A constraint folds the VALUE of its target, never the target's type.
 		// An Unknown value has no case here → nil → not statically resolvable.
@@ -304,7 +322,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe([]Integer_Interval) {
 	return nil
 }
 
-carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
+carve_fold_lookup :: proc(t: ^Type, index: int) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	target := t
 	for {
@@ -312,10 +330,10 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> []Integer_Interval {
 		case Carve_Type:
 			for i := 0; i < len(v.references); i += 1 {
 				if v.references[i].match_index == index {
-					integer_intervals, ok := fold_type_intervals(v.values[i]).([]Integer_Interval)
-					if ok do return integer_intervals
-					segs2, ok2 := fold_constraint_intervals(v.values[i]).([]Integer_Interval)
-					if ok2 do return segs2
+					it, ok := fold_type_intervals(v.values[i]).(Integer_Type)
+					if ok do return it
+					it2, ok2 := fold_constraint_intervals(v.values[i]).(Integer_Type)
+					if ok2 do return it2
 					return nil
 				}
 			}
@@ -515,6 +533,40 @@ fold_arith_integer_intervals :: proc(
 		return integer_intervals
 	}
 	return nil
+}
+
+// --- integer set operations carrying the default (Integer_Type level) ---
+//
+// These mirror bool_domain_union/intersect: the default follows the SOURCE order
+// (left operand first). `|` keeps the left default if it survives in the merged
+// set, else the right's; `&` likewise keeps whichever default still belongs to
+// the intersection; `~` has no source order, so its default is purely structural.
+// When neither operand's default survives, default_for_integer_intervals gives
+// the structural fallback (0 if present, else the first finite bound).
+
+integer_type_union :: proc(a, b: Integer_Type) -> Integer_Type {
+	segs := integer_intervals_union(a.integer_intervals, b.integer_intervals)
+	return Integer_Type{segs, integer_pick_default(segs, a.default_value, b.default_value)}
+}
+
+integer_type_intersect :: proc(a, b: Integer_Type) -> Integer_Type {
+	segs := integer_intervals_intersect(a.integer_intervals, b.integer_intervals)
+	return Integer_Type{segs, integer_pick_default(segs, a.default_value, b.default_value)}
+}
+
+integer_type_negate :: proc(a: Integer_Type) -> Integer_Type {
+	segs := integer_intervals_negate(a.integer_intervals)
+	return Integer_Type{segs, default_for_integer_intervals(segs)}
+}
+
+// integer_pick_default keeps the LEFT operand's default (source order is
+// significant — left first), falling back to the right's only when the left
+// carries none, and to the structural default only when neither does. We do NOT
+// test membership: the left default wins outright.
+integer_pick_default :: proc(segs: []Integer_Interval, left, right: Maybe(i128)) -> Maybe(i128) {
+	if l, ok := left.(i128); ok do return l
+	if r, ok := right.(i128); ok do return r
+	return default_for_integer_intervals(segs)
 }
 
 // --- integer interval set operations ---

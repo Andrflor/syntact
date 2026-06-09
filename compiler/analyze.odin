@@ -1486,17 +1486,21 @@ builtins: map[string]Type
 @(init)
 init_builtins :: proc "contextless" () {
 	context = runtime.default_context()
+	// Unsigned families already get 0 from the structural fallback (lo = 0). The
+	// SIGNED families and `int` carry an EXPLICIT 0 default so a bare `i8` (or any
+	// `&`/`|` that keeps it as the left term) defaults to 0 instead of its low
+	// bound; this default then propagates through the fold like any other.
 	builtins["u8"] = make_int_range(0, 255)
-	builtins["i8"] = make_int_range(-128, 127)
+	builtins["i8"] = make_int_range_default(-128, 127, 0)
 	builtins["u16"] = make_int_range(0, 65535)
-	builtins["i16"] = make_int_range(-32768, 32767)
+	builtins["i16"] = make_int_range_default(-32768, 32767, 0)
 	builtins["u32"] = make_int_range(0, 4294967295)
-	builtins["i32"] = make_int_range(-2147483648, 2147483647)
+	builtins["i32"] = make_int_range_default(-2147483648, 2147483647, 0)
 	builtins["u64"] = make_int_range(0, 18446744073709551615)
-	builtins["i64"] = make_int_range(-9223372036854775808, 9223372036854775807)
+	builtins["i64"] = make_int_range_default(-9223372036854775808, 9223372036854775807, 0)
 	builtins["f32"] = make_float_range(nil, nil, .f32)
 	builtins["f64"] = make_float_range(nil, nil, .f64)
-	builtins["int"] = make_int_range(nil, nil)
+	builtins["int"] = make_int_range_default(nil, nil, 0)
 	builtins["float"] = make_float_range(nil, nil, .none)
 	builtins["string"] = make_string_any()
 	builtins["char"] = make_char_any()
