@@ -1,0 +1,1 @@
+{ "name": "tc_int_mixed_sign_u16_default_ok", "description": "Bare u8:a / i8:b carry no value, so they fold to their 0 defaults; the compiler proves a+b = 0, which satisfies u16. (Contrast tc_int_mixed_sign_u16_bad, where real ?? inputs make the sum unprovable and its negative range violates u16.)", "source": "u8:a\ni8:b\nu16:c -> a+b", "expect_errors": [] }

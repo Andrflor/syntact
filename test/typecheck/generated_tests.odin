@@ -2384,52 +2384,57 @@ test_tc_u8_overflow_475 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_tc_str_backtick_eq_dquote_ok_476 :: proc(t: ^testing.T) {
+test_tc_int_mixed_sign_u16_default_ok_476 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_int_mixed_sign_u16_default_ok.json", t)
+}
+
+@(test)
+test_tc_str_backtick_eq_dquote_ok_477 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_backtick_eq_dquote_ok.json", t)
 }
 
 @(test)
-test_tc_int_mul_concrete_ok_477 :: proc(t: ^testing.T) {
+test_tc_int_mul_concrete_ok_478 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mul_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_insoluble_untyped_478 :: proc(t: ^testing.T) {
+test_tc_insoluble_untyped_479 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_untyped.json", t)
 }
 
 @(test)
-test_tc_comp_inter_unions_ok_479 :: proc(t: ^testing.T) {
+test_tc_comp_inter_unions_ok_480 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_inter_unions_ok.json", t)
 }
 
 @(test)
-test_tc_scope_uncolored_ok_480 :: proc(t: ^testing.T) {
+test_tc_scope_uncolored_ok_481 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_uncolored_ok.json", t)
 }
 
 @(test)
-test_tc_insoluble_and_481 :: proc(t: ^testing.T) {
+test_tc_insoluble_and_482 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_and.json", t)
 }
 
 @(test)
-test_tc_pull_two_independent_ok_482 :: proc(t: ^testing.T) {
+test_tc_pull_two_independent_ok_483 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_two_independent_ok.json", t)
 }
 
 @(test)
-test_tc_cmp_ge5_bad_483 :: proc(t: ^testing.T) {
+test_tc_cmp_ge5_bad_484 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cmp_ge5_bad.json", t)
 }
 
 @(test)
-test_tc_union_tri_int_ok_484 :: proc(t: ^testing.T) {
+test_tc_union_tri_int_ok_485 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_tri_int_ok.json", t)
 }
 
 @(test)
-test_tc_pat_bool_exh_485 :: proc(t: ^testing.T) {
+test_tc_pat_bool_exh_486 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_bool_exh.json", t)
 }
 
