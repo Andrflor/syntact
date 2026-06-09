@@ -560,13 +560,25 @@ integer_type_negate :: proc(a: Integer_Type) -> Integer_Type {
 }
 
 // integer_pick_default keeps the LEFT operand's default (source order is
-// significant — left first), falling back to the right's only when the left
-// carries none, and to the structural default only when neither does. We do NOT
-// test membership: the left default wins outright.
+// significant — left first) WHEN it still belongs to the folded result, else the
+// right's when it does, else the structural fallback (first finite bound). The
+// membership test matters for `&`: an intersection can narrow the left default
+// out of the set (`u8 & 100..` drops u8's 0), and then the default must be a real
+// element of what remains.
 integer_pick_default :: proc(segs: []Integer_Interval, left, right: Maybe(i128)) -> Maybe(i128) {
-	if l, ok := left.(i128); ok do return l
-	if r, ok := right.(i128); ok do return r
+	if l, ok := left.(i128); ok && integer_intervals_contains(segs, l) do return l
+	if r, ok := right.(i128); ok && integer_intervals_contains(segs, r) do return r
 	return default_for_integer_intervals(segs)
+}
+
+// integer_intervals_contains reports whether v is a member of the interval set.
+integer_intervals_contains :: proc(segs: []Integer_Interval, v: i128) -> bool {
+	for s in segs {
+		lo, lo_ok := s.lo.(i128)
+		hi, hi_ok := s.hi.(i128)
+		if (!lo_ok || lo <= v) && (!hi_ok || v <= hi) do return true
+	}
+	return false
 }
 
 // --- integer interval set operations ---
