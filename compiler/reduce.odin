@@ -55,7 +55,8 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 			return reduce_value(scope.values[i])
 		}
 	}
-	return nil
+	// A scope with no Product binding reduces to none — the empty value, not nil.
+	return new_type(None_Type{})
 }
 
 // singleton_shortcut returns the fold itself when it is a concrete singleton (a
