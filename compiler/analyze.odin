@@ -722,9 +722,34 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 	return value
 }
 
+// `-> X` produces ONE entry, the scope's production. If X is itself a
+// constraint (`-> f32:`, `-> u8:3`), the production CARRIES that constraint —
+// it is a single colored production, not a binding plus a production. Walking
+// the constraint operand directly would route through walk_constraint, which
+// appends its own (Pointing_Push) binding, doubling the entry. So we peel the
+// constraint here and emit exactly one .Product, like walk_expand does.
 walk_product :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
-	data := a.ast.node_data[idx]
-	value := walk(a, current_scope, data.unary.operand)
+	ast := a.ast
+	data := ast.node_data[idx]
+	operand_idx := data.unary.operand
+	if ast.node_kinds[operand_idx] == .Constraint {
+		cdata := ast.node_data[operand_idx]
+		constraint := walk(a, current_scope, cdata.binary.left)
+		value: ^Type = ---
+		if cdata.binary.right != INVALID_NODE {
+			value = walk(a, current_scope, cdata.binary.right)
+			scope_append(a, current_scope, "", constraint, .Product, value)
+			typecheck(a, current_scope, "", constraint, .Product, value, idx)
+		} else {
+			fc := fold_constraint(constraint)
+			value = default_value(fc)
+			scope_append(a, current_scope, "", constraint, .Product, value)
+			append(&current_scope.constraint_folds, fc)
+			append(&current_scope.type_folds, value)
+		}
+		return value
+	}
+	value := walk(a, current_scope, operand_idx)
 	scope_append(a, current_scope, "", nil, .Product, value)
 	typecheck(a, current_scope, "", nil, .Product, value, idx)
 	return value
