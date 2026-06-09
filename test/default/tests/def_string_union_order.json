@@ -1,0 +1,1 @@
+{ "name": "def_string_union_order", "description": "(\"xyz\" | \"abc\"): default follows source order (left), \"xyz\"", "source": "(\"xyz\" | \"abc\"):a", "binding": "a", "expect": "\"xyz\"" }
