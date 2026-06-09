@@ -106,22 +106,20 @@ float_kind_compatible :: #force_inline proc(ck, vk: FloatKind) -> bool {
 // fold_type_float derives the float envelope a value produces and wraps it in a
 // Float_Type, or nil if the value is not float-foldable.
 fold_type_float :: proc(t: ^Type) -> ^Type {
-	segs, kind, ok := fold_type_float_intervals(t)
+	ft, ok := fold_type_float_intervals(t).(Float_Type)
 	if !ok do return nil
-	return wrap_float_intervals(segs, kind)
+	r := new(Type)
+	r^ = ft
+	return r
 }
 
 // fold_constraint_float resolves a float constraint to a closed Float_Type, or
 // nil if it cannot be resolved statically.
 fold_constraint_float :: proc(t: ^Type) -> ^Type {
-	segs, kind, ok := fold_constraint_float_intervals(t)
+	ft, ok := fold_constraint_float_intervals(t).(Float_Type)
 	if !ok do return nil
-	return wrap_float_intervals(segs, kind)
-}
-
-wrap_float_intervals :: proc(segs: []Float_Interval, kind: FloatKind) -> ^Type {
 	r := new(Type)
-	r^ = Float_Type{segs, kind, default_for_float_intervals(segs)}
+	r^ = ft
 	return r
 }
 
@@ -136,107 +134,115 @@ float_to_string :: proc(t: Float_Type) -> string {
 	return pretty_float_intervals(t.float_intervals, t.kind)
 }
 
-// stored_fold_float extracts the (intervals, kind) payload from a folded ^Type
-// as cached in type_folds / constraint_folds when it is a Float_Type.
-stored_fold_float :: proc(t: ^Type) -> (segs: []Float_Interval, kind: FloatKind, ok: bool) {
-	if t == nil do return nil, .none, false
+// stored_fold_float extracts the Float_Type payload (intervals + kind + default)
+// from a folded ^Type as cached in type_folds / constraint_folds.
+stored_fold_float :: proc(t: ^Type) -> Maybe(Float_Type) {
+	if t == nil do return nil
 	#partial switch v in t^ {
 	case Float_Type:
-		return v.float_intervals, v.kind, true
+		return v
 	}
-	return nil, .none, false
+	return nil
 }
 
 // --- float interval fold ---
 
-fold_type_float_intervals :: proc(
-	t: ^Type,
-) -> (
-	segs: []Float_Interval,
-	kind: FloatKind,
-	ok: bool,
-) {
-	if t == nil do return nil, .none, false
+fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
+	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				if s, k, sok := stored_fold_float(v.type_folds[i]); sok {
-					return s, k, true
+				if s, sok := stored_fold_float(v.type_folds[i]).(Float_Type); sok {
+					return s
 				}
 				return fold_type_float_intervals(v.values[i])
 			}
 		}
-		return nil, .none, false
+		return nil
 	case Float_Type:
-		return v.float_intervals, v.kind, true
+		return v
 	case Range_Type:
-		left_segs, left_kind, left_ok := fold_type_float_intervals(v.left)
-		right_segs, right_kind, right_ok := fold_type_float_intervals(v.right)
-		if v.left != nil && !left_ok do return nil, .none, false
-		if v.right != nil && !right_ok do return nil, .none, false
-		lo, hi := range_span_float_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
+		left, left_ok := fold_type_float_intervals(v.left).(Float_Type)
+		right, right_ok := fold_type_float_intervals(v.right).(Float_Type)
+		if v.left != nil && !left_ok do return nil
+		if v.right != nil && !right_ok do return nil
+		lo, hi := range_span_float_bounds(
+			left.float_intervals,
+			right.float_intervals,
+			v.left == nil,
+			v.right == nil,
+		)
 		float_intervals := make([]Float_Interval, 1)
 		float_intervals[0] = Float_Interval{lo, hi, false, false}
-		return float_intervals, promote_float_kind(left_kind, right_kind), true
+		return Float_Type {
+			float_intervals,
+			promote_float_kind(left.kind, right.kind),
+			default_for_float_intervals(float_intervals),
+		}
 	case Compose_Type:
 		if v.type_fold != nil {
 			return fold_type_float_intervals(v.type_fold)
 		}
 		if v.left == nil {
-			right_segs, right_kind, right_ok := fold_type_float_intervals(v.right)
-			if !right_ok do return nil, .none, false
+			right, right_ok := fold_type_float_intervals(v.right).(Float_Type)
+			if !right_ok do return nil
+			right_segs := right.float_intervals
+			right_kind := right.kind
 			#partial switch v.operator {
 			case .Greater:
 				hi, hi_ok := right_segs[0].hi.(f64)
-				if !hi_ok do return nil, .none, false
+				if !hi_ok do return nil
 				// `>x` is the open interval (x, +∞): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{hi, nil, true, false}
-				return float_intervals, right_kind, true
+				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
 			case .GreaterEqual:
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{right_segs[0].lo, nil, false, false}
-				return float_intervals, right_kind, true
+				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
 			case .Less:
 				lo, lo_ok := right_segs[0].lo.(f64)
-				if !lo_ok do return nil, .none, false
+				if !lo_ok do return nil
 				// `<x` is the open interval (-∞, x): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{nil, lo, false, true}
-				return float_intervals, right_kind, true
+				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
 			case .LessEqual:
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{nil, right_segs[0].hi, false, false}
-				return float_intervals, right_kind, true
+				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
 			case .Subtract:
 				lo, lo_ok := right_segs[0].lo.(f64)
 				hi, hi_ok := right_segs[0].hi.(f64)
-				if !lo_ok || !hi_ok do return nil, .none, false
+				if !lo_ok || !hi_ok do return nil
 				// arithmetic negation mirrors the interval: the old hi (with its
 				// openness) becomes the new lo, and vice versa.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{-hi, -lo, right_segs[0].hi_open, right_segs[0].lo_open}
-				return float_intervals, right_kind, true
+				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
 			}
-			return nil, .none, false
+			return nil
 		}
-		left_segs, left_kind, left_ok := fold_type_float_intervals(v.left)
-		right_segs, right_kind, right_ok := fold_type_float_intervals(v.right)
-		if !left_ok || !right_ok do return nil, .none, false
+		left, left_ok := fold_type_float_intervals(v.left).(Float_Type)
+		right, right_ok := fold_type_float_intervals(v.right).(Float_Type)
+		if !left_ok || !right_ok do return nil
+		left_segs := left.float_intervals
+		right_segs := right.float_intervals
 		// Two floats only combine if their colors are compatible (f32 vs f64
 		// don't). An incompatible pair fails the fold → diagnose_compose explains.
-		if !float_kind_compatible(left_kind, right_kind) do return nil, .none, false
-		if len(left_segs) == 0 || len(right_segs) == 0 do return nil, .none, false
+		if !float_kind_compatible(left.kind, right.kind) do return nil
+		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
 		result := make([dynamic]Float_Interval)
 		for ls in left_segs {
 			for rs in right_segs {
 				pair, pair_ok := fold_arith_float_intervals(ls, rs, v.operator).([]Float_Interval)
-				if !pair_ok do return nil, .none, false
+				if !pair_ok do return nil
 				for s in pair do append(&result, s)
 			}
 		}
-		return float_intervals_normalize(result[:]), promote_float_kind(left_kind, right_kind), true
+		segs := float_intervals_normalize(result[:])
+		return Float_Type{segs, promote_float_kind(left.kind, right.kind), default_for_float_intervals(segs)}
 	case Cast_Type:
 		// Mirror integer.odin: a `::` produces its target's envelope (the cached
 		// concrete value when the source was concrete, else the whole target), so an
@@ -247,36 +253,30 @@ fold_type_float_intervals :: proc(
 		return fold_constraint_float_intervals(v.target)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if s, k, sok := stored_fold_float(v.match_scope.type_folds[v.match_index]); sok {
-				return s, k, true
+			if s, sok := stored_fold_float(v.match_scope.type_folds[v.match_index]).(Float_Type); sok {
+				return s
 			}
-			if s, k, sok := stored_fold_float(v.match_scope.constraint_folds[v.match_index]); sok {
-				return s, k, true
+			if s, sok := stored_fold_float(v.match_scope.constraint_folds[v.match_index]).(Float_Type); sok {
+				return s
 			}
 		}
-		return nil, .none, false
+		return nil
 	case Reference_Type:
 		ref := v.reference
-		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil, .none, false
-		if s, k, sok := stored_fold_float(ref.match_scope.type_folds[ref.match_index]); sok {
-			return s, k, true
+		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
+		if s, sok := stored_fold_float(ref.match_scope.type_folds[ref.match_index]).(Float_Type); sok {
+			return s
 		}
-		if s, k, sok := stored_fold_float(ref.match_scope.constraint_folds[ref.match_index]); sok {
-			return s, k, true
+		if s, sok := stored_fold_float(ref.match_scope.constraint_folds[ref.match_index]).(Float_Type); sok {
+			return s
 		}
-		return nil, .none, false
+		return nil
 	}
-	return nil, .none, false
+	return nil
 }
 
-fold_constraint_float_intervals :: proc(
-	t: ^Type,
-) -> (
-	segs: []Float_Interval,
-	kind: FloatKind,
-	ok: bool,
-) {
-	if t == nil do return nil, .none, false
+fold_constraint_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
+	if t == nil do return nil
 	#partial switch v in t^ {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
@@ -284,18 +284,27 @@ fold_constraint_float_intervals :: proc(
 				return fold_constraint_float_intervals(v.values[i])
 			}
 		}
-		return nil, .none, false
+		return nil
 	case Float_Type:
-		return v.float_intervals, v.kind, true
+		return v
 	case Range_Type:
-		left_segs, left_kind, left_ok := fold_constraint_float_intervals(v.left)
-		right_segs, right_kind, right_ok := fold_constraint_float_intervals(v.right)
-		if v.left != nil && !left_ok do return nil, .none, false
-		if v.right != nil && !right_ok do return nil, .none, false
-		lo, hi := range_span_float_bounds(left_segs, right_segs, v.left == nil, v.right == nil)
+		left, left_ok := fold_constraint_float_intervals(v.left).(Float_Type)
+		right, right_ok := fold_constraint_float_intervals(v.right).(Float_Type)
+		if v.left != nil && !left_ok do return nil
+		if v.right != nil && !right_ok do return nil
+		lo, hi := range_span_float_bounds(
+			left.float_intervals,
+			right.float_intervals,
+			v.left == nil,
+			v.right == nil,
+		)
 		float_intervals := make([]Float_Interval, 1)
 		float_intervals[0] = Float_Interval{lo, hi, false, false}
-		return float_intervals, promote_float_kind(left_kind, right_kind), true
+		return Float_Type {
+			float_intervals,
+			promote_float_kind(left.kind, right.kind),
+			default_for_float_intervals(float_intervals),
+		}
 	case Compose_Type:
 		if v.type_fold != nil {
 			return fold_constraint_float_intervals(v.type_fold)
@@ -305,21 +314,19 @@ fold_constraint_float_intervals :: proc(
 		// An Or folds to float ONLY if BOTH branches are float. Otherwise
 		// (String | f32) it is mixed: we fail to let fold_constraint keep it
 		// symbolic, and satisfy(Or) will test each branch in its own domain.
-		left, left_kind, left_ok := fold_constraint_float_intervals(v.left)
-		right, right_kind, right_ok := fold_constraint_float_intervals(v.right)
-		if !left_ok || !right_ok do return nil, .none, false
-		return float_intervals_union(left, right), promote_float_kind(left_kind, right_kind), true
+		left, left_ok := fold_constraint_float_intervals(v.left).(Float_Type)
+		right, right_ok := fold_constraint_float_intervals(v.right).(Float_Type)
+		if !left_ok || !right_ok do return nil
+		return float_type_union(left, right)
 	case And_Type:
-		left, left_kind, left_ok := fold_constraint_float_intervals(v.left)
-		right, right_kind, right_ok := fold_constraint_float_intervals(v.right)
-		if !left_ok || !right_ok do return nil, .none, false
-		return float_intervals_intersect(left, right),
-			promote_float_kind(left_kind, right_kind),
-			true
+		left, left_ok := fold_constraint_float_intervals(v.left).(Float_Type)
+		right, right_ok := fold_constraint_float_intervals(v.right).(Float_Type)
+		if !left_ok || !right_ok do return nil
+		return float_type_intersect(left, right)
 	case Negate_Type:
-		inner, inner_kind, inner_ok := fold_constraint_float_intervals(v.operand)
-		if !inner_ok do return nil, .none, false
-		return float_intervals_negate(inner), inner_kind, true
+		inner, inner_ok := fold_constraint_float_intervals(v.operand).(Float_Type)
+		if !inner_ok do return nil
+		return float_type_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			return fold_constraint_float_intervals(v.match_scope.values[v.match_index])
@@ -330,7 +337,7 @@ fold_constraint_float_intervals :: proc(
 			return fold_constraint_float_intervals(ref.match_scope.values[ref.match_index])
 		}
 	}
-	return nil, .none, false
+	return nil
 }
 
 // --- float interval arithmetic ---
@@ -515,6 +522,62 @@ float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Int
 		append(&result, Float_Interval{prev_hi, nil, prev_hi_open, false})
 	}
 	return result[:]
+}
+
+// --- float type set operations (carry the propagated default) ---
+//
+// Mirror integer_type_union/intersect/negate: combine the numeric envelopes via
+// the slice-level helpers, then thread the default along the SOURCE order.
+// The result kind is the promotion of the two operand kinds (a .none defers to
+// the colored side; f32 with f64 would already have been rejected upstream).
+
+float_type_union :: proc(a, b: Float_Type) -> Float_Type {
+	segs := float_intervals_union(a.float_intervals, b.float_intervals)
+	return Float_Type {
+		segs,
+		promote_float_kind(a.kind, b.kind),
+		float_pick_default(segs, a.default_value, b.default_value),
+	}
+}
+
+float_type_intersect :: proc(a, b: Float_Type) -> Float_Type {
+	segs := float_intervals_intersect(a.float_intervals, b.float_intervals)
+	return Float_Type {
+		segs,
+		promote_float_kind(a.kind, b.kind),
+		float_pick_default(segs, a.default_value, b.default_value),
+	}
+}
+
+float_type_negate :: proc(a: Float_Type) -> Float_Type {
+	// Negate has no source order → the default is recomputed structurally.
+	segs := float_intervals_negate(a.float_intervals)
+	return Float_Type{segs, a.kind, default_for_float_intervals(segs)}
+}
+
+// float_pick_default keeps the LEFT operand's default (source order is
+// significant — left first) WHEN it still belongs to the folded result, else
+// the right's when it does, else the structural fallback. The membership test
+// matters for `&`: an intersection can narrow the left default out of the set
+// (`f64 & 1.0..5.0` drops f64's 0), and then the default must be a real element
+// of what remains.
+float_pick_default :: proc(segs: []Float_Interval, left, right: Maybe(f64)) -> Maybe(f64) {
+	if l, ok := left.(f64); ok && float_intervals_contains(segs, l) do return l
+	if r, ok := right.(f64); ok && float_intervals_contains(segs, r) do return r
+	return default_for_float_intervals(segs)
+}
+
+// float_intervals_contains reports whether v is a member of the interval set.
+// An open bound exactly at v excludes it (`>x` does not contain x; `<x` neither).
+float_intervals_contains :: proc(segs: []Float_Interval, v: f64) -> bool {
+	for s in segs {
+		lo, lo_ok := s.lo.(f64)
+		hi, hi_ok := s.hi.(f64)
+		lo_ok_for_v := !lo_ok || lo < v || (lo == v && !s.lo_open)
+		hi_ok_for_v := !hi_ok || hi > v || (hi == v && !s.hi_open)
+		if lo_ok_for_v && hi_ok_for_v do return true
+	}
+	return false
 }
 
 // Like range_span_bounds on the integer side: span of all the bounds (chain

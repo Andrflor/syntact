@@ -1,0 +1,1 @@
+{ "name": "def_float_and_narrowed", "description": "2.0..8.0 & 5.0..9.0 = 5.0..8.0; left default 2.0 narrowed out, fallback to first bound 5.0", "source": "(2.0..8.0 & 5.0..9.0):a", "binding": "a", "expect": "5.0" }
