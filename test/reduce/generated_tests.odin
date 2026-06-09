@@ -279,117 +279,137 @@ test_literal_hex_54 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_op_not_55 :: proc(t: ^testing.T) {
+test_product_colored_u8_value_collapse_55 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/product_colored_u8_value_collapse.json", t)
+}
+
+@(test)
+test_op_not_56 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/op_not.json", t)
 }
 
 @(test)
-test_symbolic_compare_lt_56 :: proc(t: ^testing.T) {
+test_symbolic_compare_lt_57 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/symbolic_compare_lt.json", t)
 }
 
 @(test)
-test_pattern_match_bool_57 :: proc(t: ^testing.T) {
+test_product_colored_f32_collapse_58 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/product_colored_f32_collapse.json", t)
+}
+
+@(test)
+test_pattern_match_bool_59 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/pattern_match_bool.json", t)
 }
 
 @(test)
-test_op_multiply_58 :: proc(t: ^testing.T) {
+test_op_multiply_60 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/op_multiply.json", t)
 }
 
 @(test)
-test_constraint_u8_default_59 :: proc(t: ^testing.T) {
+test_constraint_u8_default_61 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/constraint_u8_default.json", t)
 }
 
 @(test)
-test_literal_bool_true_60 :: proc(t: ^testing.T) {
+test_product_colored_mixed_62 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/product_colored_mixed.json", t)
+}
+
+@(test)
+test_literal_bool_true_63 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/literal_bool_true.json", t)
 }
 
 @(test)
-test_cast_i8_to_i16_sign_extend_61 :: proc(t: ^testing.T) {
+test_cast_i8_to_i16_sign_extend_64 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/cast_i8_to_i16_sign_extend.json", t)
 }
 
 @(test)
-test_carve_materialize_override_62 :: proc(t: ^testing.T) {
+test_carve_materialize_override_65 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/carve_materialize_override.json", t)
 }
 
 @(test)
-test_cast_bool_true_to_u8_63 :: proc(t: ^testing.T) {
+test_cast_bool_true_to_u8_66 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/cast_bool_true_to_u8.json", t)
 }
 
 @(test)
-test_cast_f32_to_i32_raw_bits_64 :: proc(t: ^testing.T) {
+test_cast_f32_to_i32_raw_bits_67 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/cast_f32_to_i32_raw_bits.json", t)
 }
 
 @(test)
-test_symbolic_compare_concrete_65 :: proc(t: ^testing.T) {
+test_symbolic_compare_concrete_68 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/symbolic_compare_concrete.json", t)
 }
 
 @(test)
-test_property_last_occurrence_66 :: proc(t: ^testing.T) {
+test_property_last_occurrence_69 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/property_last_occurrence.json", t)
 }
 
 @(test)
-test_symbolic_div_unknown_67 :: proc(t: ^testing.T) {
+test_symbolic_div_unknown_70 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/symbolic_div_unknown.json", t)
 }
 
 @(test)
-test_carve_override_68 :: proc(t: ^testing.T) {
+test_carve_override_71 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/carve_override.json", t)
 }
 
 @(test)
-test_literal_binary_69 :: proc(t: ^testing.T) {
+test_literal_binary_72 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/literal_binary.json", t)
 }
 
 @(test)
-test_symbolic_factored_big_70 :: proc(t: ^testing.T) {
+test_symbolic_factored_big_73 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/symbolic_factored_big.json", t)
 }
 
 @(test)
-test_op_greater_71 :: proc(t: ^testing.T) {
+test_op_greater_74 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/op_greater.json", t)
 }
 
 @(test)
-test_execute_with_binding_72 :: proc(t: ^testing.T) {
+test_product_colored_or_f32_string_75 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/product_colored_or_f32_string.json", t)
+}
+
+@(test)
+test_execute_with_binding_76 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/execute_with_binding.json", t)
 }
 
 @(test)
-test_constraint_i32_default_73 :: proc(t: ^testing.T) {
+test_constraint_i32_default_77 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/constraint_i32_default.json", t)
 }
 
 @(test)
-test_no_product_74 :: proc(t: ^testing.T) {
+test_no_product_78 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/no_product.json", t)
 }
 
 @(test)
-test_op_divide_75 :: proc(t: ^testing.T) {
+test_op_divide_79 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/op_divide.json", t)
 }
 
 @(test)
-test_capture_resolves_value_76 :: proc(t: ^testing.T) {
+test_capture_resolves_value_80 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/capture_resolves_value.json", t)
 }
 
 @(test)
-test_capture_anonymous_field_77 :: proc(t: ^testing.T) {
+test_capture_anonymous_field_81 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/capture_anonymous_field.json", t)
 }
 
