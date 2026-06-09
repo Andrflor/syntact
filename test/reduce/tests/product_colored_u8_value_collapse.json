@@ -1,0 +1,6 @@
+{
+  "name": "Colored u8 production with explicit value collapses",
+  "description": "A scope whose sole production is `-> u8:3` collapses to 3",
+  "source": "X -> {\n  -> u8:3\n}\n-> X!",
+  "expect": "3"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Colored productions f32 and string",
+  "description": "`-> f32:` and `-> string:` are two colored PRODUCTIONS, not bindings; the scope reduces to exactly {-> 0.0, -> \"\"}, with no extra parasitic bindings",
+  "source": "X -> {\n  -> f32:\n  -> string:\n}\n-> X",
+  "expect": "{-> 0.0, -> \"\"}"
+}
