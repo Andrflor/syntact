@@ -440,9 +440,9 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 			// by the multiplier via the existing integer arithmetic.
 			lseg, l_ok := fold_string_intervals(v.left, as_constraint).([]String_Interval)
 			if !l_ok do return nil
-			mult, m_ok := fold_type_intervals(v.right).([]Integer_Interval)
+			mult_it, m_ok := fold_type_intervals(v.right).(Integer_Type)
 			if !m_ok do return nil
-			return string_intervals_repeat(lseg, mult)
+			return string_intervals_repeat(lseg, mult_it.integer_intervals)
 		}
 		return nil
 	case Or_Type:
@@ -1150,9 +1150,9 @@ fold_string_sequence :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_In
 		if v.operator == .Multiply {
 			lseg, l_ok := fold_string_sequence(v.left, as_constraint).([]String_Interval)
 			if !l_ok do return nil
-			mult, m_ok := fold_type_intervals(v.right).([]Integer_Interval)
+			mult_it, m_ok := fold_type_intervals(v.right).(Integer_Type)
 			if !m_ok do return nil
-			return string_intervals_repeat(lseg, mult)
+			return string_intervals_repeat(lseg, mult_it.integer_intervals)
 		}
 		return nil
 	case Negate_Type:
