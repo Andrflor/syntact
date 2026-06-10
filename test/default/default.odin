@@ -27,7 +27,7 @@ Default_Test_Case :: struct {
 	description: string `json:"description"`,
 	source:      string `json:"source"`,
 	binding:     string `json:"binding"`, // name of the binding to inspect
-	expect:      string `json:"expect"`,  // expected default, rendered compactly
+	expect:      string `json:"expect"`, // expected default, rendered compactly
 }
 
 load_default_test_file :: proc(rel: string) -> (Default_Test_Case, bool, string) {
@@ -54,7 +54,11 @@ run_default_test :: proc(path: string, t: ^testing.T) {
 
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
-	compiler.analyze(cache, ast)
+	analyzer := compiler.create_analyzer(ast)
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &analyzer
+	analyze_ok := compiler.analyze(cache)
+	context.user_ptr = prev_user_ptr
 
 	scope := cache.scope
 	if scope == nil {

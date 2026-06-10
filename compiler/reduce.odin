@@ -44,7 +44,6 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	// Fresh per-reduction DAG bookkeeping, allocated in the CURRENT context (the
 	// test harness runs each case in its own arena that is destroyed afterward, so a
 	// map carried over from a previous reduce would dangle). Reset every call.
-	create_reducer()
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
 			if i < len(scope.type_folds) {
@@ -916,21 +915,13 @@ current_reducer :: #force_inline proc() -> ^Reducer {
 	return cast(^Reducer)context.user_ptr
 }
 
-create_reducer :: proc() {
-	r := Reducer {
-		collapse_stack   = make([dynamic]^Scope_Type),
-		dag_table        = make(map[string]^Type),
+create_reducer :: proc() -> Reducer {
+	return Reducer {
+		collapse_stack = make([dynamic]^Scope_Type),
+		dag_table = make(map[string]^Type),
 		fixedpoint_index = make(map[rawptr]int),
-		fixedpoint_next  = 0,
+		fixedpoint_next = 0,
 	}
-
-	// Expose the reducer through the context so deep fold helpers can emit
-	// precise, source-anchored diagnostics without threading ^Analyzer through
-	// every signature. Restored on exit (analyze can be called per-file).
-	prev_user_ptr := context.user_ptr
-	context.user_ptr = &r
-	defer context.user_ptr = prev_user_ptr
-
 }
 
 // dag_intern returns the canonical node for a Compose shape: if an identical shape
