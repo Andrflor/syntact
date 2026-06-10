@@ -133,6 +133,10 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 fold_pending_on :: proc(s: ^Scope_Type) {
 	a := current_analyzer()
 	if a == nil || s == nil do return
+	// Only a scope STILL BEING WALKED is worth waiting for. An unresolved
+	// reference into a CLOSED scope is permanently broken (its close already
+	// reported the miss); re-queuing on it would loop the drain forever.
+	if !s.walking do return
 	if a.fold_pending == nil do a.fold_pending = s
 }
 
@@ -830,22 +834,16 @@ satisfy_inductive :: proc(self: ^Type, self_idx: int, tail: ^Type, prod: ^Type, 
 		if !satisfy_root(hc, ht) do return false
 	}
 	// The rest (elements past the heads) is itself the recursive constraint.
+	// A bare reference (`...Array:`) carries the CURRENT level's parameters:
+	// the rest is proved against `self` — the substituted root being proved —
+	// so `Array{u8}` keeps constraining the tail as Array{u8}. A parametric
+	// tail (`...Array{T}:`) re-materializes with this level's substitution
+	// instead (fold_carve substitutes and repoints WITHOUT unfolding the
+	// inductive production — the recursive reference inside stays as-is).
 	rest_constraint := self
-	#partial switch &tv in tail^ {
-	case Carve_Type:
-		// `...Array{T}` — materialize with this level's substitution. fold_carve
-		// substitutes and repoints WITHOUT unfolding the inductive production
-		// (the recursive reference inside stays as-is), so this terminates.
+	if _, is_carve := tail^.(Carve_Type); is_carve {
 		if sub := fold_carve(tail); sub != nil {
 			rest_constraint = new_type(sub^)
-		}
-	case Recursive_Reference_Type:
-		// Bare `...Array` — the rest is the referenced scope itself, no
-		// substitution to thread.
-		if tv.self && tv.target != nil {
-			rest_constraint = tv.target
-		} else if !tv.self && tv.scope != nil && tv.match_index >= 0 {
-			rest_constraint = tv.scope.values[tv.match_index]
 		}
 	}
 	rest := new(Scope_Type)
@@ -900,15 +898,35 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 					}
 					continue
 				}
+				// A BARE-COLORED production (`-> f32:`) imposes its COLOR — its
+				// stored value is just the materialized default (0.0), which must
+				// not narrow the production to a singleton. The bare form is
+				// recognizable because it caches the very same node as value and
+				// type fold (append_bare_constraint/close_default). A colored
+				// production WITH an explicit value (`-> u8:3`) keeps matching its
+				// value: it produces 3, the color is only its proof.
+				prod: ^Type = nil
+				if i < len(v.types) &&
+				   v.types[i] != nil &&
+				   i < len(v.type_folds) &&
+				   v.type_folds[i] == v.values[i] {
+					if i < len(v.constraint_folds) do prod = v.constraint_folds[i]
+					if prod == nil do prod = fold_constraint(v.types[i])
+				}
 				// The production may be stored RAW (a Range_Type `0..`, a Mention,
 				// …) when the producer scope was not built by a fold — e.g. the
 				// literal `{->0..}`. fold_constraint normalizes it to its domain set
 				// (0..inf) so the comparison below is interval-against-interval, not
 				// Range-against-Integer (which `satisfy` cannot match). A builtin
 				// like `u8` is already an Integer, so folding is idempotent there.
-				prod := fold_constraint(v.values[i])
+				if prod == nil do prod = fold_constraint(v.values[i])
 				if prod == nil do prod = v.values[i]
-				if (satisfy(prod, ft_content)) {
+				// Recurse through satisfy_ROOT, not satisfy: the production's
+				// content may itself be a producer scope (`-> Array{u8}:` folds to
+				// the substituted Array clone), whose production/inductive logic
+				// lives here — a bare scope_satisfy would compare it structurally
+				// and always fail.
+				if (satisfy_root(prod, ft_content)) {
 					return true
 				}
 			}

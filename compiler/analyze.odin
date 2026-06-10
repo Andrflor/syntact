@@ -433,8 +433,13 @@ pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 		if cur == nil do return nil
 		#partial switch &v in cur^ {
 		case Recursive_Reference_Type:
-			// follow chases a resolved one; landing here means unresolved.
-			if !v.self && v.match_index < 0 do return v.scope
+			// follow chases a resolved one; landing here means unresolved. Only
+			// a scope still being walked blocks — unresolved against a CLOSED
+			// scope means the close already reported the miss: permanently
+			// broken, nothing left to wait for (re-queuing would loop the drain).
+			if !v.self && v.match_index < 0 && v.scope != nil && v.scope.walking {
+				return v.scope
+			}
 			return nil
 		case Scope_Type:
 			if v.walking do return &v
