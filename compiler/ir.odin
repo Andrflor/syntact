@@ -609,7 +609,14 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			}
 			if has_tf {
 				fmt.print("t:")
-				print_fold_inline(v.type_folds[i])
+				// type_folds[i] is fold_value_type — for a scope-with-production it keeps
+				// ONLY the production (the type the scope produces, `{0}`), dropping the
+				// named members and the binding kinds. The debug dump wants the WHOLE
+				// scope structure (`{n -> 0, -> 0}`: n points at 0, then a production
+				// evaluating to 0 — distinct from `{n -> 0, 0}`). So when the member's
+				// value resolves to a scope, render that scope's members directly (each
+				// with its own type_fold); the typecheck fold layer stays unchanged.
+				print_fold_inline(member_type_fold_display(v.values[i], v.type_folds[i]))
 				fmt.print(" ")
 			}
 			if has_cf {
@@ -806,6 +813,31 @@ print_integer_intervals :: proc(t: ^Type) {
 	}
 }
 
+// member_type_fold_display picks what the `--ir` t: column shows for a member.
+// The cached type_fold (fold_value_type) is the typeof a value PRODUCES — for a
+// scope with a production it collapses to just that production (`{0}`), hiding the
+// named members and the binding kinds. For the dump we want the member's full
+// STRUCTURE instead: when its value resolves to a scope, return that scope so
+// write_fold walks its members (each rendered through its OWN type_fold, by kind:
+// `n -> 0`, `-> 0`, …). A carve is materialized first. Everything else (a domain
+// leaf, a reference, …) shows its cached fold unchanged. This is display-only; the
+// typecheck fold layer is untouched.
+member_type_fold_display :: proc(value: ^Type, cached: ^Type) -> ^Type {
+	if value != nil {
+		#partial switch v in value^ {
+		case Scope_Type:
+			if !v.walking do return value
+		case Carve_Type:
+			if sub := fold_carve(value); sub != nil {
+				st := new(Type)
+				st^ = sub^
+				return st
+			}
+		}
+	}
+	return cached
+}
+
 // print_fold_inline renders a folded ^Type (as stored in type_folds /
 // constraint_folds) for the --ir dump. Domain dispatch.
 print_fold_inline :: proc(t: ^Type) {
@@ -849,20 +881,25 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 		strings.write_byte(b, '{')
 		for i := 0; i < len(v.kind); i += 1 {
 			if i > 0 do strings.write_string(b, ", ")
-			// An ANONYMOUS binding (no name — a production or a bare scope child)
-			// renders as JUST its value: it IS the value, not a named field. So a
-			// producer `{->X}` shows `{X}` and a `{T: T:}` default scope shows
-			// `{{}, {}}`. A named binding renders `name op value`.
-			// Prefer the field's cached type_fold over its raw value (same rule as
-			// write_value): a computed field shows its folded result, not the
-			// expression — the structure is already visible on the field's own line.
+			// Each member is rendered by its BINDING KIND, so the structure is faithful:
+			//   * a PRODUCTION (`-> X`) shows its arrow even though it has no name —
+			//     `{n -> 0, -> 0}` (n points at 0, THEN a production evaluating to 0)
+			//     must not collapse to `{n -> 0, 0}` (a nameless field 0). The arrow is
+			//     the whole point.
+			//   * a NAMED binding renders `name op value`.
+			//   * a bare anonymous child (no name, not a production) renders as its value.
+			// Prefer the member's cached type_fold over its raw value: a computed field
+			// shows its folded result, not the expression.
 			fv := v.values[i]
 			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
-			if v.names[i] == "" {
-				write_fold(b, fv)
-			} else {
+			if v.names[i] != "" {
 				strings.write_string(b, v.names[i])
 				strings.write_string(b, write_binding_op(v.kind[i]))
+				write_fold(b, fv)
+			} else if v.kind[i] == .Product {
+				strings.write_string(b, "-> ")
+				write_fold(b, fv)
+			} else {
 				write_fold(b, fv)
 			}
 		}
