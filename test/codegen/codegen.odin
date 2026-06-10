@@ -1,8 +1,8 @@
 package codegen_test
 
 import compiler "../../compiler"
-import bc "../../compiler/bytecode"
 import x64 "../../compiler/backends/x64"
+import bc "../../compiler/bytecode"
 
 import "core:encoding/json"
 import "core:fmt"
@@ -92,21 +92,21 @@ parse_f64 :: proc(s: string) -> (f64, bool) {
 	neg := false
 	i := 0
 	if len(str) > 0 && (str[0] == '-' || str[0] == '+') {
-		neg = str[0] == '-'; i = 1
+		neg = str[0] == '-';i = 1
 	}
 	whole, frac, scale: f64 = 0, 0, 1
 	saw := false
 	for ; i < len(str); i += 1 {
 		c := str[i]
 		if c < '0' || c > '9' do break
-		whole = whole * 10 + f64(c - '0'); saw = true
+		whole = whole * 10 + f64(c - '0');saw = true
 	}
 	if i < len(str) && str[i] == '.' {
 		i += 1
 		for ; i < len(str); i += 1 {
 			c := str[i]
 			if c < '0' || c > '9' do break
-			scale *= 10; frac = frac * 10 + f64(c - '0'); saw = true
+			scale *= 10;frac = frac * 10 + f64(c - '0');saw = true
 		}
 	}
 	if !saw do return 0, false
@@ -127,8 +127,16 @@ run_case :: proc(path: string, t: ^testing.T) {
 
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
-	compiler.analyze(cache, ast)
+	analyzer := compiler.create_analyzer(ast)
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &analyzer
+	analyze_ok := compiler.analyze(cache)
+	context.user_ptr = prev_user_ptr
+	r := compiler.create_reducer()
+	prev_user_ptr = context.user_ptr
+	context.user_ptr = &r
 	result := compiler.reduce(cache.scope)
+	context.user_ptr = prev_user_ptr
 	prog := compiler.lower_to_bytecode(result)
 
 	// "reject": lowering must carry an error.
@@ -147,9 +155,12 @@ run_case :: proc(path: string, t: ^testing.T) {
 	// backends; all must match.
 	if len(tc.args) != len(tc.expect) {
 		testing.expectf(
-			t, false,
+			t,
+			false,
 			"[%s] args/expect length mismatch: %d vs %d",
-			tc.name, len(tc.args), len(tc.expect),
+			tc.name,
+			len(tc.args),
+			len(tc.expect),
 		)
 		return
 	}
@@ -202,24 +213,72 @@ run_combo :: proc(
 		want_native := 0
 		if v, vok := parse_int(expect); vok do want_native = ((v % 256) + 256) % 256
 		testing.expectf(
-			t, interp_str == expect,
-			"[%s #%d] args=%v interp=%s expect=%s", tc.name, combo, args, interp_str, expect,
+			t,
+			interp_str == expect,
+			"[%s #%d] args=%v interp=%s expect=%s",
+			tc.name,
+			combo,
+			args,
+			interp_str,
+			expect,
 		)
 		testing.expectf(
-			t, code == want_native,
+			t,
+			code == want_native,
 			"[%s #%d] args=%v native exit=%d expect=%d (val %s)",
-			tc.name, combo, args, code, want_native, expect,
+			tc.name,
+			combo,
+			args,
+			code,
+			want_native,
+			expect,
 		)
 	case "str":
 		got := strings.trim_right_space(stdout)
-		testing.expectf(t, interp_str == expect, "[%s #%d] args=%v interp str=%q expect=%q", tc.name, combo, args, interp_str, expect)
-		testing.expectf(t, got == expect, "[%s #%d] args=%v native str=%q expect=%q", tc.name, combo, args, got, expect)
+		testing.expectf(
+			t,
+			interp_str == expect,
+			"[%s #%d] args=%v interp str=%q expect=%q",
+			tc.name,
+			combo,
+			args,
+			interp_str,
+			expect,
+		)
+		testing.expectf(
+			t,
+			got == expect,
+			"[%s #%d] args=%v native str=%q expect=%q",
+			tc.name,
+			combo,
+			args,
+			got,
+			expect,
+		)
 	case "float":
 		ev, _ := parse_f64(expect)
 		iv := r.fvalue
 		nv, _ := parse_f64(strings.trim_space(stdout))
-		testing.expectf(t, abs_f(iv - ev) < 1e-6, "[%s #%d] args=%v interp float=%v expect=%v", tc.name, combo, args, iv, ev)
-		testing.expectf(t, abs_f(nv - ev) < 1e-6, "[%s #%d] args=%v native float=%v expect=%v", tc.name, combo, args, nv, ev)
+		testing.expectf(
+			t,
+			abs_f(iv - ev) < 1e-6,
+			"[%s #%d] args=%v interp float=%v expect=%v",
+			tc.name,
+			combo,
+			args,
+			iv,
+			ev,
+		)
+		testing.expectf(
+			t,
+			abs_f(nv - ev) < 1e-6,
+			"[%s #%d] args=%v native float=%v expect=%v",
+			tc.name,
+			combo,
+			args,
+			nv,
+			ev,
+		)
 	}
 }
 
@@ -229,13 +288,13 @@ parse_int :: proc(s: string) -> (int, bool) {
 	str := strings.trim_space(s)
 	neg := false
 	i := 0
-	if len(str) > 0 && (str[0] == '-' || str[0] == '+') {neg = str[0] == '-'; i = 1}
+	if len(str) > 0 && (str[0] == '-' || str[0] == '+') {neg = str[0] == '-';i = 1}
 	acc := 0
 	saw := false
 	for ; i < len(str); i += 1 {
 		c := str[i]
 		if c < '0' || c > '9' do return 0, false
-		acc = acc * 10 + int(c - '0'); saw = true
+		acc = acc * 10 + int(c - '0');saw = true
 	}
 	if !saw do return 0, false
 	return neg ? -acc : acc, true

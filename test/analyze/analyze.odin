@@ -20,10 +20,10 @@ test_path :: proc(rel: string) -> string {
 }
 
 Analyze_Test_Case :: struct {
-	name:          string         `json:"name"`,
-	description:   string         `json:"description"`,
-	source:        string         `json:"source"`,
-	expect_errors: []string       `json:"expect_errors"`,
+	name:          string `json:"name"`,
+	description:   string `json:"description"`,
+	source:        string `json:"source"`,
+	expect_errors: []string `json:"expect_errors"`,
 }
 
 load_analyze_test_file :: proc(rel: string) -> (Analyze_Test_Case, bool, string) {
@@ -39,26 +39,46 @@ load_analyze_test_file :: proc(rel: string) -> (Analyze_Test_Case, bool, string)
 
 error_type_from_string :: proc(s: string) -> (compiler.Analyzer_Error_Type, bool) {
 	switch s {
-	case "Undefined_Identifier":    return .Undefined_Identifier, true
-	case "Invalid_Binding_Name":    return .Invalid_Binding_Name, true
-	case "Invalid_Carve":           return .Invalid_Carve, true
-	case "Invalid_Property_Access": return .Invalid_Property_Access, true
-	case "Constraint_Mismatch":     return .Constraint_Mismatch, true
-	case "Invalid_Constraint":      return .Invalid_Constraint, true
-	case "Invalid_Constraint_Name": return .Invalid_Constraint_Name, true
-	case "Invalid_Constraint_Value": return .Invalid_Constraint_Value, true
-	case "Circular_Reference":      return .Circular_Reference, true
-	case "Invalid_Event_Pull":      return .Invalid_Event_Pull, true
-	case "Invalid_Binding_Value":   return .Invalid_Binding_Value, true
-	case "Invalid_Expand":          return .Invalid_Expand, true
-	case "Invalid_Execute":         return .Invalid_Execute, true
-	case "Invalid_operator":        return .Invalid_operator, true
-	case "Invalid_Range":           return .Invalid_Range, true
-	case "Invalid_Cast":            return .Invalid_Cast, true
-	case "Infinite_Recursion":      return .Infinite_Recursion, true
-	case "Insoluble_Constraint":    return .Insoluble_Constraint, true
-	case "Non_Exhaustive_Pattern":  return .Non_Exhaustive_Pattern, true
-	case "Default":                 return .Default, true
+	case "Undefined_Identifier":
+		return .Undefined_Identifier, true
+	case "Invalid_Binding_Name":
+		return .Invalid_Binding_Name, true
+	case "Invalid_Carve":
+		return .Invalid_Carve, true
+	case "Invalid_Property_Access":
+		return .Invalid_Property_Access, true
+	case "Constraint_Mismatch":
+		return .Constraint_Mismatch, true
+	case "Invalid_Constraint":
+		return .Invalid_Constraint, true
+	case "Invalid_Constraint_Name":
+		return .Invalid_Constraint_Name, true
+	case "Invalid_Constraint_Value":
+		return .Invalid_Constraint_Value, true
+	case "Circular_Reference":
+		return .Circular_Reference, true
+	case "Invalid_Event_Pull":
+		return .Invalid_Event_Pull, true
+	case "Invalid_Binding_Value":
+		return .Invalid_Binding_Value, true
+	case "Invalid_Expand":
+		return .Invalid_Expand, true
+	case "Invalid_Execute":
+		return .Invalid_Execute, true
+	case "Invalid_operator":
+		return .Invalid_operator, true
+	case "Invalid_Range":
+		return .Invalid_Range, true
+	case "Invalid_Cast":
+		return .Invalid_Cast, true
+	case "Infinite_Recursion":
+		return .Infinite_Recursion, true
+	case "Insoluble_Constraint":
+		return .Insoluble_Constraint, true
+	case "Non_Exhaustive_Pattern":
+		return .Non_Exhaustive_Pattern, true
+	case "Default":
+		return .Default, true
 	}
 	return .Default, false
 }
@@ -76,7 +96,11 @@ run_analyze_test :: proc(path: string, t: ^testing.T) {
 
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
-	compiler.analyze(cache, ast)
+	analyzer := compiler.create_analyzer(ast)
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &analyzer
+	analyze_ok := compiler.analyze(cache)
+	context.user_ptr = prev_user_ptr
 
 	actual_errors := cache.analyze_errors
 	expected_count := len(tc.expect_errors)
@@ -86,7 +110,16 @@ run_analyze_test :: proc(path: string, t: ^testing.T) {
 		if actual_count > 0 {
 			parts := make([dynamic]string)
 			for err in actual_errors {
-				append(&parts, fmt.tprintf("  %v: %s (line %d, col %d)", err.type, err.message, err.position.line, err.position.column))
+				append(
+					&parts,
+					fmt.tprintf(
+						"  %v: %s (line %d, col %d)",
+						err.type,
+						err.message,
+						err.position.line,
+						err.position.column,
+					),
+				)
 			}
 			msg = fmt.tprintf(
 				"\n\nAnalyzer test failed (%s)\nExpected no errors but got %d:\n%s",

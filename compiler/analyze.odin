@@ -70,19 +70,19 @@ Analyzer_Error :: struct {
 // warnings accumulate as `walk()` recurses. Reachable from deep fold helpers via
 // context.user_ptr (see current_analyzer) so they can report without threading it.
 Analyzer :: struct {
-	ast:      ^Ast,
-	scope:    ^Scope_Type,
-	errors:   [dynamic]Analyzer_Error,
-	warnings: [dynamic]Analyzer_Error,
+	ast:              ^Ast,
+	scope:            ^Scope_Type,
+	errors:           [dynamic]Analyzer_Error,
+	warnings:         [dynamic]Analyzer_Error,
 	// While walking a carve's override values, this points at the scope being
 	// carved so a source-none property (`.x`, a self-mention) resolves against
 	// the carved scope's *original* fields. nil outside a carve override. Saved
 	// and restored around each override walk so nested carves nest correctly.
-	carved_scope: ^Scope_Type,
+	carved_scope:     ^Scope_Type,
 	// Span of the carve being rechecked, so reresolve_property (in the fold layer,
 	// reached via the context) anchors its error at the carve site. Set around
 	// recheck_carve only.
-	recheck_span: Span,
+	recheck_span:     Span,
 	// Transient push/pop stacks guarding self-referential folds. They live ON the
 	// analyzer (not in a global) so their backing is allocated in this pass's
 	// allocator and dies with it: a global [dynamic] would keep a stale cap into a
@@ -93,26 +93,24 @@ Analyzer :: struct {
 	recursion_roots:  [dynamic]^Type,
 }
 
+create_analyzer :: proc(ast: ^Ast) -> Analyzer {
+	return Analyzer {
+		ast = ast,
+		scope = new(Scope_Type),
+		errors = make([dynamic]Analyzer_Error, 0),
+		warnings = make([dynamic]Analyzer_Error, 0),
+	}
+}
+
 // --- analyzer core ---
 
 // analyze is the entry point: it walks the root scope's children into the root
 // Scope_Type, leaving the result and any diagnostics in `cache`. A bare child
 // (not a binding/constraint) is treated as an anonymous Pointing_Push so it still
 // gets recorded and constraint-checked. Returns true iff no errors were emitted.
-analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
-	a := Analyzer {
-		ast      = ast,
-		scope    = new(Scope_Type),
-		errors   = make([dynamic]Analyzer_Error, 0),
-		warnings = make([dynamic]Analyzer_Error, 0),
-	}
-
-	// Expose the analyzer through the context so deep fold helpers can emit
-	// precise, source-anchored diagnostics without threading ^Analyzer through
-	// every signature. Restored on exit (analyze can be called per-file).
-	prev_user_ptr := context.user_ptr
-	context.user_ptr = &a
-	defer context.user_ptr = prev_user_ptr
+analyze :: proc(cache: ^Cache) -> bool {
+	a := current_analyzer()
+	ast := a.ast
 
 	root := ast_root(ast)
 	root_data := ast.node_data[root]
@@ -132,11 +130,11 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 		     .Product,
 		     .Expand,
 		     .Constraint:
-			walk(&a, a.scope, child)
+			walk(a, a.scope, child)
 		case:
-			value := walk(&a, a.scope, child)
-			scope_append(&a, a.scope, "", nil, .Pointing_Push, value)
-			typecheck(&a, a.scope, "", nil, .Pointing_Push, value, child)
+			value := walk(a, a.scope, child)
+			scope_append(a, a.scope, "", nil, .Pointing_Push, value)
+			typecheck(a, a.scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
 
@@ -145,7 +143,7 @@ analyze :: proc(cache: ^Cache, ast: ^Ast) -> bool {
 	cache.analyze_warnings = a.warnings
 
 	if resolver.options.print_errors && len(a.errors) > 0 {
-		debug_sem_errors(&a)
+		debug_sem_errors(a)
 	}
 
 	return len(a.errors) == 0
@@ -532,7 +530,11 @@ make_invalid :: #force_inline proc() -> ^Type {
 	return result
 }
 
-walk_scope_node :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_scope_node :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	scope := new(Scope_Type)
@@ -570,7 +572,11 @@ walk_scope_node :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, 
 // the bound name). The right side is the value; when it is a scope literal we
 // build the child Scope_Type in place and register the binding *before*
 // walking the body, so the body can refer back to the binding being defined.
-walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_binding :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	kind := ast.node_kinds[idx]
@@ -621,7 +627,12 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 		// `{plop} -> v`, `3 -> v`, `(a+b) -> v` — the left of a binding must
 		// name a binding (a bare identifier or a `constraint:name` form). A
 		// scope/literal/expression on the left is illegal, not an anonymous one.
-		sem_error(a, "invalid binding name: the left of a binding must be a name", .Invalid_Binding_Name, node_span(a, left_idx))
+		sem_error(
+			a,
+			"invalid binding name: the left of a binding must be a name",
+			.Invalid_Binding_Name,
+			node_span(a, left_idx),
+		)
 		return make_invalid()
 	}
 
@@ -674,7 +685,11 @@ walk_binding :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 // the constraint operand directly would route through walk_constraint, which
 // appends its own (Pointing_Push) binding, doubling the entry. So we peel the
 // constraint here and emit exactly one .Product, like walk_expand does.
-walk_product :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_product :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	operand_idx := data.unary.operand
@@ -704,7 +719,11 @@ walk_product :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 // `+{…}` extension. A constrained-but-valueless expand (`+{u8:}`) materializes
 // the constraint's default as the value and caches the folds directly, since
 // there is no value expression to run typecheck() against.
-walk_expand :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_expand :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	operand_idx := data.unary.operand
@@ -732,7 +751,11 @@ walk_expand :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx:
 	return value
 }
 
-walk_compile_time :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_compile_time :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	data := a.ast.node_data[idx]
 	return walk(a, current_scope, data.unary.operand)
 }
@@ -741,7 +764,11 @@ walk_compile_time :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type
 // binding: the value is the constraint's default element, and the folds are
 // cached inline (there is nothing to prove — the value is by construction the
 // constraint's own default, hence trivially inside it).
-walk_constraint :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_constraint :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	constraint := walk(a, current_scope, data.binary.left)
@@ -805,7 +832,11 @@ resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Sc
 // peels through Carve_Types to their source, so a property of a carved scope
 // resolves against the underlying scope's fields. Property access takes the
 // *last* occurrence of the name (last=true), per the same-name rule.
-walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_property :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	right_idx := data.binary.right
@@ -897,7 +928,11 @@ walk_property :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, id
 	return result
 }
 
-walk_enforce :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_enforce :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	data := a.ast.node_data[idx]
 	left := walk(a, current_scope, data.binary.left)
 	right := walk(a, current_scope, data.binary.right)
@@ -906,7 +941,11 @@ walk_enforce :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 	return result
 }
 
-walk_range :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_range :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	data := a.ast.node_data[idx]
 	// An absent bound (prefix `..hi` / postfix `lo..`) stays nil — it means
 	// "no bound", not the value `none`. walk(INVALID_NODE) would yield a
@@ -929,7 +968,11 @@ walk_range :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: 
 // And/Or/Negate nodes that the constraint folder reduces later; every other
 // operator is arithmetic and is folded eagerly into a Compose_Type's envelope
 // here so a constraint mismatch surfaces at the operation, not downstream.
-walk_operator :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_operator :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	data := a.ast.node_data[idx]
 	left: ^Type = nil
 	if data.operator.left != INVALID_NODE {
@@ -998,7 +1041,12 @@ carve_shorthand_field :: proc(
 // caller resolves it as a self-mention (a Reference_Type into the carved scope,
 // identical to `.z`) and threads it in here instead of letting `z` resolve as a
 // plain mention in the enclosing scope.
-walk_carve :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index, source_override: ^Type = nil) -> ^Type {
+walk_carve :: proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+	source_override: ^Type = nil,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	source := source_override != nil ? source_override : walk(a, current_scope, data.carve.source)
@@ -1091,8 +1139,8 @@ walk_carve :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index, so
 				},
 			)
 			append(&vals, val)
-		} else if shorthand_field, shorthand_idx, ok :=
-			   carve_shorthand_field(a, src_scope, child); ok {
+		} else if shorthand_field, shorthand_idx, ok := carve_shorthand_field(a, src_scope, child);
+		   ok {
 			// Shorthand `a{z{a->2}}` == `a{z->.z{a->2}}`: a carve child `z{…}` whose
 			// source `z` NAMES A FIELD of the scope being carved targets that field and
 			// re-carves it. (A `data{6}` whose source is NOT a carved field is a plain
@@ -1284,7 +1332,11 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
 // as a unary `=` operator (Equal with no left side), which we peel here so the
 // branch holds the bare value plus value_match=true. `c -> …` (typecheck match)
 // keeps the constraint as-is. A leading `-> p` is the default branch (match nil).
-walk_pattern :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_pattern :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	target := walk(a, current_scope, data.pattern.target)
@@ -1345,7 +1397,11 @@ walk_pattern :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 
 // `target!` — collapse. Recorded as an Execute_Type; the actual reduction
 // through the target's Product happens later in reduce.odin.
-walk_execute :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_execute :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	data := a.ast.node_data[idx]
 	target := walk(a, current_scope, data.execute.target)
 	result := new(Type)
@@ -1354,15 +1410,27 @@ walk_execute :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx
 }
 
 // `@name` — an external. Opaque to static analysis, so Unknown_Type.
-walk_external :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_external :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	return make_unknown()
 }
 
-walk_branch :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_branch :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	return make_unknown()
 }
 
-walk_unknown :: #force_inline proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+walk_unknown :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
 	return make_unknown()
 }
 
@@ -1491,7 +1559,12 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 		}
 	}
 
-	sem_error(a, fmt.tprintf("'%s' is not defined", name), .Undefined_Identifier, node_span(a, idx))
+	sem_error(
+		a,
+		fmt.tprintf("'%s' is not defined", name),
+		.Undefined_Identifier,
+		node_span(a, idx),
+	)
 	result := new(Type)
 	result^ = Invalid_Type{}
 	return result
@@ -1509,12 +1582,7 @@ current_analyzer :: #force_inline proc() -> ^Analyzer {
 // sem_error / sem_warning take the offending node's SPAN and resolve its start to
 // a Position once, here — so an Analyzer_Error always carries both the byte range
 // (to underline) and its (line, column) (to print), like Parse_Error.
-sem_error :: proc(
-	s: ^Analyzer,
-	message: string,
-	error_type: Analyzer_Error_Type,
-	span: Span,
-) {
+sem_error :: proc(s: ^Analyzer, message: string, error_type: Analyzer_Error_Type, span: Span) {
 	error := Analyzer_Error {
 		type     = error_type,
 		message  = message,
@@ -1524,12 +1592,7 @@ sem_error :: proc(
 	append(&s.errors, error)
 }
 
-sem_warning :: proc(
-	s: ^Analyzer,
-	message: string,
-	error_type: Analyzer_Error_Type,
-	span: Span,
-) {
+sem_warning :: proc(s: ^Analyzer, message: string, error_type: Analyzer_Error_Type, span: Span) {
 	warning := Analyzer_Error {
 		type     = error_type,
 		message  = message,

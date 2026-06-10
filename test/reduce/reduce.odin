@@ -49,10 +49,19 @@ run_reduce_test :: proc(path: string, t: ^testing.T) {
 
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
-	compiler.analyze(cache, ast)
+	analyzer := compiler.create_analyzer(ast)
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &analyzer
+	analyze_ok := compiler.analyze(cache)
+	context.user_ptr = prev_user_ptr
 
+
+	r := compiler.create_reducer()
+	prev_user_ptr = context.user_ptr
+	context.user_ptr = &r
 	result := compiler.reduce(cache.scope)
 	actual := compiler.value_to_string(result)
+	context.user_ptr = prev_user_ptr
 
 	if actual != tc.expect {
 		msg = fmt.tprintf(

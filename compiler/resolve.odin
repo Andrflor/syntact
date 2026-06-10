@@ -1,5 +1,7 @@
 package compiler
+import x64 "backends/x64"
 import "base:runtime"
+import bc "bytecode"
 import "core:fmt"
 import "core:hash"
 import "core:mem"
@@ -9,8 +11,6 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:thread"
-import bc "bytecode"
-import x64 "backends/x64"
 import "core:time"
 
 /*
@@ -419,7 +419,10 @@ process_cache_task :: proc(task: thread.Task) {
 		}
 
 		cache.status = .Analyzing
-		analyze_ok := analyze(cache, ast)
+		analyzer := create_analyzer(ast)
+		prev_user_ptr := context.user_ptr
+		context.user_ptr = &analyzer
+		analyze_ok := analyze(cache)
 		cache.status = .Analyzed
 
 		// End analysis timing
@@ -443,12 +446,17 @@ process_cache_task :: proc(task: thread.Task) {
 			fmt.println()
 		}
 
+		context.user_ptr = prev_user_ptr
+
 		if !resolver.options.analyze_only && analyze_ok {
 			reduce_start: time.Time
 			if resolver.options.timing {
 				reduce_start = time.now()
 			}
 
+			r := create_reducer()
+			prev_user_ptr := context.user_ptr
+			context.user_ptr = &r
 			result := reduce(cache.scope)
 
 			if resolver.options.timing {
@@ -463,8 +471,12 @@ process_cache_task :: proc(task: thread.Task) {
 			// (the bridge every backend shares) and either dump it or interpret
 			// it. Otherwise the reduced result is a VALUE rendered with
 			// value_to_string — the same path the reduce tests use.
-			if resolver.options.print_bytecode || resolver.options.run_bytecode || resolver.options.print_regalloc || resolver.options.emit_exe {
+			if resolver.options.print_bytecode ||
+			   resolver.options.run_bytecode ||
+			   resolver.options.print_regalloc ||
+			   resolver.options.emit_exe {
 				codegen_start: time.Time
+				context.user_ptr = prev_user_ptr
 				if resolver.options.timing {
 					codegen_start = time.now()
 				}
@@ -502,11 +514,16 @@ process_cache_task :: proc(task: thread.Task) {
 					codegen_duration := time.diff(codegen_start, time.now())
 					sync.atomic_add(&timing_data.codegen_time, codegen_duration)
 					if resolver.options.verbose {
-						fmt.printf("[TIMING] Codegen time for %s: %v\n", cache.path, codegen_duration)
+						fmt.printf(
+							"[TIMING] Codegen time for %s: %v\n",
+							cache.path,
+							codegen_duration,
+						)
 					}
 				}
 			} else {
 				fmt.println(value_to_string(result))
+				context.user_ptr = prev_user_ptr
 			}
 		}
 	} else if resolver.options.verbose {
