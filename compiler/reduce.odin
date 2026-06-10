@@ -44,7 +44,7 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	// Fresh per-reduction DAG bookkeeping, allocated in the CURRENT context (the
 	// test harness runs each case in its own arena that is destroyed afterward, so a
 	// map carried over from a previous reduce would dangle). Reset every call.
-	dag_reset()
+	create_reducer()
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
 			if i < len(scope.type_folds) {
@@ -187,7 +187,9 @@ follow_to_fixedpoint :: proc(t: ^Type) -> ^Type {
 			}
 			return t
 		case Reference_Type:
-			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+			if v.reference != nil &&
+			   v.reference.match_scope != nil &&
+			   v.reference.match_index >= 0 {
 				cur = v.reference.match_scope.values[v.reference.match_index]
 				continue
 			}
@@ -220,7 +222,9 @@ is_fixed_point :: proc(t: ^Type) -> bool {
 			}
 			return false
 		case Reference_Type:
-			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+			if v.reference != nil &&
+			   v.reference.match_scope != nil &&
+			   v.reference.match_index >= 0 {
 				cur = v.reference.match_scope.values[v.reference.match_index]
 				continue
 			}
@@ -251,7 +255,9 @@ cast_is_atom :: proc(t: ^Type) -> bool {
 			}
 			return false
 		case Reference_Type:
-			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+			if v.reference != nil &&
+			   v.reference.match_scope != nil &&
+			   v.reference.match_index >= 0 {
 				cur = v.reference.match_scope.values[v.reference.match_index]
 				continue
 			}
@@ -387,7 +393,9 @@ collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
 	orig := op_cost(left) + op_cost(right) + 1
 	if op_cost(rebuilt) > orig do return nil // would grow → keep the plain node
 	// Avoid pointless churn: if nothing structurally changed, bail.
-	if op_cost(rebuilt) == orig && len(kept) == count_sum_leaves(left) + count_sum_leaves(right) && constant == 0 {
+	if op_cost(rebuilt) == orig &&
+	   len(kept) == count_sum_leaves(left) + count_sum_leaves(right) &&
+	   constant == 0 {
 		return nil
 	}
 	return rebuilt
@@ -447,7 +455,7 @@ flatten_sum :: proc(node: ^Type, coeff: i128, terms: ^[dynamic]Sum_Term, constan
 				flatten_sum(v.left, coeff * c, terms, constant)
 				return
 			}
-			// var * var → an opaque atom (no distribution).
+		// var * var → an opaque atom (no distribution).
 		}
 	}
 	append(terms, Sum_Term{coeff, node})
@@ -897,14 +905,32 @@ eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 // reduce() (the test harness destroys its arena between cases — a carried-over map
 // would dangle). THREAD-LOCAL: the test runner reduces cases on multiple threads
 // concurrently, and a shared global map would data-race into corruption/segfault.
-@(thread_local) dag_table: map[string]^Type
-@(thread_local) fixedpoint_index: map[rawptr]int
-@(thread_local) fixedpoint_next: int
+Reducer :: struct {
+	collapse_stack:   [dynamic]^Scope_Type,
+	dag_table:        map[string]^Type,
+	fixedpoint_index: map[rawptr]int,
+	fixedpoint_next:  int,
+}
 
-dag_reset :: proc() {
-	dag_table = make(map[string]^Type)
-	fixedpoint_index = make(map[rawptr]int)
-	fixedpoint_next = 0
+current_reducer :: #force_inline proc() -> ^Reducer {
+	return cast(^Reducer)context.user_ptr
+}
+
+create_reducer :: proc() {
+	r := Reducer {
+		collapse_stack   = make([dynamic]^Scope_Type),
+		dag_table        = make(map[string]^Type),
+		fixedpoint_index = make(map[rawptr]int),
+		fixedpoint_next  = 0,
+	}
+
+	// Expose the reducer through the context so deep fold helpers can emit
+	// precise, source-anchored diagnostics without threading ^Analyzer through
+	// every signature. Restored on exit (analyze can be called per-file).
+	prev_user_ptr := context.user_ptr
+	context.user_ptr = &r
+	defer context.user_ptr = prev_user_ptr
+
 }
 
 // dag_intern returns the canonical node for a Compose shape: if an identical shape
@@ -914,8 +940,9 @@ dag_intern :: proc(c: Compose_Type) -> ^Type {
 	node := new(Type)
 	node^ = c
 	key := dag_key(node)
-	if existing, ok := dag_table[key]; ok do return existing
-	dag_table[key] = node
+	reducer := current_reducer()
+	if existing, ok := reducer.dag_table[key]; ok do return existing
+	reducer.dag_table[key] = node
 	return node
 }
 
@@ -977,10 +1004,11 @@ fixedpoint_id :: proc(node: ^Type) -> int {
 			id = rawptr(uintptr(ref.match_scope) ~ uintptr(ref.match_index))
 		}
 	}
-	if idx, ok := fixedpoint_index[id]; ok do return idx
-	idx := fixedpoint_next
-	fixedpoint_next += 1
-	fixedpoint_index[id] = idx
+	reducer := current_reducer()
+	if idx, ok := reducer.fixedpoint_index[id]; ok do return idx
+	idx := reducer.fixedpoint_next
+	reducer.fixedpoint_next += 1
+	reducer.fixedpoint_index[id] = idx
 	return idx
 }
 
@@ -1007,7 +1035,11 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	if ft != nil {
 		branches := make([]Pattern_Branch, len(p.branches))
 		for branch, i in p.branches {
-			branches[i] = Pattern_Branch{branch.value_match, branch.match, reduce_value(branch.product)}
+			branches[i] = Pattern_Branch {
+				branch.value_match,
+				branch.match,
+				reduce_value(branch.product),
+			}
 		}
 		r := new(Type)
 		r^ = Pattern_Type{reduce_value(p.target), branches}
