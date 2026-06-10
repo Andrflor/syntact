@@ -33,7 +33,19 @@ import "core:fmt"
 // analyzer hands us `value_match` already split out (see walk_pattern), so here we
 // only box the parts.
 build_pattern_branch :: proc(match: ^Type, product: ^Type, value_match: bool) -> Pattern_Branch {
-	return Pattern_Branch{value_match = value_match, match = match, product = product}
+	b := Pattern_Branch {
+		value_match = value_match,
+		match       = match,
+		product     = product,
+	}
+	// Cache the branch's firing set NOW (analysis time): a `=v` value match
+	// fires on equality, i.e. membership in the singleton {v} (its value fold);
+	// a typecheck match fires on inclusion in its constraint set. reduce_pattern
+	// reads this cache — no fold ever runs during reduce.
+	if match != nil {
+		b.cover_fold = value_match ? fold_value_type(match) : fold_constraint(match)
+	}
+	return b
 }
 
 // branch_covers reports whether a branch fully ABSORBS the target — i.e. the
