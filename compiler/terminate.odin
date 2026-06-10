@@ -29,10 +29,13 @@ package compiler
 // counters that used to clip legitimate recursion at 64/512/4096.
 // ============================================================================
 
-// The source scopes of collapses currently being unfolded. THREAD_LOCAL like the
-// DAG tables (the test runner reduces on multiple threads). Balanced by
-// collapse_enter/collapse_leave, so it is empty whenever a root reduce() starts.
-@(thread_local) collapse_stack: [dynamic]^Scope_Type
+// The source scopes of collapses currently being unfolded live on the Reducer
+// (reached via current_reducer()), not a global: the test runner reduces on many
+// threads each in its own arena, so a global [dynamic] would both race and keep a
+// stale backing into a freed arena. Unlike the DAG tables it is NOT reset per
+// reduce() — it must survive the collapse recursion as the termination guard.
+// Balanced by collapse_enter/collapse_leave, so it is empty whenever the top-level
+// reduce() returns.
 
 // collapse_source resolves a collapse target (`Execute_Type.target`) to the
 // canonical source scope it ultimately collapses, peeling nested carves the same
@@ -57,18 +60,23 @@ collapse_source :: proc(target: ^Type) -> ^Scope_Type {
 // already open on the stack — i.e. the recursion does not terminate statically.
 collapse_would_recurse :: proc(s: ^Scope_Type) -> bool {
 	if s == nil do return false
-	for open in collapse_stack {
+	r := current_reducer()
+	if r == nil do return false
+	for open in r.collapse_stack {
 		if open == s do return true
 	}
 	return false
 }
 
 collapse_enter :: proc(s: ^Scope_Type) {
-	append(&collapse_stack, s)
+	if r := current_reducer(); r != nil {
+		append(&r.collapse_stack, s)
+	}
 }
 
 collapse_leave :: proc() {
-	if len(collapse_stack) > 0 {
-		pop(&collapse_stack)
+	r := current_reducer()
+	if r != nil && len(r.collapse_stack) > 0 {
+		pop(&r.collapse_stack)
 	}
 }
