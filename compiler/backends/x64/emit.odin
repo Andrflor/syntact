@@ -155,8 +155,12 @@ arg_slot_info :: proc(e: ^X64_Emit) -> (count: int, is_float: map[int]bool) {
 // Registers: r12=argc, r13=&argv[0], r14=K. atoi/atof clobber rax/rcx/rdx/rsi/rdi
 // (+xmm for atof). R11 holds the ARGS_TABLE base.
 emit_arg_stub :: proc(e: ^X64_Emit) {
-	_, is_float := arg_slot_info(e)
+	count, is_float := arg_slot_info(e)
 	defer delete(is_float)
+
+	// No ?? is ever read (e.g. a fully-folded program like `fib{22}!` → a constant):
+	// parsing argv would be dead code feeding a table nobody loads. Emit nothing.
+	if count == 0 do return
 
 	// --- generic atoi loop over all of argv[1..] ---
 	rsp0 := MemoryAddress(AddressComponents{base = Register64.RSP}) // [rsp] = argc
