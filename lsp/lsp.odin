@@ -586,7 +586,11 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	}
 
 	if ast != nil && parse_ok {
-		compiler.analyze(cache, ast)
+		analyzer := compiler.create_analyzer(ast)
+		prev_user_ptr := context.user_ptr
+		context.user_ptr = &analyzer
+		analyze_ok := compiler.analyze(cache)
+		context.user_ptr = prev_user_ptr
 		doc.scope = cache.scope
 
 		for err in cache.analyze_errors {
@@ -1131,7 +1135,11 @@ collect_scope_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]
 	}
 }
 
-add_scope_bindings :: proc(ast: ^compiler.Ast, scope: ^compiler.Scope_Type, items: ^[dynamic]json.Value) {
+add_scope_bindings :: proc(
+	ast: ^compiler.Ast,
+	scope: ^compiler.Scope_Type,
+	items: ^[dynamic]json.Value,
+) {
 	for i := 0; i < len(scope.names); i += 1 {
 		if scope.names[i] == "" do continue
 		append(items, make_completion_item(scope, i))
@@ -1155,8 +1163,12 @@ make_completion_item :: proc(scope: ^compiler.Scope_Type, i: int) -> json.Value 
 				ckind = COMPLETION_KIND_MODULE
 			}
 		}
-	case .Event_Push, .Event_Pull, .Resonance_Push, .Resonance_Pull,
-	     .Reactive_Push, .Reactive_Pull:
+	case .Event_Push,
+	     .Event_Pull,
+	     .Resonance_Push,
+	     .Resonance_Pull,
+	     .Reactive_Push,
+	     .Reactive_Pull:
 		ckind = COMPLETION_KIND_EVENT
 	case .Product:
 		ckind = COMPLETION_KIND_PROPERTY
@@ -1278,16 +1290,25 @@ handle_semantic_tokens :: proc(server: ^LSP_Server, msg: LSP_Message) {
 collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
 	compiler.ensure_line_starts(ast)
 
-	emit :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token, span: compiler.Span, type: Sem_Token_Type, mod := 0) {
+	emit :: proc(
+		ast: ^compiler.Ast,
+		tokens: ^[dynamic]Raw_Sem_Token,
+		span: compiler.Span,
+		type: Sem_Token_Type,
+		mod := 0,
+	) {
 		if span.end <= span.start do return
 		pos := compiler.span_to_position(ast, span.start)
-		append(tokens, Raw_Sem_Token {
-			line       = pos.line - 1,
-			start_char = pos.column - 1,
-			length     = int(span.end - span.start),
-			type       = int(type),
-			modifiers  = mod,
-		})
+		append(
+			tokens,
+			Raw_Sem_Token {
+				line = pos.line - 1,
+				start_char = pos.column - 1,
+				length = int(span.end - span.start),
+				type = int(type),
+				modifiers = mod,
+			},
+		)
 	}
 
 	lexer: compiler.Lexer
@@ -1319,17 +1340,44 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 			emit(ast, tokens, cur.span, .Function)
 		case .Question, .DoubleQuestion:
 			emit(ast, tokens, cur.span, .Keyword)
-		case .PointingPush, .PointingPull, .EventPush, .EventPull, .ResonancePush,
-		     .ResonancePull, .ReactivePush, .ReactivePull:
+		case .PointingPush,
+		     .PointingPull,
+		     .EventPush,
+		     .EventPull,
+		     .ResonancePush,
+		     .ResonancePull,
+		     .ReactivePush,
+		     .ReactivePull:
 			emit(ast, tokens, cur.span, .Keyword)
 		case .Colon, .Cast, .ConstraintBind, .ConstraintFromNone, .ConstraintToNone:
 			emit(ast, tokens, cur.span, .TypeParameter)
 		case .PropertyAccess, .PropertyFromNone, .PropertyToNone, .Dot:
 			emit(ast, tokens, cur.span, .Property)
-		case .Plus, .Minus, .Asterisk, .Slash, .Percent, .Equal, .NotEqual, .Less,
-		     .Greater, .LessEqual, .GreaterEqual, .And, .Or, .Xor, .Not, .RShift,
-		     .LShift, .BitAnd, .BitOr, .BitNot, .Range, .PrefixRange, .PostfixRange,
-		     .DoubleDot, .Ellipsis:
+		case .Plus,
+		     .Minus,
+		     .Asterisk,
+		     .Slash,
+		     .Percent,
+		     .Equal,
+		     .NotEqual,
+		     .Less,
+		     .Greater,
+		     .LessEqual,
+		     .GreaterEqual,
+		     .And,
+		     .Or,
+		     .Xor,
+		     .Not,
+		     .RShift,
+		     .LShift,
+		     .BitAnd,
+		     .BitOr,
+		     .BitNot,
+		     .Range,
+		     .PrefixRange,
+		     .PostfixRange,
+		     .DoubleDot,
+		     .Ellipsis:
 			emit(ast, tokens, cur.span, .Operator)
 		}
 
@@ -1343,8 +1391,16 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 // that identifier as a DECLARATION.
 token_is_decl_op :: proc(k: compiler.Token_Kind) -> bool {
 	#partial switch k {
-	case .PointingPush, .PointingPull, .EventPush, .EventPull, .ResonancePush,
-	     .ResonancePull, .ReactivePush, .ReactivePull, .Colon, .ConstraintBind,
+	case .PointingPush,
+	     .PointingPull,
+	     .EventPush,
+	     .EventPull,
+	     .ResonancePush,
+	     .ResonancePull,
+	     .ReactivePush,
+	     .ReactivePull,
+	     .Colon,
+	     .ConstraintBind,
 	     .ConstraintToNone:
 		return true
 	}
@@ -1394,13 +1450,16 @@ emit_comment_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token)
 			continue
 		}
 		pos := compiler.span_to_position(ast, u32(start))
-		append(tokens, Raw_Sem_Token {
-			line       = pos.line - 1,
-			start_char = pos.column - 1,
-			length     = end - start,
-			type       = int(Sem_Token_Type.Comment),
-			modifiers  = 0,
-		})
+		append(
+			tokens,
+			Raw_Sem_Token {
+				line = pos.line - 1,
+				start_char = pos.column - 1,
+				length = end - start,
+				type = int(Sem_Token_Type.Comment),
+				modifiers = 0,
+			},
+		)
 		i = end
 	}
 }
@@ -1410,7 +1469,7 @@ emit_comment_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token)
 // ~1M tokens) take minutes, so semantic highlighting never arrived.
 sort_sem_tokens :: proc(tokens: []Raw_Sem_Token) {
 	slice.sort_by(tokens, proc(a, b: Raw_Sem_Token) -> bool {
-		if a.line != b.line do return a.line < b.line
-		return a.start_char < b.start_char
-	})
+			if a.line != b.line do return a.line < b.line
+			return a.start_char < b.start_char
+		})
 }
