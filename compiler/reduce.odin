@@ -98,6 +98,8 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		return reduce_mention(v, value)
 	case Reference_Type:
 		return reduce_reference(v, value)
+	case Recursive_Reference_Type:
+		return reduce_recursive_reference(v, value)
 	case Scope_Type:
 		return reduce_scope(&v)
 	case Integer_Type:
@@ -164,6 +166,22 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 	target := ref.match_scope.values[ref.match_index]
 	if is_fixed_point(target) do return follow_to_fixedpoint(target)
 	return reduce_value(target)
+}
+
+// reduce_recursive_reference mirrors reduce_mention for a recursive reference:
+// by analysis time every surviving one is resolved (a self one designates the
+// scope itself, a named one carries its field index), so it reduces like the
+// mention it stands for. An unresolved one (analysis errored) stays opaque.
+reduce_recursive_reference :: proc(v: Recursive_Reference_Type, node: ^Type) -> ^Type {
+	if v.self {
+		if v.target == nil do return node
+		if is_fixed_point(v.target) do return follow_to_fixedpoint(v.target)
+		return reduce_value(v.target)
+	}
+	if v.scope == nil || v.match_index < 0 do return node
+	bound := v.scope.values[v.match_index]
+	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
+	return reduce_value(bound)
 }
 
 // follow_to_fixedpoint chases a fixed-point value down THROUGH aliases to the
@@ -793,8 +811,11 @@ node_float_kind :: proc(node: ^Type) -> (FloatKind, bool) {
 			return tgt.float_kind, true
 		}
 	case Compose_Type:
-		if env := fold_value_type(node); env != nil && env != node {
-			return node_float_kind(env)
+		// Read the envelope the ANALYZER cached on the node (fold_compose fills
+		// type_fold) — reduce never re-folds. A reducer-built Compose carries no
+		// cache and falls through to its operands.
+		if v.type_fold != nil && v.type_fold != node {
+			if k, ok := node_float_kind(v.type_fold); ok do return k, true
 		}
 		if k, ok := node_float_kind(v.left); ok do return k, true
 		return node_float_kind(v.right)
@@ -1009,47 +1030,95 @@ fixedpoint_id :: proc(node: ^Type) -> int {
 
 // reduce_pattern collapses a pattern to the product of the FIRST branch that fires
 // for the target. If the target is a fixed point we cannot pick a branch at
-// compile time — but if EXACTLY ONE branch can fire (the others provably can't) we
-// still resolve it; otherwise the pattern stays symbolic (the runtime decides).
+// compile time; the pattern stays symbolic (the runtime decides). The firing test
+// reads each branch's cover_fold — cached by the analyzer — against the REDUCED
+// target through the pure per-domain satisfy kernels: no fold runs during reduce.
 reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
-	ft := fold_value_type(p.target)
-	if ft != nil && !is_fixed_point(p.target) {
-		for branch in p.branches {
-			if branch_can_match(branch, ft) {
-				return reduce_value(branch.product)
+	if !is_fixed_point(p.target) {
+		target := reduce_value(p.target)
+		if target != nil && !is_fixed_point(target) {
+			for branch in p.branches {
+				if reduce_branch_fires(branch, target) {
+					return reduce_value(branch.product)
+				}
 			}
 		}
 	}
 	// Fixed-point target: the runtime selects the branch, so keep the pattern shape
 	// but reduce the target (to its `??N`) and each branch's product. (A pattern that
 	// passed exhaustiveness always has a firing branch at runtime.)
-	if ft != nil {
-		branches := make([]Pattern_Branch, len(p.branches))
-		for branch, i in p.branches {
-			branches[i] = Pattern_Branch {
-				branch.value_match,
-				branch.match,
-				reduce_value(branch.product),
-			}
+	branches := make([]Pattern_Branch, len(p.branches))
+	for branch, i in p.branches {
+		branches[i] = Pattern_Branch {
+			value_match = branch.value_match,
+			match       = branch.match,
+			product     = reduce_value(branch.product),
+			cover_fold  = branch.cover_fold,
 		}
-		r := new(Type)
-		r^ = Pattern_Type{reduce_value(p.target), branches}
-		return r
 	}
 	r := new(Type)
-	r^ = Invalid_Type{}
+	r^ = Pattern_Type{reduce_value(p.target), branches}
 	return r
+}
+
+// reduce_branch_fires: the reduce-side in-order firing test. The default branch
+// always fires; otherwise the reduced target must fall inside the branch's
+// cached cover_fold. Only domain-leaf covers are decided here (the pure
+// per-domain satisfy); anything else — a cover that did not fold statically, a
+// scope-shaped cover — keeps the pattern symbolic rather than calling the
+// analyzer's proof machinery from reduce.
+reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> bool {
+	if branch.match == nil do return true
+	cf := branch.cover_fold
+	if cf == nil || target == nil do return false
+	#partial switch f in cf^ {
+	case Integer_Type:
+		v, ok := target^.(Integer_Type)
+		return ok && integer_satisfy(f, v)
+	case Float_Type:
+		v, ok := target^.(Float_Type)
+		return ok && float_satisfy(f, v)
+	case String_Type:
+		v, ok := target^.(String_Type)
+		return ok && string_satisfy(f, v)
+	case Bool_Type:
+		v, ok := target^.(Bool_Type)
+		return ok && bool_satisfy(f, v)
+	}
+	return false
 }
 
 // reduce_set_op materializes a |/&/~ expression to a concrete value (the default
 // of the resulting domain), or keeps it symbolic when the domain can't be
-// resolved statically (mixed families, symbolic negation).
+// resolved statically (mixed families, symbolic negation, a fixed-point
+// operand). The operands are REDUCED first, then combined through the pure
+// per-domain kernels — never the analyzer's fold_constraint.
 reduce_set_op :: proc(value: ^Type) -> ^Type {
-	folded := fold_constraint(value)
+	syn: ^Type
+	#partial switch v in value^ {
+	case Or_Type:
+		l := reduce_value(v.left)
+		r := reduce_value(v.right)
+		if l == nil || r == nil do return value
+		syn = new_type(Or_Type{l, r})
+	case And_Type:
+		l := reduce_value(v.left)
+		r := reduce_value(v.right)
+		if l == nil || r == nil do return value
+		syn = new_type(And_Type{l, r})
+	case Negate_Type:
+		o := reduce_value(v.operand)
+		if o == nil do return value
+		syn = new_type(Negate_Type{o})
+	case:
+		return value
+	}
+	folded := fold_constraint_integer(syn)
+	if folded == nil do folded = fold_constraint_float(syn)
+	if folded == nil do folded = fold_constraint_string(syn)
+	if folded == nil do folded = fold_constraint_bool(syn)
 	if folded == nil do return value
-	if _, is_none := folded^.(None_Type); is_none do return folded
-	def := default_value(folded)
-	if def != nil do return def
+	if def := type_default(folded); def != nil do return def
 	return folded
 }
 
@@ -1077,9 +1146,7 @@ execute :: proc(value: Execute_Type) -> ^Type {
 // the resulting fields. A field overridden with (or depending on) a fixed point
 // stays symbolic; concrete fields fold through.
 reduce_carve :: proc(value: Carve_Type) -> ^Type {
-	t := new(Type)
-	t^ = value
-	sub := fold_carve(t)
+	sub := reduce_substitute_carve(value)
 	if sub == nil {
 		// Source did not resolve to a scope: reduce the source through.
 		return reduce_value(value.source)
@@ -1093,6 +1160,118 @@ reduce_carve :: proc(value: Carve_Type) -> ^Type {
 	r := new(Type)
 	r^ = sub^
 	return r
+}
+
+// reduce_substitute_carve is the REDUCE-SIDE carve materialization: resolve the
+// source scope (peeling nested carves through itself), clone it, unify pulls,
+// write the overrides in, and repoint sibling references so they read the
+// substituted values. It NEVER calls the analyzer's fold layer (fold_carve and
+// friends belong to the analysis pass — they read the analyzer through
+// context.user_ptr, which carries the REDUCER here). Instead of re-folding the
+// substituted fields, it CLEARS their cached type_folds: a cleared fold makes
+// reduce_value read the value itself, which is exactly the reduction's job.
+reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
+	src: ^Scope_Type = nil
+	cur := follow(value.source)
+	for cur != nil {
+		#partial switch &s in cur^ {
+		case Scope_Type:
+			src = &s
+		case Carve_Type:
+			// A carve of a carve: substitute the inner one first so we override
+			// onto the already-substituted scope.
+			src = reduce_substitute_carve(s)
+		}
+		break
+	}
+	if src == nil do return nil
+
+	copy := scope_clone(src)
+
+	for i in 0 ..< len(value.references) {
+		ref := value.references[i]
+		if ref.match_index >= 0 && ref.match_index < len(copy.values) {
+			// Identity override (`Array{T}` overriding T with the same T): the
+			// substitution would leave, after repoint, a mention of the field
+			// onto itself — an unresolvable cycle. It changes nothing; skip.
+			if mv, is_m := value.values[i]^.(Mention_Type); is_m &&
+			   mv.match_scope == src && mv.match_index == ref.match_index {
+				continue
+			}
+			// PULL UNIFICATION: a field constraint mentioning a pull (e.g.
+			// `data{e}:somedata`) binds the pull from the supplied value
+			// (`data{6}` → e = 6), so `-> e` and every mention of e read 6.
+			if ref.match_index < len(copy.types) && copy.types[ref.match_index] != nil {
+				reduce_unify_pull(copy.types[ref.match_index], value.values[i], copy, src)
+			}
+			copy.values[ref.match_index] = value.values[i]
+			// The cached fold belongs to the PRE-carve value (a stale singleton
+			// would shadow the substitution): clear it, reduce reads the value.
+			if ref.match_index < len(copy.type_folds) {
+				copy.type_folds[ref.match_index] = nil
+			}
+		}
+	}
+
+	// Repoint every reference that named the source scope so it names the copy:
+	// sibling mentions now read the substituted values, cascading transitively.
+	// A repointed (dependent) field's cached fold is pre-substitution: clear it.
+	for i in 0 ..< len(copy.values) {
+		repointed := repoint(copy.values[i], src, copy)
+		if repointed != copy.values[i] {
+			copy.values[i] = repointed
+			if i < len(copy.type_folds) do copy.type_folds[i] = nil
+		}
+	}
+	return copy
+}
+
+// reduce_unify_pull mirrors the analyzer's unify_pull for the reduce-side
+// substitution — same structural matching, no fold calls (the freshly written
+// value reduces on demand; its stale cached fold is cleared).
+reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
+	if constraint == nil || value == nil do return
+
+	// A mention of a pull on the constraint side: bind it to the value.
+	if m, ok := constraint^.(Mention_Type); ok {
+		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(copy.kind) {
+			if copy.kind[m.match_index] == .Pointing_Pull {
+				copy.values[m.match_index] = value
+				if m.match_index < len(copy.type_folds) {
+					copy.type_folds[m.match_index] = nil
+				}
+			}
+		}
+		return
+	}
+
+	// Two carves: unify each constraint override against the value override that
+	// targets the same source slot.
+	if cc, c_ok := &constraint^.(Carve_Type); c_ok {
+		vc, v_ok := &value^.(Carve_Type)
+		if v_ok {
+			for ci in 0 ..< len(cc.references) {
+				slot := cc.references[ci].match_index
+				for vi in 0 ..< len(vc.references) {
+					if vc.references[vi].match_index == slot {
+						reduce_unify_pull(cc.values[ci], vc.values[vi], copy, src)
+						break
+					}
+				}
+			}
+		}
+		return
+	}
+
+	// Two scopes: unify field-by-field by position.
+	if cs, c_ok := &constraint^.(Scope_Type); c_ok {
+		if vs, v_ok := &value^.(Scope_Type); v_ok {
+			n := min(len(cs.values), len(vs.values))
+			for i in 0 ..< n {
+				reduce_unify_pull(cs.values[i], vs.values[i], copy, src)
+			}
+		}
+	}
 }
 
 // ============================================================================

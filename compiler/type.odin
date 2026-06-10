@@ -125,6 +125,59 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 // alone carries an identity guard (scope_fields_fold_unknown); everywhere else a
 // cycle in the language is detected exactly where it lives (follow's binding
 // chain, the collapse stack in terminate.odin), never by a magic counter.
+// fold_pending_on records that the current fold touched `s` while it is still
+// being walked: the result is unusable and the dependent obligation must be
+// deferred until s closes (the analyzer queues it and scope_close re-runs it).
+// The first scope recorded wins — any open scope is a valid re-queue target; a
+// still-blocked re-run records the next one.
+fold_pending_on :: proc(s: ^Scope_Type) {
+	a := current_analyzer()
+	if a == nil || s == nil do return
+	if a.fold_pending == nil do a.fold_pending = s
+}
+
+// execute_target_scope resolves a collapse target to the underlying ^Scope_Type
+// it reduces through, peeling carves WITHOUT folding them (no clone). This is
+// the stable identity for the recursion guard: a recursive reference inside any
+// clone still names the original scope.
+execute_target_scope :: proc(t: ^Type) -> ^Scope_Type {
+	cur := follow(t)
+	for cur != nil {
+		#partial switch &v in cur^ {
+		case Scope_Type:
+			return &v
+		case Carve_Type:
+			cur = follow(v.source)
+			continue
+		}
+		break
+	}
+	return nil
+}
+
+// execute_fold_enter/leave guard folding a collapse: a RECURSIVE collapse (its
+// production collapses the same scope again — every clone's recursive reference
+// names the original) would unfold forever at fold time. Entering an Execute
+// fold pushes the target's underlying scope; re-entering the same scope reports
+// blocked=true and the caller bails to nil (the recursion itself is reduce's
+// job, with its own termination analysis — the fold only needs the outer shape).
+execute_fold_enter :: proc(t: ^Type) -> (key: ^Scope_Type, blocked: bool) {
+	key = execute_target_scope(t)
+	if key == nil do return nil, false
+	a := current_analyzer()
+	if a == nil do return nil, false
+	for k in a.execute_stack {
+		if k == key do return nil, true
+	}
+	append(&a.execute_stack, key)
+	return key, false
+}
+
+execute_fold_leave :: proc(key: ^Scope_Type) {
+	if key == nil do return
+	if a := current_analyzer(); a != nil do pop(&a.execute_stack)
+}
+
 fold_constraint :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		#partial switch v in t^ {
@@ -133,6 +186,12 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// fold result, propagated by every composite case below.
 			return t
 		case Scope_Type:
+			// A scope still being walked has missing bindings — nothing folded
+			// over it can be trusted; defer to its close.
+			if v.walking {
+				if s, s_ok := &t^.(Scope_Type); s_ok do fold_pending_on(s)
+				return nil
+			}
 			// A scope constraint is a statically-known set only if every field's
 			// value is — an unknown buried in a field (`{x -> ??::u8}`) makes the
 			// whole scope insoluble. The shape itself is preserved (satisfy_root
@@ -162,10 +221,31 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
+		case Recursive_Reference_Type:
+			// Unresolved (its scope is still being walked): the fold cannot be
+			// trusted yet — signal the deferral and bail. Resolved: behave as the
+			// mention/property it stands for.
+			if v.self {
+				if v.scope != nil && v.scope.walking {
+					fold_pending_on(v.scope)
+					return nil
+				}
+				return fold_constraint(v.target)
+			}
+			if v.scope == nil do return nil
+			if v.match_index < 0 {
+				fold_pending_on(v.scope)
+				return nil
+			}
+			return fold_constraint_target(v.scope, v.match_index)
 		case Execute_Type:
 			// `target!` as a constraint folds to the constraint of the production
 			// the collapse reduces through (the first .Product of the target). A
-			// scope with no production collapses to `none`.
+			// scope with no production collapses to `none`. A RECURSIVE collapse
+			// bails to nil (execute_fold_enter) instead of unfolding forever.
+			key, blocked := execute_fold_enter(v.target)
+			if blocked do return nil
+			defer execute_fold_leave(key)
 			prod, resolved := execute_production(v.target)
 			if prod == nil {
 				if resolved do return new_type(None_Type{})
@@ -334,6 +414,20 @@ fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 			r^ = Unknown_Type{}
 			return r
 		}
+		// A mention chain that cycles back onto itself (a binding referring to
+		// itself) can never fold; recursing into it blindly would loop forever.
+		// follow's exact-cycle guard detects it: a chase that STOPS on another
+		// indirection cycled — unresolvable, nil.
+		#partial switch _ in value^ {
+		case Mention_Type, Reference_Type:
+			res := follow(value)
+			if res != nil {
+				#partial switch _ in res^ {
+				case Mention_Type, Reference_Type:
+					return nil
+				}
+			}
+		}
 	}
 	return fold_constraint(value)
 }
@@ -364,7 +458,30 @@ scope_fields_fold_unknown :: proc(key: ^Type, values: []^Type) -> bool {
 	defer pop(&a.scope_scan_stack)
 	for val in values {
 		if val == nil do continue
+		// A recursive tail — the explicit recursive reference, or a carve over
+		// one — is NOT an unknown: the value is constrained by induction, which
+		// the satisfy layer consumes level by level against a shrinking value.
+		// Folding it here would materialize one clone per scan, forever (each
+		// clone repoints a FRESH carve node, so no node-identity guard helps).
+		if is_recursive_tail(val) do continue
 		if fold_is_unknown(fold_constraint(val)) do return true
+	}
+	return false
+}
+
+// is_recursive_tail reports whether `t` is the marker of a recursive
+// constraint: the Recursive_Reference node itself, or a carve whose source is
+// one (`...Array{T}` — also after repoint, which clones the carve but never
+// rewrites the reference).
+is_recursive_tail :: proc(t: ^Type) -> bool {
+	if t == nil do return false
+	#partial switch v in t^ {
+	case Recursive_Reference_Type:
+		return true
+	case Carve_Type:
+		if v.source != nil {
+			if _, is_rr := v.source^.(Recursive_Reference_Type); is_rr do return true
+		}
 	}
 	return false
 }
@@ -378,6 +495,11 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		#partial switch v in t^ {
 		case Scope_Type:
+			// A scope still being walked has missing bindings — defer to its close.
+			if v.walking {
+				if s, s_ok := &t^.(Scope_Type); s_ok do fold_pending_on(s)
+				return nil
+			}
 			prods := scope_productions(v)
 			if len(prods) > 0 {
 				folded := make([dynamic]^Type, 0, len(prods))
@@ -406,10 +528,30 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 		case Reference_Type:
 			eff := reference_effective_value(v)
 			if eff != nil do return fold_value_type(eff)
+		case Recursive_Reference_Type:
+			// Unresolved: defer (see the fold_constraint case). Resolved: the
+			// value type of whatever it stands for.
+			if v.self {
+				if v.scope != nil && v.scope.walking {
+					fold_pending_on(v.scope)
+					return nil
+				}
+				return fold_value_type(v.target)
+			}
+			if v.scope == nil do return nil
+			if v.match_index < 0 {
+				fold_pending_on(v.scope)
+				return nil
+			}
+			return fold_value_type(v.scope.values[v.match_index])
 		case Execute_Type:
 			// `target!` produces the value of the production the collapse reduces
 			// through (the first .Product of the target). A scope with no
-			// production collapses to `none`.
+			// production collapses to `none`. A RECURSIVE collapse bails to nil
+			// (execute_fold_enter) instead of unfolding forever.
+			key, blocked := execute_fold_enter(v.target)
+			if blocked do return nil
+			defer execute_fold_leave(key)
 			prod, resolved := execute_production(v.target)
 			if prod == nil {
 				if resolved do return new_type(None_Type{})
@@ -599,88 +741,111 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 	return out
 }
 
-// The recursion-roots stack holds the ORIGINAL constraint-scope identities
-// currently being proved inductively. A self-reference points at the original
-// `Array` node; after a carve substitutes a parameter (`Array{int}`), repoint does
-// NOT reach into the nested production, so the inner `...Array` still points at the
-// ORIGINAL — not the substituted clone. So self_ref_binding must recognize a binding
-// that resolves to ANY root on this stack, not only the immediate `fc`. It lives on
-// the analyzer (reached via current_analyzer()), not a global: the test runner
-// proves cases on many threads each in its own arena, and a global [dynamic] would
-// keep a stale cap into a destroyed arena. Pushed/popped around each inductive step.
-is_recursion_root :: proc(s: ^Type, immediate: ^Type) -> bool {
-	if s == immediate do return true
-	a := current_analyzer()
-	if a == nil do return false
-	for r in a.recursion_roots {
-		if s == r do return true
-	}
-	return false
-}
-
-// self_ref_binding finds, within a producer scope `prod`, the index of a binding
-// that REFERENCES the constraint root — i.e. the production mentions itself
-// (`...Array` or `...Array{…}`). It follows mentions/references and peels carves;
-// a match means `prod` is the inductive step of a recursive constraint. Returns
-// (index, the followed binding ^Type, true). The check is purely semantic: a
-// binding whose target IS the root scope (`immediate`, or any original root on the
-// recursion stack) — no syntactic head/expand/carve pattern.
-self_ref_binding :: proc(prod: ^Type, immediate: ^Type) -> (idx: int, tail: ^Type, ok: bool) {
+// recursive_ref_binding finds, within a producer scope `prod`, the index of a
+// binding that IS a recursive reference — the explicit Recursive_Reference node
+// the analyzer records for a self/forward mention (`...Array`), or a carve over
+// one (`...Array{T}`). The node survives carve cloning unchanged (repoint never
+// rewrites it), so the detection needs NO root-identity bookkeeping: the
+// inductive step is wherever the node sits, whatever clone holds it. Returns
+// (index, the binding's constraint/value carrying the reference, true).
+recursive_ref_binding :: proc(prod: ^Type) -> (idx: int, tail: ^Type, ok: bool) {
 	ps, is_scope := prod^.(Scope_Type)
 	if !is_scope do return 0, nil, false
 	for i in 0 ..< len(ps.kind) {
-		// An expand/product binding may carry the self-mention as its coloring
-		// (`...Array:` stores it in types) or its value; a structural slot carries it
-		// as the value. Follow whichever is present, peeling carves to the source.
+		// An expand/product binding may carry the reference as its coloring
+		// (`...Array{T}:` stores the carve in types) or as its value.
 		raw := i < len(ps.types) && ps.types[i] != nil ? ps.types[i] : ps.values[i]
 		if raw == nil do continue
-		resolved := follow(raw)
-		src := resolved
-		if cv, is_carve := resolved^.(Carve_Type); is_carve {
-			src = follow(cv.source)
+		// The reference node itself (bare `...Array`) — checked BEFORE follow,
+		// which would chase a resolved one through to the scope.
+		if _, is_rr := raw^.(Recursive_Reference_Type); is_rr {
+			return i, raw, true
 		}
-		if is_recursion_root(src, immediate) {
-			return i, resolved, true
+		resolved := follow(raw)
+		if cv, is_carve := resolved^.(Carve_Type); is_carve && cv.source != nil {
+			if _, is_rr := cv.source^.(Recursive_Reference_Type); is_rr {
+				return i, resolved, true
+			}
 		}
 	}
 	return 0, nil, false
 }
 
-// satisfy_inductive proves a value scope `vs` against an inductive production whose
-// self-reference is at `self_idx` (the followed binding `tail`), with `self` the
-// constraint root. The bindings BEFORE self_idx are heads — each consumes one
-// leading value element, proved against the head's color. The self-reference covers
-// the REST: it is proved against the root the self-reference resolves to — `self`
-// itself for a bare `...Array`, or the SUBSTITUTED scope (`fold_carve`) for a
-// parametric `...Array{int}`, so the parameter actually re-colors the rest. The
-// finite, strictly-shrinking value is the termination guard; coinduction on
-// (self, vs) in satisfy guards against a non-shrinking pointer cycle.
+// head_constraint_in resolves a head color (`T:`) against the carved root scope
+// `root`, so a substituted parameter (T = string) is seen instead of the stale
+// generic fold cached in the production. If the head's raw constraint is a
+// mention of a name bound in root, fold root's binding for that name; otherwise
+// fall back to the head's own cached constraint_fold (a non-parametric color
+// like a literal needs no lookup).
+head_constraint_in :: proc(root: Scope_Type, ps: Scope_Type, i: int) -> ^Type {
+	rt := i < len(ps.types) ? ps.types[i] : nil
+	if rt != nil {
+		name := ""
+		#partial switch m in rt^ {
+		case Mention_Type:
+			name = m.name
+		case Reference_Type:
+			if m.reference != nil {
+				if n, nok := m.reference.name.(string); nok do name = n
+			}
+		}
+		if name != "" {
+			for j in 0 ..< len(root.names) {
+				if root.names[j] == name {
+					return fold_constraint(root.values[j])
+				}
+			}
+		}
+	}
+	return i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil
+}
+
+// satisfy_inductive proves a value scope `vs` against an inductive production
+// whose recursive reference sits at `self_idx` (the carrying node `tail`), with
+// `self` the constraint root currently proved against. The bindings BEFORE
+// self_idx are heads — each consumes one leading value element, proved against
+// the head's color resolved IN `self` (head_constraint_in: the carve that
+// produced `self` substituted the parameter there). The reference covers the
+// REST, proved against what it designates: the original scope for a bare
+// `...Array`, or the materialized carve (`fold_carve`) for `...Array{T}` — its
+// overrides were repointed into `self`'s level, so the parameter re-colors the
+// rest. The finite, strictly-shrinking value is the termination guard; a
+// headless inductive step consumes nothing and is rejected (no progress).
 satisfy_inductive :: proc(self: ^Type, self_idx: int, tail: ^Type, prod: ^Type, vs: Scope_Type) -> bool {
 	ps, _ := prod^.(Scope_Type)
 	elems := value_elements(vs)
 	defer delete(elems)
 	head_count := self_idx
+	if head_count == 0 do return false
 	if len(elems) < head_count do return false
-	// Prove each leading element against its head color (the head's own constraint
-	// fold — already substituted for this level by the carve that produced `self`).
+	root, root_ok := self^.(Scope_Type)
 	for i in 0 ..< head_count {
-		hc := i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil
+		hc :=
+			root_ok \
+			? head_constraint_in(root, ps, i) \
+			: (i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil)
 		if hc == nil do return false
 		ht := fold_value_type(elems[i])
 		if ht == nil do return false
 		if !satisfy_root(hc, ht) do return false
 	}
-	// The rest (elements past the heads) is itself the recursive constraint. Prove
-	// it against the scope the self-reference resolves to: `self` for a bare mention,
-	// or the materialized carve (parameter substituted) for `...Array{int}`. We do
-	// NOT fold the recursion away — fold_carve substitutes the parameter and repoints
-	// without unfolding the inductive production; the shrinking value terminates it.
+	// The rest (elements past the heads) is itself the recursive constraint.
 	rest_constraint := self
-	if cv, is_carve := tail^.(Carve_Type); is_carve {
-		_ = cv
+	#partial switch &tv in tail^ {
+	case Carve_Type:
+		// `...Array{T}` — materialize with this level's substitution. fold_carve
+		// substitutes and repoints WITHOUT unfolding the inductive production
+		// (the recursive reference inside stays as-is), so this terminates.
 		if sub := fold_carve(tail); sub != nil {
-			rest_constraint = new(Type)
-			rest_constraint^ = sub^
+			rest_constraint = new_type(sub^)
+		}
+	case Recursive_Reference_Type:
+		// Bare `...Array` — the rest is the referenced scope itself, no
+		// substitution to thread.
+		if tv.self && tv.target != nil {
+			rest_constraint = tv.target
+		} else if !tv.self && tv.scope != nil && tv.match_index >= 0 {
+			rest_constraint = tv.scope.values[tv.match_index]
 		}
 	}
 	rest := new(Scope_Type)
@@ -695,13 +860,6 @@ satisfy_inductive :: proc(self: ^Type, self_idx: int, tail: ^Type, prod: ^Type, 
 	}
 	rest_ft := new(Type)
 	rest_ft^ = rest^
-	// Register the ORIGINAL root so the next level's self-reference — which still
-	// points at `self`, not at the substituted clone — is recognized. Popped after.
-	if a := current_analyzer(); a != nil {
-		append(&a.recursion_roots, self)
-		defer pop(&a.recursion_roots)
-		return satisfy_root(rest_constraint, rest_ft)
-	}
 	return satisfy_root(rest_constraint, rest_ft)
 }
 
@@ -724,16 +882,17 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 			if (v.kind[i] == .Product) {
 				hasProd = true
-				// An INDUCTIVE production is one that MENTIONS THE ROOT itself
-				// (`{T: ...Array}` or `{T: ...Array{int}}`): a self-reference, found
-				// SEMANTICALLY (a binding that follows to `fc`), not by a syntactic
-				// head/expand/carve pattern. Proved by structural recursion on the
-				// value: consume the heads (bindings before the self-ref) against their
-				// color, then prove the rest against the scope the self-reference
-				// resolves to — the root for `...Array`, or the substituted carve for
-				// `...Array{int}` so the parameter actually re-colors the rest. Only
-				// when the value is a scope (a list of elements); a scalar never matches.
-				if si, tail, rec := self_ref_binding(v.values[i], fc); rec {
+				// An INDUCTIVE production is one that carries a RECURSIVE REFERENCE
+				// (`{T: ...Array}` or `{T: ...Array{int}}`) — the explicit node the
+				// analyzer records for a self/forward mention, which survives carve
+				// cloning, so no root-identity bookkeeping is needed. Proved by
+				// structural recursion on the value: consume the heads (bindings
+				// before the reference) against their color, then prove the rest
+				// against what the reference designates — the original scope for
+				// `...Array`, or the substituted carve for `...Array{int}` so the
+				// parameter actually re-colors the rest. Only when the value is a
+				// scope (a list of elements); a scalar never matches.
+				if si, tail, rec := recursive_ref_binding(v.values[i]); rec {
 					if vs, vs_ok := ft_content^.(Scope_Type); vs_ok {
 						if satisfy_inductive(fc, si, tail, v.values[i], vs) {
 							return true
@@ -1448,10 +1607,34 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 			// A carve of a carve: fold the inner one first so we substitute onto
 			// the already-substituted scope.
 			src = fold_carve(cur)
+		case Recursive_Reference_Type:
+			// An unresolved recursive source (follow chases a resolved one): the
+			// carve cannot materialize yet — defer to the awaited scope's close.
+			if !s.self && s.match_index < 0 do fold_pending_on(s.scope)
 		}
 		break
 	}
 	if src == nil do return nil
+	if src.walking {
+		// The source scope is still being walked: a clone now would miss its
+		// remaining bindings. Defer to its close.
+		fold_pending_on(src)
+		return nil
+	}
+
+	// Re-entry guard: folding a carve can reach the SAME carve node again (its
+	// own placeholder value while a recursive constraint materializes its
+	// default) — cloning forever. Bail the inner re-entry; each level of an
+	// inductive proof carries a fresh repointed node, so legitimate nesting
+	// passes through.
+	a := current_analyzer()
+	if a != nil {
+		for k in a.carve_fold_stack {
+			if k == t do return nil
+		}
+		append(&a.carve_fold_stack, t)
+	}
+	defer if a != nil do pop(&a.carve_fold_stack)
 
 	copy := scope_clone(src)
 
@@ -1462,6 +1645,15 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
 		if ref.match_index >= 0 && ref.match_index < len(copy.values) {
+			// Identity override — `Array{T}` overriding T with the very same T,
+			// the standard shape of a recursive tail. Substituting would leave,
+			// after repoint, a mention of the field ONTO ITSELF in the copy (an
+			// unresolvable cycle); the override changes nothing, keep the
+			// original value.
+			if mv, is_m := carve.values[i]^.(Mention_Type); is_m &&
+			   mv.match_scope == src && mv.match_index == ref.match_index {
+				continue
+			}
 			// PULL UNIFICATION: if this field's constraint mentions a pull (e.g.
 			// `data{e}:somedata`), unify the supplied value (`data{6}`) against that
 			// constraint to resolve the pull (`e = 6`) and write it into the pull's
@@ -1781,14 +1973,23 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			return new_type(Carve_Type{s, refs, vals})
 		}
 	case Scope_Type:
-		// A nested scope may reference the carved one; descend into its values
-		// and parent chain. Clone the scope only if something below changed.
+		// A nested scope may reference the carved one; descend into its values,
+		// its CONSTRAINTS (a head color `T:` or a tail carve `...Array{T}:` lives
+		// in the types column — without this the substitution would never reach a
+		// nested production's parameters), and its parent chain. Clone the scope
+		// only if something below changed.
 		changed := false
 		new_vals := make([dynamic]^Type, 0, len(v.values))
 		for sv in v.values {
 			nv := repoint(sv, old, dst)
 			if nv != sv do changed = true
 			append(&new_vals, nv)
+		}
+		new_types := make([dynamic]^Type, 0, len(v.types))
+		for st in v.types {
+			nt := repoint(st, old, dst)
+			if nt != st do changed = true
+			append(&new_types, nt)
 		}
 		new_parent := v.parent == old ? dst : v.parent
 		if new_parent != v.parent do changed = true
@@ -1797,6 +1998,8 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			ns.parent = new_parent
 			delete(ns.values)
 			ns.values = new_vals
+			delete(ns.types)
+			ns.types = new_types
 			r := new(Type)
 			r^ = ns^
 			return r

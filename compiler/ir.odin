@@ -134,6 +134,11 @@ Scope_Type :: struct {
 	// (those scan `names` only) — a capture is referenceable by mention within its
 	// own scope (and, for a pattern match, its branch production), nothing else.
 	captures:         [dynamic]string,
+	// True while the analyzer is still walking this scope's body. A fold that
+	// touches a walking scope cannot be trusted (bindings are missing) — it
+	// signals fold_pending and the dependent typecheck is deferred until the
+	// scope closes. Cleared at the end of the walk; always false on clones.
+	walking:          bool,
 }
 
 // `scope!` — collapse: reduce `target` through its Product binding.
@@ -176,6 +181,25 @@ Mention_Type :: struct {
 	match_index: int,
 }
 
+// A reference into a scope that was not yet entirely walked at its use site —
+// a self-reference (`Array` inside Array's body, self=true) or a forward
+// property into an enclosing scope still being walked (`module.odd` before odd
+// is bound, self=false). This is a PERMANENT IR node: it marks recursion
+// explicitly, so the satisfy layer detects an inductive production structurally
+// (a binding that follows to one of these) and it survives carve cloning
+// unchanged (repoint never rewrites it). A self one is always followable (the
+// scope pointer is valid even while incomplete); a named one stays opaque until
+// the deferred pass fills `match_index` when `scope` finishes walking (see
+// scope_close in analyze.odin).
+Recursive_Reference_Type :: struct {
+	name:        string,       // how it was written (diagnostics/printing)
+	ordinal:     i16,
+	self:        bool,         // true = the open scope itself (a mention)
+	target:      ^Type,        // the open scope's ^Type (a Scope_Type variant)
+	scope:       ^Scope_Type,  // the same scope, for resolution and identity
+	match_index: int,          // field index in scope; -1 until resolved
+}
+
 // Integer domain leaf: a normalized set of intervals (e.g. u8 = 0..255) plus the
 // value the scope produces bare. See integer.odin for the interval algebra.
 Integer_Type :: struct {
@@ -207,10 +231,15 @@ Pattern_Type :: struct {
 // Pattern branch, nil match mean match anything
 // There is two pattern mode one prefixed with a = unary value pattern check
 // And one witout the = wich is a typechek
+// `cover_fold` is the branch's FIRING SET, folded once at analysis (constraint
+// fold of a typecheck match, value fold of a `=v` match) and reused by
+// reduce_pattern — reduce never calls the fold layer. nil when the match did
+// not fold statically (the pattern then stays symbolic at reduce).
 Pattern_Branch :: struct {
 	value_match: bool,
 	match:       ^Type,
 	product:     ^Type,
+	cover_fold:  ^Type,
 }
 
 
@@ -288,6 +317,7 @@ Type :: union {
 	Carve_Type,
 	Mention_Type,
 	Reference_Type,
+	Recursive_Reference_Type,
 	Pattern_Type,
 }
 
@@ -691,6 +721,10 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			print_type(v.match_scope.values[v.match_index], depth)
 		}
 
+	case Recursive_Reference_Type:
+		// Never expand through it — that is the whole point of the node.
+		fmt.print(v.name != "" ? v.name : "<recursive>")
+
 	case Reference_Type:
 		ref := v.reference
 		n, n_ok := ref.name.(string)
@@ -845,6 +879,8 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 		strings.write_byte(b, '!')
 	case Mention_Type:
 		strings.write_string(b, v.name != "" ? v.name : "<mention>")
+	case Recursive_Reference_Type:
+		strings.write_string(b, v.name != "" ? v.name : "<recursive>")
 	case Reference_Type:
 		if v.target != nil {
 			write_fold(b, v.target)

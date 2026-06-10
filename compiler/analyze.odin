@@ -69,6 +69,9 @@ Analyzer_Error :: struct {
 // Per-file analysis state. `scope` is the root scope being built; errors and
 // warnings accumulate as `walk()` recurses. Reachable from deep fold helpers via
 // context.user_ptr (see current_analyzer) so they can report without threading it.
+// REDUCE NEVER CALLS THE FOLD LAYER (it has its own substitution/materialization
+// in reduce.odin and reads the folds the analyzer cached), so a fold helper can
+// always trust that context.user_ptr is this struct.
 Analyzer :: struct {
 	ast:              ^Ast,
 	scope:            ^Scope_Type,
@@ -89,8 +92,56 @@ Analyzer :: struct {
 	// destroyed arena and corrupt the next pass — the test runner analyzes cases on
 	// many threads, each in its own arena. Reached via current_analyzer() from the
 	// fold layer. Strictly balanced, so empty between top-level folds.
+	// scope_scan_stack guards the Scope/Carve constraint field scan against a
+	// self-referential constraint (`A -> {x -> A}`): the outermost scan decides.
 	scope_scan_stack: [dynamic]^Type,
-	recursion_roots:  [dynamic]^Type,
+	// carve_fold_stack guards fold_carve against re-entering the SAME carve node
+	// while folding it (a self-referential carve — its own placeholder value, a
+	// recursive tail): the inner re-entry bails to nil instead of cloning
+	// forever. Distinct nodes (each level of an inductive proof repoints a fresh
+	// copy) pass through.
+	carve_fold_stack: [dynamic]^Type,
+	// execute_stack guards folding a recursive collapse (`fib{…}!` whose
+	// production collapses fib again): each Execute fold pushes the UNDERLYING
+	// scope its target resolves through (stable across carve clones — the
+	// recursive reference always names the original); re-entry bails to nil.
+	execute_stack:    [dynamic]^Scope_Type,
+	// Deferred-recursion state. `fold_pending` is set by the fold layer (via
+	// current_analyzer) when a fold touches a scope still being walked or an
+	// unresolved Recursive_Reference: the fold result cannot be trusted yet, so
+	// the dependent obligation is queued on `pending` and re-run when that scope
+	// closes (scope_close).
+	fold_pending:     ^Scope_Type,
+	pending:          [dynamic]Pending,
+}
+
+// One deferred obligation, re-run when `awaiting` finishes walking:
+//   .Ref       — resolve `rr` (a Recursive_Reference) against `target` (the
+//                property's target expression; nil for a `.x` self-mention,
+//                which resolves with self_resolve's first-occurrence rule).
+//   .Carve     — re-resolve the references of `carve` (its source awaited
+//                `awaiting`), then re-run its per-field proofs + recheck_carve.
+//   .Typecheck — re-fold and re-prove binding `bind` of `scope`, patching the
+//                cached constraint_folds/type_folds in place (reduce reads them).
+//   .Default   — a bare-constraint binding (`...Array{T}:`, `c:name`) whose
+//                constraint awaited `awaiting`: re-fold it and materialize its
+//                default into values/folds at `bind`.
+Pending_Kind :: enum u8 {
+	Ref,
+	Typecheck,
+	Carve,
+	Default,
+}
+
+Pending :: struct {
+	kind:     Pending_Kind,
+	awaiting: ^Scope_Type,
+	rr:       ^Type, // .Ref: the Recursive_Reference_Type node to patch
+	target:   ^Type, // .Ref: the property's target expression (nil = self-mention)
+	carve:    ^Type, // .Carve: the Carve_Type node
+	scope:    ^Scope_Type, // .Typecheck: the owning scope
+	bind:     int, // .Typecheck: binding index in `scope`
+	node:     Node_Index, // diagnostics anchor
 }
 
 create_analyzer :: proc(ast: ^Ast) -> Analyzer {
@@ -116,6 +167,7 @@ analyze :: proc(cache: ^Cache) -> bool {
 	root_data := ast.node_data[root]
 	r := root_data.scope
 	children := ast.extra[r.start:][:r.len]
+	a.scope.walking = true
 	for child in children {
 		child_kind := ast.node_kinds[child]
 		#partial switch child_kind {
@@ -137,6 +189,21 @@ analyze :: proc(cache: ^Cache) -> bool {
 			typecheck(a, a.scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
+
+	a.scope.walking = false
+	scope_close(a, a.scope)
+	// Every deferred obligation awaits some enclosing scope, and the root is the
+	// outermost — nothing may survive its close. A leftover means a reference
+	// that never became resolvable; report it rather than silently dropping it.
+	for p in a.pending {
+		sem_error(
+			a,
+			"unresolved recursive reference",
+			.Invalid_Property_Access,
+			node_span(a, p.node),
+		)
+	}
+	clear(&a.pending)
 
 	cache.scope = a.scope
 	cache.analyze_errors = a.errors
@@ -225,12 +292,37 @@ typecheck :: proc(
 	//     must fall into. Must resolve statically.
 	// ft: the TYPE of the value (right side, a typeof) — a concrete singleton
 	//     stays itself, a set becomes its producer scope {-> set}.
+	a.fold_pending = nil
 	fc := fold_constraint(constraint)
 	ft := fold_value_type(value)
 
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, ft)
 
+	// The folds touched a scope still being walked (a recursive/forward
+	// reference): neither can be trusted yet. Queue the proof for that scope's
+	// close — retypecheck re-folds and PATCHES the two cached folds in place.
+	if pend := a.fold_pending; pend != nil {
+		a.fold_pending = nil
+		append(
+			&a.pending,
+			Pending {
+				kind = .Typecheck,
+				awaiting = pend,
+				scope = scope,
+				bind = len(scope.constraint_folds) - 1,
+				node = node,
+			},
+		)
+		return
+	}
+
+	prove_binding(a, fc, ft, name, node)
+}
+
+// prove_binding is the diagnostic tail shared by typecheck and retypecheck:
+// given the two folds, report Insoluble_Constraint / Constraint_Mismatch.
+prove_binding :: proc(a: ^Analyzer, fc, ft: ^Type, name: string, node: Node_Index) {
 	display := name != "" ? fmt.tprintf("'%s'", name) : "the production"
 
 	// A constraint must denote a statically-known SET. fold_constraint lands on
@@ -278,6 +370,133 @@ typecheck :: proc(
 			node_span(a, node),
 		)
 	}
+}
+
+// scope_close runs when `s` finishes walking: every deferred obligation that
+// awaited s is drained IN INSERTION ORDER (inner ones first, so references
+// resolve before the typechecks that read them). An obligation that re-blocks —
+// its fold hits an OUTER scope still being walked — re-queues itself on that
+// scope; the root's close is the final drain.
+scope_close :: proc(a: ^Analyzer, s: ^Scope_Type) {
+	if len(a.pending) == 0 do return
+	i := 0
+	for i < len(a.pending) {
+		if a.pending[i].awaiting != s {
+			i += 1
+			continue
+		}
+		p := a.pending[i]
+		ordered_remove(&a.pending, i)
+		switch p.kind {
+		case .Ref:
+			close_ref(a, p)
+		case .Typecheck:
+			retypecheck(a, p.scope, p.bind, p.node)
+		case .Carve:
+			close_carve(a, p)
+		case .Default:
+			close_default(a, p)
+		}
+	}
+}
+
+// close_default re-folds a deferred bare constraint and materializes its
+// default in place — mirroring what walk_constraint/walk_expand/walk_product do
+// inline for a non-recursive constraint.
+close_default :: proc(a: ^Analyzer, p: Pending) {
+	a.fold_pending = nil
+	fc := fold_constraint(p.scope.types[p.bind])
+	if pend := a.fold_pending; pend != nil {
+		a.fold_pending = nil
+		np := p
+		np.awaiting = pend
+		append(&a.pending, np)
+		return
+	}
+	value := default_value(fc)
+	p.scope.values[p.bind] = value
+	if p.bind < len(p.scope.constraint_folds) do p.scope.constraint_folds[p.bind] = fc
+	if p.bind < len(p.scope.type_folds) do p.scope.type_folds[p.bind] = value
+	if fold_is_unknown(fc) {
+		prove_binding(a, fc, value, p.scope.names[p.bind], p.node)
+	}
+}
+
+// pending_scope_of reports the still-walking scope that blocks resolving
+// through `t` (nil when nothing blocks): an unresolved named recursive
+// reference blocks on its scope; a chain landing on a scope still being walked
+// blocks on that scope; a carve blocks on whatever blocks its source.
+pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
+	cur := t
+	for cur != nil {
+		cur = follow(cur)
+		if cur == nil do return nil
+		#partial switch &v in cur^ {
+		case Recursive_Reference_Type:
+			// follow chases a resolved one; landing here means unresolved.
+			if !v.self && v.match_index < 0 do return v.scope
+			return nil
+		case Scope_Type:
+			if v.walking do return &v
+			return nil
+		case Carve_Type:
+			cur = v.source
+			continue
+		}
+		return nil
+	}
+	return nil
+}
+
+// close_ref resolves a deferred recursive reference now that the scope it
+// awaited is complete: re-resolve through the property's target expression
+// (resolve_property_site — the one place property lookup is defined). A target
+// that is ITSELF still blocked (a chain into an outer open scope) re-queues on
+// that scope; a miss against the now-complete scope is the real error.
+close_ref :: proc(a: ^Analyzer, p: Pending) {
+	rr, rr_ok := &p.rr^.(Recursive_Reference_Type)
+	if !rr_ok do return
+	if open := pending_scope_of(p.target); open != nil {
+		np := p
+		np.awaiting = open
+		append(&a.pending, np)
+		return
+	}
+	rs, ri := resolve_property_site(p.target, rr.name, rr.ordinal)
+	if rs == nil {
+		sem_error(
+			a,
+			fmt.tprintf("property '%s' does not exist", rr.name),
+			.Invalid_Property_Access,
+			node_span(a, p.node),
+		)
+		return
+	}
+	rr.scope = rs
+	rr.match_index = ri
+}
+
+// retypecheck re-runs a deferred binding proof: re-fold both sides (the
+// recursive references are resolved now), PATCH the cached folds in place
+// (reduce reads these columns), and report exactly what typecheck would have.
+retypecheck :: proc(a: ^Analyzer, scope: ^Scope_Type, bind: int, node: Node_Index) {
+	constraint := scope.types[bind]
+	value := scope.values[bind]
+	a.fold_pending = nil
+	fc := fold_constraint(constraint)
+	ft := fold_value_type(value)
+	if pend := a.fold_pending; pend != nil {
+		// Still blocked, on an outer scope still being walked: re-queue there.
+		a.fold_pending = nil
+		append(
+			&a.pending,
+			Pending{kind = .Typecheck, awaiting = pend, scope = scope, bind = bind, node = node},
+		)
+		return
+	}
+	if bind < len(scope.constraint_folds) do scope.constraint_folds[bind] = fc
+	if bind < len(scope.type_folds) do scope.type_folds[bind] = ft
+	prove_binding(a, fc, ft, scope.names[bind], node)
 }
 
 // scope_resolve maps a name (and optional ordinal) to its defining (scope, index),
@@ -424,6 +643,19 @@ follow :: proc(t: ^Type) -> ^Type {
 			if r == nil || r.match_scope == nil || r.match_index < 0 do return cur
 			key = Follow_Key{r.match_scope, r.match_index}
 			next = r.match_scope.values[r.match_index]
+		case Recursive_Reference_Type:
+			// A self one designates the scope itself (the pointer is valid even
+			// while the scope is incomplete — CONSUMERS check `walking`); a named
+			// one is followable only once the deferred pass filled match_index.
+			if v.self {
+				if v.target == nil do return cur
+				key = Follow_Key{v.scope, -1}
+				next = v.target
+			} else {
+				if v.scope == nil || v.match_index < 0 do return cur
+				key = Follow_Key{v.scope, v.match_index}
+				next = v.scope.values[v.match_index]
+			}
 		case:
 			return cur
 		}
@@ -539,6 +771,7 @@ walk_scope_node :: #force_inline proc(
 	data := ast.node_data[idx]
 	scope := new(Scope_Type)
 	scope.parent = current_scope
+	scope.walking = true
 	r := data.scope
 	children := ast.extra[r.start:][:r.len]
 	for child in children {
@@ -562,6 +795,9 @@ walk_scope_node :: #force_inline proc(
 			typecheck(a, scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
+	// Close BEFORE the value copy so the copy never carries walking=true.
+	scope.walking = false
+	scope_close(a, scope)
 	result := new(Type)
 	result^ = scope^
 	return result
@@ -641,7 +877,8 @@ walk_binding :: #force_inline proc(
 	if right_kind == .ScopeNode {
 		result := new(Type)
 		result^ = Scope_Type {
-			parent = current_scope,
+			parent  = current_scope,
+			walking = true,
 		}
 		scope := &result.(Scope_Type)
 		scope_append(a, current_scope, name, constraint, bk, result, capture)
@@ -670,6 +907,11 @@ walk_binding :: #force_inline proc(
 				typecheck(a, scope, "", nil, .Pointing_Push, val, child)
 			}
 		}
+		// The body is fully walked: close the scope (resolving everything that
+		// awaited it) BEFORE the binding's own proof, so that proof sees the
+		// resolved recursive references.
+		scope.walking = false
+		scope_close(a, scope)
 		typecheck(a, current_scope, name, constraint, bk, result, idx)
 		return result
 	}
@@ -702,11 +944,7 @@ walk_product :: #force_inline proc(
 			scope_append(a, current_scope, "", constraint, .Product, value)
 			typecheck(a, current_scope, "", constraint, .Product, value, idx)
 		} else {
-			fc := fold_constraint(constraint)
-			value = default_value(fc)
-			scope_append(a, current_scope, "", constraint, .Product, value)
-			append(&current_scope.constraint_folds, fc)
-			append(&current_scope.type_folds, value)
+			value = append_bare_constraint(a, current_scope, "", constraint, .Product, idx)
 		}
 		return value
 	}
@@ -737,11 +975,7 @@ walk_expand :: #force_inline proc(
 			scope_append(a, current_scope, "", constraint, .Expand, value)
 			typecheck(a, current_scope, "", constraint, .Expand, value, idx)
 		} else {
-			fc := fold_constraint(constraint)
-			value := default_value(fc)
-			scope_append(a, current_scope, "", constraint, .Expand, value)
-			append(&current_scope.constraint_folds, fc)
-			append(&current_scope.type_folds, value)
+			append_bare_constraint(a, current_scope, "", constraint, .Expand, idx)
 		}
 		return value
 	}
@@ -796,12 +1030,53 @@ walk_constraint :: #force_inline proc(
 			return make_invalid()
 		}
 	}
+	return append_bare_constraint(a, current_scope, name, constraint, .Pointing_Push, idx)
+}
+
+// append_bare_constraint registers a valueless colored binding (`c:name`,
+// `...c:`, `-> c:`): the value is the constraint's materialized default and the
+// folds are cached inline (there is nothing to prove — the default is by
+// construction inside its own constraint). When the constraint touches a scope
+// still being walked (a recursive constraint like `...Array{T}:` inside Array),
+// the fold + materialization are deferred to that scope's close (.Default) and
+// an Unknown placeholder holds the slot meanwhile.
+append_bare_constraint :: proc(
+	a: ^Analyzer,
+	scope: ^Scope_Type,
+	name: string,
+	constraint: ^Type,
+	bk: Binding_Kind,
+	node: Node_Index,
+) -> ^Type {
+	a.fold_pending = nil
 	fc := fold_constraint(constraint)
 	value := default_value(fc)
-	scope_append(a, current_scope, name, constraint, .Pointing_Push, value)
-	append(&current_scope.constraint_folds, fc)
-	append(&current_scope.type_folds, value)
-
+	if pend := a.fold_pending; pend != nil {
+		a.fold_pending = nil
+		// The CONSTRAINT NODE itself holds the slot until close_default patches
+		// in the materialized default — NOT an Unknown_Type, which means `??`
+		// and would wrongly diagnose every fold over this scope as insoluble.
+		// A fold reaching the placeholder folds the constraint (guarded against
+		// re-entry by scope_scan_stack), which is exactly what the slot denotes.
+		value = constraint
+		scope_append(a, scope, name, constraint, bk, value)
+		append(&scope.constraint_folds, nil)
+		append(&scope.type_folds, nil)
+		append(
+			&a.pending,
+			Pending {
+				kind = .Default,
+				awaiting = pend,
+				scope = scope,
+				bind = len(scope.values) - 1,
+				node = node,
+			},
+		)
+		return value
+	}
+	scope_append(a, scope, name, constraint, bk, value)
+	append(&scope.constraint_folds, fc)
+	append(&scope.type_folds, value)
 	return value
 }
 
@@ -905,6 +1180,24 @@ walk_property :: #force_inline proc(
 	prop_scope, prop_index := resolve_property_site(target, prop_name, prop_ordinal)
 
 	if prop_scope == nil {
+		// The target chain lands in a scope STILL BEING WALKED (`module.odd`
+		// before odd is bound): the miss is not an error yet — defer it as a
+		// recursive reference, re-resolved when that scope closes. Only a miss on
+		// a COMPLETE scope is a real Invalid_Property_Access.
+		if open := pending_scope_of(target); open != nil {
+			result := new(Type)
+			result^ = Recursive_Reference_Type {
+				name        = prop_name,
+				ordinal     = prop_ordinal,
+				scope       = open,
+				match_index = -1,
+			}
+			append(
+				&a.pending,
+				Pending{kind = .Ref, awaiting = open, rr = result, target = target, node = right_idx},
+			)
+			return result
+		}
 		sem_error(
 			a,
 			fmt.tprintf("property '%s' does not exist", prop_name),
@@ -1050,16 +1343,48 @@ walk_carve :: proc(
 	ast := a.ast
 	data := ast.node_data[idx]
 	source := source_override != nil ? source_override : walk(a, current_scope, data.carve.source)
-	r := data.carve.children
-	carve_children := ast.extra[r.start:][:r.len]
 
-	src_scope: ^Scope_Type = nil
-	resolved_source := follow(source)
-	src_target := resolved_source
+	result := new(Type)
+	result^ = Carve_Type {
+		source     = source,
+		references = make([dynamic]Reference),
+		values     = make([dynamic]^Type),
+	}
+
+	// A source that chains into a scope STILL BEING WALKED (`module.odd{…}`
+	// while module is open, or a self-carve `Array{T}` inside Array) has no
+	// resolvable fields yet: defer the WHOLE carve — reference resolution,
+	// override walks, per-field proofs, recheck — to that scope's close
+	// (close_carve). The override expressions are pure (they never register
+	// bindings into the enclosing scope), so walking them at close, with
+	// current_scope captured here, is equivalent.
+	if pending_src := pending_scope_of(source); pending_src != nil {
+		append(
+			&a.pending,
+			Pending {
+				kind = .Carve,
+				awaiting = pending_src,
+				carve = result,
+				scope = current_scope,
+				node = idx,
+			},
+		)
+		return result
+	}
+
+	carve_resolve_children(a, current_scope, idx, carve_source_scope(source), result)
+	carve_check(a, result, idx)
+	return result
+}
+
+// carve_source_scope follows a carve source down to the underlying Scope_Type
+// its override names resolve against, peeling nested carves.
+carve_source_scope :: proc(source: ^Type) -> ^Scope_Type {
+	src_target := follow(source)
 	for src_target != nil {
 		#partial switch &s in src_target^ {
 		case Scope_Type:
-			src_scope = &s
+			return &s
 		case Carve_Type:
 			if s.source != nil {
 				src_target = follow(s.source)
@@ -1068,9 +1393,29 @@ walk_carve :: proc(
 		}
 		break
 	}
+	return nil
+}
 
-	refs := make([dynamic]Reference)
-	vals := make([dynamic]^Type)
+// carve_resolve_children walks a carve's override children, resolving each
+// against src_scope and appending (reference, value) pairs onto the carve IN
+// PLACE. Shared by walk_carve (immediate) and close_carve (deferred), so both
+// resolve identically.
+carve_resolve_children :: proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+	src_scope: ^Scope_Type,
+	carve: ^Type,
+) {
+	ast := a.ast
+	data := ast.node_data[idx]
+	r := data.carve.children
+	carve_children := ast.extra[r.start:][:r.len]
+
+	cv, cv_ok := &carve^.(Carve_Type)
+	if !cv_ok do return
+	refs := &cv.references
+	vals := &cv.values
 
 	// While walking override values, a source-none property (`.x`) is a
 	// self-mention into the carved scope. Point carved_scope at it and restore
@@ -1130,7 +1475,7 @@ walk_carve :: proc(
 				}
 			}
 			append(
-				&refs,
+				refs,
 				Reference {
 					cname,
 					cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
@@ -1138,7 +1483,7 @@ walk_carve :: proc(
 					carve_index,
 				},
 			)
-			append(&vals, val)
+			append(vals, val)
 		} else if shorthand_field, shorthand_idx, ok := carve_shorthand_field(a, src_scope, child);
 		   ok {
 			// Shorthand `a{z{a->2}}` == `a{z->.z{a->2}}`: a carve child `z{…}` whose
@@ -1188,7 +1533,7 @@ walk_carve :: proc(
 				}
 			}
 			append(
-				&refs,
+				refs,
 				Reference {
 					cname,
 					cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
@@ -1196,7 +1541,7 @@ walk_carve :: proc(
 					carve_index,
 				},
 			)
-			append(&vals, val)
+			append(vals, val)
 		} else {
 			carve_scope: ^Scope_Type = nil
 			carve_index := -1
@@ -1242,20 +1587,21 @@ walk_carve :: proc(
 					}
 				}
 			}
-			append(&refs, Reference{nil, nil, carve_scope, carve_index})
-			append(&vals, val)
+			append(refs, Reference{nil, nil, carve_scope, carve_index})
+			append(vals, val)
 			positional_idx += 1
 		}
 	}
+}
 
-	result := new(Type)
-	result^ = Carve_Type{source, refs, vals}
-
+// carve_check runs the whole-carve proofs, shared by the immediate path
+// (walk_carve) and the deferred one (close_carve).
+carve_check :: proc(a: ^Analyzer, carve: ^Type, idx: Node_Index) {
 	// Pull unification conflict: a pull mentioned in two fields' constraints
 	// (`data{e}:somedata` + `data{e}:someother`) carved with values that disagree
 	// (`a{data{6} data{3}}` → e = 6 then 3) is an error — all bindings of a pull
 	// must agree on one value.
-	if conflict, has := carve_pull_conflict(result); has {
+	if conflict, has := carve_pull_conflict(carve); has {
 		display := conflict.pull_name != "" ? fmt.tprintf("'%s'", conflict.pull_name) : "a pull"
 		sem_error(
 			a,
@@ -1275,9 +1621,31 @@ walk_carve :: proc(
 	// fits u8 once x is carved out of range. fold_carve materializes the
 	// substituted scope; we re-prove every colored binding against its now-
 	// substituted value and report the mismatch at the carve site.
-	recheck_carve(a, result, idx)
+	recheck_carve(a, carve, idx)
+}
 
-	return result
+// close_carve finishes a carve whose source awaited a scope's close: the source
+// is resolvable now, so resolve the references, walk the overrides, and run the
+// proofs — everything walk_carve would have done inline. A source that is
+// STILL blocked (chained into an outer open scope) re-queues.
+close_carve :: proc(a: ^Analyzer, p: Pending) {
+	cv, cv_ok := &p.carve^.(Carve_Type)
+	if !cv_ok do return
+	if open := pending_scope_of(cv.source); open != nil {
+		np := p
+		np.awaiting = open
+		append(&a.pending, np)
+		return
+	}
+	src_scope := carve_source_scope(cv.source)
+	if src_scope == nil {
+		// The source did not resolve to a scope after all (e.g. the deferred
+		// property turned out missing — already reported there). Nothing to
+		// resolve the overrides against.
+		return
+	}
+	carve_resolve_children(a, p.scope, p.node, src_scope, p.carve)
+	carve_check(a, p.carve, p.node)
 }
 
 // recheck_carve folds a carve to its substituted scope and re-proves each
@@ -1534,6 +1902,25 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 
 	res_scope, res_index := scope_resolve(scope, name, ordinal, true, allow_capture = true)
 	if res_scope != nil {
+		// A mention of a binding whose value is a scope STILL BEING WALKED is a
+		// self/forward reference (`Array` inside Array's body, `fib` inside fib):
+		// record it as an explicit Recursive_Reference instead of a Mention, so
+		// folds defer through it, the satisfy layer detects the inductive step
+		// structurally, and it survives carve cloning (repoint never rewrites it).
+		if val := res_scope.values[res_index]; val != nil {
+			if vs, is_scope := &val^.(Scope_Type); is_scope && vs.walking {
+				result := new(Type)
+				result^ = Recursive_Reference_Type {
+					name        = name,
+					ordinal     = ordinal,
+					self        = true,
+					target      = val,
+					scope       = vs,
+					match_index = -1,
+				}
+				return result
+			}
+		}
 		if ordinal >= 0 {
 			ref := new(Reference)
 			ref^ = Reference {
