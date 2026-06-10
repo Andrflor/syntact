@@ -476,7 +476,10 @@ process_cache_task :: proc(task: thread.Task) {
 			   resolver.options.print_regalloc ||
 			   resolver.options.emit_exe {
 				codegen_start: time.Time
-				context.user_ptr = prev_user_ptr
+				// Keep user_ptr pointing at the reducer `r`: lower_to_bytecode calls
+				// fixedpoint_id to recover each ??N slot, which reads r.fixedpoint_index
+				// (populated by reduce above). Restoring prev_user_ptr here would
+				// dereference a stale/nil reducer and segfault. Restored after lowering.
 				if resolver.options.timing {
 					codegen_start = time.now()
 				}
@@ -521,6 +524,7 @@ process_cache_task :: proc(task: thread.Task) {
 						)
 					}
 				}
+				context.user_ptr = prev_user_ptr
 			} else {
 				fmt.println(value_to_string(result))
 				context.user_ptr = prev_user_ptr
