@@ -83,11 +83,13 @@ pattern_target_is_concrete :: proc(ft: ^Type) -> bool {
 
 // fold_constraint_pattern resolves a pattern used as a CONSTRAINT to a single
 // branch: the product of the FIRST branch whose match the target satisfies. When
-// the target itself can't be folded statically (e.g. an unknown), no branch can
-// be selected and the fold fails (nil).
+// the target itself can't be folded statically the fold fails (nil) — except a
+// target that depends on an unknown, which propagates Unknown so the constraint
+// is diagnosed Insoluble_Constraint rather than silently skipped.
 fold_constraint_pattern :: proc(t: ^Type) -> ^Type {
 	p, ok := t^.(Pattern_Type)
 	if !ok do return nil
+	if tf := fold_constraint(p.target); fold_is_unknown(tf) do return tf
 	ft := pattern_target_fold(p)
 	if ft == nil do return nil
 	for branch in p.branches {

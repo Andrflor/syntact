@@ -83,6 +83,14 @@ Analyzer :: struct {
 	// reached via the context) anchors its error at the carve site. Set around
 	// recheck_carve only.
 	recheck_span: Span,
+	// Transient push/pop stacks guarding self-referential folds. They live ON the
+	// analyzer (not in a global) so their backing is allocated in this pass's
+	// allocator and dies with it: a global [dynamic] would keep a stale cap into a
+	// destroyed arena and corrupt the next pass — the test runner analyzes cases on
+	// many threads, each in its own arena. Reached via current_analyzer() from the
+	// fold layer. Strictly balanced, so empty between top-level folds.
+	scope_scan_stack: [dynamic]^Type,
+	recursion_roots:  [dynamic]^Type,
 }
 
 // --- analyzer core ---
@@ -227,16 +235,12 @@ typecheck :: proc(
 
 	display := name != "" ? fmt.tprintf("'%s'", name) : "the production"
 
-	// A constraint must denote a statically-known SET. If it depends on an unknown
-	// value (`??`) anywhere — directly, through a reference, or inside any
-	// composition — it cannot be solved at compile time. `u8` is fine (the set
-	// 0..255); `??::u8` is one indeterminate u8 element, so `??::u8:a -> 10` is
-	// insoluble. This is checked on the raw constraint tree (following references)
-	// so a `??` buried under &/|/~/+/range/carve/execute/pattern is caught too.
-	// Checked BEFORE the `fc == nil` bail: an insoluble constraint (e.g. a pattern
-	// whose target is a bare `??`) folds to nil, but the right diagnosis is
-	// Insoluble_Constraint, not a silent skip.
-	if constraint != nil && constraint_depends_on_unknown(constraint) {
+	// A constraint must denote a statically-known SET. fold_constraint lands on
+	// Unknown when the constraint depends on a `??` anywhere — directly, through
+	// a reference, or inside any composition — because such a constraint cannot
+	// be solved at compile time. `u8` is fine (the set 0..255); `??::u8` is one
+	// indeterminate u8 element, so `??::u8:a -> 10` is insoluble.
+	if fold_is_unknown(fc) {
 		sem_error(
 			a,
 			fmt.tprintf(
@@ -276,79 +280,6 @@ typecheck :: proc(
 			node_span(a, node),
 		)
 	}
-}
-
-// constraint_depends_on_unknown reports whether the constraint tree `t` relies on
-// an unknown value (`??`) that is not pinned to a single concrete value, making
-// the constraint insoluble at compile time. It descends through every composition
-// (&/|/~, arithmetic/range, carve, execute) and follows references/mentions to
-// their bound value. A bare `??` is insoluble; a `??::T` (cast of an unknown) is
-// insoluble UNLESS the cast folds to a concrete singleton; everything built on top
-// of an insoluble part is itself insoluble.
-constraint_depends_on_unknown :: proc(t: ^Type, depth := 0) -> bool {
-	if t == nil do return false
-	if depth > 64 do return false // cycle guard
-	switch v in t^ {
-	case Unknown_Type:
-		return true
-	case Cast_Type:
-		// `??::u8` stays one indeterminate element unless it pinned to a concrete
-		// singleton (then type_fold is that value and the constraint is solvable).
-		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) do return false
-		return constraint_depends_on_unknown(v.value, depth + 1)
-	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
-			return constraint_depends_on_unknown(v.match_scope.values[v.match_index], depth + 1)
-		}
-		return false
-	case Reference_Type:
-		ref := v.reference
-		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			return constraint_depends_on_unknown(ref.match_scope.values[ref.match_index], depth + 1)
-		}
-		return false
-	case And_Type:
-		return constraint_depends_on_unknown(v.left, depth + 1) ||
-			constraint_depends_on_unknown(v.right, depth + 1)
-	case Or_Type:
-		return constraint_depends_on_unknown(v.left, depth + 1) ||
-			constraint_depends_on_unknown(v.right, depth + 1)
-	case Negate_Type:
-		return constraint_depends_on_unknown(v.operand, depth + 1)
-	case Compose_Type:
-		return constraint_depends_on_unknown(v.left, depth + 1) ||
-			constraint_depends_on_unknown(v.right, depth + 1)
-	case Range_Type:
-		return constraint_depends_on_unknown(v.left, depth + 1) ||
-			constraint_depends_on_unknown(v.right, depth + 1)
-	case Execute_Type:
-		return constraint_depends_on_unknown(v.target, depth + 1)
-	case Carve_Type:
-		if constraint_depends_on_unknown(v.source, depth + 1) do return true
-		for ov in v.values {
-			if constraint_depends_on_unknown(ov, depth + 1) do return true
-		}
-		return false
-	case Scope_Type:
-		// A scope-shaped constraint is solvable only if every field's value is.
-		for val in v.values {
-			if constraint_depends_on_unknown(val, depth + 1) do return true
-		}
-		return false
-	case Pattern_Type:
-		// A pattern-shaped constraint is insoluble if its target or any branch
-		// match/product depends on an unknown — the selected branch would not be
-		// statically determinable.
-		if constraint_depends_on_unknown(v.target, depth + 1) do return true
-		for branch in v.branches {
-			if constraint_depends_on_unknown(branch.match, depth + 1) do return true
-			if constraint_depends_on_unknown(branch.product, depth + 1) do return true
-		}
-		return false
-	case Integer_Type, Float_Type, String_Type, Bool_Type, None_Type, Invalid_Type:
-		return false
-	}
-	return false
 }
 
 // scope_resolve maps a name (and optional ordinal) to its defining (scope, index),

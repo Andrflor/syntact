@@ -98,25 +98,58 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 // into (the LEFT side). A producer scope {-> X} is NOT flattened: its value is
 // the producer of fold_constraint(X), mirroring fold_value_type on the right so
 // {->u8} (constraint) matches u8 (value). A plain (non-producer) scope keeps
-// its shape. Returns nil when it cannot be resolved statically.
-// fold_constraint / fold_value_type descend a constraint/value to its folded form.
+// its shape.
+//
+// This is a STRUCTURAL fold: each composite case folds its children through
+// fold_constraint first, then combines the folded results — the tree is walked
+// exactly once, here. The per-domain folders (fold_constraint_integer/float/
+// string/bool) are combination KERNELS: they run on a synthetic node whose
+// children are already folded (so their own recursion only touches leaves),
+// which keeps the interval arithmetic identical by construction.
+//
+// The result is one of:
+//   * a folded domain set (Integer/Float/String/Bool) — fully resolved;
+//   * a shape-preserved node (Scope, symbolic &/|/~, string sequence/tri-range)
+//     that satisfy() decomposes;
+//   * Unknown_Type — the constraint depends on a `??` somewhere (directly,
+//     through a reference, or inside any composition) and can never denote a
+//     statically-known set; every case PROPAGATES a child's Unknown upward and
+//     typecheck() diagnoses it as Insoluble_Constraint;
+//   * nil — not statically resolvable for any other reason (silent skip).
+//
 // A self-referential scope (a constraint that mentions itself, e.g. the inductive
 // `Array -> {…; -> {T: ...Array:}}`) is NOT a problem for these folds directly:
 // the recursive TYPECHECK is handled by satisfy_recursive, which deliberately does
 // NOT fold the recursive tail carve (the shrinking value is its termination guard,
-// see its comment). The only way fold itself would recurse forever is folding a
-// recursive carve — which no caller does. So no depth net is needed here; a cycle
-// in the language is detected exactly where it lives (follow's binding chain, the
-// collapse stack in terminate.odin), never by a magic counter.
+// see its comment). The Scope/Carve field scan does re-enter such cycles, so it
+// alone carries an identity guard (scope_fields_fold_unknown); everywhere else a
+// cycle in the language is detected exactly where it lives (follow's binding
+// chain, the collapse stack in terminate.odin), never by a magic counter.
 fold_constraint :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		#partial switch v in t^ {
+		case Unknown_Type:
+			// A `??` can never denote a statically-known set: the Unknown IS the
+			// fold result, propagated by every composite case below.
+			return t
 		case Scope_Type:
+			// A scope constraint is a statically-known set only if every field's
+			// value is — an unknown buried in a field (`{x -> ??::u8}`) makes the
+			// whole scope insoluble. The shape itself is preserved (satisfy_root
+			// matches productions / scope_satisfy matches fields).
+			if scope_fields_fold_unknown(t, v.values[:]) do return new_type(Unknown_Type{})
 			return t
 		case Carve_Type:
-			// A carve used as a constraint folds to its substituted scope.
+			// A carve used as a constraint folds to its substituted scope — which
+			// must itself be a statically-known set: an unknown source or override
+			// is insoluble, same as the Scope case (the carve node is the guard
+			// key, so a self-referential carve is not rescanned forever).
 			sub := fold_carve(t)
-			if sub == nil do return nil
+			if sub == nil {
+				if sf := fold_constraint(v.source); fold_is_unknown(sf) do return sf
+				return nil
+			}
+			if scope_fields_fold_unknown(t, sub.values[:]) do return new_type(Unknown_Type{})
 			r := new(Type)
 			r^ = sub^
 			return r
@@ -136,26 +169,34 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			prod, resolved := execute_production(v.target)
 			if prod == nil {
 				if resolved do return new_type(None_Type{})
+				// An unresolvable target may itself be an unknown (`??!`).
+				if tf := fold_constraint(v.target); fold_is_unknown(tf) do return tf
 				return nil
 			}
 			return fold_constraint(prod)
 		case And_Type:
+			left := fold_constraint(v.left)
+			right := fold_constraint(v.right)
+			if fold_is_unknown(left) do return left
+			if fold_is_unknown(right) do return right
 			// Pure numeric reduction (intersection) if possible — ..9 & 11.. etc.
 			// Symbolic otherwise: mixed families (String & Int), positional
 			// negation (pattern & ~(ends with '_')), scopes.
-			if r := fold_constraint_integer(t); r != nil do return r
-			if r := fold_constraint_float(t); r != nil do return r
-			if r := fold_constraint_bool(t); r != nil do return r
-			r := new(Type)
-			r^ = And_Type{fold_constraint(v.left), fold_constraint(v.right)}
-			return r
+			syn := new_type(And_Type{left, right})
+			if r := fold_constraint_integer(syn); r != nil do return r
+			if r := fold_constraint_float(syn); r != nil do return r
+			if r := fold_constraint_bool(syn); r != nil do return r
+			return syn
 		case Or_Type:
-			if r := fold_constraint_integer(t); r != nil do return r
-			if r := fold_constraint_float(t); r != nil do return r
-			if r := fold_constraint_bool(t); r != nil do return r
-			r := new(Type)
-			r^ = Or_Type{fold_constraint(v.left), fold_constraint(v.right)}
-			return r
+			left := fold_constraint(v.left)
+			right := fold_constraint(v.right)
+			if fold_is_unknown(left) do return left
+			if fold_is_unknown(right) do return right
+			syn := new_type(Or_Type{left, right})
+			if r := fold_constraint_integer(syn); r != nil do return r
+			if r := fold_constraint_float(syn); r != nil do return r
+			if r := fold_constraint_bool(syn); r != nil do return r
+			return syn
 		case Negate_Type:
 			// De Morgan normalization in the same pass: we push ~ toward the
 			// leaves and collapse the ~~. The result stays folded by this same
@@ -163,7 +204,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			//   ~~X      → X
 			//   ~(A & B) → ~A | ~B
 			//   ~(A | B) → ~A & ~B
-			// A ~range / ~literal leaf falls into the domain probes below
+			// A ~range / ~literal leaf folds through the domain kernels
 			// (interval complement for ordinal/numeric) or stays symbolic
 			// (positional string negation), handled by satisfy.
 			inner := follow(v.operand)
@@ -184,13 +225,14 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 				}
 			}
 			// Negative leaf: numeric complement if possible, otherwise symbolic.
-			if r := fold_constraint_integer(t); r != nil do return r
-			if r := fold_constraint_float(t); r != nil do return r
-			if r := fold_constraint_bool(t); r != nil do return r
+			operand := fold_constraint(v.operand)
+			if fold_is_unknown(operand) do return operand
+			syn := new_type(Negate_Type{operand})
+			if r := fold_constraint_integer(syn); r != nil do return r
+			if r := fold_constraint_float(syn); r != nil do return r
+			if r := fold_constraint_bool(syn); r != nil do return r
 			if neg := negate_ordinal_string(v.operand); neg != nil do return neg
-			r := new(Type)
-			r^ = Negate_Type{fold_constraint(v.operand)}
-			return r
+			return syn
 		case Integer_Type:
 			return fold_constraint_integer(t)
 		case Float_Type:
@@ -202,6 +244,12 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 		case Cast_Type:
 			// The envelope a `::` produces is exactly its target — the cast forces
 			// the value into the target's layout, so the result always lands there.
+			// As a CONSTRAINT though, a cast of an unpinned unknown (`??::u8`) is
+			// ONE indeterminate element of the target, not the whole set —
+			// insoluble, unless the cast pinned to a concrete singleton.
+			if v.type_fold == nil || !fold_is_concrete_value(v.type_fold) {
+				if vf := fold_constraint(v.value); fold_is_unknown(vf) do return vf
+			}
 			if v.type_fold != nil do return fold_constraint(v.type_fold)
 			return fold_constraint(v.target)
 		case Pattern_Type:
@@ -209,25 +257,54 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// match the target satisfies (see fold_constraint_pattern).
 			return fold_constraint_pattern(t)
 		case Compose_Type:
+			// An expression over an unknown operand (`a+10` where a -> ??) is one
+			// indeterminate value, not a set — insoluble, even though its numeric
+			// ENVELOPE folds fine (10..265 is the envelope, not the constraint).
+			left := fold_constraint(v.left)
+			right := fold_constraint(v.right)
+			if fold_is_unknown(left) do return left
+			if fold_is_unknown(right) do return right
 			// A string concatenation `+` that is an ordered SEQUENCE (did not collapse
 			// to a concrete literal) keeps its Compose shape as the constraint — satisfy
 			// matches the value in order (string_compose_satisfy). Only when it is NOT a
-			// string sequence do we fall through to the numeric/string union folds.
+			// string sequence does it fold through the numeric/string kernels.
 			if v.operator == .Add {
 				if _, ok := fold_string_sequence(t, true).([]String_Interval); ok {
 					if fold_constraint_string(t) == nil do return t
 				}
 			}
+			// The family of an expression is decided by its operands, not its tag:
+			// run the kernels over the folded children (the synthetic node carries
+			// no type_fold, so the arithmetic runs on the children — never on the
+			// cached value ENVELOPE, which would hide what the constraint depends on).
+			syn := new_type(Compose_Type{operator = v.operator, left = left, right = right})
+			if r := fold_constraint_integer(syn); r != nil do return r
+			if r := fold_constraint_float(syn); r != nil do return r
+			if r := fold_constraint_string(syn); r != nil do return r
+			if r := fold_constraint_bool(syn); r != nil do return r
+			return nil
 		case Range_Type:
 			// A THREE-bound string range `"ab".."cd".."ef"` (a Range whose right is
 			// itself a Range) means: starts with "ab", CONTAINS "cd", ends with "ef".
 			// The flat string fold loses the middle, so keep the Range_Type itself as
 			// the constraint and let satisfy enforce all three (string_tri_range_satisfy).
 			if string_is_tri_range(t) do return t
+			left := fold_constraint(v.left)
+			right := fold_constraint(v.right)
+			if fold_is_unknown(left) do return left
+			if fold_is_unknown(right) do return right
+			// A missing bound (`5..`, `..10`) stays nil on the synthetic node — the
+			// kernels read it as open to infinity on that side.
+			syn := new_type(Range_Type{left, right})
+			if r := fold_constraint_integer(syn); r != nil do return r
+			if r := fold_constraint_float(syn); r != nil do return r
+			if r := fold_constraint_string(syn); r != nil do return r
+			if r := fold_constraint_bool(syn); r != nil do return r
+			return nil
 		}
 	}
-	// Range_Type / Compose_Type are domain-ambiguous: their family is decided by
-	// their operands, not their tag. Try integer, then float, then string, bool.
+	// Leftover kinds (unresolved mentions/references, none, invalid): probe each
+	// domain in turn as a last resort.
 	if r := fold_constraint_integer(t); r != nil do return r
 	if r := fold_constraint_float(t); r != nil do return r
 	if r := fold_constraint_string(t); r != nil do return r
@@ -259,6 +336,37 @@ fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 		}
 	}
 	return fold_constraint(value)
+}
+
+// fold_is_unknown reports whether a folded constraint landed on Unknown — the
+// marker that the constraint depends on a `??` and is insoluble. nil-safe.
+fold_is_unknown :: proc(t: ^Type) -> bool {
+	if t == nil do return false
+	_, unk := t^.(Unknown_Type)
+	return unk
+}
+
+// scope_fields_fold_unknown reports whether any field value of a scope-shaped
+// constraint folds to Unknown — i.e. the scope does not denote a statically-
+// known set (`Shape -> {x -> ??::u8}` used as a constraint is insoluble).
+// `key` identifies the scope/carve node on the in-progress stack.
+//
+// The scan stack (guarding self-referential constraints `A -> {x -> A}` against
+// re-entry — the outermost scan decides) lives on the analyzer, not a global, so
+// its backing dies with this pass's arena. Reached via current_analyzer().
+scope_fields_fold_unknown :: proc(key: ^Type, values: []^Type) -> bool {
+	a := current_analyzer()
+	if a == nil do return false
+	for active in a.scope_scan_stack {
+		if active == key do return false
+	}
+	append(&a.scope_scan_stack, key)
+	defer pop(&a.scope_scan_stack)
+	for val in values {
+		if val == nil do continue
+		if fold_is_unknown(fold_constraint(val)) do return true
+	}
+	return false
 }
 
 // fold_value_type yields the TYPE of a value (the RIGHT side, a typeof).
@@ -477,41 +585,6 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	return false
 }
 
-// production_is_recursive reports whether a producer scope is the inductive step
-// of a recursive constraint — a head binding followed by an expand of a carve
-// (`{T: ...Array{T}}` folds to a scope whose last binding is `.Expand` over a
-// Carve_Type). Returns the head bindings' end index (the count of leading non-
-// expand bindings, each consuming one value element) and the expand's carve (the
-// constraint the REST of the value must satisfy). recursive=false when the shape
-// is anything else (a plain producer like `{}` or `{-> u8}`).
-production_is_recursive :: proc(
-	prod: ^Type,
-) -> (
-	head_count: int,
-	rest_carve: ^Type,
-	recursive: bool,
-) {
-	ps, ok := prod^.(Scope_Type)
-	if !ok do return 0, nil, false
-	// The last binding must be an expand over a carve (the `...Self{…}` tail); the
-	// bindings before it are the heads that each consume one leading value element.
-	n := len(ps.kind)
-	if n == 0 do return 0, nil, false
-	last := n - 1
-	if ps.kind[last] != .Expand do return 0, nil, false
-	// The tail carve (`...Array{T}:`) is the expand's COLORING — its constraint, not
-	// its value. A colored expand stores `Array{T}` in types[last] (the value side is
-	// just the default `{}`). Fall back to the value for an uncolored `...Array{T}`.
-	tail := ps.types[last] != nil ? follow(ps.types[last]) : follow(ps.values[last])
-	if _, is_carve := tail.(Carve_Type); !is_carve do return 0, nil, false
-	// Every binding before the expand is a head (a structural element to match in
-	// order). They must be non-expand, non-product (a colored slot like `T:`).
-	for i in 0 ..< last {
-		if ps.kind[i] == .Expand || ps.kind[i] == .Product do return 0, nil, false
-	}
-	return last, tail, true
-}
-
 // value_elements returns a scope value's positional elements (its pushed
 // bindings), in order — the list a recursive constraint consumes head-first. A
 // producer/expand binding is not a positional element and is skipped.
@@ -526,68 +599,90 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 	return out
 }
 
-// satisfy_recursive proves a value scope against a recursive producer by INDUCTION
-// on the finite value (which strictly shrinks each step), exactly as written:
-// `{T: ...Array{T}}` consumes the first element against the head color (T, already
-// substituted by the carve), then proves the REST against the tail carve
-// (`Array{T}`) — recursing until the value is empty, which the base-case
-// production (`{}`) matches. The shrinking value IS the termination guard; a
-// pointer-cycle in the carve cannot diverge because each step removes an element.
-// head_constraint_in resolves a recursive production's head color (`T:`) against
-// the carved root scope, so a substituted parameter (T = f32) is seen instead of
-// the stale generic fold. If the head's raw constraint is a mention of a name bound
-// in root, fold root's binding for that name; otherwise fall back to the head's own
-// cached constraint_fold (a non-parametric color like a literal needs no lookup).
-head_constraint_in :: proc(root: Scope_Type, ps: Scope_Type, i: int) -> ^Type {
-	rt := i < len(ps.types) ? ps.types[i] : nil
-	if rt != nil {
-		name := ""
-		#partial switch m in rt^ {
-		case Mention_Type:
-			name = m.name
-		case Reference_Type:
-			if m.reference != nil {
-				if n, nok := m.reference.name.(string); nok do name = n
-			}
-		}
-		if name != "" {
-			for j in 0 ..< len(root.names) {
-				if root.names[j] == name {
-					return fold_constraint(root.values[j])
-				}
-			}
-		}
+// The recursion-roots stack holds the ORIGINAL constraint-scope identities
+// currently being proved inductively. A self-reference points at the original
+// `Array` node; after a carve substitutes a parameter (`Array{int}`), repoint does
+// NOT reach into the nested production, so the inner `...Array` still points at the
+// ORIGINAL — not the substituted clone. So self_ref_binding must recognize a binding
+// that resolves to ANY root on this stack, not only the immediate `fc`. It lives on
+// the analyzer (reached via current_analyzer()), not a global: the test runner
+// proves cases on many threads each in its own arena, and a global [dynamic] would
+// keep a stale cap into a destroyed arena. Pushed/popped around each inductive step.
+is_recursion_root :: proc(s: ^Type, immediate: ^Type) -> bool {
+	if s == immediate do return true
+	a := current_analyzer()
+	if a == nil do return false
+	for r in a.recursion_roots {
+		if s == r do return true
 	}
-	return i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil
+	return false
 }
 
-satisfy_recursive :: proc(root: Scope_Type, head_count: int, prod: ^Type, vs: Scope_Type) -> bool {
+// self_ref_binding finds, within a producer scope `prod`, the index of a binding
+// that REFERENCES the constraint root — i.e. the production mentions itself
+// (`...Array` or `...Array{…}`). It follows mentions/references and peels carves;
+// a match means `prod` is the inductive step of a recursive constraint. Returns
+// (index, the followed binding ^Type, true). The check is purely semantic: a
+// binding whose target IS the root scope (`immediate`, or any original root on the
+// recursion stack) — no syntactic head/expand/carve pattern.
+self_ref_binding :: proc(prod: ^Type, immediate: ^Type) -> (idx: int, tail: ^Type, ok: bool) {
+	ps, is_scope := prod^.(Scope_Type)
+	if !is_scope do return 0, nil, false
+	for i in 0 ..< len(ps.kind) {
+		// An expand/product binding may carry the self-mention as its coloring
+		// (`...Array:` stores it in types) or its value; a structural slot carries it
+		// as the value. Follow whichever is present, peeling carves to the source.
+		raw := i < len(ps.types) && ps.types[i] != nil ? ps.types[i] : ps.values[i]
+		if raw == nil do continue
+		resolved := follow(raw)
+		src := resolved
+		if cv, is_carve := resolved^.(Carve_Type); is_carve {
+			src = follow(cv.source)
+		}
+		if is_recursion_root(src, immediate) {
+			return i, resolved, true
+		}
+	}
+	return 0, nil, false
+}
+
+// satisfy_inductive proves a value scope `vs` against an inductive production whose
+// self-reference is at `self_idx` (the followed binding `tail`), with `self` the
+// constraint root. The bindings BEFORE self_idx are heads — each consumes one
+// leading value element, proved against the head's color. The self-reference covers
+// the REST: it is proved against the root the self-reference resolves to — `self`
+// itself for a bare `...Array`, or the SUBSTITUTED scope (`fold_carve`) for a
+// parametric `...Array{int}`, so the parameter actually re-colors the rest. The
+// finite, strictly-shrinking value is the termination guard; coinduction on
+// (self, vs) in satisfy guards against a non-shrinking pointer cycle.
+satisfy_inductive :: proc(self: ^Type, self_idx: int, tail: ^Type, prod: ^Type, vs: Scope_Type) -> bool {
 	ps, _ := prod^.(Scope_Type)
 	elems := value_elements(vs)
 	defer delete(elems)
-	// Not enough elements to fill the heads → this step cannot match; the base case
-	// (empty value) is matched by the sibling `{}` production, not here.
+	head_count := self_idx
 	if len(elems) < head_count do return false
-	// Prove each leading element against its head color. The head colors by a
-	// mention of the PARAMETER (`T:`); after a carve that mention still points at
-	// the ORIGINAL scope (repoint did not reach into the nested production), so the
-	// cached constraint_fold holds the GENERIC `T` ({}), not the substituted one.
-	// Resolve the head's color in `root` instead — the carved scope where the
-	// parameter is bound to its argument (T = f32) — by name.
+	// Prove each leading element against its head color (the head's own constraint
+	// fold — already substituted for this level by the carve that produced `self`).
 	for i in 0 ..< head_count {
-		hc := head_constraint_in(root, ps, i)
+		hc := i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil
 		if hc == nil do return false
 		ht := fold_value_type(elems[i])
 		if ht == nil do return false
 		if !satisfy_root(hc, ht) do return false
 	}
-	// The rest (elements past the heads) must satisfy the tail carve (`Array{T}:`).
-	// CRUCIAL: do NOT fold_constraint the carve — `Array{T}` is a RECURSIVE
-	// constraint; materializing it would unfold the inductive production forever
-	// (fold_carve re-folds `{T: ...Array{T}:}`, which re-contains `Array{T}`…). The
-	// tail is `self` with the SAME parameter, so its folded constraint IS `root`
-	// (the carved scope we are already proving against, `Array{f32}`). Reuse it
-	// directly — the finite, shrinking value is the termination guard, not a fold.
+	// The rest (elements past the heads) is itself the recursive constraint. Prove
+	// it against the scope the self-reference resolves to: `self` for a bare mention,
+	// or the materialized carve (parameter substituted) for `...Array{int}`. We do
+	// NOT fold the recursion away — fold_carve substitutes the parameter and repoints
+	// without unfolding the inductive production; the shrinking value terminates it.
+	rest_constraint := self
+	if cv, is_carve := tail^.(Carve_Type); is_carve {
+		_ = cv
+		if sub := fold_carve(tail); sub != nil {
+			rest_constraint = new(Type)
+			rest_constraint^ = sub^
+		}
+	}
 	rest := new(Scope_Type)
 	for i in head_count ..< len(elems) {
 		append(&rest.names, "")
@@ -600,13 +695,14 @@ satisfy_recursive :: proc(root: Scope_Type, head_count: int, prod: ^Type, vs: Sc
 	}
 	rest_ft := new(Type)
 	rest_ft^ = rest^
-	// rest_carve is `Self{T}` with the current parameter threaded through, so the
-	// constraint the rest must satisfy is the very scope we hold (`root`). Recurse
-	// through satisfy_root on root, which re-enters this function with one fewer
-	// element until the value is empty and the base-case `{}` production matches.
-	root_t := new(Type)
-	root_t^ = root
-	return satisfy_root(root_t, rest_ft)
+	// Register the ORIGINAL root so the next level's self-reference — which still
+	// points at `self`, not at the substituted clone — is recognized. Popped after.
+	if a := current_analyzer(); a != nil {
+		append(&a.recursion_roots, self)
+		defer pop(&a.recursion_roots)
+		return satisfy_root(rest_constraint, rest_ft)
+	}
+	return satisfy_root(rest_constraint, rest_ft)
 }
 
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
@@ -628,14 +724,18 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 			if (v.kind[i] == .Product) {
 				hasProd = true
-				// An INDUCTIVE production (`{T: ...Self{T}}`) is proved by structural
-				// recursion on the value, not by a flat satisfy: consume the head
-				// element(s) against their color, then prove the rest against the
-				// tail carve. Routed only when the value side is a scope (a list of
-				// elements); a scalar value can never match a head+tail producer.
-				if hc, _, rec := production_is_recursive(v.values[i]); rec {
+				// An INDUCTIVE production is one that MENTIONS THE ROOT itself
+				// (`{T: ...Array}` or `{T: ...Array{int}}`): a self-reference, found
+				// SEMANTICALLY (a binding that follows to `fc`), not by a syntactic
+				// head/expand/carve pattern. Proved by structural recursion on the
+				// value: consume the heads (bindings before the self-ref) against their
+				// color, then prove the rest against the scope the self-reference
+				// resolves to — the root for `...Array`, or the substituted carve for
+				// `...Array{int}` so the parameter actually re-colors the rest. Only
+				// when the value is a scope (a list of elements); a scalar never matches.
+				if si, tail, rec := self_ref_binding(v.values[i], fc); rec {
 					if vs, vs_ok := ft_content^.(Scope_Type); vs_ok {
-						if satisfy_recursive(v, hc, v.values[i], vs) {
+						if satisfy_inductive(fc, si, tail, v.values[i], vs) {
 							return true
 						}
 					}
