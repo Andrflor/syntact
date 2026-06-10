@@ -136,8 +136,10 @@ run_case :: proc(path: string, t: ^testing.T) {
 	prev_user_ptr = context.user_ptr
 	context.user_ptr = &r
 	result := compiler.reduce(cache.scope)
-	context.user_ptr = prev_user_ptr
+	// Keep user_ptr on the reducer `r` through lowering: lower_to_bytecode reads
+	// r.fixedpoint_index (via fixedpoint_id) to recover each ??N slot. Restore after.
 	prog := compiler.lower_to_bytecode(result)
+	context.user_ptr = prev_user_ptr
 
 	// "reject": lowering must carry an error.
 	if tc.kind == "reject" {
