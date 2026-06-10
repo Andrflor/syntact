@@ -2011,17 +2011,25 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 		// A pattern's target/branches may mention the carved scope; without this
 		// the substituted pattern keeps reading the PRE-carve values (and, the
 		// pointer being unchanged, the caller never clears its stale cached fold).
-		// cover_fold is kept as-is: it is the fold of the MATCH, valid as long as
-		// the match itself was not rewritten (a match is a static set; one that
-		// mentions a carved field would need a re-fold reduce cannot do).
+		// When a branch's MATCH is itself rewritten (it mentioned a carved field,
+		// e.g. `0 ? {a -> 1}` carved with `a -> 10`), its cover_fold — the analysis-
+		// time fold of the OLD match — is now stale: reduce_branch_fires reads it and
+		// would fire the pre-carve branch. Re-fold the cover for a rewritten match so
+		// the reduce path agrees with branch_covers (which re-folds the match live).
+		// An UNCHANGED match keeps its cached cover_fold.
 		tg := repoint(v.target, old, dst)
 		changed := tg != v.target
 		branches := make([]Pattern_Branch, len(v.branches))
 		for branch, i in v.branches {
 			m := repoint(branch.match, old, dst)
 			p := repoint(branch.product, old, dst)
-			if m != branch.match || p != branch.product do changed = true
-			branches[i] = Pattern_Branch{branch.value_match, m, p, branch.cover_fold}
+			cf := branch.cover_fold
+			if m != branch.match {
+				changed = true
+				cf = m != nil ? (branch.value_match ? fold_value_type(m) : fold_constraint(m)) : nil
+			}
+			if p != branch.product do changed = true
+			branches[i] = Pattern_Branch{branch.value_match, m, p, cf}
 		}
 		if changed {
 			return new_type(Pattern_Type{tg, branches})
