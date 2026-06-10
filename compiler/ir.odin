@@ -853,12 +853,17 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 			// renders as JUST its value: it IS the value, not a named field. So a
 			// producer `{->X}` shows `{X}` and a `{T: T:}` default scope shows
 			// `{{}, {}}`. A named binding renders `name op value`.
+			// Prefer the field's cached type_fold over its raw value (same rule as
+			// write_value): a computed field shows its folded result, not the
+			// expression — the structure is already visible on the field's own line.
+			fv := v.values[i]
+			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
 			if v.names[i] == "" {
-				write_fold(b, v.values[i])
+				write_fold(b, fv)
 			} else {
 				strings.write_string(b, v.names[i])
 				strings.write_string(b, write_binding_op(v.kind[i]))
-				write_fold(b, v.values[i])
+				write_fold(b, fv)
 			}
 		}
 		strings.write_byte(b, '}')

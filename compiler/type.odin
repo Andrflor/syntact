@@ -76,13 +76,17 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 		// Only emit while a carve is being rechecked (recheck_span set) — fold_carve
 		// also runs from other contexts (reduce, materialization) where this same
 		// Invalid would duplicate the diagnostic. Those still get the Invalid marker.
-		if a := current_analyzer(); a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
+		if a := current_analyzer();
+		   a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
 			// Name the property by its identifier ('x') or, for an ordinal access, by
 			// its position (#0) — never an empty 'property ""'.
 			label := name != "" ? fmt.tprintf("'%s'", name) : fmt.tprintf("#%d", ordinal)
 			sem_error(
 				a,
-				fmt.tprintf("implicit constraint mismatch: property %s does not exist after carve substitution", label),
+				fmt.tprintf(
+					"implicit constraint mismatch: property %s does not exist after carve substitution",
+					label,
+				),
 				.Constraint_Mismatch,
 				a.recheck_span,
 			)
@@ -815,7 +819,13 @@ head_constraint_in :: proc(root: Scope_Type, ps: Scope_Type, i: int) -> ^Type {
 // overrides were repointed into `self`'s level, so the parameter re-colors the
 // rest. The finite, strictly-shrinking value is the termination guard; a
 // headless inductive step consumes nothing and is rejected (no progress).
-satisfy_inductive :: proc(self: ^Type, self_idx: int, tail: ^Type, prod: ^Type, vs: Scope_Type) -> bool {
+satisfy_inductive :: proc(
+	self: ^Type,
+	self_idx: int,
+	tail: ^Type,
+	prod: ^Type,
+	vs: Scope_Type,
+) -> bool {
 	ps, _ := prod^.(Scope_Type)
 	elems := value_elements(vs)
 	defer delete(elems)
@@ -825,9 +835,7 @@ satisfy_inductive :: proc(self: ^Type, self_idx: int, tail: ^Type, prod: ^Type, 
 	root, root_ok := self^.(Scope_Type)
 	for i in 0 ..< head_count {
 		hc :=
-			root_ok \
-			? head_constraint_in(root, ps, i) \
-			: (i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil)
+			root_ok ? head_constraint_in(root, ps, i) : (i < len(ps.constraint_folds) ? ps.constraint_folds[i] : nil)
 		if hc == nil do return false
 		ht := fold_value_type(elems[i])
 		if ht == nil do return false
@@ -1247,8 +1255,8 @@ Cast_Target_Kind :: enum {
 
 Cast_Target :: struct {
 	kind:       Cast_Target_Kind,
-	width:      uint,      // bit width for Integer/Float/Bool; ignored for String
-	signed:     bool,      // Integer signedness
+	width:      uint, // bit width for Integer/Float/Bool; ignored for String
+	signed:     bool, // Integer signedness
 	float_kind: FloatKind, // for Float (f32 -> 32 bits, f64 -> 64 bits)
 }
 
@@ -1383,10 +1391,22 @@ cast_to_bits :: proc(src_fold: ^Type, src_color: ^Type = nil) -> (Bit_Repr, bool
 			if kind == .none do kind = colored_float_kind(src_color)
 			switch kind {
 			case .f32:
-				return {bits = u128(transmute(u32)f32(val)), width = 32, signed = false, from_float = val}, true
+				return {
+						bits = u128(transmute(u32)f32(val)),
+						width = 32,
+						signed = false,
+						from_float = val,
+					},
+					true
 			case .f64, .none:
 				// An unsized literal carries f64 bits.
-				return {bits = u128(transmute(u64)val), width = 64, signed = false, from_float = val}, true
+				return {
+						bits = u128(transmute(u64)val),
+						width = 64,
+						signed = false,
+						from_float = val,
+					},
+					true
 			}
 		}
 	case Bool_Type:
@@ -1479,7 +1499,10 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if left_kind == .Invalid {
 		sem_error(
 			a,
-			fmt.tprintf("invalid range: left bound %s is not an integer, float, or string", describe_value(left_resolved)),
+			fmt.tprintf(
+				"invalid range: left bound %s is not an integer, float, or string",
+				describe_value(left_resolved),
+			),
 			.Invalid_Range,
 			node_span(a, node),
 		)
@@ -1488,7 +1511,10 @@ fold_range :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if right_kind == .Invalid {
 		sem_error(
 			a,
-			fmt.tprintf("invalid range: right bound %s is not an integer, float, or string", describe_value(right_resolved)),
+			fmt.tprintf(
+				"invalid range: right bound %s is not an integer, float, or string",
+				describe_value(right_resolved),
+			),
 			.Invalid_Range,
 			node_span(a, node),
 		)
@@ -1668,8 +1694,8 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 			// after repoint, a mention of the field ONTO ITSELF in the copy (an
 			// unresolvable cycle); the override changes nothing, keep the
 			// original value.
-			if mv, is_m := carve.values[i]^.(Mention_Type); is_m &&
-			   mv.match_scope == src && mv.match_index == ref.match_index {
+			if mv, is_m := carve.values[i]^.(Mention_Type);
+			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
 			}
 			// PULL UNIFICATION: if this field's constraint mentions a pull (e.g.
@@ -1716,7 +1742,8 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 			// carve site. Only while rechecking (recheck_span set), so other fold_carve
 			// callers don't duplicate it.
 			if had_fold {
-				if a := current_analyzer(); a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
+				if a := current_analyzer();
+				   a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
 					if comp, is_comp := copy.values[i].(Compose_Type); is_comp {
 						diagnose_compose(a, comp, a.recheck_span)
 					}
@@ -1855,7 +1882,11 @@ pull_values_agree :: proc(a, b: ^Type) -> bool {
 
 // gather_pull_bindings mirrors unify_pull but COLLECTS (constraint mention of a
 // pull → append the value to that pull's list) instead of writing.
-gather_pull_bindings :: proc(constraint, value: ^Type, src: ^Scope_Type, bound: ^map[int][dynamic]^Type) {
+gather_pull_bindings :: proc(
+	constraint, value: ^Type,
+	src: ^Scope_Type,
+	bound: ^map[int][dynamic]^Type,
+) {
 	if constraint == nil || value == nil do return
 	if m, ok := constraint^.(Mention_Type); ok {
 		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(src.kind) {
@@ -1975,6 +2006,25 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 		tg := repoint(v.target, old, dst)
 		if tg != v.target {
 			return new_type(Execute_Type{tg})
+		}
+	case Pattern_Type:
+		// A pattern's target/branches may mention the carved scope; without this
+		// the substituted pattern keeps reading the PRE-carve values (and, the
+		// pointer being unchanged, the caller never clears its stale cached fold).
+		// cover_fold is kept as-is: it is the fold of the MATCH, valid as long as
+		// the match itself was not rewritten (a match is a static set; one that
+		// mentions a carved field would need a re-fold reduce cannot do).
+		tg := repoint(v.target, old, dst)
+		changed := tg != v.target
+		branches := make([]Pattern_Branch, len(v.branches))
+		for branch, i in v.branches {
+			m := repoint(branch.match, old, dst)
+			p := repoint(branch.product, old, dst)
+			if m != branch.match || p != branch.product do changed = true
+			branches[i] = Pattern_Branch{branch.value_match, m, p, branch.cover_fold}
+		}
+		if changed {
+			return new_type(Pattern_Type{tg, branches})
 		}
 	case Carve_Type:
 		s := repoint(v.source, old, dst)
