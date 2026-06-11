@@ -229,23 +229,6 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
-		case Recursive_Reference_Type:
-			// Unresolved (its scope is still being walked): the fold cannot be
-			// trusted yet — signal the deferral and bail. Resolved: behave as the
-			// mention/property it stands for.
-			if v.self {
-				if v.scope != nil && v.scope.walking {
-					fold_pending_on(v.scope)
-					return nil
-				}
-				return fold_constraint(v.target)
-			}
-			if v.scope == nil do return nil
-			if v.match_index < 0 {
-				fold_pending_on(v.scope)
-				return nil
-			}
-			return fold_constraint_target(v.scope, v.match_index)
 		case Execute_Type:
 			// `target!` as a constraint folds to the constraint of the production
 			// the collapse reduces through (the first .Product of the target). A
@@ -478,17 +461,17 @@ scope_fields_fold_unknown :: proc(key: ^Type, values: []^Type) -> bool {
 }
 
 // is_recursive_tail reports whether `t` is the marker of a recursive
-// constraint: the Recursive_Reference node itself, or a carve whose source is
+// constraint: the Recursive_Mention node itself, or a carve whose source is
 // one (`...Array{T}` — also after repoint, which clones the carve but never
-// rewrites the reference).
+// rewrites the mention).
 is_recursive_tail :: proc(t: ^Type) -> bool {
 	if t == nil do return false
 	#partial switch v in t^ {
-	case Recursive_Reference_Type:
+	case Recursive_Mention_Type:
 		return true
 	case Carve_Type:
 		if v.source != nil {
-			if _, is_rr := v.source^.(Recursive_Reference_Type); is_rr do return true
+			if _, is_rr := v.source^.(Recursive_Mention_Type); is_rr do return true
 		}
 	}
 	return false
@@ -536,22 +519,15 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 		case Reference_Type:
 			eff := reference_effective_value(v)
 			if eff != nil do return fold_value_type(eff)
-		case Recursive_Reference_Type:
-			// Unresolved: defer (see the fold_constraint case). Resolved: the
-			// value type of whatever it stands for.
-			if v.self {
-				if v.scope != nil && v.scope.walking {
-					fold_pending_on(v.scope)
-					return nil
-				}
-				return fold_value_type(v.target)
-			}
-			if v.scope == nil do return nil
-			if v.match_index < 0 {
-				fold_pending_on(v.scope)
+		case Recursive_Mention_Type:
+			// A self mention: defer while its scope is still walking (its bindings
+			// aren't all known yet), else the value type of its self binding.
+			if v.match_scope == nil || v.match_index < 0 do return nil
+			if v.match_scope.walking {
+				fold_pending_on(v.match_scope)
 				return nil
 			}
-			return fold_value_type(v.scope.values[v.match_index])
+			return fold_value_type(v.match_scope.values[v.match_index])
 		case And_Type:
 			// A set expression (`0|10`, `..9 & 11..`, `'a'..'z'`) is a VALUE whose type
 			// is the producer of its domain envelope IN INTERVALS — value_type_envelope
@@ -722,6 +698,7 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 		return satisfy(fc, vor.left) && satisfy(fc, vor.right)
 	}
 	#partial switch f in fc^ {
+	case Recursive_Mention_Type:
 	case Compose_Type:
 		// A string concatenation `+` kept as a Compose is an ordered SEQUENCE
 		// constraint: the value (a concrete string) must split, left to right, into
@@ -782,8 +759,8 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 }
 
 // recursive_ref_binding finds, within a producer scope `prod`, the index of a
-// binding that IS a recursive reference — the explicit Recursive_Reference node
-// the analyzer records for a self/forward mention (`...Array`), or a carve over
+// binding that IS a recursive mention — the explicit Recursive_Mention node
+// the analyzer records for a self mention (`...Array`), or a carve over
 // one (`...Array{T}`). The node survives carve cloning unchanged (repoint never
 // rewrites it), so the detection needs NO root-identity bookkeeping: the
 // inductive step is wherever the node sits, whatever clone holds it. Returns
@@ -798,12 +775,12 @@ recursive_ref_binding :: proc(prod: ^Type) -> (idx: int, tail: ^Type, ok: bool) 
 		if raw == nil do continue
 		// The reference node itself (bare `...Array`) — checked BEFORE follow,
 		// which would chase a resolved one through to the scope.
-		if _, is_rr := raw^.(Recursive_Reference_Type); is_rr {
+		if _, is_rr := raw^.(Recursive_Mention_Type); is_rr {
 			return i, raw, true
 		}
 		resolved := follow(raw)
 		if cv, is_carve := resolved^.(Carve_Type); is_carve && cv.source != nil {
-			if _, is_rr := cv.source^.(Recursive_Reference_Type); is_rr {
+			if _, is_rr := cv.source^.(Recursive_Mention_Type); is_rr {
 				return i, resolved, true
 			}
 		}
@@ -1566,10 +1543,10 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 			// A carve of a carve: fold the inner one first so we substitute onto
 			// the already-substituted scope.
 			src = fold_carve(cur)
-		case Recursive_Reference_Type:
-			// An unresolved recursive source (follow chases a resolved one): the
-			// carve cannot materialize yet — defer to the awaited scope's close.
-			if !s.self && s.match_index < 0 do fold_pending_on(s.scope)
+		case Recursive_Mention_Type:
+			// A self-mention source whose scope is still walking: the carve
+			// cannot materialize yet — defer to that scope's close.
+			if s.match_scope != nil && s.match_scope.walking do fold_pending_on(s.match_scope)
 		}
 		break
 	}

@@ -108,7 +108,7 @@ Analyzer :: struct {
 	execute_stack:    [dynamic]^Scope_Type,
 	// Deferred-recursion state. `fold_pending` is set by the fold layer (via
 	// current_analyzer) when a fold touches a scope still being walked or an
-	// unresolved Recursive_Reference: the fold result cannot be trusted yet, so
+	// unresolved forward Reference: the fold result cannot be trusted yet, so
 	// the dependent obligation is queued on `pending` and re-run when that scope
 	// closes (scope_close).
 	fold_pending:     ^Scope_Type,
@@ -116,9 +116,9 @@ Analyzer :: struct {
 }
 
 // One deferred obligation, re-run when `awaiting` finishes walking:
-//   .Ref       — resolve `rr` (a Recursive_Reference) against `target` (the
-//                property's target expression; nil for a `.x` self-mention,
-//                which resolves with self_resolve's first-occurrence rule).
+//   .Ref       — resolve `rr` (an unresolved forward Reference_Type) against
+//                `target` (the property's target expression), patching the
+//                Reference's match_scope/match_index once the scope closes.
 //   .Carve     — re-resolve the references of `carve` (its source awaited
 //                `awaiting`), then re-run its per-field proofs + recheck_carve.
 //   .Typecheck — re-fold and re-prove binding `bind` of `scope`, patching the
@@ -136,7 +136,7 @@ Pending_Kind :: enum u8 {
 Pending :: struct {
 	kind:     Pending_Kind,
 	awaiting: ^Scope_Type,
-	rr:       ^Type, // .Ref: the Recursive_Reference_Type node to patch
+	rr:       ^Type, // .Ref: the unresolved Reference_Type node to patch
 	target:   ^Type, // .Ref: the property's target expression (nil = self-mention)
 	carve:    ^Type, // .Carve: the Carve_Type node
 	scope:    ^Scope_Type, // .Typecheck: the owning scope
@@ -432,14 +432,20 @@ pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 		cur = follow(cur)
 		if cur == nil do return nil
 		#partial switch &v in cur^ {
-		case Recursive_Reference_Type:
-			// follow chases a resolved one; landing here means unresolved. Only
-			// a scope still being walked blocks — unresolved against a CLOSED
-			// scope means the close already reported the miss: permanently
-			// broken, nothing left to wait for (re-queuing would loop the drain).
-			if !v.self && v.match_index < 0 && v.scope != nil && v.scope.walking {
-				return v.scope
+		case Reference_Type:
+			// follow chases a RESOLVED reference; landing here means unresolved
+			// (a deferred forward property). Only a scope still being walked
+			// blocks — unresolved against a CLOSED scope means the close already
+			// reported the miss: permanently broken, nothing left to wait for
+			// (re-queuing would loop the drain).
+			r := v.reference
+			if r != nil && r.match_index < 0 && r.match_scope != nil && r.match_scope.walking {
+				return r.match_scope
 			}
+			return nil
+		case Recursive_Mention_Type:
+			// A self mention is always resolvable (its binding pre-exists); it
+			// never blocks the drain.
 			return nil
 		case Scope_Type:
 			if v.walking do return &v
@@ -459,26 +465,30 @@ pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 // that is ITSELF still blocked (a chain into an outer open scope) re-queues on
 // that scope; a miss against the now-complete scope is the real error.
 close_ref :: proc(a: ^Analyzer, p: Pending) {
-	rr, rr_ok := &p.rr^.(Recursive_Reference_Type)
-	if !rr_ok do return
+	rt, rt_ok := &p.rr^.(Reference_Type)
+	if !rt_ok || rt.reference == nil do return
+	ref := rt.reference
 	if open := pending_scope_of(p.target); open != nil {
 		np := p
 		np.awaiting = open
 		append(&a.pending, np)
 		return
 	}
-	rs, ri := resolve_property_site(p.target, rr.name, rr.ordinal)
+	prop_name, _ := ref.name.(string)
+	prop_ordinal := i16(-1)
+	if idx, ok := ref.index.(u64); ok do prop_ordinal = i16(idx)
+	rs, ri := resolve_property_site(p.target, prop_name, prop_ordinal)
 	if rs == nil {
 		sem_error(
 			a,
-			fmt.tprintf("property '%s' does not exist", rr.name),
+			fmt.tprintf("property '%s' does not exist", prop_name),
 			.Invalid_Property_Access,
 			node_span(a, p.node),
 		)
 		return
 	}
-	rr.scope = rs
-	rr.match_index = ri
+	ref.match_scope = rs
+	ref.match_index = ri
 }
 
 // retypecheck re-runs a deferred binding proof: re-fold both sides (the
@@ -648,19 +658,13 @@ follow :: proc(t: ^Type) -> ^Type {
 			if r == nil || r.match_scope == nil || r.match_index < 0 do return cur
 			key = Follow_Key{r.match_scope, r.match_index}
 			next = r.match_scope.values[r.match_index]
-		case Recursive_Reference_Type:
-			// A self one designates the scope itself (the pointer is valid even
-			// while the scope is incomplete — CONSUMERS check `walking`); a named
-			// one is followable only once the deferred pass filled match_index.
-			if v.self {
-				if v.target == nil do return cur
-				key = Follow_Key{v.scope, -1}
-				next = v.target
-			} else {
-				if v.scope == nil || v.match_index < 0 do return cur
-				key = Follow_Key{v.scope, v.match_index}
-				next = v.scope.values[v.match_index]
-			}
+		case Recursive_Mention_Type:
+			// A self mention designates its own binding (the scope pointer is
+			// valid even while the scope is incomplete — CONSUMERS check
+			// `walking`). Follow it like a Mention to that binding's value.
+			if v.match_scope == nil || v.match_index < 0 do return cur
+			key = Follow_Key{v.match_scope, v.match_index}
+			next = v.match_scope.values[v.match_index]
 		case:
 			return cur
 		}
@@ -1190,13 +1194,18 @@ walk_property :: #force_inline proc(
 		// recursive reference, re-resolved when that scope closes. Only a miss on
 		// a COMPLETE scope is a real Invalid_Property_Access.
 		if open := pending_scope_of(target); open != nil {
-			result := new(Type)
-			result^ = Recursive_Reference_Type {
-				name        = prop_name,
-				ordinal     = prop_ordinal,
-				scope       = open,
-				match_index = -1,
+			// Not a self mention — a forward property into a scope still walking.
+			// Record an UNRESOLVED Reference (match_index -1) and defer it; the
+			// close patches the resolved (match_scope, match_index) in place.
+			ref := new(Reference)
+			ref^ = Reference {
+				prop_name,
+				prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
+				open,
+				-1,
 			}
+			result := new(Type)
+			result^ = Reference_Type{target, ref}
 			append(
 				&a.pending,
 				Pending{kind = .Ref, awaiting = open, rr = result, target = target, node = right_idx},
@@ -1908,20 +1917,19 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 	res_scope, res_index := scope_resolve(scope, name, ordinal, true, allow_capture = true)
 	if res_scope != nil {
 		// A mention of a binding whose value is a scope STILL BEING WALKED is a
-		// self/forward reference (`Array` inside Array's body, `fib` inside fib):
-		// record it as an explicit Recursive_Reference instead of a Mention, so
-		// folds defer through it, the satisfy layer detects the inductive step
-		// structurally, and it survives carve cloning (repoint never rewrites it).
+		// self mention (`Array` inside Array's body, `fib` inside fib, or `a`
+		// naming itself from an inner scope): record it as an explicit
+		// Recursive_Mention instead of a plain Mention, so folds defer through it,
+		// the satisfy layer detects the inductive step structurally, and it
+		// survives carve cloning (repoint never rewrites it). match_scope/index
+		// point at the self binding directly — its value IS the open scope.
 		if val := res_scope.values[res_index]; val != nil {
 			if vs, is_scope := &val^.(Scope_Type); is_scope && vs.walking {
 				result := new(Type)
-				result^ = Recursive_Reference_Type {
+				result^ = Recursive_Mention_Type {
 					name        = name,
-					ordinal     = ordinal,
-					self        = true,
-					target      = val,
-					scope       = vs,
-					match_index = -1,
+					match_scope = res_scope,
+					match_index = res_index,
 				}
 				return result
 			}
