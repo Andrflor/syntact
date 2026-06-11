@@ -223,6 +223,25 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 			return fold_type_intervals(v.type_fold)
 		}
 		return fold_constraint_intervals(v.target)
+	case Or_Type:
+		// A set VALUE `0|10` produces the union of its branches' envelopes — the
+		// same interval algebra fold_constraint_intervals uses on the left, but
+		// recursing through fold_type_intervals so the operands are folded as
+		// values. Folds only when BOTH branches are integer (mixed `string|u8`
+		// stays symbolic → nil). Default follows source order (left-first).
+		left, left_ok := fold_type_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_type_intervals(v.right).(Integer_Type)
+		if !left_ok || !right_ok do return nil
+		return integer_type_union(left, right)
+	case And_Type:
+		left, left_ok := fold_type_intervals(v.left).(Integer_Type)
+		right, right_ok := fold_type_intervals(v.right).(Integer_Type)
+		if !left_ok || !right_ok do return nil
+		return integer_type_intersect(left, right)
+	case Negate_Type:
+		inner, inner_ok := fold_type_intervals(v.operand).(Integer_Type)
+		if !inner_ok do return nil
+		return integer_type_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if s, ok := stored_fold_intervals(
