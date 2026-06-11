@@ -808,7 +808,7 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 		v2, ok2 := ft^.(Scope_Type)
 		ft_content := ft
 		if ok2 {
-			prods := scope_productions(v)
+			prods := scope_productions(v2)
 			if len(prods) == 1 {
 				ft_content = prods[0]
 			}
