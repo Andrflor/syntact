@@ -1,0 +1,1 @@
+{ "name": "tc_prod_int_union_wider_bad", "description": "a wider value union is rejected against a narrower producer (0|12 not in typeof 0|10)", "source": "{->0|10}:b -> 0|10\n{->0|10}:c -> 0|12", "expect_errors": ["Constraint_Mismatch"] }

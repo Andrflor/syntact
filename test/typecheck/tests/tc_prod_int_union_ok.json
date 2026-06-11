@@ -1,0 +1,1 @@
+{ "name": "tc_prod_int_union_ok", "description": "{->0|10} (typeof an int union) accepts the same union 0|10", "source": "{->0|10}:b -> 0|10", "expect_errors": [] }

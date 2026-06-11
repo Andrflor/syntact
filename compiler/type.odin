@@ -712,6 +712,15 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 //     {->u8}:a -> u8 ✅.
 satisfy :: proc(fc, ft: ^Type) -> bool {
 	if fc == nil || ft == nil do return false
+	// A value-side union (`"" | 10`, a mixed Or kept structural because the
+	// branches live in different domains) fits the constraint iff EVERY branch
+	// does: (A|B) ⊆ C ⟺ A⊆C ∧ B⊆C — the dual of the constraint-side Or below
+	// (which is a ||). Same-domain unions already folded to one domain set
+	// (Integer_Type with disjoint intervals), so a surviving Or_Type on the
+	// value side is exactly the mixed/symbolic case this decomposes.
+	if vor, ok := ft^.(Or_Type); ok {
+		return satisfy(fc, vor.left) && satisfy(fc, vor.right)
+	}
 	#partial switch f in fc^ {
 	case Compose_Type:
 		// A string concatenation `+` kept as a Compose is an ordered SEQUENCE
