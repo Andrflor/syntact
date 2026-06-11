@@ -807,18 +807,35 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 
 scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
-	if len(vs.names) != len(cs.names) do return false
-	for i in 0 ..< len(cs.names) {
-		if vs.names[i] != cs.names[i] do return false
-		if vs.kind[i] != cs.kind[i] do return false
-		v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
-		if (ok) {
-			if !satisfy_root(fold_constraint_target(v.match_scope, v.match_index), vs.type_folds[i]) do return false
-		} else {
-			if !satisfy_root(cs.constraint_folds[i], vs.type_folds[i]) do return false
-		}
+	return scope_satisfy_range(cs, 0, len(cs.names) - 1, vs, 0, len(vs.names) - 1)
+}
+
+scope_satisfy_range :: proc(cs: Scope_Type, ci, cend: int, vs: Scope_Type, vi, vend: int) -> bool {
+	if ci == cend {
+		return vi == vend
 	}
-	return true
+
+	if vi >= vend {
+		return false
+	}
+
+	if !binding_satisfy(cs, ci, vs, vi) {
+		return false
+	}
+
+	return scope_satisfy_range(cs, ci + 1, cend, vs, vi + 1, vend)
+}
+
+binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool {
+	if cs.names[i] != vs.names[j] || cs.kind[i] != vs.kind[j] {
+		return false
+	}
+	v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
+	if (ok) {
+		return satisfy_root(fold_constraint_target(v.match_scope, v.match_index), vs.type_folds[j])
+	} else {
+		return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
+	}
 }
 
 scope_productions :: proc(s: Scope_Type) -> [dynamic]^Type {
