@@ -4,7 +4,6 @@ import compiler "../../compiler"
 
 import "core:encoding/json"
 import "core:fmt"
-import "core:log"
 import vmem "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
@@ -337,7 +336,6 @@ run_test :: proc(path: string, t: ^testing.T) {
 		if !ok {
 			first_diff := first_difference(actual, tc.expect)
 			pos_map := build_position_map(ast, root, actual)
-			log.info(len(pos_map.positions))
 			found_ast, found_idx := find_node_at_position(&pos_map, first_diff)
 			position := compiler.Position{line = 1, column = 1}
 			if found_ast != nil && found_idx != compiler.INVALID_NODE {
