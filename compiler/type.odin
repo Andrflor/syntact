@@ -743,6 +743,13 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 		return false
 	}
 	if cs.constraint_folds[i] == nil {
+		// A non-production uncolored field (`x -> 1`) only constrains the shape:
+		// the field must exist with the matching name/kind (proved above), but its
+		// value imposes nothing on the corresponding value field. A production
+		// (`-> v`) is not a named field — it IS the constraint, so prove it.
+		if cs.kind[i] != .Product {
+			return true
+		}
 		return satisfy(fold_constraint(cs.values[i]), vs.type_folds[j])
 	} else {
 		v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
