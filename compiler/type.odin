@@ -805,6 +805,15 @@ recursive_ref_binding :: proc(prod: ^Type) -> (idx: int, tail: ^Type, ok: bool) 
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	v, ok := fc^.(Scope_Type)
 	if ok {
+		v2, ok2 := ft^.(Scope_Type)
+		ft_content := ft
+		if ok2 {
+			prods := scope_productions(v)
+			if len(prods) == 1 {
+				ft_content = prods[0]
+			}
+		}
+
 		hasProd := false
 		// A constraint root with productions is a sum: the value satisfies it
 		// if it matches AT LEAST ONE production. Each production IS the target
@@ -832,7 +841,7 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 				// like `u8` is already an Integer, so folding is idempotent there.
 				if prod == nil do prod = fold_constraint(v.values[i])
 				if prod == nil do prod = v.values[i]
-				if (satisfy(prod, ft)) {
+				if (satisfy(prod, ft_content)) {
 					return true
 				}
 			}
