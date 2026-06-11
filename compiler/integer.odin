@@ -150,7 +150,12 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		// its bounds: lo = global min, hi = global max. Since sub-ranges have
 		// already been folded into their span, merging is enough. A missing
 		// bound (`5..`, `..10`) = open to infinity on that side.
-		lo, hi := range_span_bounds(left.integer_intervals, right.integer_intervals, v.left == nil, v.right == nil)
+		lo, hi := range_span_bounds(
+			left.integer_intervals,
+			right.integer_intervals,
+			v.left == nil,
+			v.right == nil,
+		)
 		segs := make([]Integer_Interval, 1)
 		segs[0] = Integer_Interval{lo, hi}
 		return Integer_Type{segs, default_for_integer_intervals(segs)}
@@ -299,7 +304,12 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		right, right_ok := fold_constraint_intervals(v.right).(Integer_Type)
 		if v.left != nil && !left_ok do return nil
 		if v.right != nil && !right_ok do return nil
-		lo, hi := range_span_bounds(left.integer_intervals, right.integer_intervals, v.left == nil, v.right == nil)
+		lo, hi := range_span_bounds(
+			left.integer_intervals,
+			right.integer_intervals,
+			v.left == nil,
+			v.right == nil,
+		)
 		segs := make([]Integer_Interval, 1)
 		segs[0] = Integer_Interval{lo, hi}
 		return Integer_Type{segs, default_for_integer_intervals(segs)}
@@ -379,12 +389,20 @@ range_span_bounds :: proc(
 	left_segs, right_segs: []Integer_Interval,
 	left_open := false,
 	right_open := false,
-) -> (Maybe(i128), Maybe(i128)) {
+) -> (
+	Maybe(i128),
+	Maybe(i128),
+) {
 	lo: Maybe(i128) = nil
 	hi: Maybe(i128) = nil
 	lo_set := false
 	hi_set := false
-	consider :: proc(segs: []Integer_Interval, lo: ^Maybe(i128), hi: ^Maybe(i128), lo_set, hi_set: ^bool) {
+	consider :: proc(
+		segs: []Integer_Interval,
+		lo: ^Maybe(i128),
+		hi: ^Maybe(i128),
+		lo_set, hi_set: ^bool,
+	) {
 		for s in segs {
 			if l, ok := s.lo.(i128); ok {
 				if !lo_set^ {

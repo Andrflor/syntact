@@ -98,52 +98,6 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 	return new_type(Reference_Type{nt, nref})
 }
 
-// fold_constraint folds the imposed constraint to the set the value must fall
-// into (the LEFT side). A producer scope {-> X} is NOT flattened: its value is
-// the producer of fold_constraint(X), mirroring fold_value_type on the right so
-// {->u8} (constraint) matches u8 (value). A plain (non-producer) scope keeps
-// its shape.
-//
-// This is a STRUCTURAL fold: each composite case folds its children through
-// fold_constraint first, then combines the folded results — the tree is walked
-// exactly once, here. The per-domain folders (fold_constraint_integer/float/
-// string/bool) are combination KERNELS: they run on a synthetic node whose
-// children are already folded (so their own recursion only touches leaves),
-// which keeps the interval arithmetic identical by construction.
-//
-// The result is one of:
-//   * a folded domain set (Integer/Float/String/Bool) — fully resolved;
-//   * a shape-preserved node (Scope, symbolic &/|/~, string sequence/tri-range)
-//     that satisfy() decomposes;
-//   * Unknown_Type — the constraint depends on a `??` somewhere (directly,
-//     through a reference, or inside any composition) and can never denote a
-//     statically-known set; every case PROPAGATES a child's Unknown upward and
-//     typecheck() diagnoses it as Insoluble_Constraint;
-//   * nil — not statically resolvable for any other reason (silent skip).
-//
-// A self-referential scope (a constraint that mentions itself, e.g. the inductive
-// `Array -> {…; -> {T: ...Array:}}`) is NOT a problem for these folds directly:
-// the recursive TYPECHECK is handled by satisfy_recursive, which deliberately does
-// NOT fold the recursive tail carve (the shrinking value is its termination guard,
-// see its comment). The Scope/Carve field scan does re-enter such cycles, so it
-// alone carries an identity guard (scope_fields_fold_unknown); everywhere else a
-// cycle in the language is detected exactly where it lives (follow's binding
-// chain, the collapse stack in terminate.odin), never by a magic counter.
-// fold_pending_on records that the current fold touched `s` while it is still
-// being walked: the result is unusable and the dependent obligation must be
-// deferred until s closes (the analyzer queues it and scope_close re-runs it).
-// The first scope recorded wins — any open scope is a valid re-queue target; a
-// still-blocked re-run records the next one.
-fold_pending_on :: proc(s: ^Scope_Type) {
-	a := current_analyzer()
-	if a == nil || s == nil do return
-	// Only a scope STILL BEING WALKED is worth waiting for. An unresolved
-	// reference into a CLOSED scope is permanently broken (its close already
-	// reported the miss); re-queuing on it would loop the drain forever.
-	if !s.walking do return
-	if a.fold_pending == nil do a.fold_pending = s
-}
-
 // execute_target_scope resolves a collapse target to the underlying ^Scope_Type
 // it reduces through, peeling carves WITHOUT folding them (no clone). This is
 // the stable identity for the recursion guard: a recursive reference inside any
@@ -196,16 +150,6 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 		case Recursive_Mention_Type:
 			return t
 		case Scope_Type:
-			// A scope still being walked has missing bindings — nothing folded
-			// over it can be trusted; defer to its close.
-			if v.walking {
-				if s, s_ok := &t^.(Scope_Type); s_ok do fold_pending_on(s)
-				return nil
-			}
-			// A scope constraint is a statically-known set only if every field's
-			// value is — an unknown buried in a field (`{x -> ??::u8}`) makes the
-			// whole scope insoluble. The shape itself is preserved (satisfy_root
-			// matches productions / scope_satisfy matches fields).
 			if scope_fields_fold_unknown(t, v.values[:]) do return new_type(Unknown_Type{})
 			return t
 		case Carve_Type:
@@ -488,11 +432,6 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		switch v in t^ {
 		case Scope_Type:
-			// A scope still being walked has missing bindings — defer to its close.
-			if v.walking {
-				if s, s_ok := &t^.(Scope_Type); s_ok do fold_pending_on(s)
-				return nil
-			}
 			prods := scope_productions(v)
 			if len(prods) > 0 {
 				folded := make([dynamic]^Type, 0, len(prods))
@@ -663,7 +602,7 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 		append(&scope.types, nil)
 		append(&scope.kind, Binding_Kind.Product)
 		append(&scope.values, p)
-		append(&scope.type_folds, nil)
+		append(&scope.type_folds, p)
 		append(&scope.constraint_folds, nil)
 	}
 	r := new(Type)
@@ -756,50 +695,23 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 }
 
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
-	v, ok := fc^.(Scope_Type)
+	c, ok := fc^.(Scope_Type)
 	if ok {
-		v2, ok2 := ft^.(Scope_Type)
-		ft_content := ft
-		if ok2 {
-			prods := scope_productions(v2)
-			if len(prods) == 1 {
-				ft_content = prods[0]
+		prods := scope_productions(c)
+		prod_count := len(prods)
+		switch prod_count {
+		case 0, 1:
+			t, ok := ft^.(Scope_Type)
+			if ok {
+				return scope_satisfy(c, t)
 			}
-		}
-		hasProd := false
-		// A constraint root with productions is a sum: the value satisfies it
-		// if it matches AT LEAST ONE production. Each production IS the target
-		// constraint (the content the value must be). The value fold ft carries
-		// one extra producer level for sets ({->u8}) but not for singletons
-		// (10) — so compare the production against ft's content: ft's own
-		// production when ft is a producer, ft itself otherwise.
-		for i := 0; i < len(v.kind); i += 1 {
-			if (v.kind[i] == .Product) {
-				hasProd = true
-				// A BARE-COLORED production (`-> f32:`) imposes its COLOR							prod: ^Type = nil
-				prod: ^Type = nil
-				if i < len(v.types) &&
-				   v.types[i] != nil &&
-				   i < len(v.type_folds) &&
-				   v.type_folds[i] == v.values[i] {
-					if i < len(v.constraint_folds) do prod = v.constraint_folds[i]
-					if prod == nil do prod = fold_constraint(v.types[i])
-				}
-				// The production may be stored RAW (a Range_Type `0..`, a Mention,
-				// …) when the producer scope was not built by a fold — e.g. the
-				// literal `{->0..}`. fold_constraint normalizes it to its domain set
-				// (0..inf) so the comparison below is interval-against-interval, not
-				// Range-against-Integer (which `satisfy` cannot match). A builtin
-				// like `u8` is already an Integer, so folding is idempotent there.
-				if prod == nil do prod = fold_constraint(v.values[i])
-				if prod == nil do prod = v.values[i]
-				if (satisfy(prod, ft_content)) {
+			return false
+		case:
+			for i := 0; i < prod_count; i += 1 {
+				if satisfy(prods[i], ft) {
 					return true
 				}
 			}
-		}
-		if (hasProd) {
-			return false
 		}
 	}
 	return satisfy(fc, ft)
@@ -807,7 +719,7 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 
 scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
-	return scope_satisfy_range(cs, 0, len(cs.names) - 1, vs, 0, len(vs.names) - 1)
+	return scope_satisfy_range(cs, 0, len(cs.names), vs, 0, len(vs.names))
 }
 
 scope_satisfy_range :: proc(cs: Scope_Type, ci, cend: int, vs: Scope_Type, vi, vend: int) -> bool {
@@ -830,11 +742,18 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 	if cs.names[i] != vs.names[j] || cs.kind[i] != vs.kind[j] {
 		return false
 	}
-	v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
-	if (ok) {
-		return satisfy_root(fold_constraint_target(v.match_scope, v.match_index), vs.type_folds[j])
+	if cs.constraint_folds[i] == nil {
+		return satisfy(fold_constraint(cs.values[i]), vs.type_folds[j])
 	} else {
-		return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
+		v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
+		if (ok) {
+			return satisfy_root(
+				fold_constraint_target(v.match_scope, v.match_index),
+				vs.type_folds[j],
+			)
+		} else {
+			return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
+		}
 	}
 }
 
@@ -1514,21 +1433,10 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 			// A carve of a carve: fold the inner one first so we substitute onto
 			// the already-substituted scope.
 			src = fold_carve(cur)
-		case Recursive_Mention_Type:
-			// A self-mention source whose scope is still walking: the carve
-			// cannot materialize yet — defer to that scope's close.
-			if s.match_scope != nil && s.match_scope.walking do fold_pending_on(s.match_scope)
 		}
 		break
 	}
 	if src == nil do return nil
-	if src.walking {
-		// The source scope is still being walked: a clone now would miss its
-		// remaining bindings. Defer to its close.
-		fold_pending_on(src)
-		return nil
-	}
-
 	// Re-entry guard: folding a carve can reach the SAME carve node again (its
 	// own placeholder value while a recursive constraint materializes its
 	// default) — cloning forever. Bail the inner re-entry; each level of an
