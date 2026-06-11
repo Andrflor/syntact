@@ -98,8 +98,8 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		return reduce_mention(v, value)
 	case Reference_Type:
 		return reduce_reference(v, value)
-	case Recursive_Reference_Type:
-		return reduce_recursive_reference(v, value)
+	case Recursive_Mention_Type:
+		return reduce_recursive_mention(v, value)
 	case Scope_Type:
 		return reduce_scope(&v)
 	case Integer_Type:
@@ -168,18 +168,12 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 	return reduce_value(target)
 }
 
-// reduce_recursive_reference mirrors reduce_mention for a recursive reference:
-// by analysis time every surviving one is resolved (a self one designates the
-// scope itself, a named one carries its field index), so it reduces like the
-// mention it stands for. An unresolved one (analysis errored) stays opaque.
-reduce_recursive_reference :: proc(v: Recursive_Reference_Type, node: ^Type) -> ^Type {
-	if v.self {
-		if v.target == nil do return node
-		if is_fixed_point(v.target) do return follow_to_fixedpoint(v.target)
-		return reduce_value(v.target)
-	}
-	if v.scope == nil || v.match_index < 0 do return node
-	bound := v.scope.values[v.match_index]
+// reduce_recursive_mention mirrors reduce_mention for a self mention: by analysis
+// time it carries its self binding (match_scope, match_index), so it reduces like
+// the mention it stands for. An unresolved one (analysis errored) stays opaque.
+reduce_recursive_mention :: proc(v: Recursive_Mention_Type, node: ^Type) -> ^Type {
+	if v.match_scope == nil || v.match_index < 0 do return node
+	bound := v.match_scope.values[v.match_index]
 	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
 	return reduce_value(bound)
 }

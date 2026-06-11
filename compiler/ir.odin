@@ -181,23 +181,19 @@ Mention_Type :: struct {
 	match_index: int,
 }
 
-// A reference into a scope that was not yet entirely walked at its use site —
-// a self-reference (`Array` inside Array's body, self=true) or a forward
-// property into an enclosing scope still being walked (`module.odd` before odd
-// is bound, self=false). This is a PERMANENT IR node: it marks recursion
-// explicitly, so the satisfy layer detects an inductive production structurally
-// (a binding that follows to one of these) and it survives carve cloning
-// unchanged (repoint never rewrites it). A self one is always followable (the
-// scope pointer is valid even while incomplete); a named one stays opaque until
-// the deferred pass fills `match_index` when `scope` finishes walking (see
-// scope_close in analyze.odin).
-Recursive_Reference_Type :: struct {
-	name:        string,       // how it was written (diagnostics/printing)
-	ordinal:     i16,
-	self:        bool,         // true = the open scope itself (a mention)
-	target:      ^Type,        // the open scope's ^Type (a Scope_Type variant)
-	scope:       ^Scope_Type,  // the same scope, for resolution and identity
-	match_index: int,          // field index in scope; -1 until resolved
+// A by-name mention of something that mentions ITSELF: the open scope referring
+// to its own binding (`fib` inside fib, `Array` inside Array), or a field that
+// names itself from within an inner scope (`a -> { -> {0 a} }` — the inner `a`).
+// It is structurally a Mention_Type — `match_scope.values[match_index]` is the
+// self binding — but kept a distinct node so folds defer through it, the satisfy
+// layer detects the inductive step, and it survives carve cloning unchanged
+// (repoint never rewrites it). The scope pointer is valid even while the scope is
+// still walking; CONSUMERS check `walking`. To take a genuine (non-self) handle
+// on a binding, use Reference_Type instead.
+Recursive_Mention_Type :: struct {
+	name:        string,
+	match_scope: ^Scope_Type, // the scope holding the self binding (valid while walking)
+	match_index: int, // field index in match_scope; -1 until resolved
 }
 
 // Integer domain leaf: a normalized set of intervals (e.g. u8 = 0..255) plus the
@@ -317,7 +313,7 @@ Type :: union {
 	Carve_Type,
 	Mention_Type,
 	Reference_Type,
-	Recursive_Reference_Type,
+	Recursive_Mention_Type,
 	Pattern_Type,
 }
 
@@ -728,7 +724,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			print_type(v.match_scope.values[v.match_index], depth)
 		}
 
-	case Recursive_Reference_Type:
+	case Recursive_Mention_Type:
 		// Never expand through it — that is the whole point of the node.
 		fmt.print(v.name != "" ? v.name : "<recursive>")
 
@@ -921,7 +917,7 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 		strings.write_byte(b, '!')
 	case Mention_Type:
 		strings.write_string(b, v.name != "" ? v.name : "<mention>")
-	case Recursive_Reference_Type:
+	case Recursive_Mention_Type:
 		strings.write_string(b, v.name != "" ? v.name : "<recursive>")
 	case Reference_Type:
 		if v.target != nil {
