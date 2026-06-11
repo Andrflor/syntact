@@ -1,0 +1,1 @@
+{ "name": "tc_prod_int_union_gap_bad", "description": "a value outside the producer's union is rejected (12 not in typeof 0|10)", "source": "{->0|10}:b -> 0|12", "expect_errors": ["Constraint_Mismatch"] }
