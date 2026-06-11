@@ -755,36 +755,6 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 	return out
 }
 
-// recursive_ref_binding finds, within a producer scope `prod`, the index of a
-// binding that IS a recursive mention — the explicit Recursive_Mention node
-// the analyzer records for a self mention (`...Array`), or a carve over
-// one (`...Array{T}`). The node survives carve cloning unchanged (repoint never
-// rewrites it), so the detection needs NO root-identity bookkeeping: the
-// inductive step is wherever the node sits, whatever clone holds it. Returns
-// (index, the binding's constraint/value carrying the reference, true).
-recursive_ref_binding :: proc(prod: ^Type) -> (idx: int, tail: ^Type, ok: bool) {
-	ps, is_scope := prod^.(Scope_Type)
-	if !is_scope do return 0, nil, false
-	for i in 0 ..< len(ps.kind) {
-		// An expand/product binding may carry the reference as its coloring
-		// (`...Array{T}:` stores the carve in types) or as its value.
-		raw := i < len(ps.types) && ps.types[i] != nil ? ps.types[i] : ps.values[i]
-		if raw == nil do continue
-		// The reference node itself (bare `...Array`) — checked BEFORE follow,
-		// which would chase a resolved one through to the scope.
-		if _, is_rr := raw^.(Recursive_Mention_Type); is_rr {
-			return i, raw, true
-		}
-		resolved := follow(raw)
-		if cv, is_carve := resolved^.(Carve_Type); is_carve && cv.source != nil {
-			if _, is_rr := cv.source^.(Recursive_Mention_Type); is_rr {
-				return i, resolved, true
-			}
-		}
-	}
-	return 0, nil, false
-}
-
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	v, ok := fc^.(Scope_Type)
 	if ok {
