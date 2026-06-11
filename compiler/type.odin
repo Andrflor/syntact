@@ -193,6 +193,8 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// A `??` can never denote a statically-known set: the Unknown IS the
 			// fold result, propagated by every composite case below.
 			return t
+		case Recursive_Mention_Type:
+			return t
 		case Scope_Type:
 			// A scope still being walked has missing bindings — nothing folded
 			// over it can be trusted; defer to its close.
@@ -520,14 +522,7 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			eff := reference_effective_value(v)
 			if eff != nil do return fold_value_type(eff)
 		case Recursive_Mention_Type:
-			// A self mention: defer while its scope is still walking (its bindings
-			// aren't all known yet), else the value type of its self binding.
-			if v.match_scope == nil || v.match_index < 0 do return nil
-			if v.match_scope.walking {
-				fold_pending_on(v.match_scope)
-				return nil
-			}
-			return fold_value_type(v.match_scope.values[v.match_index])
+			return t
 		case And_Type:
 			// A set expression (`0|10`, `..9 & 11..`, `'a'..'z'`) is a VALUE whose type
 			// is the producer of its domain envelope IN INTERVALS — value_type_envelope
@@ -699,6 +694,8 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	}
 	#partial switch f in fc^ {
 	case Recursive_Mention_Type:
+		c := fold_constraint(f.match_scope.values[f.match_index])
+		return satisfy(c, ft)
 	case Compose_Type:
 		// A string concatenation `+` kept as a Compose is an ordered SEQUENCE
 		// constraint: the value (a concrete string) must split, left to right, into
@@ -844,25 +841,12 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 	for i in 0 ..< len(cs.names) {
 		if vs.names[i] != cs.names[i] do return false
 		if vs.kind[i] != cs.kind[i] do return false
-
-		if cs.kind[i] == .Product {
-			// Producer binding: match the produced CONTENT, not just shape —
-			// a producer of u8 ({->u8}) must not satisfy a producer of a
-			// producer ({->{->u8}}).
-			if !satisfy(cs.values[i], vs.values[i]) do return false
-			continue
+		v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
+		if (ok) {
+			if !satisfy_root(fold_constraint_target(v.match_scope, v.match_index), vs.type_folds[i]) do return false
+		} else {
+			if !satisfy_root(cs.constraint_folds[i], vs.type_folds[i]) do return false
 		}
-
-		// Structural binding (named): structural coloring. The constraint
-		// colored onto cs's binding (u8 on x) must be satisfied by vs's value
-		// (10 on x). Each side carries its fold from analysis: cs the
-		// constraint fold, vs the value type fold. A side with no constraint
-		// (plain `x -> 10`) imposes nothing → skip.
-		cc := i < len(cs.constraint_folds) ? cs.constraint_folds[i] : nil
-		if cc == nil do continue
-		vt := i < len(vs.type_folds) ? vs.type_folds[i] : nil
-		if vt == nil do return false // unresolved value can't satisfy a constraint
-		if !satisfy_root(cc, vt) do return false
 	}
 	return true
 }
