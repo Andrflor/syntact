@@ -813,7 +813,6 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 				ft_content = prods[0]
 			}
 		}
-
 		hasProd := false
 		// A constraint root with productions is a sum: the value satisfies it
 		// if it matches AT LEAST ONE production. Each production IS the target
