@@ -264,11 +264,9 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	case Reference_Type:
 		ref := v.reference
 		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-		if v.target != nil {
-			if carve_it, ok := carve_fold_lookup(v.target, ref.match_index).(Integer_Type); ok {
-				return carve_it
-			}
-		}
+		// match_scope already points at the substituted scope for a carved property
+		// (resolve_property_site folds the carve), so the cached fold is correct —
+		// read it directly, like float/string/bool do.
 		if s, ok := stored_fold_intervals(
 			   ref.match_scope.type_folds[ref.match_index],
 		   ).(Integer_Type); ok {
@@ -347,34 +345,6 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 			return fold_constraint_intervals(ref.match_scope.types[ref.match_index])
 		}
-	}
-	return nil
-}
-
-carve_fold_lookup :: proc(t: ^Type, index: int) -> Maybe(Integer_Type) {
-	if t == nil do return nil
-	target := t
-	for {
-		#partial switch v in target^ {
-		case Carve_Type:
-			for i := 0; i < len(v.references); i += 1 {
-				if v.references[i].match_index == index {
-					it, ok := fold_type_intervals(v.types[i]).(Integer_Type)
-					if ok do return it
-					it2, ok2 := fold_constraint_intervals(v.types[i]).(Integer_Type)
-					if ok2 do return it2
-					return nil
-				}
-			}
-			target = v.source
-			continue
-		case Mention_Type:
-			if v.match_scope != nil && v.match_index >= 0 {
-				target = v.match_scope.types[v.match_index]
-				continue
-			}
-		}
-		break
 	}
 	return nil
 }
