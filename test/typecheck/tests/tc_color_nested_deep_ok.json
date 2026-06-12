@@ -1,0 +1,1 @@
+{ "name": "tc_color_nested_deep_ok", "description": "a doubly-colored {{string:}:} accepts a doubly-nested string value", "source": "{{string:}:}:a -> {{\"\"}}", "expect_errors": [] }

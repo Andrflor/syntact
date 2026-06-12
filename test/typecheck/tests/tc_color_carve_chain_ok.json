@@ -1,0 +1,1 @@
+{ "name": "tc_color_carve_chain_ok", "description": "carving b (itself a carve of a) with a string satisfies the color inherited through the chain", "source": "{string:}:a -> {\"\"}\nb -> a{\"x\"}\nb{\"y\"}", "expect_errors": [] }

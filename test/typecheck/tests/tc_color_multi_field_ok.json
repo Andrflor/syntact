@@ -1,0 +1,1 @@
+{ "name": "tc_color_multi_field_ok", "description": "carving a {string: u8:} binding with a string and a u8 satisfies both propagated colors", "source": "{string: u8:}:a -> {\"\" 0}\na{\"ok\" 5}", "expect_errors": [] }

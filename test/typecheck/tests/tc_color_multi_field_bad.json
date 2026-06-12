@@ -1,0 +1,1 @@
+{ "name": "tc_color_multi_field_bad", "description": "a two-field colored scope {string: u8:} carries a distinct color per field; carving 1 (not string) and a string (not u8) violates both", "source": "{string: u8:}:a -> {\"\" 0}\na{1 \"bad\"}", "expect_errors": ["Constraint_Mismatch", "Constraint_Mismatch"] }

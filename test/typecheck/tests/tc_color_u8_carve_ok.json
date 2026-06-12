@@ -1,0 +1,1 @@
+{ "name": "tc_color_u8_carve_ok", "description": "a u8 color propagated to the value accepts an in-range carve (200 fits 0..255)", "source": "{u8:}:a -> {0}\na{200}", "expect_errors": [] }

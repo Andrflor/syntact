@@ -1,0 +1,1 @@
+{ "name": "tc_color_u8_negative_bad", "description": "a u8 color propagated to the value rejects a negative carve (-1 < 0)", "source": "{u8:}:a -> {0}\na{-1}", "expect_errors": ["Constraint_Mismatch"] }

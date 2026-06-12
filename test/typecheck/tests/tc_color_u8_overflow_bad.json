@@ -1,0 +1,1 @@
+{ "name": "tc_color_u8_overflow_bad", "description": "a u8 color propagated to the value rejects an out-of-range carve (300 > 255)", "source": "{u8:}:a -> {0}\na{300}", "expect_errors": ["Constraint_Mismatch"] }
