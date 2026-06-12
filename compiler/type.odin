@@ -1008,6 +1008,15 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 		}
 	}
 
+	// Repoint every reference that named the source scope so it names the copy:
+	// dependent fields (`y -> x+1`) now read the substituted values, cascading
+	// transitively. Done IN PLACE on `copy` so each mention's match_scope becomes
+	// `copy` itself, then refresh the cached folds so the integer/float/... folders
+	// (which read a mention's fold from the SCOPE's type_folds) see it.
+	for v, i in copy.types do copy.types[i] = repoint(v, src, copy)
+	for ty, i in copy.constraints do copy.constraints[i] = repoint(ty, src, copy)
+	for f, i in copy.type_folds do copy.type_folds[i] = fold_type(copy.types[i])
+	for f, i in copy.constraint_folds do copy.constraint_folds[i] = fold_constraint(copy.constraints[i])
 
 	return copy
 }

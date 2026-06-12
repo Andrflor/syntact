@@ -1102,9 +1102,14 @@ resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Sc
 		case Scope_Type:
 			return scope_resolve(&t, name, ordinal, true)
 		case Carve_Type:
-			if t.source != nil {
-				prop_target = follow(t.source)
-				continue
+			// Resolve the property against the SUBSTITUTED scope (overrides applied
+			// + repointed), not the raw source: `b.z` where b = a{x->10} and z -> x
+			// must see z = 10, not the pre-carve a.z = 0. fold_carve_type does the
+			// full substitution; scope_resolve then lands on the field whose value
+			// already reflects the carve, so the folder reads the right type_fold
+			// directly (no carve_fold_lookup shortcut needed).
+			if sub := fold_carve_type(prop_target); sub != nil {
+				return scope_resolve(sub, name, ordinal, true)
 			}
 		}
 		break
