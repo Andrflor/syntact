@@ -156,7 +156,7 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 				if s, sok := stored_fold_float(v.type_folds[i]).(Float_Type); sok {
 					return s
 				}
-				return fold_type_float_intervals(v.values[i])
+				return fold_type_float_intervals(v.types[i])
 			}
 		}
 		return nil
@@ -196,22 +196,38 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 				// `>x` is the open interval (x, +∞): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{hi, nil, true, false}
-				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
+				return Float_Type {
+					float_intervals,
+					right_kind,
+					default_for_float_intervals(float_intervals),
+				}
 			case .GreaterEqual:
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{right_segs[0].lo, nil, false, false}
-				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
+				return Float_Type {
+					float_intervals,
+					right_kind,
+					default_for_float_intervals(float_intervals),
+				}
 			case .Less:
 				lo, lo_ok := right_segs[0].lo.(f64)
 				if !lo_ok do return nil
 				// `<x` is the open interval (-∞, x): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{nil, lo, false, true}
-				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
+				return Float_Type {
+					float_intervals,
+					right_kind,
+					default_for_float_intervals(float_intervals),
+				}
 			case .LessEqual:
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{nil, right_segs[0].hi, false, false}
-				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
+				return Float_Type {
+					float_intervals,
+					right_kind,
+					default_for_float_intervals(float_intervals),
+				}
 			case .Subtract:
 				lo, lo_ok := right_segs[0].lo.(f64)
 				hi, hi_ok := right_segs[0].hi.(f64)
@@ -219,8 +235,17 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 				// arithmetic negation mirrors the interval: the old hi (with its
 				// openness) becomes the new lo, and vice versa.
 				float_intervals := make([]Float_Interval, 1)
-				float_intervals[0] = Float_Interval{-hi, -lo, right_segs[0].hi_open, right_segs[0].lo_open}
-				return Float_Type{float_intervals, right_kind, default_for_float_intervals(float_intervals)}
+				float_intervals[0] = Float_Interval {
+					-hi,
+					-lo,
+					right_segs[0].hi_open,
+					right_segs[0].lo_open,
+				}
+				return Float_Type {
+					float_intervals,
+					right_kind,
+					default_for_float_intervals(float_intervals),
+				}
 			}
 			return nil
 		}
@@ -242,7 +267,11 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 			}
 		}
 		segs := float_intervals_normalize(result[:])
-		return Float_Type{segs, promote_float_kind(left.kind, right.kind), default_for_float_intervals(segs)}
+		return Float_Type {
+			segs,
+			promote_float_kind(left.kind, right.kind),
+			default_for_float_intervals(segs),
+		}
 	case Cast_Type:
 		// Mirror integer.odin: a `::` produces its target's envelope (the cached
 		// concrete value when the source was concrete, else the whole target), so an
@@ -253,10 +282,13 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 		return fold_constraint_float_intervals(v.target)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if s, sok := stored_fold_float(v.match_scope.type_folds[v.match_index]).(Float_Type); sok {
+			if s, sok := stored_fold_float(v.match_scope.type_folds[v.match_index]).(Float_Type);
+			   sok {
 				return s
 			}
-			if s, sok := stored_fold_float(v.match_scope.constraint_folds[v.match_index]).(Float_Type); sok {
+			if s, sok := stored_fold_float(
+				   v.match_scope.constraint_folds[v.match_index],
+			   ).(Float_Type); sok {
 				return s
 			}
 		}
@@ -264,10 +296,13 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 	case Reference_Type:
 		ref := v.reference
 		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-		if s, sok := stored_fold_float(ref.match_scope.type_folds[ref.match_index]).(Float_Type); sok {
+		if s, sok := stored_fold_float(ref.match_scope.type_folds[ref.match_index]).(Float_Type);
+		   sok {
 			return s
 		}
-		if s, sok := stored_fold_float(ref.match_scope.constraint_folds[ref.match_index]).(Float_Type); sok {
+		if s, sok := stored_fold_float(
+			   ref.match_scope.constraint_folds[ref.match_index],
+		   ).(Float_Type); sok {
 			return s
 		}
 		return nil
@@ -281,7 +316,7 @@ fold_constraint_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return fold_constraint_float_intervals(v.values[i])
+				return fold_constraint_float_intervals(v.types[i])
 			}
 		}
 		return nil
@@ -329,12 +364,12 @@ fold_constraint_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 		return float_type_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return fold_constraint_float_intervals(v.match_scope.values[v.match_index])
+			return fold_constraint_float_intervals(v.match_scope.types[v.match_index])
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			return fold_constraint_float_intervals(ref.match_scope.values[ref.match_index])
+			return fold_constraint_float_intervals(ref.match_scope.types[ref.match_index])
 		}
 	}
 	return nil
@@ -588,12 +623,20 @@ range_span_float_bounds :: proc(
 	left_segs, right_segs: []Float_Interval,
 	left_open := false,
 	right_open := false,
-) -> (Maybe(f64), Maybe(f64)) {
+) -> (
+	Maybe(f64),
+	Maybe(f64),
+) {
 	lo: Maybe(f64) = nil
 	hi: Maybe(f64) = nil
 	lo_set := false
 	hi_set := false
-	consider :: proc(segs: []Float_Interval, lo: ^Maybe(f64), hi: ^Maybe(f64), lo_set, hi_set: ^bool) {
+	consider :: proc(
+		segs: []Float_Interval,
+		lo: ^Maybe(f64),
+		hi: ^Maybe(f64),
+		lo_set, hi_set: ^bool,
+	) {
 		for s in segs {
 			if l, ok := s.lo.(f64); ok {
 				if !lo_set^ {
@@ -810,8 +853,8 @@ float_display :: proc(f: f64) -> string {
 	if strings.index_byte(s, '.') < 0 &&
 	   strings.index_byte(s, 'e') < 0 &&
 	   strings.index_byte(s, 'E') < 0 &&
-	   strings.index_byte(s, 'n') < 0 && // nan
-	   strings.index_byte(s, 'i') < 0 { 	// inf
+	   strings.index_byte(s, 'n') < 0 &&
+	   strings.index_byte(s, 'i') < 0 { 	// nan// inf
 		return strings.concatenate({s, ".0"})
 	}
 	return s

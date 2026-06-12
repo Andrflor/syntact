@@ -17,7 +17,7 @@ unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	if m, ok := constraint^.(Mention_Type); ok {
 		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(copy.kind) {
 			if copy.kind[m.match_index] == .Pointing_Pull {
-				copy.values[m.match_index] = value
+				copy.types[m.match_index] = value
 				if m.match_index < len(copy.type_folds) {
 					copy.type_folds[m.match_index] = fold_value_type(value)
 				}
@@ -36,7 +36,7 @@ unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 				// find the value override hitting the same slot
 				for vi in 0 ..< len(vc.references) {
 					if vc.references[vi].match_index == slot {
-						unify_pull(cc.values[ci], vc.values[vi], copy, src)
+						unify_pull(cc.types[ci], vc.types[vi], copy, src)
 						break
 					}
 				}
@@ -48,9 +48,9 @@ unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	// Two scopes: unify field-by-field by position.
 	if cs, c_ok := &constraint^.(Scope_Type); c_ok {
 		if vs, v_ok := &value^.(Scope_Type); v_ok {
-			n := min(len(cs.values), len(vs.values))
+			n := min(len(cs.types), len(vs.types))
 			for i in 0 ..< n {
-				unify_pull(cs.values[i], vs.values[i], copy, src)
+				unify_pull(cs.types[i], vs.types[i], copy, src)
 			}
 		}
 	}
@@ -93,13 +93,13 @@ carve_pull_conflict :: proc(t: ^Type) -> (Pull_Conflict, bool) {
 		// A direct override of the pull binding itself (`e<-4`) is a binding too.
 		if src.kind[ref.match_index] == .Pointing_Pull {
 			list := bound[ref.match_index] or_else make([dynamic]^Type)
-			append(&list, carve.values[i])
+			append(&list, carve.types[i])
 			bound[ref.match_index] = list
 			continue
 		}
 		// An override of a field whose constraint mentions a pull (`data{e}:s`).
-		if ref.match_index < len(src.types) {
-			gather_pull_bindings(src.types[ref.match_index], carve.values[i], src, &bound)
+		if ref.match_index < len(src.constraints) {
+			gather_pull_bindings(src.constraints[ref.match_index], carve.types[i], src, &bound)
 		}
 	}
 
@@ -148,7 +148,7 @@ gather_pull_bindings :: proc(
 				slot := cc.references[ci].match_index
 				for vi in 0 ..< len(vc.references) {
 					if vc.references[vi].match_index == slot {
-						gather_pull_bindings(cc.values[ci], vc.values[vi], src, bound)
+						gather_pull_bindings(cc.types[ci], vc.types[vi], src, bound)
 						break
 					}
 				}
@@ -158,9 +158,9 @@ gather_pull_bindings :: proc(
 	}
 	if cs, c_ok := &constraint^.(Scope_Type); c_ok {
 		if vs, v_ok := &value^.(Scope_Type); v_ok {
-			n := min(len(cs.values), len(vs.values))
+			n := min(len(cs.types), len(vs.types))
 			for i in 0 ..< n {
-				gather_pull_bindings(cs.values[i], vs.values[i], src, bound)
+				gather_pull_bindings(cs.types[i], vs.types[i], src, bound)
 			}
 		}
 	}

@@ -123,10 +123,10 @@ Negate_Type :: struct {
 Scope_Type :: struct {
 	parent:           ^Scope_Type,
 	names:            [dynamic]string,
-	types:            [dynamic]^Type,
 	kind:             [dynamic]Binding_Kind,
-	values:           [dynamic]^Type,
+	types:            [dynamic]^Type,
 	type_folds:       [dynamic]^Type,
+	constraints:      [dynamic]^Type,
 	constraint_folds: [dynamic]^Type,
 	// captures: a second, INVISIBLE name per binding (the `(e)` capture span).
 	// Parallel to the columns above: "" when a field has no capture. Unlike
@@ -153,7 +153,7 @@ Execute_Type :: struct {
 Carve_Type :: struct {
 	source:     ^Type,
 	references: [dynamic]Reference,
-	values:     [dynamic]^Type,
+	types:      [dynamic]^Type,
 }
 
 // A resolved pointer to a specific binding: (match_scope, match_index) is the
@@ -184,7 +184,7 @@ Mention_Type :: struct {
 // A by-name mention of something that mentions ITSELF: the open scope referring
 // to its own binding (`fib` inside fib, `Array` inside Array), or a field that
 // names itself from within an inner scope (`a -> { -> {0 a} }` — the inner `a`).
-// It is structurally a Mention_Type — `match_scope.values[match_index]` is the
+// It is structurally a Mention_Type — `match_scope.types[match_index]` is the
 // self binding — but kept a distinct node so folds defer through it, the satisfy
 // layer detects the inductive step, and it survives carve cloning unchanged
 // (repoint never rewrites it). The scope pointer is valid even while the scope is
@@ -381,7 +381,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 			// Prefer the field's cached concrete fold over its raw value: a computed
 			// field (`y -> x+10`) keeps `x + 10` in values[i] but its materialized
 			// result (15) in type_folds[i]. Mirrors the default-suite runner.
-			fv := v.values[i]
+			fv := v.types[i]
 			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
 			if v.kind[i] == .Product {
 				strings.write_string(b, "-> ")
@@ -528,35 +528,38 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			fmt.print("{}")
 			break
 		}
-		if len(v.names) == 1 && v.kind[0] == .Product && v.names[0] == "" && v.types[0] == nil {
+		if len(v.names) == 1 &&
+		   v.kind[0] == .Product &&
+		   v.names[0] == "" &&
+		   v.constraints[0] == nil {
 			// Root scope (the file): collapse to its sole production.
 			if depth == 0 {
-				print_type(v.values[0], depth)
+				print_type(v.types[0], depth)
 				break
 			}
 			// Nested single-production scope = a producer {->X}: print inline.
 			fmt.print("{->")
-			print_type(v.values[0], depth)
+			print_type(v.types[0], depth)
 			fmt.print("}")
 			break
 		}
 		fmt.println("{")
 		for i := 0; i < len(v.names); i += 1 {
 			indent(depth + 1)
-			has_constraint := v.types[i] != nil
+			has_constraint := v.constraints[i] != nil
 			has_name := v.names[i] != ""
 			if v.kind[i] == .Expand {
 				fmt.print("...")
 				if has_constraint {
-					print_type(v.types[i], depth + 1)
+					print_type(v.constraints[i], depth + 1)
 					fmt.print(": -> ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				} else {
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				}
 			} else {
 				if has_constraint {
-					print_type(v.types[i], depth + 1)
+					print_type(v.constraints[i], depth + 1)
 					fmt.print(":")
 				}
 				if has_name {
@@ -567,32 +570,32 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 					if has_name || has_constraint {
 						fmt.print(" -> ")
 					}
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Pointing_Pull:
 					fmt.print(" <- ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Event_Push:
 					fmt.print(" >- ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Event_Pull:
 					fmt.print(" -< ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Resonance_Push:
 					fmt.print(" >>- ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Resonance_Pull:
 					fmt.print(" -<< ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Reactive_Push:
 					fmt.print(" >>= ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Reactive_Pull:
 					fmt.print(" =<< ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				case .Expand:
 				case .Product:
 					fmt.print("-> ")
-					print_type(v.values[i], depth + 1)
+					print_type(v.types[i], depth + 1)
 				}
 			}
 			has_tf := i < len(v.type_folds) && v.type_folds[i] != nil
@@ -612,7 +615,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 				// evaluating to 0 — distinct from `{n -> 0, 0}`). So when the member's
 				// value resolves to a scope, render that scope's members directly (each
 				// with its own type_fold); the typecheck fold layer stays unchanged.
-				print_fold_inline(member_type_fold_display(v.values[i], v.type_folds[i]))
+				print_fold_inline(member_type_fold_display(v.types[i], v.type_folds[i]))
 				fmt.print(" ")
 			}
 			if has_cf {
@@ -699,7 +702,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			ref := v.references[i]
 			n, n_ok := ref.name.(string)
 			if n_ok && n != "" do fmt.printf("%s -> ", n)
-			print_type(v.values[i], depth)
+			print_type(v.types[i], depth)
 		}
 		fmt.print("}")
 
@@ -721,7 +724,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		if v.name != "" {
 			fmt.print(v.name)
 		} else if v.match_scope != nil && v.match_index >= 0 {
-			print_type(v.match_scope.values[v.match_index], depth)
+			print_type(v.match_scope.types[v.match_index], depth)
 		}
 
 	case Recursive_Mention_Type:
@@ -886,7 +889,7 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 			//   * a bare anonymous child (no name, not a production) renders as its value.
 			// Prefer the member's cached type_fold over its raw value: a computed field
 			// shows its folded result, not the expression.
-			fv := v.values[i]
+			fv := v.types[i]
 			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
 			if v.names[i] != "" {
 				strings.write_string(b, v.names[i])
@@ -909,7 +912,7 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 				strings.write_string(b, n)
 				strings.write_string(b, "->")
 			}
-			write_fold(b, v.values[i])
+			write_fold(b, v.types[i])
 		}
 		strings.write_byte(b, '}')
 	case Execute_Type:
