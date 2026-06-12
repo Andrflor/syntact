@@ -1103,7 +1103,7 @@ scope_of_identifier :: proc(doc: ^Document, ident: compiler.Node_Index) -> ^comp
 	if enc == nil do return nil
 	s, idx := compiler.scope_resolve(enc, name, -1, true)
 	if s == nil do return nil
-	val := compiler.follow(s.values[idx])
+	val := compiler.follow(s.types[idx])
 	if val == nil do return nil
 	if sc, ok := &val.(compiler.Scope_Type); ok do return sc
 	return nil
@@ -1154,7 +1154,7 @@ make_completion_item :: proc(scope: ^compiler.Scope_Type, i: int) -> json.Value 
 	item["insertTextFormat"] = json.Integer(1) // plain text
 
 	kind := scope.kind[i]
-	value := scope.values[i]
+	value := scope.types[i]
 	ckind := COMPLETION_KIND_VARIABLE
 	#partial switch kind {
 	case .Pointing_Push:
