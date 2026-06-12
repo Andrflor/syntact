@@ -20,22 +20,38 @@ import bc "bytecode"
 // are guarded against upstream (non-arithmetic operators don't reach lowering).
 op_to_bc :: proc(op: Operator_Kind) -> bc.BC_Op {
 	#partial switch op {
-	case .Add:          return .Add
-	case .Subtract:     return .Subtract
-	case .Multiply:     return .Multiply
-	case .Divide:       return .Divide
-	case .Mod:          return .Mod
-	case .And, .BitAnd: return .BitAnd
-	case .Or, .BitOr:   return .BitOr
-	case .Xor:          return .BitXor
-	case .LShift:       return .LShift
-	case .RShift:       return .RShift
-	case .Equal:        return .Equal
-	case .NotEqual:     return .NotEqual
-	case .Less:         return .Less
-	case .Greater:      return .Greater
-	case .LessEqual:    return .LessEqual
-	case .GreaterEqual: return .GreaterEqual
+	case .Add:
+		return .Add
+	case .Subtract:
+		return .Subtract
+	case .Multiply:
+		return .Multiply
+	case .Divide:
+		return .Divide
+	case .Mod:
+		return .Mod
+	case .And, .BitAnd:
+		return .BitAnd
+	case .Or, .BitOr:
+		return .BitOr
+	case .Xor:
+		return .BitXor
+	case .LShift:
+		return .LShift
+	case .RShift:
+		return .RShift
+	case .Equal:
+		return .Equal
+	case .NotEqual:
+		return .NotEqual
+	case .Less:
+		return .Less
+	case .Greater:
+		return .Greater
+	case .LessEqual:
+		return .LessEqual
+	case .GreaterEqual:
+		return .GreaterEqual
 	}
 	return .Add
 }
@@ -93,7 +109,7 @@ machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 		}
 		return .None
 	case Compose_Type:
-		if env := fold_value_type(node); env != nil && env != node {
+		if env := fold_type(node); env != nil && env != node {
 			return machine_type_of(env)
 		}
 		lm := machine_type_of(v.left)
@@ -212,7 +228,10 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 		// not arithmetic — needs runtime concat + length (pattern capture), not
 		// implemented yet. Reject before lowering its operands.
 		if bc_compose_is_string(node) {
-			dst = bc_fail(l, "codegen: symbolic string concatenation not yet supported (needs pattern capture)")
+			dst = bc_fail(
+				l,
+				"codegen: symbolic string concatenation not yet supported (needs pattern capture)",
+			)
 		} else {
 			dst = bc_lower_compose(l, node, v)
 		}
@@ -255,9 +274,16 @@ bc_lower_compose :: proc(l: ^BC_Lower, node: ^Type, v: Compose_Type) -> bc.BC_Va
 
 	// Float operands never fold to an integer immediate — keep them register form.
 	is_float := bc.mtype_is_float(mt)
-	if is_float {l_const = false; r_const = false}
+	if is_float {l_const = false;r_const = false}
 
-	commutative := op == .Add || op == .Multiply || op == .BitAnd || op == .BitOr || op == .BitXor || op == .Equal || op == .NotEqual
+	commutative :=
+		op == .Add ||
+		op == .Multiply ||
+		op == .BitAnd ||
+		op == .BitOr ||
+		op == .BitXor ||
+		op == .Equal ||
+		op == .NotEqual
 
 	// Right operand constant: a op #rk — always valid (immediate is the right side).
 	if r_const && !l_const {
@@ -285,7 +311,15 @@ bc_lower_compose :: proc(l: ^BC_Lower, node: ^Type, v: Compose_Type) -> bc.BC_Va
 	return dst
 }
 
-bc_emit_imm :: proc(l: ^BC_Lower, node: ^Type, op: bc.BC_Op, a: bc.BC_Value, imm: i64, cmp: bool, mt_in: bc.Machine_Type) -> bc.BC_Value {
+bc_emit_imm :: proc(
+	l: ^BC_Lower,
+	node: ^Type,
+	op: bc.BC_Op,
+	a: bc.BC_Value,
+	imm: i64,
+	cmp: bool,
+	mt_in: bc.Machine_Type,
+) -> bc.BC_Value {
 	mt := mt_in
 	if mt == .None do mt = l.prog.value_types[a]
 	if cmp {
@@ -363,8 +397,8 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 		// fall through into one another.
 		if bval, is_bool := bc_branch_bool_value(branch); is_bool {
 			next := bc_fresh_label(l)
-			want := bc_fresh_value(l); bc_emit(l, bc.BC_Const{want, bval ? 1 : 0})
-			eq := bc_fresh_value(l, .U8); bc_emit(l, bc.BC_Cmp{eq, .Equal, target, want})
+			want := bc_fresh_value(l);bc_emit(l, bc.BC_Const{want, bval ? 1 : 0})
+			eq := bc_fresh_value(l, .U8);bc_emit(l, bc.BC_Cmp{eq, .Equal, target, want})
 			bc_emit(l, bc.BC_Branch_Zero{eq, next}) // target != bval → skip this branch
 			prod := bc_lower_value(l, branch.product)
 			bc_emit(l, bc.BC_Move{result, prod})
@@ -380,11 +414,11 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 			continue
 		}
 		next := bc_fresh_label(l)
-		lo_v := bc_fresh_value(l); bc_emit(l, bc.BC_Const{lo_v, lo})
-		ge_lo := bc_fresh_value(l, .U8); bc_emit(l, bc.BC_Cmp{ge_lo, .GreaterEqual, target, lo_v})
+		lo_v := bc_fresh_value(l);bc_emit(l, bc.BC_Const{lo_v, lo})
+		ge_lo := bc_fresh_value(l, .U8);bc_emit(l, bc.BC_Cmp{ge_lo, .GreaterEqual, target, lo_v})
 		bc_emit(l, bc.BC_Branch_Zero{ge_lo, next})
-		hi_v := bc_fresh_value(l); bc_emit(l, bc.BC_Const{hi_v, hi})
-		le_hi := bc_fresh_value(l, .U8); bc_emit(l, bc.BC_Cmp{le_hi, .LessEqual, target, hi_v})
+		hi_v := bc_fresh_value(l);bc_emit(l, bc.BC_Const{hi_v, hi})
+		le_hi := bc_fresh_value(l, .U8);bc_emit(l, bc.BC_Cmp{le_hi, .LessEqual, target, hi_v})
 		bc_emit(l, bc.BC_Branch_Zero{le_hi, next})
 		prod := bc_lower_value(l, branch.product)
 		bc_emit(l, bc.BC_Move{result, prod})
@@ -399,7 +433,7 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 // one. Only a singleton Bool_Type qualifies — a full `{true,false}` is not a test.
 bc_branch_bool_value :: proc(branch: Pattern_Branch) -> (val: bool, ok: bool) {
 	if !branch.value_match || branch.match == nil do return false, false
-	folded := fold_value_type(branch.match)
+	folded := fold_type(branch.match)
 	if folded == nil do folded = branch.match
 	#partial switch b in folded^ {
 	case Bool_Type:
@@ -444,7 +478,7 @@ bc_operand_is_string :: proc(node: ^Type) -> bool {
 	case Cast_Type:
 		if tgt, ok := cast_target(v.target); ok do return tgt.kind == .String
 	}
-	if env := fold_value_type(node); env != nil {
+	if env := fold_type(node); env != nil {
 		#partial switch e in env^ {
 		case String_Type:
 			return true

@@ -24,10 +24,10 @@ import "core:unicode/utf8"
 //   - RIGHT of `->` (the value) folds to its TYPE (a typeof). A concrete
 //     singleton (10, or 5..5) is its own type: Integer_Type{10,10}. A set
 //     (u8, 1..2, >=20) is NOT a value, so its type is the producer scope
-//     {-> set}. That is fold_value_type. The value/set split is SEMANTIC:
+//     {-> set}. That is fold_type. The value/set split is SEMANTIC:
 //     singleton (hi==lo) -> value, otherwise -> producer.
 //
-// satisfy then proves fold_value_type(value) fits fold_constraint(constraint).
+// satisfy then proves fold_type(value) fits fold_constraint(constraint).
 
 // reference_effective_value resolves the VALUE a Reference_Type denotes, honoring
 // a carve in its target. A property reference `C.x` carries target = `C` (the
@@ -140,11 +140,11 @@ execute_fold_leave :: proc(key: ^Scope_Type) {
 	if a := current_analyzer(); a != nil do pop(&a.execute_stack)
 }
 
-// fold_value_type yields the TYPE of a value (the RIGHT side, a typeof).
+// fold_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
-fold_value_type :: proc(t: ^Type) -> ^Type {
+fold_type :: proc(t: ^Type) -> ^Type {
 	// A producer scope {-> X} on the right is itself a value of a higher meta
-	// level: its type is the producer of fold_value_type(X). This mirrors
+	// level: its type is the producer of fold_type(X). This mirrors
 	// fold_constraint on the left so {->X} matches across sides.
 	if t != nil {
 		switch v in t^ {
@@ -153,7 +153,7 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			if len(prods) > 0 {
 				folded := make([dynamic]^Type, 0, len(prods))
 				for p in prods {
-					fp := fold_value_type(p)
+					fp := fold_type(p)
 					if fp == nil do return nil
 					append(&folded, fp)
 				}
@@ -169,14 +169,14 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			if sub == nil do return nil
 			st := new(Type)
 			st^ = sub^
-			return fold_value_type(st)
+			return fold_type(st)
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				return fold_value_type(v.match_scope.types[v.match_index])
+				return fold_type(v.match_scope.types[v.match_index])
 			}
 		case Reference_Type:
 			eff := reference_effective_value(v)
-			if eff != nil do return fold_value_type(eff)
+			if eff != nil do return fold_type(eff)
 		case Recursive_Mention_Type:
 			return t
 		case And_Type:
@@ -190,24 +190,24 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(And_Type{fold_value_type(v.left), fold_value_type(v.right)})
+			return new_type(And_Type{fold_type(v.left), fold_type(v.right)})
 		case Or_Type:
 			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(Or_Type{fold_value_type(v.left), fold_value_type(v.right)})
+			return new_type(Or_Type{fold_type(v.left), fold_type(v.right)})
 		case Negate_Type:
 			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(Negate_Type{fold_value_type(v.operand)})
+			return new_type(Negate_Type{fold_type(v.operand)})
 		case Range_Type:
 			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(Range_Type{fold_value_type(v.left), fold_value_type(v.right)})
+			return new_type(Range_Type{fold_type(v.left), fold_type(v.right)})
 		case Invalid_Type, None_Type, Unknown_Type:
 			return t
 		case Execute_Type:
@@ -223,7 +223,7 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 				if resolved do return new_type(None_Type{})
 				return nil
 			}
-			return fold_value_type(prod)
+			return fold_type(prod)
 		case Integer_Type:
 			return value_type_envelope(fold_type_integer(t))
 		case Float_Type:
@@ -237,7 +237,7 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			// concrete, otherwise the target itself — the cast forces the value into
 			// the target's layout, so the target IS the value's envelope (not wrapped
 			// in a producer scope: it already denotes the set the value lives in).
-			if v.type_fold != nil do return fold_value_type(v.type_fold)
+			if v.type_fold != nil do return fold_type(v.type_fold)
 			return fold_constraint(v.target)
 		case Compose_Type:
 			// A COMPARISON (`<`,`>`,`==`,…) is a VALUE of the bool domain: its typeof
@@ -579,7 +579,7 @@ fold_cast :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	// A value bound under a sized float color (`f32:a -> 1.0`) carries that width
 	// in its CONSTRAINT, not its (unsized) value fold — pass the constraint so the
 	// extractor can recolor the bits to the source's real width.
-	src_fold := fold_value_type(cast_t.value)
+	src_fold := fold_type(cast_t.value)
 	src_color := source_color(cast_t.value)
 	if repr, is_concrete := cast_to_bits(src_fold, src_color); is_concrete {
 		result := cast_from_bits(repr, target)
@@ -961,59 +961,20 @@ range_kind_name :: #force_inline proc(kind: Range_Operand_Kind) -> string {
 	return "unknown"
 }
 
-// ===========================================================================
-// CARVE — fold a carve to the substituted scope it derives.
-//
-// `source{ name -> v, … }` is resolved by materializing the override: copy the
-// source scope, write each override value into the field it targets, then
-// REPOINT every reference that named the source scope so it names the copy
-// instead. Because references are (match_scope, match_index), repointing the
-// scope pointer is enough — a sibling mention `z -> x` now reads the copy's new
-// x, so the substitution cascades for free, including transitively (`y -> z -> x`).
-// The folds are stale on the copy (values changed); the caller re-typechecks.
-//
-// fold_carve is PURE: it builds and returns the substituted scope (or nil if the
-// source does not resolve to a scope). The Constraint_Mismatch is raised by the
-// analyzer (walk_carve), which holds the source position — type.odin answers
-// yes/no, analyze.odin explains why. Used by fold_type and fold_constraint.
-// ===========================================================================
-
-// fold_carve_type materializes the carve `t` into its substituted Scope_Type as
-// a VALUE (the right-of-`->` side): the source is peeled through fold_carve_type,
-// so a nested carve resolves on the value side. Returns nil when the source can't
-// be reduced to a scope.
 fold_carve_type :: proc(t: ^Type) -> ^Scope_Type {
 	carve, ok := &t^.(Carve_Type)
 	if !ok do return nil
 
-	// Resolve the source down to its underlying Scope_Type, peeling nested carves
-	// on the VALUE side.
-	src: ^Scope_Type = nil
-	cur := follow(carve.source)
-	for cur != nil {
-		#partial switch &s in cur^ {
-		case Scope_Type:
-			src = &s
-		case Carve_Type:
-			src = fold_carve_type(cur)
-		}
-		break
+	folded := fold_type(carve.source)
+	src, ok2 := &folded^.(Scope_Type)
+	if ok2 {
+		return carve_substitute(t, carve, src)
 	}
-	if src == nil do return nil
-	return carve_substitute(t, carve, src)
+	// TODO: err here
+	return nil
 }
 
-// carve_substitute applies a carve's overrides onto a resolved source scope and
-// repoints, returning the substituted copy. Shared by fold_carve_type and
-// fold_carve_constraint — only the source PEEL differs between the two; the
-// substitution itself is identical. `t` is the carve node (re-entry guard key),
-// `carve` its payload, `src` the already-peeled source scope.
 carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Scope_Type {
-	// Re-entry guard: folding a carve can reach the SAME carve node again (its
-	// own placeholder value while a recursive constraint materializes its
-	// default) — cloning forever. Bail the inner re-entry; each level of an
-	// inductive proof carries a fresh repointed node, so legitimate nesting
-	// passes through.
 	a := current_analyzer()
 	if a != nil {
 		for k in a.carve_fold_stack {
@@ -1033,26 +994,17 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
 		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
-			// Identity override — `Array{T}` overriding T with the very same T,
-			// the standard shape of a recursive tail. Substituting would leave,
-			// after repoint, a mention of the field ONTO ITSELF in the copy (an
-			// unresolvable cycle); the override changes nothing, keep the
-			// original value.
 			if mv, is_m := carve.types[i]^.(Mention_Type);
 			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
 			}
-			// PULL UNIFICATION: if this field's constraint mentions a pull (e.g.
-			// `data{e}:somedata`), unify the supplied value (`data{6}`) against that
-			// constraint to resolve the pull (`e = 6`) and write it into the pull's
-			// binding in the copy — so `-> e` and every other mention of e read 6.
 			if ref.match_index < len(copy.constraints) &&
 			   copy.constraints[ref.match_index] != nil {
 				unify_pull(copy.constraints[ref.match_index], carve.types[i], copy, src)
 			}
 			copy.types[ref.match_index] = carve.types[i]
 			if ref.match_index < len(copy.type_folds) {
-				copy.type_folds[ref.match_index] = fold_value_type(carve.types[i])
+				copy.type_folds[ref.match_index] = fold_type(carve.types[i])
 			}
 		}
 	}
@@ -1084,7 +1036,7 @@ scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
 	for ty in src.constraints do append(&rst.constraints, repoint(ty, old, dst))
 	for k in src.kind do append(&rst.kind, k)
 	for v in src.types do append(&rst.types, repoint(v, old, dst))
-	for f, i in src.type_folds do append(&rst.type_folds, fold_value_type(rst.types[i]))
+	for f, i in src.type_folds do append(&rst.type_folds, fold_type(rst.types[i]))
 	for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.constraints[i]))
 	for c in src.captures do append(&rst.captures, c)
 	return rst
@@ -1178,8 +1130,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			cf := branch.cover_fold
 			if m != branch.match {
 				changed = true
-				cf =
-					m != nil ? (branch.value_match ? fold_value_type(m) : fold_constraint(m)) : nil
+				cf = m != nil ? (branch.value_match ? fold_type(m) : fold_constraint(m)) : nil
 			}
 			if p != branch.product do changed = true
 			branches[i] = Pattern_Branch{branch.value_match, m, p, cf}

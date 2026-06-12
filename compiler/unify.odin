@@ -19,7 +19,7 @@ unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 			if copy.kind[m.match_index] == .Pointing_Pull {
 				copy.types[m.match_index] = value
 				if m.match_index < len(copy.type_folds) {
-					copy.type_folds[m.match_index] = fold_value_type(value)
+					copy.type_folds[m.match_index] = fold_type(value)
 				}
 			}
 		}
@@ -68,10 +68,7 @@ Pull_Conflict :: struct {
 // it gathers, per pull, every value the overrides bind it to (via the same
 // structural matching as unify_pull), and returns the first pull bound to two
 // values whose folds differ. Pure — the analyzer (walk_carve) emits the error.
-carve_pull_conflict :: proc(t: ^Type) -> (Pull_Conflict, bool) {
-	carve, ok := &t^.(Carve_Type)
-	if !ok do return {}, false
-
+carve_pull_conflict :: proc(carve: ^Carve_Type) -> (Pull_Conflict, bool) {
 	src: ^Scope_Type = nil
 	cur := follow(carve.source)
 	for cur != nil {
@@ -105,9 +102,9 @@ carve_pull_conflict :: proc(t: ^Type) -> (Pull_Conflict, bool) {
 
 	for idx, vals in bound {
 		if len(vals) < 2 do continue
-		f0 := fold_value_type(vals[0])
+		f0 := fold_type(vals[0])
 		for k in 1 ..< len(vals) {
-			fk := fold_value_type(vals[k])
+			fk := fold_type(vals[k])
 			if !pull_values_agree(f0, fk) {
 				name := idx < len(src.names) ? src.names[idx] : ""
 				return Pull_Conflict{name, vals[0], vals[k]}, true

@@ -380,7 +380,7 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 			return false
 		case:
 			for i := 0; i < prod_count; i += 1 {
-				if satisfy(fold_value_type(prods[i]), ft) {
+				if satisfy(fold_type(prods[i]), ft) {
 					return true
 				}
 			}
@@ -452,19 +452,11 @@ fold_carve_constraint :: proc(t: ^Type) -> ^Scope_Type {
 	carve, ok := &t^.(Carve_Type)
 	if !ok do return nil
 
-	// Resolve the source down to its underlying Scope_Type, peeling nested carves
-	// on the CONSTRAINT side.
-	src: ^Scope_Type = nil
-	cur := follow(carve.source)
-	for cur != nil {
-		#partial switch &s in cur^ {
-		case Scope_Type:
-			src = &s
-		case Carve_Type:
-			src = fold_carve_constraint(cur)
-		}
-		break
+	folded := fold_constraint(carve.source)
+	src, ok2 := &folded^.(Scope_Type)
+	if ok2 {
+		return carve_substitute(t, carve, src)
 	}
-	if src == nil do return nil
-	return carve_substitute(t, carve, src)
+	// TODO: err here
+	return nil
 }
