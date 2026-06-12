@@ -1180,7 +1180,7 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	}
 	if src == nil do return nil
 
-	copy := scope_clone(src)
+	copy := scope_repoint(src, nil, nil)
 
 	for i in 0 ..< len(value.references) {
 		ref := value.references[i]
@@ -1188,8 +1188,8 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 			// Identity override (`Array{T}` overriding T with the same T): the
 			// substitution would leave, after repoint, a mention of the field
 			// onto itself — an unresolvable cycle. It changes nothing; skip.
-			if mv, is_m := value.values[i]^.(Mention_Type); is_m &&
-			   mv.match_scope == src && mv.match_index == ref.match_index {
+			if mv, is_m := value.values[i]^.(Mention_Type);
+			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
 			}
 			// PULL UNIFICATION: a field constraint mentioning a pull (e.g.

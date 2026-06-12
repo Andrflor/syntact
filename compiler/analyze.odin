@@ -1208,7 +1208,13 @@ walk_property :: #force_inline proc(
 			result^ = Reference_Type{target, ref}
 			append(
 				&a.pending,
-				Pending{kind = .Ref, awaiting = open, rr = result, target = target, node = right_idx},
+				Pending {
+					kind = .Ref,
+					awaiting = open,
+					rr = result,
+					target = target,
+					node = right_idx,
+				},
 			)
 			return result
 		}
