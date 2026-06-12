@@ -986,7 +986,6 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 
 	copy := scope_clone(src)
 
-
 	// Apply each override: write the new value into the field it targets, and
 	// refresh its cached type_fold — the integer/float/... folders read a
 	// mention's fold from the SCOPE's type_folds, not by re-folding its value,
@@ -1010,10 +1009,7 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	}
 
 
-	copy = scope_repoint(copy, src, copy)
-
-
-	return copy
+	return scope_repoint_inline(copy, src)
 }
 
 scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
@@ -1027,6 +1023,14 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	for f in src.constraint_folds do append(&dst.constraint_folds, f)
 	for c in src.captures do append(&dst.captures, c)
 	return dst
+}
+
+scope_repoint_inline :: proc(src, old: ^Scope_Type) -> ^Scope_Type {
+	for ty, i in src.constraints do src.constraints[i] = repoint(ty, old, src)
+	for v, i in src.types do src.types[i] = repoint(v, old, src)
+	for f, i in src.type_folds do src.type_folds[i] = fold_type(src.types[i])
+	for f, i in src.constraint_folds do src.constraint_folds[i] = fold_constraint(src.constraints[i])
+	return src
 }
 
 scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {

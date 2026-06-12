@@ -505,6 +505,16 @@ fold_carve_constraint :: proc(t: ^Type) -> ^Scope_Type {
 	if !ok do return nil
 
 	folded := fold_constraint(carve.source)
+	if folded == nil do return nil
+	// A recursive tail (`Array{T}` inside Array's own body) folds its source to a
+	// Recursive_Mention, not a Scope: the self binding's value IS the open scope,
+	// so resolve through the binding site to recover the scope to substitute into.
+	// Without this the carve folds to nil ([?]) and the inductive element carries
+	// no constraint — `Array{string}:a -> {"aa" 0}` would wrongly accept 0.
+	if rec, is_rec := folded^.(Recursive_Mention_Type); is_rec {
+		folded = fold_constraint_target(rec.match_scope, rec.match_index)
+		if folded == nil do return nil
+	}
 	src, ok2 := &folded^.(Scope_Type)
 	if ok2 {
 		return carve_substitute(t, carve, src)
