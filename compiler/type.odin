@@ -1009,28 +1009,20 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	}
 
 
-	return scope_repoint_inline(copy, src)
+	return copy
 }
 
 scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	dst := new(Scope_Type)
 	dst.parent = src.parent
 	for n in src.names do append(&dst.names, n)
-	for ty in src.constraints do append(&dst.constraints, ty)
+	for v in src.types do append(&dst.types, repoint(v, src, dst))
+	for ty in src.constraints do append(&dst.constraints, repoint(ty, src, dst))
 	for k in src.kind do append(&dst.kind, k)
-	for v in src.types do append(&dst.types, v)
-	for f in src.type_folds do append(&dst.type_folds, f)
-	for f in src.constraint_folds do append(&dst.constraint_folds, f)
+	for f, i in src.type_folds do append(&dst.type_folds, fold_type(dst.types[i]))
+	for f, i in src.constraint_folds do append(&dst.constraint_folds, fold_constraint(dst.constraints[i]))
 	for c in src.captures do append(&dst.captures, c)
 	return dst
-}
-
-scope_repoint_inline :: proc(src, old: ^Scope_Type) -> ^Scope_Type {
-	for ty, i in src.constraints do src.constraints[i] = repoint(ty, old, src)
-	for v, i in src.types do src.types[i] = repoint(v, old, src)
-	for f, i in src.type_folds do src.type_folds[i] = fold_type(src.types[i])
-	for f, i in src.constraint_folds do src.constraint_folds[i] = fold_constraint(src.constraints[i])
-	return src
 }
 
 scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {

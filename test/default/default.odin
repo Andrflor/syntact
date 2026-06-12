@@ -79,7 +79,7 @@ run_default_test :: proc(path: string, t: ^testing.T) {
 		return
 	}
 
-	value := scope.values[idx]
+	value := scope.types[idx]
 	if idx < len(scope.type_folds) && scope.type_folds[idx] != nil {
 		value = scope.type_folds[idx]
 	}
