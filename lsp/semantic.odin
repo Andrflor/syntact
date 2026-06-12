@@ -73,8 +73,14 @@ is_builtin :: proc(name: string) -> bool {
 // is_binding_kind reports whether a node kind is one of the directional bindings.
 is_binding_kind :: proc(k: compiler.Node_Kind) -> bool {
 	#partial switch k {
-	case .Pointing, .PointingPull, .EventPush, .EventPull,
-	     .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
+	case .Pointing,
+	     .PointingPull,
+	     .EventPush,
+	     .EventPull,
+	     .ResonancePush,
+	     .ResonancePull,
+	     .ReactivePush,
+	     .ReactivePull:
 		return true
 	}
 	return false
@@ -114,9 +120,18 @@ build_parent_map :: proc(ast: ^compiler.Ast) -> Parent_Map {
 			set(parents, ast.node_data[i].execute.target, idx)
 		case .Product, .Expand, .CompileTime:
 			set(parents, ast.node_data[i].unary.operand, idx)
-		case .Pointing, .PointingPull, .EventPush, .EventPull, .ResonancePush,
-		     .ResonancePull, .ReactivePush, .ReactivePull, .Constraint, .Property,
-		     .Range, .Enforce:
+		case .Pointing,
+		     .PointingPull,
+		     .EventPush,
+		     .EventPull,
+		     .ResonancePush,
+		     .ResonancePull,
+		     .ReactivePush,
+		     .ReactivePull,
+		     .Constraint,
+		     .Property,
+		     .Range,
+		     .Enforce:
 			set(parents, ast.node_data[i].binary.left, idx)
 			set(parents, ast.node_data[i].binary.right, idx)
 		case .Operator:
@@ -134,7 +149,11 @@ parent_of :: proc(pm: Parent_Map, idx: compiler.Node_Index) -> compiler.Node_Ind
 
 // enclosing_scope walks up from `idx` to the nearest ScopeNode ancestor (or the
 // root scope). Returns INVALID only for an empty AST.
-enclosing_scope :: proc(ast: ^compiler.Ast, pm: Parent_Map, idx: compiler.Node_Index) -> compiler.Node_Index {
+enclosing_scope :: proc(
+	ast: ^compiler.Ast,
+	pm: Parent_Map,
+	idx: compiler.Node_Index,
+) -> compiler.Node_Index {
 	cur := idx
 	for cur != INVALID {
 		if ast.node_kinds[cur] == .ScopeNode do return cur
@@ -174,7 +193,10 @@ binding_name_node :: proc(ast: ^compiler.Ast, child: compiler.Node_Index) -> com
 // scope_declarations returns the IDENTIFIER nodes that declare a name directly in
 // `scope_node` (its binding children), in source order. Same-name declarations
 // coexist (Syntact tracks them by ordinal), so duplicates are kept.
-scope_declarations :: proc(ast: ^compiler.Ast, scope_node: compiler.Node_Index) -> [dynamic]compiler.Node_Index {
+scope_declarations :: proc(
+	ast: ^compiler.Ast,
+	scope_node: compiler.Node_Index,
+) -> [dynamic]compiler.Node_Index {
 	out := make([dynamic]compiler.Node_Index, 0, 8)
 	if scope_node == INVALID || ast.node_kinds[scope_node] != .ScopeNode do return out
 	for c in compiler.node_children(ast, scope_node) {
@@ -303,8 +325,8 @@ child_scope_for :: proc(
 	parent: ^compiler.Scope_Type,
 	ast_scope: compiler.Node_Index,
 ) -> ^compiler.Scope_Type {
-	for i := 0; i < len(parent.values); i += 1 {
-		v := parent.values[i]
+	for i := 0; i < len(parent.types); i += 1 {
+		v := parent.types[i]
 		if v == nil do continue
 		if s, ok := &v.(compiler.Scope_Type); ok {
 			// Heuristic: return the first nested scope. Refined callers may match by
