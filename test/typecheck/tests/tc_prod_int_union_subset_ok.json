@@ -1,1 +1,1 @@
-{ "name": "tc_prod_int_union_subset_ok", "description": "a value union within the producer's union typechecks (0 fits typeof 0|10)", "source": "{->0|10}:b -> 0", "expect_errors": [] }
+{ "name": "tc_prod_int_union_subset_ok", "description": "a bare value no longer satisfies a producer union (0 does not fit {->0|10})", "source": "{->0|10}:b -> 0", "expect_errors": ["Constraint_Mismatch"] }
