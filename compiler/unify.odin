@@ -79,7 +79,7 @@ carve_pull_conflict :: proc(t: ^Type) -> (Pull_Conflict, bool) {
 		case Scope_Type:
 			src = &s
 		case Carve_Type:
-			src = fold_carve(cur)
+			src = fold_carve_type(cur)
 		}
 		break
 	}

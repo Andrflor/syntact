@@ -1676,7 +1676,7 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
 	saved_span := a.recheck_span
 	a.recheck_span = node_span(a, node)
 	defer a.recheck_span = saved_span
-	sub := fold_carve(carve)
+	sub := fold_carve_constraint(carve)
 	if sub == nil do return
 	// Fields DIRECTLY overridden by the carve are already proven inline by
 	// walk_carve (the explicit "constraint mismatch in carve 'x'") — skip them here

@@ -398,7 +398,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 	case Carve_Type:
 		// The default of a carve is the default of its resulting scope: fold the
 		// substitution, then render the substituted scope like any other.
-		sub := fold_carve(t)
+		sub := fold_carve_type(t)
 		if sub == nil {
 			strings.write_string(b, type_to_string(t))
 			return
@@ -827,7 +827,7 @@ member_type_fold_display :: proc(value: ^Type, cached: ^Type) -> ^Type {
 		case Scope_Type:
 			if !v.walking do return value
 		case Carve_Type:
-			if sub := fold_carve(value); sub != nil {
+			if sub := fold_carve_type(value); sub != nil {
 				st := new(Type)
 				st^ = sub^
 				return st
