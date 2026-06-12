@@ -1064,6 +1064,7 @@ scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
 // the source's ^Types are never mutated and unchanged subtrees stay shared.
 repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 	if t == nil do return t
+
 	#partial switch &v in t^ {
 	case Mention_Type:
 		if v.match_scope == old {
