@@ -22,6 +22,14 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if scope_fields_fold_unknown(t, v.types[:]) do return new_type(Unknown_Type{})
 			return t
 		case Carve_Type:
+			// A RECURSIVE carve tail (`Array{T}:` inside Array's own body, source is a
+			// Recursive_Mention) stays LAZY — return the carve node untouched, exactly
+			// like the bare Recursive_Mention case above. Materializing it here would
+			// clone the still-walking scope (truncated snapshot) and, worse, recurse on
+			// the constraint structure with no value to bound it (the body holds another
+			// `Array{T}:`), looping forever. binding_satisfy/binding_color unfold it ONE
+			// level at a time against the finite value, which is what terminates it.
+			if is_recursive_tail(t) do return t
 			// A carve used as a constraint folds to its substituted scope — which
 			// must itself be a statically-known set: an unknown source or override
 			// is insoluble, same as the Scope case (the carve node is the guard
@@ -419,6 +427,37 @@ scope_satisfy_range :: proc(cs: Scope_Type, ci, cend: int, vs: Scope_Type, vi, v
 	return scope_satisfy_range(cs, ci + 1, cend, vs, vi + 1, vend)
 }
 
+// recursive_tail_unfold resolves a recursive constraint marker ONE level deep,
+// recovering the constraint to prove the current value field against. Both the
+// bare recursive mention (`Array:`) and the recursive carve tail (`Array{T}:`)
+// land here. The bare mention reads the live scope's binding directly. The carve
+// additionally substitutes its overrides into that live scope — exactly one
+// level (`carve_substitute`), so the inner tail it contains stays a lazy marker
+// (fold_constraint returns it untouched via is_recursive_tail) and the next level
+// is only unfolded if/when the value descends into it. The finite value bounds
+// the recursion. Returns nil if the marker is neither recursive form.
+recursive_tail_unfold :: proc(fold: ^Type) -> ^Type {
+	if fold == nil do return nil
+	#partial switch v in fold^ {
+	case Recursive_Mention_Type:
+		return fold_constraint_target(v.match_scope, v.match_index)
+	case Carve_Type:
+		carve := &fold^.(Carve_Type)
+		rec, is_rec := v.source^.(Recursive_Mention_Type)
+		if !is_rec do return nil
+		live := fold_constraint_target(rec.match_scope, rec.match_index)
+		if live == nil do return nil
+		src, ok := &live^.(Scope_Type)
+		if !ok do return nil
+		sub := carve_substitute(fold, carve, src)
+		if sub == nil do return nil
+		r := new(Type)
+		r^ = sub^
+		return r
+	}
+	return nil
+}
+
 binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool {
 	if cs.names[i] != vs.names[j] || cs.kind[i] != vs.kind[j] {
 		return false
@@ -433,15 +472,15 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 		}
 		return satisfy(fold_constraint(cs.types[i]), vs.type_folds[j])
 	} else {
-		v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
-		if (ok) {
+		// A recursive tail (bare mention OR carve) is unfolded one level against the
+		// live scope; everything else is the already-materialized constraint scope.
+		if is_recursive_tail(cs.constraint_folds[i]) {
 			return satisfy_root(
-				fold_constraint_target(v.match_scope, v.match_index),
+				recursive_tail_unfold(cs.constraint_folds[i]),
 				vs.type_folds[j],
 			)
-		} else {
-			return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
 		}
+		return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
 	}
 }
 
@@ -457,8 +496,8 @@ binding_color :: proc(cs: Scope_Type, i: int) -> ^Type {
 		}
 		return fold_constraint(cs.types[i])
 	}
-	if v, ok := cs.constraint_folds[i].(Recursive_Mention_Type); ok {
-		return fold_constraint_target(v.match_scope, v.match_index)
+	if is_recursive_tail(cs.constraint_folds[i]) {
+		return recursive_tail_unfold(cs.constraint_folds[i])
 	}
 	return cs.constraint_folds[i]
 }
