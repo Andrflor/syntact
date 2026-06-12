@@ -9,7 +9,7 @@ import "core:fmt"
 //
 //   * TYPECHECK mode (value_match = false, written `u8 -> …`): the match is a
 //     CONSTRAINT. The branch fires for a target value v iff v satisfies the
-//     match's constraint set — fold_value_type(v) ⊆ fold_constraint(match).
+//     match's constraint set — fold_type(v) ⊆ fold_constraint(match).
 //   * VALUE mode (value_match = true, written `=5 -> …`): the match is a VALUE.
 //     The branch fires iff the target value EQUALS the match value (singleton
 //     membership on both sides).
@@ -19,7 +19,7 @@ import "core:fmt"
 // Branches are always considered IN ORDER. Folding splits three ways:
 //   * fold_constraint(pattern)  → resolves to ONE branch: the product of the
 //     FIRST branch whose match the target satisfies (the deterministic case).
-//   * fold_value_type(pattern)  → may resolve to MULTIPLE branches: the combined
+//   * fold_type(pattern)  → may resolve to MULTIPLE branches: the combined
 //     type (Or of every product whose branch the target CAN reach).
 //   * exhaustiveness            → the union of all branch matches must cover the
 //     target's type, OR one branch must be the empty-arrow default.
@@ -43,7 +43,7 @@ build_pattern_branch :: proc(match: ^Type, product: ^Type, value_match: bool) ->
 	// a typecheck match fires on inclusion in its constraint set. reduce_pattern
 	// reads this cache — no fold ever runs during reduce.
 	if match != nil {
-		b.cover_fold = value_match ? fold_value_type(match) : fold_constraint(match)
+		b.cover_fold = value_match ? fold_type(match) : fold_constraint(match)
 	}
 	return b
 }
@@ -75,12 +75,12 @@ branch_can_match :: proc(branch: Pattern_Branch, ft: ^Type) -> bool {
 // pattern_target_fold folds a pattern's target to its value type (the typeof the
 // branches are matched against). Returns nil when the target can't be resolved.
 pattern_target_fold :: proc(p: Pattern_Type) -> ^Type {
-	return fold_value_type(p.target)
+	return fold_type(p.target)
 }
 
 // pattern_target_is_concrete reports whether a folded target value is a single
 // concrete value (a singleton) — directly, or wrapped in a producer scope `{-> v}`
-// (which fold_value_type builds for a value). A concrete target lets fold pick the
+// (which fold_type builds for a value). A concrete target lets fold pick the
 // first matching branch in order; a set target does not.
 pattern_target_is_concrete :: proc(ft: ^Type) -> bool {
 	if ft == nil do return false
@@ -133,7 +133,7 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	if pattern_target_is_concrete(ft) {
 		for branch in p.branches {
 			if branch_covers(branch, ft) {
-				return fold_value_type(branch.product)
+				return fold_type(branch.product)
 			}
 		}
 	}
@@ -145,13 +145,13 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	// is the combined type. (Bug if we returned the first *covering* branch: `?? :
 	// u8 ? {0..127 -> 0, -> 1}` would fold to `1`, dropping `0`, instead of `0 | 1`.)
 	if len(p.branches) > 0 && branch_covers(p.branches[0], ft) {
-		return fold_value_type(p.branches[0].product)
+		return fold_type(p.branches[0].product)
 	}
 
 	// Non-deterministic: combine every branch's product into one Or type.
 	combined: ^Type = nil
 	for branch in p.branches {
-		pf := fold_value_type(branch.product)
+		pf := fold_type(branch.product)
 		if pf == nil do continue
 		if combined == nil {
 			combined = pf
@@ -176,7 +176,7 @@ branch_match_cover :: proc(branch: Pattern_Branch) -> ^Type {
 // pattern_is_exhaustive reports whether the pattern covers its whole target.
 // A pattern is exhaustive when EITHER a branch is the empty-arrow default
 // (match == nil), OR the OR of all branch matches typechecks against the target —
-// i.e. fold_value_type(target) satisfies fold_constraint(Or of matches). This is
+// i.e. fold_type(target) satisfies fold_constraint(Or of matches). This is
 // just the ordinary binding proof `satisfy_root(fc, ft)` run against the union the
 // branches build: a value branch `=v` enters the union as `{-> v}`, a typecheck
 // branch `M` as M. So `(0..120 | 22..255)` covers a u8 target exactly as the
@@ -197,7 +197,7 @@ pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 	}
 	if cover == nil do return false
 	fc := fold_constraint(cover)
-	ft := fold_value_type(p.target)
+	ft := fold_type(p.target)
 	// A match or target that does not resolve to a static set (e.g. a comparison
 	// `2>2`) can't prove coverage — and must not reach satisfy_root with a nil.
 	if fc == nil || ft == nil do return false

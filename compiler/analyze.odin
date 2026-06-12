@@ -8,7 +8,7 @@ import "core:strconv"
 // union every form in Syntact resolves to. Syntact has no type system: a `Type`
 // is the static *shape* of a value or a constraint, and the analyzer's job is to
 // prove, for every binding `c : … -> v`, that the value v falls inside the set
-// the constraint c denotes (`fold_value_type(v) ⊆ fold_constraint(c)`). The
+// the constraint c denotes (`fold_type(v) ⊆ fold_constraint(c)`). The
 // proof itself lives in the domain files (integer/float/string/bool) and is
 // dispatched from type.odin; this file only builds the tree and asks.
 //
@@ -294,7 +294,7 @@ typecheck :: proc(
 	//     stays itself, a set becomes its producer scope {-> set}.
 	a.fold_pending = nil
 	fc := fold_constraint(constraint)
-	ft := fold_value_type(value)
+	ft := fold_type(value)
 
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, ft)
@@ -499,7 +499,7 @@ retypecheck :: proc(a: ^Analyzer, scope: ^Scope_Type, bind: int, node: Node_Inde
 	value := scope.types[bind]
 	a.fold_pending = nil
 	fc := fold_constraint(constraint)
-	ft := fold_value_type(value)
+	ft := fold_type(value)
 	if pend := a.fold_pending; pend != nil {
 		// Still blocked, on an outer scope still being walked: re-queue there.
 		a.fold_pending = nil
@@ -1393,7 +1393,7 @@ walk_carve :: proc(
 	}
 
 	carve_resolve_children(a, current_scope, idx, carve_source_scope(source), result)
-	carve_check(a, result, idx)
+	carve_check(a, &result^.(Carve_Type), idx)
 	return result
 }
 
@@ -1478,7 +1478,7 @@ carve_resolve_children :: proc(
 			if carve_scope != nil && carve_index >= 0 {
 				cf := carve_scope.constraint_folds[carve_index]
 				if cf != nil {
-					vf := fold_value_type(val)
+					vf := fold_type(val)
 					if vf != nil && !satisfy_root(cf, vf) {
 						sem_error(
 							a,
@@ -1536,7 +1536,7 @@ carve_resolve_children :: proc(
 			if carve_scope != nil && carve_index >= 0 {
 				cf := carve_scope.constraint_folds[carve_index]
 				if cf != nil {
-					vf := fold_value_type(val)
+					vf := fold_type(val)
 					if vf != nil && !satisfy_root(cf, vf) {
 						sem_error(
 							a,
@@ -1592,7 +1592,7 @@ carve_resolve_children :: proc(
 			if carve_scope != nil && carve_index >= 0 {
 				cf := carve_scope.constraint_folds[carve_index]
 				if cf != nil {
-					vf := fold_value_type(val)
+					vf := fold_type(val)
 					if vf != nil && !satisfy_root(cf, vf) {
 						sem_error(
 							a,
@@ -1616,7 +1616,7 @@ carve_resolve_children :: proc(
 
 // carve_check runs the whole-carve proofs, shared by the immediate path
 // (walk_carve) and the deferred one (close_carve).
-carve_check :: proc(a: ^Analyzer, carve: ^Type, idx: Node_Index) {
+carve_check :: proc(a: ^Analyzer, carve: ^Carve_Type, idx: Node_Index) {
 	// Pull unification conflict: a pull mentioned in two fields' constraints
 	// (`data{e}:somedata` + `data{e}:someother`) carved with values that disagree
 	// (`a{data{6} data{3}}` → e = 6 then 3) is an error — all bindings of a pull
@@ -1628,8 +1628,8 @@ carve_check :: proc(a: ^Analyzer, carve: ^Type, idx: Node_Index) {
 			fmt.tprintf(
 				"pull conflict: %s is unified to both %s and %s in this carve",
 				display,
-				describe_type(fold_value_type(conflict.first)),
-				describe_type(fold_value_type(conflict.second)),
+				describe_type(fold_type(conflict.first)),
+				describe_type(fold_type(conflict.second)),
 			),
 			.Constraint_Mismatch,
 			node_span(a, idx),
@@ -1665,32 +1665,30 @@ close_carve :: proc(a: ^Analyzer, p: Pending) {
 		return
 	}
 	carve_resolve_children(a, p.scope, p.node, src_scope, p.carve)
-	carve_check(a, p.carve, p.node)
+	carve_check(a, cv, p.node)
 }
 
 // recheck_carve folds a carve to its substituted scope and re-proves each
 // colored binding (constraint vs the substituted value's fold). The per-field
 // inline check above only covers the directly-overridden fields; this covers the
 // implicit constraints — fields whose value depends on what was carved.
-recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
+recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	saved_span := a.recheck_span
 	a.recheck_span = node_span(a, node)
 	defer a.recheck_span = saved_span
-	sub := fold_carve_constraint(carve)
+	sub := fold_carve_constraint(cast(^Type)carve)
 	if sub == nil do return
 	// Fields DIRECTLY overridden by the carve are already proven inline by
 	// walk_carve (the explicit "constraint mismatch in carve 'x'") — skip them here
 	// so a direct violation isn't reported twice as a (mislabeled) "implicit" one.
 	// recheck_carve only covers the DEPENDENT fields (value references a carved one).
 	overridden := make(map[int]bool)
-	if cv, ok := carve^.(Carve_Type); ok {
-		for ref in cv.references do overridden[ref.match_index] = true
-	}
+	for ref in carve.references do overridden[ref.match_index] = true
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue
 		fc := i < len(sub.constraint_folds) ? sub.constraint_folds[i] : nil
 		if fc == nil do continue
-		ft := fold_value_type(sub.types[i])
+		ft := fold_type(sub.types[i])
 		if ft == nil do continue // unresolved value: not a definite violation here
 		if !satisfy_root(fc, ft) {
 			display := sub.names[i] != "" ? fmt.tprintf("'%s'", sub.names[i]) : "the production"
