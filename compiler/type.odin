@@ -38,7 +38,7 @@ import "core:unicode/utf8"
 reference_effective_value :: proc(v: Reference_Type) -> ^Type {
 	ref := v.reference
 	if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-	original := ref.match_scope.values[ref.match_index]
+	original := ref.match_scope.types[ref.match_index]
 	if v.target != nil {
 		cur := follow(v.target)
 		if cur != nil {
@@ -46,7 +46,7 @@ reference_effective_value :: proc(v: Reference_Type) -> ^Type {
 			case Carve_Type:
 				for i := 0; i < len(cv.references); i += 1 {
 					if cv.references[i].match_index == ref.match_index {
-						return cv.values[i]
+						return cv.types[i]
 					}
 				}
 			}
@@ -150,7 +150,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 		case Recursive_Mention_Type:
 			return t
 		case Scope_Type:
-			if scope_fields_fold_unknown(t, v.values[:]) do return new_type(Unknown_Type{})
+			if scope_fields_fold_unknown(t, v.types[:]) do return new_type(Unknown_Type{})
 			return t
 		case Carve_Type:
 			// A carve used as a constraint folds to its substituted scope — which
@@ -162,7 +162,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 				if sf := fold_constraint(v.source); fold_is_unknown(sf) do return sf
 				return nil
 			}
-			if scope_fields_fold_unknown(t, sub.values[:]) do return new_type(Unknown_Type{})
+			if scope_fields_fold_unknown(t, sub.types[:]) do return new_type(Unknown_Type{})
 			r := new(Type)
 			r^ = sub^
 			return r
@@ -342,7 +342,7 @@ negated :: proc(t: ^Type) -> ^Type {
 // when the Unknown's type is a single concrete value: a singleton constraint
 // fold becomes that value, anything else stays Unknown (which never satisfies).
 fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
-	value := scope.values[i]
+	value := scope.types[i]
 	if value != nil {
 		if _, is_unknown := value^.(Unknown_Type); is_unknown {
 			ty := scope.constraint_folds[i]
@@ -455,7 +455,7 @@ fold_value_type :: proc(t: ^Type) -> ^Type {
 			return fold_value_type(st)
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				return fold_value_type(v.match_scope.values[v.match_index])
+				return fold_value_type(v.match_scope.types[v.match_index])
 			}
 		case Reference_Type:
 			eff := reference_effective_value(v)
@@ -599,9 +599,9 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 	scope := new(Scope_Type)
 	for p in produces {
 		append(&scope.names, "")
-		append(&scope.types, nil)
+		append(&scope.constraints, nil)
 		append(&scope.kind, Binding_Kind.Product)
-		append(&scope.values, p)
+		append(&scope.types, p)
 		append(&scope.type_folds, p)
 		append(&scope.constraint_folds, nil)
 	}
@@ -633,7 +633,7 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	}
 	#partial switch f in fc^ {
 	case Recursive_Mention_Type:
-		c := fold_constraint(f.match_scope.values[f.match_index])
+		c := fold_constraint(f.match_scope.types[f.match_index])
 		return satisfy(c, ft)
 	case Compose_Type:
 		// A string concatenation `+` kept as a Compose is an ordered SEQUENCE
@@ -688,7 +688,7 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 	for i in 0 ..< len(vs.kind) {
 		#partial switch vs.kind[i] {
 		case .Pointing_Push:
-			append(&out, vs.values[i])
+			append(&out, vs.types[i])
 		}
 	}
 	return out
@@ -750,7 +750,7 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 		if cs.kind[i] != .Product {
 			return true
 		}
-		return satisfy(fold_constraint(cs.values[i]), vs.type_folds[j])
+		return satisfy(fold_constraint(cs.types[i]), vs.type_folds[j])
 	} else {
 		v, ok := cs.constraint_folds[i].(Recursive_Mention_Type)
 		if (ok) {
@@ -767,7 +767,7 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 scope_productions :: proc(s: Scope_Type) -> [dynamic]^Type {
 	out := make([dynamic]^Type, 0, len(s.kind))
 	for i in 0 ..< len(s.kind) {
-		if s.kind[i] == .Product do append(&out, s.values[i])
+		if s.kind[i] == .Product do append(&out, s.types[i])
 	}
 	return out
 }
@@ -786,14 +786,14 @@ execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
 		#partial switch &v in cur^ {
 		case Scope_Type:
 			for i := 0; i < len(v.kind); i += 1 {
-				if v.kind[i] == .Product do return v.values[i], true
+				if v.kind[i] == .Product do return v.types[i], true
 			}
 			return nil, true
 		case Carve_Type:
 			sub := fold_carve(cur)
 			if sub == nil do return nil, false
 			for i := 0; i < len(sub.kind); i += 1 {
-				if sub.kind[i] == .Product do return sub.values[i], true
+				if sub.kind[i] == .Product do return sub.types[i], true
 			}
 			return nil, true
 		}
@@ -820,9 +820,9 @@ default_value :: proc(t: ^Type) -> ^Type {
 		case Scope_Type:
 			for i := 0; i < len(v.kind); i += 1 {
 				if v.kind[i] == .Product {
-					def := type_default(v.values[i])
+					def := type_default(v.types[i])
 					if def != nil do return def
-					return v.values[i]
+					return v.types[i]
 				}
 			}
 			return t
@@ -857,11 +857,11 @@ type_default :: proc(t: ^Type) -> ^Type {
 		}
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return type_default(v.match_scope.values[v.match_index])
+			return type_default(v.match_scope.types[v.match_index])
 		}
 	case Reference_Type:
 		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
-			return type_default(v.reference.match_scope.values[v.reference.match_index])
+			return type_default(v.reference.match_scope.types[v.reference.match_index])
 		}
 	case Or_Type:
 		// The default of a union is the default of its FIRST term (the left branch),
@@ -1362,18 +1362,18 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return range_operand_kind(v.values[i])
+				return range_operand_kind(v.types[i])
 			}
 		}
 		return .Invalid
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return range_operand_kind(v.match_scope.values[v.match_index])
+			return range_operand_kind(v.match_scope.types[v.match_index])
 		}
 		return .Invalid
 	case Reference_Type:
 		if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
-			return range_operand_kind(v.reference.match_scope.values[v.reference.match_index])
+			return range_operand_kind(v.reference.match_scope.types[v.reference.match_index])
 		}
 		return .Invalid
 	case Negate_Type, And_Type, Or_Type, Compose_Type, Cast_Type:
@@ -1467,13 +1467,13 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	// so a stale fold here would hide the substitution from sibling mentions.
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
-		if ref.match_index >= 0 && ref.match_index < len(copy.values) {
+		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
 			// Identity override — `Array{T}` overriding T with the very same T,
 			// the standard shape of a recursive tail. Substituting would leave,
 			// after repoint, a mention of the field ONTO ITSELF in the copy (an
 			// unresolvable cycle); the override changes nothing, keep the
 			// original value.
-			if mv, is_m := carve.values[i]^.(Mention_Type);
+			if mv, is_m := carve.types[i]^.(Mention_Type);
 			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
 			}
@@ -1481,12 +1481,13 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 			// `data{e}:somedata`), unify the supplied value (`data{6}`) against that
 			// constraint to resolve the pull (`e = 6`) and write it into the pull's
 			// binding in the copy — so `-> e` and every other mention of e read 6.
-			if ref.match_index < len(copy.types) && copy.types[ref.match_index] != nil {
-				unify_pull(copy.types[ref.match_index], carve.values[i], copy, src)
+			if ref.match_index < len(copy.constraints) &&
+			   copy.constraints[ref.match_index] != nil {
+				unify_pull(copy.constraints[ref.match_index], carve.types[i], copy, src)
 			}
-			copy.values[ref.match_index] = carve.values[i]
+			copy.types[ref.match_index] = carve.types[i]
 			if ref.match_index < len(copy.type_folds) {
-				copy.type_folds[ref.match_index] = fold_value_type(carve.values[i])
+				copy.type_folds[ref.match_index] = fold_value_type(carve.types[i])
 			}
 		}
 	}
@@ -1502,9 +1503,9 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	dst := new(Scope_Type)
 	dst.parent = src.parent
 	for n in src.names do append(&dst.names, n)
-	for ty in src.types do append(&dst.types, ty)
+	for ty in src.constraints do append(&dst.constraints, ty)
 	for k in src.kind do append(&dst.kind, k)
-	for v in src.values do append(&dst.values, v)
+	for v in src.types do append(&dst.types, v)
 	for f in src.type_folds do append(&dst.type_folds, f)
 	for f in src.constraint_folds do append(&dst.constraint_folds, f)
 	for c in src.captures do append(&dst.captures, c)
@@ -1515,11 +1516,11 @@ scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
 	rst := new(Scope_Type)
 	rst.parent = src.parent
 	for n in src.names do append(&rst.names, n)
-	for ty in src.types do append(&rst.types, repoint(ty, old, dst))
+	for ty in src.constraints do append(&rst.constraints, repoint(ty, old, dst))
 	for k in src.kind do append(&rst.kind, k)
-	for v in src.values do append(&rst.values, repoint(v, old, dst))
-	for f, i in src.type_folds do append(&rst.type_folds, fold_value_type(rst.values[i]))
-	for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.types[i]))
+	for v in src.types do append(&rst.types, repoint(v, old, dst))
+	for f, i in src.type_folds do append(&rst.type_folds, fold_value_type(rst.types[i]))
+	for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.constraints[i]))
 	for c in src.captures do append(&rst.captures, c)
 	return rst
 }
@@ -1624,8 +1625,8 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 	case Carve_Type:
 		s := repoint(v.source, old, dst)
 		changed := s != v.source
-		vals := make([dynamic]^Type, 0, len(v.values))
-		for cv in v.values {
+		vals := make([dynamic]^Type, 0, len(v.types))
+		for cv in v.types {
 			nv := repoint(cv, old, dst)
 			if nv != cv do changed = true
 			append(&vals, nv)

@@ -45,7 +45,7 @@ family_of :: proc(t: ^Type) -> Family {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return family_of(v.values[i])
+				return family_of(v.types[i])
 			}
 		}
 		return .Scope
@@ -67,13 +67,13 @@ family_of :: proc(t: ^Type) -> Family {
 		return family_of(v.operand)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return family_of(v.match_scope.values[v.match_index])
+			return family_of(v.match_scope.types[v.match_index])
 		}
 		return .Unknown
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			return family_of(ref.match_scope.values[ref.match_index])
+			return family_of(ref.match_scope.types[ref.match_index])
 		}
 		return .Unknown
 	case Unknown_Type:
@@ -209,13 +209,13 @@ follow_for_diagnostic :: proc(t: ^Type) -> ^Type {
 		#partial switch v in cur^ {
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				cur = v.match_scope.values[v.match_index]
+				cur = v.match_scope.types[v.match_index]
 				continue
 			}
 		case Reference_Type:
 			ref := v.reference
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-				cur = ref.match_scope.values[ref.match_index]
+				cur = ref.match_scope.types[ref.match_index]
 				continue
 			}
 		}
@@ -255,7 +255,11 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 			diag_unknown(a, sym, span)
 			return
 		}
-		diag(a, span, fmt.tprintf("'%s' expects a number, not %s", sym, describe_value(comp.right)))
+		diag(
+			a,
+			span,
+			fmt.tprintf("'%s' expects a number, not %s", sym, describe_value(comp.right)),
+		)
 		return
 	}
 
@@ -307,11 +311,27 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 
 	// Non-numeric operand (string, bool, scope…).
 	if !is_numeric_family(lf) {
-		diag(a, span, fmt.tprintf("'%s' expects numbers; left operand is %s", sym, describe_value(comp.left)))
+		diag(
+			a,
+			span,
+			fmt.tprintf(
+				"'%s' expects numbers; left operand is %s",
+				sym,
+				describe_value(comp.left),
+			),
+		)
 		return
 	}
 	if !is_numeric_family(rf) {
-		diag(a, span, fmt.tprintf("'%s' expects numbers; right operand is %s", sym, describe_value(comp.right)))
+		diag(
+			a,
+			span,
+			fmt.tprintf(
+				"'%s' expects numbers; right operand is %s",
+				sym,
+				describe_value(comp.right),
+			),
+		)
 		return
 	}
 
@@ -320,14 +340,39 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 
 diag_open_or_divzero :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 	if comp.operator == .Divide || comp.operator == .Mod {
-		diag(a, span, fmt.tprintf("cannot %s %s by %s: the divisor may be zero", op_verb(comp.operator), describe_value(comp.left), describe_value(comp.right)))
+		diag(
+			a,
+			span,
+			fmt.tprintf(
+				"cannot %s %s by %s: the divisor may be zero",
+				op_verb(comp.operator),
+				describe_value(comp.left),
+				describe_value(comp.right),
+			),
+		)
 		return
 	}
-	diag(a, span, fmt.tprintf("cannot %s %s and %s at compile time", op_verb(comp.operator), describe_value(comp.left), describe_value(comp.right)))
+	diag(
+		a,
+		span,
+		fmt.tprintf(
+			"cannot %s %s and %s at compile time",
+			op_verb(comp.operator),
+			describe_value(comp.left),
+			describe_value(comp.right),
+		),
+	)
 }
 
 diag_unknown :: proc(a: ^Analyzer, sym: string, span: Span) {
-	diag(a, span, fmt.tprintf("'%s' has an unknown operand (??) that cannot be computed at compile time", sym))
+	diag(
+		a,
+		span,
+		fmt.tprintf(
+			"'%s' has an unknown operand (??) that cannot be computed at compile time",
+			sym,
+		),
+	)
 }
 
 diag :: #force_inline proc(a: ^Analyzer, span: Span, msg: string) {

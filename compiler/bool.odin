@@ -92,9 +92,9 @@ write_bool_desc :: proc(b: ^strings.Builder, t: Bool_Type) {
 // ===========================================================================
 
 Bool_Domain :: struct {
-	has_true:  bool,
-	has_false: bool,
-	default:   bool, // first source term (meaningful only when non-empty)
+	has_true:    bool,
+	has_false:   bool,
+	default:     bool, // first source term (meaningful only when non-empty)
 	has_default: bool,
 }
 
@@ -161,7 +161,7 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 				if d, ok := stored_bool_domain(v.type_folds[i]).(Bool_Domain); ok {
 					return d
 				}
-				return fold_bool_domain(v.values[i], as_constraint)
+				return fold_bool_domain(v.types[i], as_constraint)
 			}
 		}
 		return nil
@@ -183,12 +183,15 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if as_constraint {
-				return fold_bool_domain(v.match_scope.values[v.match_index], true)
+				return fold_bool_domain(v.match_scope.types[v.match_index], true)
 			}
-			if d, ok := stored_bool_domain(v.match_scope.type_folds[v.match_index]).(Bool_Domain); ok {
+			if d, ok := stored_bool_domain(v.match_scope.type_folds[v.match_index]).(Bool_Domain);
+			   ok {
 				return d
 			}
-			if d, ok := stored_bool_domain(v.match_scope.constraint_folds[v.match_index]).(Bool_Domain); ok {
+			if d, ok := stored_bool_domain(
+				   v.match_scope.constraint_folds[v.match_index],
+			   ).(Bool_Domain); ok {
 				return d
 			}
 		}
@@ -197,12 +200,16 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 			if as_constraint {
-				return fold_bool_domain(ref.match_scope.values[ref.match_index], true)
+				return fold_bool_domain(ref.match_scope.types[ref.match_index], true)
 			}
-			if d, ok := stored_bool_domain(ref.match_scope.type_folds[ref.match_index]).(Bool_Domain); ok {
+			if d, ok := stored_bool_domain(
+				   ref.match_scope.type_folds[ref.match_index],
+			   ).(Bool_Domain); ok {
 				return d
 			}
-			if d, ok := stored_bool_domain(ref.match_scope.constraint_folds[ref.match_index]).(Bool_Domain); ok {
+			if d, ok := stored_bool_domain(
+				   ref.match_scope.constraint_folds[ref.match_index],
+			   ).(Bool_Domain); ok {
 				return d
 			}
 		}

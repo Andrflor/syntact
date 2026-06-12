@@ -51,7 +51,7 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 					return shortcut
 				}
 			}
-			return reduce_value(scope.values[i])
+			return reduce_value(scope.types[i])
 		}
 	}
 	// A scope with no Product binding reduces to none — the empty value, not nil.
@@ -139,7 +139,7 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 // reduce the bound value.
 reduce_mention :: proc(v: Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
-	bound := v.match_scope.values[v.match_index]
+	bound := v.match_scope.types[v.match_index]
 	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
 	return reduce_value(bound)
 }
@@ -156,14 +156,14 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 			case Carve_Type:
 				for i := 0; i < len(cv.references); i += 1 {
 					if cv.references[i].match_index == ref.match_index {
-						if is_fixed_point(cv.values[i]) do return follow_to_fixedpoint(cv.values[i])
-						return reduce_value(cv.values[i])
+						if is_fixed_point(cv.types[i]) do return follow_to_fixedpoint(cv.types[i])
+						return reduce_value(cv.types[i])
 					}
 				}
 			}
 		}
 	}
-	target := ref.match_scope.values[ref.match_index]
+	target := ref.match_scope.types[ref.match_index]
 	if is_fixed_point(target) do return follow_to_fixedpoint(target)
 	return reduce_value(target)
 }
@@ -173,7 +173,7 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 // the mention it stands for. An unresolved one (analysis errored) stays opaque.
 reduce_recursive_mention :: proc(v: Recursive_Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
-	bound := v.match_scope.values[v.match_index]
+	bound := v.match_scope.types[v.match_index]
 	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
 	return reduce_value(bound)
 }
@@ -193,7 +193,7 @@ follow_to_fixedpoint :: proc(t: ^Type) -> ^Type {
 			return cur // the `??::u8` atom — key the symbol by THIS node
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				cur = v.match_scope.values[v.match_index]
+				cur = v.match_scope.types[v.match_index]
 				continue
 			}
 			return t
@@ -201,7 +201,7 @@ follow_to_fixedpoint :: proc(t: ^Type) -> ^Type {
 			if v.reference != nil &&
 			   v.reference.match_scope != nil &&
 			   v.reference.match_index >= 0 {
-				cur = v.reference.match_scope.values[v.reference.match_index]
+				cur = v.reference.match_scope.types[v.reference.match_index]
 				continue
 			}
 			return t
@@ -228,7 +228,7 @@ is_fixed_point :: proc(t: ^Type) -> bool {
 			continue
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				cur = v.match_scope.values[v.match_index]
+				cur = v.match_scope.types[v.match_index]
 				continue
 			}
 			return false
@@ -236,7 +236,7 @@ is_fixed_point :: proc(t: ^Type) -> bool {
 			if v.reference != nil &&
 			   v.reference.match_scope != nil &&
 			   v.reference.match_index >= 0 {
-				cur = v.reference.match_scope.values[v.reference.match_index]
+				cur = v.reference.match_scope.types[v.reference.match_index]
 				continue
 			}
 			return false
@@ -261,7 +261,7 @@ cast_is_atom :: proc(t: ^Type) -> bool {
 			return true
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				cur = v.match_scope.values[v.match_index]
+				cur = v.match_scope.types[v.match_index]
 				continue
 			}
 			return false
@@ -269,7 +269,7 @@ cast_is_atom :: proc(t: ^Type) -> bool {
 			if v.reference != nil &&
 			   v.reference.match_scope != nil &&
 			   v.reference.match_index >= 0 {
-				cur = v.reference.match_scope.values[v.reference.match_index]
+				cur = v.reference.match_scope.types[v.reference.match_index]
 				continue
 			}
 			return false
@@ -1146,9 +1146,9 @@ reduce_carve :: proc(value: Carve_Type) -> ^Type {
 		return reduce_value(value.source)
 	}
 	// Reduce each field's value in place (best-effort: keep symbolic on failure).
-	for i := 0; i < len(sub.values); i += 1 {
+	for i := 0; i < len(sub.types); i += 1 {
 		if sub.kind[i] == .Product {
-			sub.values[i] = reduce_value(sub.values[i])
+			sub.types[i] = reduce_value(sub.types[i])
 		}
 	}
 	r := new(Type)
@@ -1184,21 +1184,22 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 
 	for i in 0 ..< len(value.references) {
 		ref := value.references[i]
-		if ref.match_index >= 0 && ref.match_index < len(copy.values) {
+		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
 			// Identity override (`Array{T}` overriding T with the same T): the
 			// substitution would leave, after repoint, a mention of the field
 			// onto itself — an unresolvable cycle. It changes nothing; skip.
-			if mv, is_m := value.values[i]^.(Mention_Type);
+			if mv, is_m := value.types[i]^.(Mention_Type);
 			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
 			}
 			// PULL UNIFICATION: a field constraint mentioning a pull (e.g.
 			// `data{e}:somedata`) binds the pull from the supplied value
 			// (`data{6}` → e = 6), so `-> e` and every mention of e read 6.
-			if ref.match_index < len(copy.types) && copy.types[ref.match_index] != nil {
-				reduce_unify_pull(copy.types[ref.match_index], value.values[i], copy, src)
+			if ref.match_index < len(copy.constraints) &&
+			   copy.constraints[ref.match_index] != nil {
+				reduce_unify_pull(copy.constraints[ref.match_index], value.types[i], copy, src)
 			}
-			copy.values[ref.match_index] = value.values[i]
+			copy.types[ref.match_index] = value.types[i]
 			// The cached fold belongs to the PRE-carve value (a stale singleton
 			// would shadow the substitution): clear it, reduce reads the value.
 			if ref.match_index < len(copy.type_folds) {
@@ -1210,10 +1211,10 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	// Repoint every reference that named the source scope so it names the copy:
 	// sibling mentions now read the substituted values, cascading transitively.
 	// A repointed (dependent) field's cached fold is pre-substitution: clear it.
-	for i in 0 ..< len(copy.values) {
-		repointed := repoint(copy.values[i], src, copy)
-		if repointed != copy.values[i] {
-			copy.values[i] = repointed
+	for i in 0 ..< len(copy.types) {
+		repointed := repoint(copy.types[i], src, copy)
+		if repointed != copy.types[i] {
+			copy.types[i] = repointed
 			if i < len(copy.type_folds) do copy.type_folds[i] = nil
 		}
 	}
@@ -1230,7 +1231,7 @@ reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	if m, ok := constraint^.(Mention_Type); ok {
 		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(copy.kind) {
 			if copy.kind[m.match_index] == .Pointing_Pull {
-				copy.values[m.match_index] = value
+				copy.types[m.match_index] = value
 				if m.match_index < len(copy.type_folds) {
 					copy.type_folds[m.match_index] = nil
 				}
@@ -1248,7 +1249,7 @@ reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 				slot := cc.references[ci].match_index
 				for vi in 0 ..< len(vc.references) {
 					if vc.references[vi].match_index == slot {
-						reduce_unify_pull(cc.values[ci], vc.values[vi], copy, src)
+						reduce_unify_pull(cc.types[ci], vc.types[vi], copy, src)
 						break
 					}
 				}
@@ -1260,9 +1261,9 @@ reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	// Two scopes: unify field-by-field by position.
 	if cs, c_ok := &constraint^.(Scope_Type); c_ok {
 		if vs, v_ok := &value^.(Scope_Type); v_ok {
-			n := min(len(cs.values), len(vs.values))
+			n := min(len(cs.types), len(vs.types))
 			for i in 0 ..< n {
-				reduce_unify_pull(cs.values[i], vs.values[i], copy, src)
+				reduce_unify_pull(cs.types[i], vs.types[i], copy, src)
 			}
 		}
 	}

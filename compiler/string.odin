@@ -83,7 +83,12 @@ quotation_is_ordinal :: proc(value: string, quotation: String_Quotation) -> bool
 // itself, like make_int_result/make_float_result.
 make_string_const :: proc(value: string, quotation: String_Quotation) -> Type {
 	intervals := make([]String_Interval, 1)
-	intervals[0] = String_Interval{value, value, quotation_is_ordinal(value, quotation), count_one()}
+	intervals[0] = String_Interval {
+		value,
+		value,
+		quotation_is_ordinal(value, quotation),
+		count_one(),
+	}
 	return String_Type{intervals, value, quotation}
 }
 
@@ -134,7 +139,7 @@ string_value :: #force_inline proc(t: String_Type) -> string {
 // bound. NB: `"a".."z"` is positional, not ordinal — the quote, not just the
 // length, gates ordinal mode.
 String_Mode :: enum {
-	ordinal,    // 'a'..'z' : one single-quote char, codepoint in [lo, hi]
+	ordinal, // 'a'..'z' : one single-quote char, codepoint in [lo, hi]
 	positional, // "p".."s" / 'ab'..'cd' / `x`..`y` : starts with lo, ends with hi
 }
 
@@ -357,7 +362,12 @@ seg_default :: proc(iv: String_Interval) -> string {
 
 // The default of a UNION (the only thing a []String_Interval is) is the first
 // term's default, rendered with that term's quote (ordinal → single, else double).
-default_for_string_intervals :: proc(segs: []String_Interval) -> (Maybe(string), String_Quotation) {
+default_for_string_intervals :: proc(
+	segs: []String_Interval,
+) -> (
+	Maybe(string),
+	String_Quotation,
+) {
 	if len(segs) == 0 do return nil, .double
 	return seg_default(segs[0]), interval_quote(segs[0])
 }
@@ -402,7 +412,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 				if s, ok := stored_string_intervals(v.type_folds[i]).([]String_Interval); ok {
 					return s
 				}
-				return fold_string_intervals(v.values[i], as_constraint)
+				return fold_string_intervals(v.types[i], as_constraint)
 			}
 		}
 		return nil
@@ -471,34 +481,42 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
 			if as_constraint {
-				return fold_string_intervals(v.match_scope.values[v.match_index], true)
+				return fold_string_intervals(v.match_scope.types[v.match_index], true)
 			}
-			if s, ok := stored_string_intervals(v.match_scope.type_folds[v.match_index]).([]String_Interval); ok {
+			if s, ok := stored_string_intervals(
+				   v.match_scope.type_folds[v.match_index],
+			   ).([]String_Interval); ok {
 				return s
 			}
-			if s, ok := stored_string_intervals(v.match_scope.constraint_folds[v.match_index]).([]String_Interval); ok {
+			if s, ok := stored_string_intervals(
+				   v.match_scope.constraint_folds[v.match_index],
+			   ).([]String_Interval); ok {
 				return s
 			}
 			// The cached *_folds carry only an enveloping `{string}` for a bound
 			// ordinal range (`emailChar -> 'a'..'z'`), which loses the bounds a
 			// repetition/range needs. Fall back to the binding's actual VALUE so a
 			// mention into a class folds to its real intervals (`emailChar*1..`).
-			return fold_string_intervals(v.match_scope.values[v.match_index], false)
+			return fold_string_intervals(v.match_scope.types[v.match_index], false)
 		}
 		return nil
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
 			if as_constraint {
-				return fold_string_intervals(ref.match_scope.values[ref.match_index], true)
+				return fold_string_intervals(ref.match_scope.types[ref.match_index], true)
 			}
-			if s, ok := stored_string_intervals(ref.match_scope.type_folds[ref.match_index]).([]String_Interval); ok {
+			if s, ok := stored_string_intervals(
+				   ref.match_scope.type_folds[ref.match_index],
+			   ).([]String_Interval); ok {
 				return s
 			}
-			if s, ok := stored_string_intervals(ref.match_scope.constraint_folds[ref.match_index]).([]String_Interval); ok {
+			if s, ok := stored_string_intervals(
+				   ref.match_scope.constraint_folds[ref.match_index],
+			   ).([]String_Interval); ok {
 				return s
 			}
-			return fold_string_intervals(ref.match_scope.values[ref.match_index], false)
+			return fold_string_intervals(ref.match_scope.types[ref.match_index], false)
 		}
 		return nil
 	}
@@ -718,7 +736,11 @@ sequence_satisfy :: proc(value_segs, constraint_segs: []String_Interval) -> bool
 // segment element; an ordinal element consumes one codepoint, a concrete
 // element consumes its own length. The greedy walk is exact when all elements
 // of a given length agree (the common case); the empty string is the k=0 match.
-concrete_in_sequence :: proc(s: string, segs: []String_Interval, allowed: []Integer_Interval) -> bool {
+concrete_in_sequence :: proc(
+	s: string,
+	segs: []String_Interval,
+	allowed: []Integer_Interval,
+) -> bool {
 	rest := s
 	k := 0
 	for len(rest) > 0 {
@@ -1093,7 +1115,9 @@ string_concat_concrete :: proc(a, b: []String_Interval) -> ([]String_Interval, b
 	x := a[0]
 	y := b[0]
 	if !string_interval_is_concrete(x) || !string_interval_is_concrete(y) do return nil, false
-	joined := strings.concatenate({string_interval_concrete_value(x), string_interval_concrete_value(y)})
+	joined := strings.concatenate(
+		{string_interval_concrete_value(x), string_interval_concrete_value(y)},
+	)
 	res := make([]String_Interval, 1)
 	// A concatenation is a multi-char STRING → positional (not ordinal).
 	res[0] = String_Interval{joined, joined, false, count_one()}
@@ -1185,7 +1209,10 @@ fold_string_sequence :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_In
 // integer multiplier `mult` (reuses the integer interval arithmetic). The
 // multiplier must be ≥ 0 everywhere; otherwise nil (→ error upstream via
 // string_repeat_mult_valid).
-string_intervals_repeat :: proc(segs: []String_Interval, mult: []Integer_Interval) -> []String_Interval {
+string_intervals_repeat :: proc(
+	segs: []String_Interval,
+	mult: []Integer_Interval,
+) -> []String_Interval {
 	if !string_repeat_mult_valid(mult) do return nil
 	result := make([]String_Interval, len(segs))
 	for iv, i in segs {

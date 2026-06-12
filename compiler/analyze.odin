@@ -267,9 +267,9 @@ scope_append :: proc(
 	capture: string = "",
 ) {
 	append(&scope.names, name)
-	append(&scope.types, constraint)
+	append(&scope.constraints, constraint)
 	append(&scope.kind, bk)
-	append(&scope.values, value)
+	append(&scope.types, value)
 	append(&scope.captures, capture)
 
 }
@@ -405,7 +405,7 @@ scope_close :: proc(a: ^Analyzer, s: ^Scope_Type) {
 // inline for a non-recursive constraint.
 close_default :: proc(a: ^Analyzer, p: Pending) {
 	a.fold_pending = nil
-	fc := fold_constraint(p.scope.types[p.bind])
+	fc := fold_constraint(p.scope.constraints[p.bind])
 	if pend := a.fold_pending; pend != nil {
 		a.fold_pending = nil
 		np := p
@@ -414,7 +414,7 @@ close_default :: proc(a: ^Analyzer, p: Pending) {
 		return
 	}
 	value := default_value(fc)
-	p.scope.values[p.bind] = value
+	p.scope.types[p.bind] = value
 	if p.bind < len(p.scope.constraint_folds) do p.scope.constraint_folds[p.bind] = fc
 	if p.bind < len(p.scope.type_folds) do p.scope.type_folds[p.bind] = value
 	if fold_is_unknown(fc) {
@@ -495,8 +495,8 @@ close_ref :: proc(a: ^Analyzer, p: Pending) {
 // recursive references are resolved now), PATCH the cached folds in place
 // (reduce reads these columns), and report exactly what typecheck would have.
 retypecheck :: proc(a: ^Analyzer, scope: ^Scope_Type, bind: int, node: Node_Index) {
-	constraint := scope.types[bind]
-	value := scope.values[bind]
+	constraint := scope.constraints[bind]
+	value := scope.types[bind]
 	a.fold_pending = nil
 	fc := fold_constraint(constraint)
 	ft := fold_value_type(value)
@@ -534,7 +534,7 @@ scope_resolve :: proc(
 ) {
 	if ordinal >= 0 {
 		if name == "" {
-			if int(ordinal) < len(scope.values) {
+			if int(ordinal) < len(scope.types) {
 				return scope, int(ordinal)
 			}
 			return nil, -1
@@ -606,7 +606,7 @@ nth_pointing_push :: proc(scope: ^Scope_Type, k: int) -> int {
 self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
 	if ordinal >= 0 {
 		if name == "" {
-			if int(ordinal) < len(scope.values) {
+			if int(ordinal) < len(scope.types) {
 				return scope, int(ordinal)
 			}
 			return nil, -1
@@ -652,19 +652,19 @@ follow :: proc(t: ^Type) -> ^Type {
 		case Mention_Type:
 			if v.match_scope == nil || v.match_index < 0 do return cur
 			key = Follow_Key{v.match_scope, v.match_index}
-			next = v.match_scope.values[v.match_index]
+			next = v.match_scope.types[v.match_index]
 		case Reference_Type:
 			r := v.reference
 			if r == nil || r.match_scope == nil || r.match_index < 0 do return cur
 			key = Follow_Key{r.match_scope, r.match_index}
-			next = r.match_scope.values[r.match_index]
+			next = r.match_scope.types[r.match_index]
 		case Recursive_Mention_Type:
 			// A self mention designates its own binding (the scope pointer is
 			// valid even while the scope is incomplete — CONSUMERS check
 			// `walking`). Follow it like a Mention to that binding's value.
 			if v.match_scope == nil || v.match_index < 0 do return cur
 			key = Follow_Key{v.match_scope, v.match_index}
-			next = v.match_scope.values[v.match_index]
+			next = v.match_scope.types[v.match_index]
 		case:
 			return cur
 		}
@@ -1077,7 +1077,7 @@ append_bare_constraint :: proc(
 				kind = .Default,
 				awaiting = pend,
 				scope = scope,
-				bind = len(scope.values) - 1,
+				bind = len(scope.types) - 1,
 				node = node,
 			},
 		)
@@ -1368,7 +1368,7 @@ walk_carve :: proc(
 	result^ = Carve_Type {
 		source     = source,
 		references = make([dynamic]Reference),
-		values     = make([dynamic]^Type),
+		types      = make([dynamic]^Type),
 	}
 
 	// A source that chains into a scope STILL BEING WALKED (`module.odd{…}`
@@ -1435,7 +1435,7 @@ carve_resolve_children :: proc(
 	cv, cv_ok := &carve^.(Carve_Type)
 	if !cv_ok do return
 	refs := &cv.references
-	vals := &cv.values
+	vals := &cv.types
 
 	// While walking override values, a source-none property (`.x`) is a
 	// self-mention into the carved scope. Point carved_scope at it and restore
@@ -1690,7 +1690,7 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Type, node: Node_Index) {
 		if overridden[i] do continue
 		fc := i < len(sub.constraint_folds) ? sub.constraint_folds[i] : nil
 		if fc == nil do continue
-		ft := fold_value_type(sub.values[i])
+		ft := fold_value_type(sub.types[i])
 		if ft == nil do continue // unresolved value: not a definite violation here
 		if !satisfy_root(fc, ft) {
 			display := sub.names[i] != "" ? fmt.tprintf("'%s'", sub.names[i]) : "the production"
@@ -1929,7 +1929,7 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 		// the satisfy layer detects the inductive step structurally, and it
 		// survives carve cloning (repoint never rewrites it). match_scope/index
 		// point at the self binding directly — its value IS the open scope.
-		if val := res_scope.values[res_index]; val != nil {
+		if val := res_scope.types[res_index]; val != nil {
 			if vs, is_scope := &val^.(Scope_Type); is_scope && vs.walking {
 				result := new(Type)
 				result^ = Recursive_Mention_Type {

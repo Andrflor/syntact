@@ -135,7 +135,7 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 				if s, ok := stored_fold_intervals(v.type_folds[i]).(Integer_Type); ok {
 					return s
 				}
-				return fold_type_intervals(v.values[i])
+				return fold_type_intervals(v.types[i])
 			}
 		}
 		return nil
@@ -293,7 +293,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return fold_constraint_intervals(v.values[i])
+				return fold_constraint_intervals(v.types[i])
 			}
 		}
 		return nil
@@ -340,12 +340,12 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		// A constraint folds the VALUE of its target, never the target's type.
 		// An Unknown value has no case here → nil → not statically resolvable.
 		if v.match_scope != nil && v.match_index >= 0 {
-			return fold_constraint_intervals(v.match_scope.values[v.match_index])
+			return fold_constraint_intervals(v.match_scope.types[v.match_index])
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			return fold_constraint_intervals(ref.match_scope.values[ref.match_index])
+			return fold_constraint_intervals(ref.match_scope.types[ref.match_index])
 		}
 	}
 	return nil
@@ -359,9 +359,9 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> Maybe(Integer_Type) {
 		case Carve_Type:
 			for i := 0; i < len(v.references); i += 1 {
 				if v.references[i].match_index == index {
-					it, ok := fold_type_intervals(v.values[i]).(Integer_Type)
+					it, ok := fold_type_intervals(v.types[i]).(Integer_Type)
 					if ok do return it
-					it2, ok2 := fold_constraint_intervals(v.values[i]).(Integer_Type)
+					it2, ok2 := fold_constraint_intervals(v.types[i]).(Integer_Type)
 					if ok2 do return it2
 					return nil
 				}
@@ -370,7 +370,7 @@ carve_fold_lookup :: proc(t: ^Type, index: int) -> Maybe(Integer_Type) {
 			continue
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				target = v.match_scope.values[v.match_index]
+				target = v.match_scope.types[v.match_index]
 				continue
 			}
 		}

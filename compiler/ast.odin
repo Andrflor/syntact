@@ -114,8 +114,8 @@ Unary_Data :: struct {
 }
 
 String_Quotation :: enum u8 {
-	simple,   // '…'  — char/ordinal depending on length
-	double,   // "…"  — positional string, escapes interpreted
+	simple, // '…'  — char/ordinal depending on length
+	double, // "…"  — positional string, escapes interpreted
 	backtick, // `…`  — raw positional string, no escaping
 }
 
