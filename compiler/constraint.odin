@@ -504,6 +504,17 @@ fold_carve_constraint :: proc(t: ^Type) -> ^Scope_Type {
 	carve, ok := &t^.(Carve_Type)
 	if !ok do return nil
 
+	// Re-entry guard ARMED HERE (mirrors fold_carve_type): a self-referential
+	// carve loops in fold_constraint(carve.source) below, before carve_substitute.
+	a := current_analyzer()
+	if a != nil {
+		for k in a.carve_fold_stack {
+			if k == t do return nil
+		}
+		append(&a.carve_fold_stack, t)
+	}
+	defer if a != nil do pop(&a.carve_fold_stack)
+
 	folded := fold_constraint(carve.source)
 	if folded == nil do return nil
 	// A recursive tail (`Array{T}` inside Array's own body) folds its source to a

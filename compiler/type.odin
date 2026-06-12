@@ -965,16 +965,10 @@ fold_carve_type :: proc(t: ^Type) -> ^Scope_Type {
 	carve, ok := &t^.(Carve_Type)
 	if !ok do return nil
 
-	folded := fold_type(carve.source)
-	src, ok2 := &folded^.(Scope_Type)
-	if ok2 {
-		return carve_substitute(t, carve, src)
-	}
-	// TODO: err here
-	return nil
-}
-
-carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Scope_Type {
+	// Re-entry guard ARMED HERE, not just in carve_substitute: a self-referential
+	// carve (`a{z -> .z{…}}`, where the override's source resolves back through the
+	// carve) loops in fold_type(carve.source) BELOW — before carve_substitute is
+	// ever reached. Key on the carve node so the inner re-entry bails to nil.
 	a := current_analyzer()
 	if a != nil {
 		for k in a.carve_fold_stack {
@@ -984,6 +978,17 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	}
 	defer if a != nil do pop(&a.carve_fold_stack)
 
+	folded := fold_type(carve.source)
+	if folded == nil do return nil // self-referential source: the guard cut it
+	src, ok2 := &folded^.(Scope_Type)
+	if ok2 {
+		return carve_substitute(t, carve, src)
+	}
+	// TODO: err here
+	return nil
+}
+
+carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Scope_Type {
 	copy := scope_clone(src)
 
 	// Apply each override: write the new value into the field it targets, and
@@ -1021,15 +1026,21 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	return copy
 }
 
+// scope_clone is a PURE copy: it shares each element ^Type pointer (copy-on-write
+// happens later in carve_substitute's repoint pass) and copies the cached folds
+// as-is. No repoint and NO refold here — refolding a still-carved field during the
+// clone re-enters fold_carve_constraint on fresh clones forever (the re-entry
+// guard, keyed on the carve node, can't catch ever-new clones). carve_substitute
+// repoints and refreshes the folds AFTER the overrides are written.
 scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	dst := new(Scope_Type)
 	dst.parent = src.parent
 	for n in src.names do append(&dst.names, n)
-	for v in src.types do append(&dst.types, repoint(v, src, dst))
-	for ty in src.constraints do append(&dst.constraints, repoint(ty, src, dst))
+	for v in src.types do append(&dst.types, v)
+	for ty in src.constraints do append(&dst.constraints, ty)
 	for k in src.kind do append(&dst.kind, k)
-	for f, i in src.type_folds do append(&dst.type_folds, fold_type(dst.types[i]))
-	for f, i in src.constraint_folds do append(&dst.constraint_folds, fold_constraint(dst.constraints[i]))
+	for f in src.type_folds do append(&dst.type_folds, f)
+	for f in src.constraint_folds do append(&dst.constraint_folds, f)
 	for c in src.captures do append(&dst.captures, c)
 	return dst
 }
