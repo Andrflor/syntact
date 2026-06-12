@@ -1,0 +1,1 @@
+{ "name": "tc_color_nested_carve_ok", "description": "re-carving a doubly-colored binding's inner scope with a string satisfies the deep color", "source": "{{string:}:}:a -> {{\"\"}}\na{{\"x\"}}", "expect_errors": [] }

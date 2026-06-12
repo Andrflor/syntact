@@ -1,0 +1,1 @@
+{ "name": "tc_color_carve_pos_bad", "description": "a colored {string:} binding carries its constraint to the value, so carving it with 0 is rejected", "source": "{string:}:a -> {\"\"}\na{0}", "expect_errors": ["Constraint_Mismatch"] }

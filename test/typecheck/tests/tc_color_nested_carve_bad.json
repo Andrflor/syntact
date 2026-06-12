@@ -1,0 +1,1 @@
+{ "name": "tc_color_nested_carve_bad", "description": "the color propagated two levels deep survives a carve: re-carving the inner scope with 0 is rejected", "source": "{{string:}:}:a -> {{\"\"}}\na{{0}}", "expect_errors": ["Constraint_Mismatch"] }

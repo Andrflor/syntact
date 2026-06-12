@@ -1,0 +1,1 @@
+{ "name": "tc_color_carve_chain_bad", "description": "the color survives a carve into a new binding: b carves a, then carving b with 0 still violates the inherited string color", "source": "{string:}:a -> {\"\"}\nb -> a{\"x\"}\nb{0}", "expect_errors": ["Constraint_Mismatch"] }

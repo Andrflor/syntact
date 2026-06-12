@@ -1,0 +1,1 @@
+{ "name": "tc_color_nested_deep_bad", "description": "a doubly-colored {{string:}:} propagates the color two levels deep; the inner value 0 violates the inner string color", "source": "{{string:}:}:a -> {{0}}", "expect_errors": ["Constraint_Mismatch"] }

@@ -338,6 +338,7 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case Scope_Type:
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
+		// scope_satisfy colors vs on success itself — no separate stamp here.
 		return scope_satisfy(f, v)
 	case And_Type:
 		return satisfy(f.left, ft) && satisfy(f.right, ft)
@@ -391,7 +392,15 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 
 
 scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
-	return scope_satisfy_range(cs, 0, len(cs.names), vs, 0, len(vs.names))
+	satisfied := scope_satisfy_range(cs, 0, len(cs.names), vs, 0, len(vs.names))
+	if satisfied {
+		// Color-on-proof: once vs ⊆ cs is proven, stamp cs's per-field colors onto
+		// vs so the value carries its constraint intrinsically. Done HERE (the one
+		// place scope-vs-scope is decided) so EVERY path benefits — both satisfy's
+		// Scope_Type case and satisfy_root's direct scope_satisfy call.
+		color_scope_with_constaint(cs, vs)
+	}
+	return satisfied
 }
 
 scope_satisfy_range :: proc(cs: Scope_Type, ci, cend: int, vs: Scope_Type, vi, vend: int) -> bool {
@@ -432,6 +441,49 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 			)
 		} else {
 			return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
+		}
+	}
+}
+
+// binding_color computes the COLOR a constraint-scope field `cs[i]` imposes on
+// the corresponding value field — the same constraint binding_satisfy proves
+// against, recovered here so satisfy can stamp it onto the value. Returns nil
+// when the field constrains only the shape (an uncolored non-production field).
+// Mirrors binding_satisfy's branch structure exactly.
+binding_color :: proc(cs: Scope_Type, i: int) -> ^Type {
+	if cs.constraint_folds[i] == nil {
+		if cs.kind[i] != .Product {
+			return nil
+		}
+		return fold_constraint(cs.types[i])
+	}
+	if v, ok := cs.constraint_folds[i].(Recursive_Mention_Type); ok {
+		return fold_constraint_target(v.match_scope, v.match_index)
+	}
+	return cs.constraint_folds[i]
+}
+
+// color_scope_with_constaint stamps the constraint-scope `cs`'s per-field colors
+// onto the value-scope `vs` AFTER scope_satisfy has proven vs ⊆ cs. Once a value
+// carries its color in its own constraint_folds column, later structural
+// operations (carve, property, mention) see the constraint intrinsically — the
+// constraint travels WITH the value instead of living detached at the binding
+// site. Only ONE level is stamped here: nested scopes were already colored by
+// their own recursive pass through satisfy's Scope_Type case before we return,
+// so re-descending would be redundant. An existing color is narrowed with `&`
+// (the refinement model), never lost. Field pairing follows scope_satisfy_range
+// (parallel, in order) — valid because satisfy returned true.
+color_scope_with_constaint :: proc(cs, vs: Scope_Type) {
+	n := min(len(cs.names), len(vs.names))
+	for k in 0 ..< n {
+		if k >= len(vs.constraint_folds) do break
+		color := binding_color(cs, k)
+		if color == nil do continue
+		existing := vs.constraint_folds[k]
+		if existing == nil {
+			vs.constraint_folds[k] = color
+		} else {
+			vs.constraint_folds[k] = new_type(And_Type{existing, color})
 		}
 	}
 }

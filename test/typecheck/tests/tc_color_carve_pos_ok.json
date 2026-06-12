@@ -1,0 +1,1 @@
+{ "name": "tc_color_carve_pos_ok", "description": "carving a colored {string:} binding with a string satisfies the propagated color", "source": "{string:}:a -> {\"\"}\na{\"ok\"}", "expect_errors": [] }
