@@ -1458,7 +1458,8 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	}
 	defer if a != nil do pop(&a.carve_fold_stack)
 
-	copy := scope_repoint(src, nil, nil)
+	copy := scope_clone(src)
+
 
 	// Apply each override: write the new value into the field it targets, and
 	// refresh its cached type_fold — the integer/float/... folders read a
@@ -1491,6 +1492,9 @@ fold_carve :: proc(t: ^Type) -> ^Scope_Type {
 	}
 
 
+	copy = scope_repoint(copy, src, copy)
+
+
 	return copy
 }
 
@@ -1510,20 +1514,12 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
 	rst := new(Scope_Type)
 	rst.parent = src.parent
-	old := old
-	dst := dst
-	if (old == nil) {
-		old = src
-	}
-	if (dst == nil) {
-		dst = rst
-	}
 	for n in src.names do append(&rst.names, n)
 	for ty in src.types do append(&rst.types, repoint(ty, old, dst))
 	for k in src.kind do append(&rst.kind, k)
 	for v in src.values do append(&rst.values, repoint(v, old, dst))
-	for f, i in src.type_folds do append(&rst.type_folds, fold_value_type(dst.values[i]))
-	for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(dst.types[i]))
+	for f, i in src.type_folds do append(&rst.type_folds, fold_value_type(rst.values[i]))
+	for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.types[i]))
 	for c in src.captures do append(&rst.captures, c)
 	return rst
 }
