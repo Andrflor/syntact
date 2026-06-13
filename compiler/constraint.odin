@@ -380,18 +380,9 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	if ok {
 		prods := scope_productions(c)
 		prod_count := len(prods)
-		switch prod_count {
-		case 0:
-			t, ok := ft^.(Scope_Type)
-			if ok {
-				return scope_satisfy(c, t)
-			}
-			return false
-		case:
-			for i := 0; i < prod_count; i += 1 {
-				if satisfy(fold_type(prods[i]), ft) {
-					return true
-				}
+		for i := 0; i < prod_count; i += 1 {
+			if satisfy(fold_type(prods[i]), ft) {
+				return true
 			}
 		}
 	}
