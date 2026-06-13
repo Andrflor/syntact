@@ -1691,10 +1691,22 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	for ref in carve.references do overridden[ref.match_index] = true
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue
+		ft := fold_type(sub.types[i])
+		if ft == nil {
+			// A nil fold is ambiguous: the substituted value may be legally symbolic
+			// (`x + 1` with x an unknown), OR genuinely incoherent (`"" + 10` after x
+			// was carved to a string). detect_invalid re-inspects the operands and
+			// emits (anchored at recheck_span) only for a real error; otherwise the
+			// value is merely unresolved and not a violation. This is checked for
+			// EVERY dependent field, colored or not — an incoherent expression is an
+			// error regardless of whether the field carries a constraint.
+			detect_invalid(sub.types[i])
+			continue
+		}
+		// The constraint proof only applies to a COLORED field (`u8:y -> …`); an
+		// uncolored field that folded fine imposes nothing more.
 		fc := i < len(sub.constraint_folds) ? sub.constraint_folds[i] : nil
 		if fc == nil do continue
-		ft := fold_type(sub.types[i])
-		if ft == nil do continue // unresolved value: not a definite violation here
 		if !satisfy_root(fc, ft) {
 			display := sub.names[i] != "" ? fmt.tprintf("'%s'", sub.names[i]) : "the production"
 			sem_error(
@@ -1986,6 +1998,27 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 // top of analyze()). Returns nil outside an analysis pass.
 current_analyzer :: #force_inline proc() -> ^Analyzer {
 	return cast(^Analyzer)context.user_ptr
+}
+
+// emit reports an error from the FOLD layer, which has no `^Analyzer` (nor the
+// offending node, hence no span) threaded in. It pulls the in-flight analyzer from
+// the context and anchors the error at `a.recheck_span` — the span of the node
+// whose re-fold is in progress, armed by recheck_carve (and any other re-fold that
+// wants fold-detected errors attributed to it). Outside an analysis pass
+// (current_analyzer() == nil — a fold reached from the LSP or a unit test) it does
+// nothing: detection without a place to report is silent, never a crash. reduce
+// never calls the fold layer (see the Analyzer doc comment), so the context is
+// always this analyzer when a fold runs. This is THE entry point for errors a fold
+// DETECTS on the re-fold path, so a nil from a fold means only "unresolved/
+// symbolic", never a swallowed error. The eager walk path keeps reporting through
+// its local node's span directly (it has the node); emit is the re-fold counterpart.
+emit :: proc(message: string, error_type: Analyzer_Error_Type) {
+	a := current_analyzer()
+	if a == nil do return
+	// No armed span means this fold is not running under a re-fold that wants to
+	// own the diagnostic — stay silent rather than anchor the error at offset 0.
+	if a.recheck_span.start == 0 && a.recheck_span.end == 0 do return
+	sem_error(a, message, error_type, a.recheck_span)
 }
 
 // sem_error / sem_warning take the offending node's SPAN and resolve its start to

@@ -244,46 +244,49 @@ is_numeric_family :: #force_inline proc(f: Family) -> bool {
 // envelope for an arithmetic/bitwise operation. It inspects the operands and
 // emits the most specific, author-facing error it can. The operator is
 // arithmetic/bitwise (Set/`~` operators never reach here).
+// diagnose_compose reports an arithmetic compose whose envelope did not fold, on
+// the EAGER walk path (it has the offending node's `span`). It is a thin wrapper
+// over compose_error_message — the single source of truth that classifies the
+// compose and builds the author-facing string. A message means a real error; no
+// message means the compose is a legal symbolic value (unknown operand, etc.).
 diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
+	if msg, is_err := compose_error_message(comp); is_err {
+		sem_error(a, msg, .Invalid_operator, span)
+	}
+}
+
+// compose_error_message classifies an arithmetic compose whose envelope did not
+// fold and, when it is a GENUINE error, returns the author-facing message. It
+// returns ok=false for every LEGAL symbolic case — an unknown (`??`) operand,
+// numeric operands of one matching family, a comparison — so a fold may keep the
+// compose symbolic without reporting. This mirrors compose_stays_symbolic exactly
+// (ok == !compose_stays_symbolic for arithmetic), centralized here so both the
+// eager path (diagnose_compose) and the re-fold path (detect_invalid) agree on
+// what is an error and on the exact wording.
+compose_error_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 	sym := op_symbol(comp.operator)
 
-	// Unary form (no left operand).
+	// Unary form (no left operand): symbolic for a numeric or unknown operand.
 	if comp.left == nil {
 		rf := family_of(comp.right)
-		if rf == .Integer || rf == .Float do return
-		if rf == .Unknown {
-			diag_unknown(a, sym, span)
-			return
-		}
-		diag(
-			a,
-			span,
-			fmt.tprintf("'%s' expects a number, not %s", sym, describe_value(comp.right)),
-		)
-		return
+		if rf == .Integer || rf == .Float || rf == .Unknown do return "", false
+		return fmt.tprintf("'%s' expects a number, not %s", sym, describe_value(comp.right)), true
 	}
 
 	lf := family_of(comp.left)
 	rf := family_of(comp.right)
 
-	if lf == .Unknown || rf == .Unknown {
-		diag_unknown(a, sym, span)
-		return
-	}
+	// An unknown (`??`) operand keeps the compose symbolic — never an error here.
+	if lf == .Unknown || rf == .Unknown do return "", false
 
 	// Type mismatch: integer and float don't mix without an explicit cast.
 	if (lf == .Integer && rf == .Float) || (lf == .Float && rf == .Integer) {
-		diag(
-			a,
-			span,
-			fmt.tprintf(
-				"type mismatch: cannot %s %s and %s without a cast — color the integer (e.g. 'f64:x -> ...' or write it as a float '0.0')",
-				op_verb(comp.operator),
-				describe_value(comp.left),
-				describe_value(comp.right),
-			),
-		)
-		return
+		return fmt.tprintf(
+			"type mismatch: cannot %s %s and %s without a cast — color the integer (e.g. 'f64:x -> ...' or write it as a float '0.0')",
+			op_verb(comp.operator),
+			describe_value(comp.left),
+			describe_value(comp.right),
+		), true
 	}
 
 	// Two floats with incompatible colors (f32 vs f64).
@@ -291,92 +294,72 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 		lk := float_color(comp.left)
 		rk := float_color(comp.right)
 		if !float_kind_compatible(lk, rk) {
-			diag(
-				a,
-				span,
-				fmt.tprintf(
-					"type mismatch: cannot %s %s and %s — float colors %s and %s differ",
-					op_verb(comp.operator),
-					describe_value(comp.left),
-					describe_value(comp.right),
-					float_kind_name(lk),
-					float_kind_name(rk),
-				),
-			)
-			return
-		}
-		diag_open_or_divzero(a, comp, span)
-		return
-	}
-
-	// Non-numeric operand (string, bool, scope…).
-	if !is_numeric_family(lf) {
-		diag(
-			a,
-			span,
-			fmt.tprintf(
-				"'%s' expects numbers; left operand is %s",
-				sym,
-				describe_value(comp.left),
-			),
-		)
-		return
-	}
-	if !is_numeric_family(rf) {
-		diag(
-			a,
-			span,
-			fmt.tprintf(
-				"'%s' expects numbers; right operand is %s",
-				sym,
-				describe_value(comp.right),
-			),
-		)
-		return
-	}
-
-	diag_open_or_divzero(a, comp, span)
-}
-
-diag_open_or_divzero :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
-	if comp.operator == .Divide || comp.operator == .Mod {
-		diag(
-			a,
-			span,
-			fmt.tprintf(
-				"cannot %s %s by %s: the divisor may be zero",
+			return fmt.tprintf(
+				"type mismatch: cannot %s %s and %s — float colors %s and %s differ",
 				op_verb(comp.operator),
 				describe_value(comp.left),
 				describe_value(comp.right),
-			),
-		)
-		return
+				float_kind_name(lk),
+				float_kind_name(rk),
+			), true
+		}
+		return compose_divzero_message(comp)
 	}
-	diag(
-		a,
-		span,
-		fmt.tprintf(
-			"cannot %s %s and %s at compile time",
+
+	// Non-numeric operand (string, bool, scope…) in arithmetic is a real error.
+	if !is_numeric_family(lf) {
+		return fmt.tprintf("'%s' expects numbers; left operand is %s", sym, describe_value(comp.left)), true
+	}
+	if !is_numeric_family(rf) {
+		return fmt.tprintf("'%s' expects numbers; right operand is %s", sym, describe_value(comp.right)), true
+	}
+
+	return compose_divzero_message(comp)
+}
+
+// compose_divzero_message: for two compatible numeric operands the only remaining
+// error is a `/`,`%` whose divisor may be zero (the fold could not prove it
+// nonzero). Anything else — a sum/product that merely did not reduce to a concrete
+// value — is a LEGAL symbolic value, so ok=false.
+compose_divzero_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
+	if comp.operator == .Divide || comp.operator == .Mod {
+		return fmt.tprintf(
+			"cannot %s %s by %s: the divisor may be zero",
 			op_verb(comp.operator),
 			describe_value(comp.left),
 			describe_value(comp.right),
-		),
-	)
+		), true
+	}
+	return "", false
 }
 
-diag_unknown :: proc(a: ^Analyzer, sym: string, span: Span) {
-	diag(
-		a,
-		span,
-		fmt.tprintf(
-			"'%s' has an unknown operand (??) that cannot be computed at compile time",
-			sym,
-		),
-	)
-}
-
-diag :: #force_inline proc(a: ^Analyzer, span: Span, msg: string) {
-	sem_error(a, msg, .Invalid_operator, span)
+// detect_invalid descends a (possibly substituted) ^Type and reports, via emit,
+// the first GENUINE arithmetic incoherence it finds — the RE-FOLD counterpart of
+// diagnose_compose. recheck_carve calls it on a substituted field whose fold came
+// back nil: that nil may be a legal symbolic value OR a real error (`"" + 10` after
+// `x` was carved to a string), and only re-inspecting the operands tells them
+// apart. emit anchors the error at a.recheck_span (the carve site). Returns true
+// once it has emitted, so the caller stops treating the nil as merely unresolved.
+detect_invalid :: proc(t: ^Type) -> bool {
+	if t == nil do return false
+	#partial switch &v in t^ {
+	case Compose_Type:
+		if detect_invalid(v.left) do return true
+		if detect_invalid(v.right) do return true
+		if msg, is_err := compose_error_message(v); is_err {
+			emit(msg, .Invalid_operator)
+			return true
+		}
+	case Negate_Type:
+		return detect_invalid(v.operand)
+	case And_Type:
+		if detect_invalid(v.left) do return true
+		return detect_invalid(v.right)
+	case Or_Type:
+		if detect_invalid(v.left) do return true
+		return detect_invalid(v.right)
+	}
+	return false
 }
 
 op_verb :: proc(op: Operator_Kind) -> string {
