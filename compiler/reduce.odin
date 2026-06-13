@@ -7,43 +7,14 @@ import "core:strings"
 // ============================================================================
 // SYMBOLIC FIXED-POINT REDUCTION
 //
-// Syntact execution is structural reduction. A program reduces to the value its
-// root scope produces. When that value is fully determined at compile time it is
-// a concrete singleton and reduction is just evaluation. But a program may depend
-// on UNKNOWNS — `??` (an external the linker resolves: argc, an env value, …).
-// Each `??` is a FIXED POINT: a free variable the reducer cannot evaluate, only
-// carry. Reduction then becomes PARTIAL EVALUATION: fold everything concrete,
-// keep the fixed points symbolic, and emit the operation-minimal expression so
-// the runtime does as little as possible.
-//
-// THE RULE, applied to every node:
-//   1. Look at its fold_type (already computed by the analyzer, maximally folded).
-//   2. If that fold is a CONCRETE SINGLETON, it already IS the reduction of what
-//      the node points to — return it, no evaluation.
-//   3. Otherwise a fixed point survives inside it: do NOT use the fold as the
-//      result. Recurse into the node's VALUE (the raw expression) and partially
-//      evaluate it, isolating the `??` so the minimum of work is left for runtime.
-//
-// `((a*2)+3-4)*3` with `a -> ??:u8` is not a singleton, so we descend into the
-// value, normalize the arithmetic into a canonical polynomial over the fixed
-// point `a`, and emit `6 * a - 3` — one multiply, one subtract at runtime.
-//
-// The canonical form is a SUM OF MONOMIALS (a multivariate polynomial over the
-// symbols): map monomial -> integer coefficient, plus a constant term. `+ - *`
-// are the ring operations; any symbol reached through a non-polynomial operator
-// (`/`, `%`, a comparison, a bit op, a collapse that cannot resolve, …) becomes
-// an OPAQUE atomic symbol — still combinable linearly (`(a/b)+(a/b)` -> `2*(a/b)`)
-// but never expanded. The polynomial is then rendered back to a Compose_Type tree
-// chosen to minimize runtime operations (constant last, unit coefficients elided).
+// Partial evaluation: each `??` is a fixed point the reducer carries as a free
+// variable; everything concrete is folded, and the surviving symbolic expression
+// is emitted operation-minimal. A concrete-singleton fold IS the reduction;
+// otherwise descend into the node's value and reduce symbolically.
 // ============================================================================
 
-// reduce collapses a scope through its Product binding. The product's fold_type,
-// if a concrete singleton, is the answer outright; otherwise we descend into the
-// product's value and reduce it symbolically.
+// reduce collapses a scope through its Product binding.
 reduce :: proc(scope: ^Scope_Type) -> ^Type {
-	// Fresh per-reduction DAG bookkeeping, allocated in the CURRENT context (the
-	// test harness runs each case in its own arena that is destroyed afterward, so a
-	// map carried over from a previous reduce would dangle). Reset every call.
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
 			if i < len(scope.type_folds) {
@@ -58,17 +29,16 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	return new_type(None_Type{})
 }
 
-// singleton_shortcut returns the fold itself when it is a concrete singleton (a
-// value already fully reduced), else nil — signalling "descend into the value".
+// singleton_shortcut returns the fold when it is a concrete singleton, else nil
+// (signalling "descend into the value").
 singleton_shortcut :: proc(tf: ^Type) -> ^Type {
 	if tf == nil do return nil
 	if fold_is_concrete_value(tf) do return tf
 	return nil
 }
 
-// reduce_value is the recursive partial evaluator. It returns a reduced ^Type:
-// a concrete value when everything resolved, or a symbolic expression (a
-// normalized Compose tree over the surviving fixed points) otherwise.
+// reduce_value is the recursive partial evaluator: a concrete value when
+// everything resolved, else a symbolic Compose tree over the fixed points.
 reduce_value :: proc(value: ^Type) -> ^Type {
 	if value == nil do return nil
 	switch &v in value^ {
@@ -77,15 +47,12 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	case Compose_Type:
 		return reduce_compose(v)
 	case Cast_Type:
-		// A cast over a concrete source has its reinterpreted value cached; a cast
-		// over a fixed point (`??::u8`) stays symbolic (it IS a fixed point).
+		// Concrete source → use the cached reinterpreted value.
 		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) {
 			return reduce_value(v.type_fold)
 		}
-		// A bare `??::u8` is an ATOM — the unknown itself; carry it as is. But a cast
-		// over a COMPOSITE source (`(a+b)::u8`) is a WRAPPER: reduce the inner
-		// expression and re-wrap, so the wrapped terms (and the cast) survive instead
-		// of collapsing the whole node to one opaque `??`.
+		// A bare `??::u8` is an atom; a cast over a composite source is a width
+		// WRAPPER: reduce the inner expression and re-wrap.
 		if cast_is_atom(value) do return value
 		inner := reduce_value(v.value)
 		if inner == v.value do return value
@@ -117,7 +84,6 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	case Invalid_Type:
 		return value
 	case Unknown_Type:
-		// A bare fixed point: nothing to evaluate, carry it as is.
 		return value
 	case Or_Type:
 		return reduce_set_op(value)
@@ -131,12 +97,9 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	return value
 }
 
-// reduce_mention follows a name to its binding and reduces the bound value
-// through. If the value bottoms out in a fixed point we DON'T stop at this alias —
-// we follow to the ATOMIC `??` node (follow_to_fixedpoint) and return THAT, so
-// every route to the same unknown converges on one node and thus one `??N` index
-// (`c -> 2*n`, `e -> n` both reach n's `??`, so `c + e` collects). Otherwise we
-// reduce the bound value.
+// reduce_mention follows a name to its binding and reduces through. A fixed-point
+// binding follows to the atomic `??` node so every route to one unknown converges
+// on one node (and thus one `??N` index, so they collect).
 reduce_mention :: proc(v: Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
 	bound := v.match_scope.types[v.match_index]
@@ -168,9 +131,8 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 	return reduce_value(target)
 }
 
-// reduce_recursive_mention mirrors reduce_mention for a self mention: by analysis
-// time it carries its self binding (match_scope, match_index), so it reduces like
-// the mention it stands for. An unresolved one (analysis errored) stays opaque.
+// reduce_recursive_mention mirrors reduce_mention for a self mention; an
+// unresolved one (analysis errored) stays opaque.
 reduce_recursive_mention :: proc(v: Recursive_Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
 	bound := v.match_scope.types[v.match_index]
@@ -178,10 +140,8 @@ reduce_recursive_mention :: proc(v: Recursive_Mention_Type, node: ^Type) -> ^Typ
 	return reduce_value(bound)
 }
 
-// follow_to_fixedpoint chases a fixed-point value down THROUGH aliases to the
-// atomic `??` node (the Cast(Unknown)/Unknown itself), so all references to one
-// unknown share that single node — and therefore one fixedpoint_id. Stops at the
-// first Cast/Unknown; returns the input unchanged if no atom is found.
+// follow_to_fixedpoint chases a fixed-point value through aliases to the atomic
+// `??` node, so all references to one unknown share that node (and fixedpoint_id).
 follow_to_fixedpoint :: proc(t: ^Type) -> ^Type {
 	cur := t
 	for cur != nil {
@@ -211,10 +171,8 @@ follow_to_fixedpoint :: proc(t: ^Type) -> ^Type {
 	return t
 }
 
-// is_fixed_point reports whether `t` ultimately denotes an UNKNOWN — a value the
-// reducer cannot evaluate and must carry as a free variable. A bare `??`, a cast
-// of an unknown whose result did not become concrete, or a reference chasing down
-// to one. Following stops at the first concrete/structural node.
+// is_fixed_point reports whether `t` ultimately denotes an UNKNOWN the reducer
+// must carry as a free variable.
 is_fixed_point :: proc(t: ^Type) -> bool {
 	cur := t
 	for cur != nil {
@@ -246,11 +204,9 @@ is_fixed_point :: proc(t: ^Type) -> bool {
 	return false
 }
 
-// cast_is_atom reports whether a Cast node is a bare `??::T` ATOM — its source,
-// followed through aliases, bottoms out in the Unknown itself (the runtime input).
-// Such a cast IS the fixed point and is carried unreduced. A cast whose source is a
-// composite expression (`(a+b)::u8`) is NOT an atom: it is a width WRAPPER and must
-// have its inner expression reduced and the cast preserved around it.
+// cast_is_atom reports whether a Cast node is a bare `??::T` atom (its source,
+// followed through aliases, bottoms out in the Unknown). A composite source
+// (`(a+b)::u8`) is a width WRAPPER, not an atom.
 cast_is_atom :: proc(t: ^Type) -> bool {
 	ct, ok := &t.(Cast_Type)
 	if !ok do return false
@@ -282,11 +238,9 @@ cast_is_atom :: proc(t: ^Type) -> bool {
 	return false
 }
 
-// reduce_scope reduces a non-root scope to itself with each product/value field
-// reduced in place — used when a value resolves to a structural scope (e.g. a
-// carve result rendered without collapse).
+// reduce_scope reduces a non-root scope to itself — used when a value resolves to
+// a structural scope (e.g. a carve result rendered without collapse).
 reduce_scope :: proc(s: ^Scope_Type) -> ^Type {
-	// A pure producer scope {-> X} (single anonymous product): reduce its product.
 	if len(s.kind) == 1 && s.kind[0] == .Product && s.names[0] == "" {
 		// Keep the scope shape; callers (reduce) peel the root themselves.
 	}
@@ -298,24 +252,13 @@ reduce_scope :: proc(s: ^Scope_Type) -> ^Type {
 // ============================================================================
 // COMPOSE — the symbolic arithmetic core (DAG + constant folding + CSE).
 //
-// The reduced form is NOT distributed: distributing a product of sums (`(4x+2+5e)
-// *14*e`) multiplies the number of terms and of multiplications, which is the
-// OPPOSITE of operation-minimal. Instead we keep the author's factored structure
-// and only:
-//   * FOLD CONSTANTS — both operands concrete → evaluate; chains of constants
-//     collapse (`5*e*14` → `70*e`, `a*2*2` with a=??*2 → `4*??`).
-//   * ELIMINATE IDENTITIES — `*1`/`1*`, `+0`/`0+`, `-0`, `x-x`→0, `*0`→0.
-//   * SHARE COMMON SUBEXPRESSIONS (CSE) — a structurally identical subexpression
-//     is interned to a single node (`dag_intern`), so `e` (and `(…)*e`) is built
-//     once and reused. The emitted DAG is what codegen wants: minimal mul/add with
-//     shared rebinds, not an expanded polynomial.
-// A surviving fixed point `??` is a leaf, indexed stably as `??0`, `??1`, … so two
-// DISTINCT unknowns are visibly distinct (the linker resolves each separately).
+// The reduced form is NOT distributed (distribution grows the op count, the
+// opposite of operation-minimal). We keep the factored structure and only fold
+// constants, eliminate identities, and share common subexpressions via CSE.
 // ============================================================================
 
-// reduce_compose partially evaluates one arithmetic node: reduce the operands
-// (already interned/folded), then fold constants and apply the algebraic
-// identities, and finally intern the resulting node for CSE.
+// reduce_compose partially evaluates one arithmetic node: reduce the operands,
+// fold constants, apply the algebraic identities, then intern for CSE.
 reduce_compose :: proc(v: Compose_Type) -> ^Type {
 	left := v.left != nil ? reduce_value(v.left) : nil
 	right := v.right != nil ? reduce_value(v.right) : nil
@@ -327,18 +270,14 @@ reduce_compose :: proc(v: Compose_Type) -> ^Type {
 		}
 	}
 
-	// A binary +/- : COLLECT like terms across the whole sum chain — `k*x + m*x` →
-	// `(k+m)*x`, the constant folded, even when the two sides arrive already reduced
-	// from distinct references (`c + e`). This REDUCES operations (always a win); it
-	// is NOT distribution — products of sums stay factored.
+	// Binary +/- : collect like terms across the sum chain (`k*x + m*x` → `(k+m)*x`).
 	if (v.operator == .Add || v.operator == .Subtract) && v.left != nil {
 		if collected := collect_sum(left, right, v.operator); collected != nil {
 			return collected
 		}
 	}
 
-	// Algebraic simplification for the multiply chain (`(x*2)*2` → `x*4`, `5*e*14` →
-	// `70*e`) and the unary minus / identities.
+	// Algebraic simplification: multiply chains, unary minus, identities.
 	if simplified := simplify_arith(v.operator, left, right); simplified != nil {
 		return simplified
 	}
@@ -346,22 +285,18 @@ reduce_compose :: proc(v: Compose_Type) -> ^Type {
 	return dag_intern(Compose_Type{left, right, v.operator, nil})
 }
 
-// ============================================================================
 // SUM COLLECTION — gather a +/- chain's like terms (k*x + m*x → (k+m)*x), fold
-// the constant, and re-emit the minimal sum. This is purely ADDITIVE collection:
-// it never multiplies sums out (no distribution). A "term" is (coefficient, base)
-// where base is keyed by dag_key; the bare constant is collected separately.
-// ============================================================================
+// the constant, re-emit the minimal sum. Purely additive (no distribution). A
+// "term" is (coefficient, base) keyed by dag_key; the bare constant is separate.
 
 Sum_Term :: struct {
 	coeff: i128,
 	base:  ^Type, // nil for the constant accumulator
 }
 
-// collect_sum reduces `left <op> right` (op is + or -) by flattening BOTH sides
-// into additive terms, summing coefficients of equal bases, and rebuilding the
-// minimal sum. Returns nil if nothing actually combined (so the caller keeps the
-// plain interned node and we don't churn).
+// collect_sum flattens both sides of `left <op> right` (op + or -) into additive
+// terms, sums coefficients of equal bases, and rebuilds the minimal sum. Returns
+// nil if nothing combined (caller keeps the plain node, no churn).
 collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
 	terms: [dynamic]Sum_Term
 	constant: i128 = 0
@@ -387,20 +322,15 @@ collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
 
 	rebuilt := rebuild_sum(kept[:], constant)
 
-	// Common-factor extraction (LLVM Reassociate dual): `a*b + a*c` → `a*(b+c)`.
-	// Try it on the collected terms; keep it only if it lowers the op count (the
-	// same cost guard). This is what makes a sum of base-products beat staying
-	// expanded — gated so it never grows the expression.
+	// Common-factor extraction (LLVM Reassociate dual): `a*b + a*c` → `a*(b+c)`,
+	// kept only if it lowers the op count.
 	if factored := factor_common(kept[:], constant); factored != nil {
 		if op_cost(factored) < op_cost(rebuilt) {
 			rebuilt = factored
 		}
 	}
 
-	// Commit only if the canonical form is no MORE expensive than the original
-	// (operation-minimal: distributing 3*(2a-1)+5a → 11a-3 reduces the op count,
-	// so it commits; a form that would grow stays as-is). The original cost is the
-	// two operands plus the joining +/-; we compare node counts (Compose nodes).
+	// Commit only if the canonical form is no more expensive than the original.
 	orig := op_cost(left) + op_cost(right) + 1
 	if op_cost(rebuilt) > orig do return nil // would grow → keep the plain node
 	// Avoid pointless churn: if nothing structurally changed, bail.
@@ -412,8 +342,7 @@ collect_sum :: proc(left, right: ^Type, op: Operator_Kind) -> ^Type {
 	return rebuilt
 }
 
-// op_cost counts the arithmetic Compose nodes in a reduced expression — its
-// operation count, used to decide whether canonicalization actually reduced work.
+// op_cost counts the arithmetic Compose nodes in a reduced expression.
 op_cost :: proc(node: ^Type) -> int {
 	if node == nil do return 0
 	#partial switch v in node^ {
@@ -423,14 +352,10 @@ op_cost :: proc(node: ^Type) -> int {
 	return 0
 }
 
-// flatten_sum decomposes `node` SCALED BY `coeff` into additive terms appended to
-// `terms`, accumulating the bare constant into `constant`. `coeff` is a full
-// integer coefficient (not just a ±1 sign), which is what enables DISTRIBUTION:
-// `coeff * base` recurses into `base` with the product coefficient, so
-// `3 * (2a - 1)` flattens to `6·a + (-3)`. A `const * sub` product distributes the
-// constant into the whole affine sub-form; a `var * var` product does NOT (it is
-// kept as one opaque atom — no distribution of the non-linear part, preserving
-// `(a+1)*(a+1)` and `a*a`).
+// flatten_sum decomposes `node` scaled by `coeff` into additive terms, the bare
+// constant into `constant`. `coeff` is a full integer coefficient, so a `const*sub`
+// product distributes the constant into the affine sub-form (`3*(2a-1)` → `6a-3`);
+// a `var*var` product is kept as one opaque atom (no distribution of nonlinear).
 flatten_sum :: proc(node: ^Type, coeff: i128, terms: ^[dynamic]Sum_Term, constant: ^i128) {
 	if node == nil do return
 	if c, ok := int_of(node); ok {
@@ -453,11 +378,7 @@ flatten_sum :: proc(node: ^Type, coeff: i128, terms: ^[dynamic]Sum_Term, constan
 			}
 			return
 		case .Multiply:
-			// `k * sub` (constant on either side): DISTRIBUTE k into sub by
-			// recursing with the product coefficient. So `3 * (2a-1)` → flatten
-			// (2a-1) scaled by 3 → 6a − 3. The other factor must be the constant;
-			// the variable factor (`sub`) is flattened, never multiplied out against
-			// another variable.
+			// `k * sub`: distribute k by recursing into sub with the product coeff.
 			if c, ok := coeff_of(v.left); ok {
 				flatten_sum(v.right, coeff * c, terms, constant)
 				return
@@ -472,8 +393,8 @@ flatten_sum :: proc(node: ^Type, coeff: i128, terms: ^[dynamic]Sum_Term, constan
 	append(terms, Sum_Term{coeff, node})
 }
 
-// count_sum_leaves counts the additive leaves of a +/- chain (a product or atom is
-// one leaf), to detect whether collection actually reduced the term count.
+// count_sum_leaves counts the additive leaves of a +/- chain (a product or atom
+// is one leaf).
 count_sum_leaves :: proc(node: ^Type) -> int {
 	if node == nil do return 0
 	#partial switch v in node^ {
@@ -505,7 +426,7 @@ sum_constant_count :: proc(node: ^Type) -> int {
 	return 0
 }
 
-// rebuild_sum emits the minimal sum from collected terms + a constant: each term as
+// rebuild_sum emits the minimal sum from collected terms + a constant: each term
 // `coeff * base` (coeff 1 elided, negatives become subtractions), constant last.
 rebuild_sum :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
 	result: ^Type = nil
@@ -531,27 +452,20 @@ rebuild_sum :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
 }
 
 // ============================================================================
-// COMMON-FACTOR EXTRACTION — the DUAL of sum collection, transposed from LLVM's
-// Reassociate::OptimizeAdd: `a*b + a*c` → `a*(b+c)`. Sum collection works the `+`
-// axis (coefficients of equal bases); this works the `*` axis (bases sharing a
-// factor). LLVM's two guards, reproduced exactly:
-//   1. a factor must occur in ≥ 2 terms (MaxOcc > 1) — else no gain,
-//   2. count occurrences PER TERM (a*a contributes `a` once to its term).
-// Like LLVM's Reassociate this does NOT model latency / instruction-level
-// parallelism: it factors on op-count alone (the out-of-order x86-64 core
-// recovers the parallelism). The op_cost guard in collect_sum still applies.
+// COMMON-FACTOR EXTRACTION — dual of sum collection (LLVM Reassociate::OptimizeAdd):
+// `a*b + a*c` → `a*(b+c)`. Two guards: a factor must occur in ≥2 terms, counted
+// per term (a*a contributes `a` once). op_cost guard in collect_sum still applies.
 // ============================================================================
 
-// mul_factors decomposes a base node into its flat list of multiplicative factors
-// (LLVM FindSingleUseMultiplyFactors): `a*b*c` → [a,b,c], a bare `??` → [itself].
-// Only a `var * var` Multiply is split; a `const * x` is not a multiply-of-bases.
+// mul_factors decomposes a base into its flat list of multiplicative factors
+// (`a*b*c` → [a,b,c]). Only a `var * var` Multiply is split.
 mul_factors :: proc(node: ^Type, out: ^[dynamic]^Type) {
 	if node != nil {
 		#partial switch v in node^ {
 		case Compose_Type:
 			if v.operator == .Multiply && v.left != nil {
-				// A constant operand means this isn't a pure base product (handled by
-				// the affine pass); keep the node whole.
+				// A constant operand means this isn't a pure base product (the affine
+				// pass handles it); keep the node whole.
 				_, lc := coeff_of(v.left)
 				_, rc := coeff_of(v.right)
 				if !lc && !rc {
@@ -566,8 +480,8 @@ mul_factors :: proc(node: ^Type, out: ^[dynamic]^Type) {
 }
 
 // remove_one_factor rebuilds a base product with ONE occurrence of `factor`
-// removed (by dag_key). Returns (residual, true) if the factor was present; the
-// residual is `1` (nil base → caller uses constant 1) when it was the only factor.
+// removed (by dag_key). Returns (residual, true) if present; residual is nil
+// (caller uses constant 1) when the factor was the whole base.
 remove_one_factor :: proc(base: ^Type, factor_key: string) -> (^Type, bool) {
 	factors: [dynamic]^Type
 	defer delete(factors)
@@ -592,8 +506,8 @@ remove_one_factor :: proc(base: ^Type, factor_key: string) -> (^Type, bool) {
 }
 
 // factor_common attempts `Σ coeff_i·base_i (+ const)` → `factor·(Σ residual_i) +
-// (untouched terms) + const`, extracting the factor present in the most terms (≥2).
-// Returns nil when no factor occurs in ≥2 terms (LLVM's MaxOcc>1 guard).
+// (untouched terms) + const`, extracting the factor present in the most terms.
+// Returns nil when no factor occurs in ≥2 terms.
 factor_common :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
 	if len(terms) < 2 do return nil
 
@@ -661,8 +575,6 @@ factor_common :: proc(terms: []Sum_Term, constant: i128) -> ^Type {
 	return result
 }
 
-// append_term is a tiny helper so factor_common reads linearly (Odin's append
-// returns the slice by value for dynamic arrays passed around).
 append_term :: proc(arr: [dynamic]Sum_Term, t: Sum_Term) -> [dynamic]Sum_Term {
 	a := arr
 	append(&a, t)
@@ -684,11 +596,9 @@ int_of :: proc(t: ^Type) -> (i128, bool) {
 	return 0, false
 }
 
-// coeff_of returns the integer coefficient of a concrete numeric node for the
-// affine pass. Like int_of, but also accepts a whole-valued float constant (an
-// affine coefficient over a float base is a Float_Type, e.g. `2.0` in `2.0*x`),
-// so distribution/collection keeps working across the float domain. A non-integer
-// float (e.g. 2.5) is NOT a coefficient — the affine pass stays integer-monomial.
+// coeff_of returns the integer coefficient of a concrete numeric node. Like int_of,
+// but also accepts a whole-valued float constant (`2.0` in `2.0*x`); a non-integer
+// float (2.5) is NOT a coefficient.
 coeff_of :: proc(t: ^Type) -> (i128, bool) {
 	if t == nil do return 0, false
 	#partial switch v in t^ {
@@ -704,9 +614,9 @@ coeff_of :: proc(t: ^Type) -> (i128, bool) {
 	return 0, false
 }
 
-// simplify_arith applies the operation-minimal identities WITHOUT distributing,
-// and reassociates a constant up a `*`/`+` chain so constants coalesce. Returns
-// nil when no simplification applies (caller interns the plain node).
+// simplify_arith applies the identities without distributing, and reassociates a
+// constant up a `*`/`+` chain so constants coalesce. Returns nil when nothing
+// applies (caller interns the plain node).
 simplify_arith :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 	#partial switch op {
 	case .Multiply:
@@ -760,10 +670,8 @@ simplify_arith :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 	return nil
 }
 
-// fold_const_into_add coalesces the additive constant `k` into a node that is
-// itself `sub + c` or `sub - c` (or `c + sub`), returning `sub + (c+k)` rendered
-// as an add/subtract by sign. Returns nil when the node carries no foldable
-// constant. Does NOT distribute — it only merges adjacent additive constants.
+// fold_const_into_add coalesces constant `k` into a node that is itself `sub ± c`
+// (or `c + sub`), returning `sub + (c+k)`. Returns nil when no foldable constant.
 fold_const_into_add :: proc(node: ^Type, k: i128) -> ^Type {
 	if node == nil do return nil
 	#partial switch v in node^ {
@@ -791,10 +699,9 @@ offset_node :: proc(sub: ^Type, delta: i128) -> ^Type {
 	return dag_intern(Compose_Type{sub, affine_const(sub, delta), .Add, nil})
 }
 
-// node_float_kind reports whether a reduced node lives in the float domain, and
-// its FloatKind. A float `??::f64` is a Cast over a float target; a concrete
-// float / float Compose folds to a Float_Type. Mirrors machine_type_of's float
-// detection so an affine coefficient over a float base is itself a float.
+// node_float_kind reports whether a reduced node lives in the float domain and its
+// FloatKind. Mirrors machine_type_of's float detection so an affine coefficient
+// over a float base is itself a float.
 node_float_kind :: proc(node: ^Type) -> (FloatKind, bool) {
 	if node == nil do return .none, false
 	#partial switch v in node^ {
@@ -805,9 +712,8 @@ node_float_kind :: proc(node: ^Type) -> (FloatKind, bool) {
 			return tgt.float_kind, true
 		}
 	case Compose_Type:
-		// Read the envelope the ANALYZER cached on the node (fold_compose fills
-		// type_fold) — reduce never re-folds. A reducer-built Compose carries no
-		// cache and falls through to its operands.
+		// Read the analyzer's cached envelope (reduce never re-folds); a
+		// reducer-built Compose has no cache and falls through to its operands.
 		if v.type_fold != nil && v.type_fold != node {
 			if k, ok := node_float_kind(v.type_fold); ok do return k, true
 		}
@@ -817,10 +723,8 @@ node_float_kind :: proc(node: ^Type) -> (FloatKind, bool) {
 	return .none, false
 }
 
-// affine_const builds the integer/float literal `mag` matched to the base node's
-// domain: a float base yields a Float_Type coefficient (so `x+x+x` over `??::f64`
-// renders `3.0 * ??0`, and the native backend loads it as a float, not int bits),
-// otherwise an Integer_Type.
+// affine_const builds the literal `mag` matched to the base node's domain: a float
+// base yields a Float_Type coefficient, otherwise an Integer_Type.
 affine_const :: proc(base: ^Type, mag: i128) -> ^Type {
 	if k, ok := node_float_kind(base); ok {
 		return new_type(make_float_result(f64(mag), k))
@@ -908,17 +812,14 @@ eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 // ============================================================================
 // DAG LAYER — interning (CSE), structural keys, fixed-point indexing.
 //
-// reduce_value follows names to their bound values and reduces through, so the
-// ONLY symbolic leaf that survives is the atomic fixed point (`??` / a `::`-cast
-// of one). dag_intern hash-conses every constructed node by its STRUCTURAL key,
-// so two equal subexpressions share one ^Type — the CSE that lets codegen compute
-// `e` (and any `(…)*e`) exactly once.
+// The only symbolic leaf that survives is the atomic fixed point. dag_intern
+// hash-conses every node by its structural key, so equal subexpressions share one
+// ^Type (the CSE that lets codegen compute a shared subexpression once).
 // ============================================================================
 
-// Interning table: structural key → the canonical ^Type for that shape. Reset per
-// reduce() (the test harness destroys its arena between cases — a carried-over map
-// would dangle). THREAD-LOCAL: the test runner reduces cases on multiple threads
-// concurrently, and a shared global map would data-race into corruption/segfault.
+// Reducer state lives on context.user_ptr, fresh per reduce(): the test harness
+// destroys its arena between cases (a carried-over map would dangle) and reduces
+// cases on multiple threads (a shared global map would data-race).
 Reducer :: struct {
 	collapse_stack:   [dynamic]^Scope_Type,
 	dag_table:        map[string]^Type,
@@ -939,9 +840,8 @@ create_reducer :: proc() -> Reducer {
 	}
 }
 
-// dag_intern returns the canonical node for a Compose shape: if an identical shape
-// was already built, the existing node is returned (sharing), else this one is
-// stored. Keys are by the operands' own structural keys, so sharing is transitive.
+// dag_intern returns the canonical node for a Compose shape, sharing an existing
+// identical one. Keys are by the operands' keys, so sharing is transitive.
 dag_intern :: proc(c: Compose_Type) -> ^Type {
 	node := new(Type)
 	node^ = c
@@ -953,9 +853,7 @@ dag_intern :: proc(c: Compose_Type) -> ^Type {
 }
 
 // dag_key is the structural identity of a reduced node: equal keys ⟺ equal value.
-// A concrete int is its number; a fixed point its stable index; a compose its
-// `op(leftkey,rightkey)`. Commutative ops (`+`,`*`) sort their operand keys so
-// `a+b` and `b+a` share. Used both for CSE and for the `x-x`/`x+x` identities.
+// Commutative ops (`+`,`*`) sort their operand keys so `a+b` and `b+a` share.
 dag_key :: proc(t: ^Type) -> string {
 	if t == nil do return "_"
 	#partial switch v in t^ {
@@ -978,9 +876,8 @@ dag_key :: proc(t: ^Type) -> string {
 		}
 		return fmt.aprintf("(%s%s%s)", lk, op_symbol(v.operator), rk)
 	case Cast_Type:
-		// A bare `??::T` atom keys by its fixed-point index; a width WRAPPER over a
-		// composite source keys by its inner structure plus the target so two distinct
-		// wrappers don't collide on one `?N`.
+		// A bare `??::T` atom keys by its fixed-point index; a width wrapper keys by
+		// inner structure + target so distinct wrappers don't collide on one `?N`.
 		if cast_is_atom(t) do return fmt.aprintf("?%d", fixedpoint_id(t))
 		return fmt.aprintf("cast(%s,%s)", dag_key(v.value), type_to_string(v.target))
 	case Unknown_Type:
@@ -993,10 +890,9 @@ dag_key :: proc(t: ^Type) -> string {
 	return fmt.aprintf("@%p", t)
 }
 
-// fixedpoint_id assigns a stable, appearance-ordered index to a fixed point. Keyed
-// by node ADDRESS (every mention of the same `??` reduces to the same shared node)
-// so two mentions of one unknown share an index, two distinct `??` do not. The
-// index drives both CSE (same id → same key) and rendering (`??0`, `??1`).
+// fixedpoint_id assigns a stable, appearance-ordered index to a fixed point, keyed
+// by node address (mentions of one `??` share the node, hence the index; distinct
+// `??` do not). Drives both CSE and rendering (`??0`, `??1`).
 fixedpoint_id :: proc(node: ^Type) -> int {
 	id: rawptr = node
 	#partial switch v in node^ {
@@ -1022,11 +918,9 @@ fixedpoint_id :: proc(node: ^Type) -> int {
 // PATTERN / SET / CARVE / EXECUTE — the rest of Syntact.
 // ============================================================================
 
-// reduce_pattern collapses a pattern to the product of the FIRST branch that fires
-// for the target. If the target is a fixed point we cannot pick a branch at
-// compile time; the pattern stays symbolic (the runtime decides). The firing test
-// reads each branch's cover_fold — cached by the analyzer — against the REDUCED
-// target through the pure per-domain satisfy kernels: no fold runs during reduce.
+// reduce_pattern collapses a pattern to the product of the first branch that fires.
+// A fixed-point target can't pick a branch at compile time; the pattern stays
+// symbolic. The firing test reads cached cover_folds, never re-folding.
 reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	if !is_fixed_point(p.target) {
 		target := reduce_value(p.target)
@@ -1038,9 +932,8 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 			}
 		}
 	}
-	// Fixed-point target: the runtime selects the branch, so keep the pattern shape
-	// but reduce the target (to its `??N`) and each branch's product. (A pattern that
-	// passed exhaustiveness always has a firing branch at runtime.)
+	// Fixed-point target: keep the pattern shape, reduce the target and each branch's
+	// product; the runtime selects the branch.
 	branches := make([]Pattern_Branch, len(p.branches))
 	for branch, i in p.branches {
 		branches[i] = Pattern_Branch {
@@ -1055,12 +948,10 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	return r
 }
 
-// reduce_branch_fires: the reduce-side in-order firing test. The default branch
-// always fires; otherwise the reduced target must fall inside the branch's
-// cached cover_fold. Only domain-leaf covers are decided here (the pure
-// per-domain satisfy); anything else — a cover that did not fold statically, a
-// scope-shaped cover — keeps the pattern symbolic rather than calling the
-// analyzer's proof machinery from reduce.
+// reduce_branch_fires: the reduce-side firing test. The default branch always
+// fires; otherwise the reduced target must satisfy the branch's cached cover_fold.
+// Only domain-leaf covers are decided here; anything else keeps the pattern
+// symbolic (reduce never calls the analyzer's proof machinery).
 reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> bool {
 	if branch.match == nil do return true
 	cf := branch.cover_fold
@@ -1083,10 +974,9 @@ reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> bool {
 }
 
 // reduce_set_op materializes a |/&/~ expression to a concrete value (the default
-// of the resulting domain), or keeps it symbolic when the domain can't be
-// resolved statically (mixed families, symbolic negation, a fixed-point
-// operand). The operands are REDUCED first, then combined through the pure
-// per-domain kernels — never the analyzer's fold_constraint.
+// of the resulting domain), or keeps it symbolic when the domain can't resolve
+// statically. Operands reduced first, then combined through the per-domain kernels
+// (never the analyzer's fold_constraint).
 reduce_set_op :: proc(value: ^Type) -> ^Type {
 	syn: ^Type
 	#partial switch v in value^ {
@@ -1117,10 +1007,9 @@ reduce_set_op :: proc(value: ^Type) -> ^Type {
 }
 
 execute :: proc(value: Execute_Type) -> ^Type {
-	// If this collapse would re-enter a source scope already being unfolded, the
-	// recursion does not terminate statically (its pivot is a `??`, no base case
-	// chosen at compile time). Stop unfolding and keep the target symbolic — the
-	// runtime selects the branch. A cycle is not an error: see terminate.odin.
+	// Re-entering a source scope already being unfolded does not terminate statically
+	// (pivot is a `??`): stop unfolding, keep the target symbolic. Not an error: see
+	// terminate.odin.
 	src := collapse_source(value.target)
 	if src != nil && collapse_would_recurse(src) {
 		return value.target
@@ -1136,9 +1025,8 @@ execute :: proc(value: Execute_Type) -> ^Type {
 	return reduced
 }
 
-// reduce_carve materializes a carve into its substituted scope, reducing each of
-// the resulting fields. A field overridden with (or depending on) a fixed point
-// stays symbolic; concrete fields fold through.
+// reduce_carve materializes a carve into its substituted scope, reducing each
+// resulting field.
 reduce_carve :: proc(value: Carve_Type) -> ^Type {
 	sub := reduce_substitute_carve(value)
 	if sub == nil {
@@ -1156,14 +1044,11 @@ reduce_carve :: proc(value: Carve_Type) -> ^Type {
 	return r
 }
 
-// reduce_substitute_carve is the REDUCE-SIDE carve materialization: resolve the
-// source scope (peeling nested carves through itself), clone it, unify pulls,
-// write the overrides in, and repoint sibling references so they read the
-// substituted values. It NEVER calls the analyzer's fold layer (fold_carve and
-// friends belong to the analysis pass — they read the analyzer through
-// context.user_ptr, which carries the REDUCER here). Instead of re-folding the
-// substituted fields, it CLEARS their cached type_folds: a cleared fold makes
-// reduce_value read the value itself, which is exactly the reduction's job.
+// reduce_substitute_carve is the reduce-side carve materialization: resolve the
+// source scope, clone it, unify pulls, write overrides, repoint sibling references.
+// It NEVER calls the analyzer's fold layer (context.user_ptr carries the Reducer
+// here, not the analyzer); it clears substituted fields' cached type_folds so
+// reduce_value reads the value itself.
 reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	src: ^Scope_Type = nil
 	cur := follow(value.source)
@@ -1185,32 +1070,28 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	for i in 0 ..< len(value.references) {
 		ref := value.references[i]
 		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
-			// Identity override (`Array{T}` overriding T with the same T): the
-			// substitution would leave, after repoint, a mention of the field
-			// onto itself — an unresolvable cycle. It changes nothing; skip.
+			// Identity override (`Array{T}` overriding T with the same T) would, after
+			// repoint, leave a self-mention — an unresolvable cycle. Changes nothing; skip.
 			if mv, is_m := value.types[i]^.(Mention_Type);
 			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
 			}
-			// PULL UNIFICATION: a field constraint mentioning a pull (e.g.
-			// `data{e}:somedata`) binds the pull from the supplied value
-			// (`data{6}` → e = 6), so `-> e` and every mention of e read 6.
+			// PULL UNIFICATION: a field constraint mentioning a pull binds the pull from
+			// the supplied value (`data{6}` → e = 6), so every mention of e reads 6.
 			if ref.match_index < len(copy.constraints) &&
 			   copy.constraints[ref.match_index] != nil {
 				reduce_unify_pull(copy.constraints[ref.match_index], value.types[i], copy, src)
 			}
 			copy.types[ref.match_index] = value.types[i]
-			// The cached fold belongs to the PRE-carve value (a stale singleton
-			// would shadow the substitution): clear it, reduce reads the value.
+			// Clear the pre-carve cached fold (a stale singleton would shadow it).
 			if ref.match_index < len(copy.type_folds) {
 				copy.type_folds[ref.match_index] = nil
 			}
 		}
 	}
 
-	// Repoint every reference that named the source scope so it names the copy:
-	// sibling mentions now read the substituted values, cascading transitively.
-	// A repointed (dependent) field's cached fold is pre-substitution: clear it.
+	// Repoint references that named the source so they name the copy (sibling
+	// mentions read the substituted values, cascading); clear repointed folds.
 	for i in 0 ..< len(copy.types) {
 		repointed := repoint(copy.types[i], src, copy)
 		if repointed != copy.types[i] {
@@ -1221,9 +1102,8 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	return copy
 }
 
-// reduce_unify_pull mirrors the analyzer's unify_pull for the reduce-side
-// substitution — same structural matching, no fold calls (the freshly written
-// value reduces on demand; its stale cached fold is cleared).
+// reduce_unify_pull mirrors the analyzer's unify_pull for reduce-side substitution
+// — same structural matching, no fold calls.
 reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	if constraint == nil || value == nil do return
 
@@ -1270,8 +1150,7 @@ reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 }
 
 // ============================================================================
-// CONCRETE EVALUATORS — used by eval_concrete for non-ring operators (and by the
-// ring path's leaf folding). These operate on already-reduced concrete operands.
+// CONCRETE EVALUATORS — operate on already-reduced concrete operands.
 // ============================================================================
 
 compose_arith :: proc(lv, rv: Type, op: Operator_Kind) -> Type {

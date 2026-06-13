@@ -3,15 +3,9 @@ package compiler
 import "core:fmt"
 import "core:strings"
 
-// IR data model — the `Type` union and its payloads, the single shape every
-// Syntact form resolves to. Syntact has no type system: a `Type` is the static
-// shape of a value or a constraint. `Scope_Type` is the recursive backbone (a
-// scope is parallel `[dynamic]` arrays indexed by binding ordinal); the domain
-// payloads (Integer/Float/String intervals, Bool) carry the constraint sets the
-// folding in type.odin/integer.odin/float.odin/string.odin/bool.odin reasons over.
-// The analyzer that BUILDS this IR from the AST lives in analyze.odin.
-
-// --- shared interval types (the domain payloads carried inside a Type) ---
+// IR data model — the `Type` union and its payloads. A `Type` is the static shape
+// of a value or constraint; `Scope_Type` is the recursive backbone. The analyzer
+// that builds this IR from the AST lives in analyze.odin.
 
 Integer_Interval :: struct {
 	lo: Maybe(i128), // nil = -∞
@@ -25,30 +19,11 @@ Float_Interval :: struct {
 	hi_open: bool, // true = exclusive upper bound, e.g. `<x` is (-∞, x)
 }
 
-// A string interval unifies char and string. The `ordinal` flag IS the mode
-// (set once at construction from the literal's quotation + length):
-//   ORDINAL    (ordinal = true): a codepoint range — 'a'..'z' = any single char
-//              with codepoint in [lo,hi]. A single-quote literal ≤ 1 codepoint.
-//   POSITIONAL (ordinal = false): lo = required prefix, hi = required suffix —
-//              "a".."z" → starts with "a", ends with "z" (positional even for 1
-//              char!); any double-quote / backtick / multi-char literal.
-// So the QUOTE picks the mode once, here: only a single-char single-quote bound is
-// ordinal; "a".."z" is positional (prefix a, suffix z), not ordinal. nil bound =
-// open (no prefix / no suffix, or ±∞ ordinal).
-//
-// `count` carries the repetition (`*`). Default {1..1}. For an ordinal element it
-// is the number of chars ('a'..'z'*3 = 3 single chars each in [a-z]); for a
-// concrete element it is the number of repetitions of that literal ("ab"*3 =
-// "ababab"). It reuses all of Integer_Type's arithmetic (so the count can itself
-// be a range: 'a'..'z'*2..4 = 2 to 4 letters). The impossible count {-1..-1} TAGS
-// a word-negation segment inside a `+` sequence (see string.odin seg_is_negation).
-//
-// A []String_Interval is ALWAYS a UNION of alternatives (`|`): a value matches if
-// it satisfies AT LEAST ONE segment. The ordered concatenation `+` is NOT a flat
-// []String_Interval — it stays a Compose_Type, matched in order at satisfy time
-// (string.odin fold_string_sequence / string_compose_satisfy). A three-bound range
-// "ab".."cd".."ef" likewise stays a raw Range_Type (string_tri_range_satisfy):
-// starts with ab, contains cd, ends with ef.
+// A string interval unifies char and string. `ordinal` is the mode: true = a
+// codepoint range ('a'..'z'); false = positional (lo prefix, hi suffix). nil bound
+// = open. `count` is the repetition (`*`), default {1..1}, reusing Integer_Type's
+// arithmetic; the impossible {-1..-1} tags a word-negation segment in a `+`
+// sequence (string.odin seg_is_negation). A []String_Interval is always a UNION.
 String_Interval :: struct {
 	lo:      Maybe(string),
 	hi:      Maybe(string),
@@ -62,12 +37,10 @@ FloatKind :: enum {
 	f64,
 }
 
-// How a binding connects a name to its value inside a scope. The four
-// push/pull pairs mirror Syntact's directional operators (`->`/`<-`, `>-`/`-<`,
-// `>>-`/`-<<`, `>>=`/`=<<`); only the pointing pair is fully exercised today —
-// events, resonance and reactivity are recorded but not yet reduced. `Expand`
-// is `+{}` extension, `Product` is the scope's `->`-less production (what
-// collapse `!` reduces through).
+// How a binding connects a name to its value. The push/pull pairs mirror Syntact's
+// directional operators; only the pointing pair is reduced today (events/resonance/
+// reactivity are recorded, not yet reduced). Expand = `+{}`, Product = the
+// `->`-less production collapse `!` reduces through.
 Binding_Kind :: enum u8 {
 	Pointing_Push,
 	Pointing_Pull,
@@ -82,19 +55,8 @@ Binding_Kind :: enum u8 {
 }
 
 // --- the Type union and its variants ---
-//
-// The variants split into three groups:
-//   * connective shapes — Or/And/Negate (the `|`/`&`/~` constraint algebra),
-//     Compose (arithmetic), Range — that combine other Types symbolically until
-//     a fold collapses them to a domain (see type.odin / integer.odin / …);
-//   * domain leaves — Integer/Float/String/Bool — carrying concrete interval
-//     sets plus the default the scope produces when collapsed bare;
-//   * structural shapes — Scope/Carve/Execute and the two indirections
-//     (Mention/Reference) that point back at a binding rather than copying it.
-// None/Unknown/Invalid are the absence, the not-yet-resolved, and the
-// already-errored sentinels; they fold to nothing and never satisfy a constraint.
 
-// `A | B` (sum) and `A & B` (product/intersection — also the explicit cast).
+// `A | B` (sum) and `A & B` (intersection — also the explicit cast).
 Or_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
@@ -110,34 +72,24 @@ Negate_Type :: struct {
 	operand: ^Type,
 }
 
-// The recursive backbone. A scope is its bindings stored column-wise, indexed by
-// ordinal — same-name bindings coexist (`#0`, `#1`, …). For binding i:
-//   names[i]            the bound name ("" for anonymous / positional / product)
-//   types[i]            the imposed constraint, unfolded (nil if none)
-//   kind[i]             the Binding_Kind connecting name to value
-//   values[i]           the bound value, unfolded
-//   constraint_folds[i] types[i] resolved to its set (the LEFT of `:`) — cached
-//   type_folds[i]       values[i] folded to its typeof (the RIGHT of `->`) — cached
-// The two *_folds arrays are filled by typecheck() and reused by reduce.odin so
-// the proof is computed once. `parent` chains lexical scopes for name lookup.
+// The recursive backbone: a scope's bindings stored column-wise, indexed by ordinal
+// (same-name bindings coexist `#0`, `#1`, …). The *_folds arrays cache types[i] and
+// values[i] resolved to their sets, filled by typecheck() and reused by reduce.odin.
+// `parent` chains lexical scopes for name lookup.
 Scope_Type :: struct {
 	parent:           ^Scope_Type,
-	names:            [dynamic]string,
+	names:            [dynamic]string, // "" for anonymous / product
 	kind:             [dynamic]Binding_Kind,
 	types:            [dynamic]^Type,
-	type_folds:       [dynamic]^Type,
+	type_folds:       [dynamic]^Type, // values[i] folded to its typeof (cached)
 	constraints:      [dynamic]^Type,
-	constraint_folds: [dynamic]^Type,
-	// captures: a second, INVISIBLE name per binding (the `(e)` capture span).
-	// Parallel to the columns above: "" when a field has no capture. Unlike
-	// `names`, captures are NOT consulted by property access `.` or carving `{}`
-	// (those scan `names` only) — a capture is referenceable by mention within its
-	// own scope (and, for a pattern match, its branch production), nothing else.
+	constraint_folds: [dynamic]^Type, // types[i] folded to its set (cached)
+	// A second, INVISIBLE name per binding (the `(e)` capture). NOT consulted by
+	// `.` or carving (those scan `names` only) — reachable only by mention within
+	// its own scope (and a pattern branch's production).
 	captures:         [dynamic]string,
-	// True while the analyzer is still walking this scope's body. A fold that
-	// touches a walking scope cannot be trusted (bindings are missing) — it
-	// signals fold_pending and the dependent typecheck is deferred until the
-	// scope closes. Cleared at the end of the walk; always false on clones.
+	// True while the analyzer is still walking this scope's body: folds that touch
+	// it are untrustworthy (bindings missing) and defer. Always false on clones.
 	walking:          bool,
 }
 
@@ -146,19 +98,17 @@ Execute_Type :: struct {
 	target: ^Type,
 }
 
-// `source{ name -> v, … }` — derive a new scope from `source` by overriding
-// some of its bindings. Each `references[i]` locates the overridden field in
-// the source scope; `values[i]` is the replacement. Unmentioned fields are
-// inherited, so the carve stores only the diff, not a full copy of the source.
+// `source{ name -> v, … }` — derive a new scope by overriding bindings. Each
+// `references[i]` locates the overridden field, `types[i]` the replacement; the
+// carve stores only the diff, not a copy.
 Carve_Type :: struct {
 	source:     ^Type,
 	references: [dynamic]Reference,
 	types:      [dynamic]^Type,
 }
 
-// A resolved pointer to a specific binding: (match_scope, match_index) is the
-// definition site; name/index record how it was written (name and/or ordinal)
-// for diagnostics. Used both inside carves and inside Reference_Type.
+// A resolved pointer to a binding: (match_scope, match_index) is the definition
+// site; name/index record how it was written, for diagnostics.
 Reference :: struct {
 	name:        Maybe(string),
 	index:       Maybe(u64),
@@ -166,71 +116,55 @@ Reference :: struct {
 	match_index: int,
 }
 
-// An ordinal/property reference (`a#1`, `a.b`). `target` is the expression it
-// was reached through (nil for a bare ordinal); `reference` is the resolved site.
+// An ordinal/property reference (`a#1`, `a.b`). `target` is the expression reached
+// through (nil for a bare ordinal); `reference` the resolved site.
 Reference_Type :: struct {
 	target:    ^Type,
 	reference: ^Reference,
 }
 
-// A plain by-name reference (`a`). Unlike Reference_Type it is the common,
-// ordinal-less case; follow() chases it to the bound value on demand.
+// A plain by-name reference (`a`), the common ordinal-less case; follow() chases
+// it to the bound value on demand.
 Mention_Type :: struct {
 	name:        string,
 	match_scope: ^Scope_Type,
 	match_index: int,
 }
 
-// A by-name mention of something that mentions ITSELF: the open scope referring
-// to its own binding (`fib` inside fib, `Array` inside Array), or a field that
-// names itself from within an inner scope (`a -> { -> {0 a} }` — the inner `a`).
-// It is structurally a Mention_Type — `match_scope.types[match_index]` is the
-// self binding — but kept a distinct node so folds defer through it, the satisfy
-// layer detects the inductive step, and it survives carve cloning unchanged
-// (repoint never rewrites it). The scope pointer is valid even while the scope is
-// still walking; CONSUMERS check `walking`. To take a genuine (non-self) handle
-// on a binding, use Reference_Type instead.
+// A by-name mention of a binding that mentions ITSELF (`fib` inside fib). Kept
+// distinct from Mention_Type so folds defer through it, satisfy detects the
+// inductive step, and repoint never rewrites it on carve clones. The scope pointer
+// is valid while walking; consumers must check `walking`.
 Recursive_Mention_Type :: struct {
 	name:        string,
-	match_scope: ^Scope_Type, // the scope holding the self binding (valid while walking)
-	match_index: int, // field index in match_scope; -1 until resolved
+	match_scope: ^Scope_Type,
+	match_index: int, // -1 until resolved
 }
 
-// Integer domain leaf: a normalized set of intervals (e.g. u8 = 0..255) plus the
-// value the scope produces bare. See integer.odin for the interval algebra.
+// Integer domain leaf: a normalized interval set + the bare default. See integer.odin.
 Integer_Type :: struct {
 	integer_intervals: []Integer_Interval,
 	default_value:     Maybe(i128),
 }
 
-// Float domain leaf. `kind` tracks the family (f32/f64/unsized) since intervals
-// alone don't distinguish precision. See float.odin.
+// Float domain leaf. `kind` tracks the family since intervals don't carry precision.
 Float_Type :: struct {
 	float_intervals: []Float_Interval,
 	kind:            FloatKind,
 	default_value:   Maybe(f64),
 }
 
-// Pattern domain leaf. A pattern is assesed on something
-// In order to typechek the pattern must be exhaustve
-// So union of the match in the pattern should tpyecheck with the type_fold of target
-// Or one pattern_branch need a empty arrow
-// Branch are always considered in order
-// When fold the pattern_type resolve to the according product of it's branch
-// When fold_constraint is calledd it must resolve to one branch
-// When fold_type is called it can resolve to multiple branches and the combined type is atributed
+// Pattern domain leaf `target ? {…}`. Branches are tried in order; exhaustiveness =
+// the union of branch matches typechecks the target (or one branch is bare `->`).
+// fold_constraint resolves to one branch; fold_type combines the matching branches.
 Pattern_Type :: struct {
 	target:   ^Type,
 	branches: []Pattern_Branch,
 }
 
-// Pattern branch, nil match mean match anything
-// There is two pattern mode one prefixed with a = unary value pattern check
-// And one witout the = wich is a typechek
-// `cover_fold` is the branch's FIRING SET, folded once at analysis (constraint
-// fold of a typecheck match, value fold of a `=v` match) and reused by
-// reduce_pattern — reduce never calls the fold layer. nil when the match did
-// not fold statically (the pattern then stays symbolic at reduce).
+// One branch (nil match = match anything). `value_match` is the `=v` mode vs the
+// bare typecheck mode. `cover_fold` is the branch's firing set, folded once at
+// analysis and reused by reduce_pattern; nil when the match did not fold statically.
 Pattern_Branch :: struct {
 	value_match: bool,
 	match:       ^Type,
@@ -239,8 +173,7 @@ Pattern_Branch :: struct {
 }
 
 
-// Arithmetic `left <op> right` (`+`, `-`, `*`, …). Kept symbolic until folded;
-// `type_fold` caches the resulting envelope once fold_compose() resolves it.
+// Arithmetic `left <op> right`. Symbolic until folded; `type_fold` caches the result.
 Compose_Type :: struct {
 	left:      ^Type,
 	right:     ^Type,
@@ -248,40 +181,30 @@ Compose_Type :: struct {
 	type_fold: ^Type,
 }
 
-// `value :: target` — a raw binary reinterpret-cast. Unlike `&` (which narrows
-// by intersection and can fail to prove), `::` forces `value`'s bits into the
-// target's layout: pad/cut to the target width (zero-extend if the source domain
-// is unsigned, sign-extend if signed; truncate the high bits when narrowing),
-// THEN reinterpret the resulting bit pattern under the target's signedness.
-// e.g. `i8 -1 :: u8` -> 255 (bits 0xFF read unsigned); `u8 200 :: i16` -> 200
-// (zero-extended 0x00C8 read signed). The result always lands inside the target,
-// so `::` never raises a Constraint_Mismatch — it can only fail statically with
-// Invalid_Cast when the target has no canonical binary layout (a non-zero-based
-// range like 10..37, an open range `>10`, a sum/product, or unbounded `int`).
-// `type_fold` caches the resulting concrete value/envelope once fold_cast resolves.
+// `value :: target` — a raw reinterpret-cast: pad/truncate `value`'s bits to the
+// target width (sign- or zero-extend by source signedness), then read under the
+// target's signedness. Never a Constraint_Mismatch; fails with Invalid_Cast only
+// when the target has no canonical layout (non-zero-based range, open range, sum,
+// unbounded `int`). `type_fold` caches the result.
 Cast_Type :: struct {
 	value:     ^Type,
 	target:    ^Type,
 	type_fold: ^Type,
 }
 
-// `lo..hi`. Either bound may be nil (prefix `..hi` / postfix `lo..`), meaning
-// "unbounded on that side" — NOT the value `none`. Folded by fold_range().
+// `lo..hi`. Either bound may be nil = unbounded on that side (NOT `none`).
 Range_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
 }
 
-// Bool domain leaf. `value` is set for a concrete true/false; nil means the open
-// set {true, false} (i.e. the `Bool` constraint), with `default` the bare value.
+// Bool domain leaf. `value` set = concrete; nil = the open set {true, false}.
 Bool_Type :: struct {
 	value:   Maybe(bool),
 	default: bool,
 }
 
-// String/char domain leaf — a UNION of String_Intervals (each carrying its own
-// `ordinal` mode flag; see above). `default_quotation` is the quote to render the
-// materialized default with. See string.odin.
+// String/char domain leaf — a UNION of String_Intervals. See string.odin.
 String_Type :: struct {
 	string_intervals:  []String_Interval,
 	default_value:     Maybe(string),
@@ -318,14 +241,8 @@ Type :: union {
 }
 
 
-// ===========================================================================
 // PRINTING — render the IR (Type) for diagnostics, the --ir dump, and tests.
-//   type_to_string : a folded ^Type for error messages
-//   value_to_string/write_value : a concrete reduced/default value (tests)
-//   print_type : the full --ir tree dump
-// Per-domain rendering (integer_to_string, float_to_string, print_string_type,
-// bool_to_string) lives in each domain file; this section composes them.
-// ===========================================================================
+// Per-domain rendering lives in each domain file; this section composes them.
 
 // type_to_string renders a folded ^Type for error messages.
 type_to_string :: proc(t: ^Type) -> string {
@@ -343,9 +260,7 @@ type_to_string :: proc(t: ^Type) -> string {
 	return "<value>"
 }
 
-// value_to_string : compact rendering of a concrete VALUE (result of a default
-// or a reduction) for the tests. Handles scopes recursively: a scope is rendered
-// {p0, p1, …} with its productions, {name->val, …} with its bindings.
+// Compact rendering of a concrete value (default or reduction) for the tests.
 value_to_string :: proc(t: ^Type) -> string {
 	if t == nil do return "<nil>"
 	b := strings.builder_make()
@@ -370,7 +285,6 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 	case None_Type:
 		strings.write_string(b, "none")
 	case Unknown_Type:
-		// A surviving bare fixed point: `??N` (stable index).
 		fmt.sbprintf(b, "??%d", fixedpoint_id(t))
 	case Scope_Type:
 		strings.write_byte(b, '{')
@@ -378,9 +292,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		for i := 0; i < len(v.kind); i += 1 {
 			if !first do strings.write_string(b, ", ")
 			first = false
-			// Prefer the field's cached concrete fold over its raw value: a computed
-			// field (`y -> x+10`) keeps `x + 10` in values[i] but its materialized
-			// result (15) in type_folds[i]. Mirrors the default-suite runner.
+			// Prefer the cached fold over the raw value (a computed field shows 15, not x+10).
 			fv := v.types[i]
 			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
 			if v.kind[i] == .Product {
@@ -396,8 +308,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		}
 		strings.write_byte(b, '}')
 	case Carve_Type:
-		// The default of a carve is the default of its resulting scope: fold the
-		// substitution, then render the substituted scope like any other.
+		// fold the substitution, then render the resulting scope.
 		sub := fold_carve_type(t)
 		if sub == nil {
 			strings.write_string(b, type_to_string(t))
@@ -407,10 +318,8 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		st^ = sub^
 		write_value(b, st)
 	case Cast_Type:
-		// A cast's value is its folded result (the reinterpreted bits laid into the
-		// target) when the source was concrete. A bare `??::T` atom is a SURVIVING
-		// fixed point: render as `??N`. A width WRAPPER over a composite source
-		// (`(a+b)::u8`) renders the inner expression in parens, then `::target`.
+		// concrete source → folded result; bare `??::T` atom → `??N`; a width wrapper
+		// over a composite (`(a+b)::u8`) → the inner expression in parens, then `::target`.
 		if v.type_fold != nil && fold_is_concrete_value(v.type_fold) {
 			write_value(b, v.type_fold)
 		} else if cast_is_atom(t) {
@@ -422,19 +331,12 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 			strings.write_string(b, type_to_string(v.target))
 		}
 	case Compose_Type:
-		// A SYMBOLIC reduced expression (a fixed point survived): the reducer emits a
-		// factored Compose tree over the surviving `??`. Render it infix WITH
-		// PARENTHESES per operator precedence, so `(x+1)*y` is not mis-read as
-		// `x + 1 * y`.
+		// surviving symbolic expression: render infix with parens per precedence.
 		write_compose_value(b, v)
 	case Mention_Type, Reference_Type:
-		// A surviving fixed point renders as `??N` — a stable index distinguishing
-		// the distinct unknowns the linker will resolve (`??0`, `??1`, …).
 		fmt.sbprintf(b, "??%d", fixedpoint_id(t))
 	case Pattern_Type:
-		// A pattern whose target is a fixed point survives reduction (the runtime
-		// selects the branch): render `target ? {match -> product, …}` with the
-		// target's `??N` and each branch's reduced product.
+		// pattern over a surviving fixed-point target: render `target ? {match -> product, …}`.
 		write_value(b, v.target)
 		strings.write_string(b, " ? {")
 		for branch, i in v.branches {
@@ -450,7 +352,6 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		}
 		strings.write_byte(b, '}')
 	case Range_Type:
-		// A branch match like `0..127` reduced inside a surviving pattern.
 		if v.left != nil do write_value(b, v.left)
 		strings.write_string(b, "..")
 		if v.right != nil do write_value(b, v.right)
@@ -459,7 +360,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 	}
 }
 
-// op_prec ranks an operator for parenthesization: higher binds tighter.
+// Operator rank for parenthesization: higher binds tighter.
 op_prec :: proc(op: Operator_Kind) -> int {
 	#partial switch op {
 	case .Multiply, .Divide, .Mod:
@@ -470,9 +371,7 @@ op_prec :: proc(op: Operator_Kind) -> int {
 	return 1
 }
 
-// write_compose_value renders a reduced arithmetic node infix, parenthesizing an
-// operand whose own operator binds LOOSER than this one (so a sum inside a product
-// gets parens). A Cast operand (`??::u8`) prints as `??N` via write_value.
+// Renders a reduced arithmetic node infix, parenthesizing a looser-binding operand.
 write_compose_value :: proc(b: ^strings.Builder, v: Compose_Type) {
 	if v.left == nil {
 		strings.write_string(b, op_symbol(v.operator))
@@ -495,7 +394,7 @@ write_operand_value :: proc(b: ^strings.Builder, operand: ^Type, parent_prec: in
 				return
 			}
 		case Cast_Type:
-			// A `??::u8` fixed point: render as ??N, not value::target.
+			// `??::u8` fixed point renders as ??N, not value::target.
 			if ov.type_fold == nil || !fold_is_concrete_value(ov.type_fold) {
 				fmt.sbprintf(b, "??%d", fixedpoint_id(operand))
 				return
@@ -532,12 +431,11 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		   v.kind[0] == .Product &&
 		   v.names[0] == "" &&
 		   v.constraints[0] == nil {
-			// Root scope (the file): collapse to its sole production.
+			// root scope: collapse to its sole production; nested: print inline.
 			if depth == 0 {
 				print_type(v.types[0], depth)
 				break
 			}
-			// Nested single-production scope = a producer {->X}: print inline.
 			fmt.print("{->")
 			print_type(v.types[0], depth)
 			fmt.print("}")
@@ -608,13 +506,8 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			}
 			if has_tf {
 				fmt.print("t:")
-				// type_folds[i] is fold_value_type — for a scope-with-production it keeps
-				// ONLY the production (the type the scope produces, `{0}`), dropping the
-				// named members and the binding kinds. The debug dump wants the WHOLE
-				// scope structure (`{n -> 0, -> 0}`: n points at 0, then a production
-				// evaluating to 0 — distinct from `{n -> 0, 0}`). So when the member's
-				// value resolves to a scope, render that scope's members directly (each
-				// with its own type_fold); the typecheck fold layer stays unchanged.
+				// type_folds[i] keeps only the production for a scope-with-production;
+				// the dump wants the whole structure, so render members directly.
 				print_fold_inline(member_type_fold_display(v.types[i], v.type_folds[i]))
 				fmt.print(" ")
 			}
@@ -728,7 +621,7 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		}
 
 	case Recursive_Mention_Type:
-		// Never expand through it — that is the whole point of the node.
+		// never expand through it.
 		fmt.print(v.name != "" ? v.name : "<recursive>")
 
 	case Reference_Type:
@@ -812,15 +705,9 @@ print_integer_intervals :: proc(t: ^Type) {
 	}
 }
 
-// member_type_fold_display picks what the `--ir` t: column shows for a member.
-// The cached type_fold (fold_value_type) is the typeof a value PRODUCES — for a
-// scope with a production it collapses to just that production (`{0}`), hiding the
-// named members and the binding kinds. For the dump we want the member's full
-// STRUCTURE instead: when its value resolves to a scope, return that scope so
-// write_fold walks its members (each rendered through its OWN type_fold, by kind:
-// `n -> 0`, `-> 0`, …). A carve is materialized first. Everything else (a domain
-// leaf, a reference, …) shows its cached fold unchanged. This is display-only; the
-// typecheck fold layer is untouched.
+// What the `--ir` t: column shows for a member. The cached type_fold collapses a
+// scope-with-production to that production; for the dump we want the full structure,
+// so when the value is a scope return it (a carve is materialized). Display-only.
 member_type_fold_display :: proc(value: ^Type, cached: ^Type) -> ^Type {
 	if value != nil {
 		#partial switch v in value^ {
@@ -837,17 +724,12 @@ member_type_fold_display :: proc(value: ^Type, cached: ^Type) -> ^Type {
 	return cached
 }
 
-// print_fold_inline renders a folded ^Type (as stored in type_folds /
-// constraint_folds) for the --ir dump. Domain dispatch.
 print_fold_inline :: proc(t: ^Type) {
 	fmt.print(fold_to_string(t))
 }
 
-// fold_to_string renders ANY ^Type compactly, on one line, for the `--ir` t:/c:
-// columns. Unlike the old print_fold_inline (which printed `[?]` for everything
-// but integers/floats), this covers every variant so the dump shows the real
-// structure — scopes, carves, pulls, patterns, casts, references, … Used only for
-// debugging output, so it favors readability over the exact source syntax.
+// Renders any ^Type compactly on one line for the `--ir` t:/c: columns. Favors
+// readability over exact source syntax.
 fold_to_string :: proc(t: ^Type) -> string {
 	b := strings.builder_make()
 	write_fold(&b, t)
@@ -861,8 +743,6 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 	}
 	switch v in t^ {
 	case Integer_Type:
-		// integer_to_string already renders a singleton as `6` and a set as `u8` /
-		// `0..255` — no brackets, so a default value shows as its concrete value.
 		strings.write_string(b, integer_to_string(v))
 	case Float_Type:
 		strings.write_string(b, float_to_string(v))
@@ -880,15 +760,9 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 		strings.write_byte(b, '{')
 		for i := 0; i < len(v.kind); i += 1 {
 			if i > 0 do strings.write_string(b, ", ")
-			// Each member is rendered by its BINDING KIND, so the structure is faithful:
-			//   * a PRODUCTION (`-> X`) shows its arrow even though it has no name —
-			//     `{n -> 0, -> 0}` (n points at 0, THEN a production evaluating to 0)
-			//     must not collapse to `{n -> 0, 0}` (a nameless field 0). The arrow is
-			//     the whole point.
-			//   * a NAMED binding renders `name op value`.
-			//   * a bare anonymous child (no name, not a production) renders as its value.
-			// Prefer the member's cached type_fold over its raw value: a computed field
-			// shows its folded result, not the expression.
+			// Render by binding kind: a production keeps its arrow (`{n -> 0, -> 0}` must
+			// not collapse to `{n -> 0, 0}`); named renders `name op value`. Prefer the
+			// cached type_fold over the raw value.
 			fv := v.types[i]
 			if i < len(v.type_folds) && v.type_folds[i] != nil do fv = v.type_folds[i]
 			if v.names[i] != "" {
@@ -970,8 +844,6 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 	}
 }
 
-// write_binding_op renders the directional operator for a binding kind, used by
-// the compact fold dump.
 write_binding_op :: proc(k: Binding_Kind) -> string {
 	switch k {
 	case .Pointing_Push:

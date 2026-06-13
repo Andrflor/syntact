@@ -13,44 +13,26 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-/*
- * ====================================================================
- * Resolver System
- *
- * The resolver coordinates compilation of source files using a thread
- * pool to process files in parallel. It maintains a cache of compiled
- * files to optimize recompilation of unchanged files.
- * ====================================================================
- */
-
-/*
- * Resolver manages the compilation process across multiple files
- */
+// The resolver coordinates compilation of source files across a thread pool,
+// caching per-file results.
 Resolver :: struct {
-	files:       map[string]^Cache, // Map of file paths to cache entries
-	files_mutex: sync.Mutex, // Mutex to protect concurrent access to files map
-	entry:       ^Cache, // Entry point file cache
-	options:     Options, // Compilation options
-	pool:        thread.Pool, // Thread pool for parallel processing
+	files:       map[string]^Cache,
+	files_mutex: sync.Mutex,
+	entry:       ^Cache,
+	options:     Options,
+	pool:        thread.Pool,
 }
 
-// Global resolver instance
 resolver: Resolver
 
-/*
- * Status represents the compilation stage of a file
- */
 Status :: enum {
-	Fresh, // Initial state
-	Parsing, // Currently parsing
-	Parsed, // Successfully parsed
-	Analyzing, // Currently analyzing
-	Analyzed, // Successfully analyzed
+	Fresh,
+	Parsing,
+	Parsed,
+	Analyzing,
+	Analyzed,
 }
 
-/*
- * Cache stores compilation data for a single file
- */
 Cache :: struct {
 	path:             string,
 	scope:            ^Scope_Type,
@@ -64,31 +46,23 @@ Cache :: struct {
 	analyze_warnings: [dynamic]Analyzer_Error,
 }
 
-/*
- * TimingInfo tracks performance metrics during compilation
- */
 TimingInfo :: struct {
-	total_time:       time.Duration, // Total compilation time
-	parsing_time:     time.Duration, // Time spent parsing
-	analysis_time:    time.Duration, // Time spent analyzing
-	reduce_time:      time.Duration, // Time spent reducing
-	codegen_time:     time.Duration, // Time spent in codegen (lowering + backend)
-	file_read_time:   time.Duration, // Time spent reading files
-	thread_wait_time: time.Duration, // Time spent waiting for threads
+	total_time:       time.Duration,
+	parsing_time:     time.Duration,
+	analysis_time:    time.Duration,
+	reduce_time:      time.Duration,
+	codegen_time:     time.Duration,
+	file_read_time:   time.Duration,
+	thread_wait_time: time.Duration,
 }
 
-// Global timing data
 timing_data: TimingInfo
 
-/*
- * resolve_entry is the main entry point for the compilation process
- * Returns true if compilation succeeds, false otherwise
- */
+// resolve_entry is the main entry point; returns true on success.
 resolve_entry :: proc() -> bool {
 	resolver.options = parse_args()
 	success := true
 
-	// Start total time measurement if timing is enabled
 	total_start: time.Time
 	if resolver.options.timing {
 		total_start = time.now()
@@ -106,13 +80,11 @@ resolve_entry :: proc() -> bool {
 		)
 	}
 
-	// Debug start
 	if resolver.options.verbose {
 		fmt.println("[DEBUG] Starting resolve_entry procedure")
 		fmt.printf("[DEBUG] Input path: %s\n", resolver.options.input_path)
 	}
 
-	// Optimal thread count - one per core
 	num_threads := max(os.get_processor_core_count() - 1, 1)
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Initializing thread pool with %d threads\n", num_threads)
@@ -242,9 +214,6 @@ resolve_entry :: proc() -> bool {
 	return success
 }
 
-/*
- * process_cache schedules a file for processing in the thread pool
- */
 process_cache :: proc(cache: ^Cache) {
 	if resolver.options.verbose {
 		fmt.printf(
@@ -256,10 +225,7 @@ process_cache :: proc(cache: ^Cache) {
 	thread.pool_add_task(&resolver.pool, context.allocator, process_cache_task, cache, 0)
 }
 
-/*
- * process_cache_task handles the actual compilation of a file
- * This is executed in a worker thread from the pool
- */
+// process_cache_task compiles one file on a worker thread.
 process_cache_task :: proc(task: thread.Task) {
 	cache := cast(^Cache)task.data
 
@@ -267,7 +233,6 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Starting process_cache_task for file: %s\n", cache.path)
 	}
 
-	// Lock for the entire task
 	sync.mutex_lock(&cache.mutex)
 	defer sync.mutex_unlock(&cache.mutex)
 
@@ -276,7 +241,6 @@ process_cache_task :: proc(task: thread.Task) {
 	}
 
 
-	// Check modification time
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Checking file modification time for: %s\n", cache.path)
 	}
@@ -311,10 +275,8 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] File size: %d bytes\n", file_info.size)
 	}
 
-	// Get file size from file_info
 	file_size := int(file_info.size)
 
-	// Create temporary allocator
 	temp_arena: mem.Arena
 	mem.arena_init(&temp_arena, make([]byte, file_size))
 	temp_allocator := mem.arena_allocator(&temp_arena)
@@ -323,7 +285,6 @@ process_cache_task :: proc(task: thread.Task) {
 		fmt.printf("[DEBUG] Temporary arena initialized with size: %d bytes\n", file_size)
 	}
 
-	// Start file read timing
 	file_read_start: time.Time
 	if resolver.options.timing {
 		file_read_start = time.now()
@@ -332,7 +293,6 @@ process_cache_task :: proc(task: thread.Task) {
 		}
 	}
 
-	// Read file with temporary allocator
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Reading entire file: %s\n", cache.path)
 	}
@@ -346,7 +306,6 @@ process_cache_task :: proc(task: thread.Task) {
 		return
 	}
 
-	// End file read timing
 	if resolver.options.timing {
 		file_read_duration := time.diff(file_read_start, time.now())
 		sync.atomic_add(&timing_data.file_read_time, file_read_duration)
@@ -363,10 +322,8 @@ process_cache_task :: proc(task: thread.Task) {
 		)
 	}
 
-	// Use cache arena allocator to store the source
 	source := string(source_bytes)
 
-	// Start parsing timing
 	parsing_start: time.Time
 	if resolver.options.timing {
 		parsing_start = time.now()
@@ -375,7 +332,6 @@ process_cache_task :: proc(task: thread.Task) {
 		}
 	}
 
-	// Parsing and analysis
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Starting parsing for file: %s\n", cache.path)
 	}
@@ -383,7 +339,6 @@ process_cache_task :: proc(task: thread.Task) {
 	ast, parse_ok := parse(cache, source)
 	cache.status = .Parsed
 
-	// End parsing timing
 	if resolver.options.timing {
 		parsing_duration := time.diff(parsing_start, time.now())
 		sync.atomic_add(&timing_data.parsing_time, parsing_duration)
@@ -409,7 +364,6 @@ process_cache_task :: proc(task: thread.Task) {
 			fmt.printf("[DEBUG] Starting analysis for file: %s\n", cache.path)
 		}
 
-		// Start analysis timing
 		analysis_start: time.Time
 		if resolver.options.timing {
 			analysis_start = time.now()
@@ -425,7 +379,6 @@ process_cache_task :: proc(task: thread.Task) {
 		analyze_ok := analyze(cache)
 		cache.status = .Analyzed
 
-		// End analysis timing
 		if resolver.options.timing {
 			analysis_duration := time.diff(analysis_start, time.now())
 			sync.atomic_add(&timing_data.analysis_time, analysis_duration)
@@ -467,19 +420,15 @@ process_cache_task :: proc(task: thread.Task) {
 				}
 			}
 
-			// --bc / --run lower the reduced DAG to the target-neutral bytecode
-			// (the bridge every backend shares) and either dump it or interpret
-			// it. Otherwise the reduced result is a VALUE rendered with
-			// value_to_string — the same path the reduce tests use.
+			// --bc/--run/--regalloc/-o lower the reduced DAG to bytecode; otherwise
+			// render the reduced VALUE.
 			if resolver.options.print_bytecode ||
 			   resolver.options.run_bytecode ||
 			   resolver.options.print_regalloc ||
 			   resolver.options.emit_exe {
 				codegen_start: time.Time
-				// Keep user_ptr pointing at the reducer `r`: lower_to_bytecode calls
-				// fixedpoint_id to recover each ??N slot, which reads r.fixedpoint_index
-				// (populated by reduce above). Restoring prev_user_ptr here would
-				// dereference a stale/nil reducer and segfault. Restored after lowering.
+				// user_ptr must stay the reducer `r`: lower_to_bytecode → fixedpoint_id
+				// reads r.fixedpoint_index. Restored after lowering.
 				if resolver.options.timing {
 					codegen_start = time.now()
 				}
@@ -602,9 +551,7 @@ _process_node_flat :: proc(
 	}
 }
 
-/*
- * compute_on_need ensures a file is loaded and processed on demand
- */
+// compute_on_need ensures a file is loaded and processed on demand.
 compute_on_need :: proc(path: string) {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Checking file for recompute: %s\n", path)
@@ -634,10 +581,7 @@ compute_on_need :: proc(path: string) {
 	sync.mutex_unlock(&resolver.files_mutex)
 }
 
-/*
- * create_cache initializes a new cache entry for a file
- * Returns nil if the file cannot be accessed
- */
+// create_cache initializes a new cache entry; nil if the file is inaccessible.
 create_cache :: proc(path: string) -> ^Cache {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Creating cache for file: %s\n", path)
@@ -647,7 +591,6 @@ create_cache :: proc(path: string) -> ^Cache {
 	cache.path = path
 	cache.status = .Fresh
 
-	// Get file info
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Getting file info for: %s\n", path)
 	}
@@ -667,9 +610,7 @@ create_cache :: proc(path: string) -> ^Cache {
 		fmt.printf("[DEBUG] File last modified: %v\n", cache.last_modified)
 	}
 
-	// Initialize arena with size based on file size
-	// But at least one page (4KB)
-	arena_size := max(int(file_info.size) * 2, 4 * 1024)
+	arena_size := max(int(file_info.size) * 2, 4 * 1024) // at least one 4KB page
 
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Initializing arena with size: %d bytes\n", arena_size)
@@ -691,9 +632,6 @@ create_cache :: proc(path: string) -> ^Cache {
 	return cache
 }
 
-/*
- * free_cache releases resources associated with a cache
- */
 free_cache :: proc(cache: ^Cache) {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Freeing cache for file: %s\n", cache.path)
@@ -707,15 +645,11 @@ free_cache :: proc(cache: ^Cache) {
 	}
 }
 
-/*
- * save_cache_to_disk persists a cache to the filesystem
- * Returns true on success, false on failure
- */
+// save_cache_to_disk persists a cache; true on success.
 save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Saving cache to disk for: %s\n", cache.path)
 	}
-	// Create cache directory if it doesn't exist
 	if !os.exists(cache_dir) {
 		if err := os.make_directory(cache_dir); err != nil {
 			fmt.printf("[ERROR] Failed to create cache directory: %v\n", err)
@@ -723,12 +657,10 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 		}
 	}
 
-	// Generate unique filename based on path
 	hash_value := hash.fnv64a(transmute([]byte)cache.path)
 	cache_filename := fmt.aprintf("%x.cache", hash_value)
 	cache_path, _ := filepath.join([]string{cache_dir, cache_filename}, context.allocator)
 
-	// Remove existing file if it exists
 	if os.exists(cache_path) {
 		if err := os.remove(cache_path); err != nil {
 			fmt.printf(
@@ -740,7 +672,6 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 		}
 	}
 
-	// Open file for writing
 	cache_file, err := os.open(cache_path, os.O_WRONLY | os.O_CREATE, os.Permissions_Default_File)
 	if err != nil {
 		fmt.printf("[ERROR] Failed to create cache file: %s, error: %v\n", cache_path, err)
@@ -748,7 +679,6 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	}
 	defer os.close(cache_file)
 
-	// Write basic data first (path, modification date)
 	header := struct {
 		path_len:      int,
 		last_modified: time.Time,
@@ -768,7 +698,6 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 		return false
 	}
 
-	// Write the path
 	path_slice := transmute([]byte)cache.path
 	bytes_written, write_err = os.write(cache_file, path_slice)
 	if write_err != nil {
@@ -776,7 +705,6 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 		return false
 	}
 
-	// Write the complete arena (including structure and data)
 	arena_slice := make([]byte, size_of(vmem.Arena))
 	mem.copy(&arena_slice[0], &cache.arena, size_of(vmem.Arena))
 
@@ -793,21 +721,16 @@ save_cache_to_disk :: proc(cache: ^Cache) -> bool {
 	return true
 }
 
-/*
- * load_cache_from_disk loads a cache from the filesystem
- * Returns nil if the cache doesn't exist or is invalid
- */
+// load_cache_from_disk loads a cache; nil if missing or invalid.
 load_cache_from_disk :: proc(path: string) -> ^Cache {
 	if resolver.options.verbose {
 		fmt.printf("[DEBUG] Trying to load cache for: %s\n", path)
 	}
 
-	// Generate the same filename as when saving
 	hash_value := hash.fnv64a(transmute([]byte)path)
 	cache_filename := fmt.aprintf("%x.cache", hash_value)
 	cache_path, _ := filepath.join([]string{cache_dir, cache_filename}, context.allocator)
 
-	// Check if cache file exists
 	if !os.exists(cache_path) {
 		if resolver.options.verbose {
 			fmt.printf("[DEBUG] No cache file found at: %s\n", cache_path)
@@ -815,7 +738,6 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 		return nil
 	}
 
-	// Open file for reading
 	cache_file, err := os.open(cache_path, os.O_RDONLY)
 	if err != nil {
 		fmt.printf("[ERROR] Failed to open cache file: %s, error: %v\n", cache_path, err)
@@ -823,7 +745,6 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 	}
 	defer os.close(cache_file)
 
-	// Read header
 	header := struct {
 		path_len:      int,
 		last_modified: time.Time,
@@ -838,7 +759,7 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 	}
 	mem.copy(&header, &header_slice[0], size_of(header))
 
-	// Verify source file hasn't been modified
+	// Reject the cache if the source file changed since it was written.
 	file_info, stat_err := os.stat(path, context.allocator)
 	if stat_err != nil {
 		fmt.printf("[ERROR] Failed to stat file: %s, error: %v\n", path, stat_err)
@@ -852,10 +773,8 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 		return nil
 	}
 
-	// Create new Cache instance
 	cache := new(Cache)
 
-	// Read path
 	path_data := make([]byte, header.path_len)
 	bytes_read, read_err = os.read(cache_file, path_data)
 	if read_err != nil || bytes_read != header.path_len {
@@ -866,7 +785,6 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 
 	cache.path = string(path_data)
 
-	// Read Arena structure
 	arena_slice := make([]byte, size_of(vmem.Arena))
 	bytes_read, read_err = os.read(cache_file, arena_slice)
 	if read_err != nil || bytes_read != size_of(vmem.Arena) {
@@ -875,10 +793,8 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 		return nil
 	}
 
-	// Copy Arena structure to cache
 	mem.copy(&cache.arena, &arena_slice[0], size_of(vmem.Arena))
 
-	// Set up rest of cache
 	cache.allocator = vmem.arena_allocator(&cache.arena)
 	cache.last_modified = header.last_modified
 	cache.status = header.status
@@ -897,7 +813,6 @@ load_cache_from_disk :: proc(path: string) -> ^Cache {
 cache_dir: string
 
 get_temp_directory :: proc() -> string {
-	// Try standard environment variables first
 	if temp, ok := os.lookup_env("TEMP", context.allocator); ok {
 		return temp
 	}
@@ -906,7 +821,6 @@ get_temp_directory :: proc() -> string {
 		return tmp
 	}
 
-	// Fallback to OS-specific defaults
 	when ODIN_OS == .Windows {
 		return "C:\\Windows\\Temp"
 	} else {

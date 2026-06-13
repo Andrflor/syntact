@@ -37,9 +37,7 @@ make_int_range :: proc(lo: Maybe(i128), hi: Maybe(i128)) -> Integer_Type {
 	return Integer_Type{integer_intervals, default_for_integer_intervals(integer_intervals)}
 }
 
-// make_int_range_default builds a range with an EXPLICIT default (instead of the
-// structural first-bound fallback). Used for the signed builtins so `i8` defaults
-// to 0, not -128; the default then propagates through `&`/`|` like any other.
+// Range with an EXPLICIT default; signed builtins use it so `i8` defaults to 0, not -128.
 make_int_range_default :: proc(lo: Maybe(i128), hi: Maybe(i128), def: i128) -> Integer_Type {
 	integer_intervals := make([]Integer_Interval, 1)
 	integer_intervals[0] = Integer_Interval{lo, hi}
@@ -52,17 +50,8 @@ make_int_const :: proc(val: i128) -> Integer_Type {
 }
 
 
-// The STRUCTURAL fallback default, used only when no default was propagated from
-// the source `&`/`|` order: the first FINITE bound encountered while scanning
-// (lo₁, hi₁, lo₂, hi₂, …) — always a real element of the set.
-//   ~10 [..9|11..] → 9   (lo₁=−∞ skipped, hi₁)
-//   ..10 [..10]    → 10  (hi₁)
-//   5.. [5..]      → 5   (lo₁)
-//   ~0 [..-1|1..]  → -1  (hi₁, and −1 ∈ ~0 ✓)
-// Fully open set (.. = ℤ): no finite bound → 0.
-// NOTE: builtin signed families (i8/i16/i32/i64/int) carry an EXPLICIT 0 default
-// posted at construction (init_builtins), which then propagates; this fallback is
-// what an anonymous range with no carried default gets.
+// Structural fallback default (no propagated default): first finite bound while
+// scanning lo₁, hi₁, lo₂, …; fully open set → 0.
 default_for_integer_intervals :: proc(integer_intervals: []Integer_Interval) -> Maybe(i128) {
 	if len(integer_intervals) == 0 do return nil
 	for interval in integer_intervals {
@@ -79,8 +68,6 @@ int_to_f64 :: #force_inline proc(i: Integer_Type) -> f64 {
 
 // --- integer domain entry points (return reduced ^Type / bool / string) ---
 
-// fold_type_integer derives the integer envelope a value produces and wraps it
-// in an Integer_Type, or nil if the value is not integer-foldable.
 fold_type_integer :: proc(t: ^Type) -> ^Type {
 	it, ok := fold_type_intervals(t).(Integer_Type)
 	if !ok do return nil
@@ -89,8 +76,6 @@ fold_type_integer :: proc(t: ^Type) -> ^Type {
 	return r
 }
 
-// fold_constraint_integer resolves an integer constraint to a closed
-// Integer_Type, or nil if it cannot be resolved statically.
 fold_constraint_integer :: proc(t: ^Type) -> ^Type {
 	it, ok := fold_constraint_intervals(t).(Integer_Type)
 	if !ok do return nil
@@ -99,7 +84,6 @@ fold_constraint_integer :: proc(t: ^Type) -> ^Type {
 	return r
 }
 
-// integer_satisfy proves ft ⊆ fc when both are integer-domain Integer_Types.
 integer_satisfy :: proc(fc, ft: Integer_Type) -> bool {
 	return integer_intervals_satisfy(ft.integer_intervals, fc.integer_intervals)
 }
@@ -108,8 +92,6 @@ integer_to_string :: proc(t: Integer_Type) -> string {
 	return pretty_integer_intervals(t.integer_intervals)
 }
 
-// stored_fold_intervals extracts the Integer_Type payload (intervals + default)
-// from a folded ^Type as cached in type_folds / constraint_folds.
 stored_fold_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -121,11 +103,6 @@ stored_fold_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 
 // --- integer interval fold ---
 
-// fold_type_intervals returns the integer envelope a value produces, carried as
-// an Integer_Type (intervals + propagated default), or nil if not foldable. The
-// default follows the source `&`/`|` order through union/intersect (see
-// integer_type_union/intersect); structural nodes (range/arith/cast) recompute it
-// from their result.
 fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -217,23 +194,11 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		segs := integer_intervals_normalize(result[:])
 		return Integer_Type{segs, default_for_integer_intervals(segs)}
 	case Cast_Type:
-		// `value :: target` produces the target's envelope: the cast forces the
-		// value's bits into the target's layout, so the result always lives in the
-		// target's set. When the source was concrete fold_cast cached the exact
-		// reinterpreted value in type_fold (`i8 -1 :: u8` → 255); otherwise the
-		// envelope is the WHOLE target (`??::u8` → 0..255). This makes the envelope
-		// of an inline cast match what a reference to a `:: `-bound binding yields,
-		// so `(??::u8)*2` folds to 0..510 just like `a->??::u8 ; a*2`.
 		if v.type_fold != nil {
 			return fold_type_intervals(v.type_fold)
 		}
 		return fold_constraint_intervals(v.target)
 	case Or_Type:
-		// A set VALUE `0|10` produces the union of its branches' envelopes — the
-		// same interval algebra fold_constraint_intervals uses on the left, but
-		// recursing through fold_type_intervals so the operands are folded as
-		// values. Folds only when BOTH branches are integer (mixed `string|u8`
-		// stays symbolic → nil). Default follows source order (left-first).
 		left, left_ok := fold_type_intervals(v.left).(Integer_Type)
 		right, right_ok := fold_type_intervals(v.right).(Integer_Type)
 		if !left_ok || !right_ok do return nil
@@ -264,9 +229,6 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	case Reference_Type:
 		ref := v.reference
 		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-		// match_scope already points at the substituted scope for a carved property
-		// (resolve_property_site folds the carve), so the cached fold is correct —
-		// read it directly, like float/string/bool do.
 		if s, ok := stored_fold_intervals(
 			   ref.match_scope.type_folds[ref.match_index],
 		   ).(Integer_Type); ok {
@@ -282,9 +244,6 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	return nil
 }
 
-// fold_constraint_intervals resolves an integer constraint to an Integer_Type
-// (intervals + default), or nil if not statically resolvable. `&`/`|` propagate
-// the default along the source order via integer_type_union/intersect.
 fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -317,10 +276,6 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		}
 		return fold_type_intervals(t)
 	case Or_Type:
-		// An Or folds to integer intervals ONLY if BOTH branches do. Otherwise
-		// (String | u8) it is mixed → failure, fold_constraint keeps it symbolic
-		// and satisfy tests each branch in its own domain. The default follows the
-		// LEFT branch (source order) when it survives the union.
 		left, left_ok := fold_constraint_intervals(v.left).(Integer_Type)
 		right, right_ok := fold_constraint_intervals(v.right).(Integer_Type)
 		if !left_ok || !right_ok do return nil
@@ -335,8 +290,6 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		if !inner_ok do return nil
 		return integer_type_negate(inner)
 	case Mention_Type:
-		// A constraint folds the VALUE of its target, never the target's type.
-		// An Unknown value has no case here → nil → not statically resolvable.
 		if v.match_scope != nil && v.match_index >= 0 {
 			return fold_constraint_intervals(v.match_scope.types[v.match_index])
 		}
@@ -349,12 +302,8 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	return nil
 }
 
-// Span of a range for the constraint. In Syntact the order of bounds only
-// changes the default, never the envelope: `10..0` ≡ `0..10`, and a chained
-// range `10..0..30` ≡ `0..30` (default 10). So we take the global min of all the
-// `lo` and the global max of all the `hi` across the segments on both sides (the
-// sub-ranges having already been folded into their own span). An open bound
-// (±∞) dominates.
+// Span of a range: global min of the `lo`, global max of the `hi`; order only
+// changes the default, not the envelope. An open bound (±∞) dominates.
 range_span_bounds :: proc(
 	left_segs, right_segs: []Integer_Interval,
 	left_open := false,
@@ -400,9 +349,7 @@ range_span_bounds :: proc(
 	}
 	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
 	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
-	// A bound missing in the source (`5..`, `..10`) means open to infinity on
-	// that side: `5..` = 5..+∞, `..10` = -∞..10. Without this info, a range open
-	// on the right would be mistaken for the concrete span of its single bound (5..5).
+	// A bound missing in the source (`5..`, `..10`) is open to infinity on that side.
 	if left_open do lo = nil
 	if right_open do hi = nil
 	return lo, hi
@@ -441,16 +388,9 @@ fold_arith_integer_intervals :: proc(
 		integer_intervals[0] = Integer_Interval{min(p1, p2, p3, p4), max(p1, p2, p3, p4)}
 		return integer_intervals
 	case .Divide:
-		// Integer `idiv` by 0 raises #DE → SIGFPE → the process is killed, so unlike
-		// IEEE float division the divisor MUST be proven non-zero. The proof is on the
-		// DIVISOR ONLY: its interval must be bounded and exclude 0 (`b_lo > 0` or
-		// `b_hi < 0`). Failing that → nil → an analysis error (caller diagnoses it).
-		// The DIVIDEND may be unbounded: |a/b| ≤ |a|, so an open dividend bound stays
-		// open in the quotient (handled like Multiply's extended-reals corners).
+		// idiv traps (SIGFPE) on a 0 divisor, so the divisor must be proven bounded and non-zero.
 		if !b_lo_ok || !b_hi_ok do return nil // divisor not statically bounded
 		if b_lo <= 0 && b_hi >= 0 do return nil // divisor range includes 0
-		// Divisor excludes 0. The quotient extremes sit at the corner combinations; a
-		// missing dividend bound (±∞) keeps that side open in the result.
 		lo, hi: Maybe(i128)
 		if a_lo_ok && a_hi_ok {
 			p1 := a_lo / b_lo
@@ -463,17 +403,9 @@ fold_arith_integer_intervals :: proc(
 		integer_intervals[0] = Integer_Interval{lo, hi}
 		return integer_intervals
 	case .Mod:
-		// `a % b` is the truncated remainder (sign follows the dividend `a`), so its
-		// magnitude is bounded by both `|b| - 1` and `|a|`. Corner-sampling is INVALID
-		// here — `%` is not monotonic, so the four endpoints can all coincide (e.g.
-		// 0%3 = 255%3 = 0) and collapse a genuine [0,2] envelope to a false singleton 0,
-		// which the reducer would then treat as a concrete result. Derive the true
-		// envelope from the magnitude bound instead.
-		//
-		// Like Divide, `%` lowers to `idiv` and traps on a 0 divisor, so the DIVISOR
-		// must be proven bounded and non-zero (range excludes 0); the DIVIDEND may be
-		// unbounded (an open dividend bound just relaxes the `min(|a|, |b|-1)` clamp on
-		// that side to the full `|b|-1`).
+		// GOTCHA: `%` is not monotonic — corner-sampling is INVALID (the four endpoints
+		// can coincide, e.g. 0%3 = 255%3 = 0, collapsing a real [0,2] to a false 0).
+		// Derive the envelope from the magnitude bound. Like Divide, traps on a 0 divisor.
 		if !b_lo_ok || !b_hi_ok do return nil // divisor not statically bounded
 		if b_lo <= 0 && b_hi >= 0 do return nil // divisor range includes 0
 		max_b := max(abs(b_lo), abs(b_hi))
@@ -486,8 +418,6 @@ fold_arith_integer_intervals :: proc(
 			lo = a_lo_ok ? max(a_lo, -m) : -m
 			hi = i128(0)
 		} else {
-			// dividend straddles 0 (or is unbounded): remainder spans [-(|b|-1), |b|-1],
-			// clamped to whichever dividend bound is known.
 			lo = a_lo_ok ? max(a_lo, -m) : -m
 			hi = a_hi_ok ? min(a_hi, m) : m
 		}
@@ -543,13 +473,8 @@ fold_arith_integer_intervals :: proc(
 }
 
 // --- integer set operations carrying the default (Integer_Type level) ---
-//
-// These mirror bool_domain_union/intersect: the default follows the SOURCE order
-// (left operand first). `|` keeps the left default if it survives in the merged
-// set, else the right's; `&` likewise keeps whichever default still belongs to
-// the intersection; `~` has no source order, so its default is purely structural.
-// When neither operand's default survives, default_for_integer_intervals gives
-// the structural fallback (0 if present, else the first finite bound).
+// The default follows the SOURCE order (left operand first) when it survives the
+// fold, else the right's, else the structural fallback.
 
 integer_type_union :: proc(a, b: Integer_Type) -> Integer_Type {
 	segs := integer_intervals_union(a.integer_intervals, b.integer_intervals)
@@ -566,19 +491,15 @@ integer_type_negate :: proc(a: Integer_Type) -> Integer_Type {
 	return Integer_Type{segs, default_for_integer_intervals(segs)}
 }
 
-// integer_pick_default keeps the LEFT operand's default (source order is
-// significant — left first) WHEN it still belongs to the folded result, else the
-// right's when it does, else the structural fallback (first finite bound). The
-// membership test matters for `&`: an intersection can narrow the left default
-// out of the set (`u8 & 100..` drops u8's 0), and then the default must be a real
-// element of what remains.
+// Keeps the left default when it still belongs to the folded result, else the
+// right's, else the structural fallback. The membership test matters for `&`,
+// which can narrow the left default out of the set.
 integer_pick_default :: proc(segs: []Integer_Interval, left, right: Maybe(i128)) -> Maybe(i128) {
 	if l, ok := left.(i128); ok && integer_intervals_contains(segs, l) do return l
 	if r, ok := right.(i128); ok && integer_intervals_contains(segs, r) do return r
 	return default_for_integer_intervals(segs)
 }
 
-// integer_intervals_contains reports whether v is a member of the interval set.
 integer_intervals_contains :: proc(segs: []Integer_Interval, v: i128) -> bool {
 	for s in segs {
 		lo, lo_ok := s.lo.(i128)
@@ -808,10 +729,8 @@ builtin_alias :: proc(interval: Integer_Interval) -> string {
 }
 
 // Binary layout (bit width + signedness) of a single integer interval, used by
-// the raw cast `::`. Only the fixed-width builtins (u8/i8/…/u64/i64) have a
-// canonical layout; everything else (unbounded `int`, an arbitrary range like
-// 10..37, a multi-interval union) returns ok=false — the cast then has no target
-// to lay bits into and is an Invalid_Cast.
+// the raw cast `::`. Only the fixed-width builtins have a canonical layout;
+// everything else returns ok=false (the cast is then an Invalid_Cast).
 Int_Layout :: struct {
 	bits:   uint, // 8, 16, 32, 64
 	signed: bool,
@@ -842,14 +761,11 @@ int_layout :: proc(interval: Integer_Interval) -> (Int_Layout, bool) {
 	return {}, false
 }
 
-// Bit_Repr is the raw little-endian bit pattern of a concrete value of ANY
-// domain, with the width and signedness needed to extend or truncate it. The
-// `::` raw cast works entirely in this representation: cast_to_bits produces it,
-// resize_bits adapts the width, and cast_from_bits lays it back down (see
-// type.odin). `bits` holds the value's low `width` bits; bits above `width` are
-// don't-care. `from_float` is set when the source is itself a float value: a
-// float->float cast then converts the VALUE (IEEE rounding) rather than
-// transmuting bits, so `f64 1.0 :: f32` yields 1.0f, not bit-truncated noise.
+// Bit_Repr is the raw bit pattern of a concrete value of ANY domain, with the
+// width/signedness to extend or truncate it; the `::` raw cast works in this
+// representation (see type.odin). `bits` holds the low `width` bits. `from_float`
+// is set for a float source so a float->float cast converts the VALUE (IEEE
+// rounding) rather than transmuting bits (`f64 1.0 :: f32` yields 1.0f).
 Bit_Repr :: struct {
 	bits:       u128,
 	width:      uint,
@@ -858,21 +774,17 @@ Bit_Repr :: struct {
 }
 
 // resize_bits pads or cuts a `from_width`-wide pattern to `to_width`: sign-extend
-// when the source is signed and its top bit is set, zero-extend otherwise, and
-// truncate the high bits when narrowing. Returns the `to_width`-wide pattern.
+// a signed source with its top bit set, zero-extend otherwise, truncate when narrowing.
 resize_bits :: proc(bits: u128, from_width: uint, from_signed: bool, to_width: uint) -> u128 {
 	b := bits
-	// Isolate the source's bit pattern (clear any fill above from_width).
 	if from_width < 128 {
 		b &= (u128(1) << from_width) - 1
 	}
 	if to_width < from_width {
-		// Narrowing: cut the high bits.
 		if to_width < 128 {
 			b &= (u128(1) << to_width) - 1
 		}
 	} else if to_width > from_width {
-		// Widening: sign-extend a signed source whose top bit is set.
 		if from_signed && from_width < 128 {
 			sign_bit := u128(1) << (from_width - 1)
 			if b & sign_bit != 0 {
@@ -885,14 +797,11 @@ resize_bits :: proc(bits: u128, from_width: uint, from_signed: bool, to_width: u
 	return b
 }
 
-// bits_reinterpret_int resizes a source pattern to `to_width`, then reads it as a
-// two's-complement integer of the target signedness.
 bits_reinterpret_int :: proc(repr: Bit_Repr, to_width: uint, to_signed: bool) -> i128 {
 	b := resize_bits(repr.bits, repr.width, repr.signed, to_width)
 	if to_signed && to_width < 128 {
 		sign_bit := u128(1) << (to_width - 1)
 		if b & sign_bit != 0 {
-			// Negative under two's complement: subtract 2^width.
 			return i128(b) - i128(u128(1) << to_width)
 		}
 	}

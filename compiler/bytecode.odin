@@ -2,22 +2,13 @@ package compiler
 
 import bc "bytecode"
 
-// ============================================================================
 // LOWERING — reduced IR (^Type DAG) → the neutral bytecode (package `bytecode`).
-//
-// This is the one part of the codegen path that must know BOTH worlds: the
-// reducer's `^Type` IR (this package) and the target-neutral bytecode (the `bc`
-// package). It therefore lives in `package compiler` and translates between them
-// — including mapping the AST's Operator_Kind to the bytecode's own BC_Op.
-//
-// Post-order DFS with memoization keyed by node ADDRESS carries the reducer's CSE
-// through to the bytecode: a DAG node reached twice returns the same vN, so it is
-// computed once.
-// ============================================================================
+// The one codegen part that must know both worlds, so it lives in package compiler.
+// Memoization keyed by node ADDRESS carries the reducer's CSE through: a node
+// reached twice returns the same vN.
 
-// op_to_bc maps the compiler's Operator_Kind to the bytecode's neutral BC_Op.
-// Only the operators the bytecode models are mapped; others fall back to Add and
-// are guarded against upstream (non-arithmetic operators don't reach lowering).
+// op_to_bc maps Operator_Kind to BC_Op. Unmapped operators fall back to Add and
+// are guarded upstream (non-arithmetic operators don't reach lowering).
 op_to_bc :: proc(op: Operator_Kind) -> bc.BC_Op {
 	#partial switch op {
 	case .Add:
@@ -56,10 +47,9 @@ op_to_bc :: proc(op: Operator_Kind) -> bc.BC_Op {
 	return .Add
 }
 
-// machine_type_of derives the bytecode Machine_Type of a reduced node from its
-// fold. Single point of truth for the int/float-width-and-signedness mapping.
-// Returns .None when the node has no materializable machine layout yet (unsized
-// int/float, symbolic string) — the caller rejects.
+// machine_type_of derives a reduced node's Machine_Type. Single point of truth for
+// the int/float width-and-signedness mapping. .None = no materializable layout yet
+// (unsized int/float, symbolic string), which the caller rejects.
 machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 	if node == nil do return .None
 	#partial switch v in node^ {
@@ -72,8 +62,7 @@ machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 			if lay, ok := int_layout(iv); ok {
 				return bc.mtype_from_layout(lay.bits, lay.signed)
 			}
-			// Non-canonical range (e.g. -4..3566): the smallest type that contains
-			// it. Syntact knows this range by construction — no overflow analysis.
+			// Non-canonical range: smallest type that contains it (known by construction).
 			lo, hi: Maybe(i64)
 			if l, lok := iv.lo.?; lok do lo = i64(l)
 			if h, hok := iv.hi.?; hok do hi = i64(h)
@@ -119,16 +108,11 @@ machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 	return .None
 }
 
-// ----------------------------------------------------------------------------
-// Lowering state and helpers.
-// ----------------------------------------------------------------------------
-
 BC_Lower :: struct {
 	prog: ^bc.BC_Program,
 	memo: map[^Type]bc.BC_Value, // DAG node → its already-lowered vN (CSE)
 }
 
-// bc_fresh_value mints a new SSA value and records its Machine_Type.
 bc_fresh_value :: proc(l: ^BC_Lower, mt: bc.Machine_Type = .I64) -> bc.BC_Value {
 	v := bc.BC_Value(l.prog.value_count)
 	l.prog.value_count += 1
@@ -136,7 +120,6 @@ bc_fresh_value :: proc(l: ^BC_Lower, mt: bc.Machine_Type = .I64) -> bc.BC_Value 
 	return v
 }
 
-// bc_fail records the first lowering error and returns a placeholder value.
 bc_fail :: proc(l: ^BC_Lower, msg: string) -> bc.BC_Value {
 	if l.prog.error == "" do l.prog.error = msg
 	return bc_fresh_value(l)
@@ -168,9 +151,7 @@ lower_to_bytecode :: proc(root: ^Type) -> ^bc.BC_Program {
 		prog.result_type = prog.value_types[result]
 	}
 	bc_emit(&l, bc.BC_Ret{result})
-	// (Affine canonicalization is done UPSTREAM by the reducer, on the ^Type IR —
-	// see reduce.odin's collect_sum/flatten_sum. The bytecode is already minimal,
-	// so no bytecode-level affine pass is needed.)
+	// Affine canonicalization happens upstream in the reducer; bytecode is minimal.
 	return prog
 }
 
@@ -205,8 +186,7 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 		bc_emit(l, bc.BC_Const{dst, bool_is_concrete(v) && bool_value(v) ? 1 : 0})
 
 	case None_Type:
-		// The empty set / absence of a value (e.g. `true & false`). Materializes
-		// as 0 (exit 0 / empty), the natural "nothing" result.
+		// Empty set / absence of a value (e.g. `true & false`) materializes as 0.
 		dst = bc_fresh_value(l, .I64)
 		bc_emit(l, bc.BC_Const{dst, 0})
 
@@ -224,9 +204,8 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 		dst = bc_lower_fixed_point(l, node)
 
 	case Compose_Type:
-		// A string-domain compose ("hi " + ??::string) is an ordered sequence,
-		// not arithmetic — needs runtime concat + length (pattern capture), not
-		// implemented yet. Reject before lowering its operands.
+		// A string-domain compose is an ordered sequence, not arithmetic (needs
+		// pattern capture, not yet implemented). Reject before lowering operands.
 		if bc_compose_is_string(node) {
 			dst = bc_fail(
 				l,
@@ -247,8 +226,8 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	return dst
 }
 
-// bc_const_int returns a node's value as an i64 when it is a concrete integer (a
-// literal the lowering can fold into an immediate), else ok=false.
+// bc_const_int returns a node's value as an i64 when it is a concrete integer
+// (foldable into an immediate), else ok=false.
 bc_const_int :: proc(node: ^Type) -> (i64, bool) {
 	if node == nil do return 0, false
 	#partial switch v in node^ {
@@ -258,12 +237,9 @@ bc_const_int :: proc(node: ^Type) -> (i64, bool) {
 	return 0, false
 }
 
-// bc_lower_compose lowers an arithmetic/comparison node, choosing the IMMEDIATE
-// mnemonic (BC_Bin_Imm / BC_Cmp_Imm) when an operand is a concrete integer — so a
-// literal is an immediate on the instruction, never a separate BC_Const value.
-// For non-commutative ops (-, /, %, shifts) only the RIGHT operand may be the
-// immediate; for commutative ops either side works (the constant is normalized to
-// the immediate, the variable stays the register operand).
+// bc_lower_compose lowers an arithmetic/comparison node, choosing the immediate
+// mnemonic when an operand is a concrete integer. For non-commutative ops only the
+// RIGHT operand may be the immediate; commutative ops normalize the constant there.
 bc_lower_compose :: proc(l: ^BC_Lower, node: ^Type, v: Compose_Type) -> bc.BC_Value {
 	op := op_to_bc(v.operator)
 	mt := machine_type_of(node)
@@ -285,19 +261,18 @@ bc_lower_compose :: proc(l: ^BC_Lower, node: ^Type, v: Compose_Type) -> bc.BC_Va
 		op == .Equal ||
 		op == .NotEqual
 
-	// Right operand constant: a op #rk — always valid (immediate is the right side).
+	// a op #rk — always valid (immediate is the right side).
 	if r_const && !l_const {
 		a := bc_lower_value(l, v.left)
 		return bc_emit_imm(l, node, op, a, rk, cmp, mt)
 	}
-	// Left operand constant on a commutative op: #lk op b  ==  b op #lk.
+	// #lk op b  ==  b op #lk on a commutative op.
 	if l_const && !r_const && commutative {
 		b := bc_lower_value(l, v.right)
 		return bc_emit_imm(l, node, op, b, lk, cmp, mt)
 	}
 
-	// General register/register form (both variable, both constant — rare since
-	// the reducer folds const⊕const — or a left-constant non-commutative op).
+	// General register/register form.
 	a := bc_lower_value(l, v.left)
 	b := bc_lower_value(l, v.right)
 	if mt == .None do mt = bc.mtype_wider(l.prog.value_types[a], l.prog.value_types[b])
@@ -332,14 +307,9 @@ bc_emit_imm :: proc(
 	return dst
 }
 
-// A ??N fixed point → ONE Load_Arg{slot, width, signed}. fixedpoint_id gives the
-// stable, appearance-ordered index = the argv position.
-//
-// The Load_Arg ALONE carries the domain: normalizing a ??::u8 to 0..255 (or a
-// ??::i8 by sign-extension) is the LOAD's own semantics, not a separate mask. The
-// lowering emits nothing else — each backend realizes the domain its own way: x64
-// with a single movzx/movsx (load+extend), the interpreter by masking in
-// software. A bare/64-bit/float domain loads as-is.
+// A ??N fixed point → ONE Load_Arg{slot, width, signed}; the Load_Arg alone carries
+// the domain (??::u8 normalized by the backend's movzx/movsx, no separate mask).
+// fixedpoint_id gives the stable, appearance-ordered index = the argv position.
 bc_lower_fixed_point :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	slot := fixedpoint_id(node)
 	mt := machine_type_of(node)
@@ -356,8 +326,7 @@ bc_lower_fixed_point :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	return dst
 }
 
-// bc_lower_string_const lays a concrete string into the program's .rodata pool
-// and emits a pointer to it.
+// bc_lower_string_const lays a concrete string into .rodata and emits a pointer.
 bc_lower_string_const :: proc(l: ^BC_Lower, s: string) -> bc.BC_Value {
 	id := len(l.prog.rodata)
 	append(&l.prog.rodata, s)
@@ -385,16 +354,13 @@ bc_unknown_domain :: proc(node: ^Type) -> (width: uint, signed: bool) {
 bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 	target := bc_lower_value(l, p.target)
 	end := bc_fresh_label(l)
-	// The merge slot: every branch writes its product here via BC_Move, so the
-	// allocator pins all writers to one location (a proper phi).
+	// Merge slot: every branch writes its product here via BC_Move (a phi).
 	rt := len(p.branches) > 0 ? machine_type_of(p.branches[0].product) : bc.Machine_Type.I64
 	if rt == .None do rt = .I64
 	result := bc_fresh_value(l, rt)
 
 	for branch in p.branches {
-		// A bool value-match (`=true`/`=false`): the target is 0/1, fire when it
-		// equals the branch's bool. Emit the conditional test so the branches don't
-		// fall through into one another.
+		// A bool value-match (`=true`/`=false`): fire when target equals the bool.
 		if bval, is_bool := bc_branch_bool_value(branch); is_bool {
 			next := bc_fresh_label(l)
 			want := bc_fresh_value(l);bc_emit(l, bc.BC_Const{want, bval ? 1 : 0})
@@ -429,8 +395,8 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 	return result
 }
 
-// Extract a concrete bool from a value-match branch (`=true`/`=false`), if it is
-// one. Only a singleton Bool_Type qualifies — a full `{true,false}` is not a test.
+// Extract a concrete bool from a value-match branch. Only a singleton Bool_Type
+// qualifies — a full `{true,false}` is not a test.
 bc_branch_bool_value :: proc(branch: Pattern_Branch) -> (val: bool, ok: bool) {
 	if !branch.value_match || branch.match == nil do return false, false
 	folded := fold_type(branch.match)

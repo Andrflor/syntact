@@ -4,38 +4,25 @@ import "core:fmt"
 import "core:math"
 import "core:strings"
 
-// ext_mul multiplies over the extended reals, defining 0·∞ = 0 (the convention
-// that keeps a bounded factor times an unbounded one finite when the bound is 0).
-// Used by the interval Multiply so an unbounded `??::f64` factor folds.
+// ext_mul multiplies over the extended reals, defining 0·∞ = 0 (so an unbounded
+// `??::f64` factor times a 0 bound stays finite).
 ext_mul :: proc(x, y: f64) -> f64 {
 	if x == 0 || y == 0 do return 0
 	return x * y
 }
 
-// ext_div divides over the extended reals for interval bounds. The divisor `y` is
-// already known to exclude 0 here (the straddle case is handled separately), so the
-// only special values come from an unbounded dividend/divisor: a finite numerator
-// over an infinite denominator tends to 0, and an infinite numerator over a finite
-// denominator stays infinite (sign from the operands). Used by the interval Divide.
+// ext_div divides over the extended reals for interval bounds. `y` is known to
+// exclude 0 here (the straddle case is handled separately).
 ext_div :: proc(x, y: f64) -> f64 {
 	if math.is_inf(y) do return 0 // finite or ±∞ over ±∞ → 0 (envelope toward 0)
 	return x / y // y ≠ 0 guaranteed; ±∞/finite stays ±∞
 }
 
-// fold_float.odin — the float domain, mirror of fold_integer.odin.
-//
-// A Float_Type carries three things: a list of Float_Intervals (the numeric
-// envelope, nil bound = ±∞), a FloatKind color (.none / .f32 / .f64), and a
-// default_value. f32 is Float_Type{[{nil,nil}], .f32, 0}; f64 likewise with
-// .f64; a literal 3.14 is Float_Type{[{3.14,3.14}], .none, 3.14}; a float
-// range low..hi is Float_Type{[{low,hi}], .none, …}.
-//
-// The .none kind means "uncolored" — a literal or range. Color compatibility
-// (float_kind_compatible) is the extra check the integer domain doesn't have:
-//   - a .none constraint accepts .none / .f32 / .f64 values (any float fits)
-//   - a .f64 constraint accepts only .f64 or .none values
-//   - a .f32 constraint accepts only .f32 or .none values
-// i.e. the kinds match when they're equal or at least one side is .none.
+// The float domain, mirror of the integer domain. A Float_Type carries a list of
+// Float_Intervals (nil bound = ±∞), a FloatKind color (.none / .f32 / .f64), and
+// a default. .none is "uncolored" (literal/range); color compatibility
+// (float_kind_compatible) is the extra check the integer domain lacks — kinds
+// match when equal or either side is .none.
 
 
 float_is_concrete :: #force_inline proc(t: Float_Type) -> bool {
@@ -81,8 +68,7 @@ default_for_float_intervals :: proc(float_intervals: []Float_Interval) -> Maybe(
 	for interval in float_intervals {
 		lo, lo_ok := interval.lo.(f64)
 		hi, hi_ok := interval.hi.(f64)
-		// 0 is the default iff it is actually in the interval; an open bound
-		// exactly at 0 excludes it (e.g. `>0` does not contain 0).
+		// 0 is the default iff it is in the interval; an open bound at 0 excludes it.
 		lo_ok_for_zero := !lo_ok || lo < 0 || (lo == 0 && !interval.lo_open)
 		hi_ok_for_zero := !hi_ok || hi > 0 || (hi == 0 && !interval.hi_open)
 		if lo_ok_for_zero && hi_ok_for_zero do return f64(0)
@@ -94,8 +80,8 @@ default_for_float_intervals :: proc(float_intervals: []Float_Interval) -> Maybe(
 	return f64(0)
 }
 
-// float_kind_compatible reports whether a value of kind `vk` may be colored by
-// a constraint of kind `ck`. Equal kinds match; .none on either side matches.
+// Whether a value of kind `vk` may be colored by constraint kind `ck`: equal kinds
+// match; .none on either side matches.
 float_kind_compatible :: #force_inline proc(ck, vk: FloatKind) -> bool {
 	if ck == .none || vk == .none do return true
 	return ck == vk
@@ -103,8 +89,6 @@ float_kind_compatible :: #force_inline proc(ck, vk: FloatKind) -> bool {
 
 // --- float domain entry points (return reduced ^Type / bool / string) ---
 
-// fold_type_float derives the float envelope a value produces and wraps it in a
-// Float_Type, or nil if the value is not float-foldable.
 fold_type_float :: proc(t: ^Type) -> ^Type {
 	ft, ok := fold_type_float_intervals(t).(Float_Type)
 	if !ok do return nil
@@ -113,8 +97,6 @@ fold_type_float :: proc(t: ^Type) -> ^Type {
 	return r
 }
 
-// fold_constraint_float resolves a float constraint to a closed Float_Type, or
-// nil if it cannot be resolved statically.
 fold_constraint_float :: proc(t: ^Type) -> ^Type {
 	ft, ok := fold_constraint_float_intervals(t).(Float_Type)
 	if !ok do return nil
@@ -123,8 +105,7 @@ fold_constraint_float :: proc(t: ^Type) -> ^Type {
 	return r
 }
 
-// float_satisfy proves ft ⊆ fc when both are float-domain Float_Types: the
-// numeric envelope must fit AND the colors must be compatible.
+// float_satisfy proves ft ⊆ fc: the envelope must fit AND the colors be compatible.
 float_satisfy :: proc(fc, ft: Float_Type) -> bool {
 	if !float_kind_compatible(fc.kind, ft.kind) do return false
 	return float_intervals_satisfy(ft.float_intervals, fc.float_intervals)
@@ -134,8 +115,6 @@ float_to_string :: proc(t: Float_Type) -> string {
 	return pretty_float_intervals(t.float_intervals, t.kind)
 }
 
-// stored_fold_float extracts the Float_Type payload (intervals + kind + default)
-// from a folded ^Type as cached in type_folds / constraint_folds.
 stored_fold_float :: proc(t: ^Type) -> Maybe(Float_Type) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -193,7 +172,6 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 			case .Greater:
 				hi, hi_ok := right_segs[0].hi.(f64)
 				if !hi_ok do return nil
-				// `>x` is the open interval (x, +∞): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{hi, nil, true, false}
 				return Float_Type {
@@ -212,7 +190,6 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 			case .Less:
 				lo, lo_ok := right_segs[0].lo.(f64)
 				if !lo_ok do return nil
-				// `<x` is the open interval (-∞, x): x itself is excluded.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval{nil, lo, false, true}
 				return Float_Type {
@@ -232,8 +209,7 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 				lo, lo_ok := right_segs[0].lo.(f64)
 				hi, hi_ok := right_segs[0].hi.(f64)
 				if !lo_ok || !hi_ok do return nil
-				// arithmetic negation mirrors the interval: the old hi (with its
-				// openness) becomes the new lo, and vice versa.
+				// negation mirrors the interval: old hi (with its openness) becomes new lo.
 				float_intervals := make([]Float_Interval, 1)
 				float_intervals[0] = Float_Interval {
 					-hi,
@@ -254,8 +230,7 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 		if !left_ok || !right_ok do return nil
 		left_segs := left.float_intervals
 		right_segs := right.float_intervals
-		// Two floats only combine if their colors are compatible (f32 vs f64
-		// don't). An incompatible pair fails the fold → diagnose_compose explains.
+		// Two floats combine only if their colors are compatible (f32/f64 don't).
 		if !float_kind_compatible(left.kind, right.kind) do return nil
 		if len(left_segs) == 0 || len(right_segs) == 0 do return nil
 		result := make([dynamic]Float_Interval)
@@ -273,9 +248,6 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 			default_for_float_intervals(segs),
 		}
 	case Cast_Type:
-		// Mirror integer.odin: a `::` produces its target's envelope (the cached
-		// concrete value when the source was concrete, else the whole target), so an
-		// inline `(??::f64)*2.0` folds like a reference to a `::`-bound binding.
 		if v.type_fold != nil {
 			return fold_type_float_intervals(v.type_fold)
 		}
@@ -346,9 +318,6 @@ fold_constraint_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 		}
 		return fold_type_float_intervals(t)
 	case Or_Type:
-		// An Or folds to float ONLY if BOTH branches are float. Otherwise
-		// (String | f32) it is mixed: we fail to let fold_constraint keep it
-		// symbolic, and satisfy(Or) will test each branch in its own domain.
 		left, left_ok := fold_constraint_float_intervals(v.left).(Float_Type)
 		right, right_ok := fold_constraint_float_intervals(v.right).(Float_Type)
 		if !left_ok || !right_ok do return nil
@@ -392,21 +361,16 @@ fold_arith_float_intervals :: proc(
 	case .Add:
 		lo: Maybe(f64) = a_lo_ok && b_lo_ok ? a_lo + b_lo : nil
 		hi: Maybe(f64) = a_hi_ok && b_hi_ok ? a_hi + b_hi : nil
-		// a sum bound is exclusive if either contributing bound is exclusive
 		float_intervals[0] = Float_Interval{lo, hi, a.lo_open || b.lo_open, a.hi_open || b.hi_open}
 		return float_intervals
 	case .Subtract:
 		lo: Maybe(f64) = a_lo_ok && b_hi_ok ? a_lo - b_hi : nil
 		hi: Maybe(f64) = a_hi_ok && b_lo_ok ? a_hi - b_lo : nil
-		// subtraction pairs a's lo with b's hi (and vice versa)
 		float_intervals[0] = Float_Interval{lo, hi, a.lo_open || b.hi_open, a.hi_open || b.lo_open}
 		return float_intervals
 	case .Multiply:
-		// Multiply over EXTENDED reals: a missing bound is ±∞. The product interval is
-		// [min, max] of the four corner products, with ±∞ propagated. This lets an
-		// UNBOUNDED fixed point (`??::f64` = (-∞,+∞)) multiply by a constant and stay a
-		// (still unbounded) interval instead of failing the fold (which raised a
-		// spurious Invalid_operator). The reducer then keeps the expression symbolic.
+		// Over EXTENDED reals (missing bound = ±∞), so an unbounded `??::f64` factor
+		// folds instead of failing. Result = [min, max] of the four corner products.
 		al := a_lo_ok ? a_lo : math.inf_f64(-1)
 		ah := a_hi_ok ? a_hi : math.inf_f64(1)
 		bl := b_lo_ok ? b_lo : math.inf_f64(-1)
@@ -426,11 +390,8 @@ fold_arith_float_intervals :: proc(
 		}
 		return float_intervals
 	case .Divide:
-		// IEEE 754 float division NEVER traps: x/0 yields ±∞ and 0/0 yields NaN, so
-		// the divisor is never an error (matches Rust/Go/C/LLVM `fdiv`). Fold over
-		// EXTENDED reals like Multiply: a missing dividend bound is ±∞. When the
-		// divisor interval STRADDLES 0 the quotient spans both ±∞ half-lines, so the
-		// envelope is the whole line (-∞,+∞) — kept by leaving both bounds open.
+		// IEEE 754 division NEVER traps (x/0 = ±∞, 0/0 = NaN), so the divisor is never
+		// an error. Over EXTENDED reals; a divisor straddling 0 gives the whole line.
 		al := a_lo_ok ? a_lo : math.inf_f64(-1)
 		ah := a_hi_ok ? a_hi : math.inf_f64(1)
 		any_open := a.lo_open || a.hi_open || b.lo_open || b.hi_open
@@ -438,8 +399,6 @@ fold_arith_float_intervals :: proc(
 			float_intervals[0] = Float_Interval{nil, nil, true, true}
 			return float_intervals
 		}
-		// Divisor excludes 0: the four corner quotients bound the result. A missing
-		// divisor bound (±∞) drives the quotient toward 0, handled by ext_div.
 		bl := b_lo_ok ? b_lo : math.inf_f64(-1)
 		bh := b_hi_ok ? b_hi : math.inf_f64(1)
 		p1 := ext_div(al, bl)
@@ -495,8 +454,7 @@ float_intervals_intersect :: proc(a, b: []Float_Interval) -> []Float_Interval {
 	return result[:]
 }
 
-// float_intersect_lo picks the higher (more restrictive) lower bound for an
-// intersection; on a tie it is open if either side excluded the point.
+// Picks the higher (more restrictive) lower bound; on a tie, open if either side excluded the point.
 float_intersect_lo :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), bool) {
 	av, a_ok := a.lo.(f64)
 	bv, b_ok := b.lo.(f64)
@@ -517,8 +475,7 @@ float_intersect_hi :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), b
 	return a.hi, a.hi_open || b.hi_open
 }
 
-// float_interval_nonempty reports whether the interval contains any point.
-// With open bounds, lo == hi is empty (e.g. (x, x] holds nothing).
+// Whether the interval contains any point. With open bounds, lo == hi is empty.
 float_interval_nonempty :: #force_inline proc(s: Float_Interval) -> bool {
 	lo, lo_ok := s.lo.(f64)
 	hi, hi_ok := s.hi.(f64)
@@ -528,11 +485,8 @@ float_interval_nonempty :: #force_inline proc(s: Float_Interval) -> bool {
 	return !s.lo_open && !s.hi_open
 }
 
-// float_intervals_negate mirrors the integer negate but over the real line —
-// there is no +1/-1 adjacency for floats, so the complement of [lo, hi] is
-// (-∞, lo) ∪ (hi, +∞). The cut points (lo / hi) carry over, but their open/closed
-// status flips: a point included in the source is excluded from the complement
-// and vice versa, so a closed source bound becomes an open complement bound.
+// Complement over the real line: ~[lo, hi] = (-∞, lo) ∪ (hi, +∞), with the cut
+// points' open/closed status flipped (no +1/-1 adjacency, unlike integers).
 float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Interval {
 	result := make([dynamic]Float_Interval)
 	prev_hi: Maybe(f64) = nil
@@ -540,8 +494,6 @@ float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Int
 	for interval in float_intervals {
 		lo, lo_ok := interval.lo.(f64)
 		if lo_ok {
-			// upper bound of this complement piece is the source's lo, with
-			// flipped openness; lower bound is the previous source hi (flipped).
 			append(&result, Float_Interval{prev_hi, lo, prev_hi_open, !interval.lo_open})
 		}
 		hi, hi_ok := interval.hi.(f64)
@@ -560,11 +512,8 @@ float_intervals_negate :: proc(float_intervals: []Float_Interval) -> []Float_Int
 }
 
 // --- float type set operations (carry the propagated default) ---
-//
-// Mirror integer_type_union/intersect/negate: combine the numeric envelopes via
-// the slice-level helpers, then thread the default along the SOURCE order.
-// The result kind is the promotion of the two operand kinds (a .none defers to
-// the colored side; f32 with f64 would already have been rejected upstream).
+// Mirror integer_type_union/intersect/negate; default threaded along SOURCE order,
+// result kind = promotion of the two operand kinds.
 
 float_type_union :: proc(a, b: Float_Type) -> Float_Type {
 	segs := float_intervals_union(a.float_intervals, b.float_intervals)
@@ -585,25 +534,20 @@ float_type_intersect :: proc(a, b: Float_Type) -> Float_Type {
 }
 
 float_type_negate :: proc(a: Float_Type) -> Float_Type {
-	// Negate has no source order → the default is recomputed structurally.
 	segs := float_intervals_negate(a.float_intervals)
 	return Float_Type{segs, a.kind, default_for_float_intervals(segs)}
 }
 
-// float_pick_default keeps the LEFT operand's default (source order is
-// significant — left first) WHEN it still belongs to the folded result, else
-// the right's when it does, else the structural fallback. The membership test
-// matters for `&`: an intersection can narrow the left default out of the set
-// (`f64 & 1.0..5.0` drops f64's 0), and then the default must be a real element
-// of what remains.
+// Keeps the left default when it still belongs to the folded result, else the
+// right's, else the structural fallback. The membership test matters for `&`,
+// which can narrow the left default out of the set.
 float_pick_default :: proc(segs: []Float_Interval, left, right: Maybe(f64)) -> Maybe(f64) {
 	if l, ok := left.(f64); ok && float_intervals_contains(segs, l) do return l
 	if r, ok := right.(f64); ok && float_intervals_contains(segs, r) do return r
 	return default_for_float_intervals(segs)
 }
 
-// float_intervals_contains reports whether v is a member of the interval set.
-// An open bound exactly at v excludes it (`>x` does not contain x; `<x` neither).
+// Whether v is a member of the interval set; an open bound exactly at v excludes it.
 float_intervals_contains :: proc(segs: []Float_Interval, v: f64) -> bool {
 	for s in segs {
 		lo, lo_ok := s.lo.(f64)
@@ -615,10 +559,8 @@ float_intervals_contains :: proc(segs: []Float_Interval, v: f64) -> bool {
 	return false
 }
 
-// Like range_span_bounds on the integer side: span of all the bounds (chain
-// included), the order only changing the default. `10.0..0.0` ≡ `0.0..10.0`,
-// `10.0..0.0..30.0` ≡ `0.0..30.0`. Global min of the `lo`, global max of the
-// `hi`; an open bound dominates.
+// Like range_span_bounds on the integer side: global min of the `lo`, global max
+// of the `hi`; order only changes the default; an open bound dominates.
 range_span_float_bounds :: proc(
 	left_segs, right_segs: []Float_Interval,
 	left_open := false,
@@ -664,7 +606,6 @@ range_span_float_bounds :: proc(
 	}
 	consider(left_segs, &lo, &hi, &lo_set, &hi_set)
 	consider(right_segs, &lo, &hi, &lo_set, &hi_set)
-	// A bound missing in the source = open to infinity on that side.
 	if left_open do lo = nil
 	if right_open do hi = nil
 	return lo, hi
@@ -710,11 +651,7 @@ float_intervals_satisfy :: proc(value_segs, constraint_segs: []Float_Interval) -
 	return true
 }
 
-// float_lo_contains reports whether the constraint's lower bound admits every
-// point of the value interval's lower side. A closed constraint bound `cs.lo`
-// admits values down to and including `cs.lo`; an open one (e.g. `>x`) excludes
-// `cs.lo` itself, so the value's own lower bound must lie strictly above it —
-// unless the value bound is open at the very same point (`(x` ⊆ `(x`).
+// Whether the constraint's lower bound admits every point of the value's lower side.
 float_lo_contains :: #force_inline proc(cs, vs: Float_Interval) -> bool {
 	cl, cl_ok := cs.lo.(f64)
 	if !cl_ok do return true // constraint open to -∞ admits any lower bound
@@ -722,11 +659,9 @@ float_lo_contains :: #force_inline proc(cs, vs: Float_Interval) -> bool {
 	if !vl_ok do return false // value extends to -∞, constraint does not
 	if cl < vl do return true
 	if cl > vl do return false
-	// cl == vl: fine unless the constraint excludes the point while the value includes it
 	return !cs.lo_open || vs.lo_open
 }
 
-// float_hi_contains mirrors float_lo_contains for the upper bound.
 float_hi_contains :: #force_inline proc(cs, vs: Float_Interval) -> bool {
 	ch, ch_ok := cs.hi.(f64)
 	if !ch_ok do return true // constraint open to +∞ admits any upper bound
@@ -751,8 +686,7 @@ float_intervals_overlap :: #force_inline proc(a, b: Float_Interval) -> bool {
 	if !a_ok do return true
 	if !b_ok do return true
 	if a_hi > b_lo do return true
-	// they only touch at the shared point a_hi == b_lo: that closes the gap
-	// only if at least one side actually includes the point.
+	// touching at a_hi == b_lo closes the gap only if at least one side includes the point.
 	if a_hi == b_lo do return !a.hi_open || !b.lo_open
 	return false
 }
@@ -764,9 +698,7 @@ float_interval_merge :: #force_inline proc(a, b: Float_Interval) -> Float_Interv
 	return Float_Interval{lo, hi, lo_open, hi_open}
 }
 
-// float_merge_lo picks the lower of the two lower bounds for a union, carrying
-// that bound's openness; when both bounds coincide, the union includes the point
-// if either side did (the less restrictive — closed — wins).
+// Picks the lower of the two lower bounds for a union; on a tie, the less restrictive (closed) wins.
 float_merge_lo :: #force_inline proc(a, b: Float_Interval) -> (Maybe(f64), bool) {
 	av, a_ok := a.lo.(f64)
 	bv, b_ok := b.lo.(f64)
@@ -846,8 +778,7 @@ float_format :: proc(b: ^strings.Builder, f: f64) {
 	strings.write_string(b, float_display(f))
 }
 
-// float_display renders a float so it always reads as a float — a whole value
-// like 4.0 prints "4.0", never "4" (which would look like an integer).
+// Renders a float so it always reads as one: a whole value 4.0 prints "4.0", not "4".
 float_display :: proc(f: f64) -> string {
 	s := fmt.tprintf("%v", f)
 	if strings.index_byte(s, '.') < 0 &&
@@ -888,11 +819,9 @@ pretty_float_intervals :: proc(float_intervals: []Float_Interval, kind: FloatKin
 		if lo_ok && hi_ok && lo == hi && !interval.lo_open && !interval.hi_open {
 			float_format(&b, lo)
 		} else if lo_ok && !hi_ok && interval.lo_open {
-			// open lower half-line, rendered in source `>x` form
 			strings.write_string(&b, ">")
 			float_format(&b, lo)
 		} else if hi_ok && !lo_ok && interval.hi_open {
-			// open upper half-line, rendered in source `<x` form
 			strings.write_string(&b, "<")
 			float_format(&b, hi)
 		} else {
