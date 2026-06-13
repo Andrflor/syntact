@@ -1,0 +1,1 @@
+{ "name": "tc_symbolic_compose_ok", "description": "a deep symbolic arithmetic over unknowns (??::u8) is a legal value, never 'cannot compute at compile time' — it stays symbolic", "source": "e -> ??::u8\nb -> e * 2\n-> (b + 2 + 5 * e) * 14 * e", "expect_errors": [] }

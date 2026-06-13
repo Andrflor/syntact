@@ -1,0 +1,1 @@
+{ "name": "tc_carve_dep_string_concat_ok", "description": "carving x to another string keeps the dependent field y -> x + \"!\" coherent (string + string)", "source": "a -> {\n  x -> \"hi\"\n  y -> x + \"!\"\n}\nb -> a{x -> \"yo\"}", "expect_errors": [] }

@@ -1,0 +1,1 @@
+{ "name": "tc_carve_dep_incoherent_sub_bad", "description": "carving x to a string makes the dependent uncolored field y -> x - 1 incoherent (string minus int has no meaning)", "source": "a -> {\n  x -> 5\n  y -> x - 1\n}\nb -> a{x -> \"hi\"}", "expect_errors": ["Invalid_operator"] }

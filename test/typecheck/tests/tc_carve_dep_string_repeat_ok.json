@@ -1,0 +1,1 @@
+{ "name": "tc_carve_dep_string_repeat_ok", "description": "carving x to a string keeps z -> x * 3 coherent — string * int is repetition, not an error", "source": "a -> {\n  x -> 2\n  z -> x * 3\n}\nc -> a{x -> \"hi\"}", "expect_errors": [] }

@@ -511,55 +511,14 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 			return
 		}
 	}
-	// The envelope fold failed. In VALUE context (fold_type) an unresolved
-	// arithmetic is NOT an error: an unknown operand keeps the compose symbolic
-	// (`??0 + 1`, `e*e`), and its envelope is recomputed by interval arithmetic
-	// wherever the operands' ranges are known. "cannot ... at compile time" is a
-	// CONSTRAINT verdict (fold_constraint needs a closed set) and must not leak
-	// here. Only a genuine family incompatibility — mixing int/float without a
-	// cast, divergent float colors, a non-numeric operand — is a real value-level
-	// error; everything else stays symbolic. compose_stays_symbolic decides this.
-	if compose_stays_symbolic(comp^) do return
+	// The envelope fold failed. In VALUE context an unresolved arithmetic is NOT
+	// an error: an unknown operand keeps the compose symbolic (`??0 + 1`, `e*e`),
+	// and its envelope is recomputed by interval arithmetic wherever the operands'
+	// ranges are known. Only a GENUINE incompatibility — mixing int/float without a
+	// cast, divergent float colors, a non-numeric operand, a `/`,`%` whose divisor
+	// may be zero — is a real error. compose_error_message draws that line (and is
+	// the same source of truth the re-fold path uses via detect_invalid).
 	diagnose_compose(a, comp^, node_span(a, node))
-}
-
-// compose_stays_symbolic reports whether an arithmetic compose whose envelope
-// did not fold is a LEGAL symbolic value (operands of one numeric family, or an
-// unknown ??) rather than a real error. It mirrors the incompatibility checks in
-// diagnose_compose: a comparison over numeric families, two compatible numeric
-// operands (same family, and for floats compatible colors), or any unknown
-// operand all stay symbolic. A mixed int/float, a non-numeric operand, or a
-// divide/mod (whose divisor-zero proof is a real concern) fall through to the
-// diagnostic.
-compose_stays_symbolic :: proc(comp: Compose_Type) -> bool {
-	// Divide/mod carry a divisor-zero obligation: let diagnose_compose handle it.
-	if comp.operator == .Divide || comp.operator == .Mod do return false
-
-	// Unary arithmetic (e.g. negate): symbolic when the operand is numeric or ??.
-	if comp.left == nil {
-		rf := family_of(comp.right)
-		return is_numeric_family(rf) || rf == .Unknown
-	}
-
-	lf := family_of(comp.left)
-	rf := family_of(comp.right)
-
-	// Any unknown operand keeps it symbolic — `?? op x` is a value, not an error.
-	if lf == .Unknown || rf == .Unknown do return true
-
-	// Both numeric: symbolic only when the families MATCH (no implicit int/float
-	// mixing) and, for floats, the colors are compatible. A mismatch is a real
-	// error left to diagnose_compose.
-	if is_numeric_family(lf) && is_numeric_family(rf) {
-		if lf != rf do return false
-		if lf == .Float {
-			return float_kind_compatible(float_color(comp.left), float_color(comp.right))
-		}
-		return true
-	}
-
-	// A non-numeric operand (string/bool/scope) in arithmetic is a real error.
-	return false
 }
 
 // is_comparison_op reports whether an operator yields a bool (an ordering or
