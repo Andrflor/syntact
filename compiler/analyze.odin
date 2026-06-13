@@ -183,6 +183,7 @@ node_span :: proc(a: ^Analyzer, idx: Node_Index) -> Span {
 }
 
 node_pos :: proc(a: ^Analyzer, idx: Node_Index) -> Position {
+	if idx == INVALID_NODE || int(idx) >= len(a.ast.node_spans) do return Position{}
 	return span_to_position(a.ast, a.ast.node_spans[idx].start)
 }
 
@@ -757,7 +758,7 @@ walk_binding :: #force_inline proc(
 			} else if nk == .Carve {
 				// constraint:name{carves} — the carve source is the name
 				csrc := ast.node_data[name_idx].carve.source
-				if ast.node_kinds[csrc] == .Identifier {
+				if csrc != INVALID_NODE && ast.node_kinds[csrc] == .Identifier {
 					name = span_str(ast, ast.node_data[csrc].identifier.name)
 					capture = span_str(ast, ast.node_data[csrc].identifier.capture)
 				}
@@ -847,10 +848,12 @@ walk_product :: #force_inline proc(
 	data := ast.node_data[idx]
 	operand_idx := data.unary.operand
 	if operand_idx == INVALID_NODE {
-		// `->` with no operand (incomplete source, e.g. `{->}` mid-edit): produce an
-		// INVALID production rather than indexing node_kinds[INVALID_NODE].
-		value := make_invalid()
+		// `->` with no operand (incomplete source, e.g. `{->}` mid-edit): walk the
+		// missing node (returns INVALID) rather than indexing node_kinds[INVALID_NODE],
+		// then append it exactly as the normal path would.
+		value := walk(a, current_scope, operand_idx)
 		scope_append(a, current_scope, "", nil, .Product, value)
+		typecheck(a, current_scope, "", nil, .Product, value, idx)
 		return value
 	}
 	if ast.node_kinds[operand_idx] == .Constraint {
@@ -928,7 +931,7 @@ walk_constraint :: #force_inline proc(
 			name = span_str(ast, ast.node_data[data.binary.right].identifier.name)
 		} else if right_kind == .Carve {
 			csrc := ast.node_data[data.binary.right].carve.source
-			if ast.node_kinds[csrc] == .Identifier {
+			if csrc != INVALID_NODE && ast.node_kinds[csrc] == .Identifier {
 				name = span_str(ast, ast.node_data[csrc].identifier.name)
 			}
 		}
@@ -1213,6 +1216,7 @@ carve_shorthand_field :: proc(
 	ast := a.ast
 	if ast.node_kinds[child] != .Carve do return nil, -1, false
 	src_node := ast.node_data[child].carve.source
+	if src_node == INVALID_NODE do return nil, -1, false
 	if ast.node_kinds[src_node] != .Identifier do return nil, -1, false
 	cname := span_str(ast, ast.node_data[src_node].identifier.name)
 	cordinal := ast.node_data[src_node].identifier.ordinal
