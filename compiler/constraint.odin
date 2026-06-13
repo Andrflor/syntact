@@ -475,10 +475,7 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 		// A recursive tail (bare mention OR carve) is unfolded one level against the
 		// live scope; everything else is the already-materialized constraint scope.
 		if is_recursive_tail(cs.constraint_folds[i]) {
-			return satisfy_root(
-				recursive_tail_unfold(cs.constraint_folds[i]),
-				vs.type_folds[j],
-			)
+			return satisfy_root(recursive_tail_unfold(cs.constraint_folds[i]), vs.type_folds[j])
 		}
 		return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
 	}
