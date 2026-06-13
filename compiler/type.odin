@@ -143,25 +143,9 @@ execute_fold_leave :: proc(key: ^Scope_Type) {
 // fold_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
 fold_type :: proc(t: ^Type) -> ^Type {
-	// A producer scope {-> X} on the right is itself a value of a higher meta
-	// level: its type is the producer of fold_type(X). This mirrors
-	// fold_constraint on the left so {->X} matches across sides.
 	if t != nil {
 		switch v in t^ {
 		case Scope_Type:
-			prods := scope_productions(v)
-			if len(prods) > 0 {
-				folded := make([dynamic]^Type, 0, len(prods))
-				for p in prods {
-					fp := fold_type(p)
-					if fp == nil do return nil
-					append(&folded, fp)
-				}
-				return make_producer_scope_multi(folded[:])
-			}
-			// Structural scope (named bindings, no production): its type is
-			// itself — its bindings already carry their folds from analysis.
-			// scope_satisfy compares each binding's constraint against value.
 			return t
 		case Carve_Type:
 			// A carve folds to the substituted scope, then to that scope's type.
@@ -238,7 +222,7 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			// the target's layout, so the target IS the value's envelope (not wrapped
 			// in a producer scope: it already denotes the set the value lives in).
 			if v.type_fold != nil do return fold_type(v.type_fold)
-			return fold_constraint(v.target)
+			return fold_type(v.target)
 		case Compose_Type:
 			// A COMPARISON (`<`,`>`,`==`,…) is a VALUE of the bool domain: its typeof
 			// is `{true,false}`, regardless of whether the operands are concrete. This
