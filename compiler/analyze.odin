@@ -176,6 +176,9 @@ span_str :: proc(ast: ^Ast, s: Span) -> string {
 }
 
 node_span :: proc(a: ^Analyzer, idx: Node_Index) -> Span {
+	// A missing node (INVALID_NODE, e.g. an empty carve target `n->`) has no span;
+	// fall back to an empty span so a diagnostic never indexes out of range.
+	if idx == INVALID_NODE || int(idx) >= len(a.ast.node_spans) do return Span{}
 	return a.ast.node_spans[idx]
 }
 
@@ -843,6 +846,13 @@ walk_product :: #force_inline proc(
 	ast := a.ast
 	data := ast.node_data[idx]
 	operand_idx := data.unary.operand
+	if operand_idx == INVALID_NODE {
+		// `->` with no operand (incomplete source, e.g. `{->}` mid-edit): produce an
+		// INVALID production rather than indexing node_kinds[INVALID_NODE].
+		value := make_invalid()
+		scope_append(a, current_scope, "", nil, .Product, value)
+		return value
+	}
 	if ast.node_kinds[operand_idx] == .Constraint {
 		cdata := ast.node_data[operand_idx]
 		constraint := walk(a, current_scope, cdata.binary.left)
@@ -1312,7 +1322,7 @@ carve_resolve_children :: proc(
 			cname := ""
 			cordinal: i16 = -1
 
-			if ast.node_kinds[name_idx] == .Identifier {
+			if name_idx != INVALID_NODE && ast.node_kinds[name_idx] == .Identifier {
 				cname = span_str(ast, ast.node_data[name_idx].identifier.name)
 				cordinal = ast.node_data[name_idx].identifier.ordinal
 			}
@@ -1337,6 +1347,9 @@ carve_resolve_children :: proc(
 				if cf != nil {
 					vf := fold_type(val)
 					if vf != nil && !satisfy_root(cf, vf) {
+						// An empty carve target (`n->`) has no value node; anchor the
+						// error on the whole child so node_span never sees INVALID_NODE.
+						err_idx := val_idx != INVALID_NODE ? val_idx : child
 						sem_error(
 							a,
 							fmt.tprintf(
@@ -1346,7 +1359,7 @@ carve_resolve_children :: proc(
 								describe_type(cf),
 							),
 							.Constraint_Mismatch,
-							node_span(a, val_idx),
+							node_span(a, err_idx),
 						)
 					}
 				}
