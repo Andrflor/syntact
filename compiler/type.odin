@@ -3,38 +3,9 @@ package compiler
 import "core:fmt"
 import "core:unicode/utf8"
 
-// --- generic fold (domain-agnostic dispatch) ---
-//
-// fold_type derives the constraint a value *produces* (its envelope): for `5`
-// it is `5..5`, for `a + b` the envelope of the sum, for a reference the
-// target's. fold_constraint resolves the constraint a binding *imposes*; it
-// must reduce to a closed, compile-time-known object. Both return a reduced
-// ^Type or nil when the form cannot be resolved statically.
-//
-// satisfy(fc, ft) proves ft ⊆ fc. These three functions are pure dispatch —
-// every domain-specific operation lives in its domain file (fold_integer.odin).
-// To add a domain (float, string), give it fold_*_<domain>/<domain>_satisfy/
-// <domain>_to_string and add a case here.
-
-// A binding `constraint : … -> value` is checked by matching the *type* of the
-// value against the *value* of the constraint:
-//
-//   - LEFT of `:` (the constraint) folds to its VALUE — the set it denotes.
-//     u8 -> Integer_Type{0..255}. That is fold_constraint.
-//   - RIGHT of `->` (the value) folds to its TYPE (a typeof). A concrete
-//     singleton (10, or 5..5) is its own type: Integer_Type{10,10}. A set
-//     (u8, 1..2, >=20) is NOT a value, so its type is the producer scope
-//     {-> set}. That is fold_type. The value/set split is SEMANTIC:
-//     singleton (hi==lo) -> value, otherwise -> producer.
-//
-// satisfy then proves fold_type(value) fits fold_constraint(constraint).
-
 // reference_effective_value resolves the VALUE a Reference_Type denotes, honoring
-// a carve in its target. A property reference `C.x` carries target = `C` (the
-// carve) and a reference site pointing at the ORIGINAL field in the source scope.
-// Reading the site directly yields the pre-carve value (5), missing the override
-// (10). So when the target resolves to a carve that overrides this exact field,
-// return the override's value instead — mirroring reduce_value's Reference case.
+// a carve in its target: when the target resolves to a carve overriding this exact
+// field, return the override's value, not the stale pre-carve site value.
 reference_effective_value :: proc(v: Reference_Type) -> ^Type {
 	ref := v.reference
 	if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
@@ -56,11 +27,9 @@ reference_effective_value :: proc(v: Reference_Type) -> ^Type {
 }
 
 // reresolve_property re-resolves a property access (`target.name`) after its
-// TARGET was substituted by a carve. The old Reference froze a `(scope, index)`
-// pair against the pre-carve target; once the target's value changes, that pair
-// is stale — the name must be looked up again in the NEW value. Returns the
-// freshly-resolved Reference, or an Invalid_Type if the property no longer exists
-// in the substituted target (`point{data -> {}}!` makes `data.x` invalid). `nt`
+// TARGET was substituted by a carve: the old Reference's frozen `(scope, index)`
+// pair is stale, so the name is looked up again in the NEW value. Returns the
+// freshly-resolved Reference, or an Invalid_Type if the property is gone. `nt`
 // is the already-repointed target expression; `ref` carries the property name.
 reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 	name, has_name := ref.name.(string)
@@ -71,15 +40,10 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 	// Same lookup walk_property uses — shared so substitution resolves identically.
 	prop_scope, prop_index := resolve_property_site(nt, name, ordinal)
 	if prop_scope == nil {
-		// The property is gone in the substituted target (`point{data -> {}}!` drops
-		// `data.x`): the carve broke an implicit constraint the body relied on.
 		// Only emit while a carve is being rechecked (recheck_span set) — fold_carve
-		// also runs from other contexts (reduce, materialization) where this same
-		// Invalid would duplicate the diagnostic. Those still get the Invalid marker.
+		// also runs from reduce/materialization where this would duplicate the diagnostic.
 		if a := current_analyzer();
 		   a != nil && (a.recheck_span.start != 0 || a.recheck_span.end != 0) {
-			// Name the property by its identifier ('x') or, for an ordinal access, by
-			// its position (#0) — never an empty 'property ""'.
 			label := name != "" ? fmt.tprintf("'%s'", name) : fmt.tprintf("#%d", ordinal)
 			sem_error(
 				a,
@@ -99,9 +63,8 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 }
 
 // execute_target_scope resolves a collapse target to the underlying ^Scope_Type
-// it reduces through, peeling carves WITHOUT folding them (no clone). This is
-// the stable identity for the recursion guard: a recursive reference inside any
-// clone still names the original scope.
+// it reduces through, peeling carves WITHOUT folding them (no clone) — the stable
+// identity for the recursion guard.
 execute_target_scope :: proc(t: ^Type) -> ^Scope_Type {
 	cur := follow(t)
 	for cur != nil {
@@ -117,12 +80,9 @@ execute_target_scope :: proc(t: ^Type) -> ^Scope_Type {
 	return nil
 }
 
-// execute_fold_enter/leave guard folding a collapse: a RECURSIVE collapse (its
-// production collapses the same scope again — every clone's recursive reference
-// names the original) would unfold forever at fold time. Entering an Execute
-// fold pushes the target's underlying scope; re-entering the same scope reports
-// blocked=true and the caller bails to nil (the recursion itself is reduce's
-// job, with its own termination analysis — the fold only needs the outer shape).
+// execute_fold_enter/leave guard folding a collapse: a RECURSIVE collapse would
+// unfold forever at fold time. Re-entering the same target scope reports
+// blocked=true and the caller bails to nil (recursion is reduce's job).
 execute_fold_enter :: proc(t: ^Type) -> (key: ^Scope_Type, blocked: bool) {
 	key = execute_target_scope(t)
 	if key == nil do return nil, false
@@ -148,7 +108,6 @@ fold_type :: proc(t: ^Type) -> ^Type {
 		case Scope_Type:
 			return t
 		case Carve_Type:
-			// A carve folds to the substituted scope, then to that scope's type.
 			sub := fold_carve_type(t)
 			if sub == nil do return nil
 			st := new(Type)
@@ -164,12 +123,6 @@ fold_type :: proc(t: ^Type) -> ^Type {
 		case Recursive_Mention_Type:
 			return t
 		case And_Type:
-			// A set expression (`0|10`, `..9 & 11..`, `'a'..'z'`) is a VALUE whose type
-			// is the producer of its domain envelope IN INTERVALS — value_type_envelope
-			// wraps it the same producer level fold_constraint imposes on the left, so
-			// `{->0|10}:b -> 0|10` proves. Mirrors the Integer/Float/… leaf cases above.
-			// Only mixed-family / positional-negation / scope shapes fall through to the
-			// symbolic reconstruction.
 			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
@@ -195,16 +148,12 @@ fold_type :: proc(t: ^Type) -> ^Type {
 		case Invalid_Type, None_Type, Unknown_Type:
 			return t
 		case Execute_Type:
-			// `target!` produces the value of the production the collapse reduces
-			// through (the first .Product of the target). A scope with no
-			// production collapses to `none`. A RECURSIVE collapse bails to nil
-			// (execute_fold_enter) instead of unfolding forever.
 			key, blocked := execute_fold_enter(v.target)
 			if blocked do return nil
 			defer execute_fold_leave(key)
 			prod, resolved := execute_production(v.target)
 			if prod == nil {
-				if resolved do return new_type(None_Type{})
+				if resolved do return new_type(None_Type{}) // no production: collapses to `none`
 				return nil
 			}
 			return fold_type(prod)
@@ -217,34 +166,19 @@ fold_type :: proc(t: ^Type) -> ^Type {
 		case Bool_Type:
 			return value_type_envelope(fold_type_bool(t))
 		case Cast_Type:
-			// A cast's value type is its concrete folded result when the source was
-			// concrete, otherwise the target itself — the cast forces the value into
-			// the target's layout, so the target IS the value's envelope (not wrapped
-			// in a producer scope: it already denotes the set the value lives in).
 			if v.type_fold != nil do return fold_type(v.type_fold)
 			return fold_constraint(v.target)
 		case Compose_Type:
-			// A COMPARISON (`<`,`>`,`==`,…) is a VALUE of the bool domain: its typeof
-			// is `{true,false}`, regardless of whether the operands are concrete. This
-			// is the route pattern exhaustiveness (pattern_target_fold) and the bytecode
-			// machine type take, so returning a full Bool here is what makes
-			// `(a>50) ? { =true -> … =false -> … }` exhaustive and lowers a bool result.
+			// A comparison is a bool VALUE; its typeof is the full `{true,false}` so a
+			// `=true -> … =false -> …` pattern over it is exhaustive.
 			if is_comparison_op(v.operator) {
 				return new_type(make_bool_any())
 			}
-			// An arithmetic expression (`a+b`, `a*b`, …) is a computed VALUE, not a
-			// reified type: its envelope is the set of results it can produce, and
-			// the proof is `envelope ⊆ constraint` (constraints.md: `u8 + u8` ∈ u16).
-			// So return the numeric envelope directly, UNWRAPPED — mirroring Cast_Type
-			// above. Wrapping it in a producer scope would make a perfectly-bounded
-			// `0..510` fail to satisfy a widened `u16` by the self-match rule, which
-			// is exactly what we must avoid. (String/bool composes have no interval
-			// envelope; they fall through to the domain probes below.)
+			// Arithmetic envelope returned UNWRAPPED: wrapping `0..510` in a producer
+			// would make it fail self-match against a widened `u16`.
 			if env := fold_type_integer(t); env != nil do return env
 			if env := fold_type_float(t); env != nil do return env
 		case Pattern_Type:
-			// A pattern as a value resolves to the COMBINED type of every reachable
-			// branch (an Or of their products — see fold_type_pattern).
 			return fold_type_pattern(t)
 		}
 	}
@@ -262,8 +196,8 @@ fold_type :: proc(t: ^Type) -> ^Type {
 	return value_type_envelope(env)
 }
 
-// value_type_envelope wraps a folded numeric envelope as a typeof: a singleton
-// is its own value, any wider set becomes the producer scope {-> set}.
+// value_type_envelope wraps a folded envelope as a typeof: a singleton is its own
+// value, any wider set becomes the producer scope {-> set}.
 value_type_envelope :: proc(env: ^Type) -> ^Type {
 	if env == nil do return nil
 	if fold_is_concrete_value(env) do return env
@@ -271,7 +205,7 @@ value_type_envelope :: proc(env: ^Type) -> ^Type {
 }
 
 // fold_is_concrete_value reports whether a folded ^Type denotes one concrete
-// value (a singleton) rather than a set/range. Domain dispatch.
+// value (a singleton) rather than a set/range.
 fold_is_concrete_value :: proc(t: ^Type) -> bool {
 	if t == nil do return false
 	#partial switch v in t^ {
@@ -288,14 +222,14 @@ fold_is_concrete_value :: proc(t: ^Type) -> bool {
 }
 
 // make_producer_scope builds the scope {-> produces} — the type of a set, one
-// meta level up. Reuses Scope_Type (a single .Product binding).
+// meta level up.
 make_producer_scope :: proc(produces: ^Type) -> ^Type {
 	if produces == nil do return nil
 	return make_producer_scope_multi([]^Type{produces})
 }
 
 // make_producer_scope_multi builds a producer scope with one .Product binding
-// per element of produces (preserving order).
+// per element of produces, in order.
 make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 	scope := new(Scope_Type)
 	for p in produces {
@@ -312,13 +246,9 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 }
 
 // execute_production resolves the target of a collapse (`target!`) down to the
-// FIRST production it reduces through, mirroring reduce()/execute(): follow the
-// target to a scope (peeling a carve), then return its first .Product value.
-//
-// `resolved` distinguishes the two empty cases for the caller: when the target
-// resolves to a scope but that scope has NO production, the collapse yields
-// `none` (resolved=true, prod=nil); when the target does not resolve to a scope
-// at all, the collapse cannot be folded statically (resolved=false).
+// FIRST production it reduces through (follow to a scope, peeling a carve).
+// `resolved` splits the two empty cases: a scope with no production yields `none`
+// (resolved=true, prod=nil); a non-scope target can't fold statically (resolved=false).
 execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
 	cur := follow(t)
 	for cur != nil {
@@ -341,12 +271,9 @@ execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
 	return nil, false
 }
 
-// ===========================================================================
 // DEFAULT — the concrete value a constraint produces when no value is given
-// (`u8:a` → a equals 0). The default is ALWAYS computed on the final fold
-// intervals, never on the raw structure: ~10, ..9|11.. and ~(~10&~20) follow the
-// same path and yield consistent defaults.
-// ===========================================================================
+// (`u8:a` → a equals 0). ALWAYS computed on the final fold intervals, never on
+// the raw structure, so `~10`, `..9|11..`, `~(~10&~20)` yield consistent defaults.
 
 // default_value : the concrete value to lay down when a binding has no `->`.
 // Follows the scope/carve down to a production, then materializes its default.
@@ -378,19 +305,14 @@ default_value :: proc(t: ^Type) -> ^Type {
 	return t
 }
 
-// type_default : materializes the default of a type into a concrete value.
-// We fold the constraint into intervals (which recursively reduces Range / And /
-// Or / Negate / Compose, and computes the default_value of the set), then read
-// that default_value. No reading of raw structure: the syntax has no effect.
+// type_default : materializes the default of a type into a concrete value by
+// folding the constraint into intervals and reading the computed default_value.
 type_default :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
-	// Mention/Reference : the default is that of the targeted value.
 	#partial switch v in t^ {
 	case Compose_Type:
-		// A string concatenation `+` kept as an ordered SEQUENCE (not flattened):
-		// its default is the in-order concatenation of each segment's default
-		// ('a'..'z' + '@' + 'a'..'z' → "a@a"). string_sequence_default returns nil
-		// when the compose is not a string sequence, so we fall through.
+		// A string sequence `+`: default is the in-order concat of each segment's
+		// default ('a'..'z' + '@' + 'a'..'z' → "a@a"). nil when not a sequence.
 		if v.operator == .Add {
 			if d := string_sequence_default(t); d != nil do return d
 		}
@@ -403,21 +325,15 @@ type_default :: proc(t: ^Type) -> ^Type {
 			return type_default(v.reference.match_scope.types[v.reference.match_index])
 		}
 	case Or_Type:
-		// The default of a union is the default of its FIRST term (the left branch),
-		// recursively. This is the only rule that spans families: `(u8|string)`
-		// defaults to 0 (the u8), `(string|u8)` to "" (the string) — the single-
-		// domain folds below cannot reduce a cross-family union, so we must pick the
-		// first term here. (A same-family union folds fine below too, and its first
-		// finite bound coincides with the left term's default, so this is consistent.)
+		// Default of a union = default of its FIRST term. The only cross-family rule:
+		// `(u8|string)`→0, `(string|u8)`→"" — the single-domain folds below can't
+		// reduce a cross-family union, so the first term must be picked here.
 		if d := type_default(v.left); d != nil do return d
 		if d := type_default(v.right); d != nil do return d
 	case Negate_Type:
-		// The default of a STRING negation is the first string that does NOT match
-		// the negated operand. Strings are ordered shortest-first, so try "", then
-		// "a", "aa", … and pick the first one outside the operand. (Integer/char
-		// negations fold into intervals below and have a numeric default; this only
-		// kicks in when the operand is a positional string pattern that does not
-		// fold — `~"piro"` → "".)
+		// Default of a STRING negation: the first string (shortest-first) outside the
+		// negated operand. Only fires for a positional pattern that doesn't fold
+		// (`~"piro"` → ""); numeric negations fold to intervals below.
 		inner := fold_constraint(v.operand)
 		if inner != nil {
 			if _, is_str := inner^.(String_Type); is_str {
@@ -432,11 +348,9 @@ type_default :: proc(t: ^Type) -> ^Type {
 			}
 		}
 	}
-	// Domains: we fold into intervals and read the default_value computed on them.
 	if folded := fold_constraint_integer(t); folded != nil {
 		if it, ok := folded^.(Integer_Type); ok {
-			// An integer fold with no intervals is the EMPTY SET (`~(~10|~20)` =
-			// {10}&{20} = ∅): nothing satisfies it, so its default is `none`.
+			// No intervals = the empty set (`~(~10|~20)` = ∅): default is `none`.
 			if len(it.integer_intervals) == 0 {
 				return new_type(None_Type{})
 			}
@@ -466,8 +380,6 @@ type_default :: proc(t: ^Type) -> ^Type {
 		}
 	}
 	if folded := fold_constraint_bool(t); folded != nil {
-		// The default of a boolean domain is its first source term, materialized
-		// as a concrete boolean value. The empty set folds to None (handled above).
 		if bt, ok := folded^.(Bool_Type); ok {
 			r := new(Type)
 			r^ = make_bool_const(bt.default)
@@ -481,8 +393,8 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if t == nil do return
 	comp, ok := &t^.(Compose_Type)
 	if !ok do return
-	// fold_compose stores the raw numeric envelope of the arithmetic (a value),
-	// not its typeof — the envelope is consumed by further interval arithmetic.
+	// Stores the raw numeric envelope (a value), not its typeof — consumed by
+	// further interval arithmetic.
 	folded := fold_type_integer(t)
 	if folded == nil do folded = fold_type_float(t)
 	if folded == nil do folded = fold_type_string(t)
@@ -490,19 +402,13 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 		comp.type_fold = folded
 		return
 	}
-	// A string concatenation `+` that did NOT collapse to a concrete literal is an
-	// ORDERED SEQUENCE (`'a'..'z'*1.. + "@"`): it stays a Compose_Type and is matched
-	// in order at satisfy time (string_compose_satisfy). It is valid — no diagnostic.
+	// A string `+` that didn't collapse to a literal is an ordered SEQUENCE matched
+	// in order at satisfy time (string_compose_satisfy). Valid — no diagnostic.
 	if comp.operator == .Add {
 		if _, ok := fold_string_sequence(t, true).([]String_Interval); ok do return
 	}
-	// A COMPARISON (`<`,`>`,`<=`,`>=`,`==`,`!=`) produces a BOOL, not a numeric
-	// envelope, so it never folds to an interval — that is expected, not an error.
-	// Its TYPEOF is the bool domain `{true,false}`: fold to a full Bool so a pattern
-	// `=true -> … =false -> …` over it is exhaustive and the lowering carries a bool
-	// machine type. The concrete element (when both operands are concrete) is still
-	// computed by the reducer; this is only the static envelope. As long as the
-	// operands are compatible numeric families the comparison is valid.
+	// A comparison produces a BOOL, never an interval — fold to a full Bool so a
+	// `=true -> … =false -> …` pattern over it is exhaustive.
 	if is_comparison_op(comp.operator) {
 		lf := family_of(comp.left)
 		rf := family_of(comp.right)
@@ -511,18 +417,14 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 			return
 		}
 	}
-	// The envelope fold failed. In VALUE context an unresolved arithmetic is NOT
-	// an error: an unknown operand keeps the compose symbolic (`??0 + 1`, `e*e`),
-	// and its envelope is recomputed by interval arithmetic wherever the operands'
-	// ranges are known. Only a GENUINE incompatibility — mixing int/float without a
-	// cast, divergent float colors, a non-numeric operand, a `/`,`%` whose divisor
-	// may be zero — is a real error. compose_error_message draws that line (and is
-	// the same source of truth the re-fold path uses via detect_invalid).
+	// Envelope fold failed. An unresolved arithmetic is NOT an error — an unknown
+	// operand keeps it symbolic (`??0 + 1`). Only a genuine incompatibility (int/float
+	// mix, divergent float colors, non-numeric operand, possible /0) is. diagnose_compose
+	// draws that line, shared with the re-fold path (detect_invalid).
 	diagnose_compose(a, comp^, node_span(a, node))
 }
 
-// is_comparison_op reports whether an operator yields a bool (an ordering or
-// equality test) rather than a numeric value.
+// is_comparison_op reports whether an operator yields a bool rather than a number.
 is_comparison_op :: proc(op: Operator_Kind) -> bool {
 	#partial switch op {
 	case .Less, .Greater, .LessEqual, .GreaterEqual, .Equal, .NotEqual:
@@ -531,18 +433,12 @@ is_comparison_op :: proc(op: Operator_Kind) -> bool {
 	return false
 }
 
-// fold_cast resolves a `value :: target` raw binary reinterpret-cast. The cast
-// is domain-agnostic: it extracts the source value's raw bit pattern (integer
-// two's-complement, IEEE-754 float bits, bool 0/1, string/char bytes — all
-// little-endian), pads/cuts those bits to the target's width (zero/sign-extend
-// per the source signedness, truncate the high bits when narrowing), then
-// reinterprets the resulting pattern under the target domain. The result always
-// lands inside the target, so `::` never raises a Constraint_Mismatch — it can
-// only fail statically with Invalid_Cast when the TARGET has no binary layout (a
-// non-zero-based range like 10..37, an open range `>10`, a sum/product, or
-// unbounded int/float). When the source is a single concrete value, fold_cast
-// computes the exact reinterpreted value into `type_fold`; otherwise type_fold
-// stays nil and the constraint/value folds fall back to the target envelope.
+// fold_cast resolves a `value :: target` raw binary reinterpret-cast: extract the
+// source's raw little-endian bits, resize to the target width, reinterpret under
+// the target domain. The result always lands inside the target, so `::` never
+// raises a Constraint_Mismatch — only Invalid_Cast when the TARGET has no binary
+// layout (open range, union, unbounded int/float). A concrete source yields the
+// exact value in `type_fold`; otherwise the folds fall back to the target envelope.
 fold_cast :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if t == nil do return
 	cast_t, ok := &t^.(Cast_Type)
@@ -563,10 +459,9 @@ fold_cast :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 		return
 	}
 
-	// Concrete-source fast path: extract its bits and reinterpret into the target.
-	// A value bound under a sized float color (`f32:a -> 1.0`) carries that width
-	// in its CONSTRAINT, not its (unsized) value fold — pass the constraint so the
-	// extractor can recolor the bits to the source's real width.
+	// Concrete-source fast path. A value under a sized color (`f32:a -> 1.0`) carries
+	// its width in the CONSTRAINT, not the unsized value fold — pass src_color so the
+	// extractor recolors the bits to the real width.
 	src_fold := fold_type(cast_t.value)
 	src_color := source_color(cast_t.value)
 	if repr, is_concrete := cast_to_bits(src_fold, src_color); is_concrete {
@@ -575,8 +470,7 @@ fold_cast :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	}
 }
 
-// Cast_Target_Kind names the domain a `::` lands in. Each carries the layout
-// needed to lay bits back down.
+// Cast_Target_Kind names the domain a `::` lands in.
 Cast_Target_Kind :: enum {
 	Integer,
 	Float,
@@ -593,8 +487,8 @@ Cast_Target :: struct {
 }
 
 // cast_target derives the target domain + binary layout of a folded constraint,
-// if it has one. Fixed-width integer builtins, f32/f64, bool, and string qualify;
-// open ranges, arbitrary intervals, unions, and unbounded int/float do not.
+// if it has one. Fixed-width int builtins, f32/f64, bool, string qualify; open
+// ranges, arbitrary intervals, unions, unbounded int/float do not.
 cast_target :: proc(target_fold: ^Type) -> (Cast_Target, bool) {
 	if target_fold == nil do return {}, false
 	#partial switch v in target_fold^ {
@@ -614,13 +508,10 @@ cast_target :: proc(target_fold: ^Type) -> (Cast_Target, bool) {
 		case .none:
 		}
 	case Bool_Type:
-		// bool is a 1-bit domain; we lay it down in a byte's worth of pattern.
 		return {kind = .Bool, width = 8}, true
 	case String_Type:
-		// `char` is the ordinal single-codepoint string (the only ordinal string
-		// builtin): a cast into it reads the source as a CODEPOINT NUMBER, not a
-		// byte transmute (65::char -> 'A'). Any other string target absorbs the
-		// source bytes as is.
+		// `char` (the ordinal single-codepoint string) reads the source as a CODEPOINT
+		// NUMBER, not a byte transmute (65::char -> 'A'). Any other string takes the bytes.
 		if len(v.string_intervals) == 1 && v.string_intervals[0].ordinal {
 			return {kind = .Char}, true
 		}
@@ -629,11 +520,10 @@ cast_target :: proc(target_fold: ^Type) -> (Cast_Target, bool) {
 	return {}, false
 }
 
-// source_color resolves the COLOR (declared constraint) of a cast's source
-// expression — distinct from its value. For `u8:a -> 65`, the value of `a` folds
-// to 65 but its color is u8; the raw cast needs the color to know the source's
-// bit width. Follows a Mention/Reference to its binding's `constraint_folds`
-// slot; for a non-reference expression it falls back to its constraint fold.
+// source_color resolves the COLOR (declared constraint) of a cast's source,
+// distinct from its value: `u8:a -> 65` folds to value 65 but color u8, and the
+// raw cast needs the color for the source's bit width. Falls back to the value's
+// own constraint fold for a non-reference expression.
 source_color :: proc(value: ^Type) -> ^Type {
 	if value == nil do return nil
 	#partial switch v in value^ {
@@ -678,8 +568,8 @@ colored_int_layout :: proc(color: ^Type) -> (Int_Layout, bool) {
 	return {}, false
 }
 
-// unwrap_producer peels a single producer scope `{-> X}` down to X. fold_constraint
-// of a value-typed binding can yield such a wrapper around the real domain leaf.
+// unwrap_producer peels a single producer scope `{-> X}` down to X (fold_constraint
+// of a value-typed binding can wrap the domain leaf in one).
 unwrap_producer :: proc(t: ^Type) -> ^Type {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -691,11 +581,9 @@ unwrap_producer :: proc(t: ^Type) -> ^Type {
 }
 
 // cast_to_bits extracts the raw little-endian bit pattern of a concrete value of
-// any domain, plus its source width/signedness (used to extend or truncate).
-// `src_color` is the source's folded constraint, consulted when the value fold is
-// unsized (a bare literal under a sized color): `f32:a -> 1.0` carries f32 in its
-// constraint, so the float case reads its width from there. Returns ok=false when
-// the source is not a single concrete value.
+// any domain, plus its source width/signedness. `src_color` is consulted when the
+// value fold is unsized (a bare literal under a sized color, e.g. `f32:a -> 1.0`).
+// Returns ok=false when the source is not a single concrete value.
 cast_to_bits :: proc(src_fold: ^Type, src_color: ^Type = nil) -> (Bit_Repr, bool) {
 	if src_fold == nil do return {}, false
 	#partial switch v in src_fold^ {
@@ -772,9 +660,8 @@ cast_from_bits :: proc(repr: Bit_Repr, target: Cast_Target) -> ^Type {
 		val := bits_reinterpret_int(repr, target.width, target.signed)
 		r^ = make_int_result(val)
 	case .Float:
-		// float -> float is a VALUE conversion (IEEE rounding), not a bit
-		// transmute: f64 1.0 :: f32 -> 1.0f. Other sources (int/bool/string) are
-		// reinterpreted bit-for-bit into the target float's layout.
+		// float -> float is a VALUE conversion (IEEE rounding), not a bit transmute
+		// (f64 1.0 :: f32 -> 1.0f). Other sources transmute bit-for-bit.
 		if fv, is_float := repr.from_float.(f64); is_float {
 			switch target.float_kind {
 			case .f32:
@@ -888,12 +775,9 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 	case None_Type:
 		return .Invalid
 	case Range_Type:
-		// Chained range (`10..0..30`) : the family is that of its bounds. If both
-		// bounds are themselves invalid scalars, the sub-range is invalid; but an
-		// INTERNAL family inconsistency (`0..30.0`) has already been reported by the
-		// sub-range's own fold_range call — we do not re-report it to the parent, we
-		// return its representative family (that of left, the default) so as not to
-		// produce a misleading "right bound not a ..." message.
+		// Chained range (`10..0..30`): family is that of its bounds. An internal
+		// inconsistency (`0..30.0`) was already reported by the sub-range's own
+		// fold_range — return left's family rather than re-report a misleading error.
 		lk := range_operand_kind(follow(v.left))
 		rk := range_operand_kind(follow(v.right))
 		if lk == .Invalid && rk == .Invalid do return .Invalid
@@ -920,10 +804,8 @@ range_operand_kind :: proc(t: ^Type) -> Range_Operand_Kind {
 		}
 		return .Invalid
 	case Negate_Type, And_Type, Or_Type, Compose_Type, Cast_Type:
-		// A computed bound: set-algebra (`~'\0'`, `'a'..'z' & ~'m'`), arithmetic
-		// (a unary `-5` is Subtract(none,5), or `1+2`), or a raw cast. Its family is
-		// whatever it folds to, so probe the domains in turn — `(-5)..5` reads as an
-		// Integer range, `(~'\0')..` as a String one.
+		// A computed bound (set-algebra, arithmetic, raw cast): family is whatever it
+		// folds to, so probe the domains in turn.
 		if fold_constraint_integer(t) != nil do return .Integer
 		if fold_constraint_float(t) != nil do return .Float
 		if fold_constraint_string(t) != nil do return .String
@@ -954,9 +836,8 @@ fold_carve_type :: proc(t: ^Type) -> ^Scope_Type {
 	if !ok do return nil
 
 	// Re-entry guard ARMED HERE, not just in carve_substitute: a self-referential
-	// carve (`a{z -> .z{…}}`, where the override's source resolves back through the
-	// carve) loops in fold_type(carve.source) BELOW — before carve_substitute is
-	// ever reached. Key on the carve node so the inner re-entry bails to nil.
+	// carve loops in fold_type(carve.source) below, before carve_substitute is reached.
+	// Key on the carve node so the inner re-entry bails to nil.
 	a := current_analyzer()
 	if a != nil {
 		for k in a.carve_fold_stack {
@@ -979,10 +860,9 @@ fold_carve_type :: proc(t: ^Type) -> ^Scope_Type {
 carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Scope_Type {
 	copy := scope_clone(src)
 
-	// Apply each override: write the new value into the field it targets, and
-	// refresh its cached type_fold — the integer/float/... folders read a
-	// mention's fold from the SCOPE's type_folds, not by re-folding its value,
-	// so a stale fold here would hide the substitution from sibling mentions.
+	// Apply each override and refresh its cached type_fold — the folders read a
+	// mention's fold from the SCOPE's type_folds, so a stale fold here would hide
+	// the substitution from sibling mentions.
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
 		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
@@ -1001,11 +881,9 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 		}
 	}
 
-	// Repoint every reference that named the source scope so it names the copy:
-	// dependent fields (`y -> x+1`) now read the substituted values, cascading
-	// transitively. Done IN PLACE on `copy` so each mention's match_scope becomes
-	// `copy` itself, then refresh the cached folds so the integer/float/... folders
-	// (which read a mention's fold from the SCOPE's type_folds) see it.
+	// Repoint every reference naming the source scope to name the copy, so dependent
+	// fields (`y -> x+1`) read the substituted values, cascading transitively. Done
+	// in place on `copy`, then refresh the cached folds.
 	for v, i in copy.types do copy.types[i] = repoint(v, src, copy)
 	for ty, i in copy.constraints do copy.constraints[i] = repoint(ty, src, copy)
 	for f, i in copy.type_folds do copy.type_folds[i] = fold_type(copy.types[i])
@@ -1014,12 +892,10 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	return copy
 }
 
-// scope_clone is a PURE copy: it shares each element ^Type pointer (copy-on-write
-// happens later in carve_substitute's repoint pass) and copies the cached folds
-// as-is. No repoint and NO refold here — refolding a still-carved field during the
-// clone re-enters fold_carve_constraint on fresh clones forever (the re-entry
-// guard, keyed on the carve node, can't catch ever-new clones). carve_substitute
-// repoints and refreshes the folds AFTER the overrides are written.
+// scope_clone is a PURE copy: shares each element ^Type pointer and copies the
+// cached folds as-is. NO refold here — refolding a still-carved field would re-enter
+// fold_carve_constraint on fresh clones forever (the node-keyed guard can't catch
+// ever-new clones). carve_substitute repoints and refreshes the folds afterward.
 scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	dst := new(Scope_Type)
 	dst.parent = src.parent
@@ -1047,9 +923,9 @@ scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
 }
 
 // repoint rewrites, copy-on-write, every Mention/Reference inside `t` whose
-// match_scope is `old` to point at `dst` instead, descending through composite
-// types and nested scopes. A node is cloned only when a descendant changed, so
-// the source's ^Types are never mutated and unchanged subtrees stay shared.
+// match_scope is `old` to point at `dst`, descending through composites and nested
+// scopes. A node is cloned only when a descendant changed (unchanged subtrees stay
+// shared, the source's ^Types are never mutated).
 repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 	if t == nil do return t
 
@@ -1059,14 +935,11 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			return new_type(Mention_Type{v.name, dst, v.match_index})
 		}
 	case Reference_Type:
-		// Repoint the resolved site and the target expression it was reached through.
 		ref := v.reference
 		nt := repoint(v.target, old, dst)
-		// If the TARGET expression was substituted (`data.x` where `data` is carved),
-		// the frozen `(scope, index)` site is stale: re-resolve the property NAME in
-		// the new target value, so `point{data -> {}}!` re-points `data.x` against the
-		// empty scope and reports it gone. Only when the target actually changed and
-		// the reference is name-keyed (a property access, not a plain mention-ref).
+		// If the TARGET was substituted, the frozen `(scope, index)` site is stale:
+		// re-resolve the property NAME in the new target. Only when the target changed
+		// and the reference is name-keyed (a property access, not a plain mention-ref).
 		if ref != nil && nt != v.target {
 			if _, has_name := ref.name.(string); has_name {
 				if rr := reresolve_property(nt, ref); rr != nil {
@@ -1117,14 +990,9 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			return new_type(Execute_Type{tg})
 		}
 	case Pattern_Type:
-		// A pattern's target/branches may mention the carved scope; without this
-		// the substituted pattern keeps reading the PRE-carve values (and, the
-		// pointer being unchanged, the caller never clears its stale cached fold).
-		// When a branch's MATCH is itself rewritten (it mentioned a carved field,
-		// e.g. `0 ? {a -> 1}` carved with `a -> 10`), its cover_fold — the analysis-
-		// time fold of the OLD match — is now stale: reduce_branch_fires reads it and
-		// would fire the pre-carve branch. Re-fold the cover for a rewritten match so
-		// the reduce path agrees with branch_covers (which re-folds the match live).
+		// A pattern's target/branches may mention the carved scope. A rewritten branch
+		// MATCH has a stale cover_fold (the analysis-time fold of the OLD match) that
+		// reduce_branch_fires would fire — re-fold it so reduce agrees with branch_covers.
 		// An UNCHANGED match keeps its cached cover_fold.
 		tg := repoint(v.target, old, dst)
 		changed := tg != v.target
@@ -1164,7 +1032,6 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 	return t
 }
 
-// new_type boxes a Type value into a fresh ^Type.
 new_type :: proc(v: Type) -> ^Type {
 	r := new(Type)
 	r^ = v

@@ -1,15 +1,10 @@
 package compiler
 // unify_pull resolves PULL variables by matching a field's CONSTRAINT (which may
-// mention pulls, e.g. `data{e}`) against the VALUE supplied for that field (e.g.
-// `data{6}`), and writes the resolved value into the pull's binding in `copy`. It
-// descends structurally:
-//   * constraint is a Mention of a PULL binding (kind .Pointing_Pull) in `src`
-//     → bind that pull to `value` (write into copy at the pull's index).
-//   * both are carves of the same source → unify override-by-override (the slot a
-//     constraint override targets is matched to the value override at the same slot).
-//   * both are scopes → unify field-by-field by position.
-// `src` is the original (pre-clone) scope, used to recognize a mention as a pull
-// and to map its index into `copy` (same column order).
+// mention pulls, e.g. `data{e}`) against the VALUE supplied (e.g. `data{6}`), and
+// writes the resolved value into the pull's binding in `copy`. Descends structurally:
+// a pull mention binds to the value; two carves unify override-by-override (matched
+// slot); two scopes field-by-field. `src` is the pre-clone scope, used to recognize
+// a pull and map its index into `copy`.
 unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	if constraint == nil || value == nil do return
 
@@ -64,10 +59,9 @@ Pull_Conflict :: struct {
 	second:    ^Type,
 }
 
-// carve_pull_conflict re-runs the pull unification of a carve in DETECTION mode:
-// it gathers, per pull, every value the overrides bind it to (via the same
-// structural matching as unify_pull), and returns the first pull bound to two
-// values whose folds differ. Pure — the analyzer (walk_carve) emits the error.
+// carve_pull_conflict re-runs the pull unification in DETECTION mode: gathers, per
+// pull, every value the overrides bind it to, and returns the first pull bound to
+// two differing values. Pure — walk_carve emits the error.
 carve_pull_conflict :: proc(carve: ^Carve_Type) -> (Pull_Conflict, bool) {
 	src: ^Scope_Type = nil
 	cur := follow(carve.source)
@@ -114,8 +108,7 @@ carve_pull_conflict :: proc(carve: ^Carve_Type) -> (Pull_Conflict, bool) {
 	return {}, false
 }
 
-// pull_values_agree : two bound values are compatible iff each satisfies the
-// other's set (mutual subset = same singleton, the only safe agreement here).
+// pull_values_agree : two bound values agree iff mutual subset (the same singleton).
 pull_values_agree :: proc(a, b: ^Type) -> bool {
 	if a == nil || b == nil do return false
 	return satisfy_root(a, b) && satisfy_root(b, a)

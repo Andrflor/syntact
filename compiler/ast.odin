@@ -3,13 +3,9 @@ package compiler
 import "core:fmt"
 import "core:strings"
 
-// AST data model for Syntact — the structure produced by the parser and
-// consumed by the analyzer. This file holds the node tags, payload unions,
-// the flat SOA `Ast` container, span/position mapping, and the `node_*`
-// accessors + `print_ast`. The lexer and parser that BUILD this AST live in
-// parse.odin.
-
-// --- fundamental types ---
+// AST data model for Syntact — node tags, payload unions, the flat SOA `Ast`
+// container, span/position mapping, and the `node_*` accessors + `print_ast`. The
+// lexer and parser that build this AST live in parse.odin.
 
 Span :: struct {
 	start: u32,
@@ -21,8 +17,6 @@ EMPTY_SPAN :: Span{0, 0}
 Node_Index :: distinct u32
 INVALID_NODE :: Node_Index(0xFFFFFFFF) // absent child / no node
 
-// The AST node tags. Most map one-to-one to a Syntact form; the four push/pull
-// pairs are the directional binding operators (see Binding_Kind in analyzer.odin).
 Node_Kind :: enum u8 {
 	Pointing,
 	PointingPull,
@@ -81,7 +75,7 @@ Operator_Kind :: enum u8 {
 	BitNot,
 	RShift,
 	LShift,
-	Cast, // `::` — raw binary reinterpret-cast of `left` into `right`'s layout
+	Cast, // `::` — raw reinterpret-cast of `left` into `right`'s layout
 }
 
 ExecutionWrapper :: enum u8 {
@@ -91,9 +85,8 @@ ExecutionWrapper :: enum u8 {
 	GPU,
 }
 
-// A slice of the shared `extra` array — how variable-arity children are stored
-// (scope bodies, carve overrides, pattern branches, execute wrappers) without
-// growing the fixed-size node.
+// A slice of the shared `extra` array for variable-arity children, so the
+// fixed-size node need not grow.
 Index_Range :: struct {
 	start: u32,
 	len:   u32,
@@ -101,14 +94,14 @@ Index_Range :: struct {
 
 EMPTY_RANGE :: Index_Range{0, 0}
 
-// Two-child node (binding sides, property `a.b`, range bounds, …). Either side
-// may be INVALID_NODE for the half-open forms (`->v`, `.b`, `lo..`).
+// Two-child node (binding sides, property, range bounds). Either side may be
+// INVALID_NODE for half-open forms (`->v`, `.b`, `lo..`).
 Binary_Data :: struct {
 	left:  Node_Index,
 	right: Node_Index,
 }
 
-// One-child node (product `->`, expand `+`, compile-time, unary operators).
+// One-child node (product, expand, compile-time, unary operators).
 Unary_Data :: struct {
 	operand: Node_Index,
 }
@@ -124,34 +117,33 @@ Literal_Data :: struct {
 	quotation: String_Quotation, // only meaningful when kind == .String
 }
 
-// An identifier reference. `ordinal` < 0 means "no `#n` suffix" (resolve by
-// position, not occurrence); `capture` is the optional `(…)` capture span.
+// An identifier reference. `ordinal` < 0 means no `#n` suffix; `capture` is the
+// optional `(…)` capture span.
 Identifier_Data :: struct {
 	name:    Span,
 	capture: Span,
 	ordinal: i16,
 }
 
-// A scope literal `{ … }` — its children are the Index_Range into `extra`.
+// A scope literal `{ … }` — children are an Index_Range into `extra`.
 Scope_Data :: struct {
 	using _: Index_Range,
 }
 
-// `source{ … }` — `source` is the scope being carved, `children` the overrides.
+// `source{ … }` — `source` carved, `children` the overrides.
 Carve_Data :: struct {
 	source:   Node_Index,
 	children: Index_Range,
 }
 
-// `target ? { … }` — `branches` stores (condition, result) as consecutive pairs
-// in `extra`, so branch k is at extra[start + 2k] / extra[start + 2k + 1].
+// `target ? { … }` — `branches` stores (condition, result) as consecutive pairs:
+// branch k at extra[start + 2k] / extra[start + 2k + 1].
 Pattern_Data :: struct {
 	target:   Node_Index,
 	branches: Index_Range,
 }
 
-// `target!` — `wrappers` are the optional execution-context wrappers (threading,
-// GPU, …) the collapse runs under.
+// `target!` — `wrappers` are the optional execution-context wrappers.
 Execute_Data :: struct {
 	target:   Node_Index,
 	wrappers: Index_Range,
@@ -175,9 +167,8 @@ EventPull_Data :: struct {
 	catch_span: Span,
 }
 
-// The payload for one node. A raw union: zero tag of its own — `node_kinds[i]`
-// is the discriminant that says which field is live for node i. Sizing the node
-// to the largest variant is what keeps `node_data` a flat, indexable array.
+// The payload for one node. A raw union with no tag of its own — `node_kinds[i]`
+// is the discriminant. Sized to the largest variant to keep `node_data` flat.
 Node_Data :: struct #raw_union {
 	binary:     Binary_Data,
 	unary:      Unary_Data,
@@ -192,10 +183,9 @@ Node_Data :: struct #raw_union {
 	event_pull: EventPull_Data,
 }
 
-// The parsed program. The first four arrays are the SOA node store (indexed by
-// Node_Index); `extra` holds variable-arity children (Index_Range slices into it)
-// and `extra_u8` byte-sized side data. `line_starts` is a lazily-built offset →
-// (line, col) index, computed once on first position query (see ensure_line_starts).
+// The parsed program. The first four arrays are the SOA node store (by Node_Index);
+// `extra`/`extra_u8` hold variable-arity children. `line_starts` is lazily built on
+// first position query (ensure_line_starts).
 Ast :: struct {
 	source:               string,
 	node_kinds:           []Node_Kind,
@@ -213,9 +203,7 @@ Position :: struct {
 	offset: int,
 }
 
-// ensure_line_starts builds the offset-of-each-line-start table on demand and
-// memoizes it. Diagnostics are rare relative to parsing, so we pay this O(n) scan
-// only when the first position is actually requested.
+// Builds and memoizes the line-start table on demand (only when a position is queried).
 ensure_line_starts :: #force_inline proc(ast: ^Ast) {
 	if ast.line_starts_computed do return
 	ast.line_starts_computed = true
@@ -230,9 +218,8 @@ ensure_line_starts :: #force_inline proc(ast: ^Ast) {
 	}
 }
 
-// span_to_position maps a byte offset to (line, column) by binary-searching the
-// line-start table for the greatest start ≤ offset. The `+1` in the midpoint
-// biases the search upward so it converges on that lower bound rather than oscillating.
+// Maps a byte offset to (line, column) by binary-searching for the greatest
+// line-start ≤ offset. The `+1` in the midpoint biases upward to avoid oscillating.
 span_to_position :: #force_inline proc(ast: ^Ast, offset: u32) -> Position {
 	ensure_line_starts(ast)
 	lo, hi := 0, len(ast.line_starts) - 1
@@ -253,10 +240,8 @@ span_to_position :: #force_inline proc(ast: ^Ast, offset: u32) -> Position {
 
 // --- AST accessors and debug output ---
 //
-// The node_* helpers are the public way to read a node's payload: they hide the
-// raw-union field selection and resolve Index_Ranges back into `extra` slices, so
-// callers (analyzer, printer) never index the union directly. print_ast renders
-// the tree for `--ast`.
+// The node_* helpers hide the raw-union field selection and resolve Index_Ranges
+// into `extra` slices, so callers never index the union directly.
 
 node_text :: proc(ast: ^Ast, idx: Node_Index) -> string {
 	s := ast.node_spans[idx]
@@ -607,9 +592,8 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 	}
 }
 
-// ast_root returns the root ScopeNode. It is always the last node added — parse()
-// builds children bottom-up and appends the wrapping scope last — so the highest
-// index is the root.
+// The root ScopeNode is always the last node added (parse() appends the wrapping
+// scope last).
 ast_root :: #force_inline proc(ast: ^Ast) -> Node_Index {
 	return Node_Index(len(ast.node_kinds) - 1)
 }

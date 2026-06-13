@@ -3,18 +3,12 @@ package compiler
 import "core:fmt"
 import "core:strings"
 
-// diagnostics.odin — turns analysis failures into messages a Syntact author can
-// act on. The fold_* procedures answer a yes/no question (does this resolve?);
-// this file owns the WHY and phrases it in the language's own vocabulary —
-// values, colors (`:`), constraints — never the compiler's internals (folds,
-// intervals, envelopes). Messages are short: name the value(s), state the rule,
-// suggest the fix in one line.
+// diagnostics.odin — turns analysis failures into author-facing messages,
+// phrased in the language's vocabulary (values, colors, constraints), never the
+// compiler's internals.
 //
-// NB: any rendered fragment may contain `{` / `}` (scopes, producers). Always
-// pass such fragments through `%s`, and never build them with fmt.tprintf
-// (its `{` are format verbs) — use a strings.Builder.
-
-// --- value families -------------------------------------------------------
+// GOTCHA: a rendered fragment may contain `{`/`}` (scopes); pass it through `%s`
+// and never build it with fmt.tprintf (its `{` are format verbs) — use a Builder.
 
 // Family is the broad shape of a resolved value, used to decide whether an
 // operation is meaningful and to phrase mismatches.
@@ -59,9 +53,8 @@ family_of :: proc(t: ^Type) -> Family {
 		if lf != .None && lf != .Unknown do return lf
 		return family_of(v.right)
 	case Cast_Type:
-		// A `value :: target` lands in the target's domain — so `??::u8` is an
-		// Integer family member, not an opaque "value". This lets a fixed point
-		// participate in arithmetic/comparison without a spurious Invalid_operator.
+		// A `value :: target` lands in the target's domain (`??::u8` is Integer), so a
+		// fixed point can participate in arithmetic without a spurious Invalid_operator.
 		return family_of(v.target)
 	case Negate_Type:
 		return family_of(v.operand)
@@ -106,8 +99,8 @@ family_name :: proc(f: Family) -> string {
 	return "value"
 }
 
-// describe_value renders a short phrase naming a value's family and, when
-// concrete, its literal: "integer 0", "float 0.2", "color f32", "string \"hi\"".
+// describe_value renders a short phrase naming a value's family and, when concrete,
+// its literal: "integer 0", "color f32", "string \"hi\"".
 describe_value :: proc(t: ^Type) -> string {
 	resolved := follow_for_diagnostic(t)
 	if resolved == nil do return "nothing"
@@ -146,9 +139,8 @@ float_kind_name :: proc(k: FloatKind) -> string {
 	return "Float"
 }
 
-// describe_type renders any ^Type compactly for constraint messages: a value
-// keeps its literal, a builtin its name (u8, f32), a producer reads "{-> …}", a
-// structural scope a short word. Builder-based so embedded braces survive.
+// describe_type renders any ^Type compactly for constraint messages. Builder-based
+// so embedded braces survive.
 describe_type :: proc(t: ^Type) -> string {
 	b := strings.builder_make()
 	write_type_desc(&b, t)
@@ -202,7 +194,7 @@ write_type_desc :: proc(b: ^strings.Builder, t: ^Type) {
 }
 
 // follow_for_diagnostic resolves mentions/references to the underlying value so
-// describe_value can name the literal, not the indirection.
+// describe_value names the literal, not the indirection.
 follow_for_diagnostic :: proc(t: ^Type) -> ^Type {
 	cur := t
 	for cur != nil {
@@ -238,17 +230,9 @@ is_numeric_family :: #force_inline proc(f: Family) -> bool {
 	return f == .Integer || f == .Float
 }
 
-// --- compose diagnostic -----------------------------------------------------
-
-// diagnose_compose is called when fold_compose could not produce a numeric
-// envelope for an arithmetic/bitwise operation. It inspects the operands and
-// emits the most specific, author-facing error it can. The operator is
-// arithmetic/bitwise (Set/`~` operators never reach here).
 // diagnose_compose reports an arithmetic compose whose envelope did not fold, on
-// the EAGER walk path (it has the offending node's `span`). It is a thin wrapper
-// over compose_error_message — the single source of truth that classifies the
-// compose and builds the author-facing string. A message means a real error; no
-// message means the compose is a legal symbolic value (unknown operand, etc.).
+// the EAGER walk path (it has the node's `span`). Thin wrapper over
+// compose_error_message; no message means a legal symbolic value.
 diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 	if msg, is_err := compose_error_message(comp); is_err {
 		sem_error(a, msg, .Invalid_operator, span)
@@ -256,13 +240,9 @@ diagnose_compose :: proc(a: ^Analyzer, comp: Compose_Type, span: Span) {
 }
 
 // compose_error_message classifies an arithmetic compose whose envelope did not
-// fold and, when it is a GENUINE error, returns the author-facing message. It
-// returns ok=false for every LEGAL symbolic case — an unknown (`??`) operand,
-// numeric operands of one matching family, a comparison — so a fold may keep the
-// compose symbolic without reporting. This mirrors compose_stays_symbolic exactly
-// (ok == !compose_stays_symbolic for arithmetic), centralized here so both the
-// eager path (diagnose_compose) and the re-fold path (detect_invalid) agree on
-// what is an error and on the exact wording.
+// fold and returns the author-facing message for a GENUINE error. ok=false for
+// every legal symbolic case (unknown operand, matching numeric family, comparison).
+// The single source of truth shared by diagnose_compose and detect_invalid.
 compose_error_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 	sym := op_symbol(comp.operator)
 
@@ -318,9 +298,8 @@ compose_error_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 }
 
 // compose_divzero_message: for two compatible numeric operands the only remaining
-// error is a `/`,`%` whose divisor may be zero (the fold could not prove it
-// nonzero). Anything else — a sum/product that merely did not reduce to a concrete
-// value — is a LEGAL symbolic value, so ok=false.
+// error is a `/`,`%` whose divisor may be zero. Anything else is a legal symbolic
+// value (ok=false).
 compose_divzero_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 	if comp.operator == .Divide || comp.operator == .Mod {
 		return fmt.tprintf(
@@ -333,13 +312,11 @@ compose_divzero_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 	return "", false
 }
 
-// detect_invalid descends a (possibly substituted) ^Type and reports, via emit,
-// the first GENUINE arithmetic incoherence it finds — the RE-FOLD counterpart of
-// diagnose_compose. recheck_carve calls it on a substituted field whose fold came
-// back nil: that nil may be a legal symbolic value OR a real error (`"" + 10` after
-// `x` was carved to a string), and only re-inspecting the operands tells them
-// apart. emit anchors the error at a.recheck_span (the carve site). Returns true
-// once it has emitted, so the caller stops treating the nil as merely unresolved.
+// detect_invalid descends a (possibly substituted) ^Type and emits the first
+// GENUINE arithmetic incoherence — the re-fold counterpart of diagnose_compose,
+// called by recheck_carve on a substituted field whose fold came back nil (which
+// may be legal OR a real error like `"" + 10` after a carve). emit anchors at
+// a.recheck_span. Returns true once it has emitted.
 detect_invalid :: proc(t: ^Type) -> bool {
 	if t == nil do return false
 	#partial switch &v in t^ {

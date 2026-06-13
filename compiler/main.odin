@@ -8,59 +8,39 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 
-/*
- * ====================================================================
- * Compiler Main Function
- *
- * Entry point for the compiler that:
- * 1. Parses command-line arguments
- * 2. Sets up compilation options
- * 3. Delegates to the resolver for compilation
- * 4. Returns an appropriate exit code
- * ====================================================================
- */
-
-/*
- * Options holds all command-line options for compilation
- */
 Options :: struct {
-	input_path:         string, // Path to input file
-	output_path:        string, // Path to output file
-	print_ast:          bool, // Toggle AST printing
-	print_ir:           bool, // Toggle IR printing (analyzer output)
-	parse_only:         bool, // Skip analysis and code generation
-	analyze_only:       bool, // Skip code generation
-	verbose:            bool, // Enable verbose logging
-	timing:             bool, // Enable performance timing
+	input_path:         string,
+	output_path:        string,
+	print_ast:          bool,
+	print_ir:           bool,
+	parse_only:         bool,
+	analyze_only:       bool,
+	verbose:            bool,
+	timing:             bool,
 	print_errors:       bool,
 	no_cache:           bool,
 	evict_cache:        bool,
-	print_bytecode:     bool, // Toggle bytecode dump (--bc)
-	print_regalloc:     bool, // Toggle register-allocation dump (--regalloc)
-	run_bytecode:       bool, // Interpret the lowered bytecode (--run)
-	emit_exe:           bool, // Emit an x64 ELF executable (--emit / -o)
+	print_bytecode:     bool,
+	print_regalloc:     bool,
+	run_bytecode:       bool,
+	emit_exe:           bool,
 	run_args:           [dynamic]string, // Positional ??N values (argv strings) fed to --run
 }
-/*
- * parse_args extracts command-line options
- */
+
 parse_args :: proc() -> Options {
 	options: Options
-	// Removing on disk cache for bootstrap odin compiler will implement it properly in self-hosted
+	// On-disk cache is force-disabled in the bootstrap.
 	options.no_cache = true
 	i := 1
 	input_path_set := false
 	for i < len(os.args) {
 		arg := os.args[i]
 		if arg[0] == '-' {
-			// Handle options
 			switch arg {
 			case "-o", "--output":
 				if i + 1 < len(os.args) {
 					options.output_path = os.args[i + 1]
-					// Specifying an output file means "produce an executable"
-					// (like gcc/odin), so -o implies --emit.
-					options.emit_exe = true
+					options.emit_exe = true // -o implies --emit (gcc-style)
 					i += 1
 				} else {
 					fmt.eprintln("Error: Missing output file after", arg)
@@ -104,12 +84,10 @@ parse_args :: proc() -> Options {
 			}
 		} else {
 			if !input_path_set {
-				// First positional is the input file.
 				options.input_path = arg
 				input_path_set = true
 			} else {
-				// Further positionals are runtime ??N values for --run, kept as
-				// argv strings (the interpreter parses each per its ?? domain).
+				// Further positionals are runtime ??N values for --run (argv strings).
 				append(&options.run_args, arg)
 			}
 		}
@@ -123,9 +101,6 @@ parse_args :: proc() -> Options {
 	return options
 }
 
-/*
- * print_usage displays help information
- */
 print_usage :: proc() {
 	fmt.println("Usage: compiler [options] input_path [args...]")
 	fmt.println("")
@@ -149,12 +124,8 @@ print_usage :: proc() {
 	fmt.println("  compiler prog.syn --run 7 3     # ??0 = 7, ??1 = 3")
 }
 
-/*
- * main delegates to the resolver and handles exit codes
- */
 main :: proc() {
 	success := resolve_entry()
-	// Exit with appropriate status
 	if !success {
 		os.exit(1)
 	}

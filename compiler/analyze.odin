@@ -4,22 +4,10 @@ import "base:runtime"
 import "core:fmt"
 import "core:strconv"
 
-// The analyzer turns the parser's flat AST into a tree of `Type` — the single
-// union every form in Syntact resolves to. Syntact has no type system: a `Type`
-// is the static *shape* of a value or a constraint, and the analyzer's job is to
-// prove, for every binding `c : … -> v`, that the value v falls inside the set
-// the constraint c denotes (`fold_type(v) ⊆ fold_constraint(c)`). The
-// proof itself lives in the domain files (integer/float/string/bool) and is
-// dispatched from type.odin; this file only builds the tree and asks.
-//
-// Layout: an arena of `^Type` nodes (each its own `new(Type)`), with `Scope_Type`
-// as the recursive backbone — a scope is parallel `[dynamic]` arrays indexed by
-// binding ordinal. References never copy a value; they carry (scope, index) back
-// to the definition and are chased lazily by `follow()`.
-//
-// The IR data model this file builds — `Type` and all its variants, the domain
-// interval payloads, `Binding_Kind` — lives in ir.odin. This file holds the
-// analyzer state, the diagnostics (`Analyzer_Error*`), and the AST→IR logic.
+// The analyzer turns the AST into a tree of `Type`, proving for every binding
+// `c : … -> v` that `fold_type(v) ⊆ fold_constraint(c)` (the proof lives in the
+// domain files, dispatched from type.odin). References never copy a value; they
+// carry (scope, index) back to the definition and are chased lazily by `follow()`.
 
 Analyzer_Error_Type :: enum {
 	Undefined_Identifier,
@@ -39,17 +27,10 @@ Analyzer_Error_Type :: enum {
 	Invalid_Range,
 	Invalid_Cast,
 	Infinite_Recursion,
-	// A constraint that cannot be resolved at compile time because it depends on
-	// an unknown value (`??`), directly or through any composition. A constraint
-	// must denote a statically-known SET; `u8` is fine (the set 0..255), but a
-	// typed unknown `??::u8` is one indeterminate element, so `??::u8:a -> 10`
-	// cannot be proven. Distinct from Constraint_Mismatch (the value fails a
-	// known constraint) — here the constraint itself is not solvable.
+	// The constraint itself depends on a `??`, so it denotes no static set
+	// (distinct from Constraint_Mismatch, where a known constraint fails).
 	Insoluble_Constraint,
-	// A pattern (`target ? { … }`) whose branches do not cover the whole target:
-	// the union of the branch matches misses some target values and there is no
-	// empty-arrow (`->`) default branch. Without a covering branch a target value
-	// could fall through unmatched, so the pattern is rejected at compile time.
+	// A pattern whose branches do not cover the whole target and has no `->` default.
 	Non_Exhaustive_Pattern,
 	Default,
 }
@@ -57,75 +38,52 @@ Analyzer_Error_Type :: enum {
 Analyzer_Error :: struct {
 	type:     Analyzer_Error_Type,
 	message:  string,
-	// `span` is the source byte range to underline; `position` is its start
-	// resolved to (line, column, offset). Both are filled at creation by sem_error
-	// from the offending node's span — mirroring Parse_Error — so every consumer
-	// (LSP, debug printing) reads them directly without recomputing.
+	// `span` is the byte range to underline; `position` its start as (line, col).
 	span:     Span,
 	position: Position,
 }
 
 
-// Per-file analysis state. `scope` is the root scope being built; errors and
-// warnings accumulate as `walk()` recurses. Reachable from deep fold helpers via
-// context.user_ptr (see current_analyzer) so they can report without threading it.
-// REDUCE NEVER CALLS THE FOLD LAYER (it has its own substitution/materialization
-// in reduce.odin and reads the folds the analyzer cached), so a fold helper can
-// always trust that context.user_ptr is this struct.
+// Per-file analysis state. Reachable from deep fold helpers via context.user_ptr
+// (see current_analyzer). TRAP: reduce NEVER calls the fold layer, so a fold helper
+// can always trust that context.user_ptr is this Analyzer.
 Analyzer :: struct {
 	ast:              ^Ast,
 	scope:            ^Scope_Type,
 	errors:           [dynamic]Analyzer_Error,
 	warnings:         [dynamic]Analyzer_Error,
-	// While walking a carve's override values, this points at the scope being
-	// carved so a source-none property (`.x`, a self-mention) resolves against
-	// the carved scope's *original* fields. nil outside a carve override. Saved
-	// and restored around each override walk so nested carves nest correctly.
+	// During a carve override walk, points at the scope being carved so a
+	// source-none property (`.x`) resolves against its original fields; nil
+	// otherwise. Saved/restored around each override walk so nested carves nest.
 	carved_scope:     ^Scope_Type,
-	// Span of the carve being rechecked, so reresolve_property (in the fold layer,
-	// reached via the context) anchors its error at the carve site. Set around
-	// recheck_carve only.
+	// Span of the carve being rechecked, so the fold layer anchors its error at the
+	// carve site. Set around recheck_carve only.
 	recheck_span:     Span,
-	// Transient push/pop stacks guarding self-referential folds. They live ON the
-	// analyzer (not in a global) so their backing is allocated in this pass's
-	// allocator and dies with it: a global [dynamic] would keep a stale cap into a
-	// destroyed arena and corrupt the next pass — the test runner analyzes cases on
-	// many threads, each in its own arena. Reached via current_analyzer() from the
-	// fold layer. Strictly balanced, so empty between top-level folds.
+	// TRAP: these guard stacks live ON the analyzer (not a global) so their backing
+	// dies with this pass's arena — a global [dynamic] would keep a stale cap into a
+	// destroyed arena (the test runner analyzes on many threads). Strictly balanced.
 	// scope_scan_stack guards the Scope/Carve constraint field scan against a
 	// self-referential constraint (`A -> {x -> A}`): the outermost scan decides.
 	scope_scan_stack: [dynamic]^Type,
 	// carve_fold_stack guards fold_carve against re-entering the SAME carve node
-	// while folding it (a self-referential carve — its own placeholder value, a
-	// recursive tail): the inner re-entry bails to nil instead of cloning
-	// forever. Distinct nodes (each level of an inductive proof repoints a fresh
-	// copy) pass through.
+	// (a self-referential carve): inner re-entry bails to nil. Distinct nodes pass.
 	carve_fold_stack: [dynamic]^Type,
-	// execute_stack guards folding a recursive collapse (`fib{…}!` whose
-	// production collapses fib again): each Execute fold pushes the UNDERLYING
-	// scope its target resolves through (stable across carve clones — the
-	// recursive reference always names the original); re-entry bails to nil.
+	// execute_stack guards folding a recursive collapse: each Execute fold pushes the
+	// underlying scope its target resolves through (stable across carve clones);
+	// re-entry bails to nil.
 	execute_stack:    [dynamic]^Scope_Type,
-	// Deferred-recursion state. `fold_pending` is set by the fold layer (via
-	// current_analyzer) when a fold touches a scope still being walked or an
-	// unresolved forward Reference: the fold result cannot be trusted yet, so
-	// the dependent obligation is queued on `pending` and re-run when that scope
-	// closes (scope_close).
+	// `fold_pending` is set by the fold layer when a fold touches a scope still being
+	// walked or an unresolved forward Reference: the obligation is queued on
+	// `pending` and re-run at that scope's close (scope_close).
 	fold_pending:     ^Scope_Type,
 	pending:          [dynamic]Pending,
 }
 
 // One deferred obligation, re-run when `awaiting` finishes walking:
-//   .Ref       — resolve `rr` (an unresolved forward Reference_Type) against
-//                `target` (the property's target expression), patching the
-//                Reference's match_scope/match_index once the scope closes.
-//   .Carve     — re-resolve the references of `carve` (its source awaited
-//                `awaiting`), then re-run its per-field proofs + recheck_carve.
-//   .Typecheck — re-fold and re-prove binding `bind` of `scope`, patching the
-//                cached constraint_folds/type_folds in place (reduce reads them).
-//   .Default   — a bare-constraint binding (`...Array{T}:`, `c:name`) whose
-//                constraint awaited `awaiting`: re-fold it and materialize its
-//                default into values/folds at `bind`.
+//   .Ref       — resolve `rr` against `target`, patching the Reference's match site.
+//   .Carve     — re-resolve `carve`'s references, re-run its proofs + recheck_carve.
+//   .Typecheck — re-fold/re-prove binding `bind` of `scope`, patching cached folds.
+//   .Default   — re-fold a bare-constraint binding and materialize its default.
 Pending_Kind :: enum u8 {
 	Ref,
 	Typecheck,
@@ -155,10 +113,8 @@ create_analyzer :: proc(ast: ^Ast) -> Analyzer {
 
 // --- analyzer core ---
 
-// analyze is the entry point: it walks the root scope's children into the root
-// Scope_Type, leaving the result and any diagnostics in `cache`. A bare child
-// (not a binding/constraint) is treated as an anonymous Pointing_Push so it still
-// gets recorded and constraint-checked. Returns true iff no errors were emitted.
+// analyze walks the root scope's children into the root Scope_Type, leaving the
+// result and diagnostics in `cache`. A bare child is an anonymous Pointing_Push.
 analyze :: proc(cache: ^Cache) -> bool {
 	a := current_analyzer()
 	ast := a.ast
@@ -192,9 +148,8 @@ analyze :: proc(cache: ^Cache) -> bool {
 
 	a.scope.walking = false
 	scope_close(a, a.scope)
-	// Every deferred obligation awaits some enclosing scope, and the root is the
-	// outermost — nothing may survive its close. A leftover means a reference
-	// that never became resolvable; report it rather than silently dropping it.
+	// Nothing may survive the root's close: a leftover is a reference that never
+	// became resolvable — report it rather than silently dropping it.
 	for p in a.pending {
 		sem_error(
 			a,
@@ -220,8 +175,6 @@ span_str :: proc(ast: ^Ast, s: Span) -> string {
 	return ast.source[s.start:s.end]
 }
 
-// node_span returns the source byte range of node `idx` — what sem_error now
-// takes, so the error carries the range to underline (not just a point).
 node_span :: proc(a: ^Analyzer, idx: Node_Index) -> Span {
 	return a.ast.node_spans[idx]
 }
@@ -253,10 +206,8 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	}
 }
 
-// scope_append records one binding by pushing onto the four parallel columns in
-// lockstep, so every column stays indexed by the same ordinal. The two *_folds
-// columns are filled separately by typecheck() (or, for the bare-constraint
-// forms, inline) — never here.
+// scope_append pushes one binding onto the parallel columns in lockstep. The two
+// *_folds columns are filled separately by typecheck() (or inline), never here.
 scope_append :: proc(
 	a: ^Analyzer,
 	scope: ^Scope_Type,
@@ -275,10 +226,8 @@ scope_append :: proc(
 }
 
 // typecheck performs the constraint proof for one binding and caches both folds
-// onto the scope. It is the only place a Constraint_Mismatch is raised in the
-// normal binding path (carves do their own inline). The fc/ft split below is the
-// whole game: the constraint denotes a SET, the value denotes its own TYPE, and
-// we must show the latter is a subset of the former.
+// onto the scope (carves do their own inline). fc denotes a SET, ft a value's
+// TYPE; we prove ft ⊆ fc.
 typecheck :: proc(
 	a: ^Analyzer,
 	scope: ^Scope_Type,
@@ -288,10 +237,6 @@ typecheck :: proc(
 	value: ^Type,
 	node: Node_Index,
 ) {
-	// fc: the VALUE of the imposed constraint (left side) — the set the value
-	//     must fall into. Must resolve statically.
-	// ft: the TYPE of the value (right side, a typeof) — a concrete singleton
-	//     stays itself, a set becomes its producer scope {-> set}.
 	a.fold_pending = nil
 	fc := fold_constraint(constraint)
 	ft := fold_type(value)
@@ -299,9 +244,8 @@ typecheck :: proc(
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, ft)
 
-	// The folds touched a scope still being walked (a recursive/forward
-	// reference): neither can be trusted yet. Queue the proof for that scope's
-	// close — retypecheck re-folds and PATCHES the two cached folds in place.
+	// A fold touched a scope still being walked (recursive/forward ref): queue the
+	// proof for that scope's close, where retypecheck re-folds and patches in place.
 	if pend := a.fold_pending; pend != nil {
 		a.fold_pending = nil
 		append(
@@ -325,11 +269,7 @@ typecheck :: proc(
 prove_binding :: proc(a: ^Analyzer, fc, ft: ^Type, name: string, node: Node_Index) {
 	display := name != "" ? fmt.tprintf("'%s'", name) : "the production"
 
-	// A constraint must denote a statically-known SET. fold_constraint lands on
-	// Unknown when the constraint depends on a `??` anywhere — directly, through
-	// a reference, or inside any composition — because such a constraint cannot
-	// be solved at compile time. `u8` is fine (the set 0..255); `??::u8` is one
-	// indeterminate u8 element, so `??::u8:a -> 10` is insoluble.
+	// A constraint depending on a `??` folds to Unknown — it denotes no static set.
 	if fold_is_unknown(fc) {
 		sem_error(
 			a,
@@ -372,11 +312,9 @@ prove_binding :: proc(a: ^Analyzer, fc, ft: ^Type, name: string, node: Node_Inde
 	}
 }
 
-// scope_close runs when `s` finishes walking: every deferred obligation that
-// awaited s is drained IN INSERTION ORDER (inner ones first, so references
-// resolve before the typechecks that read them). An obligation that re-blocks —
-// its fold hits an OUTER scope still being walked — re-queues itself on that
-// scope; the root's close is the final drain.
+// scope_close drains every obligation that awaited `s` IN INSERTION ORDER (refs
+// resolve before the typechecks that read them). An obligation that re-blocks on
+// an outer open scope re-queues there; the root's close is the final drain.
 scope_close :: proc(a: ^Analyzer, s: ^Scope_Type) {
 	if len(a.pending) == 0 do return
 	i := 0
@@ -400,9 +338,8 @@ scope_close :: proc(a: ^Analyzer, s: ^Scope_Type) {
 	}
 }
 
-// close_default re-folds a deferred bare constraint and materializes its
-// default in place — mirroring what walk_constraint/walk_expand/walk_product do
-// inline for a non-recursive constraint.
+// close_default re-folds a deferred bare constraint and materializes its default
+// in place (the deferred counterpart of the inline path in walk_constraint etc.).
 close_default :: proc(a: ^Analyzer, p: Pending) {
 	a.fold_pending = nil
 	fc := fold_constraint(p.scope.constraints[p.bind])
@@ -422,10 +359,8 @@ close_default :: proc(a: ^Analyzer, p: Pending) {
 	}
 }
 
-// pending_scope_of reports the still-walking scope that blocks resolving
-// through `t` (nil when nothing blocks): an unresolved named recursive
-// reference blocks on its scope; a chain landing on a scope still being walked
-// blocks on that scope; a carve blocks on whatever blocks its source.
+// pending_scope_of reports the still-walking scope that blocks resolving through
+// `t` (nil when nothing blocks); a carve blocks on whatever blocks its source.
 pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 	cur := t
 	for cur != nil {
@@ -433,11 +368,9 @@ pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 		if cur == nil do return nil
 		#partial switch &v in cur^ {
 		case Reference_Type:
-			// follow chases a RESOLVED reference; landing here means unresolved
-			// (a deferred forward property). Only a scope still being walked
-			// blocks — unresolved against a CLOSED scope means the close already
-			// reported the miss: permanently broken, nothing left to wait for
-			// (re-queuing would loop the drain).
+			// Landing on a Reference here means unresolved. Only a still-walking
+			// scope blocks; unresolved against a CLOSED scope is permanently broken
+			// (the close already reported it — re-queuing would loop the drain).
 			r := v.reference
 			if r != nil && r.match_index < 0 && r.match_scope != nil && r.match_scope.walking {
 				return r.match_scope
@@ -459,11 +392,9 @@ pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 	return nil
 }
 
-// close_ref resolves a deferred recursive reference now that the scope it
-// awaited is complete: re-resolve through the property's target expression
-// (resolve_property_site — the one place property lookup is defined). A target
-// that is ITSELF still blocked (a chain into an outer open scope) re-queues on
-// that scope; a miss against the now-complete scope is the real error.
+// close_ref resolves a deferred recursive reference now its scope is complete,
+// re-resolving through resolve_property_site. A target still blocked on an outer
+// open scope re-queues; a miss against the now-complete scope is the real error.
 close_ref :: proc(a: ^Analyzer, p: Pending) {
 	rt, rt_ok := &p.rr^.(Reference_Type)
 	if !rt_ok || rt.reference == nil do return
@@ -491,9 +422,8 @@ close_ref :: proc(a: ^Analyzer, p: Pending) {
 	ref.match_index = ri
 }
 
-// retypecheck re-runs a deferred binding proof: re-fold both sides (the
-// recursive references are resolved now), PATCH the cached folds in place
-// (reduce reads these columns), and report exactly what typecheck would have.
+// retypecheck re-runs a deferred binding proof: re-fold both sides and PATCH the
+// cached folds in place (reduce reads these columns).
 retypecheck :: proc(a: ^Analyzer, scope: ^Scope_Type, bind: int, node: Node_Index) {
 	constraint := scope.constraints[bind]
 	value := scope.types[bind]
@@ -565,12 +495,9 @@ scope_resolve :: proc(
 		}
 	}
 
-	// Capture fallback: a `(e)` capture is an INVISIBLE alias of its binding —
-	// not in `names` (so `.`/carve never see it), but referenceable by mention.
-	// Only the mention path (walk_identifier) sets allow_capture; property access
-	// and carve resolution leave it false, so a capture stays invisible to them.
-	// Searched after visible names in THIS scope, before walking to parent, so a
-	// visible name always wins and a capture stays scope-local.
+	// Capture fallback: a `(e)` capture is an INVISIBLE alias — not in `names`, only
+	// referenceable by mention (allow_capture, set by walk_identifier only). Searched
+	// after visible names in THIS scope so a visible name wins and it stays scope-local.
 	if allow_capture {
 		for i := 0; i < len(scope.captures); i += 1 {
 			if scope.captures[i] == name {
@@ -585,13 +512,8 @@ scope_resolve :: proc(
 	return nil, -1
 }
 
-// self_resolve locates a field for a self-mention (`.x` / `.#0` / `.x#0`) in the
-// scope being carved. Unlike scope_resolve it never walks up to the parent: `.`
-// names *this* scope, so a missing field is an error, not a parent lookup. With
-// no ordinal it takes the first occurrence (the carve default-target rule).
-// nth_pointing_push returns the index of the k-th Pointing_Push binding in `scope`
-// (0-based), or -1 if there are fewer than k+1. Used by positional carves, which
-// only target the pushable (`->`) fields.
+// nth_pointing_push returns the index of the k-th Pointing_Push binding (or -1).
+// Used by positional carves, which only target the pushable (`->`) fields.
 nth_pointing_push :: proc(scope: ^Scope_Type, k: int) -> int {
 	count := 0
 	for i := 0; i < len(scope.kind); i += 1 {
@@ -603,6 +525,8 @@ nth_pointing_push :: proc(scope: ^Scope_Type, k: int) -> int {
 	return -1
 }
 
+// self_resolve locates a field for a self-mention (`.x`) in the carved scope.
+// Unlike scope_resolve it never walks up to the parent — `.` names *this* scope.
 self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
 	if ordinal >= 0 {
 		if name == "" {
@@ -631,17 +555,11 @@ self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_
 }
 
 // follow chases indirections (Mention/Reference) to the value they ultimately
-// bind, transitively (a reference to a reference resolves through). A non-pointer
-// Type, or a dangling/unresolved indirection, is returned unchanged — callers can
-// switch on the result without special-casing references.
+// bind, transitively. A non-indirection or dangling indirection returns unchanged.
 follow :: proc(t: ^Type) -> ^Type {
-	// A self-referential scope (`a -> b; b -> a`, or a constraint that mentions
-	// itself) forms a cycle in the Mention/Reference chain — chasing it unguarded
-	// would loop forever. The cycle is EXACT: it is re-visiting the same binding
-	// site (match_scope, match_index). We detect that precisely instead of clipping
-	// at a magic depth — a cycle is a valid construction, not an error, so we just
-	// stop at the node we'd revisit and return it as-is. The visited set is built
-	// lazily: a non-indirection (the common case) costs nothing.
+	// TRAP: a self-referential chain (`a -> b; b -> a`) cycles forever unguarded.
+	// We detect re-visiting the EXACT same binding site (a cycle is a valid
+	// construction, not an error) and stop there. The visited set is built lazily.
 	cur := t
 	visited: map[Follow_Key]bool
 	defer if visited != nil do delete(visited)
@@ -659,9 +577,8 @@ follow :: proc(t: ^Type) -> ^Type {
 			key = Follow_Key{r.match_scope, r.match_index}
 			next = r.match_scope.types[r.match_index]
 		case Recursive_Mention_Type:
-			// A self mention designates its own binding (the scope pointer is
-			// valid even while the scope is incomplete — CONSUMERS check
-			// `walking`). Follow it like a Mention to that binding's value.
+			// Follow like a Mention; the scope pointer is valid even while incomplete
+			// (consumers check `walking`).
 			if v.match_scope == nil || v.match_index < 0 do return cur
 			key = Follow_Key{v.match_scope, v.match_index}
 			next = v.match_scope.types[v.match_index]
@@ -676,25 +593,18 @@ follow :: proc(t: ^Type) -> ^Type {
 	return cur
 }
 
-// Follow_Key identifies a binding site: (definition scope, ordinal within it).
-// Re-visiting the same key while following indirections IS the cycle.
+// Follow_Key identifies a binding site; re-visiting one while following IS the cycle.
 Follow_Key :: struct {
 	scope: ^Scope_Type,
 	index: int,
 }
 
-// walk is the AST → Type recursion: given a node, build and return its `^Type`,
-// appending bindings to `current_scope` along the way. Binding/constraint nodes
-// have side effects (they register into the scope) and return the bound value;
-// expression nodes are pure and just return their shape. INVALID_NODE → None_Type.
-// Anything not yet modeled (externals, patterns, branches) folds to Unknown_Type.
 // walk is the AST→IR dispatcher: it routes each Node_Kind to its walk_<kind>
-// handler (mirroring how the Pratt parser dispatches on token kind). The handlers
-// hold the per-kind logic; walk only owns the INVALID_NODE guard and the fallback.
+// handler. Binding/constraint nodes register into `current_scope` and return the
+// bound value; expression nodes are pure. walk owns only the INVALID_NODE guard.
 walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	if idx == INVALID_NODE {
-		// A missing node (incomplete source while typing) is INVALID, not the
-		// legitimate value `none`.
+		// A missing node (incomplete source) is INVALID, not the value `none`.
 		return make_invalid()
 	}
 	kind := a.ast.node_kinds[idx]
@@ -750,7 +660,6 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 	return result
 }
 
-// make_unknown / make_none : the two trivial IR leaves several handlers return.
 make_unknown :: #force_inline proc() -> ^Type {
 	result := new(Type)
 	result^ = Unknown_Type{}
@@ -763,8 +672,7 @@ make_none :: #force_inline proc() -> ^Type {
 	return result
 }
 
-// make_invalid : the "an error is already reported / this folds to nothing"
-// sentinel. Distinct from None_Type, which is the LEGITIMATE value `none`.
+// make_invalid: the error sentinel. Distinct from None_Type, the value `none`.
 make_invalid :: #force_inline proc() -> ^Type {
 	result := new(Type)
 	result^ = Invalid_Type{}
@@ -804,7 +712,7 @@ walk_scope_node :: #force_inline proc(
 			typecheck(a, scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
-	// Close BEFORE the value copy so the copy never carries walking=true.
+	// TRAP: close BEFORE the value copy so the copy never carries walking=true.
 	scope.walking = false
 	scope_close(a, scope)
 	result := new(Type)
@@ -812,11 +720,9 @@ walk_scope_node :: #force_inline proc(
 	return result
 }
 
-// A directional binding `lhs <op> rhs`. The left side is either a bare name,
-// or a `constraint : name` form (so we extract both the imposed constraint and
-// the bound name). The right side is the value; when it is a scope literal we
-// build the child Scope_Type in place and register the binding *before*
-// walking the body, so the body can refer back to the binding being defined.
+// A directional binding `lhs <op> rhs`. The left is a bare name or a
+// `constraint : name` form. When the right is a scope literal we register the
+// binding *before* walking the body, so the body can refer back to it.
 walk_binding :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -853,8 +759,7 @@ walk_binding :: #force_inline proc(
 					capture = span_str(ast, ast.node_data[csrc].identifier.capture)
 				}
 			}
-			// `u16:3 -> v`, `u16:(a+b) -> v` — the colored name must resolve to
-			// an identifier; a literal/expression cannot name a binding.
+			// The colored name must resolve to an identifier.
 			if name == "" {
 				sem_error(
 					a,
@@ -869,9 +774,7 @@ walk_binding :: #force_inline proc(
 		name = span_str(ast, ast.node_data[left_idx].identifier.name)
 		capture = span_str(ast, ast.node_data[left_idx].identifier.capture)
 	} else {
-		// `{plop} -> v`, `3 -> v`, `(a+b) -> v` — the left of a binding must
-		// name a binding (a bare identifier or a `constraint:name` form). A
-		// scope/literal/expression on the left is illegal, not an anonymous one.
+		// The left of a binding must name a binding, not a scope/literal/expression.
 		sem_error(
 			a,
 			"invalid binding name: the left of a binding must be a name",
@@ -916,8 +819,7 @@ walk_binding :: #force_inline proc(
 				typecheck(a, scope, "", nil, .Pointing_Push, val, child)
 			}
 		}
-		// The body is fully walked: close the scope (resolving everything that
-		// awaited it) BEFORE the binding's own proof, so that proof sees the
+		// Close the scope BEFORE the binding's own proof, so that proof sees the
 		// resolved recursive references.
 		scope.walking = false
 		scope_close(a, scope)
@@ -930,12 +832,9 @@ walk_binding :: #force_inline proc(
 	return value
 }
 
-// `-> X` produces ONE entry, the scope's production. If X is itself a
-// constraint (`-> f32:`, `-> u8:3`), the production CARRIES that constraint —
-// it is a single colored production, not a binding plus a production. Walking
-// the constraint operand directly would route through walk_constraint, which
-// appends its own (Pointing_Push) binding, doubling the entry. So we peel the
-// constraint here and emit exactly one .Product, like walk_expand does.
+// `-> X` produces ONE entry, the scope's production. A colored production
+// (`-> u8:3`) carries the constraint; we peel it here rather than route through
+// walk_constraint (which would append its own binding and double the entry).
 walk_product :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -963,9 +862,8 @@ walk_product :: #force_inline proc(
 	return value
 }
 
-// `+{…}` extension. A constrained-but-valueless expand (`+{u8:}`) materializes
-// the constraint's default as the value and caches the folds directly, since
-// there is no value expression to run typecheck() against.
+// `+{…}` extension. A valueless expand (`+{u8:}`) materializes the constraint's
+// default (there is no value expression to typecheck against).
 walk_expand :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1003,10 +901,8 @@ walk_compile_time :: #force_inline proc(
 	return walk(a, current_scope, data.unary.operand)
 }
 
-// A bare constraint `c : name` with no `-> value`. It still introduces a
-// binding: the value is the constraint's default element, and the folds are
-// cached inline (there is nothing to prove — the value is by construction the
-// constraint's own default, hence trivially inside it).
+// A bare constraint `c : name` with no `-> value`: the value is the constraint's
+// default, with folds cached inline (nothing to prove — the default is inside it).
 walk_constraint :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1026,9 +922,7 @@ walk_constraint :: #force_inline proc(
 				name = span_str(ast, ast.node_data[csrc].identifier.name)
 			}
 		}
-		// `u16:3`, `u16:(a+b)`, … — a colored binding's name must be an
-		// identifier; a literal/expression cannot name a binding. Anything that
-		// left `name` empty here is illegal, not a silent anonymous binding.
+		// A colored binding's name must be an identifier.
 		if name == "" {
 			sem_error(
 				a,
@@ -1042,13 +936,9 @@ walk_constraint :: #force_inline proc(
 	return append_bare_constraint(a, current_scope, name, constraint, .Pointing_Push, idx)
 }
 
-// append_bare_constraint registers a valueless colored binding (`c:name`,
-// `...c:`, `-> c:`): the value is the constraint's materialized default and the
-// folds are cached inline (there is nothing to prove — the default is by
-// construction inside its own constraint). When the constraint touches a scope
-// still being walked (a recursive constraint like `...Array{T}:` inside Array),
-// the fold + materialization are deferred to that scope's close (.Default) and
-// an Unknown placeholder holds the slot meanwhile.
+// append_bare_constraint registers a valueless colored binding: the value is the
+// constraint's materialized default, folds cached inline (nothing to prove). When
+// the constraint touches a still-walking scope, the fold is deferred to its close.
 append_bare_constraint :: proc(
 	a: ^Analyzer,
 	scope: ^Scope_Type,
@@ -1062,11 +952,9 @@ append_bare_constraint :: proc(
 	value := default_value(fc)
 	if pend := a.fold_pending; pend != nil {
 		a.fold_pending = nil
-		// The CONSTRAINT NODE itself holds the slot until close_default patches
-		// in the materialized default — NOT an Unknown_Type, which means `??`
-		// and would wrongly diagnose every fold over this scope as insoluble.
-		// A fold reaching the placeholder folds the constraint (guarded against
-		// re-entry by scope_scan_stack), which is exactly what the slot denotes.
+		// TRAP: the CONSTRAINT NODE holds the slot until close_default patches in
+		// the default — NOT an Unknown_Type, which means `??` and would diagnose
+		// every fold over this scope as insoluble.
 		value = constraint
 		scope_append(a, scope, name, constraint, bk, value)
 		append(&scope.constraint_folds, nil)
@@ -1089,12 +977,9 @@ append_bare_constraint :: proc(
 	return value
 }
 
-// resolve_property_site locates the field a `target.name` access lands on,
-// returning its (scope, index) or (nil, -1) when the property does not exist. It
-// follows `target` to its scope, peeling Carve_Types to their source, and takes
-// the LAST occurrence of the name (last=true), per the same-name rule. Shared by
-// walk_property (initial analysis) and reresolve_property (carve substitution) so
-// both resolve identically — the one place property lookup is defined.
+// resolve_property_site locates the field a `target.name` access lands on (or
+// (nil,-1)). Takes the LAST occurrence of the name (same-name rule). The one place
+// property lookup is defined — shared by walk_property and the carve path.
 resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
 	prop_target := follow(target)
 	for prop_target != nil {
@@ -1102,12 +987,8 @@ resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Sc
 		case Scope_Type:
 			return scope_resolve(&t, name, ordinal, true)
 		case Carve_Type:
-			// Resolve the property against the SUBSTITUTED scope (overrides applied
-			// + repointed), not the raw source: `b.z` where b = a{x->10} and z -> x
-			// must see z = 10, not the pre-carve a.z = 0. fold_carve_type does the
-			// full substitution; scope_resolve then lands on the field whose value
-			// already reflects the carve, so the folder reads the right type_fold
-			// directly (no carve_fold_lookup shortcut needed).
+			// Resolve against the SUBSTITUTED scope, not the raw source: `b.z` where
+			// b = a{x->10} and z -> x must see z = 10, not the pre-carve a.z = 0.
 			if sub := fold_carve_type(prop_target); sub != nil {
 				return scope_resolve(sub, name, ordinal, true)
 			}
@@ -1117,10 +998,7 @@ resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Sc
 	return nil, -1
 }
 
-// `target.prop` — resolve `prop` against the scope `target` denotes. The loop
-// peels through Carve_Types to their source, so a property of a carved scope
-// resolves against the underlying scope's fields. Property access takes the
-// *last* occurrence of the name (last=true), per the same-name rule.
+// `target.prop` — resolve `prop` against the scope `target` denotes.
 walk_property :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1129,14 +1007,12 @@ walk_property :: #force_inline proc(
 	ast := a.ast
 	data := ast.node_data[idx]
 	right_idx := data.binary.right
-	// `a.` while typing: the property name node is missing. An incomplete edit
-	// is not an error here — the LSP must tolerate it.
+	// `a.` while typing: missing property name. An incomplete edit is not an error
+	// here — the LSP must tolerate it.
 	if right_idx == INVALID_NODE {
 		return make_invalid()
 	}
-	// `a.3`, `a.(b+c)` — the property side parsed but is not a name. A property
-	// must name a field; a literal/expression cannot. (Ordinals are `#n`, not
-	// `.n`.) An Invalid_Type with no diagnostic is always a bug.
+	// The property side must name a field (ordinals are `#n`, not `.n`).
 	if ast.node_kinds[right_idx] != .Identifier {
 		sem_error(
 			a,
@@ -1149,10 +1025,8 @@ walk_property :: #force_inline proc(
 	prop_name := span_str(ast, ast.node_data[right_idx].identifier.name)
 	prop_ordinal := ast.node_data[right_idx].identifier.ordinal
 
-	// Source-none property (`.x`, written with no left side) is a self-mention:
-	// inside a carve override it refers to a field of the carved scope, reading
-	// its *original* value (before any of this carve's overrides). Resolve it
-	// directly against self_scope, with no parent walk-up — `.` names this scope.
+	// Source-none property (`.x`) is a self-mention into the carved scope, reading
+	// its *original* value (before this carve's overrides), with no parent walk-up.
 	if data.binary.left == INVALID_NODE {
 		if a.carved_scope == nil {
 			sem_error(
@@ -1194,14 +1068,12 @@ walk_property :: #force_inline proc(
 	prop_scope, prop_index := resolve_property_site(target, prop_name, prop_ordinal)
 
 	if prop_scope == nil {
-		// The target chain lands in a scope STILL BEING WALKED (`module.odd`
-		// before odd is bound): the miss is not an error yet — defer it as a
-		// recursive reference, re-resolved when that scope closes. Only a miss on
-		// a COMPLETE scope is a real Invalid_Property_Access.
+		// The target chain lands in a still-walking scope (`module.odd` before odd
+		// is bound): defer the miss as a recursive reference; only a miss on a
+		// COMPLETE scope is a real Invalid_Property_Access.
 		if open := pending_scope_of(target); open != nil {
-			// Not a self mention — a forward property into a scope still walking.
-			// Record an UNRESOLVED Reference (match_index -1) and defer it; the
-			// close patches the resolved (match_scope, match_index) in place.
+			// Record an UNRESOLVED Reference (match_index -1); the close patches in
+			// the resolved (match_scope, match_index).
 			ref := new(Reference)
 			ref^ = Reference {
 				prop_name,
@@ -1265,9 +1137,8 @@ walk_range :: #force_inline proc(
 	idx: Node_Index,
 ) -> ^Type {
 	data := a.ast.node_data[idx]
-	// An absent bound (prefix `..hi` / postfix `lo..`) stays nil — it means
-	// "no bound", not the value `none`. walk(INVALID_NODE) would yield a
-	// None_Type, which fold_range and the printer would mistake for a real bound.
+	// TRAP: an absent bound stays nil ("no bound"), not None_Type — walk(INVALID_NODE)
+	// would yield None_Type, which fold_range and the printer mistake for a real bound.
 	left: ^Type = nil
 	if data.binary.left != INVALID_NODE {
 		left = walk(a, current_scope, data.binary.left)
@@ -1282,10 +1153,9 @@ walk_range :: #force_inline proc(
 	return result
 }
 
-// An operator node. The set-algebra operators (`&`, `|`, ~) become symbolic
-// And/Or/Negate nodes that the constraint folder reduces later; every other
-// operator is arithmetic and is folded eagerly into a Compose_Type's envelope
-// here so a constraint mismatch surfaces at the operation, not downstream.
+// An operator node. Set-algebra operators (`&`, `|`, ~) become symbolic
+// And/Or/Negate nodes; every other operator is arithmetic, folded eagerly into a
+// Compose_Type here so a constraint mismatch surfaces at the operation.
 walk_operator :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1316,18 +1186,10 @@ walk_operator :: #force_inline proc(
 	return result
 }
 
-// `source{ … }` — derive a new scope from `source`. We first resolve `source`
-// down to the underlying Scope_Type (peeling carves-of-carves) so each
-// override can be located in it. Overrides come in two forms, handled in the
-// loop: named (`name -> v`, resolved by name, FIRST occurrence) and positional
-// (a bare value, matched to the next field by index). Each override is
-// constraint-checked against the field it replaces.
 // carve_shorthand_field tells the shorthand carve-of-a-carved-field (`a{z{…}}`)
 // apart from a plain positional carve of a foreign scope (`a{data{6}}`). It fires
-// ONLY when the child is a `Carve` whose source is a bare identifier that names a
-// field of the scope being carved (src_scope) — then that field is the override
-// target. Otherwise (source not an identifier, or the name is not a carved field)
-// it returns ok=false and the child stays a positional value.
+// ONLY when the child is a `Carve` whose source names a field of src_scope — then
+// that field is the override target; otherwise ok=false and it stays positional.
 carve_shorthand_field :: proc(
 	a: ^Analyzer,
 	src_scope: ^Scope_Type,
@@ -1344,21 +1206,17 @@ carve_shorthand_field :: proc(
 	if ast.node_kinds[src_node] != .Identifier do return nil, -1, false
 	cname := span_str(ast, ast.node_data[src_node].identifier.name)
 	cordinal := ast.node_data[src_node].identifier.ordinal
-	// self_resolve, NOT scope_resolve: the shorthand targets a DIRECT field of the
-	// carved scope only. scope_resolve walks up to the parent, which would wrongly
-	// claim a foreign top-level scope (`a{data{6}}`, `data` defined at the root) as a
-	// carved field and steal it from the positional-carve path.
+	// TRAP: self_resolve, NOT scope_resolve — the shorthand targets a DIRECT field
+	// only; scope_resolve's parent walk-up would steal a foreign top-level scope.
 	fscope, fidx := self_resolve(src_scope, cname, cordinal)
 	if fscope == nil do return nil, -1, false
 	return fscope, fidx, true
 }
 
-// source_override, when non-nil, replaces the walk of `idx`'s source node. It is
-// used for the shorthand carve-of-a-carved-field (`a{z{a->2}}`): the inner
-// `z{a->2}`'s source `z` denotes the field of the scope being carved, so the
-// caller resolves it as a self-mention (a Reference_Type into the carved scope,
-// identical to `.z`) and threads it in here instead of letting `z` resolve as a
-// plain mention in the enclosing scope.
+// `source{ … }` — derive a new scope from `source`. source_override, when non-nil,
+// replaces the walk of the source node: used for the shorthand carve-of-a-carved-
+// field (`a{z{a->2}}`), where `z` is threaded in as a self-mention into the carved
+// scope (identical to `.z`) rather than resolving as a plain enclosing mention.
 walk_carve :: proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1376,13 +1234,9 @@ walk_carve :: proc(
 		types      = make([dynamic]^Type),
 	}
 
-	// A source that chains into a scope STILL BEING WALKED (`module.odd{…}`
-	// while module is open, or a self-carve `Array{T}` inside Array) has no
-	// resolvable fields yet: defer the WHOLE carve — reference resolution,
-	// override walks, per-field proofs, recheck — to that scope's close
-	// (close_carve). The override expressions are pure (they never register
-	// bindings into the enclosing scope), so walking them at close, with
-	// current_scope captured here, is equivalent.
+	// A source chaining into a still-walking scope (`module.odd{…}`, or a self-carve
+	// `Array{T}` inside Array) has no resolvable fields yet: defer the WHOLE carve to
+	// that scope's close. The override expressions are pure, so deferring is equivalent.
 	if pending_src := pending_scope_of(source); pending_src != nil {
 		append(
 			&a.pending,
@@ -1421,10 +1275,9 @@ carve_source_scope :: proc(source: ^Type) -> ^Scope_Type {
 	return nil
 }
 
-// carve_resolve_children walks a carve's override children, resolving each
-// against src_scope and appending (reference, value) pairs onto the carve IN
-// PLACE. Shared by walk_carve (immediate) and close_carve (deferred), so both
-// resolve identically.
+// carve_resolve_children walks a carve's override children, resolving each against
+// src_scope and appending (reference, value) pairs onto the carve IN PLACE. Shared
+// by walk_carve and close_carve.
 carve_resolve_children :: proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1442,9 +1295,8 @@ carve_resolve_children :: proc(
 	refs := &cv.references
 	vals := &cv.types
 
-	// While walking override values, a source-none property (`.x`) is a
-	// self-mention into the carved scope. Point carved_scope at it and restore
-	// the outer one afterwards so nested carves resolve `.` against the nearest.
+	// Point carved_scope at src_scope so a source-none property (`.x`) resolves
+	// against it; restore afterwards so nested carves resolve `.` against the nearest.
 	saved_carved := a.carved_scope
 	a.carved_scope = src_scope
 	defer a.carved_scope = saved_carved
@@ -1511,22 +1363,15 @@ carve_resolve_children :: proc(
 			append(vals, val)
 		} else if shorthand_field, shorthand_idx, ok := carve_shorthand_field(a, src_scope, child);
 		   ok {
-			// Shorthand `a{z{a->2}}` == `a{z->.z{a->2}}`: a carve child `z{…}` whose
-			// source `z` NAMES A FIELD of the scope being carved targets that field and
-			// re-carves it. (A `data{6}` whose source is NOT a carved field is a plain
-			// positional carve — the value `data{6}` matched to the next push slot — and
-			// falls through to the positional branch below; that distinction is why the
-			// resolve happens in the guard, not here.) Walk the child carve with the
-			// field's Reference threaded in as its source (a self-mention into the carved
-			// scope, exactly what `.z` produces).
+			// Shorthand `a{z{a->2}}` == `a{z->.z{a->2}}`: re-carve the carved field `z`.
+			// Walk the child carve with the field's Reference threaded in as its source
+			// (a self-mention into the carved scope, what `.z` produces).
 			src_node := child_data.carve.source
 			cname := span_str(ast, ast.node_data[src_node].identifier.name)
 			cordinal := ast.node_data[src_node].identifier.ordinal
 			carve_scope := shorthand_field
 			carve_index := shorthand_idx
 
-			// The self-source for the inner carve: a Reference into the carved field,
-			// identical to what a `.z` property yields (see walk_property).
 			ref_self := new(Reference)
 			ref_self^ = Reference {
 				cname,
@@ -1571,11 +1416,8 @@ carve_resolve_children :: proc(
 			carve_scope: ^Scope_Type = nil
 			carve_index := -1
 			cname := ""
-			// A positional carve targets ONLY the Pointing_Push fields, in order —
-			// pulls/events/resonance/reactive/products/expands are not positional
-			// parameters (a pull is extracted, and the others are carved by name with
-			// their own operator). So the k-th positional value goes to the k-th
-			// Pointing_Push field, skipping everything else.
+			// A positional carve targets ONLY the Pointing_Push fields, in order:
+			// the k-th positional value goes to the k-th Pointing_Push field.
 			if src_scope != nil {
 				idx := nth_pointing_push(src_scope, positional_idx)
 				if idx >= 0 {
@@ -1622,10 +1464,7 @@ carve_resolve_children :: proc(
 // carve_check runs the whole-carve proofs, shared by the immediate path
 // (walk_carve) and the deferred one (close_carve).
 carve_check :: proc(a: ^Analyzer, carve: ^Carve_Type, idx: Node_Index) {
-	// Pull unification conflict: a pull mentioned in two fields' constraints
-	// (`data{e}:somedata` + `data{e}:someother`) carved with values that disagree
-	// (`a{data{6} data{3}}` → e = 6 then 3) is an error — all bindings of a pull
-	// must agree on one value.
+	// Pull unification conflict: all bindings of a pull must agree on one value.
 	if conflict, has := carve_pull_conflict(carve); has {
 		display := conflict.pull_name != "" ? fmt.tprintf("'%s'", conflict.pull_name) : "a pull"
 		sem_error(
@@ -1641,18 +1480,13 @@ carve_check :: proc(a: ^Analyzer, carve: ^Carve_Type, idx: Node_Index) {
 		)
 	}
 
-	// Implicit constraints: substituting an override can break a constraint on
-	// another field that (transitively) references it — `u8:z -> x+y` no longer
-	// fits u8 once x is carved out of range. fold_carve materializes the
-	// substituted scope; we re-prove every colored binding against its now-
-	// substituted value and report the mismatch at the carve site.
+	// Implicit constraints: an override can break a constraint on another field that
+	// references it (`u8:z -> x+y` overflows once x is carved out of range).
 	recheck_carve(a, carve, idx)
 }
 
-// close_carve finishes a carve whose source awaited a scope's close: the source
-// is resolvable now, so resolve the references, walk the overrides, and run the
-// proofs — everything walk_carve would have done inline. A source that is
-// STILL blocked (chained into an outer open scope) re-queues.
+// close_carve finishes a deferred carve now its source is resolvable, running
+// everything walk_carve would have done inline. A source still blocked re-queues.
 close_carve :: proc(a: ^Analyzer, p: Pending) {
 	cv, cv_ok := &p.carve^.(Carve_Type)
 	if !cv_ok do return
@@ -1664,47 +1498,38 @@ close_carve :: proc(a: ^Analyzer, p: Pending) {
 	}
 	src_scope := carve_source_scope(cv.source)
 	if src_scope == nil {
-		// The source did not resolve to a scope after all (e.g. the deferred
-		// property turned out missing — already reported there). Nothing to
-		// resolve the overrides against.
+		// Source did not resolve to a scope (the deferred property was missing —
+		// already reported there). Nothing to resolve overrides against.
 		return
 	}
 	carve_resolve_children(a, p.scope, p.node, src_scope, p.carve)
 	carve_check(a, cv, p.node)
 }
 
-// recheck_carve folds a carve to its substituted scope and re-proves each
-// colored binding (constraint vs the substituted value's fold). The per-field
-// inline check above only covers the directly-overridden fields; this covers the
-// implicit constraints — fields whose value depends on what was carved.
+// recheck_carve folds a carve to its substituted scope and re-proves each colored
+// binding. Covers the implicit constraints — DEPENDENT fields (value references a
+// carved one); the inline check already covers directly-overridden fields.
 recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	saved_span := a.recheck_span
 	a.recheck_span = node_span(a, node)
 	defer a.recheck_span = saved_span
 	sub := fold_carve_constraint(cast(^Type)carve)
 	if sub == nil do return
-	// Fields DIRECTLY overridden by the carve are already proven inline by
-	// walk_carve (the explicit "constraint mismatch in carve 'x'") — skip them here
-	// so a direct violation isn't reported twice as a (mislabeled) "implicit" one.
-	// recheck_carve only covers the DEPENDENT fields (value references a carved one).
+	// Skip directly-overridden fields (already proven inline by walk_carve) so a
+	// direct violation isn't reported twice as a (mislabeled) "implicit" one.
 	overridden := make(map[int]bool)
 	for ref in carve.references do overridden[ref.match_index] = true
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue
 		ft := fold_type(sub.types[i])
 		if ft == nil {
-			// A nil fold is ambiguous: the substituted value may be legally symbolic
-			// (`x + 1` with x an unknown), OR genuinely incoherent (`"" + 10` after x
-			// was carved to a string). detect_invalid re-inspects the operands and
-			// emits (anchored at recheck_span) only for a real error; otherwise the
-			// value is merely unresolved and not a violation. This is checked for
-			// EVERY dependent field, colored or not — an incoherent expression is an
-			// error regardless of whether the field carries a constraint.
+			// A nil fold is ambiguous: legally symbolic (`x + 1`) OR incoherent
+			// (`"" + 10`). detect_invalid emits only for a real error. Checked for
+			// every dependent field, colored or not.
 			detect_invalid(sub.types[i])
 			continue
 		}
-		// The constraint proof only applies to a COLORED field (`u8:y -> …`); an
-		// uncolored field that folded fine imposes nothing more.
+		// The proof applies only to a COLORED field.
 		fc := i < len(sub.constraint_folds) ? sub.constraint_folds[i] : nil
 		if fc == nil do continue
 		if !satisfy_root(fc, ft) {
@@ -1724,17 +1549,10 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	}
 }
 
-// `target ? { match -> product, … }` — pattern match. We walk the target and
-// every branch (so their bindings and constraints are checked), build a
-// Pattern_Type from the (match, product) pairs, and prove the branches cover the
-// target (raising Non_Exhaustive_Pattern otherwise). The Pattern_Type then folds
-// to one branch as a constraint, or the union of reachable branches as a value
-// (see pattern.odin / fold_constraint_pattern / fold_type_pattern).
-//
-// A branch source carries its MODE in its syntax: `=v -> …` (value match) parses
-// as a unary `=` operator (Equal with no left side), which we peel here so the
-// branch holds the bare value plus value_match=true. `c -> …` (typecheck match)
-// keeps the constraint as-is. A leading `-> p` is the default branch (match nil).
+// `target ? { match -> product, … }` — pattern match. Builds a Pattern_Type from
+// the (match, product) pairs and proves exhaustiveness. A branch carries its mode
+// in syntax: `=v -> …` (value match) parses as a unary `=` we peel here into
+// value_match=true; `c -> …` is a typecheck match; `-> p` is the default branch.
 walk_pattern :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1754,9 +1572,7 @@ walk_pattern :: #force_inline proc(
 		match: ^Type = nil
 		value_match := false
 		if match_idx != INVALID_NODE {
-			// Peel a unary `=v` (value-match mode): the parser builds it as an Equal
-			// operator with no left operand. Walk the inner operand as the bare match
-			// value and flag the branch as a value match.
+			// Peel a unary `=v` (value-match mode): an Equal operator with no left.
 			mk := ast.node_kinds[match_idx]
 			if mk == .Operator {
 				op := ast.node_data[match_idx].operator
@@ -1783,9 +1599,8 @@ walk_pattern :: #force_inline proc(
 	result := new(Type)
 	result^ = Pattern_Type{target, branches[:]}
 
-	// Exhaustiveness: the branches must cover the whole target (a covering union of
-	// matches, or an empty-arrow default). A non-exhaustive pattern could let a
-	// target value fall through unmatched.
+	// Exhaustiveness: the branches must cover the whole target (a covering union or
+	// an empty-arrow default), else a target value could fall through unmatched.
 	if !pattern_is_exhaustive(result.(Pattern_Type)) {
 		sem_error(
 			a,
@@ -1837,11 +1652,8 @@ walk_unknown :: #force_inline proc(
 	return make_unknown()
 }
 
-// walk_literal turns a literal token into its degenerate single-element domain
-// set: `5` becomes the integer interval 5..5, `"hi"` the string singleton, etc.
-// A concrete literal is its own type — the value/set split (see type.odin) treats
-// a singleton as a value. An unparseable literal yields Invalid_Type rather than
-// crashing; the parse error is already reported upstream.
+// walk_literal turns a literal token into its single-element domain set (`5` →
+// 5..5). An unparseable literal yields Invalid_Type (the parse error is upstream).
 walk_literal :: #force_inline proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
@@ -1893,20 +1705,16 @@ walk_literal :: #force_inline proc(a: ^Analyzer, idx: Node_Index) -> ^Type {
 }
 
 
-// The built-in constraints, resolved by name when no binding shadows them. They
-// are nothing special — just pre-built domain sets: `u8` is the interval 0..255,
-// `Int` the unbounded integer line, `Bool` the open {true,false}, and so on. A
-// user binding of the same name wins (checked first in walk_identifier), so these
-// are not keywords — only defaults.
+// The built-in constraints (pre-built domain sets), resolved by name when no
+// binding shadows them — a user binding of the same name wins (walk_identifier).
 builtins: map[string]Type
 
 @(init)
 init_builtins :: proc "contextless" () {
 	context = runtime.default_context()
-	// Unsigned families already get 0 from the structural fallback (lo = 0). The
-	// SIGNED families and `int` carry an EXPLICIT 0 default so a bare `i8` (or any
-	// `&`/`|` that keeps it as the left term) defaults to 0 instead of its low
-	// bound; this default then propagates through the fold like any other.
+	// Unsigned families get 0 from the structural fallback (lo = 0). The SIGNED
+	// families and `int` carry an EXPLICIT 0 default so a bare `i8` defaults to 0,
+	// not its low bound; this propagates through the fold like any other.
 	builtins["u8"] = make_int_range(0, 255)
 	builtins["i8"] = make_int_range_default(-128, 127, 0)
 	builtins["u16"] = make_int_range(0, 65535)
@@ -1926,9 +1734,8 @@ init_builtins :: proc "contextless" () {
 }
 
 // walk_identifier resolves a name reference. A scope binding wins over a builtin;
-// an ordinal'd reference (`a#1`) produces a Reference_Type (it must carry the
-// ordinal), a plain name produces the lighter Mention_Type. A name that is
-// neither bound nor builtin is an Undefined_Identifier and folds to Invalid_Type.
+// an ordinal'd reference (`a#1`) produces a Reference_Type, a plain name a
+// Mention_Type. Neither bound nor builtin → Undefined_Identifier / Invalid_Type.
 walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
@@ -1937,13 +1744,10 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 
 	res_scope, res_index := scope_resolve(scope, name, ordinal, true, allow_capture = true)
 	if res_scope != nil {
-		// A mention of a binding whose value is a scope STILL BEING WALKED is a
-		// self mention (`Array` inside Array's body, `fib` inside fib, or `a`
-		// naming itself from an inner scope): record it as an explicit
-		// Recursive_Mention instead of a plain Mention, so folds defer through it,
-		// the satisfy layer detects the inductive step structurally, and it
-		// survives carve cloning (repoint never rewrites it). match_scope/index
-		// point at the self binding directly — its value IS the open scope.
+		// A mention of a still-walking scope is a self mention (`fib` inside fib):
+		// record an explicit Recursive_Mention so folds defer through it, satisfy
+		// detects the inductive step, and it survives carve cloning (repoint never
+		// rewrites it).
 		if val := res_scope.types[res_index]; val != nil {
 			if vs, is_scope := &val^.(Scope_Type); is_scope && vs.walking {
 				result := new(Type)
@@ -1994,36 +1798,27 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 
 // --- error reporting ---
 
-// current_analyzer fetches the in-flight analyzer from the context (set at the
-// top of analyze()). Returns nil outside an analysis pass.
+// current_analyzer fetches the in-flight analyzer from the context (nil outside a pass).
 current_analyzer :: #force_inline proc() -> ^Analyzer {
 	return cast(^Analyzer)context.user_ptr
 }
 
-// emit reports an error from the FOLD layer, which has no `^Analyzer` (nor the
-// offending node, hence no span) threaded in. It pulls the in-flight analyzer from
-// the context and anchors the error at `a.recheck_span` — the span of the node
-// whose re-fold is in progress, armed by recheck_carve (and any other re-fold that
-// wants fold-detected errors attributed to it). Outside an analysis pass
-// (current_analyzer() == nil — a fold reached from the LSP or a unit test) it does
-// nothing: detection without a place to report is silent, never a crash. reduce
-// never calls the fold layer (see the Analyzer doc comment), so the context is
-// always this analyzer when a fold runs. This is THE entry point for errors a fold
-// DETECTS on the re-fold path, so a nil from a fold means only "unresolved/
-// symbolic", never a swallowed error. The eager walk path keeps reporting through
-// its local node's span directly (it has the node); emit is the re-fold counterpart.
+// emit reports an error from the FOLD layer, which has no `^Analyzer`/node threaded
+// in. It anchors the error at `a.recheck_span` (the node being re-folded, armed by
+// recheck_carve). Outside a pass it does nothing — detection without a place to
+// report is silent. This is the entry point for errors a fold DETECTS on the
+// re-fold path; the eager walk path reports through its local node's span directly.
 emit :: proc(message: string, error_type: Analyzer_Error_Type) {
 	a := current_analyzer()
 	if a == nil do return
-	// No armed span means this fold is not running under a re-fold that wants to
-	// own the diagnostic — stay silent rather than anchor the error at offset 0.
+	// No armed span: this fold is not under a re-fold that wants the diagnostic —
+	// stay silent rather than anchor at offset 0.
 	if a.recheck_span.start == 0 && a.recheck_span.end == 0 do return
 	sem_error(a, message, error_type, a.recheck_span)
 }
 
-// sem_error / sem_warning take the offending node's SPAN and resolve its start to
-// a Position once, here — so an Analyzer_Error always carries both the byte range
-// (to underline) and its (line, column) (to print), like Parse_Error.
+// sem_error / sem_warning take the node's SPAN and resolve its start to a Position
+// once, so an Analyzer_Error carries both the byte range and (line, column).
 sem_error :: proc(s: ^Analyzer, message: string, error_type: Analyzer_Error_Type, span: Span) {
 	error := Analyzer_Error {
 		type     = error_type,

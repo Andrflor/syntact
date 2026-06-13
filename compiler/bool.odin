@@ -2,48 +2,25 @@ package compiler
 
 import "core:strings"
 
-// ============================================================================
-// bool family — a finite domain over the two-element set {true, false}.
-//
-// Modeled like the integer/float/string families, but the underlying set is
-// finite, so there are only four possible domains:
-//   {}            the empty set       → None (produced by ~Bool / ~(true|false))
-//   {true}        the singleton true  → value = true
-//   {false}       the singleton false → value = false
-//   {true,false}  the full domain     → value = nil  (Bool)
-//
-// A Bool_Type always denotes a NON-EMPTY set; the empty set folds to None_Type.
-//   - value: concrete element when the set is a singleton, nil for {true,false}.
-//   - default: the materialized default — the FIRST source term of the domain.
-//     `true`        → default true
-//     `false`       → default false
-//     `true|false`  → default true   (first operand)
-//     `false|true`  → default false  (first operand)
-//     `Bool`        → default false  (false|true, the classic zero value)
-//
-// `|` is set union (default = first operand), `&` is intersection, `~` is the
-// set complement within {true,false} (an empty complement folds to None).
-// ============================================================================
+// bool family — a finite domain over {true, false}. A Bool_Type always denotes a
+// NON-EMPTY set; the empty set (e.g. ~Bool) folds to None_Type. `value` is the
+// concrete element for a singleton, nil for {true,false}; `default` is the first
+// source term. `|` = union (default = first operand), `&` = intersect, `~` = complement.
 
 
-// ---------------------------------------------------------------------------
-// Construction
-// ---------------------------------------------------------------------------
+// --- Construction ---
 
-// make_bool_const : a concrete boolean value. value == default == v.
 make_bool_const :: proc(v: bool) -> Bool_Type {
 	return Bool_Type{v, v}
 }
 
-// make_bool_any : the `Bool` builtin = false|true, default false.
+// make_bool_any : the `bool` builtin = false|true, default false.
 make_bool_any :: proc() -> Bool_Type {
 	return Bool_Type{nil, false}
 }
 
 
-// ---------------------------------------------------------------------------
-// Predicates
-// ---------------------------------------------------------------------------
+// --- Predicates ---
 
 bool_is_concrete :: #force_inline proc(t: Bool_Type) -> bool {
 	_, ok := t.value.(bool)
@@ -66,14 +43,10 @@ bool_has_false :: proc(t: Bool_Type) -> bool {
 }
 
 
-// ---------------------------------------------------------------------------
-// Printing
-// ---------------------------------------------------------------------------
+// --- Printing ---
 
 bool_to_string :: proc(t: Bool_Type) -> string {
 	if v, ok := t.value.(bool); ok do return v ? "true" : "false"
-	// Full domain {true,false}. Print the `bool` builtin (default false) plainly;
-	// a reordered domain (default true) shows its default-first source order.
 	return t.default ? "true|false" : "bool"
 }
 
@@ -82,14 +55,9 @@ write_bool_desc :: proc(b: ^strings.Builder, t: Bool_Type) {
 }
 
 
-// ===========================================================================
-// DOMAIN ENTRY POINTS — mirror of fold_type_string / fold_constraint_string.
-//
-// We fold to a Maybe(Bool_Domain) where Bool_Domain carries the membership and
-// the default term. nil means "not a boolean expression" (so the caller falls
-// through to another domain). The empty set is materialized as None_Type by the
-// wrapper, never as a Bool_Type.
-// ===========================================================================
+// --- DOMAIN ENTRY POINTS — mirror of fold_type_string / fold_constraint_string ---
+// Fold to a Maybe(Bool_Domain); nil = "not a boolean expression". The empty set is
+// materialized as None_Type by the wrapper, never as a Bool_Type.
 
 Bool_Domain :: struct {
 	has_true:    bool,
@@ -98,8 +66,7 @@ Bool_Domain :: struct {
 	has_default: bool,
 }
 
-// wrap_bool_domain : turns a folded domain into a ^Type. The empty set becomes
-// None; otherwise a Bool_Type carrying value (singleton or nil) and default.
+// wrap_bool_domain : empty set → None; otherwise a Bool_Type with value + default.
 wrap_bool_domain :: proc(d: Bool_Domain) -> ^Type {
 	r := new(Type)
 	if !d.has_true && !d.has_false {
@@ -109,8 +76,6 @@ wrap_bool_domain :: proc(d: Bool_Domain) -> ^Type {
 	value: Maybe(bool) = nil
 	if d.has_true && !d.has_false do value = true
 	if d.has_false && !d.has_true do value = false
-	// default falls back to whichever element is present when no explicit
-	// source order was recorded.
 	def := d.default
 	if !d.has_default {
 		def = d.has_true && !d.has_false ? true : false
@@ -119,14 +84,12 @@ wrap_bool_domain :: proc(d: Bool_Domain) -> ^Type {
 	return r
 }
 
-// fold_type_bool : boolean envelope produced by a value, or nil.
 fold_type_bool :: proc(t: ^Type) -> ^Type {
 	d, ok := fold_bool_domain(t, false).(Bool_Domain)
 	if !ok do return nil
 	return wrap_bool_domain(d)
 }
 
-// fold_constraint_bool : resolved boolean constraint, or nil.
 fold_constraint_bool :: proc(t: ^Type) -> ^Type {
 	d, ok := fold_bool_domain(t, true).(Bool_Domain)
 	if !ok do return nil
@@ -146,10 +109,8 @@ bool_type_domain :: proc(v: Bool_Type) -> Bool_Domain {
 	return Bool_Domain{bool_has_true(v), bool_has_false(v), v.default, true}
 }
 
-// fold_bool_domain : reduces a ^Type to its boolean domain. `as_constraint`
-// distinguishes the value fold from the constraint fold — like the string
-// family, the difference only shows up on Mention/Reference, which follow the
-// target's VALUE when used as a constraint.
+// `as_constraint` distinguishes value vs constraint fold; the difference only
+// shows on Mention/Reference, which follow the target's VALUE when a constraint.
 fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 	if t == nil do return nil
 	#partial switch v in t^ {
@@ -166,7 +127,6 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 		}
 		return nil
 	case Or_Type:
-		// Union. The default is the LEFT operand's default (first source term).
 		ld, l_ok := fold_bool_domain(v.left, as_constraint).(Bool_Domain)
 		rd, r_ok := fold_bool_domain(v.right, as_constraint).(Bool_Domain)
 		if !l_ok || !r_ok do return nil
@@ -219,13 +179,10 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 }
 
 
-// ===========================================================================
-// SET OPERATIONS — | (union), & (intersection), ~ (negation)
-// ===========================================================================
+// --- SET OPERATIONS — | (union), & (intersection), ~ (negation) ---
 
-// Union : membership is OR'd. The default is the LEFT operand's default — the
-// first source term — so `true|false` keeps default true and `false|true`
-// keeps default false. If the left set is empty, fall back to the right's.
+// Union : membership OR'd; default = left operand's (first source term), falling
+// back to the right's if the left set is empty.
 bool_domain_union :: proc(a, b: Bool_Domain) -> Bool_Domain {
 	r := Bool_Domain {
 		has_true    = a.has_true || b.has_true,
@@ -240,14 +197,12 @@ bool_domain_union :: proc(a, b: Bool_Domain) -> Bool_Domain {
 	return r
 }
 
-// Intersection : membership is AND'd. The default is the left operand's default
-// if it survives the intersection, otherwise the right's if it survives.
+// Intersection : membership AND'd; default = left's if it survives, else right's.
 bool_domain_intersect :: proc(a, b: Bool_Domain) -> Bool_Domain {
 	r := Bool_Domain {
 		has_true  = a.has_true && b.has_true,
 		has_false = a.has_false && b.has_false,
 	}
-	// Pick a default that is still a member of the resulting set.
 	if a.default && r.has_true || !a.default && r.has_false {
 		r.default = a.default
 		r.has_default = true
@@ -258,9 +213,7 @@ bool_domain_intersect :: proc(a, b: Bool_Domain) -> Bool_Domain {
 	return r
 }
 
-// Negation : the complement within {true,false}. ~true = {false}, ~false =
-// {true}, ~(true|false) = {} (None). The default of the complement is the
-// remaining element (or none, when the result is empty).
+// Negation : complement within {true,false}; ~(true|false) = {} (None).
 bool_domain_negate :: proc(a: Bool_Domain) -> Bool_Domain {
 	r := Bool_Domain {
 		has_true  = !a.has_true,
@@ -274,13 +227,9 @@ bool_domain_negate :: proc(a: Bool_Domain) -> Bool_Domain {
 }
 
 
-// ===========================================================================
-// SATISFIES — the contract. Prove that value ⊆ constraint.
-// ===========================================================================
+// --- SATISFIES — prove value ⊆ constraint ---
 
-// bool_satisfy : every element of the value set ft is also in the constraint
-// set fc. With a two-element domain this is just membership of each present
-// element.
+// bool_satisfy : every element of ft is also in fc.
 bool_satisfy :: proc(fc, ft: Bool_Type) -> bool {
 	if bool_has_true(ft) && !bool_has_true(fc) do return false
 	if bool_has_false(ft) && !bool_has_false(fc) do return false

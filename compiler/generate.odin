@@ -7,13 +7,10 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 
-// Import the x64 assembler package
 import x64 "./backends/x64"
 
-/*
- * Code Generation for Homoiconic Language
- * This module translates the analyzed AST into machine code
- */
+// Legacy direct codegen path, superseded by the bytecode pipeline. Kept for
+// reference; all of it is commented out.
 
 // // Code generation context to track state
 // Code_Gen_Context :: struct {
