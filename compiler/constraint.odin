@@ -321,13 +321,20 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	c, ok := fc^.(Scope_Type)
 	if ok {
-		prods := scope_productions(c)
-		prod_count := len(prods)
-		for i := 0; i < prod_count; i += 1 {
-			if satisfy(fold_type(prods[i]), ft) {
-				return true
+		hasProd := false
+		for i := 0; i < len(c.kind); i += 1 {
+			if c.kind[i] == .Product {
+				hasProd = true
+				if c.constraint_folds[i] != nil {
+					if satisfy(c.constraint_folds[i], ft) {
+						return true
+					}
+				} else if satisfy((c.type_folds[i]), ft) {
+					return true
+				}
 			}
 		}
+		if (hasProd) do return false
 	}
 	return satisfy(fc, ft)
 }
