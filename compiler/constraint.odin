@@ -399,12 +399,7 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 		return false
 	}
 	if cs.constraint_folds[i] == nil {
-		// An uncolored non-production field (`x -> 1`) constrains only the shape (proved
-		// above). A production (`-> v`) IS the constraint, so prove it.
-		if cs.kind[i] != .Product {
-			return true
-		}
-		return satisfy(fold_constraint(cs.types[i]), vs.type_folds[j])
+		return satisfy((cs.type_folds[i]), vs.type_folds[j])
 	} else {
 		// A recursive tail is unfolded one level against the live scope; everything
 		// else is the already-materialized constraint scope.
