@@ -396,12 +396,19 @@ bc_lower_pattern :: proc(l: ^BC_Lower, p: Pattern_Type) -> bc.BC_Value {
 }
 
 // Extract a concrete bool from a value-match branch. Only a singleton Bool_Type
-// qualifies — a full `{true,false}` is not a test.
+// qualifies — a full `{true,false}` is not a test. A value-match branch (`=v`) is a
+// producer scope `{-> v}`; read through its single production to the reified value.
 bc_branch_bool_value :: proc(branch: Pattern_Branch) -> (val: bool, ok: bool) {
-	if !branch.value_match || branch.match == nil do return false, false
+	if branch.match == nil do return false, false
 	folded := fold_type(branch.match)
 	if folded == nil do folded = branch.match
-	#partial switch b in folded^ {
+	scope, is_scope := folded^.(Scope_Type)
+	if !is_scope do return false, false
+	prods := scope_productions(scope)
+	if len(prods) != 1 || prods[0] == nil do return false, false
+	inner := fold_type(prods[0])
+	if inner == nil do inner = prods[0]
+	#partial switch b in inner^ {
 	case Bool_Type:
 		if v, has := b.value.?; has do return v, true
 	}

@@ -162,14 +162,15 @@ Pattern_Type :: struct {
 	branches: []Pattern_Branch,
 }
 
-// One branch (nil match = match anything). `value_match` is the `=v` mode vs the
-// bare typecheck mode. `cover_fold` is the branch's firing set, folded once at
-// analysis and reused by reduce_pattern; nil when the match did not fold statically.
+// One branch (nil match = match anything). The `=v` value-match mode now lives in
+// the match type itself as an Exact_Type node (so it survives Or/And/Not nesting,
+// e.g. `=10 | =20`), not as a per-branch flag. `cover_fold` is the branch's firing
+// set, folded once at analysis and reused by reduce_pattern; nil when the match did
+// not fold statically.
 Pattern_Branch :: struct {
-	value_match: bool,
-	match:       ^Type,
-	product:     ^Type,
-	cover_fold:  ^Type,
+	match:      ^Type,
+	product:    ^Type,
+	cover_fold: ^Type,
 }
 
 
@@ -344,7 +345,6 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 			if branch.match == nil {
 				strings.write_string(b, "-> ")
 			} else {
-				if branch.value_match do strings.write_byte(b, '=')
 				write_value(b, branch.match)
 				strings.write_string(b, " -> ")
 			}
@@ -659,7 +659,6 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			if branch.match == nil {
 				fmt.print("-> ")
 			} else {
-				if branch.value_match do fmt.print("=")
 				print_type(branch.match, depth)
 				fmt.print(" -> ")
 			}
@@ -834,7 +833,6 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 		for branch, i in v.branches {
 			if i > 0 do strings.write_string(b, ", ")
 			if branch.match != nil {
-				if branch.value_match do strings.write_byte(b, '=')
 				write_fold(b, branch.match)
 			}
 			strings.write_string(b, "->")
