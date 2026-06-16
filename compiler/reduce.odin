@@ -937,10 +937,9 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	branches := make([]Pattern_Branch, len(p.branches))
 	for branch, i in p.branches {
 		branches[i] = Pattern_Branch {
-			value_match = branch.value_match,
-			match       = branch.match,
-			product     = reduce_value(branch.product),
-			cover_fold  = branch.cover_fold,
+			match      = branch.match,
+			product    = reduce_value(branch.product),
+			cover_fold = branch.cover_fold,
 		}
 	}
 	r := new(Type)
@@ -956,6 +955,12 @@ reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> bool {
 	if branch.match == nil do return true
 	cf := branch.cover_fold
 	if cf == nil || target == nil do return false
+	// A value-match (`=v`) cover folds to the producer scope `{-> v}`; read through it
+	// to the production leaf so the leaf domain test below decides v's membership.
+	if s, is_scope := cf^.(Scope_Type); is_scope {
+		prods := scope_productions(s)
+		if len(prods) == 1 && prods[0] != nil do cf = prods[0]
+	}
 	#partial switch f in cf^ {
 	case Integer_Type:
 		v, ok := target^.(Integer_Type)

@@ -8,18 +8,18 @@ import "core:fmt"
 // are considered IN ORDER. The IR lives in ir.odin; this file builds, folds, and
 // proves exhaustiveness.
 
-// build_pattern_branch boxes a walked (match, product) pair; the analyzer hands us
-// value_match already split out (see walk_pattern).
-build_pattern_branch :: proc(match: ^Type, product: ^Type, value_match: bool) -> Pattern_Branch {
+// build_pattern_branch boxes a walked (match, product) pair. A `=v` value-match is
+// already desugared by walk into the producer scope `{-> v}` in `match`, so the firing
+// set is always `fold_constraint(match)` — no per-branch mode to thread through.
+build_pattern_branch :: proc(match: ^Type, product: ^Type) -> Pattern_Branch {
 	b := Pattern_Branch {
-		value_match = value_match,
-		match       = match,
-		product     = product,
+		match   = match,
+		product = product,
 	}
 	// Cache the branch's firing set NOW (analysis time): reduce_pattern reads this
 	// cache — no fold ever runs during reduce.
 	if match != nil {
-		b.cover_fold = value_match ? fold_type(match) : fold_constraint(match)
+		b.cover_fold = fold_constraint(match)
 	}
 	return b
 }
@@ -118,11 +118,10 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 }
 
 // branch_match_cover yields the match a branch contributes to the coverage union:
-// a typecheck branch `M` as-is, a value branch `=v` as the producer `{-> v}`, a
-// default branch nil. The ONLY place the two modes differ.
+// a typecheck branch `M` as-is, a default branch nil. A value branch `=v` is already
+// the producer `{-> v}` in `match`, so both modes are handled uniformly here.
 branch_match_cover :: proc(branch: Pattern_Branch) -> ^Type {
 	if branch.match == nil do return nil
-	if branch.value_match do return make_producer_scope(branch.match)
 	return branch.match
 }
 

@@ -1003,10 +1003,10 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			cf := branch.cover_fold
 			if m != branch.match {
 				changed = true
-				cf = m != nil ? (branch.value_match ? fold_type(m) : fold_constraint(m)) : nil
+				cf = m != nil ? fold_constraint(m) : nil
 			}
 			if p != branch.product do changed = true
-			branches[i] = Pattern_Branch{branch.value_match, m, p, cf}
+			branches[i] = Pattern_Branch{m, p, cf}
 		}
 		if changed {
 			return new_type(Pattern_Type{tg, branches})

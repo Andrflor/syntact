@@ -1175,11 +1175,30 @@ walk_operator :: #force_inline proc(
 	idx: Node_Index,
 ) -> ^Type {
 	data := a.ast.node_data[idx]
+
+	// A unary `=x` is pure sugar for the producer scope `{-> x}`, EVERYWHERE: in a
+	// pattern branch it is a value-match, in a constraint it means "statically x", and
+	// as a bare value it is the producer `{-> x}`. So `=x` == `{-> x}`, no exceptions —
+	// built exactly as a source `{-> x}` would (folds via the normal machinery, so the
+	// inner value re-reifies just like the hand-written form).
+	if data.operator.kind == .Equal && data.operator.left == INVALID_NODE {
+		value := walk(a, current_scope, data.operator.right)
+		r := new(Type)
+		r^ = Scope_Type {
+			parent = current_scope,
+		}
+		scope := &r.(Scope_Type)
+		scope_append(a, scope, "", nil, .Product, value)
+		typecheck(a, scope, "", nil, .Product, value, idx)
+		return r
+	}
+
 	left: ^Type = nil
 	if data.operator.left != INVALID_NODE {
 		left = walk(a, current_scope, data.operator.left)
 	}
 	right := walk(a, current_scope, data.operator.right)
+
 	result := new(Type)
 	#partial switch data.operator.kind {
 	case .And:
@@ -1567,9 +1586,9 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 }
 
 // `target ? { match -> product, … }` — pattern match. Builds a Pattern_Type from
-// the (match, product) pairs and proves exhaustiveness. A branch carries its mode
-// in syntax: `=v -> …` (value match) parses as a unary `=` we peel here into
-// value_match=true; `c -> …` is a typecheck match; `-> p` is the default branch.
+// the (match, product) pairs and proves exhaustiveness. A branch's mode lives in its
+// match: `=v -> …` is sugar for the producer `{-> v}` (value-match, fires on equality);
+// `c -> …` is a typecheck match; `-> p` is the default branch.
 walk_pattern :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1587,20 +1606,10 @@ walk_pattern :: #force_inline proc(
 		product_idx := i + 1 < len(branch_nodes) ? branch_nodes[i + 1] : INVALID_NODE
 
 		match: ^Type = nil
-		value_match := false
 		if match_idx != INVALID_NODE {
-			// Peel a unary `=v` (value-match mode): an Equal operator with no left.
-			mk := ast.node_kinds[match_idx]
-			if mk == .Operator {
-				op := ast.node_data[match_idx].operator
-				if op.kind == .Equal && op.left == INVALID_NODE {
-					value_match = true
-					match = walk(a, current_scope, op.right)
-				}
-			}
-			if match == nil {
-				match = walk(a, current_scope, match_idx)
-			}
+			// `=v` in the match walks to the producer `{-> v}` (walk_operator turns the
+			// unary `=` into make_producer_scope), so a value-match is just a producer.
+			match = walk(a, current_scope, match_idx)
 		}
 
 		product: ^Type = nil
@@ -1610,7 +1619,7 @@ walk_pattern :: #force_inline proc(
 			product = make_none()
 		}
 
-		append(&branches, build_pattern_branch(match, product, value_match))
+		append(&branches, build_pattern_branch(match, product))
 	}
 
 	result := new(Type)
