@@ -344,7 +344,7 @@ run_test :: proc(path: string, t: ^testing.T) {
 			msg = strings.concatenate(
 				{
 					fmt.tprintf(
-						"\n\nTest failed for (%s)\nSource diff line %v, column %v:\n",
+						"\n\nParser test failed (%s)\nSource diff line %v, column %v:\n",
 						tc.name,
 						position.line,
 						position.column,

@@ -122,8 +122,9 @@ run_typecheck_test :: proc(path: string, t: ^testing.T) {
 				)
 			}
 			msg = fmt.tprintf(
-				"\n\nAnalyzer test failed (%s)\nExpected no errors but got %d:\n%s",
+				"\n\nTypecheck test failed (%s)\nSource:\n%s\nExpected no errors but got %d:\n%s",
 				tc.name,
+				tc.source,
 				actual_count,
 				strings.join(parts[:], "\n"),
 			)
@@ -139,8 +140,9 @@ run_typecheck_test :: proc(path: string, t: ^testing.T) {
 		}
 		actual_str := strings.join(parts[:], "\n") if len(parts) > 0 else "  (none)"
 		msg = fmt.tprintf(
-			"\n\nAnalyzer test failed (%s)\nExpected %d error(s) but got %d\nExpected: %v\nActual:\n%s",
+			"\n\nTypecheck test failed (%s)\nSource:\n%s\nExpected %d error(s) but got %d\nExpected: %v\nActual:\n%s",
 			tc.name,
+			tc.source,
 			expected_count,
 			actual_count,
 			tc.expect_errors,
@@ -154,8 +156,9 @@ run_typecheck_test :: proc(path: string, t: ^testing.T) {
 		expected_type, valid := error_type_from_string(expected_str)
 		if !valid {
 			msg = fmt.tprintf(
-				"\n\nAnalyzer test failed (%s)\nUnknown error type in test: '%s'",
+				"\n\nTypecheck test failed (%s)\nSource:\n%s\nUnknown error type in test: '%s'",
 				tc.name,
+				tc.source,
 				expected_str,
 			)
 			testing.expectf(t, false, "%s", msg)
@@ -164,8 +167,9 @@ run_typecheck_test :: proc(path: string, t: ^testing.T) {
 		actual_type := actual_errors[i].type
 		if actual_type != expected_type {
 			msg = fmt.tprintf(
-				"\n\nAnalyzer test failed (%s)\nError #%d: expected %v but got %v (%s)",
+				"\n\nTypecheck test failed (%s)\nSource:\n%s\nError #%d: expected %v but got %v (%s)",
 				tc.name,
+				tc.source,
 				i,
 				expected_type,
 				actual_type,
