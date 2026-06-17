@@ -55,11 +55,16 @@ odin build lsp                                # the LSP server (package lsp/)
 ### Tests
 
 ```bash
-odin test test/typecheck                       # a suite (parse/analyze/typecheck/reduce/default/codegen)
+odin test test -all-packages                   # EVERYTHING at once (all seven suites)
+odin test test/typecheck                       # a single suite
 odin test test/codegen                         # end-to-end: interpreter oracle vs native x64
 ```
 
-When asked to "run the tests", default to `test/analyze` and `test/typecheck` (plus `test/codegen` for backend work).
+`odin test test -all-packages` is the one-shot runner: `test/all_tests.odin` (package `all_test`) blank-imports every suite, and `-all-packages` runs each one's `@(test)` procs. It also picks up the x64 instruction-encoding tests (`package x64_assembler`, imported transitively by `compiler`); those need GNU `as` and are run separately with `odin test compiler/backends/x64` — treat the seven JSON suites as the canonical target.
+
+When a suite case fails, the message embeds the case name AND its `.syn` source (`Source:\n…`) plus expected/actual, so you don't need to reopen the JSON to see what ran. Odin also prints a `-define:ODIN_TEST_NAMES=…` line listing the failures, ready to paste back to rerun only those.
+
+When asked to "run the tests", default to `test/analyze` and `test/typecheck` (plus `test/codegen` for backend work), or `odin test test -all-packages` for a full sweep.
 
 **Regenerating a test harness** (after editing its `tests/*.json`): each suite has a `+build ignore` `generator.odin` that rewrites the auto-generated `generated_tests.odin` by scanning `tests/*.json`. Run it from inside the category dir:
 
@@ -124,7 +129,7 @@ Key conventions:
 
 ### test/ package — seven harnesses
 
-`test/{parse,analyze,typecheck,reduce,default,codegen,pattern}/` are independent Odin test packages, each with `tests/*.json` + a generated runner. `odin test test/<cat>` runs from anywhere (a `test_path` helper resolves JSON against the source dir).
+`test/{parse,analyze,typecheck,reduce,default,codegen,pattern}/` are independent Odin test packages, each with `tests/*.json` + a generated runner. `odin test test/<cat>` runs from anywhere (a `test_path` helper resolves JSON against the source dir). `test/all_tests.odin` is the aggregator package that blank-imports all seven so `odin test test -all-packages` runs them in one command. Every suite's failure message includes the failing case's `.syn` source.
 
 - **codegen** — the **end-to-end** suite (multi-combo: each case runs many `(args → expect)` pairs). Each case is checked against BOTH backends: the interpreter (oracle) AND native x64 (emit ELF → run via libc `popen` → compare exit-status/stdout). An interp/native divergence fails the case.
 - **typecheck** — constraint-satisfaction (`expect_errors`): self-match, raw-cast `::`, composites, carve implicit-constraints, executes, set ops, patterns, string sequences/negation/tri-range, self-property carve refs, negative-bound ranges, proof-by-default.
