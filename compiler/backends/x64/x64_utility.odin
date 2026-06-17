@@ -34,11 +34,23 @@ g_temp_dir_once: sync.Once
 
 @(private = "file")
 init_temp_dir :: proc() {
-	base, err := os.temp_directory(context.allocator)
+	// Allocate on the heap, NOT context.allocator: this runs once (sync.Once)
+	// from whichever test thread gets there first, and that thread's
+	// context.allocator is a per-test rollback stack which is recycled when the
+	// test ends — leaving g_temp_dir dangling (empty/garbage paths) for every
+	// later test. The heap-allocated path persists for the whole process.
+	heap := runtime.heap_allocator()
+	base, err := os.temp_directory(heap)
 	if err != nil {
 		base = "/tmp"
 	}
-	dir := fmt.aprintf("%s%csyntact_x64_test_%d", base, filepath.SEPARATOR, os.get_pid())
+	dir := fmt.aprintf(
+		"%s%csyntact_x64_test_%d",
+		base,
+		filepath.SEPARATOR,
+		os.get_pid(),
+		allocator = heap,
+	)
 	os.make_directory_all(dir)
 	g_temp_dir = dir
 }
@@ -867,4 +879,220 @@ get_interesting_maskregister :: proc() -> [8]MaskRegister {
 // Segment Registers (used for memory segmentation)
 get_interesting_segmentregister :: proc() -> [6]SegmentRegister {
 	return [6]SegmentRegister{.ES, .CS, .SS, .DS, .FS, .GS}
+}
+
+// ==================================
+// BATCHED REFERENCE ASSEMBLY
+// ==================================
+// A test proc emits hundreds of single-instruction asm strings, each of which
+// used to be assembled with its OWN `as` + `objdump` pair (2 process spawns
+// per instruction — the dominant cost of the x64 suite). batch_assemble runs
+// the WHOLE batch through a single `as` + single `objdump`: a label `iN:` is
+// emitted before instruction N so the per-instruction byte boundaries can be
+// recovered from objdump's symbol headers ("<iN>:"). This collapses the cost
+// to 2 process spawns per batch (i.e. per test proc). Combined with the Odin
+// test runner already running the @(test) procs across all cores, the suite is
+// dramatically faster. See batch_begin/batch_add/batch_end in x64_test.odin.
+
+// Unique scratch-file suffix per (thread, batch); avoids any cross-thread
+// filename collision without contending on a global atomic.
+@(private = "file")
+g_batch_seq: u64
+
+// batch_assemble assembles each asm string in `asm_strs` and returns one byte
+// slice per input, indexed in order. `allocator` is used for the results AND
+// for all internal scratch (it should be a growing arena the caller frees in
+// one shot — NOT the test's bounded temp allocator, which a large batch would
+// overflow). On any `as` diagnostic or OS error it falls back to assembling
+// each instruction individually (which preserves the original per-instruction
+// panic so a bad instruction is still attributable).
+batch_assemble :: proc(asm_strs: []string, allocator := context.allocator) -> [][]u8 {
+	results := make([][]u8, len(asm_strs), allocator)
+	if len(asm_strs) == 0 {
+		return results
+	}
+
+	// Redirect ALL temp use (notably fmt.tprintf for the scratch filenames in
+	// batch_run, and the per-instruction assemble in the fallback) to the
+	// growing arena. The test runner's temp allocator is bounded and a large
+	// batch would otherwise exhaust it, yielding empty filenames and a spurious
+	// `as` failure ("input '' and output '' files are the same").
+	context.temp_allocator = allocator
+
+	dump, as_err, err := batch_run(asm_strs, allocator)
+	if err != nil || as_err {
+		// Fallback: assemble individually for error attribution.
+		for s, i in asm_strs {
+			ref := asm_to_bytes(s, context.temp_allocator)
+			results[i] = make([]u8, len(ref), allocator)
+			copy(results[i], ref)
+		}
+		return results
+	}
+
+	parse_batch_objdump(dump, results, allocator)
+	return results
+}
+
+// batch_run writes one labeled assembly file, assembles it and disassembles it,
+// returning the objdump text. as_err is set (without err) when `as` emitted any
+// diagnostic, signalling the caller to fall back to per-instruction assembly.
+// `scratch` holds the (potentially large) assembly source and objdump output.
+@(private = "file")
+batch_run :: proc(
+	asm_strs: []string,
+	scratch: runtime.Allocator,
+) -> (
+	dump: string,
+	as_err: bool,
+	err: os.Error,
+) {
+	dir := test_temp_dir()
+	// Atomic so concurrent test threads never collide on a scratch filename
+	// (a collision would let one thread remove another's file mid-assembly).
+	seq := sync.atomic_add(&g_batch_seq, 1)
+	asm_file := fmt.tprintf("%s%cbatch_%d.s", dir, filepath.SEPARATOR, seq)
+	obj_file := fmt.tprintf("%s%cbatch_%d.o", dir, filepath.SEPARATOR, seq)
+
+	sb := strings.builder_make(scratch)
+	strings.write_string(&sb, ".intel_syntax noprefix\n.text\n")
+	for s, i in asm_strs {
+		fmt.sbprintf(&sb, "i%d:\n%s\n", i, s)
+	}
+	os.write_entire_file(asm_file, transmute([]byte)strings.to_string(sb)) or_return
+
+	// Assemble.
+	{
+		r, w := os.pipe() or_return
+		proc_opts := os.Process_Desc {
+			command = {"as", "--64", "-o", obj_file, asm_file},
+			stderr  = w,
+		}
+		p := os.process_start(proc_opts) or_return
+		os.close(w)
+		output := os.read_entire_file(r, scratch) or_return
+		os.close(r)
+		_ = os.process_wait(p) or_return
+		os.remove(asm_file)
+		if len(output) != 0 {
+			os.remove(obj_file)
+			return "", true, nil
+		}
+	}
+
+	// Disassemble.
+	objdump_output: []byte
+	{
+		r, w := os.pipe() or_return
+		proc_opts := os.Process_Desc {
+			command = {"objdump", "-d", "-M", "intel", obj_file},
+			stdout  = w,
+		}
+		p := os.process_start(proc_opts) or_return
+		os.close(w)
+		objdump_output = os.read_entire_file(r, scratch) or_return
+		os.close(r)
+		_ = os.process_wait(p) or_return
+		os.remove(obj_file)
+	}
+
+	return string(objdump_output), false, nil
+}
+
+// parse_batch_objdump splits one batched objdump dump into per-instruction byte
+// slices, keyed by the "<iN>:" symbol headers, writing them into results[N].
+// `allocator` backs both the result slices and the internal scratch.
+@(private = "file")
+parse_batch_objdump :: proc(dump: string, results: [][]u8, allocator: runtime.Allocator) {
+	cur := -1
+	acc := make([dynamic]u8, allocator)
+	in_text := false
+
+	for line in strings.split_lines(dump, allocator) {
+		if strings.contains(line, "Disassembly of section .text:") {
+			in_text = true
+			continue
+		}
+		if !in_text {
+			continue
+		}
+
+		trimmed := strings.trim_space(line)
+		// Instruction-boundary header, e.g. "0000000000000003 <i1>:".
+		if strings.has_suffix(trimmed, ">:") {
+			if idx, ok := parse_label_index(trimmed); ok {
+				batch_flush(results, cur, &acc, allocator)
+				cur = idx
+			}
+			continue
+		}
+
+		batch_append_line_bytes(trimmed, &acc, allocator)
+	}
+	batch_flush(results, cur, &acc, allocator)
+}
+
+// batch_flush materializes the accumulated bytes for instruction `cur`.
+@(private = "file")
+batch_flush :: proc(results: [][]u8, cur: int, acc: ^[dynamic]u8, allocator: runtime.Allocator) {
+	if cur >= 0 && cur < len(results) {
+		results[cur] = make([]u8, len(acc^), allocator)
+		copy(results[cur], acc^[:])
+	}
+	clear(acc)
+}
+
+// parse_label_index reads N from a "... <iN>:" header line.
+@(private = "file")
+parse_label_index :: proc(s: string) -> (idx: int, ok: bool) {
+	p := strings.index(s, "<i")
+	if p < 0 {
+		return 0, false
+	}
+	p += 2
+	end := p
+	for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+		end += 1
+	}
+	if end == p {
+		return 0, false
+	}
+	return strconv.parse_int(s[p:end])
+}
+
+// batch_append_line_bytes parses the hex bytes out of a single objdump
+// disassembly line (mirrors parse_objdump's per-line extraction).
+@(private = "file")
+batch_append_line_bytes :: proc(line: string, acc: ^[dynamic]u8, scratch: runtime.Allocator) {
+	if !strings.contains(line, ":") {
+		return
+	}
+	parts := strings.split(line, ":", scratch)
+	if len(parts) < 2 {
+		return
+	}
+	hex_part := strings.trim_space(parts[1])
+
+	// Cut off the mnemonic that follows the hex bytes.
+	mnemonic_start := -1
+	for i := 0; i < len(hex_part); i += 1 {
+		if i > 0 && hex_part[i - 1] == ' ' && hex_part[i] == ' ' {
+			mnemonic_start = i
+			break
+		}
+	}
+	if mnemonic_start < 0 {
+		mnemonic_start = strings.index_byte(hex_part, '\t')
+	}
+	if mnemonic_start > 0 {
+		hex_part = hex_part[:mnemonic_start]
+	}
+
+	for hex in strings.fields(hex_part, scratch) {
+		if len(hex) == 2 {
+			if value, ok := strconv.parse_int(hex, 16); ok {
+				append(acc, byte(value))
+			}
+		}
+	}
 }
