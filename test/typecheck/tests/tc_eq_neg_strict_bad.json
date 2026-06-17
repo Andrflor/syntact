@@ -1,0 +1,1 @@
+{ "name": "tc_eq_neg_strict_bad", "description": "BUG REPRO: =~10 is the producer {-> ~10}, so the value must be STATICALLY ~10; ~11 is a different negation and must be rejected", "source": "=~10:a -> ~11", "expect_errors": ["Constraint_Mismatch"] }

@@ -1,0 +1,1 @@
+{ "name": "tc_value_union_ok", "description": "BUG REPRO (root cause): a plain Or value satisfies a constraint containing it (5|11 ⊆ ~10). Currently rejected — the value folds to {-> 5 | 11} with a stray producer wrapper instead of the bare 5 | 11, so satisfy never reaches the Or-distribution branch", "source": "~10:a -> 5 | 11", "expect_errors": [] }

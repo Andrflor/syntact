@@ -1,0 +1,1 @@
+{ "name": "tc_eq_neg_exact_ok", "description": "sanity (currently passes): =~10 accepts exactly ~10. Pairs with tc_eq_neg_strict_bad to pin the = sugar's strictness over a Negate", "source": "=~10:a -> ~10", "expect_errors": [] }
