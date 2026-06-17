@@ -13,9 +13,49 @@ import "base:runtime"
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:path/filepath"
 import "core:strconv"
 import "core:strings"
+import "core:sync"
 import "core:time"
+
+// ==================================
+// TEMPORARY TEST DIRECTORY
+// ==================================
+// All scratch files produced while assembling instructions during the test
+// suite live in a single OS-temp directory ("<tmp>/syntact_x64_test_<pid>")
+// created lazily once per process and removed in full at exit, so nothing is
+// left in the current working directory. The PID makes the path unique per run.
+
+@(private = "file")
+g_temp_dir: string
+@(private = "file")
+g_temp_dir_once: sync.Once
+
+@(private = "file")
+init_temp_dir :: proc() {
+	base, err := os.temp_directory(context.allocator)
+	if err != nil {
+		base = "/tmp"
+	}
+	dir := fmt.aprintf("%s%csyntact_x64_test_%d", base, filepath.SEPARATOR, os.get_pid())
+	os.make_directory_all(dir)
+	g_temp_dir = dir
+}
+
+@(private = "file")
+test_temp_dir :: proc() -> string {
+	sync.once_do(&g_temp_dir_once, init_temp_dir)
+	return g_temp_dir
+}
+
+@(fini)
+cleanup_temp_dir :: proc "contextless" () {
+	if g_temp_dir != "" {
+		context = runtime.default_context()
+		os.remove_all(g_temp_dir)
+	}
+}
 
 // ==================================
 // STRING UTILITIES
@@ -45,9 +85,10 @@ asm_to_bytes :: proc(asm_code: string, allocator := context.allocator) -> []byte
 
 assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 	uuid := string_hash(asm_str)
-	// Create temporary filenames
-	asm_file := fmt.tprintf("temp_instruction_%x.s", uuid)
-	obj_file := fmt.tprintf("temp_instruction_%x.o", uuid)
+	// Create temporary filenames inside the per-run OS-temp directory
+	dir := test_temp_dir()
+	asm_file := fmt.tprintf("%s%ctemp_instruction_%x.s", dir, filepath.SEPARATOR, uuid)
+	obj_file := fmt.tprintf("%s%ctemp_instruction_%x.o", dir, filepath.SEPARATOR, uuid)
 
 	// Add Intel syntax prefix if not present
 	final_asm := fmt.tprintf(".intel_syntax noprefix\n%s\n", asm_str)
