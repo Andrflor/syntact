@@ -60,7 +60,7 @@ odin test test/typecheck                       # a single suite
 odin test test/codegen                         # end-to-end: interpreter oracle vs native x64
 ```
 
-`odin test test -all-packages` is the one-shot runner: `test/all_tests.odin` (package `all_test`) blank-imports every suite, and `-all-packages` runs each one's `@(test)` procs. It also picks up the x64 instruction-encoding tests (`package x64_assembler`, imported transitively by `compiler`); those need GNU `as` and are run separately with `odin test compiler/backends/x64` — treat the seven JSON suites as the canonical target.
+`odin test test -all-packages` is the one-shot runner: `test/all_tests.odin` (package `all_test`) blank-imports every suite, and `-all-packages` runs each one's `@(test)` procs. It also picks up the x64 instruction-encoding tests (`package x64_assembler`, imported transitively by `compiler`); those need GNU `as` and are run separately with `odin test compiler/backends/x64` — treat the seven JSON suites as the canonical target. Their scratch `.s`/`.o` files go to a per-run OS-temp dir (`<tmp>/syntact_x64_test_<pid>`, created lazily in `x64_utility.odin`'s `assemble`) and the whole dir is removed at process exit via an `@(fini)` — nothing is left in the working directory.
 
 When a suite case fails, the message embeds the case name AND its `.syn` source (`Source:\n…`) plus expected/actual, so you don't need to reopen the JSON to see what ran. Odin also prints a `-define:ODIN_TEST_NAMES=…` line listing the failures, ready to paste back to rerun only those.
 
