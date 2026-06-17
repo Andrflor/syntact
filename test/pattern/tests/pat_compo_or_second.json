@@ -1,0 +1,1 @@
+{"name": "compo_or_second", "description": "=10|=20 fires on 20", "source": "r -> 20 ? {=10 | =20 -> \"H\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"H\""}

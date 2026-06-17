@@ -1,0 +1,1 @@
+{"name": "exh_value_or_no_default", "description": "=10|=20 over u8 no default is non-exhaustive", "source": "a -> u8\nb -> a ? {=10 | =20 -> \"x\"}\n-> b", "expect_errors": ["Non_Exhaustive_Pattern"]}

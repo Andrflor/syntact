@@ -1,0 +1,1 @@
+{"name": "compo_and_value_miss", "description": "=1 & =5 cannot be both, misses 5", "source": "r -> 5 ? {=1 & =5 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

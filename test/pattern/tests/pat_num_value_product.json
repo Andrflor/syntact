@@ -1,0 +1,1 @@
+{"name": "num_value_product", "description": "=10 fires on 10, product 100", "source": "r -> 10 ? {=10 -> 100\n-> 0}\n-> r", "expect_errors": [], "expect": "100"}

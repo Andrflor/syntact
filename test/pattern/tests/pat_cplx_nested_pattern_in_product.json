@@ -1,0 +1,1 @@
+{"name": "cplx_nested_pattern_in_product", "description": "a pattern in a branch product: 5?{u8 -> (3?{=3->H})}", "source": "r -> 5 ? {u8 -> 3 ? {=3 -> \"H\"\n-> \"L\"}\n-> \"X\"}\n-> r", "expect_errors": [], "expect": "\"H\""}

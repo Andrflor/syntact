@@ -1,0 +1,1 @@
+{"name": "string_value_miss", "description": "=\"ho\" misses \"hi\"", "source": "r -> \"hi\" ? {=\"ho\" -> \"E\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

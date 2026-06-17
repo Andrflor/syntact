@@ -1,0 +1,1 @@
+{"name": "cplx_nested_two_levels_range", "description": "two nested patterns, inner range match", "source": "r -> 5 ? {u8 -> 7 ? {0..10 -> \"in\"\n-> \"out\"}\n-> \"no\"}\n-> r", "expect_errors": [], "expect": "\"in\""}

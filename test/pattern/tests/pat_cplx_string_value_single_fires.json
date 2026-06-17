@@ -1,0 +1,1 @@
+{"name": "cplx_string_value_single_fires", "description": "=\"a\" alone fires on \"a\"", "source": "r -> \"a\" ? {=\"a\" -> \"AB\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"AB\""}

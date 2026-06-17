@@ -1,0 +1,1 @@
+{"name": "cplx_compo_value_or_range_fires_value", "description": "=10 | 0..5 fires on 10 (value arm)", "source": "r -> 10 ? {=10 | 0..5 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

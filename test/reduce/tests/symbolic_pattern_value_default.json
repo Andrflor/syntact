@@ -2,5 +2,5 @@
   "name": "symbolic_pattern_value_default",
   "description": "Pattern value-match plus default over fixed point stays symbolic",
   "source": "n -> ??::u8\nc -> n ? {=5 -> 100, -> 0}\n-> c",
-  "expect": "??0 ? {=5 -> 100, -> 0}"
+  "expect": "??0 ? {{-> 5} -> 100, -> 0}"
 }

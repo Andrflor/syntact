@@ -1,0 +1,1 @@
+{"name": "cplx_nested_via_binding_self", "description": "inner pattern re-scrutinizes the same binding", "source": "a -> 5\nb -> a ? {u8 -> a ? {=5 -> \"yes\"\n-> \"no\"}\n-> \"x\"}\n-> b", "expect_errors": [], "expect": "\"yes\""}

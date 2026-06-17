@@ -1,0 +1,1 @@
+{"name": "constraint_shape_u8_ok", "description": "u8:b -> 5 : 5 has shape u8, ok", "source": "u8:b -> 5\n-> b", "expect_errors": []}

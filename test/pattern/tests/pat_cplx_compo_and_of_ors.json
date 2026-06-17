@@ -1,0 +1,1 @@
+{"name": "cplx_compo_and_of_ors", "description": "(=1|=2) & (=2|=3) intersects to {2}, fires on 2", "source": "r -> 2 ? {(=1 | =2) & (=2 | =3) -> \"M\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"M\""}

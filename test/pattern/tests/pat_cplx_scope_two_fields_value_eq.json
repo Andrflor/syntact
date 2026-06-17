@@ -1,0 +1,1 @@
+{"name": "cplx_scope_two_fields_value_eq", "description": "={x->5 y->6} fires on {x->5 y->6}", "source": "P -> {x->5 y->6}\nr -> P ? {={x->5 y->6} -> \"EQ\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"EQ\""}

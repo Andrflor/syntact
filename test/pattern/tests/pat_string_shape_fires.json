@@ -1,0 +1,1 @@
+{"name": "string_shape_fires", "description": "string shape fires on a concrete string", "source": "r -> \"hi\" ? {string -> \"S\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"S\""}

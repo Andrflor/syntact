@@ -1,0 +1,1 @@
+{"name": "shape_u8_fires_on_scalar", "description": "u8 (shape) fires on the scalar 5", "source": "r -> 5 ? {u8 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

@@ -1,0 +1,1 @@
+{"name": "cplx_string_value_or_fires", "description": "=\"a\" | =\"b\" MUST fire on \"a\" (string value-match under Or), exactly like =1|=2 fires on 1 \u2014 KNOWN FAILING: string value-match under Or wrongly falls through to default", "source": "r -> \"a\" ? {=\"a\" | =\"b\" -> \"AB\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"AB\""}

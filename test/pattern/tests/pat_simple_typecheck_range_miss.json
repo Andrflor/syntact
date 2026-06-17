@@ -1,0 +1,1 @@
+{"name": "simple_typecheck_range_miss", "description": "0..3 misses 5", "source": "r -> 5 ? {0..3 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

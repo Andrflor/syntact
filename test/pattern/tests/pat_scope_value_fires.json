@@ -1,0 +1,1 @@
+{"name": "scope_value_fires", "description": "={x->5} fires on {x->5}", "source": "P -> {x -> 5}\nr -> P ? {={x->5} -> \"E\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"E\""}

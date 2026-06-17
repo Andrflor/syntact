@@ -1,0 +1,1 @@
+{"name": "compo_mixed_value_miss", "description": "=1 | =2 misses 5", "source": "r -> 5 ? {=1 | =2 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

@@ -1,0 +1,1 @@
+{"name": "cplx_char_range_shape", "description": "'a'..'z' shape range fires on 'm'", "source": "r -> 'm' ? {'a'..'z' -> \"low\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"low\""}

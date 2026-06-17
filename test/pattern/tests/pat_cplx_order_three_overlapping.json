@@ -1,0 +1,1 @@
+{"name": "cplx_order_three_overlapping", "description": "=5 then 0..10 then u8: first (value) wins on 5", "source": "r -> 5 ? {=5 -> \"a\"\n0..10 -> \"b\"\nu8 -> \"c\"\n-> \"d\"}\n-> r", "expect_errors": [], "expect": "\"a\""}

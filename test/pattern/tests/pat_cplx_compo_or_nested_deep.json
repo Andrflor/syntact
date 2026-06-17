@@ -1,0 +1,1 @@
+{"name": "cplx_compo_or_nested_deep", "description": "(=1|=2)|(=7|=8) fires on 7", "source": "r -> 7 ? {(=1 | =2) | (=7 | =8) -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

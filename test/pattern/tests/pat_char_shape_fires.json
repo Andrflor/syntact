@@ -1,0 +1,1 @@
+{"name": "char_shape_fires", "description": "char fires on 'A'", "source": "r -> 'A' ? {char -> \"C\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"C\""}

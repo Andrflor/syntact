@@ -1,0 +1,1 @@
+{"name": "compo_mixed_value_shape", "description": "=1 | u8 : the u8 shape arm fires on 5", "source": "r -> 5 ? {=1 | u8 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

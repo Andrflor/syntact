@@ -1,0 +1,1 @@
+{"name": "constraint_value_u8_mismatch", "description": "=u8:b -> 5 : 5 is not the value u8 ({-> u8}), mismatch", "source": "=u8:b -> 5\n-> b", "expect_errors": ["Constraint_Mismatch"]}

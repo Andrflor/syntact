@@ -1,0 +1,1 @@
+{"name": "cplx_order_overlapping_range_first", "description": "0..10 first absorbs 5 before u8", "source": "r -> 5 ? {0..10 -> \"b\"\nu8 -> \"c\"\n-> \"d\"}\n-> r", "expect_errors": [], "expect": "\"b\""}

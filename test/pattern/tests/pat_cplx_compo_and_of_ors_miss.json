@@ -1,0 +1,1 @@
+{"name": "cplx_compo_and_of_ors_miss", "description": "(=1|=2) & (=2|=3) is {2}, misses 1", "source": "r -> 1 ? {(=1 | =2) & (=2 | =3) -> \"M\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

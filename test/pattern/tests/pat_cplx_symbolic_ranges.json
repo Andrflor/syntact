@@ -1,0 +1,1 @@
+{"name": "cplx_symbolic_ranges", "description": "?? target stays symbolic over a range split", "source": "n -> ??::u8\nr -> n ? {0..9 -> \"lo\"\n-> \"hi\"}\n-> r", "expect_errors": [], "expect": "??0 ? {0..9 -> \"lo\", -> \"hi\"}"}
