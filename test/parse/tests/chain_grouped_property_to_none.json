@@ -1,6 +1,6 @@
 {
   "name": "chain_grouped_property_to_none",
-  "description": "'(a.).b' — inside parens 'a.' parses as a property to none (Property(a, nil)); the outer '.b' chains another property onto it.",
+  "description": "'(a.).b' — the grouped 'a.' followed by '.b' parses as a single property chain a.b (Property(a, b)).",
   "source": "(a.).b",
-  "expect": "Scope[Property(Property(Identifier(a),nil),Identifier(b))]"
+  "expect": "Scope[Property(Identifier(a),Identifier(b))]"
 }
