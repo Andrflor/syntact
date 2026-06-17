@@ -71,6 +71,10 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if fold_is_unknown(left) do return left
 			if fold_is_unknown(right) do return right
 			syn := new_type(Or_Type{left, right})
+			// A producer branch (`{-> v}`) must stay symbolic: flattening would fuse the
+			// PRODUCED domains (`{-> 1} | {-> 2}` → `1..2`), losing the producer level and
+			// breaking the value-vs-shape proof. satisfy decomposes the Or per branch.
+			if fold_is_producer(left) || fold_is_producer(right) do return syn
 			if r := fold_constraint_integer(syn); r != nil do return r
 			if r := fold_constraint_float(syn); r != nil do return r
 			if r := fold_constraint_bool(syn); r != nil do return r
@@ -214,6 +218,20 @@ fold_is_unknown :: proc(t: ^Type) -> bool {
 	return unk
 }
 
+// fold_is_producer reports whether a folded constraint is a producer scope `{-> v}`
+// (a Scope_Type carrying a .Product). Such a scope must NEVER be flattened into its
+// produced domain by the numeric/bool kernels — `{-> a} | {-> b}` is the union of two
+// PRODUCER types, decided field-by-field by scope_satisfy, not `a | b` as a set.
+fold_is_producer :: proc(t: ^Type) -> bool {
+	if t == nil do return false
+	s, ok := t^.(Scope_Type)
+	if !ok do return false
+	for k in s.kind {
+		if k == .Product do return true
+	}
+	return false
+}
+
 // scope_fields_fold_unknown reports whether any field of a scope-shaped constraint
 // folds to Unknown — i.e. the scope is not a statically-known set. `key` identifies
 // the scope/carve node on the scan stack (guards self-referential constraints
@@ -294,13 +312,13 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 		if !ok do return false
 		return scope_satisfy(f, v)
 	case And_Type:
-		return satisfy(f.left, ft) && satisfy(f.right, ft)
+		return satisfy_root(f.left, ft) && satisfy_root(f.right, ft)
 	case Or_Type:
-		return satisfy(f.left, ft) || satisfy(f.right, ft)
+		return satisfy_root(f.left, ft) || satisfy_root(f.right, ft)
 	case Negate_Type:
 		// value ⊆ ~X ⟺ value not in X. Handles positional/mixed negation the fold
 		// does not expand into intervals.
-		return !satisfy(f.operand, ft)
+		return !satisfy_root(f.operand, ft)
 	}
 	return false
 }
