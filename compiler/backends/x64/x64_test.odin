@@ -7548,13 +7548,14 @@ testing_sysret :: proc(t: ^testing.T) {
 testing_int_imm8 :: proc(t: ^testing.T) {
 	batch := batch_begin(t)
 	defer batch_end(batch)
-	// Test a few interrupt numbers
-	for imm: u8 = 0; imm <= 255; imm += 50 {
+	// Test a few interrupt numbers. The counter is a plain int, NOT a u8: a
+	// `u8 <= 255` loop never terminates (the value wraps past 255 forever).
+	for imm := 0; imm <= 255; imm += 50 {
 		asm_str := fmt.tprintf("int %d", imm)
 
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
-		int_imm8(imm)
+		int_imm8(u8(imm))
 		batch_add(batch, asm_str)
 	}
 }
