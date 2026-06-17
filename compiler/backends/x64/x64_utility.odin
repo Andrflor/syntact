@@ -96,62 +96,36 @@ asm_to_bytes :: proc(asm_code: string, allocator := context.allocator) -> []byte
 }
 
 assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
-	uuid := string_hash(asm_str)
-	// Create temporary filenames inside the per-run OS-temp directory
+	// Unique scratch filenames (atomic) so concurrent test threads never collide.
+	seq := sync.atomic_add(&g_batch_seq, 1)
 	dir := test_temp_dir()
-	asm_file := fmt.tprintf("%s%ctemp_instruction_%x.s", dir, filepath.SEPARATOR, uuid)
-	obj_file := fmt.tprintf("%s%ctemp_instruction_%x.o", dir, filepath.SEPARATOR, uuid)
+	asm_file := fmt.tprintf("%s%ctemp_instruction_%d.s", dir, filepath.SEPARATOR, seq)
+	obj_file := fmt.tprintf("%s%ctemp_instruction_%d.o", dir, filepath.SEPARATOR, seq)
 
 	// Add Intel syntax prefix if not present
 	final_asm := fmt.tprintf(".intel_syntax noprefix\n%s\n", asm_str)
 	os.write_entire_file(asm_file, transmute([]byte)final_asm) or_return
 
-	// Assemble the code
-	{
-		r, w := os.pipe() or_return
-		proc_opts := os.Process_Desc {
-			command = {"as", "--64", "-o", obj_file, asm_file},
-			stderr  = w,
-		}
-
-		p := os.process_start(proc_opts) or_return
-		os.close(w) // Close write end after starting process
-
-		output := os.read_entire_file(r, context.temp_allocator) or_return
-
-		os.close(r)
-		_ = os.process_wait(p) or_return
-		os.remove(asm_file)
-		if (len(output) != 0) {
-			panic(
-				fmt.tprintf(
-					"Gnu as failed to assemble .intel_syntax noprefix for \"%s\" with the output: %s",
-					asm_str,
-					string(output),
-				),
-			)
-		}
-	}
-
-
-	// Get disassembly using objdump
-	objdump_output: []byte
-	{
-		r, w := os.pipe() or_return
-
-		proc_opts := os.Process_Desc {
-			command = {"objdump", "-d", "-M", "intel", obj_file},
-			stdout  = w,
-		}
-
-		p := os.process_start(proc_opts) or_return
-		os.close(w) // Close write end after starting process
-
-		objdump_output = os.read_entire_file(r, context.temp_allocator) or_return
-		os.close(r)
-		_ = os.process_wait(p) or_return
+	// Assemble; capture as's diagnostics via a file (no pipes, see exec_capture).
+	as_out := exec_capture({"as", "--64", "-o", obj_file, asm_file}, context.temp_allocator) or_return
+	os.remove(asm_file)
+	if len(as_out) != 0 {
 		os.remove(obj_file)
+		panic(
+			fmt.tprintf(
+				"Gnu as failed to assemble .intel_syntax noprefix for \"%s\" with the output: %s",
+				asm_str,
+				string(as_out),
+			),
+		)
 	}
+
+	// Get disassembly using objdump.
+	objdump_output := exec_capture(
+		{"objdump", "-d", "-M", "intel", obj_file},
+		context.temp_allocator,
+	) or_return
+	os.remove(obj_file)
 
 	// Parse the objdump output to extract bytes
 	parsed_bytes := parse_objdump(string(objdump_output))
@@ -161,6 +135,38 @@ assemble :: proc(asm_str: string) -> (data: []byte, err: os.Error) {
 
 	// Fallback to reading the object file directly
 	return {}, nil
+}
+
+// exec_capture runs `command` with BOTH its stdout and stderr redirected to a
+// scratch file, waits for it (process_wait blocks in waitpid and reaps the
+// child — no CPU-burning busy-poll), then returns the file's contents. Using a
+// real file instead of pipes avoids both the large-output pipe deadlock and the
+// busy-spin of os.process_exec's poll loop, which together starved the suite
+// under the parallel test runner.
+@(private = "file")
+exec_capture :: proc(
+	command: []string,
+	scratch: runtime.Allocator,
+) -> (
+	output: []byte,
+	err: os.Error,
+) {
+	dir := test_temp_dir()
+	seq := sync.atomic_add(&g_batch_seq, 1)
+	out_path := fmt.tprintf("%s%cexec_%d.out", dir, filepath.SEPARATOR, seq)
+
+	f := os.open(out_path, os.O_WRONLY + os.O_CREATE + os.O_TRUNC) or_return
+	p, start_err := os.process_start(os.Process_Desc{command = command, stdout = f, stderr = f})
+	os.close(f)
+	if start_err != nil {
+		os.remove(out_path)
+		return nil, start_err
+	}
+	_ = os.process_wait(p) or_return
+
+	output, _ = os.read_entire_file(out_path, scratch)
+	os.remove(out_path)
+	return output, nil
 }
 
 parse_objdump :: proc(dump_output: string) -> []byte {
@@ -961,40 +967,18 @@ batch_run :: proc(
 	}
 	os.write_entire_file(asm_file, transmute([]byte)strings.to_string(sb)) or_return
 
-	// Assemble.
-	{
-		r, w := os.pipe() or_return
-		proc_opts := os.Process_Desc {
-			command = {"as", "--64", "-o", obj_file, asm_file},
-			stderr  = w,
-		}
-		p := os.process_start(proc_opts) or_return
-		os.close(w)
-		output := os.read_entire_file(r, scratch) or_return
-		os.close(r)
-		_ = os.process_wait(p) or_return
-		os.remove(asm_file)
-		if len(output) != 0 {
-			os.remove(obj_file)
-			return "", true, nil
-		}
+	// Assemble; capture as's diagnostics via a file (no pipes — see exec_capture
+	// — so a large batch can't deadlock or burn CPU busy-polling).
+	as_out := exec_capture({"as", "--64", "-o", obj_file, asm_file}, scratch) or_return
+	os.remove(asm_file)
+	if len(as_out) != 0 {
+		os.remove(obj_file)
+		return "", true, nil
 	}
 
 	// Disassemble.
-	objdump_output: []byte
-	{
-		r, w := os.pipe() or_return
-		proc_opts := os.Process_Desc {
-			command = {"objdump", "-d", "-M", "intel", obj_file},
-			stdout  = w,
-		}
-		p := os.process_start(proc_opts) or_return
-		os.close(w)
-		objdump_output = os.read_entire_file(r, scratch) or_return
-		os.close(r)
-		_ = os.process_wait(p) or_return
-		os.remove(obj_file)
-	}
+	objdump_output := exec_capture({"objdump", "-d", "-M", "intel", obj_file}, scratch) or_return
+	os.remove(obj_file)
 
 	return string(objdump_output), false, nil
 }
