@@ -1,0 +1,1 @@
+{"name": "char_value_singleton_fires", "description": "='A' fires on 'A'", "source": "r -> 'A' ? {='A' -> \"C\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"C\""}

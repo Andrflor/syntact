@@ -1,0 +1,1 @@
+{"name": "compo_or_miss", "description": "=10|=20 misses 30", "source": "r -> 30 ? {=10 | =20 -> \"H\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

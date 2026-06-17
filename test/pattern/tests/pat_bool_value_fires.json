@@ -1,0 +1,1 @@
+{"name": "bool_value_fires", "description": "=true fires on true", "source": "r -> true ? {=true -> \"T\"\n-> \"F\"}\n-> r", "expect_errors": [], "expect": "\"T\""}

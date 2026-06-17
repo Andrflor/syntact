@@ -1,0 +1,1 @@
+{"name": "cplx_nested_three_levels", "description": "three nested patterns, deepest value-match fires", "source": "r -> 1 ? {u8 -> 2 ? {u8 -> 3 ? {=3 -> \"DEEP\"\n-> \"c\"}\n-> \"b\"}\n-> \"a\"}\n-> r", "expect_errors": [], "expect": "\"DEEP\""}

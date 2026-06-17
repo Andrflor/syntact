@@ -1,0 +1,1 @@
+{"name": "char_value_singleton_miss", "description": "='B' misses 'A'", "source": "r -> 'A' ? {='B' -> \"C\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

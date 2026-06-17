@@ -1,0 +1,1 @@
+{"name": "cplx_target_arith_expr", "description": "target is an arithmetic expression (n + 1)", "source": "n -> 4\nr -> (n + 1) ? {=5 -> \"five\"\n-> \"no\"}\n-> r", "expect_errors": [], "expect": "\"five\""}

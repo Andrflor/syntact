@@ -1,0 +1,1 @@
+{"name": "value_u8_does_not_fire_on_scalar", "description": "=u8 is {-> u8}, does NOT fire on the scalar 5 (value != shape)", "source": "r -> 5 ? {=u8 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

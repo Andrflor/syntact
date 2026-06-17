@@ -1,0 +1,1 @@
+{"name": "default_only", "description": "lone default fires on anything", "source": "a -> 42\nb -> a ? {\n  -> \"anything\"\n}\n-> b", "expect_errors": [], "expect": "\"anything\""}

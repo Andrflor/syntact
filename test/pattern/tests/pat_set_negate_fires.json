@@ -1,0 +1,1 @@
+{"name": "set_negate_fires", "description": "~0..3 fires on 5 outside", "source": "r -> 5 ? {~0..3 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

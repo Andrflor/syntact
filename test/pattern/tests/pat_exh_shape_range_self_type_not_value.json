@@ -1,0 +1,1 @@
+{"name": "exh_shape_range_self_type_not_value", "description": "0..10?{0..10->} is 0..10:a->0..10: the range type is not a value of itself -> non-exhaustive", "source": "a -> 0..10\nb -> a ? {0..10 -> \"x\"}\n-> b", "expect_errors": ["Non_Exhaustive_Pattern"]}

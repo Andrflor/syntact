@@ -1,0 +1,1 @@
+{"name": "cplx_target_carve_collapse", "description": "target is a carve+collapse F{x->9}!", "source": "F -> {u8:x\n-> x}\nr -> F{x->9}! ? {=9 -> \"nine\"\n-> \"no\"}\n-> r", "expect_errors": [], "expect": "\"nine\""}

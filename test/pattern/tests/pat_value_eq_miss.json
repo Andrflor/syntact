@@ -1,0 +1,1 @@
+{"name": "value_eq_miss", "description": "=6 misses 5", "source": "r -> 5 ? {=6 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

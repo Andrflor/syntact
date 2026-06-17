@@ -1,0 +1,1 @@
+{"name": "bool_value_miss", "description": "=true misses false", "source": "r -> false ? {=true -> \"T\"\n-> \"F\"}\n-> r", "expect_errors": [], "expect": "\"F\""}

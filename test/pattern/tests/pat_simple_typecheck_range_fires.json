@@ -1,0 +1,1 @@
+{"name": "simple_typecheck_range_fires", "description": "0..10 fires on 5", "source": "r -> 5 ? {0..10 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

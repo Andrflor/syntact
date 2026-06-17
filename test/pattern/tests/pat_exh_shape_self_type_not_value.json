@@ -1,0 +1,1 @@
+{"name": "exh_shape_self_type_not_value", "description": "u8?{u8->} is u8:a->u8: the TYPE u8 is not a value of u8, so it does not typecheck -> non-exhaustive", "source": "a -> u8\nb -> a ? {u8 -> \"x\"}\n-> b", "expect_errors": ["Non_Exhaustive_Pattern"]}

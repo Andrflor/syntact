@@ -1,0 +1,1 @@
+{"name": "cplx_target_union_expr", "description": "target is a union expression (a | 7)", "source": "a -> 5\nr -> (a | 7) ? {u8 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

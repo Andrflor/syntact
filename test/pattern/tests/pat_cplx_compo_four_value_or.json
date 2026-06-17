@@ -1,0 +1,1 @@
+{"name": "cplx_compo_four_value_or", "description": "=1|=2|=3|=4 fires on 3", "source": "r -> 3 ? {=1 | =2 | =3 | =4 -> \"H\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"H\""}

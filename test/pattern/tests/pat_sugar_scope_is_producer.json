@@ -1,0 +1,1 @@
+{"name": "sugar_scope_is_producer", "description": "={x->0 y->10} as a bare value is {-> {x->0 y->10}}", "source": "a -> ={x->0 y->10}\n-> a", "expect_errors": [], "expect": "{-> {x -> 0, y -> 10}}"}

@@ -1,0 +1,1 @@
+{"name": "cplx_compo_negate_value_miss", "description": "~(=5) excludes the value 5: misses 5", "source": "r -> 5 ? {~(=5) -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

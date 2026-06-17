@@ -1,0 +1,1 @@
+{"name": "num_shape_product", "description": "u8 fires on 10, product 1", "source": "r -> 10 ? {u8 -> 1\n-> 0}\n-> r", "expect_errors": [], "expect": "1"}

@@ -1,0 +1,1 @@
+{"name": "bool_shape_fires", "description": "bool shape fires on true", "source": "r -> true ? {bool -> \"B\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"B\""}

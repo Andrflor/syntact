@@ -1,0 +1,1 @@
+{"name": "exh_bool_value_partial", "description": "=true alone over bool is non-exhaustive", "source": "a -> bool\nb -> a ? {=true -> 1}\n-> b", "expect_errors": ["Non_Exhaustive_Pattern"]}

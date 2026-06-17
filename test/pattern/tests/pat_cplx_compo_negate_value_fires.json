@@ -1,0 +1,1 @@
+{"name": "cplx_compo_negate_value_fires", "description": "~(=5) fires on 6", "source": "r -> 6 ? {~(=5) -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

@@ -1,0 +1,1 @@
+{"name": "string_value_fires", "description": "=\"hi\" fires on \"hi\"", "source": "r -> \"hi\" ? {=\"hi\" -> \"E\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"E\""}

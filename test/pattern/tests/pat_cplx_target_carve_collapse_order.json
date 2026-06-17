@@ -1,0 +1,1 @@
+{"name": "cplx_target_carve_collapse_order", "description": "carve+collapse target, ordered range/value branches", "source": "F -> {u8:x\n-> x}\nr -> F{x->7}! ? {0..5 -> \"lo\"\n=7 -> \"seven\"\n-> \"hi\"}\n-> r", "expect_errors": [], "expect": "\"seven\""}

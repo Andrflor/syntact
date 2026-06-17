@@ -1,0 +1,1 @@
+{"name": "sugar_int_is_producer", "description": "=10 as a bare value is the producer {-> 10}", "source": "a -> =10\n-> a", "expect_errors": [], "expect": "{-> 10}"}

@@ -1,0 +1,1 @@
+{"name": "exh_value_u8_producer_covers", "description": "u8?{=u8->} is {-> u8}:a->u8: the scrutinee type u8 satisfies the producer {-> u8}, so it IS exhaustive", "source": "a -> u8\nb -> a ? {=u8 -> 1}\n-> b", "expect_errors": []}

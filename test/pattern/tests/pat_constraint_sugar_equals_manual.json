@@ -1,0 +1,1 @@
+{"name": "constraint_sugar_equals_manual", "description": "=u8:b equals {-> u8}:b : both mismatch on 5", "source": "{-> u8}:b -> 5\n-> b", "expect_errors": ["Constraint_Mismatch"]}

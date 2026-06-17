@@ -1,0 +1,1 @@
+{"name": "cplx_compo_and_range_and_value", "description": "0..10 & =5 fires on 5", "source": "r -> 5 ? {0..10 & =5 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"A\""}

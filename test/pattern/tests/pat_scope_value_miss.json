@@ -1,0 +1,1 @@
+{"name": "scope_value_miss", "description": "={x->6} misses {x->5}", "source": "P -> {x -> 5}\nr -> P ? {={x->6} -> \"E\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}

@@ -1,0 +1,1 @@
+{"name": "exh_value_or_with_default", "description": "=10|=20 over u8 with default is exhaustive", "source": "a -> u8\nb -> a ? {=10 | =20 -> \"x\"\n-> \"d\"}\n-> b", "expect_errors": []}

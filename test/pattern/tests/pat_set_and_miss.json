@@ -1,0 +1,1 @@
+{"name": "set_and_miss", "description": "0..10 & 3..7 misses 8", "source": "r -> 8 ? {0..10 & 3..7 -> \"A\"\n-> \"D\"}\n-> r", "expect_errors": [], "expect": "\"D\""}
