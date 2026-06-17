@@ -1,0 +1,1 @@
+{ "name": "tc_neg_self_ok", "description": "BUG REPRO: a negation value satisfies its own constraint (~10 ⊆ ~10). Currently rejected because the Or-folding value gets wrapped in a stray {-> } producer that no longer matches the bare constraint", "source": "~10:a -> ~10", "expect_errors": [] }

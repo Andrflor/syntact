@@ -1,0 +1,1 @@
+{ "name": "tc_eq_neg_union_bad", "description": "BUG REPRO: =~10 means {-> ~10}; ~(10|11|1000) is not statically ~10, must be rejected (the = sugar fails to bite through a Negate value)", "source": "=~10:a -> ~(10 | 11 | 1000)", "expect_errors": ["Constraint_Mismatch"] }
