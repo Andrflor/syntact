@@ -9,8 +9,10 @@
 ///////////////////////////////////////////////////////////////////////////////
 package x64_assembler
 
+import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:math/rand"
 import "core:strings"
 import "core:testing"
@@ -60,6 +62,76 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 	}
 }
 
+// ==================================
+// BATCHED ENCODING CHECKS
+// ==================================
+// Each @(test) proc accumulates its (asm string, our encoded bytes) pairs into
+// an Encoding_Batch instead of shelling out to `as`/`objdump` per instruction.
+// At proc exit batch_end assembles the WHOLE batch in a single `as` + `objdump`
+// pass (see batch_assemble in x64_utility.odin) and compares each case, keeping
+// the exact same first-failure reporting as compare_bytecode.
+
+Encoding_Case :: struct {
+	asm_str:  string, // cloned reference assembly
+	expected: []u8, // our encoder's output (the "got" side)
+}
+
+Encoding_Batch :: struct {
+	t:     ^testing.T,
+	arena: mem.Dynamic_Arena, // all batch allocations; freed in one shot
+	cases: [dynamic]Encoding_Case,
+}
+
+// batch_begin opens a batch for a test proc; pair with `defer batch_end(...)`.
+// Everything the batch allocates goes in a growing arena (backed by the
+// persistent allocator) which batch_end frees in a single call — so a large
+// batch cannot overflow the test's bounded temp allocator, and nothing leaks.
+batch_begin :: proc(t: ^testing.T) -> ^Encoding_Batch {
+	b := new(Encoding_Batch)
+	b.t = t
+	// Back the arena on the heap (not context.allocator, which the test runner
+	// caps at PER_THREAD_MEMORY) so a large batch can grow freely.
+	mem.dynamic_arena_init(&b.arena, runtime.heap_allocator(), runtime.heap_allocator())
+	b.cases = make([dynamic]Encoding_Case, mem.dynamic_arena_allocator(&b.arena))
+	return b
+}
+
+// batch_add records one case: it snapshots the bytes our encoder just wrote to
+// context.user_ptr and the asm string to assemble as the reference.
+batch_add :: proc(b: ^Encoding_Batch, asm_str: string) {
+	a := mem.dynamic_arena_allocator(&b.arena)
+	buffer := (^ByteBuffer)(context.user_ptr)
+	expected := make([]u8, buffer.len, a)
+	copy(expected, buffer.data[:buffer.len])
+	append(&b.cases, Encoding_Case{asm_str = strings.clone(asm_str, a), expected = expected})
+}
+
+// batch_end assembles every recorded case in a single external pass and checks
+// each, then frees the whole batch arena.
+batch_end :: proc(b: ^Encoding_Batch) {
+	a := mem.dynamic_arena_allocator(&b.arena)
+	if len(b.cases) > 0 {
+		strs := make([]string, len(b.cases), a)
+		for c, i in b.cases {
+			strs[i] = c.asm_str
+		}
+		refs := batch_assemble(strs, a)
+		for c, i in b.cases {
+			// Present the reference as "expected" and our bytes as "got",
+			// matching compare_bytecode's message orientation.
+			tmp := ByteBuffer {
+				data = c.expected,
+				len  = len(c.expected),
+				cap  = len(c.expected),
+			}
+			context.user_ptr = &tmp
+			compare_bytecode(b.t, c.asm_str, refs[i])
+		}
+	}
+	mem.dynamic_arena_destroy(&b.arena)
+	free(b)
+}
+
 
 // ==================================
 // X86-64 MOV INSTRUCTION TESTS
@@ -69,6 +141,8 @@ compare_bytecode :: proc(t: ^testing.T, desc: string, expected: []u8) {
 // --------------------------------
 @(test)
 testing_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	for dst in registers64 {
 		for src in registers64 {
@@ -80,13 +154,15 @@ testing_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_r64_imm64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	interestingImm64 := get_interesting_imm64_values()
 	for dst in registers64 {
@@ -95,13 +171,15 @@ testing_r64_imm64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r64_imm64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -126,13 +204,15 @@ testing_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Memory operand tests
 @(test)
 testing_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -157,13 +237,15 @@ testing_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // MOVABS instruction test
 @(test)
 testing_movabs_r64_imm64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	interestingImm64 := get_interesting_imm64_values()
 
@@ -174,7 +256,7 @@ testing_movabs_r64_imm64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movabs_r64_imm64(dst, i64(src))
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -182,6 +264,8 @@ testing_movabs_r64_imm64 :: proc(t: ^testing.T) {
 // Sign extension from 32-bit to 64-bit
 @(test)
 testing_movsx_r64_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	registers32 := get_all_registers32()
 
@@ -196,7 +280,7 @@ testing_movsx_r64_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsx_r64_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -204,6 +288,8 @@ testing_movsx_r64_r32 :: proc(t: ^testing.T) {
 // Double-word to quadword sign extension
 @(test)
 testing_movsxd_r64_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	registers32 := get_all_registers32()
 
@@ -218,7 +304,7 @@ testing_movsxd_r64_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsxd_r64_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -226,6 +312,8 @@ testing_movsxd_r64_r32 :: proc(t: ^testing.T) {
 // ADD operations tests
 @(test)
 testing_add_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm8Values := get_interesting_imm8_values()
 
@@ -236,13 +324,15 @@ testing_add_r64_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r64_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_add_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -267,12 +357,14 @@ testing_add_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -297,12 +389,14 @@ testing_add_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -323,12 +417,14 @@ testing_add_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_r32_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm8Values := get_interesting_imm8_values()
 
@@ -339,13 +435,15 @@ testing_add_r32_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r32_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_add_r32_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -370,12 +468,14 @@ testing_add_r32_m32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_r32_m32(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -400,12 +500,14 @@ testing_add_m32_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m32_r32(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -426,12 +528,14 @@ testing_add_m32_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m32_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_r16_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers16 := get_all_registers16()
@@ -456,12 +560,14 @@ testing_add_r16_m16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_r16_m16(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers16 := get_all_registers16()
@@ -486,12 +592,14 @@ testing_add_m16_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m16_r16(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm16Values := get_interesting_imm16_values()
@@ -512,12 +620,14 @@ testing_add_m16_imm16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m16_imm16(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_r8_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers8 := get_all_registers8()
@@ -542,12 +652,14 @@ testing_add_r8_m8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_r8_m8(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers8 := get_all_registers8()
@@ -572,12 +684,14 @@ testing_add_m8_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m8_r8(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_add_m8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm8Values := get_interesting_imm8_values()
@@ -598,13 +712,15 @@ testing_add_m8_imm8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		add_m8_imm8(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // SUB operations tests
 @(test)
 testing_sub_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm8Values := get_interesting_imm8_values()
 
@@ -615,13 +731,15 @@ testing_sub_r64_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r64_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -646,12 +764,14 @@ testing_sub_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sub_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sub_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -676,12 +796,14 @@ testing_sub_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sub_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sub_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -702,12 +824,14 @@ testing_sub_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sub_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sub_r32_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -732,12 +856,14 @@ testing_sub_r32_m32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sub_r32_m32(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sub_m32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -762,12 +888,14 @@ testing_sub_m32_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sub_m32_r32(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sub_m32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -788,13 +916,15 @@ testing_sub_m32_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sub_m32_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // AND operations tests
 @(test)
 testing_and_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -819,12 +949,14 @@ testing_and_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		and_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_and_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -849,12 +981,14 @@ testing_and_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		and_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_and_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -875,13 +1009,15 @@ testing_and_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		and_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // OR operations tests
 @(test)
 testing_or_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -906,12 +1042,14 @@ testing_or_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		or_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_or_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -936,12 +1074,14 @@ testing_or_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		or_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_or_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -962,13 +1102,15 @@ testing_or_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		or_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // XOR operations tests
 @(test)
 testing_xor_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -993,12 +1135,14 @@ testing_xor_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		xor_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_xor_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1023,13 +1167,15 @@ testing_xor_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		xor_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 
 @(test)
 testing_xor_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -1050,13 +1196,15 @@ testing_xor_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		xor_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // ADC operations tests
 @(test)
 testing_adc_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1081,12 +1229,14 @@ testing_adc_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		adc_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_adc_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1111,12 +1261,14 @@ testing_adc_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		adc_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_adc_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -1137,13 +1289,15 @@ testing_adc_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		adc_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // SBB operations tests
 @(test)
 testing_sbb_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1168,12 +1322,14 @@ testing_sbb_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sbb_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sbb_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1198,12 +1354,14 @@ testing_sbb_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sbb_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sbb_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -1224,13 +1382,15 @@ testing_sbb_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sbb_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // CMP operations tests
 @(test)
 testing_cmp_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1255,12 +1415,14 @@ testing_cmp_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		cmp_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_cmp_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1285,12 +1447,14 @@ testing_cmp_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		cmp_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_cmp_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -1311,13 +1475,15 @@ testing_cmp_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		cmp_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // TEST operations tests
 @(test)
 testing_test_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1342,12 +1508,14 @@ testing_test_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		test_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_test_m64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	imm32Values := get_interesting_imm32_values()
@@ -1368,13 +1536,15 @@ testing_test_m64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		test_m64_imm32(dst, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Unary operations tests
 @(test)
 testing_inc_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1390,12 +1560,14 @@ testing_inc_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		inc_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_dec_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1411,12 +1583,14 @@ testing_dec_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		dec_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_neg_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1432,13 +1606,15 @@ testing_neg_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		neg_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // MUL/DIV operations tests
 @(test)
 testing_mul_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1454,12 +1630,14 @@ testing_mul_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mul_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1475,12 +1653,14 @@ testing_imul_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		imul_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1505,12 +1685,14 @@ testing_imul_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		imul_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_div_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1526,12 +1708,14 @@ testing_div_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		div_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_idiv_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -1547,13 +1731,15 @@ testing_idiv_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		idiv_m64(op)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // MOV operations tests
 @(test)
 testing_mov_r64_imm64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm64Values := get_interesting_imm64_values()
 
@@ -1564,13 +1750,15 @@ testing_mov_r64_imm64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r64_imm64(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1595,12 +1783,14 @@ testing_mov_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_mov_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1625,12 +1815,14 @@ testing_mov_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_mov_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -1644,7 +1836,7 @@ testing_mov_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -1652,6 +1844,8 @@ testing_mov_r64_r64 :: proc(t: ^testing.T) {
 // Jump tests
 @(test)
 testing_jl_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
 	for imm8 in imm8Values {
@@ -1661,12 +1855,14 @@ testing_jl_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jl_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jle_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
 	for imm8 in imm8Values {
@@ -1676,12 +1872,14 @@ testing_jle_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jle_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jg_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
 	for imm8 in imm8Values {
@@ -1691,12 +1889,14 @@ testing_jg_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jg_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jge_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
 	for imm8 in imm8Values {
@@ -1706,7 +1906,7 @@ testing_jge_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jge_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -1714,6 +1914,8 @@ testing_jge_rel8 :: proc(t: ^testing.T) {
 // Zero extension tests
 @(test)
 testing_movzx_r64_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	registers8 := get_all_registers8()
 
@@ -1728,13 +1930,15 @@ testing_movzx_r64_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movzx_r64_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_movzx_r64_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	registers16 := get_all_registers16()
 
@@ -1749,7 +1953,7 @@ testing_movzx_r64_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movzx_r64_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -1757,6 +1961,8 @@ testing_movzx_r64_r16 :: proc(t: ^testing.T) {
 // Sign extension tests
 @(test)
 testing_movsx_r64_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	registers8 := get_all_registers8()
 
@@ -1771,13 +1977,15 @@ testing_movsx_r64_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsx_r64_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_movsx_r64_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	registers16 := get_all_registers16()
 
@@ -1792,7 +2000,7 @@ testing_movsx_r64_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsx_r64_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -1800,6 +2008,8 @@ testing_movsx_r64_r16 :: proc(t: ^testing.T) {
 // Byte swapping tests
 @(test)
 testing_movbe_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1824,12 +2034,14 @@ testing_movbe_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		movbe_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_movbe_m64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1854,13 +2066,15 @@ testing_movbe_m64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		movbe_m64_r64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Byte swap test
 @(test)
 testing_bswap_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -1869,13 +2083,15 @@ testing_bswap_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		bswap_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Exchange test
 @(test)
 testing_xchg_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -1889,7 +2105,7 @@ testing_xchg_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xchg_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -1897,6 +2113,8 @@ testing_xchg_r64_r64 :: proc(t: ^testing.T) {
 // Load effective address test
 @(test)
 testing_lea_r64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers64 := get_all_registers64()
@@ -1921,13 +2139,15 @@ testing_lea_r64_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		lea_r64_m64(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 32-bit register tests
 @(test)
 testing_mov_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -1938,13 +2158,15 @@ testing_mov_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -1958,13 +2180,15 @@ testing_mov_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r32_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -1989,12 +2213,14 @@ testing_mov_r32_m32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_r32_m32(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_mov_m32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -2019,13 +2245,15 @@ testing_mov_m32_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_m32_r32(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Zero extension 32-bit tests
 @(test)
 testing_movzx_r32_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	registers8 := get_all_registers8()
 
@@ -2040,13 +2268,15 @@ testing_movzx_r32_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movzx_r32_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_movzx_r32_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	registers16 := get_all_registers16()
 
@@ -2061,7 +2291,7 @@ testing_movzx_r32_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movzx_r32_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2069,6 +2299,8 @@ testing_movzx_r32_r16 :: proc(t: ^testing.T) {
 // Sign extension 32-bit tests
 @(test)
 testing_movsx_r32_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	registers8 := get_all_registers8()
 
@@ -2083,13 +2315,15 @@ testing_movsx_r32_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsx_r32_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_movsx_r32_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	registers16 := get_all_registers16()
 
@@ -2104,7 +2338,7 @@ testing_movsx_r32_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsx_r32_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2112,6 +2346,8 @@ testing_movsx_r32_r16 :: proc(t: ^testing.T) {
 // 32-bit register exchange
 @(test)
 testing_xchg_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -2125,7 +2361,7 @@ testing_xchg_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xchg_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2133,6 +2369,8 @@ testing_xchg_r32_r32 :: proc(t: ^testing.T) {
 // Load effective address 32-bit
 @(test)
 testing_lea_r32_m :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers32 := get_all_registers32()
@@ -2157,13 +2395,15 @@ testing_lea_r32_m :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		lea_r32_m(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 16-bit register tests
 @(test)
 testing_mov_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -2174,13 +2414,15 @@ testing_mov_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -2194,13 +2436,15 @@ testing_mov_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r16_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers16 := get_all_registers16()
@@ -2225,12 +2469,14 @@ testing_mov_r16_m16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_r16_m16(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_mov_m16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers16 := get_all_registers16()
@@ -2255,13 +2501,15 @@ testing_mov_m16_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_m16_r16(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Zero extension 16-bit test
 @(test)
 testing_movzx_r16_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	registers8 := get_all_registers8()
 
@@ -2276,7 +2524,7 @@ testing_movzx_r16_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movzx_r16_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2284,6 +2532,8 @@ testing_movzx_r16_r8 :: proc(t: ^testing.T) {
 // Sign extension 16-bit tests
 @(test)
 testing_movsx_r16_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	registers8 := get_all_registers8()
 
@@ -2298,7 +2548,7 @@ testing_movsx_r16_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			movsx_r16_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2306,6 +2556,8 @@ testing_movsx_r16_r8 :: proc(t: ^testing.T) {
 // 16-bit register exchange
 @(test)
 testing_xchg_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -2319,7 +2571,7 @@ testing_xchg_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xchg_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2327,6 +2579,8 @@ testing_xchg_r16_r16 :: proc(t: ^testing.T) {
 // Load effective address 16-bit
 @(test)
 testing_lea_r16_m :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers16 := get_all_registers16()
@@ -2351,13 +2605,15 @@ testing_lea_r16_m :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		lea_r16_m(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 8-bit register tests
 @(test)
 testing_mov_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -2368,13 +2624,15 @@ testing_mov_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -2388,13 +2646,15 @@ testing_mov_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r8_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers8 := get_all_registers8()
@@ -2419,12 +2679,14 @@ testing_mov_r8_m8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_r8_m8(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_mov_m8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 	registers8 := get_all_registers8()
@@ -2449,13 +2711,15 @@ testing_mov_m8_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_m8_r8(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 8-bit register exchange
 @(test)
 testing_xchg_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -2469,7 +2733,7 @@ testing_xchg_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xchg_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2477,6 +2741,8 @@ testing_xchg_r8_r8 :: proc(t: ^testing.T) {
 // Segment register tests
 @(test)
 testing_mov_sreg_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
 	registers16 := get_all_registers16()
 
@@ -2492,13 +2758,15 @@ testing_mov_sreg_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_sreg_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r16_sreg :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
 	registers16 := get_all_registers16()
 
@@ -2513,13 +2781,15 @@ testing_mov_r16_sreg :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r16_sreg(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_sreg_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
@@ -2544,12 +2814,14 @@ testing_mov_sreg_m16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_sreg_m16(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_mov_m16_sreg :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	segment_regs := [6]SegmentRegister{.CS, .DS, .ES, .FS, .GS, .SS}
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
@@ -2574,13 +2846,15 @@ testing_mov_m16_sreg :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mov_m16_sreg(dst, src)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 64-bit arithmetic operations
 @(test)
 testing_add_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm32Values := get_interesting_imm32_values()
 
@@ -2591,13 +2865,15 @@ testing_add_r64_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r64_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_add_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2611,13 +2887,15 @@ testing_add_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm32Values := get_interesting_imm32_values()
 
@@ -2628,13 +2906,15 @@ testing_sub_r64_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r64_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2648,13 +2928,15 @@ testing_sub_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_inc_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -2663,12 +2945,14 @@ testing_inc_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		inc_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_dec_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -2677,12 +2961,14 @@ testing_dec_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		dec_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_neg_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -2691,12 +2977,14 @@ testing_neg_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		neg_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_adc_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2710,13 +2998,15 @@ testing_adc_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			adc_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sbb_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2730,7 +3020,7 @@ testing_sbb_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sbb_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2738,6 +3028,8 @@ testing_sbb_r64_r64 :: proc(t: ^testing.T) {
 // Multiplication and division tests
 @(test)
 testing_mul_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -2746,12 +3038,14 @@ testing_mul_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mul_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2765,13 +3059,15 @@ testing_imul_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			imul_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_imul_r64_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm32Values := get_interesting_imm32_values()
 
@@ -2797,12 +3093,14 @@ testing_imul_r64_r64_imm32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		imul_r64_r64_imm32(dst, src, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm32Values := get_interesting_imm32_values()
 
@@ -2813,13 +3111,15 @@ testing_imul_r64_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			imul_r64_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_div_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -2828,12 +3128,14 @@ testing_div_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		div_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_idiv_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -2842,12 +3144,14 @@ testing_idiv_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		idiv_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_xadd_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2861,7 +3165,7 @@ testing_xadd_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xadd_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2869,6 +3173,8 @@ testing_xadd_r64_r64 :: proc(t: ^testing.T) {
 // Logical operations
 @(test)
 testing_and_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -2882,7 +3188,7 @@ testing_and_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2890,6 +3196,8 @@ testing_and_r64_r64 :: proc(t: ^testing.T) {
 // Control register operations tests
 @(test)
 testing_mov_r64_cr :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	control_registers := get_all_control_register()
 
@@ -2904,13 +3212,15 @@ testing_mov_r64_cr :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r64_cr(reg, cr)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_cr_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	control_registers := get_all_control_register()
 
@@ -2925,13 +3235,15 @@ testing_mov_cr_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_cr_r64(cr, reg)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_r64_dr :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	debug_registers := get_all_debug_register()
 
@@ -2946,13 +3258,15 @@ testing_mov_r64_dr :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_r64_dr(reg, dr)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mov_dr_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	debug_registers := get_all_debug_register()
 
@@ -2967,7 +3281,7 @@ testing_mov_dr_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			mov_dr_r64(dr, reg)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -2975,6 +3289,8 @@ testing_mov_dr_r64 :: proc(t: ^testing.T) {
 // 32-bit arithmetic operation tests
 @(test)
 testing_add_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -2985,13 +3301,15 @@ testing_add_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_add_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3005,13 +3323,15 @@ testing_add_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -3022,13 +3342,15 @@ testing_sub_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3042,13 +3364,15 @@ testing_sub_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_inc_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3057,12 +3381,14 @@ testing_inc_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		inc_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_dec_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3071,12 +3397,14 @@ testing_dec_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		dec_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_neg_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3085,12 +3413,14 @@ testing_neg_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		neg_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_adc_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3104,13 +3434,15 @@ testing_adc_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			adc_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sbb_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3124,13 +3456,15 @@ testing_sbb_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sbb_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mul_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3139,12 +3473,14 @@ testing_mul_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mul_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3153,12 +3489,14 @@ testing_imul_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		imul_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3172,13 +3510,15 @@ testing_imul_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			imul_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_imul_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -3189,13 +3529,15 @@ testing_imul_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			imul_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_imul_r32_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -3212,7 +3554,7 @@ testing_imul_r32_r32_imm32 :: proc(t: ^testing.T) {
 				buffer := ByteBuffer{}
 				context.user_ptr = &buffer
 				imul_r32_r32_imm32(dst, src, imm)
-				compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+				batch_add(batch, asm_str)
 			}
 		}
 	}
@@ -3220,6 +3562,8 @@ testing_imul_r32_r32_imm32 :: proc(t: ^testing.T) {
 
 @(test)
 testing_div_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3228,12 +3572,14 @@ testing_div_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		div_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_idiv_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3242,24 +3588,28 @@ testing_idiv_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		idiv_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_cdq :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "cdq"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	cdq()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // 16-bit arithmetic operations tests
 
 @(test)
 testing_add_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -3270,13 +3620,15 @@ testing_add_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_add_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3290,13 +3642,15 @@ testing_add_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -3307,13 +3661,15 @@ testing_sub_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3327,13 +3683,15 @@ testing_sub_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_inc_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3342,12 +3700,14 @@ testing_inc_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		inc_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_dec_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3356,12 +3716,14 @@ testing_dec_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		dec_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_neg_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3370,12 +3732,14 @@ testing_neg_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		neg_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_adc_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3389,13 +3753,15 @@ testing_adc_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			adc_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sbb_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3409,13 +3775,15 @@ testing_sbb_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sbb_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mul_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3424,12 +3792,14 @@ testing_mul_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mul_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3438,12 +3808,14 @@ testing_imul_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		imul_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3457,13 +3829,15 @@ testing_imul_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			imul_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_imul_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -3474,13 +3848,15 @@ testing_imul_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			imul_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_div_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3489,12 +3865,14 @@ testing_div_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		div_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_idiv_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3503,7 +3881,7 @@ testing_idiv_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		idiv_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -3511,6 +3889,8 @@ testing_idiv_r16 :: proc(t: ^testing.T) {
 
 @(test)
 testing_add_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -3521,13 +3901,15 @@ testing_add_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_add_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -3541,13 +3923,15 @@ testing_add_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			add_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -3558,13 +3942,15 @@ testing_sub_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sub_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -3578,13 +3964,15 @@ testing_sub_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sub_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_inc_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3593,12 +3981,14 @@ testing_inc_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		inc_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_dec_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3607,12 +3997,14 @@ testing_dec_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		dec_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_neg_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3621,12 +4013,14 @@ testing_neg_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		neg_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_adc_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -3640,13 +4034,15 @@ testing_adc_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			adc_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sbb_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -3660,13 +4056,15 @@ testing_sbb_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sbb_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_mul_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3675,12 +4073,14 @@ testing_mul_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		mul_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_imul_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3689,12 +4089,14 @@ testing_imul_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		imul_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_div_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3703,12 +4105,14 @@ testing_div_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		div_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_idiv_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -3717,7 +4121,7 @@ testing_idiv_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		idiv_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -3725,6 +4129,8 @@ testing_idiv_r8 :: proc(t: ^testing.T) {
 // 32-bit logical operations tests
 @(test)
 testing_and_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3738,13 +4144,15 @@ testing_and_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_and_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -3755,13 +4163,15 @@ testing_and_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_or_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3775,13 +4185,15 @@ testing_or_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_or_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -3792,13 +4204,15 @@ testing_or_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -3812,13 +4226,15 @@ testing_xor_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -3829,13 +4245,15 @@ testing_xor_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_not_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -3844,7 +4262,7 @@ testing_not_r32 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		not_r32(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -3852,6 +4270,8 @@ testing_not_r32 :: proc(t: ^testing.T) {
 
 @(test)
 testing_and_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3865,13 +4285,15 @@ testing_and_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_and_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -3882,13 +4304,15 @@ testing_and_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_or_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3902,13 +4326,15 @@ testing_or_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_or_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -3919,13 +4345,15 @@ testing_or_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -3939,13 +4367,15 @@ testing_xor_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -3956,13 +4386,15 @@ testing_xor_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_not_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -3971,7 +4403,7 @@ testing_not_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		not_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -3979,6 +4411,8 @@ testing_not_r16 :: proc(t: ^testing.T) {
 
 @(test)
 testing_and_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -3992,13 +4426,15 @@ testing_and_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_and_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4009,13 +4445,15 @@ testing_and_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			and_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_or_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -4025,13 +4463,15 @@ testing_or_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_or_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4042,13 +4482,15 @@ testing_or_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for dst in registers8 {
@@ -4062,13 +4504,15 @@ testing_xor_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r8_r8(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4079,13 +4523,15 @@ testing_xor_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_not_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4094,7 +4540,7 @@ testing_not_r8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		not_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -4103,6 +4549,8 @@ testing_not_r8 :: proc(t: ^testing.T) {
 
 @(test)
 testing_shr_r16_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	// For shifts, typical values are 1, 2, 4, 8
 	shift_values := []u8{1, 2, 4, 8}
@@ -4114,13 +4562,15 @@ testing_shr_r16_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shr_r16_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_shr_r16_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -4129,12 +4579,14 @@ testing_shr_r16_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shr_r16_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sar_r16_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	shift_values := []u8{1, 2, 4, 8}
 
@@ -4145,13 +4597,15 @@ testing_sar_r16_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sar_r16_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sar_r16_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -4160,12 +4614,14 @@ testing_sar_r16_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sar_r16_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_rol_r16_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	shift_values := []u8{1, 2, 4, 8}
 
@@ -4176,13 +4632,15 @@ testing_rol_r16_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			rol_r16_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_rol_r16_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -4191,12 +4649,14 @@ testing_rol_r16_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		rol_r16_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_ror_r16_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	shift_values := []u8{1, 2, 4, 8}
 
@@ -4207,13 +4667,15 @@ testing_ror_r16_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			ror_r16_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_ror_r16_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -4222,7 +4684,7 @@ testing_ror_r16_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		ror_r16_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -4230,6 +4692,8 @@ testing_ror_r16_cl :: proc(t: ^testing.T) {
 
 @(test)
 testing_shr_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	shift_values := []u8{1, 2, 4, 7}
 
@@ -4240,13 +4704,15 @@ testing_shr_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shr_r8_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_shr_r8_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4255,12 +4721,14 @@ testing_shr_r8_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shr_r8_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sar_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	shift_values := []u8{1, 2, 4, 7}
 
@@ -4271,13 +4739,15 @@ testing_sar_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sar_r8_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sar_r8_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4286,12 +4756,14 @@ testing_sar_r8_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sar_r8_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_rol_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	shift_values := []u8{1, 2, 4, 7}
 
@@ -4302,13 +4774,15 @@ testing_rol_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			rol_r8_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_rol_r8_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4317,12 +4791,14 @@ testing_rol_r8_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		rol_r8_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_ror_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	shift_values := []u8{1, 2, 4, 7}
 
@@ -4333,13 +4809,15 @@ testing_ror_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			ror_r8_imm8(reg, shift)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_ror_r8_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4348,13 +4826,15 @@ testing_ror_r8_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		ror_r8_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 
 @(test)
 testing_or_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4368,13 +4848,15 @@ testing_or_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			or_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_xor_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4388,13 +4870,15 @@ testing_xor_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			xor_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_not_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -4403,13 +4887,15 @@ testing_not_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		not_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Shift operations
 @(test)
 testing_shl_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4420,13 +4906,15 @@ testing_shl_r64_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shl_r64_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_shr_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4437,13 +4925,15 @@ testing_shr_r64_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shr_r64_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_rol_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4454,13 +4944,15 @@ testing_rol_r64_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			rol_r64_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_ror_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm8Values := get_interesting_imm8_values()
 
@@ -4471,7 +4963,7 @@ testing_ror_r64_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			ror_r64_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -4479,6 +4971,8 @@ testing_ror_r64_imm8 :: proc(t: ^testing.T) {
 // Double-precision shift operations tests
 @(test)
 testing_shld_r64_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few values to avoid explosion
@@ -4503,12 +4997,14 @@ testing_shld_r64_r64_imm8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shld_r64_r64_imm8(dst, src, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_shrd_r64_r64_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few values to avoid explosion
@@ -4533,13 +5029,15 @@ testing_shrd_r64_r64_imm8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shrd_r64_r64_imm8(dst, src, imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 32-bit shift operations with immediate
 @(test)
 testing_shl_r32_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4550,7 +5048,7 @@ testing_shl_r32_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shl_r32_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -4558,6 +5056,8 @@ testing_shl_r32_imm8 :: proc(t: ^testing.T) {
 // 32-bit shift operations with CL register
 @(test)
 testing_shl_r32_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4566,12 +5066,14 @@ testing_shl_r32_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shl_r32_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_shr_r32_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4582,13 +5084,15 @@ testing_shr_r32_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shr_r32_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_shr_r32_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4597,12 +5101,14 @@ testing_shr_r32_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shr_r32_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sar_r32_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4613,13 +5119,15 @@ testing_sar_r32_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			sar_r32_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_sar_r32_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4628,12 +5136,14 @@ testing_sar_r32_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		sar_r32_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_rol_r32_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4644,13 +5154,15 @@ testing_rol_r32_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			rol_r32_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_rol_r32_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4659,12 +5171,14 @@ testing_rol_r32_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		rol_r32_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_ror_r32_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4675,13 +5189,15 @@ testing_ror_r32_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			ror_r32_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_ror_r32_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg in registers32 {
@@ -4690,13 +5206,15 @@ testing_ror_r32_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		ror_r32_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 16-bit shift operations with immediate
 @(test)
 testing_shl_r16_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -4707,13 +5225,15 @@ testing_shl_r16_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shl_r16_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_shl_r16_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -4722,13 +5242,15 @@ testing_shl_r16_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shl_r16_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // 8-bit shift operations
 @(test)
 testing_shl_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4739,13 +5261,15 @@ testing_shl_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			shl_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_shl_r8_cl :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg in registers8 {
@@ -4754,13 +5278,15 @@ testing_shl_r8_cl :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		shl_r8_cl(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Bit test operations
 @(test)
 testing_bt_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few combinations to avoid explosion
@@ -4781,12 +5307,14 @@ testing_bt_r64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		bt_r64_r64(reg, bit_idx)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_bts_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few combinations to avoid explosion
@@ -4807,12 +5335,14 @@ testing_bts_r64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		bts_r64_r64(reg, bit_idx)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_btr_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few combinations to avoid explosion
@@ -4833,12 +5363,14 @@ testing_btr_r64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		btr_r64_r64(reg, bit_idx)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_btc_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few combinations to avoid explosion
@@ -4859,13 +5391,15 @@ testing_btc_r64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		btc_r64_r64(reg, bit_idx)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Bit scan operations
 @(test)
 testing_bsf_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4879,13 +5413,15 @@ testing_bsf_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			bsf_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_bsr_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4899,7 +5435,7 @@ testing_bsr_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			bsr_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -4907,6 +5443,8 @@ testing_bsr_r64_r64 :: proc(t: ^testing.T) {
 // Population count and bit manipulation
 @(test)
 testing_popcnt_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4920,13 +5458,15 @@ testing_popcnt_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			popcnt_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_lzcnt_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4940,13 +5480,15 @@ testing_lzcnt_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			lzcnt_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_tzcnt_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -4960,7 +5502,7 @@ testing_tzcnt_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			tzcnt_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -4968,6 +5510,8 @@ testing_tzcnt_r64_r64 :: proc(t: ^testing.T) {
 // BMI2 instructions
 @(test)
 testing_pext_r64_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few combinations to avoid explosion
@@ -4992,12 +5536,14 @@ testing_pext_r64_r64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		pext_r64_r64_r64(dst, src1, src2)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_pdep_r64_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	// Only test a few combinations to avoid explosion
@@ -5022,7 +5568,7 @@ testing_pdep_r64_r64_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		pdep_r64_r64_r64(dst, src1, src2)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -5030,6 +5576,8 @@ testing_pdep_r64_r64_r64 :: proc(t: ^testing.T) {
 // 64-bit comparison operations
 @(test)
 testing_cmp_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg1 in registers64 {
@@ -5043,13 +5591,15 @@ testing_cmp_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r64_r64(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmp_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm32Values := get_interesting_imm32_values()
 
@@ -5060,13 +5610,15 @@ testing_cmp_r64_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r64_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg1 in registers64 {
@@ -5080,13 +5632,15 @@ testing_test_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r64_r64(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	imm32Values := get_interesting_imm32_values()
 
@@ -5097,7 +5651,7 @@ testing_test_r64_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r64_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5105,6 +5659,8 @@ testing_test_r64_imm32 :: proc(t: ^testing.T) {
 // Conditional move operations
 @(test)
 testing_cmove_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -5118,13 +5674,15 @@ testing_cmove_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmove_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovne_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -5138,13 +5696,15 @@ testing_cmovne_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovne_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmova_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -5158,13 +5718,15 @@ testing_cmova_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmova_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovae_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -5178,13 +5740,15 @@ testing_cmovae_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovae_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovb_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -5198,13 +5762,15 @@ testing_cmovb_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovb_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovbe_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -5218,7 +5784,7 @@ testing_cmovbe_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovbe_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5226,6 +5792,8 @@ testing_cmovbe_r64_r64 :: proc(t: ^testing.T) {
 // 32-bit comparison operations
 @(test)
 testing_cmp_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg1 in registers32 {
@@ -5239,13 +5807,15 @@ testing_cmp_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r32_r32(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmp_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -5256,13 +5826,15 @@ testing_cmp_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for reg1 in registers32 {
@@ -5276,13 +5848,15 @@ testing_test_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r32_r32(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r32_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 	imm32Values := get_interesting_imm32_values()
 
@@ -5293,7 +5867,7 @@ testing_test_r32_imm32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r32_imm32(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5301,6 +5875,8 @@ testing_test_r32_imm32 :: proc(t: ^testing.T) {
 // 32-bit conditional move operations
 @(test)
 testing_cmove_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -5314,13 +5890,15 @@ testing_cmove_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmove_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovne_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -5334,13 +5912,15 @@ testing_cmovne_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovne_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmova_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -5354,13 +5934,15 @@ testing_cmova_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmova_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovae_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -5374,13 +5956,15 @@ testing_cmovae_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovae_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovb_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -5394,13 +5978,15 @@ testing_cmovb_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovb_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovbe_r32_r32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers32 := get_all_registers32()
 
 	for dst in registers32 {
@@ -5414,7 +6000,7 @@ testing_cmovbe_r32_r32 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovbe_r32_r32(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5422,6 +6008,8 @@ testing_cmovbe_r32_r32 :: proc(t: ^testing.T) {
 // 16-bit comparison operations
 @(test)
 testing_cmp_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg1 in registers16 {
@@ -5435,13 +6023,15 @@ testing_cmp_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r16_r16(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmp_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -5452,13 +6042,15 @@ testing_cmp_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg1 in registers16 {
@@ -5472,13 +6064,15 @@ testing_test_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r16_r16(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r16_imm16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 	imm16Values := get_interesting_imm16_values()
 
@@ -5489,7 +6083,7 @@ testing_test_r16_imm16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r16_imm16(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5497,6 +6091,8 @@ testing_test_r16_imm16 :: proc(t: ^testing.T) {
 // 16-bit conditional move operations
 @(test)
 testing_cmove_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -5510,13 +6106,15 @@ testing_cmove_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmove_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovne_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -5530,13 +6128,15 @@ testing_cmovne_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovne_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmova_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -5550,13 +6150,15 @@ testing_cmova_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmova_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovae_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -5570,13 +6172,15 @@ testing_cmovae_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovae_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovb_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -5590,13 +6194,15 @@ testing_cmovb_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovb_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmovbe_r16_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for dst in registers16 {
@@ -5610,7 +6216,7 @@ testing_cmovbe_r16_r16 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmovbe_r16_r16(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5618,6 +6224,8 @@ testing_cmovbe_r16_r16 :: proc(t: ^testing.T) {
 // 8-bit comparison operations
 @(test)
 testing_cmp_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg1 in registers8 {
@@ -5631,13 +6239,15 @@ testing_cmp_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r8_r8(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_cmp_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -5648,13 +6258,15 @@ testing_cmp_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			cmp_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r8_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 
 	for reg1 in registers8 {
@@ -5668,13 +6280,15 @@ testing_test_r8_r8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r8_r8(reg1, reg2)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_test_r8_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers8 := get_all_registers8()
 	imm8Values := get_interesting_imm8_values()
 
@@ -5685,7 +6299,7 @@ testing_test_r8_imm8 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			test_r8_imm8(reg, imm)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -5693,15 +6307,19 @@ testing_test_r8_imm8 :: proc(t: ^testing.T) {
 // Unconditional jump tests testing 0 only for convenience
 @(test)
 testing_jmp_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jmp 0"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jmp_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jmp_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -5710,12 +6328,14 @@ testing_jmp_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jmp_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jmp_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -5730,12 +6350,14 @@ testing_jmp_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jmp_m64(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jmp_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 
 	for imm8 in imm8Values {
@@ -5745,22 +6367,26 @@ testing_jmp_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jmp_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Call instruction tests
 @(test)
 testing_call_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "call 0"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	call_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_call_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -5769,12 +6395,14 @@ testing_call_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		call_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_call_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -5789,186 +6417,222 @@ testing_call_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		call_m64(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Return instruction test
 @(test)
 testing_ret :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "ret"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	ret()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Conditional jumps with 32-bit displacement
 @(test)
 testing_je_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "je 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	je_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jne_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jne 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jne_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jg_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jg 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jg_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jl_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jl 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jl_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jge_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jge 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jge_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 
 @(test)
 testing_ja_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "ja 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	ja_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jae_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jae 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jae_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jb_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jb 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jb_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jbe_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jbe 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jbe_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jo_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jo 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jo_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jno_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jno 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jno_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_js_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "js 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	js_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jns_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jns 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jns_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jp_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jp 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jp_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jnp_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jnp 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jnp_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_jle_rel32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "jle 0"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	jle_rel32(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Refactored jump test using the testing_jmp_rel8 pattern
 @(test)
 testing_ja_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -5976,12 +6640,14 @@ testing_ja_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		ja_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jae_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -5989,12 +6655,14 @@ testing_jae_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jae_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jb_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6002,12 +6670,14 @@ testing_jb_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jb_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jbe_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6015,12 +6685,14 @@ testing_jbe_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jbe_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jo_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6028,12 +6700,14 @@ testing_jo_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jo_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jno_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6041,12 +6715,14 @@ testing_jno_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jno_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_js_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6054,12 +6730,14 @@ testing_js_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		js_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jns_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6067,12 +6745,14 @@ testing_jns_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jns_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jp_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6080,12 +6760,14 @@ testing_jp_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jp_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jnp_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6093,12 +6775,14 @@ testing_jnp_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jnp_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_je_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6106,12 +6790,14 @@ testing_je_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		je_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jne_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6119,13 +6805,15 @@ testing_jne_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jne_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Loop instructions
 @(test)
 testing_loop_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6133,12 +6821,14 @@ testing_loop_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		loop_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_loope_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6146,12 +6836,14 @@ testing_loope_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		loope_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_loopne_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 125, -125}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 2
@@ -6159,12 +6851,14 @@ testing_loopne_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		loopne_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_jecxz_rel8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	imm8Values := [?]i8{0x0, 0x42, -0x42, 124, -124}
 	for imm8 in imm8Values {
 		adjusted := imm8 + 3
@@ -6172,12 +6866,14 @@ testing_jecxz_rel8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		jecxz_rel8(imm8)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_sete_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6188,12 +6884,14 @@ testing_sete_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("sete %s", reg_name)
 
 		sete_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setne_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6204,12 +6902,14 @@ testing_setne_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setne %s", reg_name)
 
 		setne_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setb_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6220,12 +6920,14 @@ testing_setb_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setb %s", reg_name)
 
 		setb_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setae_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6236,12 +6938,14 @@ testing_setae_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setae %s", reg_name)
 
 		setae_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setbe_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6252,12 +6956,14 @@ testing_setbe_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setbe %s", reg_name)
 
 		setbe_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_seta_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6268,12 +6974,14 @@ testing_seta_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("seta %s", reg_name)
 
 		seta_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setl_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6284,12 +6992,14 @@ testing_setl_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setl %s", reg_name)
 
 		setl_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setge_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6300,12 +7010,14 @@ testing_setge_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setge %s", reg_name)
 
 		setge_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setle_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6316,12 +7028,14 @@ testing_setle_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setle %s", reg_name)
 
 		setle_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_setg_r8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers := get_all_registers8()
 
 	for reg in registers {
@@ -6332,24 +7046,28 @@ testing_setg_r8 :: proc(t: ^testing.T) {
 		asm_str := fmt.tprintf("setg %s", reg_name)
 
 		setg_r8(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Branch prediction hint
 @(test)
 testing_endbr64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "endbr64"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	endbr64()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Stack operations - 64-bit push/pop
 @(test)
 testing_push_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -6358,12 +7076,14 @@ testing_push_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		push_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_pop_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -6372,7 +7092,7 @@ testing_pop_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		pop_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -6380,6 +7100,8 @@ testing_pop_r64 :: proc(t: ^testing.T) {
 // Stack operations - 16-bit push/pop
 @(test)
 testing_push_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -6388,12 +7110,14 @@ testing_push_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		push_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_pop_r16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers16 := get_all_registers16()
 
 	for reg in registers16 {
@@ -6402,54 +7126,64 @@ testing_pop_r16 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		pop_r16(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Flag register operations
 @(test)
 testing_pushfq :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "pushfq"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	pushfq()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_popfq :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "popfq"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	popfq()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_pushf :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "pushf"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	pushf()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_popf :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "popf"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	popf()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Stack frame operations
 @(test)
 testing_enter :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	// Test various stack frame sizes and nesting levels
 	sizes := [?]u16{0, 4, 8, 16, 32, 64, 128, 256}
 	nesting_levels := [?]u8{0, 1, 2, 3}
@@ -6461,25 +7195,29 @@ testing_enter :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			enter(size, level)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
 
 @(test)
 testing_leave :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "leave"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	leave()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 
 // CRC32 instruction
 @(test)
 testing_crc32_r64_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for dst in registers64 {
@@ -6493,7 +7231,7 @@ testing_crc32_r64_r64 :: proc(t: ^testing.T) {
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
 			crc32_r64_r64(dst, src)
-			compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+			batch_add(batch, asm_str)
 		}
 	}
 }
@@ -6501,263 +7239,315 @@ testing_crc32_r64_r64 :: proc(t: ^testing.T) {
 // String operations
 @(test)
 testing_movs_m8_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "movs byte ptr [rdi], byte ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	movs_m8_m8()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_movs_m16_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "movs word ptr [rdi], word ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	movs_m16_m16()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_movs_m32_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "movs dword ptr [rdi], dword ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	movs_m32_m32()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_movs_m64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "movs qword ptr [rdi], qword ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	movs_m64_m64()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Store string operations
 @(test)
 testing_stos_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "stos byte ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	stos_m8()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_stos_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "stos word ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	stos_m16()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_stos_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "stos dword ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	stos_m32()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_stos_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "stos qword ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	stos_m64()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Scan string operations
 @(test)
 testing_scas_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "scas byte ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	scas_m8()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_scas_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "scas word ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	scas_m16()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_scas_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "scas dword ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	scas_m32()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_scas_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "scas qword ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	scas_m64()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Compare string operations
 @(test)
 testing_cmps_m8_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "cmps byte ptr [rsi], byte ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	cmps_m8_m8()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_cmps_m16_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "cmps word ptr [rsi], word ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	cmps_m16_m16()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_cmps_m32_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "cmps dword ptr [rsi], dword ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	cmps_m32_m32()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_cmps_m64_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "cmps qword ptr [rsi], qword ptr [rdi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	cmps_m64_m64()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 
 @(test)
 testing_lods_m8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "lods byte ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	lods_m8()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_lods_m16 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "lods word ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	lods_m16()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_lods_m32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "lods dword ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	lods_m32()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_lods_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "lods qword ptr [rsi]"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	lods_m64()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // String operations with REP prefix
 @(test)
 testing_rep_movs :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rep movsb"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rep_movs()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rep_stos :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rep stosb"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rep_stos()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rep_cmps :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rep cmpsb"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rep_cmps()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // System call instructions
 @(test)
 testing_syscall :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "syscall"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	syscall()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_sysret :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "sysretq"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	sysret()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Interrupt instructions
 @(test)
 testing_int_imm8 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	// Test a few interrupt numbers
 	for imm: u8 = 0; imm <= 255; imm += 50 {
 		asm_str := fmt.tprintf("int %d", imm)
@@ -6765,202 +7555,240 @@ testing_int_imm8 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		int_imm8(imm)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_int3 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "int3"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	int3()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_iret :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "iretq"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	iret()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Processor information and model-specific registers
 @(test)
 testing_cpuid :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "cpuid"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	cpuid()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rdtsc :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rdtsc"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rdtsc()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rdtscp :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rdtscp"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rdtscp()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rdmsr :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rdmsr"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rdmsr()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_wrmsr :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "wrmsr"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	wrmsr()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rdpmc :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rdpmc"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rdpmc()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Privileged and system instructions
 @(test)
 testing_hlt :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "hlt"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	hlt()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_swapgs :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "swapgs"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	swapgs()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_wrpkru :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "wrpkru"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	wrpkru()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_rdpkru :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "rdpkru"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	rdpkru()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_clac :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "clac"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	clac()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_stac :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "stac"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	stac()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Bound checking and undefined instruction
 @(test)
 testing_ud2 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "ud2"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	ud2()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Virtualization instructions
 @(test)
 testing_vmcall :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "vmcall"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	vmcall()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_vmlaunch :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "vmlaunch"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	vmlaunch()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_vmresume :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "vmresume"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	vmresume()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_vmxoff :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "vmxoff"
 
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	vmxoff()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // =====================
@@ -6968,20 +7796,24 @@ testing_vmxoff :: proc(t: ^testing.T) {
 // =====================
 @(test)
 testing_monitor :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "monitor"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	monitor()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_mwait :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "mwait"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	mwait()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 
@@ -6989,43 +7821,53 @@ testing_mwait :: proc(t: ^testing.T) {
 // Begin hardware transaction
 @(test)
 testing_xbegin :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "xbegin 0"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	xbegin(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_xend :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "xend"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	xend()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_xabort :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "xabort 0"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	xabort(0)
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_xtest :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "xtest"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	xtest()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 // Hardware Security Instructions
 @(test)
 testing_rdrand_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 
 	for reg in registers64 {
@@ -7033,25 +7875,29 @@ testing_rdrand_r64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		rdrand_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_rdseed_r64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	registers64 := get_all_registers64()
 	for reg in registers64 {
 		asm_str := fmt.tprintf("rdseed %s", register64_to_string(reg))
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		rdseed_r64(reg)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 // Memory Management Instructions
 @(test)
 testing_prefetcht0 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7065,12 +7911,14 @@ testing_prefetcht0 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		prefetcht0(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_prefetcht1 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7084,12 +7932,14 @@ testing_prefetcht1 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		prefetcht1(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_prefetcht2 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7103,12 +7953,14 @@ testing_prefetcht2 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		prefetcht2(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_prefetchnta :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7122,12 +7974,14 @@ testing_prefetchnta :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		prefetchnta(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_clflush_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7141,12 +7995,14 @@ testing_clflush_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		clflush_m64(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_clflushopt_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7160,12 +8016,14 @@ testing_clflushopt_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		clflushopt_m64(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
 @(test)
 testing_clwb_m64 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	addresses := get_all_addressing_combinations()
 	defer delete(addresses)
 
@@ -7179,7 +8037,7 @@ testing_clwb_m64 :: proc(t: ^testing.T) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		clwb_m64(addr)
-		compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+		batch_add(batch, asm_str)
 	}
 }
 
@@ -7188,27 +8046,33 @@ testing_clwb_m64 :: proc(t: ^testing.T) {
 // =====================
 @(test)
 testing_mfence :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "mfence"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	mfence()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_lfence :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "lfence"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	lfence()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
 
 @(test)
 testing_sfence :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
 	asm_str := "sfence"
 	buffer := ByteBuffer{}
 	context.user_ptr = &buffer
 	sfence()
-	compare_bytecode(t, asm_str, asm_to_bytes(asm_str))
+	batch_add(batch, asm_str)
 }
