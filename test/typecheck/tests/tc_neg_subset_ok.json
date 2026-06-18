@@ -1,1 +1,1 @@
-{ "name": "tc_neg_subset_ok", "description": "BUG REPRO: ~(10|11) ⊆ ~10 (excluding more is a subset). Currently rejected due to the same stray {-> } producer wrapping on the Or value", "source": "~10:a -> ~(10 | 11)", "expect_errors": [] }
+{ "name": "tc_neg_subset_ok", "description": "a bare ~10 constraint demands MEMBERSHIP, not set-inclusion. ~(10|11) is itself a set, not a concrete value member of ~10, so it is rejected (set-inclusion ~(10|11) ⊆ ~10 is irrelevant to a bare constraint)", "source": "~10:a -> ~(10 | 11)", "expect_errors": ["Constraint_Mismatch"] }
