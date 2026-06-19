@@ -100,6 +100,43 @@ execute_fold_leave :: proc(key: ^Scope_Type) {
 	if a := current_analyzer(); a != nil do pop(&a.execute_stack)
 }
 
+// fold_type_set is the typeof of a set-algebra value (`~ | &`). It collapses to a
+// domain set ONLY when the expression reduces to a concrete singleton (e.g.
+// `~~5` -> 5), preserving identity. Otherwise it keeps the `~ | &` structure
+// SYMBOLIC and lifts it one meta level as the producer `{-> <canonical set>}`,
+// uniformly across domains (integers no longer distribute into a collapsed
+// interval). This is what lets `=X` match X structurally and cross-domain:
+// `(10|~20|u8)` stays distinct from `(10|~20|u16)` even though both denote
+// every integer, and `~10.0` never silently matches a string.
+fold_type_set :: proc(t: ^Type) -> ^Type {
+	if e := fold_type_integer(t); e != nil && fold_is_concrete_value(e) do return e
+	if e := fold_type_float(t); e != nil && fold_is_concrete_value(e) do return e
+	if e := fold_type_bool(t); e != nil && fold_is_concrete_value(e) do return e
+	if e := fold_type_string(t); e != nil && fold_is_concrete_value(e) do return e
+	return make_producer_scope(fold_set_value(t))
+}
+
+// fold_set_value folds a set-algebra expression to its canonical SYMBOLIC form:
+// the `~ | &` tree is kept intact (never distributed/collapsed), and each leaf is
+// folded to its bare domain envelope (no producer wrap). The structure travels so
+// a `=X` value-match can compare it as written.
+fold_set_value :: proc(t: ^Type) -> ^Type {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Negate_Type:
+		return new_type(Negate_Type{fold_set_value(v.operand)})
+	case Or_Type:
+		return new_type(Or_Type{fold_set_value(v.left), fold_set_value(v.right)})
+	case And_Type:
+		return new_type(And_Type{fold_set_value(v.left), fold_set_value(v.right)})
+	}
+	if e := fold_type_integer(t); e != nil do return e
+	if e := fold_type_float(t); e != nil do return e
+	if e := fold_type_string(t); e != nil do return e
+	if e := fold_type_bool(t); e != nil do return e
+	return fold_type(t)
+}
+
 // fold_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
 fold_type :: proc(t: ^Type) -> ^Type {
@@ -123,23 +160,11 @@ fold_type :: proc(t: ^Type) -> ^Type {
 		case Recursive_Mention_Type:
 			return t
 		case And_Type:
-			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(And_Type{fold_type(v.left), fold_type(v.right)})
+			return fold_type_set(t)
 		case Or_Type:
-			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(Or_Type{fold_type(v.left), fold_type(v.right)})
+			return fold_type_set(t)
 		case Negate_Type:
-			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_bool(t); env != nil do return value_type_envelope(env)
-			if env := fold_type_string(t); env != nil do return value_type_envelope(env)
-			return new_type(Negate_Type{fold_type(v.operand)})
+			return fold_type_set(t)
 		case Range_Type:
 			if env := fold_type_integer(t); env != nil do return value_type_envelope(env)
 			if env := fold_type_float(t); env != nil do return value_type_envelope(env)
