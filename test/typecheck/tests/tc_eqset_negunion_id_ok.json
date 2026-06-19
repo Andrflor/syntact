@@ -1,0 +1,1 @@
+{"name": "tc_eqset_negunion_id_ok", "description": "negation of a union matches itself", "source": "=~(10 | 11):a -> ~(10 | 11)", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "tc_eqset_u8_sub_bad", "description": "=u8 is identity, NOT subset: 0..15 is rejected", "source": "=u8:a -> 0..15", "expect_errors": ["Constraint_Mismatch"]}

@@ -1,0 +1,1 @@
+{"name": "tc_eqset_neg_range_id_ok", "description": "=~(0..10) accepts ~(0..10)", "source": "=~(0..10):a -> ~(0..10)", "expect_errors": []}

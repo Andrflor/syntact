@@ -1,0 +1,1 @@
+{"name": "tc_eqset_xd_int_str_bad", "description": "cross-domain: a string never satisfies =10", "source": "=10:a -> \"\"", "expect_errors": ["Constraint_Mismatch"]}

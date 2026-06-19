@@ -1,0 +1,1 @@
+{"name": "tc_eqset_dneg_collapse_bad", "description": "=~~5 (= =5) rejects 6", "source": "=~~5:a -> 6", "expect_errors": ["Constraint_Mismatch"]}

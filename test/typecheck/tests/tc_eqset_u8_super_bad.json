@@ -1,0 +1,1 @@
+{"name": "tc_eqset_u8_super_bad", "description": "=u8 is identity: a superset u16 is rejected", "source": "=u8:a -> u16", "expect_errors": ["Constraint_Mismatch"]}

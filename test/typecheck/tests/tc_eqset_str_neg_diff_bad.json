@@ -1,0 +1,1 @@
+{"name": "tc_eqset_str_neg_diff_bad", "description": "string negation identity: ~\"b\" is not ~\"a\"", "source": "=~\"a\":a -> ~\"b\"", "expect_errors": ["Constraint_Mismatch"]}

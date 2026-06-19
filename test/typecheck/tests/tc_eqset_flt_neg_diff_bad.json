@@ -1,0 +1,1 @@
+{"name": "tc_eqset_flt_neg_diff_bad", "description": "float negation identity: ~11.0 is not ~10.0", "source": "=~10.0:a -> ~11.0", "expect_errors": ["Constraint_Mismatch"]}

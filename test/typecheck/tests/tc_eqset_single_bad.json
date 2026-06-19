@@ -1,0 +1,1 @@
+{"name": "tc_eqset_single_bad", "description": "= singleton rejects a different value", "source": "=10:a -> 11", "expect_errors": ["Constraint_Mismatch"]}

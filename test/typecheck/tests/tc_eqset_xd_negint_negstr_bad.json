@@ -1,0 +1,1 @@
+{"name": "tc_eqset_xd_negint_negstr_bad", "description": "cross-domain: ~\"a\" (string negation) is not =~10 (int negation)", "source": "=~10:a -> ~\"a\"", "expect_errors": ["Constraint_Mismatch"]}

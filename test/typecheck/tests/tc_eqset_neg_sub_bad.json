@@ -1,0 +1,1 @@
+{"name": "tc_eqset_neg_sub_bad", "description": "=~10 identity: ~(10|11) is a proper subset of ~10, not structurally ~10", "source": "=~10:a -> ~(10 | 11)", "expect_errors": ["Constraint_Mismatch"]}
