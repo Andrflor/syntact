@@ -600,7 +600,7 @@ integer_intervals_satisfy :: proc(value_segs, constraint_segs: []Integer_Interva
 	for vs in value_segs {
 		found := false
 		for cs in constraint_segs {
-			if maybe_le(cs.lo, vs.lo) && maybe_le_hi(vs.hi, cs.hi) {
+			if maybe_le_lo(cs.lo, vs.lo) && maybe_le_hi(vs.hi, cs.hi) {
 				found = true
 				break
 			}
@@ -682,6 +682,19 @@ maybe_le_hi :: #force_inline proc(a, b: Maybe(i128)) -> bool {
 	bv, b_ok := b.(i128)
 	if !a_ok do return !b_ok
 	if !b_ok do return true
+	return av <= bv
+}
+
+
+// maybe_le_lo compares two LOW bounds (`a <= b`) where a nil bound is -inf.
+// Mirror of maybe_le_hi for the low side: -inf is <= anything, and a concrete
+// bound is never <= -inf. (maybe_le treats a nil SECOND arg as +inf, which is
+// wrong when both operands are low bounds — see integer_intervals_satisfy.)
+maybe_le_lo :: #force_inline proc(a, b: Maybe(i128)) -> bool {
+	av, a_ok := a.(i128)
+	bv, b_ok := b.(i128)
+	if !a_ok do return true // a = -inf <= anything
+	if !b_ok do return false // a concrete, b = -inf
 	return av <= bv
 }
 

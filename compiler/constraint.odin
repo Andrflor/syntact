@@ -232,6 +232,97 @@ fold_is_producer :: proc(t: ^Type) -> bool {
 	return false
 }
 
+// scope_is_pure_producer reports whether a scope is EXACTLY a single-production
+// producer `{-> X}` — the typeof / `=X` meta value built by value_type_envelope.
+// Matched by identity rather than subset. A multi-production scope
+// (`{-> a, -> b}`, a union of productions) is a real value, NOT this meta level,
+// so it keeps ordinary subset matching.
+scope_is_pure_producer :: proc(s: Scope_Type) -> bool {
+	return len(s.kind) == 1 && s.kind[0] == .Product
+}
+
+// type_set_equal reports STRUCTURAL identity of two folded set values — the
+// equality a `=X` value-match needs. Leaves compare by mutual subset (domain
+// equality); `~ | &` compare structurally (operand-wise; `|`/`&` are
+// order-insensitive over their flattened branches). Different kinds — including
+// a domain mismatch (`~10.0` vs a string) — are never equal.
+type_set_equal :: proc(a, b: ^Type) -> bool {
+	if a == nil || b == nil do return a == nil && b == nil
+	#partial switch va in a^ {
+	case Integer_Type:
+		vb, ok := b^.(Integer_Type)
+		return ok && integer_satisfy(va, vb) && integer_satisfy(vb, va)
+	case Float_Type:
+		vb, ok := b^.(Float_Type)
+		return ok && float_satisfy(va, vb) && float_satisfy(vb, va)
+	case String_Type:
+		vb, ok := b^.(String_Type)
+		return ok && string_satisfy(va, vb) && string_satisfy(vb, va)
+	case Bool_Type:
+		vb, ok := b^.(Bool_Type)
+		return ok && bool_satisfy(va, vb) && bool_satisfy(vb, va)
+	case Negate_Type:
+		vb, ok := b^.(Negate_Type)
+		return ok && type_set_equal(va.operand, vb.operand)
+	case Or_Type:
+		if _, ok := b^.(Or_Type); !ok do return false
+		return set_branches_equal(a, b, true)
+	case And_Type:
+		if _, ok := b^.(And_Type); !ok do return false
+		return set_branches_equal(a, b, false)
+	case Scope_Type:
+		vb, ok := b^.(Scope_Type)
+		if !ok do return false
+		if scope_is_pure_producer(va) && scope_is_pure_producer(vb) {
+			return type_set_equal(va.type_folds[0], vb.type_folds[0])
+		}
+		return false
+	}
+	return false
+}
+
+// set_branches collects the flattened branches of an `|` (is_or) or `&` tree,
+// so `a|(b|c)` and `(a|b)|c` compare equal regardless of nesting/order.
+set_branches :: proc(t: ^Type, is_or: bool, out: ^[dynamic]^Type) {
+	#partial switch v in t^ {
+	case Or_Type:
+		if is_or {
+			set_branches(v.left, is_or, out)
+			set_branches(v.right, is_or, out)
+			return
+		}
+	case And_Type:
+		if !is_or {
+			set_branches(v.left, is_or, out)
+			set_branches(v.right, is_or, out)
+			return
+		}
+	}
+	append(out, t)
+}
+
+set_branches_equal :: proc(a, b: ^Type, is_or: bool) -> bool {
+	la := make([dynamic]^Type, context.temp_allocator)
+	lb := make([dynamic]^Type, context.temp_allocator)
+	set_branches(a, is_or, &la)
+	set_branches(b, is_or, &lb)
+	if len(la) != len(lb) do return false
+	used := make([]bool, len(lb), context.temp_allocator)
+	for x in la {
+		found := false
+		for y, j in lb {
+			if used[j] do continue
+			if type_set_equal(x, y) {
+				used[j] = true
+				found = true
+				break
+			}
+		}
+		if !found do return false
+	}
+	return true
+}
+
 // scope_fields_fold_unknown reports whether any field of a scope-shaped constraint
 // folds to Unknown — i.e. the scope is not a statically-known set. `key` identifies
 // the scope/carve node on the scan stack (guards self-referential constraints
@@ -310,6 +401,18 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case Scope_Type:
 		v, ok := ft^.(Scope_Type)
 		if !ok do return false
+		// Two PURE producers (`{-> X}` vs `{-> Y}`) are the meta level of a typeof /
+		// `=X` value: matching is IDENTITY, not subset. `=~10` must accept ONLY ~10,
+		// not a proper subset like ~(10|11) (which IS ⊆ ~10 as a set). scope_satisfy
+		// proves one direction; demand the reverse too. The reverse uses the
+		// coloring-free scope_satisfy_range so it never mutates the constraint.
+		if scope_is_pure_producer(f) && scope_is_pure_producer(v) {
+			// Two single-production producers are the meta level of a typeof / `=X`
+			// value: the match is STRUCTURAL IDENTITY, not subset. `=~10` accepts only
+			// ~10 — not a proper subset like ~(10|11), and not a string. type_set_equal
+			// compares the produced sets as written.
+			return type_set_equal(f.type_folds[0], v.type_folds[0])
+		}
 		return scope_satisfy(f, v)
 	case And_Type:
 		return satisfy_root(f.left, ft) && satisfy_root(f.right, ft)
