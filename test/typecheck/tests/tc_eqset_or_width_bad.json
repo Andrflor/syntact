@@ -1,0 +1,1 @@
+{"name": "tc_eqset_or_width_bad", "description": "structural identity: (10|~20|u8) != (10|~20|u16) though both denote every integer", "source": "=(10 | ~20 | u8):a -> (10 | ~20 | u16)", "expect_errors": ["Constraint_Mismatch"]}

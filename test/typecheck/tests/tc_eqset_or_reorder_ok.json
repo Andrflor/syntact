@@ -1,0 +1,1 @@
+{"name": "tc_eqset_or_reorder_ok", "description": "= union match is order-insensitive over its branches", "source": "=(10 | ~20 | u8):a -> (u8 | 10 | ~20)", "expect_errors": []}

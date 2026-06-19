@@ -1,0 +1,1 @@
+{"name": "tc_eqset_dneg_collapse_ok", "description": "~~5 collapses to the concrete singleton 5, so =~~5 accepts 5", "source": "=~~5:a -> 5", "expect_errors": []}

@@ -1,0 +1,1 @@
+{"name": "tc_eqset_str_neg_id_ok", "description": "string negation identity: =~\"a\" accepts ~\"a\"", "source": "=~\"a\":a -> ~\"a\"", "expect_errors": []}

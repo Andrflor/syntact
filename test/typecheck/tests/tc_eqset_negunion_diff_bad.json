@@ -1,0 +1,1 @@
+{"name": "tc_eqset_negunion_diff_bad", "description": "~(10|11) is not ~(10|12)", "source": "=~(10 | 11):a -> ~(10 | 12)", "expect_errors": ["Constraint_Mismatch"]}

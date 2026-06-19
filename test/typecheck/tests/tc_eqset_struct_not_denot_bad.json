@@ -1,0 +1,1 @@
+{"name": "tc_eqset_struct_not_denot_bad", "description": "identity is STRUCTURAL not denotational: (~5|5) denotes every int but is not =int", "source": "=(~5 | 5):a -> int", "expect_errors": ["Constraint_Mismatch"]}

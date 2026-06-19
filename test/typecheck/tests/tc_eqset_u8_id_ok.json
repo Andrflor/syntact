@@ -1,0 +1,1 @@
+{"name": "tc_eqset_u8_id_ok", "description": "=u8 accepts exactly u8", "source": "=u8:a -> u8", "expect_errors": []}

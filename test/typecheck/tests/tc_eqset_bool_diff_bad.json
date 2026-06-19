@@ -1,0 +1,1 @@
+{"name": "tc_eqset_bool_diff_bad", "description": "=true rejects false", "source": "=true:a -> false", "expect_errors": ["Constraint_Mismatch"]}

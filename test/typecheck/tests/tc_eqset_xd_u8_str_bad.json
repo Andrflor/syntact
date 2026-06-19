@@ -1,0 +1,1 @@
+{"name": "tc_eqset_xd_u8_str_bad", "description": "cross-domain: a string never satisfies =u8", "source": "=u8:a -> \"x\"", "expect_errors": ["Constraint_Mismatch"]}

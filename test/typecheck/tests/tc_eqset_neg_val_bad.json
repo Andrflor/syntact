@@ -1,0 +1,1 @@
+{"name": "tc_eqset_neg_val_bad", "description": "=~10 demands the value BE the set ~10; the scalar 5 is not", "source": "=~10:a -> 5", "expect_errors": ["Constraint_Mismatch"]}

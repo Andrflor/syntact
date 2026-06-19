@@ -1,0 +1,1 @@
+{"name": "tc_eqset_xd_negflt_str_bad", "description": "cross-domain: a string never satisfies =~10.0 (float negation)", "source": "=~10.0:a -> \"\"", "expect_errors": ["Constraint_Mismatch"]}

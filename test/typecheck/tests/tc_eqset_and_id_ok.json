@@ -1,0 +1,1 @@
+{"name": "tc_eqset_and_id_ok", "description": "=X over an intersection matches the same intersection", "source": "=(0..10 & u8):a -> (0..10 & u8)", "expect_errors": []}

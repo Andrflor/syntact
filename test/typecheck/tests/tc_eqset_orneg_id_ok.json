@@ -1,0 +1,1 @@
+{"name": "tc_eqset_orneg_id_ok", "description": "(~5 | 5) matches itself structurally", "source": "=(~5 | 5):a -> (~5 | 5)", "expect_errors": []}

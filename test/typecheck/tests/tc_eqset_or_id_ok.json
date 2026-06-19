@@ -1,0 +1,1 @@
+{"name": "tc_eqset_or_id_ok", "description": "=X over a union matches the union as written", "source": "=(10 | ~20 | u8):a -> (10 | ~20 | u8)", "expect_errors": []}

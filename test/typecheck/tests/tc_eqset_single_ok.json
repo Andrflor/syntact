@@ -1,0 +1,1 @@
+{"name": "tc_eqset_single_ok", "description": "= over a singleton is plain value equality", "source": "=10:a -> 10", "expect_errors": []}

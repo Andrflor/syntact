@@ -1,0 +1,1 @@
+{"name": "tc_eqset_and_diff_bad", "description": "= intersection: a different left operand is not structurally equal", "source": "=(0..10 & u8):a -> (0..20 & u8)", "expect_errors": ["Constraint_Mismatch"]}
