@@ -559,7 +559,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 
 	cache := new(compiler.Cache)
 
-	ast, parse_ok := compiler.parse(cache, doc.content)
+	ast, _ := compiler.parse(cache, doc.content)
 	doc.ast = ast
 	doc.cache = cache
 	doc.scope = nil
@@ -585,7 +585,12 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		doc.parents = build_parent_map(ast)
 	}
 
-	if ast != nil && parse_ok {
+	// Analyze whenever there is an AST, even a PARTIAL one from a failed parse: an
+	// editor almost always holds half-typed code, and that is exactly when semantic
+	// diagnostics help most. The analyzer (and the fold layer it drives) must be
+	// robust to a malformed AST; gating on parse_ok to dodge a fold crash would be a
+	// workaround, not a fix.
+	if ast != nil {
 		analyzer := compiler.create_analyzer(ast)
 		prev_user_ptr := context.user_ptr
 		context.user_ptr = &analyzer
