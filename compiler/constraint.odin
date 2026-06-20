@@ -284,6 +284,12 @@ type_set_equal :: proc(a, b: ^Type) -> bool {
 // set_branches collects the flattened branches of an `|` (is_or) or `&` tree,
 // so `a|(b|c)` and `(a|b)|c` compare equal regardless of nesting/order.
 set_branches :: proc(t: ^Type, is_or: bool, out: ^[dynamic]^Type) {
+	// A nil operand (from a malformed `Or`/`And` whose side did not fold) is a leaf
+	// branch, not a tree to descend — append it so type_set_equal compares it as nil.
+	if t == nil {
+		append(out, t)
+		return
+	}
 	#partial switch v in t^ {
 	case Or_Type:
 		if is_or {
@@ -440,6 +446,9 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 }
 
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
+	// A nil constraint (e.g. an `Or`/`And` operand that did not fold to a static set)
+	// proves nothing. Mirror satisfy's guard so the mutual recursion never derefs nil.
+	if fc == nil || ft == nil do return false
 	c, ok := fc^.(Scope_Type)
 	if ok {
 		hasProd := false

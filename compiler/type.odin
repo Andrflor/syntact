@@ -902,6 +902,7 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
 		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
+			if carve.types[i] == nil do continue // malformed override: no replacement
 			if mv, is_m := carve.types[i]^.(Mention_Type);
 			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
 				continue
