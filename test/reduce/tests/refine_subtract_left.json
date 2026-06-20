@@ -1,0 +1,6 @@
+{
+  "name": "refine_subtract_left",
+  "description": "n-3 over i32, branch cover 4 refines n to 7 (a-k in V -> a in V+k)",
+  "source": "n -> ??::i32\n-> n - 3 ? { 4 -> 1, -> 0 }",
+  "expect": "??0 - 3 ? {4 -> 1[??0=7], -> 0[??0=-2147483648..6 | 8..2147483647]}"
+}

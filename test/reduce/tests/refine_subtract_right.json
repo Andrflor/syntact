@@ -1,0 +1,6 @@
+{
+  "name": "refine_subtract_right",
+  "description": "10-n over i32, branch cover 3 refines n to 7 (k-a in V -> a in k-V, arithmetic negation)",
+  "source": "n -> ??::i32\n-> 10 - n ? { 3 -> 1, -> 0 }",
+  "expect": "10 - ??0 ? {3 -> 1[??0=7], -> 0[??0=8..2147483647 | -2147483648..6]}"
+}

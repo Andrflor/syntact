@@ -1,0 +1,1 @@
+{ "name": "tc_pat_refine_recursive_u64_ok", "description": "pattern refinement: in the non-zero branch n is narrowed to 1..MAX, so the recursive carve f{n -> n-1} stays within u64 (no underflow)", "source": "f -> {\n  u64:n\n  -> n ? {\n    0 -> 100\n    -> f{n -> n - 1}!\n  }\n}\n-> f{n -> 5}!", "expect_errors": [] }

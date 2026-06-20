@@ -825,6 +825,10 @@ Reducer :: struct {
 	dag_table:        map[string]^Type,
 	fixedpoint_index: map[rawptr]int,
 	fixedpoint_next:  int,
+	// Per-branch refinements computed by reduce_pattern, keyed by the branch product
+	// node: inside that product, each listed fixed-point leaf carries `domain`. Lets
+	// the backend read the narrowed range, and the tests observe the refinement.
+	refinements:      map[rawptr][]Refinement,
 }
 
 current_reducer :: #force_inline proc() -> ^Reducer {
@@ -837,6 +841,7 @@ create_reducer :: proc() -> Reducer {
 		dag_table = make(map[string]^Type),
 		fixedpoint_index = make(map[rawptr]int),
 		fixedpoint_next = 0,
+		refinements = make(map[rawptr][]Refinement),
 	}
 }
 
@@ -924,7 +929,11 @@ fixedpoint_id :: proc(node: ^Type) -> int {
 reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	if !is_fixed_point(p.target) {
 		target := reduce_value(p.target)
-		if target != nil && !is_fixed_point(target) {
+		// A branch can be picked at compile time only when the reduced target carries
+		// NO free fixed point — then its membership in each cover is decidable. A
+		// target with a free `??` (e.g. `??0 + 2`, a Compose over fixed points) stays
+		// symbolic and the refinement pass below records the per-branch narrowings.
+		if target != nil && !contains_fixed_point(target) {
 			for branch in p.branches {
 				if reduce_branch_fires(branch, target) {
 					return reduce_value(branch.product)
@@ -932,19 +941,69 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 			}
 		}
 	}
-	// Fixed-point target: keep the pattern shape, reduce the target and each branch's
-	// product; the runtime selects the branch.
+	// Symbolic target: keep the pattern shape, reduce the target and each branch's
+	// product; the runtime selects the branch. Inside branch k the scrutinee is known
+	// to be `target & ~M0 & … & ~M(k-1) & Mk`; refine() pushes that conjunction down
+	// to the free leaves and we record the narrowed domains on the branch product.
+	target := reduce_value(p.target)
+	reducer := current_reducer()
 	branches := make([]Pattern_Branch, len(p.branches))
 	for branch, i in p.branches {
+		product := reduce_value(branch.product)
 		branches[i] = Pattern_Branch {
 			match      = branch.match,
-			product    = reduce_value(branch.product),
+			product    = product,
 			cover_fold = branch.cover_fold,
+		}
+		add := branch_refinement_add(p.branches[:], i)
+		if add != nil && product != nil {
+			refs := refine(target, add)
+			if len(refs) > 0 do reducer.refinements[product] = refs
 		}
 	}
 	r := new(Type)
-	r^ = Pattern_Type{reduce_value(p.target), branches}
+	r^ = Pattern_Type{target, branches}
 	return r
+}
+
+// branch_refinement_add builds the type added to the scrutinee inside branch k:
+// `Mk & ~M(k-1) & … & ~M0`. A bare/default branch (nil cover) contributes nothing
+// positive; earlier defaults can't precede a real branch in a well-formed pattern,
+// so a nil earlier cover is simply skipped.
+branch_refinement_add :: proc(branches: []Pattern_Branch, k: int) -> ^Type {
+	mk := branches[k].cover_fold
+	// The positive term: a real branch contributes its cover Mk; a default branch
+	// (nil cover) contributes only the negations of every earlier branch (~M0 & …),
+	// so it starts from the unbounded top.
+	add: ^Type
+	if mk != nil {
+		// Read through a `=v` producer scope `{-> v}` to its production leaf, mirroring
+		// reduce_branch_fires, so the cover is the leaf domain not the meta-scope.
+		add = cover_leaf(mk)
+	} else {
+		add = integer_top()
+	}
+	for j := k - 1; j >= 0; j -= 1 {
+		mj := branches[j].cover_fold
+		if mj == nil do continue
+		neg := new(Type)
+		neg^ = Negate_Type{cover_leaf(mj)}
+		conj := new(Type)
+		conj^ = And_Type{add, neg}
+		add = conj
+	}
+	return add
+}
+
+// cover_leaf reads through a single-product `{-> v}` producer scope to the leaf,
+// so a `=v` value-match cover is treated as the domain of v.
+cover_leaf :: proc(cover: ^Type) -> ^Type {
+	if cover == nil do return nil
+	if s, is_scope := cover^.(Scope_Type); is_scope {
+		prods := scope_productions(s)
+		if len(prods) == 1 && prods[0] != nil do return prods[0]
+	}
+	return cover
 }
 
 // reduce_branch_fires: the reduce-side firing test. The default branch always

@@ -1,0 +1,6 @@
+{
+  "name": "refine_range_cover",
+  "description": "n+1 over i32, range cover 0..9 refines n to -1..8 (full interval back-prop)",
+  "source": "n -> ??::i32\n-> n + 1 ? { 0..9 -> 1, -> 0 }",
+  "expect": "??0 + 1 ? {0..9 -> 1[??0=-1..8], -> 0[??0=-2147483648..-2 | 9..2147483647]}"
+}

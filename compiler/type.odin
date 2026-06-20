@@ -152,9 +152,20 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			return fold_type(st)
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
+				// A pattern-branch refinement override replaces the binding's value with
+				// its narrowed domain (so `n-1` inside `n ? {0->…, ->…}` folds n over its
+				// refined domain, not its default value).
+				if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
+					return fold_type(ov)
+				}
 				return fold_type(v.match_scope.types[v.match_index])
 			}
 		case Reference_Type:
+			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+				if ov := refine_override_for(v.reference.match_scope, v.reference.match_index); ov != nil {
+					return fold_type(ov)
+				}
+			}
 			eff := reference_effective_value(v)
 			if eff != nil do return fold_type(eff)
 		case Recursive_Mention_Type:

@@ -1,1 +1,1 @@
-{"name": "cplx_symbolic_value_default", "description": "?? target keeps the pattern symbolic with =5 desugared to {-> 5}", "source": "n -> ??::u8\nr -> n ? {=5 -> 100\n-> 0}\n-> r", "expect_errors": [], "expect": "??0 ? {{-> 5} -> 100, -> 0}"}
+{"name": "cplx_symbolic_value_default", "description": "?? target keeps the pattern symbolic with =5 desugared to {-> 5}", "source": "n -> ??::u8\nr -> n ? {=5 -> 100\n-> 0}\n-> r", "expect_errors": [], "expect": "??0 ? {{-> 5} -> 100[??0=5], -> 0[??0=0..4 | 6..255]}"}

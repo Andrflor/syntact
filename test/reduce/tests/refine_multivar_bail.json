@@ -1,0 +1,6 @@
+{
+  "name": "refine_multivar_bail",
+  "description": "a+b with two free variables is under-determined: no refinement, pattern stays symbolic",
+  "source": "a -> ??::i32\nb -> ??::i32\n-> a + b ? { 0 -> 1, -> 0 }",
+  "expect": "??0 + ??1 ? {0 -> 1, -> 0}"
+}
