@@ -309,67 +309,77 @@ test_pat_string_value_fires_60 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_pat_cplx_compo_and_of_ors_61 :: proc(t: ^testing.T) {
+test_pat_singleton_eq_exhaustive_61 :: proc(t: ^testing.T) {
+	run_pattern_test("tests/pat_singleton_eq_exhaustive.json", t)
+}
+
+@(test)
+test_pat_cplx_compo_and_of_ors_62 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_compo_and_of_ors.json", t)
 }
 
 @(test)
-test_pat_compo_or_three_62 :: proc(t: ^testing.T) {
+test_pat_compo_or_three_63 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_compo_or_three.json", t)
 }
 
 @(test)
-test_pat_cplx_nested_two_levels_range_63 :: proc(t: ^testing.T) {
+test_pat_cplx_nested_two_levels_range_64 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_nested_two_levels_range.json", t)
 }
 
 @(test)
-test_pat_cplx_target_arith_expr_64 :: proc(t: ^testing.T) {
+test_pat_cplx_target_arith_expr_65 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_target_arith_expr.json", t)
 }
 
 @(test)
-test_pat_compo_or_first_65 :: proc(t: ^testing.T) {
+test_pat_compo_or_first_66 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_compo_or_first.json", t)
 }
 
 @(test)
-test_pat_cplx_nested_via_binding_self_66 :: proc(t: ^testing.T) {
+test_pat_cplx_nested_via_binding_self_67 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_nested_via_binding_self.json", t)
 }
 
 @(test)
-test_pat_exh_value_or_with_default_67 :: proc(t: ^testing.T) {
+test_pat_exh_value_or_with_default_68 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_exh_value_or_with_default.json", t)
 }
 
 @(test)
-test_pat_cplx_compo_value_or_range_fires_range_68 :: proc(t: ^testing.T) {
+test_pat_cplx_compo_value_or_range_fires_range_69 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_compo_value_or_range_fires_range.json", t)
 }
 
 @(test)
-test_pat_cplx_scope_two_fields_value_eq_69 :: proc(t: ^testing.T) {
+test_pat_cplx_scope_two_fields_value_eq_70 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_scope_two_fields_value_eq.json", t)
 }
 
 @(test)
-test_pat_constraint_shape_u8_ok_70 :: proc(t: ^testing.T) {
+test_pat_nonsingleton_eq_not_exhaustive_71 :: proc(t: ^testing.T) {
+	run_pattern_test("tests/pat_nonsingleton_eq_not_exhaustive.json", t)
+}
+
+@(test)
+test_pat_constraint_shape_u8_ok_72 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_constraint_shape_u8_ok.json", t)
 }
 
 @(test)
-test_pat_cplx_compo_or_nested_deep_71 :: proc(t: ^testing.T) {
+test_pat_cplx_compo_or_nested_deep_73 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_compo_or_nested_deep.json", t)
 }
 
 @(test)
-test_pat_simple_typecheck_range_fires_72 :: proc(t: ^testing.T) {
+test_pat_simple_typecheck_range_fires_74 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_simple_typecheck_range_fires.json", t)
 }
 
 @(test)
-test_pat_cplx_compo_negate_value_miss_73 :: proc(t: ^testing.T) {
+test_pat_cplx_compo_negate_value_miss_75 :: proc(t: ^testing.T) {
 	run_pattern_test("tests/pat_cplx_compo_negate_value_miss.json", t)
 }
 

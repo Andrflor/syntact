@@ -1,0 +1,1 @@
+{"name": "nonsingleton_eq_not_exhaustive", "description": "=0..120 is a value-match over a NON-singleton range (not a bottom type), so =v stays distinct from v: the union with 121..255 does not cover u8", "source": "a -> ??::u8\nr -> a ? {\n  =0..120 -> 1\n  121..255 -> 2\n}\n-> r", "expect_errors": ["Non_Exhaustive_Pattern"]}
