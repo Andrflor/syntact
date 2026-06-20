@@ -984,12 +984,14 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 				}
 			}
 		}
-		// A property access (`a.r`, target != nil) is INDIRECT: it reads `r` off whatever
-		// `a` resolves to. Do NOT repoint its frozen site through the indirection — `a.r`
-		// must stay `a.r`. Rewriting match_scope here followed `a` into the carved scope
-		// and made `a.r` resolve to `a.r`, an infinite self-reference. Repointing the
-		// site only applies to a DIRECT mention-reference (`a#1`, target == nil).
-		if v.target == nil && ref != nil && ref.match_scope == old {
+		// Repointing the frozen site applies ONLY to a direct ordinal mention-reference
+		// (`a#1`: target == nil AND index set). NOT to:
+		//  - a property access (`a.r`, target != nil): it reads off whatever `a` resolves
+		//    to; rewriting it followed `a` into the carved scope (`a.r` -> `a.r`);
+		//  - a source-none property (`.x`: target == nil, index nil): the `.` ALWAYS reads
+		//    the ORIGINAL field, so it must keep `old`. Rewriting it to `dst` made `.x`
+		//    point at the override that IS `.x` — an infinite self-reference.
+		if v.target == nil && ref != nil && ref.index != nil && ref.match_scope == old {
 			nref := new(Reference)
 			nref^ = Reference{ref.name, ref.index, dst, ref.match_index}
 			return new_type(Reference_Type{nil, nref})
