@@ -177,12 +177,17 @@ resolve_entry :: proc() -> bool {
 			f64(timing_data.parsing_time) / f64(timing_data.total_time) * 100,
 		)
 
-		if !resolver.options.analyze_only {
+		// Analysis runs whenever we are not parse-only — including --analyze-only,
+		// where it is the LAST stage and thus the one most worth seeing.
+		if !resolver.options.parse_only {
 			fmt.printf(
 				"  ├─ Analysis:     %v (%.2f%%)\n",
 				timing_data.analysis_time,
 				f64(timing_data.analysis_time) / f64(timing_data.total_time) * 100,
 			)
+		}
+		// Reduce/Codegen only run when we go past analysis.
+		if !resolver.options.parse_only && !resolver.options.analyze_only {
 			fmt.printf(
 				"  ├─ Reduce:       %v (%.2f%%)\n",
 				timing_data.reduce_time,
