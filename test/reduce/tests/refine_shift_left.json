@@ -1,0 +1,6 @@
+{
+  "name": "refine_shift_left",
+  "description": "n<<2 over i32, branch cover 20 refines n to 5 (a<<k in V -> a in V>>k)",
+  "source": "n -> ??::i32\n-> n << 2 ? { 20 -> 1, -> 0 }",
+  "expect": "??0 << 2 ? {20 -> 1[??0=5], -> 0[??0=-2147483648..4 | 6..2147483647]}"
+}

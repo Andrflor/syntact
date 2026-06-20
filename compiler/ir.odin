@@ -349,6 +349,7 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 				strings.write_string(b, " -> ")
 			}
 			write_value(b, branch.product)
+			write_branch_refinements(b, branch.product)
 		}
 		strings.write_byte(b, '}')
 	case Range_Type:
@@ -837,6 +838,7 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 			}
 			strings.write_string(b, "->")
 			write_fold(b, branch.product)
+			write_branch_refinements(b, branch.product)
 		}
 		strings.write_byte(b, '}')
 	}

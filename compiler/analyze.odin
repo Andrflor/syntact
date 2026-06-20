@@ -77,6 +77,79 @@ Analyzer :: struct {
 	// `pending` and re-run at that scope's close (scope_close).
 	fold_pending:     ^Scope_Type,
 	pending:          [dynamic]Pending,
+	// Pattern-branch refinement overrides: while walking/proving a branch product,
+	// a scrutinee binding `(scope, index)` resolves to its REFINED domain here
+	// instead of its declared type. Installed/restored around each branch product in
+	// walk_pattern, so a carve proof inside `n ? {0->…, -> f{n->n-1}}` sees n:1..MAX.
+	// Consulted by resolve_binding_type at every constraint-domain resolution site.
+	refine_overrides: map[Binding_Site]^Type,
+}
+
+// Identifies a single binding for the refinement-override map.
+Binding_Site :: struct {
+	scope: ^Scope_Type,
+	index: int,
+}
+
+// resolve_binding_type returns the domain a binding resolves to during folding: its
+// pattern-refined override when one is installed for this branch, else its declared
+// type. This is the single hook that makes a refined scrutinee binding visible to
+// every domain/constraint fold inside a pattern branch product.
+resolve_binding_type :: proc(scope: ^Scope_Type, index: int) -> ^Type {
+	if scope == nil || index < 0 do return nil
+	if ov := refine_override_for(scope, index); ov != nil do return ov
+	if index < len(scope.types) do return scope.types[index]
+	return nil
+}
+
+// refine_override_for returns the installed refinement override for a binding, or
+// nil if none. Cheap when no overrides are active (the common case).
+refine_override_for :: proc(scope: ^Scope_Type, index: int) -> ^Type {
+	if scope == nil || index < 0 do return nil
+	a := current_analyzer()
+	if a == nil || len(a.refine_overrides) == 0 do return nil
+	if ov, ok := a.refine_overrides[Binding_Site{scope, index}]; ok do return ov
+	return nil
+}
+
+// snapshot_overrides copies the currently-active refinement overrides, to be replayed
+// later around a deferred obligation. Returns nil when none are active.
+snapshot_overrides :: proc(a: ^Analyzer) -> map[Binding_Site]^Type {
+	if a == nil || len(a.refine_overrides) == 0 do return nil
+	snap := make(map[Binding_Site]^Type)
+	for k, v in a.refine_overrides do snap[k] = v
+	return snap
+}
+
+// install_override_snapshot installs `snap` onto the live override map, returning the
+// prior values of exactly the keys it touched (with a `present` flag) so the install
+// can be undone precisely. A nil/empty snapshot installs nothing.
+Override_Save :: struct {
+	site:    Binding_Site,
+	value:   ^Type,
+	present: bool,
+}
+install_override_snapshot :: proc(a: ^Analyzer, snap: map[Binding_Site]^Type) -> []Override_Save {
+	if a == nil || len(snap) == 0 do return {}
+	saved := make([dynamic]Override_Save, 0, len(snap))
+	for site, v in snap {
+		prev, present := a.refine_overrides[site]
+		append(&saved, Override_Save{site, prev, present})
+		a.refine_overrides[site] = v
+	}
+	return saved[:]
+}
+
+// restore_override_snapshot undoes install_override_snapshot exactly.
+restore_override_snapshot :: proc(a: ^Analyzer, saved: []Override_Save) {
+	if a == nil do return
+	for s in saved {
+		if s.present {
+			a.refine_overrides[s.site] = s.value
+		} else {
+			delete_key(&a.refine_overrides, s.site)
+		}
+	}
 }
 
 // One deferred obligation, re-run when `awaiting` finishes walking:
@@ -100,6 +173,11 @@ Pending :: struct {
 	scope:    ^Scope_Type, // .Typecheck: the owning scope
 	bind:     int, // .Typecheck: binding index in `scope`
 	node:     Node_Index, // diagnostics anchor
+	// Snapshot of the pattern-branch refinement overrides active when this obligation
+	// was deferred. A carve inside a pattern branch (`n ? {0->…, -> f{n->n-1}}`)
+	// re-proves at scope_close, long after walk_pattern restored the live overrides —
+	// so we replay this snapshot around the deferred proof. nil/empty when none.
+	overrides: map[Binding_Site]^Type,
 }
 
 create_analyzer :: proc(ast: ^Ast) -> Analyzer {
@@ -335,7 +413,12 @@ scope_close :: proc(a: ^Analyzer, s: ^Scope_Type) {
 		case .Typecheck:
 			retypecheck(a, p.scope, p.bind, p.node)
 		case .Carve:
+			// Replay the refinement overrides that were active when this carve was
+			// deferred, so a carve inside a pattern branch re-proves with the refined
+			// scrutinee domain it was written under.
+			saved := install_override_snapshot(a, p.overrides)
 			close_carve(a, p)
+			restore_override_snapshot(a, saved)
 		case .Default:
 			close_default(a, p)
 		}
@@ -1279,6 +1362,7 @@ walk_carve :: proc(
 				carve = result,
 				scope = current_scope,
 				node = idx,
+				overrides = snapshot_overrides(a),
 			},
 		)
 		return result
@@ -1601,6 +1685,10 @@ walk_pattern :: #force_inline proc(
 	branch_nodes := ast.extra[r.start:][:r.len]
 
 	branches := make([dynamic]Pattern_Branch, 0, len(branch_nodes) / 2)
+	// Covers of earlier branches, accumulated so branch k's product is proven knowing
+	// the scrutinee fell through every prior branch (`target & ~M0 & … & M(k-1)`).
+	prior_covers := make([dynamic]^Type, 0, len(branch_nodes) / 2)
+	defer delete(prior_covers)
 	for i := 0; i < len(branch_nodes); i += 2 {
 		match_idx := branch_nodes[i]
 		product_idx := i + 1 < len(branch_nodes) ? branch_nodes[i + 1] : INVALID_NODE
@@ -1612,12 +1700,21 @@ walk_pattern :: #force_inline proc(
 			match = walk(a, current_scope, match_idx)
 		}
 
+		// Install the scrutinee refinement for THIS branch before walking its product,
+		// so any constraint proof inside the product (e.g. a carve `f{n -> n-1}`) sees
+		// the narrowed scrutinee domain. Restored right after.
+		this_cover := match != nil ? cover_leaf(fold_constraint(match)) : nil
+		installed := install_branch_refinement(a, target, this_cover, prior_covers[:])
+
 		product: ^Type = nil
 		if product_idx != INVALID_NODE {
 			product = walk(a, current_scope, product_idx)
 		} else {
 			product = make_none()
 		}
+
+		uninstall_branch_refinement(a, installed)
+		append(&prior_covers, this_cover)
 
 		append(&branches, build_pattern_branch(match, product))
 	}

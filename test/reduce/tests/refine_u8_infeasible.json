@@ -1,0 +1,6 @@
+{
+  "name": "refine_u8_infeasible",
+  "description": "n+2 over u8 with branch cover 0 forces n=-2, outside u8: empty refinement (branch infeasible), no annotation",
+  "source": "n -> ??::u8\n-> n + 2 ? { 0 -> 100, -> 200 }",
+  "expect": "??0 + 2 ? {0 -> 100, -> 200[??0=u8]}"
+}

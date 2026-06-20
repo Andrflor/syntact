@@ -1,0 +1,6 @@
+{
+  "name": "refine_affine_canonical",
+  "description": "(n+1)+4 canonicalizes to n+5 before refinement; branch cover 10 refines n to 5",
+  "source": "n -> ??::i32\n-> (n + 1) + 4 ? { 10 -> 1, -> 0 }",
+  "expect": "??0 + 5 ? {10 -> 1[??0=5], -> 0[??0=-2147483648..4 | 6..2147483647]}"
+}

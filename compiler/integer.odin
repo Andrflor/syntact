@@ -214,6 +214,10 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		return integer_type_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
+			// A pattern-branch refinement override replaces the binding's domain here.
+			if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
+				return fold_type_intervals(ov)
+			}
 			if s, ok := stored_fold_intervals(
 				   v.match_scope.type_folds[v.match_index],
 			   ).(Integer_Type); ok {
@@ -229,6 +233,9 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	case Reference_Type:
 		ref := v.reference
 		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
+		if ov := refine_override_for(ref.match_scope, ref.match_index); ov != nil {
+			return fold_type_intervals(ov)
+		}
 		if s, ok := stored_fold_intervals(
 			   ref.match_scope.type_folds[ref.match_index],
 		   ).(Integer_Type); ok {

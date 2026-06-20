@@ -1,0 +1,6 @@
+{
+  "name": "refine_multiply",
+  "description": "n*3 over i32, branch cover 12 refines n to 4 via interval division",
+  "source": "n -> ??::i32\n-> n * 3 ? { 12 -> 1, -> 0 }",
+  "expect": "3 * ??0 ? {12 -> 1[??0=4], -> 0[??0=-2147483648..3 | 5..2147483647]}"
+}

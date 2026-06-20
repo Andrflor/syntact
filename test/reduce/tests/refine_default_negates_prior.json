@@ -1,0 +1,6 @@
+{
+  "name": "refine_default_negates_prior",
+  "description": "default branch sees ~M0 & ~M1: n refined to everything except 1 and 2",
+  "source": "n -> ??::i32\n-> n ? { 1 -> 10, 2 -> 20, -> 30 }",
+  "expect": "??0 ? {1 -> 10[??0=1], 2 -> 20[??0=2], -> 30[??0=-2147483648..0 | 3..2147483647]}"
+}
