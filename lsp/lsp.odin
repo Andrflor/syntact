@@ -1333,7 +1333,9 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		case .String_Literal:
 			emit(ast, tokens, cur.span, .String)
 		case .Bool_Literal:
-			emit(ast, tokens, cur.span, .Keyword)
+			// `true`/`false` are value literals — bottom types exactly like `10` — so
+			// they get the same token type as a numeric literal, not a keyword color.
+			emit(ast, tokens, cur.span, .Number)
 		case .At:
 			emit(ast, tokens, cur.span, .Decorator)
 		case .Execute, .QuestionExclamation:
