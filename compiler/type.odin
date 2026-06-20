@@ -973,24 +973,24 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 		}
 	case Reference_Type:
 		ref := v.reference
-		nt := repoint(v.target, old, dst)
-		// If the TARGET was substituted, the frozen `(scope, index)` site is stale:
-		// re-resolve the property NAME in the new target. Only when the target changed
-		// and the reference is name-keyed (a property access, not a plain mention-ref).
-		if ref != nil && nt != v.target {
-			if _, has_name := ref.name.(string); has_name {
-				if rr := reresolve_property(nt, ref); rr != nil {
-					return rr
-				}
+		// A property access `a.r` (target != nil) is INDIRECT: it reads `r` off whatever
+		// `a` resolves to. Only repoint the `a` it travels through — never rewrite its
+		// frozen site, never re-resolve the property. `a.r` must stay `a.r`. (Rewriting
+		// the site followed the indirection into the carved scope and made `a.r` resolve
+		// to `a.r`, an infinite self-reference.)
+		if v.target != nil {
+			nt := repoint(v.target, old, dst)
+			if nt != v.target {
+				return new_type(Reference_Type{nt, ref})
 			}
+			break
 		}
+		// A targetless reference `a#1` IS a direct mention of a binding: repoint its
+		// site exactly like a plain Mention.
 		if ref != nil && ref.match_scope == old {
 			nref := new(Reference)
 			nref^ = Reference{ref.name, ref.index, dst, ref.match_index}
-			return new_type(Reference_Type{nt, nref})
-		}
-		if nt != v.target {
-			return new_type(Reference_Type{nt, ref})
+			return new_type(Reference_Type{nil, nref})
 		}
 	case Compose_Type:
 		l := repoint(v.left, old, dst)
