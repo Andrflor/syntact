@@ -118,10 +118,17 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 }
 
 // branch_match_cover yields the match a branch contributes to the coverage union:
-// a typecheck branch `M` as-is, a default branch nil. A value branch `=v` is already
-// the producer `{-> v}` in `match`, so both modes are handled uniformly here.
+// a typecheck branch `M` as-is, a default branch nil. A value branch `=v` is the
+// producer `{-> v}` in `match`. SINGLETON SUGAR: when `v` is a singleton (a bottom
+// type — `true`, `false`, `10`, a one-value set), `=v` and `v` denote the same thing
+// (there is no difference between "is the value v" and "is of type v" when type v
+// has exactly one value), so the cover is the singleton `v`, exactly like a bare `v`
+// branch. This makes `=true | =false` exhaustive over bool, like `true | false`. A
+// NON-singleton `=v` (e.g. `=u8`) keeps the producer — there `=v` ≠ `v` by design.
 branch_match_cover :: proc(branch: Pattern_Branch) -> ^Type {
 	if branch.match == nil do return nil
+	leaf := cover_leaf(fold_constraint(branch.match))
+	if leaf != nil && fold_is_concrete_value(leaf) do return leaf
 	return branch.match
 }
 
