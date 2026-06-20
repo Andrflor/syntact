@@ -185,6 +185,7 @@ negated :: proc(t: ^Type) -> ^Type {
 // Unknown (??) resolves only when its type is a single concrete value; otherwise
 // it stays Unknown (which never satisfies).
 fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
+	if scope == nil || i < 0 || i >= len(scope.types) do return nil
 	value := scope.types[i]
 	if value != nil {
 		if _, is_unknown := value^.(Unknown_Type); is_unknown {
