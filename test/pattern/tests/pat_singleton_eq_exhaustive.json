@@ -1,0 +1,1 @@
+{"name": "singleton_eq_exhaustive", "description": "=true | =false is exhaustive over bool: for a singleton (bottom type) =v and v denote the same set, so the value-match covers like a typecheck-match", "source": "b -> ??::bool\nr -> b ? {\n  =true -> 1\n  =false -> 2\n}\n-> r", "expect_errors": []}
