@@ -248,51 +248,25 @@ scope_is_pure_producer :: proc(s: Scope_Type) -> bool {
 // equality); `~ | &` compare structurally (operand-wise; `|`/`&` are
 // order-insensitive over their flattened branches). Different kinds — including
 // a domain mismatch (`~10.0` vs a string) — are never equal.
-reflect_variant :: proc(t: ^Type) -> string {
-	if t == nil do return "nil"
-	switch _ in t^ {
-	case Integer_Type: return "Integer"
-	case Float_Type: return "Float"
-	case String_Type: return "String"
-	case Bool_Type: return "Bool"
-	case Scope_Type: return "Scope"
-	case Range_Type: return "Range"
-	case Or_Type: return "Or"
-	case And_Type: return "And"
-	case Negate_Type: return "Negate"
-	case Compose_Type: return "Compose"
-	case Cast_Type: return "Cast"
-	case Pattern_Type: return "Pattern"
-	case Carve_Type: return "Carve"
-	case Mention_Type: return "Mention"
-	case Reference_Type: return "Reference"
-	case Recursive_Mention_Type: return "RecursiveMention"
-	case None_Type: return "None"
-	case Unknown_Type: return "Unknown"
-	case Invalid_Type: return "Invalid"
-	case Execute_Type: return "Execute"
-	}
-	return "?"
-}
-
 // recursive_tails_equal compares two recursive list tails (`Array{u8}` vs `Irrr{u8}`)
 // by STRUCTURE, not by name: equality is structural, so two cons-types of the same
-// unfolded shape are equal whatever they are called. It unfolds each one level and
-// compares the bodies — coinductively: a pair already on the comparison stack is
-// assumed equal (else `Array` ⊇ `Array` would recurse forever). The guard stack is
-// thread-local (the test runner compares on multiple threads).
-@(thread_local) tail_eq_stack: [dynamic][2]^Type
-
+// shape are equal whatever they are called. Both are lazy markers (a bare recursive
+// mention or a carve over one); they are equal when their per-parameter overrides fold
+// to the same value (`{u8}` vs `{u8}`). The SOURCE name is deliberately ignored — that
+// is what makes the structural identity hold across `Array` and `Irrr`. We never unfold
+// here: the value-level structure was already materialized by the analyzer, so only the
+// override comparison remains, which is finite (no recursion into the recursive body).
 recursive_tails_equal :: proc(a, b: ^Type) -> bool {
-	for pair in tail_eq_stack {
-		if pair[0] == a && pair[1] == b do return true // coinductive hypothesis
+	ca, a_is_carve := a^.(Carve_Type)
+	cb, b_is_carve := b^.(Carve_Type)
+	// A bare mention (`Array:`) has no overrides; both must be bare or both carved.
+	if a_is_carve != b_is_carve do return false
+	if !a_is_carve do return true // two bare recursive mentions: same shape, no params
+	if len(ca.types) != len(cb.types) do return false
+	for k in 0 ..< len(ca.types) {
+		if !type_set_equal(fold_type(ca.types[k]), fold_type(cb.types[k])) do return false
 	}
-	ua := recursive_tail_unfold(a)
-	ub := recursive_tail_unfold(b)
-	if ua == nil || ub == nil do return ua == nil && ub == nil
-	append(&tail_eq_stack, [2]^Type{a, b})
-	defer pop(&tail_eq_stack)
-	return type_set_equal(ua, ub)
+	return true
 }
 
 type_set_equal :: proc(a, b: ^Type) -> bool {
