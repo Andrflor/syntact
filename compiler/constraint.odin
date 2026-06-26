@@ -1,6 +1,7 @@
 package compiler
 
 import "core:fmt"
+import "core:strings"
 
 // CONSTRAINT side: fold_constraint resolves the set a binding IMPOSES (left of
 // `:`), satisfy proves a value's type is a subset of it. Same package as type.odin.
@@ -247,6 +248,53 @@ scope_is_pure_producer :: proc(s: Scope_Type) -> bool {
 // equality); `~ | &` compare structurally (operand-wise; `|`/`&` are
 // order-insensitive over their flattened branches). Different kinds — including
 // a domain mismatch (`~10.0` vs a string) — are never equal.
+reflect_variant :: proc(t: ^Type) -> string {
+	if t == nil do return "nil"
+	switch _ in t^ {
+	case Integer_Type: return "Integer"
+	case Float_Type: return "Float"
+	case String_Type: return "String"
+	case Bool_Type: return "Bool"
+	case Scope_Type: return "Scope"
+	case Range_Type: return "Range"
+	case Or_Type: return "Or"
+	case And_Type: return "And"
+	case Negate_Type: return "Negate"
+	case Compose_Type: return "Compose"
+	case Cast_Type: return "Cast"
+	case Pattern_Type: return "Pattern"
+	case Carve_Type: return "Carve"
+	case Mention_Type: return "Mention"
+	case Reference_Type: return "Reference"
+	case Recursive_Mention_Type: return "RecursiveMention"
+	case None_Type: return "None"
+	case Unknown_Type: return "Unknown"
+	case Invalid_Type: return "Invalid"
+	case Execute_Type: return "Execute"
+	}
+	return "?"
+}
+
+// recursive_tails_equal compares two recursive list tails (`Array{u8}` vs `Irrr{u8}`)
+// by STRUCTURE, not by name: equality is structural, so two cons-types of the same
+// unfolded shape are equal whatever they are called. It unfolds each one level and
+// compares the bodies — coinductively: a pair already on the comparison stack is
+// assumed equal (else `Array` ⊇ `Array` would recurse forever). The guard stack is
+// thread-local (the test runner compares on multiple threads).
+@(thread_local) tail_eq_stack: [dynamic][2]^Type
+
+recursive_tails_equal :: proc(a, b: ^Type) -> bool {
+	for pair in tail_eq_stack {
+		if pair[0] == a && pair[1] == b do return true // coinductive hypothesis
+	}
+	ua := recursive_tail_unfold(a)
+	ub := recursive_tail_unfold(b)
+	if ua == nil || ub == nil do return ua == nil && ub == nil
+	append(&tail_eq_stack, [2]^Type{a, b})
+	defer pop(&tail_eq_stack)
+	return type_set_equal(ua, ub)
+}
+
 type_set_equal :: proc(a, b: ^Type) -> bool {
 	if a == nil || b == nil do return a == nil && b == nil
 	#partial switch va in a^ {
@@ -265,6 +313,12 @@ type_set_equal :: proc(a, b: ^Type) -> bool {
 	case Negate_Type:
 		vb, ok := b^.(Negate_Type)
 		return ok && type_set_equal(va.operand, vb.operand)
+	case Recursive_Mention_Type:
+		if _, ok := b^.(Recursive_Mention_Type); !ok do return false
+		return recursive_tails_equal(a, b)
+	case Carve_Type:
+		if _, ok := b^.(Carve_Type); !ok do return false
+		return recursive_tails_equal(a, b)
 	case Or_Type:
 		if _, ok := b^.(Or_Type); !ok do return false
 		return set_branches_equal(a, b, true)
@@ -277,7 +331,30 @@ type_set_equal :: proc(a, b: ^Type) -> bool {
 		if scope_is_pure_producer(va) && scope_is_pure_producer(vb) {
 			return type_set_equal(va.type_folds[0], vb.type_folds[0])
 		}
-		return false
+		// General VALUE scope identity: same shape (names/kind) and field-wise equal
+		// folds — including the CONSTRAINT coloring (a recursive body's `T: ...` head
+		// carries its color on both sides). The type_fold of a structural placeholder
+		// is the uninstantiated body (`{}`), so comparing constraint_folds is what makes
+		// two `Array{u8}` literals equal where a subset proof would wrongly drill the
+		// colored head against that `{}`.
+		if len(va.names) != len(vb.names) do return false
+		for k in 0 ..< len(va.names) {
+			if va.names[k] != vb.names[k] || va.kind[k] != vb.kind[k] {
+				return false
+			}
+			if !type_set_equal(va.type_folds[k], vb.type_folds[k]) {
+				return false
+			}
+			ca := k < len(va.constraint_folds) ? va.constraint_folds[k] : nil
+			cb := k < len(vb.constraint_folds) ? vb.constraint_folds[k] : nil
+			if (ca == nil) != (cb == nil) {
+				return false
+			}
+			if ca != nil && !type_set_equal(ca, cb) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }
@@ -410,14 +487,9 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 		if !ok do return false
 		// Two PURE producers (`{-> X}` vs `{-> Y}`) are the meta level of a typeof /
 		// `=X` value: matching is IDENTITY, not subset. `=~10` must accept ONLY ~10,
-		// not a proper subset like ~(10|11) (which IS ⊆ ~10 as a set). scope_satisfy
-		// proves one direction; demand the reverse too. The reverse uses the
-		// coloring-free scope_satisfy_range so it never mutates the constraint.
+		// not a proper subset like ~(10|11) (which IS ⊆ ~10 as a set). type_set_equal
+		// compares the produced sets as written.
 		if scope_is_pure_producer(f) && scope_is_pure_producer(v) {
-			// Two single-production producers are the meta level of a typeof / `=X`
-			// value: the match is STRUCTURAL IDENTITY, not subset. `=~10` accepts only
-			// ~10 — not a proper subset like ~(10|11), and not a string. type_set_equal
-			// compares the produced sets as written.
 			return type_set_equal(f.type_folds[0], v.type_folds[0])
 		}
 		return scope_satisfy(f, v)
@@ -456,11 +528,13 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 		for i := 0; i < len(c.kind); i += 1 {
 			if c.kind[i] == .Product {
 				hasProd = true
-				if c.constraint_folds[i] != nil {
-					if satisfy(c.constraint_folds[i], ft) {
-						return true
-					}
-				} else if satisfy((c.type_folds[i]), ft) {
+				// Prove the value against each production. A COLORED production (`Array{u8}:`)
+				// may itself fold to a recursive list body — recurse via satisfy_root so the
+				// body is re-scanned production-by-production. A bare VALUE production (`-> v`)
+				// is just its produced value; satisfy matches it (identity for a value scope,
+				// numeric subset for `-> 0`).
+				prod := c.constraint_folds[i] != nil ? c.constraint_folds[i] : c.type_folds[i]
+				if (c.constraint_folds[i] != nil ? satisfy_root(prod, ft) : satisfy(prod, ft)) {
 					return true
 				}
 			}
@@ -470,8 +544,12 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	return satisfy(fc, ft)
 }
 
-
 scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
+	// A VALUE scope is matched by structural IDENTITY first (two `Array{u8}` literals are
+	// equal even though a subset proof would drill the colored recursive head against the
+	// other's structural placeholder). Falling through to the subset proof handles the
+	// genuine constraint case (`{0.1 2.0} ⊆ Array{f32}`).
+	if type_set_equal(new_type(cs), new_type(vs)) do return true
 	satisfied := scope_satisfy_range(cs, 0, len(cs.names), vs, 0, len(vs.names))
 	if satisfied {
 		// Color-on-proof: once vs ⊆ cs holds, stamp cs's per-field colors onto vs so
@@ -482,11 +560,55 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 	return satisfied
 }
 
+// expand_satisfies proves a value run `vs[vi..vend]` against an Expand `...A`, treating
+// it as a PARTIAL scope_satisfy_range: the run must satisfy ONE of A's productions,
+// repeated. A recursive tail (`...Array{T}:`) unfolds one level to A's body, which has
+// several productions (the empty terminal `-> {}` and the cons `-> {head, ...tail}`);
+// each is a candidate scope_satisfy_range over the SAME indices — the cons head consumes
+// one value and its inner `...tail` recurses, so the list unfolds by self-similarity with
+// no sub-scope built, the empty terminal closing an exhausted run. A plain `...A` repeats
+// A directly. nil A (`...`) only matches the empty run.
+expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
+	resolved := is_recursive_tail(a) ? recursive_tail_unfold(a) : a
+	if resolved == nil do return vi == vend
+	s, ok := &resolved^.(Scope_Type)
+	if !ok do return vi == vend
+	// Try each scope production of A's body against the run; the first that proves wins.
+	matched := false
+	for i in 0 ..< len(s.kind) {
+		if s.kind[i] != .Product do continue
+		prod := s.constraint_folds[i] != nil ? s.constraint_folds[i] : s.type_folds[i]
+		if prod == nil do continue
+		ps, sok := &prod^.(Scope_Type)
+		if !sok do continue
+		matched = true
+		if scope_satisfy_range(ps^, 0, len(ps.names), vs, vi, vend) {
+			return true
+		}
+	}
+	// No scope production (a leaf A like `...u8`): repeat A over each remaining value.
+	if !matched {
+		for j in vi ..< vend {
+			if !satisfy_root(resolved, vs.type_folds[j]) do return false
+		}
+		return true
+	}
+	return false
+}
+
 scope_satisfy_range :: proc(cs: Scope_Type, ci, cend: int, vs: Scope_Type, vi, vend: int) -> bool {
 	if ci == cend {
 		return vi == vend
 	}
 
+	// An Expand `...A` consumes the leftover value run by repeating A's production — a cons
+	// tail unfolds by self-similarity (see expand_satisfies). It is the LAST constraint
+	// field (a recursive tail has nothing after it), so its match closes the range.
+	if cs.kind[ci] == .Expand {
+		return expand_satisfies(cs.constraint_folds[ci], vs, vi, vend)
+	}
+
+	// A non-variadic field must consume exactly one value, so the value range can't be empty.
 	if vi >= vend {
 		return false
 	}
