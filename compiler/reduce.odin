@@ -14,6 +14,11 @@ import "core:strings"
 // ============================================================================
 
 // reduce collapses a scope through its Product binding.
+//
+// An `...A` expansion (`.Expand`) pastes A's bindings — INCLUDING its production
+// — at that position. So the FIRST production reached in binding order wins, and
+// an expansion that carries a production fires BEFORE a later in-place `-> v`
+// (`{...double#0; -> 6}` collapses through double#0's production, not the `6`).
 reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
@@ -24,9 +29,42 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 			}
 			return reduce_value(scope.types[i])
 		}
+		if scope.kind[i] == .Expand {
+			if prod := reduce_expand_production(scope.types[i]); prod != nil {
+				return prod
+			}
+		}
 	}
 	// A scope with no Product binding reduces to none — the empty value, not nil.
 	return new_type(None_Type{})
+}
+
+// reduce_expand_production resolves an `...A` operand to its scope and returns
+// A's production reduction, or nil when A is not a scope or carries no product
+// (a productionless expansion is transparent — collapse falls through to the
+// next binding).
+reduce_expand_production :: proc(value: ^Type) -> ^Type {
+	resolved := follow(value)
+	if resolved == nil do return nil
+	#partial switch &s in resolved^ {
+	case Scope_Type:
+		for i := 0; i < len(s.kind); i += 1 {
+			if s.kind[i] == .Product {
+				if i < len(s.type_folds) {
+					if shortcut := singleton_shortcut(s.type_folds[i]); shortcut != nil {
+						return shortcut
+					}
+				}
+				return reduce_value(s.types[i])
+			}
+			if s.kind[i] == .Expand {
+				if prod := reduce_expand_production(s.types[i]); prod != nil {
+					return prod
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // singleton_shortcut returns the fold when it is a concrete singleton, else nil
