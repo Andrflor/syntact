@@ -557,13 +557,21 @@ scope_resolve :: proc(
 			return nil, -1
 		}
 		count := 0
+		found_any := false
 		for i := 0; i < len(scope.names); i += 1 {
 			if scope.names[i] == name {
+				found_any = true
 				if count == int(ordinal) {
 					return scope, i
 				}
 				count += 1
 			}
+		}
+		// Like the unordered case, walk up to an ancestor — but only when THIS scope
+		// does not define the name at all. A scope that defines `d` shadows ancestors;
+		// an out-of-range ordinal there is unresolved, not a jump to the parent's `d`.
+		if !found_any && scope.parent != nil {
+			return scope_resolve(scope.parent, name, ordinal, last, allow_capture)
 		}
 		return nil, -1
 	}

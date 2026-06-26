@@ -285,26 +285,38 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 // FIRST production it reduces through (follow to a scope, peeling a carve).
 // `resolved` splits the two empty cases: a scope with no production yields `none`
 // (resolved=true, prod=nil); a non-scope target can't fold statically (resolved=false).
+//
+// An `...A` expansion (`.Expand`) pastes A's bindings — INCLUDING its production —
+// at that position, so an expansion carrying a production fires BEFORE a later
+// in-place `-> v` (`{...double#0; -> 6}` collapses through double#0's production).
 execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
 	cur := follow(t)
 	for cur != nil {
 		#partial switch &v in cur^ {
 		case Scope_Type:
-			for i := 0; i < len(v.kind); i += 1 {
-				if v.kind[i] == .Product do return v.types[i], true
-			}
-			return nil, true
+			return scope_first_production(&v)
 		case Carve_Type:
 			sub := fold_carve_type(cur)
 			if sub == nil do return nil, false
-			for i := 0; i < len(sub.kind); i += 1 {
-				if sub.kind[i] == .Product do return sub.types[i], true
-			}
-			return nil, true
+			return scope_first_production(sub)
 		}
 		break
 	}
 	return nil, false
+}
+
+// scope_first_production returns the first production reachable in binding order,
+// pasting any `...A` expansion's production in place (see execute_production).
+scope_first_production :: proc(s: ^Scope_Type) -> (prod: ^Type, resolved: bool) {
+	for i := 0; i < len(s.kind); i += 1 {
+		if s.kind[i] == .Product do return s.types[i], true
+		if s.kind[i] == .Expand {
+			if p, ok := execute_production(s.types[i]); ok && p != nil {
+				return p, true
+			}
+		}
+	}
+	return nil, true
 }
 
 // DEFAULT — the concrete value a constraint produces when no value is given
