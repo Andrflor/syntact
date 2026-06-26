@@ -1,6 +1,6 @@
 {
   "name": "Constraint compound array valid",
   "description": "Array{F32ORString}:a -> {0.1 ''} should pass, f32 and string both satisfy f32|string",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> f32:\n  -> string:\n}\n\nArray{F32ORString}:a -> {0.1 2.0 ''}",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n\nF32ORString -> {\n  -> f32:\n  -> string:\n}\n\nArray{F32ORString}:a -> {0.1 2.0 ''}",
   "expect_errors": []
 }
