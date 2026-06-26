@@ -1,6 +1,6 @@
 {
   "name": "Product constraint scope literal fail",
   "description": "-> Array{u8}: as constraint production, {''} does not satisfy Array{u8} because string is not u8",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nF32ORString -> {\n  -> string:\n  -> u8:\n  -> Array{u8}:\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 {''}}",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n\nF32ORString -> {\n  -> string:\n  -> u8:\n  -> Array{u8}:\n}\n\nArray{F32ORString|f32}:array -> {0.1 2.0 '' 2 {''}}",
   "expect_errors": ["Constraint_Mismatch"]
 }

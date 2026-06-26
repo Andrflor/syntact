@@ -1,6 +1,6 @@
 {
   "name": "Product value carve pass",
   "description": "-> Array{u8} as value production, Array{u8} carve is structurally Array{u8}",
-  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array:}\n}\n\nU8OrArrayU8 -> {\n  -> u8:\n  -> Array{u8}\n}\n\nArray{U8OrArrayU8}:array -> {1 2 Array{u8}}",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n\nU8OrArrayU8 -> {\n  -> u8:\n  -> Array{u8}\n}\n\nArray{U8OrArrayU8}:array -> {1 2 Array{u8}}",
   "expect_errors": []
 }
