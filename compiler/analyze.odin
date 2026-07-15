@@ -72,6 +72,11 @@ Analyzer :: struct {
 	// underlying scope its target resolves through (stable across carve clones);
 	// re-entry bails to nil.
 	execute_stack:    [dynamic]^Scope_Type,
+	// value_fold_stack guards folding a binding's VALUE through its (scope, index)
+	// site: a self-referential value — a carved override mentioning its own binding,
+	// e.g. `n -> n-1` repointed into the clone — would re-enter forever through a
+	// Compose. Re-entry bails to nil, like the direct mention-chain guard.
+	value_fold_stack: [dynamic]Binding_Site,
 	// `fold_pending` is set by the fold layer when a fold touches a scope still being
 	// walked or an unresolved forward Reference: the obligation is queued on
 	// `pending` and re-run at that scope's close (scope_close).

@@ -37,7 +37,7 @@ Source files use the `.syn` extension. (The external-import resolver in `resolve
 
 ```bash
 odin build compiler -out:compiler/compiler   # the full pipeline
-odin build lsp                                # the LSP server (package lsp/)
+odin build lsp -out:lsp/lsp                   # the LSP server (package lsp/) — WITHOUT -out it writes ./lsp.bin, NOT lsp/lsp (the binary editors typically launch); a stale lsp/lsp is a recurring source of "LSP still crashes" reports
 
 ./compiler/compiler input.syn                 # reduce and print the value
 ./compiler/compiler input.syn --ast           # print the AST
