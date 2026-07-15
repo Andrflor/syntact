@@ -862,8 +862,10 @@ walk_binding :: #force_inline proc(
 					capture = span_str(ast, ast.node_data[csrc].identifier.capture)
 				}
 			}
-			// The colored name must resolve to an identifier.
-			if name == "" {
+			// The colored name must resolve to an identifier — or a bare `(e)`
+			// capture: an ANONYMOUS captured binding (no name; invisible to `.`
+			// and carving, reachable only by mention, like any capture).
+			if name == "" && capture == "" {
 				sem_error(
 					a,
 					"invalid constraint name: the colored name must be an identifier",
@@ -988,6 +990,14 @@ walk_expand :: #force_inline proc(
 	if ast.node_kinds[operand_idx] == .Constraint {
 		cdata := ast.node_data[operand_idx]
 		constraint = walk(a, current_scope, cdata.binary.left)
+		// `...C:name` / `...C:(r)`: the Constraint's right is the binding NAME
+		// (possibly a bare capture), exactly as in walk_constraint — never a value.
+		if cdata.binary.right != INVALID_NODE &&
+		   ast.node_kinds[cdata.binary.right] == .Identifier {
+			name := span_str(ast, ast.node_data[cdata.binary.right].identifier.name)
+			capture := span_str(ast, ast.node_data[cdata.binary.right].identifier.capture)
+			return append_bare_constraint(a, current_scope, name, constraint, .Expand, idx, capture)
+		}
 		value: ^Type = nil
 		if cdata.binary.right != INVALID_NODE {
 			value = walk(a, current_scope, cdata.binary.right)
@@ -1024,18 +1034,22 @@ walk_constraint :: #force_inline proc(
 	data := ast.node_data[idx]
 	constraint := walk(a, current_scope, data.binary.left)
 	name := ""
+	capture := ""
 	if data.binary.right != INVALID_NODE {
 		right_kind := ast.node_kinds[data.binary.right]
 		if right_kind == .Identifier {
 			name = span_str(ast, ast.node_data[data.binary.right].identifier.name)
+			capture = span_str(ast, ast.node_data[data.binary.right].identifier.capture)
 		} else if right_kind == .Carve {
 			csrc := ast.node_data[data.binary.right].carve.source
 			if csrc != INVALID_NODE && ast.node_kinds[csrc] == .Identifier {
 				name = span_str(ast, ast.node_data[csrc].identifier.name)
+				capture = span_str(ast, ast.node_data[csrc].identifier.capture)
 			}
 		}
-		// A colored binding's name must be an identifier.
-		if name == "" {
+		// A colored binding's name must be an identifier — or a bare `(e)` capture
+		// (an ANONYMOUS captured binding, mention-only).
+		if name == "" && capture == "" {
 			sem_error(
 				a,
 				"invalid constraint name: the colored name must be an identifier",
@@ -1045,7 +1059,7 @@ walk_constraint :: #force_inline proc(
 			return make_invalid()
 		}
 	}
-	return append_bare_constraint(a, current_scope, name, constraint, .Pointing_Push, idx)
+	return append_bare_constraint(a, current_scope, name, constraint, .Pointing_Push, idx, capture)
 }
 
 // append_bare_constraint registers a valueless colored binding: the value is the
@@ -1058,6 +1072,7 @@ append_bare_constraint :: proc(
 	constraint: ^Type,
 	bk: Binding_Kind,
 	node: Node_Index,
+	capture: string = "",
 ) -> ^Type {
 	a.fold_pending = nil
 	fc := fold_constraint(constraint)
@@ -1068,7 +1083,7 @@ append_bare_constraint :: proc(
 		// the default — NOT an Unknown_Type, which means `??` and would diagnose
 		// every fold over this scope as insoluble.
 		value = constraint
-		scope_append(a, scope, name, constraint, bk, value)
+		scope_append(a, scope, name, constraint, bk, value, capture)
 		append(&scope.constraint_folds, nil)
 		append(&scope.type_folds, nil)
 		append(
@@ -1083,7 +1098,7 @@ append_bare_constraint :: proc(
 		)
 		return value
 	}
-	scope_append(a, scope, name, constraint, bk, value)
+	scope_append(a, scope, name, constraint, bk, value, capture)
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, value)
 	return value
