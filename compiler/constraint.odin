@@ -519,6 +519,14 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 				}
 			}
 		}
+		// OPEN SEMANTIC QUESTION (maintainer to rule): a scope constraint with BOTH
+		// structural fields and productions currently reads as producer-ONLY (the
+		// value must belong to a production's set). This correctly rejects the
+		// grammar machine as its own element (`Array{u8}` inside `Array{…}:array`,
+		// pinned by analyze/constraint_product_constraint_carve_fail), but it also
+		// rejects a function-shaped binding proven against a function-shaped value
+		// (`{T:e, -> E:}:func -> {T:e, -> E:}`) — a structural fallback here fixes
+		// func but un-pins the grammar test. The two intents share one syntax.
 		if (hasProd) do return false
 	}
 	return satisfy(fc, ft)

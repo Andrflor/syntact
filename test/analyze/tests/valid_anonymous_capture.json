@@ -1,0 +1,6 @@
+{
+  "name": "Valid anonymous capture",
+  "description": "u8:(v) -> 5 — a capture WITHOUT a name is an anonymous captured binding: no name (invisible to `.` and carving), reachable only by mention, like any capture",
+  "source": "z -> {\n  u8:(v) -> 5\n  -> v + 1\n}\n-> z!",
+  "expect_errors": []
+}

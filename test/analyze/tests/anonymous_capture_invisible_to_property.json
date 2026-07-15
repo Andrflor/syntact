@@ -1,0 +1,6 @@
+{
+  "name": "Anonymous capture invisible to property access",
+  "description": "obj.v must fail: an anonymous `(v)` capture is referenceable by mention within its scope but never via property access '.', exactly like a named binding's capture",
+  "source": "obj -> {\n  u8:(v) -> 42\n}\n-> obj.v",
+  "expect_errors": ["Invalid_Property_Access"]
+}

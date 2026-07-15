@@ -1,0 +1,6 @@
+{
+  "name": "Anonymous capture bare constraint",
+  "description": "u8:(v) with no value — the anonymous captured binding materializes the constraint default; the capture is mentionable within the scope",
+  "source": "z -> {\n  u8:(v)\n  -> v\n}\n-> z!",
+  "expect_errors": []
+}

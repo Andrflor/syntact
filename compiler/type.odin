@@ -364,11 +364,22 @@ default_value :: proc(t: ^Type) -> ^Type {
 	for {
 		#partial switch &v in cur^ {
 		case Scope_Type:
+			// A PURE producer `{-> v}` denotes its production's value-set: default
+			// through the production. A STRUCTURAL scope (any non-product binding)
+			// defaults to the whole materialized structure — defaults compose
+			// structurally (core rule 11) — so a carve into the defaulted binding
+			// still finds its fields (`{T:e, -> E:}:func` then `func{e -> …}`).
+			structural := false
 			for i := 0; i < len(v.kind); i += 1 {
-				if v.kind[i] == .Product {
-					def := type_default(v.types[i])
-					if def != nil do return def
-					return v.types[i]
+				if v.kind[i] != .Product do structural = true
+			}
+			if !structural {
+				for i := 0; i < len(v.kind); i += 1 {
+					if v.kind[i] == .Product {
+						def := type_default(v.types[i])
+						if def != nil do return def
+						return v.types[i]
+					}
 				}
 			}
 			return t
