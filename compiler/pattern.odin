@@ -105,8 +105,15 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	}
 
 	combined: ^Type = nil
-	for branch in p.branches {
+	for branch, i in p.branches {
+		// Fold the product with the scrutinee narrowed to what THIS branch implies
+		// (cover & ~priors): inside `0 -> n` the mention n folds to 0, not to n's
+		// declared domain. This is what lets a terminating recursion over a symbolic
+		// argument fold to its exit value (`f{n -> ??::u64}!` → the exit branch's
+		// singleton), exactly like a constant exit product would.
+		saved := install_fold_refinement(p.target, p.branches[:], i)
 		pf := fold_type(branch.product)
+		uninstall_fold_refinement(saved)
 		if pf == nil do continue
 		if combined == nil {
 			combined = pf
