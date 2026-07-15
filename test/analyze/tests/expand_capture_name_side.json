@@ -1,0 +1,6 @@
+{
+  "name": "Expand constraint capture name side",
+  "description": "...C:(r) — the Constraint's right is the binding NAME side (here a bare capture), never a value expression: must not walk `(r)` as a value (regression: '' is not defined)",
+  "source": "L -> {\n  -> {}\n}\ncover -> {u8:(h) ...L:(r)}\n-> 0",
+  "expect_errors": []
+}
