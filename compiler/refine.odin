@@ -115,10 +115,11 @@ install_branch_refinement :: proc(
 		if !ok do continue
 		// Don't clobber an outer (nested-pattern) override already on this site; the
 		// inner branch only narrows further. Compose by intersecting if present.
-		if existing, present := a.refine_overrides[site]; present {
-			a.refine_overrides[site] = domain_intersect(existing, r.domain)
+		if existing, present := site.scope.refine_overrides[site.index]; present {
+			site.scope.refine_overrides[site.index] = domain_intersect(existing, r.domain)
 		} else {
-			a.refine_overrides[site] = r.domain
+			site.scope.refine_overrides[site.index] = r.domain
+			a.active_override_sites[site] = true
 			append(&installed, site)
 		}
 	}
@@ -127,7 +128,10 @@ install_branch_refinement :: proc(
 
 // uninstall_branch_refinement removes exactly the overrides install added.
 uninstall_branch_refinement :: proc(a: ^Analyzer, installed: []Binding_Site) {
-	for site in installed do delete_key(&a.refine_overrides, site)
+	for site in installed {
+		delete_key(&site.scope.refine_overrides, site.index)
+		delete_key(&a.active_override_sites, site)
+	}
 }
 
 // branch_add_from_covers builds `this_cover & ~prior0 & … & ~priorN`. A default
