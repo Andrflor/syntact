@@ -976,9 +976,19 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 		// target with a free `??` (e.g. `??0 + 2`, a Compose over fixed points) stays
 		// symbolic and the refinement pass below records the per-branch narrowings.
 		if target != nil && !contains_fixed_point(target) {
-			for branch in p.branches {
-				if reduce_branch_fires(branch, target) {
-					return reduce_value(branch.product)
+			decide: for branch in p.branches {
+				switch reduce_branch_fires(branch, target) {
+				case .Yes:
+					// Destructuring: the fired product reduces with its cover
+					// substituted by the scrutinee's matched pieces (repoint — the
+					// same substitution a carve uses).
+					return reduce_value(fired_product(branch, target))
+				case .No:
+					continue
+				case .Undecidable:
+					// An undecidable cover must not fall through to a later branch
+					// (mis-firing the default): the pattern stays symbolic.
+					break decide
 				}
 			}
 		}
@@ -1054,35 +1064,128 @@ cover_leaf :: proc(cover: ^Type) -> ^Type {
 	return cover
 }
 
-// reduce_branch_fires: the reduce-side firing test. The default branch always
-// fires; otherwise the reduced target must satisfy the branch's cached cover_fold.
-// Only domain-leaf covers are decided here; anything else keeps the pattern
-// symbolic (reduce never calls the analyzer's proof machinery).
-reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> bool {
-	if branch.match == nil do return true
+// The reduce-side firing decision. Yes/No when the membership is decidable with
+// the domain kernels alone; Undecidable keeps the whole pattern SYMBOLIC — it must
+// never fall through to a later branch (that would mis-fire the default on a value
+// an earlier cover actually matches). Reduce never calls the analyzer's proof
+// machinery: structural covers are decided by reduce_scope_fires, the mirrored
+// structural walk (like reduce_unify_pull mirrors unify_pull).
+Fire_Decision :: enum u8 {
+	No,
+	Yes,
+	Undecidable,
+}
+
+reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> Fire_Decision {
+	if branch.match == nil do return .Yes
 	cf := branch.cover_fold
-	if cf == nil || target == nil do return false
+	if cf == nil || target == nil do return .Undecidable
 	// A value-match (`=v`) cover folds to the producer scope `{-> v}`; read through it
 	// to the production leaf so the leaf domain test below decides v's membership.
-	if s, is_scope := cf^.(Scope_Type); is_scope {
-		prods := scope_productions(s)
-		if len(prods) == 1 && prods[0] != nil do cf = prods[0]
+	// A structural scope cover (no production) is a destructuring shape: decide it
+	// with the mirrored structural walk against a scope target.
+	if s, is_scope := &cf^.(Scope_Type); is_scope {
+		prods := scope_productions(s^)
+		if len(prods) == 1 && prods[0] != nil {
+			cf = prods[0]
+		} else if len(prods) == 0 {
+			res := follow(target)
+			if res == nil do return .Undecidable
+			ts, t_ok := &res^.(Scope_Type)
+			if !t_ok do return .No
+			return reduce_scope_fires(s, ts, 0, 0)
+		}
 	}
+	// A `=v` whose v is itself a SCOPE VALUE (`={x->6}`) fires on structural value
+	// equality, decided field-wise with the kernels.
+	if _, cf_is_scope := cf^.(Scope_Type); cf_is_scope {
+		return reduce_value_equal(cf, target)
+	}
+	return reduce_leaf_fires(cf, target)
+}
+
+// reduce_value_equal decides structural VALUE equality of two reduced values:
+// two-way kernel satisfaction on domain leaves (equality for singletons),
+// name-sensitive field-wise recursion on scopes.
+reduce_value_equal :: proc(l, r: ^Type) -> Fire_Decision {
+	lv := reduce_value(l)
+	rv := reduce_value(r)
+	if lv == nil || rv == nil do return .Undecidable
+	if ls, l_ok := &lv^.(Scope_Type); l_ok {
+		res := follow(rv)
+		if res == nil do return .Undecidable
+		rs, r_ok := &res^.(Scope_Type)
+		if !r_ok do return .No
+		if len(ls.types) != len(rs.types) do return .No
+		for i in 0 ..< len(ls.types) {
+			ln := i < len(ls.names) ? ls.names[i] : ""
+			rn := i < len(rs.names) ? rs.names[i] : ""
+			if ln != rn do return .No
+			d := reduce_value_equal(ls.types[i], rs.types[i])
+			if d != .Yes do return d
+		}
+		return .Yes
+	}
+	d1 := reduce_leaf_fires(lv, rv)
+	if d1 == .Undecidable do return .Undecidable
+	d2 := reduce_leaf_fires(rv, lv)
+	if d2 == .Undecidable do return .Undecidable
+	return (d1 == .Yes && d2 == .Yes) ? .Yes : .No
+}
+
+// reduce_leaf_fires decides one domain-leaf membership with the kernels.
+reduce_leaf_fires :: proc(cf: ^Type, target: ^Type) -> Fire_Decision {
+	if cf == nil || target == nil do return .Undecidable
 	#partial switch f in cf^ {
 	case Integer_Type:
 		v, ok := target^.(Integer_Type)
-		return ok && integer_satisfy(f, v)
+		if !ok do return .No
+		return integer_satisfy(f, v) ? .Yes : .No
 	case Float_Type:
 		v, ok := target^.(Float_Type)
-		return ok && float_satisfy(f, v)
+		if !ok do return .No
+		return float_satisfy(f, v) ? .Yes : .No
 	case String_Type:
 		v, ok := target^.(String_Type)
-		return ok && string_satisfy(f, v)
+		if !ok do return .No
+		return string_satisfy(f, v) ? .Yes : .No
 	case Bool_Type:
 		v, ok := target^.(Bool_Type)
-		return ok && bool_satisfy(f, v)
+		if !ok do return .No
+		return bool_satisfy(f, v) ? .Yes : .No
 	}
-	return false
+	return .Undecidable
+}
+
+// reduce_scope_fires mirrors scope_satisfy_range for the reduce side: cover fields
+// in lockstep with target fields (names must agree — shape matching is
+// name-sensitive), an Expand cover field swallowing the remaining run when its
+// constraint is a domain LEAF (`...u8`). A non-leaf expand (a recursive tail
+// `...Array{T}:`) is Undecidable here — the pattern stays symbolic.
+reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> Fire_Decision {
+	c := ci
+	for c < len(cover.kind) && cover.kind[c] == .Product do c += 1
+	if c >= len(cover.kind) {
+		return vi >= len(ts.types) ? .Yes : .No
+	}
+	if cover.kind[c] == .Expand {
+		cf := c < len(cover.constraint_folds) ? cover.constraint_folds[c] : nil
+		if cf == nil do return vi >= len(ts.types) ? .Yes : .No
+		for k := vi; k < len(ts.types); k += 1 {
+			d := reduce_leaf_fires(cf, reduce_value(ts.types[k]))
+			if d != .Yes do return d
+		}
+		return .Yes
+	}
+	if vi >= len(ts.types) do return .No
+	if c < len(cover.names) && vi < len(ts.names) && cover.names[c] != ts.names[vi] {
+		return .No
+	}
+	cf := c < len(cover.constraint_folds) ? cover.constraint_folds[c] : nil
+	if cf == nil do return .Undecidable
+	d := reduce_leaf_fires(cf, reduce_value(ts.types[vi]))
+	if d != .Yes do return d
+	return reduce_scope_fires(cover, ts, c + 1, vi + 1)
 }
 
 // reduce_set_op materializes a |/&/~ expression to a concrete value (the default

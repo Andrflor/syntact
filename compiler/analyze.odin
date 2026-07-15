@@ -72,11 +72,6 @@ Analyzer :: struct {
 	// underlying scope its target resolves through (stable across carve clones);
 	// re-entry bails to nil.
 	execute_stack:    [dynamic]^Scope_Type,
-	// value_fold_stack guards folding a binding's VALUE through its (scope, index)
-	// site: a self-referential value — a carved override mentioning its own binding,
-	// e.g. `n -> n-1` repointed into the clone — would re-enter forever through a
-	// Compose. Re-entry bails to nil, like the direct mention-chain guard.
-	value_fold_stack: [dynamic]Binding_Site,
 	// `fold_pending` is set by the fold layer when a fold touches a scope still being
 	// walked or an unresolved forward Reference: the obligation is queued on
 	// `pending` and re-run at that scope's close (scope_close).
@@ -1479,29 +1474,10 @@ carve_resolve_children :: proc(
 				)
 			}
 
+			// The override proof runs in recheck_carve against the SUBSTITUTED
+			// constraint (a sibling override may rewrite this field's constraint:
+			// `a{T -> u8, source -> …}` proves source against Array{u8}).
 			val := walk(a, current_scope, val_idx)
-			if carve_scope != nil && carve_index >= 0 {
-				cf := carve_scope.constraint_folds[carve_index]
-				if cf != nil {
-					vf := fold_type(val)
-					if vf != nil && !satisfy_root(cf, vf) {
-						// An empty carve target (`n->`) has no value node; anchor the
-						// error on the whole child so node_span never sees INVALID_NODE.
-						err_idx := val_idx != INVALID_NODE ? val_idx : child
-						sem_error(
-							a,
-							fmt.tprintf(
-								"constraint mismatch in carve '%s': %s does not satisfy %s",
-								cname,
-								describe_type(vf),
-								describe_type(cf),
-							),
-							.Constraint_Mismatch,
-							node_span(a, err_idx),
-						)
-					}
-				}
-			}
 			append(
 				refs,
 				Reference {
@@ -1534,25 +1510,6 @@ carve_resolve_children :: proc(
 			self_src^ = Reference_Type{nil, ref_self}
 
 			val := walk_carve(a, current_scope, child, self_src)
-			if carve_scope != nil && carve_index >= 0 {
-				cf := carve_scope.constraint_folds[carve_index]
-				if cf != nil {
-					vf := fold_type(val)
-					if vf != nil && !satisfy_root(cf, vf) {
-						sem_error(
-							a,
-							fmt.tprintf(
-								"constraint mismatch in carve '%s': %s does not satisfy %s",
-								cname,
-								describe_type(vf),
-								describe_type(cf),
-							),
-							.Constraint_Mismatch,
-							node_span(a, child),
-						)
-					}
-				}
-			}
 			append(
 				refs,
 				Reference {
@@ -1587,27 +1544,60 @@ carve_resolve_children :: proc(
 			}
 
 			val := walk(a, current_scope, child)
-			if carve_scope != nil && carve_index >= 0 {
-				cf := carve_scope.constraint_folds[carve_index]
-				if cf != nil {
-					vf := fold_type(val)
-					if vf != nil && !satisfy_root(cf, vf) {
-						sem_error(
-							a,
-							fmt.tprintf(
-								"constraint mismatch in positional carve: %s does not satisfy %s",
-								describe_type(vf),
-								describe_type(cf),
-							),
-							.Constraint_Mismatch,
-							node_span(a, child),
-						)
-					}
-				}
-			}
 			append(refs, Reference{nil, nil, carve_scope, carve_index})
 			append(vals, val)
 			positional_idx += 1
+		}
+	}
+
+	// Prove each override against the SUBSTITUTED constraint: a sibling override
+	// may rewrite this field's constraint (`a{T -> u8, source -> …}`: source must
+	// prove against Array{u8}, not the source scope's Array{T -> {}}). The VALUE
+	// fold is the walked original — an active branch refinement keeps applying to
+	// its mentions — only the CONSTRAINT side reads through the substitution,
+	// falling back to the pre-carve constraint when the carve doesn't fold.
+	saved_pending := a.fold_pending
+	sub := fold_carve_constraint(carve)
+	a.fold_pending = saved_pending
+	for k in 0 ..< len(cv.references) {
+		ref := cv.references[k]
+		if ref.match_scope == nil || ref.match_index < 0 do continue
+		cf: ^Type = nil
+		if sub != nil && ref.match_index < len(sub.constraint_folds) {
+			cf = sub.constraint_folds[ref.match_index]
+		}
+		if cf == nil && ref.match_index < len(ref.match_scope.constraint_folds) {
+			cf = ref.match_scope.constraint_folds[ref.match_index]
+		}
+		if cf == nil do continue
+		vf := fold_type(cv.types[k])
+		if vf == nil do continue
+		if !satisfy_root(cf, vf) {
+			child := carve_children[k]
+			if name, has := ref.name.(string); has {
+				sem_error(
+					a,
+					fmt.tprintf(
+						"constraint mismatch in carve '%s': %s does not satisfy %s",
+						name,
+						describe_type(vf),
+						describe_type(cf),
+					),
+					.Constraint_Mismatch,
+					node_span(a, child),
+				)
+			} else {
+				sem_error(
+					a,
+					fmt.tprintf(
+						"constraint mismatch in positional carve: %s does not satisfy %s",
+						describe_type(vf),
+						describe_type(cf),
+					),
+					.Constraint_Mismatch,
+					node_span(a, child),
+				)
+			}
 		}
 	}
 }
@@ -1659,15 +1649,16 @@ close_carve :: proc(a: ^Analyzer, p: Pending) {
 
 // recheck_carve folds a carve to its substituted scope and re-proves each colored
 // binding. Covers the implicit constraints — DEPENDENT fields (value references a
-// carved one); the inline check already covers directly-overridden fields.
+// carved one); the override proof runs in carve_resolve_children against the
+// substituted constraint.
 recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	saved_span := a.recheck_span
 	a.recheck_span = node_span(a, node)
 	defer a.recheck_span = saved_span
 	sub := fold_carve_constraint(cast(^Type)carve)
 	if sub == nil do return
-	// Skip directly-overridden fields (already proven inline by walk_carve) so a
-	// direct violation isn't reported twice as a (mislabeled) "implicit" one.
+	// Skip directly-overridden fields (already proven at resolution) so a direct
+	// violation isn't reported twice as a (mislabeled) "implicit" one.
 	overridden := make(map[int]bool)
 	for ref in carve.references do overridden[ref.match_index] = true
 	for i in 0 ..< len(sub.names) {
@@ -1737,9 +1728,20 @@ walk_pattern :: #force_inline proc(
 		this_cover := match != nil ? cover_leaf(fold_constraint(match)) : nil
 		installed := install_branch_refinement(a, target, this_cover, prior_covers[:])
 
+		// A branch product is lexically a production OF its cover: walked with a
+		// literal scope cover as its scope, the ordinary resolution chain (cover →
+		// enclosing scope) makes the cover's bindings and `(e)` captures mentionable
+		// from the product — destructuring, with nested patterns nesting for free.
+		product_scope := current_scope
+		if match != nil {
+			if ms, is_scope := &match^.(Scope_Type); is_scope {
+				product_scope = ms
+			}
+		}
+
 		product: ^Type = nil
 		if product_idx != INVALID_NODE {
-			product = walk(a, current_scope, product_idx)
+			product = walk(a, product_scope, product_idx)
 		} else {
 			product = make_none()
 		}

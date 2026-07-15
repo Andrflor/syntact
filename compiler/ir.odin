@@ -96,6 +96,10 @@ Scope_Type :: struct {
 	// branch product); read by the fold layer via refine_override_for. Always
 	// empty outside analysis, so the reducer never touches analyzer state.
 	refine_overrides: map[int]^Type,
+	// Bindings of THIS scope whose value is mid-fold (the value_fold_enter guard
+	// against self-referential values, keyed by binding index). On the scope, not
+	// the analyzer, for the same reason as refine_overrides.
+	folding_values:   map[int]bool,
 }
 
 // `scope!` — collapse: reduce `target` through its Product binding.

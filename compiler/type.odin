@@ -104,21 +104,18 @@ execute_fold_leave :: proc(key: ^Scope_Type) {
 // self-referential value (a carved override mentioning its own binding, `n -> n-1`
 // repointed into the clone) re-enters forever through a Compose — the direct
 // mention-chain guard in fold_constraint_target can't see it. Re-entry reports
-// blocked=true and the caller bails to nil.
+// blocked=true and the caller bails to nil. The marker lives on the SCOPE (like
+// refine_overrides), never on context.user_ptr, so any phase may fold safely.
 value_fold_enter :: proc(scope: ^Scope_Type, i: int) -> (entered: bool, blocked: bool) {
-	a := current_analyzer()
-	if a == nil do return false, false
-	site := Binding_Site{scope, i}
-	for s in a.value_fold_stack {
-		if s == site do return false, true
-	}
-	append(&a.value_fold_stack, site)
+	if scope == nil do return false, false
+	if scope.folding_values[i] do return false, true
+	scope.folding_values[i] = true
 	return true, false
 }
 
-value_fold_leave :: proc(entered: bool) {
-	if !entered do return
-	if a := current_analyzer(); a != nil do pop(&a.value_fold_stack)
+value_fold_leave :: proc(scope: ^Scope_Type, i: int, entered: bool) {
+	if !entered || scope == nil do return
+	delete_key(&scope.folding_values, i)
 }
 
 // fold_type_set is the typeof of a set-algebra value (`~ | &`). It collapses to a
@@ -183,7 +180,7 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				// re-enters this fold forever through a Compose.
 				entered, blocked := value_fold_enter(v.match_scope, v.match_index)
 				if blocked do return nil
-				defer value_fold_leave(entered)
+				defer value_fold_leave(v.match_scope, v.match_index, entered)
 				return fold_type(v.match_scope.types[v.match_index])
 			}
 		case Reference_Type:
@@ -193,7 +190,7 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				}
 				entered, blocked := value_fold_enter(v.reference.match_scope, v.reference.match_index)
 				if blocked do return nil
-				defer value_fold_leave(entered)
+				defer value_fold_leave(v.reference.match_scope, v.reference.match_index, entered)
 				eff := reference_effective_value(v)
 				if eff != nil do return fold_type(eff)
 				return nil
@@ -364,22 +361,16 @@ default_value :: proc(t: ^Type) -> ^Type {
 	for {
 		#partial switch &v in cur^ {
 		case Scope_Type:
-			// A PURE producer `{-> v}` denotes its production's value-set: default
-			// through the production. A STRUCTURAL scope (any non-product binding)
-			// defaults to the whole materialized structure — defaults compose
-			// structurally (core rule 11) — so a carve into the defaulted binding
-			// still finds its fields (`{T:e, -> E:}:func` then `func{e -> …}`).
-			structural := false
+			// A scope with a production denotes its production's value-set (even
+			// with structural fields alongside — those are the machine's innards,
+			// e.g. a grammar's type parameter): the default reads through the
+			// production. To default to a STRUCTURE, color with a producer OF the
+			// structure: `{-> {T:e, -> E:}}:func` defaults to the shape scope.
 			for i := 0; i < len(v.kind); i += 1 {
-				if v.kind[i] != .Product do structural = true
-			}
-			if !structural {
-				for i := 0; i < len(v.kind); i += 1 {
-					if v.kind[i] == .Product {
-						def := type_default(v.types[i])
-						if def != nil do return def
-						return v.types[i]
-					}
+				if v.kind[i] == .Product {
+					def := type_default(v.types[i])
+					if def != nil do return def
+					return v.types[i]
 				}
 			}
 			return t

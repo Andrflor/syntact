@@ -89,10 +89,13 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	if ft == nil do return nil
 
 	// Concrete singleton target: run branches in order, take the FIRST that matches.
+	// The fired product folds with its cover substituted by the matched pieces
+	// (destructuring) — `{u8:(v)} -> v + 1` over `{3}` folds as 4, not as the
+	// cover default.
 	if pattern_target_is_concrete(ft) {
 		for branch in p.branches {
 			if branch_covers(branch, ft) {
-				return fold_type(branch.product)
+				return fold_type(fired_product(branch, ft))
 			}
 		}
 	}
@@ -101,7 +104,7 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	// A covering branch AFTER intercepting ones is NOT deterministic — earlier
 	// branches steal values, so the result is the combined Or type.
 	if len(p.branches) > 0 && branch_covers(p.branches[0], ft) {
-		return fold_type(p.branches[0].product)
+		return fold_type(fired_product(p.branches[0], ft))
 	}
 
 	combined: ^Type = nil
@@ -110,9 +113,11 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		// (cover & ~priors): inside `0 -> n` the mention n folds to 0, not to n's
 		// declared domain. This is what lets a terminating recursion over a symbolic
 		// argument fold to its exit value (`f{n -> ??::u64}!` → the exit branch's
-		// singleton), exactly like a constant exit product would.
+		// singleton), exactly like a constant exit product would. A scope target's
+		// pieces destructure into the cover the same way (fired_product falls back
+		// to the raw product when there is nothing to destructure).
 		saved := install_fold_refinement(p.target, p.branches[:], i)
-		pf := fold_type(branch.product)
+		pf := fold_type(fired_product(branch, ft))
 		uninstall_fold_refinement(saved)
 		if pf == nil do continue
 		if combined == nil {
@@ -122,6 +127,70 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		}
 	}
 	return combined
+}
+
+// destructure_cover materializes the substitution a fired branch implies: a clone
+// of the literal scope cover whose structural fields carry the matched PIECES of
+// the scrutinee, consumed positionally exactly like the scope_satisfy_range proof
+// that fired the branch — one value per plain field, an Expand (`...C:(r)`)
+// swallowing the whole remaining run as a fresh scope (the cons tail). Productions
+// are not destructured. nil when there is nothing structural to bind or the
+// scrutinee is not a scope of pieces.
+destructure_cover :: proc(cover: ^Scope_Type, pieces: ^Scope_Type) -> ^Scope_Type {
+	structural := false
+	for k in cover.kind do if k != .Product do structural = true
+	if !structural do return nil
+
+	sub := scope_clone(cover)
+	vi := 0
+	for i := 0; i < len(sub.kind); i += 1 {
+		if sub.kind[i] == .Product do continue
+		if sub.kind[i] == .Expand {
+			rest := new_type(Scope_Type{parent = pieces.parent})
+			rs := &rest.(Scope_Type)
+			for k := vi; k < len(pieces.types); k += 1 {
+				append(&rs.names, k < len(pieces.names) ? pieces.names[k] : "")
+				append(&rs.kind, k < len(pieces.kind) ? pieces.kind[k] : Binding_Kind.Pointing_Push)
+				append(&rs.types, pieces.types[k])
+				append(&rs.constraints, k < len(pieces.constraints) ? pieces.constraints[k] : nil)
+				append(&rs.captures, k < len(pieces.captures) ? pieces.captures[k] : "")
+				append(&rs.type_folds, k < len(pieces.type_folds) ? pieces.type_folds[k] : nil)
+				append(&rs.constraint_folds, k < len(pieces.constraint_folds) ? pieces.constraint_folds[k] : nil)
+			}
+			sub.types[i] = rest
+			if i < len(sub.type_folds) do sub.type_folds[i] = rest
+			vi = len(pieces.types)
+			continue
+		}
+		if vi < len(pieces.types) {
+			sub.types[i] = pieces.types[vi]
+			if i < len(sub.type_folds) {
+				sub.type_folds[i] = vi < len(pieces.type_folds) ? pieces.type_folds[vi] : nil
+			}
+			vi += 1
+		}
+	}
+	return sub
+}
+
+// fired_product: the product of a fired branch with its cover SUBSTITUTED by the
+// scrutinee's matched pieces — firing IS a carve of the cover by the scrutinee.
+// The substitution is the ordinary copy-on-write repoint (the carve machinery), so
+// mentions of the cover's fields/captures inside the product read the destructured
+// values through every fold/reduce path with no side state. Falls back to the raw
+// product when there is nothing to destructure (non-scope cover, `=v` producer,
+// non-scope scrutinee).
+fired_product :: proc(branch: Pattern_Branch, scrutinee: ^Type) -> ^Type {
+	if branch.match == nil || branch.product == nil || scrutinee == nil do return branch.product
+	cover, c_ok := &branch.match^.(Scope_Type)
+	if !c_ok do return branch.product
+	res := follow(scrutinee)
+	if res == nil do return branch.product
+	pieces, p_ok := &res^.(Scope_Type)
+	if !p_ok do return branch.product
+	sub := destructure_cover(cover, pieces)
+	if sub == nil do return branch.product
+	return repoint(branch.product, cover, sub)
 }
 
 // branch_match_cover yields the match a branch contributes to the coverage union:
