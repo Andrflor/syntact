@@ -1147,10 +1147,11 @@ reduce_carve :: proc(value: Carve_Type) -> ^Type {
 }
 
 // reduce_substitute_carve is the reduce-side carve materialization: resolve the
-// source scope, clone it, unify pulls, write overrides, repoint sibling references.
-// It NEVER calls the analyzer's fold layer (context.user_ptr carries the Reducer
-// here, not the analyzer); it clears substituted fields' cached type_folds so
-// reduce_value reads the value itself.
+// source scope, clone it (scope_clone, a PURE copy — never scope_repoint, whose
+// fold refresh re-enters the analyzer's fold layer), unify pulls, write overrides,
+// repoint sibling references. It clears the cached type_folds of every field it
+// substitutes or repoints so reduce_value reads the value itself; untouched
+// fields keep their analyze-time folds.
 reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	src: ^Scope_Type = nil
 	cur := follow(value.source)
@@ -1167,7 +1168,7 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	}
 	if src == nil do return nil
 
-	copy := scope_repoint(src, nil, nil)
+	copy := scope_clone(src)
 
 	for i in 0 ..< len(value.references) {
 		ref := value.references[i]

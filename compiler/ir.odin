@@ -91,6 +91,11 @@ Scope_Type :: struct {
 	// True while the analyzer is still walking this scope's body: folds that touch
 	// it are untrustworthy (bindings missing) and defer. Always false on clones.
 	walking:          bool,
+	// Pattern-branch refinement overrides for THIS scope's bindings, keyed by
+	// binding index. Written only by the analyzer (installed/removed around each
+	// branch product); read by the fold layer via refine_override_for. Always
+	// empty outside analysis, so the reducer never touches analyzer state.
+	refine_overrides: map[int]^Type,
 }
 
 // `scope!` — collapse: reduce `target` through its Product binding.

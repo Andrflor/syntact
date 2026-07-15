@@ -77,12 +77,11 @@ Analyzer :: struct {
 	// `pending` and re-run at that scope's close (scope_close).
 	fold_pending:     ^Scope_Type,
 	pending:          [dynamic]Pending,
-	// Pattern-branch refinement overrides: while walking/proving a branch product,
-	// a scrutinee binding `(scope, index)` resolves to its REFINED domain here
-	// instead of its declared type. Installed/restored around each branch product in
-	// walk_pattern, so a carve proof inside `n ? {0->…, -> f{n->n-1}}` sees n:1..MAX.
-	// Consulted by resolve_binding_type at every constraint-domain resolution site.
-	refine_overrides: map[Binding_Site]^Type,
+	// Sites whose scope currently carries a refinement override (the values live on
+	// each Scope_Type.refine_overrides, keyed by binding index — NOT here, so the
+	// fold layer never needs this Analyzer to read one). This set only exists to
+	// enumerate the active overrides when a deferred obligation snapshots them.
+	active_override_sites: map[Binding_Site]bool,
 }
 
 // Identifies a single binding for the refinement-override map.
@@ -103,21 +102,23 @@ resolve_binding_type :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 }
 
 // refine_override_for returns the installed refinement override for a binding, or
-// nil if none. Cheap when no overrides are active (the common case).
+// nil if none. It reads the SCOPE's own override map — no analyzer, no context —
+// so it is safe (and trivially nil) when called from the reducer's fold reuse.
 refine_override_for :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	if scope == nil || index < 0 do return nil
-	a := current_analyzer()
-	if a == nil || len(a.refine_overrides) == 0 do return nil
-	if ov, ok := a.refine_overrides[Binding_Site{scope, index}]; ok do return ov
+	if len(scope.refine_overrides) == 0 do return nil
+	if ov, ok := scope.refine_overrides[index]; ok do return ov
 	return nil
 }
 
 // snapshot_overrides copies the currently-active refinement overrides, to be replayed
 // later around a deferred obligation. Returns nil when none are active.
 snapshot_overrides :: proc(a: ^Analyzer) -> map[Binding_Site]^Type {
-	if a == nil || len(a.refine_overrides) == 0 do return nil
+	if a == nil || len(a.active_override_sites) == 0 do return nil
 	snap := make(map[Binding_Site]^Type)
-	for k, v in a.refine_overrides do snap[k] = v
+	for site in a.active_override_sites {
+		if ov, ok := site.scope.refine_overrides[site.index]; ok do snap[site] = ov
+	}
 	return snap
 }
 
@@ -133,9 +134,10 @@ install_override_snapshot :: proc(a: ^Analyzer, snap: map[Binding_Site]^Type) ->
 	if a == nil || len(snap) == 0 do return {}
 	saved := make([dynamic]Override_Save, 0, len(snap))
 	for site, v in snap {
-		prev, present := a.refine_overrides[site]
+		prev, present := site.scope.refine_overrides[site.index]
 		append(&saved, Override_Save{site, prev, present})
-		a.refine_overrides[site] = v
+		site.scope.refine_overrides[site.index] = v
+		if !present do a.active_override_sites[site] = true
 	}
 	return saved[:]
 }
@@ -145,9 +147,10 @@ restore_override_snapshot :: proc(a: ^Analyzer, saved: []Override_Save) {
 	if a == nil do return
 	for s in saved {
 		if s.present {
-			a.refine_overrides[s.site] = s.value
+			s.site.scope.refine_overrides[s.site.index] = s.value
 		} else {
-			delete_key(&a.refine_overrides, s.site)
+			delete_key(&s.site.scope.refine_overrides, s.site.index)
+			delete_key(&a.active_override_sites, s.site)
 		}
 	}
 }
