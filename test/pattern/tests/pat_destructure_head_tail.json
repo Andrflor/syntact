@@ -1,0 +1,7 @@
+{
+  "name": "pat_destructure_head_tail",
+  "description": "cons destructuring: {u8:(h) ...u8:(t)} over {3 4 5} binds h to the first piece and t to the remaining run as a scope; the leaf expand `...u8` repeats u8 over the rest",
+  "source": "x -> {3 4 5}\n-> x ? {\n  {u8:(h) ...u8:(t)} -> h\n  -> 0\n}",
+  "expect_errors": [],
+  "expect": "3"
+}

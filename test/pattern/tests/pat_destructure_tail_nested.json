@@ -1,0 +1,7 @@
+{
+  "name": "pat_destructure_tail_nested",
+  "description": "the captured tail destructures again in a nested pattern: over {3 4 5}, t = {4 5} and the inner head h2 = 4 (nested covers nest lexically: inner product -> inner cover -> outer cover)",
+  "source": "x -> {3 4 5}\n-> x ? {\n  {u8:(h) ...u8:(t)} -> t ? {\n    {u8:(h2) ...u8:(t2)} -> h2\n    -> 99\n  }\n  -> 0\n}",
+  "expect_errors": [],
+  "expect": "4"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "pat_destructure_capture_value",
+  "description": "a fired branch's cover capture binds the matched piece: {u8:(v)} over {3} makes v mentionable in the product with value 3 (firing = carve of the cover by the scrutinee)",
+  "source": "x -> {3}\n-> x ? {\n  {u8:(v)} -> v + 1\n  -> 0\n}",
+  "expect_errors": [],
+  "expect": "4"
+}

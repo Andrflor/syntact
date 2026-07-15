@@ -214,7 +214,7 @@ fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 	// site guard catches the re-entry.
 	entered, blocked := value_fold_enter(scope, i)
 	if blocked do return nil
-	defer value_fold_leave(entered)
+	defer value_fold_leave(scope, i, entered)
 	return fold_constraint(value)
 }
 
@@ -519,14 +519,12 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 				}
 			}
 		}
-		// OPEN SEMANTIC QUESTION (maintainer to rule): a scope constraint with BOTH
-		// structural fields and productions currently reads as producer-ONLY (the
-		// value must belong to a production's set). This correctly rejects the
-		// grammar machine as its own element (`Array{u8}` inside `Array{…}:array`,
-		// pinned by analyze/constraint_product_constraint_carve_fail), but it also
-		// rejects a function-shaped binding proven against a function-shaped value
-		// (`{T:e, -> E:}:func -> {T:e, -> E:}`) — a structural fallback here fixes
-		// func but un-pins the grammar test. The two intents share one syntax.
+		// BY DESIGN: a scope constraint with a production reads producer-ONLY — the
+		// value must belong to a production's set, even when structural fields sit
+		// alongside (those are the machine's innards, e.g. a grammar's type
+		// parameter). `{T:e, -> E:}:f -> {T:e, -> E:}` is a Constraint_Mismatch:
+		// to constrain to the SHAPE, color with a producer of it,
+		// `{-> {T:e, -> E:}}:f`.
 		if (hasProd) do return false
 	}
 	return satisfy(fc, ft)
@@ -560,7 +558,13 @@ expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
 	resolved := is_recursive_tail(a) ? recursive_tail_unfold(a) : a
 	if resolved == nil do return vi == vend
 	s, ok := &resolved^.(Scope_Type)
-	if !ok do return vi == vend
+	if !ok {
+		// A leaf A (`...u8`): repeat A over each remaining value.
+		for j in vi ..< vend {
+			if !satisfy_root(resolved, vs.type_folds[j]) do return false
+		}
+		return true
+	}
 	// Try each scope production of A's body against the run; the first that proves wins.
 	matched := false
 	for i in 0 ..< len(s.kind) {
