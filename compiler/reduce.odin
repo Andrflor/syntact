@@ -860,6 +860,9 @@ eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
 // cases on multiple threads (a shared global map would data-race).
 Reducer :: struct {
 	collapse_stack:   [dynamic]^Scope_Type,
+	// Canonical sources whose carve materialization is mid-field-reduction; the
+	// symbolic-pattern residual guard (see terminate.odin) reads it.
+	unfold_stack:     [dynamic]^Scope_Type,
 	dag_table:        map[string]^Type,
 	fixedpoint_index: map[rawptr]int,
 	fixedpoint_next:  int,
@@ -876,6 +879,7 @@ current_reducer :: #force_inline proc() -> ^Reducer {
 create_reducer :: proc() -> Reducer {
 	return Reducer {
 		collapse_stack = make([dynamic]^Scope_Type),
+		unfold_stack = make([dynamic]^Scope_Type),
 		dag_table = make(map[string]^Type),
 		fixedpoint_index = make(map[rawptr]int),
 		fixedpoint_next = 0,
@@ -987,7 +991,13 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	reducer := current_reducer()
 	branches := make([]Pattern_Branch, len(p.branches))
 	for branch, i in p.branches {
-		product := reduce_value(branch.product)
+		// A product that re-enters an unfold already open above this pattern cannot
+		// terminate under a symbolic scrutinee (the pivot stays symbolic every
+		// round): keep it residual instead of unfolding forever.
+		product := branch.product
+		if !contains_open_unfold(branch.product) {
+			product = reduce_value(branch.product)
+		}
 		branches[i] = Pattern_Branch {
 			match      = branch.match,
 			product    = product,
@@ -1136,6 +1146,13 @@ reduce_carve :: proc(value: Carve_Type) -> ^Type {
 		return reduce_value(value.source)
 	}
 	// Reduce each field's value in place (best-effort: keep symbolic on failure).
+	// The canonical source is marked open while its fields reduce: a SYMBOLIC
+	// pattern below keeps a re-entrant recursive branch residual instead of
+	// unfolding forever (terminate.odin); a concrete pattern still picks its
+	// branch statically and unfolds through to the base case.
+	src := collapse_source(value.source)
+	unfold_enter(src)
+	defer unfold_leave(src)
 	for i := 0; i < len(sub.types); i += 1 {
 		if sub.kind[i] == .Product {
 			sub.types[i] = reduce_value(sub.types[i])

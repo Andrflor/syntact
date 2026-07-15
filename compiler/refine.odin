@@ -134,6 +134,56 @@ uninstall_branch_refinement :: proc(a: ^Analyzer, installed: []Binding_Site) {
 	}
 }
 
+// install_fold_refinement narrows the scrutinee's binding sites to what branch k
+// of the pattern implies (`Mk & ~M(k-1) & … & ~M0`), for the duration of ONE fold
+// of that branch's product. Unlike install_branch_refinement it needs NO analyzer:
+// it writes the owning scopes' refine_overrides directly and returns the exact
+// prior state, so it is callable from any phase (walk, recheck, or a reduce-side
+// fold reuse). Restore with uninstall_fold_refinement, in the same expression.
+Fold_Override_Save :: struct {
+	site:    Binding_Site,
+	value:   ^Type,
+	present: bool,
+}
+install_fold_refinement :: proc(
+	target: ^Type,
+	branches: []Pattern_Branch,
+	k: int,
+) -> [dynamic]Fold_Override_Save {
+	saved: [dynamic]Fold_Override_Save
+	add := branch_refinement_add(branches, k)
+	if add == nil do return saved
+	refs := refine(target, add)
+	for r in refs {
+		site, ok := leaf_binding_site(r.leaf)
+		if !ok do continue
+		prev, present := site.scope.refine_overrides[site.index]
+		append(&saved, Fold_Override_Save{site, prev, present})
+		if present {
+			// An outer override (walk-time branch proof) already narrows this site;
+			// the branch fold only narrows further.
+			site.scope.refine_overrides[site.index] = domain_intersect(prev, r.domain)
+		} else {
+			site.scope.refine_overrides[site.index] = r.domain
+		}
+	}
+	return saved
+}
+
+// uninstall_fold_refinement restores exactly what install_fold_refinement changed,
+// in reverse order so nested installs on the same site unwind correctly.
+uninstall_fold_refinement :: proc(saved: [dynamic]Fold_Override_Save) {
+	for i := len(saved) - 1; i >= 0; i -= 1 {
+		s := saved[i]
+		if s.present {
+			s.site.scope.refine_overrides[s.site.index] = s.value
+		} else {
+			delete_key(&s.site.scope.refine_overrides, s.site.index)
+		}
+	}
+	delete(saved)
+}
+
 // branch_add_from_covers builds `this_cover & ~prior0 & … & ~priorN`. A default
 // branch (nil this_cover) starts from the unbounded integer top and only negates the
 // priors. nil when there is nothing to add (no cover, no priors).
