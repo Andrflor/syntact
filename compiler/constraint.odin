@@ -209,6 +209,12 @@ fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 			}
 		}
 	}
+	// A self-reference THROUGH structure (`n -> n-1` repointed into a carve clone:
+	// value = Compose(mention(self), 1)) evades the direct-chain check above; the
+	// site guard catches the re-entry.
+	entered, blocked := value_fold_enter(scope, i)
+	if blocked do return nil
+	defer value_fold_leave(entered)
 	return fold_constraint(value)
 }
 

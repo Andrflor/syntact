@@ -100,6 +100,27 @@ execute_fold_leave :: proc(key: ^Scope_Type) {
 	if a := current_analyzer(); a != nil do pop(&a.execute_stack)
 }
 
+// value_fold_enter/leave guard folding a binding's VALUE through its site: a
+// self-referential value (a carved override mentioning its own binding, `n -> n-1`
+// repointed into the clone) re-enters forever through a Compose — the direct
+// mention-chain guard in fold_constraint_target can't see it. Re-entry reports
+// blocked=true and the caller bails to nil.
+value_fold_enter :: proc(scope: ^Scope_Type, i: int) -> (entered: bool, blocked: bool) {
+	a := current_analyzer()
+	if a == nil do return false, false
+	site := Binding_Site{scope, i}
+	for s in a.value_fold_stack {
+		if s == site do return false, true
+	}
+	append(&a.value_fold_stack, site)
+	return true, false
+}
+
+value_fold_leave :: proc(entered: bool) {
+	if !entered do return
+	if a := current_analyzer(); a != nil do pop(&a.value_fold_stack)
+}
+
 // fold_type_set is the typeof of a set-algebra value (`~ | &`). It collapses to a
 // domain set ONLY when the expression reduces to a concrete singleton (e.g.
 // `~~5` -> 5), preserving identity. Otherwise it keeps the `~ | &` structure
@@ -158,6 +179,11 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
 					return fold_type(ov)
 				}
+				// Site guard: a self-referential value (carve-repointed `n -> n-1`)
+				// re-enters this fold forever through a Compose.
+				entered, blocked := value_fold_enter(v.match_scope, v.match_index)
+				if blocked do return nil
+				defer value_fold_leave(entered)
 				return fold_type(v.match_scope.types[v.match_index])
 			}
 		case Reference_Type:
@@ -165,6 +191,12 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				if ov := refine_override_for(v.reference.match_scope, v.reference.match_index); ov != nil {
 					return fold_type(ov)
 				}
+				entered, blocked := value_fold_enter(v.reference.match_scope, v.reference.match_index)
+				if blocked do return nil
+				defer value_fold_leave(entered)
+				eff := reference_effective_value(v)
+				if eff != nil do return fold_type(eff)
+				return nil
 			}
 			eff := reference_effective_value(v)
 			if eff != nil do return fold_type(eff)
