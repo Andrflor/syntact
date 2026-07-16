@@ -3,6 +3,8 @@ package compiler
 import "core:fmt"
 import "core:unicode/utf8"
 
+DISABLE_INNER_CARVE_EMIT :: #config(DISABLE_INNER_CARVE_EMIT, false)
+
 // reference_effective_value resolves the VALUE a Reference_Type denotes, honoring
 // a carve in its target: when the target resolves to a carve overriding this exact
 // field, return the override's value, not the stale pre-carve site value.
@@ -960,6 +962,19 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 			copy.types[ref.match_index] = carve.types[i]
 			if ref.match_index < len(copy.type_folds) {
 				copy.type_folds[ref.match_index] = fold_type(carve.types[i])
+			}
+		} else if ref.match_index >= len(copy.types) {
+			// The override targets a field ABSENT from the substituted source. A carve
+			// written literally in source is proven eagerly (carve_resolve_children), but
+			// a carve materialized AFTER a substitution — a param carved to `{}` then
+			// re-carved `func{e->3}` in the body — reaches here with the field gone: the
+			// source shrank under it. Left silent, the override would just vanish and the
+			// collapse fold to `none`. emit reports it on recheck_carve's armed span; a
+			// nil analyzer (rendering under reduce) no-ops, staying safe.
+			name := ref.name.(string) or_else ""
+			target := name != "" ? fmt.tprintf("'%s'", name) : "a positional field"
+			when !DISABLE_INNER_CARVE_EMIT {
+				emit(fmt.tprintf("%s does not exist in the carved scope", target), .Invalid_Carve)
 			}
 		}
 	}
