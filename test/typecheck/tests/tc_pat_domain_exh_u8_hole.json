@@ -1,0 +1,8 @@
+{
+  "name": "tc_pat_domain_exh_u8_hole",
+  "description": "a one-value hole (255) in the range tiling: non-exhaustive",
+  "source": "u8:x -> 5\n-> x ? {0..99 -> 1, 100..254 -> 2}",
+  "expect_errors": [
+    "Non_Exhaustive_Pattern"
+  ]
+}

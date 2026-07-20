@@ -1815,19 +1815,29 @@ prove_carve_overrides :: proc(a: ^Analyzer, carve: ^Carve_Type) {
 			)
 		}
 	}
+	// The materialization's dependent PRODUCTS re-prove under the substituted
+	// bindings — the inner mirror of recheck_carve's dependent-field rule: the
+	// production (`e+10`) must be valid for EVERY value the APPLIED domain of its
+	// operands admits (a string element in a mixed application makes `e+10`
+	// unprovable). Only a production whose refold failed is diagnosed.
+	for i in 0 ..< len(sub.kind) {
+		if sub.kind[i] != .Product do continue
+		if stored_type_fold_at(sub, i) != nil do continue
+		detect_invalid(sub.types[i])
+	}
 }
 
 // value_is_comparable_for_proof reports whether a folded value can be proven against a
-// color: a leaf domain, a set operator, or a producer scope `{-> leaf}`. A bare structural
-// scope (an unresolved capture placeholder, or a genuine scope value) is NOT — proving a
-// color against it would false-positive; concrete scopes prove via their own fields.
+// color: a leaf domain, a set operator, a producer scope, or any NON-EMPTY scope value
+// (it proves via scope_satisfy). Only the EMPTY scope is incomparable — it is the
+// unresolved capture placeholder, and proving a color against it would false-positive.
 value_is_comparable_for_proof :: proc(vf: ^Type) -> bool {
 	if vf == nil do return false
 	#partial switch v in vf^ {
 	case Integer_Type, Float_Type, String_Type, Bool_Type, Range_Type, Or_Type, And_Type, Negate_Type:
 		return true
 	case Scope_Type:
-		return color_is_leaf_domain(vf)
+		return len(v.kind) > 0 || color_is_leaf_domain(vf)
 	}
 	return false
 }

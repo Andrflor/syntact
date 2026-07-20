@@ -1,0 +1,6 @@
+{
+  "name": "the head capture is the branch value",
+  "description": "x destructures to the first element",
+  "source": "-> {5 6} ? {\n  {u8:(x) ...u8:(r)} -> x\n  {} -> 0\n}",
+  "expect": "5"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "tc_map_union_op_no_subtract",
+  "description": "e-1 over an applied (u8|string) domain: '-' is invalid for the string branch",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{\"\" 3 4}, {(u8|string):e, -> e-1}}!",
+  "expect_errors": [
+    "Invalid_operator"
+  ]
+}

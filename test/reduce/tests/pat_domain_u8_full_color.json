@@ -1,0 +1,6 @@
+{
+  "name": "full-color branch over a u8 binding",
+  "description": "the u8 branch fires for the value 5",
+  "source": "u8:x -> 5\n-> x ? {u8 -> 1}",
+  "expect": "1"
+}

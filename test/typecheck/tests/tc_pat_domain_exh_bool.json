@@ -1,0 +1,6 @@
+{
+  "name": "tc_pat_domain_exh_bool",
+  "description": "=true | =false covers the bool domain of a lexical colored binding",
+  "source": "bool:b -> true\n-> b ? {=true -> 1, =false -> 0}",
+  "expect_errors": []
+}

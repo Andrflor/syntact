@@ -1,0 +1,6 @@
+{
+  "name": "tc_pat_domain_exh_u8_full_color",
+  "description": "a typecheck branch on the full color u8 covers the lexical binding's domain",
+  "source": "u8:x -> 5\n-> x ? {u8 -> 1}",
+  "expect_errors": []
+}

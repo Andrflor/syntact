@@ -1,0 +1,6 @@
+{
+  "name": "tc_pat_domain_exh_u8_split",
+  "description": "two ranges tiling u8 cover the domain",
+  "source": "u8:x -> 5\n-> x ? {0..99 -> 1, 100..255 -> 2}",
+  "expect_errors": []
+}

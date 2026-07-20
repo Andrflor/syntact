@@ -1,0 +1,8 @@
+{
+  "name": "tc_pat_grammar_exh_no_empty",
+  "description": "the cons cover alone misses the empty run: non-exhaustive",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nm -> {\n  T <- {}\n  Array{T}:source\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> 1\n  }\n}",
+  "expect_errors": [
+    "Non_Exhaustive_Pattern"
+  ]
+}
