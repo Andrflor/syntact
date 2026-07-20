@@ -300,6 +300,14 @@ reduce_scope :: proc(s: ^Scope_Type) -> ^Type {
 	splice := make([]^Scope_Type, len(s.types))
 	for i in 0 ..< len(s.kind) {
 		if s.types[i] == nil do continue
+		// A bare recursive-tail CARVE reached as a value (the grammar's own cons
+		// machinery, `...Array{T}:` inside the materialized machine) re-materializes
+		// itself forever — keep it residual (terminate.odin's unfold stack marks the
+		// grammar open). A COLLAPSE (`...m{r, func}!`) is NOT skipped: execute's own
+		// guards decide it and concrete data terminates it.
+		if cv, is_carve := s.types[i]^.(Carve_Type); is_carve {
+			if unfold_open(collapse_source(cv.source)) do continue
+		}
 		#partial switch s.kind[i] {
 		case .Pointing_Push, .Pointing_Pull:
 			r := reduce_value(s.types[i])
@@ -862,6 +870,20 @@ scale_node :: proc(sub: ^Type, coeff: i128) -> ^Type {
 // eval_concrete runs the existing concrete evaluators for one operator on already
 // reduced (concrete) operands, returning nil when it cannot evaluate.
 eval_concrete :: proc(op: Operator_Kind, left, right: ^Type) -> ^Type {
+	// A STRING operand (`e + "!"` concat, `e * 3` repetition): the string kernel
+	// owns the semantics — delegate, as the analyze-time fold does.
+	l_str, r_str := false, false
+	if left != nil {
+		_, l_str = left^.(String_Type)
+	}
+	if right != nil {
+		_, r_str = right^.(String_Type)
+	}
+	if l_str || r_str {
+		syn := new_type(Compose_Type{left, right, op, nil})
+		if r := fold_type_string(syn); r != nil && fold_is_concrete_value(r) do return r
+		return nil
+	}
 	lv: Type = left != nil ? left^ : nil
 	rv: Type = right != nil ? right^ : nil
 	result := new(Type)

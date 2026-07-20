@@ -486,6 +486,35 @@ tail_param_slots :: proc(t: ^Type, g: ^Scope_Type, slots: ^map[int]bool) {
 	}
 }
 
+// default_is_infinite reports a grammar machine whose FIRST production — the one
+// default materialization and collapse follow — structurally re-enters the grammar
+// itself (an Expand tail naming the same canonical scope): its default never
+// terminates. `Array -> {T -> {}, -> {T: ...Array{T}:}, -> {}}` is rejected;
+// putting the terminal `-> {}` first makes the default finite.
+default_is_infinite :: proc(fc: ^Type) -> bool {
+	if fc == nil do return false
+	s, ok := &fc^.(Scope_Type)
+	if !ok do return false
+	for i in 0 ..< len(s.kind) {
+		if s.kind[i] != .Product do continue
+		prod := s.types[i]
+		if prod == nil do return false
+		ps, p_ok := &prod^.(Scope_Type)
+		if !p_ok do return false
+		for j in 0 ..< len(ps.kind) {
+			if ps.kind[j] != .Expand do continue
+			tail := j < len(ps.constraint_folds) ? ps.constraint_folds[j] : nil
+			if tail == nil && j < len(ps.constraints) do tail = ps.constraints[j]
+			if tail == nil && j < len(ps.types) do tail = ps.types[j]
+			if g, g_ok := grammar_of_tail(tail); g_ok && scope_canon(g) == scope_canon(s) {
+				return true
+			}
+		}
+		return false // only the FIRST production is the default path
+	}
+	return false
+}
+
 // expand_tail_subset proves a VALUE-side Expand's tail against a CONSTRAINT-side
 // Expand's tail (`...A ⊆ ...B`) — the coinductive step of the grammar-coverage
 // proof, no unfolding: both tails must repeat the SAME canonical grammar with
