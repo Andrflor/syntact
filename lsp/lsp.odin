@@ -592,8 +592,11 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	// workaround, not a fix.
 	if ast != nil {
 		analyzer := compiler.create_analyzer(ast)
+		phase_ctx := compiler.Phase_Context {
+			analyzer = &analyzer,
+		}
 		prev_user_ptr := context.user_ptr
-		context.user_ptr = &analyzer
+		context.user_ptr = &phase_ctx
 		analyze_ok := compiler.analyze(cache)
 		context.user_ptr = prev_user_ptr
 		doc.scope = cache.scope

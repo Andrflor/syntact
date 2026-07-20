@@ -1663,6 +1663,12 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	for ref in carve.references do overridden[ref.match_index] = true
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue
+		// A dependent field may CARVE a binding this carve just SUBSTITUTED (`func{e->5}!`
+		// after `m{func->{string:e}}`): that inner carve was proven at definition against
+		// func's ORIGINAL color and must be re-proven against the substituted one. Only
+		// carves whose source IS a substituted field are re-checked — a recursive carve on
+		// an un-substituted binding (`f{n->n-1}` inside f) keeps its branch-refined proof.
+		recheck_inner_carves(a, sub, sub.types[i], overridden)
 		ft := fold_type(sub.types[i])
 		if ft == nil {
 			// A nil fold is ambiguous: legally symbolic (`x + 1`) OR incoherent
@@ -1689,6 +1695,105 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 			)
 		}
 	}
+}
+
+// recheck_inner_carves descends a dependent field's value looking for a CARVE whose
+// source is a binding this parent carve just SUBSTITUTED, re-proving its overrides
+// against the substituted color. `parent` is the materialized parent scope; `substituted`
+// marks its overridden field indices. A carve on a global or un-substituted binding
+// (`f{n->n-1}` inside recursive f) is left to its eager / branch-refined proof — only a
+// carve of a substituted field (`func{e->5}!` after `m{func->{string:e}}`) is re-checked.
+// Descends only the structural wrappers a carve hides behind (collapse `!`, pattern
+// branch products, scopes of collapses, composites) — never arithmetic operands.
+recheck_inner_carves :: proc(a: ^Analyzer, parent: ^Scope_Type, t: ^Type, substituted: map[int]bool) {
+	if t == nil do return
+	#partial switch &v in t^ {
+	case Execute_Type:
+		recheck_inner_carves(a, parent, v.target, substituted)
+	case Carve_Type:
+		// Re-prove ONLY when the carve's source is a substituted field of `parent`.
+		if src_idx, ok := carve_source_parent_index(&v, parent); ok && substituted[src_idx] {
+			prove_carve_overrides(a, &v)
+		}
+		recheck_inner_carves(a, parent, v.source, substituted)
+		for cv in v.types do recheck_inner_carves(a, parent, cv, substituted)
+	case Pattern_Type:
+		recheck_inner_carves(a, parent, v.target, substituted)
+		for branch in v.branches {
+			recheck_inner_carves(a, parent, branch.product, substituted)
+		}
+	case Compose_Type:
+		recheck_inner_carves(a, parent, v.left, substituted)
+		recheck_inner_carves(a, parent, v.right, substituted)
+	case Scope_Type:
+		// A branch product is often a literal scope of collapses (`{ func{e->e}! … }`).
+		for ft in v.types do recheck_inner_carves(a, parent, ft, substituted)
+	}
+}
+
+// carve_source_parent_index resolves a carve's source to a binding of `parent`, returning
+// its index. Handles the direct Mention/Reference to a parent field. nil for anything else
+// (a global scope, a nested carve, a literal) — those aren't substituted fields.
+carve_source_parent_index :: proc(carve: ^Carve_Type, parent: ^Scope_Type) -> (int, bool) {
+	s := carve.source
+	if s == nil do return 0, false
+	#partial switch v in s^ {
+	case Mention_Type:
+		if v.match_scope == parent && v.match_index >= 0 do return v.match_index, true
+	case Reference_Type:
+		if v.reference != nil && v.reference.match_scope == parent && v.reference.match_index >= 0 {
+			return v.reference.match_index, true
+		}
+	}
+	return 0, false
+}
+
+// prove_carve_overrides proves each override of `carve` against the SUBSTITUTED color of
+// the field it targets — the fold-side mirror of carve_resolve_children's eager proof.
+// Only concludes on a COMPARABLE value (a leaf domain or a producer of one): a still-
+// symbolic/placeholder value is skipped rather than false-positived. emit dedups and
+// gates on the armed span. A recursive-tail color proves inductively via satisfy.
+prove_carve_overrides :: proc(a: ^Analyzer, carve: ^Carve_Type) {
+	sub := fold_carve_constraint(cast(^Type)carve)
+	if sub == nil do return
+	for i in 0 ..< len(carve.references) {
+		ref := carve.references[i]
+		if ref.match_index < 0 || ref.match_index >= len(sub.constraint_folds) do continue
+		fc := sub.constraint_folds[ref.match_index]
+		if fc == nil || is_recursive_tail(fc) || fold_is_unknown(fc) do continue
+		if carve.types[i] == nil do continue
+		vf := fold_type(carve.types[i])
+		if vf == nil || fold_is_unknown(vf) do continue
+		if !value_is_comparable_for_proof(vf) do continue
+		if !satisfy_root(fc, vf) {
+			nm := ref.name.(string) or_else ""
+			disp := nm != "" ? fmt.tprintf("'%s'", nm) : "a positional field"
+			emit(
+				fmt.tprintf(
+					"constraint mismatch in carve %s: %s does not satisfy %s",
+					disp,
+					describe_type(vf),
+					describe_type(fc),
+				),
+				.Constraint_Mismatch,
+			)
+		}
+	}
+}
+
+// value_is_comparable_for_proof reports whether a folded value can be proven against a
+// color: a leaf domain, a set operator, or a producer scope `{-> leaf}`. A bare structural
+// scope (an unresolved capture placeholder, or a genuine scope value) is NOT — proving a
+// color against it would false-positive; concrete scopes prove via their own fields.
+value_is_comparable_for_proof :: proc(vf: ^Type) -> bool {
+	if vf == nil do return false
+	#partial switch v in vf^ {
+	case Integer_Type, Float_Type, String_Type, Bool_Type, Range_Type, Or_Type, And_Type, Negate_Type:
+		return true
+	case Scope_Type:
+		return color_is_leaf_domain(vf)
+	}
+	return false
 }
 
 // `target ? { match -> product, … }` — pattern match. Builds a Pattern_Type from
@@ -1954,9 +2059,24 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 
 // --- error reporting ---
 
-// current_analyzer fetches the in-flight analyzer from the context (nil outside a pass).
+// Phase_Context is what context.user_ptr points at while a file is processed. It holds
+// BOTH phase handles at once, so the two never fight over the single user_ptr slot:
+// analyze fills `.analyzer`, reduce fills `.reducer` WITHOUT clearing `.analyzer`. reduce
+// legitimately re-enters the analyzer's fold layer (fold_type/fold_constraint through
+// repoint/scope_repoint), so `.analyzer` must stay reachable there — this is what lets
+// current_analyzer() return the real analyzer during reduce instead of a mis-cast pointer.
+// A field's handle is nil when its phase is not live (e.g. `.reducer` during analyze).
+Phase_Context :: struct {
+	analyzer: ^Analyzer,
+	reducer:  ^Reducer,
+}
+
+// current_analyzer fetches the in-flight analyzer from the phase context (nil outside a
+// pass, or if no analyzer is live).
 current_analyzer :: #force_inline proc() -> ^Analyzer {
-	return cast(^Analyzer)context.user_ptr
+	pc := cast(^Phase_Context)context.user_ptr
+	if pc == nil do return nil
+	return pc.analyzer
 }
 
 // emit reports an error from the FOLD layer, which has no `^Analyzer`/node threaded
@@ -1970,6 +2090,14 @@ emit :: proc(message: string, error_type: Analyzer_Error_Type) {
 	// No armed span: this fold is not under a re-fold that wants the diagnostic —
 	// stay silent rather than anchor at offset 0.
 	if a.recheck_span.start == 0 && a.recheck_span.end == 0 do return
+	// A fold is a recomputable cache: recheck_carve re-folds the same carve through both
+	// carve_resolve_children and recheck_carve, so a fold-detected error would be emitted
+	// once per refold. Drop a STRICT duplicate (same type, span, and message) — distinct
+	// diagnostics at different spans (the legitimate double, e.g. a carve override AND its
+	// dependent production both overflowing) survive untouched.
+	for e in a.errors {
+		if e.type == error_type && e.span == a.recheck_span && e.message == message do return
+	}
 	sem_error(a, message, error_type, a.recheck_span)
 }
 

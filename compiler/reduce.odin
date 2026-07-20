@@ -872,8 +872,12 @@ Reducer :: struct {
 	refinements:      map[rawptr][]Refinement,
 }
 
+// current_reducer fetches the in-flight reducer from the phase context (nil outside
+// reduce). See Phase_Context (analyze.odin) — both handles share one user_ptr slot.
 current_reducer :: #force_inline proc() -> ^Reducer {
-	return cast(^Reducer)context.user_ptr
+	pc := cast(^Phase_Context)context.user_ptr
+	if pc == nil do return nil
+	return pc.reducer
 }
 
 create_reducer :: proc() -> Reducer {
@@ -982,7 +986,7 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 					// Destructuring: the fired product reduces with its cover
 					// substituted by the scrutinee's matched pieces (repoint — the
 					// same substitution a carve uses).
-					return reduce_value(fired_product(branch, target))
+					return reduce_value(fired_product(branch, target, false))
 				case .No:
 					continue
 				case .Undecidable:
@@ -1315,8 +1319,10 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 
 	// Repoint references that named the source so they name the copy (sibling
 	// mentions read the substituted values, cascading); clear repointed folds.
+	// refold=false: reduce owns user_ptr (the Reducer), so scope_repoint must NOT
+	// re-enter the analyzer-only fold layer — it invalidates nested folds instead.
 	for i in 0 ..< len(copy.types) {
-		repointed := repoint(copy.types[i], src, copy)
+		repointed := repoint(copy.types[i], src, copy, false)
 		if repointed != copy.types[i] {
 			copy.types[i] = repointed
 			if i < len(copy.type_folds) do copy.type_folds[i] = nil

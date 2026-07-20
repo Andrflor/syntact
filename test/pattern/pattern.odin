@@ -101,21 +101,22 @@ run_pattern_test :: proc(path: string, t: ^testing.T) {
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
 	analyzer := compiler.create_analyzer(ast)
+	phase_ctx := compiler.Phase_Context {
+		analyzer = &analyzer,
+	}
 	prev_user_ptr := context.user_ptr
-	context.user_ptr = &analyzer
+	context.user_ptr = &phase_ctx
+	defer context.user_ptr = prev_user_ptr
 	compiler.analyze(cache)
-	context.user_ptr = prev_user_ptr
 
 	if !check_errors(tc, cache.analyze_errors[:], t) do return
 
 	// Optional reduction assertion: reduce the root scope and compare the value.
 	if expect, has := tc.expect.?; has {
 		r := compiler.create_reducer()
-		prev_user_ptr = context.user_ptr
-		context.user_ptr = &r
+		phase_ctx.reducer = &r
 		result := compiler.reduce(cache.scope)
 		actual := compiler.value_to_string(result)
-		context.user_ptr = prev_user_ptr
 
 		if actual != expect {
 			testing.expectf(

@@ -128,18 +128,19 @@ run_case :: proc(path: string, t: ^testing.T) {
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
 	analyzer := compiler.create_analyzer(ast)
+	phase_ctx := compiler.Phase_Context {
+		analyzer = &analyzer,
+	}
 	prev_user_ptr := context.user_ptr
-	context.user_ptr = &analyzer
+	context.user_ptr = &phase_ctx
+	defer context.user_ptr = prev_user_ptr
 	analyze_ok := compiler.analyze(cache)
-	context.user_ptr = prev_user_ptr
 	r := compiler.create_reducer()
-	prev_user_ptr = context.user_ptr
-	context.user_ptr = &r
+	phase_ctx.reducer = &r
 	result := compiler.reduce(cache.scope)
-	// Keep user_ptr on the reducer `r` through lowering: lower_to_bytecode reads
-	// r.fixedpoint_index (via fixedpoint_id) to recover each ??N slot. Restore after.
+	// The phase context stays live through lowering: lower_to_bytecode reads
+	// phase_ctx.reducer.fixedpoint_index (via fixedpoint_id) to recover each ??N slot.
 	prog := compiler.lower_to_bytecode(result)
-	context.user_ptr = prev_user_ptr
 
 	// "reject": lowering must carry an error.
 	if tc.kind == "reject" {
