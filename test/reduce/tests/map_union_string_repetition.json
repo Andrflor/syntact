@@ -1,0 +1,6 @@
+{
+  "name": "map with a per-branch-valid union op",
+  "description": "e*10 over a mixed string/int list: string repetition for the string element, multiplication for the ints",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{\"\" 3 4 5}, {(u8|string):e, -> e*10}}!",
+  "expect": "{\"\", 30, 40, 50}"
+}

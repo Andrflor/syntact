@@ -1,0 +1,6 @@
+{
+  "name": "tc_map_union_op_valid_all_branches",
+  "description": "e:(u8|string) with e*10: '*' is valid for EVERY branch (string repetition, int multiply) — accepted",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{\"\" 3 4 5}, {(u8|string):e, -> e*10}}!",
+  "expect_errors": []
+}

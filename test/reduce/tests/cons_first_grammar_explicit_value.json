@@ -1,0 +1,6 @@
+{
+  "name": "cons-first grammar with an explicit value",
+  "description": "no default materialization: the explicit run reduces as data",
+  "source": "Array -> {\n  T -> {}\n  -> {T: ...Array{T}:}\n  -> {}\n}\nArray{u8}:a -> {1 2}\n-> a",
+  "expect": "{1, 2}"
+}

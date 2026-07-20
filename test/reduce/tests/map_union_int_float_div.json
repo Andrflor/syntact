@@ -1,0 +1,6 @@
+{
+  "name": "per-element division over a mixed numeric union",
+  "description": "2.4/2 stays float, 3/2 is integer division",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{2.4 3}, {(u8|f32):e, -> e/2}}!",
+  "expect": "{1.2, 1}"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "tc_map_structural_union_bad",
+  "description": "a union mixing a primitive and a structural shape composes: {\"\"} is neither u8 nor an Array{u8}, so the applied domain fails the color",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{{\"\"} 3 4 5}, {(u8|Array{u8}):e, -> \"\"}}!",
+  "expect_errors": [
+    "Constraint_Mismatch"
+  ]
+}

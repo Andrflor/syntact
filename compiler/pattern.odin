@@ -105,10 +105,9 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	// SET target: a recursive carve inside a branch product (`f{n->n-1, acc->acc+n}`)
 	// makes every binding it REBINDS path-dependent — each materialization carries
 	// its own value, so folding such a mention to the CURRENT frame's value would
-	// bake the first frame into every path (`0 -> acc` folded acc to its initial 0:
-	// silently wrong). Those sites fold as Unknown while the branch products fold;
-	// a branch-cover refinement still wins for the scrutinee itself (`0 -> n` keeps
-	// folding n to 0 — install_rebound_shadow skips already-overridden sites).
+	// bake the first frame into every path. Those sites fold as Unknown while the
+	// branch products fold; a branch-cover refinement still wins for the scrutinee
+	// itself (`0 -> n` folds n to 0 — install_rebound_shadow skips overridden sites).
 	rebound := pattern_rebound_sites(&p, t)
 	defer delete(rebound)
 

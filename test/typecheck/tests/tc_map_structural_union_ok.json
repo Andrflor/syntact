@@ -1,0 +1,6 @@
+{
+  "name": "tc_map_structural_union_ok",
+  "description": "{1 2} satisfies the Array{u8} branch and the ints the u8 branch of the union color",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{{1 2} 3 4 5}, {(u8|Array{u8}):e, -> \"\"}}!",
+  "expect_errors": []
+}

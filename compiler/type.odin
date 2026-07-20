@@ -155,14 +155,16 @@ fold_set_value :: proc(t: ^Type) -> ^Type {
 	return fold_type(t)
 }
 
-// capture_leaf_domain returns the LEAF color of a capture that is still an unfilled cover
-// placeholder, else nil. A capture `(e)` shares its slot index with the cover field
-// `T:(e)`; while the scrutinee is symbolic the slot holds only the empty placeholder scope
-// the cover was built from, so `e` folds to a bare scope and loses its domain. Return the
-// color so `e` carries its declared domain instead. Only for a LEAF color (integer/float/
-// string/bool): a structural capture (`(r):Array{T}`) must keep its shape, and a capture
-// already holding a real destructured value is left alone.
-capture_leaf_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
+// capture_color_domain returns the color-SET of a capture that is still an unfilled
+// cover placeholder, else nil. A capture `(e)` shares its slot index with the cover
+// field `T:(e)`; while the scrutinee is symbolic the slot holds only the empty
+// placeholder scope the cover was built from, so `e` would fold to a bare scope and
+// lose its domain. Returning the color keeps every proof over `e` running on its
+// full applied set — primitive, structural, or a union of both (`u8|Array{u8}`).
+// An EXPAND capture (`...C:(r)`, the destructured tail) keeps its placeholder: its
+// SHAPE drives destructuring. A capture already holding a real destructured value
+// is left alone.
+capture_color_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	if scope == nil || index < 0 || index >= len(scope.captures) do return nil
 	if scope.captures[index] == "" do return nil // not a capture slot
 	// Re-fold the CONSTRAINT expression, not the cached fold: the cached color was
@@ -177,9 +179,12 @@ capture_leaf_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 		color = scope.constraint_folds[index]
 	}
 	if color == nil do return nil
-	// Only a leaf domain — never a structural shape. A pull-derived color folds to a
-	// producer of its set (`{-> 2..5}`); read through it to the leaf.
-	if !color_is_leaf_domain(color) do return nil
+	// An EXPAND capture (`...C:(r)`, the destructured tail) keeps its placeholder —
+	// its SHAPE matters for destructuring, not its set. Any OTHER capture folds to
+	// its full color-SET, structural branches included: `(u8|Array{u8})` must
+	// compose, so an inner carve proof sees the whole applied domain (a `{""}`
+	// element must fail against it, not be skipped as incomparable).
+	if index < len(scope.kind) && scope.kind[index] == .Expand do return nil
 	// Only when the value slot is still the EMPTY placeholder scope (not destructured).
 	val := index < len(scope.types) ? scope.types[index] : nil
 	if val == nil do return color
@@ -259,7 +264,7 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				// use of `e` carries `u8`/`2..5` — this lets an inner carve `func{e->e}`
 				// prove `e` against func's color. Restricted to a LEAF domain: a structural
 				// capture (`(r):Array{T}`) keeps its placeholder (its shape matters, not a set).
-				if dom := capture_leaf_domain(v.match_scope, v.match_index); dom != nil {
+				if dom := capture_color_domain(v.match_scope, v.match_index); dom != nil {
 					return dom
 				}
 				// Site guard: a self-referential value (carve-repointed `n -> n-1`)

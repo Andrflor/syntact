@@ -1,0 +1,6 @@
+{
+  "name": "range-tiled branches over a u8 binding",
+  "description": "5 lands in 0..99",
+  "source": "u8:x -> 5\n-> x ? {0..99 -> 1, 100..255 -> 2}",
+  "expect": "1"
+}

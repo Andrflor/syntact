@@ -276,6 +276,40 @@ compose_error_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 	// An unknown (`??`) operand keeps the compose symbolic — never an error here.
 	if lf == .Unknown || rf == .Unknown do return "", false
 
+	// A UNION operand (a domain admitting several families, e.g. e:(u8|string)
+	// applied over mixed elements): the op must be valid for EVERY family the
+	// domain admits — per element the operand is ONE value, so numeric families
+	// mix freely (2.4*10 and 3*10 are each fine), but a STRING branch only
+	// supports `+ string` (sequence) and `* integer` (repetition).
+	if is_arith_op(comp.operator) {
+		lset: bit_set[Family]
+		rset: bit_set[Family]
+		families_of(comp.left, &lset)
+		families_of(comp.right, &rset)
+		if .Unknown in lset || .Unknown in rset do return "", false
+		if card(lset) > 1 || card(rset) > 1 {
+			for fl in Family do if fl in lset {
+				for fr in Family do if fr in rset {
+					if arith_pair_invalid(fl, comp.operator, fr) {
+						return fmt.tprintf(
+							"'%s' is not defined for every value of the operand's domain: a %s does not support it here",
+							sym,
+							family_name(fl == .Integer || fl == .Float ? fr : fl),
+						), true
+					}
+				}
+			}
+			return "", false
+		}
+	}
+
+	// Legal STRING forms: `s + s` (ordered sequence) and `s * integer` (repetition).
+	if lf == .String &&
+	   ((comp.operator == .Add && rf == .String) ||
+			   (comp.operator == .Multiply && rf == .Integer)) {
+		return "", false
+	}
+
 	// Type mismatch: integer and float don't mix without an explicit cast.
 	if (lf == .Integer && rf == .Float) || (lf == .Float && rf == .Integer) {
 		return fmt.tprintf(
@@ -334,6 +368,71 @@ compose_divzero_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 // called by recheck_carve on a substituted field whose fold came back nil (which
 // may be legal OR a real error like `"" + 10` after a carve). emit anchors at
 // a.recheck_span. Returns true once it has emitted.
+is_arith_op :: proc(op: Operator_Kind) -> bool {
+	#partial switch op {
+	case .Add, .Subtract, .Multiply, .Divide, .Mod:
+		return true
+	}
+	return false
+}
+
+// families_of collects EVERY family an operand's domain admits (an Or union
+// spreads; a mention reads its stored VALUE fold first — the applied domain of a
+// capture — before the raw value).
+families_of :: proc(t: ^Type, out: ^bit_set[Family]) {
+	if t == nil {
+		out^ += {.None}
+		return
+	}
+	#partial switch v in t^ {
+	case Or_Type:
+		families_of(v.left, out)
+		families_of(v.right, out)
+		return
+	case Mention_Type:
+		if v.match_scope != nil && v.match_index >= 0 {
+			if f := stored_type_fold_at(v.match_scope, v.match_index); f != nil && f != t {
+				families_of(f, out)
+				return
+			}
+		}
+	case Reference_Type:
+		ref := v.reference
+		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+			if f := stored_type_fold_at(ref.match_scope, ref.match_index); f != nil && f != t {
+				families_of(f, out)
+				return
+			}
+		}
+	case Scope_Type:
+		// A producer `{-> set}` admits its production's families.
+		prods := scope_productions(v)
+		if len(prods) == 1 && prods[0] != nil {
+			families_of(prods[0], out)
+			return
+		}
+	}
+	out^ += {family_of(t)}
+}
+
+// arith_pair_invalid: is this (family, op, family) combination DEFINITELY invalid
+// for one concrete element? Numeric families always compose (the element is one
+// value; reduce promotes per-element); a string only concatenates with a string
+// or repeats by an integer count; everything else has no arithmetic.
+arith_pair_invalid :: proc(fl: Family, op: Operator_Kind, fr: Family) -> bool {
+	l_num := fl == .Integer || fl == .Float
+	r_num := fr == .Integer || fr == .Float
+	if l_num && r_num do return false
+	if fl == .String {
+		if op == .Add do return fr != .String
+		if op == .Multiply do return fr != .Integer
+		return true
+	}
+	// non-numeric, non-string left (bool/scope/none) — or a numeric left against a
+	// non-numeric right (`3 + ""`): no arithmetic.
+	return true
+}
+
 detect_invalid :: proc(t: ^Type) -> bool {
 	if t == nil do return false
 	#partial switch &v in t^ {
