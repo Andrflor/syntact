@@ -212,6 +212,13 @@ color_is_leaf_domain :: proc(color: ^Type) -> bool {
 
 // fold_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
+// scope_canon reads through the clone chain to the canonical (walk-built) scope —
+// the "same scope up to materialization" identity.
+scope_canon :: #force_inline proc(s: ^Scope_Type) -> ^Scope_Type {
+	if s == nil do return nil
+	return s.origin != nil ? s.origin : s
+}
+
 // Bounds-guarded fold reads: a mid-construction or freshly cloned scope may not
 // have its fold columns filled yet — an out-of-range index reads as "no fold".
 stored_type_fold_at :: #force_inline proc(s: ^Scope_Type, i: int) -> ^Type {
@@ -1099,6 +1106,7 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	dst := new(Scope_Type)
 	dst.parent = src.parent
+	dst.origin = scope_canon(src)
 	for n in src.names do append(&dst.names, n)
 	for v in src.types do append(&dst.types, v)
 	for ty in src.constraints do append(&dst.constraints, ty)
@@ -1128,6 +1136,7 @@ scope_repoint_node :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Type 
 	node^ = Scope_Type{}
 	rst := &node^.(Scope_Type)
 	rst.parent = src.parent
+	rst.origin = scope_canon(src)
 	for n in src.names do append(&rst.names, n)
 	for ty in src.constraints do append(&rst.constraints, repoint(ty, old, dst, refold))
 	for k in src.kind do append(&rst.kind, k)

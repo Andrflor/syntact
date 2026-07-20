@@ -73,6 +73,23 @@ family_of :: proc(t: ^Type) -> Family {
 		return .Unknown
 	case None_Type:
 		return .None
+	case Execute_Type:
+		// A collapse has its production's family. A recursive collapse that can't
+		// resolve statically (the guards cut it) is Unknown — legally symbolic,
+		// never an Invalid_operator (`n * f{n->n-1}!`).
+		if prod, resolved := execute_production(v.target); resolved && prod != nil {
+			return family_of(prod)
+		}
+		return .Unknown
+	case Pattern_Type:
+		// A pattern's family is its branches' — the first branch that decides one.
+		// The recursive branch of a self-recursive production decides through its
+		// non-recursive operand (`n * f{…}!` → Integer via n), so this terminates.
+		for branch in v.branches {
+			f := family_of(branch.product)
+			if f != .None && f != .Unknown && f != .Other do return f
+		}
+		return .Unknown
 	}
 	return .Other
 }

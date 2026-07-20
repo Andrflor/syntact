@@ -91,7 +91,8 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	// Concrete singleton target: run branches in order, take the FIRST that matches.
 	// The fired product folds with its cover substituted by the matched pieces
 	// (destructuring) — `{u8:(v)} -> v + 1` over `{3}` folds as 4, not as the
-	// cover default.
+	// cover default. No rebound shadowing here: with a concrete scrutinee the
+	// current frame IS the only path, so a rebound binding's frame value is exact.
 	if pattern_target_is_concrete(ft) {
 		for branch in p.branches {
 			if branch_covers(branch, ft) {
@@ -100,10 +101,22 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		}
 	}
 
-	// Set target: deterministic ONLY when the FIRST branch covers the whole target.
+	// SET target: a recursive carve inside a branch product (`f{n->n-1, acc->acc+n}`)
+	// makes every binding it REBINDS path-dependent — each materialization carries
+	// its own value, so folding such a mention to the CURRENT frame's value would
+	// bake the first frame into every path (`0 -> acc` folded acc to its initial 0:
+	// silently wrong). Those sites fold as Unknown while the branch products fold;
+	// a branch-cover refinement still wins for the scrutinee itself (`0 -> n` keeps
+	// folding n to 0 — install_rebound_shadow skips already-overridden sites).
+	rebound := pattern_rebound_sites(&p, t)
+	defer delete(rebound)
+
+	// Deterministic ONLY when the FIRST branch covers the whole target.
 	// A covering branch AFTER intercepting ones is NOT deterministic — earlier
 	// branches steal values, so the result is the combined Or type.
 	if len(p.branches) > 0 && branch_covers(p.branches[0], ft) {
+		shadow := install_rebound_shadow(rebound[:])
+		defer uninstall_fold_refinement(shadow)
 		return fold_type(fired_product(p.branches[0], ft))
 	}
 
@@ -117,9 +130,20 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		// pieces destructure into the cover the same way (fired_product falls back
 		// to the raw product when there is nothing to destructure).
 		saved := install_fold_refinement(p.target, p.branches[:], i)
+		shadow := install_rebound_shadow(rebound[:])
 		pf := fold_type(fired_product(branch, ft))
+		uninstall_fold_refinement(shadow)
 		uninstall_fold_refinement(saved)
-		if pf == nil do continue
+		if pf == nil {
+			// A branch that folds to nothing is skippable ONLY when it is the pure
+			// tail re-entry of this very pattern — its value IS the eventual exit
+			// value, already contributed by the exit branches. Any other unfoldable
+			// branch might fire with a value of its own (`n * f{…}!`): claiming the
+			// Or of the remaining branches would bake a wrong constant, so the
+			// pattern folds to nothing and stays symbolic.
+			if product_is_pure_tail(branch.product, pattern_home_scope(&p), t) do continue
+			return nil
+		}
 		if combined == nil {
 			combined = pf
 		} else {
@@ -127,6 +151,121 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		}
 	}
 	return combined
+}
+
+// pattern_home_scope: the scope the pattern's scrutinee lives in — the pattern's
+// own world in WHICHEVER materialization is being folded (a clone's target mention
+// was repointed to the clone). nil when the scrutinee is not a direct binding.
+pattern_home_scope :: proc(p: ^Pattern_Type) -> ^Scope_Type {
+	if p.target == nil do return nil
+	#partial switch v in p.target^ {
+	case Mention_Type:
+		return v.match_scope
+	case Reference_Type:
+		if v.reference != nil do return v.reference.match_scope
+	}
+	return nil
+}
+
+// pattern_recursive_carve reports whether `carve` re-enters the scope this
+// pattern belongs to — the self-recursion of a recursive collapse. The carve
+// sources the CANONICAL scope while the folded pattern may live in a clone, so
+// the comparison reads through the clone chain (scope_canon); the direct
+// production-node check covers a pattern whose scrutinee is not a plain binding.
+pattern_recursive_carve :: proc(carve: ^Carve_Type, home: ^Scope_Type, pattern: ^Type) -> bool {
+	src := collapse_source(carve.source)
+	if src == nil do return false
+	if home != nil && scope_canon(home) == scope_canon(src) do return true
+	for i in 0 ..< len(src.kind) {
+		if src.kind[i] == .Product && src.types[i] == pattern do return true
+	}
+	return false
+}
+
+// product_is_pure_tail: the branch product IS the recursive collapse itself
+// (`-> f{…}!`), so its value equals the pattern's eventual exit value and the
+// pattern fold may skip it. Anything WRAPPING the recursion (`n * f{…}!`, a
+// scope of collapses) contributes value of its own and cannot be skipped.
+product_is_pure_tail :: proc(product: ^Type, home: ^Scope_Type, pattern: ^Type) -> bool {
+	if product == nil do return false
+	ex, ok := product^.(Execute_Type)
+	if !ok do return false
+	cur := follow(ex.target)
+	if cur == nil do return false
+	cv, c_ok := &cur^.(Carve_Type)
+	if !c_ok do return false
+	return pattern_recursive_carve(cv, home, pattern)
+}
+
+// pattern_rebound_sites collects the binding sites a RECURSIVE carve inside any
+// branch product rebinds (`f{n->n-1, acc->acc+n}` rebinds n and acc). The sites
+// are anchored on the pattern's HOME scope — the clone the product's mentions
+// actually resolve against — mapping each reference through carve_ref_index
+// (the refs themselves still point at the canonical scope).
+pattern_rebound_sites :: proc(p: ^Pattern_Type, pattern: ^Type) -> [dynamic]Binding_Site {
+	sites: [dynamic]Binding_Site
+	home := pattern_home_scope(p)
+	if home == nil do return sites
+	for branch in p.branches {
+		collect_rebound_sites(branch.product, home, pattern, &sites)
+	}
+	return sites
+}
+
+// collect_rebound_sites walks the same structural backbone as contains_open_unfold,
+// appending the override targets of every carve that re-enters the pattern's scope.
+collect_rebound_sites :: proc(t: ^Type, home: ^Scope_Type, pattern: ^Type, sites: ^[dynamic]Binding_Site) {
+	if t == nil do return
+	#partial switch &v in t^ {
+	case Execute_Type:
+		collect_rebound_sites(v.target, home, pattern, sites)
+	case Carve_Type:
+		if pattern_recursive_carve(&v, home, pattern) {
+			for ref in v.references {
+				idx := carve_ref_index(ref, home)
+				if idx < 0 || idx >= len(home.types) do continue
+				append(sites, Binding_Site{home, idx})
+			}
+		}
+		collect_rebound_sites(v.source, home, pattern, sites)
+		for ov in v.types do collect_rebound_sites(ov, home, pattern, sites)
+	case Compose_Type:
+		collect_rebound_sites(v.left, home, pattern, sites)
+		collect_rebound_sites(v.right, home, pattern, sites)
+	case Or_Type:
+		collect_rebound_sites(v.left, home, pattern, sites)
+		collect_rebound_sites(v.right, home, pattern, sites)
+	case And_Type:
+		collect_rebound_sites(v.left, home, pattern, sites)
+		collect_rebound_sites(v.right, home, pattern, sites)
+	case Negate_Type:
+		collect_rebound_sites(v.operand, home, pattern, sites)
+	case Range_Type:
+		collect_rebound_sites(v.left, home, pattern, sites)
+		collect_rebound_sites(v.right, home, pattern, sites)
+	case Cast_Type:
+		collect_rebound_sites(v.value, home, pattern, sites)
+	case Scope_Type:
+		for ft in v.types do collect_rebound_sites(ft, home, pattern, sites)
+	case Pattern_Type:
+		collect_rebound_sites(v.target, home, pattern, sites)
+		for branch in v.branches do collect_rebound_sites(branch.product, home, pattern, sites)
+	}
+}
+
+// install_rebound_shadow overrides each rebound site with Unknown so its mention
+// folds symbolic. A site ALREADY overridden is skipped — the branch-cover
+// refinement (installed just before) or an outer frame's narrowing wins, which is
+// what keeps the sound `0 -> n` exit folding to 0. Undone by
+// uninstall_fold_refinement like any override batch.
+install_rebound_shadow :: proc(sites: []Binding_Site) -> [dynamic]Fold_Override_Save {
+	saved: [dynamic]Fold_Override_Save
+	for site in sites {
+		if _, present := site.scope.refine_overrides[site.index]; present do continue
+		append(&saved, Fold_Override_Save{site, nil, false})
+		site.scope.refine_overrides[site.index] = new_type(Unknown_Type{})
+	}
+	return saved
 }
 
 // destructure_cover materializes the substitution a fired branch implies: a clone
@@ -229,11 +368,57 @@ pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 	}
 	if cover == nil do return false
 	fc := fold_constraint(cover)
-	ft := fold_type(p.target)
+	ft := pattern_target_coverage(p)
 	// A match/target that is not a static set (e.g. `2>2`) can't prove coverage and
 	// must not reach satisfy_root with a nil.
 	if fc == nil || ft == nil do return false
-	return satisfy_root(fc, ft)
+	res := satisfy_root(fc, ft)
+	fmt.eprintln("[DBG] exhaustive:", res, "fc=", describe_type(fc), "ft=", describe_type(ft))
+	return res
+}
+
+// pattern_target_coverage: the set of values the scrutinee can take — its
+// DECLARED domain (constraint side) when it is a colored binding, else its value
+// fold. A carve may rebind a colored binding to anything in its color, so
+// exhaustiveness is a contract over the DOMAIN (`Array{T}:source` must be covered
+// for every list, not just for source's current default). A grammar machine (a
+// scope whose value-set is its productions' union — the producer rule) expands to
+// that union so each production is proven against the covers.
+pattern_target_coverage :: proc(p: Pattern_Type) -> ^Type {
+	cf: ^Type
+	if p.target != nil {
+		#partial switch v in p.target^ {
+		case Mention_Type:
+			if v.match_scope != nil && v.match_index >= 0 {
+				cf = stored_constraint_fold_at(v.match_scope, v.match_index)
+			}
+		case Reference_Type:
+			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+				cf = stored_constraint_fold_at(v.reference.match_scope, v.reference.match_index)
+			}
+		}
+	}
+	if cf == nil do return fold_type(p.target)
+	if s, ok := &cf^.(Scope_Type); ok {
+		if prod_union := scope_production_union(s); prod_union != nil do return prod_union
+	}
+	return cf
+}
+
+// scope_production_union: the Or of a machine scope's production sets (the
+// value-side mirror of satisfy_root's producer-only rule). nil when the scope
+// carries no production.
+scope_production_union :: proc(s: ^Scope_Type) -> ^Type {
+	out: ^Type
+	for i in 0 ..< len(s.kind) {
+		if s.kind[i] != .Product do continue
+		prod := stored_constraint_fold_at(s, i)
+		if prod == nil do prod = stored_type_fold_at(s, i)
+		if prod == nil do prod = s.types[i]
+		if prod == nil do continue
+		out = out == nil ? prod : new_type(Or_Type{out, prod})
+	}
+	return out
 }
 
 describe_pattern :: proc(p: Pattern_Type) -> string {
