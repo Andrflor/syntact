@@ -1,0 +1,6 @@
+{
+  "name": "tc_grammar_default_terminal_first",
+  "description": "the same grammar with the terminal production first has a finite default: clean",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a\n-> a",
+  "expect_errors": []
+}

@@ -1,0 +1,8 @@
+{
+  "name": "tc_pat_grammar_exh_empty_only",
+  "description": "cover {} alone misses every non-empty run over Array{T}: non-exhaustive",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {} -> {}\n  }\n}",
+  "expect_errors": [
+    "Non_Exhaustive_Pattern"
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "recursion with a =0 value-branch exit",
+  "description": "the =v exit fires at reduce exactly like the typecheck exit",
+  "source": "f -> {\n  u64:n -> 10\n  acc -> 0\n  -> n ? {\n    =0 -> acc\n    -> f{n -> n-1, acc -> acc+n}!\n  }\n}\n-> f{n -> 5}!",
+  "expect": "15"
+}

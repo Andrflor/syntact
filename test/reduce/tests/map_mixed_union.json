@@ -1,0 +1,6 @@
+{
+  "name": "map over a mixed int/float list",
+  "description": "a (u8|f32) param maps 2.4 and the ints; float arithmetic stays float",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{2.4 3 4 5}, {(u8|f32):e, -> e*10}}!",
+  "expect": "{24.0, 30, 40, 50}"
+}

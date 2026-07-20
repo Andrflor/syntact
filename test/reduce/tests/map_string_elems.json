@@ -1,0 +1,6 @@
+{
+  "name": "map over strings with repetition",
+  "description": "string elements map through e*2 (repetition folds in reduce via the string kernel)",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{\"ab\" \"c\"}, {string:e, -> e*2}}!",
+  "expect": "{\"abab\", \"cc\"}"
+}

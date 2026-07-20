@@ -1,0 +1,6 @@
+{
+  "name": "tc_pat_grammar_exh_full",
+  "description": "cons cover {T:(e) ...Array{T}:(r)} + empty {} cover the whole grammar (tail-vs-tail coinductive step): exhaustive",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n",
+  "expect_errors": []
+}

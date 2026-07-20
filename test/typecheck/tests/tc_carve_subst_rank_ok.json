@@ -1,0 +1,6 @@
+{
+  "name": "tc_carve_subst_rank_ok",
+  "description": "func substituted by a same-shape scope: the inner carve's frozen reference re-resolves by name-rank and the proof passes",
+  "source": "m -> {\n  func -> {u8:e, -> e+1}\n  -> func{e -> 5}!\n}\n-> m{func -> {u8:e, -> e+2}}!",
+  "expect_errors": []
+}

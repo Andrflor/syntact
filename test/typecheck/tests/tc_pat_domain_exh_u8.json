@@ -1,0 +1,8 @@
+{
+  "name": "tc_pat_domain_exh_u8",
+  "description": "a pattern over a LEXICALLY MENTIONED u8-colored binding must cover the DOMAIN u8, not the current value 5 (a carve may rebind x)",
+  "source": "u8:x -> 5\n-> x ? {=5 -> 1}",
+  "expect_errors": [
+    "Non_Exhaustive_Pattern"
+  ]
+}

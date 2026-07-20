@@ -1,0 +1,6 @@
+{
+  "name": "non-tail recursion reduces concretely",
+  "description": "4 * f(3) unfolds to 24 through the arithmetic wrapper around the recursive collapse",
+  "source": "f -> {\n  u64:n -> 5\n  -> n ? {\n    0 -> 1\n    -> n * f{n -> n-1}!\n  }\n}\n-> f{n -> 4}!",
+  "expect": "24"
+}

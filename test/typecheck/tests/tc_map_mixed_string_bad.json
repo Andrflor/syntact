@@ -1,0 +1,8 @@
+{
+  "name": "tc_map_mixed_string_bad",
+  "description": "mixed 2.4|3|4|5 pulled into T does not satisfy string",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> { func{e->e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n-> map{{2.4 3 4 5}, {string:e, -> e*10}}!",
+  "expect_errors": [
+    "Constraint_Mismatch"
+  ]
+}

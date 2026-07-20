@@ -1,0 +1,6 @@
+{
+  "name": "symbolic-arg recursion with the scrutinee as exit",
+  "description": "exit 0 -> n is refined to the singleton 0 by the branch cover: the whole collapse folds to 0 for any ??",
+  "source": "f -> {\n  u64:n -> 10\n  -> n ? {\n    0 -> n\n    -> f{n -> n-1}!\n  }\n}\n-> f{n -> ??::u64}!",
+  "expect": "0"
+}

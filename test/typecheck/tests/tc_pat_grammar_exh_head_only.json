@@ -1,0 +1,8 @@
+{
+  "name": "tc_pat_grammar_exh_head_only",
+  "description": "cover {T:(e)} (exactly one element) + {} misses runs of length >= 2 over Array{T}: non-exhaustive",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e)} -> { func{e->e}!}\n    {} -> {}\n  }\n}",
+  "expect_errors": [
+    "Non_Exhaustive_Pattern"
+  ]
+}
