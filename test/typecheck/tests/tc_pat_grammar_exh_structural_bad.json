@@ -1,0 +1,8 @@
+{
+  "name": "tc_pat_grammar_exh_structural_bad",
+  "description": "a STRUCTURALLY DIFFERENT grammar (Pair consumes two heads) does not cover Array{T}'s tail: non-exhaustive",
+  "source": "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nPair -> {\n  T -> {}\n  -> {}\n  -> {T: T: ...Pair{T}:}\n}\nmap -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Pair{T}:(r)} -> { func{e->e}!}\n    {} -> {}\n  }\n}",
+  "expect_errors": [
+    "Non_Exhaustive_Pattern"
+  ]
+}

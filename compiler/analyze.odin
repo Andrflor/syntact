@@ -1017,6 +1017,17 @@ walk_expand :: #force_inline proc(
 		}
 		return value
 	}
+	// A bare captured tail `...(r)`: an anonymous UNCONSTRAINED Expand binding
+	// whose capture swallows the rest of the run (its domain is inferred from the
+	// scrutinee's grammar by stamp_cover_tail_domain). Walking the identifier as a
+	// value would wrongly resolve `r` as a mention.
+	if ast.node_kinds[operand_idx] == .Identifier {
+		iname := span_str(ast, ast.node_data[operand_idx].identifier.name)
+		icap := span_str(ast, ast.node_data[operand_idx].identifier.capture)
+		if icap != "" && iname == "" {
+			return append_bare_constraint(a, current_scope, "", nil, .Expand, idx, icap)
+		}
+	}
 	value := walk(a, current_scope, operand_idx)
 	scope_append(a, current_scope, "", nil, .Expand, value)
 	typecheck(a, current_scope, "", nil, .Expand, value, idx)
@@ -1850,6 +1861,9 @@ walk_pattern :: #force_inline proc(
 			// `=v` in the match walks to the producer `{-> v}` (walk_operator turns the
 			// unary `=` into make_producer_scope), so a value-match is just a producer.
 			match = walk(a, current_scope, match_idx)
+			// A bare trailing `...(r)` in the cover inherits the scrutinee grammar's
+			// tail domain (the rest of an Array{T} run IS an Array{T}).
+			stamp_cover_tail_domain(match, target)
 		}
 
 		// Install the scrutinee refinement for THIS branch before walking its product,

@@ -515,31 +515,95 @@ default_is_infinite :: proc(fc: ^Type) -> bool {
 	return false
 }
 
+// grammar_structural_equal decides equality of two grammar scopes STRUCTURALLY —
+// Syntact has no nominal types: `Irr -> {T->{}, ->{}, ->{T: ...Irr{T}:}}` IS
+// `Array` with the same body. COINDUCTIVE: the pair under test is assumed equal
+// while the bodies compare field-by-field, so the self-referential tails close
+// the loop on the assumption instead of unfolding.
+grammar_structural_equal :: proc(a, b: ^Scope_Type, assumed: ^map[[2]rawptr]bool) -> bool {
+	ca := scope_canon(a)
+	cb := scope_canon(b)
+	if ca == cb do return true
+	if ca == nil || cb == nil do return false
+	key := [2]rawptr{rawptr(ca), rawptr(cb)}
+	if assumed[key] do return true
+	assumed[key] = true
+	if len(ca.kind) != len(cb.kind) do return false
+	for i in 0 ..< len(ca.kind) {
+		if ca.kind[i] != cb.kind[i] do return false
+		na := i < len(ca.names) ? ca.names[i] : ""
+		nb := i < len(cb.names) ? cb.names[i] : ""
+		if na != nb do return false
+		fa := stored_type_fold_at(ca, i)
+		if fa == nil && i < len(ca.types) do fa = ca.types[i]
+		fb := stored_type_fold_at(cb, i)
+		if fb == nil && i < len(cb.types) do fb = cb.types[i]
+		if !structural_type_equal(fa, fb, assumed) do return false
+		ga := stored_constraint_fold_at(ca, i)
+		gb := stored_constraint_fold_at(cb, i)
+		if (ga == nil) != (gb == nil) do return false
+		if ga != nil && !structural_type_equal(ga, gb, assumed) do return false
+	}
+	return true
+}
+
+// structural_type_equal: the per-field companion of grammar_structural_equal.
+// Recursive tails compare coinductively (grammar + slot-wise parameter sets);
+// scopes recurse field-by-field; leaves by the ordinary set equality.
+structural_type_equal :: proc(x, y: ^Type, assumed: ^map[[2]rawptr]bool) -> bool {
+	if x == y do return true
+	if x == nil || y == nil do return false
+	xr := is_recursive_tail(x)
+	yr := is_recursive_tail(y)
+	if xr != yr do return false
+	if xr {
+		xg, x_ok := grammar_of_tail(x)
+		yg, y_ok := grammar_of_tail(y)
+		if !x_ok || !y_ok do return false
+		if !grammar_structural_equal(xg, yg, assumed) do return false
+		return tail_params_equal(x, xg, y, yg)
+	}
+	if xs, x_is := &x^.(Scope_Type); x_is {
+		ys, y_is := &y^.(Scope_Type)
+		if !y_is do return false
+		return grammar_structural_equal(xs, ys, assumed)
+	}
+	return type_set_equal(x, y)
+}
+
+// tail_params_equal: both tails bind the same slots to the same sets (equal, not
+// merely narrower — the run's shape recurses on them).
+tail_params_equal :: proc(vt: ^Type, vg: ^Scope_Type, ct: ^Type, cg: ^Scope_Type) -> bool {
+	slots := make(map[int]bool)
+	defer delete(slots)
+	tail_param_slots(vt, vg, &slots)
+	tail_param_slots(ct, cg, &slots)
+	for slot in slots {
+		va := tail_param_set(vt, vg, slot)
+		ca := tail_param_set(ct, cg, slot)
+		if va == nil || ca == nil do return false
+		if !type_set_equal(va, ca) do return false
+	}
+	return true
+}
+
 // expand_tail_subset proves a VALUE-side Expand's tail against a CONSTRAINT-side
 // Expand's tail (`...A ⊆ ...B`) — the coinductive step of the grammar-coverage
-// proof, no unfolding: both tails must repeat the SAME canonical grammar with
-// EQUAL parameters on every explicitly bound slot (equal, not merely narrower —
-// the run's shape recurses on them). A nil value tail (`...`) only ever denotes
-// the empty run — any constraint tail covers it. Leaf tails prove by the
-// ordinary subset.
+// proof, no unfolding: both tails must repeat STRUCTURALLY EQUAL grammars
+// (grammar_structural_equal — never nominal) with equal parameters. A BARE
+// constraint tail (`...(r)` — no color) swallows ANY rest, so it covers every
+// value tail; a nil VALUE tail only ever denotes the empty run — any constraint
+// tail covers it. Leaf tails prove by the ordinary subset.
 expand_tail_subset :: proc(vt, ct: ^Type) -> bool {
 	if vt == nil do return true
-	if ct == nil do return false
+	if ct == nil do return true
 	vg, v_ok := grammar_of_tail(vt)
 	cg, c_ok := grammar_of_tail(ct)
 	if v_ok && c_ok {
-		if scope_canon(vg) != scope_canon(cg) do return false
-		slots := make(map[int]bool)
-		defer delete(slots)
-		tail_param_slots(vt, vg, &slots)
-		tail_param_slots(ct, cg, &slots)
-		for slot in slots {
-			va := tail_param_set(vt, vg, slot)
-			ca := tail_param_set(ct, cg, slot)
-			if va == nil || ca == nil do return false
-			if !type_set_equal(va, ca) do return false
-		}
-		return true
+		assumed := make(map[[2]rawptr]bool)
+		defer delete(assumed)
+		if !grammar_structural_equal(vg, cg, &assumed) do return false
+		return tail_params_equal(vt, vg, ct, cg)
 	}
 	if v_ok || c_ok do return false
 	return satisfy_root(ct, vt)
@@ -685,6 +749,9 @@ expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
 		if vt == nil && vi < len(vs.constraints) do vt = vs.constraints[vi]
 		return expand_tail_subset(vt, a)
 	}
+	// A BARE `...` (no constraint written) swallows ANY rest — the destructuring
+	// tail. Only a written tail that fails to RESOLVE stays empty-run-only below.
+	if a == nil do return true
 	resolved := is_recursive_tail(a) ? recursive_tail_unfold(a) : a
 	if resolved == nil do return vi == vend
 	s, ok := &resolved^.(Scope_Type)
