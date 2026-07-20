@@ -78,6 +78,12 @@ Negate_Type :: struct {
 // `parent` chains lexical scopes for name lookup.
 Scope_Type :: struct {
 	parent:           ^Scope_Type,
+	// The canonical scope this one was cloned from (through any number of clones —
+	// scope_clone/scope_repoint_node thread it). nil on a scope built by the walk:
+	// that IS the canonical. `scope_canon` reads through it, giving every consumer
+	// the "same scope up to materialization" identity (a recursive carve sources
+	// the CANONICAL scope while the folded pattern lives in a clone).
+	origin:           ^Scope_Type,
 	names:            [dynamic]string, // "" for anonymous / product
 	kind:             [dynamic]Binding_Kind,
 	types:            [dynamic]^Type,

@@ -218,6 +218,14 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	case Pattern_Type:
 		dst = bc_lower_pattern(l, v)
 
+	case Execute_Type, Carve_Type:
+		// A residual recursive collapse (a symbolic scrutinee kept the pattern
+		// symbolic) has no closed form to emit: the bytecode has no loops yet.
+		dst = bc_fail(
+			l,
+			"codegen: recursion over a symbolic ?? does not lower yet (the bytecode has no loops)",
+		)
+
 	case:
 		dst = bc_fail(l, "codegen: unsupported value in lowering")
 	}

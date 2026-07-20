@@ -1,6 +1,7 @@
 package compiler
 
 import "core:fmt"
+import "core:reflect"
 import "core:strings"
 
 // CONSTRAINT side: fold_constraint resolves the set a binding IMPOSES (left of
@@ -425,6 +426,70 @@ is_recursive_tail :: proc(t: ^Type) -> bool {
 	return false
 }
 
+// recursive_tail_site resolves a recursive-tail marker (a bare Recursive_Mention
+// or a carve over one) to the binding site of the grammar it names.
+recursive_tail_site :: proc(t: ^Type) -> (Binding_Site, bool) {
+	if t == nil do return {}, false
+	#partial switch v in t^ {
+	case Recursive_Mention_Type:
+		return Binding_Site{v.match_scope, v.match_index}, true
+	case Carve_Type:
+		if v.source != nil {
+			if rr, is_rr := v.source^.(Recursive_Mention_Type); is_rr {
+				return Binding_Site{rr.match_scope, rr.match_index}, true
+			}
+		}
+	}
+	return {}, false
+}
+
+// recursive_tails_subset proves `...A ⊆ ...B` for two RECURSIVE tails without
+// unfolding — the coinductive step of the grammar-coverage proof: the tails name
+// the SAME grammar (same canonical binding site) and each of A's overrides binds
+// the same slot to the same set as B's (both directions, so the parameters are
+// equal, not merely narrower — a run of Array{u8} is not a run of Array{u16}
+// carrying the same production shapes).
+recursive_tails_subset :: proc(vt, ct: ^Type) -> bool {
+	va, v_ok := recursive_tail_site(vt)
+	ca, c_ok := recursive_tail_site(ct)
+	if !v_ok || !c_ok do return false
+	if scope_canon(va.scope) != scope_canon(ca.scope) || va.index != ca.index do return false
+	vc, v_is := &vt^.(Carve_Type)
+	cc, c_is := &ct^.(Carve_Type)
+	if v_is != c_is do return false
+	if !v_is do return true
+	if len(vc.references) != len(cc.references) do return false
+	for vi in 0 ..< len(vc.references) {
+		slot := vc.references[vi].match_index
+		found := false
+		for ci in 0 ..< len(cc.references) {
+			if cc.references[ci].match_index != slot do continue
+			vf := fold_constraint(vc.types[vi])
+			cf := fold_constraint(cc.types[ci])
+			if vf == nil || cf == nil do return false
+			if !type_set_equal(vf, cf) do return false
+			found = true
+			break
+		}
+		if !found do return false
+	}
+	return true
+}
+
+// expand_tail_subset proves a VALUE-side Expand's tail against a CONSTRAINT-side
+// Expand's tail (`...A ⊆ ...B`). A nil value tail (`...`) only ever denotes the
+// empty run — any constraint tail covers it. Recursive tails compare
+// coinductively; leaf tails prove by the ordinary subset.
+expand_tail_subset :: proc(vt, ct: ^Type) -> bool {
+	if vt == nil do return true
+	if ct == nil do return false
+	v_rec := is_recursive_tail(vt)
+	c_rec := is_recursive_tail(ct)
+	if v_rec && c_rec do return recursive_tails_subset(vt, ct)
+	if v_rec || c_rec do return false
+	return satisfy_root(ct, vt)
+}
+
 satisfy :: proc(fc, ft: ^Type) -> bool {
 	if fc == nil || ft == nil do return false
 	// A value-side union fits the constraint iff EVERY branch does:
@@ -555,6 +620,22 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 // no sub-scope built, the empty terminal closing an exhausted run. A plain `...A` repeats
 // A directly. nil A (`...`) only matches the empty run.
 expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
+	// The run itself may hold an Expand (`{T: ...Array{T}:}` proven as a SHAPE —
+	// the grammar-coverage proof): a tail-vs-tail step, the run's LAST field. The
+	// value tail must be a subset of this Expand's tail (coinductive: same grammar,
+	// equal parameters — no unfolding).
+	if vi < vend && vs.kind[vi] == .Expand {
+		if vi + 1 != vend do return false
+		vt := vi < len(vs.constraint_folds) ? vs.constraint_folds[vi] : nil
+		if vt == nil && vi < len(vs.constraints) do vt = vs.constraints[vi]
+		r := expand_tail_subset(vt, a)
+		vk := "nil"
+		if vt != nil do vk = fmt.tprintf("%v rec=%v", reflect.union_variant_typeid(vt^), is_recursive_tail(vt))
+		ck := "nil"
+		if a != nil do ck = fmt.tprintf("%v rec=%v", reflect.union_variant_typeid(a^), is_recursive_tail(a))
+		fmt.eprintln("[DBG] tail_subset:", r, "vt=", vk, "ct=", ck)
+		return r
+	}
 	resolved := is_recursive_tail(a) ? recursive_tail_unfold(a) : a
 	if resolved == nil do return vi == vend
 	s, ok := &resolved^.(Scope_Type)
