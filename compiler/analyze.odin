@@ -784,7 +784,14 @@ walk_scope_node :: #force_inline proc(
 ) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
-	scope := new(Scope_Type)
+	// Build the scope IN PLACE inside its ^Type node: the address the children's
+	// mentions resolve to (match_scope) IS the address every later consumer keys
+	// on (follow/fold/carve repoint) — one identity. Building in a working struct
+	// and copying it into the node afterwards left two addresses for one scope,
+	// and clone-based substitutions missed the internal mentions.
+	result := new(Type)
+	result^ = Scope_Type{}
+	scope := &result^.(Scope_Type)
 	scope.parent = current_scope
 	scope.walking = true
 	r := data.scope
@@ -810,11 +817,8 @@ walk_scope_node :: #force_inline proc(
 			typecheck(a, scope, "", nil, .Pointing_Push, value, child)
 		}
 	}
-	// TRAP: close BEFORE the value copy so the copy never carries walking=true.
 	scope.walking = false
 	scope_close(a, scope)
-	result := new(Type)
-	result^ = scope^
 	return result
 }
 

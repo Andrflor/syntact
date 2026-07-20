@@ -212,6 +212,16 @@ color_is_leaf_domain :: proc(color: ^Type) -> bool {
 
 // fold_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
+// Bounds-guarded fold reads: a mid-construction or freshly cloned scope may not
+// have its fold columns filled yet — an out-of-range index reads as "no fold".
+stored_type_fold_at :: #force_inline proc(s: ^Scope_Type, i: int) -> ^Type {
+	return i >= 0 && i < len(s.type_folds) ? s.type_folds[i] : nil
+}
+
+stored_constraint_fold_at :: #force_inline proc(s: ^Scope_Type, i: int) -> ^Type {
+	return i >= 0 && i < len(s.constraint_folds) ? s.constraint_folds[i] : nil
+}
+
 fold_type :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		switch v in t^ {
@@ -1099,20 +1109,32 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	return dst
 }
 
-// scope_repoint rewrites a nested scope's references from `old` to `dst`, refreshing
-// its cached folds via fold_type/fold_constraint. That refresh must NOT run under reduce
-// (reduce_substitute_carve → repoint → here): re-entering the analyzer fold layer there
-// would re-materialize carves on ever-fresh clones the node-keyed guard can't catch — an
-// unbounded re-fold, the reason the reducer's substitution is kept fold-free (CLAUDE.md).
-// So the reduce path passes repoint(..., refold=false): the folds are invalidated (nil)
-// and recomputed lazily by reduce's own consumers. See `repoint`'s `refold` parameter.
-scope_repoint :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Scope_Type {
-	rst := new(Scope_Type)
+// scope_repoint_node rewrites a nested scope's references from `old` to `dst`,
+// building the clone IN PLACE inside its final ^Type node (one identity — the
+// address internal mentions are repointed to IS the node every consumer sees).
+// The clone is a NEW identity, so the scope's own internal self-mentions (a
+// production or sibling field mentioning this very scope) are repointed src→clone
+// in a second pass — the same law carve_substitute applies to its copy; without
+// it a later substitution on the clone misses the internal mentions and their
+// stale cached folds survive (`m{func -> {u8:e, -> e+2}}` then `func{e->5}!`
+// folding e at its default).
+// The fold refresh must NOT run under reduce (reduce_substitute_carve → repoint →
+// here): re-entering the analyzer fold layer there would re-materialize carves on
+// ever-fresh clones the node-keyed guard can't catch — an unbounded re-fold. So
+// the reduce path passes repoint(..., refold=false): the folds are invalidated
+// (nil) and recomputed lazily by reduce's own consumers.
+scope_repoint_node :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Type {
+	node := new(Type)
+	node^ = Scope_Type{}
+	rst := &node^.(Scope_Type)
 	rst.parent = src.parent
 	for n in src.names do append(&rst.names, n)
 	for ty in src.constraints do append(&rst.constraints, repoint(ty, old, dst, refold))
 	for k in src.kind do append(&rst.kind, k)
 	for v in src.types do append(&rst.types, repoint(v, old, dst, refold))
+	// Identity pass: follow internal self-mentions onto the clone.
+	for v, i in rst.types do rst.types[i] = repoint(v, src, rst, refold)
+	for ty, i in rst.constraints do rst.constraints[i] = repoint(ty, src, rst, refold)
 	if refold {
 		for f, i in src.type_folds do append(&rst.type_folds, fold_type(rst.types[i]))
 		for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.constraints[i]))
@@ -1121,7 +1143,7 @@ scope_repoint :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Scope_Type
 		for _ in src.constraint_folds do append(&rst.constraint_folds, nil)
 	}
 	for c in src.captures do append(&rst.captures, c)
-	return rst
+	return node
 }
 
 // repoint rewrites, copy-on-write, every Mention/Reference inside `t` whose
@@ -1252,8 +1274,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type, refold := true) -> ^Type {
 			return new_type(Carve_Type{s, refs, vals})
 		}
 	case Scope_Type:
-		rs := scope_repoint(&v, old, dst, refold)
-		return new_type(rs^)
+		return scope_repoint_node(&v, old, dst, refold)
 	}
 	return t
 }

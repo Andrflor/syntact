@@ -379,17 +379,17 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 		if len(neg) == 0 do return nil
 		return neg
 	case Mention_Type:
-		if v.match_scope != nil && v.match_index >= 0 {
+		if v.match_scope != nil && v.match_index >= 0 && v.match_index < len(v.match_scope.types) {
 			if as_constraint {
 				return fold_string_intervals(v.match_scope.types[v.match_index], true)
 			}
 			if s, ok := stored_string_intervals(
-				   v.match_scope.type_folds[v.match_index],
+				   stored_type_fold_at(v.match_scope, v.match_index),
 			   ).([]String_Interval); ok {
 				return s
 			}
 			if s, ok := stored_string_intervals(
-				   v.match_scope.constraint_folds[v.match_index],
+				   stored_constraint_fold_at(v.match_scope, v.match_index),
 			   ).([]String_Interval); ok {
 				return s
 			}
@@ -400,17 +400,18 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 		return nil
 	case Reference_Type:
 		ref := v.reference
-		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 &&
+		   ref.match_index < len(ref.match_scope.types) {
 			if as_constraint {
 				return fold_string_intervals(ref.match_scope.types[ref.match_index], true)
 			}
 			if s, ok := stored_string_intervals(
-				   ref.match_scope.type_folds[ref.match_index],
+				   stored_type_fold_at(ref.match_scope, ref.match_index),
 			   ).([]String_Interval); ok {
 				return s
 			}
 			if s, ok := stored_string_intervals(
-				   ref.match_scope.constraint_folds[ref.match_index],
+				   stored_constraint_fold_at(ref.match_scope, ref.match_index),
 			   ).([]String_Interval); ok {
 				return s
 			}
