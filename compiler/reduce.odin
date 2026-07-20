@@ -1296,23 +1296,26 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 
 	for i in 0 ..< len(value.references) {
 		ref := value.references[i]
-		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
+		// A substitution may have replaced the source with a structurally different
+		// scope — re-resolve a named reference against it (see carve_ref_index).
+		idx := carve_ref_index(ref, copy)
+		if idx >= 0 && idx < len(copy.types) {
 			// Identity override (`Array{T}` overriding T with the same T) would, after
 			// repoint, leave a self-mention — an unresolvable cycle. Changes nothing; skip.
 			if mv, is_m := value.types[i]^.(Mention_Type);
-			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
+			   is_m && mv.match_scope == src && mv.match_index == idx {
 				continue
 			}
 			// PULL UNIFICATION: a field constraint mentioning a pull binds the pull from
 			// the supplied value (`data{6}` → e = 6), so every mention of e reads 6.
-			if ref.match_index < len(copy.constraints) &&
-			   copy.constraints[ref.match_index] != nil {
-				reduce_unify_pull(copy.constraints[ref.match_index], value.types[i], copy, src)
+			if idx < len(copy.constraints) &&
+			   copy.constraints[idx] != nil {
+				reduce_unify_pull(copy.constraints[idx], value.types[i], copy, src)
 			}
-			copy.types[ref.match_index] = value.types[i]
+			copy.types[idx] = value.types[i]
 			// Clear the pre-carve cached fold (a stale singleton would shadow it).
-			if ref.match_index < len(copy.type_folds) {
-				copy.type_folds[ref.match_index] = nil
+			if idx < len(copy.type_folds) {
+				copy.type_folds[idx] = nil
 			}
 		}
 	}
