@@ -442,6 +442,14 @@ close_default :: proc(a: ^Analyzer, p: Pending) {
 		append(&a.pending, np)
 		return
 	}
+	if default_is_infinite(fc) {
+		sem_error(
+			a,
+			"infinite default: the constraint's first production recurses into its own grammar — put a terminal production (e.g. `-> {}`) first",
+			.Infinite_Recursion,
+			node_span(a, p.node),
+		)
+	}
 	value := default_value(fc)
 	p.scope.types[p.bind] = value
 	if p.bind < len(p.scope.constraint_folds) do p.scope.constraint_folds[p.bind] = fc
@@ -1077,6 +1085,14 @@ append_bare_constraint :: proc(
 ) -> ^Type {
 	a.fold_pending = nil
 	fc := fold_constraint(constraint)
+	if default_is_infinite(fc) {
+		sem_error(
+			a,
+			"infinite default: the constraint's first production recurses into its own grammar — put a terminal production (e.g. `-> {}`) first",
+			.Infinite_Recursion,
+			node_span(a, node),
+		)
+	}
 	value := default_value(fc)
 	if pend := a.fold_pending; pend != nil {
 		a.fold_pending = nil
