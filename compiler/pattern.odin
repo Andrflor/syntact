@@ -17,7 +17,8 @@ build_pattern_branch :: proc(match: ^Type, product: ^Type) -> Pattern_Branch {
 		product = product,
 	}
 	// Cache the branch's firing set NOW (analysis time): reduce_pattern reads this
-	// cache — no fold ever runs during reduce.
+	// cache first. A reduce-side clone invalidates it to nil (repoint refold=false);
+	// reduce_branch_fires then refolds it on demand.
 	if match != nil {
 		b.cover_fold = fold_constraint(match)
 	}
@@ -372,29 +373,24 @@ pattern_is_exhaustive :: proc(p: Pattern_Type) -> bool {
 	// A match/target that is not a static set (e.g. `2>2`) can't prove coverage and
 	// must not reach satisfy_root with a nil.
 	if fc == nil || ft == nil do return false
-	res := satisfy_root(fc, ft)
-	fmt.eprintln("[DBG] exhaustive:", res, "fc=", describe_type(fc), "ft=", describe_type(ft))
-	return res
+	return satisfy_root(fc, ft)
 }
 
 // pattern_target_coverage: the set of values the scrutinee can take — its
-// DECLARED domain (constraint side) when it is a colored binding, else its value
-// fold. A carve may rebind a colored binding to anything in its color, so
+// DECLARED domain (constraint side) when it is a LEXICALLY MENTIONED colored
+// binding, else its value fold. A lexical binding is the carve-parameter surface:
+// any carve of the enclosing scope may rebind it to anything in its color, so
 // exhaustiveness is a contract over the DOMAIN (`Array{T}:source` must be covered
-// for every list, not just for source's current default). A grammar machine (a
-// scope whose value-set is its productions' union — the producer rule) expands to
-// that union so each production is proven against the covers.
+// for every list, not just for source's current default). A property reference
+// (`C.x`) reads an already-MATERIALIZED value — its fold is what it is. A grammar
+// machine (a scope whose value-set is its productions' union — the producer rule)
+// expands to that union so each production is proven against the covers.
 pattern_target_coverage :: proc(p: Pattern_Type) -> ^Type {
 	cf: ^Type
 	if p.target != nil {
-		#partial switch v in p.target^ {
-		case Mention_Type:
+		if v, is_mention := p.target^.(Mention_Type); is_mention {
 			if v.match_scope != nil && v.match_index >= 0 {
 				cf = stored_constraint_fold_at(v.match_scope, v.match_index)
-			}
-		case Reference_Type:
-			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
-				cf = stored_constraint_fold_at(v.reference.match_scope, v.reference.match_index)
 			}
 		}
 	}

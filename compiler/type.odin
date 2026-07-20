@@ -195,16 +195,21 @@ color_is_leaf_domain :: proc(color: ^Type) -> bool {
 	#partial switch v in c^ {
 	case Integer_Type, Float_Type, String_Type, Bool_Type:
 		return true
+	case Or_Type:
+		// A CROSS-FAMILY union (`2.4|3..5` — the kernels keep it symbolic) is still
+		// a leaf domain: every leaf is one, and satisfy decomposes the set algebra.
+		return color_is_leaf_domain(v.left) && color_is_leaf_domain(v.right)
+	case And_Type:
+		return color_is_leaf_domain(v.left) && color_is_leaf_domain(v.right)
+	case Negate_Type:
+		return color_is_leaf_domain(v.operand)
 	case Scope_Type:
 		// A pure producer `{-> set}`: its production is the domain — check it.
 		prods := scope_productions(v)
 		if len(prods) == 1 && len(v.names) == 1 {
 			pf := fold_constraint(prods[0])
 			if pf == nil do return false
-			#partial switch _ in pf^ {
-			case Integer_Type, Float_Type, String_Type, Bool_Type:
-				return true
-			}
+			return color_is_leaf_domain(pf)
 		}
 	}
 	return false

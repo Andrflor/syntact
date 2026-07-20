@@ -1,7 +1,6 @@
 package compiler
 
 import "core:fmt"
-import "core:reflect"
 import "core:strings"
 
 // CONSTRAINT side: fold_constraint resolves the set a binding IMPOSES (left of
@@ -426,67 +425,94 @@ is_recursive_tail :: proc(t: ^Type) -> bool {
 	return false
 }
 
-// recursive_tail_site resolves a recursive-tail marker (a bare Recursive_Mention
-// or a carve over one) to the binding site of the grammar it names.
-recursive_tail_site :: proc(t: ^Type) -> (Binding_Site, bool) {
-	if t == nil do return {}, false
-	#partial switch v in t^ {
+// grammar_of_tail resolves an Expand tail to the grammar scope it repeats,
+// whatever its representation: a LAZY recursive marker (inside the grammar's own
+// body), a carve over one, or the already-MATERIALIZED machine scope (from
+// outside, where fold_carve_constraint substituted it — its `origin` still names
+// the canonical body). ok=false for a leaf tail (`...u8`).
+grammar_of_tail :: proc(t: ^Type) -> (^Scope_Type, bool) {
+	if t == nil do return nil, false
+	#partial switch &v in t^ {
 	case Recursive_Mention_Type:
-		return Binding_Site{v.match_scope, v.match_index}, true
+		return recursive_site_body(v.match_scope, v.match_index)
 	case Carve_Type:
 		if v.source != nil {
 			if rr, is_rr := v.source^.(Recursive_Mention_Type); is_rr {
-				return Binding_Site{rr.match_scope, rr.match_index}, true
+				return recursive_site_body(rr.match_scope, rr.match_index)
 			}
 		}
+		if sub := fold_carve_constraint(t); sub != nil do return sub, true
+	case Scope_Type:
+		return &v, true
 	}
-	return {}, false
+	return nil, false
 }
 
-// recursive_tails_subset proves `...A ⊆ ...B` for two RECURSIVE tails without
-// unfolding — the coinductive step of the grammar-coverage proof: the tails name
-// the SAME grammar (same canonical binding site) and each of A's overrides binds
-// the same slot to the same set as B's (both directions, so the parameters are
-// equal, not merely narrower — a run of Array{u8} is not a run of Array{u16}
-// carrying the same production shapes).
-recursive_tails_subset :: proc(vt, ct: ^Type) -> bool {
-	va, v_ok := recursive_tail_site(vt)
-	ca, c_ok := recursive_tail_site(ct)
-	if !v_ok || !c_ok do return false
-	if scope_canon(va.scope) != scope_canon(ca.scope) || va.index != ca.index do return false
-	vc, v_is := &vt^.(Carve_Type)
-	cc, c_is := &ct^.(Carve_Type)
-	if v_is != c_is do return false
-	if !v_is do return true
-	if len(vc.references) != len(cc.references) do return false
-	for vi in 0 ..< len(vc.references) {
-		slot := vc.references[vi].match_index
-		found := false
-		for ci in 0 ..< len(cc.references) {
-			if cc.references[ci].match_index != slot do continue
-			vf := fold_constraint(vc.types[vi])
-			cf := fold_constraint(cc.types[ci])
-			if vf == nil || cf == nil do return false
-			if !type_set_equal(vf, cf) do return false
-			found = true
-			break
+// recursive_site_body follows a recursive marker's binding site to the grammar's
+// body scope.
+recursive_site_body :: proc(scope: ^Scope_Type, index: int) -> (^Scope_Type, bool) {
+	if scope == nil || index < 0 || index >= len(scope.types) do return nil, false
+	body := follow(scope.types[index])
+	if body == nil do return nil, false
+	if s, ok := &body^.(Scope_Type); ok do return s, true
+	return nil, false
+}
+
+// tail_param_set: the set a tail binds to grammar parameter `slot` — a carve
+// override's constraint fold, or the materialized machine's field fold. nil when
+// the tail carries no binding for that slot.
+tail_param_set :: proc(t: ^Type, g: ^Scope_Type, slot: int) -> ^Type {
+	if t == nil do return nil
+	#partial switch &v in t^ {
+	case Carve_Type:
+		for i in 0 ..< len(v.references) {
+			if carve_ref_index(v.references[i], g) == slot do return fold_constraint(v.types[i])
 		}
-		if !found do return false
+		return nil
+	case Scope_Type:
+		if f := stored_type_fold_at(&v, slot); f != nil do return f
+		if slot >= 0 && slot < len(v.types) do return fold_type(v.types[slot])
 	}
-	return true
+	return nil
+}
+
+// tail_param_slots collects the grammar-parameter slots a tail explicitly binds.
+tail_param_slots :: proc(t: ^Type, g: ^Scope_Type, slots: ^map[int]bool) {
+	if t == nil do return
+	if cv, ok := &t^.(Carve_Type); ok {
+		for i in 0 ..< len(cv.references) {
+			if idx := carve_ref_index(cv.references[i], g); idx >= 0 do slots[idx] = true
+		}
+	}
 }
 
 // expand_tail_subset proves a VALUE-side Expand's tail against a CONSTRAINT-side
-// Expand's tail (`...A ⊆ ...B`). A nil value tail (`...`) only ever denotes the
-// empty run — any constraint tail covers it. Recursive tails compare
-// coinductively; leaf tails prove by the ordinary subset.
+// Expand's tail (`...A ⊆ ...B`) — the coinductive step of the grammar-coverage
+// proof, no unfolding: both tails must repeat the SAME canonical grammar with
+// EQUAL parameters on every explicitly bound slot (equal, not merely narrower —
+// the run's shape recurses on them). A nil value tail (`...`) only ever denotes
+// the empty run — any constraint tail covers it. Leaf tails prove by the
+// ordinary subset.
 expand_tail_subset :: proc(vt, ct: ^Type) -> bool {
 	if vt == nil do return true
 	if ct == nil do return false
-	v_rec := is_recursive_tail(vt)
-	c_rec := is_recursive_tail(ct)
-	if v_rec && c_rec do return recursive_tails_subset(vt, ct)
-	if v_rec || c_rec do return false
+	vg, v_ok := grammar_of_tail(vt)
+	cg, c_ok := grammar_of_tail(ct)
+	if v_ok && c_ok {
+		if scope_canon(vg) != scope_canon(cg) do return false
+		slots := make(map[int]bool)
+		defer delete(slots)
+		tail_param_slots(vt, vg, &slots)
+		tail_param_slots(ct, cg, &slots)
+		for slot in slots {
+			va := tail_param_set(vt, vg, slot)
+			ca := tail_param_set(ct, cg, slot)
+			if va == nil || ca == nil do return false
+			if !type_set_equal(va, ca) do return false
+		}
+		return true
+	}
+	if v_ok || c_ok do return false
 	return satisfy_root(ct, vt)
 }
 
@@ -628,13 +654,7 @@ expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
 		if vi + 1 != vend do return false
 		vt := vi < len(vs.constraint_folds) ? vs.constraint_folds[vi] : nil
 		if vt == nil && vi < len(vs.constraints) do vt = vs.constraints[vi]
-		r := expand_tail_subset(vt, a)
-		vk := "nil"
-		if vt != nil do vk = fmt.tprintf("%v rec=%v", reflect.union_variant_typeid(vt^), is_recursive_tail(vt))
-		ck := "nil"
-		if a != nil do ck = fmt.tprintf("%v rec=%v", reflect.union_variant_typeid(a^), is_recursive_tail(a))
-		fmt.eprintln("[DBG] tail_subset:", r, "vt=", vk, "ct=", ck)
-		return r
+		return expand_tail_subset(vt, a)
 	}
 	resolved := is_recursive_tail(a) ? recursive_tail_unfold(a) : a
 	if resolved == nil do return vi == vend

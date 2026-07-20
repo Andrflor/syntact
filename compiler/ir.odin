@@ -39,8 +39,9 @@ FloatKind :: enum {
 
 // How a binding connects a name to its value. The push/pull pairs mirror Syntact's
 // directional operators; only the pointing pair is reduced today (events/resonance/
-// reactivity are recorded, not yet reduced). Expand = `+{}`, Product = the
-// `->`-less production collapse `!` reduces through.
+// reactivity are recorded, not yet reduced). Expand = the `...` expansion (there is
+// NO extension operator — a scope is closed), Product = the `->`-less production
+// collapse `!` reduces through.
 Binding_Kind :: enum u8 {
 	Pointing_Push,
 	Pointing_Pull,
@@ -56,7 +57,7 @@ Binding_Kind :: enum u8 {
 
 // --- the Type union and its variants ---
 
-// `A | B` (sum) and `A & B` (intersection — also the explicit cast).
+// `A | B` (sum) and `A & B` (intersection). The explicit cast is Cast_Type (`::`).
 Or_Type :: struct {
 	left:  ^Type,
 	right: ^Type,
@@ -177,11 +178,12 @@ Pattern_Type :: struct {
 	branches: []Pattern_Branch,
 }
 
-// One branch (nil match = match anything). The `=v` value-match mode now lives in
-// the match type itself as an Exact_Type node (so it survives Or/And/Not nesting,
-// e.g. `=10 | =20`), not as a per-branch flag. `cover_fold` is the branch's firing
-// set, folded once at analysis and reused by reduce_pattern; nil when the match did
-// not fold statically.
+// One branch (nil match = match anything). The `=v` value-match mode lives in the
+// match type itself: walk desugars `=v` into the producer scope `{-> v}` (so it
+// survives Or/And/Not nesting, e.g. `=10 | =20`), not as a per-branch flag.
+// `cover_fold` is the branch's firing set, folded at analysis and reused by
+// reduce_pattern; nil when the match did not fold statically (or was invalidated
+// by a reduce-side clone — reduce_branch_fires refolds it on demand).
 Pattern_Branch :: struct {
 	match:      ^Type,
 	product:    ^Type,

@@ -44,9 +44,11 @@ Analyzer_Error :: struct {
 }
 
 
-// Per-file analysis state. Reachable from deep fold helpers via context.user_ptr
-// (see current_analyzer). TRAP: reduce NEVER calls the fold layer, so a fold helper
-// can always trust that context.user_ptr is this Analyzer.
+// Per-file analysis state. Reachable from deep fold helpers via current_analyzer(),
+// which reads the Phase_Context on context.user_ptr. TRAP: reduce also re-enters the
+// fold layer (refold on demand), so context.user_ptr is NEVER a bare ^Analyzer — it is
+// a Phase_Context holding both phase handles; always go through current_analyzer()/
+// current_reducer(), never cast the pointer directly (see Phase_Context below).
 Analyzer :: struct {
 	ast:              ^Ast,
 	scope:            ^Scope_Type,
@@ -975,7 +977,7 @@ walk_product :: #force_inline proc(
 	return value
 }
 
-// `+{…}` extension. A valueless expand (`+{u8:}`) materializes the constraint's
+// `...expr` expansion. A valueless expand (`...u8:`) materializes the constraint's
 // default (there is no value expression to typecheck against).
 walk_expand :: #force_inline proc(
 	a: ^Analyzer,
