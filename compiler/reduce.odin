@@ -1037,7 +1037,8 @@ fixedpoint_id :: proc(node: ^Type) -> int {
 
 // reduce_pattern collapses a pattern to the product of the first branch that fires.
 // A fixed-point target can't pick a branch at compile time; the pattern stays
-// symbolic. The firing test reads cached cover_folds, never re-folding.
+// symbolic. The firing test reads cached cover_folds, refolding on demand when a
+// reduce-side clone invalidated one (reduce_branch_fires).
 reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 	if !is_fixed_point(p.target) {
 		target := reduce_value(p.target)

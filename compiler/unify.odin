@@ -1,5 +1,6 @@
 package compiler
 
+
 // unify_pull resolves PULL variables by matching a field's CONSTRAINT (which may
 // mention pulls, e.g. `data{e}`) against the VALUE supplied (e.g. `data{6}`), and
 // writes the resolved value into the pull's binding in `copy`. Descends structurally:
