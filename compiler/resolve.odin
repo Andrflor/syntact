@@ -379,8 +379,14 @@ process_cache_task :: proc(task: thread.Task) {
 
 		cache.status = .Analyzing
 		analyzer := create_analyzer(ast)
+		// One Phase_Context for the whole file: analyze fills .analyzer now, reduce fills
+		// .reducer below WITHOUT clearing .analyzer, so reduce can still reach the fold layer.
+		phase_ctx := Phase_Context {
+			analyzer = &analyzer,
+		}
 		prev_user_ptr := context.user_ptr
-		context.user_ptr = &analyzer
+		context.user_ptr = &phase_ctx
+		defer context.user_ptr = prev_user_ptr
 		analyze_ok := analyze(cache)
 		cache.status = .Analyzed
 
@@ -404,8 +410,6 @@ process_cache_task :: proc(task: thread.Task) {
 			fmt.println()
 		}
 
-		context.user_ptr = prev_user_ptr
-
 		if !resolver.options.analyze_only && analyze_ok {
 			reduce_start: time.Time
 			if resolver.options.timing {
@@ -413,8 +417,10 @@ process_cache_task :: proc(task: thread.Task) {
 			}
 
 			r := create_reducer()
-			prev_user_ptr := context.user_ptr
-			context.user_ptr = &r
+			// Add the reducer to the SAME phase context; .analyzer stays live so the
+			// reducer's fold reuse (repoint/scope_repoint → fold_type) resolves the real
+			// analyzer instead of a mis-cast pointer.
+			phase_ctx.reducer = &r
 			result := reduce(cache.scope)
 
 			if resolver.options.timing {
@@ -432,8 +438,8 @@ process_cache_task :: proc(task: thread.Task) {
 			   resolver.options.print_regalloc ||
 			   resolver.options.emit_exe {
 				codegen_start: time.Time
-				// user_ptr must stay the reducer `r`: lower_to_bytecode → fixedpoint_id
-				// reads r.fixedpoint_index. Restored after lowering.
+				// The phase context stays live through codegen: lower_to_bytecode →
+				// fixedpoint_id reads phase_ctx.reducer.fixedpoint_index.
 				if resolver.options.timing {
 					codegen_start = time.now()
 				}
@@ -478,10 +484,8 @@ process_cache_task :: proc(task: thread.Task) {
 						)
 					}
 				}
-				context.user_ptr = prev_user_ptr
 			} else {
 				fmt.println(value_to_string(result))
-				context.user_ptr = prev_user_ptr
 			}
 		}
 	} else if resolver.options.verbose {

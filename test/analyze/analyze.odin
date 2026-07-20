@@ -97,8 +97,11 @@ run_analyze_test :: proc(path: string, t: ^testing.T) {
 	cache := new(compiler.Cache)
 	ast, _ := compiler.parse(cache, tc.source)
 	analyzer := compiler.create_analyzer(ast)
+	phase_ctx := compiler.Phase_Context {
+		analyzer = &analyzer,
+	}
 	prev_user_ptr := context.user_ptr
-	context.user_ptr = &analyzer
+	context.user_ptr = &phase_ctx
 	analyze_ok := compiler.analyze(cache)
 	context.user_ptr = prev_user_ptr
 

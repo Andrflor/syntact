@@ -3,8 +3,6 @@ package compiler
 import "core:fmt"
 import "core:unicode/utf8"
 
-DISABLE_INNER_CARVE_EMIT :: #config(DISABLE_INNER_CARVE_EMIT, false)
-
 // reference_effective_value resolves the VALUE a Reference_Type denotes, honoring
 // a carve in its target: when the target resolves to a carve overriding this exact
 // field, return the override's value, not the stale pre-carve site value.
@@ -157,6 +155,61 @@ fold_set_value :: proc(t: ^Type) -> ^Type {
 	return fold_type(t)
 }
 
+// capture_leaf_domain returns the LEAF color of a capture that is still an unfilled cover
+// placeholder, else nil. A capture `(e)` shares its slot index with the cover field
+// `T:(e)`; while the scrutinee is symbolic the slot holds only the empty placeholder scope
+// the cover was built from, so `e` folds to a bare scope and loses its domain. Return the
+// color so `e` carries its declared domain instead. Only for a LEAF color (integer/float/
+// string/bool): a structural capture (`(r):Array{T}`) must keep its shape, and a capture
+// already holding a real destructured value is left alone.
+capture_leaf_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
+	if scope == nil || index < 0 || index >= len(scope.captures) do return nil
+	if scope.captures[index] == "" do return nil // not a capture slot
+	// Re-fold the CONSTRAINT expression, not the cached fold: the cached color was
+	// folded when the cover was built (a pull `T` still unbound, folding to `{}`), but
+	// the mention of T now resolves to its inferred domain (2..5). Fall back to the
+	// cache when there is no live constraint expression.
+	color: ^Type = nil
+	if index < len(scope.constraints) && scope.constraints[index] != nil {
+		color = fold_constraint(scope.constraints[index])
+	}
+	if color == nil && index < len(scope.constraint_folds) {
+		color = scope.constraint_folds[index]
+	}
+	if color == nil do return nil
+	// Only a leaf domain — never a structural shape. A pull-derived color folds to a
+	// producer of its set (`{-> 2..5}`); read through it to the leaf.
+	if !color_is_leaf_domain(color) do return nil
+	// Only when the value slot is still the EMPTY placeholder scope (not destructured).
+	val := index < len(scope.types) ? scope.types[index] : nil
+	if val == nil do return color
+	if vs, ok := val^.(Scope_Type); ok && len(vs.kind) == 0 do return color
+	return nil
+}
+
+// color_is_leaf_domain reports whether a folded color denotes a LEAF set (integer/float/
+// string/bool), reading through a producer scope `{-> set}` (how a pull-derived domain
+// like T=2..5 folds). A structural scope/carve (`Array{T}`) is NOT a leaf domain.
+color_is_leaf_domain :: proc(color: ^Type) -> bool {
+	c := color
+	#partial switch v in c^ {
+	case Integer_Type, Float_Type, String_Type, Bool_Type:
+		return true
+	case Scope_Type:
+		// A pure producer `{-> set}`: its production is the domain — check it.
+		prods := scope_productions(v)
+		if len(prods) == 1 && len(v.names) == 1 {
+			pf := fold_constraint(prods[0])
+			if pf == nil do return false
+			#partial switch _ in pf^ {
+			case Integer_Type, Float_Type, String_Type, Bool_Type:
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // fold_type yields the TYPE of a value (the RIGHT side, a typeof).
 // Singleton -> the value itself; any wider set -> the producer scope {-> set}.
 fold_type :: proc(t: ^Type) -> ^Type {
@@ -177,6 +230,15 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				// refined domain, not its default value).
 				if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
 					return fold_type(ov)
+				}
+				// A LEAF-COLORED capture (`(e)` in `{u8:(e) …}`) still awaiting a concrete
+				// scrutinee has only its empty cover placeholder in `types[]`, which would
+				// fold to a bare scope and drop the domain. Fold to its color instead, so a
+				// use of `e` carries `u8`/`2..5` — this lets an inner carve `func{e->e}`
+				// prove `e` against func's color. Restricted to a LEAF domain: a structural
+				// capture (`(r):Array{T}`) keeps its placeholder (its shape matters, not a set).
+				if dom := capture_leaf_domain(v.match_scope, v.match_index); dom != nil {
+					return dom
 				}
 				// Site guard: a self-referential value (carve-repointed `n -> n-1`)
 				// re-enters this fold forever through a Compose.
@@ -973,9 +1035,7 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 			// nil analyzer (rendering under reduce) no-ops, staying safe.
 			name := ref.name.(string) or_else ""
 			target := name != "" ? fmt.tprintf("'%s'", name) : "a positional field"
-			when !DISABLE_INNER_CARVE_EMIT {
-				emit(fmt.tprintf("%s does not exist in the carved scope", target), .Invalid_Carve)
-			}
+			emit(fmt.tprintf("%s does not exist in the carved scope", target), .Invalid_Carve)
 		}
 	}
 
@@ -986,7 +1046,6 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	for ty, i in copy.constraints do copy.constraints[i] = repoint(ty, src, copy)
 	for f, i in copy.type_folds do copy.type_folds[i] = fold_type(copy.types[i])
 	for f, i in copy.constraint_folds do copy.constraint_folds[i] = fold_constraint(copy.constraints[i])
-
 	return copy
 }
 
@@ -1007,15 +1066,27 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	return dst
 }
 
-scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
+// scope_repoint rewrites a nested scope's references from `old` to `dst`, refreshing
+// its cached folds via fold_type/fold_constraint. That refresh must NOT run under reduce
+// (reduce_substitute_carve → repoint → here): re-entering the analyzer fold layer there
+// would re-materialize carves on ever-fresh clones the node-keyed guard can't catch — an
+// unbounded re-fold, the reason the reducer's substitution is kept fold-free (CLAUDE.md).
+// So the reduce path passes repoint(..., refold=false): the folds are invalidated (nil)
+// and recomputed lazily by reduce's own consumers. See `repoint`'s `refold` parameter.
+scope_repoint :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Scope_Type {
 	rst := new(Scope_Type)
 	rst.parent = src.parent
 	for n in src.names do append(&rst.names, n)
-	for ty in src.constraints do append(&rst.constraints, repoint(ty, old, dst))
+	for ty in src.constraints do append(&rst.constraints, repoint(ty, old, dst, refold))
 	for k in src.kind do append(&rst.kind, k)
-	for v in src.types do append(&rst.types, repoint(v, old, dst))
-	for f, i in src.type_folds do append(&rst.type_folds, fold_type(rst.types[i]))
-	for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.constraints[i]))
+	for v in src.types do append(&rst.types, repoint(v, old, dst, refold))
+	if refold {
+		for f, i in src.type_folds do append(&rst.type_folds, fold_type(rst.types[i]))
+		for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.constraints[i]))
+	} else {
+		for _ in src.type_folds do append(&rst.type_folds, nil)
+		for _ in src.constraint_folds do append(&rst.constraint_folds, nil)
+	}
 	for c in src.captures do append(&rst.captures, c)
 	return rst
 }
@@ -1023,8 +1094,11 @@ scope_repoint :: proc(src, old, dst: ^Scope_Type) -> ^Scope_Type {
 // repoint rewrites, copy-on-write, every Mention/Reference inside `t` whose
 // match_scope is `old` to point at `dst`, descending through composites and nested
 // scopes. A node is cloned only when a descendant changed (unchanged subtrees stay
-// shared, the source's ^Types are never mutated).
-repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
+// shared, the source's ^Types are never mutated). `refold` (default true, analyze
+// path) recomputes nested scopes' cached folds; reduce passes false so the fold layer
+// (analyzer-only) is never re-entered — folds are invalidated (nil) and recomputed
+// lazily instead.
+repoint :: proc(t: ^Type, old, dst: ^Scope_Type, refold := true) -> ^Type {
 	if t == nil do return t
 
 	#partial switch &v in t^ {
@@ -1034,7 +1108,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 		}
 	case Reference_Type:
 		ref := v.reference
-		nt := repoint(v.target, old, dst)
+		nt := repoint(v.target, old, dst, refold)
 		// If the TARGET was substituted, the frozen `(scope, index)` site is stale:
 		// re-resolve the property NAME in the new target (this detects a property that
 		// disappears after the carve, e.g. `arr->{}` then `arr.#0`).
@@ -1061,36 +1135,36 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			return new_type(Reference_Type{nt, ref})
 		}
 	case Compose_Type:
-		l := repoint(v.left, old, dst)
-		r := repoint(v.right, old, dst)
+		l := repoint(v.left, old, dst, refold)
+		r := repoint(v.right, old, dst, refold)
 		if l != v.left || r != v.right {
 			return new_type(Compose_Type{l, r, v.operator, nil})
 		}
 	case Or_Type:
-		l := repoint(v.left, old, dst)
-		r := repoint(v.right, old, dst)
+		l := repoint(v.left, old, dst, refold)
+		r := repoint(v.right, old, dst, refold)
 		if l != v.left || r != v.right {
 			return new_type(Or_Type{l, r})
 		}
 	case And_Type:
-		l := repoint(v.left, old, dst)
-		r := repoint(v.right, old, dst)
+		l := repoint(v.left, old, dst, refold)
+		r := repoint(v.right, old, dst, refold)
 		if l != v.left || r != v.right {
 			return new_type(And_Type{l, r})
 		}
 	case Range_Type:
-		l := repoint(v.left, old, dst)
-		r := repoint(v.right, old, dst)
+		l := repoint(v.left, old, dst, refold)
+		r := repoint(v.right, old, dst, refold)
 		if l != v.left || r != v.right {
 			return new_type(Range_Type{l, r})
 		}
 	case Negate_Type:
-		o := repoint(v.operand, old, dst)
+		o := repoint(v.operand, old, dst, refold)
 		if o != v.operand {
 			return new_type(Negate_Type{o})
 		}
 	case Execute_Type:
-		tg := repoint(v.target, old, dst)
+		tg := repoint(v.target, old, dst, refold)
 		if tg != v.target {
 			return new_type(Execute_Type{tg})
 		}
@@ -1099,16 +1173,18 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 		// MATCH has a stale cover_fold (the analysis-time fold of the OLD match) that
 		// reduce_branch_fires would fire — re-fold it so reduce agrees with branch_covers.
 		// An UNCHANGED match keeps its cached cover_fold.
-		tg := repoint(v.target, old, dst)
+		tg := repoint(v.target, old, dst, refold)
 		changed := tg != v.target
 		branches := make([]Pattern_Branch, len(v.branches))
 		for branch, i in v.branches {
-			m := repoint(branch.match, old, dst)
-			p := repoint(branch.product, old, dst)
+			m := repoint(branch.match, old, dst, refold)
+			p := repoint(branch.product, old, dst, refold)
 			cf := branch.cover_fold
 			if m != branch.match {
 				changed = true
-				cf = m != nil ? fold_constraint(m) : nil
+				// refold=false (reduce path): don't re-enter the fold layer; invalidate
+				// the stale cover_fold so a reduce-side consumer recomputes it.
+				cf = (refold && m != nil) ? fold_constraint(m) : nil
 			}
 			if p != branch.product do changed = true
 			branches[i] = Pattern_Branch{m, p, cf}
@@ -1117,11 +1193,11 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			return new_type(Pattern_Type{tg, branches})
 		}
 	case Carve_Type:
-		s := repoint(v.source, old, dst)
+		s := repoint(v.source, old, dst, refold)
 		changed := s != v.source
 		vals := make([dynamic]^Type, 0, len(v.types))
 		for cv in v.types {
-			nv := repoint(cv, old, dst)
+			nv := repoint(cv, old, dst, refold)
 			if nv != cv do changed = true
 			append(&vals, nv)
 		}
@@ -1131,7 +1207,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type) -> ^Type {
 			return new_type(Carve_Type{s, refs, vals})
 		}
 	case Scope_Type:
-		rs := scope_repoint(&v, old, dst)
+		rs := scope_repoint(&v, old, dst, refold)
 		return new_type(rs^)
 	}
 	return t

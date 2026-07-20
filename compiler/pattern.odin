@@ -180,7 +180,9 @@ destructure_cover :: proc(cover: ^Scope_Type, pieces: ^Scope_Type) -> ^Scope_Typ
 // values through every fold/reduce path with no side state. Falls back to the raw
 // product when there is nothing to destructure (non-scope cover, `=v` producer,
 // non-scope scrutinee).
-fired_product :: proc(branch: Pattern_Branch, scrutinee: ^Type) -> ^Type {
+// refold (default true, analyze path) is threaded to repoint; reduce passes false so
+// the substitution never re-enters the analyzer-only fold layer (see repoint).
+fired_product :: proc(branch: Pattern_Branch, scrutinee: ^Type, refold := true) -> ^Type {
 	if branch.match == nil || branch.product == nil || scrutinee == nil do return branch.product
 	cover, c_ok := &branch.match^.(Scope_Type)
 	if !c_ok do return branch.product
@@ -190,7 +192,7 @@ fired_product :: proc(branch: Pattern_Branch, scrutinee: ^Type) -> ^Type {
 	if !p_ok do return branch.product
 	sub := destructure_cover(cover, pieces)
 	if sub == nil do return branch.product
-	return repoint(branch.product, cover, sub)
+	return repoint(branch.product, cover, sub, refold)
 }
 
 // branch_match_cover yields the match a branch contributes to the coverage union:
