@@ -154,6 +154,55 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	return combined
 }
 
+// grammar_tail_domain: the union of a grammar machine's productions' expand
+// tails — the domain of "the rest of a run" of that grammar (for Array, the cons
+// tail `Array{T}`).
+grammar_tail_domain :: proc(machine: ^Scope_Type) -> ^Type {
+	out: ^Type
+	for i in 0 ..< len(machine.kind) {
+		if machine.kind[i] != .Product do continue
+		prod := stored_type_fold_at(machine, i)
+		if prod == nil && i < len(machine.types) do prod = machine.types[i]
+		if prod == nil do continue
+		ps, ok := &prod^.(Scope_Type)
+		if !ok do continue
+		for j in 0 ..< len(ps.kind) {
+			if ps.kind[j] != .Expand do continue
+			t := stored_constraint_fold_at(ps, j)
+			if t == nil && j < len(ps.constraints) do t = ps.constraints[j]
+			if t == nil do continue
+			out = out == nil ? t : new_type(Or_Type{out, t})
+		}
+	}
+	return out
+}
+
+// stamp_cover_tail_domain infers the domain of a BARE trailing `...(r)` in a
+// scope cover from the scrutinee's declared grammar: the rest of a run of
+// `Array{T}` is an `Array{T}`, so the capture r carries the grammar tail exactly
+// as if `...Array{T}:(r)` had been written. Purely additive — a WRITTEN tail
+// constraint is never touched.
+stamp_cover_tail_domain :: proc(match: ^Type, target: ^Type) {
+	if match == nil || target == nil do return
+	ms, is_scope := &match^.(Scope_Type)
+	if !is_scope do return
+	idx := -1
+	for i in 0 ..< len(ms.kind) do if ms.kind[i] == .Expand do idx = i
+	if idx < 0 || idx >= len(ms.constraint_folds) do return
+	if idx < len(ms.constraints) && ms.constraints[idx] != nil do return
+	if ms.constraint_folds[idx] != nil do return
+	cf: ^Type
+	if v, is_m := target^.(Mention_Type); is_m && v.match_scope != nil && v.match_index >= 0 {
+		cf = stored_constraint_fold_at(v.match_scope, v.match_index)
+	}
+	if cf == nil do return
+	machine, ok := &cf^.(Scope_Type)
+	if !ok do return
+	if tail := grammar_tail_domain(machine); tail != nil {
+		ms.constraint_folds[idx] = tail
+	}
+}
+
 // pattern_home_scope: the scope the pattern's scrutinee lives in — the pattern's
 // own world in WHICHEVER materialization is being folded (a clone's target mention
 // was repointed to the clone). nil when the scrutinee is not a direct binding.

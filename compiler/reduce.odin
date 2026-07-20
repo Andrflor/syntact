@@ -1294,7 +1294,12 @@ reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> 
 	}
 	if cover.kind[c] == .Expand {
 		cf := cover_constraint_fold(cover, c)
-		if cf == nil do return vi >= len(ts.types) ? .Yes : .No
+		if cf == nil {
+			// A BARE `...(r)` (no constraint written) swallows any rest; a WRITTEN
+			// tail whose fold failed stays undecidable rather than misfiring.
+			bare := c >= len(cover.constraints) || cover.constraints[c] == nil
+			return bare ? .Yes : .Undecidable
+		}
 		for k := vi; k < len(ts.types); k += 1 {
 			d := reduce_leaf_fires(cf, reduce_value(ts.types[k]))
 			if d == .Undecidable {
