@@ -1,0 +1,6 @@
+{
+  "name": "a scope VALUE reduces its fields",
+  "description": "a fired product that is a literal scope of collapses materializes them",
+  "source": "f -> {u8:e, -> e+1}\n-> {5 6} ? {\n  {u8:(x) ...u8:(r)} -> { f{e -> x}! }\n  {} -> 0\n}",
+  "expect": "{6}"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "a cover capture feeds a carve in the product",
+  "description": "the destructured head x flows through f{e->x}! : 5+1",
+  "source": "f -> {u8:e, -> e+1}\n-> {5 6} ? {\n  {u8:(x) ...u8:(r)} -> f{e -> x}!\n  {} -> 0\n}",
+  "expect": "6"
+}

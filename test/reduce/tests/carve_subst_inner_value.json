@@ -1,0 +1,6 @@
+{
+  "name": "inner carve after a structural substitution",
+  "description": "m{func -> {u8:e, -> e+2}} then func{e->5}! reads the substituted body: 7 (was: e folded at its default)",
+  "source": "m -> {\n  func -> {u8:e, -> e+1}\n  -> func{e -> 5}!\n}\n-> m{func -> {u8:e, -> e+2}}!",
+  "expect": "7"
+}

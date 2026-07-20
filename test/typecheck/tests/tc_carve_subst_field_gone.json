@@ -1,0 +1,8 @@
+{
+  "name": "tc_carve_subst_field_gone",
+  "description": "func substituted by a scope WITHOUT the carved field: the override target vanished and the carve reports it",
+  "source": "m -> {\n  func -> {u8:e, -> e+1}\n  -> func{e -> 5}!\n}\n-> m{func -> {x -> 1}}!",
+  "expect_errors": [
+    "Invalid_Carve"
+  ]
+}
