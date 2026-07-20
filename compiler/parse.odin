@@ -1198,7 +1198,7 @@ is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
 //   * a separator before a non-arithmetic operator ends the expression;
 //   * a `->` is not chained onto an existing Product/Pointing left;
 //   * a glued `(` after an *anonymous* identifier breaks out (no spurious call).
-// A missing prefix handler skips the stray token and retries.
+// A missing prefix handler reports the stray token, skips it, and retries.
 parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node_Index {
 	if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
 		return INVALID_NODE
@@ -1206,6 +1206,17 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 
 	prefix := prefix_table[parser.current_token.kind]
 	if prefix == nil {
+		// A token that can start no expression is a syntax error; error_at is
+		// panic-mode-suppressed so recovery sweeps report it only once.
+		token := parser.current_token
+		error_at(
+			parser,
+			token,
+			fmt.tprintf(
+				"Unexpected token '%s'",
+				parser.source[token.span.start:token.span.end],
+			),
+		)
 		advance_token(parser)
 		if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
 			return INVALID_NODE
@@ -1472,6 +1483,14 @@ parse_execute_prefix :: proc(parser: ^Parser) -> Node_Index {
 	}
 
 	operand := parse_expression(parser, Precedence.CALL)
+	if operand == INVALID_NODE {
+		data: Node_Data
+		data.execute = Execute_Data {
+			target   = INVALID_NODE,
+			wrappers = EMPTY_RANGE,
+		}
+		return add_node(parser, .Execute, data, span)
+	}
 	data: Node_Data
 	data.unary = Unary_Data {
 		operand = operand,
@@ -1646,7 +1665,17 @@ parse_property_access :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	// `a.3` / `a.(…)`: a non-name glued to `.`. Parse it as the right node anyway so
 	// walk_property reports Invalid_Property_Access and it doesn't leak back as a stray member.
+	// A token that starts no expression at all (`a.$`) keeps right = INVALID_NODE, like `a.`.
 	prop_id := parse_expression(parser, Precedence(int(Precedence.CALL) + 1))
+	if prop_id == INVALID_NODE {
+		parser.panic_mode = false
+		data: Node_Data
+		data.binary = Binary_Data {
+			left  = left,
+			right = INVALID_NODE,
+		}
+		return add_node(parser, .Property, data, Span{span_start, dot_span_end})
+	}
 	prop_span := parser.node_spans[prop_id]
 
 	data: Node_Data
