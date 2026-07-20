@@ -278,13 +278,76 @@ cast_is_atom :: proc(t: ^Type) -> bool {
 
 // reduce_scope reduces a non-root scope to itself — used when a value resolves to
 // a structural scope (e.g. a carve result rendered without collapse).
+// reduce_scope reduces a scope VALUE: everything is a scope, so the value of a
+// scope is the scope of its fields' reduced values — each pointing field reduces
+// through (a fired pattern product `{func{e->e}! ...map{r, func}!}` materializes
+// its collapses), and an `...A` expansion whose operand reduces to a scope PASTES
+// that scope's bindings at its position (the value-side of the paste rule
+// execute_production applies to productions) — the flat cons list. A production
+// stays lazy (it is the collapse target, reduced by `!`), and a scope already
+// mid-reduction above (a self-referential field) is returned as-is — laziness
+// exactly where eagerness cannot terminate.
 reduce_scope :: proc(s: ^Scope_Type) -> ^Type {
-	if len(s.kind) == 1 && s.kind[0] == .Product && s.names[0] == "" {
-		// Keep the scope shape; callers (reduce) peel the root themselves.
+	reducer := current_reducer()
+	if reducer != nil {
+		for open in reducer.scope_stack do if open == s do return new_type(s^)
+		append(&reducer.scope_stack, s)
 	}
-	r := new(Type)
-	r^ = s^
-	return r
+	defer if reducer != nil do pop(&reducer.scope_stack)
+
+	changed := false
+	reduced_vals := make([]^Type, len(s.types))
+	splice := make([]^Scope_Type, len(s.types))
+	for i in 0 ..< len(s.kind) {
+		if s.types[i] == nil do continue
+		#partial switch s.kind[i] {
+		case .Pointing_Push, .Pointing_Pull:
+			r := reduce_value(s.types[i])
+			if r != nil && r != s.types[i] {
+				reduced_vals[i] = r
+				changed = true
+			}
+		case .Expand:
+			r := reduce_value(s.types[i])
+			if r == nil do continue
+			res := follow(r)
+			if res == nil do continue
+			if rs, ok := &res^.(Scope_Type); ok {
+				splice[i] = rs
+				changed = true
+			} else if r != s.types[i] {
+				reduced_vals[i] = r
+				changed = true
+			}
+		}
+	}
+	if !changed do return new_type(s^)
+
+	out := new(Scope_Type)
+	out.parent = s.parent
+	for i in 0 ..< len(s.kind) {
+		if sp := splice[i]; sp != nil {
+			for j in 0 ..< len(sp.kind) {
+				append(&out.names, j < len(sp.names) ? sp.names[j] : "")
+				append(&out.kind, sp.kind[j])
+				append(&out.types, j < len(sp.types) ? sp.types[j] : nil)
+				append(&out.constraints, j < len(sp.constraints) ? sp.constraints[j] : nil)
+				append(&out.type_folds, j < len(sp.type_folds) ? sp.type_folds[j] : nil)
+				append(&out.constraint_folds, j < len(sp.constraint_folds) ? sp.constraint_folds[j] : nil)
+				append(&out.captures, j < len(sp.captures) ? sp.captures[j] : "")
+			}
+			continue
+		}
+		append(&out.names, i < len(s.names) ? s.names[i] : "")
+		append(&out.kind, s.kind[i])
+		append(&out.types, reduced_vals[i] != nil ? reduced_vals[i] : s.types[i])
+		append(&out.constraints, i < len(s.constraints) ? s.constraints[i] : nil)
+		// A reduced field's cached fold is stale: invalidate; consumers refold on demand.
+		append(&out.type_folds, reduced_vals[i] != nil ? nil : (i < len(s.type_folds) ? s.type_folds[i] : nil))
+		append(&out.constraint_folds, i < len(s.constraint_folds) ? s.constraint_folds[i] : nil)
+		append(&out.captures, i < len(s.captures) ? s.captures[i] : "")
+	}
+	return new_type(out^)
 }
 
 // ============================================================================
@@ -863,6 +926,9 @@ Reducer :: struct {
 	// Canonical sources whose carve materialization is mid-field-reduction; the
 	// symbolic-pattern residual guard (see terminate.odin) reads it.
 	unfold_stack:     [dynamic]^Scope_Type,
+	// Scope values whose fields are mid-reduction (reduce_scope): a self-referential
+	// field re-entering its own scope stays lazy instead of looping.
+	scope_stack:      [dynamic]^Scope_Type,
 	dag_table:        map[string]^Type,
 	fixedpoint_index: map[rawptr]int,
 	fixedpoint_next:  int,
@@ -1068,12 +1134,15 @@ cover_leaf :: proc(cover: ^Type) -> ^Type {
 	return cover
 }
 
-// The reduce-side firing decision. Yes/No when the membership is decidable with
-// the domain kernels alone; Undecidable keeps the whole pattern SYMBOLIC — it must
-// never fall through to a later branch (that would mis-fire the default on a value
-// an earlier cover actually matches). Reduce never calls the analyzer's proof
-// machinery: structural covers are decided by reduce_scope_fires, the mirrored
-// structural walk (like reduce_unify_pull mirrors unify_pull).
+// The reduce-side firing decision. Yes/No when the membership is decidable;
+// Undecidable keeps the whole pattern SYMBOLIC — it must never fall through to a
+// later branch (that would mis-fire the default on a value an earlier cover
+// actually matches). Reduce bases the decision on what is ALREADY FOLDED and
+// refolds on demand (a reduce-side clone invalidates cached folds; recompute them
+// lazily at the decision point) — the fast kernel walk (reduce_scope_fires) decides
+// the common shapes, everything past it goes to the ordinary satisfy proof over the
+// folded values. This call gate is only reached for a target with no free `??`
+// (reduce_pattern's static path), where membership is genuinely decidable.
 Fire_Decision :: enum u8 {
 	No,
 	Yes,
@@ -1083,6 +1152,10 @@ Fire_Decision :: enum u8 {
 reduce_branch_fires :: proc(branch: Pattern_Branch, target: ^Type) -> Fire_Decision {
 	if branch.match == nil do return .Yes
 	cf := branch.cover_fold
+	if cf == nil && branch.match != nil {
+		// Invalidated by a reduce-side clone (repoint refold=false): refold on demand.
+		cf = fold_constraint(branch.match)
+	}
 	if cf == nil || target == nil do return .Undecidable
 	// A value-match (`=v`) cover folds to the producer scope `{-> v}`; read through it
 	// to the production leaf so the leaf domain test below decides v's membership.
@@ -1161,11 +1234,35 @@ reduce_leaf_fires :: proc(cf: ^Type, target: ^Type) -> Fire_Decision {
 	return .Undecidable
 }
 
+// cover_constraint_fold reads a cover field's constraint fold, recomputing it on
+// demand when a reduce-side clone invalidated it (repoint refold=false) — reduce
+// bases decisions on existing folds and refolds as needed. The recomputed fold is
+// cached back so the next decision reuses it.
+cover_constraint_fold :: proc(cover: ^Scope_Type, c: int) -> ^Type {
+	cf := c < len(cover.constraint_folds) ? cover.constraint_folds[c] : nil
+	if cf == nil && c < len(cover.constraints) && cover.constraints[c] != nil {
+		cf = fold_constraint(cover.constraints[c])
+		if c < len(cover.constraint_folds) do cover.constraint_folds[c] = cf
+	}
+	return cf
+}
+
+// scope_ensure_value_folds fills the missing type_folds of a reduced scope so the
+// satisfy machinery (which reads folds) can prove against it — same on-demand rule.
+scope_ensure_value_folds :: proc(ts: ^Scope_Type) {
+	for k in 0 ..< len(ts.types) {
+		if k < len(ts.type_folds) && ts.type_folds[k] == nil && ts.types[k] != nil {
+			ts.type_folds[k] = fold_type(reduce_value(ts.types[k]))
+		}
+	}
+}
+
 // reduce_scope_fires mirrors scope_satisfy_range for the reduce side: cover fields
 // in lockstep with target fields (names must agree — shape matching is
-// name-sensitive), an Expand cover field swallowing the remaining run when its
-// constraint is a domain LEAF (`...u8`). A non-leaf expand (a recursive tail
-// `...Array{T}:`) is Undecidable here — the pattern stays symbolic.
+// name-sensitive), an Expand cover field swallowing the remaining run. A domain-LEAF
+// expand (`...u8`) repeats the kernel test; a structural expand (the recursive tail
+// `...Array{T}:`) goes to the ordinary satisfy proof (expand_satisfies) over the
+// folded run — decidable here because the static path guarantees a `??`-free target.
 reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> Fire_Decision {
 	c := ci
 	for c < len(cover.kind) && cover.kind[c] == .Product do c += 1
@@ -1173,11 +1270,16 @@ reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> 
 		return vi >= len(ts.types) ? .Yes : .No
 	}
 	if cover.kind[c] == .Expand {
-		cf := c < len(cover.constraint_folds) ? cover.constraint_folds[c] : nil
+		cf := cover_constraint_fold(cover, c)
 		if cf == nil do return vi >= len(ts.types) ? .Yes : .No
 		for k := vi; k < len(ts.types); k += 1 {
 			d := reduce_leaf_fires(cf, reduce_value(ts.types[k]))
-			if d != .Yes do return d
+			if d == .Undecidable {
+				// Structural expand: the full satisfy proof over the folded run.
+				scope_ensure_value_folds(ts)
+				return expand_satisfies(cf, ts^, k, len(ts.types)) ? .Yes : .No
+			}
+			if d == .No do return .No
 		}
 		return .Yes
 	}
@@ -1185,9 +1287,17 @@ reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> 
 	if c < len(cover.names) && vi < len(ts.names) && cover.names[c] != ts.names[vi] {
 		return .No
 	}
-	cf := c < len(cover.constraint_folds) ? cover.constraint_folds[c] : nil
+	cf := cover_constraint_fold(cover, c)
 	if cf == nil do return .Undecidable
-	d := reduce_leaf_fires(cf, reduce_value(ts.types[vi]))
+	elem := reduce_value(ts.types[vi])
+	d := reduce_leaf_fires(cf, elem)
+	if d == .Undecidable {
+		// Non-kernel cover fold (a set fold, a nested destructuring shape): the
+		// ordinary satisfy proof on the folded element.
+		vf := fold_type(elem)
+		if vf == nil do return .Undecidable
+		d = satisfy_root(cf, vf) ? .Yes : .No
+	}
 	if d != .Yes do return d
 	return reduce_scope_fires(cover, ts, c + 1, vi + 1)
 }
@@ -1339,6 +1449,16 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	if constraint == nil || value == nil do return
 
+	// Unification matches the VALUE's structure: a mention/reference/collapse is
+	// resolved to its reduced structure on demand (a recursive carve passes the
+	// cover capture `r` — a mention of the destructured tail scope).
+	value := value
+	#partial switch _ in value^ {
+	case Mention_Type, Reference_Type, Execute_Type:
+		value = reduce_value(value)
+		if value == nil do return
+	}
+
 	// A mention of a pull on the constraint side: bind it to the value.
 	if m, ok := constraint^.(Mention_Type); ok {
 		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(copy.kind) {
@@ -1353,10 +1473,12 @@ reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 	}
 
 	// Two carves: unify each constraint override against the value override that
-	// targets the same source slot.
+	// targets the same source slot. A SCOPE value against a grammar carve
+	// (`Array{T}:source` proven by `{2 3 4 5}`) reuses the analyzer's grammar
+	// unroll (unify_pull_carve_scope) — reduce refolds on demand, so re-entering
+	// the fold layer at this bounded point is fine.
 	if cc, c_ok := &constraint^.(Carve_Type); c_ok {
-		vc, v_ok := &value^.(Carve_Type)
-		if v_ok {
+		if vc, v_ok := &value^.(Carve_Type); v_ok {
 			for ci in 0 ..< len(cc.references) {
 				slot := cc.references[ci].match_index
 				for vi in 0 ..< len(vc.references) {
@@ -1366,6 +1488,8 @@ reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
 					}
 				}
 			}
+		} else if vs, vs_ok := &value^.(Scope_Type); vs_ok {
+			unify_pull_carve_scope(cc, vs^, copy, src)
 		}
 		return
 	}

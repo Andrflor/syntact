@@ -254,12 +254,12 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 		return fold_constraint_float_intervals(v.target)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if s, sok := stored_fold_float(v.match_scope.type_folds[v.match_index]).(Float_Type);
+			if s, sok := stored_fold_float(stored_type_fold_at(v.match_scope, v.match_index)).(Float_Type);
 			   sok {
 				return s
 			}
 			if s, sok := stored_fold_float(
-				   v.match_scope.constraint_folds[v.match_index],
+				   stored_constraint_fold_at(v.match_scope, v.match_index),
 			   ).(Float_Type); sok {
 				return s
 			}
@@ -268,12 +268,12 @@ fold_type_float_intervals :: proc(t: ^Type) -> Maybe(Float_Type) {
 	case Reference_Type:
 		ref := v.reference
 		if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-		if s, sok := stored_fold_float(ref.match_scope.type_folds[ref.match_index]).(Float_Type);
+		if s, sok := stored_fold_float(stored_type_fold_at(ref.match_scope, ref.match_index)).(Float_Type);
 		   sok {
 			return s
 		}
 		if s, sok := stored_fold_float(
-			   ref.match_scope.constraint_folds[ref.match_index],
+			   stored_constraint_fold_at(ref.match_scope, ref.match_index),
 		   ).(Float_Type); sok {
 			return s
 		}

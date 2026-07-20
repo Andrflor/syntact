@@ -218,15 +218,19 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 			if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
 				return fold_type_intervals(ov)
 			}
-			if s, ok := stored_fold_intervals(
-				   v.match_scope.type_folds[v.match_index],
-			   ).(Integer_Type); ok {
-				return s
+			if v.match_index < len(v.match_scope.type_folds) {
+				if s, ok := stored_fold_intervals(
+					   v.match_scope.type_folds[v.match_index],
+				   ).(Integer_Type); ok {
+					return s
+				}
 			}
-			if s, ok := stored_fold_intervals(
-				   v.match_scope.constraint_folds[v.match_index],
-			   ).(Integer_Type); ok {
-				return s
+			if v.match_index < len(v.match_scope.constraint_folds) {
+				if s, ok := stored_fold_intervals(
+					   v.match_scope.constraint_folds[v.match_index],
+				   ).(Integer_Type); ok {
+					return s
+				}
 			}
 		}
 		return nil
@@ -236,15 +240,19 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		if ov := refine_override_for(ref.match_scope, ref.match_index); ov != nil {
 			return fold_type_intervals(ov)
 		}
-		if s, ok := stored_fold_intervals(
-			   ref.match_scope.type_folds[ref.match_index],
-		   ).(Integer_Type); ok {
-			return s
+		if ref.match_index < len(ref.match_scope.type_folds) {
+			if s, ok := stored_fold_intervals(
+				   ref.match_scope.type_folds[ref.match_index],
+			   ).(Integer_Type); ok {
+				return s
+			}
 		}
-		if s, ok := stored_fold_intervals(
-			   ref.match_scope.constraint_folds[ref.match_index],
-		   ).(Integer_Type); ok {
-			return s
+		if ref.match_index < len(ref.match_scope.constraint_folds) {
+			if s, ok := stored_fold_intervals(
+				   ref.match_scope.constraint_folds[ref.match_index],
+			   ).(Integer_Type); ok {
+				return s
+			}
 		}
 		return nil
 	}
