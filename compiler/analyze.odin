@@ -1563,8 +1563,10 @@ carve_resolve_children :: proc(
 		ref := cv.references[k]
 		if ref.match_scope == nil || ref.match_index < 0 do continue
 		cf: ^Type = nil
-		if sub != nil && ref.match_index < len(sub.constraint_folds) {
-			cf = sub.constraint_folds[ref.match_index]
+		if sub != nil {
+			if idx := carve_ref_index(ref, sub); idx >= 0 && idx < len(sub.constraint_folds) {
+				cf = sub.constraint_folds[idx]
+			}
 		}
 		if cf == nil && ref.match_index < len(ref.match_scope.constraint_folds) {
 			cf = ref.match_scope.constraint_folds[ref.match_index]
@@ -1660,7 +1662,7 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	// Skip directly-overridden fields (already proven at resolution) so a direct
 	// violation isn't reported twice as a (mislabeled) "implicit" one.
 	overridden := make(map[int]bool)
-	for ref in carve.references do overridden[ref.match_index] = true
+	for ref in carve.references do overridden[carve_ref_index(ref, sub)] = true
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue
 		// A dependent field may CARVE a binding this carve just SUBSTITUTED (`func{e->5}!`
@@ -1758,8 +1760,9 @@ prove_carve_overrides :: proc(a: ^Analyzer, carve: ^Carve_Type) {
 	if sub == nil do return
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
-		if ref.match_index < 0 || ref.match_index >= len(sub.constraint_folds) do continue
-		fc := sub.constraint_folds[ref.match_index]
+		idx := carve_ref_index(ref, sub)
+		if idx < 0 || idx >= len(sub.constraint_folds) do continue
+		fc := sub.constraint_folds[idx]
 		if fc == nil || is_recursive_tail(fc) || fold_is_unknown(fc) do continue
 		if carve.types[i] == nil do continue
 		vf := fold_type(carve.types[i])

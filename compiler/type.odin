@@ -1003,6 +1003,38 @@ fold_carve_type :: proc(t: ^Type) -> ^Scope_Type {
 	return nil
 }
 
+// carve_ref_index maps a carve reference onto the MATERIALIZED source `sub`. The
+// frozen match_index describes the DEFINITION-TIME structure; when a substitution
+// replaced the source with a structurally different scope (`m{func -> {string:e,
+// e->e+""}}` then `func{e->e}` in m's body), the frozen index lands on the wrong
+// field — a NAMED reference re-resolves against `sub` by the same rule the
+// definition used: the ordinal `#n` when given, else the occurrence rank the frozen
+// index had among same-named fields of its definition scope (scope_resolve's carve
+// mode picked the first, rank 0). On an unchanged source this recomputes the frozen
+// index exactly. -1 when the occurrence is gone from the substituted scope (the
+// caller reports). A positional (unnamed) reference keeps its frozen index. Pure
+// bookkeeping — no folds, callable from reduce.
+carve_ref_index :: proc(ref: Reference, sub: ^Scope_Type) -> int {
+	name, has_name := ref.name.(string)
+	if !has_name || name == "" do return ref.match_index
+	rank := 0
+	if o, has_o := ref.index.(u64); has_o {
+		rank = int(o)
+	} else if ref.match_scope != nil &&
+	   ref.match_index >= 0 && ref.match_index < len(ref.match_scope.names) {
+		for j in 0 ..< ref.match_index {
+			if ref.match_scope.names[j] == name do rank += 1
+		}
+	}
+	count := 0
+	for i in 0 ..< len(sub.names) {
+		if sub.names[i] != name do continue
+		if count == rank do return i
+		count += 1
+	}
+	return -1
+}
+
 carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Scope_Type {
 	copy := scope_clone(src)
 
@@ -1011,21 +1043,22 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	// the substitution from sibling mentions.
 	for i in 0 ..< len(carve.references) {
 		ref := carve.references[i]
-		if ref.match_index >= 0 && ref.match_index < len(copy.types) {
+		idx := carve_ref_index(ref, copy)
+		if idx >= 0 && idx < len(copy.types) {
 			if carve.types[i] == nil do continue // malformed override: no replacement
 			if mv, is_m := carve.types[i]^.(Mention_Type);
-			   is_m && mv.match_scope == src && mv.match_index == ref.match_index {
+			   is_m && mv.match_scope == src && mv.match_index == idx {
 				continue
 			}
-			if ref.match_index < len(copy.constraints) &&
-			   copy.constraints[ref.match_index] != nil {
-				unify_pull(copy.constraints[ref.match_index], carve.types[i], copy, src)
+			if idx < len(copy.constraints) &&
+			   copy.constraints[idx] != nil {
+				unify_pull(copy.constraints[idx], carve.types[i], copy, src)
 			}
-			copy.types[ref.match_index] = carve.types[i]
-			if ref.match_index < len(copy.type_folds) {
-				copy.type_folds[ref.match_index] = fold_type(carve.types[i])
+			copy.types[idx] = carve.types[i]
+			if idx < len(copy.type_folds) {
+				copy.type_folds[idx] = fold_type(carve.types[i])
 			}
-		} else if ref.match_index >= len(copy.types) {
+		} else if ref.match_index >= len(copy.types) || (idx < 0 && ref.match_index >= 0) {
 			// The override targets a field ABSENT from the substituted source. A carve
 			// written literally in source is proven eagerly (carve_resolve_children), but
 			// a carve materialized AFTER a substitution — a param carved to `{}` then
@@ -1185,6 +1218,18 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type, refold := true) -> ^Type {
 				// refold=false (reduce path): don't re-enter the fold layer; invalidate
 				// the stale cover_fold so a reduce-side consumer recomputes it.
 				cf = (refold && m != nil) ? fold_constraint(m) : nil
+				// The product is lexically a production OF the cover (walk_pattern), so
+				// its mentions of the cover's bindings/captures point at the OLD cover
+				// scope — which `old`→`dst` doesn't rewrite. Cascade them to the rewritten
+				// cover, the same repoint fired_product does, so a substituted constraint
+				// inside the cover (e.g. a pull bound by this carve) reaches the product.
+				if branch.match != nil && m != nil {
+					if oc, o_ok := &branch.match^.(Scope_Type); o_ok {
+						if nc, n_ok := &m^.(Scope_Type); n_ok {
+							p = repoint(p, oc, nc, refold)
+						}
+					}
+				}
 			}
 			if p != branch.product do changed = true
 			branches[i] = Pattern_Branch{m, p, cf}
