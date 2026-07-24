@@ -697,6 +697,17 @@ value_elements :: proc(vs: Scope_Type) -> [dynamic]^Type {
 	return out
 }
 
+// scope_is_plain_value reports a scope that is pure data: no colored field, no
+// production. As a set such a value is a single point — it admits only itself.
+scope_is_plain_value :: proc(s: Scope_Type) -> bool {
+	for i in 0 ..< len(s.kind) {
+		if s.kind[i] == .Product do return false
+		if i < len(s.constraint_folds) && s.constraint_folds[i] != nil do return false
+		if i < len(s.constraints) && s.constraints[i] != nil do return false
+	}
+	return true
+}
+
 satisfy_root :: proc(fc, ft: ^Type) -> bool {
 	// A nil constraint (e.g. an `Or`/`And` operand that did not fold to a static set)
 	// proves nothing. Mirror satisfy's guard so the mutual recursion never derefs nil.
@@ -713,8 +724,20 @@ satisfy_root :: proc(fc, ft: ^Type) -> bool {
 				// is just its produced value; satisfy matches it (identity for a value scope,
 				// numeric subset for `-> 0`).
 				prod := c.constraint_folds[i] != nil ? c.constraint_folds[i] : c.type_folds[i]
-				if (c.constraint_folds[i] != nil ? satisfy_root(prod, ft) : satisfy(prod, ft)) {
-					return true
+				if c.constraint_folds[i] != nil {
+					if satisfy_root(prod, ft) do return true
+				} else if prod != nil {
+					// The producer law for a PLAIN scope value (no colored field, no
+					// production): `={x->6}` / `{-> {x->6}}` is the typeof meta level of
+					// that value, and admits only what is STATICALLY the same value —
+					// identity, mirroring `{->0|10}` admitting only the set 0|10. A
+					// shape-bearing scope (colored fields) keeps the subset proof: it
+					// admits instances through its colors.
+					if ps, is_scope := prod^.(Scope_Type); is_scope && scope_is_plain_value(ps) {
+						if type_set_equal(prod, ft) do return true
+					} else if satisfy(prod, ft) {
+						return true
+					}
 				}
 			}
 		}
