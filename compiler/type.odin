@@ -167,6 +167,13 @@ fold_set_value :: proc(t: ^Type) -> ^Type {
 capture_color_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	if scope == nil || index < 0 || index >= len(scope.captures) do return nil
 	if scope.captures[index] == "" do return nil // not a capture slot
+	// Only an UNRESOLVED slot (marked at cover build, cleared by destructuring)
+	// reads through its color — a slot holding a real value, including a real
+	// `{}`, is an ordinary binding.
+	if index not_in scope.unresolved_captures do return nil
+	// An EXPAND capture (`...C:(r)`, the destructured tail) keeps its placeholder —
+	// its SHAPE matters for destructuring, not its set.
+	if index < len(scope.kind) && scope.kind[index] == .Expand do return nil
 	// Re-fold the CONSTRAINT expression, not the cached fold: the cached color was
 	// folded when the cover was built (a pull `T` still unbound, folding to `{}`), but
 	// the mention of T now resolves to its inferred domain (2..5). Fall back to the
@@ -178,18 +185,14 @@ capture_color_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	if color == nil && index < len(scope.constraint_folds) {
 		color = scope.constraint_folds[index]
 	}
-	if color == nil do return nil
-	// An EXPAND capture (`...C:(r)`, the destructured tail) keeps its placeholder —
-	// its SHAPE matters for destructuring, not its set. Any OTHER capture folds to
-	// its full color-SET, structural branches included: `(u8|Array{u8})` must
-	// compose, so an inner carve proof sees the whole applied domain (a `{""}`
-	// element must fail against it, not be skipped as incomparable).
-	if index < len(scope.kind) && scope.kind[index] == .Expand do return nil
-	// Only when the value slot is still the EMPTY placeholder scope (not destructured).
-	val := index < len(scope.types) ? scope.types[index] : nil
-	if val == nil do return color
-	if vs, ok := val^.(Scope_Type); ok && len(vs.kind) == 0 do return color
-	return nil
+	// A color that is itself the empty scope is the unbound-pull placeholder ("the
+	// color is not inferred yet") — and a missing color is the same state: the
+	// slot's value is UNKNOWN. Never a conclusive `{}`.
+	if color == nil do return new_type(Unknown_Type{})
+	if ds, is_scope := color^.(Scope_Type); is_scope && len(ds.kind) == 0 {
+		return new_type(Unknown_Type{})
+	}
+	return color
 }
 
 // binding_value_view returns the ^Type a binding's VALUE denotes to any observer —
@@ -205,16 +208,10 @@ capture_color_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 binding_value_view :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	if scope == nil || index < 0 || index >= len(scope.types) do return nil
 	if ov := refine_override_for(scope, index); ov != nil do return ov
-	if dom := capture_color_domain(scope, index); dom != nil {
-		// A color that is itself the EMPTY scope is the unbound-pull placeholder
-		// ("the color is not inferred yet"), not a real domain: the view is
-		// unknown — no diagnostic may conclude on it. Only a materialization that
-		// binds the pull yields a domain to conclude on.
-		if ds, is_scope := dom^.(Scope_Type); is_scope && len(ds.kind) == 0 {
-			return new_type(Unknown_Type{})
-		}
-		return dom
-	}
+	// capture_color_domain owns the unresolved-capture law: the applied color for
+	// an unresolved slot, Unknown while that color is not inferred yet, nil for a
+	// resolved slot (whose stored value — a real `{}` included — is the value).
+	if dom := capture_color_domain(scope, index); dom != nil do return dom
 	return scope.types[index]
 }
 
@@ -1318,6 +1315,7 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	for f in src.type_folds do append(&dst.type_folds, f)
 	for f in src.constraint_folds do append(&dst.constraint_folds, f)
 	for c in src.captures do append(&dst.captures, c)
+	for i in src.unresolved_captures do dst.unresolved_captures[i] = true
 	return dst
 }
 
@@ -1356,6 +1354,7 @@ scope_repoint_node :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Type 
 		for _ in src.constraint_folds do append(&rst.constraint_folds, nil)
 	}
 	for c in src.captures do append(&rst.captures, c)
+	for i in src.unresolved_captures do rst.unresolved_captures[i] = true
 	return node
 }
 
