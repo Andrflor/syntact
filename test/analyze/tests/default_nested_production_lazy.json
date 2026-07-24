@@ -1,0 +1,6 @@
+{
+  "name": "default_nested_production_lazy",
+  "description": "the infinite-default law is ONE level deep by design: a default materializes the first production's immediate run (an expand tail there must not re-enter the grammar — see tc_infinite_default), while a production one scope deeper stays LAZY data, so this doubly-nested self-reference is a finite, legal default",
+  "source": "A -> {\n  -> { -> {...A:}}\n}\nA:v\n-> 0",
+  "expect_errors": []
+}

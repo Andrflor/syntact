@@ -92,96 +92,108 @@ is_refinable_leaf :: proc(e: ^Type) -> bool {
 	return false
 }
 
-// install_branch_refinement computes the scrutinee narrowing for one branch and
-// installs it as binding overrides on the analyzer, returning the keys it added so
-// uninstall can remove exactly those. `this_cover` is the branch's positive cover
-// (nil for a default branch); `priors` are the covers of all earlier branches,
-// negated into the conjunction. Only refinements that map back to a concrete binding
-// site are installed; a leaf with no binding (a bare anonymous `??`) is skipped.
-install_branch_refinement :: proc(
-	a: ^Analyzer,
-	target: ^Type,
-	this_cover: ^Type,
-	priors: []^Type,
-) -> []Binding_Site {
-	add := branch_add_from_covers(this_cover, priors)
-	if add == nil do return {}
-	refs := refine(target, add)
-	if len(refs) == 0 do return {}
+// --- override frames ---
+//
+// EVERY mechanism that narrows a binding for a scope of work — walk-time branch
+// refinement, fold-time branch refinement, rebound shadows, deferred-obligation
+// replay — goes through ONE frame: frame_override records the site's exact prior
+// state before writing, frame_restore unwinds newest-first. Frames nest like a
+// stack; a site narrowed by an outer frame is narrowed FURTHER by an inner one
+// and restored exactly when the inner frame pops (the old per-mechanism undo
+// logs let a sibling branch inherit the previous branch's narrowing).
 
-	installed := make([dynamic]Binding_Site, 0, len(refs))
-	for r in refs {
-		site, ok := leaf_binding_site(r.leaf)
-		if !ok do continue
-		// Don't clobber an outer (nested-pattern) override already on this site; the
-		// inner branch only narrows further. Compose by intersecting if present.
-		if existing, present := site.scope.refine_overrides[site.index]; present {
-			site.scope.refine_overrides[site.index] = domain_intersect(existing, r.domain)
-		} else {
-			site.scope.refine_overrides[site.index] = r.domain
-			a.active_override_sites[site] = true
-			append(&installed, site)
-		}
-	}
-	return installed[:]
-}
-
-// uninstall_branch_refinement removes exactly the overrides install added.
-uninstall_branch_refinement :: proc(a: ^Analyzer, installed: []Binding_Site) {
-	for site in installed {
-		delete_key(&site.scope.refine_overrides, site.index)
-		delete_key(&a.active_override_sites, site)
-	}
-}
-
-// install_fold_refinement narrows the scrutinee's binding sites to what branch k
-// of the pattern implies (`Mk & ~M(k-1) & … & ~M0`), for the duration of ONE fold
-// of that branch's product. Unlike install_branch_refinement it needs NO analyzer:
-// it writes the owning scopes' refine_overrides directly and returns the exact
-// prior state, so it is callable from any phase (walk, recheck, or a reduce-side
-// fold reuse). Restore with uninstall_fold_refinement, in the same expression.
-Fold_Override_Save :: struct {
+Override_Save :: struct {
 	site:    Binding_Site,
 	value:   ^Type,
 	present: bool,
 }
-install_fold_refinement :: proc(
-	target: ^Type,
-	branches: []Pattern_Branch,
-	k: int,
-) -> [dynamic]Fold_Override_Save {
-	saved: [dynamic]Fold_Override_Save
-	add := branch_refinement_add(branches, k)
-	if add == nil do return saved
-	refs := refine(target, add)
-	for r in refs {
-		site, ok := leaf_binding_site(r.leaf)
-		if !ok do continue
-		prev, present := site.scope.refine_overrides[site.index]
-		append(&saved, Fold_Override_Save{site, prev, present})
-		if present {
-			// An outer override (walk-time branch proof) already narrows this site;
-			// the branch fold only narrows further.
-			site.scope.refine_overrides[site.index] = domain_intersect(prev, r.domain)
-		} else {
-			site.scope.refine_overrides[site.index] = r.domain
-		}
-	}
-	return saved
+
+Override_Frame :: [dynamic]Override_Save
+
+// frame_override records `site`'s prior state on the frame, then installs `value`.
+frame_override :: proc(frame: ^Override_Frame, site: Binding_Site, value: ^Type) {
+	prev, present := site.scope.refine_overrides[site.index]
+	append(frame, Override_Save{site, prev, present})
+	site.scope.refine_overrides[site.index] = value
 }
 
-// uninstall_fold_refinement restores exactly what install_fold_refinement changed,
-// in reverse order so nested installs on the same site unwind correctly.
-uninstall_fold_refinement :: proc(saved: [dynamic]Fold_Override_Save) {
-	for i := len(saved) - 1; i >= 0; i -= 1 {
-		s := saved[i]
+// frame_narrow installs the branch-refinement narrowing law on one site: a site
+// already narrowed (an outer frame) only narrows FURTHER, by intersection.
+frame_narrow :: proc(frame: ^Override_Frame, site: Binding_Site, domain: ^Type) {
+	value := domain
+	if prev, present := site.scope.refine_overrides[site.index]; present {
+		value = domain_intersect(prev, domain)
+	}
+	frame_override(frame, site, value)
+}
+
+// frame_restore unwinds a frame exactly, newest first, and frees it. Callable
+// from any phase — no analyzer involved.
+frame_restore :: proc(frame: Override_Frame) {
+	for i := len(frame) - 1; i >= 0; i -= 1 {
+		s := frame[i]
 		if s.present {
 			s.site.scope.refine_overrides[s.site.index] = s.value
 		} else {
 			delete_key(&s.site.scope.refine_overrides, s.site.index)
 		}
 	}
-	delete(saved)
+	delete(frame)
+}
+
+// install_branch_refinement computes the scrutinee narrowing for one branch and
+// installs it as a frame, additionally registering fresh sites on the analyzer's
+// active set (so a deferred obligation can snapshot the branch environment).
+// `this_cover` is the branch's positive cover (nil for a default branch); `priors`
+// are the covers of all earlier branches, negated into the conjunction. A leaf
+// with no binding site (a bare anonymous `??`) is skipped.
+install_branch_refinement :: proc(
+	a: ^Analyzer,
+	target: ^Type,
+	this_cover: ^Type,
+	priors: []^Type,
+) -> Override_Frame {
+	frame: Override_Frame
+	add := branch_add_from_covers(this_cover, priors)
+	if add == nil do return frame
+	for r in refine(target, add) {
+		site, ok := leaf_binding_site(r.leaf)
+		if !ok do continue
+		if _, present := site.scope.refine_overrides[site.index]; !present {
+			a.active_override_sites[site] = true
+		}
+		frame_narrow(&frame, site, r.domain)
+	}
+	return frame
+}
+
+// uninstall_branch_refinement pops the frame and retires the active-set entries
+// of sites that carried no override before it.
+uninstall_branch_refinement :: proc(a: ^Analyzer, frame: Override_Frame) {
+	for s in frame {
+		if !s.present do delete_key(&a.active_override_sites, s.site)
+	}
+	frame_restore(frame)
+}
+
+// install_fold_refinement narrows the scrutinee's binding sites to what branch k
+// of the pattern implies (`Mk & ~M(k-1) & … & ~M0`), for the duration of ONE fold
+// of that branch's product. Needs NO analyzer — callable from any phase (walk,
+// recheck, or a reduce-side fold reuse). Restore with frame_restore.
+install_fold_refinement :: proc(
+	target: ^Type,
+	branches: []Pattern_Branch,
+	k: int,
+) -> Override_Frame {
+	frame: Override_Frame
+	add := branch_refinement_add(branches, k)
+	if add == nil do return frame
+	for r in refine(target, add) {
+		site, ok := leaf_binding_site(r.leaf)
+		if !ok do continue
+		frame_narrow(&frame, site, r.domain)
+	}
+	return frame
 }
 
 // branch_add_from_covers builds `this_cover & ~prior0 & … & ~priorN`. A default

@@ -1,6 +1,0 @@
-{
-  "name": "infinite_default_nested",
-  "description": "GAP: default completeness requires a terminating default; the first production re-enters the grammar one scope level down, so the default never materializes — must be Infinite_Recursion exactly like the direct `-> {...A:}` form (default_is_infinite only scans one structural level)",
-  "source": "A -> {\n  -> { -> {...A:}}\n}\nA:v\n-> 0",
-  "expect_errors": ["Infinite_Recursion"]
-}
