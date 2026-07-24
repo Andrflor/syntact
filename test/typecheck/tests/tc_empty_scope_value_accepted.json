@@ -1,0 +1,6 @@
+{
+  "name": "tc_empty_scope_value_accepted",
+  "description": "the positive side of the same law: a real {} proves fine against a color that admits it (S produces {})",
+  "source": "S -> {\n  -> {}\n}\nf -> {\n  S:x\n  -> 0\n}\n-> f{x -> {}}!",
+  "expect_errors": []
+}

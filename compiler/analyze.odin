@@ -483,6 +483,9 @@ close_default :: proc(a: ^Analyzer, p: Pending) {
 	p.scope.types[p.bind] = value
 	if p.bind < len(p.scope.constraint_folds) do p.scope.constraint_folds[p.bind] = fc
 	if p.bind < len(p.scope.type_folds) do p.scope.type_folds[p.bind] = value
+	if p.bind < len(p.scope.captures) {
+		mark_unresolved_capture(p.scope, p.bind, p.scope.captures[p.bind], value)
+	}
 	if fold_is_unknown(fc) {
 		prove_binding(a, fc, value, p.scope.names[p.bind], p.node)
 	}
@@ -1124,7 +1127,25 @@ append_bare_constraint :: proc(
 	scope_append(a, scope, name, constraint, bk, value, capture)
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, value)
+	mark_unresolved_capture(scope, len(scope.types) - 1, capture, value)
 	return value
+}
+
+// mark_unresolved_capture records that a capture slot still holds the cover
+// build's own materialization, not a destructured piece. This is the ONE moment
+// the distinction is knowable: right here `value` is what WE just laid down —
+// nothing (an unbound color) or the shared `{}` default of an unbound pull. Once
+// a real value lands in the slot the marker is gone (destructure_cover clears
+// it), so a genuine `{}` value is never mistaken for a placeholder again.
+mark_unresolved_capture :: proc(scope: ^Scope_Type, index: int, capture: string, value: ^Type) {
+	if capture == "" || index < 0 do return
+	if value == nil {
+		scope.unresolved_captures[index] = true
+		return
+	}
+	if vs, ok := value^.(Scope_Type); ok && len(vs.kind) == 0 {
+		scope.unresolved_captures[index] = true
+	}
 }
 
 // resolve_property_site locates the field a `target.name` access lands on (or
@@ -1814,17 +1835,17 @@ prove_carve_override :: proc(fc: ^Type, value: ^Type, ref: Reference, fallback: 
 	}
 }
 
-// value_is_comparable_for_proof reports whether a folded value can be proven against a
-// color: a leaf domain, a set operator, a producer scope, or any NON-EMPTY scope value
-// (it proves via scope_satisfy). Only the EMPTY scope is incomparable — it is the
-// unresolved capture placeholder, and proving a color against it would false-positive.
+// value_is_comparable_for_proof reports whether a folded value can be proven
+// against a color: a leaf domain, a set operator, or any scope value — a real
+// `{}` included. An UNRESOLVED capture never reaches this question: its fold
+// reads through capture_color_domain to the applied color, or to Unknown while
+// that color is not inferred (and Unknown was skipped by the caller already).
 value_is_comparable_for_proof :: proc(vf: ^Type) -> bool {
 	if vf == nil do return false
 	#partial switch v in vf^ {
-	case Integer_Type, Float_Type, String_Type, Bool_Type, Range_Type, Or_Type, And_Type, Negate_Type:
+	case Integer_Type, Float_Type, String_Type, Bool_Type, Range_Type, Or_Type, And_Type, Negate_Type,
+	     Scope_Type:
 		return true
-	case Scope_Type:
-		return len(v.kind) > 0 || color_is_leaf_domain(vf)
 	}
 	return false
 }

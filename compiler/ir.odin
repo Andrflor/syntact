@@ -107,6 +107,14 @@ Scope_Type :: struct {
 	// against self-referential values, keyed by binding index). On the scope, not
 	// the analyzer, for the same reason as refine_overrides.
 	folding_values:   map[int]bool,
+	// Capture slots whose value is still what the cover build laid down — NOT a
+	// destructured piece. A placeholder is REPRESENTED, never guessed from the
+	// value's shape: the `{}` a slot holds before destructuring is the same node
+	// as an unbound pull's real value, so shape can't tell them apart. Marked by
+	// append_bare_constraint at build (a capture whose materialized default is
+	// nothing / the empty scope), carried by clones, CLEARED by destructure_cover
+	// when a matched piece fills the slot.
+	unresolved_captures: map[int]bool,
 }
 
 // `scope!` — collapse: reduce `target` through its Product binding.

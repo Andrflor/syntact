@@ -1,0 +1,6 @@
+{
+  "name": "tc_empty_scope_value_proves",
+  "description": "a REAL {} value is an ordinary value, not a placeholder: carved into a u8-colored field it must FAIL the proof (it used to be silently skipped as 'incomparable' because {} doubled as the unresolved-capture sentinel)",
+  "source": "f -> {\n  u8:x\n  -> x\n}\n-> f{x -> {}}!",
+  "expect_errors": ["Constraint_Mismatch"]
+}

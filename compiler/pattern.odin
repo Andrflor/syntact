@@ -77,10 +77,13 @@ pattern_target_is_concrete_structure :: proc(ft: ^Type) -> bool {
 }
 
 // scope_value_is_concrete reports whether a scope VALUE denotes exactly one
-// structure: non-empty (the empty scope doubles as the capture/pull placeholder,
-// which must stay symbolic), production-free (a machine's value-set is its
-// productions' union), only pushed fields (an expand tail or a pull hole is a
-// set), each folding to a singleton or recursively to such a structure.
+// structure: production-free (a machine's value-set is its productions' union),
+// only pushed fields (an expand tail or a pull hole is a set), each folding to a
+// singleton or recursively to such a structure. The EMPTY scope is excluded not
+// as a placeholder guess but because it is the default an unbound structural
+// DOMAIN materializes (`Array{T}:source` before any carve): dispatching a
+// pattern on it would bake the domain's default into the machine's type, where
+// exhaustiveness correctly reasons over the declared domain instead.
 scope_value_is_concrete :: proc(s: Scope_Type) -> bool {
 	if len(s.kind) == 0 do return false
 	for i in 0 ..< len(s.kind) {
@@ -386,6 +389,7 @@ destructure_cover :: proc(cover: ^Scope_Type, pieces: ^Scope_Type) -> ^Scope_Typ
 			}
 			sub.types[i] = rest
 			if i < len(sub.type_folds) do sub.type_folds[i] = rest
+			delete_key(&sub.unresolved_captures, i) // the slot now holds a real piece
 			vi = len(pieces.types)
 			continue
 		}
@@ -394,6 +398,7 @@ destructure_cover :: proc(cover: ^Scope_Type, pieces: ^Scope_Type) -> ^Scope_Typ
 			if i < len(sub.type_folds) {
 				sub.type_folds[i] = vi < len(pieces.type_folds) ? pieces.type_folds[vi] : nil
 			}
+			delete_key(&sub.unresolved_captures, i) // the slot now holds a real piece
 			vi += 1
 		}
 	}
