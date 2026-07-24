@@ -1206,6 +1206,7 @@ walk_property :: #force_inline proc(
 			prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
 			s_scope,
 			s_index,
+			node_span(a, right_idx),
 		}
 		result := new(Type)
 		result^ = Reference_Type{nil, ref}
@@ -1229,6 +1230,7 @@ walk_property :: #force_inline proc(
 				prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
 				open,
 				-1,
+				node_span(a, right_idx),
 			}
 			result := new(Type)
 			result^ = Reference_Type{target, ref}
@@ -1261,6 +1263,7 @@ walk_property :: #force_inline proc(
 		prop_ordinal >= 0 ? Maybe(u64)(u64(prop_ordinal)) : nil,
 		prop_scope,
 		prop_index,
+		node_span(a, right_idx),
 	}
 	result := new(Type)
 	result^ = Reference_Type{target, ref}
@@ -1454,6 +1457,7 @@ walk_carve :: proc(
 		source     = source,
 		references = make([dynamic]Reference),
 		types      = make([dynamic]^Type),
+		span       = node_span(a, idx),
 	}
 
 	// A source chaining into a still-walking scope (`module.odd{…}`, or a self-carve
@@ -1554,9 +1558,10 @@ carve_resolve_children :: proc(
 				)
 			}
 
-			// The override proof runs in recheck_carve against the SUBSTITUTED
-			// constraint (a sibling override may rewrite this field's constraint:
-			// `a{T -> u8, source -> …}` proves source against Array{u8}).
+			// The override proof runs at MATERIALIZATION (prove_materialized_carve)
+			// against the SUBSTITUTED constraint (a sibling override may rewrite this
+			// field's constraint: `a{T -> u8, source -> …}` proves source against
+			// Array{u8}).
 			val := walk(a, current_scope, val_idx)
 			append(
 				refs,
@@ -1565,6 +1570,7 @@ carve_resolve_children :: proc(
 					cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
 					carve_scope,
 					carve_index,
+					node_span(a, child),
 				},
 			)
 			append(vals, val)
@@ -1585,6 +1591,7 @@ carve_resolve_children :: proc(
 				cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
 				carve_scope,
 				carve_index,
+				node_span(a, src_node),
 			}
 			self_src := new(Type)
 			self_src^ = Reference_Type{nil, ref_self}
@@ -1597,6 +1604,7 @@ carve_resolve_children :: proc(
 					cordinal >= 0 ? Maybe(u64)(u64(cordinal)) : nil,
 					carve_scope,
 					carve_index,
+					node_span(a, child),
 				},
 			)
 			append(vals, val)
@@ -1624,64 +1632,12 @@ carve_resolve_children :: proc(
 			}
 
 			val := walk(a, current_scope, child)
-			append(refs, Reference{nil, nil, carve_scope, carve_index})
+			append(refs, Reference{nil, nil, carve_scope, carve_index, node_span(a, child)})
 			append(vals, val)
 			positional_idx += 1
 		}
 	}
 
-	// Prove each override against the SUBSTITUTED constraint: a sibling override
-	// may rewrite this field's constraint (`a{T -> u8, source -> …}`: source must
-	// prove against Array{u8}, not the source scope's Array{T -> {}}). The VALUE
-	// fold is the walked original — an active branch refinement keeps applying to
-	// its mentions — only the CONSTRAINT side reads through the substitution,
-	// falling back to the pre-carve constraint when the carve doesn't fold.
-	saved_pending := a.fold_pending
-	sub := fold_carve_constraint(carve)
-	a.fold_pending = saved_pending
-	for k in 0 ..< len(cv.references) {
-		ref := cv.references[k]
-		if ref.match_scope == nil || ref.match_index < 0 do continue
-		cf: ^Type = nil
-		if sub != nil {
-			if idx := carve_ref_index(ref, sub); idx >= 0 && idx < len(sub.constraint_folds) {
-				cf = sub.constraint_folds[idx]
-			}
-		}
-		if cf == nil && ref.match_index < len(ref.match_scope.constraint_folds) {
-			cf = ref.match_scope.constraint_folds[ref.match_index]
-		}
-		if cf == nil do continue
-		vf := fold_type(cv.types[k])
-		if vf == nil do continue
-		if !satisfy_root(cf, vf) {
-			child := carve_children[k]
-			if name, has := ref.name.(string); has {
-				sem_error(
-					a,
-					fmt.tprintf(
-						"constraint mismatch in carve '%s': %s does not satisfy %s",
-						name,
-						describe_type(vf),
-						describe_type(cf),
-					),
-					.Constraint_Mismatch,
-					node_span(a, child),
-				)
-			} else {
-				sem_error(
-					a,
-					fmt.tprintf(
-						"constraint mismatch in positional carve: %s does not satisfy %s",
-						describe_type(vf),
-						describe_type(cf),
-					),
-					.Constraint_Mismatch,
-					node_span(a, child),
-				)
-			}
-		}
-	}
 }
 
 // carve_check runs the whole-carve proofs, shared by the immediate path
@@ -1729,33 +1685,72 @@ close_carve :: proc(a: ^Analyzer, p: Pending) {
 	carve_check(a, cv, p.node)
 }
 
-// recheck_carve folds a carve to its substituted scope and re-proves each colored
-// binding. Covers the implicit constraints — DEPENDENT fields (value references a
-// carved one); the override proof runs in carve_resolve_children against the
-// substituted constraint.
+// recheck_carve materializes the carve under this node's armed span so the
+// materialization proof (prove_materialized_carve, run by carve_substitute) fires:
+// direct overrides AND the implicit constraints — dependent fields whose value
+// references a carved one. A source that does NOT materialize (still symbolic)
+// can't have changed any color, so each override proves against its FROZEN
+// definition color instead — exact, because only a materialization changes colors.
 recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 	saved_span := a.recheck_span
 	a.recheck_span = node_span(a, node)
 	defer a.recheck_span = saved_span
-	sub := fold_carve_constraint(cast(^Type)carve)
-	if sub == nil do return
-	// Skip directly-overridden fields (already proven at resolution) so a direct
-	// violation isn't reported twice as a (mislabeled) "implicit" one.
+	if fold_carve_constraint(cast(^Type)carve) != nil do return
+	for i in 0 ..< len(carve.references) {
+		ref := carve.references[i]
+		if ref.match_scope == nil || ref.match_index < 0 do continue
+		if ref.match_index >= len(ref.match_scope.constraint_folds) do continue
+		prove_carve_override(
+			ref.match_scope.constraint_folds[ref.match_index],
+			carve.types[i],
+			ref,
+			carve.span,
+		)
+	}
+}
+
+// prove_materialized_carve is THE carve proof law, run by carve_substitute on
+// every materialization: each field of the substituted scope must still inhabit
+// its color.
+//   * A directly-overridden field proves its override VALUE — the walked original,
+//     NOT the clone's repointed refold: an active branch refinement keeps applying
+//     to the original's mentions, and a self-referential override (`n -> n-1`)
+//     refolds to nothing on the clone. The color is the SUBSTITUTED one (a sibling
+//     override may rewrite it: `a{T -> u8, source -> …}` proves source against
+//     Array{u8}, not Array{T -> {}}), falling back to the frozen definition color
+//     when the substituted one didn't fold.
+//   * Every other colored field re-proves its refold — the implicit constraints
+//     (`u8:z -> x+y` overflows once x is carved out of range). A nil refold is
+//     ambiguous — legally symbolic (`x + 1`) OR incoherent (`"" + 10` after the
+//     carve) — detect_invalid emits only for a real error.
+// Proving at materialization is what makes the proof compositional: an inner carve
+// at ANY depth, under ANY wrapper, re-proves the moment any fold materializes it,
+// in the environment that fold established (walk-time branch refinement or
+// fold_type_pattern's install_fold_refinement). Recomputed folds re-prove for
+// free — emit_at dedups onto the spans recorded at walk. No-op without a live
+// analyzer: reduce and rendering materialize without proving.
+prove_materialized_carve :: proc(carve: ^Carve_Type, sub: ^Scope_Type) {
+	if current_analyzer() == nil do return
 	overridden := make(map[int]bool)
-	for ref in carve.references do overridden[carve_ref_index(ref, sub)] = true
+	defer delete(overridden)
+	for k in 0 ..< len(carve.references) {
+		ref := carve.references[k]
+		idx := carve_ref_index(ref, sub)
+		if idx >= 0 do overridden[idx] = true
+		fc: ^Type = nil
+		if idx >= 0 && idx < len(sub.constraint_folds) do fc = sub.constraint_folds[idx]
+		if fc == nil &&
+		   ref.match_scope != nil &&
+		   ref.match_index >= 0 &&
+		   ref.match_index < len(ref.match_scope.constraint_folds) {
+			fc = ref.match_scope.constraint_folds[ref.match_index]
+		}
+		prove_carve_override(fc, carve.types[k], ref, carve.span)
+	}
 	for i in 0 ..< len(sub.names) {
-		if overridden[i] do continue
-		// A dependent field may CARVE a binding this carve just SUBSTITUTED (`func{e->5}!`
-		// after `m{func->{string:e}}`): that inner carve was proven at definition against
-		// func's ORIGINAL color and must be re-proven against the substituted one. Only
-		// carves whose source IS a substituted field are re-checked — a recursive carve on
-		// an un-substituted binding (`f{n->n-1}` inside f) keeps its branch-refined proof.
-		recheck_inner_carves(a, sub, sub.types[i], overridden)
+		if overridden[i] do continue // proven above as a direct override
 		ft := fold_type(sub.types[i])
 		if ft == nil {
-			// A nil fold is ambiguous: legally symbolic (`x + 1`) OR incoherent
-			// (`"" + 10`). detect_invalid emits only for a real error. Checked for
-			// every dependent field, colored or not.
 			detect_invalid(sub.types[i])
 			continue
 		}
@@ -1764,8 +1759,7 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 		if fc == nil do continue
 		if !satisfy_root(fc, ft) {
 			display := sub.names[i] != "" ? fmt.tprintf("'%s'", sub.names[i]) : "the production"
-			sem_error(
-				a,
+			emit_at(
 				fmt.tprintf(
 					"implicit constraint mismatch: %s does not satisfy %s on %s after carve",
 					describe_type(ft),
@@ -1773,104 +1767,49 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 					display,
 				),
 				.Constraint_Mismatch,
-				node_span(a, node),
+				carve.span,
 			)
 		}
 	}
 }
 
-// recheck_inner_carves descends a dependent field's value looking for a CARVE whose
-// source is a binding this parent carve just SUBSTITUTED, re-proving its overrides
-// against the substituted color. `parent` is the materialized parent scope; `substituted`
-// marks its overridden field indices. A carve on a global or un-substituted binding
-// (`f{n->n-1}` inside recursive f) is left to its eager / branch-refined proof — only a
-// carve of a substituted field (`func{e->5}!` after `m{func->{string:e}}`) is re-checked.
-// Descends only the structural wrappers a carve hides behind (collapse `!`, pattern
-// branch products, scopes of collapses, composites) — never arithmetic operands.
-recheck_inner_carves :: proc(a: ^Analyzer, parent: ^Scope_Type, t: ^Type, substituted: map[int]bool) {
-	if t == nil do return
-	#partial switch &v in t^ {
-	case Execute_Type:
-		recheck_inner_carves(a, parent, v.target, substituted)
-	case Carve_Type:
-		// Re-prove ONLY when the carve's source is a substituted field of `parent`.
-		if src_idx, ok := carve_source_parent_index(&v, parent); ok && substituted[src_idx] {
-			prove_carve_overrides(a, &v)
-		}
-		recheck_inner_carves(a, parent, v.source, substituted)
-		for cv in v.types do recheck_inner_carves(a, parent, cv, substituted)
-	case Pattern_Type:
-		recheck_inner_carves(a, parent, v.target, substituted)
-		for branch in v.branches {
-			recheck_inner_carves(a, parent, branch.product, substituted)
-		}
-	case Compose_Type:
-		recheck_inner_carves(a, parent, v.left, substituted)
-		recheck_inner_carves(a, parent, v.right, substituted)
-	case Scope_Type:
-		// A branch product is often a literal scope of collapses (`{ func{e->e}! … }`).
-		for ft in v.types do recheck_inner_carves(a, parent, ft, substituted)
-	}
-}
-
-// carve_source_parent_index resolves a carve's source to a binding of `parent`, returning
-// its index. Handles the direct Mention/Reference to a parent field. nil for anything else
-// (a global scope, a nested carve, a literal) — those aren't substituted fields.
-carve_source_parent_index :: proc(carve: ^Carve_Type, parent: ^Scope_Type) -> (int, bool) {
-	s := carve.source
-	if s == nil do return 0, false
-	#partial switch v in s^ {
-	case Mention_Type:
-		if v.match_scope == parent && v.match_index >= 0 do return v.match_index, true
-	case Reference_Type:
-		if v.reference != nil && v.reference.match_scope == parent && v.reference.match_index >= 0 {
-			return v.reference.match_index, true
-		}
-	}
-	return 0, false
-}
-
-// prove_carve_overrides proves each override of `carve` against the SUBSTITUTED color of
-// the field it targets — the fold-side mirror of carve_resolve_children's eager proof.
-// Only concludes on a COMPARABLE value (a leaf domain or a producer of one): a still-
-// symbolic/placeholder value is skipped rather than false-positived. emit dedups and
-// gates on the armed span. A recursive-tail color proves inductively via satisfy.
-prove_carve_overrides :: proc(a: ^Analyzer, carve: ^Carve_Type) {
-	sub := fold_carve_constraint(cast(^Type)carve)
-	if sub == nil do return
-	for i in 0 ..< len(carve.references) {
-		ref := carve.references[i]
-		idx := carve_ref_index(ref, sub)
-		if idx < 0 || idx >= len(sub.constraint_folds) do continue
-		fc := sub.constraint_folds[idx]
-		if fc == nil || is_recursive_tail(fc) || fold_is_unknown(fc) do continue
-		if carve.types[i] == nil do continue
-		vf := fold_type(carve.types[i])
-		if vf == nil || fold_is_unknown(vf) do continue
-		if !value_is_comparable_for_proof(vf) do continue
-		if !satisfy_root(fc, vf) {
-			nm := ref.name.(string) or_else ""
-			disp := nm != "" ? fmt.tprintf("'%s'", nm) : "a positional field"
-			emit(
-				fmt.tprintf(
-					"constraint mismatch in carve %s: %s does not satisfy %s",
-					disp,
-					describe_type(vf),
-					describe_type(fc),
-				),
-				.Constraint_Mismatch,
-			)
-		}
-	}
-	// The materialization's dependent PRODUCTS re-prove under the substituted
-	// bindings — the inner mirror of recheck_carve's dependent-field rule: the
-	// production (`e+10`) must be valid for EVERY value the APPLIED domain of its
-	// operands admits (a string element in a mixed application makes `e+10`
-	// unprovable). Only a production whose refold failed is diagnosed.
-	for i in 0 ..< len(sub.kind) {
-		if sub.kind[i] != .Product do continue
-		if stored_type_fold_at(sub, i) != nil do continue
-		detect_invalid(sub.types[i])
+// prove_carve_override proves ONE override value against a color. It only
+// concludes on conclusive evidence: an unfolded/unknown color, or a still-
+// symbolic/placeholder value (fold nil, unknown, or incomparable) is skipped
+// rather than false-positived — the obligation is not forgiven, it re-fires at
+// the next materialization that resolves the value. A recursive-tail color proves
+// inductively via satisfy at its own collapse, not here. Anchors at the override's
+// recorded span (fallback: the carve's), so every re-proof dedups onto one site.
+prove_carve_override :: proc(fc: ^Type, value: ^Type, ref: Reference, fallback: Span) {
+	if fc == nil || is_recursive_tail(fc) || fold_is_unknown(fc) do return
+	if value == nil do return
+	vf := fold_type(value)
+	if vf == nil || fold_is_unknown(vf) do return
+	if !value_is_comparable_for_proof(vf) do return
+	if satisfy_root(fc, vf) do return
+	span := ref.span
+	if span.start == 0 && span.end == 0 do span = fallback
+	if name, has := ref.name.(string); has {
+		emit_at(
+			fmt.tprintf(
+				"constraint mismatch in carve '%s': %s does not satisfy %s",
+				name,
+				describe_type(vf),
+				describe_type(fc),
+			),
+			.Constraint_Mismatch,
+			span,
+		)
+	} else {
+		emit_at(
+			fmt.tprintf(
+				"constraint mismatch in positional carve: %s does not satisfy %s",
+				describe_type(vf),
+				describe_type(fc),
+			),
+			.Constraint_Mismatch,
+			span,
+		)
 	}
 }
 
@@ -2123,6 +2062,7 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 				Maybe(u64)(u64(ordinal)),
 				res_scope,
 				res_index,
+				node_span(a, idx),
 			}
 			result := new(Type)
 			result^ = Reference_Type{nil, ref}
@@ -2176,25 +2116,32 @@ current_analyzer :: #force_inline proc() -> ^Analyzer {
 }
 
 // emit reports an error from the FOLD layer, which has no `^Analyzer`/node threaded
-// in. It anchors the error at `a.recheck_span` (the node being re-folded, armed by
-// recheck_carve). Outside a pass it does nothing — detection without a place to
-// report is silent. This is the entry point for errors a fold DETECTS on the
-// re-fold path; the eager walk path reports through its local node's span directly.
+// in, anchored at `a.recheck_span` (the node being re-folded, armed by
+// recheck_carve). Outside a pass, or with no armed span, it does nothing —
+// detection without a place to report is silent.
 emit :: proc(message: string, error_type: Analyzer_Error_Type) {
+	emit_at(message, error_type, Span{})
+}
+
+// emit_at reports a fold-layer error at an explicit span — the carve / override
+// site recorded on the IR at walk time — falling back to the armed recheck_span
+// when the span is zero, and staying silent when neither is set (rather than
+// anchoring at offset 0). A fold is a recomputable cache, so the same proof
+// re-fires once per refold: a STRICT duplicate (same type, span, and message) is
+// dropped — the stable per-site span is what makes every re-proof of one
+// obligation collapse onto ONE diagnostic — while distinct diagnostics at
+// different spans (the legitimate double, e.g. a carve override AND its dependent
+// production both overflowing) survive untouched.
+emit_at :: proc(message: string, error_type: Analyzer_Error_Type, span: Span) {
 	a := current_analyzer()
 	if a == nil do return
-	// No armed span: this fold is not under a re-fold that wants the diagnostic —
-	// stay silent rather than anchor at offset 0.
-	if a.recheck_span.start == 0 && a.recheck_span.end == 0 do return
-	// A fold is a recomputable cache: recheck_carve re-folds the same carve through both
-	// carve_resolve_children and recheck_carve, so a fold-detected error would be emitted
-	// once per refold. Drop a STRICT duplicate (same type, span, and message) — distinct
-	// diagnostics at different spans (the legitimate double, e.g. a carve override AND its
-	// dependent production both overflowing) survive untouched.
+	s := span
+	if s.start == 0 && s.end == 0 do s = a.recheck_span
+	if s.start == 0 && s.end == 0 do return
 	for e in a.errors {
-		if e.type == error_type && e.span == a.recheck_span && e.message == message do return
+		if e.type == error_type && e.span == s && e.message == message do return
 	}
-	sem_error(a, message, error_type, a.recheck_span)
+	sem_error(a, message, error_type, s)
 }
 
 // sem_error / sem_warning take the node's SPAN and resolve its start to a Position

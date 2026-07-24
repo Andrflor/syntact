@@ -1,0 +1,7 @@
+{
+  "name": "cover_anon_shape_default_misses",
+  "description": "README pattern shapes: u8: denotes the complete value 0, not the set 0..255 — 5 does not match it and falls to the default branch (use bare u8 to match the whole set)",
+  "source": "n -> 5\nr -> n ? {\n  u8: -> 1\n  -> 0\n}\n-> r",
+  "expect_errors": [],
+  "expect": "0"
+}

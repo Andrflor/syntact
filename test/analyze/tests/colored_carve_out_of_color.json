@@ -1,0 +1,6 @@
+{
+  "name": "colored_carve_out_of_color",
+  "description": "constraints.md constraint-as-contract: one override out of its color is ONE violation, reported once (GAP: the compiler currently double-reports it — once from the override proof, once from the binding proof)",
+  "source": "Point -> {\n  u8:x\n}\nPoint:p{x -> 300}\n-> 0",
+  "expect_errors": ["Constraint_Mismatch"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "colored_carve_applies",
+  "description": "README shapes: Point:p{x -> 10 y -> 20} means create p, constrain p by Point, carve p — so p.x is 10, not Point's default",
+  "source": "Point -> {\n  u8:x\n  u8:y\n}\nPoint:p{x -> 10 y -> 20}\n-> p.x",
+  "expect": "10"
+}

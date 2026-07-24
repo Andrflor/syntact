@@ -365,9 +365,9 @@ compose_divzero_message :: proc(comp: Compose_Type) -> (msg: string, ok: bool) {
 
 // detect_invalid descends a (possibly substituted) ^Type and emits the first
 // GENUINE arithmetic incoherence — the re-fold counterpart of diagnose_compose,
-// called by recheck_carve on a substituted field whose fold came back nil (which
-// may be legal OR a real error like `"" + 10` after a carve). emit anchors at
-// a.recheck_span. Returns true once it has emitted.
+// called by prove_materialized_carve on a substituted field whose fold came back
+// nil (which may be legal OR a real error like `"" + 10` after a carve). emit
+// anchors at a.recheck_span. Returns true once it has emitted.
 is_arith_op :: proc(op: Operator_Kind) -> bool {
 	#partial switch op {
 	case .Add, .Subtract, .Multiply, .Divide, .Mod:

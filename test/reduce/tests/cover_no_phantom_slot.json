@@ -1,0 +1,6 @@
+{
+  "name": "cover_no_phantom_slot",
+  "description": "patterns are analytic (core rule 9): a branch cover adds no binding to the enclosing scope, so the scope's pushable fields are exactly a and t and the positional carve f{5, 9} lands 9 on t",
+  "source": "f -> {\n  u8:a\n  t -> a ? {\n    u8: -> 1\n    -> 0\n  }\n  -> t\n}\n-> f{5, 9}!",
+  "expect": "9"
+}

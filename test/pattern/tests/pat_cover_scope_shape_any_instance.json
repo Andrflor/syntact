@@ -1,0 +1,7 @@
+{
+  "name": "cover_scope_shape_any_instance",
+  "description": "README pattern shapes: a structural cover admits through its colors — Circle: matches any Circle-shaped value (radius 2 included), not only the default instance",
+  "source": "Circle -> {\n  u8:radius\n}\ns -> Circle{radius -> 2}\nr -> s ? {\n  Circle: -> 1\n  -> 0\n}\n-> r",
+  "expect_errors": [],
+  "expect": "1"
+}

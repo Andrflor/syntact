@@ -1,0 +1,6 @@
+{
+  "name": "tc_chained_range_ok",
+  "description": "constraints.md chained ranges: 1..4..2..7 expands the bounds and is equivalent to 1..7; 6 satisfies it",
+  "source": "1..4..2..7:x -> 6\n-> x",
+  "expect_errors": []
+}

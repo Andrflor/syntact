@@ -1,0 +1,6 @@
+{
+  "name": "tc_concrete_scope_scrutinee",
+  "description": "GAP: README pattern operator — the first matching pattern selects the production. s is the concrete Circle{radius -> 7}: Square: cannot match it, Circle: does, so r is statically 1 and satisfies =1. The analyzer folds a concrete scope scrutinee as the union of every branch (2 | 1 | 0), including impossible ones.",
+  "source": "Circle -> {\n  u8:radius\n}\nSquare -> {\n  u8:side\n}\ns -> Circle{radius -> 7}\nr -> s ? {\n  Square: -> 2\n  Circle: -> 1\n  -> 0\n}\n=1:c -> r\n-> 0",
+  "expect_errors": []
+}
