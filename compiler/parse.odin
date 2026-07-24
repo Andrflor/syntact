@@ -1186,13 +1186,11 @@ parse_statement :: proc(parser: ^Parser) -> Node_Index {
 		advance_token(parser)
 		return INVALID_NODE
 	}
-	expr := parse_expression(parser)
-	if expr == INVALID_NODE && parser.current_token.kind == .RightBrace {
-		error_at_current(parser, "Unexpected }")
-		advance_token(parser)
-		return INVALID_NODE
-	}
-	return expr
+	// A failed expression may stop AT a `}`: that brace belongs to the enclosing
+	// scope/carve loop (its closer), never to this statement — leave it in place.
+	// A genuinely stray top-level `}` is consumed by the entry guard above on the
+	// next call.
+	return parse_expression(parser)
 }
 
 // The arithmetic/logical operators that may continue an expression across a soft
@@ -1231,6 +1229,11 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 		)
 		advance_token(parser)
 		if parser.current_token.kind == .EOF || parser.current_token.kind == .RightBrace {
+			return INVALID_NODE
+		}
+		// A soft statement boundary ends the broken expression: the next line is a
+		// fresh statement, never the continuation of the one that just errored.
+		if has_flag(parser.current_token, .Separator_Before) {
 			return INVALID_NODE
 		}
 		return parse_expression(parser, precedence)
@@ -1472,6 +1475,13 @@ parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 	}
 
 	if !expect_token(parser, .RightParen) {
+		// An unclosed group swallows at most its own statement. Stopped mid-line
+		// on stray tokens or at a separator, the content is part of the broken
+		// statement — drop it. Stopped at `}`/EOF, the enclosing scope auto-closes
+		// the group and the content survives.
+		if parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
+			return INVALID_NODE
+		}
 		return expr
 	}
 
@@ -2398,6 +2408,11 @@ parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: N
 		advance_token(parser)
 		if !has_flag(parser.current_token, .Separator_Before) {
 			product = parse_expression(parser, .ASSIGNMENT)
+			// `source -> <broken>`: the branch promised a production and lost it —
+			// drop the whole branch rather than degrade it into a guard.
+			if product == INVALID_NODE {
+				return INVALID_NODE, INVALID_NODE
+			}
 		}
 	}
 
