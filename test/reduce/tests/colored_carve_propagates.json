@@ -1,0 +1,6 @@
+{
+  "name": "colored_carve_propagates",
+  "description": "README carving: carving propagates through dependent bindings — carving x to 10 through the colored form makes y (-> x + 1) read 11",
+  "source": "Point -> {\n  u8:x\n  u8:y -> x + 1\n}\nPoint:p{x -> 10}\n-> p.y",
+  "expect": "11"
+}

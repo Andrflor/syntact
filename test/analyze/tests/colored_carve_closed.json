@@ -1,0 +1,6 @@
+{
+  "name": "colored_carve_closed",
+  "description": "README 'Carving is closed': a colored carve targeting a name that does not exist in the shape is an error, not a silent addition",
+  "source": "Point -> {\n  u8:x\n}\nPoint:p{z -> 1}\n-> 0",
+  "expect_errors": ["Invalid_Carve"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "tc_refinement_sibling_leak",
+  "description": "GAP: in the inner default branch the scrutinee is provably (<10) & ~(<5) = 5..9 ⊆ 5..20, so the carve proof must pass. It fails today because the previous sibling branch's refinement (0..4) leaks: install_branch_refinement intersects an existing override in place without restoring it.",
+  "source": "g -> {\n  5..20:v -> 5\n  -> v\n}\nf -> {\n  u8:n\n  -> n ? {\n    <10 -> n ? {\n      <5 -> 1\n      -> g{v -> n}!\n    }\n    -> 0\n  }\n}\n-> f{n -> 7}!",
+  "expect_errors": []
+}

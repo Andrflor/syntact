@@ -1,0 +1,6 @@
+{
+  "name": "colored_carve_value_position",
+  "description": "an anonymous colored carve is an ordinary value: y -> Point:{x -> 10} binds y to a complete anonymous Point instance carved with x = 10, and registers nothing else in the scope",
+  "source": "Point -> {\n  u8:x\n}\ny -> Point:{x -> 10}\n-> y.x",
+  "expect": "10"
+}

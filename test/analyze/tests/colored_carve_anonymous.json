@@ -1,0 +1,6 @@
+{
+  "name": "colored_carve_anonymous",
+  "description": "an anonymous shaped binding can be carved: Point:{x -> 10} is a complete anonymous Point instance derived with x = 10 (README anonymous shaped bindings + carving)",
+  "source": "Point -> {\n  u8:x\n}\nPoint:{x -> 10}\n-> 0",
+  "expect_errors": []
+}

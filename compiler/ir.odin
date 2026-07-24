@@ -116,20 +116,27 @@ Execute_Type :: struct {
 
 // `source{ name -> v, … }` — derive a new scope by overriding bindings. Each
 // `references[i]` locates the overridden field, `types[i]` the replacement; the
-// carve stores only the diff, not a copy.
+// carve stores only the diff, not a copy. `span` is the carve's source location —
+// the anchor every materialization proof of this carve (at any refold depth)
+// reports on, so re-proofs dedup instead of scattering; zero when the carve was
+// not built from a source node.
 Carve_Type :: struct {
 	source:     ^Type,
 	references: [dynamic]Reference,
 	types:      [dynamic]^Type,
+	span:       Span,
 }
 
 // A resolved pointer to a binding: (match_scope, match_index) is the definition
-// site; name/index record how it was written, for diagnostics.
+// site; name/index record how it was written, for diagnostics. `span` is where the
+// reference was written (zero when synthesized) — a carve override's proof anchors
+// here on every materialization, so re-proofs dedup.
 Reference :: struct {
 	name:        Maybe(string),
 	index:       Maybe(u64),
 	match_scope: ^Scope_Type,
 	match_index: int,
+	span:        Span,
 }
 
 // An ordinal/property reference (`a#1`, `a.b`). `target` is the expression reached

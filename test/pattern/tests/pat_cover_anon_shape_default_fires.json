@@ -1,0 +1,7 @@
+{
+  "name": "cover_anon_shape_default_fires",
+  "description": "README pattern shapes: u8: is an anonymous binding shaped by u8 — a complete value, the default 0. A leaf admits only itself, so the branch fires exactly on 0.",
+  "source": "n -> 0\nr -> n ? {\n  u8: -> 1\n  -> 0\n}\n-> r",
+  "expect_errors": [],
+  "expect": "1"
+}

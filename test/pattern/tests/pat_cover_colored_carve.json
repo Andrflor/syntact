@@ -1,0 +1,7 @@
+{
+  "name": "cover_colored_carve",
+  "description": "a colored carve used as a cover (Circle:c{x -> 1}) is a pure value — it derives from the shape, matches the scrutinee, and registers nothing in the enclosing scope",
+  "source": "Circle -> {\n  u8:x\n}\nv -> Circle{x -> 1}\nr -> v ? {\n  Circle:c{x -> 1} -> 1\n  -> 0\n}\n-> r",
+  "expect_errors": [],
+  "expect": "1"
+}

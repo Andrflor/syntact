@@ -1,0 +1,6 @@
+{
+  "name": "tc_comparison_concrete_folds",
+  "description": "GAP: constraints.md concrete value optimization — when values are known at compile time the compiler computes the exact result, so 2 > 2 is statically false and satisfies =false. The analyzer currently folds every comparison to the full bool set.",
+  "source": "=false:c -> 2 > 2\n-> 0",
+  "expect_errors": []
+}

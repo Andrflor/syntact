@@ -58,7 +58,7 @@ reresolve_property :: proc(nt: ^Type, ref: ^Reference) -> ^Type {
 		return new_type(Invalid_Type{})
 	}
 	nref := new(Reference)
-	nref^ = Reference{ref.name, ref.index, prop_scope, prop_index}
+	nref^ = Reference{ref.name, ref.index, prop_scope, prop_index, ref.span}
 	return new_type(Reference_Type{nt, nref})
 }
 
@@ -1106,6 +1106,13 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	for ty, i in copy.constraints do copy.constraints[i] = repoint(ty, src, copy)
 	for f, i in copy.type_folds do copy.type_folds[i] = fold_type(copy.types[i])
 	for f, i in copy.constraint_folds do copy.constraint_folds[i] = fold_constraint(copy.constraints[i])
+
+	// Materialization IS the proof obligation: every field of the substituted scope
+	// must still inhabit its color. Proving here — not in any walk — is what makes
+	// the proof compositional: any fold that materializes a carve, at any depth,
+	// under any wrapper, in any environment (walk-time branch refinement or
+	// fold_type_pattern's re-install), proves it. No-ops without a live analyzer.
+	prove_materialized_carve(carve, copy)
 	return copy
 }
 
@@ -1202,7 +1209,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type, refold := true) -> ^Type {
 		//    point at the override that IS `.x` — an infinite self-reference.
 		if v.target == nil && ref != nil && ref.index != nil && ref.match_scope == old {
 			nref := new(Reference)
-			nref^ = Reference{ref.name, ref.index, dst, ref.match_index}
+			nref^ = Reference{ref.name, ref.index, dst, ref.match_index, ref.span}
 			return new_type(Reference_Type{nil, nref})
 		}
 		if nt != v.target {
@@ -1290,7 +1297,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type, refold := true) -> ^Type {
 		if changed {
 			refs := make([dynamic]Reference, 0, len(v.references))
 			for rf in v.references do append(&refs, rf)
-			return new_type(Carve_Type{s, refs, vals})
+			return new_type(Carve_Type{s, refs, vals, v.span})
 		}
 	case Scope_Type:
 		return scope_repoint_node(&v, old, dst, refold)

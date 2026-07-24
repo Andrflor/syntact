@@ -1,0 +1,6 @@
+{
+  "name": "tc_chained_range_reject",
+  "description": "constraints.md chained ranges: 1..4..2..7 is 1..7; 8 is outside it and must be rejected",
+  "source": "1..4..2..7:y -> 8\n-> y",
+  "expect_errors": ["Constraint_Mismatch"]
+}
