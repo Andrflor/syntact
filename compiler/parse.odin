@@ -48,7 +48,6 @@ Token_Kind :: enum u8 {
 	Cast, // `::` — raw binary reinterpret-cast into the target's layout
 	Question,
 	DoubleQuestion,
-	QuestionExclamation,
 	Dot,
 	DoubleDot,
 	Ellipsis,
@@ -245,7 +244,6 @@ init_lex_dispatch :: proc "contextless" () {
 	PAIR_BANG['='] = {.NotEqual, 2}
 
 	PAIR_QUESTION['?'] = {.DoubleQuestion, 2}
-	PAIR_QUESTION['!'] = {.QuestionExclamation, 2}
 
 	PAIR_ZERO['x'] = {.Hexadecimal, 0}
 	PAIR_ZERO['X'] = {.Hexadecimal, 0}
@@ -797,7 +795,6 @@ init_parse_tables :: proc "contextless" () {
 	infix_table[.GreaterEqual] = parse_binary
 	infix_table[.PostfixRange] = parse_postfix_range
 	infix_table[.Range] = parse_range
-	infix_table[.QuestionExclamation] = parse_enforce
 	infix_table[.PointingPush] = parse_pointing_push
 	infix_table[.PointingPull] = parse_pointing_pull
 	infix_table[.EventPush] = parse_event_push
@@ -868,7 +865,6 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Range] = .RANGE
 
 	prec_table[.DoubleQuestion] = .PRIMARY
-	prec_table[.QuestionExclamation] = .PATTERN
 
 	prec_table[.PointingPush] = .POINTING
 	prec_table[.PointingPull] = .ASSIGNMENT
@@ -2390,27 +2386,6 @@ parse_branch :: proc(parser: ^Parser) -> (source_idx: Node_Index, product_idx: N
 	}
 
 	return source, product
-}
-
-parse_enforce :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
-	span_start := parser.node_spans[left].start
-	token_kind := parser.current_token.kind
-	prec := prec_table[token_kind]
-	advance_token(parser)
-
-	right := parse_expression(parser, prec)
-	if right == INVALID_NODE {
-		error_at_current(parser, "Expected expression after ?!")
-		parser.panic_mode = false
-		return left
-	}
-
-	data: Node_Data
-	data.binary = Binary_Data {
-		left  = left,
-		right = right,
-	}
-	return add_node(parser, .Enforce, data, Span{span_start, parser.node_spans[right].end})
 }
 
 parse_unknown :: proc(parser: ^Parser) -> Node_Index {

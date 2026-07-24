@@ -1,0 +1,6 @@
+{
+  "name": "tc_proof_by_coloring_fails",
+  "description": "a proof obligation IS a coloring — the type system is the prover: 2 = 3 folds to the singleton false, which does not inhabit the color true",
+  "source": "true:check -> 2 = 3\n-> 0",
+  "expect_errors": ["Constraint_Mismatch"]
+}

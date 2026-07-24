@@ -1,0 +1,6 @@
+{
+  "name": "tc_proof_inline_production",
+  "description": "the inline obligation is the colored production: `-> true:(2 = 3)` proves the produced value against the color true and fails — what `?!` used to write, expressed by the one contract",
+  "source": "-> true:(2 = 3)",
+  "expect_errors": ["Constraint_Mismatch"]
+}

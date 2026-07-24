@@ -41,7 +41,6 @@ Node_Kind :: enum u8 {
 	Expand,
 	External,
 	Range,
-	Enforce,
 	Unknown,
 }
 
@@ -507,18 +506,6 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		if n_data.operator.right != INVALID_NODE {
 			fmt.printf("%s  Right:\n", indent_str)
 			print_ast(ast, n_data.operator.right, indent + 4)
-		}
-	case .Enforce:
-		fmt.printf("%sEnforce ?! (line %d, column %d)\n", indent_str, pos.line, pos.column)
-		if n_data.binary.left != INVALID_NODE {
-			fmt.printf("%s  Left:\n", indent_str)
-			print_ast(ast, n_data.binary.left, indent + 4)
-		} else {
-			fmt.printf("%s  Left: none (unary operator)\n", indent_str)
-		}
-		if n_data.binary.right != INVALID_NODE {
-			fmt.printf("%s  Right:\n", indent_str)
-			print_ast(ast, n_data.binary.right, indent + 4)
 		}
 	case .Branch:
 	case .Execute:

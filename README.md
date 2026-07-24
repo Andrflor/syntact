@@ -144,7 +144,7 @@ Syntact is in active development.
 
 The bootstrap compiler is written in Odin and runs the full pipeline end to end: **parse → analyze (constraint folding) → reduce → bytecode → native x86-64 ELF**. A Syntact program compiles to a runnable static executable. The analyzer proves constraints from value ranges (there is no type system, only structural coloring); the reducer collapses everything reducible — carving, collapse, references, patterns, and affine arithmetic — to a minimal form; a target-neutral bytecode then feeds an optimizing x64 backend (linear-scan allocation, register coalescing, LEA-based instruction selection, width-correct 32-bit arithmetic). An LSP (diagnostics, hover, go-to-definition, rename, completion) and six declarative test suites are part of the project.
 
-This README describes the **design direction** of the language, including features that are planned but not yet implemented. The implementation plan near the end separates the working core from later layers such as events, resonance, full scope algebra, and proofs.
+This README describes the **design direction** of the language, including features that are planned but not yet implemented. Events, resonance, and the full scope algebra are the layers still ahead of the implementation.
 
 ---
 
@@ -240,7 +240,7 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [No null, no uninitialized state](#no-null-no-uninitialized-state)
 * [Algebraic immutability](#algebraic-immutability)
 * [Mutation and reactivity are opt-in](#mutation-and-reactivity-are-opt-in)
-* [Primitive types](#primitive-types)
+* [Values are sets](#values-are-sets)
 * [Shapes](#shapes)
 * [The pattern operator `?`](#the-pattern-operator-)
 * [Destructuring patterns](#destructuring-patterns)
@@ -256,7 +256,6 @@ So “no functions” is not the goal. It is the consequence of choosing smaller
 * [Compile-time and metaprogramming](#compile-time-and-metaprogramming)
 * [Proofs](#proofs)
 * [Why this should be fast](#why-this-should-be-fast)
-* [Implementation plan](#implementation-plan)
 
 ---
 
@@ -697,7 +696,7 @@ Role -> {
 }
 
 User -> {
-  String:name
+  string:name
   u8:age
   Role:role -> "member"
 }
@@ -853,46 +852,63 @@ A program with no resonant or reactive bindings is purely algebraic. Combined wi
 
 ---
 
-## Primitive types
+## Values are sets
 
-Primitive types are scopes known by the compiler.
 
-They are primitive in representation, not in ontology.
 
-A minimal primitive set may include:
+There is no separate world of types. **Every value is a set — usually a set of one.**
+
+`5` is the singleton set `5..5`. `0..255` is a set of 256 values. `>0` is a set. A
+"type" is nothing more than a set standing on the left of `:`, and *any* value can
+stand there — `5:x` colors `x` by the singleton `5`, which is a perfectly good
+(one-inhabitant) type. Values and types are the same continuum, read from the two
+ends.
+
+The so-called primitive types are **builtin names for particular sets**:
 
 ```text
-none      empty value sentinel
-bool      false or true
-u8        unsigned 8-bit integer
-i8        signed 8-bit integer
-u16       unsigned 16-bit integer
-i16       signed 16-bit integer
-u32       unsigned 32-bit integer
-i32       signed 32-bit integer
-u64       unsigned 64-bit integer
-i64       signed 64-bit integer
-usize     architecture-sized unsigned integer
-isize     architecture-sized signed integer
-f32       32-bit floating point
-f64       64-bit floating point
-char      character / scalar value
-String    string data
+u8      0..255
+i8      -128..127
+u16     0..65535
+i16     -32768..32767
+u32     0..4294967295
+i32     -2147483648..2147483647
+u64     0..18446744073709551615
+i64     -9223372036854775808..9223372036854775807
+int     ..0..     every integer
+f32     32-bit floats
+f64     64-bit floats
+float   every decimal
+char    a single character
+string  ''..      every string
+bool    false | true
+none    the empty set
 ```
 
-`u8` is the shape of unsigned 8-bit values, defaulting to `0`.
+A builtin is not a keyword: it resolves like any name, and a binding of the same
+name shadows it. Domain "types" are the same thing written by hand — there is no
+difference in kind between `u8` and:
 
-`bool` is the shape of `false` and `true`, defaulting to `false`.
+```syntact
+Port -> u16 & >0
+Percent -> u8 & <=100
+Digit -> '0'..'9'
+```
 
-`String` is the shape of strings, defaulting to `""`.
+The default of a set is its distinguished element: `0` for the numeric builtins
+(including the signed ones), `""` for `string`, `false` for `bool`.
 
 ```syntact
 u8:count       // 0
 bool:enabled   // false
-String:name    // ""
+string:name    // ""
 ```
 
-The exact primitive set may evolve, but the rule should not: primitives behave like scopes in the language model.
+This is why proofs need no machinery of their own: the compiler tracks every
+value's set by construction, and `:` demands the value's set be contained in the
+color's. Arithmetic composes sets (`u8 + u8` is `0..510`), comparisons over
+decided sets fold to their exact answer (`2 > 2` **is** `false`), and a mistake
+is a set that escapes its color — reported at compile time.
 
 ---
 
@@ -902,7 +918,7 @@ The exact primitive set may evolve, but the rule should not: primitives behave l
 
 ```syntact
 u8:age
-String:name
+string:name
 Point:p
 ```
 
@@ -912,14 +928,14 @@ A shaped binding can receive a value:
 
 ```syntact
 u8:age -> 29
-String:name -> "Alice"
+string:name -> "Alice"
 ```
 
 or use its default:
 
 ```syntact
 u8:age      // 0
-String:name // ""
+string:name // ""
 ```
 
 A shaped binding can be carved immediately:
@@ -982,7 +998,7 @@ Now define a union-like scope:
 ```syntact
 F32OrString -> {
   -> f32:
-  -> String:
+  -> string:
 }
 ```
 
@@ -1002,7 +1018,7 @@ Array{F32OrString}    carve Array with T = F32OrString
 -> {0.1 2.0 "hello"}  give it a value
 ```
 
-The constraint on `array` is `Array{F32OrString}`. This means every element must satisfy `F32OrString`. But this constraint was never written on any individual element. `0.1` is not annotated as `f32:`. `"hello"` is not annotated as `String:`. The coloring is **implicit** — it flows from the constraint on the whole scope down to each structural position.
+The constraint on `array` is `Array{F32OrString}`. This means every element must satisfy `F32OrString`. But this constraint was never written on any individual element. `0.1` is not annotated as `f32:`. `"hello"` is not annotated as `string:`. The coloring is **implicit** — it flows from the constraint on the whole scope down to each structural position.
 
 This is a direct consequence of default completeness and the scope model. A constraint is not an annotation that lives on one binding. It is a structural property of the scope, and it propagates inward.
 
@@ -1101,7 +1117,12 @@ This is why `?` is not just an if/switch replacement. It is the analytic side of
 
 ## Destructuring patterns
 
-Patterns can destructure.
+Destructuring needs no syntax of its own: **a branch's product is lexically a
+production of its cover**, so the cover's bindings are simply in scope on the
+right side. When the branch fires, the matched pieces substitute into the cover
+— reading them IS destructuring.
+
+A named cover exposes its fields by name:
 
 ```syntact
 Circle -> {
@@ -1112,31 +1133,44 @@ area -> {
   Shape:shape
 
   -> shape ? {
-    Circle:{radius(r)} -> r * r * 3
+    Circle: -> radius * radius * 3
+    -> 0
   }
 }
 ```
 
-`Circle:{radius(r)}` means:
+`Circle:` is the anonymous shaped binding; inside the branch, `radius` resolves
+into the matched Circle — no extraction operator, just the ordinary resolution
+chain.
 
-```text
-match a Circle
-open its structure
-extract radius
-capture radius as r
-make r available on the right side
-```
-
-You can refine while destructuring:
+A structural cover names its pieces with captures. `(x)` is an invisible alias:
+not a field, unreachable by `.` or carving, mentionable only from the branch:
 
 ```syntact
-shape ? {
-  Circle:{radius(r)?<10} -> r * r * 3
-  Circle:{radius(r)}     -> r * r * 3
+x -> {3 4 5}
+
+-> x ? {
+  {u8:(h) ...u8:(t)} -> h    // h = 3, t = the rest {4 5} as a scope
+  -> 0
 }
 ```
 
-You can unify different shapes through a common projection:
+The cons cover `{u8:(h) ...u8:(t)}` consumes the run the way the grammar does:
+one colored head, an expand tail swallowing the rest — so recursion over a list
+is a pattern whose cover mirrors the list's own grammar:
+
+```syntact
+sum -> {
+  Array{u8}:list
+  -> list ? {
+    {} -> 0
+    {u8:(h) ...Array{u8}:(t)} -> h + sum{list -> t}!
+  }
+}
+```
+
+Two shapes unify through a common projection because resolution is structural,
+not nominal — both covers expose `side`:
 
 ```syntact
 Square -> {
@@ -1151,38 +1185,25 @@ area -> {
   Shape:shape
 
   -> shape ? {
-    Square:{side(s)} | Diamond:{side(s)} -> s * s
+    Square: | Diamond: -> side * side
+    -> 0
   }
 }
 ```
 
-No nominal interface is required. The pattern says what structure it needs.
+No nominal interface is required. The cover says what structure it needs, and
+what it names is what the product can read.
 
 ---
 
 ## Carving versus destructuring
 
-This distinction is important.
-
-These three forms are different:
+This distinction is important. These two forms are different:
 
 ```syntact
-Circle:{radius?<10}
 Circle{radius?<10}
 Circle{radius?<10}:
 ```
-
-### `Circle:{...}`
-
-This is shape constraint plus local destructuring or patterning.
-
-```syntact
-Circle:{radius(r)?<10} -> r
-```
-
-It creates an anonymous value constrained by `Circle`, inspects its `radius`, captures it as `r`, and checks `r < 10`.
-
-The capture exists in the branch or scope where the pattern is used.
 
 ### `Circle{...}`
 
@@ -1192,7 +1213,7 @@ This carves or refines the scope `Circle` itself.
 SmallCircle -> Circle{radius?<10}
 ```
 
-This defines a refined shape. It does not capture `radius` into a local name.
+This defines a refined shape — a new scope, no binding, no capture.
 
 ### `Circle{...}:`
 
@@ -1202,17 +1223,22 @@ This creates an anonymous binding constrained by the carved shape.
 Circle{radius?<10}:
 ```
 
-This means “some anonymous value shaped like a Circle whose radius is less than 10”. It still does not create a local `r` unless you destructure it.
-
-To get `r`:
+This means "some anonymous value shaped like a Circle whose radius is less than
+10". As a pattern cover it matches such values, and its fields destructure the
+usual way — the product reads them lexically:
 
 ```syntact
 SmallCircle -> Circle{radius?<10}
 
-SmallCircle:{radius(r)} -> r * r * 3
+shape ? {
+  SmallCircle: -> radius * radius * 3
+  -> 0
+}
 ```
 
-This separation keeps the syntax algebraic instead of magical.
+This separation keeps the syntax algebraic instead of magical: `{...}` always
+derives, `:` always colors, and destructuring is never an operator — it is the
+cover's bindings being in scope.
 
 ---
 
@@ -1269,7 +1295,7 @@ Role -> {
 }
 
 User -> {
-  String:name
+  string:name
   u8:age
   Role:role -> "member"
 }
@@ -1285,48 +1311,38 @@ The goal is closure: construction, derivation, matching, destructuring, refineme
 
 String patterns and grammars should also live in the algebra.
 
+A grammar is a set of strings, so a grammar IS a type — written with the same
+operators as every other set:
+
 ```syntact
 alpha -> 'a'..'z' | 'A'..'Z'
 digit -> '0'..'9'
 emailChar -> alpha | digit | '.' | '_' | '-'
 
-Email -> {
-  String:(s) -> "email@example.com"
-
-  -> s ?!
-    emailChar*1..
-    + '@'
-    + emailChar*1..
-    + '.'
-    + alpha*2..
-}
+Email -> emailChar*1.. + '@' + emailChar*1.. + '.' + alpha*2..
 ```
 
-The long-term idea is that regex-like validation is not a string passed to a library. It is a grammar-shaped constraint in the language algebra.
+Regex-like validation is not a string passed to a library: `Email` is a constraint
+like any other, and coloring is the validation.
+
+```syntact
+Email:contact -> "team@example.com"  // proven at compile time
+Email:oops -> "not-an-email"         // Constraint_Mismatch
+```
 
 Another example:
 
 ```syntact
 idChar -> 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-'
 
-Identifier -> {
-  String:(s) -> "defaultId"
+Identifier -> idChar*1.. & ~(.. + '_')
 
-  -> s ?!
-    idChar*1..
-    & ~(.. + '_')
-}
-```
-
-Then:
-
-```syntact
-Identifier:id                 // defaultId
 Identifier:someId -> "someId" // ok
-Identifier:oops -> "bad_"     // rejected if statically known/provable
+Identifier:oops -> "bad_"     // rejected: ends with '_'
 ```
 
-This is not meant to be in the first implementation. But it shows the direction: data modeling, parsing, validation, and proofs should not be separate worlds.
+Data modeling, parsing, validation, and proofs are not separate worlds: they are
+the one constraint algebra, applied to the string family.
 
 ---
 
@@ -1418,7 +1434,7 @@ Serializer -> {
 
   roundTrip <- {
     S:value -> ??
-    -> decode{value -> encode{value -> value}!}! = value ?! true
+    -> true:(decode{value -> encode{value -> value}!}! = value)
   }
 }
 ```
@@ -1443,11 +1459,11 @@ Effects are different. Effects are **nominal events** with structural payloads.
 
 ```syntact
 Log -> {
-  String:message
+  string:message
 }
 
 Audit -> {
-  String:message
+  string:message
 }
 ```
 
@@ -1506,8 +1522,8 @@ kernel -> <kernel.so>{
     -> ??::u8
   }
   read -> {
-    i32:fd  usize:len
-    -> ??::isize
+    i32:fd  u64:len
+    -> ??::i64
   }
 }
 ```
@@ -1544,7 +1560,7 @@ So the rule is: an effect is lifted whenever a collapse crosses the external fro
 
 This is where the one-world model pays off. In a language with a boxed runtime, calling a C library means writing a translation layer — unwrapping objects, marshalling, refcounting — for every binding, maintained by hand. That glue exists because there are *two* representations that do not speak to each other.
 
-Syntact has one representation. A String, an array, a scope are *values* in the machine layout, not boxed objects — there is no pointer type in the pure language; the pointer only appears in boundary codegen, derived mechanically by a size rule (a value larger than a register is passed by address, otherwise by value). So there is nothing to translate. You declare the provenance, color the signatures, and the library is a scope you carve and collapse like any other.
+Syntact has one representation. A string, an array, a scope are *values* in the machine layout, not boxed objects — there is no pointer type in the pure language; the pointer only appears in boundary codegen, derived mechanically by a size rule (a value larger than a register is passed by address, otherwise by value). So there is nothing to translate. You declare the provenance, color the signatures, and the library is a scope you carve and collapse like any other.
 
 You can even prove safety *at* the frontier. A C string is "any non-null char, then a terminator", which is a content constraint:
 
@@ -1552,7 +1568,7 @@ You can even prove safety *at* the frontier. A C string is "any non-null char, t
 CString -> (~'\0').. + '\0'
 ```
 
-A String satisfying `CString` is statically known to be a well-formed C string — no interior null — *before* it ever crosses the boundary.
+A string satisfying `CString` is statically known to be a well-formed C string — no interior null — *before* it ever crosses the boundary.
 
 ### Writing a library in Syntact
 
@@ -1582,11 +1598,11 @@ In Syntact, the code emits a nominal event. The surrounding scope decides how to
 
 ```syntact
 Alloc -> {
-  usize:size
+  u64:size
 }
 
 Buffer -> {
-  usize:size
+  u64:size
   ptr -> >- Alloc{size -> size}
   -> ptr
 }
@@ -1757,7 +1773,7 @@ This means: `value` is resonant (driven by the `Update` event) and initially bou
 
 ```syntact
 Text -> {
-  String:text =<< ""
+  string:text =<< ""
   =<< text ? {
     -> >- Redraw{}
   }
@@ -1897,21 +1913,31 @@ The compiler and runtime are not different semantic engines. The compiler is the
 
 ## Proofs
 
-Proofs are long-term, not part of the first usable version.
+There is no proof operator, because there is no proof system: **the type system
+is the prover**. A proof obligation is a coloring — `:` demands that a value's
+set be contained in the color's set, the compiler must establish it, and a
+failure is a compile error. Since any value is a type, `true` is a color like
+any other:
 
-The intended operators are:
-
-```text
-??  symbolic unknown
-?!  proof obligation
+```syntact
+true:check -> 2 = 2     // proven: the comparison folds to true
+true:oops -> 2 = 3      // Constraint_Mismatch: false does not satisfy true
 ```
 
-Example:
+Inline, the same obligation is a colored production:
+
+```syntact
+-> true:(2 = 2)
+```
+
+`??` provides the quantified values: a symbolic unknown ranges over its whole
+set, so a property colored `true` over a `??` asks "does this hold for EVERY
+value of that shape?" — the same question, asked of a wider set.
 
 ```syntact
 decodeEncodeSymmetry -> {
-  String:m -> ??
-  -> decode{value -> encode{value -> m}!}! = m ?! true
+  string:m -> ??
+  true:holds -> decode{value -> encode{value -> m}!}! = m
 }
 ```
 
@@ -1934,14 +1960,16 @@ Serializer -> {
 
   roundTrip <- {
     S:value -> ??
-    -> decode{value -> encode{value -> value}!}! = value ?! true
+    -> true:(decode{value -> encode{value -> value}!}! = value)
   }
 }
 ```
 
-The point is not to attach a separate proof assistant to the language. The point is to ask the same reducer a stronger question: can this property be proven for every value of this shape?
-
-This must be added carefully. Proofs can make compile time explode. The first versions should not depend on them.
+The point is not to attach a separate proof assistant to the language: a proof
+is the ordinary constraint contract, and the prover's strength is the reducer's
+strength. Today it decides everything the set envelopes decide (concrete values,
+decided ranges); symbolic quantification over `??` deepens as the reducer does —
+carefully, because proofs can make compile time explode.
 
 ---
 
@@ -2039,7 +2067,7 @@ In Syntact:
 Port -> u16 & >0
 
 ServerConfig -> {
-  String:host -> "localhost"
+  string:host -> "localhost"
   Port:port -> 8080
   bool:debug -> false
 }
@@ -2128,184 +2156,6 @@ proofs as future reduction obligations
 ```
 
 The promise is not that everything becomes easy. The promise is that the hard things belong to one algebra instead of ten incompatible subsystems.
-
----
-
-## Implementation plan
-
-Syntact is too ambitious to build all at once.
-
-The implementation grows in layers. Each layer must be useful by itself. The
-language is still in its initial development cycle, so the milestones are numbered
-under a single `v0` line — `v0` is the executable core, `v0.1`…`v0.5` add each
-layer on top — rather than as separate major versions.
-
-### v0 — Core executable language
-
-Goal: prove that `scope + binding + carving + collapse` works.
-
-Include:
-
-```text
-parser
-scopes
-bindings with ->
-productions
-access with .
-carving with {...}
-collapse with !
-primitive values
-basic static analysis
-simple backend
-```
-
-Exclude:
-
-```text
-events
-resonance
-full scope algebra
-proofs
-concurrency
-advanced grammars
-large SDK
-```
-
-This must work:
-
-```syntact
-square -> {
-  n -> 0
-  -> n * n
-}
-
--> square{n -> 5}!
-```
-
-**Status: done, and past "simple backend."** The bootstrap compiler runs parse → analyze → reduce → bytecode → native x86-64 ELF, with an optimizing backend (linear-scan + coalescing, LEA instruction selection, 32-bit-width arithmetic). Scopes, bindings, productions, access, carving, collapse, primitive values, and constraint analysis all work.
-
-### v0.1 — Shapes and patterns
-
-Goal: make Syntact useful for small real programs.
-
-Include:
-
-```text
-:
-primitive shapes
-user-defined shapes
-pattern matching with ?
-structural destructuring
-anonymous shaped bindings
-basic refinements
-```
-
-This enables:
-
-```syntact
-Circle -> {
-  u8:radius
-}
-
-SmallCircle -> Circle{radius?<10}
-
-area -> {
-  SmallCircle:{radius(r)}
-  -> r * r * 3
-}
-```
-
-**Status: mostly done.** Constraint coloring (`:`), primitive and user-defined
-shapes, pattern matching with `?` (typecheck and value branches, exhaustiveness),
-anonymous shaped bindings, set-algebra constraints (`&`/`|`/`~`), and ranges all
-work and compile to native code. Structural destructuring with capture
-(`Circle:{radius(r)}`) and full carve materialization are the remaining gaps.
-
-### v0.2 — Nominal events
-
-Goal: introduce Syntact's algebraic effects.
-
-Include:
-
-```text
-nominal event declaration
-event emission with >-
-handlers with -<
-lexical handler resolution
-missing-handler errors
-handler override through carving
-```
-
-This enables:
-
-```syntact
-Log -> {
-  String:message
-}
-
-program -> {
-  Log -< e {
-    -> io.write{e.message}!
-  }
-
-  >- Log{message -> "hello"}
-  -> 0
-}
-```
-
-### v0.3 — Resonance and reactivity
-
-Goal: model state, mutation, and derived bindings.
-
-Include:
-
-```text
->>-    resonant binding declaration
--<<    resonant update inside handler
->>=    reactive derived binding
-=<<    reactive production
-resonant bindings driven by nominal events
-reactive bindings that track dependencies
-state abstractions as library scopes
-UI-friendly reactive patterns
-```
-
-### v0.4 — Fuller scope algebra
-
-Goal: close the algebra.
-
-Include progressively:
-
-```text
-&
-|
-~
-ranges
-sequence grammars
-shape refinement
-exact vs derived shape relations
-first-class reusable patterns
-module/scope algebra
-```
-
-This is where `Email`, `Identifier`, `SmallCircle`, `weirdInt`, JSON grammars, and refined domain shapes become central.
-
-### v0.5 — Proofs
-
-Goal: add compile-time obligations carefully.
-
-Include only after the rest is stable:
-
-```text
-??
-?!
-limited symbolic reduction
-law checking
-serializer round trips
-simple algebraic properties
-```
-
-Proofs are powerful, but they are not required to make the language useful. They are the long-term destination.
 
 ---
 
