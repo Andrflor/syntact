@@ -518,6 +518,11 @@ pending_scope_of :: proc(t: ^Type) -> ^Scope_Type {
 		case Carve_Type:
 			cur = v.source
 			continue
+		case Execute_Type:
+			// A collapse blocks on whatever blocks its target — `mod.f{...}!.x`
+			// before `f` is bound must defer, not miss.
+			cur = v.target
+			continue
 		}
 		return nil
 	}
@@ -1164,6 +1169,17 @@ resolve_property_site :: proc(target: ^Type, name: string, ordinal: i16) -> (^Sc
 			// b = a{x->10} and z -> x must see z = 10, not the pre-carve a.z = 0.
 			if sub := fold_carve_type(prop_target); sub != nil {
 				return scope_resolve(sub, name, ordinal, true)
+			}
+		case Execute_Type:
+			// `target!.name` — a collapse denotes its production's value: resolve the
+			// property against the production it reduces through (a carve production
+			// materializes, so the site reads the carved values). Guarded like every
+			// collapse fold — a RECURSIVE collapse can't be peeled statically.
+			key, blocked := execute_fold_enter(t.target)
+			if blocked do return nil, -1
+			defer execute_fold_leave(key)
+			if prod, resolved := execute_production(t.target); resolved && prod != nil {
+				return resolve_property_site(prod, name, ordinal)
 			}
 		}
 		break

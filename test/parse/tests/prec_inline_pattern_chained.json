@@ -1,6 +1,6 @@
 {
   "name": "Inline Pattern Chained Ambiguity",
-  "description": "x ? y ? z — chained inline patterns, tests if second ? is parsed as nested pattern on product",
+  "description": "x ? y ? z — inline `?` is left-associative: (x ? y) ? z, the first match's result is the second's scrutinee",
   "source": "x ? y ? z",
-  "expect": "Scope[Pattern(Identifier(x),[Branch(Pattern(Identifier(y),[Branch(Identifier(z),nil)]),nil)])]"
+  "expect": "Scope[Pattern(Pattern(Identifier(x),[Branch(Identifier(y),nil)]),[Branch(Identifier(z),nil)])]"
 }
