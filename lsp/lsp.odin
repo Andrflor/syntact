@@ -1346,7 +1346,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 			emit(ast, tokens, cur.span, .Number)
 		case .At:
 			emit(ast, tokens, cur.span, .Decorator)
-		case .Execute, .QuestionExclamation:
+		case .Execute:
 			emit(ast, tokens, cur.span, .Function)
 		case .Question, .DoubleQuestion:
 			emit(ast, tokens, cur.span, .Keyword)

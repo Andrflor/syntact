@@ -192,8 +192,6 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 		return fmt.tprintf("External(%s,%s)", nextern_name(ast, idx), ast_to_string(ast, nextern_scope(ast, idx)))
 	case .Unknown:
 		return "Unknown"
-	case .Enforce:
-		return fmt.tprintf("Enforce(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Branch:
 		return fmt.tprintf("Branch(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	}
@@ -238,7 +236,7 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 
 	kind := nkind(ast, idx)
 	switch kind {
-	case .Pointing, .PointingPull, .EventPush, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull, .Property, .Constraint, .Range, .Enforce, .Branch:
+	case .Pointing, .PointingPull, .EventPush, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull, .Property, .Constraint, .Range, .Branch:
 		walk_all_nodes(ast, nbin_left(ast, idx), full_string, pos_map)
 		walk_all_nodes(ast, nbin_right(ast, idx), full_string, pos_map)
 	case .EventPull:
