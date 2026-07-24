@@ -359,7 +359,7 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			// (the concrete-value law), else the full `{true,false}` so a
 			// `=true -> … =false -> …` pattern over it is exhaustive.
 			if is_comparison_op(v.operator) {
-				if r := fold_concrete_comparison(v); r != nil do return r
+				if r := fold_comparison_envelope(v); r != nil do return r
 				return new_type(make_bool_any())
 			}
 			// Arithmetic envelope returned UNWRAPPED: wrapping `0..510` in a producer
@@ -616,7 +616,7 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	// singleton (the concrete-value law); a symbolic one keeps the full Bool so a
 	// `=true -> … =false -> …` pattern over it is exhaustive.
 	if is_comparison_op(comp.operator) {
-		if r := fold_concrete_comparison(comp^); r != nil {
+		if r := fold_comparison_envelope(comp^); r != nil {
 			comp.type_fold = r
 			return
 		}
@@ -643,66 +643,159 @@ is_comparison_op :: proc(op: Operator_Kind) -> bool {
 	return false
 }
 
-// fold_concrete_comparison computes a comparison over two CONCRETE numeric
-// operands to its exact bool singleton — the concrete-value law: when values are
-// known at compile time, the compiler computes the exact result. nil when either
-// side is symbolic (the caller keeps the full {true,false} envelope) or
-// non-numeric. Two integers compare exactly; a mixed int/float pair compares as
-// f64 (the integer promotes, per element).
-fold_concrete_comparison :: proc(comp: Compose_Type) -> ^Type {
+// fold_comparison_envelope decides a comparison from its operands' ENVELOPES —
+// the concrete-value law generalized: a singleton is a degenerate range, so
+// `2 > 2` folds false and a `0..255` value `< 300` folds true by the SAME rule:
+// the comparison folds to its exact bool whenever every (left, right) pair of
+// values agrees on the answer. An overlap (or an unbounded deciding side) keeps
+// the full {true,false} envelope — which is what keeps `=true/=false` exhaustive
+// over a genuinely undecided comparison. Two integer envelopes decide exactly in
+// i128; a float or mixed pair decides in f64 (the integer side promotes),
+// conservatively: floats only decide across a STRICT separation, so an open
+// bound can never flip a verdict.
+fold_comparison_envelope :: proc(comp: Compose_Type) -> ^Type {
 	if !is_comparison_op(comp.operator) do return nil
 
-	li, l_int := concrete_int_operand(comp.left)
-	ri, r_int := concrete_int_operand(comp.right)
+	llo_i, lhi_i, l_int := integer_envelope_bounds(comp.left)
+	rlo_i, rhi_i, r_int := integer_envelope_bounds(comp.right)
 	if l_int && r_int {
-		return new_type(make_bool_const(compare_ordered(comp.operator, li > ri, li < ri)))
+		def_lt, def_le, def_gt, def_ge, eq: bool
+		if l, lok := lhi_i.(i128); lok {
+			if r, rok := rlo_i.(i128); rok {
+				def_lt = l < r
+				def_le = l <= r
+			}
+		}
+		if l, lok := llo_i.(i128); lok {
+			if r, rok := rhi_i.(i128); rok {
+				def_gt = l > r
+				def_ge = l >= r
+			}
+		}
+		eq = maybe_i128_singleton_equal(llo_i, lhi_i, rlo_i, rhi_i)
+		return comparison_verdict(comp.operator, def_lt, def_le, def_gt, def_ge, eq)
 	}
 
-	lf, l_num := concrete_number_operand(comp.left)
-	rf, r_num := concrete_number_operand(comp.right)
+	llo, lhi, l_num := number_envelope_bounds(comp.left)
+	rlo, rhi, r_num := number_envelope_bounds(comp.right)
 	if l_num && r_num {
-		return new_type(make_bool_const(compare_ordered(comp.operator, lf > rf, lf < rf)))
+		def_lt, def_le, def_gt, def_ge, eq: bool
+		if l, lok := lhi.(f64); lok {
+			if r, rok := rlo.(f64); rok {
+				def_lt = l < r // strict separation only: open bounds can't flip this
+				def_le = l < r
+			}
+		}
+		if l, lok := llo.(f64); lok {
+			if r, rok := rhi.(f64); rok {
+				def_gt = l > r
+				def_ge = l > r
+			}
+		}
+		return comparison_verdict(comp.operator, def_lt, def_le, def_gt, def_ge, eq)
 	}
 	return nil
 }
 
-// compare_ordered evaluates a comparison operator from the two order facts.
-compare_ordered :: proc(op: Operator_Kind, gt, lt: bool) -> bool {
+// comparison_verdict turns the definite order relations between two envelopes
+// into a bool singleton, or nil when the operator's answer is not decided.
+comparison_verdict :: proc(op: Operator_Kind, def_lt, def_le, def_gt, def_ge, singletons_equal: bool) -> ^Type {
+	decided, value: bool
 	#partial switch op {
 	case .Less:
-		return lt
-	case .Greater:
-		return gt
+		if def_lt {value, decided = true, true} else if def_ge do decided = true
 	case .LessEqual:
-		return !gt
+		if def_le || singletons_equal {value, decided = true, true} else if def_gt do decided = true
+	case .Greater:
+		if def_gt {value, decided = true, true} else if def_le do decided = true
 	case .GreaterEqual:
-		return !lt
+		if def_ge || singletons_equal {value, decided = true, true} else if def_lt do decided = true
 	case .Equal:
-		return !gt && !lt
+		if singletons_equal {value, decided = true, true} else if def_lt || def_gt do decided = true
 	case .NotEqual:
-		return gt || lt
+		if def_lt || def_gt {value, decided = true, true} else if singletons_equal do decided = true
 	}
-	return false
+	if !decided do return nil
+	return new_type(make_bool_const(value))
 }
 
-concrete_int_operand :: proc(t: ^Type) -> (i128, bool) {
-	if it := fold_type_integer(t); it != nil {
-		if iv, ok := it^.(Integer_Type); ok && int_is_concrete(iv) {
-			return int_value(iv), true
-		}
-	}
-	return 0, false
+maybe_i128_singleton_equal :: proc(llo, lhi, rlo, rhi: Maybe(i128)) -> bool {
+	a, ok1 := llo.(i128)
+	b, ok2 := lhi.(i128)
+	c, ok3 := rlo.(i128)
+	d, ok4 := rhi.(i128)
+	return ok1 && ok2 && ok3 && ok4 && a == b && c == d && a == c
 }
 
-// concrete_number_operand reads a concrete numeric operand as f64 (int promoted).
-concrete_number_operand :: proc(t: ^Type) -> (f64, bool) {
-	if v, ok := concrete_int_operand(t); ok do return f64(v), true
-	if ft := fold_type_float(t); ft != nil {
-		if fv, ok := ft^.(Float_Type); ok && float_is_concrete(fv) {
-			return float_value(fv), true
+// integer_envelope_bounds folds an operand's integer envelope down to its overall
+// [lo, hi] bounds (nil = unbounded on that side); ok=false for a non-integer or
+// empty envelope.
+integer_envelope_bounds :: proc(t: ^Type) -> (lo, hi: Maybe(i128), ok: bool) {
+	it := fold_type_integer(t)
+	if it == nil do return nil, nil, false
+	iv, is_int := it^.(Integer_Type)
+	if !is_int || len(iv.integer_intervals) == 0 do return nil, nil, false
+	first := true
+	for seg in iv.integer_intervals {
+		if first {
+			lo, hi = seg.lo, seg.hi
+			first = false
+			continue
+		}
+		if cur, has := lo.(i128); has {
+			if sl, seg_has := seg.lo.(i128); seg_has {
+				if sl < cur do lo = sl
+			} else {
+				lo = nil
+			}
+		}
+		if cur, has := hi.(i128); has {
+			if sh, seg_has := seg.hi.(i128); seg_has {
+				if sh > cur do hi = sh
+			} else {
+				hi = nil
+			}
 		}
 	}
-	return 0, false
+	return lo, hi, true
+}
+
+// number_envelope_bounds reads an operand's numeric envelope as f64 bounds — the
+// integer envelope promoted, else the float envelope (open flags dropped: the
+// caller only decides across strict separation, where openness cannot matter).
+number_envelope_bounds :: proc(t: ^Type) -> (lo, hi: Maybe(f64), ok: bool) {
+	if ilo, ihi, is_int := integer_envelope_bounds(t); is_int {
+		if v, has := ilo.(i128); has do lo = f64(v)
+		if v, has := ihi.(i128); has do hi = f64(v)
+		return lo, hi, true
+	}
+	ft := fold_type_float(t)
+	if ft == nil do return nil, nil, false
+	fv, is_float := ft^.(Float_Type)
+	if !is_float || len(fv.float_intervals) == 0 do return nil, nil, false
+	first := true
+	for seg in fv.float_intervals {
+		if first {
+			lo, hi = seg.lo, seg.hi
+			first = false
+			continue
+		}
+		if cur, has := lo.(f64); has {
+			if sl, seg_has := seg.lo.(f64); seg_has {
+				if sl < cur do lo = sl
+			} else {
+				lo = nil
+			}
+		}
+		if cur, has := hi.(f64); has {
+			if sh, seg_has := seg.hi.(f64); seg_has {
+				if sh > cur do hi = sh
+			} else {
+				hi = nil
+			}
+		}
+	}
+	return lo, hi, true
 }
 
 // fold_cast resolves a `value :: target` raw binary reinterpret-cast: extract the

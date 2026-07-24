@@ -1,0 +1,6 @@
+{
+  "name": "tc_comparison_envelope_decides",
+  "description": "the concrete-value law generalized to envelopes: a is a symbolic 0..255, and every value of it is < 300, so the comparison folds to the singleton true and satisfies =true",
+  "source": "a -> ??::u8\n=true:c -> a < 300\n-> 0",
+  "expect_errors": []
+}
