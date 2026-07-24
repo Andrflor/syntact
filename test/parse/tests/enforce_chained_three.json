@@ -1,6 +1,0 @@
-{
-  "name": "Enforce Chained Three",
-  "description": "Three chained enforce operators - right-associative",
-  "source": "a ?! b ?! c",
-  "expect": "Scope[Enforce(Identifier(a),Enforce(Identifier(b),Identifier(c)))]"
-}

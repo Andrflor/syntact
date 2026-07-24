@@ -130,8 +130,7 @@ build_parent_map :: proc(ast: ^compiler.Ast) -> Parent_Map {
 		     .ReactivePull,
 		     .Constraint,
 		     .Property,
-		     .Range,
-		     .Enforce:
+		     .Range:
 			set(parents, ast.node_data[i].binary.left, idx)
 			set(parents, ast.node_data[i].binary.right, idx)
 		case .Operator:

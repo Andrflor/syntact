@@ -1,6 +1,0 @@
-{
-  "name": "enforce_unproven_obligation",
-  "description": "GAP: README Proofs — `?!` is a proof obligation; an obligation that cannot hold (2 = 3 is false, never true) must fail compilation. walk_enforce currently builds a plain Or and proves nothing. The error type may be revisited when ?! is implemented.",
-  "source": "-> 2 = 3 ?! true",
-  "expect_errors": ["Constraint_Mismatch"]
-}
