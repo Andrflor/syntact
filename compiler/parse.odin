@@ -142,6 +142,15 @@ has_space_after_char :: #force_inline proc(l: ^Lexer, char: u8) -> bool {
 	return false
 }
 
+// is_space_at treats a comment opener as whitespace — the one law for glue on the
+// right side, mirroring what the trivia flags record for the left side.
+is_space_at :: #force_inline proc(l: ^Lexer, pos: u32) -> bool {
+	if pos >= l.source_len do return false
+	c := l.src[pos]
+	if IS_SPACE[c] do return true
+	return c == '/' && pos + 1 < l.source_len && (l.src[pos + 1] == '/' || l.src[pos + 1] == '*')
+}
+
 // Newline and comma both fold to Separator_Before (soft statement boundaries):
 // `a\nb` and `a, b` are treated identically.
 skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
@@ -317,16 +326,20 @@ lex_single_lbracket :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 
 // is_detached reports whether the `(`/`{` is NOT glued to the preceding operand
 // (no carve/capture). Glue is broken by a space OR a newline/comma — without the
-// latter, `x -> u8\n(C | string)` would mis-read `(` as a capture on `u8`.
-is_detached :: #force_inline proc(l: ^Lexer, start: u32) -> bool {
-	if start == 0 do return true
-	c := l.src[start - 1]
-	return IS_SPACE[c] || c == '\n' || c == ','
+// latter, `x -> u8\n(C | string)` would mis-read `(` as a capture on `u8`. Read
+// from the token's trivia flags so a comment (lexical whitespace) breaks glue too.
+TRIVIA_BEFORE_MASK: u8 :
+	(1 << u8(Token_Flags.Space_Before)) |
+	(1 << u8(Token_Flags.Line_Before)) |
+	(1 << u8(Token_Flags.Separator_Before))
+
+is_detached :: #force_inline proc(flags: u8, start: u32) -> bool {
+	return start == 0 || (flags & TRIVIA_BEFORE_MASK) != 0
 }
 
 // Detached `{` opens a fresh scope; glued `x{…}` opens a carve (LeftBraceCarve).
 lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
-	sb := is_detached(l, start)
+	sb := is_detached(flags, start)
 	l.offset = start + 1
 	return Token {
 		kind = sb ? .LeftBrace : .LeftBraceCarve,
@@ -337,7 +350,7 @@ lex_lbrace :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 
 // Same space rule as `{`: glued `(` is LeftParenNoSpace (call/capture), spaced is a plain group.
 lex_lparen :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
-	sb := is_detached(l, start)
+	sb := is_detached(flags, start)
 	l.offset = start + 1
 	return Token {
 		kind = sb ? .LeftParen : .LeftParenNoSpace,
@@ -365,13 +378,8 @@ lex_colon :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 		l.offset = start + 2
 		return Token{kind = .Cast, span = Span{start, start + 2}, flags = flags}
 	}
-	sb := u8(start > 0 && IS_SPACE[src[start - 1]])
-	sa := u8(
-		start < l.source_len &&
-		src[start] == ':' &&
-		start + 1 < l.source_len &&
-		IS_SPACE[src[start + 1]],
-	)
+	sb := u8((flags & (1 << u8(Token_Flags.Space_Before))) != 0)
+	sa := u8(is_space_at(l, start + 1))
 	l.offset = start + 1
 	return Token{kind = COLON_TABLE[sb][sa], span = Span{start, start + 1}, flags = flags}
 }
@@ -542,7 +550,7 @@ next_token :: proc(l: ^Lexer) -> Token {
 	off: u32
 
 	for {
-		flags = skip_trivia(l)
+		flags |= skip_trivia(l)
 		off = l.offset
 
 		if off >= slen {
@@ -551,6 +559,8 @@ next_token :: proc(l: ^Lexer) -> Token {
 
 		c := src[off]
 
+		// A comment is trivia: it separates like a space, and a block comment
+		// holding a newline separates like a newline (the comment's whitespace shape).
 		if c == '/' && off + 1 < slen {
 			nc := src[off + 1]
 			if nc == '/' {
@@ -559,6 +569,7 @@ next_token :: proc(l: ^Lexer) -> Token {
 					off += 1
 				}
 				l.offset = off
+				set_flag(&flags, .Space_Before)
 				continue
 			}
 			if nc == '*' {
@@ -572,10 +583,15 @@ next_token :: proc(l: ^Lexer) -> Token {
 						off += 2
 						depth -= 1
 					} else {
+						if src[off] == '\n' {
+							set_flag(&flags, .Line_Before)
+							set_flag(&flags, .Separator_Before)
+						}
 						off += 1
 					}
 				}
 				l.offset = off
+				set_flag(&flags, .Space_Before)
 				continue
 			}
 		}

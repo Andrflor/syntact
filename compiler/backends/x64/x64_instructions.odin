@@ -2764,39 +2764,25 @@ add_m16_imm16 :: proc(mem: MemoryAddress, imm: u16) {
 // ADD variants
 // Add memory to register
 add_r8_m8 :: proc(dst: Register8, mem: MemoryAddress) {
-	has_high_byte := u8(dst) >= 16
-	rm := u8(dst) & 0xF
-	if has_high_byte {
-		assert(
-			false,
-			"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
-		)
-	} else {
-		// Only set REX.B when needed (for r8-r15)
-		need_rex := rm >= 8
-		if need_rex {
-			rex: u8 = 0x40 | 0x01 // REX + REX.B
-			write([]u8{rex})
-		}
-		write_memory_address(mem, rm & 0x7, [1]u8{0x02}, false, need_rex)
-	}
+	assert(
+		u8(dst) < u8(Register8.AH),
+		"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
+	)
+	// SPL/BPL/SIL/DIL need a REX prefix even though none of R/X/B is set;
+	// write_memory_address composes REX.R (extended reg) with REX.X/REX.B
+	// (extended index/base) into a single prefix.
+	force_rex := u8(dst) >= u8(Register8.SPL) && u8(dst) <= u8(Register8.DIL)
+	write_memory_address(mem, u8(dst), [1]u8{0x02}, false, force_rex) // 02 /r
 }
 
 // Add register to memory
 add_m8_r8 :: proc(mem: MemoryAddress, src: Register8) {
-	has_high_byte := u8(src) >= 16
-	if has_high_byte {
-		assert(false, "High byte registers (AH–DH) not encodable with memory in 64-bit mode")
-		return
-	}
-	src_rm := u8(src) & 0xF
-	// Only set REX.R when needed (for r8-r15)
-	need_rex := src_rm >= 8
-	if need_rex {
-		rex: u8 = 0x40 | 0x04 // REX + REX.R
-		write([]u8{rex})
-	}
-	write_memory_address(mem, src_rm & 0x7, [1]u8{0x00}, false, need_rex)
+	assert(
+		u8(src) < u8(Register8.AH),
+		"High byte registers (AH, BH, CH, DH) cannot be used with memory operands in 64-bit mode",
+	)
+	force_rex := u8(src) >= u8(Register8.SPL) && u8(src) <= u8(Register8.DIL)
+	write_memory_address(mem, u8(src), [1]u8{0x00}, false, force_rex) // 00 /r
 }
 
 // Add immediate to memory

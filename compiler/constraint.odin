@@ -856,6 +856,11 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 		return false
 	}
 	if cs.constraint_folds[i] == nil {
+		// An uncolored NAMED binding is shape-only: the field must exist (paired by
+		// name/kind above) but its default imposes nothing on the value — instances
+		// are carved from shapes, and a carve rewrites defaults freely. A bare
+		// positional value stays a leaf: it admits only itself.
+		if cs.names[i] != "" do return true
 		return satisfy((cs.type_folds[i]), vs.type_folds[j])
 	}
 	// A recursive tail unfolds one level inside satisfy's Carve case — one law,

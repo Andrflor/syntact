@@ -319,7 +319,8 @@ testing_add_r64_imm8 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm8Values {
-			asm_str := fmt.tprintf("add %s, %d", register64_to_string(reg), imm)
+			// 83 /0 ib sign-extends the imm8, so print it signed
+			asm_str := fmt.tprintf("add %s, %d", register64_to_string(reg), cast(i8)imm)
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -430,7 +431,8 @@ testing_add_r32_imm8 :: proc(t: ^testing.T) {
 
 	for reg in registers32 {
 		for imm in imm8Values {
-			asm_str := fmt.tprintf("add %s, %d", register32_to_string(reg), imm)
+			// 83 /0 ib sign-extends the imm8, so print it signed
+			asm_str := fmt.tprintf("add %s, %d", register32_to_string(reg), cast(i8)imm)
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
@@ -726,7 +728,8 @@ testing_sub_r64_imm8 :: proc(t: ^testing.T) {
 
 	for reg in registers64 {
 		for imm in imm8Values {
-			asm_str := fmt.tprintf("sub %s, %d", register64_to_string(reg), imm)
+			// 83 /5 ib sign-extends the imm8, so print it signed
+			asm_str := fmt.tprintf("sub %s, %d", register64_to_string(reg), cast(i8)imm)
 
 			buffer := ByteBuffer{}
 			context.user_ptr = &buffer
