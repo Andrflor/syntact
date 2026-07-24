@@ -207,27 +207,7 @@ analyze :: proc(cache: ^Cache) -> bool {
 	r := root_data.scope
 	children := ast.extra[r.start:][:r.len]
 	a.scope.walking = true
-	for child in children {
-		child_kind := ast.node_kinds[child]
-		#partial switch child_kind {
-		case .Pointing,
-		     .PointingPull,
-		     .EventPush,
-		     .EventPull,
-		     .ResonancePush,
-		     .ResonancePull,
-		     .ReactivePush,
-		     .ReactivePull,
-		     .Product,
-		     .Expand,
-		     .Constraint:
-			walk(a, a.scope, child)
-		case:
-			value := walk(a, a.scope, child)
-			scope_append(a, a.scope, "", nil, .Pointing_Push, value)
-			typecheck(a, a.scope, "", nil, .Pointing_Push, value, child)
-		}
-	}
+	walk_scope_children(a, a.scope, children)
 
 	a.scope.walking = false
 	scope_close(a, a.scope)
@@ -268,6 +248,46 @@ node_span :: proc(a: ^Analyzer, idx: Node_Index) -> Span {
 node_pos :: proc(a: ^Analyzer, idx: Node_Index) -> Position {
 	if idx == INVALID_NODE || int(idx) >= len(a.ast.node_spans) do return Position{}
 	return span_to_position(a.ast, a.ast.node_spans[idx].start)
+}
+
+// walk_scope_children walks a scope's child nodes IN ORDER, deciding for each what
+// the form IS in binding position — the ONE place that law lives (the root, scope
+// literals, and bound scope bodies all walk through here):
+//   * a directional binding / production / expand registers itself (walk);
+//   * a bare colored form `C:name` registers a binding holding C's default;
+//   * a colored carve `C:name{…}` (a Carve whose source is a Constraint — the
+//     parser wraps the whole colored form in the Carve) registers `name` colored
+//     by C with the CARVED complete value;
+//   * anything else is an anonymous pushed value.
+// Everywhere else (pattern covers, carve overrides, operands) the same forms are
+// VALUES: walk routes them to their pure walkers and nothing registers.
+walk_scope_children :: proc(a: ^Analyzer, scope: ^Scope_Type, children: []Node_Index) {
+	for child in children {
+		child_kind := a.ast.node_kinds[child]
+		if child_kind == .Carve && carve_colored_source(a, child) != INVALID_NODE {
+			walk_colored_carve_binding(a, scope, child)
+			continue
+		}
+		#partial switch child_kind {
+		case .Pointing,
+		     .PointingPull,
+		     .EventPush,
+		     .EventPull,
+		     .ResonancePush,
+		     .ResonancePull,
+		     .ReactivePush,
+		     .ReactivePull,
+		     .Product,
+		     .Expand:
+			walk(a, scope, child)
+		case .Constraint:
+			walk_constraint_binding(a, scope, child)
+		case:
+			value := walk(a, scope, child)
+			scope_append(a, scope, "", nil, .Pointing_Push, value)
+			typecheck(a, scope, "", nil, .Pointing_Push, value, child)
+		}
+	}
 }
 
 binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
@@ -806,27 +826,7 @@ walk_scope_node :: #force_inline proc(
 	scope.walking = true
 	r := data.scope
 	children := ast.extra[r.start:][:r.len]
-	for child in children {
-		child_kind := ast.node_kinds[child]
-		#partial switch child_kind {
-		case .Pointing,
-		     .PointingPull,
-		     .EventPush,
-		     .EventPull,
-		     .ResonancePush,
-		     .ResonancePull,
-		     .ReactivePush,
-		     .ReactivePull,
-		     .Product,
-		     .Expand,
-		     .Constraint:
-			walk(a, scope, child)
-		case:
-			value := walk(a, scope, child)
-			scope_append(a, scope, "", nil, .Pointing_Push, value)
-			typecheck(a, scope, "", nil, .Pointing_Push, value, child)
-		}
-	}
+	walk_scope_children(a, scope, children)
 	scope.walking = false
 	scope_close(a, scope)
 	return result
@@ -855,35 +855,10 @@ walk_binding :: #force_inline proc(
 
 	if left_kind == .Constraint {
 		cdata := ast.node_data[left_idx]
-		constraint_idx := cdata.binary.left
-		name_idx := cdata.binary.right
-		constraint = walk(a, current_scope, constraint_idx)
-		if name_idx != INVALID_NODE {
-			nk := ast.node_kinds[name_idx]
-			if nk == .Identifier {
-				name = span_str(ast, ast.node_data[name_idx].identifier.name)
-				capture = span_str(ast, ast.node_data[name_idx].identifier.capture)
-			} else if nk == .Carve {
-				// constraint:name{carves} — the carve source is the name
-				csrc := ast.node_data[name_idx].carve.source
-				if csrc != INVALID_NODE && ast.node_kinds[csrc] == .Identifier {
-					name = span_str(ast, ast.node_data[csrc].identifier.name)
-					capture = span_str(ast, ast.node_data[csrc].identifier.capture)
-				}
-			}
-			// The colored name must resolve to an identifier — or a bare `(e)`
-			// capture: an ANONYMOUS captured binding (no name; invisible to `.`
-			// and carving, reachable only by mention, like any capture).
-			if name == "" && capture == "" {
-				sem_error(
-					a,
-					"invalid constraint name: the colored name must be an identifier",
-					.Invalid_Constraint_Name,
-					node_span(a, name_idx),
-				)
-				return make_invalid()
-			}
-		}
+		constraint = walk(a, current_scope, cdata.binary.left)
+		n_ok: bool
+		name, capture, n_ok = colored_name(a, cdata.binary.right)
+		if !n_ok do return make_invalid()
 	} else if left_kind == .Identifier {
 		name = span_str(ast, ast.node_data[left_idx].identifier.name)
 		capture = span_str(ast, ast.node_data[left_idx].identifier.capture)
@@ -912,27 +887,7 @@ walk_binding :: #force_inline proc(
 		rdata := ast.node_data[right_idx]
 		r := rdata.scope
 		scope_children := ast.extra[r.start:][:r.len]
-		for child in scope_children {
-			child_kind := ast.node_kinds[child]
-			#partial switch child_kind {
-			case .Pointing,
-			     .PointingPull,
-			     .EventPush,
-			     .EventPull,
-			     .ResonancePush,
-			     .ResonancePull,
-			     .ReactivePush,
-			     .ReactivePull,
-			     .Product,
-			     .Expand,
-			     .Constraint:
-				walk(a, scope, child)
-			case:
-				val := walk(a, scope, child)
-				scope_append(a, scope, "", nil, .Pointing_Push, val)
-				typecheck(a, scope, "", nil, .Pointing_Push, val, child)
-			}
-		}
+		walk_scope_children(a, scope, scope_children)
 		// Close the scope BEFORE the binding's own proof, so that proof sees the
 		// resolved recursive references.
 		scope.walking = false
@@ -1043,43 +998,97 @@ walk_compile_time :: #force_inline proc(
 	return walk(a, current_scope, data.unary.operand)
 }
 
-// A bare constraint `c : name` with no `-> value`: the value is the constraint's
-// default, with folds cached inline (nothing to prove — the default is inside it).
+// colored_name extracts the binding name (and optional `(e)` capture) from the
+// right of a `constraint : name` form. INVALID_NODE (an anonymous `C:`) is valid.
+// Anything else must be an identifier — or a bare `(e)` capture: an ANONYMOUS
+// captured binding (no name; invisible to `.` and carving, reachable only by
+// mention, like any capture). ok=false reports Invalid_Constraint_Name.
+colored_name :: proc(a: ^Analyzer, name_idx: Node_Index) -> (name, capture: string, ok: bool) {
+	if name_idx == INVALID_NODE do return "", "", true
+	ast := a.ast
+	if ast.node_kinds[name_idx] == .Identifier {
+		name = span_str(ast, ast.node_data[name_idx].identifier.name)
+		capture = span_str(ast, ast.node_data[name_idx].identifier.capture)
+	}
+	if name == "" && capture == "" {
+		sem_error(
+			a,
+			"invalid constraint name: the colored name must be an identifier",
+			.Invalid_Constraint_Name,
+			node_span(a, name_idx),
+		)
+		return "", "", false
+	}
+	return name, capture, true
+}
+
+// A bare colored form `c : name` in VALUE position (a pattern cover, an operand):
+// PURE — the form denotes the constraint's materialized default, and nothing is
+// registered anywhere. A `.Constraint` CHILD of a scope is a binding and goes
+// through walk_scope_children → walk_constraint_binding instead: registration is
+// the caller's decision, not a side effect of evaluating the form.
 walk_constraint :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
 	idx: Node_Index,
 ) -> ^Type {
-	ast := a.ast
-	data := ast.node_data[idx]
+	data := a.ast.node_data[idx]
 	constraint := walk(a, current_scope, data.binary.left)
-	name := ""
-	capture := ""
-	if data.binary.right != INVALID_NODE {
-		right_kind := ast.node_kinds[data.binary.right]
-		if right_kind == .Identifier {
-			name = span_str(ast, ast.node_data[data.binary.right].identifier.name)
-			capture = span_str(ast, ast.node_data[data.binary.right].identifier.capture)
-		} else if right_kind == .Carve {
-			csrc := ast.node_data[data.binary.right].carve.source
-			if csrc != INVALID_NODE && ast.node_kinds[csrc] == .Identifier {
-				name = span_str(ast, ast.node_data[csrc].identifier.name)
-				capture = span_str(ast, ast.node_data[csrc].identifier.capture)
-			}
-		}
-		// A colored binding's name must be an identifier — or a bare `(e)` capture
-		// (an ANONYMOUS captured binding, mention-only).
-		if name == "" && capture == "" {
-			sem_error(
-				a,
-				"invalid constraint name: the colored name must be an identifier",
-				.Invalid_Constraint_Name,
-				node_span(a, data.binary.right),
-			)
-			return make_invalid()
-		}
+	if _, _, ok := colored_name(a, data.binary.right); !ok {
+		return make_invalid()
 	}
-	return append_bare_constraint(a, current_scope, name, constraint, .Pointing_Push, idx, capture)
+	value, _, _ := materialize_bare_constraint(a, constraint, idx)
+	return value
+}
+
+// walk_constraint_binding registers the binding a bare colored form denotes when
+// it stands as a scope child: `C:name` — create `name`, color it by C, value =
+// C's materialized default.
+walk_constraint_binding :: proc(
+	a: ^Analyzer,
+	scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
+	data := a.ast.node_data[idx]
+	constraint := walk(a, scope, data.binary.left)
+	name, capture, ok := colored_name(a, data.binary.right)
+	if !ok do return make_invalid()
+	return append_bare_constraint(a, scope, name, constraint, .Pointing_Push, idx, capture)
+}
+
+// materialize_bare_constraint folds a constraint and materializes its default —
+// the PURE half of a bare colored form, shared by the registering path
+// (append_bare_constraint) and value positions (walk_constraint, pattern covers).
+// When the fold touches a still-walking scope, `pend` names the scope to await and
+// the value is the constraint node itself as a placeholder.
+materialize_bare_constraint :: proc(
+	a: ^Analyzer,
+	constraint: ^Type,
+	node: Node_Index,
+) -> (
+	value: ^Type,
+	fc: ^Type,
+	pend: ^Scope_Type,
+) {
+	a.fold_pending = nil
+	fc = fold_constraint(constraint)
+	if default_is_infinite(fc) {
+		sem_error(
+			a,
+			"infinite default: the constraint's first production recurses into its own grammar — put a terminal production (e.g. `-> {}`) first",
+			.Infinite_Recursion,
+			node_span(a, node),
+		)
+	}
+	value = default_value(fc)
+	if pend = a.fold_pending; pend != nil {
+		a.fold_pending = nil
+		// TRAP: the CONSTRAINT NODE holds the slot until close_default patches in
+		// the default — NOT an Unknown_Type, which means `??` and would diagnose
+		// every fold over this scope as insoluble.
+		value = constraint
+	}
+	return
 }
 
 // append_bare_constraint registers a valueless colored binding: the value is the
@@ -1094,23 +1103,8 @@ append_bare_constraint :: proc(
 	node: Node_Index,
 	capture: string = "",
 ) -> ^Type {
-	a.fold_pending = nil
-	fc := fold_constraint(constraint)
-	if default_is_infinite(fc) {
-		sem_error(
-			a,
-			"infinite default: the constraint's first production recurses into its own grammar — put a terminal production (e.g. `-> {}`) first",
-			.Infinite_Recursion,
-			node_span(a, node),
-		)
-	}
-	value := default_value(fc)
-	if pend := a.fold_pending; pend != nil {
-		a.fold_pending = nil
-		// TRAP: the CONSTRAINT NODE holds the slot until close_default patches in
-		// the default — NOT an Unknown_Type, which means `??` and would diagnose
-		// every fold over this scope as insoluble.
-		value = constraint
+	value, fc, pend := materialize_bare_constraint(a, constraint, node)
+	if pend != nil {
 		scope_append(a, scope, name, constraint, bk, value, capture)
 		append(&scope.constraint_folds, nil)
 		append(&scope.type_folds, nil)
@@ -1388,10 +1382,47 @@ carve_shorthand_field :: proc(
 	return fscope, fidx, true
 }
 
+// carve_colored_source returns the `.Constraint` node a carve's source holds for
+// the colored-carve form `C:name{…}` (the parser wraps the whole colored form in
+// the Carve node), or INVALID_NODE for a plain carve.
+carve_colored_source :: proc(a: ^Analyzer, carve_idx: Node_Index) -> Node_Index {
+	src := a.ast.node_data[carve_idx].carve.source
+	if src != INVALID_NODE && a.ast.node_kinds[src] == .Constraint do return src
+	return INVALID_NODE
+}
+
+// walk_colored_carve_binding registers the binding a colored carve denotes when it
+// stands as a scope child: `C:name{…}` — create `name`, color it by C, and derive
+// its value by carving C's complete structure with the overrides ("create p,
+// constrain p by Point, carve p with x -> 10").
+walk_colored_carve_binding :: proc(
+	a: ^Analyzer,
+	scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
+	ast := a.ast
+	cnode := carve_colored_source(a, idx)
+	cdata := ast.node_data[cnode]
+	constraint := walk(a, scope, cdata.binary.left)
+	name, capture, ok := colored_name(a, cdata.binary.right)
+	if !ok do return make_invalid()
+	// An empty carve is the identity derivation, so `C:name{}` IS `C:name`.
+	if ast.node_data[idx].carve.children.len == 0 {
+		return append_bare_constraint(a, scope, name, constraint, .Pointing_Push, idx, capture)
+	}
+	value := walk_carve(a, scope, idx, constraint)
+	scope_append(a, scope, name, constraint, .Pointing_Push, value, capture)
+	typecheck(a, scope, name, constraint, .Pointing_Push, value, idx)
+	return value
+}
+
 // `source{ … }` — derive a new scope from `source`. source_override, when non-nil,
 // replaces the walk of the source node: used for the shorthand carve-of-a-carved-
 // field (`a{z{a->2}}`), where `z` is threaded in as a self-mention into the carved
 // scope (identical to `.z`) rather than resolving as a plain enclosing mention.
+// A COLORED source (`C:name{…}` in value position — a pattern cover, an operand)
+// derives from the shape C itself, PURELY: the name registers nothing here; a
+// scope child registers through walk_colored_carve_binding instead.
 walk_carve :: proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1400,7 +1431,23 @@ walk_carve :: proc(
 ) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
-	source := source_override != nil ? source_override : walk(a, current_scope, data.carve.source)
+	source: ^Type
+	if source_override != nil {
+		source = source_override
+	} else if cnode := carve_colored_source(a, idx); cnode != INVALID_NODE {
+		cdata := ast.node_data[cnode]
+		source = walk(a, current_scope, cdata.binary.left)
+		if _, _, ok := colored_name(a, cdata.binary.right); !ok {
+			return make_invalid()
+		}
+		// An empty carve is the identity derivation: `C:{}` IS the bare `C:`.
+		if data.carve.children.len == 0 {
+			value, _, _ := materialize_bare_constraint(a, source, idx)
+			return value
+		}
+	} else {
+		source = walk(a, current_scope, data.carve.source)
+	}
 
 	result := new(Type)
 	result^ = Carve_Type {

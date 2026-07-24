@@ -1054,7 +1054,27 @@ shape ? {
 }
 ```
 
-Here `Circle:` means “matches the `Circle` shape anonymously”.
+Here `Circle:` is an anonymous binding shaped by `Circle` — a complete value, by default completeness. Matching is against that complete value: a structural shape carries its colored fields, and a colored field admits any value of its color, so any `Circle`-shaped value takes this branch.
+
+For a primitive shape the complete value is a single leaf — the default — so the anonymous-binding form matches only that value:
+
+```syntact
+n ? {
+  u8: -> "zero"    // u8: is an anonymous u8 binding — its complete value is 0
+  -> "not zero"
+}
+```
+
+To match a primitive's whole set, use the shape itself, bare:
+
+```syntact
+n ? {
+  u8 -> "fits in a byte"
+  -> "wider"
+}
+```
+
+The rule is uniform: a branch match is an ordinary expression denoting a set of values, and the branch fires when the scrutinee belongs to it. A bare shape denotes its set. `C:` denotes the complete value of an anonymous binding colored by `C` — structure admits through its colors, a leaf admits only itself.
 
 A pattern can be a refinement:
 
