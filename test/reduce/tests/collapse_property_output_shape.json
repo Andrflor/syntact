@@ -1,0 +1,6 @@
+{
+  "name": "Collapse keeps its output shape for property access",
+  "description": "A collapse denotes its production's value: `avg{red blue}!.r` reads field r of the produced Color, through the carved inputs (255+0)/2",
+  "source": "Color -> {\n  u8:r\n  u8:g\n  u8:b\n}\navg -> {\n  Color:a\n  Color:b\n  -> Color{\n    r -> (a.r + b.r)/2\n    g -> (a.g + b.g)/2\n    b -> (a.b + b.b)/2\n  }\n}\nColor:red{r->255}\nColor:blue{b->255}\n-> avg{red blue}!.r",
+  "expect": "127"
+}

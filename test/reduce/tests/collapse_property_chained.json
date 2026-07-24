@@ -1,0 +1,6 @@
+{
+  "name": "Property chain through a collapse result",
+  "description": "`box{...}!.inner.x` resolves each step against the collapsed production's shape: inner is a scope field of the produced scope, x a field of the nested Point carve",
+  "source": "Point -> { u8:x u8:y }\nbox -> {\n  Point:p\n  -> { inner -> Point{x -> p.x + 1} }\n}\n-> box{Point{x->9}}!.inner.x",
+  "expect": "10"
+}
