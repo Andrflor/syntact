@@ -6,6 +6,27 @@ import "core:strings"
 // CONSTRAINT side: fold_constraint resolves the set a binding IMPOSES (left of
 // `:`), satisfy proves a value's type is a subset of it. Same package as type.odin.
 
+// probe_constraint_domains folds `t` through each domain kernel in the coloring
+// order — integer, float, string, bool — returning the first family that claims
+// it (a set takes the color of what it carries). nil when no kernel resolves it.
+probe_constraint_domains :: proc(t: ^Type) -> ^Type {
+	if r := fold_constraint_integer(t); r != nil do return r
+	if r := fold_constraint_float(t); r != nil do return r
+	if r := fold_constraint_string(t); r != nil do return r
+	if r := fold_constraint_bool(t); r != nil do return r
+	return nil
+}
+
+// probe_set_algebra_domains is the `& | ~` variant: the set-algebra kernels never
+// produce a STRING set (string negation/positional composition stays symbolic),
+// so the string kernel is excluded.
+probe_set_algebra_domains :: proc(t: ^Type) -> ^Type {
+	if r := fold_constraint_integer(t); r != nil do return r
+	if r := fold_constraint_float(t); r != nil do return r
+	if r := fold_constraint_bool(t); r != nil do return r
+	return nil
+}
+
 fold_constraint :: proc(t: ^Type) -> ^Type {
 	if t != nil {
 		#partial switch v in t^ {
@@ -62,9 +83,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// Numeric intersection if possible (`..9 & 11..`); symbolic otherwise
 			// (mixed families, positional negation, scopes).
 			syn := new_type(And_Type{left, right})
-			if r := fold_constraint_integer(syn); r != nil do return r
-			if r := fold_constraint_float(syn); r != nil do return r
-			if r := fold_constraint_bool(syn); r != nil do return r
+			if r := probe_set_algebra_domains(syn); r != nil do return r
 			return syn
 		case Or_Type:
 			left := fold_constraint(v.left)
@@ -76,9 +95,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// PRODUCED domains (`{-> 1} | {-> 2}` → `1..2`), losing the producer level and
 			// breaking the value-vs-shape proof. satisfy decomposes the Or per branch.
 			if fold_is_producer(left) || fold_is_producer(right) do return syn
-			if r := fold_constraint_integer(syn); r != nil do return r
-			if r := fold_constraint_float(syn); r != nil do return r
-			if r := fold_constraint_bool(syn); r != nil do return r
+			if r := probe_set_algebra_domains(syn); r != nil do return r
 			return syn
 		case Negate_Type:
 			// De Morgan normalization, in the same pass: push ~ toward the leaves and
@@ -103,9 +120,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			operand := fold_constraint(v.operand)
 			if fold_is_unknown(operand) do return operand
 			syn := new_type(Negate_Type{operand})
-			if r := fold_constraint_integer(syn); r != nil do return r
-			if r := fold_constraint_float(syn); r != nil do return r
-			if r := fold_constraint_bool(syn); r != nil do return r
+			if r := probe_set_algebra_domains(syn); r != nil do return r
 			if neg := negate_ordinal_string(v.operand); neg != nil do return neg
 			return syn
 		case Integer_Type:
@@ -145,11 +160,7 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			// Run the kernels over the folded CHILDREN (the synthetic node has no
 			// type_fold), never the cached envelope — which would hide the dependency.
 			syn := new_type(Compose_Type{operator = v.operator, left = left, right = right})
-			if r := fold_constraint_integer(syn); r != nil do return r
-			if r := fold_constraint_float(syn); r != nil do return r
-			if r := fold_constraint_string(syn); r != nil do return r
-			if r := fold_constraint_bool(syn); r != nil do return r
-			return nil
+			return probe_constraint_domains(syn)
 		case Range_Type:
 			// A three-bound string range `"ab".."cd".."ef"` (starts/contains/ends): the
 			// flat fold loses the middle, so keep the Range and let satisfy enforce all three.
@@ -160,19 +171,11 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			if fold_is_unknown(right) do return right
 			// A missing bound (`5..`, `..10`) stays nil — the kernels read it as open.
 			syn := new_type(Range_Type{left, right})
-			if r := fold_constraint_integer(syn); r != nil do return r
-			if r := fold_constraint_float(syn); r != nil do return r
-			if r := fold_constraint_string(syn); r != nil do return r
-			if r := fold_constraint_bool(syn); r != nil do return r
-			return nil
+			return probe_constraint_domains(syn)
 		}
 	}
 	// Leftover kinds (unresolved mentions/references, none, invalid): probe each domain.
-	if r := fold_constraint_integer(t); r != nil do return r
-	if r := fold_constraint_float(t); r != nil do return r
-	if r := fold_constraint_string(t); r != nil do return r
-	if r := fold_constraint_bool(t); r != nil do return r
-	return nil
+	return probe_constraint_domains(t)
 }
 
 // negated wraps a ^Type in a Negate_Type; fold_constraint re-normalizes it.
@@ -621,6 +624,18 @@ satisfy :: proc(fc, ft: ^Type) -> bool {
 	case Recursive_Mention_Type:
 		c := fold_constraint(f.match_scope.types[f.match_index])
 		return satisfy(c, ft)
+	case Carve_Type:
+		// A LAZY recursive tail (`Array{u8}` kept symbolic by fold_constraint) unfolds
+		// ONE level against the finite value — the same law binding_satisfy applies,
+		// centralized here so a tail reached through set algebra (`u8 | Array{u8}`)
+		// proves identically. A non-tail carve materializes and proves as its scope.
+		if is_recursive_tail(fc) {
+			return satisfy_root(recursive_tail_unfold(fc), ft)
+		}
+		if sub := fold_carve_constraint(fc); sub != nil {
+			return satisfy_root(new_type(sub^), ft)
+		}
+		return false
 	case Compose_Type:
 		// A string `+` sequence: the value must split, left to right, into its segments.
 		if f.operator == .Add {
@@ -842,14 +857,10 @@ binding_satisfy :: proc(cs: Scope_Type, i: int, vs: Scope_Type, j: int) -> bool 
 	}
 	if cs.constraint_folds[i] == nil {
 		return satisfy((cs.type_folds[i]), vs.type_folds[j])
-	} else {
-		// A recursive tail is unfolded one level against the live scope; everything
-		// else is the already-materialized constraint scope.
-		if is_recursive_tail(cs.constraint_folds[i]) {
-			return satisfy_root(recursive_tail_unfold(cs.constraint_folds[i]), vs.type_folds[j])
-		}
-		return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
 	}
+	// A recursive tail unfolds one level inside satisfy's Carve case — one law,
+	// whether the tail stands alone or inside set algebra.
+	return satisfy_root(cs.constraint_folds[i], vs.type_folds[j])
 }
 
 // binding_color computes the COLOR `cs[i]` imposes on the value field — the same
@@ -871,10 +882,16 @@ binding_color :: proc(cs: Scope_Type, i: int) -> ^Type {
 // color_scope_with_constaint stamps `cs`'s per-field colors onto `vs` after
 // scope_satisfy proved vs ⊆ cs, so the constraint travels WITH the value. Only ONE
 // level (nested scopes were colored by their own recursive pass). An existing color
-// is narrowed with `&`, never lost. Field pairing follows scope_satisfy_range.
+// is narrowed with `&`, never lost. Field pairing follows scope_satisfy_range —
+// which is 1:1 ONLY up to the first Expand: the tail consumes the whole remaining
+// RUN, so its grammar color pairs many-to-one and must never be stamped onto the
+// single element at its index (that corrupts the shared value node, and the next
+// proof of the same value reads the bogus color). Tail elements are colored by the
+// tail's own unfold proofs.
 color_scope_with_constaint :: proc(cs, vs: Scope_Type) {
 	n := min(len(cs.names), len(vs.names))
 	for k in 0 ..< n {
+		if cs.kind[k] == .Expand do break
 		if k >= len(vs.constraint_folds) do break
 		color := binding_color(cs, k)
 		if color == nil do continue

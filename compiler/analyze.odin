@@ -84,6 +84,18 @@ Analyzer :: struct {
 	// fold layer never needs this Analyzer to read one). This set only exists to
 	// enumerate the active overrides when a deferred obligation snapshots them.
 	active_override_sites: map[Binding_Site]bool,
+	// The obligation ledger: one conclusion per (recorded site, error type). A
+	// proof re-fires on every materialization; whatever environment concludes
+	// FIRST owns the diagnostic — a later re-proof of the same obligation (same
+	// site, possibly a different message) never stacks a second one.
+	concluded:             map[Obligation_Site]bool,
+}
+
+// Obligation_Site identifies one proof obligation for the ledger: the source
+// span recorded on the IR at walk time plus the error class.
+Obligation_Site :: struct {
+	span: Span,
+	type: Analyzer_Error_Type,
 }
 
 // Identifies a single binding for the refinement-override map.
@@ -124,37 +136,20 @@ snapshot_overrides :: proc(a: ^Analyzer) -> map[Binding_Site]^Type {
 	return snap
 }
 
-// install_override_snapshot installs `snap` onto the live override map, returning the
-// prior values of exactly the keys it touched (with a `present` flag) so the install
-// can be undone precisely. A nil/empty snapshot installs nothing.
-Override_Save :: struct {
-	site:    Binding_Site,
-	value:   ^Type,
-	present: bool,
-}
-install_override_snapshot :: proc(a: ^Analyzer, snap: map[Binding_Site]^Type) -> []Override_Save {
-	if a == nil || len(snap) == 0 do return {}
-	saved := make([dynamic]Override_Save, 0, len(snap))
+// install_override_snapshot replays a snapshot of branch overrides (taken by
+// snapshot_overrides when an obligation was deferred) as an ordinary override
+// frame, registering fresh sites on the active set. Undo with
+// uninstall_branch_refinement — the same frame law as every other installer.
+install_override_snapshot :: proc(a: ^Analyzer, snap: map[Binding_Site]^Type) -> Override_Frame {
+	frame: Override_Frame
+	if a == nil || len(snap) == 0 do return frame
 	for site, v in snap {
-		prev, present := site.scope.refine_overrides[site.index]
-		append(&saved, Override_Save{site, prev, present})
-		site.scope.refine_overrides[site.index] = v
-		if !present do a.active_override_sites[site] = true
-	}
-	return saved[:]
-}
-
-// restore_override_snapshot undoes install_override_snapshot exactly.
-restore_override_snapshot :: proc(a: ^Analyzer, saved: []Override_Save) {
-	if a == nil do return
-	for s in saved {
-		if s.present {
-			s.site.scope.refine_overrides[s.site.index] = s.value
-		} else {
-			delete_key(&s.site.scope.refine_overrides, s.site.index)
-			delete_key(&a.active_override_sites, s.site)
+		if _, present := site.scope.refine_overrides[site.index]; !present {
+			a.active_override_sites[site] = true
 		}
+		frame_override(&frame, site, v)
 	}
+	return frame
 }
 
 // One deferred obligation, re-run when `awaiting` finishes walking:
@@ -368,7 +363,21 @@ typecheck :: proc(
 		return
 	}
 
+	if carve_of_own_color(constraint, value) do return
 	prove_binding(a, fc, ft, name, node)
+}
+
+// carve_of_own_color reports whether a binding's value is a carve DERIVED FROM
+// its own constraint (`Point:p{x -> 10}` — walk_colored_carve_binding threads the
+// constraint in as the carve source). Such a value inhabits its color by
+// construction; every possible violation (an override out of color, a dependent
+// field broken by an override) is proven at materialization
+// (prove_materialized_carve), so the whole-binding proof would only re-report the
+// same obligation with a vaguer message.
+carve_of_own_color :: proc(constraint, value: ^Type) -> bool {
+	if constraint == nil || value == nil do return false
+	cv, ok := value^.(Carve_Type)
+	return ok && cv.source == constraint
 }
 
 // prove_binding is the diagnostic tail shared by typecheck and retypecheck:
@@ -443,7 +452,7 @@ scope_close :: proc(a: ^Analyzer, s: ^Scope_Type) {
 			// scrutinee domain it was written under.
 			saved := install_override_snapshot(a, p.overrides)
 			close_carve(a, p)
-			restore_override_snapshot(a, saved)
+			uninstall_branch_refinement(a, saved)
 		case .Default:
 			close_default(a, p)
 		}
@@ -561,7 +570,23 @@ retypecheck :: proc(a: ^Analyzer, scope: ^Scope_Type, bind: int, node: Node_Inde
 	}
 	if bind < len(scope.constraint_folds) do scope.constraint_folds[bind] = fc
 	if bind < len(scope.type_folds) do scope.type_folds[bind] = ft
+	if carve_of_own_color(constraint, value) do return
 	prove_binding(a, fc, ft, scope.names[bind], node)
+}
+
+// nth_named returns the index of the rank-th binding named `name` in `scope` (or
+// -1), plus whether the scope defines the name AT ALL — the ONE occurrence law
+// behind ordinal resolution (`a#1`), the carve default target (rank 0), and carve
+// re-resolution against a substituted scope (carve_ref_index).
+nth_named :: proc(scope: ^Scope_Type, name: string, rank: int) -> (idx: int, found_any: bool) {
+	count := 0
+	for i := 0; i < len(scope.names); i += 1 {
+		if scope.names[i] != name do continue
+		found_any = true
+		if count == rank do return i, true
+		count += 1
+	}
+	return -1, found_any
 }
 
 // scope_resolve maps a name (and optional ordinal) to its defining (scope, index),
@@ -589,17 +614,8 @@ scope_resolve :: proc(
 			}
 			return nil, -1
 		}
-		count := 0
-		found_any := false
-		for i := 0; i < len(scope.names); i += 1 {
-			if scope.names[i] == name {
-				found_any = true
-				if count == int(ordinal) {
-					return scope, i
-				}
-				count += 1
-			}
-		}
+		idx, found_any := nth_named(scope, name, int(ordinal))
+		if idx >= 0 do return scope, idx
 		// Like the unordered case, walk up to an ancestor — but only when THIS scope
 		// does not define the name at all. A scope that defines `d` shadows ancestors;
 		// an out-of-range ordinal there is unresolved, not a jump to the parent's `d`.
@@ -616,10 +632,8 @@ scope_resolve :: proc(
 			}
 		}
 	} else {
-		for i := 0; i < len(scope.names); i += 1 {
-			if scope.names[i] == name {
-				return scope, i
-			}
+		if idx, _ := nth_named(scope, name, 0); idx >= 0 {
+			return scope, idx
 		}
 	}
 
@@ -656,28 +670,15 @@ nth_pointing_push :: proc(scope: ^Scope_Type, k: int) -> int {
 // self_resolve locates a field for a self-mention (`.x`) in the carved scope.
 // Unlike scope_resolve it never walks up to the parent — `.` names *this* scope.
 self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_Type, int) {
-	if ordinal >= 0 {
-		if name == "" {
-			if int(ordinal) < len(scope.types) {
-				return scope, int(ordinal)
-			}
-			return nil, -1
-		}
-		count := 0
-		for i := 0; i < len(scope.names); i += 1 {
-			if scope.names[i] == name {
-				if count == int(ordinal) {
-					return scope, i
-				}
-				count += 1
-			}
+	if ordinal >= 0 && name == "" {
+		if int(ordinal) < len(scope.types) {
+			return scope, int(ordinal)
 		}
 		return nil, -1
 	}
-	for i := 0; i < len(scope.names); i += 1 {
-		if scope.names[i] == name {
-			return scope, i
-		}
+	rank := ordinal >= 0 ? int(ordinal) : 0
+	if idx, _ := nth_named(scope, name, rank); idx >= 0 {
+		return scope, idx
 	}
 	return nil, -1
 }
@@ -2126,20 +2127,34 @@ emit :: proc(message: string, error_type: Analyzer_Error_Type) {
 // emit_at reports a fold-layer error at an explicit span — the carve / override
 // site recorded on the IR at walk time — falling back to the armed recheck_span
 // when the span is zero, and staying silent when neither is set (rather than
-// anchoring at offset 0). A fold is a recomputable cache, so the same proof
-// re-fires once per refold: a STRICT duplicate (same type, span, and message) is
-// dropped — the stable per-site span is what makes every re-proof of one
-// obligation collapse onto ONE diagnostic — while distinct diagnostics at
-// different spans (the legitimate double, e.g. a carve override AND its dependent
-// production both overflowing) survive untouched.
+// anchoring at offset 0).
+//
+// A fold is a recomputable cache, so the same proof re-fires once per refold —
+// possibly under a DIFFERENT environment, wording the failure differently. The
+// obligation ledger keys the conclusion on (site, error type): one obligation,
+// one diagnostic, whatever each re-proof would have said. Distinct obligations
+// at different sites (e.g. a carve override AND its dependent production both
+// overflowing) survive untouched. Only a FALLBACK-anchored error (no recorded
+// site — the caller passed a zero span) still dedups by exact message: its
+// anchor varies with whichever recheck is armed, so the span alone cannot
+// identify the obligation.
 emit_at :: proc(message: string, error_type: Analyzer_Error_Type, span: Span) {
 	a := current_analyzer()
 	if a == nil do return
+	site_anchored := span.start != 0 || span.end != 0
 	s := span
-	if s.start == 0 && s.end == 0 do s = a.recheck_span
-	if s.start == 0 && s.end == 0 do return
-	for e in a.errors {
-		if e.type == error_type && e.span == s && e.message == message do return
+	if !site_anchored {
+		s = a.recheck_span
+		if s.start == 0 && s.end == 0 do return
+	}
+	if site_anchored {
+		key := Obligation_Site{s, error_type}
+		if key in a.concluded do return
+		a.concluded[key] = true
+	} else {
+		for e in a.errors {
+			if e.type == error_type && e.span == s && e.message == message do return
+		}
 	}
 	sem_error(a, message, error_type, s)
 }

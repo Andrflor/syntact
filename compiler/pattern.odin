@@ -63,6 +63,40 @@ pattern_target_is_concrete :: proc(ft: ^Type) -> bool {
 	return false
 }
 
+// pattern_target_is_concrete_structure reports whether a folded target denotes
+// exactly one STRUCTURE (a production-free scope of concrete fields). Structural
+// dispatch-in-order applies only to a NON-recursive pattern: a self-recursive
+// machine folds through its refinement machinery (rebound shadows, per-branch
+// narrowing), which owns the path-dependence a concrete frame would bake in.
+pattern_target_is_concrete_structure :: proc(ft: ^Type) -> bool {
+	if ft == nil do return false
+	if s, ok := ft^.(Scope_Type); ok && len(scope_productions(s)) == 0 {
+		return scope_value_is_concrete(s)
+	}
+	return false
+}
+
+// scope_value_is_concrete reports whether a scope VALUE denotes exactly one
+// structure: non-empty (the empty scope doubles as the capture/pull placeholder,
+// which must stay symbolic), production-free (a machine's value-set is its
+// productions' union), only pushed fields (an expand tail or a pull hole is a
+// set), each folding to a singleton or recursively to such a structure.
+scope_value_is_concrete :: proc(s: Scope_Type) -> bool {
+	if len(s.kind) == 0 do return false
+	for i in 0 ..< len(s.kind) {
+		if s.kind[i] != .Pointing_Push do return false
+		f: ^Type = i < len(s.type_folds) ? s.type_folds[i] : nil
+		if f == nil && i < len(s.types) do f = s.types[i]
+		if f == nil do return false
+		if fold_is_concrete_value(f) do continue
+		fs, ok := f^.(Scope_Type)
+		if !ok || len(scope_productions(fs)) > 0 || !scope_value_is_concrete(fs) {
+			return false
+		}
+	}
+	return true
+}
+
 // fold_constraint_pattern resolves a pattern used as a CONSTRAINT to the product of
 // the FIRST branch whose match the target satisfies. A target depending on an
 // unknown propagates Unknown (so it is diagnosed Insoluble rather than skipped).
@@ -89,12 +123,23 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 	ft := pattern_target_fold(p)
 	if ft == nil do return nil
 
-	// Concrete singleton target: run branches in order, take the FIRST that matches.
-	// The fired product folds with its cover substituted by the matched pieces
+	// Rebound sites: a recursive carve inside a branch product (`f{n->n-1,
+	// acc->acc+n}`) makes every binding it REBINDS path-dependent — each
+	// materialization carries its own value, so folding such a mention to the
+	// CURRENT frame's value would bake the first frame into every path.
+	rebound := pattern_rebound_sites(&p, t)
+	defer delete(rebound)
+
+	// Concrete target: run branches in order, take the FIRST that matches. The
+	// fired product folds with its cover substituted by the matched pieces
 	// (destructuring) — `{u8:(v)} -> v + 1` over `{3}` folds as 4, not as the
 	// cover default. No rebound shadowing here: with a concrete scrutinee the
 	// current frame IS the only path, so a rebound binding's frame value is exact.
-	if pattern_target_is_concrete(ft) {
+	// A concrete STRUCTURE dispatches this way only in a NON-recursive pattern —
+	// a self-recursive machine keeps the set path below, whose refinement
+	// machinery owns the rebound path-dependence.
+	if pattern_target_is_concrete(ft) ||
+	   (len(rebound) == 0 && pattern_target_is_concrete_structure(ft)) {
 		for branch in p.branches {
 			if branch_covers(branch, ft) {
 				return fold_type(fired_product(branch, ft))
@@ -102,21 +147,16 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		}
 	}
 
-	// SET target: a recursive carve inside a branch product (`f{n->n-1, acc->acc+n}`)
-	// makes every binding it REBINDS path-dependent — each materialization carries
-	// its own value, so folding such a mention to the CURRENT frame's value would
-	// bake the first frame into every path. Those sites fold as Unknown while the
-	// branch products fold; a branch-cover refinement still wins for the scrutinee
-	// itself (`0 -> n` folds n to 0 — install_rebound_shadow skips overridden sites).
-	rebound := pattern_rebound_sites(&p, t)
-	defer delete(rebound)
+	// SET target: rebound sites fold as Unknown while the branch products fold; a
+	// branch-cover refinement still wins for the scrutinee itself (`0 -> n` folds
+	// n to 0 — install_rebound_shadow skips overridden sites).
 
 	// Deterministic ONLY when the FIRST branch covers the whole target.
 	// A covering branch AFTER intercepting ones is NOT deterministic — earlier
 	// branches steal values, so the result is the combined Or type.
 	if len(p.branches) > 0 && branch_covers(p.branches[0], ft) {
 		shadow := install_rebound_shadow(rebound[:])
-		defer uninstall_fold_refinement(shadow)
+		defer frame_restore(shadow)
 		return fold_type(fired_product(p.branches[0], ft))
 	}
 
@@ -132,8 +172,8 @@ fold_type_pattern :: proc(t: ^Type) -> ^Type {
 		saved := install_fold_refinement(p.target, p.branches[:], i)
 		shadow := install_rebound_shadow(rebound[:])
 		pf := fold_type(fired_product(branch, ft))
-		uninstall_fold_refinement(shadow)
-		uninstall_fold_refinement(saved)
+		frame_restore(shadow)
+		frame_restore(saved)
 		if pf == nil {
 			// A branch that folds to nothing is skippable ONLY when it is the pure
 			// tail re-entry of this very pattern — its value IS the eventual exit
@@ -305,16 +345,15 @@ collect_rebound_sites :: proc(t: ^Type, home: ^Scope_Type, pattern: ^Type, sites
 // install_rebound_shadow overrides each rebound site with Unknown so its mention
 // folds symbolic. A site ALREADY overridden is skipped — the branch-cover
 // refinement (installed just before) or an outer frame's narrowing wins, which is
-// what keeps the sound `0 -> n` exit folding to 0. Undone by
-// uninstall_fold_refinement like any override batch.
-install_rebound_shadow :: proc(sites: []Binding_Site) -> [dynamic]Fold_Override_Save {
-	saved: [dynamic]Fold_Override_Save
+// what keeps the sound `0 -> n` exit folding to 0. Undone by frame_restore like
+// any override frame.
+install_rebound_shadow :: proc(sites: []Binding_Site) -> Override_Frame {
+	frame: Override_Frame
 	for site in sites {
 		if _, present := site.scope.refine_overrides[site.index]; present do continue
-		append(&saved, Fold_Override_Save{site, nil, false})
-		site.scope.refine_overrides[site.index] = new_type(Unknown_Type{})
+		frame_override(&frame, site, new_type(Unknown_Type{}))
 	}
-	return saved
+	return frame
 }
 
 // destructure_cover materializes the substitution a fired branch implies: a clone

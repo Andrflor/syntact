@@ -1472,67 +1472,6 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 	return copy
 }
 
-// reduce_unify_pull mirrors the analyzer's unify_pull for reduce-side substitution
-// — same structural matching, no fold calls.
-reduce_unify_pull :: proc(constraint, value: ^Type, copy, src: ^Scope_Type) {
-	if constraint == nil || value == nil do return
-
-	// Unification matches the VALUE's structure: a mention/reference/collapse is
-	// resolved to its reduced structure on demand (a recursive carve passes the
-	// cover capture `r` — a mention of the destructured tail scope).
-	value := value
-	#partial switch _ in value^ {
-	case Mention_Type, Reference_Type, Execute_Type:
-		value = reduce_value(value)
-		if value == nil do return
-	}
-
-	// A mention of a pull on the constraint side: bind it to the value.
-	if m, ok := constraint^.(Mention_Type); ok {
-		if m.match_scope == src && m.match_index >= 0 && m.match_index < len(copy.kind) {
-			if copy.kind[m.match_index] == .Pointing_Pull {
-				copy.types[m.match_index] = value
-				if m.match_index < len(copy.type_folds) {
-					copy.type_folds[m.match_index] = nil
-				}
-			}
-		}
-		return
-	}
-
-	// Two carves: unify each constraint override against the value override that
-	// targets the same source slot. A SCOPE value against a grammar carve
-	// (`Array{T}:source` proven by `{2 3 4 5}`) reuses the analyzer's grammar
-	// unroll (unify_pull_carve_scope) — reduce refolds on demand, so re-entering
-	// the fold layer at this bounded point is fine.
-	if cc, c_ok := &constraint^.(Carve_Type); c_ok {
-		if vc, v_ok := &value^.(Carve_Type); v_ok {
-			for ci in 0 ..< len(cc.references) {
-				slot := cc.references[ci].match_index
-				for vi in 0 ..< len(vc.references) {
-					if vc.references[vi].match_index == slot {
-						reduce_unify_pull(cc.types[ci], vc.types[vi], copy, src)
-						break
-					}
-				}
-			}
-		} else if vs, vs_ok := &value^.(Scope_Type); vs_ok {
-			unify_pull_carve_scope(cc, vs^, copy, src)
-		}
-		return
-	}
-
-	// Two scopes: unify field-by-field by position.
-	if cs, c_ok := &constraint^.(Scope_Type); c_ok {
-		if vs, v_ok := &value^.(Scope_Type); v_ok {
-			n := min(len(cs.types), len(vs.types))
-			for i in 0 ..< n {
-				reduce_unify_pull(cs.types[i], vs.types[i], copy, src)
-			}
-		}
-	}
-}
-
 // ============================================================================
 // CONCRETE EVALUATORS — operate on already-reduced concrete operands.
 // ============================================================================

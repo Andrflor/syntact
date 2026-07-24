@@ -60,15 +60,27 @@ family_of :: proc(t: ^Type) -> Family {
 		return family_of(v.operand)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return family_of(v.match_scope.types[v.match_index])
+			// Read through binding_value_view, never the raw slot: a capture whose
+			// slot is still the cover placeholder classifies by its applied COLOR,
+			// exactly as fold_type would resolve it.
+			return family_of(binding_value_view(v.match_scope, v.match_index))
 		}
 		return .Unknown
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			return family_of(ref.match_scope.types[ref.match_index])
+			return family_of(binding_value_view(ref.match_scope, ref.match_index))
 		}
 		return .Unknown
+	case Or_Type:
+		// A union domain (a capture's applied `u8|string`) spans families; family_of
+		// answers with ONE family only when both branches agree. A mixed union is
+		// .Other — NOT .Unknown (no ?? involved), so compose_error_message still
+		// reaches the per-family union check through families_of.
+		lf := family_of(v.left)
+		rf := family_of(v.right)
+		if lf == rf do return lf
+		return .Other
 	case Unknown_Type:
 		return .Unknown
 	case None_Type:
@@ -391,16 +403,21 @@ families_of :: proc(t: ^Type, out: ^bit_set[Family]) {
 		return
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			if f := stored_type_fold_at(v.match_scope, v.match_index); f != nil && f != t {
-				families_of(f, out)
+			// Resolve through binding_value_view (refinement override / capture
+			// color / stored value — the same resolution fold_type applies), so a
+			// union domain SPREADS into its families instead of collapsing to one.
+			if view := binding_value_view(v.match_scope, v.match_index);
+			   view != nil && view != t {
+				families_of(view, out)
 				return
 			}
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			if f := stored_type_fold_at(ref.match_scope, ref.match_index); f != nil && f != t {
-				families_of(f, out)
+			if view := binding_value_view(ref.match_scope, ref.match_index);
+			   view != nil && view != t {
+				families_of(view, out)
 				return
 			}
 		}

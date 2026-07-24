@@ -154,23 +154,23 @@ test_typecheck_i8_overflow_29 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_default_bool_false_first_30 :: proc(t: ^testing.T) {
+test_default_nested_production_lazy_30 :: proc(t: ^testing.T) {
+	run_analyze_test("tests/default_nested_production_lazy.json", t)
+}
+
+@(test)
+test_default_bool_false_first_31 :: proc(t: ^testing.T) {
 	run_analyze_test("tests/default_bool_false_first.json", t)
 }
 
 @(test)
-test_negrange_satisfy_valid_31 :: proc(t: ^testing.T) {
+test_negrange_satisfy_valid_32 :: proc(t: ^testing.T) {
 	run_analyze_test("tests/negrange_satisfy_valid.json", t)
 }
 
 @(test)
-test_typecheck_bool_valid_false_32 :: proc(t: ^testing.T) {
+test_typecheck_bool_valid_false_33 :: proc(t: ^testing.T) {
 	run_analyze_test("tests/typecheck_bool_valid_false.json", t)
-}
-
-@(test)
-test_infinite_default_nested_33 :: proc(t: ^testing.T) {
-	run_analyze_test("tests/infinite_default_nested.json", t)
 }
 
 @(test)

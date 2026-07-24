@@ -192,6 +192,32 @@ capture_color_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	return nil
 }
 
+// binding_value_view returns the ^Type a binding's VALUE denotes to any observer —
+// the ONE value-resolution law, shared by folding and the diagnostics layer so a
+// proof always classifies the same value the fold would produce:
+//   1. the branch-refinement override, when one is installed for this branch;
+//   2. the capture's applied COLOR, while its slot still holds the unfilled cover
+//      placeholder (fold_type's capture rule — without it a diagnostic reads the
+//      raw placeholder scope and concludes "a scope" for a value whose domain is
+//      really `u8|string`);
+//   3. the stored value.
+// Steps 1–2 return already-folded domains; step 3 returns the raw expression.
+binding_value_view :: proc(scope: ^Scope_Type, index: int) -> ^Type {
+	if scope == nil || index < 0 || index >= len(scope.types) do return nil
+	if ov := refine_override_for(scope, index); ov != nil do return ov
+	if dom := capture_color_domain(scope, index); dom != nil {
+		// A color that is itself the EMPTY scope is the unbound-pull placeholder
+		// ("the color is not inferred yet"), not a real domain: the view is
+		// unknown — no diagnostic may conclude on it. Only a materialization that
+		// binds the pull yields a domain to conclude on.
+		if ds, is_scope := dom^.(Scope_Type); is_scope && len(ds.kind) == 0 {
+			return new_type(Unknown_Type{})
+		}
+		return dom
+	}
+	return scope.types[index]
+}
+
 // color_is_leaf_domain reports whether a folded color denotes a LEAF set (integer/float/
 // string/bool), reading through a producer scope `{-> set}` (how a pull-derived domain
 // like T=2..5 folds). A structural scope/carve (`Array{T}`) is NOT a leaf domain.
@@ -254,9 +280,12 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			if v.match_scope != nil && v.match_index >= 0 {
 				// A pattern-branch refinement override replaces the binding's value with
 				// its narrowed domain (so `n-1` inside `n ? {0->…, ->…}` folds n over its
-				// refined domain, not its default value).
+				// refined domain, not its default value). Returned UNWRAPPED, like the
+				// arithmetic envelopes: the override is the ENVELOPE of a symbolic value
+				// (`n` ranges over 5..9), not the set-as-a-value meta level — wrapping it
+				// in a producer would make it fail against the leaf color it inhabits.
 				if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
-					return fold_type(ov)
+					return ov
 				}
 				// A LEAF-COLORED capture (`(e)` in `{u8:(e) …}`) still awaiting a concrete
 				// scrutinee has only its empty cover placeholder in `types[]`, which would
@@ -276,8 +305,9 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			}
 		case Reference_Type:
 			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
+				// Unwrapped for the same reason as the Mention override above.
 				if ov := refine_override_for(v.reference.match_scope, v.reference.match_index); ov != nil {
-					return fold_type(ov)
+					return ov
 				}
 				entered, blocked := value_fold_enter(v.reference.match_scope, v.reference.match_index)
 				if blocked do return nil
@@ -325,9 +355,11 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			if v.type_fold != nil do return fold_type(v.type_fold)
 			return fold_constraint(v.target)
 		case Compose_Type:
-			// A comparison is a bool VALUE; its typeof is the full `{true,false}` so a
+			// A comparison is a bool VALUE: exact when both operands are concrete
+			// (the concrete-value law), else the full `{true,false}` so a
 			// `=true -> … =false -> …` pattern over it is exhaustive.
 			if is_comparison_op(v.operator) {
+				if r := fold_concrete_comparison(v); r != nil do return r
 				return new_type(make_bool_any())
 			}
 			// Arithmetic envelope returned UNWRAPPED: wrapping `0..510` in a producer
@@ -580,9 +612,14 @@ fold_compose :: proc(a: ^Analyzer, t: ^Type, node: Node_Index) {
 	if comp.operator == .Add {
 		if _, ok := fold_string_sequence(t, true).([]String_Interval); ok do return
 	}
-	// A comparison produces a BOOL, never an interval — fold to a full Bool so a
+	// A comparison produces a BOOL. Two concrete operands compute the exact
+	// singleton (the concrete-value law); a symbolic one keeps the full Bool so a
 	// `=true -> … =false -> …` pattern over it is exhaustive.
 	if is_comparison_op(comp.operator) {
+		if r := fold_concrete_comparison(comp^); r != nil {
+			comp.type_fold = r
+			return
+		}
 		lf := family_of(comp.left)
 		rf := family_of(comp.right)
 		if is_numeric_family(lf) && is_numeric_family(rf) {
@@ -604,6 +641,68 @@ is_comparison_op :: proc(op: Operator_Kind) -> bool {
 		return true
 	}
 	return false
+}
+
+// fold_concrete_comparison computes a comparison over two CONCRETE numeric
+// operands to its exact bool singleton — the concrete-value law: when values are
+// known at compile time, the compiler computes the exact result. nil when either
+// side is symbolic (the caller keeps the full {true,false} envelope) or
+// non-numeric. Two integers compare exactly; a mixed int/float pair compares as
+// f64 (the integer promotes, per element).
+fold_concrete_comparison :: proc(comp: Compose_Type) -> ^Type {
+	if !is_comparison_op(comp.operator) do return nil
+
+	li, l_int := concrete_int_operand(comp.left)
+	ri, r_int := concrete_int_operand(comp.right)
+	if l_int && r_int {
+		return new_type(make_bool_const(compare_ordered(comp.operator, li > ri, li < ri)))
+	}
+
+	lf, l_num := concrete_number_operand(comp.left)
+	rf, r_num := concrete_number_operand(comp.right)
+	if l_num && r_num {
+		return new_type(make_bool_const(compare_ordered(comp.operator, lf > rf, lf < rf)))
+	}
+	return nil
+}
+
+// compare_ordered evaluates a comparison operator from the two order facts.
+compare_ordered :: proc(op: Operator_Kind, gt, lt: bool) -> bool {
+	#partial switch op {
+	case .Less:
+		return lt
+	case .Greater:
+		return gt
+	case .LessEqual:
+		return !gt
+	case .GreaterEqual:
+		return !lt
+	case .Equal:
+		return !gt && !lt
+	case .NotEqual:
+		return gt || lt
+	}
+	return false
+}
+
+concrete_int_operand :: proc(t: ^Type) -> (i128, bool) {
+	if it := fold_type_integer(t); it != nil {
+		if iv, ok := it^.(Integer_Type); ok && int_is_concrete(iv) {
+			return int_value(iv), true
+		}
+	}
+	return 0, false
+}
+
+// concrete_number_operand reads a concrete numeric operand as f64 (int promoted).
+concrete_number_operand :: proc(t: ^Type) -> (f64, bool) {
+	if v, ok := concrete_int_operand(t); ok do return f64(v), true
+	if ft := fold_type_float(t); ft != nil {
+		if fv, ok := ft^.(Float_Type); ok && float_is_concrete(fv) {
+			return float_value(fv), true
+		}
+	}
+	return 0, false
 }
 
 // fold_cast resolves a `value :: target` raw binary reinterpret-cast: extract the
@@ -1053,13 +1152,8 @@ carve_ref_index :: proc(ref: Reference, sub: ^Scope_Type) -> int {
 			if ref.match_scope.names[j] == name do rank += 1
 		}
 	}
-	count := 0
-	for i in 0 ..< len(sub.names) {
-		if sub.names[i] != name do continue
-		if count == rank do return i
-		count += 1
-	}
-	return -1
+	idx, _ := nth_named(sub, name, rank)
+	return idx
 }
 
 carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Scope_Type {
