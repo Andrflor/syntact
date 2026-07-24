@@ -1,0 +1,6 @@
+{
+  "name": "Property on a scalar-producing collapse is an error",
+  "description": "`f!` where f produces 5 has no fields: `.r` is a real Invalid_Property_Access, not a silent none",
+  "source": "f -> { -> 5 }\n-> f!.r",
+  "expect_errors": ["Invalid_Property_Access"]
+}
