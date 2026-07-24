@@ -1,0 +1,6 @@
+{
+  "name": "tc_refinement_three_level_sisters",
+  "description": "three nesting levels, the MIDDLE branch has a sister: in it n is provably (<50) & ~(<40) = 40..49 ⊆ 40..60, and no narrowing from the innermost pattern (level 3) may leak into that proof — branch refinement frames must unwind exactly",
+  "source": "g -> {\n  40..60:v -> 40\n  -> v\n}\nf -> {\n  u8:n\n  -> n ? {\n    <50 -> n ? {\n      <40 -> n ? {\n        <10 -> 1\n        -> 2\n      }\n      -> g{v -> n}!\n    }\n    -> 0\n  }\n}\n-> f{n -> 45}!",
+  "expect_errors": []
+}

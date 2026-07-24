@@ -1,0 +1,6 @@
+{
+  "name": "tc_comparison_envelope_undecided",
+  "description": "an OVERLAPPING envelope does not decide: a is 0..255 and a < 100 is true for some values, false for others, so the comparison keeps the full {true,false} type and does not satisfy =true",
+  "source": "a -> ??::u8\n=true:c -> a < 100\n-> 0",
+  "expect_errors": ["Constraint_Mismatch"]
+}
