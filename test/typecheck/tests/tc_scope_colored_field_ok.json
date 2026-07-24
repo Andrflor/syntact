@@ -1,0 +1,1 @@
+{ "name": "tc_scope_colored_field_ok", "description": "companion to tc_scope_uncolored_leaf_strict: a colored field admits any value of its color", "source": "{u8:x}:a -> {x -> 99}", "expect_errors": [] }

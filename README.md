@@ -1155,6 +1155,10 @@ x -> {3 4 5}
 }
 ```
 
+A capture may also glue directly onto the name it aliases: `u8(h)` is the same
+capture as `u8:(h)`. The parenthesized name is never a call — collapse is `!` —
+so even `u8(u8)` reads unambiguously as "a `u8`, captured under the name `u8`".
+
 The cons cover `{u8:(h) ...u8:(t)}` consumes the run the way the grammar does:
 one colored head, an expand tail swallowing the rest — so recursion over a list
 is a pattern whose cover mirrors the list's own grammar:
