@@ -50,35 +50,35 @@ Analyzer_Error :: struct {
 // a Phase_Context holding both phase handles; always go through current_analyzer()/
 // current_reducer(), never cast the pointer directly (see Phase_Context below).
 Analyzer :: struct {
-	ast:              ^Ast,
-	scope:            ^Scope_Type,
-	errors:           [dynamic]Analyzer_Error,
-	warnings:         [dynamic]Analyzer_Error,
+	ast:                   ^Ast,
+	scope:                 ^Scope_Type,
+	errors:                [dynamic]Analyzer_Error,
+	warnings:              [dynamic]Analyzer_Error,
 	// During a carve override walk, points at the scope being carved so a
 	// source-none property (`.x`) resolves against its original fields; nil
 	// otherwise. Saved/restored around each override walk so nested carves nest.
-	carved_scope:     ^Scope_Type,
+	carved_scope:          ^Scope_Type,
 	// Span of the carve being rechecked, so the fold layer anchors its error at the
 	// carve site. Set around recheck_carve only.
-	recheck_span:     Span,
+	recheck_span:          Span,
 	// TRAP: these guard stacks live ON the analyzer (not a global) so their backing
 	// dies with this pass's arena — a global [dynamic] would keep a stale cap into a
 	// destroyed arena (the test runner analyzes on many threads). Strictly balanced.
 	// scope_scan_stack guards the Scope/Carve constraint field scan against a
 	// self-referential constraint (`A -> {x -> A}`): the outermost scan decides.
-	scope_scan_stack: [dynamic]^Type,
+	scope_scan_stack:      [dynamic]^Type,
 	// carve_fold_stack guards fold_carve against re-entering the SAME carve node
 	// (a self-referential carve): inner re-entry bails to nil. Distinct nodes pass.
-	carve_fold_stack: [dynamic]^Type,
+	carve_fold_stack:      [dynamic]^Type,
 	// execute_stack guards folding a recursive collapse: each Execute fold pushes the
 	// underlying scope its target resolves through (stable across carve clones);
 	// re-entry bails to nil.
-	execute_stack:    [dynamic]^Scope_Type,
+	execute_stack:         [dynamic]^Scope_Type,
 	// `fold_pending` is set by the fold layer when a fold touches a scope still being
 	// walked or an unresolved forward Reference: the obligation is queued on
 	// `pending` and re-run at that scope's close (scope_close).
-	fold_pending:     ^Scope_Type,
-	pending:          [dynamic]Pending,
+	fold_pending:          ^Scope_Type,
+	pending:               [dynamic]Pending,
 	// Sites whose scope currently carries a refinement override (the values live on
 	// each Scope_Type.refine_overrides, keyed by binding index — NOT here, so the
 	// fold layer never needs this Analyzer to read one). This set only exists to
@@ -165,14 +165,14 @@ Pending_Kind :: enum u8 {
 }
 
 Pending :: struct {
-	kind:     Pending_Kind,
-	awaiting: ^Scope_Type,
-	rr:       ^Type, // .Ref: the unresolved Reference_Type node to patch
-	target:   ^Type, // .Ref: the property's target expression (nil = self-mention)
-	carve:    ^Type, // .Carve: the Carve_Type node
-	scope:    ^Scope_Type, // .Typecheck: the owning scope
-	bind:     int, // .Typecheck: binding index in `scope`
-	node:     Node_Index, // diagnostics anchor
+	kind:      Pending_Kind,
+	awaiting:  ^Scope_Type,
+	rr:        ^Type, // .Ref: the unresolved Reference_Type node to patch
+	target:    ^Type, // .Ref: the property's target expression (nil = self-mention)
+	carve:     ^Type, // .Carve: the Carve_Type node
+	scope:     ^Scope_Type, // .Typecheck: the owning scope
+	bind:      int, // .Typecheck: binding index in `scope`
+	node:      Node_Index, // diagnostics anchor
 	// Snapshot of the pattern-branch refinement overrides active when this obligation
 	// was deferred. A carve inside a pattern branch (`n ? {0->…, -> f{n->n-1}}`)
 	// re-proves at scope_close, long after walk_pattern restored the live overrides —
@@ -763,8 +763,6 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		return walk_constraint(a, current_scope, idx)
 	case .Property:
 		return walk_property(a, current_scope, idx)
-	case .Enforce:
-		return walk_enforce(a, current_scope, idx)
 	case .Range:
 		return walk_range(a, current_scope, idx)
 	case .Operator:
@@ -964,7 +962,15 @@ walk_expand :: #force_inline proc(
 		   ast.node_kinds[cdata.binary.right] == .Identifier {
 			name := span_str(ast, ast.node_data[cdata.binary.right].identifier.name)
 			capture := span_str(ast, ast.node_data[cdata.binary.right].identifier.capture)
-			return append_bare_constraint(a, current_scope, name, constraint, .Expand, idx, capture)
+			return append_bare_constraint(
+				a,
+				current_scope,
+				name,
+				constraint,
+				.Expand,
+				idx,
+				capture,
+			)
 		}
 		value: ^Type = nil
 		if cdata.binary.right != INVALID_NODE {
@@ -1048,11 +1054,7 @@ walk_constraint :: #force_inline proc(
 // walk_constraint_binding registers the binding a bare colored form denotes when
 // it stands as a scope child: `C:name` — create `name`, color it by C, value =
 // C's materialized default.
-walk_constraint_binding :: proc(
-	a: ^Analyzer,
-	scope: ^Scope_Type,
-	idx: Node_Index,
-) -> ^Type {
+walk_constraint_binding :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	data := a.ast.node_data[idx]
 	constraint := walk(a, scope, data.binary.left)
 	name, capture, ok := colored_name(a, data.binary.right)
@@ -1292,19 +1294,6 @@ walk_property :: #force_inline proc(
 	return result
 }
 
-walk_enforce :: #force_inline proc(
-	a: ^Analyzer,
-	current_scope: ^Scope_Type,
-	idx: Node_Index,
-) -> ^Type {
-	data := a.ast.node_data[idx]
-	left := walk(a, current_scope, data.binary.left)
-	right := walk(a, current_scope, data.binary.right)
-	result := new(Type)
-	result^ = Or_Type{left, right}
-	return result
-}
-
 walk_range :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1420,11 +1409,7 @@ carve_colored_source :: proc(a: ^Analyzer, carve_idx: Node_Index) -> Node_Index 
 // stands as a scope child: `C:name{…}` — create `name`, color it by C, and derive
 // its value by carving C's complete structure with the overrides ("create p,
 // constrain p by Point, carve p with x -> 10").
-walk_colored_carve_binding :: proc(
-	a: ^Analyzer,
-	scope: ^Scope_Type,
-	idx: Node_Index,
-) -> ^Type {
+walk_colored_carve_binding :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_Index) -> ^Type {
 	ast := a.ast
 	cnode := carve_colored_source(a, idx)
 	cdata := ast.node_data[cnode]
@@ -1843,7 +1828,14 @@ prove_carve_override :: proc(fc: ^Type, value: ^Type, ref: Reference, fallback: 
 value_is_comparable_for_proof :: proc(vf: ^Type) -> bool {
 	if vf == nil do return false
 	#partial switch v in vf^ {
-	case Integer_Type, Float_Type, String_Type, Bool_Type, Range_Type, Or_Type, And_Type, Negate_Type,
+	case Integer_Type,
+	     Float_Type,
+	     String_Type,
+	     Bool_Type,
+	     Range_Type,
+	     Or_Type,
+	     And_Type,
+	     Negate_Type,
 	     Scope_Type:
 		return true
 	}

@@ -1,0 +1,6 @@
+{
+  "name": "tc_proof_by_coloring_holds",
+  "description": "the proof that holds: 2 = 2 folds to true and inhabits the color true — no dedicated proof operator, just `:`",
+  "source": "true:check -> 2 = 2\n-> 0",
+  "expect_errors": []
+}
