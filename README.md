@@ -142,7 +142,7 @@ Come back to this list when a section feels surprising. Most surprises resolve t
 
 Syntact is in active development.
 
-The bootstrap compiler is written in Odin and runs the full pipeline end to end: **parse → analyze (constraint folding) → reduce → bytecode → native x86-64 ELF**. A Syntact program compiles to a runnable static executable. The analyzer proves constraints from value ranges (there is no type system, only structural coloring); the reducer collapses everything reducible — carving, collapse, references, patterns, and affine arithmetic — to a minimal form; a target-neutral bytecode then feeds an optimizing x64 backend (linear-scan allocation, register coalescing, LEA-based instruction selection, width-correct 32-bit arithmetic). An LSP (diagnostics, hover, go-to-definition, rename, completion) and six declarative test suites are part of the project.
+The bootstrap compiler is written in Odin and runs the full pipeline end to end: **parse → analyze (constraint folding) → reduce → bytecode → native x86-64 ELF**. A Syntact program compiles to a runnable static executable — or, when it declares an external boundary, to a dynamically linked one: the compiler emits the ELF dynamic tables (`.interp`, `.dynstr`, `.dynsym`, `.hash`, `.rela`, `.dynamic`) itself, so linking against a `.so` needs no external linker and no build system. Only scalar arguments and results are supported so far (see `interop.md`). The analyzer proves constraints from value ranges (there is no type system, only structural coloring); the reducer collapses everything reducible — carving, collapse, references, patterns, and affine arithmetic — to a minimal form; a target-neutral bytecode then feeds an optimizing x64 backend (linear-scan allocation, register coalescing, LEA-based instruction selection, width-correct 32-bit arithmetic). An LSP (diagnostics, hover, go-to-definition, rename, completion) and six declarative test suites are part of the project.
 
 This README describes the **design direction** of the language, including features that are planned but not yet implemented. Events, resonance, and the full scope algebra are the layers still ahead of the implementation.
 
@@ -1582,7 +1582,7 @@ So you do not need to drop into C for the fast path. A Syntact library is struct
 
 The external boundary is therefore the *exception* — reserved for code you do not control (the kernel, a proprietary `.so`). Everything else is written in Syntact: pure, reducible, optimized by reduction.
 
-> Note: the external boundary is design, not yet implemented. The `<lib>{}` provenance form, `::` raw casts, and the `??` unknown describe where the language is going; the cast and the unknown already fold in the bootstrap compiler, the `<lib>{}` boundary does not parse yet.
+> Note: the external boundary is **partially implemented**. `<lib>{}` parses, analyzes and reduces; a collapse across the frontier becomes a real call in the emitted executable, and the compiler writes the ELF dynamic tables itself — no external linker is invoked. Verified against `libm`, `libc`, `libz`, `libcrypto`, `libpcre2`, `libasound` and `libSDL2`, including two libraries in one binary. What works today is scalars that fit a register (integers and floats, up to six arguments, in any mix); passing an address — and therefore the whole `String`/array side of the size rule — is not implemented, and the memory model it depends on is still an open design question. See `interop.md` for the full state and the open questions.
 
 ---
 
