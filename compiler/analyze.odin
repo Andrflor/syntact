@@ -780,6 +780,8 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		return walk_execute(a, current_scope, idx)
 	case .External:
 		return walk_external(a, current_scope, idx)
+	case .Foreign:
+		return walk_foreign(a, current_scope, idx)
 	case .Literal:
 		return walk_literal(a, idx)
 	case .Identifier:
@@ -836,6 +838,32 @@ walk_scope_node :: #force_inline proc(
 	walk_scope_children(a, scope, children)
 	scope.walking = false
 	scope_close(a, scope)
+	return result
+}
+
+// `<libm.so.6>{ sqrt -> { f64:x  -> ??::f64 } }` — a foreign scope. The body is
+// walked by the ORDINARY scope machinery: a declared symbol is just a binding whose
+// value is a scope, its inputs are colored bindings and its production an unknown
+// cast into the result layout. Nothing here is special-cased — the only addition is
+// stamping the provenance on the scope, which is what marks every collapse through
+// it as crossing the external frontier.
+walk_foreign :: #force_inline proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+) -> ^Type {
+	ast := a.ast
+	data := ast.node_data[idx]
+	body := data.foreign_lib.scope
+	// A provenance with no block declares nothing (the parser already reported it).
+	if body == INVALID_NODE do return make_invalid()
+
+	result := walk(a, current_scope, body)
+	// The body is a scope literal, so this holds; on a malformed body walk returned
+	// Invalid and there is nothing to stamp.
+	if scope, ok := &result^.(Scope_Type); ok {
+		scope.foreign_lib = span_str(ast, data.foreign_lib.lib)
+	}
 	return result
 }
 

@@ -22,7 +22,11 @@ import "core:strings"
 reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
-			if i < len(scope.type_folds) {
+			// The singleton shortcut answers with the FOLD instead of reducing — but a
+			// production that collapses an external must not be answered that way: the
+			// call still has to happen, so a singleton (or void) result must not stand
+			// in for it. Provenance decides, never the shape of the result.
+			if i < len(scope.type_folds) && !holds_foreign_collapse(scope.types[i]) {
 				if shortcut := singleton_shortcut(scope.type_folds[i]); shortcut != nil {
 					return shortcut
 				}
@@ -50,7 +54,8 @@ reduce_expand_production :: proc(value: ^Type) -> ^Type {
 	case Scope_Type:
 		for i := 0; i < len(s.kind); i += 1 {
 			if s.kind[i] == .Product {
-				if i < len(s.type_folds) {
+				// Same guard as reduce: an external collapse is never answered by its fold.
+				if i < len(s.type_folds) && !holds_foreign_collapse(s.types[i]) {
 					if shortcut := singleton_shortcut(s.type_folds[i]); shortcut != nil {
 						return shortcut
 					}
@@ -65,6 +70,36 @@ reduce_expand_production :: proc(value: ^Type) -> ^Type {
 		}
 	}
 	return nil
+}
+
+// holds_foreign_collapse reports whether an expression contains a collapse that
+// crosses the external frontier. Such an expression can never be answered by its
+// cached fold, however concrete that fold looks: the call must still be emitted.
+//
+// The walk covers the composites a production can be built from, so an external
+// buried in arithmetic (`libm.sqrt{x->2.0}! + 1`) is caught too.
+holds_foreign_collapse :: proc(t: ^Type) -> bool {
+	if t == nil do return false
+	#partial switch v in t^ {
+	case Execute_Type:
+		if foreign_target_scope(v.target) != nil do return true
+		return holds_foreign_collapse(v.target)
+	case Foreign_Call_Type:
+		return true
+	case Compose_Type:
+		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+	case Cast_Type:
+		return holds_foreign_collapse(v.value)
+	case Or_Type:
+		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+	case And_Type:
+		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+	case Negate_Type:
+		return holds_foreign_collapse(v.operand)
+	case Range_Type:
+		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+	}
+	return false
 }
 
 // singleton_shortcut returns the fold when it is a concrete singleton, else nil
@@ -82,6 +117,10 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	switch &v in value^ {
 	case Execute_Type:
 		return reduce_value(execute(v))
+	case Foreign_Call_Type:
+		// Already the residual of a crossed frontier: irreducible by construction,
+		// codegen emits the call. Its arguments were reduced when it was built.
+		return value
 	case Compose_Type:
 		return reduce_compose(v)
 	case Cast_Type:
@@ -1375,11 +1414,68 @@ execute :: proc(value: Execute_Type) -> ^Type {
 	if reduced == nil do return value.target
 	#partial switch &s in reduced^ {
 	case Scope_Type:
+		// PROVENANCE DECIDES, not the shape of the production: if this collapse
+		// crosses the external frontier it becomes a call, even when the production
+		// would fold to a singleton or to nothing.
+		if call := foreign_call_of(&s, src); call != nil do return call
 		collapse_enter(src)
 		defer collapse_leave()
 		return reduce(&s)
 	}
 	return reduced
+}
+
+// foreign_call_of lifts a collapse into a Foreign_Call_Type when its target is a
+// symbol declared in a `<lib>{…}` scope, else nil.
+//
+// The provenance sits on the LIBRARY scope, and the collapse target is one of its
+// symbols, so the marker is read through the symbol's parent. `carved` is the
+// pre-carve source scope: a carve clones the symbol, and the clone's parent chain is
+// preserved, but the SYMBOL NAME lives in the parent's `names` — so the name is
+// recovered by locating the scope (or its canonical origin) among the library's
+// bindings.
+foreign_call_of :: proc(target: ^Scope_Type, carved: ^Scope_Type) -> ^Type {
+	lib_scope := target.parent
+	if lib_scope == nil || lib_scope.foreign_lib == "" do return nil
+
+	symbol := foreign_symbol_name(lib_scope, target, carved)
+	if symbol == "" do return nil
+
+	call := Foreign_Call_Type {
+		lib    = lib_scope.foreign_lib,
+		symbol = symbol,
+	}
+	// Arguments in DECLARATION order — that is the ABI's argument order. The
+	// production is the declared result layout, not a computed value.
+	for i := 0; i < len(target.kind); i += 1 {
+		if target.kind[i] == .Product {
+			call.production = target.types[i]
+			continue
+		}
+		// Only value-carrying inputs are arguments; an expansion is not one.
+		if target.kind[i] == .Expand do continue
+		append(&call.args, reduce_value(target.types[i]))
+	}
+	return new_type(call)
+}
+
+// foreign_symbol_name recovers the declared name of a foreign symbol: the binding of
+// `lib_scope` whose value is this very scope. A carve replaced the symbol with a
+// clone, so identity is compared up to materialization (scope_canon), and the
+// pre-carve source is accepted as well.
+foreign_symbol_name :: proc(lib_scope, target, carved: ^Scope_Type) -> string {
+	canon := scope_canon(target)
+	for i := 0; i < len(lib_scope.types); i += 1 {
+		bound := follow(lib_scope.types[i])
+		if bound == nil do continue
+		#partial switch &b in bound^ {
+		case Scope_Type:
+			if &b == target || scope_canon(&b) == canon || (carved != nil && &b == carved) {
+				return lib_scope.names[i]
+			}
+		}
+	}
+	return ""
 }
 
 // reduce_carve materializes a carve into its substituted scope, reducing each

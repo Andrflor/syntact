@@ -1,0 +1,6 @@
+{
+  "name": "Foreign Not Prefix Comparison",
+  "description": "<b>s{v->1} stays a prefix comparison — the foreign form requires a `{` IMMEDIATELY after the closing `>`, so a path followed by anything else falls back to `<`.",
+  "source": "a -> <b>s{v->1}",
+  "expect": "Scope[Pointing(Identifier(a),Operator(Greater,Operator(Less,nil,Identifier(b)),Carve(Identifier(s),[Pointing(Identifier(v),Literal(Integer,1))])))]"
+}

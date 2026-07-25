@@ -402,6 +402,39 @@ lex_less :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return Token{kind = kind, span = Span{start, start + tlen}, flags = flags}
 }
 
+// Scans a `<…>` library path starting at the `<` and returns the span of the path
+// WITHOUT its chevrons. Lexically `<b>` (a provenance) and `<b>` (the tail of
+// `a<b>c`) are the same bytes, so this is NOT a lexer decision: only the parser
+// knows whether a `<` sits in prefix position, and it alone calls this. A closing
+// `>` must be reached over filename bytes on the same line, otherwise this was an
+// ordinary comparison (`<5`, `a < b`) and we report failure.
+scan_lib_path :: proc(src: string, open: u32) -> (Span, bool) {
+	i := open + 1
+	for i < u32(len(src)) {
+		c := src[i]
+		if c == '>' {
+			// `<>` declares no library: reject the empty path.
+			if i == open + 1 do return EMPTY_SPAN, false
+			return Span{open + 1, i}, true
+		}
+		if !is_lib_path_byte(c) do return EMPTY_SPAN, false
+		i += 1
+	}
+	return EMPTY_SPAN, false
+}
+
+// Bytes admissible in a library name: letters, digits, and the punctuation that
+// appears in sonames and relative paths (`libz.so.1`, `./lib/libfoo.so`).
+is_lib_path_byte :: #force_inline proc(c: u8) -> bool {
+	switch c {
+	case 'a' ..= 'z', 'A' ..= 'Z', '0' ..= '9':
+		return true
+	case '.', '_', '-', '+', '/':
+		return true
+	}
+	return false
+}
+
 // `>>` may extend to 3-byte `>>-` (ResonancePush) / `>>=` (ReactivePush); peek the
 // third byte before settling for RShift.
 lex_greater :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
@@ -2303,6 +2336,15 @@ parse_range :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 parse_prefix_comparison :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
 	token_kind := parser.current_token.kind
+
+	// A `<` in PREFIX position may open a foreign provenance (`<libm.so.6>{…}`)
+	// rather than a prefix comparison (`<5`). Only here is the distinction
+	// decidable: in infix position (`a<b>c`) the very same bytes are comparisons,
+	// which is why the lexer must not attempt this.
+	if token_kind == .Less {
+		if node, is_foreign := try_parse_foreign(parser); is_foreign do return node
+	}
+
 	advance_token(parser)
 
 	operand := parse_expression(parser, .UNARY)
@@ -2491,6 +2533,49 @@ parse_reference :: proc(parser: ^Parser) -> Node_Index {
 	process_filenode_flat(current, parser)
 
 	return current
+}
+
+// `<libm.so.6>{ … }` — a foreign scope, speculated from a prefix `<`. The body is an
+// ordinary scope, so its symbols are parsed by the normal machinery: a symbol is
+// just a binding whose value is a scope whose inputs are colored bindings and whose
+// production is an unknown cast into the result layout. Nothing is special-cased.
+//
+// A `{` MUST follow the path — `<libm.so.6>` alone names a library without declaring
+// anything, and requiring the block is also what keeps the speculation unambiguous:
+// `<a>` on its own stays available as prefix-comparison syntax.
+try_parse_foreign :: proc(parser: ^Parser) -> (Node_Index, bool) {
+	open := parser.current_token.span.start
+	lib_span, ok := scan_lib_path(parser.source, open)
+	if !ok do return INVALID_NODE, false
+
+	// Re-lex from just past the closing `>`, so the block is tokenized normally.
+	// Nothing has been consumed yet, so failing after this point still needs no
+	// rollback of node state — only the lexer position moves.
+	saved_offset := parser.lexer.offset
+	saved_current := parser.current_token
+	saved_peek := parser.peek_token
+
+	parser.lexer.offset = lib_span.end + 1
+	parser.current_token = next_token(&parser.lexer)
+	parser.peek_token = next_token(&parser.lexer)
+
+	if parser.current_token.kind != .LeftBrace && parser.current_token.kind != .LeftBraceCarve {
+		// Not a provenance after all: restore and let the prefix comparison run.
+		parser.lexer.offset = saved_offset
+		parser.current_token = saved_current
+		parser.peek_token = saved_peek
+		return INVALID_NODE, false
+	}
+
+	scope := parse_scope(parser)
+	if scope == INVALID_NODE do return INVALID_NODE, true
+
+	data: Node_Data
+	data.foreign_lib = Foreign_Data {
+		lib   = lib_span,
+		scope = scope,
+	}
+	return add_node(parser, .Foreign, data, Span{open, parser.node_spans[scope].end}), true
 }
 
 // `|`, `<`, `[`, `(` may begin an execution-wrapper chain (`x<!>`, `x[!]`, …) or be

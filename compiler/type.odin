@@ -317,6 +317,11 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			if eff != nil do return fold_type(eff)
 		case Recursive_Mention_Type:
 			return t
+		case Foreign_Call_Type:
+			// The typeof a foreign call is its DECLARED production layout: the value
+			// itself is not computable, only its shape is known. The effect is not
+			// erased by this — the call node survives in the reduction.
+			return fold_type(v.production)
 		case And_Type:
 			return fold_type_set(t)
 		case Or_Type:
@@ -438,6 +443,21 @@ make_producer_scope_multi :: proc(produces: []^Type) -> ^Type {
 // An `...A` expansion (`.Expand`) pastes A's bindings — INCLUDING its production —
 // at that position, so an expansion carrying a production fires BEFORE a later
 // in-place `-> v` (`{...double#0; -> 6}` collapses through double#0's production).
+// foreign_target_scope returns the LIBRARY scope a collapse target belongs to when
+// that target is a foreign symbol, else nil. The provenance sits on the library
+// scope and the target is one of its symbols, so the marker is read through the
+// symbol's parent — carves preserve the parent chain, so a partially applied
+// external is still recognized.
+//
+// This is THE effect marker, and it is deliberately independent of the production's
+// shape: singleton, non-singleton or void all cross the frontier alike.
+foreign_target_scope :: proc(t: ^Type) -> ^Scope_Type {
+	s := execute_target_scope(t)
+	if s == nil do return nil
+	if s.parent == nil || s.parent.foreign_lib == "" do return nil
+	return s.parent
+}
+
 execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
 	cur := follow(t)
 	for cur != nil {
@@ -1316,6 +1336,9 @@ scope_clone :: proc(src: ^Scope_Type) -> ^Scope_Type {
 	for f in src.constraint_folds do append(&dst.constraint_folds, f)
 	for c in src.captures do append(&dst.captures, c)
 	for i in src.unresolved_captures do dst.unresolved_captures[i] = true
+	// Provenance survives cloning: a carved external is still external, so the
+	// effect is lifted at the collapse of the clone just as on the original.
+	dst.foreign_lib = src.foreign_lib
 	return dst
 }
 
@@ -1355,6 +1378,8 @@ scope_repoint_node :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Type 
 	}
 	for c in src.captures do append(&rst.captures, c)
 	for i in src.unresolved_captures do rst.unresolved_captures[i] = true
+	// Provenance survives repointing, for the same reason it survives cloning.
+	rst.foreign_lib = src.foreign_lib
 	return node
 }
 

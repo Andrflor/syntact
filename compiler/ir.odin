@@ -115,11 +115,36 @@ Scope_Type :: struct {
 	// nothing / the empty scope), carried by clones, CLEARED by destructure_cover
 	// when a matched piece fills the slot.
 	unresolved_captures: map[int]bool,
+	// The link provenance when this scope came from `<libm.so.6>{ … }`, "" otherwise.
+	// This is the EFFECT MARKER: a collapse whose target resolves into a binding of
+	// a foreign scope crosses the external frontier, so it must be lifted as an
+	// effectful call regardless of whether its production folds to a singleton, a
+	// non-singleton, or nothing at all. Provenance decides, never the result's shape.
+	// Carried by clones so a carved external stays external.
+	foreign_lib:         string,
 }
 
 // `scope!` — collapse: reduce `target` through its Product binding.
 Execute_Type :: struct {
 	target: ^Type,
+}
+
+// The residual of a collapse that CROSSED THE EXTERNAL FRONTIER: `libm.sqrt{x->2.0}!`
+// where `sqrt` lives in a `<libm.so.6>{…}` scope. The reducer cannot reduce it — the
+// value is not computable in pure Syntact — so it stops here and codegen turns this
+// into a call to the linked symbol.
+//
+// This node is produced from the target's PROVENANCE, never from its production
+// failing to fold: a `<lib>` symbol whose production is a singleton or void is still
+// an effectful call, and folding the result to a point must not erase the act of
+// calling. `args` are the reduced input bindings in declaration order (the ABI's
+// argument order); `production` is the declared result layout, which is what the
+// caller's type sees.
+Foreign_Call_Type :: struct {
+	lib:        string,
+	symbol:     string,
+	args:       [dynamic]^Type,
+	production: ^Type,
 }
 
 // `source{ name -> v, … }` — derive a new scope by overriding bindings. Each
@@ -261,6 +286,7 @@ Type :: union {
 	Integer_Type,
 	Float_Type,
 	Execute_Type,
+	Foreign_Call_Type,
 	Range_Type,
 	Bool_Type,
 	None_Type,
@@ -319,6 +345,15 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 		strings.write_string(b, "none")
 	case Unknown_Type:
 		fmt.sbprintf(b, "??%d", fixedpoint_id(t))
+	case Foreign_Call_Type:
+		// The residual of a crossed frontier: rendered as the call it will become,
+		// since no value can stand in for it at compile time.
+		fmt.sbprintf(b, "<%s>.%s(", v.lib, v.symbol)
+		for a, i in v.args {
+			if i > 0 do strings.write_string(b, ", ")
+			write_value(b, a)
+		}
+		strings.write_byte(b, ')')
 	case Scope_Type:
 		strings.write_byte(b, '{')
 		first := true
@@ -474,6 +509,9 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 			fmt.print("}")
 			break
 		}
+		// A foreign scope announces its provenance: this is the effect marker, so it
+		// must be visible when reading the IR.
+		if v.foreign_lib != "" do fmt.printf("<%s>", v.foreign_lib)
 		fmt.println("{")
 		for i := 0; i < len(v.names); i += 1 {
 			indent(depth + 1)
@@ -617,6 +655,14 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 	case Execute_Type:
 		print_type(v.target, depth)
 		fmt.print("!")
+
+	case Foreign_Call_Type:
+		fmt.printf("<%s>.%s(", v.lib, v.symbol)
+		for a, i in v.args {
+			if i > 0 do fmt.print(", ")
+			print_type(a, depth)
+		}
+		fmt.print(")")
 
 	case Carve_Type:
 		if v.source != nil {
@@ -824,6 +870,17 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 	case Execute_Type:
 		write_fold(b, v.target)
 		strings.write_byte(b, '!')
+	case Foreign_Call_Type:
+		strings.write_byte(b, '<')
+		strings.write_string(b, v.lib)
+		strings.write_string(b, ">.")
+		strings.write_string(b, v.symbol)
+		strings.write_byte(b, '(')
+		for a, i in v.args {
+			if i > 0 do strings.write_string(b, ", ")
+			write_fold(b, a)
+		}
+		strings.write_byte(b, ')')
 	case Mention_Type:
 		strings.write_string(b, v.name != "" ? v.name : "<mention>")
 	case Recursive_Mention_Type:

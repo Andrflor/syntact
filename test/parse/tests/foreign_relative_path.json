@@ -1,0 +1,6 @@
+{
+  "name": "Foreign Relative Path",
+  "description": "<./lib/libfoo.so> — the provenance admits the punctuation of sonames and relative paths; the compiler copies the string verbatim and never interprets it.",
+  "source": "libm -> <./lib/libfoo.so>{ f -> { -> ??::u8 } }",
+  "expect": "Scope[Pointing(Identifier(libm),Foreign(./lib/libfoo.so,Scope[Pointing(Identifier(f),Scope[Product(Operator(Cast,Unknown,Identifier(u8)))])]))]"
+}
