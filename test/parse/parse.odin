@@ -96,6 +96,9 @@ nextern_name :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index)
 	s := ast.node_data[idx].external.name
 	return ast.source[s.start:s.end]
 }
+nforeign_scope :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+	return ast.node_data[idx].foreign_lib.scope
+}
 nevt_from :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
 	return ast.node_data[idx].event_pull.from
 }
@@ -190,6 +193,12 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 		return fmt.tprintf("Expand(%s)", ast_to_string(ast, nunary(ast, idx)))
 	case .External:
 		return fmt.tprintf("External(%s,%s)", nextern_name(ast, idx), ast_to_string(ast, nextern_scope(ast, idx)))
+	case .Foreign:
+		return fmt.tprintf(
+			"Foreign(%s,%s)",
+			compiler.node_foreign_lib_str(ast, idx),
+			ast_to_string(ast, nforeign_scope(ast, idx)),
+		)
 	case .Unknown:
 		return "Unknown"
 	case .Branch:
@@ -266,6 +275,8 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 		}
 	case .External:
 		walk_all_nodes(ast, nextern_scope(ast, idx), full_string, pos_map)
+	case .Foreign:
+		walk_all_nodes(ast, nforeign_scope(ast, idx), full_string, pos_map)
 	case .Identifier, .Literal, .Unknown:
 	}
 }

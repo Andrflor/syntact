@@ -1,0 +1,6 @@
+{
+  "name": "Foreign Declaration",
+  "description": "<libm.so.6>{ sqrt -> { f64:x, -> ??::f64 } } — a foreign scope: the provenance is an opaque link string, the body an ordinary scope whose symbol declares colored inputs and an unknown cast into the result layout.",
+  "source": "libm -> <libm.so.6>{ sqrt -> { f64:x, -> ??::f64 } }",
+  "expect": "Scope[Pointing(Identifier(libm),Foreign(libm.so.6,Scope[Pointing(Identifier(sqrt),Scope[Constraint(Identifier(f64),Identifier(x)),Product(Operator(Cast,Unknown,Identifier(f64)))])]))]"
+}

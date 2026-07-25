@@ -1,0 +1,6 @@
+{
+  "name": "Foreign Anonymous No Args",
+  "description": "<libz.so.1>{ crc32 -> { -> ??::u8 } } — a foreign provenance standing alone (unbound), holding a symbol that takes no argument: the symbol scope is just a production.",
+  "source": "<libz.so.1>{ crc32 -> { -> ??::u8 } }",
+  "expect": "Scope[Foreign(libz.so.1,Scope[Pointing(Identifier(crc32),Scope[Product(Operator(Cast,Unknown,Identifier(u8)))])])]"
+}

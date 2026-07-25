@@ -40,6 +40,10 @@ Node_Kind :: enum u8 {
 	Property,
 	Expand,
 	External,
+	// `<libm.so.6>{ … }` — a scope whose bindings live behind the external
+	// frontier. Distinct from External (a file import): the payload is a link
+	// provenance, and a collapse through it is an effectful call.
+	Foreign,
 	Range,
 	Unknown,
 }
@@ -160,6 +164,14 @@ External_Data :: struct {
 	scope: Node_Index,
 }
 
+// `<libm.so.6>{ sqrt -> { f64:x  -> ??::f64 } }` — `lib` spans the provenance
+// WITHOUT its chevrons (an opaque string the compiler only copies into the link
+// tables, never interprets), `scope` the block of declared symbols.
+Foreign_Data :: struct {
+	lib:   Span,
+	scope: Node_Index,
+}
+
 EventPull_Data :: struct {
 	from:       Node_Index,
 	to:         Node_Index,
@@ -169,17 +181,18 @@ EventPull_Data :: struct {
 // The payload for one node. A raw union with no tag of its own — `node_kinds[i]`
 // is the discriminant. Sized to the largest variant to keep `node_data` flat.
 Node_Data :: struct #raw_union {
-	binary:     Binary_Data,
-	unary:      Unary_Data,
-	literal:    Literal_Data,
-	identifier: Identifier_Data,
-	scope:      Scope_Data,
-	carve:      Carve_Data,
-	pattern:    Pattern_Data,
-	execute:    Execute_Data,
-	operator:   Operator_Node_Data,
-	external:   External_Data,
-	event_pull: EventPull_Data,
+	binary:      Binary_Data,
+	unary:       Unary_Data,
+	literal:     Literal_Data,
+	identifier:  Identifier_Data,
+	scope:       Scope_Data,
+	carve:       Carve_Data,
+	pattern:     Pattern_Data,
+	execute:     Execute_Data,
+	operator:    Operator_Node_Data,
+	external:    External_Data,
+	foreign_lib: Foreign_Data,
+	event_pull:  EventPull_Data,
 }
 
 // The parsed program. The first four arrays are the SOA node store (by Node_Index);
@@ -249,6 +262,12 @@ node_text :: proc(ast: ^Ast, idx: Node_Index) -> string {
 
 node_name_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
 	s := ast.node_data[idx].identifier.name
+	return ast.source[s.start:s.end]
+}
+
+// The link provenance of a Foreign node, chevrons already trimmed by the parser.
+node_foreign_lib_str :: proc(ast: ^Ast, idx: Node_Index) -> string {
+	s := ast.node_data[idx].foreign_lib.lib
 	return ast.source[s.start:s.end]
 }
 
@@ -449,6 +468,14 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		if n_data.external.scope != INVALID_NODE {
 			fmt.printf("%s  Target:\n", indent_str)
 			print_ast(ast, n_data.external.scope, indent + 4)
+		}
+	case .Foreign:
+		fmt.printf(
+			"%sForeign <%s> (line %d, column %d)\n",
+			indent_str, node_foreign_lib_str(ast, idx), pos.line, pos.column,
+		)
+		if n_data.foreign_lib.scope != INVALID_NODE {
+			print_ast(ast, n_data.foreign_lib.scope, indent + 2)
 		}
 	case .Product:
 		fmt.printf("%sProduct -> (line %d, column %d)\n", indent_str, pos.line, pos.column)
