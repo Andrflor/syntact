@@ -105,10 +105,14 @@ emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 		e.rodata_off[i] = len(rodata_blob)
 		for c in transmute([]u8)s do append(&rodata_blob, c)
 	}
-	e.rodata_vaddr = ELF_BASE + ELF_HEADERS
+	// The header block grows by two program headers when the program imports
+	// anything, which shifts .rodata — so the address must be derived from the same
+	// function the ELF writer uses, not from the static constant.
+	headers := elf_headers_size(len(prog.imports))
+	e.rodata_vaddr = ELF_BASE + headers
 
 	// Code follows the rodata blob in the image.
-	code_off := ELF_HEADERS + len(rodata_blob)
+	code_off := headers + len(rodata_blob)
 	e.code_base_off = code_off
 
 	context.user_ptr = &e.buf
@@ -683,8 +687,84 @@ emit_body :: proc(e: ^X64_Emit) -> string {
 			emit_brz(e, v.cond, v.target)
 		case bc.BC_Ret:
 			emit_exit(e, v.src)
+		case bc.BC_Foreign_Call:
+			if msg := emit_foreign_call(e, v); msg != "" do return msg
 		}
 	}
+	return ""
+}
+
+// System V AMD64 argument registers, by class. Integers and pointers consume the
+// INTEGER sequence, floats the SSE sequence, each independently — so `f(int, double,
+// int)` passes rdi, xmm0, rsi.
+SYSV_INT_ARGS := [?]Register64{.RDI, .RSI, .RDX, .RCX, .R8, .R9}
+SYSV_SSE_ARGS := [?]XMMRegister{.XMM0, .XMM1, .XMM2, .XMM3, .XMM4, .XMM5, .XMM6, .XMM7}
+
+// emit_foreign_call emits a call across the external frontier:
+//
+//	args → System V registers, by class
+//	rax  ← number of SSE registers used (required for variadic targets)
+//	call [GOT_VADDR + 8*slot]      ; slot filled by the loader at startup
+//	dst  ← rax (integer result) or xmm0 (float result)
+//
+// The call is INDIRECT through the GOT: the loader writes the resolved address there
+// before the program runs, so the emitted code needs no relocation of its own. The
+// slot address is an absolute immediate, known ahead of layout (see GOT_VADDR).
+emit_foreign_call :: proc(e: ^X64_Emit, v: bc.BC_Foreign_Call) -> string {
+	if v.slot >= GOT_MAX {
+		return "codegen: too many distinct imported symbols"
+	}
+	if len(v.args) > len(SYSV_INT_ARGS) {
+		// Stack-passed arguments would also change the alignment arithmetic below.
+		return "codegen: more than 6 arguments to an external is not supported yet"
+	}
+
+	// Load the arguments BEFORE touching the argument registers as destinations:
+	// a value may live in a register that is itself an argument register, so each
+	// is staged through RAX and pushed, then popped into place. Straightforward and
+	// correct regardless of the allocator's choices.
+	int_n, sse_n := 0, 0
+	for a in v.args {
+		mt := e.prog.value_types[int(a)]
+		load(e, .RAX, a)
+		push_r64(.RAX)
+		if bc.mtype_is_float(mt) {
+			sse_n += 1
+		} else {
+			int_n += 1
+		}
+	}
+	// Pop in reverse so each argument lands in its own register.
+	int_i, sse_i := int_n, sse_n
+	for i := len(v.args) - 1; i >= 0; i -= 1 {
+		mt := e.prog.value_types[int(v.args[i])]
+		pop_r64(.RAX)
+		if bc.mtype_is_float(mt) {
+			sse_i -= 1
+			movq_xmm_r64(SYSV_SSE_ARGS[sse_i], .RAX)
+		} else {
+			int_i -= 1
+			mov_r64_r64(SYSV_INT_ARGS[int_i], .RAX)
+		}
+	}
+
+	// A variadic callee reads AL for the count of SSE registers used; a fixed-arity
+	// one ignores it. Setting it is always safe and makes printf-shaped targets work.
+	emit_load_imm_into(e, .RAX, i64(sse_n))
+
+	// System V requires RSP ≡ 0 (mod 16) AT THE CALL. The prologue aligned the frame,
+	// and the push/pop pairs above are balanced, so alignment is preserved — but the
+	// call itself pushes a return address, so the callee sees RSP+8. That is exactly
+	// what the ABI specifies, so nothing more is needed here.
+	movabs_r64_imm64(.R10, i64(GOT_VADDR + 8 * v.slot))
+	call_m64(AddressComponents{base = .R10})
+
+	// Collect the result from the register its class dictates.
+	dst_mt := e.prog.value_types[int(v.dst)]
+	if bc.mtype_is_float(dst_mt) {
+		movq_r64_xmm_bits(.RAX, .XMM0)
+	}
+	store(e, v.dst, .RAX)
 	return ""
 }
 

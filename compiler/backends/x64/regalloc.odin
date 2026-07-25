@@ -320,6 +320,10 @@ bc_def :: proc(inst: bc.BC_Inst) -> (int, bool) {
 		return int(v.dst), true
 	case bc.BC_Move:
 		return int(v.dst), true
+	case bc.BC_Foreign_Call:
+		// A definition even when the external returns nothing: the slot exists so the
+		// result has a home, and the call is emitted either way.
+		return int(v.dst), true
 	case bc.BC_Label_Def, bc.BC_Jump, bc.BC_Branch_Zero, bc.BC_Ret:
 		return 0, false
 	}
@@ -328,8 +332,13 @@ bc_def :: proc(inst: bc.BC_Inst) -> (int, bool) {
 
 // bc_uses returns the virtual registers an instruction reads.
 bc_uses :: proc(inst: bc.BC_Inst) -> []int {
+	// Sized for the widest fixed-arity instruction; a foreign call has arbitrary
+	// arity and returns its own slice instead (its args are already a []BC_Value).
 	@(static) buf: [2]int
 	switch v in inst {
+	case bc.BC_Foreign_Call:
+		// Reinterpret rather than copy: BC_Value is a distinct int, same layout.
+		return transmute([]int)v.args
 	case bc.BC_Const, bc.BC_Const_F, bc.BC_Str_Const, bc.BC_Load_Arg, bc.BC_Label_Def, bc.BC_Jump:
 		return buf[:0]
 	case bc.BC_Bin:
