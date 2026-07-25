@@ -53,6 +53,19 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 			regs[int(v.dst)] = v.bytes
 		case BC_Load_Arg:
 			regs[int(v.dst)] = interp_load_arg(prog, v, args)
+		case BC_Foreign_Call:
+			// The reference interpreter has no loader and no linked libraries: an
+			// effect crossing the external frontier can only happen in a real
+			// executable. Reported rather than faked, so `--run` never invents a value.
+			imp := prog.imports[v.slot]
+			return {
+				ok = false,
+				error = fmt.tprintf(
+					"cannot interpret a foreign call (<%s>.%s): build an executable to run it",
+					imp.lib,
+					imp.symbol,
+				),
+			}
 		case BC_Bin:
 			dst_mt := prog.value_types[int(v.dst)]
 			if mtype_is_float(dst_mt) {
