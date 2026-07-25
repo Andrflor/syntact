@@ -243,6 +243,7 @@ BC_Inst :: union {
 	BC_Jump, // goto target — back-edge too, so the Label/Jump/Branch_Zero/Move set forms a full CFG: conditionals AND loops are expressible
 	BC_Branch_Zero, // if cond == 0 goto target
 	BC_Ret, // return src (becomes the program's result)
+	BC_Foreign_Call, // dst = call [GOT slot](args…) — crosses the external frontier
 }
 
 BC_Const :: struct {
@@ -321,18 +322,57 @@ BC_Ret :: struct {
 	src: BC_Value,
 }
 
+// A call across the external frontier: `dst = call [GOT slot](args…)`.
+//
+// `slot` indexes BC_Program.imports, which is also the GOT slot the loader fills at
+// startup — so the emitter can address the target without knowing the final table
+// layout. `args` are in DECLARATION order, which the backend maps onto the target
+// ABI's registers by their Machine_Type (integers and floats use separate register
+// classes in System V, so the split happens at emit time, not here).
+//
+// `dst` carries the DECLARED result layout. It is still a definition even for a void
+// external: the call happens regardless of whether anything meaningful is returned.
+BC_Foreign_Call :: struct {
+	dst:  BC_Value,
+	slot: int,
+	args: []BC_Value,
+}
+
 // A lowered program: a flat instruction list plus the value/label counters so a
 // backend knows how many virtual registers to allocate. `error` is non-empty
 // when lowering hit a construct it cannot codegen yet (a symbolic string, an
 // unsized domain) — the pipeline reports it instead of emitting wrong bytecode.
+// One imported symbol: the library it comes from and its name. The pair is written
+// verbatim into the link tables (.dynstr/.dynsym) — neither string is interpreted.
+// The index of an entry in BC_Program.imports IS its GOT slot number, so codegen can
+// address the slot before the tables exist.
+BC_Import :: struct {
+	lib:    string,
+	symbol: string,
+}
+
 BC_Program :: struct {
 	insts:       [dynamic]BC_Inst,
 	value_count: int,
 	label_count: int,
 	value_types: [dynamic]Machine_Type, // Machine_Type per BC_Value (indexed by vN)
 	rodata:      [dynamic]string, // concrete string literals → .rodata, indexed by id
+	// Symbols this program calls across the external frontier, deduplicated. Empty
+	// for a pure program — and an empty list is what keeps the default output a
+	// static binary with no interpreter and no dynamic tables at all.
+	imports:     [dynamic]BC_Import,
 	result_type: Machine_Type, // Machine_Type of the program's returned value
 	error:       string,
+}
+
+// bc_intern_import returns the GOT slot for (lib, symbol), appending it on first
+// use so repeated calls to the same symbol share one slot.
+bc_intern_import :: proc(prog: ^BC_Program, lib, symbol: string) -> int {
+	for imp, i in prog.imports {
+		if imp.lib == lib && imp.symbol == symbol do return i
+	}
+	append(&prog.imports, BC_Import{lib = lib, symbol = symbol})
+	return len(prog.imports) - 1
 }
 
 // ----------------------------------------------------------------------------
@@ -389,6 +429,19 @@ bc_inst_line :: proc(inst: BC_Inst, prog: ^BC_Program = nil) -> string {
 	case BC_Ret:
 		rt := prog != nil ? mtype_name(prog.result_type) : ""
 		return fmt.tprintf("  ret v%d  ; %s", int(v.src), rt)
+	case BC_Foreign_Call:
+		b := strings.builder_make()
+		fmt.sbprintf(&b, "  v%d = call [got %d](", int(v.dst), v.slot)
+		for a, i in v.args {
+			if i > 0 do strings.write_string(&b, ", ")
+			fmt.sbprintf(&b, "v%d", int(a))
+		}
+		strings.write_byte(&b, ')')
+		if prog != nil && v.slot < len(prog.imports) {
+			imp := prog.imports[v.slot]
+			fmt.sbprintf(&b, "  ; <%s>.%s", imp.lib, imp.symbol)
+		}
+		return strings.to_string(b)
 	}
 	return ""
 }

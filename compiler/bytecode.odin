@@ -1,6 +1,7 @@
 package compiler
 
 import bc "bytecode"
+import "core:fmt"
 
 // LOWERING — reduced IR (^Type DAG) → the neutral bytecode (package `bytecode`).
 // The one codegen part that must know both worlds, so it lives in package compiler.
@@ -104,6 +105,10 @@ machine_type_of :: proc(node: ^Type) -> bc.Machine_Type {
 		lm := machine_type_of(v.left)
 		rm := machine_type_of(v.right)
 		return bc.mtype_wider(lm, rm)
+	case Foreign_Call_Type:
+		// An external's layout is its DECLARED production: nothing else about the
+		// result is knowable at compile time.
+		return machine_type_of(v.production)
 	}
 	return .None
 }
@@ -218,6 +223,9 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	case Pattern_Type:
 		dst = bc_lower_pattern(l, v)
 
+	case Foreign_Call_Type:
+		dst = bc_lower_foreign_call(l, node, v)
+
 	case Execute_Type, Carve_Type:
 		// A residual recursive collapse (a symbolic scrutinee kept the pattern
 		// symbolic) has no closed form to emit: the bytecode has no loops yet.
@@ -231,6 +239,48 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 	}
 
 	l.memo[node] = dst
+	return dst
+}
+
+// bc_lower_foreign_call lowers a call across the external frontier: each argument is
+// lowered as an ordinary value, the (lib, symbol) pair is interned into the program's
+// import list, and the call is emitted against that slot.
+//
+// The result's Machine_Type comes from the DECLARED production, which is the only
+// thing known about an external's result — its value is not computable here.
+bc_lower_foreign_call :: proc(l: ^BC_Lower, node: ^Type, v: Foreign_Call_Type) -> bc.BC_Value {
+	args := make([]bc.BC_Value, len(v.args))
+	for a, i in v.args {
+		args[i] = bc_lower_value(l, a)
+		// An argument with no machine layout (a symbolic string, an unsized domain)
+		// cannot be marshalled across the frontier.
+		if int(args[i]) < len(l.prog.value_types) &&
+		   l.prog.value_types[args[i]] == .None {
+			return bc_fail(
+				l,
+				fmt.tprintf(
+					"codegen: argument %d of <%s>.%s has no machine layout",
+					i,
+					v.lib,
+					v.symbol,
+				),
+			)
+		}
+	}
+
+	mt := machine_type_of(v.production)
+	// A `Str` result would have to be marshalled back from an address; only register
+	// -sized results are handled so far.
+	if mt == .Str {
+		return bc_fail(
+			l,
+			fmt.tprintf("codegen: string results from <%s>.%s do not lower yet", v.lib, v.symbol),
+		)
+	}
+
+	dst := bc_fresh_value(l, mt)
+	slot := bc.bc_intern_import(l.prog, v.lib, v.symbol)
+	bc_emit(l, bc.BC_Foreign_Call{dst = dst, slot = slot, args = args})
 	return dst
 }
 
