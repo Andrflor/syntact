@@ -49,7 +49,7 @@ Every build-shaped command accepts:
 ```
 
 **`run` requires the root file-scope to have a production** — collapsing it *is* running the
-program (README:270). A tree with no root production has nothing to run; use `bundle` or
+program (`specs/language/03-first-program.md`). A tree with no root production has nothing to run; use `bundle` or
 `test` instead. This is a structural precondition, not a project category (§5).
 
 **Why `run` defaults to debug and `build`/`bundle` to release:** `run` means "I am iterating"
@@ -80,8 +80,8 @@ signing         per-platform identity config (§7.4)
 
 **There is no `kind` field, deliberately.** Declaring what a project *is* would be exactly the
 sort of built-in category the language rejects — *"the role it plays … comes from the
-operation applied to it, not from a built-in category"* (README:323). A project is a source
-tree. Which role it plays is decided by the command:
+operation applied to it, not from a built-in category"* (`specs/language/04-scopes.md`). A project is a
+source tree. Which role it plays is decided by the command:
 
 ```
 run / build   → the root file-scope's production is the program
@@ -133,8 +133,8 @@ sdk/
 ## 5. Libraries — there is no library artifact
 
 A Syntact library is **a folder of `.syn` files**, and publishing it means shipping the
-folder. README:1579 — *"there is no separate notion of 'a library'"* — and README:1581 —
-*"There is nothing to bundle."* A folder is a scope, a file is a scope, `@` resolves the
+folder. `specs/language/16-external-boundary.md` states both halves: *"there is no separate notion of
+'a library'"* and *"There is nothing to bundle."* A folder is a scope, a file is a scope, `@` resolves the
 filesystem as a scope graph, and `...@lib.geometry` expands it into the consumer, which
 reduces it *there*. No package format, no serialized IR, no interface file, no ABI, no
 version-compatibility surface. Full statement in `targets.md` §6.2.
@@ -185,7 +185,7 @@ Since nothing is declared, each command has a **structural** precondition it che
 
 | Command | Requires |
 |---|---|
-| `run` / `build` | the root file-scope has a production — *"Running the program means collapsing the file-scope"* (README:270). No production ⇒ nothing to run. |
+| `run` / `build` | the root file-scope has a production — *"Running the program means collapsing the file-scope"* (`specs/language/03-first-program.md`). No production ⇒ nothing to run. |
 | `bundle` | at least one declared export |
 | `check` / `test` / `format` | nothing |
 
@@ -351,7 +351,7 @@ cold-build cache. The push/forward/stream outside is §7.1. Nothing else is need
 ## 9. `lsp`
 
 The server already exists (`lsp/lsp.odin`, `lsp/semantic.odin`) with diagnostics, hover,
-go-to-definition, rename, completion, and semantic tokens (README:145). Changes:
+go-to-definition, rename, completion, and semantic tokens (the root `README.md` Status section). Changes:
 
 - becomes `syntact lsp` — one binary, so editors configure one command and version skew
   between compiler and server becomes impossible;
