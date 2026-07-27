@@ -26,7 +26,7 @@ Nothing to invent, only to finish.
 per target. Factored, 8 targets come out of 2 ISAs + 3 image formats + 6 platform records
 (§6.1), plus 2 signers.
 
-Related: reduce collapses everything reducible before codegen (README:2041), so backend
+Related: reduce collapses everything reducible before codegen (`specs/language/20-performance.md`), so backend
 cost scales with the *surviving residual*, not with source size. Fast compilation is a
 property of the design, not a tuning exercise.
 
@@ -226,14 +226,15 @@ refactor pays for object emission too.
 
 > *"An external library is a scope whose production points out; a library written in Syntact
 > is a scope whose production reduces in. They are the same object, seen from two sides —
-> **there is no separate notion of 'a library'**."* — README:1579
+> **there is no separate notion of 'a library'**."*
 >
 > *"…it cross-compiles by an arch flag instead of shipping one binary per platform.
-> **There is nothing to bundle.**"* — README:1581
+> **There is nothing to bundle.**"*
+> — both from `specs/language/16-external-boundary.md`
 
-A Syntact library is a **folder of `.syn` files**. A folder is a scope, a file is a scope
-(README:325), the filesystem is resolved as a scope graph by `@`, and importing is expansion
-(README:1841-1877):
+A Syntact library is a **folder of `.syn` files**. A folder is a scope and a file is a scope
+(`specs/language/04-scopes.md`), the filesystem is resolved as a scope graph by `@`, and importing
+is expansion (`specs/language/18-modules.md`):
 
 ```syntact
 ...@lib.geometry
@@ -527,7 +528,7 @@ changes the code and nothing re-invokes it — so it is close to useless. Syntac
 a CLI, a test run, a server, and a GUI alike.
 
 The general form falls out of the language rather than a framework hook: **running is collapsing
-the file-scope** (README:270), so reload is *re-collapsing from the point the change
+the file-scope** (`specs/language/03-first-program.md`), so reload is *re-collapsing from the point the change
 invalidated*. Because `reduce` is pure and dependency-tracked, that point is known exactly.
 
 **Reload unit = a binding in a scope.** Content-address each binding as
@@ -561,8 +562,8 @@ state at all, so reload preserves nothing because there is nothing to preserve. 
 effects.md's handlers land there is live state, and the rule is scoped precisely to it: *state
 lives in resonant bindings inside handlers; a handler whose shape is unchanged keeps its state,
 a handler whose shape changed resets.* Note this is narrower and better-defined than Flutter's
-widget-identity rule — resonance is the only place mutation exists (README:1685), so it is the
-only thing a reload can disturb. Retrofitting this later is how these systems get ugly.
+widget-identity rule — resonance is the only place mutation exists
+(`specs/language/17-resonance-and-reactivity.md`), so it is the only thing a reload can disturb. Retrofitting this later is how these systems get ugly.
 
 **The interpreter is the debug tier on all five platforms** — and on iOS it is *mandatory*,
 since JIT is forbidden. So this is built once and shipped everywhere. It is also, with C/JS
@@ -597,16 +598,17 @@ than one feature, and §7 why callbacks are the reverse-direction problem.
 
 No third-party engine is bound. The GUI framework and the game framework are **one ordinary
 Syntact library** — a folder of `.syn` (§6.2), expanded through `@`, reduced at the consumer.
-This is what README:1814-1835 already sketches, ending on *"`State`, `Column`, `Text`, and
-`Button` are scopes. The SDK should be a library of scopes, not a second language."*
+This is what `specs/language/17-resonance-and-reactivity.md` already sketches, ending on
+*"`State`, `Column`, `Text`, and `Button` are scopes. The SDK should be a library of scopes, not a
+second language."*
 
 Unifying GUI and games is more defensible here than in most ecosystems. The usual split is
 retained-mode/event-driven/layout on one side and immediate-mode/frame-driven on the other —
-but reactivity (`>>=`, README:1754) gives the retained-mode propagation and the execution
-patterns (`[!]`, `|!|`, README:560) give frame-parallel and GPU dispatch, over the same scope
-algebra. Both faces, one set of primitives. What genuinely differs is **frame pacing and
+but reactivity (`>>=`) gives the retained-mode propagation and the execution patterns (`[!]`, `|!|`)
+give frame-parallel and GPU dispatch, over the same scope algebra — see
+`specs/language/17-resonance-and-reactivity.md` and `specs/language/07-execution-patterns.md`. Both faces, one set of primitives. What genuinely differs is **frame pacing and
 allocation discipline**: games need predictable per-frame cost, GUI tolerates variance. The
-`Alloc` handler pattern (README:1604-1653) is where that is expressed, so it is a handler
+`Alloc` handler pattern (`specs/language/15-effects-and-handlers.md`) is where that is expressed, so it is a handler
 choice rather than two frameworks.
 
 **Two consequences that change this document's priorities:**
@@ -618,8 +620,8 @@ UIKit. Those are struct-heavy APIs and every one of them delivers input through 
 for GUI**, not later refinements. Scalars-in-registers cannot bind Vulkan.
 
 Note that this is *not* `|!|`. The GPU execution pattern is a **collapse strategy for compute**
-— README:617-629 is explicit that a GPU collapse may yield zero kernels, one, several, or
-library calls, and that it "does not expose a kernel model in the source language". Rendering is
+— `specs/language/07-execution-patterns.md` is explicit that a GPU collapse may yield zero kernels,
+one, several, or library calls, and that it "does not expose a kernel model in the source language". Rendering is
 a different thing: a swapchain, command buffers, pipeline state objects, frame synchronization,
 a presentation lifecycle. That is driving a graphics API through `<lib>`, not asking for a scope
 to be collapsed on the GPU. Both uses of the GPU coexist and must not be conflated — `|!|` for
