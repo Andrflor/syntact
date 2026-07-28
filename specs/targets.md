@@ -115,6 +115,13 @@ The ISA layer then has exactly three procs that touch platform at all — `emit_
 `emit_result`, `emit_call_out` — and each switches on these **fields**, never on a platform
 name.
 
+**This record is also what `@platform` exposes to source** (`sdk.md` §3.1) — the same knowledge
+under source-facing names, so a program can branch on the platform with no configuration layer
+anywhere. The two must be **one definition with two views, not two lists that drift.** The
+entry/result fields stay backend-only: a program has no use for how its own entry stub is
+shaped. Everything else — `syscalls`, `libc_name`, `lib_ref`, `sym_prefix`, `pie`, page size,
+plus arch/os/abi/image identity and the pointer-width shapes — is readable from source.
+
 `syscalls: nil` on macOS/iOS is what mechanically forces the libc path that effects.md:121
 predicted. It also means `emit_exit` needs a libc-call variant, not merely a different
 syscall number.
@@ -581,9 +588,9 @@ three concerns this one previously scattered as per-format trivia: calling conve
 that change decisions in *this* document:
 
 - The **library reference model** (four different names for `libm` across platforms) is
-  resolved there in §4: provenance stays opaque to the compiler, the per-target mapping moves
-  into the project manifest. `Platform.lib_ref` here covers only the *form* the container
-  needs, never the name.
+  resolved there in §4: provenance stays opaque to the compiler, and the per-target name is an
+  ordinary comptime branch in source (`sdk.md` §3.1) — no configuration layer.
+  `Platform.lib_ref` here covers only the *form* the container needs, never the name.
 - **`Abi` becomes a record** alongside `Platform` (§4 here), and `emit_foreign_call`'s SysV
   hardcoding — register lists, independent int/SSE counters, the 6-argument ceiling — becomes
   data. Windows x64 needs positional slots and 32-byte shadow space; Apple aarch64 passes
