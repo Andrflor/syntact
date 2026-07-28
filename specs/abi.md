@@ -23,8 +23,8 @@ vary independently:
 
 Conflating them is why the current code has SysV register lists sitting in the same
 procedure as GOT slot arithmetic (`emit.odin:713-770`). They belong to different layers of
-`targets.md` §5: convention → `isa/*`, mechanism → `image/*`, naming → `platform/*` plus
-the manifest.
+`targets.md` §5: convention → `isa/*`, mechanism → `image/*`, naming → `platform/*` for the
+*form*, and source for the *name* (§4).
 
 ---
 
@@ -143,23 +143,30 @@ Two properties are in tension and both are worth keeping:
 
 ### The resolution
 
-**Keep `<…>` provenance opaque to the compiler, and put the per-platform mapping in the
-project manifest.**
+**Keep `<…>` provenance opaque to the compiler, and let the per-target name be an ordinary
+comptime branch in source.**
 
-Source names a *logical* library; the manifest — which is itself a Syntact scope per
-`sdk.md` §3 — carves the real name per target:
+The target is a comptime binding (`sdk.md` §3.1), so a library declaration can simply differ
+per target and the reducer eliminates the branches that do not apply:
 
+```syntact
+libm -> @platform.os ? {
+  linux  -> <libm.so.6>{ sqrt -> { f64:x -> ??::f64 } }
+  macos  -> <libSystem.B.dylib>{ sqrt -> { f64:x -> ??::f64 } }
+}
 ```
-libm -> <libm>{ sqrt -> { f64:x  -> ??::f64 } }
-```
 
-with the mapping supplied as ordinary project data, not compiler data. The compiler still
-contains zero library names: it receives a resolved string exactly as it does today, from
-the manifest instead of from source. Default mappings for the common C libraries ship as an
-ordinary Syntact library — a folder of `.syn` resolved through `@`, not a compiler builtin.
+`@platform` is the compiler-supplied namespace for what is platform-determined; everything under
+it is comptime, so the branch reduces (`sdk.md` §3.1).
+
+No configuration layer is involved, and **there is no manifest** — this is ordinary source,
+reduced by the ordinary reducer. The compiler still contains zero library names: it receives a
+resolved string exactly as it does today, from a branch that has already collapsed. Default
+mappings for the common C libraries ship as an ordinary Syntact library — a folder of `.syn`
+reached through `@`, carrying exactly this branch, not a compiler builtin.
 
 `Platform.lib_ref` (`targets.md` §4) then covers only the *form* the container needs
-(soname / unversioned soname / path / DLL name); the manifest covers the *name*. Both are
+(soname / unversioned soname / path / DLL name); source carves the *name*. Both are
 required; they are different questions.
 
 **Escape hatch to keep:** a `<…>` containing a platform-specific literal must still work
@@ -231,7 +238,7 @@ state rule in `targets.md` §10 and should be decided with it.
 |---|---|---|
 | `Abi` record + ABI-driven `emit_foreign_call` | nothing | pure refactor of working code, checkable against the seven-library set in `interop.md` |
 | stack-passed arguments | the `Abi` record | removes the 6-argument ceiling; Win64 has only 4 register slots, so it is a prerequisite there |
-| library naming via manifest | `sdk.md`'s `project/` exists | language-visible (§4), so it constrains `<lib>` source written before it |
+| per-target library naming | the target is exposed as a comptime binding (`sdk.md` §3.1) | language-visible (§4), so it constrains `<lib>` source written before it |
 | AAPCS64 | the aarch64 ISA | variadics must be verified against **both** Linux and Apple rules — they differ (§2.2) |
 | Mach-O binding | the classic-vs-chained question is resolved (§3) | |
 | Win64 convention + PE IAT | the `Abi` record and stack-passed arguments | |

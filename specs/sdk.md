@@ -40,7 +40,7 @@ Today's developer flags — `--ast --ir --bc --regalloc --emit --parse-only --an
 Every build-shaped command accepts:
 
 ```
---target <t>        repeatable; defaults from the manifest
+--target <t>        repeatable; defaults to host
 --artifact <a>      Executable | Shared_Library | Static_Library | Object
                     | App_Package        (§5 — there is no library artifact)
 --profile debug|release     overrides the default above
@@ -63,46 +63,159 @@ construction** — there is no "works in debug, breaks in release" class of bug 
 
 ---
 
-## 3. Project manifest
+## 3. There is no project file
 
-An SDK needs a project file. What it must carry:
+**There is no manifest, no project descriptor, no configuration format.** Not a YAML file, not
+a TOML file, and not a `project.syn` either. The SDK takes a source file and reduces it.
 
-```
-name            project identity
-root            the root .syn file — the file-scope that is the program
-targets         DEFAULT target list       (convenience; --target overrides)
-artifact        DEFAULT artifact          (convenience; --artifact overrides)
-exports         which bindings cross the C ABI, when bundling  (§5)
-libs            per-target external library name mapping (abi.md §4)
-dependencies    where to find other libraries — paths/sources for `@` to resolve (§5)
-signing         per-platform identity config (§7.4)
-```
-
-**There is no `kind` field, deliberately.** Declaring what a project *is* would be exactly the
-sort of built-in category the language rejects — *"the role it plays … comes from the
-operation applied to it, not from a built-in category"* (`specs/language/04-scopes.md`). A project is a
-source tree. Which role it plays is decided by the command:
+### Finding the root
 
 ```
-run / build   → the root file-scope's production is the program
-bundle        → the named `exports` are C-ABI symbols
-consumed by @ → it is a scope another tree expands
+syntact build foo.syn     → the file given
+syntact build             → main.syn, else lib/main.syn, else error
 ```
 
-The same tree can serve all three at once. `targets` and `artifact` in the manifest are
-**defaults so you do not retype flags**, nothing more — not a declaration of what the project
-*is*.
+That is the whole of project resolution. No search for a descriptor, no project directory
+detection, no notion of "being inside a project."
 
-**Proposal — write the manifest in Syntact.** A manifest is a set of named bindings; a
-Syntact scope *is* a set of named bindings. So `project.syn` can be an ordinary scope,
-reduced by the existing reducer, with no YAML/TOML/JSON parser and no second configuration
-language. It also means the manifest is *computable* — a target list can be a fold, signing
-config can carve per platform.
+### Why there is nothing else to configure
 
-This is consistent with the project's stated aim (composable, algebraic, consistent) and it
-removes a whole dependency. **Marked as a decision, not settled** — the risk is
-bootstrapping order (the manifest must be readable before the project is configured) and
-error quality for malformed manifests.
+Everything a manifest would have carried is either already expressible *in the source*, or is
+a property of the invocation. It is never project data:
+
+| Would-be field | Where it actually lives |
+|---|---|
+| project identity | the artifact name — the root file's name, or `-o` |
+| root file | the resolution rule above |
+| target list | chosen at the invocation: `build` selects the target(s) it emits for, `run` selects one (possibly from connected devices, §7) |
+| artifact | chosen at the invocation: `--artifact` |
+| external library names | ordinary Syntact — a binding that differs per target (§3.1) |
+| exports | ordinary Syntact — what the source says it exposes |
+| dependencies | `@` resolves the filesystem as a scope graph (`specs/language/18-modules.md`); there is no dependency list to declare |
+| signing identity | a property of the machine, not the source — discovered or passed at invocation (§7.4) |
+
+A configuration layer for any of these would be a **second, weaker language** sitting beside
+Syntact and duplicating what scopes already do. That is precisely the sort of parallel ontology
+the language rejects: *"there is no separate import ontology"*, *"the compiler is the reducer
+used before runtime"* (`specs/language/18-modules.md`).
+
+### 3.1 `@platform`
+
+`@` prefixes name **namespaces you operate in**, not special cases inside one shared space.
+`@platform` is the namespace for what is platform-determined. Importing files from the current
+tree is a *different* namespace under its own prefix — potentially `@lib`, **not settled**
+(§3.2).
+
+`@platform` is supplied by the compiler, so everything under it is known at comptime. Which
+means **nothing special is needed to branch on it**: no conditional-compilation directive, no
+`#if`, no attribute. A branch on a comptime value is reduced by the ordinary reducer and the
+dead branch is gone — the same mechanism that turns `"hello, " + "world"` into one string.
+
+A library can therefore be declared differently per platform:
+
+```syntact
+libm -> @platform.os ? {
+  linux  -> <libm.so.6>{ sqrt -> { f64:x -> ??::f64 } }
+  macos  -> <libSystem.B.dylib>{ sqrt -> { f64:x -> ??::f64 } }
+}
+```
+
+and a program can refuse a platform outright, at compile time:
+
+```syntact
+@platform.arch ? {
+  aarch64 -> ...
+  ~aarch64 -> !unsupported_target
+}
+```
+
+This is why library naming needs no manifest and no compiler table. The invariant *"no library
+is privileged — the compiler contains no mention of any library name"* (`interop.md` §1) holds
+unchanged: the name lives in source, in a branch that reduces.
+
+#### What `@platform` exposes
+
+**The governing principle is that the programmer gets the power.** `@platform` is not a
+curated set of blessed predicates — it is what the compiler knows about the machine, handed
+over. If the compiler had to know something to emit code, the program can read it and branch on
+it. Anything withheld would force exactly the escape hatches (config layers, build scripts,
+per-platform source trees) this design removes.
+
+**Identity — what machine this is.** Sets, so they are branched on and constrained with the
+ordinary algebra:
+
+```
+os              linux | macos | ios | ios_sim | android | windows
+arch            x86_64 | aarch64
+abi             sysv | win64 | aapcs64 | aapcs64_apple
+image           elf | macho | pe
+family          unix | windows          derived; convenience for the common branch
+```
+
+**Layout — the shapes that differ per platform.** These are *shapes*, not descriptors: they
+color bindings directly, which is what makes a `size_t` at the C frontier writable without the
+compiler privileging anything.
+
+```
+usize           unsigned integer shape, pointer-width
+isize           signed integer shape, pointer-width
+ptr_width       64                          the number, when the shape is not what is wanted
+endianness      little | big
+char_signed     whether C `char` is signed  (differs: x86 Linux vs ARM)
+long_width      C `long` — 64 on LP64, 32 on Windows LLP64
+align_max       maximum fundamental alignment
+```
+
+`@platform.usize:len -> 0` is then an ordinary colored binding.
+
+**Capability — what the platform can do.** These are what make a branch *meaningful* rather
+than cosmetic, and each corresponds to a real divergence already recorded in `targets.md` §4:
+
+```
+syscalls        whether direct syscalls are available; false ⇒ must route through libc
+                (nil on macOS/iOS — `targets.md` §4, and the mechanism effects.md:121 predicted)
+libc_name       "libc.so.6" | "libSystem.B.dylib" | …
+lib_ref         soname | unversioned_soname | path       how a library is referenced
+sym_prefix      "_" on Mach-O, "" on ELF
+pie             optional | required
+page_size       platform page size
+```
+
+**Build context — what this invocation is.** The target and artifact are chosen at the
+invocation (§3), and the program can read what was chosen:
+
+```
+artifact        Executable | Shared_Library | Static_Library | Object | App_Package
+profile         debug | release
+```
+
+`profile` is deliberately readable: a program may want debug-only assertions or logging that
+reduce away entirely in release. That is the reduce mechanism doing what it already does, not a
+preprocessor.
+
+**ISA features** — SIMD width and extension bits (`sse4.2`, `avx2`, `neon`, …) are the obvious
+next block, and the one that most rewards handing power to the programmer, since a Syntact
+library specializes by carving rather than by shipping per-CPU binaries. Left **open** here:
+`vectorize.odin` is x64-only today, so the honest feature list is whatever the backend actually
+tracks, and that is one ISA short.
+
+**Alignment with `targets.md` §4.** The `Platform` record there is the backend's form of this
+same knowledge, oriented toward emission (`entry_exe`, `entry_app`, `result_kind`). The
+capability block above is deliberately the same data under source-facing names. **They must be
+one definition with two views, not two lists that drift** — the entry/result fields stay
+backend-only, since a program has no use for how its own entry stub is shaped.
+
+Default mappings for common C libraries are then just an ordinary Syntact library — a folder of
+`.syn` reached through its namespace prefix, carrying exactly the branch above. Not compiler
+data, and not project data.
+
+### 3.2 Open — the namespace prefixes
+
+`@platform` is settled. What is **not** settled is the rest of the prefix space: the prefix for
+importing from the current tree (potentially `@lib`), whether third-party libraries get their
+own, and whether the set of root namespaces is fixed by the compiler or extensible. The
+resolution rule for each namespace follows from what it names, so this has to be decided before
+`@` resolution is implemented.
 
 ---
 
@@ -117,7 +230,7 @@ compiler/            the compiler proper — no CLI, no I/O policy
 lsp/                 ← MOVED under sdk/, or kept and invoked by sdk/cli
 sdk/
   cli/               subcommand dispatch, flag parsing, help
-  project/           manifest parse/resolve, library resolution for `@`
+  source/            root resolution (§3), `@` scope-graph resolution
   device/            discovery + transport (§7)
   toolchain/         doctor probes, signing identity discovery
   templates/         create scaffolds (§6)
@@ -176,7 +289,7 @@ syntact build  --target android-arm64 --artifact App_Package  → multi-ABI APK
 ```
 
 A tree written purely for Syntact consumers simply never gets `build` or `bundle` run on it —
-only `check`, `test`, `format`, and dependency resolution (§3). Nothing declares that; it is
+only `check`, `test`, `format`, and being reached through `@`. Nothing declares that; it is
 just which commands are meaningful.
 
 ### What each command requires
@@ -189,12 +302,13 @@ Since nothing is declared, each command has a **structural** precondition it che
 | `bundle` | at least one declared export |
 | `check` / `test` / `format` | nothing |
 
-Both preconditions are properties of the source, checked by the compiler, not categories
-recorded in a manifest.
+Both preconditions are properties of the source, checked by the compiler — not declared
+anywhere.
 
-**Open: how are exports declared?** The manifest `exports` list is the obvious first answer
-and keeps the language untouched. A language-level marker would be more expressive but adds
-surface. Not settled.
+**Open: how are exports declared?** In the source, since there is nowhere else (§3). A scope
+already *has* a production and a set of bindings; what `bundle` needs is to know which bindings
+become C-ABI symbols. Whether that is read off the scope's structure directly or needs a
+language-level marker is not settled. What is settled: it is not an external list.
 
 ---
 
@@ -205,7 +319,8 @@ syntact create cli <name>
 syntact create gui <name>
 ```
 
-`cli` is small: `project.syn`, a source root with a root production, a test stub.
+`cli` is small: a `main.syn` with a root production, and a test stub. Nothing else — there is
+no project file to scaffold (§3).
 
 **`gui` is the substantial one, because a GUI app needs per-platform host material** — the
 same reason `flutter create` lays down `android/`, `ios/`, `macos/`, `linux/`, `windows/`
@@ -214,7 +329,7 @@ to be installable, and those cannot be derived from the source tree.
 
 ```
 myapp/
-  project.syn
+  main.syn
   src/
   test/
   android/     AndroidManifest.xml, app id, permissions, min SDK, icons, resources
@@ -234,11 +349,15 @@ Apple `Info.plist`, entitlements, icons, launch images.
 This is the same asymmetry as §7.3: much less scaffolding than Flutter, for the same
 structural reason.
 
-**Open — folder or manifest?** The declarative half (app id, permissions, entitlements) could
-live in `project.syn` and be carved per platform, which is more in the spirit of the language
-and avoids five config dialects. Assets are binary files and must sit on disk regardless. So
-the folders are certainly needed for assets; whether they also carry config, or whether config
-is carved in the manifest and *emitted* into the package at build time, is not settled.
+**The declarative half belongs in source.** App id, permissions, entitlements are named
+values — so they are bindings, carved per platform through `@platform` like anything else (§3.1),
+and *emitted* into the package at build time. That avoids five config dialects and needs no
+project file. Assets are binary files and must sit on disk regardless, so the folders stay for
+assets.
+
+What is not settled is the emission side: which platform files are generated wholly from
+source, and whether any must remain hand-editable on disk for the cases the compiler cannot
+anticipate.
 
 For reference, entry point is selected by `--artifact` × platform — not by which template was
 used. This is what `Platform.entry_exe` / `entry_app` / `entry_lib` in `targets.md` §4 encode:
@@ -249,8 +368,8 @@ used. This is what `Platform.entry_exe` / `entry_app` / `entry_lib` in `targets.
 | `App_Package` | window + native event loop | `JNI_OnLoad` / NativeActivity | `UIApplicationMain` |
 | `Shared_Library` | dylib init | `JNI_OnLoad` | dylib init |
 
-A tree intended for Syntact consumers needs no scaffold beyond a directory and a
-`project.syn`, so there is no template for it.
+A tree intended for Syntact consumers needs no scaffold beyond a directory and a `.syn` file,
+so there is no template for it.
 
 ---
 
@@ -330,7 +449,7 @@ Apple Developer account**, per `targets.md` §9.
 ## 8. The `run` loop
 
 ```
-resolve manifest
+resolve the root file (§3)
   → select (target, artifact=Executable, profile=debug)
   → ensure a native VM binary exists for that target        ← see §12 open decision
   → compile source to BC_Program
@@ -357,8 +476,7 @@ go-to-definition, rename, completion, and semantic tokens (the root `README.md` 
   between compiler and server becomes impossible;
 - gains `textDocument/formatting` and `textDocument/rangeFormatting`, both delegating to
   `sdk/format/` (§10) — currently absent;
-- shares `project/` so it resolves library dependencies the same way `build` does, rather
-  than guessing;
+- shares `source/` so it resolves `@` imports the same way `build` does, rather than guessing;
 - shares the content-addressed cache from `targets.md` §10, so an LSP keystroke and a
   `run` reload reuse each other's reduce results instead of duplicating work.
 
@@ -428,11 +546,18 @@ A third path worth considering: once the aarch64 backend exists, the VM could in
 be *hosted* — but it is written in Odin, not Syntact, so that only becomes real after
 self-hosting. Not a near-term option.
 
-**Manifest in Syntact or not** (§3).
+**The namespace prefixes other than `@platform`** — current-tree imports, third-party
+libraries, and whether the root set is fixed or extensible (§3.2).
 
-**How are exports declared** — manifest list or a language-level marker (§5).
+**ISA feature exposure under `@platform`** — honest list requires a second backend's feature
+tracking (§3.1).
 
-**Per-platform config: folder or carved in the manifest** (§6).
+**One definition, two views** for `@platform`'s capability block and `targets.md` §4's
+`Platform` record, so they cannot drift (§3.1).
+
+**How are exports declared** — read off the scope's structure, or a language-level marker (§5).
+
+**Which platform files are generated from source vs. hand-editable on disk** (§6).
 
 ---
 
@@ -442,7 +567,7 @@ Facts, not an ordering — the sequencing is yours to choose.
 
 | Item | Cannot happen until |
 |---|---|
-| subcommand skeleton, `project/`, `clean`, `check`, folding `lsp` in | nothing — pure refactor of existing behaviour |
+| subcommand skeleton, `source/`, `clean`, `check`, folding `lsp` in | nothing — pure refactor of existing behaviour |
 | `format` | the lexer retains comment text and the glue rules are respected (§10) |
 | `run` with hot reload | `targets.md` §10 — reduce cache, resident VM, patch protocol |
 | `run` on a device | that device's transport (§7.1), plus a VM binary for its target (§12) |
