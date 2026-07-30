@@ -1,0 +1,6 @@
+{
+  "name": "An event named through a colored producer resolves to what it produces",
+  "description": "Logger -> { -> {u8:n} } is a producer, so `Logger:debug -<` handles the scope Logger PRODUCES, not Logger itself — the same producer law satisfy_root applies to constraints. Handler and emit peel identically, so they meet on one identity.",
+  "source": "Logger -> {\n  -> { u8:n }\n}\n\nprogram -> {\n  Logger:debug -< e {\n    -> 9\n  }\n  -> >- Logger:debug\n}\n\n-> program!",
+  "expect": "9"
+}

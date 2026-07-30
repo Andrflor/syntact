@@ -1,0 +1,6 @@
+{
+  "name": "The left of -< must name an event scope",
+  "description": "A handler is keyed on the identity of a data scope; a literal names no scope so there is nothing to key on",
+  "source": "program -> {\n  5 -< e { -> 1 }\n  -> 0\n}\n-> program!",
+  "expect_errors": ["Invalid_Event_Pull"]
+}

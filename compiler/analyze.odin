@@ -264,9 +264,12 @@ walk_scope_children :: proc(a: ^Analyzer, scope: ^Scope_Type, children: []Node_I
 			continue
 		}
 		#partial switch child_kind {
+		case .EventPush:
+			// An emit in binding position registers an entry (anonymous, or named when
+			// written `name >- E{…}`); in value position walk gives the value alone.
+			walk_event_push(a, scope, child)
 		case .Pointing,
 		     .PointingPull,
-		     .EventPush,
 		     .EventPull,
 		     .ResonancePush,
 		     .ResonancePull,
@@ -285,16 +288,16 @@ walk_scope_children :: proc(a: ^Analyzer, scope: ^Scope_Type, children: []Node_I
 	}
 }
 
+// binding_kind_from_node maps a directional node to its Binding_Kind. The event
+// pair is absent by design: `>-`/`-<` do not route through walk_binding (the left
+// of `-<` names the event it handles, not the binding it defines), so they stamp
+// .Event_Push / .Event_Pull themselves — see walk_event_push / walk_event_pull.
 binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	#partial switch kind {
 	case .Pointing:
 		return .Pointing_Push
 	case .PointingPull:
 		return .Pointing_Pull
-	case .EventPush:
-		return .Event_Push
-	case .EventPull:
-		return .Event_Pull
 	case .ResonancePush:
 		return .Resonance_Push
 	case .ResonancePull:
@@ -751,13 +754,17 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		return walk_scope_node(a, current_scope, idx)
 	case .Pointing,
 	     .PointingPull,
-	     .EventPush,
-	     .EventPull,
 	     .ResonancePush,
 	     .ResonancePull,
 	     .ReactivePush,
 	     .ReactivePull:
 		return walk_binding(a, current_scope, idx)
+	case .EventPush:
+		// In VALUE position an emit is just the value it denotes; only in binding
+		// position (walk_scope_children) does it register an entry.
+		return walk_emit_value(a, current_scope, idx)
+	case .EventPull:
+		return walk_event_pull(a, current_scope, idx)
 	case .Product:
 		return walk_product(a, current_scope, idx)
 	case .Expand:
@@ -936,9 +943,342 @@ walk_binding :: #force_inline proc(
 	return value
 }
 
+// ============================================================================
+// NOMINAL EVENTS — `>-` emit / `-<` handle
+//
+// An event is an ORDINARY data scope (`Log -> {string:message}`) used as the
+// nominal key of a handler. Nominality needs no marker on the type: it IS the
+// identity of the resolved scope (scope_canon), so two structurally identical
+// events declared separately never match. Everything else in Syntact stays
+// structural; this is the one place identity, not shape, decides.
+//
+//   Log -< e { -> io.write{e.message}! }   registers a handler for scope Log,
+//                                          `e` captures the incoming payload
+//   >- Log{message -> "hello"}             emits; resolves to the handler above
+//
+// Resolution is lexical and static: an emit walks the `parent` chain for the
+// nearest `.Event_Pull` whose event scope is the same scope (up to
+// materialization) as the emit payload's carve source. Found → the emit IS the
+// handler's production, substituted at reduce. Not found → Invalid_Event_Pull.
+// Nothing dynamic survives, so the whole flow inlines at compile time.
+// ============================================================================
+
+// event_scope_of resolves an event reference (the left of `-<`, or the source of
+// an emit's payload carve) to the canonical data scope that identifies it. A bare
+// mention of the event and a carve of it both land on the same canonical scope,
+// which is exactly the match rule. nil when it does not resolve to a scope.
+//
+// A producer scope obeys the SAME producer law as constraints (satisfy_root): an
+// event named through `Logger:debug`, where `Logger -> { -> {…} }`, denotes what
+// Logger PRODUCES, not Logger itself — so both the handler and the emit peel to
+// the produced scope and meet on one identity.
+event_scope_of :: proc(t: ^Type) -> ^Scope_Type {
+	s := carve_source_scope(t)
+	if s == nil do return nil
+	if prod := produced_scope(s); prod != nil do return scope_canon(prod)
+	return scope_canon(s)
+}
+
+// produced_scope peels a producer scope to the single scope it produces, or nil
+// when it produces nothing, produces a non-scope, or offers a CHOICE of
+// productions (several productions denote a set, so there is no single scope to
+// read through). This is the structural half of the producer law that
+// default_value applies to values and satisfy_root to constraints: `Logger -> {
+// -> {u8:n} }` denotes what it PRODUCES, so its fields are the production's.
+produced_scope :: proc(s: ^Scope_Type) -> ^Scope_Type {
+	found: ^Scope_Type = nil
+	for i := 0; i < len(s.kind); i += 1 {
+		if s.kind[i] != .Product do continue
+		if found != nil do return nil // a choice of productions is not one identity
+		prod := follow(s.types[i])
+		if prod == nil do return nil
+		ps, ok := &prod^.(Scope_Type)
+		if !ok do return nil
+		found = ps
+	}
+	return found
+}
+
+// walk_event_pull registers a handler: `Event -< e { … }`.
+//
+// The event is resolved by STANDARD resolution (it is just a name bound to a data
+// scope). The capture `e` sits to the RIGHT of `-<` because its scope is the
+// handler body alone, so it is installed as the body's own first binding, holding
+// the event scope as its value — `e` then resolves through the existing invisible
+// capture path and `e.message` is an ordinary projection. At reduce the emit
+// overwrites that binding with the real payload.
+walk_event_pull :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+	ast := a.ast
+	data := ast.node_data[idx]
+	event_idx := data.event_pull.from
+	body_idx := data.event_pull.to
+	capture := span_str(ast, data.event_pull.catch_span)
+
+	if event_idx == INVALID_NODE {
+		sem_error(
+			a,
+			"a handler must name the event it handles: `Event -< e { … }`",
+			.Invalid_Event_Pull,
+			node_span(a, idx),
+		)
+		return make_invalid()
+	}
+	event := walk(a, current_scope, event_idx)
+	if body_idx == INVALID_NODE || ast.node_kinds[body_idx] != .ScopeNode {
+		sem_error(
+			a,
+			"a handler's body must be a scope: `Event -< e { -> value }`",
+			.Invalid_Event_Pull,
+			node_span(a, idx),
+		)
+		return make_invalid()
+	}
+
+	// The event must name a data scope — that scope's identity IS the nominal key.
+	if event_scope_of(event) == nil {
+		sem_error(
+			a,
+			"the left of `-<` must name an event scope (a scope declared like `Log -> { string:message }`)",
+			.Invalid_Event_Pull,
+			node_span(a, event_idx),
+		)
+		return make_invalid()
+	}
+
+	result := new(Type)
+	result^ = Scope_Type {
+		parent  = current_scope,
+		walking = true,
+	}
+	body := &result.(Scope_Type)
+	// Register the handler binding BEFORE walking the body, exactly as walk_binding
+	// does, so the body may refer back to it. The event scope is the binding's
+	// CONSTRAINT: it records which event this handles without standing in for the
+	// handler's own value.
+	scope_append(a, current_scope, "", event, .Event_Pull, result)
+	append(&current_scope.constraint_folds, nil)
+	append(&current_scope.type_folds, nil)
+
+	// The payload slot: invisible (no name), reachable only as the capture `e`
+	// within this body. Its value is the event scope, so `e.message` typechecks
+	// against the event's declared shape before any emit exists.
+	if capture != "" {
+		scope_append(a, body, "", nil, .Pointing_Push, event, capture)
+		append(&body.constraint_folds, nil)
+		append(&body.type_folds, nil)
+	}
+
+	rdata := ast.node_data[body_idx]
+	r := rdata.scope
+	walk_scope_children(a, body, ast.extra[r.start:][:r.len])
+	body.walking = false
+	scope_close(a, body)
+
+	// A handler MUST produce: the emit's value IS that production, so a handler
+	// without one would make every emit of this event valueless.
+	if !scope_has_product(body) {
+		sem_error(
+			a,
+			"a handler must produce a value: add a production (`-> value`) to the handler body",
+			.Invalid_Event_Pull,
+			node_span(a, idx),
+		)
+	}
+	return result
+}
+
+// scope_has_product reports whether a scope collapses to a value — a `->`
+// production, or an `...A` expansion that carries one (the same order law reduce
+// applies, so the check agrees with what a collapse would actually find).
+scope_has_product :: proc(scope: ^Scope_Type) -> bool {
+	for i := 0; i < len(scope.kind); i += 1 {
+		if scope.kind[i] == .Product do return true
+		if scope.kind[i] == .Expand {
+			if s := carve_source_scope(scope.types[i]); s != nil && scope_has_product(s) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// walk_event_push walks an emit: `>- Event{ … }`, or `name >- Event{ … }` when the
+// emitted value is bound (the emit IS a value, so binding it is ordinary).
+//
+// The payload is an ordinary carve of the event scope, so it walks as one (and
+// carve_check already proved its overrides against the event's shape — there is
+// no separate structural check to make). Only the handler LOOKUP is new: the
+// nearest enclosing `.Event_Pull` keyed on the same canonical scope.
+walk_event_push :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+	ast := a.ast
+	data := ast.node_data[idx]
+	left_idx := data.binary.left
+
+	value := walk_emit_value(a, current_scope, idx)
+	// A bare emit registers itself as an anonymous Event_Push binding; `name >- E{…}`
+	// (or `C:name >- E{…}`) binds the emitted value under that name.
+	name := ""
+	capture := ""
+	constraint: ^Type = nil
+	if left_idx != INVALID_NODE {
+		left_kind := ast.node_kinds[left_idx]
+		if left_kind == .Constraint {
+			cdata := ast.node_data[left_idx]
+			constraint = walk(a, current_scope, cdata.binary.left)
+			n_ok: bool
+			name, capture, n_ok = colored_name(a, cdata.binary.right)
+			if !n_ok do return make_invalid()
+		} else if left_kind == .Identifier {
+			name = span_str(ast, ast.node_data[left_idx].identifier.name)
+			capture = span_str(ast, ast.node_data[left_idx].identifier.capture)
+		} else {
+			sem_error(
+				a,
+				"invalid binding name: the left of an emit must be a name",
+				.Invalid_Binding_Name,
+				node_span(a, left_idx),
+			)
+			return make_invalid()
+		}
+	}
+	scope_append(a, current_scope, name, constraint, .Event_Push, value, capture)
+	typecheck(a, current_scope, name, constraint, .Event_Push, value, idx)
+	return value
+}
+
+// walk_emit_value resolves an emit to the value it denotes: its handler's
+// production with the payload substituted in. This is where the whole nominal
+// event mechanism lands — everything else about `>-` is ordinary binding.
+walk_emit_value :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+	ast := a.ast
+	data := ast.node_data[idx]
+	payload_idx := data.binary.right
+
+	if payload_idx == INVALID_NODE {
+		sem_error(
+			a,
+			"an emit must name the event it emits: `>- Event{ field -> value }`",
+			.Invalid_Event_Pull,
+			node_span(a, idx),
+		)
+		return make_invalid()
+	}
+	payload := walk(a, current_scope, payload_idx)
+	event := event_scope_of(payload)
+	if event == nil {
+		sem_error(
+			a,
+			"the right of `>-` must name an event scope, optionally carved: `>- Log{message -> \"hi\"}`",
+			.Invalid_Event_Pull,
+			node_span(a, payload_idx),
+		)
+		return make_invalid()
+	}
+
+	handler, capture_index := resolve_handler(current_scope, event)
+	if handler == nil {
+		sem_error(
+			a,
+			fmt.tprintf(
+				"no handler in scope for this event: add a `%s -<` handler in an enclosing scope",
+				event_display_name(current_scope, event),
+			),
+			.Invalid_Event_Pull,
+			node_span(a, idx),
+		)
+		return make_invalid()
+	}
+
+	// The emit IS the handler's production, with the payload substituted into the
+	// capture slot: a carve of the handler body, collapsed. Reduce then folds it
+	// like any other collapse — no residual, no continuation, fully static.
+	result := new(Type)
+	if capture_index < 0 {
+		// A handler that ignores its payload (no capture) needs no substitution.
+		result^ = Execute_Type{handler}
+		return result
+	}
+	carve := new(Type)
+	cv := Carve_Type {
+		source     = handler,
+		references = make([dynamic]Reference),
+		types      = make([dynamic]^Type),
+		span       = node_span(a, idx),
+	}
+	append(
+		&cv.references,
+		Reference {
+			name = nil,
+			index = Maybe(u64)(u64(capture_index)),
+			match_scope = event_handler_scope(handler),
+			match_index = capture_index,
+			span = node_span(a, idx),
+		},
+	)
+	append(&cv.types, payload)
+	carve^ = cv
+	result^ = Execute_Type{carve}
+	return result
+}
+
+// resolve_handler finds the handler for `event`: the nearest `.Event_Pull`
+// binding, walking up the lexical chain, whose event scope is `event` up to
+// materialization. Returns the handler body and the index of its payload capture
+// slot (-1 when the handler declared no capture).
+//
+// Within one scope the LAST matching handler wins, mirroring the same-name rule
+// that makes a later binding shadow an earlier one; the parent chain is only
+// consulted when this scope handles the event nowhere.
+resolve_handler :: proc(scope: ^Scope_Type, event: ^Scope_Type) -> (^Type, int) {
+	for s := scope; s != nil; s = s.parent {
+		for i := len(s.kind) - 1; i >= 0; i -= 1 {
+			if s.kind[i] != .Event_Pull do continue
+			if i >= len(s.constraints) do continue
+			if event_scope_of(s.constraints[i]) != event do continue
+			body := s.types[i]
+			return body, handler_capture_index(body)
+		}
+	}
+	return nil, -1
+}
+
+// handler_capture_index locates a handler body's payload slot — the binding
+// carrying the `-<` capture. -1 when the handler declared none.
+handler_capture_index :: proc(handler: ^Type) -> int {
+	h := event_handler_scope(handler)
+	if h == nil do return -1
+	for i := 0; i < len(h.captures); i += 1 {
+		if h.captures[i] != "" do return i
+	}
+	return -1
+}
+
+// event_handler_scope reads a handler binding's value as the scope it is.
+event_handler_scope :: proc(handler: ^Type) -> ^Scope_Type {
+	if handler == nil do return nil
+	if s, ok := &handler^.(Scope_Type); ok do return s
+	return nil
+}
+
+// event_display_name recovers the source name an event scope was bound to, for
+// diagnostics; falls back to a generic word when the event was written inline.
+event_display_name :: proc(scope: ^Scope_Type, event: ^Scope_Type) -> string {
+	for s := scope; s != nil; s = s.parent {
+		for i := 0; i < len(s.names); i += 1 {
+			if s.names[i] == "" do continue
+			if bound := follow(s.types[i]); bound != nil {
+				if bs, ok := &bound^.(Scope_Type); ok && scope_canon(bs) == event {
+					return s.names[i]
+				}
+			}
+		}
+	}
+	return "Event"
+}
+
 // `-> X` produces ONE entry, the scope's production. A colored production
 // (`-> u8:3`) carries the constraint; we peel it here rather than route through
-// walk_constraint (which would append its own binding and double the entry).
+// walk_constraint (which would double the entry).
 walk_product :: #force_inline proc(
 	a: ^Analyzer,
 	current_scope: ^Scope_Type,
@@ -1464,7 +1804,18 @@ walk_colored_carve_binding :: proc(a: ^Analyzer, scope: ^Scope_Type, idx: Node_I
 	if ast.node_data[idx].carve.children.len == 0 {
 		return append_bare_constraint(a, scope, name, constraint, .Pointing_Push, idx, capture)
 	}
-	value := walk_carve(a, scope, idx, constraint)
+	// The overrides name fields of what the color DENOTES. Under the producer law a
+	// producer denotes its production (`Logger -> { -> {u8:n} }` — `n` lives in the
+	// production, not in Logger), so a producer color is carved through to it. The
+	// binding's COLOR stays the constraint itself: the empty-carve path above already
+	// materializes through the production, so both agree on what the value inhabits.
+	source := constraint
+	if cs := carve_source_scope(constraint); cs != nil {
+		if prod := produced_scope(cs); prod != nil {
+			source = new_type(prod^)
+		}
+	}
+	value := walk_carve(a, scope, idx, source)
 	scope_append(a, scope, name, constraint, .Pointing_Push, value, capture)
 	typecheck(a, scope, name, constraint, .Pointing_Push, value, idx)
 	return value

@@ -1,0 +1,6 @@
+{
+  "name": "A handler must produce a value",
+  "description": "The emit's value IS the handler's production, so a handler body without a production would make every emit of that event valueless",
+  "source": "Log -> { string:message }\nprogram -> {\n  Log -< e { x -> 1 }\n  -> 0\n}\n-> program!",
+  "expect_errors": ["Invalid_Event_Pull"]
+}

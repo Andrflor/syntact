@@ -1,0 +1,6 @@
+{
+  "name": "A handler does not handle a structurally identical other event",
+  "description": "Log and Audit have the same shape {string:message} but are different nominal events: a Log handler must not catch an Audit emit, so the Audit emit finds no handler",
+  "source": "Log -> { string:message }\nAudit -> { string:message }\nprogram -> {\n  Log -< e { -> e.message }\n  -> >- Audit{message -> \"hi\"}\n}\n-> program!",
+  "expect_errors": ["Invalid_Event_Pull"]
+}

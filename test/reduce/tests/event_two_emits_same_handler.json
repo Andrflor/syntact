@@ -1,0 +1,6 @@
+{
+  "name": "Two emits of one event each substitute their own payload",
+  "description": "The handler is shared but each emit carves its own payload into the capture slot, so the two emits reduce independently",
+  "source": "Add -> {\n  u8:v\n}\n\nprogram -> {\n  Add -< e {\n    -> e.v + 10\n  }\n  a -> >- Add{v -> 1}\n  b -> >- Add{v -> 2}\n  -> a + b\n}\n\n-> program!",
+  "expect": "23"
+}

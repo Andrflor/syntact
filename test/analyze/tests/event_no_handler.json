@@ -1,0 +1,6 @@
+{
+  "name": "An emit with no handler in the hierarchy is an error",
+  "description": "Handler resolution is static and lexical: with no `Log -<` in any enclosing scope the emit cannot resolve, and there is no runtime fallback",
+  "source": "Log -> { string:message }\nprogram -> { -> >- Log{message -> \"hi\"} }\n-> program!",
+  "expect_errors": ["Invalid_Event_Pull"]
+}

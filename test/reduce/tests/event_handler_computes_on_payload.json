@@ -1,0 +1,6 @@
+{
+  "name": "A handler computes over its captured payload",
+  "description": "The capture `e` is the whole payload scope, so `e.n` is an ordinary projection and arithmetic over it folds statically",
+  "source": "Tick -> {\n  u8:n\n}\n\nprogram -> {\n  Tick -< e {\n    -> e.n * 2 + 1\n  }\n  -> >- Tick{n -> 5}\n}\n\n-> program!",
+  "expect": "11"
+}

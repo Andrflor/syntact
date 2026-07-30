@@ -1,0 +1,6 @@
+{
+  "name": "An emit reduces to its handler's production",
+  "description": "The canonical event flow: `>- Log{message -> \"hello\"}` resolves statically to the Log handler and IS its production, so the whole thing folds to the payload's message",
+  "source": "Log -> {\n  string:message\n}\n\nprogram -> {\n  Log -< e {\n    -> e.message\n  }\n  -> >- Log{message -> \"hello\"}\n}\n\n-> program!",
+  "expect": "\"hello\""
+}
