@@ -1,0 +1,6 @@
+{
+  "name": "A nested emit uses the handler from an enclosing scope",
+  "description": "Handler resolution walks the lexical parent chain, and the substitution still happens at the emit site, so the inner scope's collapse yields the outer handler's production over the inner payload",
+  "source": "Log -> {\n  string:message\n}\n\nouter -> {\n  Log -< e {\n    -> e.message\n  }\n  inner -> {\n    -> >- Log{message -> \"deep\"}\n  }\n  -> inner!\n}\n\n-> outer!",
+  "expect": "\"deep\""
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Structurally identical events resolve to their own handlers",
+  "description": "Log and Audit share the shape {string:message} but are distinct nominal events; each emit reaches the handler keyed on its own scope identity, proving identity and not shape decides. Each emit is bound separately because `>-` takes its payload at ASSIGNMENT precedence, so an inline `>- A{..} + >- B{..}` would fold the whole sum into the first payload.",
+  "source": "Log -> {\n  string:message\n}\n\nAudit -> {\n  string:message\n}\n\nprogram -> {\n  Log -< e {\n    -> 1\n  }\n  Audit -< e {\n    -> 2\n  }\n  a -> >- Log{message -> \"x\"}\n  b -> >- Audit{message -> \"x\"}\n  -> a + b * 10\n}\n\n-> program!",
+  "expect": "21"
+}

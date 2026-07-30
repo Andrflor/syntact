@@ -1,0 +1,6 @@
+{
+  "name": "A handler may declare no capture",
+  "description": "The capture is optional; a handler that ignores its payload still produces, and the emit is that production",
+  "source": "Ping -> {\n  u8:n\n}\n\nprogram -> {\n  Ping -< {\n    -> 42\n  }\n  -> >- Ping{n -> 1}\n}\n\n-> program!",
+  "expect": "42"
+}

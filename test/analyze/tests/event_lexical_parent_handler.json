@@ -1,0 +1,6 @@
+{
+  "name": "A handler in an enclosing scope handles a nested emit",
+  "description": "Resolution walks the lexical parent chain, so a handler declared in an outer scope serves emits from scopes nested inside it",
+  "source": "Log -> { string:message }\nouter -> {\n  Log -< e { -> e.message }\n  inner -> { -> >- Log{message -> \"deep\"} }\n  -> inner!\n}\n-> outer!",
+  "expect_errors": []
+}

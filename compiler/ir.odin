@@ -38,10 +38,15 @@ FloatKind :: enum {
 }
 
 // How a binding connects a name to its value. The push/pull pairs mirror Syntact's
-// directional operators; only the pointing pair is reduced today (events/resonance/
+// directional operators; the pointing and event pairs are reduced today (resonance/
 // reactivity are recorded, not yet reduced). Expand = the `...` expansion (there is
 // NO extension operator — a scope is closed), Product = the `->`-less production
 // collapse `!` reduces through.
+//
+// The event pair carries an extra law: an `.Event_Pull` binding is a HANDLER, and
+// the event it handles lives in its `constraints` slot (its own value is the
+// handler body). An `.Event_Push` is an emit, already resolved by the analyzer to
+// the collapse of its handler — so no event survives into reduce as an event.
 Binding_Kind :: enum u8 {
 	Pointing_Push,
 	Pointing_Pull,

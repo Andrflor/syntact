@@ -1,0 +1,6 @@
+{
+  "name": "The nearest handler in the hierarchy wins",
+  "description": "Resolution takes the FIRST handler found walking outward, so a handler in the emitting scope shadows one in an enclosing scope",
+  "source": "Log -> {\n  u8:n\n}\n\nouter -> {\n  Log -< e {\n    -> 100\n  }\n  inner -> {\n    Log -< e {\n      -> e.n\n    }\n    -> >- Log{n -> 7}\n  }\n  -> inner!\n}\n\n-> outer!",
+  "expect": "7"
+}
