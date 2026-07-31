@@ -1,0 +1,6 @@
+{
+  "name": "Emission of an undeclared event",
+  "description": "`>- Plop{…}` names no declared event. ONE error: the payload carve of an unresolved source reports nothing of its own.",
+  "source": "Log -> {\n  string:message\n}\n>- Plop{message -> \"x\"}\n-> 0",
+  "expect_errors": ["Undefined_Identifier"]
+}

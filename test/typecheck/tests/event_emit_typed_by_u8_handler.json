@@ -1,0 +1,6 @@
+{
+  "name": "Emission colored by the handler u8 answer",
+  "description": "The handler produces 10 regardless of the payload, so `u8:val` proves against 10 — the payload`s own type never leaks into the emission`s.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> 10\n}\nu8:val >- Log{\"message\"}\n-> val",
+  "expect_errors": []
+}

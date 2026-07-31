@@ -1,0 +1,6 @@
+{
+  "name": "Handler of an undeclared event",
+  "description": "`Lig -< e {…}` — the nominal key of a handler is a declared data scope, so an undeclared name is undefined, not an implicitly-created event. ONE error: the capture of an unresolved event is the error sentinel, so `e.message` stays silent instead of cascading the same root cause.",
+  "source": "Lig -< e {\n  -> e.message\n}",
+  "expect_errors": ["Undefined_Identifier"]
+}

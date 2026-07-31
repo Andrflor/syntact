@@ -1,0 +1,6 @@
+{
+  "name": "A named emit answers with the handler production",
+  "description": "The handler ignores its payload and produces 10, so that is the bound value — the payload only feeds the capture.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> 10\n}\nval >- Log{\"message\"}\n-> val",
+  "expect": "10"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Emission of a structural value is not an event",
+  "description": "A payload alone is not a capability: the right of `>-` must name an event scope, optionally carved.",
+  "source": "Log -> {\n  string:message\n}\n-> >- 42",
+  "expect_errors": ["Invalid_Event_Pull"]
+}

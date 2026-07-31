@@ -1,0 +1,6 @@
+{
+  "name": "Prefix emission of an undeclared event",
+  "description": "The prefix `>- plip` form resolves its event exactly like the infix one — the emit target is never left unwalked.",
+  "source": "-> >- plip",
+  "expect_errors": ["Undefined_Identifier"]
+}

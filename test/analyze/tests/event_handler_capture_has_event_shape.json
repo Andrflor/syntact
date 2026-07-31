@@ -1,0 +1,6 @@
+{
+  "name": "Handler capture carries the event shape",
+  "description": "The capture holds the event scope, so `e.message` is an ordinary projection against the declared payload and typechecks before any emit exists.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\n-> 0",
+  "expect_errors": []
+}

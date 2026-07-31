@@ -268,9 +268,11 @@ walk_scope_children :: proc(a: ^Analyzer, scope: ^Scope_Type, children: []Node_I
 			// An emit in binding position registers an entry (anonymous, or named when
 			// written `name >- E{…}`); in value position walk gives the value alone.
 			walk_event_push(a, scope, child)
+		case .EventPull:
+			// A handler in binding position belongs to THIS scope.
+			walk_event_pull(a, scope, child)
 		case .Pointing,
 		     .PointingPull,
-		     .EventPull,
 		     .ResonancePush,
 		     .ResonancePull,
 		     .ReactivePush,
@@ -550,12 +552,16 @@ close_ref :: proc(a: ^Analyzer, p: Pending) {
 	if idx, ok := ref.index.(u64); ok do prop_ordinal = i16(idx)
 	rs, ri := resolve_property_site(p.target, prop_name, prop_ordinal)
 	if rs == nil {
-		sem_error(
-			a,
-			fmt.tprintf("property '%s' does not exist", prop_name),
-			.Invalid_Property_Access,
-			node_span(a, p.node),
-		)
+		// A broken target's own diagnostic already fired; re-reporting the field miss
+		// would cascade one root cause into two.
+		if !is_broken(p.target) {
+			sem_error(
+				a,
+				fmt.tprintf("property '%s' does not exist", prop_name),
+				.Invalid_Property_Access,
+				node_span(a, p.node),
+			)
+		}
 		return
 	}
 	ref.match_scope = rs
@@ -665,6 +671,14 @@ scope_resolve :: proc(
 	return nil, -1
 }
 
+// slot_is_handler reports whether a binding slot is a HANDLER (`E -< e {…}`). Its
+// `constraints` entry is the EVENT IT HANDLES — a nominal KEY, not a color — so
+// every constraint proof must skip such a slot: proving a handler's body against
+// the shape of the event it interprets is a category error, not a mismatch.
+slot_is_handler :: #force_inline proc(scope: ^Scope_Type, i: int) -> bool {
+	return scope != nil && i >= 0 && i < len(scope.kind) && scope.kind[i] == .Event_Pull
+}
+
 // nth_pointing_push returns the index of the k-th Pointing_Push binding (or -1).
 // Used by positional carves, which only target the pushable (`->`) fields.
 nth_pointing_push :: proc(scope: ^Scope_Type, k: int) -> int {
@@ -764,7 +778,9 @@ walk :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type
 		// position (walk_scope_children) does it register an entry.
 		return walk_emit_value(a, current_scope, idx)
 	case .EventPull:
-		return walk_event_pull(a, current_scope, idx)
+		// In VALUE position a handler registers nowhere — it is the interpretation
+		// itself, which a carve override then installs on the scope it derives.
+		return walk_event_pull(a, current_scope, idx, register = false)
 	case .Product:
 		return walk_product(a, current_scope, idx)
 	case .Expand:
@@ -821,6 +837,27 @@ make_invalid :: #force_inline proc() -> ^Type {
 	result := new(Type)
 	result^ = Invalid_Type{}
 	return result
+}
+
+// is_broken reports whether a value resolves to the ERROR SENTINEL — the marker
+// that a diagnostic already fired at its own site. Consumers check it to stay
+// silent rather than cascade one root cause into several. A carve of a broken
+// source is itself broken: deriving from nothing yields nothing.
+is_broken :: proc(t: ^Type) -> bool {
+	cur := t
+	for cur != nil {
+		r := follow(cur)
+		if r == nil do return false
+		#partial switch v in r^ {
+		case Invalid_Type:
+			return true
+		case Carve_Type:
+			cur = v.source
+			continue
+		}
+		return false
+	}
+	return false
 }
 
 walk_scope_node :: #force_inline proc(
@@ -1007,7 +1044,22 @@ produced_scope :: proc(s: ^Scope_Type) -> ^Scope_Type {
 // the event scope as its value — `e` then resolves through the existing invisible
 // capture path and `e.message` is an ordinary projection. At reduce the emit
 // overwrites that binding with the real payload.
-walk_event_pull :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Index) -> ^Type {
+// Two POSITIONS share this walk, exactly as `>-` shares walk_event_push /
+// walk_emit_value:
+//   * a scope child (`register`) — the handler belongs to that scope;
+//   * a carve override (`register` false) — it SPECIALIZES an inherited handler
+//     (`FastLib -> SomeLib{Alloc -< e {…}}`), so it registers nothing and
+//     carve_resolve_children installs it on the carve instead.
+// `event_value`, when given, is the already-walked event: the carve path must
+// resolve it first (to find the slot the override targets) and passing it in keeps
+// the event name from being walked — and mis-reported — twice.
+walk_event_pull :: proc(
+	a: ^Analyzer,
+	current_scope: ^Scope_Type,
+	idx: Node_Index,
+	register := true,
+	event_value: ^Type = nil,
+) -> ^Type {
 	ast := a.ast
 	data := ast.node_data[idx]
 	event_idx := data.event_pull.from
@@ -1023,7 +1075,7 @@ walk_event_pull :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 		)
 		return make_invalid()
 	}
-	event := walk(a, current_scope, event_idx)
+	event := event_value != nil ? event_value : walk(a, current_scope, event_idx)
 	if body_idx == INVALID_NODE || ast.node_kinds[body_idx] != .ScopeNode {
 		sem_error(
 			a,
@@ -1035,7 +1087,10 @@ walk_event_pull :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 	}
 
 	// The event must name a data scope — that scope's identity IS the nominal key.
+	// A name that did not resolve at all already reported; only a resolved value of
+	// the wrong shape is news here.
 	if event_scope_of(event) == nil {
+		if is_broken(event) do return make_invalid()
 		sem_error(
 			a,
 			"the left of `-<` must name an event scope (a scope declared like `Log -> { string:message }`)",
@@ -1055,9 +1110,11 @@ walk_event_pull :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 	// does, so the body may refer back to it. The event scope is the binding's
 	// CONSTRAINT: it records which event this handles without standing in for the
 	// handler's own value.
-	scope_append(a, current_scope, "", event, .Event_Pull, result)
-	append(&current_scope.constraint_folds, nil)
-	append(&current_scope.type_folds, nil)
+	if register {
+		scope_append(a, current_scope, "", event, .Event_Pull, result)
+		append(&current_scope.constraint_folds, nil)
+		append(&current_scope.type_folds, nil)
+	}
 
 	// The payload slot: invisible (no name), reachable only as the capture `e`
 	// within this body. Its value is the event scope, so `e.message` typechecks
@@ -1166,6 +1223,7 @@ walk_emit_value :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 	payload := walk(a, current_scope, payload_idx)
 	event := event_scope_of(payload)
 	if event == nil {
+		if is_broken(payload) do return make_invalid()
 		sem_error(
 			a,
 			"the right of `>-` must name an event scope, optionally carved: `>- Log{message -> \"hi\"}`",
@@ -1231,15 +1289,27 @@ walk_emit_value :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 // consulted when this scope handles the event nowhere.
 resolve_handler :: proc(scope: ^Scope_Type, event: ^Scope_Type) -> (^Type, int) {
 	for s := scope; s != nil; s = s.parent {
-		for i := len(s.kind) - 1; i >= 0; i -= 1 {
-			if s.kind[i] != .Event_Pull do continue
-			if i >= len(s.constraints) do continue
-			if event_scope_of(s.constraints[i]) != event do continue
-			body := s.types[i]
-			return body, handler_capture_index(body)
+		if i := scope_handler_index(s, event); i >= 0 {
+			return s.types[i], handler_capture_index(s.types[i])
 		}
 	}
 	return nil, -1
+}
+
+// scope_handler_index finds the handler THIS scope installs for `event` — the last
+// matching `.Event_Pull` slot, by the same rule resolve_handler applies within a
+// scope. -1 when this scope handles the event nowhere. Split out because a carve
+// override targets the CARVED scope's own handler and must not walk up: an
+// enclosing handler is not a field of the scope being derived.
+scope_handler_index :: proc(s: ^Scope_Type, event: ^Scope_Type) -> int {
+	if s == nil || event == nil do return -1
+	for i := len(s.kind) - 1; i >= 0; i -= 1 {
+		if s.kind[i] != .Event_Pull do continue
+		if i >= len(s.constraints) do continue
+		if event_scope_of(s.constraints[i]) != event do continue
+		return i
+	}
+	return -1
 }
 
 // handler_capture_index locates a handler body's payload slot — the binding
@@ -1450,6 +1520,10 @@ materialize_bare_constraint :: proc(
 	pend: ^Scope_Type,
 ) {
 	a.fold_pending = nil
+	// An unresolvable color denotes no set at all, so the bare form materializes the
+	// error sentinel rather than nothing: the diagnostic already fired at the color
+	// itself, and the sentinel keeps every later use of the binding silent.
+	if is_broken(constraint) do return make_invalid(), nil, nil
 	fc = fold_constraint(constraint)
 	if default_is_infinite(fc) {
 		sem_error(
@@ -1654,6 +1728,10 @@ walk_property :: #force_inline proc(
 			)
 			return result
 		}
+		// A broken target's own diagnostic already fired (an undefined name, an
+		// unresolvable color); re-reporting the field miss would cascade one root
+		// cause into two.
+		if is_broken(target) do return make_invalid()
 		sem_error(
 			a,
 			fmt.tprintf("property '%s' does not exist", prop_name),
@@ -1924,6 +2002,12 @@ carve_resolve_children :: proc(
 	refs := &cv.references
 	vals := &cv.types
 
+	// A broken source has no fields to target, and its own diagnostic already fired:
+	// every override would miss, turning one root cause into one error per override.
+	// The overrides are still WALKED (their own contents get proven) — only the miss
+	// is silent.
+	broken_src := is_broken(cv.source)
+
 	// Point carved_scope at src_scope so a source-none property (`.x`) resolves
 	// against it; restore afterwards so nested carves resolve `.` against the nearest.
 	saved_carved := a.carved_scope
@@ -1951,7 +2035,7 @@ carve_resolve_children :: proc(
 			if src_scope != nil {
 				carve_scope, carve_index = scope_resolve(src_scope, cname, cordinal, false)
 			}
-			if carve_scope == nil {
+			if carve_scope == nil && !broken_src {
 				sem_error(
 					a,
 					fmt.tprintf("'%s' does not exist in the carved scope", cname),
@@ -1975,6 +2059,39 @@ carve_resolve_children :: proc(
 					node_span(a, child),
 				},
 			)
+			append(vals, val)
+		} else if child_kind == .EventPull {
+			// Specializing an INHERITED handler (`FastLib -> SomeLib{Alloc -< e {…}}`,
+			// README §Handlers as compile-time DI): the override targets the source's
+			// own handler slot for that event. A scope is closed, so carving derives and
+			// never extends — the source must already handle the event.
+			// TRAP: scope_handler_index, NOT resolve_handler — an override names a field
+			// of the CARVED scope; the lexical walk-up would steal an unrelated
+			// enclosing handler and silently rewrite the wrong slot.
+			event_idx := child_data.event_pull.from
+			event_value := event_idx != INVALID_NODE ? walk(a, current_scope, event_idx) : nil
+			event := event_scope_of(event_value)
+			carve_scope: ^Scope_Type = nil
+			carve_index := -1
+			if i := scope_handler_index(src_scope, event); i >= 0 {
+				carve_scope = src_scope
+				carve_index = i
+			}
+			if carve_scope == nil && !broken_src && !is_broken(event_value) {
+				sem_error(
+					a,
+					fmt.tprintf(
+						"the carved scope has no handler for '%s': a carve derives a scope, it cannot add a handler the source does not declare",
+						event_display_name(current_scope, event),
+					),
+					.Invalid_Carve,
+					node_span(a, event_idx != INVALID_NODE ? event_idx : child),
+				)
+			}
+			// The override is the interpretation ALONE: it registers in no scope, and
+			// the event it handles is already recorded by the slot it replaces.
+			val := walk_event_pull(a, current_scope, child, register = false, event_value = event_value)
+			append(refs, Reference{nil, nil, carve_scope, carve_index, node_span(a, child)})
 			append(vals, val)
 		} else if shorthand_field, shorthand_idx, ok := carve_shorthand_field(a, src_scope, child);
 		   ok {
@@ -2024,7 +2141,7 @@ carve_resolve_children :: proc(
 					carve_index = idx
 				}
 			}
-			if carve_scope == nil {
+			if carve_scope == nil && !broken_src {
 				sem_error(
 					a,
 					"positional carve out of range: the scope has fewer pushable (->)  fields",
@@ -2102,6 +2219,7 @@ recheck_carve :: proc(a: ^Analyzer, carve: ^Carve_Type, node: Node_Index) {
 		ref := carve.references[i]
 		if ref.match_scope == nil || ref.match_index < 0 do continue
 		if ref.match_index >= len(ref.match_scope.constraint_folds) do continue
+		if slot_is_handler(ref.match_scope, ref.match_index) do continue
 		prove_carve_override(
 			ref.match_scope.constraint_folds[ref.match_index],
 			carve.types[i],
@@ -2139,6 +2257,9 @@ prove_materialized_carve :: proc(carve: ^Carve_Type, sub: ^Scope_Type) {
 		ref := carve.references[k]
 		idx := carve_ref_index(ref, sub)
 		if idx >= 0 do overridden[idx] = true
+		if slot_is_handler(sub, idx) || slot_is_handler(ref.match_scope, ref.match_index) {
+			continue // a handler slot's constraint is the event key, not a color
+		}
 		fc: ^Type = nil
 		if idx >= 0 && idx < len(sub.constraint_folds) do fc = sub.constraint_folds[idx]
 		if fc == nil &&
@@ -2151,6 +2272,7 @@ prove_materialized_carve :: proc(carve: ^Carve_Type, sub: ^Scope_Type) {
 	}
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue // proven above as a direct override
+		if slot_is_handler(sub, i) do continue // the event key is not a color
 		ft := fold_type(sub.types[i])
 		if ft == nil {
 			detect_invalid(sub.types[i])
