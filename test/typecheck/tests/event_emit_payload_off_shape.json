@@ -1,0 +1,6 @@
+{
+  "name": "Emitted payload outside the event shape",
+  "description": "The payload lands in the capture slot, whose color is the declared event: an off-shape payload fails the ordinary carve proof.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\nval >- Log{message -> 42}\n-> val",
+  "expect_errors": ["Constraint_Mismatch"]
+}

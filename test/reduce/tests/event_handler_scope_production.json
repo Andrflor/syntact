@@ -1,0 +1,6 @@
+{
+  "name": "A bare emit leaves the scope production untouched",
+  "description": "An emit written as a plain scope entry is an ordinary anonymous binding, not the production: collapsing the scope still reduces through its `->`.",
+  "source": "Log -> {\n  string:message\n}\nprogram -> {\n  Log -< e {\n    -> e.message\n  }\n  >- Log{message -> \"hello\"}\n  -> 0\n}\n-> program!",
+  "expect": "0"
+}

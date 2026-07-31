@@ -1,0 +1,6 @@
+{
+  "name": "An event name resolves past its handler",
+  "description": "After `Log -< e {…}` the name Log still denotes the event DECLARATION — a handler occupies its own namespace and is not a value named Log.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\n-> Log",
+  "expect": "{message -> \"\"}"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "A named emit binds the handler answer",
+  "description": "`val >- Log{\"message\"}` carves the payload POSITIONALLY into the event, then binds what the handler produces from it.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\nval >- Log{\"message\"}\n-> val",
+  "expect": "\"message\""
+}

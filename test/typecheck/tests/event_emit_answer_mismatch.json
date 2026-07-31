@@ -1,0 +1,6 @@
+{
+  "name": "Emission answer against the wrong color",
+  "description": "The handler answers 10, so coloring the emission `string` is a constraint mismatch like any other binding.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> 10\n}\nstring:val >- Log{\"message\"}\n-> val",
+  "expect_errors": ["Constraint_Mismatch"]
+}

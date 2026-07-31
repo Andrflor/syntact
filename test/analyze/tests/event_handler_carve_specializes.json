@@ -1,0 +1,6 @@
+{
+  "name": "Carving an inherited handler",
+  "description": "README §Handlers as compile-time DI: `FastLib -> SomeLib{Alloc -< e {…}}` overrides the SOURCE`s handler slot for Alloc — the handler`s constraint slot is the event key, so no constraint proof runs against it.",
+  "source": "Alloc -> {\n  u64:size\n}\nSomeLib -> {\n  Alloc -< e { -> e.size }\n  -> 1\n}\nFastLib -> SomeLib{ Alloc -< e { -> e.size + 1 } }\n-> FastLib!",
+  "expect_errors": []
+}

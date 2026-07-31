@@ -1,0 +1,6 @@
+{
+  "name": "Carving a handler the source does not declare",
+  "description": "A scope is closed, so carving derives and never extends: specializing Alloc requires SomeLib to already handle it. Resolution is scope-local — an enclosing handler is not a field of the scope being derived.",
+  "source": "Alloc -> {\n  u64:size\n}\nSomeLib -> {\n  -> 1\n}\nFastLib -> SomeLib{ Alloc -< e { -> e.size } }\n-> FastLib!",
+  "expect_errors": ["Invalid_Carve"]
+}

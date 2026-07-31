@@ -1,0 +1,6 @@
+{
+  "name": "A handler renders as a handler slot",
+  "description": "An uncollapsed scope shows its interpretation in place: the handler slot is anonymous (keyed by the event scope, not by a name) and its body carries the invisible payload slot.",
+  "source": "Alloc -> {\n  u64:size\n}\nSomeLib -> {\n  Alloc -< e { -> e.size }\n  -> 1\n}\n-> SomeLib",
+  "expect": "{{??0, -> 0}, -> 1}"
+}

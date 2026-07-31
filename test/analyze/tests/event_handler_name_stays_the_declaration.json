@@ -1,0 +1,6 @@
+{
+  "name": "A handler does not bind a value named after the event",
+  "description": "`Log -< e {…}` installs an interpretation keyed on the event scope`s identity — an anonymous slot, not a value named Log. So `Log` below still denotes the declaration and colors `Log:x -> {message -> \"hi\"}`.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\nLog:x -> {\n  message -> \"hi\"\n}\n-> x.message",
+  "expect_errors": []
+}

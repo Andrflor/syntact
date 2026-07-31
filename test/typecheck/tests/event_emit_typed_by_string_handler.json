@@ -1,0 +1,6 @@
+{
+  "name": "Emission colored by the handler string answer",
+  "description": "The emission`s value is the interpretation`s answer, tracked by the standard machinery: `e.message` is a string, so `string:val` proves.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\nstring:val >- Log{\"message\"}\n-> val",
+  "expect_errors": []
+}

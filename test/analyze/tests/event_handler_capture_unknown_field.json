@@ -1,0 +1,6 @@
+{
+  "name": "Handler capture rejects a field the event lacks",
+  "description": "The capture has the event`s shape and nothing more, so a field outside the declared payload misses.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.nope\n}\n-> 0",
+  "expect_errors": ["Invalid_Property_Access"]
+}

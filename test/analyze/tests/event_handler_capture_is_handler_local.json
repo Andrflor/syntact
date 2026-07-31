@@ -1,0 +1,6 @@
+{
+  "name": "Handler capture is local to the handler body",
+  "description": "The capture sits to the RIGHT of `-<` because its scope is the body alone: it is the body`s own first invisible binding, so the enclosing scope never sees it.",
+  "source": "Log -> {\n  string:message\n}\nLog -< e {\n  -> e.message\n}\n-> e",
+  "expect_errors": ["Undefined_Identifier"]
+}
