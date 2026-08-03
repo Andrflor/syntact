@@ -1,0 +1,1 @@
+{"name": "def_carve_recolors_bare_production", "description": "a bare colored production follows its substituted color: with `-> T:` first, maybe{u8} defaults to u8's 0, not to the {} T defaulted to at definition", "source": "None->{}\nmaybe -> {\n  T -> None\n  -> T:\n  -> None:\n}\nmaybe{u8}:b", "binding": "b", "expect": "0"}

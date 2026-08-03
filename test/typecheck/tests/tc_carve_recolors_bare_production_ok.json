@@ -1,0 +1,1 @@
+{ "name": "tc_carve_recolors_bare_production_ok", "description": "carving a scope's type parameter recolors its bare colored productions: `-> T:` under {T -> u8} IS `-> u8:`, so nothing is left of the pre-carve default to contradict the new color", "source": "None->{}\nmaybe -> {\n  T -> None\n  -> None:\n  -> T:\n}\n\nmaybe{u8}:b", "expect_errors": [] }

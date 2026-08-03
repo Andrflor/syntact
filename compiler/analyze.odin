@@ -485,7 +485,12 @@ close_default :: proc(a: ^Analyzer, p: Pending) {
 		)
 	}
 	value := default_value(fc)
-	p.scope.types[p.bind] = value
+	// The slot stays valueless (it stated no value): only the color and the cached read
+	// of it are filled in. A cover CAPTURE keeps a materialized placeholder, by the same
+	// rule append_bare_constraint applies.
+	if p.bind < len(p.scope.captures) && p.scope.captures[p.bind] != "" {
+		p.scope.types[p.bind] = value
+	}
 	if p.bind < len(p.scope.constraint_folds) do p.scope.constraint_folds[p.bind] = fc
 	if p.bind < len(p.scope.type_folds) do p.scope.type_folds[p.bind] = value
 	if p.bind < len(p.scope.captures) {
@@ -724,18 +729,18 @@ follow :: proc(t: ^Type) -> ^Type {
 		case Mention_Type:
 			if v.match_scope == nil || v.match_index < 0 do return cur
 			key = Follow_Key{v.match_scope, v.match_index}
-			next = v.match_scope.types[v.match_index]
+			next = slot_value(v.match_scope, v.match_index)
 		case Reference_Type:
 			r := v.reference
 			if r == nil || r.match_scope == nil || r.match_index < 0 do return cur
 			key = Follow_Key{r.match_scope, r.match_index}
-			next = r.match_scope.types[r.match_index]
+			next = slot_value(r.match_scope, r.match_index)
 		case Recursive_Mention_Type:
 			// Follow like a Mention; the scope pointer is valid even while incomplete
 			// (consumers check `walking`).
 			if v.match_scope == nil || v.match_index < 0 do return cur
 			key = Follow_Key{v.match_scope, v.match_index}
-			next = v.match_scope.types[v.match_index]
+			next = slot_value(v.match_scope, v.match_index)
 		case:
 			return cur
 		}
@@ -1558,7 +1563,7 @@ append_bare_constraint :: proc(
 ) -> ^Type {
 	value, fc, pend := materialize_bare_constraint(a, constraint, node)
 	if pend != nil {
-		scope_append(a, scope, name, constraint, bk, value, capture)
+		scope_append(a, scope, name, constraint, bk, capture != "" ? value : nil, capture)
 		append(&scope.constraint_folds, nil)
 		append(&scope.type_folds, nil)
 		append(
@@ -1573,7 +1578,16 @@ append_bare_constraint :: proc(
 		)
 		return value
 	}
-	scope_append(a, scope, name, constraint, bk, value, capture)
+	// NO VALUE IS STORED: this binding stated none, so its COLOR is the only source
+	// of truth and its value is what reading it materializes (slot_value). Baking the
+	// default into the slot would freeze it: `maybe{u8}` substitutes T, and a baked
+	// `{}` would survive under the new color u8 — a value nobody ever wrote.
+	// EXCEPT a cover CAPTURE (`{T:(e) …}`): its slot is a destructuring target, and
+	// the placeholder laid down here is what a fired branch replaces with the matched
+	// piece — a represented placeholder, never re-derived from a live color (that is
+	// the unresolved_captures / capture_color_domain law, which owns the domain a
+	// capture reads before it is filled).
+	scope_append(a, scope, name, constraint, bk, capture != "" ? value : nil, capture)
 	append(&scope.constraint_folds, fc)
 	append(&scope.type_folds, value)
 	mark_unresolved_capture(scope, len(scope.types) - 1, capture, value)
@@ -2273,9 +2287,13 @@ prove_materialized_carve :: proc(carve: ^Carve_Type, sub: ^Scope_Type) {
 	for i in 0 ..< len(sub.names) {
 		if overridden[i] do continue // proven above as a direct override
 		if slot_is_handler(sub, i) do continue // the event key is not a color
-		ft := fold_type(sub.types[i])
+		// slot_value, not the raw slot: a field that stated no value holds its color's
+		// default, and after substitution that is the SUBSTITUTED color's default —
+		// exactly the value this proof must judge.
+		value := slot_value(sub, i)
+		ft := fold_type(value)
 		if ft == nil {
-			detect_invalid(sub.types[i])
+			detect_invalid(value)
 			continue
 		}
 		// The proof applies only to a COLORED field.

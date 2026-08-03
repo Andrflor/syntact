@@ -1,0 +1,6 @@
+{
+  "name": "Property of a recolored valueless binding",
+  "description": "reading b.v after Box{16..32} materializes the SUBSTITUTED color's default (16), never the frozen u8 default",
+  "source": "Box -> {\n  T -> u8\n  T:v\n}\nBox{16..32}:b\n-> b.v",
+  "expect": "16"
+}

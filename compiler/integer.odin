@@ -112,7 +112,7 @@ fold_type_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 				if s, ok := stored_fold_intervals(v.type_folds[i]).(Integer_Type); ok {
 					return s
 				}
-				return fold_type_intervals(v.types[i])
+				return fold_type_intervals(slot_value(&t.(Scope_Type), i))
 			}
 		}
 		return nil
@@ -265,7 +265,7 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 	case Scope_Type:
 		for i := 0; i < len(v.kind); i += 1 {
 			if v.kind[i] == .Product {
-				return fold_constraint_intervals(v.types[i])
+				return fold_constraint_intervals(slot_value(&t.(Scope_Type), i))
 			}
 		}
 		return nil
@@ -306,12 +306,12 @@ fold_constraint_intervals :: proc(t: ^Type) -> Maybe(Integer_Type) {
 		return integer_type_negate(inner)
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			return fold_constraint_intervals(v.match_scope.types[v.match_index])
+			return fold_constraint_intervals(slot_value(v.match_scope, v.match_index))
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			return fold_constraint_intervals(ref.match_scope.types[ref.match_index])
+			return fold_constraint_intervals(slot_value(ref.match_scope, ref.match_index))
 		}
 	}
 	return nil

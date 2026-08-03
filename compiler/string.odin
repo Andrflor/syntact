@@ -325,7 +325,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 				if s, ok := stored_string_intervals(v.type_folds[i]).([]String_Interval); ok {
 					return s
 				}
-				return fold_string_intervals(v.types[i], as_constraint)
+				return fold_string_intervals(slot_value(&t.(Scope_Type), i), as_constraint)
 			}
 		}
 		return nil
@@ -381,7 +381,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 && v.match_index < len(v.match_scope.types) {
 			if as_constraint {
-				return fold_string_intervals(v.match_scope.types[v.match_index], true)
+				return fold_string_intervals(slot_value(v.match_scope, v.match_index), true)
 			}
 			if s, ok := stored_string_intervals(
 				   stored_type_fold_at(v.match_scope, v.match_index),
@@ -395,7 +395,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 			}
 			// The cached *_folds envelope to `{string}`, losing the bounds a
 			// repetition needs — fall back to the binding's actual value.
-			return fold_string_intervals(v.match_scope.types[v.match_index], false)
+			return fold_string_intervals(slot_value(v.match_scope, v.match_index), false)
 		}
 		return nil
 	case Reference_Type:
@@ -403,7 +403,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 &&
 		   ref.match_index < len(ref.match_scope.types) {
 			if as_constraint {
-				return fold_string_intervals(ref.match_scope.types[ref.match_index], true)
+				return fold_string_intervals(slot_value(ref.match_scope, ref.match_index), true)
 			}
 			if s, ok := stored_string_intervals(
 				   stored_type_fold_at(ref.match_scope, ref.match_index),
@@ -415,7 +415,7 @@ fold_string_intervals :: proc(t: ^Type, as_constraint: bool) -> Maybe([]String_I
 			   ).([]String_Interval); ok {
 				return s
 			}
-			return fold_string_intervals(ref.match_scope.types[ref.match_index], false)
+			return fold_string_intervals(slot_value(ref.match_scope, ref.match_index), false)
 		}
 		return nil
 	}

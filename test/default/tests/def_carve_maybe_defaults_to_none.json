@@ -1,0 +1,1 @@
+{ "name": "def_carve_maybe_defaults_to_none", "description": "the Maybe shape maybe{u8} produces None's {} or u8's 0; its default is its FIRST production, so None", "source": "None->{}\nmaybe -> {\n  T -> None\n  -> None:\n  -> T:\n}\nmaybe{u8}:b", "binding": "b", "expect": "{}" }

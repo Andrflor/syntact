@@ -873,3 +873,17 @@ test_def_pull_default_173 :: proc(t: ^testing.T) {
 	run_default_test("tests/def_pull_default.json", t)
 }
 
+@(test)
+test_def_carve_recolors_bare_binding_174 :: proc(t: ^testing.T) {
+	run_default_test("tests/def_carve_recolors_bare_binding.json", t)
+}
+
+@(test)
+test_def_carve_recolors_bare_production_175 :: proc(t: ^testing.T) {
+	run_default_test("tests/def_carve_recolors_bare_production.json", t)
+}
+
+@(test)
+test_def_carve_maybe_defaults_to_none_176 :: proc(t: ^testing.T) {
+	run_default_test("tests/def_carve_maybe_defaults_to_none.json", t)
+}

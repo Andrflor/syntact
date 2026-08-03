@@ -31,10 +31,10 @@ reduce :: proc(scope: ^Scope_Type) -> ^Type {
 					return shortcut
 				}
 			}
-			return reduce_value(scope.types[i])
+			return reduce_value(reduce_slot_value(scope, i))
 		}
 		if scope.kind[i] == .Expand {
-			if prod := reduce_expand_production(scope.types[i]); prod != nil {
+			if prod := reduce_expand_production(reduce_slot_value(scope, i)); prod != nil {
 				return prod
 			}
 		}
@@ -60,10 +60,10 @@ reduce_expand_production :: proc(value: ^Type) -> ^Type {
 						return shortcut
 					}
 				}
-				return reduce_value(s.types[i])
+				return reduce_value(reduce_slot_value(&s, i))
 			}
 			if s.kind[i] == .Expand {
-				if prod := reduce_expand_production(s.types[i]); prod != nil {
+				if prod := reduce_expand_production(reduce_slot_value(&s, i)); prod != nil {
 					return prod
 				}
 			}
@@ -108,6 +108,18 @@ singleton_shortcut :: proc(tf: ^Type) -> ^Type {
 	if tf == nil do return nil
 	if fold_is_concrete_value(tf) do return tf
 	return nil
+}
+
+// reduce_slot_value is the REDUCER's read of a binding's value: the value it
+// stated, else — having stated none — its color's default. The default is taken
+// from the fold cache, which the analyzer materialized (and every substitution it
+// materialized refreshed): the reducer must never re-enter the analyzer-only fold
+// layer to recompute a color, so reduce_substitute_carve refreshes this cache for
+// the slots whose color it substitutes.
+reduce_slot_value :: proc(s: ^Scope_Type, i: int) -> ^Type {
+	if s == nil || i < 0 || i >= len(s.types) do return nil
+	if s.types[i] != nil do return s.types[i]
+	return i < len(s.type_folds) ? s.type_folds[i] : nil
 }
 
 // reduce_value is the recursive partial evaluator: a concrete value when
@@ -179,7 +191,7 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 // on one node (and thus one `??N` index, so they collect).
 reduce_mention :: proc(v: Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
-	bound := v.match_scope.types[v.match_index]
+	bound := reduce_slot_value(v.match_scope, v.match_index)
 	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
 	return reduce_value(bound)
 }
@@ -203,7 +215,7 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 			}
 		}
 	}
-	target := ref.match_scope.types[ref.match_index]
+	target := reduce_slot_value(ref.match_scope, ref.match_index)
 	if is_fixed_point(target) do return follow_to_fixedpoint(target)
 	return reduce_value(target)
 }
@@ -212,7 +224,7 @@ reduce_reference :: proc(v: Reference_Type, node: ^Type) -> ^Type {
 // unresolved one (analysis errored) stays opaque.
 reduce_recursive_mention :: proc(v: Recursive_Mention_Type, node: ^Type) -> ^Type {
 	if v.match_scope == nil || v.match_index < 0 do return node
-	bound := v.match_scope.types[v.match_index]
+	bound := reduce_slot_value(v.match_scope, v.match_index)
 	if is_fixed_point(bound) do return follow_to_fixedpoint(bound)
 	return reduce_value(bound)
 }
@@ -1564,6 +1576,19 @@ reduce_substitute_carve :: proc(value: Carve_Type) -> ^Scope_Type {
 			copy.types[i] = repointed
 			if i < len(copy.type_folds) do copy.type_folds[i] = nil
 		}
+	}
+
+	// A field that stated NO value holds its color's default, so a substituted color
+	// gives it a new one: repoint the COLOR onto the copy (a valueless field is the one
+	// place the reducer needs the color) and re-materialize the default into the cache
+	// reduce_slot_value reads. default_value only touches the domain folds — never the
+	// analyzer's carve-materializing layer, which reduce must not re-enter.
+	for i in 0 ..< len(copy.types) {
+		if copy.types[i] != nil do continue
+		if i >= len(copy.constraints) || copy.constraints[i] == nil do continue
+		copy.constraints[i] = repoint(copy.constraints[i], src, copy, false)
+		if i < len(copy.constraint_folds) do copy.constraint_folds[i] = nil
+		if i < len(copy.type_folds) do copy.type_folds[i] = default_value(copy.constraints[i])
 	}
 	return copy
 }

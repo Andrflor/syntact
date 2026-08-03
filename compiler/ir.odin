@@ -539,7 +539,10 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 				if has_name {
 					fmt.print(v.names[i])
 				}
-				switch v.kind[i] {
+				// A binding that stated NO value prints as the bare colored form it is
+				// (`u8:x`): there is no value expression to show, and the value it holds
+				// — its color's default — is the `t:` column below.
+				if v.types[i] != nil || !has_constraint do switch v.kind[i] {
 				case .Pointing_Push:
 					if has_name || has_constraint {
 						fmt.print(" -> ")

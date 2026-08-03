@@ -1,0 +1,1 @@
+{ "name": "tc_carve_recolors_bare_binding_stated_bad", "description": "a STATED value is not re-derived by a carve: `T:v -> 0` under {T -> string} still claims 0, which string does not admit", "source": "Box -> {\n  T -> u8\n  T:v -> 0\n}\nBox{string}:b", "expect_errors": ["Constraint_Mismatch"] }
