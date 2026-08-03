@@ -122,7 +122,7 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 				if d, ok := stored_bool_domain(v.type_folds[i]).(Bool_Domain); ok {
 					return d
 				}
-				return fold_bool_domain(v.types[i], as_constraint)
+				return fold_bool_domain(slot_value(&t.(Scope_Type), i), as_constraint)
 			}
 		}
 		return nil
@@ -143,7 +143,7 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 && v.match_index < len(v.match_scope.types) {
 			if as_constraint {
-				return fold_bool_domain(v.match_scope.types[v.match_index], true)
+				return fold_bool_domain(slot_value(v.match_scope, v.match_index), true)
 			}
 			if d, ok := stored_bool_domain(stored_type_fold_at(v.match_scope, v.match_index)).(Bool_Domain);
 			   ok {
@@ -161,7 +161,7 @@ fold_bool_domain :: proc(t: ^Type, as_constraint: bool) -> Maybe(Bool_Domain) {
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 &&
 		   ref.match_index < len(ref.match_scope.types) {
 			if as_constraint {
-				return fold_bool_domain(ref.match_scope.types[ref.match_index], true)
+				return fold_bool_domain(slot_value(ref.match_scope, ref.match_index), true)
 			}
 			if d, ok := stored_bool_domain(
 				   stored_type_fold_at(ref.match_scope, ref.match_index),

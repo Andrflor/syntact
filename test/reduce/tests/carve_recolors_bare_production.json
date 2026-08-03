@@ -1,0 +1,6 @@
+{
+  "name": "Carve recolors a bare colored production",
+  "description": "`-> T:` under {T -> u8} is `-> u8:`, so the collapse yields u8's default 0 — not the {} T defaulted to at definition",
+  "source": "None -> {}\nmaybe -> {\n  T -> None\n  -> T:\n}\n-> maybe{u8}!",
+  "expect": "0"
+}

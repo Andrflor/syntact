@@ -1,0 +1,1 @@
+{"name": "def_carve_recolors_bare_binding", "description": "a valueless colored binding's value follows its color through a carve: T:v under {T -> 16..32} defaults to 16, not to u8's 0", "source": "Box -> {\n  T -> u8\n  T:v\n}\nBox{16..32}:b", "binding": "b", "expect": "{T -> {-> 16..32}, v -> 16}"}

@@ -9,7 +9,7 @@ import "core:unicode/utf8"
 reference_effective_value :: proc(v: Reference_Type) -> ^Type {
 	ref := v.reference
 	if ref == nil || ref.match_scope == nil || ref.match_index < 0 do return nil
-	original := ref.match_scope.types[ref.match_index]
+	original := slot_value(ref.match_scope, ref.match_index)
 	if v.target != nil {
 		cur := follow(v.target)
 		if cur != nil {
@@ -203,7 +203,8 @@ capture_color_domain :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 //      placeholder (fold_type's capture rule — without it a diagnostic reads the
 //      raw placeholder scope and concludes "a scope" for a value whose domain is
 //      really `u8|string`);
-//   3. the stored value.
+//   3. the value it stated, or — having stated none — its color's default
+//      (slot_value).
 // Steps 1–2 return already-folded domains; step 3 returns the raw expression.
 binding_value_view :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	if scope == nil || index < 0 || index >= len(scope.types) do return nil
@@ -212,7 +213,7 @@ binding_value_view :: proc(scope: ^Scope_Type, index: int) -> ^Type {
 	// an unresolved slot, Unknown while that color is not inferred yet, nil for a
 	// resolved slot (whose stored value — a real `{}` included — is the value).
 	if dom := capture_color_domain(scope, index); dom != nil do return dom
-	return scope.types[index]
+	return slot_value(scope, index)
 }
 
 // color_is_leaf_domain reports whether a folded color denotes a LEAF set (integer/float/
@@ -298,7 +299,7 @@ fold_type :: proc(t: ^Type) -> ^Type {
 				entered, blocked := value_fold_enter(v.match_scope, v.match_index)
 				if blocked do return nil
 				defer value_fold_leave(v.match_scope, v.match_index, entered)
-				return fold_type(v.match_scope.types[v.match_index])
+				return fold_type(slot_value(v.match_scope, v.match_index))
 			}
 		case Reference_Type:
 			if v.reference != nil && v.reference.match_scope != nil && v.reference.match_index >= 0 {
@@ -478,9 +479,9 @@ execute_production :: proc(t: ^Type) -> (prod: ^Type, resolved: bool) {
 // pasting any `...A` expansion's production in place (see execute_production).
 scope_first_production :: proc(s: ^Scope_Type) -> (prod: ^Type, resolved: bool) {
 	for i := 0; i < len(s.kind); i += 1 {
-		if s.kind[i] == .Product do return s.types[i], true
+		if s.kind[i] == .Product do return slot_value(s, i), true
 		if s.kind[i] == .Expand {
-			if p, ok := execute_production(s.types[i]); ok && p != nil {
+			if p, ok := execute_production(slot_value(s, i)); ok && p != nil {
 				return p, true
 			}
 		}
@@ -508,9 +509,10 @@ default_value :: proc(t: ^Type) -> ^Type {
 			// structure: `{-> {T:e, -> E:}}:func` defaults to the shape scope.
 			for i := 0; i < len(v.kind); i += 1 {
 				if v.kind[i] == .Product {
-					def := type_default(v.types[i])
+					prod := slot_value(&v, i)
+					def := type_default(prod)
 					if def != nil do return def
-					return v.types[i]
+					return prod
 				}
 			}
 			return t
@@ -525,6 +527,34 @@ default_value :: proc(t: ^Type) -> ^Type {
 	def := type_default(target)
 	if def != nil do return def
 	return t
+}
+
+// slot_default materializes the value of a VALUELESS colored binding (`u8:x`,
+// `-> C:`, `...C:`): it stated no value, so its COLOR is the only source of truth
+// and its value is that color's default. Nothing is stored in `types[i]` for such
+// a binding, which is what makes substitution self-correcting: `maybe{u8}` rewrites
+// the color to u8 and the value follows to 0, with no per-slot bookkeeping and
+// nothing left over from before the carve.
+slot_default :: proc(s: ^Scope_Type, i: int) -> ^Type {
+	if s == nil || i < 0 || i >= len(s.constraints) do return nil
+	// An unresolvable color denotes no set at all, so the binding's value is the error
+	// sentinel — NOT nothing: the diagnostic already fired at the color itself, and the
+	// sentinel is what keeps every later use of the binding silent (the law
+	// materialize_bare_constraint states for the same form).
+	if is_broken(s.constraints[i]) do return make_invalid()
+	color := i < len(s.constraint_folds) ? s.constraint_folds[i] : nil
+	if color == nil do color = fold_constraint(s.constraints[i])
+	if color == nil do return nil
+	return default_value(color)
+}
+
+// slot_value is THE read of a binding's value: the value it stated, else — having
+// stated none — its color's default. Every consumer that reads `types[i]` for a
+// value goes through here, so the two cases can never diverge.
+slot_value :: proc(s: ^Scope_Type, i: int) -> ^Type {
+	if s == nil || i < 0 || i >= len(s.types) do return nil
+	if s.types[i] != nil do return s.types[i]
+	return slot_default(s, i)
 }
 
 // type_default : materializes the default of a type into a concrete value by
@@ -1308,8 +1338,12 @@ carve_substitute :: proc(t: ^Type, carve: ^Carve_Type, src: ^Scope_Type) -> ^Sco
 	// in place on `copy`, then refresh the cached folds.
 	for v, i in copy.types do copy.types[i] = repoint(v, src, copy)
 	for ty, i in copy.constraints do copy.constraints[i] = repoint(ty, src, copy)
-	for f, i in copy.type_folds do copy.type_folds[i] = fold_type(copy.types[i])
 	for f, i in copy.constraint_folds do copy.constraint_folds[i] = fold_constraint(copy.constraints[i])
+	// The colors are substituted, so re-read every value: a stated one re-folds
+	// (`c -> a+b` becomes `"ab"`), a valueless colored one re-materializes from its
+	// new color (`-> T:` under `{T -> u8}` is `-> u8:`, i.e. 0). Colors first — the
+	// second read consults them.
+	for f, i in copy.type_folds do copy.type_folds[i] = fold_type(slot_value(copy, i))
 
 	// Materialization IS the proof obligation: every field of the substituted scope
 	// must still inhabit its color. Proving here — not in any walk — is what makes
@@ -1370,8 +1404,9 @@ scope_repoint_node :: proc(src, old, dst: ^Scope_Type, refold := true) -> ^Type 
 	for v, i in rst.types do rst.types[i] = repoint(v, src, rst, refold)
 	for ty, i in rst.constraints do rst.constraints[i] = repoint(ty, src, rst, refold)
 	if refold {
-		for f, i in src.type_folds do append(&rst.type_folds, fold_type(rst.types[i]))
 		for f, i in src.constraint_folds do append(&rst.constraint_folds, fold_constraint(rst.constraints[i]))
+		// Colors first, then the values that read them (see carve_substitute).
+		for f, i in src.type_folds do append(&rst.type_folds, fold_type(slot_value(rst, i)))
 	} else {
 		for _ in src.type_folds do append(&rst.type_folds, nil)
 		for _ in src.constraint_folds do append(&rst.constraint_folds, nil)

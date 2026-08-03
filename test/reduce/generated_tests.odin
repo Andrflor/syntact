@@ -693,3 +693,17 @@ test_colored_carve_propagates_137 :: proc(t: ^testing.T) {
 	run_reduce_test("tests/colored_carve_propagates.json", t)
 }
 
+@(test)
+test_carve_recolors_bare_production_138 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/carve_recolors_bare_production.json", t)
+}
+
+@(test)
+test_carve_recolors_bare_binding_property_139 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/carve_recolors_bare_binding_property.json", t)
+}
+
+@(test)
+test_carve_recolors_bare_production_at_reduce_140 :: proc(t: ^testing.T) {
+	run_reduce_test("tests/carve_recolors_bare_production_at_reduce.json", t)
+}

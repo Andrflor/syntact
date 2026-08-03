@@ -190,7 +190,7 @@ negated :: proc(t: ^Type) -> ^Type {
 // it stays Unknown (which never satisfies).
 fold_constraint_target :: proc(scope: ^Scope_Type, i: int) -> ^Type {
 	if scope == nil || i < 0 || i >= len(scope.types) do return nil
-	value := scope.types[i]
+	value := slot_value(scope, i)
 	if value != nil {
 		if _, is_unknown := value^.(Unknown_Type); is_unknown {
 			ty := scope.constraint_folds[i]
@@ -455,7 +455,7 @@ grammar_of_tail :: proc(t: ^Type) -> (^Scope_Type, bool) {
 // body scope.
 recursive_site_body :: proc(scope: ^Scope_Type, index: int) -> (^Scope_Type, bool) {
 	if scope == nil || index < 0 || index >= len(scope.types) do return nil, false
-	body := follow(scope.types[index])
+	body := follow(slot_value(scope, index))
 	if body == nil do return nil, false
 	if s, ok := &body^.(Scope_Type); ok do return s, true
 	return nil, false
@@ -500,7 +500,7 @@ default_is_infinite :: proc(fc: ^Type) -> bool {
 	if !ok do return false
 	for i in 0 ..< len(s.kind) {
 		if s.kind[i] != .Product do continue
-		prod := s.types[i]
+		prod := slot_value(s, i)
 		if prod == nil do return false
 		ps, p_ok := &prod^.(Scope_Type)
 		if !p_ok do return false
@@ -899,6 +899,8 @@ binding_color :: proc(cs: Scope_Type, i: int) -> ^Type {
 		if cs.kind[i] != .Product {
 			return nil
 		}
+		// No color on this slot, so there is no default to read through: the value
+		// is whatever it stated.
 		return fold_constraint(cs.types[i])
 	}
 	if is_recursive_tail(cs.constraint_folds[i]) {
@@ -934,8 +936,9 @@ color_scope_with_constaint :: proc(cs, vs: Scope_Type) {
 
 scope_productions :: proc(s: Scope_Type) -> [dynamic]^Type {
 	out := make([dynamic]^Type, 0, len(s.kind))
+	sc := s // addressable copy: the columns are shared, so this reads the same slots
 	for i in 0 ..< len(s.kind) {
-		if s.kind[i] == .Product do append(&out, s.types[i])
+		if s.kind[i] == .Product do append(&out, slot_value(&sc, i))
 	}
 	return out
 }

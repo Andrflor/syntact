@@ -25,6 +25,11 @@ Plane2D -> @lib.geometry.Plane
 // the scope with @ are nothing special there are the same as anything else
 Plane3D -> Plane
 
+T1  -> { a -> 10 }
+T2 -> {a -> ""}
+foo -> { T1:data, -> data.a }
+foo{T2:}
+
 Circle->{->{u8:radius}}
 Square->{->{u8:side}}
 
@@ -41,6 +46,8 @@ maybe -> {
   -> None:
   -> T:
 }
+
+maybe{u8}
 
 double -> {
   maybe{Shape}:shape
@@ -97,7 +104,7 @@ reduce -> {
 }
 
 Error -> {
-  String:(message)
+  string:(message)
 }
 
 errorNoneReduce -> {
@@ -157,21 +164,21 @@ square{n->plop}! //144 u32
 square{n->{}}! //0 u8
 
 Log -> {
-  String:message
+  string:message
 }
 
 Input -> {
-  String:message
+  string:message
 }
 
 Logger -> {
   -> {
-    String:message
+    string:message
   }
 }
 
 Get -> {
-  String:url
+  string:url
 }
 
 ArenaAlloc -> {
@@ -179,13 +186,13 @@ ArenaAlloc -> {
 }
 
 debugPrint -> {
-  String:message
+  string:message
   >- Logger:debug{message->message}
 }
 
 printBack -> {
-  String:message
-  String:input >- Input{message->message}
+  string:message
+  string:input >- Input{message->message}
   >- Log{message->input}
   debugPrint{message->message}!
 }
@@ -200,7 +207,7 @@ getPony -> {
 httpCompileTime -> !{@http}
 
 // Config Text is a string here
-String:configText -> httpCompileTime.get{"https://api.myservice.com/config"}!
+string:configText -> httpCompileTime.get{"https://api.myservice.com/config"}!
 
 // Pattern match directly on the string
 result -> configText ? {
@@ -259,5 +266,3 @@ main -> {
 // Still everything is optimized around those side effects in the produced binary
 // So it's optimized as hell
 ->main!
-
-a

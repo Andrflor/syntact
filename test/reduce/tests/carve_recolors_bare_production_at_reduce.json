@@ -1,0 +1,6 @@
+{
+  "name": "Recolored bare production materialized by the reducer",
+  "description": "the collapse sits behind a recursion, so the reducer — not the analyzer's fold — materializes maybe{u8}; the valueless production must still read the SUBSTITUTED color's default (0), not None's {}",
+  "source": "None -> {}\nmaybe -> {\n  T -> None\n  -> T:\n}\nloop -> {\n  u8:n\n  -> n ? {\n    0 -> maybe{u8}!\n    -> loop{n -> n - 1}!\n  }\n}\n-> loop{n -> 3}!",
+  "expect": "0"
+}

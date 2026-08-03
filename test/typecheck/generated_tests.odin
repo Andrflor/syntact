@@ -3038,3 +3038,12 @@ test_tc_flt_inter_bad_606 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_inter_bad.json", t)
 }
 
+@(test)
+test_tc_carve_recolors_bare_production_ok_607 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_carve_recolors_bare_production_ok.json", t)
+}
+
+@(test)
+test_tc_carve_recolors_bare_binding_stated_bad_608 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_carve_recolors_bare_binding_stated_bad.json", t)
+}

@@ -230,13 +230,13 @@ follow_for_diagnostic :: proc(t: ^Type) -> ^Type {
 		#partial switch v in cur^ {
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
-				cur = v.match_scope.types[v.match_index]
+				cur = slot_value(v.match_scope, v.match_index)
 				continue
 			}
 		case Reference_Type:
 			ref := v.reference
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-				cur = ref.match_scope.types[ref.match_index]
+				cur = slot_value(ref.match_scope, ref.match_index)
 				continue
 			}
 		}
