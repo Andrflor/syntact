@@ -1,0 +1,1 @@
+{"name": "exh_nested_producer_missing_one_production_errors", "description": "soundness: expanding must not make a genuinely non-exhaustive pattern pass -- u32 is left uncovered", "source": "None -> {}\nnum -> {\n  -> u8:\n  -> u32:\n}\nt -> {\n  (None|num):n\n  -> n ? {\n    None -> 0\n    u8 -> 1\n  }\n}", "expect_errors": ["Non_Exhaustive_Pattern"]}

@@ -1,0 +1,1 @@
+{"name": "exh_nested_producer_missing_none_branch_errors", "description": "soundness: the structural None side of the union must still be covered", "source": "None -> {}\nnum -> {\n  -> u8:\n  -> u32:\n}\nt -> {\n  (None|num):n\n  -> n ? {\n    u8 -> 1\n    u32 -> 2\n  }\n}", "expect_errors": ["Non_Exhaustive_Pattern"]}

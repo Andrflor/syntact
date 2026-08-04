@@ -1,0 +1,1 @@
+{"name": "exh_nested_producer_in_and_operand", "description": "expansion walks And operands too, not only Or: (num & u8) narrows to u8 and the u8 branch covers it", "source": "num -> {\n  -> u8:\n  -> u32:\n}\nt -> {\n  (num & u8):n\n  -> n ? {\n    u8 -> 1\n  }\n}", "expect_errors": []}
