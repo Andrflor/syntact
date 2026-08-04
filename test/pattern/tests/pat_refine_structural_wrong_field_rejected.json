@@ -1,0 +1,1 @@
+{"name": "refine_structural_wrong_field_rejected", "description": "soundness: the narrowing is the branch's shape, so a field of the OTHER shape must still be rejected", "source": "Circle->{u8:radius}\nSquare->{u8:side}\ndouble -> {\n  (Circle|Square):shape\n  -> shape ? {\n    Circle -> shape.side\n    Square -> shape.side\n  }\n}", "expect_errors": ["Invalid_Property_Access"]}

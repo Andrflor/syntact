@@ -58,6 +58,10 @@ Analyzer :: struct {
 	// source-none property (`.x`) resolves against its original fields; nil
 	// otherwise. Saved/restored around each override walk so nested carves nest.
 	carved_scope:          ^Scope_Type,
+	// During a UNION cover's product walk (`Square: | Diamond: -> …`), the cover
+	// itself; nil otherwise. A name resolved in the cover scope must belong to the
+	// common projection — present in EVERY operand. Saved/restored like carved_scope.
+	union_cover:           ^Type,
 	// Span of the carve being rechecked, so the fold layer anchors its error at the
 	// carve site. Set around recheck_carve only.
 	recheck_span:          Span,
@@ -311,6 +315,41 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	case:
 		return .Pointing_Push
 	}
+}
+
+// cover_scope: the scope a cover exposes to its branch product. A cover IS a scope,
+// so the product is walked inside it and the ordinary resolution chain does the rest.
+// A UNION of covers exposes the projection COMMON to its operands — the spec's
+// "two shapes unify through a common projection because resolution is structural,
+// not nominal" (specs/language/12-patterns.md). Either operand serves that shared
+// surface; cover_projects keeps it shared.
+cover_scope :: proc(match: ^Type) -> ^Scope_Type {
+	if match == nil do return nil
+	#partial switch &m in match^ {
+	case Scope_Type:
+		return &m
+	case Or_Type:
+		s := cover_scope(m.left)
+		if s == nil do s = cover_scope(m.right)
+		return s
+	}
+	return nil
+}
+
+// cover_projects reports whether `name` belongs to a cover's common projection: it
+// must resolve in EVERY operand of a union, and in the scope itself otherwise. A
+// name only one operand defines is not readable — the scrutinee might be the other
+// shape, and resolving positionally would read a different field under that name.
+cover_projects :: proc(match: ^Type, name: string) -> bool {
+	if match == nil do return false
+	#partial switch &m in match^ {
+	case Scope_Type:
+		idx, _ := nth_named(&m, name, 0)
+		return idx >= 0
+	case Or_Type:
+		return cover_projects(m.left, name) && cover_projects(m.right, name)
+	}
+	return false
 }
 
 // scope_append pushes one binding onto the parallel columns in lockstep. The two
@@ -713,6 +752,17 @@ self_resolve :: proc(scope: ^Scope_Type, name: string, ordinal: i16) -> (^Scope_
 	return nil, -1
 }
 
+// refined_slot_value reads the value follow should chase through a binding: a live
+// pattern-branch refinement when one is installed, else the stored value. Inside
+// `shape ? {Circle -> …}` the scrutinee IS a Circle for that branch, so every
+// consumer that follows the mention — property resolution, carve target resolution
+// — must see the narrowed shape, not the declared union. Outside a branch no
+// override exists and this is exactly slot_value.
+refined_slot_value :: #force_inline proc(scope: ^Scope_Type, index: int) -> ^Type {
+	if ov := refine_override_for(scope, index); ov != nil do return ov
+	return slot_value(scope, index)
+}
+
 // follow chases indirections (Mention/Reference) to the value they ultimately
 // bind, transitively. A non-indirection or dangling indirection returns unchanged.
 follow :: proc(t: ^Type) -> ^Type {
@@ -729,12 +779,12 @@ follow :: proc(t: ^Type) -> ^Type {
 		case Mention_Type:
 			if v.match_scope == nil || v.match_index < 0 do return cur
 			key = Follow_Key{v.match_scope, v.match_index}
-			next = slot_value(v.match_scope, v.match_index)
+			next = refined_slot_value(v.match_scope, v.match_index)
 		case Reference_Type:
 			r := v.reference
 			if r == nil || r.match_scope == nil || r.match_index < 0 do return cur
 			key = Follow_Key{r.match_scope, r.match_index}
-			next = slot_value(r.match_scope, r.match_index)
+			next = refined_slot_value(r.match_scope, r.match_index)
 		case Recursive_Mention_Type:
 			// Follow like a Mention; the scope pointer is valid even while incomplete
 			// (consumers check `walking`).
@@ -2422,15 +2472,17 @@ walk_pattern :: #force_inline proc(
 		// enclosing scope) makes the cover's bindings and `(e)` captures mentionable
 		// from the product — destructuring, with nested patterns nesting for free.
 		product_scope := current_scope
-		if match != nil {
-			if ms, is_scope := &match^.(Scope_Type); is_scope {
-				product_scope = ms
-			}
-		}
+		if ms := cover_scope(match); ms != nil do product_scope = ms
 
 		product: ^Type = nil
 		if product_idx != INVALID_NODE {
+			// A union cover only lends its COMMON projection to the product.
+			saved_union := a.union_cover
+			if match != nil {
+				if _, is_or := match^.(Or_Type); is_or do a.union_cover = match
+			}
 			product = walk(a, product_scope, product_idx)
+			a.union_cover = saved_union
 		} else {
 			product = make_none()
 		}
@@ -2588,6 +2640,11 @@ walk_identifier :: #force_inline proc(a: ^Analyzer, scope: ^Scope_Type, idx: Nod
 	ordinal := data.identifier.ordinal
 
 	res_scope, res_index := scope_resolve(scope, name, ordinal, true, allow_capture = true)
+	// Inside a union cover's product, a name that landed IN the cover scope must be
+	// part of the common projection — defined by every operand.
+	if res_scope != nil && a.union_cover != nil && res_scope == scope {
+		if !cover_projects(a.union_cover, name) do res_scope = nil
+	}
 	if res_scope != nil {
 		// A mention of a still-walking scope is a self mention (`fib` inside fib):
 		// record an explicit Recursive_Mention so folds defer through it, satisfy

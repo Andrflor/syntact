@@ -46,7 +46,21 @@ refine :: proc(e: ^Type, add: ^Type) -> []Refinement {
 	// `n ? {0->…, ->…}` narrows n to `~0 & u64` in the default branch.
 	if is_refinable_leaf(e) {
 		dom := domain_intersect(leaf_domain(e), add)
-		if dom == nil do return {}
+		if dom == nil {
+			// No INTERVAL meaning: the scrutinee ranges over structures, not numbers.
+			// The spec's rule is the same either way — "a bare shape denotes its set,
+			// and the branch fires when the scrutinee belongs to it" — so inside the
+			// branch the scrutinee IS a value of the cover's set. Interval intersection
+			// is how `&` lands in the integer domain; where that does not apply, `e & M`
+			// is M itself, the narrower side. Only a cover naming ONE shape narrows:
+			// a union cover proves no single shape, which is what the leaf already has.
+			if sh := cover_shape(add); sh != nil {
+				out := make([]Refinement, 1)
+				out[0] = Refinement{leaf = e, domain = sh}
+				return out
+			}
+			return {}
+		}
 		out := make([]Refinement, 1)
 		out[0] = Refinement{leaf = e, domain = dom}
 		return out
@@ -122,7 +136,13 @@ frame_override :: proc(frame: ^Override_Frame, site: Binding_Site, value: ^Type)
 frame_narrow :: proc(frame: ^Override_Frame, site: Binding_Site, domain: ^Type) {
 	value := domain
 	if prev, present := site.scope.refine_overrides[site.index]; present {
-		value = domain_intersect(prev, domain)
+		// Intersect where the interval level applies. It does not for a STRUCTURAL
+		// narrowing, and a nil there would erase the override entirely — handing the
+		// branch back the whole declared union. `domain` is what THIS branch proves,
+		// already the narrower of the two, so keeping it is the narrowing law.
+		if narrowed := domain_intersect(prev, domain); narrowed != nil {
+			value = narrowed
+		}
 	}
 	frame_override(frame, site, value)
 }
@@ -487,6 +507,24 @@ leaf_domain :: proc(leaf: ^Type) -> ^Type {
 	}
 	// An untyped `??` has no static bound: the unbounded integer top.
 	return integer_top()
+}
+
+// cover_shape: the single STRUCTURE a branch cover denotes, or nil. A bare shape
+// cover (`Circle`) denotes its set, and inside the branch the scrutinee belongs to
+// it — so that shape is the narrowing. A producer scope reads through its single
+// production; a machine (several productions) or a union denotes alternatives, not
+// one shape, and narrows nothing.
+cover_shape :: proc(add: ^Type) -> ^Type {
+	if add == nil do return nil
+	t := follow(add)
+	if t == nil do return nil
+	s, is_scope := &t^.(Scope_Type)
+	if !is_scope do return nil
+	prods := scope_productions(s^)
+	defer delete(prods)
+	if len(prods) == 0 do return t // a plain structural scope IS the shape
+	if len(prods) == 1 && prods[0] != nil do return cover_shape(prods[0])
+	return nil
 }
 
 // domain_intersect intersects two integer domains at the interval level, returning

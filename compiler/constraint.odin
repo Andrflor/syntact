@@ -57,11 +57,23 @@ fold_constraint :: proc(t: ^Type) -> ^Type {
 			return r
 		case Mention_Type:
 			if v.match_scope != nil && v.match_index >= 0 {
+				// A live branch refinement IS this binding's constraint for the branch:
+				// inside `shape ? {Square -> …}` the scrutinee is a Square, so a carve
+				// `shape{side -> …}` must resolve its fields against that shape and not
+				// against the declared union's default. Same law fold_type applies on
+				// the value side; without it the constraint side keeps the whole domain
+				// and the carve looks for `side` in the first production's shape.
+				if ov := refine_override_for(v.match_scope, v.match_index); ov != nil {
+					return ov
+				}
 				return fold_constraint_target(v.match_scope, v.match_index)
 			}
 		case Reference_Type:
 			ref := v.reference
 			if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
+				if ov := refine_override_for(ref.match_scope, ref.match_index); ov != nil {
+					return ov
+				}
 				return fold_constraint_target(ref.match_scope, ref.match_index)
 			}
 		case Execute_Type:
