@@ -1,0 +1,1 @@
+{"name": "exh_nested_producer_union_all_branches", "description": "listing every expanded production as its own branch is exhaustive for (None|num)", "source": "None -> {}\nnum -> {\n  -> u8:\n  -> u32:\n}\nt -> {\n  (None|num):n\n  -> n ? {\n    None -> 0\n    u8 -> 1\n    u32 -> 2\n  }\n}\n-> t!", "expect_errors": [], "expect": "1"}

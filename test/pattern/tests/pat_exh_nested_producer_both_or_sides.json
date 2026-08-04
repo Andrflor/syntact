@@ -1,0 +1,1 @@
+{"name": "exh_nested_producer_both_or_sides", "description": "both sides of a union may be producer scopes; each expands independently", "source": "a -> {\n  -> u8:\n}\nb -> {\n  -> u32:\n}\nt -> {\n  (a|b):n\n  -> n ? {\n    u8 -> 1\n    u32 -> 2\n  }\n}", "expect_errors": []}

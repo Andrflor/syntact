@@ -487,10 +487,61 @@ pattern_target_coverage :: proc(p: Pattern_Type) -> ^Type {
 		}
 	}
 	if cf == nil do return fold_type(p.target)
-	if s, ok := &cf^.(Scope_Type); ok {
-		if prod_union := scope_production_union(s); prod_union != nil do return prod_union
+	return expand_producer_scopes(cf)
+}
+
+// expand_producer_scopes rewrites every machine scope in a coverage set into the
+// union of its productions, THROUGH the set algebra rather than only at the root.
+// A union of domains is still a domain: `(None|num):n` with `num -> {-> u8: …}`
+// must expand `num` exactly as a bare `num:n` target does, or the branches that
+// cover u8/u32 prove nothing against it and the pattern reads non-exhaustive.
+//
+// The expansion is TRANSITIVE: a production may itself be a machine scope, which
+// is exactly what a generic instantiation builds — `maybe{num}` expands to
+// `None | num`, and `num` must then expand to `u8|u32|u64`. Expanding only one
+// level would leave that inner scope opaque and the pattern non-exhaustive.
+//
+// A recursive grammar (`Array -> {-> {} -> {T: ...Array:}}`) names ITSELF in a
+// production, so the walk terminates the way every other self-reference in the
+// compiler does: on IDENTITY, not on a counter. `active` holds the scopes
+// currently being expanded; re-entering one leaves it unexpanded (its own
+// productions are already in the union being built) and the walk unwinds. A
+// grammar nests as deeply as it is written — nothing here bounds how far a
+// non-recursive chain may expand. Nothing else is rewritten: a leaf, a
+// structural scope, and an unexpandable operand are returned as they are.
+expand_producer_scopes :: proc(t: ^Type) -> ^Type {
+	active := make([dynamic]^Scope_Type, 0, 4, context.temp_allocator)
+	defer delete(active)
+	return expand_producer_walk(t, &active)
+}
+
+expand_producer_walk :: proc(t: ^Type, active: ^[dynamic]^Scope_Type) -> ^Type {
+	if t == nil do return nil
+	#partial switch v in t^ {
+	case Scope_Type:
+		s := &t^.(Scope_Type)
+		// Already being expanded higher up: this is the grammar's self-reference.
+		for k in active do if k == s do return t
+		prod_union := scope_production_union(s)
+		if prod_union == nil do break
+		append(active, s)
+		defer pop(active)
+		// Re-enter: the union's own operands may be machine scopes themselves.
+		return expand_producer_walk(prod_union, active)
+	case Or_Type:
+		left := expand_producer_walk(v.left, active)
+		right := expand_producer_walk(v.right, active)
+		if left != v.left || right != v.right {
+			return new_type(Or_Type{left, right})
+		}
+	case And_Type:
+		left := expand_producer_walk(v.left, active)
+		right := expand_producer_walk(v.right, active)
+		if left != v.left || right != v.right {
+			return new_type(And_Type{left, right})
+		}
 	}
-	return cf
+	return t
 }
 
 // scope_production_union: the Or of a machine scope's production sets (the

@@ -1,0 +1,1 @@
+{"name": "exh_nested_producer_default_branch_covers", "description": "an empty-arrow default still covers an expanded producer union without listing every production", "source": "None -> {}\nnum -> {\n  -> u8:\n  -> u32:\n}\nt -> {\n  (None|num):n\n  -> n ? {\n    None -> 0\n    -> 1\n  }\n}", "expect_errors": []}
