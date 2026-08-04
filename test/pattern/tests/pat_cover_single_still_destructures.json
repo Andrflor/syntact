@@ -1,0 +1,1 @@
+{"name": "cover_single_still_destructures", "description": "a single structural cover keeps destructuring exactly as before: the union path must not disturb it", "source": "Square -> {\n  u16:side\n}\narea -> {\n  Square:shape -> Square{side->5}\n  -> shape ? {\n    Square: -> side * side\n    -> 0\n  }\n}\n-> area!", "expect_errors": [], "expect": "25"}

@@ -416,8 +416,10 @@ destructure_cover :: proc(cover: ^Scope_Type, pieces: ^Scope_Type) -> ^Scope_Typ
 // the substitution never re-enters the analyzer-only fold layer (see repoint).
 fired_product :: proc(branch: Pattern_Branch, scrutinee: ^Type, refold := true) -> ^Type {
 	if branch.match == nil || branch.product == nil || scrutinee == nil do return branch.product
-	cover, c_ok := &branch.match^.(Scope_Type)
-	if !c_ok do return branch.product
+	// The cover the product was walked in — an operand for a union cover, whose
+	// shared surface is what the product reads (see cover_scope).
+	cover := cover_scope(branch.match)
+	if cover == nil do return branch.product
 	res := follow(scrutinee)
 	if res == nil do return branch.product
 	pieces, p_ok := &res^.(Scope_Type)
