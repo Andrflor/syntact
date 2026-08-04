@@ -1,0 +1,1 @@
+{"name": "refine_mixed_scope_union_none_branch_rejects", "description": "refinement stays sound: inside the None branch the scrutinee is a structure, so arithmetic on it is still rejected", "source": "None -> {}\nMaybe -> {\n  -> None:\n  -> u8:\n}\nbad -> {\n  Maybe:shape\n  -> shape ? {\n    u8 -> 1\n    None -> shape/2\n  }\n}", "expect_errors": ["Invalid_operator"]}

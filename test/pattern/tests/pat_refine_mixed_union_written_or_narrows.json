@@ -1,0 +1,1 @@
+{"name": "refine_mixed_union_written_or_narrows", "description": "the same set written as a written union (None|u8) narrows identically -- one spelling of a set must never behave differently from the other", "source": "None -> {}\ndivide -> {\n  (None|u8):shape\n  -> shape ? {\n    None -> 0\n    u8 -> shape/2\n  }\n}\n-> divide!", "expect_errors": [], "expect": "0"}

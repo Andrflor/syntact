@@ -199,6 +199,16 @@ install_fold_refinement :: proc(
 // branch_add_from_covers builds `this_cover & ~prior0 & … & ~priorN`. A default
 // branch (nil this_cover) starts from the unbounded integer top and only negates the
 // priors. nil when there is nothing to add (no cover, no priors).
+//
+// A prior that does not live in the leaf's domain is SKIPPED rather than conjoined.
+// In a mixed-family scrutinee (`Maybe -> {-> None:  -> u8:}`) the `None` branch's
+// cover is a structure: `u8 & ~None` folds to nothing in the integer domain, and
+// conjoining it would discard the perfectly good `u8` narrowing along with it —
+// leaving the `u8` branch with NO refinement, so `shape/2` still saw the whole
+// mixed domain. Dropping such a prior only ever WIDENS the computed domain, which
+// is the safe direction: refinement is correct always, complete when it can be
+// (the law this file opens with). What remains is the positive cover, which is
+// exactly what the branch proves.
 branch_add_from_covers :: proc(this_cover: ^Type, priors: []^Type) -> ^Type {
 	add: ^Type
 	if this_cover != nil {
@@ -210,6 +220,9 @@ branch_add_from_covers :: proc(this_cover: ^Type, priors: []^Type) -> ^Type {
 	}
 	for p in priors {
 		if p == nil do continue
+		// Out-of-domain prior (a structural cover): unrepresentable as a leaf-domain
+		// complement, so it contributes nothing instead of poisoning the conjunction.
+		if fold_type_integer(p) == nil do continue
 		neg := new(Type)
 		neg^ = Negate_Type{p}
 		conj := new(Type)

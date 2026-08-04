@@ -1,0 +1,1 @@
+{"name": "refine_pull_hole_instantiation_narrows", "description": "the pull-hole generic form (T <- u8) narrows in the u8 branch as well", "source": "None -> {}\nmaybe -> {\n  T <- None\n  -> None:\n  -> T:\n}\ndivide -> {\n  maybe{T <- u8}:shape\n  -> shape ? {\n    None -> 0\n    u8 -> shape/2\n  }\n}\n-> divide!", "expect_errors": [], "expect": "0"}

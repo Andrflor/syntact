@@ -1,0 +1,1 @@
+{"name": "refine_mixed_scope_union_string_branch_rejects", "description": "refinement stays sound across families: a string branch of a mixed union still rejects division", "source": "None -> {}\nMaybe -> {\n  -> None:\n  -> string:\n}\nbad -> {\n  Maybe:shape\n  -> shape ? {\n    None -> 0\n    string -> shape/2\n  }\n}", "expect_errors": ["Invalid_operator"]}

@@ -388,6 +388,46 @@ is_arith_op :: proc(op: Operator_Kind) -> bool {
 	return false
 }
 
+// binding_families spreads the families a BINDING admits, and reports whether it
+// resolved. A COLORED binding ranges over its DECLARED domain, so that domain —
+// not the single value the slot happens to hold — decides which operations are
+// meaningful on it. `Maybe:shape` with `Maybe -> {-> None:  -> u8:}` stores the
+// color's materialized default (`{}`, the FIRST production) in `types[]`; reading
+// only that value would classify `shape` as a bare scope and reject `shape/2`
+// even in the `u8` branch, while the identical set written `(None|u8):shape`
+// spreads correctly. One spelling of a set must not classify differently from the
+// other, so the constraint is the side consulted here — the same side
+// leaf_domain reads in refine.odin.
+//
+// A live refinement override (the branch narrowing) and a capture's applied color
+// still win: both are already the exact domain in force at this use site.
+binding_families :: proc(
+	scope: ^Scope_Type,
+	index: int,
+	self: ^Type,
+	out: ^bit_set[Family],
+) -> bool {
+	if ov := refine_override_for(scope, index); ov != nil && ov != self {
+		families_of(ov, out)
+		return true
+	}
+	if dom := capture_color_domain(scope, index); dom != nil && dom != self {
+		families_of(dom, out)
+		return true
+	}
+	if index < len(scope.constraints) && scope.constraints[index] != nil {
+		if c := scope.constraints[index]; c != self {
+			families_of(c, out)
+			return true
+		}
+	}
+	if view := binding_value_view(scope, index); view != nil && view != self {
+		families_of(view, out)
+		return true
+	}
+	return false
+}
+
 // families_of collects EVERY family an operand's domain admits (an Or union
 // spreads; a mention reads its stored VALUE fold first — the applied domain of a
 // capture — before the raw value).
@@ -403,31 +443,27 @@ families_of :: proc(t: ^Type, out: ^bit_set[Family]) {
 		return
 	case Mention_Type:
 		if v.match_scope != nil && v.match_index >= 0 {
-			// Resolve through binding_value_view (refinement override / capture
-			// color / stored value — the same resolution fold_type applies), so a
-			// union domain SPREADS into its families instead of collapsing to one.
-			if view := binding_value_view(v.match_scope, v.match_index);
-			   view != nil && view != t {
-				families_of(view, out)
-				return
-			}
+			if binding_families(v.match_scope, v.match_index, t, out) do return
 		}
 	case Reference_Type:
 		ref := v.reference
 		if ref != nil && ref.match_scope != nil && ref.match_index >= 0 {
-			if view := binding_value_view(ref.match_scope, ref.match_index);
-			   view != nil && view != t {
-				families_of(view, out)
-				return
-			}
+			if binding_families(ref.match_scope, ref.match_index, t, out) do return
 		}
 	case Scope_Type:
-		// A producer `{-> set}` admits its production's families.
+		// A producer scope DENOTES the union of its productions, so it admits the
+		// families of ALL of them: `{-> None:  -> u8:}` is `None | u8` and spreads
+		// exactly like the written `Or` — one spelling of a set must not classify
+		// differently from the other. A scope with no production is a structure,
+		// not a producer, and falls through to `.Scope` below.
 		prods := scope_productions(v)
-		if len(prods) == 1 && prods[0] != nil {
-			families_of(prods[0], out)
-			return
+		spread := false
+		for p in prods {
+			if p == nil do continue
+			families_of(p, out)
+			spread = true
 		}
+		if spread do return
 	}
 	out^ += {family_of(t)}
 }
