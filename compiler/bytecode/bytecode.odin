@@ -433,6 +433,10 @@ BC_Foreign_Call :: struct {
 	// Empty layouts denote the ordinary scalar path and preserve old hand-built
 	// bytecode users.
 	arg_layouts: []BC_Aggregate_Layout,
+	// Foreign scalar ABI types come from the declared boundary constraints, not
+	// necessarily from the concrete source value (for example an f32 formal can
+	// be carved with an f64 literal).
+	arg_types: []Machine_Type,
 	result_layout: BC_Aggregate_Layout,
 	has_result_layout: bool,
 }

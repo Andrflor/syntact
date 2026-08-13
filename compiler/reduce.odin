@@ -196,7 +196,14 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 	if value == nil do return nil
 	switch &v in value^ {
 	case Execute_Type:
-		return reduce_value(execute(v))
+		if reducer := current_reducer(); reducer != nil {
+			if cached, ok := reducer.effect_cache[rawptr(value)]; ok do return cached
+		}
+		result := reduce_value(execute(v))
+		if reducer := current_reducer(); reducer != nil {
+			reducer.effect_cache[rawptr(value)] = result
+		}
+		return result
 	case Foreign_Call_Type:
 		// Already the residual of a crossed frontier: irreducible by construction,
 		// codegen emits the call. Its arguments were reduced when it was built.
@@ -1077,6 +1084,9 @@ Reducer :: struct {
 	dag_table:        map[string]^Type,
 	fixedpoint_index: map[rawptr]int,
 	fixedpoint_next:  int,
+	// A bound collapse is evaluated once even when it is both sequenced as an
+	// effect and read through a later production.
+	effect_cache:     map[rawptr]^Type,
 	// Per-branch refinements computed by reduce_pattern, keyed by the branch product
 	// node: inside that product, each listed fixed-point leaf carries `domain`. Lets
 	// the backend read the narrowed range, and the tests observe the refinement.
@@ -1098,6 +1108,7 @@ create_reducer :: proc() -> Reducer {
 		dag_table = make(map[string]^Type),
 		fixedpoint_index = make(map[rawptr]int),
 		fixedpoint_next = 0,
+		effect_cache = make(map[rawptr]^Type),
 		refinements = make(map[rawptr][]Refinement),
 	}
 }

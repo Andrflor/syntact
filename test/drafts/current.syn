@@ -30,8 +30,8 @@ T2 -> {a -> ""}
 foo -> { T1:data, -> data.a }
 foo{T2:}
 
-Circle->{->{u8:radius}}
-Square->{->{u8:side}}
+Circle->{u8:radius}
+Square->{u8:side}
 
 Shape -> {
   circle -> Circle
@@ -47,16 +47,31 @@ maybe -> {
   -> T:
 }
 
-maybe{u8}
+maybe{u8}:a -> 12
+
+a ? {
+  None -> 1
+  u8 -> 2
+}
 
 double -> {
   maybe{Shape}:shape
   -> shape ? {
-    None: -> shape
-    Circle: -> shape{radius->radius*2}
-    Square: -> shape{side->side*2}
+    None -> shape
+    Circle -> shape{radius->.radius*2}
+    Square -> shape{side->.side*2}
   }
 }
+
+divide -> {
+  maybe{u8}:shape
+  -> shape ? {
+    None -> shape
+    u8 -> shape/2
+  }
+}
+
+
 
 List -> {
   T -> None
@@ -76,8 +91,8 @@ map -> {
     -> R:
   }
   -> list ? {
-    None: -> list
-    {S:(e) ...List{S}:(l)}: -> map{{mapper{e}! ...l} mapper->mapper}!
+    None -> list
+    {S:(e) ...List{S}:(l)} -> map{{mapper{e}! ...l} mapper->mapper}!
   }
 }
 
@@ -95,8 +110,8 @@ reduce -> {
     -> T:
   }
   -> list ? {
-    {T:(e)}: -> e
-    {T:(e1) T:(e2) ...List{T}:(l)}: -> reduce{
+    {T:(e)} -> e
+    {T:(e1) T:(e2) ...List{T}:(l)} -> reduce{
       list->{reducer{a->e1 b->e2}! ...l}
       reducer->reducer
     }!
@@ -116,9 +131,9 @@ errorNoneReduce -> {
     -> T:
   }
   -> list ? {
-    None: -> Error{"Trying to reduce empty list"}
-    {T:(e)}: -> e
-    {T:(e1) T:(e2) ...List{T}:(l)}: -> reduce{
+    None -> Error{"Trying to reduce empty list"}
+    {T:(e)} -> e
+    {T:(e1) T:(e2) ...List{T}:(l)} -> reduce{
       list->{reducer{a->e1 b->e2}! ...l}
       reducer->reducer
     }!
@@ -140,8 +155,8 @@ doubleV2 -> transform{transformer->double}
 
 maybe{u8}:data -> 22
 maybe{Shape}:shape -> data ? {
- None: -> data
- u8: -> Circle:{radius->data}
+ None -> data
+ u8 -> Circle{radius->data}
 }
 
 shape -> double{shape->shape}!
@@ -152,9 +167,8 @@ shape -> doubleV2{shape->shape}!
 square -> {
   maybe{num}:n
   -> n ? {
-    None: -> 0
-    num: -> n*n
-    }
+    None -> 0
+    num -> n*n
   }
 }
 maybe{u32}:plop -> 12

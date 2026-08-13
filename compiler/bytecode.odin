@@ -256,9 +256,15 @@ bc_lower_value :: proc(l: ^BC_Lower, node: ^Type) -> bc.BC_Value {
 			if value, found := l.frame_slots[key.index]; found do return value
 		}
 	}
-	// Pure DAG nodes may be CSE'd. Foreign calls and residual sequences are
-	// effectful, so sharing their node must not erase a second execution.
+	// Pure DAG nodes may be CSE'd. A Foreign_Call_Type is also memoized: reduction
+	// can place the same bound call in both an effect sequence and its value, and
+	// those two references denote one evaluation. Residual sequences themselves are
+	// not memoized, so distinct sequence evaluations retain their effects.
 	memoizable := !holds_foreign_collapse(node)
+	#partial switch _ in node^ {
+	case Foreign_Call_Type:
+		memoizable = true
+	}
 	if memoizable {
 		if v, ok := l.memo[node]; ok do return v
 	}
@@ -716,10 +722,18 @@ bc_lower_internal_function :: proc(l: ^BC_Lower, scope: ^Scope_Type, id: bc.Func
 bc_lower_foreign_call :: proc(l: ^BC_Lower, node: ^Type, v: Foreign_Call_Type) -> bc.BC_Value {
 	args := make([]bc.BC_Value, len(v.args))
 	arg_layouts := make([]bc.BC_Aggregate_Layout, len(v.args))
+	arg_types := make([]bc.Machine_Type, len(v.args))
 	cell_slots := make([]bc.BC_Scratch_Id, len(v.args))
-	for i in 0 ..< len(cell_slots) do cell_slots[i] = bc.BC_INVALID_SCRATCH
+	for i in 0 ..< len(cell_slots) {
+		cell_slots[i] = bc.BC_INVALID_SCRATCH
+		arg_types[i] = bc.Machine_Type.None
+	}
 	for a, i in v.args {
 		constraint := i < len(v.arg_constraints) ? v.arg_constraints[i] : nil
+		if constraint != nil {
+			declared_type := machine_type_of(fold_constraint(constraint))
+			if declared_type != bc.Machine_Type.None do arg_types[i] = declared_type
+		}
 		layout, has_layout := bc_declared_layout(constraint)
 		writable := i < len(v.arg_writable) && v.arg_writable[i]
 		if writable {
@@ -788,7 +802,7 @@ bc_lower_foreign_call :: proc(l: ^BC_Lower, node: ^Type, v: Foreign_Call_Type) -
 		bc_emit(l, bc.BC_Materialize{dst = dst, slot = slot, size = result_layout.size, borrowed = false})
 	}
 	slot := bc.bc_intern_import(l.registry, v.lib, v.symbol)
-	bc_emit(l, bc.BC_Foreign_Call{dst = dst, slot = slot, args = args, arg_layouts = arg_layouts, result_layout = result_layout, has_result_layout = has_result_layout})
+	bc_emit(l, bc.BC_Foreign_Call{dst = dst, slot = slot, args = args, arg_layouts = arg_layouts, arg_types = arg_types, result_layout = result_layout, has_result_layout = has_result_layout})
 
 	// A writable formal is a cell, not the foreign function's scalar return.  The
 	// call's nominal event is resumed only after the cell has been loaded back.

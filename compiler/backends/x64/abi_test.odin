@@ -52,6 +52,47 @@ testing_sysv_abi_classifies_small_aggregates_and_sret :: proc(t: ^testing.T) {
 }
 
 @(test)
+testing_sysv_abi_spills_aggregate_when_integer_registers_are_exhausted :: proc(t: ^testing.T) {
+	pieces := make([]bc.BC_Aggregate_Piece, 2)
+	defer delete(pieces)
+	pieces[0] = bc.BC_Aggregate_Piece{offset = 0, size = 8, machine = .U64}
+	pieces[1] = bc.BC_Aggregate_Piece{offset = 8, size = 8, machine = .U64}
+	layouts := make([]bc.BC_Aggregate_Layout, 7)
+	defer delete(layouts)
+	layouts[6] = bc.BC_Aggregate_Layout{size = 16, align = 8, pieces = pieces}
+	types := make([]bc.Machine_Type, 7)
+	defer delete(types)
+	for i in 0 ..< 6 do types[i] = .U64
+	types[6] = .U64
+	assignment, msg := x64_sysv_assign(types, layouts)
+	defer delete_x64_assignment(&assignment)
+	testing.expectf(t, msg == "", "integer aggregate spill assignment failed: %s", msg)
+	if msg != "" do return
+	testing.expectf(t, assignment.piece_locations[6][0].class == .Stack && assignment.piece_locations[6][1].class == .Stack, "integer aggregate was not spilled: %v", assignment.piece_locations[6])
+	testing.expectf(t, assignment.piece_locations[6][0].stack_offset == 0 && assignment.piece_locations[6][1].stack_offset == 8, "integer aggregate stack offsets=%v", assignment.piece_locations[6])
+}
+
+@(test)
+testing_sysv_abi_spills_sse_aggregate_when_sse_registers_are_exhausted :: proc(t: ^testing.T) {
+	pieces := make([]bc.BC_Aggregate_Piece, 2)
+	defer delete(pieces)
+	pieces[0] = bc.BC_Aggregate_Piece{offset = 0, size = 8, machine = .F64}
+	pieces[1] = bc.BC_Aggregate_Piece{offset = 8, size = 8, machine = .F64}
+	layouts := make([]bc.BC_Aggregate_Layout, 8)
+	defer delete(layouts)
+	layouts[7] = bc.BC_Aggregate_Layout{size = 16, align = 8, pieces = pieces}
+	types := make([]bc.Machine_Type, 8)
+	defer delete(types)
+	for i in 0 ..< 8 do types[i] = .F64
+	assignment, msg := x64_sysv_assign(types, layouts)
+	defer delete_x64_assignment(&assignment)
+	testing.expectf(t, msg == "", "SSE aggregate spill assignment failed: %s", msg)
+	if msg != "" do return
+	testing.expectf(t, assignment.piece_locations[7][0].class == .Stack && assignment.piece_locations[7][1].class == .Stack, "SSE aggregate was not spilled: %v", assignment.piece_locations[7])
+	testing.expectf(t, assignment.piece_locations[7][0].stack_offset == 0 && assignment.piece_locations[7][1].stack_offset == 8, "SSE aggregate stack offsets=%v", assignment.piece_locations[7])
+}
+
+@(test)
 testing_named_function_two_register_aggregate_round_trip :: proc(t: ^testing.T) {
 	pair := abi_pair_layout()
 	defer delete(pair.pieces)
