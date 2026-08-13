@@ -1048,6 +1048,15 @@ emit_materialize :: proc(e: ^X64_Emit, v: bc.BC_Materialize) -> string {
 			}
 		} else {
 			load(e, .RAX, store.value)
+			if store.size == 4 && int(store.value) < len(e.prog.value_types) && e.prog.value_types[int(store.value)] == .F32 {
+				// Syntact keeps scalar floats in f64 form between operations;
+				// materializing an f32 field must round to single precision first.
+				movq_xmm_r64(.XMM0, .RAX)
+				cvtsd2ss_xmm_xmm(.XMM0, .XMM0)
+				movd_r32_xmm(.EAX, .XMM0)
+				mov_m32_r32(mem, .EAX)
+				continue
+			}
 			switch store.size {
 			case 1: mov_m8_r8(mem, .AL)
 			case 2: mov_m16_r16(mem, .AX)
@@ -1274,6 +1283,15 @@ emit_call_arguments :: proc(
 					mov_m64_r64(stage, .R10)
 				}
 			}
+		} else if layout.size == 0 && types[i] == .F32 {
+			// Scalar floats are represented as f64 bits internally. SysV requires
+			// an f32 argument to be rounded and placed in the low 32 XMM bits.
+			load(e, .RAX, arg)
+			movq_xmm_r64(.XMM0, .RAX)
+			cvtsd2ss_xmm_xmm(.XMM0, .XMM0)
+			movd_r32_xmm(.EAX, .XMM0)
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(assignment.stack_size + stage_offsets[i])})
+			mov_m32_r32(stage, .EAX)
 		} else {
 			load(e, .RAX, arg)
 			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(assignment.stack_size + stage_offsets[i])})
@@ -1326,7 +1344,10 @@ emit_foreign_call :: proc(e: ^X64_Emit, v: bc.BC_Foreign_Call) -> string {
 	}
 	types := make([]bc.Machine_Type, len(v.args))
 	defer delete(types)
-	for arg, i in v.args do types[i] = e.prog.value_types[int(arg)]
+	for arg, i in v.args {
+		types[i] = e.prog.value_types[int(arg)]
+		if i < len(v.arg_types) && v.arg_types[i] != .None do types[i] = v.arg_types[i]
+	}
 	assignment, msg := x64_sysv_assign(types, v.arg_layouts, v.has_result_layout && v.result_layout.memory)
 	if msg != "" do return msg
 	defer delete(assignment.locations)

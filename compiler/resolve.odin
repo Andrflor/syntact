@@ -421,6 +421,7 @@ process_cache_task :: proc(task: thread.Task) {
 			// reducer's fold reuse (repoint/scope_repoint → fold_type) resolves the real
 			// analyzer instead of a mis-cast pointer.
 			phase_ctx.reducer = &r
+			context.user_ptr = &phase_ctx
 			result := reduce(cache.scope)
 
 			if resolver.options.timing {

@@ -1048,7 +1048,7 @@ walk_binding :: #force_inline proc(
 		append(&current_scope.constraint_folds, fold_constraint(constraint))
 		append(&current_scope.type_folds, fold_type(value))
 	} else {
-		typecheck(a, current_scope, name, constraint, bk, value, idx)
+		typecheck(a, current_scope, name, constraint, bk, value, right_idx)
 	}
 	return value
 }
