@@ -3,6 +3,132 @@ package compiler
 import "core:fmt"
 import "core:unicode/utf8"
 
+// C_Field_Layout is the ABI-neutral layout of one declared aggregate member.
+// `indirect` is metadata for a reactive-pull member: the field occupies one
+// machine pointer in the C representation, while the language still has no
+// pointer value.
+C_Field_Layout :: struct {
+	offset:   int,
+	size:     int,
+	align:    int,
+	indirect: bool,
+}
+
+C_Layout :: struct {
+	size:   int,
+	align:  int,
+	fields: []C_Field_Layout,
+}
+
+// c_layout computes the C aggregate layout from declared constraints. It is
+// intentionally independent of the materialized values in `Scope_Type.types`:
+// a field declared u32 but defaulted to 0 is still four bytes in C.
+c_layout :: proc(scope: ^Scope_Type) -> (C_Layout, bool) {
+	seen := make(map[rawptr]bool)
+	defer delete(seen)
+	return c_layout_scope(scope, &seen)
+}
+
+c_layout_scope :: proc(scope: ^Scope_Type, seen: ^map[rawptr]bool) -> (C_Layout, bool) {
+	if scope == nil do return {}, false
+	key := rawptr(scope_canon(scope))
+	if seen^[key] do return {}, false
+	seen^[key] = true
+	defer delete_key(seen, key)
+
+	fields := make([dynamic]C_Field_Layout)
+	offset := 0
+	max_align := 1
+	for i in 0 ..< len(scope.kind) {
+		if scope.kind[i] == .Product || scope.kind[i] == .Expand do continue
+		declared := i < len(scope.constraints) ? scope.constraints[i] : nil
+		if declared == nil && i < len(scope.constraint_folds) do declared = scope.constraint_folds[i]
+		if declared == nil do return {}, false
+
+		field_align := 1
+		field_size := 0
+		indirect := scope.kind[i] == .Reactive_Pull
+		if indirect {
+			// Reactive pull is borrowed indirect input. The referent is represented
+			// only by the boundary plan; it is never a source-level address.
+			field_size, field_align = 8, 8
+		} else {
+			field, ok := c_layout_type(fold_constraint(declared), seen)
+			if !ok do return {}, false
+			field_size, field_align = field.size, field.align
+		}
+		if field_align > max_align do max_align = field_align
+		offset = c_align_up(offset, field_align)
+		append(&fields, C_Field_Layout{offset, field_size, field_align, indirect})
+		offset += field_size
+	}
+
+	return C_Layout{size = c_align_up(offset, max_align), align = max_align, fields = fields[:]}, true
+}
+
+c_layout_type :: proc(t: ^Type, seen: ^map[rawptr]bool) -> (C_Layout, bool) {
+	if t == nil do return {}, false
+	cur := follow(t)
+	if cur == nil do return {}, false
+	#partial switch &v in cur^ {
+	case Scope_Type:
+		// A producer-only scope is a value wrapper, not a C struct. A scope with
+		// ordinary members and a production remains an aggregate; the production
+		// is not a field.
+		has_member := false
+		for k in v.kind do if k != .Product && k != .Expand {has_member = true; break}
+		if !has_member {
+			prods := scope_productions(v)
+			defer delete(prods)
+			if len(prods) == 1 do return c_layout_type(prods[0], seen)
+		}
+		return c_layout_scope(&v, seen)
+	case Foreign_Call_Type:
+		return c_layout_type(v.production, seen)
+	case Cast_Type:
+		if target, ok := cast_target(fold_constraint(v.target)); ok do return c_layout_scalar(target)
+	case Integer_Type:
+		if len(v.integer_intervals) == 1 {
+			if lay, ok := int_layout(v.integer_intervals[0]); ok {
+			return C_Layout{size = int(lay.bits / 8), align = int(lay.bits / 8)}, true
+			}
+		}
+	case Float_Type:
+		if v.kind == .f32 do return C_Layout{size = 4, align = 4}, true
+		if v.kind == .f64 do return C_Layout{size = 8, align = 8}, true
+	case Bool_Type:
+		return C_Layout{size = 1, align = 1}, true
+	case String_Type:
+		// A Syntact string at a C frontier is a const char*.
+		return C_Layout{size = 8, align = 8}, true
+	case None_Type:
+		return C_Layout{size = 0, align = 1}, true
+	}
+	if target, ok := cast_target(fold_constraint(cur)); ok do return c_layout_scalar(target)
+	return {}, false
+}
+
+c_layout_scalar :: proc(target: Cast_Target) -> (C_Layout, bool) {
+	switch target.kind {
+	case .Integer:
+		sz := int(target.width / 8)
+		return C_Layout{size = sz, align = sz}, sz > 0
+	case .Float:
+		sz := int(target.width / 8)
+		return C_Layout{size = sz, align = sz}, sz > 0
+	case .Bool:
+		return C_Layout{size = 1, align = 1}, true
+	case .String, .Char:
+		return C_Layout{size = 8, align = 8}, true
+	}
+	return {}, false
+}
+
+c_align_up :: proc(value, alignment: int) -> int {
+	if alignment <= 1 do return value
+	return (value + alignment - 1) & ~(alignment - 1)
+}
+
 // reference_effective_value resolves the VALUE a Reference_Type denotes, honoring
 // a carve in its target: when the target resolves to a carve overriding this exact
 // field, return the override's value, not the stale pre-carve site value.
@@ -323,6 +449,9 @@ fold_type :: proc(t: ^Type) -> ^Type {
 			// itself is not computable, only its shape is known. The effect is not
 			// erased by this — the call node survives in the reduction.
 			return fold_type(v.production)
+		case Effect_Sequence_Type:
+			// Effects do not change the value's static shape.
+			return fold_type(v.value)
 		case And_Type:
 			return fold_type_set(t)
 		case Or_Type:
@@ -1493,7 +1622,7 @@ repoint :: proc(t: ^Type, old, dst: ^Scope_Type, refold := true) -> ^Type {
 	case Execute_Type:
 		tg := repoint(v.target, old, dst, refold)
 		if tg != v.target {
-			return new_type(Execute_Type{tg})
+			return new_type(Execute_Type{target = tg, caller_scope = v.caller_scope})
 		}
 	case Pattern_Type:
 		// A pattern's target/branches may mention the carved scope. A rewritten branch

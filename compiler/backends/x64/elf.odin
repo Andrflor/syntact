@@ -7,7 +7,10 @@ import bc "../../bytecode"
 emit_executable :: proc(prog: ^bc.BC_Program, path: string) -> string {
 	out, msg := emit_x64(prog)
 	if msg != "" do return msg
-	image := build_elf(out.code, out.rodata, prog.imports[:])
+	defer delete(out.code)
+	defer delete(out.rodata)
+	image := build_elf(out.code, out.rodata, prog.imports[:], out.scratch_size)
+	defer delete(image)
 	if err := os.write_entire_file(path, image); err != nil {
 		return "could not write output file"
 	}
@@ -77,11 +80,16 @@ GOT_BASE_VADDR :: ARGS_TABLE_VADDR + 8 * ARGS_TABLE_MAX
 GOT_VADDR :: GOT_BASE_VADDR + 8 * GOT_RESERVED
 GOT_MAX :: 128 // up to 128 distinct imported symbols
 
+// Materialized aggregates occupy a zero-filled image tail. The bytecode refers
+// only to abstract function-local slots; the x64 image assigns each function a
+// disjoint range beginning here.
+SCRATCH_VADDR :: GOT_VADDR + 8 * GOT_MAX + 0x1000
+
 // build_elf assembles a full executable image:
 //   [ELF header][program header][rodata][code][.shstrtab][section headers]
 // The entry point is the code (right after rodata). The loadable segment covers
 // rodata+code; the section table sits past it (not loaded, just for tooling).
-build_elf :: proc(code: []u8, rodata: []u8, imports: []bc.BC_Import = nil) -> []u8 {
+build_elf :: proc(code: []u8, rodata: []u8, imports: []bc.BC_Import = nil, scratch_size: int = 0) -> []u8 {
 	has_rodata := len(rodata) > 0
 	// Dynamic linking is driven purely by whether the source imported anything: with
 	// no imports the image below is byte-for-byte the static one.
@@ -103,15 +111,19 @@ build_elf :: proc(code: []u8, rodata: []u8, imports: []bc.BC_Import = nil) -> []
 		// last table gives the file extent.
 		dyn_end = dyn.dyn_addr - ELF_BASE + len(dyn.dyn_tab)
 	}
+	defer if is_dynamic do delete_dyn_tables(&dyn)
 
 	filesz := dyn_end // loadable bytes: headers + rodata + code + dynamic tables
 	// memsz additionally covers the zero-filled args table and GOT, which have no
 	// file backing — the loader writes the GOT before the program runs.
 	memsz := (GOT_VADDR - ELF_BASE) + 8 * GOT_MAX
+	scratch_end := SCRATCH_VADDR - ELF_BASE + scratch_size
+	if scratch_end > memsz do memsz = scratch_end
 
 	// --- .shstrtab: the section-name string table. Offset 0 is the empty name. ---
 	// Names: "\0.text\0.rodata\0.shstrtab\0" (rodata entry present only if needed).
 	shstr := make([dynamic]u8)
+	defer delete(shstr)
 	append(&shstr, 0)
 	name_text := len(shstr); append_cstr(&shstr, ".text")
 	name_rodata := 0

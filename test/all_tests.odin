@@ -19,6 +19,7 @@ package all_test
 import _ "./analyze"
 import _ "./codegen"
 import _ "./default"
+import _ "./ffi"
 import _ "./parse"
 import _ "./pattern"
 import _ "./reduce"

@@ -131,7 +131,8 @@ Scope_Type :: struct {
 
 // `scope!` — collapse: reduce `target` through its Product binding.
 Execute_Type :: struct {
-	target: ^Type,
+	target:       ^Type,
+	caller_scope: ^Scope_Type, // analyzer-time lexical site for foreign resonance handlers
 }
 
 // The residual of a collapse that CROSSED THE EXTERNAL FRONTIER: `libm.sqrt{x->2.0}!`
@@ -145,11 +146,40 @@ Execute_Type :: struct {
 // calling. `args` are the reduced input bindings in declaration order (the ABI's
 // argument order); `production` is the declared result layout, which is what the
 // caller's type sees.
+Foreign_Writeback :: struct {
+	argument:      int,
+	formal_name:   string,
+	event:         ^Scope_Type,
+	handler:       ^Type,
+	capture_index: int,
+}
+
 Foreign_Call_Type :: struct {
 	lib:        string,
 	symbol:     string,
 	args:       [dynamic]^Type,
+	// The argument value is reduced, but its ABI layout comes from this declared
+	// constraint.  Keeping the two columns separate prevents a default scalar
+	// value from erasing the aggregate shape it inhabits.
+	arg_constraints: [dynamic]^Type,
+	// A reactive pull is the existing borrowed-indirect marker at the boundary.
+	// It does not introduce a language address or imply writeback.
+	arg_borrowed: [dynamic]bool,
+	// Resonant formals retain the nominal event and the already-resolved handler.
+	// These are analyzer-time identities; reduction never updates a Scope_Type.
+	arg_writable: [dynamic]bool,
+	arg_events:   [dynamic]^Scope_Type,
+	writebacks:   [dynamic]Foreign_Writeback,
 	production: ^Type,
+}
+
+// An ordered residual produced when a scope's non-production bindings contain
+// effects. The effects are evaluated in declaration order, then the ordinary
+// production value is returned. This is an internal reduction form: it does not
+// add language syntax or a new binding kind.
+Effect_Sequence_Type :: struct {
+	effects: [dynamic]^Type,
+	value:   ^Type,
 }
 
 // `source{ name -> v, … }` — derive a new scope by overriding bindings. Each
@@ -292,6 +322,7 @@ Type :: union {
 	Float_Type,
 	Execute_Type,
 	Foreign_Call_Type,
+	Effect_Sequence_Type,
 	Range_Type,
 	Bool_Type,
 	None_Type,
@@ -359,6 +390,15 @@ write_value :: proc(b: ^strings.Builder, t: ^Type) {
 			write_value(b, a)
 		}
 		strings.write_byte(b, ')')
+	case Effect_Sequence_Type:
+		strings.write_string(b, "[effects: ")
+		for effect, i in v.effects {
+			if i > 0 do strings.write_string(b, "; ")
+			write_value(b, effect)
+		}
+		strings.write_string(b, "; value: ")
+		write_value(b, v.value)
+		strings.write_byte(b, ']')
 	case Scope_Type:
 		strings.write_byte(b, '{')
 		first := true
@@ -672,6 +712,16 @@ print_type_value :: proc(t: Type, depth: int = 0) {
 		}
 		fmt.print(")")
 
+	case Effect_Sequence_Type:
+		fmt.print("[effects: ")
+		for effect, i in v.effects {
+			if i > 0 do fmt.print("; ")
+			print_type(effect, depth)
+		}
+		fmt.print("; value: ")
+		print_type(v.value, depth)
+		fmt.print("]")
+
 	case Carve_Type:
 		if v.source != nil {
 			print_type(v.source, depth)
@@ -889,6 +939,15 @@ write_fold :: proc(b: ^strings.Builder, t: ^Type) {
 			write_fold(b, a)
 		}
 		strings.write_byte(b, ')')
+	case Effect_Sequence_Type:
+		strings.write_string(b, "[effects: ")
+		for effect, i in v.effects {
+			if i > 0 do strings.write_string(b, "; ")
+			write_fold(b, effect)
+		}
+		strings.write_string(b, "; value: ")
+		write_fold(b, v.value)
+		strings.write_byte(b, ']')
 	case Mention_Type:
 		strings.write_string(b, v.name != "" ? v.name : "<mention>")
 	case Recursive_Mention_Type:

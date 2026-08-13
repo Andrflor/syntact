@@ -79,6 +79,15 @@ Dyn_Tables :: struct {
 	dyn_addr:    int,
 }
 
+delete_dyn_tables :: proc(t: ^Dyn_Tables) {
+	delete(t.interp)
+	delete(t.dynstr)
+	delete(t.dynsym)
+	delete(t.hash)
+	delete(t.rela)
+	delete(t.dyn_tab)
+}
+
 // elf_hash is the original SysV symbol hash (still what DT_HASH indexes). The loader
 // refuses a dynamic object without it, so it is written even though nothing here
 // looks symbols up by hash.

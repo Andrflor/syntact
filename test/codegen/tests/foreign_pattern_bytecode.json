@@ -1,0 +1,10 @@
+{
+  "name": "foreign_pattern_bytecode",
+  "description": "A foreign call used as a pattern target remains in lowered bytecode.",
+  "source": "lib -> <libm.so.6>{ probe -> { -> ??::u8 } }\n-> lib.probe{}! ? { 0 -> 1, -> 2 }",
+  "args": [],
+  "expect": [],
+  "kind": "bytecode",
+  "bytecode_imports": ["libm.so.6:probe"],
+  "bytecode_calls": ["libm.so.6:probe"]
+}

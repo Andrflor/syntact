@@ -1,0 +1,6 @@
+{
+  "name": "effectful bindings execute in declaration order",
+  "description": "Only foreign-valued bindings before the production are sequenced; an ordinary pure binding remains absent from the residual.",
+  "source": "lib -> <libm.so.6>{ first -> { -> ??::u8 }, second -> { -> ??::u8 } }\nprogram -> {\n  firstCall -> lib.first{}!\n  pure -> 1 + 2\n  secondCall -> lib.second{}!\n  -> 7\n}\n-> program!",
+  "expect": "[effects: <libm.so.6>.first(); <libm.so.6>.second(); value: 7]"
+}

@@ -55,6 +55,8 @@ Codegen_Test_Case :: struct {
 	args:        [][]string `json:"args"`,
 	expect:      []string `json:"expect"`,
 	kind:        string `json:"kind"`, // "int" | "str" | "float" | "reject"
+	bytecode_imports: []string `json:"bytecode_imports"`,
+	bytecode_calls:   []string `json:"bytecode_calls"`,
 }
 
 load_case :: proc(rel: string) -> (Codegen_Test_Case, bool, string) {
@@ -142,6 +144,11 @@ run_case :: proc(path: string, t: ^testing.T) {
 	// phase_ctx.reducer.fixedpoint_index (via fixedpoint_id) to recover each ??N slot.
 	prog := compiler.lower_to_bytecode(result)
 
+	if tc.kind == "bytecode" {
+		run_bytecode_assertions(t, tc, prog)
+		return
+	}
+
 	// "reject": lowering must carry an error.
 	if tc.kind == "reject" {
 		testing.expectf(
@@ -177,6 +184,134 @@ run_case :: proc(path: string, t: ^testing.T) {
 	for combo in 0 ..< len(tc.args) {
 		run_combo(t, tc, prog, exe, tc.args[combo], tc.expect[combo], combo)
 	}
+}
+
+run_bytecode_assertions :: proc(t: ^testing.T, tc: Codegen_Test_Case, prog: ^bc.BC_Program) {
+	if prog == nil {
+		testing.expectf(t, false, "[%s] expected bytecode, got nil", tc.name)
+		return
+	}
+	testing.expectf(t, prog.error == "", "[%s] bytecode error: %s", tc.name, prog.error)
+	if prog.error != "" do return
+
+	imports: [dynamic]string
+	for imp in prog.imports do append(&imports, fmt.tprintf("%s:%s", imp.lib, imp.symbol))
+	testing.expectf(
+		t,
+		strings.join(imports[:], ",") == strings.join(tc.bytecode_imports, ","),
+		"[%s] imports=%v expected=%v",
+		tc.name,
+		imports,
+		tc.bytecode_imports,
+	)
+
+	calls: [dynamic]string
+	for inst in prog.insts {
+		if call, ok := inst.(bc.BC_Foreign_Call); ok {
+			imp := prog.imports[call.slot]
+			append(&calls, fmt.tprintf("%s:%s", imp.lib, imp.symbol))
+		}
+	}
+	testing.expectf(
+		t,
+		strings.join(calls[:], ",") == strings.join(tc.bytecode_calls, ","),
+		"[%s] calls=%v expected=%v",
+		tc.name,
+		calls,
+		tc.bytecode_calls,
+	)
+}
+
+@(test)
+test_foreign_resonant_scalar_writeback :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	defer vmem.arena_destroy(&arena)
+	previous_allocator := context.allocator
+	context.allocator = vmem.arena_allocator(&arena)
+	defer context.allocator = previous_allocator
+
+	source := "Changed -> { u32:value }\nChanged -< e { value -<< e.value }\nlib -> <libc.so.6>{\n  memset -> {\n    u32:value >>- Changed\n    u8:fill\n    u64:size\n    -> ??::u64\n  }\n}\n-> lib.memset{value -> 1 fill -> 7 size -> 4}!"
+	cache := new(compiler.Cache)
+	ast, _ := compiler.parse(cache, source)
+	analyzer := compiler.create_analyzer(ast)
+	phase := compiler.Phase_Context{analyzer = &analyzer}
+	previous_user_ptr := context.user_ptr
+	context.user_ptr = &phase
+	defer context.user_ptr = previous_user_ptr
+	_ = compiler.analyze(cache)
+	reducer := compiler.create_reducer()
+	phase.reducer = &reducer
+	result := compiler.reduce(cache.scope)
+	prog := compiler.lower_to_bytecode(result)
+	if prog == nil || prog.error != "" {
+		testing.expectf(t, false, "resonant foreign lowering error: %s", prog != nil ? prog.error : "nil bytecode")
+		return
+	}
+	materialized := false
+	loaded := false
+	called := false
+	for inst in prog.insts {
+		if _, ok := inst.(bc.BC_Materialize); ok do materialized = true
+		if _, ok := inst.(bc.BC_Load); ok do loaded = true
+		if _, ok := inst.(bc.BC_Call); ok do called = true
+	}
+	testing.expectf(t, materialized && loaded && called, "resonant foreign continuation missing materialize=%v load=%v call=%v", materialized, loaded, called)
+
+	path := "/tmp/syntact-resonant-foreign"
+	emsg := x64.emit_executable(prog, path)
+	defer os.remove(path)
+	if emsg != "" {
+		testing.expectf(t, false, "resonant foreign emission error: %s", emsg)
+		return
+	}
+	state, _, _, err := os.process_exec({command = []string{path}}, context.temp_allocator)
+	testing.expectf(t, err == nil && state.exit_code == 7, "resonant foreign result: success=%v exit=%d error=%v\n%s", state.success, state.exit_code, err, bc.bytecode_to_string(prog))
+}
+
+@(test)
+test_foreign_resonant_fixed_aggregate_writeback :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	defer vmem.arena_destroy(&arena)
+	previous_allocator := context.allocator
+	context.allocator = vmem.arena_allocator(&arena)
+	defer context.allocator = previous_allocator
+
+	source := "Big -> { u32:a -> 1 u64:b -> 2 u32:c -> 3 }\nChanged -> { Big:value }\nChanged -< e {\n  value -<< e.value\n  -> e.value.a\n}\nlib -> <libc.so.6>{\n  memset -> {\n    Big:value >>- Changed\n    u8:fill\n    u64:size\n    -> ??::u64\n  }\n}\n-> lib.memset{value -> Big{a -> 1 b -> 2 c -> 3} fill -> 7 size -> 24}!"
+	cache := new(compiler.Cache)
+	ast, _ := compiler.parse(cache, source)
+	analyzer := compiler.create_analyzer(ast)
+	phase := compiler.Phase_Context{analyzer = &analyzer}
+	previous_user_ptr := context.user_ptr
+	context.user_ptr = &phase
+	defer context.user_ptr = previous_user_ptr
+	_ = compiler.analyze(cache)
+	reducer := compiler.create_reducer()
+	phase.reducer = &reducer
+	result := compiler.reduce(cache.scope)
+	prog := compiler.lower_to_bytecode(result)
+	if prog == nil || prog.error != "" {
+		testing.expectf(t, false, "aggregate resonant foreign lowering error: %s", prog != nil ? prog.error : "nil bytecode")
+		return
+	}
+	loaded := false
+	for inst in prog.insts {
+		if _, ok := inst.(bc.BC_Load_Aggregate); ok do loaded = true
+	}
+	testing.expectf(t, loaded, "aggregate resonant foreign continuation emitted no aggregate load\n%s", bc.bytecode_to_string(prog))
+	out, message := x64.emit_x64(prog)
+	defer delete(out.code)
+	defer delete(out.rodata)
+	testing.expectf(t, message == "", "aggregate resonant foreign x64 emission error: %s", message)
+	if message != "" do return
+	path := "/tmp/syntact-resonant-foreign-aggregate"
+	emsg := x64.emit_executable(prog, path)
+	defer os.remove(path)
+	if emsg != "" {
+		testing.expectf(t, false, "aggregate resonant foreign executable error: %s", emsg)
+		return
+	}
+	state, _, _, err := os.process_exec({command = []string{path}}, context.temp_allocator)
+	testing.expectf(t, err == nil && state.exit_code == 7, "aggregate resonant foreign result: success=%v exit=%d error=%v\n%s", state.success, state.exit_code, err, bc.bytecode_to_string(prog))
 }
 
 // run_combo validates ONE input/output pair against both backends.

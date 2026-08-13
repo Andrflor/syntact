@@ -74,3 +74,33 @@ run_reduce_test :: proc(path: string, t: ^testing.T) {
 		testing.expectf(t, false, "%s", msg)
 	}
 }
+
+@(test)
+test_resonant_foreign_call_is_not_folded_to_its_return_default :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	defer vmem.arena_destroy(&arena)
+	previous_allocator := context.allocator
+	context.allocator = vmem.arena_allocator(&arena)
+	defer context.allocator = previous_allocator
+
+	source := "Changed -> { u32:value }\nChanged -< e { value -<< e.value }\nlib -> <libc.so.6>{\n  memset -> { u32:value >>- Changed u8:fill u64:size -> ??::u64 }\n}\n-> lib.memset{value -> 1 fill -> 7 size -> 4}!"
+	cache := new(compiler.Cache)
+	ast, _ := compiler.parse(cache, source)
+	analyzer := compiler.create_analyzer(ast)
+	phase := compiler.Phase_Context{analyzer = &analyzer}
+	previous_user_ptr := context.user_ptr
+	context.user_ptr = &phase
+	defer context.user_ptr = previous_user_ptr
+	_ = compiler.analyze(cache)
+	if len(cache.analyze_errors) != 0 {
+		testing.expectf(t, false, "resonant foreign source analyzed with errors: %v", cache.analyze_errors)
+		return
+	}
+	reducer := compiler.create_reducer()
+	phase.reducer = &reducer
+	result := compiler.reduce(cache.scope)
+	call, ok := result^.(compiler.Foreign_Call_Type)
+	testing.expectf(t, ok, "foreign collapse was folded away instead of remaining effectful")
+	if !ok do return
+	testing.expectf(t, len(call.writebacks) == 1 && call.writebacks[0].event != nil, "reduction lost foreign writeback event metadata")
+}

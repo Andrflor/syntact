@@ -1,0 +1,1 @@
+{ "name": "int_pattern_semi_open", "description": "semi-open lower bound emits a guard", "source": "n -> ??::u8\n-> n ? { >0 -> 1, -> 0 }", "args": [["0"], ["1"], ["2"], ["255"]], "expect": ["0", "1", "1", "1"], "kind": "int" }

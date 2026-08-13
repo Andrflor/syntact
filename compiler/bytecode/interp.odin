@@ -28,6 +28,17 @@ BC_Interp_Result :: struct {
 }
 
 interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
+	if prog != nil && len(prog.funcs) > 0 {
+		fn, ok := bc_program_entry(prog)
+		if !ok do return {ok = false, error = "bytecode has no entry function"}
+		value, err, ran := interp_named_func(prog, fn, args, nil)
+		if !ran do return {ok = false, error = err}
+		return interp_result_type(fn.result, value)
+	}
+	return interp_bytecode_flat(prog, args)
+}
+
+interp_bytecode_flat :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 	if prog == nil do return {ok = false, error = "no bytecode"}
 	if prog.error != "" do return {ok = false, error = prog.error}
 
@@ -51,6 +62,16 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 			regs[int(v.dst)] = v.fimm
 		case BC_Str_Const:
 			regs[int(v.dst)] = v.bytes
+		case BC_Rodata_Address:
+			regs[int(v.dst)] = i64(0)
+		case BC_Materialize:
+			regs[int(v.dst)] = i64(int(v.slot))
+		case BC_Load:
+			return {ok = false, error = "cannot interpret a scratch load without a native memory model"}
+		case BC_Load_Aggregate:
+			return {ok = false, error = "cannot interpret an aggregate load without a native memory model"}
+		case BC_Load_Indirect:
+			return {ok = false, error = "cannot interpret an indirect load without a native memory model"}
 		case BC_Load_Arg:
 			regs[int(v.dst)] = interp_load_arg(prog, v, args)
 		case BC_Foreign_Call:
@@ -66,6 +87,8 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 					imp.symbol,
 				),
 			}
+		case BC_Call:
+			return {ok = false, error = "internal call requires a named bytecode function model"}
 		case BC_Bin:
 			dst_mt := prog.value_types[int(v.dst)]
 			if mtype_is_float(dst_mt) {
@@ -120,6 +143,155 @@ interp_bytecode :: proc(prog: ^BC_Program, args: []string) -> BC_Interp_Result {
 		pc += 1
 	}
 	return {ok = false, error = "fell off end without ret"}
+}
+
+// interp_named_func is a small frame interpreter. Each call owns its register
+// array and PC, while argv fixed points and foreign imports belong to the program.
+// Parameters occupy v0..v(len(params)-1), which makes BC_Func self-contained.
+interp_named_func :: proc(
+	prog: ^BC_Program,
+	fn: BC_Func,
+	args: []string,
+	params: []BC_Val,
+) -> (BC_Val, string, bool) {
+	if prog.error != "" do return {}, prog.error, false
+	regs := make([]BC_Val, fn.value_count)
+	defer delete(regs)
+	for value, i in params {
+		if i >= len(regs) do return {}, "call parameter exceeds callee frame", false
+		regs[i] = value
+	}
+
+	label_pc := make([]int, fn.label_count)
+	defer delete(label_pc)
+	for i in 0 ..< len(label_pc) do label_pc[i] = -1
+	for inst, pc in fn.insts {
+		if def, is := inst.(BC_Label_Def); is {
+			if int(def.label) >= 0 && int(def.label) < len(label_pc) do label_pc[int(def.label)] = pc
+		}
+	}
+
+	pc := 0
+	for pc < len(fn.insts) {
+		switch v in fn.insts[pc] {
+		case BC_Const:
+			regs[int(v.dst)] = v.imm
+		case BC_Const_F:
+			regs[int(v.dst)] = v.fimm
+		case BC_Str_Const:
+			regs[int(v.dst)] = v.bytes
+		case BC_Rodata_Address:
+			regs[int(v.dst)] = i64(0)
+		case BC_Materialize:
+			regs[int(v.dst)] = i64(int(v.slot))
+		case BC_Load:
+			return {}, "cannot interpret a scratch load without a native memory model", false
+		case BC_Load_Aggregate:
+			return {}, "cannot interpret an aggregate load without a native memory model", false
+		case BC_Load_Indirect:
+			return {}, "cannot interpret an indirect load without a native memory model", false
+		case BC_Load_Arg:
+			regs[int(v.dst)] = interp_load_arg_func(fn, v, args)
+		case BC_Bin:
+			mt := fn.value_types[int(v.dst)]
+			if mtype_is_float(mt) {
+				res, err := interp_bin_f(v.op, interp_f(regs[int(v.a)]), interp_f(regs[int(v.b)]))
+				if err != "" do return {}, err, false
+				regs[int(v.dst)] = res
+			} else {
+				res, err := interp_bin(v.op, interp_i(regs[int(v.a)]), interp_i(regs[int(v.b)]))
+				if err != "" do return {}, err, false
+				regs[int(v.dst)] = res
+			}
+		case BC_Bin_Imm:
+			mt := fn.value_types[int(v.dst)]
+			if mtype_is_float(mt) {
+				res, err := interp_bin_f(v.op, interp_f(regs[int(v.a)]), f64(v.imm))
+				if err != "" do return {}, err, false
+				regs[int(v.dst)] = res
+			} else {
+				res, err := interp_bin(v.op, interp_i(regs[int(v.a)]), v.imm)
+				if err != "" do return {}, err, false
+				regs[int(v.dst)] = res
+			}
+		case BC_Cmp:
+			if _, af := regs[int(v.a)].(f64); af || has_float(regs[int(v.b)]) {
+				regs[int(v.dst)] = interp_cmp_f(v.op, interp_f(regs[int(v.a)]), interp_f(regs[int(v.b)])) ? i64(1) : i64(0)
+			} else {
+				regs[int(v.dst)] = interp_cmp(v.op, interp_i(regs[int(v.a)]), interp_i(regs[int(v.b)])) ? i64(1) : i64(0)
+			}
+		case BC_Cmp_Imm:
+			if _, af := regs[int(v.a)].(f64); af {
+				regs[int(v.dst)] = interp_cmp_f(v.op, interp_f(regs[int(v.a)]), f64(v.imm)) ? i64(1) : i64(0)
+			} else {
+				regs[int(v.dst)] = interp_cmp(v.op, interp_i(regs[int(v.a)]), v.imm) ? i64(1) : i64(0)
+			}
+		case BC_Move:
+			regs[int(v.dst)] = regs[int(v.src)]
+		case BC_Label_Def:
+		case BC_Jump:
+			at := int(v.target) < len(label_pc) ? label_pc[int(v.target)] : -1
+			if at < 0 do return {}, "jump to undefined bytecode label", false
+			pc = at; continue
+		case BC_Branch_Zero:
+			if interp_i(regs[int(v.cond)]) == 0 {
+				at := int(v.target) < len(label_pc) ? label_pc[int(v.target)] : -1
+				if at < 0 do return {}, "branch to undefined bytecode label", false
+				pc = at; continue
+			}
+		case BC_Call:
+			callee: BC_Func
+			found := false
+			for candidate in prog.funcs do if candidate.id == v.func {callee = candidate; found = true; break}
+			if !found do return {}, "call to undefined bytecode function", false
+			call_args := make([dynamic]BC_Val, len(v.args))
+			for arg, i in v.args do call_args[i] = regs[int(arg)]
+			value, err, ran := interp_named_func(prog, callee, args, call_args[:])
+			delete(call_args)
+			if !ran do return {}, err, false
+			regs[int(v.dst)] = value
+		case BC_Foreign_Call:
+			if v.slot < 0 || v.slot >= len(prog.imports) do return {}, "foreign call has invalid import slot", false
+			imp := prog.imports[v.slot]
+			return {}, fmt.tprintf("cannot interpret a foreign call (<%s>.%s): build an executable to run it", imp.lib, imp.symbol), false
+		case BC_Ret:
+			return regs[int(v.src)], "", true
+		}
+		pc += 1
+	}
+	return {}, "fell off end without ret", false
+}
+
+interp_load_arg_func :: proc(fn: BC_Func, v: BC_Load_Arg, args: []string) -> BC_Val {
+	raw := v.slot < len(args) ? args[v.slot] : ""
+	mt := fn.value_types[int(v.dst)]
+	if mtype_is_float(mt) do return interp_parse_f64(raw)
+	x := interp_parse_i64(raw)
+	if v.width == 0 || v.width >= 64 do return x
+	mask := i64((u64(1) << v.width) - 1)
+	x &= mask
+	if v.signed {
+		sign_bit := i64(1) << (v.width - 1)
+		if (x & sign_bit) != 0 do x |= ~mask
+	}
+	return x
+}
+
+has_float :: proc(v: BC_Val) -> bool {
+	_, ok := v.(f64)
+	return ok
+}
+
+interp_result_type :: proc(mt: Machine_Type, val: BC_Val) -> BC_Interp_Result {
+	switch r in val {
+	case i64:
+		return {value = r, rtype = mt, ok = true}
+	case f64:
+		return {fvalue = r, rtype = mt, ok = true}
+	case string:
+		return {svalue = r, rtype = .Str, ok = true}
+	}
+	return {ok = true, rtype = mt}
 }
 
 interp_load_arg :: proc(prog: ^BC_Program, v: BC_Load_Arg, args: []string) -> BC_Val {

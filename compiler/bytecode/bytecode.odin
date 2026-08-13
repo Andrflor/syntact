@@ -22,8 +22,21 @@ BC_Value :: distinct int
 
 BC_INVALID_VALUE :: BC_Value(-1)
 
+// A function identity is dense and local to one BC_Program. Keeping the identity
+// separate from its printable name lets calls remain compact while dumps and
+// later object writers retain a stable binding name.
+Func_Id :: distinct int
+
+BC_INVALID_FUNC :: Func_Id(-1)
+
 // A jump target inside the instruction stream.
 BC_Label :: distinct int
+
+// A scratch slot is an abstract, function-local storage location. Backends lay
+// slots out in a frame or image tail; no machine address is exposed to lowering.
+BC_Scratch_Id :: distinct int
+
+BC_INVALID_SCRATCH :: BC_Scratch_Id(-1)
 
 // BC_Op is the bytecode's OWN operator set, so the package doesn't depend on the
 // compiler's Operator_Kind. The lowering maps one to the other.
@@ -233,6 +246,11 @@ BC_Inst :: union {
 	BC_Const, // dst = imm — a constant that must live in a register (rare: e.g. ret of a bare const)
 	BC_Const_F, // dst = fimm (float constant)
 	BC_Str_Const, // dst = pointer to a concrete string in .rodata
+	BC_Rodata_Address, // dst = address of a program-global neutral rodata blob
+	BC_Materialize, // dst = address of a function-local scratch aggregate
+	BC_Load, // dst = scalar read from a function-local scratch aggregate
+	BC_Load_Aggregate, // dst = address of a copy of a function-local aggregate
+	BC_Load_Indirect, // dst = scalar read from an abstract aggregate address
 	BC_Load_Arg, // dst = argv[slot] (a ??N fixed point), int/float domain
 	BC_Bin, // dst = a op b      (reg op reg)
 	BC_Bin_Imm, // dst = a op #imm   (reg op immediate)
@@ -244,6 +262,7 @@ BC_Inst :: union {
 	BC_Branch_Zero, // if cond == 0 goto target
 	BC_Ret, // return src (becomes the program's result)
 	BC_Foreign_Call, // dst = call [GOT slot](args…) — crosses the external frontier
+	BC_Call, // dst = call internal function(args…)
 }
 
 BC_Const :: struct {
@@ -264,11 +283,85 @@ BC_Str_Const :: struct {
 	id:    int, // .rodata slot index (assigned at lowering)
 }
 
+BC_Rodata_Blob :: struct {
+	data:  []u8,
+	align: int,
+}
+
+BC_Rodata_Address :: struct {
+	dst:    BC_Value,
+	blob:   int,
+	offset: int,
+}
+
+BC_Scratch_Slot :: struct {
+	id:    BC_Scratch_Id,
+	size:  int,
+	align: int,
+}
+
+BC_Materialize_Store :: struct {
+	offset:     int,
+	value:      BC_Value,
+	size:       int,
+	copy_bytes: bool, // value is an address of another abstract scratch slot
+}
+
+BC_Materialize :: struct {
+	dst:      BC_Value,
+	slot:     BC_Scratch_Id,
+	size:     int,
+	borrowed: bool, // metadata only: no writeback or resonance semantics here
+	stores:   []BC_Materialize_Store,
+	inputs:   []BC_Value, // flattened source values for liveness; same order as stores
+}
+
+BC_Load :: struct {
+	dst:    BC_Value,
+	slot:   BC_Scratch_Id,
+	offset: int,
+	width:  uint,
+	signed: bool,
+}
+
+BC_Load_Aggregate :: struct {
+	dst:      BC_Value,
+	src_slot: BC_Scratch_Id,
+	dst_slot: BC_Scratch_Id,
+	size:     int,
+}
+
+BC_Load_Indirect :: struct {
+	dst:    BC_Value,
+	address: BC_Value,
+	offset: int,
+	width:  uint,
+	signed: bool,
+}
+
 BC_Load_Arg :: struct {
 	dst:    BC_Value,
 	slot:   int,
 	width:  uint, // domain bit width (8/16/32/64), 0 = unsized → full i64
 	signed: bool, // domain signedness, drives mask vs sign-extend at the entry
+}
+
+// An aggregate's fixed C layout, expressed without a target address.  Pieces
+// are the non-padding portions of the aggregate's eightbyte chunks.  Backends
+// classify the pieces for their own calling convention; lowering never turns
+// an aggregate into a source-visible pointer or a guessed scalar.
+BC_Aggregate_Piece :: struct {
+	offset:  int,
+	size:    int,
+	machine: Machine_Type,
+}
+
+BC_Aggregate_Layout :: struct {
+	size:     int,
+	align:    int,
+	pieces:   []BC_Aggregate_Piece,
+	memory:   bool, // SysV MEMORY: the existing abstract aggregate cell is passed
+	indirect: bool, // explicit existing indirect lowering (e.g. writable/borrowed)
 }
 
 BC_Bin :: struct {
@@ -336,6 +429,49 @@ BC_Foreign_Call :: struct {
 	dst:  BC_Value,
 	slot: int,
 	args: []BC_Value,
+	// One entry per argument when an aggregate has layout-sensitive ABI lowering.
+	// Empty layouts denote the ordinary scalar path and preserve old hand-built
+	// bytecode users.
+	arg_layouts: []BC_Aggregate_Layout,
+	result_layout: BC_Aggregate_Layout,
+	has_result_layout: bool,
+}
+
+// A call to another function in the same program. Arguments are evaluated in
+// declaration order and are received by the callee's v0..v(len(params)-1).
+BC_Call :: struct {
+	dst:  BC_Value,
+	func: Func_Id,
+	args: []BC_Value,
+	arg_layouts: []BC_Aggregate_Layout,
+	result_layout: BC_Aggregate_Layout,
+	has_result_layout: bool,
+}
+
+// Structured loop metadata is deliberately descriptive: the executable control
+// flow remains the existing Label/Jump/Branch instruction set.
+Loop_Info :: struct {
+	header: BC_Label,
+	latch:  BC_Label,
+	exits:  []BC_Label,
+}
+
+BC_Func :: struct {
+	id:          Func_Id,
+	identity:    string,
+	params:      []Machine_Type,
+	param_layouts: []BC_Aggregate_Layout,
+	param_scratch: []BC_Scratch_Id,
+	result:      Machine_Type,
+	result_layout: BC_Aggregate_Layout,
+	has_result_layout: bool,
+	sret_slot:   BC_Scratch_Id,
+	insts:       []BC_Inst,
+	value_count: int,
+	label_count: int,
+	value_types: []Machine_Type,
+	loops:       []Loop_Info,
+	scratch:     []BC_Scratch_Slot,
 }
 
 // A lowered program: a flat instruction list plus the value/label counters so a
@@ -352,17 +488,47 @@ BC_Import :: struct {
 }
 
 BC_Program :: struct {
+	// Named function model. The legacy fields below remain a compatibility view for
+	// existing pure codegen and hand-built ABI tests; new programs should populate
+	// funcs and entry as well.
+	funcs:       [dynamic]BC_Func,
+	entry:       Maybe(Func_Id),
+	exports:     []Func_Id,
+
+	// Legacy flat entry view. It is intentionally kept until all machine backends
+	// consume BC_Func directly.
 	insts:       [dynamic]BC_Inst,
+	params:      [dynamic]Machine_Type,
+	param_layouts: [dynamic]BC_Aggregate_Layout,
+	param_scratch: [dynamic]BC_Scratch_Id,
 	value_count: int,
 	label_count: int,
 	value_types: [dynamic]Machine_Type, // Machine_Type per BC_Value (indexed by vN)
 	rodata:      [dynamic]string, // concrete string literals → .rodata, indexed by id
+	rodata_blobs: [dynamic]BC_Rodata_Blob, // neutral bytes, program-global
+	scratch:     [dynamic]BC_Scratch_Slot, // legacy entry function's local plan
 	// Symbols this program calls across the external frontier, deduplicated. Empty
 	// for a pure program — and an empty list is what keeps the default output a
 	// static binary with no interpreter and no dynamic tables at all.
 	imports:     [dynamic]BC_Import,
+	loops:       [dynamic]Loop_Info,
 	result_type: Machine_Type, // Machine_Type of the program's returned value
+	result_layout: BC_Aggregate_Layout,
+	has_result_layout: bool,
+	sret_slot: BC_Scratch_Id,
 	error:       string,
+}
+
+bc_program_entry :: proc(prog: ^BC_Program) -> (BC_Func, bool) {
+	if prog == nil || len(prog.funcs) == 0 do return {}, false
+	id := Func_Id(0)
+	if selected, ok := prog.entry.?; ok do id = selected
+	for f in prog.funcs do if f.id == id do return f, true
+	return {}, false
+}
+
+bc_program_has_named_funcs :: proc(prog: ^BC_Program) -> bool {
+	return prog != nil && len(prog.funcs) > 0
 }
 
 // bc_intern_import returns the GOT slot for (lib, symbol), appending it on first
@@ -373,6 +539,14 @@ bc_intern_import :: proc(prog: ^BC_Program, lib, symbol: string) -> int {
 	}
 	append(&prog.imports, BC_Import{lib = lib, symbol = symbol})
 	return len(prog.imports) - 1
+}
+
+// bc_append_rodata_blob interns target-neutral bytes in program-global rodata.
+// The returned index is stable for the lifetime of the program and is resolved
+// to an address only by a concrete image backend.
+BC_Append_Rodata_Blob :: proc(prog: ^BC_Program, data: []u8, align: int = 1) -> int {
+	append(&prog.rodata_blobs, BC_Rodata_Blob{data = data, align = align})
+	return len(prog.rodata_blobs) - 1
 }
 
 // ----------------------------------------------------------------------------
@@ -388,6 +562,23 @@ bytecode_to_string :: proc(prog: ^BC_Program) -> string {
 	}
 	for s, i in prog.rodata {
 		fmt.sbprintf(&sb, "; .rodata[%d] = %q\n", i, s)
+	}
+	for blob, i in prog.rodata_blobs {
+		fmt.sbprintf(&sb, "; .blob[%d] = %d bytes align %d\n", i, len(blob.data), blob.align)
+	}
+	if len(prog.funcs) > 0 {
+		for fn in prog.funcs {
+			fmt.sbprintf(&sb, "func @f%d %s() -> %s {{\n", int(fn.id), fn.identity, mtype_name(fn.result))
+			view := BC_Program{result_type = fn.result, imports = prog.imports}
+			for inst in fn.insts do fmt.sbprintf(&sb, "%s\n", bc_inst_line(inst, &view))
+			for loop in fn.loops {
+				fmt.sbprintf(&sb, "  ; loop L%d..L%d", int(loop.header), int(loop.latch))
+				for exit in loop.exits do fmt.sbprintf(&sb, " exit L%d", int(exit))
+				strings.write_byte(&sb, '\n')
+			}
+			strings.write_string(&sb, "}\n")
+		}
+		return strings.to_string(sb)
 	}
 	for inst in prog.insts {
 		fmt.sbprintf(&sb, "%s\n", bc_inst_line(inst, prog))
@@ -405,6 +596,16 @@ bc_inst_line :: proc(inst: BC_Inst, prog: ^BC_Program = nil) -> string {
 		return fmt.tprintf("  v%d = constf %v", int(v.dst), v.fimm)
 	case BC_Str_Const:
 		return fmt.tprintf("  v%d = str .rodata[%d]", int(v.dst), v.id)
+	case BC_Rodata_Address:
+		return fmt.tprintf("  v%d = address .blob[%d]+%d", int(v.dst), v.blob, v.offset)
+	case BC_Materialize:
+		return fmt.tprintf("  v%d = materialize scratch[%d] size=%d", int(v.dst), int(v.slot), v.size)
+	case BC_Load:
+		return fmt.tprintf("  v%d = load scratch[%d]+%d :%s%d", int(v.dst), int(v.slot), v.offset, v.signed ? "i" : "u", v.width)
+	case BC_Load_Aggregate:
+		return fmt.tprintf("  v%d = load aggregate scratch[%d] -> scratch[%d] size=%d", int(v.dst), int(v.src_slot), int(v.dst_slot), v.size)
+	case BC_Load_Indirect:
+		return fmt.tprintf("  v%d = load *v%d+%d :%s%d", int(v.dst), int(v.address), v.offset, v.signed ? "i" : "u", v.width)
 	case BC_Load_Arg:
 		if v.width != 0 && v.width < 64 {
 			return fmt.tprintf("  v%d = arg %d :%s%d", int(v.dst), v.slot, v.signed ? "i" : "u", v.width)
@@ -441,6 +642,15 @@ bc_inst_line :: proc(inst: BC_Inst, prog: ^BC_Program = nil) -> string {
 			imp := prog.imports[v.slot]
 			fmt.sbprintf(&b, "  ; <%s>.%s", imp.lib, imp.symbol)
 		}
+		return strings.to_string(b)
+	case BC_Call:
+		b := strings.builder_make()
+		fmt.sbprintf(&b, "  v%d = call @f%d(", int(v.dst), int(v.func))
+		for a, i in v.args {
+			if i > 0 do strings.write_string(&b, ", ")
+			fmt.sbprintf(&b, "v%d", int(a))
+		}
+		strings.write_byte(&b, ')')
 		return strings.to_string(b)
 	}
 	return ""

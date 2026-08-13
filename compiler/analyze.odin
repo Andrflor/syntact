@@ -317,6 +317,10 @@ binding_kind_from_node :: proc(kind: Node_Kind) -> Binding_Kind {
 	}
 }
 
+binding_is_resonance :: #force_inline proc(kind: Binding_Kind) -> bool {
+	return kind == .Resonance_Push || kind == .Resonance_Pull
+}
+
 // cover_scope: the scope a cover exposes to its branch product. A cover IS a scope,
 // so the product is walked inside it and the ordinary resolution chain does the rest.
 // A UNION of covers exposes the projection COMMON to its operands — the spec's
@@ -1026,12 +1030,26 @@ walk_binding :: #force_inline proc(
 		// resolved recursive references.
 		scope.walking = false
 		scope_close(a, scope)
-		typecheck(a, current_scope, name, constraint, bk, result, idx)
+		if binding_is_resonance(bk) {
+			// The RHS of resonance names the nominal event/update channel. It is
+			// deliberately not proved against the writable formal's value color.
+			append(&current_scope.constraint_folds, fold_constraint(constraint))
+			append(&current_scope.type_folds, fold_type(result))
+		} else {
+			typecheck(a, current_scope, name, constraint, bk, result, idx)
+		}
 		return result
 	}
 	value := walk(a, current_scope, right_idx)
 	scope_append(a, current_scope, name, constraint, bk, value, capture)
-	typecheck(a, current_scope, name, constraint, bk, value, idx)
+	if binding_is_resonance(bk) {
+		// Resonance's RHS is an event identity, not the value inhabiting the
+		// writable formal. The actual value is supplied by a later carve/call.
+		append(&current_scope.constraint_folds, fold_constraint(constraint))
+		append(&current_scope.type_folds, fold_type(value))
+	} else {
+		typecheck(a, current_scope, name, constraint, bk, value, idx)
+	}
 	return value
 }
 
@@ -1186,12 +1204,13 @@ walk_event_pull :: proc(
 	body.walking = false
 	scope_close(a, body)
 
-	// A handler MUST produce: the emit's value IS that production, so a handler
-	// without one would make every emit of this event valueless.
-	if !scope_has_product(body) {
+	// A handler normally produces explicitly. A resonance update is also a valid
+	// terminal continuation: its RHS is the value delivered to the named state
+	// channel, so no synthetic Scope_Type mutation is needed.
+	if !scope_has_product(body) && !scope_has_resonance_update(body) {
 		sem_error(
 			a,
-			"a handler must produce a value: add a production (`-> value`) to the handler body",
+			"a handler must produce a value or contain a resonance update (`-<<`)",
 			.Invalid_Event_Pull,
 			node_span(a, idx),
 		)
@@ -1210,6 +1229,14 @@ scope_has_product :: proc(scope: ^Scope_Type) -> bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+scope_has_resonance_update :: proc(scope: ^Scope_Type) -> bool {
+	if scope == nil do return false
+	for kind in scope.kind {
+		if kind == .Resonance_Pull do return true
 	}
 	return false
 }
@@ -1308,7 +1335,7 @@ walk_emit_value :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 	result := new(Type)
 	if capture_index < 0 {
 		// A handler that ignores its payload (no capture) needs no substitution.
-		result^ = Execute_Type{handler}
+		result^ = Execute_Type{target = handler, caller_scope = current_scope}
 		return result
 	}
 	carve := new(Type)
@@ -1330,7 +1357,7 @@ walk_emit_value :: proc(a: ^Analyzer, current_scope: ^Scope_Type, idx: Node_Inde
 	)
 	append(&cv.types, payload)
 	carve^ = cv
-	result^ = Execute_Type{carve}
+	result^ = Execute_Type{target = carve, caller_scope = current_scope}
 	return result
 }
 
@@ -2520,7 +2547,7 @@ walk_execute :: #force_inline proc(
 	data := a.ast.node_data[idx]
 	target := walk(a, current_scope, data.execute.target)
 	result := new(Type)
-	result^ = Execute_Type{target}
+	result^ = Execute_Type{target = target, caller_scope = current_scope}
 	return result
 }
 
@@ -2620,6 +2647,10 @@ init_builtins :: proc "contextless" () {
 	builtins["i32"] = make_int_range_default(-2147483648, 2147483647, 0)
 	builtins["u64"] = make_int_range(0, 18446744073709551615)
 	builtins["i64"] = make_int_range_default(-9223372036854775808, 9223372036854775807, 0)
+	// The current target is x86-64, so the pointer-width aliases have the same
+	// layout as their 64-bit fixed-width families.
+	builtins["usize"] = make_int_range(0, 18446744073709551615)
+	builtins["isize"] = make_int_range_default(-9223372036854775808, 9223372036854775807, 0)
 	builtins["f32"] = make_float_range(nil, nil, .f32)
 	builtins["f64"] = make_float_range(nil, nil, .f64)
 	builtins["int"] = make_int_range_default(nil, nil, 0)

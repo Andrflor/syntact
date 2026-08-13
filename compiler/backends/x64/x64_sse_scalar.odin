@@ -16,6 +16,8 @@ package x64_assembler
 //   divsd  xmm,xmm : F2 0F 5E /r
 //   cvtsi2sd xmm,r64 : F2 REX.W 0F 2A /r
 //   cvttsd2si r64,xmm : F2 REX.W 0F 2C /r
+//   cvtsd2ss xmm,xmm : F2 0F 5A /r
+//   cvtss2sd xmm,xmm : F3 0F 5A /r
 //   movq  r64,xmm : 66 REX.W 0F 7E /r   (xmm → gpr, all 64 bits)
 // ============================================================================
 
@@ -39,6 +41,14 @@ mulsd_xmm_xmm :: proc(dst, src: XMMRegister) {
 
 divsd_xmm_xmm :: proc(dst, src: XMMRegister) {
 	write([]u8{0xF2, 0x0F, 0x5E, xmm_modrm(dst, src)})
+}
+
+cvtsd2ss_xmm_xmm :: proc(dst, src: XMMRegister) {
+	write([]u8{0xF2, 0x0F, 0x5A, xmm_modrm(dst, src)})
+}
+
+cvtss2sd_xmm_xmm :: proc(dst, src: XMMRegister) {
+	write([]u8{0xF3, 0x0F, 0x5A, xmm_modrm(dst, src)})
 }
 
 // cvtsi2sd xmm, r64 : convert a signed 64-bit integer to a double.
