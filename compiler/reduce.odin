@@ -22,20 +22,21 @@ import "core:strings"
 reduce :: proc(scope: ^Scope_Type) -> ^Type {
 	for i := 0; i < len(scope.kind); i += 1 {
 		if scope.kind[i] == .Product {
+			effects := reduce_effectful_bindings(scope, i)
 			// The singleton shortcut answers with the FOLD instead of reducing — but a
 			// production that collapses an external must not be answered that way: the
 			// call still has to happen, so a singleton (or void) result must not stand
 			// in for it. Provenance decides, never the shape of the result.
-			if i < len(scope.type_folds) && !holds_foreign_collapse(scope.types[i]) {
+			if len(effects) == 0 && i < len(scope.type_folds) && !holds_foreign_collapse(scope.types[i]) {
 				if shortcut := singleton_shortcut(scope.type_folds[i]); shortcut != nil {
 					return shortcut
 				}
 			}
-			return reduce_value(reduce_slot_value(scope, i))
+			return make_effect_sequence(effects, reduce_value(reduce_slot_value(scope, i)))
 		}
 		if scope.kind[i] == .Expand {
 			if prod := reduce_expand_production(reduce_slot_value(scope, i)); prod != nil {
-				return prod
+				return make_effect_sequence(reduce_effectful_bindings(scope, i), prod)
 			}
 		}
 	}
@@ -54,17 +55,18 @@ reduce_expand_production :: proc(value: ^Type) -> ^Type {
 	case Scope_Type:
 		for i := 0; i < len(s.kind); i += 1 {
 			if s.kind[i] == .Product {
+				effects := reduce_effectful_bindings(&s, i)
 				// Same guard as reduce: an external collapse is never answered by its fold.
-				if i < len(s.type_folds) && !holds_foreign_collapse(s.types[i]) {
+				if len(effects) == 0 && i < len(s.type_folds) && !holds_foreign_collapse(s.types[i]) {
 					if shortcut := singleton_shortcut(s.type_folds[i]); shortcut != nil {
 						return shortcut
 					}
 				}
-				return reduce_value(reduce_slot_value(&s, i))
+				return make_effect_sequence(effects, reduce_value(reduce_slot_value(&s, i)))
 			}
 			if s.kind[i] == .Expand {
 				if prod := reduce_expand_production(reduce_slot_value(&s, i)); prod != nil {
-					return prod
+					return make_effect_sequence(reduce_effectful_bindings(&s, i), prod)
 				}
 			}
 		}
@@ -79,25 +81,56 @@ reduce_expand_production :: proc(value: ^Type) -> ^Type {
 // The walk covers the composites a production can be built from, so an external
 // buried in arithmetic (`libm.sqrt{x->2.0}! + 1`) is caught too.
 holds_foreign_collapse :: proc(t: ^Type) -> bool {
+	seen := make(map[rawptr]bool)
+	defer delete(seen)
+	return holds_foreign_collapse_seen(t, &seen)
+}
+
+holds_foreign_collapse_seen :: proc(t: ^Type, seen: ^map[rawptr]bool) -> bool {
 	if t == nil do return false
+	key := rawptr(t)
+	if seen^[key] do return false
+	seen^[key] = true
 	#partial switch v in t^ {
 	case Execute_Type:
 		if foreign_target_scope(v.target) != nil do return true
-		return holds_foreign_collapse(v.target)
+		if holds_foreign_collapse_seen(v.target, seen) do return true
+		resolved := follow(v.target)
+		return resolved != v.target && holds_foreign_collapse_seen(resolved, seen)
 	case Foreign_Call_Type:
 		return true
+	case Effect_Sequence_Type:
+		if holds_foreign_collapse_seen(v.value, seen) do return true
+		for effect in v.effects do if holds_foreign_collapse_seen(effect, seen) do return true
+		return false
 	case Compose_Type:
-		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+		return holds_foreign_collapse_seen(v.left, seen) || holds_foreign_collapse_seen(v.right, seen)
 	case Cast_Type:
-		return holds_foreign_collapse(v.value)
+		return holds_foreign_collapse_seen(v.value, seen)
 	case Or_Type:
-		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+		return holds_foreign_collapse_seen(v.left, seen) || holds_foreign_collapse_seen(v.right, seen)
 	case And_Type:
-		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+		return holds_foreign_collapse_seen(v.left, seen) || holds_foreign_collapse_seen(v.right, seen)
 	case Negate_Type:
-		return holds_foreign_collapse(v.operand)
+		return holds_foreign_collapse_seen(v.operand, seen)
 	case Range_Type:
-		return holds_foreign_collapse(v.left) || holds_foreign_collapse(v.right)
+		return holds_foreign_collapse_seen(v.left, seen) || holds_foreign_collapse_seen(v.right, seen)
+	case Carve_Type:
+		if holds_foreign_collapse_seen(v.source, seen) do return true
+		for override in v.types do if holds_foreign_collapse_seen(override, seen) do return true
+		return false
+	case Scope_Type:
+		for field in v.types do if holds_foreign_collapse_seen(field, seen) do return true
+		return false
+	case Pattern_Type:
+		if holds_foreign_collapse_seen(v.target, seen) do return true
+		for branch in v.branches {
+			if holds_foreign_collapse_seen(branch.product, seen) do return true
+		}
+		return false
+	case Mention_Type, Reference_Type, Recursive_Mention_Type:
+		resolved := follow(t)
+		return resolved != t && holds_foreign_collapse_seen(resolved, seen)
 	}
 	return false
 }
@@ -122,6 +155,41 @@ reduce_slot_value :: proc(s: ^Scope_Type, i: int) -> ^Type {
 	return i < len(s.type_folds) ? s.type_folds[i] : nil
 }
 
+// reduce_effectful_bindings selects only preceding bindings whose value crosses
+// the foreign frontier. Inspecting provenance is deliberately separate from
+// reduction: ordinary pure bindings remain lazy and are never evaluated merely
+// because a later production is being collapsed.
+reduce_effectful_bindings :: proc(s: ^Scope_Type, end: int) -> [dynamic]^Type {
+	effects := make([dynamic]^Type)
+	if s == nil do return effects
+	limit := end < len(s.kind) ? end : len(s.kind)
+	for i := 0; i < limit; i += 1 {
+		if s.kind[i] == .Product do continue
+		value := reduce_slot_value(s, i)
+		if !binding_value_is_effectful(value) do continue
+		if reduced := reduce_value(value); reduced != nil do append(&effects, reduced)
+	}
+	return effects
+}
+
+// A scope or carve is a pure structural value until an explicit collapse reaches
+// it. Their fields may contain effectful expressions, but merely binding the
+// structure does not execute those expressions. Other expression forms can
+// execute at this binding site and are checked recursively for provenance.
+binding_value_is_effectful :: proc(value: ^Type) -> bool {
+	if value == nil do return false
+	#partial switch &v in value^ {
+	case Scope_Type, Carve_Type:
+		return false
+	}
+	return holds_foreign_collapse(value)
+}
+
+make_effect_sequence :: proc(effects: [dynamic]^Type, value: ^Type) -> ^Type {
+	if len(effects) == 0 do return value
+	return new_type(Effect_Sequence_Type{effects, value})
+}
+
 // reduce_value is the recursive partial evaluator: a concrete value when
 // everything resolved, else a symbolic Compose tree over the fixed points.
 reduce_value :: proc(value: ^Type) -> ^Type {
@@ -133,6 +201,10 @@ reduce_value :: proc(value: ^Type) -> ^Type {
 		// Already the residual of a crossed frontier: irreducible by construction,
 		// codegen emits the call. Its arguments were reduced when it was built.
 		return value
+	case Effect_Sequence_Type:
+		effects := make([dynamic]^Type, len(v.effects))
+		for effect, i in v.effects do effects[i] = reduce_value(effect)
+		return make_effect_sequence(effects, reduce_value(v.value))
 	case Compose_Type:
 		return reduce_compose(v)
 	case Cast_Type:
@@ -1119,7 +1191,7 @@ reduce_pattern :: proc(p: Pattern_Type) -> ^Type {
 		// NO free fixed point — then its membership in each cover is decidable. A
 		// target with a free `??` (e.g. `??0 + 2`, a Compose over fixed points) stays
 		// symbolic and the refinement pass below records the per-branch narrowings.
-		if target != nil && !contains_fixed_point(target) {
+		if target != nil && !contains_fixed_point(target) && !holds_foreign_collapse(target) {
 			decide: for branch in p.branches {
 				switch reduce_branch_fires(branch, target) {
 				case .Yes:
@@ -1429,7 +1501,7 @@ execute :: proc(value: Execute_Type) -> ^Type {
 		// PROVENANCE DECIDES, not the shape of the production: if this collapse
 		// crosses the external frontier it becomes a call, even when the production
 		// would fold to a singleton or to nothing.
-		if call := foreign_call_of(&s, src); call != nil do return call
+		if call := foreign_call_of(&s, src, value.caller_scope); call != nil do return call
 		collapse_enter(src)
 		defer collapse_leave()
 		return reduce(&s)
@@ -1446,7 +1518,7 @@ execute :: proc(value: Execute_Type) -> ^Type {
 // preserved, but the SYMBOL NAME lives in the parent's `names` — so the name is
 // recovered by locating the scope (or its canonical origin) among the library's
 // bindings.
-foreign_call_of :: proc(target: ^Scope_Type, carved: ^Scope_Type) -> ^Type {
+foreign_call_of :: proc(target: ^Scope_Type, carved: ^Scope_Type, caller_scope: ^Scope_Type = nil) -> ^Type {
 	lib_scope := target.parent
 	if lib_scope == nil || lib_scope.foreign_lib == "" do return nil
 
@@ -1457,6 +1529,11 @@ foreign_call_of :: proc(target: ^Scope_Type, carved: ^Scope_Type) -> ^Type {
 		lib    = lib_scope.foreign_lib,
 		symbol = symbol,
 	}
+	// `carved` is the declaration-time source of the collapse.  Its values retain
+	// the RHS of a resonant formal (`>>- Event`) even after a call-site carve has
+	// replaced that value with the initial state.  Keep that nominal identity here;
+	// never write the post-call value back into either scope.
+	formal_scope := carved != nil ? carved : target
 	// Arguments in DECLARATION order — that is the ABI's argument order. The
 	// production is the declared result layout, not a computed value.
 	for i := 0; i < len(target.kind); i += 1 {
@@ -1466,7 +1543,40 @@ foreign_call_of :: proc(target: ^Scope_Type, carved: ^Scope_Type) -> ^Type {
 		}
 		// Only value-carrying inputs are arguments; an expansion is not one.
 		if target.kind[i] == .Expand do continue
+		constraint := i < len(target.constraints) ? target.constraints[i] : nil
+		if constraint == nil && formal_scope != nil && i < len(formal_scope.constraints) {
+			constraint = formal_scope.constraints[i]
+		}
+		writable := false
+		event: ^Scope_Type = nil
+		handler: ^Type = nil
+		capture_index := -1
+		formal_name := i < len(target.names) ? target.names[i] : ""
+		if formal_scope != nil && i < len(formal_scope.kind) {
+			writable = formal_scope.kind[i] == .Resonance_Push || formal_scope.kind[i] == .Resonance_Pull
+			if i < len(formal_scope.names) && formal_scope.names[i] != "" do formal_name = formal_scope.names[i]
+			if writable && i < len(formal_scope.types) {
+				event = event_scope_of(formal_scope.types[i])
+				if event != nil {
+					handler_scope := caller_scope != nil ? caller_scope : formal_scope.parent
+					handler, capture_index = resolve_handler(handler_scope, event)
+				}
+			}
+		}
 		append(&call.args, reduce_value(target.types[i]))
+		append(&call.arg_constraints, constraint)
+		append(&call.arg_borrowed, target.kind[i] == .Reactive_Pull)
+		append(&call.arg_writable, writable)
+		append(&call.arg_events, event)
+		if writable {
+			append(&call.writebacks, Foreign_Writeback{
+				argument = len(call.args) - 1,
+				formal_name = formal_name,
+				event = event,
+				handler = handler,
+				capture_index = capture_index,
+			})
+		}
 	}
 	return new_type(call)
 }

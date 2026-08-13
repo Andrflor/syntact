@@ -183,3 +183,54 @@ run_analyze_test :: proc(path: string, t: ^testing.T) {
 		}
 	}
 }
+
+@(test)
+test_resonant_foreign_formal_keeps_nominal_event :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	defer vmem.arena_destroy(&arena)
+	previous_allocator := context.allocator
+	context.allocator = vmem.arena_allocator(&arena)
+	defer context.allocator = previous_allocator
+
+	source := "Changed -> { u32:value }\nChanged -< e { value -<< e.value }\nlib -> <libc.so.6>{\n  memset -> { u32:value >>- Changed u8:fill u64:size -> ??::u64 }\n}\n-> lib.memset{value -> 1 fill -> 7 size -> 4}!"
+	cache := new(compiler.Cache)
+	ast, _ := compiler.parse(cache, source)
+	analyzer := compiler.create_analyzer(ast)
+	phase := compiler.Phase_Context{analyzer = &analyzer}
+	previous_user_ptr := context.user_ptr
+	context.user_ptr = &phase
+	defer context.user_ptr = previous_user_ptr
+	_ = compiler.analyze(cache)
+	testing.expectf(t, len(cache.analyze_errors) == 0, "resonant foreign source analyzed with errors: %v", cache.analyze_errors)
+	if len(cache.analyze_errors) != 0 do return
+	reducer := compiler.create_reducer()
+	phase.reducer = &reducer
+	result := compiler.reduce(cache.scope)
+	call, ok := result^.(compiler.Foreign_Call_Type)
+	testing.expectf(t, ok, "reduction did not retain the foreign call")
+	if !ok do return
+	testing.expectf(t, len(call.arg_writable) > 0 && call.arg_writable[0], "foreign resonant formal was not marked writable")
+	testing.expectf(t, len(call.arg_events) > 0 && call.arg_events[0] != nil, "foreign resonant formal lost its event identity")
+	testing.expectf(t, len(call.writebacks) == 1 && call.writebacks[0].handler != nil, "foreign resonant formal lost named handler metadata")
+}
+
+@(test)
+test_pointer_width_integer_builtins :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	defer vmem.arena_destroy(&arena)
+	previous_allocator := context.allocator
+	context.allocator = vmem.arena_allocator(&arena)
+	defer context.allocator = previous_allocator
+
+	source := "Values -> { usize:unsigned -> 0 isize:signed -> 0 }\n-> Values{}!"
+	cache := new(compiler.Cache)
+	ast, _ := compiler.parse(cache, source)
+	analyzer := compiler.create_analyzer(ast)
+	phase := compiler.Phase_Context{analyzer = &analyzer}
+	previous_user_ptr := context.user_ptr
+	context.user_ptr = &phase
+	defer context.user_ptr = previous_user_ptr
+
+	_ = compiler.analyze(cache)
+	testing.expectf(t, len(cache.analyze_errors) == 0, "pointer-width builtin source analyzed with errors: %v", cache.analyze_errors)
+}

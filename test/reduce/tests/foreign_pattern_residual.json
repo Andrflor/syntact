@@ -1,0 +1,6 @@
+{
+  "name": "foreign call survives a pattern target",
+  "description": "A foreign collapse used as a pattern scrutinee remains an effectful residual even when the branch result is concrete.",
+  "source": "lib -> <libm.so.6>{ probe -> { -> ??::u8 } }\n-> lib.probe{}! ? { 0 -> 1, -> 2 }",
+  "expect": "<libm.so.6>.probe() ? {0 -> 1, -> 2}"
+}

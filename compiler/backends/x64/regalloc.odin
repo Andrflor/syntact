@@ -45,10 +45,16 @@ Reg_Alloc :: struct {
 // — unlike RBX (callee-saved), which would need save/restore in an ABI function.
 // RAX and RDX are deliberately EXCLUDED — they are the fixed scratch/clobber
 // pair for imul/idiv (idiv writes both), so the emitter always has them free.
-// RSP/RBP are the stack frame. RBX is callee-saved; reserved for later use.
+// RSP/RBP are the stack frame. RBX is callee-saved and reserved for the
+// ARGS_TABLE base. R10 is the GOT-call target scratch and is also reserved.
 // RCX is excluded too: variable shifts (shl/shr by a register) require the count
 // in CL, so the emitter keeps RCX free as the shift-count scratch.
-ALLOCATABLE_REGS := [?]Register64{.RSI, .RDI, .R8, .R9, .R10, .R11, .R12, .R13, .R14, .R15}
+ALLOCATABLE_REGS := [?]Register64{.RSI, .RDI, .R8, .R9, .R11, .R12, .R13, .R14, .R15}
+
+// A value that remains live across a foreign call must not occupy a SysV
+// caller-saved register. RBX is reserved by the emitter, leaving these four
+// preserved registers for such intervals.
+CALL_PRESERVED_REGS := [?]Register64{.R12, .R13, .R14, .R15}
 
 // A live interval for one virtual register.
 Live_Interval :: struct {
@@ -117,6 +123,7 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	next_spill_offset := 0
 
 	for iv in intervals {
+		across_call := interval_crosses_foreign_call(prog, iv.start, iv.end)
 		// Expire every active interval that ends before this one starts; return
 		// its register to the pool. Use `iv.start + 1` so an operand whose LAST use
 		// is exactly at this instruction (end == iv.start) is also reclaimed — its
@@ -125,7 +132,16 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 		// here → dst takes a's register → the copy vanishes).
 		expire_old(&active, &active_reg, &free_regs, iv.start + 1)
 
-		if len(free_regs) > 0 {
+		// A foreign call is a register-clobber barrier. Only the preserved pool is
+		// eligible for an interval that is live on both sides of the barrier.
+		free_idx := -1
+		for fr, idx in free_regs {
+			if reg_allowed_across_call(fr, across_call) {
+				free_idx = idx
+				break
+			}
+		}
+		if free_idx >= 0 {
 			reg, has_pref := Register64{}, false
 			// A value can have BOTH a move-bias hint (reuse operand `a`'s dying
 			// register to elide the in-op copy) and a physical preference (the ret
@@ -139,17 +155,19 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 			// wins instead — overriding it would force two shuffle movs.
 			if phys_pref[iv.vreg] > 0 && commutative_def[iv.vreg] {
 				want := Register64(u8(phys_pref[iv.vreg] - 1))
-				for fr, idx in free_regs {
-					if fr == want {
-						reg = fr; has_pref = true
-						ordered_remove(&free_regs, idx)
-						break
+				if reg_allowed_across_call(want, across_call) {
+					for fr, idx in free_regs {
+						if fr == want {
+							reg = fr; has_pref = true
+							ordered_remove(&free_regs, idx)
+							break
+						}
 					}
 				}
 			}
 			if !has_pref && hint[iv.vreg] >= 0 {
 				src := hint[iv.vreg]
-				if loc := locs[src]; loc.kind == .Register {
+				if loc := locs[src]; loc.kind == .Register && reg_allowed_across_call(loc.reg, across_call) {
 					for fr, idx in free_regs {
 						if fr == loc.reg {
 							reg = fr; has_pref = true
@@ -163,15 +181,21 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 			// hint didn't land can still take RDI/RSI if free (saves the final mov).
 			if !has_pref && phys_pref[iv.vreg] > 0 {
 				want := Register64(u8(phys_pref[iv.vreg] - 1))
-				for fr, idx in free_regs {
-					if fr == want {
-						reg = fr; has_pref = true
-						ordered_remove(&free_regs, idx)
-						break
+				if reg_allowed_across_call(want, across_call) {
+					for fr, idx in free_regs {
+						if fr == want {
+							reg = fr; has_pref = true
+							ordered_remove(&free_regs, idx)
+							break
+						}
 					}
 				}
 			}
-			if !has_pref do reg = pop(&free_regs)
+			if !has_pref {
+				// No preference removed a register, so the eligible index is stable.
+				reg = free_regs[free_idx]
+				ordered_remove(&free_regs, free_idx)
+			}
 			locs[iv.vreg] = VReg_Loc{kind = .Register, reg = reg}
 			active_reg[iv.vreg] = reg
 			insert_active(&active, iv)
@@ -182,16 +206,33 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 			next_spill_offset += 8
 			spill_at := next_spill_offset
 			if len(active) > 0 {
-				last := active[len(active) - 1]
-				if last.end > iv.end {
-					reg := active_reg[last.vreg]
-					// Move `last` to the stack, give its reg to iv.
-					locs[last.vreg] = VReg_Loc{kind = .Stack, offset = spill_at}
-					delete_key(&active_reg, last.vreg)
-					ordered_remove(&active, len(active) - 1)
-					locs[iv.vreg] = VReg_Loc{kind = .Register, reg = reg}
-					active_reg[iv.vreg] = reg
-					insert_active(&active, iv)
+				last_idx := len(active) - 1
+				if across_call {
+					// The active list is sorted by end. Find the latest-ending
+					// interval in the preserved pool; caller-saved intervals cannot
+					// provide a register to this value.
+					last_idx = -1
+					for i := len(active) - 1; i >= 0; i -= 1 {
+						if reg, ok := active_reg[active[i].vreg]; ok && reg_allowed_across_call(reg, true) {
+							last_idx = i
+							break
+						}
+					}
+				}
+				if last_idx >= 0 {
+					last := active[last_idx]
+					if last.end > iv.end {
+						reg := active_reg[last.vreg]
+						// Move `last` to the stack, give its reg to iv.
+						locs[last.vreg] = VReg_Loc{kind = .Stack, offset = spill_at}
+						delete_key(&active_reg, last.vreg)
+						ordered_remove(&active, last_idx)
+						locs[iv.vreg] = VReg_Loc{kind = .Register, reg = reg}
+						active_reg[iv.vreg] = reg
+						insert_active(&active, iv)
+					} else {
+						locs[iv.vreg] = VReg_Loc{kind = .Stack, offset = spill_at}
+					}
 				} else {
 					locs[iv.vreg] = VReg_Loc{kind = .Stack, offset = spill_at}
 				}
@@ -204,6 +245,26 @@ allocate_registers :: proc(prog: ^bc.BC_Program) -> Reg_Alloc {
 	// 16-byte align the spill area for ABI-correct stack alignment.
 	stack_size := (next_spill_offset + 15) & ~int(15)
 	return Reg_Alloc{locs = locs, stack_size = stack_size}
+}
+
+// interval_crosses_foreign_call reports whether a value is live after a call at
+// which it was already defined. A value used only as a call argument ends at the
+// call and does not need a preserved register; a value used later does.
+interval_crosses_foreign_call :: proc(prog: ^bc.BC_Program, start, end: int) -> bool {
+	for inst, pc in prog.insts {
+		if pc <= start || pc >= end do continue
+		if _, ok := inst.(bc.BC_Foreign_Call); ok do return true
+		if _, ok := inst.(bc.BC_Call); ok do return true
+	}
+	return false
+}
+
+reg_allowed_across_call :: proc(reg: Register64, across_call: bool) -> bool {
+	if !across_call do return true
+	for preserved in CALL_PRESERVED_REGS {
+		if reg == preserved do return true
+	}
+	return false
 }
 
 // def_op_is_commutative reports whether the instruction defines its dst via a
@@ -270,6 +331,11 @@ compute_intervals :: proc(prog: ^bc.BC_Program) -> [dynamic]Live_Interval {
 		def[i] = -1
 		last[i] = -1
 	}
+	param_count := len(prog.params) < n ? len(prog.params) : n
+	for i in 0 ..< param_count {
+		def[i] = 0
+		last[i] = 0
+	}
 
 	for inst, pc in prog.insts {
 		// Record uses (operands) first, then the def.
@@ -279,6 +345,39 @@ compute_intervals :: proc(prog: ^bc.BC_Program) -> [dynamic]Live_Interval {
 		if d, ok := bc_def(inst); ok {
 			if def[d] == -1 do def[d] = pc
 			if last[d] < pc do last[d] = pc // a value with no later use lives at its def
+		}
+	}
+
+	// A textual interval is not enough for a backward edge: a value produced in
+	// the latch can be consumed at the header on the next iteration, and a value
+	// initialized before the header remains live until the latch. Extend every
+	// value used in a backward-edge region through that edge. This is conservative
+	// but keeps the existing linear allocator correct without inventing addresses
+	// or a second allocation model.
+	for jump, jump_pc in prog.insts {
+		target: bc.BC_Label
+		is_edge := false
+		#partial switch j in jump {
+		case bc.BC_Jump:
+			target = j.target; is_edge = true
+		case bc.BC_Branch_Zero:
+			target = j.target; is_edge = true
+		case:
+		}
+		if !is_edge do continue
+		target_pc := -1
+		for marker, marker_pc in prog.insts {
+			if def, ok := marker.(bc.BC_Label_Def); ok && def.label == target {
+				target_pc = marker_pc
+				break
+			}
+		}
+		if target_pc < 0 || target_pc > jump_pc do continue
+		for inst, use_pc in prog.insts {
+			if use_pc < target_pc || use_pc > jump_pc do continue
+			for u in bc_uses(inst) {
+				if u >= 0 && last[u] < jump_pc do last[u] = jump_pc
+			}
 		}
 	}
 
@@ -308,6 +407,16 @@ bc_def :: proc(inst: bc.BC_Inst) -> (int, bool) {
 		return int(v.dst), true
 	case bc.BC_Str_Const:
 		return int(v.dst), true
+	case bc.BC_Rodata_Address:
+		return int(v.dst), true
+	case bc.BC_Materialize:
+		return int(v.dst), true
+	case bc.BC_Load:
+		return int(v.dst), true
+	case bc.BC_Load_Aggregate:
+		return int(v.dst), true
+	case bc.BC_Load_Indirect:
+		return int(v.dst), true
 	case bc.BC_Load_Arg:
 		return int(v.dst), true
 	case bc.BC_Bin:
@@ -323,6 +432,10 @@ bc_def :: proc(inst: bc.BC_Inst) -> (int, bool) {
 	case bc.BC_Foreign_Call:
 		// A definition even when the external returns nothing: the slot exists so the
 		// result has a home, and the call is emitted either way.
+		if v.has_result_layout do return 0, false
+		return int(v.dst), true
+	case bc.BC_Call:
+		if v.has_result_layout do return 0, false
 		return int(v.dst), true
 	case bc.BC_Label_Def, bc.BC_Jump, bc.BC_Branch_Zero, bc.BC_Ret:
 		return 0, false
@@ -339,8 +452,15 @@ bc_uses :: proc(inst: bc.BC_Inst) -> []int {
 	case bc.BC_Foreign_Call:
 		// Reinterpret rather than copy: BC_Value is a distinct int, same layout.
 		return transmute([]int)v.args
-	case bc.BC_Const, bc.BC_Const_F, bc.BC_Str_Const, bc.BC_Load_Arg, bc.BC_Label_Def, bc.BC_Jump:
+	case bc.BC_Call:
+		return transmute([]int)v.args
+	case bc.BC_Const, bc.BC_Const_F, bc.BC_Str_Const, bc.BC_Rodata_Address, bc.BC_Load, bc.BC_Load_Aggregate, bc.BC_Load_Arg, bc.BC_Label_Def, bc.BC_Jump:
 		return buf[:0]
+	case bc.BC_Load_Indirect:
+		buf[0] = int(v.address)
+		return buf[:1]
+	case bc.BC_Materialize:
+		return transmute([]int)v.inputs
 	case bc.BC_Bin:
 		buf[0] = int(v.a); buf[1] = int(v.b)
 		return buf[:2]

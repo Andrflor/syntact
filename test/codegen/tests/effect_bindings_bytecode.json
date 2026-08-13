@@ -1,0 +1,10 @@
+{
+  "name": "effect_bindings_bytecode",
+  "description": "Foreign-valued bindings lower as calls in declaration order while a pure binding is not lowered.",
+  "source": "lib -> <libm.so.6>{ first -> { -> ??::u8 }, second -> { -> ??::u8 } }\nprogram -> {\n  firstCall -> lib.first{}!\n  pure -> 1 + 2\n  secondCall -> lib.second{}!\n  -> 7\n}\n-> program!",
+  "args": [],
+  "expect": [],
+  "kind": "bytecode",
+  "bytecode_imports": ["libm.so.6:first", "libm.so.6:second"],
+  "bytecode_calls": ["libm.so.6:first", "libm.so.6:second"]
+}

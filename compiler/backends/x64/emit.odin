@@ -33,7 +33,10 @@ X64_Emit :: struct {
 	// BEFORE emitting code (they depend only on string lengths), so bc.BC_Str_Const
 	// loads an absolute address with no fixup.
 	rodata_off:    []int,
+	rodata_blob_off: []int,
 	rodata_vaddr:  int,
+	scratch_offsets: []int,
+	scratch_base_vaddr: int,
 	code_base_off: int,
 	// str_len[vN] is the byte length of the concrete string a Str_Const value
 	// holds, used by the string epilogue's write(1, ptr, len).
@@ -50,6 +53,14 @@ X64_Emit :: struct {
 	// absorbed[v] = the value was dissolved into a parent lea's address mode (an
 	// intermediate +/-/index node), so the emitter must not emit it on its own.
 	absorbed:      []bool,
+	// Foreign calls cross an ABI clobber boundary. When present, the prologue
+	// establishes a known 16-byte-aligned RSP before the body starts.
+	has_foreign_call: bool,
+	// Named-function emission switches BC_Ret from process exit to an ABI return.
+	returning_function: bool,
+	current_func:      bc.Func_Id,
+	call_fixups:       [dynamic]X64_Call_Fixup,
+	func_pos:          map[int]int,
 }
 
 X64_Fixup :: struct {
@@ -57,17 +68,267 @@ X64_Fixup :: struct {
 	label: bc.BC_Label,
 }
 
+X64_Call_Fixup :: struct {
+	at:   int,
+	func: bc.Func_Id,
+}
+
 // X64_Output is the emitter's result: the code bytes plus the .rodata blob that
 // must precede the code in the image (string literals live there).
 X64_Output :: struct {
-	code:   []u8,
-	rodata: []u8,
+	code:         []u8,
+	rodata:       []u8,
+	scratch_size: int,
 }
 
 // emit_x64 lowers a bc.BC_Program to machine code + its .rodata blob. The image is
 // laid out [headers][rodata][code]; rodata offsets depend only on string lengths,
 // so they're known before emitting and bc.BC_Str_Const loads absolute addresses.
 emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
+	if prog != nil && len(prog.funcs) > 0 {
+		if len(prog.funcs) > 1 {
+			return emit_x64_named(prog)
+		}
+		for inst in prog.funcs[0].insts {
+			if _, ok := inst.(bc.BC_Call); ok do return emit_x64_named(prog)
+		}
+	}
+	// New callers may provide only the named entry function. Materialize the
+	// legacy flat view locally so the established pure emitter remains unchanged.
+	if prog != nil && len(prog.insts) == 0 && len(prog.funcs) == 1 {
+		fn := prog.funcs[0]
+		view := prog^
+		view.insts = make([dynamic]bc.BC_Inst)
+		for inst in fn.insts do append(&view.insts, inst)
+		view.value_types = make([dynamic]bc.Machine_Type)
+		for mt in fn.value_types do append(&view.value_types, mt)
+		view.rodata_blobs = prog.rodata_blobs
+		view.scratch = make([dynamic]bc.BC_Scratch_Slot)
+		for slot in fn.scratch do append(&view.scratch, slot)
+		view.value_count = fn.value_count
+		view.label_count = fn.label_count
+		view.result_type = fn.result
+		view.funcs = nil
+		defer delete(view.insts)
+		defer delete(view.value_types)
+		defer delete(view.scratch)
+		return emit_x64_flat(&view)
+	}
+	return emit_x64_flat(prog)
+}
+
+// emit_x64_named emits each BC_Func in one text image. Functions use a small
+// SysV scalar frame: integer/float parameters arrive in their ABI registers,
+// BC_Call uses a rel32 edge, and BC_Ret returns through RAX/XMM0. The entry
+// function alone gets the process argv stub and exit epilogue.
+emit_x64_named :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
+	if prog.error != "" do return {}, prog.error
+	e := X64_Emit{prog = nil, func_pos = make(map[int]int), str_len = make(map[int]int)}
+	defer delete(e.func_pos)
+	defer delete(e.call_fixups)
+
+	rodata_blob := make([dynamic]u8)
+	defer delete(rodata_blob)
+	e.rodata_off = make([]int, len(prog.rodata))
+	defer delete(e.rodata_off)
+	e.rodata_blob_off = make([]int, len(prog.rodata_blobs))
+	defer delete(e.rodata_blob_off)
+	for s, i in prog.rodata {
+		e.rodata_off[i] = len(rodata_blob)
+		for c in transmute([]u8)s do append(&rodata_blob, c)
+		append(&rodata_blob, 0)
+	}
+	for blob, i in prog.rodata_blobs {
+		for len(rodata_blob) % max(1, blob.align) != 0 do append(&rodata_blob, 0)
+		e.rodata_blob_off[i] = len(rodata_blob)
+		for b in blob.data do append(&rodata_blob, b)
+	}
+	headers := elf_headers_size(len(prog.imports))
+	e.rodata_vaddr = ELF_BASE + headers
+	e.code_base_off = headers + len(rodata_blob)
+	context.user_ptr = &e.buf
+
+	entry := bc.Func_Id(0)
+	if selected, ok := prog.entry.?; ok do entry = selected
+	scratch_cursor := 0
+	for fn in prog.funcs {
+		view: bc.BC_Program = {
+			imports = prog.imports,
+			rodata = prog.rodata,
+			rodata_blobs = prog.rodata_blobs,
+			result_type = fn.result,
+			result_layout = fn.result_layout,
+			has_result_layout = fn.has_result_layout,
+			sret_slot = fn.sret_slot,
+		}
+		view.insts = make([dynamic]bc.BC_Inst)
+		for inst in fn.insts do append(&view.insts, inst)
+		view.value_types = make([dynamic]bc.Machine_Type)
+		for mt in fn.value_types do append(&view.value_types, mt)
+		view.params = make([dynamic]bc.Machine_Type)
+		for mt in fn.params do append(&view.params, mt)
+		view.param_layouts = make([dynamic]bc.BC_Aggregate_Layout)
+		for layout in fn.param_layouts do append(&view.param_layouts, layout)
+		view.param_scratch = make([dynamic]bc.BC_Scratch_Id)
+		for slot in fn.param_scratch do append(&view.param_scratch, slot)
+		view.value_count = fn.value_count
+		view.label_count = fn.label_count
+		view.scratch = make([dynamic]bc.BC_Scratch_Slot)
+		for slot in fn.scratch do append(&view.scratch, slot)
+
+		e.prog = &view
+		init_scratch_plan(&e, fn.scratch[:], SCRATCH_VADDR + scratch_cursor)
+		scratch_cursor += scratch_plan_size(fn.scratch[:])
+		e.current_func = fn.id
+		e.returning_function = fn.id != entry
+		e.has_foreign_call = false
+		for inst in view.insts {
+			if _, ok := inst.(bc.BC_Foreign_Call); ok do e.has_foreign_call = true
+			if _, ok := inst.(bc.BC_Call); ok do e.has_foreign_call = true
+		}
+		e.func_pos[int(fn.id)] = e.buf.len
+		e.label_pos = make([]int, fn.label_count)
+		for i in 0 ..< len(e.label_pos) do e.label_pos[i] = -1
+		e.fixups = make([dynamic]X64_Fixup)
+		e.def = make([]int, fn.value_count)
+		e.use_count = make([]int, fn.value_count)
+		e.absorbed = make([]bool, fn.value_count)
+		for i in 0 ..< fn.value_count do e.def[i] = -1
+		param_count := len(fn.params) < len(e.def) ? len(fn.params) : len(e.def)
+		for i in 0 ..< param_count do e.def[i] = 0
+		for inst, pc in view.insts {
+			if d, ok := bc_def(inst); ok do e.def[d] = pc
+			for u in bc_uses(inst) do e.use_count[u] += 1
+		}
+		e.alloc = allocate_registers(&view)
+		if fn.id == entry do emit_arg_stub(&e)
+		frame := (e.alloc.stack_size + 15) & ~int(15)
+		emit_named_prologue(&e, frame)
+		if e.returning_function do emit_named_params(&e, fn.params, fn.param_layouts[:], fn.param_scratch[:], fn.has_result_layout && fn.result_layout.memory, fn.sret_slot)
+		if msg := emit_body(&e); msg != "" do return {}, msg
+		patch_fixups(&e)
+		delete(e.fixups)
+		delete(e.alloc.locs)
+		delete(e.def)
+		delete(e.use_count)
+		delete(e.absorbed)
+		delete(view.insts)
+		delete(view.value_types)
+		delete(view.params)
+		delete(view.param_layouts)
+		delete(view.param_scratch)
+		delete(view.scratch)
+		delete(e.scratch_offsets)
+		delete(e.label_pos)
+	}
+	for fix in e.call_fixups {
+		if target, ok := e.func_pos[int(fix.func)]; ok {
+			patch_rel32(&e, fix.at, i32(target - (fix.at + 4)))
+		} else {
+			return {}, "codegen: call to undefined native function"
+		}
+	}
+	code := make([]u8, e.buf.len)
+	copy(code, e.buf.data[:e.buf.len])
+	delete(e.str_len)
+	return X64_Output{code = code, rodata = rodata_blob[:], scratch_size = scratch_cursor}, ""
+}
+
+emit_named_prologue :: proc(e: ^X64_Emit, frame: int) {
+	push_r64(.RBP)
+	mov_r64_r64(.RBP, .RSP)
+	if frame > 0 do sub_r64_imm32(.RSP, u32(frame))
+}
+
+emit_named_params :: proc(
+	e: ^X64_Emit,
+	params: []bc.Machine_Type,
+	layouts: []bc.BC_Aggregate_Layout,
+	param_scratch: []bc.BC_Scratch_Id,
+	has_sret: bool,
+	sret_slot: bc.BC_Scratch_Id,
+) {
+	assignment, msg := x64_sysv_assign(params, layouts, has_sret)
+	if msg != "" do return
+	defer delete(assignment.locations)
+	defer {
+		for parts in assignment.piece_locations do if parts != nil do delete(parts)
+		delete(assignment.piece_locations)
+	}
+
+	if has_sret && sret_slot != bc.BC_INVALID_SCRATCH {
+		mem, ok := scratch_mem(e, sret_slot, 0)
+		if ok do mov_m64_r64(mem, .RDI)
+	}
+	stage_offsets := make([]int, len(params))
+	defer delete(stage_offsets)
+	stage_cursor := 0
+	for i in 0 ..< len(params) {
+		stage_offsets[i] = stage_cursor
+		count := len(assignment.piece_locations[i])
+		stage_cursor += count * 8
+	}
+	stage_size := x64_abi_align16(stage_cursor)
+	if stage_size > 0 do sub_r64_imm32(.RSP, u32(stage_size))
+	defer {
+		if stage_size > 0 do add_r64_imm32(.RSP, u32(stage_size))
+	}
+
+	for i in 0 ..< len(params) {
+		for loc, piece in assignment.piece_locations[i] {
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(stage_offsets[i] + piece * 8)})
+			if loc.class == .Stack {
+				incoming := MemoryAddress(AddressComponents{base = Register64.RBP, displacement = i32(16 + loc.stack_offset)})
+				if i < len(layouts) && layouts[i].size > 0 && !layouts[i].memory && !layouts[i].indirect {
+					sz := layouts[i].pieces[piece].size
+					if sz < 8 {mov_r32_m32(.EAX, incoming); mov_m32_r32(stage, .EAX)} else {mov_r64_m64(.RAX, incoming); mov_m64_r64(stage, .RAX)}
+				} else if params[i] == .F32 {
+					mov_r32_m32(.EAX, incoming); mov_m32_r32(stage, .EAX)
+				} else {
+					mov_r64_m64(.RAX, incoming); mov_m64_r64(stage, .RAX)
+				}
+			} else if loc.class == .SSE {
+				if i < len(layouts) && layouts[i].size > 0 && layouts[i].pieces[piece].size <= 4 {
+					movd_r32_xmm(.EAX, SYSV_SSE_ARGS[loc.register]); mov_m32_r32(stage, .EAX)
+				} else {
+					movq_r64_xmm_bits(.RAX, SYSV_SSE_ARGS[loc.register]); mov_m64_r64(stage, .RAX)
+				}
+			} else {
+				mov_m64_r64(stage, SYSV_INT_ARGS[loc.register])
+			}
+		}
+	}
+
+	for i in 0 ..< len(params) {
+		is_aggregate := i < len(layouts) && layouts[i].size > 0
+		if !is_aggregate {
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(stage_offsets[i])})
+			if params[i] == .F32 {
+				mov_r32_m32(.EAX, stage); movd_xmm_r32(.XMM0, .EAX); cvtss2sd_xmm_xmm(.XMM0, .XMM0); movq_r64_xmm_bits(.RAX, .XMM0)
+			} else {mov_r64_m64(.RAX, stage)}
+			store(e, bc.BC_Value(i), .RAX)
+			continue
+		}
+		layout := layouts[i]
+		if layout.memory || layout.indirect {
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(stage_offsets[i])})
+			mov_r64_m64(.RAX, stage)
+			store(e, bc.BC_Value(i), .RAX)
+			continue
+		}
+		if i >= len(param_scratch) || param_scratch[i] == bc.BC_INVALID_SCRATCH do continue
+		for desc, piece in layout.pieces {
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(stage_offsets[i] + piece * 8)})
+			mem, ok := scratch_mem(e, param_scratch[i], desc.offset)
+			if !ok do continue
+			if desc.size <= 4 {mov_r32_m32(.EAX, stage); mov_m32_r32(mem, .EAX)} else {mov_r64_m64(.RAX, stage); mov_m64_r64(mem, .RAX)}
+		}
+		mem, ok := scratch_mem(e, param_scratch[i], 0)
+		if ok {emit_load_imm_into(e, .RAX, i64(e.scratch_base_vaddr + e.scratch_offsets[int(param_scratch[i])])) ; store(e, bc.BC_Value(i), .RAX)}
+	}
+}
+
+emit_x64_flat :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 	if prog == nil do return {}, "no program"
 	if prog.error != "" do return {}, prog.error
 
@@ -81,19 +342,24 @@ emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 	e.def = make([]int, prog.value_count)
 	e.use_count = make([]int, prog.value_count)
 	e.absorbed = make([]bool, prog.value_count)
+	e.str_len = make(map[int]int)
 	defer delete(e.def)
 	defer delete(e.use_count)
 	defer delete(e.absorbed)
+	defer delete(e.str_len)
 	for i in 0 ..< prog.value_count do e.def[i] = -1
 	for inst, pc in prog.insts {
 		if d, ok := bc_def(inst); ok do e.def[d] = pc
 		for u in bc_uses(inst) do e.use_count[u] += 1
+		if _, ok := inst.(bc.BC_Foreign_Call); ok do e.has_foreign_call = true
 	}
 
 	// Linear-scan register allocation: values live in registers, only spilled
 	// ones touch the stack. load/store consult e.alloc.
 	e.alloc = allocate_registers(prog)
 	defer delete(e.alloc.locs)
+	init_scratch_plan(&e, prog.scratch[:], SCRATCH_VADDR)
+	defer delete(e.scratch_offsets)
 
 	// Lay out .rodata: concatenated string bytes, each offset recorded. The blob
 	// sits right after the headers, so each string's runtime address is
@@ -101,9 +367,18 @@ emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 	rodata_blob := make([dynamic]u8)
 	e.rodata_off = make([]int, len(prog.rodata))
 	defer delete(e.rodata_off)
+	e.rodata_blob_off = make([]int, len(prog.rodata_blobs))
+	defer delete(e.rodata_blob_off)
 	for s, i in prog.rodata {
 		e.rodata_off[i] = len(rodata_blob)
 		for c in transmute([]u8)s do append(&rodata_blob, c)
+		// Keep the logical length separate from the native C-string terminator.
+		append(&rodata_blob, 0)
+	}
+	for blob, i in prog.rodata_blobs {
+		for len(rodata_blob) % max(1, blob.align) != 0 do append(&rodata_blob, 0)
+		e.rodata_blob_off[i] = len(rodata_blob)
+		for b in blob.data do append(&rodata_blob, b)
 	}
 	// The header block grows by two program headers when the program imports
 	// anything, which shifts .rodata — so the address must be derived from the same
@@ -128,7 +403,30 @@ emit_x64 :: proc(prog: ^bc.BC_Program) -> (X64_Output, string) {
 
 	out := make([]u8, e.buf.len)
 	copy(out, e.buf.data[:e.buf.len])
-	return X64_Output{code = out, rodata = rodata_blob[:]}, ""
+	return X64_Output{code = out, rodata = rodata_blob[:], scratch_size = scratch_plan_size(prog.scratch[:])}, ""
+}
+
+scratch_plan_size :: proc(slots: []bc.BC_Scratch_Slot) -> int {
+	offset := 0
+	for slot in slots {
+		align := max(1, slot.align)
+		offset = (offset + align - 1) & ~(align - 1)
+		offset += slot.size
+	}
+	return (offset + 15) & ~int(15)
+}
+
+init_scratch_plan :: proc(e: ^X64_Emit, slots: []bc.BC_Scratch_Slot, base: int) {
+	e.scratch_offsets = make([]int, len(slots))
+	e.scratch_base_vaddr = base
+	offset := 0
+	for slot in slots {
+		align := max(1, slot.align)
+		offset = (offset + align - 1) & ~(align - 1)
+		id := int(slot.id)
+		if id >= 0 && id < len(e.scratch_offsets) do e.scratch_offsets[id] = offset
+		offset += slot.size
+	}
 }
 
 // arg_slot_info collects, per arg slot, whether that slot is a FLOAT ?? (its
@@ -449,16 +747,20 @@ store :: proc(e: ^X64_Emit, vN: bc.BC_Value, reg: Register64) {
 // --- prologue / epilogue ---------------------------------------------------
 
 emit_prologue :: proc(e: ^X64_Emit, frame: int) {
-	// No frame needed when nothing is spilled: we call nothing and use no stack
-	// locals (spills), and the float-print scratch lives in the red zone below
-	// rsp. So `push rbp ; mov rbp,rsp ; sub rsp,N` is dead — skip it entirely.
-	if e.alloc.stack_size == 0 do return
+	// Process entry does not provide the caller-controlled alignment contract that
+	// a normal ABI function receives. A program with foreign calls therefore
+	// aligns RSP even when no spill frame is needed.
+	if e.alloc.stack_size == 0 {
+		if e.has_foreign_call do and_reg_imm(e, .RSP, -16)
+		return
+	}
 	// push rbp ; mov rbp, rsp ; sub rsp, frame. This only reserves the spill area;
 	// the ??N arguments are NOT in the frame — emit_arg_stub parses argv[1..] into
 	// the ARGS_TABLE before the prologue, and emit_load_arg reads each slot from
 	// there. The frame is purely for register spills under pressure.
 	push_r64(.RBP)
 	mov_r64_r64(.RBP, .RSP)
+	if e.has_foreign_call do and_reg_imm(e, .RSP, -16)
 	sub_r64_imm32(.RSP, u32(frame))
 }
 
@@ -666,6 +968,19 @@ emit_body :: proc(e: ^X64_Emit) -> string {
 			put_i64_bytes(e, i64(addr))
 			store(e, v.dst, .RAX)
 			e.str_len[int(v.dst)] = len(v.bytes)
+		case bc.BC_Rodata_Address:
+			if v.blob < 0 || v.blob >= len(e.rodata_blob_off) do return "x64: invalid rodata blob"
+			addr := e.rodata_vaddr + e.rodata_blob_off[v.blob] + v.offset
+			emit_load_imm_into(e, .RAX, i64(addr))
+			store(e, v.dst, .RAX)
+		case bc.BC_Materialize:
+			if msg := emit_materialize(e, v); msg != "" do return msg
+		case bc.BC_Load:
+			if msg := emit_scratch_load(e, v); msg != "" do return msg
+		case bc.BC_Load_Aggregate:
+			if msg := emit_scratch_aggregate_load(e, v); msg != "" do return msg
+		case bc.BC_Load_Indirect:
+			if msg := emit_indirect_load(e, v); msg != "" do return msg
 		case bc.BC_Load_Arg:
 			emit_load_arg(e, v)
 		case bc.BC_Bin:
@@ -686,19 +1001,314 @@ emit_body :: proc(e: ^X64_Emit) -> string {
 		case bc.BC_Branch_Zero:
 			emit_brz(e, v.cond, v.target)
 		case bc.BC_Ret:
-			emit_exit(e, v.src)
+			if e.returning_function {
+				emit_named_return(e, v.src)
+			} else {
+				emit_exit(e, v.src)
+			}
 		case bc.BC_Foreign_Call:
 			if msg := emit_foreign_call(e, v); msg != "" do return msg
+		case bc.BC_Call:
+			if msg := emit_internal_call(e, v); msg != "" do return msg
 		}
 	}
 	return ""
 }
 
-// System V AMD64 argument registers, by class. Integers and pointers consume the
-// INTEGER sequence, floats the SSE sequence, each independently — so `f(int, double,
-// int)` passes rdi, xmm0, rsi.
-SYSV_INT_ARGS := [?]Register64{.RDI, .RSI, .RDX, .RCX, .R8, .R9}
-SYSV_SSE_ARGS := [?]XMMRegister{.XMM0, .XMM1, .XMM2, .XMM3, .XMM4, .XMM5, .XMM6, .XMM7}
+scratch_mem :: proc(e: ^X64_Emit, slot: bc.BC_Scratch_Id, offset: int) -> (MemoryAddress, bool) {
+	id := int(slot)
+	if id < 0 || id >= len(e.scratch_offsets) do return {}, false
+	emit_load_imm_into(e, .R10, i64(e.scratch_base_vaddr + e.scratch_offsets[id]))
+	return AddressComponents{base = Register64.R10, displacement = i32(offset)}, true
+}
+
+emit_materialize :: proc(e: ^X64_Emit, v: bc.BC_Materialize) -> string {
+	for store in v.stores {
+		mem, ok := scratch_mem(e, v.slot, store.offset)
+		if !ok do return "x64: invalid materialization scratch slot"
+		if store.copy_bytes {
+			// R11 is not used as a persistent base by the body. It can therefore
+			// hold the child scratch address while R10 addresses the destination.
+			load(e, .R11, store.value)
+			for copied := 0; copied < store.size; {
+				chunk := store.size - copied >= 8 ? 8 : (store.size - copied >= 4 ? 4 : (store.size - copied >= 2 ? 2 : 1))
+				src := MemoryAddress(AddressComponents{base = Register64.R11, displacement = i32(copied)})
+				dst := MemoryAddress(AddressComponents{base = Register64.R10, displacement = i32(copied)})
+				switch chunk {
+				case 8:
+					mov_r64_m64(.RAX, src); mov_m64_r64(dst, .RAX)
+				case 4:
+					mov_r32_m32(.EAX, src); mov_m32_r32(dst, .EAX)
+				case 2:
+					mov_r16_m16(.AX, src); mov_m16_r16(dst, .AX)
+				case 1:
+					mov_r8_m8(.AL, src); mov_m8_r8(dst, .AL)
+				}
+				copied += chunk
+			}
+		} else {
+			load(e, .RAX, store.value)
+			switch store.size {
+			case 1: mov_m8_r8(mem, .AL)
+			case 2: mov_m16_r16(mem, .AX)
+			case 4: mov_m32_r32(mem, .EAX)
+			case 8: mov_m64_r64(mem, .RAX)
+			case: return "x64: unsupported materialization field width"
+			}
+		}
+	}
+	id := int(v.slot)
+	if id < 0 || id >= len(e.scratch_offsets) do return "x64: invalid materialization scratch slot"
+	emit_load_imm_into(e, .RAX, i64(e.scratch_base_vaddr + e.scratch_offsets[id]))
+	store(e, v.dst, .RAX)
+	return ""
+}
+
+emit_scratch_load :: proc(e: ^X64_Emit, v: bc.BC_Load) -> string {
+	mem, ok := scratch_mem(e, v.slot, v.offset)
+	if !ok do return "x64: invalid scratch load slot"
+	rd, homed := home_reg(e, v.dst)
+	dst := homed ? rd : Register64.RAX
+	switch v.width {
+	case 64:
+		mov_r64_m64(dst, mem)
+	case 32:
+		if v.signed {movsxd_r64_m32(dst, mem)} else {mov_r64d_m32(dst, mem)}
+	case 16:
+		if v.signed {movsx_r64_m16(dst, mem)} else {movzx_r64_m16(dst, mem)}
+	case 8:
+		if v.signed {movsx_r64_m8(dst, mem)} else {movzx_r64_m8(dst, mem)}
+	case:
+		return "x64: unsupported scratch load width"
+	}
+	if !homed do store(e, v.dst, dst)
+	return ""
+}
+
+emit_scratch_aggregate_load :: proc(e: ^X64_Emit, v: bc.BC_Load_Aggregate) -> string {
+	src_id, dst_id := int(v.src_slot), int(v.dst_slot)
+	if src_id < 0 || src_id >= len(e.scratch_offsets) || dst_id < 0 || dst_id >= len(e.scratch_offsets) {
+		return "x64: invalid aggregate load slot"
+	}
+	if v.size < 0 do return "x64: negative aggregate load size"
+	emit_load_imm_into(e, .R11, i64(e.scratch_base_vaddr + e.scratch_offsets[src_id]))
+	emit_load_imm_into(e, .R10, i64(e.scratch_base_vaddr + e.scratch_offsets[dst_id]))
+	for copied := 0; copied < v.size; {
+		chunk := v.size - copied >= 8 ? 8 : (v.size - copied >= 4 ? 4 : (v.size - copied >= 2 ? 2 : 1))
+		src := MemoryAddress(AddressComponents{base = Register64.R11, displacement = i32(copied)})
+		dst := MemoryAddress(AddressComponents{base = Register64.R10, displacement = i32(copied)})
+		switch chunk {
+		case 8:
+			mov_r64_m64(.RAX, src); mov_m64_r64(dst, .RAX)
+		case 4:
+			mov_r32_m32(.EAX, src); mov_m32_r32(dst, .EAX)
+		case 2:
+			mov_r16_m16(.AX, src); mov_m16_r16(dst, .AX)
+		case 1:
+			mov_r8_m8(.AL, src); mov_m8_r8(dst, .AL)
+		}
+		copied += chunk
+	}
+	emit_load_imm_into(e, .RAX, i64(e.scratch_base_vaddr + e.scratch_offsets[dst_id]))
+	store(e, v.dst, .RAX)
+	return ""
+}
+
+emit_indirect_load :: proc(e: ^X64_Emit, v: bc.BC_Load_Indirect) -> string {
+	load(e, .R10, v.address)
+	mem := MemoryAddress(AddressComponents{base = Register64.R10, displacement = i32(v.offset)})
+	rd, homed := home_reg(e, v.dst)
+	dst := homed ? rd : Register64.RAX
+	switch v.width {
+	case 64:
+		mov_r64_m64(dst, mem)
+	case 32:
+		if v.signed {movsxd_r64_m32(dst, mem)} else {mov_r64d_m32(dst, mem)}
+	case 16:
+		if v.signed {movsx_r64_m16(dst, mem)} else {movzx_r64_m16(dst, mem)}
+	case 8:
+		if v.signed {movsx_r64_m8(dst, mem)} else {movzx_r64_m8(dst, mem)}
+	case:
+		return "x64: unsupported indirect load width"
+	}
+	if !homed do store(e, v.dst, dst)
+	return ""
+}
+
+emit_named_return :: proc(e: ^X64_Emit, src: bc.BC_Value) {
+	if e.prog.has_result_layout {
+		layout := e.prog.result_layout
+		load(e, .R11, src)
+		if layout.memory {
+			if e.prog.sret_slot == bc.BC_INVALID_SCRATCH do return
+			dst, ok := scratch_mem(e, e.prog.sret_slot, 0)
+			if !ok do return
+			mov_r64_m64(.R10, dst)
+			for copied := 0; copied < layout.size; {
+				chunk := layout.size - copied >= 8 ? 8 : (layout.size - copied >= 4 ? 4 : (layout.size - copied >= 2 ? 2 : 1))
+				source := MemoryAddress(AddressComponents{base = Register64.R11, displacement = i32(copied)})
+				target := MemoryAddress(AddressComponents{base = Register64.R10, displacement = i32(copied)})
+				switch chunk {
+				case 8: mov_r64_m64(.RAX, source); mov_m64_r64(target, .RAX)
+				case 4: mov_r32_m32(.EAX, source); mov_m32_r32(target, .EAX)
+				case 2: mov_r16_m16(.AX, source); mov_m16_r16(target, .AX)
+				case 1: mov_r8_m8(.AL, source); mov_m8_r8(target, .AL)
+				}
+				copied += chunk
+			}
+			mov_r64_r64(.RAX, .R10)
+		} else {
+			int_piece, sse_piece := 0, 0
+			for desc, _ in layout.pieces {
+				source := MemoryAddress(AddressComponents{base = Register64.R11, displacement = i32(desc.offset)})
+				if bc.mtype_is_float(desc.machine) {
+					if desc.size <= 4 {mov_r32_m32(.EAX, source); movd_xmm_r32(SYSV_SSE_ARGS[sse_piece], .EAX)} else {movq_xmm_m64(SYSV_SSE_ARGS[sse_piece], source)}
+					sse_piece += 1
+				} else {
+					if desc.size <= 4 {mov_r32_m32(.EAX, source); mov_r32_r32(r32(SYSV_INT_RET[int_piece]), .EAX)} else {mov_r64_m64(SYSV_INT_RET[int_piece], source)}
+					int_piece += 1
+				}
+			}
+		}
+		pop_r64(.RBP)
+		ret()
+		return
+	}
+	if e.prog.result_type == .F32 {
+		load(e, .RAX, src)
+		movq_xmm_r64(.XMM0, .RAX)
+		cvtsd2ss_xmm_xmm(.XMM0, .XMM0)
+	} else if bc.mtype_is_float(e.prog.result_type) {
+		load(e, .RAX, src)
+		movq_xmm_r64(.XMM0, .RAX)
+	} else {
+		load(e, .RAX, src)
+	}
+	pop_r64(.RBP)
+	ret()
+}
+
+emit_aggregate_result :: proc(e: ^X64_Emit, dst: bc.BC_Value, layout: bc.BC_Aggregate_Layout) -> string {
+	if layout.memory do return ""
+	load(e, .R11, dst)
+	int_piece, sse_piece := 0, 0
+	for desc, _ in layout.pieces {
+		mem := MemoryAddress(AddressComponents{base = Register64.R11, displacement = i32(desc.offset)})
+		if bc.mtype_is_float(desc.machine) {
+			if desc.size <= 4 {movd_r32_xmm(.EAX, SYSV_SSE_ARGS[sse_piece]); mov_m32_r32(mem, .EAX)} else {movq_r64_xmm_bits(.RAX, SYSV_SSE_ARGS[sse_piece]); mov_m64_r64(mem, .RAX)}
+			sse_piece += 1
+		} else {
+			if desc.size <= 4 {mov_r32_r32(.EAX, r32(SYSV_INT_RET[int_piece])); mov_m32_r32(mem, .EAX)} else {mov_r64_r64(.RAX, SYSV_INT_RET[int_piece]); mov_m64_r64(mem, .RAX)}
+			int_piece += 1
+		}
+	}
+	return ""
+}
+
+emit_internal_call :: proc(e: ^X64_Emit, v: bc.BC_Call) -> string {
+	types := make([]bc.Machine_Type, len(v.args))
+	defer delete(types)
+	for arg, i in v.args do types[i] = e.prog.value_types[int(arg)]
+	assignment, msg := x64_sysv_assign(types, v.arg_layouts, v.has_result_layout && v.result_layout.memory)
+	if msg != "" do return msg
+	defer delete(assignment.locations)
+	defer {
+		for parts in assignment.piece_locations do if parts != nil do delete(parts)
+		delete(assignment.piece_locations)
+	}
+	total := emit_call_arguments(e, v.args, types, v.arg_layouts, assignment, v.has_result_layout && v.result_layout.memory, v.dst)
+	call_rel32(0)
+	append(&e.call_fixups, X64_Call_Fixup{at = e.buf.len - 4, func = v.func})
+	if total > 0 do add_r64_imm32(.RSP, u32(total))
+	if v.has_result_layout {
+		if v.result_layout.memory do return ""
+		return emit_aggregate_result(e, v.dst, v.result_layout)
+	}
+	dst_mt := e.prog.value_types[int(v.dst)]
+	if dst_mt == .F32 {
+		cvtss2sd_xmm_xmm(.XMM0, .XMM0)
+		movq_r64_xmm_bits(.RAX, .XMM0)
+	} else if bc.mtype_is_float(dst_mt) {
+		movq_r64_xmm_bits(.RAX, .XMM0)
+	}
+	store(e, v.dst, .RAX)
+	return ""
+}
+
+// emit_call_arguments reserves both the ABI outgoing area and a temporary area
+// containing every argument. Staging first is required when a value already
+// lives in an argument register that is also a destination for an earlier arg.
+// Both areas are 16-byte multiples, so the call-site alignment is unchanged.
+emit_call_arguments :: proc(
+	e: ^X64_Emit,
+	args: []bc.BC_Value,
+	types: []bc.Machine_Type,
+	layouts: []bc.BC_Aggregate_Layout,
+	assignment: X64_ABI_Assignment,
+	has_sret: bool,
+	result_dst: bc.BC_Value,
+) -> int {
+	stage_offsets := make([]int, len(args))
+	defer delete(stage_offsets)
+	stage_cursor := 0
+	for i in 0 ..< len(args) {
+		stage_offsets[i] = stage_cursor
+		count := len(assignment.piece_locations[i])
+		stage_cursor += count * 8
+	}
+	stage_size := x64_abi_align16(stage_cursor)
+	total := assignment.stack_size + stage_size
+	if total > 0 do sub_r64_imm32(.RSP, u32(total))
+
+	for arg, i in args {
+		layout := i < len(layouts) ? layouts[i] : bc.BC_Aggregate_Layout{}
+		if layout.size > 0 && !layout.memory && !layout.indirect {
+			load(e, .RAX, arg)
+			for desc, piece in layout.pieces {
+				stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(assignment.stack_size + stage_offsets[i] + piece * 8)})
+				if desc.size <= 4 {
+					mov_r32_m32(.R10D, MemoryAddress(AddressComponents{base = Register64.RAX, displacement = i32(desc.offset)}))
+					mov_m32_r32(stage, .R10D)
+				} else {
+					mov_r64_m64(.R10, MemoryAddress(AddressComponents{base = Register64.RAX, displacement = i32(desc.offset)}))
+					mov_m64_r64(stage, .R10)
+				}
+			}
+		} else {
+			load(e, .RAX, arg)
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(assignment.stack_size + stage_offsets[i])})
+			mov_m64_r64(stage, .RAX)
+		}
+	}
+
+	for arg, i in args {
+		_ = arg
+		layout := i < len(layouts) ? layouts[i] : bc.BC_Aggregate_Layout{}
+		for loc, piece in assignment.piece_locations[i] {
+			desc: bc.BC_Aggregate_Piece
+			if layout.size > 0 && !layout.memory && !layout.indirect {
+				desc = layout.pieces[piece]
+			} else {
+				desc = bc.BC_Aggregate_Piece{size = types[i] == .F32 ? 4 : 8, machine = types[i]}
+			}
+			stage := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(assignment.stack_size + stage_offsets[i] + piece * 8)})
+			if loc.class == .Stack {
+				outgoing := MemoryAddress(AddressComponents{base = Register64.RSP, displacement = i32(loc.stack_offset)})
+				if desc.size <= 4 {mov_r32_m32(.EAX, stage); mov_m32_r32(outgoing, .EAX)} else {mov_r64_m64(.RAX, stage); mov_m64_r64(outgoing, .RAX)}
+			} else if loc.class == .SSE {
+				if desc.size <= 4 {mov_r32_m32(.EAX, stage); movd_xmm_r32(SYSV_SSE_ARGS[loc.register], .EAX)} else {mov_r64_m64(.RAX, stage); movq_xmm_r64(SYSV_SSE_ARGS[loc.register], .RAX)}
+			} else {
+				mov_r64_m64(.RAX, stage)
+				mov_r64_r64(SYSV_INT_ARGS[loc.register], .RAX)
+			}
+		}
+	}
+	if has_sret {
+		load(e, .RAX, result_dst)
+		mov_r64_r64(.RDI, .RAX)
+	}
+	return total
+}
 
 // emit_foreign_call emits a call across the external frontier:
 //
@@ -714,54 +1324,40 @@ emit_foreign_call :: proc(e: ^X64_Emit, v: bc.BC_Foreign_Call) -> string {
 	if v.slot >= GOT_MAX {
 		return "codegen: too many distinct imported symbols"
 	}
-	if len(v.args) > len(SYSV_INT_ARGS) {
-		// Stack-passed arguments would also change the alignment arithmetic below.
-		return "codegen: more than 6 arguments to an external is not supported yet"
+	types := make([]bc.Machine_Type, len(v.args))
+	defer delete(types)
+	for arg, i in v.args do types[i] = e.prog.value_types[int(arg)]
+	assignment, msg := x64_sysv_assign(types, v.arg_layouts, v.has_result_layout && v.result_layout.memory)
+	if msg != "" do return msg
+	defer delete(assignment.locations)
+	defer {
+		for parts in assignment.piece_locations do if parts != nil do delete(parts)
+		delete(assignment.piece_locations)
 	}
+	total := emit_call_arguments(e, v.args, types, v.arg_layouts, assignment, v.has_result_layout && v.result_layout.memory, v.dst)
 
-	// Load the arguments BEFORE touching the argument registers as destinations:
-	// a value may live in a register that is itself an argument register, so each
-	// is staged through RAX and pushed, then popped into place. Straightforward and
-	// correct regardless of the allocator's choices.
-	int_n, sse_n := 0, 0
-	for a in v.args {
-		mt := e.prog.value_types[int(a)]
-		load(e, .RAX, a)
-		push_r64(.RAX)
-		if bc.mtype_is_float(mt) {
-			sse_n += 1
-		} else {
-			int_n += 1
-		}
-	}
-	// Pop in reverse so each argument lands in its own register.
-	int_i, sse_i := int_n, sse_n
-	for i := len(v.args) - 1; i >= 0; i -= 1 {
-		mt := e.prog.value_types[int(v.args[i])]
-		pop_r64(.RAX)
-		if bc.mtype_is_float(mt) {
-			sse_i -= 1
-			movq_xmm_r64(SYSV_SSE_ARGS[sse_i], .RAX)
-		} else {
-			int_i -= 1
-			mov_r64_r64(SYSV_INT_ARGS[int_i], .RAX)
-		}
-	}
+	// Foreign declarations currently have no variadic marker. AL is therefore set
+	// as the SysV SSE metadata for every call, which fixed-arity callees ignore and
+	// preserves the existing behavior for declarations used with variadic symbols.
+	emit_load_imm_into(e, .RAX, i64(assignment.sse_count))
 
-	// A variadic callee reads AL for the count of SSE registers used; a fixed-arity
-	// one ignores it. Setting it is always safe and makes printf-shaped targets work.
-	emit_load_imm_into(e, .RAX, i64(sse_n))
-
-	// System V requires RSP ≡ 0 (mod 16) AT THE CALL. The prologue aligned the frame,
-	// and the push/pop pairs above are balanced, so alignment is preserved — but the
-	// call itself pushes a return address, so the callee sees RSP+8. That is exactly
-	// what the ABI specifies, so nothing more is needed here.
+	// The prologue establishes RSP ≡ 0 (mod 16), and the argument staging pushes
+	// are balanced before this point, so the call-site requirement is preserved with
+	// or without a spill frame and for any supported argument count.
 	movabs_r64_imm64(.R10, i64(GOT_VADDR + 8 * v.slot))
 	call_m64(AddressComponents{base = .R10})
+	if total > 0 do add_r64_imm32(.RSP, u32(total))
 
+	if v.has_result_layout {
+		if v.result_layout.memory do return ""
+		return emit_aggregate_result(e, v.dst, v.result_layout)
+	}
 	// Collect the result from the register its class dictates.
 	dst_mt := e.prog.value_types[int(v.dst)]
-	if bc.mtype_is_float(dst_mt) {
+	if dst_mt == .F32 {
+		cvtss2sd_xmm_xmm(.XMM0, .XMM0)
+		movq_r64_xmm_bits(.RAX, .XMM0)
+	} else if bc.mtype_is_float(dst_mt) {
 		movq_r64_xmm_bits(.RAX, .XMM0)
 	}
 	store(e, v.dst, .RAX)
