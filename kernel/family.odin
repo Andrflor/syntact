@@ -85,7 +85,7 @@ set_operation :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: ..^Expr) -> 
 		sets[j] = r
 		odometer(digits, domains)
 	}
-	return family_expr(syms, sets)
+	return family_expr(syms, radices(domains), sets)
 }
 
 // enveloped : l'opération sur les enveloppes des opérandes. Chaque opération est
@@ -196,15 +196,47 @@ apply_set_op :: proc(op: Set_Op, args: []Set) -> (Set, Arith_Status) {
 	return {}, .Invalid
 }
 
-// family_expr : la forme canonique d'une table ; constante, c'est son ensemble.
-family_expr :: proc(syms: []int, sets: []Set) -> ^Expr {
-	constant := true
-	for s in sets[1:] do if !atoms_subset(s, sets[0]) || !atoms_subset(sets[0], s) {
-		constant = false
-		break
+// family_expr : la forme canonique d'une table. On retire les inconnues dont elle ne
+// dépend pas ; sans inconnue, c'est son ensemble. Deux tables qui sont la même
+// fonction ont alors les mêmes inconnues, donc la même écriture.
+family_expr :: proc(syms: []int, radix: []int, sets: []Set) -> ^Expr {
+	f, _ := prune(syms, radix, sets)
+	if len(f.syms) == 0 do return singleton(new_expr(f.sets[0]))
+	return new_expr(f)
+}
+
+prune :: proc(syms: []int, radix: []int, sets: []Set) -> (Family, []int) {
+	syms, radix, sets := syms, radix, sets
+	for j := 0; j < len(syms); {
+		if depends_on(sets, radix, j) {
+			j += 1
+			continue
+		}
+		// la dimension j ne compte pas : on ne garde que sa première valeur
+		stride := 1
+		for r in radix[:j] do stride *= r
+		kept := make([dynamic]Set, 0, len(sets) / radix[j])
+		for s, i in sets do if (i / stride) % radix[j] == 0 do append(&kept, s)
+		syms = slice.concatenate([][]int{syms[:j], syms[j + 1:]})
+		radix = slice.concatenate([][]int{radix[:j], radix[j + 1:]})
+		sets = kept[:]
 	}
-	if constant do return singleton(new_expr(sets[0]))
-	return new_expr(Family{syms, sets})
+	return Family{syms, sets}, radix
+}
+
+// depends_on : la table change quand seule l'inconnue j change.
+depends_on :: proc(sets: []Set, radix: []int, j: int) -> bool {
+	stride := 1
+	for r in radix[:j] do stride *= r
+	for s, i in sets {
+		d := (i / stride) % radix[j]
+		if d > 0 && !same_set(s, sets[i - d * stride]) do return true
+	}
+	return false
+}
+
+same_set :: proc(a, b: Set) -> bool {
+	return atoms_subset(a, b) && atoms_subset(b, a)
 }
 
 Family_Status :: enum u8 {
@@ -246,7 +278,8 @@ family_of :: proc(k: ^Kernel, t: ^Expr) -> (Family, Family_Status) {
 			sets[j] = set_of_atoms({a})
 			odometer(digits, domains)
 		}
-		return Family{syms, sets}, .Ok
+		f, _ := prune(syms, radices(domains), sets)
+		return f, .Ok
 	}
 	return {}, .Not_Set
 }
@@ -271,6 +304,12 @@ joint_domains :: proc(k: ^Kernel, families: []Family) -> ([]int, [][]Atom, bool)
 	syms := slice.unique(all[:])
 	domains, ok := symbol_domains(k, syms)
 	return syms, domains, ok
+}
+
+radices :: proc(domains: [][]Atom) -> []int {
+	out := make([]int, len(domains))
+	for d, i in domains do out[i] = len(d)
+	return out
 }
 
 // sub_index : la case de la table `f` pour une valeur des symboles `syms`.
@@ -380,7 +419,7 @@ fmax :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
 
 family_equal :: proc(a, b: Family) -> bool {
 	if !slice.equal(a.syms, b.syms) || len(a.sets) != len(b.sets) do return false
-	for s, i in a.sets do if !atoms_subset(s, b.sets[i]) || !atoms_subset(b.sets[i], s) do return false
+	for s, i in a.sets do if !same_set(s, b.sets[i]) do return false
 	return true
 }
 
