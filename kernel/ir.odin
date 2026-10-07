@@ -65,7 +65,9 @@ Op :: struct {
 	span:  syn.Span,
 }
 
-// `lo..hi`. Une borne nil est ouverte.
+// `lo..hi`. Une borne nil est ouverte. Entre des caractères, l'intervalle porte sur
+// les caractères (`'a'..'z'`) ; entre des chaînes, sur les positions (`"jwt"..`
+// commence par, `.."_"` finit par).
 Range :: struct {
 	lo:   ^Expr,
 	hi:   ^Expr,

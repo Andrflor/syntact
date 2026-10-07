@@ -208,7 +208,6 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 		up += 1
 	}
 	if set, ok := builtin(name); ok do return new_expr(set)
-	if name == "char" do return unsupported(k, idx, "char (les chaînes d'un caractère attendent l'algèbre des chaînes)")
 	return report(k, .Undefined_Identifier, span, fmt.tprintf("'%s' n'est pas défini", name))
 }
 
@@ -239,6 +238,8 @@ builtin :: proc(name: string) -> (Set, bool) {
 		return set_of_strings(strings_all()), true
 	case "bool":
 		return set_of_bools({.False, .True}), true
+	case "char":
+		return set_of_chars(chars_all()), true
 	case "none":
 		return Set{}, true // l'ensemble vide : une valeur, son propre singleton
 	}
@@ -262,7 +263,18 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> ^Expr {
 		if !ok do return report(k, .Unsupported, span, "flottant illisible")
 		return new_expr(set_of_floats(floats_point(v)))
 	case .String:
-		return new_expr(set_of_strings(strings_point(decode_string(text, lit.quotation))))
+		// Entre apostrophes, un caractère (`'a'`, ou le caractère vide `''`) ; entre
+		// guillemets, ou entre apostrophes avec plusieurs caractères, une chaîne.
+		s := decode_string(text, lit.quotation)
+		if lit.quotation == .simple {
+			switch strings.rune_count(s) {
+			case 0:
+				return new_expr(set_of_chars(ints_point(CHAR_EMPTY)))
+			case 1:
+				return new_expr(set_of_chars(ints_point(i128(first_rune(s)))))
+			}
+		}
+		return new_expr(set_of_strings(strings_point(s)))
 	case .Bool:
 		return new_expr(set_of_bools(bools_point(text == "true")))
 	}

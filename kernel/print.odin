@@ -93,15 +93,12 @@ print_set :: proc(s: Set) -> string {
 	parts := make([dynamic]string)
 	for iv in s.ints.intervals do append(&parts, print_int_interval(iv))
 	for iv in s.floats.intervals do append(&parts, print_float_interval(iv))
-	if s.strings.cofinite {
-		if len(s.strings.items) == 0 {
-			append(&parts, "string")
-		} else {
-			append(&parts, fmt.tprintf("~(%s)", quoted(s.strings.items)))
-		}
-	} else if len(s.strings.items) > 0 {
-		append(&parts, quoted(s.strings.items))
+	if ints_subset(chars_all(), s.chars) {
+		append(&parts, "char")
+	} else {
+		for iv in s.chars.intervals do append(&parts, print_char_interval(iv))
 	}
+	if len(s.strings.states) > 0 do append(&parts, print_strings(s.strings))
 	switch s.bools {
 	case {.False, .True}:
 		append(&parts, "bool")
@@ -114,10 +111,16 @@ print_set :: proc(s: Set) -> string {
 	return strings.join(parts[:], " | ")
 }
 
-quoted :: proc(items: []string) -> string {
-	parts := make([dynamic]string, 0, len(items))
-	for it in items do append(&parts, fmt.tprintf("%q", it))
-	return strings.join(parts[:], " | ")
+print_char_interval :: proc(iv: Int_Interval) -> string {
+	lo, _ := iv.lo.?
+	hi, _ := iv.hi.?
+	if lo == hi do return print_char(lo)
+	return fmt.tprintf("%s..%s", print_char(lo), print_char(hi))
+}
+
+print_char :: proc(c: i128) -> string {
+	if c == CHAR_EMPTY do return "''"
+	return print_rune(rune(c))
 }
 
 print_int_interval :: proc(iv: Int_Interval) -> string {

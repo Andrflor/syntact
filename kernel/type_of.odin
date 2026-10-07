@@ -213,36 +213,54 @@ type_unknown :: proc(k: ^Kernel, u: Unknown, env: ^Scope) -> ^Expr {
 	return x // les valeurs possibles : les éléments de l'ensemble
 }
 
-// type_of(lo..hi) = { x..y | x ∈ type_of(lo), y ∈ type_of(hi) }. Un intervalle est
-// l'enveloppe de ses bornes : chaîné (`1..4..2..7`), il s'étend (specs/constraints.md).
+// type_of(lo..hi) = { x..y | x ∈ type_of(lo), y ∈ type_of(hi) }. Entre des
+// nombres, un intervalle est l'enveloppe de ses bornes : à l'envers ou chaîné, il
+// s'étend (`2..1` est `1..2`, `1..4..2..7` est `1..7`). Entre des caractères, c'est
+// une plage de caractères ; entre des chaînes, « commence par » et « finit par ».
 type_range :: proc(k: ^Kernel, r: Range, env: ^Scope) -> ^Expr {
 	lo, lo_status := bound_of(k, r.lo, env)
 	hi, hi_status := bound_of(k, r.hi, env)
 	switch {
 	case lo_status == .Invalid || hi_status == .Invalid:
 		return new_expr(Invalid{})
-	case lo_status == .Strings || hi_status == .Strings:
-		return report(k, .Unsupported, r.span, "pas encore dans le kernel : les intervalles de chaînes")
-	case lo_status == .Not_Number || hi_status == .Not_Number:
-		return report(k, .Invalid_Range, r.span, "les bornes d'un intervalle doivent être des nombres")
-	case lo_status == .Many || hi_status == .Many:
-		return new_expr(Many{}) // une borne inconnue : plusieurs intervalles possibles
+	case lo_status == .Not_Bound || hi_status == .Not_Bound:
+		return report(k, .Invalid_Range, r.span, "les bornes d'un intervalle sont des nombres ou des chaînes connus")
+	case lo_status == .Unknown || hi_status == .Unknown:
+		return report(k, .Unsupported, r.span, "pas encore dans le kernel : un intervalle à borne inconnue")
 	}
+	if lo_status == .Open && hi_status == .Open do return singleton(new_expr(set_top()))
 	ld, _ := pure_domain(lo)
 	hd, _ := pure_domain(hi)
 	if lo_status == .Open do ld = hd
 	if hi_status == .Open do hd = ld
-	if ld != hd do return report(k, .Invalid_Range, r.span, "les bornes d'un intervalle doivent être de la même sorte")
-	if ld == .Floats {
+	switch {
+	case ld == .Ints && hd == .Ints:
+		llo, lhi := ints_bounds(lo.ints)
+		hlo, hhi := ints_bounds(hi.ints)
+		iv := Int_Interval{lo = lo_status == .Open ? nil : min_hi(llo, hlo), hi = hi_status == .Open ? nil : max_lo(lhi, hhi)}
+		return singleton(new_expr(set_of_ints(ints_of({iv}))))
+	case ld == .Chars && hd == .Chars:
+		llo, lhi := ints_bounds(lo.chars)
+		hlo, hhi := ints_bounds(hi.chars)
+		iv := Int_Interval{lo = lo_status == .Open ? CHAR_EMPTY : min_hi(llo, hlo), hi = hi_status == .Open ? i128(MAX_RUNE) : max_lo(lhi, hhi)}
+		return singleton(new_expr(set_of_chars(ints_of({iv}))))
+	case ld == .Floats && hd == .Floats:
 		llo, lhi := floats_bounds(lo.floats)
 		hlo, hhi := floats_bounds(hi.floats)
 		iv := Float_Interval{lo = lo_status == .Open ? nil : fmin(llo, hlo), hi = hi_status == .Open ? nil : fmax(lhi, hhi)}
 		return singleton(new_expr(set_of_floats(floats_of({iv}))))
+	case (ld == .Strings || ld == .Chars) && (hd == .Strings || hd == .Chars):
+		l := strings_all()
+		if lo_status != .Open do l = strings_prefixed(as_strings(lo))
+		if hi_status != .Open do l = strings_intersect(l, strings_suffixed(as_strings(hi)))
+		return singleton(new_expr(set_of_strings(l)))
 	}
-	llo, lhi := ints_bounds(lo.ints)
-	hlo, hhi := ints_bounds(hi.ints)
-	iv := Int_Interval{lo = lo_status == .Open ? nil : min_hi(llo, hlo), hi = hi_status == .Open ? nil : max_lo(lhi, hhi)}
-	return singleton(new_expr(set_of_ints(ints_of({iv}))))
+	return report(k, .Invalid_Range, r.span, "les bornes d'un intervalle doivent être de la même sorte")
+}
+
+first_rune :: proc(s: string) -> rune {
+	for r in s do return r
+	return 0
 }
 
 fmin :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
@@ -262,31 +280,24 @@ fmax :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
 Bound_Status :: enum u8 {
 	Ok,
 	Open, // pas de borne
-	Many, // plusieurs bornes possibles (une valeur inconnue)
-	Not_Number,
-	Strings,
+	Unknown, // une borne qui dépend d'une inconnue
+	Not_Bound, // ni un nombre ni une chaîne
 	Invalid,
 }
 
-// bound_of : l'ensemble qu'une borne désigne — un nombre connu, ou l'ensemble d'un
-// intervalle déjà construit (chaînage).
+// bound_of : l'ensemble qu'une borne désigne — une valeur connue, ou l'ensemble
+// d'un intervalle déjà construit (chaînage).
 bound_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> (Set, Bound_Status) {
 	if e == nil do return {}, .Open
 	t := type_of(k, e, env)
 	if is_invalid(t) do return {}, .Invalid
 	x, ok := the_element(t)
-	if !ok do return {}, .Many
+	if !ok do return {}, .Unknown
 	s, is_set := x^.(Set)
-	if !is_set do return {}, .Not_Number
+	if !is_set do return {}, .Not_Bound
 	d, pure := pure_domain(s)
-	if !pure do return {}, .Not_Number
-	#partial switch d {
-	case .Ints, .Floats:
-		return s, .Ok
-	case .Strings:
-		return {}, .Strings
-	}
-	return {}, .Not_Number
+	if !pure || d == .Bools do return {}, .Not_Bound
+	return s, .Ok
 }
 
 display :: proc(b: ^Binding) -> string {
