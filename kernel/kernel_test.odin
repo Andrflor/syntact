@@ -52,6 +52,9 @@ CASES := []Case {
 	{"n -> ??::(0..3)\na -> (n | 6) & (n | 7)", "{n -> ??0  a -> {-> 0  -> 1  -> 2  -> 3}}", {}},
 	{"n -> ??::(0..3)\n(n | 0..3):e -> 2", "", {}}, // une table constante est un ensemble
 	{"n -> ??::(0..3)\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
+	// trop d'inconnues pour énumérer : l'enveloppe (une valeur), jamais une couleur
+	{"n -> ??::u64\na -> (n | 6) & >3", "{n -> ??0  a -> {-> ⊆ 4..18446744073709551615}}", {}},
+	{"n -> ??::u64\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
 	{"box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}\na -> box.x\nb -> box.y\nc -> box.x#0", "", {}},
 	{"empty -> {x -> 1}\ne -> empty!", "{empty -> {-> {x -> 1}}  e -> none}", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p\nq -> p.x", "", {}},

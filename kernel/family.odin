@@ -19,6 +19,14 @@ Family :: struct {
 	sets: []Set,
 }
 
+// Subsets : un ensemble qui dépend de trop d'inconnues pour être énuméré. On n'en
+// garde que l'enveloppe — l'union de tous les ensembles possibles : le type est
+// « un ensemble inclus dans `upper` ». C'est une sur-approximation, valable pour
+// une valeur ; ce n'est jamais un singleton, donc jamais une couleur.
+Subsets :: struct {
+	upper: Set,
+}
+
 Set_Op_Kind :: enum u8 {
 	Union,
 	Inter,
@@ -58,13 +66,13 @@ set_operation :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: ..^Expr) -> 
 		case .Ok:
 			families[i] = f
 		case .Too_Large:
-			return report(k, .Unsupported, span, "trop d'inconnues pour une forme exacte de cet ensemble")
+			return enveloped(k, op, span, args)
 		case .Not_Set:
 			return report(k, .Unsupported, span, fmt.tprintf("pas encore dans le kernel : cette opération sur %s", print_expr(a)))
 		}
 	}
 	syms, domains, ok := joint_domains(k, families)
-	if !ok do return report(k, .Unsupported, span, "trop d'inconnues pour une forme exacte de cet ensemble")
+	if !ok do return enveloped(k, op, span, args)
 	total := 1
 	for d in domains do total *= len(d)
 	sets := make([]Set, total)
@@ -78,6 +86,85 @@ set_operation :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: ..^Expr) -> 
 		odometer(digits, domains)
 	}
 	return family_expr(syms, sets)
+}
+
+// enveloped : l'opération sur les enveloppes des opérandes. Chaque opération est
+// monotone sur les enveloppes, sauf le complément, dont l'enveloppe est toute la
+// sorte, et `!=x`, qui couvre toute la sorte dès que x a plusieurs valeurs.
+enveloped :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: []^Expr) -> ^Expr {
+	uppers := make([]Set, len(args))
+	for a, i in args {
+		u, ok := upper_of(k, a)
+		if !ok do return report(k, .Unsupported, span, fmt.tprintf("pas encore dans le kernel : cette opération sur %s", print_expr(a)))
+		uppers[i] = u
+	}
+	r: Set
+	status := Arith_Status.Ok
+	switch op.kind {
+	case .Union, .Inter, .Arith:
+		r, status = apply_set_op(op, uppers)
+	case .Range:
+		r, status = range_set(uppers[0], op.lo_open, uppers[1], op.hi_open) // l'enveloppe de toutes les plages
+	case .Comp:
+		r = sorts_of(uppers[0])
+	case .Half:
+		r, status = half_envelope(op.half, uppers[0])
+	}
+	if status != .Ok do return set_op_failure(k, op, status, span, args)
+	if set_is_empty(r) do return singleton(new_expr(r)) // inclus dans ∅ : c'est ∅
+	return new_expr(Subsets{r})
+}
+
+// upper_of : l'enveloppe d'un type d'ensemble — l'union de ses ensembles possibles.
+upper_of :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
+	if s, ok := known_set(t); ok do return s, true
+	#partial switch v in t^ {
+	case Family:
+		u := Set{}
+		for s in v.sets do u = set_union(u, s)
+		return u, true
+	case Subsets:
+		return v.upper, true
+	case Poly, Term:
+		vals, _ := values_of(k, t) // une valeur inconnue, vue comme l'ensemble d'elle-même
+		return vals, true
+	}
+	return {}, false
+}
+
+// sorts_of : toutes les valeurs des sortes qu'un ensemble porte.
+sorts_of :: proc(s: Set) -> Set {
+	top := set_top()
+	r := Set{}
+	if domain_count(s, .Ints) > 0 do r.ints = top.ints
+	if domain_count(s, .Floats) > 0 do r.floats = top.floats
+	if domain_count(s, .Chars) > 0 do r.chars = top.chars
+	if domain_count(s, .Strings) > 0 do r.strings = top.strings
+	if domain_count(s, .Bools) > 0 do r.bools = top.bools
+	return r
+}
+
+// half_envelope : l'union de `>x` pour tout x de `xs` (et de même pour les autres).
+half_envelope :: proc(kind: syn.Operator_Kind, xs: Set) -> (Set, Arith_Status) {
+	d, pure := pure_domain(xs)
+	if !pure || (d != .Ints && d != .Floats) do return {}, .Invalid
+	if kind == .NotEqual do return sorts_of(xs), .Ok
+	if d == .Ints {
+		l, h := ints_bounds(xs.ints)
+		if kind == .Greater || kind == .GreaterEqual {
+			if v, ok := l.?; ok do return half_line(kind, set_of_ints(ints_point(v)))
+		} else {
+			if v, ok := h.?; ok do return half_line(kind, set_of_ints(ints_point(v)))
+		}
+		return sorts_of(xs), .Ok
+	}
+	l, h := floats_bounds(xs.floats)
+	if kind == .Greater || kind == .GreaterEqual {
+		if v, ok := l.?; ok do return half_line(kind, set_of_floats(floats_point(v)))
+	} else {
+		if v, ok := h.?; ok do return half_line(kind, set_of_floats(floats_point(v)))
+	}
+	return sorts_of(xs), .Ok
 }
 
 set_op_failure :: proc(k: ^Kernel, op: Set_Op, status: Arith_Status, span: syn.Span, args: []^Expr) -> ^Expr {
@@ -138,6 +225,8 @@ family_of :: proc(k: ^Kernel, t: ^Expr) -> (Family, Family_Status) {
 	#partial switch v in t^ {
 	case Family:
 		return v, .Ok
+	case Subsets:
+		return {}, .Too_Large // déjà une enveloppe : on reste sur les enveloppes
 	case Poly, Term:
 		found := make([dynamic]int)
 		collect_symbols(t, &found)
@@ -293,6 +382,11 @@ family_equal :: proc(a, b: Family) -> bool {
 	if !slice.equal(a.syms, b.syms) || len(a.sets) != len(b.sets) do return false
 	for s, i in a.sets do if !atoms_subset(s, b.sets[i]) || !atoms_subset(b.sets[i], s) do return false
 	return true
+}
+
+// Une enveloppe s'écrit `{-> ⊆ U}` : un ensemble inclus dans U.
+write_subsets :: proc(b: ^strings.Builder, s: Subsets) {
+	fmt.sbprintf(b, "{{-> ⊆ %s}}", print_set(s.upper))
 }
 
 // Une table s'écrit comme le type qu'elle est : l'un de ses ensembles,

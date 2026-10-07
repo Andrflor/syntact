@@ -95,6 +95,7 @@ Expr :: union {
 	Poly, // une forme sur des inconnues (résultat de type_of seulement) : canon.odin
 	Term,
 	Family, // un ensemble qui dépend d'inconnues : family.odin
+	Subsets, // son enveloppe, quand il dépend de trop d'inconnues
 	Invalid,
 }
 

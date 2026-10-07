@@ -61,6 +61,8 @@ write_expr :: proc(b: ^strings.Builder, e: ^Expr) {
 		write_term(b, v)
 	case Family:
 		write_family(b, v)
+	case Subsets:
+		write_subsets(b, v)
 	case Invalid:
 		strings.write_string(b, "<invalide>")
 	}
