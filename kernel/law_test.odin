@@ -921,3 +921,89 @@ test_law_affine :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, outcomes[.Proved] > 0 && outcomes[.Refuted] > 0, "verdicts : %v", outcomes)
 }
+
+// --- les ensembles de scopes : le BDD contre un modèle exact ---
+//
+// L'univers : les scopes {x y}, {r} et {z}, de champs dans 0..3 ou 99. Les formes
+// tirées n'admettent que des champs dans 0..3 et n'ont que les structures {x y} et
+// {r} : 99 et {z} représentent tout ce qu'aucune forme n'atteint. Chaque ensemble
+// de scopes est donc une union de ces 31 classes, et le modèle est exact — même
+// pour le vide et l'inclusion, qui portent sur tous les scopes.
+
+FIELD_VALUES := [5]i128{0, 1, 2, 3, 99}
+STRUCTURES := [3][]string{{"x", "y"}, {"r"}, {"z"}}
+
+Scope_Model :: struct {
+	bdd:  Bdd,
+	mask: u64, // les éléments de l'univers qu'il contient
+}
+
+@(test)
+test_law_scopes :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	state: rand.Default_Random_State
+	gen := seeded(&state, 18)
+	k: Kernel
+
+	scope_value :: proc(names: []string, values: []i128) -> ^Scope {
+		s := new_scope(nil)
+		for n, i in names do append(&s.bindings, Binding{name = n, kind = .Push, value = new_expr(set_of_ints(ints_point(values[i])))})
+		return s
+	}
+	universe := make([dynamic]^Scope)
+	for a in FIELD_VALUES do for b in FIELD_VALUES do append(&universe, scope_value(STRUCTURES[0], {a, b}))
+	for c in FIELD_VALUES do append(&universe, scope_value(STRUCTURES[1], {c}))
+	append(&universe, scope_value(STRUCTURES[2], {0}))
+
+	random_atom :: proc(gen: runtime.Random_Generator, universe: []^Scope) -> Scope_Model {
+		names := STRUCTURES[rand.int_max(2, gen)]
+		fields := make([]Field, len(names))
+		shape := new_scope(nil)
+		for n, i in names {
+			lo := i128(rand.int_range(0, 4, gen))
+			hi := lo + i128(rand.int_range(-1, 3, gen)) // parfois vide
+			fields[i] = Field{name = n, kind = .Push, set = set_of_ints(ints_intersect(ints_range(lo, hi), ints_range(0, 3)))}
+			append(&shape.bindings, Binding{name = n, kind = .Push, color = new_expr(fields[i].set)})
+		}
+		r := new_record(fields, shape)
+		mask: u64
+		for u, i in universe {
+			if len(u.bindings) != len(fields) || u.bindings[0].name != fields[0].name do continue
+			inside := true
+			for f, j in fields do if !set_subset(u.bindings[j].value^.(Set), f.set) do inside = false
+			if inside do mask |= 1 << uint(i)
+		}
+		return Scope_Model{bdd_atom(r), mask}
+	}
+	all_mask := u64(1) << uint(len(universe)) - 1
+	random_scopes :: proc(gen: runtime.Random_Generator, universe: []^Scope, all_mask: u64, depth: int) -> Scope_Model {
+		if depth == 0 || rand.int_max(4, gen) == 0 do return random_atom(gen, universe)
+		a := random_scopes(gen, universe, all_mask, depth - 1)
+		b := random_scopes(gen, universe, all_mask, depth - 1)
+		switch rand.int_max(4, gen) {
+		case 0:
+			return Scope_Model{bdd_or(a.bdd, b.bdd), a.mask | b.mask}
+		case 1:
+			return Scope_Model{bdd_and(a.bdd, b.bdd), a.mask & b.mask}
+		case 2:
+			return Scope_Model{bdd_diff(a.bdd, b.bdd), a.mask & ~b.mask}
+		}
+		return Scope_Model{bdd_diff(.Top, a.bdd), all_mask & ~a.mask} // ~a
+	}
+	empty, included := 0, 0
+	for _ in 0 ..< ROUNDS {
+		a := random_scopes(gen, universe[:], all_mask, 3)
+		b := random_scopes(gen, universe[:], all_mask, 3)
+		for u, i in universe {
+			want := a.mask & (1 << uint(i)) != 0
+			testing.expectf(t, bdd_admits(&k, a.bdd, u) == verdict(want), "appartenance de l'élément %d : %v attendu", i, want)
+		}
+		testing.expectf(t, bdd_is_empty(a.bdd) == (a.mask == 0), "vide : %v attendu", a.mask == 0)
+		testing.expectf(t, bdd_subset(a.bdd, b.bdd) == (a.mask & ~b.mask == 0), "inclusion : %v attendu", a.mask & ~b.mask == 0)
+		if a.mask == 0 do empty += 1
+		if a.mask & ~b.mask == 0 do included += 1
+	}
+	testing.expectf(t, empty >= ROUNDS / 20 && included >= ROUNDS / 10, "cas vides : %d, inclusions : %d", empty, included)
+}

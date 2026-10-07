@@ -16,6 +16,7 @@ Domain :: enum u8 {
 	Chars,
 	Strings,
 	Bools,
+	Scopes,
 }
 
 Set :: struct {
@@ -32,6 +33,7 @@ Set :: struct {
 	chars:   Ints,
 	strings: Strings,
 	bools:   Bools,
+	scopes:  Bdd, // des combinaisons de formes de scopes (bdd.odin)
 }
 
 // --- entiers : intervalles triés, disjoints, non adjacents ---
@@ -653,12 +655,17 @@ carried :: proc(s: Set) -> bit_set[Domain] {
 	if len(s.chars.intervals) > 0 do r += {.Chars}
 	if s.strings.re != nil do r += {.Strings}
 	if s.bools != {} do r += {.Bools}
+	if !is_leaf(s.scopes, .Bottom) do r += {.Scopes}
 	return r
 }
 
 set_count :: proc(s: Set) -> int {
-	n := ints_count(s.ints) + floats_count(s.floats) + ints_count(s.chars) + strings_count(s.strings) + card(s.bools)
-	return min(n, 2)
+	n := 0
+	for d in Domain {
+		n += domain_count(s, d)
+		if n >= 2 do return 2
+	}
+	return n
 }
 
 set_is_empty :: proc(s: Set) -> bool {
@@ -684,6 +691,9 @@ domain_count :: proc(s: Set, d: Domain) -> int {
 		return strings_count(s.strings)
 	case .Bools:
 		return card(s.bools)
+	case .Scopes:
+		// un ensemble de scopes n'est jamais un atome : un scope valeur est un ^Scope
+		return bdd_is_empty(s.scopes) ? 0 : 2
 	}
 	return 0
 }
@@ -696,6 +706,7 @@ set_union :: proc(a, b: Set) -> Set {
 		chars = ints_union(a.chars, b.chars),
 		strings = strings_union(a.strings, b.strings),
 		bools = a.bools | b.bools,
+		scopes = bdd_or(a.scopes, b.scopes),
 	}
 }
 
@@ -709,6 +720,7 @@ set_intersect :: proc(a, b: Set) -> Set {
 		chars = ints_intersect(a.chars, b.chars),
 		strings = strings_intersect(a.strings, b.strings),
 		bools = a.bools & b.bools,
+		scopes = bdd_and(a.scopes, b.scopes),
 	}
 }
 
@@ -722,6 +734,7 @@ set_complement :: proc(a: Set) -> Set {
 	if .Chars in r.sorts do r.chars = ints_intersect(ints_complement(a.chars), chars_all())
 	if .Strings in r.sorts do r.strings = strings_complement(a.strings)
 	if .Bools in r.sorts do r.bools = ~a.bools
+	if .Scopes in r.sorts do r.scopes = bdd_diff(.Top, a.scopes)
 	return r
 }
 
@@ -734,6 +747,7 @@ set_diff :: proc(a, b: Set) -> Set {
 		chars = ints_intersect(a.chars, ints_complement(b.chars)),
 		strings = strings_intersect(a.strings, strings_complement(b.strings)),
 		bools = a.bools - b.bools,
+		scopes = bdd_diff(a.scopes, b.scopes),
 	}
 }
 
@@ -748,7 +762,8 @@ set_subset :: proc(a, b: Set) -> bool {
 		floats_subset(a.floats, b.floats) &&
 		ints_subset(a.chars, b.chars) &&
 		strings_subset(a.strings, b.strings) &&
-		a.bools <= b.bools
+		a.bools <= b.bools &&
+		bdd_subset(a.scopes, b.scopes)
 }
 
 set_equal :: proc(a, b: Set) -> bool {
@@ -774,6 +789,8 @@ set_default :: proc(s: Set) -> (Set, bool) {
 		return set_of_strings(strings_point(v)), true
 	case .Bools:
 		return set_of_bools(.False in s.bools ? {.False} : {.True}), true
+	case .Scopes:
+		return {}, false // un scope n'est pas un atome : voir default_of
 	}
 	return {}, false
 }

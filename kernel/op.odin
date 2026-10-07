@@ -34,8 +34,7 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 known_set :: proc(t: ^Expr) -> (Set, bool) {
 	x, ok := the_element(t)
 	if !ok do return {}, false
-	s, is_set := x^.(Set)
-	return s, is_set
+	return colour_set(x) // un ensemble d'atomes, ou un scope lu comme ensemble
 }
 
 // `|` et `&` opèrent sur des ensembles : sur l'élément de chaque opérande.
@@ -253,7 +252,7 @@ order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
 	case .Floats:
 		alo, ahi = floats_bounds(a.floats)
 		blo, bhi = floats_bounds(b.floats)
-	case .Strings, .Bools:
+	case .Strings, .Bools, .Scopes:
 		return {}, false
 	}
 	// lt : a < b est sûr ; ge : a >= b est sûr (et symétriquement).
