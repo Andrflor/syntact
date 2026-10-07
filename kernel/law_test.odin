@@ -852,3 +852,72 @@ test_normal_families :: proc(t: ^testing.T) {
 	_, is_set := known_set(constant)
 	testing.expect(t, is_set, "n | 0..3 est l'ensemble 0..3")
 }
+
+// --- la vérification par paliers : jamais « prouvé » ni « réfuté » à tort ---
+
+@(test)
+test_law_value_in :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	state: rand.Default_Random_State
+	gen := seeded(&state, 16)
+	k: Kernel
+	domains := [3]Ints{ints_range(-3, 3), ints_range(0, 5), ints_range(2, 4)}
+	for d in domains do append(&k.symbols, set_of_ints(d))
+	decided := [Verdict]int{}
+	for _ in 0 ..< ROUNDS {
+		tree := random_tree(gen, 3)
+		p := poly_type(tree_poly(tree))
+		c, _ := random_ints(gen)
+		all := true
+		for x in -3 ..= 3 do for y in 0 ..= 5 do for z in 2 ..= 4 {
+			if !ints_contains(c, tree_eval(tree, {i128(x), i128(y), i128(z)})) do all = false
+		}
+		v := admits(&k, new_expr(set_of_ints(c)), p)
+		decided[v] += 1
+		testing.expectf(t, v != .Proved || all, "%s ⊆ %v déclaré prouvé à tort", print_expr(p), c)
+		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v déclaré réfuté à tort", print_expr(p), c)
+		testing.expectf(t, v != .Undecided, "%s ⊆ %v : petit domaine, toujours décidé", print_expr(p), c)
+	}
+	testing.expectf(t, decided[.Proved] >= ROUNDS / 10 && decided[.Refuted] >= ROUNDS / 10, "verdicts : %v", decided)
+}
+
+// a·x + b sur un domaine trop grand pour être énuméré : le palier affine décide
+// seul, et juste.
+@(test)
+test_law_affine :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	state: rand.Default_Random_State
+	gen := seeded(&state, 17)
+	N :: 100_000 // au-delà de la limite d'énumération
+	k: Kernel
+	append(&k.symbols, set_of_ints(ints_range(0, N)))
+	x := poly_var(0)
+	outcomes := [Verdict]int{}
+	for _ in 0 ..< 60 {
+		a := i128(rand.int_range(-7, 8, gen))
+		if a == 0 do a = 3
+		b := i128(rand.int_range(-20, 21, gen))
+		ax, _ := poly_scale(x, a)
+		p, _ := poly_add(ax, Poly{const = b})
+		// une couleur à trous : tout sauf quelques points ou petits intervalles
+		holes := make([dynamic]Int_Interval)
+		for _ in 0 ..< rand.int_range(1, 4, gen) {
+			at := i128(rand.int_range(-60, 61, gen)) * (rand.int_max(2, gen) == 0 ? 1 : a)
+			append(&holes, Int_Interval{at, at + i128(rand.int_range(0, 2, gen))})
+		}
+		c := ints_complement(ints_of(holes[:]))
+		all := true
+		for v in 0 ..= N do if !ints_contains(c, a * i128(v) + b) {
+			all = false
+			break
+		}
+		r := admits(&k, new_expr(set_of_ints(c)), poly_type(p))
+		outcomes[r] += 1
+		testing.expectf(t, r == verdict(all), "%s ⊆ %v : %v, attendu %v", print_expr(poly_type(p)), c, r, verdict(all))
+	}
+	testing.expectf(t, outcomes[.Proved] > 0 && outcomes[.Refuted] > 0, "verdicts : %v", outcomes)
+}

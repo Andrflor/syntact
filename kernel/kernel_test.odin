@@ -58,6 +58,17 @@ CASES := []Case {
 	// trop d'inconnues pour énumérer : l'enveloppe (une valeur), jamais une couleur
 	{"n -> ??::u64\na -> (n | 6) & >3", "{n -> ??0  a -> {-> ⊆ 4..18446744073709551615}}", {}},
 	{"n -> ??::u64\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
+	// la vérification par paliers : enveloppe, affine, extrêmes linéaires, énumération ;
+	// ce qu'on ne sait pas prouver est dit, jamais accepté
+	{"n -> ??::u64\nm -> ??::u64\nu64:d -> n + m", "", {.Constraint_Mismatch}},
+	{"u16:z -> (??::u8) * (??::u8)", "", {}},
+	{"n -> ??::u64\n(~6):x -> n * 2 + 1", "", {}},
+	{"n -> ??::u64\n(~5):x -> n * 2 + 1", "", {.Constraint_Mismatch}},
+	{"n -> ??::u64\nm -> ??::u64\n(~5):x -> n * 2 + m * 4 + 1", "", {.Unproven}},
+	{"(\"a\" + string):v -> \"b\" + ??::string", "", {.Constraint_Mismatch}},
+	// bidirectionnel : la couleur descend dans un scope littéral
+	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p -> {x -> ??  y -> 2}", "", {}},
+	{"Point -> {\n  u8:x\n  u8:y\n}\nLine -> {\n  Point:a\n  Point:b\n}\nLine:l -> {a -> {x -> ??  y -> 1}  b -> {x -> 3  y -> ??}}", "", {}},
 	{"box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}\na -> box.x\nb -> box.y\nc -> box.x#0", "", {}},
 	{"empty -> {x -> 1}\ne -> empty!", "{empty -> {-> {x -> 1}}  e -> none}", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p\nq -> p.x", "", {}},
