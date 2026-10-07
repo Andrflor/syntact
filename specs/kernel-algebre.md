@@ -56,14 +56,27 @@ confusion entre « la valeur `0..255` » et « une valeur parmi `0..255` ».
 
 ---
 
-## 2. Les ensembles d'atomes : une algèbre de Boole par sorte, l'inclusion décidée
+## 2. Les ensembles : une algèbre de Boole par sorte, l'inclusion décidée
 
-Un ensemble d'atomes est un quintuplet `(Z, R, C, S, B)`, une composante par sorte
-(`Set`, `set.odin`). Les opérations se font composante par composante. Le
-complément se prend dans les sortes que l'ensemble porte : `~5` est « tout entier
-sauf 5 » (spécification, `specs/constraints.md`). Dans chaque sorte, `∪ ∩ ~`
-forment une algèbre de Boole. L'inclusion se décide sorte par sorte, par
-`A ∩ ~B = ∅`.
+Un ensemble a une composante par sorte : entiers, flottants, caractères, chaînes,
+booléens, scopes (`Set`, `set.odin`). Les opérations se font composante par
+composante, et l'inclusion se décide sorte par sorte, par `A ∖ B = ∅`.
+
+**Les sortes portées.** Le complément se prend dans les sortes dont l'ensemble
+parle : `~5` est « tout entier sauf 5 » (`specs/constraints.md`, Negation). Un
+ensemble retient ces sortes (`sorts`, `carried`), même quand leur composante est
+vide :
+
+```
+~(u8 | string)    = ..-1 | 256.. | ~string     la sorte string reste portée
+~~(u8 | string)   = u8 | string
+u8 & string       = none                       aucune sorte commune
+0 & 1             = ~int                       vide, mais parle des entiers
+```
+
+Dans chaque sorte, `∪ ∩ ~` forment une algèbre de Boole. Comme `~` garde les
+sortes, **`~~X = X` pour tout X**, y compris à travers une ref. `subset` et
+l'égalité ne lisent que les valeurs, jamais les sortes.
 
 ### Théorème 2.1 — entiers (et caractères) : forme normale unique
 
@@ -106,62 +119,69 @@ conventions rendent l'écriture des bornes unique :
 *Code* : `floats_of`, `normal_zero`. *Tests* : `test_law_floats`,
 `test_normal_floats`.
 
-### Théorème 2.3 — chaînes : l'inclusion est décidée exactement
+### Théorème 2.3 — chaînes : l'inclusion est décidée exactement, par les dérivées
 
 Un ensemble de chaînes est un langage régulier, gardé sous la forme de
-l'expression qui l'écrit (`Regex`, `regular.odin`) :
+l'expression qui l'écrit, en **forme de similarité** et partagée (`Regex`,
+`regular.odin`) :
 
 ```
-"a" | "ab"     Words    un ensemble fini de mots
+"a" | "ab"     Words    un ensemble fini de mots ({""} est ε)
 'a'..'z'       Class    un mot d'une lettre dans la plage
-x + y          Cat      x | y   Alt      x & y   And
+x + y          Cat      associée à droite
+x | y   x & y  Alt, And aplaties, triées par id, sans doublon
 ~x             Not      (~∅ : toute chaîne)
 x * 2..4       Repeat   par un ensemble de comptes naturels
 ```
 
 > **(a)** Chaque construction (`strings_union`, `_intersect`, `_complement`,
 > `_concat`, `_repeat`, `_prefixed`, `_suffixed`) rend une expression du langage
-> attendu.
+> attendu. Deux expressions semblables (Owens, Reppy, Turon, déf. 4.1) sont le
+> même nœud.
 >
 > **(b)** `strings_subset(A, B)` est vrai si et seulement si `L(A) ⊆ L(B)`.
 
 *Preuve de (a).* Chaque constructeur applique des réécritures, et chacune garde le
 langage :
-- l'aplatissement de `+`, `|` et `&` (associativité) ;
-- ∅ absorbant pour `+` et `&`, neutre pour `|` ;
+- l'aplatissement de `|` et `&`, triés et sans doublon (associativité,
+  commutativité, idempotence) ;
+- `+` associée à droite ;
+- ∅ absorbant pour `+` et `&`, neutre pour `|` ; `~∅` absorbant pour `|`, neutre
+  pour `&` ;
 - `""` neutre pour `+` ;
 - la fusion de deux mots voisins dans `+` ;
 - la réunion des ensembles finis de mots dans `|` ;
-- un doublon d'écriture retiré dans `|` et `&` (idempotence) ;
 - `~~x = x` ;
-- `Words & X` = les mots de `Words` que `X` reconnaît (décidé par (b)) ;
-- `x * {0} = ""`, `x * {1} = x`, `w * {n} = wⁿ` ;
-- les comptes négatifs retirés (ils n'existent pas). ∎
+- `Words & X` = les mots de `Words` que `X` reconnaît ;
+- `x * {0} = ""`, `x * {1} = x`, `w * {n} = wⁿ`, les comptes négatifs retirés ;
+- `x * C = x * 0..max C` quand `"" ∈ x`, car alors `xᶜ ⊇ xᵈ` pour `d ≤ c`.
 
-*Preuve de (b).* L'automate est construit au moment de décider, jamais gardé
-(`dfa_of`) :
-1. **Construction de Thompson** (`fragment`). Par induction sur l'expression, le
-   fragment de `x` reconnaît `L(x)` entre son entrée et sa sortie. On a
-   `L^{a..b} = L^a·(ε|L)^{b-a}` et `L^{a..} = L^a·L*`. `And` et `Not` y entrent par
-   leur automate déterministe, recopié.
-2. **Déterminisation** par sous-ensembles (`determinize`). Elle découpe les plages
-   de caractères en intervalles élémentaires et garde le langage (Rabin–Scott).
-3. **Complément** (`dfa_complement`) : on complète l'automate déterministe par un
-   puits, puis on inverse l'acceptation. **Intersection** (`dfa_intersect`) :
-   l'automate des paires.
-4. **Émondage** (`trim`). On garde les états accessibles qui mènent à un état
-   acceptant. Le langage ne change pas. Le langage est vide si et seulement s'il ne
-   reste aucun état.
+Le partage (`intern`) identifie deux nœuds de même structure, opérandes comparés
+par adresse. ∎
 
-Donc `L(A) ⊆ L(B)` ⇔ `L(A) ∩ ~L(B) = ∅` ⇔ l'automate émondé de `A & ~B` est vide.
-Quand `A` est un ensemble fini de mots, on teste chaque mot sur l'automate de `B`,
-ce qui revient au même. ∎
+*Preuve de (b).* Par les **dérivées de Brzozowski** (`derive`) : `∂c L = { w |
+c·w ∈ L }`, calculée sur l'expression par les règles d'Owens et al. (§3.1). Pour la
+répétition, `∂c(x^C) = ∂c(x) · x^(C-1)` : on dérive le premier morceau non vide. La
+normalisation de (a) rend cette règle juste aussi quand `"" ∈ x`.
+1. `w ∈ L(r)` ⇔ la dérivée de r par les lettres de w accepte "" (`regex_contains`).
+2. On n'a besoin que d'une dérivée par **classe** de caractères. Ce sont les plages
+   où la dérivée ne change pas, sur-approchées par les bornes des plages et la
+   première lettre des mots (`cuts`, `classes` ; Owens et al. §4.2).
+3. `witness(r)` explore les dérivées en largeur, comparées par adresse. Il rend le
+   premier mot accepté rencontré, donc le plus court, puis le premier dans l'ordre
+   des points de code. Il termine parce qu'une expression n'a qu'un nombre fini de
+   dérivées à similarité près (Brzozowski, 1964).
 
-**Lectures.** Toutes les autres lectures se font sur l'automate émondé et ne
-dépendent que du langage, jamais de l'écriture :
-- `strings_count` : un cycle dans l'automate émondé signifie une infinité de mots ;
-- `strings_default` : le plus court mot, puis le plus petit en ordre des points de code ;
-- `strings_words`.
+Donc `L(A) ⊆ L(B)` ⇔ `L(A & ~B) = ∅` ⇔ `witness(A & ~B)` ne trouve rien. Quand `A`
+est un ensemble fini de mots, on teste chaque mot dans `B`, ce qui revient au même. ∎
+
+**Lectures.** Elles ne dépendent que du langage, jamais de l'écriture :
+- `strings_default` : `witness`, donc le plus petit mot ;
+- `strings_count`, saturé à 2 : un témoin `w`, puis un témoin de `L ∖ {w}` ;
+- `strings_words` : l'automate des dérivées, émondé (Owens et al., fig. 1).
+
+Les décisions sont mémoïsées par nœud, puisque les nœuds sont partagés et
+immuables. Il n'y a ni déterminisation, ni produit d'automates, ni automate gardé.
 
 *Tests* :
 - `test_law_strings` : l'appartenance contre l'énumération des mots de longueur
@@ -169,15 +189,56 @@ dépendent que du langage, jamais de l'écriture :
 - `test_decide_strings` : des paires égales par une loi ; une inclusion décidée vaut
   sur les mots courts ; une inclusion refusée a un témoin, dans `A` et hors de `B`.
 
-### Théorème 2.4 — ensembles mixtes
+### Théorème 2.4 — scopes : les formes et leurs combinaisons
+
+Une couleur de scope sans production est une **forme** : l'ensemble des scopes de
+même structure (noms et kinds, dans l'ordre) dont chaque binding est admis par le
+sien. Un binding nommé sans couleur n'impose rien. Les combinaisons `|`, `&` et `~`
+de formes sont un **BDD paresseux** (`bdd.odin` ; Frisch, thèse, ch. 7 ;
+Elixir 1.19) : `{a, oui, peut, non} = (a & oui) | peut | (~a & non)`.
+
+> `bdd_subset(A, B)` est vrai si et seulement si tout scope de `A` est dans `B`.
+
+*Preuve.*
+- **Les opérations gardent l'ensemble.** `bdd_or`, `bdd_and` et `bdd_diff`
+  appliquent les identités booléennes, atome par atome dans l'ordre des ids. Une
+  union reste dans `peut` au lieu d'être distribuée.
+- **Le vide se lit chemin par chemin.** Un chemin est une intersection de formes
+  positives moins des formes négatives. Le BDD est vide si et seulement si chaque
+  chemin l'est (`bdd_is_empty`).
+- **Un chemin se lit champ par champ.** Des formes de structures différentes sont
+  disjointes. Sans forme positive, il reste toujours des scopes, car il existe
+  d'autres structures. Sinon, l'intersection des positives est un produit
+  `F₁ × … × Fₙ`, et il faut décider s'il est couvert par l'union des négatives de
+  même structure. On retire une négative `N` à la fois : `F ∖ N` est l'union, pour
+  chaque champ i, de `F` avec `Fᵢ ∖ Nᵢ` (`product_covered`). Chaque champ est un
+  ensemble, décidé par ce §2. ∎
+
+**L'admission d'un scope valeur** (`bdd_admits`) suit le BDD, avec une appartenance
+à quatre valeurs : toujours, pas toujours, jamais, inconnu.
+- « Pas toujours » veut dire qu'une valeur des inconnues sort de l'ensemble. Il ne
+  se nie pas, et deux « pas toujours » ne se combinent pas par « ou » : ce ne sont
+  pas forcément les mêmes valeurs.
+- « Jamais » se combine librement.
+
+Sur une valeur sans inconnue, « pas toujours » est « jamais », et l'admission est
+exacte.
+
+*Tests* : `test_law_scopes`. Il confronte le BDD à un modèle fini **exact** : un
+univers qui contient un représentant de chaque classe de scopes, y compris les
+structures et les valeurs qu'aucune forme n'atteint. L'appartenance, le vide et
+l'inclusion doivent coïncider exactement.
+
+### Théorème 2.5 — ensembles mixtes
 
 > `set_subset(A, B)` est vrai si et seulement si `A ⊆ B`.
 
 *Preuve.* Les sortes sont disjointes : `A ⊆ B` si et seulement si l'inclusion vaut
-dans chaque sorte, et chacune est décidée par 2.1 à 2.3. Le défaut ne dépend que
+dans chaque sorte, et chacune est décidée par 2.1 à 2.4. Le défaut ne dépend que
 de l'ensemble. On prend la première sorte non vide dans un ordre fixe, puis son
-élément distingué, qui est une fonction de la composante (2.1–2.3). ∎
-*Tests* : `test_decide_sets`, `test_law_defaults`.
+élément distingué, qui est une fonction de la composante (2.1–2.3). Une forme seule
+a pour défaut la forme elle-même. ∎
+*Tests* : `test_decide_sets`, `test_law_defaults`, `test_law_mixed_complement`.
 
 ### Clôture
 
@@ -318,16 +379,42 @@ ou sur-approchée. Pour une table, ce sont ses entrées. Pour une enveloppe
 2. **Les valeurs possibles contiennent la valeur réelle.** Par le théorème 4.1,
    `⟦v⟧σ` est une valeur possible de `type_of(v)` ; `values_of` en donne un
    sur-ensemble.
-3. **L'admission** est une inclusion, décidée exactement (§2). `check` vérifie que
-   chaque valeur possible est admise par `⟦C⟧` :
-   - un atome doit être élément de la couleur ;
-   - `none` n'est admis que par la couleur `none` ;
+3. **L'admission a trois issues** (`admits`, `check.odin`) : prouvée, réfutée, ou
+   non prouvée. Seule « prouvée » accepte. « Non prouvée » est l'erreur
+   `Unproven`, jamais une acceptation.
+   - un atome doit être élément de la couleur (§2, exact) ;
+   - `none` n'est admis que par une couleur vide ;
    - un caractère est admis par une couleur de chaînes ;
-   - pour un scope, l'admission passe par une production, ou par la même structure
-     avec chaque binding coloré admis.
+   - un scope valeur est admis par une forme, ou une combinaison de formes (2.4).
+     Une couleur de scope qui n'est pas close se lit binding par binding
+     (`scope_admits`), avec les mêmes trois issues ;
+   - une valeur sur des inconnues (`value_in`) se décide **par paliers**, du moins
+     cher au plus cher :
+     1. **l'enveloppe** (`envelope`), sans énumérer. Elle est sûre (§4), et
+        **exacte** quand aucune inconnue ne se répète et que l'opération est exacte
+        sur des ensembles indépendants (`±x ± y`, une concaténation de mots). Une
+        enveloppe admise prouve ; une enveloppe exacte non admise, ou dont rien
+        n'est admis, réfute ;
+     2. **`a·x + b`**, une seule inconnue, se décide exactement (`affine_in`) :
+        l'antécédent d'un trou de la couleur est un intervalle de x, croisé avec
+        l'ensemble de x. Sinon, pour une forme de degré 1, le min et le max sont
+        **atteints** aux bornes des inconnues (`linear_extremes`) : s'ils sortent
+        de la couleur, c'est réfuté ;
+     3. **l'énumération** exacte, si les inconnues s'énumèrent ;
+     4. sinon, `Unproven`.
 
-   Une sur-approximation ne peut que **refuser** davantage, jamais accepter une
-   valeur réelle hors couleur. ∎
+   Chaque palier ne dit « prouvé » ou « réfuté » que quand c'est vrai : une
+   sur-approximation ne prouve que si elle est admise toute entière. ∎
+
+*Tests* : `test_law_value_in` (paliers contre la force brute, petits domaines),
+`test_law_affine` (domaines trop grands pour être énumérés), `test_law_admission`.
+
+**Typage bidirectionnel.** La couleur attendue descend dans la valeur : un `??` la
+prend, et un scope littéral passe à chaque binding la couleur de la forme qui
+l'attend. Pour une combinaison de formes, c'est la seule forme de sa structure.
+Cela ne change pas la sûreté (la vérification finale a lieu quand même). Cela
+rend précis ce qui ne l'était pas : `Point:p -> {x -> ??  y -> 2}` donne à l'inconnue
+la couleur `u8`.
 
 **Corollaire.** Un programme accepté respecte toutes ses couleurs, quelles que soient
 les valeurs de ses inconnues. Les preuves `true:p -> …` en sont un cas particulier.
@@ -351,6 +438,8 @@ elle est aussi vérifiée sur la structure.
 | `A * 0..2 = "" ∪ A ∪ AA`, `A * 1..3 = A + A * 0..2` | `test_law_strings`, `test_decide_strings` |
 | `2|1 = 2..1`, `2|"a"|3..4 = "a"|2..4` | `kernel_test.odin` |
 | `n - n = 0`, `(a+b)(a-b) = a² - b²`, distributivité | `test_law_polynomials`, `test_normal_polynomials` |
+| `~~A = A` à travers les sortes (`~~(u8 \| string)`) | `test_law_mixed_complement`, `kernel_test.odin` |
+| `|`, `&`, `~` de formes : appartenance, vide, inclusion | `test_law_scopes` |
 
 ---
 
@@ -364,9 +453,12 @@ elle est aussi vérifiée sur la structure.
 2. **Flottants.** Leurs ensembles sont des ensembles de réels, pas de valeurs f64
    discrètes. Une expression flottante inconnue n'est réduite qu'aux lois IEEE
    exactes (3.4).
-3. **Enveloppes.** `{-> ⊆ U}` est une sur-approximation. Elle n'est jamais utilisée
+3. **Inconnues liées.** Les paliers supposent des inconnues indépendantes (chacune
+   dans son ensemble). Quand le domaine d'une inconnue dépendra d'une autre
+   (`m -> ??::(0..n)`), le palier 2 deviendra relationnel (Fourier–Motzkin).
+4. **Enveloppes.** `{-> ⊆ U}` est une sur-approximation. Elle n'est jamais utilisée
    pour affirmer une égalité ou une inclusion de types, ni comme couleur.
-4. **Limites de taille.**
+5. **Limites de taille.**
    - Au-delà de 65 536 affectations, on n'énumère plus : les valeurs sont
      sur-approchées.
    - Au-delà de 4 096 répétitions, une répétition n'est pas construite.
@@ -376,10 +468,10 @@ elle est aussi vérifiée sur la structure.
    Ces trois cas sont des erreurs explicites (`Unsupported`), jamais une
    approximation de couleur. Seule une enveloppe de valeurs (§4) qui sort de
    l'univers devient infinie de ce côté, ce qui est une sur-approximation sûre.
-5. **Pas encore dans le kernel.** Les propriétés ci-dessus portent sur ce que le
-   kernel implémente. Le carve, les patterns, la récursion, les trous `<-`,
-   l'algèbre des scopes (`|` et `&` de formes) et les effets restent à prouver de la
-   même façon quand ils seront ajoutés. Toute forme non implémentée signale
+6. **Pas encore dans le kernel.** Les propriétés ci-dessus portent sur ce que le
+   kernel implémente. Le carve, les patterns, la récursion (formes récursives :
+   l'inclusion coinductive de CDuce), les trous `<-` et les effets restent à prouver
+   de la même façon quand ils seront ajoutés. Toute forme non implémentée signale
    `Unsupported` : elle ne produit jamais un résultat non couvert par ces théorèmes.
 
 ---
@@ -390,11 +482,12 @@ elle est aussi vérifiée sur la structure.
 |---|---|---|
 | 2.1 entiers, caractères | `set.odin` : `ints_of` | `test_law_ints`, `test_normal_ints`, `test_law_chars*` |
 | 2.2 flottants | `set.odin` : `floats_of` | `test_law_floats`, `test_normal_floats`, `test_law_float_arith` |
-| 2.3 chaînes | `regular.odin` : constructeurs, `dfa_of`, `trim` | `test_law_strings`, `test_decide_strings` |
-| 2.4 mixtes | `set.odin` | `test_decide_sets`, `test_law_defaults`, `test_law_mixed_complement` |
+| 2.3 chaînes | `regular.odin` : constructeurs, `derive`, `witness` | `test_law_strings`, `test_decide_strings` |
+| 2.4 scopes | `bdd.odin` : `bdd_*`, `product_covered`, `bdd_admits` | `test_law_scopes` |
+| 2.5 mixtes, sortes portées | `set.odin` : `carried`, `set_complement` | `test_decide_sets`, `test_law_defaults`, `test_law_mixed_complement` |
 | 3.1–3.4 inconnues | `unknown.odin` | `test_law_polynomials`, `test_normal_polynomials`, `test_law_float_terms`, `test_law_words` |
 | 3.5 tables | `family.odin` | `test_law_families`, `test_normal_families`, `test_law_envelopes` |
 | 4.1 correction | `type_of.odin`, `op.odin` | `test_law_*`, corpus `test/typecheck` |
-| 5.1 sûreté | `check.odin` | `test_law_admission`, corpus `test/typecheck`, `kernel_test.odin` |
+| 5.1 sûreté, paliers | `check.odin` | `test_law_value_in`, `test_law_affine`, `test_law_admission`, corpus `test/typecheck` (383 cas), `kernel_test.odin` |
 
 `odin test kernel` exécute tout.
