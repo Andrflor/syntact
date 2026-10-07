@@ -1,13 +1,14 @@
 package kernel
 
+import "core:math"
 import "core:slice"
 
-// Les ensembles de valeurs atomiques, sous forme canonique. Un littéral est un
+// Les ensembles de valeurs atomiques, sous forme normale. Un littéral est un
 // ensemble à un élément (`5` est `5..5`), un builtin est un ensemble (`u8` est
 // `0..255`), `none` est l'ensemble vide. Un ensemble mixte (`u8 | string`) a une
-// composante canonique par sorte ; chaque composante est une algèbre close.
-// Deux ensembles égaux ont la même structure, quelle que soit leur écriture :
-// `2|1` et `2..1` sont `1..2`, `2|"a"|3..4` et `"a"|2..4` sont `2..4 | "a"`.
+// composante par sorte ; chaque composante est une algèbre close. L'égalité est
+// l'inclusion dans les deux sens : `2|1` et `2..1` sont égaux, comme `2|"a"|3..4`
+// et `"a"|2..4`. Les intervalles ont même une écriture unique (`1..2`).
 
 Domain :: enum u8 {
 	Ints,
@@ -18,6 +19,11 @@ Domain :: enum u8 {
 }
 
 Set :: struct {
+	// Les sortes dont l'ensemble parle, même quand leur composant est vide : `~bool`
+	// ne contient aucun booléen mais parle toujours des booléens. C'est ce qui fait
+	// de ~ une involution (`~~X = X`). Une sorte qui a des valeurs est toujours
+	// portée (`carried`) ; subset et l'égalité ne lisent que les valeurs.
+	sorts:   bit_set[Domain],
 	ints:    Ints,
 	floats:  Floats,
 	// Les caractères, par leur point de code ; CHAR_EMPTY est le caractère vide `''`,
@@ -29,6 +35,11 @@ Set :: struct {
 }
 
 // --- entiers : intervalles triés, disjoints, non adjacents ---
+//
+// L'univers des entiers finis est [-I128_MAX, I128_MAX] : symétrique, la négation
+// n'y déborde jamais, et un calcul exact qui en sortirait échoue (add_checked,
+// mul_checked). Au bord, une borne finie et une borne infinie désignent les mêmes
+// valeurs : la forme normale écrit la borne infinie, sauf pour le point du bord.
 
 Int_Interval :: struct {
 	lo: Maybe(i128), // nil = -∞
@@ -77,14 +88,28 @@ ints_of :: proc(raw: []Int_Interval) -> Ints {
 		last_hi, last_bounded := last.hi.?
 		if !last_bounded do break // le dernier va déjà jusqu'à +∞
 		lo, lo_ok := iv.lo.?
-		if !lo_ok || lo <= last_hi + 1 {
+		if !lo_ok || lo - 1 <= last_hi { 	// lo ≥ -I128_MAX : lo - 1 ne déborde pas
 			hi, hi_ok := iv.hi.?
 			if !hi_ok || hi > last_hi do last.hi = iv.hi
 		} else {
 			append(&out, iv)
 		}
 	}
+	for &iv in out do iv = at_edges(iv)
 	return Ints{out[:]}
+}
+
+// at_edges : une borne au bord de l'univers s'écrit infinie, sauf pour le point du
+// bord lui-même, qui reste un point.
+at_edges :: proc(iv: Int_Interval) -> Int_Interval {
+	lo, lo_ok := iv.lo.?
+	hi, hi_ok := iv.hi.?
+	r := iv
+	if lo_ok && lo == I128_MAX do return Int_Interval{lo, lo}
+	if hi_ok && hi == -I128_MAX do return Int_Interval{hi, hi}
+	if lo_ok && lo == -I128_MAX do r.lo = nil
+	if hi_ok && hi == I128_MAX do r.hi = nil
+	return r
 }
 
 ints_union :: proc(a, b: Ints) -> Ints {
@@ -109,11 +134,11 @@ ints_complement :: proc(a: Ints) -> Ints {
 	cursor: Maybe(i128) = nil // début du trou courant ; nil = -∞
 	open := true // le trou courant est encore ouvert
 	for iv in a.intervals {
-		if lo, ok := iv.lo.?; ok {
+		if lo, ok := iv.lo.?; ok && lo > -I128_MAX {
 			append(&out, Int_Interval{cursor, lo - 1})
 		}
 		hi, ok := iv.hi.?
-		if !ok {
+		if !ok || hi == I128_MAX {
 			open = false
 			break
 		}
@@ -159,22 +184,35 @@ ints_bounds :: proc(a: Ints) -> (lo, hi: Maybe(i128)) {
 	return a.intervals[0].lo, a.intervals[len(a.intervals) - 1].hi
 }
 
-// Arithmétique d'intervalles : { x op y | x ∈ a, y ∈ b }, sur-approximée par intervalle.
-ints_arith :: proc(op: Arith, a, b: Ints) -> Ints {
+// ints_arith : { x op y | x ∈ a, y ∈ b }, par intervalles — exact pour + et -,
+// l'enveloppe pour *. `exact` est faux quand une borne finie sortirait de
+// l'univers : elle devient infinie de son côté, une sur-approximation sûre.
+ints_arith :: proc(op: Arith, a, b: Ints) -> (r: Ints, exact: bool) {
 	out := make([dynamic]Int_Interval)
+	exact = true
 	for x in a.intervals {
 		for y in b.intervals {
+			iv: Int_Interval
+			ok: bool
 			switch op {
 			case .Add:
-				append(&out, Int_Interval{add_bound(x.lo, y.lo), add_bound(x.hi, y.hi)})
+				iv, ok = add_interval(x, y)
 			case .Sub:
-				append(&out, Int_Interval{add_bound(x.lo, neg_bound(y.hi)), add_bound(x.hi, neg_bound(y.lo))})
+				iv, ok = add_interval(x, Int_Interval{neg_bound(y.hi), neg_bound(y.lo)})
 			case .Mul:
-				append(&out, mul_interval(x, y))
+				iv, ok = mul_interval(x, y)
 			}
+			exact &&= ok
+			append(&out, iv)
 		}
 	}
-	return ints_of(out[:])
+	return ints_of(out[:]), exact
+}
+
+add_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
+	lo, lo_ok := add_bound(x.lo, y.lo)
+	hi, hi_ok := add_bound(x.hi, y.hi)
+	return Int_Interval{lo, hi}, lo_ok && hi_ok
 }
 
 // ints_pow : { xⁿ | x ∈ a } sur l'enveloppe de chaque intervalle — une puissance
@@ -225,7 +263,6 @@ Arith :: enum u8 {
 }
 
 I128_MAX :: max(i128)
-I128_MIN :: min(i128)
 
 max_lo :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
 	x, x_ok := a.?
@@ -248,40 +285,84 @@ neg_bound :: proc(a: Maybe(i128)) -> Maybe(i128) {
 	return nil
 }
 
-// Une somme qui déborde i128 devient infinie : c'est une sur-approximation sûre.
-add_bound :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
+// add_bound : deux bornes du même côté. Une borne infinie l'emporte ; une somme qui
+// sort de l'univers devient infinie (`ok` faux).
+add_bound :: proc(a, b: Maybe(i128)) -> (Maybe(i128), bool) {
 	x, x_ok := a.?
 	y, y_ok := b.?
-	if !x_ok || !y_ok do return nil
-	if y > 0 && x > I128_MAX - y do return nil
-	if y < 0 && x < I128_MIN - y do return nil
-	return x + y
+	if !x_ok || !y_ok do return nil, true
+	s, ok := add_checked(x, y)
+	if !ok do return nil, false
+	return s, true
 }
 
-mul_interval :: proc(x, y: Int_Interval) -> Int_Interval {
-	xl, xl_ok := x.lo.?
-	xh, xh_ok := x.hi.?
-	yl, yl_ok := y.lo.?
-	yh, yh_ok := y.hi.?
-	// Un facteur exactement nul annule tout, même un intervalle infini.
-	if (xl_ok && xh_ok && xl == 0 && xh == 0) || (yl_ok && yh_ok && yl == 0 && yh == 0) {
-		return Int_Interval{i128(0), i128(0)}
-	}
-	if !(xl_ok && xh_ok && yl_ok && yh_ok) do return Int_Interval{nil, nil}
-	lo, hi := I128_MAX, I128_MIN
-	for p in ([4][2]i128{{xl, yl}, {xl, yh}, {xh, yl}, {xh, yh}}) {
-		v, ok := mul_checked(p[0], p[1])
-		if !ok do return Int_Interval{nil, nil}
-		lo, hi = min(lo, v), max(hi, v)
-	}
-	return Int_Interval{lo, hi}
+add_checked :: proc(a, b: i128) -> (i128, bool) {
+	if b > 0 && a > I128_MAX - b do return 0, false
+	if b < 0 && a < -I128_MAX - b do return 0, false
+	return a + b, true
 }
 
 mul_checked :: proc(a, b: i128) -> (i128, bool) {
+	// Sous 2⁶³ en valeur absolue, le produit tient : pas de division 128 bits.
+	SMALL :: i128(1) << 63
+	if a > -SMALL && a < SMALL && b > -SMALL && b < SMALL do return a * b, true
 	if a == 0 || b == 0 do return 0, true
-	r := a * b
-	if r / b != a do return 0, false
-	return r, true
+	if abs(a) > I128_MAX / abs(b) do return 0, false
+	return a * b, true
+}
+
+// Ext : une borne étendue, pour multiplier des intervalles infinis.
+Ext :: struct {
+	v:   i128,
+	inf: int, // -1 : -∞, 1 : +∞, 0 : la valeur finie v
+}
+
+ext_of :: proc(b: Maybe(i128), side: int) -> Ext {
+	if v, ok := b.?; ok do return Ext{v, 0}
+	return Ext{0, side}
+}
+
+ext_sign :: proc(e: Ext) -> int {
+	if e.inf != 0 do return e.inf
+	return e.v > 0 ? 1 : (e.v < 0 ? -1 : 0)
+}
+
+// ext_mul : 0·∞ = 0, car les valeurs sont finies et seules les bornes sont des
+// limites. Un produit qui sort de l'univers devient infini, de son signe.
+ext_mul :: proc(a, b: Ext) -> (Ext, bool) {
+	sa, sb := ext_sign(a), ext_sign(b)
+	if sa == 0 || sb == 0 do return Ext{}, true
+	if a.inf != 0 || b.inf != 0 do return Ext{0, sa * sb}, true
+	p, ok := mul_checked(a.v, b.v)
+	if !ok do return Ext{0, sa * sb}, false
+	return Ext{p, 0}, true
+}
+
+ext_less :: proc(a, b: Ext) -> bool {
+	if a.inf != b.inf do return a.inf < b.inf
+	return a.inf == 0 && a.v < b.v
+}
+
+ext_bound :: proc(e: Ext) -> Maybe(i128) {
+	if e.inf != 0 do return nil
+	return e.v
+}
+
+// mul_interval : le produit d'intervalles est atteint aux coins.
+mul_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
+	xs := [2]Ext{ext_of(x.lo, -1), ext_of(x.hi, 1)}
+	ys := [2]Ext{ext_of(y.lo, -1), ext_of(y.hi, 1)}
+	lo, hi: Ext
+	exact := true
+	for a, i in xs {
+		for b, j in ys {
+			p, ok := ext_mul(a, b)
+			exact &&= ok
+			if (i == 0 && j == 0) || ext_less(p, lo) do lo = p
+			if (i == 0 && j == 0) || ext_less(hi, p) do hi = p
+		}
+	}
+	return Int_Interval{ext_bound(lo), ext_bound(hi)}, exact
 }
 
 // --- flottants : intervalles à bornes ouvertes ou fermées ---
@@ -305,8 +386,8 @@ floats_all :: proc() -> Floats {
 	return floats_of({Float_Interval{}})
 }
 
-// Une forme canonique n'a qu'un zéro : -0.0 s'écrit 0.0.
-canonical_zero :: proc(b: Maybe(f64)) -> Maybe(f64) {
+// Une forme normale n'a qu'un zéro : -0.0 s'écrit 0.0.
+normal_zero :: proc(b: Maybe(f64)) -> Maybe(f64) {
 	if v, ok := b.?; ok && v == 0 do return f64(0)
 	return b
 }
@@ -325,7 +406,7 @@ floats_of :: proc(raw: []Float_Interval) -> Floats {
 		// Une borne infinie n'est ni ouverte ni fermée : une seule écriture.
 		_, lo_finite := iv.lo.?
 		_, hi_finite := iv.hi.?
-		append(&kept, Float_Interval{canonical_zero(iv.lo), canonical_zero(iv.hi), iv.lo_open && lo_finite, iv.hi_open && hi_finite})
+		append(&kept, Float_Interval{normal_zero(iv.lo), normal_zero(iv.hi), iv.lo_open && lo_finite, iv.hi_open && hi_finite})
 	}
 	slice.sort_by(kept[:], proc(a, b: Float_Interval) -> bool {
 		al, a_ok := a.lo.?
@@ -437,27 +518,16 @@ floats_contains :: proc(a: Floats, v: f64) -> bool {
 	return floats_subset(floats_point(v), a)
 }
 
-// Le défaut : 0.0 s'il y est, sinon un élément du premier intervalle (sa borne
-// basse si elle est fermée, sinon un point intérieur).
+// Le défaut, comme pour les entiers : 0.0 s'il y est, sinon le plus petit flottant
+// du premier intervalle — sa borne basse, ou le flottant juste au-dessus d'une borne
+// ouverte ; sans borne basse, le plus grand — sa borne haute, ou juste en dessous.
 floats_default :: proc(a: Floats) -> (f64, bool) {
 	if len(a.intervals) == 0 do return 0, false
 	if floats_contains(a, 0) do return 0, true
 	iv := a.intervals[0]
-	lo, lo_ok := iv.lo.?
-	hi, hi_ok := iv.hi.?
-	switch {
-	case lo_ok && !iv.lo_open:
-		return lo, true
-	case lo_ok && hi_ok:
-		return (lo + hi) / 2, true
-	case lo_ok:
-		return lo + 1, true
-	case hi_ok && !iv.hi_open:
-		return hi, true
-	case hi_ok:
-		return hi - 1, true
-	}
-	return 0, true
+	if lo, ok := iv.lo.?; ok do return iv.lo_open ? math.nextafter(lo, math.INF_F64) : lo, true
+	hi, _ := iv.hi.? // sans aucune borne, l'intervalle contiendrait 0
+	return iv.hi_open ? math.nextafter(hi, math.NEG_INF_F64) : hi, true
 }
 
 floats_arith :: proc(op: Arith, a, b: Floats) -> Floats {
@@ -527,17 +597,17 @@ bools_point :: proc(v: bool) -> Bools {
 // --- l'ensemble mixte ---
 
 set_of_ints :: proc(i: Ints) -> Set {
-	return Set{ints = i}
+	return Set{sorts = {.Ints}, ints = i}
 }
 
 set_of_floats :: proc(f: Floats) -> Set {
-	return Set{floats = f}
+	return Set{sorts = {.Floats}, floats = f}
 }
 
 CHAR_EMPTY :: i128(-1)
 
 set_of_chars :: proc(c: Ints) -> Set {
-	return Set{chars = c}
+	return Set{sorts = {.Chars}, chars = c}
 }
 
 // chars_all : tous les caractères, le caractère vide compris.
@@ -567,11 +637,23 @@ as_strings :: proc(s: Set) -> Strings {
 }
 
 set_of_strings :: proc(s: Strings) -> Set {
-	return Set{strings = s}
+	return Set{sorts = {.Strings}, strings = s}
 }
 
 set_of_bools :: proc(b: Bools) -> Set {
-	return Set{bools = b}
+	return Set{sorts = {.Bools}, bools = b}
+}
+
+// carried : les sortes dont l'ensemble parle — celles qu'il a gardées, et celles où
+// son écriture a quelque chose.
+carried :: proc(s: Set) -> bit_set[Domain] {
+	r := s.sorts
+	if len(s.ints.intervals) > 0 do r += {.Ints}
+	if len(s.floats.intervals) > 0 do r += {.Floats}
+	if len(s.chars.intervals) > 0 do r += {.Chars}
+	if s.strings.re != nil do r += {.Strings}
+	if s.bools != {} do r += {.Bools}
+	return r
 }
 
 set_count :: proc(s: Set) -> int {
@@ -608,6 +690,7 @@ domain_count :: proc(s: Set, d: Domain) -> int {
 
 set_union :: proc(a, b: Set) -> Set {
 	return Set {
+		sorts = carried(a) | carried(b),
 		ints = ints_union(a.ints, b.ints),
 		floats = floats_union(a.floats, b.floats),
 		chars = ints_union(a.chars, b.chars),
@@ -616,8 +699,11 @@ set_union :: proc(a, b: Set) -> Set {
 	}
 }
 
+// Deux sortes différentes ne se rencontrent pas : `u8 & string` ne parle de rien,
+// c'est none ; `0 & 1` parle encore des entiers.
 set_intersect :: proc(a, b: Set) -> Set {
 	return Set {
+		sorts = carried(a) & carried(b),
 		ints = ints_intersect(a.ints, b.ints),
 		floats = floats_intersect(a.floats, b.floats),
 		chars = ints_intersect(a.chars, b.chars),
@@ -630,19 +716,31 @@ set_intersect :: proc(a, b: Set) -> Set {
 // entier sauf 5 », `~'A'` « tout caractère sauf A », `~"piro"` « toute chaîne sauf
 // piro » — jamais « tout sauf » (specs/constraints.md, Negation).
 set_complement :: proc(a: Set) -> Set {
-	r := Set{}
-	if domain_count(a, .Ints) > 0 do r.ints = ints_complement(a.ints)
-	if domain_count(a, .Floats) > 0 do r.floats = floats_complement(a.floats)
-	if domain_count(a, .Chars) > 0 do r.chars = ints_intersect(ints_complement(a.chars), chars_all())
-	if domain_count(a, .Strings) > 0 do r.strings = strings_complement(a.strings)
-	if domain_count(a, .Bools) > 0 do r.bools = ~a.bools
+	r := Set{sorts = carried(a)}
+	if .Ints in r.sorts do r.ints = ints_complement(a.ints)
+	if .Floats in r.sorts do r.floats = floats_complement(a.floats)
+	if .Chars in r.sorts do r.chars = ints_intersect(ints_complement(a.chars), chars_all())
+	if .Strings in r.sorts do r.strings = strings_complement(a.strings)
+	if .Bools in r.sorts do r.bools = ~a.bools
 	return r
+}
+
+// set_diff : a ∖ b, sorte par sorte ; a garde ses sortes.
+set_diff :: proc(a, b: Set) -> Set {
+	return Set {
+		sorts = carried(a),
+		ints = ints_intersect(a.ints, ints_complement(b.ints)),
+		floats = floats_intersect(a.floats, floats_complement(b.floats)),
+		chars = ints_intersect(a.chars, ints_complement(b.chars)),
+		strings = strings_intersect(a.strings, strings_complement(b.strings)),
+		bools = a.bools - b.bools,
+	}
 }
 
 // set_top : toutes les valeurs atomiques. C'est `..` seul : il prend la sorte de ce
 // qu'il rencontre (`.. + '_'` : toute chaîne qui finit par _).
 set_top :: proc() -> Set {
-	return Set{ints = ints_all(), floats = floats_all(), chars = chars_all(), strings = strings_all(), bools = {.False, .True}}
+	return Set{sorts = ~{}, ints = ints_all(), floats = floats_all(), chars = chars_all(), strings = strings_all(), bools = {.False, .True}}
 }
 
 set_subset :: proc(a, b: Set) -> bool {

@@ -9,8 +9,10 @@ import "core:strings"
 import "core:testing"
 
 // LES LOIS. Chaque algèbre est confrontée à un modèle brut sur des cas tirés au
-// hasard (graine fixe : les tests sont reproductibles), et chaque loi canonique
-// exige l'égalité de STRUCTURE : deux écritures du même ensemble, une seule forme.
+// hasard (graine fixe : les tests sont reproductibles). Les lois s'éprouvent par
+// les décisions que le typecheck utilise — l'inclusion, l'égalité comme double
+// inclusion — et, là où la forme normale est unique (intervalles, polynômes), par
+// la structure elle-même.
 
 ROUNDS :: 400
 
@@ -80,7 +82,7 @@ test_law_ints :: proc(t: ^testing.T) {
 		subset := true
 		for x in INT_POINTS do if in_raw(ra, x) && !in_raw(rb, x) do subset = false
 		if !subset do testing.expectf(t, !ints_subset(a, b), "%v ⊄ %v", ra, rb)
-		// lois canoniques : même structure
+		// la forme normale des intervalles est unique : les lois tiennent sur la structure
 		testing.expect(t, same_ints(ints_union(a, b), ints_union(b, a)), "union commutative")
 		testing.expect(t, same_ints(ints_intersect(a, b), ints_intersect(b, a)), "inter commutative")
 		testing.expect(t, same_ints(ints_complement(ints_complement(a)), a), "~~a = a")
@@ -93,7 +95,7 @@ test_law_ints :: proc(t: ^testing.T) {
 		a = ints_intersect(a, ints_range(nil, i128(rand.int_range(-9, 9, gen))))
 		b := ints_intersect(ints_range(i128(rand.int_range(-9, 9, gen)), nil), ints_range(nil, i128(rand.int_range(-9, 9, gen))))
 		for op in Arith {
-			r := ints_arith(op, a, b)
+			r, _ := ints_arith(op, a, b)
 			for x in -9 ..= 9 do for y in -9 ..= 9 {
 				if !ints_contains(a, i128(x)) || !ints_contains(b, i128(y)) do continue
 				v := op == .Add ? x + y : (op == .Sub ? x - y : x * y)
@@ -112,8 +114,10 @@ test_law_ints :: proc(t: ^testing.T) {
 	}
 	// les débordements deviennent des bornes infinies, jamais des valeurs fausses
 	huge := ints_range(I128_MAX - 1, I128_MAX)
-	testing.expect(t, ints_contains(ints_arith(.Mul, huge, huge), I128_MAX), "débordement de * : borne ouverte")
-	testing.expect(t, ints_contains(ints_arith(.Add, huge, huge), I128_MAX), "débordement de + : borne ouverte")
+	product, product_exact := ints_arith(.Mul, huge, huge)
+	sum, sum_exact := ints_arith(.Add, huge, huge)
+	testing.expect(t, !product_exact && ints_contains(product, I128_MAX), "débordement de * : borne ouverte, signalé")
+	testing.expect(t, !sum_exact && ints_contains(sum, I128_MAX), "débordement de + : borne ouverte, signalé")
 	testing.expect(t, ints_contains(ints_pow(ints_range(-1_000_000_000_000, 1_000_000_000_000), 4), I128_MAX), "débordement de puissance")
 }
 
@@ -176,7 +180,7 @@ test_law_floats :: proc(t: ^testing.T) {
 	testing.expect(t, same_floats(floats_point(-0.0), floats_point(0.0)), "-0.0 s'écrit 0.0")
 }
 
-// --- chaînes : automates contre l'énumération des mots de longueur ≤ 5 ---
+// --- chaînes : les décisions contre l'énumération des mots de longueur ≤ 5 ---
 
 MAX_LEN :: 5
 ALPHABET :: "abc"
@@ -194,7 +198,7 @@ all_words :: proc() -> []string {
 Words :: map[string]bool
 
 Lang :: struct {
-	dfa:   Strings,
+	lang:  Strings,
 	words: Words, // le langage restreint aux mots de longueur ≤ MAX_LEN sur ALPHABET
 	text:  string,
 }
@@ -220,27 +224,27 @@ random_lang :: proc(gen: runtime.Random_Generator, universe: []string, depth: in
 		m := make(Words)
 		for w in x.words do m[w] = true
 		for w in y.words do m[w] = true
-		return Lang{strings_union(x.dfa, y.dfa), m, fmt.tprintf("(%s | %s)", x.text, y.text)}
+		return Lang{strings_union(x.lang, y.lang), m, fmt.tprintf("(%s | %s)", x.text, y.text)}
 	case 4:
 		x, y := random_lang(gen, universe, depth - 1), random_lang(gen, universe, depth - 1)
 		m := make(Words)
 		for w in x.words do if y.words[w] do m[w] = true
-		return Lang{strings_intersect(x.dfa, y.dfa), m, fmt.tprintf("(%s & %s)", x.text, y.text)}
+		return Lang{strings_intersect(x.lang, y.lang), m, fmt.tprintf("(%s & %s)", x.text, y.text)}
 	case 5:
 		x := random_lang(gen, universe, depth - 1)
 		m := make(Words)
 		for w in universe do if !x.words[w] do m[w] = true
-		return Lang{strings_complement(x.dfa), m, fmt.tprintf("~%s", x.text)}
+		return Lang{strings_complement(x.lang), m, fmt.tprintf("~%s", x.text)}
 	case 6:
 		x, y := random_lang(gen, universe, depth - 1), random_lang(gen, universe, depth - 1)
-		return Lang{strings_concat(x.dfa, y.dfa), cat_words(x.words, y.words), fmt.tprintf("(%s + %s)", x.text, y.text)}
+		return Lang{strings_concat(x.lang, y.lang), cat_words(x.words, y.words), fmt.tprintf("(%s + %s)", x.text, y.text)}
 	case 7:
 		x := random_lang(gen, universe, depth - 1)
 		lo := rand.int_range(0, 3, gen)
 		bounded := rand.int_max(2, gen) == 0
 		hi := lo + rand.int_range(0, 3, gen)
 		counts := bounded ? ints_range(i128(lo), i128(hi)) : ints_range(i128(lo), nil)
-		r, _ := strings_repeat(x.dfa, counts)
+		r, _ := strings_repeat(x.lang, counts)
 		m := make(Words)
 		top := bounded ? hi : max(lo, MAX_LEN) + 1
 		for n in lo ..= top {
@@ -251,10 +255,10 @@ random_lang :: proc(gen: runtime.Random_Generator, universe: []string, depth: in
 		return Lang{r, m, fmt.tprintf("(%s * %v)", x.text, counts)}
 	case 8:
 		x := random_lang(gen, universe, depth - 1)
-		return Lang{strings_prefixed(x.dfa), cat_words(x.words, words_of(universe)), fmt.tprintf("(%s..)", x.text)}
+		return Lang{strings_prefixed(x.lang), cat_words(x.words, words_of(universe)), fmt.tprintf("(%s..)", x.text)}
 	case 9:
 		x := random_lang(gen, universe, depth - 1)
-		return Lang{strings_suffixed(x.dfa), cat_words(words_of(universe), x.words), fmt.tprintf("(..%s)", x.text)}
+		return Lang{strings_suffixed(x.lang), cat_words(words_of(universe), x.words), fmt.tprintf("(..%s)", x.text)}
 	}
 	return {}
 }
@@ -277,54 +281,54 @@ test_law_strings :: proc(t: ^testing.T) {
 		a := random_lang(gen, universe, 3)
 		b := random_lang(gen, universe, 2)
 		c := random_lang(gen, universe, 2)
-		// l'automate reconnaît exactement le langage
+		// l'expression reconnaît exactement le langage
 		for w in universe {
-			if strings_contains(a.dfa, w) != a.words[w] {
+			if strings_contains(a.lang, w) != a.words[w] {
 				testing.expectf(t, false, "%s : %q %v", a.text, w, a.words[w])
 				break
 			}
 		}
-		// lois canoniques : même automate
-		testing.expectf(t, strings_equal(strings_union(a.dfa, b.dfa), strings_union(b.dfa, a.dfa)), "union commutative : %s, %s", a.text, b.text)
-		testing.expectf(t, strings_equal(strings_intersect(a.dfa, b.dfa), strings_intersect(b.dfa, a.dfa)), "inter commutative : %s, %s", a.text, b.text)
-		testing.expectf(t, strings_equal(strings_complement(strings_complement(a.dfa)), a.dfa), "~~a = a : %s", a.text)
-		testing.expectf(t, strings_equal(strings_union(a.dfa, a.dfa), a.dfa), "a | a = a : %s", a.text)
+		// les lois, décidées par double inclusion
+		testing.expectf(t, strings_equal(strings_union(a.lang, b.lang), strings_union(b.lang, a.lang)), "union commutative : %s, %s", a.text, b.text)
+		testing.expectf(t, strings_equal(strings_intersect(a.lang, b.lang), strings_intersect(b.lang, a.lang)), "inter commutative : %s, %s", a.text, b.text)
+		testing.expectf(t, strings_equal(strings_complement(strings_complement(a.lang)), a.lang), "~~a = a : %s", a.text)
+		testing.expectf(t, strings_equal(strings_union(a.lang, a.lang), a.lang), "a | a = a : %s", a.text)
 		testing.expectf(
 			t,
-			strings_equal(strings_intersect(a.dfa, strings_union(b.dfa, c.dfa)), strings_union(strings_intersect(a.dfa, b.dfa), strings_intersect(a.dfa, c.dfa))),
+			strings_equal(strings_intersect(a.lang, strings_union(b.lang, c.lang)), strings_union(strings_intersect(a.lang, b.lang), strings_intersect(a.lang, c.lang))),
 			"distributivité : %s, %s, %s", a.text, b.text, c.text,
 		)
 		testing.expectf(
 			t,
-			strings_equal(strings_complement(strings_union(a.dfa, b.dfa)), strings_intersect(strings_complement(a.dfa), strings_complement(b.dfa))),
+			strings_equal(strings_complement(strings_union(a.lang, b.lang)), strings_intersect(strings_complement(a.lang), strings_complement(b.lang))),
 			"De Morgan : %s, %s", a.text, b.text,
 		)
 		testing.expectf(
 			t,
-			strings_equal(strings_concat(strings_concat(a.dfa, b.dfa), c.dfa), strings_concat(a.dfa, strings_concat(b.dfa, c.dfa))),
+			strings_equal(strings_concat(strings_concat(a.lang, b.lang), c.lang), strings_concat(a.lang, strings_concat(b.lang, c.lang))),
 			"concaténation associative : %s, %s, %s", a.text, b.text, c.text,
 		)
-		testing.expectf(t, strings_equal(strings_concat(a.dfa, strings_empty_word()), a.dfa), "a + \"\" = a : %s", a.text)
-		rep, _ := strings_repeat(a.dfa, ints_range(0, 2))
-		testing.expectf(t, strings_equal(rep, strings_union(strings_empty_word(), strings_union(a.dfa, strings_concat(a.dfa, a.dfa)))), "a * 0..2 : %s", a.text)
-		testing.expect(t, strings_subset(strings_intersect(a.dfa, b.dfa), a.dfa), "a & b ⊆ a")
+		testing.expectf(t, strings_equal(strings_concat(a.lang, strings_empty_word()), a.lang), "a + \"\" = a : %s", a.text)
+		rep, _ := strings_repeat(a.lang, ints_range(0, 2))
+		testing.expectf(t, strings_equal(rep, strings_union(strings_empty_word(), strings_union(a.lang, strings_concat(a.lang, a.lang)))), "a * 0..2 : %s", a.text)
+		testing.expect(t, strings_subset(strings_intersect(a.lang, b.lang), a.lang), "a & b ⊆ a")
 		// comptage, mot unique, défaut
 		short := make([dynamic]string)
 		for w in a.words do append(&short, w)
 		slice.sort_by(short[:], proc(x, y: string) -> bool {return len(x) != len(y) ? len(x) < len(y) : x < y})
-		n := strings_count(a.dfa)
+		n := strings_count(a.lang)
 		if len(short) > 0 do testing.expectf(t, n >= 1, "%s a des mots", a.text)
 		if n == 0 do testing.expectf(t, len(short) == 0, "%s est vide", a.text)
 		if n == 1 && len(short) == 1 {
-			w, _ := strings_single(a.dfa)
+			w, _ := strings_single(a.lang)
 			testing.expectf(t, w == short[0], "%s : mot unique %q", a.text, short[0])
 		}
 		if len(short) > 0 && !strings.contains_any(a.text, "~") {
-			d, _ := strings_default(a.dfa)
+			d, _ := strings_default(a.lang)
 			testing.expectf(t, d == short[0], "%s : défaut %q, attendu %q", a.text, d, short[0])
 		}
 	}
-	testing.expect(t, len(Strings{}.states) == 0 && strings_count(strings_empty_word()) == 1, "∅ ≠ {\"\"}")
+	testing.expect(t, strings_count(Strings{}) == 0 && strings_count(strings_empty_word()) == 1, "∅ ≠ {\"\"}")
 	testing.expect(t, strings_equal(strings_prefixed(strings_empty_word()), strings_all()), "\"\".. est toute chaîne")
 	testing.expect(t, strings_equal(strings_of_words({"ba", "a", "ab"}), strings_union(strings_point("ab"), strings_union(strings_point("a"), strings_point("ba")))), "arbre de mots")
 }
@@ -350,7 +354,7 @@ test_law_chars :: proc(t: ^testing.T) {
 	testing.expect(t, !set_equal(set_of_chars(ints_point('a')), set_of_strings(strings_point("a"))), "'a' et \"a\" sont deux valeurs")
 }
 
-// --- polynômes : forme canonique contre l'évaluation directe ---
+// --- polynômes : forme normale contre l'évaluation directe ---
 
 Tree :: struct {
 	op:          u8, // 0 feuille, '+', '-', '*'
@@ -429,15 +433,13 @@ test_law_polynomials :: proc(t: ^testing.T) {
 	for _ in 0 ..< ROUNDS {
 		tree := random_tree(gen, 3)
 		p := poly_type(tree_poly(tree))
-		// la forme canonique ne dépend pas de l'ordre des opérandes
+		// la forme normale ne dépend pas de l'ordre des opérandes
 		testing.expect(t, expr_equal(&k, p, poly_type(tree_poly(mirror(tree)))), "commutativité")
 		// elle vaut l'expression en tout point, et ses valeurs sont exactes
 		brute := make([dynamic]Atom)
 		for x in -3 ..= 3 do for y in -3 ..= 3 do for z in -3 ..= 3 {
 			env := [3]i128{i128(x), i128(y), i128(z)}
-			m := make(map[int]Atom)
-			m[0], m[1], m[2] = env[0], env[1], env[2]
-			v, ok := eval(p, m)
+			v, ok := eval(p, {env[0], env[1], env[2]})
 			testing.expectf(t, ok && v.(i128) == tree_eval(tree, env), "évaluation de %s", print_expr(p))
 			append(&brute, tree_eval(tree, env))
 		}
@@ -466,9 +468,7 @@ test_law_polynomials :: proc(t: ^testing.T) {
 				}
 				seen[int(truth)] = true
 				// la forme écrite garde la même vérité
-				m := make(map[int]Atom)
-				m[0], m[1], m[2] = i128(x), i128(y), i128(z)
-				got, ok := eval(r, m)
+				got, ok := eval(r, {i128(x), i128(y), i128(z)})
 				testing.expectf(t, ok && got.(bool) == truth, "%v de %s en (%d,%d,%d)", op, print_expr(p), x, y, z)
 			}
 			_, decided := r^.(Set)
@@ -568,11 +568,12 @@ test_law_families :: proc(t: ^testing.T) {
 	testing.expectf(t, checked >= ROUNDS / 2 && families >= ROUNDS / 8, "cas vérifiés : %d, dont tables : %d", checked, families)
 }
 
-// --- LA CANONICITÉ ELLE-MÊME : même structure ⇔ même ensemble ---
+// --- LES FORMES NORMALES ET LES DÉCISIONS ---
 //
-// Sur des paires souvent égales par construction, la structure doit être identique
-// si et seulement si les ensembles sont égaux — égalité décidée indépendamment de
-// la structure, par inclusion dans les deux sens (A ∩ ~B vide, B ∩ ~A vide).
+// Les intervalles et les polynômes ont une forme normale unique : même structure
+// ⇔ même ensemble, l'égalité étant décidée indépendamment de la structure. Les
+// chaînes et les ensembles mixtes n'en promettent pas : on éprouve directement la
+// décision d'inclusion, sur des paires égales par une loi et contre un modèle.
 
 // split_ints : le même ensemble, écrit en morceaux mélangés.
 split_ints :: proc(gen: runtime.Random_Generator, raw: []Int_Interval) -> []Int_Interval {
@@ -592,7 +593,7 @@ split_ints :: proc(gen: runtime.Random_Generator, raw: []Int_Interval) -> []Int_
 }
 
 @(test)
-test_canonical_ints :: proc(t: ^testing.T) {
+test_normal_ints :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
@@ -640,7 +641,7 @@ split_floats :: proc(gen: runtime.Random_Generator, raw: []Float_Interval) -> []
 }
 
 @(test)
-test_canonical_floats :: proc(t: ^testing.T) {
+test_normal_floats :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
@@ -670,97 +671,115 @@ test_canonical_floats :: proc(t: ^testing.T) {
 	testing.expectf(t, equal_pairs >= ROUNDS, "paires égales : %d", equal_pairs)
 }
 
+// law_pair : deux écritures du même langage, par une loi tirée au hasard.
+law_pair :: proc(gen: runtime.Random_Generator, universe: []string) -> (a, b: Strings, law: string) {
+	a = random_lang(gen, universe, 3).lang
+	x := random_lang(gen, universe, 2).lang
+	y := random_lang(gen, universe, 2).lang
+	switch rand.int_max(6, gen) {
+	case 0:
+		return a, strings_union(a, strings_intersect(a, x)), "absorption"
+	case 1:
+		return a, strings_union(strings_intersect(a, x), strings_intersect(a, strings_complement(x))), "partition"
+	case 2:
+		return a, strings_complement(strings_complement(a)), "~~a"
+	case 3:
+		return a, strings_concat(strings_empty_word(), a), "\"\" + a"
+	case 4:
+		return strings_concat(strings_concat(a, x), y), strings_concat(a, strings_concat(x, y)), "associativité"
+	}
+	r, _ := strings_repeat(a, ints_range(0, 2))
+	b, _ = strings_repeat(a, ints_range(1, 3))
+	return strings_concat(a, r), b, "a + a * 0..2"
+}
+
 @(test)
-test_canonical_strings :: proc(t: ^testing.T) {
+test_decide_strings :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
 	state: rand.Default_Random_State
 	gen := seeded(&state, 8)
 	universe := all_words()
-	equal_pairs := 0
+	refuted, included := 0, 0
 	for _ in 0 ..< ROUNDS {
-		a := random_lang(gen, universe, 3).dfa
-		x := random_lang(gen, universe, 2).dfa
-		y := random_lang(gen, universe, 2).dfa
-		b: Strings
-		switch rand.int_max(9, gen) {
-		case 0:
-			b = strings_union(a, strings_intersect(a, x))
-		case 1:
-			b = strings_union(strings_intersect(a, x), strings_intersect(a, strings_complement(x)))
-		case 2:
-			b = strings_complement(strings_complement(a))
-		case 3:
-			b = strings_concat(strings_empty_word(), a)
-		case 4:
-			// (a + x) + y contre a + (x + y)
-			a = strings_concat(strings_concat(a, x), y)
-			b = strings_concat(x, y)
-			b = strings_concat(random_lang(gen, universe, 0).dfa, b)
-			if rand.int_max(2, gen) == 0 do b = strings_concat(strings_concat(strings_point(""), a), strings_empty_word())
-		case 5:
-			// a * 1..3 contre a + a * 0..2
-			b, _ = strings_repeat(a, ints_range(1, 3))
-			r, _ := strings_repeat(a, ints_range(0, 2))
-			a = strings_concat(a, r)
-		case:
-			b = random_lang(gen, universe, 3).dfa
+		a, b, law := law_pair(gen, universe)
+		testing.expectf(t, strings_equal(a, b), "%s : %s et %s", law, print_strings(a), print_strings(b))
+		// une inclusion décidée vaut sur les mots courts ; une inclusion refusée a un
+		// témoin, dans a et hors de b
+		x := random_lang(gen, universe, 3)
+		y := random_lang(gen, universe, 3)
+		if strings_subset(x.lang, y.lang) {
+			included += 1
+			for w in x.words do testing.expectf(t, y.words[w], "%s ⊆ %s, mais pas %q", x.text, y.text, w)
+		} else {
+			refuted += 1
+			w, ok := strings_default(strings_intersect(x.lang, strings_complement(y.lang)))
+			testing.expectf(t, ok && strings_contains(x.lang, w) && !strings_contains(y.lang, w), "%s ⊄ %s : témoin %q", x.text, y.text, w)
 		}
-		semantic := strings_subset(a, b) && strings_subset(b, a)
-		if semantic do equal_pairs += 1
-		testing.expectf(t, strings_equal(a, b) == semantic, "structure %v, langages égaux %v :\n%s\n%s", strings_equal(a, b), semantic, print_strings(a), print_strings(b))
 	}
-	testing.expectf(t, equal_pairs >= ROUNDS / 3, "paires égales : %d", equal_pairs)
+	testing.expectf(t, refuted >= ROUNDS / 8 && included >= ROUNDS / 8, "inclusions refusées : %d, décidées : %d", refuted, included)
 }
 
-// same_structure : deux ensembles écrits pareil, composante par composante.
-same_structure :: proc(a, b: Set) -> bool {
-	return same_ints(a.ints, b.ints) &&
-		same_floats(a.floats, b.floats) &&
-		same_ints(a.chars, b.chars) &&
-		strings_equal(a.strings, b.strings) &&
-		a.bools == b.bools
+random_set :: proc(gen: runtime.Random_Generator, universe: []string) -> Set {
+	s: Set
+	if rand.int_max(2, gen) == 0 do s.ints, _ = random_ints(gen)
+	if rand.int_max(3, gen) == 0 do s.floats, _ = random_floats(gen)
+	if rand.int_max(3, gen) == 0 do s.chars = ints_intersect(ints_range(CHAR_EMPTY, 'z'), ints_range(i128(rand.int_range(90, 110, gen)), nil))
+	if rand.int_max(3, gen) == 0 do s.strings = random_lang(gen, universe, 2).lang
+	if rand.int_max(3, gen) == 0 do s.bools = rand.choice([]Bools{{}, {.True}, {.False}, {.False, .True}}, gen)
+	return s
+}
+
+// sample_atoms : des atomes de chaque sorte, pour comparer deux ensembles point par point.
+sample_atoms :: proc(universe: []string) -> []Atom {
+	out := make([dynamic]Atom)
+	for x in INT_POINTS do append(&out, x)
+	for x in FLOAT_BOUNDS do append(&out, x, x + 0.25)
+	append(&out, Char_Atom(CHAR_EMPTY))
+	for c in i128(85) ..= 125 do append(&out, Char_Atom(c))
+	for w in universe do append(&out, w)
+	append(&out, false, true)
+	return out[:]
+}
+
+has_atom :: proc(s: Set, a: Atom) -> bool {
+	return set_subset(set_of_atoms({a}), s)
 }
 
 @(test)
-test_canonical_sets :: proc(t: ^testing.T) {
+test_decide_sets :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
 	state: rand.Default_Random_State
 	gen := seeded(&state, 9)
 	universe := all_words()
-	random_set :: proc(gen: runtime.Random_Generator, universe: []string) -> Set {
-		s: Set
-		if rand.int_max(2, gen) == 0 do s.ints, _ = random_ints(gen)
-		if rand.int_max(3, gen) == 0 do s.floats, _ = random_floats(gen)
-		if rand.int_max(3, gen) == 0 do s.chars = ints_intersect(ints_range(CHAR_EMPTY, 'z'), ints_range(i128(rand.int_range(90, 110, gen)), nil))
-		if rand.int_max(3, gen) == 0 do s.strings = random_lang(gen, universe, 2).dfa
-		if rand.int_max(3, gen) == 0 do s.bools = rand.choice([]Bools{{}, {.True}, {.False}, {.False, .True}}, gen)
-		return s
-	}
-	equal_pairs := 0
+	atoms := sample_atoms(universe)
 	for _ in 0 ..< ROUNDS {
 		a := random_set(gen, universe)
 		x := random_set(gen, universe)
 		b: Set
-		switch rand.int_max(5, gen) {
+		switch rand.int_max(3, gen) {
 		case 0:
 			b = set_union(a, set_intersect(a, x))
 		case 1:
-			b = set_union(set_intersect(a, x), set_intersect(a, set_complement(x)))
+			b = set_intersect(set_union(a, x), a) // le complément ne vaut que dans les sortes de x : pas de partition ici
 		case 2:
-			b = set_union(x, a) // commuté, puis comparé à a | x
+			b = set_union(x, a)
 			a = set_union(a, x)
-		case:
-			b = random_set(gen, universe)
 		}
-		semantic := set_equal(a, b)
-		if semantic do equal_pairs += 1
-		testing.expectf(t, same_structure(a, b) == semantic, "%s et %s : structure %v, égaux %v", print_set(a), print_set(b), same_structure(a, b), semantic)
+		testing.expectf(t, set_equal(a, b), "%s et %s", print_set(a), print_set(b))
+		// une inclusion décidée vaut en chaque point ; un point de x hors de y la refuse
+		y := random_set(gen, universe)
+		decided := set_subset(x, y)
+		for p in atoms {
+			if has_atom(x, p) && !has_atom(y, p) {
+				testing.expectf(t, !decided, "%s ⊆ %s, mais pas %v", print_set(x), print_set(y), p)
+				break
+			}
+		}
 	}
-	testing.expectf(t, equal_pairs >= ROUNDS / 3, "paires égales : %d", equal_pairs)
 }
 
 // Les polynômes : même forme ⇔ même polynôme. L'identité est décidée sans la forme,
@@ -788,7 +807,7 @@ rewrite :: proc(gen: runtime.Random_Generator, t: ^Tree) -> ^Tree {
 }
 
 @(test)
-test_canonical_polynomials :: proc(t: ^testing.T) {
+test_normal_polynomials :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
@@ -815,7 +834,7 @@ test_canonical_polynomials :: proc(t: ^testing.T) {
 // Les tables : deux tables qui sont la même fonction ont la même écriture, même
 // quand l'une a été construite avec une inconnue dont elle ne dépend pas.
 @(test)
-test_canonical_families :: proc(t: ^testing.T) {
+test_normal_families :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)

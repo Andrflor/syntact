@@ -1,10 +1,16 @@
 # Le kernel des types — propriétés algébriques et preuves
 
-> Ce document prouve, de bout en bout, les propriétés du kernel (`kernel/`) :
-> que chaque type a une écriture unique (canonicité), que `type_of` ne ment jamais
-> sur les valeurs possibles (correction), et que la vérification n'accepte jamais
-> une couleur violée (sûreté). Chaque théorème renvoie au code qui le réalise et au
-> test qui le vérifie. Les limites sont dites, pas cachées (§7).
+> Ce document prouve, de bout en bout, ce dont le typecheck a besoin (`kernel/`) :
+> - les **décisions** sur les types sont exactes : appartenance, inclusion, égalité
+>   comme double inclusion, « est un singleton » ;
+> - `type_of` ne ment jamais sur les valeurs possibles (**correction**) ;
+> - la vérification n'accepte jamais une couleur violée (**sûreté**).
+>
+> Les types n'ont pas d'écriture unique, et n'en ont pas besoin. Ils ont une
+> **forme normale simple**, choisie pour que ces décisions soient faciles. Elle est
+> unique là où cela ne coûte rien (intervalles, polynômes). Chaque théorème renvoie
+> au code qui le réalise et au test qui le vérifie. Les limites sont dites, pas
+> cachées (§7).
 
 ---
 
@@ -16,9 +22,15 @@
 - Un **singleton** est un type à un seul élément ; son **élément** est cette valeur.
 - Une **couleur** `C` d'un binding `C:x -> v` est l'élément du singleton
   `type_of(C)` ; elle désigne un ensemble `⟦C⟧`.
-- « Canonique » : une fonction `N` des écritures vers les représentations telle que
-  **`N(A) = N(B)` ⇔ `A` et `B` désignent le même ensemble** (égalité de structure
-  ⇔ égalité sémantique).
+- Le typecheck ne demande que trois décisions :
+
+  ```
+  is_singleton(type_of(C))                 la couleur désigne un seul ensemble
+  subset(A, B)   ⇔  A ∩ ~B = ∅             les valeurs possibles sont admises
+  equal(A, B)    ⇔  subset(A, B) ∧ subset(B, A)
+  ```
+
+  Aucune ne lit la structure d'une écriture : seulement l'ensemble qu'elle désigne.
 
 ---
 
@@ -44,16 +56,16 @@ confusion entre « la valeur `0..255` » et « une valeur parmi `0..255` ».
 
 ---
 
-## 2. Les ensembles d'atomes : une algèbre de Boole par sorte, canonique
+## 2. Les ensembles d'atomes : une algèbre de Boole par sorte, l'inclusion décidée
 
 Un ensemble d'atomes est un quintuplet `(Z, R, C, S, B)`, une composante par sorte
 (`Set`, `set.odin`). Les opérations se font composante par composante. Le
 complément se prend dans les sortes que l'ensemble porte : `~5` est « tout entier
 sauf 5 » (spécification, `specs/constraints.md`). Dans chaque sorte, `∪ ∩ ~`
-forment une algèbre de Boole. L'inclusion se décide par `A ∩ ~B = ∅`, sorte par
-sorte.
+forment une algèbre de Boole. L'inclusion se décide sorte par sorte, par
+`A ∩ ~B = ∅`.
 
-### Théorème 2.1 — entiers (et caractères) : écriture unique
+### Théorème 2.1 — entiers (et caractères) : forme normale unique
 
 > Toute union finie d'intervalles de `ℤ`, bornes éventuellement infinies, s'écrit
 > d'une seule façon comme une suite d'intervalles **non vides, triés, disjoints et
@@ -68,11 +80,18 @@ sorte.
   maximales d'un ensemble ne dépendent que de l'ensemble, donc deux écritures
   normales du même ensemble ont les mêmes intervalles, dans le même ordre. ∎
 
+Le vide est la suite vide : `A ∩ ~B = ∅` se lit directement.
+
+**L'univers.** Les entiers finis vivent dans `[-(2¹²⁷-1), 2¹²⁷-1]`. Cet univers est
+symétrique : la négation n'y déborde jamais. Au bord, une borne finie et une borne
+infinie désignent les mêmes valeurs ; la forme normale écrit la borne infinie,
+sauf pour le point du bord lui-même (`at_edges`), ce qui garde l'unicité.
+
 *Code* : `ints_of`, qui établit l'invariant. *Tests* : `is_normal`,
-`test_law_ints`, `test_canonical_ints`. Les caractères sont le même ensemble sur
+`test_law_ints`, `test_normal_ints`. Les caractères sont le même ensemble sur
 `[ε_c, 0x10FFFF]`.
 
-### Théorème 2.2 — flottants : écriture unique sur les réels
+### Théorème 2.2 — flottants : forme normale unique sur les réels
 
 > Toute union finie d'intervalles de `ℝ`, bornes ouvertes ou fermées, éventuellement
 > infinies, s'écrit d'une seule façon comme une suite d'intervalles non vides, triés,
@@ -82,48 +101,83 @@ sorte.
 *Preuve.* C'est l'argument de 2.1 sur les composantes connexes de `ℝ`. Deux
 conventions rendent l'écriture des bornes unique :
 - une borne infinie ne porte pas de drapeau ouvert/fermé ;
-- `-0.0` s'écrit `0.0`.
+- `-0.0` s'écrit `0.0`. ∎
 
-Avant ces conventions, une même composante avait deux écritures ; le test de
-canonicité l'a détecté et c'est corrigé. ∎
+*Code* : `floats_of`, `normal_zero`. *Tests* : `test_law_floats`,
+`test_normal_floats`.
 
-*Code* : `floats_of`, `canonical_zero`. *Tests* : `test_law_floats`,
-`test_canonical_floats`.
+### Théorème 2.3 — chaînes : l'inclusion est décidée exactement
 
-### Théorème 2.3 — chaînes : écriture unique (Myhill–Nerode)
+Un ensemble de chaînes est un langage régulier, gardé sous la forme de
+l'expression qui l'écrit (`Regex`, `regular.odin`) :
 
-> Tout langage régulier a une seule représentation : l'automate déterministe minimal
-> sans état mort, dont les états sont numérotés en largeur depuis l'initial en
-> suivant les arêtes dans l'ordre des caractères, et dont les arêtes voisines vers le
-> même état sont fusionnées.
+```
+"a" | "ab"     Words    un ensemble fini de mots
+'a'..'z'       Class    un mot d'une lettre dans la plage
+x + y          Cat      x | y   Alt      x & y   And
+~x             Not      (~∅ : toute chaîne)
+x * 2..4       Repeat   par un ensemble de comptes naturels
+```
 
-*Preuve.*
-- **Myhill–Nerode.** Un langage régulier `L` a un automate minimal unique à
-  isomorphisme près : ses états sont les classes de la congruence de Nerode. Retirer
-  l'état mort (celui de la classe des mots sans suffixe acceptant) garde l'unicité.
-- **`minimize` calcule cet automate.** On ne garde que les états accessibles et
-  vivants. Le raffinement de Moore part de la partition
-  {acceptants, non acceptants} et sépare deux états dès que leurs transitions mènent
-  à des classes différentes. Il converge vers l'équivalence de Nerode sur cet
-  automate. Les signatures fusionnent les plages voisines, donc deux états de même
-  comportement dont les plages sont découpées différemment ont la même signature.
-- **La numérotation retire l'isomorphisme.** Un parcours en largeur depuis
-  l'initial, qui visite les arêtes par caractère croissant, assigne un numéro à
-  chaque état en fonction du seul langage. Deux automates minimaux isomorphes
-  reçoivent donc la même numérotation, c'est-à-dire la même structure. ∎
+> **(a)** Chaque construction (`strings_union`, `_intersect`, `_complement`,
+> `_concat`, `_repeat`, `_prefixed`, `_suffixed`) rend une expression du langage
+> attendu.
+>
+> **(b)** `strings_subset(A, B)` est vrai si et seulement si `L(A) ⊆ L(B)`.
 
-*Code* : `minimize`, `signature`, `determinize`, `product` (`regular.odin`).
-*Tests* : `test_law_strings` (appartenance contre l'énumération des mots de
-longueur ≤ 5), `test_canonical_strings`.
+*Preuve de (a).* Chaque constructeur applique des réécritures, et chacune garde le
+langage :
+- l'aplatissement de `+`, `|` et `&` (associativité) ;
+- ∅ absorbant pour `+` et `&`, neutre pour `|` ;
+- `""` neutre pour `+` ;
+- la fusion de deux mots voisins dans `+` ;
+- la réunion des ensembles finis de mots dans `|` ;
+- un doublon d'écriture retiré dans `|` et `&` (idempotence) ;
+- `~~x = x` ;
+- `Words & X` = les mots de `Words` que `X` reconnaît (décidé par (b)) ;
+- `x * {0} = ""`, `x * {1} = x`, `w * {n} = wⁿ` ;
+- les comptes négatifs retirés (ils n'existent pas). ∎
+
+*Preuve de (b).* L'automate est construit au moment de décider, jamais gardé
+(`dfa_of`) :
+1. **Construction de Thompson** (`fragment`). Par induction sur l'expression, le
+   fragment de `x` reconnaît `L(x)` entre son entrée et sa sortie. On a
+   `L^{a..b} = L^a·(ε|L)^{b-a}` et `L^{a..} = L^a·L*`. `And` et `Not` y entrent par
+   leur automate déterministe, recopié.
+2. **Déterminisation** par sous-ensembles (`determinize`). Elle découpe les plages
+   de caractères en intervalles élémentaires et garde le langage (Rabin–Scott).
+3. **Complément** (`dfa_complement`) : on complète l'automate déterministe par un
+   puits, puis on inverse l'acceptation. **Intersection** (`dfa_intersect`) :
+   l'automate des paires.
+4. **Émondage** (`trim`). On garde les états accessibles qui mènent à un état
+   acceptant. Le langage ne change pas. Le langage est vide si et seulement s'il ne
+   reste aucun état.
+
+Donc `L(A) ⊆ L(B)` ⇔ `L(A) ∩ ~L(B) = ∅` ⇔ l'automate émondé de `A & ~B` est vide.
+Quand `A` est un ensemble fini de mots, on teste chaque mot sur l'automate de `B`,
+ce qui revient au même. ∎
+
+**Lectures.** Toutes les autres lectures se font sur l'automate émondé et ne
+dépendent que du langage, jamais de l'écriture :
+- `strings_count` : un cycle dans l'automate émondé signifie une infinité de mots ;
+- `strings_default` : le plus court mot, puis le plus petit en ordre des points de code ;
+- `strings_words`.
+
+*Tests* :
+- `test_law_strings` : l'appartenance contre l'énumération des mots de longueur
+  ≤ 5 ; les lois décidées par double inclusion ; le compte, le mot unique, le défaut ;
+- `test_decide_strings` : des paires égales par une loi ; une inclusion décidée vaut
+  sur les mots courts ; une inclusion refusée a un témoin, dans `A` et hors de `B`.
 
 ### Théorème 2.4 — ensembles mixtes
 
-> L'écriture d'un ensemble mixte est unique.
+> `set_subset(A, B)` est vrai si et seulement si `A ⊆ B`.
 
-*Preuve.* Les sortes sont disjointes. Un ensemble est donc la donnée de ses cinq
-composantes, chacune unique par 2.1 à 2.3. Le défaut ne dépend pas de l'ordre
-d'écriture : on prend la première sorte non vide dans un ordre fixe. ∎
-*Test* : `test_canonical_sets`.
+*Preuve.* Les sortes sont disjointes : `A ⊆ B` si et seulement si l'inclusion vaut
+dans chaque sorte, et chacune est décidée par 2.1 à 2.3. Le défaut ne dépend que
+de l'ensemble. On prend la première sorte non vide dans un ordre fixe, puis son
+élément distingué, qui est une fonction de la composante (2.1–2.3). ∎
+*Tests* : `test_decide_sets`, `test_law_defaults`.
 
 ### Clôture
 
@@ -131,9 +185,9 @@ d'écriture : on prend la première sorte non vide dans un ordre fixe. ∎
   d'intervalles. L'arithmétique `+ - *` est sur-approchée par intervalles : c'est
   un sur-ensemble, voir §4.
 - **Chaînes.** Les langages réguliers sont clos par `∪ ∩ ~`, par la concaténation et
-  par la répétition `L^S` où `S` est une union finie d'intervalles de `ℕ` :
-  `L^{a..b} = L^a·(ε|L)^{b-a}` et `L^{a..} = L^a·L*`. Les plages de caractères
-  `'a'..'z'`, les préfixes `p..` et les suffixes `..s` sont réguliers.
+  par la répétition `L^S`, où `S` est une union finie d'intervalles de `ℕ`. Les
+  plages de caractères `'a'..'z'`, les préfixes `p..` et les suffixes `..s` sont
+  réguliers.
 - **Caractères.** Ils se plongent dans les chaînes (un caractère comme la chaîne
   d'une lettre, `ε_c` comme `""`) pour `+`, `*`, et pour l'admission par une
   couleur `string`.
@@ -144,8 +198,10 @@ d'écriture : on prend la première sorte non vide dans un ordre fixe. ∎
 
 Une inconnue est un symbole `??k` qui porte l'ensemble de ses valeurs possibles.
 Une inconnue dont l'ensemble n'a qu'une valeur est cette valeur (`new_symbol`).
+Ici, la forme normale sert la **précision** : `n - n` doit valoir `0`, pas
+`-255..255`.
 
-### Théorème 3.1 — entiers : écriture unique des polynômes
+### Théorème 3.1 — entiers : forme normale unique des polynômes
 
 > Tout polynôme de `ℤ[??₀, ??₁, …]` a une seule écriture `Σ cᵢ·mᵢ + c`, où les
 > monômes `mᵢ` sont distincts et triés (par degré, puis par ids), et où les
@@ -153,13 +209,14 @@ Une inconnue dont l'ensemble n'a qu'une valeur est cette valeur (`new_symbol`).
 
 *Preuve.* Les monômes forment une base du `ℤ`-module `ℤ[X]` : la décomposition sur
 une base est unique. L'ordre total fixé sur les monômes rend l'écriture unique.
-`poly_add`, `poly_sub` et `poly_mul` (`canon.odin`) calculent dans cette base et
+`poly_add`, `poly_sub` et `poly_mul` (`unknown.odin`) calculent dans cette base et
 renormalisent : ils trient, fusionnent les monômes égaux et retirent les zéros. ∎
 
-*Tests* : `test_law_polynomials` (évaluation en tout point d'un domaine ;
-commutativité ; `(a+b)(a-b) = a² - b²`), `test_canonical_polynomials` (même forme
-⇔ même polynôme, l'identité étant décidée par évaluation en des points aléatoires,
-lemme de Schwartz–Zippel).
+*Tests* :
+- `test_law_polynomials` : évaluation en tout point d'un domaine ; commutativité ;
+  `(a+b)(a-b) = a² - b²` ;
+- `test_normal_polynomials` : même forme ⇔ même polynôme, l'identité étant décidée
+  par évaluation en des points aléatoires (lemme de Schwartz–Zippel).
 
 ### Théorème 3.2 — comparaisons entières
 
@@ -179,45 +236,41 @@ exactes de `p`, sur la même énumération que le §4. ∎
 écrite garde la vérité en tout point, et que la comparaison est décidée si et
 seulement si sa vérité est constante.
 
-### Théorème 3.3 — chaînes : écriture unique des mots
+### Théorème 3.3 — chaînes inconnues : forme normale des mots
 
-> Une concaténation dont des parties sont inconnues a une seule écriture : la suite
-> aplatie de ses parties, les littéraux voisins fusionnés et le mot vide retiré.
+> Une concaténation dont des parties sont inconnues s'écrit comme la suite aplatie
+> de ses parties, les littéraux voisins fusionnés et le mot vide retiré.
 
 *Preuve.* C'est la forme normale du monoïde libre engendré par les littéraux et les
 symboles, modulo l'associativité de la concaténation et la fusion des littéraux. ∎
 
 ### Théorème 3.4 — flottants inconnus
 
-> Deux expressions flottantes ont la même écriture si et seulement si elles sont
-> égales modulo la commutativité de `+` et de `*`, `-(-x) = x`, `a - b = a + (-b)`
-> et `x·1.0 = x`.
+> Deux expressions flottantes ont la même écriture si elles sont égales modulo la
+> commutativité de `+` et de `*`, `-(-x) = x`, `a - b = a + (-b)` et `x·1.0 = x`.
 
-*Preuve.* Ces lois sont exactes en IEEE 754. Les opérandes sont ordonnés par une
-écriture canonique, et les constructeurs appliquent ces lois et aucune autre. ∎
+*Preuve.* Ces lois sont exactes en IEEE 754. Les opérandes sont ordonnés par leur
+écriture, et les constructeurs appliquent ces lois et aucune autre. ∎
 L'associativité n'est **pas** une loi IEEE : elle n'est pas appliquée (§7).
 
 ### Théorème 3.5 — ensembles qui dépendent d'inconnues
 
 > Un ensemble qui dépend d'inconnues énumérables est une fonction des valeurs des
-> inconnues vers les ensembles. Il a une seule écriture : la table de ses valeurs,
-> restreinte aux inconnues dont elle dépend vraiment (dans un ordre fixe, les valeurs
-> énumérées dans l'ordre de leur ensemble), chaque entrée étant canonique par §2.
-> Une table sans inconnue est son ensemble.
+> inconnues vers les ensembles. Il s'écrit comme la table de ses valeurs, restreinte
+> aux inconnues dont elle dépend vraiment. **Une table constante est son ensemble** :
+> c'est un singleton, donc une couleur possible.
 
 *Preuve.*
-- **Les inconnues retenues sont fixées.** Une fonction dépend d'une inconnue s'il
-  existe deux affectations qui ne diffèrent qu'en elle et donnent des ensembles
-  différents. C'est une propriété de la fonction : deux tables égales retiennent les
-  mêmes inconnues, et `prune` les retire toutes. Avant `prune`, une table construite
-  en passant par une inconnue inutile s'écrivait autrement ; c'est corrigé.
-- **Les entrées sont fixées.** Sur les mêmes inconnues, la table est la fonction
-  elle-même, lue dans un ordre fixe. ∎
+- Une fonction dépend d'une inconnue s'il existe deux affectations qui ne diffèrent
+  qu'en elle et donnent des ensembles différents. `prune` compare les entrées par
+  double inclusion (§2), et retire exactement les inconnues dont la table ne dépend
+  pas.
+- Sans inconnue retenue, la fonction est constante : c'est l'ensemble. ∎
 
 La corrélation est gardée : `(n | 6) & (n | 7)` vaut `{n}` pour chaque n.
 *Code* : `set_operation`, `family_expr`, `prune` (`family.odin`). *Tests* :
 `test_law_families` (la table contre le calcul direct, pour chaque affectation),
-`test_canonical_families`.
+`test_normal_families`.
 
 ---
 
@@ -239,7 +292,7 @@ ou sur-approchée. Pour une table, ce sont ses entrées. Pour une enveloppe
   correct par induction, dans l'ordre (un binding ne voit que ceux du dessus) ;
 - **`s.x`, `s!`** : on lit le type de la dernière occurrence de `x`, ou de la
   première production, qui contient sa valeur par induction ;
-- **opérateur sur des valeurs** : la forme canonique est une équivalence (§3), donc
+- **opérateur sur des valeurs** : la forme normale est une équivalence (§3), donc
   elle a la même valeur en `σ`. Ses valeurs possibles sont soit l'énumération exacte
   sur toutes les affectations, qui contient donc `σ`, soit une sur-approximation par
   intervalles (arithmétique d'intervalles, qui contient tout résultat exact,
@@ -265,7 +318,8 @@ ou sur-approchée. Pour une table, ce sont ses entrées. Pour une enveloppe
 2. **Les valeurs possibles contiennent la valeur réelle.** Par le théorème 4.1,
    `⟦v⟧σ` est une valeur possible de `type_of(v)` ; `values_of` en donne un
    sur-ensemble.
-3. **L'admission.** `check` vérifie que chaque valeur possible est admise par `⟦C⟧` :
+3. **L'admission** est une inclusion, décidée exactement (§2). `check` vérifie que
+   chaque valeur possible est admise par `⟦C⟧` :
    - un atome doit être élément de la couleur ;
    - `none` n'est admis que par la couleur `none` ;
    - un caractère est admis par une couleur de chaînes ;
@@ -280,41 +334,48 @@ les valeurs de ses inconnues. Les preuves `true:p -> …` en sont un cas particu
 
 ---
 
-## 6. Les lois, vérifiées structurellement
+## 6. Les lois
 
-Par la canonicité, toute loi vraie sur les ensembles est vraie **sur l'écriture** :
-les deux membres ont la même structure, sans calcul supplémentaire.
+Une loi vraie sur les ensembles est vérifiée par la décision d'égalité (double
+inclusion). Pour les intervalles et les polynômes, la forme normale étant unique,
+elle est aussi vérifiée sur la structure.
 
 | Loi | Où elle est vérifiée |
 |---|---|
-| `A ∪ B = B ∪ A`, `A ∩ B = B ∩ A` | `test_law_*`, `test_canonical_sets` |
-| `A ∪ A = A`, absorption `A ∪ (A ∩ X) = A` | `test_law_strings`, `test_canonical_*` |
+| `A ∪ B = B ∪ A`, `A ∩ B = B ∩ A` | `test_law_*`, `test_decide_sets` |
+| `A ∪ A = A`, absorption `A ∪ (A ∩ X) = A` | `test_law_strings`, `test_decide_*`, `test_normal_*` |
 | `~~A = A`, De Morgan | `test_law_ints`, `test_law_floats`, `test_law_strings` |
 | `A ∩ (B ∪ C) = (A ∩ B) ∪ (A ∩ C)` | `test_law_strings` |
-| `(A ∩ X) ∪ (A ∩ ~X) = A` | `test_canonical_*` |
-| `(A + B) + C = A + (B + C)`, `A + "" = A` | `test_law_strings`, `test_canonical_strings` |
-| `A * 0..2 = "" ∪ A ∪ AA`, `A * 1..3 = A + A * 0..2` | `test_law_strings`, `test_canonical_strings` |
+| `(A ∩ X) ∪ (A ∩ ~X) = A` (X de même sorte) | `test_normal_*`, `test_decide_strings` |
+| `(A + B) + C = A + (B + C)`, `A + "" = A` | `test_law_strings`, `test_decide_strings` |
+| `A * 0..2 = "" ∪ A ∪ AA`, `A * 1..3 = A + A * 0..2` | `test_law_strings`, `test_decide_strings` |
 | `2|1 = 2..1`, `2|"a"|3..4 = "a"|2..4` | `kernel_test.odin` |
-| `n - n = 0`, `(a+b)(a-b) = a² - b²`, distributivité | `test_law_polynomials`, `test_canonical_polynomials` |
+| `n - n = 0`, `(a+b)(a-b) = a² - b²`, distributivité | `test_law_polynomials`, `test_normal_polynomials` |
 
 ---
 
 ## 7. Limites, dites
 
-1. **Polynômes et comparaisons.** Ils sont canoniques en tant que **polynômes**, pas en
-   tant que fonctions sur le domaine des inconnues : `n² - n` et `0` coïncident sur
-   n ∈ {0,1} mais s'écrivent différemment, et de même `n < 3` et `n² < 9` sur `u8`.
-   Les **valeurs** restent exactes (énumération), donc la vérification n'est pas
-   affectée. Seule l'égalité des formes l'est.
-2. **Flottants.** Leurs ensembles sont canoniques sur les réels, pas sur les valeurs
-   f64 discrètes. Une expression flottante inconnue n'est canonique qu'aux lois IEEE
-   exactes près (3.4).
+1. **Polynômes et comparaisons.** Leur forme est unique en tant que **polynômes**, pas
+   en tant que fonctions sur le domaine des inconnues : `n² - n` et `0` coïncident
+   sur n ∈ {0,1} mais s'écrivent différemment, et de même `n < 3` et `n² < 9` sur
+   `u8`. Les **valeurs** restent exactes (énumération), donc la vérification n'est
+   pas affectée. Seule l'égalité des formes l'est.
+2. **Flottants.** Leurs ensembles sont des ensembles de réels, pas de valeurs f64
+   discrètes. Une expression flottante inconnue n'est réduite qu'aux lois IEEE
+   exactes (3.4).
 3. **Enveloppes.** `{-> ⊆ U}` est une sur-approximation. Elle n'est jamais utilisée
    pour affirmer une égalité ou une inclusion de types, ni comme couleur.
-4. **Limites de taille.** Au-delà de 65 536 affectations, on n'énumère plus : les
-   valeurs sont sur-approchées. Au-delà de 4 096 répétitions, un automate exact
-   n'est pas construit : c'est une erreur explicite, jamais une approximation de
-   couleur.
+4. **Limites de taille.**
+   - Au-delà de 65 536 affectations, on n'énumère plus : les valeurs sont
+     sur-approchées.
+   - Au-delà de 4 096 répétitions, une répétition n'est pas construite.
+   - Un littéral, ou un calcul exact sur des valeurs ou des ensembles, qui sortirait
+     de l'univers des entiers (2.1) n'est pas calculé.
+
+   Ces trois cas sont des erreurs explicites (`Unsupported`), jamais une
+   approximation de couleur. Seule une enveloppe de valeurs (§4) qui sort de
+   l'univers devient infinie de ce côté, ce qui est une sur-approximation sûre.
 5. **Pas encore dans le kernel.** Les propriétés ci-dessus portent sur ce que le
    kernel implémente. Le carve, les patterns, la récursion, les trous `<-`,
    l'algèbre des scopes (`|` et `&` de formes) et les effets restent à prouver de la
@@ -327,13 +388,13 @@ les deux membres ont la même structure, sans calcul supplémentaire.
 
 | Propriété | Code | Tests |
 |---|---|---|
-| 2.1 entiers, caractères | `set.odin` : `ints_of` | `test_law_ints`, `test_canonical_ints` |
-| 2.2 flottants | `set.odin` : `floats_of` | `test_law_floats`, `test_canonical_floats` |
-| 2.3 chaînes | `regular.odin` : `minimize` | `test_law_strings`, `test_canonical_strings` |
-| 2.4 mixtes | `set.odin` | `test_canonical_sets` |
-| 3.1–3.4 inconnues | `canon.odin` | `test_law_polynomials`, `test_canonical_polynomials`, `kernel_test.odin` |
-| 3.5 tables | `family.odin` | `test_law_families`, `test_canonical_families` |
+| 2.1 entiers, caractères | `set.odin` : `ints_of` | `test_law_ints`, `test_normal_ints`, `test_law_chars*` |
+| 2.2 flottants | `set.odin` : `floats_of` | `test_law_floats`, `test_normal_floats`, `test_law_float_arith` |
+| 2.3 chaînes | `regular.odin` : constructeurs, `dfa_of`, `trim` | `test_law_strings`, `test_decide_strings` |
+| 2.4 mixtes | `set.odin` | `test_decide_sets`, `test_law_defaults`, `test_law_mixed_complement` |
+| 3.1–3.4 inconnues | `unknown.odin` | `test_law_polynomials`, `test_normal_polynomials`, `test_law_float_terms`, `test_law_words` |
+| 3.5 tables | `family.odin` | `test_law_families`, `test_normal_families`, `test_law_envelopes` |
 | 4.1 correction | `type_of.odin`, `op.odin` | `test_law_*`, corpus `test/typecheck` |
-| 5.1 sûreté | `check.odin` | corpus `test/typecheck` (381 cas), `kernel_test.odin` |
+| 5.1 sûreté | `check.odin` | `test_law_admission`, corpus `test/typecheck`, `kernel_test.odin` |
 
 `odin test kernel` exécute tout.

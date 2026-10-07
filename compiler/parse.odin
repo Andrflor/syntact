@@ -1368,7 +1368,11 @@ parse_identifier :: proc(parser: ^Parser) -> Node_Index {
 		if src[i] == '#' {
 			name_span.end = i
 			ord, ok := strconv.parse_int(string(src[i + 1:span.end]))
-			if ok do ordinal = i16(ord)
+			if ok && ord <= int(max(i16)) {
+				ordinal = i16(ord)
+			} else {
+				error_at_current(parser, "Ordinal too large")
+			}
 			break
 		}
 	}
@@ -1492,6 +1496,7 @@ parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 		data.identifier = Identifier_Data {
 			name    = EMPTY_SPAN,
 			capture = capture_span,
+			ordinal = -1,
 		}
 		return add_node(parser, .Identifier, data, Span{span_start, span_end})
 	}
@@ -2518,6 +2523,7 @@ parse_reference :: proc(parser: ^Parser) -> Node_Index {
 		prop_data.identifier = Identifier_Data {
 			name    = prop_span,
 			capture = EMPTY_SPAN,
+			ordinal = -1,
 		}
 		prop_id := add_node(parser, .Identifier, prop_data, prop_span)
 
