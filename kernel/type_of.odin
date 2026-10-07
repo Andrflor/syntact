@@ -76,32 +76,60 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 
 // type_scope construit le scope typé, binding par binding, dans l'ordre : chaque
 // binding est typé en voyant ceux du dessus. La case existe avant d'être typée ;
-// une ref qui la trouve encore vide est une récursion.
-type_scope :: proc(k: ^Kernel, s: ^Scope, env: ^Scope) -> ^Scope {
+// une ref qui la trouve encore vide est une récursion. `shape` : la forme que la
+// couleur attend, quand ce scope est la valeur d'un binding coloré par elle.
+type_scope :: proc(k: ^Kernel, s: ^Scope, env: ^Scope, shape: ^Scope = nil) -> ^Scope {
 	t := new_scope(env, s.span)
 	append(&k.typed, t)
-	for &b in s.bindings {
+	for &b, i in s.bindings {
 		append(&t.bindings, Binding{name = b.name, capture = b.capture, kind = b.kind, span = b.span})
-		i := len(t.bindings) - 1
-		color, value := type_binding(k, &b, t)
+		color, value := type_binding(k, &b, t, expected_color(shape, i, b))
 		t.bindings[i].color = color
 		t.bindings[i].value = value
 	}
 	return t
 }
 
-type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> (color: ^Expr, value: ^Expr) {
+// expected_color : la couleur que la forme attend à la place i, si ce binding y
+// correspond (même nom, même kind).
+expected_color :: proc(shape: ^Scope, i: int, b: Binding) -> ^Expr {
+	if shape == nil || i >= len(shape.bindings) do return nil
+	sb := shape.bindings[i]
+	if sb.name != b.name || sb.kind != b.kind do return nil
+	return sb.color
+}
+
+// type_binding : la couleur, puis la valeur. Le typage est bidirectionnel : la
+// couleur attendue — la sienne, sinon celle de la forme qui l'entoure — descend
+// dans la valeur : un `??` la prend, un scope littéral la passe à ses bindings.
+type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr = nil) -> (color: ^Expr, value: ^Expr) {
 	if b.kind != .Push && b.kind != .Product do return nil, new_expr(Invalid{}) // signalé à la construction
 	if b.color != nil do color = color_of(k, b.color, env, b)
+	wanted := color != nil ? color : expected
 	switch {
 	case b.value == nil:
 		value = default_of(k, color, b)
-	case is_bare_unknown(b.value) && color != nil:
-		value = type_unknown(k, b.value^.(Unknown), env, color) // `??` prend sa couleur
+	case is_bare_unknown(b.value) && wanted != nil:
+		value = type_unknown(k, b.value^.(Unknown), env, wanted) // `??` prend sa couleur
 	case:
+		if shape, is_shape := as_shape(wanted); is_shape {
+			if literal, is_scope := b.value^.(^Scope); is_scope {
+				value = singleton(new_expr(type_scope(k, literal, env, shape)))
+				break
+			}
+		}
 		value = type_of(k, b.value, env)
 	}
 	return
+}
+
+// as_shape : une couleur qui est une forme de scope — sans production, donc lue
+// binding par binding.
+as_shape :: proc(color: ^Expr) -> (^Scope, bool) {
+	if color == nil do return nil, false
+	s, ok := color^.(^Scope)
+	if !ok || first_production(s) >= 0 do return nil, false
+	return s, true
 }
 
 is_bare_unknown :: proc(e: ^Expr) -> bool {

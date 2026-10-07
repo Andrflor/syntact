@@ -218,19 +218,28 @@ with_const :: proc(p: Poly) -> []Mono {
 	return out[:]
 }
 
-poly_envelope :: proc(k: ^Kernel, p: Poly) -> Ints {
-	sum := ints_point(p.const)
+// poly_envelope : les valeurs d'un polynôme, par intervalles, sans énumérer.
+// `exact` quand chaque inconnue y apparaît une fois, de coefficient ±1 : la somme
+// d'ensembles indépendants est alors exacte.
+poly_envelope :: proc(k: ^Kernel, p: Poly) -> (sum: Ints, exact: bool) {
+	sum = ints_point(p.const)
+	exact = true
 	for m in p.monos {
+		exact &&= len(m.vars) == 1 && abs(m.coef) == 1
 		prod := ints_point(m.coef)
 		for i := 0; i < len(m.vars); {
 			j := i
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
-			prod, _ = ints_arith(.Mul, prod, ints_pow(k.symbols[m.vars[i]].ints, j - i))
+			ok: bool
+			prod, ok = ints_arith(.Mul, prod, ints_pow(k.symbols[m.vars[i]].ints, j - i))
+			exact &&= ok
 			i = j
 		}
-		sum, _ = ints_arith(.Add, sum, prod) // une enveloppe : une borne qui déborde devient infinie
+		ok: bool
+		sum, ok = ints_arith(.Add, sum, prod) // une borne qui déborde devient infinie
+		exact &&= ok
 	}
-	return sum
+	return
 }
 
 // --- flottants, chaînes, comparaisons : constructeurs normalisants ---
@@ -451,44 +460,69 @@ values_of :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 		return v, true
 	case Poly, Term:
 		if s, ok := enumerate(k, t); ok do return s, true
-		return approximate(k, t), false
+		vals, _ = envelope(k, t)
+		return vals, false
 	}
 	return {}, false
 }
 
-approximate :: proc(k: ^Kernel, t: ^Expr) -> Set {
+// envelope : les valeurs possibles d'une forme, sans énumérer. `exact` quand
+// aucune inconnue ne s'y répète et que l'opération est exacte sur des ensembles
+// indépendants (une somme ±x ± y…, une concaténation de mots) ; sur-approchées
+// sinon.
+envelope :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 	#partial switch v in t^ {
 	case Set:
-		return v
+		return v, true
 	case Poly:
-		return set_of_ints(poly_envelope(k, v))
+		ints, ints_exact := poly_envelope(k, v)
+		return set_of_ints(ints), ints_exact
 	case Term:
 		arg :: proc(k: ^Kernel, t: Term, i: int) -> Set {
-			s, _ := values_of(k, t.args[i])
+			s, _ := envelope(k, t.args[i])
 			return s
 		}
 		switch v.op {
 		case .Sym:
-			return k.symbols[v.sym]
+			return k.symbols[v.sym], true
 		case .F_Add:
-			return set_of_floats(floats_arith(.Add, arg(k, v, 0).floats, arg(k, v, 1).floats))
+			return set_of_floats(floats_arith(.Add, arg(k, v, 0).floats, arg(k, v, 1).floats)), false
 		case .F_Mul:
-			return set_of_floats(floats_arith(.Mul, arg(k, v, 0).floats, arg(k, v, 1).floats))
+			return set_of_floats(floats_arith(.Mul, arg(k, v, 0).floats, arg(k, v, 1).floats)), false
 		case .F_Neg:
-			return set_of_floats(floats_neg(arg(k, v, 0).floats))
+			return set_of_floats(floats_neg(arg(k, v, 0).floats)), false
 		case .Concat:
 			l := strings_point("")
 			for i in 0 ..< len(v.args) do l = strings_concat(l, as_strings(arg(k, v, i)))
-			return set_of_strings(l)
+			return set_of_strings(l), words_independent(v)
 		case .Repeat:
 			r, ok := strings_repeat(as_strings(arg(k, v, 0)), arg(k, v, 1).ints)
-			if !ok do return set_of_strings(strings_all())
-			return set_of_strings(r)
+			if !ok do return set_of_strings(strings_all()), false
+			return set_of_strings(r), false
 		case .Lt, .Le, .Eq, .Ne:
-			return set_of_bools({.False, .True})
+			return set_of_bools({.False, .True}), false
 		}
 	}
-	return {}
+	return {}, false
+}
+
+// words_independent : un mot dont chaque partie est connue ou une inconnue qui ne
+// s'y répète pas — ses valeurs sont exactement la concaténation des ensembles.
+words_independent :: proc(t: Term) -> bool {
+	seen := make(map[int]bool, allocator = context.temp_allocator)
+	for a in t.args {
+		#partial switch v in a^ {
+		case Set:
+			continue
+		case Term:
+			if v.op == .Sym && !seen[v.sym] {
+				seen[v.sym] = true
+				continue
+			}
+		}
+		return false
+	}
+	return true
 }
 
 // --- énumération exacte ---

@@ -122,6 +122,7 @@ Error_Kind :: enum u8 {
 	Invalid_operator,
 	Invalid_Range,
 	Constraint_Mismatch,
+	Unproven, // le kernel ne sait pas prouver qu'une couleur est respectée
 	Insoluble_Constraint,
 	Unsupported, // une forme que le kernel ne traite pas encore
 }
