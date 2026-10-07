@@ -2,6 +2,7 @@ package kernel
 
 import syn "../compiler"
 import "core:fmt"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
@@ -342,14 +343,19 @@ write_regex :: proc(b: ^strings.Builder, re: ^Regex, textual: bool) -> Level {
 		fmt.sbprintf(b, "\"\" + %s", print_char_range(re.class))
 		return .TERM
 	case .Cat:
-		for p, i in re.parts {
-			if i > 0 do strings.write_string(b, " + ")
-			sub(b, p, above(.TERM), textual = true)
+		// associée à droite : on écrit la suite de ses parties
+		for part, first := re, true; part != nil; first = false {
+			if !first do strings.write_string(b, " + ")
+			head := part.parts[0] if part.kind == .Cat else part
+			sub(b, head, above(.TERM), textual = true)
+			part = part.parts[1] if part.kind == .Cat else nil
 		}
 		return .TERM
 	case .Alt, .And:
 		level := re.kind == .Alt ? Level.OR : Level.AND
-		for p, i in re.parts {
+		parts := slice.clone(re.parts, context.temp_allocator)
+		slice.sort_by(parts, proc(x, y: ^Regex) -> bool {return x.kind == .Words && y.kind != .Words}) // les mots d'abord
+		for p, i in parts {
 			if i > 0 do strings.write_string(b, re.kind == .Alt ? " | " : " & ")
 			sub(b, p, above(level), textual = false)
 		}
