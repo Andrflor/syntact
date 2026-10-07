@@ -15,6 +15,24 @@ Cette proposition dit comment représenter les types pour que `subset` soit :
 - **exact** : jamais « oui » sans preuve ;
 - **pas cher** : on garde des formes simplifiées, sans tout déployer.
 
+> **État (2026-10-07) : réalisé** sur la branche `kernel-canonical`. Le code est
+> dans `kernel/`, et les preuves sont dans `specs/kernel-algebre.md`. Ce qui
+> diffère de la proposition écrite ci-dessous :
+> - le type s'appelle toujours `Set`. On y a ajouté `sorts` et `scopes`, sans le
+>   renommer : `type` désigne déjà ce que rend `type_of` ;
+> - `sorts` est complétée par `carried` : une sorte qui a des valeurs est toujours
+>   portée. Les constructeurs n'ont donc rien à déclarer ;
+> - l'admission d'un scope valeur par un BDD utilise quatre valeurs (toujours, pas
+>   toujours, jamais, inconnu), pas trois : deux réfutations qui dépendent
+>   d'inconnues ne se combinent pas par « ou » ;
+> - palier 2 : `a·x + b` (une inconnue) est décidé **exactement**, par
+>   l'antécédent de chaque trou de la couleur, en plus des extrêmes linéaires ;
+> - la vérification reste à la fin. Le bidirectionnel fait descendre la couleur
+>   dans les `??` et les scopes littéraux, y compris à travers une union de formes ;
+> - une couleur de scope qui n'est pas close (un binding qui dépend d'une
+>   inconnue, ou un ensemble comme valeur) se lit encore binding par binding
+>   (`scope_admits`), avec les trois issues.
+
 ---
 
 ## 0. Ce que la théorie a déjà pour un système comme le nôtre
@@ -498,14 +516,21 @@ check :: proc(k: ^Kernel, e: ^Expr, env: ^Scope, colour: Type, b: ^Binding) -> ^
 
 ## 7. Ce qui reste ouvert
 
-1. **`0 & 1`.** C'est un vide de sorte `Int`, pas none (`u8 & string` est none).
-   Est-ce qu'il doit admettre la valeur none ? La proposition dit non.
-2. **`Unproven`.** C'est une troisième issue du typecheck : ni accepté, ni faux,
-   « pas prouvé ». La proposition la rend explicite plutôt que de rejeter en
-   silence.
-3. **Formes récursives** (`List{data}`). C'est l'inclusion coinductive de CDuce :
-   on suppose `a ⊆ b` pendant qu'on le vérifie, avec mémoïsation. Elle arrive avec
-   l'algèbre des scopes.
+1. **Un vide qui porte une sorte.** `0 & 1` vaut `~int`, qui n'est pas none.
+   L'admission compare les valeurs : aujourd'hui, une couleur vide admet la valeur
+   none, quelle que soit sa sorte (règle inchangée). Faut-il qu'elle ne l'admette
+   que pour la couleur sans sorte ?
+2. **`*` sur des ensembles.** C'est encore l'enveloppe d'intervalles :
+   `(1..3) * (1..3) = 1..9`. Pour l'exact `{x·y}` en gardant une couleur, il faut le
+   domaine des congruences (`2.. pas 2`).
+3. **Sortes mêlées dans une opération** (`1 + 1.5`, `(u8 | string) + 1`) : erreur, ou
+   paires valides seules ?
+4. **Opérande vide** (`none + 1`, une case vide dans une table) : ∅ qui se propage,
+   ou erreur ?
+5. **Formes récursives** (`List{data}`) : l'inclusion coinductive de CDuce, avec
+   l'algèbre des scopes récursifs.
+6. **Inconnues liées** (`m -> ??::(0..n)`) : le palier 2 relationnel
+   (Fourier–Motzkin).
 
 ## Sources
 

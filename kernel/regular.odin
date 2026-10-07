@@ -417,7 +417,13 @@ witness :: proc(r: ^Regex) -> (string, bool) {
 	return "", false
 }
 
-// --- décisions ---
+// --- décisions, mémoïsées par nœud : les nœuds sont partagés et immuables ---
+
+@(thread_local)
+subset_memo: map[[2]int]bool
+
+@(thread_local)
+count_memo: map[int]int
 
 strings_subset :: proc(a, b: Strings) -> bool {
 	if a.re == nil || is_all(b.re) do return true
@@ -425,7 +431,11 @@ strings_subset :: proc(a, b: Strings) -> bool {
 		for w in a.re.words do if !regex_contains(b.re, w) do return false
 		return true
 	}
+	key := [2]int{a.re.id, b.re == nil ? -1 : b.re.id}
+	if known, ok := subset_memo[key]; ok do return known
 	_, found := witness(regex_and(a.re, regex_not(b.re)))
+	context.allocator = runtime.heap_allocator()
+	subset_memo[key] = !found
 	return !found
 }
 
@@ -446,10 +456,15 @@ strings_count :: proc(a: Strings) -> int {
 	case .Class:
 		return 2
 	}
-	w, found := witness(a.re)
-	if !found do return 0
-	_, other := witness(regex_and(a.re, regex_not(strings_point(w).re)))
-	return other ? 2 : 1
+	if known, ok := count_memo[a.re.id]; ok do return known
+	n := 0
+	if w, found := witness(a.re); found {
+		_, other := witness(regex_and(a.re, regex_not(strings_point(w).re)))
+		n = other ? 2 : 1
+	}
+	context.allocator = runtime.heap_allocator()
+	count_memo[a.re.id] = n
+	return n
 }
 
 // strings_default : le plus petit mot.
