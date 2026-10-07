@@ -1,27 +1,31 @@
 package kernel
 
+import "base:runtime"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
+import "core:unicode/utf8"
 
 // LES ENSEMBLES DE CHAÎNES : des langages réguliers, gardés sous la forme de
-// l'expression qui les écrit. Cette forme est seulement normalisée — mots finis
-// regroupés et triés, concaténations aplaties, mots voisins fusionnés, ∅ et ""
-// absorbés — sans prétendre à l'unicité : l'égalité est l'inclusion dans les deux
-// sens, et l'inclusion se décide sur un automate construit au moment de décider.
+// l'expression qui les écrit, en forme de similarité (Owens, Reppy, Turon,
+// « Regular-expression derivatives re-examined », déf. 4.1) et partagée : deux
+// écritures semblables sont le même nœud. La forme n'est pas unique — deux
+// écritures équivalentes mais dissemblables restent deux nœuds — et n'a pas à
+// l'être : l'inclusion se décide à la demande, par les dérivées de Brzozowski,
+// sans automate.
 //
-//   "a" | "ab"        Words    un ensemble fini de mots
+//   "a" | "ab"        Words    un ensemble fini de mots ({""} est ε)
 //   'a'..'z'          Class    un mot d'une lettre dans la plage
-//   x + y             Cat
-//   x | y             Alt
-//   x & y             And
+//   x + y             Cat      associée à droite : [tête, reste]
+//   x | y             Alt      aplatie, triée, sans doublon
+//   x & y             And      aplatie, triée, sans doublon
 //   ~x                Not      ~∅ : toute chaîne
 //   x * 2..4          Repeat   par un ensemble de comptes naturels
 
 MAX_RUNE :: rune(0x10FFFF)
 
-// Au-delà, une répétition n'est pas construite : son automate aurait autant
-// d'états que de répétitions.
+// Au-delà, une répétition n'est pas construite : chaque dérivée garde le compte
+// restant, il y en aurait autant que de répétitions.
 MAX_REPEAT :: 4096
 
 Regex_Kind :: enum u8 {
@@ -38,8 +42,9 @@ Regex :: struct {
 	kind:   Regex_Kind,
 	words:  []string, // Words : non vide, sans doublon, du plus court au plus long puis dans l'ordre
 	class:  Rune_Range, // Class : au moins deux caractères (un seul est un mot)
-	parts:  []^Regex, // Cat, Alt, And ; Not et Repeat : parts[0]
-	counts: Ints, // Repeat : des naturels, ni {0} ni {1}
+	parts:  []^Regex, // Cat : [tête, reste] ; Alt, And : au moins deux, triés par id ; Not, Repeat : [r]
+	counts: Ints, // Repeat : des naturels, ni {0} ni {1} ; 0..max si r accepte ""
+	id:     int, // l'ordre de création : il trie les opérandes de | et &
 }
 
 Strings :: struct {
@@ -50,13 +55,40 @@ Rune_Range :: struct {
 	lo, hi: rune, // inclus
 }
 
-// --- constructions ---
+// --- le partage ---
 
-regex :: proc(r: Regex) -> Strings {
-	p := new(Regex)
-	p^ = r
-	return Strings{p}
+// La table des nœuds, par fil d'exécution. Les nœuds sont immuables et vivent
+// autant que le programme : ils sont alloués hors des arènes des passes.
+@(thread_local)
+regex_nodes: map[string]^Regex
+
+// intern : le nœud partagé de cette structure.
+intern :: proc(r: Regex) -> ^Regex {
+	key := regex_key(r)
+	if n, ok := regex_nodes[key]; ok do return n
+	context.allocator = runtime.heap_allocator()
+	n := new(Regex)
+	n^ = r
+	n.words = slice.clone(r.words)
+	for &w in n.words do w = strings.clone(w)
+	n.parts = slice.clone(r.parts)
+	n.counts = Ints{slice.clone(r.counts.intervals)}
+	n.id = len(regex_nodes)
+	regex_nodes[strings.clone(key)] = n
+	return n
 }
+
+// regex_key : la structure d'un nœud, ses opérandes par id.
+regex_key :: proc(r: Regex) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "%v %d %d", r.kind, r.class.lo, r.class.hi)
+	for w in r.words do fmt.sbprintf(&b, " %d:%s", len(w), w)
+	for p in r.parts do fmt.sbprintf(&b, " #%d", p == nil ? -1 : p.id)
+	for iv in r.counts.intervals do fmt.sbprintf(&b, " %v..%v", iv.lo, iv.hi)
+	return strings.to_string(b)
+}
+
+// --- constructions : la similarité, et elle seule ---
 
 strings_point :: proc(word: string) -> Strings {
 	return strings_of_words({word})
@@ -69,9 +101,9 @@ strings_empty_word :: proc() -> Strings {
 // strings_of_words : le langage fini de ces mots.
 strings_of_words :: proc(words: []string) -> Strings {
 	if len(words) == 0 do return {}
-	sorted := slice.clone(words)
+	sorted := slice.clone(words, context.temp_allocator)
 	slice.sort_by(sorted, shortlex)
-	return regex({kind = .Words, words = slice.unique(sorted)})
+	return Strings{intern({kind = .Words, words = slice.unique(sorted)})}
 }
 
 // shortlex : le plus court d'abord, puis l'ordre des points de code.
@@ -83,122 +115,120 @@ shortlex :: proc(a, b: string) -> bool {
 // strings_runes : les mots d'un caractère compris dans [lo, hi].
 strings_runes :: proc(lo, hi: rune) -> Strings {
 	if lo == hi do return strings_point(fmt.tprintf("%c", lo))
-	return regex({kind = .Class, class = {min(lo, hi), max(lo, hi)}})
+	return Strings{intern({kind = .Class, class = {min(lo, hi), max(lo, hi)}})}
 }
 
 strings_all :: proc() -> Strings {
 	return strings_complement({})
 }
 
-is_all :: proc(a: Strings) -> bool {
-	return a.re != nil && a.re.kind == .Not && a.re.parts[0] == nil
+is_all :: proc(r: ^Regex) -> bool {
+	return r != nil && r.kind == .Not && r.parts[0] == nil
 }
 
-single_word :: proc(re: ^Regex) -> (string, bool) {
-	if re != nil && re.kind == .Words && len(re.words) == 1 do return re.words[0], true
+is_epsilon :: proc(r: ^Regex) -> bool {
+	w, single := single_word(r)
+	return single && w == ""
+}
+
+single_word :: proc(r: ^Regex) -> (string, bool) {
+	if r != nil && r.kind == .Words && len(r.words) == 1 do return r.words[0], true
 	return "", false
 }
 
-// members : les opérandes d'une opération aplatie — ceux de `re` s'il en est une
-// du même genre, sinon `re` lui-même.
-members :: proc(re: ^Regex, kind: Regex_Kind) -> []^Regex {
-	if re.kind == kind do return re.parts
-	one := make([]^Regex, 1)
-	one[0] = re
+// members : les opérandes d'une opération aplatie — ceux de `r` s'il en est une
+// du même genre, sinon `r` lui-même.
+members :: proc(r: ^Regex, kind: Regex_Kind) -> []^Regex {
+	if r.kind == kind do return r.parts
+	one := make([]^Regex, 1, context.temp_allocator)
+	one[0] = r
 	return one
 }
 
-add_new :: proc(parts: ^[dynamic]^Regex, re: ^Regex) {
-	for p in parts do if regex_same(p, re) do return
-	append(parts, re)
-}
-
-// regex_same : la même écriture. Une simple économie : deux écritures différentes
-// peuvent être le même langage.
-regex_same :: proc(a, b: ^Regex) -> bool {
-	if a == nil || b == nil do return a == b
-	if a.kind != b.kind || a.class != b.class || len(a.parts) != len(b.parts) do return false
-	if !slice.equal(a.words, b.words) || !slice.equal(a.counts.intervals, b.counts.intervals) do return false
-	for p, i in a.parts do if !regex_same(p, b.parts[i]) do return false
-	return true
+// operation : `|` ou `&` sur des opérandes triés par id et sans doublon.
+operation :: proc(kind: Regex_Kind, parts: []^Regex) -> ^Regex {
+	slice.sort_by(parts, proc(a, b: ^Regex) -> bool {return a.id < b.id})
+	unique := slice.unique(parts)
+	if len(unique) == 1 do return unique[0]
+	return intern({kind = kind, parts = unique})
 }
 
 strings_union :: proc(a, b: Strings) -> Strings {
-	if a.re == nil do return b
-	if b.re == nil do return a
-	if is_all(a) || is_all(b) do return strings_all()
-	words := make([dynamic]string)
-	parts := make([dynamic]^Regex)
-	for x in ([2]^Regex{a.re, b.re}) {
+	return Strings{regex_or(a.re, b.re)}
+}
+
+regex_or :: proc(a, b: ^Regex) -> ^Regex {
+	if a == nil do return b
+	if b == nil do return a
+	if is_all(a) || is_all(b) do return a if is_all(a) else b
+	words := make([dynamic]string, context.temp_allocator)
+	parts := make([dynamic]^Regex, context.temp_allocator)
+	for x in ([2]^Regex{a, b}) {
 		for m in members(x, .Alt) {
 			if m.kind == .Words do append(&words, ..m.words)
-			else do add_new(&parts, m)
+			else do append(&parts, m)
 		}
 	}
-	if len(words) > 0 do inject_at(&parts, 0, strings_of_words(words[:]).re)
-	if len(parts) == 1 do return Strings{parts[0]}
-	return regex({kind = .Alt, parts = parts[:]})
+	if len(words) > 0 do append(&parts, strings_of_words(words[:]).re)
+	return operation(.Alt, parts[:])
 }
 
 strings_intersect :: proc(a, b: Strings) -> Strings {
-	if a.re == nil || b.re == nil do return {}
+	return Strings{regex_and(a.re, b.re)}
+}
+
+regex_and :: proc(a, b: ^Regex) -> ^Regex {
+	if a == nil || b == nil do return nil
 	if is_all(a) do return b
 	if is_all(b) do return a
-	parts := make([dynamic]^Regex)
-	for x in ([2]^Regex{a.re, b.re}) do for m in members(x, .And) do add_new(&parts, m)
+	parts := make([dynamic]^Regex, context.temp_allocator)
+	for x in ([2]^Regex{a, b}) do append(&parts, ..members(x, .And))
 	// Avec un ensemble fini de mots, le résultat est fini : ceux de ses mots que
 	// toutes les autres parties reconnaissent.
 	for p, i in parts {
 		if p.kind != .Words do continue
-		others := make([dynamic]Dfa)
-		for q, j in parts do if j != i do append(&others, dfa_of(q))
-		kept := make([dynamic]string)
+		kept := make([dynamic]string, context.temp_allocator)
 		word: for w in p.words {
-			for d in others do if !dfa_accepts(d, w) do continue word
+			for q, j in parts do if j != i && !regex_contains(q, w) do continue word
 			append(&kept, w)
 		}
-		return strings_of_words(kept[:])
+		return strings_of_words(kept[:]).re
 	}
-	if len(parts) == 1 do return Strings{parts[0]}
-	return regex({kind = .And, parts = parts[:]})
+	return operation(.And, parts[:])
 }
 
 // Le complément dans l'ensemble de toutes les chaînes.
 strings_complement :: proc(a: Strings) -> Strings {
-	if a.re != nil && a.re.kind == .Not do return Strings{a.re.parts[0]}
-	inner := make([]^Regex, 1)
-	inner[0] = a.re
-	return regex({kind = .Not, parts = inner})
+	return Strings{regex_not(a.re)}
+}
+
+regex_not :: proc(a: ^Regex) -> ^Regex {
+	if a != nil && a.kind == .Not do return a.parts[0]
+	return intern({kind = .Not, parts = []^Regex{a}})
 }
 
 strings_concat :: proc(a, b: Strings) -> Strings {
-	if a.re == nil || b.re == nil do return {}
-	parts := make([dynamic]^Regex)
-	for x in ([2]^Regex{a.re, b.re}) {
-		for m in members(x, .Cat) {
-			w, single := single_word(m)
-			if single && w == "" do continue
-			if single && len(parts) > 0 {
-				if prev, prev_single := single_word(parts[len(parts) - 1]); prev_single {
-					parts[len(parts) - 1] = strings_point(strings.concatenate({prev, w})).re
-					continue
-				}
+	return Strings{regex_cat(a.re, b.re)}
+}
+
+regex_cat :: proc(a, b: ^Regex) -> ^Regex {
+	if a == nil || b == nil do return nil
+	if is_epsilon(a) do return b
+	if is_epsilon(b) do return a
+	if a.kind == .Cat do return regex_cat(a.parts[0], regex_cat(a.parts[1], b)) // à droite
+	if w, single := single_word(a); single {
+		if v, also := single_word(b); also do return strings_point(strings.concatenate({w, v}, context.temp_allocator)).re
+		if b.kind == .Cat {
+			if v, head := single_word(b.parts[0]); head {
+				return regex_cat(strings_point(strings.concatenate({w, v}, context.temp_allocator)).re, b.parts[1])
 			}
-			append(&parts, m)
 		}
 	}
-	switch len(parts) {
-	case 0:
-		return strings_empty_word()
-	case 1:
-		return Strings{parts[0]}
-	}
-	return regex({kind = .Cat, parts = parts[:]})
+	return intern({kind = .Cat, parts = []^Regex{a, b}})
 }
 
 // strings_repeat : L^c pour tout compte c de `counts` (les comptes négatifs
-// n'existent pas). `ok` est faux quand un compte fini est trop grand pour être
-// construit.
+// n'existent pas). `ok` est faux quand un compte fini est trop grand.
 strings_repeat :: proc(a: Strings, counts: Ints) -> (Strings, bool) {
 	natural := ints_intersect(counts, ints_range(0, nil))
 	for iv in natural.intervals {
@@ -206,25 +236,31 @@ strings_repeat :: proc(a: Strings, counts: Ints) -> (Strings, bool) {
 		hi, bounded := iv.hi.?
 		if lo > MAX_REPEAT || (bounded && hi > MAX_REPEAT) do return {}, false
 	}
-	if len(natural.intervals) == 0 do return {}, true
-	with_zero := ints_contains(natural, 0)
-	if a.re == nil do return with_zero ? strings_empty_word() : {}, true // ∅⁰ = {""}
-	w, single := single_word(a.re)
-	if single && w == "" do return a, true
-	if ints_count(natural) == 1 {
-		n, _ := ints_default(natural)
+	return Strings{regex_repeat(a.re, natural)}, true
+}
+
+regex_repeat :: proc(r: ^Regex, natural: Ints) -> ^Regex {
+	counts := natural
+	if len(counts.intervals) == 0 do return nil
+	epsilon := strings_empty_word().re
+	if r == nil do return epsilon if ints_contains(counts, 0) else nil // ∅⁰ = {""}
+	if is_epsilon(r) do return epsilon
+	if regex_nullable(r) {
+		// "" ∈ r : r^c contient r^d pour tout d ≤ c, donc r^C = r^(0..max C)
+		_, top := ints_bounds(counts)
+		counts = ints_range(0, top)
+	}
+	if ints_count(counts) == 1 {
+		n, _ := ints_default(counts)
 		switch {
 		case n == 0:
-			return strings_empty_word(), true
+			return epsilon
 		case n == 1:
-			return a, true
-		case single:
-			return strings_point(strings.repeat(w, int(n))), true
+			return r
 		}
+		if w, single := single_word(r); single do return strings_point(strings.repeat(w, int(n), context.temp_allocator)).re
 	}
-	inner := make([]^Regex, 1)
-	inner[0] = a.re
-	return regex({kind = .Repeat, parts = inner, counts = natural}), true
+	return intern({kind = .Repeat, parts = []^Regex{r}, counts = counts})
 }
 
 // "p".. : commence par un mot de p ; .."s" : finit par un mot de s.
@@ -236,16 +272,161 @@ strings_suffixed :: proc(s: Strings) -> Strings {
 	return strings_concat(strings_all(), s)
 }
 
+// --- dérivées ---
+
+regex_nullable :: proc(r: ^Regex) -> bool {
+	if r == nil do return false
+	switch r.kind {
+	case .Words:
+		return r.words[0] == ""
+	case .Class:
+		return false
+	case .Cat, .And:
+		for p in r.parts do if !regex_nullable(p) do return false
+		return true
+	case .Alt:
+		for p in r.parts do if regex_nullable(p) do return true
+		return false
+	case .Not:
+		return !regex_nullable(r.parts[0])
+	case .Repeat:
+		return ints_contains(r.counts, 0)
+	}
+	return false
+}
+
+// derive : les suffixes des mots de r qui commencent par c (Brzozowski).
+derive :: proc(r: ^Regex, c: rune) -> ^Regex {
+	if r == nil do return nil
+	switch r.kind {
+	case .Words:
+		suffixes := make([dynamic]string, context.temp_allocator)
+		for w in r.words {
+			head, size := utf8.decode_rune(w)
+			if w != "" && head == c do append(&suffixes, w[size:])
+		}
+		return strings_of_words(suffixes[:]).re
+	case .Class:
+		return c >= r.class.lo && c <= r.class.hi ? strings_empty_word().re : nil
+	case .Cat:
+		d := regex_cat(derive(r.parts[0], c), r.parts[1])
+		return regex_or(d, derive(r.parts[1], c)) if regex_nullable(r.parts[0]) else d
+	case .Alt:
+		d: ^Regex = nil
+		for p in r.parts do d = regex_or(d, derive(p, c))
+		return d
+	case .And:
+		d := derive(r.parts[0], c)
+		for p in r.parts[1:] do d = regex_and(d, derive(p, c))
+		return d
+	case .Not:
+		return regex_not(derive(r.parts[0], c))
+	case .Repeat:
+		// le premier morceau, puis les autres : r^C donne ∂r · r^(C-1)
+		return regex_cat(derive(r.parts[0], c), regex_repeat(r.parts[0], counts_minus_one(r.counts)))
+	}
+	return nil
+}
+
+// counts_minus_one : { c - 1 | c ∈ C, c ≥ 1 }.
+counts_minus_one :: proc(counts: Ints) -> Ints {
+	out := make([dynamic]Int_Interval, context.temp_allocator)
+	for iv in counts.intervals {
+		lo, _ := iv.lo.?
+		shifted := Int_Interval{max(lo - 1, 0), iv.hi}
+		if hi, bounded := iv.hi.?; bounded {
+			if hi == 0 do continue
+			shifted.hi = hi - 1
+		}
+		append(&out, shifted)
+	}
+	return ints_of(out[:])
+}
+
+// cuts : les bornes de l'alphabet où la dérivée peut changer (les classes de
+// dérivées d'Owens et al., §4.2, sur-approchées) : une dérivée par plage suffit.
+cuts :: proc(r: ^Regex, out: ^[dynamic]rune) {
+	if r == nil do return
+	switch r.kind {
+	case .Words:
+		for w in r.words {
+			if w == "" do continue
+			head, _ := utf8.decode_rune(w)
+			append(out, head, head + 1)
+		}
+	case .Class:
+		append(out, r.class.lo, r.class.hi + 1)
+	case .Cat:
+		cuts(r.parts[0], out)
+		if regex_nullable(r.parts[0]) do cuts(r.parts[1], out)
+	case .Alt, .And, .Not, .Repeat:
+		for p in r.parts do cuts(p, out)
+	}
+}
+
+// classes : les plages de l'alphabet sur lesquelles la dérivée de r est la même,
+// dans l'ordre ; chacune est représentée par son plus petit caractère.
+classes :: proc(r: ^Regex) -> []Rune_Range {
+	bounds := make([dynamic]rune, context.temp_allocator)
+	append(&bounds, 0)
+	cuts(r, &bounds)
+	slice.sort(bounds[:])
+	unique := slice.unique(bounds[:])
+	out := make([dynamic]Rune_Range, 0, len(unique), context.temp_allocator)
+	for b, i in unique {
+		if b > MAX_RUNE do break
+		hi := i + 1 < len(unique) ? min(unique[i + 1] - 1, MAX_RUNE) : MAX_RUNE
+		append(&out, Rune_Range{b, hi})
+	}
+	return out[:]
+}
+
+regex_contains :: proc(r: ^Regex, word: string) -> bool {
+	cur := r
+	for c in word {
+		cur = derive(cur, c)
+		if cur == nil do return false
+	}
+	return regex_nullable(cur)
+}
+
+// witness : le plus petit mot de r — le plus court, puis le premier dans l'ordre
+// des points de code —, s'il y en a un. Un parcours en largeur des dérivées,
+// comparées par adresse ; il termine parce qu'une expression n'a qu'un nombre fini
+// de dérivées dissemblables (Brzozowski).
+witness :: proc(r: ^Regex) -> (string, bool) {
+	Visit :: struct {
+		re:   ^Regex,
+		word: string,
+	}
+	if r == nil do return "", false
+	seen := make(map[^Regex]bool, allocator = context.temp_allocator)
+	queue := make([dynamic]Visit, context.temp_allocator)
+	append(&queue, Visit{r, ""})
+	seen[r] = true
+	for i := 0; i < len(queue); i += 1 {
+		v := queue[i]
+		if regex_nullable(v.re) do return strings.clone(v.word), true
+		for class in classes(v.re) {
+			d := derive(v.re, class.lo)
+			if d == nil || seen[d] do continue
+			seen[d] = true
+			append(&queue, Visit{d, fmt.tprintf("%s%c", v.word, class.lo)})
+		}
+	}
+	return "", false
+}
+
 // --- décisions ---
 
 strings_subset :: proc(a, b: Strings) -> bool {
-	if a.re == nil || is_all(b) do return true
+	if a.re == nil || is_all(b.re) do return true
 	if a.re.kind == .Words {
-		d := dfa_of(b.re)
-		for w in a.re.words do if !dfa_accepts(d, w) do return false
+		for w in a.re.words do if !regex_contains(b.re, w) do return false
 		return true
 	}
-	return len(dfa_of(strings_intersect(a, strings_complement(b)).re).states) == 0
+	_, found := witness(regex_and(a.re, regex_not(b.re)))
+	return !found
 }
 
 strings_equal :: proc(a, b: Strings) -> bool {
@@ -253,11 +434,10 @@ strings_equal :: proc(a, b: Strings) -> bool {
 }
 
 strings_contains :: proc(a: Strings, word: string) -> bool {
-	if a.re != nil && a.re.kind == .Words do return slice.contains(a.re.words, word)
-	return dfa_accepts(dfa_of(a.re), word)
+	return regex_contains(a.re, word)
 }
 
-// strings_count : le nombre de mots, saturé à 2.
+// strings_count : le nombre de mots, saturé à 2 — deux recherches de témoin.
 strings_count :: proc(a: Strings) -> int {
 	if a.re == nil do return 0
 	#partial switch a.re.kind {
@@ -266,14 +446,16 @@ strings_count :: proc(a: Strings) -> int {
 	case .Class:
 		return 2
 	}
-	return dfa_count(dfa_of(a.re))
+	w, found := witness(a.re)
+	if !found do return 0
+	_, other := witness(regex_and(a.re, regex_not(strings_point(w).re)))
+	return other ? 2 : 1
 }
 
-// strings_default : le plus court mot, et parmi eux le plus petit.
+// strings_default : le plus petit mot.
 strings_default :: proc(a: Strings) -> (string, bool) {
-	if a.re == nil do return "", false
-	if a.re.kind == .Words do return a.re.words[0], true
-	return dfa_default(dfa_of(a.re))
+	if a.re != nil && a.re.kind == .Words do return a.re.words[0], true
+	return witness(a.re)
 }
 
 // strings_single : le mot unique d'un langage qui n'en a qu'un.
@@ -282,14 +464,15 @@ strings_single :: proc(a: Strings) -> (string, bool) {
 	return strings_default(a)
 }
 
-// strings_words : tous les mots d'un langage fini, s'il en a au plus `limit`.
+// strings_words : tous les mots d'un langage fini, s'il en a au plus `limit` —
+// par l'automate des dérivées, émondé.
 strings_words :: proc(a: Strings, limit: int) -> ([]string, bool) {
 	if a.re == nil do return nil, true
 	if a.re.kind == .Words do return a.re.words, len(a.re.words) <= limit
-	return dfa_words(dfa_of(a.re), limit)
+	return dfa_words(derivative_dfa(a.re), limit)
 }
 
-// --- les automates : construits pour décider, jamais gardés ---
+// --- l'automate des dérivées : seulement pour énumérer ---
 
 Edge :: struct {
 	using range: Rune_Range,
@@ -302,175 +485,34 @@ Dfa_State :: struct {
 }
 
 // Un automate déterministe émondé : tout état est accessible depuis l'initial (0)
-// et mène à un état acceptant. Sans état, il reconnaît le langage vide.
+// et mène à un état acceptant.
 Dfa :: struct {
 	states: []Dfa_State,
 }
 
-dfa_of :: proc(re: ^Regex) -> Dfa {
-	if re == nil do return {}
-	#partial switch re.kind {
-	case .And:
-		d := dfa_of(re.parts[0])
-		for p in re.parts[1:] do d = dfa_intersect(d, dfa_of(p))
-		return d
-	case .Not:
-		return dfa_complement(dfa_of(re.parts[0]))
-	}
-	n: Nfa
-	start, end := fragment(&n, re)
-	n.states[end].accept = true
-	return determinize(&n, start)
-}
-
-Nfa_State :: struct {
-	accept: bool,
-	edges:  [dynamic]Edge,
-	eps:    [dynamic]int,
-}
-
-Nfa :: struct {
-	states: [dynamic]Nfa_State,
-}
-
-nfa_add :: proc(n: ^Nfa) -> int {
-	append(&n.states, Nfa_State{})
-	return len(n.states) - 1
-}
-
-// fragment : ajoute à `n` un morceau qui reconnaît `re`, d'une entrée à une sortie
-// (la construction de Thompson). And et Not passent par leur automate déterministe.
-fragment :: proc(n: ^Nfa, re: ^Regex) -> (start, end: int) {
-	start, end = nfa_add(n), nfa_add(n)
-	if re == nil do return
-	switch re.kind {
-	case .Words:
-		for w in re.words {
-			cur := start
-			for r in w {
-				next := nfa_add(n)
-				append(&n.states[cur].edges, Edge{{r, r}, next})
-				cur = next
-			}
-			append(&n.states[cur].eps, end)
-		}
-	case .Class:
-		append(&n.states[start].edges, Edge{re.class, end})
-	case .Cat:
-		cur := start
-		for p in re.parts do cur = then(n, cur, p)
-		append(&n.states[cur].eps, end)
-	case .Alt:
-		for p in re.parts {
-			s, e := fragment(n, p)
-			append(&n.states[start].eps, s)
-			append(&n.states[e].eps, end)
-		}
-	case .Repeat:
-		for iv in re.counts.intervals {
-			lo, _ := iv.lo.?
-			cur := nfa_add(n)
-			append(&n.states[start].eps, cur)
-			for _ in 0 ..< lo do cur = then(n, cur, re.parts[0])
-			if hi, bounded := iv.hi.?; bounded {
-				for _ in lo ..< hi {
-					append(&n.states[cur].eps, end)
-					cur = then(n, cur, re.parts[0])
-				}
-			} else {
-				s, e := fragment(n, re.parts[0])
-				append(&n.states[cur].eps, s)
-				append(&n.states[e].eps, cur)
-			}
-			append(&n.states[cur].eps, end)
-		}
-	case .And, .Not:
-		d := dfa_of(re)
-		base := len(n.states)
-		for s in d.states {
-			id := nfa_add(n)
-			for e in s.edges do append(&n.states[id].edges, Edge{e.range, base + e.to})
-			if s.accept do append(&n.states[id].eps, end)
-		}
-		if len(d.states) > 0 do append(&n.states[start].eps, base)
-	}
-	return
-}
-
-// then : enchaîne après `cur` un morceau qui reconnaît `re` ; renvoie sa sortie.
-then :: proc(n: ^Nfa, cur: int, re: ^Regex) -> int {
-	s, e := fragment(n, re)
-	append(&n.states[cur].eps, s)
-	return e
-}
-
-closure :: proc(n: ^Nfa, set: []int) -> []int {
-	seen := make(map[int]bool)
-	stack := make([dynamic]int)
-	for s in set {
-		if !seen[s] {
-			seen[s] = true
-			append(&stack, s)
-		}
-	}
-	for len(stack) > 0 {
-		s := pop(&stack)
-		for t in n.states[s].eps {
-			if !seen[t] {
-				seen[t] = true
-				append(&stack, t)
-			}
-		}
-	}
-	out := make([dynamic]int, 0, len(seen))
-	for s in seen do append(&out, s)
-	slice.sort(out[:])
-	return out[:]
-}
-
-// determinize : la construction par sous-ensembles, sur des arêtes étiquetées par
-// des plages de caractères découpées en intervalles élémentaires.
-determinize :: proc(n: ^Nfa, start: int) -> Dfa {
+// derivative_dfa : les états sont les dérivées de r, les arêtes ses classes
+// (Owens et al., fig. 1).
+derivative_dfa :: proc(r: ^Regex) -> Dfa {
+	index := make(map[^Regex]int, allocator = context.temp_allocator)
+	order := make([dynamic]^Regex, context.temp_allocator)
 	raw := make([dynamic]Dfa_State)
-	index := make(map[string]int)
-	sets := make([dynamic][]int)
-	first := closure(n, {start})
-	index[fmt.tprint(first)] = 0
-	append(&sets, first)
-	append(&raw, Dfa_State{})
-	for i := 0; i < len(sets); i += 1 {
-		set := sets[i]
-		accept := false
-		bounds := make([dynamic]rune)
-		for s in set {
-			accept ||= n.states[s].accept
-			for e in n.states[s].edges {
-				append(&bounds, e.lo)
-				if e.hi < MAX_RUNE do append(&bounds, e.hi + 1)
-			}
-		}
-		slice.sort(bounds[:])
-		cuts := slice.unique(bounds[:])
+	index[r] = 0
+	append(&order, r)
+	for i := 0; i < len(order); i += 1 {
+		q := order[i]
 		edges := make([dynamic]Edge)
-		for b, j in cuts {
-			hi := j + 1 < len(cuts) ? cuts[j + 1] - 1 : MAX_RUNE
-			targets := make([dynamic]int)
-			for s in set {
-				for e in n.states[s].edges do if b >= e.lo && b <= e.hi do append(&targets, e.to)
-			}
-			if len(targets) == 0 do continue
-			target := closure(n, targets[:])
-			key := fmt.tprint(target)
-			id, known := index[key]
+		for class in classes(q) {
+			d := derive(q, class.lo)
+			if d == nil do continue
+			id, known := index[d]
 			if !known {
-				id = len(sets)
-				index[key] = id
-				append(&sets, target)
-				append(&raw, Dfa_State{})
+				id = len(order)
+				index[d] = id
+				append(&order, d)
 			}
-			append(&edges, Edge{{b, hi}, id})
+			append(&edges, Edge{class, id})
 		}
-		raw[i] = Dfa_State{accept, edges[:]}
+		append(&raw, Dfa_State{regex_nullable(q), edges[:]})
 	}
 	return trim(raw[:], 0)
 }
@@ -515,134 +557,6 @@ trim :: proc(raw: []Dfa_State, start: int) -> Dfa {
 		states[i] = Dfa_State{raw[old].accept, edges[:]}
 	}
 	return Dfa{states}
-}
-
-// dfa_complement : compléter avec un puits, puis inverser l'acceptation.
-dfa_complement :: proc(a: Dfa) -> Dfa {
-	n := len(a.states)
-	raw := make([]Dfa_State, n + 1)
-	sink := n
-	for s, i in a.states do raw[i] = Dfa_State{!s.accept, fill_gaps(s.edges, sink)}
-	raw[sink] = Dfa_State{true, fill_gaps(nil, sink)}
-	return trim(raw, n == 0 ? sink : 0)
-}
-
-fill_gaps :: proc(edges: []Edge, sink: int) -> []Edge {
-	out := make([dynamic]Edge, 0, 2 * len(edges) + 1)
-	next := rune(0)
-	for e in edges {
-		if e.lo > next do append(&out, Edge{{next, e.lo - 1}, sink})
-		append(&out, e)
-		next = e.hi + 1
-	}
-	if next <= MAX_RUNE do append(&out, Edge{{next, MAX_RUNE}, sink})
-	return out[:]
-}
-
-// dfa_intersect : l'automate des paires.
-dfa_intersect :: proc(a, b: Dfa) -> Dfa {
-	if len(a.states) == 0 || len(b.states) == 0 do return {}
-	Pair :: [2]int
-	index := make(map[Pair]int)
-	pairs := make([dynamic]Pair)
-	raw := make([dynamic]Dfa_State)
-	index[{0, 0}] = 0
-	append(&pairs, Pair{0, 0})
-	append(&raw, Dfa_State{})
-	for i := 0; i < len(pairs); i += 1 {
-		p := pairs[i]
-		edges := make([dynamic]Edge)
-		for x in a.states[p[0]].edges {
-			for y in b.states[p[1]].edges {
-				lo, hi := max(x.lo, y.lo), min(x.hi, y.hi)
-				if lo > hi do continue
-				target := Pair{x.to, y.to}
-				id, known := index[target]
-				if !known {
-					id = len(pairs)
-					index[target] = id
-					append(&pairs, target)
-					append(&raw, Dfa_State{})
-				}
-				append(&edges, Edge{{lo, hi}, id})
-			}
-		}
-		raw[i] = Dfa_State{a.states[p[0]].accept && b.states[p[1]].accept, edges[:]}
-	}
-	return trim(raw[:], 0)
-}
-
-dfa_accepts :: proc(a: Dfa, word: string) -> bool {
-	if len(a.states) == 0 do return false
-	cur := 0
-	for r in word {
-		next := -1
-		for e in a.states[cur].edges {
-			if r >= e.lo && r <= e.hi {
-				next = e.to
-				break
-			}
-		}
-		if next < 0 do return false
-		cur = next
-	}
-	return a.states[cur].accept
-}
-
-// dfa_count : le nombre de mots, saturé à 2. L'automate est émondé : un cycle
-// signifie une infinité de mots.
-dfa_count :: proc(a: Dfa) -> int {
-	if len(a.states) == 0 do return 0
-	memo := make([]int, len(a.states))
-	for &m in memo do m = -1
-	on_path := make([]bool, len(a.states))
-	count :: proc(a: Dfa, s: int, memo: []int, on_path: []bool) -> int {
-		if on_path[s] do return 2
-		if memo[s] >= 0 do return memo[s]
-		on_path[s] = true
-		n := a.states[s].accept ? 1 : 0
-		for e in a.states[s].edges {
-			width := int(e.hi - e.lo) + 1
-			n += min(width, 2) * count(a, e.to, memo, on_path)
-			if n >= 2 do break
-		}
-		on_path[s] = false
-		memo[s] = min(n, 2)
-		return memo[s]
-	}
-	return count(a, 0, memo, on_path)
-}
-
-// dfa_default : à chaque pas, le plus petit caractère qui reste sur un plus court
-// chemin vers un état acceptant.
-dfa_default :: proc(a: Dfa) -> (string, bool) {
-	if len(a.states) == 0 do return "", false
-	dist := make([]int, len(a.states))
-	for &d in dist do d = max(int)
-	for s, i in a.states do if s.accept do dist[i] = 0
-	for changed := true; changed; {
-		changed = false
-		for s, i in a.states {
-			for e in s.edges {
-				if dist[e.to] != max(int) && dist[e.to] + 1 < dist[i] {
-					dist[i] = dist[e.to] + 1
-					changed = true
-				}
-			}
-		}
-	}
-	b := strings.builder_make()
-	cur := 0
-	for !a.states[cur].accept {
-		for e in a.states[cur].edges {
-			if dist[e.to] == dist[cur] - 1 {
-				strings.write_rune(&b, e.lo)
-				cur = e.to
-				break
-			}
-		}
-	}
-	return strings.to_string(b), true
 }
 
 dfa_words :: proc(a: Dfa, limit: int) -> ([]string, bool) {
