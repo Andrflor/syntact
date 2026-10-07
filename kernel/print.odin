@@ -11,6 +11,13 @@ print_expr :: proc(e: ^Expr) -> string {
 	return strings.to_string(b)
 }
 
+// brief : une écriture raccourcie, pour un message d'erreur.
+brief :: proc(e: ^Expr) -> string {
+	s := print_expr(e)
+	if len(s) <= 120 do return s
+	return fmt.tprintf("%s…", s[:120])
+}
+
 write_expr :: proc(b: ^strings.Builder, e: ^Expr) {
 	if e == nil {
 		strings.write_string(b, "<nil>")
@@ -48,8 +55,12 @@ write_expr :: proc(b: ^strings.Builder, e: ^Expr) {
 			strings.write_string(b, "::")
 			write_expr(b, v.layout)
 		}
-	case Many:
-		strings.write_string(b, "<plusieurs>")
+	case Poly:
+		write_poly(b, v)
+	case Term:
+		write_term(b, v)
+	case Family:
+		write_family(b, v)
 	case Invalid:
 		strings.write_string(b, "<invalide>")
 	}

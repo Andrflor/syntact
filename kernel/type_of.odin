@@ -7,7 +7,7 @@ import "core:fmt"
 //
 //   type_of(5)                    = 5                  une valeur connue est son propre singleton
 //   type_of(u8)                   = {-> 0..255}        l'ensemble comme valeur : un niveau au-dessus
-//   type_of(??::u8)               = 0..255             256 valeurs possibles
+//   type_of(??::u8)               = ??0                une inconnue, qui vaut dans 0..255
 //   type_of(none)                 = none               none = {}, une valeur : son propre singleton
 //   type_of(scope{ Σ binding })   = { scope{ Σ typeof(binding) } }
 //
@@ -67,8 +67,8 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 	case Range:
 		return type_range(k, v, env)
 	case Unknown:
-		return type_unknown(k, v, env)
-	case Many, Invalid:
+		return type_unknown(k, v, env, nil)
+	case Poly, Term, Family, Invalid:
 		return e
 	}
 	return e
@@ -97,7 +97,7 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> (color: ^Expr, val
 	case b.value == nil:
 		value = default_of(k, color, b)
 	case is_bare_unknown(b.value) && color != nil:
-		value = admitted(k, color, b) // `??` prend sa couleur : il vaut pour toutes ses valeurs
+		value = type_unknown(k, b.value^.(Unknown), env, color) // `??` prend sa couleur
 	case:
 		value = type_of(k, b.value, env)
 	}
@@ -116,7 +116,7 @@ color_of :: proc(k: ^Kernel, c: ^Expr, env: ^Scope, b: ^Binding) -> ^Expr {
 	if is_invalid(t) do return nil
 	x, ok := the_element(t)
 	if !ok {
-		report(k, .Insoluble_Constraint, b.span, fmt.tprintf("la couleur de %s ne désigne pas un seul ensemble : %s", display(b), print_expr(t)))
+		report(k, .Insoluble_Constraint, b.span, fmt.tprintf("la couleur de %s ne désigne pas un seul ensemble : %s", display(b), brief(t)))
 		return nil
 	}
 	return x
@@ -137,12 +137,6 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		return singleton(color)
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
-}
-
-// admitted : toutes les valeurs qu'une couleur admet, comme type.
-admitted :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
-	if _, ok := color^.(Set); ok do return color
-	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ?? coloré par un scope")
 }
 
 first_production :: proc(s: ^Scope) -> int {
@@ -203,101 +197,38 @@ type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 	return s.bindings[p].value
 }
 
-type_unknown :: proc(k: ^Kernel, u: Unknown, env: ^Scope) -> ^Expr {
-	if u.layout == nil do return new_expr(Many{})
-	t := type_of(k, u.layout, env)
-	if is_invalid(t) do return t
-	x, ok := the_element(t)
-	if !ok do return report(k, .Insoluble_Constraint, u.span, "la forme de ?? doit être un seul ensemble")
-	if _, is_set := x^.(Set); !is_set do return report(k, .Unsupported, u.span, "pas encore dans le kernel : ?? d'un scope")
-	return x // les valeurs possibles : les éléments de l'ensemble
+// type_unknown : une nouvelle inconnue. Ses valeurs possibles viennent de sa forme
+// (`??::u8`), de la couleur qui l'attend (`u8:x -> ??`), ou de rien : un `??` sans
+// rien peut valoir n'importe quel atome.
+type_unknown :: proc(k: ^Kernel, u: Unknown, env: ^Scope, color: ^Expr) -> ^Expr {
+	shape := color
+	if u.layout != nil {
+		t := type_of(k, u.layout, env)
+		if is_invalid(t) do return t
+		x, ok := the_element(t)
+		if !ok do return report(k, .Insoluble_Constraint, u.span, "la forme de ?? doit être un seul ensemble")
+		shape = x
+	}
+	if shape == nil do return new_symbol(k, set_top())
+	s, is_set := shape^.(Set)
+	if !is_set do return report(k, .Unsupported, u.span, "pas encore dans le kernel : ?? d'un scope")
+	return new_symbol(k, s)
 }
 
-// type_of(lo..hi) = { x..y | x ∈ type_of(lo), y ∈ type_of(hi) }. Entre des
-// nombres, un intervalle est l'enveloppe de ses bornes : à l'envers ou chaîné, il
-// s'étend (`2..1` est `1..2`, `1..4..2..7` est `1..7`). Entre des caractères, c'est
-// une plage de caractères ; entre des chaînes, « commence par » et « finit par ».
+// type_of(lo..hi) = { x..y | x ∈ type_of(lo), y ∈ type_of(hi) } : voir range_set.
 type_range :: proc(k: ^Kernel, r: Range, env: ^Scope) -> ^Expr {
-	lo, lo_status := bound_of(k, r.lo, env)
-	hi, hi_status := bound_of(k, r.hi, env)
-	switch {
-	case lo_status == .Invalid || hi_status == .Invalid:
-		return new_expr(Invalid{})
-	case lo_status == .Not_Bound || hi_status == .Not_Bound:
-		return report(k, .Invalid_Range, r.span, "les bornes d'un intervalle sont des nombres ou des chaînes connus")
-	case lo_status == .Unknown || hi_status == .Unknown:
-		return report(k, .Unsupported, r.span, "pas encore dans le kernel : un intervalle à borne inconnue")
-	}
-	if lo_status == .Open && hi_status == .Open do return singleton(new_expr(set_top()))
-	ld, _ := pure_domain(lo)
-	hd, _ := pure_domain(hi)
-	if lo_status == .Open do ld = hd
-	if hi_status == .Open do hd = ld
-	switch {
-	case ld == .Ints && hd == .Ints:
-		llo, lhi := ints_bounds(lo.ints)
-		hlo, hhi := ints_bounds(hi.ints)
-		iv := Int_Interval{lo = lo_status == .Open ? nil : min_hi(llo, hlo), hi = hi_status == .Open ? nil : max_lo(lhi, hhi)}
-		return singleton(new_expr(set_of_ints(ints_of({iv}))))
-	case ld == .Chars && hd == .Chars:
-		llo, lhi := ints_bounds(lo.chars)
-		hlo, hhi := ints_bounds(hi.chars)
-		iv := Int_Interval{lo = lo_status == .Open ? CHAR_EMPTY : min_hi(llo, hlo), hi = hi_status == .Open ? i128(MAX_RUNE) : max_lo(lhi, hhi)}
-		return singleton(new_expr(set_of_chars(ints_of({iv}))))
-	case ld == .Floats && hd == .Floats:
-		llo, lhi := floats_bounds(lo.floats)
-		hlo, hhi := floats_bounds(hi.floats)
-		iv := Float_Interval{lo = lo_status == .Open ? nil : fmin(llo, hlo), hi = hi_status == .Open ? nil : fmax(lhi, hhi)}
-		return singleton(new_expr(set_of_floats(floats_of({iv}))))
-	case (ld == .Strings || ld == .Chars) && (hd == .Strings || hd == .Chars):
-		l := strings_all()
-		if lo_status != .Open do l = strings_prefixed(as_strings(lo))
-		if hi_status != .Open do l = strings_intersect(l, strings_suffixed(as_strings(hi)))
-		return singleton(new_expr(set_of_strings(l)))
-	}
-	return report(k, .Invalid_Range, r.span, "les bornes d'un intervalle doivent être de la même sorte")
+	open := singleton(new_expr(Set{})) // une borne absente : ignorée par range_set
+	lo, hi := open, open
+	if r.lo != nil do lo = type_of(k, r.lo, env)
+	if r.hi != nil do hi = type_of(k, r.hi, env)
+	if is_invalid(lo) do return lo
+	if is_invalid(hi) do return hi
+	return set_operation(k, Set_Op{kind = .Range, lo_open = r.lo == nil, hi_open = r.hi == nil}, r.span, lo, hi)
 }
 
 first_rune :: proc(s: string) -> rune {
 	for r in s do return r
 	return 0
-}
-
-fmin :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok || !y_ok do return nil
-	return min(x, y)
-}
-
-fmax :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok || !y_ok do return nil
-	return max(x, y)
-}
-
-Bound_Status :: enum u8 {
-	Ok,
-	Open, // pas de borne
-	Unknown, // une borne qui dépend d'une inconnue
-	Not_Bound, // ni un nombre ni une chaîne
-	Invalid,
-}
-
-// bound_of : l'ensemble qu'une borne désigne — une valeur connue, ou l'ensemble
-// d'un intervalle déjà construit (chaînage).
-bound_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> (Set, Bound_Status) {
-	if e == nil do return {}, .Open
-	t := type_of(k, e, env)
-	if is_invalid(t) do return {}, .Invalid
-	x, ok := the_element(t)
-	if !ok do return {}, .Unknown
-	s, is_set := x^.(Set)
-	if !is_set do return {}, .Not_Bound
-	d, pure := pure_domain(s)
-	if !pure || d == .Bools do return {}, .Not_Bound
-	return s, .Ok
 }
 
 display :: proc(b: ^Binding) -> string {

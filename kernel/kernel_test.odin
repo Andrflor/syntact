@@ -20,7 +20,7 @@ Case :: struct {
 
 CASES := []Case {
 	{"x -> 1\ny -> x + 2", "{x -> 1  y -> 3}", {}},
-	{"u8:a -> ??\nu8:b -> ??\nu16:c -> a + b", "{0..255:a -> 0..255  0..255:b -> 0..255  0..65535:c -> 0..510}", {}},
+	{"u8:a -> ??\nu8:b -> ??\nu16:c -> a + b", "{0..255:a -> ??0  0..255:b -> ??1  0..65535:c -> ??0 + ??1}", {}},
 	{"u8:a -> ??\nu8:d -> a + a", "", {.Constraint_Mismatch}},
 	{"u8 -> 5", "", {}}, // un builtin n'est qu'un nom : un binding peut le masquer
 	{"e -> 0..255\nf -> >0", "{e -> {-> 0..255}  f -> {-> 1..}}", {}},
@@ -38,7 +38,20 @@ CASES := []Case {
 	{"~5:x -> 6", "", {}},
 	{"~5:x -> 5", "", {.Constraint_Mismatch}},
 	// les scopes : type_of(scope{Σ b}) = { scope{Σ type_of(b)} }
-	{"b -> {\n  n -> ??::u8\n  -> n * 2\n}\nc -> b.n\nd -> b!", "{b -> {-> {n -> 0..255  -> 0..510}}  c -> 0..255  d -> 0..510}", {}},
+	{"b -> {\n  n -> ??::u8\n  -> n * 2\n}\nc -> b.n\nd -> b!", "{b -> {-> {n -> ??0  -> 2*??0}}  c -> ??0  d -> 2*??0}", {}},
+	// les inconnues : des formes canoniques, des valeurs exactes quand on peut les énumérer
+	{"n -> ??::u8\na -> n - n\nb -> n * 3 + n\nc -> (n + 1) * 2", "{n -> ??0  a -> 0  b -> 4*??0  c -> 2*??0 + 2}", {}},
+	{"n -> ??::u8\nu8:e -> n - n", "", {}},
+	{"n -> ??::u8\nm -> ??::u8\nu16:f -> n * m", "", {}},
+	{"n -> ??::u8\nm -> ??::u8\nu8:f -> n * m", "", {.Constraint_Mismatch}},
+	{"n -> ??::u8\ntrue:g -> n < n + 1", "", {}},
+	{"n -> ??::u8\nfalse:i -> 2 * n = 3", "", {}},
+	{"s -> ??::string\nw -> \"a\" + s + \"b\" + \"c\"", "{s -> ??0  w -> (\"a\" + ??0 + \"bc\")}", {}},
+	{"x -> ??::f64\ny -> (x + 0.1) + 0.2\ntrue:r -> x + 1.0 = 1.0 + x", "", {}},
+	// les ensembles qui dépendent d'inconnues : la table de leurs valeurs
+	{"n -> ??::(0..3)\na -> (n | 6) & (n | 7)", "{n -> ??0  a -> {-> 0  -> 1  -> 2  -> 3}}", {}},
+	{"n -> ??::(0..3)\n(n | 0..3):e -> 2", "", {}}, // une table constante est un ensemble
+	{"n -> ??::(0..3)\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
 	{"box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}\na -> box.x\nb -> box.y\nc -> box.x#0", "", {}},
 	{"empty -> {x -> 1}\ne -> empty!", "{empty -> {-> {x -> 1}}  e -> none}", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p\nq -> p.x", "", {}},

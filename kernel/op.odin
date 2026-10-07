@@ -7,11 +7,10 @@ import "core:fmt"
 //
 //   type_of(a op b) = { x op y | x ∈ type_of(a), y ∈ type_of(b) }
 //
-// Si les opérandes sont des valeurs (leurs types sont des ensembles d'atomes),
-// on calcule sur les valeurs. Si ce sont des ensembles (leurs types sont des
-// singletons d'ensembles : `u8`, `>0`), on calcule sur ces ensembles, et le
-// résultat est encore un ensemble unique. Un mélange qui produirait plusieurs
-// ensembles possibles donne Many.
+// Si les deux opérandes sont des valeurs (un atome, ou une forme sur des
+// inconnues), on calcule sur les valeurs et le résultat est sous forme
+// canonique. Si ce sont des ensembles (`u8`, `>0`, `'a'..'z'`), on calcule sur
+// les ensembles, et le résultat est encore un ensemble.
 
 type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	if o.left == nil do return type_unary(k, o, env)
@@ -30,16 +29,18 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur %v", o.kind))
 }
 
+// known_set : l'ensemble qu'un type désigne quand il est connu (un atome est
+// l'ensemble de lui-même).
+known_set :: proc(t: ^Expr) -> (Set, bool) {
+	x, ok := the_element(t)
+	if !ok do return {}, false
+	s, is_set := x^.(Set)
+	return s, is_set
+}
+
 // `|` et `&` opèrent sur des ensembles : sur l'élément de chaque opérande.
 set_algebra :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	xa, oka := the_element(a)
-	xb, okb := the_element(b)
-	if !oka || !okb do return new_expr(Many{}) // plusieurs ensembles possibles
-	sa, sa_ok := xa^.(Set)
-	sb, sb_ok := xb^.(Set)
-	if !sa_ok || !sb_ok do return report(k, .Unsupported, o.span, "pas encore dans le kernel : | et & sur des scopes")
-	r := o.kind == .Or ? set_union(sa, sb) : set_intersect(sa, sb)
-	return singleton(new_expr(r))
+	return set_operation(k, Set_Op{kind = o.kind == .Or ? .Union : .Inter}, o.span, a, b)
 }
 
 arith_of :: proc(kind: syn.Operator_Kind) -> Arith {
@@ -53,46 +54,75 @@ arith_of :: proc(kind: syn.Operator_Kind) -> Arith {
 }
 
 arithmetic :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	// Sur des valeurs : les deux types sont des ensembles d'atomes.
-	if sa, ok := a^.(Set); ok {
-		if sb, ok2 := b^.(Set); ok2 {
-			r, status := arith_sets(arith_of(o.kind), sa, sb)
-			if status != .Ok do return arith_failure(k, o, status, sa, sb)
-			return new_expr(r)
-		}
+	op := arith_of(o.kind)
+	if is_value(a) && is_value(b) {
+		r, status := value_arith(k, op, a, b)
+		if status != .Ok do return arith_failure(k, o, status, a, b)
+		return r
 	}
-	// Sur des ensembles : les deux types sont des singletons d'ensembles.
-	xa, oka := the_element(a)
-	xb, okb := the_element(b)
-	if !oka || !okb do return new_expr(Many{})
-	sa, sa_ok := xa^.(Set)
-	sb, sb_ok := xb^.(Set)
-	if !sa_ok || !sb_ok do return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' attend des nombres", o.kind))
-	r, status := arith_sets(arith_of(o.kind), sa, sb)
-	if status != .Ok do return arith_failure(k, o, status, sa, sb)
-	return singleton(new_expr(r))
+	// Sur des ensembles, connus ou qui dépendent d'inconnues.
+	return set_operation(k, Set_Op{kind = .Arith, arith = op}, o.span, a, b)
+}
+
+// value_arith : sur deux valeurs, connues ou non, en forme canonique.
+value_arith :: proc(k: ^Kernel, op: Arith, a, b: ^Expr) -> (^Expr, Arith_Status) {
+	sa, a_atom := a^.(Set)
+	sb, b_atom := b^.(Set)
+	if a_atom && b_atom {
+		r, status := arith_sets(op, sa, sb)
+		return new_expr(r), status
+	}
+	da, a_ok := value_domain(k, a)
+	db, b_ok := value_domain(k, b)
+	if !a_ok || !b_ok do return nil, .Invalid // une inconnue dont la sorte n'est pas connue
+	switch {
+	case da == .Ints && db == .Ints:
+		pa, _ := as_poly(a)
+		pb, _ := as_poly(b)
+		r: Poly
+		ok: bool
+		switch op {
+		case .Add:
+			r, ok = poly_add(pa, pb)
+		case .Sub:
+			r, ok = poly_sub(pa, pb)
+		case .Mul:
+			r, ok = poly_mul(pa, pb)
+		}
+		if !ok do return nil, .Unsupported // un coefficient au-delà de i128
+		return poly_type(r), .Ok
+	case da == .Floats && db == .Floats:
+		switch op {
+		case .Add:
+			return float_add(a, b), .Ok
+		case .Sub:
+			return float_add(a, float_neg(b)), .Ok // a - b = a + (-b), exactement
+		case .Mul:
+			return float_mul(a, b), .Ok
+		}
+	case is_textual(da) && is_textual(db) && op == .Add:
+		return concat(k, a, b), .Ok
+	case op == .Mul && is_textual(da) && db == .Ints:
+		return repeat_term(k, a, b)
+	case op == .Mul && da == .Ints && is_textual(db):
+		return repeat_term(k, b, a)
+	case (da == .Ints && db == .Floats) || (da == .Floats && db == .Ints):
+		return nil, .Unsupported
+	}
+	return nil, .Invalid
 }
 
 Arith_Status :: enum u8 {
 	Ok,
 	Invalid, // l'opérateur ne s'applique pas à ces sortes
-	Unsupported, // pas encore dans le kernel (grammaires de chaînes, mélange entier/flottant)
+	Unsupported, // pas encore dans le kernel (mélange entier/flottant, trop grand pour être exact)
 }
 
-arith_failure :: proc(k: ^Kernel, o: Op, status: Arith_Status, a, b: Set) -> ^Expr {
+arith_failure :: proc(k: ^Kernel, o: Op, status: Arith_Status, a, b: ^Expr) -> ^Expr {
 	if status == .Unsupported {
-		return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '%v' sur %s et %s", o.kind, print_set(a), print_set(b)))
+		return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '%v' sur %s et %s", o.kind, print_expr(a), print_expr(b)))
 	}
-	return invalid_operator(k, o, a, b)
-}
-
-invalid_operator :: proc(k: ^Kernel, o: Op, a, b: Set) -> ^Expr {
-	return report(
-		k,
-		.Invalid_operator,
-		o.span,
-		fmt.tprintf("'%v' ne s'applique pas à %s et %s", o.kind, print_set(a), print_set(b)),
-	)
+	return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' ne s'applique pas à %s et %s", o.kind, print_expr(a), print_expr(b)))
 }
 
 // arith_sets : { x op y } sur deux ensembles, sorte par sorte : chaque sorte de
@@ -103,6 +133,9 @@ invalid_operator :: proc(k: ^Kernel, o: Op, a, b: Set) -> ^Expr {
 arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 	has :: proc(s: Set, d: Domain) -> bool {
 		return domain_count(s, d) > 0
+	}
+	textual :: proc(s: Set) -> bool {
+		return domain_count(s, .Strings) > 0 || domain_count(s, .Chars) > 0
 	}
 	r := Set{}
 	found := false
@@ -115,9 +148,6 @@ arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 		found = true
 	}
 	// Concaténer ou répéter des caractères donne des chaînes.
-	textual :: proc(s: Set) -> bool {
-		return domain_count(s, .Strings) > 0 || domain_count(s, .Chars) > 0
-	}
 	if textual(a) && textual(b) && op == .Add {
 		r.strings = strings_union(r.strings, strings_concat(as_strings(a), as_strings(b)))
 		found = true
@@ -148,42 +178,65 @@ pure_domain :: proc(s: Set) -> (Domain, bool) {
 	return d, found
 }
 
-// Une comparaison donne un booléen : exact quand les ensembles le décident,
-// `bool` sinon.
+compare_op_of :: proc(kind: syn.Operator_Kind) -> Compare_Op {
+	#partial switch kind {
+	case .Less:
+		return .Lt
+	case .LessEqual:
+		return .Le
+	case .Greater:
+		return .Gt
+	case .GreaterEqual:
+		return .Ge
+	case .NotEqual:
+		return .Ne
+	}
+	return .Eq
+}
+
+// Une comparaison donne un booléen : exact quand les valeurs le décident, une
+// forme canonique sinon. Deux sortes différentes ne sont jamais égales.
 comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	sa, a_ok := a^.(Set)
-	sb, b_ok := b^.(Set)
-	if !a_ok || !b_ok {
-		// Deux ensembles comparés comme valeurs : seule l'égalité a un sens.
-		xa, oka := the_element(a)
-		xb, okb := the_element(b)
-		if !oka || !okb || (o.kind != .Equal && o.kind != .NotEqual) {
-			return report(k, .Unsupported, o.span, "pas encore dans le kernel : cette comparaison")
+	op := compare_op_of(o.kind)
+	if is_value(a) && is_value(b) {
+		da, a_ok := value_domain(k, a)
+		db, b_ok := value_domain(k, b)
+		if a_ok && b_ok && da != db {
+			if op == .Eq || op == .Ne do return bool_atom(op == .Ne)
+			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compare deux sortes différentes : %s et %s", o.kind, print_expr(a), print_expr(b)))
 		}
-		ea, ea_ok := xa^.(Set)
-		eb, eb_ok := xb^.(Set)
-		if !ea_ok || !eb_ok do return report(k, .Unsupported, o.span, "pas encore dans le kernel : l'égalité de scopes")
-		return new_expr(set_of_bools(bools_point(set_equal(ea, eb) == (o.kind == .Equal))))
+		r: ^Expr
+		status: Arith_Status
+		pa, a_poly := as_poly(a)
+		pb, b_poly := as_poly(b)
+		if a_poly && b_poly {
+			p, ok := poly_sub(pa, pb)
+			if !ok do return report(k, .Unsupported, o.span, "pas encore dans le kernel : un coefficient au-delà de i128")
+			r, status = int_compare(k, op, p)
+		} else {
+			r, status = general_compare(k, op, a, b)
+		}
+		if status != .Ok do return arith_failure(k, o, status, a, b)
+		return r
 	}
-	#partial switch o.kind {
-	case .Equal, .NotEqual:
-		verdict := equal_verdict(sa, sb)
-		if o.kind == .NotEqual && card(verdict) == 1 do verdict = ~verdict
-		return new_expr(set_of_bools(verdict))
+	// Deux ensembles comparés comme valeurs : seule l'égalité a un sens.
+	sa, a_known := known_set(a)
+	sb, b_known := known_set(b)
+	if !a_known || !b_known || (op != .Eq && op != .Ne) {
+		return report(k, .Unsupported, o.span, "pas encore dans le kernel : cette comparaison")
 	}
-	verdict, ok := order_verdict(o.kind, sa, sb)
-	if !ok do return invalid_operator(k, o, sa, sb)
-	return new_expr(set_of_bools(verdict))
+	return bool_atom(set_equal(sa, sb) == (op == .Eq))
 }
 
 equal_verdict :: proc(a, b: Set) -> Bools {
-	if set_count(a) == 1 && set_count(b) == 1 do return set_equal(a, b) ? {.True} : {.False}
+	if is_atom(a) && is_atom(b) do return set_equal(a, b) ? {.True} : {.False}
 	if set_is_empty(set_intersect(a, b)) do return {.False}
 	return {.False, .True}
 }
 
-// order_verdict décide `a < b` (etc.) sur les enveloppes de deux ensembles de nombres.
-order_verdict :: proc(kind: syn.Operator_Kind, a, b: Set) -> (Bools, bool) {
+// order_verdict décide `a < b` (etc.) sur les enveloppes de deux ensembles de
+// nombres ou de caractères.
+order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
 	da, a_pure := pure_domain(a)
 	db, b_pure := pure_domain(b)
 	if !a_pure || !b_pure || da != db do return {}, false
@@ -206,17 +259,17 @@ order_verdict :: proc(kind: syn.Operator_Kind, a, b: Set) -> (Bools, bool) {
 	le := below(ahi, blo, strict = false)
 	gt := below(bhi, alo, strict = true)
 	ge := below(bhi, alo, strict = false)
-	#partial switch kind {
-	case .Less:
+	#partial switch op {
+	case .Lt:
 		if lt do return {.True}, true
 		if ge do return {.False}, true
-	case .LessEqual:
+	case .Le:
 		if le do return {.True}, true
 		if gt do return {.False}, true
-	case .Greater:
+	case .Gt:
 		if gt do return {.True}, true
 		if le do return {.False}, true
-	case .GreaterEqual:
+	case .Ge:
 		if ge do return {.True}, true
 		if lt do return {.False}, true
 	}
@@ -246,73 +299,35 @@ type_unary :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	if is_invalid(t) do return t
 	#partial switch o.kind {
 	case .Subtract:
-		if s, ok := t^.(Set); ok {
-			r, done := negate_values(s)
-			if !done do return report(k, .Invalid_operator, o.span, "'-' attend des nombres")
-			return new_expr(r)
-		}
-		return report(k, .Unsupported, o.span, "pas encore dans le kernel : '-' sur un ensemble")
+		return negate(k, o, t)
 	case .Not:
-		x, ok := the_element(t)
-		if !ok do return new_expr(Many{})
-		s, is_set := x^.(Set)
-		if !is_set do return report(k, .Unsupported, o.span, "pas encore dans le kernel : ~ sur un scope")
-		return singleton(new_expr(set_complement(s)))
+		return set_operation(k, Set_Op{kind = .Comp}, o.span, t)
 	case .Greater, .Less, .GreaterEqual, .LessEqual, .NotEqual:
-		s, status := bound_of(k, o.right, env)
-		#partial switch status {
-		case .Invalid:
-			return new_expr(Invalid{})
-		case .Unknown:
-			return report(k, .Unsupported, o.span, "pas encore dans le kernel : une comparaison préfixe à borne inconnue")
-		}
-		d, _ := pure_domain(s)
-		if status != .Ok || set_count(s) != 1 || d == .Strings {
-			return report(k, .Invalid_Range, o.span, "une comparaison préfixe attend un nombre connu")
-		}
-		return singleton(new_expr(half_line(o.kind, s)))
+		return set_operation(k, Set_Op{kind = .Half, half = o.kind}, o.span, t)
 	}
 	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur préfixe %v", o.kind))
 }
 
-negate_values :: proc(s: Set) -> (Set, bool) {
-	d, pure := pure_domain(s)
-	if !pure do return {}, false
-	#partial switch d {
-	case .Ints:
-		return set_of_ints(ints_neg(s.ints)), true
-	case .Floats:
-		return set_of_floats(floats_neg(s.floats)), true
-	}
-	return {}, false
-}
-
-// half_line : `>x` est l'ensemble des nombres de la sorte de x plus grands que x.
-half_line :: proc(kind: syn.Operator_Kind, x: Set) -> Set {
-	if ints_count(x.ints) == 1 {
-		v, _ := ints_default(x.ints)
-		#partial switch kind {
-		case .Greater:
-			return set_of_ints(ints_range(v + 1, nil))
-		case .GreaterEqual:
-			return set_of_ints(ints_range(v, nil))
-		case .Less:
-			return set_of_ints(ints_range(nil, v - 1))
-		case .LessEqual:
-			return set_of_ints(ints_range(nil, v))
+// negate : `-x`, sur une valeur (connue ou non) ou sur un ensemble connu.
+negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
+	if is_value(t) {
+		d, ok := value_domain(k, t)
+		if ok && d == .Ints {
+			p, _ := as_poly(t)
+			r, r_ok := poly_scale(p, -1)
+			if r_ok do return poly_type(r)
 		}
-		return set_of_ints(ints_complement(ints_point(v))) // !=
+		if ok && d == .Floats do return float_neg(t)
+		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend un nombre : %s", print_expr(t)))
 	}
-	v, _ := floats_default(x.floats)
-	#partial switch kind {
-	case .Greater:
-		return set_of_floats(floats_of({Float_Interval{lo = v, lo_open = true}}))
-	case .GreaterEqual:
-		return set_of_floats(floats_of({Float_Interval{lo = v}}))
-	case .Less:
-		return set_of_floats(floats_of({Float_Interval{hi = v, hi_open = true}}))
-	case .LessEqual:
-		return set_of_floats(floats_of({Float_Interval{hi = v}}))
+	s, known := known_set(t)
+	if !known do return report(k, .Unsupported, o.span, "pas encore dans le kernel : '-' sur un ensemble qui dépend d'une inconnue")
+	d, pure := pure_domain(s)
+	switch {
+	case pure && d == .Ints:
+		return singleton(new_expr(set_of_ints(ints_neg(s.ints))))
+	case pure && d == .Floats:
+		return singleton(new_expr(set_of_floats(floats_neg(s.floats))))
 	}
-	return set_of_floats(floats_complement(floats_point(v)))
+	return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend des nombres : %s", print_set(s)))
 }
