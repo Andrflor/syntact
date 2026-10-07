@@ -37,16 +37,19 @@ CASES := []Case {
 	{"n -> ??::u8\nn:x -> 5", "", {.Insoluble_Constraint}},
 	{"~5:x -> 6", "", {}},
 	{"~5:x -> 5", "", {.Constraint_Mismatch}},
+	// ~ se prend dans les sortes portées, et les garde : ~~X = X, même par une ref
+	{"X -> u8 | string\nY -> ~X\n(~Y):x -> \"a\"", "", {}},
+	{"a -> ~bool\nb -> ~a\nc -> 0 & 1\nd -> u8 & string\ne -> ~c", "{a -> ~bool  b -> {-> bool}  c -> ~int  d -> none  e -> {-> int}}", {}},
 	// les scopes : type_of(scope{Σ b}) = { scope{Σ type_of(b)} }
 	{"b -> {\n  n -> ??::u8\n  -> n * 2\n}\nc -> b.n\nd -> b!", "{b -> {-> {n -> ??0  -> 2*??0}}  c -> ??0  d -> 2*??0}", {}},
-	// les inconnues : des formes canoniques, des valeurs exactes quand on peut les énumérer
+	// les inconnues : des formes normales, des valeurs exactes quand on peut les énumérer
 	{"n -> ??::u8\na -> n - n\nb -> n * 3 + n\nc -> (n + 1) * 2", "{n -> ??0  a -> 0  b -> 4*??0  c -> 2*??0 + 2}", {}},
 	{"n -> ??::u8\nu8:e -> n - n", "", {}},
 	{"n -> ??::u8\nm -> ??::u8\nu16:f -> n * m", "", {}},
 	{"n -> ??::u8\nm -> ??::u8\nu8:f -> n * m", "", {.Constraint_Mismatch}},
 	{"n -> ??::u8\ntrue:g -> n < n + 1", "", {}},
 	{"n -> ??::u8\nfalse:i -> 2 * n = 3", "", {}},
-	{"s -> ??::string\nw -> \"a\" + s + \"b\" + \"c\"", "{s -> ??0  w -> (\"a\" + ??0 + \"bc\")}", {}},
+	{"s -> ??::string\nw -> \"a\" + s + \"b\" + \"c\"", "{s -> ??0  w -> \"a\" + ??0 + \"bc\"}", {}},
 	{"x -> ??::f64\ny -> (x + 0.1) + 0.2\ntrue:r -> x + 1.0 = 1.0 + x", "", {}},
 	// les ensembles qui dépendent d'inconnues : la table de leurs valeurs
 	{"n -> ??::(0..3)\na -> (n | 6) & (n | 7)", "{n -> ??0  a -> {-> 0  -> 1  -> 2  -> 3}}", {}},
@@ -65,7 +68,7 @@ CASES := []Case {
 	{"F32OrString -> {\n  -> f32:\n  -> string:\n}\nF32OrString:c -> 3", "", {.Constraint_Mismatch}},
 	{"r -> >0.5 & <1.0\nr:a -> 0.75\nr:d", "", {}},
 	{"r -> >0.5 & <1.0\nr:b -> 1.0", "", {.Constraint_Mismatch}},
-	// les chaînes : des langages réguliers, sous forme canonique
+	// les chaînes : des langages réguliers, l'égalité par double inclusion
 	{"true:a -> (..10 * \"ab\") = (\"ab\" * 0..10)", "", {}},
 	{"(..10 * \"ab\"):x -> \"abab\"", "", {}},
 	{"(..10 * \"ab\"):x -> \"aba\"", "", {.Constraint_Mismatch}},

@@ -9,7 +9,7 @@ import "core:fmt"
 //
 // Si les deux opérandes sont des valeurs (un atome, ou une forme sur des
 // inconnues), on calcule sur les valeurs et le résultat est sous forme
-// canonique. Si ce sont des ensembles (`u8`, `>0`, `'a'..'z'`), on calcule sur
+// normale. Si ce sont des ensembles (`u8`, `>0`, `'a'..'z'`), on calcule sur
 // les ensembles, et le résultat est encore un ensemble.
 
 type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
@@ -64,7 +64,7 @@ arithmetic :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 	return set_operation(k, Set_Op{kind = .Arith, arith = op}, o.span, a, b)
 }
 
-// value_arith : sur deux valeurs, connues ou non, en forme canonique.
+// value_arith : sur deux valeurs, connues ou non, en forme normale.
 value_arith :: proc(k: ^Kernel, op: Arith, a, b: ^Expr) -> (^Expr, Arith_Status) {
 	sa, a_atom := a^.(Set)
 	sb, b_atom := b^.(Set)
@@ -74,7 +74,7 @@ value_arith :: proc(k: ^Kernel, op: Arith, a, b: ^Expr) -> (^Expr, Arith_Status)
 	}
 	da, a_ok := value_domain(k, a)
 	db, b_ok := value_domain(k, b)
-	if !a_ok || !b_ok do return nil, .Invalid // une inconnue dont la sorte n'est pas connue
+	if !a_ok || !b_ok do return nil, .Unsupported // une inconnue de plusieurs sortes
 	switch {
 	case da == .Ints && db == .Ints:
 		pa, _ := as_poly(a)
@@ -140,7 +140,9 @@ arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 	r := Set{}
 	found := false
 	if has(a, .Ints) && has(b, .Ints) {
-		r.ints = ints_arith(op, a.ints, b.ints)
+		exact: bool
+		r.ints, exact = ints_arith(op, a.ints, b.ints)
+		if !exact do return {}, .Unsupported // une borne au-delà de i128
 		found = true
 	}
 	if has(a, .Floats) && has(b, .Floats) {
@@ -195,7 +197,7 @@ compare_op_of :: proc(kind: syn.Operator_Kind) -> Compare_Op {
 }
 
 // Une comparaison donne un booléen : exact quand les valeurs le décident, une
-// forme canonique sinon. Deux sortes différentes ne sont jamais égales.
+// forme normale sinon. Deux sortes différentes ne sont jamais égales.
 comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 	op := compare_op_of(o.kind)
 	if is_value(a) && is_value(b) {
@@ -318,6 +320,7 @@ negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 			if r_ok do return poly_type(r)
 		}
 		if ok && d == .Floats do return float_neg(t)
+		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '-' sur une inconnue de plusieurs sortes : %s", print_expr(t)))
 		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend un nombre : %s", print_expr(t)))
 	}
 	s, known := known_set(t)

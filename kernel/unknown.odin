@@ -4,11 +4,11 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-// LES INCONNUES ET LEURS FORMES CANONIQUES
+// LES INCONNUES ET LEURS FORMES NORMALES
 //
 // Une inconnue (`??::u8`, `string:s -> ??`) est un symbole qui porte l'ensemble de
-// ses valeurs possibles. Une expression qui en dépend garde sa forme, sous une
-// écriture unique :
+// ses valeurs possibles. Une expression qui en dépend garde sa forme, normalisée
+// pour être précise (`n - n` vaut 0, pas -255..255) :
 //
 //   entiers       un polynôme : Σ coef·monôme + constante, monômes triés,
 //                 coefficients non nuls ; sans monôme, c'est l'atome.
@@ -129,7 +129,7 @@ as_poly :: proc(t: ^Expr) -> (Poly, bool) {
 	return {}, false
 }
 
-// poly_type : la forme canonique d'un polynôme ; sans monôme, c'est un atome.
+// poly_type : la forme normale d'un polynôme ; sans monôme, c'est un atome.
 poly_type :: proc(p: Poly) -> ^Expr {
 	if len(p.monos) == 0 do return new_expr(set_of_ints(ints_point(p.const)))
 	return new_expr(p)
@@ -218,12 +218,6 @@ with_const :: proc(p: Poly) -> []Mono {
 	return out[:]
 }
 
-add_checked :: proc(a, b: i128) -> (i128, bool) {
-	if b > 0 && a > I128_MAX - b do return 0, false
-	if b < 0 && a < I128_MIN - b do return 0, false
-	return a + b, true
-}
-
 poly_envelope :: proc(k: ^Kernel, p: Poly) -> Ints {
 	sum := ints_point(p.const)
 	for m in p.monos {
@@ -231,21 +225,21 @@ poly_envelope :: proc(k: ^Kernel, p: Poly) -> Ints {
 		for i := 0; i < len(m.vars); {
 			j := i
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
-			prod = ints_arith(.Mul, prod, ints_pow(k.symbols[m.vars[i]].ints, j - i))
+			prod, _ = ints_arith(.Mul, prod, ints_pow(k.symbols[m.vars[i]].ints, j - i))
 			i = j
 		}
-		sum = ints_arith(.Add, sum, prod)
+		sum, _ = ints_arith(.Add, sum, prod) // une enveloppe : une borne qui déborde devient infinie
 	}
 	return sum
 }
 
-// --- flottants, chaînes, comparaisons : constructeurs canoniques ---
+// --- flottants, chaînes, comparaisons : constructeurs normalisants ---
 
 term_of :: proc(op: Term_Op, args: ..^Expr) -> ^Expr {
 	return new_expr(Term{op = op, args = slice.clone(args)})
 }
 
-// ordered : les opérandes d'une opération commutative dans l'ordre canonique.
+// ordered : les opérandes d'une opération commutative dans un ordre fixé.
 ordered :: proc(a, b: ^Expr) -> (^Expr, ^Expr) {
 	if expr_less(b, a) do return b, a
 	return a, b
@@ -339,7 +333,7 @@ Compare_Op :: enum u8 {
 }
 
 // int_compare : `a ⋈ b` à partir de p = a - b, décidé quand les valeurs de p le
-// décident, écrit canoniquement sinon.
+// décident, en forme normale sinon.
 int_compare :: proc(k: ^Kernel, op: Compare_Op, p: Poly) -> (^Expr, Arith_Status) {
 	q := p
 	kind := Term_Op.Lt
@@ -403,7 +397,7 @@ decide_int :: proc(kind: Term_Op, c: i128) -> bool {
 // le décident ; sinon `>` et `>=` s'écrivent `<` et `<=` en échangeant, `=` et
 // `!=` ordonnent leurs opérandes.
 general_compare :: proc(k: ^Kernel, op: Compare_Op, a, b: ^Expr) -> (^Expr, Arith_Status) {
-	// Deux formes canoniques égales sont la même valeur.
+	// Deux formes normales égales sont la même valeur.
 	if expr_equal(k, a, b) do return bool_atom(op == .Eq || op == .Le || op == .Ge), .Ok
 	va, _ := values_of(k, a)
 	vb, _ := values_of(k, b)
@@ -524,7 +518,7 @@ enumerate :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 		domains[i] = atoms
 	}
 	results := make([dynamic]Atom)
-	env := make(map[int]Atom)
+	env := make([]Atom, len(k.symbols))
 	index := make([]int, len(ids))
 	for {
 		for id, i in ids do env[id] = domains[i][index[i]]
@@ -560,13 +554,13 @@ atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
 	for iv in s.ints.intervals {
 		lo, lo_ok := iv.lo.?
 		hi, hi_ok := iv.hi.?
-		if !lo_ok || !hi_ok || hi - lo >= i128(limit) do return nil, false
+		if !lo_ok || !hi_ok || !narrow(lo, hi, limit) do return nil, false
 		for v := lo; v <= hi; v += 1 do append(&out, v)
 	}
 	for iv in s.chars.intervals {
 		lo, _ := iv.lo.?
 		hi, _ := iv.hi.?
-		if hi - lo >= i128(limit) do return nil, false
+		if !narrow(lo, hi, limit) do return nil, false
 		for v := lo; v <= hi; v += 1 do append(&out, Char_Atom(v))
 	}
 	if floats_count(s.floats) > 1 do return nil, false
@@ -574,7 +568,7 @@ atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
 		v, _ := floats_default(s.floats)
 		append(&out, v)
 	}
-	if len(s.strings.states) > 0 {
+	if s.strings.re != nil {
 		words, ok := strings_words(s.strings, limit)
 		if !ok do return nil, false
 		for w in words do append(&out, w)
@@ -584,18 +578,25 @@ atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
 	return out[:], len(out) <= limit
 }
 
+// narrow : lo..hi a moins de `limit` éléments, sans déborder (hi - lo peut
+// dépasser I128_MAX).
+narrow :: proc(lo, hi: i128, limit: int) -> bool {
+	if lo > I128_MAX - i128(limit) do return true
+	return hi < lo + i128(limit)
+}
+
 set_of_atoms :: proc(atoms: []Atom) -> Set {
-	ints := make([dynamic]Int_Interval)
-	chars := make([dynamic]Int_Interval)
+	ints := make([dynamic]i128)
+	chars := make([dynamic]i128)
 	floats := make([dynamic]Float_Interval)
 	words := make([dynamic]string)
 	bools: Bools
 	for a in atoms {
 		switch v in a {
 		case i128:
-			append(&ints, Int_Interval{v, v})
+			append(&ints, v)
 		case Char_Atom:
-			append(&chars, Int_Interval{i128(v), i128(v)})
+			append(&chars, i128(v))
 		case f64:
 			append(&floats, Float_Interval{lo = v, hi = v})
 		case string:
@@ -605,12 +606,29 @@ set_of_atoms :: proc(atoms: []Atom) -> Set {
 		}
 	}
 	return Set {
-		ints = ints_of(ints[:]),
+		ints = ints_of_points(ints[:]),
 		floats = floats_of(floats[:]),
-		chars = ints_of(chars[:]),
+		chars = ints_of_points(chars[:]),
 		strings = strings_of_words(words[:]),
 		bools = bools,
 	}
+}
+
+// ints_of_points : l'ensemble de ces entiers, les suites consécutives en intervalles.
+ints_of_points :: proc(points: []i128) -> Ints {
+	slice.sort(points)
+	runs := make([dynamic]Int_Interval)
+	for v in points {
+		if len(runs) > 0 {
+			last := &runs[len(runs) - 1]
+			if hi, _ := last.hi.?; v - 1 <= hi { 	// v ≥ -I128_MAX : v - 1 ne déborde pas
+				last.hi = max(hi, v)
+				continue
+			}
+		}
+		append(&runs, Int_Interval{v, v})
+	}
+	return ints_of(runs[:])
 }
 
 // atom_of : la valeur d'un atome connu.
@@ -620,7 +638,8 @@ atom_of :: proc(s: Set) -> (Atom, bool) {
 	return atoms[0], true
 }
 
-eval :: proc(t: ^Expr, env: map[int]Atom) -> (Atom, bool) {
+// eval : la valeur de `t` quand chaque inconnue `id` vaut env[id].
+eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	#partial switch v in t^ {
 	case Set:
 		return atom_of(v)
@@ -734,7 +753,7 @@ atom_less :: proc(a, b: Atom) -> (bool, bool) {
 	return false, false
 }
 
-// --- égalité des formes canoniques ---
+// --- égalité des formes ---
 
 expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 	if a == nil || b == nil do return a == b
@@ -765,59 +784,63 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 
 // --- impression ---
 
-write_poly :: proc(b: ^strings.Builder, p: Poly) {
+printed_poly :: proc(p: Poly) -> (string, Level) {
+	b := strings.builder_make()
 	for m, i in p.monos {
 		coef := m.coef
 		if i > 0 {
-			strings.write_string(b, coef < 0 ? " - " : " + ")
+			strings.write_string(&b, coef < 0 ? " - " : " + ")
 			coef = abs(coef)
 		} else if coef < 0 {
-			strings.write_byte(b, '-')
+			strings.write_byte(&b, '-')
 			coef = -coef
 		}
-		if coef != 1 do fmt.sbprintf(b, "%d*", coef)
+		if coef != 1 do fmt.sbprintf(&b, "%d*", coef)
 		for v, j in m.vars {
-			if j > 0 do strings.write_byte(b, '*')
-			fmt.sbprintf(b, "??%d", v)
+			if j > 0 do strings.write_byte(&b, '*')
+			fmt.sbprintf(&b, "??%d", v)
 		}
 	}
-	if p.const > 0 do fmt.sbprintf(b, " + %d", p.const)
-	if p.const < 0 do fmt.sbprintf(b, " - %d", -p.const)
+	if p.const > 0 do fmt.sbprintf(&b, " + %d", p.const)
+	if p.const < 0 do fmt.sbprintf(&b, " - %d", -p.const)
+	level := Level.TERM
+	if len(p.monos) == 1 && p.const == 0 {
+		m := p.monos[0]
+		switch {
+		case m.coef == 1 && len(m.vars) == 1:
+			level = .PRIMARY
+		case m.coef == -1 && len(m.vars) == 1:
+			level = .UNARY
+		case:
+			level = .FACTOR
+		}
+	}
+	return strings.to_string(b), level
 }
 
-TERM_SYMBOLS := [Term_Op]string {
-	.Sym    = "",
-	.F_Add  = " + ",
-	.F_Mul  = " * ",
-	.F_Neg  = "-",
-	.Concat = " + ",
-	.Repeat = " * ",
-	.Lt     = " < ",
-	.Le     = " <= ",
-	.Eq     = " = ",
-	.Ne     = " != ",
-}
-
-write_term :: proc(b: ^strings.Builder, t: Term) {
-	#partial switch t.op {
+// printed_term : les opérandes d'une opération flottante sont tous entre
+// parenthèses s'il le faut — `(a + b) + c` n'est pas `a + (b + c)` en IEEE.
+printed_term :: proc(t: Term) -> (string, Level) {
+	infix :: proc(args: []^Expr, symbol: string, operand: Level) -> string {
+		parts := make([]string, len(args))
+		for a, i in args do parts[i] = print_at(a, operand)
+		return strings.join(parts, symbol)
+	}
+	switch t.op {
 	case .Sym:
-		fmt.sbprintf(b, "??%d", t.sym)
-		return
+		return fmt.tprintf("??%d", t.sym), .PRIMARY
 	case .F_Neg:
-		strings.write_byte(b, '-')
-		write_expr(b, t.args[0])
-		return
-	case .Lt, .Eq, .Ne:
-		if len(t.args) == 1 {
-			write_expr(b, t.args[0]) // la forme entière : p ⋈ 0
-			fmt.sbprintf(b, "%s0", TERM_SYMBOLS[t.op])
-			return
-		}
+		return fmt.tprintf("-%s", print_at(t.args[0], .CALL)), .UNARY
+	case .F_Add, .Concat:
+		return infix(t.args, " + ", above(.TERM)), .TERM
+	case .F_Mul, .Repeat:
+		return infix(t.args, " * ", above(.FACTOR)), .FACTOR
+	case .Lt, .Le:
+		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_at(t.args[0], above(.COMPARISON)), t.op == .Lt ? "<" : "<="), .COMPARISON
+		return infix(t.args, t.op == .Lt ? " < " : " <= ", above(.COMPARISON)), .COMPARISON
+	case .Eq, .Ne:
+		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_at(t.args[0], above(.EQUALITY)), t.op == .Eq ? "=" : "!="), .EQUALITY
+		return infix(t.args, t.op == .Eq ? " = " : " != ", above(.EQUALITY)), .EQUALITY
 	}
-	strings.write_byte(b, '(')
-	for a, i in t.args {
-		if i > 0 do strings.write_string(b, TERM_SYMBOLS[t.op])
-		write_expr(b, a)
-	}
-	strings.write_byte(b, ')')
+	return "", .PRIMARY
 }

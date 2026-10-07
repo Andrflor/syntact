@@ -2,6 +2,7 @@ package kernel
 
 import syn "../compiler"
 import "core:fmt"
+import "core:math"
 import "core:strconv"
 import "core:strings"
 
@@ -44,7 +45,9 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			s.bindings[i].value = build_expr(k, s, right)
 			return
 		}
-		b.value = build_expr(k, s, right)
+		// Le parser accepte une flèche sans valeur (`x ->`, `x -> ()`) ; son sens n'est
+		// pas encore fixé.
+		b.value = right == syn.INVALID_NODE ? unsupported(k, idx, "une flèche sans valeur") : build_expr(k, s, right)
 		append(&s.bindings, b)
 	case .Constraint:
 		// `C:name` : un binding coloré sans valeur (sa valeur est le défaut de C).
@@ -59,6 +62,8 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			cdata := ast.node_data[operand]
 			b.color = build_expr(k, s, cdata.binary.left)
 			if v := cdata.binary.right; v != syn.INVALID_NODE do b.value = build_expr(k, s, v)
+		} else if operand == syn.INVALID_NODE {
+			b.value = unsupported(k, idx, "une production sans valeur")
 		} else {
 			b.value = build_expr(k, s, operand)
 		}
@@ -118,7 +123,7 @@ build_left :: proc(k: ^Kernel, s: ^Scope, left: syn.Node_Index, b: ^Binding) -> 
 }
 
 build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
-	if idx == syn.INVALID_NODE do return new_expr(Invalid{}) // erreur de parse, déjà signalée
+	if idx == syn.INVALID_NODE do return unsupported(k, idx, "une expression vide")
 	ast := k.ast
 	data := ast.node_data[idx]
 	span := ast.node_spans[idx]
@@ -147,6 +152,7 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 		)
 	case .Execute:
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "les patterns d'exécution")
+		if data.execute.target == syn.INVALID_NODE do return unsupported(k, idx, "le collapse sans cible")
 		return new_expr(Collapse{target = build_expr(k, s, data.execute.target), span = span})
 	case .Operator:
 		op := data.operator
@@ -255,12 +261,12 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> ^Expr {
 	case .Integer, .Hexadecimal, .Binary:
 		base := lit.kind == .Integer ? 10 : (lit.kind == .Hexadecimal ? 16 : 2)
 		digits := lit.kind == .Integer ? text : text[2:]
-		v, ok := strconv.parse_u64_of_base(digits, base)
-		if !ok do return unsupported(k, idx, "un entier littéral au-delà de 64 bits")
-		return new_expr(set_of_ints(ints_point(i128(v))))
+		v, ok := parse_integer(digits, i128(base))
+		if !ok do return unsupported(k, idx, "un entier littéral au-delà de i128")
+		return new_expr(set_of_ints(ints_point(v)))
 	case .Float:
 		v, ok := strconv.parse_f64(text)
-		if !ok do return report(k, .Unsupported, span, "flottant illisible")
+		if !ok || math.is_inf(v) do return unsupported(k, idx, "un flottant littéral au-delà de f64")
 		return new_expr(set_of_floats(floats_point(v)))
 	case .String:
 		// Entre apostrophes, un caractère (`'a'`, ou le caractère vide `''`) ; entre
@@ -279,6 +285,28 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> ^Expr {
 		return new_expr(set_of_bools(bools_point(text == "true")))
 	}
 	return unsupported(k, idx, "ce littéral")
+}
+
+// parse_integer lit les chiffres d'un entier littéral ; faux s'il sort de l'univers
+// des entiers (set.odin).
+parse_integer :: proc(digits: string, base: i128) -> (v: i128, ok: bool) {
+	for c in digits {
+		d: i128
+		switch c {
+		case '0' ..= '9':
+			d = i128(c - '0')
+		case 'a' ..= 'f':
+			d = i128(c - 'a' + 10)
+		case 'A' ..= 'F':
+			d = i128(c - 'A' + 10)
+		case:
+			return 0, false
+		}
+		if d >= base do return 0, false
+		v = mul_checked(v, base) or_return
+		v = add_checked(v, d) or_return
+	}
+	return v, len(digits) > 0
 }
 
 // decode_string interprète les échappements (le parser a déjà retiré les

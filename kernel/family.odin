@@ -8,7 +8,7 @@ import "core:strings"
 // LES ENSEMBLES QUI DÉPENDENT D'INCONNUES
 //
 // `n..10`, `??::u8 & >10`, `n | 6` : un ensemble par valeur des inconnues. Sa forme
-// canonique est la table complète — symboles triés, valeurs énumérées dans l'ordre
+// normale est la table complète — symboles triés, valeurs énumérées dans l'ordre
 // de leur ensemble, le premier symbole variant le plus vite. La corrélation est
 // gardée : `(n | 6) & (n | 7)` vaut {n} pour chaque n. Une table constante est son
 // ensemble. Comme type, une table désigne plusieurs ensembles : ce n'est pas un
@@ -134,14 +134,7 @@ upper_of :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 
 // sorts_of : toutes les valeurs des sortes qu'un ensemble porte.
 sorts_of :: proc(s: Set) -> Set {
-	top := set_top()
-	r := Set{}
-	if domain_count(s, .Ints) > 0 do r.ints = top.ints
-	if domain_count(s, .Floats) > 0 do r.floats = top.floats
-	if domain_count(s, .Chars) > 0 do r.chars = top.chars
-	if domain_count(s, .Strings) > 0 do r.strings = top.strings
-	if domain_count(s, .Bools) > 0 do r.bools = top.bools
-	return r
+	return set_complement(Set{sorts = carried(s)})
 }
 
 // half_envelope : l'union de `>x` pour tout x de `xs` (et de même pour les autres).
@@ -196,7 +189,7 @@ apply_set_op :: proc(op: Set_Op, args: []Set) -> (Set, Arith_Status) {
 	return {}, .Invalid
 }
 
-// family_expr : la forme canonique d'une table. On retire les inconnues dont elle ne
+// family_expr : la forme normale d'une table. On retire les inconnues dont elle ne
 // dépend pas ; sans inconnue, c'est son ensemble. Deux tables qui sont la même
 // fonction ont alors les mêmes inconnues, donc la même écriture.
 family_expr :: proc(syms: []int, radix: []int, sets: []Set) -> ^Expr {
@@ -269,7 +262,7 @@ family_of :: proc(k: ^Kernel, t: ^Expr) -> (Family, Family_Status) {
 		total := 1
 		for d in domains do total *= len(d)
 		sets := make([]Set, total)
-		env := make(map[int]Atom)
+		env := make([]Atom, len(k.symbols))
 		digits := make([]int, len(syms))
 		for j in 0 ..< total {
 			for id, i in syms do env[id] = domains[i][digits[i]]
@@ -332,10 +325,11 @@ odometer :: proc(digits: []int, domains: [][]Atom) {
 	}
 }
 
-// range_set : `lo..hi` sur des ensembles connus. Entre des nombres, l'enveloppe de
-// ses bornes (`2..1` est `1..2`, `1..4..2..7` est `1..7`) ; entre des caractères,
-// une plage de caractères ; entre des chaînes, « commence par » et « finit par » ;
-// `..` seul, tout.
+// range_set : `lo..hi` sur des ensembles connus. C'est l'union des plages x..y pour
+// x ∈ lo, y ∈ hi. Entre des nombres ou des caractères, c'est l'enveloppe de
+// lo ∪ hi (`2..1` est `1..2`, `1..4..2..7` est `1..7`) : toute valeur entre deux
+// bornes est entre une borne de lo et une borne de hi. Entre des chaînes, « commence
+// par » et « finit par ». `..` seul, tout.
 range_set :: proc(lo: Set, lo_open: bool, hi: Set, hi_open: bool) -> (Set, Arith_Status) {
 	if lo_open && hi_open do return set_top(), .Ok
 	ld, l_pure := pure_domain(lo)
@@ -343,22 +337,20 @@ range_set :: proc(lo: Set, lo_open: bool, hi: Set, hi_open: bool) -> (Set, Arith
 	if lo_open do ld, l_pure = hd, h_pure
 	if hi_open do hd, h_pure = ld, l_pure
 	if !l_pure || !h_pure do return {}, .Invalid
+	both := set_union(lo, hi) // une borne ouverte est vide : elle ne compte pas
 	switch {
 	case ld == .Ints && hd == .Ints:
-		llo, lhi := ints_bounds(lo.ints)
-		hlo, hhi := ints_bounds(hi.ints)
-		iv := Int_Interval{lo = lo_open ? nil : min_hi(llo, hlo), hi = hi_open ? nil : max_lo(lhi, hhi)}
-		return set_of_ints(ints_of({iv})), .Ok
+		l, h := ints_bounds(both.ints)
+		return set_of_ints(ints_range(lo_open ? nil : l, hi_open ? nil : h)), .Ok
 	case ld == .Chars && hd == .Chars:
-		llo, lhi := ints_bounds(lo.chars)
-		hlo, hhi := ints_bounds(hi.chars)
-		iv := Int_Interval{lo = lo_open ? CHAR_EMPTY : min_hi(llo, hlo), hi = hi_open ? i128(MAX_RUNE) : max_lo(lhi, hhi)}
-		return set_of_chars(ints_of({iv})), .Ok
+		l, h := ints_bounds(both.chars)
+		return set_of_chars(ints_range(lo_open ? CHAR_EMPTY : l, hi_open ? i128(MAX_RUNE) : h)), .Ok
 	case ld == .Floats && hd == .Floats:
-		llo, lhi := floats_bounds(lo.floats)
-		hlo, hhi := floats_bounds(hi.floats)
-		iv := Float_Interval{lo = lo_open ? nil : fmin(llo, hlo), hi = hi_open ? nil : fmax(lhi, hhi)}
-		return set_of_floats(floats_of({iv})), .Ok
+		f := both.floats.intervals
+		hull := Float_Interval{f[0].lo, f[len(f) - 1].hi, f[0].lo_open, f[len(f) - 1].hi_open}
+		if lo_open do hull.lo, hull.lo_open = nil, false
+		if hi_open do hull.hi, hull.hi_open = nil, false
+		return set_of_floats(floats_of({hull})), .Ok
 	case is_textual(ld) && is_textual(hd):
 		l := strings_all()
 		if !lo_open do l = strings_prefixed(as_strings(lo))
@@ -377,10 +369,12 @@ half_line :: proc(kind: syn.Operator_Kind, x: Set) -> (Set, Arith_Status) {
 		v, _ := ints_default(x.ints)
 		#partial switch kind {
 		case .Greater:
+			if v == I128_MAX do return set_of_ints({}), .Ok // aucun entier au-delà de l'univers
 			return set_of_ints(ints_range(v + 1, nil)), .Ok
 		case .GreaterEqual:
 			return set_of_ints(ints_range(v, nil)), .Ok
 		case .Less:
+			if v == -I128_MAX do return set_of_ints({}), .Ok
 			return set_of_ints(ints_range(nil, v - 1)), .Ok
 		case .LessEqual:
 			return set_of_ints(ints_range(nil, v)), .Ok
@@ -403,20 +397,6 @@ half_line :: proc(kind: syn.Operator_Kind, x: Set) -> (Set, Arith_Status) {
 	return {}, .Invalid
 }
 
-fmin :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok || !y_ok do return nil
-	return min(x, y)
-}
-
-fmax :: proc(a, b: Maybe(f64)) -> Maybe(f64) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok || !y_ok do return nil
-	return max(x, y)
-}
-
 family_equal :: proc(a, b: Family) -> bool {
 	if !slice.equal(a.syms, b.syms) || len(a.sets) != len(b.sets) do return false
 	for s, i in a.sets do if !same_set(s, b.sets[i]) do return false
@@ -429,7 +409,7 @@ write_subsets :: proc(b: ^strings.Builder, s: Subsets) {
 }
 
 // Une table s'écrit comme le type qu'elle est : l'un de ses ensembles,
-// `{-> S1 -> S2 …}`, dans l'ordre canonique.
+// `{-> S1 -> S2 …}`, dans l'ordre de leur écriture.
 write_family :: proc(b: ^strings.Builder, f: Family) {
 	printed := make([dynamic]string)
 	for s in f.sets do append(&printed, print_set(s))
