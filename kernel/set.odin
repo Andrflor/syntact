@@ -322,7 +322,10 @@ floats_of :: proc(raw: []Float_Interval) -> Floats {
 	kept := make([dynamic]Float_Interval, 0, len(raw))
 	for iv in raw {
 		if float_interval_empty(iv) do continue
-		append(&kept, Float_Interval{canonical_zero(iv.lo), canonical_zero(iv.hi), iv.lo_open, iv.hi_open})
+		// Une borne infinie n'est ni ouverte ni fermée : une seule écriture.
+		_, lo_finite := iv.lo.?
+		_, hi_finite := iv.hi.?
+		append(&kept, Float_Interval{canonical_zero(iv.lo), canonical_zero(iv.hi), iv.lo_open && lo_finite, iv.hi_open && hi_finite})
 	}
 	slice.sort_by(kept[:], proc(a, b: Float_Interval) -> bool {
 		al, a_ok := a.lo.?
