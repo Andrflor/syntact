@@ -42,8 +42,11 @@ admits :: proc(k: ^Kernel, color, type: ^Expr) -> Verdict {
 		case Poly, Term:
 			return value_in(k, type, c)
 		}
-		return .Refuted // un ensemble, un scope : pas un atome
+		if s, is_scope := scope_element(type); is_scope && first_production(s) < 0 do return bdd_admits(k, c.scopes, s)
+		return .Refuted // un ensemble comme valeur n'est pas un élément d'un ensemble d'atomes
 	case ^Scope:
+		// une forme close se lit comme ensemble ; sinon binding par binding
+		if s, ok := shape_set(c); ok do return admits(k, new_expr(s), type)
 		return scope_admits(k, c, type)
 	}
 	return .Refuted

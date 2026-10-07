@@ -584,6 +584,7 @@ collect_symbols :: proc(t: ^Expr, out: ^[dynamic]int) {
 
 // atoms_of_set : tous les éléments d'un ensemble, s'il en a au plus `limit`.
 atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
+	if domain_count(s, .Scopes) > 0 do return nil, false // des scopes ne s'énumèrent pas en atomes
 	out := make([dynamic]Atom)
 	for iv in s.ints.intervals {
 		lo, lo_ok := iv.lo.?

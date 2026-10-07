@@ -159,6 +159,10 @@ printed_set :: proc(s: Set) -> (string, Level) {
 	case {.False}:
 		append(&parts, Part{"false", .PRIMARY})
 	}
+	if domain_count(s, .Scopes) > 0 {
+		text, level := printed_bdd(s.scopes)
+		append(&parts, Part{text, level})
+	}
 	// une sorte portée mais vide : « aucun entier », etc.
 	for d in s.sorts do if domain_count(s, d) == 0 do append(&parts, Part{fmt.tprintf("~%s", SORT_NAMES[d]), .UNARY})
 	switch len(parts) {
@@ -178,6 +182,7 @@ SORT_NAMES := [Domain]string {
 	.Chars   = "char",
 	.Strings = "string",
 	.Bools   = "bool",
+	.Scopes  = "scope",
 }
 
 print_ints :: proc(a: Ints) -> string {

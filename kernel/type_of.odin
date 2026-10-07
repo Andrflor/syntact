@@ -112,8 +112,8 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr = nil
 	case is_bare_unknown(b.value) && wanted != nil:
 		value = type_unknown(k, b.value^.(Unknown), env, wanted) // `??` prend sa couleur
 	case:
-		if shape, is_shape := as_shape(wanted); is_shape {
-			if literal, is_scope := b.value^.(^Scope); is_scope {
+		if literal, is_scope := b.value^.(^Scope); is_scope {
+			if shape, found := expected_shape(wanted, literal); found {
 				value = singleton(new_expr(type_scope(k, literal, env, shape)))
 				break
 			}
@@ -123,13 +123,31 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr = nil
 	return
 }
 
-// as_shape : une couleur qui est une forme de scope — sans production, donc lue
-// binding par binding.
-as_shape :: proc(color: ^Expr) -> (^Scope, bool) {
+// expected_shape : la forme qu'une couleur attend pour ce scope littéral — la
+// couleur elle-même si c'est une forme, ou la seule forme de même structure dans
+// une combinaison de formes.
+expected_shape :: proc(color: ^Expr, literal: ^Scope) -> (^Scope, bool) {
 	if color == nil do return nil, false
-	s, ok := color^.(^Scope)
-	if !ok || first_production(s) >= 0 do return nil, false
-	return s, true
+	#partial switch c in color^ {
+	case ^Scope:
+		return c, first_production(c) < 0
+	case Set:
+		found: ^Scope = nil
+		for r in bdd_atoms(c.scopes) {
+			if !fits(r, literal) || r.shape == found do continue
+			if found != nil do return nil, false // ambigu
+			found = r.shape
+		}
+		return found, found != nil
+	}
+	return nil, false
+}
+
+// fits : le scope littéral a la structure de la forme (noms et kinds, dans l'ordre).
+fits :: proc(r: ^Record, literal: ^Scope) -> bool {
+	if len(r.fields) != len(literal.bindings) do return false
+	for f, i in r.fields do if f.name != literal.bindings[i].name || f.kind != literal.bindings[i].kind do return false
+	return true
 }
 
 is_bare_unknown :: proc(e: ^Expr) -> bool {
@@ -157,6 +175,7 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	if color == nil do return new_expr(Invalid{})
 	#partial switch c in color^ {
 	case Set:
+		if first, _ := set_first_domain(c); first == .Scopes do return scopes_default(k, c.scopes, b)
 		d, ok := set_default(c)
 		if !ok do return color // la couleur none : sa seule valeur est none
 		return new_expr(d)
@@ -165,6 +184,15 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		return singleton(color)
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
+}
+
+// scopes_default : le défaut d'un ensemble de scopes réduit à une forme, c'est la
+// forme elle-même (`Point:p` vaut Point).
+scopes_default :: proc(k: ^Kernel, b: Bdd, binding: ^Binding) -> ^Expr {
+	if n, is_node := b.(^Bdd_Node); is_node && is_leaf(n.yes, .Top) && is_leaf(n.maybe, .Bottom) && is_leaf(n.no, .Bottom) {
+		return singleton(new_expr(n.atom.shape))
+	}
+	return report(k, .Unsupported, binding.span, "pas encore dans le kernel : le défaut d'une combinaison de formes")
 }
 
 first_production :: proc(s: ^Scope) -> int {

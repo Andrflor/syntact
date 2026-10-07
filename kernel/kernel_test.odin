@@ -69,6 +69,13 @@ CASES := []Case {
 	// bidirectionnel : la couleur descend dans un scope littéral
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p -> {x -> ??  y -> 2}", "", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nLine -> {\n  Point:a\n  Point:b\n}\nLine:l -> {a -> {x -> ??  y -> 1}  b -> {x -> 3  y -> ??}}", "", {}},
+	// l'algèbre des formes : | & ~ de scopes, un BDD paresseux
+	{"Point -> {\n  u8:x\n  u8:y\n}\nCircle -> {\n  u8:radius\n}\n(Point | Circle):a -> {x -> 1  y -> 2}\n(Point | Circle):b -> {radius -> 3}", "", {}},
+	{"Point -> {\n  u8:x\n  u8:y\n}\nCircle -> {\n  u8:radius\n}\n(Point | Circle):c -> {radius -> 300}", "", {.Constraint_Mismatch}},
+	{"Point -> {\n  u8:x\n  u8:y\n}\nOrigin -> {\n  0:x\n  0:y\n}\n(Point & ~Origin):a -> {x -> 1  y -> 0}\ntrue:c -> (Origin & ~Point) = none\ntrue:e -> (Point | Origin) = Point", "", {}},
+	{"Point -> {\n  u8:x\n  u8:y\n}\nOrigin -> {\n  0:x\n  0:y\n}\n(Point & ~Origin):b -> {x -> 0  y -> 0}", "", {.Constraint_Mismatch}},
+	{"Point -> {\n  u8:x\n  u8:y\n}\nn -> ??::u8\n(Point | {string:name}):p -> {x -> n  y -> n + 1}", "", {.Constraint_Mismatch}},
+	{"Point -> {\n  u8:x\n  u8:y\n}\nCircle -> {\n  u8:radius\n}\n(Point | Circle):a -> {x -> ??  y -> 2}", "", {}},
 	{"box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}\na -> box.x\nb -> box.y\nc -> box.x#0", "", {}},
 	{"empty -> {x -> 1}\ne -> empty!", "{empty -> {-> {x -> 1}}  e -> none}", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p\nq -> p.x", "", {}},
