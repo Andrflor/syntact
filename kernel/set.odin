@@ -177,6 +177,41 @@ ints_arith :: proc(op: Arith, a, b: Ints) -> Ints {
 	return ints_of(out[:])
 }
 
+// ints_pow : { xⁿ | x ∈ a } sur l'enveloppe de chaque intervalle — une puissance
+// paire ne descend pas sous 0.
+ints_pow :: proc(a: Ints, n: int) -> Ints {
+	if n == 1 do return a
+	out := make([dynamic]Int_Interval, 0, len(a.intervals))
+	for iv in a.intervals do append(&out, pow_interval(iv, n))
+	return ints_of(out[:])
+}
+
+pow_bound :: proc(b: Maybe(i128), n: int) -> Maybe(i128) {
+	v, ok := b.?
+	if !ok do return nil
+	r: i128 = 1
+	for _ in 0 ..< n {
+		p, p_ok := mul_checked(r, v)
+		if !p_ok do return nil // trop grand : infini, une sur-approximation sûre
+		r = p
+	}
+	return r
+}
+
+pow_interval :: proc(iv: Int_Interval, n: int) -> Int_Interval {
+	if n % 2 == 1 do return Int_Interval{pow_bound(iv.lo, n), pow_bound(iv.hi, n)}
+	lo, lo_ok := iv.lo.?
+	hi, hi_ok := iv.hi.?
+	if lo_ok && lo >= 0 do return Int_Interval{pow_bound(iv.lo, n), pow_bound(iv.hi, n)}
+	if hi_ok && hi <= 0 do return Int_Interval{pow_bound(iv.hi, n), pow_bound(iv.lo, n)}
+	if !lo_ok || !hi_ok do return Int_Interval{i128(0), nil}
+	a, b := pow_bound(iv.lo, n), pow_bound(iv.hi, n)
+	x, x_ok := a.?
+	y, y_ok := b.?
+	if !x_ok || !y_ok do return Int_Interval{i128(0), nil}
+	return Int_Interval{i128(0), max(x, y)}
+}
+
 ints_neg :: proc(a: Ints) -> Ints {
 	out := make([dynamic]Int_Interval, 0, len(a.intervals))
 	for iv in a.intervals do append(&out, Int_Interval{neg_bound(iv.hi), neg_bound(iv.lo)})

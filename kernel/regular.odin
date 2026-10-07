@@ -65,6 +65,30 @@ strings_all :: proc() -> Strings {
 	return strings_complement(Strings{})
 }
 
+// strings_of_words : le langage fini de ces mots (un arbre de préfixes, minimisé).
+strings_of_words :: proc(words: []string) -> Strings {
+	if len(words) == 0 do return Strings{}
+	n: Nfa
+	root := nfa_add(&n)
+	for w in words {
+		cur := root
+		for r in w {
+			next := -1
+			for e in n.states[cur].edges do if e.lo == r {
+				next = e.to
+				break
+			}
+			if next < 0 {
+				next = nfa_add(&n)
+				append(&n.states[cur].edges, Edge{{r, r}, next})
+			}
+			cur = next
+		}
+		n.states[cur].accept = true
+	}
+	return determinize(&n, root)
+}
+
 strings_empty_word :: proc() -> Strings {
 	return strings_point("")
 }

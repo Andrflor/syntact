@@ -80,10 +80,6 @@ Unknown :: struct {
 	span:   syn.Span,
 }
 
-// Un type à plus d'un élément que l'on ne sait pas énumérer (par exemple l'union
-// d'un ensemble avec une valeur inconnue). N'apparaît que comme résultat de type_of.
-Many :: struct {}
-
 // Une erreur déjà signalée à cet endroit : tout ce qui en dépend reste silencieux.
 Invalid :: struct {}
 
@@ -96,7 +92,9 @@ Expr :: union {
 	Op,
 	Range,
 	Unknown,
-	Many,
+	Poly, // une forme sur des inconnues (résultat de type_of seulement) : canon.odin
+	Term,
+	Family, // un ensemble qui dépend d'inconnues : family.odin
 	Invalid,
 }
 
@@ -134,9 +132,10 @@ Error :: struct {
 }
 
 Kernel :: struct {
-	ast:    ^syn.Ast,
-	errors: [dynamic]Error,
-	typed:  [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
+	ast:     ^syn.Ast,
+	errors:  [dynamic]Error,
+	typed:   [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
+	symbols: [dynamic]Set, // l'ensemble des valeurs possibles de chaque inconnue
 }
 
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> ^Expr {
