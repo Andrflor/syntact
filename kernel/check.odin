@@ -34,11 +34,23 @@ contains :: proc(color, type: ^Expr) -> bool {
 	return false
 }
 
-// atoms_admitted : les valeurs possibles `t` sont des éléments de `c`. `none` n'est
-// l'élément d'aucun ensemble d'atomes : seule la couleur none l'admet.
+// atoms_admitted : les valeurs possibles `t` sont admises par la couleur `c`.
+// `none` n'est l'élément d'aucun ensemble d'atomes : seule la couleur none
+// l'admet. Une couleur de chaînes admet un caractère comme la chaîne d'une lettre.
 atoms_admitted :: proc(t, c: Set) -> bool {
 	if set_is_empty(t) do return set_is_empty(c)
-	return set_subset(t, c)
+	if set_subset(t, c) do return true
+	outside := ints_intersect(t.chars, ints_complement(c.chars))
+	lifted := t
+	lifted.chars = {}
+	lifted.strings = strings_union(t.strings, chars_as_strings(outside))
+	return set_subset(lifted, c)
+}
+
+// atoms_subset : a ⊆ b, deux types d'atomes, strictement (sans admission).
+atoms_subset :: proc(a, b: Set) -> bool {
+	if set_is_empty(a) do return set_is_empty(b)
+	return set_subset(a, b)
 }
 
 // scope_admits : un scope avec productions admet ce qu'admet l'une de ses
@@ -74,7 +86,7 @@ binding_admits :: proc(b: Binding, type: ^Expr) -> bool {
 type_subset :: proc(a, b: ^Expr) -> bool {
 	if is_invalid(a) || is_invalid(b) do return true
 	if sa, ok := a^.(Set); ok {
-		if sb, ok2 := b^.(Set); ok2 do return atoms_admitted(sa, sb)
+		if sb, ok2 := b^.(Set); ok2 do return atoms_subset(sa, sb)
 	}
 	xa, a_one := the_element(a)
 	xb, b_one := the_element(b)

@@ -95,32 +95,44 @@ invalid_operator :: proc(k: ^Kernel, o: Op, a, b: Set) -> ^Expr {
 	)
 }
 
-// arith_sets : { x op y } sur deux ensembles d'une même sorte. `+` concatène deux
-// chaînes connues.
+// arith_sets : { x op y } sur deux ensembles, sorte par sorte : chaque sorte de
+// `a` se combine avec la sorte de `b` pour laquelle l'opération existe. Sur les
+// nombres, l'arithmétique ; sur les chaînes, `+` concatène et `*` répète par un
+// ensemble de comptes (`'a'..'z' * 2..4`, `..10 * "ab"`), dans les deux sens.
+// Aucune paire compatible : l'opérateur ne s'applique pas.
 arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
-	da, a_pure := pure_domain(a)
-	db, b_pure := pure_domain(b)
-	if !a_pure || !b_pure do return {}, .Invalid
-	if da == .Strings || db == .Strings {
-		// Seule la concaténation de deux chaînes connues est là ; le reste (`*`,
-		// les grammaires) attend l'algèbre des chaînes.
-		if da == db && op == .Add && strings_count(a.strings) == 1 && strings_count(b.strings) == 1 {
-			return set_of_strings(strings_point(fmt.tprintf("%s%s", a.strings.items[0], b.strings.items[0]))), .Ok
+	has :: proc(s: Set, d: Domain) -> bool {
+		return domain_count(s, d) > 0
+	}
+	r := Set{}
+	found := false
+	if has(a, .Ints) && has(b, .Ints) {
+		r.ints = ints_arith(op, a.ints, b.ints)
+		found = true
+	}
+	if has(a, .Floats) && has(b, .Floats) {
+		r.floats = floats_arith(op, a.floats, b.floats)
+		found = true
+	}
+	// Concaténer ou répéter des caractères donne des chaînes.
+	textual :: proc(s: Set) -> bool {
+		return domain_count(s, .Strings) > 0 || domain_count(s, .Chars) > 0
+	}
+	if textual(a) && textual(b) && op == .Add {
+		r.strings = strings_union(r.strings, strings_concat(as_strings(a), as_strings(b)))
+		found = true
+	}
+	if op == .Mul {
+		for pair in ([2][2]Set{{a, b}, {b, a}}) {
+			if !textual(pair[0]) || !has(pair[1], .Ints) do continue
+			rep, ok := strings_repeat(as_strings(pair[0]), pair[1].ints)
+			if !ok do return {}, .Unsupported // trop grand pour un automate exact
+			r.strings = strings_union(r.strings, rep)
+			found = true
 		}
-		if op == .Sub do return {}, .Invalid
-		return {}, .Unsupported
 	}
-	if da != db {
-		if da != .Bools && db != .Bools do return {}, .Unsupported // entier et flottant
-		return {}, .Invalid
-	}
-	switch da {
-	case .Ints:
-		return set_of_ints(ints_arith(op, a.ints, b.ints)), .Ok
-	case .Floats:
-		return set_of_floats(floats_arith(op, a.floats, b.floats)), .Ok
-	case .Strings, .Bools:
-	}
+	if found do return r, .Ok
+	if (has(a, .Ints) && has(b, .Floats)) || (has(a, .Floats) && has(b, .Ints)) do return {}, .Unsupported
 	return {}, .Invalid
 }
 
@@ -180,6 +192,9 @@ order_verdict :: proc(kind: syn.Operator_Kind, a, b: Set) -> (Bools, bool) {
 	case .Ints:
 		alo, ahi = to_f64(ints_bounds(a.ints))
 		blo, bhi = to_f64(ints_bounds(b.ints))
+	case .Chars:
+		alo, ahi = to_f64(ints_bounds(a.chars))
+		blo, bhi = to_f64(ints_bounds(b.chars))
 	case .Floats:
 		alo, ahi = floats_bounds(a.floats)
 		blo, bhi = floats_bounds(b.floats)
@@ -248,12 +263,11 @@ type_unary :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 		#partial switch status {
 		case .Invalid:
 			return new_expr(Invalid{})
-		case .Strings:
-			return report(k, .Unsupported, o.span, "pas encore dans le kernel : les comparaisons préfixes de chaînes")
-		case .Many:
-			return new_expr(Many{})
+		case .Unknown:
+			return report(k, .Unsupported, o.span, "pas encore dans le kernel : une comparaison préfixe à borne inconnue")
 		}
-		if status != .Ok || set_count(s) != 1 {
+		d, _ := pure_domain(s)
+		if status != .Ok || set_count(s) != 1 || d == .Strings {
 			return report(k, .Invalid_Range, o.span, "une comparaison préfixe attend un nombre connu")
 		}
 		return singleton(new_expr(half_line(o.kind, s)))

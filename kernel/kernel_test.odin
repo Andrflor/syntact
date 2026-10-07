@@ -49,6 +49,26 @@ CASES := []Case {
 	{"F32OrString -> {\n  -> f32:\n  -> string:\n}\nF32OrString:c -> 3", "", {.Constraint_Mismatch}},
 	{"r -> >0.5 & <1.0\nr:a -> 0.75\nr:d", "", {}},
 	{"r -> >0.5 & <1.0\nr:b -> 1.0", "", {.Constraint_Mismatch}},
+	// les chaînes : des langages réguliers, sous forme canonique
+	{"true:a -> (..10 * \"ab\") = (\"ab\" * 0..10)", "", {}},
+	{"(..10 * \"ab\"):x -> \"abab\"", "", {}},
+	{"(..10 * \"ab\"):x -> \"aba\"", "", {.Constraint_Mismatch}},
+	{"true:a -> (2|1) = (2..1)", "", {}},
+	{"true:a -> (2|\"a\"|3..4) = (\"a\"|2..4)", "", {}},
+	{"a -> 'a'..'z' * 2..3 + \"!\"\na:x -> \"ab!\"\na:y -> \"a!\"", "", {.Constraint_Mismatch}},
+	{"(\"jwt\"..\"lel\"):x -> \"jwtXlel\"", "", {}},
+	{"(\"a\"..\"z\"):c -> 'b'", "", {.Constraint_Mismatch}}, // \"a\"..\"z\" : commence par a, finit par z
+	{"('a'..'z'):c -> 'b'", "", {}}, // 'a'..'z' : un caractère de a à z
+	{"(~'\\0' * 0.. + '\\0'):s -> \"a\\0c\\0\"", "", {.Constraint_Mismatch}},
+	{"(~'\\0' * 0.. + '\\0'):s -> \"abc\\0\"", "", {}},
+	{"(~\"piro\"):s -> \"pira\"", "", {}},
+	{"x -> ''..", "{x -> {-> char}}", {}}, // ''.. : n'importe quel caractère
+	// les caractères : une sorte, admise par une couleur string
+	{"string:s -> 'c'", "", {}},
+	{"char:c -> \"a\"", "", {.Constraint_Mismatch}},
+	{"true:a -> 'a' = \"a\"", "", {.Constraint_Mismatch}},
+	{"a -> 'a' + 'b'", "{a -> \"ab\"}", {}},
+	{"char:c", "{char:c -> ''}", {}},
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
@@ -91,6 +111,7 @@ Divergence :: struct {
 
 DIVERGENCES := []Divergence {
 	{"tc_insoluble_scope_field", {}, "le champ inconnu ??::u8 est typé et a un défaut (0) : la couleur Shape reste un seul ensemble"},
+	{"tc_ident_no_trail_bad", {}, "'' est le caractère vide : ''*0.. vaut \"\", donc ~(''*0.. + '_') exclut seulement \"_\""},
 }
 
 expected_errors :: proc(c: Corpus_Case) -> []string {

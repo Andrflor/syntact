@@ -1,16 +1,18 @@
 package kernel
 
 import "core:slice"
-import "core:strings"
 
-// Les ensembles de valeurs atomiques. Un littéral est un ensemble à un élément
-// (`5` est `5..5`), un builtin est un ensemble (`u8` est `0..255`). Un ensemble
-// mixte (`u8 | string`) a une composante par sorte de valeur. Chaque composante
-// est une algèbre close : union, intersection, complément, inclusion.
+// Les ensembles de valeurs atomiques, sous forme canonique. Un littéral est un
+// ensemble à un élément (`5` est `5..5`), un builtin est un ensemble (`u8` est
+// `0..255`), `none` est l'ensemble vide. Un ensemble mixte (`u8 | string`) a une
+// composante canonique par sorte ; chaque composante est une algèbre close.
+// Deux ensembles égaux ont la même structure, quelle que soit leur écriture :
+// `2|1` et `2..1` sont `1..2`, `2|"a"|3..4` et `"a"|2..4` sont `2..4 | "a"`.
 
 Domain :: enum u8 {
 	Ints,
 	Floats,
+	Chars,
 	Strings,
 	Bools,
 }
@@ -18,11 +20,12 @@ Domain :: enum u8 {
 Set :: struct {
 	ints:    Ints,
 	floats:  Floats,
+	// Les caractères, par leur point de code ; CHAR_EMPTY est le caractère vide `''`,
+	// le plus bas de tous. Une couleur `string` admet un caractère comme la chaîne
+	// d'une lettre (`string:s -> 'c'`), mais `'a'` et `"a"` restent deux valeurs.
+	chars:   Ints,
 	strings: Strings,
 	bools:   Bools,
-	// La sorte qui fournit le défaut d'un ensemble mixte : celle du premier terme
-	// (`u8 | string` vaut 0 par défaut, `string | u8` vaut "").
-	first:   Domain,
 }
 
 // --- entiers : intervalles triés, disjoints, non adjacents ---
@@ -267,6 +270,12 @@ floats_all :: proc() -> Floats {
 	return floats_of({Float_Interval{}})
 }
 
+// Une forme canonique n'a qu'un zéro : -0.0 s'écrit 0.0.
+canonical_zero :: proc(b: Maybe(f64)) -> Maybe(f64) {
+	if v, ok := b.?; ok && v == 0 do return f64(0)
+	return b
+}
+
 float_interval_empty :: proc(iv: Float_Interval) -> bool {
 	lo, lo_ok := iv.lo.?
 	hi, hi_ok := iv.hi.?
@@ -276,7 +285,10 @@ float_interval_empty :: proc(iv: Float_Interval) -> bool {
 
 floats_of :: proc(raw: []Float_Interval) -> Floats {
 	kept := make([dynamic]Float_Interval, 0, len(raw))
-	for iv in raw do if !float_interval_empty(iv) do append(&kept, iv)
+	for iv in raw {
+		if float_interval_empty(iv) do continue
+		append(&kept, Float_Interval{canonical_zero(iv.lo), canonical_zero(iv.hi), iv.lo_open, iv.hi_open})
+	}
 	slice.sort_by(kept[:], proc(a, b: Float_Interval) -> bool {
 		al, a_ok := a.lo.?
 		bl, b_ok := b.lo.?
@@ -461,99 +473,6 @@ floats_bounds :: proc(a: Floats) -> (lo, hi: Maybe(f64)) {
 	return a.intervals[0].lo, a.intervals[len(a.intervals) - 1].hi
 }
 
-// --- chaînes : ensemble fini, ou cofini (tout sauf une liste finie) ---
-
-Strings :: struct {
-	cofinite: bool, // true = toutes les chaînes sauf `items`
-	items:    []string, // trié, sans doublon
-}
-
-strings_point :: proc(s: string) -> Strings {
-	items := make([]string, 1)
-	items[0] = s
-	return Strings{false, items}
-}
-
-strings_all :: proc() -> Strings {
-	return Strings{cofinite = true}
-}
-
-string_items :: proc(raw: []string) -> []string {
-	out := slice.clone(raw)
-	slice.sort(out)
-	return slice.unique(out)
-}
-
-items_union :: proc(a, b: []string) -> []string {
-	all := make([dynamic]string, 0, len(a) + len(b))
-	append(&all, ..a)
-	append(&all, ..b)
-	return string_items(all[:])
-}
-
-items_intersect :: proc(a, b: []string) -> []string {
-	out := make([dynamic]string)
-	for s in a do if slice.contains(b, s) do append(&out, s)
-	return out[:]
-}
-
-items_minus :: proc(a, b: []string) -> []string {
-	out := make([dynamic]string)
-	for s in a do if !slice.contains(b, s) do append(&out, s)
-	return out[:]
-}
-
-strings_union :: proc(a, b: Strings) -> Strings {
-	switch {
-	case !a.cofinite && !b.cofinite:
-		return Strings{false, items_union(a.items, b.items)}
-	case !a.cofinite:
-		return Strings{true, items_minus(b.items, a.items)}
-	case !b.cofinite:
-		return Strings{true, items_minus(a.items, b.items)}
-	}
-	return Strings{true, items_intersect(a.items, b.items)}
-}
-
-strings_intersect :: proc(a, b: Strings) -> Strings {
-	switch {
-	case !a.cofinite && !b.cofinite:
-		return Strings{false, items_intersect(a.items, b.items)}
-	case !a.cofinite:
-		return Strings{false, items_minus(a.items, b.items)}
-	case !b.cofinite:
-		return Strings{false, items_minus(b.items, a.items)}
-	}
-	return Strings{true, items_union(a.items, b.items)}
-}
-
-strings_complement :: proc(a: Strings) -> Strings {
-	return Strings{!a.cofinite, a.items}
-}
-
-strings_subset :: proc(a, b: Strings) -> bool {
-	return strings_count(strings_intersect(a, strings_complement(b))) == 0
-}
-
-strings_count :: proc(a: Strings) -> int {
-	if a.cofinite do return 2
-	return min(len(a.items), 2)
-}
-
-strings_contains :: proc(a: Strings, s: string) -> bool {
-	return slice.contains(a.items, s) != a.cofinite
-}
-
-// Le défaut : "" s'il y est, sinon la première chaîne de la suite "", "a", "aa", …
-// qui y est (un ensemble cofini n'en exclut qu'un nombre fini, la suite termine).
-strings_default :: proc(a: Strings) -> (string, bool) {
-	if strings_count(a) == 0 do return "", false
-	if !a.cofinite do return a.items[0], true
-	n := 0
-	for !strings_contains(a, strings.repeat("a", n)) do n += 1
-	return strings.repeat("a", n), true
-}
-
 // --- booléens ---
 
 Bool_Elem :: enum u8 {
@@ -570,23 +489,55 @@ bools_point :: proc(v: bool) -> Bools {
 // --- l'ensemble mixte ---
 
 set_of_ints :: proc(i: Ints) -> Set {
-	return Set{ints = i, first = .Ints}
+	return Set{ints = i}
 }
 
 set_of_floats :: proc(f: Floats) -> Set {
-	return Set{floats = f, first = .Floats}
+	return Set{floats = f}
+}
+
+CHAR_EMPTY :: i128(-1)
+
+set_of_chars :: proc(c: Ints) -> Set {
+	return Set{chars = c}
+}
+
+// chars_all : tous les caractères, le caractère vide compris.
+chars_all :: proc() -> Ints {
+	return ints_range(CHAR_EMPTY, i128(MAX_RUNE))
+}
+
+// chars_as_strings : chaque caractère comme la chaîne d'une lettre ; le caractère
+// vide comme la chaîne vide.
+chars_as_strings :: proc(c: Ints) -> Strings {
+	out := Strings{}
+	for iv in c.intervals {
+		lo, _ := iv.lo.?
+		hi, _ := iv.hi.?
+		if lo == CHAR_EMPTY {
+			out = strings_union(out, strings_empty_word())
+			lo = 0
+		}
+		if lo <= hi do out = strings_union(out, strings_runes(rune(lo), rune(hi)))
+	}
+	return out
+}
+
+// as_strings : les chaînes d'un ensemble, ses caractères compris.
+as_strings :: proc(s: Set) -> Strings {
+	return strings_union(s.strings, chars_as_strings(s.chars))
 }
 
 set_of_strings :: proc(s: Strings) -> Set {
-	return Set{strings = s, first = .Strings}
+	return Set{strings = s}
 }
 
 set_of_bools :: proc(b: Bools) -> Set {
-	return Set{bools = b, first = .Bools}
+	return Set{bools = b}
 }
 
 set_count :: proc(s: Set) -> int {
-	n := ints_count(s.ints) + floats_count(s.floats) + strings_count(s.strings) + card(s.bools)
+	n := ints_count(s.ints) + floats_count(s.floats) + ints_count(s.chars) + strings_count(s.strings) + card(s.bools)
 	return min(n, 2)
 }
 
@@ -594,9 +545,9 @@ set_is_empty :: proc(s: Set) -> bool {
 	return set_count(s) == 0
 }
 
-// La sorte du premier terme non vide, à partir de `first`.
+// La première sorte non vide, dans l'ordre fixe des sortes : le défaut d'un
+// ensemble ne dépend pas de la façon dont il a été écrit.
 set_first_domain :: proc(s: Set) -> (Domain, bool) {
-	if domain_count(s, s.first) > 0 do return s.first, true
 	for d in Domain do if domain_count(s, d) > 0 do return d, true
 	return .Ints, false
 }
@@ -607,6 +558,8 @@ domain_count :: proc(s: Set, d: Domain) -> int {
 		return ints_count(s.ints)
 	case .Floats:
 		return floats_count(s.floats)
+	case .Chars:
+		return ints_count(s.chars)
 	case .Strings:
 		return strings_count(s.strings)
 	case .Bools:
@@ -616,44 +569,48 @@ domain_count :: proc(s: Set, d: Domain) -> int {
 }
 
 set_union :: proc(a, b: Set) -> Set {
-	r := Set {
-		ints    = ints_union(a.ints, b.ints),
-		floats  = floats_union(a.floats, b.floats),
+	return Set {
+		ints = ints_union(a.ints, b.ints),
+		floats = floats_union(a.floats, b.floats),
+		chars = ints_union(a.chars, b.chars),
 		strings = strings_union(a.strings, b.strings),
-		bools   = a.bools | b.bools,
+		bools = a.bools | b.bools,
 	}
-	d, ok := set_first_domain(a)
-	if !ok do d, _ = set_first_domain(b)
-	r.first = d
-	return r
 }
 
 set_intersect :: proc(a, b: Set) -> Set {
-	r := Set {
-		ints    = ints_intersect(a.ints, b.ints),
-		floats  = floats_intersect(a.floats, b.floats),
+	return Set {
+		ints = ints_intersect(a.ints, b.ints),
+		floats = floats_intersect(a.floats, b.floats),
+		chars = ints_intersect(a.chars, b.chars),
 		strings = strings_intersect(a.strings, b.strings),
-		bools   = a.bools & b.bools,
-		first   = a.first,
+		bools = a.bools & b.bools,
 	}
-	r.first, _ = set_first_domain(r)
-	return r
 }
 
 // Le complément se prend dans les sortes que l'ensemble porte : `~5` est « tout
-// entier sauf 5 », pas « tout sauf 5 » (specs/constraints.md, Negation).
+// entier sauf 5 », `~'A'` « tout caractère sauf A », `~"piro"` « toute chaîne sauf
+// piro » — jamais « tout sauf » (specs/constraints.md, Negation).
 set_complement :: proc(a: Set) -> Set {
-	r := Set{first = a.first}
+	r := Set{}
 	if domain_count(a, .Ints) > 0 do r.ints = ints_complement(a.ints)
 	if domain_count(a, .Floats) > 0 do r.floats = floats_complement(a.floats)
+	if domain_count(a, .Chars) > 0 do r.chars = ints_intersect(ints_complement(a.chars), chars_all())
 	if domain_count(a, .Strings) > 0 do r.strings = strings_complement(a.strings)
 	if domain_count(a, .Bools) > 0 do r.bools = ~a.bools
 	return r
 }
 
+// set_top : toutes les valeurs atomiques. C'est `..` seul : il prend la sorte de ce
+// qu'il rencontre (`.. + '_'` : toute chaîne qui finit par _).
+set_top :: proc() -> Set {
+	return Set{ints = ints_all(), floats = floats_all(), chars = chars_all(), strings = strings_all(), bools = {.False, .True}}
+}
+
 set_subset :: proc(a, b: Set) -> bool {
 	return ints_subset(a.ints, b.ints) &&
 		floats_subset(a.floats, b.floats) &&
+		ints_subset(a.chars, b.chars) &&
 		strings_subset(a.strings, b.strings) &&
 		a.bools <= b.bools
 }
@@ -673,6 +630,9 @@ set_default :: proc(s: Set) -> (Set, bool) {
 	case .Floats:
 		v, _ := floats_default(s.floats)
 		return set_of_floats(floats_point(v)), true
+	case .Chars:
+		lo, _ := ints_bounds(s.chars) // le plus bas : le caractère vide s'il y est
+		return set_of_chars(ints_point(lo.? or_else CHAR_EMPTY)), true
 	case .Strings:
 		v, _ := strings_default(s.strings)
 		return set_of_strings(strings_point(v)), true
