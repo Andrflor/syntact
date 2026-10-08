@@ -256,7 +256,6 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> ^Expr {
 	ast := k.ast
 	lit := ast.node_data[idx].literal
 	text := syn.node_text(ast, idx)
-	span := ast.node_spans[idx]
 	switch lit.kind {
 	case .Integer, .Hexadecimal, .Binary:
 		base := lit.kind == .Integer ? 10 : (lit.kind == .Hexadecimal ? 16 : 2)
