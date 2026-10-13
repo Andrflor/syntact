@@ -137,19 +137,13 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 		for c in syn.node_children(ast, idx) do build_binding(k, child, c)
 		return new_expr(child)
 	case .Property:
-		if data.binary.left == syn.INVALID_NODE do return unsupported(k, idx, "la propriété sans source .x")
 		prop := data.binary.right
 		if prop == syn.INVALID_NODE || ast.node_kinds[prop] != .Identifier {
 			return report(k, .Invalid_Property_Access, span, "une propriété doit être un nom")
 		}
-		return new_expr(
-			Access {
-				target = build_expr(k, s, data.binary.left),
-				name = syn.node_name_str(ast, prop),
-				ordinal = int(ast.node_data[prop].identifier.ordinal),
-				span = span,
-			},
-		)
+		// `.x` sans source : le champ x du scope que carve le carve qui l'entoure
+		target := data.binary.left == syn.INVALID_NODE ? new_expr(Carving{span}) : build_expr(k, s, data.binary.left)
+		return new_expr(Access{target = target, name = syn.node_name_str(ast, prop), ordinal = int(ast.node_data[prop].identifier.ordinal), span = span})
 	case .Execute:
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "les patterns d'exécution")
 		if data.execute.target == syn.INVALID_NODE do return unsupported(k, idx, "le collapse sans cible")
@@ -186,22 +180,40 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 
 // build_carve : la cible, et les arguments comme un scope écrit à cet endroit.
 build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
+	return new_expr(build_carve_args(k, s, idx, build_expr(k, s, k.ast.node_data[idx].carve.source)))
+}
+
+build_carve_args :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: ^Expr) -> Carve {
 	ast := k.ast
 	span := ast.node_spans[idx]
 	args := new_scope(s, span)
 	ordinals := make([dynamic]int)
 	for child in syn.node_carve_children(ast, idx) {
-		// `z{a -> 2}` sans flèche : un raccourci pour carver le champ z, ou une valeur
-		// positionnelle `Box{1}`, selon que z est un champ de la cible
-		if ast.node_kinds[child] == .Carve && ast.node_kinds[ast.node_data[child].carve.source] == .Identifier {
-			unsupported(k, child, "le raccourci de carve z{…}")
-			continue
-		}
 		before := len(args.bindings)
-		build_binding(k, args, child)
+		if ast.node_kinds[child] == .Carve && ast.node_kinds[ast.node_data[child].carve.source] == .Identifier {
+			append(&args.bindings, Binding{kind = .Push, value = build_shorthand(k, args, child), span = node_span(k, child)})
+		} else {
+			build_binding(k, args, child)
+		}
 		if len(args.bindings) > before do append(&ordinals, carve_ordinal(ast, child))
 	}
-	return new_expr(Carve{target = build_expr(k, s, ast.node_data[idx].carve.source), args = args, ordinals = ordinals[:], span = span})
+	return Carve{target = target, args = args, ordinals = ordinals[:], span = span}
+}
+
+// build_shorthand : `z{…}` sans flèche, parmi les arguments d'un carve. Sa cible,
+// `.z` ou le z visible, se choisit au typage (Shorthand) : z peut n'être que le
+// champ du scope carvé, sans rien de visible qui s'appelle ainsi.
+build_shorthand :: proc(k: ^Kernel, args: ^Scope, idx: syn.Node_Index) -> ^Expr {
+	ast := k.ast
+	source := ast.node_data[idx].carve.source
+	span := ast.node_spans[source]
+	name := syn.node_name_str(ast, source)
+	ordinal := int(ast.node_data[source].identifier.ordinal)
+	sh := Shorthand {
+		field = Access{target = new_expr(Carving{span}), name = name, ordinal = ordinal, span = span},
+	}
+	if ref, found, _ := lookup(args, name, ordinal, span); found do sh.outer = new_expr(ref)
+	return new_expr(build_carve_args(k, args, idx, new_expr(sh)))
 }
 
 // carve_ordinal : l'occurrence que vise un argument nommé `x#n -> v` ; -1 sinon.
@@ -221,8 +233,14 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	span := ast.node_spans[idx]
 	name := syn.node_name_str(ast, idx)
 	if name == "" do name = syn.node_capture_str(ast, idx) // `(c)` : un nom entre parenthèses
-	ordinal := int(ast.node_data[idx].identifier.ordinal)
+	ref, found, missing := lookup(s, name, int(ast.node_data[idx].identifier.ordinal), span)
+	if !found do return report(k, .Undefined_Identifier, span, missing)
+	return new_expr(ref)
+}
 
+// lookup : le binding visible au-dessus de s qui porte ce nom (la n-ième occurrence
+// avec `x#n`) ; sinon, pourquoi il n'y en a pas.
+lookup :: proc(s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (ref: Ref, found: bool, missing: string) {
 	up := 0
 	for sc := s; sc != nil; sc = sc.parent {
 		if ordinal >= 0 {
@@ -230,20 +248,18 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 			seen := 0
 			for b, i in sc.bindings {
 				if b.name != name do continue
-				if seen == ordinal do return new_expr(Ref{up, i, name, span})
+				if seen == ordinal do return Ref{up, i, name, span}, true, ""
 				seen += 1
 			}
-			if seen > 0 {
-				return report(k, .Undefined_Identifier, span, fmt.tprintf("'%s#%d' n'existe pas", name, ordinal))
-			}
+			if seen > 0 do return {}, false, fmt.tprintf("'%s#%d' n'existe pas", name, ordinal)
 		} else {
 			#reverse for b, i in sc.bindings {
-				if b.name == name || (b.capture != "" && b.capture == name) do return new_expr(Ref{up, i, name, span})
+				if b.name == name || (b.capture != "" && b.capture == name) do return Ref{up, i, name, span}, true, ""
 			}
 		}
 		up += 1
 	}
-	return report(k, .Undefined_Identifier, span, fmt.tprintf("'%s' n'est pas défini", name))
+	return {}, false, fmt.tprintf("'%s' n'est pas défini", name)
 }
 
 // Les builtins sont des noms pour des ensembles (specs/language/10). Ils sont les

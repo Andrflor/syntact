@@ -33,13 +33,26 @@ Binding :: struct {
 	value:      ^Expr, // à droite de la flèche ; nil = pas écrite : le défaut de la couleur
 	color_type: ^Expr, // type_of(color) : un seul ensemble, qui ne dépend d'aucune inconnue
 	value_type: ^Expr, // type_of(value), ou le défaut de color_type ; nil = pas encore typé
+	copy:       Copy,
 	span:       syn.Span,
+}
+
+// Copy : ce qu'un carve a fait d'un binding de la copie qu'il a dérivée. Une erreur
+// n'est signalée qu'une fois, là où on peut la corriger : un binding copié sans
+// changement a déjà été vérifié dans sa source, un binding que le carve a changé
+// est signalé au carve.
+Copy :: enum u8 {
+	Written, // pas une copie : le binding tel qu'écrit
+	Same, // copié d'une source, sans que le carve ne le touche
+	Changed, // la valeur carvée, ou un binding qui en dépend
 }
 
 Scope :: struct {
 	parent:   ^Scope,
 	bindings: [dynamic]Binding,
 	shape:    ^Scope, // la forme contre laquelle il a été typé : la couleur implicite de ses bindings
+	site:     syn.Span, // une copie : le carve qui l'a dérivée, où sont signalées ses erreurs
+	carving:  ^Scope, // les arguments d'un carve : le scope qu'il dérive, que `.x` désigne
 	span:     syn.Span,
 }
 
@@ -91,6 +104,22 @@ Carved :: struct {
 	index: int,
 }
 
+// `.x` sans source, dans les arguments d'un carve : le scope que ce carve dérive.
+// `a{z -> .z{b -> 2}}` recarve le z de a.
+Carving :: struct {
+	span: syn.Span,
+}
+
+// `z{…}` sans flèche, parmi les arguments d'un carve : la cible de ce carve
+// intérieur reste à choisir. Si le scope carvé a un champ z, c'est `.z`, et
+// l'argument recarve ce champ : `a{z{b -> 2}}` vaut `a{z -> .z{b -> 2}}`. Sinon
+// c'est le z visible, et l'argument est positionnel : `Pt{Box{1}}`. On ne le sait
+// qu'une fois la cible typée.
+Shorthand :: struct {
+	field: Access, // .z
+	outer: ^Expr, // z, résolu au-dessus ; nil quand rien ne s'appelle z
+}
+
 // `lo..hi`. Une borne nil est ouverte. Entre des caractères, l'intervalle porte sur
 // les caractères (`'a'..'z'`) ; entre des chaînes, sur les positions (`"jwt"..`
 // commence par, `.."_"` finit par).
@@ -117,6 +146,8 @@ Expr :: union {
 	Collapse,
 	Carve,
 	Carved,
+	Carving,
+	Shorthand,
 	Op,
 	Range,
 	Unknown,
@@ -158,7 +189,8 @@ Error_Kind :: enum u8 {
 Error :: struct {
 	kind:    Error_Kind,
 	message: string,
-	span:    syn.Span,
+	span:    syn.Span, // où la signaler
+	origin:  syn.Span, // ce qu'elle concerne, écrit dans la source d'une copie ; = span hors des copies
 }
 
 Kernel :: struct {
@@ -167,13 +199,41 @@ Kernel :: struct {
 	typed:   [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
 	symbols: [dynamic]Set, // l'ensemble des valeurs possibles de chaque inconnue
 	shapes:  map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
+	scene:   Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
 }
 
-// report : une erreur, une seule fois — une copie re-typée par un carve retrouve
-// les erreurs de l'original qui ne dépendent pas du carve.
+// Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit
+// qu'elles concernent ; dans une copie, au carve (site), ou nulle part (quiet).
+Scene :: struct {
+	site:  syn.Span,
+	quiet: bool,
+}
+
+// enter : la scène d'un binding du scope s ; rend la précédente, à rétablir.
+enter :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> (previous: Scene) {
+	previous = k.scene
+	switch b.copy {
+	case .Written:
+		k.scene = {}
+	case .Same:
+		k.scene = {quiet = true}
+	case .Changed:
+		k.scene = {site = s.site}
+		// la valeur carvée elle-même : à l'argument, quand le carve est celui qui a
+		// dérivé ce scope
+		if b.value != nil {
+			if c, carved := b.value^.(Carved); carved && c.args.span == s.site do k.scene.site = c.args.bindings[c.index].span
+		}
+	}
+	return
+}
+
+// report : une erreur, à la place que dit la scène, une seule fois.
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> ^Expr {
-	e := Error{kind, message, span}
-	if !slice.contains(k.errors[:], e) do append(&k.errors, e)
+	if !k.scene.quiet {
+		e := Error{kind, message, k.scene.site != {} ? k.scene.site : span, span}
+		if !slice.contains(k.errors[:], e) do append(&k.errors, e)
+	}
 	return new_expr(Invalid{})
 }
 

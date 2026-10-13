@@ -80,6 +80,11 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 		return fmt.tprintf("%s%s", print_at(v.target, .CALL, view), print_scope(v.args, .Program, v.ordinals)), .CALL
 	case Carved:
 		return printed(v.args.bindings[v.index].value, .Program) // l'argument, tel qu'écrit
+	case Carving:
+		return "", .PRIMARY // `.x` : la source est le scope carvé
+	case Shorthand:
+		if v.field.ordinal >= 0 do return fmt.tprintf("%s#%d", v.field.name, v.field.ordinal), .PRIMARY
+		return v.field.name, .PRIMARY
 	case Op:
 		o := OPERATORS[v.kind]
 		if v.left == nil do return fmt.tprintf("%s%s", o.text, print_at(v.right, .UNARY, view)), .UNARY
