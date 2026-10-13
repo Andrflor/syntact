@@ -1,5 +1,6 @@
 package kernel
 
+import syn "../compiler"
 import "core:encoding/json"
 import "core:fmt"
 import "core:log"
@@ -127,6 +128,9 @@ CASES := []Case {
 	{"a -> {x -> 1}\na{x -> 2  x -> 3}", "", {.Invalid_Carve}},
 	{"x -> 5\nx{1}", "", {.Invalid_Carve}},
 	{"{string:}:a -> {\"\"}\nb -> a{\"x\"}\nb{0}", "", {.Constraint_Mismatch}}, // la coloration implicite suit les copies
+	{"Box -> {u8:n}\nPt -> {Box -> {u16:n}}\np -> Pt{Box{300}}", "", {}}, // z{…} : le champ z l'emporte sur le z visible
+	{"a -> {x -> 1}\nb -> a{zz{1}}", "", {.Undefined_Identifier}}, // ni champ ni nom visible
+	{"a -> .z", "", {.Invalid_Property_Access}}, // `.x` sans source hors des arguments d'un carve
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
@@ -146,6 +150,45 @@ test_cases :: proc(t: ^testing.T) {
 				testing.expectf(t, printed == c.typed, "%q\n  typé    : %s\n  attendu : %s", c.source, printed, c.typed)
 			}
 		}
+		vmem.arena_destroy(&arena)
+	}
+}
+
+// Une erreur d'une copie est signalée au carve qui l'a causée (`carve ← source`),
+// une seule fois ; ce que le carve ne change pas est signalé dans la source.
+Site_Case :: struct {
+	source: string,
+	sites:  []string,
+}
+
+SITE_CASES := []Site_Case {
+	{"Box -> {\n  u8:x -> 1\n  u8:y -> x + 200\n}\nb -> Box{x -> 100}\nc -> Box{x -> 100}", {"5:9 ← 3:3", "6:9 ← 3:3"}},
+	{"Box -> {\n  u8:x -> 1\n  u8:y -> 300\n}\nb -> Box{x -> 2}", {"3:3"}},
+	{"Box -> {\n  T -> u8\n  T:v -> 0\n}\nn -> ??::u8\nb -> Box{v -> n * 2}", {"6:10 ← 3:3"}}, // la valeur carvée : à l'argument
+	{"Inner -> {\n  u8:a -> 0\n}\nBox -> {\n  x -> 1\n  w -> Inner{a -> x}\n}\nb -> Box{x -> 300}", {"8:9 ← 2:3"}},
+	{"Pair -> {\n  u8:a\n  u8:b\n}\np -> Pair{7}\nq -> p{b -> 300}\nr -> q{a -> 1}", {"6:8 ← 3:3"}},
+	{"P8 -> {\n  u8:x\n}\nP16 -> {\n  u16:x\n}\nWrap -> {\n  S -> P16\n  S:p -> {x -> 300}\n}\nw -> Wrap{S -> P8}", {"11:10 ← 9:11"}}, // la couleur implicite
+	{"Box -> {\n  n -> ??::u8\n  u8:y -> n * 2\n  x -> 1\n}\nb -> Box{x -> 5}", {"3:3"}},
+}
+
+@(test)
+test_carve_error_sites :: proc(t: ^testing.T) {
+	for c in SITE_CASES {
+		arena: vmem.Arena
+		context.allocator = vmem.arena_allocator(&arena)
+		_, k, parsed := run(c.source)
+		testing.expectf(t, parsed, "parse : %q", c.source)
+		got := make([dynamic]string)
+		for e in k.errors {
+			at := syn.span_to_position(k.ast, e.span.start)
+			site := fmt.tprintf("%d:%d", at.line, at.column)
+			if e.origin != e.span {
+				src := syn.span_to_position(k.ast, e.origin.start)
+				site = fmt.tprintf("%s ← %d:%d", site, src.line, src.column)
+			}
+			append(&got, site)
+		}
+		testing.expectf(t, slice.equal(got[:], c.sites), "%q\n  erreurs à %v, attendu %v\n  %s", c.source, got[:], c.sites, describe_errors(k.errors[:]))
 		vmem.arena_destroy(&arena)
 	}
 }

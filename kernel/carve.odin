@@ -1,5 +1,6 @@
 package kernel
 
+import syn "../compiler"
 import "core:fmt"
 
 // LE CARVE
@@ -10,13 +11,18 @@ import "core:fmt"
 // visent, et on type la copie. Tout ce qui dépend d'une valeur carvée — une
 // valeur, une couleur, un carve plus profond — est re-typé avec elle ; la
 // vérification finale porte sur la copie comme sur tout scope.
+//
+// Les erreurs de la copie sont signalées au carve, et seulement celles que le carve
+// a causées : un binding qu'il ne change pas a déjà été vérifié dans sa source.
 
 type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return report(k, .Invalid_Carve, c.span, fmt.tprintf("on ne carve qu'un scope : %s", brief(t)))
-	derived := copy_scope(s, s.parent)
+	c.args.carving = s // ce que `.x` désigne dans les arguments
+	// dans une copie, ce carve est dérivé avec elle : ses erreurs vont au carve d'origine
+	derived := copy_scope(s, s.parent, k.scene.site != {} ? k.scene.site : c.span)
 	carved := make([]bool, len(derived.bindings))
 	position := 0
 	for a, i in c.args.bindings {
@@ -37,15 +43,106 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 		carved[j] = true
 		derived.bindings[j].value = new_expr(Carved{c.args, i})
 	}
+	// une copie faite en silence est celle d'un binding que rien n'a changé : elle
+	// redonne ce que sa source a déjà donné
+	if !k.scene.quiet do mark_changes(derived, c.args, {})
 	type_scope(k, derived, s.shape)
 	return new_expr(derived)
 }
 
+// Ce qui a changé autour de ce qu'on marque : la couleur implicite que la forme
+// donne à ses bindings (shape), le scope que désigne `.x` (carving).
+Around :: struct {
+	shape, carving: bool,
+}
+
+// mark_changes : dans la copie s, les bindings que le carve change — la valeur
+// qu'il a mise (un argument de args), et ce qui en dépend : une couleur, une valeur,
+// un scope écrit dedans, une couleur implicite. Rend vrai si un binding de s a changé.
+mark_changes :: proc(s, args: ^Scope, around: Around) -> (changed: bool) {
+	for &b in s.bindings {
+		color := b.color != nil ? changes(b.color, s, args, {carving = around.carving}) : around.shape
+		value := changes(b.value, s, args, {shape = color, carving = around.carving})
+		if color || value {
+			b.copy = .Changed
+			changed = true
+		}
+	}
+	return
+}
+
+// changes : `e`, écrit dans env, dépend d'un binding changé. Chaque scope écrit
+// dedans est marqué en passant : les deux opérandes sont toujours parcourus.
+changes :: proc(e: ^Expr, env, args: ^Scope, around: Around) -> bool {
+	if e == nil do return false
+	inner := Around{carving = around.carving} // la forme ne colore que le scope qu'elle attend
+	#partial switch v in e^ {
+	case Carved:
+		return v.args == args
+	case Carving:
+		return around.carving
+	case Shorthand:
+		outer := changes(v.outer, env, args, inner)
+		return outer || around.carving
+	case Ref:
+		sc := env
+		for _ in 0 ..< v.up do sc = sc.parent
+		return sc.bindings[v.index].copy == .Changed
+	case ^Scope:
+		return v.parent == env && mark_changes(v, args, around)
+	case Access:
+		return changes(v.target, env, args, inner)
+	case Collapse:
+		return changes(v.target, env, args, inner)
+	case Carve:
+		target := changes(v.target, env, args, inner)
+		written := v.args.parent == env && mark_changes(v.args, args, {carving = target})
+		return target || written
+	case Op:
+		left := changes(v.left, env, args, inner)
+		right := changes(v.right, env, args, inner)
+		return left || right
+	case Range:
+		lo := changes(v.lo, env, args, inner)
+		hi := changes(v.hi, env, args, inner)
+		return lo || hi
+	case Unknown:
+		return changes(v.layout, env, args, inner)
+	}
+	return false
+}
+
+// carving_of : le scope que dérive le carve dont env est l'un des arguments, ou y
+// est écrit.
+carving_of :: proc(env: ^Scope) -> ^Scope {
+	for sc := env; sc != nil; sc = sc.parent do if sc.carving != nil do return sc.carving
+	return nil
+}
+
+type_carving :: proc(k: ^Kernel, c: Carving, env: ^Scope) -> ^Expr {
+	s := carving_of(env)
+	if s == nil do return report(k, .Invalid_Property_Access, c.span, "'.x' sans source ne s'écrit que dans les arguments d'un carve")
+	return new_expr(s)
+}
+
+// recarves : `z{…}` recarve le champ z du scope carvé s, s'il en a un.
+recarves :: proc(s: ^Scope, sh: Shorthand) -> bool {
+	return s != nil && find_binding(s, sh.field.name, sh.field.ordinal) >= 0
+}
+
+type_shorthand :: proc(k: ^Kernel, sh: Shorthand, env: ^Scope) -> ^Expr {
+	if recarves(carving_of(env), sh) do return type_access(k, sh.field, env)
+	if sh.outer == nil do return report(k, .Undefined_Identifier, sh.field.span, fmt.tprintf("'%s' n'est ni un champ du scope carvé ni un nom visible", sh.field.name))
+	return type_of(k, sh.outer, env)
+}
+
 // carve_target : le binding que vise un argument. Nommé, la première occurrence
-// de son nom, ou celle de `x#n` ; sans nom, le binding de même rang parmi ceux qui
-// ne sont pas des productions. -1 : il n'existe pas — un scope est clos.
+// de son nom, ou celle de `x#n` ; `z{…}` qui recarve un champ, ce champ ; sans
+// nom, le binding de même rang parmi ceux qui ne sont pas des productions. -1 : il
+// n'existe pas — un scope est clos.
 carve_target :: proc(s: ^Scope, a: Binding, ordinal: int, position: ^int) -> int {
 	if a.name != "" do return find_binding(s, a.name, max(ordinal, 0))
+	if sh, ok := shorthand_of(a); ok && recarves(s, sh) do return find_binding(s, sh.field.name, max(sh.field.ordinal, 0))
 	rank := position^
 	position^ += 1
 	for b, i in s.bindings {
@@ -54,6 +151,15 @@ carve_target :: proc(s: ^Scope, a: Binding, ordinal: int, position: ^int) -> int
 		rank -= 1
 	}
 	return -1
+}
+
+// shorthand_of : l'argument est `z{…}`, sans flèche.
+shorthand_of :: proc(a: Binding) -> (Shorthand, bool) {
+	if a.value == nil do return {}, false
+	c, is_carve := a.value^.(Carve)
+	if !is_carve do return {}, false
+	sh, ok := c.target^.(Shorthand)
+	return sh, ok
 }
 
 carve_miss :: proc(a: Binding, ordinal: int, position: int) -> string {
@@ -71,15 +177,16 @@ type_argument :: proc(k: ^Kernel, c: Carved, color: ^Expr) -> ^Expr {
 	return a.value_type
 }
 
-// copy_scope : la copie symbolique d'un scope, sous `parent`. Les scopes écrits
-// dedans sont copiés avec lui ; ceux qu'il désigne seulement (un argument de
-// carve écrit ailleurs, la forme qui le colore) sont partagés. Les types ne sont
-// pas copiés : la copie se type à nouveau.
-copy_scope :: proc(s: ^Scope, parent: ^Scope) -> ^Scope {
+// copy_scope : la copie symbolique d'un scope, sous `parent`, dérivée par le carve
+// `site`. Les scopes écrits dedans sont copiés avec lui ; ceux qu'il désigne
+// seulement (un argument de carve écrit ailleurs, la forme qui le colore) sont
+// partagés. Les types ne sont pas copiés : la copie se type à nouveau.
+copy_scope :: proc(s: ^Scope, parent: ^Scope, site: syn.Span) -> ^Scope {
 	c := new_scope(parent, s.span)
 	c.shape = s.shape
+	c.site = site
 	for b in s.bindings {
-		append(&c.bindings, Binding{name = b.name, capture = b.capture, kind = b.kind, color = copy_expr(b.color, s, c), value = copy_expr(b.value, s, c), span = b.span})
+		append(&c.bindings, Binding{name = b.name, capture = b.capture, kind = b.kind, color = copy_expr(b.color, s, c), value = copy_expr(b.value, s, c), copy = .Same, span = b.span})
 	}
 	return c
 }
@@ -90,13 +197,13 @@ copy_expr :: proc(e: ^Expr, from, to: ^Scope) -> ^Expr {
 	#partial switch v in e^ {
 	case ^Scope:
 		if v.parent != from do return e
-		return new_expr(copy_scope(v, to))
+		return new_expr(copy_scope(v, to, to.site))
 	case Access:
 		return new_expr(Access{copy_expr(v.target, from, to), v.name, v.ordinal, v.span})
 	case Collapse:
 		return new_expr(Collapse{copy_expr(v.target, from, to), v.span})
 	case Carve:
-		args := v.args.parent == from ? copy_scope(v.args, to) : v.args
+		args := v.args.parent == from ? copy_scope(v.args, to, to.site) : v.args
 		return new_expr(Carve{copy_expr(v.target, from, to), args, v.ordinals, v.span})
 	case Op:
 		return new_expr(Op{v.kind, copy_expr(v.left, from, to), copy_expr(v.right, from, to), v.span})

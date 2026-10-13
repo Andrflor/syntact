@@ -25,7 +25,12 @@ main :: proc() {
 	fmt.println(kernel.print_type(kernel.new_expr(program)))
 	for e in k.errors {
 		pos := syn.span_to_position(k.ast, e.span.start)
-		fmt.printfln("  %v %d:%d  %s", e.kind, pos.line, pos.column, e.message)
+		fmt.printf("  %v %d:%d  %s", e.kind, pos.line, pos.column, e.message)
+		if e.origin != e.span {
+			src := syn.span_to_position(k.ast, e.origin.start)
+			fmt.printf("  (écrit en %d:%d)", src.line, src.column)
+		}
+		fmt.println()
 	}
 	os.exit(len(k.errors) == 0 ? 0 : 1)
 }

@@ -19,6 +19,7 @@ check :: proc(k: ^Kernel) {
 	for s in k.typed {
 		for &b in s.bindings {
 			if b.color_type == nil || b.value_type == nil || is_invalid(b.color_type) || is_invalid(b.value_type) do continue
+			enter(k, s, &b)
 			color, _ := color_set(k, b.color_type) // un seul ensemble : vérifié au typage
 			switch admits(k, color, b.value_type) {
 			case .Proved:
@@ -29,6 +30,7 @@ check :: proc(k: ^Kernel) {
 			}
 		}
 	}
+	k.scene = {}
 }
 
 // admits : pour toute valeur des inconnues, la valeur que désigne le type `t` est
