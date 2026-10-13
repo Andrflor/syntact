@@ -1,0 +1,1045 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Syntact</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: sticky top bar, a hero holding a live scope, then the tour as a chapter rail
+   beside one reading column; reference tables run full width. Arrows are cobalt,
+   and every color (the left side of `:`) is amber, in prose and in code alike. */
+:root {
+  --paper: #f3f4ef;
+  --sheet: #fbfbf8;
+  --ink: #16191d;
+  --muted: #5b626a;
+  --rule: #d9dcd3;
+  --accent: #2b4ccf;
+  --accent-soft: #e2e7fa;
+  --hue: #a35604;
+  --hue-soft: #f6e7d3;
+  --ok: #2a7a3b;
+  --ok-soft: #dff0e2;
+  --bad: #b3261e;
+  --bad-soft: #fae3e1;
+  --code-bg: #1a1d24;
+  --code-line: #2a2f39;
+  --code-ink: #e6e8ee;
+  --code-dim: #8a92a2;
+  --code-arrow: #94a9ff;
+  --code-hue: #f3b467;
+  --code-str: #9ed5aa;
+  --code-num: #d2bcff;
+  --code-unk: #ff9d8c;
+  --display: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #111316; --sheet: #171a1f; --ink: #e7e9ec; --muted: #9aa1ab; --rule: #2a2e35;
+    --accent: #9db0ff; --accent-soft: #1f2645; --hue: #f0ac5c; --hue-soft: #3a2a15;
+    --ok: #7fd08c; --ok-soft: #15301b; --bad: #ff8a7d; --bad-soft: #3b1c1a;
+    --code-bg: #1c2029; --code-line: #2e3440;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #111316; --sheet: #171a1f; --ink: #e7e9ec; --muted: #9aa1ab; --rule: #2a2e35;
+  --accent: #9db0ff; --accent-soft: #1f2645; --hue: #f0ac5c; --hue-soft: #3a2a15;
+  --ok: #7fd08c; --ok-soft: #15301b; --bad: #ff8a7d; --bad-soft: #3b1c1a;
+  --code-bg: #1c2029; --code-line: #2e3440;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: calc(env(safe-area-inset-top, 0px) + 72px); }
+body { background: var(--paper); color: var(--ink); font: 17px/1.65 var(--body); }
+a { color: var(--accent); text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+p { margin: 0 0 16px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; letter-spacing: -.01em; }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 32px 0 8px; }
+ul { margin: 0 0 16px; padding-left: 1.2em; display: grid; gap: 6px; }
+
+/* inline code: a color is amber, everything else neutral */
+:not(pre) > code { font: .84em var(--mono); background: var(--sheet); border: 1px solid var(--rule); padding: .05em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+code.c { color: var(--hue); }
+
+.wrap { max-width: 1160px; margin: 0 auto; padding-inline: 24px; }
+
+/* top bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--paper) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--rule); }
+.bar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; flex-wrap: wrap; }
+.mark { font: 600 18px/1 var(--mono); color: var(--ink); text-decoration: none; letter-spacing: -.02em; }
+.mark b { color: var(--accent); font-weight: 600; }
+.bar nav { display: flex; gap: 4px 18px; flex-wrap: wrap; font: 500 15px/1 var(--display); }
+.bar nav a { color: var(--muted); text-decoration: none; padding: 6px 0; }
+.bar nav a:hover { color: var(--ink); }
+
+/* hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 48px; align-items: center; padding-block: 64px 56px; }
+.eyebrow { font: 600 12px/1.3 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 18px; }
+.hero h1 { font-size: clamp(2.6rem, 6vw, 4.4rem); line-height: 1; font-weight: 700; margin: 0 0 22px; letter-spacing: -.03em; }
+.hero h1 .br { font-family: var(--mono); font-weight: 400; color: var(--accent); letter-spacing: -.06em; }
+.lead { font-size: 1.2rem; color: var(--muted); max-width: 34rem; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+.btn { font: 600 15px/1 var(--display); padding: 12px 18px; border-radius: 6px; text-decoration: none; border: 1px solid var(--ink); color: var(--ink); }
+.btn.primary { background: var(--ink); color: var(--paper); }
+.btn:hover { opacity: .88; }
+
+/* code panels */
+pre.code { margin: 0 0 18px; padding: 16px 18px; background: var(--code-bg); color: var(--code-ink); border-radius: 8px; overflow-x: auto; font: 14px/1.6 var(--mono); }
+pre.code .com { color: var(--code-dim); font-style: italic; }
+pre.code .str { color: var(--code-str); }
+pre.code .num { color: var(--code-num); }
+pre.code .arr { color: var(--code-arrow); font-weight: 600; }
+pre.code .col { color: var(--code-hue); }
+pre.code .unk { color: var(--code-unk); font-weight: 600; }
+pre.code .op { color: #ffffff; font-weight: 600; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) pre.code .op { color: var(--code-ink); } }
+
+/* live scope */
+.live { background: var(--code-bg); border-radius: 12px; color: var(--code-ink); overflow: hidden; }
+.live pre.code { margin: 0; border-radius: 0; padding: 20px 22px 14px; font-size: 15px; }
+.live .ctrl { display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-top: 1px solid var(--code-line); font: 13px/1 var(--mono); color: var(--code-dim); flex-wrap: wrap; }
+.live .ctrl input { flex: 1 1 140px; accent-color: var(--code-arrow); min-width: 0; }
+.live .ctrl output { color: var(--code-num); font-weight: 600; min-width: 2ch; }
+.rows { display: grid; border-top: 1px solid var(--code-line); }
+.rows div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 10px 22px; border-bottom: 1px solid var(--code-line); font: 14px/1.5 var(--mono); align-items: baseline; }
+.rows div:last-child { border-bottom: 0; }
+.rows code { overflow-wrap: anywhere; min-width: 0; }
+.rows small { display: block; font: italic 13px/1.4 var(--body); color: var(--code-dim); }
+.rows .res { color: var(--code-num); }
+
+/* two operations strip */
+.ops { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border-block: 1px solid var(--rule); margin-bottom: 24px; }
+.ops div { padding: 22px 24px 18px 0; min-width: 0; }
+.ops div + div { padding-left: 24px; border-left: 1px solid var(--rule); }
+.ops b { display: block; font: 600 1.2rem/1.2 var(--display); margin-bottom: 6px; }
+.ops b code { font-size: .95em; border: 0; background: none; padding: 0; color: var(--accent); }
+.ops p { margin: 0; color: var(--muted); }
+
+/* sections */
+.section { padding-block: 72px 24px; }
+.section > h2, .head h2 { font-size: clamp(1.9rem, 4vw, 2.6rem); line-height: 1.05; font-weight: 700; margin: 0 0 12px; }
+.head { max-width: 44rem; margin-bottom: 36px; }
+.head p { color: var(--muted); font-size: 1.1rem; }
+
+/* tour */
+.tour { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 56px; }
+.rail { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 84px); align-self: start; }
+.rail ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; font: 500 14px/1.3 var(--display); }
+.rail a { display: grid; grid-template-columns: 2.2em minmax(0, 1fr); padding: 6px 8px; border-radius: 5px; color: var(--muted); text-decoration: none; }
+.rail a span { font: 12px/1.5 var(--mono); color: var(--accent); }
+.rail a:hover, .rail a.on { background: var(--sheet); color: var(--ink); }
+.rail a.on { box-shadow: inset 2px 0 0 var(--accent); }
+.chapters-mobile { display: none; }
+.read { min-width: 0; max-width: 44rem; }
+.chapter { padding-bottom: 56px; margin-bottom: 56px; border-bottom: 1px solid var(--rule); }
+.chapter:last-child { border-bottom: 0; }
+.chapter > header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.chapter > header .n { font: 600 14px/1 var(--mono); color: var(--accent); }
+.chapter > header h2 { font-size: 1.85rem; line-height: 1.1; font-weight: 700; margin: 0; }
+.tag { font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; padding: 5px 8px; border-radius: 99px; background: var(--hue-soft); color: var(--hue); }
+.lede { font-size: 1.12rem; }
+
+/* tables */
+.tw { overflow-x: auto; margin: 0 0 20px; }
+table { width: 100%; border-collapse: collapse; font-size: 15.5px; }
+th, td { text-align: left; padding: 9px 12px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 11px/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+td:first-child { white-space: nowrap; padding-right: 18px; }
+td code { white-space: nowrap; }
+.groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 48px; }
+.groups > div { min-width: 0; }
+.groups h3 { margin-top: 18px; font-size: 1rem; text-transform: uppercase; letter-spacing: .06em; font-family: var(--mono); font-weight: 600; color: var(--muted); }
+
+/* set checker */
+.checker { border: 1px solid var(--rule); background: var(--sheet); border-radius: 10px; padding: 18px; margin: 8px 0 20px; display: grid; gap: 14px; }
+.checker .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.checker label { display: grid; gap: 5px; font: 600 11px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.checker select, .checker input { font: 15px/1.2 var(--mono); padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); color: var(--ink); min-width: 0; }
+.checker input { width: 8.5rem; }
+.checker .line { font: 600 15px/1.5 var(--mono); overflow-wrap: anywhere; }
+.checker .line .c { color: var(--hue); }
+.verdict { display: flex; gap: 12px; align-items: flex-start; }
+.pill { font: 600 12px/1 var(--display); letter-spacing: .04em; text-transform: uppercase; padding: 7px 10px; border-radius: 99px; white-space: nowrap; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.no { background: var(--bad-soft); color: var(--bad); }
+.verdict p { margin: 0; font-size: 15.5px; }
+
+/* numbers */
+.bench { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-block: 1px solid var(--rule); margin: 8px 0 20px; }
+.bench div { padding: 18px 18px 16px 0; min-width: 0; }
+.bench div + div { padding-left: 18px; border-left: 1px solid var(--rule); }
+.bench b { display: block; font: 700 2rem/1 var(--display); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.bench span { display: block; font: 13px/1.4 var(--mono); color: var(--muted); margin-top: 6px; }
+
+/* rules */
+.rules { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 48px; counter-reset: r; }
+.rules li { counter-increment: r; display: grid; grid-template-columns: 2.4em minmax(0, 1fr); padding: 12px 0; border-bottom: 1px solid var(--rule); font-size: 1.05rem; }
+.rules li::before { content: counter(r, decimal-leading-zero); font: 600 13px/1.9 var(--mono); color: var(--accent); }
+
+.status { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+.status div { min-width: 0; }
+footer { border-top: 1px solid var(--rule); margin-top: 72px; padding-block: 28px 48px; color: var(--muted); font-size: 15px; }
+
+@media (max-width: 900px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-block: 40px 40px; gap: 32px; }
+  .tour { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .rail { display: none; }
+  .chapters-mobile { display: block; margin-bottom: 32px; border: 1px solid var(--rule); border-radius: 8px; background: var(--sheet); }
+  .chapters-mobile summary { cursor: pointer; padding: 12px 14px; font: 600 15px/1.2 var(--display); }
+  .chapters-mobile ol { margin: 0; padding: 0 14px 12px 2.2em; display: grid; gap: 4px; font: 500 15px/1.4 var(--display); }
+  .groups, .rules, .status { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .wrap { padding-inline: 16px; }
+  body { font-size: 16.5px; }
+  .ops, .bench { grid-template-columns: minmax(0, 1fr); }
+  .ops div + div, .bench div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .rows div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .section { padding-block: 52px 16px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+</style>
+<style>body { margin: 0; } [hidden] { display: none !important; }</style>
+</head>
+<body>
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="#top"><b>{</b>syntact<b>}</b></a>
+    <nav aria-label="Site">
+      <a href="#tour">Tour</a>
+      <a href="#syntax">Syntax</a>
+      <a href="#coming-from">Coming from</a>
+      <a href="#rules">Rules</a>
+      <a href="#status">Status</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">An experimental programming language</p>
+        <h1>Everything is a <span class="br">{</span>scope<span class="br">}</span>.</h1>
+        <p class="lead">Syntact has no functions, no classes, no modules and no type system apart from its values. It has one structure, the scope, and a few operations on it. You derive a scope, collapse it, color a binding with it, or match against it.</p>
+        <div class="cta">
+          <a class="btn primary" href="#tour">Take the tour</a>
+          <a class="btn" href="#syntax">Syntax at a glance</a>
+        </div>
+      </div>
+      <div class="live" aria-label="A live scope">
+<pre class="code"><code>square -> {
+  n -> 0
+  -> n * n
+}</code></pre>
+        <div class="ctrl">
+          <label for="carve-n">carve n</label>
+          <input type="range" id="carve-n" min="0" max="16" value="5">
+          <output id="carve-out" for="carve-n">5</output>
+        </div>
+        <div class="rows">
+          <div><code id="r1a">square{n -> 5}</code><code id="r1b">{n -> 5  -> n * n}<small>a new scope; square is unchanged</small></code></div>
+          <div><code id="r2a">square{n -> 5}!</code><code class="res" id="r2b">25<small>collapsed through its production</small></code></div>
+          <div><code>square!</code><code class="res">0<small>the original still has its default</small></code></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="ops">
+      <div><b>Carving <code>{…}</code></b><p>derives a new scope from an existing one, with some bindings given other values.</p></div>
+      <div><b>Collapse <code>!</code></b><p>reduces a scope through its production, the value it yields.</p></div>
+    </div>
+    <p style="color: var(--muted); max-width: 44rem;">What other languages write as a function call, <code>square(5)</code>, is two separate operations in Syntact: derive <code>square</code> with <code>n</code> set to 5, then collapse the result. Most of the language follows from keeping them apart.</p>
+
+    <!-- TOUR -->
+    <section class="section" id="tour">
+      <div class="head">
+        <h2>The tour</h2>
+        <p>Fifteen short chapters, in reading order. Each one builds on the ones before it. Every example comes from the language reference.</p>
+      </div>
+      <div class="tour">
+        <nav class="rail" aria-label="Chapters">
+          <ol id="rail">
+            <li><a href="#scopes"><span>01</span>Scopes and bindings</a></li>
+            <li><a href="#collapse"><span>02</span>Productions and collapse</a></li>
+            <li><a href="#carving"><span>03</span>Carving</a></li>
+            <li><a href="#defaults"><span>04</span>Defaults</a></li>
+            <li><a href="#sets"><span>05</span>Values are sets</a></li>
+            <li><a href="#shapes"><span>06</span>Shapes and color</a></li>
+            <li><a href="#patterns"><span>07</span>Patterns</a></li>
+            <li><a href="#grammars"><span>08</span>Grammars</a></li>
+            <li><a href="#unknowns"><span>09</span>Unknowns and proofs</a></li>
+            <li><a href="#holes"><span>10</span>Holes and genericity</a></li>
+            <li><a href="#effects"><span>11</span>Effects and handlers</a></li>
+            <li><a href="#boundary"><span>12</span>The external boundary</a></li>
+            <li><a href="#strategies"><span>13</span>Execution patterns</a></li>
+            <li><a href="#state"><span>14</span>Resonance and reactivity</a></li>
+            <li><a href="#modules"><span>15</span>Files and modules</a></li>
+          </ol>
+        </nav>
+
+        <div class="read">
+          <details class="chapters-mobile">
+            <summary>Chapters</summary>
+            <ol>
+              <li><a href="#scopes">Scopes and bindings</a></li>
+              <li><a href="#collapse">Productions and collapse</a></li>
+              <li><a href="#carving">Carving</a></li>
+              <li><a href="#defaults">Defaults</a></li>
+              <li><a href="#sets">Values are sets</a></li>
+              <li><a href="#shapes">Shapes and color</a></li>
+              <li><a href="#patterns">Patterns</a></li>
+              <li><a href="#grammars">Grammars</a></li>
+              <li><a href="#unknowns">Unknowns and proofs</a></li>
+              <li><a href="#holes">Holes and genericity</a></li>
+              <li><a href="#effects">Effects and handlers</a></li>
+              <li><a href="#boundary">The external boundary</a></li>
+              <li><a href="#strategies">Execution patterns</a></li>
+              <li><a href="#state">Resonance and reactivity</a></li>
+              <li><a href="#modules">Files and modules</a></li>
+            </ol>
+          </details>
+
+          <!-- 01 -->
+          <article class="chapter" id="scopes">
+            <header><span class="n">01</span><h2>Scopes and bindings</h2></header>
+            <p class="lede"><code>{…}</code> creates a scope. Inside it, <code>-></code> binds a name to a value, and <code>.</code> reads a binding back.</p>
+<pre class="code"><code>point -> {
+  x -> 10
+  y -> 20
+}
+
+point.x   // 10</code></pre>
+            <p>A scope is an ordered list of bindings. A binding can use whatever is above it, in its own scope or in an enclosing one. Order matters:</p>
+<pre class="code"><code>x -> 1
+y -> x + 1   // fine: x is above
+
+z -> w + 1   // error: w does not exist yet
+w -> 1</code></pre>
+            <p>A file is a scope too, and running a program means collapsing that file. This is a whole program that produces 42:</p>
+<pre class="code"><code>greeting -> "hello"
+answer -> 42
+-> answer</code></pre>
+            <h3>Two bindings can share a name</h3>
+            <p>A scope is data, not a symbol table, so two bindings may have the same name. Neither overwrites the other: they are <code>x#0</code> and <code>x#1</code>. Reading a name gives the <em>last</em> occurrence. Carving targets the <em>first</em> one, unless you name an occurrence.</p>
+<pre class="code"><code>box -> {
+  x -> 1
+  y -> x      // built from the first x
+  x -> 2
+}
+
+box.x            // 2    reading takes the last x
+box.y            // 1
+
+box2 -> box{x -> 10}
+box2.x           // 2    the last x is untouched
+box2.y           // 10   y follows the first x
+
+box{x#1 -> 9}    // carve the second x instead</code></pre>
+          </article>
+
+          <!-- 02 -->
+          <article class="chapter" id="collapse">
+            <header><span class="n">02</span><h2>Productions and collapse</h2></header>
+            <p class="lede">A binding with no name on the left is a <em>production</em>: what the scope yields. It replaces <code>return</code>. Collapse, written <code>!</code>, reduces a scope through its production.</p>
+<pre class="code"><code>add -> {
+  a -> 1
+  b -> 2
+  -> a + b
+}
+
+add.a   // 1
+add!    // 3</code></pre>
+            <p>A scope can have several productions. The first is the default and the others are the other things it can produce. This is how sum-like shapes are written:</p>
+<pre class="code"><code>BoolLike -> {
+  -> false
+  -> true
+}</code></pre>
+            <p>Expressions resolve, scopes collapse. A binding that holds a scope gives you the scope; <code>!</code> gives you what it produces. A scope with no production collapses to <code>none</code>.</p>
+<pre class="code"><code>box -> {
+  x -> 1
+  y -> {
+    -> x + 1
+  }
+}
+
+box.y    // the scope bound to y
+box.y!   // 2
+
+empty -> {
+  x -> 1
+}
+empty!   // none</code></pre>
+          </article>
+
+          <!-- 03 -->
+          <article class="chapter" id="carving">
+            <header><span class="n">03</span><h2>Carving</h2></header>
+            <p class="lede">Braces after an existing scope derive a new one. The original is never modified.</p>
+<pre class="code"><code>Point -> {
+  x -> 0
+  y -> 0
+}
+
+shifted -> Point{x -> 5}
+
+Point.x     // 0
+shifted.x   // 5
+shifted.y   // 0</code></pre>
+            <p>Carving runs through everything that depends on the carved binding. This is why it is not argument passing: the whole structure is derived before anything is reduced.</p>
+<pre class="code"><code>box -> {
+  x -> 1
+  y -> x + 1
+}
+
+box2 -> box{x -> 10}
+box2.y   // 11</code></pre>
+            <p>Arguments without a name fill the bindings in order, skipping productions: <code>Point{3, 4}</code> sets <code>x</code> to 3 and <code>y</code> to 4.</p>
+            <h3>A scope is closed</h3>
+            <p>Carving changes bindings that exist. It never adds one. A misspelled name is an error, so a typo cannot quietly grow a scope.</p>
+<pre class="code"><code>User -> {
+  string:name
+  u8:age
+}
+
+User{nmae -> "Ada"}   // error: nmae is not a binding of User</code></pre>
+          </article>
+
+          <!-- 04 -->
+          <article class="chapter" id="defaults">
+            <header><span class="n">04</span><h2>Defaults and completeness</h2></header>
+            <p class="lede">Every scope is complete. Its bindings have defaults, so it is real data the moment it is written, with nothing waiting to be constructed.</p>
+<pre class="code"><code>Point -> {
+  u8:x
+  u8:y
+}
+
+Point.x   // 0
+Point:p
+p.y       // 0</code></pre>
+            <p>Defaults compose. A structure made of complete parts is complete:</p>
+<pre class="code"><code>Vec2 -> {
+  f32:x
+  f32:y
+}
+
+Transform -> {
+  Vec2:position
+  Vec2:scale -> Vec2{x -> 1 y -> 1}
+}
+
+Transform.position.x   // 0
+Transform.scale.x      // 1</code></pre>
+            <p>So there is no null and no uninitialized binding. When absence or failure matters, you model it in the structure.</p>
+            <p>Nothing is ever mutated either. <code>box2 -> box{x -> 10}</code> does not patch <code>box</code>: both scopes exist side by side. When a program needs change over time, it opts in explicitly with resonance or reactivity (chapter 14).</p>
+          </article>
+
+          <!-- 05 -->
+          <article class="chapter" id="sets">
+            <header><span class="n">05</span><h2>Values are sets</h2></header>
+            <p class="lede">There is no separate world of types. <code>5</code> is a set with one element. <code>u8</code> is the name of the set <code>0..255</code>. A type is simply a set used on the left of <code>:</code>.</p>
+<pre class="code"><code>u8:age -> 29      // fine
+u8:age -> 300     // Constraint_Mismatch: 300 is not in 0..255</code></pre>
+            <p>Writing <code class="c">u8</code><code>:age</code> <em>colors</em> the binding <code>age</code> with <code>u8</code>. The compiler must establish that every value <code>age</code> can take belongs to that set. If it cannot, the program does not compile.</p>
+            <p>The builtin types are names for sets. They are not keywords: they resolve like any name, and you can shadow them.</p>
+            <div class="tw"><table>
+              <thead><tr><th>Name</th><th>Set</th><th>Default</th></tr></thead>
+              <tbody>
+                <tr><td><code>u8</code> <code>u16</code> <code>u32</code> <code>u64</code></td><td><code>0..255</code>, <code>0..65535</code>, …</td><td><code>0</code></td></tr>
+                <tr><td><code>i8</code> <code>i16</code> <code>i32</code> <code>i64</code></td><td><code>-128..127</code>, …</td><td><code>0</code></td></tr>
+                <tr><td><code>int</code></td><td>every integer</td><td><code>0</code></td></tr>
+                <tr><td><code>f32</code> <code>f64</code> <code>float</code></td><td>floating-point numbers</td><td><code>0</code></td></tr>
+                <tr><td><code>char</code></td><td>a single character, like <code>'a'</code></td><td></td></tr>
+                <tr><td><code>string</code></td><td>every string, like <code>"a"</code></td><td><code>""</code></td></tr>
+                <tr><td><code>bool</code></td><td><code>false | true</code></td><td><code>false</code></td></tr>
+                <tr><td><code>none</code></td><td>the empty set</td><td></td></tr>
+              </tbody>
+            </table></div>
+            <h3>Make your own</h3>
+            <p>Your own types are written with the same operators. There is no difference in kind between <code>u8</code> and these:</p>
+<pre class="code"><code>Port -> u16 &amp; >0         // 1..65535
+Percent -> u8 &amp; <=100    // 0..100
+Digit -> '0'..'9'</code></pre>
+            <div class="tw"><table>
+              <thead><tr><th>Write</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>a | b</code></td><td>union: in <code>a</code> or in <code>b</code></td></tr>
+                <tr><td><code>a &amp; b</code></td><td>intersection: in both</td></tr>
+                <tr><td><code>~a</code></td><td>complement: not in <code>a</code></td></tr>
+                <tr><td><code>lo..hi</code></td><td>a range; either end can be left open</td></tr>
+                <tr><td><code>>x</code> <code>&lt;x</code> <code>>=x</code> <code>&lt;=x</code></td><td>everything above or below <code>x</code></td></tr>
+              </tbody>
+            </table></div>
+            <p>Arithmetic works on sets too. <code>u8 + u8</code> is <code>0..510</code>, and a comparison whose answer is already decided is that answer: <code>2 > 2</code> is <code>false</code>.</p>
+            <h3>Try it</h3>
+            <div class="checker" id="checker">
+              <div class="controls">
+                <label for="ck-color">Color
+                  <select id="ck-color">
+                    <option value="u8">u8</option>
+                    <option value="i8">i8</option>
+                    <option value="u16">u16</option>
+                    <option value="Port">Port</option>
+                    <option value="Percent" selected>Percent</option>
+                    <option value="AdultAge">AdultAge</option>
+                  </select>
+                </label>
+                <label for="ck-kind">Value
+                  <select id="ck-kind">
+                    <option value="num" selected>a number</option>
+                    <option value="u8">??::u8</option>
+                    <option value="u8p1">??::u8 + 1</option>
+                    <option value="i8">??::i8</option>
+                  </select>
+                </label>
+                <label for="ck-num" id="ck-num-label">Number
+                  <input id="ck-num" type="text" inputmode="numeric" value="42" autocomplete="off">
+                </label>
+              </div>
+              <div class="line" id="ck-line"></div>
+              <div class="verdict"><span class="pill" id="ck-pill"></span><p id="ck-why"></p></div>
+            </div>
+            <p><code>??::u8</code> is a value the compiler does not know, only that it is a <code>u8</code>. Chapter 09 explains it.</p>
+          </article>
+
+          <!-- 06 -->
+          <article class="chapter" id="shapes">
+            <header><span class="n">06</span><h2>Shapes and color</h2></header>
+            <p class="lede">Any scope can be a color. Used on the left of <code>:</code>, a scope is a <em>shape</em>. The same scope is carved with <code>{…}</code> and collapsed with <code>!</code>; the operator chooses the role.</p>
+<pre class="code"><code>Point -> {
+  u8:x
+  u8:y
+}
+
+Point:p{x -> 10 y -> 20}         // color p by Point, then carve it
+Point:q -> {x -> 3  y -> 300}    // Constraint_Mismatch on y</code></pre>
+            <p>Nobody wrote <code class="c">u8</code> on the <code>x</code> and <code>y</code> of <code>q</code>. The color of <code>q</code> flows into its fields by itself. This is <em>implicit coloring</em>: a constraint is a property of the structure, not an annotation on one binding.</p>
+            <p>The name can be left out. <code class="c">Circle</code><code>:</code> is an anonymous binding shaped like <code>Circle</code>. With productions, that gives sum types:</p>
+<pre class="code"><code>Shape -> {
+  -> Circle:
+  -> Square:
+}</code></pre>
+            <p>Color travels with the value. Here every element must be an <code>f32</code> or a <code>string</code>, though no element says so:</p>
+<pre class="code"><code>F32OrString -> {
+  -> f32:
+  -> string:
+}
+
+Array{F32OrString}:array -> {0.1 2.0 "hello"}</code></pre>
+          </article>
+
+          <!-- 07 -->
+          <article class="chapter" id="patterns">
+            <header><span class="n">07</span><h2>Patterns</h2></header>
+            <p class="lede"><code>?</code> takes a value on the left and branches on the right. The first branch that matches gives the result. A branch with no pattern is the default.</p>
+<pre class="code"><code>n ? {
+  0 -> "zero"
+  >0 -> "positive"
+  -> "negative"
+}</code></pre>
+            <p>A pattern is any expression that denotes a set, and the branch fires when the value belongs to it. Sets compose, so patterns do too:</p>
+<pre class="code"><code>value ? {
+  (u8 | i8) &amp; >10 -> "a small int above 10"
+  -> "something else"
+}
+
+shape ? {
+  Circle: -> "circle"
+  Square: -> "square"
+  -> "unknown"
+}</code></pre>
+            <p>One subtlety: a bare <code>u8</code> is the whole set, while <code class="c">u8</code><code>:</code> is an anonymous <code>u8</code> binding, whose complete value is its default <code>0</code>.</p>
+<pre class="code"><code>n ? {
+  u8 -> "fits in a byte"
+  -> "wider"
+}</code></pre>
+            <h3>Destructuring needs no syntax</h3>
+            <p>A branch's result is written inside its pattern's scope, so the pattern's bindings are simply visible there. Reading them is destructuring.</p>
+<pre class="code"><code>Circle -> {
+  u8:radius
+}
+
+area -> {
+  Shape:shape
+  -> shape ? {
+    Circle: -> radius * radius * 3
+    -> 0
+  }
+}</code></pre>
+            <p>Structural patterns name their pieces with captures. <code>(h)</code> is an alias visible only in the branch. A list pattern mirrors the list's own grammar, so recursion reads naturally:</p>
+<pre class="code"><code>sum -> {
+  Array{u8}:list
+  -> list ? {
+    {} -> 0
+    {u8:(h) ...Array{u8}:(t)} -> h + sum{list -> t}!
+  }
+}</code></pre>
+          </article>
+
+          <!-- 08 -->
+          <article class="chapter" id="grammars">
+            <header><span class="n">08</span><h2>Grammars</h2></header>
+            <p class="lede">A grammar is a set of strings, so a grammar is a type, written with the same operators as every other set. Validation is just coloring.</p>
+<pre class="code"><code>alpha -> 'a'..'z' | 'A'..'Z'
+digit -> '0'..'9'
+emailChar -> alpha | digit | '.' | '_' | '-'
+
+Email -> emailChar*1.. + '@' + emailChar*1.. + '.' + alpha*2..
+
+Email:contact -> "team@example.com"   // proven at compile time
+Email:oops -> "not-an-email"          // Constraint_Mismatch</code></pre>
+            <p><code>'a'</code> is a character and <code>"a"</code> a string. <code>'a'..'z'</code> is a range of characters, <code>+</code> concatenates, and <code>*1..</code> repeats one or more times. Complement works as well:</p>
+<pre class="code"><code>idChar -> 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '-'
+Identifier -> idChar*1.. &amp; ~(.. + '_')    // no trailing underscore
+
+Identifier:someId -> "someId"   // fine
+Identifier:oops -> "bad_"       // rejected</code></pre>
+          </article>
+
+          <!-- 09 -->
+          <article class="chapter" id="unknowns">
+            <header><span class="n">09</span><h2>Unknowns and proofs</h2></header>
+            <p class="lede"><code>??</code> is a value the compiler cannot know, such as a program input or a result from outside. <code>??::u8</code> says it is a <code>u8</code>.</p>
+            <p>The compiler keeps the exact form of what depends on an unknown, and a color must hold for every value the unknown can take:</p>
+<pre class="code"><code>n -> ??::u8
+m -> n * 2 - n     // the compiler sees that m is n
+u8:ok -> m         // proven for every n
+u8:big -> n * 2    // Constraint_Mismatch: n = 128 gives 256</code></pre>
+            <h3>Proofs are colors</h3>
+            <p>There is no separate proof system. Since any value is a set, <code>true</code> is a color like any other, and a property is proven by coloring it <code>true</code>:</p>
+<pre class="code"><code>true:check -> 2 = 2    // proven
+true:oops -> 2 = 3     // Constraint_Mismatch: false is not true</code></pre>
+            <p>Over an unknown, the same question asks whether a property holds for every value:</p>
+<pre class="code"><code>decodeEncodeSymmetry -> {
+  string:m -> ??
+  true:holds -> decode{value -> encode{value -> m}!}! = m
+}</code></pre>
+          </article>
+
+          <!-- 10 -->
+          <article class="chapter" id="holes">
+            <header><span class="n">10</span><h2>Holes and genericity</h2></header>
+            <p class="lede"><code>&lt;-</code> declares a hole, filled where the scope is used. Generics are just scopes with holes.</p>
+<pre class="code"><code>identity -> {
+  T &lt;- none
+  value &lt;- none
+  -> value
+}
+
+identity{value -> 5}!          // T is inferred from 5
+identity{T &lt;- u8 value -> 5}!  // or filled explicitly</code></pre>
+            <p><code>-></code> pushes a value into a binding; <code>&lt;-</code> pulls a value into a hole. A carve can mix both.</p>
+<pre class="code"><code>List -> {
+  T &lt;- none
+  -> {}
+  -> { T:, ...List{T}: }
+}
+
+List{T &lt;- u8}:numbers</code></pre>
+            <p>The first production is the empty list; the second is a <code>T</code> followed by the rest of the list.</p>
+          </article>
+
+          <!-- 11 -->
+          <article class="chapter" id="effects">
+            <header><span class="n">11</span><h2>Effects and handlers</h2></header>
+            <p class="lede">Everything in Syntact is structural, except effects. An effect is a <em>named</em> event: <code>Log</code> and <code>Audit</code> may carry the same string and still mean different things.</p>
+            <p><code>>-</code> emits an event. <code>-&lt;</code> handles it. The nearest visible handler handles it, and execution then resumes where the event was emitted.</p>
+<pre class="code"><code>Log -> {
+  string:message
+}
+
+program -> {
+  Log -&lt; e {
+    -> io.write{e.message}!
+  }
+
+  >- Log{message -> "hello"}
+  -> 0
+}
+
+-> program!</code></pre>
+            <h3>Dependency injection at compile time</h3>
+            <p>Code that needs an allocator, a logger or a clock does not receive one. It emits an event, and the surrounding scope decides what that means.</p>
+<pre class="code"><code>Alloc -> {
+  u64:size
+}
+
+Buffer -> {
+  u64:size
+  ptr -> >- Alloc{size -> size}
+  -> ptr
+}
+
+WithArena -> {
+  Alloc -&lt; e {
+    -> arena.alloc{e.size}!
+  }
+  -> Buffer{size -> 1024}!
+}</code></pre>
+            <p>A library can be specialized by carving its handler, as in <code>FastLib -> SomeLib{Alloc -&lt; e {…}}</code>. Logging, time, randomness, database access and test mocks all work the same way.</p>
+          </article>
+
+          <!-- 12 -->
+          <article class="chapter" id="boundary">
+            <header><span class="n">12</span><h2>The external boundary</h2><span class="tag">partly implemented</span></header>
+            <p class="lede">A program eventually talks to something it cannot reduce: the kernel, a C library. That boundary is a scope whose production points outside.</p>
+<pre class="code"><code>kernel -> &lt;kernel.so>{
+  write -> {
+    u8:a  u8:b
+    -> ??::u8
+  }
+}
+
+partial -> kernel.write{b -> 4}   // carved, not executed: pure data
+partial!                          // the call happens here, only now</code></pre>
+            <p><code>&lt;kernel.so></code> says where the leaves come from. <code>-> ??::u8</code> says the result cannot be computed in Syntact but will be a <code>u8</code>. There is no glue code to write, and you can prove things at the frontier:</p>
+<pre class="code"><code>CString -> (~'\0').. + '\0'   // no interior null, then a terminator</code></pre>
+            <p>Today the compiler calls real shared libraries with scalar arguments and results. Passing addresses, and so strings and arrays, is still open.</p>
+          </article>
+
+          <!-- 13 -->
+          <article class="chapter" id="strategies">
+            <header><span class="n">13</span><h2>Execution patterns</h2></header>
+            <p class="lede">How a collapse runs is decided where it happens, not where the computation is written. No function is declared async, parallel or GPU.</p>
+            <div class="tw"><table>
+              <thead><tr><th>Write</th><th>Collapse</th></tr></thead>
+              <tbody>
+                <tr><td><code>work!</code></td><td>sequentially</td></tr>
+                <tr><td><code>work&lt;!></code></td><td>on another thread</td></tr>
+                <tr><td><code>work[!]</code></td><td>in parallel on the CPU</td></tr>
+                <tr><td><code>work(!)</code></td><td>in the background</td></tr>
+                <tr><td><code>work|!|</code></td><td>on the GPU</td></tr>
+              </tbody>
+            </table></div>
+            <p>They nest: <code>packed(&lt;[!]>)</code> is background, threaded, parallel. The compiler checks that a strategy is legal. A scope that emits unsafe effects cannot be sent to the GPU unless its handlers make that safe.</p>
+          </article>
+
+          <!-- 14 -->
+          <article class="chapter" id="state">
+            <header><span class="n">14</span><h2>Resonance and reactivity</h2><span class="tag">not implemented yet</span></header>
+            <p class="lede">Change is opt-in. <em>Resonance</em> is state that changes only through a named event. <em>Reactivity</em> is a value derived from others that follows them when they change.</p>
+<pre class="code"><code>Counter -> {
+  Change -> { u8:value }
+
+  -> {
+    u8:value >>- Change -> 0
+
+    Change -&lt; e {
+      value -&lt;&lt; e.value
+    }
+
+    increment -> {
+      >- Change{value -> value + 1}
+    }
+
+    -> value
+  }
+}</code></pre>
+            <p><code>>>-</code> declares that <code>value</code> may change, through <code>Change</code> only. <code>-&lt;&lt;</code> performs the update inside the handler. There is no hidden mutable field.</p>
+<pre class="code"><code>Counter:globalCounter
+bool:counterPositive >>= globalCounter.value >= 0</code></pre>
+            <p><code>>>=</code> recomputes <code>counterPositive</code> whenever <code>globalCounter.value</code> changes. <code>=&lt;&lt;</code> without a name is a reactive production, such as redrawing a view when its text changes.</p>
+          </article>
+
+          <!-- 15 -->
+          <article class="chapter" id="modules">
+            <header><span class="n">15</span><h2>Files and modules</h2></header>
+            <p class="lede">Files and folders are scopes. <code>@</code> reads the file system as a graph of scopes, and importing is expansion with <code>...</code>.</p>
+<pre class="code"><code>Plane2D -> @lib.geometry.Plane
+
+...@lib.geometry                  // import everything
+
+...@lib.geometry{                 // carve a library, then import it
+  Plane -> Plane{dimension -> 3}
+}</code></pre>
+            <p>A program is already data before it collapses, so much of what other languages call metaprogramming is ordinary code here:</p>
+            <div class="tw"><table>
+              <thead><tr><th>Elsewhere</th><th>In Syntact</th></tr></thead>
+              <tbody>
+                <tr><td>constructors, builders</td><td>defaults and carving</td></tr>
+                <tr><td><code>copyWith</code></td><td>carving</td></tr>
+                <tr><td>generic specialization</td><td>holes and carving</td></tr>
+                <tr><td>DI configuration, mocks</td><td>handler override</td></tr>
+                <tr><td>compile-time constants</td><td>pure collapse</td></tr>
+                <tr><td>macros</td><td>scope transformation</td></tr>
+              </tbody>
+            </table></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAST -->
+    <section class="section" id="fast">
+      <div class="head">
+        <h2>You pay for what survives</h2>
+        <p>Collapse is a request to reduce everything that can be reduced. Abstractions vanish at compile time, and only the remaining computation is compiled.</p>
+      </div>
+      <p style="max-width: 44rem;">A benchmark program from the reference stacks seventeen lines of arithmetic over three runtime inputs. The bootstrap compiler reduces it to <code>60·a + 78·b + 40·c</code> and emits the same instructions as gcc and clang at <code>-O3</code>. Compared with the equivalent C:</p>
+      <div class="bench">
+        <div><b>472 B</b><span>binary, vs 15 976 B for gcc -O3</span></div>
+        <div><b>152 µs</b><span>process start, vs 450 µs</span></div>
+        <div><b>5.3 ms</b><span>to a runnable executable, vs 36.9 ms</span></div>
+      </div>
+      <p style="max-width: 44rem; color: var(--muted);">The gains are structural: no libc, no separate link step, and value ranges known by construction. The arithmetic itself is on par with C.</p>
+    </section>
+
+    <!-- SYNTAX -->
+    <section class="section" id="syntax">
+      <div class="head">
+        <h2>Syntax at a glance</h2>
+        <p>Every operator in the language, grouped by what it does.</p>
+      </div>
+      <div class="groups">
+        <div>
+          <h3>Bindings</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>x -> v</code></td><td>bind <code>x</code> to <code>v</code></td></tr>
+            <tr><td><code>-> v</code></td><td>production: what the scope yields</td></tr>
+            <tr><td><code>c:x -> v</code></td><td>bind <code>x</code>, colored by <code>c</code></td></tr>
+            <tr><td><code>c:x</code></td><td>colored, with the default of <code>c</code></td></tr>
+            <tr><td><code>c:</code></td><td>anonymous binding colored by <code>c</code></td></tr>
+            <tr><td><code>x &lt;- v</code></td><td>a hole, filled at the use site</td></tr>
+            <tr><td><code>x#1</code></td><td>the second binding named <code>x</code></td></tr>
+            <tr><td><code>// …</code></td><td>comment</td></tr>
+          </tbody></table></div>
+          <h3>Scopes</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>{ … }</code></td><td>a new scope</td></tr>
+            <tr><td><code>s.x</code></td><td>read the last <code>x</code> of <code>s</code></td></tr>
+            <tr><td><code>s{x -> v}</code></td><td>carve: derive <code>s</code> with another <code>x</code></td></tr>
+            <tr><td><code>s{1, 2}</code></td><td>carve by position</td></tr>
+            <tr><td><code>s!</code></td><td>collapse through the production</td></tr>
+            <tr><td><code>...s</code></td><td>expand <code>s</code> into the current scope</td></tr>
+          </tbody></table></div>
+          <h3>Unknowns</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>??</code></td><td>a value not known at compile time</td></tr>
+            <tr><td><code>??::u8</code></td><td>an unknown with the layout of <code>u8</code></td></tr>
+            <tr><td><code>v::t</code></td><td>reinterpret <code>v</code> in the layout of <code>t</code></td></tr>
+          </tbody></table></div>
+        </div>
+        <div>
+          <h3>Sets</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>a | b</code></td><td>union</td></tr>
+            <tr><td><code>a &amp; b</code></td><td>intersection</td></tr>
+            <tr><td><code>~a</code></td><td>complement</td></tr>
+            <tr><td><code>lo..hi</code></td><td>range, either end open</td></tr>
+            <tr><td><code>>x</code> <code>&lt;=x</code></td><td>half-lines</td></tr>
+            <tr><td><code>a + b</code></td><td>addition, or concatenation of strings</td></tr>
+            <tr><td><code>s*1..</code></td><td>repeat a string pattern</td></tr>
+          </tbody></table></div>
+          <h3>Patterns</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>v ? { p -> r }</code></td><td>first branch whose pattern holds <code>v</code></td></tr>
+            <tr><td><code>c:(h)</code></td><td>capture a piece under the name <code>h</code></td></tr>
+          </tbody></table></div>
+          <h3>Effects and state</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>>- E{…}</code></td><td>emit the event <code>E</code></td></tr>
+            <tr><td><code>E -&lt; e {…}</code></td><td>handle <code>E</code></td></tr>
+            <tr><td><code>x >>- E</code></td><td>resonant: changes through <code>E</code></td></tr>
+            <tr><td><code>x -&lt;&lt; v</code></td><td>resonant update, in a handler</td></tr>
+            <tr><td><code>x >>= expr</code></td><td>reactive: follows <code>expr</code></td></tr>
+            <tr><td><code>=&lt;&lt; expr</code></td><td>reactive production</td></tr>
+          </tbody></table></div>
+          <h3>Outside and strategy</h3>
+          <div class="tw"><table><tbody>
+            <tr><td><code>@lib.file</code></td><td>a file or folder as a scope</td></tr>
+            <tr><td><code>&lt;lib.so>{…}</code></td><td>scopes provided by a shared library</td></tr>
+            <tr><td><code>&lt;!></code> <code>[!]</code> <code>(!)</code> <code>|!|</code></td><td>thread, parallel, background, GPU</td></tr>
+          </tbody></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- COMING FROM -->
+    <section class="section" id="coming-from">
+      <div class="head">
+        <h2>Coming from another language</h2>
+        <p>The syntax looks familiar on purpose, and the familiar reading is a fine way to start. These are the closest equivalents, and what each one really is.</p>
+      </div>
+      <div class="tw"><table>
+        <thead><tr><th>You know</th><th>Syntact</th><th>What it really is</th></tr></thead>
+        <tbody>
+          <tr><td>a function</td><td><code>square -> { n -> 0  -> n * n }</code></td><td>a complete scope with a default and a production</td></tr>
+          <tr><td>a call <code>f(5)</code></td><td><code>square{n -> 5}!</code></td><td>carve, then collapse</td></tr>
+          <tr><td><code>return x</code></td><td><code>-> x</code></td><td>a production</td></tr>
+          <tr><td>a variable <code>n = 0</code></td><td><code>n -> 0</code></td><td>a binding, which never changes</td></tr>
+          <tr><td>a struct or class</td><td><code>Point -> { u8:x  u8:y }</code></td><td>a scope, already a value</td></tr>
+          <tr><td>a type annotation</td><td><code>u8:age</code></td><td>a color: the value must belong to the set</td></tr>
+          <tr><td>an enum or union</td><td><code>{ -> Circle:  -> Square: }</code></td><td>a scope with several productions</td></tr>
+          <tr><td><code>switch</code>, <code>match</code></td><td><code>v ? { … }</code></td><td>membership in sets</td></tr>
+          <tr><td>null</td><td></td><td>none: every binding has a default</td></tr>
+          <tr><td>generics</td><td><code>T &lt;- none</code></td><td>a hole filled at the use site</td></tr>
+          <tr><td>a regex</td><td><code>alpha*1.. + '@' + …</code></td><td>a set of strings, checked at compile time</td></tr>
+          <tr><td>an assertion</td><td><code>true:check -> …</code></td><td>a color, proven by the compiler</td></tr>
+          <tr><td>a DI container, a mock</td><td><code>Alloc -&lt; e { … }</code></td><td>a handler for a named event</td></tr>
+          <tr><td>a mutable field</td><td><code>x >>- Change</code></td><td>resonance: change through a named event</td></tr>
+          <tr><td>a computed property</td><td><code>x >>= expr</code></td><td>reactivity</td></tr>
+          <tr><td>async, threads</td><td><code>work&lt;!></code></td><td>a strategy chosen at the collapse site</td></tr>
+          <tr><td><code>import</code></td><td><code>...@lib.geometry</code></td><td>expansion of a scope</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <!-- RULES -->
+    <section class="section" id="rules">
+      <div class="head">
+        <h2>The twelve rules</h2>
+        <p>The whole core language in twelve lines. When something surprises you, one of these usually explains it.</p>
+      </div>
+      <ol class="rules">
+        <li>A scope is an ordered structure, not a symbol table.</li>
+        <li>A binding is an occurrence, not a variable slot.</li>
+        <li>A name is a projection, not an identity.</li>
+        <li>Access resolves a name through the current view.</li>
+        <li>Carving derives a new scope by targeting existing structural occurrences.</li>
+        <li>A scope is closed: carving refines existing bindings, it never adds new ones.</li>
+        <li>Collapse reduces a scope through its production.</li>
+        <li>Shapes are scopes used as structural constraints.</li>
+        <li>Patterns are scopes used analytically.</li>
+        <li>Effects are nominal; everything else is structural.</li>
+        <li>Defaults compose structurally.</li>
+        <li>No binding is ever mutated by the core language.</li>
+      </ol>
+    </section>
+
+    <!-- STATUS -->
+    <section class="section" id="status">
+      <div class="head">
+        <h2>Status</h2>
+        <p>Syntact is experimental and in active development.</p>
+      </div>
+      <div class="status">
+        <div>
+          <h3>What runs today</h3>
+          <p>The bootstrap compiler is written in Odin. It parses, checks colors, reduces, and emits native x86-64 executables, static or linked against shared libraries, with no external linker. A language server provides diagnostics, hover, go-to-definition, rename and completion.</p>
+        </div>
+        <div>
+          <h3>What is still ahead</h3>
+          <p>This site follows the language reference, which describes the design. Events, resonance, reactivity and the full scope algebra are ahead of the implementation, and the type checker is being rewritten as a small algebraic kernel.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="wrap">Based on the Syntact language reference. Syntact is a structural reduction language with nominal effects.</div>
+  </footer>
+</main>
+
+<script>
+(function () {
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  // Syntax coloring: one group per token class, longest arrows first.
+  var TOKENS = /(\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(>>-|-<<|>>=|=<<|->|<-|>-|-<)|(\?\?\d*)|([A-Za-z_]\w*(?=:(?!:)))|(\b\d+(?:\.\d+)?\b)|(!|\?|\.\.\.|::|\||&|~|\.\.)/g;
+  var CLASSES = ["com", "str", "arr", "unk", "col", "num", "op"];
+  function paint(code) {
+    var text = code.textContent, out = "", last = 0, m;
+    TOKENS.lastIndex = 0;
+    while ((m = TOKENS.exec(text))) {
+      out += esc(text.slice(last, m.index));
+      for (var g = 1; g < m.length; g++) {
+        if (m[g] !== undefined) { out += '<span class="' + CLASSES[g - 1] + '">' + esc(m[0]) + "</span>"; break; }
+      }
+      last = m.index + m[0].length;
+    }
+    code.innerHTML = out + esc(text.slice(last));
+  }
+  document.querySelectorAll("pre.code code").forEach(paint);
+
+  // The live scope in the hero.
+  var slider = document.getElementById("carve-n");
+  function carve() {
+    var n = parseInt(slider.value, 10);
+    document.getElementById("carve-out").textContent = n;
+    document.getElementById("r1a").textContent = "square{n -> " + n + "}";
+    document.getElementById("r1b").innerHTML = "{n -> " + n + "  -> n * n}<small>a new scope; square is unchanged</small>";
+    document.getElementById("r2a").textContent = "square{n -> " + n + "}!";
+    document.getElementById("r2b").innerHTML = (n * n) + "<small>collapsed through its production</small>";
+  }
+  slider.addEventListener("input", carve);
+  carve();
+
+  // The set checker: integer colors as intervals, values as intervals.
+  var COLORS = {
+    u8: { lo: 0, hi: 255, text: "0..255" },
+    i8: { lo: -128, hi: 127, text: "-128..127" },
+    u16: { lo: 0, hi: 65535, text: "0..65535" },
+    Port: { lo: 1, hi: 65535, text: "u16 & >0, which is 1..65535" },
+    Percent: { lo: 0, hi: 100, text: "u8 & <=100, which is 0..100" },
+    AdultAge: { lo: 18, hi: 120, text: "u8 & >=18 & <=120, which is 18..120" }
+  };
+  var VALUES = {
+    u8: { lo: 0, hi: 255, src: "??::u8" },
+    u8p1: { lo: 1, hi: 256, src: "??::u8 + 1" },
+    i8: { lo: -128, hi: 127, src: "??::i8" }
+  };
+  var colorSel = document.getElementById("ck-color"), kindSel = document.getElementById("ck-kind");
+  var numInput = document.getElementById("ck-num"), numLabel = document.getElementById("ck-num-label");
+  function range(lo, hi) { return lo === hi ? String(lo) : lo + ".." + hi; }
+  function check() {
+    var c = COLORS[colorSel.value], kind = kindSel.value, v, src;
+    numLabel.hidden = kind !== "num";
+    if (kind === "num") {
+      var raw = numInput.value.trim();
+      if (!/^-?\d+$/.test(raw)) {
+        document.getElementById("ck-line").innerHTML = '<span class="c">' + colorSel.value + "</span>:x -> " + esc(raw || "…");
+        var p0 = document.getElementById("ck-pill"); p0.textContent = "waiting"; p0.className = "pill";
+        document.getElementById("ck-why").textContent = "Enter a whole number, like 42 or -7.";
+        return;
+      }
+      v = { lo: parseInt(raw, 10), hi: parseInt(raw, 10) }; src = String(v.lo);
+    } else { v = VALUES[kind]; src = v.src; }
+    document.getElementById("ck-line").innerHTML = '<span class="c">' + colorSel.value + "</span>:x -> " + esc(src);
+    var below = v.lo < c.lo ? [v.lo, Math.min(v.hi, c.lo - 1)] : null;
+    var above = v.hi > c.hi ? [Math.max(v.lo, c.hi + 1), v.hi] : null;
+    var ok = !below && !above;
+    var pill = document.getElementById("ck-pill");
+    pill.textContent = ok ? "compiles" : "rejected"; pill.className = "pill " + (ok ? "ok" : "no");
+    var why;
+    if (kind === "num") {
+      why = ok ? v.lo + " is in " + c.text + "."
+               : "Constraint_Mismatch at compile time: " + v.lo + " is not in " + c.text + ".";
+    } else {
+      var esc_ = [below, above].filter(Boolean).map(function (r) { return range(r[0], r[1]); }).join(" and ");
+      why = ok ? "Every value " + src + " can take (" + range(v.lo, v.hi) + ") is in " + c.text + "."
+               : "Constraint_Mismatch at compile time: " + src + " can be " + esc_ + ", which is outside " + c.text + ".";
+    }
+    document.getElementById("ck-why").textContent = why;
+  }
+  [colorSel, kindSel].forEach(function (el) { el.addEventListener("change", check); });
+  numInput.addEventListener("input", check);
+  check();
+
+  // Highlight the chapter being read in the rail.
+  var links = Array.prototype.slice.call(document.querySelectorAll("#rail a"));
+  if ("IntersectionObserver" in window) {
+    var byId = {};
+    links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        links.forEach(function (a) { a.classList.remove("on"); });
+        var a = byId[e.target.id]; if (a) a.classList.add("on");
+      });
+    }, { rootMargin: "-30% 0px -60% 0px" });
+    document.querySelectorAll(".chapter").forEach(function (c) { io.observe(c); });
+  }
+})();
+</script>
+</body>
+</html>
