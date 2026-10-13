@@ -172,24 +172,6 @@ Corpus_Case :: struct {
 	expect_errors: []string `json:"expect_errors"`,
 }
 
-// Les cas du corpus dont l'attente encode un comportement du proto que la
-// sémantique du kernel tranche autrement. Chaque entrée dit pourquoi.
-Divergence :: struct {
-	name:   string,
-	expect: []string,
-	reason: string,
-}
-
-DIVERGENCES := []Divergence {
-	{"tc_insoluble_scope_field", {}, "le champ inconnu ??::u8 est typé et a un défaut (0) : la couleur Shape reste un seul ensemble"},
-	{"tc_ident_no_trail_bad", {}, "'' est le caractère vide : ''*0.. vaut \"\", donc ~(''*0.. + '_') exclut seulement \"_\""},
-}
-
-expected_errors :: proc(c: Corpus_Case) -> []string {
-	for d in DIVERGENCES do if d.name == c.name do return d.expect
-	return c.expect_errors
-}
-
 @(test)
 test_typecheck_corpus :: proc(t: ^testing.T) {
 	arena: vmem.Arena
@@ -218,7 +200,7 @@ test_typecheck_corpus :: proc(t: ^testing.T) {
 		}
 		got := make([dynamic]string)
 		for kind in error_kinds(k.errors[:]) do append(&got, fmt.tprint(kind))
-		want := slice.clone(expected_errors(c))
+		want := slice.clone(c.expect_errors)
 		slice.sort(want)
 		want = slice.unique(want)
 		if slice.equal(got[:], want) {
