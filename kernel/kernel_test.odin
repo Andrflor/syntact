@@ -10,8 +10,8 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 
-// Un cas : la source, le scope typé attendu (vide = ne pas comparer) et les
-// erreurs attendues.
+// Un cas : la source, les types attendus du scope (vide = ne pas comparer) et
+// les erreurs attendues.
 Case :: struct {
 	source: string,
 	typed:  string,
@@ -23,7 +23,7 @@ CASES := []Case {
 	{"u8:a -> ??\nu8:b -> ??\nu16:c -> a + b", "{0..255:a -> ??0  0..255:b -> ??1  0..65535:c -> ??0 + ??1}", {}},
 	{"u8:a -> ??\nu8:d -> a + a", "", {.Constraint_Mismatch}},
 	{"u8 -> 5", "", {}}, // un builtin n'est qu'un nom : un binding peut le masquer
-	{"e -> 0..255\nf -> >0", "{e -> {-> 0..255}  f -> {-> 1..}}", {}},
+	{"e -> 0..255\nf -> >0", "{e -> 0..255  f -> 1..}", {}},
 	{"Port -> u16 & >0\nPort:p -> 0", "", {.Constraint_Mismatch}},
 	{"Port -> u16 & >0\nPort:p -> 8080", "", {}},
 	{"none:i -> 5", "", {.Constraint_Mismatch}},
@@ -39,9 +39,9 @@ CASES := []Case {
 	{"~5:x -> 5", "", {.Constraint_Mismatch}},
 	// ~ se prend dans les sortes portées, et les garde : ~~X = X, même par une ref
 	{"X -> u8 | string\nY -> ~X\n(~Y):x -> \"a\"", "", {}},
-	{"a -> ~bool\nb -> ~a\nc -> 0 & 1\nd -> u8 & string\ne -> ~c", "{a -> ~bool  b -> {-> bool}  c -> ~int  d -> none  e -> {-> int}}", {}},
-	// les scopes : type_of(scope{Σ b}) = { scope{Σ type_of(b)} }
-	{"b -> {\n  n -> ??::u8\n  -> n * 2\n}\nc -> b.n\nd -> b!", "{b -> {-> {n -> ??0  -> 2*??0}}  c -> ??0  d -> 2*??0}", {}},
+	{"a -> ~bool\nb -> ~a\nc -> 0 & 1\nd -> u8 & string\ne -> ~c", "{a -> ~bool  b -> bool  c -> ~int  d -> none  e -> int}", {}},
+	// les scopes : un scope est son propre type, ses bindings portent les leurs
+	{"b -> {\n  n -> ??::u8\n  -> n * 2\n}\nc -> b.n\nd -> b!", "{b -> {n -> ??0  -> 2*??0}  c -> ??0  d -> 2*??0}", {}},
 	// les inconnues : des formes normales, des valeurs exactes quand on peut les énumérer
 	{"n -> ??::u8\na -> n - n\nb -> n * 3 + n\nc -> (n + 1) * 2", "{n -> ??0  a -> 0  b -> 4*??0  c -> 2*??0 + 2}", {}},
 	{"n -> ??::u8\nu8:e -> n - n", "", {}},
@@ -51,12 +51,12 @@ CASES := []Case {
 	{"n -> ??::u8\nfalse:i -> 2 * n = 3", "", {}},
 	{"s -> ??::string\nw -> \"a\" + s + \"b\" + \"c\"", "{s -> ??0  w -> \"a\" + ??0 + \"bc\"}", {}},
 	{"x -> ??::f64\ny -> (x + 0.1) + 0.2\ntrue:r -> x + 1.0 = 1.0 + x", "", {}},
-	// les ensembles qui dépendent d'inconnues : la table de leurs valeurs
-	{"n -> ??::(0..3)\na -> (n | 6) & (n | 7)", "{n -> ??0  a -> {-> 0  -> 1  -> 2  -> 3}}", {}},
-	{"n -> ??::(0..3)\n(n | 0..3):e -> 2", "", {}}, // une table constante est un ensemble
+	// les ensembles qui dépendent d'inconnues : la forme de l'opération, simplifiée
+	{"n -> ??::(0..3)\na -> (n | 6) & (n | 7)", "{n -> ??0  a -> (??0 | 6) & (??0 | 7)}", {}},
+	{"n -> ??::(0..3)\n(n | 0..3):e -> 2", "", {}}, // n | 0..3 est 0..3 : un seul ensemble
 	{"n -> ??::(0..3)\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
-	// trop d'inconnues pour énumérer : l'enveloppe (une valeur), jamais une couleur
-	{"n -> ??::u64\na -> (n | 6) & >3", "{n -> ??0  a -> {-> ⊆ 4..18446744073709551615}}", {}},
+	// une forme dépend d'inconnues : jamais une couleur, même trop grande pour être énumérée
+	{"n -> ??::u64\na -> (n | 6) & >3", "{n -> ??0  a -> (??0 | 6) & 4..}", {}},
 	{"n -> ??::u64\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
 	// la vérification par paliers : enveloppe, affine, extrêmes linéaires, énumération ;
 	// ce qu'on ne sait pas prouver est dit, jamais accepté
@@ -77,7 +77,7 @@ CASES := []Case {
 	{"Point -> {\n  u8:x\n  u8:y\n}\nn -> ??::u8\n(Point | {string:name}):p -> {x -> n  y -> n + 1}", "", {.Constraint_Mismatch}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nCircle -> {\n  u8:radius\n}\n(Point | Circle):a -> {x -> ??  y -> 2}", "", {}},
 	{"box -> {\n  x -> 1\n  y -> x\n  x -> 2\n}\na -> box.x\nb -> box.y\nc -> box.x#0", "", {}},
-	{"empty -> {x -> 1}\ne -> empty!", "{empty -> {-> {x -> 1}}  e -> none}", {}},
+	{"empty -> {x -> 1}\ne -> empty!", "{empty -> {x -> 1}  e -> none}", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:p\nq -> p.x", "", {}},
 	{"Point -> {\n  u8:x\n  u8:y\n}\nPoint:r -> {x -> 1 y -> 300}", "", {.Constraint_Mismatch}},
 	{"Role -> {\n  -> \"member\"\n  -> \"admin\"\n}\nRole:a -> \"admin\"\nRole:c\nd -> c", "", {}},
@@ -99,13 +99,34 @@ CASES := []Case {
 	{"(~'\\0' * 0.. + '\\0'):s -> \"a\\0c\\0\"", "", {.Constraint_Mismatch}},
 	{"(~'\\0' * 0.. + '\\0'):s -> \"abc\\0\"", "", {}},
 	{"(~\"piro\"):s -> \"pira\"", "", {}},
-	{"x -> ''..", "{x -> {-> char}}", {}}, // ''.. : n'importe quel caractère
+	{"x -> ''..", "{x -> char}", {}}, // ''.. : n'importe quel caractère
 	// les caractères : une sorte, admise par une couleur string
 	{"string:s -> 'c'", "", {}},
 	{"char:c -> \"a\"", "", {.Constraint_Mismatch}},
 	{"true:a -> 'a' = \"a\"", "", {.Constraint_Mismatch}},
 	{"a -> 'a' + 'b'", "{a -> \"ab\"}", {}},
 	{"char:c", "{char:c -> ''}", {}},
+	// la couleur demande l'appartenance : un ensemble de plusieurs valeurs n'est pas
+	// un élément de u8 ; {-> u8} n'admet que la valeur u8
+	{"u8:a -> u8", "", {.Constraint_Mismatch}},
+	{"x -> u8\nu8:y -> x", "", {.Constraint_Mismatch}},
+	{"n -> ??::u8\nu8:y -> n", "", {}}, // un élément inconnu de u8
+	{"{-> u8}:a -> u8", "{{-> 0..255}:a -> 0..255}", {}},
+	{"P -> {-> u8}\nP:x\ny -> x", "{P -> {-> 0..255}  {-> 0..255}:x -> 0..255  y -> 0..255}", {}}, // le défaut : la première production
+	{"n -> ??::(0..3)\n{-> 0..3}:z -> n | 0..3", "{n -> ??0  {-> 0..3}:z -> 0..3}", {}},
+	{"n -> ??::(0..3)\n{-> 0..3}:w -> n | 1..3", "", {.Constraint_Mismatch}}, // n = 1 : 1..3
+	{"C -> {-> {x -> 1}}\nC:a -> {x -> 1}\nC:b -> {x -> 2}", "", {.Constraint_Mismatch}}, // la valeur exacte, pas sa forme
+	// le carve : une copie symbolique, les arguments à la place des valeurs, re-typée
+	{"box -> {\n  x -> 1\n  y -> x + 1\n}\nbox2 -> box{x -> 10}\na -> box2.y\nb -> box.y", "{box -> {x -> 1  y -> 2}  box2 -> {x -> 10  y -> 11}  a -> 11  b -> 2}", {}},
+	{"Config -> {\n  port -> \"8080\"\n  url -> \"localhost:\" + port\n  port -> \"3000\"\n}\nDev -> Config{port -> \"9000\"}\na -> Dev.port\nb -> Dev.url\nc -> Config{port#1 -> \"1\"}.port", "{Config -> {port -> \"8080\"  url -> \"localhost:8080\"  port -> \"3000\"}  Dev -> {port -> \"9000\"  url -> \"localhost:9000\"  port -> \"3000\"}  a -> \"3000\"  b -> \"localhost:9000\"  c -> \"1\"}", {}},
+	{"square -> {\n  n -> 0\n  -> n * n\n}\nr -> square{n -> 5}!", "{square -> {n -> 0  -> 0}  r -> 25}", {}},
+	{"a -> {\n  x -> 1\n  b -> {-> x}\n}\nc -> a{x -> 2}.b!\nd -> a.b!", "{a -> {x -> 1  b -> {-> 1}}  c -> 2  d -> 1}", {}}, // les scopes écrits dedans suivent la copie
+	{"a -> {u8:d}\nb -> a{d -> ??}", "{a -> {0..255:d -> 0}  b -> {0..255:d -> ??0}}", {}}, // l'argument prend la couleur du binding qu'il remplace
+	{"Box -> {\n  T -> u8\n  T:v -> 0\n}\nn -> ??::u8\nb -> Box{T -> u16  v -> n * 300}", "", {.Constraint_Mismatch}}, // la couleur est re-typée : 300·n ∉ u16
+	{"User -> {u8:age}\nUser{raole -> 1}", "", {.Invalid_Carve}}, // un scope est clos
+	{"a -> {x -> 1}\na{x -> 2  x -> 3}", "", {.Invalid_Carve}},
+	{"x -> 5\nx{1}", "", {.Invalid_Carve}},
+	{"{string:}:a -> {\"\"}\nb -> a{\"x\"}\nb{0}", "", {.Constraint_Mismatch}}, // la coloration implicite suit les copies
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
@@ -115,18 +136,31 @@ test_cases :: proc(t: ^testing.T) {
 	for c in CASES {
 		arena: vmem.Arena
 		context.allocator = vmem.arena_allocator(&arena)
-		typed, k, parsed := run(c.source)
+		program, k, parsed := run(c.source)
 		testing.expectf(t, parsed, "parse : %q", c.source)
 		if parsed {
 			got := error_kinds(k.errors[:])
 			testing.expectf(t, slice.equal(got, sorted_kinds(c.errors)), "%q\n  erreurs : %v, attendu %v\n  %s", c.source, got, c.errors, describe_errors(k.errors[:]))
 			if c.typed != "" {
-				printed := print_expr(new_expr(typed))
+				printed := print_type(new_expr(program))
 				testing.expectf(t, printed == c.typed, "%q\n  typé    : %s\n  attendu : %s", c.source, printed, c.typed)
 			}
 		}
 		vmem.arena_destroy(&arena)
 	}
+}
+
+// Un binding porte sa couleur et sa valeur telles qu'écrites, et leurs types : le
+// type simplifie, la valeur garde toute la structure qui l'a produit.
+@(test)
+test_value_and_type :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	program, k, parsed := run("n -> ??::u8\nu16:x -> n * 2 - n + (1 + 2)\nb -> {-> n}\ny -> b!\nsq -> {\n  m -> 0\n  -> m * m\n}\nz -> sq{m -> n}!")
+	testing.expect(t, parsed && len(k.errors) == 0, "le programme est valide")
+	testing.expect_value(t, print_expr(new_expr(program)), "{n -> ??::u8  u16:x -> n * 2 - n + (1 + 2)  b -> {-> n}  y -> b!  sq -> {m -> 0  -> m * m}  z -> sq{m -> n}!}")
+	testing.expect_value(t, print_type(new_expr(program)), "{n -> ??0  0..65535:x -> ??0 + 3  b -> {-> ??0}  y -> ??0  sq -> {m -> 0  -> 0}  z -> ??0*??0}")
 }
 
 // Le corpus de test/typecheck : chaque source dont toutes les formes sont dans le

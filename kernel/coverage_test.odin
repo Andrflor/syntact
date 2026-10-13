@@ -190,6 +190,55 @@ test_law_bools :: proc(t: ^testing.T) {
 	}
 }
 
+// --- les ensembles pris comme valeurs : listes finies et cofinies, contre un modèle ---
+//
+// L'univers : quatre ensembles distincts, et un cinquième qu'aucune liste ne nomme,
+// qui représente tous les autres. Une liste est comparée à son masque.
+
+@(test)
+test_law_set_values :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	state: rand.Default_Random_State
+	gen := seeded(&state, 24)
+	pool := [4]Set{set_of_ints(ints_range(0, 1)), set_of_ints(ints_range(0, 2)), set_of_strings(strings_of_words({"a", "b"})), set_of_bools({.False, .True})}
+	// les mêmes ensembles, écrits autrement : l'égalité est celle des ensembles
+	rewritten := [4]Set{set_of_ints(ints_of({{1, 1}, {0, 0}})), set_of_ints(ints_of({{2, 2}, {0, 1}})), set_of_strings(strings_of_words({"b", "a", "b"})), set_of_bools({.True, .False})}
+	other := set_of_ints(ints_range(5, 6))
+	OTHER :: u8(1 << 4)
+	Model :: struct {
+		set:  Set,
+		mask: u8,
+	}
+	random_values :: proc(gen: runtime.Random_Generator, pool: [4]Set) -> Model {
+		listed := make([dynamic]Set)
+		mask: u8
+		for p, i in pool do if rand.int_max(2, gen) == 0 {
+			append(&listed, p)
+			mask |= 1 << uint(i)
+		}
+		cofinite := rand.int_max(2, gen) == 0
+		if cofinite do mask = ~mask & 0x1F
+		return Model{Set{sorts = {.Sets}, sets = Set_Values{listed[:], cofinite}}, mask}
+	}
+	for _ in 0 ..< ROUNDS {
+		a, b := random_values(gen, pool), random_values(gen, pool)
+		check :: proc(t: ^testing.T, s: Set, mask: u8, rewritten: [4]Set, other: Set, what: string) {
+			for p, i in rewritten do testing.expectf(t, values_contains(s.sets, p) == (mask & (1 << uint(i)) != 0), "%s : élément %d", what, i)
+			testing.expectf(t, values_contains(s.sets, other) == (mask & OTHER != 0), "%s : les autres ensembles", what)
+		}
+		check(t, set_union(a.set, b.set), a.mask | b.mask, rewritten, other, "union")
+		check(t, set_intersect(a.set, b.set), a.mask & b.mask, rewritten, other, "intersection")
+		check(t, set_diff(a.set, b.set), a.mask & ~b.mask, rewritten, other, "différence")
+		check(t, set_complement(a.set), ~a.mask & 0x1F, rewritten, other, "complément")
+		testing.expect(t, set_equal(set_complement(set_complement(a.set)), a.set), "~~a = a")
+		testing.expect(t, set_subset(a.set, b.set) == (a.mask & ~b.mask == 0), "inclusion")
+		testing.expect(t, set_is_empty(a.set) == (a.mask == 0), "vide")
+		testing.expect(t, set_equal(set_complement(set_union(a.set, b.set)), set_intersect(set_complement(a.set), set_complement(b.set))), "De Morgan")
+	}
+}
+
 // --- un ensemble mixte : le complément ne touche que les sortes portées ---
 
 @(test)
@@ -391,7 +440,7 @@ build_sx :: proc(k: ^Kernel, x: ^Sx, n: ^Expr) -> ^Expr {
 	case 0:
 		return n
 	case 1:
-		return singleton(new_expr(x.known))
+		return new_expr(x.known)
 	}
 	op := Set_Op{kind = x.kind, half = x.half, arith = .Add}
 	switch x.kind {
@@ -402,8 +451,10 @@ build_sx :: proc(k: ^Kernel, x: ^Sx, n: ^Expr) -> ^Expr {
 	return set_operation(k, op, {}, build_sx(k, x.a, n), build_sx(k, x.b, n))
 }
 
+// La forme d'un ensemble qui dépend d'une inconnue, simplifiée, vaut le calcul
+// direct pour chaque valeur de l'inconnue, et son enveloppe le contient.
 @(test)
-test_law_envelopes :: proc(t: ^testing.T) {
+test_law_set_forms_large :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
@@ -411,25 +462,30 @@ test_law_envelopes :: proc(t: ^testing.T) {
 	gen := seeded(&state, 18)
 	k: Kernel
 	big := new_symbol(&k, set_of_ints(ints_range(-100_000, 100_000))) // trop grand pour énumérer
-	enveloped_seen := 0
+	id := big^.(Poly).monos[0].vars[0]
+	forms := 0
 	for _ in 0 ..< ROUNDS {
 		x := random_sx(gen, 3)
 		clear(&k.errors)
 		e := build_sx(&k, x, big)
 		if len(k.errors) > 0 do continue
-		upper, ok := upper_of(&k, e)
+		upper, ok := set_envelope(&k, e)
 		testing.expect(t, ok, "toute forme d'ensemble a une enveloppe")
-		if _, is_env := e^.(Subsets); is_env do enveloped_seen += 1
+		if is_set_form(e) do forms += 1
+		env := make([]Atom, len(k.symbols))
 		for _ in 0 ..< 20 {
 			v := i128(rand.int_range(-100_000, 100_001, gen))
 			clear(&k.errors)
 			exact := build_sx(&k, x, new_expr(set_of_ints(ints_point(v))))
-			if len(k.errors) > 0 do continue
-			s, known := known_set(exact)
-			testing.expectf(t, known && set_subset(s, upper), "n = %d : %s ⊄ %s", v, print_expr(exact), print_set(upper))
+			if len(k.errors) > 0 do continue // une opération invalide pour cette valeur : l'opérande vide, question ouverte
+			s, known := color_set(&k, exact)
+			testing.expectf(t, known && set_subset(s, upper), "n = %d : %s ⊄ %s", v, print_type(exact), print_set(upper))
+			env[id] = v
+			got, got_ok := eval_set(&k, e, env)
+			testing.expectf(t, got_ok && set_equal(got, s) && carried(got) == carried(s), "n = %d : %s vaut %s, attendu %s", v, print_type(e), print_set(got), print_set(s))
 		}
 	}
-	testing.expectf(t, enveloped_seen >= ROUNDS / 8, "enveloppes vérifiées : %d", enveloped_seen)
+	testing.expectf(t, forms >= ROUNDS / 8, "formes vérifiées : %d", forms)
 }
 
 // --- les comparaisons qui ne sont pas entières ---
@@ -463,16 +519,11 @@ test_law_general_compare :: proc(t: ^testing.T) {
 		collect_symbols(b, &syms)
 		slice.sort(syms[:])
 		ids := slice.unique(syms[:])
-		domains, _ := symbol_domains(&k, ids)
-		digits := make([]int, len(ids))
-		total := 1
-		for dm in domains do total *= len(dm)
+		as, _ := assignments_of(&k, ids)
 		seen: [2]bool
-		for _ in 0 ..< total {
-			env := make([]Atom, len(k.symbols))
-			for id, i in ids do env[id] = domains[i][digits[i]]
-			x, _ := eval(a, env)
-			y, _ := eval(b, env)
+		for {
+			x, _ := eval(a, as.env)
+			y, _ := eval(b, as.env)
 			truth: bool
 			switch op {
 			case .Eq:
@@ -491,12 +542,12 @@ test_law_general_compare :: proc(t: ^testing.T) {
 				truth = !l
 			}
 			seen[int(truth)] = true
-			got, ok := eval(r, env)
-			testing.expectf(t, ok && got.(bool) == truth, "%v de %s et %s", op, print_expr(a), print_expr(b))
-			odometer(digits, domains)
+			got, ok := eval(r, as.env)
+			testing.expectf(t, ok && got.(bool) == truth, "%v de %s et %s", op, print_type(a), print_type(b))
+			if !next_assignment(&as) do break
 		}
 		_, decided := r^.(Set)
-		testing.expectf(t, decided == !(seen[0] && seen[1]), "%v de %s et %s : décidé %v", op, print_expr(a), print_expr(b), decided)
+		testing.expectf(t, decided == !(seen[0] && seen[1]), "%v de %s et %s : décidé %v", op, print_type(a), print_type(b), decided)
 	}
 }
 
@@ -561,13 +612,13 @@ test_law_float_terms :: proc(t: ^testing.T) {
 	for _ in 0 ..< ROUNDS {
 		x := random_fx(gen, 3)
 		e := fx_build(syms, x, false)
-		testing.expectf(t, expr_equal(&k, e, fx_build(syms, x, true)), "commutativité : %s", print_expr(e))
+		testing.expectf(t, expr_equal(&k, e, fx_build(syms, x, true)), "commutativité : %s", print_type(e))
 		vals, _ := values_of(&k, e)
 		for p in ([?][2]f64{{-2, 0.5}, {3, 4}, {0, 1}, {1.25, 2.5}, {-1, 3.75}}) {
 			got, ok := eval(e, {p[0], p[1]})
 			want := fx_eval(x, p)
-			testing.expectf(t, ok && got.(f64) == want, "%s en %v : %v, attendu %v", print_expr(e), p, got, want)
-			testing.expectf(t, floats_contains(vals.floats, want), "valeurs de %s : %v manque", print_expr(e), want)
+			testing.expectf(t, ok && got.(f64) == want, "%s en %v : %v, attendu %v", print_type(e), p, got, want)
+			testing.expectf(t, floats_contains(vals.floats, want), "valeurs de %s : %v manque", print_type(e), want)
 		}
 	}
 }
@@ -608,7 +659,7 @@ test_law_words :: proc(t: ^testing.T) {
 		for p in parts do left = concat(&k, left, p)
 		right := new_expr(set_of_strings(strings_point("")))
 		#reverse for p in pieces do right = concat(&k, p, right)
-		testing.expectf(t, expr_equal(&k, left, right), "%s et %s", print_expr(left), print_expr(right))
+		testing.expectf(t, expr_equal(&k, left, right), "%s et %s", print_type(left), print_type(right))
 		// répétée un nombre inconnu de fois : la valeur et les valeurs possibles exactes
 		rep, _ := repeat_term(&k, left, count)
 		vals, exact := values_of(&k, rep)
@@ -619,8 +670,8 @@ test_law_words :: proc(t: ^testing.T) {
 			testing.expect(t, ok, "évaluation du mot")
 			word := atom_text(one)
 			got, _ := eval(rep, env)
-			testing.expectf(t, atom_text(got) == strings.repeat(word, n), "%s * %d", print_expr(left), n)
-			testing.expectf(t, strings_contains(vals.strings, strings.repeat(word, n)), "valeurs de %s", print_expr(rep))
+			testing.expectf(t, atom_text(got) == strings.repeat(word, n), "%s * %d", print_type(left), n)
+			testing.expectf(t, strings_contains(vals.strings, strings.repeat(word, n)), "valeurs de %s", print_type(rep))
 		}
 	}
 }
@@ -644,7 +695,7 @@ test_law_approximation :: proc(t: ^testing.T) {
 		for _ in 0 ..< 30 {
 			env := [3]i128{i128(rand.int_range(-1_000_000, 1_000_001, gen)), i128(rand.int_range(-1_000_000, 1_000_001, gen)), i128(rand.int_range(-1_000_000, 1_000_001, gen))}
 			v := tree_eval(tree, env)
-			testing.expectf(t, ints_contains(vals.ints, v), "%s en %v = %d hors de %v", print_expr(p), env, v, vals.ints)
+			testing.expectf(t, ints_contains(vals.ints, v), "%s en %v = %d hors de %v", print_type(p), env, v, vals.ints)
 		}
 	}
 }

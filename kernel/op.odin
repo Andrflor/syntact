@@ -3,14 +3,11 @@ package kernel
 import syn "../compiler"
 import "core:fmt"
 
-// type_of d'un opérateur. Une seule loi pour tous :
-//
-//   type_of(a op b) = { x op y | x ∈ type_of(a), y ∈ type_of(b) }
-//
-// Si les deux opérandes sont des valeurs (un atome, ou une forme sur des
-// inconnues), on calcule sur les valeurs et le résultat est sous forme
-// normale. Si ce sont des ensembles (`u8`, `>0`, `'a'..'z'`), on calcule sur
-// les ensembles, et le résultat est encore un ensemble.
+// type_of d'un opérateur. Si les deux opérandes sont des valeurs (un atome, ou
+// une forme sur des inconnues), on calcule sur les valeurs, et le résultat est
+// sous forme normale (`n * 2 - n` vaut ??0). Si ce sont des ensembles (`u8`,
+// `>0`, `'a'..'z'`), on calcule sur leurs éléments : `u8 + 1` vaut 1..256 ; et si
+// l'un dépend d'inconnues, le type garde la forme de l'opération (set_form.odin).
 
 type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	if o.left == nil do return type_unary(k, o, env)
@@ -29,15 +26,7 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur %v", o.kind))
 }
 
-// known_set : l'ensemble qu'un type désigne quand il est connu (un atome est
-// l'ensemble de lui-même).
-known_set :: proc(t: ^Expr) -> (Set, bool) {
-	x, ok := the_element(t)
-	if !ok do return {}, false
-	return colour_set(x) // un ensemble d'atomes, ou un scope lu comme ensemble
-}
-
-// `|` et `&` opèrent sur des ensembles : sur l'élément de chaque opérande.
+// `|` et `&` opèrent sur des ensembles.
 set_algebra :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 	return set_operation(k, Set_Op{kind = o.kind == .Or ? .Union : .Inter}, o.span, a, b)
 }
@@ -119,9 +108,9 @@ Arith_Status :: enum u8 {
 
 arith_failure :: proc(k: ^Kernel, o: Op, status: Arith_Status, a, b: ^Expr) -> ^Expr {
 	if status == .Unsupported {
-		return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '%v' sur %s et %s", o.kind, print_expr(a), print_expr(b)))
+		return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '%v' sur %s et %s", o.kind, print_type(a), print_type(b)))
 	}
-	return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' ne s'applique pas à %s et %s", o.kind, print_expr(a), print_expr(b)))
+	return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' ne s'applique pas à %s et %s", o.kind, print_type(a), print_type(b)))
 }
 
 // arith_sets : { x op y } sur deux ensembles, sorte par sorte : chaque sorte de
@@ -204,7 +193,7 @@ comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		db, b_ok := value_domain(k, b)
 		if a_ok && b_ok && da != db {
 			if op == .Eq || op == .Ne do return bool_atom(op == .Ne)
-			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compare deux sortes différentes : %s et %s", o.kind, print_expr(a), print_expr(b)))
+			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compare deux sortes différentes : %s et %s", o.kind, print_type(a), print_type(b)))
 		}
 		r: ^Expr
 		status: Arith_Status
@@ -221,8 +210,8 @@ comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		return r
 	}
 	// Deux ensembles comparés comme valeurs : seule l'égalité a un sens.
-	sa, a_known := known_set(a)
-	sb, b_known := known_set(b)
+	sa, a_known := color_set(k, a)
+	sb, b_known := color_set(k, b)
 	if !a_known || !b_known || (op != .Eq && op != .Ne) {
 		return report(k, .Unsupported, o.span, "pas encore dans le kernel : cette comparaison")
 	}
@@ -252,7 +241,7 @@ order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
 	case .Floats:
 		alo, ahi = floats_bounds(a.floats)
 		blo, bhi = floats_bounds(b.floats)
-	case .Strings, .Bools, .Scopes:
+	case .Strings, .Bools, .Scopes, .Sets:
 		return {}, false
 	}
 	// lt : a < b est sûr ; ge : a >= b est sûr (et symétriquement).
@@ -319,17 +308,17 @@ negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 			if r_ok do return poly_type(r)
 		}
 		if ok && d == .Floats do return float_neg(t)
-		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '-' sur une inconnue de plusieurs sortes : %s", print_expr(t)))
-		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend un nombre : %s", print_expr(t)))
+		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '-' sur une inconnue de plusieurs sortes : %s", print_type(t)))
+		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend un nombre : %s", print_type(t)))
 	}
-	s, known := known_set(t)
+	s, known := color_set(k, t)
 	if !known do return report(k, .Unsupported, o.span, "pas encore dans le kernel : '-' sur un ensemble qui dépend d'une inconnue")
 	d, pure := pure_domain(s)
 	switch {
 	case pure && d == .Ints:
-		return singleton(new_expr(set_of_ints(ints_neg(s.ints))))
+		return new_expr(set_of_ints(ints_neg(s.ints)))
 	case pure && d == .Floats:
-		return singleton(new_expr(set_of_floats(floats_neg(s.floats))))
+		return new_expr(set_of_floats(floats_neg(s.floats)))
 	}
 	return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend des nombres : %s", print_set(s)))
 }

@@ -5,7 +5,7 @@ import kernel ".."
 import "core:fmt"
 import "core:os"
 
-// kernel FILE : imprime le scope typé du fichier et les erreurs.
+// kernel FILE : imprime le scope du fichier, tel qu'écrit puis ses types, et les erreurs.
 main :: proc() {
 	if len(os.args) < 2 {
 		fmt.eprintln("usage: kernel FILE")
@@ -16,12 +16,13 @@ main :: proc() {
 		fmt.eprintln("lecture impossible:", os.args[1])
 		os.exit(2)
 	}
-	typed, k, parsed := kernel.run(string(data))
+	program, k, parsed := kernel.run(string(data))
 	if !parsed {
 		fmt.eprintln("erreur de parse")
 		os.exit(1)
 	}
-	fmt.println(kernel.print_expr(kernel.new_expr(typed)))
+	fmt.println(kernel.print_expr(kernel.new_expr(program)))
+	fmt.println(kernel.print_type(kernel.new_expr(program)))
 	for e in k.errors {
 		pos := syn.span_to_position(k.ast, e.span.start)
 		fmt.printfln("  %v %d:%d  %s", e.kind, pos.line, pos.column, e.message)

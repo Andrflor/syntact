@@ -2,9 +2,9 @@ package kernel
 
 import "core:fmt"
 
-// La vérification finale : une fois tout typé, chaque binding coloré doit avoir
-// toutes ses valeurs possibles admises par sa couleur. C'est la seule question
-// du typecheck ; elle a trois issues.
+// La vérification finale : une fois tout typé, la valeur de chaque binding coloré
+// doit être un élément de sa couleur, pour toute valeur des inconnues. C'est la
+// seule question du typecheck ; elle a trois issues.
 Verdict :: enum u8 {
 	Proved, // toute valeur possible est admise
 	Refuted, // une valeur possible ne l'est pas
@@ -16,40 +16,64 @@ verdict :: proc(holds: bool) -> Verdict {
 }
 
 check :: proc(k: ^Kernel) {
-	for t in k.typed {
-		for &b in t.bindings {
-			if b.color == nil || b.value == nil || is_invalid(b.value) do continue
-			switch admits(k, b.color, b.value) {
+	for s in k.typed {
+		for &b in s.bindings {
+			if b.color_type == nil || b.value_type == nil || is_invalid(b.color_type) || is_invalid(b.value_type) do continue
+			color, _ := color_set(k, b.color_type) // un seul ensemble : vérifié au typage
+			switch admits(k, color, b.value_type) {
 			case .Proved:
 			case .Refuted:
-				report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ⊄ %s sur %s", brief(b.value), brief(b.color), display(&b)))
+				report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ∉ %s sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
 			case .Undecided:
-				report(k, .Unproven, b.span, fmt.tprintf("%s ⊆ %s n'a pas pu être prouvé sur %s", brief(b.value), brief(b.color), display(&b)))
+				report(k, .Unproven, b.span, fmt.tprintf("%s ∈ %s n'a pas pu être prouvé sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
 			}
 		}
 	}
 }
 
-// admits : toutes les valeurs possibles de `type` sont admises par la couleur
-// `color`. Une couleur est un ensemble d'atomes, ou un scope lu comme ensemble.
-admits :: proc(k: ^Kernel, color, type: ^Expr) -> Verdict {
-	if is_invalid(color) || is_invalid(type) do return .Proved // déjà signalé ailleurs
-	#partial switch c in color^ {
+// admits : pour toute valeur des inconnues, la valeur que désigne le type `t` est
+// un élément de la couleur.
+admits :: proc(k: ^Kernel, color: Set, t: ^Expr) -> Verdict {
+	if is_invalid(t) do return .Proved // déjà signalé ailleurs
+	#partial switch v in t^ {
 	case Set:
-		#partial switch v in type^ {
-		case Set:
-			return verdict(atoms_admitted(v, c))
-		case Poly, Term:
-			return value_in(k, type, c)
-		}
-		if s, is_scope := scope_element(type); is_scope && first_production(s) < 0 do return bdd_admits(k, c.scopes, s)
-		return .Refuted // un ensemble comme valeur n'est pas un élément d'un ensemble d'atomes
+		return verdict(member(v, color))
+	case Poly, Term:
+		return value_in(k, t, color)
+	case Set_Form:
+		return form_in(k, t, color)
 	case ^Scope:
-		// une forme close se lit comme ensemble ; sinon binding par binding
-		if s, ok := shape_set(c); ok do return admits(k, new_expr(s), type)
-		return scope_admits(k, c, type)
+		return bdd_admits(k, color.scopes, v)
 	}
 	return .Refuted
+}
+
+// member : la valeur `v`, connue, est un élément de la couleur. Un atome (ou none)
+// se lit parmi ses atomes ; un ensemble d'au moins deux éléments n'est l'élément
+// que d'une couleur qui l'admet comme valeur : `u8:a -> u8` est refusé,
+// `{-> u8}:a -> u8` est admis.
+member :: proc(v, color: Set) -> bool {
+	if is_atom(v) do return atoms_admitted(v, color)
+	return values_contains(color.sets, v)
+}
+
+// form_in : pour toute valeur des inconnues, l'ensemble que vaut la forme est un
+// élément de la couleur.
+form_in :: proc(k: ^Kernel, t: ^Expr, c: Set) -> Verdict {
+	// Sans ensemble admis comme valeur, une forme jamais vide dont l'enveloppe évite
+	// la couleur est refusée : chacune de ses valeurs est hors de la couleur.
+	if values_is_empty(c.sets) && never_empty(k, t) {
+		if env, ok := set_envelope(k, t); ok && none_admitted(env, c) do return .Refuted
+	}
+	a, enumerable := assignments(k, t)
+	if !enumerable do return .Undecided
+	for {
+		s, ok := eval_set(k, t, a.env)
+		if !ok do return .Undecided
+		if !member(s, c) do return .Refuted
+		if !next_assignment(&a) do break
+	}
+	return .Proved
 }
 
 // value_in : ∀σ, ⟦v⟧σ est admise par c — par paliers, du moins cher au plus cher.
@@ -149,86 +173,4 @@ atoms_admitted :: proc(t, c: Set) -> bool {
 atoms_subset :: proc(a, b: Set) -> bool {
 	if set_is_empty(a) do return set_is_empty(b)
 	return set_subset(a, b)
-}
-
-// scope_admits : un scope avec productions admet ce qu'admet l'une de ses
-// productions ; sans production, il admet les scopes de même structure dont
-// chaque binding est admis par le sien.
-scope_admits :: proc(k: ^Kernel, c: ^Scope, type: ^Expr) -> Verdict {
-	if first_production(c) >= 0 {
-		result := Verdict.Refuted
-		for b in c.bindings {
-			if b.kind != .Product do continue
-			switch binding_admits(k, b, type) {
-			case .Proved:
-				return .Proved
-			case .Undecided:
-				result = .Undecided
-			case .Refuted:
-			}
-		}
-		return result
-	}
-	v, ok := scope_element(type)
-	if !ok || len(v.bindings) != len(c.bindings) do return .Refuted
-	result := Verdict.Proved
-	for cb, i in c.bindings {
-		vb := v.bindings[i]
-		if cb.name != vb.name || cb.kind != vb.kind do return .Refuted
-		// un binding nommé sans couleur n'impose rien : un carve peut lui donner toute valeur
-		if cb.color == nil && cb.name != "" do continue
-		switch binding_admits(k, cb, vb.value) {
-		case .Refuted:
-			return .Refuted
-		case .Undecided:
-			result = .Undecided
-		case .Proved:
-		}
-	}
-	return result
-}
-
-// binding_admits : ce qu'un binding d'une couleur admet — ce qu'admet sa couleur
-// s'il en a une, sinon les valeurs de son propre type.
-binding_admits :: proc(k: ^Kernel, b: Binding, type: ^Expr) -> Verdict {
-	if b.color != nil do return admits(k, b.color, type)
-	return verdict(type_subset(k, type, b.value))
-}
-
-// type_subset : a ⊆ b, deux types (deux ensembles de valeurs possibles). Une
-// inclusion affirmée ne repose jamais sur une sur-approximation.
-type_subset :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
-	if is_invalid(a) || is_invalid(b) do return true
-	if expr_equal(k, a, b) do return true
-	if is_value(a) {
-		if sb, ok := b^.(Set); ok {
-			va, exact := values_of(k, a)
-			return exact && atoms_subset(va, sb)
-		}
-		return false
-	}
-	xa, a_one := the_element(a)
-	xb, b_one := the_element(b)
-	return a_one && b_one && value_equal(k, xa, xb)
-}
-
-// value_equal : deux valeurs (éléments de types) identiques.
-value_equal :: proc(k: ^Kernel, x, y: ^Expr) -> bool {
-	#partial switch a in x^ {
-	case Set:
-		b, ok := y^.(Set)
-		return ok && set_equal(a, b)
-	case ^Scope:
-		b, ok := y^.(^Scope)
-		if !ok || len(a.bindings) != len(b.bindings) do return false
-		for ab, i in a.bindings {
-			bb := b.bindings[i]
-			if ab.name != bb.name || ab.kind != bb.kind do return false
-			if (ab.color == nil) != (bb.color == nil) do return false
-			if ab.color != nil && !value_equal(k, ab.color, bb.color) do return false
-			if !type_subset(k, ab.value, bb.value) || !type_subset(k, bb.value, ab.value) do return false
-		}
-		return true
-	}
-	return false
 }

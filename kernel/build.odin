@@ -13,7 +13,7 @@ import "core:strings"
 build_program :: proc(k: ^Kernel, ast: ^syn.Ast) -> ^Scope {
 	k.ast = ast
 	root := syn.ast_root(ast)
-	s := new_scope(nil, ast.node_spans[root])
+	s := new_scope(prelude(), ast.node_spans[root])
 	for child in syn.node_children(ast, root) do build_binding(k, s, child)
 	return s
 }
@@ -175,7 +175,7 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	case .CompileTime:
 		return build_expr(k, s, data.unary.operand)
 	case .Carve:
-		return unsupported(k, idx, "le carve")
+		return build_carve(k, s, idx)
 	case .Pattern:
 		return unsupported(k, idx, "le pattern ?")
 	case .Constraint:
@@ -184,8 +184,38 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	return unsupported(k, idx, fmt.tprintf("la forme %v", ast.node_kinds[idx]))
 }
 
+// build_carve : la cible, et les arguments comme un scope écrit à cet endroit.
+build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
+	ast := k.ast
+	span := ast.node_spans[idx]
+	args := new_scope(s, span)
+	ordinals := make([dynamic]int)
+	for child in syn.node_carve_children(ast, idx) {
+		// `z{a -> 2}` sans flèche : un raccourci pour carver le champ z, ou une valeur
+		// positionnelle `Box{1}`, selon que z est un champ de la cible
+		if ast.node_kinds[child] == .Carve && ast.node_kinds[ast.node_data[child].carve.source] == .Identifier {
+			unsupported(k, child, "le raccourci de carve z{…}")
+			continue
+		}
+		before := len(args.bindings)
+		build_binding(k, args, child)
+		if len(args.bindings) > before do append(&ordinals, carve_ordinal(ast, child))
+	}
+	return new_expr(Carve{target = build_expr(k, s, ast.node_data[idx].carve.source), args = args, ordinals = ordinals[:], span = span})
+}
+
+// carve_ordinal : l'occurrence que vise un argument nommé `x#n -> v` ; -1 sinon.
+carve_ordinal :: proc(ast: ^syn.Ast, child: syn.Node_Index) -> int {
+	#partial switch ast.node_kinds[child] {
+	case .Pointing, .PointingPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
+		left := ast.node_data[child].binary.left
+		if left != syn.INVALID_NODE && ast.node_kinds[left] == .Identifier do return int(ast.node_data[left].identifier.ordinal)
+	}
+	return -1
+}
+
 // build_identifier résout un nom vers le binding visible au-dessus de lui, en
-// remontant les scopes ; un nom inconnu des scopes est un builtin, ou une erreur.
+// remontant les scopes jusqu'au prélude ; un nom qu'aucun ne définit est une erreur.
 build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	ast := k.ast
 	span := ast.node_spans[idx]
@@ -200,7 +230,7 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 			seen := 0
 			for b, i in sc.bindings {
 				if b.name != name do continue
-				if seen == ordinal do return new_expr(Ref{up, i, span})
+				if seen == ordinal do return new_expr(Ref{up, i, name, span})
 				seen += 1
 			}
 			if seen > 0 {
@@ -208,48 +238,58 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 			}
 		} else {
 			#reverse for b, i in sc.bindings {
-				if b.name == name || (b.capture != "" && b.capture == name) do return new_expr(Ref{up, i, span})
+				if b.name == name || (b.capture != "" && b.capture == name) do return new_expr(Ref{up, i, name, span})
 			}
 		}
 		up += 1
 	}
-	if set, ok := builtin(name); ok do return new_expr(set)
 	return report(k, .Undefined_Identifier, span, fmt.tprintf("'%s' n'est pas défini", name))
 }
 
-// Les builtins sont des noms pour des ensembles (specs/language/10).
-builtin :: proc(name: string) -> (Set, bool) {
+// Les builtins sont des noms pour des ensembles (specs/language/10). Ils sont les
+// bindings du prélude, le scope qui entoure tout fichier : ils se résolvent comme
+// tout nom, et un binding du fichier les masque.
+BUILTINS := [?]string{"u8", "i8", "u16", "i16", "u32", "i32", "u64", "usize", "i64", "isize", "int", "f32", "f64", "float", "string", "bool", "char", "none"}
+
+prelude :: proc() -> ^Scope {
+	p := new_scope(nil)
+	for name in BUILTINS {
+		v := new_expr(builtin(name))
+		append(&p.bindings, Binding{name = name, kind = .Push, value = v, value_type = v})
+	}
+	return p
+}
+
+builtin :: proc(name: string) -> Set {
 	switch name {
 	case "u8":
-		return set_of_ints(ints_range(0, 255)), true
+		return set_of_ints(ints_range(0, 255))
 	case "i8":
-		return set_of_ints(ints_range(-128, 127)), true
+		return set_of_ints(ints_range(-128, 127))
 	case "u16":
-		return set_of_ints(ints_range(0, 65535)), true
+		return set_of_ints(ints_range(0, 65535))
 	case "i16":
-		return set_of_ints(ints_range(-32768, 32767)), true
+		return set_of_ints(ints_range(-32768, 32767))
 	case "u32":
-		return set_of_ints(ints_range(0, 4294967295)), true
+		return set_of_ints(ints_range(0, 4294967295))
 	case "i32":
-		return set_of_ints(ints_range(-2147483648, 2147483647)), true
+		return set_of_ints(ints_range(-2147483648, 2147483647))
 	case "u64", "usize":
-		return set_of_ints(ints_range(0, 18446744073709551615)), true
+		return set_of_ints(ints_range(0, 18446744073709551615))
 	case "i64", "isize":
-		return set_of_ints(ints_range(-9223372036854775808, 9223372036854775807)), true
+		return set_of_ints(ints_range(-9223372036854775808, 9223372036854775807))
 	case "int":
-		return set_of_ints(ints_all()), true
+		return set_of_ints(ints_all())
 	case "f32", "f64", "float":
-		return set_of_floats(floats_all()), true
+		return set_of_floats(floats_all())
 	case "string":
-		return set_of_strings(strings_all()), true
+		return set_of_strings(strings_all())
 	case "bool":
-		return set_of_bools({.False, .True}), true
+		return set_of_bools({.False, .True})
 	case "char":
-		return set_of_chars(chars_all()), true
-	case "none":
-		return Set{}, true // l'ensemble vide : une valeur, son propre singleton
+		return set_of_chars(chars_all())
 	}
-	return {}, false
+	return Set{} // none : l'ensemble vide, une valeur, son propre singleton
 }
 
 build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> ^Expr {
