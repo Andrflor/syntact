@@ -1,12 +1,16 @@
 package kernel
 
 import syn "../compiler"
+import "core:slice"
 
-// L'IR du kernel. Un scope est une liste ordonnée de bindings ; un binding porte
-// une couleur (à gauche du `:`) et une valeur (à droite de la flèche). La même
-// forme sert au programme et à ses types : `type_of` d'un scope est le singleton
-// du scope de ses types de bindings, dont chaque binding garde sa couleur
-// (`color_of`, un ensemble) et porte son type à la place de sa valeur.
+// L'IR du kernel. Un scope est une liste ordonnée de bindings. Un binding porte
+// quatre choses : sa couleur et sa valeur, symboliques, telles qu'écrites — et
+// leurs types. Le type simplifie (un carve qui donne 5 a le type 5), la valeur
+// garde toute la structure qui l'a produit.
+//
+// Les types sont eux aussi des expressions : le type de 5 est 5, celui de u8 est
+// 0..255, celui de `??::u8` est l'inconnue ??0. Un scope est son propre type : ses
+// bindings portent déjà les leurs.
 
 Binding_Kind :: enum u8 {
 	Push, // name -> value
@@ -22,17 +26,20 @@ Binding_Kind :: enum u8 {
 }
 
 Binding :: struct {
-	name:    string, // "" = anonyme ou production
-	capture: string, // alias invisible `(h)`
-	kind:    Binding_Kind,
-	color:   ^Expr, // nil = non coloré
-	value:   ^Expr, // nil = pas de valeur : le défaut de la couleur
-	span:    syn.Span,
+	name:       string, // "" = anonyme ou production
+	capture:    string, // alias invisible `(h)`
+	kind:       Binding_Kind,
+	color:      ^Expr, // à gauche du `:` ; nil = non coloré
+	value:      ^Expr, // à droite de la flèche ; nil = pas écrite : le défaut de la couleur
+	color_type: ^Expr, // type_of(color) : un seul ensemble, qui ne dépend d'aucune inconnue
+	value_type: ^Expr, // type_of(value), ou le défaut de color_type ; nil = pas encore typé
+	span:       syn.Span,
 }
 
 Scope :: struct {
 	parent:   ^Scope,
 	bindings: [dynamic]Binding,
+	shape:    ^Scope, // la forme contre laquelle il a été typé : la couleur implicite de ses bindings
 	span:     syn.Span,
 }
 
@@ -40,6 +47,7 @@ Scope :: struct {
 Ref :: struct {
 	up:    int,
 	index: int,
+	name:  string, // tel qu'écrit, pour l'impression
 	span:  syn.Span,
 }
 
@@ -63,6 +71,24 @@ Op :: struct {
 	left:  ^Expr,
 	right: ^Expr,
 	span:  syn.Span,
+}
+
+// `target{…}` : un scope dérivé de target, dont des bindings reçoivent une autre
+// valeur. Les arguments sont un scope écrit à cet endroit : `x -> v` vise la
+// première occurrence de x (`x#n -> v`, la n-ième), un argument sans nom vise le
+// binding de même rang parmi ceux qui ne sont pas des productions.
+Carve :: struct {
+	target:   ^Expr,
+	args:     ^Scope,
+	ordinals: []int, // pour chaque argument, l'occurrence visée ; -1 : la première
+	span:     syn.Span,
+}
+
+// Carved : dans un scope carvé, la valeur qu'un argument a mise à la place. Elle
+// reste l'argument `index` de `args`, écrit et typé là où il a été écrit.
+Carved :: struct {
+	args:  ^Scope,
+	index: int,
 }
 
 // `lo..hi`. Une borne nil est ouverte. Entre des caractères, l'intervalle porte sur
@@ -89,13 +115,14 @@ Expr :: union {
 	Ref,
 	Access,
 	Collapse,
+	Carve,
+	Carved,
 	Op,
 	Range,
 	Unknown,
-	Poly, // une forme sur des inconnues (résultat de type_of seulement) : unknown.odin
-	Term,
-	Family, // un ensemble qui dépend d'inconnues : family.odin
-	Subsets, // son enveloppe, quand il dépend de trop d'inconnues
+	Poly, // une valeur entière qui dépend d'inconnues (un type seulement) : unknown.odin
+	Term, // une autre valeur qui dépend d'inconnues
+	Set_Form, // un ensemble qui dépend d'inconnues : set_form.odin
 	Invalid,
 }
 
@@ -119,6 +146,7 @@ Error_Kind :: enum u8 {
 	Invalid_Binding_Name,
 	Invalid_Property_Access,
 	Invalid_Execute,
+	Invalid_Carve,
 	Invalid_operator,
 	Invalid_Range,
 	Constraint_Mismatch,
@@ -138,10 +166,14 @@ Kernel :: struct {
 	errors:  [dynamic]Error,
 	typed:   [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
 	symbols: [dynamic]Set, // l'ensemble des valeurs possibles de chaque inconnue
+	shapes:  map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
 }
 
+// report : une erreur, une seule fois — une copie re-typée par un carve retrouve
+// les erreurs de l'original qui ne dépendent pas du carve.
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> ^Expr {
-	append(&k.errors, Error{kind, message, span})
+	e := Error{kind, message, span}
+	if !slice.contains(k.errors[:], e) do append(&k.errors, e)
 	return new_expr(Invalid{})
 }
 

@@ -7,22 +7,37 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
-// Impression de l'IR (et donc des types) en syntaxe Syntact, avec les seules
-// parenthèses qu'exige la précédence du parser : chaque écriture rend aussi le
-// niveau auquel elle lie.
+// Impression de l'IR en syntaxe Syntact, avec les seules parenthèses qu'exige la
+// précédence du parser : chaque écriture rend aussi le niveau auquel elle lie.
+// Une même IR a deux lectures : le programme, couleurs et valeurs telles
+// qu'écrites ; et ses types, color_type et value_type.
 
 Level :: syn.Precedence
 
+View :: enum u8 {
+	Program,
+	Type,
+}
+
 print_expr :: proc(e: ^Expr) -> string {
-	s, _ := printed(e)
+	s, _ := printed(e, .Program)
+	return s
+}
+
+print_type :: proc(t: ^Expr) -> string {
+	s, _ := printed(t, .Type)
 	return s
 }
 
 // print_at : `e` à une place qui lie au niveau `level`, entre parenthèses s'il
 // lie plus lâchement.
-print_at :: proc(e: ^Expr, level: Level) -> string {
-	s, own := printed(e)
+print_at :: proc(e: ^Expr, level: Level, view := View.Program) -> string {
+	s, own := printed(e, view)
 	return wrap(s, own, level)
+}
+
+print_type_at :: proc(t: ^Expr, level: Level) -> string {
+	return print_at(t, level, .Type)
 }
 
 wrap :: proc(s: string, own, level: Level) -> string {
@@ -33,18 +48,17 @@ above :: proc(level: Level) -> Level {
 	return Level(int(level) + 1)
 }
 
-// brief : une écriture raccourcie, pour un message d'erreur.
-brief :: proc(e: ^Expr) -> string {
-	s := print_expr(e)
+// brief : un type, en écriture raccourcie, pour un message d'erreur.
+brief :: proc(t: ^Expr) -> string {
+	s := print_type(t)
 	if len(s) <= 120 do return s
 	cut := 120
 	for cut > 0 && !utf8.rune_start(s[cut]) do cut -= 1
 	return fmt.tprintf("%s…", s[:cut])
 }
 
-printed :: proc(e: ^Expr) -> (string, Level) {
+printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 	if e == nil do return "<nil>", .PRIMARY
-	b := strings.builder_make()
 	switch v in e^ {
 	case Set:
 		return printed_set(v)
@@ -52,32 +66,64 @@ printed :: proc(e: ^Expr) -> (string, Level) {
 		return printed_poly(v)
 	case Term:
 		return printed_term(v)
+	case Set_Form:
+		return printed_set_form(v)
 	case ^Scope:
-		write_scope(&b, v)
-	case Family:
-		write_family(&b, v)
-	case Subsets:
-		write_subsets(&b, v)
+		return print_scope(v, view), .PRIMARY
 	case Ref:
-		fmt.sbprintf(&b, "ref(%d,%d)", v.up, v.index)
+		return v.name, .PRIMARY
 	case Access:
-		fmt.sbprintf(&b, "%s.%s", print_at(v.target, .CALL), v.name)
+		return fmt.tprintf("%s.%s", print_at(v.target, .CALL, view), v.name), .CALL
 	case Collapse:
-		fmt.sbprintf(&b, "%s!", print_at(v.target, .CALL))
+		return fmt.tprintf("%s!", print_at(v.target, .CALL, view)), .CALL
+	case Carve:
+		return fmt.tprintf("%s%s", print_at(v.target, .CALL, view), print_scope(v.args, .Program, v.ordinals)), .CALL
+	case Carved:
+		return printed(v.args.bindings[v.index].value, .Program) // l'argument, tel qu'écrit
 	case Op:
-		if v.left != nil do fmt.sbprintf(&b, "(%s %v %s)", print_expr(v.left), v.kind, print_expr(v.right))
-		else do fmt.sbprintf(&b, "(%v %s)", v.kind, print_expr(v.right))
+		o := OPERATORS[v.kind]
+		if v.left == nil do return fmt.tprintf("%s%s", o.text, print_at(v.right, .UNARY, view)), .UNARY
+		return fmt.tprintf("%s %s %s", print_at(v.left, o.level, view), o.text, print_at(v.right, above(o.level), view)), o.level
 	case Range:
-		lo := v.lo != nil ? print_at(v.lo, .CALL) : ""
-		hi := v.hi != nil ? print_at(v.hi, .CALL) : ""
+		lo := v.lo != nil ? print_at(v.lo, .CALL, view) : ""
+		hi := v.hi != nil ? print_at(v.hi, .CALL, view) : ""
 		return fmt.tprintf("%s..%s", lo, hi), .RANGE
 	case Unknown:
 		if v.layout == nil do return "??", .PRIMARY
-		return fmt.tprintf("??::%s", print_at(v.layout, .CALL)), .CALL
+		return fmt.tprintf("??::%s", print_at(v.layout, .CALL, view)), .CALL
 	case Invalid:
-		strings.write_string(&b, "<invalide>")
+		return "<invalide>", .PRIMARY
 	}
-	return strings.to_string(b), .PRIMARY
+	return "", .PRIMARY
+}
+
+Operator :: struct {
+	text:  string,
+	level: Level,
+}
+
+OPERATORS := [syn.Operator_Kind]Operator {
+	.Add          = {"+", .TERM},
+	.Subtract     = {"-", .TERM},
+	.Multiply     = {"*", .FACTOR},
+	.Divide       = {"/", .FACTOR},
+	.Mod          = {"%", .FACTOR},
+	.Equal        = {"=", .EQUALITY},
+	.NotEqual     = {"!=", .EQUALITY},
+	.Less         = {"<", .COMPARISON},
+	.Greater      = {">", .COMPARISON},
+	.LessEqual    = {"<=", .COMPARISON},
+	.GreaterEqual = {">=", .COMPARISON},
+	.And          = {"&", .AND},
+	.Or           = {"|", .OR},
+	.Xor          = {"^", .AND},
+	.Not          = {"~", .UNARY},
+	.BitAnd       = {"[&]", .AND},
+	.BitOr        = {"[|]", .OR},
+	.BitNot       = {"[~]", .UNARY},
+	.RShift       = {">>", .SHIFT},
+	.LShift       = {"<<", .SHIFT},
+	.Cast         = {"::", .CALL},
 }
 
 ARROWS := [Binding_Kind]string {
@@ -93,23 +139,30 @@ ARROWS := [Binding_Kind]string {
 	.Reactive_Pull  = "=<<",
 }
 
-// Une couleur est l'opérande gauche de `:` : elle doit lier plus fort que lui.
-write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
-	strings.write_byte(b, '{')
+// print_scope : un scope, lu comme programme ou comme type. Une couleur est
+// l'opérande gauche de `:` : elle doit lier plus fort que lui. `ordinals` : pour
+// les arguments d'un carve, l'occurrence que vise chacun (`x#1`).
+print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
+	b := strings.builder_make()
+	strings.write_byte(&b, '{')
 	for bd, i in s.bindings {
-		if i > 0 do strings.write_string(b, "  ")
-		if bd.color != nil do fmt.sbprintf(b, "%s:", print_at(bd.color, above(.CONSTRAINT)))
-		if bd.name != "" do strings.write_string(b, bd.name)
-		if bd.capture != "" do fmt.sbprintf(b, "(%s)", bd.capture)
-		if bd.value != nil {
-			if bd.name != "" || bd.color != nil || bd.kind != .Push {
-				if bd.name != "" || bd.color != nil do strings.write_byte(b, ' ')
-				fmt.sbprintf(b, "%s ", ARROWS[bd.kind])
+		color, value := bd.color, bd.value
+		if view == .Type do color, value = bd.color_type, bd.value_type
+		if i > 0 do strings.write_string(&b, "  ")
+		if color != nil do fmt.sbprintf(&b, "%s:", print_at(color, above(.CONSTRAINT), view))
+		if bd.name != "" do strings.write_string(&b, bd.name)
+		if i < len(ordinals) && ordinals[i] >= 0 do fmt.sbprintf(&b, "#%d", ordinals[i])
+		if bd.capture != "" do fmt.sbprintf(&b, "(%s)", bd.capture)
+		if value != nil {
+			if bd.name != "" || color != nil || bd.kind != .Push {
+				if bd.name != "" || color != nil do strings.write_byte(&b, ' ')
+				fmt.sbprintf(&b, "%s ", ARROWS[bd.kind])
 			}
-			strings.write_string(b, print_expr(bd.value))
+			strings.write_string(&b, print_at(value, .NONE, view))
 		}
 	}
-	strings.write_byte(b, '}')
+	strings.write_byte(&b, '}')
+	return strings.to_string(b)
 }
 
 // --- ensembles ---
@@ -163,6 +216,10 @@ printed_set :: proc(s: Set) -> (string, Level) {
 		text, level := printed_bdd(s.scopes)
 		append(&parts, Part{text, level})
 	}
+	if domain_count(s, .Sets) > 0 {
+		text, level := printed_values(s.sets)
+		append(&parts, Part{text, level})
+	}
 	// une sorte portée mais vide : « aucun entier », etc.
 	for d in s.sorts do if domain_count(s, d) == 0 do append(&parts, Part{fmt.tprintf("~%s", SORT_NAMES[d]), .UNARY})
 	switch len(parts) {
@@ -183,6 +240,22 @@ SORT_NAMES := [Domain]string {
 	.Strings = "string",
 	.Bools   = "bool",
 	.Scopes  = "scope",
+	.Sets    = "set",
+}
+
+// printed_values : les ensembles admis comme valeurs, `{-> u8  -> i8}` ; leur
+// complément, `~{-> u8}` ; tous, `set`.
+printed_values :: proc(a: Set_Values) -> (string, Level) {
+	if len(a.values) == 0 do return "set", .PRIMARY
+	b := strings.builder_make()
+	strings.write_byte(&b, '{')
+	for v, i in a.values {
+		if i > 0 do strings.write_string(&b, "  ")
+		fmt.sbprintf(&b, "-> %s", print_set(v))
+	}
+	strings.write_byte(&b, '}')
+	if a.cofinite do return fmt.tprintf("~%s", strings.to_string(b)), .UNARY
+	return strings.to_string(b), .PRIMARY
 }
 
 print_ints :: proc(a: Ints) -> string {

@@ -440,11 +440,11 @@ test_law_polynomials :: proc(t: ^testing.T) {
 		for x in -3 ..= 3 do for y in -3 ..= 3 do for z in -3 ..= 3 {
 			env := [3]i128{i128(x), i128(y), i128(z)}
 			v, ok := eval(p, {env[0], env[1], env[2]})
-			testing.expectf(t, ok && v.(i128) == tree_eval(tree, env), "évaluation de %s", print_expr(p))
+			testing.expectf(t, ok && v.(i128) == tree_eval(tree, env), "évaluation de %s", print_type(p))
 			append(&brute, tree_eval(tree, env))
 		}
 		vals, exact := values_of(&k, p)
-		testing.expectf(t, exact && set_equal(vals, set_of_atoms(brute[:])), "valeurs de %s", print_expr(p))
+		testing.expectf(t, exact && set_equal(vals, set_of_atoms(brute[:])), "valeurs de %s", print_type(p))
 		// une comparaison est décidée exactement quand sa vérité ne varie pas
 		for op in ([?]Compare_Op{.Lt, .Le, .Gt, .Ge, .Eq, .Ne}) {
 			r, _ := int_compare(&k, op, tree_poly(tree))
@@ -469,10 +469,10 @@ test_law_polynomials :: proc(t: ^testing.T) {
 				seen[int(truth)] = true
 				// la forme écrite garde la même vérité
 				got, ok := eval(r, {i128(x), i128(y), i128(z)})
-				testing.expectf(t, ok && got.(bool) == truth, "%v de %s en (%d,%d,%d)", op, print_expr(p), x, y, z)
+				testing.expectf(t, ok && got.(bool) == truth, "%v de %s en (%d,%d,%d)", op, print_type(p), x, y, z)
 			}
 			_, decided := r^.(Set)
-			testing.expectf(t, decided == !(seen[0] && seen[1]), "%v de %s : décidé %v", op, print_expr(p), decided)
+			testing.expectf(t, decided == !(seen[0] && seen[1]), "%v de %s : décidé %v", op, print_type(p), decided)
 		}
 	}
 	// des identités : une seule forme
@@ -488,10 +488,10 @@ test_law_polynomials :: proc(t: ^testing.T) {
 	testing.expect(t, expr_equal(&k, poly_type(z), new_expr(set_of_ints(ints_point(0)))), "a - a = 0")
 }
 
-// --- les ensembles qui dépendent d'inconnues : la table contre le calcul direct ---
+// --- les ensembles qui dépendent d'inconnues : la forme contre le calcul direct ---
 
 @(test)
-test_law_families :: proc(t: ^testing.T) {
+test_law_set_forms :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
@@ -501,12 +501,13 @@ test_law_families :: proc(t: ^testing.T) {
 	append(&k.symbols, set_of_ints(ints_range(0, 3)))
 	append(&k.symbols, set_of_ints(ints_range(5, 6)))
 	known := [?]Set{set_of_ints(ints_range(0, 4)), set_of_ints(ints_point(6)), set_of_ints(ints_range(2, 9)), Set{}}
-	checked, families := 0, 0
+	checked, forms := 0, 0
 	for _ in 0 ..< ROUNDS {
 		// une expression d'ensembles aléatoire, évaluée de deux façons
-		build :: proc(k: ^Kernel, gen: runtime.Random_Generator, known: []Set, depth: int) -> (^Expr, [dynamic]Set) {
-			// le résultat attendu pour chaque (n, m), n ∈ 0..3, m ∈ 5..6, dans l'ordre de l'odomètre
-			expected := make([dynamic]Set)
+		build :: proc(k: ^Kernel, gen: runtime.Random_Generator, known: []Set, depth: int) -> (^Expr, [dynamic]Maybe(Set)) {
+			// le résultat attendu pour chaque (n, m), n ∈ 0..3, m ∈ 5..6, dans l'ordre
+			// des affectations ; nil : l'opération est invalide pour ces valeurs
+			expected := make([dynamic]Maybe(Set))
 			pick := depth == 0 ? rand.int_max(3, gen) : rand.int_max(7, gen)
 			switch pick {
 			case 0, 1:
@@ -516,7 +517,7 @@ test_law_families :: proc(t: ^testing.T) {
 			case 2:
 				s := rand.choice(known, gen)
 				for _ in 0 ..< 8 do append(&expected, s)
-				return singleton(new_expr(s)), expected
+				return new_expr(s), expected
 			}
 			a, ea := build(k, gen, known, depth - 1)
 			b, eb := build(k, gen, known, depth - 1)
@@ -534,38 +535,37 @@ test_law_families :: proc(t: ^testing.T) {
 			args := op.kind == .Comp ? []^Expr{a} : []^Expr{a, b}
 			r := set_operation(k, op, {}, ..args)
 			for i in 0 ..< 8 {
-				operands := op.kind == .Comp ? []Set{ea[i]} : []Set{ea[i], eb[i]}
-				v, status := apply_set_op(op, operands)
-				if status != .Ok do v = Set{ints = ints_point(-999)} // marqueur : l'opération est invalide
-				append(&expected, v)
+				x, x_ok := ea[i].?
+				y, y_ok := eb[i].?
+				if !x_ok || (op.kind != .Comp && !y_ok) {
+					append(&expected, nil)
+					continue
+				}
+				v, status := apply_set_op(op, op.kind == .Comp ? []Set{x} : []Set{x, y})
+				if status == .Ok do append(&expected, v)
+				else do append(&expected, nil)
 			}
 			return r, expected
 		}
 		clear(&k.errors)
 		e, expected := build(&k, gen, known[:], 3)
-		if len(k.errors) > 0 do continue // une plage entre sortes différentes : signalée, pas un résultat
+		if len(k.errors) > 0 do continue // invalide pour toute valeur : signalé, pas un résultat
+		// invalide pour certaines valeurs seulement : l'opérande vide, question ouverte
+		partial := false
+		for x in expected do if x == nil do partial = true
+		if partial do continue
 		checked += 1
-		// la table, ou l'ensemble constant, vaut le calcul direct pour chaque (n, m)
+		if is_set_form(e) do forms += 1
+		env := make([]Atom, 2)
 		for m in i128(5) ..= 6 do for n in i128(0) ..= 3 {
-			i := int(m - 5) * 4 + int(n)
-			got: Set
-			#partial switch v in e^ {
-			case Family:
-				digits := make([]int, len(v.syms))
-				for id, j in v.syms do digits[j] = id == 0 ? int(n) : int(m - 5)
-				doms := make([][]Atom, len(v.syms))
-				for id, j in v.syms do doms[j], _ = atoms_of_set(k.symbols[id], 100)
-				got = v.sets[sub_index(v, v.syms, doms, digits)]
-			case:
-				got, _ = known_set(e)
-				if p, ok := e^.(Poly); ok do got = set_of_ints(ints_point(p.monos[0].vars[0] == 0 ? n : m))
-			}
-			testing.expectf(t, set_equal(got, expected[i]) && set_is_empty(got) == set_is_empty(expected[i]), "%s en n=%d m=%d : %s attendu %s", print_expr(e), n, m, print_set(got), print_set(expected[i]))
+			env[0], env[1] = n, m
+			want := expected[int(m - 5) * 4 + int(n)].?
+			got, ok := eval_set(&k, e, env)
+			testing.expectf(t, ok && set_equal(got, want) && carried(got) == carried(want), "%s en n=%d m=%d : %s attendu %s", print_type(e), n, m, print_set(got), print_set(want))
 		}
-		if _, is_family := e^.(Family); is_family do families += 1
 	}
-	// le test ne passe pas à vide : assez de cas vérifiés, dont de vraies tables
-	testing.expectf(t, checked >= ROUNDS / 2 && families >= ROUNDS / 8, "cas vérifiés : %d, dont tables : %d", checked, families)
+	// le test ne passe pas à vide : assez de cas vérifiés, dont de vraies formes
+	testing.expectf(t, checked >= ROUNDS / 2 && forms >= ROUNDS / 8, "cas vérifiés : %d, dont formes : %d", checked, forms)
 }
 
 // --- LES FORMES NORMALES ET LES DÉCISIONS ---
@@ -826,15 +826,15 @@ test_normal_polynomials :: proc(t: ^testing.T) {
 		}
 		if identical do equal_pairs += 1
 		same := expr_equal(&k, poly_type(tree_poly(a)), poly_type(tree_poly(b)))
-		testing.expectf(t, same == identical, "%s et %s : même forme %v, même polynôme %v", print_expr(poly_type(tree_poly(a))), print_expr(poly_type(tree_poly(b))), same, identical)
+		testing.expectf(t, same == identical, "%s et %s : même forme %v, même polynôme %v", print_type(poly_type(tree_poly(a))), print_type(poly_type(tree_poly(b))), same, identical)
 	}
 	testing.expectf(t, equal_pairs >= ROUNDS / 3, "paires égales : %d", equal_pairs)
 }
 
-// Les tables : deux tables qui sont la même fonction ont la même écriture, même
-// quand l'une a été construite avec une inconnue dont elle ne dépend pas.
+// Les lois exactes qui simplifient une forme : none est neutre pour | et absorbant
+// pour & ; un opérande toujours inclus dans un ensemble connu tombe.
 @(test)
-test_normal_families :: proc(t: ^testing.T) {
+test_set_form_simplification :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
@@ -842,15 +842,15 @@ test_normal_families :: proc(t: ^testing.T) {
 	append(&k.symbols, set_of_ints(ints_range(0, 3)))
 	append(&k.symbols, set_of_ints(ints_range(5, 6)))
 	n, m := new_expr(poly_var(0)), new_expr(poly_var(1))
-	none := singleton(new_expr(Set{}))
-	only_n := set_operation(&k, Set_Op{kind = .Union}, {}, n, singleton(new_expr(set_of_ints(ints_point(9)))))
-	// la même table, construite en passant par m : (n | 9) | (m & ∅)
-	through_m := set_operation(&k, Set_Op{kind = .Union}, {}, only_n, set_operation(&k, Set_Op{kind = .Inter}, {}, m, none))
-	testing.expect(t, expr_equal(&k, only_n, through_m), "une inconnue inutile disparaît de la table")
-	// et une table qui ne dépend de rien est son ensemble
-	constant := set_operation(&k, Set_Op{kind = .Union}, {}, n, singleton(new_expr(set_of_ints(ints_range(0, 3)))))
-	_, is_set := known_set(constant)
-	testing.expect(t, is_set, "n | 0..3 est l'ensemble 0..3")
+	none := new_expr(Set{})
+	union_of :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {return set_operation(k, Set_Op{kind = .Union}, {}, a, b)}
+	inter_of :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {return set_operation(k, Set_Op{kind = .Inter}, {}, a, b)}
+	only_n := union_of(&k, n, new_expr(set_of_ints(ints_point(9))))
+	testing.expect(t, print_type(only_n) == "??0 | 9", "n | 9 reste une forme")
+	testing.expect(t, union_of(&k, only_n, inter_of(&k, m, none)) == only_n, "(n | 9) | (m & none) est n | 9")
+	constant, is_set := color_set(&k, union_of(&k, n, new_expr(set_of_ints(ints_range(0, 3)))))
+	testing.expect(t, is_set && set_equal(constant, set_of_ints(ints_range(0, 3))), "n | 0..3 est 0..3")
+	testing.expect(t, inter_of(&k, n, new_expr(set_of_ints(ints_range(0, 9)))) == n, "n & 0..9 est n")
 }
 
 // --- la vérification par paliers : jamais « prouvé » ni « réfuté » à tort ---
@@ -874,11 +874,11 @@ test_law_value_in :: proc(t: ^testing.T) {
 		for x in -3 ..= 3 do for y in 0 ..= 5 do for z in 2 ..= 4 {
 			if !ints_contains(c, tree_eval(tree, {i128(x), i128(y), i128(z)})) do all = false
 		}
-		v := admits(&k, new_expr(set_of_ints(c)), p)
+		v := admits(&k, set_of_ints(c), p)
 		decided[v] += 1
-		testing.expectf(t, v != .Proved || all, "%s ⊆ %v déclaré prouvé à tort", print_expr(p), c)
-		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v déclaré réfuté à tort", print_expr(p), c)
-		testing.expectf(t, v != .Undecided, "%s ⊆ %v : petit domaine, toujours décidé", print_expr(p), c)
+		testing.expectf(t, v != .Proved || all, "%s ⊆ %v déclaré prouvé à tort", print_type(p), c)
+		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v déclaré réfuté à tort", print_type(p), c)
+		testing.expectf(t, v != .Undecided, "%s ⊆ %v : petit domaine, toujours décidé", print_type(p), c)
 	}
 	testing.expectf(t, decided[.Proved] >= ROUNDS / 10 && decided[.Refuted] >= ROUNDS / 10, "verdicts : %v", decided)
 }
@@ -915,9 +915,9 @@ test_law_affine :: proc(t: ^testing.T) {
 			all = false
 			break
 		}
-		r := admits(&k, new_expr(set_of_ints(c)), poly_type(p))
+		r := admits(&k, set_of_ints(c), poly_type(p))
 		outcomes[r] += 1
-		testing.expectf(t, r == verdict(all), "%s ⊆ %v : %v, attendu %v", print_expr(poly_type(p)), c, r, verdict(all))
+		testing.expectf(t, r == verdict(all), "%s ⊆ %v : %v, attendu %v", print_type(poly_type(p)), c, r, verdict(all))
 	}
 	testing.expectf(t, outcomes[.Proved] > 0 && outcomes[.Refuted] > 0, "verdicts : %v", outcomes)
 }
@@ -949,7 +949,10 @@ test_law_scopes :: proc(t: ^testing.T) {
 
 	scope_value :: proc(names: []string, values: []i128) -> ^Scope {
 		s := new_scope(nil)
-		for n, i in names do append(&s.bindings, Binding{name = n, kind = .Push, value = new_expr(set_of_ints(ints_point(values[i])))})
+		for n, i in names {
+			v := new_expr(set_of_ints(ints_point(values[i])))
+			append(&s.bindings, Binding{name = n, kind = .Push, value = v, value_type = v})
+		}
 		return s
 	}
 	universe := make([dynamic]^Scope)
@@ -965,14 +968,15 @@ test_law_scopes :: proc(t: ^testing.T) {
 			lo := i128(rand.int_range(0, 4, gen))
 			hi := lo + i128(rand.int_range(-1, 3, gen)) // parfois vide
 			fields[i] = Field{name = n, kind = .Push, set = set_of_ints(ints_intersect(ints_range(lo, hi), ints_range(0, 3)))}
-			append(&shape.bindings, Binding{name = n, kind = .Push, color = new_expr(fields[i].set)})
+			c := new_expr(fields[i].set)
+			append(&shape.bindings, Binding{name = n, kind = .Push, color = c, color_type = c})
 		}
 		r := new_record(fields, shape)
 		mask: u64
 		for u, i in universe {
 			if len(u.bindings) != len(fields) || u.bindings[0].name != fields[0].name do continue
 			inside := true
-			for f, j in fields do if !set_subset(u.bindings[j].value^.(Set), f.set) do inside = false
+			for f, j in fields do if !set_subset(u.bindings[j].value_type^.(Set), f.set) do inside = false
 			if inside do mask |= 1 << uint(i)
 		}
 		return Scope_Model{bdd_atom(r), mask}

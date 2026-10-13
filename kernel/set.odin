@@ -3,10 +3,12 @@ package kernel
 import "core:math"
 import "core:slice"
 
-// Les ensembles de valeurs atomiques, sous forme normale. Un littéral est un
-// ensemble à un élément (`5` est `5..5`), un builtin est un ensemble (`u8` est
-// `0..255`), `none` est l'ensemble vide. Un ensemble mixte (`u8 | string`) a une
-// composante par sorte ; chaque composante est une algèbre close. L'égalité est
+// Les ensembles de valeurs, sous forme normale. Un littéral est un ensemble à un
+// élément (`5` est `5..5`), un builtin est un ensemble (`u8` est `0..255`), `none`
+// est l'ensemble vide. Un ensemble mixte (`u8 | string`) a une composante par
+// sorte ; chaque composante est une algèbre close. Les éléments sont des atomes,
+// des scopes, ou des ensembles pris comme valeurs (`{-> u8}` n'a qu'un élément :
+// l'ensemble u8). L'égalité est
 // l'inclusion dans les deux sens : `2|1` et `2..1` sont égaux, comme `2|"a"|3..4`
 // et `"a"|2..4`. Les intervalles ont même une écriture unique (`1..2`).
 
@@ -17,6 +19,7 @@ Domain :: enum u8 {
 	Strings,
 	Bools,
 	Scopes,
+	Sets,
 }
 
 Set :: struct {
@@ -34,6 +37,7 @@ Set :: struct {
 	strings: Strings,
 	bools:   Bools,
 	scopes:  Bdd, // des combinaisons de formes de scopes (bdd.odin)
+	sets:    Set_Values, // des ensembles pris comme valeurs
 }
 
 // --- entiers : intervalles triés, disjoints, non adjacents ---
@@ -596,6 +600,100 @@ bools_point :: proc(v: bool) -> Bools {
 	return v ? {.True} : {.False}
 }
 
+// --- les ensembles pris comme valeurs ---
+//
+// Une couleur peut admettre un ensemble comme valeur : `{-> u8}` n'admet que la
+// valeur u8, quand u8 admet ses éléments. Ces valeurs sont une sorte à part, sans
+// ordre : une liste finie d'ensembles, ou tous les ensembles sauf une liste finie.
+// Aucun n'est un atome : un atome est déjà son propre singleton.
+
+Set_Values :: struct {
+	values:   []Set, // sans doublon : deux ensembles égaux sont une seule valeur
+	cofinite: bool, // vrai : tous les ensembles sauf `values`
+}
+
+values_point :: proc(v: Set) -> Set_Values {
+	values := make([]Set, 1)
+	values[0] = v
+	return Set_Values{values = values}
+}
+
+values_is_empty :: proc(a: Set_Values) -> bool {
+	return !a.cofinite && len(a.values) == 0
+}
+
+values_contains :: proc(a: Set_Values, v: Set) -> bool {
+	return listed(a.values, v) != a.cofinite
+}
+
+listed :: proc(list: []Set, v: Set) -> bool {
+	for x in list do if set_equal(x, v) do return true
+	return false
+}
+
+// listed_or, listed_and, listed_minus : l'union, l'intersection et la différence de
+// deux listes, sans doublon.
+listed_or :: proc(a, b: []Set) -> []Set {
+	out := make([dynamic]Set, 0, len(a) + len(b))
+	append(&out, ..a)
+	for v in b do if !listed(a, v) do append(&out, v)
+	return out[:]
+}
+
+listed_and :: proc(a, b: []Set) -> []Set {
+	out := make([dynamic]Set, 0, len(a))
+	for v in a do if listed(b, v) do append(&out, v)
+	return out[:]
+}
+
+listed_minus :: proc(a, b: []Set) -> []Set {
+	out := make([dynamic]Set, 0, len(a))
+	for v in a do if !listed(b, v) do append(&out, v)
+	return out[:]
+}
+
+values_union :: proc(a, b: Set_Values) -> Set_Values {
+	switch {
+	case !a.cofinite && !b.cofinite:
+		return {listed_or(a.values, b.values), false}
+	case a.cofinite && b.cofinite:
+		return {listed_and(a.values, b.values), true} // ~A | ~B = ~(A & B)
+	case a.cofinite:
+		return {listed_minus(a.values, b.values), true} // ~A | B = ~(A ∖ B)
+	}
+	return {listed_minus(b.values, a.values), true}
+}
+
+values_intersect :: proc(a, b: Set_Values) -> Set_Values {
+	switch {
+	case !a.cofinite && !b.cofinite:
+		return {listed_and(a.values, b.values), false}
+	case a.cofinite && b.cofinite:
+		return {listed_or(a.values, b.values), true} // ~A & ~B = ~(A | B)
+	case a.cofinite:
+		return {listed_minus(b.values, a.values), false} // ~A & B = B ∖ A
+	}
+	return {listed_minus(a.values, b.values), false}
+}
+
+values_complement :: proc(a: Set_Values) -> Set_Values {
+	return {a.values, !a.cofinite}
+}
+
+// values_subset : il y a une infinité d'ensembles, donc une liste ne contient
+// jamais « tous sauf une liste ».
+values_subset :: proc(a, b: Set_Values) -> bool {
+	switch {
+	case !a.cofinite && !b.cofinite:
+		return len(listed_minus(a.values, b.values)) == 0
+	case !a.cofinite && b.cofinite:
+		return len(listed_and(a.values, b.values)) == 0
+	case a.cofinite && b.cofinite:
+		return len(listed_minus(b.values, a.values)) == 0
+	}
+	return false
+}
+
 // --- l'ensemble mixte ---
 
 set_of_ints :: proc(i: Ints) -> Set {
@@ -656,6 +754,7 @@ carried :: proc(s: Set) -> bit_set[Domain] {
 	if s.strings.re != nil do r += {.Strings}
 	if s.bools != {} do r += {.Bools}
 	if !is_leaf(s.scopes, .Bottom) do r += {.Scopes}
+	if !values_is_empty(s.sets) do r += {.Sets}
 	return r
 }
 
@@ -670,6 +769,11 @@ set_count :: proc(s: Set) -> int {
 
 set_is_empty :: proc(s: Set) -> bool {
 	return set_count(s) == 0
+}
+
+// is_atom : une valeur atomique — un seul élément, ou aucun (none).
+is_atom :: proc(s: Set) -> bool {
+	return set_count(s) <= 1
 }
 
 // La première sorte non vide, dans l'ordre fixe des sortes : le défaut d'un
@@ -694,6 +798,9 @@ domain_count :: proc(s: Set, d: Domain) -> int {
 	case .Scopes:
 		// un ensemble de scopes n'est jamais un atome : un scope valeur est un ^Scope
 		return bdd_is_empty(s.scopes) ? 0 : 2
+	case .Sets:
+		// de même : un ensemble d'ensembles n'est jamais un atome
+		return values_is_empty(s.sets) ? 0 : 2
 	}
 	return 0
 }
@@ -707,6 +814,7 @@ set_union :: proc(a, b: Set) -> Set {
 		strings = strings_union(a.strings, b.strings),
 		bools = a.bools | b.bools,
 		scopes = bdd_or(a.scopes, b.scopes),
+		sets = values_union(a.sets, b.sets),
 	}
 }
 
@@ -721,6 +829,7 @@ set_intersect :: proc(a, b: Set) -> Set {
 		strings = strings_intersect(a.strings, b.strings),
 		bools = a.bools & b.bools,
 		scopes = bdd_and(a.scopes, b.scopes),
+		sets = values_intersect(a.sets, b.sets),
 	}
 }
 
@@ -735,6 +844,7 @@ set_complement :: proc(a: Set) -> Set {
 	if .Strings in r.sorts do r.strings = strings_complement(a.strings)
 	if .Bools in r.sorts do r.bools = ~a.bools
 	if .Scopes in r.sorts do r.scopes = bdd_diff(.Top, a.scopes)
+	if .Sets in r.sorts do r.sets = values_complement(a.sets)
 	return r
 }
 
@@ -748,6 +858,7 @@ set_diff :: proc(a, b: Set) -> Set {
 		strings = strings_intersect(a.strings, strings_complement(b.strings)),
 		bools = a.bools - b.bools,
 		scopes = bdd_diff(a.scopes, b.scopes),
+		sets = values_intersect(a.sets, values_complement(b.sets)),
 	}
 }
 
@@ -763,7 +874,8 @@ set_subset :: proc(a, b: Set) -> bool {
 		ints_subset(a.chars, b.chars) &&
 		strings_subset(a.strings, b.strings) &&
 		a.bools <= b.bools &&
-		bdd_subset(a.scopes, b.scopes)
+		bdd_subset(a.scopes, b.scopes) &&
+		values_subset(a.sets, b.sets)
 }
 
 set_equal :: proc(a, b: Set) -> bool {
@@ -789,8 +901,8 @@ set_default :: proc(s: Set) -> (Set, bool) {
 		return set_of_strings(strings_point(v)), true
 	case .Bools:
 		return set_of_bools(.False in s.bools ? {.False} : {.True}), true
-	case .Scopes:
-		return {}, false // un scope n'est pas un atome : voir default_of
+	case .Scopes, .Sets:
+		return {}, false // pas un atome : voir default_of
 	}
 	return {}, false
 }

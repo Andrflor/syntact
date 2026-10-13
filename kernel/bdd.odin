@@ -14,10 +14,12 @@ import "core:strings"
 // distribuées : la taille reste celle de l'écriture. On ne distribue qu'en
 // décidant, chemin par chemin, puis champ par champ.
 
-// Record : une forme. `shape` est le scope typé qu'elle lit (son défaut).
+// Record : une forme. `shape` est le scope qu'elle lit (son défaut). `exact` : elle
+// n'admet que ce scope valeur lui-même, chaque binding n'admettant que sa valeur.
 Record :: struct {
 	fields: []Field,
 	shape:  ^Scope,
+	exact:  bool,
 	id:     int, // l'ordre des nœuds du BDD
 }
 
@@ -46,9 +48,9 @@ Bdd_Node :: struct {
 @(thread_local)
 record_count: int
 
-new_record :: proc(fields: []Field, shape: ^Scope) -> ^Record {
+new_record :: proc(fields: []Field, shape: ^Scope, exact := false) -> ^Record {
 	r := new(Record)
-	r^ = Record{fields, shape, record_count}
+	r^ = Record{fields, shape, exact, record_count}
 	record_count += 1
 	return r
 }
@@ -189,11 +191,12 @@ field_set :: proc(f: Field) -> Set {
 	return set_everything() if f.free else f.set
 }
 
-// set_everything : toutes les valeurs, scopes compris.
+// set_everything : toutes les valeurs, scopes et ensembles compris.
 set_everything :: proc() -> Set {
 	s := set_top()
-	s.sorts += {.Scopes}
+	s.sorts += {.Scopes, .Sets}
 	s.scopes = .Top
+	s.sets = Set_Values{cofinite = true}
 	return s
 }
 
@@ -212,75 +215,72 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 	return out[:]
 }
 
-// --- les formes, depuis les scopes typés ---
+// --- les types lus comme couleurs ---
 
-// shape_set : l'ensemble qu'un scope typé désigne comme couleur. Avec des
-// productions, ce qu'admet l'une d'elles ; sans, sa forme. Faux quand un binding
-// n'a pas d'ensemble clos (une valeur qui dépend d'une inconnue, un ensemble
-// comme valeur) : la couleur se lit alors binding par binding (scope_admits).
-shape_set :: proc(s: ^Scope) -> (Set, bool) {
+// color_set : l'ensemble des valeurs qu'un type admet comme couleur. Un ensemble
+// admet ses éléments. Un scope avec des productions admet chacune : une production
+// colorée, ce qu'admet sa couleur ; sinon, sa valeur exactement (`{-> u8}` n'admet
+// que la valeur u8). Sans production, c'est une forme. Faux quand le type dépend
+// d'une inconnue : ce n'est pas un seul ensemble. Un scope n'est lu qu'une fois.
+color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
+	#partial switch v in t^ {
+	case Set:
+		return v, true
+	case ^Scope:
+		if s, seen := k.shapes[v]; seen do return s, true
+		s, closed := scope_color_set(k, v)
+		if closed do k.shapes[v] = s
+		return s, closed
+	}
+	return {}, false
+}
+
+scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	if first_production(s) >= 0 {
-		u := Set{}
 		for b in s.bindings {
 			if b.kind != .Product do continue
-			x, ok := admitted_set(b)
-			if !ok do return {}, false
-			u = set_union(u, x)
+			x := admitted_by(k, b) or_return
+			set = set_union(set, x)
 		}
-		return u, true
+		return set, true
 	}
 	fields := make([]Field, len(s.bindings))
 	for b, i in s.bindings {
 		fields[i] = Field{name = b.name, kind = b.kind}
 		if b.color == nil && b.name != "" {
-			fields[i].free = true
+			fields[i].free = true // un binding nommé sans couleur n'impose rien : un carve peut lui donner toute valeur
 			continue
 		}
-		x, ok := admitted_set(b)
-		if !ok do return {}, false
-		fields[i].set = x
+		fields[i].set = admitted_by(k, b) or_return
 	}
 	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, s))}, true
 }
 
-// admitted_set : ce qu'admet un binding d'une couleur — sa couleur, sinon sa
-// valeur, quand c'est un atome ou un scope clos.
-admitted_set :: proc(b: Binding) -> (Set, bool) {
-	if b.color != nil do return colour_set(b.color)
-	if b.value == nil do return {}, false
-	if s, is_set := b.value^.(Set); is_set do return s, true
-	if v, is_scope := scope_element(b.value); is_scope do return shape_of_value(v)
-	return {}, false
+// admitted_by : ce qu'un binding admet — ce qu'admet sa couleur, sinon sa valeur.
+admitted_by :: proc(k: ^Kernel, b: Binding) -> (Set, bool) {
+	if b.color != nil do return color_set(k, b.color_type)
+	return exact_set(k, b.value_type)
 }
 
-colour_set :: proc(c: ^Expr) -> (Set, bool) {
-	#partial switch v in c^ {
+// exact_set : l'ensemble dont ce type est le seul élément. Un atome est son propre
+// singleton ; un ensemble d'au moins deux éléments est une valeur de la sorte des
+// ensembles ; un scope, la forme dont chaque binding n'admet que sa valeur. Faux
+// quand le type dépend d'une inconnue.
+exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
+	if t == nil || is_invalid(t) do return {}, false
+	#partial switch v in t^ {
 	case Set:
-		return v, true
+		if is_atom(v) do return v, true
+		return Set{sorts = {.Sets}, sets = values_point(v)}, true
 	case ^Scope:
-		return shape_set(v)
+		fields := make([]Field, len(v.bindings))
+		for b, i in v.bindings {
+			fields[i] = Field{name = b.name, kind = b.kind}
+			fields[i].set = exact_set(k, b.value_type) or_return
+		}
+		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, v, exact = true))}, true
 	}
 	return {}, false
-}
-
-// shape_of_value : un scope valeur, comme le singleton de sa forme — chaque
-// binding admet exactement sa valeur.
-shape_of_value :: proc(v: ^Scope) -> (Set, bool) {
-	if first_production(v) >= 0 do return {}, false // un ensemble comme valeur
-	fields := make([]Field, len(v.bindings))
-	for b, i in v.bindings {
-		fields[i] = Field{name = b.name, kind = b.kind}
-		if s, is_set := b.value^.(Set); is_set && is_atom(s) {
-			fields[i].set = s
-			continue
-		}
-		inner, is_scope := scope_element(b.value)
-		if !is_scope do return {}, false
-		x, ok := shape_of_value(inner)
-		if !ok do return {}, false
-		fields[i].set = x
-	}
-	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, v))}, true
 }
 
 // --- l'admission d'un scope valeur ---
@@ -374,23 +374,28 @@ record_member :: proc(k: ^Kernel, r: ^Record, s: ^Scope) -> Member {
 	for f, i in r.fields {
 		b := s.bindings[i]
 		if f.name != b.name || f.kind != b.kind do return .Never
-		if f.free do continue
-		result = and3(result, member_of(admits(k, new_expr(f.set), b.value), is_closed_value(b.value)))
+		if f.free || colored_within(k, b, f.set) do continue
+		result = and3(result, member_of(admits(k, f.set, b.value_type), is_closed_type(b.value_type)))
 	}
 	return result
 }
 
-// is_closed_value : une valeur sans inconnue — son verdict vaut pour toutes.
-is_closed_value :: proc(v: ^Expr) -> bool {
-	#partial switch x in v^ {
-	case Set:
-		return true
-	case Poly, Term, Family, Subsets:
+// colored_within : la couleur du binding n'admet que des éléments de `s`. Sa valeur
+// y est alors, ou sa propre vérification le signale : rien à décider deux fois.
+colored_within :: proc(k: ^Kernel, b: Binding, s: Set) -> bool {
+	if b.color_type == nil do return false
+	c, closed := color_set(k, b.color_type)
+	return closed && atoms_subset(c, s)
+}
+
+// is_closed_type : un type sans inconnue — son verdict vaut pour toutes leurs valeurs.
+is_closed_type :: proc(t: ^Expr) -> bool {
+	#partial switch v in t^ {
+	case Poly, Term, Set_Form:
 		return false
+	case ^Scope:
+		for b in v.bindings do if b.value_type != nil && !is_closed_type(b.value_type) do return false
 	}
-	inner, is_scope := scope_element(v)
-	if !is_scope do return true
-	for b in inner.bindings do if !is_closed_value(b.value) do return false
 	return true
 }
 
@@ -405,7 +410,8 @@ printed_bdd :: proc(b: Bdd) -> (string, Level) {
 	case Bdd_Leaf:
 		return v == .Top ? "scope" : "none", .PRIMARY
 	case ^Bdd_Node:
-		atom := print_expr(new_expr(v.atom.shape))
+		atom := print_type(new_expr(v.atom.shape))
+		if v.atom.exact do atom = fmt.tprintf("{{-> %s}}", atom) // le scope lui-même, pas sa forme
 		parts := make([dynamic]Part, context.temp_allocator)
 		branch :: proc(parts: ^[dynamic]Part, head: string, head_level: Level, rest: Bdd) {
 			if is_leaf(rest, .Bottom) do return

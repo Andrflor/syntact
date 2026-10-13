@@ -19,9 +19,10 @@ import "core:strings"
 //   comparaisons  sur les entiers p < 0, p = 0, p ≠ 0 avec p normalisé (pgcd,
 //                 signe) ; sinon a < b, a <= b (sens fixé), a = b (ordonnés).
 //
-// Le type d'une telle expression (ses valeurs possibles) est exact quand on peut
-// énumérer ses symboles, sur-approché sinon — jamais pour une couleur : une
-// couleur est un singleton, donc ne dépend d'aucune inconnue.
+// La forme normale EST le type : exacte, jamais remplacée par une approximation.
+// Ses valeurs possibles ne se calculent que pour décider (check.odin) : exactes
+// quand on peut énumérer ses inconnues, une enveloppe sûre sinon. Une couleur ne
+// dépend d'aucune inconnue.
 
 Mono :: struct {
 	coef: i128,
@@ -255,7 +256,7 @@ ordered :: proc(a, b: ^Expr) -> (^Expr, ^Expr) {
 }
 
 expr_less :: proc(a, b: ^Expr) -> bool {
-	return print_expr(a) < print_expr(b)
+	return print_type(a) < print_type(b)
 }
 
 float_add :: proc(a, b: ^Expr) -> ^Expr {
@@ -537,39 +538,68 @@ Atom :: union {
 	bool,
 }
 
-enumerate :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
-	syms := make([dynamic]int)
-	collect_symbols(t, &syms)
-	slice.sort(syms[:])
-	ids := slice.unique(syms[:])
-	domains := make([][]Atom, len(ids))
-	total := 1
-	for id, i in ids {
-		atoms, ok := atoms_of_set(k.symbols[id], ENUMERATION_LIMIT)
-		if !ok do return {}, false
-		total *= len(atoms)
-		if total > ENUMERATION_LIMIT do return {}, false
-		domains[i] = atoms
-	}
+// enumerate : les valeurs possibles d'une forme, exactes, si ses inconnues
+// s'énumèrent.
+enumerate :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, ok: bool) {
+	a := assignments(k, t) or_return
 	results := make([dynamic]Atom)
-	env := make([]Atom, len(k.symbols))
-	index := make([]int, len(ids))
 	for {
-		for id, i in ids do env[id] = domains[i][index[i]]
-		a, ok := eval(t, env)
-		if !ok do return {}, false
-		append(&results, a)
-		// le compteur suivant, comme un odomètre
-		i := 0
-		for i < len(ids) {
-			index[i] += 1
-			if index[i] < len(domains[i]) do break
-			index[i] = 0
-			i += 1
-		}
-		if i == len(ids) do break
+		v := eval(t, a.env) or_return
+		append(&results, v)
+		if !next_assignment(&a) do break
 	}
 	return set_of_atoms(results[:]), true
+}
+
+// Assignments : toutes les valeurs des inconnues d'un type, une à une, la première
+// inconnue variant le plus vite. `env[id]` est la valeur courante de l'inconnue id.
+Assignments :: struct {
+	ids:     []int,
+	domains: [][]Atom,
+	digits:  []int,
+	env:     []Atom,
+}
+
+// assignments : la première affectation des inconnues de `t` ; faux s'il y en a
+// trop pour les énumérer.
+assignments :: proc(k: ^Kernel, t: ^Expr) -> (Assignments, bool) {
+	found := make([dynamic]int)
+	collect_symbols(t, &found)
+	slice.sort(found[:])
+	return assignments_of(k, slice.unique(found[:]))
+}
+
+// assignments_of : de même, pour des inconnues données, sans doublon.
+assignments_of :: proc(k: ^Kernel, ids: []int) -> (a: Assignments, ok: bool) {
+	a.ids = ids
+	a.domains = make([][]Atom, len(ids))
+	total := 1
+	for id, i in ids {
+		a.domains[i] = atoms_of_set(k.symbols[id], ENUMERATION_LIMIT) or_return
+		total *= len(a.domains[i])
+		if total > ENUMERATION_LIMIT do return a, false
+	}
+	a.digits = make([]int, len(ids))
+	a.env = make([]Atom, len(k.symbols))
+	load_assignment(&a)
+	return a, true
+}
+
+// next_assignment : passe à l'affectation suivante ; faux après la dernière.
+next_assignment :: proc(a: ^Assignments) -> bool {
+	for i in 0 ..< len(a.digits) {
+		a.digits[i] += 1
+		if a.digits[i] < len(a.domains[i]) {
+			load_assignment(a)
+			return true
+		}
+		a.digits[i] = 0
+	}
+	return false
+}
+
+load_assignment :: proc(a: ^Assignments) {
+	for id, i in a.ids do a.env[id] = a.domains[i][a.digits[i]]
 }
 
 collect_symbols :: proc(t: ^Expr, out: ^[dynamic]int) {
@@ -579,12 +609,14 @@ collect_symbols :: proc(t: ^Expr, out: ^[dynamic]int) {
 	case Term:
 		if v.op == .Sym do append(out, v.sym)
 		for a in v.args do collect_symbols(a, out)
+	case Set_Form:
+		for a in v.args do collect_symbols(a, out)
 	}
 }
 
 // atoms_of_set : tous les éléments d'un ensemble, s'il en a au plus `limit`.
 atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
-	if domain_count(s, .Scopes) > 0 do return nil, false // des scopes ne s'énumèrent pas en atomes
+	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return nil, false // ni des scopes ni des ensembles ne s'énumèrent en atomes
 	out := make([dynamic]Atom)
 	for iv in s.ints.intervals {
 		lo, lo_ok := iv.lo.?
@@ -808,11 +840,6 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 		if !ok || x.op != y.op || x.sym != y.sym || len(x.args) != len(y.args) do return false
 		for e, i in x.args do if !expr_equal(k, e, y.args[i]) do return false
 		return true
-	case Family:
-		y, ok := b^.(Family)
-		return ok && family_equal(x, y)
-	case ^Scope:
-		return value_equal(k, a, b)
 	}
 	return false
 }
@@ -858,23 +885,23 @@ printed_poly :: proc(p: Poly) -> (string, Level) {
 printed_term :: proc(t: Term) -> (string, Level) {
 	infix :: proc(args: []^Expr, symbol: string, operand: Level) -> string {
 		parts := make([]string, len(args))
-		for a, i in args do parts[i] = print_at(a, operand)
+		for a, i in args do parts[i] = print_type_at(a, operand)
 		return strings.join(parts, symbol)
 	}
 	switch t.op {
 	case .Sym:
 		return fmt.tprintf("??%d", t.sym), .PRIMARY
 	case .F_Neg:
-		return fmt.tprintf("-%s", print_at(t.args[0], .CALL)), .UNARY
+		return fmt.tprintf("-%s", print_type_at(t.args[0], .CALL)), .UNARY
 	case .F_Add, .Concat:
 		return infix(t.args, " + ", above(.TERM)), .TERM
 	case .F_Mul, .Repeat:
 		return infix(t.args, " * ", above(.FACTOR)), .FACTOR
 	case .Lt, .Le:
-		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_at(t.args[0], above(.COMPARISON)), t.op == .Lt ? "<" : "<="), .COMPARISON
+		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_type_at(t.args[0], above(.COMPARISON)), t.op == .Lt ? "<" : "<="), .COMPARISON
 		return infix(t.args, t.op == .Lt ? " < " : " <= ", above(.COMPARISON)), .COMPARISON
 	case .Eq, .Ne:
-		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_at(t.args[0], above(.EQUALITY)), t.op == .Eq ? "=" : "!="), .EQUALITY
+		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_type_at(t.args[0], above(.EQUALITY)), t.op == .Eq ? "=" : "!="), .EQUALITY
 		return infix(t.args, t.op == .Eq ? " = " : " != ", above(.EQUALITY)), .EQUALITY
 	}
 	return "", .PRIMARY
