@@ -60,12 +60,17 @@ direct :: proc(s: ^Scope, p: Place) -> bool {
 type_expansion :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, shape: []Place) {
 	previous := enter(k, env, b)
 	defer k.scene = previous
-	if v, literal := b.value^.(^Scope); literal && v.parent == env && shape != nil {
+	if v, literal := scope_literal(b.value); literal && v.parent == env && shape != nil {
 		type_scope(k, v, shape)
 		b.value_type = b.value
 		return
 	}
-	b.value_type = type_of(k, b.value, env)
+	if b.color != nil {
+		b.color_type = type_color(k, b, env)
+		b.value_type = default_of(k, b.color_type, b)
+	} else {
+		b.value_type = type_of(k, b.value, env)
+	}
 	if is_invalid(b.value_type) do return
 	if _, is_scope := b.value_type^.(^Scope); !is_scope {
 		b.value_type = report(k, .Invalid_Expansion, b.span, fmt.tprintf("on n'expanse qu'un scope : %s", brief(b.value_type)))
@@ -119,4 +124,11 @@ local_ordinal :: proc(s: ^Scope, target: Place, name: string) -> int {
 		if binding_at(p).name == name do seen += 1
 	}
 	return -1
+}
+
+// scope_literal : la valeur écrite est un scope.
+scope_literal :: proc(value: ^Expr) -> (^Scope, bool) {
+	if value == nil do return nil, false
+	v, ok := value^.(^Scope)
+	return v, ok
 }

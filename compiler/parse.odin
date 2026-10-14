@@ -51,6 +51,7 @@ Token_Kind :: enum u8 {
 	Dot,
 	DoubleDot,
 	Ellipsis,
+	EllipsisNone, // `...` détaché : l'expansion de tout scope
 	Range,
 	PrefixRange,
 	PostfixRange,
@@ -480,7 +481,9 @@ lex_zero :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	return scan_number(l, start, flags)
 }
 
-// The dot family is delimiter-sensitive. `...` is Ellipsis. `..` picks among
+// The dot family is delimiter-sensitive. `...` glued to an operand is Ellipsis
+// (`...xs`); followed by a value-delimiter it is EllipsisNone, the bare expansion
+// (`{... u8:b}`). `..` picks among
 // DoubleDot/PrefixRange/PostfixRange/Range by which sides have a value-delimiter;
 // a single `.` picks Dot/Property{From,To}None the same way. "Delimiter" = a byte
 // that can't be part of an operand, so `a.b` is told from `a. `/`.b` without parser feedback.
@@ -495,7 +498,8 @@ lex_dot :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 		if off < slen && src[off] == '.' {
 			off += 1
 			l.offset = off
-			return Token{kind = .Ellipsis, span = Span{start, off}, flags = flags}
+			kind := off >= slen || IS_AFTER_DELIM[src[off]] ? Token_Kind.EllipsisNone : Token_Kind.Ellipsis
+			return Token{kind = kind, span = Span{start, off}, flags = flags}
 		}
 		l.offset = off
 		kind := Token_Kind.Range
@@ -811,6 +815,7 @@ init_parse_tables :: proc "contextless" () {
 	prefix_table[.ReactivePush] = parse_reactive_push_prefix
 	prefix_table[.ReactivePull] = parse_reactive_pull_prefix
 	prefix_table[.Ellipsis] = parse_expansion
+	prefix_table[.EllipsisNone] = parse_bare_expansion
 
 	infix_table[.LeftBraceCarve] = parse_carve
 	infix_table[.LeftBracket] = parse_left_bracket
@@ -925,6 +930,7 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.ReactivePull] = .ASSIGNMENT
 
 	prec_table[.Ellipsis] = .PRIMARY
+	prec_table[.EllipsisNone] = .PRIMARY
 }
 
 grow_buffer :: proc($T: typeid, buf: ^[]T, current_len: int) {
@@ -2491,6 +2497,18 @@ parse_expansion :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Expand, data, Span{span_start, parser.node_spans[target].end})
 }
 
+// `...` alone — the bare expansion: an Expand without a target, which places any
+// scope at all.
+parse_bare_expansion :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	advance_token(parser)
+	data: Node_Data
+	data.unary = Unary_Data {
+		operand = INVALID_NODE,
+	}
+	return add_node(parser, .Expand, data, span)
+}
+
 // `@name.a.b` — an External node with any trailing `.a.b` folded into Property nodes over it.
 parse_reference :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
@@ -2802,6 +2820,7 @@ IS_EXPRESSION_START: [Token_Kind]bool = #partial {
 	.DoubleDot          = true,
 	.Question           = true,
 	.Ellipsis           = true,
+	.EllipsisNone       = true,
 	.PointingPush       = true,
 	.Equal              = true,
 	.NotEqual           = true,

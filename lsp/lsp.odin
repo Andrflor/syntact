@@ -1387,7 +1387,8 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		     .PrefixRange,
 		     .PostfixRange,
 		     .DoubleDot,
-		     .Ellipsis:
+		     .Ellipsis,
+		     .EllipsisNone:
 			emit(ast, tokens, cur.span, .Operator)
 		}
 

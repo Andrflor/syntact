@@ -134,12 +134,13 @@ type_color :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> ^Expr {
 
 // expected_shape : la forme qu'un type de couleur attend pour ce scope littéral —
 // la couleur elle-même si c'est une forme, ou la seule forme de même structure
-// dans une combinaison de formes.
+// dans une combinaison de formes. La coloration implicite descend place par
+// place : une forme de longueur quelconque (`...C:`) n'a pas de places fixes.
 expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bool) {
 	if color == nil do return nil, false
 	#partial switch c in color^ {
 	case ^Scope:
-		return c, first_production(c) == nil
+		return c, first_production(c) == nil && fixed_length(c)
 	case Set:
 		found: ^Scope = nil
 		for r in bdd_atoms(c.scopes) {
@@ -150,6 +151,16 @@ expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bo
 		return found, found != nil
 	}
 	return nil, false
+}
+
+// fixed_length : la forme n'a pas de suite — ni elle, ni ce qu'elle expanse.
+fixed_length :: proc(s: ^Scope) -> bool {
+	for b in s.bindings {
+		if b.kind != .Expand do continue
+		if b.color != nil do return false
+		if v, ok := expanded(b); ok && !fixed_length(v) do return false
+	}
+	return true
 }
 
 // fits : le scope littéral a la structure de la forme (noms et kinds, dans l'ordre).
@@ -187,6 +198,8 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 // scopes_default : le défaut d'un ensemble de scopes réduit à une forme, c'est la
 // forme elle-même (`Point:p` vaut Point).
 scopes_default :: proc(k: ^Kernel, b: Bdd, binding: ^Binding) -> ^Expr {
+	// tous les scopes : le scope vide, comme "" pour toutes les chaînes
+	if is_leaf(b, .Top) do return new_expr(new_scope(nil))
 	if n, is_node := b.(^Bdd_Node); is_node && is_leaf(n.yes, .Top) && is_leaf(n.maybe, .Bottom) && is_leaf(n.no, .Bottom) {
 		return new_expr(n.atom.shape)
 	}

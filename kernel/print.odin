@@ -161,15 +161,24 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 	b := strings.builder_make()
 	strings.write_byte(&b, '{')
 	shown := make([dynamic]Binding, context.temp_allocator)
-	if view == .Type {
-		for p in places(s) do append(&shown, binding_at(p)^) // le scope tel qu'il se présente
-	} else {
-		append(&shown, ..s.bindings[:])
-	}
+	if view == .Type do presented(s, &shown) // le scope tel qu'il se présente
+	else do append(&shown, ..s.bindings[:])
 	for bd, i in shown {
 		color, value := bd.color, bd.value
 		if view == .Type do color, value = bd.color_type, bd.value_type
 		if i > 0 do strings.write_string(&b, "  ")
+		if bd.kind == .Expand {
+			// `...xs`, `...C:(t)`, `...` : l'expansion, puis ce qu'elle dépose
+			strings.write_string(&b, ARROWS[.Expand])
+			if bd.color != nil {
+				if !is_all_scopes(bd.color) do fmt.sbprintf(&b, "%s:", print_at(bd.color, above(.CONSTRAINT), view))
+				if bd.name != "" do strings.write_string(&b, bd.name)
+				if bd.capture != "" do fmt.sbprintf(&b, "(%s)", bd.capture)
+			} else if value != nil {
+				strings.write_string(&b, print_at(value, .NONE, view))
+			}
+			continue
+		}
 		if color != nil do fmt.sbprintf(&b, "%s:", print_at(color, above(.CONSTRAINT), view))
 		if bd.name != "" do strings.write_string(&b, bd.name)
 		if i < len(ordinals) && ordinals[i] >= 0 do fmt.sbprintf(&b, "#%d", ordinals[i])
@@ -177,8 +186,7 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 		if value != nil {
 			if bd.name != "" || color != nil || bd.kind != .Push {
 				if bd.name != "" || color != nil do strings.write_byte(&b, ' ')
-				strings.write_string(&b, ARROWS[bd.kind])
-				if bd.kind != .Expand do strings.write_byte(&b, ' ') // `...xs` s'écrit collé
+				fmt.sbprintf(&b, "%s ", ARROWS[bd.kind])
 			}
 			strings.write_string(&b, print_at(value, .NONE, view))
 		}
@@ -475,4 +483,23 @@ write_regex :: proc(b: ^strings.Builder, re: ^Regex, textual: bool) -> Level {
 		return .FACTOR
 	}
 	return .PRIMARY
+}
+
+// is_all_scopes : la couleur de `...` seul, tous les scopes.
+is_all_scopes :: proc(e: ^Expr) -> bool {
+	s, ok := e^.(Set)
+	return ok && s.sorts == {.Scopes} && is_leaf(s.scopes, .Top)
+}
+
+// presented : les bindings qu'un scope présente, pour l'impression de son type.
+// Une expansion d'une valeur dépose ses bindings ; une expansion colorée reste une
+// suite, `...C:` — ce qu'elle dépose n'est pas une valeur.
+presented :: proc(s: ^Scope, out: ^[dynamic]Binding) {
+	for b in s.bindings {
+		if b.kind == .Expand && b.color == nil {
+			if v, ok := expanded(b); ok do presented(v, out)
+			continue
+		}
+		append(out, b)
+	}
 }

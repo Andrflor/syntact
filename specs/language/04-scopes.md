@@ -57,11 +57,22 @@ b -> {...a  z -> 9}
 b{x -> 5}.y             // 6 — `{...a  z -> 9}{x -> 5}` is `{...a{x -> 5}  z -> 9}`
 ```
 
-Expanded alone, `...` places any scope at all — as `..` alone is any atom. In a
-shape, it is a run of any bindings:
+`...C:` expands an anonymous binding colored by `C`, as `u8:` is an anonymous
+binding colored by `u8`. As a value, it places the default of `C`; in a shape, it
+admits any scope that `C` admits, so the shape no longer has a fixed length:
+
+```syntact
+Pair -> {u8: u8:}
+{...Pair: string:}:a -> {1 2 "x"}     // a pair, then a string
+```
+
+`...` alone is `...` of any scope — as `..` alone is any atom. It is written
+detached: `...xs` expands `xs`, while `... ` followed by a space, a new line or a
+closing brace expands any scope:
 
 ```syntact
 {... u8:b}:a            // a: any scope whose last binding is a u8 named b
+{u8:x ...}:c            // c: a u8 named x, then anything
 ```
 
 A file is a scope. A folder is a scope. A library is a scope. A primitive type is a scope. A pattern can be a scope. A program is a scope.
