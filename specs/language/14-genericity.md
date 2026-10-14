@@ -5,7 +5,7 @@
 ```syntact
 identity -> {
   T <- none
-  value <- none
+  T:value -> none
   -> value
 }
 
@@ -13,7 +13,23 @@ identity{value -> 5}!
 identity{value -> "hello"}!
 ```
 
-`T` and `value` are both holes. Carving with `value -> 5` fills `value`, and `T` is inferred from the shape of what filled it. The use site never has to mention `T` — it is recovered from the carving.
+`T` is a hole. `value` is an ordinary field whose color mentions `T`. Carving with `value -> 5` pushes into `value`, and because the color of `value` mentions `T`, the carve infers `T` from the shape of what filled it. The use site never has to mention `T` — it is recovered from the carving.
+
+A hole is inferred only through the colors that mention it. Every field that mentions the same hole must agree on it:
+
+```syntact
+data -> { u8:x -> 0 }
+
+pair -> {
+  u8:e <- 2
+  data{e}:first
+  data{e}:second
+  -> e
+}
+
+pair{data{6} data{6}}!   // e = 6
+pair{data{6} data{3}}!   // error: e cannot be both 6 and 3
+```
 
 A hole can also be filled explicitly. Since a hole is *pulled*, not pushed, the fill arrow at the use site is `<-`, not `->`:
 
@@ -21,7 +37,23 @@ A hole can also be filled explicitly. Since a hole is *pulled*, not pushed, the 
 identity{T <- u8 value -> 5}!
 ```
 
-`value -> 5` is an ordinary push binding into the hole `value`. `T <- u8` says “fill the hole `T` with `u8`”. Mixing the two arrows is not a quirk: `->` pushes a value into a binding, `<-` pulls a value into a hole. The carve can do either at any position.
+`value -> 5` pushes a value into the field `value`. `T <- u8` says “fill the hole `T` with `u8`”. Mixing the two arrows is not a quirk: `->` pushes a value into a binding, `<-` pulls a value into a hole. A hole is filled only by `<-`, and a field only by `->`.
+
+An explicit fill is one more constraint on the hole, not an override: `pair{e <- 4 data{6} data{6}}` is an error, since the carve forces `e = 6`.
+
+A positional carve argument never lands in a hole. Positions count only the push fields, so holes are skipped:
+
+```syntact
+base -> {
+  x <- 0
+  u8:a -> 1
+  u8:b -> 2
+}
+
+base{10, 20}   // a -> 10, b -> 20; x keeps its default
+```
+
+A scope whose only fields are holes has no positional slot: `{ x <- 0 }{9}` is an invalid carve.
 
 This is genericity without a separate generic syntax.
 
