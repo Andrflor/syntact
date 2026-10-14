@@ -1478,6 +1478,11 @@ walk_expand :: #force_inline proc(
 	data := ast.node_data[idx]
 	operand_idx := data.unary.operand
 	constraint: ^Type = nil
+	// `...` alone: the expansion of any scope — an anonymous unconstrained Expand
+	// binding, the same as the captured tail `...(r)` without its capture.
+	if operand_idx == INVALID_NODE {
+		return append_bare_constraint(a, current_scope, "", nil, .Expand, idx)
+	}
 	if ast.node_kinds[operand_idx] == .Constraint {
 		cdata := ast.node_data[operand_idx]
 		constraint = walk(a, current_scope, cdata.binary.left)

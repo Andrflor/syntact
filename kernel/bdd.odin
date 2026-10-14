@@ -26,8 +26,9 @@ Record :: struct {
 Field :: struct {
 	name: string,
 	kind: Binding_Kind,
-	set:  Set, // ce que le binding admet
+	set:  Set, // ce que le binding admet ; pour une suite, les scopes qu'elle forme
 	free: bool, // un binding nommé sans couleur n'impose rien
+	run:  bool, // `...C:` : une suite de bindings, qui forme un scope admis par C
 }
 
 Bdd_Leaf :: enum u8 {
@@ -149,6 +150,9 @@ bdd_subset :: proc(a, b: Bdd) -> bool {
 // formes, et il en reste toujours (une autre structure).
 records_empty :: proc(pos, neg: []^Record) -> bool {
 	if len(pos) == 0 do return false
+	// une forme de longueur quelconque : son vide ne se décide pas encore ici ; on
+	// ne l'affirme pas — et ignorer une forme retirée ne fait qu'agrandir le reste
+	for r in pos do if has_run(r) do return false
 	first := pos[0]
 	fields := make([]Set, len(first.fields), context.temp_allocator)
 	for f, i in first.fields do fields[i] = field_set(f)
@@ -158,7 +162,7 @@ records_empty :: proc(pos, neg: []^Record) -> bool {
 	}
 	cover := make([dynamic][]Set, context.temp_allocator)
 	for r in neg {
-		if !same_structure(r, first) do continue
+		if has_run(r) || !same_structure(r, first) do continue
 		sets := make([]Set, len(r.fields), context.temp_allocator)
 		for f, i in r.fields do sets[i] = field_set(f)
 		append(&cover, sets)
@@ -182,8 +186,13 @@ product_covered :: proc(fields: []Set, cover: [][]Set) -> bool {
 
 same_structure :: proc(a, b: ^Record) -> bool {
 	if len(a.fields) != len(b.fields) do return false
-	for f, i in a.fields do if f.name != b.fields[i].name || f.kind != b.fields[i].kind do return false
+	for f, i in a.fields do if f.name != b.fields[i].name || f.kind != b.fields[i].kind || f.run != b.fields[i].run do return false
 	return true
+}
+
+has_run :: proc(r: ^Record) -> bool {
+	for f in r.fields do if f.run do return true
+	return false
 }
 
 // field_set : ce qu'un binding admet ; tout, s'il n'impose rien.
@@ -246,17 +255,36 @@ scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 		}
 		return set, true
 	}
-	fields := make([]Field, len(shown))
-	for p, i in shown {
-		b := binding_at(p)^
-		fields[i] = Field{name = b.name, kind = b.kind}
-		if b.color == nil && b.name != "" {
-			fields[i].free = true // un binding nommé sans couleur n'impose rien : un carve peut lui donner toute valeur
+	fields := make([dynamic]Field)
+	shape_fields(k, s, &fields) or_return
+	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s))}, true
+}
+
+// shape_fields : les places d'une forme. Une expansion `...xs` y dépose les
+// places de xs ; une expansion colorée `...C:`, une suite — ce qu'elle dépose n'est
+// pas une valeur mais tout scope que C admet.
+shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field) -> bool {
+	for b in s.bindings {
+		if b.kind == .Expand {
+			if b.color == nil {
+				v, ok := expanded(b)
+				if !ok do return false
+				shape_fields(k, v, out) or_return
+				continue
+			}
+			set := color_set(k, b.color_type) or_return
+			append(out, Field{kind = .Expand, set = set, run = true})
 			continue
 		}
-		fields[i].set = admitted_by(k, b) or_return
+		f := Field{name = b.name, kind = b.kind}
+		if b.color == nil && b.name != "" {
+			f.free = true // un binding nommé sans couleur n'impose rien : un carve peut lui donner toute valeur
+		} else {
+			f.set = admitted_by(k, b) or_return
+		}
+		append(out, f)
 	}
-	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, s))}, true
+	return true
 }
 
 // admitted_by : ce qu'un binding admet — ce qu'admet sa couleur, sinon sa valeur.
@@ -350,7 +378,7 @@ not3 :: proc(a: Member) -> Member {
 
 // bdd_admits : le scope valeur `s` est-il dans l'ensemble `b` ?
 bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope) -> Verdict {
-	switch bdd_member(k, b, s) {
+	switch bdd_member(k, b, places(s)) {
 	case .Always:
 		return .Proved
 	case .Not_Always, .Never:
@@ -360,30 +388,67 @@ bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope) -> Verdict {
 	return .Undecided
 }
 
-bdd_member :: proc(k: ^Kernel, b: Bdd, s: ^Scope) -> Member {
+// bdd_member : la suite de bindings `view` — un scope, ou la part d'un scope
+// qu'une suite reçoit — est-elle dans l'ensemble `b` ?
+bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place) -> Member {
 	switch v in b {
 	case Bdd_Leaf:
 		return v == .Top ? .Always : .Never
 	case ^Bdd_Node:
-		in_atom := record_member(k, v.atom, s)
-		via_yes := and3(in_atom, bdd_member(k, v.yes, s))
-		via_no := and3(not3(in_atom), bdd_member(k, v.no, s))
-		return or3(or3(via_yes, bdd_member(k, v.maybe, s)), via_no)
+		in_atom := record_member(k, v.atom, view)
+		via_yes := and3(in_atom, bdd_member(k, v.yes, view))
+		via_no := and3(not3(in_atom), bdd_member(k, v.no, view))
+		return or3(or3(via_yes, bdd_member(k, v.maybe, view)), via_no)
 	}
 	return .Never
 }
 
-record_member :: proc(k: ^Kernel, r: ^Record, s: ^Scope) -> Member {
-	shown := places(s)
-	if len(shown) != len(r.fields) do return .Never
-	result := Member.Always
-	for f, i in r.fields {
-		b := binding_at(shown[i])^
-		if f.name != b.name || f.kind != b.kind do return .Never
-		if f.free || colored_within(k, b, f.set) do continue
-		result = and3(result, member_of(admits(k, f.set, b.value_type), is_closed_type(b.value_type)))
+// record_member : la suite `view` a-t-elle la forme r ? Chaque place de la forme
+// prend un binding ; une suite prend une part, de longueur quelconque, que sa
+// couleur doit admettre comme scope. On essaie chaque découpage.
+//
+// Une forme qui se mentionne elle-même peut redemander la même suite (`X -> {...X:}`)
+// : une appartenance qui dépend d'elle-même n'est pas établie — c'est la plus
+// petite solution, celle des valeurs finies.
+record_member :: proc(k: ^Kernel, r: ^Record, view: []Place) -> Member {
+	key := Matching{r, raw_data(view), len(view)}
+	if key in k.matching do return .Never
+	k.matching[key] = {}
+	defer delete_key(&k.matching, key)
+	memo := make(map[[2]int]Member, context.temp_allocator)
+	return match_fields(k, r.fields, view, 0, 0, &memo)
+}
+
+// Matching : une appartenance en cours de décision.
+Matching :: struct {
+	record: ^Record,
+	view:   rawptr,
+	len:    int,
+}
+
+// match_fields : view[i:] a-t-elle la forme fields[j:] ?
+match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo: ^map[[2]int]Member) -> Member {
+	if j == len(fields) do return i == len(view) ? .Always : .Never
+	if m, seen := memo[{i, j}]; seen do return m
+	f := fields[j]
+	result := Member.Never
+	if f.run {
+		for e in i ..= len(view) {
+			result = or3(result, and3(bdd_member(k, f.set.scopes, view[i:e]), match_fields(k, fields, view, e, j + 1, memo)))
+			if result == .Always do break
+		}
+	} else if i < len(view) {
+		result = and3(field_member(k, f, binding_at(view[i])^), match_fields(k, fields, view, i + 1, j + 1, memo))
 	}
+	memo[{i, j}] = result
 	return result
+}
+
+// field_member : le binding b a-t-il la place f ?
+field_member :: proc(k: ^Kernel, f: Field, b: Binding) -> Member {
+	if f.name != b.name || f.kind != b.kind do return .Never
+	if f.free || colored_within(k, b, f.set) do return .Always
+	return member_of(admits(k, f.set, b.value_type), is_closed_type(b.value_type))
 }
 
 // colored_within : la couleur du binding n'admet que des éléments de `s`. Sa valeur

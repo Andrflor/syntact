@@ -73,17 +73,19 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		}
 		append(&s.bindings, b)
 	case .Expand:
+		// `...E` dépose la valeur de E ; `...C:` celle d'un binding anonyme coloré par
+		// C, et `...` seul, d'un binding coloré par tous les scopes
 		target := data.unary.operand
-		value: ^Expr
+		b := Binding{kind = .Expand, span = span}
 		switch {
 		case target == syn.INVALID_NODE:
-			value = unsupported(k, idx, "l'expansion sans cible")
+			b.color = new_expr(Set{sorts = {.Scopes}, scopes = .Top})
 		case ast.node_kinds[target] == .Constraint:
-			value = unsupported(k, idx, "l'expansion d'un binding coloré")
+			if !build_left(k, s, target, &b) do return
 		case:
-			value = build_expr(k, s, target)
+			b.value = build_expr(k, s, target)
 		}
-		append(&s.bindings, Binding{kind = .Expand, value = value, span = span})
+		append(&s.bindings, b)
 	case .EventPush:
 		append(&s.bindings, Binding{kind = .Event_Push, value = unsupported(k, idx, "l'émission >-"), span = span})
 	case .EventPull:

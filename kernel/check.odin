@@ -44,7 +44,7 @@ refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr) -> (field: ^Binding, set
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return
 	n, is_node := color.scopes.(^Bdd_Node)
-	if !is_node || !is_leaf(n.yes, .Top) || !is_leaf(n.maybe, .Bottom) || !is_leaf(n.no, .Bottom) do return
+	if !is_node || !is_leaf(n.yes, .Top) || !is_leaf(n.maybe, .Bottom) || !is_leaf(n.no, .Bottom) || has_run(n.atom) do return
 	shown := places(s)
 	if len(shown) != len(n.atom.fields) do return
 	for f, i in n.atom.fields {

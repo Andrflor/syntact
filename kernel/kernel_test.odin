@@ -163,6 +163,14 @@ CASES := []Case {
 	{"xs -> {2 3}\nys -> {1 ...xs}\nzs -> ys{9 8 7}", "{xs -> {2  3}  ys -> {1  2  3}  zs -> {9  8  7}}", {}}, // des positions à travers l'expansion
 	{"{u8: u8: u8:}:ys -> {1 ...{2 300}}", "", {.Constraint_Mismatch}},
 	{"a -> {x -> 1}\nb -> {...a}\nc -> b{x -> 2 x -> 3}", "", {.Invalid_Carve}},
+	// une expansion colorée est une suite : tout scope que sa couleur admet
+	{"{... u8:b}:a -> {1 \"x\" {} b -> 5}", "", {}},
+	{"{... u8:b}:a -> {b -> 300}", "", {.Constraint_Mismatch}},
+	{"{... u8:b}:a -> {1 2}", "", {.Constraint_Mismatch}}, // pas de b à la fin
+	{"{u8:x ...}:a -> {x -> 3  y -> \"z\"  4}", "", {}},
+	{"Pair -> {u8: u8:}\n{...Pair: string:}:a -> {1 2 \"x\"}", "", {}},
+	{"Pair -> {u8: u8:}\n{...Pair: string:}:z -> {1 \"x\"}", "", {.Constraint_Mismatch}},
+	{"q -> {...u8:}", "", {.Invalid_Expansion}}, // le défaut de u8 n'est pas un scope
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
