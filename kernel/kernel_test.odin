@@ -201,7 +201,10 @@ SITE_CASES := []Site_Case {
 	{"Pair -> {\n  u8:a\n  u8:b\n}\np -> Pair{7}\nq -> p{b -> 300}\nr -> q{a -> 1}", {"6:8 ← 3:3"}},
 	{"P8 -> {\n  u8:x\n}\nP16 -> {\n  u16:x\n}\nWrap -> {\n  S -> P16\n  S:p -> {x -> 300}\n}\nw -> Wrap{S -> P8}", {"11:10 ← 9:11"}}, // la couleur implicite
 	{"Box -> {\n  n -> ??::u8\n  u8:y -> n * 2\n  x -> 1\n}\nb -> Box{x -> 5}", {"3:3"}},
-	{"f -> {\n  u8:x -> 5\n  -> x ? {=5 -> 1}\n}\ng -> f{x -> 6}!", {"5:7 ← 3:6"}}, // un carve qui rend le pattern non exhaustif
+	{"f -> {\n  u8:x -> 5\n  -> x ? {=5 -> 1}\n}\ng -> f{x -> 6}!", {"5:7 ← 3:6"}},
+	{"{u8: u8: u8:}:ys -> {1 ...{2 300}}", {"1:30"}}, // un littéral expansé reçoit la forme à sa place
+	{"xs -> {2 300}\n{u8: u8: u8:}:ys -> {1 ...xs}", {"2:1 ← 1:10"}}, // une valeur reçue d'ailleurs : au binding, écrit là où est le 300
+	{"p -> {x -> 1  y -> {z -> 300}}\n{u8:x  {u8:z}:y}:q -> p", {"2:1 ← 1:21"}}, // au plus profond // un carve qui rend le pattern non exhaustif
 }
 
 @(test)

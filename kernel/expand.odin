@@ -55,8 +55,16 @@ direct :: proc(s: ^Scope, p: Place) -> bool {
 	return p.scope == s && p.index == p.top
 }
 
-// type_expansion : la valeur de `...E` doit être un scope.
-type_expansion :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) {
+// type_expansion : la valeur de `...E` doit être un scope. Un scope écrit ici
+// reçoit `shape`, la suite de la forme de env à partir de sa place.
+type_expansion :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, shape: []Place) {
+	previous := enter(k, env, b)
+	defer k.scene = previous
+	if v, literal := b.value^.(^Scope); literal && v.parent == env && shape != nil {
+		type_scope(k, v, shape)
+		b.value_type = b.value
+		return
+	}
 	b.value_type = type_of(k, b.value, env)
 	if is_invalid(b.value_type) do return
 	if _, is_scope := b.value_type^.(^Scope); !is_scope {

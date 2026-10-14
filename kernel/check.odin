@@ -24,13 +24,36 @@ check :: proc(k: ^Kernel) {
 			switch admits(k, color, b.value_type) {
 			case .Proved:
 			case .Refuted:
-				report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ∉ %s sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
+				if field, set, found := refused_field(k, color, b.value_type); found {
+					report_about(k, .Constraint_Mismatch, b.span, field.span, fmt.tprintf("%s ∉ %s sur %s, dans %s", brief(field.value_type), print_set(set), display(field), display(&b)))
+				} else {
+					report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ∉ %s sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
+				}
 			case .Undecided:
 				report(k, .Unproven, b.span, fmt.tprintf("%s ∈ %s n'a pas pu être prouvé sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
 			}
 		}
 	}
 	k.scene = {}
+}
+
+// refused_field : quand la couleur est une seule forme et la valeur un scope, le
+// binding de la valeur que la forme refuse — au plus profond, quand c'est un scope
+// refusé par une forme plus intérieure — et ce que la forme y admet.
+refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr) -> (field: ^Binding, set: Set, found: bool) {
+	s, is_scope := t^.(^Scope)
+	if !is_scope do return
+	n, is_node := color.scopes.(^Bdd_Node)
+	if !is_node || !is_leaf(n.yes, .Top) || !is_leaf(n.maybe, .Bottom) || !is_leaf(n.no, .Bottom) do return
+	shown := places(s)
+	if len(shown) != len(n.atom.fields) do return
+	for f, i in n.atom.fields {
+		b := binding_at(shown[i])
+		if f.free || b.value_type == nil || admits(k, f.set, b.value_type) != .Refuted do continue
+		if inner, inner_set, deeper := refused_field(k, f.set, b.value_type); deeper do return inner, inner_set, true
+		return b, f.set, true
+	}
+	return
 }
 
 // admits : pour toute valeur des inconnues, la valeur que désigne le type `t` est
