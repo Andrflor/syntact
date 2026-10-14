@@ -1004,378 +1004,378 @@ test_tc_map_inner_proof_bad_199 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_tc_soluble_singleton_ref_ok_200 :: proc(t: ^testing.T) {
+test_tc_carve_recolors_bare_binding_stated_bad_200 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_carve_recolors_bare_binding_stated_bad.json", t)
+}
+
+@(test)
+test_tc_soluble_singleton_ref_ok_201 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_soluble_singleton_ref_ok.json", t)
 }
 
 @(test)
-test_tc_rep_range_ok_201 :: proc(t: ^testing.T) {
+test_tc_rep_range_ok_202 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_rep_range_ok.json", t)
 }
 
 @(test)
-test_tc_str_neg_word_seq_bad_202 :: proc(t: ^testing.T) {
+test_tc_str_neg_word_seq_bad_203 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_word_seq_bad.json", t)
 }
 
 @(test)
-test_tc_bool_union_true_ok_203 :: proc(t: ^testing.T) {
+test_tc_bool_union_true_ok_204 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_union_true_ok.json", t)
 }
 
 @(test)
-test_tc_bool_inter_same_ok_204 :: proc(t: ^testing.T) {
+test_tc_bool_inter_same_ok_205 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_inter_same_ok.json", t)
 }
 
 @(test)
-test_tc_neg_ord_range_bad_205 :: proc(t: ^testing.T) {
+test_tc_neg_ord_range_bad_206 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_ord_range_bad.json", t)
 }
 
 @(test)
-test_tc_color_carve_chain_bad_206 :: proc(t: ^testing.T) {
+test_tc_color_carve_chain_bad_207 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_carve_chain_bad.json", t)
 }
 
 @(test)
-test_tc_carve_implicit_ref_fail_207 :: proc(t: ^testing.T) {
+test_tc_carve_implicit_ref_fail_208 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_implicit_ref_fail.json", t)
 }
 
 @(test)
-test_tc_eq_neg_strict_bad_208 :: proc(t: ^testing.T) {
+test_tc_eq_neg_strict_bad_209 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eq_neg_strict_bad.json", t)
 }
 
 @(test)
-test_tc_pat_float_typecheck_exh_209 :: proc(t: ^testing.T) {
+test_tc_pat_float_typecheck_exh_210 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_float_typecheck_exh.json", t)
 }
 
 @(test)
-test_tc_eqset_dneg_collapse_ok_210 :: proc(t: ^testing.T) {
+test_tc_eqset_dneg_collapse_ok_211 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_dneg_collapse_ok.json", t)
 }
 
 @(test)
-test_tc_ref_neg_singleton_bad2_211 :: proc(t: ^testing.T) {
+test_tc_ref_neg_singleton_bad2_212 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_neg_singleton_bad2.json", t)
 }
 
 @(test)
-test_tc_scope_shape_calc_ok_212 :: proc(t: ^testing.T) {
+test_tc_scope_shape_calc_ok_213 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_shape_calc_ok.json", t)
 }
 
 @(test)
-test_tc_union_bool_int_intok_213 :: proc(t: ^testing.T) {
+test_tc_union_bool_int_intok_214 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_bool_int_intok.json", t)
 }
 
 @(test)
-test_tc_cast_into_i8_ok_214 :: proc(t: ^testing.T) {
+test_tc_cast_into_i8_ok_215 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_into_i8_ok.json", t)
 }
 
 @(test)
-test_tc_str_tri_range_noprefix_bad_215 :: proc(t: ^testing.T) {
+test_tc_str_tri_range_noprefix_bad_216 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_tri_range_noprefix_bad.json", t)
 }
 
 @(test)
-test_tc_pat_two_values_nonexh_216 :: proc(t: ^testing.T) {
+test_tc_pat_two_values_nonexh_217 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_two_values_nonexh.json", t)
 }
 
 @(test)
-test_tc_color_nested_carve_ok_217 :: proc(t: ^testing.T) {
+test_tc_color_nested_carve_ok_218 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_nested_carve_ok.json", t)
 }
 
 @(test)
-test_tc_str_tri_range_nomid_bad_218 :: proc(t: ^testing.T) {
+test_tc_str_tri_range_nomid_bad_219 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_tri_range_nomid_bad.json", t)
 }
 
 @(test)
-test_tc_cmp_le100_bad_219 :: proc(t: ^testing.T) {
+test_tc_cmp_le100_bad_220 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cmp_le100_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_single_ok_220 :: proc(t: ^testing.T) {
+test_tc_eqset_single_ok_221 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_single_ok.json", t)
 }
 
 @(test)
-test_tc_cast_unknown_forced_ok_221 :: proc(t: ^testing.T) {
+test_tc_cast_unknown_forced_ok_222 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_unknown_forced_ok.json", t)
 }
 
 @(test)
-test_tc_str_range_tri_ok_222 :: proc(t: ^testing.T) {
+test_tc_str_range_tri_ok_223 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_tri_ok.json", t)
 }
 
 @(test)
-test_tc_str_neg_ord_seq_short_ok_223 :: proc(t: ^testing.T) {
+test_tc_str_neg_ord_seq_short_ok_224 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_ord_seq_short_ok.json", t)
 }
 
 @(test)
-test_tc_int_and_cast_i8_ok_224 :: proc(t: ^testing.T) {
+test_tc_int_and_cast_i8_ok_225 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_and_cast_i8_ok.json", t)
 }
 
 @(test)
-test_tc_ref_or_family_bad_225 :: proc(t: ^testing.T) {
+test_tc_ref_or_family_bad_226 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_or_family_bad.json", t)
 }
 
 @(test)
-test_tc_ref_union_singletons_bad_226 :: proc(t: ^testing.T) {
+test_tc_ref_union_singletons_bad_227 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_union_singletons_bad.json", t)
 }
 
 @(test)
-test_tc_unk_mul_u8_bad_227 :: proc(t: ^testing.T) {
+test_tc_unk_mul_u8_bad_228 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_unk_mul_u8_bad.json", t)
 }
 
 @(test)
-test_tc_carve_subst_inner_carve_missing_bad_228 :: proc(t: ^testing.T) {
+test_tc_carve_subst_inner_carve_missing_bad_229 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_subst_inner_carve_missing_bad.json", t)
 }
 
 @(test)
-test_tc_execute_of_carve_ok_229 :: proc(t: ^testing.T) {
+test_tc_execute_of_carve_ok_230 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_of_carve_ok.json", t)
 }
 
 @(test)
-test_tc_color_u8_carve_ok_230 :: proc(t: ^testing.T) {
+test_tc_color_u8_carve_ok_231 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_u8_carve_ok.json", t)
 }
 
 @(test)
-test_tc_str_squote_multi_pos_ok_231 :: proc(t: ^testing.T) {
+test_tc_str_squote_multi_pos_ok_232 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_squote_multi_pos_ok.json", t)
 }
 
 @(test)
-test_tc_neg_or_self_other_ok_232 :: proc(t: ^testing.T) {
+test_tc_neg_or_self_other_ok_233 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_or_self_other_ok.json", t)
 }
 
 @(test)
-test_tc_pos_prefix_bad_233 :: proc(t: ^testing.T) {
+test_tc_pos_prefix_bad_234 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pos_prefix_bad.json", t)
 }
 
 @(test)
-test_tc_scope_field_union_ok_234 :: proc(t: ^testing.T) {
+test_tc_scope_field_union_ok_235 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_field_union_ok.json", t)
 }
 
 @(test)
-test_tc_carve_override_bad_235 :: proc(t: ^testing.T) {
+test_tc_carve_override_bad_236 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_override_bad.json", t)
 }
 
 @(test)
-test_tc_seq_tag_ok_236 :: proc(t: ^testing.T) {
+test_tc_seq_tag_ok_237 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_seq_tag_ok.json", t)
 }
 
 @(test)
-test_tc_ref_type_concrete_bad_237 :: proc(t: ^testing.T) {
+test_tc_ref_type_concrete_bad_238 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_type_concrete_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_u8_sub_bad_238 :: proc(t: ^testing.T) {
+test_tc_eqset_u8_sub_bad_239 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_u8_sub_bad.json", t)
 }
 
 @(test)
-test_tc_pat_combined_union_bad_239 :: proc(t: ^testing.T) {
+test_tc_pat_combined_union_bad_240 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_combined_union_bad.json", t)
 }
 
 @(test)
-test_tc_grammar_via_mention_ok_240 :: proc(t: ^testing.T) {
+test_tc_grammar_via_mention_ok_241 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_grammar_via_mention_ok.json", t)
 }
 
 @(test)
-test_tc_execute_ref_producer_bad_241 :: proc(t: ^testing.T) {
+test_tc_execute_ref_producer_bad_242 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_ref_producer_bad.json", t)
 }
 
 @(test)
-test_tc_str_neg_word_seq_digits_ok_242 :: proc(t: ^testing.T) {
+test_tc_str_neg_word_seq_digits_ok_243 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_word_seq_digits_ok.json", t)
 }
 
 @(test)
-test_tc_bool_neg_false_ok_243 :: proc(t: ^testing.T) {
+test_tc_bool_neg_false_ok_244 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_neg_false_ok.json", t)
 }
 
 @(test)
-test_tc_char_union_neg_ok_244 :: proc(t: ^testing.T) {
+test_tc_char_union_neg_ok_245 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_char_union_neg_ok.json", t)
 }
 
 @(test)
-test_tc_str_neg_ord_range_multi_bad_245 :: proc(t: ^testing.T) {
+test_tc_str_neg_ord_range_multi_bad_246 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_ord_range_multi_bad.json", t)
 }
 
 @(test)
-test_tc_pull_three_last_diverges_bad_246 :: proc(t: ^testing.T) {
+test_tc_pull_three_last_diverges_bad_247 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_three_last_diverges_bad.json", t)
 }
 
 @(test)
-test_tc_ref_arith_nested_bad_247 :: proc(t: ^testing.T) {
+test_tc_ref_arith_nested_bad_248 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_arith_nested_bad.json", t)
 }
 
 @(test)
-test_tc_prop_as_value_ok_248 :: proc(t: ^testing.T) {
+test_tc_prop_as_value_ok_249 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_prop_as_value_ok.json", t)
 }
 
 @(test)
-test_tc_str_neg_ord_seq_nonull_bad_249 :: proc(t: ^testing.T) {
+test_tc_str_neg_ord_seq_nonull_bad_250 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_ord_seq_nonull_bad.json", t)
 }
 
 @(test)
-test_tc_str_backtick_range_bad_250 :: proc(t: ^testing.T) {
+test_tc_str_backtick_range_bad_251 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_backtick_range_bad.json", t)
 }
 
 @(test)
-test_tc_color_multi_field_bad_251 :: proc(t: ^testing.T) {
+test_tc_color_multi_field_bad_252 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_multi_field_bad.json", t)
 }
 
 @(test)
-test_tc_pat_exh_value_singleton_252 :: proc(t: ^testing.T) {
+test_tc_pat_exh_value_singleton_253 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_exh_value_singleton.json", t)
 }
 
 @(test)
-test_tc_int_mul_range_u16_ok_253 :: proc(t: ^testing.T) {
+test_tc_int_mul_range_u16_ok_254 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mul_range_u16_ok.json", t)
 }
 
 @(test)
-test_tc_eqset_xd_int_str_bad_254 :: proc(t: ^testing.T) {
+test_tc_eqset_xd_int_str_bad_255 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_xd_int_str_bad.json", t)
 }
 
 @(test)
-test_tc_demorgan_ok_255 :: proc(t: ^testing.T) {
+test_tc_demorgan_ok_256 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_demorgan_ok.json", t)
 }
 
 @(test)
-test_tc_char_builtin_accepts_char_256 :: proc(t: ^testing.T) {
+test_tc_char_builtin_accepts_char_257 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_char_builtin_accepts_char.json", t)
 }
 
 @(test)
-test_tc_insoluble_neg_257 :: proc(t: ^testing.T) {
+test_tc_insoluble_neg_258 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_neg.json", t)
 }
 
 @(test)
-test_tc_union_char_alts_bad_258 :: proc(t: ^testing.T) {
+test_tc_union_char_alts_bad_259 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_char_alts_bad.json", t)
 }
 
 @(test)
-test_tc_str_rep_exact_bad_259 :: proc(t: ^testing.T) {
+test_tc_str_rep_exact_bad_260 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_rep_exact_bad.json", t)
 }
 
 @(test)
-test_tc_execute_carve_as_type_bad_260 :: proc(t: ^testing.T) {
+test_tc_execute_carve_as_type_bad_261 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_carve_as_type_bad.json", t)
 }
 
 @(test)
-test_tc_execute_chain_ref_ok_261 :: proc(t: ^testing.T) {
+test_tc_execute_chain_ref_ok_262 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_chain_ref_ok.json", t)
 }
 
 @(test)
-test_tc_ref_arith_overflow_bad_262 :: proc(t: ^testing.T) {
+test_tc_ref_arith_overflow_bad_263 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_arith_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_color_nested_carve_bad_263 :: proc(t: ^testing.T) {
+test_tc_color_nested_carve_bad_264 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_nested_carve_bad.json", t)
 }
 
 @(test)
-test_tc_str_concat_concrete_ok_264 :: proc(t: ^testing.T) {
+test_tc_str_concat_concrete_ok_265 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_concat_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_carve_subst_inner_constraint_bad_265 :: proc(t: ^testing.T) {
+test_tc_carve_subst_inner_constraint_bad_266 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_subst_inner_constraint_bad.json", t)
 }
 
 @(test)
-test_tc_carve_implicit_compose_fail_266 :: proc(t: ^testing.T) {
+test_tc_carve_implicit_compose_fail_267 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_implicit_compose_fail.json", t)
 }
 
 @(test)
-test_tc_scope_union_ok1_267 :: proc(t: ^testing.T) {
+test_tc_scope_union_ok1_268 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_union_ok1.json", t)
 }
 
 @(test)
-test_tc_pat_bool_nonexh_268 :: proc(t: ^testing.T) {
+test_tc_pat_bool_nonexh_269 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_bool_nonexh.json", t)
 }
 
 @(test)
-test_tc_refchain_triple_bad_269 :: proc(t: ^testing.T) {
+test_tc_refchain_triple_bad_270 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_refchain_triple_bad.json", t)
 }
 
 @(test)
-test_tc_int_sub_u8u8_i16_ok_270 :: proc(t: ^testing.T) {
+test_tc_int_sub_u8u8_i16_ok_271 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_sub_u8u8_i16_ok.json", t)
 }
 
 @(test)
-test_tc_scope_prop_271 :: proc(t: ^testing.T) {
+test_tc_scope_prop_272 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_prop.json", t)
 }
 
 @(test)
-test_tc_pat_refine_even_odd_ok_272 :: proc(t: ^testing.T) {
+test_tc_pat_refine_even_odd_ok_273 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_refine_even_odd_ok.json", t)
 }
 
 @(test)
-test_tc_bool_true_bad_273 :: proc(t: ^testing.T) {
+test_tc_bool_true_bad_274 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_true_bad.json", t)
-}
-
-@(test)
-test_tc_eqset_struct_not_denot_bad_274 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_eqset_struct_not_denot_bad.json", t)
 }
 
 @(test)
@@ -1474,1576 +1474,1577 @@ test_tc_pat_prod_string_on_int_bad_293 :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_tc_ref_prop_arith_ok_294 :: proc(t: ^testing.T) {
+test_tc_eqset_or_width_ok_294 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_eqset_or_width_ok.json", t)
+}
+
+@(test)
+test_tc_ref_prop_arith_ok_295 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_prop_arith_ok.json", t)
 }
 
 @(test)
-test_tc_cmp_le100_ok_295 :: proc(t: ^testing.T) {
+test_tc_cmp_le100_ok_296 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cmp_le100_ok.json", t)
 }
 
 @(test)
-test_tc_self_string_set_bad_296 :: proc(t: ^testing.T) {
+test_tc_self_string_set_bad_297 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_self_string_set_bad.json", t)
 }
 
 @(test)
-test_tc_scope_field_union_bad_297 :: proc(t: ^testing.T) {
+test_tc_scope_field_union_bad_298 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_field_union_bad.json", t)
 }
 
 @(test)
-test_tc_pat_exh_value_open_range_298 :: proc(t: ^testing.T) {
+test_tc_pat_exh_value_open_range_299 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_exh_value_open_range.json", t)
 }
 
 @(test)
-test_tc_pat_target_carve_ok_299 :: proc(t: ^testing.T) {
+test_tc_pat_target_carve_ok_300 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_target_carve_ok.json", t)
 }
 
 @(test)
-test_tc_proof_by_coloring_fails_300 :: proc(t: ^testing.T) {
+test_tc_proof_by_coloring_fails_301 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_proof_by_coloring_fails.json", t)
 }
 
 @(test)
-test_tc_pat_prod_ref_overflow_bad_301 :: proc(t: ^testing.T) {
+test_tc_pat_prod_ref_overflow_bad_302 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_ref_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_carve_value_ok_302 :: proc(t: ^testing.T) {
+test_tc_carve_value_ok_303 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_value_ok.json", t)
 }
 
 @(test)
-test_tc_neg_and_neg_ok_303 :: proc(t: ^testing.T) {
+test_tc_neg_and_neg_ok_304 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_and_neg_ok.json", t)
 }
 
 @(test)
-test_tc_scope_colored_field_ok_304 :: proc(t: ^testing.T) {
+test_tc_scope_colored_field_ok_305 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_colored_field_ok.json", t)
 }
 
 @(test)
-test_tc_str_tri_range_url_ok_305 :: proc(t: ^testing.T) {
+test_tc_str_tri_range_url_ok_306 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_tri_range_url_ok.json", t)
 }
 
 @(test)
-test_tc_str_rep_exact_ok_306 :: proc(t: ^testing.T) {
+test_tc_str_rep_exact_ok_307 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_rep_exact_ok.json", t)
 }
 
 @(test)
-test_tc_empty_scope_value_accepted_307 :: proc(t: ^testing.T) {
+test_tc_empty_scope_value_accepted_308 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_empty_scope_value_accepted.json", t)
 }
 
 @(test)
-test_tc_str_range_prefix_ok_308 :: proc(t: ^testing.T) {
+test_tc_str_range_prefix_ok_309 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_prefix_ok.json", t)
 }
 
 @(test)
-test_tc_str_union_pat_ok_309 :: proc(t: ^testing.T) {
+test_tc_str_union_pat_ok_310 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_union_pat_ok.json", t)
 }
 
 @(test)
-test_tc_pat_nested_overflow_bad_310 :: proc(t: ^testing.T) {
+test_tc_pat_nested_overflow_bad_311 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_nested_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_refinement_three_level_sisters_311 :: proc(t: ^testing.T) {
+test_tc_refinement_three_level_sisters_312 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_refinement_three_level_sisters.json", t)
 }
 
 @(test)
-test_tc_eqset_u8_super_bad_312 :: proc(t: ^testing.T) {
+test_tc_eqset_u8_super_bad_313 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_u8_super_bad.json", t)
 }
 
 @(test)
-test_tc_insoluble_nested_compose_313 :: proc(t: ^testing.T) {
+test_tc_insoluble_nested_compose_314 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_nested_compose.json", t)
 }
 
 @(test)
-test_tc_str_backtick_exact_ok_314 :: proc(t: ^testing.T) {
+test_tc_str_backtick_exact_ok_315 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_backtick_exact_ok.json", t)
 }
 
 @(test)
-test_tc_str_range_tri_noprefix_bad_315 :: proc(t: ^testing.T) {
+test_tc_str_range_tri_noprefix_bad_316 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_tri_noprefix_bad.json", t)
 }
 
 @(test)
-test_tc_union_char_alts_ok_316 :: proc(t: ^testing.T) {
+test_tc_union_char_alts_ok_317 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_char_alts_ok.json", t)
 }
 
 @(test)
-test_tc_color_nested_deep_ok_317 :: proc(t: ^testing.T) {
+test_tc_color_nested_deep_ok_318 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_nested_deep_ok.json", t)
 }
 
 @(test)
-test_tc_union_bool_int_float_bad_318 :: proc(t: ^testing.T) {
+test_tc_union_bool_int_float_bad_319 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_bool_int_float_bad.json", t)
 }
 
 @(test)
-test_tc_color_multi_field_ok_319 :: proc(t: ^testing.T) {
+test_tc_color_multi_field_ok_320 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_multi_field_ok.json", t)
 }
 
 @(test)
-test_tc_map_union_op_valid_all_branches_320 :: proc(t: ^testing.T) {
+test_tc_map_union_op_valid_all_branches_321 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_map_union_op_valid_all_branches.json", t)
 }
 
 @(test)
-test_tc_str_char_ok_321 :: proc(t: ^testing.T) {
+test_tc_str_char_ok_322 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_char_ok.json", t)
 }
 
 @(test)
-test_event_emit_payload_off_shape_322 :: proc(t: ^testing.T) {
+test_event_emit_payload_off_shape_323 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/event_emit_payload_off_shape.json", t)
 }
 
 @(test)
-test_tc_scope_calc_two_refs_bad_323 :: proc(t: ^testing.T) {
+test_tc_scope_calc_two_refs_bad_324 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_calc_two_refs_bad.json", t)
 }
 
 @(test)
-test_tc_flt_sub_concrete_ok_324 :: proc(t: ^testing.T) {
+test_tc_flt_sub_concrete_ok_325 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_sub_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_insoluble_ref_chain_325 :: proc(t: ^testing.T) {
+test_tc_insoluble_ref_chain_326 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_ref_chain.json", t)
 }
 
 @(test)
-test_tc_str_union_pat_bad_326 :: proc(t: ^testing.T) {
+test_tc_str_union_pat_bad_327 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_union_pat_bad.json", t)
 }
 
 @(test)
-test_tc_insoluble_and_327 :: proc(t: ^testing.T) {
+test_tc_insoluble_and_328 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_and.json", t)
 }
 
 @(test)
-test_tc_neg_self_ok_328 :: proc(t: ^testing.T) {
+test_tc_neg_self_ok_329 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_self_ok.json", t)
 }
 
 @(test)
-test_tc_str_neg_concat_ok_329 :: proc(t: ^testing.T) {
+test_tc_str_neg_concat_ok_330 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_concat_ok.json", t)
 }
 
 @(test)
-test_tc_carve_shorthand_two_fields_ok_330 :: proc(t: ^testing.T) {
+test_tc_carve_shorthand_two_fields_ok_331 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_shorthand_two_fields_ok.json", t)
 }
 
 @(test)
-test_tc_carve_value_override_bad_331 :: proc(t: ^testing.T) {
+test_tc_carve_value_override_bad_332 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_value_override_bad.json", t)
 }
 
 @(test)
-test_tc_ref_neg_singleton_bad_332 :: proc(t: ^testing.T) {
+test_tc_ref_neg_singleton_bad_333 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_neg_singleton_bad.json", t)
 }
 
 @(test)
-test_tc_cross_range_333 :: proc(t: ^testing.T) {
+test_tc_cross_range_334 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cross_range.json", t)
 }
 
 @(test)
-test_tc_pat_prod_float_ok_334 :: proc(t: ^testing.T) {
+test_tc_pat_prod_float_ok_335 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_float_ok.json", t)
 }
 
 @(test)
-test_tc_cross_str_int_335 :: proc(t: ^testing.T) {
+test_tc_cross_str_int_336 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cross_str_int.json", t)
 }
 
 @(test)
-test_tc_cast_target_neg_union_fail_336 :: proc(t: ^testing.T) {
+test_tc_cast_target_neg_union_fail_337 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_target_neg_union_fail.json", t)
 }
 
 @(test)
-test_tc_ref_singleton_other_bad_337 :: proc(t: ^testing.T) {
+test_tc_ref_singleton_other_bad_338 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_singleton_other_bad.json", t)
 }
 
 @(test)
-test_tc_execute_ref_producer_ok_338 :: proc(t: ^testing.T) {
+test_tc_execute_ref_producer_ok_339 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_ref_producer_ok.json", t)
 }
 
 @(test)
-test_tc_empty_scope_value_proves_339 :: proc(t: ^testing.T) {
+test_tc_empty_scope_value_proves_340 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_empty_scope_value_proves.json", t)
 }
 
 @(test)
-test_tc_pull_named_vs_struct_conflict_bad_340 :: proc(t: ^testing.T) {
+test_tc_pull_named_vs_struct_conflict_bad_341 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_named_vs_struct_conflict_bad.json", t)
 }
 
 @(test)
-test_tc_str_ord_mid_ok_341 :: proc(t: ^testing.T) {
+test_tc_str_ord_mid_ok_342 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_ord_mid_ok.json", t)
 }
 
 @(test)
-test_tc_comp_negrange_or_pt_bad_342 :: proc(t: ^testing.T) {
+test_tc_comp_negrange_or_pt_bad_343 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_negrange_or_pt_bad.json", t)
 }
 
 @(test)
-test_tc_carve_implicit_override_both_ok_343 :: proc(t: ^testing.T) {
+test_tc_carve_implicit_override_both_ok_344 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_implicit_override_both_ok.json", t)
 }
 
 @(test)
-test_tc_carve_property_ok_344 :: proc(t: ^testing.T) {
+test_tc_carve_property_ok_345 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_property_ok.json", t)
 }
 
 @(test)
-test_tc_pat_default_first_345 :: proc(t: ^testing.T) {
+test_tc_pat_default_first_346 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_default_first.json", t)
 }
 
 @(test)
-test_tc_str_dquote_1char_pos_az_ok_346 :: proc(t: ^testing.T) {
+test_tc_str_dquote_1char_pos_az_ok_347 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_dquote_1char_pos_az_ok.json", t)
 }
 
 @(test)
-test_tc_carve_then_execute_ok_347 :: proc(t: ^testing.T) {
+test_tc_carve_then_execute_ok_348 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_then_execute_ok.json", t)
 }
 
 @(test)
-test_tc_carve_subst_field_gone_348 :: proc(t: ^testing.T) {
+test_tc_carve_subst_field_gone_349 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_subst_field_gone.json", t)
 }
 
 @(test)
-test_tc_insoluble_colored_binding_349 :: proc(t: ^testing.T) {
+test_tc_insoluble_colored_binding_350 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_colored_binding.json", t)
 }
 
 @(test)
-test_tc_pat_prod_set_bad_350 :: proc(t: ^testing.T) {
+test_tc_pat_prod_set_bad_351 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_set_bad.json", t)
 }
 
 @(test)
-test_tc_carve_self_property_ref_glued_ok_351 :: proc(t: ^testing.T) {
+test_tc_carve_self_property_ref_glued_ok_352 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_self_property_ref_glued_ok.json", t)
 }
 
 @(test)
-test_tc_pat_refine_no_exclusion_bad_352 :: proc(t: ^testing.T) {
+test_tc_pat_refine_no_exclusion_bad_353 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_refine_no_exclusion_bad.json", t)
 }
 
 @(test)
-test_tc_refchain_constraint_bad_353 :: proc(t: ^testing.T) {
+test_tc_refchain_constraint_bad_354 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_refchain_constraint_bad.json", t)
 }
 
 @(test)
-test_tc_carve_subst_rank_ok_354 :: proc(t: ^testing.T) {
+test_tc_carve_subst_rank_ok_355 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_subst_rank_ok.json", t)
 }
 
 @(test)
-test_tc_str_concat_lit_class_ok_355 :: proc(t: ^testing.T) {
+test_tc_str_concat_lit_class_ok_356 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_concat_lit_class_ok.json", t)
 }
 
 @(test)
-test_tc_pat_grammar_exh_wrong_param_356 :: proc(t: ^testing.T) {
+test_tc_pat_grammar_exh_wrong_param_357 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_grammar_exh_wrong_param.json", t)
 }
 
 @(test)
-test_tc_neg_char_ok_357 :: proc(t: ^testing.T) {
+test_tc_neg_char_ok_358 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_char_ok.json", t)
 }
 
 @(test)
-test_tc_scope_nested_bad_358 :: proc(t: ^testing.T) {
+test_tc_scope_nested_bad_359 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_nested_bad.json", t)
 }
 
 @(test)
-test_tc_pat_nonexh_gap_359 :: proc(t: ^testing.T) {
+test_tc_pat_nonexh_gap_360 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_nonexh_gap.json", t)
 }
 
 @(test)
-test_tc_int_mul_range_u8_default0_ok_360 :: proc(t: ^testing.T) {
+test_tc_int_mul_range_u8_default0_ok_361 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mul_range_u8_default0_ok.json", t)
 }
 
 @(test)
-test_event_emit_answer_mismatch_361 :: proc(t: ^testing.T) {
+test_event_emit_answer_mismatch_362 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/event_emit_answer_mismatch.json", t)
 }
 
 @(test)
-test_tc_map_union_op_invalid_branch_362 :: proc(t: ^testing.T) {
+test_tc_map_union_op_invalid_branch_363 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_map_union_op_invalid_branch.json", t)
 }
 
 @(test)
-test_tc_demorgan_deep_ok_363 :: proc(t: ^testing.T) {
+test_tc_demorgan_deep_ok_364 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_demorgan_deep_ok.json", t)
 }
 
 @(test)
-test_tc_int_mixed_sign_i16_ok_364 :: proc(t: ^testing.T) {
+test_tc_int_mixed_sign_i16_ok_365 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mixed_sign_i16_ok.json", t)
 }
 
 @(test)
-test_tc_str_tri_range_middle_ok_365 :: proc(t: ^testing.T) {
+test_tc_str_tri_range_middle_ok_366 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_tri_range_middle_ok.json", t)
 }
 
 @(test)
-test_tc_u8_overflow_366 :: proc(t: ^testing.T) {
+test_tc_u8_overflow_367 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_u8_overflow.json", t)
 }
 
 @(test)
-test_tc_union_u8_f32_overflow_bad_367 :: proc(t: ^testing.T) {
+test_tc_union_u8_f32_overflow_bad_368 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_u8_f32_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_pat_nonexh_singleton_wrong_368 :: proc(t: ^testing.T) {
+test_tc_eqset_denotational_ok_369 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_eqset_denotational_ok.json", t)
+}
+
+@(test)
+test_tc_pat_nonexh_singleton_wrong_370 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_nonexh_singleton_wrong.json", t)
 }
 
 @(test)
-test_tc_pat_nonexh_value_open_369 :: proc(t: ^testing.T) {
+test_tc_pat_nonexh_value_open_371 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_nonexh_value_open.json", t)
 }
 
 @(test)
-test_tc_scope_union_ok2_370 :: proc(t: ^testing.T) {
+test_tc_scope_union_ok2_372 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_union_ok2.json", t)
 }
 
 @(test)
-test_tc_prod_u8_371 :: proc(t: ^testing.T) {
+test_tc_prod_u8_373 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_prod_u8.json", t)
 }
 
 @(test)
-test_tc_ref_and_range_ok_372 :: proc(t: ^testing.T) {
+test_tc_ref_and_range_ok_374 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_and_range_ok.json", t)
 }
 
 @(test)
-test_tc_self_char_singleton_ok_373 :: proc(t: ^testing.T) {
+test_tc_self_char_singleton_ok_375 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_self_char_singleton_ok.json", t)
 }
 
 @(test)
-test_tc_proof_by_coloring_holds_374 :: proc(t: ^testing.T) {
+test_tc_proof_by_coloring_holds_376 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_proof_by_coloring_holds.json", t)
 }
 
 @(test)
-test_tc_neg_range_ok_375 :: proc(t: ^testing.T) {
+test_tc_neg_range_ok_377 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_range_ok.json", t)
 }
 
 @(test)
-test_tc_carve_pos_skips_pull_ok_376 :: proc(t: ^testing.T) {
+test_tc_carve_pos_skips_pull_ok_378 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_pos_skips_pull_ok.json", t)
 }
 
 @(test)
-test_tc_pull_unify_ok_377 :: proc(t: ^testing.T) {
+test_tc_pull_unify_ok_379 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_unify_ok.json", t)
 }
 
 @(test)
-test_tc_comparison_concrete_folds_378 :: proc(t: ^testing.T) {
+test_tc_comparison_concrete_folds_380 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comparison_concrete_folds.json", t)
 }
 
 @(test)
-test_tc_flt_inter_ok_379 :: proc(t: ^testing.T) {
+test_tc_flt_inter_ok_381 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_inter_ok.json", t)
 }
 
 @(test)
-test_tc_str_neg_word_lit_bad_380 :: proc(t: ^testing.T) {
+test_tc_str_neg_word_lit_bad_382 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_word_lit_bad.json", t)
 }
 
 @(test)
-test_tc_carve_shorthand_vs_positional_foreign_ok_381 :: proc(t: ^testing.T) {
+test_tc_carve_shorthand_vs_positional_foreign_ok_383 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_shorthand_vs_positional_foreign_ok.json", t)
 }
 
 @(test)
-test_tc_pat_float_value_nonexh_382 :: proc(t: ^testing.T) {
+test_tc_pat_float_value_nonexh_384 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_float_value_nonexh.json", t)
 }
 
 @(test)
-test_tc_int_and_gt_ok_383 :: proc(t: ^testing.T) {
+test_tc_int_and_gt_ok_385 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_and_gt_ok.json", t)
 }
 
 @(test)
-test_tc_pull_named_only_ok_384 :: proc(t: ^testing.T) {
+test_tc_pull_named_only_ok_386 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_named_only_ok.json", t)
 }
 
 @(test)
-test_tc_carve_override_is_ref_ok_385 :: proc(t: ^testing.T) {
+test_tc_carve_override_is_ref_ok_387 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_override_is_ref_ok.json", t)
 }
 
 @(test)
-test_tc_map_union_op_no_int_concat_386 :: proc(t: ^testing.T) {
+test_tc_map_union_op_no_int_concat_388 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_map_union_op_no_int_concat.json", t)
 }
 
 @(test)
-test_tc_ident_no_trail_bad_387 :: proc(t: ^testing.T) {
+test_tc_ident_no_trail_bad_389 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ident_no_trail_bad.json", t)
 }
 
 @(test)
-test_tc_flt_add_range_bad_388 :: proc(t: ^testing.T) {
+test_tc_flt_add_range_bad_390 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_add_range_bad.json", t)
 }
 
 @(test)
-test_tc_flt_range_bad_389 :: proc(t: ^testing.T) {
+test_tc_flt_range_bad_391 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_range_bad.json", t)
 }
 
 @(test)
-test_tc_scope_shape_ok_390 :: proc(t: ^testing.T) {
+test_tc_scope_shape_ok_392 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_shape_ok.json", t)
 }
 
 @(test)
-test_tc_carve_property_compute_bad_391 :: proc(t: ^testing.T) {
+test_tc_carve_property_compute_bad_393 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_property_compute_bad.json", t)
 }
 
 @(test)
-test_tc_neg_subset_ok_392 :: proc(t: ^testing.T) {
+test_tc_neg_subset_ok_394 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_subset_ok.json", t)
 }
 
 @(test)
-test_tc_str_union_class_literal_class_ok_393 :: proc(t: ^testing.T) {
+test_tc_str_union_class_literal_class_ok_395 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_union_class_literal_class_ok.json", t)
 }
 
 @(test)
-test_tc_prod_int_union_subset_ok_394 :: proc(t: ^testing.T) {
+test_tc_prod_int_union_subset_ok_396 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_prod_int_union_subset_ok.json", t)
 }
 
 @(test)
-test_tc_str_union_class_literal_bad_395 :: proc(t: ^testing.T) {
+test_tc_str_union_class_literal_bad_397 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_union_class_literal_bad.json", t)
 }
 
 @(test)
-test_tc_carve_dep_string_repeat_ok_396 :: proc(t: ^testing.T) {
+test_tc_carve_dep_string_repeat_ok_398 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_dep_string_repeat_ok.json", t)
 }
 
 @(test)
-test_tc_pat_prod_arith_overflow_bad_397 :: proc(t: ^testing.T) {
+test_tc_pat_prod_arith_overflow_bad_399 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_arith_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_comp_double_and_bad_lo_398 :: proc(t: ^testing.T) {
+test_tc_comp_double_and_bad_lo_400 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_double_and_bad_lo.json", t)
 }
 
 @(test)
-test_tc_str_concat_lit_class_prefix_bad_399 :: proc(t: ^testing.T) {
+test_tc_str_concat_lit_class_prefix_bad_401 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_concat_lit_class_prefix_bad.json", t)
 }
 
 @(test)
-test_tc_pull_conflict_bad_400 :: proc(t: ^testing.T) {
+test_tc_pull_conflict_bad_402 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_conflict_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_flt_neg_id_ok_401 :: proc(t: ^testing.T) {
+test_tc_eqset_flt_neg_id_ok_403 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_flt_neg_id_ok.json", t)
 }
 
 @(test)
-test_tc_pat_prod_arith_ok_402 :: proc(t: ^testing.T) {
+test_tc_pat_prod_arith_ok_404 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_arith_ok.json", t)
 }
 
 @(test)
-test_tc_scope_calc_range_field_bad_403 :: proc(t: ^testing.T) {
+test_tc_scope_calc_range_field_bad_405 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_calc_range_field_bad.json", t)
 }
 
 @(test)
-test_tc_int_mul_concrete_ok_404 :: proc(t: ^testing.T) {
+test_tc_int_mul_concrete_ok_406 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mul_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_pat_combined_union_ok_405 :: proc(t: ^testing.T) {
+test_tc_pat_combined_union_ok_407 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_combined_union_ok.json", t)
 }
 
 @(test)
-test_tc_str_range_pos_mid_ok_406 :: proc(t: ^testing.T) {
+test_tc_str_range_pos_mid_ok_408 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_pos_mid_ok.json", t)
 }
 
 @(test)
-test_tc_int_and_cast_u8_ok_407 :: proc(t: ^testing.T) {
+test_tc_int_and_cast_u8_ok_409 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_and_cast_u8_ok.json", t)
 }
 
 @(test)
-test_tc_char_rep_union_bad_408 :: proc(t: ^testing.T) {
+test_tc_char_rep_union_bad_410 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_char_rep_union_bad.json", t)
 }
 
 @(test)
-test_tc_color_carve_chain_ok_409 :: proc(t: ^testing.T) {
+test_tc_color_carve_chain_ok_411 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_carve_chain_ok.json", t)
 }
 
 @(test)
-test_tc_carve_override_ref_overflow_bad_410 :: proc(t: ^testing.T) {
+test_tc_carve_override_ref_overflow_bad_412 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_override_ref_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_neg_double_bad_411 :: proc(t: ^testing.T) {
+test_tc_neg_double_bad_413 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_double_bad.json", t)
 }
 
 @(test)
-test_tc_pat_prod_cast_ok_412 :: proc(t: ^testing.T) {
+test_tc_pat_prod_cast_ok_414 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_cast_ok.json", t)
 }
 
 @(test)
-test_tc_pat_insoluble_target_unknown_413 :: proc(t: ^testing.T) {
+test_tc_pat_insoluble_target_unknown_415 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_insoluble_target_unknown.json", t)
 }
 
 @(test)
-test_tc_grammar_via_mention_bad_414 :: proc(t: ^testing.T) {
+test_tc_grammar_via_mention_bad_416 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_grammar_via_mention_bad.json", t)
 }
 
 @(test)
-test_tc_unk_add_u16_ok_415 :: proc(t: ^testing.T) {
+test_tc_unk_add_u16_ok_417 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_unk_add_u16_ok.json", t)
 }
 
 @(test)
-test_tc_str_backtick_exact_bad_416 :: proc(t: ^testing.T) {
+test_tc_str_backtick_exact_bad_418 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_backtick_exact_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_bool_diff_bad_417 :: proc(t: ^testing.T) {
+test_tc_eqset_bool_diff_bad_419 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_bool_diff_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_or_width_bad_418 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_eqset_or_width_bad.json", t)
-}
-
-@(test)
-test_tc_pat_exh_default_419 :: proc(t: ^testing.T) {
+test_tc_pat_exh_default_420 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_exh_default.json", t)
 }
 
 @(test)
-test_tc_flt_union_ok_420 :: proc(t: ^testing.T) {
+test_tc_flt_union_ok_421 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_union_ok.json", t)
 }
 
 @(test)
-test_tc_carve_shorthand_field_ok_421 :: proc(t: ^testing.T) {
+test_tc_carve_shorthand_field_ok_422 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_shorthand_field_ok.json", t)
 }
 
 @(test)
-test_tc_int_and_empty_bad_422 :: proc(t: ^testing.T) {
+test_tc_int_and_empty_bad_423 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_and_empty_bad.json", t)
 }
 
 @(test)
-test_tc_prod_nest_bad_423 :: proc(t: ^testing.T) {
+test_tc_prod_nest_bad_424 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_prod_nest_bad.json", t)
 }
 
 @(test)
-test_tc_int_mul_concrete_bad_424 :: proc(t: ^testing.T) {
+test_tc_int_mul_concrete_bad_425 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mul_concrete_bad.json", t)
 }
 
 @(test)
-test_tc_carve_subst_inner_carve_present_ok_425 :: proc(t: ^testing.T) {
+test_tc_carve_subst_inner_carve_present_ok_426 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_subst_inner_carve_present_ok.json", t)
 }
 
 @(test)
-test_tc_ref_or_family_ok_426 :: proc(t: ^testing.T) {
+test_tc_ref_or_family_ok_427 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_or_family_ok.json", t)
 }
 
 @(test)
-test_tc_carve_as_type_via_ref_bad_427 :: proc(t: ^testing.T) {
+test_tc_carve_as_type_via_ref_bad_428 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_as_type_via_ref_bad.json", t)
 }
 
 @(test)
-test_tc_color_nested_deep_bad_428 :: proc(t: ^testing.T) {
+test_tc_color_nested_deep_bad_429 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_nested_deep_bad.json", t)
 }
 
 @(test)
-test_tc_carve_self_property_ref_overflow_bad_429 :: proc(t: ^testing.T) {
+test_tc_carve_self_property_ref_overflow_bad_430 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_self_property_ref_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_pat_grammar_exh_structural_430 :: proc(t: ^testing.T) {
+test_tc_pat_grammar_exh_structural_431 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_grammar_exh_structural.json", t)
 }
 
 @(test)
-test_tc_eqset_negunion_diff_bad_431 :: proc(t: ^testing.T) {
+test_tc_eqset_negunion_diff_bad_432 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_negunion_diff_bad.json", t)
 }
 
 @(test)
-test_tc_carve_self_property_ref_spaced_ok_432 :: proc(t: ^testing.T) {
+test_tc_carve_self_property_ref_spaced_ok_433 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_self_property_ref_spaced_ok.json", t)
 }
 
 @(test)
-test_tc_eq_neg_exact_ok_433 :: proc(t: ^testing.T) {
+test_tc_eq_neg_exact_ok_434 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eq_neg_exact_ok.json", t)
 }
 
 @(test)
-test_tc_pat_char_value_nonexh_434 :: proc(t: ^testing.T) {
+test_tc_pat_char_value_nonexh_435 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_char_value_nonexh.json", t)
 }
 
 @(test)
-test_tc_ref_neg_range_ok_435 :: proc(t: ^testing.T) {
+test_tc_ref_neg_range_ok_436 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_neg_range_ok.json", t)
 }
 
 @(test)
-test_tc_mixed_str_in_strf32_436 :: proc(t: ^testing.T) {
+test_tc_mixed_str_in_strf32_437 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_mixed_str_in_strf32.json", t)
 }
 
 @(test)
-test_tc_int_add_concrete_ok_437 :: proc(t: ^testing.T) {
+test_tc_int_add_concrete_ok_438 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_add_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_eqset_single_bad_438 :: proc(t: ^testing.T) {
+test_tc_eqset_single_bad_439 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_single_bad.json", t)
 }
 
 @(test)
-test_tc_union_rep_bad_439 :: proc(t: ^testing.T) {
+test_tc_union_rep_bad_440 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_rep_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_xd_str_int_bad_440 :: proc(t: ^testing.T) {
+test_tc_eqset_xd_str_int_bad_441 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_xd_str_int_bad.json", t)
 }
 
 @(test)
-test_tc_cast_sum_no_cast_bad_441 :: proc(t: ^testing.T) {
+test_tc_cast_sum_no_cast_bad_442 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_sum_no_cast_bad.json", t)
 }
 
 @(test)
-test_tc_carve_nested_bad_442 :: proc(t: ^testing.T) {
+test_tc_carve_nested_bad_443 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_nested_bad.json", t)
 }
 
 @(test)
-test_tc_comp_double_and_ok_443 :: proc(t: ^testing.T) {
+test_tc_comp_double_and_ok_444 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_double_and_ok.json", t)
 }
 
 @(test)
-test_tc_carve_nested_ok_444 :: proc(t: ^testing.T) {
+test_tc_carve_nested_ok_445 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_nested_ok.json", t)
 }
 
 @(test)
-test_tc_str_concat_pattern_bad_445 :: proc(t: ^testing.T) {
+test_tc_str_concat_pattern_bad_446 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_concat_pattern_bad.json", t)
 }
 
 @(test)
-test_tc_execute_empty_none_fail_446 :: proc(t: ^testing.T) {
+test_tc_execute_empty_none_fail_447 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_empty_none_fail.json", t)
 }
 
 @(test)
-test_tc_pat_bool_exh_447 :: proc(t: ^testing.T) {
+test_tc_pat_bool_exh_448 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_bool_exh.json", t)
 }
 
 @(test)
-test_tc_seq_email_ok_448 :: proc(t: ^testing.T) {
+test_tc_seq_email_ok_449 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_seq_email_ok.json", t)
 }
 
 @(test)
-test_tc_comp_inter_unions_ok2_449 :: proc(t: ^testing.T) {
+test_tc_comp_inter_unions_ok2_450 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_inter_unions_ok2.json", t)
 }
 
 @(test)
-test_tc_self_ref_set_bad_450 :: proc(t: ^testing.T) {
+test_tc_self_ref_set_bad_451 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_self_ref_set_bad.json", t)
 }
 
 @(test)
-test_tc_bool_any_false_ok_451 :: proc(t: ^testing.T) {
+test_tc_bool_any_false_ok_452 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_any_false_ok.json", t)
 }
 
 @(test)
-test_tc_str_backtick_union_ok_452 :: proc(t: ^testing.T) {
+test_tc_str_backtick_union_ok_453 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_backtick_union_ok.json", t)
 }
 
 @(test)
-test_tc_int_mod_opaque_int_ok_453 :: proc(t: ^testing.T) {
+test_tc_int_mod_opaque_int_ok_454 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mod_opaque_int_ok.json", t)
 }
 
 @(test)
-test_tc_carve_sibling_override_subst_bad_454 :: proc(t: ^testing.T) {
+test_tc_carve_sibling_override_subst_bad_455 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_sibling_override_subst_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_orneg_id_ok_455 :: proc(t: ^testing.T) {
+test_tc_eqset_orneg_id_ok_456 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_orneg_id_ok.json", t)
 }
 
 @(test)
-test_tc_pat_combined_bool_string_ok_456 :: proc(t: ^testing.T) {
+test_tc_pat_combined_bool_string_ok_457 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_combined_bool_string_ok.json", t)
 }
 
 @(test)
-test_tc_pat_domain_exh_u8_split_457 :: proc(t: ^testing.T) {
+test_tc_pat_domain_exh_u8_split_458 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_domain_exh_u8_split.json", t)
 }
 
 @(test)
-test_tc_pat_target_execute_ok_458 :: proc(t: ^testing.T) {
+test_tc_pat_target_execute_ok_459 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_target_execute_ok.json", t)
 }
 
 @(test)
-test_tc_cast_target_open_fail_459 :: proc(t: ^testing.T) {
+test_tc_cast_target_open_fail_460 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_target_open_fail.json", t)
 }
 
 @(test)
-test_tc_str_range_pos_edge_ok_460 :: proc(t: ^testing.T) {
+test_tc_str_range_pos_edge_ok_461 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_pos_edge_ok.json", t)
 }
 
 @(test)
-test_tc_ident_ok_461 :: proc(t: ^testing.T) {
+test_tc_ident_ok_462 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ident_ok.json", t)
 }
 
 @(test)
-test_tc_int_sub_concrete_bad_462 :: proc(t: ^testing.T) {
+test_tc_int_sub_concrete_bad_463 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_sub_concrete_bad.json", t)
 }
 
 @(test)
-test_tc_flt_mul_concrete_ok_463 :: proc(t: ^testing.T) {
+test_tc_flt_mul_concrete_ok_464 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_mul_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_union_tri_int_ok_464 :: proc(t: ^testing.T) {
+test_tc_union_tri_int_ok_465 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_tri_int_ok.json", t)
 }
 
 @(test)
-test_tc_mixed_int_bad_465 :: proc(t: ^testing.T) {
+test_tc_mixed_int_bad_466 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_mixed_int_bad.json", t)
 }
 
 @(test)
-test_tc_union_tri_bool_bad_466 :: proc(t: ^testing.T) {
+test_tc_union_tri_bool_bad_467 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_tri_bool_bad.json", t)
 }
 
 @(test)
-test_tc_int_div_opaque_int_ok_467 :: proc(t: ^testing.T) {
+test_tc_int_div_opaque_int_ok_468 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_div_opaque_int_ok.json", t)
 }
 
 @(test)
-test_tc_pat_combined_bool_string_bad_468 :: proc(t: ^testing.T) {
+test_tc_pat_combined_bool_string_bad_469 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_combined_bool_string_bad.json", t)
 }
 
 @(test)
-test_tc_str_range_tri_nomid_bad_469 :: proc(t: ^testing.T) {
+test_tc_str_range_tri_nomid_bad_470 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_tri_nomid_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_or_reorder_ok_470 :: proc(t: ^testing.T) {
+test_tc_eqset_or_reorder_ok_471 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_or_reorder_ok.json", t)
 }
 
 @(test)
-test_tc_int_sub_range_bad_471 :: proc(t: ^testing.T) {
+test_tc_int_sub_range_bad_472 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_sub_range_bad.json", t)
 }
 
 @(test)
-test_tc_pat_exh_typecheck_full_472 :: proc(t: ^testing.T) {
+test_tc_pat_exh_typecheck_full_473 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_exh_typecheck_full.json", t)
 }
 
 @(test)
-test_tc_comp_tri_union_mid_ok_473 :: proc(t: ^testing.T) {
+test_tc_comp_tri_union_mid_ok_474 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_tri_union_mid_ok.json", t)
 }
 
 @(test)
-test_tc_pat_exh_union_covers_474 :: proc(t: ^testing.T) {
+test_tc_pat_exh_union_covers_475 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_exh_union_covers.json", t)
 }
 
 @(test)
-test_tc_map_structural_union_both_arrays_475 :: proc(t: ^testing.T) {
+test_tc_map_structural_union_both_arrays_476 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_map_structural_union_both_arrays.json", t)
 }
 
 @(test)
-test_tc_execute_as_type_bad_476 :: proc(t: ^testing.T) {
+test_tc_execute_as_type_bad_477 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_as_type_bad.json", t)
 }
 
 @(test)
-test_tc_bool_neg_true_ok_477 :: proc(t: ^testing.T) {
+test_tc_bool_neg_true_ok_478 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_neg_true_ok.json", t)
 }
 
 @(test)
-test_tc_pat_prod_bool_ok_478 :: proc(t: ^testing.T) {
+test_tc_pat_prod_bool_ok_479 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_prod_bool_ok.json", t)
 }
 
 @(test)
-test_tc_execute_as_type_ok_479 :: proc(t: ^testing.T) {
+test_tc_execute_as_type_ok_480 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_as_type_ok.json", t)
 }
 
 @(test)
-test_tc_scope_shape_wrong_name_bad_480 :: proc(t: ^testing.T) {
+test_tc_scope_shape_wrong_name_bad_481 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_shape_wrong_name_bad.json", t)
 }
 
 @(test)
-test_tc_flt_add_concrete_bad_481 :: proc(t: ^testing.T) {
+test_tc_flt_add_concrete_bad_482 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_add_concrete_bad.json", t)
 }
 
 @(test)
-test_tc_pat_grammar_exh_full_482 :: proc(t: ^testing.T) {
+test_tc_pat_grammar_exh_full_483 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_grammar_exh_full.json", t)
 }
 
 @(test)
-test_tc_cmp_lt0_ok_483 :: proc(t: ^testing.T) {
+test_tc_cmp_lt0_ok_484 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cmp_lt0_ok.json", t)
 }
 
 @(test)
-test_tc_str_range_prefix_bad_484 :: proc(t: ^testing.T) {
+test_tc_str_range_prefix_bad_485 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_range_prefix_bad.json", t)
 }
 
 @(test)
-test_tc_soluble_set_constraint_ok_485 :: proc(t: ^testing.T) {
+test_tc_soluble_set_constraint_ok_486 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_soluble_set_constraint_ok.json", t)
 }
 
 @(test)
-test_tc_map_mixed_union_ok_486 :: proc(t: ^testing.T) {
+test_tc_map_mixed_union_ok_487 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_map_mixed_union_ok.json", t)
 }
 
 @(test)
-test_tc_neg_pos_bad_487 :: proc(t: ^testing.T) {
+test_tc_neg_pos_bad_488 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_pos_bad.json", t)
 }
 
 @(test)
-test_tc_int_add_u8u8_u16_ok_488 :: proc(t: ^testing.T) {
+test_tc_int_add_u8u8_u16_ok_489 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_add_u8u8_u16_ok.json", t)
 }
 
 @(test)
-test_tc_str_tri_range_nosuffix_bad_489 :: proc(t: ^testing.T) {
+test_tc_str_tri_range_nosuffix_bad_490 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_tri_range_nosuffix_bad.json", t)
 }
 
 @(test)
-test_tc_str_ord_below_bad_490 :: proc(t: ^testing.T) {
+test_tc_str_ord_below_bad_491 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_ord_below_bad.json", t)
 }
 
 @(test)
-test_tc_bool_true_ok_491 :: proc(t: ^testing.T) {
+test_tc_bool_true_ok_492 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_true_ok.json", t)
 }
 
 @(test)
-test_tc_int_and_gt_bad_492 :: proc(t: ^testing.T) {
+test_tc_int_and_gt_bad_493 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_and_gt_bad.json", t)
 }
 
 @(test)
-test_tc_rep_exact_bad_493 :: proc(t: ^testing.T) {
+test_tc_rep_exact_bad_494 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_rep_exact_bad.json", t)
 }
 
 @(test)
-test_tc_scope_calc_field_bad_494 :: proc(t: ^testing.T) {
+test_tc_scope_calc_field_bad_495 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_calc_field_bad.json", t)
 }
 
 @(test)
-test_tc_eqset_neg_range_diff_bad_495 :: proc(t: ^testing.T) {
+test_tc_eqset_neg_range_diff_bad_496 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_neg_range_diff_bad.json", t)
 }
 
 @(test)
-test_tc_str_squote_multi_pos_bad_496 :: proc(t: ^testing.T) {
+test_tc_str_squote_multi_pos_bad_497 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_squote_multi_pos_bad.json", t)
 }
 
 @(test)
-test_tc_carve_as_type_via_ref_ok_497 :: proc(t: ^testing.T) {
+test_tc_carve_as_type_via_ref_ok_498 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_as_type_via_ref_ok.json", t)
 }
 
 @(test)
-test_tc_cast_target_unsized_float_fail_498 :: proc(t: ^testing.T) {
+test_tc_cast_target_unsized_float_fail_499 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_target_unsized_float_fail.json", t)
 }
 
 @(test)
-test_tc_pat_mixed_modes_exh_499 :: proc(t: ^testing.T) {
+test_tc_pat_mixed_modes_exh_500 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_mixed_modes_exh.json", t)
 }
 
 @(test)
-test_tc_int_sub_concrete_ok_500 :: proc(t: ^testing.T) {
+test_tc_int_sub_concrete_ok_501 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_sub_concrete_ok.json", t)
 }
 
 @(test)
-test_tc_scope_shape_calc_bad_501 :: proc(t: ^testing.T) {
+test_tc_scope_shape_calc_bad_502 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_shape_calc_bad.json", t)
 }
 
 @(test)
-test_tc_execute_value_ok_502 :: proc(t: ^testing.T) {
+test_tc_execute_value_ok_503 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_value_ok.json", t)
 }
 
 @(test)
-test_tc_str_union_mixed_len_ok_503 :: proc(t: ^testing.T) {
+test_tc_str_union_mixed_len_ok_504 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_union_mixed_len_ok.json", t)
 }
 
 @(test)
-test_tc_eqset_and_diff_bad_504 :: proc(t: ^testing.T) {
+test_tc_eqset_and_diff_bad_505 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_and_diff_bad.json", t)
 }
 
 @(test)
-test_tc_cast_then_overflow_ok_505 :: proc(t: ^testing.T) {
+test_tc_cast_then_overflow_ok_506 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_then_overflow_ok.json", t)
 }
 
 @(test)
-test_tc_cmp_gt6f_bad_506 :: proc(t: ^testing.T) {
+test_tc_cmp_gt6f_bad_507 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cmp_gt6f_bad.json", t)
 }
 
 @(test)
-test_tc_str_neg_concat_bad_507 :: proc(t: ^testing.T) {
+test_tc_str_neg_concat_bad_508 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_concat_bad.json", t)
 }
 
 @(test)
-test_tc_str_neg_plus_lit_bad_508 :: proc(t: ^testing.T) {
+test_tc_str_neg_plus_lit_bad_509 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_neg_plus_lit_bad.json", t)
 }
 
 @(test)
-test_tc_scope_mixed_fields_ok_509 :: proc(t: ^testing.T) {
+test_tc_scope_mixed_fields_ok_510 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_mixed_fields_ok.json", t)
 }
 
 @(test)
-test_tc_flt_open_hi_ok_510 :: proc(t: ^testing.T) {
+test_tc_flt_open_hi_ok_511 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_open_hi_ok.json", t)
 }
 
 @(test)
-test_tc_prod_ok_511 :: proc(t: ^testing.T) {
+test_tc_prod_ok_512 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_prod_ok.json", t)
 }
 
 @(test)
-test_tc_nested_prop_512 :: proc(t: ^testing.T) {
+test_tc_nested_prop_513 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_nested_prop.json", t)
 }
 
 @(test)
-test_tc_scope_two_order_bad_513 :: proc(t: ^testing.T) {
+test_tc_scope_two_order_bad_514 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_two_order_bad.json", t)
 }
 
 @(test)
-test_tc_grammar_default_terminal_first_514 :: proc(t: ^testing.T) {
+test_tc_grammar_default_terminal_first_515 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_grammar_default_terminal_first.json", t)
 }
 
 @(test)
-test_tc_ref_neg_range_bad_515 :: proc(t: ^testing.T) {
+test_tc_ref_neg_range_bad_516 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_neg_range_bad.json", t)
 }
 
 @(test)
-test_tc_union_char_int_bad_516 :: proc(t: ^testing.T) {
+test_tc_union_char_int_bad_517 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_char_int_bad.json", t)
 }
 
 @(test)
-test_tc_pat_target_arith_exh_517 :: proc(t: ^testing.T) {
+test_tc_pat_target_arith_exh_518 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_target_arith_exh.json", t)
 }
 
 @(test)
-test_tc_eqset_and_id_ok_518 :: proc(t: ^testing.T) {
+test_tc_eqset_and_id_ok_519 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_and_id_ok.json", t)
 }
 
 @(test)
-test_tc_str_rep_range_bad_519 :: proc(t: ^testing.T) {
+test_tc_str_rep_range_bad_520 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_rep_range_bad.json", t)
 }
 
 @(test)
-test_tc_int_mixed_sign_u16_default_ok_520 :: proc(t: ^testing.T) {
+test_tc_int_mixed_sign_u16_default_ok_521 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_mixed_sign_u16_default_ok.json", t)
 }
 
 @(test)
-test_tc_neg_str_exact_bad_521 :: proc(t: ^testing.T) {
+test_tc_neg_str_exact_bad_522 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg_str_exact_bad.json", t)
 }
 
 @(test)
-test_tc_ident_no_trail_ok_522 :: proc(t: ^testing.T) {
+test_tc_ident_no_trail_ok_523 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ident_no_trail_ok.json", t)
 }
 
 @(test)
-test_tc_scope_calc_range_field_ok_523 :: proc(t: ^testing.T) {
+test_tc_scope_calc_range_field_ok_524 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_calc_range_field_ok.json", t)
 }
 
 @(test)
-test_tc_prod_nest_ok_524 :: proc(t: ^testing.T) {
+test_tc_prod_nest_ok_525 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_prod_nest_ok.json", t)
 }
 
 @(test)
-test_tc_comp_and_or_ok_neg_525 :: proc(t: ^testing.T) {
+test_tc_comp_and_or_ok_neg_526 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_and_or_ok_neg.json", t)
 }
 
 @(test)
-test_tc_scope_calc_mul_ok_526 :: proc(t: ^testing.T) {
+test_tc_scope_calc_mul_ok_527 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_calc_mul_ok.json", t)
 }
 
 @(test)
-test_tc_scope_two_second_overflow_bad_527 :: proc(t: ^testing.T) {
+test_tc_scope_two_second_overflow_bad_528 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_two_second_overflow_bad.json", t)
 }
 
 @(test)
-test_tc_map_mixed_u8_bad_528 :: proc(t: ^testing.T) {
+test_tc_map_mixed_u8_bad_529 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_map_mixed_u8_bad.json", t)
 }
 
 @(test)
-test_tc_carve_as_type_ok_529 :: proc(t: ^testing.T) {
+test_tc_carve_as_type_ok_530 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_as_type_ok.json", t)
 }
 
 @(test)
-test_tc_pull_unify_agree_ok_530 :: proc(t: ^testing.T) {
+test_tc_pull_unify_agree_ok_531 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pull_unify_agree_ok.json", t)
 }
 
 @(test)
-test_tc_eqset_negunion_id_ok_531 :: proc(t: ^testing.T) {
+test_tc_eqset_negunion_id_ok_532 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_negunion_id_ok.json", t)
 }
 
 @(test)
-test_tc_str_union_class_literal_ok_532 :: proc(t: ^testing.T) {
+test_tc_str_union_class_literal_ok_533 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_str_union_class_literal_ok.json", t)
 }
 
 @(test)
-test_tc_mixed_strint_int_533 :: proc(t: ^testing.T) {
+test_tc_mixed_strint_int_534 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_mixed_strint_int.json", t)
 }
 
 @(test)
-test_tc_int_sub_u8u8_u8_default0_ok_534 :: proc(t: ^testing.T) {
+test_tc_int_sub_u8u8_u8_default0_ok_535 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_int_sub_u8u8_u8_default0_ok.json", t)
 }
 
 @(test)
-test_tc_pat_domain_exh_bool_535 :: proc(t: ^testing.T) {
+test_tc_pat_domain_exh_bool_536 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_domain_exh_bool.json", t)
 }
 
 @(test)
-test_tc_eqset_xd_negflt_str_bad_536 :: proc(t: ^testing.T) {
+test_tc_eqset_xd_negflt_str_bad_537 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_xd_negflt_str_bad.json", t)
 }
 
 @(test)
-test_tc_carve_dep_incoherent_sub_bad_537 :: proc(t: ^testing.T) {
+test_tc_carve_dep_incoherent_sub_bad_538 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_dep_incoherent_sub_bad.json", t)
 }
 
 @(test)
-test_tc_comp_tri_union_gap_bad_538 :: proc(t: ^testing.T) {
+test_tc_comp_tri_union_gap_bad_539 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_tri_union_gap_bad.json", t)
 }
 
 @(test)
-test_tc_ref_range_and_ok_539 :: proc(t: ^testing.T) {
+test_tc_ref_range_and_ok_540 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_range_and_ok.json", t)
 }
 
 @(test)
-test_tc_neg10_bad_540 :: proc(t: ^testing.T) {
+test_tc_neg10_bad_541 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_neg10_bad.json", t)
 }
 
 @(test)
-test_tc_cast_target_int_fail_541 :: proc(t: ^testing.T) {
+test_tc_cast_target_int_fail_542 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_target_int_fail.json", t)
 }
 
 @(test)
-test_tc_carve_implicit_independent_ok_542 :: proc(t: ^testing.T) {
+test_tc_carve_implicit_independent_ok_543 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_implicit_independent_ok.json", t)
 }
 
 @(test)
-test_tc_seq_range_count_bad_543 :: proc(t: ^testing.T) {
+test_tc_seq_range_count_bad_544 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_seq_range_count_bad.json", t)
 }
 
 @(test)
-test_tc_carve_override_ok_544 :: proc(t: ^testing.T) {
+test_tc_carve_override_ok_545 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_override_ok.json", t)
 }
 
 @(test)
-test_tc_carve_545 :: proc(t: ^testing.T) {
+test_tc_carve_546 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve.json", t)
 }
 
 @(test)
-test_tc_mixed_strint_float_546 :: proc(t: ^testing.T) {
+test_tc_mixed_strint_float_547 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_mixed_strint_float.json", t)
 }
 
 @(test)
-test_tc_eqset_neg_range_id_ok_547 :: proc(t: ^testing.T) {
+test_tc_eqset_neg_range_id_ok_548 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_neg_range_id_ok.json", t)
 }
 
 @(test)
-test_tc_ref_neg_singleton_ok2_548 :: proc(t: ^testing.T) {
+test_tc_ref_neg_singleton_ok2_549 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ref_neg_singleton_ok2.json", t)
 }
 
 @(test)
-test_tc_union_char_int_char_ok_549 :: proc(t: ^testing.T) {
+test_tc_union_char_int_char_ok_550 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_union_char_int_char_ok.json", t)
 }
 
 @(test)
-test_tc_eqset_u8_id_ok_550 :: proc(t: ^testing.T) {
+test_tc_eqset_u8_id_ok_551 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_u8_id_ok.json", t)
 }
 
 @(test)
-test_tc_bool_any_true_ok_551 :: proc(t: ^testing.T) {
+test_tc_bool_any_true_ok_552 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_any_true_ok.json", t)
 }
 
 @(test)
-test_tc_scope_calc_field_ok_552 :: proc(t: ^testing.T) {
+test_tc_scope_calc_field_ok_553 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_calc_field_ok.json", t)
 }
 
 @(test)
-test_tc_ord_char_bad_553 :: proc(t: ^testing.T) {
+test_tc_ord_char_bad_554 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_ord_char_bad.json", t)
 }
 
 @(test)
-test_tc_bool_neg_true_bad_554 :: proc(t: ^testing.T) {
+test_tc_bool_neg_true_bad_555 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_bool_neg_true_bad.json", t)
 }
 
 @(test)
-test_tc_insoluble_scope_field_555 :: proc(t: ^testing.T) {
+test_tc_insoluble_scope_field_556 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_insoluble_scope_field.json", t)
 }
 
 @(test)
-test_tc_char_union_neg_bad_556 :: proc(t: ^testing.T) {
+test_tc_char_union_neg_bad_557 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_char_union_neg_bad.json", t)
 }
 
 @(test)
-test_tc_scope_shape_wrong_family_bad_557 :: proc(t: ^testing.T) {
+test_tc_scope_shape_wrong_family_bad_558 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_scope_shape_wrong_family_bad.json", t)
 }
 
 @(test)
-test_tc_comp_and_or_ok_hi_558 :: proc(t: ^testing.T) {
+test_tc_comp_and_or_ok_hi_559 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_comp_and_or_ok_hi.json", t)
 }
 
 @(test)
-test_tc_seq_range_count_ok_559 :: proc(t: ^testing.T) {
+test_tc_seq_range_count_ok_560 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_seq_range_count_ok.json", t)
 }
 
 @(test)
-test_tc_pat_grammar_exh_head_only_560 :: proc(t: ^testing.T) {
+test_tc_pat_grammar_exh_head_only_561 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_pat_grammar_exh_head_only.json", t)
 }
 
 @(test)
-test_tc_cast_target_unbounded_int_fail_561 :: proc(t: ^testing.T) {
+test_tc_cast_target_unbounded_int_fail_562 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_cast_target_unbounded_int_fail.json", t)
 }
 
 @(test)
-test_tc_seq_two_classes_ok_562 :: proc(t: ^testing.T) {
+test_tc_seq_two_classes_ok_563 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_seq_two_classes_ok.json", t)
 }
 
 @(test)
-test_tc_flt_neg_bad_563 :: proc(t: ^testing.T) {
+test_tc_flt_neg_bad_564 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_flt_neg_bad.json", t)
 }
 
 @(test)
-test_tc_execute_ref_binding_ok_564 :: proc(t: ^testing.T) {
+test_tc_execute_ref_binding_ok_565 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_execute_ref_binding_ok.json", t)
 }
 
 @(test)
-test_tc_eqset_str_neg_diff_bad_565 :: proc(t: ^testing.T) {
+test_tc_eqset_str_neg_diff_bad_566 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_eqset_str_neg_diff_bad.json", t)
 }
 
 @(test)
-test_tc_color_carve_pos_bad_566 :: proc(t: ^testing.T) {
+test_tc_color_carve_pos_bad_567 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_color_carve_pos_bad.json", t)
 }
 
 @(test)
-test_tc_str_neg_ord_seq_ok_567 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_neg_ord_seq_ok.json", t)
-}
-
-@(test)
-test_tc_carve_dep_incoherent_add_bad_568 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_carve_dep_incoherent_add_bad.json", t)
-}
-
-@(test)
-test_tc_pat_domain_exh_u8_full_color_569 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_pat_domain_exh_u8_full_color.json", t)
-}
-
-@(test)
-test_tc_str_dquote_1char_pos_bad_570 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_dquote_1char_pos_bad.json", t)
-}
-
-@(test)
-test_tc_cmp_gt6f_ok_571 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_cmp_gt6f_ok.json", t)
-}
-
-@(test)
-test_tc_scope_shape_overflow_bad_572 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_scope_shape_overflow_bad.json", t)
-}
-
-@(test)
-test_tc_flt_add_concrete_ok_573 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_flt_add_concrete_ok.json", t)
-}
-
-@(test)
-test_tc_bool_false_ok_574 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_bool_false_ok.json", t)
-}
-
-@(test)
-test_tc_str_dquote_1char_pos_ok_575 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_dquote_1char_pos_ok.json", t)
-}
-
-@(test)
-test_tc_str_rep_concrete_ok_576 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_rep_concrete_ok.json", t)
-}
-
-@(test)
-test_tc_seq_email_bad_577 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_seq_email_bad.json", t)
-}
-
-@(test)
-test_tc_int_sub_range_hi_ok_578 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_int_sub_range_hi_ok.json", t)
-}
-
-@(test)
-test_tc_map_structural_union_ok_579 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_map_structural_union_ok.json", t)
-}
-
-@(test)
-test_tc_scope_nested_ok_580 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_scope_nested_ok.json", t)
-}
-
-@(test)
-test_tc_neg_char_bad_581 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_neg_char_bad.json", t)
-}
-
-@(test)
-test_tc_str_tri_range_url_bad_582 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_tri_range_url_bad.json", t)
-}
-
-@(test)
-test_tc_prod_int_union_wider_bad_583 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_prod_int_union_wider_bad.json", t)
-}
-
-@(test)
-test_tc_self_singleton_ok_584 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_self_singleton_ok.json", t)
-}
-
-@(test)
-test_tc_union_u8_f32_float_ok_585 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_union_u8_f32_float_ok.json", t)
-}
-
-@(test)
-test_tc_eqset_xd_negint_negstr_bad_586 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_eqset_xd_negint_negstr_bad.json", t)
-}
-
-@(test)
-test_tc_insoluble_or_587 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_insoluble_or.json", t)
-}
-
-@(test)
-test_tc_union_tri_float_ok_588 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_union_tri_float_ok.json", t)
-}
-
-@(test)
-test_tc_int_add_overflow_bad_589 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_int_add_overflow_bad.json", t)
-}
-
-@(test)
-test_tc_pat_grammar_exh_empty_only_590 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_pat_grammar_exh_empty_only.json", t)
-}
-
-@(test)
-test_tc_neg_ord_range_ok_591 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_neg_ord_range_ok.json", t)
-}
-
-@(test)
-test_tc_neg_int_ok_592 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_neg_int_ok.json", t)
-}
-
-@(test)
-test_tc_cast_char_to_u8_ok_593 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_cast_char_to_u8_ok.json", t)
-}
-
-@(test)
-test_tc_mixed_strint_str_594 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_mixed_strint_str.json", t)
-}
-
-@(test)
-test_tc_cast_f64_to_f32_ok_595 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_cast_f64_to_f32_ok.json", t)
-}
-
-@(test)
-test_tc_flt_range_ok_596 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_flt_range_ok.json", t)
-}
-
-@(test)
-test_tc_char_builtin_rejects_int_597 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_char_builtin_rejects_int.json", t)
-}
-
-@(test)
-test_tc_str_backtick_in_string_ok_598 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_backtick_in_string_ok.json", t)
-}
-
-@(test)
-test_tc_char_rep_union_ok_599 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_char_rep_union_ok.json", t)
-}
-
-@(test)
-test_tc_mixed_float_600 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_mixed_float.json", t)
-}
-
-@(test)
-test_event_emit_typed_by_u8_handler_601 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/event_emit_typed_by_u8_handler.json", t)
-}
-
-@(test)
-test_tc_str_tri_range_contains_ok_602 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_tri_range_contains_ok.json", t)
-}
-
-@(test)
-test_tc_str_neg_concat_digits_ok_603 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_str_neg_concat_digits_ok.json", t)
-}
-
-@(test)
-test_tc_cmp_ge5_ok_604 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_cmp_ge5_ok.json", t)
-}
-
-@(test)
-test_tc_carve_sibling_override_subst_605 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_carve_sibling_override_subst.json", t)
-}
-
-@(test)
-test_tc_flt_inter_bad_606 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_flt_inter_bad.json", t)
-}
-
-@(test)
-test_tc_carve_recolors_bare_production_ok_607 :: proc(t: ^testing.T) {
+test_tc_carve_recolors_bare_production_ok_568 :: proc(t: ^testing.T) {
 	run_typecheck_test("tests/tc_carve_recolors_bare_production_ok.json", t)
 }
 
 @(test)
-test_tc_carve_recolors_bare_binding_stated_bad_608 :: proc(t: ^testing.T) {
-	run_typecheck_test("tests/tc_carve_recolors_bare_binding_stated_bad.json", t)
+test_tc_str_neg_ord_seq_ok_569 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_neg_ord_seq_ok.json", t)
 }
+
+@(test)
+test_tc_carve_dep_incoherent_add_bad_570 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_carve_dep_incoherent_add_bad.json", t)
+}
+
+@(test)
+test_tc_pat_domain_exh_u8_full_color_571 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_pat_domain_exh_u8_full_color.json", t)
+}
+
+@(test)
+test_tc_str_dquote_1char_pos_bad_572 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_dquote_1char_pos_bad.json", t)
+}
+
+@(test)
+test_tc_cmp_gt6f_ok_573 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_cmp_gt6f_ok.json", t)
+}
+
+@(test)
+test_tc_scope_shape_overflow_bad_574 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_scope_shape_overflow_bad.json", t)
+}
+
+@(test)
+test_tc_flt_add_concrete_ok_575 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_flt_add_concrete_ok.json", t)
+}
+
+@(test)
+test_tc_bool_false_ok_576 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_bool_false_ok.json", t)
+}
+
+@(test)
+test_tc_str_dquote_1char_pos_ok_577 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_dquote_1char_pos_ok.json", t)
+}
+
+@(test)
+test_tc_str_rep_concrete_ok_578 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_rep_concrete_ok.json", t)
+}
+
+@(test)
+test_tc_seq_email_bad_579 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_seq_email_bad.json", t)
+}
+
+@(test)
+test_tc_int_sub_range_hi_ok_580 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_int_sub_range_hi_ok.json", t)
+}
+
+@(test)
+test_tc_map_structural_union_ok_581 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_map_structural_union_ok.json", t)
+}
+
+@(test)
+test_tc_scope_nested_ok_582 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_scope_nested_ok.json", t)
+}
+
+@(test)
+test_tc_neg_char_bad_583 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_neg_char_bad.json", t)
+}
+
+@(test)
+test_tc_str_tri_range_url_bad_584 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_tri_range_url_bad.json", t)
+}
+
+@(test)
+test_tc_prod_int_union_wider_bad_585 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_prod_int_union_wider_bad.json", t)
+}
+
+@(test)
+test_tc_self_singleton_ok_586 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_self_singleton_ok.json", t)
+}
+
+@(test)
+test_tc_union_u8_f32_float_ok_587 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_union_u8_f32_float_ok.json", t)
+}
+
+@(test)
+test_tc_eqset_xd_negint_negstr_bad_588 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_eqset_xd_negint_negstr_bad.json", t)
+}
+
+@(test)
+test_tc_insoluble_or_589 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_insoluble_or.json", t)
+}
+
+@(test)
+test_tc_union_tri_float_ok_590 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_union_tri_float_ok.json", t)
+}
+
+@(test)
+test_tc_int_add_overflow_bad_591 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_int_add_overflow_bad.json", t)
+}
+
+@(test)
+test_tc_pat_grammar_exh_empty_only_592 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_pat_grammar_exh_empty_only.json", t)
+}
+
+@(test)
+test_tc_neg_ord_range_ok_593 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_neg_ord_range_ok.json", t)
+}
+
+@(test)
+test_tc_neg_int_ok_594 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_neg_int_ok.json", t)
+}
+
+@(test)
+test_tc_cast_char_to_u8_ok_595 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_cast_char_to_u8_ok.json", t)
+}
+
+@(test)
+test_tc_mixed_strint_str_596 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_mixed_strint_str.json", t)
+}
+
+@(test)
+test_tc_cast_f64_to_f32_ok_597 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_cast_f64_to_f32_ok.json", t)
+}
+
+@(test)
+test_tc_flt_range_ok_598 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_flt_range_ok.json", t)
+}
+
+@(test)
+test_tc_char_builtin_rejects_int_599 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_char_builtin_rejects_int.json", t)
+}
+
+@(test)
+test_tc_str_backtick_in_string_ok_600 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_backtick_in_string_ok.json", t)
+}
+
+@(test)
+test_tc_char_rep_union_ok_601 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_char_rep_union_ok.json", t)
+}
+
+@(test)
+test_tc_mixed_float_602 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_mixed_float.json", t)
+}
+
+@(test)
+test_event_emit_typed_by_u8_handler_603 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/event_emit_typed_by_u8_handler.json", t)
+}
+
+@(test)
+test_tc_str_tri_range_contains_ok_604 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_tri_range_contains_ok.json", t)
+}
+
+@(test)
+test_tc_str_neg_concat_digits_ok_605 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_str_neg_concat_digits_ok.json", t)
+}
+
+@(test)
+test_tc_cmp_ge5_ok_606 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_cmp_ge5_ok.json", t)
+}
+
+@(test)
+test_tc_carve_sibling_override_subst_607 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_carve_sibling_override_subst.json", t)
+}
+
+@(test)
+test_tc_flt_inter_bad_608 :: proc(t: ^testing.T) {
+	run_typecheck_test("tests/tc_flt_inter_bad.json", t)
+}
+
