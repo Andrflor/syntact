@@ -177,7 +177,8 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 		if value != nil {
 			if bd.name != "" || color != nil || bd.kind != .Push {
 				if bd.name != "" || color != nil do strings.write_byte(&b, ' ')
-				fmt.sbprintf(&b, "%s ", ARROWS[bd.kind])
+				strings.write_string(&b, ARROWS[bd.kind])
+				if bd.kind != .Expand do strings.write_byte(&b, ' ') // `...xs` s'écrit collé
 			}
 			strings.write_string(&b, print_at(value, .NONE, view))
 		}
