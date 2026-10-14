@@ -198,6 +198,7 @@ Error_Kind :: enum u8 {
 	Invalid_Property_Access,
 	Invalid_Execute,
 	Invalid_Carve,
+	Invalid_Expansion,
 	Invalid_operator,
 	Invalid_Range,
 	Constraint_Mismatch,

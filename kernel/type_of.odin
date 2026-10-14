@@ -62,14 +62,20 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 type_scope :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope = nil) {
 	s.shape = shape
 	append(&k.typed, s)
-	for &b, i in s.bindings do type_binding(k, &b, s, expected_color(shape, i, b))
+	expected := shape != nil ? places(shape) : nil
+	position := 0 // la place du binding parmi ceux que s présente
+	for &b in s.bindings {
+		type_binding(k, &b, s, expected_color(expected, position, b))
+		if b.kind != .Expand do position += 1
+		else if v, ok := expanded(b); ok do position += len(places(v))
+	}
 }
 
 // expected_color : le type de couleur que la forme attend à la place i, si ce
 // binding y correspond (même nom, même kind).
-expected_color :: proc(shape: ^Scope, i: int, b: Binding) -> ^Expr {
-	if shape == nil || i >= len(shape.bindings) do return nil
-	sb := shape.bindings[i]
+expected_color :: proc(shape: []Place, i: int, b: Binding) -> ^Expr {
+	if i >= len(shape) do return nil
+	sb := binding_at(shape[i])
 	if sb.name != b.name || sb.kind != b.kind do return nil
 	return sb.color_type
 }
@@ -82,6 +88,10 @@ expected_color :: proc(shape: ^Scope, i: int, b: Binding) -> ^Expr {
 type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	previous := enter(k, env, b)
 	defer k.scene = previous
+	if b.kind == .Expand {
+		type_expansion(k, b, env)
+		return
+	}
 	if b.kind != .Push && b.kind != .Pull && b.kind != .Product {
 		b.value_type = new_expr(Invalid{}) // signalé à la construction
 		return
@@ -128,7 +138,7 @@ expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bo
 	if color == nil do return nil, false
 	#partial switch c in color^ {
 	case ^Scope:
-		return c, first_production(c) < 0
+		return c, first_production(c) == nil
 	case Set:
 		found: ^Scope = nil
 		for r in bdd_atoms(c.scopes) {
@@ -167,7 +177,7 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		if !ok do return color // la couleur none : sa seule valeur est none
 		return new_expr(d)
 	case ^Scope:
-		if p := first_production(c); p >= 0 do return c.bindings[p].value_type
+		if p := first_production(c); p != nil do return p.value_type
 		return color
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
@@ -182,9 +192,10 @@ scopes_default :: proc(k: ^Kernel, b: Bdd, binding: ^Binding) -> ^Expr {
 	return report(k, .Unsupported, binding.span, "pas encore dans le kernel : le défaut d'une combinaison de formes")
 }
 
-first_production :: proc(s: ^Scope) -> int {
-	for b, i in s.bindings do if b.kind == .Product do return i
-	return -1
+// first_production : la première production que présente s, ou nil.
+first_production :: proc(s: ^Scope) -> ^Binding {
+	for p in places(s) do if b := binding_at(p); b.kind == .Product do return b
+	return nil
 }
 
 // type_ref : le type du binding désigné.
@@ -201,26 +212,28 @@ type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
 	if is_invalid(t) do return t
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'.%s' : la cible n'est pas un scope", a.name))
-	i := find_binding(s, a.name, a.ordinal)
-	if i < 0 do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' n'existe pas dans ce scope", a.name))
-	v := s.bindings[i].value_type
+	p, found := find_binding(s, a.name, a.ordinal)
+	if !found do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' n'existe pas dans ce scope", a.name))
+	v := binding_at(p).value_type
 	if v == nil do return report(k, .Unsupported, a.span, "pas encore dans le kernel : la récursion")
 	return refine(k, v, a.span)
 }
 
-// find_binding : l'accès lit la dernière occurrence d'un nom, ou la n-ième avec `#n`.
-find_binding :: proc(s: ^Scope, name: string, ordinal: int) -> int {
+// find_binding : parmi les bindings que présente s, la dernière occurrence d'un
+// nom, ou la n-ième avec `#n`.
+find_binding :: proc(s: ^Scope, name: string, ordinal: int) -> (Place, bool) {
+	all := places(s)
 	if ordinal >= 0 {
 		seen := 0
-		for b, i in s.bindings {
-			if b.name != name do continue
-			if seen == ordinal do return i
+		for p in all {
+			if binding_at(p).name != name do continue
+			if seen == ordinal do return p, true
 			seen += 1
 		}
-		return -1
+		return {}, false
 	}
-	#reverse for b, i in s.bindings do if b.name == name do return i
-	return -1
+	#reverse for p in all do if binding_at(p).name == name do return p, true
+	return {}, false
 }
 
 type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
@@ -229,8 +242,8 @@ type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Execute, c.span, "on ne collapse qu'un scope")
 	p := first_production(s)
-	if p < 0 do return new_expr(Set{}) // un scope sans production se réduit à none
-	return s.bindings[p].value_type
+	if p == nil do return new_expr(Set{}) // un scope sans production se réduit à none
+	return p.value_type
 }
 
 // type_unknown : une nouvelle inconnue. Ses valeurs possibles viennent de sa forme

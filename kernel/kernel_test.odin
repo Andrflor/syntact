@@ -153,6 +153,16 @@ CASES := []Case {
 	{"Circle -> {u8:radius}\nSquare -> {u8:side}\nr -> Circle{radius -> 7} ? {Square: -> 2  Circle: -> 1}", "{Circle -> {0..255:radius -> 0}  Square -> {0..255:side -> 0}  r -> 1}", {}},
 	{"r -> 3 ? {u8: -> 1  -> 2}", "{r -> 2}", {}}, // u8: est le défaut de u8 : 0
 	{"Circle -> {u8:radius}\nr -> Circle ? {Circle: -> radius}", "", {.Unsupported}}, // la déstructuration
+	// l'expansion : `...E` dépose les bindings de la valeur de E, tels quels
+	{"xs -> {2 3}\nys -> {1 ...xs 4}", "{xs -> {2  3}  ys -> {1  2  3  4}}", {}},
+	{"p -> {...{-> 5}}\nq -> p!", "{p -> {-> 5}  q -> 5}", {}}, // une production déposée
+	{"a -> {x -> 1}\nb -> {x -> 0  ...a}\nl -> b.x\nf -> b.x#0", "{a -> {x -> 1}  b -> {x -> 0  x -> 1}  l -> 1  f -> 0}", {}}, // une seconde occurrence
+	{"b -> {...5}", "", {.Invalid_Expansion}},
+	{"a -> {u8:x -> 1\n  u8:y -> x + 1}\nb -> {...a  z -> 9}\nd -> b{x -> 5}.y", "", {}}, // le carve passe dans l'expansion
+	{"a -> {u8:x -> 1\n  u8:y -> x + 200}\nb -> {...a  z -> 9}\nc -> b{x -> 100}", "", {.Constraint_Mismatch}},
+	{"xs -> {2 3}\nys -> {1 ...xs}\nzs -> ys{9 8 7}", "{xs -> {2  3}  ys -> {1  2  3}  zs -> {9  8  7}}", {}}, // des positions à travers l'expansion
+	{"{u8: u8: u8:}:ys -> {1 ...{2 300}}", "", {.Constraint_Mismatch}},
+	{"a -> {x -> 1}\nb -> {...a}\nc -> b{x -> 2 x -> 3}", "", {.Invalid_Carve}},
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
