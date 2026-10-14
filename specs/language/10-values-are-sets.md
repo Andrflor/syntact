@@ -80,6 +80,18 @@ Two sets are equal when they have the same elements, however they are written:
 =~10:h -> ~(10 | 11)                     // error: 11 is in ~10, not in ~(10 | 11)
 ```
 
+Writings that look different can still be the same set. Compute the elements
+before deciding:
+
+- `~5 | 5`: `~5` is every integer except 5, and `| 5` puts 5 back. That is every
+  integer, which is `int`. So `=(~5 | 5):g -> int` is valid.
+- `10 | ~20 | u8`: `~20` is every integer except 20, and `u8` contains 20, so
+  the union is every integer. `10 | ~20 | u16` is every integer for the same
+  reason (`u16` contains 20 too). So `=(10 | ~20 | u8):a -> (10 | ~20 | u16)` is
+  valid: `u8` and `u16` differ, but here both only put 20 back.
+- `~10` and `~(10 | 11)` really differ: 11 is in the first, not in the second.
+  That one is an error.
+
 ---
 
 ---

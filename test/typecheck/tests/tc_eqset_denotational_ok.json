@@ -1,1 +1,1 @@
-{"name": "tc_eqset_denotational_ok", "description": "=X compares sets, not writings: (~5|5) is every integer, so it is =int", "source": "=(~5 | 5):a -> int", "expect_errors": []}
+{"name": "tc_eqset_denotational_ok", "description": "VALID: =X compares the elements, not the writing. ~5 is every integer except 5, and |5 puts 5 back: ~5|5 is every integer, which is exactly int. Same set on both sides: no error.", "source": "=(~5 | 5):a -> int", "expect_errors": []}
