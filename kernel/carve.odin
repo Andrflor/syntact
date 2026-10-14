@@ -23,7 +23,7 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	c.args.carving = s // ce que `.x` désigne dans les arguments
 	// dans une copie, ce carve est dérivé avec elle : ses erreurs vont au carve d'origine
 	derived := copy_scope(s, s.parent, k.scene.site != {} ? k.scene.site : c.span)
-	targets := fill(k, derived, c)
+	targets := fill(k, s, derived, c)
 	infer_holes(k, s, c, derived, targets)
 	// une copie faite en silence est celle d'un binding que rien n'a changé : elle
 	// redonne ce que sa source a déjà donné
@@ -33,10 +33,14 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 }
 
 // fill : met chaque argument à la place du binding qu'il vise. `->` remplit un
-// champ, `<-` un trou ; un argument sans nom vise un champ, jamais un trou. Rend,
-// pour chaque argument, le binding qu'il remplit (-1 : aucun).
-fill :: proc(k: ^Kernel, derived: ^Scope, c: Carve) -> []int {
+// champ, `<-` un trou ; un argument sans nom vise un champ, jamais un trou. La
+// cible se lit dans la source s, typée, à travers ses expansions ; la copie a les
+// mêmes bindings écrits. Rend, pour chaque argument, le binding écrit de la copie
+// qu'il remplit (-1 : aucun, ou un binding qu'une expansion apporte).
+fill :: proc(k: ^Kernel, s, derived: ^Scope, c: Carve) -> []int {
 	targets := make([]int, len(c.args.bindings))
+	chosen := make([dynamic]Place, context.temp_allocator)
+	into := make(map[int]Into, context.temp_allocator)
 	position := 0
 	for a, i in c.args.bindings {
 		targets[i] = -1
@@ -45,29 +49,35 @@ fill :: proc(k: ^Kernel, derived: ^Scope, c: Carve) -> []int {
 			report(k, .Unsupported, a.span, "pas encore dans le kernel : un argument de carve coloré")
 			continue
 		}
-		j := carve_target(derived, a, c.ordinals[i], &position)
-		if j < 0 {
+		p, found := carve_target(s, a, c.ordinals[i], &position)
+		if !found {
 			report(k, .Invalid_Carve, a.span, carve_miss(a, c.ordinals[i], position))
 			continue
 		}
-		b := &derived.bindings[j]
+		b := binding_at(p)
 		if (a.kind == .Pull) != (b.kind == .Pull) {
 			message := a.kind == .Pull ? "%s n'est pas un trou : il se remplit par ->" : "%s est un trou : il se remplit par <-"
 			report(k, .Invalid_Carve, a.span, fmt.tprintf(message, display(b)))
 			continue
 		}
-		if targets_contain(targets[:i], j) {
+		if slice_contains(chosen[:], p) {
 			report(k, .Invalid_Carve, a.span, fmt.tprintf("%s est carvé deux fois", display(b)))
 			continue
 		}
-		targets[i] = j
-		b.value = new_expr(Carved{c.args, i})
+		append(&chosen, p)
+		if !direct(s, p) {
+			carve_into(&into, derived, s, p, a, i, c)
+			continue
+		}
+		targets[i] = p.index
+		derived.bindings[p.index].value = new_expr(Carved{c.args, i})
 	}
+	carve_expansions(into, derived, c)
 	return targets
 }
 
-targets_contain :: proc(targets: []int, j: int) -> bool {
-	for t in targets do if t == j do return true
+slice_contains :: proc(places: []Place, p: Place) -> bool {
+	for q in places do if q.scope == p.scope && q.index == p.index do return true
 	return false
 }
 
@@ -156,7 +166,9 @@ type_carving :: proc(k: ^Kernel, c: Carving, env: ^Scope) -> ^Expr {
 
 // recarves : `z{…}` recarve le champ z du scope carvé s, s'il en a un.
 recarves :: proc(s: ^Scope, sh: Shorthand) -> bool {
-	return s != nil && find_binding(s, sh.field.name, sh.field.ordinal) >= 0
+	if s == nil do return false
+	_, found := find_binding(s, sh.field.name, sh.field.ordinal)
+	return found
 }
 
 type_shorthand :: proc(k: ^Kernel, sh: Shorthand, env: ^Scope) -> ^Expr {
@@ -165,21 +177,27 @@ type_shorthand :: proc(k: ^Kernel, sh: Shorthand, env: ^Scope) -> ^Expr {
 	return type_of(k, sh.outer, env)
 }
 
-// carve_target : le binding que vise un argument. Nommé, la première occurrence
-// de son nom, ou celle de `x#n` ; `z{…}` qui recarve un champ, ce champ ; sans
-// nom, le champ de même rang — ni production ni trou. -1 : il n'existe pas — un
-// scope est clos.
-carve_target :: proc(s: ^Scope, a: Binding, ordinal: int, position: ^int) -> int {
+// carve_target : le binding que vise un argument, parmi ceux que présente s.
+// Nommé, la première occurrence de son nom, ou celle de `x#n` ; `z{…}` qui
+// recarve un champ, ce champ ; sans nom, le champ de même rang — ni production ni
+// trou. Faux : il n'existe pas — un scope est clos.
+carve_target :: proc(s: ^Scope, a: Binding, ordinal: int, position: ^int) -> (Place, bool) {
 	if a.name != "" do return find_binding(s, a.name, max(ordinal, 0))
 	if sh, ok := shorthand_of(a); ok && recarves(s, sh) do return find_binding(s, sh.field.name, max(sh.field.ordinal, 0))
 	rank := position^
 	position^ += 1
-	for b, i in s.bindings {
-		if b.kind == .Product || b.kind == .Pull do continue
-		if rank == 0 do return i
+	for p in places(s) {
+		kind := binding_at(p).kind
+		if kind == .Product || kind == .Pull do continue
+		if rank == 0 do return p, true
 		rank -= 1
 	}
-	return -1
+	return {}, false
+}
+
+is_shorthand :: proc(a: Binding) -> bool {
+	_, ok := shorthand_of(a)
+	return ok
 }
 
 // shorthand_of : l'argument est `z{…}`, sans flèche.

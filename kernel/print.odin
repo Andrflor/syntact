@@ -160,7 +160,13 @@ ARROWS := [Binding_Kind]string {
 print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 	b := strings.builder_make()
 	strings.write_byte(&b, '{')
-	for bd, i in s.bindings {
+	shown := make([dynamic]Binding, context.temp_allocator)
+	if view == .Type {
+		for p in places(s) do append(&shown, binding_at(p)^) // le scope tel qu'il se présente
+	} else {
+		append(&shown, ..s.bindings[:])
+	}
+	for bd, i in shown {
 		color, value := bd.color, bd.value
 		if view == .Type do color, value = bd.color_type, bd.value_type
 		if i > 0 do strings.write_string(&b, "  ")

@@ -73,7 +73,17 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		}
 		append(&s.bindings, b)
 	case .Expand:
-		append(&s.bindings, Binding{kind = .Expand, value = unsupported(k, idx, "l'expansion ..."), span = span})
+		target := data.unary.operand
+		value: ^Expr
+		switch {
+		case target == syn.INVALID_NODE:
+			value = unsupported(k, idx, "l'expansion sans cible")
+		case ast.node_kinds[target] == .Constraint:
+			value = unsupported(k, idx, "l'expansion d'un binding coloré")
+		case:
+			value = build_expr(k, s, target)
+		}
+		append(&s.bindings, Binding{kind = .Expand, value = value, span = span})
 	case .EventPush:
 		append(&s.bindings, Binding{kind = .Event_Push, value = unsupported(k, idx, "l'émission >-"), span = span})
 	case .EventPull:

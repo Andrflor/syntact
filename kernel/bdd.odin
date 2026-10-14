@@ -236,16 +236,19 @@ color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 }
 
 scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
-	if first_production(s) >= 0 {
-		for b in s.bindings {
+	shown := places(s)
+	if first_production(s) != nil {
+		for p in shown {
+			b := binding_at(p)^
 			if b.kind != .Product do continue
 			x := admitted_by(k, b) or_return
 			set = set_union(set, x)
 		}
 		return set, true
 	}
-	fields := make([]Field, len(s.bindings))
-	for b, i in s.bindings {
+	fields := make([]Field, len(shown))
+	for p, i in shown {
+		b := binding_at(p)^
 		fields[i] = Field{name = b.name, kind = b.kind}
 		if b.color == nil && b.name != "" {
 			fields[i].free = true // un binding nommé sans couleur n'impose rien : un carve peut lui donner toute valeur
@@ -273,8 +276,10 @@ exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 		if is_atom(v) do return v, true
 		return Set{sorts = {.Sets}, sets = values_point(v)}, true
 	case ^Scope:
-		fields := make([]Field, len(v.bindings))
-		for b, i in v.bindings {
+		shown := places(v)
+		fields := make([]Field, len(shown))
+		for p, i in shown {
+			b := binding_at(p)^
 			fields[i] = Field{name = b.name, kind = b.kind}
 			fields[i].set = exact_set(k, b.value_type) or_return
 		}
@@ -369,10 +374,11 @@ bdd_member :: proc(k: ^Kernel, b: Bdd, s: ^Scope) -> Member {
 }
 
 record_member :: proc(k: ^Kernel, r: ^Record, s: ^Scope) -> Member {
-	if len(s.bindings) != len(r.fields) do return .Never
+	shown := places(s)
+	if len(shown) != len(r.fields) do return .Never
 	result := Member.Always
 	for f, i in r.fields {
-		b := s.bindings[i]
+		b := binding_at(shown[i])^
 		if f.name != b.name || f.kind != b.kind do return .Never
 		if f.free || colored_within(k, b, f.set) do continue
 		result = and3(result, member_of(admits(k, f.set, b.value_type), is_closed_type(b.value_type)))
@@ -394,7 +400,7 @@ is_closed_type :: proc(t: ^Expr) -> bool {
 	case Poly, Term, Set_Form:
 		return false
 	case ^Scope:
-		for b in v.bindings do if b.value_type != nil && !is_closed_type(b.value_type) do return false
+		for p in places(v) do if field := binding_at(p).value_type; field != nil && !is_closed_type(field) do return false
 	}
 	return true
 }

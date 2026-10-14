@@ -131,11 +131,12 @@ land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 	case ^Scope:
 		w, is_scope := at.type^.(^Scope)
 		if !is_scope || !same_bindings(v, w) do return // la vérification du champ le signale
-		for vb, i in v.bindings {
-			wb := w.bindings[i]
+		vs, ws := places(v), places(w)
+		for vp, i in vs {
+			vb, wb := binding_at(vp)^, binding_at(ws[i])^
 			if vb.color != nil {
 				inner := wb.color != nil ? Landing{wb.color_type, true} : Landing{wb.value_type, at.required}
-				land(k, p, type_of(k, vb.color, v), inner)
+				land(k, p, type_of(k, vb.color, vp.scope), inner)
 			}
 			if vb.value != nil do land(k, p, vb.value_type, Landing{wb.value_type, at.required})
 		}
@@ -144,10 +145,11 @@ land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 	if mentions(p, pattern) do p.blocked = true
 }
 
-// same_bindings : mêmes bindings, mêmes noms, mêmes kinds, dans l'ordre.
+// same_bindings : ils présentent les mêmes bindings — noms et kinds, dans l'ordre.
 same_bindings :: proc(a, b: ^Scope) -> bool {
-	if len(a.bindings) != len(b.bindings) do return false
-	for x, i in a.bindings do if x.name != b.bindings[i].name || x.kind != b.bindings[i].kind do return false
+	x, y := places(a), places(b)
+	if len(x) != len(y) do return false
+	for p, i in x do if binding_at(p).name != binding_at(y[i]).name || binding_at(p).kind != binding_at(y[i]).kind do return false
 	return true
 }
 
