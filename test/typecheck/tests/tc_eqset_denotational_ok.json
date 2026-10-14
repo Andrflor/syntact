@@ -1,0 +1,1 @@
+{"name": "tc_eqset_denotational_ok", "description": "=X compares sets, not writings: (~5|5) is every integer, so it is =int", "source": "=(~5 | 5):a -> int", "expect_errors": []}
