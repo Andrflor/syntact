@@ -57,17 +57,22 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 
 // type_scope type chaque binding sur place, dans l'ordre : chacun voit les types
 // de ceux du dessus. Une ref vers un binding pas encore typé est une récursion.
-// `shape` : la forme que la couleur attend, quand ce scope est la valeur d'un
-// binding coloré par elle. Le scope la retient : ses copies la gardent.
-type_scope :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope = nil) {
+// `shape` : les places de la forme que la couleur attend, quand ce scope est la
+// valeur d'un binding coloré par elle. Le scope la retient : ses copies la
+// gardent. Un scope écrit ici et expansé reçoit la suite de la forme, à partir de
+// la place où il dépose ses bindings.
+type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 	s.shape = shape
 	append(&k.typed, s)
-	expected := shape != nil ? places(shape) : nil
 	position := 0 // la place du binding parmi ceux que s présente
 	for &b in s.bindings {
-		type_binding(k, &b, s, expected_color(expected, position, b))
-		if b.kind != .Expand do position += 1
-		else if v, ok := expanded(b); ok do position += len(places(v))
+		if b.kind == .Expand {
+			type_expansion(k, &b, s, position < len(shape) ? shape[position:] : nil)
+			if v, ok := expanded(b); ok do position += len(places(v))
+			continue
+		}
+		type_binding(k, &b, s, expected_color(shape, position, b))
+		position += 1
 	}
 }
 
@@ -88,10 +93,6 @@ expected_color :: proc(shape: []Place, i: int, b: Binding) -> ^Expr {
 type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	previous := enter(k, env, b)
 	defer k.scene = previous
-	if b.kind == .Expand {
-		type_expansion(k, b, env)
-		return
-	}
 	if b.kind != .Push && b.kind != .Pull && b.kind != .Product {
 		b.value_type = new_expr(Invalid{}) // signalé à la construction
 		return
@@ -109,7 +110,7 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 		}
 	case ^Scope:
 		if shape, found := expected_shape(k, b.color_type, v); found {
-			type_scope(k, v, shape)
+			type_scope(k, v, places(shape))
 			b.value_type = b.value
 			return
 		}

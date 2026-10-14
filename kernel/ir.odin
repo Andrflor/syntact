@@ -50,7 +50,7 @@ Copy :: enum u8 {
 Scope :: struct {
 	parent:   ^Scope,
 	bindings: [dynamic]Binding,
-	shape:    ^Scope, // la forme contre laquelle il a été typé : la couleur implicite de ses bindings
+	shape:    []Place, // la forme qu'il a reçue, place par place : la couleur implicite de ses bindings
 	site:     syn.Span, // une copie : le carve qui l'a dérivée, où sont signalées ses erreurs
 	carving:  ^Scope, // les arguments d'un carve : le scope qu'il dérive, que `.x` désigne
 	cover:    ^Expr, // une branche de pattern : ce qu'elle admet ; nil pour la branche par défaut
@@ -253,8 +253,14 @@ enter :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> (previous: Scene) {
 
 // report : une erreur, à la place que dit la scène, une seule fois.
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> ^Expr {
+	return report_about(k, kind, span, span, message)
+}
+
+// report_about : une erreur signalée en `span`, qui concerne ce qui est écrit en
+// `origin` — un binding qu'un scope a reçu d'ailleurs.
+report_about :: proc(k: ^Kernel, kind: Error_Kind, span, origin: syn.Span, message: string) -> ^Expr {
 	if !k.scene.quiet {
-		e := Error{kind, message, k.scene.site != {} ? k.scene.site : span, span}
+		e := Error{kind, message, k.scene.site != {} ? k.scene.site : span, origin}
 		if !slice.contains(k.errors[:], e) do append(&k.errors, e)
 	}
 	return new_expr(Invalid{})
