@@ -160,6 +160,13 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 			}
 			return unsupported(k, idx, "le cast ::")
 		}
+		if op.kind == .Equal && op.left == syn.INVALID_NODE {
+			// `=X` : la valeur X elle-même, `{-> X}` — `=u8` admet la valeur u8, pas ses
+			// éléments
+			child := new_scope(s, span)
+			append(&child.bindings, Binding{kind = .Product, value = build_expr(k, child, op.right), span = span})
+			return new_expr(child)
+		}
 		left: ^Expr = nil
 		if op.left != syn.INVALID_NODE do left = build_expr(k, s, op.left)
 		return new_expr(Op{kind = op.kind, left = left, right = build_expr(k, s, op.right), span = span})

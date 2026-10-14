@@ -56,6 +56,30 @@ color's. Arithmetic composes sets (`u8 + u8` is `0..510`), comparisons over
 decided sets fold to their exact answer (`2 > 2` **is** `false`), and a mistake
 is a set that escapes its color — reported at compile time.
 
+## A set as a value: `=`
+
+As a color, a set admits its **elements**. To admit the set itself, as one
+value, prefix it with `=`:
+
+```syntact
+u8:a -> 5      // 5 is an element of u8
+u8:b -> u8     // error: the set u8 is not an element of u8
+=u8:c -> u8    // the value u8 itself
+=u8:d -> 5     // error: 5 is not the set u8
+```
+
+`=X` is the scope `{-> X}`: a color whose only element is the value `X`. On a
+single value it changes nothing — `=true:x` and `true:x` admit the same thing.
+
+Two sets are equal when they have the same elements, however they are written:
+
+```syntact
+=(10 | ~20 | u8):e -> (u8 | 10 | ~20)    // the same set, reordered
+=~~5:f -> 5                              // ~~5 is 5
+=(~5 | 5):g -> int                       // both are every integer
+=~10:h -> ~(10 | 11)                     // error: 11 is in ~10, not in ~(10 | 11)
+```
+
 ---
 
 ---
