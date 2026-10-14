@@ -380,6 +380,16 @@ empty -> {
   x -> 1
 }
 empty!   // none</code></pre>
+            <h3>Productions are lazy</h3>
+            <p>A production runs only when its value is asked for: by <code>!</code>, by a default, by a color that reads the scope, or by a pattern branch that fires. Nothing else runs it.</p>
+<pre class="code"><code>f -> {
+  u8:n
+  -> n + 1
+}
+
+g -> f{n -> 5}   // a scope: nothing has run yet
+g!               // 6, computed here</code></pre>
+            <p>This is what lets a scope mention itself: a list defined in terms of a list only unfolds as far as a value is actually asked for.</p>
           </article>
 
           <!-- 03 -->
@@ -404,7 +414,7 @@ shifted.y   // 0</code></pre>
 
 box2 -> box{x -> 10}
 box2.y   // 11</code></pre>
-            <p>Arguments without a name fill the bindings in order, skipping productions: <code>Point{3, 4}</code> sets <code>x</code> to 3 and <code>y</code> to 4.</p>
+            <p>Arguments without a name fill the bindings in order, skipping productions and holes (chapter 10): <code>Point{3, 4}</code> sets <code>x</code> to 3 and <code>y</code> to 4.</p>
             <h3>A scope is closed</h3>
             <p>Carving changes bindings that exist. It never adds one. A misspelled name is an error, so a typo cannot quietly grow a scope.</p>
 <pre class="code"><code>User -> {
@@ -481,6 +491,13 @@ Digit -> '0'..'9'</code></pre>
               </tbody>
             </table></div>
             <p>Arithmetic works on sets too. <code>u8 + u8</code> is <code>0..510</code>, and a comparison whose answer is already decided is that answer: <code>2 > 2</code> is <code>false</code>.</p>
+            <h3>A set as a value</h3>
+            <p>As a color, a set admits its elements. To admit the set itself, as one value, write <code>=</code> in front of it:</p>
+<pre class="code"><code>u8:a -> 5       // 5 is an element of u8
+u8:b -> u8      // error: the set u8 is not an element of u8
+=u8:c -> u8     // the set u8 itself
+=u8:d -> 5      // error: 5 is not the set u8</code></pre>
+            <p>On a single value <code>=</code> changes nothing: <code>=true</code> and <code>true</code> admit the same thing. Two sets are equal when they have the same elements, however they are written: <code>~5 | 5</code> is every integer, so it is <code>int</code>.</p>
             <h3>Try it</h3>
             <div class="checker" id="checker">
               <div class="controls">
@@ -563,6 +580,20 @@ shape ? {
   u8 -> "fits in a byte"
   -> "wider"
 }</code></pre>
+            <h3>A pattern covers the value</h3>
+            <p>A pattern covers the value it is given, not its color. When the value is known, exactly one branch fires and the others never run. A value that no branch takes is an error: the pattern is not exhaustive.</p>
+<pre class="code"><code>f -> {
+  u8:x -> 5
+  -> x ? {=5 -> 1}   // fine: x is 5
+}
+
+g -> f{x -> 6}!      // error here: no branch takes 6</code></pre>
+            <p>To cover a whole color, make the value unknown with <code>??</code>. Each branch then takes what the branches above it left, and inside a branch the unknown is narrowed to what that branch took:</p>
+<pre class="code"><code>a -> ??::u8
+u8:next -> a ? {
+  &lt;255 -> a + 1   // a is 0..254 here, so a + 1 fits in u8
+  -> 0
+}</code></pre>
             <h3>Destructuring needs no syntax</h3>
             <p>A branch's result is written inside its pattern's scope, so the pattern's bindings are simply visible there. Reading them is destructuring.</p>
 <pre class="code"><code>Circle -> {
@@ -629,16 +660,30 @@ true:oops -> 2 = 3     // Constraint_Mismatch: false is not true</code></pre>
           <!-- 10 -->
           <article class="chapter" id="holes">
             <header><span class="n">10</span><h2>Holes and genericity</h2></header>
-            <p class="lede"><code>&lt;-</code> declares a hole, filled where the scope is used. Generics are just scopes with holes.</p>
+            <p class="lede"><code>&lt;-</code> declares a hole, a binding the use site fills. Generics are just scopes with holes.</p>
 <pre class="code"><code>identity -> {
   T &lt;- none
-  value &lt;- none
+  T:value -> none
   -> value
 }
 
-identity{value -> 5}!          // T is inferred from 5
-identity{T &lt;- u8 value -> 5}!  // or filled explicitly</code></pre>
-            <p><code>-></code> pushes a value into a binding; <code>&lt;-</code> pulls a value into a hole. A carve can mix both.</p>
+identity{value -> 5}!          // T is inferred: 5
+identity{T &lt;- u8 value -> 5}!  // T is filled: u8, and 5 is in u8</code></pre>
+            <p>A hole is filled by <code>&lt;-</code>, a field by <code>-></code>, never the other way round. A positional argument never lands in a hole.</p>
+            <p>A hole that the carve does not fill is inferred from what lands where it is written. What lands is either a value that is sent (it can be read in a wider set without changing its meaning) or a type that is required, such as the color of something the carve provides or an explicit <code>&lt;-</code> (it cannot be widened). The hole takes the one that holds all the others, never their union; then its own color applies.</p>
+<pre class="code"><code>data -> { u8:x -> 0 }
+
+pair -> {
+  u8:e &lt;- 2
+  data{e}:first
+  data{e}:second
+  -> e
+}
+
+pair{data{6} data{6}}!          // e is 6
+pair{data{6} data{3}}!          // error: neither 6 nor 3 holds the other
+pair{e &lt;- 4 data{6} data{6}}!   // error: e requires 4, and 6 is not in 4</code></pre>
+            <p>A list is a scope with a hole for its element:</p>
 <pre class="code"><code>List -> {
   T &lt;- none
   -> {}
@@ -809,7 +854,7 @@ bool:counterPositive >>= globalCounter.value >= 0</code></pre>
             <tr><td><code>c:x -> v</code></td><td>bind <code>x</code>, colored by <code>c</code></td></tr>
             <tr><td><code>c:x</code></td><td>colored, with the default of <code>c</code></td></tr>
             <tr><td><code>c:</code></td><td>anonymous binding colored by <code>c</code></td></tr>
-            <tr><td><code>x &lt;- v</code></td><td>a hole, filled at the use site</td></tr>
+            <tr><td><code>x &lt;- v</code></td><td>a hole, filled at the use site by <code>s{x &lt;- w}</code></td></tr>
             <tr><td><code>x#1</code></td><td>the second binding named <code>x</code></td></tr>
             <tr><td><code>// …</code></td><td>comment</td></tr>
           </tbody></table></div>
@@ -821,6 +866,8 @@ bool:counterPositive >>= globalCounter.value >= 0</code></pre>
             <tr><td><code>s{1, 2}</code></td><td>carve by position</td></tr>
             <tr><td><code>s!</code></td><td>collapse through the production</td></tr>
             <tr><td><code>...s</code></td><td>expand <code>s</code> into the current scope</td></tr>
+            <tr><td><code>...c:</code></td><td>in a shape, any scope that <code>c</code> admits</td></tr>
+            <tr><td><code>... </code></td><td>alone: any scope at all</td></tr>
           </tbody></table></div>
           <h3>Unknowns</h3>
           <div class="tw"><table><tbody>
@@ -839,6 +886,7 @@ bool:counterPositive >>= globalCounter.value >= 0</code></pre>
             <tr><td><code>>x</code> <code>&lt;=x</code></td><td>half-lines</td></tr>
             <tr><td><code>a + b</code></td><td>addition, or concatenation of strings</td></tr>
             <tr><td><code>s*1..</code></td><td>repeat a string pattern</td></tr>
+            <tr><td><code>=s</code></td><td>the set <code>s</code> itself, as one value</td></tr>
           </tbody></table></div>
           <h3>Patterns</h3>
           <div class="tw"><table><tbody>

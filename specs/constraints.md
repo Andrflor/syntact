@@ -126,14 +126,14 @@ u8:b -> ??
 u16:c -> a + b      -- 0..510 ⊆ 0..65535 → OK
 ```
 
-### Option 2: Explicit cast with `&` (intersection)
+### Option 2: Explicit reinterpretation with `::`
 ```
 u8:a -> ??
 u8:b -> ??
-u8:c -> (a + b) & u8   -- explicit: "I want this truncated to u8"
+u8:c -> (a + b)::u8    -- explicit: "read this in the layout of u8" (wraps: 300::u8 is 44)
 ```
 
-The `&` operator is the **intersection** — it means "take the result AND constrain it to this range". When used as a cast, the compiler generates the appropriate truncation/wrapping at runtime.
+`&` is never a conversion. It is the **intersection**: `300 & u8` is `none`, because 300 is not in u8. Asking for a value to be *changed* into another layout is `::`, which reinterprets it.
 
 ### Option 3: Use tighter input constraints
 ```
@@ -150,7 +150,7 @@ i8:b -> ??          -- -128..127
 i16:c -> a + b      -- -128..382 ⊆ -32768..32767 → OK
 u16:d -> a + b      -- -128..382 ⊄ 0..65535 → ERROR (negatives!)
 i8:e -> a - b       -- -127..383 ⊄ -128..127 → ERROR
-i8:e -> (a - b) & i8  -- explicit cast → OK
+i8:e -> (a - b)::i8   -- explicit reinterpretation → OK
 ```
 
 ## Addition `+`
@@ -242,7 +242,7 @@ Any two things can be combined with `&`. Always valid, but may produce `None` if
 - `u8 & 11..` → same thing
 - `String & >10` → `None` (nothing is both a string and greater than 10)
 - `i32 & >=0` → `0..2147483647`
-- `(u8 + u8) & u8` → explicit cast: truncate the 0..510 result to 0..255
+- `(u8 + u8) & u8` → `0..255`: the part of 0..510 that is in u8 — an intersection, not a conversion
 
 ### Bitwise operators (bracket syntax)
 
@@ -326,4 +326,3 @@ Given a value (or constraint) A and a constraint B, verify that every possible v
 - **Recursive types**: `List{data}` where `data` references itself. Requires cycle detection in satisfiability checks.
 - **Pattern negation semantics**: `~(''..*0.. + '_')` — negating a concatenation pattern. How does this decompose?
 - **Strict inequality in ranges**: `>6.0` cannot be expressed as an inclusive range. Needs explicit open/closed bound tracking, or is the unary operator form sufficient?
-- **`&` as cast semantics**: When `&` is used to truncate (e.g., `(a+b) & u8`), what is the exact runtime behavior? Wrapping (modulo) or truncation (bitwise mask)? For integers, wrapping (modulo 256 for u8) is the natural choice.

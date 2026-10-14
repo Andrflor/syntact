@@ -16,20 +16,20 @@ first time — each part builds on the ones before it.
 ## The model
 
 - [**First program**](03-first-program.md) — a file is a scope; running it is collapsing it
-- [**Scopes**](04-scopes.md) — the one primitive. What `{...}` creates
+- [**Scopes**](04-scopes.md) — the one primitive. What `{...}` creates, and what `...` places in it
 - [**Bindings**](05-bindings.md) — `->`, ordering, and why two bindings may share a name
-- [**Productions and collapse**](06-productions-and-collapse.md) — `->` without a left side, and what `!` actually means
+- [**Productions and collapse**](06-productions-and-collapse.md) — `->` without a left side, what `!` actually means, and why productions are lazy
 - [**Execution patterns**](07-execution-patterns.md) — `<!>` `[!]` `(!)` `|!|` — strategy at the collapse site, not in the computation
 - [**Carving**](08-carving.md) — deriving a new scope, and why a scope is closed
 - [**Defaults, completeness, immutability**](09-defaults-and-immutability.md) — why there is no null and nothing is ever mutated
 
 ## Shapes, sets, and patterns
 
-- [**Values are sets**](10-values-are-sets.md) — there is no separate world of types; `5` is a singleton set
+- [**Values are sets**](10-values-are-sets.md) — there is no separate world of types; `5` is a singleton set; `=X` takes a set as one value
 - [**Shapes**](11-shapes.md) — `:` as structural coloring that propagates inward
-- [**Patterns and destructuring**](12-patterns.md) — `?`, covers, captures, and why destructuring needs no operator
+- [**Patterns and destructuring**](12-patterns.md) — `?`, what a pattern covers (the value, not the color), captures, and why destructuring needs no operator
 - [**Scope algebra**](13-scope-algebra.md) — `&`, `|`, `~`, refinement — and grammars as ordinary sets
-- [**Pull bindings and genericity**](14-genericity.md) — `<-` holes. Generics without generic syntax
+- [**Pull bindings and genericity**](14-genericity.md) — `<-` holes, filled by `<-` or inferred from the carve. Generics without generic syntax
 
 ## Effects, state, and the outside world
 

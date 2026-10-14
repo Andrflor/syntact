@@ -51,6 +51,19 @@ derive square with n = 5
 then collapse the derived scope
 ```
 
+Arguments without a name fill the bindings in order. Positions count the bindings a carve can fill with `->`: productions and holes (`<-`, see [genericity](14-genericity.md)) are skipped.
+
+```syntact
+Point -> {
+  x -> 0
+  y -> 0
+}
+
+Point{3, 4}   // x -> 3, y -> 4
+```
+
+A binding placed by an expansion is carved where it was written: `{...a  z -> 9}{x -> 5}` is `{...a{x -> 5}  z -> 9}` (see [expansion](04-scopes.md#expansion-)).
+
 ---
 
 ## Carving is closed

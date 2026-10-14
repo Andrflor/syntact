@@ -103,6 +103,31 @@ Collapse is intentional. It happens where `!` appears. That explicitness is what
 
 ---
 
+## Productions are lazy
+
+A production is evaluated only when its value is asked for:
+
+- a collapse `!`;
+- a default — the default of a scope with productions is its first one;
+- a color that reads the scope as a set of values;
+- a pattern branch that fires.
+
+Nothing else evaluates it. A carve derives a scope and checks the bindings it changes; it does not run the derived scope's production:
+
+```syntact
+f -> {
+  u8:n
+  -> n + 1
+}
+
+g -> f{n -> 5}    // a scope: its production is not evaluated
+g!                // 6 — evaluated here, because it is asked for
+```
+
+This is what lets a scope mention itself. `List{T}` inside `List`, or `f{n -> n - 1}!` inside `f`, only unfolds as far as a value is actually asked for.
+
+---
+
 ---
 
 [← Bindings](05-bindings.md) · [Index](README.md) · [Execution patterns →](07-execution-patterns.md)
