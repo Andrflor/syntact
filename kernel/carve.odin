@@ -23,10 +23,24 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	c.args.carving = s // ce que `.x` désigne dans les arguments
 	// dans une copie, ce carve est dérivé avec elle : ses erreurs vont au carve d'origine
 	derived := copy_scope(s, s.parent, k.scene.site != {} ? k.scene.site : c.span)
-	carved := make([]bool, len(derived.bindings))
+	targets := fill(k, derived, c)
+	infer_holes(k, s, c, derived, targets)
+	// une copie faite en silence est celle d'un binding que rien n'a changé : elle
+	// redonne ce que sa source a déjà donné
+	if !k.scene.quiet do mark_changes(derived, c.args, {})
+	type_scope(k, derived, s.shape)
+	return new_expr(derived)
+}
+
+// fill : met chaque argument à la place du binding qu'il vise. `->` remplit un
+// champ, `<-` un trou ; un argument sans nom vise un champ, jamais un trou. Rend,
+// pour chaque argument, le binding qu'il remplit (-1 : aucun).
+fill :: proc(k: ^Kernel, derived: ^Scope, c: Carve) -> []int {
+	targets := make([]int, len(c.args.bindings))
 	position := 0
 	for a, i in c.args.bindings {
-		if a.kind != .Push do continue // une autre flèche : signalée à la construction
+		targets[i] = -1
+		if a.kind != .Push && a.kind != .Pull do continue // une autre flèche : signalée à la construction
 		if a.color != nil {
 			report(k, .Unsupported, a.span, "pas encore dans le kernel : un argument de carve coloré")
 			continue
@@ -36,18 +50,25 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 			report(k, .Invalid_Carve, a.span, carve_miss(a, c.ordinals[i], position))
 			continue
 		}
-		if carved[j] {
-			report(k, .Invalid_Carve, a.span, fmt.tprintf("%s est carvé deux fois", display(&derived.bindings[j])))
+		b := &derived.bindings[j]
+		if (a.kind == .Pull) != (b.kind == .Pull) {
+			message := a.kind == .Pull ? "%s n'est pas un trou : il se remplit par ->" : "%s est un trou : il se remplit par <-"
+			report(k, .Invalid_Carve, a.span, fmt.tprintf(message, display(b)))
 			continue
 		}
-		carved[j] = true
-		derived.bindings[j].value = new_expr(Carved{c.args, i})
+		if targets_contain(targets[:i], j) {
+			report(k, .Invalid_Carve, a.span, fmt.tprintf("%s est carvé deux fois", display(b)))
+			continue
+		}
+		targets[i] = j
+		b.value = new_expr(Carved{c.args, i})
 	}
-	// une copie faite en silence est celle d'un binding que rien n'a changé : elle
-	// redonne ce que sa source a déjà donné
-	if !k.scene.quiet do mark_changes(derived, c.args, {})
-	type_scope(k, derived, s.shape)
-	return new_expr(derived)
+	return targets
+}
+
+targets_contain :: proc(targets: []int, j: int) -> bool {
+	for t in targets do if t == j do return true
+	return false
 }
 
 // Ce qui a changé autour de ce qu'on marque : la couleur implicite que la forme
@@ -78,6 +99,8 @@ changes :: proc(e: ^Expr, env, args: ^Scope, around: Around) -> bool {
 	inner := Around{carving = around.carving} // la forme ne colore que le scope qu'elle attend
 	#partial switch v in e^ {
 	case Carved:
+		return v.args == args
+	case Inferred:
 		return v.args == args
 	case Carving:
 		return around.carving
@@ -138,15 +161,15 @@ type_shorthand :: proc(k: ^Kernel, sh: Shorthand, env: ^Scope) -> ^Expr {
 
 // carve_target : le binding que vise un argument. Nommé, la première occurrence
 // de son nom, ou celle de `x#n` ; `z{…}` qui recarve un champ, ce champ ; sans
-// nom, le binding de même rang parmi ceux qui ne sont pas des productions. -1 : il
-// n'existe pas — un scope est clos.
+// nom, le champ de même rang — ni production ni trou. -1 : il n'existe pas — un
+// scope est clos.
 carve_target :: proc(s: ^Scope, a: Binding, ordinal: int, position: ^int) -> int {
 	if a.name != "" do return find_binding(s, a.name, max(ordinal, 0))
 	if sh, ok := shorthand_of(a); ok && recarves(s, sh) do return find_binding(s, sh.field.name, max(sh.field.ordinal, 0))
 	rank := position^
 	position^ += 1
 	for b, i in s.bindings {
-		if b.kind == .Product do continue
+		if b.kind == .Product || b.kind == .Pull do continue
 		if rank == 0 do return i
 		rank -= 1
 	}

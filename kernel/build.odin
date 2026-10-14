@@ -35,7 +35,11 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	#partial switch ast.node_kinds[idx] {
 	case .Pointing, .PointingPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		b := Binding{kind = arrow_kind(ast.node_kinds[idx]), span = span}
-		if b.kind != .Push do unsupported(k, idx, fmt.tprintf("la flèche %v", b.kind))
+		if b.kind != .Push && b.kind != .Pull do unsupported(k, idx, fmt.tprintf("la flèche %v", b.kind))
+		if b.kind == .Pull && data.binary.left == syn.INVALID_NODE {
+			report(k, .Invalid_Binding_Name, span, "un trou porte un nom")
+			return
+		}
 		if !build_left(k, s, data.binary.left, &b) do return
 		right := data.binary.right
 		if right != syn.INVALID_NODE && ast.node_kinds[right] == .ScopeNode {

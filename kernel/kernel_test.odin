@@ -131,6 +131,18 @@ CASES := []Case {
 	{"Box -> {u8:n}\nPt -> {Box -> {u16:n}}\np -> Pt{Box{300}}", "", {}}, // z{…} : le champ z l'emporte sur le z visible
 	{"a -> {x -> 1}\nb -> a{zz{1}}", "", {.Undefined_Identifier}}, // ni champ ni nom visible
 	{"a -> .z", "", {.Invalid_Property_Access}}, // `.x` sans source hors des arguments d'un carve
+	// les trous : `<-` les remplit, les positions les sautent, le carve infère les autres
+	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{v -> 5}!", "{id -> {T <- none  none:v -> none  -> none}  r -> 5}", {}},
+	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{T <- u8 v -> 5}!", "", {}}, // requis u8, 5 y est
+	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{T <- 4 v -> 5}!", "", {.Constraint_Mismatch}},
+	{"id -> {\n  T <- none\n  T:v -> none\n}\nr -> id{T -> u8}", "", {.Invalid_Carve}}, // un trou se remplit par <-
+	{"id -> {\n  T <- none\n  T:v -> none\n}\nr -> id{v <- 5}", "", {.Invalid_Carve}}, // un champ se remplit par ->
+	{"a -> {\n  u8:e <- 2\n  -> e\n}\nr -> a{e <- 300}!", "", {.Constraint_Mismatch}}, // la couleur du trou s'applique
+	{"a -> {\n  e <- 2\n  -> e\n}\nr -> a{<- 3}", "", {.Invalid_Binding_Name}}, // un trou porte un nom
+	{"B -> {\n  T <- u8\n  T:v\n  {T:w}:s -> {w -> 0}\n}\nr -> B{s -> {u8:w -> 1}}", "", {}}, // la couleur d'un champ reçue : un type requis
+	{"B -> {\n  T <- u8\n  T:v\n  {T:w}:s -> {w -> 0}\n}\nr -> B{v -> 300  s -> {u8:w -> 1}}", "", {.Constraint_Mismatch}}, // 300 ∉ u8, requis par s
+	{"B -> {\n  T <- u8\n  {T:w}:s -> {w -> 0}\n  {T:w}:t -> {w -> 0}\n}\nr -> B{s -> {u8:w -> 1}  t -> {u16:w -> 1}}", "", {.Constraint_Mismatch}}, // deux types requis différents
+	{"a -> {\n  e <- 2\n  u8:x -> e + 1\n}\nr -> a{x -> 6}", "", {.Unsupported}}, // un trou écrit dans une opération
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
