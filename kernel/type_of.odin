@@ -43,6 +43,8 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 		return type_shorthand(k, v, env)
 	case Op:
 		return type_op(k, v, env)
+	case Match:
+		return type_match(k, v, env)
 	case Range:
 		return type_range(k, v, env)
 	case Unknown:
@@ -191,7 +193,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	for _ in 0 ..< r.up do sc = sc.parent
 	t := sc.bindings[r.index].value_type
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
-	return t
+	return refine(k, t, r.span)
 }
 
 type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
@@ -203,7 +205,7 @@ type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
 	if i < 0 do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' n'existe pas dans ce scope", a.name))
 	v := s.bindings[i].value_type
 	if v == nil do return report(k, .Unsupported, a.span, "pas encore dans le kernel : la récursion")
-	return v
+	return refine(k, v, a.span)
 }
 
 // find_binding : l'accès lit la dernière occurrence d'un nom, ou la n-ième avec `#n`.
