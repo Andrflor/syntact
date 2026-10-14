@@ -104,6 +104,14 @@ Carved :: struct {
 	index: int,
 }
 
+// Inferred : dans un scope carvé, la valeur qu'un trou a reçue du carve sans être
+// rempli : celle, parmi ce qui tombe à sa place, qui contient toutes les autres
+// (hole.odin).
+Inferred :: struct {
+	args: ^Scope, // les arguments du carve qui l'a inférée
+	type: ^Expr,
+}
+
 // `.x` sans source, dans les arguments d'un carve : le scope que ce carve dérive.
 // `a{z -> .z{b -> 2}}` recarve le z de a.
 Carving :: struct {
@@ -146,6 +154,7 @@ Expr :: union {
 	Collapse,
 	Carve,
 	Carved,
+	Inferred,
 	Carving,
 	Shorthand,
 	Op,

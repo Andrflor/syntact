@@ -1,6 +1,6 @@
 # Pull bindings and genericity
 
-`<-` declares a hole filled by the use site.
+`<-` declares a **hole**: a binding the use site fills. Until it is filled, a hole holds its default, like any binding.
 
 ```syntact
 identity -> {
@@ -8,40 +8,21 @@ identity -> {
   T:value -> none
   -> value
 }
-
-identity{value -> 5}!
-identity{value -> "hello"}!
 ```
 
-`T` is a hole. `value` is an ordinary field whose color mentions `T`. Carving with `value -> 5` pushes into `value`, and because the color of `value` mentions `T`, the carve infers `T` from the shape of what filled it. The use site never has to mention `T` — it is recovered from the carving.
+`T` is a hole. `value` is an ordinary field, colored by `T`.
 
-A hole is inferred only through the colors that mention it. Every field that mentions the same hole must agree on it:
+## Filling a hole
+
+A hole is filled by `<-`, a field by `->`. The two arrows are not interchangeable: `->` pushes a value into a field, `<-` pulls a value into a hole.
 
 ```syntact
-data -> { u8:x -> 0 }
-
-pair -> {
-  u8:e <- 2
-  data{e}:first
-  data{e}:second
-  -> e
-}
-
-pair{data{6} data{6}}!   // e = 6
-pair{data{6} data{3}}!   // error: e cannot be both 6 and 3
+identity{T <- u8 value -> 5}!   // T is u8, value is 5
+identity{T -> u8}!              // error: T is a hole, it is filled by <-
+identity{value <- 5}!           // error: value is a field, it is filled by ->
 ```
 
-A hole can also be filled explicitly. Since a hole is *pulled*, not pushed, the fill arrow at the use site is `<-`, not `->`:
-
-```syntact
-identity{T <- u8 value -> 5}!
-```
-
-`value -> 5` pushes a value into the field `value`. `T <- u8` says “fill the hole `T` with `u8`”. Mixing the two arrows is not a quirk: `->` pushes a value into a binding, `<-` pulls a value into a hole. A hole is filled only by `<-`, and a field only by `->`.
-
-An explicit fill is one more constraint on the hole, not an override: `pair{e <- 4 data{6} data{6}}` is an error, since the carve forces `e = 6`.
-
-A positional carve argument never lands in a hole. Positions count only the push fields, so holes are skipped:
+A positional argument never lands in a hole: positions count only the fields.
 
 ```syntact
 base -> {
@@ -53,7 +34,76 @@ base -> {
 base{10, 20}   // a -> 10, b -> 20; x keeps its default
 ```
 
-A scope whose only fields are holes has no positional slot: `{ x <- 0 }{9}` is an invalid carve.
+A scope whose only bindings are holes has no position: `{ x <- 0 }{9}` is an invalid carve.
+
+## Inferring a hole
+
+A hole the carve does not fill is inferred from the carve. Everything the carve puts where the hole is mentioned — in the color of a field it fills, or in the value that field had — lands in the hole:
+
+```syntact
+identity{value -> 5}!   // 5 lands in T: T is 5
+```
+
+What lands in a hole is of one of two kinds:
+
+- a **sent value**: `5` above, or the elements of a list. A value can be read in a larger type without changing its meaning: `{2.4 3 4 5}` read as `u8|f32` is still `{2.4 3 4 5}`.
+- a **required type**: the color of something the carve provides, or an explicit fill `T <- u8`. A required type cannot be read as a larger one: a function that takes `(2.4|3|4|5):e`, read as one that takes `(u8|f32):e`, would accept values it refuses.
+
+The hole takes the one that holds all the others. It is never their union: the type must already be one of them.
+
+- If something requires a type, every required type is the same, and the hole is that type. Every sent value must be in it.
+- Otherwise, one of the sent values holds all the others, and the hole is that one.
+
+Anything else is an error. Then, as for every binding, the hole's own color applies.
+
+```syntact
+identity{T <- u8 value -> 5}!   // T requires u8, 5 is in u8: T is u8
+identity{T <- 4 value -> 5}!    // error: 5 is not in 4
+```
+
+Two fields that mention the same hole must agree:
+
+```syntact
+data -> { u8:x -> 0 }
+
+pair -> {
+  u8:e <- 2
+  data{e}:first
+  data{e}:second
+  -> e
+}
+
+pair{data{6} data{6}}!          // e is 6
+pair{data{6} data{3}}!          // error: neither 6 nor 3 holds the other
+pair{e <- 4 data{6} data{6}}!   // error: e requires 4, 6 is not in 4
+```
+
+The rule is the same for a generic function. Here `T` receives the elements of `source` (sent values), and the color of `e` in `func` (a required type):
+
+```syntact
+Array -> {
+  T -> {}
+  -> {}
+  -> { T: ...Array{T}: }
+}
+
+map -> {
+  T <- {}
+  E <- {}
+  Array{T}:source
+  func -> { e -> T:, -> E: }
+  -> source ? {
+    { T:(e) ...Array{T}:(r) } -> { func{e -> e}! ...map{r, func}! }
+    {} -> {}
+  }
+}
+
+map{{2.4 3 4 5}, {(u8|f32):e, -> e*10}}!       // T is u8|f32: 2.4, 3, 4 and 5 are in it
+map{{2.4 3 4 5}, {(2.4|3|4|5):e, -> e*10}}!    // T is 2.4|3|4|5
+map{{2.4 3 4 5}, {string:e, -> e}}!            // error: 2.4|3|4|5 is not in string
+```
+
+The other way round is an error too. If `source` only knows its elements as `u8|f32`, a `func` that takes `(2.4|3|4|5):e` cannot receive them: `u8|f32` is required on both sides, and the two differ.
 
 This is genericity without a separate generic syntax.
 
@@ -98,34 +148,6 @@ Serializer -> {
   }
 }
 ```
-
-Eventually, laws can be added to the same scope:
-
-```syntact
-Serializer -> {
-  S <- {}
-  R <- {}
-
-  encode -> {
-    S:value
-    -> R:
-  }
-
-  decode -> {
-    R:value
-    -> S:
-  }
-
-  roundTrip <- {
-    S:value -> ??
-    -> true:(decode{value -> encode{value -> value}!}! = value)
-  }
-}
-```
-
-That is not only an interface. It is an algebraic contract: operations plus obligations.
-
-Proof obligations are long-term. The generic structure does not depend on them.
 
 ---
 

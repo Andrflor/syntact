@@ -35,6 +35,8 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 		return type_carve(k, v, env)
 	case Carved:
 		return type_argument(k, v, nil)
+	case Inferred:
+		return v.type
 	case Carving:
 		return type_carving(k, v, env)
 	case Shorthand:
@@ -78,7 +80,7 @@ expected_color :: proc(shape: ^Scope, i: int, b: Binding) -> ^Expr {
 type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	previous := enter(k, env, b)
 	defer k.scene = previous
-	if b.kind != .Push && b.kind != .Product {
+	if b.kind != .Push && b.kind != .Pull && b.kind != .Product {
 		b.value_type = new_expr(Invalid{}) // signalé à la construction
 		return
 	}

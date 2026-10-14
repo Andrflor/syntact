@@ -80,6 +80,8 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 		return fmt.tprintf("%s%s", print_at(v.target, .CALL, view), print_scope(v.args, .Program, v.ordinals)), .CALL
 	case Carved:
 		return printed(v.args.bindings[v.index].value, .Program) // l'argument, tel qu'écrit
+	case Inferred:
+		return printed(v.type, .Program)
 	case Carving:
 		return "", .PRIMARY // `.x` : la source est le scope carvé
 	case Shorthand:
