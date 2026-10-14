@@ -66,7 +66,9 @@ Pair -> {u8: u8:}
 {...Pair: string:}:a -> {1 2 "x"}     // a pair, then a string
 ```
 
-`...` alone is `...` of any scope — as `..` alone is any atom. It is written
+`...` alone is `...` of any scope — as `..` alone is any atom. Its default, like
+the default of every scope at all, is the empty scope `{}`, as the default of every
+string is `""`. It is written
 detached: `...xs` expands `xs`, while `... ` followed by a space, a new line or a
 closing brace expands any scope:
 

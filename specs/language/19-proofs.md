@@ -28,30 +28,6 @@ decodeEncodeSymmetry -> {
 }
 ```
 
-Or as a law inside a scope:
-
-```syntact
-Serializer -> {
-  S <- {}
-  R <- {}
-
-  encode -> {
-    S:value
-    -> R:
-  }
-
-  decode -> {
-    R:value
-    -> S:
-  }
-
-  roundTrip <- {
-    S:value -> ??
-    -> true:(decode{value -> encode{value -> value}!}! = value)
-  }
-}
-```
-
 The point is not to attach a separate proof assistant to the language: a proof
 is the ordinary constraint contract, and the prover's strength is the reducer's
 strength. Today it decides everything the set envelopes decide (concrete values,
