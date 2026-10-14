@@ -182,7 +182,7 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	case .Carve:
 		return build_carve(k, s, idx)
 	case .Pattern:
-		return unsupported(k, idx, "le pattern ?")
+		return build_match(k, s, idx)
 	case .Constraint:
 		return unsupported(k, idx, "le binding coloré anonyme en position de valeur")
 	}
@@ -245,8 +245,61 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	name := syn.node_name_str(ast, idx)
 	if name == "" do name = syn.node_capture_str(ast, idx) // `(c)` : un nom entre parenthèses
 	ref, found, missing := lookup(s, name, int(ast.node_data[idx].identifier.ordinal), span)
-	if !found do return report(k, .Undefined_Identifier, span, missing)
+	if !found {
+		// dans une branche `C: -> …`, le nom est peut-être un champ de C
+		for sc := s; sc != nil; sc = sc.parent do if shaped_cover(sc.cover) do return unsupported(k, idx, "la déstructuration")
+		return report(k, .Undefined_Identifier, span, missing)
+	}
 	return new_expr(ref)
+}
+
+// build_match : `target ? {…}`. Chaque branche est un scope sous s : sa couverture,
+// puis sa production, qui est lexicalement une production de sa couverture.
+build_match :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
+	ast := k.ast
+	data := ast.node_data[idx].pattern
+	if data.target == syn.INVALID_NODE do return unsupported(k, idx, "le pattern sans cible")
+	m := Match{target = build_expr(k, s, data.target), span = ast.node_spans[idx]}
+	pairs := syn.node_pattern_branches(ast, idx)
+	branches := make([dynamic]^Scope)
+	for i := 0; i < len(pairs); i += 2 {
+		cover := pairs[i]
+		product := i + 1 < len(pairs) ? pairs[i + 1] : syn.INVALID_NODE
+		if product == syn.INVALID_NODE do return unsupported(k, idx, "une branche sans production")
+		b := new_scope(s, node_span(k, cover != syn.INVALID_NODE ? cover : product))
+		if cover != syn.INVALID_NODE do b.cover = build_cover(k, b, cover)
+		append(&b.bindings, Binding{kind = .Product, value = build_expr(k, b, product), span = node_span(k, product)})
+		append(&branches, b)
+	}
+	m.branches = branches[:]
+	return new_expr(m)
+}
+
+// build_cover : ce qu'une branche admet. `C:` est un binding anonyme coloré par C :
+// sa valeur complète, le défaut de C (`{-> C:}!`) — `u8:` n'admet que 0, `Circle:`
+// tout scope de la forme Circle.
+build_cover :: proc(k: ^Kernel, b: ^Scope, idx: syn.Node_Index) -> ^Expr {
+	ast := k.ast
+	#partial switch ast.node_kinds[idx] {
+	case .Constraint:
+		data := ast.node_data[idx].binary
+		if data.right != syn.INVALID_NODE do return unsupported(k, idx, "la déstructuration")
+		value := new_scope(b, node_span(k, idx))
+		append(&value.bindings, Binding{kind = .Product, color = build_expr(k, value, data.left), span = node_span(k, idx)})
+		return new_expr(Collapse{target = new_expr(value), span = node_span(k, idx)})
+	case .ScopeNode:
+		return unsupported(k, idx, "la déstructuration")
+	}
+	return build_expr(k, b, idx)
+}
+
+// shaped_cover : la couverture `C:`, dont la production peut lire les champs.
+shaped_cover :: proc(cover: ^Expr) -> bool {
+	if cover == nil do return false
+	c, is_collapse := cover^.(Collapse)
+	if !is_collapse do return false
+	value, is_scope := c.target^.(^Scope)
+	return is_scope && len(value.bindings) == 1 && value.bindings[0].kind == .Product && value.bindings[0].color != nil
 }
 
 // lookup : le binding visible au-dessus de s qui porte ce nom (la n-ième occurrence

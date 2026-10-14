@@ -143,6 +143,16 @@ CASES := []Case {
 	{"B -> {\n  T <- u8\n  T:v\n  {T:w}:s -> {w -> 0}\n}\nr -> B{v -> 300  s -> {u8:w -> 1}}", "", {.Constraint_Mismatch}}, // 300 ∉ u8, requis par s
 	{"B -> {\n  T <- u8\n  {T:w}:s -> {w -> 0}\n  {T:w}:t -> {w -> 0}\n}\nr -> B{s -> {u8:w -> 1}  t -> {u16:w -> 1}}", "", {.Constraint_Mismatch}}, // deux types requis différents
 	{"a -> {\n  e <- 2\n  u8:x -> e + 1\n}\nr -> a{x -> 6}", "", {.Unsupported}}, // un trou écrit dans une opération
+	// le pattern : la valeur est couverte, une inconnue est restreinte dans chaque branche
+	{"a -> ??::u8\nu8:r -> a ? {<255 -> a + 1  -> 0}", "", {}},
+	{"a -> ??::u8\nu8:r -> a ? {>0 -> a + 1  -> 0}", "", {.Constraint_Mismatch}},
+	{"u8:x -> 5\nr -> x ? {=5 -> 1}", "{0..255:x -> 5  r -> 1}", {}}, // la valeur 5, pas la couleur u8
+	{"u8:x -> ??\nr -> x ? {=5 -> 1}", "", {.Non_Exhaustive_Pattern}},
+	{"r -> 5 ? {=7 -> 300  -> 0}\nu8:z -> r", "", {}}, // une branche qui ne se déclenche pas n'est pas typée
+	{"a -> ??::u8\nr -> a ? {\n  -> 0\n  =5 -> 300\n}\nu8:z -> r", "", {}}, // la branche par défaut prend tout
+	{"Circle -> {u8:radius}\nSquare -> {u8:side}\nr -> Circle{radius -> 7} ? {Square: -> 2  Circle: -> 1}", "{Circle -> {0..255:radius -> 0}  Square -> {0..255:side -> 0}  r -> 1}", {}},
+	{"r -> 3 ? {u8: -> 1  -> 2}", "{r -> 2}", {}}, // u8: est le défaut de u8 : 0
+	{"Circle -> {u8:radius}\nr -> Circle ? {Circle: -> radius}", "", {.Unsupported}}, // la déstructuration
 	{"y -> x", "", {.Undefined_Identifier}},
 	{"a -> {x -> 1}\nb -> a.z", "", {.Invalid_Property_Access}},
 }
@@ -181,6 +191,7 @@ SITE_CASES := []Site_Case {
 	{"Pair -> {\n  u8:a\n  u8:b\n}\np -> Pair{7}\nq -> p{b -> 300}\nr -> q{a -> 1}", {"6:8 ← 3:3"}},
 	{"P8 -> {\n  u8:x\n}\nP16 -> {\n  u16:x\n}\nWrap -> {\n  S -> P16\n  S:p -> {x -> 300}\n}\nw -> Wrap{S -> P8}", {"11:10 ← 9:11"}}, // la couleur implicite
 	{"Box -> {\n  n -> ??::u8\n  u8:y -> n * 2\n  x -> 1\n}\nb -> Box{x -> 5}", {"3:3"}},
+	{"f -> {\n  u8:x -> 5\n  -> x ? {=5 -> 1}\n}\ng -> f{x -> 6}!", {"5:7 ← 3:6"}}, // un carve qui rend le pattern non exhaustif
 }
 
 @(test)

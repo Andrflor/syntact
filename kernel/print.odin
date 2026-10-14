@@ -91,6 +91,14 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 		o := OPERATORS[v.kind]
 		if v.left == nil do return fmt.tprintf("%s%s", o.text, print_at(v.right, .UNARY, view)), .UNARY
 		return fmt.tprintf("%s %s %s", print_at(v.left, o.level, view), o.text, print_at(v.right, above(o.level), view)), o.level
+	case Match:
+		parts := make([dynamic]string, context.temp_allocator)
+		for b in v.branches {
+			product := print_at(b.bindings[0].value, .NONE, view)
+			if b.cover == nil do append(&parts, fmt.tprintf("-> %s", product))
+			else do append(&parts, fmt.tprintf("%s -> %s", print_at(b.cover, .NONE, view), product))
+		}
+		return fmt.tprintf("%s ? {{%s}}", print_at(v.target, .CALL, view), strings.join(parts[:], "  ")), .PATTERN
 	case Range:
 		lo := v.lo != nil ? print_at(v.lo, .CALL, view) : ""
 		hi := v.hi != nil ? print_at(v.hi, .CALL, view) : ""

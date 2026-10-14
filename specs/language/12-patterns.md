@@ -71,6 +71,57 @@ value ? {
 
 This is why `?` is not just an if/switch replacement. It is the analytic side of the algebra.
 
+## What a pattern covers
+
+A pattern covers the **value** of its target, not its color. A definition is
+checked with its values, like everything else, and a carve that changes a value
+is checked at that carve:
+
+```syntact
+f -> {
+  u8:x -> 5
+  -> x ? {=5 -> 1}   // valid: x is 5
+}
+
+g -> f{x -> 6}!      // error, here: no branch takes 6
+```
+
+To cover a whole color, make the value unknown with `??`:
+
+```syntact
+u8:x -> ??
+-> x ? {=5 -> 1}     // error: no branch takes 0..4 | 6..255
+```
+
+When the target is known, exactly one branch fires: the first that takes it.
+The other branches never run, so they are not checked.
+
+When the target is unknown, its possible values are shared out in order: each
+branch takes what the branches above it left. A branch that takes nothing never
+fires. Inside a branch, an unknown target is narrowed to what that branch took:
+
+```syntact
+a -> ??::u8
+u8:r -> a ? {
+  <255 -> a + 1   // a is 0..254 here: a + 1 fits in u8
+  -> 0
+}
+```
+
+The result is the product of whichever branch fires — one of the reachable
+products:
+
+```syntact
+a -> ??::u8
+(bool | string):r -> a ? {
+  0..120 -> true
+  -> "x"
+}
+```
+
+A value that no branch takes is an error: the pattern is not exhaustive. The
+default branch takes everything that is left.
+
 ---
 
 ## Destructuring patterns

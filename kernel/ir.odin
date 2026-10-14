@@ -53,6 +53,7 @@ Scope :: struct {
 	shape:    ^Scope, // la forme contre laquelle il a été typé : la couleur implicite de ses bindings
 	site:     syn.Span, // une copie : le carve qui l'a dérivée, où sont signalées ses erreurs
 	carving:  ^Scope, // les arguments d'un carve : le scope qu'il dérive, que `.x` désigne
+	cover:    ^Expr, // une branche de pattern : ce qu'elle admet ; nil pour la branche par défaut
 	span:     syn.Span,
 }
 
@@ -128,6 +129,15 @@ Shorthand :: struct {
 	outer: ^Expr, // z, résolu au-dessus ; nil quand rien ne s'appelle z
 }
 
+// `target ? {…}` : chaque branche est un scope, dont la production est celle de la
+// branche, écrite dans sa couverture (Scope.cover). La première branche qui admet
+// la valeur de target la donne (pattern.odin).
+Match :: struct {
+	target:   ^Expr,
+	branches: []^Scope,
+	span:     syn.Span,
+}
+
 // `lo..hi`. Une borne nil est ouverte. Entre des caractères, l'intervalle porte sur
 // les caractères (`'a'..'z'`) ; entre des chaînes, sur les positions (`"jwt"..`
 // commence par, `.."_"` finit par).
@@ -158,6 +168,7 @@ Expr :: union {
 	Carving,
 	Shorthand,
 	Op,
+	Match,
 	Range,
 	Unknown,
 	Poly, // une valeur entière qui dépend d'inconnues (un type seulement) : unknown.odin
@@ -190,6 +201,7 @@ Error_Kind :: enum u8 {
 	Invalid_operator,
 	Invalid_Range,
 	Constraint_Mismatch,
+	Non_Exhaustive_Pattern, // une valeur possible qu'aucune branche n'admet
 	Unproven, // le kernel ne sait pas prouver qu'une couleur est respectée
 	Insoluble_Constraint,
 	Unsupported, // une forme que le kernel ne traite pas encore
@@ -209,6 +221,7 @@ Kernel :: struct {
 	symbols: [dynamic]Set, // l'ensemble des valeurs possibles de chaque inconnue
 	shapes:  map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
 	scene:   Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
+	refined: [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 }
 
 // Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit

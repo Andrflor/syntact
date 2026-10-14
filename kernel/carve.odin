@@ -81,10 +81,12 @@ Around :: struct {
 // qu'il a mise (un argument de args), et ce qui en dépend : une couleur, une valeur,
 // un scope écrit dedans, une couleur implicite. Rend vrai si un binding de s a changé.
 mark_changes :: proc(s, args: ^Scope, around: Around) -> (changed: bool) {
+	// une branche dont la couverture change : sa production peut changer avec elle
+	cover := s.cover != nil && changes(s.cover, s, args, {carving = around.carving})
 	for &b in s.bindings {
 		color := b.color != nil ? changes(b.color, s, args, {carving = around.carving}) : around.shape
 		value := changes(b.value, s, args, {shape = color, carving = around.carving})
-		if color || value {
+		if cover || color || value {
 			b.copy = .Changed
 			changed = true
 		}
@@ -125,6 +127,10 @@ changes :: proc(e: ^Expr, env, args: ^Scope, around: Around) -> bool {
 		left := changes(v.left, env, args, inner)
 		right := changes(v.right, env, args, inner)
 		return left || right
+	case Match:
+		changed := changes(v.target, env, args, inner)
+		for b in v.branches do changed |= b.parent == env && mark_changes(b, args, inner)
+		return changed
 	case Range:
 		lo := changes(v.lo, env, args, inner)
 		hi := changes(v.hi, env, args, inner)
@@ -208,6 +214,7 @@ copy_scope :: proc(s: ^Scope, parent: ^Scope, site: syn.Span) -> ^Scope {
 	c := new_scope(parent, s.span)
 	c.shape = s.shape
 	c.site = site
+	c.cover = copy_expr(s.cover, s, c)
 	for b in s.bindings {
 		append(&c.bindings, Binding{name = b.name, capture = b.capture, kind = b.kind, color = copy_expr(b.color, s, c), value = copy_expr(b.value, s, c), copy = .Same, span = b.span})
 	}
@@ -230,6 +237,10 @@ copy_expr :: proc(e: ^Expr, from, to: ^Scope) -> ^Expr {
 		return new_expr(Carve{copy_expr(v.target, from, to), args, v.ordinals, v.span})
 	case Op:
 		return new_expr(Op{v.kind, copy_expr(v.left, from, to), copy_expr(v.right, from, to), v.span})
+	case Match:
+		branches := make([]^Scope, len(v.branches))
+		for b, i in v.branches do branches[i] = copy_scope(b, to, to.site)
+		return new_expr(Match{copy_expr(v.target, from, to), branches, v.span})
 	case Range:
 		return new_expr(Range{copy_expr(v.lo, from, to), copy_expr(v.hi, from, to), v.span})
 	case Unknown:
