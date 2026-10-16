@@ -11,26 +11,48 @@ plus : `Array{T}` est l'ensemble de toutes les suites finies de `T`, ce qu'on
 Ce document fait la liste des cas, et pour chacun : sa représentation finie, et
 ce que le kernel sait en décider.
 
-## 1. La représentation : un système d'équations
+## 1. La self-référence est une inconnue de type
 
-Un scope récursif se lit comme une **équation** dont il est l'inconnue. Une
-variable, c'est un scope écrit et les types de ses arguments :
-`Array{u8}` est la variable `X`, et
+Dans `Array`, `...Array{T}:` désigne le type qu'on est en train de définir. On le
+traite comme une **inconnue** : `X`, le type d'`Array{T}`.
+
+Ce n'est pas l'inconnue de `??`. `??::u8` est une **valeur** inconnue, dont le
+type est connu (`??0 ∈ 0..255`). `X` est un **type** inconnu : c'est lui qu'on
+cherche. Une référence au scope qu'on définit, avec ses propres arguments, est
+`X` ; `G` (`Nest{T -> {T:}}`) est `X` appliqué à d'autres arguments, une inconnue
+paramétrée `X(T)`.
+
+On type les productions avec `X` à la place de la self-référence, et une
+**équation** émerge :
 
 ```text
-X = {} | {u8: ...X}
+X = {} | {T: ...X}
 ```
 
-Toutes les récursions d'un programme forment un système fini d'équations :
-c'est la représentation finie. Dans le kernel, c'est un graphe de formes avec des
-cycles — une forme (`Record`) dont un champ, ou une suite, a pour ensemble la
-variable elle-même.
+Sa solution est le type, en représentation finie :
 
-Pour nouer le cycle, il faut reconnaître la variable : `Array{T}` écrit dans la
-production d'`Array`, avec `T` le même, **est** `X`. Deux carves de la même cible
-avec des arguments de même type (formes normales, `kernel-algebre.md` §2–3) sont
-le même scope. Sans ça, chaque occurrence crée une variable nouvelle et le système
-est infini : c'est la boucle d'aujourd'hui.
+```text
+X = {0..*T:}          la première production : {}, la seconde : {1..*T:}
+```
+
+Toutes les self-références d'un programme forment un système fini d'équations
+(une par scope récursif, mutuelles comprises) : c'est la représentation finie
+d'un type infini.
+
+### Le cas de base découle de l'équation
+
+Le défaut d'un scope est sa première production. Son type est la solution de
+l'équation de la **première production seule** :
+
+- `Array` : `d = {}`, une valeur finie ;
+- première production récursive (`Infinite`, `tc_infinite_default`) ou pas de cas
+  de base (H) : `d = {T: ...d}`, dont la seule solution est `{∞*T:}`, une valeur
+  infinie : la définition est illégale ;
+- non gardée (I) : `d = {...d}` ne consomme rien, l'équation ne détermine aucune
+  valeur : illégale.
+
+La loi « le cas de base vient en premier, n'est pas récursif, et finit » n'est pas
+une règle de plus : c'est ce que dit la solution.
 
 ## 2. Les cas
 
@@ -46,13 +68,8 @@ est infini : c'est la boucle d'aujourd'hui.
 | H | sans cas de base | `X = {T: ...X}` | — | **illégal** |
 | I | non gardée | `X = {...X} \| {}` | — | **illégal** |
 
-**La loi du cas de base.** La première production d'un scope récursif est son cas
-de base : elle vient en premier, elle n'est pas récursive, et elle finit. H (pas
-de cas de base), I (non gardée) et une première production récursive sont des
-définitions illégales, signalées à la définition. Le défaut, qui est la première
-production, est donc toujours une valeur finie.
-
-A, B, C, D et F sont supportés. G doit passer aussi.
+H, I et une première production récursive sont illégaux (§1, le cas de base). A,
+B, C, D et F sont supportés. G doit passer aussi.
 
 **A, B, C, E — une suite régulière.** Un scope est une suite de bindings, comme
 une chaîne est une suite de caractères. Une équation où la variable n'apparaît
@@ -81,7 +98,7 @@ Une valeur finie ne descend que d'un nombre fini de niveaux : l'appartenance se
 décide en ne créant que les variables qu'elle visite. Reste à trouver la
 représentation pour l'inclusion.
 
-**H, I — illégaux** (la loi du cas de base, ci-dessus).
+**H, I — illégaux** (§1, le cas de base).
 
 ## 3. Ce qu'on décide
 
@@ -92,17 +109,15 @@ représentation pour l'inclusion.
 - **Inclusion et vide** (`Array{u8}` ⊆ `Array{u16}` ?) : coinductif, on suppose
   l'inclusion en cours vraie. Exact pour A–E (langages réguliers d'arbres).
   Pour F, `Unproven` quand on ne sait pas, jamais une acceptation.
-- **Le défaut** : la première production, le cas de base, non récursive : une
-  valeur finie. La première production d'`Array` est `{}` : le défaut est `{}`.
-  Une première production récursive (`tc_infinite_default`) est une définition
-  illégale.
+- **Le défaut** : la solution de l'équation de la première production seule
+  (§1) ; une solution infinie rend la définition illégale.
 
 ## 4. Les fonctions récursives
 
 Une fonction récursive structurelle suit la récursion de sa donnée : `map`
 appelle `map` sur la queue `r` de son argument. Si l'argument est `Array{T}`,
 de type `{0..*T:}`, la queue a le **même** type `{0..*T:}`. L'appel récursif a
-donc la même variable que l'appel en cours (§1) : le type du résultat est une
+donc la même inconnue que l'appel en cours (§1) : le type du résultat est une
 inconnue `Y` du système, `Y = {} | {E: ...Y}`, soit `{0..*E:}`. Pas de
 déroulement : une équation de plus.
 
