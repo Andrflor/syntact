@@ -228,9 +228,11 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 
 // color_set : l'ensemble des valeurs qu'un type admet comme couleur. Un ensemble
 // admet ses éléments. Un scope avec des productions admet chacune : une production
-// colorée, ce qu'admet sa couleur ; sinon, sa valeur exactement (`{-> u8}` n'admet
-// que la valeur u8). Sans production, c'est une forme. Faux quand le type dépend
-// d'une inconnue : ce n'est pas un seul ensemble. Un scope n'est lu qu'une fois.
+// colorée, ce qu'admet sa couleur ; une production qui donne une forme (un scope
+// sans production), ce qu'admet cette forme — ses contraintes ; sinon, sa valeur
+// exactement (`{-> u8}` n'admet que la valeur u8). Sans production, c'est une
+// forme. Faux quand le type dépend d'une inconnue : ce n'est pas un seul
+// ensemble. Un scope n'est lu qu'une fois.
 color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	#partial switch v in t^ {
 	case Set:
@@ -249,8 +251,14 @@ scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	if _, producer := first_production(s); producer {
 		for p in shown {
 			if binding_at(p).kind != .Product do continue
-			produced(k, p) // le scope lu comme couleur : ses productions sont demandées
-			x := admitted_by(k, binding_at(p)^) or_return
+			t := produced(k, p) // le scope lu comme couleur : ses productions sont demandées
+			b := binding_at(p)^
+			x: Set
+			if shape, gives_scope := t^.(^Scope); gives_scope && b.color == nil && !producer_scope(shape) {
+				x = color_set(k, t) or_return
+			} else {
+				x = admitted_by(k, b) or_return
+			}
 			set = set_union(set, x)
 		}
 		return set, true
@@ -258,6 +266,12 @@ scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	fields := make([dynamic]Field)
 	shape_fields(k, s, &fields) or_return
 	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s))}, true
+}
+
+// producer_scope : le scope présente une production.
+producer_scope :: proc(s: ^Scope) -> bool {
+	_, found := first_production(s)
+	return found
 }
 
 // shape_fields : les places d'une forme. Une expansion `...xs` y dépose les
