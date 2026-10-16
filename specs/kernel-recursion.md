@@ -41,10 +41,18 @@ est infini : c'est la boucle d'aujourd'hui.
 | C | liste non vide | `X = {T:} \| {T: ...X}` | `{1..*T:}` | oui |
 | D | arbre, récursion par un champ | `X = {} \| {X:l  T:v  X:r}` | arbre régulier | oui |
 | E | mutuelle | `X = {} \| {A: ...Y}`, `Y = {B: ...X}` | `{0..*(A: B:)}` | oui |
-| F | au milieu d'une suite | `X = {} \| {A: ...X  B:}` | `AⁿBⁿ` | **non** |
-| G | polymorphe | `X{T} = {} \| {T: ...X{{T:}}}` | une variable par niveau | **non fini** |
-| H | sans cas de base | `X = {T: ...X}` | vide : aucune valeur finie | — |
-| I | non gardée | `X = {...X} \| {}` | rien n'est consommé | — |
+| F | au milieu d'une suite | `X = {} \| {A: ...X  B:}` | `AⁿBⁿ` | non |
+| G | polymorphe | `X{T} = {} \| {T: ...X{{T:}}}` | une variable par niveau | non fini |
+| H | sans cas de base | `X = {T: ...X}` | — | **illégal** |
+| I | non gardée | `X = {...X} \| {}` | — | **illégal** |
+
+**La loi du cas de base.** La première production d'un scope récursif est son cas
+de base : elle vient en premier, elle n'est pas récursive, et elle finit. H (pas
+de cas de base), I (non gardée) et une première production récursive sont des
+définitions illégales, signalées à la définition. Le défaut, qui est la première
+production, est donc toujours une valeur finie.
+
+A, B, C, D et F sont supportés. G doit passer aussi.
 
 **A, B, C, E — une suite régulière.** Un scope est une suite de bindings, comme
 une chaîne est une suite de caractères. Une équation où la variable n'apparaît
@@ -61,22 +69,19 @@ suites à l'intérieur de chaque niveau restent régulières (A–C) : ce sont l
 « expressions régulières » de XDuce (Hosoya, Vouillon, Pierce, TOPLAS 2005), où
 un scope est une haie (une suite d'arbres étiquetés).
 
-**F — pas régulier.** La variable apparaît au milieu d'une suite. `AⁿBⁿ` n'est pas
-un langage régulier : c'est une grammaire algébrique. Le système d'équations le
-représente quand même en fini, et l'appartenance d'une valeur se décide (§3).
-L'inclusion de deux tels types est indécidable en général. XDuce interdit ces
-définitions pour cette raison.
+**F — supporté, pas régulier.** La variable apparaît au milieu d'une suite.
+`AⁿBⁿ` n'est pas un langage régulier : c'est une grammaire algébrique. Le système
+d'équations le représente en fini, et l'appartenance d'une valeur se décide (§3).
+L'inclusion de deux tels types n'est pas décidable en général : `Unproven` quand
+on ne sait pas, jamais une acceptation.
 
-**G — pas fini.** L'argument change à chaque niveau (`T`, puis `{T:}`, puis
-`{{T:}:}`…). Chaque niveau est une variable nouvelle : le système n'est pas
-fini.
+**G — doit passer.** L'argument change à chaque niveau (`T`, puis `{T:}`, puis
+`{{T:}:}`…) : chaque niveau est une variable nouvelle, le système n'est pas fini.
+Une valeur finie ne descend que d'un nombre fini de niveaux : l'appartenance se
+décide en ne créant que les variables qu'elle visite. Reste à trouver la
+représentation pour l'inclusion.
 
-**H — vide.** Aucune valeur finie : le plus petit point fixe est vide. Colorer
-par `X` n'admet rien, et le défaut n'existe pas.
-
-**I — non gardée.** `{...X}` ne consomme aucun binding avant de revenir à `X` :
-l'équation `X = X | {}` ne dit rien de plus que `X = {}`. Il faut décider si
-c'est une erreur.
+**H, I — illégaux** (la loi du cas de base, ci-dessus).
 
 ## 3. Ce qu'on décide
 
@@ -87,11 +92,10 @@ c'est une erreur.
 - **Inclusion et vide** (`Array{u8}` ⊆ `Array{u16}` ?) : coinductif, on suppose
   l'inclusion en cours vraie. Exact pour A–E (langages réguliers d'arbres).
   Pour F, `Unproven` quand on ne sait pas, jamais une acceptation.
-- **Le défaut** : une valeur, donc finie. C'est le premier défaut du système qui
-  est **productif** (qui atteint une valeur finie, l'algorithme classique des
-  symboles productifs d'une grammaire). La première production d'`Array` est `{}`
-  : le défaut est `{}`. Si la première production revient à `X` sans cas de base
-  (`tc_infinite_default`), le défaut est infini : erreur.
+- **Le défaut** : la première production, le cas de base, non récursive : une
+  valeur finie. La première production d'`Array` est `{}` : le défaut est `{}`.
+  Une première production récursive (`tc_infinite_default`) est une définition
+  illégale.
 
 ## 4. Les fonctions récursives
 
@@ -110,8 +114,8 @@ que ça termine.
 
 ## 5. À réfléchir
 
-1. **F** — refuser la définition (comme XDuce), ou l'accepter avec une inclusion
-   `Unproven` quand elle n'est pas décidable ?
-2. **G** — refuser, ou borner ?
-3. **I** — une récursion non gardée est-elle une erreur ?
-4. **Les nombres** (§4) — élargir, ou dérouler sous quelle condition ?
+1. **G** — la représentation, pour décider l'inclusion.
+2. **E** — dans `Even`/`Odd`, la seule production d'`Odd` passe par `Even` : est-ce
+   un cas de base récursif (illégal), ou est-il admis parce que le défaut d'`Even`
+   est `{}` ?
+3. **Les nombres** (§4) — élargir, ou dérouler sous quelle condition ?
