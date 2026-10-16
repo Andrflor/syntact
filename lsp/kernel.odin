@@ -2,6 +2,9 @@ package lsp
 
 import "../compiler"
 import kernel "../kernel"
+import "core:fmt"
+import "core:sys/posix"
+import "core:time"
 
 // ============================================================================
 // LE KERNEL DANS L'ÉDITEUR
@@ -91,4 +94,35 @@ visible_bindings :: proc(program: ^kernel.Scope, offset: u32) -> []^kernel.Bindi
 // shown_type : le binding tel que le kernel l'a typé.
 shown_type :: proc(b: ^kernel.Binding) -> string {
 	return kernel.print_binding(b^, .Type)
+}
+
+// KERNEL_TIMEOUT : au-delà, on considère que le kernel ne termine pas.
+KERNEL_TIMEOUT :: 5 * time.Second
+
+// kernel_fails : le kernel, lancé dans un processus à part sur cet AST, plante ou
+// ne termine pas. Il est déterministe : s'il termine à part, il termine ici.
+kernel_fails :: proc(ast: ^compiler.Ast) -> (failure: string, failed: bool) {
+	pid := posix.fork()
+	if pid < 0 do return "", false // pas de processus à part : on le lance ici
+	if pid == 0 {
+		kernel.check_ast(ast)
+		posix._exit(0)
+	}
+	start := time.now()
+	status: i32
+	for {
+		if posix.waitpid(pid, &status, {.NOHANG}) == pid do break
+		if time.since(start) > KERNEL_TIMEOUT {
+			posix.kill(pid, .SIGKILL)
+			posix.waitpid(pid, &status, {})
+			return fmt.tprintf("le kernel ne termine pas en %v sur ce fichier", KERNEL_TIMEOUT), true
+		}
+		time.sleep(2 * time.Millisecond)
+	}
+	// tué par un signal : les 7 bits bas du statut. posix.WIFSIGNALED d'Odin compte
+	// en signé sous Linux, et prend une sortie normale (0) pour un signal.
+	if signal := status & 0x7f; signal != 0 && signal != 0x7f {
+		return fmt.tprintf("le kernel a planté sur ce fichier (%v)", posix.Signal(signal)), true
+	}
+	return "", false
 }

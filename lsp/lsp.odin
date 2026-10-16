@@ -583,7 +583,13 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		doc.parents = build_parent_map(ast)
 
 		// Le kernel type ce qu'il y a d'AST, même partiel : un éditeur tient presque
-		// toujours du code à moitié écrit.
+		// toujours du code à moitié écrit. Il tourne d'abord à part : s'il plante ou
+		// ne termine pas, le LSP reste en vie et le dit.
+		if failure, failed := kernel_fails(ast); failed {
+			append(&diagnostics, Diagnostic{range = span_range(ast, ast.node_spans[compiler.ast_root(ast)]), severity = 1, source = "syn-kernel", message = failure})
+			publish_diagnostics(uri, diagnostics[:])
+			return
+		}
 		program, k := kernel.check_ast(ast)
 		doc.program = program
 		for e in k.errors {
