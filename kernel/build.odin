@@ -86,6 +86,17 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			b.value = build_expr(k, s, target)
 		}
 		append(&s.bindings, b)
+	case .Carve:
+		source := data.carve.source
+		if source == syn.INVALID_NODE || ast.node_kinds[source] != .Constraint {
+			append(&s.bindings, Binding{kind = .Push, value = build_expr(k, s, idx), span = span})
+			return
+		}
+		// `C:p{…}` : p, coloré par C, vaut le défaut de C carvé (specs/language/11)
+		b := Binding{kind = .Push, span = span}
+		if !build_left(k, s, source, &b) do return
+		b.value = new_expr(build_carve_args(k, s, idx, build_default(k, s, source)))
+		append(&s.bindings, b)
 	case .EventPush:
 		append(&s.bindings, Binding{kind = .Event_Push, value = unsupported(k, idx, "l'émission >-"), span = span})
 	case .EventPull:
@@ -294,15 +305,21 @@ build_cover :: proc(k: ^Kernel, b: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	ast := k.ast
 	#partial switch ast.node_kinds[idx] {
 	case .Constraint:
-		data := ast.node_data[idx].binary
-		if data.right != syn.INVALID_NODE do return unsupported(k, idx, "la déstructuration")
-		value := new_scope(b, node_span(k, idx))
-		append(&value.bindings, Binding{kind = .Product, color = build_expr(k, value, data.left), span = node_span(k, idx)})
-		return new_expr(Collapse{target = new_expr(value), span = node_span(k, idx)})
+		if ast.node_data[idx].binary.right != syn.INVALID_NODE do return unsupported(k, idx, "la déstructuration")
+		return build_default(k, b, idx)
 	case .ScopeNode:
 		return unsupported(k, idx, "la déstructuration")
 	}
 	return build_expr(k, b, idx)
+}
+
+// build_default : la valeur complète d'un binding coloré `C:…`, le défaut de C :
+// `{-> C:}!`.
+build_default :: proc(k: ^Kernel, s: ^Scope, constraint: syn.Node_Index) -> ^Expr {
+	span := node_span(k, constraint)
+	value := new_scope(s, span)
+	append(&value.bindings, Binding{kind = .Product, color = build_expr(k, value, k.ast.node_data[constraint].binary.left), span = span})
+	return new_expr(Collapse{target = new_expr(value), span = span})
 }
 
 // shaped_cover : la couverture `C:`, dont la production peut lire les champs.
