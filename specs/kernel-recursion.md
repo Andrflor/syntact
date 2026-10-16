@@ -88,7 +88,7 @@ un scope est une haie (une suite d'arbres étiquetés).
 
 **F — supporté, pas régulier.** La variable apparaît au milieu d'une suite.
 `AⁿBⁿ` n'est pas un langage régulier : c'est une grammaire algébrique. Le système
-d'équations le représente en fini, et l'appartenance d'une valeur se décide (§3).
+d'équations le représente en fini, et l'appartenance d'une valeur se décide (§4).
 L'inclusion de deux tels types n'est pas décidable en général : `Unproven` quand
 on ne sait pas, jamais une acceptation.
 
@@ -100,7 +100,36 @@ représentation pour l'inclusion.
 
 **H, I — illégaux** (§1, le cas de base).
 
-## 3. Ce qu'on décide
+## 3. Les types, cas par cas
+
+| cas | équation | type | défaut |
+|---|---|---|---|
+| A | `X = {} \| {T: ...X}` | `{0..*T:}` | `{}` |
+| B | `X = {} \| {...X  T:}` | `{0..*T:}` | `{}` |
+| C | `X = {T:} \| {T: ...X}` | `{1..*T:}` | `{T:}` |
+| D | `X = {} \| {X:l  T:v  X:r}` | `X = {} \| {X:l  T:v  X:r}` : le type se nomme lui-même | `{}` |
+| E | `Even = {} \| {u8: ...Odd}`, `Odd = {string: ...Even}` | `Even = {0..*(u8: string:)}`, `Odd = {string: 0..*(u8: string:)}` | `{}`, `{string:}` |
+| F | `X = {} \| {A: ...X  B:}` | `{n*A:  n*B:}`, `n ∈ 0..` | `{}` |
+| G | `X(T) = {} \| {T: ...X({T:})}` | n éléments, le k-ième de type `Fᵏ(T)`, `F(T) = {T:}` | `{}` |
+
+La représentation gagne quatre formes de type :
+
+1. **La répétition comptée** (A, B, C, E) : une suite de bindings, ou d'un groupe de
+   bindings, répétée par un ensemble de comptes : `{0..*T:}`, `{0..*(u8: string:)}`.
+   C'est la solution d'Arden, et la même algèbre que `'a'..'z' * 2..` sur les
+   chaînes (`regular.odin`).
+2. **Le type qui se nomme lui-même** (D) : `X` dans un champ n'est pas une suite,
+   Arden ne s'applique pas. Le type garde son équation et `X` le désigne dans le
+   champ. Le cas de base `{}` garantit des arbres finis.
+3. **Le compte partagé** (F) : le même `n` compte les `A` et les `B`. C'est une
+   inconnue entière, `n ∈ 0..`, comme celles de `??` dans le kernel.
+4. **La répétition indexée** (G) : le k-ième élément a le type `Fᵏ(T)`, où `F` est
+   ce que la récursion fait à l'argument.
+
+`Odd` (E) n'a qu'une production, qui passe par `Even`, mais son défaut
+`{string: ...défaut(Even)}` vaut `{string:}`, fini : il est légal.
+
+## 4. Ce qu'on décide
 
 - **Appartenance d'une valeur** (`a` est-il un `Array{u8}` ?) : la valeur est
   finie, on déplie le système sur elle. Inductif : une appartenance qui dépend
@@ -112,7 +141,7 @@ représentation pour l'inclusion.
 - **Le défaut** : la solution de l'équation de la première production seule
   (§1) ; une solution infinie rend la définition illégale.
 
-## 4. Les fonctions récursives
+## 5. Les fonctions récursives
 
 Une fonction récursive structurelle suit la récursion de sa donnée : `map`
 appelle `map` sur la queue `r` de son argument. Si l'argument est `Array{T}`,
@@ -127,10 +156,7 @@ l'argument change à chaque niveau (`n`, `n - 1`, …), comme dans G. Il faut un
 Cousot & Cousot 1977), ou dérouler quand les valeurs sont connues et qu'on sait
 que ça termine.
 
-## 5. À réfléchir
+## 6. À réfléchir
 
-1. **G** — la représentation, pour décider l'inclusion.
-2. **E** — dans `Even`/`Odd`, la seule production d'`Odd` passe par `Even` : est-ce
-   un cas de base récursif (illégal), ou est-il admis parce que le défaut d'`Even`
-   est `{}` ?
-3. **Les nombres** (§4) — élargir, ou dérouler sous quelle condition ?
+1. **G** — décider l'inclusion de deux répétitions indexées.
+2. **Les nombres** (§5) — élargir, ou dérouler sous quelle condition ?
