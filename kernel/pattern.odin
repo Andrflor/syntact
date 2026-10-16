@@ -23,11 +23,13 @@ import "core:fmt"
 //   reçoit (Refinement). Le résultat est l'une des productions des branches
 //   atteintes : une inconnue sur l'union de leurs valeurs.
 
-// Refinement : dans une branche, l'inconnue `sym` ne vaut que ce que la branche
-// reçoit ; elle y est remplacée par `by`, une inconnue sur ces seules valeurs.
+// Refinement : dans la branche `branch`, l'inconnue `sym` ne vaut que ce que la
+// branche reçoit ; elle y est remplacée par `by`, une inconnue sur ces seules
+// valeurs. C'est lexical : seul ce qui est écrit dans la branche le voit.
 Refinement :: struct {
-	sym: int,
-	by:  ^Expr,
+	sym:    int,
+	by:     ^Expr,
+	branch: ^Scope,
 }
 
 type_match :: proc(k: ^Kernel, m: Match, env: ^Scope) -> ^Expr {
@@ -58,10 +60,10 @@ cover_set :: proc(k: ^Kernel, b: ^Scope) -> (set: Maybe(Set), ok: bool) {
 	return s, true
 }
 
-// production : le type de la production d'une branche.
+// production : le type de la production d'une branche, qui se déclenche.
 production :: proc(k: ^Kernel, b: ^Scope) -> ^Expr {
 	type_scope(k, b)
-	return b.bindings[0].value_type
+	return produced(k, Place{b, 0, 0})
 }
 
 // match_value : target est connue ; la première branche qui l'admet la donne.
@@ -100,7 +102,7 @@ match_unknown :: proc(k: ^Kernel, m: Match, t: ^Expr) -> ^Expr {
 			append(&products, production(k, b))
 			continue
 		}
-		append(&k.refined, Refinement{sym, new_symbol(k, part)})
+		append(&k.refined, Refinement{sym, new_symbol(k, part), b})
 		append(&products, production(k, b))
 		pop(&k.refined)
 	}
@@ -139,11 +141,18 @@ one_of :: proc(k: ^Kernel, products: []^Expr, span: syn.Span) -> ^Expr {
 
 // --- le raffinement ---
 
-// refine : un type lu dans une branche, où ses inconnues restreintes sont remplacées.
-refine :: proc(k: ^Kernel, t: ^Expr, span: syn.Span) -> ^Expr {
+// refine : un type lu en env, où les inconnues que restreignent les branches qui
+// entourent env sont remplacées.
+refine :: proc(k: ^Kernel, t: ^Expr, env: ^Scope, span: syn.Span) -> ^Expr {
 	r := t
-	for x in k.refined do r = substitute(k, r, x.sym, x.by, span)
+	for x in k.refined do if encloses(x.branch, env) do r = substitute(k, r, x.sym, x.by, span)
 	return r
+}
+
+// encloses : s est écrit dans outer, ou est outer.
+encloses :: proc(outer, s: ^Scope) -> bool {
+	for sc := s; sc != nil; sc = sc.parent do if sc == outer do return true
+	return false
 }
 
 // substitute : t, où l'inconnue `sym` vaut `by`, remis en forme normale.

@@ -224,6 +224,7 @@ Kernel :: struct {
 	scene:   Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
 	refined:  [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
+	producing: map[syn.Span]struct{}, // les productions écrites en cours de typage, demandées (produced)
 }
 
 // Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit

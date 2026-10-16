@@ -165,7 +165,10 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 	else do append(&shown, ..s.bindings[:])
 	for bd, i in shown {
 		color, value := bd.color, bd.value
+		at := view
 		if view == .Type do color, value = bd.color_type, bd.value_type
+		// une production que rien n'a demandée n'a pas de type : elle reste écrite
+		if view == .Type && bd.kind == .Product && bd.value_type == nil do color, value, at = bd.color, bd.value, .Program
 		if i > 0 do strings.write_string(&b, "  ")
 		if bd.kind == .Expand {
 			// `...xs`, `...C:(t)`, `...` : l'expansion, puis ce qu'elle dépose
@@ -179,7 +182,7 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 			}
 			continue
 		}
-		if color != nil do fmt.sbprintf(&b, "%s:", print_at(color, above(.CONSTRAINT), view))
+		if color != nil do fmt.sbprintf(&b, "%s:", print_at(color, above(.CONSTRAINT), at))
 		if bd.name != "" do strings.write_string(&b, bd.name)
 		if i < len(ordinals) && ordinals[i] >= 0 do fmt.sbprintf(&b, "#%d", ordinals[i])
 		if bd.capture != "" do fmt.sbprintf(&b, "(%s)", bd.capture)
@@ -188,7 +191,7 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 				if bd.name != "" || color != nil do strings.write_byte(&b, ' ')
 				fmt.sbprintf(&b, "%s ", ARROWS[bd.kind])
 			}
-			strings.write_string(&b, print_at(value, .NONE, view))
+			strings.write_string(&b, print_at(value, .NONE, at))
 		}
 	}
 	strings.write_byte(&b, '}')
