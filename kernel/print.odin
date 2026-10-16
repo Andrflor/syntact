@@ -198,6 +198,12 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 		}
 		return
 	}
+	if bd.kind == .Product && color != nil {
+		// `-> C:`, ou `-> C:(v)` : une production colorée
+		fmt.sbprintf(b, "%s %s:", ARROWS[.Product], print_at(color, above(.CONSTRAINT), at))
+		if value != nil do fmt.sbprintf(b, "(%s)", print_at(value, .NONE, at))
+		return
+	}
 	if color != nil do fmt.sbprintf(b, "%s:", print_at(color, above(.CONSTRAINT), at))
 	if bd.name != "" do strings.write_string(b, bd.name)
 	if ordinal >= 0 do fmt.sbprintf(b, "#%d", ordinal)
