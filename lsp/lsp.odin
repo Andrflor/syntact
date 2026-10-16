@@ -1,6 +1,7 @@
 package lsp
 
 import "../compiler"
+import kernel "../kernel"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
@@ -137,10 +138,8 @@ Document :: struct {
 	version: int,
 	content: string,
 	ast:     ^compiler.Ast,
-	// The new analyzer has no `Semantic`; analysis lands in a Cache (root scope +
-	// parse/analyze diagnostics). `scope` is `cache.scope` after analyze().
-	cache:   ^compiler.Cache,
-	scope:   ^compiler.Scope_Type,
+	// le scope du fichier, typé par le kernel : chaque binding écrit porte ses types
+	program: ^kernel.Scope,
 	// Cursor→name resolution is lexical over the AST; the parent map is rebuilt on
 	// each (re)analysis and reused by definition/references/rename/completion.
 	parents: Parent_Map,
@@ -561,8 +560,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 
 	ast, _ := compiler.parse(cache, doc.content)
 	doc.ast = ast
-	doc.cache = cache
-	doc.scope = nil
+	doc.program = nil
 
 	diagnostics := make([dynamic]Diagnostic, 0, len(cache.parse_errors) + 16)
 	defer delete(diagnostics)
@@ -583,44 +581,25 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		// Build the lexical parent map regardless of analysis success — it powers
 		// definition/references even when analysis bailed on an error.
 		doc.parents = build_parent_map(ast)
-	}
 
-	// Analyze whenever there is an AST, even a PARTIAL one from a failed parse: an
-	// editor almost always holds half-typed code, and that is exactly when semantic
-	// diagnostics help most. The analyzer (and the fold layer it drives) must be
-	// robust to a malformed AST; gating on parse_ok to dodge a fold crash would be a
-	// workaround, not a fix.
-	if ast != nil {
-		analyzer := compiler.create_analyzer(ast)
-		phase_ctx := compiler.Phase_Context {
-			analyzer = &analyzer,
-		}
-		prev_user_ptr := context.user_ptr
-		context.user_ptr = &phase_ctx
-		analyze_ok := compiler.analyze(cache)
-		context.user_ptr = prev_user_ptr
-		doc.scope = cache.scope
-
-		for err in cache.analyze_errors {
+		// Le kernel type ce qu'il y a d'AST, même partiel : un éditeur tient presque
+		// toujours du code à moitié écrit.
+		program, k := kernel.check_ast(ast)
+		doc.program = program
+		for e in k.errors {
+			message := e.message
+			if e.origin != e.span {
+				o := compiler.span_to_position(ast, e.origin.start)
+				message = fmt.tprintf("%s (écrit en %d:%d)", message, o.line, o.column)
+			}
 			append(
 				&diagnostics,
 				Diagnostic {
-					range = span_range(ast, err.span),
-					severity = 1,
-					source = "syn-analyze",
-					message = err.message,
-				},
-			)
-		}
-
-		for warn in cache.analyze_warnings {
-			append(
-				&diagnostics,
-				Diagnostic {
-					range = span_range(ast, warn.span),
-					severity = 2,
-					source = "syn-analyze",
-					message = warn.message,
+					range = span_range(ast, e.span),
+					// ce que le kernel ne traite pas encore n'est pas une faute du code
+					severity = e.kind == .Unsupported ? 2 : 1,
+					source = "syn-kernel",
+					message = message,
 				},
 			)
 		}
@@ -708,69 +687,29 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	send_response(msg.id, make_location(uri, def_start, def_end))
 }
 
-// handle_hover renders the identifier under the cursor: its name and its folded
-// type/constraint (the declared color, else the value's type). Resolution uses the
-// analyzed Scope_Type — find the enclosing scope by position, resolve the name,
-// and describe its constraint/type fold. A builtin name shows its constraint set.
+// handle_hover : le binding que désigne l'identifiant sous le curseur, tel que le
+// kernel l'a typé.
 handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	uri, _, use, doc, ok := resolve_binding_at(server, msg.params)
+	_, decl, use, doc, ok := resolve_binding_at(server, msg.params)
 	if !ok || use == compiler.INVALID_NODE {
 		send_response(msg.id, json.Null{})
 		return
 	}
-	_ = uri
 	ast := doc.ast
 	name := compiler.node_name_str(ast, use)
-	if name == "" {
+	b := written_binding(doc.program, name, ast.node_spans[decl].start)
+	if name == "" || b == nil {
 		send_response(msg.id, json.Null{})
 		return
 	}
 
-	detail := hover_detail(doc, use, name)
-	if detail == "" {
-		send_response(msg.id, json.Null{})
-		return
-	}
-
-	// Render as a markdown code block.
 	contents := make(map[string]json.Value)
 	contents["kind"] = json.String("markdown")
-	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", detail))
+	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", shown_type(b)))
 
 	result := make(map[string]json.Value)
 	result["contents"] = json.Object(contents)
 	send_response(msg.id, json.Object(result))
-}
-
-// hover_detail builds the hover string for `name` at the cursor: "name : <type>"
-// from the binding's constraint/type fold in the enclosing analyzed scope, or
-// "name : <builtin set>" for a builtin, or just the name when nothing resolves.
-hover_detail :: proc(doc: ^Document, use: compiler.Node_Index, name: string) -> string {
-	ast := doc.ast
-	if doc.scope != nil {
-		enc := scope_type_at(ast, doc.parents, doc.scope, ast.node_spans[use].start)
-		if enc != nil {
-			if s, idx := compiler.scope_resolve(enc, name, -1, true); s != nil {
-				op := binding_kind_symbol(s.kind[idx])
-				t: ^compiler.Type = nil
-				if idx < len(s.constraint_folds) && s.constraint_folds[idx] != nil {
-					t = s.constraint_folds[idx]
-				} else if idx < len(s.type_folds) && s.type_folds[idx] != nil {
-					t = s.type_folds[idx]
-				}
-				if t != nil {
-					return fmt.tprintf("%s %s %s", name, op, compiler.describe_type(t))
-				}
-				return fmt.tprintf("%s %s", name, op)
-			}
-		}
-	}
-	// Builtin: show the set it denotes.
-	if bt, is_b := compiler.builtins[name]; is_b {
-		bt_copy := bt
-		return fmt.tprintf("%s : %s", name, compiler.describe_type(&bt_copy))
-	}
-	return ""
 }
 
 // resolve_binding_at maps a cursor to the identifier under it (`use`) and the
@@ -1065,20 +1004,24 @@ send_empty_completion :: proc(id: Maybe(json.Value)) {
 	send_response(id, json.Object(result))
 }
 
-// collect_property_completions : after `expr.`, complete the bindings of the
-// scope `expr` denotes. We resolve `expr` (the dot's source identifier) to its
-// declaration value via the analyzed Scope_Type, peel it to a Scope_Type, and list
-// its named fields.
+// collect_property_completions : après `x.`, les bindings nommés que présente le
+// scope que vaut x.
 collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
 	ast := doc.ast
-	if doc.scope == nil do return
 	source_node := find_dot_source(ast, offset)
 	if source_node == compiler.INVALID_NODE do return
 	if ast.node_kinds[source_node] != .Identifier do return
-
-	target := scope_of_identifier(doc, source_node)
-	if target == nil do return
-	add_scope_bindings(ast, target, items)
+	name := compiler.node_name_str(ast, source_node)
+	decl := resolve_definition(ast, doc.parents, source_node)
+	if decl == compiler.INVALID_NODE do return
+	b := written_binding(doc.program, name, ast.node_spans[decl].start)
+	if b == nil || b.value_type == nil do return
+	target, is_scope := b.value_type^.(^kernel.Scope)
+	if !is_scope do return
+	for p in kernel.places(target) {
+		field := kernel.binding_at(p)
+		if field.name != "" do append(items, make_completion_item(field))
+	}
 }
 
 find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
@@ -1099,134 +1042,29 @@ find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index 
 	return node_left(ast, best)
 }
 
-// scope_of_identifier resolves the identifier `ident` to the Scope_Type its value
-// denotes (peeling Mention/Reference/Carve and `follow`), for property completion.
-// Returns nil when it is not scope-valued. Resolution is lexical: find the binding
-// in the enclosing analyzed scope by name, then follow its value to a scope.
-scope_of_identifier :: proc(doc: ^Document, ident: compiler.Node_Index) -> ^compiler.Scope_Type {
-	ast := doc.ast
-	name := compiler.node_name_str(ast, ident)
-	if name == "" do return nil
-	enc := scope_type_at(ast, doc.parents, doc.scope, ast.node_spans[ident].start)
-	if enc == nil do return nil
-	s, idx := compiler.scope_resolve(enc, name, -1, true)
-	if s == nil do return nil
-	val := compiler.follow(s.types[idx])
-	if val == nil do return nil
-	if sc, ok := &val.(compiler.Scope_Type); ok do return sc
-	return nil
-}
-
+// collect_scope_completions : les noms visibles au curseur, builtins compris.
 collect_scope_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
-	ast := doc.ast
-	seen := make(map[string]bool)
-	defer delete(seen)
-
-	scope := scope_type_at(ast, doc.parents, doc.scope, offset)
-	for scope != nil {
-		for i := 0; i < len(scope.names); i += 1 {
-			name := scope.names[i]
-			if name == "" do continue
-			if name in seen do continue
-			seen[name] = true
-			append(items, make_completion_item(scope, i))
-		}
-		scope = scope.parent
-	}
-
-	for bname in compiler.builtins {
-		if bname in seen do continue
-		item := make(map[string]json.Value)
-		item["label"] = json.String(bname)
-		item["kind"] = json.Integer(COMPLETION_KIND_CLASS)
-		append(items, json.Object(item))
-	}
+	for b in visible_bindings(doc.program, offset) do append(items, make_completion_item(b))
 }
 
-add_scope_bindings :: proc(
-	ast: ^compiler.Ast,
-	scope: ^compiler.Scope_Type,
-	items: ^[dynamic]json.Value,
-) {
-	for i := 0; i < len(scope.names); i += 1 {
-		if scope.names[i] == "" do continue
-		append(items, make_completion_item(scope, i))
-	}
-}
-
-// make_completion_item builds a completion item for binding `i` of `scope`, with a
-// kind from the binding kind / value shape and a detail string from the folded type.
-make_completion_item :: proc(scope: ^compiler.Scope_Type, i: int) -> json.Value {
+// make_completion_item : un binding, avec son type selon le kernel.
+make_completion_item :: proc(b: ^kernel.Binding) -> json.Value {
 	item := make(map[string]json.Value)
-	item["label"] = json.String(scope.names[i])
+	item["label"] = json.String(b.name)
 	item["insertTextFormat"] = json.Integer(1) // plain text
 
-	kind := scope.kind[i]
-	value := scope.types[i]
 	ckind := COMPLETION_KIND_VARIABLE
-	#partial switch kind {
-	case .Pointing_Push:
-		if value != nil {
-			if _, is_scope := compiler.follow(value).(compiler.Scope_Type); is_scope {
-				ckind = COMPLETION_KIND_MODULE
-			}
+	#partial switch b.kind {
+	case .Push:
+		if b.value_type != nil {
+			if _, is_scope := b.value_type^.(^kernel.Scope); is_scope do ckind = COMPLETION_KIND_MODULE
 		}
-	case .Event_Push,
-	     .Event_Pull,
-	     .Resonance_Push,
-	     .Resonance_Pull,
-	     .Reactive_Push,
-	     .Reactive_Pull:
+	case .Event_Push, .Event_Pull, .Resonance_Push, .Resonance_Pull, .Reactive_Push, .Reactive_Pull:
 		ckind = COMPLETION_KIND_EVENT
-	case .Product:
-		ckind = COMPLETION_KIND_PROPERTY
 	}
 	item["kind"] = json.Integer(ckind)
-
-	detail := binding_detail(scope, i)
-	if detail != "" do item["detail"] = json.String(detail)
+	item["detail"] = json.String(shown_type(b))
 	return json.Object(item)
-}
-
-// binding_detail renders a short type/kind description for a binding: its folded
-// type (constraint or value) plus the directional operator symbol.
-binding_detail :: proc(scope: ^compiler.Scope_Type, i: int) -> string {
-	op := binding_kind_symbol(scope.kind[i])
-	// Prefer the constraint fold (the declared color), else the value type fold.
-	t: ^compiler.Type = nil
-	if i < len(scope.constraint_folds) && scope.constraint_folds[i] != nil {
-		t = scope.constraint_folds[i]
-	} else if i < len(scope.type_folds) && scope.type_folds[i] != nil {
-		t = scope.type_folds[i]
-	}
-	if t == nil do return op
-	return compiler.describe_type(t)
-}
-
-binding_kind_symbol :: proc(kind: compiler.Binding_Kind) -> string {
-	switch kind {
-	case .Pointing_Push:
-		return "->"
-	case .Pointing_Pull:
-		return "<-"
-	case .Event_Push:
-		return ">-"
-	case .Event_Pull:
-		return "-<"
-	case .Resonance_Push:
-		return ">>-"
-	case .Resonance_Pull:
-		return "-<<"
-	case .Reactive_Push:
-		return ">>="
-	case .Reactive_Pull:
-		return "=<<"
-	case .Expand:
-		return "..."
-	case .Product:
-		return "->"
-	}
-	return ""
 }
 
 /* ======================================================================

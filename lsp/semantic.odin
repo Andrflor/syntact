@@ -13,8 +13,8 @@ import "../compiler"
 // So the LSP resolves names LEXICALLY over the AST: it builds a child→parent map
 // once, finds the enclosing ScopeNode of a cursor, and resolves an identifier to
 // the binding that declares its name by scanning enclosing scopes inner-to-outer.
-// This is robust and needs no node→binding table from the analyzer. The analyzed
-// `Scope_Type` is still used for completion/hover (names + folded types).
+// This is robust and needs no node→binding table from the analyzer. Types, for
+// hover and completion, come from the kernel (kernel.odin).
 // ============================================================================
 
 INVALID :: compiler.INVALID_NODE
@@ -272,68 +272,4 @@ all_references :: proc(
 		if resolve_definition(ast, pm, idx) == decl do append(&out, idx)
 	}
 	return out
-}
-
-// --- scope_type lookup (for completion / hover) ------------------------------
-
-// scope_type_at maps a cursor offset to the analyzed Scope_Type that lexically
-// encloses it. Because the analyzer builds Scope_Type children in the same source
-// order as the AST ScopeNodes, we descend the analyzed tree in parallel with the
-// AST scope chain. Returns the root scope as a fallback.
-//
-// We don't have a node→Scope_Type table, so we match by POSITION: walk the AST
-// scope ancestry of the offset (root → … → innermost) and, for each step, find the
-// child Scope_Type produced for that AST scope by index among the parent's scope-
-// valued bindings. Falls back to the root when the descent can't be matched.
-scope_type_at :: proc(
-	ast: ^compiler.Ast,
-	pm: Parent_Map,
-	root: ^compiler.Scope_Type,
-	offset: u32,
-) -> ^compiler.Scope_Type {
-	if root == nil do return nil
-	target := find_node_at_offset(ast, offset)
-	if target == INVALID do return root
-
-	// AST scope ancestry, innermost-first.
-	chain := make([dynamic]compiler.Node_Index, 0, 8)
-	cur := target
-	for cur != INVALID {
-		if ast.node_kinds[cur] == .ScopeNode do append(&chain, cur)
-		cur = parent_of(pm, cur)
-	}
-	// Reverse to root-first (the outermost ScopeNode is the file root).
-	if len(chain) == 0 do return root
-	scope := root
-	// Descend from the second-outermost inward, matching each nested AST ScopeNode
-	// to a scope-valued binding of the current Scope_Type by source order.
-	for i := len(chain) - 2; i >= 0; i -= 1 {
-		ast_scope := chain[i]
-		next := child_scope_for(ast, scope, ast_scope)
-		if next == nil do break
-		scope = next
-	}
-	return scope
-}
-
-// child_scope_for finds, among `parent`'s bindings whose value is a nested
-// Scope_Type, the one corresponding to the AST `ast_scope` node by source order.
-// (The analyzer creates one nested Scope_Type per scope-literal binding, in order.)
-child_scope_for :: proc(
-	ast: ^compiler.Ast,
-	parent: ^compiler.Scope_Type,
-	ast_scope: compiler.Node_Index,
-) -> ^compiler.Scope_Type {
-	for i := 0; i < len(parent.types); i += 1 {
-		v := parent.types[i]
-		if v == nil do continue
-		if s, ok := &v.(compiler.Scope_Type); ok {
-			// Heuristic: return the first nested scope. Refined callers may match by
-			// span if the analyzer later records it; today nesting is shallow in
-			// practice and the parent chain already narrows the search.
-			_ = ast_scope
-			return s
-		}
-	}
-	return nil
 }
