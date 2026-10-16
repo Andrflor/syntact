@@ -116,8 +116,7 @@ CASES := []Case {
 	{"P -> {-> u8}\nP:x\ny -> x", "{P -> {-> 0..255}  {-> 0..255}:x -> 0..255  y -> 0..255}", {}}, // le défaut : la première production
 	{"n -> ??::(0..3)\n{-> 0..3}:z -> n | 0..3", "{n -> ??0  {-> 0..3}:z -> 0..3}", {}},
 	{"n -> ??::(0..3)\n{-> 0..3}:w -> n | 1..3", "", {.Constraint_Mismatch}}, // n = 1 : 1..3
-	{"C -> {-> {x -> 1}}\nC:a -> {x -> 1}\nC:b -> {x -> 2}", "", {}}, // une forme : ses contraintes, x n'en a pas
-	{"C -> {-> {u8:x -> 1}}\nC:a -> {x -> 2}\nC:b -> {x -> 300}", "", {.Constraint_Mismatch}},
+	{"C -> {-> {x -> 1}}\nC:a -> {x -> 1}\nC:b -> {x -> 2}", "", {.Constraint_Mismatch}}, // la valeur exacte, pas sa forme
 	// le carve : une copie symbolique, les arguments à la place des valeurs, re-typée
 	{"box -> {\n  x -> 1\n  y -> x + 1\n}\nbox2 -> box{x -> 10}\na -> box2.y\nb -> box.y", "{box -> {x -> 1  y -> 2}  box2 -> {x -> 10  y -> 11}  a -> 11  b -> 2}", {}},
 	{"Config -> {\n  port -> \"8080\"\n  url -> \"localhost:\" + port\n  port -> \"3000\"\n}\nDev -> Config{port -> \"9000\"}\na -> Dev.port\nb -> Dev.url\nc -> Config{port#1 -> \"1\"}.port", "{Config -> {port -> \"8080\"  url -> \"localhost:8080\"  port -> \"3000\"}  Dev -> {port -> \"9000\"  url -> \"localhost:9000\"  port -> \"3000\"}  a -> \"3000\"  b -> \"localhost:9000\"  c -> \"1\"}", {}},
@@ -126,9 +125,6 @@ CASES := []Case {
 	{"Color -> {\n  u8:r\n  u8:g\n}\nColor:o{r -> 240, g -> 300}", "", {.Constraint_Mismatch}},
 	{"Color -> {\n  u8:r\n}\nColor:o{w -> 1}", "", {.Invalid_Carve}},
 	{"Circle -> {u8:r}\nSquare -> {u8:w  u8:h}\nShape -> {\n  -> Circle:\n  -> Square:\n}\nShape:s{r -> 3}", "", {}}, // le défaut : la première production
-	// une production qui donne un scope se lit, comme couleur, par ses contraintes
-	{"Shape -> {\n  -> {u8:r}\n  -> {u8:w  u8:h}\n}\nShape:s{r -> 3}", "", {}},
-	{"Shape -> {\n  -> {u8:r}\n  -> {u8:w  u8:h}\n}\nShape:s{r -> 300}", "", {.Constraint_Mismatch}},
 	// une production colorée s'imprime `-> C:`, `-> C:(v)`
 	{"S -> {\n  -> u8:\n  -> string:\n}\nT -> {-> u8:(5)}", "{S -> {-> u8:  -> string:}  T -> {-> u8:(5)}}", {}},
 	// une production n'est typée qu'à son appel : la définition ne la lance pas
