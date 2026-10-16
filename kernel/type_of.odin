@@ -16,10 +16,6 @@ import "core:fmt"
 // Les scopes sont typés sur place : chaque binding garde sa couleur et sa valeur
 // symboliques, et reçoit leurs types. La vérification `valeur ⊆ couleur` se fait
 // à la fin (check), une fois tout typé.
-//
-// Une production n'est typée que quand on en fait quelque chose (produced) : un
-// collapse, un défaut, une couleur qui lit le scope, une branche qui se déclenche.
-// Jamais à la définition, jamais au carve (specs/language/06).
 
 type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 	if e == nil do return new_expr(Invalid{})
@@ -61,7 +57,6 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 
 // type_scope type chaque binding sur place, dans l'ordre : chacun voit les types
 // de ceux du dessus. Une ref vers un binding pas encore typé est une récursion.
-// Les productions attendent qu'on les demande (produced).
 // `shape` : les places de la forme que la couleur attend, quand ce scope est la
 // valeur d'un binding coloré par elle. Le scope la retient : ses copies la
 // gardent. Un scope écrit ici et expansé reçoit la suite de la forme, à partir de
@@ -76,7 +71,7 @@ type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 			if v, ok := expanded(b); ok do position += len(places(v))
 			continue
 		}
-		if b.kind != .Product do type_binding(k, &b, s, expected_color(shape, position, b))
+		type_binding(k, &b, s, expected_color(shape, position, b))
 		position += 1
 	}
 }
@@ -145,8 +140,7 @@ expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bo
 	if color == nil do return nil, false
 	#partial switch c in color^ {
 	case ^Scope:
-		_, producer := first_production(c)
-		return c, !producer && fixed_length(c)
+		return c, first_production(c) == nil && fixed_length(c)
 	case Set:
 		found: ^Scope = nil
 		for r in bdd_atoms(c.scopes) {
@@ -195,7 +189,7 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		if !ok do return color // la couleur none : sa seule valeur est none
 		return new_expr(d)
 	case ^Scope:
-		if p, found := first_production(c); found do return produced(k, p)
+		if p := first_production(c); p != nil do return p.value_type
 		return color
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
@@ -212,24 +206,10 @@ scopes_default :: proc(k: ^Kernel, b: Bdd, binding: ^Binding) -> ^Expr {
 	return report(k, .Unsupported, binding.span, "pas encore dans le kernel : le défaut d'une combinaison de formes")
 }
 
-// first_production : la première production que présente s.
-first_production :: proc(s: ^Scope) -> (Place, bool) {
-	for p in places(s) do if binding_at(p).kind == .Product do return p, true
-	return {}, false
-}
-
-// produced : le type d'une production, demandé par ce qu'on en fait. Il ne dépend
-// que de ce qui l'entoure là où elle est écrite : une fois typée, elle le garde.
-// Demandée pendant qu'elle se type elle-même — la même production écrite, dans
-// une copie ou non — c'est une récursion.
-produced :: proc(k: ^Kernel, p: Place) -> ^Expr {
-	b := binding_at(p)
-	if b.value_type != nil do return b.value_type
-	if b.span in k.producing do return report(k, .Unsupported, b.span, "pas encore dans le kernel : la récursion")
-	k.producing[b.span] = {}
-	defer delete_key(&k.producing, b.span)
-	type_binding(k, b, p.scope, nil)
-	return b.value_type
+// first_production : la première production que présente s, ou nil.
+first_production :: proc(s: ^Scope) -> ^Binding {
+	for p in places(s) do if b := binding_at(p); b.kind == .Product do return b
+	return nil
 }
 
 // type_ref : le type du binding désigné.
@@ -238,7 +218,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	for _ in 0 ..< r.up do sc = sc.parent
 	t := sc.bindings[r.index].value_type
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
-	return refine(k, t, env, r.span)
+	return refine(k, t, r.span)
 }
 
 type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
@@ -250,7 +230,7 @@ type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
 	if !found do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' n'existe pas dans ce scope", a.name))
 	v := binding_at(p).value_type
 	if v == nil do return report(k, .Unsupported, a.span, "pas encore dans le kernel : la récursion")
-	return refine(k, v, env, a.span)
+	return refine(k, v, a.span)
 }
 
 // find_binding : parmi les bindings que présente s, la dernière occurrence d'un
@@ -275,9 +255,9 @@ type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 	if is_invalid(t) do return t
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Execute, c.span, "on ne collapse qu'un scope")
-	p, found := first_production(s)
-	if !found do return new_expr(Set{}) // un scope sans production se réduit à none
-	return refine(k, produced(k, p), env, c.span)
+	p := first_production(s)
+	if p == nil do return new_expr(Set{}) // un scope sans production se réduit à none
+	return p.value_type
 }
 
 // type_unknown : une nouvelle inconnue. Ses valeurs possibles viennent de sa forme

@@ -246,11 +246,11 @@ color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 
 scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	shown := places(s)
-	if _, producer := first_production(s); producer {
+	if first_production(s) != nil {
 		for p in shown {
-			if binding_at(p).kind != .Product do continue
-			produced(k, p) // le scope lu comme couleur : ses productions sont demandées
-			x := admitted_by(k, binding_at(p)^) or_return
+			b := binding_at(p)^
+			if b.kind != .Product do continue
+			x := admitted_by(k, b) or_return
 			set = set_union(set, x)
 		}
 		return set, true
@@ -287,13 +287,6 @@ shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field) -> bool {
 	return true
 }
 
-// held : le type de ce que tient la place p, lue comme une valeur — une production
-// y est demandée.
-held :: proc(k: ^Kernel, p: Place) -> ^Expr {
-	b := binding_at(p)
-	return b.kind == .Product ? produced(k, p) : b.value_type
-}
-
 // admitted_by : ce qu'un binding admet — ce qu'admet sa couleur, sinon sa valeur.
 admitted_by :: proc(k: ^Kernel, b: Binding) -> (Set, bool) {
 	if b.color != nil do return color_set(k, b.color_type)
@@ -316,7 +309,7 @@ exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 		for p, i in shown {
 			b := binding_at(p)^
 			fields[i] = Field{name = b.name, kind = b.kind}
-			fields[i].set = exact_set(k, held(k, p)) or_return
+			fields[i].set = exact_set(k, b.value_type) or_return
 		}
 		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, v, exact = true))}, true
 	}
@@ -445,19 +438,17 @@ match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo
 			if result == .Always do break
 		}
 	} else if i < len(view) {
-		result = and3(field_member(k, f, view[i]), match_fields(k, fields, view, i + 1, j + 1, memo))
+		result = and3(field_member(k, f, binding_at(view[i])^), match_fields(k, fields, view, i + 1, j + 1, memo))
 	}
 	memo[{i, j}] = result
 	return result
 }
 
-// field_member : le binding à la place p a-t-il la place f ?
-field_member :: proc(k: ^Kernel, f: Field, p: Place) -> Member {
-	b := binding_at(p)^
+// field_member : le binding b a-t-il la place f ?
+field_member :: proc(k: ^Kernel, f: Field, b: Binding) -> Member {
 	if f.name != b.name || f.kind != b.kind do return .Never
-	t := held(k, p)
-	if f.free || colored_within(k, binding_at(p)^, f.set) do return .Always
-	return member_of(admits(k, f.set, t), is_closed_type(t))
+	if f.free || colored_within(k, b, f.set) do return .Always
+	return member_of(admits(k, f.set, b.value_type), is_closed_type(b.value_type))
 }
 
 // colored_within : la couleur du binding n'admet que des éléments de `s`. Sa valeur
