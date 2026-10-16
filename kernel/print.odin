@@ -164,38 +164,51 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 	if view == .Type do presented(s, &shown) // le scope tel qu'il se présente
 	else do append(&shown, ..s.bindings[:])
 	for bd, i in shown {
-		color, value := bd.color, bd.value
-		at := view
-		if view == .Type do color, value = bd.color_type, bd.value_type
-		// une production que rien n'a demandée n'a pas de type : elle reste écrite
-		if view == .Type && bd.kind == .Product && bd.value_type == nil do color, value, at = bd.color, bd.value, .Program
 		if i > 0 do strings.write_string(&b, "  ")
-		if bd.kind == .Expand {
-			// `...xs`, `...C:(t)`, `...` : l'expansion, puis ce qu'elle dépose
-			strings.write_string(&b, ARROWS[.Expand])
-			if bd.color != nil {
-				if !is_all_scopes(bd.color) do fmt.sbprintf(&b, "%s:", print_at(bd.color, above(.CONSTRAINT), view))
-				if bd.name != "" do strings.write_string(&b, bd.name)
-				if bd.capture != "" do fmt.sbprintf(&b, "(%s)", bd.capture)
-			} else if value != nil {
-				strings.write_string(&b, print_at(value, .NONE, view))
-			}
-			continue
-		}
-		if color != nil do fmt.sbprintf(&b, "%s:", print_at(color, above(.CONSTRAINT), at))
-		if bd.name != "" do strings.write_string(&b, bd.name)
-		if i < len(ordinals) && ordinals[i] >= 0 do fmt.sbprintf(&b, "#%d", ordinals[i])
-		if bd.capture != "" do fmt.sbprintf(&b, "(%s)", bd.capture)
-		if value != nil {
-			if bd.name != "" || color != nil || bd.kind != .Push {
-				if bd.name != "" || color != nil do strings.write_byte(&b, ' ')
-				fmt.sbprintf(&b, "%s ", ARROWS[bd.kind])
-			}
-			strings.write_string(&b, print_at(value, .NONE, at))
-		}
+		write_binding(&b, bd, view, i < len(ordinals) ? ordinals[i] : -1)
 	}
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
+}
+
+// print_binding : un binding seul, lu comme programme ou comme type.
+print_binding :: proc(bd: Binding, view: View) -> string {
+	b := strings.builder_make()
+	write_binding(&b, bd, view, -1)
+	return strings.to_string(b)
+}
+
+// write_binding : `ordinal`, l'occurrence que vise un argument de carve (`x#1`) ;
+// -1 sinon.
+write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int) {
+	color, value := bd.color, bd.value
+	at := view
+	if view == .Type do color, value = bd.color_type, bd.value_type
+	// une production que rien n'a demandée n'a pas de type : elle reste écrite
+	if view == .Type && bd.kind == .Product && bd.value_type == nil do color, value, at = bd.color, bd.value, .Program
+	if bd.kind == .Expand {
+		// `...xs`, `...C:(t)`, `...` : l'expansion, puis ce qu'elle dépose
+		strings.write_string(b, ARROWS[.Expand])
+		if bd.color != nil {
+			if !is_all_scopes(bd.color) do fmt.sbprintf(b, "%s:", print_at(bd.color, above(.CONSTRAINT), view))
+			if bd.name != "" do strings.write_string(b, bd.name)
+			if bd.capture != "" do fmt.sbprintf(b, "(%s)", bd.capture)
+		} else if value != nil {
+			strings.write_string(b, print_at(value, .NONE, view))
+		}
+		return
+	}
+	if color != nil do fmt.sbprintf(b, "%s:", print_at(color, above(.CONSTRAINT), at))
+	if bd.name != "" do strings.write_string(b, bd.name)
+	if ordinal >= 0 do fmt.sbprintf(b, "#%d", ordinal)
+	if bd.capture != "" do fmt.sbprintf(b, "(%s)", bd.capture)
+	if value != nil {
+		if bd.name != "" || color != nil || bd.kind != .Push {
+			if bd.name != "" || color != nil do strings.write_byte(b, ' ')
+			fmt.sbprintf(b, "%s ", ARROWS[bd.kind])
+		}
+		strings.write_string(b, print_at(value, .NONE, at))
+	}
 }
 
 // --- ensembles ---
