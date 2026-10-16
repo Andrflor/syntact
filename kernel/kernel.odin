@@ -11,6 +11,8 @@ run :: proc(source: string) -> (program: ^Scope, k: Kernel, parsed: bool) {
 	if !ok do return nil, k, false
 	program = build_program(&k, ast)
 	type_scope(&k, program)
+	// lancer le programme, c'est collapser le fichier : sa production est demandée
+	if p, found := first_production(program); found do produced(&k, p)
 	check(&k)
 	return program, k, true
 }
