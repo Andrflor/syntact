@@ -126,13 +126,8 @@ CASES := []Case {
 	{"Color -> {\n  u8:r\n}\nColor:o{w -> 1}", "", {.Invalid_Carve}},
 	{"Circle -> {u8:r}\nSquare -> {u8:w  u8:h}\nShape -> {\n  -> Circle:\n  -> Square:\n}\nShape:s{r -> 3}", "", {}}, // le défaut : la première production
 	// une production colorée s'imprime `-> C:`, `-> C:(v)`
-	{"S -> {\n  -> u8:\n  -> string:\n}\nT -> {-> u8:(5)}", "{S -> {-> u8:  -> string:}  T -> {-> u8:(5)}}", {}},
-	// une production n'est typée qu'à son appel : la définition ne la lance pas
-	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {}},
-	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> f{n -> 1}!", "", {.Constraint_Mismatch}},
-	// le raffinement d'une branche est lexical : il ne reste pas sur une production demandée dedans
-	{"n -> ??::u8\nb -> {-> n}\nr -> n ? {0 -> b!, -> 1}\nc -> b!", "", {}},
-	{"square -> {\n  n -> 0\n  -> n * n\n}\nr -> square{n -> 5}!", "{square -> {n -> 0  -> n * n}  r -> 25}", {}}, // une production n'est typée qu'à son appel
+	{"S -> {\n  -> u8:\n  -> string:\n}\nT -> {-> u8:(5)}", "{S -> {-> 0..255:(0)  -> string:(\"\")}  T -> {-> 0..255:(5)}}", {}},
+	{"square -> {\n  n -> 0\n  -> n * n\n}\nr -> square{n -> 5}!", "{square -> {n -> 0  -> 0}  r -> 25}", {}},
 	{"a -> {\n  x -> 1\n  b -> {-> x}\n}\nc -> a{x -> 2}.b!\nd -> a.b!", "{a -> {x -> 1  b -> {-> 1}}  c -> 2  d -> 1}", {}}, // les scopes écrits dedans suivent la copie
 	{"a -> {u8:d}\nb -> a{d -> ??}", "{a -> {0..255:d -> 0}  b -> {0..255:d -> ??0}}", {}}, // l'argument prend la couleur du binding qu'il remplace
 	{"Box -> {\n  T -> u8\n  T:v -> 0\n}\nn -> ??::u8\nb -> Box{T -> u16  v -> n * 300}", "", {.Constraint_Mismatch}}, // la couleur est re-typée : 300·n ∉ u16
@@ -144,7 +139,7 @@ CASES := []Case {
 	{"a -> {x -> 1}\nb -> a{zz{1}}", "", {.Undefined_Identifier}}, // ni champ ni nom visible
 	{"a -> .z", "", {.Invalid_Property_Access}}, // `.x` sans source hors des arguments d'un carve
 	// les trous : `<-` les remplit, les positions les sautent, le carve infère les autres
-	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{v -> 5}!", "{id -> {T <- none  none:v -> none  -> v}  r -> 5}", {}},
+	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{v -> 5}!", "{id -> {T <- none  none:v -> none  -> none}  r -> 5}", {}},
 	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{T <- u8 v -> 5}!", "", {}}, // requis u8, 5 y est
 	{"id -> {\n  T <- none\n  T:v -> none\n  -> v\n}\nr -> id{T <- 4 v -> 5}!", "", {.Constraint_Mismatch}},
 	{"id -> {\n  T <- none\n  T:v -> none\n}\nr -> id{T -> u8}", "", {.Invalid_Carve}}, // un trou se remplit par <-
@@ -259,7 +254,7 @@ test_value_and_type :: proc(t: ^testing.T) {
 	program, k, parsed := run("n -> ??::u8\nu16:x -> n * 2 - n + (1 + 2)\nb -> {-> n}\ny -> b!\nsq -> {\n  m -> 0\n  -> m * m\n}\nz -> sq{m -> n}!")
 	testing.expect(t, parsed && len(k.errors) == 0, "le programme est valide")
 	testing.expect_value(t, print_expr(new_expr(program)), "{n -> ??::u8  u16:x -> n * 2 - n + (1 + 2)  b -> {-> n}  y -> b!  sq -> {m -> 0  -> m * m}  z -> sq{m -> n}!}")
-	testing.expect_value(t, print_type(new_expr(program)), "{n -> ??0  0..65535:x -> ??0 + 3  b -> {-> ??0}  y -> ??0  sq -> {m -> 0  -> m * m}  z -> ??0*??0}")
+	testing.expect_value(t, print_type(new_expr(program)), "{n -> ??0  0..65535:x -> ??0 + 3  b -> {-> ??0}  y -> ??0  sq -> {m -> 0  -> 0}  z -> ??0*??0}")
 }
 
 // Le corpus de test/typecheck : chaque source dont toutes les formes sont dans le

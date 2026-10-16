@@ -17,8 +17,6 @@ run :: proc(source: string) -> (program: ^Scope, k: Kernel, parsed: bool) {
 check_ast :: proc(ast: ^syn.Ast) -> (program: ^Scope, k: Kernel) {
 	program = build_program(&k, ast)
 	type_scope(&k, program)
-	// lancer le programme, c'est collapser le fichier : sa production est demandée
-	if p, found := first_production(program); found do produced(&k, p)
 	check(&k)
 	return
 }

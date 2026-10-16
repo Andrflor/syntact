@@ -184,8 +184,6 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 	color, value := bd.color, bd.value
 	at := view
 	if view == .Type do color, value = bd.color_type, bd.value_type
-	// une production que rien n'a demandée n'a pas de type : elle reste écrite
-	if view == .Type && bd.kind == .Product && bd.value_type == nil do color, value, at = bd.color, bd.value, .Program
 	if bd.kind == .Expand {
 		// `...xs`, `...C:(t)`, `...` : l'expansion, puis ce qu'elle dépose
 		strings.write_string(b, ARROWS[.Expand])
