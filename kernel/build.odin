@@ -186,11 +186,12 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 		return new_expr(Collapse{target = build_expr(k, s, data.execute.target), span = span})
 	case .Operator:
 		op := data.operator
-		if op.kind == .Cast {
+		if op.kind == .Layout {
+			// `??::T` : une inconnue de type T ; le cast s'écrit `\`
 			if op.left != syn.INVALID_NODE && ast.node_kinds[op.left] == .Unknown {
 				return new_expr(Unknown{layout = build_expr(k, s, op.right), span = span})
 			}
-			return unsupported(k, idx, "le cast ::")
+			return report(k, .Invalid_Cast, span, "`::` n'écrit que le type d'une inconnue, `??::u8` ; le cast s'écrit `\\`")
 		}
 		if op.kind == .Equal && op.left == syn.INVALID_NODE {
 			// `=X` : la valeur X elle-même, `{-> X}` — `=u8` admet la valeur u8, pas ses

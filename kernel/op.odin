@@ -30,6 +30,8 @@ binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		return arithmetic(k, o, a, b)
 	case .Equal, .NotEqual, .Less, .Greater, .LessEqual, .GreaterEqual:
 		return comparison(k, o, a, b)
+	case .Cast:
+		return cast_into(k, o, a, b)
 	}
 	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur %v", o.kind))
 }
@@ -359,4 +361,98 @@ negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 		return new_expr(set_of_floats(floats_neg(s.floats)))
 	}
 	return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend des nombres : %s", print_set(s)))
+}
+
+// --- le cast ---
+
+// `x \ T` force x dans le layout T. Entre entiers, on garde les bits bas :
+// (200 + 100) \ u8 vaut 44, -1 \ u8 vaut 255, 200 \ i8 vaut -56. Entre sortes, un
+// caractère donne son code, un booléen 0 ou 1, un flottant sa partie entière ; un
+// entier donne le flottant, ou le booléen (vrai s'il n'est pas nul). Une valeur
+// inconnue qui tient déjà dans le layout ne change pas ; sinon le cast reste une
+// opération de l'équation, dont les valeurs sont celles du layout.
+
+Layout :: struct {
+	kind:   Domain, // .Ints, .Floats, .Bools ou .Chars
+	bits:   uint,
+	signed: bool,
+}
+
+cast_into :: proc(k: ^Kernel, o: Op, a, t: ^Expr) -> ^Expr {
+	target, closed := color_set(k, t)
+	layout, is_layout := layout_of(target)
+	if !closed || !is_layout do return report(k, .Invalid_Cast, o.span, fmt.tprintf("on ne cast que vers un layout — un entier de 8 à 64 bits, un flottant, un booléen, un caractère : %s", brief(t)))
+	if v, known := a^.(Set); known {
+		x, atom := atom_of(v)
+		r, ok := cast_atom(x, layout)
+		if !atom || !ok do return report(k, .Invalid_Cast, o.span, fmt.tprintf("%s ne se cast pas en %s", brief(a), brief(t)))
+		return new_expr(set_of_atoms({r}))
+	}
+	if !is_value(a) do return report(k, .Invalid_Cast, o.span, fmt.tprintf("on ne cast qu'une valeur : %s", brief(a)))
+	if d, ok := value_domain(k, a); ok && d == layout.kind {
+		if env, _ := envelope(k, a); atoms_subset(env, target) do return a // elle y tient déjà
+	}
+	args := make([]^Expr, 2)
+	args[0], args[1] = a, new_expr(target)
+	return new_expr(Term{op = .Cast, args = args})
+}
+
+// layout_of : l'ensemble est celui d'un layout.
+layout_of :: proc(s: Set) -> (Layout, bool) {
+	kind, pure := pure_domain(s)
+	if !pure do return {}, false
+	#partial switch kind {
+	case .Ints:
+		lo, hi := ints_bounds(s.ints)
+		l, l_ok := lo.?
+		h, h_ok := hi.?
+		if !l_ok || !h_ok || len(s.ints.intervals) != 1 do return {}, false
+		for bits in ([?]uint{8, 16, 32, 64}) {
+			span := i128(1) << bits
+			if l == 0 && h == span - 1 do return Layout{.Ints, bits, false}, true
+			if l == -span / 2 && h == span / 2 - 1 do return Layout{.Ints, bits, true}, true
+		}
+	case .Floats:
+		if set_equal(s, set_of_floats(floats_all())) do return Layout{kind = .Floats}, true
+	case .Bools:
+		if set_equal(s, set_of_bools({.False, .True})) do return Layout{kind = .Bools}, true
+	case .Chars:
+		if set_equal(s, set_of_chars(chars_all())) do return Layout{kind = .Chars}, true
+	}
+	return {}, false
+}
+
+// cast_atom : une valeur connue, forcée dans le layout.
+cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
+	as_int: i128
+	switch v in x {
+	case i128:
+		as_int = v
+	case Char_Atom:
+		as_int = i128(v)
+	case bool:
+		as_int = v ? 1 : 0
+	case f64:
+		if l.kind == .Floats do return v, true
+		if v != v || v > 1e38 || v < -1e38 do return nil, false // NaN, ou au-delà de i128
+		as_int = i128(v) // la partie entière
+	case string:
+		return nil, false
+	}
+	switch l.kind {
+	case .Ints:
+		span := i128(1) << l.bits
+		r := as_int %% span
+		if l.signed && r >= span / 2 do r -= span
+		return r, true
+	case .Floats:
+		return f64(as_int), true
+	case .Bools:
+		return as_int != 0, true
+	case .Chars:
+		if as_int < 0 || as_int > i128(max(rune)) do return nil, false
+		return Char_Atom(as_int), true
+	case .Strings, .Scopes, .Sets:
+	}
+	return nil, false
 }

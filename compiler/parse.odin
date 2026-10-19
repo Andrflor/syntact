@@ -68,6 +68,7 @@ Token_Kind :: enum u8 {
 	Asterisk,
 	Slash,
 	Percent,
+	Backslash, // `\` — the cast
 	And,
 	Or,
 	Xor,
@@ -212,6 +213,7 @@ init_lex_dispatch :: proc "contextless" () {
 	LEX_DISPATCH['+'] = lex_single_plus
 	LEX_DISPATCH['*'] = lex_single_asterisk
 	LEX_DISPATCH['%'] = lex_single_percent
+	LEX_DISPATCH['\\'] = lex_single_backslash
 	LEX_DISPATCH['&'] = lex_single_and
 	LEX_DISPATCH['|'] = lex_single_or
 	LEX_DISPATCH['^'] = lex_single_xor
@@ -295,6 +297,8 @@ lex_single_asterisk :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.
 	return Token{.Asterisk, Span{s, s + 1}, f}}
 lex_single_percent :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.Percent, Span{s, s + 1}, f}}
+lex_single_backslash :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
+	return Token{.Backslash, Span{s, s + 1}, f}}
 lex_single_and :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.And, Span{s, s + 1}, f}}
 lex_single_or :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
@@ -733,6 +737,7 @@ Precedence :: enum {
 	AND,
 	EQUALITY,
 	COMPARISON,
+	CAST, // `\` : looser than arithmetic, tighter than comparisons
 	TERM,
 	FACTOR,
 	CONSTRAINT,
@@ -841,6 +846,7 @@ init_parse_tables :: proc "contextless" () {
 	infix_table[.Asterisk] = parse_binary
 	infix_table[.Slash] = parse_binary
 	infix_table[.Percent] = parse_binary
+	infix_table[.Backslash] = parse_binary
 	infix_table[.Equal] = parse_binary
 	infix_table[.NotEqual] = parse_binary
 	infix_table[.Less] = parse_less_than
@@ -884,7 +890,7 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Colon] = .CONSTRAINT
 	// `::` binds tighter than arithmetic — `a+b::u8` parses as `a+(b::u8)`,
 	// so casting the sum requires explicit parens: `(a+b)::u8`.
-	prec_table[.Cast] = .CONSTRAINT
+	prec_table[.Cast] = .CALL // `::` colle à `??` : `~??::u8` est `~(??::u8)`
 
 	prec_table[.Question] = .PATTERN
 	prec_table[.Execute] = .CALL
@@ -905,6 +911,7 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Asterisk] = .FACTOR
 	prec_table[.Slash] = .FACTOR
 	prec_table[.Percent] = .FACTOR
+	prec_table[.Backslash] = .CAST
 
 	prec_table[.Equal] = .EQUALITY
 	prec_table[.NotEqual] = .EQUALITY
@@ -1236,7 +1243,7 @@ parse_statement :: proc(parser: ^Parser) -> Node_Index {
 // separator (`a\n+ b` chains, but `a\n-> b` ends the statement).
 is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
 	#partial switch kind {
-	case .Plus, .Minus, .Asterisk, .Slash, .Percent, .And, .Or:
+	case .Plus, .Minus, .Asterisk, .Slash, .Percent, .Backslash, .And, .Or:
 		return true
 	}
 	return false
@@ -1660,8 +1667,10 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		op_kind = .LShift
 	case .RShift:
 		op_kind = .RShift
-	case .Cast:
+	case .Backslash:
 		op_kind = .Cast
+	case .Cast:
+		op_kind = .Layout
 	case:
 		error_at_current(parser, fmt.tprintf("Unhandled binary operator type: %v", token_kind))
 		return INVALID_NODE

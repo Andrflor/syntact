@@ -81,6 +81,7 @@ Term_Op :: enum u8 {
 	Le, // [a, b] pour a <= b
 	Eq, // entiers : [p] pour p = 0 ; sinon [a, b] ordonnés
 	Ne,
+	Cast, // [valeur, layout] : la valeur forcée dans le layout (op.odin, cast)
 }
 
 Term :: struct {
@@ -251,6 +252,9 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 			return .Strings, true
 		case .Lt, .Le, .Eq, .Ne:
 			return .Bools, true
+		case .Cast:
+			s, _ := v.args[1]^.(Set)
+			return pure_domain(s)
 		}
 	}
 	return .Ints, false
@@ -695,6 +699,12 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 			return set_of_strings(r), false
 		case .Lt, .Le, .Eq, .Ne:
 			return set_of_bools(comparison_envelope(k, v, ctx)), false
+		case .Cast:
+			// ce qui tient dans le layout ne change pas ; sinon, tout le layout
+			layout, _ := v.args[1]^.(Set)
+			inner, _ := envelope(k, v.args[0], ctx)
+			if atoms_subset(inner, layout) do return inner, false
+			return layout, false
 		}
 	}
 	return {}, false
@@ -912,13 +922,21 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 		if sum % den(v) != 0 do return nil, false
 		return sum / den(v), true
 	case Term:
+		if v.op == .Cast {
+			x, known := eval(v.args[0], env)
+			if !known do return nil, false
+			layout, _ := v.args[1]^.(Set)
+			l, ok := layout_of(layout)
+			if !ok do return nil, false
+			return cast_atom(x, l)
+		}
 		args := make([]Atom, len(v.args))
 		for a, i in v.args {
 			x, ok := eval(a, env)
 			if !ok do return nil, false
 			args[i] = x
 		}
-		switch v.op {
+		#partial switch v.op {
 		case .F_Add, .F_Mul:
 			x, x_ok := args[0].(f64)
 			y, y_ok := args[1].(f64)
@@ -1120,6 +1138,8 @@ printed_term :: proc(t: Term) -> (string, Level) {
 	case .Eq, .Ne:
 		if len(t.args) == 1 do return fmt.tprintf("%s %s 0", print_type_at(t.args[0], above(.EQUALITY)), t.op == .Eq ? "=" : "!="), .EQUALITY
 		return infix(t.args, t.op == .Eq ? " = " : " != ", above(.EQUALITY)), .EQUALITY
+	case .Cast:
+		return fmt.tprintf("%s \\ %s", print_type_at(t.args[0], above(.CAST)), print_type_at(t.args[1], above(.CAST))), .CAST
 	}
 	return "", .PRIMARY
 }

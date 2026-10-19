@@ -398,7 +398,7 @@ invert_operand :: proc(op: Operator_Kind, V, konst: ^Type, free_is_left: bool) -
 		if !free_is_left || k < 0 do return nil
 		out = integer_intervals_shl_widen(segs, k)
 	case .Divide, .Mod, .Equal, .Less, .Greater, .NotEqual, .LessEqual,
-	     .GreaterEqual, .And, .Or, .Xor, .Not, .BitAnd, .BitOr, .BitNot, .Cast:
+	     .GreaterEqual, .And, .Or, .Xor, .Not, .BitAnd, .BitOr, .BitNot, .Cast, .Layout:
 		return nil // no usable inverse here
 	}
 

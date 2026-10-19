@@ -78,7 +78,8 @@ Operator_Kind :: enum u8 {
 	BitNot,
 	RShift,
 	LShift,
-	Cast, // `::` — raw reinterpret-cast of `left` into `right`'s layout
+	Cast, // `\` — force `left` into the layout of `right`: `n + 2 \ u8` is `(n + 2) \ u8`
+	Layout, // `::` — the type of an unknown: `??::u8`
 }
 
 ExecutionWrapper :: enum u8 {

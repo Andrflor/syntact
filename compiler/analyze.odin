@@ -1915,8 +1915,8 @@ walk_operator :: #force_inline proc(
 		result^ = Or_Type{left, right}
 	case .Not:
 		result^ = Negate_Type{right}
-	case .Cast:
-		// `left :: right` — raw reinterpret-cast of `left` into `right`'s layout.
+	case .Cast, .Layout:
+		// `left \ right` (or `??::right`) — raw reinterpret-cast of `left` into `right`'s layout.
 		result^ = Cast_Type{left, right, nil}
 		fold_cast(a, result, idx)
 	case:

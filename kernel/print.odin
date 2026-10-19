@@ -142,7 +142,8 @@ OPERATORS := [syn.Operator_Kind]Operator {
 	.BitNot       = {"[~]", .UNARY},
 	.RShift       = {">>", .SHIFT},
 	.LShift       = {"<<", .SHIFT},
-	.Cast         = {"::", .CALL},
+	.Cast         = {"\\", .CAST},
+	.Layout       = {"::", .CALL},
 }
 
 ARROWS := [Binding_Kind]string {

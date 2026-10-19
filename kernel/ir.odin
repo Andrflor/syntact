@@ -209,6 +209,7 @@ Error_Kind :: enum u8 {
 	Unproven, // le kernel ne sait pas prouver qu'une couleur est respectée
 	Insoluble_Constraint,
 	Infinite_Recursion, // le cas de base d'un type récursif revient à lui-même
+	Invalid_Cast, // un cast vers ce qui n'est pas un layout
 	Unsupported, // une forme que le kernel ne traite pas encore
 }
 

@@ -163,6 +163,14 @@ CASES := []Test_Case {
 	{"v -> ??::u8\nu8:t -> (v ? {<60 -> v, -> 0}) + 200", "", {.Constraint_Mismatch}},
 	{"v -> ??::u8\ntrue:w -> v ? {<10 -> v < 20, -> true}", "", {}},
 	{"v -> ??::u8\ntrue:w -> v ? {<30 -> v < 20, -> true}", "", {.Constraint_Mismatch}},
+	// le cast `\` force une valeur dans un layout ; il lie moins fort que
+	// l'arithmétique : `a + b \ u8` est `(a + b) \ u8`
+	{"a -> 200\nb -> 100\nc -> a + b \\ u8\nd -> -1 \\ u8\ne -> 200 \\ i8\nf -> 'A' \\ u8\ng -> true \\ u8", "{a -> 200  b -> 100  c -> 44  d -> 255  e -> -56  f -> 65  g -> 1}", {}},
+	{"n -> ??::u8\nu8:c -> n + 1 \\ u8", "{n -> ??0  0..255:c -> ??0 + 1 \\ 0..255}", {}},
+	{"n -> ??::u8\nu16:c -> n + 1 \\ u16", "{n -> ??0  0..65535:c -> ??0 + 1}", {}}, // il y tient déjà
+	{"a -> 5 \\ int", "", {.Invalid_Cast}},
+	{"a -> 5 \\ 10..37", "", {.Invalid_Cast}},
+	{"a -> 5::u8", "", {.Invalid_Cast}}, // `::` n'écrit que le type d'une inconnue
 	// un scope ne voit son propre nom que dans ses productions
 	{"ones -> {1 ...ones}", "", {.Undefined_Identifier}},
 	{"X -> {\n  X:child\n  -> {}\n}", "", {.Undefined_Identifier}},

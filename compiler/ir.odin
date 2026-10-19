@@ -1144,6 +1144,8 @@ op_symbol :: proc(op: Operator_Kind) -> string {
 	case .RShift:
 		return ">>"
 	case .Cast:
+		return "\\"
+	case .Layout:
 		return "::"
 	}
 	return "?"
