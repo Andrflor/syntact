@@ -62,8 +62,6 @@ Term :: struct {
 	args: []^Expr,
 }
 
-// Au-delà, on n'énumère plus les valeurs d'une expression : on les sur-approche.
-ENUMERATION_LIMIT :: 1 << 16
 
 // --- symboles ---
 
@@ -581,16 +579,14 @@ bool_atom :: proc(v: bool) -> ^Expr {
 
 // --- valeurs possibles ---
 
-// values_of : les valeurs possibles d'un type de valeur, exactes (`exact`) quand
-// on peut énumérer ses inconnues, sur-approchées sinon.
+// values_of : les valeurs possibles d'un type de valeur, par son enveloppe — exacte
+// quand l'algèbre le permet, sur-approchée sinon. On n'énumère pas.
 values_of :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 	#partial switch v in t^ {
 	case Set:
 		return v, true
 	case Poly, Term, ^Var:
-		if s, ok := enumerate(k, t); ok do return s, true
-		vals, _ = envelope(k, t)
-		return vals, false
+		return envelope(k, t)
 	}
 	return {}, false
 }
@@ -637,10 +633,49 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 			if !ok do return set_of_strings(strings_all()), false
 			return set_of_strings(r), false
 		case .Lt, .Le, .Eq, .Ne:
-			return set_of_bools({.False, .True}), false
+			return set_of_bools(comparison_envelope(k, v, ctx)), false
 		}
 	}
 	return {}, false
+}
+
+// comparison_envelope : les vérités possibles d'une comparaison, par l'enveloppe de
+// ses opérandes dans le contexte — `v < 20` est toujours vrai quand v ∈ 0..9.
+comparison_envelope :: proc(k: ^Kernel, t: Term, ctx: Context) -> Bools {
+	if len(t.args) == 1 {
+		// [p] : p < 0, p = 0, p ≠ 0
+		e, _ := envelope(k, t.args[0], ctx)
+		lo, hi := ints_bounds(e.ints)
+		l, l_ok := lo.?
+		h, h_ok := hi.?
+		#partial switch t.op {
+		case .Lt:
+			if h_ok && h < 0 do return {.True}
+			if l_ok && l >= 0 do return {.False}
+		case .Eq, .Ne:
+			truth: Bools = {.False, .True}
+			if !ints_contains(e.ints, 0) do truth = {.False}
+			else if ints_count(e.ints) == 1 do truth = {.True}
+			if t.op == .Ne && card(truth) == 1 do truth = ~truth
+			return truth
+		}
+		return {.False, .True}
+	}
+	a, _ := envelope(k, t.args[0], ctx)
+	b, _ := envelope(k, t.args[1], ctx)
+	#partial switch t.op {
+	case .Lt:
+		if truth, ok := order_verdict(.Lt, a, b); ok do return truth
+	case .Le:
+		if truth, ok := order_verdict(.Le, a, b); ok do return truth
+	case .Eq:
+		return equal_verdict(a, b)
+	case .Ne:
+		truth := equal_verdict(a, b)
+		if card(truth) == 1 do truth = ~truth
+		return truth
+	}
+	return {.False, .True}
 }
 
 // words_independent : un mot dont chaque partie est connue ou une inconnue qui ne
@@ -673,71 +708,6 @@ Atom :: union {
 	Char_Atom,
 	string,
 	bool,
-}
-
-// enumerate : les valeurs possibles d'une forme, exactes, si ses inconnues
-// s'énumèrent.
-enumerate :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, ok: bool) {
-	a := assignments(k, t, ctx) or_return
-	results := make([dynamic]Atom)
-	for {
-		v := eval(t, a.env) or_return
-		append(&results, v)
-		if !next_assignment(&a) do break
-	}
-	return set_of_atoms(results[:]), true
-}
-
-// Assignments : toutes les valeurs des inconnues d'un type, une à une, la première
-// inconnue variant le plus vite. `env[id]` est la valeur courante de l'inconnue id.
-Assignments :: struct {
-	ids:     []^Var,
-	domains: [][]Atom,
-	digits:  []int,
-	env:     []Atom,
-}
-
-// assignments : la première affectation des inconnues de `t` ; faux s'il y en a
-// trop pour les énumérer.
-assignments :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (Assignments, bool) {
-	found := make([dynamic]^Var)
-	collect_symbols(t, &found)
-	slice.sort_by(found[:], var_less)
-	return assignments_of(k, slice.unique(found[:]), ctx)
-}
-
-// assignments_of : de même, pour des inconnues données, sans doublon.
-assignments_of :: proc(k: ^Kernel, ids: []^Var, ctx: Context = nil) -> (a: Assignments, ok: bool) {
-	a.ids = ids
-	a.domains = make([][]Atom, len(ids))
-	total := 1
-	for id, i in ids {
-		d := known_domain(ctx, id) or_return
-		a.domains[i] = atoms_of_set(d, ENUMERATION_LIMIT) or_return
-		total *= len(a.domains[i])
-		if total > ENUMERATION_LIMIT do return a, false
-	}
-	a.digits = make([]int, len(ids))
-	a.env = make([]Atom, k.variables)
-	load_assignment(&a)
-	return a, true
-}
-
-// next_assignment : passe à l'affectation suivante ; faux après la dernière.
-next_assignment :: proc(a: ^Assignments) -> bool {
-	for i in 0 ..< len(a.digits) {
-		a.digits[i] += 1
-		if a.digits[i] < len(a.domains[i]) {
-			load_assignment(a)
-			return true
-		}
-		a.digits[i] = 0
-	}
-	return false
-}
-
-load_assignment :: proc(a: ^Assignments) {
-	for id, i in a.ids do a.env[id.id] = a.domains[i][a.digits[i]]
 }
 
 collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {

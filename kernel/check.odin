@@ -1,6 +1,7 @@
 package kernel
 
 import "core:fmt"
+import "core:slice"
 
 // La vérification finale : une fois tout typé, la valeur de chaque binding coloré
 // doit être un élément de sa couleur, pour toute valeur des inconnues. C'est la
@@ -104,15 +105,41 @@ form_in :: proc(k: ^Kernel, t: ^Expr, c: Set, ctx: Context = nil) -> Verdict {
 	if values_is_empty(c.sets) && never_empty(k, t) {
 		if env, ok := set_envelope(k, t); ok && none_admitted(env, c) do return .Refuted
 	}
-	a, enumerable := assignments(k, t, ctx)
-	if !enumerable do return .Undecided
-	for {
-		s, ok := eval_set(k, t, a.env)
-		if !ok do return .Undecided
-		if !member(s, c) do return .Refuted
-		if !next_assignment(&a) do break
+	// un témoin aux bornes des domaines : un ensemble que vaut la forme, hors de c
+	if set_outside_at_bounds(k, t, c, ctx) do return .Refuted
+	return .Undecided
+}
+
+// set_outside_at_bounds : en mettant chaque inconnue de la forme t à l'une des
+// bornes de son domaine, t vaut un ensemble que c n'admet pas.
+set_outside_at_bounds :: proc(k: ^Kernel, t: ^Expr, c: Set, ctx: Context) -> bool {
+	vars, bounds, finite := corners(k, t, ctx)
+	if !finite do return false
+	env := make([]Atom, k.variables, context.temp_allocator)
+	for corner in 0 ..< 1 << uint(len(vars)) {
+		for x, i in vars do env[x.id] = bounds[i][(corner >> uint(i)) & 1]
+		if s, ok := eval_set(k, t, env); ok && !member(s, c) do return true
 	}
-	return .Proved
+	return false
+}
+
+// corners : les inconnues de t, et les bornes de leurs domaines dans ctx — des
+// valeurs qu'elles peuvent prendre. Faux sans bornes finies, ou trop d'inconnues.
+corners :: proc(k: ^Kernel, t: ^Expr, ctx: Context) -> (vars: []^Var, bounds: [][2]Atom, finite: bool) {
+	found := make([dynamic]^Var, context.temp_allocator)
+	collect_symbols(t, &found)
+	slice.sort_by(found[:], var_less)
+	vars = slice.unique(found[:])
+	if len(vars) > 12 do return
+	bounds = make([][2]Atom, len(vars), context.temp_allocator)
+	for x, i in vars {
+		d, solved := known_domain(ctx, x)
+		if !solved do return
+		lo, hi, bounded := atom_bounds(d)
+		if !bounded do return
+		bounds[i] = {lo, hi}
+	}
+	return vars, bounds, true
 }
 
 // value_in : ∀σ, ⟦v⟧σ est admise par c — par paliers, du moins cher au plus cher.
@@ -128,9 +155,45 @@ value_in :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context = nil) -> Verdict {
 		if l, ok := lo.?; ok && !ints_contains(c.ints, l) do return .Refuted
 		if h, ok := hi.?; ok && !ints_contains(c.ints, h) do return .Refuted
 	}
-	// 3. Exact, si les inconnues s'énumèrent.
-	if vals, ok := enumerate(k, v, ctx); ok do return verdict(atoms_admitted(vals, c))
+	// 3. Un témoin : les bornes des domaines sont des valeurs possibles ; une valeur
+	//    hors de c en l'une d'elles réfute. On n'énumère pas.
+	if outside_at_bounds(k, v, c, ctx) do return .Refuted
 	return .Undecided
+}
+
+// outside_at_bounds : en mettant chaque inconnue de v à l'une des bornes de son
+// domaine dans ctx, v prend une valeur hors de c.
+outside_at_bounds :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context) -> bool {
+	vars, bounds, finite := corners(k, v, ctx)
+	if !finite do return false
+	env := make([]Atom, k.variables, context.temp_allocator)
+	for corner in 0 ..< 1 << uint(len(vars)) {
+		for x, i in vars do env[x.id] = bounds[i][(corner >> uint(i)) & 1]
+		if r, ok := eval(v, env); ok && !atoms_admitted(set_of_atoms({r}), c) do return true
+	}
+	return false
+}
+
+// atom_bounds : le plus petit et le plus grand élément d'un domaine d'entiers ou de
+// caractères — des valeurs qu'il contient.
+atom_bounds :: proc(d: Set) -> (lo, hi: Atom, finite: bool) {
+	kind, pure := pure_domain(d)
+	if !pure do return
+	#partial switch kind {
+	case .Ints:
+		lm, hm := ints_bounds(d.ints)
+		l, l_ok := lm.?
+		h, h_ok := hm.?
+		if !l_ok || !h_ok do return
+		return l, h, true
+	case .Chars:
+		lm, hm := ints_bounds(d.chars)
+		l, l_ok := lm.?
+		h, h_ok := hm.?
+		if !l_ok || !h_ok do return
+		return Char_Atom(l), Char_Atom(h), true
+	}
+	return
 }
 
 // none_admitted : aucune valeur de t n'est admise par c.

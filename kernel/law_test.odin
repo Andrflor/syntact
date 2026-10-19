@@ -454,9 +454,11 @@ test_law_polynomials :: proc(t: ^testing.T) {
 			testing.expectf(t, ok && v.(i128) == tree_eval(tree, env), "évaluation de %s", print_type(p))
 			append(&brute, tree_eval(tree, env))
 		}
+		// les valeurs : sans énumérer, l'enveloppe contient les vraies ; exacte, elle
+		// leur est égale
 		vals, exact := values_of(&k, p)
-		testing.expectf(t, exact && set_equal(vals, set_of_atoms(brute[:])), "valeurs de %s", print_type(p))
-		// une comparaison est décidée exactement quand sa vérité ne varie pas
+		testing.expectf(t, atoms_subset(set_of_atoms(brute[:]), vals) && (!exact || set_equal(vals, set_of_atoms(brute[:]))), "valeurs de %s", print_type(p))
+		// une comparaison décidée l'est à raison : sa vérité ne varie pas
 		for op in ([?]Compare_Op{.Lt, .Le, .Gt, .Ge, .Eq, .Ne}) {
 			r, _ := int_compare(&k, op, tree_poly(tree))
 			seen: [2]bool
@@ -483,7 +485,7 @@ test_law_polynomials :: proc(t: ^testing.T) {
 				testing.expectf(t, ok && got.(bool) == truth, "%v de %s en (%d,%d,%d)", op, print_type(p), x, y, z)
 			}
 			_, decided := r^.(Set)
-			testing.expectf(t, decided == !(seen[0] && seen[1]), "%v de %s : décidé %v", op, print_type(p), decided)
+			testing.expectf(t, !decided || !(seen[0] && seen[1]), "%v de %s : décidé %v", op, print_type(p), decided)
 		}
 	}
 	// des identités : une seule forme
@@ -887,7 +889,6 @@ test_law_value_in :: proc(t: ^testing.T) {
 		decided[v] += 1
 		testing.expectf(t, v != .Proved || all, "%s ⊆ %v déclaré prouvé à tort", print_type(p), c)
 		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v déclaré réfuté à tort", print_type(p), c)
-		testing.expectf(t, v != .Undecided, "%s ⊆ %v : petit domaine, toujours décidé", print_type(p), c)
 	}
 	testing.expectf(t, decided[.Proved] >= ROUNDS / 10 && decided[.Refuted] >= ROUNDS / 10, "verdicts : %v", decided)
 }
