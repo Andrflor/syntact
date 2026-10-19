@@ -13,13 +13,13 @@ import "core:testing"
 
 // Un cas : la source, les types attendus du scope (vide = ne pas comparer) et
 // les erreurs attendues.
-Case :: struct {
+Test_Case :: struct {
 	source: string,
 	typed:  string,
 	errors: []Error_Kind,
 }
 
-CASES := []Case {
+CASES := []Test_Case {
 	{"x -> 1\ny -> x + 2", "{x -> 1  y -> 3}", {}},
 	{"u8:a -> ??\nu8:b -> ??\nu16:c -> a + b", "{0..255:a -> ??0  0..255:b -> ??1  0..65535:c -> ??0 + ??1}", {}},
 	{"u8:a -> ??\nu8:d -> a + a", "", {.Constraint_Mismatch}},
@@ -143,6 +143,15 @@ CASES := []Case {
 	// le cas de base vient en premier, n'est pas récursif, et finit
 	{"Endless -> {\n  T -> {}\n  -> {T: ...Endless{T}:}\n}", "", {.Infinite_Recursion}},
 	{"Unguarded -> {\n  -> {...Unguarded:}\n  -> {}\n}", "", {.Infinite_Recursion}},
+	// un pattern sur une inconnue donne un type par cas ; le contexte de chaque
+	// branche décide (specs/equational.md §3)
+	{"v -> ??::u8\nc -> v + 3\nu8:l -> v ? {<10 -> c, -> 10}", "{v -> ??0  c -> ??0 + 3  0..255:l -> ??0 ? {0..9 -> ??0 + 3  10..255 -> 10}}", {}},
+	{"v -> ??::u8\nc -> v + 3\nu8:l -> c", "", {.Constraint_Mismatch}},
+	{"v -> ??::u8\nr -> v ? {<10 -> v ? {<10 -> 1}, -> 2}", "{v -> ??0  r -> ??0 ? {0..9 -> 1  10..255 -> 2}}", {}},
+	{"v -> ??::u8\nu8:t -> (v ? {<50 -> v, -> 0}) + 200", "", {}},
+	{"v -> ??::u8\nu8:t -> (v ? {<60 -> v, -> 0}) + 200", "", {.Constraint_Mismatch}},
+	{"v -> ??::u8\ntrue:w -> v ? {<10 -> v < 20, -> true}", "", {}},
+	{"v -> ??::u8\ntrue:w -> v ? {<30 -> v < 20, -> true}", "", {.Constraint_Mismatch}},
 	// un scope ne voit son propre nom que dans ses productions
 	{"ones -> {1 ...ones}", "", {.Undefined_Identifier}},
 	{"X -> {\n  X:child\n  -> {}\n}", "", {.Undefined_Identifier}},

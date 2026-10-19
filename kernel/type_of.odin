@@ -49,7 +49,7 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 		return type_range(k, v, env)
 	case Unknown:
 		return type_unknown(k, v, env, nil)
-	case Poly, Term, Set_Form, Itself, Invalid:
+	case Poly, Term, Set_Form, Cases, Itself, Invalid:
 		return e // déjà un type
 	}
 	return e
@@ -267,7 +267,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	// le scope qu'on est en train de définir : une self-référence
 	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_expr(Itself{v, new_expr(r)})
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
-	return refine(k, t, r.span)
+	return t
 }
 
 type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
@@ -280,7 +280,7 @@ type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
 	if !found do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' n'existe pas dans ce scope", a.name))
 	v := binding_at(p).value_type
 	if v == nil do return report(k, .Unsupported, a.span, "pas encore dans le kernel : la récursion")
-	return refine(k, v, a.span)
+	return v
 }
 
 // find_binding : parmi les bindings que présente s, la dernière occurrence d'un

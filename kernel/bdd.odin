@@ -469,8 +469,8 @@ not3 :: proc(a: Member) -> Member {
 }
 
 // bdd_admits : le scope valeur `s` est-il dans l'ensemble `b` ?
-bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope) -> Verdict {
-	switch bdd_member(k, b, places(s)) {
+bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope, ctx: Context = nil) -> Verdict {
+	switch bdd_member(k, b, places(s), ctx) {
 	case .Always:
 		return .Proved
 	case .Not_Always, .Never:
@@ -482,15 +482,15 @@ bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope) -> Verdict {
 
 // bdd_member : la suite de bindings `view` — un scope, ou la part d'un scope
 // qu'une suite reçoit — est-elle dans l'ensemble `b` ?
-bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place) -> Member {
+bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place, ctx: Context = nil) -> Member {
 	switch v in b {
 	case Bdd_Leaf:
 		return v == .Top ? .Always : .Never
 	case ^Bdd_Node:
-		in_atom := record_member(k, v.atom, view)
-		via_yes := and3(in_atom, bdd_member(k, v.yes, view))
-		via_no := and3(not3(in_atom), bdd_member(k, v.no, view))
-		return or3(or3(via_yes, bdd_member(k, v.maybe, view)), via_no)
+		in_atom := record_member(k, v.atom, view, ctx)
+		via_yes := and3(in_atom, bdd_member(k, v.yes, view, ctx))
+		via_no := and3(not3(in_atom), bdd_member(k, v.no, view, ctx))
+		return or3(or3(via_yes, bdd_member(k, v.maybe, view, ctx)), via_no)
 	}
 	return .Never
 }
@@ -502,7 +502,7 @@ bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place) -> Member {
 // Une forme qui se mentionne elle-même peut redemander la même suite (`X -> {...X:}`)
 // : une appartenance qui dépend d'elle-même n'est pas établie — c'est la plus
 // petite solution, celle des valeurs finies.
-record_member :: proc(k: ^Kernel, r: ^Record, view: []Place) -> Member {
+record_member :: proc(k: ^Kernel, r: ^Record, view: []Place, ctx: Context = nil) -> Member {
 	key := Matching{r, raw_data(view), len(view)}
 	if key in k.matching do return .Never
 	k.matching[key] = {}
@@ -510,10 +510,10 @@ record_member :: proc(k: ^Kernel, r: ^Record, view: []Place) -> Member {
 	if r.equation != nil {
 		// une self-référence : on lit l'équation sur cette suite, rien de plus
 		set, closed := color_set(k, new_expr(r.shape))
-		return closed ? bdd_member(k, set.scopes, view) : .Unknown
+		return closed ? bdd_member(k, set.scopes, view, ctx) : .Unknown
 	}
 	memo := make(map[[2]int]Member, context.temp_allocator)
-	return match_fields(k, r.fields, view, 0, 0, &memo)
+	return match_fields(k, r.fields, view, 0, 0, &memo, ctx)
 }
 
 // Matching : une appartenance en cours de décision.
@@ -524,18 +524,18 @@ Matching :: struct {
 }
 
 // match_fields : view[i:] a-t-elle la forme fields[j:] ?
-match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo: ^map[[2]int]Member) -> Member {
+match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo: ^map[[2]int]Member, ctx: Context) -> Member {
 	if j == len(fields) do return i == len(view) ? .Always : .Never
 	if m, seen := memo[{i, j}]; seen do return m
 	f := fields[j]
 	result := Member.Never
 	if f.run {
 		for e in i ..= len(view) {
-			result = or3(result, and3(run_member(k, f, view[i:e]), match_fields(k, fields, view, e, j + 1, memo)))
+			result = or3(result, and3(run_member(k, f, view[i:e], ctx), match_fields(k, fields, view, e, j + 1, memo, ctx)))
 			if result == .Always do break
 		}
 	} else if i < len(view) {
-		result = and3(field_member(k, f, binding_at(view[i])^), match_fields(k, fields, view, i + 1, j + 1, memo))
+		result = and3(field_member(k, f, binding_at(view[i])^, ctx), match_fields(k, fields, view, i + 1, j + 1, memo, ctx))
 	}
 	memo[{i, j}] = result
 	return result
@@ -543,25 +543,25 @@ match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo
 
 // run_member : la suite view est-elle admise par la suite f — un seul morceau, ou
 // n morceaux non vides, n parmi ses comptes, chacun admis ?
-run_member :: proc(k: ^Kernel, f: Field, view: []Place) -> Member {
-	if len(f.counts.intervals) == 0 do return bdd_member(k, f.set.scopes, view)
-	repeated :: proc(k: ^Kernel, f: Field, view: []Place, n: i128) -> Member {
+run_member :: proc(k: ^Kernel, f: Field, view: []Place, ctx: Context) -> Member {
+	if len(f.counts.intervals) == 0 do return bdd_member(k, f.set.scopes, view, ctx)
+	repeated :: proc(k: ^Kernel, f: Field, view: []Place, n: i128, ctx: Context) -> Member {
 		if len(view) == 0 do return ints_contains(f.counts, n) ? .Always : .Never
 		result := Member.Never
 		for e in 1 ..= len(view) {
-			result = or3(result, and3(bdd_member(k, f.set.scopes, view[:e]), repeated(k, f, view[e:], n + 1)))
+			result = or3(result, and3(bdd_member(k, f.set.scopes, view[:e], ctx), repeated(k, f, view[e:], n + 1, ctx)))
 			if result == .Always do break
 		}
 		return result
 	}
-	return repeated(k, f, view, 0)
+	return repeated(k, f, view, 0, ctx)
 }
 
 // field_member : le binding b a-t-il la place f ?
-field_member :: proc(k: ^Kernel, f: Field, b: Binding) -> Member {
+field_member :: proc(k: ^Kernel, f: Field, b: Binding, ctx: Context) -> Member {
 	if f.name != b.name || f.kind != b.kind do return .Never
 	if f.free || colored_within(k, b, f.set) do return .Always
-	return member_of(admits(k, f.set, b.value_type), is_closed_type(b.value_type))
+	return member_of(admits(k, f.set, b.value_type, ctx), is_closed_type(b.value_type))
 }
 
 // colored_within : la couleur du binding n'admet que des éléments de `s`. Sa valeur
@@ -575,7 +575,7 @@ colored_within :: proc(k: ^Kernel, b: Binding, s: Set) -> bool {
 // is_closed_type : un type sans inconnue — son verdict vaut pour toutes leurs valeurs.
 is_closed_type :: proc(t: ^Expr) -> bool {
 	#partial switch v in t^ {
-	case Poly, Term, Set_Form:
+	case Poly, Term, Set_Form, Cases:
 		return false
 	case ^Scope:
 		for p in places(v) do if field := binding_at(p).value_type; field != nil && !is_closed_type(field) do return false

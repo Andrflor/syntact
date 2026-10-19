@@ -90,6 +90,58 @@ domain :: proc(v: ^Var) -> Set {
 	return s
 }
 
+// --- le contexte ---
+
+// Fact : ce qu'une branche sait d'une variable — elle n'y vaut que `domain`.
+Fact :: struct {
+	var:    ^Var,
+	domain: Set,
+}
+
+// Context : les faits qui valent à un endroit, ceux des branches qui l'entourent
+// (specs/equational.md §3). Le raffinement n'est pas une réécriture : les types ne
+// changent pas, c'est ce qu'on sait de leurs variables qui change.
+Context :: []Fact
+
+// known_domain : le domaine de v dans le contexte ctx.
+known_domain :: proc(ctx: Context, v: ^Var) -> Set {
+	d := domain(v)
+	for f in ctx do if f.var == v do d = set_intersect(d, f.domain)
+	return d
+}
+
+// with : le contexte, et un fait de plus.
+with :: proc(ctx: Context, f: Fact) -> Context {
+	if f.var == nil do return ctx
+	out := make([]Fact, len(ctx) + 1, context.temp_allocator)
+	copy(out, ctx)
+	out[len(ctx)] = f
+	return out
+}
+
+// context_of : les faits qui valent dans s — ceux des branches qui l'entourent.
+context_of :: proc(s: ^Scope) -> Context {
+	facts := make([dynamic]Fact, context.temp_allocator)
+	for sc := s; sc != nil; sc = sc.parent do if sc.fact.var != nil do append(&facts, sc.fact)
+	return facts[:]
+}
+
+// --- les cas ---
+
+// Case : une branche atteinte d'un pattern — sa valeur, et ce qu'elle sait de
+// l'inconnue (aucun fait quand la cible n'est pas une inconnue seule).
+Case :: struct {
+	fact:  Fact,
+	value: ^Expr,
+}
+
+// Cases : le type d'un pattern sur une inconnue. Il n'est jamais aplati en une
+// nouvelle inconnue : chaque cas garde sa valeur et ce que sa branche sait
+// (specs/equational.md §2).
+Cases :: struct {
+	cases: []Case,
+}
+
 poly_var :: proc(x: ^Var) -> Poly {
 	vars := make([]^Var, 1)
 	vars[0] = x
@@ -246,7 +298,7 @@ with_const :: proc(p: Poly) -> []Mono {
 // poly_envelope : les valeurs d'un polynôme, par intervalles, sans énumérer.
 // `exact` quand chaque inconnue y apparaît une fois, de coefficient ±1 : la somme
 // d'ensembles indépendants est alors exacte.
-poly_envelope :: proc(k: ^Kernel, p: Poly) -> (sum: Ints, exact: bool) {
+poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, exact: bool) {
 	sum = ints_point(p.const)
 	exact = true
 	for m in p.monos {
@@ -256,7 +308,7 @@ poly_envelope :: proc(k: ^Kernel, p: Poly) -> (sum: Ints, exact: bool) {
 			j := i
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
 			ok: bool
-			prod, ok = ints_arith(.Mul, prod, ints_pow(domain(m.vars[i]).ints, j - i))
+			prod, ok = ints_arith(.Mul, prod, ints_pow(known_domain(ctx, m.vars[i]).ints, j - i))
 			exact &&= ok
 			i = j
 		}
@@ -495,33 +547,39 @@ values_of :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 // aucune inconnue ne s'y répète et que l'opération est exacte sur des ensembles
 // indépendants (une somme ±x ± y…, une concaténation de mots) ; sur-approchées
 // sinon.
-envelope :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
+envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact: bool) {
 	#partial switch v in t^ {
 	case Set:
 		return v, true
 	case Poly:
-		ints, ints_exact := poly_envelope(k, v)
+		ints, ints_exact := poly_envelope(k, v, ctx)
 		return set_of_ints(ints), ints_exact
+	case Cases:
+		for c in v.cases {
+			s, _ := envelope(k, c.value, with(ctx, c.fact))
+			vals = set_union(vals, s)
+		}
+		return vals, false
 	case Term:
-		arg :: proc(k: ^Kernel, t: Term, i: int) -> Set {
-			s, _ := envelope(k, t.args[i])
+		arg :: proc(k: ^Kernel, t: Term, i: int, ctx: Context) -> Set {
+			s, _ := envelope(k, t.args[i], ctx)
 			return s
 		}
 		switch v.op {
 		case .Sym:
-			return domain(v.sym), true
+			return known_domain(ctx, v.sym), true
 		case .F_Add:
-			return set_of_floats(floats_arith(.Add, arg(k, v, 0).floats, arg(k, v, 1).floats)), false
+			return set_of_floats(floats_arith(.Add, arg(k, v, 0, ctx).floats, arg(k, v, 1, ctx).floats)), false
 		case .F_Mul:
-			return set_of_floats(floats_arith(.Mul, arg(k, v, 0).floats, arg(k, v, 1).floats)), false
+			return set_of_floats(floats_arith(.Mul, arg(k, v, 0, ctx).floats, arg(k, v, 1, ctx).floats)), false
 		case .F_Neg:
-			return set_of_floats(floats_neg(arg(k, v, 0).floats)), false
+			return set_of_floats(floats_neg(arg(k, v, 0, ctx).floats)), false
 		case .Concat:
 			l := strings_point("")
-			for i in 0 ..< len(v.args) do l = strings_concat(l, as_strings(arg(k, v, i)))
+			for i in 0 ..< len(v.args) do l = strings_concat(l, as_strings(arg(k, v, i, ctx)))
 			return set_of_strings(l), words_independent(v)
 		case .Repeat:
-			r, ok := strings_repeat(as_strings(arg(k, v, 0)), arg(k, v, 1).ints)
+			r, ok := strings_repeat(as_strings(arg(k, v, 0, ctx)), arg(k, v, 1, ctx).ints)
 			if !ok do return set_of_strings(strings_all()), false
 			return set_of_strings(r), false
 		case .Lt, .Le, .Eq, .Ne:
@@ -564,8 +622,8 @@ Atom :: union {
 
 // enumerate : les valeurs possibles d'une forme, exactes, si ses inconnues
 // s'énumèrent.
-enumerate :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, ok: bool) {
-	a := assignments(k, t) or_return
+enumerate :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, ok: bool) {
+	a := assignments(k, t, ctx) or_return
 	results := make([dynamic]Atom)
 	for {
 		v := eval(t, a.env) or_return
@@ -586,20 +644,20 @@ Assignments :: struct {
 
 // assignments : la première affectation des inconnues de `t` ; faux s'il y en a
 // trop pour les énumérer.
-assignments :: proc(k: ^Kernel, t: ^Expr) -> (Assignments, bool) {
+assignments :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (Assignments, bool) {
 	found := make([dynamic]^Var)
 	collect_symbols(t, &found)
 	slice.sort_by(found[:], var_less)
-	return assignments_of(k, slice.unique(found[:]))
+	return assignments_of(k, slice.unique(found[:]), ctx)
 }
 
 // assignments_of : de même, pour des inconnues données, sans doublon.
-assignments_of :: proc(k: ^Kernel, ids: []^Var) -> (a: Assignments, ok: bool) {
+assignments_of :: proc(k: ^Kernel, ids: []^Var, ctx: Context = nil) -> (a: Assignments, ok: bool) {
 	a.ids = ids
 	a.domains = make([][]Atom, len(ids))
 	total := 1
 	for id, i in ids {
-		a.domains[i] = atoms_of_set(domain(id), ENUMERATION_LIMIT) or_return
+		a.domains[i] = atoms_of_set(known_domain(ctx, id), ENUMERATION_LIMIT) or_return
 		total *= len(a.domains[i])
 		if total > ENUMERATION_LIMIT do return a, false
 	}
@@ -635,6 +693,11 @@ collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {
 		for a in v.args do collect_symbols(a, out)
 	case Set_Form:
 		for a in v.args do collect_symbols(a, out)
+	case Cases:
+		for c in v.cases {
+			if c.fact.var != nil do append(out, c.fact.var)
+			collect_symbols(c.value, out)
+		}
 	}
 }
 
@@ -734,6 +797,13 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	#partial switch v in t^ {
 	case Set:
 		return atom_of(v)
+	case Cases:
+		// le cas dont le fait vaut pour ces valeurs
+		for c in v.cases {
+			if c.fact.var == nil do return nil, false
+			if atoms_subset(set_of_atoms({env[c.fact.var.id]}), c.fact.domain) do return eval(c.value, env)
+		}
+		return nil, false
 	case Poly:
 		sum := v.const
 		for m in v.monos {
@@ -865,8 +935,35 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 		if !ok || x.op != y.op || x.sym != y.sym || len(x.args) != len(y.args) do return false
 		for e, i in x.args do if !expr_equal(k, e, y.args[i]) do return false
 		return true
+	case Cases:
+		y, ok := b^.(Cases)
+		if !ok || len(x.cases) != len(y.cases) do return false
+		for c, i in x.cases {
+			d := y.cases[i]
+			if c.fact.var != d.fact.var || !set_equal(c.fact.domain, d.fact.domain) || !expr_equal(k, c.value, d.value) do return false
+		}
+		return true
 	}
 	return false
+}
+
+// printed_cases : `??0 ? {0..9 -> ??0 + 3  10..255 -> 10}`, le pattern qui le donne ;
+// sans fait, les valeurs possibles.
+printed_cases :: proc(c: Cases) -> (string, Level) {
+	parts := make([dynamic]string, context.temp_allocator)
+	on := c.cases[0].fact.var
+	for x in c.cases {
+		if x.fact.var != on || on == nil {
+			on = nil
+			break
+		}
+	}
+	if on == nil {
+		for x in c.cases do append(&parts, print_type_at(x.value, above(.OR)))
+		return strings.join(parts[:], " | "), .OR
+	}
+	for x in c.cases do append(&parts, fmt.tprintf("%s -> %s", print_set(x.fact.domain), print_type_at(x.value, .NONE)))
+	return fmt.tprintf("??%d ? {{%s}}", on.id, strings.join(parts[:], "  ")), .PATTERN
 }
 
 // --- impression ---

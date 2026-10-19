@@ -189,6 +189,8 @@ mentions :: proc(p: ^Probe, t: ^Expr) -> bool {
 		for m in v.monos do for x in m.vars do if x in p.holes do return true
 	case Set_Form:
 		for a in v.args do if mentions(p, a) do return true
+	case Cases:
+		for c in v.cases do if mentions(p, c.value) do return true
 	}
 	return false
 }

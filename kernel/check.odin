@@ -21,10 +21,11 @@ check :: proc(k: ^Kernel) {
 			if b.color_type == nil || b.value_type == nil || is_invalid(b.color_type) || is_invalid(b.value_type) do continue
 			enter(k, s, &b)
 			color, _ := color_set(k, b.color_type) // un seul ensemble : vérifié au typage
-			switch admits(k, color, b.value_type) {
+			ctx := context_of(s) // ce que les branches qui entourent le binding savent
+			switch admits(k, color, b.value_type, ctx) {
 			case .Proved:
 			case .Refuted:
-				if field, set, found := refused_field(k, color, b.value_type); found {
+				if field, set, found := refused_field(k, color, b.value_type, ctx); found {
 					report_about(k, .Constraint_Mismatch, b.span, field.span, fmt.tprintf("%s ∉ %s sur %s, dans %s", brief(field.value_type), print_set(set), display(field), display(&b)))
 				} else {
 					report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ∉ %s sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
@@ -40,7 +41,7 @@ check :: proc(k: ^Kernel) {
 // refused_field : quand la couleur est une seule forme et la valeur un scope, le
 // binding de la valeur que la forme refuse — au plus profond, quand c'est un scope
 // refusé par une forme plus intérieure — et ce que la forme y admet.
-refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr) -> (field: ^Binding, set: Set, found: bool) {
+refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr, ctx: Context = nil) -> (field: ^Binding, set: Set, found: bool) {
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return
 	n, is_node := color.scopes.(^Bdd_Node)
@@ -49,8 +50,8 @@ refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr) -> (field: ^Binding, set
 	if len(shown) != len(n.atom.fields) do return
 	for f, i in n.atom.fields {
 		b := binding_at(shown[i])
-		if f.free || b.value_type == nil || admits(k, f.set, b.value_type) != .Refuted do continue
-		if inner, inner_set, deeper := refused_field(k, f.set, b.value_type); deeper do return inner, inner_set, true
+		if f.free || b.value_type == nil || admits(k, f.set, b.value_type, ctx) != .Refuted do continue
+		if inner, inner_set, deeper := refused_field(k, f.set, b.value_type, ctx); deeper do return inner, inner_set, true
 		return b, f.set, true
 	}
 	return
@@ -58,17 +59,30 @@ refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr) -> (field: ^Binding, set
 
 // admits : pour toute valeur des inconnues, la valeur que désigne le type `t` est
 // un élément de la couleur.
-admits :: proc(k: ^Kernel, color: Set, t: ^Expr) -> Verdict {
+admits :: proc(k: ^Kernel, color: Set, t: ^Expr, ctx: Context = nil) -> Verdict {
 	if is_invalid(t) do return .Proved // déjà signalé ailleurs
 	#partial switch v in t^ {
 	case Set:
 		return verdict(member(v, color))
 	case Poly, Term:
-		return value_in(k, t, color)
+		return value_in(k, t, color, ctx)
 	case Set_Form:
-		return form_in(k, t, color)
+		return form_in(k, t, color, ctx)
 	case ^Scope:
-		return bdd_admits(k, color.scopes, v)
+		return bdd_admits(k, color.scopes, v, ctx)
+	case Cases:
+		// chaque cas, sous ce que sa branche sait
+		result := Verdict.Proved
+		for c in v.cases {
+			switch admits(k, color, c.value, with(ctx, c.fact)) {
+			case .Proved:
+			case .Refuted:
+				return .Refuted
+			case .Undecided:
+				result = .Undecided
+			}
+		}
+		return result
 	}
 	return .Refuted
 }
@@ -84,13 +98,13 @@ member :: proc(v, color: Set) -> bool {
 
 // form_in : pour toute valeur des inconnues, l'ensemble que vaut la forme est un
 // élément de la couleur.
-form_in :: proc(k: ^Kernel, t: ^Expr, c: Set) -> Verdict {
+form_in :: proc(k: ^Kernel, t: ^Expr, c: Set, ctx: Context = nil) -> Verdict {
 	// Sans ensemble admis comme valeur, une forme jamais vide dont l'enveloppe évite
 	// la couleur est refusée : chacune de ses valeurs est hors de la couleur.
 	if values_is_empty(c.sets) && never_empty(k, t) {
 		if env, ok := set_envelope(k, t); ok && none_admitted(env, c) do return .Refuted
 	}
-	a, enumerable := assignments(k, t)
+	a, enumerable := assignments(k, t, ctx)
 	if !enumerable do return .Undecided
 	for {
 		s, ok := eval_set(k, t, a.env)
@@ -102,20 +116,20 @@ form_in :: proc(k: ^Kernel, t: ^Expr, c: Set) -> Verdict {
 }
 
 // value_in : ∀σ, ⟦v⟧σ est admise par c — par paliers, du moins cher au plus cher.
-value_in :: proc(k: ^Kernel, v: ^Expr, c: Set) -> Verdict {
+value_in :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context = nil) -> Verdict {
 	// 1. L'enveloppe, sans énumérer : la forme normale a déjà fait `n - n = 0`.
-	env, exact := envelope(k, v)
+	env, exact := envelope(k, v, ctx)
 	if atoms_admitted(env, c) do return .Proved
 	if exact || none_admitted(env, c) do return .Refuted
 	// 2. Une forme linéaire : a·x + b se décide exactement ; sinon son min et son max
 	//    sont atteints, aux bornes des inconnues.
-	if r, affine := affine_in(k, v, c); affine do return r
-	if lo, hi, linear := linear_extremes(k, v); linear {
+	if r, affine := affine_in(k, v, c, ctx); affine do return r
+	if lo, hi, linear := linear_extremes(k, v, ctx); linear {
 		if l, ok := lo.?; ok && !ints_contains(c.ints, l) do return .Refuted
 		if h, ok := hi.?; ok && !ints_contains(c.ints, h) do return .Refuted
 	}
 	// 3. Exact, si les inconnues s'énumèrent.
-	if vals, ok := enumerate(k, v); ok do return verdict(atoms_admitted(vals, c))
+	if vals, ok := enumerate(k, v, ctx); ok do return verdict(atoms_admitted(vals, c))
 	return .Undecided
 }
 
@@ -128,11 +142,11 @@ none_admitted :: proc(t, c: Set) -> bool {
 // affine_in : v = a·x + b, une seule inconnue. Ses valeurs hors de c sont celles
 // qui tombent dans un trou de c ; l'antécédent d'un trou est un intervalle de x,
 // qu'on croise avec l'ensemble de x.
-affine_in :: proc(k: ^Kernel, v: ^Expr, c: Set) -> (Verdict, bool) {
+affine_in :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context = nil) -> (Verdict, bool) {
 	p, is_poly := v^.(Poly)
 	if !is_poly || len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return .Undecided, false
 	a, b := p.monos[0].coef, p.const
-	domain := domain(p.monos[0].vars[0]).ints
+	domain := known_domain(ctx, p.monos[0].vars[0]).ints
 	for gap in ints_complement(c.ints).intervals {
 		lo, lo_ok := preimage(gap.lo, a, b, a > 0)
 		hi, hi_ok := preimage(gap.hi, a, b, a < 0)
@@ -156,13 +170,13 @@ preimage :: proc(bound: Maybe(i128), a, b: i128, up: bool) -> (Maybe(i128), bool
 // linear_extremes : le min et le max d'un polynôme de degré 1, atteints quand
 // chaque inconnue est à une borne de son ensemble (une borne finie en fait partie).
 // nil : infini de ce côté, ou au-delà de l'univers.
-linear_extremes :: proc(k: ^Kernel, v: ^Expr) -> (lo, hi: Maybe(i128), ok: bool) {
+linear_extremes :: proc(k: ^Kernel, v: ^Expr, ctx: Context = nil) -> (lo, hi: Maybe(i128), ok: bool) {
 	p, is_poly := v^.(Poly)
 	if !is_poly do return nil, nil, false
 	for m in p.monos do if len(m.vars) != 1 do return nil, nil, false
 	lo, hi = p.const, p.const
 	for m in p.monos {
-		l, h := ints_bounds(domain(m.vars[0]).ints)
+		l, h := ints_bounds(known_domain(ctx, m.vars[0]).ints)
 		if m.coef < 0 do l, h = h, l
 		lo = scaled_sum(lo, m.coef, l)
 		hi = scaled_sum(hi, m.coef, h)

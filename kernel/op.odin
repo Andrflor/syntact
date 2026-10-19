@@ -15,6 +15,14 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	b := type_of(k, o.right, env)
 	if is_invalid(a) do return a
 	if is_invalid(b) do return b
+	return binary(k, o, a, b)
+}
+
+// binary : l'opération sur deux types. Sur un type par cas, elle se fait cas par
+// cas, chaque cas gardant ce que sa branche sait.
+binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
+	if x, is_cases := a^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, other: ^Expr) -> ^Expr {return binary(k, o, v, other)}, k, o, b)
+	if y, is_cases := b^.(Cases); is_cases do return each_case(y, proc(k: ^Kernel, o: Op, v, other: ^Expr) -> ^Expr {return binary(k, o, other, v)}, k, o, a)
 	#partial switch o.kind {
 	case .Or, .And:
 		return set_algebra(k, o, a, b)
@@ -24,6 +32,18 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 		return comparison(k, o, a, b)
 	}
 	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur %v", o.kind))
+}
+
+// each_case : f appliquée à la valeur de chaque cas ; une erreur dans un cas est
+// celle de l'opération.
+each_case :: proc(c: Cases, f: proc(k: ^Kernel, o: Op, v, other: ^Expr) -> ^Expr, k: ^Kernel, o: Op, other: ^Expr) -> ^Expr {
+	out := make([]Case, len(c.cases))
+	for x, i in c.cases {
+		r := f(k, o, x.value, other)
+		if is_invalid(r) do return r
+		out[i] = Case{x.fact, r}
+	}
+	return new_expr(Cases{out})
 }
 
 // `|` et `&` opèrent sur des ensembles.
@@ -287,6 +307,11 @@ to_f64 :: proc(lo, hi: Maybe(i128)) -> (Maybe(f64), Maybe(f64)) {
 type_unary :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	t := type_of(k, o.right, env)
 	if is_invalid(t) do return t
+	return unary(k, o, t)
+}
+
+unary :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
+	if x, is_cases := t^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, _: ^Expr) -> ^Expr {return unary(k, o, v)}, k, o, nil)
 	#partial switch o.kind {
 	case .Subtract:
 		return negate(k, o, t)

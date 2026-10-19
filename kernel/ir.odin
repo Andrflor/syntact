@@ -54,6 +54,7 @@ Scope :: struct {
 	site:     syn.Span, // une copie : le carve qui l'a dérivée, où sont signalées ses erreurs
 	carving:  ^Scope, // les arguments d'un carve : le scope qu'il dérive, que `.x` désigne
 	cover:    ^Expr, // une branche de pattern : ce qu'elle admet ; nil pour la branche par défaut
+	fact:     Fact, // une branche de pattern : ce qu'elle sait de l'inconnue qu'elle reçoit
 	span:     syn.Span,
 }
 
@@ -183,6 +184,7 @@ Expr :: union {
 	Poly, // une valeur entière qui dépend d'inconnues (un type seulement) : unknown.odin
 	Term, // une autre valeur qui dépend d'inconnues
 	Set_Form, // un ensemble qui dépend d'inconnues : set_form.odin
+	Cases, // le type d'un pattern sur une inconnue : une valeur par branche atteinte
 	Itself, // l'inconnue de type d'une self-référence
 	Invalid,
 }
@@ -233,7 +235,6 @@ Kernel :: struct {
 	variables: int, // le compte des variables créées : leur ordre (unknown.odin)
 	shapes:   map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
 	scene:    Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
-	refined:  [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
 	defining: [dynamic]Defining, // les scopes en cours de typage : ce qu'une self-référence désigne
 	building: [dynamic]Building, // à la construction : le binding qu'on construit dans chaque scope

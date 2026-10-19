@@ -68,6 +68,8 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 		return printed_term(v)
 	case Set_Form:
 		return printed_set_form(v)
+	case Cases:
+		return printed_cases(v)
 	case ^Scope:
 		return print_scope(v, view), .PRIMARY
 	case Ref:
