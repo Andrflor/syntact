@@ -28,11 +28,12 @@ Record :: struct {
 }
 
 Field :: struct {
-	name: string,
-	kind: Binding_Kind,
-	set:  Set, // ce que le binding admet ; pour une suite, les scopes qu'elle forme
-	free: bool, // un binding nommé sans couleur n'impose rien
-	run:  bool, // `...C:` : une suite de bindings, qui forme un scope admis par C
+	name:   string,
+	kind:   Binding_Kind,
+	set:    Set, // ce que le binding admet ; pour une suite, les scopes qu'elle forme
+	free:   bool, // un binding nommé sans couleur n'impose rien
+	run:    bool, // `...C:` : une suite de bindings, qui forme un scope admis par C
+	counts: Ints, // une suite comptée : n morceaux, n parmi counts, chacun admis par set ; vide : un seul
 }
 
 Bdd_Leaf :: enum u8 {
@@ -195,6 +196,11 @@ same_structure :: proc(a, b: ^Record) -> bool {
 	return true
 }
 
+has_count :: proc(r: ^Record) -> bool {
+	for f in r.fields do if len(f.counts.intervals) > 0 do return true
+	return false
+}
+
 has_run :: proc(r: ^Record) -> bool {
 	for f in r.fields do if f.run do return true
 	return false
@@ -256,17 +262,91 @@ color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	shown := places(s)
 	if first_production(s) != nil {
+		alternatives := make([dynamic]Set, context.temp_allocator)
 		for p in shown {
 			b := binding_at(p)^
 			if b.kind != .Product do continue
-			x := admitted_by(k, b) or_return
-			set = set_union(set, x)
+			append(&alternatives, admitted_by(k, b) or_return)
 		}
+		if solved, solvable := arden(s, alternatives[:]); solvable do return solved, true
+		for x in alternatives do set = set_union(set, x)
 		return set, true
 	}
 	fields := make([dynamic]Field)
 	shape_fields(k, s, &fields, exact = false) or_return
 	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s))}, true
+}
+
+// arden : l'équation de s, X = A·X | B, où chaque production récursive finit par la
+// suite X (ou X = X·A | B, où chacune commence par elle), a pour solution
+// X = A*·B (ou B·A*) : le lemme d'Arden (specs/kernel-recursion.md §5). A* est une
+// suite comptée, `0..*A`. Faux si l'équation n'a pas cette forme : elle reste une
+// équation.
+arden :: proc(s: ^Scope, alternatives: []Set) -> (Set, bool) {
+	Side :: enum u8 {
+		None,
+		Tail,
+		Head,
+	}
+	side := Side.None
+	group, bases: Set
+	base_records := make([dynamic]^Record, context.temp_allocator)
+	for x in alternatives {
+		r, single := lone_record(x)
+		at := -1 // la place de la suite X dans la production
+		if single do for f, i in r.fields do if f.run && equation_of(f.set) == s {
+			if at >= 0 do return {}, false // deux fois X : pas linéaire
+			at = i
+		}
+		if at < 0 {
+			bases = set_union(bases, x)
+			if single do append(&base_records, r)
+			continue
+		}
+		here := at == len(r.fields) - 1 ? Side.Tail : at == 0 ? Side.Head : Side.None
+		if here == .None || (side != .None && side != here) || len(r.fields) < 2 do return {}, false
+		side = here
+		rest := here == .Tail ? r.fields[:at] : r.fields[1:]
+		group = set_union(group, Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(rest, s, exact = true))})
+	}
+	if side == .None do return {}, false
+	repeat := Field{kind = .Expand, set = group, run = true, counts = ints_range(0, nil)}
+	solved: Set
+	// A*·B : la suite comptée, puis chaque base ; une base qui n'est pas une seule
+	// forme se lit comme une suite qu'elle admet
+	if len(base_records) == 0 || !set_equal(bases, records_union(base_records[:])) {
+		fields := side == .Tail ? []Field{repeat, Field{kind = .Expand, set = bases, run = true}} : []Field{Field{kind = .Expand, set = bases, run = true}, repeat}
+		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, s, exact = true))}, true
+	}
+	for r in base_records {
+		fields := make([dynamic]Field)
+		if side == .Tail do append(&fields, repeat)
+		append(&fields, ..r.fields)
+		if side == .Head do append(&fields, repeat)
+		solved = set_union(solved, Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s, exact = true))})
+	}
+	return solved, true
+}
+
+// lone_record : l'ensemble est une seule forme.
+lone_record :: proc(x: Set) -> (^Record, bool) {
+	n, is_node := x.scopes.(^Bdd_Node)
+	if !is_node || !is_leaf(n.yes, .Top) || !is_leaf(n.maybe, .Bottom) || !is_leaf(n.no, .Bottom) do return nil, false
+	if x.sorts != {.Scopes} do return nil, false
+	return n.atom, true
+}
+
+// records_union : l'union de ces formes.
+records_union :: proc(records: []^Record) -> (u: Set) {
+	for r in records do u = set_union(u, Set{sorts = {.Scopes}, scopes = bdd_atom(r)})
+	return
+}
+
+// equation_of : l'ensemble est une self-référence ; le scope dont c'est l'équation.
+equation_of :: proc(x: Set) -> ^Scope {
+	r, single := lone_record(x)
+	if !single || r.equation == nil do return nil
+	return r.shape
 }
 
 // shape_fields : les places d'une forme, chacune par son contrat — sa couleur,
@@ -451,7 +531,7 @@ match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo
 	result := Member.Never
 	if f.run {
 		for e in i ..= len(view) {
-			result = or3(result, and3(bdd_member(k, f.set.scopes, view[i:e]), match_fields(k, fields, view, e, j + 1, memo)))
+			result = or3(result, and3(run_member(k, f, view[i:e]), match_fields(k, fields, view, e, j + 1, memo)))
 			if result == .Always do break
 		}
 	} else if i < len(view) {
@@ -459,6 +539,22 @@ match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo
 	}
 	memo[{i, j}] = result
 	return result
+}
+
+// run_member : la suite view est-elle admise par la suite f — un seul morceau, ou
+// n morceaux non vides, n parmi ses comptes, chacun admis ?
+run_member :: proc(k: ^Kernel, f: Field, view: []Place) -> Member {
+	if len(f.counts.intervals) == 0 do return bdd_member(k, f.set.scopes, view)
+	repeated :: proc(k: ^Kernel, f: Field, view: []Place, n: i128) -> Member {
+		if len(view) == 0 do return ints_contains(f.counts, n) ? .Always : .Never
+		result := Member.Never
+		for e in 1 ..= len(view) {
+			result = or3(result, and3(bdd_member(k, f.set.scopes, view[:e]), repeated(k, f, view[e:], n + 1)))
+			if result == .Always do break
+		}
+		return result
+	}
+	return repeated(k, f, view, 0)
 }
 
 // field_member : le binding b a-t-il la place f ?
@@ -487,6 +583,35 @@ is_closed_type :: proc(t: ^Expr) -> bool {
 	return true
 }
 
+// print_fields : une forme par ses champs — `{0..*0..255:}`, `{u8:  ...C:}`.
+print_fields :: proc(fields: []Field) -> string {
+	parts := make([dynamic]string, context.temp_allocator)
+	for f in fields {
+		switch {
+		case len(f.counts.intervals) > 0:
+			append(&parts, fmt.tprintf("%s*%s", print_ints(f.counts), print_group(f.set)))
+		case f.run:
+			append(&parts, fmt.tprintf("...%s:", print_set(f.set)))
+		case f.free:
+			append(&parts, f.name)
+		case:
+			append(&parts, fmt.tprintf("%s:%s", print_set(f.set), f.name))
+		}
+	}
+	return fmt.tprintf("{{%s}}", strings.join(parts[:], "  "))
+}
+
+// print_group : ce qu'une suite comptée répète — un champ seul tel quel, sinon
+// entre parenthèses.
+print_group :: proc(s: Set) -> string {
+	if r, single := lone_record(s); single {
+		inner := print_fields(r.fields)
+		inner = inner[1:len(inner) - 1]
+		return len(r.fields) == 1 ? inner : fmt.tprintf("(%s)", inner)
+	}
+	return fmt.tprintf("(%s)", print_set(s))
+}
+
 // --- impression : `(a & oui) | peut | (~a & non)`, en Syntact ---
 
 printed_bdd :: proc(b: Bdd) -> (string, Level) {
@@ -500,6 +625,7 @@ printed_bdd :: proc(b: Bdd) -> (string, Level) {
 	case ^Bdd_Node:
 		atom := print_type(new_expr(v.atom.shape))
 		if v.atom.exact do atom = fmt.tprintf("{{-> %s}}", atom) // le scope lui-même, pas sa forme
+		if has_count(v.atom) do atom = print_fields(v.atom.fields) // une solution d'Arden : ses champs
 		if v.atom.equation != nil do atom = print_expr(v.atom.equation) // la self-référence telle qu'écrite
 		parts := make([dynamic]Part, context.temp_allocator)
 		branch :: proc(parts: ^[dynamic]Part, head: string, head_level: Level, rest: Bdd) {

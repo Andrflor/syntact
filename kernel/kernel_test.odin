@@ -352,3 +352,27 @@ indent :: proc(s: string) -> string {
 	for &l in lines do l = fmt.tprintf("      | %s", l)
 	return strings.join(lines, "\n")
 }
+
+// Une équation résolue par Arden : la couleur du binding `x`, imprimée comme
+// ensemble (specs/kernel-recursion.md §5).
+@(test)
+test_recursive_solved :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	SOLVED :: [?][2]string {
+		{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x", "{0..*0..255:}"},
+		{"Rev -> {\n  T -> {}\n  -> {}\n  -> {...Rev{T}:  T:}\n}\nRev{u8}:x", "{0..*0..255:}"},
+		{"NonEmpty -> {\n  T -> {}\n  -> {T:}\n  -> {T: ...NonEmpty{T}:}\n}\nNonEmpty{u8}:x -> {1}", "{0..*0..255:  0..255:}"},
+		{"Pairs -> {\n  -> {}\n  -> {u8: string: ...Pairs:}\n}\nPairs:x", "{0..*(0..255:  string:)}"},
+	}
+	for c in SOLVED {
+		program, k, parsed := run(c[0])
+		testing.expect(t, parsed)
+		b := program.bindings[len(program.bindings) - 1]
+		set, closed := color_set(&k, b.color_type)
+		testing.expect(t, closed)
+		testing.expect_value(t, print_set(set), c[1])
+		testing.expect_value(t, len(k.errors), 0)
+	}
+}
