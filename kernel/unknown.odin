@@ -46,7 +46,6 @@ Poly :: struct {
 }
 
 Term_Op :: enum u8 {
-	Sym, // une inconnue qui n'est pas un entier pur
 	F_Add, // flottants : commutatif, opérandes ordonnés
 	F_Mul,
 	F_Neg,
@@ -60,7 +59,6 @@ Term_Op :: enum u8 {
 
 Term :: struct {
 	op:   Term_Op,
-	sym:  ^Var, // .Sym
 	args: []^Expr,
 }
 
@@ -77,7 +75,7 @@ new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 	if d, pure := pure_domain(set); pure && d == .Ints {
 		return new_expr(poly_var(v))
 	}
-	return new_expr(Term{op = .Sym, sym = v})
+	return new_expr(v)
 }
 
 // new_var : une variable de domaine `set`.
@@ -94,7 +92,7 @@ new_equation_var :: proc(k: ^Kernel, type: ^Expr) -> ^Expr {
 	v := new(Var)
 	v^ = Var{k.variables, type}
 	k.variables += 1
-	return new_expr(Term{op = .Sym, sym = v})
+	return new_expr(v)
 }
 
 // equation_of : le scope dont le type de v est l'équation, et l'expression qui
@@ -116,19 +114,19 @@ equation_of :: proc(v: ^Var) -> (d: ^Scope, carve: Maybe(Carve), call: bool, ok:
 // equation_var : t est une self-référence qui désigne un scope (X, carvé ou non) ;
 // sa variable, et le scope dont c'est l'équation.
 equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
-	term, is_term := t^.(Term)
-	if !is_term || term.op != .Sym do return nil, nil, false
-	d, _, call, ok := equation_of(term.sym)
-	return term.sym, d, ok && !call
+	v, is_var := t^.(^Var)
+	if !is_var do return nil, nil, false
+	d, _, call, ok := equation_of(v)
+	return v, d, ok && !call
 }
 
 // pending : t est une variable dont le domaine est une équation pas encore
 // résolue ; elle prend la sorte de l'opération où elle apparaît.
 pending :: proc(t: ^Expr) -> (^Var, bool) {
-	term, is_term := t^.(Term)
-	if !is_term || term.op != .Sym do return nil, false
-	_, solved := domain(term.sym)
-	return term.sym, !solved
+	v, is_var := t^.(^Var)
+	if !is_var do return nil, false
+	_, solved := domain(v)
+	return v, !solved
 }
 
 // domain : l'ensemble des valeurs possibles d'une variable ; faux quand son type
@@ -204,7 +202,7 @@ is_value :: proc(t: ^Expr) -> bool {
 	#partial switch v in t^ {
 	case Set:
 		return is_atom(v)
-	case Poly, Term:
+	case Poly, Term, ^Var:
 		return true
 	}
 	return false
@@ -217,12 +215,12 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 		return pure_domain(v)
 	case Poly:
 		return .Ints, true
+	case ^Var:
+		d, solved := domain(v)
+		if !solved do return .Ints, false
+		return pure_domain(d)
 	case Term:
 		switch v.op {
-		case .Sym:
-			d, solved := domain(v.sym)
-			if !solved do return .Ints, false
-			return pure_domain(d)
 		case .F_Add, .F_Mul, .F_Neg:
 			return .Floats, true
 		case .Concat, .Repeat:
@@ -589,7 +587,7 @@ values_of :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 	#partial switch v in t^ {
 	case Set:
 		return v, true
-	case Poly, Term:
+	case Poly, Term, ^Var:
 		if s, ok := enumerate(k, t); ok do return s, true
 		vals, _ = envelope(k, t)
 		return vals, false
@@ -614,16 +612,16 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 			vals = set_union(vals, s)
 		}
 		return vals, false
+	case ^Var:
+		d, solved := known_domain(ctx, v)
+		if !solved do return set_everything(), false // une équation pas encore résolue
+		return d, true
 	case Term:
 		arg :: proc(k: ^Kernel, t: Term, i: int, ctx: Context) -> Set {
 			s, _ := envelope(k, t.args[i], ctx)
 			return s
 		}
 		switch v.op {
-		case .Sym:
-			d, solved := known_domain(ctx, v.sym)
-			if !solved do return set_everything(), false // une équation pas encore résolue
-			return d, true
 		case .F_Add:
 			return set_of_floats(floats_arith(.Add, arg(k, v, 0, ctx).floats, arg(k, v, 1, ctx).floats)), false
 		case .F_Mul:
@@ -654,8 +652,9 @@ words_independent :: proc(t: Term) -> bool {
 		case Set:
 			continue
 		case Term:
-			if v.op == .Sym && !seen[v.sym] {
-				seen[v.sym] = true
+		case ^Var:
+			if !seen[v] {
+				seen[v] = true
 				continue
 			}
 		}
@@ -745,8 +744,9 @@ collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {
 	#partial switch v in t^ {
 	case Poly:
 		for m in v.monos do append(out, ..m.vars)
+	case ^Var:
+		append(out, v)
 	case Term:
-		if v.op == .Sym do append(out, v.sym)
 		for a in v.args do collect_symbols(a, out)
 	case Set_Form:
 		for a in v.args do collect_symbols(a, out)
@@ -854,6 +854,8 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	#partial switch v in t^ {
 	case Set:
 		return atom_of(v)
+	case ^Var:
+		return env[v.id], true
 	case Cases:
 		// le cas dont le fait vaut pour ces valeurs
 		for c in v.cases {
@@ -885,8 +887,6 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 			args[i] = x
 		}
 		switch v.op {
-		case .Sym:
-			return env[v.sym.id], true
 		case .F_Add, .F_Mul:
 			x, x_ok := args[0].(f64)
 			y, y_ok := args[1].(f64)
@@ -989,9 +989,12 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 		return true
 	case Term:
 		y, ok := b^.(Term)
-		if !ok || x.op != y.op || x.sym != y.sym || len(x.args) != len(y.args) do return false
+		if !ok || x.op != y.op || len(x.args) != len(y.args) do return false
 		for e, i in x.args do if !expr_equal(k, e, y.args[i]) do return false
 		return true
+	case ^Var:
+		y, ok := b^.(^Var)
+		return ok && x == y
 	case Cases:
 		y, ok := b^.(Cases)
 		if !ok || len(x.cases) != len(y.cases) do return false
@@ -1068,8 +1071,6 @@ printed_term :: proc(t: Term) -> (string, Level) {
 		return strings.join(parts, symbol)
 	}
 	switch t.op {
-	case .Sym:
-		return print_var(t.sym), .CALL
 	case .F_Neg:
 		return fmt.tprintf("-%s", print_type_at(t.args[0], .CALL)), .UNARY
 	case .F_Add, .Concat:

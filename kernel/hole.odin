@@ -81,7 +81,7 @@ probe :: proc(k: ^Kernel, s: ^Scope, c: Carve, targets: []int) -> (p: Probe) {
 	for &b, j in target.bindings {
 		if b.kind != .Pull do continue
 		sym := new_symbol(k, set_top())
-		p.holes[sym.(Term).sym] = j
+		p.holes[sym.(^Var)] = j
 		b.value = sym
 	}
 	type_scope(k, target, s.shape)
@@ -129,8 +129,8 @@ probe :: proc(k: ^Kernel, s: ^Scope, c: Carve, targets: []int) -> (p: Probe) {
 land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 	if pattern == nil || is_invalid(pattern) || at.type == nil || is_invalid(at.type) do return
 	#partial switch v in pattern^ {
-	case Term:
-		if j, is_hole := p.holes[v.sym]; v.op == .Sym && is_hole {
+	case ^Var:
+		if j, is_hole := p.holes[v]; is_hole {
 			append(&p.landed[j], at)
 			return
 		}
@@ -182,8 +182,9 @@ same_bindings :: proc(a, b: ^Scope) -> bool {
 mentions :: proc(p: ^Probe, t: ^Expr) -> bool {
 	if t == nil do return false
 	#partial switch v in t^ {
+	case ^Var:
+		return v in p.holes
 	case Term:
-		if v.op == .Sym do return v.sym in p.holes
 		for a in v.args do if mentions(p, a) do return true
 	case Poly:
 		for m in v.monos do for x in m.vars do if x in p.holes do return true

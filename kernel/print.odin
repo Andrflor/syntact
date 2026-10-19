@@ -66,6 +66,8 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 		return printed_poly(v)
 	case Term:
 		return printed_term(v)
+	case ^Var:
+		return print_var(v), .CALL
 	case Set_Form:
 		return printed_set_form(v)
 	case Cases:

@@ -576,7 +576,7 @@ colored_within :: proc(k: ^Kernel, b: Binding, s: Set) -> bool {
 // is_closed_type : un type sans inconnue — son verdict vaut pour toutes leurs valeurs.
 is_closed_type :: proc(t: ^Expr) -> bool {
 	#partial switch v in t^ {
-	case Poly, Term, Set_Form, Cases:
+	case Poly, Term, ^Var, Set_Form, Cases:
 		return false
 	case ^Scope:
 		for p in places(v) do if field := binding_at(p).value_type; field != nil && !is_closed_type(field) do return false

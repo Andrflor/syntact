@@ -94,7 +94,7 @@ within :: proc(env, s: Set) -> bool {
 set_envelope :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	if s, known := color_set(k, t); known do return s, true
 	#partial switch v in t^ {
-	case Poly, Term:
+	case Poly, Term, ^Var:
 		vals, _ := values_of(k, t)
 		return vals, true
 	case Set_Form:
@@ -130,7 +130,7 @@ enveloped :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> (Set, Arith_Status) 
 // never_empty : le type a au moins une valeur, quelles que soient les inconnues.
 never_empty :: proc(k: ^Kernel, t: ^Expr) -> bool {
 	#partial switch v in t^ {
-	case Poly, Term:
+	case Poly, Term, ^Var:
 		return true
 	case Set_Form:
 		#partial switch v.op.kind {
@@ -149,7 +149,7 @@ never_empty :: proc(k: ^Kernel, t: ^Expr) -> bool {
 eval_set :: proc(k: ^Kernel, t: ^Expr, env: []Atom) -> (set: Set, ok: bool) {
 	if s, known := color_set(k, t); known do return s, true
 	#partial switch v in t^ {
-	case Poly, Term:
+	case Poly, Term, ^Var:
 		a := eval(t, env) or_return
 		return set_of_atoms({a}), true
 	case Set_Form:

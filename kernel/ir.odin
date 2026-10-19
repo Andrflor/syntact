@@ -174,6 +174,7 @@ Expr :: union {
 	Unknown,
 	Poly, // une valeur entière qui dépend d'inconnues (un type seulement) : unknown.odin
 	Term, // une autre valeur qui dépend d'inconnues
+	^Var, // une inconnue qui n'est pas un entier pur (un entier est un polynôme)
 	Set_Form, // un ensemble qui dépend d'inconnues : set_form.odin
 	Cases, // le type d'un pattern sur une inconnue : une valeur par branche atteinte
 	Invalid,

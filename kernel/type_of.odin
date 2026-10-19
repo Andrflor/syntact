@@ -49,7 +49,7 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 		return type_range(k, v, env)
 	case Unknown:
 		return type_unknown(k, v, env, nil)
-	case Poly, Term, Set_Form, Cases, Invalid:
+	case Poly, Term, ^Var, Set_Form, Cases, Invalid:
 		return e // déjà un type
 	}
 	return e

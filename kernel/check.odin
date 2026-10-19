@@ -64,7 +64,7 @@ admits :: proc(k: ^Kernel, color: Set, t: ^Expr, ctx: Context = nil) -> Verdict 
 	#partial switch v in t^ {
 	case Set:
 		return verdict(member(v, color))
-	case Poly, Term:
+	case Poly, Term, ^Var:
 		return value_in(k, t, color, ctx)
 	case Set_Form:
 		return form_in(k, t, color, ctx)

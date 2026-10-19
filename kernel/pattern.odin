@@ -33,7 +33,7 @@ type_match :: proc(k: ^Kernel, m: Match, env: ^Scope) -> ^Expr {
 	case ^Scope:
 		if !is_closed_type(t) do return report(k, .Unsupported, m.span, "pas encore dans le kernel : un pattern sur un scope qui dépend d'une inconnue")
 		return match_value(k, m, t, ctx)
-	case Poly, Term, Cases:
+	case Poly, Term, ^Var, Cases:
 		return match_unknown(k, m, t, ctx)
 	}
 	return report(k, .Unsupported, m.span, fmt.tprintf("pas encore dans le kernel : un pattern sur %s", brief(t)))
@@ -109,8 +109,8 @@ lone_symbol :: proc(t: ^Expr) -> (^Var, bool) {
 	#partial switch v in t^ {
 	case Poly:
 		if v.const == 0 && len(v.monos) == 1 && v.monos[0].coef == 1 && len(v.monos[0].vars) == 1 do return v.monos[0].vars[0], true
-	case Term:
-		if v.op == .Sym do return v.sym, true
+	case ^Var:
+		return v, true
 	}
 	return nil, false
 }
