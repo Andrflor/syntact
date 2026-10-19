@@ -6,8 +6,8 @@ import "core:strings"
 
 // LES INCONNUES ET LEURS FORMES NORMALES
 //
-// Une inconnue (`??::u8`, `string:s -> ??`) est un symbole qui porte l'ensemble de
-// ses valeurs possibles. Une expression qui en dépend garde sa forme, normalisée
+// Une inconnue (`??::u8`, `string:s -> ??`) est une variable qui porte son domaine,
+// l'ensemble de ses valeurs possibles (specs/equational.md). Une expression qui en dépend garde sa forme, normalisée
 // pour être précise (`n - n` vaut 0, pas -255..255) :
 //
 //   entiers       un polynôme : Σ coef·monôme + constante, monômes triés,
@@ -24,9 +24,16 @@ import "core:strings"
 // quand on peut énumérer ses inconnues, une enveloppe sûre sinon. Une couleur ne
 // dépend d'aucune inconnue.
 
+// Var : une variable — une valeur inconnue, qui porte son domaine : un type. Toutes
+// ses mentions sont le même nœud. `id` ne sert qu'à l'ordre et à l'impression.
+Var :: struct {
+	id:     int,
+	domain: ^Expr,
+}
+
 Mono :: struct {
 	coef: i128,
-	vars: []int, // ids de symboles triés, répétés pour les puissances : n² = [n, n]
+	vars: []^Var, // triées par id, répétées pour les puissances : n² = [n, n]
 }
 
 Poly :: struct {
@@ -49,7 +56,7 @@ Term_Op :: enum u8 {
 
 Term :: struct {
 	op:   Term_Op,
-	sym:  int, // .Sym
+	sym:  ^Var, // .Sym
 	args: []^Expr,
 }
 
@@ -58,21 +65,34 @@ ENUMERATION_LIMIT :: 1 << 16
 
 // --- symboles ---
 
-// new_symbol : une inconnue dont les valeurs possibles sont `set`. Une inconnue à
-// une seule valeur possible est cette valeur.
+// new_symbol : une variable dont le domaine est `set`. Une variable à une seule
+// valeur possible est cette valeur.
 new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 	if is_atom(set) do return new_expr(set)
-	id := len(k.symbols)
-	append(&k.symbols, set)
+	v := new_var(k, set)
 	if d, pure := pure_domain(set); pure && d == .Ints {
-		return new_expr(poly_var(id))
+		return new_expr(poly_var(v))
 	}
-	return new_expr(Term{op = .Sym, sym = id})
+	return new_expr(Term{op = .Sym, sym = v})
 }
 
-poly_var :: proc(id: int) -> Poly {
-	vars := make([]int, 1)
-	vars[0] = id
+// new_var : une variable de domaine `set`.
+new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
+	v := new(Var)
+	v^ = Var{k.variables, new_expr(set)}
+	k.variables += 1
+	return v
+}
+
+// domain : l'ensemble des valeurs possibles d'une variable.
+domain :: proc(v: ^Var) -> Set {
+	s, _ := v.domain^.(Set)
+	return s
+}
+
+poly_var :: proc(x: ^Var) -> Poly {
+	vars := make([]^Var, 1)
+	vars[0] = x
 	monos := make([]Mono, 1)
 	monos[0] = Mono{1, vars}
 	return Poly{monos = monos}
@@ -99,7 +119,7 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 	case Term:
 		switch v.op {
 		case .Sym:
-			return pure_domain(k.symbols[v.sym])
+			return pure_domain(domain(v.sym))
 		case .F_Add, .F_Mul, .F_Neg:
 			return .Floats, true
 		case .Concat, .Repeat:
@@ -138,8 +158,12 @@ poly_type :: proc(p: Poly) -> ^Expr {
 
 mono_less :: proc(a, b: Mono) -> bool {
 	if len(a.vars) != len(b.vars) do return len(a.vars) < len(b.vars)
-	for v, i in a.vars do if v != b.vars[i] do return v < b.vars[i]
+	for v, i in a.vars do if v != b.vars[i] do return v.id < b.vars[i].id
 	return false
+}
+
+var_less :: proc(a, b: ^Var) -> bool {
+	return a.id < b.id
 }
 
 // poly_of : trie, fusionne les monômes égaux, retire les coefficients nuls.
@@ -195,10 +219,10 @@ poly_mul :: proc(a, b: Poly) -> (Poly, bool) {
 		for y in with_const(b) {
 			coef, ok := mul_checked(x.coef, y.coef)
 			if !ok do return {}, false
-			vars := make([dynamic]int, 0, len(x.vars) + len(y.vars))
+			vars := make([dynamic]^Var, 0, len(x.vars) + len(y.vars))
 			append(&vars, ..x.vars)
 			append(&vars, ..y.vars)
-			slice.sort(vars[:])
+			slice.sort_by(vars[:], var_less)
 			if len(vars) > 0 {
 				append(&out, Mono{coef, vars[:]})
 				continue
@@ -232,7 +256,7 @@ poly_envelope :: proc(k: ^Kernel, p: Poly) -> (sum: Ints, exact: bool) {
 			j := i
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
 			ok: bool
-			prod, ok = ints_arith(.Mul, prod, ints_pow(k.symbols[m.vars[i]].ints, j - i))
+			prod, ok = ints_arith(.Mul, prod, ints_pow(domain(m.vars[i]).ints, j - i))
 			exact &&= ok
 			i = j
 		}
@@ -485,7 +509,7 @@ envelope :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 		}
 		switch v.op {
 		case .Sym:
-			return k.symbols[v.sym], true
+			return domain(v.sym), true
 		case .F_Add:
 			return set_of_floats(floats_arith(.Add, arg(k, v, 0).floats, arg(k, v, 1).floats)), false
 		case .F_Mul:
@@ -510,7 +534,7 @@ envelope :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 // words_independent : un mot dont chaque partie est connue ou une inconnue qui ne
 // s'y répète pas — ses valeurs sont exactement la concaténation des ensembles.
 words_independent :: proc(t: Term) -> bool {
-	seen := make(map[int]bool, allocator = context.temp_allocator)
+	seen := make(map[^Var]bool, allocator = context.temp_allocator)
 	for a in t.args {
 		#partial switch v in a^ {
 		case Set:
@@ -554,7 +578,7 @@ enumerate :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, ok: bool) {
 // Assignments : toutes les valeurs des inconnues d'un type, une à une, la première
 // inconnue variant le plus vite. `env[id]` est la valeur courante de l'inconnue id.
 Assignments :: struct {
-	ids:     []int,
+	ids:     []^Var,
 	domains: [][]Atom,
 	digits:  []int,
 	env:     []Atom,
@@ -563,24 +587,24 @@ Assignments :: struct {
 // assignments : la première affectation des inconnues de `t` ; faux s'il y en a
 // trop pour les énumérer.
 assignments :: proc(k: ^Kernel, t: ^Expr) -> (Assignments, bool) {
-	found := make([dynamic]int)
+	found := make([dynamic]^Var)
 	collect_symbols(t, &found)
-	slice.sort(found[:])
+	slice.sort_by(found[:], var_less)
 	return assignments_of(k, slice.unique(found[:]))
 }
 
 // assignments_of : de même, pour des inconnues données, sans doublon.
-assignments_of :: proc(k: ^Kernel, ids: []int) -> (a: Assignments, ok: bool) {
+assignments_of :: proc(k: ^Kernel, ids: []^Var) -> (a: Assignments, ok: bool) {
 	a.ids = ids
 	a.domains = make([][]Atom, len(ids))
 	total := 1
 	for id, i in ids {
-		a.domains[i] = atoms_of_set(k.symbols[id], ENUMERATION_LIMIT) or_return
+		a.domains[i] = atoms_of_set(domain(id), ENUMERATION_LIMIT) or_return
 		total *= len(a.domains[i])
 		if total > ENUMERATION_LIMIT do return a, false
 	}
 	a.digits = make([]int, len(ids))
-	a.env = make([]Atom, len(k.symbols))
+	a.env = make([]Atom, k.variables)
 	load_assignment(&a)
 	return a, true
 }
@@ -599,10 +623,10 @@ next_assignment :: proc(a: ^Assignments) -> bool {
 }
 
 load_assignment :: proc(a: ^Assignments) {
-	for id, i in a.ids do a.env[id] = a.domains[i][a.digits[i]]
+	for id, i in a.ids do a.env[id.id] = a.domains[i][a.digits[i]]
 }
 
-collect_symbols :: proc(t: ^Expr, out: ^[dynamic]int) {
+collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {
 	#partial switch v in t^ {
 	case Poly:
 		for m in v.monos do append(out, ..m.vars)
@@ -715,7 +739,7 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 		for m in v.monos {
 			prod := m.coef
 			for id in m.vars {
-				x, is_int := env[id].(i128)
+				x, is_int := env[id.id].(i128)
 				if !is_int do return nil, false
 				p, ok := mul_checked(prod, x)
 				if !ok do return nil, false
@@ -735,7 +759,7 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 		}
 		switch v.op {
 		case .Sym:
-			return env[v.sym], true
+			return env[v.sym.id], true
 		case .F_Add, .F_Mul:
 			x, x_ok := args[0].(f64)
 			y, y_ok := args[1].(f64)
@@ -861,7 +885,7 @@ printed_poly :: proc(p: Poly) -> (string, Level) {
 		if coef != 1 do fmt.sbprintf(&b, "%d*", coef)
 		for v, j in m.vars {
 			if j > 0 do strings.write_byte(&b, '*')
-			fmt.sbprintf(&b, "??%d", v)
+			fmt.sbprintf(&b, "??%d", v.id)
 		}
 	}
 	if p.const > 0 do fmt.sbprintf(&b, " + %d", p.const)
@@ -891,7 +915,7 @@ printed_term :: proc(t: Term) -> (string, Level) {
 	}
 	switch t.op {
 	case .Sym:
-		return fmt.tprintf("??%d", t.sym), .PRIMARY
+		return fmt.tprintf("??%d", t.sym.id), .PRIMARY
 	case .F_Neg:
 		return fmt.tprintf("-%s", print_type_at(t.args[0], .CALL)), .UNARY
 	case .F_Add, .Concat:

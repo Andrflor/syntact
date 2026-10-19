@@ -30,7 +30,7 @@ Landing :: struct {
 }
 
 Probe :: struct {
-	holes:   map[int]int, // l'inconnue de la sonde → l'index du trou
+	holes:   map[^Var]int, // la variable de la sonde → l'index du trou
 	landed:  [][dynamic]Landing, // par binding de la cible : ce qui tombe à sa place
 	blocked: bool, // un trou écrit dans une opération : on ne sait pas ce qui y tombe
 }

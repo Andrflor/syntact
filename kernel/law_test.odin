@@ -391,10 +391,21 @@ mirror :: proc(t: ^Tree) -> ^Tree {
 	return m
 }
 
+// test_vars : les variables d'un test, dans l'ordre où il les crée — leurs ids
+// sont 0, 1, 2…, les indices que les arbres et les environnements utilisent.
+@(thread_local)
+test_vars: []^Var
+
+declare_vars :: proc(k: ^Kernel, sets: ..Set) {
+	vars := make([]^Var, len(sets))
+	for s, i in sets do vars[i] = new_var(k, s)
+	test_vars = vars
+}
+
 tree_poly :: proc(t: ^Tree) -> Poly {
 	if t.op == 0 {
 		if t.leaf_sym < 0 do return Poly{const = t.leaf_const}
-		return poly_var(t.leaf_sym)
+		return poly_var(test_vars[t.leaf_sym])
 	}
 	a, b := tree_poly(t.left), tree_poly(t.right)
 	r: Poly
@@ -429,7 +440,7 @@ test_law_polynomials :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 4)
 	k: Kernel
-	for _ in 0 ..< 3 do append(&k.symbols, set_of_ints(ints_range(-3, 3)))
+	declare_vars(&k, set_of_ints(ints_range(-3, 3)), set_of_ints(ints_range(-3, 3)), set_of_ints(ints_range(-3, 3)))
 	for _ in 0 ..< ROUNDS {
 		tree := random_tree(gen, 3)
 		p := poly_type(tree_poly(tree))
@@ -476,7 +487,7 @@ test_law_polynomials :: proc(t: ^testing.T) {
 		}
 	}
 	// des identités : une seule forme
-	a, b := poly_var(0), poly_var(1)
+	a, b := poly_var(test_vars[0]), poly_var(test_vars[1])
 	s, _ := poly_add(a, b)
 	d, _ := poly_sub(a, b)
 	l, _ := poly_mul(s, d)
@@ -498,8 +509,7 @@ test_law_set_forms :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 5)
 	k: Kernel
-	append(&k.symbols, set_of_ints(ints_range(0, 3)))
-	append(&k.symbols, set_of_ints(ints_range(5, 6)))
+	declare_vars(&k, set_of_ints(ints_range(0, 3)), set_of_ints(ints_range(5, 6)))
 	known := [?]Set{set_of_ints(ints_range(0, 4)), set_of_ints(ints_point(6)), set_of_ints(ints_range(2, 9)), Set{}}
 	checked, forms := 0, 0
 	for _ in 0 ..< ROUNDS {
@@ -513,7 +523,7 @@ test_law_set_forms :: proc(t: ^testing.T) {
 			case 0, 1:
 				id := pick
 				for m in i128(5) ..= 6 do for n in i128(0) ..= 3 do append(&expected, set_of_ints(ints_point(id == 0 ? n : m)))
-				return new_expr(poly_var(id)), expected
+				return new_expr(poly_var(test_vars[id])), expected
 			case 2:
 				s := rand.choice(known, gen)
 				for _ in 0 ..< 8 do append(&expected, s)
@@ -814,7 +824,7 @@ test_normal_polynomials :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 10)
 	k: Kernel
-	for _ in 0 ..< 3 do append(&k.symbols, set_of_ints(ints_range(-3, 3)))
+	declare_vars(&k, set_of_ints(ints_range(-3, 3)), set_of_ints(ints_range(-3, 3)), set_of_ints(ints_range(-3, 3)))
 	equal_pairs := 0
 	for _ in 0 ..< ROUNDS {
 		a := random_tree(gen, 3)
@@ -839,9 +849,8 @@ test_set_form_simplification :: proc(t: ^testing.T) {
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
 	k: Kernel
-	append(&k.symbols, set_of_ints(ints_range(0, 3)))
-	append(&k.symbols, set_of_ints(ints_range(5, 6)))
-	n, m := new_expr(poly_var(0)), new_expr(poly_var(1))
+	declare_vars(&k, set_of_ints(ints_range(0, 3)), set_of_ints(ints_range(5, 6)))
+	n, m := new_expr(poly_var(test_vars[0])), new_expr(poly_var(test_vars[1]))
 	none := new_expr(Set{})
 	union_of :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {return set_operation(k, Set_Op{kind = .Union}, {}, a, b)}
 	inter_of :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {return set_operation(k, Set_Op{kind = .Inter}, {}, a, b)}
@@ -864,7 +873,7 @@ test_law_value_in :: proc(t: ^testing.T) {
 	gen := seeded(&state, 16)
 	k: Kernel
 	domains := [3]Ints{ints_range(-3, 3), ints_range(0, 5), ints_range(2, 4)}
-	for d in domains do append(&k.symbols, set_of_ints(d))
+	declare_vars(&k, set_of_ints(domains[0]), set_of_ints(domains[1]), set_of_ints(domains[2]))
 	decided := [Verdict]int{}
 	for _ in 0 ..< ROUNDS {
 		tree := random_tree(gen, 3)
@@ -894,8 +903,8 @@ test_law_affine :: proc(t: ^testing.T) {
 	gen := seeded(&state, 17)
 	N :: 100_000 // au-delà de la limite d'énumération
 	k: Kernel
-	append(&k.symbols, set_of_ints(ints_range(0, N)))
-	x := poly_var(0)
+	declare_vars(&k, set_of_ints(ints_range(0, N)))
+	x := poly_var(test_vars[0])
 	outcomes := [Verdict]int{}
 	for _ in 0 ..< 60 {
 		a := i128(rand.int_range(-7, 8, gen))

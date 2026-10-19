@@ -227,12 +227,12 @@ Error :: struct {
 }
 
 Kernel :: struct {
-	ast:     ^syn.Ast,
-	errors:  [dynamic]Error,
-	typed:   [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
-	symbols: [dynamic]Set, // l'ensemble des valeurs possibles de chaque inconnue
-	shapes:  map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
-	scene:   Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
+	ast:      ^syn.Ast,
+	errors:   [dynamic]Error,
+	typed:    [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
+	variables: int, // le compte des variables créées : leur ordre (unknown.odin)
+	shapes:   map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
+	scene:    Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
 	refined:  [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
 	defining: [dynamic]Defining, // les scopes en cours de typage : ce qu'une self-référence désigne
@@ -266,9 +266,13 @@ enter :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> (previous: Scene) {
 	case .Written:
 		k.scene = {}
 	case .Same:
-		k.scene = {quiet = true}
+		k.scene = {
+			quiet = true,
+		}
 	case .Changed:
-		k.scene = {site = s.site}
+		k.scene = {
+			site = s.site,
+		}
 		// la valeur carvée elle-même : à l'argument, quand le carve est celui qui a
 		// dérivé ce scope
 		if b.value != nil {
@@ -285,7 +289,12 @@ report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) ->
 
 // report_about : une erreur signalée en `span`, qui concerne ce qui est écrit en
 // `origin` — un binding qu'un scope a reçu d'ailleurs.
-report_about :: proc(k: ^Kernel, kind: Error_Kind, span, origin: syn.Span, message: string) -> ^Expr {
+report_about :: proc(
+	k: ^Kernel,
+	kind: Error_Kind,
+	span, origin: syn.Span,
+	message: string,
+) -> ^Expr {
 	if !k.scene.quiet {
 		e := Error{kind, message, k.scene.site != {} ? k.scene.site : span, origin}
 		if !slice.contains(k.errors[:], e) do append(&k.errors, e)

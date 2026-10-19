@@ -26,7 +26,7 @@ import "core:fmt"
 // Refinement : dans une branche, l'inconnue `sym` ne vaut que ce que la branche
 // reçoit ; elle y est remplacée par `by`, une inconnue sur ces seules valeurs.
 Refinement :: struct {
-	sym: int,
+	sym: ^Var,
 	by:  ^Expr,
 }
 
@@ -112,14 +112,14 @@ match_unknown :: proc(k: ^Kernel, m: Match, t: ^Expr) -> ^Expr {
 }
 
 // lone_symbol : t est une inconnue seule, que les branches peuvent restreindre.
-lone_symbol :: proc(t: ^Expr) -> (int, bool) {
+lone_symbol :: proc(t: ^Expr) -> (^Var, bool) {
 	#partial switch v in t^ {
 	case Poly:
 		if v.const == 0 && len(v.monos) == 1 && v.monos[0].coef == 1 && len(v.monos[0].vars) == 1 do return v.monos[0].vars[0], true
 	case Term:
 		if v.op == .Sym do return v.sym, true
 	}
-	return 0, false
+	return nil, false
 }
 
 // one_of : la valeur d'un pattern dont plusieurs branches peuvent se déclencher —
@@ -147,7 +147,7 @@ refine :: proc(k: ^Kernel, t: ^Expr, span: syn.Span) -> ^Expr {
 }
 
 // substitute : t, où l'inconnue `sym` vaut `by`, remis en forme normale.
-substitute :: proc(k: ^Kernel, t: ^Expr, sym: int, by: ^Expr, span: syn.Span) -> ^Expr {
+substitute :: proc(k: ^Kernel, t: ^Expr, sym: ^Var, by: ^Expr, span: syn.Span) -> ^Expr {
 	if !mentions_symbol(t, sym) do return t
 	#partial switch v in t^ {
 	case Poly:
@@ -208,8 +208,8 @@ rebuilt_term :: proc(k: ^Kernel, op: Term_Op, args: []^Expr, span: syn.Span) -> 
 	return r
 }
 
-mentions_symbol :: proc(t: ^Expr, sym: int) -> bool {
-	ids := make([dynamic]int, context.temp_allocator)
+mentions_symbol :: proc(t: ^Expr, sym: ^Var) -> bool {
+	ids := make([dynamic]^Var, context.temp_allocator)
 	collect_symbols(t, &ids)
 	for id in ids do if id == sym do return true
 	return false

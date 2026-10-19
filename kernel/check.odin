@@ -132,7 +132,7 @@ affine_in :: proc(k: ^Kernel, v: ^Expr, c: Set) -> (Verdict, bool) {
 	p, is_poly := v^.(Poly)
 	if !is_poly || len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return .Undecided, false
 	a, b := p.monos[0].coef, p.const
-	domain := k.symbols[p.monos[0].vars[0]].ints
+	domain := domain(p.monos[0].vars[0]).ints
 	for gap in ints_complement(c.ints).intervals {
 		lo, lo_ok := preimage(gap.lo, a, b, a > 0)
 		hi, hi_ok := preimage(gap.hi, a, b, a < 0)
@@ -162,7 +162,7 @@ linear_extremes :: proc(k: ^Kernel, v: ^Expr) -> (lo, hi: Maybe(i128), ok: bool)
 	for m in p.monos do if len(m.vars) != 1 do return nil, nil, false
 	lo, hi = p.const, p.const
 	for m in p.monos {
-		l, h := ints_bounds(k.symbols[m.vars[0]].ints)
+		l, h := ints_bounds(domain(m.vars[0]).ints)
 		if m.coef < 0 do l, h = h, l
 		lo = scaled_sum(lo, m.coef, l)
 		hi = scaled_sum(hi, m.coef, h)

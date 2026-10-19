@@ -472,7 +472,7 @@ test_law_set_forms_large :: proc(t: ^testing.T) {
 		upper, ok := set_envelope(&k, e)
 		testing.expect(t, ok, "toute forme d'ensemble a une enveloppe")
 		if is_set_form(e) do forms += 1
-		env := make([]Atom, len(k.symbols))
+		env := make([]Atom, k.variables)
 		for _ in 0 ..< 20 {
 			v := i128(rand.int_range(-100_000, 100_001, gen))
 			clear(&k.errors)
@@ -480,7 +480,7 @@ test_law_set_forms_large :: proc(t: ^testing.T) {
 			if len(k.errors) > 0 do continue // une opération invalide pour cette valeur : l'opérande vide, question ouverte
 			s, known := color_set(&k, exact)
 			testing.expectf(t, known && set_subset(s, upper), "n = %d : %s ⊄ %s", v, print_type(exact), print_set(upper))
-			env[id] = v
+			env[id.id] = v
 			got, got_ok := eval_set(&k, e, env)
 			testing.expectf(t, got_ok && set_equal(got, s) && carried(got) == carried(s), "n = %d : %s vaut %s, attendu %s", v, print_type(e), print_set(got), print_set(s))
 		}
@@ -514,10 +514,10 @@ test_law_general_compare :: proc(t: ^testing.T) {
 		testing.expect(t, status == .Ok, "comparaison valide")
 		if status != .Ok do continue
 		// la vérité, sur toutes les valeurs des inconnues
-		syms := make([dynamic]int)
+		syms := make([dynamic]^Var)
 		collect_symbols(a, &syms)
 		collect_symbols(b, &syms)
-		slice.sort(syms[:])
+		slice.sort_by(syms[:], var_less)
 		ids := slice.unique(syms[:])
 		as, _ := assignments_of(&k, ids)
 		seen: [2]bool
@@ -686,7 +686,7 @@ test_law_approximation :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 22)
 	k: Kernel
-	for _ in 0 ..< 3 do append(&k.symbols, set_of_ints(ints_range(-1_000_000, 1_000_000)))
+	declare_vars(&k, set_of_ints(ints_range(-1_000_000, 1_000_000)), set_of_ints(ints_range(-1_000_000, 1_000_000)), set_of_ints(ints_range(-1_000_000, 1_000_000)))
 	for _ in 0 ..< ROUNDS {
 		tree := random_tree(gen, 3)
 		p := poly_type(tree_poly(tree))
