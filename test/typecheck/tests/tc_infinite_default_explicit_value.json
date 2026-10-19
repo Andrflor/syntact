@@ -1,6 +1,8 @@
 {
   "name": "tc_infinite_default_explicit_value",
-  "description": "a cons-first grammar with an EXPLICIT value never materializes the default: clean",
+  "description": "a cons-first grammar is illegal at its definition, even with an explicit value: the base case comes first, is not recursive, and ends (specs/kernel-recursion.md §1)",
   "source": "Array -> {\n  T -> {}\n  -> {T: ...Array{T}:}\n  -> {}\n}\nArray{u8}:a -> {1 2}\n-> a",
-  "expect_errors": []
+  "expect_errors": [
+    "Infinite_Recursion"
+  ]
 }

@@ -1,7 +1,6 @@
 package kernel
 
 import "core:fmt"
-import "core:slice"
 
 // type_of : la seule opération sémantique. Le type d'une expression est
 // l'ensemble qu'elle désigne, écrit lui-même en IR, et simplifié :
@@ -65,10 +64,12 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 	s.shape = shape
 	append(&k.typed, s)
-	append(&k.defining, s)
+	append(&k.defining, Defining{s, 0})
 	defer pop(&k.defining)
+	at := len(k.defining) - 1
 	position := 0 // la place du binding parmi ceux que s présente
-	for &b in s.bindings {
+	for &b, i in s.bindings {
+		k.defining[at].at = i
 		if b.kind == .Expand {
 			type_expansion(k, &b, s, position < len(shape) ? shape[position:] : nil)
 			if v, ok := expanded(b); ok do position += len(places(v))
@@ -132,21 +133,21 @@ type_color :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> ^Expr {
 	if is_invalid(t) do return t
 	if _, itself := t^.(Itself); itself do return t
 	if _, closed := color_set(k, t); !closed {
-		if reaches_itself(t) do return report(k, .Unsupported, b.span, "pas encore dans le kernel : un type récursif lu comme couleur")
+		if holds_invalid(t) do return new_expr(Invalid{}) // une erreur déjà signalée dedans
 		return report(k, .Insoluble_Constraint, b.span, fmt.tprintf("la couleur de %s ne désigne pas un seul ensemble : %s", display(b), brief(t)))
 	}
 	return t
 }
 
-// reaches_itself : le type contient une self-référence, dans une couleur ou une
-// valeur de ses bindings, à quelque profondeur que ce soit.
-reaches_itself :: proc(t: ^Expr) -> bool {
-	if t == nil do return false
-	#partial switch v in t^ {
-	case Itself:
-		return true
-	case ^Scope:
-		for b in v.bindings do if reaches_itself(b.color_type) || reaches_itself(b.value_type) do return true
+// holds_invalid : un binding du scope, à quelque profondeur que ce soit, porte une
+// erreur déjà signalée.
+holds_invalid :: proc(t: ^Expr) -> bool {
+	s, is_scope := t^.(^Scope)
+	if !is_scope do return false
+	for b in s.bindings {
+		if is_invalid(b.color_type) || is_invalid(b.value_type) do return true
+		if b.color_type != nil && holds_invalid(b.color_type) do return true
+		if b.value_type != nil && holds_invalid(b.value_type) do return true
 	}
 	return false
 }
@@ -163,7 +164,7 @@ expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bo
 	case Set:
 		found: ^Scope = nil
 		for r in bdd_atoms(c.scopes) {
-			if !fits(r, literal) || r.shape == found do continue
+			if r.equation != nil || !fits(r, literal) || r.shape == found do continue
 			if found != nil do return nil, false // ambigu
 			found = r.shape
 		}
@@ -211,9 +212,32 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		if p := first_production(c); p != nil do return p.value_type
 		return color
 	case Itself:
-		return report(k, .Unsupported, b.span, "pas encore dans le kernel : le défaut d'un type récursif")
+		return recursive_default(k, c, b)
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
+}
+
+// being_defined : s est en cours de typage.
+being_defined :: proc(k: ^Kernel, s: ^Scope) -> bool {
+	for d in k.defining do if d.scope == s do return true
+	return false
+}
+
+// recursive_default : le défaut de X, celui de son scope : sa première production,
+// le cas de base (specs/kernel-recursion.md §1). Si c'est elle qu'on est en train
+// de typer, le cas de base revient à X : son défaut serait infini, la définition
+// est illégale. Sans production, le scope se contient lui-même : pas de cas de base.
+recursive_default :: proc(k: ^Kernel, x: Itself, b: ^Binding) -> ^Expr {
+	p := first_production(x.scope)
+	if p != nil && p.value_type != nil do return p.value_type
+	if p != nil && !typing(k, x.scope, p) do return report(k, .Unsupported, b.span, "pas encore dans le kernel : une self-référence écrite avant le cas de base")
+	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("le cas de base de %s revient à lui-même : son défaut serait infini", print_expr(x.written)))
+}
+
+// typing : le binding p de s est celui qu'on est en train de typer.
+typing :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
+	#reverse for d in k.defining do if d.scope == s do return &s.bindings[d.at] == p
+	return false
 }
 
 // scopes_default : le défaut d'un ensemble de scopes réduit à une forme, c'est la
@@ -222,6 +246,7 @@ scopes_default :: proc(k: ^Kernel, b: Bdd, binding: ^Binding) -> ^Expr {
 	// tous les scopes : le scope vide, comme "" pour toutes les chaînes
 	if is_leaf(b, .Top) do return new_expr(new_scope(nil))
 	if n, is_node := b.(^Bdd_Node); is_node && is_leaf(n.yes, .Top) && is_leaf(n.maybe, .Bottom) && is_leaf(n.no, .Bottom) {
+		if n.atom.equation != nil do return default_of(k, new_expr(n.atom.shape), binding) // le défaut de l'équation
 		return new_expr(n.atom.shape)
 	}
 	return report(k, .Unsupported, binding.span, "pas encore dans le kernel : le défaut d'une combinaison de formes")
@@ -240,7 +265,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	b := sc.bindings[r.index]
 	t := b.value_type
 	// le scope qu'on est en train de définir : une self-référence
-	if v, literal := scope_literal(b.value); t == nil && literal && slice.contains(k.defining[:], v) do return new_expr(Itself{v, new_expr(r)})
+	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_expr(Itself{v, new_expr(r)})
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
 	return refine(k, t, r.span)
 }

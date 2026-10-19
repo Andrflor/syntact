@@ -15,12 +15,16 @@ import "core:strings"
 // décidant, chemin par chemin, puis champ par champ.
 
 // Record : une forme. `shape` est le scope qu'elle lit (son défaut). `exact` : elle
-// n'admet que ce scope valeur lui-même, chaque binding n'admettant que sa valeur.
+// n'admet que ce scope valeur lui-même, chaque binding n'admettant que son contrat.
+// `equation` : une self-référence — la forme n'a pas de champs, elle renvoie à
+// l'équation de `shape`, lue seulement au moment de décider (§3 de
+// specs/kernel-recursion.md : on ne déplie jamais).
 Record :: struct {
-	fields: []Field,
-	shape:  ^Scope,
-	exact:  bool,
-	id:     int, // l'ordre des nœuds du BDD
+	fields:   []Field,
+	shape:    ^Scope,
+	exact:    bool,
+	equation: ^Expr, // la self-référence telle qu'écrite ; nil pour une forme
+	id:       int, // l'ordre des nœuds du BDD
 }
 
 Field :: struct {
@@ -49,9 +53,9 @@ Bdd_Node :: struct {
 @(thread_local)
 record_count: int
 
-new_record :: proc(fields: []Field, shape: ^Scope, exact := false) -> ^Record {
+new_record :: proc(fields: []Field, shape: ^Scope, exact := false, equation: ^Expr = nil) -> ^Record {
 	r := new(Record)
-	r^ = Record{fields, shape, exact, record_count}
+	r^ = Record{fields, shape, exact, equation, record_count}
 	record_count += 1
 	return r
 }
@@ -150,9 +154,10 @@ bdd_subset :: proc(a, b: Bdd) -> bool {
 // formes, et il en reste toujours (une autre structure).
 records_empty :: proc(pos, neg: []^Record) -> bool {
 	if len(pos) == 0 do return false
-	// une forme de longueur quelconque : son vide ne se décide pas encore ici ; on
-	// ne l'affirme pas — et ignorer une forme retirée ne fait qu'agrandir le reste
-	for r in pos do if has_run(r) do return false
+	// une forme de longueur quelconque, ou une équation : son vide ne se décide pas
+	// encore ici ; on ne l'affirme pas — et ignorer une forme retirée ne fait
+	// qu'agrandir le reste
+	for r in pos do if has_run(r) || r.equation != nil do return false
 	first := pos[0]
 	fields := make([]Set, len(first.fields), context.temp_allocator)
 	for f, i in first.fields do fields[i] = field_set(f)
@@ -162,7 +167,7 @@ records_empty :: proc(pos, neg: []^Record) -> bool {
 	}
 	cover := make([dynamic][]Set, context.temp_allocator)
 	for r in neg {
-		if has_run(r) || !same_structure(r, first) do continue
+		if has_run(r) || r.equation != nil || !same_structure(r, first) do continue
 		sets := make([]Set, len(r.fields), context.temp_allocator)
 		for f, i in r.fields do sets[i] = field_set(f)
 		append(&cover, sets)
@@ -228,13 +233,17 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 
 // color_set : l'ensemble des valeurs qu'un type admet comme couleur. Un ensemble
 // admet ses éléments. Un scope avec des productions admet chacune : une production
-// colorée, ce qu'admet sa couleur ; sinon, sa valeur exactement (`{-> u8}` n'admet
-// que la valeur u8). Sans production, c'est une forme. Faux quand le type dépend
-// d'une inconnue : ce n'est pas un seul ensemble. Un scope n'est lu qu'une fois.
+// colorée, ce qu'admet sa couleur ; sinon, sa valeur exactement, lue par ses
+// contrats (`{-> u8}` n'admet que la valeur u8). Sans production, c'est une forme.
+// Une self-référence admet ce qu'admet son équation : une forme qui y renvoie.
+// Faux quand le type dépend d'une inconnue : ce n'est pas un seul ensemble. Un
+// scope n'est lu qu'une fois.
 color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	#partial switch v in t^ {
 	case Set:
 		return v, true
+	case Itself:
+		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, v.scope, equation = v.written))}, true
 	case ^Scope:
 		if s, seen := k.shapes[v]; seen do return s, true
 		s, closed := scope_color_set(k, v)
@@ -256,20 +265,23 @@ scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 		return set, true
 	}
 	fields := make([dynamic]Field)
-	shape_fields(k, s, &fields) or_return
+	shape_fields(k, s, &fields, exact = false) or_return
 	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s))}, true
 }
 
-// shape_fields : les places d'une forme. Une expansion `...xs` y dépose les
-// places de xs ; une expansion colorée `...C:`, une suite — ce qu'elle dépose n'est
-// pas une valeur mais tout scope que C admet.
-shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field) -> bool {
+// shape_fields : les places d'une forme, chacune par son contrat — sa couleur,
+// écrite ou reçue de la forme qui l'entoure (la coloration implicite). Une
+// expansion `...xs` y dépose les places de xs ; une expansion colorée `...C:`, une
+// suite — ce qu'elle dépose n'est pas une valeur mais tout scope que C admet. Un
+// binding sans contrat admet sa valeur ; nommé, dans une forme (`exact` faux), il
+// n'impose rien : un carve peut lui donner toute valeur.
+shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field, exact: bool) -> bool {
 	for b in s.bindings {
 		if b.kind == .Expand {
 			if b.color == nil {
 				v, ok := expanded(b)
-				if !ok do return false
-				shape_fields(k, v, out) or_return
+				if !ok do return false // une expansion sans scope typé : on ne sait pas ce qu'elle dépose
+				shape_fields(k, v, out, exact) or_return
 				continue
 			}
 			set := color_set(k, b.color_type) or_return
@@ -277,26 +289,31 @@ shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field) -> bool {
 			continue
 		}
 		f := Field{name = b.name, kind = b.kind}
-		if b.color == nil && b.name != "" {
-			f.free = true // un binding nommé sans couleur n'impose rien : un carve peut lui donner toute valeur
-		} else {
-			f.set = admitted_by(k, b) or_return
+		switch {
+		case b.color_type != nil:
+			f.set = color_set(k, b.color_type) or_return
+		case b.name != "" && !exact:
+			f.free = true
+		case:
+			f.set = exact_set(k, b.value_type) or_return
 		}
 		append(out, f)
 	}
 	return true
 }
 
-// admitted_by : ce qu'un binding admet — ce qu'admet sa couleur, sinon sa valeur.
+// admitted_by : ce qu'un binding admet — ce qu'admet sa couleur, écrite ou
+// implicite, sinon sa valeur.
 admitted_by :: proc(k: ^Kernel, b: Binding) -> (Set, bool) {
-	if b.color != nil do return color_set(k, b.color_type)
+	if b.color_type != nil do return color_set(k, b.color_type)
 	return exact_set(k, b.value_type)
 }
 
 // exact_set : l'ensemble dont ce type est le seul élément. Un atome est son propre
 // singleton ; un ensemble d'au moins deux éléments est une valeur de la sorte des
-// ensembles ; un scope, la forme dont chaque binding n'admet que sa valeur. Faux
-// quand le type dépend d'une inconnue.
+// ensembles ; un scope, la forme dont chaque binding n'admet que son contrat — sa
+// couleur, écrite ou implicite, sinon sa valeur. Faux quand le type dépend d'une
+// inconnue.
 exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 	if t == nil || is_invalid(t) do return {}, false
 	#partial switch v in t^ {
@@ -304,16 +321,9 @@ exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 		if is_atom(v) do return v, true
 		return Set{sorts = {.Sets}, sets = values_point(v)}, true
 	case ^Scope:
-		// une expansion sans scope typé : on ne sait pas ce qu'elle dépose
-		for b in v.bindings do if _, ok := expanded(b); b.kind == .Expand && !ok do return {}, false
-		shown := places(v)
-		fields := make([]Field, len(shown))
-		for p, i in shown {
-			b := binding_at(p)^
-			fields[i] = Field{name = b.name, kind = b.kind}
-			fields[i].set = exact_set(k, b.value_type) or_return
-		}
-		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, v, exact = true))}, true
+		fields := make([dynamic]Field)
+		shape_fields(k, v, &fields, exact = true) or_return
+		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], v, exact = true))}, true
 	}
 	return {}, false
 }
@@ -417,6 +427,11 @@ record_member :: proc(k: ^Kernel, r: ^Record, view: []Place) -> Member {
 	if key in k.matching do return .Never
 	k.matching[key] = {}
 	defer delete_key(&k.matching, key)
+	if r.equation != nil {
+		// une self-référence : on lit l'équation sur cette suite, rien de plus
+		set, closed := color_set(k, new_expr(r.shape))
+		return closed ? bdd_member(k, set.scopes, view) : .Unknown
+	}
 	memo := make(map[[2]int]Member, context.temp_allocator)
 	return match_fields(k, r.fields, view, 0, 0, &memo)
 }
@@ -485,6 +500,7 @@ printed_bdd :: proc(b: Bdd) -> (string, Level) {
 	case ^Bdd_Node:
 		atom := print_type(new_expr(v.atom.shape))
 		if v.atom.exact do atom = fmt.tprintf("{{-> %s}}", atom) // le scope lui-même, pas sa forme
+		if v.atom.equation != nil do atom = print_expr(v.atom.equation) // la self-référence telle qu'écrite
 		parts := make([dynamic]Part, context.temp_allocator)
 		branch :: proc(parts: ^[dynamic]Part, head: string, head_level: Level, rest: Bdd) {
 			if is_leaf(rest, .Bottom) do return

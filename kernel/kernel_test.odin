@@ -128,9 +128,21 @@ CASES := []Case {
 	// une production colorée s'imprime `-> C:`, `-> C:(v)`
 	{"S -> {\n  -> u8:\n  -> string:\n}\nT -> {-> u8:(5)}", "{S -> {-> 0..255:(0)  -> string:(\"\")}  T -> {-> 0..255:(5)}}", {}},
 	// une self-référence est l'inconnue de type X : ni copiée, ni dépliée
-	{"f -> {\n  u8:n\n  -> f{n -> n + 1}\n}", "{f -> {0..255:n -> 0  -> f{n -> n + 1}}}", {}},
-	// ses arguments se vérifient comme ceux de tout carve : n vaut 1, n - 1 ∉ 1..255
-	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch}},
+	{"f -> {\n  u8:n\n  -> f{n -> n}\n}", "{f -> {0..255:n -> 0  -> f{n -> n}}}", {}},
+	// ses arguments se vérifient comme ceux de tout carve : n vaut 1, n - 1 ∉ 1..255 ;
+	// avec d'autres arguments, c'est l'équation appliquée ailleurs : pas encore
+	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch, .Unsupported}},
+	// les types récursifs : lus sur la valeur, sans rien déplier
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 2 3}", "", {}},
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 \"x\"}", "", {.Constraint_Mismatch}},
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a", "", {}}, // le défaut : {}
+	{"Tree -> {\n  T -> {}\n  -> {}\n  -> {Tree{T}:l  T:v  Tree{T}:r}\n}\nTree{u8}:t -> {l -> {}  v -> 5  r -> {l -> {}  v -> 6  r -> {}}}", "", {}},
+	{"Tree -> {\n  T -> {}\n  -> {}\n  -> {Tree{T}:l  T:v  Tree{T}:r}\n}\nTree{u8}:t -> {l -> {}  v -> 5  r -> {l -> {}  v -> 300  r -> {}}}", "", {.Constraint_Mismatch}},
+	{"Balanced -> {\n  -> {}\n  -> {u8: ...Balanced:  string:}\n}\nBalanced:b -> {1 2 \"a\" \"b\"}", "", {}},
+	{"Balanced -> {\n  -> {}\n  -> {u8: ...Balanced:  string:}\n}\nBalanced:b -> {1 \"a\" 2}", "", {.Constraint_Mismatch}},
+	// le cas de base vient en premier, n'est pas récursif, et finit
+	{"Endless -> {\n  T -> {}\n  -> {T: ...Endless{T}:}\n}", "", {.Infinite_Recursion}},
+	{"Unguarded -> {\n  -> {...Unguarded:}\n  -> {}\n}", "", {.Infinite_Recursion}},
 	{"square -> {\n  n -> 0\n  -> n * n\n}\nr -> square{n -> 5}!", "{square -> {n -> 0  -> 0}  r -> 25}", {}},
 	{"a -> {\n  x -> 1\n  b -> {-> x}\n}\nc -> a{x -> 2}.b!\nd -> a.b!", "{a -> {x -> 1  b -> {-> 1}}  c -> 2  d -> 1}", {}}, // les scopes écrits dedans suivent la copie
 	{"a -> {u8:d}\nb -> a{d -> ??}", "{a -> {0..255:d -> 0}  b -> {0..255:d -> ??0}}", {}}, // l'argument prend la couleur du binding qu'il remplace

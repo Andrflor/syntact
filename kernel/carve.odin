@@ -38,18 +38,26 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 // source écrite (une copie garde le span de ce qu'elle copie). Quels que soient
 // ses arguments, c'est une self-référence : X, ou X appliqué à d'autres arguments.
 redefined :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
-	#reverse for d in k.defining do if d.span == s.span do return d, true
+	#reverse for d in k.defining do if d.scope.span == s.span do return d.scope, true
 	return nil, false
 }
 
 // carve_itself : le carve de s est une self-référence, qui redonne d. Rien n'est
 // copié ni typé de s ; ses arguments sont vérifiés contre les bindings qu'ils
-// remplissent, comme pour tout carve.
+// remplissent, comme pour tout carve. S'ils donnent à d d'autres types que les
+// siens, c'est l'équation appliquée à d'autres arguments (la récursion
+// polymorphe, ou l'appel récursif d'une fonction).
 carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
 	c.args.carving = s
 	targets := fill(k, s, copy_scope(s, s.parent, c.span), c)
 	for j, i in targets do if j >= 0 do type_argument(k, Carved{c.args, i}, s.bindings[j].color_type)
 	append(&k.typed, c.args) // vérifiés à la fin, avec tout le reste
+	for j, i in targets {
+		if j < 0 do continue
+		given := c.args.bindings[i].value_type
+		if is_invalid(given) do return given
+		if !expr_equal(k, given, d.bindings[j].value_type) do return report(k, .Unsupported, c.span, "pas encore dans le kernel : une self-référence avec d'autres arguments")
+	}
 	return new_expr(Itself{d, new_expr(c)})
 }
 

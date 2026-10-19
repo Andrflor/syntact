@@ -41,7 +41,13 @@ infer_holes :: proc(k: ^Kernel, s: ^Scope, c: Carve, derived: ^Scope, targets: [
 	if !has_hole(s) do return
 	p := probe(k, s, c, targets)
 	if p.blocked {
-		report(k, .Unsupported, c.span, "pas encore dans le kernel : un trou écrit dans une opération")
+		invalid := report(k, .Unsupported, c.span, "pas encore dans le kernel : un trou écrit dans une opération")
+		// un trou qu'on ne sait pas inférer : ce qui en dépend reste silencieux
+		for &b in derived.bindings {
+			if b.kind != .Pull do continue
+			if filled, is_carved := b.value^.(Carved); is_carved && filled.args == c.args do continue
+			b.value = invalid
+		}
 		return
 	}
 	for &b, j in derived.bindings {
@@ -129,6 +135,12 @@ land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 			return
 		}
 	case ^Scope:
+		// un scope à productions admet ce que ses productions admettent, pas sa
+		// structure : on ne sait pas encore ce qui y tombe
+		if first_production(v) != nil {
+			if scope_mentions(p, v) do p.blocked = true
+			return
+		}
 		w, is_scope := at.type^.(^Scope)
 		if !is_scope || !same_bindings(v, w) do return // la vérification du champ le signale
 		vs, ws := places(v), places(w)
@@ -143,6 +155,19 @@ land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 		return
 	}
 	if mentions(p, pattern) do p.blocked = true
+}
+
+// scope_mentions : un binding du scope, à quelque profondeur que ce soit, dépend
+// d'un trou de la sonde.
+scope_mentions :: proc(p: ^Probe, s: ^Scope) -> bool {
+	for b in s.bindings {
+		for t in ([2]^Expr{b.color_type, b.value_type}) {
+			if t == nil do continue
+			if inner, is_scope := t^.(^Scope); is_scope && scope_mentions(p, inner) do return true
+			if mentions(p, t) do return true
+		}
+	}
+	return false
 }
 
 // same_bindings : ils présentent les mêmes bindings — noms et kinds, dans l'ordre.

@@ -215,6 +215,7 @@ Error_Kind :: enum u8 {
 	Non_Exhaustive_Pattern, // une valeur possible qu'aucune branche n'admet
 	Unproven, // le kernel ne sait pas prouver qu'une couleur est respectée
 	Insoluble_Constraint,
+	Infinite_Recursion, // le cas de base d'un type récursif revient à lui-même
 	Unsupported, // une forme que le kernel ne traite pas encore
 }
 
@@ -234,7 +235,13 @@ Kernel :: struct {
 	scene:   Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
 	refined:  [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
-	defining: [dynamic]^Scope, // les scopes en cours de typage : ce qu'une self-référence désigne
+	defining: [dynamic]Defining, // les scopes en cours de typage : ce qu'une self-référence désigne
+}
+
+// Defining : un scope en cours de typage, et l'index du binding qu'on y type.
+Defining :: struct {
+	scope: ^Scope,
+	at:    int,
 }
 
 // Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit

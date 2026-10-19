@@ -824,6 +824,7 @@ atom_less :: proc(a, b: Atom) -> (bool, bool) {
 
 expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 	if a == nil || b == nil do return a == b
+	if a == b do return true // le même type : un scope est son propre type
 	#partial switch x in a^ {
 	case Set:
 		y, ok := b^.(Set)
