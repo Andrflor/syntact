@@ -236,6 +236,14 @@ Kernel :: struct {
 	refined:  [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
 	defining: [dynamic]Defining, // les scopes en cours de typage : ce qu'une self-référence désigne
+	building: [dynamic]Building, // à la construction : le binding qu'on construit dans chaque scope
+}
+
+// Building : à la construction de l'IR, le binding qu'on construit dans un scope.
+Building :: struct {
+	scope:   ^Scope,
+	index:   int, // la place qu'il a, ou aura, dans le scope
+	product: bool,
 }
 
 // Defining : un scope en cours de typage, et l'index du binding qu'on y type.

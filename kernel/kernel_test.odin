@@ -143,6 +143,9 @@ CASES := []Case {
 	// le cas de base vient en premier, n'est pas récursif, et finit
 	{"Endless -> {\n  T -> {}\n  -> {T: ...Endless{T}:}\n}", "", {.Infinite_Recursion}},
 	{"Unguarded -> {\n  -> {...Unguarded:}\n  -> {}\n}", "", {.Infinite_Recursion}},
+	// un scope ne voit son propre nom que dans ses productions
+	{"ones -> {1 ...ones}", "", {.Undefined_Identifier}},
+	{"X -> {\n  X:child\n  -> {}\n}", "", {.Undefined_Identifier}},
 	{"square -> {\n  n -> 0\n  -> n * n\n}\nr -> square{n -> 5}!", "{square -> {n -> 0  -> 0}  r -> 25}", {}},
 	{"a -> {\n  x -> 1\n  b -> {-> x}\n}\nc -> a{x -> 2}.b!\nd -> a.b!", "{a -> {x -> 1  b -> {-> 1}}  c -> 2  d -> 1}", {}}, // les scopes écrits dedans suivent la copie
 	{"a -> {u8:d}\nb -> a{d -> ??}", "{a -> {0..255:d -> 0}  b -> {0..255:d -> ??0}}", {}}, // l'argument prend la couleur du binding qu'il remplace

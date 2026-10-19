@@ -170,9 +170,11 @@ fausses) : on ne s'en sert jamais comme type.
 Une définition récursive, type, fonction ou valeur, est vérifiée à sa définition,
 sur les types :
 
-1. **La self-référence n'est légale que dans une production.** Ailleurs (un champ,
-   une expansion, une valeur) elle est une erreur : `ones -> {1 ...ones}` est une
-   valeur infinie, `X -> {X:child  -> {}}` un champ sans fin.
+1. **Un scope ne voit son propre nom que dans ses productions.** Ailleurs (un
+   champ, une expansion, une valeur) le nom n'est pas visible : `ones -> {1 ...ones}`
+   et `X -> {X:child  -> {}}` sont des noms non définis. La récursion mutuelle
+   passant par un champ (`module.odd` dans le champ `even` de `module`) n'est donc
+   plus possible : elle est à repenser.
 2. **Un cas de base** : la première production, non récursive, qui finit (§1).
 3. **La terminaison** : chaque appel récursif se rapproche du cas de base — la
    queue d'une liste ; `n - 1` dans une branche qui reçoit `n ∈ 1..255`, quand le
@@ -231,6 +233,8 @@ prouver que la forme close ne déborde pas (`255·256/2 = 32640`), et l'ensemble
 valeurs du résultat se calcule sur cette borne.
 
 ## 9. À réfléchir
+
+0. **La récursion mutuelle** — `even`/`odd` ne peuvent plus se nommer (§7).
 
 1. **G** — décider l'inclusion de deux répétitions indexées.
 2. **Les formes closes** (§8) — quelles classes de récurrences on résout, et le

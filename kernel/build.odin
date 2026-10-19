@@ -32,6 +32,8 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	ast := k.ast
 	data := ast.node_data[idx]
 	span := ast.node_spans[idx]
+	append(&k.building, Building{s, len(s.bindings), ast.node_kinds[idx] == .Product})
+	defer pop(&k.building)
 	#partial switch ast.node_kinds[idx] {
 	case .Pointing, .PointingPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		b := Binding{kind = arrow_kind(ast.node_kinds[idx]), span = span}
@@ -246,7 +248,7 @@ build_shorthand :: proc(k: ^Kernel, args: ^Scope, idx: syn.Node_Index) -> ^Expr 
 	sh := Shorthand {
 		field = Access{target = new_expr(Carving{span}), name = name, ordinal = ordinal, span = span},
 	}
-	if ref, found, _ := lookup(args, name, ordinal, span); found do sh.outer = new_expr(ref)
+	if ref, found, _ := lookup(k, args, name, ordinal, span); found do sh.outer = new_expr(ref)
 	return new_expr(build_carve_args(k, args, idx, new_expr(sh)))
 }
 
@@ -267,7 +269,7 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	span := ast.node_spans[idx]
 	name := syn.node_name_str(ast, idx)
 	if name == "" do name = syn.node_capture_str(ast, idx) // `(c)` : un nom entre parenthèses
-	ref, found, missing := lookup(s, name, int(ast.node_data[idx].identifier.ordinal), span)
+	ref, found, missing := lookup(k, s, name, int(ast.node_data[idx].identifier.ordinal), span)
 	if !found {
 		// dans une branche `C: -> …`, le nom est peut-être un champ de C
 		for sc := s; sc != nil; sc = sc.parent do if shaped_cover(sc.cover) do return unsupported(k, idx, "la déstructuration")
@@ -333,26 +335,50 @@ shaped_cover :: proc(cover: ^Expr) -> bool {
 
 // lookup : le binding visible au-dessus de s qui porte ce nom (la n-ième occurrence
 // avec `x#n`) ; sinon, pourquoi il n'y en a pas.
-lookup :: proc(s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (ref: Ref, found: bool, missing: string) {
+lookup :: proc(k: ^Kernel, s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (ref: Ref, found: bool, missing: string) {
 	up := 0
+	child: ^Scope = nil // le scope d'où l'on vient
 	for sc := s; sc != nil; sc = sc.parent {
 		if ordinal >= 0 {
 			// `x#n` : la n-ième occurrence, dans le premier scope qui définit le nom.
 			seen := 0
 			for b, i in sc.bindings {
-				if b.name != name do continue
+				if b.name != name || !visible(k, sc, i, child) do continue
 				if seen == ordinal do return Ref{up, i, name, span}, true, ""
 				seen += 1
 			}
 			if seen > 0 do return {}, false, fmt.tprintf("'%s#%d' n'existe pas", name, ordinal)
 		} else {
 			#reverse for b, i in sc.bindings {
-				if b.name == name || (b.capture != "" && b.capture == name) do return Ref{up, i, name, span}, true, ""
+				if b.name != name && (b.capture == "" || b.capture != name) do continue
+				if visible(k, sc, i, child) do return Ref{up, i, name, span}, true, ""
 			}
 		}
 		up += 1
+		child = sc
 	}
 	return {}, false, fmt.tprintf("'%s' n'est pas défini", name)
+}
+
+// visible : le binding i de sc est-il visible depuis child, le scope d'où l'on
+// vient ? Un binding qu'on est en train de construire, et dont child est le corps,
+// est le scope qui se nomme lui-même : il ne se voit que dans ses productions
+// (specs/kernel-recursion.md §7).
+visible :: proc(k: ^Kernel, sc: ^Scope, i: int, child: ^Scope) -> bool {
+	if child == nil do return true
+	in_sc, in_child := false, false
+	product := false
+	#reverse for b in k.building {
+		if !in_sc && b.scope == sc {
+			in_sc = true
+			if b.index != i do return true // un binding déjà construit
+		}
+		if !in_child && b.scope == child {
+			in_child = true
+			product = b.product
+		}
+	}
+	return !in_sc || !in_child || product
 }
 
 // Les builtins sont des noms pour des ensembles (specs/language/10). Ils sont les
