@@ -64,12 +64,8 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 	s.shape = shape
 	append(&k.typed, s)
-	append(&k.defining, Defining{s, 0})
-	defer pop(&k.defining)
-	at := len(k.defining) - 1
 	position := 0 // la place du binding parmi ceux que s présente
-	for &b, i in s.bindings {
-		k.defining[at].at = i
+	for &b in s.bindings {
 		if b.kind == .Expand {
 			type_expansion(k, &b, s, position < len(shape) ? shape[position:] : nil)
 			if v, ok := expanded(b); ok do position += len(places(v))
@@ -218,12 +214,6 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
 }
 
-// being_defined : s est en cours de typage.
-being_defined :: proc(k: ^Kernel, s: ^Scope) -> bool {
-	for d in k.defining do if d.scope == s do return true
-	return false
-}
-
 // recursive_default : le défaut de X, celui de son scope : sa première production,
 // le cas de base (specs/kernel-recursion.md §1). Si c'est elle qu'on est en train
 // de typer, le cas de base revient à X : son défaut serait infini, la définition
@@ -231,14 +221,7 @@ being_defined :: proc(k: ^Kernel, s: ^Scope) -> bool {
 recursive_default :: proc(k: ^Kernel, x: ^Var, d: ^Scope, b: ^Binding) -> ^Expr {
 	p := first_production(d)
 	if p != nil && p.value_type != nil do return p.value_type
-	if p != nil && !typing(k, d, p) do return report(k, .Unsupported, b.span, "pas encore dans le kernel : une self-référence écrite avant le cas de base")
 	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("le cas de base de %s revient à lui-même : son défaut serait infini", print_equation(x.type)))
-}
-
-// typing : le binding p de s est celui qu'on est en train de typer.
-typing :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
-	#reverse for d in k.defining do if d.scope == s do return &s.bindings[d.at] == p
-	return false
 }
 
 // scopes_default : le défaut d'un ensemble de scopes réduit à une forme, c'est la
@@ -266,7 +249,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	b := sc.bindings[r.index]
 	t := b.value_type
 	// le scope qu'on est en train de définir : une self-référence
-	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_equation_var(k, new_expr(v))
+	if v, literal := scope_literal(b.value); t == nil && literal && encloses(v, env) do return new_equation_var(k, new_expr(v))
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
 	return t
 }
@@ -373,4 +356,11 @@ display :: proc(b: ^Binding) -> string {
 	if b.name != "" do return fmt.tprintf("'%s'", b.name)
 	if b.kind == .Product do return "la production"
 	return "ce binding"
+}
+
+// encloses : s est écrit dans outer, ou est outer — un scope qu'on est en train de
+// typer quand on type s.
+encloses :: proc(outer, s: ^Scope) -> bool {
+	for sc := s; sc != nil; sc = sc.parent do if sc == outer do return true
+	return false
 }

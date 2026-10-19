@@ -227,21 +227,6 @@ Kernel :: struct {
 	shapes:   map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
 	scene:    Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
-	defining: [dynamic]Defining, // les scopes en cours de typage : ce qu'une self-référence désigne
-	building: [dynamic]Building, // à la construction : le binding qu'on construit dans chaque scope
-}
-
-// Building : à la construction de l'IR, le binding qu'on construit dans un scope.
-Building :: struct {
-	scope:   ^Scope,
-	index:   int, // la place qu'il a, ou aura, dans le scope
-	product: bool,
-}
-
-// Defining : un scope en cours de typage, et l'index du binding qu'on y type.
-Defining :: struct {
-	scope: ^Scope,
-	at:    int,
 }
 
 // Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit

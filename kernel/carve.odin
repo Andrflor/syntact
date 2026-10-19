@@ -22,7 +22,7 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return report(k, .Invalid_Carve, c.span, fmt.tprintf("on ne carve qu'un scope : %s", brief(t)))
 	c.args.carving = s // ce que `.x` désigne dans les arguments
-	if d, found := redefined(k, s); found do return carve_itself(k, s, d, c)
+	if d, found := redefined(env, s); found do return carve_itself(k, s, d, c)
 	// dans une copie, ce carve est dérivé avec elle : ses erreurs vont au carve d'origine
 	derived := copy_scope(s, s.parent, k.scene.site != {} ? k.scene.site : c.span)
 	targets := fill(k, s, derived, c)
@@ -37,8 +37,8 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 // redefined : le scope en cours de définition que le carve de s redonne — même
 // source écrite (une copie garde le span de ce qu'elle copie). Quels que soient
 // ses arguments, c'est une self-référence : X, ou X appliqué à d'autres arguments.
-redefined :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
-	#reverse for d in k.defining do if d.scope.span == s.span do return d.scope, true
+redefined :: proc(env, s: ^Scope) -> (^Scope, bool) {
+	for d := env; d != nil; d = d.parent do if d.span == s.span do return d, true
 	return nil, false
 }
 

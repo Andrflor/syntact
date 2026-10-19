@@ -27,41 +27,47 @@ node_span :: proc(k: ^Kernel, idx: syn.Node_Index) -> syn.Span {
 	return k.ast.node_spans[idx]
 }
 
-// build_binding ajoute à `s` le binding que décrit le nœud enfant `idx`.
+// build_binding ajoute à `s` le binding que décrit le nœud enfant `idx`. Il entre
+// dans son scope avant que ses parties soient construites : le binding en
+// construction est toujours le dernier de son scope (visible, dans lookup).
 build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
+	append(&s.bindings, Binding{span = k.ast.node_spans[idx]})
+	if !build_parts(k, s, idx, &s.bindings[len(s.bindings) - 1]) do pop(&s.bindings)
+}
+
+// build_parts : la flèche, la couleur, le nom et la valeur du binding b, déjà dans
+// s. Faux si ce n'est pas un binding (son erreur est signalée).
+build_parts :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, b: ^Binding) -> bool {
 	ast := k.ast
 	data := ast.node_data[idx]
 	span := ast.node_spans[idx]
-	append(&k.building, Building{s, len(s.bindings), ast.node_kinds[idx] == .Product})
-	defer pop(&k.building)
 	#partial switch ast.node_kinds[idx] {
 	case .Pointing, .PointingPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
-		b := Binding{kind = arrow_kind(ast.node_kinds[idx]), span = span}
+		b.kind = arrow_kind(ast.node_kinds[idx])
 		if b.kind != .Push && b.kind != .Pull do unsupported(k, idx, fmt.tprintf("la flèche %v", b.kind))
 		if b.kind == .Pull && data.binary.left == syn.INVALID_NODE {
 			report(k, .Invalid_Binding_Name, span, "un trou porte un nom")
-			return
+			return false
 		}
-		if !build_left(k, s, data.binary.left, &b) do return
+		if !build_left(k, s, data.binary.left, b) do return false
 		right := data.binary.right
 		if right != syn.INVALID_NODE && ast.node_kinds[right] == .ScopeNode {
-			// Le binding existe avant son corps : le corps peut se référer à lui.
-			append(&s.bindings, b)
-			i := len(s.bindings) - 1
-			s.bindings[i].value = build_expr(k, s, right)
-			return
+			// le corps est la valeur du binding avant d'être rempli : depuis ses
+			// productions, le binding se voit lui-même
+			body := new_scope(s, ast.node_spans[right])
+			b.value = new_expr(body)
+			for c in syn.node_children(ast, right) do build_binding(k, body, c)
+			return true
 		}
 		// Le parser accepte une flèche sans valeur (`x ->`, `x -> ()`) ; son sens n'est
 		// pas encore fixé.
 		b.value = right == syn.INVALID_NODE ? unsupported(k, idx, "une flèche sans valeur") : build_expr(k, s, right)
-		append(&s.bindings, b)
 	case .Constraint:
 		// `C:name` : un binding coloré sans valeur (sa valeur est le défaut de C).
-		b := Binding{kind = .Push, span = span}
-		if !build_left(k, s, idx, &b) do return
-		append(&s.bindings, b)
+		b.kind = .Push
+		return build_left(k, s, idx, b)
 	case .Product:
-		b := Binding{kind = .Product, span = span}
+		b.kind = .Product
 		operand := data.unary.operand
 		if operand != syn.INVALID_NODE && ast.node_kinds[operand] == .Constraint {
 			// `-> C:` ou `-> C:(e)` : une production colorée.
@@ -73,40 +79,41 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		} else {
 			b.value = build_expr(k, s, operand)
 		}
-		append(&s.bindings, b)
 	case .Expand:
 		// `...E` dépose la valeur de E ; `...C:` celle d'un binding anonyme coloré par
 		// C, et `...` seul, d'un binding coloré par tous les scopes
 		target := data.unary.operand
-		b := Binding{kind = .Expand, span = span}
+		b.kind = .Expand
 		switch {
 		case target == syn.INVALID_NODE:
 			b.color = new_expr(Set{sorts = {.Scopes}, scopes = .Top})
 		case ast.node_kinds[target] == .Constraint:
-			if !build_left(k, s, target, &b) do return
+			return build_left(k, s, target, b)
 		case:
 			b.value = build_expr(k, s, target)
 		}
-		append(&s.bindings, b)
 	case .Carve:
+		b.kind = .Push
 		source := data.carve.source
 		if source == syn.INVALID_NODE || ast.node_kinds[source] != .Constraint {
-			append(&s.bindings, Binding{kind = .Push, value = build_expr(k, s, idx), span = span})
-			return
+			b.value = build_expr(k, s, idx)
+			return true
 		}
 		// `C:p{…}` : p, coloré par C, vaut le défaut de C carvé (specs/language/11)
-		b := Binding{kind = .Push, span = span}
-		if !build_left(k, s, source, &b) do return
+		if !build_left(k, s, source, b) do return false
 		b.value = new_expr(build_carve_args(k, s, idx, build_default(k, s, source)))
-		append(&s.bindings, b)
 	case .EventPush:
-		append(&s.bindings, Binding{kind = .Event_Push, value = unsupported(k, idx, "l'émission >-"), span = span})
+		b.kind = .Event_Push
+		b.value = unsupported(k, idx, "l'émission >-")
 	case .EventPull:
-		append(&s.bindings, Binding{kind = .Event_Pull, value = unsupported(k, idx, "le handler -<"), span = span})
+		b.kind = .Event_Pull
+		b.value = unsupported(k, idx, "le handler -<")
 	case:
 		// Une valeur seule est un binding anonyme.
-		append(&s.bindings, Binding{kind = .Push, value = build_expr(k, s, idx), span = span})
+		b.kind = .Push
+		b.value = build_expr(k, s, idx)
 	}
+	return true
 }
 
 arrow_kind :: proc(kind: syn.Node_Kind) -> Binding_Kind {
@@ -189,7 +196,8 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 			// `=X` : la valeur X elle-même, `{-> X}` — `=u8` admet la valeur u8, pas ses
 			// éléments
 			child := new_scope(s, span)
-			append(&child.bindings, Binding{kind = .Product, value = build_expr(k, child, op.right), span = span})
+			append(&child.bindings, Binding{kind = .Product, span = span})
+			child.bindings[0].value = build_expr(k, child, op.right)
 			return new_expr(child)
 		}
 		left: ^Expr = nil
@@ -227,7 +235,8 @@ build_carve_args :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: ^Ex
 	for child in syn.node_carve_children(ast, idx) {
 		before := len(args.bindings)
 		if ast.node_kinds[child] == .Carve && ast.node_kinds[ast.node_data[child].carve.source] == .Identifier {
-			append(&args.bindings, Binding{kind = .Push, value = build_shorthand(k, args, child), span = node_span(k, child)})
+			append(&args.bindings, Binding{kind = .Push, span = node_span(k, child)})
+			args.bindings[len(args.bindings) - 1].value = build_shorthand(k, args, child)
 		} else {
 			build_binding(k, args, child)
 		}
@@ -248,7 +257,7 @@ build_shorthand :: proc(k: ^Kernel, args: ^Scope, idx: syn.Node_Index) -> ^Expr 
 	sh := Shorthand {
 		field = Access{target = new_expr(Carving{span}), name = name, ordinal = ordinal, span = span},
 	}
-	if ref, found, _ := lookup(k, args, name, ordinal, span); found do sh.outer = new_expr(ref)
+	if ref, found, _ := lookup(args, name, ordinal, span); found do sh.outer = new_expr(ref)
 	return new_expr(build_carve_args(k, args, idx, new_expr(sh)))
 }
 
@@ -269,7 +278,7 @@ build_identifier :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 	span := ast.node_spans[idx]
 	name := syn.node_name_str(ast, idx)
 	if name == "" do name = syn.node_capture_str(ast, idx) // `(c)` : un nom entre parenthèses
-	ref, found, missing := lookup(k, s, name, int(ast.node_data[idx].identifier.ordinal), span)
+	ref, found, missing := lookup(s, name, int(ast.node_data[idx].identifier.ordinal), span)
 	if !found {
 		// dans une branche `C: -> …`, le nom est peut-être un champ de C
 		for sc := s; sc != nil; sc = sc.parent do if shaped_cover(sc.cover) do return unsupported(k, idx, "la déstructuration")
@@ -293,7 +302,8 @@ build_match :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> ^Expr {
 		if product == syn.INVALID_NODE do return unsupported(k, idx, "une branche sans production")
 		b := new_scope(s, node_span(k, cover != syn.INVALID_NODE ? cover : product))
 		if cover != syn.INVALID_NODE do b.cover = build_cover(k, b, cover)
-		append(&b.bindings, Binding{kind = .Product, value = build_expr(k, b, product), span = node_span(k, product)})
+		append(&b.bindings, Binding{kind = .Product, span = node_span(k, product)})
+		b.bindings[0].value = build_expr(k, b, product)
 		append(&branches, b)
 	}
 	m.branches = branches[:]
@@ -335,7 +345,7 @@ shaped_cover :: proc(cover: ^Expr) -> bool {
 
 // lookup : le binding visible au-dessus de s qui porte ce nom (la n-ième occurrence
 // avec `x#n`) ; sinon, pourquoi il n'y en a pas.
-lookup :: proc(k: ^Kernel, s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (ref: Ref, found: bool, missing: string) {
+lookup :: proc(s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (ref: Ref, found: bool, missing: string) {
 	up := 0
 	child: ^Scope = nil // le scope d'où l'on vient
 	for sc := s; sc != nil; sc = sc.parent {
@@ -343,7 +353,7 @@ lookup :: proc(k: ^Kernel, s: ^Scope, name: string, ordinal: int, span: syn.Span
 			// `x#n` : la n-ième occurrence, dans le premier scope qui définit le nom.
 			seen := 0
 			for b, i in sc.bindings {
-				if b.name != name || !visible(k, sc, i, child) do continue
+				if b.name != name || !visible(sc, i, child) do continue
 				if seen == ordinal do return Ref{up, i, name, span}, true, ""
 				seen += 1
 			}
@@ -351,7 +361,7 @@ lookup :: proc(k: ^Kernel, s: ^Scope, name: string, ordinal: int, span: syn.Span
 		} else {
 			#reverse for b, i in sc.bindings {
 				if b.name != name && (b.capture == "" || b.capture != name) do continue
-				if visible(k, sc, i, child) do return Ref{up, i, name, span}, true, ""
+				if visible(sc, i, child) do return Ref{up, i, name, span}, true, ""
 			}
 		}
 		up += 1
@@ -361,24 +371,14 @@ lookup :: proc(k: ^Kernel, s: ^Scope, name: string, ordinal: int, span: syn.Span
 }
 
 // visible : le binding i de sc est-il visible depuis child, le scope d'où l'on
-// vient ? Un binding qu'on est en train de construire, et dont child est le corps,
-// est le scope qui se nomme lui-même : il ne se voit que dans ses productions
-// (specs/kernel-recursion.md §7).
-visible :: proc(k: ^Kernel, sc: ^Scope, i: int, child: ^Scope) -> bool {
-	if child == nil do return true
-	in_sc, in_child := false, false
-	product := false
-	#reverse for b in k.building {
-		if !in_sc && b.scope == sc {
-			in_sc = true
-			if b.index != i do return true // un binding déjà construit
-		}
-		if !in_child && b.scope == child {
-			in_child = true
-			product = b.product
-		}
-	}
-	return !in_sc || !in_child || product
+// vient ? Le binding en construction est le dernier de son scope (build_binding) :
+// il ne se voit que depuis les productions du scope qui est sa valeur
+// (specs/kernel-recursion.md §7). Le prélude est déjà construit.
+visible :: proc(sc: ^Scope, i: int, child: ^Scope) -> bool {
+	if sc.parent == nil || i != len(sc.bindings) - 1 do return true
+	body, literal := scope_literal(sc.bindings[i].value)
+	if !literal || body != child || len(child.bindings) == 0 do return false
+	return child.bindings[len(child.bindings) - 1].kind == .Product
 }
 
 // Les builtins sont des noms pour des ensembles (specs/language/10). Ils sont les
