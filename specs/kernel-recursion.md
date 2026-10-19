@@ -88,7 +88,7 @@ un scope est une haie (une suite d'arbres étiquetés).
 
 **F — supporté, pas régulier.** La variable apparaît au milieu d'une suite.
 `AⁿBⁿ` n'est pas un langage régulier : c'est une grammaire algébrique. Le système
-d'équations le représente en fini, et l'appartenance d'une valeur se décide (§4).
+d'équations le représente en fini, et l'appartenance d'une valeur se décide (§6).
 L'inclusion de deux tels types n'est pas décidable en général : `Unproven` quand
 on ne sait pas, jamais une acceptation.
 
@@ -111,37 +111,61 @@ représentation pour l'inclusion.
 | E | `Even = {} \| {u8: ...Odd}`, `Odd = {string: ...Even}` | `Even = {0..*(u8: string:)}`, `Odd = {string: 0..*(u8: string:)}` | `{}`, `{string:}` |
 | F | `X = {} \| {A: ...X  B:}` | `{n*A:  n*B:}`, `n ∈ 0..` | `{}` |
 | G | `X(T) = {} \| {T: ...X({T:})}` | n éléments, le k-ième de type `Fᵏ(T)`, `F(T) = {T:}` | `{}` |
-
-La représentation gagne quatre formes de type :
-
-1. **La répétition comptée** (A, B, C, E) : une suite de bindings, ou d'un groupe de
-   bindings, répétée par un ensemble de comptes : `{0..*T:}`, `{0..*(u8: string:)}`.
-   C'est la solution d'Arden, et la même algèbre que `'a'..'z' * 2..` sur les
-   chaînes (`regular.odin`).
-2. **Le type qui se nomme lui-même** (D) : `X` dans un champ n'est pas une suite,
-   Arden ne s'applique pas. Le type garde son équation et `X` le désigne dans le
-   champ. Le cas de base `{}` garantit des arbres finis.
-3. **Le compte partagé** (F) : le même `n` compte les `A` et les `B`. C'est une
-   inconnue entière, `n ∈ 0..`, comme celles de `??` dans le kernel.
-4. **La répétition indexée** (G) : le k-ième élément a le type `Fᵏ(T)`, où `F` est
-   ce que la récursion fait à l'argument.
+| Nested | `X = {} \| {u8: ...X  string:} \| {bool: ...X  f64:}` | l'équation elle-même | `{}` |
 
 `Odd` (E) n'a qu'une production, qui passe par `Even`, mais son défaut
 `{string: ...défaut(Even)}` vaut `{string:}`, fini : il est légal.
 
-## 4. Ce qu'on décide
+## 4. Deux nouvelles formes de type
 
-- **Appartenance d'une valeur** (`a` est-il un `Array{u8}` ?) : la valeur est
-  finie, on déplie le système sur elle. Inductif : une appartenance qui dépend
-  d'elle-même n'est pas établie (`record_member`, `k.matching`, déjà là).
-  Décidable dans **tous** les cas, F compris.
-- **Inclusion et vide** (`Array{u8}` ⊆ `Array{u16}` ?) : coinductif, on suppose
-  l'inclusion en cours vraie. Exact pour A–E (langages réguliers d'arbres).
-  Pour F, `Unproven` quand on ne sait pas, jamais une acceptation.
+1. **Les suites comptées.** Une suite de bindings, ou d'un groupe de bindings,
+   répétée par un ensemble de comptes : `{0..*T:}`, `{1..*T:}`,
+   `{0..*(u8: string:)}`. Avec deux variantes : le compte partagé
+   (`{n*A:  n*B:}`, `n ∈ 0..`, une inconnue entière comme celles de `??`) et la
+   répétition indexée (le k-ième élément de type `Fᵏ(T)`). Même algèbre que
+   `'a'..'z' * 2..` sur les chaînes (`regular.odin`).
+2. **Les types équation.** L'équation elle-même, gardée comme type :
+   `X = {} | {u8: ...X  string:} | {bool: ...X  f64:}`, où `X` désigne le type.
+   C'est la forme de base : elle est finie et exacte pour tout type récursif.
+
+## 5. Résoudre quand c'est possible
+
+On résout l'équation en suite comptée quand on le peut :
+
+- récursion à un bout d'une suite (A, B, C, E) : le lemme d'Arden ;
+- une seule paire autour de la récursion (F) : un compte partagé ;
+- l'argument qui change à chaque niveau (G) : une répétition indexée.
+
+Sinon, le type **reste une équation** : récursion dans un champ (D, les arbres),
+plusieurs paires (`Nested`), plusieurs self-références dans une suite. Une forme
+comptée de ces types serait une sur-approximation (elle admettrait des valeurs
+fausses) : on ne s'en sert jamais comme type.
+
+## 6. Typecheck avec un type équation
+
+**On ne déplie jamais.** Le typechecker travaille sur l'équation telle quelle :
+
+- **Une valeur dans le type** (`Nested:c -> {1 true 2.5 "x"}`) : la valeur est
+  finie, on la lit contre l'équation. Toujours décidable.
+- **Un type inclus dans un autre** (`Nested:r -> gen{n -> ??}!`, §7) : la
+  comparaison porte sur **ce que les types admettent**, jamais sur leur écriture.
+  `X = {} | {u8: u8: ...X}` est inclus dans `Y = {} | {u8: ...Y}` alors qu'aucune
+  production de X ne correspond à une production de Y.
+  - deux suites comptées : on compare les comptes et les éléments (les entiers pairs
+    sont inclus dans tous les entiers) ;
+  - sinon, élément par élément : ce que chaque type admet en premier, puis ce qu'il
+    reste à admettre (les dérivées de Brzozowski, déjà utilisées pour les chaînes),
+    en retenant les paires déjà comparées.
+
+  Le kernel s'arrête toujours : sur une paire qu'il ne sait pas comparer, il répond
+  « pas prouvé » (`Unproven`), jamais une acceptation. L'inclusion de deux grammaires
+  quelconques est indécidable (Bar-Hillel, Perles, Shamir 1961), mais seulement
+  pour des types artificiels que personne n'écrit.
+- **Un pattern exhaustif** : les branches couvrent-elles chaque production ?
 - **Le défaut** : la solution de l'équation de la première production seule
   (§1) ; une solution infinie rend la définition illégale.
 
-## 5. Les fonctions récursives
+## 7. Les fonctions récursives
 
 Une fonction récursive structurelle suit la récursion de sa donnée : `map`
 appelle `map` sur la queue `r` de son argument. Si l'argument est `Array{T}`,
@@ -150,13 +174,42 @@ donc la même inconnue que l'appel en cours (§1) : le type du résultat est une
 inconnue `Y` du système, `Y = {} | {E: ...Y}`, soit `{0..*E:}`. Pas de
 déroulement : une équation de plus.
 
-Une fonction sur des nombres (`f{n -> n - 1}`) n'a pas de structure : le type de
-l'argument change à chaque niveau (`n`, `n - 1`, …), comme dans G. Il faut un
-élargissement de l'argument (un intervalle qui grandit jusqu'à se stabiliser,
-Cousot & Cousot 1977), ou dérouler quand les valeurs sont connues et qu'on sait
-que ça termine.
+Une fonction récursive appelée avec une inconnue donne elle aussi un type
+équation :
 
-## 6. À réfléchir
+```syntact
+gen -> {
+  u8:n -> ??
+  -> n ? {0 -> {}, -> {1 ...gen{n -> n - 1}!  "x"}}
+}
+
+Nested:r -> gen{n -> ??}!
+```
+
+`gen{n -> ??}!` a pour type `Y = {} | {1 ...Y "x"}`, soit `{n*1:  n*"x":}`.
+Vérifier `r`, c'est vérifier que ce type est inclus dans `Nested` (§6).
+
+Une fonction sur des nombres suit la même loi : on ne la déplie jamais, son
+appel récursif est une inconnue, et son type est une équation. Comme pour les
+types, on la **résout quand c'est possible**, ici en forme close :
+
+```syntact
+sum -> {
+  u8:n -> ??
+  -> n ? {0 -> 0, -> n + sum{n -> n - 1}!}
+}
+```
+
+L'équation `sum(n) = n + sum(n - 1)`, `sum(0) = 0` se résout en
+`sum(n) = n·(n+1)/2` : le type de `sum{n -> ??}!` est cette forme close, et
+`sum{n -> 5}!` vaut `15` par substitution. Sinon, le type reste l'équation.
+
+Les entrées sont en général **bornées** (`u8:n` : `n ∈ 0..255`). La borne sert à
+prouver que la forme close ne déborde pas (`255·256/2 = 32640`), et l'ensemble des
+valeurs du résultat se calcule sur cette borne.
+
+## 8. À réfléchir
 
 1. **G** — décider l'inclusion de deux répétitions indexées.
-2. **Les nombres** (§5) — élargir, ou dérouler sous quelle condition ?
+2. **Les formes closes** (§7) — quelles classes de récurrences on résout, et le
+   débordement à largeur fixe (`specs/research-recursion.md`).
