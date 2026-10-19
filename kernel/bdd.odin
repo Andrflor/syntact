@@ -246,7 +246,7 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 // scope n'est lu qu'une fois.
 color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	if x, d, recursive := equation_var(t); recursive {
-		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, d, equation = x.written))}, true
+		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, d, equation = x.type))}, true
 	}
 	#partial switch v in t^ {
 	case Set:
@@ -295,7 +295,7 @@ arden :: proc(s: ^Scope, alternatives: []Set) -> (Set, bool) {
 	for x in alternatives {
 		r, single := lone_record(x)
 		at := -1 // la place de la suite X dans la production
-		if single do for f, i in r.fields do if f.run && equation_of(f.set) == s {
+		if single do for f, i in r.fields do if f.run && set_equation(f.set) == s {
 			if at >= 0 do return {}, false // deux fois X : pas linéaire
 			at = i
 		}
@@ -343,8 +343,8 @@ records_union :: proc(records: []^Record) -> (u: Set) {
 	return
 }
 
-// equation_of : l'ensemble est une self-référence ; le scope dont c'est l'équation.
-equation_of :: proc(x: Set) -> ^Scope {
+// set_equation : l'ensemble est une self-référence ; le scope dont c'est l'équation.
+set_equation :: proc(x: Set) -> ^Scope {
 	r, single := lone_record(x)
 	if !single || r.equation == nil do return nil
 	return r.shape
@@ -627,7 +627,7 @@ printed_bdd :: proc(b: Bdd) -> (string, Level) {
 		atom := print_type(new_expr(v.atom.shape))
 		if v.atom.exact do atom = fmt.tprintf("{{-> %s}}", atom) // le scope lui-même, pas sa forme
 		if has_count(v.atom) do atom = print_fields(v.atom.fields) // une solution d'Arden : ses champs
-		if v.atom.equation != nil do atom = print_expr(v.atom.equation) // la self-référence telle qu'écrite
+		if v.atom.equation != nil do atom = print_equation(v.atom.equation) // la self-référence, jamais dépliée
 		parts := make([dynamic]Part, context.temp_allocator)
 		branch :: proc(parts: ^[dynamic]Part, head: string, head_level: Level, rest: Bdd) {
 			if is_leaf(rest, .Bottom) do return

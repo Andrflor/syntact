@@ -24,26 +24,22 @@ import "core:strings"
 // quand on peut énumérer ses inconnues, une enveloppe sûre sinon. Une couleur ne
 // dépend d'aucune inconnue.
 
-// Var : une variable — une valeur inconnue, qui porte son domaine : un type. Toutes
-// ses mentions sont le même nœud. `id` ne sert qu'à l'ordre et à l'impression.
+// Var : une variable — une valeur inconnue qui porte son type. Toutes ses mentions
+// sont le même nœud ; `id` ne sert qu'à l'ordre et à l'impression.
 //
-// Le domaine d'un `??` est un ensemble. Celui d'une self-référence est une
-// équation : le scope en cours de définition, qui la mentionne
-// (specs/equational.md §2) ; `written` est alors la self-référence telle
-// qu'écrite, pour l'impression — jamais dépliée.
+// Le type d'un `??` est un ensemble. Celui d'une self-référence est l'équation
+// qu'elle désigne, telle qu'une expression l'écrit (specs/equational.md §2) : le
+// scope en cours de définition (X), ce scope carvé par d'autres arguments, ou sa
+// production (un appel récursif : `f{n -> n - 1}!`).
 Var :: struct {
-	id:      int,
-	domain:  ^Expr,
-	written: ^Expr,
-	args:    []^Expr, // une équation appliquée : les types que reçoivent les bindings de son scope ; nil : les siens
-	call:    bool, // la valeur de sa production (Y, un appel récursif), pas le scope (X)
+	id:   int,
+	type: ^Expr,
 }
 
 Mono :: struct {
 	coef: i128,
 	vars: []^Var, // triées par id, répétées pour les puissances : n² = [n, n]
 }
-
 Poly :: struct {
 	monos: []Mono, // triés, coefficients non nuls
 	const: i128,
@@ -73,7 +69,7 @@ ENUMERATION_LIMIT :: 1 << 16
 
 // --- symboles ---
 
-// new_symbol : une variable dont le domaine est `set`. Une variable à une seule
+// new_symbol : une variable de type `set`. Une variable à une seule
 // valeur possible est cette valeur.
 new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 	if is_atom(set) do return new_expr(set)
@@ -87,29 +83,43 @@ new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 // new_var : une variable de domaine `set`.
 new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
 	v := new(Var)
-	v^ = Var{id = k.variables, domain = new_expr(set)}
+	v^ = Var{k.variables, new_expr(set)}
 	k.variables += 1
 	return v
 }
 
-// new_equation_var : la self-référence `written` au scope d, en cours de
-// définition — une variable dont le domaine est l'équation de d, appliquée aux
-// types `args` (nil : les siens). `call` : la valeur de sa production, un appel
-// récursif.
-new_equation_var :: proc(k: ^Kernel, d: ^Scope, written: ^Expr, args: []^Expr = nil, call := false) -> ^Expr {
+// new_equation_var : une variable dont le type est une équation — `type` écrit sur
+// le scope en cours de définition.
+new_equation_var :: proc(k: ^Kernel, type: ^Expr) -> ^Expr {
 	v := new(Var)
-	v^ = Var{k.variables, new_expr(d), written, args, call}
+	v^ = Var{k.variables, type}
 	k.variables += 1
 	return new_expr(Term{op = .Sym, sym = v})
 }
 
-// equation_var : t est une self-référence, un scope (X) ; sa variable, et le scope
-// dont c'est l'équation.
+// equation_of : le scope dont le type de v est l'équation, et l'expression qui
+// l'écrit : le scope lui-même, carvé, ou collapsé (un appel).
+equation_of :: proc(v: ^Var) -> (d: ^Scope, carve: Maybe(Carve), call: bool, ok: bool) {
+	t := v.type
+	if c, collapsed := t^.(Collapse); collapsed {
+		t = c.target
+		call = true
+	}
+	if x, carved := t^.(Carve); carved {
+		carve = x
+		t = x.target
+	}
+	d, ok = t^.(^Scope)
+	return
+}
+
+// equation_var : t est une self-référence qui désigne un scope (X, carvé ou non) ;
+// sa variable, et le scope dont c'est l'équation.
 equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
 	term, is_term := t^.(Term)
-	if !is_term || term.op != .Sym || term.sym.call do return nil, nil, false
-	d, is_scope := term.sym.domain^.(^Scope)
-	return term.sym, d, is_scope
+	if !is_term || term.op != .Sym do return nil, nil, false
+	d, _, call, ok := equation_of(term.sym)
+	return term.sym, d, ok && !call
 }
 
 // pending : t est une variable dont le domaine est une équation pas encore
@@ -121,10 +131,10 @@ pending :: proc(t: ^Expr) -> (^Var, bool) {
 	return term.sym, !solved
 }
 
-// domain : l'ensemble des valeurs possibles d'une variable ; faux quand son domaine
+// domain : l'ensemble des valeurs possibles d'une variable ; faux quand son type
 // est une équation pas encore résolue.
 domain :: proc(v: ^Var) -> (Set, bool) {
-	s, solved := v.domain^.(Set)
+	s, solved := v.type^.(Set)
 	return s, solved
 }
 
@@ -1029,8 +1039,7 @@ printed_poly :: proc(p: Poly) -> (string, Level) {
 		if coef != 1 do fmt.sbprintf(&b, "%d*", coef)
 		for v, j in m.vars {
 			if j > 0 do strings.write_byte(&b, '*')
-			if v.written != nil do strings.write_string(&b, print_at(v.written, .CALL))
-			else do fmt.sbprintf(&b, "??%d", v.id)
+			strings.write_string(&b, print_var(v))
 		}
 	}
 	if p.const > 0 do fmt.sbprintf(&b, " + %d", p.const)
@@ -1060,8 +1069,7 @@ printed_term :: proc(t: Term) -> (string, Level) {
 	}
 	switch t.op {
 	case .Sym:
-		if t.sym.written != nil do return printed(t.sym.written, .Program) // la self-référence telle qu'écrite
-		return fmt.tprintf("??%d", t.sym.id), .PRIMARY
+		return print_var(t.sym), .CALL
 	case .F_Neg:
 		return fmt.tprintf("-%s", print_type_at(t.args[0], .CALL)), .UNARY
 	case .F_Add, .Concat:

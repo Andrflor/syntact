@@ -217,6 +217,38 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 	}
 }
 
+// print_var : une variable — `??0` pour un `??`, l'équation telle qu'écrite pour une
+// self-référence.
+print_var :: proc(v: ^Var) -> string {
+	if _, solved := v.type^.(Set); solved do return fmt.tprintf("??%d", v.id)
+	return print_equation(v.type)
+}
+
+// print_equation : le type d'une self-référence, jamais déplié — le scope par le nom
+// qui le définit, ses arguments, son collapse.
+print_equation :: proc(t: ^Expr) -> string {
+	#partial switch v in t^ {
+	case Collapse:
+		return fmt.tprintf("%s!", print_equation(v.target))
+	case Carve:
+		return fmt.tprintf("%s%s", print_equation(v.target), print_scope(v.args, .Program, v.ordinals))
+	case ^Scope:
+		return name_of(v)
+	}
+	return print_expr(t)
+}
+
+// name_of : le nom du binding qui définit le scope s — écrit, ou copié (une copie
+// garde le span de ce qu'elle copie).
+name_of :: proc(s: ^Scope) -> string {
+	for sc := s.parent; sc != nil; sc = sc.parent {
+		for b in sc.bindings {
+			if v, literal := scope_literal(b.value); literal && v.span == s.span && b.name != "" do return b.name
+		}
+	}
+	return "{…}"
+}
+
 // --- ensembles ---
 
 print_set :: proc(s: Set) -> string {

@@ -230,7 +230,7 @@ recursive_default :: proc(k: ^Kernel, x: ^Var, d: ^Scope, b: ^Binding) -> ^Expr 
 	p := first_production(d)
 	if p != nil && p.value_type != nil do return p.value_type
 	if p != nil && !typing(k, d, p) do return report(k, .Unsupported, b.span, "pas encore dans le kernel : une self-référence écrite avant le cas de base")
-	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("le cas de base de %s revient à lui-même : son défaut serait infini", print_expr(x.written)))
+	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("le cas de base de %s revient à lui-même : son défaut serait infini", print_equation(x.type)))
 }
 
 // typing : le binding p de s est celui qu'on est en train de typer.
@@ -264,7 +264,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	b := sc.bindings[r.index]
 	t := b.value_type
 	// le scope qu'on est en train de définir : une self-référence
-	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_equation_var(k, v, new_expr(r))
+	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_equation_var(k, new_expr(v))
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
 	return t
 }
@@ -306,8 +306,8 @@ type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 		// un appel récursif : la valeur de la production de l'équation, appliquée
 		// aux mêmes types que x — une inconnue (specs/equational.md §2). Sur les
 		// mêmes types, connus, il revient à lui-même : la récursion ne finit pas.
-		if x.args == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s revient avec les mêmes arguments : la récursion ne finit pas", print_expr(x.written)))
-		return new_equation_var(k, d, new_expr(c), x.args, call = true)
+		if _, carved, _, _ := equation_of(x); carved == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s! revient avec les mêmes arguments : la récursion ne finit pas", print_equation(x.type)))
+		return new_equation_var(k, new_expr(Collapse{target = x.type, span = c.span}))
 	}
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Execute, c.span, "on ne collapse qu'un scope")

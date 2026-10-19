@@ -128,7 +128,7 @@ CASES := []Test_Case {
 	// une production colorée s'imprime `-> C:`, `-> C:(v)`
 	{"S -> {\n  -> u8:\n  -> string:\n}\nT -> {-> u8:(5)}", "{S -> {-> 0..255:(0)  -> string:(\"\")}  T -> {-> 0..255:(5)}}", {}},
 	// une self-référence est l'inconnue de type X : ni copiée, ni dépliée
-	{"f -> {\n  u8:n\n  -> f{n -> n}\n}", "{f -> {0..255:n -> 0  -> f{n -> n}}}", {}},
+	{"f -> {\n  u8:n\n  -> f{n -> n}\n}", "{f -> {0..255:n -> 0  -> f}}", {}}, // les mêmes arguments : f lui-même
 	// ses arguments se vérifient comme ceux de tout carve : n vaut 1, n - 1 ∉ 1..255 ;
 	// avec d'autres arguments, c'est l'équation appliquée à d'autres types
 	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch}},
