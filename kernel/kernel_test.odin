@@ -127,6 +127,10 @@ CASES := []Case {
 	{"Circle -> {u8:r}\nSquare -> {u8:w  u8:h}\nShape -> {\n  -> Circle:\n  -> Square:\n}\nShape:s{r -> 3}", "", {}}, // le défaut : la première production
 	// une production colorée s'imprime `-> C:`, `-> C:(v)`
 	{"S -> {\n  -> u8:\n  -> string:\n}\nT -> {-> u8:(5)}", "{S -> {-> 0..255:(0)  -> string:(\"\")}  T -> {-> 0..255:(5)}}", {}},
+	// une self-référence est l'inconnue de type X : ni copiée, ni dépliée
+	{"f -> {\n  u8:n\n  -> f{n -> n + 1}\n}", "{f -> {0..255:n -> 0  -> f{n -> n + 1}}}", {}},
+	// ses arguments se vérifient comme ceux de tout carve : n vaut 1, n - 1 ∉ 1..255
+	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch}},
 	{"square -> {\n  n -> 0\n  -> n * n\n}\nr -> square{n -> 5}!", "{square -> {n -> 0  -> 0}  r -> 25}", {}},
 	{"a -> {\n  x -> 1\n  b -> {-> x}\n}\nc -> a{x -> 2}.b!\nd -> a.b!", "{a -> {x -> 1  b -> {-> 1}}  c -> 2  d -> 1}", {}}, // les scopes écrits dedans suivent la copie
 	{"a -> {u8:d}\nb -> a{d -> ??}", "{a -> {0..255:d -> 0}  b -> {0..255:d -> ??0}}", {}}, // l'argument prend la couleur du binding qu'il remplace

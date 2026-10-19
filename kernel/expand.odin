@@ -73,6 +73,10 @@ type_expansion :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, shape: []Place) {
 	}
 	if is_invalid(b.value_type) do return
 	if _, is_scope := b.value_type^.(^Scope); !is_scope {
+		if _, itself := b.value_type^.(Itself); itself {
+			b.value_type = report(k, .Unsupported, b.span, "pas encore dans le kernel : expanser un type récursif")
+			return
+		}
 		b.value_type = report(k, .Invalid_Expansion, b.span, fmt.tprintf("on n'expanse qu'un scope : %s", brief(b.value_type)))
 	}
 }

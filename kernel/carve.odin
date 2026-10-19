@@ -18,9 +18,11 @@ import "core:fmt"
 type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
+	if x, itself := t^.(Itself); itself do return carve_itself(k, x.scope, x.scope, c)
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return report(k, .Invalid_Carve, c.span, fmt.tprintf("on ne carve qu'un scope : %s", brief(t)))
 	c.args.carving = s // ce que `.x` désigne dans les arguments
+	if d, found := redefined(k, s); found do return carve_itself(k, s, d, c)
 	// dans une copie, ce carve est dérivé avec elle : ses erreurs vont au carve d'origine
 	derived := copy_scope(s, s.parent, k.scene.site != {} ? k.scene.site : c.span)
 	targets := fill(k, s, derived, c)
@@ -30,6 +32,25 @@ type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	if !k.scene.quiet do mark_changes(derived, c.args, {})
 	type_scope(k, derived, s.shape)
 	return new_expr(derived)
+}
+
+// redefined : le scope en cours de définition que le carve de s redonne — même
+// source écrite (une copie garde le span de ce qu'elle copie). Quels que soient
+// ses arguments, c'est une self-référence : X, ou X appliqué à d'autres arguments.
+redefined :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
+	#reverse for d in k.defining do if d.span == s.span do return d, true
+	return nil, false
+}
+
+// carve_itself : le carve de s est une self-référence, qui redonne d. Rien n'est
+// copié ni typé de s ; ses arguments sont vérifiés contre les bindings qu'ils
+// remplissent, comme pour tout carve.
+carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
+	c.args.carving = s
+	targets := fill(k, s, copy_scope(s, s.parent, c.span), c)
+	for j, i in targets do if j >= 0 do type_argument(k, Carved{c.args, i}, s.bindings[j].color_type)
+	append(&k.typed, c.args) // vérifiés à la fin, avec tout le reste
+	return new_expr(Itself{d, new_expr(c)})
 }
 
 // fill : met chaque argument à la place du binding qu'il vise. `->` remplit un

@@ -153,6 +153,15 @@ Unknown :: struct {
 	span:   syn.Span,
 }
 
+// Itself : une self-référence — un carve qui redonne `scope`, en cours de
+// définition. C'est l'inconnue de type X de son équation
+// (specs/kernel-recursion.md §1) : rien n'est copié, rien n'est déplié.
+// `written` : le carve tel qu'écrit, pour l'impression.
+Itself :: struct {
+	scope:   ^Scope,
+	written: ^Expr,
+}
+
 // Une erreur déjà signalée à cet endroit : tout ce qui en dépend reste silencieux.
 Invalid :: struct {}
 
@@ -174,6 +183,7 @@ Expr :: union {
 	Poly, // une valeur entière qui dépend d'inconnues (un type seulement) : unknown.odin
 	Term, // une autre valeur qui dépend d'inconnues
 	Set_Form, // un ensemble qui dépend d'inconnues : set_form.odin
+	Itself, // l'inconnue de type d'une self-référence
 	Invalid,
 }
 
@@ -224,6 +234,7 @@ Kernel :: struct {
 	scene:   Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
 	refined:  [dynamic]Refinement, // dans une branche : les inconnues restreintes à ce qu'elle admet
 	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
+	defining: [dynamic]^Scope, // les scopes en cours de typage : ce qu'une self-référence désigne
 }
 
 // Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit

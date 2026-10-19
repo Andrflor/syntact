@@ -304,6 +304,8 @@ exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 		if is_atom(v) do return v, true
 		return Set{sorts = {.Sets}, sets = values_point(v)}, true
 	case ^Scope:
+		// une expansion sans scope typé : on ne sait pas ce qu'elle dépose
+		for b in v.bindings do if _, ok := expanded(b); b.kind == .Expand && !ok do return {}, false
 		shown := places(v)
 		fields := make([]Field, len(shown))
 		for p, i in shown {
