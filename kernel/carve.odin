@@ -18,7 +18,7 @@ import "core:fmt"
 type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
-	if x, itself := t^.(Itself); itself do return carve_itself(k, x.scope, x.scope, c)
+	if _, d, recursive := equation_var(t); recursive do return carve_itself(k, d, d, c)
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return report(k, .Invalid_Carve, c.span, fmt.tprintf("on ne carve qu'un scope : %s", brief(t)))
 	c.args.carving = s // ce que `.x` désigne dans les arguments
@@ -58,7 +58,7 @@ carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
 		if is_invalid(given) do return given
 		if !expr_equal(k, given, d.bindings[j].value_type) do return report(k, .Unsupported, c.span, "pas encore dans le kernel : une self-référence avec d'autres arguments")
 	}
-	return new_expr(Itself{d, new_expr(c)})
+	return new_equation_var(k, d, new_expr(c))
 }
 
 // fill : met chaque argument à la place du binding qu'il vise. `->` remplit un

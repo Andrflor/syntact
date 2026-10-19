@@ -26,9 +26,15 @@ import "core:strings"
 
 // Var : une variable — une valeur inconnue, qui porte son domaine : un type. Toutes
 // ses mentions sont le même nœud. `id` ne sert qu'à l'ordre et à l'impression.
+//
+// Le domaine d'un `??` est un ensemble. Celui d'une self-référence est une
+// équation : le scope en cours de définition, qui la mentionne
+// (specs/equational.md §2) ; `written` est alors la self-référence telle
+// qu'écrite, pour l'impression — jamais dépliée.
 Var :: struct {
-	id:     int,
-	domain: ^Expr,
+	id:      int,
+	domain:  ^Expr,
+	written: ^Expr,
 }
 
 Mono :: struct {
@@ -79,15 +85,34 @@ new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 // new_var : une variable de domaine `set`.
 new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
 	v := new(Var)
-	v^ = Var{k.variables, new_expr(set)}
+	v^ = Var{k.variables, new_expr(set), nil}
 	k.variables += 1
 	return v
 }
 
-// domain : l'ensemble des valeurs possibles d'une variable.
-domain :: proc(v: ^Var) -> Set {
-	s, _ := v.domain^.(Set)
-	return s
+// new_equation_var : la self-référence `written` au scope d, en cours de
+// définition — une variable dont le domaine est l'équation de d.
+new_equation_var :: proc(k: ^Kernel, d: ^Scope, written: ^Expr) -> ^Expr {
+	v := new(Var)
+	v^ = Var{k.variables, new_expr(d), written}
+	k.variables += 1
+	return new_expr(Term{op = .Sym, sym = v})
+}
+
+// equation_var : t est une self-référence ; sa variable, et le scope dont c'est
+// l'équation.
+equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
+	term, is_term := t^.(Term)
+	if !is_term || term.op != .Sym do return nil, nil, false
+	d, is_scope := term.sym.domain^.(^Scope)
+	return term.sym, d, is_scope
+}
+
+// domain : l'ensemble des valeurs possibles d'une variable ; faux quand son domaine
+// est une équation pas encore résolue.
+domain :: proc(v: ^Var) -> (Set, bool) {
+	s, solved := v.domain^.(Set)
+	return s, solved
 }
 
 // --- le contexte ---
@@ -103,11 +128,12 @@ Fact :: struct {
 // changent pas, c'est ce qu'on sait de leurs variables qui change.
 Context :: []Fact
 
-// known_domain : le domaine de v dans le contexte ctx.
-known_domain :: proc(ctx: Context, v: ^Var) -> Set {
-	d := domain(v)
+// known_domain : le domaine de v dans le contexte ctx ; faux quand son domaine est
+// une équation pas encore résolue.
+known_domain :: proc(ctx: Context, v: ^Var) -> (d: Set, solved: bool) {
+	d = domain(v) or_return
 	for f in ctx do if f.var == v do d = set_intersect(d, f.domain)
-	return d
+	return d, true
 }
 
 // with : le contexte, et un fait de plus.
@@ -171,7 +197,9 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 	case Term:
 		switch v.op {
 		case .Sym:
-			return pure_domain(domain(v.sym))
+			d, solved := domain(v.sym)
+			if !solved do return .Ints, false
+			return pure_domain(d)
 		case .F_Add, .F_Mul, .F_Neg:
 			return .Floats, true
 		case .Concat, .Repeat:
@@ -308,7 +336,10 @@ poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, ex
 			j := i
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
 			ok: bool
-			prod, ok = ints_arith(.Mul, prod, ints_pow(known_domain(ctx, m.vars[i]).ints, j - i))
+			d, solved := known_domain(ctx, m.vars[i])
+			if !solved do d = set_of_ints(ints_all()) // une équation pas encore résolue : tout entier
+			prod, ok = ints_arith(.Mul, prod, ints_pow(d.ints, j - i))
+			exact &&= solved
 			exact &&= ok
 			i = j
 		}
@@ -567,7 +598,9 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 		}
 		switch v.op {
 		case .Sym:
-			return known_domain(ctx, v.sym), true
+			d, solved := known_domain(ctx, v.sym)
+			if !solved do return set_everything(), false // une équation pas encore résolue
+			return d, true
 		case .F_Add:
 			return set_of_floats(floats_arith(.Add, arg(k, v, 0, ctx).floats, arg(k, v, 1, ctx).floats)), false
 		case .F_Mul:
@@ -657,7 +690,8 @@ assignments_of :: proc(k: ^Kernel, ids: []^Var, ctx: Context = nil) -> (a: Assig
 	a.domains = make([][]Atom, len(ids))
 	total := 1
 	for id, i in ids {
-		a.domains[i] = atoms_of_set(known_domain(ctx, id), ENUMERATION_LIMIT) or_return
+		d := known_domain(ctx, id) or_return
+		a.domains[i] = atoms_of_set(d, ENUMERATION_LIMIT) or_return
 		total *= len(a.domains[i])
 		if total > ENUMERATION_LIMIT do return a, false
 	}
@@ -1012,6 +1046,7 @@ printed_term :: proc(t: Term) -> (string, Level) {
 	}
 	switch t.op {
 	case .Sym:
+		if t.sym.written != nil do return printed(t.sym.written, .Program) // la self-référence telle qu'écrite
 		return fmt.tprintf("??%d", t.sym.id), .PRIMARY
 	case .F_Neg:
 		return fmt.tprintf("-%s", print_type_at(t.args[0], .CALL)), .UNARY

@@ -245,11 +245,12 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 // Faux quand le type dépend d'une inconnue : ce n'est pas un seul ensemble. Un
 // scope n'est lu qu'une fois.
 color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
+	if x, d, recursive := equation_var(t); recursive {
+		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, d, equation = x.written))}, true
+	}
 	#partial switch v in t^ {
 	case Set:
 		return v, true
-	case Itself:
-		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, v.scope, equation = v.written))}, true
 	case ^Scope:
 		if s, seen := k.shapes[v]; seen do return s, true
 		s, closed := scope_color_set(k, v)

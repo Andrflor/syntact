@@ -49,7 +49,7 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 		return type_range(k, v, env)
 	case Unknown:
 		return type_unknown(k, v, env, nil)
-	case Poly, Term, Set_Form, Cases, Itself, Invalid:
+	case Poly, Term, Set_Form, Cases, Invalid:
 		return e // déjà un type
 	}
 	return e
@@ -131,7 +131,7 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 type_color :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> ^Expr {
 	t := type_of(k, b.color, env)
 	if is_invalid(t) do return t
-	if _, itself := t^.(Itself); itself do return t
+	if _, _, recursive := equation_var(t); recursive do return t
 	if _, closed := color_set(k, t); !closed {
 		if holds_invalid(t) do return new_expr(Invalid{}) // une erreur déjà signalée dedans
 		return report(k, .Insoluble_Constraint, b.span, fmt.tprintf("la couleur de %s ne désigne pas un seul ensemble : %s", display(b), brief(t)))
@@ -195,6 +195,7 @@ fits :: proc(r: ^Record, literal: ^Scope) -> bool {
 // production s'il en a, sinon lui-même (`Point:p` vaut Point).
 default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	if color == nil || is_invalid(color) do return new_expr(Invalid{})
+	if x, d, recursive := equation_var(color); recursive do return recursive_default(k, x, d, b)
 	#partial switch c in color^ {
 	case Set:
 		first, _ := set_first_domain(c)
@@ -211,8 +212,6 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	case ^Scope:
 		if p := first_production(c); p != nil do return p.value_type
 		return color
-	case Itself:
-		return recursive_default(k, c, b)
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
 }
@@ -227,10 +226,10 @@ being_defined :: proc(k: ^Kernel, s: ^Scope) -> bool {
 // le cas de base (specs/kernel-recursion.md §1). Si c'est elle qu'on est en train
 // de typer, le cas de base revient à X : son défaut serait infini, la définition
 // est illégale. Sans production, le scope se contient lui-même : pas de cas de base.
-recursive_default :: proc(k: ^Kernel, x: Itself, b: ^Binding) -> ^Expr {
-	p := first_production(x.scope)
+recursive_default :: proc(k: ^Kernel, x: ^Var, d: ^Scope, b: ^Binding) -> ^Expr {
+	p := first_production(d)
 	if p != nil && p.value_type != nil do return p.value_type
-	if p != nil && !typing(k, x.scope, p) do return report(k, .Unsupported, b.span, "pas encore dans le kernel : une self-référence écrite avant le cas de base")
+	if p != nil && !typing(k, d, p) do return report(k, .Unsupported, b.span, "pas encore dans le kernel : une self-référence écrite avant le cas de base")
 	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("le cas de base de %s revient à lui-même : son défaut serait infini", print_expr(x.written)))
 }
 
@@ -265,7 +264,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	b := sc.bindings[r.index]
 	t := b.value_type
 	// le scope qu'on est en train de définir : une self-référence
-	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_expr(Itself{v, new_expr(r)})
+	if v, literal := scope_literal(b.value); t == nil && literal && being_defined(k, v) do return new_equation_var(k, v, new_expr(r))
 	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
 	return t
 }
@@ -273,7 +272,7 @@ type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
 	t := type_of(k, a.target, env)
 	if is_invalid(t) do return t
-	if _, itself := t^.(Itself); itself do return report(k, .Unsupported, a.span, "pas encore dans le kernel : un champ d'un type récursif")
+	if _, _, recursive := equation_var(t); recursive do return report(k, .Unsupported, a.span, "pas encore dans le kernel : un champ d'un type récursif")
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'.%s' : la cible n'est pas un scope", a.name))
 	p, found := find_binding(s, a.name, a.ordinal)
@@ -303,7 +302,7 @@ find_binding :: proc(s: ^Scope, name: string, ordinal: int) -> (Place, bool) {
 type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
-	if _, itself := t^.(Itself); itself do return report(k, .Unsupported, c.span, "pas encore dans le kernel : l'appel récursif")
+	if _, _, recursive := equation_var(t); recursive do return report(k, .Unsupported, c.span, "pas encore dans le kernel : l'appel récursif")
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Execute, c.span, "on ne collapse qu'un scope")
 	p := first_production(s)

@@ -108,8 +108,6 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 	case Unknown:
 		if v.layout == nil do return "??", .PRIMARY
 		return fmt.tprintf("??::%s", print_at(v.layout, .CALL, view)), .CALL
-	case Itself:
-		return printed(v.written, .Program) // le carve tel qu'écrit, jamais déplié
 	case Invalid:
 		return "<invalide>", .PRIMARY
 	}

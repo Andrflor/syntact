@@ -154,15 +154,6 @@ Unknown :: struct {
 	span:   syn.Span,
 }
 
-// Itself : une self-référence — un carve qui redonne `scope`, en cours de
-// définition. C'est l'inconnue de type X de son équation
-// (specs/kernel-recursion.md §1) : rien n'est copié, rien n'est déplié.
-// `written` : le carve tel qu'écrit, pour l'impression.
-Itself :: struct {
-	scope:   ^Scope,
-	written: ^Expr,
-}
-
 // Une erreur déjà signalée à cet endroit : tout ce qui en dépend reste silencieux.
 Invalid :: struct {}
 
@@ -185,7 +176,6 @@ Expr :: union {
 	Term, // une autre valeur qui dépend d'inconnues
 	Set_Form, // un ensemble qui dépend d'inconnues : set_form.odin
 	Cases, // le type d'un pattern sur une inconnue : une valeur par branche atteinte
-	Itself, // l'inconnue de type d'une self-référence
 	Invalid,
 }
 
