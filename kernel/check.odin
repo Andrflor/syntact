@@ -207,7 +207,7 @@ none_admitted :: proc(t, c: Set) -> bool {
 // qu'on croise avec l'ensemble de x.
 affine_in :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context = nil) -> (Verdict, bool) {
 	p, is_poly := v^.(Poly)
-	if !is_poly || len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return .Undecided, false
+	if !is_poly || den(p) != 1 || len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return .Undecided, false
 	a, b := p.monos[0].coef, p.const
 	known, solved := known_domain(ctx, p.monos[0].vars[0])
 	if !solved do return .Undecided, false
@@ -237,7 +237,7 @@ preimage :: proc(bound: Maybe(i128), a, b: i128, up: bool) -> (Maybe(i128), bool
 // nil : infini de ce côté, ou au-delà de l'univers.
 linear_extremes :: proc(k: ^Kernel, v: ^Expr, ctx: Context = nil) -> (lo, hi: Maybe(i128), ok: bool) {
 	p, is_poly := v^.(Poly)
-	if !is_poly do return nil, nil, false
+	if !is_poly || den(p) != 1 do return nil, nil, false
 	for m in p.monos do if len(m.vars) != 1 do return nil, nil, false
 	lo, hi = p.const, p.const
 	for m in p.monos {

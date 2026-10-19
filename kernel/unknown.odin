@@ -43,6 +43,32 @@ Mono :: struct {
 Poly :: struct {
 	monos: []Mono, // triés, coefficients non nuls
 	const: i128,
+	denom: i128, // le dénominateur commun, positif, réduit ; 0 vaut 1. Les valeurs restent entières : n·(n+1)/2
+}
+
+// den : le dénominateur d'un polynôme.
+den :: proc(p: Poly) -> i128 {
+	return p.denom == 0 ? 1 : p.denom
+}
+
+// numerator : le polynôme sans son dénominateur.
+numerator :: proc(p: Poly) -> Poly {
+	q := p
+	q.denom = 0
+	return q
+}
+
+// over : num / d, réduit par le pgcd de ses coefficients et de d.
+over :: proc(num: Poly, d: i128) -> Poly {
+	if d == 1 do return num
+	g := d
+	for m in num.monos do g = gcd(g, abs(m.coef))
+	g = gcd(g, abs(num.const))
+	monos := make([]Mono, len(num.monos))
+	for m, i in num.monos do monos[i] = Mono{m.coef / g, m.vars}
+	r := Poly{monos = monos, const = num.const / g, denom = d / g}
+	if r.denom == 1 do r.denom = 0
+	return r
 }
 
 Term_Op :: enum u8 {
@@ -251,7 +277,7 @@ as_poly :: proc(t: ^Expr) -> (Poly, bool) {
 
 // poly_type : la forme normale d'un polynôme ; sans monôme, c'est un atome.
 poly_type :: proc(p: Poly) -> ^Expr {
-	if len(p.monos) == 0 do return new_expr(set_of_ints(ints_point(p.const)))
+	if len(p.monos) == 0 && p.const % den(p) == 0 do return new_expr(set_of_ints(ints_point(p.const / den(p))))
 	return new_expr(p)
 }
 
@@ -281,10 +307,34 @@ poly_of :: proc(monos: []Mono, c: i128) -> (Poly, bool) {
 	}
 	kept := make([dynamic]Mono, 0, len(out))
 	for m in out do if m.coef != 0 do append(&kept, m)
-	return Poly{kept[:], c}, true
+	return Poly{monos = kept[:], const = c}, true
 }
 
-poly_add :: proc(a, b: Poly) -> (Poly, bool) {
+// Sur des dénominateurs : la somme sur le plus petit multiple commun, le produit
+// sur le produit, puis réduits. Les opérations sur les numérateurs sont entières.
+
+poly_add :: proc(a, b: Poly) -> (r: Poly, ok: bool) {
+	da, db := den(a), den(b)
+	if da == 1 && db == 1 do return num_add(a, b)
+	l := mul_checked(da / gcd(da, db), db) or_return
+	x := num_scale(numerator(a), l / da) or_return
+	y := num_scale(numerator(b), l / db) or_return
+	s := num_add(x, y) or_return
+	return over(s, l), true
+}
+
+poly_scale :: proc(a: Poly, s: i128) -> (r: Poly, ok: bool) {
+	n := num_scale(numerator(a), s) or_return
+	return over(n, den(a)), true
+}
+
+poly_mul :: proc(a, b: Poly) -> (r: Poly, ok: bool) {
+	d := mul_checked(den(a), den(b)) or_return
+	n := num_mul(numerator(a), numerator(b)) or_return
+	return over(n, d), true
+}
+
+num_add :: proc(a, b: Poly) -> (Poly, bool) {
 	all := make([dynamic]Mono, 0, len(a.monos) + len(b.monos))
 	append(&all, ..a.monos)
 	append(&all, ..b.monos)
@@ -293,7 +343,7 @@ poly_add :: proc(a, b: Poly) -> (Poly, bool) {
 	return poly_of(all[:], c)
 }
 
-poly_scale :: proc(a: Poly, s: i128) -> (Poly, bool) {
+num_scale :: proc(a: Poly, s: i128) -> (Poly, bool) {
 	out := make([]Mono, len(a.monos))
 	for m, i in a.monos {
 		c, ok := mul_checked(m.coef, s)
@@ -311,7 +361,7 @@ poly_sub :: proc(a, b: Poly) -> (Poly, bool) {
 	return poly_add(a, nb)
 }
 
-poly_mul :: proc(a, b: Poly) -> (Poly, bool) {
+num_mul :: proc(a, b: Poly) -> (Poly, bool) {
 	out := make([dynamic]Mono)
 	c: i128 = 0
 	for x in with_const(a) {
@@ -346,6 +396,15 @@ with_const :: proc(p: Poly) -> []Mono {
 // `exact` quand chaque inconnue y apparaît une fois, de coefficient ±1 : la somme
 // d'ensembles indépendants est alors exacte.
 poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, exact: bool) {
+	if d := den(p); d > 1 {
+		// le numérateur, puis la division : les valeurs sont entières
+		n, _ := poly_envelope(k, numerator(p), ctx)
+		lo, hi := ints_bounds(n)
+		l, h: Maybe(i128)
+		if x, ok := lo.?; ok do l = -floor_div(-x, d)
+		if x, ok := hi.?; ok do h = floor_div(x, d)
+		return ints_range(l, h), false
+	}
 	sum = ints_point(p.const)
 	exact = true
 	for m in p.monos {
@@ -470,7 +529,8 @@ Compare_Op :: enum u8 {
 
 // int_compare : `a ⋈ b` à partir de p = a - b, décidé quand les valeurs de p le
 // décident, en forme normale sinon.
-int_compare :: proc(k: ^Kernel, op: Compare_Op, p: Poly) -> (^Expr, Arith_Status) {
+int_compare :: proc(k: ^Kernel, op: Compare_Op, p_in: Poly) -> (^Expr, Arith_Status) {
+	p := numerator(p_in) // le dénominateur est positif : le signe est celui du numérateur
 	q := p
 	kind := Term_Op.Lt
 	ok := true
@@ -516,7 +576,7 @@ int_compare :: proc(k: ^Kernel, op: Compare_Op, p: Poly) -> (^Expr, Arith_Status
 			c = -c
 		}
 	}
-	return term_of(kind, new_expr(Poly{monos, c})), .Ok
+	return term_of(kind, new_expr(Poly{monos = monos, const = c})), .Ok
 }
 
 decide_int :: proc(kind: Term_Op, c: i128) -> bool {
@@ -562,6 +622,7 @@ general_compare :: proc(k: ^Kernel, op: Compare_Op, a, b: ^Expr) -> (^Expr, Arit
 }
 
 gcd :: proc(a, b: i128) -> i128 {
+	if a == 0 && b == 0 do return 1
 	x, y := a, b
 	for y != 0 do x, y = y, x % y
 	return x
@@ -848,7 +909,8 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 			if !ok do return nil, false
 			sum = s
 		}
-		return sum, true
+		if sum % den(v) != 0 do return nil, false
+		return sum / den(v), true
 	case Term:
 		args := make([]Atom, len(v.args))
 		for a, i in v.args {
@@ -952,7 +1014,7 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 		return ok && atoms_subset(x, y) && atoms_subset(y, x)
 	case Poly:
 		y, ok := b^.(Poly)
-		if !ok || x.const != y.const || len(x.monos) != len(y.monos) do return false
+		if !ok || x.const != y.const || den(x) != den(y) || len(x.monos) != len(y.monos) do return false
 		for m, i in x.monos {
 			if m.coef != y.monos[i].coef || !slice.equal(m.vars, y.monos[i].vars) do return false
 		}
@@ -998,7 +1060,12 @@ printed_cases :: proc(c: Cases) -> (string, Level) {
 
 // --- impression ---
 
-printed_poly :: proc(p: Poly) -> (string, Level) {
+printed_poly :: proc(p_in: Poly) -> (string, Level) {
+	if d := den(p_in); d > 1 {
+		text, _ := printed_poly(numerator(p_in))
+		return fmt.tprintf("(%s)/%d", text, d), .FACTOR
+	}
+	p := p_in
 	b := strings.builder_make()
 	for m, i in p.monos {
 		coef := m.coef
