@@ -130,8 +130,13 @@ CASES := []Test_Case {
 	// une self-référence est l'inconnue de type X : ni copiée, ni dépliée
 	{"f -> {\n  u8:n\n  -> f{n -> n}\n}", "{f -> {0..255:n -> 0  -> f{n -> n}}}", {}},
 	// ses arguments se vérifient comme ceux de tout carve : n vaut 1, n - 1 ∉ 1..255 ;
-	// avec d'autres arguments, c'est l'équation appliquée ailleurs : pas encore
-	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch, .Unsupported}},
+	// avec d'autres arguments, c'est l'équation appliquée à d'autres types
+	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch}},
+	// un appel récursif est une inconnue de l'équation : tant qu'elle n'est pas
+	// résolue, ce qui en dépend n'est pas prouvé
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}", "{f -> {0..255:n -> ??0  -> ??0 ? {0 -> 0  1..255 -> ??0 + f{n -> n - 1}!}}}", {}},
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nu16:r -> f{n -> ??}!", "", {.Unproven}},
+	{"f -> {\n  u8:n -> 5\n  -> f{n -> n}!\n}", "", {.Infinite_Recursion}},
 	// les types récursifs : lus sur la valeur, sans rien déplier
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 2 3}", "", {}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 \"x\"}", "", {.Constraint_Mismatch}},

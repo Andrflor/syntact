@@ -73,7 +73,8 @@ arithmetic :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 }
 
 // value_arith : sur deux valeurs, connues ou non, en forme normale.
-value_arith :: proc(k: ^Kernel, op: Arith, a, b: ^Expr) -> (^Expr, Arith_Status) {
+value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_Status) {
+	a, b := a_in, b_in
 	sa, a_atom := a^.(Set)
 	sb, b_atom := b^.(Set)
 	if a_atom && b_atom {
@@ -82,6 +83,8 @@ value_arith :: proc(k: ^Kernel, op: Arith, a, b: ^Expr) -> (^Expr, Arith_Status)
 	}
 	da, a_ok := value_domain(k, a)
 	db, b_ok := value_domain(k, b)
+	a, da, a_ok = adopt(a, da, a_ok, db, b_ok)
+	b, db, b_ok = adopt(b, db, b_ok, da, a_ok)
 	if !a_ok || !b_ok do return nil, .Unsupported // une inconnue de plusieurs sortes
 	switch {
 	case da == .Ints && db == .Ints:
@@ -118,6 +121,16 @@ value_arith :: proc(k: ^Kernel, op: Arith, a, b: ^Expr) -> (^Expr, Arith_Status)
 		return nil, .Unsupported
 	}
 	return nil, .Invalid
+}
+
+// adopt : une variable dont l'équation n'est pas encore résolue prend la sorte de
+// l'autre opérande ; entière, elle entre dans les polynômes.
+adopt :: proc(t: ^Expr, d: Domain, ok: bool, other: Domain, other_ok: bool) -> (^Expr, Domain, bool) {
+	if ok || !other_ok do return t, d, ok
+	v, waiting := pending(t)
+	if !waiting do return t, d, ok
+	if other == .Ints do return new_expr(poly_var(v)), other, true
+	return t, other, true
 }
 
 Arith_Status :: enum u8 {

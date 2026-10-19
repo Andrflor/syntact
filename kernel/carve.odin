@@ -52,13 +52,17 @@ carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
 	targets := fill(k, s, copy_scope(s, s.parent, c.span), c)
 	for j, i in targets do if j >= 0 do type_argument(k, Carved{c.args, i}, s.bindings[j].color_type)
 	append(&k.typed, c.args) // vérifiés à la fin, avec tout le reste
+	given := make([]^Expr, len(d.bindings))
+	for b, j in d.bindings do given[j] = b.value_type
+	same := true
 	for j, i in targets {
 		if j < 0 do continue
-		given := c.args.bindings[i].value_type
-		if is_invalid(given) do return given
-		if !expr_equal(k, given, d.bindings[j].value_type) do return report(k, .Unsupported, c.span, "pas encore dans le kernel : une self-référence avec d'autres arguments")
+		given[j] = c.args.bindings[i].value_type
+		if is_invalid(given[j]) do return given[j]
+		same &&= expr_equal(k, given[j], d.bindings[j].value_type)
 	}
-	return new_equation_var(k, d, new_expr(c))
+	if same do return new_equation_var(k, d, new_expr(c))
+	return new_equation_var(k, d, new_expr(c), given) // l'équation appliquée à d'autres types
 }
 
 // fill : met chaque argument à la place du binding qu'il vise. `->` remplit un

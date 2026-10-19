@@ -35,6 +35,8 @@ Var :: struct {
 	id:      int,
 	domain:  ^Expr,
 	written: ^Expr,
+	args:    []^Expr, // une équation appliquée : les types que reçoivent les bindings de son scope ; nil : les siens
+	call:    bool, // la valeur de sa production (Y, un appel récursif), pas le scope (X)
 }
 
 Mono :: struct {
@@ -85,27 +87,38 @@ new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 // new_var : une variable de domaine `set`.
 new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
 	v := new(Var)
-	v^ = Var{k.variables, new_expr(set), nil}
+	v^ = Var{id = k.variables, domain = new_expr(set)}
 	k.variables += 1
 	return v
 }
 
 // new_equation_var : la self-référence `written` au scope d, en cours de
-// définition — une variable dont le domaine est l'équation de d.
-new_equation_var :: proc(k: ^Kernel, d: ^Scope, written: ^Expr) -> ^Expr {
+// définition — une variable dont le domaine est l'équation de d, appliquée aux
+// types `args` (nil : les siens). `call` : la valeur de sa production, un appel
+// récursif.
+new_equation_var :: proc(k: ^Kernel, d: ^Scope, written: ^Expr, args: []^Expr = nil, call := false) -> ^Expr {
 	v := new(Var)
-	v^ = Var{k.variables, new_expr(d), written}
+	v^ = Var{k.variables, new_expr(d), written, args, call}
 	k.variables += 1
 	return new_expr(Term{op = .Sym, sym = v})
 }
 
-// equation_var : t est une self-référence ; sa variable, et le scope dont c'est
-// l'équation.
+// equation_var : t est une self-référence, un scope (X) ; sa variable, et le scope
+// dont c'est l'équation.
 equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
 	term, is_term := t^.(Term)
-	if !is_term || term.op != .Sym do return nil, nil, false
+	if !is_term || term.op != .Sym || term.sym.call do return nil, nil, false
 	d, is_scope := term.sym.domain^.(^Scope)
 	return term.sym, d, is_scope
+}
+
+// pending : t est une variable dont le domaine est une équation pas encore
+// résolue ; elle prend la sorte de l'opération où elle apparaît.
+pending :: proc(t: ^Expr) -> (^Var, bool) {
+	term, is_term := t^.(Term)
+	if !is_term || term.op != .Sym do return nil, false
+	_, solved := domain(term.sym)
+	return term.sym, !solved
 }
 
 // domain : l'ensemble des valeurs possibles d'une variable ; faux quand son domaine
@@ -1016,7 +1029,8 @@ printed_poly :: proc(p: Poly) -> (string, Level) {
 		if coef != 1 do fmt.sbprintf(&b, "%d*", coef)
 		for v, j in m.vars {
 			if j > 0 do strings.write_byte(&b, '*')
-			fmt.sbprintf(&b, "??%d", v.id)
+			if v.written != nil do strings.write_string(&b, print_at(v.written, .CALL))
+			else do fmt.sbprintf(&b, "??%d", v.id)
 		}
 	}
 	if p.const > 0 do fmt.sbprintf(&b, " + %d", p.const)

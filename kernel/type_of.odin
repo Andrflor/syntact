@@ -302,12 +302,32 @@ find_binding :: proc(s: ^Scope, name: string, ordinal: int) -> (Place, bool) {
 type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
-	if _, _, recursive := equation_var(t); recursive do return report(k, .Unsupported, c.span, "pas encore dans le kernel : l'appel récursif")
+	if x, d, recursive := equation_var(t); recursive {
+		// un appel récursif : la valeur de la production de l'équation, appliquée
+		// aux mêmes types que x — une inconnue (specs/equational.md §2). Sur les
+		// mêmes types, connus, il revient à lui-même : la récursion ne finit pas.
+		if x.args == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s revient avec les mêmes arguments : la récursion ne finit pas", print_expr(x.written)))
+		return new_equation_var(k, d, new_expr(c), x.args, call = true)
+	}
 	s, ok := t^.(^Scope)
 	if !ok do return report(k, .Invalid_Execute, c.span, "on ne collapse qu'un scope")
 	p := first_production(s)
 	if p == nil do return new_expr(Set{}) // un scope sans production se réduit à none
 	return p.value_type
+}
+
+// binding_types : les types des bindings de s qui ne sont ni des productions ni des
+// expansions.
+binding_types :: proc(s: ^Scope) -> []^Expr {
+	types := make([]^Expr, len(s.bindings), context.temp_allocator)
+	for b, j in s.bindings do if b.kind != .Product && b.kind != .Expand do types[j] = b.value_type
+	return types
+}
+
+// known_types : aucun de ces types ne dépend d'une inconnue.
+known_types :: proc(types: []^Expr) -> bool {
+	for t in types do if t != nil && !is_closed_type(t) do return false
+	return true
 }
 
 // type_unknown : une nouvelle inconnue. Ses valeurs possibles viennent de sa forme
