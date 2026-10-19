@@ -81,7 +81,10 @@ Term_Op :: enum u8 {
 	Le, // [a, b] pour a <= b
 	Eq, // entiers : [p] pour p = 0 ; sinon [a, b] ordonnés
 	Ne,
-	Cast, // [valeur, layout] : la valeur forcée dans le layout (op.odin, cast)
+	Cast, // [valeur, layout] : la valeur forcée dans le layout (op.odin, cast_into)
+	Div, // entiers : [a, b], a / b tronqué vers zéro, b jamais nul (op.odin, division)
+	Mod, // entiers : [a, b], le reste, du signe de a
+	F_Div, // flottants : [a, b], la division d'IEEE 754
 }
 
 Term :: struct {
@@ -176,10 +179,36 @@ Context :: []Fact
 
 // known_domain : le domaine de v dans le contexte ctx ; faux quand son domaine est
 // une équation pas encore résolue.
-known_domain :: proc(ctx: Context, v: ^Var) -> (d: Set, solved: bool) {
+known_domain :: proc(k: ^Kernel, ctx: Context, v: ^Var) -> (d: Set, solved: bool) {
+	if derived(v) {
+		d, _ = envelope(k, v.type, ctx) // une opération : les valeurs de son expression
+		return d, true
+	}
 	d = domain(v) or_return
 	for f in ctx do if f.var == v do d = set_intersect(d, f.domain)
 	return d, true
+}
+
+// derived : v nomme une opération entière qui n'est pas un polynôme (une division,
+// un cast) pour qu'elle entre dans un polynôme : son type est cette opération.
+// Elle est transparente — ses valeurs, ses inconnues, son évaluation sont celles
+// de son expression.
+derived :: proc(v: ^Var) -> bool {
+	_, is_term := v.type^.(Term)
+	return is_term
+}
+
+// as_int_poly : une valeur entière comme polynôme — une opération qui n'en est pas
+// un y entre par une variable dérivée (derived).
+as_int_poly :: proc(k: ^Kernel, t: ^Expr) -> (Poly, bool) {
+	if p, ok := as_poly(t); ok do return p, true
+	if _, is_term := t^.(Term); is_term {
+		v := new(Var)
+		v^ = Var{k.variables, t}
+		k.variables += 1
+		return poly_var(v), true
+	}
+	return {}, false
 }
 
 // with : le contexte, et un fait de plus.
@@ -255,6 +284,10 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 		case .Cast:
 			s, _ := v.args[1]^.(Set)
 			return pure_domain(s)
+		case .Div, .Mod:
+			return .Ints, true
+		case .F_Div:
+			return .Floats, true
 		}
 	}
 	return .Ints, false
@@ -418,7 +451,7 @@ poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, ex
 			j := i
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
 			ok: bool
-			d, solved := known_domain(ctx, m.vars[i])
+			d, solved := known_domain(k, ctx, m.vars[i])
 			if !solved do d = set_of_ints(ints_all()) // une équation pas encore résolue : tout entier
 			prod, ok = ints_arith(.Mul, prod, ints_pow(d.ints, j - i))
 			exact &&= solved
@@ -674,7 +707,7 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 		}
 		return vals, false
 	case ^Var:
-		d, solved := known_domain(ctx, v)
+		d, solved := known_domain(k, ctx, v)
 		if !solved do return set_everything(), false // une équation pas encore résolue
 		return d, true
 	case Term:
@@ -705,6 +738,12 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 			inner, _ := envelope(k, v.args[0], ctx)
 			if atoms_subset(inner, layout) do return inner, false
 			return layout, false
+		case .Div:
+			return set_of_ints(div_envelope(arg(k, v, 0, ctx).ints, arg(k, v, 1, ctx).ints)), false
+		case .Mod:
+			return set_of_ints(mod_envelope(arg(k, v, 0, ctx).ints, arg(k, v, 1, ctx).ints)), false
+		case .F_Div:
+			return set_of_floats(floats_all()), false
 		}
 	}
 	return {}, false
@@ -784,7 +823,10 @@ Atom :: union {
 collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {
 	#partial switch v in t^ {
 	case Poly:
-		for m in v.monos do append(out, ..m.vars)
+		for m in v.monos do for x in m.vars {
+			if derived(x) do collect_symbols(x.type, out)
+			else do append(out, x)
+		}
 	case ^Var:
 		append(out, v)
 	case Term:
@@ -909,7 +951,13 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 		for m in v.monos {
 			prod := m.coef
 			for id in m.vars {
-				x, is_int := env[id.id].(i128)
+				value := env[id.id]
+				if derived(id) {
+					known: bool
+					value, known = eval(id.type, env)
+					if !known do return nil, false
+				}
+				x, is_int := value.(i128)
 				if !is_int do return nil, false
 				p, ok := mul_checked(prod, x)
 				if !ok do return nil, false
@@ -945,6 +993,15 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 		case .F_Neg:
 			x, ok := args[0].(f64)
 			return -x, ok
+		case .Div, .Mod:
+			x, x_ok := args[0].(i128)
+			y, y_ok := args[1].(i128)
+			if !x_ok || !y_ok || y == 0 do return nil, false
+			return v.op == .Div ? x / y : x % y, true
+		case .F_Div:
+			x, x_ok := args[0].(f64)
+			y, y_ok := args[1].(f64)
+			return x / y, x_ok && y_ok
 		case .Concat:
 			b := strings.builder_make()
 			for a in args do strings.write_string(&b, atom_text(a))
@@ -1140,6 +1197,10 @@ printed_term :: proc(t: Term) -> (string, Level) {
 		return infix(t.args, t.op == .Eq ? " = " : " != ", above(.EQUALITY)), .EQUALITY
 	case .Cast:
 		return fmt.tprintf("%s \\ %s", print_type_at(t.args[0], above(.CAST)), print_type_at(t.args[1], above(.CAST))), .CAST
+	case .Div, .F_Div:
+		return fmt.tprintf("%s / %s", print_type_at(t.args[0], .FACTOR), print_type_at(t.args[1], above(.FACTOR))), .FACTOR
+	case .Mod:
+		return fmt.tprintf("%s %% %s", print_type_at(t.args[0], .FACTOR), print_type_at(t.args[1], above(.FACTOR))), .FACTOR
 	}
 	return "", .PRIMARY
 }

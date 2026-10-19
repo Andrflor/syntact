@@ -133,7 +133,7 @@ corners :: proc(k: ^Kernel, t: ^Expr, ctx: Context) -> (vars: []^Var, bounds: []
 	if len(vars) > 12 do return
 	bounds = make([][2]Atom, len(vars), context.temp_allocator)
 	for x, i in vars {
-		d, solved := known_domain(ctx, x)
+		d, solved := known_domain(k, ctx, x)
 		if !solved do return
 		lo, hi, bounded := atom_bounds(d)
 		if !bounded do return
@@ -209,7 +209,7 @@ affine_in :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context = nil) -> (Verdict,
 	p, is_poly := v^.(Poly)
 	if !is_poly || den(p) != 1 || len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return .Undecided, false
 	a, b := p.monos[0].coef, p.const
-	known, solved := known_domain(ctx, p.monos[0].vars[0])
+	known, solved := known_domain(k, ctx, p.monos[0].vars[0])
 	if !solved do return .Undecided, false
 	domain := known.ints
 	for gap in ints_complement(c.ints).intervals {
@@ -241,7 +241,7 @@ linear_extremes :: proc(k: ^Kernel, v: ^Expr, ctx: Context = nil) -> (lo, hi: Ma
 	for m in p.monos do if len(m.vars) != 1 do return nil, nil, false
 	lo, hi = p.const, p.const
 	for m in p.monos {
-		d, solved := known_domain(ctx, m.vars[0])
+		d, solved := known_domain(k, ctx, m.vars[0])
 		if !solved do return nil, nil, false
 		l, h := ints_bounds(d.ints)
 		if m.coef < 0 do l, h = h, l

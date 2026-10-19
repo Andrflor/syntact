@@ -15,14 +15,14 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	b := type_of(k, o.right, env)
 	if is_invalid(a) do return a
 	if is_invalid(b) do return b
-	return binary(k, o, a, b)
+	return binary(k, o, a, b, context_of(env))
 }
 
-// binary : l'opération sur deux types. Sur un type par cas, elle se fait cas par
-// cas, chaque cas gardant ce que sa branche sait.
-binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	if x, is_cases := a^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, other: ^Expr) -> ^Expr {return binary(k, o, v, other)}, k, o, b)
-	if y, is_cases := b^.(Cases); is_cases do return each_case(y, proc(k: ^Kernel, o: Op, v, other: ^Expr) -> ^Expr {return binary(k, o, other, v)}, k, o, a)
+// binary : l'opération sur deux types, dans le contexte où elle est écrite. Sur un
+// type par cas, elle se fait cas par cas, chaque cas avec ce que sa branche sait.
+binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
+	if x, is_cases := a^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr {return binary(k, o, v, other, ctx)}, k, o, b, ctx)
+	if y, is_cases := b^.(Cases); is_cases do return each_case(y, proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr {return binary(k, o, other, v, ctx)}, k, o, a, ctx)
 	#partial switch o.kind {
 	case .Or, .And:
 		return set_algebra(k, o, a, b)
@@ -32,16 +32,18 @@ binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		return comparison(k, o, a, b)
 	case .Cast:
 		return cast_into(k, o, a, b)
+	case .Divide, .Mod:
+		return division(k, o, a, b, ctx)
 	}
 	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur %v", o.kind))
 }
 
 // each_case : f appliquée à la valeur de chaque cas ; une erreur dans un cas est
 // celle de l'opération.
-each_case :: proc(c: Cases, f: proc(k: ^Kernel, o: Op, v, other: ^Expr) -> ^Expr, k: ^Kernel, o: Op, other: ^Expr) -> ^Expr {
+each_case :: proc(c: Cases, f: proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr, k: ^Kernel, o: Op, other: ^Expr, ctx: Context) -> ^Expr {
 	out := make([]Case, len(c.cases))
 	for x, i in c.cases {
-		r := f(k, o, x.value, other)
+		r := f(k, o, x.value, other, with(ctx, x.fact))
 		if is_invalid(r) do return r
 		out[i] = Case{x.fact, r}
 	}
@@ -90,8 +92,9 @@ value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_S
 	if !a_ok || !b_ok do return nil, .Unsupported // une inconnue de plusieurs sortes
 	switch {
 	case da == .Ints && db == .Ints:
-		pa, _ := as_poly(a)
-		pb, _ := as_poly(b)
+		pa, a_poly := as_int_poly(k, a)
+		pb, b_poly := as_int_poly(k, b)
+		if !a_poly || !b_poly do return nil, .Unsupported
 		r: Poly
 		ok: bool
 		switch op {
@@ -326,7 +329,7 @@ type_unary :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 }
 
 unary :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
-	if x, is_cases := t^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, _: ^Expr) -> ^Expr {return unary(k, o, v)}, k, o, nil)
+	if x, is_cases := t^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, _: ^Expr, _: Context) -> ^Expr {return unary(k, o, v)}, k, o, nil, nil)
 	#partial switch o.kind {
 	case .Subtract:
 		return negate(k, o, t)
@@ -455,4 +458,90 @@ cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
 	case .Strings, .Scopes, .Sets:
 	}
 	return nil, false
+}
+
+// --- la division ---
+
+// Entre entiers, `/` tronque vers zéro et `%` donne le reste, du signe du dividende
+// — la division de la machine. Le diviseur ne vaut jamais 0 : s'il le peut, dans le
+// contexte où la division est écrite, c'est une erreur. Entre flottants, c'est la
+// division d'IEEE 754, sans erreur (x / 0 vaut ±∞). Sur des inconnues, la division
+// reste une opération de l'équation ; x / 1 est x, x % 1 est 0, et x % d est x quand
+// x est déjà dans 0..d - 1.
+division :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
+	if !is_value(a) || !is_value(b) do return report(k, .Unsupported, o.span, "pas encore dans le kernel : la division d'ensembles")
+	da, a_ok := value_domain(k, a)
+	db, b_ok := value_domain(k, b)
+	op_name := o.kind == .Divide ? "/" : "%"
+	if !a_ok || !b_ok || da != db || (da != .Ints && da != .Floats) || (da == .Floats && o.kind == .Mod) {
+		return report(k, .Invalid_operator, o.span, fmt.tprintf("'%s' ne s'applique pas à %s et %s", op_name, brief(a), brief(b)))
+	}
+	if da == .Floats {
+		x, x_known := float_atom(a)
+		y, y_known := float_atom(b)
+		if x_known && y_known do return new_expr(set_of_floats(floats_point(x / y)))
+		return new_expr(Term{op = .F_Div, args = pair(a, b)})
+	}
+	divisor, _ := envelope(k, b, ctx)
+	if ints_contains(divisor.ints, 0) do return report(k, .Invalid_operator, o.span, fmt.tprintf("le diviseur %s peut valoir 0", brief(b)))
+	x, x_known := int_atom(a)
+	y, y_known := int_atom(b)
+	if x_known && y_known do return new_expr(set_of_ints(ints_point(o.kind == .Divide ? x / y : x % y)))
+	if y_known && y == 1 do return o.kind == .Divide ? a : new_expr(set_of_ints(ints_point(0)))
+	if y_known && y > 0 && o.kind == .Mod {
+		if values, _ := envelope(k, a, ctx); ints_subset(values.ints, ints_range(0, y - 1)) do return a
+	}
+	return new_expr(Term{op = o.kind == .Divide ? .Div : .Mod, args = pair(a, b)})
+}
+
+pair :: proc(a, b: ^Expr) -> []^Expr {
+	args := make([]^Expr, 2)
+	args[0], args[1] = a, b
+	return args
+}
+
+int_atom :: proc(t: ^Expr) -> (i128, bool) {
+	s, is_set := t^.(Set)
+	if !is_set do return 0, false
+	x, ok := atom_of(s)
+	v, is_int := x.(i128)
+	return v, ok && is_int
+}
+
+float_atom :: proc(t: ^Expr) -> (f64, bool) {
+	s, is_set := t^.(Set)
+	if !is_set do return 0, false
+	x, ok := atom_of(s)
+	v, is_float := x.(f64)
+	return v, ok && is_float
+}
+
+// div_envelope : les quotients possibles, a et b deux ensembles d'entiers, b sans 0
+// et d'un seul signe — la division tronquée y est monotone en chaque opérande :
+// ses extrêmes sont aux coins.
+div_envelope :: proc(a, b: Ints) -> Ints {
+	alo, ahi := ints_bounds(a)
+	blo, bhi := ints_bounds(b)
+	al, al_ok := alo.?
+	ah, ah_ok := ahi.?
+	bl, bl_ok := blo.?
+	bh, bh_ok := bhi.?
+	if !al_ok || !ah_ok || !bl_ok || !bh_ok || (bl <= 0 && bh >= 0) do return ints_all()
+	q := [4]i128{al / bl, al / bh, ah / bl, ah / bh}
+	return ints_range(min(q[0], q[1], q[2], q[3]), max(q[0], q[1], q[2], q[3]))
+}
+
+// mod_envelope : les restes possibles — de valeur absolue sous le plus grand |b|,
+// du signe du dividende (le reste n'est pas monotone : pas de coins).
+mod_envelope :: proc(a, b: Ints) -> Ints {
+	blo, bhi := ints_bounds(b)
+	bl, bl_ok := blo.?
+	bh, bh_ok := bhi.?
+	if !bl_ok || !bh_ok do return ints_all()
+	m := max(abs(bl), abs(bh)) - 1
+	alo, ahi := ints_bounds(a)
+	lo, hi := -m, m
+	if l, ok := alo.?; ok do lo = l >= 0 ? 0 : max(l, -m)
+	if h, ok := ahi.?; ok do hi = h <= 0 ? 0 : min(h, m)
+	return ints_range(lo, hi)
 }

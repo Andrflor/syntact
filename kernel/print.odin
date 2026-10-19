@@ -224,6 +224,7 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 // self-référence.
 print_var :: proc(v: ^Var) -> string {
 	if _, solved := v.type^.(Set); solved do return fmt.tprintf("??%d", v.id)
+	if derived(v) do return print_type_at(v.type, .CALL) // l'opération, entre parenthèses s'il le faut
 	return print_equation(v.type)
 }
 

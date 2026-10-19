@@ -45,7 +45,7 @@ assignments_of :: proc(k: ^Kernel, ids: []^Var, ctx: Context = nil) -> (a: Assig
 	a.domains = make([][]Atom, len(ids))
 	total := 1
 	for id, i in ids {
-		d := known_domain(ctx, id) or_return
+		d := known_domain(k, ctx, id) or_return
 		a.domains[i] = atoms_of_set(d, ENUMERATION_LIMIT) or_return
 		total *= len(a.domains[i])
 		if total > ENUMERATION_LIMIT do return a, false

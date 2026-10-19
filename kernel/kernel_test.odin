@@ -171,6 +171,14 @@ CASES := []Test_Case {
 	{"a -> 5 \\ int", "", {.Invalid_Cast}},
 	{"a -> 5 \\ 10..37", "", {.Invalid_Cast}},
 	{"a -> 5::u8", "", {.Invalid_Cast}}, // `::` n'écrit que le type d'une inconnue
+	// la division : tronquée vers zéro, le reste du signe du dividende ; un diviseur
+	// qui peut valoir 0, dans le contexte, est une erreur
+	{"a -> 10 / 3\nb -> 10 % 3\nc -> -7 / 2\nd -> -7 % 2\nx -> 1.0 / 4.0", "{a -> 3  b -> 1  c -> -3  d -> -1  x -> 0.25}", {}},
+	{"n -> ??::u8\ne -> n / 2\nf -> n % 256\nu8:g -> n / 1", "{n -> ??0  e -> ??0 / 2  f -> ??0  0..255:g -> ??0}", {}},
+	{"n -> ??::u8\nh -> 10 / n", "", {.Invalid_operator}},
+	{"n -> ??::u8\ni -> n ? {0 -> 0, -> 100 / n}", "", {}},
+	{"n -> ??::u8\nu8:q -> n / 2 + 128", "", {}}, // 0..127 + 128
+	{"n -> ??::u8\nu8:q -> n / 2 + 129", "", {.Constraint_Mismatch}},
 	// un scope ne voit son propre nom que dans ses productions
 	{"ones -> {1 ...ones}", "", {.Undefined_Identifier}},
 	{"X -> {\n  X:child\n  -> {}\n}", "", {.Undefined_Identifier}},
