@@ -76,6 +76,8 @@ type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 			continue
 		}
 		type_binding(k, &b, s, expected_color(shape, position, b))
+		// une production qui s'appelle elle-même : son équation, résolue si on sait
+		if b.kind == .Product && b.value_type != nil do b.value_type = solved(k, s, b.value_type)
 		position += 1
 	}
 }
@@ -306,7 +308,12 @@ type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 		// un appel récursif : la valeur de la production de l'équation, appliquée
 		// aux mêmes types que x — une inconnue (specs/equational.md §2). Sur les
 		// mêmes types, connus, il revient à lui-même : la récursion ne finit pas.
-		if _, carved, _, _ := equation_of(x); carved == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s! revient avec les mêmes arguments : la récursion ne finit pas", print_equation(x.type)))
+		_, carved, _, _ := equation_of(x)
+		if carved == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s! revient avec les mêmes arguments : la récursion ne finit pas", print_equation(x.type)))
+		// l'équation de d déjà résolue : sa forme close, appliquée aux arguments
+		if applied, ok := carved.?; ok {
+			if closed, solved := apply_closed(k, d, applied); solved do return closed
+		}
 		return new_equation_var(k, new_expr(Collapse{target = x.type, span = c.span}))
 	}
 	s, ok := t^.(^Scope)

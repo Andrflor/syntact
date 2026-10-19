@@ -62,8 +62,9 @@ carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
 		same &&= expr_equal(k, given[j], d.bindings[j].value_type)
 	}
 	if same do return new_equation_var(k, new_expr(d))
-	// l'équation appliquée à d'autres types : le scope, carvé par ces arguments
-	return new_equation_var(k, new_expr(Carve{target = new_expr(d), args = c.args, ordinals = c.ordinals, span = c.span}))
+	// l'équation appliquée à d'autres types : la source écrite, carvée par ces
+	// arguments
+	return new_equation_var(k, new_expr(Carve{target = new_expr(s), args = c.args, ordinals = c.ordinals, span = c.span}))
 }
 
 // fill : met chaque argument à la place du binding qu'il vise. `->` remplit un

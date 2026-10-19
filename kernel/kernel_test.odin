@@ -134,8 +134,14 @@ CASES := []Test_Case {
 	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}\n-> 0", "", {.Constraint_Mismatch}},
 	// un appel récursif est une inconnue de l'équation : tant qu'elle n'est pas
 	// résolue, ce qui en dépend n'est pas prouvé
-	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}", "{f -> {0..255:n -> ??0  -> ??0 ? {0 -> 0  1..255 -> ??0 + f{n -> n - 1}!}}}", {}},
-	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nu16:r -> f{n -> ??}!", "", {.Unproven}},
+	// résolue quand on sait : la somme Y(n) = n + Y(n - 1), Y(0) = 0 a la forme close
+	// n·(n+1)/2 ; un appel l'applique à son argument, sans dérouler
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}", "{f -> {0..255:n -> ??0  -> (??0 + ??0*??0)/2}}", {}},
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nu16:r -> f{n -> ??}!", "", {}},
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nu8:r -> f{n -> ??}!", "", {.Constraint_Mismatch}}, // 255·256/2 = 32640
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nfive -> f{n -> 5}!", "{f -> {0..255:n -> ??0  -> (??0 + ??0*??0)/2}  five -> 15}", {}},
+	// une équation qu'on ne sait pas encore résoudre reste une équation : pas prouvé
+	{"g -> {\n  u8:n -> ??\n  -> n ? {0 -> 1, -> 2 * g{n -> n - 1}!}\n}\nu16:r -> g{n -> ??}!", "", {.Unproven}},
 	{"f -> {\n  u8:n -> 5\n  -> f{n -> n}!\n}", "", {.Infinite_Recursion}},
 	// les types récursifs : lus sur la valeur, sans rien déplier
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 2 3}", "", {}},
