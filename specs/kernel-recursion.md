@@ -165,7 +165,29 @@ fausses) : on ne s'en sert jamais comme type.
 - **Le défaut** : la solution de l'équation de la première production seule
   (§1) ; une solution infinie rend la définition illégale.
 
-## 7. Les fonctions récursives
+## 7. Le typecheck récursif
+
+Une définition récursive, type, fonction ou valeur, est vérifiée à sa définition,
+sur les types :
+
+1. **La self-référence n'est légale que dans une production.** Ailleurs (un champ,
+   une expansion, une valeur) elle est une erreur : `ones -> {1 ...ones}` est une
+   valeur infinie, `X -> {X:child  -> {}}` un champ sans fin.
+2. **Un cas de base** : la première production, non récursive, qui finit (§1).
+3. **La terminaison** : chaque appel récursif se rapproche du cas de base — la
+   queue d'une liste ; `n - 1` dans une branche qui reçoit `n ∈ 1..255`, quand le
+   cas de base est `0`. Une récursion dont on ne prouve pas qu'elle finit est une
+   erreur.
+4. **Le corps typé avec l'appel récursif comme inconnue** : les arguments de l'appel
+   vérifiés contre les contrats, avec le raffinement de la branche (`n - 1 ∈
+   0..254` tient dans `u8`) ; le type du résultat est la solution de l'équation, et
+   il respecte la couleur de la production.
+
+On travaille toujours sur les types. Des mêmes types d'arguments donnent la même
+inconnue ; d'autres types, l'équation appliquée à ces types. Quand tout est connu,
+le type est un singleton.
+
+## 8. Les fonctions récursives
 
 Une fonction récursive structurelle suit la récursion de sa donnée : `map`
 appelle `map` sur la queue `r` de son argument. Si l'argument est `Array{T}`,
@@ -208,8 +230,8 @@ Les entrées sont en général **bornées** (`u8:n` : `n ∈ 0..255`). La borne 
 prouver que la forme close ne déborde pas (`255·256/2 = 32640`), et l'ensemble des
 valeurs du résultat se calcule sur cette borne.
 
-## 8. À réfléchir
+## 9. À réfléchir
 
 1. **G** — décider l'inclusion de deux répétitions indexées.
-2. **Les formes closes** (§7) — quelles classes de récurrences on résout, et le
+2. **Les formes closes** (§8) — quelles classes de récurrences on résout, et le
    débordement à largeur fixe (`specs/research-recursion.md`).
