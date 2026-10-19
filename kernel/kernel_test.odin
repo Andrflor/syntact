@@ -170,6 +170,12 @@ CASES := []Test_Case {
 	{"n -> ??::u8\nu16:c -> n + 1 \\ u16", "{n -> ??0  0..65535:c -> ??0 + 1}", {}}, // il y tient déjà
 	{"a -> 5 \\ int", "", {.Invalid_Cast}},
 	{"a -> 5 \\ 10..37", "", {.Invalid_Cast}},
+	{"a -> 5 \\ float", "", {.Invalid_Cast}}, // float n'a pas de largeur
+	{"a -> 0.1 \\ f32\nb -> 0.1 \\ f64\nc -> 16777217 \\ f32", "{a -> 0.10000000149011612  b -> 0.1  c -> 16777216.0}", {}}, // le plus proche de la largeur
+	{"f32:a -> 340282366920938463463374607431768211456.0", "", {.Constraint_Mismatch}}, // 2^128 : au-delà de f32
+	{"f64:a -> 340282366920938463463374607431768211456.0", "", {}},
+	{"a -> 340282366920938463463374607431768211456.0 \\ f32", "", {.Invalid_Cast}},
+	{"x -> ??::f64\nz -> x \\ f64", "{x -> ??0  z -> ??0}", {}}, // il y tient déjà
 	{"a -> 5::u8", "", {.Invalid_Cast}}, // `::` n'écrit que le type d'une inconnue
 	// la division : tronquée vers zéro, le reste du signe du dividende ; un diviseur
 	// qui peut valoir 0, dans le contexte, est une erreur

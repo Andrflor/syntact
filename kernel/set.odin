@@ -392,6 +392,13 @@ floats_all :: proc() -> Floats {
 	return floats_of({Float_Interval{}})
 }
 
+// floats_layout : les valeurs finies du flottant IEEE 754 de cette largeur, de
+// -max à max. La plage seule les distingue ; l'arrondi est celui du cast.
+floats_layout :: proc(bits: uint) -> Floats {
+	m := bits == 32 ? f64(max(f32)) : max(f64)
+	return floats_of({Float_Interval{lo = -m, hi = m}})
+}
+
 // Une forme normale n'a qu'un zéro : -0.0 s'écrit 0.0.
 normal_zero :: proc(b: Maybe(f64)) -> Maybe(f64) {
 	if v, ok := b.?; ok && v == 0 do return f64(0)

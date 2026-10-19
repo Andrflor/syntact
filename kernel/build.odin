@@ -416,7 +416,11 @@ builtin :: proc(name: string) -> Set {
 		return set_of_ints(ints_range(-9223372036854775808, 9223372036854775807))
 	case "int":
 		return set_of_ints(ints_all())
-	case "f32", "f64", "float":
+	case "f32":
+		return set_of_floats(floats_layout(32))
+	case "f64":
+		return set_of_floats(floats_layout(64))
+	case "float":
 		return set_of_floats(floats_all())
 	case "string":
 		return set_of_strings(strings_all())
