@@ -8,3 +8,5 @@ The code is in odin
 You should follow best practices
 DRY KISS
 You should be sure of what you do if in doubt ask the user
+
+Use English in the code even when the conversation is in another language: comments, identifiers, error messages (they are what the LSP shows) and commit messages
