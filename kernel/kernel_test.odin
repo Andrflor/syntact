@@ -35,7 +35,16 @@ CASES := []Test_Case {
 	{"true:check -> 2 = 2", "{true:check -> true}", {}},
 	{"true:oops -> 2 = 3", "", {.Constraint_Mismatch}},
 	{"((u8 | i8) & >10):x -> 42", "{11..255:x -> 42}", {}},
-	{"n -> ??::u8\nn:x -> 5", "", {.Insoluble_Constraint}},
+	// a color is an equation: it can share the unknowns of the value, not introduce one
+	{"n -> ??::u8\nn:x -> 5", "", {.Constraint_Mismatch}}, // 5 is not every value of n
+	{"n -> ??::u8\nn:a\n(n + n):b -> a + n", "{n -> ??0  ??0:a -> ??0  (2*??0):b -> 2*??0}", {}}, // a is n
+	{"n -> ??::u8\n(0..n):d -> n\n(>n):f -> n + 1\n(n..):g -> 2 * n", "", {}},
+	{"n -> ??::u8\n(0..n):e -> n + 1", "", {.Constraint_Mismatch}},
+	{"n -> ??::u8\nm -> ??::u8\n(0..n):i -> m", "", {.Constraint_Mismatch}}, // m = 1, n = 0
+	{"n -> ??::u8\nm -> ??::u8\n(n & m):k -> n", "", {.Constraint_Mismatch}}, // empty as soon as n ≠ m
+	{"x -> ??::u8\n(x ? {<10 -> x, -> 10}):z -> x ? {<10 -> x, -> 10}", "", {}}, // each case, under its fact
+	{"??:z", "", {.Insoluble_Constraint}},
+	{"(??::u8 & >10):b -> 11", "", {.Insoluble_Constraint}},
 	{"~5:x -> 6", "", {}},
 	{"~5:x -> 5", "", {.Constraint_Mismatch}},
 	// ~ se prend dans les sortes portées, et les garde : ~~X = X, même par une ref
@@ -55,10 +64,10 @@ CASES := []Test_Case {
 	// les ensembles qui dépendent d'inconnues : la forme de l'opération, simplifiée
 	{"n -> ??::(0..3)\na -> (n | 6) & (n | 7)", "{n -> ??0  a -> (??0 | 6) & (??0 | 7)}", {}},
 	{"n -> ??::(0..3)\n(n | 0..3):e -> 2", "", {}}, // n | 0..3 est 0..3 : un seul ensemble
-	{"n -> ??::(0..3)\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
-	// une forme dépend d'inconnues : jamais une couleur, même trop grande pour être énumérée
+	{"n -> ??::(0..3)\n(n..10):g -> 5", "", {}}, // n <= 10: 5 is between n and 10
+	// a form that depends on unknowns is a color like any other
 	{"n -> ??::u64\na -> (n | 6) & >3", "{n -> ??0  a -> (??0 | 6) & 4..}", {}},
-	{"n -> ??::u64\n(n..10):g -> 5", "", {.Insoluble_Constraint}},
+	{"n -> ??::u64\n(n..10):g -> 5", "", {.Constraint_Mismatch}}, // n at its maximum: 5 is outside 10..n
 	// la vérification par paliers : enveloppe, affine, extrêmes linéaires, énumération ;
 	// ce qu'on ne sait pas prouver est dit, jamais accepté
 	{"n -> ??::u64\nm -> ??::u64\nu64:d -> n + m", "", {.Constraint_Mismatch}},

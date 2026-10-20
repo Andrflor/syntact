@@ -31,7 +31,7 @@ Binding :: struct {
 	kind:       Binding_Kind,
 	color:      ^Expr, // à gauche du `:` ; nil = non coloré
 	value:      ^Expr, // à droite de la flèche ; nil = pas écrite : le défaut de la couleur
-	color_type: ^Expr, // type_of(color) : un seul ensemble, qui ne dépend d'aucune inconnue
+	color_type: ^Expr, // type_of(color): an equation, which can share the unknowns of the value
 	value_type: ^Expr, // type_of(value), ou le défaut de color_type ; nil = pas encore typé
 	copy:       Copy,
 	span:       syn.Span,

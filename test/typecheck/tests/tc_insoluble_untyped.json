@@ -1,1 +1,1 @@
-{ "name": "tc_insoluble_untyped", "description": "an untyped unknown ?? used as a constraint — insoluble", "source": "a -> ??\na:b -> 10", "expect_errors": ["Insoluble_Constraint"] }
+{ "name": "tc_insoluble_untyped", "description": "an untyped unknown binding used as a color: a can be another value than 10, refuted", "source": "a -> ??\na:b -> 10", "expect_errors": ["Constraint_Mismatch"] }

@@ -21,8 +21,8 @@ import "core:strings"
 //
 // La forme normale EST le type : exacte, jamais remplacée par une approximation.
 // Ses valeurs possibles ne se calculent que pour décider (check.odin) : exactes
-// quand on peut énumérer ses inconnues, une enveloppe sûre sinon. Une couleur ne
-// dépend d'aucune inconnue.
+// quand on peut énumérer ses inconnues, une enveloppe sûre sinon. A color can
+// depend on unknowns too (check.odin, admitted).
 
 // Var : une variable — une valeur inconnue qui porte son type. Toutes ses mentions
 // sont le même nœud ; `id` ne sert qu'à l'ordre et à l'impression.

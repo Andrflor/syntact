@@ -1,1 +1,1 @@
-{ "name": "tc_insoluble_ref_chain", "description": "a reference chain ending in ?? is insoluble (followed transitively)", "source": "a -> ??::u8\nC -> a\nC:b -> 10", "expect_errors": ["Insoluble_Constraint"] }
+{ "name": "tc_insoluble_ref_chain", "description": "a color reached through a reference chain ending in ?? depends on that unknown: 10 is not every value of a, refuted", "source": "a -> ??::u8\nC -> a\nC:b -> 10", "expect_errors": ["Constraint_Mismatch"] }

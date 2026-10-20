@@ -123,18 +123,43 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	b.value_type = type_of(k, b.value, env)
 }
 
-// type_color : le type de la couleur. Il doit désigner un seul ensemble, qui ne
-// dépend d'aucune inconnue ; sinon la couleur est insoluble. Une self-référence en
-// désigne un : celui que donne son équation.
+// type_color: the type of the color, an equation like any other type. It can
+// depend on the unknowns of the bindings it mentions, which the value can share
+// (check.odin). It cannot introduce one: a `??` written in the color is shared by
+// no value.
 type_color :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> ^Expr {
+	if writes_unknown(b.color) do return report(k, .Insoluble_Constraint, b.span, fmt.tprintf("the color of %s introduces an unknown `??` that no value shares", display(b)))
 	t := type_of(k, b.color, env)
-	if is_invalid(t) do return t
-	if _, _, recursive := equation_var(t); recursive do return t
-	if _, closed := color_set(k, t); !closed {
-		if holds_invalid(t) do return new_expr(Invalid{}) // une erreur déjà signalée dedans
-		return report(k, .Insoluble_Constraint, b.span, fmt.tprintf("la couleur de %s ne désigne pas un seul ensemble : %s", display(b), brief(t)))
+	if _, is_scope := t^.(^Scope); is_scope {
+		if _, closed := color_set(k, t); !closed {
+			if holds_invalid(t) do return new_expr(Invalid{}) // an error already reported inside
+			return report(k, .Unsupported, b.span, fmt.tprintf("not in the kernel yet: a scope shape that depends on an unknown: %s", brief(t)))
+		}
 	}
 	return t
+}
+
+// writes_unknown: a `??` is written in the expression — outside the scopes it
+// writes, whose bindings have their own colors.
+writes_unknown :: proc(e: ^Expr) -> bool {
+	if e == nil do return false
+	#partial switch v in e^ {
+	case Unknown:
+		return true
+	case Op:
+		return writes_unknown(v.left) || writes_unknown(v.right)
+	case Range:
+		return writes_unknown(v.lo) || writes_unknown(v.hi)
+	case Access:
+		return writes_unknown(v.target)
+	case Collapse:
+		return writes_unknown(v.target)
+	case Carve:
+		return writes_unknown(v.target)
+	case Match:
+		return writes_unknown(v.target)
+	}
+	return false
 }
 
 // holds_invalid : un binding du scope, à quelque profondeur que ce soit, porte une
@@ -210,6 +235,8 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	case ^Scope:
 		if p := first_production(c); p != nil do return p.value_type
 		return color
+	case Poly, Term, ^Var:
+		return color // a value designates its singleton, whose default is the value itself
 	}
 	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
 }
@@ -320,18 +347,23 @@ known_types :: proc(types: []^Expr) -> bool {
 	return true
 }
 
-// type_unknown : une nouvelle inconnue. Ses valeurs possibles viennent de sa forme
-// (`??::u8`), de la couleur qui l'attend (`u8:x -> ??`), ou de rien : un `??` sans
-// rien peut valoir n'importe quel atome.
+// type_unknown: a new unknown. Its possible values come from its shape (`??::u8`),
+// from the color that expects it (`u8:x -> ??`), or from nothing: a bare `??` can
+// be any atom. As in new_symbol, an unknown with a single possible value is that
+// value: `n:x -> ??` is n.
 type_unknown :: proc(k: ^Kernel, u: Unknown, env: ^Scope, color: ^Expr) -> ^Expr {
 	shape := color
 	if u.layout != nil {
+		if writes_unknown(u.layout) do return report(k, .Insoluble_Constraint, u.span, "the shape of ?? introduces an unknown `??` that no value shares")
 		shape = type_of(k, u.layout, env)
-		if is_invalid(shape) do return shape
 	}
 	if shape == nil do return new_symbol(k, set_top())
+	if is_invalid(shape) do return shape
 	s, closed := color_set(k, shape)
-	if !closed do return report(k, .Insoluble_Constraint, u.span, "la forme de ?? doit être un seul ensemble")
+	if !closed {
+		if is_value(shape) do return shape
+		return report(k, .Unsupported, u.span, fmt.tprintf("not in the kernel yet: an unknown whose domain depends on another: %s", brief(shape)))
+	}
 	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return report(k, .Unsupported, u.span, "pas encore dans le kernel : ?? d'un scope ou d'un ensemble")
 	return new_symbol(k, s)
 }

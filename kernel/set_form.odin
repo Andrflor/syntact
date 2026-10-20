@@ -16,7 +16,8 @@ import "core:strings"
 //
 // La forme est simplifiée par des lois exactes : un opérande vide, ou un opérande
 // toujours inclus dans l'autre, tombe (`n | 0..3` vaut 0..3 quand n est dans
-// 0..3). Une forme dépend d'inconnues : ce n'est jamais une couleur.
+// 0..3). A form can be a color: its unknowns move to the value's side (check.odin,
+// admitted).
 
 Set_Op_Kind :: enum u8 {
 	Union,

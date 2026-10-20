@@ -1,1 +1,1 @@
-{ "name": "tc_insoluble_via_binding", "description": "a typed-unknown bound, then used as a constraint — insoluble", "source": "a -> ??::u8\na:b -> 10", "expect_errors": ["Insoluble_Constraint"] }
+{ "name": "tc_insoluble_via_binding", "description": "an unknown binding used as a color depends on it: 10 is not every value of a, refuted", "source": "a -> ??::u8\na:b -> 10", "expect_errors": ["Constraint_Mismatch"] }

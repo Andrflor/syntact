@@ -1,11 +1,13 @@
 package kernel
 
+import syn "../compiler"
 import "core:fmt"
 import "core:slice"
 
-// La vérification finale : une fois tout typé, la valeur de chaque binding coloré
-// doit être un élément de sa couleur, pour toute valeur des inconnues. C'est la
-// seule question du typecheck ; elle a trois issues.
+// The final check: once everything is typed, the value of each colored binding
+// must be an element of its color, for every value of the unknowns — those of the
+// value, and those of the color when it depends on some. It is the only question
+// of the typecheck; it has three outcomes.
 Verdict :: enum u8 {
 	Proved, // toute valeur possible est admise
 	Refuted, // une valeur possible ne l'est pas
@@ -21,16 +23,17 @@ check :: proc(k: ^Kernel) {
 		for &b in s.bindings {
 			if b.color_type == nil || b.value_type == nil || is_invalid(b.color_type) || is_invalid(b.value_type) do continue
 			enter(k, s, &b)
-			color, _ := color_set(k, b.color_type) // un seul ensemble : vérifié au typage
 			ctx := context_of(s) // ce que les branches qui entourent le binding savent
-			switch admits(k, color, b.value_type, ctx) {
+			switch admitted(k, b.color_type, b.value_type, ctx) {
 			case .Proved:
 			case .Refuted:
-				if field, set, found := refused_field(k, color, b.value_type, ctx); found {
-					report_about(k, .Constraint_Mismatch, b.span, field.span, fmt.tprintf("%s ∉ %s sur %s, dans %s", brief(field.value_type), print_set(set), display(field), display(&b)))
-				} else {
-					report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ∉ %s sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
+				if color, closed := color_set(k, b.color_type); closed {
+					if field, set, found := refused_field(k, color, b.value_type, ctx); found {
+						report_about(k, .Constraint_Mismatch, b.span, field.span, fmt.tprintf("%s ∉ %s sur %s, dans %s", brief(field.value_type), print_set(set), display(field), display(&b)))
+						continue
+					}
 				}
+				report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s ∉ %s sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
 			case .Undecided:
 				report(k, .Unproven, b.span, fmt.tprintf("%s ∈ %s n'a pas pu être prouvé sur %s", brief(b.value_type), brief(b.color_type), display(&b)))
 			}
@@ -56,6 +59,129 @@ refused_field :: proc(k: ^Kernel, color: Set, t: ^Expr, ctx: Context = nil) -> (
 		return b, f.set, true
 	}
 	return
+}
+
+// admitted: for every value of the unknowns, the value v is an element of the
+// color c. The rules are those of a known color (admits): when c depends on
+// unknowns, they move to the value's side, as in algebra — each condition puts a
+// value against a known set (conditions). A color whose unknowns cannot be moved
+// can still be refuted by a witness.
+admitted :: proc(k: ^Kernel, c, v: ^Expr, ctx: Context) -> Verdict {
+	conds := make([dynamic]Condition, context.temp_allocator)
+	if !conditions(k, c, v, ctx, &conds) do return outside_at_bounds(k, c, v, ctx) ? .Refuted : .Undecided
+	r := Verdict.Proved
+	for x in conds {
+		r = both(r, admits(k, x.set, x.value, x.ctx))
+		if r == .Refuted do break
+	}
+	return r
+}
+
+// Condition: a value against a known set, in a context.
+Condition :: struct {
+	set:   Set,
+	value: ^Expr,
+	ctx:   Context,
+}
+
+// conditions: `v ∈ c` as conditions that must all hold, whose left side is known.
+// Each constructor of c says, by its definition, how its unknowns move to the
+// value's side:
+//
+//   v ∈ S          S known               v ∈ S
+//   v ∈ x          a value               (v = x) ∈ {true}
+//   v ∈ >x         >=x, <x, <=x, !=x     (v > x) ∈ {true}
+//   v ∈ lo..hi     lo <= hi              (lo <= v) ∈ {true}  and  (v <= hi) ∈ {true}
+//   v ∈ A & B                            those of A, and those of B
+//   by cases       v or c                those of each case, under what its branch knows
+//
+// False for what these conditions cannot write: a union or a complement that
+// depends on unknowns, bounds that cannot be ordered.
+conditions :: proc(k: ^Kernel, c, v: ^Expr, ctx: Context, out: ^[dynamic]Condition) -> bool {
+	if set, closed := color_set(k, c); closed {
+		append(out, Condition{set, v, ctx})
+		return true
+	}
+	if x, is_cases := v^.(Cases); is_cases {
+		for e in x.cases do if reachable(k, ctx, e.fact) do conditions(k, c, e.value, with(ctx, e.fact), out) or_return
+		return true
+	}
+	#partial switch x in c^ {
+	case Cases:
+		for e in x.cases do if reachable(k, ctx, e.fact) do conditions(k, e.value, v, with(ctx, e.fact), out) or_return
+		return true
+	case Poly, Term, ^Var:
+		return compared(k, .Equal, v, c, ctx, out)
+	case Set_Form:
+		#partial switch x.op.kind {
+		case .Half:
+			return compared(k, x.op.half, v, x.args[0], ctx, out)
+		case .Inter:
+			return conditions(k, x.args[0], v, ctx, out) && conditions(k, x.args[1], v, ctx, out)
+		case .Range:
+			// between numbers or characters, v lies between the bounds, in either
+			// order (`2..1` is `1..2`); between strings, `..` means "starts with" and
+			// "ends with", which comparisons cannot write
+			lo, hi := x.args[0], x.args[1]
+			if !ordered_sort(k, x.op.lo_open ? hi : lo) do return false
+			if !x.op.lo_open && !x.op.hi_open && !holds(k, .LessEqual, lo, hi, ctx) {
+				if !holds(k, .LessEqual, hi, lo, ctx) do return false
+				lo, hi = hi, lo
+			}
+			if !x.op.lo_open do compared(k, .LessEqual, lo, v, ctx, out) or_return
+			if !x.op.hi_open do compared(k, .LessEqual, v, hi, ctx, out) or_return
+			return true
+		}
+	}
+	return false
+}
+
+// compared: the condition `(a ⋈ b) ∈ {true}`, by the algebra's comparison. False
+// when ⋈ does not compare a and b.
+compared :: proc(k: ^Kernel, kind: syn.Operator_Kind, a, b: ^Expr, ctx: Context, out: ^[dynamic]Condition) -> bool {
+	t := comparison_of(k, kind, a, b, ctx) or_return
+	append(out, Condition{set_of_bools({.True}), t, ctx})
+	return true
+}
+
+// holds: `a ⋈ b` is true for every value of the unknowns.
+holds :: proc(k: ^Kernel, kind: syn.Operator_Kind, a, b: ^Expr, ctx: Context) -> bool {
+	t, comparable := comparison_of(k, kind, a, b, ctx)
+	return comparable && admits(k, set_of_bools({.True}), t, ctx) == .Proved
+}
+
+// ordered_sort: t is a value of an ordered sort — a number or a character.
+ordered_sort :: proc(k: ^Kernel, t: ^Expr) -> bool {
+	d, ok := value_domain(k, t)
+	return ok && is_value(t) && (d == .Ints || d == .Floats || d == .Chars)
+}
+
+// comparison_of: the type of `a ⋈ b`. `=` and `!=` compare two values of any
+// sorts; an order compares two values of the same sort.
+comparison_of :: proc(k: ^Kernel, kind: syn.Operator_Kind, a, b: ^Expr, ctx: Context) -> (^Expr, bool) {
+	if !is_value(a) || !is_value(b) do return nil, false
+	if kind != .Equal && kind != .NotEqual {
+		da, a_ok := value_domain(k, a)
+		db, b_ok := value_domain(k, b)
+		if !a_ok || !b_ok || da != db do return nil, false
+	}
+	t := binary(k, Op{kind = kind}, a, b, ctx)
+	return t, !is_invalid(t)
+}
+
+// reachable: the fact of a case is compatible with the context. Otherwise no value
+// of the unknowns leads to it: the case asks for nothing.
+reachable :: proc(k: ^Kernel, ctx: Context, f: Fact) -> bool {
+	if f.var == nil do return true
+	d, solved := known_domain(k, ctx, f.var)
+	return !solved || !set_is_empty(set_intersect(d, f.domain))
+}
+
+// both: two verdicts that must hold together.
+both :: proc(a, b: Verdict) -> Verdict {
+	if a == .Refuted || b == .Refuted do return .Refuted
+	if a == .Undecided || b == .Undecided do return .Undecided
+	return .Proved
 }
 
 // admits : pour toute valeur des inconnues, la valeur que désigne le type `t` est
@@ -105,29 +231,33 @@ form_in :: proc(k: ^Kernel, t: ^Expr, c: Set, ctx: Context = nil) -> Verdict {
 	if values_is_empty(c.sets) && never_empty(k, t) {
 		if env, ok := set_envelope(k, t); ok && none_admitted(env, c) do return .Refuted
 	}
-	// un témoin aux bornes des domaines : un ensemble que vaut la forme, hors de c
-	if set_outside_at_bounds(k, t, c, ctx) do return .Refuted
+	// a witness at the bounds of the domains: a set the form is worth, outside c
+	if outside_at_bounds(k, new_expr(c), t, ctx) do return .Refuted
 	return .Undecided
 }
 
-// set_outside_at_bounds : en mettant chaque inconnue de la forme t à l'une des
-// bornes de son domaine, t vaut un ensemble que c n'admet pas.
-set_outside_at_bounds :: proc(k: ^Kernel, t: ^Expr, c: Set, ctx: Context) -> bool {
-	vars, bounds, finite := corners(k, t, ctx)
+// outside_at_bounds: setting each unknown of the value v and of the color c to one
+// of the bounds of its domain in ctx, v is not an element of what c is worth — a
+// possible value outside the color. A scope is not evaluated at a point.
+outside_at_bounds :: proc(k: ^Kernel, c, v: ^Expr, ctx: Context) -> bool {
+	if _, is_scope := v^.(^Scope); is_scope do return false
+	vars, bounds, finite := corners(k, ctx, c, v)
 	if !finite do return false
 	env := make([]Atom, k.variables, context.temp_allocator)
 	for corner in 0 ..< 1 << uint(len(vars)) {
 		for x, i in vars do env[x.id] = bounds[i][(corner >> uint(i)) & 1]
-		if s, ok := eval_set(k, t, env); ok && !member(s, c) do return true
+		color, colored := eval_set(k, c, env)
+		value, valued := eval_set(k, v, env)
+		if colored && valued && !member(value, color) do return true
 	}
 	return false
 }
 
-// corners : les inconnues de t, et les bornes de leurs domaines dans ctx — des
-// valeurs qu'elles peuvent prendre. Faux sans bornes finies, ou trop d'inconnues.
-corners :: proc(k: ^Kernel, t: ^Expr, ctx: Context) -> (vars: []^Var, bounds: [][2]Atom, finite: bool) {
+// corners: the unknowns of the types ts, and the bounds of their domains in ctx —
+// values they can take. False without finite bounds, or with too many unknowns.
+corners :: proc(k: ^Kernel, ctx: Context, ts: ..^Expr) -> (vars: []^Var, bounds: [][2]Atom, finite: bool) {
 	found := make([dynamic]^Var, context.temp_allocator)
-	collect_symbols(t, &found)
+	for t in ts do collect_symbols(t, &found)
 	slice.sort_by(found[:], var_less)
 	vars = slice.unique(found[:])
 	if len(vars) > 12 do return
@@ -157,21 +287,8 @@ value_in :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context = nil) -> Verdict {
 	}
 	// 3. Un témoin : les bornes des domaines sont des valeurs possibles ; une valeur
 	//    hors de c en l'une d'elles réfute. On n'énumère pas.
-	if outside_at_bounds(k, v, c, ctx) do return .Refuted
+	if outside_at_bounds(k, new_expr(c), v, ctx) do return .Refuted
 	return .Undecided
-}
-
-// outside_at_bounds : en mettant chaque inconnue de v à l'une des bornes de son
-// domaine dans ctx, v prend une valeur hors de c.
-outside_at_bounds :: proc(k: ^Kernel, v: ^Expr, c: Set, ctx: Context) -> bool {
-	vars, bounds, finite := corners(k, v, ctx)
-	if !finite do return false
-	env := make([]Atom, k.variables, context.temp_allocator)
-	for corner in 0 ..< 1 << uint(len(vars)) {
-		for x, i in vars do env[x.id] = bounds[i][(corner >> uint(i)) & 1]
-		if r, ok := eval(v, env); ok && !atoms_admitted(set_of_atoms({r}), c) do return true
-	}
-	return false
 }
 
 // atom_bounds : le plus petit et le plus grand élément d'un domaine d'entiers ou de
