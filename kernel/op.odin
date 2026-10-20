@@ -3,11 +3,11 @@ package kernel
 import syn "../compiler"
 import "core:fmt"
 
-// type_of d'un opérateur. Si les deux opérandes sont des valeurs (un atome, ou
-// une forme sur des inconnues), on calcule sur les valeurs, et le résultat est
-// sous forme normale (`n * 2 - n` vaut ??0). Si ce sont des ensembles (`u8`,
-// `>0`, `'a'..'z'`), on calcule sur leurs éléments : `u8 + 1` vaut 1..256 ; et si
-// l'un dépend d'inconnues, le type garde la forme de l'opération (set_form.odin).
+// type_of of an operator. If both operands are values (an atom, or a form over
+// unknowns), the computation is on the values, and the result is in normal form
+// (`n * 2 - n` is ??0). If they are sets (`u8`, `>0`, `'a'..'z'`), the computation
+// is on their elements: `u8 + 1` is 1..256; and if one depends on unknowns, the
+// type keeps the form of the operation (set_form.odin).
 
 type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	if o.left == nil do return type_unary(k, o, env)
@@ -18,8 +18,8 @@ type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	return binary(k, o, a, b, context_of(env))
 }
 
-// binary : l'opération sur deux types, dans le contexte où elle est écrite. Sur un
-// type par cas, elle se fait cas par cas, chaque cas avec ce que sa branche sait.
+// binary: the operation on two types, in the context where it is written. On a
+// type by cases, it is done case by case, each case with what its branch knows.
 binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
 	if x, is_cases := a^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr {return binary(k, o, v, other, ctx)}, k, o, b, ctx)
 	if y, is_cases := b^.(Cases); is_cases do return each_case(y, proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr {return binary(k, o, other, v, ctx)}, k, o, a, ctx)
@@ -35,11 +35,11 @@ binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
 	case .Divide, .Mod:
 		return division(k, o, a, b, ctx)
 	}
-	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur %v", o.kind))
+	return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: the operator %v", o.kind))
 }
 
-// each_case : f appliquée à la valeur de chaque cas ; une erreur dans un cas est
-// celle de l'opération.
+// each_case: f applied to the value of each case; an error in a case is that of
+// the operation.
 each_case :: proc(c: Cases, f: proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr, k: ^Kernel, o: Op, other: ^Expr, ctx: Context) -> ^Expr {
 	out := make([]Case, len(c.cases))
 	for x, i in c.cases {
@@ -50,7 +50,7 @@ each_case :: proc(c: Cases, f: proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Con
 	return new_expr(Cases{out})
 }
 
-// `|` et `&` opèrent sur des ensembles.
+// `|` and `&` operate on sets.
 set_algebra :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 	return set_operation(k, Set_Op{kind = o.kind == .Or ? .Union : .Inter}, o.span, a, b)
 }
@@ -72,11 +72,11 @@ arithmetic :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		if status != .Ok do return arith_failure(k, o, status, a, b)
 		return r
 	}
-	// Sur des ensembles, connus ou qui dépendent d'inconnues.
+	// On sets, known or depending on unknowns.
 	return set_operation(k, Set_Op{kind = .Arith, arith = op}, o.span, a, b)
 }
 
-// value_arith : sur deux valeurs, connues ou non, en forme normale.
+// value_arith: on two values, known or not, in normal form.
 value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_Status) {
 	a, b := a_in, b_in
 	sa, a_atom := a^.(Set)
@@ -89,7 +89,7 @@ value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_S
 	db, b_ok := value_domain(k, b)
 	a, da, a_ok = adopt(a, da, a_ok, db, b_ok)
 	b, db, b_ok = adopt(b, db, b_ok, da, a_ok)
-	if !a_ok || !b_ok do return nil, .Unsupported // une inconnue de plusieurs sortes
+	if !a_ok || !b_ok do return nil, .Unsupported // an unknown of several sorts
 	switch {
 	case da == .Ints && db == .Ints:
 		pa, a_poly := as_int_poly(k, a)
@@ -105,14 +105,14 @@ value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_S
 		case .Mul:
 			r, ok = poly_mul(pa, pb)
 		}
-		if !ok do return nil, .Unsupported // un coefficient au-delà de i128
+		if !ok do return nil, .Unsupported // a coefficient beyond i128
 		return poly_type(r), .Ok
 	case da == .Floats && db == .Floats:
 		switch op {
 		case .Add:
 			return float_add(a, b), .Ok
 		case .Sub:
-			return float_add(a, float_neg(b)), .Ok // a - b = a + (-b), exactement
+			return float_add(a, float_neg(b)), .Ok // a - b = a + (-b), exactly
 		case .Mul:
 			return float_mul(a, b), .Ok
 		}
@@ -128,8 +128,8 @@ value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_S
 	return nil, .Invalid
 }
 
-// adopt : une variable dont l'équation n'est pas encore résolue prend la sorte de
-// l'autre opérande ; entière, elle entre dans les polynômes.
+// adopt: a variable whose equation is not solved yet takes the sort of the other
+// operand; when integer, it enters the polynomials.
 adopt :: proc(t: ^Expr, d: Domain, ok: bool, other: Domain, other_ok: bool) -> (^Expr, Domain, bool) {
 	if ok || !other_ok do return t, d, ok
 	v, waiting := pending(t)
@@ -140,22 +140,22 @@ adopt :: proc(t: ^Expr, d: Domain, ok: bool, other: Domain, other_ok: bool) -> (
 
 Arith_Status :: enum u8 {
 	Ok,
-	Invalid, // l'opérateur ne s'applique pas à ces sortes
-	Unsupported, // pas encore dans le kernel (mélange entier/flottant, trop grand pour être exact)
+	Invalid, // the operator does not apply to these sorts
+	Unsupported, // not in the kernel yet (integer/float mix, too large to be exact)
 }
 
 arith_failure :: proc(k: ^Kernel, o: Op, status: Arith_Status, a, b: ^Expr) -> ^Expr {
 	if status == .Unsupported {
-		return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '%v' sur %s et %s", o.kind, print_type(a), print_type(b)))
+		return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: '%v' on %s and %s", o.kind, print_type(a), print_type(b)))
 	}
-	return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' ne s'applique pas à %s et %s", o.kind, print_type(a), print_type(b)))
+	return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' does not apply to %s and %s", o.kind, print_type(a), print_type(b)))
 }
 
-// arith_sets : { x op y } sur deux ensembles, sorte par sorte : chaque sorte de
-// `a` se combine avec la sorte de `b` pour laquelle l'opération existe. Sur les
-// nombres, l'arithmétique ; sur les chaînes, `+` concatène et `*` répète par un
-// ensemble de comptes (`'a'..'z' * 2..4`, `..10 * "ab"`), dans les deux sens.
-// Aucune paire compatible : l'opérateur ne s'applique pas.
+// arith_sets: { x op y } on two sets, sort by sort: each sort of `a` combines
+// with the sort of `b` for which the operation exists. On numbers, arithmetic; on
+// strings, `+` concatenates and `*` repeats by a set of counts (`'a'..'z' * 2..4`,
+// `..10 * "ab"`), in both directions. No compatible pair: the operator does not
+// apply.
 arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 	has :: proc(s: Set, d: Domain) -> bool {
 		return domain_count(s, d) > 0
@@ -168,14 +168,14 @@ arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 	if has(a, .Ints) && has(b, .Ints) {
 		exact: bool
 		r.ints, exact = ints_arith(op, a.ints, b.ints)
-		if !exact do return {}, .Unsupported // une borne au-delà de i128
+		if !exact do return {}, .Unsupported // a bound beyond i128
 		found = true
 	}
 	if has(a, .Floats) && has(b, .Floats) {
 		r.floats = floats_arith(op, a.floats, b.floats)
 		found = true
 	}
-	// Concaténer ou répéter des caractères donne des chaînes.
+	// Concatenating or repeating characters gives strings.
 	if textual(a) && textual(b) && op == .Add {
 		r.strings = strings_union(r.strings, strings_concat(as_strings(a), as_strings(b)))
 		found = true
@@ -184,7 +184,7 @@ arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 		for pair in ([2][2]Set{{a, b}, {b, a}}) {
 			if !textual(pair[0]) || !has(pair[1], .Ints) do continue
 			rep, ok := strings_repeat(as_strings(pair[0]), pair[1].ints)
-			if !ok do return {}, .Unsupported // trop grand pour un automate exact
+			if !ok do return {}, .Unsupported // too large for an exact automaton
 			r.strings = strings_union(r.strings, rep)
 			found = true
 		}
@@ -194,7 +194,7 @@ arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
 	return {}, .Invalid
 }
 
-// pure_domain : la sorte unique d'un ensemble non vide qui n'en porte qu'une.
+// pure_domain: the single sort of a non-empty set that carries only one.
 pure_domain :: proc(s: Set) -> (Domain, bool) {
 	found := false
 	d: Domain
@@ -222,8 +222,8 @@ compare_op_of :: proc(kind: syn.Operator_Kind) -> Compare_Op {
 	return .Eq
 }
 
-// Une comparaison donne un booléen : exact quand les valeurs le décident, une
-// forme normale sinon. Deux sortes différentes ne sont jamais égales.
+// A comparison gives a boolean: exact when the values decide it, a normal form
+// otherwise. Two different sorts are never equal.
 comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 	op := compare_op_of(o.kind)
 	if is_value(a) && is_value(b) {
@@ -231,7 +231,7 @@ comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		db, b_ok := value_domain(k, b)
 		if a_ok && b_ok && da != db {
 			if op == .Eq || op == .Ne do return bool_atom(op == .Ne)
-			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compare deux sortes différentes : %s et %s", o.kind, print_type(a), print_type(b)))
+			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compares two different sorts: %s and %s", o.kind, print_type(a), print_type(b)))
 		}
 		r: ^Expr
 		status: Arith_Status
@@ -239,7 +239,7 @@ comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		pb, b_poly := as_poly(b)
 		if a_poly && b_poly {
 			p, ok := poly_sub(pa, pb)
-			if !ok do return report(k, .Unsupported, o.span, "pas encore dans le kernel : un coefficient au-delà de i128")
+			if !ok do return report(k, .Unsupported, o.span, "not in the kernel yet: a coefficient beyond i128")
 			r, status = int_compare(k, op, p)
 		} else {
 			r, status = general_compare(k, op, a, b)
@@ -247,11 +247,11 @@ comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 		if status != .Ok do return arith_failure(k, o, status, a, b)
 		return r
 	}
-	// Deux ensembles comparés comme valeurs : seule l'égalité a un sens.
+	// Two sets compared as values: only equality makes sense.
 	sa, a_known := color_set(k, a)
 	sb, b_known := color_set(k, b)
 	if !a_known || !b_known || (op != .Eq && op != .Ne) {
-		return report(k, .Unsupported, o.span, "pas encore dans le kernel : cette comparaison")
+		return report(k, .Unsupported, o.span, "not in the kernel yet: this comparison")
 	}
 	return bool_atom(set_equal(sa, sb) == (op == .Eq))
 }
@@ -262,8 +262,8 @@ equal_verdict :: proc(a, b: Set) -> Bools {
 	return {.False, .True}
 }
 
-// order_verdict décide `a < b` (etc.) sur les enveloppes de deux ensembles de
-// nombres ou de caractères.
+// order_verdict decides `a < b` (etc.) on the envelopes of two sets of numbers
+// or of characters.
 order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
 	da, a_pure := pure_domain(a)
 	db, b_pure := pure_domain(b)
@@ -282,7 +282,7 @@ order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
 	case .Strings, .Bools, .Scopes, .Sets:
 		return {}, false
 	}
-	// lt : a < b est sûr ; ge : a >= b est sûr (et symétriquement).
+	// lt: a < b is certain; ge: a >= b is certain (and symmetrically).
 	lt := below(ahi, blo, strict = true)
 	le := below(ahi, blo, strict = false)
 	gt := below(bhi, alo, strict = true)
@@ -304,7 +304,7 @@ order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
 	return {.False, .True}, true
 }
 
-// below : hi < lo (ou hi <= lo), pour une borne haute et une borne basse.
+// below: hi < lo (or hi <= lo), for an upper bound and a lower bound.
 below :: proc(hi, lo: Maybe(f64), strict: bool) -> bool {
 	h, h_ok := hi.?
 	l, l_ok := lo.?
@@ -320,8 +320,8 @@ to_f64 :: proc(lo, hi: Maybe(i128)) -> (Maybe(f64), Maybe(f64)) {
 	return l, h
 }
 
-// Les opérateurs unaires : `-x` sur une valeur ; `~X`, `>x`, `<x`, `>=x`, `<=x`,
-// `!=x` construisent un ensemble.
+// The unary operators: `-x` on a value; `~X`, `>x`, `<x`, `>=x`, `<=x`, `!=x`
+// build a set.
 type_unary :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
 	t := type_of(k, o.right, env)
 	if is_invalid(t) do return t
@@ -338,10 +338,10 @@ unary :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 	case .Greater, .Less, .GreaterEqual, .LessEqual, .NotEqual:
 		return set_operation(k, Set_Op{kind = .Half, half = o.kind}, o.span, t)
 	}
-	return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : l'opérateur préfixe %v", o.kind))
+	return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: the prefix operator %v", o.kind))
 }
 
-// negate : `-x`, sur une valeur (connue ou non) ou sur un ensemble connu.
+// negate: `-x`, on a value (known or not) or on a known set.
 negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 	if is_value(t) {
 		d, ok := value_domain(k, t)
@@ -351,11 +351,11 @@ negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 			if r_ok do return poly_type(r)
 		}
 		if ok && d == .Floats do return float_neg(t)
-		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("pas encore dans le kernel : '-' sur une inconnue de plusieurs sortes : %s", print_type(t)))
-		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend un nombre : %s", print_type(t)))
+		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: '-' on an unknown of several sorts: %s", print_type(t)))
+		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' expects a number: %s", print_type(t)))
 	}
 	s, known := color_set(k, t)
-	if !known do return report(k, .Unsupported, o.span, "pas encore dans le kernel : '-' sur un ensemble qui dépend d'une inconnue")
+	if !known do return report(k, .Unsupported, o.span, "not in the kernel yet: '-' on a set that depends on an unknown")
 	d, pure := pure_domain(s)
 	switch {
 	case pure && d == .Ints:
@@ -363,20 +363,20 @@ negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 	case pure && d == .Floats:
 		return new_expr(set_of_floats(floats_neg(s.floats)))
 	}
-	return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' attend des nombres : %s", print_set(s)))
+	return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' expects numbers: %s", print_set(s)))
 }
 
-// --- le cast ---
+// --- the cast ---
 
-// `x \ T` force x dans le layout T. Entre entiers, on garde les bits bas :
-// (200 + 100) \ u8 vaut 44, -1 \ u8 vaut 255, 200 \ i8 vaut -56. Entre sortes, un
-// caractère donne son code, un booléen 0 ou 1, un flottant sa partie entière ; un
-// entier donne le flottant, ou le booléen (vrai s'il n'est pas nul). Une valeur
-// inconnue qui tient déjà dans le layout ne change pas ; sinon le cast reste une
-// opération de l'équation, dont les valeurs sont celles du layout.
+// `x \ T` forces x into the layout T. Between integers, the low bits are kept:
+// (200 + 100) \ u8 is 44, -1 \ u8 is 255, 200 \ i8 is -56. Across sorts, a
+// character gives its code, a boolean 0 or 1, a float its integer part; an integer
+// gives the float, or the boolean (true if it is not zero). An unknown value that
+// already fits in the layout does not change; otherwise the cast stays an
+// operation of the equation, whose values are those of the layout.
 
 Layout :: struct {
-	kind:   Domain, // .Ints, .Floats, .Bools ou .Chars
+	kind:   Domain, // .Ints, .Floats, .Bools or .Chars
 	bits:   uint,
 	signed: bool,
 }
@@ -384,23 +384,23 @@ Layout :: struct {
 cast_into :: proc(k: ^Kernel, o: Op, a, t: ^Expr) -> ^Expr {
 	target, closed := color_set(k, t)
 	layout, is_layout := layout_of(target)
-	if !closed || !is_layout do return report(k, .Invalid_Cast, o.span, fmt.tprintf("on ne cast que vers un layout — un entier de 8 à 64 bits, un flottant, un booléen, un caractère : %s", brief(t)))
+	if !closed || !is_layout do return report(k, .Invalid_Cast, o.span, fmt.tprintf("one can only cast to a layout — an integer of 8 to 64 bits, a float, a boolean, a character: %s", brief(t)))
 	if v, known := a^.(Set); known {
 		x, atom := atom_of(v)
 		r, ok := cast_atom(x, layout)
-		if !atom || !ok do return report(k, .Invalid_Cast, o.span, fmt.tprintf("%s ne se cast pas en %s", brief(a), brief(t)))
+		if !atom || !ok do return report(k, .Invalid_Cast, o.span, fmt.tprintf("%s does not cast to %s", brief(a), brief(t)))
 		return new_expr(set_of_atoms({r}))
 	}
-	if !is_value(a) do return report(k, .Invalid_Cast, o.span, fmt.tprintf("on ne cast qu'une valeur : %s", brief(a)))
+	if !is_value(a) do return report(k, .Invalid_Cast, o.span, fmt.tprintf("one can only cast a value: %s", brief(a)))
 	if d, ok := value_domain(k, a); ok && d == layout.kind {
-		if env, _ := envelope(k, a); atoms_subset(env, target) do return a // elle y tient déjà
+		if env, _ := envelope(k, a); atoms_subset(env, target) do return a // it already fits in it
 	}
 	args := make([]^Expr, 2)
 	args[0], args[1] = a, new_expr(target)
 	return new_expr(Term{op = .Cast, args = args})
 }
 
-// layout_of : l'ensemble est celui d'un layout.
+// layout_of: the set is that of a layout.
 layout_of :: proc(s: Set) -> (Layout, bool) {
 	kind, pure := pure_domain(s)
 	if !pure do return {}, false
@@ -425,7 +425,7 @@ layout_of :: proc(s: Set) -> (Layout, bool) {
 	return {}, false
 }
 
-// cast_atom : une valeur connue, forcée dans le layout.
+// cast_atom: a known value, forced into the layout.
 cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
 	as_int: i128
 	switch v in x {
@@ -437,8 +437,8 @@ cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
 		as_int = v ? 1 : 0
 	case f64:
 		if l.kind == .Floats do return v, true
-		if v != v || v > 1e38 || v < -1e38 do return nil, false // NaN, ou au-delà de i128
-		as_int = i128(v) // la partie entière
+		if v != v || v > 1e38 || v < -1e38 do return nil, false // NaN, or beyond i128
+		as_int = i128(v) // the integer part
 	case string:
 		return nil, false
 	}
@@ -460,21 +460,21 @@ cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
 	return nil, false
 }
 
-// --- la division ---
+// --- the division ---
 
-// Entre entiers, `/` tronque vers zéro et `%` donne le reste, du signe du dividende
-// — la division de la machine. Le diviseur ne vaut jamais 0 : s'il le peut, dans le
-// contexte où la division est écrite, c'est une erreur. Entre flottants, c'est la
-// division d'IEEE 754, sans erreur (x / 0 vaut ±∞). Sur des inconnues, la division
-// reste une opération de l'équation ; x / 1 est x, x % 1 est 0, et x % d est x quand
-// x est déjà dans 0..d - 1.
+// Between integers, `/` truncates toward zero and `%` gives the remainder, with
+// the sign of the dividend — the machine's division. The divisor is never 0: if it
+// can be, in the context where the division is written, it is an error. Between
+// floats, it is the IEEE 754 division, without error (x / 0 is ±∞). On unknowns,
+// the division stays an operation of the equation; x / 1 is x, x % 1 is 0, and
+// x % d is x when x is already in 0..d - 1.
 division :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
-	if !is_value(a) || !is_value(b) do return report(k, .Unsupported, o.span, "pas encore dans le kernel : la division d'ensembles")
+	if !is_value(a) || !is_value(b) do return report(k, .Unsupported, o.span, "not in the kernel yet: the division of sets")
 	da, a_ok := value_domain(k, a)
 	db, b_ok := value_domain(k, b)
 	op_name := o.kind == .Divide ? "/" : "%"
 	if !a_ok || !b_ok || da != db || (da != .Ints && da != .Floats) || (da == .Floats && o.kind == .Mod) {
-		return report(k, .Invalid_operator, o.span, fmt.tprintf("'%s' ne s'applique pas à %s et %s", op_name, brief(a), brief(b)))
+		return report(k, .Invalid_operator, o.span, fmt.tprintf("'%s' does not apply to %s and %s", op_name, brief(a), brief(b)))
 	}
 	if da == .Floats {
 		x, x_known := float_atom(a)
@@ -483,7 +483,7 @@ division :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
 		return new_expr(Term{op = .F_Div, args = pair(a, b)})
 	}
 	divisor, _ := envelope(k, b, ctx)
-	if ints_contains(divisor.ints, 0) do return report(k, .Invalid_operator, o.span, fmt.tprintf("le diviseur %s peut valoir 0", brief(b)))
+	if ints_contains(divisor.ints, 0) do return report(k, .Invalid_operator, o.span, fmt.tprintf("the divisor %s can be 0", brief(b)))
 	x, x_known := int_atom(a)
 	y, y_known := int_atom(b)
 	if x_known && y_known do return new_expr(set_of_ints(ints_point(o.kind == .Divide ? x / y : x % y)))
@@ -516,9 +516,9 @@ float_atom :: proc(t: ^Expr) -> (f64, bool) {
 	return v, ok && is_float
 }
 
-// div_envelope : les quotients possibles, a et b deux ensembles d'entiers, b sans 0
-// et d'un seul signe — la division tronquée y est monotone en chaque opérande :
-// ses extrêmes sont aux coins.
+// div_envelope: the possible quotients, a and b two sets of integers, b without 0
+// and of a single sign — the truncated division is monotone in each operand there:
+// its extremes are at the corners.
 div_envelope :: proc(a, b: Ints) -> Ints {
 	alo, ahi := ints_bounds(a)
 	blo, bhi := ints_bounds(b)
@@ -531,8 +531,8 @@ div_envelope :: proc(a, b: Ints) -> Ints {
 	return ints_range(min(q[0], q[1], q[2], q[3]), max(q[0], q[1], q[2], q[3]))
 }
 
-// mod_envelope : les restes possibles — de valeur absolue sous le plus grand |b|,
-// du signe du dividende (le reste n'est pas monotone : pas de coins).
+// mod_envelope: the possible remainders — of absolute value below the largest
+// |b|, with the sign of the dividend (the remainder is not monotone: no corners).
 mod_envelope :: proc(a, b: Ints) -> Ints {
 	blo, bhi := ints_bounds(b)
 	bl, bl_ok := blo.?

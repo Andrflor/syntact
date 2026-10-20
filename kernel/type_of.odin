@@ -2,20 +2,20 @@ package kernel
 
 import "core:fmt"
 
-// type_of : la seule opération sémantique. Le type d'une expression est
-// l'ensemble qu'elle désigne, écrit lui-même en IR, et simplifié :
+// type_of: the only semantic operation. The type of an expression is the set it
+// designates, itself written in IR, and simplified:
 //
-//   type_of(5)             = 5           une valeur est un ensemble : son propre type
+//   type_of(5)             = 5           a value is a set: its own type
 //   type_of(u8)            = 0..255
 //   type_of(none)          = none
-//   type_of(??::u8)        = ??0         une inconnue, qui vaut dans 0..255
-//   type_of(n * 2 + n)     = 3*??0       la forme normale, exacte
-//   type_of(??0..10)       = ??0..10     un ensemble qui dépend d'une inconnue
-//   type_of(scope)         = scope       ses bindings portent leurs types
+//   type_of(??::u8)        = ??0         an unknown, whose value lies in 0..255
+//   type_of(n * 2 + n)     = 3*??0       the normal form, exact
+//   type_of(??0..10)       = ??0..10     a set that depends on an unknown
+//   type_of(scope)         = scope       its bindings carry their types
 //
-// Les scopes sont typés sur place : chaque binding garde sa couleur et sa valeur
-// symboliques, et reçoit leurs types. La vérification `valeur ⊆ couleur` se fait
-// à la fin (check), une fois tout typé.
+// Scopes are typed in place: each binding keeps its symbolic color and value, and
+// receives their types. The check `value ⊆ color` happens at the end (check), once
+// everything is typed.
 
 type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 	if e == nil do return new_expr(Invalid{})
@@ -50,21 +50,21 @@ type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
 	case Unknown:
 		return type_unknown(k, v, env, nil)
 	case Poly, Term, ^Var, Set_Form, Cases, Invalid:
-		return e // déjà un type
+		return e // already a type
 	}
 	return e
 }
 
-// type_scope type chaque binding sur place, dans l'ordre : chacun voit les types
-// de ceux du dessus. Une ref vers un binding pas encore typé est une récursion.
-// `shape` : les places de la forme que la couleur attend, quand ce scope est la
-// valeur d'un binding coloré par elle. Le scope la retient : ses copies la
-// gardent. Un scope écrit ici et expansé reçoit la suite de la forme, à partir de
-// la place où il dépose ses bindings.
+// type_scope types each binding in place, in order: each one sees the types of
+// those above it. A ref to a binding not yet typed is a recursion.
+// `shape`: the places of the shape the color expects, when this scope is the
+// value of a binding colored by it. The scope retains it: its copies keep it. A
+// scope written here and expanded receives the rest of the shape, starting from
+// the place where it lays down its bindings.
 type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 	s.shape = shape
 	append(&k.typed, s)
-	position := 0 // la place du binding parmi ceux que s présente
+	position := 0 // the place of the binding among those s presents
 	for &b in s.bindings {
 		if b.kind == .Expand {
 			type_expansion(k, &b, s, position < len(shape) ? shape[position:] : nil)
@@ -72,14 +72,14 @@ type_scope :: proc(k: ^Kernel, s: ^Scope, shape: []Place = nil) {
 			continue
 		}
 		type_binding(k, &b, s, expected_color(shape, position, b))
-		// une production qui s'appelle elle-même : son équation, résolue si on sait
+		// a production that calls itself: its equation, solved if we know how
 		if b.kind == .Product && b.value_type != nil do b.value_type = solved(k, s, b.value_type)
 		position += 1
 	}
 }
 
-// expected_color : le type de couleur que la forme attend à la place i, si ce
-// binding y correspond (même nom, même kind).
+// expected_color: the color type the shape expects at place i, if this binding
+// corresponds to it (same name, same kind).
 expected_color :: proc(shape: []Place, i: int, b: Binding) -> ^Expr {
 	if i >= len(shape) do return nil
 	sb := binding_at(shape[i])
@@ -87,16 +87,16 @@ expected_color :: proc(shape: []Place, i: int, b: Binding) -> ^Expr {
 	return sb.color_type
 }
 
-// type_binding : la couleur, puis la valeur. Un binding sans couleur écrite prend
-// celle que la forme qui l'entoure attend à sa place (`expected`) : la coloration
-// implicite (specs/language/11). Le typage est bidirectionnel : la couleur descend
-// dans la valeur — un `??` la prend, un scope littéral la passe à ses bindings, un
-// argument de carve la reçoit du binding qu'il remplace.
+// type_binding: the color, then the value. A binding without a written color takes
+// the one the shape around it expects at its place (`expected`): implicit
+// coloring (specs/language/11). Typing is bidirectional: the color goes down into
+// the value — a `??` takes it, a literal scope passes it to its bindings, a carve
+// argument receives it from the binding it replaces.
 type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	previous := enter(k, env, b)
 	defer k.scene = previous
 	if b.kind != .Push && b.kind != .Pull && b.kind != .Product {
-		b.value_type = new_expr(Invalid{}) // signalé à la construction
+		b.value_type = new_expr(Invalid{}) // reported at construction
 		return
 	}
 	b.color_type = b.color != nil ? type_color(k, b, env) : expected
@@ -107,7 +107,7 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	#partial switch v in b.value^ {
 	case Unknown:
 		if v.layout == nil && b.color_type != nil {
-			b.value_type = type_unknown(k, v, env, b.color_type) // `??` prend sa couleur
+			b.value_type = type_unknown(k, v, env, b.color_type) // `??` takes its color
 			return
 		}
 	case ^Scope:
@@ -162,8 +162,8 @@ writes_unknown :: proc(e: ^Expr) -> bool {
 	return false
 }
 
-// holds_invalid : un binding du scope, à quelque profondeur que ce soit, porte une
-// erreur déjà signalée.
+// holds_invalid: a binding of the scope, at whatever depth, carries an error
+// already reported.
 holds_invalid :: proc(t: ^Expr) -> bool {
 	s, is_scope := t^.(^Scope)
 	if !is_scope do return false
@@ -175,10 +175,10 @@ holds_invalid :: proc(t: ^Expr) -> bool {
 	return false
 }
 
-// expected_shape : la forme qu'un type de couleur attend pour ce scope littéral —
-// la couleur elle-même si c'est une forme, ou la seule forme de même structure
-// dans une combinaison de formes. La coloration implicite descend place par
-// place : une forme de longueur quelconque (`...C:`) n'a pas de places fixes.
+// expected_shape: the shape a color type expects for this literal scope — the
+// color itself if it is a shape, or the only shape of the same structure in a
+// combination of shapes. Implicit coloring goes down place by place: a shape of
+// any length (`...C:`) has no fixed places.
 expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bool) {
 	if color == nil do return nil, false
 	#partial switch c in color^ {
@@ -188,7 +188,7 @@ expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bo
 		found: ^Scope = nil
 		for r in bdd_atoms(c.scopes) {
 			if r.equation != nil || !fits(r, literal) || r.shape == found do continue
-			if found != nil do return nil, false // ambigu
+			if found != nil do return nil, false // ambiguous
 			found = r.shape
 		}
 		return found, found != nil
@@ -196,7 +196,7 @@ expected_shape :: proc(k: ^Kernel, color: ^Expr, literal: ^Scope) -> (^Scope, bo
 	return nil, false
 }
 
-// fixed_length : la forme n'a pas de suite — ni elle, ni ce qu'elle expanse.
+// fixed_length: the shape has no run — neither itself, nor what it expands.
 fixed_length :: proc(s: ^Scope) -> bool {
 	for b in s.bindings {
 		if b.kind != .Expand do continue
@@ -206,16 +206,17 @@ fixed_length :: proc(s: ^Scope) -> bool {
 	return true
 }
 
-// fits : le scope littéral a la structure de la forme (noms et kinds, dans l'ordre).
+// fits: the literal scope has the structure of the shape (names and kinds, in
+// order).
 fits :: proc(r: ^Record, literal: ^Scope) -> bool {
 	if len(r.fields) != len(literal.bindings) do return false
 	for f, i in r.fields do if f.name != literal.bindings[i].name || f.kind != literal.bindings[i].kind do return false
 	return true
 }
 
-// default_of : le type de la valeur d'un binding qui n'en écrit pas — le défaut de
-// sa couleur. Un ensemble : son élément distingué. Un scope : sa première
-// production s'il en a, sinon lui-même (`Point:p` vaut Point).
+// default_of: the type of the value of a binding that writes none — the default of
+// its color. A set: its distinguished element. A scope: its first production if it
+// has one, otherwise itself (`Point:p` is Point).
 default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	if color == nil || is_invalid(color) do return new_expr(Invalid{})
 	if x, d, recursive := equation_var(color); recursive do return recursive_default(k, x, d, b)
@@ -226,11 +227,11 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		case .Scopes:
 			return scopes_default(k, c.scopes, b)
 		case .Sets:
-			if c.sets.cofinite do return report(k, .Unsupported, b.span, "pas encore dans le kernel : le défaut de tous les ensembles sauf quelques-uns")
+			if c.sets.cofinite do return report(k, .Unsupported, b.span, "not in the kernel yet: the default of all sets but a few")
 			return new_expr(c.sets.values[0])
 		}
 		d, ok := set_default(c)
-		if !ok do return color // la couleur none : sa seule valeur est none
+		if !ok do return color // the color none: its only value is none
 		return new_expr(d)
 	case ^Scope:
 		if p := first_production(c); p != nil do return p.value_type
@@ -238,64 +239,64 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	case Poly, Term, ^Var:
 		return color // a value designates its singleton, whose default is the value itself
 	}
-	return report(k, .Unsupported, b.span, "pas encore dans le kernel : ce défaut")
+	return report(k, .Unsupported, b.span, "not in the kernel yet: this default")
 }
 
-// recursive_default : le défaut de X, celui de son scope : sa première production,
-// le cas de base (specs/kernel-recursion.md §1). Si c'est elle qu'on est en train
-// de typer, le cas de base revient à X : son défaut serait infini, la définition
-// est illégale. Sans production, le scope se contient lui-même : pas de cas de base.
+// recursive_default: the default of X, that of its scope: its first production,
+// the base case (specs/kernel-recursion.md §1). If it is the one being typed, the
+// base case comes back to X: its default would be infinite, the definition is
+// illegal. Without a production, the scope contains itself: no base case.
 recursive_default :: proc(k: ^Kernel, x: ^Var, d: ^Scope, b: ^Binding) -> ^Expr {
 	p := first_production(d)
 	if p != nil && p.value_type != nil do return p.value_type
-	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("le cas de base de %s revient à lui-même : son défaut serait infini", print_equation(x.type)))
+	return report(k, .Infinite_Recursion, b.span, fmt.tprintf("the base case of %s comes back to itself: its default would be infinite", print_equation(x.type)))
 }
 
-// scopes_default : le défaut d'un ensemble de scopes réduit à une forme, c'est la
-// forme elle-même (`Point:p` vaut Point).
+// scopes_default: the default of a set of scopes reduced to one shape is the shape
+// itself (`Point:p` is Point).
 scopes_default :: proc(k: ^Kernel, b: Bdd, binding: ^Binding) -> ^Expr {
-	// tous les scopes : le scope vide, comme "" pour toutes les chaînes
+	// all scopes: the empty scope, like "" for all strings
 	if is_leaf(b, .Top) do return new_expr(new_scope(nil))
 	if n, is_node := b.(^Bdd_Node); is_node && is_leaf(n.yes, .Top) && is_leaf(n.maybe, .Bottom) && is_leaf(n.no, .Bottom) {
-		if n.atom.equation != nil do return default_of(k, new_expr(n.atom.shape), binding) // le défaut de l'équation
+		if n.atom.equation != nil do return default_of(k, new_expr(n.atom.shape), binding) // the default of the equation
 		return new_expr(n.atom.shape)
 	}
-	return report(k, .Unsupported, binding.span, "pas encore dans le kernel : le défaut d'une combinaison de formes")
+	return report(k, .Unsupported, binding.span, "not in the kernel yet: the default of a combination of shapes")
 }
 
-// first_production : la première production que présente s, ou nil.
+// first_production: the first production s presents, or nil.
 first_production :: proc(s: ^Scope) -> ^Binding {
 	for p in places(s) do if b := binding_at(p); b.kind == .Product do return b
 	return nil
 }
 
-// type_ref : le type du binding désigné.
+// type_ref: the type of the designated binding.
 type_ref :: proc(k: ^Kernel, r: Ref, env: ^Scope) -> ^Expr {
 	sc := env
 	for _ in 0 ..< r.up do sc = sc.parent
 	b := sc.bindings[r.index]
 	t := b.value_type
-	// le scope qu'on est en train de définir : une self-référence
+	// the scope being defined: a self-reference
 	if v, literal := scope_literal(b.value); t == nil && literal && encloses(v, env) do return new_equation_var(k, new_expr(v))
-	if t == nil do return report(k, .Unsupported, r.span, "pas encore dans le kernel : la récursion")
+	if t == nil do return report(k, .Unsupported, r.span, "not in the kernel yet: recursion")
 	return t
 }
 
 type_access :: proc(k: ^Kernel, a: Access, env: ^Scope) -> ^Expr {
 	t := type_of(k, a.target, env)
 	if is_invalid(t) do return t
-	if _, _, recursive := equation_var(t); recursive do return report(k, .Unsupported, a.span, "pas encore dans le kernel : un champ d'un type récursif")
+	if _, _, recursive := equation_var(t); recursive do return report(k, .Unsupported, a.span, "not in the kernel yet: a field of a recursive type")
 	s, ok := t^.(^Scope)
-	if !ok do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'.%s' : la cible n'est pas un scope", a.name))
+	if !ok do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'.%s': the target is not a scope", a.name))
 	p, found := find_binding(s, a.name, a.ordinal)
-	if !found do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' n'existe pas dans ce scope", a.name))
+	if !found do return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("'%s' does not exist in this scope", a.name))
 	v := binding_at(p).value_type
-	if v == nil do return report(k, .Unsupported, a.span, "pas encore dans le kernel : la récursion")
+	if v == nil do return report(k, .Unsupported, a.span, "not in the kernel yet: recursion")
 	return v
 }
 
-// find_binding : parmi les bindings que présente s, la dernière occurrence d'un
-// nom, ou la n-ième avec `#n`.
+// find_binding: among the bindings s presents, the last occurrence of a name, or
+// the n-th with `#n`.
 find_binding :: proc(s: ^Scope, name: string, ordinal: int) -> (Place, bool) {
 	all := places(s)
 	if ordinal >= 0 {
@@ -315,25 +316,25 @@ type_collapse :: proc(k: ^Kernel, c: Collapse, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
 	if x, d, recursive := equation_var(t); recursive {
-		// un appel récursif : la valeur de la production de l'équation, appliquée
-		// aux mêmes types que x — une inconnue (specs/equational.md §2). Sur les
-		// mêmes types, connus, il revient à lui-même : la récursion ne finit pas.
+		// a recursive call: the value of the production of the equation, applied
+		// to the same types as x — an unknown (specs/equational.md §2). On the
+		// same types, known, it comes back to itself: the recursion does not end.
 		_, carved, _, _ := equation_of(x)
-		if carved == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s! revient avec les mêmes arguments : la récursion ne finit pas", print_equation(x.type)))
-		// l'équation de d déjà résolue : sa forme close, appliquée aux arguments
+		if carved == nil && known_types(binding_types(d)) do return report(k, .Infinite_Recursion, c.span, fmt.tprintf("%s! comes back with the same arguments: the recursion does not end", print_equation(x.type)))
+		// the equation of d already solved: its closed form, applied to the arguments
 		if applied, ok := carved.?; ok {
 			if closed, solved := apply_closed(k, d, applied); solved do return closed
 		}
 		return new_equation_var(k, new_expr(Collapse{target = x.type, span = c.span}))
 	}
 	s, ok := t^.(^Scope)
-	if !ok do return report(k, .Invalid_Execute, c.span, "on ne collapse qu'un scope")
+	if !ok do return report(k, .Invalid_Execute, c.span, "only a scope can be collapsed")
 	p := first_production(s)
-	if p == nil do return new_expr(Set{}) // un scope sans production se réduit à none
+	if p == nil do return new_expr(Set{}) // a scope without a production reduces to none
 	return p.value_type
 }
 
-// binding_types : les types des bindings de s qui ne sont ni des productions ni des
+// binding_types: the types of the bindings of s that are neither productions nor
 // expansions.
 binding_types :: proc(s: ^Scope) -> []^Expr {
 	types := make([]^Expr, len(s.bindings), context.temp_allocator)
@@ -341,7 +342,7 @@ binding_types :: proc(s: ^Scope) -> []^Expr {
 	return types
 }
 
-// known_types : aucun de ces types ne dépend d'une inconnue.
+// known_types: none of these types depends on an unknown.
 known_types :: proc(types: []^Expr) -> bool {
 	for t in types do if t != nil && !is_closed_type(t) do return false
 	return true
@@ -364,13 +365,14 @@ type_unknown :: proc(k: ^Kernel, u: Unknown, env: ^Scope, color: ^Expr) -> ^Expr
 		if is_value(shape) do return shape
 		return report(k, .Unsupported, u.span, fmt.tprintf("not in the kernel yet: an unknown whose domain depends on another: %s", brief(shape)))
 	}
-	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return report(k, .Unsupported, u.span, "pas encore dans le kernel : ?? d'un scope ou d'un ensemble")
+	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return report(k, .Unsupported, u.span, "not in the kernel yet: ?? of a scope or of a set")
 	return new_symbol(k, s)
 }
 
-// type_of(lo..hi) = l'union des plages x..y, x ∈ type_of(lo), y ∈ type_of(hi) : voir range_set.
+// type_of(lo..hi) = the union of the ranges x..y, x ∈ type_of(lo), y ∈ type_of(hi):
+// see range_set.
 type_range :: proc(k: ^Kernel, r: Range, env: ^Scope) -> ^Expr {
-	open := new_expr(Set{}) // une borne absente : ignorée par range_set
+	open := new_expr(Set{}) // an absent bound: ignored by range_set
 	lo, hi := open, open
 	if r.lo != nil do lo = type_of(k, r.lo, env)
 	if r.hi != nil do hi = type_of(k, r.hi, env)
@@ -386,12 +388,12 @@ first_rune :: proc(s: string) -> rune {
 
 display :: proc(b: ^Binding) -> string {
 	if b.name != "" do return fmt.tprintf("'%s'", b.name)
-	if b.kind == .Product do return "la production"
-	return "ce binding"
+	if b.kind == .Product do return "the production"
+	return "this binding"
 }
 
-// encloses : s est écrit dans outer, ou est outer — un scope qu'on est en train de
-// typer quand on type s.
+// encloses: s is written in outer, or is outer — a scope being typed when s is
+// typed.
 encloses :: proc(outer, s: ^Scope) -> bool {
 	for sc := s; sc != nil; sc = sc.parent do if sc == outer do return true
 	return false

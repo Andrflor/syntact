@@ -1,17 +1,18 @@
 package kernel
 
-// LA RÉSOLUTION D'UNE ÉQUATION
+// SOLVING AN EQUATION
 //
-// La production d'un scope qui s'appelle lui-même est une équation : l'appel
-// récursif y est une inconnue (specs/equational.md §4). Quand elle a la forme
+// The production of a scope that calls itself is an equation: the recursive
+// call is an unknown in it (specs/equational.md §4). When it has the form
 //
-//   Y(p) = c                  pour p = b, le cas de base
-//   Y(p) = g(p) + Y(p - 1)    pour p de b + 1 à la borne de son domaine
+//   Y(p) = c                  for p = b, the base case
+//   Y(p) = g(p) + Y(p - 1)    for p from b + 1 to the bound of its domain
 //
-// où p est un paramètre du scope et g un polynôme en p, sa solution est la somme
-// Y(p) = c + Σ g(i), i de b + 1 à p : un polynôme, la forme close. On la calcule
-// sans dérouler : la somme d'un polynôme de degré n est un polynôme de degré n + 1,
-// donné par ses différences finies en b. Sinon, l'équation reste telle quelle.
+// where p is a parameter of the scope and g a polynomial in p, its solution is the
+// sum Y(p) = c + Σ g(i), i from b + 1 to p: a polynomial, the closed form. It is
+// computed without unrolling: the sum of a polynomial of degree n is a polynomial
+// of degree n + 1, given by its finite differences at b. Otherwise, the equation
+// stays as it is.
 
 solved :: proc(k: ^Kernel, d: ^Scope, t: ^Expr) -> ^Expr {
 	cases, is_cases := t^.(Cases)
@@ -19,7 +20,7 @@ solved :: proc(k: ^Kernel, d: ^Scope, t: ^Expr) -> ^Expr {
 	base, step := cases.cases[0], cases.cases[1]
 	p := base.fact.var
 	if p == nil || step.fact.var != p || !parameter_of(d, p) do return t
-	// le cas de base : une seule valeur de p, et la valeur qu'il donne
+	// the base case: a single value of p, and the value it gives
 	lo, hi := ints_bounds(base.fact.domain.ints)
 	b, b_ok := lo.?
 	if !b_ok || hi != lo || ints_count(base.fact.domain.ints) != 1 do return t
@@ -28,7 +29,7 @@ solved :: proc(k: ^Kernel, d: ^Scope, t: ^Expr) -> ^Expr {
 	c_atom, c_ok := eval(base.value, env)
 	c, c_int := c_atom.(i128)
 	if !c_ok || !c_int do return t
-	// le pas : p parcourt b + 1 et au-delà, sans trou
+	// the step: p ranges over b + 1 and beyond, without a hole
 	step_lo, _ := ints_bounds(step.fact.domain.ints)
 	if s, ok := step_lo.?; !ok || s != b + 1 || len(step.fact.domain.ints.intervals) != 1 do return t
 	q, is_poly := as_poly(step.value)
@@ -39,7 +40,7 @@ solved :: proc(k: ^Kernel, d: ^Scope, t: ^Expr) -> ^Expr {
 	return t
 }
 
-// parameter_of : p est le type d'un binding de d — un paramètre.
+// parameter_of: p is the type of a binding of d — a parameter.
 parameter_of :: proc(d: ^Scope, p: ^Var) -> bool {
 	for b in d.bindings {
 		if b.kind == .Product || b.value_type == nil do continue
@@ -48,8 +49,8 @@ parameter_of :: proc(d: ^Scope, p: ^Var) -> bool {
 	return false
 }
 
-// step_rest : q = g + Y, où Y est l'appel de d qui donne à p le type p - 1 — et g,
-// un polynôme en p seul.
+// step_rest: q = g + Y, where Y is the call of d that gives p the type p - 1 — and
+// g, a polynomial in p alone.
 step_rest :: proc(k: ^Kernel, d: ^Scope, p: ^Var, q: Poly) -> (g: Poly, found: bool) {
 	if den(q) != 1 do return
 	call: ^Var = nil
@@ -65,8 +66,8 @@ step_rest :: proc(k: ^Kernel, d: ^Scope, p: ^Var, q: Poly) -> (g: Poly, found: b
 	return
 }
 
-// steps_down : x est l'appel récursif de d qui donne à son paramètre p le type
-// p - 1, et laisse les autres bindings tels quels.
+// steps_down: x is the recursive call of d that gives its parameter p the type
+// p - 1, and leaves the other bindings as they are.
 steps_down :: proc(k: ^Kernel, d: ^Scope, p: ^Var, x: ^Var) -> bool {
 	target, carve, call, ok := equation_of(x)
 	c, carved := carve.?
@@ -86,13 +87,13 @@ steps_down :: proc(k: ^Kernel, d: ^Scope, p: ^Var, x: ^Var) -> bool {
 	return moved
 }
 
-// closed_sum : c + Σ g(i), i de b + 1 à p, comme un polynôme en p — par les
-// différences finies de la somme en b : S(p) = Σ Δʲ S(b) · C(p - b, j).
+// closed_sum: c + Σ g(i), i from b + 1 to p, as a polynomial in p — by the
+// finite differences of the sum at b: S(p) = Σ Δʲ S(b) · C(p - b, j).
 closed_sum :: proc(k: ^Kernel, p: ^Var, g: Poly, b, c: i128) -> (result: Poly, ok: bool) {
 	degree := 0
 	for m in g.monos do degree = max(degree, len(m.vars))
 	n := degree + 1
-	// la somme en b, b + 1, …, b + n
+	// the sum at b, b + 1, …, b + n
 	sums := make([]i128, n + 1, context.temp_allocator)
 	env := make([]Atom, k.variables, context.temp_allocator)
 	for i in 1 ..= n {
@@ -102,7 +103,7 @@ closed_sum :: proc(k: ^Kernel, p: ^Var, g: Poly, b, c: i128) -> (result: Poly, o
 		if !evaluated || !is_int do return
 		sums[i] = add_checked(sums[i - 1], x) or_return
 	}
-	// ses différences finies en b
+	// its finite differences at b
 	diffs := make([]i128, n + 1, context.temp_allocator)
 	row := sums
 	for j in 0 ..= n {
@@ -128,9 +129,10 @@ closed_sum :: proc(k: ^Kernel, p: ^Var, g: Poly, b, c: i128) -> (result: Poly, o
 	return result, true
 }
 
-// apply_closed : la production de d, résolue en forme close, appliquée au carve c
-// — chaque paramètre que c change remplacé par le type qu'il reçoit. Faux tant que
-// la production n'est pas résolue (elle se type, ou elle reste une équation).
+// apply_closed: the production of d, solved in closed form, applied to the carve
+// c — each parameter that c changes replaced by the type it receives. False as
+// long as the production is not solved (it is being typed, or it stays an
+// equation).
 apply_closed :: proc(k: ^Kernel, d: ^Scope, c: Carve) -> (^Expr, bool) {
 	p := first_production(d)
 	if p == nil || p.value_type == nil || mentions_call(p.value_type, d) do return nil, false
@@ -148,7 +150,7 @@ apply_closed :: proc(k: ^Kernel, d: ^Scope, c: Carve) -> (^Expr, bool) {
 	return r, true
 }
 
-// mentions_call : t dépend d'un appel récursif de d pas encore résolu.
+// mentions_call: t depends on a recursive call of d not solved yet.
 mentions_call :: proc(t: ^Expr, d: ^Scope) -> bool {
 	found := make([dynamic]^Var, context.temp_allocator)
 	collect_symbols(t, &found)
@@ -159,8 +161,8 @@ mentions_call :: proc(t: ^Expr, d: ^Scope) -> bool {
 	return false
 }
 
-// substitute_var : t, où la variable x vaut `by`, en forme normale. Faux pour une
-// forme que la substitution ne sait pas encore réécrire.
+// substitute_var: t, where the variable x is `by`, in normal form. False for a
+// form that the substitution cannot rewrite yet.
 substitute_var :: proc(t: ^Expr, x: ^Var, by: ^Expr) -> (^Expr, bool) {
 	#partial switch v in t^ {
 	case Set:

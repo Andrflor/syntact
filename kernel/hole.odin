@@ -4,25 +4,25 @@ import syn "../compiler"
 import "core:fmt"
 import "core:strings"
 
-// L'INFÉRENCE DES TROUS
+// HOLE INFERENCE
 //
-// Un trou (`T <- d`) que le carve ne remplit pas reçoit sa valeur du carve
-// (specs/language/14). Ce qui tombe à sa place — là où il est écrit dans la
-// couleur d'un champ que le carve remplit, ou dans la valeur que ce champ avait —
-// est de deux natures :
+// A hole (`T <- d`) that the carve does not fill receives its value from the carve
+// (specs/language/14). What lands in its place — where it is written in the color
+// of a field that the carve fills, or in the value that this field had — is of two
+// kinds:
 //
-// - une valeur envoyée : elle se lit dans un type plus large sans changer de sens ;
-// - un type requis : la couleur de ce que le carve fournit, ou le remplissage `<-`.
-//   Il ne se lit pas plus large : ce serait admettre ce qu'il refuse.
+// - a sent value: it reads in a wider type without changing meaning;
+// - a required type: the color of what the carve provides, or the `<-` filling.
+//   It does not read wider: that would be admitting what it refuses.
 //
-// Le trou prend celle qui contient toutes les autres, jamais leur union. S'il y a
-// des types requis, ils sont tous le même, et chaque valeur envoyée y est. Sinon,
-// l'une des valeurs envoyées contient toutes les autres. La couleur du trou
-// s'applique ensuite, comme à tout binding.
+// The hole takes the one that contains all the others, never their union. If there
+// are required types, they are all the same, and each sent value is in it.
+// Otherwise, one of the sent values contains all the others. The color of the hole
+// then applies, as to any binding.
 //
-// Pour savoir ce qui tombe où, on type une sonde : une copie de la cible où chaque
-// trou est une inconnue. Une couleur ou une valeur qui écrit le trou le porte alors
-// dans son type, à l'endroit même où le carve met quelque chose.
+// To know what lands where, we type a probe: a copy of the target where each hole
+// is an unknown. A color or a value that writes the hole then carries it in its
+// type, at the very place where the carve puts something.
 
 Landing :: struct {
 	type:     ^Expr,
@@ -30,19 +30,19 @@ Landing :: struct {
 }
 
 Probe :: struct {
-	holes:   map[^Var]int, // la variable de la sonde → l'index du trou
-	landed:  [][dynamic]Landing, // par binding de la cible : ce qui tombe à sa place
-	blocked: bool, // un trou écrit dans une opération : on ne sait pas ce qui y tombe
+	holes:   map[^Var]int, // the variable of the probe → the index of the hole
+	landed:  [][dynamic]Landing, // per binding of the target: what lands in its place
+	blocked: bool, // a hole written in an operation: we do not know what lands there
 }
 
-// infer_holes : la valeur de chaque trou de `derived` que le carve détermine.
-// `targets` : pour chaque argument, le binding qu'il remplit (fill).
+// infer_holes: the value of each hole of `derived` that the carve determines.
+// `targets`: for each argument, the binding it fills (fill).
 infer_holes :: proc(k: ^Kernel, s: ^Scope, c: Carve, derived: ^Scope, targets: []int) {
 	if !has_hole(s) do return
 	p := probe(k, s, c, targets)
 	if p.blocked {
-		invalid := report(k, .Unsupported, c.span, "pas encore dans le kernel : un trou écrit dans une opération")
-		// un trou qu'on ne sait pas inférer : ce qui en dépend reste silencieux
+		invalid := report(k, .Unsupported, c.span, "not in the kernel yet: a hole written in an operation")
+		// a hole we cannot infer: what depends on it stays silent
 		for &b in derived.bindings {
 			if b.kind != .Pull do continue
 			if filled, is_carved := b.value^.(Carved); is_carved && filled.args == c.args do continue
@@ -54,7 +54,7 @@ infer_holes :: proc(k: ^Kernel, s: ^Scope, c: Carve, derived: ^Scope, targets: [
 		if b.kind != .Pull || len(p.landed[j]) == 0 do continue
 		t, settled := settle(k, p.landed[j][:], &b, c.span)
 		if !settled do continue
-		// rempli par `<-` : il garde ce remplissage, que le reste a confirmé
+		// filled by `<-`: it keeps this filling, which the rest confirmed
 		if filled, is_carved := b.value^.(Carved); is_carved && filled.args == c.args do continue
 		b.value = new_expr(Inferred{c.args, t})
 	}
@@ -65,8 +65,8 @@ has_hole :: proc(s: ^Scope) -> bool {
 	return false
 }
 
-// probe : ce qui tombe à la place de chaque trou. La sonde est typée en silence, et
-// rien de ce qu'elle type n'est vérifié : seule sa forme compte.
+// probe: what lands in the place of each hole. The probe is typed silently, and
+// nothing it types is checked: only its shape counts.
 probe :: proc(k: ^Kernel, s: ^Scope, c: Carve, targets: []int) -> (p: Probe) {
 	previous := k.scene
 	k.scene = {quiet = true}
@@ -86,11 +86,11 @@ probe :: proc(k: ^Kernel, s: ^Scope, c: Carve, targets: []int) -> (p: Probe) {
 	}
 	type_scope(k, target, s.shape)
 
-	// les arguments, typés à part : ceux du carve le seront avec la couleur du
-	// binding qu'ils remplacent, qui peut dépendre d'un trou pas encore inféré
+	// the arguments, typed apart: those of the carve will be typed with the color
+	// of the binding they replace, which can depend on a hole not yet inferred
 	args := copy_scope(c.args, c.args.parent, c.args.site)
 	args.carving = s
-	unread := make([]bool, len(s.bindings)) // un champ carvé que la sonde n'a pas su typer
+	unread := make([]bool, len(s.bindings)) // a carved field that the probe could not type
 	for &a, i in args.bindings {
 		j := targets[i]
 		if j < 0 do continue
@@ -112,20 +112,20 @@ probe :: proc(k: ^Kernel, s: ^Scope, c: Carve, targets: []int) -> (p: Probe) {
 			land(k, &p, b.value_type, sent)
 		}
 	}
-	// Un champ qui dépend d'un trou, et que la sonde n'a pas su typer : on ne sait
-	// pas ce qui tombe à la place du trou. Les dépendances se lisent comme celles
-	// d'un carve, les trous tenant lieu de ce qui change — une fois la sonde typée,
-	// car un binding changé ne se type plus en silence.
+	// A field that depends on a hole, and that the probe could not type: we do not
+	// know what lands in the place of the hole. The dependencies are read like those
+	// of a carve, the holes standing for what changes — once the probe is typed,
+	// since a changed binding is no longer typed silently.
 	for &b in target.bindings do if b.kind == .Pull do b.copy = .Changed
 	mark_changes(target, nil, {})
 	for b, j in target.bindings do if unread[j] && b.copy == .Changed do p.blocked = true
 	return
 }
 
-// land : `pattern`, un type de la sonde, reçoit `at` ; chaque trou qu'il écrit
-// reçoit la partie de `at` qui est à sa place. Dans un scope, la couleur d'un champ
-// reçoit la couleur du champ correspondant s'il en a une (un type requis), sinon
-// sa valeur ; la valeur d'un champ reçoit la valeur.
+// land: `pattern`, a type of the probe, receives `at`; each hole it writes receives
+// the part of `at` that is in its place. In a scope, the color of a field receives
+// the color of the corresponding field if it has one (a required type), otherwise
+// its value; the value of a field receives the value.
 land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 	if pattern == nil || is_invalid(pattern) || at.type == nil || is_invalid(at.type) do return
 	#partial switch v in pattern^ {
@@ -135,14 +135,14 @@ land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 			return
 		}
 	case ^Scope:
-		// un scope à productions admet ce que ses productions admettent, pas sa
-		// structure : on ne sait pas encore ce qui y tombe
+		// a scope with productions admits what its productions admit, not its
+		// structure: we do not know yet what lands there
 		if first_production(v) != nil {
 			if scope_mentions(p, v) do p.blocked = true
 			return
 		}
 		w, is_scope := at.type^.(^Scope)
-		if !is_scope || !same_bindings(v, w) do return // la vérification du champ le signale
+		if !is_scope || !same_bindings(v, w) do return // the check of the field reports it
 		vs, ws := places(v), places(w)
 		for vp, i in vs {
 			vb, wb := binding_at(vp)^, binding_at(ws[i])^
@@ -157,8 +157,8 @@ land :: proc(k: ^Kernel, p: ^Probe, pattern: ^Expr, at: Landing) {
 	if mentions(p, pattern) do p.blocked = true
 }
 
-// scope_mentions : un binding du scope, à quelque profondeur que ce soit, dépend
-// d'un trou de la sonde.
+// scope_mentions: a binding of the scope, at whatever depth, depends on a hole of
+// the probe.
 scope_mentions :: proc(p: ^Probe, s: ^Scope) -> bool {
 	for b in s.bindings {
 		for t in ([2]^Expr{b.color_type, b.value_type}) {
@@ -170,7 +170,7 @@ scope_mentions :: proc(p: ^Probe, s: ^Scope) -> bool {
 	return false
 }
 
-// same_bindings : ils présentent les mêmes bindings — noms et kinds, dans l'ordre.
+// same_bindings: they present the same bindings — names and kinds, in order.
 same_bindings :: proc(a, b: ^Scope) -> bool {
 	x, y := places(a), places(b)
 	if len(x) != len(y) do return false
@@ -178,7 +178,7 @@ same_bindings :: proc(a, b: ^Scope) -> bool {
 	return true
 }
 
-// mentions : le type dépend d'un trou de la sonde.
+// mentions: the type depends on a hole of the probe.
 mentions :: proc(p: ^Probe, t: ^Expr) -> bool {
 	if t == nil do return false
 	#partial switch v in t^ {
@@ -196,8 +196,8 @@ mentions :: proc(p: ^Probe, t: ^Expr) -> bool {
 	return false
 }
 
-// settle : ce qui est tombé à la place du trou `b` désigne-t-il une valeur, celle
-// qui contient toutes les autres ? Sinon, l'erreur, au carve.
+// settle: does what landed in the place of the hole `b` designate a value, the one
+// that contains all the others? Otherwise, the error, at the carve.
 settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^Expr, bool) {
 	required: ^Expr = nil
 	required_set: Set
@@ -205,7 +205,7 @@ settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^
 		if !l.required do continue
 		set, closed := color_set(k, l.type)
 		if !closed {
-			report(k, .Unsupported, span, fmt.tprintf("pas encore dans le kernel : %s requis par %s", brief(l.type), display(b)))
+			report(k, .Unsupported, span, fmt.tprintf("not in the kernel yet: %s required by %s", brief(l.type), display(b)))
 			return nil, false
 		}
 		if required == nil {
@@ -213,7 +213,7 @@ settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^
 			continue
 		}
 		if !set_equal(set, required_set) {
-			report(k, .Constraint_Mismatch, span, fmt.tprintf("%s requiert à la fois %s et %s", display(b), brief(required), brief(l.type)))
+			report(k, .Constraint_Mismatch, span, fmt.tprintf("%s requires both %s and %s", display(b), brief(required), brief(l.type)))
 			return nil, false
 		}
 	}
@@ -223,23 +223,23 @@ settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^
 			switch admits(k, required_set, l.type) {
 			case .Proved:
 			case .Refuted:
-				report(k, .Constraint_Mismatch, span, fmt.tprintf("%s ∉ %s, que requiert %s", brief(l.type), brief(required), display(b)))
+				report(k, .Constraint_Mismatch, span, fmt.tprintf("%s ∉ %s, which %s requires", brief(l.type), brief(required), display(b)))
 				return nil, false
 			case .Undecided:
-				report(k, .Unproven, span, fmt.tprintf("%s ∈ %s, que requiert %s, n'a pas pu être prouvé", brief(l.type), brief(required), display(b)))
+				report(k, .Unproven, span, fmt.tprintf("%s ∈ %s, which %s requires, could not be proved", brief(l.type), brief(required), display(b)))
 				return nil, false
 			}
 		}
 		return required, true
 	}
-	// que des valeurs envoyées : l'une d'elles contient toutes les autres
+	// only sent values: one of them contains all the others
 	candidates: for candidate in landed {
 		set, closed := exact_set(k, candidate.type)
 		if !closed do continue
 		for l in landed do if admits(k, set, l.type) != .Proved do continue candidates
 		return candidate.type, true
 	}
-	report(k, .Constraint_Mismatch, span, fmt.tprintf("aucune des valeurs reçues par %s ne contient les autres : %s", display(b), listed_types(landed)))
+	report(k, .Constraint_Mismatch, span, fmt.tprintf("none of the values received by %s contains the others: %s", display(b), listed_types(landed)))
 	return nil, false
 }
 

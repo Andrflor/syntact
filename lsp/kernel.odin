@@ -7,20 +7,19 @@ import "core:sys/posix"
 import "core:time"
 
 // ============================================================================
-// LE KERNEL DANS L'ÉDITEUR
+// THE KERNEL IN THE EDITOR
 //
-// Le kernel type le fichier sur place : chaque binding écrit porte ses types. Le
-// LSP retrouve un binding par la position de ce qui est écrit — le scope écrit le
-// plus profond qui contient le curseur, puis, dedans, le binding qui le contient.
-// Les copies d'un carve ne sont pas écrites dans le fichier : on ne les parcourt
-// pas.
+// The kernel types the file in place: each written binding carries its types. The
+// LSP finds a binding by the position of what is written — the deepest written
+// scope that contains the cursor, then, inside it, the binding that contains it.
+// The copies of a carve are not written in the file: they are not traversed.
 // ============================================================================
 
 contains :: proc(span: compiler.Span, offset: u32) -> bool {
 	return span.start <= offset && offset <= span.end
 }
 
-// written_scope_at : le scope écrit le plus profond qui contient offset, sous s.
+// written_scope_at: the deepest written scope that contains offset, under s.
 written_scope_at :: proc(s: ^kernel.Scope, offset: u32) -> ^kernel.Scope {
 	if s == nil do return nil
 	for b in s.bindings {
@@ -31,7 +30,7 @@ written_scope_at :: proc(s: ^kernel.Scope, offset: u32) -> ^kernel.Scope {
 	return s
 }
 
-// scope_in_expr : le scope écrit dans e (qui est écrit dans s) contenant offset.
+// scope_in_expr: the scope written in e (which is written in s) containing offset.
 scope_in_expr :: proc(e: ^kernel.Expr, s: ^kernel.Scope, offset: u32) -> ^kernel.Scope {
 	if e == nil do return nil
 	#partial switch v in e^ {
@@ -63,8 +62,8 @@ scope_in_expr :: proc(e: ^kernel.Expr, s: ^kernel.Scope, offset: u32) -> ^kernel
 	return nil
 }
 
-// written_binding : le binding écrit qui déclare `name` à offset ; sinon celui que
-// le prélude nomme ainsi (un builtin).
+// written_binding: the written binding that declares `name` at offset; otherwise
+// the one the prelude names so (a builtin).
 written_binding :: proc(program: ^kernel.Scope, name: string, offset: u32) -> ^kernel.Binding {
 	if program == nil do return nil
 	s := written_scope_at(program, offset)
@@ -75,8 +74,8 @@ written_binding :: proc(program: ^kernel.Scope, name: string, offset: u32) -> ^k
 	return nil
 }
 
-// visible_bindings : les bindings nommés visibles à offset, du plus proche au
-// prélude ; un nom masqué n'apparaît qu'une fois.
+// visible_bindings: the named bindings visible at offset, from the closest to the
+// prelude; a shadowed name appears only once.
 visible_bindings :: proc(program: ^kernel.Scope, offset: u32) -> []^kernel.Binding {
 	out := make([dynamic]^kernel.Binding)
 	if program == nil do return out[:]
@@ -91,19 +90,20 @@ visible_bindings :: proc(program: ^kernel.Scope, offset: u32) -> []^kernel.Bindi
 	return out[:]
 }
 
-// shown_type : le binding tel que le kernel l'a typé.
+// shown_type: the binding as the kernel typed it.
 shown_type :: proc(b: ^kernel.Binding) -> string {
 	return kernel.print_binding(b^, .Type)
 }
 
-// KERNEL_TIMEOUT : au-delà, on considère que le kernel ne termine pas.
+// KERNEL_TIMEOUT: beyond it, the kernel is considered not to terminate.
 KERNEL_TIMEOUT :: 5 * time.Second
 
-// kernel_fails : le kernel, lancé dans un processus à part sur cet AST, plante ou
-// ne termine pas. Il est déterministe : s'il termine à part, il termine ici.
+// kernel_fails: the kernel, run in a separate process on this AST, crashes or
+// does not terminate. It is deterministic: if it terminates apart, it terminates
+// here.
 kernel_fails :: proc(ast: ^compiler.Ast) -> (failure: string, failed: bool) {
 	pid := posix.fork()
-	if pid < 0 do return "", false // pas de processus à part : on le lance ici
+	if pid < 0 do return "", false // no separate process: run it here
 	if pid == 0 {
 		kernel.check_ast(ast)
 		posix._exit(0)
@@ -115,14 +115,14 @@ kernel_fails :: proc(ast: ^compiler.Ast) -> (failure: string, failed: bool) {
 		if time.since(start) > KERNEL_TIMEOUT {
 			posix.kill(pid, .SIGKILL)
 			posix.waitpid(pid, &status, {})
-			return fmt.tprintf("le kernel ne termine pas en %v sur ce fichier", KERNEL_TIMEOUT), true
+			return fmt.tprintf("the kernel does not terminate within %v on this file", KERNEL_TIMEOUT), true
 		}
 		time.sleep(2 * time.Millisecond)
 	}
-	// tué par un signal : les 7 bits bas du statut. posix.WIFSIGNALED d'Odin compte
-	// en signé sous Linux, et prend une sortie normale (0) pour un signal.
+	// killed by a signal: the low 7 bits of the status. Odin's posix.WIFSIGNALED
+	// counts as signed under Linux, and takes a normal exit (0) for a signal.
 	if signal := status & 0x7f; signal != 0 && signal != 0x7f {
-		return fmt.tprintf("le kernel a planté sur ce fichier (%v)", posix.Signal(signal)), true
+		return fmt.tprintf("the kernel crashed on this file (%v)", posix.Signal(signal)), true
 	}
 	return "", false
 }

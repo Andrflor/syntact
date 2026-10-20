@@ -3,14 +3,14 @@ package kernel
 import syn "../compiler"
 import "core:slice"
 
-// L'IR du kernel. Un scope est une liste ordonnée de bindings. Un binding porte
-// quatre choses : sa couleur et sa valeur, symboliques, telles qu'écrites — et
-// leurs types. Le type simplifie (un carve qui donne 5 a le type 5), la valeur
-// garde toute la structure qui l'a produit.
+// The IR of the kernel. A scope is an ordered list of bindings. A binding carries
+// four things: its color and its value, symbolic, as written — and their types.
+// The type simplifies (a carve that gives 5 has type 5), the value keeps all the
+// structure that produced it.
 //
-// Les types sont eux aussi des expressions : le type de 5 est 5, celui de u8 est
-// 0..255, celui de `??::u8` est l'inconnue ??0. Un scope est son propre type : ses
-// bindings portent déjà les leurs.
+// Types are expressions too: the type of 5 is 5, that of u8 is 0..255, that of
+// `??::u8` is the unknown ??0. A scope is its own type: its bindings already carry
+// theirs.
 
 Binding_Kind :: enum u8 {
 	Push, // name -> value
@@ -26,61 +26,61 @@ Binding_Kind :: enum u8 {
 }
 
 Binding :: struct {
-	name:       string, // "" = anonyme ou production
-	capture:    string, // alias invisible `(h)`
+	name:       string, // "" = anonymous or production
+	capture:    string, // invisible alias `(h)`
 	kind:       Binding_Kind,
-	color:      ^Expr, // à gauche du `:` ; nil = non coloré
-	value:      ^Expr, // à droite de la flèche ; nil = pas écrite : le défaut de la couleur
+	color:      ^Expr, // left of the `:`; nil = uncolored
+	value:      ^Expr, // right of the arrow; nil = not written: the default of the color
 	color_type: ^Expr, // type_of(color): an equation, which can share the unknowns of the value
-	value_type: ^Expr, // type_of(value), ou le défaut de color_type ; nil = pas encore typé
+	value_type: ^Expr, // type_of(value), or the default of color_type; nil = not typed yet
 	copy:       Copy,
 	span:       syn.Span,
 }
 
-// Copy : ce qu'un carve a fait d'un binding de la copie qu'il a dérivée. Une erreur
-// n'est signalée qu'une fois, là où on peut la corriger : un binding copié sans
-// changement a déjà été vérifié dans sa source, un binding que le carve a changé
-// est signalé au carve.
+// Copy: what a carve did with a binding of the copy it derived. An error is
+// reported only once, where it can be fixed: a binding copied without change has
+// already been checked in its source, a binding that the carve changed is reported
+// at the carve.
 Copy :: enum u8 {
-	Written, // pas une copie : le binding tel qu'écrit
-	Same, // copié d'une source, sans que le carve ne le touche
-	Changed, // la valeur carvée, ou un binding qui en dépend
+	Written, // not a copy: the binding as written
+	Same, // copied from a source, without the carve touching it
+	Changed, // the carved value, or a binding that depends on it
 }
 
 Scope :: struct {
 	parent:   ^Scope,
 	bindings: [dynamic]Binding,
-	shape:    []Place, // la forme qu'il a reçue, place par place : la couleur implicite de ses bindings
-	site:     syn.Span, // une copie : le carve qui l'a dérivée, où sont signalées ses erreurs
-	carving:  ^Scope, // les arguments d'un carve : le scope qu'il dérive, que `.x` désigne
-	cover:    ^Expr, // une branche de pattern : ce qu'elle admet ; nil pour la branche par défaut
-	fact:     Fact, // une branche de pattern : ce qu'elle sait de l'inconnue qu'elle reçoit
+	shape:    []Place, // the shape it received, place by place: the implicit color of its bindings
+	site:     syn.Span, // a copy: the carve that derived it, where its errors are reported
+	carving:  ^Scope, // the arguments of a carve: the scope it derives, which `.x` designates
+	cover:    ^Expr, // a pattern branch: what it admits; nil for the default branch
+	fact:     Fact, // a pattern branch: what it knows about the unknown it receives
 	span:     syn.Span,
 }
 
-// Un binding, résolu lexicalement : remonter `up` scopes, prendre le binding `index`.
+// A binding, resolved lexically: go up `up` scopes, take binding `index`.
 Ref :: struct {
 	up:    int,
 	index: int,
-	name:  string, // tel qu'écrit, pour l'impression
+	name:  string, // as written, for printing
 	span:  syn.Span,
 }
 
-// `target.name` (dernière occurrence) ou `target.name#n`.
+// `target.name` (last occurrence) or `target.name#n`.
 Access :: struct {
 	target:  ^Expr,
 	name:    string,
-	ordinal: int, // -1 = dernière occurrence
+	ordinal: int, // -1 = last occurrence
 	span:    syn.Span,
 }
 
-// `target!` : le scope réduit par sa première production.
+// `target!`: the scope reduced by its first production.
 Collapse :: struct {
 	target: ^Expr,
 	span:   syn.Span,
 }
 
-// Un opérateur. `left` est nil pour un opérateur unaire (`~x`, `>0`, `-x`).
+// An operator. `left` is nil for a unary operator (`~x`, `>0`, `-x`).
 Op :: struct {
 	kind:  syn.Operator_Kind,
 	left:  ^Expr,
@@ -88,73 +88,74 @@ Op :: struct {
 	span:  syn.Span,
 }
 
-// `target{…}` : un scope dérivé de target, dont des bindings reçoivent une autre
-// valeur. Les arguments sont un scope écrit à cet endroit : `x -> v` vise la
-// première occurrence de x (`x#n -> v`, la n-ième), un argument sans nom vise le
-// binding de même rang parmi ceux qui ne sont pas des productions.
+// `target{…}`: a scope derived from target, some bindings of which receive another
+// value. The arguments are a scope written at this place: `x -> v` targets the
+// first occurrence of x (`x#n -> v`, the n-th), an unnamed argument targets the
+// binding of the same rank among those that are not productions.
 Carve :: struct {
 	target:   ^Expr,
 	args:     ^Scope,
-	ordinals: []int, // pour chaque argument, l'occurrence visée ; -1 : la première
+	ordinals: []int, // for each argument, the targeted occurrence; -1: the first
 	span:     syn.Span,
 }
 
-// Carved : dans un scope carvé, la valeur qu'un argument a mise à la place. Elle
-// reste l'argument `index` de `args`, écrit et typé là où il a été écrit.
+// Carved: in a carved scope, the value that an argument put in its place. It
+// remains argument `index` of `args`, written and typed where it was written.
 Carved :: struct {
 	args:  ^Scope,
 	index: int,
 }
 
-// Inferred : dans un scope carvé, la valeur qu'un trou a reçue du carve sans être
-// rempli : celle, parmi ce qui tombe à sa place, qui contient toutes les autres
-// (hole.odin).
+// Inferred: in a carved scope, the value that a hole received from the carve
+// without being filled: the one, among what falls in its place, that contains all
+// the others (hole.odin).
 Inferred :: struct {
-	args: ^Scope, // les arguments du carve qui l'a inférée
+	args: ^Scope, // the arguments of the carve that inferred it
 	type: ^Expr,
 }
 
-// `.x` sans source, dans les arguments d'un carve : le scope que ce carve dérive.
-// `a{z -> .z{b -> 2}}` recarve le z de a.
+// `.x` without a source, in the arguments of a carve: the scope that this carve
+// derives. `a{z -> .z{b -> 2}}` recarves the z of a.
 Carving :: struct {
 	span: syn.Span,
 }
 
-// `z{…}` sans flèche, parmi les arguments d'un carve : la cible de ce carve
-// intérieur reste à choisir. Si le scope carvé a un champ z, c'est `.z`, et
-// l'argument recarve ce champ : `a{z{b -> 2}}` vaut `a{z -> .z{b -> 2}}`. Sinon
-// c'est le z visible, et l'argument est positionnel : `Pt{Box{1}}`. On ne le sait
-// qu'une fois la cible typée.
+// `z{…}` without an arrow, among the arguments of a carve: the target of this
+// inner carve remains to be chosen. If the carved scope has a field z, it is `.z`,
+// and the argument recarves that field: `a{z{b -> 2}}` is `a{z -> .z{b -> 2}}`.
+// Otherwise it is the visible z, and the argument is positional: `Pt{Box{1}}`.
+// This is known only once the target is typed.
 Shorthand :: struct {
 	field: Access, // .z
-	outer: ^Expr, // z, résolu au-dessus ; nil quand rien ne s'appelle z
+	outer: ^Expr, // z, resolved above; nil when nothing is called z
 }
 
-// `target ? {…}` : chaque branche est un scope, dont la production est celle de la
-// branche, écrite dans sa couverture (Scope.cover). La première branche qui admet
-// la valeur de target la donne (pattern.odin).
+// `target ? {…}`: each branch is a scope, whose production is that of the branch,
+// written in its cover (Scope.cover). The first branch that admits the value of
+// target gives it (pattern.odin).
 Match :: struct {
 	target:   ^Expr,
 	branches: []^Scope,
 	span:     syn.Span,
 }
 
-// `lo..hi`. Une borne nil est ouverte. Entre des caractères, l'intervalle porte sur
-// les caractères (`'a'..'z'`) ; entre des chaînes, sur les positions (`"jwt"..`
-// commence par, `.."_"` finit par).
+// `lo..hi`. A nil bound is open. Between characters, the interval is over the
+// characters (`'a'..'z'`); between strings, over the positions (`"jwt"..` starts
+// with, `.."_"` ends with).
 Range :: struct {
 	lo:   ^Expr,
 	hi:   ^Expr,
 	span: syn.Span,
 }
 
-// `??` (layout nil) ou `??::T` : une valeur inconnue, dont seul le type est connu.
+// `??` (nil layout) or `??::T`: an unknown value, of which only the type is known.
 Unknown :: struct {
 	layout: ^Expr,
 	span:   syn.Span,
 }
 
-// Une erreur déjà signalée à cet endroit : tout ce qui en dépend reste silencieux.
+// An error already reported at this place: everything that depends on it stays
+// silent.
 Invalid :: struct {}
 
 Expr :: union {
@@ -172,11 +173,11 @@ Expr :: union {
 	Match,
 	Range,
 	Unknown,
-	Poly, // une valeur entière qui dépend d'inconnues (un type seulement) : unknown.odin
-	Term, // une autre valeur qui dépend d'inconnues
-	^Var, // une inconnue qui n'est pas un entier pur (un entier est un polynôme)
-	Set_Form, // un ensemble qui dépend d'inconnues : set_form.odin
-	Cases, // le type d'un pattern sur une inconnue : une valeur par branche atteinte
+	Poly, // an integer value that depends on unknowns (a type only): unknown.odin
+	Term, // another value that depends on unknowns
+	^Var, // an unknown that is not a pure integer (an integer is a polynomial)
+	Set_Form, // a set that depends on unknowns: set_form.odin
+	Cases, // the type of a pattern on an unknown: one value per reached branch
 	Invalid,
 }
 
@@ -193,7 +194,7 @@ new_scope :: proc(parent: ^Scope, span: syn.Span = {}) -> ^Scope {
 	return s
 }
 
-// --- erreurs ---
+// --- errors ---
 
 Error_Kind :: enum u8 {
 	Undefined_Identifier,
@@ -205,39 +206,39 @@ Error_Kind :: enum u8 {
 	Invalid_operator,
 	Invalid_Range,
 	Constraint_Mismatch,
-	Non_Exhaustive_Pattern, // une valeur possible qu'aucune branche n'admet
-	Unproven, // le kernel ne sait pas prouver qu'une couleur est respectée
+	Non_Exhaustive_Pattern, // a possible value that no branch admits
+	Unproven, // the kernel cannot prove that a color is respected
 	Insoluble_Constraint,
-	Infinite_Recursion, // le cas de base d'un type récursif revient à lui-même
-	Invalid_Cast, // un cast vers ce qui n'est pas un layout
-	Unsupported, // une forme que le kernel ne traite pas encore
+	Infinite_Recursion, // the base case of a recursive type comes back to itself
+	Invalid_Cast, // a cast to what is not a layout
+	Unsupported, // a form that the kernel does not handle yet
 }
 
 Error :: struct {
 	kind:    Error_Kind,
 	message: string,
-	span:    syn.Span, // où la signaler
-	origin:  syn.Span, // ce qu'elle concerne, écrit dans la source d'une copie ; = span hors des copies
+	span:    syn.Span, // where to report it
+	origin:  syn.Span, // what it concerns, written in the source of a copy; = span outside copies
 }
 
 Kernel :: struct {
 	ast:      ^syn.Ast,
 	errors:   [dynamic]Error,
-	typed:    [dynamic]^Scope, // tous les scopes typés, pour la vérification finale
-	variables: int, // le compte des variables créées : leur ordre (unknown.odin)
-	shapes:   map[^Scope]Set, // un scope lu comme couleur, une fois pour toutes (bdd.odin)
-	scene:    Scene, // le binding typé ou vérifié en ce moment : où vont ses erreurs
-	matching: map[Matching]struct{}, // les appartenances à une forme en cours de décision
+	typed:    [dynamic]^Scope, // all typed scopes, for the final check
+	variables: int, // the count of created variables: their order (unknown.odin)
+	shapes:   map[^Scope]Set, // a scope read as a color, once and for all (bdd.odin)
+	scene:    Scene, // the binding typed or checked right now: where its errors go
+	matching: map[Matching]struct{}, // the memberships in a shape being decided
 }
 
-// Scene : où vont les erreurs du binding en cours. Hors des copies, à l'endroit
-// qu'elles concernent ; dans une copie, au carve (site), ou nulle part (quiet).
+// Scene: where the errors of the current binding go. Outside copies, to the place
+// they concern; in a copy, to the carve (site), or nowhere (quiet).
 Scene :: struct {
 	site:  syn.Span,
 	quiet: bool,
 }
 
-// enter : la scène d'un binding du scope s ; rend la précédente, à rétablir.
+// enter: the scene of a binding of scope s; returns the previous one, to restore.
 enter :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> (previous: Scene) {
 	previous = k.scene
 	switch b.copy {
@@ -251,8 +252,8 @@ enter :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> (previous: Scene) {
 		k.scene = {
 			site = s.site,
 		}
-		// la valeur carvée elle-même : à l'argument, quand le carve est celui qui a
-		// dérivé ce scope
+		// the carved value itself: at the argument, when the carve is the one that
+		// derived this scope
 		if b.value != nil {
 			if c, carved := b.value^.(Carved); carved && c.args.span == s.site do k.scene.site = c.args.bindings[c.index].span
 		}
@@ -260,13 +261,13 @@ enter :: proc(k: ^Kernel, s: ^Scope, b: ^Binding) -> (previous: Scene) {
 	return
 }
 
-// report : une erreur, à la place que dit la scène, une seule fois.
+// report: an error, at the place the scene says, only once.
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> ^Expr {
 	return report_about(k, kind, span, span, message)
 }
 
-// report_about : une erreur signalée en `span`, qui concerne ce qui est écrit en
-// `origin` — un binding qu'un scope a reçu d'ailleurs.
+// report_about: an error reported at `span`, which concerns what is written at
+// `origin` — a binding that a scope received from elsewhere.
 report_about :: proc(
 	k: ^Kernel,
 	kind: Error_Kind,

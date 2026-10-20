@@ -7,10 +7,10 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
 
-// Impression de l'IR en syntaxe Syntact, avec les seules parenthèses qu'exige la
-// précédence du parser : chaque écriture rend aussi le niveau auquel elle lie.
-// Une même IR a deux lectures : le programme, couleurs et valeurs telles
-// qu'écrites ; et ses types, color_type et value_type.
+// Printing of the IR in Syntact syntax, with only the parentheses that the
+// parser's precedence requires: each writing also returns the level at which it
+// binds. The same IR has two readings: the program, colors and values as
+// written; and its types, color_type and value_type.
 
 Level :: syn.Precedence
 
@@ -29,8 +29,8 @@ print_type :: proc(t: ^Expr) -> string {
 	return s
 }
 
-// print_at : `e` à une place qui lie au niveau `level`, entre parenthèses s'il
-// lie plus lâchement.
+// print_at: `e` at a place that binds at the level `level`, in parentheses if it
+// binds more loosely.
 print_at :: proc(e: ^Expr, level: Level, view := View.Program) -> string {
 	s, own := printed(e, view)
 	return wrap(s, own, level)
@@ -48,7 +48,7 @@ above :: proc(level: Level) -> Level {
 	return Level(int(level) + 1)
 }
 
-// brief : un type, en écriture raccourcie, pour un message d'erreur.
+// brief: a type, in shortened writing, for an error message.
 brief :: proc(t: ^Expr) -> string {
 	s := print_type(t)
 	if len(s) <= 120 do return s
@@ -83,11 +83,11 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 	case Carve:
 		return fmt.tprintf("%s%s", print_at(v.target, .CALL, view), print_scope(v.args, .Program, v.ordinals)), .CALL
 	case Carved:
-		return printed(v.args.bindings[v.index].value, .Program) // l'argument, tel qu'écrit
+		return printed(v.args.bindings[v.index].value, .Program) // the argument, as written
 	case Inferred:
 		return printed(v.type, .Program)
 	case Carving:
-		return "", .PRIMARY // `.x` : la source est le scope carvé
+		return "", .PRIMARY // `.x`: the source is the carved scope
 	case Shorthand:
 		if v.field.ordinal >= 0 do return fmt.tprintf("%s#%d", v.field.name, v.field.ordinal), .PRIMARY
 		return v.field.name, .PRIMARY
@@ -111,7 +111,7 @@ printed :: proc(e: ^Expr, view: View) -> (string, Level) {
 		if v.layout == nil do return "??", .PRIMARY
 		return fmt.tprintf("??::%s", print_at(v.layout, .CALL, view)), .CALL
 	case Invalid:
-		return "<invalide>", .PRIMARY
+		return "<invalid>", .PRIMARY
 	}
 	return "", .PRIMARY
 }
@@ -159,14 +159,14 @@ ARROWS := [Binding_Kind]string {
 	.Reactive_Pull  = "=<<",
 }
 
-// print_scope : un scope, lu comme programme ou comme type. Une couleur est
-// l'opérande gauche de `:` : elle doit lier plus fort que lui. `ordinals` : pour
-// les arguments d'un carve, l'occurrence que vise chacun (`x#1`).
+// print_scope: a scope, read as a program or as a type. A color is the left
+// operand of `:`: it must bind tighter than it. `ordinals`: for the arguments of
+// a carve, the occurrence each one aims at (`x#1`).
 print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 	b := strings.builder_make()
 	strings.write_byte(&b, '{')
 	shown := make([dynamic]Binding, context.temp_allocator)
-	if view == .Type do presented(s, &shown) // le scope tel qu'il se présente
+	if view == .Type do presented(s, &shown) // the scope as it presents itself
 	else do append(&shown, ..s.bindings[:])
 	for bd, i in shown {
 		if i > 0 do strings.write_string(&b, "  ")
@@ -176,21 +176,21 @@ print_scope :: proc(s: ^Scope, view: View, ordinals: []int = nil) -> string {
 	return strings.to_string(b)
 }
 
-// print_binding : un binding seul, lu comme programme ou comme type.
+// print_binding: a lone binding, read as a program or as a type.
 print_binding :: proc(bd: Binding, view: View) -> string {
 	b := strings.builder_make()
 	write_binding(&b, bd, view, -1)
 	return strings.to_string(b)
 }
 
-// write_binding : `ordinal`, l'occurrence que vise un argument de carve (`x#1`) ;
-// -1 sinon.
+// write_binding: `ordinal`, the occurrence a carve argument aims at (`x#1`); -1
+// otherwise.
 write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int) {
 	color, value := bd.color, bd.value
 	at := view
 	if view == .Type do color, value = bd.color_type, bd.value_type
 	if bd.kind == .Expand {
-		// `...xs`, `...C:(t)`, `...` : l'expansion, puis ce qu'elle dépose
+		// `...xs`, `...C:(t)`, `...`: the expansion, then what it deposits
 		strings.write_string(b, ARROWS[.Expand])
 		if bd.color != nil {
 			if !is_all_scopes(bd.color) do fmt.sbprintf(b, "%s:", print_at(bd.color, above(.CONSTRAINT), view))
@@ -202,7 +202,7 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 		return
 	}
 	if bd.kind == .Product && color != nil {
-		// `-> C:`, ou `-> C:(v)` : une production colorée
+		// `-> C:`, or `-> C:(v)`: a colored production
 		fmt.sbprintf(b, "%s %s:", ARROWS[.Product], print_at(color, above(.CONSTRAINT), at))
 		if value != nil do fmt.sbprintf(b, "(%s)", print_at(value, .NONE, at))
 		return
@@ -220,16 +220,16 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 	}
 }
 
-// print_var : une variable — `??0` pour un `??`, l'équation telle qu'écrite pour une
-// self-référence.
+// print_var: a variable — `??0` for a `??`, the equation as written for a
+// self-reference.
 print_var :: proc(v: ^Var) -> string {
 	if _, solved := v.type^.(Set); solved do return fmt.tprintf("??%d", v.id)
-	if derived(v) do return print_type_at(v.type, .CALL) // l'opération, entre parenthèses s'il le faut
+	if derived(v) do return print_type_at(v.type, .CALL) // the operation, in parentheses if needed
 	return print_equation(v.type)
 }
 
-// print_equation : le type d'une self-référence, jamais déplié — le scope par le nom
-// qui le définit, ses arguments, son collapse.
+// print_equation: the type of a self-reference, never unfolded — the scope by the
+// name that defines it, its arguments, its collapse.
 print_equation :: proc(t: ^Expr) -> string {
 	#partial switch v in t^ {
 	case Collapse:
@@ -242,8 +242,8 @@ print_equation :: proc(t: ^Expr) -> string {
 	return print_expr(t)
 }
 
-// name_of : le nom du binding qui définit le scope s — écrit, ou copié (une copie
-// garde le span de ce qu'elle copie).
+// name_of: the name of the binding that defines the scope s — written, or copied
+// (a copy keeps the span of what it copies).
 name_of :: proc(s: ^Scope) -> string {
 	for sc := s.parent; sc != nil; sc = sc.parent {
 		for b in sc.bindings {
@@ -253,14 +253,14 @@ name_of :: proc(s: ^Scope) -> string {
 	return "{…}"
 }
 
-// --- ensembles ---
+// --- sets ---
 
 print_set :: proc(s: Set) -> string {
 	text, _ := printed_set(s)
 	return text
 }
 
-// printed_set : une composante par sorte, unies par `|`.
+// printed_set: one component per sort, joined by `|`.
 printed_set :: proc(s: Set) -> (string, Level) {
 	Part :: struct {
 		text:  string,
@@ -308,7 +308,7 @@ printed_set :: proc(s: Set) -> (string, Level) {
 		text, level := printed_values(s.sets)
 		append(&parts, Part{text, level})
 	}
-	// une sorte portée mais vide : « aucun entier », etc.
+	// a sort carried but empty: "no integer", etc.
 	for d in s.sorts do if domain_count(s, d) == 0 do append(&parts, Part{fmt.tprintf("~%s", SORT_NAMES[d]), .UNARY})
 	switch len(parts) {
 	case 0:
@@ -331,8 +331,8 @@ SORT_NAMES := [Domain]string {
 	.Sets    = "set",
 }
 
-// printed_values : les ensembles admis comme valeurs, `{-> u8  -> i8}` ; leur
-// complément, `~{-> u8}` ; tous, `set`.
+// printed_values: the sets admitted as values, `{-> u8  -> i8}`; their
+// complement, `~{-> u8}`; all of them, `set`.
 printed_values :: proc(a: Set_Values) -> (string, Level) {
 	if len(a.values) == 0 do return "set", .PRIMARY
 	b := strings.builder_make()
@@ -372,8 +372,8 @@ printed_int_interval :: proc(iv: Int_Interval) -> (string, Level) {
 	return "int", .PRIMARY
 }
 
-// Une borne fermée s'écrit dans la plage (`0.5..1.0`) ; une borne ouverte, par une
-// demi-droite (`>0.5 & <1.0`).
+// A closed bound is written in the range (`0.5..1.0`); an open bound, by a
+// half-line (`>0.5 & <1.0`).
 printed_float_interval :: proc(iv: Float_Interval) -> (string, Level) {
 	lo, lo_ok := iv.lo.?
 	hi, hi_ok := iv.hi.?
@@ -389,9 +389,9 @@ printed_float_interval :: proc(iv: Float_Interval) -> (string, Level) {
 	return fmt.tprintf("%s & %s", lower, upper), .AND
 }
 
-// print_float : l'écriture décimale la plus courte qui relit la même valeur, sans
-// exposant (Syntact n'en lit pas), toujours avec un point pour ne pas la lire
-// comme un entier.
+// print_float: the shortest decimal writing that reads back the same value,
+// without exponent (Syntact does not read one), always with a point so as not to
+// read it as an integer.
 print_float :: proc(v: f64) -> string {
 	s := fmt.tprintf("%v", v)
 	sign := ""
@@ -423,8 +423,8 @@ print_float :: proc(v: f64) -> string {
 	return fmt.tprintf("%s%s.%s", sign, whole, frac)
 }
 
-// Une plage de caractères qui touche une extrémité s'écrit ouverte de ce côté :
-// `'d'..` va jusqu'au dernier caractère, `..'c'` part du caractère vide.
+// A range of characters that touches an end is written open on that side:
+// `'d'..` goes up to the last character, `..'c'` starts from the empty character.
 print_char_interval :: proc(iv: Int_Interval) -> string {
 	lo, _ := iv.lo.?
 	hi, _ := iv.hi.?
@@ -441,8 +441,8 @@ print_char :: proc(c: i128) -> string {
 	return quote_text(fmt.tprintf("%c", rune(c)), '\'')
 }
 
-// quote_text : un texte entre délimiteurs, avec les seuls échappements que Syntact
-// lit (\n \t \r \0, et l'échappement du délimiteur et de \).
+// quote_text: a text between delimiters, with only the escapes that Syntact reads
+// (\n \t \r \0, and the escape of the delimiter and of \).
 quote_text :: proc(text: string, quote: byte) -> string {
 	b := strings.builder_make()
 	strings.write_byte(&b, quote)
@@ -467,7 +467,7 @@ quote_text :: proc(text: string, quote: byte) -> string {
 	return strings.to_string(b)
 }
 
-// --- chaînes ---
+// --- strings ---
 
 print_strings :: proc(a: Strings) -> string {
 	text, _ := printed_strings(a)
@@ -480,10 +480,10 @@ printed_strings :: proc(a: Strings) -> (string, Level) {
 	return strings.to_string(b), level
 }
 
-// write_regex écrit `re` et rend le niveau auquel l'écriture lie. `textual` :
-// la place lit déjà un caractère comme une chaîne (dans `+`, à gauche de `*`) ;
-// ailleurs, une plage de caractères seule se lirait comme des caractères, et
-// s'écrit concaténée au mot vide.
+// write_regex writes `re` and returns the level at which the writing binds.
+// `textual`: the place already reads a character as a string (in `+`, left of
+// `*`); elsewhere, a lone range of characters would read as characters, and is
+// written concatenated to the empty word.
 write_regex :: proc(b: ^strings.Builder, re: ^Regex, textual: bool) -> Level {
 	if re == nil {
 		strings.write_string(b, "none")
@@ -509,7 +509,7 @@ write_regex :: proc(b: ^strings.Builder, re: ^Regex, textual: bool) -> Level {
 		fmt.sbprintf(b, "\"\" + %s", print_char_range(re.class))
 		return .TERM
 	case .Cat:
-		// associée à droite : on écrit la suite de ses parties
+		// right-associated: the sequence of its parts is written
 		for part, first := re, true; part != nil; first = false {
 			if !first do strings.write_string(b, " + ")
 			head := part.parts[0] if part.kind == .Cat else part
@@ -520,7 +520,7 @@ write_regex :: proc(b: ^strings.Builder, re: ^Regex, textual: bool) -> Level {
 	case .Alt, .And:
 		level := re.kind == .Alt ? Level.OR : Level.AND
 		parts := slice.clone(re.parts, context.temp_allocator)
-		slice.sort_by(parts, proc(x, y: ^Regex) -> bool {return x.kind == .Words && y.kind != .Words}) // les mots d'abord
+		slice.sort_by(parts, proc(x, y: ^Regex) -> bool {return x.kind == .Words && y.kind != .Words}) // the words first
 		for p, i in parts {
 			if i > 0 do strings.write_string(b, re.kind == .Alt ? " | " : " & ")
 			sub(b, p, above(level), textual = false)
@@ -543,15 +543,15 @@ write_regex :: proc(b: ^strings.Builder, re: ^Regex, textual: bool) -> Level {
 	return .PRIMARY
 }
 
-// is_all_scopes : la couleur de `...` seul, tous les scopes.
+// is_all_scopes: the color of `...` alone, all scopes.
 is_all_scopes :: proc(e: ^Expr) -> bool {
 	s, ok := e^.(Set)
 	return ok && s.sorts == {.Scopes} && is_leaf(s.scopes, .Top)
 }
 
-// presented : les bindings qu'un scope présente, pour l'impression de son type.
-// Une expansion d'une valeur dépose ses bindings ; une expansion colorée reste une
-// suite, `...C:` — ce qu'elle dépose n'est pas une valeur.
+// presented: the bindings a scope presents, for the printing of its type. An
+// expansion of a value deposits its bindings; a colored expansion stays a
+// sequence, `...C:` — what it deposits is not a value.
 presented :: proc(s: ^Scope, out: ^[dynamic]Binding) {
 	for b in s.bindings {
 		if b.kind == .Expand && b.color == nil {

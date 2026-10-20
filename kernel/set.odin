@@ -3,14 +3,13 @@ package kernel
 import "core:math"
 import "core:slice"
 
-// Les ensembles de valeurs, sous forme normale. Un littéral est un ensemble à un
-// élément (`5` est `5..5`), un builtin est un ensemble (`u8` est `0..255`), `none`
-// est l'ensemble vide. Un ensemble mixte (`u8 | string`) a une composante par
-// sorte ; chaque composante est une algèbre close. Les éléments sont des atomes,
-// des scopes, ou des ensembles pris comme valeurs (`{-> u8}` n'a qu'un élément :
-// l'ensemble u8). L'égalité est
-// l'inclusion dans les deux sens : `2|1` et `2..1` sont égaux, comme `2|"a"|3..4`
-// et `"a"|2..4`. Les intervalles ont même une écriture unique (`1..2`).
+// Sets of values, in normal form. A literal is a set of one element (`5` is
+// `5..5`), a builtin is a set (`u8` is `0..255`), `none` is the empty set. A mixed
+// set (`u8 | string`) has one component per sort; each component is a closed
+// algebra. The elements are atoms, scopes, or sets taken as values (`{-> u8}` has
+// only one element: the set u8). Equality is inclusion in both directions: `2|1`
+// and `2..1` are equal, like `2|"a"|3..4` and `"a"|2..4`. Intervals even have a
+// unique written form (`1..2`).
 
 Domain :: enum u8 {
 	Ints,
@@ -23,29 +22,30 @@ Domain :: enum u8 {
 }
 
 Set :: struct {
-	// Les sortes dont l'ensemble parle, même quand leur composant est vide : `~bool`
-	// ne contient aucun booléen mais parle toujours des booléens. C'est ce qui fait
-	// de ~ une involution (`~~X = X`). Une sorte qui a des valeurs est toujours
-	// portée (`carried`) ; subset et l'égalité ne lisent que les valeurs.
+	// The sorts the set speaks about, even when their component is empty: `~bool`
+	// contains no boolean but still speaks about booleans. This is what makes ~ an
+	// involution (`~~X = X`). A sort that has values is always carried
+	// (`carried`); subset and equality read only the values.
 	sorts:   bit_set[Domain],
 	ints:    Ints,
 	floats:  Floats,
-	// Les caractères, par leur point de code ; CHAR_EMPTY est le caractère vide `''`,
-	// le plus bas de tous. Une couleur `string` admet un caractère comme la chaîne
-	// d'une lettre (`string:s -> 'c'`), mais `'a'` et `"a"` restent deux valeurs.
+	// Characters, by their code point; CHAR_EMPTY is the empty character `''`, the
+	// lowest of all. A `string` color admits a character as the one-letter string
+	// (`string:s -> 'c'`), but `'a'` and `"a"` remain two values.
 	chars:   Ints,
 	strings: Strings,
 	bools:   Bools,
-	scopes:  Bdd, // des combinaisons de formes de scopes (bdd.odin)
-	sets:    Set_Values, // des ensembles pris comme valeurs
+	scopes:  Bdd, // combinations of scope shapes (bdd.odin)
+	sets:    Set_Values, // sets taken as values
 }
 
-// --- entiers : intervalles triés, disjoints, non adjacents ---
+// --- integers: sorted, disjoint, non-adjacent intervals ---
 //
-// L'univers des entiers finis est [-I128_MAX, I128_MAX] : symétrique, la négation
-// n'y déborde jamais, et un calcul exact qui en sortirait échoue (add_checked,
-// mul_checked). Au bord, une borne finie et une borne infinie désignent les mêmes
-// valeurs : la forme normale écrit la borne infinie, sauf pour le point du bord.
+// The universe of finite integers is [-I128_MAX, I128_MAX]: symmetric, negation
+// never overflows in it, and an exact computation that would leave it fails
+// (add_checked, mul_checked). At the edge, a finite bound and an infinite bound
+// denote the same values: the normal form writes the infinite bound, except for
+// the edge point.
 
 Int_Interval :: struct {
 	lo: Maybe(i128), // nil = -∞
@@ -68,7 +68,7 @@ ints_all :: proc() -> Ints {
 	return ints_range(nil, nil)
 }
 
-// ints_of normalise une liste quelconque d'intervalles.
+// ints_of normalizes an arbitrary list of intervals.
 ints_of :: proc(raw: []Int_Interval) -> Ints {
 	kept := make([dynamic]Int_Interval, 0, len(raw))
 	for iv in raw {
@@ -92,9 +92,9 @@ ints_of :: proc(raw: []Int_Interval) -> Ints {
 		}
 		last := &out[len(out) - 1]
 		last_hi, last_bounded := last.hi.?
-		if !last_bounded do break // le dernier va déjà jusqu'à +∞
+		if !last_bounded do break // the last one already goes up to +∞
 		lo, lo_ok := iv.lo.?
-		if !lo_ok || lo - 1 <= last_hi { 	// lo ≥ -I128_MAX : lo - 1 ne déborde pas
+		if !lo_ok || lo - 1 <= last_hi { 	// lo ≥ -I128_MAX: lo - 1 does not overflow
 			hi, hi_ok := iv.hi.?
 			if !hi_ok || hi > last_hi do last.hi = iv.hi
 		} else {
@@ -105,8 +105,8 @@ ints_of :: proc(raw: []Int_Interval) -> Ints {
 	return Ints{out[:]}
 }
 
-// at_edges : une borne au bord de l'univers s'écrit infinie, sauf pour le point du
-// bord lui-même, qui reste un point.
+// at_edges: a bound at the edge of the universe is written infinite, except for
+// the edge point itself, which stays a point.
 at_edges :: proc(iv: Int_Interval) -> Int_Interval {
 	lo, lo_ok := iv.lo.?
 	hi, hi_ok := iv.hi.?
@@ -137,8 +137,8 @@ ints_intersect :: proc(a, b: Ints) -> Ints {
 
 ints_complement :: proc(a: Ints) -> Ints {
 	out := make([dynamic]Int_Interval)
-	cursor: Maybe(i128) = nil // début du trou courant ; nil = -∞
-	open := true // le trou courant est encore ouvert
+	cursor: Maybe(i128) = nil // start of the current hole; nil = -∞
+	open := true // the current hole is still open
 	for iv in a.intervals {
 		if lo, ok := iv.lo.?; ok && lo > -I128_MAX {
 			append(&out, Int_Interval{cursor, lo - 1})
@@ -158,7 +158,8 @@ ints_subset :: proc(a, b: Ints) -> bool {
 	return len(ints_intersect(a, ints_complement(b)).intervals) == 0
 }
 
-// ints_count compte les éléments, saturé à 2 (on ne veut savoir que 0, 1 ou plusieurs).
+// ints_count counts the elements, saturated at 2 (we only want to know 0, 1 or
+// several).
 ints_count :: proc(a: Ints) -> int {
 	if len(a.intervals) == 0 do return 0
 	if len(a.intervals) > 1 do return 2
@@ -176,7 +177,8 @@ ints_contains :: proc(a: Ints, v: i128) -> bool {
 	return false
 }
 
-// Le défaut d'un ensemble d'entiers : 0 s'il y est, sinon sa première borne finie.
+// The default of a set of integers: 0 if it is in it, otherwise its first finite
+// bound.
 ints_default :: proc(a: Ints) -> (i128, bool) {
 	if len(a.intervals) == 0 do return 0, false
 	if ints_contains(a, 0) do return 0, true
@@ -190,9 +192,9 @@ ints_bounds :: proc(a: Ints) -> (lo, hi: Maybe(i128)) {
 	return a.intervals[0].lo, a.intervals[len(a.intervals) - 1].hi
 }
 
-// ints_arith : { x op y | x ∈ a, y ∈ b }, par intervalles — exact pour + et -,
-// l'enveloppe pour *. `exact` est faux quand une borne finie sortirait de
-// l'univers : elle devient infinie de son côté, une sur-approximation sûre.
+// ints_arith: { x op y | x ∈ a, y ∈ b }, by intervals — exact for + and -, the
+// envelope for *. `exact` is false when a finite bound would leave the universe:
+// it becomes infinite on its side, a safe over-approximation.
 ints_arith :: proc(op: Arith, a, b: Ints) -> (r: Ints, exact: bool) {
 	out := make([dynamic]Int_Interval)
 	exact = true
@@ -221,8 +223,8 @@ add_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
 	return Int_Interval{lo, hi}, lo_ok && hi_ok
 }
 
-// ints_pow : { xⁿ | x ∈ a } sur l'enveloppe de chaque intervalle — une puissance
-// paire ne descend pas sous 0.
+// ints_pow: { xⁿ | x ∈ a } over the envelope of each interval — an even power
+// does not go below 0.
 ints_pow :: proc(a: Ints, n: int) -> Ints {
 	if n == 1 do return a
 	out := make([dynamic]Int_Interval, 0, len(a.intervals))
@@ -236,7 +238,7 @@ pow_bound :: proc(b: Maybe(i128), n: int) -> Maybe(i128) {
 	r: i128 = 1
 	for _ in 0 ..< n {
 		p, p_ok := mul_checked(r, v)
-		if !p_ok do return nil // trop grand : infini, une sur-approximation sûre
+		if !p_ok do return nil // too large: infinite, a safe over-approximation
 		r = p
 	}
 	return r
@@ -291,8 +293,8 @@ neg_bound :: proc(a: Maybe(i128)) -> Maybe(i128) {
 	return nil
 }
 
-// add_bound : deux bornes du même côté. Une borne infinie l'emporte ; une somme qui
-// sort de l'univers devient infinie (`ok` faux).
+// add_bound: two bounds on the same side. An infinite bound wins; a sum that
+// leaves the universe becomes infinite (`ok` false).
 add_bound :: proc(a, b: Maybe(i128)) -> (Maybe(i128), bool) {
 	x, x_ok := a.?
 	y, y_ok := b.?
@@ -309,7 +311,7 @@ add_checked :: proc(a, b: i128) -> (i128, bool) {
 }
 
 mul_checked :: proc(a, b: i128) -> (i128, bool) {
-	// Sous 2⁶³ en valeur absolue, le produit tient : pas de division 128 bits.
+	// Below 2⁶³ in absolute value, the product fits: no 128-bit division.
 	SMALL :: i128(1) << 63
 	if a > -SMALL && a < SMALL && b > -SMALL && b < SMALL do return a * b, true
 	if a == 0 || b == 0 do return 0, true
@@ -317,10 +319,10 @@ mul_checked :: proc(a, b: i128) -> (i128, bool) {
 	return a * b, true
 }
 
-// Ext : une borne étendue, pour multiplier des intervalles infinis.
+// Ext: an extended bound, to multiply infinite intervals.
 Ext :: struct {
 	v:   i128,
-	inf: int, // -1 : -∞, 1 : +∞, 0 : la valeur finie v
+	inf: int, // -1: -∞, 1: +∞, 0: the finite value v
 }
 
 ext_of :: proc(b: Maybe(i128), side: int) -> Ext {
@@ -333,8 +335,8 @@ ext_sign :: proc(e: Ext) -> int {
 	return e.v > 0 ? 1 : (e.v < 0 ? -1 : 0)
 }
 
-// ext_mul : 0·∞ = 0, car les valeurs sont finies et seules les bornes sont des
-// limites. Un produit qui sort de l'univers devient infini, de son signe.
+// ext_mul: 0·∞ = 0, because the values are finite and only the bounds are
+// limits. A product that leaves the universe becomes infinite, with its sign.
 ext_mul :: proc(a, b: Ext) -> (Ext, bool) {
 	sa, sb := ext_sign(a), ext_sign(b)
 	if sa == 0 || sb == 0 do return Ext{}, true
@@ -354,7 +356,7 @@ ext_bound :: proc(e: Ext) -> Maybe(i128) {
 	return e.v
 }
 
-// mul_interval : le produit d'intervalles est atteint aux coins.
+// mul_interval: the product of intervals is reached at the corners.
 mul_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
 	xs := [2]Ext{ext_of(x.lo, -1), ext_of(x.hi, 1)}
 	ys := [2]Ext{ext_of(y.lo, -1), ext_of(y.hi, 1)}
@@ -371,7 +373,7 @@ mul_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
 	return Int_Interval{ext_bound(lo), ext_bound(hi)}, exact
 }
 
-// --- flottants : intervalles à bornes ouvertes ou fermées ---
+// --- floats: intervals with open or closed bounds ---
 
 Float_Interval :: struct {
 	lo:      Maybe(f64), // nil = -∞
@@ -392,7 +394,7 @@ floats_all :: proc() -> Floats {
 	return floats_of({Float_Interval{}})
 }
 
-// Une forme normale n'a qu'un zéro : -0.0 s'écrit 0.0.
+// A normal form has only one zero: -0.0 is written 0.0.
 normal_zero :: proc(b: Maybe(f64)) -> Maybe(f64) {
 	if v, ok := b.?; ok && v == 0 do return f64(0)
 	return b
@@ -409,7 +411,7 @@ floats_of :: proc(raw: []Float_Interval) -> Floats {
 	kept := make([dynamic]Float_Interval, 0, len(raw))
 	for iv in raw {
 		if float_interval_empty(iv) do continue
-		// Une borne infinie n'est ni ouverte ni fermée : une seule écriture.
+		// An infinite bound is neither open nor closed: a single written form.
 		_, lo_finite := iv.lo.?
 		_, hi_finite := iv.hi.?
 		append(&kept, Float_Interval{normal_zero(iv.lo), normal_zero(iv.hi), iv.lo_open && lo_finite, iv.hi_open && hi_finite})
@@ -489,7 +491,7 @@ tighter_hi :: proc(x, y: Float_Interval) -> (Maybe(f64), bool) {
 
 floats_complement :: proc(a: Floats) -> Floats {
 	out := make([dynamic]Float_Interval)
-	gap := Float_Interval{} // de -∞
+	gap := Float_Interval{} // from -∞
 	open := true
 	for iv in a.intervals {
 		if lo, ok := iv.lo.?; ok {
@@ -524,15 +526,15 @@ floats_contains :: proc(a: Floats, v: f64) -> bool {
 	return floats_subset(floats_point(v), a)
 }
 
-// Le défaut, comme pour les entiers : 0.0 s'il y est, sinon le plus petit flottant
-// du premier intervalle — sa borne basse, ou le flottant juste au-dessus d'une borne
-// ouverte ; sans borne basse, le plus grand — sa borne haute, ou juste en dessous.
+// The default, as for integers: 0.0 if it is in it, otherwise the smallest float
+// of the first interval — its lower bound, or the float just above an open bound;
+// without a lower bound, the largest — its upper bound, or just below.
 floats_default :: proc(a: Floats) -> (f64, bool) {
 	if len(a.intervals) == 0 do return 0, false
 	if floats_contains(a, 0) do return 0, true
 	iv := a.intervals[0]
 	if lo, ok := iv.lo.?; ok do return iv.lo_open ? math.nextafter(lo, math.INF_F64) : lo, true
-	hi, _ := iv.hi.? // sans aucune borne, l'intervalle contiendrait 0
+	hi, _ := iv.hi.? // without any bound, the interval would contain 0
 	return iv.hi_open ? math.nextafter(hi, math.NEG_INF_F64) : hi, true
 }
 
@@ -546,7 +548,7 @@ floats_arith :: proc(op: Arith, a, b: Floats) -> Floats {
 	return floats_of(out[:])
 }
 
-// Arithmétique flottante sur l'enveloppe fermée : une sur-approximation sûre.
+// Float arithmetic on the closed envelope: a safe over-approximation.
 float_interval_arith :: proc(op: Arith, x, y: Float_Interval) -> Float_Interval {
 	xl, xl_ok := x.lo.?
 	xh, xh_ok := x.hi.?
@@ -587,7 +589,7 @@ floats_bounds :: proc(a: Floats) -> (lo, hi: Maybe(f64)) {
 	return a.intervals[0].lo, a.intervals[len(a.intervals) - 1].hi
 }
 
-// --- booléens ---
+// --- booleans ---
 
 Bool_Elem :: enum u8 {
 	False,
@@ -600,16 +602,16 @@ bools_point :: proc(v: bool) -> Bools {
 	return v ? {.True} : {.False}
 }
 
-// --- les ensembles pris comme valeurs ---
+// --- sets taken as values ---
 //
-// Une couleur peut admettre un ensemble comme valeur : `{-> u8}` n'admet que la
-// valeur u8, quand u8 admet ses éléments. Ces valeurs sont une sorte à part, sans
-// ordre : une liste finie d'ensembles, ou tous les ensembles sauf une liste finie.
-// Aucun n'est un atome : un atome est déjà son propre singleton.
+// A color can admit a set as a value: `{-> u8}` admits only the value u8, whereas
+// u8 admits its elements. These values are a sort of their own, without order: a
+// finite list of sets, or all sets except a finite list. None is an atom: an atom
+// is already its own singleton.
 
 Set_Values :: struct {
-	values:   []Set, // sans doublon : deux ensembles égaux sont une seule valeur
-	cofinite: bool, // vrai : tous les ensembles sauf `values`
+	values:   []Set, // without duplicates: two equal sets are a single value
+	cofinite: bool, // true: all sets except `values`
 }
 
 values_point :: proc(v: Set) -> Set_Values {
@@ -631,8 +633,8 @@ listed :: proc(list: []Set, v: Set) -> bool {
 	return false
 }
 
-// listed_or, listed_and, listed_minus : l'union, l'intersection et la différence de
-// deux listes, sans doublon.
+// listed_or, listed_and, listed_minus: the union, the intersection and the
+// difference of two lists, without duplicates.
 listed_or :: proc(a, b: []Set) -> []Set {
 	out := make([dynamic]Set, 0, len(a) + len(b))
 	append(&out, ..a)
@@ -680,8 +682,8 @@ values_complement :: proc(a: Set_Values) -> Set_Values {
 	return {a.values, !a.cofinite}
 }
 
-// values_subset : il y a une infinité d'ensembles, donc une liste ne contient
-// jamais « tous sauf une liste ».
+// values_subset: there are infinitely many sets, so a list never contains "all
+// except a list".
 values_subset :: proc(a, b: Set_Values) -> bool {
 	switch {
 	case !a.cofinite && !b.cofinite:
@@ -694,7 +696,7 @@ values_subset :: proc(a, b: Set_Values) -> bool {
 	return false
 }
 
-// --- l'ensemble mixte ---
+// --- the mixed set ---
 
 set_of_ints :: proc(i: Ints) -> Set {
 	return Set{sorts = {.Ints}, ints = i}
@@ -710,13 +712,13 @@ set_of_chars :: proc(c: Ints) -> Set {
 	return Set{sorts = {.Chars}, chars = c}
 }
 
-// chars_all : tous les caractères, le caractère vide compris.
+// chars_all: all characters, the empty character included.
 chars_all :: proc() -> Ints {
 	return ints_range(CHAR_EMPTY, i128(MAX_RUNE))
 }
 
-// chars_as_strings : chaque caractère comme la chaîne d'une lettre ; le caractère
-// vide comme la chaîne vide.
+// chars_as_strings: each character as the one-letter string; the empty character
+// as the empty string.
 chars_as_strings :: proc(c: Ints) -> Strings {
 	out := Strings{}
 	for iv in c.intervals {
@@ -731,7 +733,7 @@ chars_as_strings :: proc(c: Ints) -> Strings {
 	return out
 }
 
-// as_strings : les chaînes d'un ensemble, ses caractères compris.
+// as_strings: the strings of a set, its characters included.
 as_strings :: proc(s: Set) -> Strings {
 	return strings_union(s.strings, chars_as_strings(s.chars))
 }
@@ -744,8 +746,8 @@ set_of_bools :: proc(b: Bools) -> Set {
 	return Set{sorts = {.Bools}, bools = b}
 }
 
-// carried : les sortes dont l'ensemble parle — celles qu'il a gardées, et celles où
-// son écriture a quelque chose.
+// carried: the sorts the set speaks about — those it has kept, and those where its
+// written form has something.
 carried :: proc(s: Set) -> bit_set[Domain] {
 	r := s.sorts
 	if len(s.ints.intervals) > 0 do r += {.Ints}
@@ -771,13 +773,13 @@ set_is_empty :: proc(s: Set) -> bool {
 	return set_count(s) == 0
 }
 
-// is_atom : une valeur atomique — un seul élément, ou aucun (none).
+// is_atom: an atomic value — a single element, or no element (none).
 is_atom :: proc(s: Set) -> bool {
 	return set_count(s) <= 1
 }
 
-// La première sorte non vide, dans l'ordre fixe des sortes : le défaut d'un
-// ensemble ne dépend pas de la façon dont il a été écrit.
+// The first non-empty sort, in the fixed order of sorts: the default of a set
+// does not depend on how it was written.
 set_first_domain :: proc(s: Set) -> (Domain, bool) {
 	for d in Domain do if domain_count(s, d) > 0 do return d, true
 	return .Ints, false
@@ -796,10 +798,10 @@ domain_count :: proc(s: Set, d: Domain) -> int {
 	case .Bools:
 		return card(s.bools)
 	case .Scopes:
-		// un ensemble de scopes n'est jamais un atome : un scope valeur est un ^Scope
+		// a set of scopes is never an atom: a value scope is a ^Scope
 		return bdd_is_empty(s.scopes) ? 0 : 2
 	case .Sets:
-		// de même : un ensemble d'ensembles n'est jamais un atome
+		// likewise: a set of sets is never an atom
 		return values_is_empty(s.sets) ? 0 : 2
 	}
 	return 0
@@ -818,8 +820,8 @@ set_union :: proc(a, b: Set) -> Set {
 	}
 }
 
-// Deux sortes différentes ne se rencontrent pas : `u8 & string` ne parle de rien,
-// c'est none ; `0 & 1` parle encore des entiers.
+// Two different sorts do not meet: `u8 & string` speaks about nothing, it is
+// none; `0 & 1` still speaks about integers.
 set_intersect :: proc(a, b: Set) -> Set {
 	return Set {
 		sorts = carried(a) & carried(b),
@@ -833,9 +835,9 @@ set_intersect :: proc(a, b: Set) -> Set {
 	}
 }
 
-// Le complément se prend dans les sortes que l'ensemble porte : `~5` est « tout
-// entier sauf 5 », `~'A'` « tout caractère sauf A », `~"piro"` « toute chaîne sauf
-// piro » — jamais « tout sauf » (specs/constraints.md, Negation).
+// The complement is taken within the sorts the set carries: `~5` is "any integer
+// except 5", `~'A'` "any character except A", `~"piro"` "any string except piro"
+// — never "anything except" (specs/constraints.md, Negation).
 set_complement :: proc(a: Set) -> Set {
 	r := Set{sorts = carried(a)}
 	if .Ints in r.sorts do r.ints = ints_complement(a.ints)
@@ -848,7 +850,7 @@ set_complement :: proc(a: Set) -> Set {
 	return r
 }
 
-// set_diff : a ∖ b, sorte par sorte ; a garde ses sortes.
+// set_diff: a ∖ b, sort by sort; a keeps its sorts.
 set_diff :: proc(a, b: Set) -> Set {
 	return Set {
 		sorts = carried(a),
@@ -862,8 +864,8 @@ set_diff :: proc(a, b: Set) -> Set {
 	}
 }
 
-// set_top : toutes les valeurs atomiques. C'est `..` seul : il prend la sorte de ce
-// qu'il rencontre (`.. + '_'` : toute chaîne qui finit par _).
+// set_top: all atomic values. It is `..` alone: it takes the sort of what it meets
+// (`.. + '_'`: any string that ends with _).
 set_top :: proc() -> Set {
 	return Set{sorts = ~{}, ints = ints_all(), floats = floats_all(), chars = chars_all(), strings = strings_all(), bools = {.False, .True}}
 }
@@ -882,7 +884,7 @@ set_equal :: proc(a, b: Set) -> bool {
 	return set_subset(a, b) && set_subset(b, a)
 }
 
-// Le défaut d'un ensemble : l'élément distingué de sa première sorte.
+// The default of a set: the distinguished element of its first sort.
 set_default :: proc(s: Set) -> (Set, bool) {
 	d, ok := set_first_domain(s)
 	if !ok do return {}, false
@@ -894,7 +896,7 @@ set_default :: proc(s: Set) -> (Set, bool) {
 		v, _ := floats_default(s.floats)
 		return set_of_floats(floats_point(v)), true
 	case .Chars:
-		lo, _ := ints_bounds(s.chars) // le plus bas : le caractère vide s'il y est
+		lo, _ := ints_bounds(s.chars) // the lowest: the empty character if it is there
 		return set_of_chars(ints_point(lo.? or_else CHAR_EMPTY)), true
 	case .Strings:
 		v, _ := strings_default(s.strings)
@@ -902,7 +904,7 @@ set_default :: proc(s: Set) -> (Set, bool) {
 	case .Bools:
 		return set_of_bools(.False in s.bools ? {.False} : {.True}), true
 	case .Scopes, .Sets:
-		return {}, false // pas un atome : voir default_of
+		return {}, false // not an atom: see default_of
 	}
 	return {}, false
 }

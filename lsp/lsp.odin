@@ -138,7 +138,7 @@ Document :: struct {
 	version: int,
 	content: string,
 	ast:     ^compiler.Ast,
-	// le scope du fichier, typé par le kernel : chaque binding écrit porte ses types
+	// the scope of the file, typed by the kernel: each written binding carries its types
 	program: ^kernel.Scope,
 	// Cursor→name resolution is lexical over the AST; the parent map is rebuilt on
 	// each (re)analysis and reused by definition/references/rename/completion.
@@ -582,9 +582,9 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		// definition/references even when analysis bailed on an error.
 		doc.parents = build_parent_map(ast)
 
-		// Le kernel type ce qu'il y a d'AST, même partiel : un éditeur tient presque
-		// toujours du code à moitié écrit. Il tourne d'abord à part : s'il plante ou
-		// ne termine pas, le LSP reste en vie et le dit.
+		// The kernel types whatever AST there is, even partial: an editor almost
+		// always holds half-written code. It first runs apart: if it crashes or
+		// does not terminate, the LSP stays alive and says so.
 		if failure, failed := kernel_fails(ast); failed {
 			append(&diagnostics, Diagnostic{range = span_range(ast, ast.node_spans[compiler.ast_root(ast)]), severity = 1, source = "syn-kernel", message = failure})
 			publish_diagnostics(uri, diagnostics[:])
@@ -596,13 +596,13 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 			message := e.message
 			if e.origin != e.span {
 				o := compiler.span_to_position(ast, e.origin.start)
-				message = fmt.tprintf("%s (écrit en %d:%d)", message, o.line, o.column)
+				message = fmt.tprintf("%s (written at %d:%d)", message, o.line, o.column)
 			}
 			append(
 				&diagnostics,
 				Diagnostic {
 					range = span_range(ast, e.span),
-					// ce que le kernel ne traite pas encore n'est pas une faute du code
+					// what the kernel does not handle yet is not a fault of the code
 					severity = e.kind == .Unsupported ? 2 : 1,
 					source = "syn-kernel",
 					message = message,
@@ -693,8 +693,8 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	send_response(msg.id, make_location(uri, def_start, def_end))
 }
 
-// handle_hover : le binding que désigne l'identifiant sous le curseur, tel que le
-// kernel l'a typé.
+// handle_hover: the binding that the identifier under the cursor designates, as
+// the kernel typed it.
 handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	_, decl, use, doc, ok := resolve_binding_at(server, msg.params)
 	if !ok || use == compiler.INVALID_NODE {
@@ -1010,8 +1010,8 @@ send_empty_completion :: proc(id: Maybe(json.Value)) {
 	send_response(id, json.Object(result))
 }
 
-// collect_property_completions : après `x.`, les bindings nommés que présente le
-// scope que vaut x.
+// collect_property_completions: after `x.`, the named bindings presented by the
+// scope that x is.
 collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
 	ast := doc.ast
 	source_node := find_dot_source(ast, offset)
@@ -1048,12 +1048,12 @@ find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index 
 	return node_left(ast, best)
 }
 
-// collect_scope_completions : les noms visibles au curseur, builtins compris.
+// collect_scope_completions: the names visible at the cursor, builtins included.
 collect_scope_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
 	for b in visible_bindings(doc.program, offset) do append(items, make_completion_item(b))
 }
 
-// make_completion_item : un binding, avec son type selon le kernel.
+// make_completion_item: a binding, with its type according to the kernel.
 make_completion_item :: proc(b: ^kernel.Binding) -> json.Value {
 	item := make(map[string]json.Value)
 	item["label"] = json.String(b.name)

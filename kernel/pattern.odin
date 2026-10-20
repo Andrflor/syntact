@@ -3,25 +3,25 @@ package kernel
 import syn "../compiler"
 import "core:fmt"
 
-// LE PATTERN
+// THE PATTERN
 //
-// `target ? {cover -> product …}` (specs/language/12). Une couverture est une
-// expression qui désigne un ensemble, lu comme une couleur : `0`, `=5`, `u8`, `>0`,
-// `u8:` (le défaut de u8), `Circle:` (la forme Circle). La branche sans couverture
-// admet tout. La première branche qui admet la valeur de target la donne.
+// `target ? {cover -> product …}` (specs/language/12). A cover is an expression
+// that designates a set, read as a color: `0`, `=5`, `u8`, `>0`, `u8:` (the
+// default of u8), `Circle:` (the shape Circle). The branch without a cover admits
+// everything. The first branch that admits the value of target gives it.
 //
-// C'est la valeur de target qui est couverte, pas sa couleur : une définition se
-// vérifie avec ses valeurs, et un carve qui les change se vérifie au carve. Pour
-// couvrir toute une couleur, la valeur est `??`.
+// It is the value of target that is covered, not its color: a definition is
+// checked with its values, and a carve that changes them is checked at the carve.
+// To cover a whole color, the value is `??`.
 //
-// - Une valeur connue : une seule branche se déclenche, les autres ne sont pas
-//   typées. Aucune : Non_Exhaustive_Pattern.
-// - Une inconnue : chaque branche reçoit ce que les précédentes n'ont pas pris ;
-//   une branche qui ne reçoit rien ne se déclenche jamais. Ce qui reste à la fin
-//   n'est couvert par aucune branche : Non_Exhaustive_Pattern. Quand target est
-//   une inconnue seule, la branche le sait : c'est un fait de son contexte
-//   (Scope.fact), pas une réécriture. Le résultat est le type par cas (Cases) —
-//   une valeur par branche atteinte, jamais aplatie.
+// - A known value: a single branch fires, the others are not typed. None:
+//   Non_Exhaustive_Pattern.
+// - An unknown: each branch receives what the previous ones did not take; a
+//   branch that receives nothing never fires. What remains at the end is covered
+//   by no branch: Non_Exhaustive_Pattern. When target is a lone unknown, the
+//   branch knows it: it is a fact of its context (Scope.fact), not a rewriting.
+//   The result is the type by cases (Cases) — one value per reached branch, never
+//   flattened.
 
 type_match :: proc(k: ^Kernel, m: Match, env: ^Scope) -> ^Expr {
 	t := type_of(k, m.target, env)
@@ -31,34 +31,34 @@ type_match :: proc(k: ^Kernel, m: Match, env: ^Scope) -> ^Expr {
 	case Set:
 		return match_value(k, m, t, ctx)
 	case ^Scope:
-		if !is_closed_type(t) do return report(k, .Unsupported, m.span, "pas encore dans le kernel : un pattern sur un scope qui dépend d'une inconnue")
+		if !is_closed_type(t) do return report(k, .Unsupported, m.span, "not in the kernel yet: a pattern on a scope that depends on an unknown")
 		return match_value(k, m, t, ctx)
 	case Poly, Term, ^Var, Cases:
 		return match_unknown(k, m, t, ctx)
 	}
-	return report(k, .Unsupported, m.span, fmt.tprintf("pas encore dans le kernel : un pattern sur %s", brief(t)))
+	return report(k, .Unsupported, m.span, fmt.tprintf("not in the kernel yet: a pattern on %s", brief(t)))
 }
 
-// cover_set : ce qu'admet la couverture d'une branche ; nil pour la branche par défaut.
+// cover_set: what the cover of a branch admits; nil for the default branch.
 cover_set :: proc(k: ^Kernel, b: ^Scope) -> (set: Maybe(Set), ok: bool) {
 	if b.cover == nil do return nil, true
 	t := type_of(k, b.cover, b)
 	if is_invalid(t) do return nil, false
 	s, closed := color_set(k, t)
 	if !closed {
-		report(k, .Unsupported, b.span, fmt.tprintf("pas encore dans le kernel : une couverture qui dépend d'une inconnue : %s", brief(t)))
+		report(k, .Unsupported, b.span, fmt.tprintf("not in the kernel yet: a cover that depends on an unknown: %s", brief(t)))
 		return nil, false
 	}
 	return s, true
 }
 
-// production : le type de la production d'une branche.
+// production: the type of the production of a branch.
 production :: proc(k: ^Kernel, b: ^Scope) -> ^Expr {
 	type_scope(k, b)
 	return b.bindings[0].value_type
 }
 
-// match_value : target est connue ; la première branche qui l'admet la donne.
+// match_value: target is known; the first branch that admits it gives it.
 match_value :: proc(k: ^Kernel, m: Match, t: ^Expr, ctx: Context) -> ^Expr {
 	for b in m.branches {
 		c, ok := cover_set(k, b)
@@ -70,41 +70,41 @@ match_value :: proc(k: ^Kernel, m: Match, t: ^Expr, ctx: Context) -> ^Expr {
 			return production(k, b)
 		case .Refuted:
 		case .Undecided:
-			return report(k, .Unproven, m.span, fmt.tprintf("on ne sait pas si %s est admis par %s", brief(t), brief(b.cover)))
+			return report(k, .Unproven, m.span, fmt.tprintf("we do not know whether %s is admitted by %s", brief(t), brief(b.cover)))
 		}
 	}
-	return report(k, .Non_Exhaustive_Pattern, m.span, fmt.tprintf("aucune branche n'admet %s", brief(t)))
+	return report(k, .Non_Exhaustive_Pattern, m.span, fmt.tprintf("no branch admits %s", brief(t)))
 }
 
-// match_unknown : target dépend d'inconnues. Ses valeurs possibles, dans le
-// contexte, se partagent entre les branches, dans l'ordre.
+// match_unknown: target depends on unknowns. Its possible values, in the
+// context, are shared among the branches, in order.
 match_unknown :: proc(k: ^Kernel, m: Match, t: ^Expr, ctx: Context) -> ^Expr {
 	rest, exact := envelope(k, t, ctx)
 	sym, single := lone_symbol(t)
 	cases := make([dynamic]Case)
 	for b in m.branches {
-		if set_is_empty(rest) do break // les branches suivantes ne se déclenchent jamais
+		if set_is_empty(rest) do break // the following branches never fire
 		c, ok := cover_set(k, b)
 		if !ok do return new_expr(Invalid{})
 		cover, covering := c.?
 		part := covering ? set_intersect(rest, cover) : rest
 		rest = covering ? set_diff(rest, cover) : {}
 		if set_is_empty(part) do continue
-		if single do b.fact = Fact{sym, part} // ce que la branche sait de l'inconnue
+		if single do b.fact = Fact{sym, part} // what the branch knows of the unknown
 		value := production(k, b)
 		if is_invalid(value) do return value
 		append(&cases, Case{b.fact, value})
 	}
 	if !set_is_empty(rest) {
-		if exact do return report(k, .Non_Exhaustive_Pattern, m.span, fmt.tprintf("aucune branche n'admet %s", print_set(rest)))
-		return report(k, .Unproven, m.span, fmt.tprintf("on ne sait pas prouver que les branches couvrent %s", print_set(rest)))
+		if exact do return report(k, .Non_Exhaustive_Pattern, m.span, fmt.tprintf("no branch admits %s", print_set(rest)))
+		return report(k, .Unproven, m.span, fmt.tprintf("we cannot prove that the branches cover %s", print_set(rest)))
 	}
 	if len(cases) == 1 do return cases[0].value
-	for c in cases do if _, is_scope := c.value^.(^Scope); is_scope do return report(k, .Unsupported, m.span, "pas encore dans le kernel : un pattern sur une inconnue dont une branche donne un scope")
+	for c in cases do if _, is_scope := c.value^.(^Scope); is_scope do return report(k, .Unsupported, m.span, "not in the kernel yet: a pattern on an unknown where a branch gives a scope")
 	return new_expr(Cases{cases[:]})
 }
 
-// lone_symbol : t est une inconnue seule, que les branches peuvent restreindre.
+// lone_symbol: t is a lone unknown, which the branches can restrict.
 lone_symbol :: proc(t: ^Expr) -> (^Var, bool) {
 	#partial switch v in t^ {
 	case Poly:

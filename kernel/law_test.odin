@@ -8,11 +8,11 @@ import "core:slice"
 import "core:strings"
 import "core:testing"
 
-// LES LOIS. Chaque algèbre est confrontée à un modèle brut sur des cas tirés au
-// hasard (graine fixe : les tests sont reproductibles). Les lois s'éprouvent par
-// les décisions que le typecheck utilise — l'inclusion, l'égalité comme double
-// inclusion — et, là où la forme normale est unique (intervalles, polynômes), par
-// la structure elle-même.
+// THE LAWS. Each algebra is confronted with a brute-force model on randomly drawn
+// cases (fixed seed: the tests are reproducible). The laws are tested through the
+// decisions that the typecheck uses — inclusion, equality as double inclusion —
+// and, where the normal form is unique (intervals, polynomials), through the
+// structure itself.
 
 ROUNDS :: 400
 
@@ -21,7 +21,7 @@ seeded :: proc(state: ^rand.Default_Random_State, seed: u64) -> runtime.Random_G
 	return rand.default_random_generator(state)
 }
 
-// --- entiers ---
+// --- integers ---
 
 random_ints :: proc(gen: runtime.Random_Generator) -> (Ints, []Int_Interval) {
 	raw := make([dynamic]Int_Interval)
@@ -72,24 +72,24 @@ test_law_ints :: proc(t: ^testing.T) {
 	for _ in 0 ..< ROUNDS {
 		a, ra := random_ints(gen)
 		b, rb := random_ints(gen)
-		testing.expectf(t, is_normal(a), "forme normale : %v", a)
+		testing.expectf(t, is_normal(a), "normal form: %v", a)
 		for x in INT_POINTS {
-			testing.expectf(t, ints_contains(a, x) == in_raw(ra, x), "ints_of %v en %d", ra, x)
-			testing.expectf(t, ints_contains(ints_union(a, b), x) == (in_raw(ra, x) || in_raw(rb, x)), "union en %d", x)
-			testing.expectf(t, ints_contains(ints_intersect(a, b), x) == (in_raw(ra, x) && in_raw(rb, x)), "inter en %d", x)
-			testing.expectf(t, ints_contains(ints_complement(a), x) == !in_raw(ra, x), "complément de %v en %d", ra, x)
+			testing.expectf(t, ints_contains(a, x) == in_raw(ra, x), "ints_of %v at %d", ra, x)
+			testing.expectf(t, ints_contains(ints_union(a, b), x) == (in_raw(ra, x) || in_raw(rb, x)), "union at %d", x)
+			testing.expectf(t, ints_contains(ints_intersect(a, b), x) == (in_raw(ra, x) && in_raw(rb, x)), "inter at %d", x)
+			testing.expectf(t, ints_contains(ints_complement(a), x) == !in_raw(ra, x), "complement of %v at %d", ra, x)
 		}
 		subset := true
 		for x in INT_POINTS do if in_raw(ra, x) && !in_raw(rb, x) do subset = false
 		if !subset do testing.expectf(t, !ints_subset(a, b), "%v ⊄ %v", ra, rb)
-		// la forme normale des intervalles est unique : les lois tiennent sur la structure
-		testing.expect(t, same_ints(ints_union(a, b), ints_union(b, a)), "union commutative")
-		testing.expect(t, same_ints(ints_intersect(a, b), ints_intersect(b, a)), "inter commutative")
+		// the normal form of intervals is unique: the laws hold on the structure
+		testing.expect(t, same_ints(ints_union(a, b), ints_union(b, a)), "commutative union")
+		testing.expect(t, same_ints(ints_intersect(a, b), ints_intersect(b, a)), "commutative inter")
 		testing.expect(t, same_ints(ints_complement(ints_complement(a)), a), "~~a = a")
 		testing.expect(t, same_ints(ints_complement(ints_union(a, b)), ints_intersect(ints_complement(a), ints_complement(b))), "De Morgan")
 		testing.expect(t, ints_subset(ints_intersect(a, b), a), "a ∩ b ⊆ a")
 	}
-	// l'arithmétique d'intervalles contient toujours les résultats exacts
+	// interval arithmetic always contains the exact results
 	for _ in 0 ..< ROUNDS {
 		a := ints_range(i128(rand.int_range(-9, 9, gen)), nil)
 		a = ints_intersect(a, ints_range(nil, i128(rand.int_range(-9, 9, gen))))
@@ -99,7 +99,7 @@ test_law_ints :: proc(t: ^testing.T) {
 			for x in -9 ..= 9 do for y in -9 ..= 9 {
 				if !ints_contains(a, i128(x)) || !ints_contains(b, i128(y)) do continue
 				v := op == .Add ? x + y : (op == .Sub ? x - y : x * y)
-				testing.expectf(t, ints_contains(r, i128(v)), "%v %v %v ne contient pas %d", a, op, b, v)
+				testing.expectf(t, ints_contains(r, i128(v)), "%v %v %v does not contain %d", a, op, b, v)
 			}
 		}
 		for n in 1 ..= 3 {
@@ -108,20 +108,20 @@ test_law_ints :: proc(t: ^testing.T) {
 				if !ints_contains(a, i128(x)) do continue
 				p := 1
 				for _ in 0 ..< n do p *= x
-				testing.expectf(t, ints_contains(r, i128(p)), "%v^%d ne contient pas %d", a, n, p)
+				testing.expectf(t, ints_contains(r, i128(p)), "%v^%d does not contain %d", a, n, p)
 			}
 		}
 	}
-	// les débordements deviennent des bornes infinies, jamais des valeurs fausses
+	// overflows become infinite bounds, never wrong values
 	huge := ints_range(I128_MAX - 1, I128_MAX)
 	product, product_exact := ints_arith(.Mul, huge, huge)
 	sum, sum_exact := ints_arith(.Add, huge, huge)
-	testing.expect(t, !product_exact && ints_contains(product, I128_MAX), "débordement de * : borne ouverte, signalé")
-	testing.expect(t, !sum_exact && ints_contains(sum, I128_MAX), "débordement de + : borne ouverte, signalé")
-	testing.expect(t, ints_contains(ints_pow(ints_range(-1_000_000_000_000, 1_000_000_000_000), 4), I128_MAX), "débordement de puissance")
+	testing.expect(t, !product_exact && ints_contains(product, I128_MAX), "overflow of *: open bound, reported")
+	testing.expect(t, !sum_exact && ints_contains(sum, I128_MAX), "overflow of +: open bound, reported")
+	testing.expect(t, ints_contains(ints_pow(ints_range(-1_000_000_000_000, 1_000_000_000_000), 4), I128_MAX), "overflow of power")
 }
 
-// --- flottants ---
+// --- floats ---
 
 FLOAT_BOUNDS := [?]f64{-3, -2, -1, -0.5, 0, 0.5, 1, 2, 3}
 
@@ -168,19 +168,19 @@ test_law_floats :: proc(t: ^testing.T) {
 		a, ra := random_floats(gen)
 		b, rb := random_floats(gen)
 		for x in points {
-			testing.expectf(t, floats_contains(a, x) == in_float_raw(ra, x), "floats_of %v en %v", ra, x)
-			testing.expectf(t, floats_contains(floats_union(a, b), x) == (in_float_raw(ra, x) || in_float_raw(rb, x)), "union en %v", x)
-			testing.expectf(t, floats_contains(floats_intersect(a, b), x) == (in_float_raw(ra, x) && in_float_raw(rb, x)), "inter en %v", x)
-			testing.expectf(t, floats_contains(floats_complement(a), x) == !in_float_raw(ra, x), "complément de %v en %v", ra, x)
+			testing.expectf(t, floats_contains(a, x) == in_float_raw(ra, x), "floats_of %v at %v", ra, x)
+			testing.expectf(t, floats_contains(floats_union(a, b), x) == (in_float_raw(ra, x) || in_float_raw(rb, x)), "union at %v", x)
+			testing.expectf(t, floats_contains(floats_intersect(a, b), x) == (in_float_raw(ra, x) && in_float_raw(rb, x)), "inter at %v", x)
+			testing.expectf(t, floats_contains(floats_complement(a), x) == !in_float_raw(ra, x), "complement of %v at %v", ra, x)
 		}
-		testing.expect(t, same_floats(floats_union(a, b), floats_union(b, a)), "union commutative")
+		testing.expect(t, same_floats(floats_union(a, b), floats_union(b, a)), "commutative union")
 		testing.expect(t, same_floats(floats_complement(floats_complement(a)), a), "~~a = a")
-		if d, ok := floats_default(a); ok do testing.expectf(t, floats_contains(a, d), "le défaut %v de %v en fait partie", d, ra)
+		if d, ok := floats_default(a); ok do testing.expectf(t, floats_contains(a, d), "the default %v of %v belongs to it", d, ra)
 	}
-	testing.expect(t, same_floats(floats_point(-0.0), floats_point(0.0)), "-0.0 s'écrit 0.0")
+	testing.expect(t, same_floats(floats_point(-0.0), floats_point(0.0)), "-0.0 is written 0.0")
 }
 
-// --- chaînes : les décisions contre l'énumération des mots de longueur ≤ 5 ---
+// --- strings: the decisions against the enumeration of words of length ≤ 5 ---
 
 MAX_LEN :: 5
 ALPHABET :: "abc"
@@ -199,7 +199,7 @@ Words :: map[string]bool
 
 Lang :: struct {
 	lang:  Strings,
-	words: Words, // le langage restreint aux mots de longueur ≤ MAX_LEN sur ALPHABET
+	words: Words, // the language restricted to the words of length ≤ MAX_LEN over ALPHABET
 	text:  string,
 }
 
@@ -281,59 +281,59 @@ test_law_strings :: proc(t: ^testing.T) {
 		a := random_lang(gen, universe, 3)
 		b := random_lang(gen, universe, 2)
 		c := random_lang(gen, universe, 2)
-		// l'expression reconnaît exactement le langage
+		// the expression recognizes exactly the language
 		for w in universe {
 			if strings_contains(a.lang, w) != a.words[w] {
-				testing.expectf(t, false, "%s : %q %v", a.text, w, a.words[w])
+				testing.expectf(t, false, "%s: %q %v", a.text, w, a.words[w])
 				break
 			}
 		}
-		// les lois, décidées par double inclusion
-		testing.expectf(t, strings_equal(strings_union(a.lang, b.lang), strings_union(b.lang, a.lang)), "union commutative : %s, %s", a.text, b.text)
-		testing.expectf(t, strings_equal(strings_intersect(a.lang, b.lang), strings_intersect(b.lang, a.lang)), "inter commutative : %s, %s", a.text, b.text)
-		testing.expectf(t, strings_equal(strings_complement(strings_complement(a.lang)), a.lang), "~~a = a : %s", a.text)
-		testing.expectf(t, strings_equal(strings_union(a.lang, a.lang), a.lang), "a | a = a : %s", a.text)
+		// the laws, decided by double inclusion
+		testing.expectf(t, strings_equal(strings_union(a.lang, b.lang), strings_union(b.lang, a.lang)), "commutative union: %s, %s", a.text, b.text)
+		testing.expectf(t, strings_equal(strings_intersect(a.lang, b.lang), strings_intersect(b.lang, a.lang)), "commutative inter: %s, %s", a.text, b.text)
+		testing.expectf(t, strings_equal(strings_complement(strings_complement(a.lang)), a.lang), "~~a = a: %s", a.text)
+		testing.expectf(t, strings_equal(strings_union(a.lang, a.lang), a.lang), "a | a = a: %s", a.text)
 		testing.expectf(
 			t,
 			strings_equal(strings_intersect(a.lang, strings_union(b.lang, c.lang)), strings_union(strings_intersect(a.lang, b.lang), strings_intersect(a.lang, c.lang))),
-			"distributivité : %s, %s, %s", a.text, b.text, c.text,
+			"distributivity: %s, %s, %s", a.text, b.text, c.text,
 		)
 		testing.expectf(
 			t,
 			strings_equal(strings_complement(strings_union(a.lang, b.lang)), strings_intersect(strings_complement(a.lang), strings_complement(b.lang))),
-			"De Morgan : %s, %s", a.text, b.text,
+			"De Morgan: %s, %s", a.text, b.text,
 		)
 		testing.expectf(
 			t,
 			strings_equal(strings_concat(strings_concat(a.lang, b.lang), c.lang), strings_concat(a.lang, strings_concat(b.lang, c.lang))),
-			"concaténation associative : %s, %s, %s", a.text, b.text, c.text,
+			"associative concatenation: %s, %s, %s", a.text, b.text, c.text,
 		)
-		testing.expectf(t, strings_equal(strings_concat(a.lang, strings_empty_word()), a.lang), "a + \"\" = a : %s", a.text)
+		testing.expectf(t, strings_equal(strings_concat(a.lang, strings_empty_word()), a.lang), "a + \"\" = a: %s", a.text)
 		rep, _ := strings_repeat(a.lang, ints_range(0, 2))
-		testing.expectf(t, strings_equal(rep, strings_union(strings_empty_word(), strings_union(a.lang, strings_concat(a.lang, a.lang)))), "a * 0..2 : %s", a.text)
+		testing.expectf(t, strings_equal(rep, strings_union(strings_empty_word(), strings_union(a.lang, strings_concat(a.lang, a.lang)))), "a * 0..2: %s", a.text)
 		testing.expect(t, strings_subset(strings_intersect(a.lang, b.lang), a.lang), "a & b ⊆ a")
-		// comptage, mot unique, défaut
+		// counting, single word, default
 		short := make([dynamic]string)
 		for w in a.words do append(&short, w)
 		slice.sort_by(short[:], proc(x, y: string) -> bool {return len(x) != len(y) ? len(x) < len(y) : x < y})
 		n := strings_count(a.lang)
-		if len(short) > 0 do testing.expectf(t, n >= 1, "%s a des mots", a.text)
-		if n == 0 do testing.expectf(t, len(short) == 0, "%s est vide", a.text)
+		if len(short) > 0 do testing.expectf(t, n >= 1, "%s has words", a.text)
+		if n == 0 do testing.expectf(t, len(short) == 0, "%s is empty", a.text)
 		if n == 1 && len(short) == 1 {
 			w, _ := strings_single(a.lang)
-			testing.expectf(t, w == short[0], "%s : mot unique %q", a.text, short[0])
+			testing.expectf(t, w == short[0], "%s: single word %q", a.text, short[0])
 		}
 		if len(short) > 0 && !strings.contains_any(a.text, "~") {
 			d, _ := strings_default(a.lang)
-			testing.expectf(t, d == short[0], "%s : défaut %q, attendu %q", a.text, d, short[0])
+			testing.expectf(t, d == short[0], "%s: default %q, expected %q", a.text, d, short[0])
 		}
 	}
 	testing.expect(t, strings_count(Strings{}) == 0 && strings_count(strings_empty_word()) == 1, "∅ ≠ {\"\"}")
-	testing.expect(t, strings_equal(strings_prefixed(strings_empty_word()), strings_all()), "\"\".. est toute chaîne")
-	testing.expect(t, strings_equal(strings_of_words({"ba", "a", "ab"}), strings_union(strings_point("ab"), strings_union(strings_point("a"), strings_point("ba")))), "arbre de mots")
+	testing.expect(t, strings_equal(strings_prefixed(strings_empty_word()), strings_all()), "\"\".. is every string")
+	testing.expect(t, strings_equal(strings_of_words({"ba", "a", "ab"}), strings_union(strings_point("ab"), strings_union(strings_point("a"), strings_point("ba")))), "word tree")
 }
 
-// --- caractères ---
+// --- characters ---
 
 @(test)
 test_law_chars :: proc(t: ^testing.T) {
@@ -343,22 +343,22 @@ test_law_chars :: proc(t: ^testing.T) {
 	empty := set_of_chars(ints_point(CHAR_EMPTY))
 	a := set_of_chars(ints_range('a', 'c'))
 	comp := set_complement(a)
-	testing.expect(t, ints_contains(comp.chars, CHAR_EMPTY), "~'a'..'c' contient le caractère vide")
-	testing.expect(t, ints_contains(comp.chars, i128(MAX_RUNE)) && !ints_contains(comp.chars, i128(MAX_RUNE) + 1), "le complément reste dans les caractères")
-	testing.expect(t, strings_count(comp.strings) == 0, "le complément d'un caractère n'est pas une chaîne")
+	testing.expect(t, ints_contains(comp.chars, CHAR_EMPTY), "~'a'..'c' contains the empty character")
+	testing.expect(t, ints_contains(comp.chars, i128(MAX_RUNE)) && !ints_contains(comp.chars, i128(MAX_RUNE) + 1), "the complement stays within characters")
+	testing.expect(t, strings_count(comp.strings) == 0, "the complement of a character is not a string")
 	testing.expect(t, set_equal(set_complement(comp), a), "~~a = a")
 	lifted := chars_as_strings(set_union(a, empty).chars)
-	testing.expect(t, strings_equal(lifted, strings_of_words({"", "a", "b", "c"})), "les caractères comme chaînes, '' comme \"\"")
-	testing.expect(t, atoms_admitted(a, set_of_strings(strings_all())), "string admet les caractères")
-	testing.expect(t, !atoms_admitted(set_of_strings(strings_point("a")), set_of_chars(chars_all())), "char n'admet pas \"a\"")
-	testing.expect(t, !set_equal(set_of_chars(ints_point('a')), set_of_strings(strings_point("a"))), "'a' et \"a\" sont deux valeurs")
+	testing.expect(t, strings_equal(lifted, strings_of_words({"", "a", "b", "c"})), "characters as strings, '' as \"\"")
+	testing.expect(t, atoms_admitted(a, set_of_strings(strings_all())), "string admits characters")
+	testing.expect(t, !atoms_admitted(set_of_strings(strings_point("a")), set_of_chars(chars_all())), "char does not admit \"a\"")
+	testing.expect(t, !set_equal(set_of_chars(ints_point('a')), set_of_strings(strings_point("a"))), "'a' and \"a\" are two values")
 }
 
-// --- polynômes : forme normale contre l'évaluation directe ---
+// --- polynomials: normal form against direct evaluation ---
 
 Tree :: struct {
-	op:          u8, // 0 feuille, '+', '-', '*'
-	leaf_sym:    int, // -1 : constante
+	op:          u8, // 0 leaf, '+', '-', '*'
+	leaf_sym:    int, // -1: constant
 	leaf_const:  i128,
 	left, right: ^Tree,
 }
@@ -376,7 +376,7 @@ random_tree :: proc(gen: runtime.Random_Generator, depth: int) -> ^Tree {
 	return t
 }
 
-// mirror : la même expression, opérandes des opérations commutatives échangés.
+// mirror: the same expression, with the operands of commutative operations swapped.
 mirror :: proc(t: ^Tree) -> ^Tree {
 	if t.op == 0 || t.op == '-' {
 		if t.op == 0 do return t
@@ -391,8 +391,8 @@ mirror :: proc(t: ^Tree) -> ^Tree {
 	return m
 }
 
-// test_vars : les variables d'un test, dans l'ordre où il les crée — leurs ids
-// sont 0, 1, 2…, les indices que les arbres et les environnements utilisent.
+// test_vars: the variables of a test, in the order it creates them — their ids
+// are 0, 1, 2…, the indices that the trees and the environments use.
 @(thread_local)
 test_vars: []^Var
 
@@ -444,21 +444,21 @@ test_law_polynomials :: proc(t: ^testing.T) {
 	for _ in 0 ..< ROUNDS {
 		tree := random_tree(gen, 3)
 		p := poly_type(tree_poly(tree))
-		// la forme normale ne dépend pas de l'ordre des opérandes
-		testing.expect(t, expr_equal(&k, p, poly_type(tree_poly(mirror(tree)))), "commutativité")
-		// elle vaut l'expression en tout point, et ses valeurs sont exactes
+		// the normal form does not depend on the order of the operands
+		testing.expect(t, expr_equal(&k, p, poly_type(tree_poly(mirror(tree)))), "commutativity")
+		// it equals the expression at every point, and its values are exact
 		brute := make([dynamic]Atom)
 		for x in -3 ..= 3 do for y in -3 ..= 3 do for z in -3 ..= 3 {
 			env := [3]i128{i128(x), i128(y), i128(z)}
 			v, ok := eval(p, {env[0], env[1], env[2]})
-			testing.expectf(t, ok && v.(i128) == tree_eval(tree, env), "évaluation de %s", print_type(p))
+			testing.expectf(t, ok && v.(i128) == tree_eval(tree, env), "evaluation of %s", print_type(p))
 			append(&brute, tree_eval(tree, env))
 		}
-		// les valeurs : sans énumérer, l'enveloppe contient les vraies ; exacte, elle
-		// leur est égale
+		// the values: without enumerating, the envelope contains the true ones;
+		// when exact, it equals them
 		vals, exact := values_of(&k, p)
-		testing.expectf(t, atoms_subset(set_of_atoms(brute[:]), vals) && (!exact || set_equal(vals, set_of_atoms(brute[:]))), "valeurs de %s", print_type(p))
-		// une comparaison décidée l'est à raison : sa vérité ne varie pas
+		testing.expectf(t, atoms_subset(set_of_atoms(brute[:]), vals) && (!exact || set_equal(vals, set_of_atoms(brute[:]))), "values of %s", print_type(p))
+		// a decided comparison is rightly decided: its truth does not vary
 		for op in ([?]Compare_Op{.Lt, .Le, .Gt, .Ge, .Eq, .Ne}) {
 			r, _ := int_compare(&k, op, tree_poly(tree))
 			seen: [2]bool
@@ -480,15 +480,15 @@ test_law_polynomials :: proc(t: ^testing.T) {
 					truth = v != 0
 				}
 				seen[int(truth)] = true
-				// la forme écrite garde la même vérité
+				// the written form keeps the same truth
 				got, ok := eval(r, {i128(x), i128(y), i128(z)})
-				testing.expectf(t, ok && got.(bool) == truth, "%v de %s en (%d,%d,%d)", op, print_type(p), x, y, z)
+				testing.expectf(t, ok && got.(bool) == truth, "%v of %s at (%d,%d,%d)", op, print_type(p), x, y, z)
 			}
 			_, decided := r^.(Set)
-			testing.expectf(t, !decided || !(seen[0] && seen[1]), "%v de %s : décidé %v", op, print_type(p), decided)
+			testing.expectf(t, !decided || !(seen[0] && seen[1]), "%v of %s: decided %v", op, print_type(p), decided)
 		}
 	}
-	// des identités : une seule forme
+	// identities: a single form
 	a, b := poly_var(test_vars[0]), poly_var(test_vars[1])
 	s, _ := poly_add(a, b)
 	d, _ := poly_sub(a, b)
@@ -501,7 +501,7 @@ test_law_polynomials :: proc(t: ^testing.T) {
 	testing.expect(t, expr_equal(&k, poly_type(z), new_expr(set_of_ints(ints_point(0)))), "a - a = 0")
 }
 
-// --- les ensembles qui dépendent d'inconnues : la forme contre le calcul direct ---
+// --- sets that depend on unknowns: the form against direct computation ---
 
 @(test)
 test_law_set_forms :: proc(t: ^testing.T) {
@@ -515,10 +515,10 @@ test_law_set_forms :: proc(t: ^testing.T) {
 	known := [?]Set{set_of_ints(ints_range(0, 4)), set_of_ints(ints_point(6)), set_of_ints(ints_range(2, 9)), Set{}}
 	checked, forms := 0, 0
 	for _ in 0 ..< ROUNDS {
-		// une expression d'ensembles aléatoire, évaluée de deux façons
+		// a random set expression, evaluated in two ways
 		build :: proc(k: ^Kernel, gen: runtime.Random_Generator, known: []Set, depth: int) -> (^Expr, [dynamic]Maybe(Set)) {
-			// le résultat attendu pour chaque (n, m), n ∈ 0..3, m ∈ 5..6, dans l'ordre
-			// des affectations ; nil : l'opération est invalide pour ces valeurs
+			// the expected result for each (n, m), n ∈ 0..3, m ∈ 5..6, in the order
+			// of the assignments; nil: the operation is invalid for these values
 			expected := make([dynamic]Maybe(Set))
 			pick := depth == 0 ? rand.int_max(3, gen) : rand.int_max(7, gen)
 			switch pick {
@@ -561,8 +561,8 @@ test_law_set_forms :: proc(t: ^testing.T) {
 		}
 		clear(&k.errors)
 		e, expected := build(&k, gen, known[:], 3)
-		if len(k.errors) > 0 do continue // invalide pour toute valeur : signalé, pas un résultat
-		// invalide pour certaines valeurs seulement : l'opérande vide, question ouverte
+		if len(k.errors) > 0 do continue // invalid for every value: reported, not a result
+		// invalid for some values only: the empty operand, open question
 		partial := false
 		for x in expected do if x == nil do partial = true
 		if partial do continue
@@ -573,21 +573,21 @@ test_law_set_forms :: proc(t: ^testing.T) {
 			env[0], env[1] = n, m
 			want := expected[int(m - 5) * 4 + int(n)].?
 			got, ok := eval_set(&k, e, env)
-			testing.expectf(t, ok && set_equal(got, want) && carried(got) == carried(want), "%s en n=%d m=%d : %s attendu %s", print_type(e), n, m, print_set(got), print_set(want))
+			testing.expectf(t, ok && set_equal(got, want) && carried(got) == carried(want), "%s at n=%d m=%d: %s expected %s", print_type(e), n, m, print_set(got), print_set(want))
 		}
 	}
-	// le test ne passe pas à vide : assez de cas vérifiés, dont de vraies formes
-	testing.expectf(t, checked >= ROUNDS / 2 && forms >= ROUNDS / 8, "cas vérifiés : %d, dont formes : %d", checked, forms)
+	// the test does not pass vacuously: enough cases checked, including real forms
+	testing.expectf(t, checked >= ROUNDS / 2 && forms >= ROUNDS / 8, "cases checked: %d, of which forms: %d", checked, forms)
 }
 
-// --- LES FORMES NORMALES ET LES DÉCISIONS ---
+// --- NORMAL FORMS AND DECISIONS ---
 //
-// Les intervalles et les polynômes ont une forme normale unique : même structure
-// ⇔ même ensemble, l'égalité étant décidée indépendamment de la structure. Les
-// chaînes et les ensembles mixtes n'en promettent pas : on éprouve directement la
-// décision d'inclusion, sur des paires égales par une loi et contre un modèle.
+// Intervals and polynomials have a unique normal form: same structure ⇔ same
+// set, equality being decided independently of the structure. Strings and mixed
+// sets promise none: the inclusion decision is tested directly, on pairs equal by
+// a law and against a model.
 
-// split_ints : le même ensemble, écrit en morceaux mélangés.
+// split_ints: the same set, written in shuffled pieces.
 split_ints :: proc(gen: runtime.Random_Generator, raw: []Int_Interval) -> []Int_Interval {
 	out := make([dynamic]Int_Interval)
 	for iv in raw {
@@ -630,9 +630,9 @@ test_normal_ints :: proc(t: ^testing.T) {
 		}
 		semantic := ints_subset(a, b) && ints_subset(b, a)
 		if semantic do equal_pairs += 1
-		testing.expectf(t, same_ints(a, b) == semantic, "%v et %v : structure %v, ensembles égaux %v", a, b, same_ints(a, b), semantic)
+		testing.expectf(t, same_ints(a, b) == semantic, "%v and %v: structure %v, equal sets %v", a, b, same_ints(a, b), semantic)
 	}
-	testing.expectf(t, equal_pairs >= ROUNDS, "paires égales : %d", equal_pairs)
+	testing.expectf(t, equal_pairs >= ROUNDS, "equal pairs: %d", equal_pairs)
 }
 
 split_floats :: proc(gen: runtime.Random_Generator, raw: []Float_Interval) -> []Float_Interval {
@@ -678,12 +678,12 @@ test_normal_floats :: proc(t: ^testing.T) {
 		}
 		semantic := floats_subset(a, b) && floats_subset(b, a)
 		if semantic do equal_pairs += 1
-		testing.expectf(t, same_floats(a, b) == semantic, "%v et %v : structure %v, ensembles égaux %v", a, b, same_floats(a, b), semantic)
+		testing.expectf(t, same_floats(a, b) == semantic, "%v and %v: structure %v, equal sets %v", a, b, same_floats(a, b), semantic)
 	}
-	testing.expectf(t, equal_pairs >= ROUNDS, "paires égales : %d", equal_pairs)
+	testing.expectf(t, equal_pairs >= ROUNDS, "equal pairs: %d", equal_pairs)
 }
 
-// law_pair : deux écritures du même langage, par une loi tirée au hasard.
+// law_pair: two writings of the same language, by a randomly drawn law.
 law_pair :: proc(gen: runtime.Random_Generator, universe: []string) -> (a, b: Strings, law: string) {
 	a = random_lang(gen, universe, 3).lang
 	x := random_lang(gen, universe, 2).lang
@@ -698,7 +698,7 @@ law_pair :: proc(gen: runtime.Random_Generator, universe: []string) -> (a, b: St
 	case 3:
 		return a, strings_concat(strings_empty_word(), a), "\"\" + a"
 	case 4:
-		return strings_concat(strings_concat(a, x), y), strings_concat(a, strings_concat(x, y)), "associativité"
+		return strings_concat(strings_concat(a, x), y), strings_concat(a, strings_concat(x, y)), "associativity"
 	}
 	r, _ := strings_repeat(a, ints_range(0, 2))
 	b, _ = strings_repeat(a, ints_range(1, 3))
@@ -716,21 +716,21 @@ test_decide_strings :: proc(t: ^testing.T) {
 	refuted, included := 0, 0
 	for _ in 0 ..< ROUNDS {
 		a, b, law := law_pair(gen, universe)
-		testing.expectf(t, strings_equal(a, b), "%s : %s et %s", law, print_strings(a), print_strings(b))
-		// une inclusion décidée vaut sur les mots courts ; une inclusion refusée a un
-		// témoin, dans a et hors de b
+		testing.expectf(t, strings_equal(a, b), "%s: %s and %s", law, print_strings(a), print_strings(b))
+		// a decided inclusion holds on the short words; a refused inclusion has a
+		// witness, in a and outside b
 		x := random_lang(gen, universe, 3)
 		y := random_lang(gen, universe, 3)
 		if strings_subset(x.lang, y.lang) {
 			included += 1
-			for w in x.words do testing.expectf(t, y.words[w], "%s ⊆ %s, mais pas %q", x.text, y.text, w)
+			for w in x.words do testing.expectf(t, y.words[w], "%s ⊆ %s, but not %q", x.text, y.text, w)
 		} else {
 			refuted += 1
 			w, ok := strings_default(strings_intersect(x.lang, strings_complement(y.lang)))
-			testing.expectf(t, ok && strings_contains(x.lang, w) && !strings_contains(y.lang, w), "%s ⊄ %s : témoin %q", x.text, y.text, w)
+			testing.expectf(t, ok && strings_contains(x.lang, w) && !strings_contains(y.lang, w), "%s ⊄ %s: witness %q", x.text, y.text, w)
 		}
 	}
-	testing.expectf(t, refuted >= ROUNDS / 8 && included >= ROUNDS / 8, "inclusions refusées : %d, décidées : %d", refuted, included)
+	testing.expectf(t, refuted >= ROUNDS / 8 && included >= ROUNDS / 8, "refused inclusions: %d, decided: %d", refuted, included)
 }
 
 random_set :: proc(gen: runtime.Random_Generator, universe: []string) -> Set {
@@ -743,7 +743,7 @@ random_set :: proc(gen: runtime.Random_Generator, universe: []string) -> Set {
 	return s
 }
 
-// sample_atoms : des atomes de chaque sorte, pour comparer deux ensembles point par point.
+// sample_atoms: atoms of each sort, to compare two sets point by point.
 sample_atoms :: proc(universe: []string) -> []Atom {
 	out := make([dynamic]Atom)
 	for x in INT_POINTS do append(&out, x)
@@ -776,27 +776,27 @@ test_decide_sets :: proc(t: ^testing.T) {
 		case 0:
 			b = set_union(a, set_intersect(a, x))
 		case 1:
-			b = set_intersect(set_union(a, x), a) // le complément ne vaut que dans les sortes de x : pas de partition ici
+			b = set_intersect(set_union(a, x), a) // the complement only holds within the sorts of x: no partition here
 		case 2:
 			b = set_union(x, a)
 			a = set_union(a, x)
 		}
-		testing.expectf(t, set_equal(a, b), "%s et %s", print_set(a), print_set(b))
-		// une inclusion décidée vaut en chaque point ; un point de x hors de y la refuse
+		testing.expectf(t, set_equal(a, b), "%s and %s", print_set(a), print_set(b))
+		// a decided inclusion holds at each point; a point of x outside y refuses it
 		y := random_set(gen, universe)
 		decided := set_subset(x, y)
 		for p in atoms {
 			if has_atom(x, p) && !has_atom(y, p) {
-				testing.expectf(t, !decided, "%s ⊆ %s, mais pas %v", print_set(x), print_set(y), p)
+				testing.expectf(t, !decided, "%s ⊆ %s, but not %v", print_set(x), print_set(y), p)
 				break
 			}
 		}
 	}
 }
 
-// Les polynômes : même forme ⇔ même polynôme. L'identité est décidée sans la forme,
-// par évaluation en des points tirés au hasard (Schwartz–Zippel : deux polynômes
-// distincts de degré ≤ 8 coïncident rarement sur 8 points pris dans [-10⁴, 10⁴]³).
+// Polynomials: same form ⇔ same polynomial. Identity is decided without the form,
+// by evaluation at randomly drawn points (Schwartz–Zippel: two distinct
+// polynomials of degree ≤ 8 rarely coincide on 8 points taken in [-10⁴, 10⁴]³).
 rewrite :: proc(gen: runtime.Random_Generator, t: ^Tree) -> ^Tree {
 	if t.op == 0 do return t
 	l, r := rewrite(gen, t.left), rewrite(gen, t.right)
@@ -813,7 +813,7 @@ rewrite :: proc(gen: runtime.Random_Generator, t: ^Tree) -> ^Tree {
 		minus.leaf_sym, minus.leaf_const = -1, -1
 		return node('+', l, node('*', minus, r)) // a - b = a + (-1)b
 	case t.op != '-' && rand.int_max(2, gen) == 0:
-		return node(t.op, r, l) // commutativité
+		return node(t.op, r, l) // commutativity
 	}
 	return node(t.op, l, r)
 }
@@ -838,13 +838,13 @@ test_normal_polynomials :: proc(t: ^testing.T) {
 		}
 		if identical do equal_pairs += 1
 		same := expr_equal(&k, poly_type(tree_poly(a)), poly_type(tree_poly(b)))
-		testing.expectf(t, same == identical, "%s et %s : même forme %v, même polynôme %v", print_type(poly_type(tree_poly(a))), print_type(poly_type(tree_poly(b))), same, identical)
+		testing.expectf(t, same == identical, "%s and %s: same form %v, same polynomial %v", print_type(poly_type(tree_poly(a))), print_type(poly_type(tree_poly(b))), same, identical)
 	}
-	testing.expectf(t, equal_pairs >= ROUNDS / 3, "paires égales : %d", equal_pairs)
+	testing.expectf(t, equal_pairs >= ROUNDS / 3, "equal pairs: %d", equal_pairs)
 }
 
-// Les lois exactes qui simplifient une forme : none est neutre pour | et absorbant
-// pour & ; un opérande toujours inclus dans un ensemble connu tombe.
+// The exact laws that simplify a form: none is neutral for | and absorbing
+// for &; an operand always included in a known set drops out.
 @(test)
 test_set_form_simplification :: proc(t: ^testing.T) {
 	arena: vmem.Arena
@@ -857,14 +857,14 @@ test_set_form_simplification :: proc(t: ^testing.T) {
 	union_of :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {return set_operation(k, Set_Op{kind = .Union}, {}, a, b)}
 	inter_of :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {return set_operation(k, Set_Op{kind = .Inter}, {}, a, b)}
 	only_n := union_of(&k, n, new_expr(set_of_ints(ints_point(9))))
-	testing.expect(t, print_type(only_n) == "??0 | 9", "n | 9 reste une forme")
-	testing.expect(t, union_of(&k, only_n, inter_of(&k, m, none)) == only_n, "(n | 9) | (m & none) est n | 9")
+	testing.expect(t, print_type(only_n) == "??0 | 9", "n | 9 stays a form")
+	testing.expect(t, union_of(&k, only_n, inter_of(&k, m, none)) == only_n, "(n | 9) | (m & none) is n | 9")
 	constant, is_set := color_set(&k, union_of(&k, n, new_expr(set_of_ints(ints_range(0, 3)))))
-	testing.expect(t, is_set && set_equal(constant, set_of_ints(ints_range(0, 3))), "n | 0..3 est 0..3")
-	testing.expect(t, inter_of(&k, n, new_expr(set_of_ints(ints_range(0, 9)))) == n, "n & 0..9 est n")
+	testing.expect(t, is_set && set_equal(constant, set_of_ints(ints_range(0, 3))), "n | 0..3 is 0..3")
+	testing.expect(t, inter_of(&k, n, new_expr(set_of_ints(ints_range(0, 9)))) == n, "n & 0..9 is n")
 }
 
-// --- la vérification par paliers : jamais « prouvé » ni « réfuté » à tort ---
+// --- checking by tiers: never wrongly "proved" or "refuted" ---
 
 @(test)
 test_law_value_in :: proc(t: ^testing.T) {
@@ -887,14 +887,14 @@ test_law_value_in :: proc(t: ^testing.T) {
 		}
 		v := admits(&k, set_of_ints(c), p)
 		decided[v] += 1
-		testing.expectf(t, v != .Proved || all, "%s ⊆ %v déclaré prouvé à tort", print_type(p), c)
-		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v déclaré réfuté à tort", print_type(p), c)
+		testing.expectf(t, v != .Proved || all, "%s ⊆ %v wrongly declared proved", print_type(p), c)
+		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v wrongly declared refuted", print_type(p), c)
 	}
-	testing.expectf(t, decided[.Proved] >= ROUNDS / 10 && decided[.Refuted] >= ROUNDS / 10, "verdicts : %v", decided)
+	testing.expectf(t, decided[.Proved] >= ROUNDS / 10 && decided[.Refuted] >= ROUNDS / 10, "verdicts: %v", decided)
 }
 
-// a·x + b sur un domaine trop grand pour être énuméré : le palier affine décide
-// seul, et juste.
+// a·x + b over a domain too large to be enumerated: the affine tier decides
+// alone, and correctly.
 @(test)
 test_law_affine :: proc(t: ^testing.T) {
 	arena: vmem.Arena
@@ -902,7 +902,7 @@ test_law_affine :: proc(t: ^testing.T) {
 	defer vmem.arena_destroy(&arena)
 	state: rand.Default_Random_State
 	gen := seeded(&state, 17)
-	N :: 100_000 // au-delà de la limite d'énumération
+	N :: 100_000 // beyond the enumeration limit
 	k: Kernel
 	declare_vars(&k, set_of_ints(ints_range(0, N)))
 	x := poly_var(test_vars[0])
@@ -913,7 +913,7 @@ test_law_affine :: proc(t: ^testing.T) {
 		b := i128(rand.int_range(-20, 21, gen))
 		ax, _ := poly_scale(x, a)
 		p, _ := poly_add(ax, Poly{const = b})
-		// une couleur à trous : tout sauf quelques points ou petits intervalles
+		// a color with holes: everything but a few points or small intervals
 		holes := make([dynamic]Int_Interval)
 		for _ in 0 ..< rand.int_range(1, 4, gen) {
 			at := i128(rand.int_range(-60, 61, gen)) * (rand.int_max(2, gen) == 0 ? 1 : a)
@@ -927,25 +927,25 @@ test_law_affine :: proc(t: ^testing.T) {
 		}
 		r := admits(&k, set_of_ints(c), poly_type(p))
 		outcomes[r] += 1
-		testing.expectf(t, r == verdict(all), "%s ⊆ %v : %v, attendu %v", print_type(poly_type(p)), c, r, verdict(all))
+		testing.expectf(t, r == verdict(all), "%s ⊆ %v: %v, expected %v", print_type(poly_type(p)), c, r, verdict(all))
 	}
-	testing.expectf(t, outcomes[.Proved] > 0 && outcomes[.Refuted] > 0, "verdicts : %v", outcomes)
+	testing.expectf(t, outcomes[.Proved] > 0 && outcomes[.Refuted] > 0, "verdicts: %v", outcomes)
 }
 
-// --- les ensembles de scopes : le BDD contre un modèle exact ---
+// --- sets of scopes: the BDD against an exact model ---
 //
-// L'univers : les scopes {x y}, {r} et {z}, de champs dans 0..3 ou 99. Les formes
-// tirées n'admettent que des champs dans 0..3 et n'ont que les structures {x y} et
-// {r} : 99 et {z} représentent tout ce qu'aucune forme n'atteint. Chaque ensemble
-// de scopes est donc une union de ces 31 classes, et le modèle est exact — même
-// pour le vide et l'inclusion, qui portent sur tous les scopes.
+// The universe: the scopes {x y}, {r} and {z}, with fields in 0..3 or 99. The drawn
+// shapes admit only fields in 0..3 and have only the structures {x y} and {r}: 99
+// and {z} stand for everything that no shape reaches. Each set of scopes is thus a
+// union of these 31 classes, and the model is exact — even for emptiness and
+// inclusion, which range over all scopes.
 
 FIELD_VALUES := [5]i128{0, 1, 2, 3, 99}
 STRUCTURES := [3][]string{{"x", "y"}, {"r"}, {"z"}}
 
 Scope_Model :: struct {
 	bdd:  Bdd,
-	mask: u64, // les éléments de l'univers qu'il contient
+	mask: u64, // the elements of the universe that it contains
 }
 
 @(test)
@@ -976,7 +976,7 @@ test_law_scopes :: proc(t: ^testing.T) {
 		shape := new_scope(nil)
 		for n, i in names {
 			lo := i128(rand.int_range(0, 4, gen))
-			hi := lo + i128(rand.int_range(-1, 3, gen)) // parfois vide
+			hi := lo + i128(rand.int_range(-1, 3, gen)) // sometimes empty
 			fields[i] = Field{name = n, kind = .Push, set = set_of_ints(ints_intersect(ints_range(lo, hi), ints_range(0, 3)))}
 			c := new_expr(fields[i].set)
 			append(&shape.bindings, Binding{name = n, kind = .Push, color = c, color_type = c})
@@ -1012,12 +1012,12 @@ test_law_scopes :: proc(t: ^testing.T) {
 		b := random_scopes(gen, universe[:], all_mask, 3)
 		for u, i in universe {
 			want := a.mask & (1 << uint(i)) != 0
-			testing.expectf(t, bdd_admits(&k, a.bdd, u) == verdict(want), "appartenance de l'élément %d : %v attendu", i, want)
+			testing.expectf(t, bdd_admits(&k, a.bdd, u) == verdict(want), "membership of the element %d: %v expected", i, want)
 		}
-		testing.expectf(t, bdd_is_empty(a.bdd) == (a.mask == 0), "vide : %v attendu", a.mask == 0)
-		testing.expectf(t, bdd_subset(a.bdd, b.bdd) == (a.mask & ~b.mask == 0), "inclusion : %v attendu", a.mask & ~b.mask == 0)
+		testing.expectf(t, bdd_is_empty(a.bdd) == (a.mask == 0), "empty: %v expected", a.mask == 0)
+		testing.expectf(t, bdd_subset(a.bdd, b.bdd) == (a.mask & ~b.mask == 0), "inclusion: %v expected", a.mask & ~b.mask == 0)
 		if a.mask == 0 do empty += 1
 		if a.mask & ~b.mask == 0 do included += 1
 	}
-	testing.expectf(t, empty >= ROUNDS / 20 && included >= ROUNDS / 10, "cas vides : %d, inclusions : %d", empty, included)
+	testing.expectf(t, empty >= ROUNDS / 20 && included >= ROUNDS / 10, "empty cases: %d, inclusions: %d", empty, included)
 }

@@ -6,26 +6,25 @@ import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
 
-// LES ENSEMBLES DE CHAÎNES : des langages réguliers, gardés sous la forme de
-// l'expression qui les écrit, en forme de similarité (Owens, Reppy, Turon,
-// « Regular-expression derivatives re-examined », déf. 4.1) et partagée : deux
-// écritures semblables sont le même nœud. La forme n'est pas unique — deux
-// écritures équivalentes mais dissemblables restent deux nœuds — et n'a pas à
-// l'être : l'inclusion se décide à la demande, par les dérivées de Brzozowski,
-// sans automate.
+// SETS OF STRINGS: regular languages, kept as the expression that writes them, in
+// similarity form (Owens, Reppy, Turon, "Regular-expression derivatives
+// re-examined", def. 4.1) and shared: two similar writings are the same node. The
+// form is not unique — two equivalent but dissimilar writings remain two nodes —
+// and does not have to be: inclusion is decided on demand, by Brzozowski
+// derivatives, without an automaton.
 //
-//   "a" | "ab"        Words    un ensemble fini de mots ({""} est ε)
-//   'a'..'z'          Class    un mot d'une lettre dans la plage
-//   x + y             Cat      associée à droite : [tête, reste]
-//   x | y             Alt      aplatie, triée, sans doublon
-//   x & y             And      aplatie, triée, sans doublon
-//   ~x                Not      ~∅ : toute chaîne
-//   x * 2..4          Repeat   par un ensemble de comptes naturels
+//   "a" | "ab"        Words    a finite set of words ({""} is ε)
+//   'a'..'z'          Class    a one-letter word in the range
+//   x + y             Cat      right-associated: [head, rest]
+//   x | y             Alt      flattened, sorted, without duplicates
+//   x & y             And      flattened, sorted, without duplicates
+//   ~x                Not      ~∅: any string
+//   x * 2..4          Repeat   by a set of natural counts
 
 MAX_RUNE :: rune(0x10FFFF)
 
-// Au-delà, une répétition n'est pas construite : chaque dérivée garde le compte
-// restant, il y en aurait autant que de répétitions.
+// Beyond this, a repetition is not built: each derivative keeps the remaining
+// count, there would be as many of them as repetitions.
 MAX_REPEAT :: 4096
 
 Regex_Kind :: enum u8 {
@@ -40,29 +39,29 @@ Regex_Kind :: enum u8 {
 
 Regex :: struct {
 	kind:   Regex_Kind,
-	words:  []string, // Words : non vide, sans doublon, du plus court au plus long puis dans l'ordre
-	class:  Rune_Range, // Class : au moins deux caractères (un seul est un mot)
-	parts:  []^Regex, // Cat : [tête, reste] ; Alt, And : au moins deux, triés par id ; Not, Repeat : [r]
-	counts: Ints, // Repeat : des naturels, ni {0} ni {1} ; 0..max si r accepte ""
-	id:     int, // l'ordre de création : il trie les opérandes de | et &
+	words:  []string, // Words: non-empty, without duplicates, from shortest to longest then in order
+	class:  Rune_Range, // Class: at least two characters (a single one is a word)
+	parts:  []^Regex, // Cat: [head, rest]; Alt, And: at least two, sorted by id; Not, Repeat: [r]
+	counts: Ints, // Repeat: naturals, neither {0} nor {1}; 0..max if r accepts ""
+	id:     int, // the creation order: it sorts the operands of | and &
 }
 
 Strings :: struct {
-	re: ^Regex, // nil : le langage vide
+	re: ^Regex, // nil: the empty language
 }
 
 Rune_Range :: struct {
-	lo, hi: rune, // inclus
+	lo, hi: rune, // inclusive
 }
 
-// --- le partage ---
+// --- sharing ---
 
-// La table des nœuds, par fil d'exécution. Les nœuds sont immuables et vivent
-// autant que le programme : ils sont alloués hors des arènes des passes.
+// The node table, per thread. Nodes are immutable and live as long as the
+// program: they are allocated outside the passes' arenas.
 @(thread_local)
 regex_nodes: map[string]^Regex
 
-// intern : le nœud partagé de cette structure.
+// intern: the shared node of this structure.
 intern :: proc(r: Regex) -> ^Regex {
 	key := regex_key(r)
 	if n, ok := regex_nodes[key]; ok do return n
@@ -78,7 +77,7 @@ intern :: proc(r: Regex) -> ^Regex {
 	return n
 }
 
-// regex_key : la structure d'un nœud, ses opérandes par id.
+// regex_key: the structure of a node, its operands by id.
 regex_key :: proc(r: Regex) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "%v %d %d", r.kind, r.class.lo, r.class.hi)
@@ -88,7 +87,7 @@ regex_key :: proc(r: Regex) -> string {
 	return strings.to_string(b)
 }
 
-// --- constructions : la similarité, et elle seule ---
+// --- constructions: similarity, and only similarity ---
 
 strings_point :: proc(word: string) -> Strings {
 	return strings_of_words({word})
@@ -98,7 +97,7 @@ strings_empty_word :: proc() -> Strings {
 	return strings_point("")
 }
 
-// strings_of_words : le langage fini de ces mots.
+// strings_of_words: the finite language of these words.
 strings_of_words :: proc(words: []string) -> Strings {
 	if len(words) == 0 do return {}
 	sorted := slice.clone(words, context.temp_allocator)
@@ -106,13 +105,13 @@ strings_of_words :: proc(words: []string) -> Strings {
 	return Strings{intern({kind = .Words, words = slice.unique(sorted)})}
 }
 
-// shortlex : le plus court d'abord, puis l'ordre des points de code.
+// shortlex: the shortest first, then code point order.
 shortlex :: proc(a, b: string) -> bool {
 	la, lb := strings.rune_count(a), strings.rune_count(b)
 	return la != lb ? la < lb : a < b
 }
 
-// strings_runes : les mots d'un caractère compris dans [lo, hi].
+// strings_runes: the one-character words within [lo, hi].
 strings_runes :: proc(lo, hi: rune) -> Strings {
 	if lo == hi do return strings_point(fmt.tprintf("%c", lo))
 	return Strings{intern({kind = .Class, class = {min(lo, hi), max(lo, hi)}})}
@@ -136,8 +135,8 @@ single_word :: proc(r: ^Regex) -> (string, bool) {
 	return "", false
 }
 
-// members : les opérandes d'une opération aplatie — ceux de `r` s'il en est une
-// du même genre, sinon `r` lui-même.
+// members: the operands of a flattened operation — those of `r` if it is one of
+// the same kind, otherwise `r` itself.
 members :: proc(r: ^Regex, kind: Regex_Kind) -> []^Regex {
 	if r.kind == kind do return r.parts
 	one := make([]^Regex, 1, context.temp_allocator)
@@ -145,7 +144,7 @@ members :: proc(r: ^Regex, kind: Regex_Kind) -> []^Regex {
 	return one
 }
 
-// operation : `|` ou `&` sur des opérandes triés par id et sans doublon.
+// operation: `|` or `&` over operands sorted by id and without duplicates.
 operation :: proc(kind: Regex_Kind, parts: []^Regex) -> ^Regex {
 	slice.sort_by(parts, proc(a, b: ^Regex) -> bool {return a.id < b.id})
 	unique := slice.unique(parts)
@@ -183,8 +182,8 @@ regex_and :: proc(a, b: ^Regex) -> ^Regex {
 	if is_all(b) do return a
 	parts := make([dynamic]^Regex, context.temp_allocator)
 	for x in ([2]^Regex{a, b}) do append(&parts, ..members(x, .And))
-	// Avec un ensemble fini de mots, le résultat est fini : ceux de ses mots que
-	// toutes les autres parties reconnaissent.
+	// With a finite set of words, the result is finite: those of its words that
+	// all the other parts recognize.
 	for p, i in parts {
 		if p.kind != .Words do continue
 		kept := make([dynamic]string, context.temp_allocator)
@@ -197,7 +196,7 @@ regex_and :: proc(a, b: ^Regex) -> ^Regex {
 	return operation(.And, parts[:])
 }
 
-// Le complément dans l'ensemble de toutes les chaînes.
+// The complement within the set of all strings.
 strings_complement :: proc(a: Strings) -> Strings {
 	return Strings{regex_not(a.re)}
 }
@@ -215,7 +214,7 @@ regex_cat :: proc(a, b: ^Regex) -> ^Regex {
 	if a == nil || b == nil do return nil
 	if is_epsilon(a) do return b
 	if is_epsilon(b) do return a
-	if a.kind == .Cat do return regex_cat(a.parts[0], regex_cat(a.parts[1], b)) // à droite
+	if a.kind == .Cat do return regex_cat(a.parts[0], regex_cat(a.parts[1], b)) // to the right
 	if w, single := single_word(a); single {
 		if v, also := single_word(b); also do return strings_point(strings.concatenate({w, v}, context.temp_allocator)).re
 		if b.kind == .Cat {
@@ -227,8 +226,8 @@ regex_cat :: proc(a, b: ^Regex) -> ^Regex {
 	return intern({kind = .Cat, parts = []^Regex{a, b}})
 }
 
-// strings_repeat : L^c pour tout compte c de `counts` (les comptes négatifs
-// n'existent pas). `ok` est faux quand un compte fini est trop grand.
+// strings_repeat: L^c for every count c of `counts` (negative counts do not
+// exist). `ok` is false when a finite count is too large.
 strings_repeat :: proc(a: Strings, counts: Ints) -> (Strings, bool) {
 	natural := ints_intersect(counts, ints_range(0, nil))
 	for iv in natural.intervals {
@@ -246,7 +245,7 @@ regex_repeat :: proc(r: ^Regex, natural: Ints) -> ^Regex {
 	if r == nil do return epsilon if ints_contains(counts, 0) else nil // ∅⁰ = {""}
 	if is_epsilon(r) do return epsilon
 	if regex_nullable(r) {
-		// "" ∈ r : r^c contient r^d pour tout d ≤ c, donc r^C = r^(0..max C)
+		// "" ∈ r: r^c contains r^d for every d ≤ c, so r^C = r^(0..max C)
 		_, top := ints_bounds(counts)
 		counts = ints_range(0, top)
 	}
@@ -263,7 +262,7 @@ regex_repeat :: proc(r: ^Regex, natural: Ints) -> ^Regex {
 	return intern({kind = .Repeat, parts = []^Regex{r}, counts = counts})
 }
 
-// "p".. : commence par un mot de p ; .."s" : finit par un mot de s.
+// "p"..: starts with a word of p; .."s": ends with a word of s.
 strings_prefixed :: proc(p: Strings) -> Strings {
 	return strings_concat(p, strings_all())
 }
@@ -272,7 +271,7 @@ strings_suffixed :: proc(s: Strings) -> Strings {
 	return strings_concat(strings_all(), s)
 }
 
-// --- dérivées ---
+// --- derivatives ---
 
 regex_nullable :: proc(r: ^Regex) -> bool {
 	if r == nil do return false
@@ -295,7 +294,7 @@ regex_nullable :: proc(r: ^Regex) -> bool {
 	return false
 }
 
-// derive : les suffixes des mots de r qui commencent par c (Brzozowski).
+// derive: the suffixes of the words of r that start with c (Brzozowski).
 derive :: proc(r: ^Regex, c: rune) -> ^Regex {
 	if r == nil do return nil
 	switch r.kind {
@@ -322,13 +321,13 @@ derive :: proc(r: ^Regex, c: rune) -> ^Regex {
 	case .Not:
 		return regex_not(derive(r.parts[0], c))
 	case .Repeat:
-		// le premier morceau, puis les autres : r^C donne ∂r · r^(C-1)
+		// the first piece, then the others: r^C gives ∂r · r^(C-1)
 		return regex_cat(derive(r.parts[0], c), regex_repeat(r.parts[0], counts_minus_one(r.counts)))
 	}
 	return nil
 }
 
-// counts_minus_one : { c - 1 | c ∈ C, c ≥ 1 }.
+// counts_minus_one: { c - 1 | c ∈ C, c ≥ 1 }.
 counts_minus_one :: proc(counts: Ints) -> Ints {
 	out := make([dynamic]Int_Interval, context.temp_allocator)
 	for iv in counts.intervals {
@@ -343,8 +342,9 @@ counts_minus_one :: proc(counts: Ints) -> Ints {
 	return ints_of(out[:])
 }
 
-// cuts : les bornes de l'alphabet où la dérivée peut changer (les classes de
-// dérivées d'Owens et al., §4.2, sur-approchées) : une dérivée par plage suffit.
+// cuts: the bounds of the alphabet where the derivative can change (the
+// derivative classes of Owens et al., §4.2, over-approximated): one derivative
+// per range suffices.
 cuts :: proc(r: ^Regex, out: ^[dynamic]rune) {
 	if r == nil do return
 	switch r.kind {
@@ -364,8 +364,8 @@ cuts :: proc(r: ^Regex, out: ^[dynamic]rune) {
 	}
 }
 
-// classes : les plages de l'alphabet sur lesquelles la dérivée de r est la même,
-// dans l'ordre ; chacune est représentée par son plus petit caractère.
+// classes: the ranges of the alphabet over which the derivative of r is the same,
+// in order; each is represented by its smallest character.
 classes :: proc(r: ^Regex) -> []Rune_Range {
 	bounds := make([dynamic]rune, context.temp_allocator)
 	append(&bounds, 0)
@@ -390,10 +390,10 @@ regex_contains :: proc(r: ^Regex, word: string) -> bool {
 	return regex_nullable(cur)
 }
 
-// witness : le plus petit mot de r — le plus court, puis le premier dans l'ordre
-// des points de code —, s'il y en a un. Un parcours en largeur des dérivées,
-// comparées par adresse ; il termine parce qu'une expression n'a qu'un nombre fini
-// de dérivées dissemblables (Brzozowski).
+// witness: the smallest word of r — the shortest, then the first in code point
+// order —, if there is one. A breadth-first traversal of the derivatives,
+// compared by address; it terminates because an expression has only a finite
+// number of dissimilar derivatives (Brzozowski).
 witness :: proc(r: ^Regex) -> (string, bool) {
 	Visit :: struct {
 		re:   ^Regex,
@@ -417,7 +417,7 @@ witness :: proc(r: ^Regex) -> (string, bool) {
 	return "", false
 }
 
-// --- décisions, mémoïsées par nœud : les nœuds sont partagés et immuables ---
+// --- decisions, memoized per node: nodes are shared and immutable ---
 
 @(thread_local)
 subset_memo: map[[2]int]bool
@@ -447,7 +447,7 @@ strings_contains :: proc(a: Strings, word: string) -> bool {
 	return regex_contains(a.re, word)
 }
 
-// strings_count : le nombre de mots, saturé à 2 — deux recherches de témoin.
+// strings_count: the number of words, saturated at 2 — two witness searches.
 strings_count :: proc(a: Strings) -> int {
 	if a.re == nil do return 0
 	#partial switch a.re.kind {
@@ -467,27 +467,27 @@ strings_count :: proc(a: Strings) -> int {
 	return n
 }
 
-// strings_default : le plus petit mot.
+// strings_default: the smallest word.
 strings_default :: proc(a: Strings) -> (string, bool) {
 	if a.re != nil && a.re.kind == .Words do return a.re.words[0], true
 	return witness(a.re)
 }
 
-// strings_single : le mot unique d'un langage qui n'en a qu'un.
+// strings_single: the unique word of a language that has only one.
 strings_single :: proc(a: Strings) -> (string, bool) {
 	if strings_count(a) != 1 do return "", false
 	return strings_default(a)
 }
 
-// strings_words : tous les mots d'un langage fini, s'il en a au plus `limit` —
-// par l'automate des dérivées, émondé.
+// strings_words: all the words of a finite language, if it has at most `limit` of
+// them — through the derivative automaton, trimmed.
 strings_words :: proc(a: Strings, limit: int) -> ([]string, bool) {
 	if a.re == nil do return nil, true
 	if a.re.kind == .Words do return a.re.words, len(a.re.words) <= limit
 	return dfa_words(derivative_dfa(a.re), limit)
 }
 
-// --- l'automate des dérivées : seulement pour énumérer ---
+// --- the derivative automaton: only for enumerating ---
 
 Edge :: struct {
 	using range: Rune_Range,
@@ -496,16 +496,16 @@ Edge :: struct {
 
 Dfa_State :: struct {
 	accept: bool,
-	edges:  []Edge, // triées, disjointes
+	edges:  []Edge, // sorted, disjoint
 }
 
-// Un automate déterministe émondé : tout état est accessible depuis l'initial (0)
-// et mène à un état acceptant.
+// A trimmed deterministic automaton: every state is reachable from the initial
+// one (0) and leads to an accepting state.
 Dfa :: struct {
 	states: []Dfa_State,
 }
 
-// derivative_dfa : les états sont les dérivées de r, les arêtes ses classes
+// derivative_dfa: the states are the derivatives of r, the edges its classes
 // (Owens et al., fig. 1).
 derivative_dfa :: proc(r: ^Regex) -> Dfa {
 	index := make(map[^Regex]int, allocator = context.temp_allocator)
@@ -532,8 +532,8 @@ derivative_dfa :: proc(r: ^Regex) -> Dfa {
 	return trim(raw[:], 0)
 }
 
-// trim : garde les états accessibles depuis `start` qui mènent à un état
-// acceptant, numérotés dans l'ordre où on les rencontre.
+// trim: keeps the states reachable from `start` that lead to an accepting state,
+// numbered in the order they are met.
 trim :: proc(raw: []Dfa_State, start: int) -> Dfa {
 	n := len(raw)
 	preds := make([][dynamic]int, n)
@@ -578,7 +578,7 @@ dfa_words :: proc(a: Dfa, limit: int) -> ([]string, bool) {
 	out := make([dynamic]string)
 	if len(a.states) == 0 do return out[:], true
 	walk :: proc(a: Dfa, s: int, prefix: ^strings.Builder, out: ^[dynamic]string, limit, depth: int) -> bool {
-		if depth > len(a.states) do return false // un cycle : infini
+		if depth > len(a.states) do return false // a cycle: infinite
 		if a.states[s].accept {
 			if len(out) >= limit do return false
 			append(out, strings.clone(strings.to_string(prefix^)))

@@ -3,55 +3,55 @@ package kernel
 import syn "../compiler"
 import "core:fmt"
 
-// LE CARVE
+// THE CARVE
 //
-// `target{x -> v}` dérive un nouveau scope (specs/language/08). Comme chaque binding
-// garde sa couleur et sa valeur symboliques, le carve est une copie : on copie
-// l'arbre symbolique du scope, on met les arguments à la place des valeurs qu'ils
-// visent, et on type la copie. Tout ce qui dépend d'une valeur carvée — une
-// valeur, une couleur, un carve plus profond — est re-typé avec elle ; la
-// vérification finale porte sur la copie comme sur tout scope.
+// `target{x -> v}` derives a new scope (specs/language/08). Since each binding
+// keeps its symbolic color and value, the carve is a copy: we copy the symbolic
+// tree of the scope, put the arguments in place of the values they target, and
+// type the copy. Everything that depends on a carved value — a value, a color, a
+// deeper carve — is re-typed with it; the final check applies to the copy as to
+// any scope.
 //
-// Les erreurs de la copie sont signalées au carve, et seulement celles que le carve
-// a causées : un binding qu'il ne change pas a déjà été vérifié dans sa source.
+// The errors of the copy are reported at the carve, and only those the carve
+// caused: a binding it does not change has already been checked in its source.
 
 type_carve :: proc(k: ^Kernel, c: Carve, env: ^Scope) -> ^Expr {
 	t := type_of(k, c.target, env)
 	if is_invalid(t) do return t
 	if _, d, recursive := equation_var(t); recursive do return carve_itself(k, d, d, c)
 	s, is_scope := t^.(^Scope)
-	if !is_scope do return report(k, .Invalid_Carve, c.span, fmt.tprintf("on ne carve qu'un scope : %s", brief(t)))
-	c.args.carving = s // ce que `.x` désigne dans les arguments
+	if !is_scope do return report(k, .Invalid_Carve, c.span, fmt.tprintf("only a scope can be carved: %s", brief(t)))
+	c.args.carving = s // what `.x` designates in the arguments
 	if d, found := redefined(env, s); found do return carve_itself(k, s, d, c)
-	// dans une copie, ce carve est dérivé avec elle : ses erreurs vont au carve d'origine
+	// in a copy, this carve is derived with it: its errors go to the original carve
 	derived := copy_scope(s, s.parent, k.scene.site != {} ? k.scene.site : c.span)
 	targets := fill(k, s, derived, c)
 	infer_holes(k, s, c, derived, targets)
-	// une copie faite en silence est celle d'un binding que rien n'a changé : elle
-	// redonne ce que sa source a déjà donné
+	// a copy made silently is that of a binding nothing has changed: it gives back
+	// what its source already gave
 	if !k.scene.quiet do mark_changes(derived, c.args, {})
 	type_scope(k, derived, s.shape)
 	return new_expr(derived)
 }
 
-// redefined : le scope en cours de définition que le carve de s redonne — même
-// source écrite (une copie garde le span de ce qu'elle copie). Quels que soient
-// ses arguments, c'est une self-référence : X, ou X appliqué à d'autres arguments.
+// redefined: the scope being defined that the carve of s gives back — same
+// written source (a copy keeps the span of what it copies). Whatever its
+// arguments, it is a self-reference: X, or X applied to other arguments.
 redefined :: proc(env, s: ^Scope) -> (^Scope, bool) {
 	for d := env; d != nil; d = d.parent do if d.span == s.span do return d, true
 	return nil, false
 }
 
-// carve_itself : le carve de s est une self-référence, qui redonne d. Rien n'est
-// copié ni typé de s ; ses arguments sont vérifiés contre les bindings qu'ils
-// remplissent, comme pour tout carve. S'ils donnent à d d'autres types que les
-// siens, c'est l'équation appliquée à d'autres arguments (la récursion
-// polymorphe, ou l'appel récursif d'une fonction).
+// carve_itself: the carve of s is a self-reference, which gives back d. Nothing of
+// s is copied or typed; its arguments are checked against the bindings they fill,
+// as for any carve. If they give d types other than its own, it is the equation
+// applied to other arguments (polymorphic recursion, or the recursive call of a
+// function).
 carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
 	c.args.carving = s
 	targets := fill(k, s, copy_scope(s, s.parent, c.span), c)
 	for j, i in targets do if j >= 0 do type_argument(k, Carved{c.args, i}, s.bindings[j].color_type)
-	append(&k.typed, c.args) // vérifiés à la fin, avec tout le reste
+	append(&k.typed, c.args) // checked at the end, with everything else
 	given := make([]^Expr, len(d.bindings))
 	for b, j in d.bindings do given[j] = b.value_type
 	same := true
@@ -62,16 +62,16 @@ carve_itself :: proc(k: ^Kernel, s, d: ^Scope, c: Carve) -> ^Expr {
 		same &&= expr_equal(k, given[j], d.bindings[j].value_type)
 	}
 	if same do return new_equation_var(k, new_expr(d))
-	// l'équation appliquée à d'autres types : la source écrite, carvée par ces
+	// the equation applied to other types: the written source, carved by these
 	// arguments
 	return new_equation_var(k, new_expr(Carve{target = new_expr(s), args = c.args, ordinals = c.ordinals, span = c.span}))
 }
 
-// fill : met chaque argument à la place du binding qu'il vise. `->` remplit un
-// champ, `<-` un trou ; un argument sans nom vise un champ, jamais un trou. La
-// cible se lit dans la source s, typée, à travers ses expansions ; la copie a les
-// mêmes bindings écrits. Rend, pour chaque argument, le binding écrit de la copie
-// qu'il remplit (-1 : aucun, ou un binding qu'une expansion apporte).
+// fill: puts each argument in place of the binding it targets. `->` fills a field,
+// `<-` a hole; an argument without a name targets a field, never a hole. The
+// target is read in the source s, typed, through its expansions; the copy has the
+// same written bindings. Returns, for each argument, the written binding of the
+// copy that it fills (-1: none, or a binding that an expansion brings).
 fill :: proc(k: ^Kernel, s, derived: ^Scope, c: Carve) -> []int {
 	targets := make([]int, len(c.args.bindings))
 	chosen := make([dynamic]Place, context.temp_allocator)
@@ -79,9 +79,9 @@ fill :: proc(k: ^Kernel, s, derived: ^Scope, c: Carve) -> []int {
 	position := 0
 	for a, i in c.args.bindings {
 		targets[i] = -1
-		if a.kind != .Push && a.kind != .Pull do continue // une autre flèche : signalée à la construction
+		if a.kind != .Push && a.kind != .Pull do continue // another arrow: reported at construction
 		if a.color != nil {
-			report(k, .Unsupported, a.span, "pas encore dans le kernel : un argument de carve coloré")
+			report(k, .Unsupported, a.span, "not in the kernel yet: a colored carve argument")
 			continue
 		}
 		p, found := carve_target(s, a, c.ordinals[i], &position)
@@ -91,12 +91,12 @@ fill :: proc(k: ^Kernel, s, derived: ^Scope, c: Carve) -> []int {
 		}
 		b := binding_at(p)
 		if (a.kind == .Pull) != (b.kind == .Pull) {
-			message := a.kind == .Pull ? "%s n'est pas un trou : il se remplit par ->" : "%s est un trou : il se remplit par <-"
+			message := a.kind == .Pull ? "%s is not a hole: it is filled with ->" : "%s is a hole: it is filled with <-"
 			report(k, .Invalid_Carve, a.span, fmt.tprintf(message, display(b)))
 			continue
 		}
 		if slice_contains(chosen[:], p) {
-			report(k, .Invalid_Carve, a.span, fmt.tprintf("%s est carvé deux fois", display(b)))
+			report(k, .Invalid_Carve, a.span, fmt.tprintf("%s is carved twice", display(b)))
 			continue
 		}
 		append(&chosen, p)
@@ -116,17 +116,17 @@ slice_contains :: proc(places: []Place, p: Place) -> bool {
 	return false
 }
 
-// Ce qui a changé autour de ce qu'on marque : la couleur implicite que la forme
-// donne à ses bindings (shape), le scope que désigne `.x` (carving).
+// What has changed around what we mark: the implicit color that the shape gives
+// its bindings (shape), the scope that `.x` designates (carving).
 Around :: struct {
 	shape, carving: bool,
 }
 
-// mark_changes : dans la copie s, les bindings que le carve change — la valeur
-// qu'il a mise (un argument de args), et ce qui en dépend : une couleur, une valeur,
-// un scope écrit dedans, une couleur implicite. Rend vrai si un binding de s a changé.
+// mark_changes: in the copy s, the bindings that the carve changes — the value it
+// put (an argument of args), and what depends on it: a color, a value, a scope
+// written inside, an implicit color. Returns true if a binding of s changed.
 mark_changes :: proc(s, args: ^Scope, around: Around) -> (changed: bool) {
-	// une branche dont la couverture change : sa production peut changer avec elle
+	// a branch whose cover changes: its production can change with it
 	cover := s.cover != nil && changes(s.cover, s, args, {carving = around.carving})
 	for &b in s.bindings {
 		color := b.color != nil ? changes(b.color, s, args, {carving = around.carving}) : around.shape
@@ -139,11 +139,11 @@ mark_changes :: proc(s, args: ^Scope, around: Around) -> (changed: bool) {
 	return
 }
 
-// changes : `e`, écrit dans env, dépend d'un binding changé. Chaque scope écrit
-// dedans est marqué en passant : les deux opérandes sont toujours parcourus.
+// changes: `e`, written in env, depends on a changed binding. Each scope written
+// inside is marked along the way: both operands are always traversed.
 changes :: proc(e: ^Expr, env, args: ^Scope, around: Around) -> bool {
 	if e == nil do return false
-	inner := Around{carving = around.carving} // la forme ne colore que le scope qu'elle attend
+	inner := Around{carving = around.carving} // the shape colors only the scope it expects
 	#partial switch v in e^ {
 	case Carved:
 		return v.args == args
@@ -186,8 +186,8 @@ changes :: proc(e: ^Expr, env, args: ^Scope, around: Around) -> bool {
 	return false
 }
 
-// carving_of : le scope que dérive le carve dont env est l'un des arguments, ou y
-// est écrit.
+// carving_of: the scope derived by the carve of which env is one of the arguments,
+// or is written in them.
 carving_of :: proc(env: ^Scope) -> ^Scope {
 	for sc := env; sc != nil; sc = sc.parent do if sc.carving != nil do return sc.carving
 	return nil
@@ -195,11 +195,11 @@ carving_of :: proc(env: ^Scope) -> ^Scope {
 
 type_carving :: proc(k: ^Kernel, c: Carving, env: ^Scope) -> ^Expr {
 	s := carving_of(env)
-	if s == nil do return report(k, .Invalid_Property_Access, c.span, "'.x' sans source ne s'écrit que dans les arguments d'un carve")
+	if s == nil do return report(k, .Invalid_Property_Access, c.span, "'.x' without a source is only written in the arguments of a carve")
 	return new_expr(s)
 }
 
-// recarves : `z{…}` recarve le champ z du scope carvé s, s'il en a un.
+// recarves: `z{…}` recarves the field z of the carved scope s, if it has one.
 recarves :: proc(s: ^Scope, sh: Shorthand) -> bool {
 	if s == nil do return false
 	_, found := find_binding(s, sh.field.name, sh.field.ordinal)
@@ -208,14 +208,14 @@ recarves :: proc(s: ^Scope, sh: Shorthand) -> bool {
 
 type_shorthand :: proc(k: ^Kernel, sh: Shorthand, env: ^Scope) -> ^Expr {
 	if recarves(carving_of(env), sh) do return type_access(k, sh.field, env)
-	if sh.outer == nil do return report(k, .Undefined_Identifier, sh.field.span, fmt.tprintf("'%s' n'est ni un champ du scope carvé ni un nom visible", sh.field.name))
+	if sh.outer == nil do return report(k, .Undefined_Identifier, sh.field.span, fmt.tprintf("'%s' is neither a field of the carved scope nor a visible name", sh.field.name))
 	return type_of(k, sh.outer, env)
 }
 
-// carve_target : le binding que vise un argument, parmi ceux que présente s.
-// Nommé, la première occurrence de son nom, ou celle de `x#n` ; `z{…}` qui
-// recarve un champ, ce champ ; sans nom, le champ de même rang — ni production ni
-// trou. Faux : il n'existe pas — un scope est clos.
+// carve_target: the binding that an argument targets, among those s presents.
+// Named, the first occurrence of its name, or that of `x#n`; `z{…}` that recarves
+// a field, that field; without a name, the field of the same rank — neither a
+// production nor a hole. False: it does not exist — a scope is closed.
 carve_target :: proc(s: ^Scope, a: Binding, ordinal: int, position: ^int) -> (Place, bool) {
 	if a.name != "" do return find_binding(s, a.name, max(ordinal, 0))
 	if sh, ok := shorthand_of(a); ok && recarves(s, sh) do return find_binding(s, sh.field.name, max(sh.field.ordinal, 0))
@@ -235,7 +235,7 @@ is_shorthand :: proc(a: Binding) -> bool {
 	return ok
 }
 
-// shorthand_of : l'argument est `z{…}`, sans flèche.
+// shorthand_of: the argument is `z{…}`, without an arrow.
 shorthand_of :: proc(a: Binding) -> (Shorthand, bool) {
 	if a.value == nil do return {}, false
 	c, is_carve := a.value^.(Carve)
@@ -245,24 +245,24 @@ shorthand_of :: proc(a: Binding) -> (Shorthand, bool) {
 }
 
 carve_miss :: proc(a: Binding, ordinal: int, position: int) -> string {
-	if a.name == "" do return fmt.tprintf("le scope n'a pas de %de binding à carver", position)
-	if ordinal >= 0 do return fmt.tprintf("'%s#%d' n'est pas un binding du scope carvé", a.name, ordinal)
-	return fmt.tprintf("'%s' n'est pas un binding du scope carvé", a.name)
+	if a.name == "" do return fmt.tprintf("the scope has no binding number %d to carve", position)
+	if ordinal >= 0 do return fmt.tprintf("'%s#%d' is not a binding of the carved scope", a.name, ordinal)
+	return fmt.tprintf("'%s' is not a binding of the carved scope", a.name)
 }
 
-// type_argument : le type d'un argument de carve, typé une fois, là où il a été
-// écrit, avec la couleur du binding qu'il remplace. Une copie de la copie garde
-// la même valeur : l'argument a été fixé par le carve qui l'a écrit.
+// type_argument: the type of a carve argument, typed once, where it was written,
+// with the color of the binding it replaces. A copy of the copy keeps the same
+// value: the argument was fixed by the carve that wrote it.
 type_argument :: proc(k: ^Kernel, c: Carved, color: ^Expr) -> ^Expr {
 	a := &c.args.bindings[c.index]
 	if a.value_type == nil do type_binding(k, a, c.args, color)
 	return a.value_type
 }
 
-// copy_scope : la copie symbolique d'un scope, sous `parent`, dérivée par le carve
-// `site`. Les scopes écrits dedans sont copiés avec lui ; ceux qu'il désigne
-// seulement (un argument de carve écrit ailleurs, la forme qui le colore) sont
-// partagés. Les types ne sont pas copiés : la copie se type à nouveau.
+// copy_scope: the symbolic copy of a scope, under `parent`, derived by the carve
+// `site`. The scopes written inside are copied with it; those it only designates
+// (a carve argument written elsewhere, the shape that colors it) are shared. The
+// types are not copied: the copy is typed again.
 copy_scope :: proc(s: ^Scope, parent: ^Scope, site: syn.Span) -> ^Scope {
 	c := new_scope(parent, s.span)
 	c.shape = s.shape
@@ -274,7 +274,7 @@ copy_scope :: proc(s: ^Scope, parent: ^Scope, site: syn.Span) -> ^Scope {
 	return c
 }
 
-// copy_expr : `e`, écrit dans le scope `from`, réécrit dans sa copie `to`.
+// copy_expr: `e`, written in the scope `from`, rewritten in its copy `to`.
 copy_expr :: proc(e: ^Expr, from, to: ^Scope) -> ^Expr {
 	if e == nil do return nil
 	#partial switch v in e^ {
@@ -299,5 +299,5 @@ copy_expr :: proc(e: ^Expr, from, to: ^Scope) -> ^Expr {
 	case Unknown:
 		return new_expr(Unknown{copy_expr(v.layout, from, to), v.span})
 	}
-	return e // Set, Ref, Carved, Invalid : rien à réécrire
+	return e // Set, Ref, Carved, Invalid: nothing to rewrite
 }

@@ -2,20 +2,20 @@ package kernel
 
 import "core:fmt"
 
-// L'EXPANSION
+// THE EXPANSION
 //
-// `...E` dépose ici les bindings de la valeur de E, tous et tels quels : un scope
-// qui expanse `{2 3}` présente les mêmes bindings que s'il les écrivait. Les
-// bindings déposés restent écrits dans leur scope — leurs références y sont
-// relatives — et un scope se présente à travers ses expansions (places).
+// `...E` deposits here the bindings of the value of E, all of them and as they are:
+// a scope that expands `{2 3}` presents the same bindings as if it wrote them. The
+// deposited bindings remain written in their scope — their references are relative
+// to it — and a scope presents itself through its expansions (places).
 //
-// Un carve passe dans l'expansion qui apporte le binding qu'il vise :
-// `{...a}{x -> v}` vaut `{...a{x -> v}}`, et ce qui dépend de x dans a se retype
-// avec lui.
+// A carve passes into the expansion that brings the binding it targets:
+// `{...a}{x -> v}` is `{...a{x -> v}}`, and what depends on x in a is retyped
+// with it.
 
-// Place : un binding tel qu'un scope le présente. Il est écrit dans `scope`, à
-// l'index `index` ; `top` est l'index, dans le scope présenté, du binding écrit qui
-// l'apporte — lui-même, ou l'expansion qui le dépose.
+// Place: a binding as a scope presents it. It is written in `scope`, at index
+// `index`; `top` is the index, in the presented scope, of the written binding that
+// brings it — itself, or the expansion that deposits it.
 Place :: struct {
 	scope: ^Scope,
 	index: int,
@@ -26,9 +26,9 @@ binding_at :: proc(p: Place) -> ^Binding {
 	return &p.scope.bindings[p.index]
 }
 
-// places : les bindings que présente s, ses expansions déposées, dans l'ordre.
-// Une expansion pas encore typée, ou invalide, ne dépose rien : son erreur est
-// signalée où elle est écrite.
+// places: the bindings that s presents, its expansions deposited, in order.
+// An expansion not yet typed, or invalid, deposits nothing: its error is
+// reported where it is written.
 places :: proc(s: ^Scope) -> []Place {
 	out := make([dynamic]Place)
 	for b, i in s.bindings {
@@ -43,20 +43,20 @@ places :: proc(s: ^Scope) -> []Place {
 	return out[:]
 }
 
-// expanded : le scope qu'une expansion dépose.
+// expanded: the scope that an expansion deposits.
 expanded :: proc(b: Binding) -> (^Scope, bool) {
 	if b.value_type == nil do return nil, false
 	v, is_scope := b.value_type^.(^Scope)
 	return v, is_scope
 }
 
-// direct : le binding est écrit dans le scope qui le présente.
+// direct: the binding is written in the scope that presents it.
 direct :: proc(s: ^Scope, p: Place) -> bool {
 	return p.scope == s && p.index == p.top
 }
 
-// type_expansion : la valeur de `...E` doit être un scope. Un scope écrit ici
-// reçoit `shape`, la suite de la forme de env à partir de sa place.
+// type_expansion: the value of `...E` must be a scope. A scope written here
+// receives `shape`, the rest of the shape of env from its place onward.
 type_expansion :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, shape: []Place) {
 	previous := enter(k, env, b)
 	defer k.scene = previous
@@ -74,24 +74,24 @@ type_expansion :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, shape: []Place) {
 	if is_invalid(b.value_type) do return
 	if _, is_scope := b.value_type^.(^Scope); !is_scope {
 		if _, _, recursive := equation_var(b.value_type); recursive {
-			b.value_type = report(k, .Unsupported, b.span, "pas encore dans le kernel : expanser un type récursif")
+			b.value_type = report(k, .Unsupported, b.span, "not in the kernel yet: expanding a recursive type")
 			return
 		}
-		b.value_type = report(k, .Invalid_Expansion, b.span, fmt.tprintf("on n'expanse qu'un scope : %s", brief(b.value_type)))
+		b.value_type = report(k, .Invalid_Expansion, b.span, fmt.tprintf("only a scope can be expanded: %s", brief(b.value_type)))
 	}
 }
 
-// Into : les arguments qu'un carve fait passer dans l'expansion `top` de sa copie.
+// Into: the arguments that a carve passes into the expansion `top` of its copy.
 Into :: struct {
 	args:     ^Scope,
 	ordinals: [dynamic]int,
 }
 
-// carve_into : l'argument `a`, l'index i des arguments de c, vise `target`, que
-// l'expansion `target.top` apporte. Il devient un argument du carve de cette
-// expansion : nommé par le binding qu'il vise, à son occurrence dans le scope
-// déposé ; sans nom s'il est positionnel — les positions d'un scope déposé se
-// suivent, et le carve les remplit dans l'ordre.
+// carve_into: the argument `a`, index i of the arguments of c, targets `target`,
+// which the expansion `target.top` brings. It becomes an argument of the carve of
+// that expansion: named by the binding it targets, at its occurrence in the
+// deposited scope; unnamed if it is positional — the positions of a deposited
+// scope follow one another, and the carve fills them in order.
 carve_into :: proc(into: ^map[int]Into, derived, s: ^Scope, target: Place, a: Binding, i: int, c: Carve) {
 	group, seen := into[target.top]
 	if !seen do group = Into{args = new_scope(derived, c.args.span)}
@@ -105,7 +105,7 @@ carve_into :: proc(into: ^map[int]Into, derived, s: ^Scope, target: Place, a: Bi
 	into[target.top] = group
 }
 
-// carve_expansions : chaque expansion dans laquelle passent des arguments devient
+// carve_expansions: each expansion into which arguments pass becomes
 // `...E{…}`.
 carve_expansions :: proc(into: map[int]Into, derived: ^Scope, c: Carve) {
 	for top, group in into {
@@ -114,13 +114,13 @@ carve_expansions :: proc(into: map[int]Into, derived: ^Scope, c: Carve) {
 	}
 }
 
-// expanded_scope : le scope que dépose une expansion typée.
+// expanded_scope: the scope that a typed expansion deposits.
 expanded_scope :: proc(b: Binding) -> ^Scope {
 	v, _ := expanded(b)
 	return v
 }
 
-// local_ordinal : l'occurrence de `name`, dans le scope déposé, qu'est `target`.
+// local_ordinal: the occurrence of `name`, in the deposited scope, that `target` is.
 local_ordinal :: proc(s: ^Scope, target: Place, name: string) -> int {
 	seen := 0
 	for p in places(s) {
@@ -130,7 +130,7 @@ local_ordinal :: proc(s: ^Scope, target: Place, name: string) -> int {
 	return -1
 }
 
-// scope_literal : la valeur écrite est un scope.
+// scope_literal: the written value is a scope.
 scope_literal :: proc(value: ^Expr) -> (^Scope, bool) {
 	if value == nil do return nil, false
 	v, ok := value^.(^Scope)

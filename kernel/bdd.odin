@@ -4,36 +4,35 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-// LES ENSEMBLES DE SCOPES : des combinaisons de formes.
+// SETS OF SCOPES: combinations of shapes.
 //
-// Une forme est une couleur de scope sans production — `{u8:x  u8:y}` — lue comme
-// l'ensemble des scopes de même structure dont chaque binding est admis par le
-// sien. `|`, `&` et `~` de formes se gardent dans un BDD paresseux (Frisch,
-// thèse, ch. 7 ; Elixir 1.19) : `{a, oui, peut, non}` vaut
-// `(a & oui) | peut | (~a & non)`. Les unions restent dans `peut` au lieu d'être
-// distribuées : la taille reste celle de l'écriture. On ne distribue qu'en
-// décidant, chemin par chemin, puis champ par champ.
+// A shape is a scope color without production — `{u8:x  u8:y}` — read as the set
+// of scopes of the same structure whose every binding is admitted by its own.
+// `|`, `&` and `~` of shapes are kept in a lazy BDD (Frisch, thesis, ch. 7;
+// Elixir 1.19): `{a, yes, maybe, no}` is `(a & yes) | maybe | (~a & no)`. Unions
+// stay in `maybe` instead of being distributed: the size stays that of what was
+// written. We distribute only when deciding, path by path, then field by field.
 
-// Record : une forme. `shape` est le scope qu'elle lit (son défaut). `exact` : elle
-// n'admet que ce scope valeur lui-même, chaque binding n'admettant que son contrat.
-// `equation` : une self-référence — la forme n'a pas de champs, elle renvoie à
-// l'équation de `shape`, lue seulement au moment de décider (§3 de
-// specs/kernel-recursion.md : on ne déplie jamais).
+// Record: a shape. `shape` is the scope it reads (its default). `exact`: it admits
+// only that value scope itself, each binding admitting only its contract.
+// `equation`: a self-reference — the shape has no fields, it refers to the
+// equation of `shape`, read only at decision time (§3 of
+// specs/kernel-recursion.md: we never unfold).
 Record :: struct {
 	fields:   []Field,
 	shape:    ^Scope,
 	exact:    bool,
-	equation: ^Expr, // la self-référence telle qu'écrite ; nil pour une forme
-	id:       int, // l'ordre des nœuds du BDD
+	equation: ^Expr, // the self-reference as written; nil for a shape
+	id:       int, // the order of the BDD nodes
 }
 
 Field :: struct {
 	name:   string,
 	kind:   Binding_Kind,
-	set:    Set, // ce que le binding admet ; pour une suite, les scopes qu'elle forme
-	free:   bool, // un binding nommé sans couleur n'impose rien
-	run:    bool, // `...C:` : une suite de bindings, qui forme un scope admis par C
-	counts: Ints, // une suite comptée : n morceaux, n parmi counts, chacun admis par set ; vide : un seul
+	set:    Set, // what the binding admits; for a run, the scopes it forms
+	free:   bool, // a named binding without color imposes nothing
+	run:    bool, // `...C:`: a run of bindings, which forms a scope admitted by C
+	counts: Ints, // a counted run: n pieces, n among counts, each admitted by set; empty: a single one
 }
 
 Bdd_Leaf :: enum u8 {
@@ -42,7 +41,7 @@ Bdd_Leaf :: enum u8 {
 }
 
 Bdd :: union #no_nil {
-	Bdd_Leaf, // la valeur zéro : Bottom, aucun scope
+	Bdd_Leaf, // the zero value: Bottom, no scope
 	^Bdd_Node,
 }
 
@@ -70,7 +69,7 @@ bdd_atom :: proc(r: ^Record) -> Bdd {
 	return node(r, .Top, .Bottom, .Bottom)
 }
 
-// node : un nœud, simplifié quand une branche rend les autres inutiles.
+// node: a node, simplified when a branch makes the others useless.
 node :: proc(atom: ^Record, yes, maybe, no: Bdd) -> Bdd {
 	if is_leaf(maybe, .Top) do return .Top
 	if is_leaf(yes, .Bottom) && is_leaf(no, .Bottom) do return maybe
@@ -88,7 +87,7 @@ bdd_or :: proc(a, b: Bdd) -> Bdd {
 	case x.atom == y.atom:
 		return node(x.atom, bdd_or(x.yes, y.yes), bdd_or(x.maybe, y.maybe), bdd_or(x.no, y.no))
 	case x.atom.id < y.atom.id:
-		return node(x.atom, x.yes, bdd_or(x.maybe, b), x.no) // l'union reste paresseuse
+		return node(x.atom, x.yes, bdd_or(x.maybe, b), x.no) // the union stays lazy
 	}
 	return node(y.atom, y.yes, bdd_or(a, y.maybe), y.no)
 }
@@ -107,7 +106,7 @@ bdd_and :: proc(a, b: Bdd) -> Bdd {
 	return node(y.atom, bdd_and(a, y.yes), bdd_and(a, y.maybe), bdd_and(a, y.no))
 }
 
-// a ∖ b : on ne distribue que le long de l'atome courant.
+// a ∖ b: we distribute only along the current atom.
 bdd_diff :: proc(a, b: Bdd) -> Bdd {
 	if is_leaf(b, .Top) || is_leaf(a, .Bottom) do return .Bottom
 	if is_leaf(b, .Bottom) do return a
@@ -122,8 +121,8 @@ bdd_diff :: proc(a, b: Bdd) -> Bdd {
 	return node(x.atom, bdd_diff(x.yes, b), bdd_diff(x.maybe, b), bdd_diff(x.no, b))
 }
 
-// bdd_is_empty : chaque chemin est une intersection de formes moins des formes ;
-// le BDD est vide si chaque chemin l'est.
+// bdd_is_empty: each path is an intersection of shapes minus shapes; the BDD is
+// empty if each path is.
 bdd_is_empty :: proc(b: Bdd) -> bool {
 	walk :: proc(b: Bdd, pos, neg: ^[dynamic]^Record) -> bool {
 		switch v in b {
@@ -150,14 +149,14 @@ bdd_subset :: proc(a, b: Bdd) -> bool {
 	return bdd_is_empty(bdd_diff(a, b))
 }
 
-// records_empty : ∩pos ∖ ∪neg = ∅ ? Deux structures différentes ne se
-// rencontrent pas ; sans forme positive, ce sont tous les scopes moins quelques
-// formes, et il en reste toujours (une autre structure).
+// records_empty: ∩pos ∖ ∪neg = ∅? Two different structures do not meet; without
+// a positive shape, it is all scopes minus a few shapes, and some always remain
+// (another structure).
 records_empty :: proc(pos, neg: []^Record) -> bool {
 	if len(pos) == 0 do return false
-	// une forme de longueur quelconque, ou une équation : son vide ne se décide pas
-	// encore ici ; on ne l'affirme pas — et ignorer une forme retirée ne fait
-	// qu'agrandir le reste
+	// a shape of any length, or an equation: its emptiness is not decided here
+	// yet; we do not assert it — and ignoring a removed shape only enlarges the
+	// rest
 	for r in pos do if has_run(r) || r.equation != nil do return false
 	first := pos[0]
 	fields := make([]Set, len(first.fields), context.temp_allocator)
@@ -176,8 +175,8 @@ records_empty :: proc(pos, neg: []^Record) -> bool {
 	return product_covered(fields, cover[:])
 }
 
-// product_covered : F₁ × … × Fₙ ⊆ ∪ cover ? On retire une forme N à la fois : ce
-// qui reste de F hors de N est l'union, pour chaque champ i, de F avec Fᵢ ∖ Nᵢ.
+// product_covered: F₁ × … × Fₙ ⊆ ∪ cover? We remove one shape N at a time: what
+// remains of F outside N is the union, for each field i, of F with Fᵢ ∖ Nᵢ.
 product_covered :: proc(fields: []Set, cover: [][]Set) -> bool {
 	for f in fields do if set_is_empty(f) do return true
 	if len(cover) == 0 do return false
@@ -206,12 +205,12 @@ has_run :: proc(r: ^Record) -> bool {
 	return false
 }
 
-// field_set : ce qu'un binding admet ; tout, s'il n'impose rien.
+// field_set: what a binding admits; everything, if it imposes nothing.
 field_set :: proc(f: Field) -> Set {
 	return set_everything() if f.free else f.set
 }
 
-// set_everything : toutes les valeurs, scopes et ensembles compris.
+// set_everything: all values, scopes and sets included.
 set_everything :: proc() -> Set {
 	s := set_top()
 	s.sorts += {.Scopes, .Sets}
@@ -220,7 +219,7 @@ set_everything :: proc() -> Set {
 	return s
 }
 
-// bdd_atoms : les formes qui apparaissent dans le BDD.
+// bdd_atoms: the shapes that appear in the BDD.
 bdd_atoms :: proc(b: Bdd) -> []^Record {
 	out := make([dynamic]^Record, context.temp_allocator)
 	walk :: proc(b: Bdd, out: ^[dynamic]^Record) {
@@ -235,15 +234,15 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 	return out[:]
 }
 
-// --- les types lus comme couleurs ---
+// --- types read as colors ---
 
-// color_set : l'ensemble des valeurs qu'un type admet comme couleur. Un ensemble
-// admet ses éléments. Un scope avec des productions admet chacune : une production
-// colorée, ce qu'admet sa couleur ; sinon, sa valeur exactement, lue par ses
-// contrats (`{-> u8}` n'admet que la valeur u8). Sans production, c'est une forme.
-// Une self-référence admet ce qu'admet son équation : une forme qui y renvoie.
-// Faux quand le type dépend d'une inconnue : ce n'est pas un seul ensemble. Un
-// scope n'est lu qu'une fois.
+// color_set: the set of values a type admits as a color. A set admits its
+// elements. A scope with productions admits each one: a colored production, what
+// its color admits; otherwise, its value exactly, read through its contracts
+// (`{-> u8}` admits only the value u8). Without production, it is a shape. A
+// self-reference admits what its equation admits: a shape that refers to it.
+// False when the type depends on an unknown: it is not a single set. A scope is
+// read only once.
 color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	if x, d, recursive := equation_var(t); recursive {
 		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, d, equation = x.type))}, true
@@ -278,11 +277,11 @@ scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s))}, true
 }
 
-// arden : l'équation de s, X = A·X | B, où chaque production récursive finit par la
-// suite X (ou X = X·A | B, où chacune commence par elle), a pour solution
-// X = A*·B (ou B·A*) : le lemme d'Arden (specs/kernel-recursion.md §5). A* est une
-// suite comptée, `0..*A`. Faux si l'équation n'a pas cette forme : elle reste une
-// équation.
+// arden: the equation of s, X = A·X | B, where each recursive production ends with
+// the run X (or X = X·A | B, where each one starts with it), has as solution
+// X = A*·B (or B·A*): Arden's lemma (specs/kernel-recursion.md §5). A* is a
+// counted run, `0..*A`. False if the equation does not have this form: it stays
+// an equation.
 arden :: proc(s: ^Scope, alternatives: []Set) -> (Set, bool) {
 	Side :: enum u8 {
 		None,
@@ -294,9 +293,9 @@ arden :: proc(s: ^Scope, alternatives: []Set) -> (Set, bool) {
 	base_records := make([dynamic]^Record, context.temp_allocator)
 	for x in alternatives {
 		r, single := lone_record(x)
-		at := -1 // la place de la suite X dans la production
+		at := -1 // the place of the run X in the production
 		if single do for f, i in r.fields do if f.run && set_equation(f.set) == s {
-			if at >= 0 do return {}, false // deux fois X : pas linéaire
+			if at >= 0 do return {}, false // X twice: not linear
 			at = i
 		}
 		if at < 0 {
@@ -313,8 +312,8 @@ arden :: proc(s: ^Scope, alternatives: []Set) -> (Set, bool) {
 	if side == .None do return {}, false
 	repeat := Field{kind = .Expand, set = group, run = true, counts = ints_range(0, nil)}
 	solved: Set
-	// A*·B : la suite comptée, puis chaque base ; une base qui n'est pas une seule
-	// forme se lit comme une suite qu'elle admet
+	// A*·B: the counted run, then each base; a base that is not a single shape is
+	// read as a run it admits
 	if len(base_records) == 0 || !set_equal(bases, records_union(base_records[:])) {
 		fields := side == .Tail ? []Field{repeat, Field{kind = .Expand, set = bases, run = true}} : []Field{Field{kind = .Expand, set = bases, run = true}, repeat}
 		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields, s, exact = true))}, true
@@ -329,7 +328,7 @@ arden :: proc(s: ^Scope, alternatives: []Set) -> (Set, bool) {
 	return solved, true
 }
 
-// lone_record : l'ensemble est une seule forme.
+// lone_record: the set is a single shape.
 lone_record :: proc(x: Set) -> (^Record, bool) {
 	n, is_node := x.scopes.(^Bdd_Node)
 	if !is_node || !is_leaf(n.yes, .Top) || !is_leaf(n.maybe, .Bottom) || !is_leaf(n.no, .Bottom) do return nil, false
@@ -337,31 +336,31 @@ lone_record :: proc(x: Set) -> (^Record, bool) {
 	return n.atom, true
 }
 
-// records_union : l'union de ces formes.
+// records_union: the union of these shapes.
 records_union :: proc(records: []^Record) -> (u: Set) {
 	for r in records do u = set_union(u, Set{sorts = {.Scopes}, scopes = bdd_atom(r)})
 	return
 }
 
-// set_equation : l'ensemble est une self-référence ; le scope dont c'est l'équation.
+// set_equation: the set is a self-reference; the scope whose equation it is.
 set_equation :: proc(x: Set) -> ^Scope {
 	r, single := lone_record(x)
 	if !single || r.equation == nil do return nil
 	return r.shape
 }
 
-// shape_fields : les places d'une forme, chacune par son contrat — sa couleur,
-// écrite ou reçue de la forme qui l'entoure (la coloration implicite). Une
-// expansion `...xs` y dépose les places de xs ; une expansion colorée `...C:`, une
-// suite — ce qu'elle dépose n'est pas une valeur mais tout scope que C admet. Un
-// binding sans contrat admet sa valeur ; nommé, dans une forme (`exact` faux), il
-// n'impose rien : un carve peut lui donner toute valeur.
+// shape_fields: the places of a shape, each by its contract — its color, written
+// or received from the shape that surrounds it (implicit coloring). An expansion
+// `...xs` deposits the places of xs there; a colored expansion `...C:`, a run —
+// what it deposits is not a value but any scope C admits. A binding without
+// contract admits its value; named, in a shape (`exact` false), it imposes
+// nothing: a carve can give it any value.
 shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field, exact: bool) -> bool {
 	for b in s.bindings {
 		if b.kind == .Expand {
 			if b.color == nil {
 				v, ok := expanded(b)
-				if !ok do return false // une expansion sans scope typé : on ne sait pas ce qu'elle dépose
+				if !ok do return false // an expansion without a typed scope: we do not know what it deposits
 				shape_fields(k, v, out, exact) or_return
 				continue
 			}
@@ -383,18 +382,18 @@ shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field, exact: bool) -
 	return true
 }
 
-// admitted_by : ce qu'un binding admet — ce qu'admet sa couleur, écrite ou
-// implicite, sinon sa valeur.
+// admitted_by: what a binding admits — what its color admits, written or
+// implicit, otherwise its value.
 admitted_by :: proc(k: ^Kernel, b: Binding) -> (Set, bool) {
 	if b.color_type != nil do return color_set(k, b.color_type)
 	return exact_set(k, b.value_type)
 }
 
-// exact_set : l'ensemble dont ce type est le seul élément. Un atome est son propre
-// singleton ; un ensemble d'au moins deux éléments est une valeur de la sorte des
-// ensembles ; un scope, la forme dont chaque binding n'admet que son contrat — sa
-// couleur, écrite ou implicite, sinon sa valeur. Faux quand le type dépend d'une
-// inconnue.
+// exact_set: the set whose only element is this type. An atom is its own
+// singleton; a set of at least two elements is a value of the sort of sets; a
+// scope, the shape whose every binding admits only its contract — its color,
+// written or implicit, otherwise its value. False when the type depends on an
+// unknown.
 exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 	if t == nil || is_invalid(t) do return {}, false
 	#partial switch v in t^ {
@@ -409,12 +408,12 @@ exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 	return {}, false
 }
 
-// --- l'admission d'un scope valeur ---
+// --- admission of a value scope ---
 
-// Member : l'appartenance d'une valeur qui peut dépendre d'inconnues. « Pas
-// toujours » (une valeur des inconnues sort) ne se nie pas, et deux « pas
-// toujours » ne se combinent pas par « ou » : ce ne sont pas forcément les mêmes
-// valeurs. « Jamais » se combine librement.
+// Member: the membership of a value that may depend on unknowns. "Not always"
+// (some value of the unknowns falls outside) cannot be negated, and two "not
+// always" do not combine by "or": they are not necessarily the same values.
+// "Never" combines freely.
 Member :: enum u8 {
 	Always,
 	Not_Always,
@@ -469,7 +468,7 @@ not3 :: proc(a: Member) -> Member {
 	return .Unknown
 }
 
-// bdd_admits : le scope valeur `s` est-il dans l'ensemble `b` ?
+// bdd_admits: is the value scope `s` in the set `b`?
 bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope, ctx: Context = nil) -> Verdict {
 	switch bdd_member(k, b, places(s), ctx) {
 	case .Always:
@@ -481,8 +480,8 @@ bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope, ctx: Context = nil) -> Verdict
 	return .Undecided
 }
 
-// bdd_member : la suite de bindings `view` — un scope, ou la part d'un scope
-// qu'une suite reçoit — est-elle dans l'ensemble `b` ?
+// bdd_member: is the run of bindings `view` — a scope, or the part of a scope a
+// run receives — in the set `b`?
 bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place, ctx: Context = nil) -> Member {
 	switch v in b {
 	case Bdd_Leaf:
@@ -496,20 +495,20 @@ bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place, ctx: Context = nil) -> Mem
 	return .Never
 }
 
-// record_member : la suite `view` a-t-elle la forme r ? Chaque place de la forme
-// prend un binding ; une suite prend une part, de longueur quelconque, que sa
-// couleur doit admettre comme scope. On essaie chaque découpage.
+// record_member: does the run `view` have the shape r? Each place of the shape
+// takes a binding; a run takes a part, of any length, that its color must admit
+// as a scope. We try each split.
 //
-// Une forme qui se mentionne elle-même peut redemander la même suite (`X -> {...X:}`)
-// : une appartenance qui dépend d'elle-même n'est pas établie — c'est la plus
-// petite solution, celle des valeurs finies.
+// A shape that mentions itself can ask again for the same run (`X -> {...X:}`):
+// a membership that depends on itself is not established — this is the least
+// solution, that of finite values.
 record_member :: proc(k: ^Kernel, r: ^Record, view: []Place, ctx: Context = nil) -> Member {
 	key := Matching{r, raw_data(view), len(view)}
 	if key in k.matching do return .Never
 	k.matching[key] = {}
 	defer delete_key(&k.matching, key)
 	if r.equation != nil {
-		// une self-référence : on lit l'équation sur cette suite, rien de plus
+		// a self-reference: we read the equation on this run, nothing more
 		set, closed := color_set(k, new_expr(r.shape))
 		return closed ? bdd_member(k, set.scopes, view, ctx) : .Unknown
 	}
@@ -517,14 +516,14 @@ record_member :: proc(k: ^Kernel, r: ^Record, view: []Place, ctx: Context = nil)
 	return match_fields(k, r.fields, view, 0, 0, &memo, ctx)
 }
 
-// Matching : une appartenance en cours de décision.
+// Matching: a membership being decided.
 Matching :: struct {
 	record: ^Record,
 	view:   rawptr,
 	len:    int,
 }
 
-// match_fields : view[i:] a-t-elle la forme fields[j:] ?
+// match_fields: does view[i:] have the shape fields[j:]?
 match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo: ^map[[2]int]Member, ctx: Context) -> Member {
 	if j == len(fields) do return i == len(view) ? .Always : .Never
 	if m, seen := memo[{i, j}]; seen do return m
@@ -542,8 +541,8 @@ match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo
 	return result
 }
 
-// run_member : la suite view est-elle admise par la suite f — un seul morceau, ou
-// n morceaux non vides, n parmi ses comptes, chacun admis ?
+// run_member: is the run view admitted by the run f — a single piece, or n
+// non-empty pieces, n among its counts, each admitted?
 run_member :: proc(k: ^Kernel, f: Field, view: []Place, ctx: Context) -> Member {
 	if len(f.counts.intervals) == 0 do return bdd_member(k, f.set.scopes, view, ctx)
 	repeated :: proc(k: ^Kernel, f: Field, view: []Place, n: i128, ctx: Context) -> Member {
@@ -558,22 +557,22 @@ run_member :: proc(k: ^Kernel, f: Field, view: []Place, ctx: Context) -> Member 
 	return repeated(k, f, view, 0, ctx)
 }
 
-// field_member : le binding b a-t-il la place f ?
+// field_member: does the binding b have the place f?
 field_member :: proc(k: ^Kernel, f: Field, b: Binding, ctx: Context) -> Member {
 	if f.name != b.name || f.kind != b.kind do return .Never
 	if f.free || colored_within(k, b, f.set) do return .Always
 	return member_of(admits(k, f.set, b.value_type, ctx), is_closed_type(b.value_type))
 }
 
-// colored_within : la couleur du binding n'admet que des éléments de `s`. Sa valeur
-// y est alors, ou sa propre vérification le signale : rien à décider deux fois.
+// colored_within: the binding's color admits only elements of `s`. Its value is
+// then in it, or its own check reports it: nothing to decide twice.
 colored_within :: proc(k: ^Kernel, b: Binding, s: Set) -> bool {
 	if b.color_type == nil do return false
 	c, closed := color_set(k, b.color_type)
 	return closed && atoms_subset(c, s)
 }
 
-// is_closed_type : un type sans inconnue — son verdict vaut pour toutes leurs valeurs.
+// is_closed_type: a type without unknown — its verdict holds for all their values.
 is_closed_type :: proc(t: ^Expr) -> bool {
 	#partial switch v in t^ {
 	case Poly, Term, ^Var, Set_Form, Cases:
@@ -584,7 +583,7 @@ is_closed_type :: proc(t: ^Expr) -> bool {
 	return true
 }
 
-// print_fields : une forme par ses champs — `{0..*0..255:}`, `{u8:  ...C:}`.
+// print_fields: a shape by its fields — `{0..*0..255:}`, `{u8:  ...C:}`.
 print_fields :: proc(fields: []Field) -> string {
 	parts := make([dynamic]string, context.temp_allocator)
 	for f in fields {
@@ -602,8 +601,8 @@ print_fields :: proc(fields: []Field) -> string {
 	return fmt.tprintf("{{%s}}", strings.join(parts[:], "  "))
 }
 
-// print_group : ce qu'une suite comptée répète — un champ seul tel quel, sinon
-// entre parenthèses.
+// print_group: what a counted run repeats — a lone field as is, otherwise in
+// parentheses.
 print_group :: proc(s: Set) -> string {
 	if r, single := lone_record(s); single {
 		inner := print_fields(r.fields)
@@ -613,7 +612,7 @@ print_group :: proc(s: Set) -> string {
 	return fmt.tprintf("(%s)", print_set(s))
 }
 
-// --- impression : `(a & oui) | peut | (~a & non)`, en Syntact ---
+// --- printing: `(a & yes) | maybe | (~a & no)`, in Syntact ---
 
 printed_bdd :: proc(b: Bdd) -> (string, Level) {
 	Part :: struct {
@@ -625,9 +624,9 @@ printed_bdd :: proc(b: Bdd) -> (string, Level) {
 		return v == .Top ? "scope" : "none", .PRIMARY
 	case ^Bdd_Node:
 		atom := print_type(new_expr(v.atom.shape))
-		if v.atom.exact do atom = fmt.tprintf("{{-> %s}}", atom) // le scope lui-même, pas sa forme
-		if has_count(v.atom) do atom = print_fields(v.atom.fields) // une solution d'Arden : ses champs
-		if v.atom.equation != nil do atom = print_equation(v.atom.equation) // la self-référence, jamais dépliée
+		if v.atom.exact do atom = fmt.tprintf("{{-> %s}}", atom) // the scope itself, not its shape
+		if has_count(v.atom) do atom = print_fields(v.atom.fields) // an Arden solution: its fields
+		if v.atom.equation != nil do atom = print_equation(v.atom.equation) // the self-reference, never unfolded
 		parts := make([dynamic]Part, context.temp_allocator)
 		branch :: proc(parts: ^[dynamic]Part, head: string, head_level: Level, rest: Bdd) {
 			if is_leaf(rest, .Bottom) do return

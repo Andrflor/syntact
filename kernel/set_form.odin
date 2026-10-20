@@ -5,18 +5,18 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-// LES OPÉRATIONS D'ENSEMBLES, ET LES ENSEMBLES QUI DÉPENDENT D'INCONNUES
+// SET OPERATIONS, AND SETS THAT DEPEND ON UNKNOWNS
 //
-// `|`, `&`, `~`, l'arithmétique, `..` et les demi-droites opèrent sur des
-// ensembles. Sur des ensembles connus, le type est l'ensemble calculé. Quand un
-// opérande dépend d'inconnues (`??0..10`, `u8 & >??0`, `??0 | 6`), le type garde
-// la forme de l'opération : pour chaque valeur des inconnues, il vaut l'opération
-// sur les valeurs de ses opérandes. La corrélation est gardée : dans
-// `(n | 6) & (n | 7)`, c'est deux fois le même n.
+// `|`, `&`, `~`, arithmetic, `..` and the half-lines operate on sets. On known
+// sets, the type is the computed set. When an operand depends on unknowns
+// (`??0..10`, `u8 & >??0`, `??0 | 6`), the type keeps the form of the operation:
+// for each value of the unknowns, it is worth the operation on the values of its
+// operands. The correlation is kept: in `(n | 6) & (n | 7)`, it is the same n
+// twice.
 //
-// La forme est simplifiée par des lois exactes : un opérande vide, ou un opérande
-// toujours inclus dans l'autre, tombe (`n | 0..3` vaut 0..3 quand n est dans
-// 0..3). A form can be a color: its unknowns move to the value's side (check.odin,
+// The form is simplified by exact laws: an empty operand, or an operand always
+// included in the other, drops out (`n | 0..3` is worth 0..3 when n is in 0..3).
+// A form can be a color: its unknowns move to the value's side (check.odin,
 // admitted).
 
 Set_Op_Kind :: enum u8 {
@@ -36,14 +36,14 @@ Set_Op :: struct {
 	hi_open: bool,
 }
 
-// Un ensemble qui dépend d'inconnues. Ses opérandes sont des types.
+// A set that depends on unknowns. Its operands are types.
 Set_Form :: struct {
 	op:   Set_Op,
 	args: []^Expr,
 }
 
-// set_operation : applique `op` à des types. Tous connus, c'est l'ensemble calculé ;
-// sinon, la forme de l'opération, dont les sortes sont vérifiées sur les enveloppes.
+// set_operation: applies `op` to types. All known, it is the computed set;
+// otherwise, the form of the operation, whose sorts are checked on the envelopes.
 set_operation :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: ..^Expr) -> ^Expr {
 	known := make([]Set, len(args))
 	all_known := true
@@ -57,7 +57,7 @@ set_operation :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: ..^Expr) -> 
 		if status != .Ok do return set_op_failure(k, op, status, span, args)
 		return new_expr(r)
 	}
-	// la borne d'une demi-droite est une seule valeur, jamais un ensemble
+	// the bound of a half-line is a single value, never a set
 	if op.kind == .Half && is_set_form(args[0]) do return set_op_failure(k, op, .Invalid, span, args)
 	if _, status := enveloped(k, op, args); status != .Ok do return set_op_failure(k, op, status, span, args)
 	return simplified(k, op, args)
@@ -68,9 +68,9 @@ is_set_form :: proc(t: ^Expr) -> bool {
 	return ok
 }
 
-// simplified : la forme de l'opération, après les lois exactes qui font tomber un
-// opérande — none, neutre pour | et absorbant pour & ; et un opérande x toujours
-// inclus dans un ensemble connu s : x | s = s et x & s = x.
+// simplified: the form of the operation, after the exact laws that drop an
+// operand — none, neutral for | and absorbing for &; and an operand x always
+// included in a known set s: x | s = s and x & s = x.
 simplified :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> ^Expr {
 	if op.kind == .Union || op.kind == .Inter {
 		for a, i in args {
@@ -84,14 +84,14 @@ simplified :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> ^Expr {
 	return new_expr(Set_Form{op, slice.clone(args)})
 }
 
-// within : chaque valeur de `env` est dans `s`, et chaque sorte qu'il porte aussi.
+// within: each value of `env` is in `s`, and each sort it carries too.
 within :: proc(env, s: Set) -> bool {
 	return set_subset(env, s) && carried(env) <= carried(s)
 }
 
-// set_envelope : l'union de toutes les valeurs possibles d'un type — exacte pour un
-// ensemble connu, sur-approchée sinon. Elle sert à décider et à vérifier les
-// sortes ; ce n'est jamais un type.
+// set_envelope: the union of all the possible values of a type — exact for a
+// known set, over-approximated otherwise. It serves to decide and to check the
+// sorts; it is never a type.
 set_envelope :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	if s, known := color_set(k, t); known do return s, true
 	#partial switch v in t^ {
@@ -105,9 +105,9 @@ set_envelope :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	return {}, false
 }
 
-// enveloped : l'opération sur les enveloppes des opérandes. Chaque opération est
-// monotone sur les enveloppes, sauf le complément, dont l'enveloppe est toute la
-// sorte, et `!=x`, qui couvre toute la sorte dès que x a plusieurs valeurs.
+// enveloped: the operation on the envelopes of the operands. Each operation is
+// monotone on the envelopes, except the complement, whose envelope is the whole
+// sort, and `!=x`, which covers the whole sort as soon as x has several values.
 enveloped :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> (Set, Arith_Status) {
 	uppers := make([]Set, len(args))
 	for a, i in args {
@@ -119,7 +119,7 @@ enveloped :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> (Set, Arith_Status) 
 	case .Union, .Inter, .Arith:
 		return apply_set_op(op, uppers)
 	case .Range:
-		return range_set(uppers[0], op.lo_open, uppers[1], op.hi_open) // l'enveloppe de toutes les plages
+		return range_set(uppers[0], op.lo_open, uppers[1], op.hi_open) // the envelope of all the ranges
 	case .Comp:
 		return sorts_of(uppers[0]), .Ok
 	case .Half:
@@ -128,7 +128,7 @@ enveloped :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> (Set, Arith_Status) 
 	return {}, .Invalid
 }
 
-// never_empty : le type a au moins une valeur, quelles que soient les inconnues.
+// never_empty: the type has at least one value, whatever the unknowns.
 never_empty :: proc(k: ^Kernel, t: ^Expr) -> bool {
 	#partial switch v in t^ {
 	case Poly, Term, ^Var:
@@ -146,7 +146,7 @@ never_empty :: proc(k: ^Kernel, t: ^Expr) -> bool {
 	return known && !set_is_empty(s)
 }
 
-// eval_set : l'ensemble que vaut un type quand chaque inconnue `id` vaut env[id].
+// eval_set: the set a type is worth when each unknown `id` is worth env[id].
 eval_set :: proc(k: ^Kernel, t: ^Expr, env: []Atom) -> (set: Set, ok: bool) {
 	if s, known := color_set(k, t); known do return s, true
 	#partial switch v in t^ {
@@ -162,12 +162,13 @@ eval_set :: proc(k: ^Kernel, t: ^Expr, env: []Atom) -> (set: Set, ok: bool) {
 	return {}, false
 }
 
-// sorts_of : toutes les valeurs des sortes qu'un ensemble porte.
+// sorts_of: all the values of the sorts that a set carries.
 sorts_of :: proc(s: Set) -> Set {
 	return set_complement(Set{sorts = carried(s)})
 }
 
-// half_envelope : l'union de `>x` pour tout x de `xs` (et de même pour les autres).
+// half_envelope: the union of `>x` for every x of `xs` (and likewise for the
+// others).
 half_envelope :: proc(kind: syn.Operator_Kind, xs: Set) -> (Set, Arith_Status) {
 	d, pure := pure_domain(xs)
 	if !pure || (d != .Ints && d != .Floats) do return {}, .Invalid
@@ -194,11 +195,11 @@ set_op_failure :: proc(k: ^Kernel, op: Set_Op, status: Arith_Status, span: syn.S
 	parts := make([dynamic]string)
 	for a in args do append(&parts, print_type(a))
 	operands := strings.join(parts[:], ", ")
-	if status == .Unsupported do return report(k, .Unsupported, span, fmt.tprintf("pas encore dans le kernel : %v sur %s", op.kind, operands))
+	if status == .Unsupported do return report(k, .Unsupported, span, fmt.tprintf("not in the kernel yet: %v on %s", op.kind, operands))
 	if op.kind == .Range || op.kind == .Half {
-		return report(k, .Invalid_Range, span, fmt.tprintf("les bornes d'un intervalle sont des nombres, des caractères ou des chaînes de même sorte : %s", operands))
+		return report(k, .Invalid_Range, span, fmt.tprintf("the bounds of an interval are numbers, characters or strings of the same sort: %s", operands))
 	}
-	return report(k, .Invalid_operator, span, fmt.tprintf("%v ne s'applique pas à %s", op.kind, operands))
+	return report(k, .Invalid_operator, span, fmt.tprintf("%v does not apply to %s", op.kind, operands))
 }
 
 apply_set_op :: proc(op: Set_Op, args: []Set) -> (Set, Arith_Status) {
@@ -219,11 +220,11 @@ apply_set_op :: proc(op: Set_Op, args: []Set) -> (Set, Arith_Status) {
 	return {}, .Invalid
 }
 
-// range_set : `lo..hi` sur des ensembles connus. C'est l'union des plages x..y pour
-// x ∈ lo, y ∈ hi. Entre des nombres ou des caractères, c'est l'enveloppe de
-// lo ∪ hi (`2..1` est `1..2`, `1..4..2..7` est `1..7`) : toute valeur entre deux
-// bornes est entre une borne de lo et une borne de hi. Entre des chaînes, « commence
-// par » et « finit par ». `..` seul, tout.
+// range_set: `lo..hi` on known sets. It is the union of the ranges x..y for
+// x ∈ lo, y ∈ hi. Between numbers or characters, it is the envelope of
+// lo ∪ hi (`2..1` is `1..2`, `1..4..2..7` is `1..7`): any value between two
+// bounds is between a bound of lo and a bound of hi. Between strings, "starts
+// with" and "ends with". `..` alone, everything.
 range_set :: proc(lo: Set, lo_open: bool, hi: Set, hi_open: bool) -> (Set, Arith_Status) {
 	if lo_open && hi_open do return set_top(), .Ok
 	ld, l_pure := pure_domain(lo)
@@ -231,7 +232,7 @@ range_set :: proc(lo: Set, lo_open: bool, hi: Set, hi_open: bool) -> (Set, Arith
 	if lo_open do ld, l_pure = hd, h_pure
 	if hi_open do hd, h_pure = ld, l_pure
 	if !l_pure || !h_pure do return {}, .Invalid
-	both := set_union(lo, hi) // une borne ouverte est vide : elle ne compte pas
+	both := set_union(lo, hi) // an open bound is empty: it does not count
 	switch {
 	case ld == .Ints && hd == .Ints:
 		l, h := ints_bounds(both.ints)
@@ -254,7 +255,7 @@ range_set :: proc(lo: Set, lo_open: bool, hi: Set, hi_open: bool) -> (Set, Arith
 	return {}, .Invalid
 }
 
-// half_line : `>x` est l'ensemble des nombres de la sorte de x plus grands que x.
+// half_line: `>x` is the set of the numbers of the sort of x greater than x.
 half_line :: proc(kind: syn.Operator_Kind, x: Set) -> (Set, Arith_Status) {
 	d, pure := pure_domain(x)
 	if !pure || set_count(x) != 1 do return {}, .Invalid
@@ -263,7 +264,7 @@ half_line :: proc(kind: syn.Operator_Kind, x: Set) -> (Set, Arith_Status) {
 		v, _ := ints_default(x.ints)
 		#partial switch kind {
 		case .Greater:
-			if v == I128_MAX do return set_of_ints({}), .Ok // aucun entier au-delà de l'univers
+			if v == I128_MAX do return set_of_ints({}), .Ok // no integer beyond the universe
 			return set_of_ints(ints_range(v + 1, nil)), .Ok
 		case .GreaterEqual:
 			return set_of_ints(ints_range(v, nil)), .Ok
@@ -291,7 +292,7 @@ half_line :: proc(kind: syn.Operator_Kind, x: Set) -> (Set, Arith_Status) {
 	return {}, .Invalid
 }
 
-// --- impression, en Syntact ---
+// --- printing, in Syntact ---
 
 printed_set_form :: proc(f: Set_Form) -> (string, Level) {
 	binary :: proc(a, b: ^Expr, symbol: string, level: Level) -> (string, Level) {

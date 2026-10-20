@@ -51,7 +51,7 @@ Token_Kind :: enum u8 {
 	Dot,
 	DoubleDot,
 	Ellipsis,
-	EllipsisNone, // `...` détaché : l'expansion de tout scope
+	EllipsisNone, // detached `...`: the expansion of any scope
 	Range,
 	PrefixRange,
 	PostfixRange,
@@ -890,7 +890,7 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Colon] = .CONSTRAINT
 	// `::` binds tighter than arithmetic — `a+b::u8` parses as `a+(b::u8)`,
 	// so casting the sum requires explicit parens: `(a+b)::u8`.
-	prec_table[.Cast] = .CALL // `::` colle à `??` : `~??::u8` est `~(??::u8)`
+	prec_table[.Cast] = .CALL // `::` sticks to `??`: `~??::u8` is `~(??::u8)`
 
 	prec_table[.Question] = .PATTERN
 	prec_table[.Execute] = .CALL

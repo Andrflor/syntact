@@ -4,33 +4,33 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-// LES INCONNUES ET LEURS FORMES NORMALES
+// UNKNOWNS AND THEIR NORMAL FORMS
 //
-// Une inconnue (`??::u8`, `string:s -> ??`) est une variable qui porte son domaine,
-// l'ensemble de ses valeurs possibles (specs/equational.md). Une expression qui en dépend garde sa forme, normalisée
-// pour être précise (`n - n` vaut 0, pas -255..255) :
+// An unknown (`??::u8`, `string:s -> ??`) is a variable that carries its domain,
+// the set of its possible values (specs/equational.md). An expression that depends
+// on it keeps its form, normalized to be precise (`n - n` is 0, not -255..255):
 //
-//   entiers       un polynôme : Σ coef·monôme + constante, monômes triés,
-//                 coefficients non nuls ; sans monôme, c'est l'atome.
+//   integers      a polynomial: Σ coef·monomial + constant, monomials sorted,
+//                 nonzero coefficients; without a monomial, it is the atom.
 //                 n - n → 0      n*3 + n → 4*??0      (n + 1)*2 → 2*??0 + 2
-//   flottants     un terme réduit par les seules lois exactes en IEEE : la
-//                 commutativité de + et *, -(-x) = x, x*1.0 = x.
-//   chaînes       un mot : concaténation aplatie, littéraux voisins fusionnés.
-//   comparaisons  sur les entiers p < 0, p = 0, p ≠ 0 avec p normalisé (pgcd,
-//                 signe) ; sinon a < b, a <= b (sens fixé), a = b (ordonnés).
+//   floats        a term reduced by the only laws that are exact in IEEE: the
+//                 commutativity of + and *, -(-x) = x, x*1.0 = x.
+//   strings       a word: flattened concatenation, neighboring literals merged.
+//   comparisons   on integers p < 0, p = 0, p ≠ 0 with p normalized (gcd,
+//                 sign); otherwise a < b, a <= b (fixed direction), a = b (ordered).
 //
-// La forme normale EST le type : exacte, jamais remplacée par une approximation.
-// Ses valeurs possibles ne se calculent que pour décider (check.odin) : exactes
-// quand on peut énumérer ses inconnues, une enveloppe sûre sinon. A color can
-// depend on unknowns too (check.odin, admitted).
+// The normal form IS the type: exact, never replaced by an approximation.
+// Its possible values are computed only to decide (check.odin): exact when its
+// unknowns can be enumerated, a safe envelope otherwise. A color can depend on
+// unknowns too (check.odin, admitted).
 
-// Var : une variable — une valeur inconnue qui porte son type. Toutes ses mentions
-// sont le même nœud ; `id` ne sert qu'à l'ordre et à l'impression.
+// Var: a variable — an unknown value that carries its type. All its mentions are
+// the same node; `id` only serves for ordering and printing.
 //
-// Le type d'un `??` est un ensemble. Celui d'une self-référence est l'équation
-// qu'elle désigne, telle qu'une expression l'écrit (specs/equational.md §2) : le
-// scope en cours de définition (X), ce scope carvé par d'autres arguments, ou sa
-// production (un appel récursif : `f{n -> n - 1}!`).
+// The type of a `??` is a set. That of a self-reference is the equation it
+// designates, as an expression writes it (specs/equational.md §2): the scope being
+// defined (X), this scope carved by other arguments, or its production (a
+// recursive call: `f{n -> n - 1}!`).
 Var :: struct {
 	id:   int,
 	type: ^Expr,
@@ -38,27 +38,27 @@ Var :: struct {
 
 Mono :: struct {
 	coef: i128,
-	vars: []^Var, // triées par id, répétées pour les puissances : n² = [n, n]
+	vars: []^Var, // sorted by id, repeated for powers: n² = [n, n]
 }
 Poly :: struct {
-	monos: []Mono, // triés, coefficients non nuls
+	monos: []Mono, // sorted, nonzero coefficients
 	const: i128,
-	denom: i128, // le dénominateur commun, positif, réduit ; 0 vaut 1. Les valeurs restent entières : n·(n+1)/2
+	denom: i128, // the common denominator, positive, reduced; 0 means 1. The values stay integers: n·(n+1)/2
 }
 
-// den : le dénominateur d'un polynôme.
+// den: the denominator of a polynomial.
 den :: proc(p: Poly) -> i128 {
 	return p.denom == 0 ? 1 : p.denom
 }
 
-// numerator : le polynôme sans son dénominateur.
+// numerator: the polynomial without its denominator.
 numerator :: proc(p: Poly) -> Poly {
 	q := p
 	q.denom = 0
 	return q
 }
 
-// over : num / d, réduit par le pgcd de ses coefficients et de d.
+// over: num / d, reduced by the gcd of its coefficients and of d.
 over :: proc(num: Poly, d: i128) -> Poly {
 	if d == 1 do return num
 	g := d
@@ -72,19 +72,19 @@ over :: proc(num: Poly, d: i128) -> Poly {
 }
 
 Term_Op :: enum u8 {
-	F_Add, // flottants : commutatif, opérandes ordonnés
+	F_Add, // floats: commutative, ordered operands
 	F_Mul,
 	F_Neg,
-	Concat, // chaînes : un mot
-	Repeat, // [texte, compte] : une répétition dont le compte est inconnu
-	Lt, // entiers : [p] pour p < 0 ; sinon [a, b] pour a < b
-	Le, // [a, b] pour a <= b
-	Eq, // entiers : [p] pour p = 0 ; sinon [a, b] ordonnés
+	Concat, // strings: a word
+	Repeat, // [text, count]: a repetition whose count is unknown
+	Lt, // integers: [p] for p < 0; otherwise [a, b] for a < b
+	Le, // [a, b] for a <= b
+	Eq, // integers: [p] for p = 0; otherwise [a, b] ordered
 	Ne,
-	Cast, // [valeur, layout] : la valeur forcée dans le layout (op.odin, cast_into)
-	Div, // entiers : [a, b], a / b tronqué vers zéro, b jamais nul (op.odin, division)
-	Mod, // entiers : [a, b], le reste, du signe de a
-	F_Div, // flottants : [a, b], la division d'IEEE 754
+	Cast, // [value, layout]: the value forced into the layout (op.odin, cast_into)
+	Div, // integers: [a, b], a / b truncated toward zero, b never zero (op.odin, division)
+	Mod, // integers: [a, b], the remainder, with the sign of a
+	F_Div, // floats: [a, b], the IEEE 754 division
 }
 
 Term :: struct {
@@ -93,10 +93,10 @@ Term :: struct {
 }
 
 
-// --- symboles ---
+// --- symbols ---
 
-// new_symbol : une variable de type `set`. Une variable à une seule
-// valeur possible est cette valeur.
+// new_symbol: a variable of type `set`. A variable with a single
+// possible value is that value.
 new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 	if is_atom(set) do return new_expr(set)
 	v := new_var(k, set)
@@ -106,7 +106,7 @@ new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
 	return new_expr(v)
 }
 
-// new_var : une variable de domaine `set`.
+// new_var: a variable of domain `set`.
 new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
 	v := new(Var)
 	v^ = Var{k.variables, new_expr(set)}
@@ -114,8 +114,8 @@ new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
 	return v
 }
 
-// new_equation_var : une variable dont le type est une équation — `type` écrit sur
-// le scope en cours de définition.
+// new_equation_var: a variable whose type is an equation — `type` written on the
+// scope being defined.
 new_equation_var :: proc(k: ^Kernel, type: ^Expr) -> ^Expr {
 	v := new(Var)
 	v^ = Var{k.variables, type}
@@ -123,8 +123,8 @@ new_equation_var :: proc(k: ^Kernel, type: ^Expr) -> ^Expr {
 	return new_expr(v)
 }
 
-// equation_of : le scope dont le type de v est l'équation, et l'expression qui
-// l'écrit : le scope lui-même, carvé, ou collapsé (un appel).
+// equation_of: the scope of which the type of v is the equation, and the
+// expression that writes it: the scope itself, carved, or collapsed (a call).
 equation_of :: proc(v: ^Var) -> (d: ^Scope, carve: Maybe(Carve), call: bool, ok: bool) {
 	t := v.type
 	if c, collapsed := t^.(Collapse); collapsed {
@@ -139,8 +139,8 @@ equation_of :: proc(v: ^Var) -> (d: ^Scope, carve: Maybe(Carve), call: bool, ok:
 	return
 }
 
-// equation_var : t est une self-référence qui désigne un scope (X, carvé ou non) ;
-// sa variable, et le scope dont c'est l'équation.
+// equation_var: t is a self-reference that designates a scope (X, carved or not);
+// its variable, and the scope of which it is the equation.
 equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
 	v, is_var := t^.(^Var)
 	if !is_var do return nil, nil, false
@@ -148,8 +148,8 @@ equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
 	return v, d, ok && !call
 }
 
-// pending : t est une variable dont le domaine est une équation pas encore
-// résolue ; elle prend la sorte de l'opération où elle apparaît.
+// pending: t is a variable whose domain is an equation not yet solved; it takes
+// the sort of the operation where it appears.
 pending :: proc(t: ^Expr) -> (^Var, bool) {
 	v, is_var := t^.(^Var)
 	if !is_var do return nil, false
@@ -157,31 +157,32 @@ pending :: proc(t: ^Expr) -> (^Var, bool) {
 	return v, !solved
 }
 
-// domain : l'ensemble des valeurs possibles d'une variable ; faux quand son type
-// est une équation pas encore résolue.
+// domain: the set of possible values of a variable; false when its type is an
+// equation not yet solved.
 domain :: proc(v: ^Var) -> (Set, bool) {
 	s, solved := v.type^.(Set)
 	return s, solved
 }
 
-// --- le contexte ---
+// --- the context ---
 
-// Fact : ce qu'une branche sait d'une variable — elle n'y vaut que `domain`.
+// Fact: what a branch knows about a variable — within it, the variable is only
+// `domain`.
 Fact :: struct {
 	var:    ^Var,
 	domain: Set,
 }
 
-// Context : les faits qui valent à un endroit, ceux des branches qui l'entourent
-// (specs/equational.md §3). Le raffinement n'est pas une réécriture : les types ne
-// changent pas, c'est ce qu'on sait de leurs variables qui change.
+// Context: the facts that hold at a place, those of the branches that surround it
+// (specs/equational.md §3). Refinement is not a rewriting: the types do not
+// change, what is known about their variables is what changes.
 Context :: []Fact
 
-// known_domain : le domaine de v dans le contexte ctx ; faux quand son domaine est
-// une équation pas encore résolue.
+// known_domain: the domain of v in the context ctx; false when its domain is an
+// equation not yet solved.
 known_domain :: proc(k: ^Kernel, ctx: Context, v: ^Var) -> (d: Set, solved: bool) {
 	if derived(v) {
-		d, _ = envelope(k, v.type, ctx) // une opération : les valeurs de son expression
+		d, _ = envelope(k, v.type, ctx) // an operation: the values of its expression
 		return d, true
 	}
 	d = domain(v) or_return
@@ -189,17 +190,17 @@ known_domain :: proc(k: ^Kernel, ctx: Context, v: ^Var) -> (d: Set, solved: bool
 	return d, true
 }
 
-// derived : v nomme une opération entière qui n'est pas un polynôme (une division,
-// un cast) pour qu'elle entre dans un polynôme : son type est cette opération.
-// Elle est transparente — ses valeurs, ses inconnues, son évaluation sont celles
-// de son expression.
+// derived: v names an integer operation that is not a polynomial (a division, a
+// cast) so that it enters a polynomial: its type is that operation. It is
+// transparent — its values, its unknowns, its evaluation are those of its
+// expression.
 derived :: proc(v: ^Var) -> bool {
 	_, is_term := v.type^.(Term)
 	return is_term
 }
 
-// as_int_poly : une valeur entière comme polynôme — une opération qui n'en est pas
-// un y entre par une variable dérivée (derived).
+// as_int_poly: an integer value as a polynomial — an operation that is not one
+// enters it through a derived variable (derived).
 as_int_poly :: proc(k: ^Kernel, t: ^Expr) -> (Poly, bool) {
 	if p, ok := as_poly(t); ok do return p, true
 	if _, is_term := t^.(Term); is_term {
@@ -211,7 +212,7 @@ as_int_poly :: proc(k: ^Kernel, t: ^Expr) -> (Poly, bool) {
 	return {}, false
 }
 
-// with : le contexte, et un fait de plus.
+// with: the context, and one more fact.
 with :: proc(ctx: Context, f: Fact) -> Context {
 	if f.var == nil do return ctx
 	out := make([]Fact, len(ctx) + 1, context.temp_allocator)
@@ -220,24 +221,24 @@ with :: proc(ctx: Context, f: Fact) -> Context {
 	return out
 }
 
-// context_of : les faits qui valent dans s — ceux des branches qui l'entourent.
+// context_of: the facts that hold in s — those of the branches that surround it.
 context_of :: proc(s: ^Scope) -> Context {
 	facts := make([dynamic]Fact, context.temp_allocator)
 	for sc := s; sc != nil; sc = sc.parent do if sc.fact.var != nil do append(&facts, sc.fact)
 	return facts[:]
 }
 
-// --- les cas ---
+// --- the cases ---
 
-// Case : une branche atteinte d'un pattern — sa valeur, et ce qu'elle sait de
-// l'inconnue (aucun fait quand la cible n'est pas une inconnue seule).
+// Case: a reached branch of a pattern — its value, and what it knows about the
+// unknown (no fact when the target is not a lone unknown).
 Case :: struct {
 	fact:  Fact,
 	value: ^Expr,
 }
 
-// Cases : le type d'un pattern sur une inconnue. Il n'est jamais aplati en une
-// nouvelle inconnue : chaque cas garde sa valeur et ce que sa branche sait
+// Cases: the type of a pattern on an unknown. It is never flattened into a new
+// unknown: each case keeps its value and what its branch knows
 // (specs/equational.md §2).
 Cases :: struct {
 	cases: []Case,
@@ -251,7 +252,7 @@ poly_var :: proc(x: ^Var) -> Poly {
 	return Poly{monos = monos}
 }
 
-// is_value : un type de valeur — un atome, ou une forme sur des inconnues.
+// is_value: a value type — an atom, or a form over unknowns.
 is_value :: proc(t: ^Expr) -> bool {
 	#partial switch v in t^ {
 	case Set:
@@ -262,7 +263,7 @@ is_value :: proc(t: ^Expr) -> bool {
 	return false
 }
 
-// value_domain : la sorte d'une valeur, connue ou non.
+// value_domain: the sort of a value, known or not.
 value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 	#partial switch v in t^ {
 	case Set:
@@ -297,7 +298,7 @@ is_textual :: proc(d: Domain) -> bool {
 	return d == .Strings || d == .Chars
 }
 
-// --- polynômes entiers ---
+// --- integer polynomials ---
 
 as_poly :: proc(t: ^Expr) -> (Poly, bool) {
 	#partial switch v in t^ {
@@ -312,7 +313,7 @@ as_poly :: proc(t: ^Expr) -> (Poly, bool) {
 	return {}, false
 }
 
-// poly_type : la forme normale d'un polynôme ; sans monôme, c'est un atome.
+// poly_type: the normal form of a polynomial; without a monomial, it is an atom.
 poly_type :: proc(p: Poly) -> ^Expr {
 	if len(p.monos) == 0 && p.const % den(p) == 0 do return new_expr(set_of_ints(ints_point(p.const / den(p))))
 	return new_expr(p)
@@ -328,7 +329,7 @@ var_less :: proc(a, b: ^Var) -> bool {
 	return a.id < b.id
 }
 
-// poly_of : trie, fusionne les monômes égaux, retire les coefficients nuls.
+// poly_of: sorts, merges equal monomials, removes zero coefficients.
 poly_of :: proc(monos: []Mono, c: i128) -> (Poly, bool) {
 	sorted := slice.clone(monos)
 	slice.sort_by(sorted, mono_less)
@@ -347,8 +348,8 @@ poly_of :: proc(monos: []Mono, c: i128) -> (Poly, bool) {
 	return Poly{monos = kept[:], const = c}, true
 }
 
-// Sur des dénominateurs : la somme sur le plus petit multiple commun, le produit
-// sur le produit, puis réduits. Les opérations sur les numérateurs sont entières.
+// With denominators: the sum over the least common multiple, the product over the
+// product, then reduced. The operations on the numerators are integer ones.
 
 poly_add :: proc(a, b: Poly) -> (r: Poly, ok: bool) {
 	da, db := den(a), den(b)
@@ -421,7 +422,7 @@ num_mul :: proc(a, b: Poly) -> (Poly, bool) {
 	return poly_of(out[:], c)
 }
 
-// with_const : les monômes et la constante, la constante comme monôme vide.
+// with_const: the monomials and the constant, the constant as an empty monomial.
 with_const :: proc(p: Poly) -> []Mono {
 	out := make([dynamic]Mono, 0, len(p.monos) + 1)
 	append(&out, ..p.monos)
@@ -429,12 +430,12 @@ with_const :: proc(p: Poly) -> []Mono {
 	return out[:]
 }
 
-// poly_envelope : les valeurs d'un polynôme, par intervalles, sans énumérer.
-// `exact` quand chaque inconnue y apparaît une fois, de coefficient ±1 : la somme
-// d'ensembles indépendants est alors exacte.
+// poly_envelope: the values of a polynomial, by intervals, without enumerating.
+// `exact` when each unknown appears in it once, with coefficient ±1: the sum of
+// independent sets is then exact.
 poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, exact: bool) {
 	if d := den(p); d > 1 {
-		// le numérateur, puis la division : les valeurs sont entières
+		// the numerator, then the division: the values are integers
 		n, _ := poly_envelope(k, numerator(p), ctx)
 		lo, hi := ints_bounds(n)
 		l, h: Maybe(i128)
@@ -452,26 +453,26 @@ poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, ex
 			for j < len(m.vars) && m.vars[j] == m.vars[i] do j += 1
 			ok: bool
 			d, solved := known_domain(k, ctx, m.vars[i])
-			if !solved do d = set_of_ints(ints_all()) // une équation pas encore résolue : tout entier
+			if !solved do d = set_of_ints(ints_all()) // an equation not yet solved: any integer
 			prod, ok = ints_arith(.Mul, prod, ints_pow(d.ints, j - i))
 			exact &&= solved
 			exact &&= ok
 			i = j
 		}
 		ok: bool
-		sum, ok = ints_arith(.Add, sum, prod) // une borne qui déborde devient infinie
+		sum, ok = ints_arith(.Add, sum, prod) // a bound that overflows becomes infinite
 		exact &&= ok
 	}
 	return
 }
 
-// --- flottants, chaînes, comparaisons : constructeurs normalisants ---
+// --- floats, strings, comparisons: normalizing constructors ---
 
 term_of :: proc(op: Term_Op, args: ..^Expr) -> ^Expr {
 	return new_expr(Term{op = op, args = slice.clone(args)})
 }
 
-// ordered : les opérandes d'une opération commutative dans un ordre fixé.
+// ordered: the operands of a commutative operation in a fixed order.
 ordered :: proc(a, b: ^Expr) -> (^Expr, ^Expr) {
 	if expr_less(b, a) do return b, a
 	return a, b
@@ -487,7 +488,7 @@ float_add :: proc(a, b: ^Expr) -> ^Expr {
 }
 
 float_mul :: proc(a, b: ^Expr) -> ^Expr {
-	if is_float_atom(a, 1) do return b // x · 1.0 = x, exactement
+	if is_float_atom(a, 1) do return b // x · 1.0 = x, exactly
 	if is_float_atom(b, 1) do return a
 	x, y := ordered(a, b)
 	return term_of(.F_Mul, x, y)
@@ -504,9 +505,9 @@ is_float_atom :: proc(e: ^Expr, v: f64) -> bool {
 	return ok && floats_count(s.floats) == 1 && set_count(s) == 1 && floats_contains(s.floats, v)
 }
 
-// concat : un mot. Les parties connues voisines fusionnent en une chaîne ; tout
-// connu, c'est un atome ; le mot vide disparaît. Un caractère inconnu seul reste
-// dans un mot, qui est une chaîne.
+// concat: a word. Neighboring known parts merge into one string; all known, it
+// is an atom; the empty word disappears. A lone unknown character stays in a
+// word, which is a string.
 concat :: proc(k: ^Kernel, a, b: ^Expr) -> ^Expr {
 	parts := make([dynamic]^Expr)
 	append_parts(&parts, a)
@@ -529,7 +530,7 @@ append_parts :: proc(parts: ^[dynamic]^Expr, e: ^Expr) {
 		return
 	}
 	word, _ := strings_single(as_strings(s))
-	if word == "" do return // le mot vide ne change rien
+	if word == "" do return // the empty word changes nothing
 	if len(parts) > 0 {
 		if last, last_known := parts[len(parts) - 1]^.(Set); last_known {
 			prev, _ := strings_single(as_strings(last))
@@ -540,8 +541,8 @@ append_parts :: proc(parts: ^[dynamic]^Expr, e: ^Expr) {
 	append(parts, new_expr(set_of_strings(strings_point(word))))
 }
 
-// repeat_term : un texte répété un nombre de fois connu est un mot ; un compte
-// inconnu garde la répétition.
+// repeat_term: a text repeated a known number of times is a word; an unknown
+// count keeps the repetition.
 repeat_term :: proc(k: ^Kernel, text, count: ^Expr) -> (^Expr, Arith_Status) {
 	if n, ok := as_poly(count); ok && len(n.monos) == 0 {
 		if n.const < 0 do return nil, .Invalid
@@ -553,7 +554,7 @@ repeat_term :: proc(k: ^Kernel, text, count: ^Expr) -> (^Expr, Arith_Status) {
 	return term_of(.Repeat, text, count), .Ok
 }
 
-// --- comparaisons ---
+// --- comparisons ---
 
 Compare_Op :: enum u8 {
 	Lt,
@@ -564,10 +565,10 @@ Compare_Op :: enum u8 {
 	Ne,
 }
 
-// int_compare : `a ⋈ b` à partir de p = a - b, décidé quand les valeurs de p le
-// décident, en forme normale sinon.
+// int_compare: `a ⋈ b` from p = a - b, decided when the values of p decide it,
+// in normal form otherwise.
 int_compare :: proc(k: ^Kernel, op: Compare_Op, p_in: Poly) -> (^Expr, Arith_Status) {
-	p := numerator(p_in) // le dénominateur est positif : le signe est celui du numérateur
+	p := numerator(p_in) // the denominator is positive: the sign is that of the numerator
 	q := p
 	kind := Term_Op.Lt
 	ok := true
@@ -597,7 +598,7 @@ int_compare :: proc(k: ^Kernel, op: Compare_Op, p_in: Poly) -> (^Expr, Arith_Sta
 		if !ints_contains(vals.ints, 0) do return bool_atom(kind == .Ne), .Ok
 		if ints_count(vals.ints) == 1 do return bool_atom(kind == .Eq), .Ok
 	}
-	// Normalisation : diviser par le pgcd des coefficients, fixer le signe.
+	// Normalization: divide by the gcd of the coefficients, fix the sign.
 	g: i128 = 0
 	for m in q.monos do g = gcd(g, abs(m.coef))
 	monos := make([]Mono, len(q.monos))
@@ -606,7 +607,7 @@ int_compare :: proc(k: ^Kernel, op: Compare_Op, p_in: Poly) -> (^Expr, Arith_Sta
 	if kind == .Lt {
 		c = floor_div(c, g) // g·r + c < 0 ⇔ r + ⌊c/g⌋ < 0
 	} else {
-		if c % g != 0 do return bool_atom(kind == .Ne), .Ok // g·r = -c n'a pas de solution entière
+		if c % g != 0 do return bool_atom(kind == .Ne), .Ok // g·r = -c has no integer solution
 		c = c / g
 		if monos[0].coef < 0 {
 			for &m in monos do m.coef = -m.coef
@@ -626,11 +627,11 @@ decide_int :: proc(kind: Term_Op, c: i128) -> bool {
 	return c != 0
 }
 
-// general_compare : sur une sorte sans forme polynomiale. Décidé quand les valeurs
-// le décident ; sinon `>` et `>=` s'écrivent `<` et `<=` en échangeant, `=` et
-// `!=` ordonnent leurs opérandes.
+// general_compare: on a sort without a polynomial form. Decided when the values
+// decide it; otherwise `>` and `>=` are written `<` and `<=` by swapping, `=` and
+// `!=` order their operands.
 general_compare :: proc(k: ^Kernel, op: Compare_Op, a, b: ^Expr) -> (^Expr, Arith_Status) {
-	// Deux formes normales égales sont la même valeur.
+	// Two equal normal forms are the same value.
 	if expr_equal(k, a, b) do return bool_atom(op == .Eq || op == .Le || op == .Ge), .Ok
 	va, _ := values_of(k, a)
 	vb, _ := values_of(k, b)
@@ -675,10 +676,10 @@ bool_atom :: proc(v: bool) -> ^Expr {
 	return new_expr(set_of_bools(bools_point(v)))
 }
 
-// --- valeurs possibles ---
+// --- possible values ---
 
-// values_of : les valeurs possibles d'un type de valeur, par son enveloppe — exacte
-// quand l'algèbre le permet, sur-approchée sinon. On n'énumère pas.
+// values_of: the possible values of a value type, by its envelope — exact when the
+// algebra allows it, over-approximated otherwise. Nothing is enumerated.
 values_of :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 	#partial switch v in t^ {
 	case Set:
@@ -689,10 +690,9 @@ values_of :: proc(k: ^Kernel, t: ^Expr) -> (vals: Set, exact: bool) {
 	return {}, false
 }
 
-// envelope : les valeurs possibles d'une forme, sans énumérer. `exact` quand
-// aucune inconnue ne s'y répète et que l'opération est exacte sur des ensembles
-// indépendants (une somme ±x ± y…, une concaténation de mots) ; sur-approchées
-// sinon.
+// envelope: the possible values of a form, without enumerating. `exact` when no
+// unknown repeats in it and the operation is exact on independent sets (a sum
+// ±x ± y…, a concatenation of words); over-approximated otherwise.
 envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact: bool) {
 	#partial switch v in t^ {
 	case Set:
@@ -708,7 +708,7 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 		return vals, false
 	case ^Var:
 		d, solved := known_domain(k, ctx, v)
-		if !solved do return set_everything(), false // une équation pas encore résolue
+		if !solved do return set_everything(), false // an equation not yet solved
 		return d, true
 	case Term:
 		arg :: proc(k: ^Kernel, t: Term, i: int, ctx: Context) -> Set {
@@ -733,7 +733,7 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 		case .Lt, .Le, .Eq, .Ne:
 			return set_of_bools(comparison_envelope(k, v, ctx)), false
 		case .Cast:
-			// ce qui tient dans le layout ne change pas ; sinon, tout le layout
+			// what fits in the layout does not change; otherwise, the whole layout
 			layout, _ := v.args[1]^.(Set)
 			inner, _ := envelope(k, v.args[0], ctx)
 			if atoms_subset(inner, layout) do return inner, false
@@ -749,8 +749,8 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 	return {}, false
 }
 
-// comparison_envelope : les vérités possibles d'une comparaison, par l'enveloppe de
-// ses opérandes dans le contexte — `v < 20` est toujours vrai quand v ∈ 0..9.
+// comparison_envelope: the possible truths of a comparison, by the envelope of its
+// operands in the context — `v < 20` is always true when v ∈ 0..9.
 comparison_envelope :: proc(k: ^Kernel, t: Term, ctx: Context) -> Bools {
 	if len(t.args) == 1 {
 		// [p] : p < 0, p = 0, p ≠ 0
@@ -788,8 +788,8 @@ comparison_envelope :: proc(k: ^Kernel, t: Term, ctx: Context) -> Bools {
 	return {.False, .True}
 }
 
-// words_independent : un mot dont chaque partie est connue ou une inconnue qui ne
-// s'y répète pas — ses valeurs sont exactement la concaténation des ensembles.
+// words_independent: a word each part of which is known or an unknown that does
+// not repeat in it — its values are exactly the concatenation of the sets.
 words_independent :: proc(t: Term) -> bool {
 	seen := make(map[^Var]bool, allocator = context.temp_allocator)
 	for a in t.args {
@@ -808,7 +808,7 @@ words_independent :: proc(t: Term) -> bool {
 	return true
 }
 
-// --- énumération exacte ---
+// --- exact enumeration ---
 
 Char_Atom :: distinct i128
 
@@ -841,9 +841,9 @@ collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {
 	}
 }
 
-// atoms_of_set : tous les éléments d'un ensemble, s'il en a au plus `limit`.
+// atoms_of_set: all the elements of a set, if it has at most `limit`.
 atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
-	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return nil, false // ni des scopes ni des ensembles ne s'énumèrent en atomes
+	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return nil, false // neither scopes nor sets enumerate into atoms
 	out := make([dynamic]Atom)
 	for iv in s.ints.intervals {
 		lo, lo_ok := iv.lo.?
@@ -872,8 +872,8 @@ atoms_of_set :: proc(s: Set, limit: int) -> ([]Atom, bool) {
 	return out[:], len(out) <= limit
 }
 
-// narrow : lo..hi a moins de `limit` éléments, sans déborder (hi - lo peut
-// dépasser I128_MAX).
+// narrow: lo..hi has fewer than `limit` elements, without overflowing (hi - lo
+// can exceed I128_MAX).
 narrow :: proc(lo, hi: i128, limit: int) -> bool {
 	if lo > I128_MAX - i128(limit) do return true
 	return hi < lo + i128(limit)
@@ -908,14 +908,14 @@ set_of_atoms :: proc(atoms: []Atom) -> Set {
 	}
 }
 
-// ints_of_points : l'ensemble de ces entiers, les suites consécutives en intervalles.
+// ints_of_points: the set of these integers, consecutive runs as intervals.
 ints_of_points :: proc(points: []i128) -> Ints {
 	slice.sort(points)
 	runs := make([dynamic]Int_Interval)
 	for v in points {
 		if len(runs) > 0 {
 			last := &runs[len(runs) - 1]
-			if hi, _ := last.hi.?; v - 1 <= hi { 	// v ≥ -I128_MAX : v - 1 ne déborde pas
+			if hi, _ := last.hi.?; v - 1 <= hi { 	// v ≥ -I128_MAX: v - 1 does not overflow
 				last.hi = max(hi, v)
 				continue
 			}
@@ -925,14 +925,14 @@ ints_of_points :: proc(points: []i128) -> Ints {
 	return ints_of(runs[:])
 }
 
-// atom_of : la valeur d'un atome connu.
+// atom_of: the value of a known atom.
 atom_of :: proc(s: Set) -> (Atom, bool) {
 	atoms, ok := atoms_of_set(s, 1)
 	if !ok || len(atoms) != 1 do return nil, false
 	return atoms[0], true
 }
 
-// eval : la valeur de `t` quand chaque inconnue `id` vaut env[id].
+// eval: the value of `t` when each unknown `id` is env[id].
 eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	#partial switch v in t^ {
 	case Set:
@@ -940,7 +940,7 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	case ^Var:
 		return env[v.id], true
 	case Cases:
-		// le cas dont le fait vaut pour ces valeurs
+		// the case whose fact holds for these values
 		for c in v.cases {
 			if c.fact.var == nil do return nil, false
 			if atoms_subset(set_of_atoms({env[c.fact.var.id]}), c.fact.domain) do return eval(c.value, env)
@@ -1021,7 +1021,7 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	return nil, false
 }
 
-// atom_text : un caractère ou une chaîne, comme chaîne.
+// atom_text: a character or a string, as a string.
 atom_text :: proc(a: Atom) -> string {
 	#partial switch v in a {
 	case string:
@@ -1078,11 +1078,11 @@ atom_less :: proc(a, b: Atom) -> (bool, bool) {
 	return false, false
 }
 
-// --- égalité des formes ---
+// --- equality of forms ---
 
 expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 	if a == nil || b == nil do return a == b
-	if a == b do return true // le même type : un scope est son propre type
+	if a == b do return true // the same type: a scope is its own type
 	#partial switch x in a^ {
 	case Set:
 		y, ok := b^.(Set)
@@ -1114,8 +1114,8 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 	return false
 }
 
-// printed_cases : `??0 ? {0..9 -> ??0 + 3  10..255 -> 10}`, le pattern qui le donne ;
-// sans fait, les valeurs possibles.
+// printed_cases: `??0 ? {0..9 -> ??0 + 3  10..255 -> 10}`, the pattern that gives
+// it; without a fact, the possible values.
 printed_cases :: proc(c: Cases) -> (string, Level) {
 	parts := make([dynamic]string, context.temp_allocator)
 	on := c.cases[0].fact.var
@@ -1133,7 +1133,7 @@ printed_cases :: proc(c: Cases) -> (string, Level) {
 	return fmt.tprintf("??%d ? {{%s}}", on.id, strings.join(parts[:], "  ")), .PATTERN
 }
 
-// --- impression ---
+// --- printing ---
 
 printed_poly :: proc(p_in: Poly) -> (string, Level) {
 	if d := den(p_in); d > 1 {
@@ -1174,8 +1174,8 @@ printed_poly :: proc(p_in: Poly) -> (string, Level) {
 	return strings.to_string(b), level
 }
 
-// printed_term : les opérandes d'une opération flottante sont tous entre
-// parenthèses s'il le faut — `(a + b) + c` n'est pas `a + (b + c)` en IEEE.
+// printed_term: the operands of a float operation are all in parentheses if
+// needed — `(a + b) + c` is not `a + (b + c)` in IEEE.
 printed_term :: proc(t: Term) -> (string, Level) {
 	infix :: proc(args: []^Expr, symbol: string, operand: Level) -> string {
 		parts := make([]string, len(args))

@@ -2,14 +2,14 @@ package kernel
 
 import "core:slice"
 
-// L'ORACLE DES TESTS : énumérer les valeurs des inconnues, pour vérifier ce que le
-// kernel décide sans énumérer.
+// THE TESTS' ORACLE: enumerate the values of the unknowns, to check what the
+// kernel decides without enumerating.
 
-// Au-delà, l'oracle n'énumère plus.
+// Beyond this, the oracle no longer enumerates.
 ENUMERATION_LIMIT :: 1 << 16
 
-// enumerate : les valeurs possibles d'une forme, exactes, si ses inconnues
-// s'énumèrent.
+// enumerate: the possible values of a form, exact, if its unknowns can be
+// enumerated.
 enumerate :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, ok: bool) {
 	a := assignments(k, t, ctx) or_return
 	results := make([dynamic]Atom)
@@ -21,8 +21,8 @@ enumerate :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, ok: b
 	return set_of_atoms(results[:]), true
 }
 
-// Assignments : toutes les valeurs des inconnues d'un type, une à une, la première
-// inconnue variant le plus vite. `env[id]` est la valeur courante de l'inconnue id.
+// Assignments: all the values of the unknowns of a type, one by one, the first
+// unknown varying fastest. `env[id]` is the current value of the unknown id.
 Assignments :: struct {
 	ids:     []^Var,
 	domains: [][]Atom,
@@ -30,8 +30,8 @@ Assignments :: struct {
 	env:     []Atom,
 }
 
-// assignments : la première affectation des inconnues de `t` ; faux s'il y en a
-// trop pour les énumérer.
+// assignments: the first assignment of the unknowns of `t`; false if there are
+// too many to enumerate.
 assignments :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (Assignments, bool) {
 	found := make([dynamic]^Var)
 	collect_symbols(t, &found)
@@ -39,7 +39,7 @@ assignments :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (Assignments, b
 	return assignments_of(k, slice.unique(found[:]), ctx)
 }
 
-// assignments_of : de même, pour des inconnues données, sans doublon.
+// assignments_of: likewise, for given unknowns, without duplicates.
 assignments_of :: proc(k: ^Kernel, ids: []^Var, ctx: Context = nil) -> (a: Assignments, ok: bool) {
 	a.ids = ids
 	a.domains = make([][]Atom, len(ids))
@@ -56,7 +56,7 @@ assignments_of :: proc(k: ^Kernel, ids: []^Var, ctx: Context = nil) -> (a: Assig
 	return a, true
 }
 
-// next_assignment : passe à l'affectation suivante ; faux après la dernière.
+// next_assignment: moves to the next assignment; false after the last one.
 next_assignment :: proc(a: ^Assignments) -> bool {
 	for i in 0 ..< len(a.digits) {
 		a.digits[i] += 1
