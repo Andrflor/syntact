@@ -31,7 +31,7 @@ Binding :: struct {
 	kind:       Binding_Kind,
 	color:      ^Expr, // left of the `:`; nil = uncolored
 	value:      ^Expr, // right of the arrow; nil = not written: the default of the color
-	color_type: ^Expr, // type_of(color): an equation, which can share the unknowns of the value
+	color_type: ^Expr, // type_of(color): a type like any other, which can share the unknowns of the value
 	value_type: ^Expr, // type_of(value), or the default of color_type; nil = not typed yet
 	copy:       Copy,
 	span:       syn.Span,
@@ -54,7 +54,7 @@ Scope :: struct {
 	site:     syn.Span, // a copy: the carve that derived it, where its errors are reported
 	carving:  ^Scope, // the arguments of a carve: the scope it derives, which `.x` designates
 	cover:    ^Expr, // a pattern branch: what it admits; nil for the default branch
-	fact:     Fact, // a pattern branch: what it knows about the unknown it receives
+	fact:     ^Expr, // a pattern branch: what it knows, `target in part`; nil otherwise
 	span:     syn.Span,
 }
 
@@ -208,7 +208,6 @@ Error_Kind :: enum u8 {
 	Constraint_Mismatch,
 	Non_Exhaustive_Pattern, // a possible value that no branch admits
 	Unproven, // the kernel cannot prove that a color is respected
-	Insoluble_Constraint,
 	Infinite_Recursion, // the base case of a recursive type comes back to itself
 	Invalid_Cast, // a cast to what is not a layout
 	Unsupported, // a form that the kernel does not handle yet
@@ -226,9 +225,9 @@ Kernel :: struct {
 	errors:   [dynamic]Error,
 	typed:    [dynamic]^Scope, // all typed scopes, for the final check
 	variables: int, // the count of created variables: their order (unknown.odin)
-	shapes:   map[^Scope]Set, // a scope read as a color, once and for all (bdd.odin)
+	shapes:   map[^Scope]Set, // a scope taken as a set, in normal form, once and for all (bdd.odin)
 	scene:    Scene, // the binding typed or checked right now: where its errors go
-	matching: map[Matching]struct{}, // the memberships in a shape being decided
+	matching: map[Matching]struct{}, // the memberships in a shape being written (in.odin)
 }
 
 // Scene: where the errors of the current binding go. Outside copies, to the place

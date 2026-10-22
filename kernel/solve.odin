@@ -18,20 +18,24 @@ solved :: proc(k: ^Kernel, d: ^Scope, t: ^Expr) -> ^Expr {
 	cases, is_cases := t^.(Cases)
 	if !is_cases || len(cases.cases) != 2 do return t
 	base, step := cases.cases[0], cases.cases[1]
-	p := base.fact.var
-	if p == nil || step.fact.var != p || !parameter_of(d, p) do return t
+	on, base_part, base_in := fact_in(base.fact)
+	on_step, step_part, step_in := fact_in(step.fact)
+	if !base_in || !step_in do return t
+	p, lone := lone_symbol(on)
+	step_p, step_lone := lone_symbol(on_step)
+	if !lone || !step_lone || step_p != p || !parameter_of(d, p) do return t
 	// the base case: a single value of p, and the value it gives
-	lo, hi := ints_bounds(base.fact.domain.ints)
+	lo, hi := ints_bounds(base_part.ints)
 	b, b_ok := lo.?
-	if !b_ok || hi != lo || ints_count(base.fact.domain.ints) != 1 do return t
+	if !b_ok || hi != lo || ints_count(base_part.ints) != 1 do return t
 	env := make([]Atom, k.variables, context.temp_allocator)
 	env[p.id] = b
 	c_atom, c_ok := eval(base.value, env)
 	c, c_int := c_atom.(i128)
 	if !c_ok || !c_int do return t
 	// the step: p ranges over b + 1 and beyond, without a hole
-	step_lo, _ := ints_bounds(step.fact.domain.ints)
-	if s, ok := step_lo.?; !ok || s != b + 1 || len(step.fact.domain.ints.intervals) != 1 do return t
+	step_lo, _ := ints_bounds(step_part.ints)
+	if s, ok := step_lo.?; !ok || s != b + 1 || len(step_part.ints.intervals) != 1 do return t
 	q, is_poly := as_poly(step.value)
 	if !is_poly do return t
 	g, found := step_rest(k, d, p, q)

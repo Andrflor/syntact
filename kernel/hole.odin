@@ -80,7 +80,7 @@ probe :: proc(k: ^Kernel, s: ^Scope, c: Carve, targets: []int) -> (p: Probe) {
 	target := copy_scope(s, s.parent, k.scene.site)
 	for &b, j in target.bindings {
 		if b.kind != .Pull do continue
-		sym := new_symbol(k, set_top())
+		sym := new_symbol(k, new_expr(set_top()))
 		p.holes[sym.(^Var)] = j
 		b.value = sym
 	}
@@ -197,14 +197,16 @@ mentions :: proc(p: ^Probe, t: ^Expr) -> bool {
 }
 
 // settle: does what landed in the place of the hole `b` designate a value, the one
-// that contains all the others? Otherwise, the error, at the carve.
+// that contains all the others? Otherwise, the error, at the carve. The required
+// types are the same set; each sent value is one of their elements. Without
+// required types, one sent value is all the others: each is in =it.
 settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^Expr, bool) {
 	required: ^Expr = nil
 	required_set: Set
 	for l in landed {
 		if !l.required do continue
-		set, closed := color_set(k, l.type)
-		if !closed {
+		set, known := normal_set(k, l.type)
+		if !known {
 			report(k, .Unsupported, span, fmt.tprintf("not in the kernel yet: %s required by %s", brief(l.type), display(b)))
 			return nil, false
 		}
@@ -220,7 +222,7 @@ settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^
 	if required != nil {
 		for l in landed {
 			if l.required do continue
-			switch admits(k, required_set, l.type) {
+			switch decide(k, in_type(k, l.type, required, nil), nil) {
 			case .Proved:
 			case .Refuted:
 				report(k, .Constraint_Mismatch, span, fmt.tprintf("%s ∉ %s, which %s requires", brief(l.type), brief(required), display(b)))
@@ -232,11 +234,8 @@ settle :: proc(k: ^Kernel, landed: []Landing, b: ^Binding, span: syn.Span) -> (^
 		}
 		return required, true
 	}
-	// only sent values: one of them contains all the others
 	candidates: for candidate in landed {
-		set, closed := exact_set(k, candidate.type)
-		if !closed do continue
-		for l in landed do if admits(k, set, l.type) != .Proved do continue candidates
+		for l in landed do if decide(k, single(k, l.type, candidate.type, nil), nil) != .Proved do continue candidates
 		return candidate.type, true
 	}
 	report(k, .Constraint_Mismatch, span, fmt.tprintf("none of the values received by %s contains the others: %s", display(b), listed_types(landed)))

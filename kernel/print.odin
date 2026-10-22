@@ -223,9 +223,9 @@ write_binding :: proc(b: ^strings.Builder, bd: Binding, view: View, ordinal: int
 // print_var: a variable — `??0` for a `??`, the equation as written for a
 // self-reference.
 print_var :: proc(v: ^Var) -> string {
-	if _, solved := v.type^.(Set); solved do return fmt.tprintf("??%d", v.id)
 	if derived(v) do return print_type_at(v.type, .CALL) // the operation, in parentheses if needed
-	return print_equation(v.type)
+	if is_equation(v) do return print_equation(v.type)
+	return fmt.tprintf("??%d", v.id)
 }
 
 // print_equation: the type of a self-reference, never unfolded — the scope by the

@@ -461,7 +461,7 @@ test_law_set_forms_large :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 18)
 	k: Kernel
-	big := new_symbol(&k, set_of_ints(ints_range(-100_000, 100_000))) // too large to enumerate
+	big := new_symbol(&k, new_expr(set_of_ints(ints_range(-100_000, 100_000)))) // too large to enumerate
 	id := big^.(Poly).monos[0].vars[0]
 	forms := 0
 	for _ in 0 ..< ROUNDS {
@@ -478,10 +478,10 @@ test_law_set_forms_large :: proc(t: ^testing.T) {
 			clear(&k.errors)
 			exact := build_sx(&k, x, new_expr(set_of_ints(ints_point(v))))
 			if len(k.errors) > 0 do continue // an operation invalid for this value: the empty operand, open question
-			s, known := color_set(&k, exact)
+			s, known := normal_set(&k, exact)
 			testing.expectf(t, known && set_subset(s, upper), "n = %d: %s ⊄ %s", v, print_type(exact), print_set(upper))
 			env[id.id] = v
-			got, got_ok := eval_set(&k, e, env)
+			got, got_ok := eval_set(e, env)
 			testing.expectf(t, got_ok && set_equal(got, s) && carried(got) == carried(s), "n = %d: %s is %s, expected %s", v, print_type(e), print_set(got), print_set(s))
 		}
 	}
@@ -502,7 +502,7 @@ test_law_general_compare :: proc(t: ^testing.T) {
 	for _ in 0 ..< ROUNDS {
 		s := rand.choice(sorts, gen)
 		operand :: proc(k: ^Kernel, gen: runtime.Random_Generator, s: Set) -> ^Expr {
-			if rand.int_max(2, gen) == 0 do return new_symbol(k, s)
+			if rand.int_max(2, gen) == 0 do return new_symbol(k, new_expr(s))
 			atoms, _ := atoms_of_set(s, 64)
 			return new_expr(set_of_atoms({rand.choice(atoms, gen)}))
 		}
@@ -608,7 +608,7 @@ test_law_float_terms :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 20)
 	k: Kernel
-	syms := []^Expr{new_symbol(&k, set_of_floats(floats_of({Float_Interval{lo = -2, hi = 3}}))), new_symbol(&k, set_of_floats(floats_of({Float_Interval{lo = 0.5, hi = 4}})))}
+	syms := []^Expr{new_symbol(&k, new_expr(set_of_floats(floats_of({Float_Interval{lo = -2, hi = 3}})))), new_symbol(&k, new_expr(set_of_floats(floats_of({Float_Interval{lo = 0.5, hi = 4}}))))}
 	for _ in 0 ..< ROUNDS {
 		x := random_fx(gen, 3)
 		e := fx_build(syms, x, false)
@@ -633,9 +633,9 @@ test_law_words :: proc(t: ^testing.T) {
 	state: rand.Default_Random_State
 	gen := seeded(&state, 21)
 	k: Kernel
-	s0 := new_symbol(&k, set_of_strings(strings_of_words({"x", "yy"})))
-	s1 := new_symbol(&k, set_of_chars(ints_range('p', 'q')))
-	count := new_symbol(&k, set_of_ints(ints_range(0, 3)))
+	s0 := new_symbol(&k, new_expr(set_of_strings(strings_of_words({"x", "yy"}))))
+	s1 := new_symbol(&k, new_expr(set_of_chars(ints_range('p', 'q'))))
+	count := new_symbol(&k, new_expr(set_of_ints(ints_range(0, 3))))
 	for _ in 0 ..< ROUNDS {
 		// a sequence of parts, concatenated left to right and right to left,
 		// with the literals cut into pieces on one side: a single form

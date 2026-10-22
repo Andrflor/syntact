@@ -2,6 +2,7 @@ package kernel
 
 import syn "../compiler"
 import "core:fmt"
+import "core:slice"
 
 // type_of of an operator. If both operands are values (an atom, or a form over
 // unknowns), the computation is on the values, and the result is in normal form
@@ -229,31 +230,39 @@ comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
 	if is_value(a) && is_value(b) {
 		da, a_ok := value_domain(k, a)
 		db, b_ok := value_domain(k, b)
-		if a_ok && b_ok && da != db {
-			if op == .Eq || op == .Ne do return bool_atom(op == .Ne)
+		if a_ok && b_ok && da != db && op != .Eq && op != .Ne {
 			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compares two different sorts: %s and %s", o.kind, print_type(a), print_type(b)))
 		}
-		r: ^Expr
-		status: Arith_Status
-		pa, a_poly := as_poly(a)
-		pb, b_poly := as_poly(b)
-		if a_poly && b_poly {
-			p, ok := poly_sub(pa, pb)
-			if !ok do return report(k, .Unsupported, o.span, "not in the kernel yet: a coefficient beyond i128")
-			r, status = int_compare(k, op, p)
-		} else {
-			r, status = general_compare(k, op, a, b)
-		}
+		r, status := compare_values(k, op, a, b)
 		if status != .Ok do return arith_failure(k, o, status, a, b)
 		return r
 	}
-	// Two sets compared as values: only equality makes sense.
-	sa, a_known := color_set(k, a)
-	sb, b_known := color_set(k, b)
+	// Two sets compared as values, by their normal forms: only equality makes sense.
+	sa, a_known := normal_set(k, a)
+	sb, b_known := normal_set(k, b)
 	if !a_known || !b_known || (op != .Eq && op != .Ne) {
 		return report(k, .Unsupported, o.span, "not in the kernel yet: this comparison")
 	}
 	return bool_atom(set_equal(sa, sb) == (op == .Eq))
+}
+
+// compare_values: `a ⋈ b` between two values, known or not, in normal form. Two
+// different sorts are never equal, and no order applies between them (Invalid).
+compare_values :: proc(k: ^Kernel, op: Compare_Op, a, b: ^Expr) -> (^Expr, Arith_Status) {
+	da, a_ok := value_domain(k, a)
+	db, b_ok := value_domain(k, b)
+	if a_ok && b_ok && da != db {
+		if op == .Eq || op == .Ne do return bool_atom(op == .Ne), .Ok
+		return nil, .Invalid
+	}
+	pa, a_poly := as_poly(a)
+	pb, b_poly := as_poly(b)
+	if a_poly && b_poly {
+		p, ok := poly_sub(pa, pb)
+		if !ok do return nil, .Unsupported // a coefficient beyond i128
+		return int_compare(k, op, p)
+	}
+	return general_compare(k, op, a, b)
 }
 
 equal_verdict :: proc(a, b: Set) -> Bools {
@@ -354,7 +363,7 @@ negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
 		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: '-' on an unknown of several sorts: %s", print_type(t)))
 		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' expects a number: %s", print_type(t)))
 	}
-	s, known := color_set(k, t)
+	s, known := normal_set(k, t)
 	if !known do return report(k, .Unsupported, o.span, "not in the kernel yet: '-' on a set that depends on an unknown")
 	d, pure := pure_domain(s)
 	switch {
@@ -382,7 +391,7 @@ Layout :: struct {
 }
 
 cast_into :: proc(k: ^Kernel, o: Op, a, t: ^Expr) -> ^Expr {
-	target, closed := color_set(k, t)
+	target, closed := normal_set(k, t)
 	layout, is_layout := layout_of(target)
 	if !closed || !is_layout do return report(k, .Invalid_Cast, o.span, fmt.tprintf("one can only cast to a layout — an integer of 8 to 64 bits, a float, a boolean, a character: %s", brief(t)))
 	if v, known := a^.(Set); known {
@@ -466,8 +475,10 @@ cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
 // the sign of the dividend — the machine's division. The divisor is never 0: if it
 // can be, in the context where the division is written, it is an error. Between
 // floats, it is the IEEE 754 division, without error (x / 0 is ±∞). On unknowns,
-// the division stays an operation of the equation; x / 1 is x, x % 1 is 0, and
-// x % d is x when x is already in 0..d - 1.
+// the division stays an operation of the equation, except where it is exact: x / 1
+// is x; a polynomial that d divides for every value of its unknowns, divided by d,
+// is that polynomial over d (2·n / 2 is n, m·(m + 1) / 2 is (m + m·m)/2, their
+// remainder 0); and x % d is x when x is already in 0..d - 1.
 division :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
 	if !is_value(a) || !is_value(b) do return report(k, .Unsupported, o.span, "not in the kernel yet: the division of sets")
 	da, a_ok := value_domain(k, a)
@@ -488,11 +499,56 @@ division :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
 	y, y_known := int_atom(b)
 	if x_known && y_known do return new_expr(set_of_ints(ints_point(o.kind == .Divide ? x / y : x % y)))
 	if y_known && y == 1 do return o.kind == .Divide ? a : new_expr(set_of_ints(ints_point(0)))
+	if y_known {
+		if q, exact := divided(a, y); exact do return o.kind == .Divide ? poly_type(q) : new_expr(set_of_ints(ints_point(0)))
+	}
 	if y_known && y > 0 && o.kind == .Mod {
 		if values, _ := envelope(k, a, ctx); ints_subset(values.ints, ints_range(0, y - 1)) do return a
 	}
 	return new_expr(Term{op = o.kind == .Divide ? .Div : .Mod, args = pair(a, b)})
 }
+
+// divided: the polynomial a divided by d, when d divides it for every value of its
+// unknowns: the quotient is exact, the remainder 0, and the quotient keeps d as
+// its denominator (`m * (m + 1) / 2` is `(m + m*m)/2`). With integer coefficients,
+// the remainder of a by d depends only on the remainders of its unknowns: trying
+// each of them decides it.
+divided :: proc(a: ^Expr, d: i128) -> (Poly, bool) {
+	p, is_poly := as_poly(a)
+	if !is_poly || den(p) != 1 || d == 0 do return {}, false
+	m := abs(d)
+	vars := make([dynamic]^Var, context.temp_allocator)
+	for mono in p.monos do for x in mono.vars do if !slice.contains(vars[:], x) do append(&vars, x)
+	total: i128 = 1
+	for _ in vars {
+		total *= m
+		if total > MAX_RESIDUES do return {}, false
+	}
+	residues := make([]i128, len(vars), context.temp_allocator)
+	for n in 0 ..< total {
+		rest := n
+		for &r in residues {
+			r = rest % m
+			rest /= m
+		}
+		sum := p.const %% m
+		for mono in p.monos {
+			term := mono.coef %% m
+			for x in mono.vars {
+				i, _ := slice.linear_search(vars[:], x)
+				term = term * residues[i] %% m
+			}
+			sum = (sum + term) %% m
+		}
+		if sum != 0 do return {}, false
+	}
+	q, ok := poly_scale(p, d < 0 ? -1 : 1)
+	if !ok do return {}, false
+	return over(q, m), true
+}
+
+// MAX_RESIDUES: beyond this, the remainders of the unknowns are not tried.
+MAX_RESIDUES :: 1 << 12
 
 pair :: proc(a, b: ^Expr) -> []^Expr {
 	args := make([]^Expr, 2)

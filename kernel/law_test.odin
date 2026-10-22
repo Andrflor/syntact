@@ -398,7 +398,7 @@ test_vars: []^Var
 
 declare_vars :: proc(k: ^Kernel, sets: ..Set) {
 	vars := make([]^Var, len(sets))
-	for s, i in sets do vars[i] = new_var(k, s)
+	for s, i in sets do vars[i] = new_var(k, new_expr(s))
 	test_vars = vars
 }
 
@@ -572,7 +572,7 @@ test_law_set_forms :: proc(t: ^testing.T) {
 		for m in i128(5) ..= 6 do for n in i128(0) ..= 3 {
 			env[0], env[1] = n, m
 			want := expected[int(m - 5) * 4 + int(n)].?
-			got, ok := eval_set(&k, e, env)
+			got, ok := eval_set(e, env)
 			testing.expectf(t, ok && set_equal(got, want) && carried(got) == carried(want), "%s at n=%d m=%d: %s expected %s", print_type(e), n, m, print_set(got), print_set(want))
 		}
 	}
@@ -859,7 +859,7 @@ test_set_form_simplification :: proc(t: ^testing.T) {
 	only_n := union_of(&k, n, new_expr(set_of_ints(ints_point(9))))
 	testing.expect(t, print_type(only_n) == "??0 | 9", "n | 9 stays a form")
 	testing.expect(t, union_of(&k, only_n, inter_of(&k, m, none)) == only_n, "(n | 9) | (m & none) is n | 9")
-	constant, is_set := color_set(&k, union_of(&k, n, new_expr(set_of_ints(ints_range(0, 3)))))
+	constant, is_set := normal_set(&k, union_of(&k, n, new_expr(set_of_ints(ints_range(0, 3)))))
 	testing.expect(t, is_set && set_equal(constant, set_of_ints(ints_range(0, 3))), "n | 0..3 is 0..3")
 	testing.expect(t, inter_of(&k, n, new_expr(set_of_ints(ints_range(0, 9)))) == n, "n & 0..9 is n")
 }
@@ -885,7 +885,7 @@ test_law_value_in :: proc(t: ^testing.T) {
 		for x in -3 ..= 3 do for y in 0 ..= 5 do for z in 2 ..= 4 {
 			if !ints_contains(c, tree_eval(tree, {i128(x), i128(y), i128(z)})) do all = false
 		}
-		v := admits(&k, set_of_ints(c), p)
+		v := decide(&k, in_type(&k, p, new_expr(set_of_ints(c)), nil), nil)
 		decided[v] += 1
 		testing.expectf(t, v != .Proved || all, "%s ⊆ %v wrongly declared proved", print_type(p), c)
 		testing.expectf(t, v != .Refuted || !all, "%s ⊆ %v wrongly declared refuted", print_type(p), c)
@@ -925,7 +925,7 @@ test_law_affine :: proc(t: ^testing.T) {
 			all = false
 			break
 		}
-		r := admits(&k, set_of_ints(c), poly_type(p))
+		r := decide(&k, in_type(&k, poly_type(p), new_expr(set_of_ints(c)), nil), nil)
 		outcomes[r] += 1
 		testing.expectf(t, r == verdict(all), "%s ⊆ %v: %v, expected %v", print_type(poly_type(p)), c, r, verdict(all))
 	}
@@ -1012,7 +1012,7 @@ test_law_scopes :: proc(t: ^testing.T) {
 		b := random_scopes(gen, universe[:], all_mask, 3)
 		for u, i in universe {
 			want := a.mask & (1 << uint(i)) != 0
-			testing.expectf(t, bdd_admits(&k, a.bdd, u) == verdict(want), "membership of the element %d: %v expected", i, want)
+			testing.expectf(t, decide(&k, in_type(&k, new_expr(u), new_expr(Set{sorts = {.Scopes}, scopes = a.bdd}), nil), nil) == verdict(want), "membership of the element %d: %v expected", i, want)
 		}
 		testing.expectf(t, bdd_is_empty(a.bdd) == (a.mask == 0), "empty: %v expected", a.mask == 0)
 		testing.expectf(t, bdd_subset(a.bdd, b.bdd) == (a.mask & ~b.mask == 0), "inclusion: %v expected", a.mask & ~b.mask == 0)

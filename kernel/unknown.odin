@@ -18,19 +18,21 @@ import "core:strings"
 //   strings       a word: flattened concatenation, neighboring literals merged.
 //   comparisons   on integers p < 0, p = 0, p ≠ 0 with p normalized (gcd,
 //                 sign); otherwise a < b, a <= b (fixed direction), a = b (ordered).
+//   x in c        what the laws of in leave (in.odin): a boolean, like a comparison.
 //
 // The normal form IS the type: exact, never replaced by an approximation.
-// Its possible values are computed only to decide (check.odin): exact when its
-// unknowns can be enumerated, a safe envelope otherwise. A color can depend on
-// unknowns too (check.odin, admitted).
+// Its possible values are computed only to decide (decide.odin): a safe envelope.
+// A color is a type like any other: it depends on unknowns the same way.
 
 // Var: a variable — an unknown value that carries its type. All its mentions are
 // the same node; `id` only serves for ordering and printing.
 //
-// The type of a `??` is a set. That of a self-reference is the equation it
-// designates, as an expression writes it (specs/equational.md §2): the scope being
-// defined (X), this scope carved by other arguments, or its production (a
-// recursive call: `f{n -> n - 1}!`).
+// An unknown is in its domain: the type of a `??` is that domain, a set
+// (`??::u8`, x in u8) or an equation over earlier unknowns (`(0..n):e -> ??`,
+// e in 0..n). That of a self-reference is the equation it designates, as an
+// expression writes it (specs/equational.md §2): the scope being defined (X), this
+// scope carved by other arguments, or its production (a recursive call:
+// `f{n -> n - 1}!`). That of a derived variable is the integer operation it names.
 Var :: struct {
 	id:   int,
 	type: ^Expr,
@@ -85,6 +87,7 @@ Term_Op :: enum u8 {
 	Div, // integers: [a, b], a / b truncated toward zero, b never zero (op.odin, division)
 	Mod, // integers: [a, b], the remainder, with the sign of a
 	F_Div, // floats: [a, b], the IEEE 754 division
+	In, // [x, c]: x is an element of c — what the laws of in leave (in.odin)
 }
 
 Term :: struct {
@@ -95,21 +98,22 @@ Term :: struct {
 
 // --- symbols ---
 
-// new_symbol: a variable of type `set`. A variable with a single
-// possible value is that value.
-new_symbol :: proc(k: ^Kernel, set: Set) -> ^Expr {
-	if is_atom(set) do return new_expr(set)
-	v := new_var(k, set)
-	if d, pure := pure_domain(set); pure && d == .Ints {
-		return new_expr(poly_var(v))
+// new_symbol: an unknown in `domain` — a set, or an equation over earlier
+// unknowns. An unknown with a single possible value is that value; one whose
+// values are integers enters the polynomials.
+new_symbol :: proc(k: ^Kernel, domain: ^Expr) -> ^Expr {
+	if s, known := domain^.(Set); known && is_atom(s) do return domain
+	v := new_var(k, domain)
+	if values, ok := set_envelope(k, domain); ok {
+		if d, pure := pure_domain(values); pure && d == .Ints do return new_expr(poly_var(v))
 	}
 	return new_expr(v)
 }
 
-// new_var: a variable of domain `set`.
-new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
+// new_var: a variable of type `type`.
+new_var :: proc(k: ^Kernel, type: ^Expr) -> ^Var {
 	v := new(Var)
-	v^ = Var{k.variables, new_expr(set)}
+	v^ = Var{k.variables, type}
 	k.variables += 1
 	return v
 }
@@ -117,10 +121,7 @@ new_var :: proc(k: ^Kernel, set: Set) -> ^Var {
 // new_equation_var: a variable whose type is an equation — `type` written on the
 // scope being defined.
 new_equation_var :: proc(k: ^Kernel, type: ^Expr) -> ^Expr {
-	v := new(Var)
-	v^ = Var{k.variables, type}
-	k.variables += 1
-	return new_expr(v)
+	return new_expr(new_var(k, type))
 }
 
 // equation_of: the scope of which the type of v is the equation, and the
@@ -148,45 +149,51 @@ equation_var :: proc(t: ^Expr) -> (^Var, ^Scope, bool) {
 	return v, d, ok && !call
 }
 
-// pending: t is a variable whose domain is an equation not yet solved; it takes
-// the sort of the operation where it appears.
+// pending: t is a self-reference or a recursive call, whose equation is not
+// solved; it takes the sort of the operation where it appears.
 pending :: proc(t: ^Expr) -> (^Var, bool) {
 	v, is_var := t^.(^Var)
 	if !is_var do return nil, false
-	_, solved := domain(v)
-	return v, !solved
+	return v, is_equation(v)
 }
 
-// domain: the set of possible values of a variable; false when its type is an
-// equation not yet solved.
-domain :: proc(v: ^Var) -> (Set, bool) {
-	s, solved := v.type^.(Set)
-	return s, solved
+// is_equation: the type of v is the equation of a scope — a self-reference or a
+// recursive call — not a domain.
+is_equation :: proc(v: ^Var) -> bool {
+	_, _, _, ok := equation_of(v)
+	return ok
+}
+
+// dependent: v is an unknown whose domain is an equation over earlier unknowns
+// (`(0..n):e -> ??`). Its envelope forgets the relation; `e in 0..n` is a
+// hypothesis of what is decided about it (decide.odin).
+dependent :: proc(v: ^Var) -> bool {
+	_, is_form := v.type^.(Set_Form)
+	return is_form
 }
 
 // --- the context ---
 
-// Fact: what a branch knows about a variable — within it, the variable is only
-// `domain`.
-Fact :: struct {
-	var:    ^Var,
-	domain: Set,
-}
+// Context: what holds at a place — the facts of the branches that surround it
+// (specs/equational.md §3), each a truth: `target in cover`. Refinement is not a
+// rewriting: the types do not change, what is known about their unknowns does.
+Context :: []^Expr
 
-// Context: the facts that hold at a place, those of the branches that surround it
-// (specs/equational.md §3). Refinement is not a rewriting: the types do not
-// change, what is known about their variables is what changes.
-Context :: []Fact
-
-// known_domain: the domain of v in the context ctx; false when its domain is an
-// equation not yet solved.
+// known_domain: the possible values of v in the context ctx — those of its domain,
+// or of the operation it names, within what the facts about v alone say. A domain
+// over earlier unknowns gives all the values it can take. False for a
+// self-reference: its equation is not a domain.
 known_domain :: proc(k: ^Kernel, ctx: Context, v: ^Var) -> (d: Set, solved: bool) {
+	if is_equation(v) do return {}, false
 	if derived(v) {
 		d, _ = envelope(k, v.type, ctx) // an operation: the values of its expression
 		return d, true
 	}
-	d = domain(v) or_return
-	for f in ctx do if f.var == v do d = set_intersect(d, f.domain)
+	d = set_envelope(k, v.type) or_return
+	for f in ctx {
+		if x, lone := lone_unknown(f); !lone || x != v do continue
+		if s, solved := solution(k, f, v); solved do d = set_intersect(d, s)
+	}
 	return d, true
 }
 
@@ -203,37 +210,32 @@ derived :: proc(v: ^Var) -> bool {
 // enters it through a derived variable (derived).
 as_int_poly :: proc(k: ^Kernel, t: ^Expr) -> (Poly, bool) {
 	if p, ok := as_poly(t); ok do return p, true
-	if _, is_term := t^.(Term); is_term {
-		v := new(Var)
-		v^ = Var{k.variables, t}
-		k.variables += 1
-		return poly_var(v), true
-	}
+	if _, is_term := t^.(Term); is_term do return poly_var(new_var(k, t)), true
 	return {}, false
 }
 
 // with: the context, and one more fact.
-with :: proc(ctx: Context, f: Fact) -> Context {
-	if f.var == nil do return ctx
-	out := make([]Fact, len(ctx) + 1, context.temp_allocator)
+with :: proc(ctx: Context, fact: ^Expr) -> Context {
+	if fact == nil do return ctx
+	out := make([]^Expr, len(ctx) + 1, context.temp_allocator)
 	copy(out, ctx)
-	out[len(ctx)] = f
+	out[len(ctx)] = fact
 	return out
 }
 
 // context_of: the facts that hold in s — those of the branches that surround it.
 context_of :: proc(s: ^Scope) -> Context {
-	facts := make([dynamic]Fact, context.temp_allocator)
-	for sc := s; sc != nil; sc = sc.parent do if sc.fact.var != nil do append(&facts, sc.fact)
+	facts := make([dynamic]^Expr, context.temp_allocator)
+	for sc := s; sc != nil; sc = sc.parent do if sc.fact != nil do append(&facts, sc.fact)
 	return facts[:]
 }
 
 // --- the cases ---
 
-// Case: a reached branch of a pattern — its value, and what it knows about the
-// unknown (no fact when the target is not a lone unknown).
+// Case: a reached branch of a pattern — its value, and what it knows: the truth
+// `target in part`, part being the values of target it receives.
 Case :: struct {
-	fact:  Fact,
+	fact:  ^Expr,
 	value: ^Expr,
 }
 
@@ -271,7 +273,7 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 	case Poly:
 		return .Ints, true
 	case ^Var:
-		d, solved := domain(v)
+		d, solved := known_domain(k, nil, v)
 		if !solved do return .Ints, false
 		return pure_domain(d)
 	case Term:
@@ -280,7 +282,7 @@ value_domain :: proc(k: ^Kernel, t: ^Expr) -> (Domain, bool) {
 			return .Floats, true
 		case .Concat, .Repeat:
 			return .Strings, true
-		case .Lt, .Le, .Eq, .Ne:
+		case .Lt, .Le, .Eq, .Ne, .In:
 			return .Bools, true
 		case .Cast:
 			s, _ := v.args[1]^.(Set)
@@ -455,7 +457,7 @@ poly_envelope :: proc(k: ^Kernel, p: Poly, ctx: Context = nil) -> (sum: Ints, ex
 			d, solved := known_domain(k, ctx, m.vars[i])
 			if !solved do d = set_of_ints(ints_all()) // an equation not yet solved: any integer
 			prod, ok = ints_arith(.Mul, prod, ints_pow(d.ints, j - i))
-			exact &&= solved
+			exact &&= solved && !dependent(m.vars[i])
 			exact &&= ok
 			i = j
 		}
@@ -709,7 +711,7 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 	case ^Var:
 		d, solved := known_domain(k, ctx, v)
 		if !solved do return set_everything(), false // an equation not yet solved
-		return d, true
+		return d, !dependent(v) // a domain over other unknowns: all it can take, an envelope
 	case Term:
 		arg :: proc(k: ^Kernel, t: Term, i: int, ctx: Context) -> Set {
 			s, _ := envelope(k, t.args[i], ctx)
@@ -732,6 +734,8 @@ envelope :: proc(k: ^Kernel, t: ^Expr, ctx: Context = nil) -> (vals: Set, exact:
 			return set_of_strings(r), false
 		case .Lt, .Le, .Eq, .Ne:
 			return set_of_bools(comparison_envelope(k, v, ctx)), false
+		case .In:
+			return set_of_bools(truths(k, t, ctx)), false
 		case .Cast:
 			// what fits in the layout does not change; otherwise, the whole layout
 			layout, _ := v.args[1]^.(Set)
@@ -835,7 +839,7 @@ collect_symbols :: proc(t: ^Expr, out: ^[dynamic]^Var) {
 		for a in v.args do collect_symbols(a, out)
 	case Cases:
 		for c in v.cases {
-			if c.fact.var != nil do append(out, c.fact.var)
+			if c.fact != nil do collect_symbols(c.fact, out)
 			collect_symbols(c.value, out)
 		}
 	}
@@ -942,8 +946,9 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 	case Cases:
 		// the case whose fact holds for these values
 		for c in v.cases {
-			if c.fact.var == nil do return nil, false
-			if atoms_subset(set_of_atoms({env[c.fact.var.id]}), c.fact.domain) do return eval(c.value, env)
+			holds, known := holds_at(c.fact, env)
+			if !known do return nil, false
+			if holds do return eval(c.value, env)
 		}
 		return nil, false
 	case Poly:
@@ -970,6 +975,12 @@ eval :: proc(t: ^Expr, env: []Atom) -> (Atom, bool) {
 		if sum % den(v) != 0 do return nil, false
 		return sum / den(v), true
 	case Term:
+		if v.op == .In {
+			x, x_known := eval_set(v.args[0], env)
+			c, c_known := eval_set(v.args[1], env)
+			if !x_known || !c_known do return nil, false
+			return set_member(x, c), true
+		}
 		if v.op == .Cast {
 			x, known := eval(v.args[0], env)
 			if !known do return nil, false
@@ -1102,12 +1113,17 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 	case ^Var:
 		y, ok := b^.(^Var)
 		return ok && x == y
+	case Set_Form:
+		y, ok := b^.(Set_Form)
+		if !ok || x.op != y.op || len(x.args) != len(y.args) do return false
+		for e, i in x.args do if !expr_equal(k, e, y.args[i]) do return false
+		return true
 	case Cases:
 		y, ok := b^.(Cases)
 		if !ok || len(x.cases) != len(y.cases) do return false
 		for c, i in x.cases {
 			d := y.cases[i]
-			if c.fact.var != d.fact.var || !set_equal(c.fact.domain, d.fact.domain) || !expr_equal(k, c.value, d.value) do return false
+			if !expr_equal(k, c.fact, d.fact) || !expr_equal(k, c.value, d.value) do return false
 		}
 		return true
 	}
@@ -1115,22 +1131,33 @@ expr_equal :: proc(k: ^Kernel, a, b: ^Expr) -> bool {
 }
 
 // printed_cases: `??0 ? {0..9 -> ??0 + 3  10..255 -> 10}`, the pattern that gives
-// it; without a fact, the possible values.
+// it, when each case knows `target in part` of the same target; otherwise the
+// possible values.
 printed_cases :: proc(c: Cases) -> (string, Level) {
 	parts := make([dynamic]string, context.temp_allocator)
-	on := c.cases[0].fact.var
+	on: ^Expr = nil
 	for x in c.cases {
-		if x.fact.var != on || on == nil {
+		target, part, is_in := fact_in(x.fact)
+		if !is_in || (on != nil && !expr_equal(nil, on, target)) {
 			on = nil
 			break
 		}
+		on = target
+		append(&parts, fmt.tprintf("%s -> %s", print_set(part), print_type_at(x.value, .NONE)))
 	}
-	if on == nil {
-		for x in c.cases do append(&parts, print_type_at(x.value, above(.OR)))
-		return strings.join(parts[:], " | "), .OR
-	}
-	for x in c.cases do append(&parts, fmt.tprintf("%s -> %s", print_set(x.fact.domain), print_type_at(x.value, .NONE)))
-	return fmt.tprintf("??%d ? {{%s}}", on.id, strings.join(parts[:], "  ")), .PATTERN
+	if on != nil do return fmt.tprintf("%s ? {{%s}}", print_type_at(on, .CALL), strings.join(parts[:], "  ")), .PATTERN
+	clear(&parts)
+	for x in c.cases do append(&parts, print_type_at(x.value, above(.OR)))
+	return strings.join(parts[:], " | "), .OR
+}
+
+// fact_in: the fact is `target in part`, part a known set.
+fact_in :: proc(fact: ^Expr) -> (target: ^Expr, part: Set, ok: bool) {
+	if fact == nil do return
+	t, is_term := fact^.(Term)
+	if !is_term || t.op != .In do return
+	part = t.args[1]^.(Set) or_return
+	return t.args[0], part, true
 }
 
 // --- printing ---
@@ -1201,6 +1228,8 @@ printed_term :: proc(t: Term) -> (string, Level) {
 		return fmt.tprintf("%s / %s", print_type_at(t.args[0], .FACTOR), print_type_at(t.args[1], above(.FACTOR))), .FACTOR
 	case .Mod:
 		return fmt.tprintf("%s %% %s", print_type_at(t.args[0], .FACTOR), print_type_at(t.args[1], above(.FACTOR))), .FACTOR
+	case .In:
+		return fmt.tprintf("%s in %s", print_type_at(t.args[0], above(.COMPARISON)), print_type_at(t.args[1], above(.COMPARISON))), .COMPARISON
 	}
 	return "", .PRIMARY
 }

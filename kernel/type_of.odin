@@ -13,8 +13,9 @@ import "core:fmt"
 //   type_of(??0..10)       = ??0..10     a set that depends on an unknown
 //   type_of(scope)         = scope       its bindings carry their types
 //
-// Scopes are typed in place: each binding keeps its symbolic color and value, and
-// receives their types. The check `value ⊆ color` happens at the end (check), once
+// The color and the value of a binding are typed the same way. Scopes are typed in
+// place: each binding keeps its symbolic color and value, and receives their
+// types. The check, `value in color`, happens at the end (check.odin), once
 // everything is typed.
 
 type_of :: proc(k: ^Kernel, e: ^Expr, env: ^Scope) -> ^Expr {
@@ -123,56 +124,10 @@ type_binding :: proc(k: ^Kernel, b: ^Binding, env: ^Scope, expected: ^Expr) {
 	b.value_type = type_of(k, b.value, env)
 }
 
-// type_color: the type of the color, an equation like any other type. It can
-// depend on the unknowns of the bindings it mentions, which the value can share
-// (check.odin). It cannot introduce one: a `??` written in the color is shared by
-// no value.
+// type_color: the type of the color — a type like any other: it can depend on
+// unknowns, those of the bindings it mentions or a `??` written in it.
 type_color :: proc(k: ^Kernel, b: ^Binding, env: ^Scope) -> ^Expr {
-	if writes_unknown(b.color) do return report(k, .Insoluble_Constraint, b.span, fmt.tprintf("the color of %s introduces an unknown `??` that no value shares", display(b)))
-	t := type_of(k, b.color, env)
-	if _, is_scope := t^.(^Scope); is_scope {
-		if _, closed := color_set(k, t); !closed {
-			if holds_invalid(t) do return new_expr(Invalid{}) // an error already reported inside
-			return report(k, .Unsupported, b.span, fmt.tprintf("not in the kernel yet: a scope shape that depends on an unknown: %s", brief(t)))
-		}
-	}
-	return t
-}
-
-// writes_unknown: a `??` is written in the expression — outside the scopes it
-// writes, whose bindings have their own colors.
-writes_unknown :: proc(e: ^Expr) -> bool {
-	if e == nil do return false
-	#partial switch v in e^ {
-	case Unknown:
-		return true
-	case Op:
-		return writes_unknown(v.left) || writes_unknown(v.right)
-	case Range:
-		return writes_unknown(v.lo) || writes_unknown(v.hi)
-	case Access:
-		return writes_unknown(v.target)
-	case Collapse:
-		return writes_unknown(v.target)
-	case Carve:
-		return writes_unknown(v.target)
-	case Match:
-		return writes_unknown(v.target)
-	}
-	return false
-}
-
-// holds_invalid: a binding of the scope, at whatever depth, carries an error
-// already reported.
-holds_invalid :: proc(t: ^Expr) -> bool {
-	s, is_scope := t^.(^Scope)
-	if !is_scope do return false
-	for b in s.bindings {
-		if is_invalid(b.color_type) || is_invalid(b.value_type) do return true
-		if b.color_type != nil && holds_invalid(b.color_type) do return true
-		if b.value_type != nil && holds_invalid(b.value_type) do return true
-	}
-	return false
+	return type_of(k, b.color, env)
 }
 
 // expected_shape: the shape a color type expects for this literal scope — the
@@ -215,8 +170,10 @@ fits :: proc(r: ^Record, literal: ^Scope) -> bool {
 }
 
 // default_of: the type of the value of a binding that writes none — the default of
-// its color. A set: its distinguished element. A scope: its first production if it
-// has one, otherwise itself (`Point:p` is Point).
+// its color. A set: its distinguished element — for numbers, characters and
+// booleans, that of the sort when the set has it (0, ''…), the same whatever the
+// unknowns when the set depends on some (`0..n` has 0). A scope: its first
+// production if it has one, otherwise itself (`Point:p` is Point).
 default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 	if color == nil || is_invalid(color) do return new_expr(Invalid{})
 	if x, d, recursive := equation_var(color); recursive do return recursive_default(k, x, d, b)
@@ -238,6 +195,15 @@ default_of :: proc(k: ^Kernel, color: ^Expr, b: ^Binding) -> ^Expr {
 		return color
 	case Poly, Term, ^Var:
 		return color // a value designates its singleton, whose default is the value itself
+	case Set_Form:
+		if values, ok := set_envelope(k, color); ok {
+			sort, pure := pure_domain(values)
+			if pure && (sort == .Ints || sort == .Floats || sort == .Chars || sort == .Bools) {
+				distinguished, _ := set_default(sorts_of(values))
+				if decide(k, in_type(k, new_expr(distinguished), color, nil), nil) == .Proved do return new_expr(distinguished)
+			}
+		}
+		return report(k, .Unsupported, b.span, fmt.tprintf("not in the kernel yet: the default of %s, which depends on an unknown", brief(color)))
 	}
 	return report(k, .Unsupported, b.span, "not in the kernel yet: this default")
 }
@@ -348,25 +314,22 @@ known_types :: proc(types: []^Expr) -> bool {
 	return true
 }
 
-// type_unknown: a new unknown. Its possible values come from its shape (`??::u8`),
-// from the color that expects it (`u8:x -> ??`), or from nothing: a bare `??` can
-// be any atom. As in new_symbol, an unknown with a single possible value is that
-// value: `n:x -> ??` is n.
+// type_unknown: a new unknown, in its domain. The domain comes from its shape
+// (`??::u8`), from the color that expects it (`u8:x -> ??`), or from nothing: a
+// bare `??` can be any atom. It is a type like any other: a set, or an equation
+// over earlier unknowns (`(0..n):e -> ??`). An unknown with a single possible
+// value is that value: `n:x -> ??` is n.
 type_unknown :: proc(k: ^Kernel, u: Unknown, env: ^Scope, color: ^Expr) -> ^Expr {
-	shape := color
-	if u.layout != nil {
-		if writes_unknown(u.layout) do return report(k, .Insoluble_Constraint, u.span, "the shape of ?? introduces an unknown `??` that no value shares")
-		shape = type_of(k, u.layout, env)
-	}
-	if shape == nil do return new_symbol(k, set_top())
-	if is_invalid(shape) do return shape
-	s, closed := color_set(k, shape)
-	if !closed {
-		if is_value(shape) do return shape
-		return report(k, .Unsupported, u.span, fmt.tprintf("not in the kernel yet: an unknown whose domain depends on another: %s", brief(shape)))
-	}
-	if domain_count(s, .Scopes) > 0 || domain_count(s, .Sets) > 0 do return report(k, .Unsupported, u.span, "not in the kernel yet: ?? of a scope or of a set")
-	return new_symbol(k, s)
+	domain := color
+	if u.layout != nil do domain = type_of(k, u.layout, env)
+	if domain == nil do return new_symbol(k, new_expr(set_top()))
+	if is_invalid(domain) do return domain
+	if x, is_var := domain^.(^Var); is_var && is_equation(x) do return report(k, .Unsupported, u.span, "not in the kernel yet: ?? of a scope")
+	if is_value(domain) do return domain
+	values, ok := set_envelope(k, domain)
+	if !ok do return report(k, .Unsupported, u.span, fmt.tprintf("not in the kernel yet: ?? whose domain is %s", brief(domain)))
+	if domain_count(values, .Scopes) > 0 || domain_count(values, .Sets) > 0 do return report(k, .Unsupported, u.span, "not in the kernel yet: ?? of a scope or of a set")
+	return new_symbol(k, domain)
 }
 
 // type_of(lo..hi) = the union of the ranges x..y, x ∈ type_of(lo), y ∈ type_of(hi):

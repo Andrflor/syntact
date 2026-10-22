@@ -6,7 +6,7 @@ import "core:strings"
 
 // SETS OF SCOPES: combinations of shapes.
 //
-// A shape is a scope color without production — `{u8:x  u8:y}` — read as the set
+// A shape — a scope without production, `{u8:x  u8:y}` — taken as a set is the set
 // of scopes of the same structure whose every binding is admitted by its own.
 // `|`, `&` and `~` of shapes are kept in a lazy BDD (Frisch, thesis, ch. 7;
 // Elixir 1.19): `{a, yes, maybe, no}` is `(a & yes) | maybe | (~a & no)`. Unions
@@ -234,16 +234,16 @@ bdd_atoms :: proc(b: Bdd) -> []^Record {
 	return out[:]
 }
 
-// --- types read as colors ---
+// --- the normal form of a set ---
 
-// color_set: the set of values a type admits as a color. A set admits its
-// elements. A scope with productions admits each one: a colored production, what
-// its color admits; otherwise, its value exactly, read through its contracts
-// (`{-> u8}` admits only the value u8). Without production, it is a shape. A
-// self-reference admits what its equation admits: a shape that refers to it.
-// False when the type depends on an unknown: it is not a single set. A scope is
-// read only once.
-color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
+// normal_set: a type without unknown, taken as a set — the elements it
+// designates, in normal form. A set is its own normal form. A scope with
+// productions designates what each one admits: a colored production, its color;
+// another, its value itself; Arden's lemma solves the equation of a scope that
+// mentions itself. Without production, the scopes of its shape. A self-reference
+// designates its equation, read only on a value. False when the type depends on
+// an unknown. A scope is read only once.
+normal_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 	if x, d, recursive := equation_var(t); recursive {
 		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(nil, d, equation = x.type))}, true
 	}
@@ -252,28 +252,31 @@ color_set :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
 		return v, true
 	case ^Scope:
 		if s, seen := k.shapes[v]; seen do return s, true
-		s, closed := scope_color_set(k, v)
+		s, closed := scope_set(k, v)
 		if closed do k.shapes[v] = s
 		return s, closed
 	}
 	return {}, false
 }
 
-scope_color_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
+scope_set :: proc(k: ^Kernel, s: ^Scope) -> (set: Set, ok: bool) {
 	shown := places(s)
 	if first_production(s) != nil {
 		alternatives := make([dynamic]Set, context.temp_allocator)
 		for p in shown {
 			b := binding_at(p)^
 			if b.kind != .Product do continue
-			append(&alternatives, admitted_by(k, b) or_return)
+			alternative: Set
+			if b.color_type != nil do alternative = normal_set(k, b.color_type) or_return
+			else do alternative = single_set(k, b.value_type) or_return
+			append(&alternatives, alternative)
 		}
 		if solved, solvable := arden(s, alternatives[:]); solvable do return solved, true
 		for x in alternatives do set = set_union(set, x)
 		return set, true
 	}
 	fields := make([dynamic]Field)
-	shape_fields(k, s, &fields, exact = false) or_return
+	record_fields(k, s, &fields, exact = false) or_return
 	return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], s))}, true
 }
 
@@ -349,52 +352,45 @@ set_equation :: proc(x: Set) -> ^Scope {
 	return r.shape
 }
 
-// shape_fields: the places of a shape, each by its contract — its color, written
-// or received from the shape that surrounds it (implicit coloring). An expansion
-// `...xs` deposits the places of xs there; a colored expansion `...C:`, a run —
-// what it deposits is not a value but any scope C admits. A binding without
-// contract admits its value; named, in a shape (`exact` false), it imposes
-// nothing: a carve can give it any value.
-shape_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field, exact: bool) -> bool {
+// record_fields: the places of a shape, each by the normal form of its contract —
+// its color, written or received from the shape that surrounds it (implicit
+// coloring). An expansion `...xs` deposits the places of xs there; a colored
+// expansion `...C:`, a run — what it deposits is not a value but any scope C
+// admits. A binding without contract admits its value; named, in a shape (`exact`
+// false), it imposes nothing: a carve can give it any value.
+record_fields :: proc(k: ^Kernel, s: ^Scope, out: ^[dynamic]Field, exact: bool) -> bool {
 	for b in s.bindings {
 		if b.kind == .Expand {
 			if b.color == nil {
 				v, ok := expanded(b)
 				if !ok do return false // an expansion without a typed scope: we do not know what it deposits
-				shape_fields(k, v, out, exact) or_return
+				record_fields(k, v, out, exact) or_return
 				continue
 			}
-			set := color_set(k, b.color_type) or_return
+			set := normal_set(k, b.color_type) or_return
 			append(out, Field{kind = .Expand, set = set, run = true})
 			continue
 		}
 		f := Field{name = b.name, kind = b.kind}
 		switch {
 		case b.color_type != nil:
-			f.set = color_set(k, b.color_type) or_return
+			f.set = normal_set(k, b.color_type) or_return
 		case b.name != "" && !exact:
 			f.free = true
 		case:
-			f.set = exact_set(k, b.value_type) or_return
+			f.set = single_set(k, b.value_type) or_return
 		}
 		append(out, f)
 	}
 	return true
 }
 
-// admitted_by: what a binding admits — what its color admits, written or
-// implicit, otherwise its value.
-admitted_by :: proc(k: ^Kernel, b: Binding) -> (Set, bool) {
-	if b.color_type != nil do return color_set(k, b.color_type)
-	return exact_set(k, b.value_type)
-}
-
-// exact_set: the set whose only element is this type. An atom is its own
+// single_set: the set whose only element is the type t, =t. An atom is its own
 // singleton; a set of at least two elements is a value of the sort of sets; a
 // scope, the shape whose every binding admits only its contract — its color,
 // written or implicit, otherwise its value. False when the type depends on an
 // unknown.
-exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
+single_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 	if t == nil || is_invalid(t) do return {}, false
 	#partial switch v in t^ {
 	case Set:
@@ -402,174 +398,10 @@ exact_set :: proc(k: ^Kernel, t: ^Expr) -> (set: Set, ok: bool) {
 		return Set{sorts = {.Sets}, sets = values_point(v)}, true
 	case ^Scope:
 		fields := make([dynamic]Field)
-		shape_fields(k, v, &fields, exact = true) or_return
+		record_fields(k, v, &fields, exact = true) or_return
 		return Set{sorts = {.Scopes}, scopes = bdd_atom(new_record(fields[:], v, exact = true))}, true
 	}
 	return {}, false
-}
-
-// --- admission of a value scope ---
-
-// Member: the membership of a value that may depend on unknowns. "Not always"
-// (some value of the unknowns falls outside) cannot be negated, and two "not
-// always" do not combine by "or": they are not necessarily the same values.
-// "Never" combines freely.
-Member :: enum u8 {
-	Always,
-	Not_Always,
-	Never,
-	Unknown,
-}
-
-member_of :: proc(v: Verdict, closed: bool) -> Member {
-	switch v {
-	case .Proved:
-		return .Always
-	case .Refuted:
-		return closed ? .Never : .Not_Always
-	case .Undecided:
-	}
-	return .Unknown
-}
-
-and3 :: proc(a, b: Member) -> Member {
-	switch {
-	case a == .Never || b == .Never:
-		return .Never
-	case a == .Always:
-		return b
-	case b == .Always:
-		return a
-	case a == .Not_Always || b == .Not_Always:
-		return .Not_Always
-	}
-	return .Unknown
-}
-
-or3 :: proc(a, b: Member) -> Member {
-	switch {
-	case a == .Always || b == .Always:
-		return .Always
-	case a == .Never:
-		return b
-	case b == .Never:
-		return a
-	}
-	return .Unknown
-}
-
-not3 :: proc(a: Member) -> Member {
-	#partial switch a {
-	case .Always:
-		return .Never
-	case .Never:
-		return .Always
-	}
-	return .Unknown
-}
-
-// bdd_admits: is the value scope `s` in the set `b`?
-bdd_admits :: proc(k: ^Kernel, b: Bdd, s: ^Scope, ctx: Context = nil) -> Verdict {
-	switch bdd_member(k, b, places(s), ctx) {
-	case .Always:
-		return .Proved
-	case .Not_Always, .Never:
-		return .Refuted
-	case .Unknown:
-	}
-	return .Undecided
-}
-
-// bdd_member: is the run of bindings `view` — a scope, or the part of a scope a
-// run receives — in the set `b`?
-bdd_member :: proc(k: ^Kernel, b: Bdd, view: []Place, ctx: Context = nil) -> Member {
-	switch v in b {
-	case Bdd_Leaf:
-		return v == .Top ? .Always : .Never
-	case ^Bdd_Node:
-		in_atom := record_member(k, v.atom, view, ctx)
-		via_yes := and3(in_atom, bdd_member(k, v.yes, view, ctx))
-		via_no := and3(not3(in_atom), bdd_member(k, v.no, view, ctx))
-		return or3(or3(via_yes, bdd_member(k, v.maybe, view, ctx)), via_no)
-	}
-	return .Never
-}
-
-// record_member: does the run `view` have the shape r? Each place of the shape
-// takes a binding; a run takes a part, of any length, that its color must admit
-// as a scope. We try each split.
-//
-// A shape that mentions itself can ask again for the same run (`X -> {...X:}`):
-// a membership that depends on itself is not established — this is the least
-// solution, that of finite values.
-record_member :: proc(k: ^Kernel, r: ^Record, view: []Place, ctx: Context = nil) -> Member {
-	key := Matching{r, raw_data(view), len(view)}
-	if key in k.matching do return .Never
-	k.matching[key] = {}
-	defer delete_key(&k.matching, key)
-	if r.equation != nil {
-		// a self-reference: we read the equation on this run, nothing more
-		set, closed := color_set(k, new_expr(r.shape))
-		return closed ? bdd_member(k, set.scopes, view, ctx) : .Unknown
-	}
-	memo := make(map[[2]int]Member, context.temp_allocator)
-	return match_fields(k, r.fields, view, 0, 0, &memo, ctx)
-}
-
-// Matching: a membership being decided.
-Matching :: struct {
-	record: ^Record,
-	view:   rawptr,
-	len:    int,
-}
-
-// match_fields: does view[i:] have the shape fields[j:]?
-match_fields :: proc(k: ^Kernel, fields: []Field, view: []Place, i, j: int, memo: ^map[[2]int]Member, ctx: Context) -> Member {
-	if j == len(fields) do return i == len(view) ? .Always : .Never
-	if m, seen := memo[{i, j}]; seen do return m
-	f := fields[j]
-	result := Member.Never
-	if f.run {
-		for e in i ..= len(view) {
-			result = or3(result, and3(run_member(k, f, view[i:e], ctx), match_fields(k, fields, view, e, j + 1, memo, ctx)))
-			if result == .Always do break
-		}
-	} else if i < len(view) {
-		result = and3(field_member(k, f, binding_at(view[i])^, ctx), match_fields(k, fields, view, i + 1, j + 1, memo, ctx))
-	}
-	memo[{i, j}] = result
-	return result
-}
-
-// run_member: is the run view admitted by the run f — a single piece, or n
-// non-empty pieces, n among its counts, each admitted?
-run_member :: proc(k: ^Kernel, f: Field, view: []Place, ctx: Context) -> Member {
-	if len(f.counts.intervals) == 0 do return bdd_member(k, f.set.scopes, view, ctx)
-	repeated :: proc(k: ^Kernel, f: Field, view: []Place, n: i128, ctx: Context) -> Member {
-		if len(view) == 0 do return ints_contains(f.counts, n) ? .Always : .Never
-		result := Member.Never
-		for e in 1 ..= len(view) {
-			result = or3(result, and3(bdd_member(k, f.set.scopes, view[:e], ctx), repeated(k, f, view[e:], n + 1, ctx)))
-			if result == .Always do break
-		}
-		return result
-	}
-	return repeated(k, f, view, 0, ctx)
-}
-
-// field_member: does the binding b have the place f?
-field_member :: proc(k: ^Kernel, f: Field, b: Binding, ctx: Context) -> Member {
-	if f.name != b.name || f.kind != b.kind do return .Never
-	if f.free || colored_within(k, b, f.set) do return .Always
-	return member_of(admits(k, f.set, b.value_type, ctx), is_closed_type(b.value_type))
-}
-
-// colored_within: the binding's color admits only elements of `s`. Its value is
-// then in it, or its own check reports it: nothing to decide twice.
-colored_within :: proc(k: ^Kernel, b: Binding, s: Set) -> bool {
-	if b.color_type == nil do return false
-	c, closed := color_set(k, b.color_type)
-	return closed && atoms_subset(c, s)
 }
 
 // is_closed_type: a type without unknown — its verdict holds for all their values.

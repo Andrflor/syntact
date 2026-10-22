@@ -35,16 +35,31 @@ CASES := []Test_Case {
 	{"true:check -> 2 = 2", "{true:check -> true}", {}},
 	{"true:oops -> 2 = 3", "", {.Constraint_Mismatch}},
 	{"((u8 | i8) & >10):x -> 42", "{11..255:x -> 42}", {}},
-	// a color is an equation: it can share the unknowns of the value, not introduce one
+	// a color is a type like any other: it shares the unknowns of the value, and the
+	// value must be one of its elements for every value of the unknowns
 	{"n -> ??::u8\nn:x -> 5", "", {.Constraint_Mismatch}}, // 5 is not every value of n
 	{"n -> ??::u8\nn:a\n(n + n):b -> a + n", "{n -> ??0  ??0:a -> ??0  (2*??0):b -> 2*??0}", {}}, // a is n
+	{"u8:n -> ??\nn:a -> n\nm -> n * 2\nn:b -> m / 2", "{0..255:n -> ??0  ??0:a -> ??0  m -> 2*??0  ??0:b -> ??0}", {}}, // 2·n / 2 is n
 	{"n -> ??::u8\n(0..n):d -> n\n(>n):f -> n + 1\n(n..):g -> 2 * n", "", {}},
 	{"n -> ??::u8\n(0..n):e -> n + 1", "", {.Constraint_Mismatch}},
 	{"n -> ??::u8\nm -> ??::u8\n(0..n):i -> m", "", {.Constraint_Mismatch}}, // m = 1, n = 0
 	{"n -> ??::u8\nm -> ??::u8\n(n & m):k -> n", "", {.Constraint_Mismatch}}, // empty as soon as n ≠ m
+	{"n -> ??::u8\nm -> ??::u8\n(n | m):x -> n\n(n | m):y -> 5", "", {.Constraint_Mismatch}}, // y: n and m can both differ from 5
 	{"x -> ??::u8\n(x ? {<10 -> x, -> 10}):z -> x ? {<10 -> x, -> 10}", "", {}}, // each case, under its fact
-	{"??:z", "", {.Insoluble_Constraint}},
-	{"(??::u8 & >10):b -> 11", "", {.Insoluble_Constraint}},
+	// a set of several values is not one of its elements; an atom is its own singleton
+	{"n -> ??::u8\nu8:j -> 0..n", "", {.Constraint_Mismatch}}, // 0..n is an atom only for n = 0
+	{"n -> ??::u8\n=(0..n):k -> 0..n", "", {}},
+	{"=u8:e -> 5", "", {.Constraint_Mismatch}},
+	// an unknown is in its domain, which can be an equation over earlier unknowns
+	{"n -> ??::u8\n(0..n):e -> ??\nu8:f -> e\n(0..n):g -> e", "{n -> ??0  0..??0:e -> ??1  0..255:f -> ??1  0..??0:g -> ??1}", {}},
+	{"n -> ??::u8\n(0..n):e -> ??\n(0..n - 1):h -> e", "", {.Constraint_Mismatch}}, // e can be n
+	// a `??` written in a color is an unknown like any other
+	{"??::u8:x -> 5", "", {.Constraint_Mismatch}}, // it can be 0
+	{"(??::u8 & >10):b -> 11", "", {.Constraint_Mismatch}},
+	{"(~??::u8):b -> 5", "", {.Constraint_Mismatch}}, // it can be 5
+	{"??:z", "{??0:z -> ??0}", {}}, // z is the unknown that colors it
+	// a shape whose color depends on an unknown
+	{"n -> ??::u8\nP -> {(0..n):x -> n}\nP:p -> {x -> n}\nP:q -> {x -> n + 1}", "", {.Constraint_Mismatch}},
 	{"~5:x -> 6", "", {}},
 	{"~5:x -> 5", "", {.Constraint_Mismatch}},
 	// ~ is taken within the carried sorts, and keeps them: ~~X = X, even via a ref
@@ -151,11 +166,19 @@ CASES := []Test_Case {
 	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nfive -> f{n -> 5}!", "{f -> {0..255:n -> ??0  -> (??0 + ??0*??0)/2}  five -> 15}", {}},
 	// an equation that cannot be solved yet remains an equation: not proved
 	{"g -> {\n  u8:n -> ??\n  -> n ? {0 -> 1, -> 2 * g{n -> n - 1}!}\n}\nu16:r -> g{n -> ??}!", "", {.Unproven}},
+	// a recursive call on an unknown, against a color that depends on it
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nm -> ??::u8\n(0..(m * (m + 1) / 2)):t -> f{m}!", "", {}},
+	{"f -> {\n  u8:n -> ??\n  -> n ? {0 -> 0, -> n + f{n -> n - 1}!}\n}\nm -> ??::u8\n(0..m):w -> f{m}!", "", {.Constraint_Mismatch}}, // m = 2: 3
+	{"m -> ??::u8\nx -> m * (m + 1) / 2\ny -> m * 3 / 2", "{m -> ??0  x -> (??0 + ??0*??0)/2  y -> 3*??0 / 2}", {}}, // exact when 2 divides it for every m
 	{"f -> {\n  u8:n -> 5\n  -> f{n -> n}!\n}", "", {.Infinite_Recursion}},
 	// recursive types: read on the value, without unfolding anything
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 2 3}", "", {}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a -> {1 \"x\"}", "", {.Constraint_Mismatch}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:a", "", {}}, // the default: {}
+	// a recursive type whose color depends on an unknown, read on the value
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nn -> ??::u8\nArray{0..n}:c -> {0 n}\nArray{0..n}:e", "", {}},
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nn -> ??::u8\nArray{0..n}:d -> {0 n + 1}", "", {.Constraint_Mismatch}},
+	{"n -> ??::u8\nP -> {(0..n):x}\nP:p", "{n -> ??0  P -> {0..??0:x -> 0}  {0..??0:x -> 0}:p -> {0..??0:x -> 0}}", {}}, // 0 is in 0..n whatever n
 	{"Tree -> {\n  T -> {}\n  -> {}\n  -> {Tree{T}:l  T:v  Tree{T}:r}\n}\nTree{u8}:t -> {l -> {}  v -> 5  r -> {l -> {}  v -> 6  r -> {}}}", "", {}},
 	{"Tree -> {\n  T -> {}\n  -> {}\n  -> {Tree{T}:l  T:v  Tree{T}:r}\n}\nTree{u8}:t -> {l -> {}  v -> 5  r -> {l -> {}  v -> 300  r -> {}}}", "", {.Constraint_Mismatch}},
 	{"Balanced -> {\n  -> {}\n  -> {u8: ...Balanced:  string:}\n}\nBalanced:b -> {1 2 \"a\" \"b\"}", "", {}},
@@ -418,7 +441,7 @@ test_recursive_solved :: proc(t: ^testing.T) {
 		program, k, parsed := run(c[0])
 		testing.expect(t, parsed)
 		b := program.bindings[len(program.bindings) - 1]
-		set, closed := color_set(&k, b.color_type)
+		set, closed := normal_set(&k, b.color_type)
 		testing.expect(t, closed)
 		testing.expect_value(t, print_set(set), c[1])
 		testing.expect_value(t, len(k.errors), 0)

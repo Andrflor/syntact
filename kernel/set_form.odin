@@ -15,9 +15,10 @@ import "core:strings"
 // twice.
 //
 // The form is simplified by exact laws: an empty operand, or an operand always
-// included in the other, drops out (`n | 0..3` is worth 0..3 when n is in 0..3).
-// A form can be a color: its unknowns move to the value's side (check.odin,
-// admitted).
+// included in the other, drops out (`n | 0..3` is worth 0..3 when n is in 0..3);
+// the complement of a comparison is its opposite (`~(n < 5)` is `n >= 5`), and
+// `~~x` is x. On truths — the types `x in c` and the comparisons — & | ~ are
+// ∧ ∨ ¬: a truth holds when true is one of its elements (in.odin).
 
 Set_Op_Kind :: enum u8 {
 	Union,
@@ -48,7 +49,7 @@ set_operation :: proc(k: ^Kernel, op: Set_Op, span: syn.Span, args: ..^Expr) -> 
 	known := make([]Set, len(args))
 	all_known := true
 	for a, i in args {
-		s, ok := color_set(k, a)
+		s, ok := normal_set(k, a)
 		known[i] = s
 		all_known &&= ok
 	}
@@ -70,11 +71,17 @@ is_set_form :: proc(t: ^Expr) -> bool {
 
 // simplified: the form of the operation, after the exact laws that drop an
 // operand — none, neutral for | and absorbing for &; and an operand x always
-// included in a known set s: x | s = s and x & s = x.
+// included in a known set s: x | s = s and x & s = x. The complement of a
+// complement is what it complements; that of a comparison, a single boolean, is
+// the opposite comparison.
 simplified :: proc(k: ^Kernel, op: Set_Op, args: []^Expr) -> ^Expr {
+	if op.kind == .Comp {
+		if inner, is_form := args[0]^.(Set_Form); is_form && inner.op.kind == .Comp do return inner.args[0]
+		if opposite, ok := opposite_comparison(k, args[0]); ok do return opposite
+	}
 	if op.kind == .Union || op.kind == .Inter {
 		for a, i in args {
-			s, known := color_set(k, a)
+			s, known := normal_set(k, a)
 			if !known do continue
 			other := args[1 - i]
 			if carried(s) == {} do return op.kind == .Union ? other : a
@@ -93,10 +100,10 @@ within :: proc(env, s: Set) -> bool {
 // known set, over-approximated otherwise. It serves to decide and to check the
 // sorts; it is never a type.
 set_envelope :: proc(k: ^Kernel, t: ^Expr) -> (Set, bool) {
-	if s, known := color_set(k, t); known do return s, true
+	if s, known := normal_set(k, t); known do return s, true
 	#partial switch v in t^ {
-	case Poly, Term, ^Var:
-		vals, _ := values_of(k, t)
+	case Poly, Term, ^Var, Cases:
+		vals, _ := envelope(k, t)
 		return vals, true
 	case Set_Form:
 		s, status := enveloped(k, v.op, v.args)
@@ -142,24 +149,54 @@ never_empty :: proc(k: ^Kernel, t: ^Expr) -> bool {
 		}
 		return false
 	}
-	s, known := color_set(k, t)
+	s, known := normal_set(k, t)
 	return known && !set_is_empty(s)
 }
 
 // eval_set: the set a type is worth when each unknown `id` is worth env[id].
-eval_set :: proc(k: ^Kernel, t: ^Expr, env: []Atom) -> (set: Set, ok: bool) {
-	if s, known := color_set(k, t); known do return s, true
+eval_set :: proc(t: ^Expr, env: []Atom) -> (set: Set, ok: bool) {
 	#partial switch v in t^ {
+	case Set:
+		return v, true
 	case Poly, Term, ^Var:
 		a := eval(t, env) or_return
 		return set_of_atoms({a}), true
 	case Set_Form:
 		args := make([]Set, len(v.args))
-		for x, i in v.args do args[i] = eval_set(k, x, env) or_return
+		for x, i in v.args do args[i] = eval_set(x, env) or_return
 		r, status := apply_set_op(v.op, args)
 		return r, status == .Ok
+	case Cases:
+		// the case whose fact holds for these values
+		for c in v.cases {
+			holds := holds_at(c.fact, env) or_return
+			if holds do return eval_set(c.value, env)
+		}
 	}
 	return {}, false
+}
+
+// opposite_comparison: ~t, t a comparison — a single boolean, whose complement is
+// its opposite: `~(p < 0)` is `p >= 0`, `~(a = b)` is `a != b`. Between floats, an
+// order has no opposite comparison (NaN).
+opposite_comparison :: proc(k: ^Kernel, t: ^Expr) -> (^Expr, bool) {
+	c, is_term := t^.(Term)
+	if !is_term do return nil, false
+	#partial switch c.op {
+	case .Eq, .Ne:
+		return new_expr(Term{op = c.op == .Eq ? .Ne : .Eq, args = c.args}), true
+	case .Lt, .Le:
+		if len(c.args) == 1 {
+			p, _ := as_poly(c.args[0])
+			r, status := int_compare(k, .Ge, p) // ¬(p < 0) is p >= 0
+			return r, status == .Ok
+		}
+		if d, ok := value_domain(k, c.args[0]); ok && (d == .Ints || d == .Chars) {
+			// a total order: ¬(a < b) is b <= a
+			return new_expr(Term{op = c.op == .Lt ? .Le : .Lt, args = pair(c.args[1], c.args[0])}), true
+		}
+	}
+	return nil, false
 }
 
 // sorts_of: all the values of the sorts that a set carries.
