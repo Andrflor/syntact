@@ -1,910 +1,186 @@
 package kernel
 
-import "core:math"
-import "core:slice"
-
-// Sets of values, in normal form. A literal is a set of one element (`5` is
-// `5..5`), a builtin is a set (`u8` is `0..255`), `none` is the empty set. A mixed
-// set (`u8 | string`) has one component per sort; each component is a closed
-// algebra. The elements are atoms, scopes, or sets taken as values (`{-> u8}` has
-// only one element: the set u8). Equality is inclusion in both directions: `2|1`
-// and `2..1` are equal, like `2|"a"|3..4` and `"a"|2..4`. Intervals even have a
-// unique written form (`1..2`).
-
-Domain :: enum u8 {
-	Ints,
-	Floats,
-	Chars,
-	Strings,
-	Bools,
-	Scopes,
-	Sets,
-}
-
-Set :: struct {
-	// The sorts the set speaks about, even when their component is empty: `~bool`
-	// contains no boolean but still speaks about booleans. This is what makes ~ an
-	// involution (`~~X = X`). A sort that has values is always carried
-	// (`carried`); subset and equality read only the values.
-	sorts:   bit_set[Domain],
-	ints:    Ints,
-	floats:  Floats,
-	// Characters, by their code point; CHAR_EMPTY is the empty character `''`, the
-	// lowest of all. A `string` color admits a character as the one-letter string
-	// (`string:s -> 'c'`), but `'a'` and `"a"` remain two values.
-	chars:   Ints,
-	strings: Strings,
-	bools:   Bools,
-	scopes:  Bdd, // combinations of scope shapes (bdd.odin)
-	sets:    Set_Values, // sets taken as values
-}
-
-// --- integers: sorted, disjoint, non-adjacent intervals ---
+// CONSTANT TYPES (specs/types.md §1, §4.1–4.4)
 //
-// The universe of finite integers is [-I128_MAX, I128_MAX]: symmetric, negation
-// never overflows in it, and an exact computation that would leave it fails
-// (add_checked, mul_checked). At the edge, a finite bound and an infinite bound
-// denote the same values: the normal form writes the infinite bound, except for
-// the edge point.
+// A type without unknowns, in normal form: one component per family of
+// primitives. `|`, `&` and `~` act component by component; `~` is the absolute
+// complement, so it complements every component. `none`, the empty type, is the
+// set whose every component is empty: the zero value.
 
-Int_Interval :: struct {
-	lo: Maybe(i128), // nil = -∞
-	hi: Maybe(i128), // nil = +∞
-}
-
-Ints :: struct {
-	intervals: []Int_Interval,
-}
-
-ints_point :: proc(v: i128) -> Ints {
-	return ints_of({Int_Interval{v, v}})
-}
-
-ints_range :: proc(lo, hi: Maybe(i128)) -> Ints {
-	return ints_of({Int_Interval{lo, hi}})
-}
-
-ints_all :: proc() -> Ints {
-	return ints_range(nil, nil)
-}
-
-// ints_of normalizes an arbitrary list of intervals.
-ints_of :: proc(raw: []Int_Interval) -> Ints {
-	kept := make([dynamic]Int_Interval, 0, len(raw))
-	for iv in raw {
-		lo, lo_ok := iv.lo.?
-		hi, hi_ok := iv.hi.?
-		if lo_ok && hi_ok && lo > hi do continue
-		append(&kept, iv)
-	}
-	slice.sort_by(kept[:], proc(a, b: Int_Interval) -> bool {
-		al, a_ok := a.lo.?
-		bl, b_ok := b.lo.?
-		if !a_ok do return b_ok
-		if !b_ok do return false
-		return al < bl
-	})
-	out := make([dynamic]Int_Interval, 0, len(kept))
-	for iv in kept {
-		if len(out) == 0 {
-			append(&out, iv)
-			continue
-		}
-		last := &out[len(out) - 1]
-		last_hi, last_bounded := last.hi.?
-		if !last_bounded do break // the last one already goes up to +∞
-		lo, lo_ok := iv.lo.?
-		if !lo_ok || lo - 1 <= last_hi { 	// lo ≥ -I128_MAX: lo - 1 does not overflow
-			hi, hi_ok := iv.hi.?
-			if !hi_ok || hi > last_hi do last.hi = iv.hi
-		} else {
-			append(&out, iv)
-		}
-	}
-	for &iv in out do iv = at_edges(iv)
-	return Ints{out[:]}
-}
-
-// at_edges: a bound at the edge of the universe is written infinite, except for
-// the edge point itself, which stays a point.
-at_edges :: proc(iv: Int_Interval) -> Int_Interval {
-	lo, lo_ok := iv.lo.?
-	hi, hi_ok := iv.hi.?
-	r := iv
-	if lo_ok && lo == I128_MAX do return Int_Interval{lo, lo}
-	if hi_ok && hi == -I128_MAX do return Int_Interval{hi, hi}
-	if lo_ok && lo == -I128_MAX do r.lo = nil
-	if hi_ok && hi == I128_MAX do r.hi = nil
-	return r
-}
-
-ints_union :: proc(a, b: Ints) -> Ints {
-	all := make([dynamic]Int_Interval, 0, len(a.intervals) + len(b.intervals))
-	append(&all, ..a.intervals)
-	append(&all, ..b.intervals)
-	return ints_of(all[:])
-}
-
-ints_intersect :: proc(a, b: Ints) -> Ints {
-	out := make([dynamic]Int_Interval)
-	for x in a.intervals {
-		for y in b.intervals {
-			append(&out, Int_Interval{max_lo(x.lo, y.lo), min_hi(x.hi, y.hi)})
-		}
-	}
-	return ints_of(out[:])
-}
-
-ints_complement :: proc(a: Ints) -> Ints {
-	out := make([dynamic]Int_Interval)
-	cursor: Maybe(i128) = nil // start of the current hole; nil = -∞
-	open := true // the current hole is still open
-	for iv in a.intervals {
-		if lo, ok := iv.lo.?; ok && lo > -I128_MAX {
-			append(&out, Int_Interval{cursor, lo - 1})
-		}
-		hi, ok := iv.hi.?
-		if !ok || hi == I128_MAX {
-			open = false
-			break
-		}
-		cursor = hi + 1
-	}
-	if open do append(&out, Int_Interval{cursor, nil})
-	return ints_of(out[:])
-}
-
-ints_subset :: proc(a, b: Ints) -> bool {
-	return len(ints_intersect(a, ints_complement(b)).intervals) == 0
-}
-
-// ints_count counts the elements, saturated at 2 (we only want to know 0, 1 or
-// several).
-ints_count :: proc(a: Ints) -> int {
-	if len(a.intervals) == 0 do return 0
-	if len(a.intervals) > 1 do return 2
-	lo, lo_ok := a.intervals[0].lo.?
-	hi, hi_ok := a.intervals[0].hi.?
-	return lo_ok && hi_ok && lo == hi ? 1 : 2
-}
-
-ints_contains :: proc(a: Ints, v: i128) -> bool {
-	for iv in a.intervals {
-		if lo, ok := iv.lo.?; ok && v < lo do continue
-		if hi, ok := iv.hi.?; ok && v > hi do continue
-		return true
-	}
-	return false
-}
-
-// The default of a set of integers: 0 if it is in it, otherwise its first finite
-// bound.
-ints_default :: proc(a: Ints) -> (i128, bool) {
-	if len(a.intervals) == 0 do return 0, false
-	if ints_contains(a, 0) do return 0, true
-	if lo, ok := a.intervals[0].lo.?; ok do return lo, true
-	hi, _ := a.intervals[0].hi.?
-	return hi, true
-}
-
-ints_bounds :: proc(a: Ints) -> (lo, hi: Maybe(i128)) {
-	if len(a.intervals) == 0 do return nil, nil
-	return a.intervals[0].lo, a.intervals[len(a.intervals) - 1].hi
-}
-
-// ints_arith: { x op y | x ∈ a, y ∈ b }, by intervals — exact for + and -, the
-// envelope for *. `exact` is false when a finite bound would leave the universe:
-// it becomes infinite on its side, a safe over-approximation.
-ints_arith :: proc(op: Arith, a, b: Ints) -> (r: Ints, exact: bool) {
-	out := make([dynamic]Int_Interval)
-	exact = true
-	for x in a.intervals {
-		for y in b.intervals {
-			iv: Int_Interval
-			ok: bool
-			switch op {
-			case .Add:
-				iv, ok = add_interval(x, y)
-			case .Sub:
-				iv, ok = add_interval(x, Int_Interval{neg_bound(y.hi), neg_bound(y.lo)})
-			case .Mul:
-				iv, ok = mul_interval(x, y)
-			}
-			exact &&= ok
-			append(&out, iv)
-		}
-	}
-	return ints_of(out[:]), exact
-}
-
-add_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
-	lo, lo_ok := add_bound(x.lo, y.lo)
-	hi, hi_ok := add_bound(x.hi, y.hi)
-	return Int_Interval{lo, hi}, lo_ok && hi_ok
-}
-
-// ints_pow: { xⁿ | x ∈ a } over the envelope of each interval — an even power
-// does not go below 0.
-ints_pow :: proc(a: Ints, n: int) -> Ints {
-	if n == 1 do return a
-	out := make([dynamic]Int_Interval, 0, len(a.intervals))
-	for iv in a.intervals do append(&out, pow_interval(iv, n))
-	return ints_of(out[:])
-}
-
-pow_bound :: proc(b: Maybe(i128), n: int) -> Maybe(i128) {
-	v, ok := b.?
-	if !ok do return nil
-	r: i128 = 1
-	for _ in 0 ..< n {
-		p, p_ok := mul_checked(r, v)
-		if !p_ok do return nil // too large: infinite, a safe over-approximation
-		r = p
-	}
-	return r
-}
-
-pow_interval :: proc(iv: Int_Interval, n: int) -> Int_Interval {
-	if n % 2 == 1 do return Int_Interval{pow_bound(iv.lo, n), pow_bound(iv.hi, n)}
-	lo, lo_ok := iv.lo.?
-	hi, hi_ok := iv.hi.?
-	if lo_ok && lo >= 0 do return Int_Interval{pow_bound(iv.lo, n), pow_bound(iv.hi, n)}
-	if hi_ok && hi <= 0 do return Int_Interval{pow_bound(iv.hi, n), pow_bound(iv.lo, n)}
-	if !lo_ok || !hi_ok do return Int_Interval{i128(0), nil}
-	a, b := pow_bound(iv.lo, n), pow_bound(iv.hi, n)
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok || !y_ok do return Int_Interval{i128(0), nil}
-	return Int_Interval{i128(0), max(x, y)}
-}
-
-ints_neg :: proc(a: Ints) -> Ints {
-	out := make([dynamic]Int_Interval, 0, len(a.intervals))
-	for iv in a.intervals do append(&out, Int_Interval{neg_bound(iv.hi), neg_bound(iv.lo)})
-	return ints_of(out[:])
-}
-
-Arith :: enum u8 {
-	Add,
-	Sub,
-	Mul,
-}
-
-I128_MAX :: max(i128)
-
-max_lo :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok do return b
-	if !y_ok do return a
-	return max(x, y)
-}
-
-min_hi :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok do return b
-	if !y_ok do return a
-	return min(x, y)
-}
-
-neg_bound :: proc(a: Maybe(i128)) -> Maybe(i128) {
-	if v, ok := a.?; ok do return -v
-	return nil
-}
-
-// add_bound: two bounds on the same side. An infinite bound wins; a sum that
-// leaves the universe becomes infinite (`ok` false).
-add_bound :: proc(a, b: Maybe(i128)) -> (Maybe(i128), bool) {
-	x, x_ok := a.?
-	y, y_ok := b.?
-	if !x_ok || !y_ok do return nil, true
-	s, ok := add_checked(x, y)
-	if !ok do return nil, false
-	return s, true
-}
-
-add_checked :: proc(a, b: i128) -> (i128, bool) {
-	if b > 0 && a > I128_MAX - b do return 0, false
-	if b < 0 && a < -I128_MAX - b do return 0, false
-	return a + b, true
-}
-
-mul_checked :: proc(a, b: i128) -> (i128, bool) {
-	// Below 2⁶³ in absolute value, the product fits: no 128-bit division.
-	SMALL :: i128(1) << 63
-	if a > -SMALL && a < SMALL && b > -SMALL && b < SMALL do return a * b, true
-	if a == 0 || b == 0 do return 0, true
-	if abs(a) > I128_MAX / abs(b) do return 0, false
-	return a * b, true
-}
-
-// Ext: an extended bound, to multiply infinite intervals.
-Ext :: struct {
-	v:   i128,
-	inf: int, // -1: -∞, 1: +∞, 0: the finite value v
-}
-
-ext_of :: proc(b: Maybe(i128), side: int) -> Ext {
-	if v, ok := b.?; ok do return Ext{v, 0}
-	return Ext{0, side}
-}
-
-ext_sign :: proc(e: Ext) -> int {
-	if e.inf != 0 do return e.inf
-	return e.v > 0 ? 1 : (e.v < 0 ? -1 : 0)
-}
-
-// ext_mul: 0·∞ = 0, because the values are finite and only the bounds are
-// limits. A product that leaves the universe becomes infinite, with its sign.
-ext_mul :: proc(a, b: Ext) -> (Ext, bool) {
-	sa, sb := ext_sign(a), ext_sign(b)
-	if sa == 0 || sb == 0 do return Ext{}, true
-	if a.inf != 0 || b.inf != 0 do return Ext{0, sa * sb}, true
-	p, ok := mul_checked(a.v, b.v)
-	if !ok do return Ext{0, sa * sb}, false
-	return Ext{p, 0}, true
-}
-
-ext_less :: proc(a, b: Ext) -> bool {
-	if a.inf != b.inf do return a.inf < b.inf
-	return a.inf == 0 && a.v < b.v
-}
-
-ext_bound :: proc(e: Ext) -> Maybe(i128) {
-	if e.inf != 0 do return nil
-	return e.v
-}
-
-// mul_interval: the product of intervals is reached at the corners.
-mul_interval :: proc(x, y: Int_Interval) -> (Int_Interval, bool) {
-	xs := [2]Ext{ext_of(x.lo, -1), ext_of(x.hi, 1)}
-	ys := [2]Ext{ext_of(y.lo, -1), ext_of(y.hi, 1)}
-	lo, hi: Ext
-	exact := true
-	for a, i in xs {
-		for b, j in ys {
-			p, ok := ext_mul(a, b)
-			exact &&= ok
-			if (i == 0 && j == 0) || ext_less(p, lo) do lo = p
-			if (i == 0 && j == 0) || ext_less(hi, p) do hi = p
-		}
-	}
-	return Int_Interval{ext_bound(lo), ext_bound(hi)}, exact
-}
-
-// --- floats: intervals with open or closed bounds ---
-
-Float_Interval :: struct {
-	lo:      Maybe(f64), // nil = -∞
-	hi:      Maybe(f64), // nil = +∞
-	lo_open: bool,
-	hi_open: bool,
-}
-
-Floats :: struct {
-	intervals: []Float_Interval,
-}
-
-floats_point :: proc(v: f64) -> Floats {
-	return floats_of({Float_Interval{lo = v, hi = v}})
-}
-
-floats_all :: proc() -> Floats {
-	return floats_of({Float_Interval{}})
-}
-
-// A normal form has only one zero: -0.0 is written 0.0.
-normal_zero :: proc(b: Maybe(f64)) -> Maybe(f64) {
-	if v, ok := b.?; ok && v == 0 do return f64(0)
-	return b
-}
-
-float_interval_empty :: proc(iv: Float_Interval) -> bool {
-	lo, lo_ok := iv.lo.?
-	hi, hi_ok := iv.hi.?
-	if !lo_ok || !hi_ok do return false
-	return lo > hi || (lo == hi && (iv.lo_open || iv.hi_open))
-}
-
-floats_of :: proc(raw: []Float_Interval) -> Floats {
-	kept := make([dynamic]Float_Interval, 0, len(raw))
-	for iv in raw {
-		if float_interval_empty(iv) do continue
-		// An infinite bound is neither open nor closed: a single written form.
-		_, lo_finite := iv.lo.?
-		_, hi_finite := iv.hi.?
-		append(&kept, Float_Interval{normal_zero(iv.lo), normal_zero(iv.hi), iv.lo_open && lo_finite, iv.hi_open && hi_finite})
-	}
-	slice.sort_by(kept[:], proc(a, b: Float_Interval) -> bool {
-		al, a_ok := a.lo.?
-		bl, b_ok := b.lo.?
-		if !a_ok do return b_ok
-		if !b_ok do return false
-		if al != bl do return al < bl
-		return !a.lo_open && b.lo_open
-	})
-	out := make([dynamic]Float_Interval, 0, len(kept))
-	for iv in kept {
-		if len(out) == 0 {
-			append(&out, iv)
-			continue
-		}
-		last := &out[len(out) - 1]
-		last_hi, last_bounded := last.hi.?
-		if !last_bounded do break
-		lo, lo_ok := iv.lo.?
-		touches := !lo_ok || lo < last_hi || (lo == last_hi && !(last.hi_open && iv.lo_open))
-		if !touches {
-			append(&out, iv)
-			continue
-		}
-		hi, hi_ok := iv.hi.?
-		if !hi_ok {
-			last.hi, last.hi_open = nil, false
-		} else if hi > last_hi || (hi == last_hi && !iv.hi_open) {
-			last.hi, last.hi_open = hi, iv.hi_open
-		}
-	}
-	return Floats{out[:]}
-}
-
-floats_union :: proc(a, b: Floats) -> Floats {
-	all := make([dynamic]Float_Interval, 0, len(a.intervals) + len(b.intervals))
-	append(&all, ..a.intervals)
-	append(&all, ..b.intervals)
-	return floats_of(all[:])
-}
-
-floats_intersect :: proc(a, b: Floats) -> Floats {
-	out := make([dynamic]Float_Interval)
-	for x in a.intervals {
-		for y in b.intervals {
-			iv: Float_Interval
-			iv.lo, iv.lo_open = tighter_lo(x, y)
-			iv.hi, iv.hi_open = tighter_hi(x, y)
-			append(&out, iv)
-		}
-	}
-	return floats_of(out[:])
-}
-
-tighter_lo :: proc(x, y: Float_Interval) -> (Maybe(f64), bool) {
-	a, a_ok := x.lo.?
-	b, b_ok := y.lo.?
-	if !a_ok do return y.lo, y.lo_open
-	if !b_ok do return x.lo, x.lo_open
-	if a > b do return a, x.lo_open
-	if b > a do return b, y.lo_open
-	return a, x.lo_open || y.lo_open
-}
-
-tighter_hi :: proc(x, y: Float_Interval) -> (Maybe(f64), bool) {
-	a, a_ok := x.hi.?
-	b, b_ok := y.hi.?
-	if !a_ok do return y.hi, y.hi_open
-	if !b_ok do return x.hi, x.hi_open
-	if a < b do return a, x.hi_open
-	if b < a do return b, y.hi_open
-	return a, x.hi_open || y.hi_open
-}
-
-floats_complement :: proc(a: Floats) -> Floats {
-	out := make([dynamic]Float_Interval)
-	gap := Float_Interval{} // from -∞
-	open := true
-	for iv in a.intervals {
-		if lo, ok := iv.lo.?; ok {
-			gap.hi, gap.hi_open = lo, !iv.lo_open
-			append(&out, gap)
-		}
-		hi, ok := iv.hi.?
-		if !ok {
-			open = false
-			break
-		}
-		gap = Float_Interval{lo = hi, lo_open = !iv.hi_open}
-	}
-	if open do append(&out, gap)
-	return floats_of(out[:])
-}
-
-floats_subset :: proc(a, b: Floats) -> bool {
-	return len(floats_intersect(a, floats_complement(b)).intervals) == 0
-}
-
-floats_count :: proc(a: Floats) -> int {
-	if len(a.intervals) == 0 do return 0
-	if len(a.intervals) > 1 do return 2
-	iv := a.intervals[0]
-	lo, lo_ok := iv.lo.?
-	hi, hi_ok := iv.hi.?
-	return lo_ok && hi_ok && lo == hi ? 1 : 2
-}
-
-floats_contains :: proc(a: Floats, v: f64) -> bool {
-	return floats_subset(floats_point(v), a)
-}
-
-// The default, as for integers: 0.0 if it is in it, otherwise the smallest float
-// of the first interval — its lower bound, or the float just above an open bound;
-// without a lower bound, the largest — its upper bound, or just below.
-floats_default :: proc(a: Floats) -> (f64, bool) {
-	if len(a.intervals) == 0 do return 0, false
-	if floats_contains(a, 0) do return 0, true
-	iv := a.intervals[0]
-	if lo, ok := iv.lo.?; ok do return iv.lo_open ? math.nextafter(lo, math.INF_F64) : lo, true
-	hi, _ := iv.hi.? // without any bound, the interval would contain 0
-	return iv.hi_open ? math.nextafter(hi, math.NEG_INF_F64) : hi, true
-}
-
-floats_arith :: proc(op: Arith, a, b: Floats) -> Floats {
-	out := make([dynamic]Float_Interval)
-	for x in a.intervals {
-		for y in b.intervals {
-			append(&out, float_interval_arith(op, x, y))
-		}
-	}
-	return floats_of(out[:])
-}
-
-// Float arithmetic on the closed envelope: a safe over-approximation.
-float_interval_arith :: proc(op: Arith, x, y: Float_Interval) -> Float_Interval {
-	xl, xl_ok := x.lo.?
-	xh, xh_ok := x.hi.?
-	yl, yl_ok := y.lo.?
-	yh, yh_ok := y.hi.?
-	switch op {
-	case .Add:
-		return Float_Interval{lo = fsum(xl, xl_ok, yl, yl_ok), hi = fsum(xh, xh_ok, yh, yh_ok)}
-	case .Sub:
-		return Float_Interval{lo = fsum(xl, xl_ok, -yh, yh_ok), hi = fsum(xh, xh_ok, -yl, yl_ok)}
-	case .Mul:
-		if !(xl_ok && xh_ok && yl_ok && yh_ok) do return Float_Interval{}
-		ps := [4]f64{xl * yl, xl * yh, xh * yl, xh * yh}
-		return Float_Interval{lo = slice.min(ps[:]), hi = slice.max(ps[:])}
-	}
-	return Float_Interval{}
-}
-
-fsum :: proc(a: f64, a_ok: bool, b: f64, b_ok: bool) -> Maybe(f64) {
-	if !a_ok || !b_ok do return nil
-	return a + b
-}
-
-floats_neg :: proc(a: Floats) -> Floats {
-	out := make([dynamic]Float_Interval, 0, len(a.intervals))
-	for iv in a.intervals {
-		lo: Maybe(f64) = nil
-		hi: Maybe(f64) = nil
-		if v, ok := iv.hi.?; ok do lo = -v
-		if v, ok := iv.lo.?; ok do hi = -v
-		append(&out, Float_Interval{lo, hi, iv.hi_open, iv.lo_open})
-	}
-	return floats_of(out[:])
-}
-
-floats_bounds :: proc(a: Floats) -> (lo, hi: Maybe(f64)) {
-	if len(a.intervals) == 0 do return nil, nil
-	return a.intervals[0].lo, a.intervals[len(a.intervals) - 1].hi
-}
-
-// --- booleans ---
-
-Bool_Elem :: enum u8 {
+Bool_Value :: enum u8 {
 	False,
 	True,
 }
 
-Bools :: bit_set[Bool_Elem]
+Bools :: bit_set[Bool_Value]
 
-bools_point :: proc(v: bool) -> Bools {
-	return v ? {.True} : {.False}
+Set :: struct {
+	ints:   Ints,
+	reals:  Reals,
+	words:  ^Words, // nil: no string
+	bools:  Bools,
+	scopes: Scopes,
 }
 
-// --- sets taken as values ---
-//
-// A color can admit a set as a value: `{-> u8}` admits only the value u8, whereas
-// u8 admits its elements. These values are a sort of their own, without order: a
-// finite list of sets, or all sets except a finite list. None is an atom: an atom
-// is already its own singleton.
-
-Set_Values :: struct {
-	values:   []Set, // without duplicates: two equal sets are a single value
-	cofinite: bool, // true: all sets except `values`
+// Prim: a primitive value (§1). A character is a string of length 1.
+Prim :: union {
+	i128,
+	f64,
+	string,
+	bool,
 }
 
-values_point :: proc(v: Set) -> Set_Values {
-	values := make([]Set, 1)
-	values[0] = v
-	return Set_Values{values = values}
+NONE :: Set{}
+
+set_words :: proc(s: Set) -> ^Words {
+	return s.words == nil ? words_empty() : s.words
 }
 
-values_is_empty :: proc(a: Set_Values) -> bool {
-	return !a.cofinite && len(a.values) == 0
-}
-
-values_contains :: proc(a: Set_Values, v: Set) -> bool {
-	return listed(a.values, v) != a.cofinite
-}
-
-listed :: proc(list: []Set, v: Set) -> bool {
-	for x in list do if set_equal(x, v) do return true
-	return false
-}
-
-// listed_or, listed_and, listed_minus: the union, the intersection and the
-// difference of two lists, without duplicates.
-listed_or :: proc(a, b: []Set) -> []Set {
-	out := make([dynamic]Set, 0, len(a) + len(b))
-	append(&out, ..a)
-	for v in b do if !listed(a, v) do append(&out, v)
-	return out[:]
-}
-
-listed_and :: proc(a, b: []Set) -> []Set {
-	out := make([dynamic]Set, 0, len(a))
-	for v in a do if listed(b, v) do append(&out, v)
-	return out[:]
-}
-
-listed_minus :: proc(a, b: []Set) -> []Set {
-	out := make([dynamic]Set, 0, len(a))
-	for v in a do if !listed(b, v) do append(&out, v)
-	return out[:]
-}
-
-values_union :: proc(a, b: Set_Values) -> Set_Values {
-	switch {
-	case !a.cofinite && !b.cofinite:
-		return {listed_or(a.values, b.values), false}
-	case a.cofinite && b.cofinite:
-		return {listed_and(a.values, b.values), true} // ~A | ~B = ~(A & B)
-	case a.cofinite:
-		return {listed_minus(a.values, b.values), true} // ~A | B = ~(A ∖ B)
+set_of :: proc(p: Prim) -> Set {
+	switch v in p {
+	case i128:
+		return Set{ints = ints_point(v)}
+	case f64:
+		return Set{reals = reals_point(v)}
+	case string:
+		return Set{words = words_literal(v)}
+	case bool:
+		return Set{bools = {v ? .True : .False}}
 	}
-	return {listed_minus(b.values, a.values), true}
+	return NONE
 }
 
-values_intersect :: proc(a, b: Set_Values) -> Set_Values {
-	switch {
-	case !a.cofinite && !b.cofinite:
-		return {listed_and(a.values, b.values), false}
-	case a.cofinite && b.cofinite:
-		return {listed_or(a.values, b.values), true} // ~A & ~B = ~(A | B)
-	case a.cofinite:
-		return {listed_minus(b.values, a.values), false} // ~A & B = B ∖ A
-	}
-	return {listed_minus(a.values, b.values), false}
+set_bool :: proc(b: bool) -> Set {
+	return set_of(b)
 }
 
-values_complement :: proc(a: Set_Values) -> Set_Values {
-	return {a.values, !a.cofinite}
-}
-
-// values_subset: there are infinitely many sets, so a list never contains "all
-// except a list".
-values_subset :: proc(a, b: Set_Values) -> bool {
-	switch {
-	case !a.cofinite && !b.cofinite:
-		return len(listed_minus(a.values, b.values)) == 0
-	case !a.cofinite && b.cofinite:
-		return len(listed_and(a.values, b.values)) == 0
-	case a.cofinite && b.cofinite:
-		return len(listed_minus(b.values, a.values)) == 0
-	}
-	return false
-}
-
-// --- the mixed set ---
-
-set_of_ints :: proc(i: Ints) -> Set {
-	return Set{sorts = {.Ints}, ints = i}
-}
-
-set_of_floats :: proc(f: Floats) -> Set {
-	return Set{sorts = {.Floats}, floats = f}
-}
-
-CHAR_EMPTY :: i128(-1)
-
-set_of_chars :: proc(c: Ints) -> Set {
-	return Set{sorts = {.Chars}, chars = c}
-}
-
-// chars_all: all characters, the empty character included.
-chars_all :: proc() -> Ints {
-	return ints_range(CHAR_EMPTY, i128(MAX_RUNE))
-}
-
-// chars_as_strings: each character as the one-letter string; the empty character
-// as the empty string.
-chars_as_strings :: proc(c: Ints) -> Strings {
-	out := Strings{}
-	for iv in c.intervals {
-		lo, _ := iv.lo.?
-		hi, _ := iv.hi.?
-		if lo == CHAR_EMPTY {
-			out = strings_union(out, strings_empty_word())
-			lo = 0
-		}
-		if lo <= hi do out = strings_union(out, strings_runes(rune(lo), rune(hi)))
-	}
-	return out
-}
-
-// as_strings: the strings of a set, its characters included.
-as_strings :: proc(s: Set) -> Strings {
-	return strings_union(s.strings, chars_as_strings(s.chars))
-}
-
-set_of_strings :: proc(s: Strings) -> Set {
-	return Set{sorts = {.Strings}, strings = s}
-}
-
-set_of_bools :: proc(b: Bools) -> Set {
-	return Set{sorts = {.Bools}, bools = b}
-}
-
-// carried: the sorts the set speaks about — those it has kept, and those where its
-// written form has something.
-carried :: proc(s: Set) -> bit_set[Domain] {
-	r := s.sorts
-	if len(s.ints.intervals) > 0 do r += {.Ints}
-	if len(s.floats.intervals) > 0 do r += {.Floats}
-	if len(s.chars.intervals) > 0 do r += {.Chars}
-	if s.strings.re != nil do r += {.Strings}
-	if s.bools != {} do r += {.Bools}
-	if !is_leaf(s.scopes, .Bottom) do r += {.Scopes}
-	if !values_is_empty(s.sets) do r += {.Sets}
-	return r
-}
-
-set_count :: proc(s: Set) -> int {
-	n := 0
-	for d in Domain {
-		n += domain_count(s, d)
-		if n >= 2 do return 2
-	}
-	return n
-}
-
-set_is_empty :: proc(s: Set) -> bool {
-	return set_count(s) == 0
-}
-
-// is_atom: an atomic value — a single element, or no element (none).
-is_atom :: proc(s: Set) -> bool {
-	return set_count(s) <= 1
-}
-
-// The first non-empty sort, in the fixed order of sorts: the default of a set
-// does not depend on how it was written.
-set_first_domain :: proc(s: Set) -> (Domain, bool) {
-	for d in Domain do if domain_count(s, d) > 0 do return d, true
-	return .Ints, false
-}
-
-domain_count :: proc(s: Set, d: Domain) -> int {
-	switch d {
-	case .Ints:
-		return ints_count(s.ints)
-	case .Floats:
-		return floats_count(s.floats)
-	case .Chars:
-		return ints_count(s.chars)
-	case .Strings:
-		return strings_count(s.strings)
-	case .Bools:
-		return card(s.bools)
-	case .Scopes:
-		// a set of scopes is never an atom: a value scope is a ^Scope
-		return bdd_is_empty(s.scopes) ? 0 : 2
-	case .Sets:
-		// likewise: a set of sets is never an atom
-		return values_is_empty(s.sets) ? 0 : 2
-	}
-	return 0
+// set_everything: `~none`, every value.
+set_everything :: proc() -> Set {
+	return set_complement(NONE)
 }
 
 set_union :: proc(a, b: Set) -> Set {
 	return Set {
-		sorts = carried(a) | carried(b),
 		ints = ints_union(a.ints, b.ints),
-		floats = floats_union(a.floats, b.floats),
-		chars = ints_union(a.chars, b.chars),
-		strings = strings_union(a.strings, b.strings),
+		reals = reals_union(a.reals, b.reals),
+		words = words_alt(set_words(a), set_words(b)),
 		bools = a.bools | b.bools,
-		scopes = bdd_or(a.scopes, b.scopes),
-		sets = values_union(a.sets, b.sets),
+		scopes = scopes_union(a.scopes, b.scopes),
 	}
 }
 
-// Two different sorts do not meet: `u8 & string` speaks about nothing, it is
-// none; `0 & 1` still speaks about integers.
 set_intersect :: proc(a, b: Set) -> Set {
 	return Set {
-		sorts = carried(a) & carried(b),
 		ints = ints_intersect(a.ints, b.ints),
-		floats = floats_intersect(a.floats, b.floats),
-		chars = ints_intersect(a.chars, b.chars),
-		strings = strings_intersect(a.strings, b.strings),
+		reals = reals_intersect(a.reals, b.reals),
+		words = words_and(set_words(a), set_words(b)),
 		bools = a.bools & b.bools,
-		scopes = bdd_and(a.scopes, b.scopes),
-		sets = values_intersect(a.sets, b.sets),
+		scopes = scopes_intersect(a.scopes, b.scopes),
 	}
 }
 
-// The complement is taken within the sorts the set carries: `~5` is "any integer
-// except 5", `~'A'` "any character except A", `~"piro"` "any string except piro"
-// — never "anything except" (specs/constraints.md, Negation).
 set_complement :: proc(a: Set) -> Set {
-	r := Set{sorts = carried(a)}
-	if .Ints in r.sorts do r.ints = ints_complement(a.ints)
-	if .Floats in r.sorts do r.floats = floats_complement(a.floats)
-	if .Chars in r.sorts do r.chars = ints_intersect(ints_complement(a.chars), chars_all())
-	if .Strings in r.sorts do r.strings = strings_complement(a.strings)
-	if .Bools in r.sorts do r.bools = ~a.bools
-	if .Scopes in r.sorts do r.scopes = bdd_diff(.Top, a.scopes)
-	if .Sets in r.sorts do r.sets = values_complement(a.sets)
-	return r
-}
-
-// set_diff: a ∖ b, sort by sort; a keeps its sorts.
-set_diff :: proc(a, b: Set) -> Set {
 	return Set {
-		sorts = carried(a),
-		ints = ints_intersect(a.ints, ints_complement(b.ints)),
-		floats = floats_intersect(a.floats, floats_complement(b.floats)),
-		chars = ints_intersect(a.chars, ints_complement(b.chars)),
-		strings = strings_intersect(a.strings, strings_complement(b.strings)),
-		bools = a.bools - b.bools,
-		scopes = bdd_diff(a.scopes, b.scopes),
-		sets = values_intersect(a.sets, values_complement(b.sets)),
+		ints = ints_complement(a.ints),
+		reals = reals_complement(a.reals),
+		words = words_not(set_words(a)),
+		bools = ~a.bools,
+		scopes = scopes_complement(a.scopes),
 	}
 }
 
-// set_top: all atomic values. It is `..` alone: it takes the sort of what it meets
-// (`.. + '_'`: any string that ends with _).
-set_top :: proc() -> Set {
-	return Set{sorts = ~{}, ints = ints_all(), floats = floats_all(), chars = chars_all(), strings = strings_all(), bools = {.False, .True}}
+set_is_none :: proc(a: Set) -> bool {
+	return(
+		ints_empty(a.ints) &&
+		reals_empty(a.reals) &&
+		words_is_empty(set_words(a)) &&
+		a.bools == {} &&
+		scopes_empty(a.scopes) \
+	)
 }
 
 set_subset :: proc(a, b: Set) -> bool {
-	return ints_subset(a.ints, b.ints) &&
-		floats_subset(a.floats, b.floats) &&
-		ints_subset(a.chars, b.chars) &&
-		strings_subset(a.strings, b.strings) &&
-		a.bools <= b.bools &&
-		bdd_subset(a.scopes, b.scopes) &&
-		values_subset(a.sets, b.sets)
+	return set_is_none(set_intersect(a, set_complement(b)))
 }
 
 set_equal :: proc(a, b: Set) -> bool {
-	return set_subset(a, b) && set_subset(b, a)
+	return(
+		ints_equal(a.ints, b.ints) &&
+		reals_equal(a.reals, b.reals) &&
+		words_equal(set_words(a), set_words(b)) &&
+		a.bools == b.bools &&
+		scopes_equal(a.scopes, b.scopes) \
+	)
 }
 
-// The default of a set: the distinguished element of its first sort.
-set_default :: proc(s: Set) -> (Set, bool) {
-	d, ok := set_first_domain(s)
-	if !ok do return {}, false
-	switch d {
-	case .Ints:
-		v, _ := ints_default(s.ints)
-		return set_of_ints(ints_point(v)), true
-	case .Floats:
-		v, _ := floats_default(s.floats)
-		return set_of_floats(floats_point(v)), true
-	case .Chars:
-		lo, _ := ints_bounds(s.chars) // the lowest: the empty character if it is there
-		return set_of_chars(ints_point(lo.? or_else CHAR_EMPTY)), true
-	case .Strings:
-		v, _ := strings_default(s.strings)
-		return set_of_strings(strings_point(v)), true
-	case .Bools:
-		return set_of_bools(.False in s.bools ? {.False} : {.True}), true
-	case .Scopes, .Sets:
-		return {}, false // not an atom: see default_of
+set_has :: proc(a: Set, p: Prim) -> bool {
+	switch v in p {
+	case i128:
+		return ints_contains(a.ints, v)
+	case f64:
+		return reals_contains(a.reals, v)
+	case string:
+		return words_contains(set_words(a), v)
+	case bool:
+		return (v ? Bool_Value.True : Bool_Value.False) in a.bools
 	}
-	return {}, false
+	return false
+}
+
+// set_single: the only element of a, when a is one primitive.
+set_single :: proc(a: Set) -> (p: Prim, ok: bool) {
+	found := 0
+	if !ints_empty(a.ints) {
+		v, single := ints_single(a.ints)
+		if !single do return nil, false
+		p, found = v, found + 1
+	}
+	if !reals_empty(a.reals) {
+		v, single := reals_single(a.reals)
+		if !single do return nil, false
+		p, found = v, found + 1
+	}
+	if w := set_words(a); !words_is_empty(w) {
+		v, single := words_single(w)
+		if !single do return nil, false
+		p, found = v, found + 1
+	}
+	switch a.bools {
+	case {.True}:
+		p, found = true, found + 1
+	case {.False}:
+		p, found = false, found + 1
+	case {.False, .True}:
+		return nil, false
+	}
+	if !scopes_empty(a.scopes) do return nil, false
+	return p, found == 1
+}
+
+// The families of primitives (§4.5): the sets an operator accepts.
+Family :: enum u8 {
+	Int,
+	Real,
+	String,
+	Char,
+	Bool,
+	Count, // an integer ≥ 0: the count of a repetition
+}
+
+family_set :: proc(f: Family) -> Set {
+	switch f {
+	case .Int:
+		return Set{ints = ints_all()}
+	case .Real:
+		return Set{reals = reals_all()}
+	case .String:
+		return Set{words = words_all()}
+	case .Char:
+		return Set{words = words_chars()}
+	case .Bool:
+		return Set{bools = {.False, .True}}
+	case .Count:
+		return Set{ints = ints_between(0, nil)}
+	}
+	return NONE
 }

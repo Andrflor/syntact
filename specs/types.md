@@ -161,9 +161,8 @@ any × any → bool             in
 ?₁::u8 + 1     legal: ?₁::u8 in int
 ```
 
-`[~]` is the bitwise not: `[~]true = false`. It is not `~`. There is no equality
-operator: equality is written `=t`, difference `~t`, and they are tested with `in`
-or with a pattern.
+`[~]` is the bitwise not: `[~]true = false`. It is not `~`. Equality is written
+`=t`, difference `~t`: `a = b` is `a in =b`. There is no `==` and no `!=`.
 
 Every operator except `in` distributes over `|`:
 

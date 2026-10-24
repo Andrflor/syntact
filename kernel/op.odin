@@ -2,602 +2,304 @@ package kernel
 
 import syn "../compiler"
 import "core:fmt"
-import "core:slice"
 
-// type_of of an operator. If both operands are values (an atom, or a form over
-// unknowns), the computation is on the values, and the result is in normal form
-// (`n * 2 - n` is ??0). If they are sets (`u8`, `>0`, `'a'..'z'`), the computation
-// is on their elements: `u8 + 1` is 1..256; and if one depends on unknowns, the
-// type keeps the form of the operation (set_form.odin).
+// THE LAWS OF THE OPERATIONS (specs/types.md §4)
+//
+// apply builds the type that an operation gives. On constant sets the laws
+// compute it: | & ~ component by component (§4.1), an operator by distributing
+// over | and computing on the primitives (§4.5). What no law reduces stays an
+// Apply. An operator applies only to types proven to be in a family it accepts;
+// otherwise it is illegal.
 
-type_op :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
-	if o.left == nil do return type_unary(k, o, env)
-	a := type_of(k, o.left, env)
-	b := type_of(k, o.right, env)
-	if is_invalid(a) do return a
-	if is_invalid(b) do return b
-	return binary(k, o, a, b, context_of(env))
-}
-
-// binary: the operation on two types, in the context where it is written. On a
-// type by cases, it is done case by case, each case with what its branch knows.
-binary :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
-	if x, is_cases := a^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr {return binary(k, o, v, other, ctx)}, k, o, b, ctx)
-	if y, is_cases := b^.(Cases); is_cases do return each_case(y, proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr {return binary(k, o, other, v, ctx)}, k, o, a, ctx)
-	#partial switch o.kind {
-	case .Or, .And:
-		return set_algebra(k, o, a, b)
-	case .Add, .Subtract, .Multiply:
-		return arithmetic(k, o, a, b)
-	case .Equal, .NotEqual, .Less, .Greater, .LessEqual, .GreaterEqual:
-		return comparison(k, o, a, b)
-	case .Cast:
-		return cast_into(k, o, a, b)
-	case .Divide, .Mod:
-		return division(k, o, a, b, ctx)
-	}
-	return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: the operator %v", o.kind))
-}
-
-// each_case: f applied to the value of each case; an error in a case is that of
-// the operation.
-each_case :: proc(c: Cases, f: proc(k: ^Kernel, o: Op, v, other: ^Expr, ctx: Context) -> ^Expr, k: ^Kernel, o: Op, other: ^Expr, ctx: Context) -> ^Expr {
-	out := make([]Case, len(c.cases))
-	for x, i in c.cases {
-		r := f(k, o, x.value, other, with(ctx, x.fact))
-		if is_invalid(r) do return r
-		out[i] = Case{x.fact, r}
-	}
-	return new_expr(Cases{out})
-}
-
-// `|` and `&` operate on sets.
-set_algebra :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	return set_operation(k, Set_Op{kind = o.kind == .Or ? .Union : .Inter}, o.span, a, b)
-}
-
-arith_of :: proc(kind: syn.Operator_Kind) -> Arith {
-	#partial switch kind {
-	case .Subtract:
-		return .Sub
-	case .Multiply:
-		return .Mul
-	}
-	return .Add
-}
-
-arithmetic :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	op := arith_of(o.kind)
-	if is_value(a) && is_value(b) {
-		r, status := value_arith(k, op, a, b)
-		if status != .Ok do return arith_failure(k, o, status, a, b)
-		return r
-	}
-	// On sets, known or depending on unknowns.
-	return set_operation(k, Set_Op{kind = .Arith, arith = op}, o.span, a, b)
-}
-
-// value_arith: on two values, known or not, in normal form.
-value_arith :: proc(k: ^Kernel, op: Arith, a_in, b_in: ^Expr) -> (^Expr, Arith_Status) {
-	a, b := a_in, b_in
-	sa, a_atom := a^.(Set)
-	sb, b_atom := b^.(Set)
-	if a_atom && b_atom {
-		r, status := arith_sets(op, sa, sb)
-		return new_expr(r), status
-	}
-	da, a_ok := value_domain(k, a)
-	db, b_ok := value_domain(k, b)
-	a, da, a_ok = adopt(a, da, a_ok, db, b_ok)
-	b, db, b_ok = adopt(b, db, b_ok, da, a_ok)
-	if !a_ok || !b_ok do return nil, .Unsupported // an unknown of several sorts
-	switch {
-	case da == .Ints && db == .Ints:
-		pa, a_poly := as_int_poly(k, a)
-		pb, b_poly := as_int_poly(k, b)
-		if !a_poly || !b_poly do return nil, .Unsupported
-		r: Poly
-		ok: bool
-		switch op {
-		case .Add:
-			r, ok = poly_add(pa, pb)
-		case .Sub:
-			r, ok = poly_sub(pa, pb)
-		case .Mul:
-			r, ok = poly_mul(pa, pb)
-		}
-		if !ok do return nil, .Unsupported // a coefficient beyond i128
-		return poly_type(r), .Ok
-	case da == .Floats && db == .Floats:
-		switch op {
-		case .Add:
-			return float_add(a, b), .Ok
-		case .Sub:
-			return float_add(a, float_neg(b)), .Ok // a - b = a + (-b), exactly
-		case .Mul:
-			return float_mul(a, b), .Ok
-		}
-	case is_textual(da) && is_textual(db) && op == .Add:
-		return concat(k, a, b), .Ok
-	case op == .Mul && is_textual(da) && db == .Ints:
-		return repeat_term(k, a, b)
-	case op == .Mul && da == .Ints && is_textual(db):
-		return repeat_term(k, b, a)
-	case (da == .Ints && db == .Floats) || (da == .Floats && db == .Ints):
-		return nil, .Unsupported
-	}
-	return nil, .Invalid
-}
-
-// adopt: a variable whose equation is not solved yet takes the sort of the other
-// operand; when integer, it enters the polynomials.
-adopt :: proc(t: ^Expr, d: Domain, ok: bool, other: Domain, other_ok: bool) -> (^Expr, Domain, bool) {
-	if ok || !other_ok do return t, d, ok
-	v, waiting := pending(t)
-	if !waiting do return t, d, ok
-	if other == .Ints do return new_expr(poly_var(v)), other, true
-	return t, other, true
-}
-
-Arith_Status :: enum u8 {
-	Ok,
-	Invalid, // the operator does not apply to these sorts
-	Unsupported, // not in the kernel yet (integer/float mix, too large to be exact)
-}
-
-arith_failure :: proc(k: ^Kernel, o: Op, status: Arith_Status, a, b: ^Expr) -> ^Expr {
-	if status == .Unsupported {
-		return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: '%v' on %s and %s", o.kind, print_type(a), print_type(b)))
-	}
-	return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' does not apply to %s and %s", o.kind, print_type(a), print_type(b)))
-}
-
-// arith_sets: { x op y } on two sets, sort by sort: each sort of `a` combines
-// with the sort of `b` for which the operation exists. On numbers, arithmetic; on
-// strings, `+` concatenates and `*` repeats by a set of counts (`'a'..'z' * 2..4`,
-// `..10 * "ab"`), in both directions. No compatible pair: the operator does not
-// apply.
-arith_sets :: proc(op: Arith, a, b: Set) -> (Set, Arith_Status) {
-	has :: proc(s: Set, d: Domain) -> bool {
-		return domain_count(s, d) > 0
-	}
-	textual :: proc(s: Set) -> bool {
-		return domain_count(s, .Strings) > 0 || domain_count(s, .Chars) > 0
-	}
-	r := Set{}
-	found := false
-	if has(a, .Ints) && has(b, .Ints) {
-		exact: bool
-		r.ints, exact = ints_arith(op, a.ints, b.ints)
-		if !exact do return {}, .Unsupported // a bound beyond i128
-		found = true
-	}
-	if has(a, .Floats) && has(b, .Floats) {
-		r.floats = floats_arith(op, a.floats, b.floats)
-		found = true
-	}
-	// Concatenating or repeating characters gives strings.
-	if textual(a) && textual(b) && op == .Add {
-		r.strings = strings_union(r.strings, strings_concat(as_strings(a), as_strings(b)))
-		found = true
-	}
-	if op == .Mul {
-		for pair in ([2][2]Set{{a, b}, {b, a}}) {
-			if !textual(pair[0]) || !has(pair[1], .Ints) do continue
-			rep, ok := strings_repeat(as_strings(pair[0]), pair[1].ints)
-			if !ok do return {}, .Unsupported // too large for an exact automaton
-			r.strings = strings_union(r.strings, rep)
-			found = true
-		}
-	}
-	if found do return r, .Ok
-	if (has(a, .Ints) && has(b, .Floats)) || (has(a, .Floats) && has(b, .Ints)) do return {}, .Unsupported
-	return {}, .Invalid
-}
-
-// pure_domain: the single sort of a non-empty set that carries only one.
-pure_domain :: proc(s: Set) -> (Domain, bool) {
-	found := false
-	d: Domain
-	for x in Domain {
-		if domain_count(s, x) == 0 do continue
-		if found do return d, false
-		d, found = x, true
-	}
-	return d, found
-}
-
-compare_op_of :: proc(kind: syn.Operator_Kind) -> Compare_Op {
-	#partial switch kind {
-	case .Less:
-		return .Lt
-	case .LessEqual:
-		return .Le
-	case .Greater:
-		return .Gt
-	case .GreaterEqual:
-		return .Ge
-	case .NotEqual:
-		return .Ne
-	}
-	return .Eq
-}
-
-// A comparison gives a boolean: exact when the values decide it, a normal form
-// otherwise. Two different sorts are never equal.
-comparison :: proc(k: ^Kernel, o: Op, a, b: ^Expr) -> ^Expr {
-	op := compare_op_of(o.kind)
-	if is_value(a) && is_value(b) {
-		da, a_ok := value_domain(k, a)
-		db, b_ok := value_domain(k, b)
-		if a_ok && b_ok && da != db && op != .Eq && op != .Ne {
-			return report(k, .Invalid_operator, o.span, fmt.tprintf("'%v' compares two different sorts: %s and %s", o.kind, print_type(a), print_type(b)))
-		}
-		r, status := compare_values(k, op, a, b)
-		if status != .Ok do return arith_failure(k, o, status, a, b)
-		return r
-	}
-	// Two sets compared as values, by their normal forms: only equality makes sense.
-	sa, a_known := normal_set(k, a)
-	sb, b_known := normal_set(k, b)
-	if !a_known || !b_known || (op != .Eq && op != .Ne) {
-		return report(k, .Unsupported, o.span, "not in the kernel yet: this comparison")
-	}
-	return bool_atom(set_equal(sa, sb) == (op == .Eq))
-}
-
-// compare_values: `a ⋈ b` between two values, known or not, in normal form. Two
-// different sorts are never equal, and no order applies between them (Invalid).
-compare_values :: proc(k: ^Kernel, op: Compare_Op, a, b: ^Expr) -> (^Expr, Arith_Status) {
-	da, a_ok := value_domain(k, a)
-	db, b_ok := value_domain(k, b)
-	if a_ok && b_ok && da != db {
-		if op == .Eq || op == .Ne do return bool_atom(op == .Ne), .Ok
-		return nil, .Invalid
-	}
-	pa, a_poly := as_poly(a)
-	pb, b_poly := as_poly(b)
-	if a_poly && b_poly {
-		p, ok := poly_sub(pa, pb)
-		if !ok do return nil, .Unsupported // a coefficient beyond i128
-		return int_compare(k, op, p)
-	}
-	return general_compare(k, op, a, b)
-}
-
-equal_verdict :: proc(a, b: Set) -> Bools {
-	if is_atom(a) && is_atom(b) do return set_equal(a, b) ? {.True} : {.False}
-	if set_is_empty(set_intersect(a, b)) do return {.False}
-	return {.False, .True}
-}
-
-// order_verdict decides `a < b` (etc.) on the envelopes of two sets of numbers
-// or of characters.
-order_verdict :: proc(op: Compare_Op, a, b: Set) -> (Bools, bool) {
-	da, a_pure := pure_domain(a)
-	db, b_pure := pure_domain(b)
-	if !a_pure || !b_pure || da != db do return {}, false
-	alo, ahi, blo, bhi: Maybe(f64)
-	switch da {
-	case .Ints:
-		alo, ahi = to_f64(ints_bounds(a.ints))
-		blo, bhi = to_f64(ints_bounds(b.ints))
-	case .Chars:
-		alo, ahi = to_f64(ints_bounds(a.chars))
-		blo, bhi = to_f64(ints_bounds(b.chars))
-	case .Floats:
-		alo, ahi = floats_bounds(a.floats)
-		blo, bhi = floats_bounds(b.floats)
-	case .Strings, .Bools, .Scopes, .Sets:
-		return {}, false
-	}
-	// lt: a < b is certain; ge: a >= b is certain (and symmetrically).
-	lt := below(ahi, blo, strict = true)
-	le := below(ahi, blo, strict = false)
-	gt := below(bhi, alo, strict = true)
-	ge := below(bhi, alo, strict = false)
+apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
+	for a in args do if is_invalid(a) do return Invalid{}
 	#partial switch op {
-	case .Lt:
-		if lt do return {.True}, true
-		if ge do return {.False}, true
-	case .Le:
-		if le do return {.True}, true
-		if gt do return {.False}, true
-	case .Gt:
-		if gt do return {.True}, true
-		if le do return {.False}, true
-	case .Ge:
-		if ge do return {.True}, true
-		if lt do return {.False}, true
+	case .Or, .And, .Not:
+		return apply_boolean(op, args)
+	case .Is:
+		return apply_is(args[0])
+	case .In:
+		return type_in(args[0], args[1])
+	case .Add, .Sub, .Mul, .Div, .Mod, .Neg, .Bit_And, .Bit_Or, .Xor, .Bit_Not, .Shl, .Shr, .Less, .Less_Eq, .Greater, .Greater_Eq:
+		return apply_operator(k, op, args, span)
 	}
-	return {.False, .True}, true
+	return new_apply(op, ..args)
 }
 
-// below: hi < lo (or hi <= lo), for an upper bound and a lower bound.
-below :: proc(hi, lo: Maybe(f64), strict: bool) -> bool {
-	h, h_ok := hi.?
-	l, l_ok := lo.?
-	if !h_ok || !l_ok do return false
-	return strict ? h < l : h <= l
-}
-
-to_f64 :: proc(lo, hi: Maybe(i128)) -> (Maybe(f64), Maybe(f64)) {
-	l: Maybe(f64) = nil
-	h: Maybe(f64) = nil
-	if v, ok := lo.?; ok do l = f64(v)
-	if v, ok := hi.?; ok do h = f64(v)
-	return l, h
-}
-
-// The unary operators: `-x` on a value; `~X`, `>x`, `<x`, `>=x`, `<=x`, `!=x`
-// build a set.
-type_unary :: proc(k: ^Kernel, o: Op, env: ^Scope) -> ^Expr {
-	t := type_of(k, o.right, env)
-	if is_invalid(t) do return t
-	return unary(k, o, t)
-}
-
-unary :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
-	if x, is_cases := t^.(Cases); is_cases do return each_case(x, proc(k: ^Kernel, o: Op, v, _: ^Expr, _: Context) -> ^Expr {return unary(k, o, v)}, k, o, nil, nil)
-	#partial switch o.kind {
-	case .Subtract:
-		return negate(k, o, t)
+// apply_boolean: | & ~ (§4.1). On constant sets, the normal form computes them.
+apply_boolean :: proc(op: Op, args: []Type) -> Type {
+	sets := make([]Set, len(args))
+	for a, i in args {
+		s, constant := a.(Set)
+		if !constant do return new_apply(op, ..args)
+		sets[i] = s
+	}
+	#partial switch op {
+	case .Or:
+		return set_union(sets[0], sets[1])
+	case .And:
+		return set_intersect(sets[0], sets[1])
 	case .Not:
-		return set_operation(k, Set_Op{kind = .Comp}, o.span, t)
-	case .Greater, .Less, .GreaterEqual, .LessEqual, .NotEqual:
-		return set_operation(k, Set_Op{kind = .Half, half = o.kind}, o.span, t)
+		return set_complement(sets[0])
 	}
-	return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: the prefix operator %v", o.kind))
+	return new_apply(op, ..args)
 }
 
-// negate: `-x`, on a value (known or not) or on a known set.
-negate :: proc(k: ^Kernel, o: Op, t: ^Expr) -> ^Expr {
-	if is_value(t) {
-		d, ok := value_domain(k, t)
-		if ok && d == .Ints {
-			p, _ := as_poly(t)
-			r, r_ok := poly_scale(p, -1)
-			if r_ok do return poly_type(r)
-		}
-		if ok && d == .Floats do return float_neg(t)
-		if !ok do return report(k, .Unsupported, o.span, fmt.tprintf("not in the kernel yet: '-' on an unknown of several sorts: %s", print_type(t)))
-		return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' expects a number: %s", print_type(t)))
+// apply_is: =p = p for a primitive (§4.4).
+apply_is :: proc(t: Type) -> Type {
+	if s, ok := t.(Set); ok {
+		if set_is_none(s) do return s
+		if _, single := set_single(s); single do return s
 	}
-	s, known := normal_set(k, t)
-	if !known do return report(k, .Unsupported, o.span, "not in the kernel yet: '-' on a set that depends on an unknown")
-	d, pure := pure_domain(s)
-	switch {
-	case pure && d == .Ints:
-		return new_expr(set_of_ints(ints_neg(s.ints)))
-	case pure && d == .Floats:
-		return new_expr(set_of_floats(floats_neg(s.floats)))
-	}
-	return report(k, .Invalid_operator, o.span, fmt.tprintf("'-' expects numbers: %s", print_set(s)))
+	return new_apply(.Is, t)
 }
 
-// --- the cast ---
-
-// `x \ T` forces x into the layout T. Between integers, the low bits are kept:
-// (200 + 100) \ u8 is 44, -1 \ u8 is 255, 200 \ i8 is -56. Across sorts, a
-// character gives its code, a boolean 0 or 1, a float its integer part; an integer
-// gives the float, or the boolean (true if it is not zero). An unknown value that
-// already fits in the layout does not change; otherwise the cast stays an
-// operation of the equation, whose values are those of the layout.
-
-Layout :: struct {
-	kind:   Domain, // .Ints, .Floats, .Bools or .Chars
-	bits:   uint,
-	signed: bool,
+// Signature: the families an operator accepts, one per operand (§4.5).
+Signature :: struct {
+	args:   [2]Family,
+	result: Family,
 }
 
-cast_into :: proc(k: ^Kernel, o: Op, a, t: ^Expr) -> ^Expr {
-	target, closed := normal_set(k, t)
-	layout, is_layout := layout_of(target)
-	if !closed || !is_layout do return report(k, .Invalid_Cast, o.span, fmt.tprintf("one can only cast to a layout — an integer of 8 to 64 bits, a float, a boolean, a character: %s", brief(t)))
-	if v, known := a^.(Set); known {
-		x, atom := atom_of(v)
-		r, ok := cast_atom(x, layout)
-		if !atom || !ok do return report(k, .Invalid_Cast, o.span, fmt.tprintf("%s does not cast to %s", brief(a), brief(t)))
-		return new_expr(set_of_atoms({r}))
+signatures :: proc(op: Op) -> []Signature {
+	@(static) add := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .String}, .String}}
+	@(static) arith := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
+	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}}
+	@(static) int_only := []Signature{{{.Int, .Int}, .Int}}
+	@(static) bits := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
+	@(static) neg := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
+	@(static) bit_not := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
+	@(static) compare := []Signature{{{.Int, .Int}, .Bool}, {{.Real, .Real}, .Bool}, {{.Char, .Char}, .Bool}}
+	#partial switch op {
+	case .Add:
+		return add
+	case .Sub, .Div:
+		return arith
+	case .Mul:
+		return mul
+	case .Mod, .Shl, .Shr:
+		return int_only
+	case .Bit_And, .Bit_Or, .Xor:
+		return bits
+	case .Neg:
+		return neg
+	case .Bit_Not:
+		return bit_not
+	case .Less, .Less_Eq, .Greater, .Greater_Eq:
+		return compare
 	}
-	if !is_value(a) do return report(k, .Invalid_Cast, o.span, fmt.tprintf("one can only cast a value: %s", brief(a)))
-	if d, ok := value_domain(k, a); ok && d == layout.kind {
-		if env, _ := envelope(k, a); atoms_subset(env, target) do return a // it already fits in it
-	}
-	args := make([]^Expr, 2)
-	args[0], args[1] = a, new_expr(target)
-	return new_expr(Term{op = .Cast, args = args})
+	return nil
 }
 
-// layout_of: the set is that of a layout.
-layout_of :: proc(s: Set) -> (Layout, bool) {
-	kind, pure := pure_domain(s)
-	if !pure do return {}, false
-	#partial switch kind {
-	case .Ints:
-		lo, hi := ints_bounds(s.ints)
-		l, l_ok := lo.?
-		h, h_ok := hi.?
-		if !l_ok || !h_ok || len(s.ints.intervals) != 1 do return {}, false
-		for bits in ([?]uint{8, 16, 32, 64}) {
-			span := i128(1) << bits
-			if l == 0 && h == span - 1 do return Layout{.Ints, bits, false}, true
-			if l == -span / 2 && h == span / 2 - 1 do return Layout{.Ints, bits, true}, true
-		}
-	case .Floats:
-		if set_equal(s, set_of_floats(floats_all())) do return Layout{kind = .Floats}, true
-	case .Bools:
-		if set_equal(s, set_of_bools({.False, .True})) do return Layout{kind = .Bools}, true
-	case .Chars:
-		if set_equal(s, set_of_chars(chars_all())) do return Layout{kind = .Chars}, true
+// signature_of: the signature whose families contain the operands.
+signature_of :: proc(op: Op, args: []Set) -> (Signature, bool) {
+	for sig in signatures(op) {
+		fits := true
+		for a, i in args do fits &&= set_subset(a, family_set(sig.args[i]))
+		if fits do return sig, true
 	}
 	return {}, false
 }
 
-// cast_atom: a known value, forced into the layout.
-cast_atom :: proc(x: Atom, l: Layout) -> (Atom, bool) {
-	as_int: i128
-	switch v in x {
-	case i128:
-		as_int = v
-	case Char_Atom:
-		as_int = i128(v)
-	case bool:
-		as_int = v ? 1 : 0
-	case f64:
-		if l.kind == .Floats do return v, true
-		if v != v || v > 1e38 || v < -1e38 do return nil, false // NaN, or beyond i128
-		as_int = i128(v) // the integer part
-	case string:
-		return nil, false
+apply_operator :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
+	sets := make([]Set, len(args))
+	for a, i in args {
+		s, constant := a.(Set)
+		if !constant do return new_apply(op, ..args)
+		sets[i] = s
 	}
-	switch l.kind {
-	case .Ints:
-		span := i128(1) << l.bits
-		r := as_int %% span
-		if l.signed && r >= span / 2 do r -= span
-		return r, true
-	case .Floats:
-		return f64(as_int), true
-	case .Bools:
-		return as_int != 0, true
-	case .Chars:
-		if as_int < 0 || as_int > i128(max(rune)) do return nil, false
-		return Char_Atom(as_int), true
-	case .Strings, .Scopes, .Sets:
+	for s in sets do if set_is_none(s) do return NONE // none op c = none
+	sig, legal := signature_of(op, sets)
+	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v does not apply to %s", op, print_types(args)))
+	if (op == .Div || op == .Mod) && sig.args[1] != .Real && ints_contains(sets[1].ints, 0) || op == .Div && sig.args[1] == .Real && reals_contains(sets[1].reals, 0) {
+		return report(k, .Invalid_operator, span, fmt.tprintf("the divisor %s may be 0", print_type(args[1])))
 	}
-	return nil, false
+	if r, exact := compute(op, sig, sets); exact do return r
+	return new_apply(op, ..args)
 }
 
-// --- the division ---
-
-// Between integers, `/` truncates toward zero and `%` gives the remainder, with
-// the sign of the dividend — the machine's division. The divisor is never 0: if it
-// can be, in the context where the division is written, it is an error. Between
-// floats, it is the IEEE 754 division, without error (x / 0 is ±∞). On unknowns,
-// the division stays an operation of the equation, except where it is exact: x / 1
-// is x; a polynomial that d divides for every value of its unknowns, divided by d,
-// is that polynomial over d (2·n / 2 is n, m·(m + 1) / 2 is (m + m·m)/2, their
-// remainder 0); and x % d is x when x is already in 0..d - 1.
-division :: proc(k: ^Kernel, o: Op, a, b: ^Expr, ctx: Context) -> ^Expr {
-	if !is_value(a) || !is_value(b) do return report(k, .Unsupported, o.span, "not in the kernel yet: the division of sets")
-	da, a_ok := value_domain(k, a)
-	db, b_ok := value_domain(k, b)
-	op_name := o.kind == .Divide ? "/" : "%"
-	if !a_ok || !b_ok || da != db || (da != .Ints && da != .Floats) || (da == .Floats && o.kind == .Mod) {
-		return report(k, .Invalid_operator, o.span, fmt.tprintf("'%s' does not apply to %s and %s", op_name, brief(a), brief(b)))
-	}
-	if da == .Floats {
-		x, x_known := float_atom(a)
-		y, y_known := float_atom(b)
-		if x_known && y_known do return new_expr(set_of_floats(floats_point(x / y)))
-		return new_expr(Term{op = .F_Div, args = pair(a, b)})
-	}
-	divisor, _ := envelope(k, b, ctx)
-	if ints_contains(divisor.ints, 0) do return report(k, .Invalid_operator, o.span, fmt.tprintf("the divisor %s can be 0", brief(b)))
-	x, x_known := int_atom(a)
-	y, y_known := int_atom(b)
-	if x_known && y_known do return new_expr(set_of_ints(ints_point(o.kind == .Divide ? x / y : x % y)))
-	if y_known && y == 1 do return o.kind == .Divide ? a : new_expr(set_of_ints(ints_point(0)))
-	if y_known {
-		if q, exact := divided(a, y); exact do return o.kind == .Divide ? poly_type(q) : new_expr(set_of_ints(ints_point(0)))
-	}
-	if y_known && y > 0 && o.kind == .Mod {
-		if values, _ := envelope(k, a, ctx); ints_subset(values.ints, ints_range(0, y - 1)) do return a
-	}
-	return new_expr(Term{op = o.kind == .Divide ? .Div : .Mod, args = pair(a, b)})
-}
-
-// divided: the polynomial a divided by d, when d divides it for every value of its
-// unknowns: the quotient is exact, the remainder 0, and the quotient keeps d as
-// its denominator (`m * (m + 1) / 2` is `(m + m*m)/2`). With integer coefficients,
-// the remainder of a by d depends only on the remainders of its unknowns: trying
-// each of them decides it.
-divided :: proc(a: ^Expr, d: i128) -> (Poly, bool) {
-	p, is_poly := as_poly(a)
-	if !is_poly || den(p) != 1 || d == 0 do return {}, false
-	m := abs(d)
-	vars := make([dynamic]^Var, context.temp_allocator)
-	for mono in p.monos do for x in mono.vars do if !slice.contains(vars[:], x) do append(&vars, x)
-	total: i128 = 1
-	for _ in vars {
-		total *= m
-		if total > MAX_RESIDUES do return {}, false
-	}
-	residues := make([]i128, len(vars), context.temp_allocator)
-	for n in 0 ..< total {
-		rest := n
-		for &r in residues {
-			r = rest % m
-			rest /= m
+// compute: { x op y | x ∈ a, y ∈ b } (§4.5: distribute over |, compute on the
+// primitives). False when the result is not exact in a normal form: the
+// operation then stays an Apply.
+compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
+	a := args[0]
+	switch sig.args[0] {
+	case .Int:
+		#partial switch op {
+		case .Add:
+			return Set{ints = ints_add(a.ints, args[1].ints)}, true
+		case .Sub:
+			return Set{ints = ints_add(a.ints, ints_neg(args[1].ints))}, true
+		case .Neg:
+			return Set{ints = ints_neg(a.ints)}, true
+		case .Bit_Not:
+			return Set{ints = ints_add(ints_neg(a.ints), ints_point(-1))}, true
+		case .Less, .Less_Eq, .Greater, .Greater_Eq:
+			return compare_ints(op, a.ints, args[1].ints), true
 		}
-		sum := p.const %% m
-		for mono in p.monos {
-			term := mono.coef %% m
-			for x in mono.vars {
-				i, _ := slice.linear_search(vars[:], x)
-				term = term * residues[i] %% m
+		return enumerate_ints(op, a.ints, args[1].ints)
+	case .Real:
+		#partial switch op {
+		case .Add:
+			return Set{reals = reals_add(a.reals, args[1].reals)}, true
+		case .Sub:
+			return Set{reals = reals_add(a.reals, reals_neg(args[1].reals))}, true
+		case .Neg:
+			return Set{reals = reals_neg(a.reals)}, true
+		case .Less, .Less_Eq, .Greater, .Greater_Eq:
+			return compare_reals(op, a.reals, args[1].reals), true
+		}
+		#partial switch op {
+		case .Mul:
+			r, exact := reals_mul(a.reals, args[1].reals)
+			return Set{reals = r}, exact
+		case .Div:
+			r, exact := reals_div(a.reals, args[1].reals)
+			return Set{reals = r}, exact
+		}
+	case .String:
+		#partial switch op {
+		case .Add:
+			return Set{words = words_cat(set_words(a), set_words(args[1]))}, true
+		case .Mul:
+			return Set{words = words_repeat(set_words(a), args[1].ints)}, true
+		}
+	case .Char:
+		x_lo, x_hi, _ := words_char_bounds(set_words(a))
+		y_lo, y_hi, _ := words_char_bounds(set_words(args[1]))
+		return compare_ints(op, ints_between(x_lo, x_hi), ints_between(y_lo, y_hi)), true
+	case .Bool:
+		out: Bools
+		for x in a.bools {
+			if op == .Bit_Not {
+				out += {x == .True ? .False : .True}
+				continue
 			}
-			sum = (sum + term) %% m
+			for y in args[1].bools {
+				p, q := x == .True, y == .True
+				r: bool
+				#partial switch op {
+				case .Bit_And:
+					r = p && q
+				case .Bit_Or:
+					r = p || q
+				case .Xor:
+					r = p != q
+				}
+				out += {r ? .True : .False}
+			}
 		}
-		if sum != 0 do return {}, false
+		return Set{bools = out}, true
+	case .Count:
 	}
-	q, ok := poly_scale(p, d < 0 ? -1 : 1)
-	if !ok do return {}, false
-	return over(q, m), true
+	return {}, false
 }
 
-// MAX_RESIDUES: beyond this, the remainders of the unknowns are not tried.
-MAX_RESIDUES :: 1 << 12
+// ENUMERATION_LIMIT: past this many pairs, an operator whose image is not a range
+// stays an Apply instead of being enumerated.
+ENUMERATION_LIMIT :: 4096
 
-pair :: proc(a, b: ^Expr) -> []^Expr {
-	args := make([]^Expr, 2)
-	args[0], args[1] = a, b
-	return args
+enumerate_ints :: proc(op: Op, a, b: Ints) -> (Set, bool) {
+	n, finite_a := ints_size(a, ENUMERATION_LIMIT)
+	m, finite_b := ints_size(b, ENUMERATION_LIMIT)
+	if !finite_a || !finite_b || n * m > ENUMERATION_LIMIT do return {}, false
+	out := make([dynamic]Int_Range)
+	for x in ints_values(a) {
+		for y in ints_values(b) {
+			r, ok := int_operation(op, x, y)
+			if !ok do return {}, false
+			append(&out, Int_Range{r, r})
+		}
+	}
+	return Set{ints = ints_of(out[:])}, true
 }
 
-int_atom :: proc(t: ^Expr) -> (i128, bool) {
-	s, is_set := t^.(Set)
-	if !is_set do return 0, false
-	x, ok := atom_of(s)
-	v, is_int := x.(i128)
-	return v, ok && is_int
+int_operation :: proc(op: Op, x, y: i128) -> (i128, bool) {
+	#partial switch op {
+	case .Mul:
+		return mul_checked(x, y)
+	case .Div:
+		return x / y, true
+	case .Mod:
+		return x % y, true
+	case .Bit_And:
+		return x & y, true
+	case .Bit_Or:
+		return x | y, true
+	case .Xor:
+		return x ~ y, true
+	case .Shl:
+		if y < 0 || y > 126 do return 0, false
+		return mul_checked(x, i128(1) << uint(y))
+	case .Shr:
+		if y < 0 do return 0, false
+		return y > 126 ? (x < 0 ? -1 : 0) : x >> uint(y), true
+	}
+	return 0, false
 }
 
-float_atom :: proc(t: ^Expr) -> (f64, bool) {
-	s, is_set := t^.(Set)
-	if !is_set do return 0, false
-	x, ok := atom_of(s)
-	v, is_float := x.(f64)
-	return v, ok && is_float
+// compare_ints: the booleans that x op y takes for x in a, y in b. `x < y` is
+// possible when min a < max b, and `x >= y` when max a >= min b.
+compare_ints :: proc(op: Op, a, b: Ints) -> Set {
+	below := proc(x, y: Maybe(i128)) -> bool {
+		u, has_u := x.?
+		v, has_v := y.?
+		return !has_u || !has_v || u < v
+	}
+	at_most := proc(x, y: Maybe(i128)) -> bool {
+		u, has_u := x.?
+		v, has_v := y.?
+		return !has_u || !has_v || u <= v
+	}
+	lo_a, hi_a, lo_b, hi_b := ints_min(a), ints_max(a), ints_min(b), ints_max(b)
+	yes, no: bool
+	#partial switch op {
+	case .Less:
+		yes, no = below(lo_a, hi_b), at_most(lo_b, hi_a)
+	case .Less_Eq:
+		yes, no = at_most(lo_a, hi_b), below(lo_b, hi_a)
+	case .Greater:
+		yes, no = below(lo_b, hi_a), at_most(lo_a, hi_b)
+	case .Greater_Eq:
+		yes, no = at_most(lo_b, hi_a), below(lo_a, hi_b)
+	}
+	out: Bools
+	if yes do out += {.True}
+	if no do out += {.False}
+	return Set{bools = out}
 }
 
-// div_envelope: the possible quotients, a and b two sets of integers, b without 0
-// and of a single sign — the truncated division is monotone in each operand there:
-// its extremes are at the corners.
-div_envelope :: proc(a, b: Ints) -> Ints {
-	alo, ahi := ints_bounds(a)
-	blo, bhi := ints_bounds(b)
-	al, al_ok := alo.?
-	ah, ah_ok := ahi.?
-	bl, bl_ok := blo.?
-	bh, bh_ok := bhi.?
-	if !al_ok || !ah_ok || !bl_ok || !bh_ok || (bl <= 0 && bh >= 0) do return ints_all()
-	q := [4]i128{al / bl, al / bh, ah / bl, ah / bh}
-	return ints_range(min(q[0], q[1], q[2], q[3]), max(q[0], q[1], q[2], q[3]))
-}
-
-// mod_envelope: the possible remainders — of absolute value below the largest
-// |b|, with the sign of the dividend (the remainder is not monotone: no corners).
-mod_envelope :: proc(a, b: Ints) -> Ints {
-	blo, bhi := ints_bounds(b)
-	bl, bl_ok := blo.?
-	bh, bh_ok := bhi.?
-	if !bl_ok || !bh_ok do return ints_all()
-	m := max(abs(bl), abs(bh)) - 1
-	alo, ahi := ints_bounds(a)
-	lo, hi := -m, m
-	if l, ok := alo.?; ok do lo = l >= 0 ? 0 : max(l, -m)
-	if h, ok := ahi.?; ok do hi = h <= 0 ? 0 : min(h, m)
-	return ints_range(lo, hi)
+// compare_reals: as compare_ints, with the infimum and supremum of each set; a
+// bound counts for <= only when it is reached.
+compare_reals :: proc(op: Op, a, b: Reals) -> Set {
+	Edge :: struct {
+		v:      Maybe(f64), // nil: infinite
+		closed: bool,
+	}
+	inf := proc(r: Reals) -> Edge {return {r.ranges[0].lo, !r.ranges[0].lo_open}}
+	sup := proc(r: Reals) -> Edge {last := r.ranges[len(r.ranges) - 1];return {last.hi, !last.hi_open}}
+	below := proc(x, y: Edge) -> bool {
+		u, has_u := x.v.?
+		v, has_v := y.v.?
+		return !has_u || !has_v || u < v
+	}
+	at_most := proc(x, y: Edge) -> bool {
+		u, has_u := x.v.?
+		v, has_v := y.v.?
+		return !has_u || !has_v || u < v || (u == v && x.closed && y.closed)
+	}
+	yes, no: bool
+	#partial switch op {
+	case .Less:
+		yes, no = below(inf(a), sup(b)), at_most(inf(b), sup(a))
+	case .Less_Eq:
+		yes, no = at_most(inf(a), sup(b)), below(inf(b), sup(a))
+	case .Greater:
+		yes, no = below(inf(b), sup(a)), at_most(inf(a), sup(b))
+	case .Greater_Eq:
+		yes, no = at_most(inf(b), sup(a)), below(inf(a), sup(b))
+	}
+	out: Bools
+	if yes do out += {.True}
+	if no do out += {.False}
+	return Set{bools = out}
 }

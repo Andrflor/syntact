@@ -1,3 +1,4 @@
 ./compiler/compiler
 ./lsp/lsp
 ./test/test
+kernel/cmd/kernel
