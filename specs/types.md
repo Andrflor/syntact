@@ -446,6 +446,28 @@ values of L.
 - otherwise, it stays an equation: the check cannot conclude, and says so
   (unproven).
 
+The laws that decide it are those of §4, and these:
+
+```text
+x in C = true      when the layout of x is in C:    L & ~C = none
+x in C = false     when it is disjoint from C:      L & C = none
+```
+
+The layout of `?ₖ::L` is L; the layout of a term over unknowns is the term with
+each unknown replaced by its layout: an operator distributes over `|` (§4.5).
+`?₁::u8 + 1` has the layout `1..256`.
+
+An atom `u in S` that stays is decided on each side (Boole): u is `?::(L & S)`,
+then `?::(L & ~S)`; on each side the atom reduces, and the rest of the equation
+with it. A branch types its product for the values that reach it: where its reach
+says `u in S`, u is `?::(L & S)` inside the branch (§6).
+
+```text
+a -> ??::u8
+u8:x -> a + 1                          layout 1..256: not proven
+u8:y -> a ? {<255 -> a + 1  -> 0}      a is ?::(0..254) in the branch: 1..255  ✓
+```
+
 What is checked, and where:
 
 - every binding of a scope that has a color;
