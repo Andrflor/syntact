@@ -95,6 +95,29 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nx -> a + 1.5", "", {.Invalid_operator}},
 	{"a -> ??::u8\nbool:x -> a < 300", "", {}},
 	{"a -> ??::u8\nx -> 10 / a", "", {.Invalid_operator}},
+	// §5.1
+	{"0:x -> {0}", "", {.Constraint_Mismatch}},
+	{"=({0 | 1}):x -> {0} | {1}", "", {.Constraint_Mismatch}},
+	// §5.3
+	{"box -> {x -> 1  y -> x + 1}\nx -> box{x -> 10}.y", "11", {}},
+	{"box -> {x -> 1  y -> x + 1}\nx -> box.y", "2", {}},
+	{"b -> {x -> 0  x -> 1}\nx -> b.x", "1", {}},
+	{"b -> {x -> 0  x -> 1}\nx -> b.x#0", "0", {}},
+	{"x -> {a -> 1  -> a + 1}!", "2", {}},
+	{"x -> {a -> 1}!", "none", {}},
+	{"=({1 2 3 4}):x -> {1 ...{2 3} 4}", "", {}},
+	{"b -> {x -> 1}\nx -> b{y -> 2}", "", {.Invalid_Carve}},
+	{"b -> {u8:x -> 1}\nx -> b{x -> 300}", "", {.Constraint_Mismatch}},
+	{"b -> {u8:x -> 1  u8:y -> x + 1}\nx -> b{x -> 255}", "", {.Constraint_Mismatch}},
+	// §5.4
+	{"{-> false  -> true}:x -> true", "true", {}},
+	{"{-> u8}:x -> u8", "", {}},
+	{"{-> u8}:x -> 5", "", {.Constraint_Mismatch}},
+	{"{u8: u8:}:x -> {1 2}", "", {}},
+	{"{u8:}:x -> {1 2}", "", {.Constraint_Mismatch}},
+	{"Pair -> {u8: u8:}\n{...Pair: string:}:x -> {1 2 \"x\"}", "", {}},
+	{"{string:}:a -> {\"\"}\nx -> a{0}", "", {.Constraint_Mismatch}},
+	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}", "", {.Constraint_Mismatch}},
 }
 
 @(test)

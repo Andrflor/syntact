@@ -56,7 +56,12 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	case .Constraint:
 		build_left(k, s, idx, b)
 	case .Product:
+		// from a production, the binding whose value this scope is, is visible: a
+		// scope names itself only in its productions (specs/types.md §5.5)
 		b.kind = .Product
+		was := s.producing
+		s.producing = true
+		defer s.producing = was
 		operand := data.unary.operand
 		switch {
 		case operand == syn.INVALID_NODE:
@@ -70,7 +75,28 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	case .PointingPull:
 		unsupported(k, idx, "a hole <-")
 	case .Expand:
-		unsupported(k, idx, "the expansion ...")
+		// `...e` places the bindings of e; `...C:` and `...` are runs, in a shape
+		b.kind = .Expand
+		target := data.unary.operand
+		switch {
+		case target == syn.INVALID_NODE:
+		case ast.node_kinds[target] == .Constraint:
+			build_left(k, s, target, b)
+			b.kind = .Expand
+		case:
+			b.value = build_expr(k, s, target)
+		}
+	case .Carve:
+		source := data.carve.source
+		if source != syn.INVALID_NODE && ast.node_kinds[source] == .Constraint {
+			// `C:p{…}`: p, colored by C, is the default of C carved (specs/language/11)
+			build_left(k, s, source, b)
+			d := new(Default_Expr)
+			d.color, d.span = b.color, node_span(k, source)
+			b.value = build_carve(k, s, idx, d)
+		} else {
+			b.value = build_expr(k, s, idx)
+		}
 	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
@@ -126,6 +152,34 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		u := new(Unknown_Expr)
 		u.span = span
 		return u
+	case .ScopeNode:
+		child := new_scope(s, span)
+		for c in syn.node_children(ast, idx) do build_binding(k, child, c)
+		child.complete = true
+		return child
+	case .Property:
+		prop := data.binary.right
+		if data.binary.left == syn.INVALID_NODE do return unsupported(k, idx, "`.x` without a scope before it")
+		if prop == syn.INVALID_NODE || ast.node_kinds[prop] != .Identifier do return unsupported(k, idx, "a property that is not a name")
+		a := new(Access_Expr)
+		a.target = build_expr(k, s, data.binary.left)
+		a.name = syn.node_name_str(ast, prop)
+		a.ordinal = int(ast.node_data[prop].identifier.ordinal)
+		a.span = span
+		return a
+	case .Execute:
+		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
+		c := new(Collapse_Expr)
+		c.target = build_expr(k, s, data.execute.target)
+		c.span = span
+		return c
+	case .Carve:
+		return build_carve(k, s, idx, build_expr(k, s, data.carve.source))
+	case .Constraint:
+		if data.binary.right != syn.INVALID_NODE do return unsupported(k, idx, "a named colored binding as a value")
+		d := new(Default_Expr)
+		d.color, d.span = build_expr(k, s, data.binary.left), span
+		return d
 	}
 	return unsupported(k, idx, fmt.tprintf("the form %v", ast.node_kinds[idx]))
 }
@@ -248,6 +302,32 @@ clone_exprs :: proc(es: []Expr) -> []Expr {
 	return out
 }
 
+// build_carve: `target{args}`. A named argument `x -> v` or `x#n -> v` names the
+// binding it carves; an unnamed one is positional. The arguments are written here.
+build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Expr) -> Expr {
+	ast := k.ast
+	args := make([dynamic]Carve_Arg_Expr)
+	for child in syn.node_carve_children(ast, idx) {
+		a := Carve_Arg_Expr{ordinal = -1, span = node_span(k, child)}
+		#partial switch ast.node_kinds[child] {
+		case .Pointing:
+			left := ast.node_data[child].binary.left
+			if left == syn.INVALID_NODE || ast.node_kinds[left] != .Identifier do return unsupported(k, child, "a carve argument whose name is not an identifier")
+			a.name = syn.node_name_str(ast, left)
+			a.ordinal = int(ast.node_data[left].identifier.ordinal)
+			a.value = build_expr(k, s, ast.node_data[child].binary.right)
+		case .Carve:
+			return unsupported(k, child, "the carve shorthand `z{…}` among arguments")
+		case:
+			a.value = build_expr(k, s, child)
+		}
+		append(&args, a)
+	}
+	c := new(Carve_Expr)
+	c.target, c.args, c.span = target, args[:], node_span(k, idx)
+	return c
+}
+
 // build_name: the last occurrence of the name visible above, up to the prelude.
 build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 	ast := k.ast
@@ -260,8 +340,10 @@ build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 
 // lookup: in each scope from s up, the bindings above the one being built.
 lookup :: proc(s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (Name, bool) {
-	for sc := s; sc != nil; sc = sc.parent {
+	child: ^Scope
+	for sc := s; sc != nil; child, sc = sc, sc.parent {
 		visible := sc.complete ? len(sc.bindings) : len(sc.bindings) - 1
+		if child != nil && child.producing do visible = len(sc.bindings) // the scope names itself
 		if ordinal >= 0 {
 			seen := 0
 			for i in 0 ..< visible {

@@ -14,7 +14,47 @@ Expr :: union {
 	^Operation,
 	^Range_Expr,
 	^Unknown_Expr,
+	^Scope, // a scope literal
+	^Access_Expr,
+	^Collapse_Expr,
+	^Carve_Expr,
+	^Default_Expr,
 	Invalid, // an error already reported
+}
+
+// Access_Expr: `target.name`, `target.name#n`.
+Access_Expr :: struct {
+	target:  Expr,
+	name:    string,
+	ordinal: int, // -1: the last occurrence
+	span:    syn.Span,
+}
+
+// Collapse_Expr: `target!`.
+Collapse_Expr :: struct {
+	target: Expr,
+	span:   syn.Span,
+}
+
+// Carve_Expr: `target{args}`: the arguments are written where the carve is.
+Carve_Expr :: struct {
+	target: Expr,
+	args:   []Carve_Arg_Expr,
+	span:   syn.Span,
+}
+
+Carve_Arg_Expr :: struct {
+	name:    string,
+	ordinal: int,
+	value:   Expr,
+	span:    syn.Span,
+}
+
+// Default_Expr: `C:` in a value: an anonymous binding colored by C, complete with
+// the default of C (specs/language/11, 12).
+Default_Expr :: struct {
+	color: Expr,
+	span:  syn.Span,
 }
 
 // Unknown_Expr: `??` or `??::L`. Without a layout, `C:x -> ??` takes the layout of
@@ -67,6 +107,19 @@ type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
 		return type_range(k, f, v)
 	case ^Unknown_Expr:
 		return new_unknown(k, v.layout == nil ? Type(everything()) : type_of(k, f, v.layout))
+	case ^Scope:
+		return literal_frame(k, v, f)
+	case ^Access_Expr:
+		return access(k, type_of(k, f, v.target), v.name, v.ordinal, v.span)
+	case ^Collapse_Expr:
+		return collapse(k, type_of(k, f, v.target), v.span)
+	case ^Carve_Expr:
+		target := type_of(k, f, v.target)
+		args := make([]Carve_Arg, len(v.args))
+		for a, i in v.args do args[i] = Carve_Arg{a.name, a.ordinal, type_of(k, f, a.value), a.span}
+		return carve(k, target, args, v.span)
+	case ^Default_Expr:
+		return default_of(k, type_of(k, f, v.color))
 	case Invalid:
 		return Invalid{}
 	}

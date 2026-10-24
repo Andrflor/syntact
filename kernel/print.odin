@@ -22,11 +22,42 @@ print_type :: proc(t: Type) -> string {
 	case ^Unknown:
 		return fmt.tprintf("?%d", v.id)
 	case ^Frame:
-		return "{…}"
+		return print_frame(v, 0)
 	case Invalid:
 		return "<invalid>"
 	}
 	return "<nil>"
+}
+
+// print_frame: a scope with the types of its bindings, as far as they are known.
+print_frame :: proc(f: ^Frame, depth: int) -> string {
+	if depth > 3 do return "{…}"
+	parts := make([dynamic]string)
+	for b, i in f.scope.bindings {
+		value := "…"
+		if f.states[i] == .Done {
+			if g, is_frame := f.values[i].(^Frame); is_frame {
+				value = print_frame(g, depth + 1)
+			} else {
+				value = print_type(f.values[i])
+			}
+		}
+		switch b.kind {
+		case .Product:
+			append(&parts, fmt.tprintf("-> %s", value))
+		case .Expand:
+			append(&parts, fmt.tprintf("...%s", value))
+		case .Pull:
+			append(&parts, fmt.tprintf("%s <- %s", b.name, value))
+		case .Push:
+			if b.name == "" {
+				append(&parts, value)
+			} else {
+				append(&parts, fmt.tprintf("%s -> %s", b.name, value))
+			}
+		}
+	}
+	return fmt.tprintf("{{%s}}", strings.join(parts[:], "  "))
 }
 
 OP_SPELLING := [Op]string {

@@ -16,24 +16,26 @@ package kernel
 // has it; none is in c only when c is none; a set taken as a value is in c only
 // when c has it as an element (§5.4). What no law reduces stays `x in c`.
 
-type_in :: proc(x, c: Type) -> Type {
+type_in :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if is_invalid(x) || is_invalid(c) do return Invalid{}
 	xs, x_constant := x.(Set)
 	cs, c_constant := c.(Set)
 	if x_constant && c_constant do return set_bool(set_in(xs, cs))
+	if c, is_frame := c.(^Frame); is_frame do return frame_admits(k, x, c)
+	if _, is_frame := x.(^Frame); is_frame && c_constant do return set_bool(cs.scopes.all)
 	if x_constant && set_is_none(xs) {
 		if c_constant do return set_bool(set_is_none(cs))
 	}
-	if a, is_apply := c.(^Apply); is_apply && a.op == .Is do return type_equal(x, a.args[0])
-	if !c_constant && is_atom(c) do return type_equal(x, c) // x in p = x in =p
+	if a, is_apply := c.(^Apply); is_apply && a.op == .Is do return type_equal(k, x, a.args[0])
+	if !c_constant && is_atom(c) do return type_equal(k, x, c) // x in p = x in =p
 	if a, is_apply := c.(^Apply); is_apply && !(x_constant && set_is_none(xs)) {
 		#partial switch a.op {
 		case .Or:
-			return bool_operation(.Bit_Or, type_in(x, a.args[0]), type_in(x, a.args[1]))
+			return bool_operation(.Bit_Or, type_in(k, x, a.args[0]), type_in(k, x, a.args[1]))
 		case .And:
-			return bool_operation(.Bit_And, type_in(x, a.args[0]), type_in(x, a.args[1]))
+			return bool_operation(.Bit_And, type_in(k, x, a.args[0]), type_in(k, x, a.args[1]))
 		case .Not:
-			return bool_operation(.Bit_Not, type_in(x, a.args[0]), nil)
+			return bool_operation(.Bit_Not, type_in(k, x, a.args[0]), nil)
 		}
 	}
 	return new_apply(.In, x, c)
@@ -41,12 +43,28 @@ type_in :: proc(x, c: Type) -> Type {
 
 // type_equal: x in =t. True when x and t are equal by the laws, false when both
 // are constant and differ.
-type_equal :: proc(x, t: Type) -> Type {
-	if type_same(x, t) do return type_true()
-	xs, x_constant := x.(Set)
-	ts, t_constant := t.(Set)
-	if x_constant && t_constant do return set_bool(set_equal(xs, ts))
+type_equal :: proc(k: ^Kernel, x, t: Type) -> Type {
+	if type_same(k, x, t) do return type_true()
+	if known(k, x) && known(k, t) do return type_false() // two known values, not the same
 	return new_apply(.In, x, new_apply(.Is, t))
+}
+
+// known: t has no unknown, and is in normal form: a constant, a scope whose
+// bindings are known, or a | of known values.
+known :: proc(k: ^Kernel, t: Type) -> bool {
+	#partial switch v in t {
+	case Set:
+		return true
+	case ^Apply:
+		return v.op == .Or && known(k, v.args[0]) && known(k, v.args[1])
+	case ^Frame:
+		for s in frame_slots(k, v) {
+			if binding_of(s).kind == .Expand && binding_of(s).value == nil do return false
+			if !known(k, slot_value(k, s)) do return false
+		}
+		return true
+	}
+	return false
 }
 
 // set_in: x in c, both constant.

@@ -295,14 +295,19 @@ A scope with productions admits what they produce:
 A scope without production is a shape. It admits the scopes of the same structure
 (same names, same kinds, same order) whose every binding is admitted by the color of
 its own. Two different structures have nothing in common. `...C:` admits a run of
-bindings of any length, as `* 0..` does for strings:
+bindings that, taken as a scope, C admits; `...` alone admits any run
+(specs/language/04):
 
 ```text
-{1 2} in {u8: u8:}          = true
-{1 2} in {u8:}              = false         different structures
-{u8:} & {u8: u8:}           = none
-{1 2 3} in {...u8:}         = true
+{1 2} in {u8: u8:}               = true
+{1 2} in {u8:}                   = false         different structures
+{u8:} & {u8: u8:}                = none
+Pair -> {u8: u8:}
+{1 2 "x"} in {...Pair: string:}  = true
 ```
+
+A produced shape admits through its colors, another produced value admits only
+itself (specs/language/12): `{-> {-> u8}}` admits the scope `{-> u8}`, not `u8`.
 
 A binding without a color imposes the structural constraints of its uses. Used with
 `*`, it must admit `*`; if one of its properties is read, that property must exist

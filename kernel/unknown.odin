@@ -426,6 +426,29 @@ substitute :: proc(t: Type, values: map[^Unknown]Set) -> Type {
 	return t
 }
 
+// same_alternatives: two | are the same when each alternative of one is an
+// alternative of the other, in any order (§4.1).
+same_alternatives :: proc(k: ^Kernel, a, b: ^Apply) -> bool {
+	xs, ys := make([dynamic]Type), make([dynamic]Type)
+	alternatives(a, &xs)
+	alternatives(b, &ys)
+	contains := proc(k: ^Kernel, list: []Type, t: Type) -> bool {
+		for u in list do if type_same(k, u, t) do return true
+		return false
+	}
+	for x in xs do if !contains(k, ys[:], x) do return false
+	for y in ys do if !contains(k, xs[:], y) do return false
+	return true
+}
+
+alternatives :: proc(t: Type, out: ^[dynamic]Type) {
+	if a, ok := t.(^Apply); ok && a.op == .Or {
+		for arg in a.args do alternatives(arg, out)
+		return
+	}
+	append(out, t)
+}
+
 // poly_normal: a polynomial without unknowns is its constant.
 poly_normal :: proc(p: Poly) -> Type {
 	if c, constant := poly_is_constant(p); constant do return set_of(c)
@@ -433,7 +456,7 @@ poly_normal :: proc(p: Poly) -> Type {
 }
 
 // type_same: a and b are the same type by the laws: equal normal forms.
-type_same :: proc(a, b: Type) -> bool {
+type_same :: proc(k: ^Kernel, a, b: Type) -> bool {
 	switch x in a {
 	case Set:
 		y, ok := b.(Set)
@@ -447,11 +470,12 @@ type_same :: proc(a, b: Type) -> bool {
 	case ^Apply:
 		y, ok := b.(^Apply)
 		if !ok || x.op != y.op || len(x.args) != len(y.args) do return false
-		for arg, i in x.args do if !type_same(arg, y.args[i]) do return false
+		if x.op == .Or do return same_alternatives(k, x, y)
+		for arg, i in x.args do if !type_same(k, arg, y.args[i]) do return false
 		return true
 	case ^Frame:
 		y, ok := b.(^Frame)
-		return ok && x == y
+		return ok && frame_same(k, x, y)
 	case Invalid:
 	}
 	return false

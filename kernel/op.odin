@@ -19,7 +19,7 @@ apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
 	case .Is:
 		return apply_is(args[0])
 	case .In:
-		return type_in(args[0], args[1])
+		return type_in(k, args[0], args[1])
 	case .Add, .Sub, .Mul, .Div, .Mod, .Neg, .Bit_And, .Bit_Or, .Xor, .Bit_Not, .Shl, .Shr, .Less, .Less_Eq, .Greater, .Greater_Eq:
 		return apply_operator(k, op, args, span)
 	case .Range, .Range_From, .Range_To:
