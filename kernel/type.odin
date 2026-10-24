@@ -53,6 +53,8 @@ Op :: enum u8 {
 	Range,
 	Range_From,
 	Range_To,
+	// §6: [target, cover, product, …], a nil cover for the default branch
+	Match,
 }
 
 Apply :: struct {

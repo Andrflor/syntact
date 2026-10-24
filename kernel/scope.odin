@@ -82,12 +82,12 @@ frame_of :: proc(f: ^Frame, s: ^Scope) -> ^Frame {
 
 // literal_frame: the frame of the scope literal s written in f — the same one each
 // time it is asked. A new frame is checked once (check.odin).
-literal_frame :: proc(k: ^Kernel, s: ^Scope, f: ^Frame) -> ^Frame {
+literal_frame :: proc(k: ^Kernel, s: ^Scope, f: ^Frame, check := true) -> ^Frame {
 	key := [2]rawptr{s, f}
 	if g, ok := k.literals[key]; ok do return g
 	g := new_frame(s, f)
 	k.literals[key] = g
-	if k.quiet == 0 do append(&k.pending, g)
+	if check && k.quiet == 0 do append(&k.pending, g)
 	return g
 }
 

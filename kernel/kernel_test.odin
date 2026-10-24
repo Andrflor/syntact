@@ -118,6 +118,18 @@ SPEC_CASES := []Spec_Case {
 	{"Pair -> {u8: u8:}\n{...Pair: string:}:x -> {1 2 \"x\"}", "", {}},
 	{"{string:}:a -> {\"\"}\nx -> a{0}", "", {.Constraint_Mismatch}},
 	{"f -> {\n  1..255:n\n  -> f{n -> n - 1}\n}", "", {.Constraint_Mismatch}},
+	// §6
+	{"x -> 5 ? {0 -> \"zero\"  -> \"many\"}", `"many"`, {}},
+	{"x -> 0 ? {0 -> \"zero\"  -> \"many\"}", `"zero"`, {}},
+	{"x -> 5 ? {>0 -> 1  -> 2}", "1", {}},
+	{"x -> 5 ? {u8: -> 1  -> 2}", "2", {}},
+	{"x -> 0 ? {u8: -> 1  -> 2}", "1", {}},
+	{"x -> 5 ? {=4 -> 1}", "", {.Non_Exhaustive_Pattern}},
+	{"a -> ??::u8\nu8:x -> a ? {<10 -> a + 3  -> 10}", "", {}},
+	{"a -> ??::u8\nu8:x -> a ? {<255 -> a + 1  -> 0}", "", {}},
+	{"a -> ??::u8\nu8:x -> a ? {<=255 -> a + 1  -> 0}", "", {.Constraint_Mismatch}},
+	{"u8:a -> ??\nx -> a ? {=5 -> 1}", "", {.Non_Exhaustive_Pattern}},
+	{"a -> ??::u8\nr -> a ? {<10 -> a + 3  -> 10}\n(bool | string):x -> a ? {0..120 -> true  -> \"x\"}", "", {}},
 }
 
 @(test)

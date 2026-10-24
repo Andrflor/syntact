@@ -12,7 +12,7 @@ import "core:fmt"
 // otherwise it is illegal.
 
 apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
-	for a in args do if is_invalid(a) do return Invalid{}
+	for a in args do if a != nil && is_invalid(a) do return Invalid{}
 	#partial switch op {
 	case .Or, .And, .Not:
 		return apply_boolean(op, args)
@@ -24,6 +24,8 @@ apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
 		return apply_operator(k, op, args, span)
 	case .Range, .Range_From, .Range_To:
 		return apply_range(k, op, args, span)
+	case .Match:
+		return apply_match(k, args)
 	}
 	return new_apply(op, ..args)
 }

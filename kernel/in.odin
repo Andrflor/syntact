@@ -26,6 +26,9 @@ type_in :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if x_constant && set_is_none(xs) {
 		if c_constant do return set_bool(set_is_none(cs))
 	}
+	// a pattern gives one of its products: `in` enters each branch
+	if a, is_apply := x.(^Apply); is_apply && a.op == .Match do return map_products(k, a, proc(k: ^Kernel, p, other: Type) -> Type {return type_in(k, p, other)}, c)
+	if a, is_apply := c.(^Apply); is_apply && a.op == .Match do return map_products(k, a, proc(k: ^Kernel, p, other: Type) -> Type {return type_in(k, other, p)}, x)
 	if a, is_apply := c.(^Apply); is_apply && a.op == .Is do return type_equal(k, x, a.args[0])
 	if !c_constant && is_atom(c) do return type_equal(k, x, c) // x in p = x in =p
 	if a, is_apply := c.(^Apply); is_apply && !(x_constant && set_is_none(xs)) {

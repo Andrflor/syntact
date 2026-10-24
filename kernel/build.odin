@@ -175,6 +175,8 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		return c
 	case .Carve:
 		return build_carve(k, s, idx, build_expr(k, s, data.carve.source))
+	case .Pattern:
+		return build_match(k, s, idx)
 	case .Constraint:
 		if data.binary.right != syn.INVALID_NODE do return unsupported(k, idx, "a named colored binding as a value")
 		d := new(Default_Expr)
@@ -300,6 +302,31 @@ clone_exprs :: proc(es: []Expr) -> []Expr {
 	out := make([]Expr, len(es))
 	copy(out, es)
 	return out
+}
+
+// build_match: `target ? {cover -> product …}`. Each branch is a scope under s,
+// whose production is the product.
+build_match :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
+	ast := k.ast
+	data := ast.node_data[idx].pattern
+	if data.target == syn.INVALID_NODE do return unsupported(k, idx, "a pattern without a target")
+	m := new(Match_Expr)
+	m.target, m.span = build_expr(k, s, data.target), node_span(k, idx)
+	pairs := syn.node_pattern_branches(ast, idx)
+	branches := make([dynamic]Branch_Expr)
+	for i := 0; i + 1 < len(pairs); i += 2 {
+		cover, product := pairs[i], pairs[i + 1]
+		if product == syn.INVALID_NODE do return unsupported(k, idx, "a branch without a product")
+		b := Branch_Expr{span = node_span(k, cover != syn.INVALID_NODE ? cover : product)}
+		if cover != syn.INVALID_NODE do b.cover = build_expr(k, s, cover)
+		b.scope = new_scope(s, b.span)
+		append(&b.scope.bindings, Binding{kind = .Product, span = node_span(k, product)})
+		b.scope.bindings[0].value = build_expr(k, b.scope, product)
+		b.scope.complete = true
+		append(&branches, b)
+	}
+	m.branches = branches[:]
+	return m
 }
 
 // build_carve: `target{args}`. A named argument `x -> v` or `x#n -> v` names the

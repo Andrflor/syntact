@@ -45,6 +45,9 @@ is_atom :: proc(t: Type) -> bool {
 			return false
 		case .In:
 			return true
+		case .Match:
+			for p in match_products(v) do if !is_atom(p) do return false
+			return true
 		}
 		for a in v.args do if !is_atom(a) do return false
 		return true
@@ -58,19 +61,21 @@ is_atom :: proc(t: Type) -> bool {
 
 // envelope: the values an atomic t may take, for every value of its unknowns;
 // a set that contains them all. False when it cannot be computed.
-envelope :: proc(t: Type) -> (result: Set, ok: bool) {
+envelope :: proc(t: Type, narrow: map[^Unknown]Set = nil) -> (result: Set, ok: bool) {
 	switch v in t {
 	case Set:
 		return v, is_atom(v)
 	case ^Unknown:
-		return layout_envelope(v.layout)
+		if n, ok := narrow[v]; ok do return n, true
+		return layout_envelope(v.layout, narrow)
 	case Poly:
-		return poly_envelope(v)
+		return poly_envelope(v, narrow)
 	case ^Apply:
 		if !is_atom(v) do return {}, false
-		if v.op == .In do return in_envelope(v.args[0], v.args[1])
+		if v.op == .In do return in_envelope(v.args[0], v.args[1], narrow)
+		if v.op == .Match do return match_envelope(v, narrow)
 		sets := make([]Set, len(v.args))
-		for a, i in v.args do sets[i] = envelope(a) or_return
+		for a, i in v.args do sets[i] = envelope(a, narrow) or_return
 		for s in sets do if set_is_none(s) do return NONE, true
 		sig, legal := signature_of(v.op, sets)
 		if !legal do return {}, false
@@ -83,19 +88,19 @@ envelope :: proc(t: Type) -> (result: Set, ok: bool) {
 
 // layout_envelope: every value the layout L may admit, whatever the earlier
 // unknowns it depends on.
-layout_envelope :: proc(t: Type) -> (result: Set, ok: bool) {
+layout_envelope :: proc(t: Type, narrow: map[^Unknown]Set = nil) -> (result: Set, ok: bool) {
 	#partial switch v in t {
 	case Set:
 		return v, true
 	case ^Apply:
 		#partial switch v.op {
 		case .Or:
-			a := layout_envelope(v.args[0]) or_return
-			b := layout_envelope(v.args[1]) or_return
+			a := layout_envelope(v.args[0], narrow) or_return
+			b := layout_envelope(v.args[1], narrow) or_return
 			return set_union(a, b), true
 		case .And:
-			a, a_ok := layout_envelope(v.args[0])
-			b, b_ok := layout_envelope(v.args[1])
+			a, a_ok := layout_envelope(v.args[0], narrow)
+			b, b_ok := layout_envelope(v.args[1], narrow)
 			_ = a_ok || b_ok
 			if a_ok && b_ok do return set_intersect(a, b), true
 			if a_ok do return a, true
@@ -103,12 +108,12 @@ layout_envelope :: proc(t: Type) -> (result: Set, ok: bool) {
 		case .Range, .Range_From, .Range_To:
 			lo, hi: Set
 			has_lo, has_hi := v.op != .Range_To, v.op != .Range_From
-			if has_lo do lo = envelope(v.args[0]) or_return
-			if has_hi do hi = envelope(v.args[len(v.args) - 1]) or_return
+			if has_lo do lo = envelope(v.args[0], narrow) or_return
+			if has_hi do hi = envelope(v.args[len(v.args) - 1], narrow) or_return
 			return range_hull(lo, hi, has_lo, has_hi)
 		}
 	}
-	return envelope(t)
+	return envelope(t, narrow)
 }
 
 // range_hull: every value between the smallest possible low bound and the
@@ -124,12 +129,13 @@ range_hull :: proc(lo, hi: Set, has_lo, has_hi: bool) -> (Set, bool) {
 
 // poly_envelope: the integers p may take, by interval arithmetic on the
 // envelopes of its unknowns — a safe envelope, exact for one unknown of degree 1.
-poly_envelope :: proc(p: Poly) -> (result: Set, ok: bool) {
+poly_envelope :: proc(p: Poly, narrow: map[^Unknown]Set = nil) -> (result: Set, ok: bool) {
 	sum := ints_point(p.constant)
 	for m in p.monos {
 		term := ints_point(m.coef)
 		for v in m.vars {
-			e := layout_envelope(v.layout) or_return
+			e, narrowed := narrow[v]
+			if !narrowed do e = layout_envelope(v.layout, narrow) or_return
 			term = ints_hull_mul(term, e.ints)
 		}
 		sum = ints_add(sum, term)
@@ -193,14 +199,14 @@ ints_hull_div :: proc(a: Ints, d: i128) -> Ints {
 }
 
 // in_envelope: the booleans `x in c` may take, x atomic.
-in_envelope :: proc(x, c: Type) -> (result: Set, ok: bool) {
-	e := envelope(x) or_return
+in_envelope :: proc(x, c: Type, narrow: map[^Unknown]Set = nil) -> (result: Set, ok: bool) {
+	e := envelope(x, narrow) or_return
 	yes, no := true, true
 	if cs, constant := c.(Set); constant {
 		yes = !set_is_none(set_intersect(e, cs))
 		no = !set_subset(e, cs)
 	} else if a, is_apply := c.(^Apply); is_apply && a.op == .Is && is_atom(a.args[0]) {
-		t := envelope(a.args[0]) or_return
+		t := envelope(a.args[0], narrow) or_return
 		yes = !set_is_none(set_intersect(e, t))
 		_, single_e := set_single(e)
 		no = !(single_e && set_equal(e, t))
@@ -330,7 +336,7 @@ collect_constants :: proc(t: Type, out: ^[dynamic]Set) {
 	case ^Unknown:
 		collect_constants(v.layout, out)
 	case ^Apply:
-		for a in v.args do collect_constants(a, out)
+		for a in v.args do if a != nil do collect_constants(a, out)
 	}
 }
 
@@ -384,7 +390,7 @@ collect_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
 		poly_unknowns(v, &vars)
 		for u in vars do collect_unknowns(u, out)
 	case ^Apply:
-		for a in v.args do collect_unknowns(a, out)
+		for a in v.args do if a != nil do collect_unknowns(a, out)
 	case Set, ^Frame, Invalid:
 	}
 }
@@ -418,7 +424,7 @@ substitute :: proc(t: Type, values: map[^Unknown]Set) -> Type {
 		return poly_normal(result)
 	case ^Apply:
 		args := make([]Type, len(v.args))
-		for a, i in v.args do args[i] = substitute(a, values)
+		for a, i in v.args do if a != nil do args[i] = substitute(a, values)
 		scratch: Kernel // an assignment cannot make an operation illegal: its envelope was checked
 		return apply(&scratch, v.op, args, {})
 	case Set, ^Frame, Invalid:
@@ -457,6 +463,7 @@ poly_normal :: proc(p: Poly) -> Type {
 
 // type_same: a and b are the same type by the laws: equal normal forms.
 type_same :: proc(k: ^Kernel, a, b: Type) -> bool {
+	if a == nil || b == nil do return a == nil && b == nil
 	switch x in a {
 	case Set:
 		y, ok := b.(Set)

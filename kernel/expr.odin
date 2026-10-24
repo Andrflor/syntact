@@ -19,6 +19,7 @@ Expr :: union {
 	^Collapse_Expr,
 	^Carve_Expr,
 	^Default_Expr,
+	^Match_Expr,
 	Invalid, // an error already reported
 }
 
@@ -120,6 +121,8 @@ type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
 		return carve(k, target, args, v.span)
 	case ^Default_Expr:
 		return default_of(k, type_of(k, f, v.color))
+	case ^Match_Expr:
+		return type_match(k, f, v)
 	case Invalid:
 		return Invalid{}
 	}

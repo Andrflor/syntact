@@ -85,6 +85,7 @@ OP_SPELLING := [Op]string {
 	.Range      = "..",
 	.Range_From = "..",
 	.Range_To   = "..",
+	.Match      = "?",
 }
 
 print_poly :: proc(p: Poly) -> string {
@@ -118,6 +119,16 @@ print_poly :: proc(p: Poly) -> string {
 
 print_apply :: proc(a: ^Apply) -> string {
 	#partial switch a.op {
+	case .Match:
+		parts := make([dynamic]string)
+		for i := 1; i + 1 < len(a.args); i += 2 {
+			if a.args[i] == nil {
+				append(&parts, fmt.tprintf("-> %s", print_type(a.args[i + 1])))
+			} else {
+				append(&parts, fmt.tprintf("%s -> %s", print_type(a.args[i]), print_type(a.args[i + 1])))
+			}
+		}
+		return fmt.tprintf("%s ? {{%s}}", print_operand(a.args[0]), strings.join(parts[:], "  "))
 	case .Range:
 		return fmt.tprintf("%s..%s", print_operand(a.args[0]), print_operand(a.args[1]))
 	case .Range_From:
