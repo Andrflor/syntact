@@ -35,8 +35,6 @@ type_match :: proc(k: ^Kernel, f: ^Frame, m: ^Match_Expr) -> Type {
 	args := make([dynamic]Type)
 	append(&args, t)
 	taken := type_false() // t in one of the covers above
-	taken_sets := NONE // the same, while the covers are constant
-	constant_covers := true
 	for b in m.branches {
 		cover: Type
 		admits := type_true()
@@ -47,14 +45,14 @@ type_match :: proc(k: ^Kernel, f: ^Frame, m: ^Match_Expr) -> Type {
 		}
 		if is_bool(admits, false) do continue
 		reach := bool_operation(.Bit_And, admits, bool_operation(.Bit_Not, taken, nil))
-		if never, _ := decide(bool_operation(.Bit_Not, reach, nil), k.narrow); never == .True do continue // no value reaches it
-		product := branch_product(k, b.scope, f, t, cover, &taken_sets, &constant_covers)
+		if never, _ := decide(guarded(k.guard, bool_operation(.Bit_Not, reach, nil))); never == .True do continue // no value reaches it
+		product := branch_product(k, b.scope, f, reach)
 		if len(args) == 1 && is_bool(admits, true) do return product // the first branch that admits t
 		append(&args, cover, product)
 		taken = bool_operation(.Bit_Or, taken, admits)
 		if is_bool(admits, true) do break
 	}
-	switch verdict, counterexample := decide(taken, k.narrow); verdict {
+	switch verdict, counterexample := decide(guarded(k.guard, taken)); verdict {
 	case .True:
 	case .False:
 		when_ := counterexample == "" ? "" : fmt.tprintf(" (%s)", counterexample)
@@ -72,28 +70,13 @@ branch_frame :: proc(k: ^Kernel, s: ^Scope, f: ^Frame) -> ^Frame {
 	return literal_frame(k, s, f, false)
 }
 
-// branch_product: the product of a branch. What it checks holds for the values of
-// the target that reach the branch: when the target is an unknown and the covers
-// are constant, the unknown is narrowed to them while the product is typed (§6:
-// for each value of the target, the laws apply).
-branch_product :: proc(k: ^Kernel, s: ^Scope, f: ^Frame, t, cover: Type, taken: ^Set, constant_covers: ^bool) -> Type {
-	u := target_unknown(t)
-	cs, constant := cover.(Set)
-	if cover != nil && !constant do constant_covers^ = false
-	if u == nil || !constant_covers^ do return value_type(k, branch_frame(k, s, f), 0)
-	values, known_values := k.narrow[u]
-	if !known_values {
-		values, known_values = layout_envelope(u.layout)
-		if !known_values do return value_type(k, branch_frame(k, s, f), 0)
-	}
-	part := set_intersect(values, set_complement(taken^))
-	if cover != nil do part = set_intersect(part, cs)
-	if cover != nil do taken^ = set_union(taken^, cs)
-	previous := k.narrow
-	k.narrow = copy_narrow(previous)
-	if k.narrow == nil do k.narrow = make(map[^Unknown]Set)
-	k.narrow[u] = part
-	defer k.narrow = previous
+// branch_product: the product of a branch, typed under the condition that
+// reaches it: what it checks holds for the values of the target that reach the
+// branch (§6: for each value of the target, the laws apply).
+branch_product :: proc(k: ^Kernel, s: ^Scope, f: ^Frame, reach: Type) -> Type {
+	outer := k.guard
+	k.guard = outer == nil ? reach : bool_operation(.Bit_And, outer, reach)
+	defer k.guard = outer
 	return value_type(k, branch_frame(k, s, f), 0)
 }
 

@@ -15,15 +15,75 @@ package kernel
 //
 // a polynomial in m when g is one (Faulhaber), for every m from b up.
 
-// recursion_of: the collapse of g, when it would unfold the production being
-// typed again on unknowns: the equation, not unfolded.
+// recursion_of: the collapse of g from inside the production of a frame of the
+// same scope: a recursive call, which stays an operation — the equation is never
+// unfolded while it is posed.
 recursion_of :: proc(k: ^Kernel, g: ^Frame) -> (Type, bool) {
 	if g.source == nil do return nil, false
-	recursive := false
-	for h in k.producing do if h.scope == g.scope && h.parent == g.parent do recursive = true
-	if !recursive do return nil, false
-	for _, o in g.overrides do if !known(k, o.type) do return new_apply(.Recur, g), true
+	for h in k.producing do if h.scope == g.scope && h.parent == g.parent do return new_apply(.Recur, g), true
 	return nil, false
+}
+
+// substitute_equation: the collapse of a carve g whose source produces an
+// equation in the unknowns that g carves: that equation, the unknowns given the
+// values of the carve. sum{n -> 5}! is (sum!) with ?0 = 5.
+substitute_equation :: proc(k: ^Kernel, g: ^Frame) -> (Type, bool) {
+	source := g.source
+	if source == nil do return nil, false
+	values := make(map[^Unknown]Set)
+	for i, o in g.overrides {
+		v, is_set := o.type.(Set)
+		u := target_unknown(value_type(k, source, i))
+		if !is_set || u == nil do return nil, false
+		values[u] = v
+	}
+	for s in shape_slots(k, source) {
+		if binding_of(s).kind != .Product do continue
+		if s.frame.states[s.index] == .In_Progress do return nil, false
+		equation := slot_value(k, s)
+		if has_recursion(equation) do return nil, false
+		return substitute(equation, values), true
+	}
+	return nil, false
+}
+
+// unfold: in the production t of f, each recursive call on known arguments
+// replaced by its value — when the recursion is proven to end: an integer
+// argument that moves strictly toward a bound of its color (a well-founded
+// order). Otherwise the call stays, and so does the equation.
+unfold :: proc(k: ^Kernel, f: ^Frame, t: Type) -> Type {
+	a, is_apply := t.(^Apply)
+	if !is_apply do return t
+	if a.op == .Recur {
+		g := a.args[0].(^Frame)
+		h := frame_of(f, g.scope) // the frame of the scope that calls itself
+		if h == nil || !ends(k, h, g) do return t
+		return collapse(k, g, {})
+	}
+	if !has_recursion(t) do return t
+	args := make([]Type, len(a.args))
+	for arg, i in a.args do if arg != nil do args[i] = unfold(k, f, arg)
+	if a.op == .Match do return apply_match(k, args)
+	return apply(k, a.op, args, {})
+}
+
+// ends: the call g, made from f, moves an integer argument strictly toward a
+// bound of its color.
+ends :: proc(k: ^Kernel, f: ^Frame, g: ^Frame) -> bool {
+	for i, o in g.overrides {
+		before, known_before := ints_single(as_set(value_type(k, f, i)).ints)
+		after, known_after := ints_single(as_set(o.type).ints)
+		color, colored := color_type(k, f, i).(Set)
+		if !known_before || !known_after || !colored do continue
+		if after < before && ints_min(color.ints) != nil do return true
+		if after > before && ints_max(color.ints) != nil do return true
+	}
+	return false
+}
+
+as_set :: proc(t: Type) -> Set {
+	s, _ := t.(Set)
+	return s
 }
 
 has_recursion :: proc(t: Type) -> bool {

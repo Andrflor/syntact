@@ -31,6 +31,12 @@ type_in :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if a, is_apply := c.(^Apply); is_apply && a.op == .Match do return map_products(k, a, proc(k: ^Kernel, p, other: Type) -> Type {return type_in(k, other, p)}, x)
 	if a, is_apply := c.(^Apply); is_apply && a.op == .Is do return type_equal(k, x, a.args[0])
 	if !c_constant && is_atom(c) do return type_equal(k, x, c) // x in p = x in =p
+	// (a * u + b) / d in S = u in {v | (a * v + b) / d in S}: the preimage
+	if p, is_poly := x.(Poly); is_poly && c_constant {
+		if u, a, b, linear := linear_in(p); linear && !(a == 1 && b == 0 && p.denom == 1) {
+			return type_in(k, poly_var(u), Set{ints = preimage(cs.ints, a, b, p.denom)})
+		}
+	}
 	if a, is_apply := c.(^Apply); is_apply && !(x_constant && set_is_none(xs)) {
 		#partial switch a.op {
 		case .Or:
@@ -48,6 +54,10 @@ type_in :: proc(k: ^Kernel, x, c: Type) -> Type {
 // are constant and differ.
 type_equal :: proc(k: ^Kernel, x, t: Type) -> Type {
 	if type_same(k, x, t) do return type_true()
+	// x in =t = t in =x: for a primitive x, t in x
+	if xs, constant := x.(Set); constant && !is_constant(t) && is_atom(t) {
+		if _, primitive := set_single(xs); primitive do return type_in(k, t, xs)
+	}
 	if known(k, x) && known(k, t) do return type_false() // two known values, not the same
 	return new_apply(.In, x, new_apply(.Is, t))
 }
@@ -68,6 +78,40 @@ known :: proc(k: ^Kernel, t: Type) -> bool {
 		return true
 	}
 	return false
+}
+
+// linear_in: p = (a * u + b) / d, one unknown u of degree 1.
+linear_in :: proc(p: Poly) -> (u: ^Unknown, a, b: i128, ok: bool) {
+	if len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return
+	return p.monos[0].vars[0], p.monos[0].coef, p.constant, true
+}
+
+// preimage: the integers v such that (a * v + b) / d is in s, a ≠ 0, d > 0.
+preimage :: proc(s: Ints, a, b, d: i128) -> Ints {
+	out := make([dynamic]Int_Range)
+	for r in s.ranges {
+		// d * lo <= a * v + b <= d * hi
+		lo, hi: Maybe(i128)
+		if l, ok := r.lo.?; ok do lo = l * d - b
+		if h, ok := r.hi.?; ok do hi = h * d - b
+		if a < 0 do lo, hi = neg_bound(hi), neg_bound(lo)
+		m := abs(a)
+		from, to: Maybe(i128)
+		if l, ok := lo.?; ok do from = ceil_div(l, m)
+		if h, ok := hi.?; ok do to = floor_div(h, m)
+		append(&out, Int_Range{from, to})
+	}
+	return ints_of(out[:])
+}
+
+floor_div :: proc(x, y: i128) -> i128 {
+	q := x / y
+	if (x % y != 0) && ((x < 0) != (y < 0)) do q -= 1
+	return q
+}
+
+ceil_div :: proc(x, y: i128) -> i128 {
+	return -floor_div(-x, y)
 }
 
 // set_in: x in c, both constant.

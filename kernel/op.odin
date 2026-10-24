@@ -67,6 +67,8 @@ Signature :: struct {
 signatures :: proc(op: Op) -> []Signature {
 	@(static) add := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .String}, .String}}
 	@(static) arith := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
+	@(static) div := []Signature{{{.Int, .Nonzero_Int}, .Int}, {{.Real, .Nonzero_Real}, .Real}}
+	@(static) modulo := []Signature{{{.Int, .Nonzero_Int}, .Int}}
 	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}}
 	@(static) int_only := []Signature{{{.Int, .Int}, .Int}}
 	@(static) bits := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
@@ -76,11 +78,15 @@ signatures :: proc(op: Op) -> []Signature {
 	#partial switch op {
 	case .Add:
 		return add
-	case .Sub, .Div:
+	case .Sub:
 		return arith
+	case .Div:
+		return div
 	case .Mul:
 		return mul
-	case .Mod, .Shl, .Shr:
+	case .Mod:
+		return modulo
+	case .Shl, .Shr:
 		return int_only
 	case .Bit_And, .Bit_Or, .Xor:
 		return bits
@@ -105,34 +111,54 @@ signature_of :: proc(op: Op, args: []Set) -> (Signature, bool) {
 }
 
 apply_operator :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
-	// what each operand may be: a constant set, or the envelope of an atom
-	possible := make([]Set, len(args))
 	constant := true
-	for a, i in args {
+	for a in args {
 		if s, ok := a.(Set); ok {
-			possible[i] = s
+			if set_is_none(s) do return NONE // none op c = none
 			continue
 		}
 		constant = false
 		if has_recursion(a) do return new_apply(op, ..args) // proven once the equation is solved or unfolded
-		e, ok := envelope(a, k.narrow)
-		if !ok do return report(k, .Invalid_operator, span, fmt.tprintf("%v: cannot prove the family of %s", op, print_type(a)))
-		possible[i] = e
 	}
-	for s in possible do if set_is_none(s) do return NONE // none op c = none
-	sig, legal := signature_of(op, possible)
+	sig, legal := legal_signature(k, op, args)
 	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v does not apply to %s", op, print_types(args)))
-	if op == .Div || op == .Mod {
-		if set_has(possible[1], i128(0)) || set_has(possible[1], f64(0)) {
-			return report(k, .Invalid_operator, span, fmt.tprintf("the divisor %s may be 0", print_type(args[1])))
-		}
-	}
 	if constant {
-		if r, exact := compute(op, sig, possible); exact do return r
+		sets := make([]Set, len(args))
+		for a, i in args do sets[i] = a.(Set)
+		if r, exact := compute(op, sig, sets); exact do return r
 	} else if sig.args[0] == .Int {
 		if r, ok := poly_operation(op, args); ok do return r
 	}
 	return new_apply(op, ..args)
+}
+
+// legal_signature: the first signature whose families are proven to hold the
+// operands — the same proof as the check (§7), under the branches around. The
+// operator distributes over |: a set is in a family when each of its elements
+// is, an atom when `a in F` is true.
+legal_signature :: proc(k: ^Kernel, op: Op, args: []Type) -> (Signature, bool) {
+	next: for sig in signatures(op) {
+		obligation := type_true()
+		for a, i in args {
+			family := family_set(sig.args[i])
+			switch {
+			case is_constant(a):
+				if !set_subset(a.(Set), family) do continue next
+			case is_atom(a):
+				obligation = bool_operation(.Bit_And, obligation, type_in(k, a, family))
+			case:
+				e, ok := layout_envelope(a)
+				if !ok || !set_subset(e, family) do continue next
+			}
+		}
+		if verdict, _ := decide(guarded(k.guard, obligation)); verdict == .True do return sig, true
+	}
+	return {}, false
+}
+
+is_constant :: proc(t: Type) -> bool {
+	_, ok := t.(Set)
+	return ok
 }
 
 // poly_operation: the ring laws on integers (§4.5), in the normal form of a
@@ -208,7 +234,14 @@ compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			return compare_ints(op, a.ints, args[1].ints), true
 		}
-		return enumerate_ints(op, a.ints, args[1].ints)
+		// on two primitives the operator computes; on sets, an image that is not a
+		// range stays the operation
+		x, single_x := ints_single(a.ints)
+		y, single_y := ints_single(args[1].ints)
+		if !single_x || !single_y do return {}, false
+		r, ok := int_operation(op, x, y)
+		if !ok do return {}, false
+		return set_of(r), true
 	case .Real:
 		#partial switch op {
 		case .Add:
@@ -261,28 +294,9 @@ compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
 			}
 		}
 		return Set{bools = out}, true
-	case .Count:
+	case .Count, .Nonzero_Int, .Nonzero_Real: // never the first operand
 	}
 	return {}, false
-}
-
-// ENUMERATION_LIMIT: past this many pairs, an operator whose image is not a range
-// stays an Apply instead of being enumerated.
-ENUMERATION_LIMIT :: 4096
-
-enumerate_ints :: proc(op: Op, a, b: Ints) -> (Set, bool) {
-	n, finite_a := ints_size(a, ENUMERATION_LIMIT)
-	m, finite_b := ints_size(b, ENUMERATION_LIMIT)
-	if !finite_a || !finite_b || n * m > ENUMERATION_LIMIT do return {}, false
-	out := make([dynamic]Int_Range)
-	for x in ints_values(a) {
-		for y in ints_values(b) {
-			r, ok := int_operation(op, x, y)
-			if !ok do return {}, false
-			append(&out, Int_Range{r, r})
-		}
-	}
-	return Set{ints = ints_of(out[:])}, true
 }
 
 int_operation :: proc(op: Op, x, y: i128) -> (i128, bool) {

@@ -80,6 +80,7 @@ envelope :: proc(t: Type, narrow: map[^Unknown]Set = nil) -> (result: Set, ok: b
 		sig, legal := signature_of(v.op, sets)
 		if !legal do return {}, false
 		if r, exact := compute(v.op, sig, sets); exact do return r, true
+		if sig.args[0] == .Int && v.op == .Mul do return Set{ints = ints_hull_mul(sets[0].ints, sets[1].ints)}, true
 		return family_set(sig.result), true
 	case ^Frame, Invalid:
 	}
@@ -225,150 +226,146 @@ Verdict :: enum u8 {
 	Undecided,
 }
 
-DECIDE_LIMIT :: 1 << 16
-
-// decide: whether the boolean r is true for every value of its unknowns. By its
-// envelope first; then by giving each unknown each of its values, when they are
-// few enough. An unknown with too many values is given the values where r may
-// change — the bounds and the constants of r: a counterexample found that way
-// is real, but finding none proves nothing.
+// decide: whether the boolean r is true for every value of its unknowns — the
+// unknowns ranging over their layouts, or over `narrow` where it says.
+//
+//   1. its envelope: true only, or false only;
+//   2. a case split on an atom `u in S` (Shannon): the values of u in S make it
+//      true, the others false; each split removes an atom;
+//   3. a split of the values of an unknown in two halves; the values end as points,
+//      where the laws compute r.
+//
+// A counterexample is a point where r is false. On infinitely many values, when
+// neither the envelope nor an atom concludes, r stays an equation: undecided.
 decide :: proc(r: Type, narrow: map[^Unknown]Set = nil) -> (verdict: Verdict, counterexample: string) {
 	if is_bool(r, true) do return .True, ""
 	if is_bool(r, false) do return .False, ""
 	if e, ok := envelope(r, narrow); ok {
 		if set_equal(e, set_bool(true)) do return .True, ""
-		if set_equal(e, set_bool(false)) do return .False, ""
+		if set_equal(e, set_bool(false)) do return .False, witness(r, narrow)
+	}
+	if atom, u, s, found := split_atom(r); found {
+		values, ok := domain(u, narrow)
+		if !ok do return .Undecided, ""
+		return decide_parts(r, narrow, u, {set_intersect(values, s), set_intersect(values, set_complement(s))}, atom)
 	}
 	unknowns := make([dynamic]^Unknown)
 	collect_unknowns(r, &unknowns)
 	slice.sort_by(unknowns[:], proc(a, b: ^Unknown) -> bool {return a.id < b.id})
-	constants := make([dynamic]Set)
-	collect_constants(r, &constants)
-	values := make(map[^Unknown]Set)
-	budget := DECIDE_LIMIT
-	found, complete := search(r, unknowns[:], constants[:], narrow, &values, &budget)
-	if found != nil do return .False, print_assignment(unknowns[:], found)
-	if complete do return .True, ""
+	all_points := true
+	for u in unknowns {
+		values, ok := domain(u, narrow)
+		if !ok do return .Undecided, ""
+		if _, point := set_single(values); point do continue
+		all_points = false
+		if halves, finite := halve(values); finite do return decide_parts(r, narrow, u, halves, nil)
+	}
+	if all_points {
+		// every unknown has one value: the laws compute r
+		values := make(map[^Unknown]Set)
+		for u in unknowns do values[u], _ = domain(u, narrow)
+		v := substitute(r, values)
+		if is_bool(v, true) do return .True, ""
+		if is_bool(v, false) do return .False, print_assignment(unknowns[:], values)
+	}
 	return .Undecided, ""
 }
 
-// search: an assignment of the unknowns for which r is not true. `complete` is
-// true when every assignment was given and found true.
-@(private = "file")
-search :: proc(r: Type, unknowns: []^Unknown, constants: []Set, narrow: map[^Unknown]Set, values: ^map[^Unknown]Set, budget: ^int) -> (found: map[^Unknown]Set, complete: bool) {
-	if len(unknowns) == 0 {
-		budget^ -= 1
-		v := substitute(r, values^)
-		if is_bool(v, false) do return clone_map(values^), true
-		return nil, is_bool(v, true)
+// decide_parts: r on each part of the values of u; with an atom, the atom is true
+// on the first part and false on the second.
+decide_parts :: proc(r: Type, narrow: map[^Unknown]Set, u: ^Unknown, parts: [2]Set, atom: ^Apply) -> (Verdict, string) {
+	undecided := false
+	for part, i in parts {
+		if set_is_none(part) do continue
+		n := make(map[^Unknown]Set)
+		for key, v in narrow do n[key] = v
+		n[u] = part
+		side := r
+		if atom != nil do side = assume(r, atom, i == 0)
+		v, c := decide(side, n)
+		if v == .False do return .False, c
+		undecided ||= v == .Undecided
 	}
-	u := unknowns[0]
-	layout, constant := substitute(u.layout, values^).(Set)
-	if n, narrowed := narrow[u]; narrowed do layout, constant = n, true
-	if !constant do return nil, false
-	elements, all := set_elements(layout, budget^)
-	if !all do elements = sample_values(layout, constants)
-	complete = all
-	for e in elements {
-		if budget^ <= 0 do return nil, false
-		values[u] = e
-		f, c := search(r, unknowns[1:], constants, narrow, values, budget)
-		if f != nil do return f, true
-		complete &&= c
-	}
-	delete_key(values, u)
-	return nil, complete
+	return undecided ? .Undecided : .True, ""
 }
 
-// sample_values: the values of a layout where a boolean may change: its bounds,
-// and the constants of the term with their neighbours.
-@(private = "file")
-sample_values :: proc(layout: Set, constants: []Set) -> []Set {
-	out := make([dynamic]Set)
-	add := proc(out: ^[dynamic]Set, layout: Set, p: Prim) {
-		v := set_of(p)
-		if !set_has(layout, p) do return
-		for o in out do if set_equal(o, v) do return
-		append(out, v)
+// domain: the values u ranges over.
+domain :: proc(u: ^Unknown, narrow: map[^Unknown]Set) -> (Set, bool) {
+	if values, narrowed := narrow[u]; narrowed do return values, true
+	return layout_envelope(u.layout, narrow)
+}
+
+// halve: a finite set of values in two; false for infinitely many.
+halve :: proc(s: Set) -> ([2]Set, bool) {
+	lo, has_lo := ints_min(s.ints).?
+	hi, has_hi := ints_max(s.ints).?
+	other := s
+	other.ints = {}
+	if !ints_empty(s.ints) {
+		if !has_lo || !has_hi do return {}, false
+		if lo < hi {
+			mid := lo + (hi - lo) / 2
+			first := set_intersect(s, Set{ints = ints_between(nil, mid)})
+			return {first, set_intersect(s, set_complement(first))}, true
+		}
+		if !set_is_none(other) do return {Set{ints = s.ints}, other}, true
 	}
-	ints := make([dynamic]i128)
-	append(&ints, 0, 1, -1)
-	for r in layout.ints.ranges {
-		if v, ok := r.lo.?; ok do append(&ints, v)
-		if v, ok := r.hi.?; ok do append(&ints, v)
+	if s.bools == {.False, .True} do return {Set{bools = {.False}}, set_intersect(s, set_complement(Set{bools = {.False}}))}, true
+	if w := set_words(s); !words_is_empty(w) {
+		first, found := words_witness(w)
+		if !found do return {}, false
+		one := set_of(first)
+		rest := set_intersect(s, set_complement(one))
+		if set_is_none(rest) do return {}, false
+		if !words_finite(w) do return {}, false
+		return {one, rest}, true
 	}
-	for c in constants {
-		for r in c.ints.ranges {
-			if v, ok := r.lo.?; ok do append(&ints, v - 1, v, v + 1)
-			if v, ok := r.hi.?; ok do append(&ints, v - 1, v, v + 1)
+	return {}, false
+}
+
+// witness: a point where r is false, its envelope being false everywhere: any
+// value of each unknown.
+witness :: proc(r: Type, narrow: map[^Unknown]Set) -> string {
+	unknowns := make([dynamic]^Unknown)
+	collect_unknowns(r, &unknowns)
+	slice.sort_by(unknowns[:], proc(a, b: ^Unknown) -> bool {return a.id < b.id})
+	values := make(map[^Unknown]Set)
+	for u in unknowns {
+		d, ok := domain(u, narrow)
+		if ok do values[u] = set_default(d)
+	}
+	return print_assignment(unknowns[:], values)
+}
+
+// split_atom: an `u in S` in the boolean r, u an unknown and S a constant set.
+split_atom :: proc(r: Type) -> (atom: ^Apply, u: ^Unknown, s: Set, found: bool) {
+	a, is_apply := r.(^Apply)
+	if !is_apply do return
+	if a.op == .In {
+		target := target_unknown(a.args[0])
+		set, constant := a.args[1].(Set)
+		if target != nil && constant do return a, target, set, true
+		return
+	}
+	if a.op == .Bit_And || a.op == .Bit_Or || a.op == .Bit_Not {
+		for arg in a.args do if arg != nil {
+			atom, u, s, found = split_atom(arg)
+			if found do return
 		}
 	}
-	for v in ints do add(&out, layout, v)
-	reals := make([dynamic]f64)
-	append(&reals, 0, 1, -1)
-	for c in ([2]Set{layout, {}}) do for r in c.reals.ranges {
-		if v, ok := r.lo.?; ok do append(&reals, v, v - 1, v + 1)
-		if v, ok := r.hi.?; ok do append(&reals, v, v - 1, v + 1)
-	}
-	for c in constants do for r in c.reals.ranges {
-		if v, ok := r.lo.?; ok do append(&reals, v, v - 0.5, v + 0.5)
-		if v, ok := r.hi.?; ok do append(&reals, v, v - 0.5, v + 0.5)
-	}
-	for v in reals do add(&out, layout, v)
-	words := set_words(layout)
-	if w, ok := words_witness(words); ok do add(&out, layout, w)
-	for c in constants {
-		cw := set_words(c)
-		if w, ok := words_witness(words_and(words, cw)); ok do add(&out, layout, w)
-		if w, ok := words_witness(words_and(words, words_not(cw))); ok do add(&out, layout, w)
-	}
-	for b in layout.bools do add(&out, layout, b == .True)
-	return out[:]
+	return
 }
 
-// collect_constants: the constant sets in t.
-collect_constants :: proc(t: Type, out: ^[dynamic]Set) {
-	#partial switch v in t {
-	case Set:
-		append(out, v)
-	case Poly:
-		append(out, set_of(v.constant))
-		for m in v.monos do append(out, set_of(m.coef))
-	case ^Unknown:
-		collect_constants(v.layout, out)
-	case ^Apply:
-		for a in v.args do if a != nil do collect_constants(a, out)
-	}
-}
-
-clone_map :: proc(m: map[^Unknown]Set) -> map[^Unknown]Set {
-	out := make(map[^Unknown]Set)
-	for k, v in m do out[k] = v
-	return out
-}
-
-// set_elements: the elements of a finite set, at most `limit` of them.
-set_elements :: proc(s: Set, limit: int) -> ([]Set, bool) {
-	out := make([dynamic]Set)
-	if !ints_empty(s.ints) {
-		n, finite := ints_size(s.ints, i128(limit))
-		if !finite do return nil, false
-		_ = n
-		for v in ints_values(s.ints) do append(&out, set_of(v))
-	}
-	if !reals_empty(s.reals) {
-		v, single := reals_single(s.reals)
-		if !single do return nil, false
-		append(&out, set_of(v))
-	}
-	if w := set_words(s); !words_is_empty(w) {
-		v, single := words_single(w)
-		if !single do return nil, false
-		append(&out, set_of(v))
-	}
-	for b in s.bools do append(&out, set_of(b == .True))
-	if !scopes_empty(s.scopes) do return nil, false
-	return out[:], len(out) <= limit
+// assume: r where the boolean atom is b.
+assume :: proc(r: Type, atom: ^Apply, b: bool) -> Type {
+	a, is_apply := r.(^Apply)
+	if !is_apply do return r
+	if a == atom do return set_bool(b)
+	if a.op != .Bit_And && a.op != .Bit_Or && a.op != .Bit_Not do return r
+	x := assume(a.args[0], atom, b)
+	y: Type
+	if len(a.args) > 1 do y = assume(a.args[1], atom, b)
+	return bool_operation(a.op, x, y)
 }
 
 print_assignment :: proc(unknowns: []^Unknown, values: map[^Unknown]Set) -> string {

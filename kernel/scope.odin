@@ -59,7 +59,7 @@ Frame :: struct {
 	states:    []Typing,
 	slots:     Maybe([]Slot), // its bindings as a value, the expansions placed
 	placing:   bool, // its expansions are being placed
-	narrow:    map[^Unknown]Set, // written inside a branch: the values of the target that reach it, for its checks
+	guard:     Type, // written inside a branch: its checks hold when the branch is reached; nil, always
 }
 
 // Slot: a binding of a frame, an expansion placed: binding `index` of `frame`.
@@ -88,9 +88,9 @@ literal_frame :: proc(k: ^Kernel, s: ^Scope, f: ^Frame, check := true) -> ^Frame
 	key := [2]rawptr{s, f}
 	if g, ok := k.literals[key]; ok do return g
 	g := new_frame(s, f)
-	g.narrow = copy_narrow(k.narrow)
+	g.guard = k.guard
 	k.literals[key] = g
-	if check && k.quiet == 0 do append(&k.pending, g)
+	if check do append(&k.pending, g)
 	return g
 }
 
@@ -137,9 +137,6 @@ value_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 		return report(k, .Infinite_Recursion, f.scope.bindings[i].span, "this binding comes back to itself before it has a value")
 	case .Not_Asked:
 	}
-	if k.depth > MAX_DEPTH do return report(k, .Unsupported, f.scope.bindings[i].span, "not in the kernel yet: a recursion it cannot solve")
-	k.depth += 1
-	defer k.depth -= 1
 	f.states[i] = .In_Progress
 	b := f.scope.bindings[i]
 	if b.kind == .Product do append(&k.producing, f)
@@ -161,22 +158,14 @@ value_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 	if b.kind == .Product {
 		pop(&k.producing)
 		t = solve(k, f, t) // a production that mentions itself is an equation
+		t = unfold(k, f, t)
 	}
 	f.values[i] = t
 	f.states[i] = .Done
 	return t
 }
 
-// MAX_DEPTH: past this many bindings typed one inside the other, a recursion is
-// one this kernel does not solve yet.
-MAX_DEPTH :: 400
 
-copy_narrow :: proc(m: map[^Unknown]Set) -> map[^Unknown]Set {
-	if len(m) == 0 do return nil
-	out := make(map[^Unknown]Set)
-	for key, v in m do out[key] = v
-	return out
-}
 
 slot_value :: proc(k: ^Kernel, s: Slot) -> Type {
 	return value_type(k, s.frame, s.index)
@@ -275,6 +264,7 @@ collapse :: proc(k: ^Kernel, target: Type, span: syn.Span) -> Type {
 	f, is_frame := target.(^Frame)
 	if !is_frame do return report(k, .Invalid_Execute, span, fmt.tprintf("%s is not a scope: nothing to collapse", print_type(target)))
 	if r, recursive := recursion_of(k, f); recursive do return r
+	if r, posed := substitute_equation(k, f); posed do return r
 	for s in shape_slots(k, f) do if binding_of(s).kind == .Product do return slot_value(k, s)
 	return NONE
 }
@@ -327,9 +317,9 @@ carve :: proc(k: ^Kernel, target: Type, args: []Carve_Arg, span: syn.Span) -> Ty
 	if g, ok := k.carves[key]; ok do return g
 	g := new_frame(f.scope, f.parent)
 	g.source, g.overrides, g.site, g.shape = f, overrides, span, f.shape
-	g.narrow = copy_narrow(k.narrow)
+	g.guard = k.guard
 	k.carves[key] = g
-	if k.quiet == 0 do append(&k.pending, g)
+	append(&k.pending, g)
 	return g
 }
 

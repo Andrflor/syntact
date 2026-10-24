@@ -2,6 +2,13 @@ package kernel
 
 import "core:fmt"
 
+// guarded: r, required only where guard holds: [~]guard [|] r. What a branch
+// types holds for the values of its target that reach it (§6).
+guarded :: proc(guard, r: Type) -> Type {
+	if guard == nil do return r
+	return bool_operation(.Bit_Or, bool_operation(.Bit_Not, guard, nil), r)
+}
+
 // THE CHECK (specs/types.md §7)
 //
 //   C:x -> V    ⟺    V in C = true
@@ -16,6 +23,9 @@ import "core:fmt"
 // checked at its carve, and only in what the carve changed: the rest was checked
 // in its source.
 check_frame :: proc(k: ^Kernel, f: ^Frame) {
+	outer := k.guard
+	k.guard = f.guard
+	defer k.guard = outer
 	previous := k.site
 	k.site = f.site
 	defer k.site = previous
@@ -34,7 +44,7 @@ check_frame :: proc(k: ^Kernel, f: ^Frame) {
 		if f.source != nil && type_same(k, v, value_type(k, f.source, i)) && type_same(k, c, color_type(k, f.source, i)) do continue
 		r := type_in(k, v, c)
 		if is_invalid(r) do continue
-		switch verdict, counterexample := decide(r, f.narrow); verdict {
+		switch verdict, counterexample := decide(guarded(f.guard, r)); verdict {
 		case .True:
 		case .False:
 			when_ := counterexample == "" ? "" : fmt.tprintf(" when %s", counterexample)

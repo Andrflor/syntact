@@ -165,6 +165,8 @@ Family :: enum u8 {
 	Char,
 	Bool,
 	Count, // an integer ≥ 0: the count of a repetition
+	Nonzero_Int, // a divisor: int & ~0
+	Nonzero_Real, // float & ~0.0
 }
 
 family_set :: proc(f: Family) -> Set {
@@ -181,6 +183,10 @@ family_set :: proc(f: Family) -> Set {
 		return Set{bools = {.False, .True}}
 	case .Count:
 		return Set{ints = ints_between(0, nil)}
+	case .Nonzero_Int:
+		return Set{ints = ints_complement(ints_point(0))}
+	case .Nonzero_Real:
+		return Set{reals = reals_complement(reals_point(0))}
 	}
 	return NONE
 }

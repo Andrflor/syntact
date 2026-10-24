@@ -139,12 +139,15 @@ Between strings, `..` is about positions:
 
 An operator applies only to types proven to be in a family compatible with it.
 Otherwise it is illegal. This proof is the same as the check (§7): `a + b` on
-integers requires `a in int` and `b in int` to be true.
+integers requires `a in int` and `b in int` to be true. Since an operator
+distributes over `|`, a set is in a family when each of its elements is.
 
 ```text
-int × int → int              +  -  *  /  %  [&]  [|]  ^  <<  >>
+int × int → int              +  -  *  [&]  [|]  ^  <<  >>
+int × (int & ~0) → int       /  %        the divisor is not 0
 int → int                    -  [~]
-float × float → float        +  -  *  /
+float × float → float        +  -  *
+float × (float & ~0.0) → float   /
 float → float                -
 string × string → string     +           concatenation; a character is a string
 string × int → string        *           repetition, the count ≥ 0 (§4.6)
@@ -159,6 +162,7 @@ any × any → bool             in
 1 + 1.5        illegal: 1 is an integer, 1.5 a real
 0 < "a"        illegal
 ?₁::u8 + 1     legal: ?₁::u8 in int
+10 / ?₁::u8    illegal: ?₁ may be 0
 ```
 
 `[~]` is the bitwise not: `[~]true = false`. It is not `~`. Equality is written
@@ -283,6 +287,9 @@ box{x -> 10}.y       = 10 + 1 = 11
 A carve creates no binding. An unnamed argument targets, in order, the bindings
 that are neither productions nor holes.
 
+Two scopes are equal when their bindings are, in order: the same names, the same
+kinds, equal values.
+
 ### 5.4 A scope as a color
 
 A scope with productions admits what they produce:
@@ -309,6 +316,15 @@ Pair -> {u8: u8:}
 A produced shape admits through its colors, another produced value admits only
 itself (specs/language/12): `{-> {-> u8}}` admits the scope `{-> u8}`, not `u8`.
 
+The color of a binding flows down into its value (specs/language/11): in the value
+of a binding colored by a shape, a binding without a color has the color of its
+place in the shape. A carve of that value is checked against it:
+
+```text
+{string:}:a -> {""}
+a{0}                        0 in string = false
+```
+
 A binding without a color imposes the structural constraints of its uses. Used with
 `*`, it must admit `*`; if one of its properties is read, that property must exist
 and admit the use made of it. Without a use, it imposes only its presence.
@@ -318,11 +334,27 @@ and admit the use made of it. Without a use, it imposes only its presence.
 {p -> {y -> 1}  -> p.y + 1}    p has a property y that admits + 1: an integer
 ```
 
-### 5.5 Recursion
+### 5.5 Defaults
+
+A binding without a value has the default of its color (specs/language/09, 10):
+
+```text
+a set          its distinguished element: 0 when it has it, "" for strings, false for
+               booleans; otherwise its first element
+a scope        with productions, its first production; a shape, itself: complete
+               with the defaults of its bindings
+C:             in a value, an anonymous binding colored by C: the default of C
+```
+
+### 5.6 Recursion
 
 A scope names itself only in its productions. Its type is then an equation that
-mentions it. The first production is the base case, and it is not recursive. The
-equation is never unfolded: it is solved, or it stays.
+mentions it. The first production is the base case, and it is not recursive: a
+base case whose value places itself again is an infinite recursion. The equation
+is never unfolded: asked again from its own production, the scope stays a carve
+and a collapse, applied to types. It is solved — Arden, a closed form — or it
+stays. A carve of a solved equation substitutes its arguments into the solution:
+`sum{n -> 5}!` is `sum!` with `n` = 5.
 
 Arden, when the name is at the edge of the sequence:
 
@@ -371,6 +403,25 @@ r - a                                 = (?₁::u8 ? {…}) - ?₁::u8
 For each value of `?₁`, the laws apply: this is how the check decides (§7). A target
 that no branch admits makes the pattern non-exhaustive.
 
+A pattern gives one of its products, so `in` enters each branch, and a pattern
+whose branches all give the same product is that product:
+
+```text
+x in (t ? {c -> p  …})   = t ? {c -> x in p  …}
+(t ? {c -> p  …}) in C   = t ? {c -> p in C  …}
+t ? {c -> p  -> p}       = p
+```
+
+What a branch types holds for the values of the target that reach it. Its checks
+are guarded by the branch: with `reach` the target in its cover and in none of the
+covers above, a check `r` inside it is `[~]reach [|] r`. A branch that no value
+reaches is not typed.
+
+```text
+sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
+          the carve n -> n - 1 is checked for n in 1..255: (n in 0) [|] (n - 1 in u8)
+```
+
 ## 7. The check
 
 ```text
@@ -392,7 +443,18 @@ values of L.
 
 - ✓ when the equation is true for every value of the `?`;
 - ✗ when a value of the `?` makes it other than true: a counterexample;
-- otherwise, it stays an equation.
+- otherwise, it stays an equation: the check cannot conclude, and says so
+  (unproven).
+
+What is checked, and where:
+
+- every binding of a scope that has a color;
+- a definition along its base case: its first production. The other productions
+  are typed when they are asked: a collapse, a default, a color that reads them, a
+  branch that fires;
+- a carve where it is written, in what it changed: the rest was checked in its
+  source;
+- inside a branch, under the condition that reaches it (§6).
 
 ```text
 a -> ??::u8
@@ -412,6 +474,9 @@ Where these documents say otherwise, this one wins:
   Also `''..` as every string: it is every character, and `string = ''.. * 0..`.
 - `kernel-algebre.md`: an uncolored binding imposing nothing. It imposes the
   constraints of its uses (§5.4).
+- `equational.md`, `kernel-recursion.md`: a context that narrows an unknown inside
+  a branch. The checks of a branch are guarded by the condition that reaches it
+  (§6).
 - The character as a sort apart from strings: a character is a string of length 1
   (§4.6).
-- `==` and `!=` in the parser: there is no equality operator (§4.5).
+- `==` and `!=` in the parser: `a = b` is `a in =b` (§4.5).
