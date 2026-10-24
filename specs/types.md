@@ -189,6 +189,13 @@ integers   + and * associative and commutative, * distributes over +, 0 and 1 ne
            ?₁ - ?₁ = 0        ?₁ + ?₁ = 2 * ?₁
 reals      a field: the same laws, and (a / b) * b = a for b ≠ 0
 booleans   [~] [&] [|] ^: a Boolean algebra, [~][~]a = a
+           b in true = b        b in false = [~]b
+```
+
+A comparison with one primitive is `in` of its bound (§4.3):
+
+```text
+x < c = x in <c        x <= c = x in <=c        and likewise > >=
 ```
 
 What no law reduces stays as it is: `~5 + 1`, `?₁ in u8`.
