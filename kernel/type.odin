@@ -55,6 +55,8 @@ Op :: enum u8 {
 	Range_To,
 	// §6: [target, cover, product, …], a nil cover for the default branch
 	Match,
+	// §5.5: [frame]: the collapse of a carve of the scope being produced, not unfolded
+	Recur,
 }
 
 Apply :: struct {

@@ -24,7 +24,7 @@ check_frame :: proc(k: ^Kernel, f: ^Frame) {
 		if b.kind == .Product && first_production && f.source == nil && f.shape == nil {
 			// a definition is typed along its default: its first production, the base case
 			first_production = false
-			value_type(k, f, i)
+			if g, is_frame := value_type(k, f, i).(^Frame); is_frame do frame_slots(k, g) // the base case, as a value
 			continue
 		}
 		if b.kind == .Product || b.kind == .Expand do continue
@@ -34,7 +34,7 @@ check_frame :: proc(k: ^Kernel, f: ^Frame) {
 		if f.source != nil && type_same(k, v, value_type(k, f.source, i)) && type_same(k, c, color_type(k, f.source, i)) do continue
 		r := type_in(k, v, c)
 		if is_invalid(r) do continue
-		switch verdict, counterexample := decide(r); verdict {
+		switch verdict, counterexample := decide(r, f.narrow); verdict {
 		case .True:
 		case .False:
 			when_ := counterexample == "" ? "" : fmt.tprintf(" when %s", counterexample)

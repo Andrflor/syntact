@@ -57,7 +57,9 @@ Frame :: struct {
 	colors:    []Type,
 	values:    []Type,
 	states:    []Typing,
-	slots:     Maybe([]Slot), // its bindings once the expansions are placed
+	slots:     Maybe([]Slot), // its bindings as a value, the expansions placed
+	placing:   bool, // its expansions are being placed
+	narrow:    map[^Unknown]Set, // written inside a branch: the values of the target that reach it, for its checks
 }
 
 // Slot: a binding of a frame, an expansion placed: binding `index` of `frame`.
@@ -86,6 +88,7 @@ literal_frame :: proc(k: ^Kernel, s: ^Scope, f: ^Frame, check := true) -> ^Frame
 	key := [2]rawptr{s, f}
 	if g, ok := k.literals[key]; ok do return g
 	g := new_frame(s, f)
+	g.narrow = copy_narrow(k.narrow)
 	k.literals[key] = g
 	if check && k.quiet == 0 do append(&k.pending, g)
 	return g
@@ -104,7 +107,7 @@ color_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 	if b.color != nil {
 		f.colors[i] = type_of(k, f, b.color)
 	} else if f.shape != nil && b.kind != .Product {
-		cs := frame_slots(k, f.shape)
+		cs := shape_slots(k, f.shape)
 		if i < len(cs) && len(cs) == len(f.scope.bindings) && binding_of(cs[i]).kind != .Expand {
 			f.colors[i] = slot_color(k, cs[i])
 		}
@@ -139,6 +142,7 @@ value_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 	defer k.depth -= 1
 	f.states[i] = .In_Progress
 	b := f.scope.bindings[i]
+	if b.kind == .Product do append(&k.producing, f)
 	t: Type
 	if o, carved := f.overrides[i]; carved {
 		t = o.type
@@ -154,6 +158,10 @@ value_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 	if g, is_frame := t.(^Frame); is_frame {
 		if c, colored := color_type(k, f, i).(^Frame); colored && !has_productions(k, c) do t = colored_frame(k, g, c)
 	}
+	if b.kind == .Product {
+		pop(&k.producing)
+		t = solve(k, f, t) // a production that mentions itself is an equation
+	}
 	f.values[i] = t
 	f.states[i] = .Done
 	return t
@@ -163,6 +171,13 @@ value_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 // one this kernel does not solve yet.
 MAX_DEPTH :: 400
 
+copy_narrow :: proc(m: map[^Unknown]Set) -> map[^Unknown]Set {
+	if len(m) == 0 do return nil
+	out := make(map[^Unknown]Set)
+	for key, v in m do out[key] = v
+	return out
+}
+
 slot_value :: proc(k: ^Kernel, s: Slot) -> Type {
 	return value_type(k, s.frame, s.index)
 }
@@ -171,14 +186,23 @@ slot_color :: proc(k: ^Kernel, s: Slot) -> Type {
 	return color_type(k, s.frame, s.index)
 }
 
-// frame_slots: the bindings of f, each expansion `...e` replaced by the bindings
-// of its value, as they are (specs/language/04). `...C:` and `...` stay: in a
-// shape, they admit a run.
+// frame_slots: the bindings of f as a value, each expansion replaced by the
+// bindings it places, as they are (specs/language/04): `...e` those of e, `...C:`
+// those of the default of C, `...` none (the default of any scope is {}). A value
+// whose expansions place themselves again has no end: the base case of a
+// recursive scope that recurses (specs/types.md §5.5).
 frame_slots :: proc(k: ^Kernel, f: ^Frame) -> []Slot {
 	if s, ok := f.slots.?; ok do return s
+	if f.placing {
+		report(k, .Infinite_Recursion, f.scope.span, "this value places itself again: its base case recurses")
+		return nil
+	}
+	f.placing = true
+	defer f.placing = false
 	out := make([dynamic]Slot)
 	for b, i in f.scope.bindings {
-		if b.kind == .Expand && b.value != nil {
+		if b.kind == .Expand {
+			if b.value == nil && b.color == nil do continue
 			if g, is_frame := value_type(k, f, i).(^Frame); is_frame {
 				append(&out, ..frame_slots(k, g))
 				continue
@@ -190,8 +214,23 @@ frame_slots :: proc(k: ^Kernel, f: ^Frame) -> []Slot {
 	return out[:]
 }
 
+// shape_slots: the bindings of f as a shape: `...C:` and `...` stay, as runs.
+shape_slots :: proc(k: ^Kernel, f: ^Frame) -> []Slot {
+	out := make([dynamic]Slot)
+	for b, i in f.scope.bindings {
+		if b.kind == .Expand && b.value != nil {
+			if g, is_frame := value_type(k, f, i).(^Frame); is_frame {
+				append(&out, ..shape_slots(k, g))
+				continue
+			}
+		}
+		append(&out, Slot{f, i})
+	}
+	return out[:]
+}
+
 has_productions :: proc(k: ^Kernel, f: ^Frame) -> bool {
-	for s in frame_slots(k, f) do if binding_of(s).kind == .Product do return true
+	for s in shape_slots(k, f) do if binding_of(s).kind == .Product do return true
 	return false
 }
 
@@ -203,7 +242,7 @@ default_of :: proc(k: ^Kernel, c: Type) -> Type {
 	case Set:
 		return set_default(v)
 	case ^Frame:
-		for s in frame_slots(k, v) do if binding_of(s).kind == .Product do return slot_value(k, s)
+		for s in shape_slots(k, v) do if binding_of(s).kind == .Product do return slot_value(k, s)
 		return v
 	case ^Apply:
 		if v.op == .Or do return default_of(k, v.args[0])
@@ -235,7 +274,8 @@ collapse :: proc(k: ^Kernel, target: Type, span: syn.Span) -> Type {
 	if is_invalid(target) do return target
 	f, is_frame := target.(^Frame)
 	if !is_frame do return report(k, .Invalid_Execute, span, fmt.tprintf("%s is not a scope: nothing to collapse", print_type(target)))
-	for s in frame_slots(k, f) do if binding_of(s).kind == .Product do return slot_value(k, s)
+	if r, recursive := recursion_of(k, f); recursive do return r
+	for s in shape_slots(k, f) do if binding_of(s).kind == .Product do return slot_value(k, s)
 	return NONE
 }
 
@@ -287,6 +327,7 @@ carve :: proc(k: ^Kernel, target: Type, args: []Carve_Arg, span: syn.Span) -> Ty
 	if g, ok := k.carves[key]; ok do return g
 	g := new_frame(f.scope, f.parent)
 	g.source, g.overrides, g.site, g.shape = f, overrides, span, f.shape
+	g.narrow = copy_narrow(k.narrow)
 	k.carves[key] = g
 	if k.quiet == 0 do append(&k.pending, g)
 	return g
@@ -338,7 +379,7 @@ frame_admits :: proc(k: ^Kernel, x: Type, c: ^Frame) -> Type {
 	defer delete_key(&k.admitting, key)
 	if has_productions(k, c) {
 		r := type_false()
-		for s in frame_slots(k, c) {
+		for s in shape_slots(k, c) {
 			if binding_of(s).kind != .Product do continue
 			p := slot_value(k, s)
 			produced, is_frame := p.(^Frame)
@@ -353,7 +394,7 @@ frame_admits :: proc(k: ^Kernel, x: Type, c: ^Frame) -> Type {
 		if is_atom(x) do return type_false()
 		return new_apply(.In, x, c)
 	}
-	return match_shape(k, frame_slots(k, f), frame_slots(k, c))
+	return match_shape(k, frame_slots(k, f), shape_slots(k, c))
 }
 
 admission_key :: proc(k: ^Kernel, x: Type) -> string {

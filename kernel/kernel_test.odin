@@ -130,7 +130,17 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nu8:x -> a ? {<=255 -> a + 1  -> 0}", "", {.Constraint_Mismatch}},
 	{"u8:a -> ??\nx -> a ? {=5 -> 1}", "", {.Non_Exhaustive_Pattern}},
 	{"a -> ??::u8\nr -> a ? {<10 -> a + 3  -> 10}\n(bool | string):x -> a ? {0..120 -> true  -> \"x\"}", "", {}},
+	// §5.5
+	{SUM + "x -> sum!", "(?0 + ?0 * ?0) / 2", {}},
+	{SUM + "x -> sum{n -> 5}!", "15", {}},
+	{SUM + "u16:x -> sum!", "", {}},
+	{SUM + "u8:x -> sum!", "", {.Constraint_Mismatch}},
+	{"Array -> {\n  T -> {}\n  -> {T: ...Array{T}:}\n  -> {}\n}\nArray{u8}:x", "", {.Infinite_Recursion}},
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x -> {1 2 3}", "", {}},
+	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x -> {1 300 3}", "", {.Constraint_Mismatch}},
 }
+
+SUM :: "sum -> {\n  u8:n -> ??\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
 
 @(test)
 test_spec :: proc(t: ^testing.T) {

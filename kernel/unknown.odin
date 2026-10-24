@@ -232,10 +232,10 @@ DECIDE_LIMIT :: 1 << 16
 // few enough. An unknown with too many values is given the values where r may
 // change — the bounds and the constants of r: a counterexample found that way
 // is real, but finding none proves nothing.
-decide :: proc(r: Type) -> (verdict: Verdict, counterexample: string) {
+decide :: proc(r: Type, narrow: map[^Unknown]Set = nil) -> (verdict: Verdict, counterexample: string) {
 	if is_bool(r, true) do return .True, ""
 	if is_bool(r, false) do return .False, ""
-	if e, ok := envelope(r); ok {
+	if e, ok := envelope(r, narrow); ok {
 		if set_equal(e, set_bool(true)) do return .True, ""
 		if set_equal(e, set_bool(false)) do return .False, ""
 	}
@@ -246,7 +246,7 @@ decide :: proc(r: Type) -> (verdict: Verdict, counterexample: string) {
 	collect_constants(r, &constants)
 	values := make(map[^Unknown]Set)
 	budget := DECIDE_LIMIT
-	found, complete := search(r, unknowns[:], constants[:], &values, &budget)
+	found, complete := search(r, unknowns[:], constants[:], narrow, &values, &budget)
 	if found != nil do return .False, print_assignment(unknowns[:], found)
 	if complete do return .True, ""
 	return .Undecided, ""
@@ -255,7 +255,7 @@ decide :: proc(r: Type) -> (verdict: Verdict, counterexample: string) {
 // search: an assignment of the unknowns for which r is not true. `complete` is
 // true when every assignment was given and found true.
 @(private = "file")
-search :: proc(r: Type, unknowns: []^Unknown, constants: []Set, values: ^map[^Unknown]Set, budget: ^int) -> (found: map[^Unknown]Set, complete: bool) {
+search :: proc(r: Type, unknowns: []^Unknown, constants: []Set, narrow: map[^Unknown]Set, values: ^map[^Unknown]Set, budget: ^int) -> (found: map[^Unknown]Set, complete: bool) {
 	if len(unknowns) == 0 {
 		budget^ -= 1
 		v := substitute(r, values^)
@@ -264,6 +264,7 @@ search :: proc(r: Type, unknowns: []^Unknown, constants: []Set, values: ^map[^Un
 	}
 	u := unknowns[0]
 	layout, constant := substitute(u.layout, values^).(Set)
+	if n, narrowed := narrow[u]; narrowed do layout, constant = n, true
 	if !constant do return nil, false
 	elements, all := set_elements(layout, budget^)
 	if !all do elements = sample_values(layout, constants)
@@ -271,7 +272,7 @@ search :: proc(r: Type, unknowns: []^Unknown, constants: []Set, values: ^map[^Un
 	for e in elements {
 		if budget^ <= 0 do return nil, false
 		values[u] = e
-		f, c := search(r, unknowns[1:], constants, values, budget)
+		f, c := search(r, unknowns[1:], constants, narrow, values, budget)
 		if f != nil do return f, true
 		complete &&= c
 	}
@@ -390,6 +391,10 @@ collect_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
 		poly_unknowns(v, &vars)
 		for u in vars do collect_unknowns(u, out)
 	case ^Apply:
+		if v.op == .Recur {
+			for _, o in v.args[0].(^Frame).overrides do collect_unknowns(o.type, out)
+			return
+		}
 		for a in v.args do if a != nil do collect_unknowns(a, out)
 	case Set, ^Frame, Invalid:
 	}
@@ -423,9 +428,16 @@ substitute :: proc(t: Type, values: map[^Unknown]Set) -> Type {
 		}
 		return poly_normal(result)
 	case ^Apply:
+		scratch: Kernel // an assignment cannot make an operation illegal: its envelope was checked
+		if v.op == .Recur {
+			// the recursion, carved with the values: unfolded once they are known
+			g := v.args[0].(^Frame)
+			args := make([dynamic]Carve_Arg)
+			for i, o in g.overrides do append(&args, Carve_Arg{g.scope.bindings[i].name, -1, substitute(o.type, values), {}})
+			return collapse(&scratch, carve(&scratch, g.source, args[:], {}), {})
+		}
 		args := make([]Type, len(v.args))
 		for a, i in v.args do if a != nil do args[i] = substitute(a, values)
-		scratch: Kernel // an assignment cannot make an operation illegal: its envelope was checked
 		return apply(&scratch, v.op, args, {})
 	case Set, ^Frame, Invalid:
 	}

@@ -86,6 +86,7 @@ OP_SPELLING := [Op]string {
 	.Range_From = "..",
 	.Range_To   = "..",
 	.Match      = "?",
+	.Recur      = "!",
 }
 
 print_poly :: proc(p: Poly) -> string {
@@ -129,6 +130,14 @@ print_apply :: proc(a: ^Apply) -> string {
 			}
 		}
 		return fmt.tprintf("%s ? {{%s}}", print_operand(a.args[0]), strings.join(parts[:], "  "))
+	case .Recur:
+		g := a.args[0].(^Frame)
+		parts := make([dynamic]string)
+		for i, o in g.overrides {
+			name := g.scope.bindings[i].name
+			append(&parts, fmt.tprintf("%s -> %s", name == "" ? "_" : name, print_type(o.type)))
+		}
+		return fmt.tprintf("{{…}}{{%s}}!", strings.join(parts[:], "  "))
 	case .Range:
 		return fmt.tprintf("%s..%s", print_operand(a.args[0]), print_operand(a.args[1]))
 	case .Range_From:

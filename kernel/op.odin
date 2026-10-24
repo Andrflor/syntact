@@ -114,7 +114,8 @@ apply_operator :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type
 			continue
 		}
 		constant = false
-		e, ok := envelope(a)
+		if has_recursion(a) do return new_apply(op, ..args) // proven once the equation is solved or unfolded
+		e, ok := envelope(a, k.narrow)
 		if !ok do return report(k, .Invalid_operator, span, fmt.tprintf("%v: cannot prove the family of %s", op, print_type(a)))
 		possible[i] = e
 	}

@@ -82,6 +82,11 @@ same_vars :: proc(a, b: []^Unknown) -> bool {
 	return slice.equal(a, b)
 }
 
+// poly_over: p / d, the values staying integers (a closed form).
+poly_over :: proc(p: Poly, d: i128) -> Poly {
+	return poly_of(p.monos, p.constant, p.denom * d)
+}
+
 poly_is_constant :: proc(p: Poly) -> (i128, bool) {
 	if len(p.monos) != 0 || p.denom != 1 do return 0, false
 	return p.constant, true

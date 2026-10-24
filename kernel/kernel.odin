@@ -43,6 +43,8 @@ Kernel :: struct {
 	site:      syn.Span, // the carve whose frame is being checked: its errors go there
 	colored:   map[[2]rawptr]^Frame, // a scope value under the shape of its color
 	depth:     int, // the bindings being typed, one inside the other
+	producing: [dynamic]^Frame, // the frames whose production is being typed
+	narrow:    map[^Unknown]Set, // inside a branch: the values of its target that reach it
 }
 
 // report: an error, once, at the carve being checked if any; the type of what it
