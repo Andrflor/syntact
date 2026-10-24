@@ -169,6 +169,7 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 	for a in args do if is_none(a) do return None{} // none op c = none
 	sig, legal := legal_signature(k, op, args)
 	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v is not proven to apply to %s", op, print_types(args)))
+	if bound, x, ok := comparison_bound(op, args); ok do return in_law(k, x, normal(k, bound))
 	constant := true
 	for a in args do constant &&= is_constant(a)
 	if constant {
@@ -184,6 +185,50 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 		if op == .Add do return concatenation(args)
 	}
 	return new_operation(op, ..args)
+}
+
+// comparison_bound: x < c = x in <c, and likewise for <= > >= (§4.3), when c is
+// one primitive and x is not a constant: the comparison is then an atom of `in`.
+comparison_bound :: proc(op: Operator, args: []Type) -> (bound: Type, x: Type, ok: bool) {
+	#partial switch op {
+	case .Less, .Less_Eq, .Greater, .Greater_Eq:
+	case:
+		return
+	}
+	order := op
+	c := args[1]
+	x = args[0]
+	if !is_constant(c) {
+		// c op x = x op' c
+		x, c = c, x
+		#partial switch op {
+		case .Less:
+			order = .Greater
+		case .Less_Eq:
+			order = .Greater_Eq
+		case .Greater:
+			order = .Less
+		case .Greater_Eq:
+			order = .Less_Eq
+		}
+	}
+	if is_constant(x) do return
+	#partial switch _ in c {
+	case Int, Real, Char:
+	case:
+		return
+	}
+	#partial switch order {
+	case .Less:
+		bound = new_and(new_range(nil, c), new_not(c))
+	case .Less_Eq:
+		bound = new_range(nil, c)
+	case .Greater:
+		bound = new_and(new_range(c, nil), new_not(c))
+	case .Greater_Eq:
+		bound = new_range(c, nil)
+	}
+	return bound, x, true
 }
 
 // compute: the image of an operator on constant sets, when it is a normal form.

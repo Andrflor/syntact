@@ -57,6 +57,11 @@ decide :: proc(k: ^Kernel, eq: Type) -> Truth {
 	case ^Pattern:
 		return decide_branches(k, v)
 	case ^Operation:
+		// the layout of the equation: true, or false, for every value
+		if image, ok := layout_image(k, eq); ok {
+			if is_bool(image, true) do return .True
+			if is_bool(image, false) do return .False
+		}
 		#partial switch v.op {
 		case .Bit_Not:
 			return negate(decide(k, v.args[0]))

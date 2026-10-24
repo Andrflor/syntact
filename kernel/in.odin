@@ -11,6 +11,7 @@ package kernel
 //   x in =t       = true when x and t are the same; false when both are known
 //                   and differ
 //   x in p        = x in =p                        p one value
+//   b in true     = b,  b in false = [~]b          b a boolean
 //   none in t     = t is none
 //   (t::L) in L   = true: an unknown, or a term over unknowns, is in what holds
 //                   its layout, and in nothing disjoint from it
@@ -63,8 +64,14 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 
 // in_reading: x in a constant type without scope, taken whole. Its elements are
 // primitives; a complement also holds every scope and every set taken as a value.
+// A boolean b is in =true when it is true: b in true = b, b in false = [~]b.
 in_reading :: proc(k: ^Kernel, x, c: Type, r: Reading) -> Type {
 	if is_primitive(x) do return Bool(disjoint(k, x, c) == .False)
+	if v, is_bool := c.(Bool); is_bool {
+		if _, is_op := x.(^Operation); is_op {
+			if f, known := family_of(k, x); known && f == .Bool do return bool(v) ? x : bool_not(x)
+		}
+	}
 	if !is_value(k, x) do return Bool(r.all_scopes) // a set, taken as a value
 	#partial switch v in x {
 	case ^Scope:
