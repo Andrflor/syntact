@@ -9,8 +9,9 @@ import "core:strings"
 // FROM THE AST TO THE PROGRAM
 //
 // Each node becomes the expression it writes; each name is resolved once, to the
-// last occurrence visible above it (specs/types.md §5.2). The file is a scope,
-// inside the prelude, the scope of the aliases (§3).
+// last occurrence visible above it (specs/types.md §5.2). A scope names itself
+// only from its productions (§5.6): that name is marked, and its collapse is a
+// recursive call. The file is a scope, inside the prelude of the aliases (§3).
 
 build_program :: proc(k: ^Kernel) -> ^Frame {
 	root := syn.ast_root(k.ast)
@@ -23,8 +24,7 @@ build_program :: proc(k: ^Kernel) -> ^Frame {
 
 new_scope :: proc(parent: ^Scope, span: syn.Span) -> ^Scope {
 	s := new(Scope)
-	s.parent = parent
-	s.span = span
+	s.parent, s.span = parent, span
 	return s
 }
 
@@ -56,8 +56,6 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	case .Constraint:
 		build_left(k, s, idx, b)
 	case .Product:
-		// from a production, the binding whose value this scope is, is visible: a
-		// scope names itself only in its productions (specs/types.md §5.5)
 		b.kind = .Product
 		was := s.producing
 		s.producing = true
@@ -72,8 +70,6 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		case:
 			b.value = build_expr(k, s, operand)
 		}
-	case .PointingPull:
-		unsupported(k, idx, "a hole <-")
 	case .Expand:
 		// `...e` places the bindings of e; `...C:` and `...` are runs, in a shape
 		b.kind = .Expand
@@ -97,6 +93,8 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		} else {
 			b.value = build_expr(k, s, idx)
 		}
+	case .PointingPull:
+		unsupported(k, idx, "a hole <-")
 	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
@@ -104,7 +102,7 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	}
 }
 
-// build_left: a name, or `C:name`, or `C:` (an anonymous colored binding).
+// build_left: a name, `C:name`, or `C:` (an anonymous colored binding).
 build_left :: proc(k: ^Kernel, s: ^Scope, left: syn.Node_Index, b: ^Binding) {
 	ast := k.ast
 	if left == syn.INVALID_NODE do return
@@ -171,6 +169,7 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
 		c := new(Collapse_Expr)
 		c.target = build_expr(k, s, data.execute.target)
+		c.recursive = names_itself(c.target)
 		c.span = span
 		return c
 	case .Carve:
@@ -184,6 +183,17 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		return d
 	}
 	return unsupported(k, idx, fmt.tprintf("the form %v", ast.node_kinds[idx]))
+}
+
+// names_itself: e is the scope being defined, or a carve of it.
+names_itself :: proc(e: Expr) -> bool {
+	#partial switch v in e {
+	case Name:
+		return v.self
+	case ^Carve_Expr:
+		return names_itself(v.target)
+	}
+	return false
 }
 
 // char_bound: a bound written as one character between apostrophes ('a', or ''),
@@ -204,11 +214,18 @@ char_bound :: proc(ast: ^syn.Ast, idx: syn.Node_Index) -> bool {
 
 // build_operator: an operator of the language, as an operation of the algebra.
 // The prefix bounds are their laws (§4.3): >=t = t..  <=t = ..t  >t = t.. & ~t
-// <t = ..t & ~t. There is no equality operator: equality is =t (§4.5).
+// <t = ..t & ~t. Equality is =t: a = b is a in =b (§4.5).
 build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 	ast := k.ast
 	data := ast.node_data[idx].operator
 	span := node_span(k, idx)
+	if data.kind == .Layout {
+		// `??::L`: an unknown in the layout L
+		if data.left == syn.INVALID_NODE || ast.node_kinds[data.left] != .Unknown do return unsupported(k, idx, "`::` on anything but `??`")
+		u := new(Unknown_Expr)
+		u.layout, u.span = build_expr(k, s, data.right), span
+		return u
+	}
 	right := build_expr(k, s, data.right)
 	if data.left == syn.INVALID_NODE {
 		#partial switch data.kind {
@@ -236,13 +253,6 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 			return Invalid{}
 		}
 		return unsupported(k, idx, fmt.tprintf("the prefix operator %v", data.kind))
-	}
-	if data.kind == .Layout {
-		// `??::L`: an unknown read in the layout L
-		if ast.node_kinds[data.left] != .Unknown do return unsupported(k, idx, "`::` on anything but `??`")
-		u := new(Unknown_Expr)
-		u.layout, u.span = right, span
-		return u
 	}
 	left := build_expr(k, s, data.left)
 	op: Op
@@ -280,7 +290,6 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 	case .GreaterEqual:
 		op = .Greater_Eq
 	case .Equal:
-		// a = b is a in =b (§4.5)
 		return operation(.In, span, left, operation(.Is, span, right))
 	case .NotEqual:
 		report(k, .Invalid_operator, span, "there is no `!=`: the values other than t are written ~t")
@@ -365,22 +374,27 @@ build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 	return Invalid{}
 }
 
-// lookup: in each scope from s up, the bindings above the one being built.
+// lookup: in each scope from s up, the bindings above the one being built. From a
+// production, the binding whose value is the scope is visible too: the scope
+// names itself.
 lookup :: proc(s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (Name, bool) {
 	child: ^Scope
 	for sc := s; sc != nil; child, sc = sc, sc.parent {
 		visible := sc.complete ? len(sc.bindings) : len(sc.bindings) - 1
-		if child != nil && child.producing do visible = len(sc.bindings) // the scope names itself
+		self := child != nil && child.producing && !sc.complete
+		if self do visible = len(sc.bindings)
 		if ordinal >= 0 {
 			seen := 0
 			for i in 0 ..< visible {
 				if sc.bindings[i].name != name do continue
-				if seen == ordinal do return Name{sc, i, span}, true
+				if seen == ordinal do return Name{sc, i, self && i == len(sc.bindings) - 1, span}, true
 				seen += 1
 			}
 			continue
 		}
-		for i := visible - 1; i >= 0; i -= 1 do if sc.bindings[i].name == name do return Name{sc, i, span}, true
+		for i := visible - 1; i >= 0; i -= 1 {
+			if sc.bindings[i].name == name do return Name{sc, i, self && i == len(sc.bindings) - 1, span}, true
+		}
 	}
 	return {}, false
 }
@@ -408,8 +422,6 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> Expr {
 	return unsupported(k, idx, "this literal")
 }
 
-// parse_integer: the digits of an integer literal; false beyond the universe of
-// integers (ints.odin).
 parse_integer :: proc(digits: string, base: i128) -> (v: i128, ok: bool) {
 	for c in digits {
 		d: i128
@@ -465,11 +477,11 @@ prelude :: proc() -> ^Scope {
 		name:  string,
 		value: proc() -> Set,
 	} {
-		{"int", proc() -> Set {return Set{ints = ints_all()}}},
-		{"float", proc() -> Set {return Set{reals = reals_all()}}},
+		{"int", proc() -> Set {return Set{ints = ints_all()}}}, // ..0..
+		{"float", proc() -> Set {return Set{reals = reals_all()}}}, // ..0.0..
 		{"f32", proc() -> Set {return Set{reals = reals_all()}}},
 		{"f64", proc() -> Set {return Set{reals = reals_all()}}},
-		{"char", proc() -> Set {return Set{words = words_chars()}}},
+		{"char", proc() -> Set {return Set{words = words_chars()}}}, // ''..
 		{"string", proc() -> Set {return Set{words = words_all()}}}, // ''.. * 0..
 		{"bool", proc() -> Set {return Set{bools = {.False, .True}}}},
 		{"none", proc() -> Set {return NONE}},

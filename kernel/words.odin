@@ -235,6 +235,7 @@ words_derive :: proc(a: ^Words, c: rune) -> ^Words {
 
 // words_cuts: code points where the derivative may change: the bounds of every
 // class in a. Between two cuts, every character derives a the same way.
+@(private = "file")
 words_cuts :: proc(a: ^Words) -> []rune {
 	points := make(map[rune]bool)
 	points[0] = true
@@ -346,69 +347,6 @@ words_single_word :: proc(a: ^Words) -> (string, bool) {
 			return "", false
 		}
 	}
-}
-
-// words_finite: a has finitely many strings: no cycle of derivatives that can
-// still reach a string.
-words_finite :: proc(a: ^Words) -> bool {
-	cuts := words_cuts(a)
-	edges := make(map[int][dynamic]^Words)
-	states := make([dynamic]^Words)
-	seen := make(map[int]bool)
-	append(&states, a)
-	seen[a.id] = true
-	for i := 0; i < len(states); i += 1 {
-		s := states[i]
-		next := make([dynamic]^Words)
-		for c in cuts {
-			d := words_derive(s, c)
-			if d.kind == .Empty do continue
-			append(&next, d)
-			if !seen[d.id] {
-				seen[d.id] = true
-				append(&states, d)
-			}
-		}
-		edges[s.id] = next
-	}
-	// the states that reach a string
-	alive := make(map[int]bool)
-	for changed := true; changed; {
-		changed = false
-		for s in states {
-			if alive[s.id] do continue
-			reaches := s.nullable
-			for d in edges[s.id] do reaches ||= alive[d.id]
-			if reaches {
-				alive[s.id] = true
-				changed = true
-			}
-		}
-	}
-	// a cycle among them: infinitely many strings
-	Mark :: enum u8 {
-		White,
-		Grey,
-		Black,
-	}
-	marks := make(map[int]Mark)
-	cyclic := false
-	visit :: proc(s: ^Words, edges: map[int][dynamic]^Words, alive: map[int]bool, marks: ^map[int]Mark, cyclic: ^bool) {
-		marks[s.id] = .Grey
-		for d in edges[s.id] {
-			if !alive[d.id] do continue
-			switch marks[d.id] {
-			case .Grey:
-				cyclic^ = true
-			case .White:
-				visit(d, edges, alive, marks, cyclic)
-			case .Black:
-			}
-		}
-		marks[s.id] = .Black
-	}
-	if alive[a.id] do visit(a, edges, alive, &marks, &cyclic)
-	return !cyclic
 }
 
 // words_char_bounds: the smallest and largest code point of a set of characters.

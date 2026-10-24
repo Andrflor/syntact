@@ -135,7 +135,7 @@ print_apply :: proc(a: ^Apply) -> string {
 		parts := make([dynamic]string)
 		for i, o in g.overrides {
 			name := g.scope.bindings[i].name
-			append(&parts, fmt.tprintf("%s -> %s", name == "" ? "_" : name, print_type(o.type)))
+			append(&parts, fmt.tprintf("%s -> %s", name == "" ? "_" : name, print_type(o)))
 		}
 		return fmt.tprintf("{{…}}{{%s}}!", strings.join(parts[:], "  "))
 	case .Range:

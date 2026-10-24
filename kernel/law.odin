@@ -5,17 +5,17 @@ import "core:fmt"
 
 // THE LAWS OF THE OPERATIONS (specs/types.md §4)
 //
-// apply builds the type that an operation gives. On constant sets the laws
-// compute it: | & ~ component by component (§4.1), an operator by distributing
-// over | and computing on the primitives (§4.5). What no law reduces stays an
-// Apply. An operator applies only to types proven to be in a family it accepts;
-// otherwise it is illegal.
+// apply builds the type an operation gives, by the laws of the spec: on constant
+// sets the normal form computes it (§4.1–4.6); on integers over unknowns, the
+// laws of a ring give a polynomial; on booleans, those of a Boolean algebra. What
+// no law reduces stays an Apply. An operator applies only to types proven to be in
+// a family it accepts (§4.5): the proof is the check's (prove.odin).
 
 apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
 	for a in args do if a != nil && is_invalid(a) do return Invalid{}
-	#partial switch op {
+	switch op {
 	case .Or, .And, .Not:
-		return apply_boolean(op, args)
+		return apply_set(op, args)
 	case .Is:
 		return apply_is(args[0])
 	case .In:
@@ -26,12 +26,13 @@ apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
 		return apply_range(k, op, args, span)
 	case .Match:
 		return apply_match(k, args)
+	case .Recur:
 	}
 	return new_apply(op, ..args)
 }
 
-// apply_boolean: | & ~ (§4.1). On constant sets, the normal form computes them.
-apply_boolean :: proc(op: Op, args: []Type) -> Type {
+// apply_set: | & ~ (§4.1), computed by the normal form on constant sets.
+apply_set :: proc(op: Op, args: []Type) -> Type {
 	sets := make([]Set, len(args))
 	for a, i in args {
 		s, constant := a.(Set)
@@ -43,10 +44,8 @@ apply_boolean :: proc(op: Op, args: []Type) -> Type {
 		return set_union(sets[0], sets[1])
 	case .And:
 		return set_intersect(sets[0], sets[1])
-	case .Not:
-		return set_complement(sets[0])
 	}
-	return new_apply(op, ..args)
+	return set_complement(sets[0])
 }
 
 // apply_is: =p = p for a primitive (§4.4).
@@ -66,46 +65,41 @@ Signature :: struct {
 
 signatures :: proc(op: Op) -> []Signature {
 	@(static) add := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .String}, .String}}
-	@(static) arith := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
+	@(static) sub := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
+	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}}
 	@(static) div := []Signature{{{.Int, .Nonzero_Int}, .Int}, {{.Real, .Nonzero_Real}, .Real}}
 	@(static) modulo := []Signature{{{.Int, .Nonzero_Int}, .Int}}
-	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}}
-	@(static) int_only := []Signature{{{.Int, .Int}, .Int}}
+	@(static) shift := []Signature{{{.Int, .Count}, .Int}}
 	@(static) bits := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
-	@(static) neg := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}}
-	@(static) bit_not := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
 	@(static) compare := []Signature{{{.Int, .Int}, .Bool}, {{.Real, .Real}, .Bool}, {{.Char, .Char}, .Bool}}
 	#partial switch op {
 	case .Add:
 		return add
-	case .Sub:
-		return arith
-	case .Div:
-		return div
+	case .Sub, .Neg:
+		return sub
 	case .Mul:
 		return mul
+	case .Div:
+		return div
 	case .Mod:
 		return modulo
 	case .Shl, .Shr:
-		return int_only
-	case .Bit_And, .Bit_Or, .Xor:
+		return shift
+	case .Bit_And, .Bit_Or, .Xor, .Bit_Not:
 		return bits
-	case .Neg:
-		return neg
-	case .Bit_Not:
-		return bit_not
 	case .Less, .Less_Eq, .Greater, .Greater_Eq:
 		return compare
 	}
 	return nil
 }
 
-// signature_of: the signature whose families contain the operands.
-signature_of :: proc(op: Op, args: []Set) -> (Signature, bool) {
-	for sig in signatures(op) {
-		fits := true
-		for a, i in args do fits &&= set_subset(a, family_set(sig.args[i]))
-		if fits do return sig, true
+// legal_signature: the first signature whose families are proven to hold the
+// operands. An operator distributes over |: a set is in a family when each of its
+// elements is.
+legal_signature :: proc(k: ^Kernel, op: Op, args: []Type) -> (Signature, bool) {
+	next: for sig in signatures(op) {
+		for a, i in args do if prove_elements(k, a, family_set(sig.args[i])) != .Proven do continue next
+		return sig, true
 	}
 	return {}, false
 }
@@ -118,51 +112,29 @@ apply_operator :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type
 			continue
 		}
 		constant = false
-		if has_recursion(a) do return new_apply(op, ..args) // proven once the equation is solved or unfolded
+		// the family of a recursive call is that of the solution of its equation:
+		// proven when the equation is solved (recursion.odin)
+		if has_recursion(a) do return new_apply(op, ..args)
 	}
 	sig, legal := legal_signature(k, op, args)
-	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v does not apply to %s", op, print_types(args)))
+	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v is not proven to apply to %s", op, print_types(args)))
 	if constant {
 		sets := make([]Set, len(args))
 		for a, i in args do sets[i] = a.(Set)
 		if r, exact := compute(op, sig, sets); exact do return r
-	} else if sig.args[0] == .Int {
+		return new_apply(op, ..args)
+	}
+	#partial switch sig.args[0] {
+	case .Int:
 		if r, ok := poly_operation(op, args); ok do return r
+	case .Bool:
+		return bool_operation(op, args)
 	}
 	return new_apply(op, ..args)
 }
 
-// legal_signature: the first signature whose families are proven to hold the
-// operands — the same proof as the check (§7), under the branches around. The
-// operator distributes over |: a set is in a family when each of its elements
-// is, an atom when `a in F` is true.
-legal_signature :: proc(k: ^Kernel, op: Op, args: []Type) -> (Signature, bool) {
-	next: for sig in signatures(op) {
-		obligation := type_true()
-		for a, i in args {
-			family := family_set(sig.args[i])
-			switch {
-			case is_constant(a):
-				if !set_subset(a.(Set), family) do continue next
-			case is_atom(a):
-				obligation = bool_operation(.Bit_And, obligation, type_in(k, a, family))
-			case:
-				e, ok := layout_envelope(a)
-				if !ok || !set_subset(e, family) do continue next
-			}
-		}
-		if verdict, _ := decide(guarded(k.guard, obligation)); verdict == .True do return sig, true
-	}
-	return {}, false
-}
-
-is_constant :: proc(t: Type) -> bool {
-	_, ok := t.(Set)
-	return ok
-}
-
 // poly_operation: the ring laws on integers (§4.5), in the normal form of a
-// polynomial; the division only by a constant that divides every coefficient.
+// polynomial; a division only by a constant that divides every coefficient.
 poly_operation :: proc(op: Op, args: []Type) -> (result: Type, ok: bool) {
 	ps := make([]Poly, len(args))
 	for a, i in args do ps[i] = as_poly(a) or_return
@@ -187,40 +159,40 @@ poly_operation :: proc(op: Op, args: []Type) -> (result: Type, ok: bool) {
 	return poly_normal(r), true
 }
 
-as_poly :: proc(t: Type) -> (Poly, bool) {
-	#partial switch v in t {
-	case Poly:
-		return v, true
-	case Set:
-		n, single := ints_single(v.ints)
-		if single && set_equal(v, set_of(n)) do return poly_constant(n), true
+// bool_operation: [&] [|] ^ [~] by the laws of a Boolean algebra (§4.5):
+// computed on constants, simplified by the neutral and absorbing elements.
+bool_operation :: proc(op: Op, args: []Type) -> Type {
+	a := args[0]
+	if op == .Bit_Not {
+		if is_bool(a, true) do return type_false()
+		if is_bool(a, false) do return type_true()
+		if n, ok := a.(^Apply); ok && n.op == .Bit_Not do return n.args[0]
+		return new_apply(.Bit_Not, a)
 	}
-	return {}, false
+	b := args[1]
+	if op == .Xor {
+		if is_bool(a, false) do return b
+		if is_bool(b, false) do return a
+		return new_apply(op, a, b)
+	}
+	absorbing := op == .Bit_Or // true absorbs [|], false absorbs [&]
+	if is_bool(a, absorbing) || is_bool(b, absorbing) do return set_bool(absorbing)
+	if is_bool(a, !absorbing) do return b
+	if is_bool(b, !absorbing) do return a
+	return new_apply(op, a, b)
 }
 
-// apply_range: a range whose bounds depend on unknowns (§4.3); computed once they
-// are primitives.
-apply_range :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
-	bounds: [2]Maybe(Prim)
-	slots := op == .Range ? []int{0, 1} : (op == .Range_From ? []int{0} : []int{1})
-	for a, i in args {
-		s, constant := a.(Set)
-		if !constant do return new_apply(op, ..args)
-		p, single := set_single(s)
-		if !single do return report(k, .Invalid_Range, span, "a bound of a range is one primitive")
-		bounds[slots[i]] = p
-	}
-	family, _ := bounds[0].?
-	if family == nil do family, _ = bounds[1].?
-	return range_set(k, bounds[0], bounds[1], family, span)
-}
+bool_and :: proc(a, b: Type) -> Type {return bool_operation(.Bit_And, {a, b})}
+bool_or :: proc(a, b: Type) -> Type {return bool_operation(.Bit_Or, {a, b})}
+bool_not :: proc(a: Type) -> Type {return bool_operation(.Bit_Not, {a})}
 
-// compute: { x op y | x ∈ a, y ∈ b } (§4.5: distribute over |, compute on the
-// primitives). False when the result is not exact in a normal form: the
-// operation then stays an Apply.
+// compute: { x op y | x ∈ a, y ∈ b } on constant sets (§4.5: distribute over |,
+// compute on the primitives), when the result is a normal form: ranges for + - and
+// the comparisons, words for the strings, any operator on single primitives.
+// Otherwise false: the operation stays.
 compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
 	a := args[0]
-	switch sig.args[0] {
+	#partial switch sig.args[0] {
 	case .Int:
 		#partial switch op {
 		case .Add:
@@ -234,14 +206,11 @@ compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			return compare_ints(op, a.ints, args[1].ints), true
 		}
-		// on two primitives the operator computes; on sets, an image that is not a
-		// range stays the operation
 		x, single_x := ints_single(a.ints)
 		y, single_y := ints_single(args[1].ints)
 		if !single_x || !single_y do return {}, false
 		r, ok := int_operation(op, x, y)
-		if !ok do return {}, false
-		return set_of(r), true
+		return set_of(r), ok
 	case .Real:
 		#partial switch op {
 		case .Add:
@@ -252,8 +221,6 @@ compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
 			return Set{reals = reals_neg(a.reals)}, true
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			return compare_reals(op, a.reals, args[1].reals), true
-		}
-		#partial switch op {
 		case .Mul:
 			r, exact := reals_mul(a.reals, args[1].reals)
 			return Set{reals = r}, exact
@@ -294,7 +261,6 @@ compute :: proc(op: Op, sig: Signature, args: []Set) -> (Set, bool) {
 			}
 		}
 		return Set{bools = out}, true
-	case .Count, .Nonzero_Int, .Nonzero_Real: // never the first operand
 	}
 	return {}, false
 }
@@ -314,24 +280,23 @@ int_operation :: proc(op: Op, x, y: i128) -> (i128, bool) {
 	case .Xor:
 		return x ~ y, true
 	case .Shl:
-		if y < 0 || y > 126 do return 0, false
+		if y > 126 do return 0, false
 		return mul_checked(x, i128(1) << uint(y))
 	case .Shr:
-		if y < 0 do return 0, false
 		return y > 126 ? (x < 0 ? -1 : 0) : x >> uint(y), true
 	}
 	return 0, false
 }
 
-// compare_ints: the booleans that x op y takes for x in a, y in b. `x < y` is
-// possible when min a < max b, and `x >= y` when max a >= min b.
+// compare_ints: the booleans x op y takes for x in a, y in b: `x < y` happens
+// when min a < max b, `x >= y` when max a >= min b.
 compare_ints :: proc(op: Op, a, b: Ints) -> Set {
-	below := proc(x, y: Maybe(i128)) -> bool {
+	below :: proc(x, y: Maybe(i128)) -> bool {
 		u, has_u := x.?
 		v, has_v := y.?
 		return !has_u || !has_v || u < v
 	}
-	at_most := proc(x, y: Maybe(i128)) -> bool {
+	at_most :: proc(x, y: Maybe(i128)) -> bool {
 		u, has_u := x.?
 		v, has_v := y.?
 		return !has_u || !has_v || u <= v
@@ -354,21 +319,20 @@ compare_ints :: proc(op: Op, a, b: Ints) -> Set {
 	return Set{bools = out}
 }
 
-// compare_reals: as compare_ints, with the infimum and supremum of each set; a
-// bound counts for <= only when it is reached.
+// compare_reals: as compare_ints, a bound counting for <= only when reached.
 compare_reals :: proc(op: Op, a, b: Reals) -> Set {
 	Edge :: struct {
-		v:      Maybe(f64), // nil: infinite
+		v:      Maybe(f64),
 		closed: bool,
 	}
-	inf := proc(r: Reals) -> Edge {return {r.ranges[0].lo, !r.ranges[0].lo_open}}
-	sup := proc(r: Reals) -> Edge {last := r.ranges[len(r.ranges) - 1];return {last.hi, !last.hi_open}}
-	below := proc(x, y: Edge) -> bool {
+	inf :: proc(r: Reals) -> Edge {return {r.ranges[0].lo, !r.ranges[0].lo_open}}
+	sup :: proc(r: Reals) -> Edge {last := r.ranges[len(r.ranges) - 1];return {last.hi, !last.hi_open}}
+	below :: proc(x, y: Edge) -> bool {
 		u, has_u := x.v.?
 		v, has_v := y.v.?
 		return !has_u || !has_v || u < v
 	}
-	at_most := proc(x, y: Edge) -> bool {
+	at_most :: proc(x, y: Edge) -> bool {
 		u, has_u := x.v.?
 		v, has_v := y.v.?
 		return !has_u || !has_v || u < v || (u == v && x.closed && y.closed)
@@ -388,4 +352,21 @@ compare_reals :: proc(op: Op, a, b: Reals) -> Set {
 	if yes do out += {.True}
 	if no do out += {.False}
 	return Set{bools = out}
+}
+
+// apply_range: a range whose bounds depend on unknowns (§4.3), computed once
+// they are primitives.
+apply_range :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
+	bounds: [2]Maybe(Prim)
+	slots := op == .Range ? []int{0, 1} : (op == .Range_From ? []int{0} : []int{1})
+	for a, i in args {
+		s, constant := a.(Set)
+		if !constant do return new_apply(op, ..args)
+		p, single := set_single(s)
+		if !single do return report(k, .Invalid_Range, span, "a bound of a range is one primitive")
+		bounds[slots[i]] = p
+	}
+	family, _ := bounds[0].?
+	if family == nil do family, _ = bounds[1].?
+	return range_set(k, bounds[0], bounds[1], family, span)
 }

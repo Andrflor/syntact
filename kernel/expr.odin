@@ -6,10 +6,10 @@ import syn "../compiler"
 //
 // An expression is a type of the algebra as it is written (specs/types.md §2),
 // names included. type_of puts it in normal form in a frame: a name becomes the
-// type of its binding (§5.2), and each operation is applied by its laws.
+// type of its binding (§5.2), each operation is applied by its laws.
 
 Expr :: union {
-	Set, // a literal or a builtin
+	Set, // a literal or an alias of the prelude
 	Name,
 	^Operation,
 	^Range_Expr,
@@ -23,58 +23,12 @@ Expr :: union {
 	Invalid, // an error already reported
 }
 
-// Access_Expr: `target.name`, `target.name#n`.
-Access_Expr :: struct {
-	target:  Expr,
-	name:    string,
-	ordinal: int, // -1: the last occurrence
-	span:    syn.Span,
-}
-
-// Collapse_Expr: `target!`.
-Collapse_Expr :: struct {
-	target: Expr,
-	span:   syn.Span,
-}
-
-// Carve_Expr: `target{args}`: the arguments are written where the carve is.
-Carve_Expr :: struct {
-	target: Expr,
-	args:   []Carve_Arg_Expr,
-	span:   syn.Span,
-}
-
-Carve_Arg_Expr :: struct {
-	name:    string,
-	ordinal: int,
-	value:   Expr,
-	span:    syn.Span,
-}
-
-// Default_Expr: `C:` in a value: an anonymous binding colored by C, complete with
-// the default of C (specs/language/11, 12).
-Default_Expr :: struct {
-	color: Expr,
-	span:  syn.Span,
-}
-
-// Unknown_Expr: `??` or `??::L`. Without a layout, `C:x -> ??` takes the layout of
-// its color; elsewhere, it is any primitive.
-Unknown_Expr :: struct {
-	layout: Expr,
-	span:   syn.Span,
-}
-
-is_invalid_expr :: proc(e: Expr) -> bool {
-	if e == nil do return true
-	_, ok := e.(Invalid)
-	return ok
-}
-
-// Name: a binding, resolved where it is written: the last visible occurrence.
+// Name: a binding, the last occurrence visible where the name is written. `self`:
+// the scope being defined, named from one of its productions (§5.6).
 Name :: struct {
 	scope: ^Scope,
 	index: int,
+	self:  bool,
 	span:  syn.Span,
 }
 
@@ -84,13 +38,61 @@ Operation :: struct {
 	span: syn.Span,
 }
 
-// Range_Expr: `lo..hi`, a bound may be missing (§4.3). Between single-quoted
-// literals the range is over the characters (ordinal); between strings, over the
-// positions.
+// Range_Expr: `lo..hi`, a bound may be missing (§4.3). Between characters written
+// between apostrophes, the range is over the characters; between strings, over
+// the positions.
 Range_Expr :: struct {
 	lo, hi:  Expr,
 	ordinal: bool,
 	span:    syn.Span,
+}
+
+// Unknown_Expr: `??` or `??::L`. Without a layout, `C:x -> ??` takes its color;
+// elsewhere it is any primitive.
+Unknown_Expr :: struct {
+	layout: Expr,
+	span:   syn.Span,
+}
+
+Access_Expr :: struct {
+	target:  Expr,
+	name:    string,
+	ordinal: int, // -1: the last occurrence
+	span:    syn.Span,
+}
+
+// Collapse_Expr: `target!`. `recursive`: the target is the scope being defined,
+// named from its production: a recursive call, which stays an equation.
+Collapse_Expr :: struct {
+	target:    Expr,
+	recursive: bool,
+	span:      syn.Span,
+}
+
+Carve_Expr :: struct {
+	target: Expr,
+	args:   []Carve_Arg_Expr,
+	span:   syn.Span,
+}
+
+Carve_Arg_Expr :: struct {
+	name:    string, // "" for a positional argument
+	ordinal: int,
+	value:   Expr,
+	span:    syn.Span,
+}
+
+// Default_Expr: `C:` as a value: an anonymous binding colored by C, complete with
+// the default of C.
+Default_Expr :: struct {
+	color: Expr,
+	span:  syn.Span,
+}
+
+is_invalid_expr :: proc(e: Expr) -> bool {
+	if e == nil do return true
+	_, ok := e.(Invalid)
+	return ok
 }
 
 type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
@@ -98,8 +100,7 @@ type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
 	case Set:
 		return v
 	case Name:
-		g := frame_of(f, v.scope)
-		return value_type(k, g, v.index)
+		return value_type(k, frame_of(f, v.scope), v.index)
 	case ^Operation:
 		args := make([]Type, len(v.args))
 		for a, i in v.args do args[i] = type_of(k, f, a)
@@ -113,7 +114,13 @@ type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
 	case ^Access_Expr:
 		return access(k, type_of(k, f, v.target), v.name, v.ordinal, v.span)
 	case ^Collapse_Expr:
-		return collapse(k, type_of(k, f, v.target), v.span)
+		target := type_of(k, f, v.target)
+		if v.recursive {
+			g, is_frame := target.(^Frame)
+			if !is_frame do return collapse(k, target, v.span)
+			return new_apply(.Recur, g) // never unfolded (§5.6)
+		}
+		return collapse(k, target, v.span)
 	case ^Carve_Expr:
 		target := type_of(k, f, v.target)
 		args := make([]Carve_Arg, len(v.args))
@@ -129,22 +136,51 @@ type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
 	return Invalid{}
 }
 
-// type_range: l..u is the | of every primitive from l to u, in the order of their
-// family (§4.3), whichever bound is written first. A missing bound is infinite;
-// the bound '' is the smallest character. A bound that is itself a range gives its
-// extremities: `..0..` is every integer. Between strings, `..` is about positions:
+// type_range: l..u is the | of every primitive from l to u in the order of their
+// family, whichever bound is written first (§4.3). A missing bound is infinite;
+// '' as a bound is the smallest character; a bound that is itself a range gives
+// its extremities (`..0..` is every integer). Between strings, about positions:
 //
-//   "jwt"..       = "jwt" + string
-//   .."lel"       = string + "lel"
-//   "jwt".."lel"  = ("jwt" + string) & (string + "lel")
+//   l..u = (l + string) & (string + u)      l.. = l + string      ..u = string + u
+//
+// A bound that depends on unknowns leaves the range an operation: 0..n.
 type_range :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> Type {
+	types: [2]Type
+	nested := false
+	for e, i in ([2]Expr{r.lo, r.hi}) {
+		if e == nil do continue
+		if _, is_range := e.(^Range_Expr); is_range do nested = true
+		types[i] = type_of(k, f, e)
+		if is_invalid(types[i]) do return Invalid{}
+	}
 	if !r.ordinal {
-		if w, positional, ok := string_range(k, f, r); positional {
-			if !ok do return Invalid{}
+		strings_only := true
+		any := false
+		for t in types do if t != nil {
+			any = true
+			s, constant := t.(Set)
+			strings_only &&= constant && !set_is_none(s) && set_subset(s, family_set(.String))
+		}
+		if any && strings_only {
+			w := words_all()
+			if types[0] != nil do w = words_and(w, words_cat(set_words(types[0].(Set)), words_all()))
+			if types[1] != nil do w = words_and(w, words_cat(words_all(), set_words(types[1].(Set))))
 			return Set{words = w}
 		}
 	}
-	if dependent, ok := dependent_range(k, f, r); ok do return dependent
+	if !nested {
+		dependent := false
+		for t in types do if t != nil && !is_constant(t) do dependent = true
+		if dependent {
+			switch {
+			case r.lo != nil && r.hi != nil:
+				return apply(k, .Range, {types[0], types[1]}, r.span)
+			case r.lo != nil:
+				return apply(k, .Range_From, {types[0]}, r.span)
+			}
+			return apply(k, .Range_To, {types[1]}, r.span)
+		}
+	}
 	ends, ok := range_ends(k, f, r)
 	if !ok do return Invalid{}
 	family, has_family := ends.family.?
@@ -152,8 +188,8 @@ type_range :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> Type {
 	return range_set(k, ends.lo, ends.hi, family, r.span)
 }
 
-// range_set: every primitive from lo to hi, nil being infinite; between
-// strings, the characters (ordinal).
+// range_set: every primitive from lo to hi, nil being infinite; between strings,
+// the characters.
 range_set :: proc(k: ^Kernel, lo, hi: Maybe(Prim), family: Prim, span: syn.Span) -> Type {
 	x, has_lo := lo.?
 	y, has_hi := hi.?
@@ -161,7 +197,7 @@ range_set :: proc(k: ^Kernel, lo, hi: Maybe(Prim), family: Prim, span: syn.Span)
 		if !same_family(x, y) do return report(k, .Invalid_Range, span, "the bounds of a range are of two families")
 		if prim_less(y, x) do x, y = y, x
 	}
-	switch v in family {
+	switch _ in family {
 	case i128:
 		a, b: Maybe(i128)
 		if has_lo do a = x.(i128)
@@ -182,61 +218,14 @@ range_set :: proc(k: ^Kernel, lo, hi: Maybe(Prim), family: Prim, span: syn.Span)
 	return report(k, .Invalid_Range, span, "a range is between integers, reals or characters")
 }
 
-// dependent_range: a range whose bound depends on unknowns, `0..n` with n
-// unknown: an operation of the algebra, computed once its bounds are known.
-dependent_range :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> (Type, bool) {
-	bounds := [2]Expr{r.lo, r.hi}
-	types: [2]Type
-	dependent := false
-	for e, i in bounds {
-		if e == nil do continue
-		if _, nested := e.(^Range_Expr); nested do return nil, false
-		types[i] = type_of(k, f, e)
-		if is_invalid(types[i]) do return Invalid{}, true
-		if _, constant := types[i].(Set); !constant do dependent = true
-	}
-	if !dependent do return nil, false
-	switch {
-	case r.lo != nil && r.hi != nil:
-		return apply(k, .Range, {types[0], types[1]}, r.span), true
-	case r.lo != nil:
-		return apply(k, .Range_From, {types[0]}, r.span), true
-	}
-	return apply(k, .Range_To, {types[1]}, r.span), true
-}
-
-// string_range: a range between strings, about positions (§4.3). A bound is any
-// set of strings, a nested range included: "ab".."cd".."ef" starts with "ab",
-// then has "cd", and ends with "ef".
-//
-//   l..u = (l + string) & (string + u)      l.. = l + string      ..u = string + u
-string_range :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> (w: ^Words, positional: bool, ok: bool) {
-	bounds: [2]Maybe(^Words)
-	for e, i in ([2]Expr{r.lo, r.hi}) {
-		if e == nil do continue
-		t := type_of(k, f, e)
-		if is_invalid(t) do return nil, true, false
-		s, constant := t.(Set)
-		if !constant || set_is_none(s) || !set_subset(s, family_set(.String)) do return nil, false, false
-		bounds[i] = set_words(s)
-	}
-	if bounds[0] == nil && bounds[1] == nil do return nil, false, false
-	w = words_all()
-	if lo, has := bounds[0].?; has do w = words_and(w, words_cat(lo, words_all()))
-	if hi, has := bounds[1].?; has do w = words_and(w, words_cat(words_all(), hi))
-	return w, true, true
-}
-
 // Ends: the extremities of a range; nil is infinite.
 Ends :: struct {
 	lo, hi: Maybe(Prim),
 	family: Maybe(Prim), // a primitive of the family of the range; nil for `..`
 }
 
-// range_ends: the extremities of r. For integers, reals and characters, the
-// smallest and the largest of all its ends, whichever is written first; a missing
-// bound, or a nested range open on a side, is infinite on that side. Between
-// strings, the bounds as written.
+// range_ends: the smallest and the largest of all the ends of r; a missing bound,
+// or a nested range open on a side, is infinite on that side.
 range_ends :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> (ends: Ends, ok: bool) {
 	sides: [2]Maybe(Ends)
 	for e, i in ([2]Expr{r.lo, r.hi}) {
@@ -249,7 +238,7 @@ range_ends :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> (ends: Ends, ok: bo
 		sides[i] = Ends{p, p, p}
 	}
 	values := make([dynamic]Prim)
-	below, above := r.lo == nil, r.hi == nil // infinite on that side
+	below, above := r.lo == nil, r.hi == nil
 	for side in sides {
 		e := side.? or_continue
 		if family, has := e.family.?; has {
@@ -281,7 +270,6 @@ range_ends :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> (ends: Ends, ok: bo
 	return ends, true
 }
 
-// prim_less: a < b, two primitives of one family; characters by code point.
 prim_less :: proc(a, b: Prim) -> bool {
 	switch x in a {
 	case i128:

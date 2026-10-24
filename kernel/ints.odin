@@ -125,30 +125,6 @@ ints_single :: proc(a: Ints) -> (i128, bool) {
 	return lo, has_lo && has_hi && lo == hi
 }
 
-// ints_size: the number of elements, when it is finite and at most `limit`.
-ints_size :: proc(a: Ints, limit: i128) -> (i128, bool) {
-	n: i128
-	for r in a.ranges {
-		lo, has_lo := r.lo.?
-		hi, has_hi := r.hi.?
-		if !has_lo || !has_hi || hi - lo >= limit do return 0, false
-		n += hi - lo + 1
-		if n > limit do return 0, false
-	}
-	return n, true
-}
-
-// ints_values: the elements of a finite set, in order.
-ints_values :: proc(a: Ints) -> []i128 {
-	out := make([dynamic]i128)
-	for r in a.ranges {
-		lo, _ := r.lo.?
-		hi, _ := r.hi.?
-		for v := lo; v <= hi; v += 1 do append(&out, v)
-	}
-	return out[:]
-}
-
 ints_min :: proc(a: Ints) -> Maybe(i128) {
 	return len(a.ranges) == 0 ? nil : a.ranges[0].lo
 }
