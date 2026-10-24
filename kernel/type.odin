@@ -9,6 +9,8 @@ package kernel
 
 Type :: union {
 	Set, // a constant type (set.odin)
+	Poly, // integer arithmetic on unknowns (poly.odin)
+	^Unknown, // ?k::L (unknown.odin)
 	^Apply, // an operation that no law reduces
 	^Frame, // a scope (scope.odin)
 	Invalid, // an error already reported: what depends on it stays silent
@@ -47,6 +49,10 @@ Op :: enum u8 {
 	Greater_Eq,
 	// §4.7
 	In,
+	// §4.3, with a bound that depends on unknowns: [lo, hi], [lo], [hi]
+	Range,
+	Range_From,
+	Range_To,
 }
 
 Apply :: struct {

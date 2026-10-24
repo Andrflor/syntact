@@ -17,6 +17,10 @@ print_type :: proc(t: Type) -> string {
 		return print_set(v)
 	case ^Apply:
 		return print_apply(v)
+	case Poly:
+		return print_poly(v)
+	case ^Unknown:
+		return fmt.tprintf("?%d", v.id)
 	case ^Frame:
 		return "{…}"
 	case Invalid:
@@ -47,9 +51,49 @@ OP_SPELLING := [Op]string {
 	.Greater    = ">",
 	.Greater_Eq = ">=",
 	.In         = "in",
+	.Range      = "..",
+	.Range_From = "..",
+	.Range_To   = "..",
+}
+
+print_poly :: proc(p: Poly) -> string {
+	b := strings.builder_make()
+	for m, i in p.monos {
+		c := m.coef
+		if i > 0 {
+			strings.write_string(&b, c < 0 ? " - " : " + ")
+			c = abs(c)
+		} else if c < 0 {
+			strings.write_string(&b, "-")
+			c = -c
+		}
+		if c != 1 do fmt.sbprintf(&b, "%v * ", c)
+		for v, j in m.vars {
+			if j > 0 do strings.write_string(&b, " * ")
+			fmt.sbprintf(&b, "?%d", v.id)
+		}
+	}
+	if p.constant != 0 || len(p.monos) == 0 {
+		if len(p.monos) > 0 {
+			fmt.sbprintf(&b, p.constant < 0 ? " - %v" : " + %v", abs(p.constant))
+		} else {
+			fmt.sbprintf(&b, "%v", p.constant)
+		}
+	}
+	s := strings.to_string(b)
+	if p.denom != 1 do s = fmt.tprintf("(%s) / %v", s, p.denom)
+	return s
 }
 
 print_apply :: proc(a: ^Apply) -> string {
+	#partial switch a.op {
+	case .Range:
+		return fmt.tprintf("%s..%s", print_operand(a.args[0]), print_operand(a.args[1]))
+	case .Range_From:
+		return fmt.tprintf("%s..", print_operand(a.args[0]))
+	case .Range_To:
+		return fmt.tprintf("..%s", print_operand(a.args[0]))
+	}
 	if len(a.args) == 1 do return fmt.tprintf("%s%s", OP_SPELLING[a.op], print_operand(a.args[0]))
 	return fmt.tprintf("%s %s %s", print_operand(a.args[0]), OP_SPELLING[a.op], print_operand(a.args[1]))
 }

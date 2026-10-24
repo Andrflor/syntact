@@ -122,6 +122,10 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		return r
 	case .CompileTime:
 		return build_expr(k, s, data.unary.operand)
+	case .Unknown:
+		u := new(Unknown_Expr)
+		u.span = span
+		return u
 	}
 	return unsupported(k, idx, fmt.tprintf("the form %v", ast.node_kinds[idx]))
 }
@@ -176,6 +180,13 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 			return Invalid{}
 		}
 		return unsupported(k, idx, fmt.tprintf("the prefix operator %v", data.kind))
+	}
+	if data.kind == .Layout {
+		// `??::L`: an unknown read in the layout L
+		if ast.node_kinds[data.left] != .Unknown do return unsupported(k, idx, "`::` on anything but `??`")
+		u := new(Unknown_Expr)
+		u.layout, u.span = right, span
+		return u
 	}
 	left := build_expr(k, s, data.left)
 	op: Op

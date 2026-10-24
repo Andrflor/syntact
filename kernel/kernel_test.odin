@@ -82,6 +82,19 @@ SPEC_CASES := []Spec_Case {
 	{`string:x`, `""`, {}},
 	{`bool:x`, "false", {}},
 	{`(1..10):x`, "1", {}},
+	// §5.2: unknowns, names
+	{"a -> ??::u8\nx -> a - a", "0", {}},
+	{"a -> ??::u8\nx -> a + 3", "?0 + 3", {}},
+	{"a -> ??::u8\nx -> a * 2 + a", "3 * ?0", {}},
+	{"u8:n -> ??\nn:x -> n", "?0", {}},
+	{"u8:n -> ??\nm -> n * 2\nn:x -> m / 2", "?0", {}},
+	{"u8:n -> ??\nu16:x -> n + 1", "?0 + 1", {}},
+	{"u8:n -> ??\nu8:x -> n + 1", "", {.Constraint_Mismatch}},
+	{"u8:n -> ??\n(0..n):x -> ??", "", {}},
+	{"u8:n -> ??\nu8:x -> 0..n", "", {.Constraint_Mismatch}},
+	{"a -> ??::u8\nx -> a + 1.5", "", {.Invalid_operator}},
+	{"a -> ??::u8\nbool:x -> a < 300", "", {}},
+	{"a -> ??::u8\nx -> 10 / a", "", {.Invalid_operator}},
 }
 
 @(test)

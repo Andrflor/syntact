@@ -79,7 +79,9 @@ value_type :: proc(k: ^Kernel, f: ^Frame, i: int) -> Type {
 	f.states[i] = .In_Progress
 	b := f.scope.bindings[i]
 	t: Type
-	if b.value != nil {
+	if u, unknown := b.value.(^Unknown_Expr); unknown && u.layout == nil && b.color != nil {
+		t = new_unknown(k, color_type(k, f, i)) // `C:x -> ??`: an unknown of C
+	} else if b.value != nil {
 		t = type_of(k, f, b.value)
 	} else if c := color_type(k, f, i); c != nil {
 		t = default_of(c)

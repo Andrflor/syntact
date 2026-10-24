@@ -22,6 +22,8 @@ apply :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
 		return type_in(args[0], args[1])
 	case .Add, .Sub, .Mul, .Div, .Mod, .Neg, .Bit_And, .Bit_Or, .Xor, .Bit_Not, .Shl, .Shr, .Less, .Less_Eq, .Greater, .Greater_Eq:
 		return apply_operator(k, op, args, span)
+	case .Range, .Range_From, .Range_To:
+		return apply_range(k, op, args, span)
 	}
 	return new_apply(op, ..args)
 }
@@ -101,20 +103,87 @@ signature_of :: proc(op: Op, args: []Set) -> (Signature, bool) {
 }
 
 apply_operator :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
-	sets := make([]Set, len(args))
+	// what each operand may be: a constant set, or the envelope of an atom
+	possible := make([]Set, len(args))
+	constant := true
+	for a, i in args {
+		if s, ok := a.(Set); ok {
+			possible[i] = s
+			continue
+		}
+		constant = false
+		e, ok := envelope(a)
+		if !ok do return report(k, .Invalid_operator, span, fmt.tprintf("%v: cannot prove the family of %s", op, print_type(a)))
+		possible[i] = e
+	}
+	for s in possible do if set_is_none(s) do return NONE // none op c = none
+	sig, legal := signature_of(op, possible)
+	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v does not apply to %s", op, print_types(args)))
+	if op == .Div || op == .Mod {
+		if set_has(possible[1], i128(0)) || set_has(possible[1], f64(0)) {
+			return report(k, .Invalid_operator, span, fmt.tprintf("the divisor %s may be 0", print_type(args[1])))
+		}
+	}
+	if constant {
+		if r, exact := compute(op, sig, possible); exact do return r
+	} else if sig.args[0] == .Int {
+		if r, ok := poly_operation(op, args); ok do return r
+	}
+	return new_apply(op, ..args)
+}
+
+// poly_operation: the ring laws on integers (§4.5), in the normal form of a
+// polynomial; the division only by a constant that divides every coefficient.
+poly_operation :: proc(op: Op, args: []Type) -> (result: Type, ok: bool) {
+	ps := make([]Poly, len(args))
+	for a, i in args do ps[i] = as_poly(a) or_return
+	r: Poly
+	#partial switch op {
+	case .Add:
+		r = poly_add(ps[0], ps[1])
+	case .Sub:
+		r = poly_add(ps[0], poly_neg(ps[1]))
+	case .Mul:
+		r = poly_mul(ps[0], ps[1])
+	case .Neg:
+		r = poly_neg(ps[0])
+	case .Bit_Not:
+		r = poly_add(poly_neg(ps[0]), poly_constant(-1))
+	case .Div:
+		d := poly_is_constant(ps[1]) or_return
+		r = poly_div(ps[0], d) or_return
+	case:
+		return nil, false
+	}
+	return poly_normal(r), true
+}
+
+as_poly :: proc(t: Type) -> (Poly, bool) {
+	#partial switch v in t {
+	case Poly:
+		return v, true
+	case Set:
+		n, single := ints_single(v.ints)
+		if single && set_equal(v, set_of(n)) do return poly_constant(n), true
+	}
+	return {}, false
+}
+
+// apply_range: a range whose bounds depend on unknowns (§4.3); computed once they
+// are primitives.
+apply_range :: proc(k: ^Kernel, op: Op, args: []Type, span: syn.Span) -> Type {
+	bounds: [2]Maybe(Prim)
+	slots := op == .Range ? []int{0, 1} : (op == .Range_From ? []int{0} : []int{1})
 	for a, i in args {
 		s, constant := a.(Set)
 		if !constant do return new_apply(op, ..args)
-		sets[i] = s
+		p, single := set_single(s)
+		if !single do return report(k, .Invalid_Range, span, "a bound of a range is one primitive")
+		bounds[slots[i]] = p
 	}
-	for s in sets do if set_is_none(s) do return NONE // none op c = none
-	sig, legal := signature_of(op, sets)
-	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v does not apply to %s", op, print_types(args)))
-	if (op == .Div || op == .Mod) && sig.args[1] != .Real && ints_contains(sets[1].ints, 0) || op == .Div && sig.args[1] == .Real && reals_contains(sets[1].reals, 0) {
-		return report(k, .Invalid_operator, span, fmt.tprintf("the divisor %s may be 0", print_type(args[1])))
-	}
-	if r, exact := compute(op, sig, sets); exact do return r
-	return new_apply(op, ..args)
+	family, _ := bounds[0].?
+	if family == nil do family, _ = bounds[1].?
+	return range_set(k, bounds[0], bounds[1], family, span)
 }
 
 // compute: { x op y | x ∈ a, y ∈ b } (§4.5: distribute over |, compute on the

@@ -13,7 +13,15 @@ Expr :: union {
 	Name,
 	^Operation,
 	^Range_Expr,
+	^Unknown_Expr,
 	Invalid, // an error already reported
+}
+
+// Unknown_Expr: `??` or `??::L`. Without a layout, `C:x -> ??` takes the layout of
+// its color; elsewhere, it is any primitive.
+Unknown_Expr :: struct {
+	layout: Expr,
+	span:   syn.Span,
 }
 
 is_invalid_expr :: proc(e: Expr) -> bool {
@@ -57,6 +65,8 @@ type_of :: proc(k: ^Kernel, f: ^Frame, e: Expr) -> Type {
 		return apply(k, v.op, args, v.span)
 	case ^Range_Expr:
 		return type_range(k, f, v)
+	case ^Unknown_Expr:
+		return new_unknown(k, v.layout == nil ? Type(everything()) : type_of(k, f, v.layout))
 	case Invalid:
 		return Invalid{}
 	}
@@ -78,31 +88,65 @@ type_range :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> Type {
 			return Set{words = w}
 		}
 	}
+	if dependent, ok := dependent_range(k, f, r); ok do return dependent
 	ends, ok := range_ends(k, f, r)
 	if !ok do return Invalid{}
 	family, has_family := ends.family.?
 	if !has_family do return everything()
-	switch _ in family {
+	return range_set(k, ends.lo, ends.hi, family, r.span)
+}
+
+// range_set: every primitive from lo to hi, nil being infinite; between
+// strings, the characters (ordinal).
+range_set :: proc(k: ^Kernel, lo, hi: Maybe(Prim), family: Prim, span: syn.Span) -> Type {
+	x, has_lo := lo.?
+	y, has_hi := hi.?
+	if has_lo && has_hi {
+		if !same_family(x, y) do return report(k, .Invalid_Range, span, "the bounds of a range are of two families")
+		if prim_less(y, x) do x, y = y, x
+	}
+	switch v in family {
 	case i128:
-		lo, has_lo := ends.lo.?
-		hi, has_hi := ends.hi.?
-		a: Maybe(i128) = has_lo ? Maybe(i128)(lo.(i128)) : nil
-		b: Maybe(i128) = has_hi ? Maybe(i128)(hi.(i128)) : nil
+		a, b: Maybe(i128)
+		if has_lo do a = x.(i128)
+		if has_hi do b = y.(i128)
 		return Set{ints = ints_between(a, b)}
 	case f64:
 		rr: Real_Range
-		if lo, has := ends.lo.?; has do rr.lo = lo.(f64)
-		if hi, has := ends.hi.?; has do rr.hi = hi.(f64)
+		if has_lo do rr.lo = x.(f64)
+		if has_hi do rr.hi = y.(f64)
 		return Set{reals = reals_of({rr})}
 	case string:
-		lo, has_lo := ends.lo.?
-		hi, has_hi := ends.hi.?
-		a: Maybe(i128) = has_lo && lo.(string) != "" ? Maybe(i128)(i128(first_rune(lo.(string)))) : nil
-		b: Maybe(i128) = has_hi && hi.(string) != "" ? Maybe(i128)(i128(first_rune(hi.(string)))) : nil
+		a, b: Maybe(i128)
+		if has_lo && x.(string) != "" do a = i128(first_rune(x.(string)))
+		if has_hi && y.(string) != "" do b = i128(first_rune(y.(string)))
 		return Set{words = words_class(ints_between(a, b))}
 	case bool:
 	}
-	return report(k, .Invalid_Range, r.span, "a range is between integers, reals or characters")
+	return report(k, .Invalid_Range, span, "a range is between integers, reals or characters")
+}
+
+// dependent_range: a range whose bound depends on unknowns, `0..n` with n
+// unknown: an operation of the algebra, computed once its bounds are known.
+dependent_range :: proc(k: ^Kernel, f: ^Frame, r: ^Range_Expr) -> (Type, bool) {
+	bounds := [2]Expr{r.lo, r.hi}
+	types: [2]Type
+	dependent := false
+	for e, i in bounds {
+		if e == nil do continue
+		if _, nested := e.(^Range_Expr); nested do return nil, false
+		types[i] = type_of(k, f, e)
+		if is_invalid(types[i]) do return Invalid{}, true
+		if _, constant := types[i].(Set); !constant do dependent = true
+	}
+	if !dependent do return nil, false
+	switch {
+	case r.lo != nil && r.hi != nil:
+		return apply(k, .Range, {types[0], types[1]}, r.span), true
+	case r.lo != nil:
+		return apply(k, .Range_From, {types[0]}, r.span), true
+	}
+	return apply(k, .Range_To, {types[1]}, r.span), true
 }
 
 // string_range: a range between strings, about positions (§4.3). A bound is any

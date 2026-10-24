@@ -28,8 +28,9 @@ Error :: struct {
 }
 
 Kernel :: struct {
-	ast:    ^syn.Ast,
-	errors: [dynamic]Error,
+	ast:      ^syn.Ast,
+	errors:   [dynamic]Error,
+	unknowns: int, // the count of unknowns created: their ids
 }
 
 // report: an error, once; the type of what it concerns is Invalid.

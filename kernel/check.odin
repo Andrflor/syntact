@@ -16,11 +16,13 @@ check_frame :: proc(k: ^Kernel, f: ^Frame) {
 		c := color_type(k, f, i)
 		if c == nil || is_invalid(c) || is_invalid(v) do continue
 		r := type_in(v, c)
-		switch {
-		case is_bool(r, true), is_invalid(r):
-		case is_bool(r, false):
-			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s is not an element of %s", print_type(v), print_type(c)))
-		case:
+		if is_invalid(r) do continue
+		switch verdict, counterexample := decide(r); verdict {
+		case .True:
+		case .False:
+			when_ := counterexample == "" ? "" : fmt.tprintf(" when %s", counterexample)
+			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("%s is not an element of %s%s", print_type(v), print_type(c), when_))
+		case .Undecided:
 			report(k, .Unproven, b.span, fmt.tprintf("cannot decide whether %s is in %s", print_type(v), print_type(c)))
 		}
 	}

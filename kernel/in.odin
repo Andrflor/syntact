@@ -25,6 +25,7 @@ type_in :: proc(x, c: Type) -> Type {
 		if c_constant do return set_bool(set_is_none(cs))
 	}
 	if a, is_apply := c.(^Apply); is_apply && a.op == .Is do return type_equal(x, a.args[0])
+	if !c_constant && is_atom(c) do return type_equal(x, c) // x in p = x in =p
 	if a, is_apply := c.(^Apply); is_apply && !(x_constant && set_is_none(xs)) {
 		#partial switch a.op {
 		case .Or:
@@ -41,6 +42,7 @@ type_in :: proc(x, c: Type) -> Type {
 // type_equal: x in =t. True when x and t are equal by the laws, false when both
 // are constant and differ.
 type_equal :: proc(x, t: Type) -> Type {
+	if type_same(x, t) do return type_true()
 	xs, x_constant := x.(Set)
 	ts, t_constant := t.(Set)
 	if x_constant && t_constant do return set_bool(set_equal(xs, ts))
