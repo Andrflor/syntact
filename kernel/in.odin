@@ -5,84 +5,150 @@ package kernel
 // `x in c` is true when x is an element of c. It takes both arguments whole. Its
 // laws, which put it in normal form:
 //
-//   x in (a | b)  = (x in a) [|] (x in b)        x ≠ none
-//   x in (a & b)  = (x in a) [&] (x in b)        x ≠ none
-//   x in ~a       = [~](x in a)                  x ≠ none
-//   x in =t       = true when x and t are the same, false when both are closed
-//   x in p        = x in =p                      p a primitive, or an unknown
-//   none in t     = false                        t ≠ none
-//   (a * u + b) / d in S = u in {v | (a * v + b) / d in S}     the preimage
-//   x in (t ? {c -> p …}) = t ? {c -> x in p …}  a pattern gives one product
-//   x in S        S a scope: what its productions produce, or its shape (§5.4)
+//   x in (a | b)  = (x in a) [|] (x in b)          x ≠ none
+//   x in (a & b)  = (x in a) [&] (x in b)          x ≠ none
+//   x in ~a       = [~](x in a)                    x ≠ none
+//   x in =t       = true when x and t are the same; false when both are known
+//                   and differ
+//   x in p        = x in =p                        p one value
+//   none in t     = t is none
+//   (t::L) in L   = true: an unknown, or a term over unknowns, is in what holds
+//                   its layout, and in nothing disjoint from it
+//   (a * u + b) in S = u in {v | a * v + b in S}   the preimage
+//   x in (t ? {c -> p …}) = t ? {c -> x in p …}    a pattern gives one product
+//   x in S        S a scope: what its productions give, or its shape (§5.4)
 //
-// What no law reduces stays `x in c`: the check proves it (prove.odin).
+// On a constant type without scope, the laws of | & ~ are computed whole, by its
+// reading (set.odin). What no law reduces stays `x in c`: the check proves it
+// (prove.odin).
 
-type_in :: proc(k: ^Kernel, x, c: Type) -> Type {
+in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if is_invalid(x) || is_invalid(c) do return Invalid{}
-	xs, x_constant := x.(Set)
-	cs, c_constant := c.(Set)
-	if x_constant && c_constant do return set_bool(set_in(xs, cs))
-	if x_constant && set_is_none(xs) && c_constant do return set_bool(set_is_none(cs))
-	if a, ok := x.(^Apply); ok && a.op == .Match {
-		return map_products(k, a, proc(k: ^Kernel, p, other: Type) -> Type {return type_in(k, p, other)}, c)
+	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
+	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
+	if u, ok := x.(^Unknown); ok && (same(k, known_layout(k, u), c) || same(k, u.layout, c)) do return Bool(true) // (t::L) in L
+	if s, ok := c.(^Scope); ok do return admits(k, x, s)
+	if i, ok := c.(^Is); ok do return equal_law(k, x, i.term)
+	if is_none(x) {
+		if is_constant(c) {
+			switch empty(k, c) {
+			case .True:
+				return Bool(true)
+			case .False:
+				return Bool(false)
+			case .Unknown:
+			}
+		}
+		return new_operation(.In, x, c)
 	}
-	if a, ok := c.(^Apply); ok && a.op == .Match {
-		return map_products(k, a, proc(k: ^Kernel, p, other: Type) -> Type {return type_in(k, other, p)}, x)
+	if is_constant(c) {
+		if r := read(k, c); r.exact && len(r.scopes) == 0 do return in_reading(k, x, c, r)
+	} else if is_value(k, c) {
+		return equal_law(k, x, c) // x in p = x in =p
 	}
-	if f, is_frame := c.(^Frame); is_frame do return frame_admits(k, x, f)
-	if _, is_frame := x.(^Frame); is_frame && c_constant do return set_bool(cs.scopes.all)
-	if a, ok := c.(^Apply); ok && a.op == .Is do return type_equal(k, x, a.args[0])
-	if !c_constant && is_atom(c) do return type_equal(k, x, c)
-	if p, is_poly := x.(Poly); is_poly && c_constant {
-		if u, a, b, linear := linear_in(p); linear && !(a == 1 && b == 0 && p.denom == 1) {
-			return type_in(k, poly_var(u), Set{ints = preimage(cs.ints, a, b, p.denom)})
+	#partial switch v in c {
+	case ^Or:
+		out: Type = Bool(false)
+		for term in v.terms do out = bool_or(out, in_law(k, x, term))
+		return out
+	case ^And:
+		out: Type = Bool(true)
+		for term in v.terms do out = bool_and(out, in_law(k, x, term))
+		return out
+	case ^Not:
+		return bool_not(in_law(k, x, v.term))
+	}
+	return new_operation(.In, x, c)
+}
+
+// in_reading: x in a constant type without scope, taken whole. Its elements are
+// primitives; a complement also holds every scope and every set taken as a value.
+in_reading :: proc(k: ^Kernel, x, c: Type, r: Reading) -> Type {
+	if is_primitive(x) do return Bool(disjoint(k, x, c) == .False)
+	if !is_value(k, x) do return Bool(r.all_scopes) // a set, taken as a value
+	#partial switch v in x {
+	case ^Scope:
+		return Bool(r.all_scopes)
+	case ^Unknown:
+		return layout_in(k, x, known_layout(k, v), c)
+	}
+	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
+		return in_law(k, u, rebuild(k, Reading{ints = preimage(r.ints, a, b), words = words_empty(), exact = true}))
+	}
+	if image, ok := layout_image(k, x); ok do return layout_in(k, x, image, c)
+	return new_operation(.In, x, c)
+}
+
+// layout_in: x, one value of the layout L, is in c when L is, and is not when L
+// and c are disjoint.
+layout_in :: proc(k: ^Kernel, x, layout, c: Type) -> Type {
+	if subset(k, layout, c) == .True do return Bool(true)
+	if disjoint(k, layout, c) == .True do return Bool(false)
+	return new_operation(.In, x, c)
+}
+
+// equal_law: x in =t.
+equal_law :: proc(k: ^Kernel, x, t: Type) -> Type {
+	if is_invalid(x) || is_invalid(t) do return Invalid{}
+	if same(k, x, t) do return Bool(true)
+	if is_constant(x) && is_constant(t) {
+		switch values_equal(k, x, t) {
+		case .True:
+			return Bool(true)
+		case .False:
+			return Bool(false)
+		case .Unknown:
 		}
 	}
-	if a, ok := c.(^Apply); ok && !(x_constant && set_is_none(xs)) {
-		#partial switch a.op {
-		case .Or:
-			return bool_or(type_in(k, x, a.args[0]), type_in(k, x, a.args[1]))
-		case .And:
-			return bool_and(type_in(k, x, a.args[0]), type_in(k, x, a.args[1]))
-		case .Not:
-			return bool_not(type_in(k, x, a.args[0]))
-		}
+	if is_primitive(x) && is_value(k, t) do return in_law(k, t, x) // t in =x: a primitive is its own singleton
+	return new_operation(.In, x, new_is(t))
+}
+
+// values_equal: two known values are equal: two sets when each is in the other,
+// two scopes when their bindings are (§5.3).
+values_equal :: proc(k: ^Kernel, a, b: Type) -> Truth {
+	_, a_scope := a.(^Scope)
+	_, b_scope := b.(^Scope)
+	if a_scope || b_scope do return truth(a_scope && b_scope && same(k, a, b))
+	x := subset(k, a, b)
+	y := subset(k, b, a)
+	if x == .True && y == .True do return .True
+	if x == .False || y == .False do return .False
+	return .Unknown
+}
+
+// is_value: t is one value for each value of its unknowns, not a set of them: an
+// unknown, an operation on values, a pattern whose products are values.
+is_value :: proc(k: ^Kernel, t: Type) -> bool {
+	switch v in t {
+	case Char, Int, Real, Bool, None, ^Unknown, ^Scope, ^Collapse, Invalid:
+		return true
+	case ^Operation:
+		if v.op == .In do return true
+		for a in v.args do if !is_value(k, a) do return false
+		return true
+	case ^Pattern:
+		for b in v.branches do if !is_value(k, b.product) do return false
+		return true
+	case ^Or, ^And, ^Not, ^Is, ^Range, ^Name, ^Access, ^Carve, ^Default:
 	}
-	return new_apply(.In, x, c)
+	return false
 }
 
-// type_equal: x in =t. True when x and t are the same by the laws; false when both
-// are closed and differ; for a primitive x, `t in x`.
-type_equal :: proc(k: ^Kernel, x, t: Type) -> Type {
-	if same(k, x, t) do return type_true()
-	if closed(k, x) && closed(k, t) do return type_false()
-	if xs, constant := x.(Set); constant && !is_constant(t) && is_atom(t) {
-		if _, primitive := set_single(xs); primitive do return type_in(k, t, xs)
-	}
-	return new_apply(.In, x, new_apply(.Is, t))
+// linear_in: t = a * u + b, one unknown u of degree 1.
+linear_in :: proc(t: Type) -> (u: ^Unknown, a, b: i128, ok: bool) {
+	s, is_sum := as_sum(t)
+	if !is_sum || s.denom != 1 || len(s.products) != 1 || len(s.products[0].factors) != 1 do return
+	return s.products[0].factors[0], s.products[0].coef, s.constant, true
 }
 
-// set_in: x in c, both constant. none is only in none; a set taken as a value is
-// only among the scopes of `~none`.
-set_in :: proc(x, c: Set) -> bool {
-	if set_is_none(x) do return set_is_none(c)
-	if p, single := set_single(x); single do return set_has(c, p)
-	return c.scopes.all
-}
-
-// linear_in: p = (a * u + b) / d, one unknown u of degree 1.
-linear_in :: proc(p: Poly) -> (u: ^Unknown, a, b: i128, ok: bool) {
-	if len(p.monos) != 1 || len(p.monos[0].vars) != 1 do return
-	return p.monos[0].vars[0], p.monos[0].coef, p.constant, true
-}
-
-// preimage: the integers v such that (a * v + b) / d is in s, a ≠ 0, d > 0.
-preimage :: proc(s: Ints, a, b, d: i128) -> Ints {
+// preimage: the integers v such that a * v + b is in s, a ≠ 0.
+preimage :: proc(s: Ints, a, b: i128) -> Ints {
 	out := make([dynamic]Int_Range)
-	for r in s.ranges {
+	for r in s {
 		lo, hi: Maybe(i128)
-		if l, ok := r.lo.?; ok do lo = l * d - b
-		if h, ok := r.hi.?; ok do hi = h * d - b
+		if l, ok := r.lo.?; ok do lo = l - b
+		if h, ok := r.hi.?; ok do hi = h - b
 		if a < 0 do lo, hi = neg_bound(hi), neg_bound(lo)
 		m := abs(a)
 		from, to: Maybe(i128)

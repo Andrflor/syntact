@@ -1,111 +1,190 @@
 package kernel
 
+import syn "../compiler"
+import "core:fmt"
+import "core:slice"
+
 // RECURSION (specs/types.md §5.6)
 //
-// A scope names itself only in its productions. Its collapse there is a recursive
-// call: it stays an operation, Apply(.Recur, [the frame]) — carving and collapse
-// applied to types — and the production is an equation that mentions it. The
-// equation is never unfolded: it is solved, or it stays.
+// A scope names itself only in its productions. Asked again from its own
+// production, it stays a carve and a collapse — a recursive call — and is never
+// unfolded. Its first production is then an equation that mentions it. It is
+// solved — a closed form — or it stays. A call of a solved equation substitutes
+// its arguments into the solution.
 //
-// The closed form, when the name is called on an integer:
+// An operator applies to a recursive call when its family is the one the
+// operator needs: the hypothesis of an induction, checked once the equation is
+// given — the family of the first production must be that one.
+
+// origin: the scope a copy carves, uncarved; a scope is its own.
+origin :: proc(s: ^Scope) -> ^Scope {
+	return s.carved != nil ? s.carved : s
+}
+
+// recursive_call: s! asked while a production of s, or of the scope s carves, is
+// given. A carve of it was checked where it is written (scope.odin).
+recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
+	root := origin(s)
+	root.recursive = true
+	if p, found := first_production(k, root); found && p.state != .In_Progress {
+		solution := binding_type(k, p)
+		if solved(solution, root) {
+			if s == root do return solution
+			values := make(map[^Unknown]Type)
+			substitutable := true
+			for b, v in s.changes {
+				u, is_unknown := binding_type(k, b).(^Unknown)
+				if !is_unknown {
+					substitutable = false
+					break
+				}
+				values[u] = v
+			}
+			if substitutable {
+				if r, done := substitute(k, solution, &Substitution{values = values}); done do return r
+			}
+		}
+	}
+	out := new(Collapse)
+	out.target, out.recursive, out.span = s, true, span
+	return out
+}
+
+// solved: t holds no recursive call of the scope.
+solved :: proc(t: Type, root: ^Scope) -> bool {
+	#partial switch v in t {
+	case ^Collapse:
+		if s, ok := v.target.(^Scope); ok && v.recursive && origin(s) == root do return false
+	case ^Operation:
+		for a in v.args do if !solved(a, root) do return false
+	case ^Or:
+		for a in v.terms do if !solved(a, root) do return false
+	case ^And:
+		for a in v.terms do if !solved(a, root) do return false
+	case ^Not:
+		return solved(v.term, root)
+	case ^Pattern:
+		if !solved(v.target, root) do return false
+		for b in v.branches do if !solved(b.product, root) do return false
+	}
+	return true
+}
+
+// assume: the hypothesis that a recursive call is in the family f, recorded when
+// none is; false when another one is.
+assume :: proc(k: ^Kernel, c: ^Collapse, f: Family) -> bool {
+	s, ok := c.target.(^Scope)
+	if !ok do return false
+	root := origin(s)
+	if have, found := k.hypotheses[root]; found do return family_holds(f, have)
+	k.hypotheses[root] = f
+	return true
+}
+
+hypothesis :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
+	s, ok := c.target.(^Scope)
+	if !ok do return {}, false
+	f, found := k.hypotheses[origin(s)]
+	return f, found
+}
+
+// recursion_law: the first production of a recursive scope, once given: the
+// hypothesis is checked, and the equation solved when it has a closed form.
+recursion_law :: proc(k: ^Kernel, b: ^Binding, value: Type) -> Type {
+	root := origin(b.scope)
+	if !root.recursive do return value
+	first, found := first_production(k, b.scope)
+	if !found || first != b do return value
+	if f, assumed := k.hypotheses[root]; assumed {
+		g, known := family_of(k, value)
+		if !known || !family_holds(f, g) {
+			report(k, .Invalid_operator, b.span, fmt.tprintf("the recursive call is used as %v, and is not proven to be one", f))
+		}
+	}
+	if b.scope.carved != nil do return value
+	return solve(k, b.scope, value)
+}
+
+// solve: the closed form (§5.6). When
 //
 //   f{n -> m}! = m ? {b -> c  -> g(m) + f{n -> m - 1}!}
-//   ⟹  f{n -> m}! = c + g(b + 1) + … + g(m)
 //
-// for every m of the domain of n, which all come down to b; a polynomial in m when
-// g is one. A carve of a scope whose production is an equation in its unknowns is
-// that equation, the unknowns given the values of the carve: sum{n -> 5}! is sum!
-// with n = 5.
-
-has_recursion :: proc(t: Type) -> bool {
-	a, is_apply := t.(^Apply)
-	if !is_apply do return false
-	if a.op == .Recur do return true
-	for arg in a.args do if arg != nil && has_recursion(arg) do return true
-	return false
-}
-
-// solve: the production t of f, an equation that mentions f, in closed form when
-// it has the form above; t otherwise.
-solve :: proc(k: ^Kernel, f: ^Frame, t: Type) -> Type {
-	m, is_match := t.(^Apply)
-	if !is_match || m.op != .Match || len(m.args) != 5 || m.args[3] != nil do return t
-	u := target_unknown(m.args[0])
-	if u == nil do return t
-	// the base case: one integer b, a product c that does not recurse
-	cover, base_ok := m.args[1].(Set)
-	if !base_ok do return t
-	b, single := ints_single(cover.ints)
-	if !single || !set_equal(cover, set_of(b)) do return t
-	c, c_ok := as_poly(m.args[2])
-	if !c_ok do return t
-	// every value of the domain of u comes down to b
-	domain, known := maybe(k, u.domain)
-	low, bounded := ints_min(domain.ints).?
-	if !known || !bounded || low < b || !set_subset(domain, family_set(.Int)) do return t
-	g, ok := step_of(k, f, u, m.args[4])
-	if !ok do return t
-	// c + Σ_{j=b+1}^{u} g(j) = c + Σ_p a_p (S_p(u) - S_p(b))
-	result := c
-	for mono in g.monos {
-		s := power_sum(u, len(mono.vars))
-		at_b := substitute_number(s, u, b)
-		result = poly_add(result, poly_mul(poly_over(poly_constant(mono.coef), g.denom), poly_add(s, poly_neg(at_b))))
+// with m ≥ b for every value, then f{n -> m}! = c + g(b + 1) + … + g(m), a
+// polynomial in m when g is one: c + G(m) - G(b), G(m) = g(0) + … + g(m).
+solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
+	p, is_pattern := value.(^Pattern)
+	if !is_pattern || len(p.branches) != 2 || p.branches[1].cover != nil do return value
+	u, is_unknown := p.target.(^Unknown)
+	base, has_base := p.branches[0].cover.(Int)
+	c, constant := p.branches[0].product.(Int)
+	if !is_unknown || !has_base || !constant do return value
+	g, call, split := split_call(k, p.branches[1].product, root)
+	if !split || len(call.changes) != 1 do return value
+	for b, v in call.changes {
+		x, same_unknown := binding_type(k, b).(^Unknown)
+		step, is_sum := as_sum(v)
+		if !same_unknown || x != u || !is_sum || !same_sum(step, sum_add(unknown_sum(u), sum_constant(-1))) do return value
 	}
-	if g.constant != 0 do result = poly_add(result, poly_mul(poly_over(poly_constant(g.constant), g.denom), poly_add(poly_var(u), poly_constant(-b))))
-	return poly_normal(result)
+	degree := 0
+	for q in g.products {
+		for f in q.factors do if f != u do return value
+		degree = max(degree, len(q.factors))
+	}
+	if subset(k, known_layout(k, u), new_range(Int(base), nil, .Int)) != .True do return value
+	sums := power_sums(u, degree)
+	total := sum_scale(sums[0], g.constant)
+	for q in g.products do total = sum_add(total, sum_scale(sums[len(q.factors)], q.coef))
+	total = sum_div(total, g.denom)
+	at_base, exact := sum_eval(total, u, i128(base))
+	if !exact do return value
+	return sum_term(sum_add(sum_constant(i128(c) - at_base), total))
 }
 
-// step_of: g, when p is g(u) + f{n -> u - 1}!, g a polynomial in u alone.
-step_of :: proc(k: ^Kernel, f: ^Frame, u: ^Unknown, p: Type) -> (Poly, bool) {
-	recursion: ^Apply
-	g := poly_constant(0)
-	parts := make([dynamic]Type)
-	sum_parts(p, &parts)
-	for part in parts {
-		if a, is_apply := part.(^Apply); is_apply && a.op == .Recur {
-			if recursion != nil do return {}, false
-			recursion = a
+// split_call: a product g + f{…}!, with g a sum and one recursive call of f.
+split_call :: proc(k: ^Kernel, product: Type, root: ^Scope) -> (g: Sum, call: ^Scope, ok: bool) {
+	terms := []Type{product}
+	if o, is_add := product.(^Operation); is_add && o.op == .Add do terms = o.args
+	g = sum_constant(0)
+	for t in terms {
+		if c, is_call := t.(^Collapse); is_call && c.recursive {
+			s, is_scope := c.target.(^Scope)
+			if !is_scope || origin(s) != root || call != nil do return
+			call = s
 			continue
 		}
-		q, is_poly := as_poly(part)
-		if !is_poly do return {}, false
-		for mono in q.monos do for v in mono.vars do if v != u do return {}, false
-		g = poly_add(g, q)
+		part := as_sum(t) or_return
+		g = sum_add(g, part)
 	}
-	if recursion == nil do return {}, false
-	h := recursion.args[0].(^Frame)
-	if h.scope != f.scope || h.parent != f.parent || len(h.overrides) != 1 do return {}, false
-	for i, o in h.overrides {
-		parameter := target_unknown(value_type(k, f, i))
-		arg, arg_poly := as_poly(o)
-		if parameter != u || !arg_poly || !poly_equal(arg, poly_add(poly_var(u), poly_constant(-1))) do return {}, false
-	}
-	return g, true
+	return g, call, call != nil
 }
 
-sum_parts :: proc(t: Type, out: ^[dynamic]Type) {
-	if a, is_apply := t.(^Apply); is_apply && a.op == .Add {
-		sum_parts(a.args[0], out)
-		sum_parts(a.args[1], out)
-		return
-	}
-	append(out, t)
+// --- polynomials, by the laws of the ring (arith.odin) ---
+
+unknown_sum :: proc(u: ^Unknown) -> Sum {
+	s := sum_constant(0)
+	append(&s.products, Product{1, slice.clone([]^Unknown{u})})
+	return s
 }
 
-// power_sum: S_p(u) = 1^p + … + u^p, a polynomial in u, from
-// (u + 1)^(p+1) - 1 = Σ_{q ≤ p} C(p + 1, q) S_q(u).
-power_sum :: proc(u: ^Unknown, p: int) -> Poly {
-	sums := make([dynamic]Poly)
-	next := poly_add(poly_var(u), poly_constant(1))
-	for q in 0 ..= p {
-		power := poly_constant(1)
-		for _ in 0 ..= q do power = poly_mul(power, next)
-		s := poly_add(power, poly_constant(-1))
-		for r, j in sums do s = poly_add(s, poly_neg(poly_mul(poly_constant(binomial(q + 1, j)), r)))
-		append(&sums, poly_over(s, i128(q + 1)))
-	}
-	return sums[p]
+same_sum :: proc(a, b: Sum) -> bool {
+	d := sum_add(a, sum_neg(b))
+	return len(d.products) == 0 && d.constant == 0
+}
+
+sum_scale :: proc(s: Sum, c: i128) -> Sum {
+	return sum_mul(s, sum_constant(c))
+}
+
+sum_div :: proc(s: Sum, d: i128) -> Sum {
+	out := s
+	out.denom *= d
+	return sum_reduce(out)
+}
+
+sum_pow :: proc(s: Sum, n: int) -> Sum {
+	out := sum_constant(1)
+	for _ in 0 ..< n do out = sum_mul(out, s)
+	return out
 }
 
 binomial :: proc(n, r: int) -> i128 {
@@ -114,77 +193,90 @@ binomial :: proc(n, r: int) -> i128 {
 	return out
 }
 
-// substitute_number: p with u = b, a constant polynomial.
-substitute_number :: proc(p: Poly, u: ^Unknown, b: i128) -> Poly {
-	result := poly_constant(p.constant)
-	for m in p.monos {
-		term := poly_constant(m.coef)
-		for v in m.vars do term = poly_mul(term, v == u ? poly_constant(b) : poly_var(v))
-		result = poly_add(result, term)
+// power_sums: S_0 … S_d, S_p(m) = 0^p + 1^p + … + m^p, from
+// C(p+1, 0) S_0 + … + C(p+1, p) S_p = (m + 1)^(p+1).
+power_sums :: proc(u: ^Unknown, d: int) -> []Sum {
+	out := make([]Sum, d + 1)
+	next := sum_add(unknown_sum(u), sum_constant(1))
+	for p in 0 ..= d {
+		acc := sum_pow(next, p + 1)
+		for j in 0 ..< p do acc = sum_add(acc, sum_neg(sum_scale(out[j], binomial(p + 1, j))))
+		out[p] = sum_div(acc, i128(p + 1))
 	}
-	return poly_over(result, p.denom)
+	return out
 }
 
-// substitute_equation: the collapse of a carve g whose source produces an
-// equation in the unknowns g carves: that equation, with their values.
-substitute_equation :: proc(k: ^Kernel, g: ^Frame) -> (Type, bool) {
-	source := g.source
-	if source == nil do return nil, false
-	values := make(map[^Unknown]Type)
-	for i, o in g.overrides {
-		u := target_unknown(value_type(k, source, i))
-		if u == nil do return nil, false
-		values[u] = o
+// sum_eval: the value of a polynomial in u at u = v; false when it is not an
+// integer.
+sum_eval :: proc(s: Sum, u: ^Unknown, v: i128) -> (i128, bool) {
+	total := s.constant
+	for q in s.products {
+		term := q.coef
+		for f in q.factors {
+			if f != u do return 0, false
+			term *= v
+		}
+		total += term
 	}
-	for s in shape_slots(k, source) {
-		if binding_of(s).kind != .Product do continue
-		if s.frame.states[s.index] == .In_Progress do return nil, false
-		return substitute(k, slot_value(k, s), values), true
+	if total % s.denom != 0 do return 0, false
+	return total / s.denom, true
+}
+
+// --- substitution ---
+
+// Substitution: unknowns replaced by values (a call of a solved equation), or
+// every unknown by its known layout (the image of a term, prove.odin).
+Substitution :: struct {
+	values:  map[^Unknown]Type,
+	layouts: bool,
+}
+
+// substitute: t with its unknowns replaced, put in normal form by the same laws;
+// false when t holds a term the replacement does not reach.
+substitute :: proc(k: ^Kernel, t: Type, s: ^Substitution) -> (out: Type, ok: bool) {
+	switch v in t {
+	case Char, Int, Real, Bool, None, Invalid:
+		return t, true
+	case ^Unknown:
+		if x, found := s.values[v]; found do return x, true
+		return s.layouts ? known_layout(k, v) : Type(v), true
+	case ^Operation:
+		if v.op == .In && s.layouts do return family_term(.Bool), true // a boolean, whose value the layouts do not give
+		args := make([]Type, len(v.args))
+		for a, i in v.args do args[i] = substitute(k, a, s) or_return
+		return operation_law(k, v.op, args, v.span), true
+	case ^Or:
+		terms := make([]Type, len(v.terms))
+		for a, i in v.terms do terms[i] = substitute(k, a, s) or_return
+		return or_law(k, terms), true
+	case ^And:
+		terms := make([]Type, len(v.terms))
+		for a, i in v.terms do terms[i] = substitute(k, a, s) or_return
+		return and_law(k, terms), true
+	case ^Not:
+		return not_law(k, substitute(k, v.term, s) or_return), true
+	case ^Is:
+		return is_law(substitute(k, v.term, s) or_return), true
+	case ^Range:
+		lo, hi: Type
+		if v.lo != nil do lo = substitute(k, v.lo, s) or_return
+		if v.hi != nil do hi = substitute(k, v.hi, s) or_return
+		return range_law(k, lo, hi, v.family, v.span), true
+	case ^Pattern:
+		if s.layouts do return nil, false
+		p := new(Pattern)
+		p.span = v.span
+		p.target = substitute(k, v.target, s) or_return
+		p.branches = make([]Branch, len(v.branches))
+		for b, i in v.branches {
+			p.branches[i] = b
+			p.branches[i].scope = nil
+			p.branches[i].product = substitute(k, b.product, s) or_return
+		}
+		return pattern_law(k, p), true
+	case ^Collapse:
+		if f, known := family_of(k, v); known && s.layouts do return family_term(f), true
+	case ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return nil, false
-}
-
-// substitute: t, each unknown in values replaced by its value, in normal form. A
-// recursive call is carved again with the values: it stays a call.
-substitute :: proc(k: ^Kernel, t: Type, values: map[^Unknown]Type) -> Type {
-	switch v in t {
-	case ^Unknown:
-		if x, ok := values[v]; ok do return x
-		return v
-	case Poly:
-		result := poly_constant(v.constant)
-		for m in v.monos {
-			term := poly_constant(m.coef)
-			for u in m.vars {
-				factor := poly_var(u)
-				if x, ok := values[u]; ok {
-					p, is_poly := as_poly(x)
-					if !is_poly do return t
-					factor = p
-				}
-				term = poly_mul(term, factor)
-			}
-			result = poly_add(result, term)
-		}
-		if v.denom != 1 {
-			q, exact := poly_div(result, v.denom)
-			if !exact do return Poly{result.monos, result.constant, result.denom * v.denom}
-			result = q
-		}
-		return poly_normal(result)
-	case ^Apply:
-		if v.op == .Recur {
-			g := v.args[0].(^Frame)
-			args := make([dynamic]Carve_Arg)
-			for i, o in g.overrides do append(&args, Carve_Arg{g.scope.bindings[i].name, -1, substitute(k, o, values), {}})
-			c := carve(k, g.source, args[:], {})
-			if h, is_frame := c.(^Frame); is_frame do return new_apply(.Recur, h)
-			return c
-		}
-		args := make([]Type, len(v.args))
-		for a, i in v.args do if a != nil do args[i] = substitute(k, a, values)
-		return apply(k, v.op, args, {})
-	case Set, ^Frame, Invalid:
-	}
-	return t
 }

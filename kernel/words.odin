@@ -4,39 +4,37 @@ import "core:fmt"
 import "core:slice"
 import "core:strings"
 
-// SETS OF STRINGS (specs/types.md §4.3, §4.6)
+// WORDS
 //
-// A set of strings is a regular language, kept as the expression that writes it.
-// A character is a string of length 1: a class of code points. The constructors
-// apply the laws of the algebra (| & ~ of a Boolean algebra, + associative with ""
-// neutral, the repetition laws of §4.6), and similar expressions are the same node
-// (Owens, Reppy, Turon). Emptiness, inclusion and membership are decided by
-// Brzozowski derivatives: a regular expression has finitely many of them.
+// The strings of a constant type, read as a regular language: what the laws of
+// | & ~, + and * on strings (§4.1, §4.6) compute on, to decide whether a set of
+// strings is empty or in another (set.odin). A character is a word of length 1.
+// Similar expressions are one node (Owens, Reppy, Turon); emptiness and membership
+// are decided by Brzozowski derivatives, of which a regular expression has finitely
+// many. Words are never a type: a type is a term of type.odin.
 
 MAX_RUNE :: 0x10FFFF
 
 Words_Kind :: enum u8 {
-	Empty, // no string
+	Empty, // no word
 	Epsilon, // ""
-	Class, // one character, among `class`
-	Cat, // [a, b]: a then b, associated to the right
-	Alt, // a | b | …: flattened, sorted by id, without duplicates
-	And, // a & b & …: likewise
-	Not, // [a]: every string but those of a
-	Repeat, // [a]: a repeated a number of times taken in `counts`
+	Class, // one character among `class`
+	Cat, // [a, b]: a then b
+	Alt, // a | b | …
+	And, // a & b & …
+	Not, // every word but those of a
+	Repeat, // a repeated n times, n in `counts`
 }
 
 Words :: struct {
 	kind:     Words_Kind,
-	class:    Ints, // Class: code points in 0..MAX_RUNE
+	class:    Ints, // Class: code points
 	args:     []^Words,
 	counts:   Ints, // Repeat: integers ≥ 0
 	id:       int,
 	nullable: bool, // "" is in it
 }
 
-// The nodes of the current run: similar expressions are one node, compared by
-// address. words_reset starts a new table, in the current allocator.
 @(thread_local)
 words_table: map[string]^Words
 @(thread_local)
@@ -50,76 +48,39 @@ words_reset :: proc() {
 @(private = "file")
 intern :: proc(w: Words) -> ^Words {
 	b := strings.builder_make(context.temp_allocator)
-	strings.write_int(&b, int(w.kind))
-	for r in w.class.ranges do write_range(&b, r)
+	fmt.sbprintf(&b, "%d|", int(w.kind))
+	for r in w.class do fmt.sbprintf(&b, "%v:%v;", r.lo, r.hi)
 	strings.write_byte(&b, '|')
-	for a in w.args {
-		strings.write_int(&b, a.id)
-		strings.write_byte(&b, ',')
-	}
+	for a in w.args do fmt.sbprintf(&b, "%d,", a.id)
 	strings.write_byte(&b, '|')
-	for r in w.counts.ranges do write_range(&b, r)
+	for r in w.counts do fmt.sbprintf(&b, "%v:%v;", r.lo, r.hi)
 	key := strings.to_string(b)
 	if found, ok := words_table[key]; ok do return found
 	n := new(Words)
 	n^ = w
-	n.args = slice.clone(w.args) // the arguments are often a literal on the stack
+	n.args = slice.clone(w.args)
+	n.class = slice.clone(w.class)
+	n.counts = slice.clone(w.counts)
 	n.id = len(words_table)
 	words_table[strings.clone(key)] = n
 	return n
 }
 
-@(private = "file")
-write_range :: proc(b: ^strings.Builder, r: Int_Range) {
-	if lo, ok := r.lo.?; ok do strings.write_string(b, fmt.tprint(lo))
-	strings.write_byte(b, ':')
-	if hi, ok := r.hi.?; ok do strings.write_string(b, fmt.tprint(hi))
-	strings.write_byte(b, ';')
-}
+words_empty :: proc() -> ^Words {return intern(Words{kind = .Empty})}
+words_epsilon :: proc() -> ^Words {return intern(Words{kind = .Epsilon, nullable = true})}
+words_all :: proc() -> ^Words {return words_not(words_empty())}
+words_chars :: proc() -> ^Words {return words_class({{0, MAX_RUNE}})}
 
-words_empty :: proc() -> ^Words {
-	return intern(Words{kind = .Empty})
-}
-
-words_epsilon :: proc() -> ^Words {
-	return intern(Words{kind = .Epsilon, nullable = true})
-}
-
-// words_class: one character among the code points of `points`.
 words_class :: proc(points: Ints) -> ^Words {
-	class := ints_intersect(points, ints_between(0, MAX_RUNE))
-	if ints_empty(class) do return words_empty()
+	class := ints_intersect(points, {{0, MAX_RUNE}})
+	if len(class) == 0 do return words_empty()
 	return intern(Words{kind = .Class, class = class})
 }
 
 words_char :: proc(c: rune) -> ^Words {
-	return words_class(ints_point(i128(c)))
+	return words_class({{i128(c), i128(c)}})
 }
 
-// words_chars: every character.
-words_chars :: proc() -> ^Words {
-	return words_class(ints_between(0, MAX_RUNE))
-}
-
-// words_all: every string.
-words_all :: proc() -> ^Words {
-	return words_not(words_empty())
-}
-
-words_literal :: proc(s: string) -> ^Words {
-	w := words_epsilon()
-	runes := utf8_runes(s)
-	#reverse for c in runes do w = words_cat(words_char(c), w)
-	return w
-}
-
-utf8_runes :: proc(s: string) -> []rune {
-	out := make([dynamic]rune, 0, len(s))
-	for c in s do append(&out, c)
-	return out[:]
-}
-
-// words_cat: a then b. ∅ is absorbing, "" neutral, + associative (§4.6).
 words_cat :: proc(a, b: ^Words) -> ^Words {
 	if a.kind == .Empty || b.kind == .Empty do return words_empty()
 	if a.kind == .Epsilon do return b
@@ -128,17 +89,9 @@ words_cat :: proc(a, b: ^Words) -> ^Words {
 	return intern(Words{kind = .Cat, args = {a, b}, nullable = a.nullable && b.nullable})
 }
 
-words_alt :: proc(a, b: ^Words) -> ^Words {
-	return words_combine(.Alt, {a, b})
-}
+words_alt :: proc(a, b: ^Words) -> ^Words {return words_combine(.Alt, {a, b})}
+words_and :: proc(a, b: ^Words) -> ^Words {return words_combine(.And, {a, b})}
 
-words_and :: proc(a, b: ^Words) -> ^Words {
-	return words_combine(.And, {a, b})
-}
-
-// words_combine: | or & of several sets, by the laws of a Boolean algebra
-// (§4.1): flattened, sorted, without duplicates; the classes are merged; ∅ and
-// every string are neutral or absorbing.
 words_combine :: proc(kind: Words_Kind, parts: []^Words) -> ^Words {
 	is_or := kind == .Alt
 	neutral := is_or ? words_empty() : words_all()
@@ -188,25 +141,21 @@ words_not :: proc(a: ^Words) -> ^Words {
 	return intern(Words{kind = .Not, args = {a}, nullable = !a.nullable})
 }
 
-// words_repeat: a repeated n times, n in `counts` (§4.6). t * 0 = "",
-// t * 1 = t. When "" is in a, a * n contains every a * m for m ≤ n: the counts
-// close downward, which keeps the derivative rule exact.
+// words_repeat: a * counts (§4.6): t * 0 = "", t * 1 = t. When "" is in a, the
+// counts close downward, which keeps the derivative exact.
 words_repeat :: proc(a: ^Words, counts: Ints) -> ^Words {
-	c := ints_intersect(counts, ints_between(0, nil))
-	if ints_empty(c) do return words_empty()
-	has_zero := ints_contains(c, 0)
-	if a.kind == .Empty do return has_zero ? words_epsilon() : words_empty()
+	c := ints_intersect(counts, {{0, nil}})
+	if len(c) == 0 do return words_empty()
+	if a.kind == .Empty do return ints_contains(c, 0) ? words_epsilon() : words_empty()
 	if a.kind == .Epsilon do return words_epsilon()
-	if a.nullable do c = ints_between(0, ints_max(c))
+	if a.nullable do c = {{0, c[len(c) - 1].hi}}
 	if n, single := ints_single(c); single {
 		if n == 0 do return words_epsilon()
 		if n == 1 do return a
-		if _, literal := words_single_word(a); literal && n <= 64 do return words_cat(a, words_repeat(a, ints_point(n - 1)))
 	}
 	return intern(Words{kind = .Repeat, args = {a}, counts = c, nullable = ints_contains(c, 0)})
 }
 
-// words_derive: the strings w such that c·w is in a (Brzozowski).
 words_derive :: proc(a: ^Words, c: rune) -> ^Words {
 	key := [2]int{a.id, int(c)}
 	if d, ok := derivatives[key]; ok do return d
@@ -226,15 +175,15 @@ words_derive :: proc(a: ^Words, c: rune) -> ^Words {
 	case .Not:
 		d = words_not(words_derive(a.args[0], c))
 	case .Repeat:
-		rest := ints_add(ints_intersect(a.counts, ints_between(1, nil)), ints_point(-1))
+		rest := ints_add(ints_intersect(a.counts, {{1, nil}}), {{-1, -1}})
 		d = words_cat(words_derive(a.args[0], c), words_repeat(a.args[0], rest))
 	}
 	derivatives[key] = d
 	return d
 }
 
-// words_cuts: code points where the derivative may change: the bounds of every
-// class in a. Between two cuts, every character derives a the same way.
+// words_cuts: the code points where a derivative may change: the bounds of the
+// classes in a.
 @(private = "file")
 words_cuts :: proc(a: ^Words) -> []rune {
 	points := make(map[rune]bool)
@@ -246,7 +195,7 @@ words_cuts :: proc(a: ^Words) -> []rune {
 		w := pop(&stack)
 		if seen[w.id] do continue
 		seen[w.id] = true
-		for r in w.class.ranges {
+		for r in w.class {
 			lo, _ := r.lo.?
 			hi, _ := r.hi.?
 			points[rune(lo)] = true
@@ -254,17 +203,17 @@ words_cuts :: proc(a: ^Words) -> []rune {
 		}
 		append(&stack, ..w.args)
 	}
-	out := make([dynamic]rune, 0, len(points))
+	out := make([dynamic]rune)
 	for p in points do append(&out, p)
 	slice.sort(out[:])
 	return out[:]
 }
 
-// words_witness: the shortest string of a, the first in code point order.
+// words_witness: the shortest word of a, the first in code point order.
 words_witness :: proc(a: ^Words) -> (string, bool) {
 	Step :: struct {
 		state: ^Words,
-		from:  int, // the previous step, -1 for the start
+		from:  int,
 		c:     rune,
 	}
 	cuts := words_cuts(a)
@@ -278,7 +227,9 @@ words_witness :: proc(a: ^Words) -> (string, bool) {
 			runes := make([dynamic]rune)
 			for j := i; steps[j].from >= 0; j = steps[j].from do append(&runes, steps[j].c)
 			slice.reverse(runes[:])
-			return runes_string(runes[:]), true
+			b := strings.builder_make()
+			for c in runes do strings.write_rune(&b, c)
+			return strings.to_string(b), true
 		}
 		for c in cuts {
 			d := words_derive(s.state, c)
@@ -288,12 +239,6 @@ words_witness :: proc(a: ^Words) -> (string, bool) {
 		}
 	}
 	return "", false
-}
-
-runes_string :: proc(runes: []rune) -> string {
-	b := strings.builder_make()
-	for c in runes do strings.write_rune(&b, c)
-	return strings.to_string(b)
 }
 
 words_is_empty :: proc(a: ^Words) -> bool {
@@ -306,53 +251,16 @@ words_subset :: proc(a, b: ^Words) -> bool {
 	return a == b || words_is_empty(words_and(a, words_not(b)))
 }
 
-words_equal :: proc(a, b: ^Words) -> bool {
-	return a == b || (words_subset(a, b) && words_subset(b, a))
-}
-
 words_contains :: proc(a: ^Words, s: string) -> bool {
 	w := a
 	for c in s do w = words_derive(w, c)
 	return w.nullable
 }
 
-// words_single: the only string of a, when there is exactly one.
-words_single :: proc(a: ^Words) -> (string, bool) {
-	s, found := words_witness(a)
-	if !found do return "", false
-	return s, words_is_empty(words_and(a, words_not(words_literal(s))))
-}
-
-// words_single_word: a, when it is one fixed string, written as one: a chain of
-// single characters.
-words_single_word :: proc(a: ^Words) -> (string, bool) {
+words_literal :: proc(s: string) -> ^Words {
+	w := words_epsilon()
 	runes := make([dynamic]rune)
-	x := a
-	for {
-		#partial switch x.kind {
-		case .Epsilon:
-			return runes_string(runes[:]), true
-		case .Class:
-			c, single := ints_single(x.class)
-			if !single do return "", false
-			append(&runes, rune(c))
-			return runes_string(runes[:]), true
-		case .Cat:
-			if x.args[0].kind != .Class do return "", false
-			c, single := ints_single(x.args[0].class)
-			if !single do return "", false
-			append(&runes, rune(c))
-			x = x.args[1]
-		case:
-			return "", false
-		}
-	}
-}
-
-// words_char_bounds: the smallest and largest code point of a set of characters.
-words_char_bounds :: proc(a: ^Words) -> (lo, hi: i128, ok: bool) {
-	if a.kind != .Class do return 0, 0, false
-	l, _ := ints_min(a.class).?
-	h, _ := ints_max(a.class).?
-	return l, h, true
+	for c in s do append(&runes, c)
+	#reverse for c in runes do w = words_cat(words_char(c), w)
+	return w
 }

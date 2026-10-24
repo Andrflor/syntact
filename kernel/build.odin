@@ -6,20 +6,19 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 
-// FROM THE AST TO THE PROGRAM
+// FROM THE AST TO TERMS
 //
-// Each node becomes the expression it writes; each name is resolved once, to the
-// last occurrence visible above it (specs/types.md §5.2). A scope names itself
-// only from its productions (§5.6): that name is marked, and its collapse is a
-// recursive call. The file is a scope, inside the prelude of the aliases (§3).
+// Each node becomes the term it writes (type.odin). Each name is resolved once, to
+// the last occurrence visible above it (§5.2). A scope names itself only from its
+// productions (§5.6): that name is marked, and its collapse is a recursive call.
+// The file is a scope, inside the prelude of the aliases (§3).
 
-build_program :: proc(k: ^Kernel) -> ^Frame {
+build_program :: proc(k: ^Kernel) -> ^Scope {
 	root := syn.ast_root(k.ast)
-	p := prelude()
-	s := new_scope(p, node_span(k, root))
+	s := new_scope(prelude(), node_span(k, root))
 	for child in syn.node_children(k.ast, root) do build_binding(k, s, child)
 	s.complete = true
-	return new_frame(s, new_frame(p, nil))
+	return s
 }
 
 new_scope :: proc(parent: ^Scope, span: syn.Span) -> ^Scope {
@@ -28,14 +27,20 @@ new_scope :: proc(parent: ^Scope, span: syn.Span) -> ^Scope {
 	return s
 }
 
+new_binding :: proc(s: ^Scope, kind: Kind, span: syn.Span) -> ^Binding {
+	b := new(Binding)
+	b.kind, b.span, b.scope = kind, span, s
+	append(&s.bindings, b)
+	return b
+}
+
 node_span :: proc(k: ^Kernel, idx: syn.Node_Index) -> syn.Span {
 	if idx == syn.INVALID_NODE || int(idx) >= len(k.ast.node_spans) do return {}
 	return k.ast.node_spans[idx]
 }
 
-unsupported :: proc(k: ^Kernel, idx: syn.Node_Index, what: string) -> Expr {
-	report(k, .Unsupported, node_span(k, idx), fmt.tprintf("not in the kernel yet: %s", what))
-	return Invalid{}
+unsupported :: proc(k: ^Kernel, idx: syn.Node_Index, what: string) -> Type {
+	return report(k, .Unsupported, node_span(k, idx), fmt.tprintf("not in the kernel yet: %s", what))
 }
 
 // build_binding adds to s the binding that node idx writes. While its parts are
@@ -43,15 +48,15 @@ unsupported :: proc(k: ^Kernel, idx: syn.Node_Index, what: string) -> Expr {
 build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	ast := k.ast
 	data := ast.node_data[idx]
-	append(&s.bindings, Binding{span = node_span(k, idx)})
-	b := &s.bindings[len(s.bindings) - 1]
+	b := new_binding(s, .Push, node_span(k, idx))
 	#partial switch ast.node_kinds[idx] {
 	case .Pointing:
 		build_left(k, s, data.binary.left, b)
 		if data.binary.right == syn.INVALID_NODE {
-			unsupported(k, idx, "an arrow without a value")
+			b.value = unsupported(k, idx, "an arrow without a value")
 		} else {
-			b.value = build_expr(k, s, data.binary.right)
+			b.value = build_term(k, s, data.binary.right)
+			if v, is_scope := b.value.(^Scope); is_scope do v.name = b.name
 		}
 	case .Constraint:
 		build_left(k, s, idx, b)
@@ -63,42 +68,41 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		operand := data.unary.operand
 		switch {
 		case operand == syn.INVALID_NODE:
-			unsupported(k, idx, "a production without a value")
+			b.value = unsupported(k, idx, "a production without a value")
 		case ast.node_kinds[operand] == .Constraint:
 			build_left(k, s, operand, b)
-			b.kind = .Product
 		case:
-			b.value = build_expr(k, s, operand)
+			b.value = build_term(k, s, operand)
 		}
 	case .Expand:
-		// `...e` places the bindings of e; `...C:` and `...` are runs, in a shape
+		// `...e` places the bindings of e; `...C:` and `...` are runs (§5.4)
 		b.kind = .Expand
 		target := data.unary.operand
 		switch {
 		case target == syn.INVALID_NODE:
 		case ast.node_kinds[target] == .Constraint:
 			build_left(k, s, target, b)
-			b.kind = .Expand
 		case:
-			b.value = build_expr(k, s, target)
+			b.value = build_term(k, s, target)
 		}
 	case .Carve:
 		source := data.carve.source
 		if source != syn.INVALID_NODE && ast.node_kinds[source] == .Constraint {
 			// `C:p{…}`: p, colored by C, is the default of C carved (specs/language/11)
 			build_left(k, s, source, b)
-			d := new(Default_Expr)
+			d := new(Default)
 			d.color, d.span = b.color, node_span(k, source)
 			b.value = build_carve(k, s, idx, d)
 		} else {
-			b.value = build_expr(k, s, idx)
+			b.value = build_term(k, s, idx)
 		}
 	case .PointingPull:
-		unsupported(k, idx, "a hole <-")
+		b.kind = .Pull
+		b.value = unsupported(k, idx, "a hole <-")
 	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
-		unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
+		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
-		b.value = build_expr(k, s, idx) // a lone value is an anonymous binding
+		b.value = build_term(k, s, idx) // a lone value is an anonymous binding
 	}
 }
 
@@ -112,20 +116,20 @@ build_left :: proc(k: ^Kernel, s: ^Scope, left: syn.Node_Index, b: ^Binding) {
 		return
 	case .Constraint:
 		data := ast.node_data[left].binary
-		b.color = build_expr(k, s, data.left)
+		b.color = build_term(k, s, data.left)
 		if name := data.right; name != syn.INVALID_NODE {
 			if ast.node_kinds[name] != .Identifier {
-				unsupported(k, name, "a colored binding whose name is not an identifier")
+				b.color = unsupported(k, name, "a colored binding whose name is not an identifier")
 				return
 			}
 			b.name = syn.node_name_str(ast, name)
 		}
 		return
 	}
-	unsupported(k, left, "a binding whose left side is not a name")
+	b.color = unsupported(k, left, "a binding whose left side is not a name")
 }
 
-build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
+build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	if idx == syn.INVALID_NODE do return nil
 	ast := k.ast
 	data := ast.node_data[idx]
@@ -136,20 +140,13 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 	case .Identifier:
 		return build_name(k, s, idx)
 	case .Operator:
-		return build_operator(k, s, idx)
+		return written(build_operator(k, s, idx), span)
 	case .Range:
-		r := new(Range_Expr)
-		r.span = span
-		r.lo = build_expr(k, s, data.binary.left)
-		r.hi = build_expr(k, s, data.binary.right)
-		r.ordinal = char_bound(ast, data.binary.left) || char_bound(ast, data.binary.right)
-		return r
+		return written(build_range(k, s, idx), span)
 	case .CompileTime:
-		return build_expr(k, s, data.unary.operand)
+		return build_term(k, s, data.unary.operand)
 	case .Unknown:
-		u := new(Unknown_Expr)
-		u.span = span
-		return u
+		return new_unknown(k, nil)
 	case .ScopeNode:
 		child := new_scope(s, span)
 		for c in syn.node_children(ast, idx) do build_binding(k, child, c)
@@ -159,104 +156,116 @@ build_expr :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		prop := data.binary.right
 		if data.binary.left == syn.INVALID_NODE do return unsupported(k, idx, "`.x` without a scope before it")
 		if prop == syn.INVALID_NODE || ast.node_kinds[prop] != .Identifier do return unsupported(k, idx, "a property that is not a name")
-		a := new(Access_Expr)
-		a.target = build_expr(k, s, data.binary.left)
+		a := new(Access)
+		a.target = build_term(k, s, data.binary.left)
 		a.name = syn.node_name_str(ast, prop)
 		a.ordinal = int(ast.node_data[prop].identifier.ordinal)
 		a.span = span
 		return a
 	case .Execute:
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
-		c := new(Collapse_Expr)
-		c.target = build_expr(k, s, data.execute.target)
-		c.recursive = names_itself(c.target)
+		c := new(Collapse)
+		c.target = build_term(k, s, data.execute.target)
 		c.span = span
 		return c
 	case .Carve:
-		return build_carve(k, s, idx, build_expr(k, s, data.carve.source))
+		return build_carve(k, s, idx, build_term(k, s, data.carve.source))
 	case .Pattern:
-		return build_match(k, s, idx)
+		return build_pattern(k, s, idx)
 	case .Constraint:
 		if data.binary.right != syn.INVALID_NODE do return unsupported(k, idx, "a named colored binding as a value")
-		d := new(Default_Expr)
-		d.color, d.span = build_expr(k, s, data.binary.left), span
+		d := new(Default)
+		d.color, d.span = build_term(k, s, data.binary.left), span
 		return d
 	}
 	return unsupported(k, idx, fmt.tprintf("the form %v", ast.node_kinds[idx]))
 }
 
-// names_itself: e is the scope being defined, or a carve of it.
-names_itself :: proc(e: Expr) -> bool {
-	#partial switch v in e {
-	case Name:
-		return v.self
-	case ^Carve_Expr:
-		return names_itself(v.target)
-	}
-	return false
+new_unknown :: proc(k: ^Kernel, written: Type) -> ^Unknown {
+	u := new(Unknown)
+	u.id, u.written = k.unknowns, written
+	k.unknowns += 1
+	return u
 }
 
-// char_bound: a bound written as one character between apostrophes ('a', or ''),
-// or a range of such: the range is then over the characters (§4.3).
-char_bound :: proc(ast: ^syn.Ast, idx: syn.Node_Index) -> bool {
+// build_range: `l..u`. Between strings, `..` is about positions (§4.3), whichever
+// way the bounds are given; a bound written between apostrophes ('a', '') is a
+// character, and the range is then over the characters:
+//
+//   l..u = (l + string) & (string + u)      l.. = l + string      ..u = string + u
+build_range :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
+	data := k.ast.node_data[idx].binary
+	lo := build_term(k, s, data.left)
+	hi := build_term(k, s, data.right)
+	if !positional(k.ast, data.left) && !positional(k.ast, data.right) do return new_range(lo, hi)
+	parts := make([dynamic]Type)
+	if lo != nil do append(&parts, new_operation(.Add, lo, string_term()))
+	if hi != nil do append(&parts, new_operation(.Add, string_term(), hi))
+	if len(parts) == 0 do return string_term()
+	return len(parts) == 1 ? parts[0] : new_and(..parts[:])
+}
+
+// positional: a bound written as a string that is not one character between
+// apostrophes, or a range of such.
+positional :: proc(ast: ^syn.Ast, idx: syn.Node_Index) -> bool {
 	if idx == syn.INVALID_NODE do return false
 	#partial switch ast.node_kinds[idx] {
 	case .Literal:
 		lit := ast.node_data[idx].literal
+		if lit.kind != .String do return false
 		text := decode_string(syn.node_text(ast, idx), lit.quotation)
-		return lit.kind == .String && lit.quotation == .simple && strings.rune_count(text) <= 1
+		return lit.quotation != .simple || strings.rune_count(text) > 1
 	case .Range:
 		data := ast.node_data[idx].binary
-		return char_bound(ast, data.left) || char_bound(ast, data.right)
+		return positional(ast, data.left) || positional(ast, data.right)
 	}
 	return false
 }
 
-// build_operator: an operator of the language, as an operation of the algebra.
-// The prefix bounds are their laws (§4.3): >=t = t..  <=t = ..t  >t = t.. & ~t
+// build_operator: an operator of the language, as a term of the algebra. The
+// prefix bounds are their laws (§4.3): >=t = t..  <=t = ..t  >t = t.. & ~t
 // <t = ..t & ~t. Equality is =t: a = b is a in =b (§4.5).
-build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
+build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	ast := k.ast
 	data := ast.node_data[idx].operator
 	span := node_span(k, idx)
 	if data.kind == .Layout {
 		// `??::L`: an unknown in the layout L
 		if data.left == syn.INVALID_NODE || ast.node_kinds[data.left] != .Unknown do return unsupported(k, idx, "`::` on anything but `??`")
-		u := new(Unknown_Expr)
-		u.layout, u.span = build_expr(k, s, data.right), span
-		return u
+		return new_unknown(k, build_term(k, s, data.right))
 	}
-	right := build_expr(k, s, data.right)
+	if data.kind == .NotEqual do return report(k, .Invalid_operator, span, "there is no `!=`: the values other than t are written ~t")
+	right := build_term(k, s, data.right)
 	if data.left == syn.INVALID_NODE {
 		#partial switch data.kind {
 		case .Subtract:
-			return operation(.Neg, span, right)
+			return new_operation(.Neg, right)
 		case .Not:
-			return operation(.Not, span, right)
+			return new_not(right)
 		case .BitNot:
-			return operation(.Bit_Not, span, right)
+			return new_operation(.Bit_Not, right)
 		case .Equal:
-			return operation(.Is, span, right)
-		case .GreaterEqual, .LessEqual, .Greater, .Less:
-			r := new(Range_Expr)
-			r.span = span
-			r.ordinal = char_bound(ast, data.right)
-			if data.kind == .GreaterEqual || data.kind == .Greater {
-				r.lo = right
-			} else {
-				r.hi = right
-			}
-			if data.kind == .GreaterEqual || data.kind == .LessEqual do return r
-			return operation(.And, span, r, operation(.Not, span, right))
-		case .NotEqual:
-			report(k, .Invalid_operator, span, "there is no `!=`: the values other than t are written ~t")
-			return Invalid{}
+			return new_is(right)
+		case .GreaterEqual:
+			return new_range(right, nil)
+		case .LessEqual:
+			return new_range(nil, right)
+		case .Greater:
+			return new_and(new_range(right, nil), new_not(right))
+		case .Less:
+			return new_and(new_range(nil, right), new_not(right))
 		}
 		return unsupported(k, idx, fmt.tprintf("the prefix operator %v", data.kind))
 	}
-	left := build_expr(k, s, data.left)
-	op: Op
+	left := build_term(k, s, data.left)
+	op: Operator
 	#partial switch data.kind {
+	case .And:
+		return new_and(left, right)
+	case .Or:
+		return new_or(left, right)
+	case .Equal:
+		return new_operation(.In, left, new_is(right))
 	case .Add:
 		op = .Add
 	case .Subtract:
@@ -267,10 +276,6 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		op = .Div
 	case .Mod:
 		op = .Mod
-	case .And:
-		op = .And
-	case .Or:
-		op = .Or
 	case .Xor:
 		op = .Xor
 	case .BitAnd:
@@ -289,117 +294,111 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
 		op = .Greater
 	case .GreaterEqual:
 		op = .Greater_Eq
-	case .Equal:
-		return operation(.In, span, left, operation(.Is, span, right))
-	case .NotEqual:
-		report(k, .Invalid_operator, span, "there is no `!=`: the values other than t are written ~t")
-		return Invalid{}
 	case:
 		return unsupported(k, idx, fmt.tprintf("the operator %v", data.kind))
 	}
-	return operation(op, span, left, right)
+	return new_operation(op, left, right)
 }
 
-operation :: proc(op: Op, span: syn.Span, args: ..Expr) -> Expr {
-	for a in args do if is_invalid_expr(a) do return Invalid{}
-	o := new(Operation)
-	o^ = Operation{op, clone_exprs(args), span}
-	return o
-}
-
-clone_exprs :: proc(es: []Expr) -> []Expr {
-	out := make([]Expr, len(es))
-	copy(out, es)
-	return out
-}
-
-// build_match: `target ? {cover -> product …}`. Each branch is a scope under s,
+// build_pattern: `target ? {cover -> product …}`. Each branch is a scope under s,
 // whose production is the product.
-build_match :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
+build_pattern :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	ast := k.ast
 	data := ast.node_data[idx].pattern
 	if data.target == syn.INVALID_NODE do return unsupported(k, idx, "a pattern without a target")
-	m := new(Match_Expr)
-	m.target, m.span = build_expr(k, s, data.target), node_span(k, idx)
+	p := new(Pattern)
+	p.target, p.span = build_term(k, s, data.target), node_span(k, idx)
 	pairs := syn.node_pattern_branches(ast, idx)
-	branches := make([dynamic]Branch_Expr)
+	branches := make([dynamic]Branch)
 	for i := 0; i + 1 < len(pairs); i += 2 {
 		cover, product := pairs[i], pairs[i + 1]
 		if product == syn.INVALID_NODE do return unsupported(k, idx, "a branch without a product")
-		b := Branch_Expr{span = node_span(k, cover != syn.INVALID_NODE ? cover : product)}
-		if cover != syn.INVALID_NODE do b.cover = build_expr(k, s, cover)
+		b := Branch{span = node_span(k, cover != syn.INVALID_NODE ? cover : product)}
+		if cover != syn.INVALID_NODE do b.cover = build_term(k, s, cover)
 		b.scope = new_scope(s, b.span)
-		append(&b.scope.bindings, Binding{kind = .Product, span = node_span(k, product)})
-		b.scope.bindings[0].value = build_expr(k, b.scope, product)
+		b.product = build_term(k, b.scope, product)
 		b.scope.complete = true
 		append(&branches, b)
 	}
-	m.branches = branches[:]
-	return m
+	p.branches = branches[:]
+	return p
 }
 
 // build_carve: `target{args}`. A named argument `x -> v` or `x#n -> v` names the
-// binding it carves; an unnamed one is positional. The arguments are written here.
-build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Expr) -> Expr {
+// binding it carves; an unnamed one is positional.
+build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) -> Type {
 	ast := k.ast
-	args := make([dynamic]Carve_Arg_Expr)
+	args := make([dynamic]Carve_Arg)
 	for child in syn.node_carve_children(ast, idx) {
-		a := Carve_Arg_Expr{ordinal = -1, span = node_span(k, child)}
+		a := Carve_Arg{ordinal = -1, span = node_span(k, child)}
 		#partial switch ast.node_kinds[child] {
 		case .Pointing:
 			left := ast.node_data[child].binary.left
 			if left == syn.INVALID_NODE || ast.node_kinds[left] != .Identifier do return unsupported(k, child, "a carve argument whose name is not an identifier")
 			a.name = syn.node_name_str(ast, left)
 			a.ordinal = int(ast.node_data[left].identifier.ordinal)
-			a.value = build_expr(k, s, ast.node_data[child].binary.right)
+			a.value = build_term(k, s, ast.node_data[child].binary.right)
 		case .Carve:
 			return unsupported(k, child, "the carve shorthand `z{…}` among arguments")
 		case:
-			a.value = build_expr(k, s, child)
+			a.value = build_term(k, s, child)
 		}
 		append(&args, a)
 	}
-	c := new(Carve_Expr)
+	c := new(Carve)
 	c.target, c.args, c.span = target, args[:], node_span(k, idx)
 	return c
 }
 
 // build_name: the last occurrence of the name visible above, up to the prelude.
-build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Expr {
+build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	ast := k.ast
 	name := syn.node_name_str(ast, idx)
 	ordinal := int(ast.node_data[idx].identifier.ordinal)
-	if n, found := lookup(s, name, ordinal, node_span(k, idx)); found do return n
-	report(k, .Undefined_Identifier, node_span(k, idx), fmt.tprintf("`%s` is not defined above", name))
-	return Invalid{}
+	n := new(Name)
+	n.span = node_span(k, idx)
+	found: bool
+	n.binding, n.self, found = lookup(s, name, ordinal)
+	if !found do return report(k, .Undefined_Identifier, n.span, fmt.tprintf("`%s` is not defined above", name))
+	return n
 }
 
 // lookup: in each scope from s up, the bindings above the one being built. From a
-// production, the binding whose value is the scope is visible too: the scope
-// names itself.
-lookup :: proc(s: ^Scope, name: string, ordinal: int, span: syn.Span) -> (Name, bool) {
+// production, the binding being built whose value holds it is visible too: the
+// scope names itself.
+lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool) {
 	child: ^Scope
 	for sc := s; sc != nil; child, sc = sc, sc.parent {
 		visible := sc.complete ? len(sc.bindings) : len(sc.bindings) - 1
 		self := child != nil && child.producing && !sc.complete
 		if self do visible = len(sc.bindings)
+		found := -1
 		if ordinal >= 0 {
 			seen := 0
 			for i in 0 ..< visible {
 				if sc.bindings[i].name != name do continue
-				if seen == ordinal do return Name{sc, i, self && i == len(sc.bindings) - 1, span}, true
+				if seen == ordinal {
+					found = i
+					break
+				}
 				seen += 1
 			}
-			continue
+		} else {
+			for i := visible - 1; i >= 0; i -= 1 {
+				if sc.bindings[i].name == name {
+					found = i
+					break
+				}
+			}
 		}
-		for i := visible - 1; i >= 0; i -= 1 {
-			if sc.bindings[i].name == name do return Name{sc, i, self && i == len(sc.bindings) - 1, span}, true
-		}
+		if found < 0 do continue
+		if self && found == len(sc.bindings) - 1 do return sc.bindings[found], child, true
+		return sc.bindings[found], nil, true
 	}
-	return {}, false
+	return nil, nil, false
 }
 
-build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> Expr {
+build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> Type {
 	ast := k.ast
 	lit := ast.node_data[idx].literal
 	text := syn.node_text(ast, idx)
@@ -409,17 +408,26 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> Expr {
 		digits := lit.kind == .Integer ? text : text[2:]
 		v, ok := parse_integer(digits, base)
 		if !ok do return unsupported(k, idx, "an integer literal beyond 128 bits")
-		return set_of(v)
+		return Int(v)
 	case .Float:
 		v, ok := strconv.parse_f64(text)
 		if !ok || math.is_inf(v) do return unsupported(k, idx, "a real literal beyond f64")
-		return set_of(v)
+		return Real(v)
 	case .String:
-		return set_of(decode_string(text, lit.quotation))
+		return string_value(decode_string(text, lit.quotation))
 	case .Bool:
-		return set_of(text == "true")
+		return Bool(text == "true")
 	}
 	return unsupported(k, idx, "this literal")
+}
+
+// string_value: a string as the concatenation of its characters (§4.6); a
+// character is a string of length 1.
+string_value :: proc(s: string) -> Type {
+	parts := make([dynamic]Type)
+	for c in s do append(&parts, Char(c))
+	if len(parts) == 1 do return parts[0]
+	return new_operation(.Add, ..parts[:])
 }
 
 parse_integer :: proc(digits: string, base: i128) -> (v: i128, ok: bool) {
@@ -473,31 +481,30 @@ decode_string :: proc(body: string, quotation: syn.String_Quotation) -> string {
 
 // prelude: the aliases (§3), bound like any binding.
 prelude :: proc() -> ^Scope {
-	@(static) aliases := [?]struct {
-		name:  string,
-		value: proc() -> Set,
-	} {
-		{"int", proc() -> Set {return Set{ints = ints_all()}}}, // ..0..
-		{"float", proc() -> Set {return Set{reals = reals_all()}}}, // ..0.0..
-		{"f32", proc() -> Set {return Set{reals = reals_all()}}},
-		{"f64", proc() -> Set {return Set{reals = reals_all()}}},
-		{"char", proc() -> Set {return Set{words = words_chars()}}}, // ''..
-		{"string", proc() -> Set {return Set{words = words_all()}}}, // ''.. * 0..
-		{"bool", proc() -> Set {return Set{bools = {.False, .True}}}},
-		{"none", proc() -> Set {return NONE}},
-		{"u8", proc() -> Set {return Set{ints = ints_between(0, 255)}}},
-		{"i8", proc() -> Set {return Set{ints = ints_between(-128, 127)}}},
-		{"u16", proc() -> Set {return Set{ints = ints_between(0, 65535)}}},
-		{"i16", proc() -> Set {return Set{ints = ints_between(-32768, 32767)}}},
-		{"u32", proc() -> Set {return Set{ints = ints_between(0, 4294967295)}}},
-		{"i32", proc() -> Set {return Set{ints = ints_between(-2147483648, 2147483647)}}},
-		{"u64", proc() -> Set {return Set{ints = ints_between(0, 18446744073709551615)}}},
-		{"i64", proc() -> Set {return Set{ints = ints_between(-9223372036854775808, 9223372036854775807)}}},
-		{"usize", proc() -> Set {return Set{ints = ints_between(0, 18446744073709551615)}}},
-		{"isize", proc() -> Set {return Set{ints = ints_between(-9223372036854775808, 9223372036854775807)}}},
-	}
+	ints :: proc(lo, hi: i128) -> Type {return new_range(Int(lo), Int(hi), .Int)}
 	p := new_scope(nil, {})
+	alias :: proc(p: ^Scope, name: string, value: Type) {
+		b := new_binding(p, .Push, {})
+		b.name, b.value = name, value
+	}
+	alias(p, "int", new_range(nil, nil, .Int)) // ..0..
+	alias(p, "float", new_range(nil, nil, .Real)) // ..0.0..
+	alias(p, "f32", new_range(nil, nil, .Real))
+	alias(p, "f64", new_range(nil, nil, .Real))
+	alias(p, "char", new_range(Char(0), nil)) // ''..
+	alias(p, "string", string_term()) // ''.. * 0..
+	alias(p, "bool", new_or(Bool(false), Bool(true)))
+	alias(p, "none", None{})
+	alias(p, "u8", ints(0, 255))
+	alias(p, "i8", ints(-128, 127))
+	alias(p, "u16", ints(0, 65535))
+	alias(p, "i16", ints(-32768, 32767))
+	alias(p, "u32", ints(0, 4294967295))
+	alias(p, "i32", ints(-2147483648, 2147483647))
+	alias(p, "u64", ints(0, 18446744073709551615))
+	alias(p, "i64", ints(-9223372036854775808, 9223372036854775807))
+	alias(p, "usize", ints(0, 18446744073709551615))
+	alias(p, "isize", ints(-9223372036854775808, 9223372036854775807))
 	p.complete = true
-	for a in aliases do append(&p.bindings, Binding{name = a.name, kind = .Push, value = a.value()})
 	return p
 }

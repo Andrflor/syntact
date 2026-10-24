@@ -16,14 +16,14 @@ main :: proc() {
 		fmt.eprintln("cannot read:", os.args[1])
 		os.exit(2)
 	}
-	program, k, parsed := kernel.run(string(data))
+	k, parsed := kernel.run(string(data))
 	if !parsed {
 		fmt.eprintln("parse error")
 		os.exit(1)
 	}
-	for b, i in program.scope.bindings {
+	for b in k.root.bindings {
 		name := b.name == "" ? "_" : b.name
-		fmt.printfln("%s: %s", name, kernel.print_type(kernel.value_type(&k, program, i)))
+		fmt.printfln("%s: %s", name, kernel.print_type(kernel.binding_type(&k, b)))
 	}
 	for e in k.errors {
 		pos := syn.span_to_position(k.ast, e.span.start)

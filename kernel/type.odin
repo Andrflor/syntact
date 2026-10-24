@@ -1,76 +1,283 @@
 package kernel
 
-import "core:slice"
+import syn "../compiler"
 
-// TYPES (specs/types.md §2)
+// TYPES (specs/types.md §1–2)
 //
-// A type is an equation: the expression itself, in normal form. `a + 1` with a
-// in u8 is the type `a + 1`; `b + 1` is another type, unless something proves
-// a = b. A constant type is a set in normal form; an integer expression over
-// unknowns is a polynomial; an operation that no law reduces stays an Apply.
+// A type is a term of this grammar, and nothing else. The primitive types are the
+// values; the algebra composes them; scopes, names and patterns are terms too. The
+// program as written is made of these terms, and its types are their normal forms
+// (normal.odin).
 
 Type :: union {
-	Set, // a constant type (set.odin)
-	Poly, // integers over unknowns (poly.odin)
-	^Unknown, // ?k::L, when it is not an integer
-	^Apply, // an operation that no law reduces
-	^Frame, // a scope (scope.odin)
+	// §1: the primitives
+	Char, // 'a': a character, a string of length 1
+	Int, // 5
+	Real, // 0.5
+	Bool, // true, false
+	None, // the empty type, ∨([])
+	^Unknown, // ?ₖ::L
+	// §2: the algebra
+	^Or, // ∨([t…])      a | b
+	^And, // ∧([t…])      a & b
+	^Not, // ~(t)
+	^Is, // =(t)
+	^Range, // l..u         .. extends |
+	^Operation, // *([t…], op)  a + b, a in b, …
+	^Name, // x            the type of its binding
+	^Scope, // {b…}
+	^Access, // s.x
+	^Collapse, // s!
+	^Carve, // s{…}
+	^Default, // C:           an anonymous binding colored by C
+	^Pattern, // t ? {c -> p …}
 	Invalid, // an error already reported: what depends on it stays silent
 }
 
+Char :: distinct rune
+Int :: distinct i128
+Real :: distinct f64
+Bool :: distinct bool
+None :: struct {}
 Invalid :: struct {}
 
-// Unknown: `??::L`, one value in its domain L (§5.2). Each `??` written is a
-// distinct unknown; the same one comes back through a name.
+// Unknown: `??::L`, one value in L. Each `??` written is a distinct unknown; the
+// same one comes back through a name.
 Unknown :: struct {
-	id:     int,
-	domain: Type,
+	id:      int,
+	written: Type, // `??::L`: L as written; nil: the layout of its binding's color
+	layout:  Type, // its normal form, once asked
 }
 
-Op :: enum u8 {
-	// §4.1, §4.4
-	Or,
-	And,
-	Not,
-	Is, // =t
-	// §4.5, §4.6
-	Add,
+Or :: struct {
+	terms: []Type,
+}
+
+And :: struct {
+	terms: []Type,
+}
+
+Not :: struct {
+	term: Type,
+}
+
+Is :: struct {
+	term: Type,
+}
+
+// Range: every primitive from lo to hi; a nil bound is infinite. Its bounds are
+// primitives of one family, or terms over unknowns (0..n). Infinite on both sides,
+// it keeps its family: `..0..` is every integer, `..` alone every primitive.
+Range :: struct {
+	lo, hi: Type,
+	family: Range_Family,
+	span:   syn.Span,
+}
+
+Range_Family :: enum u8 {
+	Any, // `..`: every primitive
+	Int,
+	Real,
+}
+
+Operator :: enum u8 {
+	Add, // + : integers, reals, and the concatenation of strings
 	Sub,
-	Mul,
+	Mul, // * : integers, reals, and the repetition of a string
 	Div,
 	Mod,
 	Neg,
-	Bit_And,
-	Bit_Or,
-	Xor,
-	Bit_Not,
+	Bit_And, // [&]
+	Bit_Or, // [|]
+	Xor, // ^
+	Bit_Not, // [~]
 	Shl,
 	Shr,
 	Less,
 	Less_Eq,
 	Greater,
 	Greater_Eq,
-	// §4.7
 	In,
-	// §4.3, a bound that depends on unknowns: [lo, hi], [lo], [hi]
-	Range,
-	Range_From,
-	Range_To,
-	// §6: [target, cover, product, …], a nil cover for the default branch
-	Match,
-	// §5.6: [frame]: a scope that names itself, carved and collapsed: never unfolded
-	Recur,
 }
 
-Apply :: struct {
-	op:   Op,
+Operation :: struct {
+	op:   Operator,
 	args: []Type,
+	span: syn.Span, // as written: where an illegal operator is reported
 }
 
-new_apply :: proc(op: Op, args: ..Type) -> Type {
-	a := new(Apply)
-	a^ = Apply{op, slice.clone(args)}
+// Name: a binding, the last occurrence visible where the name is written. `self`:
+// the scope being defined, named from one of its productions (§5.6); in a carve,
+// the scope the carve derives.
+Name :: struct {
+	binding: ^Binding,
+	self:    ^Scope,
+	span:    syn.Span,
+}
+
+Access :: struct {
+	target:  Type,
+	name:    string,
+	ordinal: int, // x#n; -1: the last occurrence
+	span:    syn.Span,
+}
+
+// Collapse: `s!`. `recursive`: asked while the production of its scope is given:
+// a recursive call, never unfolded (§5.6).
+Collapse :: struct {
+	target:    Type,
+	recursive: bool,
+	span:      syn.Span,
+}
+
+Carve :: struct {
+	target: Type,
+	args:   []Carve_Arg,
+	span:   syn.Span,
+}
+
+Carve_Arg :: struct {
+	name:    string, // "" for a positional argument
+	ordinal: int, // x#n; -1: the first occurrence
+	value:   Type,
+	span:    syn.Span,
+}
+
+Default :: struct {
+	color: Type,
+	span:  syn.Span,
+}
+
+Pattern :: struct {
+	target:   Type,
+	branches: []Branch,
+	span:     syn.Span,
+}
+
+// Branch: a scope whose production is written in its cover (§6): `scope` holds
+// what the branch types, under the layouts its reach narrows.
+Branch :: struct {
+	cover:   Type, // nil: the default branch
+	product: Type,
+	scope:   ^Scope,
+	span:    syn.Span,
+}
+
+// --- scopes (§5) ---
+
+Kind :: enum u8 {
+	Push, // name -> value, C:name, an anonymous value
+	Pull, // name <- value: a hole
+	Product, // -> value: a production
+	Expand, // ...value, ...C:, ...
+}
+
+Typing :: enum u8 {
+	Not_Asked,
+	In_Progress,
+	Done,
+}
+
+// Binding: a binding as written — its color and its value are terms — and their
+// normal forms, given once, when asked.
+Binding :: struct {
+	name:        string, // "" for an anonymous binding or a production
+	kind:        Kind,
+	color:       Type, // nil: uncolored
+	value:       Type, // nil: the default of the color
+	span:        syn.Span,
+	scope:       ^Scope,
+	source:      ^Binding, // in a copy made by a carve: the binding it copies
+	carved:      bool, // in a copy: its value is the carve's
+	typed_color: Type,
+	typed_value: Type,
+	state:       Typing,
+}
+
+// Scope: an ordered sequence of bindings — a type. A carve derives a scope: a copy
+// where some bindings receive another value (§5.3).
+Scope :: struct {
+	parent:    ^Scope, // where it is written: its names see the bindings above
+	bindings:  [dynamic]^Binding,
+	source:    ^Scope, // a copy (carve, coloring): the scope it copies
+	carved:    ^Scope, // a carve: the scope it carves, uncarved
+	changes:   map[^Binding]Type, // a carve: the values of the bindings of `carved` it replaces
+	facts:     Facts, // a branch, a carve: the layouts narrowed where it is typed
+	placed:    [View][]^Binding, // its bindings with the expansions placed
+	placed_by: bit_set[View], // the views placed
+	complete:  bool, // all its bindings are built: all are visible
+	producing: bool, // one of its productions is being built: it may name itself
+	recursive: bool, // asked again while its production is given (§5.6)
+	reached:   bool, // asked once: it is checked (check.odin)
+	name:      string, // the binding it is the value of, as written: for printing
+	placing:   [View]bool, // its expansions are being placed
+	span:      syn.Span,
+}
+
+// View: a scope read as a value, where `...C:` places the default of C, or as a
+// shape, where `...C:` admits a run that C admits (§5.4).
+View :: enum u8 {
+	Value,
+	Shape,
+}
+
+// Facts: the layout of an unknown narrowed by the branches that reach a term: it
+// holds the values of the unknown for which the term is asked (§6).
+Facts :: map[^Unknown]Type
+
+// --- helpers ---
+
+new_or :: proc(terms: ..Type) -> Type {
+	o := new(Or)
+	o.terms = clone_types(terms)
+	return o
+}
+
+new_and :: proc(terms: ..Type) -> Type {
+	a := new(And)
+	a.terms = clone_types(terms)
 	return a
+}
+
+new_not :: proc(t: Type) -> Type {
+	n := new(Not)
+	n.term = t
+	return n
+}
+
+new_is :: proc(t: Type) -> Type {
+	i := new(Is)
+	i.term = t
+	return i
+}
+
+new_range :: proc(lo, hi: Type, family := Range_Family.Any, span := syn.Span{}) -> Type {
+	r := new(Range)
+	r.lo, r.hi, r.family, r.span = lo, hi, family, span
+	return r
+}
+
+new_operation :: proc(op: Operator, args: ..Type) -> Type {
+	o := new(Operation)
+	o.op, o.args = op, clone_types(args)
+	return o
+}
+
+// written: a term built from the source, with the place it is written.
+written :: proc(t: Type, span: syn.Span) -> Type {
+	#partial switch v in t {
+	case ^Operation:
+		v.span = span
+	case ^Range:
+		v.span = span
+	}
+	return t
+}
+
+clone_types :: proc(ts: []Type) -> []Type {
+	out := make([]Type, len(ts))
+	copy(out, ts)
+	return out
 }
 
 is_invalid :: proc(t: Type) -> bool {
@@ -78,188 +285,51 @@ is_invalid :: proc(t: Type) -> bool {
 	return ok
 }
 
-is_constant :: proc(t: Type) -> bool {
-	_, ok := t.(Set)
+is_none :: proc(t: Type) -> bool {
+	_, ok := t.(None)
 	return ok
 }
 
-type_true :: proc() -> Type {return set_bool(true)}
-type_false :: proc() -> Type {return set_bool(false)}
-
-// is_bool: t is the constant b.
 is_bool :: proc(t: Type, b: bool) -> bool {
-	s, ok := t.(Set)
-	if !ok do return false
-	p, single := set_single(s)
-	v, is_b := p.(bool)
-	return single && is_b && v == b
+	v, ok := t.(Bool)
+	return ok && bool(v) == b
 }
 
-// new_unknown: ?k::domain. One possible value is that value; integer values
-// make a polynomial.
-new_unknown :: proc(k: ^Kernel, domain: Type) -> Type {
-	if is_invalid(domain) do return Invalid{}
-	if s, constant := domain.(Set); constant {
-		if _, single := set_single(s); single do return s
-	}
-	u := new(Unknown)
-	u^ = Unknown{k.unknowns, domain}
-	k.unknowns += 1
-	if family_of(domain) == {.Int} do return poly_var(u)
-	return u
+// EVERYTHING: ~none, every value (§4.1).
+everything :: proc() -> Type {
+	return new_not(None{})
 }
 
-// family_of: the families the elements of a set-type belong to, by its form: a
-// constant, a range of integers, a | of them.
-family_of :: proc(t: Type) -> bit_set[Family] {
-	#partial switch v in t {
-	case Set:
-		out: bit_set[Family]
-		if !ints_empty(v.ints) do out += {.Int}
-		if !reals_empty(v.reals) do out += {.Real}
-		if !words_is_empty(set_words(v)) do out += {.String}
-		if v.bools != {} do out += {.Bool}
-		return out
-	case ^Apply:
-		#partial switch v.op {
-		case .Range, .Range_From, .Range_To:
-			return family_of_bound(v.args[0])
-		case .Or:
-			return family_of(v.args[0]) | family_of(v.args[1])
-		case .And:
-			return family_of(v.args[0]) & family_of(v.args[1])
-		}
-	}
-	return {}
+// is_everything: t is ~none.
+is_everything :: proc(t: Type) -> bool {
+	n, ok := t.(^Not)
+	return ok && is_none(n.term)
 }
 
-family_of_bound :: proc(t: Type) -> bit_set[Family] {
-	#partial switch v in t {
-	case Set:
-		return family_of(v)
-	case Poly:
-		return {.Int}
-	}
-	return {}
+// empty_string: "", the concatenation of nothing (§4.6).
+empty_string :: proc() -> Type {
+	return new_operation(.Add)
 }
 
-// is_atom: t is one value for each value of its unknowns, not a set of values.
-is_atom :: proc(t: Type) -> bool {
-	switch v in t {
-	case Set:
-		if set_is_none(v) do return true
-		_, single := set_single(v)
-		return single
-	case Poly, ^Unknown, ^Frame, Invalid:
-		return true
-	case ^Apply:
-		#partial switch v.op {
-		case .Or, .And, .Not, .Is, .Range, .Range_From, .Range_To:
-			return false
-		case .In, .Recur:
-			return true
-		case .Match:
-			for i := 2; i < len(v.args); i += 2 do if !is_atom(v.args[i]) do return false
-			return true
-		}
-		for a in v.args do if !is_atom(a) do return false
+is_empty_string :: proc(t: Type) -> bool {
+	o, ok := t.(^Operation)
+	return ok && o.op == .Add && len(o.args) == 0
+}
+
+// is_primitive: a value of §1 other than an unknown.
+is_primitive :: proc(t: Type) -> bool {
+	#partial switch _ in t {
+	case Char, Int, Real, Bool, None:
 		return true
 	}
-	return false
+	return is_string_value(t)
 }
 
-// same: a and b are the same type by the laws: equal normal forms. An unknown is
-// only itself; a | is the same whatever the order of its alternatives.
-same :: proc(k: ^Kernel, a, b: Type) -> bool {
-	if a == nil || b == nil do return a == nil && b == nil
-	switch x in a {
-	case Set:
-		y, ok := b.(Set)
-		return ok && set_equal(x, y)
-	case Poly:
-		y, ok := b.(Poly)
-		return ok && poly_equal(x, y)
-	case ^Unknown:
-		y, ok := b.(^Unknown)
-		return ok && x == y
-	case ^Apply:
-		y, ok := b.(^Apply)
-		if !ok || x.op != y.op || len(x.args) != len(y.args) do return false
-		if x.op == .Or do return same_alternatives(k, x, y)
-		if x.op == .Recur do return frame_same(k, x.args[0].(^Frame), y.args[0].(^Frame))
-		for arg, i in x.args do if !same(k, arg, y.args[i]) do return false
-		return true
-	case ^Frame:
-		y, ok := b.(^Frame)
-		return ok && frame_same(k, x, y)
-	case Invalid:
-	}
-	return false
-}
-
-same_alternatives :: proc(k: ^Kernel, a, b: ^Apply) -> bool {
-	xs, ys := make([dynamic]Type), make([dynamic]Type)
-	alternatives(a, &xs)
-	alternatives(b, &ys)
-	contains :: proc(k: ^Kernel, list: []Type, t: Type) -> bool {
-		for u in list do if same(k, u, t) do return true
-		return false
-	}
-	for x in xs do if !contains(k, ys[:], x) do return false
-	for y in ys do if !contains(k, xs[:], y) do return false
+// is_string_value: a string of zero or several characters: a concatenation of
+// characters.
+is_string_value :: proc(t: Type) -> bool {
+	o, ok := t.(^Operation)
+	if !ok || o.op != .Add do return false
+	for a in o.args do if _, is_char := a.(Char); !is_char do return false
 	return true
-}
-
-alternatives :: proc(t: Type, out: ^[dynamic]Type) {
-	if a, ok := t.(^Apply); ok && a.op == .Or {
-		for arg in a.args do alternatives(arg, out)
-		return
-	}
-	append(out, t)
-}
-
-// closed: t has no unknown: a constant, a scope whose bindings are closed, a |
-// of closed types.
-closed :: proc(k: ^Kernel, t: Type) -> bool {
-	#partial switch v in t {
-	case Set:
-		return true
-	case ^Frame:
-		for s in frame_slots(k, v) {
-			if binding_of(s).kind == .Expand && binding_of(s).value == nil do return false
-			if !closed(k, slot_value(k, s)) do return false
-		}
-		return true
-	case ^Apply:
-		return v.op == .Or && closed(k, v.args[0]) && closed(k, v.args[1])
-	}
-	return false
-}
-
-// target_unknown: the unknown t is, when it is one.
-target_unknown :: proc(t: Type) -> ^Unknown {
-	#partial switch v in t {
-	case ^Unknown:
-		return v
-	case Poly:
-		if len(v.monos) == 1 && v.constant == 0 && v.denom == 1 && v.monos[0].coef == 1 && len(v.monos[0].vars) == 1 do return v.monos[0].vars[0]
-	}
-	return nil
-}
-
-// poly_normal: a polynomial without unknowns is its constant.
-poly_normal :: proc(p: Poly) -> Type {
-	if c, constant := poly_is_constant(p); constant do return set_of(c)
-	return p
-}
-
-as_poly :: proc(t: Type) -> (Poly, bool) {
-	#partial switch v in t {
-	case Poly:
-		return v, true
-	case Set:
-		n, single := ints_single(v.ints)
-		if single && set_equal(v, set_of(n)) do return poly_constant(n), true
-	}
-	return {}, false
 }

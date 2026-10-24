@@ -5,18 +5,17 @@ import "core:slice"
 
 // THE KERNEL
 //
-// The type algebra of specs/types.md, and nothing else. A type is an equation:
-// the expression itself, over unknowns that carry their domain. The laws of the
-// algebra put it in normal form (law.odin, in.odin). A scope is a system of
-// equations (scope.odin). The check proves `V in C` from what is known — the
-// domains of the unknowns and what the patterns around prove (prove.odin). What
-// is not proven is refused. Nothing is computed beside the laws: no search over
-// values, no unfolding.
+// The type algebra of specs/types.md, and nothing else. A type is a term of its
+// grammar (type.odin): the program as written is made of these terms, and the type
+// of each is its normal form, given by orienting the laws (normal.odin, set.odin,
+// arith.odin, in.odin, scope.odin, pattern.odin, recursion.odin). The check is
+// `V in C = true` for every value of the unknowns (prove.odin): what the laws do
+// not prove is refused.
 
 Error_Kind :: enum u8 {
 	Undefined_Identifier,
-	Constraint_Mismatch, // a value not proven in its color
-	Non_Exhaustive_Pattern, // a value of the target not proven taken by a branch
+	Constraint_Mismatch, // `V in C` is not proven true
+	Non_Exhaustive_Pattern, // a value of the target is not proven taken by a branch
 	Invalid_Carve,
 	Invalid_operator, // an operator on types not proven in a family it accepts
 	Invalid_Range,
@@ -33,35 +32,35 @@ Error :: struct {
 }
 
 Kernel :: struct {
-	ast:       ^syn.Ast,
-	errors:    [dynamic]Error,
-	unknowns:  int, // the unknowns created: their ids
-	literals:  map[[2]rawptr]^Frame, // the frame of each scope literal in each frame
-	carves:    map[string]^Frame, // the frame of each carve, by source and arguments
-	colored:   map[[2]rawptr]^Frame, // a scope value under the shape of its color
-	admitting: map[string]bool, // the admissions being proven (scope.odin)
-	pending:   [dynamic]^Frame, // the frames created, to check
-	facts:     Facts, // what the patterns around prove, while a branch is typed
-	site:      syn.Span, // the carve whose frame is checked: where its errors go
+	ast:        ^syn.Ast,
+	errors:     [dynamic]Error,
+	unknowns:   int, // the unknowns written: their ids
+	facts:      Facts, // the layouts the branches around narrow (pattern.odin)
+	site:       syn.Span, // the carve being checked: where its errors go
+	copies:     map[string]^Scope, // the carves made, by source, arguments and facts
+	admitting:  map[string]bool, // the admissions being decided (scope.odin)
+	comparing:  map[[2]^Scope]bool, // the scopes being compared (scope.odin)
+	hypotheses: map[^Scope]Family, // the family of a recursive call (recursion.odin)
+	giving:     map[^Scope]int, // the scopes whose production is being given, by origin
+	pending:    [dynamic]^Scope, // the scopes reached, to check
+	root:       ^Scope, // the file
 }
 
-// report: an error, once; what it concerns is Invalid, and stays silent.
+// report: an error, once. What it concerns becomes Invalid, which stays silent.
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> Type {
 	e := Error{kind, message, k.site != {} ? k.site : span}
 	if !slice.contains(k.errors[:], e) do append(&k.errors, e)
 	return Invalid{}
 }
 
-// run: parses the source, builds the program and checks it. The program is the
-// frame of the file.
-run :: proc(source: string) -> (program: ^Frame, k: Kernel, parsed: bool) {
+// run: parses the source, builds the file as a scope and checks it.
+run :: proc(source: string) -> (k: Kernel, parsed: bool) {
 	words_reset()
 	cache := new(syn.Cache)
 	ast, ok := syn.parse(cache, source)
-	if !ok do return nil, k, false
+	if !ok do return k, false
 	k.ast = ast
-	program = build_program(&k)
-	check_frame(&k, program)
-	for i := 0; i < len(k.pending); i += 1 do check_frame(&k, k.pending[i])
-	return program, k, true
+	k.root = build_program(&k)
+	check_program(&k)
+	return k, true
 }

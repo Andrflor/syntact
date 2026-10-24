@@ -1,114 +1,137 @@
 package kernel
 
-import syn "../compiler"
 import "core:fmt"
 
 // PATTERNS (specs/types.md §6)
 //
-// A pattern is a type of the algebra, like | and ~. In `t ? B`, B is a scope of
-// branches; each branch is a scope whose production is written in its cover. Like
-// `in`, a pattern takes its target whole:
+// A pattern is a type of the algebra. Like `in`, it takes its target whole:
 //
 //   t ? {c -> p  …} = p              when t in c = true
 //   t ? {c -> p  …} = t ? {…}        when t in c = false
 //   t ? {-> p  …}   = p              the branch without a cover admits everything
-//   t ? {c -> p  -> p} = p           every branch gives the same product
+//   t ? {c -> p  -> p} = p           all its branches give the same product
 //
-// On an unknown target, `t in c` does not reduce: the pattern stays an equation,
-// Apply(.Match, [t, c₁, p₁, …]), a nil cover for the default branch. A branch knows
-// what its cover proves of the target — the target in its cover and in none of the
-// covers above — and its product is typed with that knowledge. A branch that no
-// known value of the target reaches is not typed.
+// A branch is reached by the values of the target in its cover and in none of the
+// covers above: its reach, `t in c [&] [~](t in c₀) …`. What a branch types holds
+// for those values: where the reach says `u in S` of an unknown u, u is, inside
+// the branch, `?::(L & S)` — its layout narrowed (Facts). A branch that no value
+// reaches is not typed. A value of the target that no branch takes makes the
+// pattern non-exhaustive.
 
-Match_Expr :: struct {
-	target:   Expr,
-	branches: []Branch_Expr,
-	span:     syn.Span,
+pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
+	target := normal(k, p.target)
+	if is_invalid(target) do return Invalid{}
+	reached, rest, complete := reaches(k, target, p.branches)
+	out := make([dynamic]Branch)
+	for r in reached {
+		b := p.branches[r.branch]
+		saved := k.facts
+		k.facts = r.facts
+		if b.scope != nil do b.scope.facts = r.facts
+		product := normal(k, b.product)
+		k.facts = saved
+		if r.all && len(out) == 0 do return product
+		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
+	}
+	if complete && rest != nil && decide(k, rest) != .False {
+		report(k, .Non_Exhaustive_Pattern, p.span, fmt.tprintf("a value of %s is not proven taken by a branch", print_type(target)))
+	}
+	if len(out) == 0 do return None{}
+	all_same := true
+	for b in out[1:] do all_same &&= same(k, b.product, out[0].product)
+	if all_same do return out[0].product
+	r := new(Pattern)
+	r.target, r.branches, r.span = target, out[:], p.span
+	return r
 }
 
-Branch_Expr :: struct {
-	cover: Expr, // nil: the default branch
-	scope: ^Scope, // the branch: its production is the product
-	span:  syn.Span,
+// Reach: a branch that values of the target reach: its cover, the layouts its
+// reach narrows, and whether every value that comes to it takes it.
+Reach :: struct {
+	branch: int,
+	cover:  Type,
+	facts:  Facts,
+	all:    bool,
 }
 
-type_match :: proc(k: ^Kernel, f: ^Frame, m: ^Match_Expr) -> Type {
-	t := type_of(k, f, m.target)
-	if is_invalid(t) do return t
-	u := target_unknown(t)
-	args := make([dynamic]Type)
-	append(&args, t)
-	covers := NONE // the covers above, while they are constant
-	constant_covers := true
-	for b in m.branches {
+// reaches: the branches values of the target reach, up to one that every value
+// left takes; then rest is nil. Otherwise rest is the condition of the values
+// that no branch takes. Not complete when a cover is invalid: already reported.
+reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]Reach, rest: Type, complete: bool) {
+	out = make([dynamic]Reach)
+	rest = Bool(true) // the values no branch above takes
+	complete = true
+	for b, i in branches {
+		cond: Type = Bool(true)
 		cover: Type
-		admits := type_true()
 		if b.cover != nil {
-			cover = type_of(k, f, b.cover)
-			if is_invalid(cover) do return Invalid{}
-			admits = type_in(k, t, cover)
-		}
-		if is_bool(admits, false) do continue
-		// what the branch knows of the target
-		facts := k.facts
-		cs, constant := cover.(Set)
-		constant_covers &&= cover == nil || constant
-		if u != nil && constant_covers {
-			if domain, known := known_set(k, u); known {
-				part := set_intersect(domain, set_complement(covers))
-				if cover != nil do part = set_intersect(part, cs)
-				if set_is_none(part) do continue // no known value reaches it
-				facts = with_fact(k.facts, u, part)
+			cover = normal(k, b.cover)
+			cond = in_law(k, target, cover)
+			if is_invalid(cover) || is_invalid(cond) {
+				complete = false
+				continue
 			}
 		}
-		if cover != nil && constant do covers = set_union(covers, cs)
-		product := branch_product(k, b.scope, f, facts)
-		if len(args) == 1 && is_bool(admits, true) do return product // the first branch that admits t
-		append(&args, cover, product)
-		if is_bool(admits, true) do break
+		reach := bool_and(rest, cond)
+		rest = bool_and(rest, bool_not(cond))
+		facts, reached := narrow(k, k.facts, reach)
+		if !reached do continue
+		all := is_bool(rest, false)
+		append(&out, Reach{i, cover, facts, all})
+		if all do return out, nil, complete
 	}
-	if len(args) == 1 do return report(k, .Non_Exhaustive_Pattern, m.span, fmt.tprintf("no branch takes %s", print_type(t)))
-	if args[len(args) - 2] != nil {
-		// no default branch: every value of the target must be taken
-		taken := args[1]
-		for i := 3; i < len(args); i += 2 do taken = apply_set(.Or, {taken, args[i]})
-		if prove_in(k, t, taken) != .Proven do return report(k, .Non_Exhaustive_Pattern, m.span, fmt.tprintf("not proven that a branch takes every value of %s", print_type(t)))
-	}
-	return apply_match(k, args[:])
+	return out, rest, complete
 }
 
-// branch_product: the product of a branch, typed with what the branch knows.
-branch_product :: proc(k: ^Kernel, s: ^Scope, f: ^Frame, facts: Facts) -> Type {
-	previous := k.facts
-	k.facts = facts
-	defer k.facts = previous
-	return value_type(k, literal_frame(k, s, f, false), 0)
-}
-
-// apply_match: the laws of the pattern, on types.
-apply_match :: proc(k: ^Kernel, args: []Type) -> Type {
-	t := args[0]
-	rest := make([dynamic]Type)
-	append(&rest, t)
-	for i := 1; i + 1 < len(args); i += 2 {
-		c, p := args[i], args[i + 1]
-		admits := c == nil ? type_true() : type_in(k, t, c)
-		if is_bool(admits, false) do continue
-		if len(rest) == 1 && is_bool(admits, true) do return p
-		append(&rest, c, p)
-		if is_bool(admits, true) do break
+// narrow: the layouts a reach narrows: `u in S` narrows u to L & S, `[~](u in S)`
+// to L & ~S, through [&]. False when the reach is false, or narrows a layout to
+// none: no value reaches.
+narrow :: proc(k: ^Kernel, facts: Facts, reach: Type) -> (Facts, bool) {
+	if is_bool(reach, false) || is_invalid(reach) do return nil, false
+	out := facts
+	copied := false
+	literals := make([dynamic]Type)
+	conjuncts(reach, &literals)
+	for l in literals {
+		positive := true
+		atom := l
+		if n, ok := l.(^Operation); ok && n.op == .Bit_Not {
+			positive = false
+			atom = n.args[0]
+		}
+		o, is_op := atom.(^Operation)
+		if !is_op || o.op != .In do continue
+		u, is_unknown := o.args[0].(^Unknown)
+		if !is_unknown || !is_constant(o.args[1]) do continue
+		part := positive ? o.args[1] : not_law(k, o.args[1])
+		layout := and_law(k, {known_layout_in(k, out, u), part})
+		if is_none(layout) do return nil, false
+		if !copied {
+			out = make(Facts)
+			for x, l in facts do out[x] = l
+			copied = true
+		}
+		out[u] = layout
 	}
-	if len(rest) == 1 do return NONE // no branch: reported where the pattern is written
-	same_products := true
-	for i := 4; i < len(rest); i += 2 do same_products &&= same(k, rest[i], rest[2])
-	if same_products do return rest[2]
-	return new_apply(.Match, ..rest[:])
+	return out, true
 }
 
-// map_products: the pattern, each product p replaced by f(p, other).
-map_products :: proc(k: ^Kernel, a: ^Apply, f: proc(k: ^Kernel, p, other: Type) -> Type, other: Type) -> Type {
-	args := make([]Type, len(a.args))
-	copy(args, a.args)
-	for i := 2; i < len(args); i += 2 do args[i] = f(k, args[i], other)
-	return apply_match(k, args)
+// conjuncts: the terms of a [&].
+conjuncts :: proc(t: Type, out: ^[dynamic]Type) {
+	if o, ok := t.(^Operation); ok && o.op == .Bit_And {
+		for a in o.args do conjuncts(a, out)
+		return
+	}
+	append(out, t)
+}
+
+// enter_branches: a pattern gives one of its products, so an operation on it
+// enters each branch: x in (t ? {c -> p …}) = t ? {c -> x in p …}, and likewise
+// (t ? {c -> p …}) in C = t ? {c -> p in C …}.
+enter_branches :: proc(k: ^Kernel, p: ^Pattern, apply: proc(product, other: Type) -> Type, other: Type) -> Type {
+	entered := new(Pattern)
+	entered.target, entered.span = p.target, p.span
+	entered.branches = make([]Branch, len(p.branches))
+	for b, i in p.branches do entered.branches[i] = Branch{cover = b.cover, product = apply(b.product, other), span = b.span}
+	return pattern_law(k, entered)
 }
