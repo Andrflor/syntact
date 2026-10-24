@@ -491,6 +491,21 @@ run_scope :: proc(k: ^Kernel, part: []^Binding) -> ^Scope {
 	return s
 }
 
+// different_structures: two shapes without run whose names, kinds or order
+// differ: they admit nothing in common (§5.4).
+different_structures :: proc(k: ^Kernel, a, b: Type) -> bool {
+	x, is_x := a.(^Scope)
+	y, is_y := b.(^Scope)
+	if !is_x || !is_y || !is_shape(k, x) || !is_shape(k, y) do return false
+	xs := placed(k, x, .Shape)
+	ys := placed(k, y, .Shape)
+	for p in xs do if is_run(p) do return false
+	for p in ys do if is_run(p) do return false
+	if len(xs) != len(ys) do return true
+	for p, i in xs do if p.name != ys[i].name || p.kind != ys[i].kind do return true
+	return false
+}
+
 // --- equality ---
 
 // same: two normal forms are the same term. Two scopes are equal when their

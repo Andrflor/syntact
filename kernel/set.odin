@@ -183,13 +183,15 @@ reading_intersect :: proc(k: ^Kernel, a, b: Reading) -> Reading {
 	case b.all_scopes:
 		append(&r.scopes, ..a.scopes[:])
 	case:
+		// two scopes have in common what is held by both; two shapes of different
+		// structures, nothing (§5.4); otherwise it is not read here
 		for x in a.scopes {
-			found := false
-			for y in b.scopes do if same(k, x, y) do found = true
-			if found {
-				append(&r.scopes, x)
-			} else if len(b.scopes) > 0 {
-				r.exact = false
+			for y in b.scopes {
+				if same(k, x, y) {
+					append(&r.scopes, x)
+				} else if !different_structures(k, x, y) {
+					r.exact = false
+				}
 			}
 		}
 	}

@@ -10,6 +10,7 @@ package kernel
 //   x in ~a       = [~](x in a)                    x ≠ none
 //   x in =t       = true when x and t are the same; false when both are known
 //                   and differ
+//   x in l..u     = l <= x [&] x <= u              x one value
 //   x in p        = x in =p                        p one value
 //   b in true     = b,  b in false = [~]b          b a boolean
 //   none in t     = t is none
@@ -48,6 +49,14 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		return equal_law(k, x, c) // x in p = x in =p
 	}
 	#partial switch v in c {
+	case ^Range:
+		// one value from l to u: l <= x [&] x <= u (§4.3)
+		if is_value(k, x) {
+			out: Type = Bool(true)
+			if v.lo != nil do out = bool_and(out, operation_law(k, .Greater_Eq, {x, v.lo}, v.span))
+			if v.hi != nil do out = bool_and(out, operation_law(k, .Less_Eq, {x, v.hi}, v.span))
+			return out
+		}
 	case ^Or:
 		out: Type = Bool(false)
 		for term in v.terms do out = bool_or(out, in_law(k, x, term))
