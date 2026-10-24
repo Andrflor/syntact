@@ -155,7 +155,7 @@ SPEC_CASES := []Spec_Case {
 	// §5.6
 	{"f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n + f{n -> n - 1}!}}\nx -> f{n -> 3}!", "13", {}},
 	{"f -> {u8:n -> ??  -> n ? {1 -> 1  -> n + f{n -> n - 1}!}}\nx -> f!", "", {.Constraint_Mismatch}},
-	{"fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\nx -> fact{n -> 5}!", "5 * fact{n -> 4}!", {}},
+	{"fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\nx -> fact{n -> 5}!", "fact{n -> 5}!", {}},
 	{SUM + "x -> sum!", "(?0 + ?0 * ?0) / 2", {}},
 	{SUM + "x -> sum{n -> 5}!", "15", {}},
 	{SUM + "u16:x -> sum!", "", {.Constraint_Mismatch}}, // not proven: no law bounds a product of unknowns

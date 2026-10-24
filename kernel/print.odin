@@ -327,12 +327,12 @@ write_scope :: proc(b: ^strings.Builder, s: ^Scope, keyed: bool) {
 		strings.write_byte(b, '}')
 		return
 	}
-	if s.name != "" {
-		strings.write_string(b, s.name)
-		return
-	}
 	if s.source != nil && s.source != s {
 		write_scope(b, s.source, false)
+		return
+	}
+	if s.name != "" {
+		strings.write_string(b, s.name)
 		return
 	}
 	strings.write_byte(b, '{')

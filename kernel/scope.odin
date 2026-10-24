@@ -110,7 +110,13 @@ collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 		if is_invalid(target) do return Invalid{}
 		return report(k, .Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
-	if c.recursive || k.giving[origin(s)] > 0 do return recursive_call(k, s, c.span)
+	root := origin(s)
+	if c.recursive || k.giving[root] > 0 do return recursive_call(k, s, c.span)
+	if s != root {
+		// a carve of a recursive scope: its arguments go into the solution, or it stays
+		if p, found := first_production(k, root); found do binding_type(k, p)
+		if root.recursive do return recursive_call(k, s, c.span)
+	}
 	if p, found := first_production(k, s); found do return binding_type(k, p)
 	return None{}
 }
@@ -234,7 +240,7 @@ copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, facts: Fac
 
 copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	c := new_scope(parent, s.span)
-	c.source, c.name, c.complete = s, s.name, true
+	c.source, c.complete = s, true
 	m.scopes[s] = c
 	for b in s.bindings {
 		n := new(Binding)
