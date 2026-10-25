@@ -324,32 +324,44 @@ write_body :: proc(b: ^strings.Builder, s: ^Scope) {
 }
 
 // print_binding: a binding with the normal forms of its color and its value,
-// `C:x -> v`, or `C:x` when no value is written; the scope it is the value of is
-// written out, not named.
+// `C:x -> v`, or `C:x` when no value is written; the scope it gives, unless a
+// carve, written out with the normal forms of its bindings.
 print_binding :: proc(k: ^Kernel, x: ^Binding) -> string {
 	b := strings.builder_make(context.temp_allocator)
+	write_typed(&b, k, x, true)
+	return strings.to_string(b)
+}
+
+write_typed :: proc(b: ^strings.Builder, k: ^Kernel, x: ^Binding, expand: bool) {
 	switch x.kind {
 	case .Product:
-		strings.write_string(&b, "-> ")
+		strings.write_string(b, "-> ")
 	case .Expand:
-		strings.write_string(&b, "...")
+		strings.write_string(b, "...")
 	case .Push, .Pull:
 	}
 	if c := binding_color(k, x); c != nil {
-		write_type(&b, c, PREC_ATOM)
-		strings.write_byte(&b, ':')
+		write_type(b, c, PREC_ATOM)
+		strings.write_byte(b, ':')
 	}
-	strings.write_string(&b, x.name)
-	if x.capture != "" do fmt.sbprintf(&b, "(%s)", x.capture)
-	if x.value == nil do return strings.to_string(b)
+	strings.write_string(b, x.name)
+	if x.capture != "" do fmt.sbprintf(b, "(%s)", x.capture)
+	if x.value == nil do return
 	v := binding_type(k, x)
-	if x.kind != .Product && x.kind != .Expand do strings.write_string(&b, x.kind == .Pull ? " <- " : " -> ")
-	if s, is_scope := v.(^Scope); is_scope && s.name != "" && s.name == x.name {
-		write_body(&b, s)
-	} else {
-		write_type(&b, v, 0)
+	if x.kind != .Product && x.kind != .Expand && (x.name != "" || x.color != nil) {
+		strings.write_string(b, x.kind == .Pull ? " <- " : " -> ")
 	}
-	return strings.to_string(b)
+	s, is_scope := v.(^Scope)
+	if !expand || !is_scope || s.carved != nil {
+		write_type(b, v, 0)
+		return
+	}
+	strings.write_byte(b, '{')
+	for inner, i in s.bindings {
+		if i > 0 do strings.write_string(b, "  ")
+		write_typed(b, k, inner, false)
+	}
+	strings.write_byte(b, '}')
 }
 
 // write_changes: the arguments of a carve, {x -> v …}.

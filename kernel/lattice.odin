@@ -227,7 +227,7 @@ union_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	append(&out, ..kept[:])
 	if slice.contains(by[.Bool][:], Type(Bool(false))) do append(&out, Bool(false))
 	if slice.contains(by[.Bool][:], Type(Bool(true))) do append(&out, Bool(true))
-	append(&out, ..unique_cells(k, by[.Value][:]))
+	append(&out, ..join_shapes(k, by[.Value][:]))
 	append(&out, ..unique_cells(k, by[.Other][:]))
 	return out[:]
 }
@@ -236,6 +236,181 @@ unique_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	out := make([dynamic]Type)
 	for c in cells do if !contains_same(k, out[:], c) do append(&out, c)
 	return out[:]
+}
+
+// join_shapes: the | of value cells in normal form: a cell once, and the shapes
+// of one structure as a union of products in its canonical form (§5.4). It
+// depends on the set only when the colors are constants of primitives.
+join_shapes :: proc(k: ^Kernel, cells: []Type) -> []Type {
+	out := make([dynamic]Type)
+	groups := make([dynamic][dynamic]^Scope)
+	next: for c in unique_cells(k, cells) {
+		s, is_scope := c.(^Scope)
+		if !is_scope || !joinable(k, s) {
+			append(&out, c)
+			continue
+		}
+		for &g in groups {
+			if same_structure(k, g[0], s) {
+				append(&g, s)
+				continue next
+			}
+		}
+		g := make([dynamic]^Scope)
+		append(&g, s)
+		append(&groups, g)
+	}
+	for g in groups {
+		if len(g) == 1 {
+			append(&out, g[0])
+			continue
+		}
+		rows := make([][]Type, len(g))
+		for s, i in g {
+			places := placed(k, s, .Shape)
+			rows[i] = make([]Type, len(places))
+			for p, j in places do rows[i][j] = binding_color(k, p)
+		}
+		template := placed(k, g[0], .Shape)
+		for row in product_rows(k, rows) do append(&out, product_shape(template, row))
+	}
+	return out[:]
+}
+
+// joinable: a shape whose places are all colored and hold no value.
+joinable :: proc(k: ^Kernel, s: ^Scope) -> bool {
+	if !is_shape(k, s) do return false
+	for p in placed(k, s, .Shape) do if p.color == nil || p.value != nil do return false
+	return true
+}
+
+// same_structure: the same names, kinds and order.
+same_structure :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
+	xs, ys := placed(k, a, .Shape), placed(k, b, .Shape)
+	if len(xs) != len(ys) do return false
+	for p, i in xs do if p.name != ys[i].name || p.kind != ys[i].kind do return false
+	return true
+}
+
+// product_rows: a union of products — rows of colors — in canonical form: the
+// first place cut into blocks, the values the same rows admit; the rest of each
+// block in canonical form; the blocks with the same rest joined, as
+// (A×X) ∪ (B×X) = (A∪B)×X.
+product_rows :: proc(k: ^Kernel, rows: [][]Type) -> [][]Type {
+	if len(rows) == 0 || len(rows[0]) == 0 do return rows[:min(len(rows), 1)]
+	Group :: struct {
+		color: Type,
+		rest:  [][]Type,
+	}
+	groups := make([dynamic]Group)
+	firsts := make([]Type, len(rows))
+	for r, i in rows do firsts[i] = r[0]
+	for b in blocks(k, firsts) {
+		tails := make([][]Type, len(b.members))
+		for m, i in b.members do tails[i] = rows[m][1:]
+		rest := product_rows(k, tails)
+		joined := false
+		for &g in groups {
+			if same_rows(k, g.rest, rest) {
+				g.color = or_law(k, {g.color, b.color})
+				joined = true
+				break
+			}
+		}
+		if !joined do append(&groups, Group{b.color, rest})
+	}
+	out := make([dynamic][]Type)
+	for g in groups {
+		for r in g.rest {
+			row := make([]Type, len(r) + 1)
+			row[0] = g.color
+			copy(row[1:], r)
+			append(&out, row)
+		}
+	}
+	slice.sort_by(out[:], proc(a, b: []Type) -> bool {return terms_order(a, b) < 0})
+	return out[:]
+}
+
+same_rows :: proc(k: ^Kernel, a, b: [][]Type) -> bool {
+	if len(a) != len(b) do return false
+	for r, i in a do if !same_all(k, r, b[i]) do return false
+	return true
+}
+
+Block :: struct {
+	color:   Type,
+	members: [dynamic]int, // the colors that admit it
+}
+
+// blocks: the values of the colors, cut by which of them admit them. Colors that
+// are not constants of primitives are cut by being the same.
+blocks :: proc(k: ^Kernel, colors: []Type) -> []Block {
+	out := make([dynamic]Block)
+	exact := true
+	for c in colors do exact &&= cuttable(c)
+	if !exact {
+		next: for c, i in colors {
+			for &b in out {
+				if same(k, b.color, c) {
+					append(&b.members, i)
+					continue next
+				}
+			}
+			b := Block{color = c}
+			append(&b.members, i)
+			append(&out, b)
+		}
+		return out[:]
+	}
+	for c, i in colors {
+		cut := make([dynamic]Block)
+		rest := c
+		for b in out {
+			inside := and_law(k, {b.color, c})
+			outside := and_law(k, {b.color, not_law(k, c)})
+			if !is_none(inside) {
+				members := slice.clone_to_dynamic(b.members[:])
+				append(&members, i)
+				append(&cut, Block{inside, members})
+			}
+			if !is_none(outside) do append(&cut, Block{outside, b.members})
+			rest = and_law(k, {rest, not_law(k, b.color)})
+		}
+		if !is_none(rest) {
+			b := Block{color = rest}
+			append(&b.members, i)
+			append(&cut, b)
+		}
+		out = cut
+	}
+	return out[:]
+}
+
+// cuttable: a constant of primitives and strings: its & and ~ are computed whole.
+cuttable :: proc(c: Type) -> bool {
+	if !is_constant(c) do return false
+	cells, _ := as_cells(c)
+	for x in cells {
+		#partial switch cell_family(x) {
+		case .Int, .Real, .Char, .Text, .Bool:
+		case:
+			return false
+		}
+	}
+	return true
+}
+
+// product_shape: a shape of the template's structure, colored by a row.
+product_shape :: proc(template: []^Binding, row: []Type) -> Type {
+	s := new_scope(nil, {})
+	s.source, s.complete, s.reached = s, true, true
+	for p, i in template {
+		b := new_binding(s, p.kind, p.span)
+		b.name, b.capture = p.name, p.capture
+		b.color, b.typed_color = row[i], row[i]
+	}
+	return s
 }
 
 // --- & of cells ---

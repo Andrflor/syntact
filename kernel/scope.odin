@@ -120,7 +120,28 @@ carve_law :: proc(k: ^Kernel, c: ^Carve) -> Type {
 		if is_invalid(target) do return target
 		return problem(.Invalid_Carve, c.span, fmt.tprintf("%s is not a scope: it cannot be carved", print_type(target)))
 	}
-	return carve(k, s, args, c.span)
+	r := carve(k, s, args, c.span)
+	// the value of a binding colored by C, carved, is checked against C (§5.4)
+	if b := designated(k, c.target); b != nil && !is_invalid(r) {
+		if color := binding_color(k, b); color != nil {
+			if p := in_problem(k, r, color, c.span); p != nil do return p
+		}
+	}
+	return r
+}
+
+// designated: the binding a term designates: a name, or a field of a scope.
+designated :: proc(k: ^Kernel, t: Type) -> ^Binding {
+	#partial switch v in t {
+	case ^Name:
+		return v.binding
+	case ^Access:
+		s, is_scope := normal(k, v.target).(^Scope)
+		if !is_scope do return nil
+		b, _ := occurrence(placed(k, s, .Value), v.name, v.ordinal, true)
+		return b
+	}
+	return nil
 }
 
 // carve: s{x -> w} = s where the first occurrence of x is w. An unnamed argument
@@ -452,8 +473,10 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	if is_invalid(x) do return x
 	if recursive(s) {
 		solution, solved := arden(k, s)
-		if !solved do return new_operation(.In, x, s) // the equation stays
-		if solution != s do return admits(k, x, solution)
+		if solved && solution != s do return admits(k, x, solution)
+		// unsolved, a scope is asked of the productions when they are guarded: each
+		// asks it of runs strictly shorter than it (§5.6); otherwise the equation stays
+		if _, is_scope := x.(^Scope); !solved && !(is_scope && guarded(k, s)) do return new_operation(.In, x, s)
 	}
 	shape := placed(k, s, .Shape)
 	out: Type = Bool(false)
@@ -611,6 +634,23 @@ arden :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
 	return solution, true
 }
 
+// guarded: in each production of s, a run that names s comes with a binding: a
+// scope in s is asked of runs strictly shorter than it (§5.6).
+guarded :: proc(k: ^Kernel, s: ^Scope) -> bool {
+	for p in placed(k, s, .Shape) {
+		if p.kind != .Product || p.value == nil do continue
+		shape, is_scope := binding_type(k, p).(^Scope)
+		if !is_scope do continue
+		names, fixed := false, false
+		for b in placed(k, shape, .Shape) {
+			if !is_run(b) do fixed = true
+			else if binding_mentions(k, b, s) do names = true
+		}
+		if names && !fixed do return false
+	}
+	return true
+}
+
 // binding_mentions: the color or the value of a binding holds the scope s.
 binding_mentions :: proc(k: ^Kernel, b: ^Binding, s: ^Scope) -> bool {
 	seen := make(map[^Scope]bool)
@@ -645,25 +685,45 @@ mentions_scope :: proc(k: ^Kernel, t: Type, s: ^Scope, seen: ^map[^Scope]bool) -
 	return false
 }
 
-// repeated_in: x in A * n, A a set of shapes of one fixed length L: x is a run of
-// n pieces of L bindings, each in A (§4.6, §5.6).
+// repeated_in: x in A * n, A a set of shapes: x is y + z, y a piece in A and z
+// in A * (n - 1), over the lengths A admits — the law of `in` on a concatenation
+// (§4.6, §5.6). A piece takes a binding at least; when A admits {}, empty pieces
+// make up any count that n allows.
 repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
+	stays := new_operation(.In, x, new_operation(.Mul, a, counts))
 	v, is_scope := x.(^Scope)
-	if !is_scope do return is_constant(x) ? Type(Bool(false)) : new_operation(.In, x, new_operation(.Mul, a, counts))
-	length := -1
-	alternatives, _ := as_cells(a)
+	if !is_scope do return is_constant(x) ? Type(Bool(false)) : stays
+	alternatives, negated := as_cells(a)
+	if negated do return stays
+	lengths := make([dynamic]int) // the lengths of the pieces, when each is fixed
+	any_length := false
 	for c in alternatives {
 		shape, ok := c.(^Scope)
-		if !ok do return new_operation(.In, x, new_operation(.Mul, a, counts))
+		if !ok do return stays
 		n, fixed := shape_length(k, shape)
-		if !fixed || length >= 0 && n != length do return new_operation(.In, x, new_operation(.Mul, a, counts))
-		length = n
+		if !fixed do any_length = true
+		else if !slice.contains(lengths[:], n) do append(&lengths, n)
 	}
-	if length <= 0 do return new_operation(.In, x, new_operation(.Mul, a, counts))
-	xs := placed(k, v, .Value)
-	if len(xs) % length != 0 || !counts_hold(counts, i128(len(xs) / length)) do return Bool(false)
-	out: Type = Bool(true)
-	for i := 0; i < len(xs); i += length do out = bool_and(k, out, in_law(k, run_scope(k, xs[i:i + length]), a))
+	empty := in_law(k, run_scope(k, nil), a)
+	if !is_bool(empty, true) && !is_bool(empty, false) do return stays
+	return pieces_in(k, placed(k, v, .Value), a, counts, 0, lengths[:], any_length, is_bool(empty, true))
+}
+
+// pieces_in: the bindings xs are pieces in a, after `used` of them.
+pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts: Type, used: i128, lengths: []int, any_length, empty: bool) -> Type {
+	if len(xs) == 0 {
+		if empty do return Bool(!is_none(counts_from(counts, used)))
+		return Bool(counts_hold(counts, used))
+	}
+	if is_none(counts_from(counts, used + 1)) do return Bool(false)
+	out: Type = Bool(false)
+	for i in 1 ..= len(xs) {
+		if !any_length && !slice.contains(lengths, i) do continue
+		head := in_law(k, run_scope(k, xs[:i]), a)
+		if is_bool(head, false) do continue
+		out = bool_or(k, out, bool_and(k, head, pieces_in(k, xs[i:], a, counts, used + 1, lengths, any_length, empty)))
+		if is_bool(out, true) do return out
+	}
 	return out
 }
 
@@ -777,12 +837,20 @@ same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
 		}
 		return true
 	}
+	return same_bindings(k, a, b, true)
+}
+
+// same_bindings: the bindings of two scopes are, in order, the same names, kinds
+// and values (§5.3) — as terms, the same colors too: `{u8:}` and `{i8:}` give the
+// same value, not the same set.
+same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 	xs := placed(k, a, .Value)
 	ys := placed(k, b, .Value)
 	if len(xs) != len(ys) do return false
 	for x, i in xs {
 		y := ys[i]
 		if x.name != y.name || x.kind != y.kind do return false
+		if colors && !same(k, binding_color(k, x), binding_color(k, y)) do return false
 		if !same(k, binding_type(k, x), binding_type(k, y)) do return false
 	}
 	return true

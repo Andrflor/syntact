@@ -319,7 +319,10 @@ A scope with productions admits what they produce:
 
 A scope without production is a shape. It admits the scopes of the same structure
 (same names, same kinds, same order) whose every binding is admitted by the color of
-its own. Two different structures have nothing in common. `...C:` admits a run of
+its own. Two different structures have nothing in common. Shapes of one structure
+are products, and their `|` is written in one form: the first place cut into
+blocks, the values the same shapes admit; the rest of each block in that form; the
+blocks with the same rest joined, as (A×X) ∪ (B×X) = (A∪B)×X. `...C:` admits a run of
 bindings that, taken as a scope, C admits; `...` alone admits any run
 (specs/language/04):
 
@@ -327,6 +330,9 @@ bindings that, taken as a scope, C admits; `...` alone admits any run
 {1 2} in {u8: u8:}               = true
 {1 2} in {u8:}                   = false         different structures
 {u8:} & {u8: u8:}                = none
+{u8: string:} | {i8: string:}    = {(-128..255): string:}
+{u8: string:} | {i8: bool:}      = {(-128..-1): bool:} | {(0..127): (string | bool):}
+                                   | {(128..255): string:}
 Pair -> {u8: u8:}
 {1 2 "x"} in {...Pair: string:}  = true
 ```
@@ -372,7 +378,8 @@ mentions it. The first production is the base case, and it is not recursive: a
 base case whose value places itself again is an infinite recursion. The equation
 is never unfolded: asked again from its own production, the scope stays a carve
 and a collapse, applied to types. It is solved — Arden, a closed form — or it
-stays. A carve of a solved equation substitutes its arguments into the solution:
+stays. A scope asked whether it is in an equation that is not solved is asked of
+its productions (§5.4) when they are guarded. A carve of a solved equation substitutes its arguments into the solution:
 `sum{n -> 5}!` is `sum!` with `n` = 5.
 
 Arden, when the name is at the edge of the sequence:
@@ -383,7 +390,24 @@ X = {} | {T: ...X}      ⟹    X = {0..*T:}       the run of 0 or more T:
 ```
 
 It is the same law as for strings: `X = A + X | B` gives `X = A * 0.. + B` when `""`
-is not in A.
+is not in A. A run is in `A * n` when it is cut into n pieces, each in A: the law of
+`in` on a concatenation, over the lengths of the pieces A admits.
+
+```text
+X = {} | {u8: ...X} | {i8: string: ...X}   ⟹   X = {...(({u8:} | {i8: string:}) * 0..):}
+{1 (-2) "x" 3} in X = {1} + {-2 "x"} + {3}, each in {u8:} | {i8: string:}   = true
+```
+
+Guarded, when in each production a run that names the scope comes with a binding:
+each question is then on a run strictly shorter than the scope asked, and the
+equation itself is not unfolded. Otherwise the equation stays.
+
+```text
+List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
+{10 10} in List{u8} = {10 10} in {}  [|]  {10 10} in {u8: ...List{u8}: u8:}
+                    = 10 in u8  [&]  {} in List{u8}  [&]  10 in u8       = true
+{10 10 10} in List{u8}                                                    = false
+```
 
 The closed form, when the name is called on an integer:
 
