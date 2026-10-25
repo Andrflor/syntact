@@ -192,6 +192,8 @@ SPEC_CASES := []Spec_Case {
 	{"same -> {u8:n -> ??  -> same{n -> n}!}", "", {.Infinite_Recursion}},
 	{"head -> {-> head! ? {0 -> 1  -> 2}}", "", {.Infinite_Recursion}},
 	{"lazy -> {-> {x -> lazy!}}", "", {}},
+	// a character that does not print is shown by its code
+	{"x -> char & ~'\\0'", "'\\x01'..", {}},
 	{"f -> {u64:n -> 5  -> n ? {0 -> 1  -> n * f{n -> n - 1}!}}\nx -> f{n -> 4}!", "", {}},
 	// not guarded: the equation stays
 	{"L -> {\n  -> {}\n  -> {...L: ...L:}\n}\nL:a -> {}", "", {.Constraint_Mismatch}},

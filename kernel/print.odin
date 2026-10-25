@@ -2,6 +2,7 @@ package kernel
 
 import "core:fmt"
 import "core:strings"
+import "core:unicode"
 
 // PRINTING
 //
@@ -238,11 +239,16 @@ write_char :: proc(b: ^strings.Builder, c: rune, quote: byte) {
 		strings.write_string(b, "\\n")
 	case '\t':
 		strings.write_string(b, "\\t")
+	case '\r':
+		strings.write_string(b, "\\r")
 	case '\\':
 		strings.write_string(b, "\\\\")
 	case:
 		if c == rune(quote) do strings.write_byte(b, '\\')
-		strings.write_rune(b, c)
+		// a character that does not print is shown by its code
+		if unicode.is_print(c) do strings.write_rune(b, c)
+		else if c <= 0xff do fmt.sbprintf(b, "\\x%02x", c)
+		else do fmt.sbprintf(b, "\\u{%x}", c)
 	}
 	if quote != 0 do strings.write_byte(b, quote)
 }
