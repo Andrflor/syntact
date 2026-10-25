@@ -32,17 +32,17 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return operation_law(k, v.op, normal_all(k, v.args), v.span)
 	case ^Name:
 		if v.self != nil do return v.self // the scope being defined: a carve and a collapse apply to it (§5.6)
-		return rewrite(k, binding_type(k, v.binding), k.rewrite)
+		return binding_type(k, v.binding)
 	case ^Scope:
 		return scope_law(k, v)
 	case ^Access:
-		return rewrite(k, access_law(k, normal(k, v.target), v), k.rewrite)
+		return access_law(k, normal(k, v.target), v)
 	case ^Collapse:
-		return rewrite(k, collapse_law(k, v), k.rewrite)
+		return collapse_law(k, v)
 	case ^Carve:
 		return carve_law(k, v)
 	case ^Default:
-		return rewrite(k, default_of(k, normal(k, v.color), v.span, v.color), k.rewrite)
+		return default_of(k, normal(k, v.color), v.span, v.color)
 	case ^Pattern:
 		return pattern_law(k, v)
 	}
@@ -276,10 +276,7 @@ bound_less :: proc(a, b: Type) -> bool {
 binding_color :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if b.color == nil do return nil
 	if b.typed_color == nil {
-		saved := k.rewrite
-		k.rewrite = scope_rewrite(b.scope)
 		b.typed_color = normal(k, b.color)
-		k.rewrite = saved
 	}
 	return b.typed_color
 }
@@ -296,8 +293,6 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	case .Not_Asked:
 	}
 	b.state = .In_Progress
-	saved := k.rewrite
-	k.rewrite = scope_rewrite(b.scope)
 	color := binding_color(k, b)
 	value: Type
 	if b.value == nil {
@@ -310,7 +305,6 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if shape, ok := color.(^Scope); ok && b.kind == .Push && is_shape(k, shape) {
 		if s, is_scope := value.(^Scope); is_scope do value = colored(k, s, shape)
 	}
-	k.rewrite = saved
 	b.typed_value, b.state = value, .Done
 	return value
 }

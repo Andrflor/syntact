@@ -154,8 +154,7 @@ derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span
 	merged := make(map[^Binding]Type)
 	for b, v in s.changes do merged[b] = v
 	for b, v in changes do merged[s.carved != nil ? b.source : b] = v
-	r := merge_rewrites(k, scope_rewrite(root.parent), k.rewrite)
-	c := copy_scope(k, root, merged, r)
+	c := copy_scope(k, root, merged)
 	c.carved, c.changes = root, merged
 	check_carve(k, c, span)
 	return c
@@ -164,35 +163,33 @@ derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span
 // check_carve: the bindings of a carve whose equation changed — the replaced ones,
 // and those that name them — are typed and checked, with their errors at the carve.
 check_carve :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) {
-	saved_site, saved_rewrite := k.site, k.rewrite
-	if k.site == {} do k.site = span
-	k.rewrite = scope_rewrite(c)
 	for b in c.bindings {
 		if b.kind == .Product || b.kind == .Expand do continue
 		v := binding_type(k, b)
 		color := binding_color(k, b)
 		if !b.carved && same(k, v, binding_type(k, b.source)) && same(k, color, binding_color(k, b.source)) do continue
-		failed := obligations(k, v)
-		failed = color != nil && obligations(k, color) || failed
+		failed := obligations(k, v, span)
+		failed = color != nil && obligations(k, color, span) || failed
 		if failed || color == nil do continue
-		check_in(k, v, color, b.span)
+		check_in(k, v, color, span)
 	}
-	k.site, k.rewrite = saved_site, saved_rewrite
 }
 
 // --- copies ---
 
 // Copier: the bindings and scopes of a copy, by those they copy: a name follows
-// its binding into the copy.
+// its binding into the copy. A copy for a branch also substitutes each reference
+// from outside by its type, with the unknowns of `outer` rewritten.
 Copier :: struct {
-	bindings: map[^Binding]^Binding,
-	scopes:   map[^Scope]^Scope,
+	bindings:   map[^Binding]^Binding,
+	scopes:     map[^Scope]^Scope,
+	substitute: bool,
+	outer:      Rewrite,
 }
 
-copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, r: Rewrite) -> ^Scope {
+copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
 	m := Copier{}
 	c := copy_into(k, &m, s, s.parent)
-	c.rewrite = r
 	for b in c.bindings {
 		if v, carved := changes[b.source]; carved {
 			b.value, b.carved = v, true
@@ -203,7 +200,8 @@ copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, r: Rewrite
 
 copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	c := new_scope(parent, s.span)
-	c.source, c.recursive, c.complete = s, s.recursive, true
+	c.recursive, c.complete = s.recursive, true
+	if !m.substitute do c.source = s // a scope of a branch is checked as written there
 	m.scopes[s] = c
 	for b in s.bindings {
 		n := new(Binding)
@@ -248,8 +246,16 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case ^Name:
 		n := new(Name)
 		n^ = v^
-		if b, found := m.bindings[v.binding]; found do n.binding = b
-		if s, found := m.scopes[v.self]; found && v.self != nil do n.self = s
+		if b, found := m.bindings[v.binding]; found {
+			n.binding = b
+			return n
+		}
+		if v.self != nil {
+			if s, found := m.scopes[v.self]; found do n.self = s
+			return n
+		}
+		// a reference from outside the copy: its type, with the unknowns rewritten
+		if m.substitute do return rewrite(k, binding_type(k, v.binding), m.outer)
 		return n
 	case ^Scope:
 		parent := scope
@@ -348,7 +354,7 @@ colored :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope) -> Type {
 	places := placed(k, shape, .Shape)
 	if len(places) != len(s.bindings) do return s
 	for b, i in s.bindings do if b.kind == .Expand || is_run(places[i]) do return s
-	c := copy_scope(k, s, nil, nil)
+	c := copy_scope(k, s, nil)
 	for b, i in c.bindings do if b.color == nil && places[i].color != nil do b.color = places[i].color
 	return c
 }

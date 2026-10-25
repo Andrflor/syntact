@@ -75,38 +75,6 @@ layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 	return everything()
 }
 
-// scope_rewrite: the rewrite where a scope is typed: that of the nearest branch or
-// carve around it.
-scope_rewrite :: proc(s: ^Scope) -> Rewrite {
-	for sc := s; sc != nil; sc = sc.parent do if sc.rewrite != nil do return sc.rewrite
-	return nil
-}
-
-// merge_rewrites: both narrowings at once: an unknown both narrow is in both.
-merge_rewrites :: proc(k: ^Kernel, a, b: Rewrite) -> Rewrite {
-	if a == nil do return b
-	if b == nil do return a
-	out := make(Rewrite)
-	for id, t in a do out[id] = t
-	for id, t in b {
-		x, found := out[id]
-		if !found {
-			out[id] = t
-			continue
-		}
-		u, is_unknown := x.(^Unknown)
-		w, other := t.(^Unknown)
-		switch {
-		case is_unknown && other:
-			out[id] = narrowing(u, and_law(k, {layout_of(k, u), layout_of(k, w)}))
-		case is_unknown:
-			out[id] = t // a primitive: the narrower
-		}
-	}
-	return out
-}
-
-
 // layout_image: a term over unknowns, each replaced by its layout: an operator
 // distributes over |, so the term is one value of this image (§4.5, §7). A
 // boolean whose value the layouts do not give is false | true. False when the term

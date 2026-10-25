@@ -35,15 +35,13 @@ Kernel :: struct {
 	ast:        ^syn.Ast,
 	errors:     [dynamic]Error,
 	unknowns:   int, // the unknowns written: their ids
-	rewrite:    Rewrite, // the unknowns the branches around rewrite (rewrite.odin)
-	site:       syn.Span, // the carve being checked: where its errors go
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
 }
 
 // report: an error, once. What it concerns becomes Invalid, which stays silent.
 report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> Type {
-	e := Error{kind, message, k.site != {} ? k.site : span}
+	e := Error{kind, message, span}
 	if !slice.contains(k.errors[:], e) do append(&k.errors, e)
 	return Invalid{}
 }

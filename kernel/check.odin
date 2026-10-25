@@ -1,5 +1,6 @@
 package kernel
 
+import syn "../compiler"
 import "core:fmt"
 
 // WHAT IS CHECKED, AND WHERE (specs/types.md §7)
@@ -58,46 +59,44 @@ check_binding :: proc(k: ^Kernel, b: ^Binding) {
 	failed := value != nil && obligations(k, value)
 	failed = color != nil && obligations(k, color) || failed
 	if failed || color == nil || value == nil do return
-	saved := k.rewrite
-	k.rewrite = scope_rewrite(b.scope)
 	check_in(k, value, color, b.span)
-	k.rewrite = saved
 }
 
 // obligations: the proofs a normal form asks besides `V in C`; true when one is
-// not proven, and reported: `V in C` is then not asked.
-obligations :: proc(k: ^Kernel, t: Type) -> bool {
+// not proven, and reported — at the site given, a carve, or where it is: `V in C`
+// is then not asked.
+obligations :: proc(k: ^Kernel, t: Type, site := syn.Span{}) -> bool {
 	switch v in t {
 	case Invalid:
-		if v.problem != nil do report(k, v.problem.kind, v.problem.span, v.problem.message)
+		if v.problem != nil do report(k, v.problem.kind, site != {} ? site : v.problem.span, v.problem.message)
 		return true
 	case ^Operation:
 		failed := false
-		for a in v.args do failed = obligations(k, a) || failed
+		for a in v.args do failed = obligations(k, a, site) || failed
 		if !failed && takes_recursive_call(v) do failed = !call_applies(k, v)
 		return failed
 	case ^Pattern:
-		failed := obligations(k, v.target)
+		failed := obligations(k, v.target, site)
 		for b in v.branches {
-			if b.cover != nil do failed = obligations(k, b.cover) || failed
-			failed = obligations(k, b.product) || failed
+			if b.cover != nil do failed = obligations(k, b.cover, site) || failed
+			failed = obligations(k, b.product, site) || failed
 		}
 		if !failed do exhaustive(k, v)
 		return failed
 	case ^Or:
 		failed := false
-		for a in v.terms do failed = obligations(k, a) || failed
+		for a in v.terms do failed = obligations(k, a, site) || failed
 		return failed
 	case ^And:
 		failed := false
-		for a in v.terms do failed = obligations(k, a) || failed
+		for a in v.terms do failed = obligations(k, a, site) || failed
 		return failed
 	case ^Not:
-		return obligations(k, v.term)
+		return obligations(k, v.term, site)
 	case ^Is:
-		return obligations(k, v.term)
+		return obligations(k, v.term, site)
 	case ^Range:
-		return v.lo != nil && obligations(k, v.lo) || v.hi != nil && obligations(k, v.hi)
+		return v.lo != nil && obligations(k, v.lo, site) || v.hi != nil && obligations(k, v.hi, site)
 	case Char, Int, Real, Bool, None, ^Unknown, ^Name, ^Scope, ^Access, ^Collapse, ^Carve, ^Default:
 	}
 	return false

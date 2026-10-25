@@ -32,7 +32,7 @@ Verdict :: enum u8 {
 prove :: proc(k: ^Kernel, eq: Type) -> (Verdict, Rewrite) {
 	#partial switch v in eq {
 	case Bool:
-		return bool(v) ? .Proven : .Refuted, k.rewrite
+		return bool(v) ? .Proven : .Refuted, nil
 	case Invalid:
 		return .Proven, nil // already reported
 	case ^Pattern:
@@ -56,13 +56,11 @@ prove_branches :: proc(k: ^Kernel, p: ^Pattern) -> (Verdict, Rewrite) {
 	reached, _, _ := reaches(k, p.target, p.branches)
 	verdict := Verdict.Proven
 	for r in reached {
-		saved := k.rewrite
-		k.rewrite = r.rewrite
 		v, witness := prove(k, p.branches[r.branch].product)
-		k.rewrite = saved
 		switch v {
 		case .Proven:
 		case .Refuted:
+			if witness == nil do witness = r.rewrite
 			if r.exact do return .Refuted, witness
 			verdict = .Unproven
 		case .Unproven:

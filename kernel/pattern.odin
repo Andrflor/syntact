@@ -26,11 +26,7 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	out := make([dynamic]Branch)
 	for r in reached {
 		b := p.branches[r.branch]
-		saved := k.rewrite
-		k.rewrite = r.rewrite
-		if b.scope != nil do b.scope.rewrite = r.rewrite
-		product := rewrite(k, normal(k, b.product), r.rewrite)
-		k.rewrite = saved
+		product := branch_product(k, b, r.rewrite)
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 	}
@@ -74,7 +70,7 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		}
 		reach := bool_and(k, rest, cond)
 		rest = bool_and(k, rest, bool_not(k, cond))
-		r, reached, exact := narrow(k, k.rewrite, reach)
+		r, reached, exact := narrow(k, nil, reach)
 		if !reached do continue
 		all := is_bool(rest, false)
 		append(&out, Reach{i, cover, r, all, exact})
@@ -126,6 +122,16 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		out[u.id] = narrowing(u, layout)
 	}
 	return out, true, exact
+}
+
+// branch_product: the product of a branch, for the values that reach it: a copy of
+// it where each reference from outside is its type — computed once — with the
+// unknowns the reach narrows rewritten, ?ₖ::(L & S). The scopes written in it are
+// copied likewise: they are the scopes of that branch.
+branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite) -> Type {
+	if b.scope == nil || len(r) == 0 do return rewrite(k, normal(k, b.product), r)
+	m := Copier{outer = r, substitute = true}
+	return rewrite(k, normal(k, copy_term(k, &m, b.product, b.scope)), r)
 }
 
 // conjuncts: the terms of a [&].

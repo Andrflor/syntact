@@ -222,7 +222,6 @@ Scope :: struct {
 	source:    ^Scope, // a copy (carve, coloring): the scope it copies
 	carved:    ^Scope, // a carve: the scope it carves, uncarved
 	changes:   map[^Binding]Type, // a carve: the values of the bindings of `carved` it replaces
-	rewrite:   Rewrite, // a branch, a carve: the unknowns rewritten where it is typed
 	complete:  bool, // all its bindings are built: all are visible
 	producing: bool, // one of its productions is being built: it may name itself
 	recursive: bool, // one of its productions names it (§5.6)
