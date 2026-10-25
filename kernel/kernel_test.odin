@@ -160,6 +160,9 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nx -> 1000 / (a + 1)", "", {}},
 	{"a -> ??::u8\n(3..1000):x -> 1000 / (a + 1)", "", {}},
 	{"x -> u8 * u8", "(0..255) * (0..255)", {}},
+	{"Pair -> {u8: u8:}\nList -> {\n  -> {}\n  -> {...Pair: ...List:}\n}\nList:x -> {1 2 3 4}", "", {}},
+	{"Pair -> {u8: u8:}\nList -> {\n  -> {}\n  -> {...Pair: ...List:}\n}\nList:x -> {1 2 3}", "", {.Constraint_Mismatch}},
+	{"Tree -> {\n  -> {}\n  -> {u8: ...Tree: ...Tree:}\n}\nTree:x -> {1}", "", {.Constraint_Mismatch}}, // not at the edge: the equation stays
 	// §5.6
 	{"f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n + f{n -> n - 1}!}}\nx -> f{n -> 3}!", "13", {}},
 	{"f -> {u8:n -> ??  -> n ? {1 -> 1  -> n + f{n -> n - 1}!}}\nx -> f!", "", {.Constraint_Mismatch}},

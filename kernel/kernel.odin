@@ -38,8 +38,6 @@ Kernel :: struct {
 	rewrite:    Rewrite, // the unknowns the branches around rewrite (rewrite.odin)
 	site:       syn.Span, // the carve being checked: where its errors go
 	copies:     map[string]^Scope, // the carves made, by source, arguments and rewrite
-	admitting:  map[string]bool, // the admissions being decided (scope.odin)
-	comparing:  map[[2]^Scope]bool, // the scopes being compared (scope.odin)
 	hypotheses: map[^Scope]Family, // the family of a recursive call (recursion.odin)
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file

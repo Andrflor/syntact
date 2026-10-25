@@ -383,10 +383,11 @@ colored :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope) -> Type {
 // scopes of the same structure whose bindings its colors admit.
 admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	if is_invalid(x) do return Invalid{}
-	key := fmt.tprintf("%s in %p", key_of(x), s)
-	if key in k.admitting do return new_operation(.In, x, s) // asked again inside itself: not decided here
-	k.admitting[strings.clone(key)] = true
-	defer delete_key(&k.admitting, key)
+	if origin(s).recursive {
+		solution, solved := arden(k, s)
+		if !solved do return new_operation(.In, x, s) // the equation stays
+		if solution != s do return admits(k, x, solution)
+	}
 	shape := placed(k, s, .Shape)
 	out: Type = Bool(false)
 	produces := false
@@ -452,15 +453,29 @@ match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Ty
 	return out
 }
 
-// run_length: the number of bindings a run `...C:` takes when C is a shape without
-// run; false otherwise.
+// run_length: the number of bindings a run `...C:` takes, when C is a shape of a
+// fixed length.
 run_length :: proc(k: ^Kernel, b: ^Binding) -> (int, bool) {
 	if b.color == nil do return 0, false
 	s, ok := binding_color(k, b).(^Scope)
-	if !ok || !is_shape(k, s) do return 0, false
-	places := placed(k, s, .Shape)
-	for p in places do if is_run(p) do return 0, false
-	return len(places), true
+	if !ok do return 0, false
+	return shape_length(k, s)
+}
+
+// shape_length: the number of bindings of every scope a shape admits, when it is
+// fixed: each of its runs takes a fixed number.
+shape_length :: proc(k: ^Kernel, s: ^Scope) -> (length: int, fixed: bool) {
+	if !is_shape(k, s) do return 0, false
+	n := 0
+	for p in placed(k, s, .Shape) {
+		if !is_run(p) {
+			n += 1
+			continue
+		}
+		m := run_length(k, p) or_return
+		n += m
+	}
+	return n, true
 }
 
 // run_scope: a run of bindings taken as a scope; the same run is the same scope.
@@ -474,6 +489,102 @@ run_scope :: proc(k: ^Kernel, part: []^Binding) -> ^Scope {
 	s.source, s.complete, s.reached = s, true, true
 	k.copies[strings.clone(strings.to_string(key))] = s
 	return s
+}
+
+// --- recursive shapes (§5.6) ---
+//
+// A scope whose productions name it is an equation in it. When each production is
+// a shape that names it only as its last run, X = B | A + X: the bases B, the
+// prefixes A. Arden solves it, as for strings (§5.6): X = A * 0.. + B, the shape
+// of a run of zero or more A, then a B. Otherwise the equation stays.
+
+arden :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
+	key := fmt.tprintf("arden %p", s)
+	if solution, found := k.copies[key]; found do return solution, true
+	prefixes := make([dynamic]Type)
+	bases := make([dynamic]Type)
+	for p in placed(k, s, .Shape) {
+		if p.kind != .Product do continue
+		if p.value == nil do return nil, false // `-> C:`: not a shape
+		shape, is_scope := binding_type(k, p).(^Scope)
+		if !is_scope || !is_shape(k, shape) do return nil, false
+		places := placed(k, shape, .Shape)
+		n := len(places)
+		if n > 0 && is_run(places[n - 1]) && places[n - 1].color != nil && same(k, binding_color(k, places[n - 1]), s) {
+			for b in places[:n - 1] do if binding_mentions(k, b, s) do return nil, false
+			append(&prefixes, run_scope(k, places[:n - 1]))
+			continue
+		}
+		for b in places do if binding_mentions(k, b, s) do return nil, false
+		append(&bases, shape)
+	}
+	if len(prefixes) == 0 do return s, true // it names itself elsewhere than in a shape
+	solution := new_scope(nil, s.span)
+	solution.source, solution.complete, solution.reached = s, true, true
+	run := new_binding(solution, .Expand, s.span)
+	run.color = new_operation(.Mul, or_law(k, prefixes[:]), new_range(Int(0), nil, .Int))
+	run.typed_color = run.color
+	last := new_binding(solution, .Expand, s.span)
+	last.color = or_law(k, bases[:])
+	last.typed_color = last.color
+	k.copies[strings.clone(key)] = solution
+	return solution, true
+}
+
+// binding_mentions: the color or the value of a binding holds the scope s.
+binding_mentions :: proc(k: ^Kernel, b: ^Binding, s: ^Scope) -> bool {
+	seen := make(map[^Scope]bool)
+	if b.color != nil && mentions_scope(k, binding_color(k, b), s, &seen) do return true
+	return b.value != nil && b.kind != .Product && mentions_scope(k, binding_type(k, b), s, &seen)
+}
+
+mentions_scope :: proc(k: ^Kernel, t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
+	#partial switch v in t {
+	case ^Scope:
+		if same(k, v, s) do return true
+		if v in seen do return false
+		seen[v] = true
+		for b in placed(k, v, .Shape) {
+			if b.color != nil && mentions_scope(k, binding_color(k, b), s, seen) do return true
+		}
+	case ^Collapse:
+		if x, ok := v.target.(^Scope); ok do return origin(x) == origin(s)
+	case ^Operation:
+		for a in v.args do if mentions_scope(k, a, s, seen) do return true
+	case ^Or:
+		for a in v.terms do if mentions_scope(k, a, s, seen) do return true
+	case ^And:
+		for a in v.terms do if mentions_scope(k, a, s, seen) do return true
+	case ^Not:
+		return mentions_scope(k, v.term, s, seen)
+	case ^Is:
+		return mentions_scope(k, v.term, s, seen)
+	case ^Pattern:
+		for b in v.branches do if mentions_scope(k, b.product, s, seen) do return true
+	}
+	return false
+}
+
+// repeated_in: x in A * n, A a set of shapes of one fixed length L: x is a run of
+// n pieces of L bindings, each in A (§4.6, §5.6).
+repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
+	v, is_scope := x.(^Scope)
+	if !is_scope do return is_constant(x) ? Type(Bool(false)) : new_operation(.In, x, new_operation(.Mul, a, counts))
+	length := -1
+	alternatives, _ := as_cells(a)
+	for c in alternatives {
+		shape, ok := c.(^Scope)
+		if !ok do return new_operation(.In, x, new_operation(.Mul, a, counts))
+		n, fixed := shape_length(k, shape)
+		if !fixed || length >= 0 && n != length do return new_operation(.In, x, new_operation(.Mul, a, counts))
+		length = n
+	}
+	if length <= 0 do return new_operation(.In, x, new_operation(.Mul, a, counts))
+	xs := placed(k, v, .Value)
+	if len(xs) % length != 0 || !counts_hold(counts, i128(len(xs) / length)) do return Bool(false)
+	out: Type = Bool(true)
+	for i := 0; i < len(xs); i += length do out = bool_and(out, in_law(k, run_scope(k, xs[i:i + length]), a))
+	return out
 }
 
 // different_structures: two shapes without run whose names, kinds or order
@@ -574,10 +685,18 @@ same_all :: proc(k: ^Kernel, a, b: []Type) -> bool {
 
 same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
 	if a == b do return true
-	pair := [2]^Scope{a, b}
-	if pair in k.comparing do return true // compared inside itself: equal as far as the rest says
-	k.comparing[pair] = true
-	defer delete_key(&k.comparing, pair)
+	// two carves of one scope: s{x -> v} = s{x -> w} when v = w; s{x -> s.x} = s
+	if root := origin(a); root == origin(b) {
+		for x in root.bindings {
+			v, in_a := a.changes[x]
+			w, in_b := b.changes[x]
+			if !in_a && !in_b do continue
+			if !in_a do v = binding_type(k, x)
+			if !in_b do w = binding_type(k, x)
+			if !same(k, v, w) do return false
+		}
+		return true
+	}
 	xs := placed(k, a, .Value)
 	ys := placed(k, b, .Value)
 	if len(xs) != len(ys) do return false

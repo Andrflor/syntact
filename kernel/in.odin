@@ -30,6 +30,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
 	if s, ok := c.(^Scope); ok do return admits(k, x, s)
+	if o, ok := c.(^Operation); ok && o.op == .Mul && cell_family(o.args[0]) == .Value do return repeated_in(k, x, o.args[0], o.args[1])
 	if i, ok := c.(^Is); ok do return equal_law(k, x, i.term)
 	if is_none(x) {
 		if is_none(c) do return Bool(true)
