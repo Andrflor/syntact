@@ -431,26 +431,38 @@ produced :: proc(k: ^Kernel, x: Type, p: ^Binding) -> Type {
 }
 
 // match_shape: the same names, kinds and order, each binding admitted by the color
-// of its place; a run `...C:` takes the bindings that C admits taken as a scope.
-// A run has the length of its shape, or takes what the others leave: one such run
-// at most is decided.
+// of its place; a run `...C:` takes bindings that C admits taken as a scope. It is
+// the law of `in` on a concatenation, as for strings: x in (A + B) is true when x
+// is y + z with y in A and z in B — over the ways the bindings of x are split
+// between the places, finitely many.
 match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Type {
-	lengths, decided, fits := run_lengths(k, xs, shape)
-	if !decided do return new_operation(.In, x, s)
-	if !fits do return Bool(false)
-	out: Type = Bool(true)
-	at := 0
-	for b, i in shape {
-		part := xs[at:at + lengths[i]]
-		at += lengths[i]
-		if !is_run(b) {
-			v := part[0]
-			if v.name != b.name || v.kind != b.kind do return Bool(false)
-			if c := binding_color(k, b); c != nil do out = bool_and(k, out, in_law(k, binding_type(k, v), c))
-			continue
-		}
-		if b.color == nil do continue // `...` admits any run
-		out = bool_and(k, out, in_law(k, run_scope(k, part), binding_color(k, b)))
+	if len(shape) == 0 do return Bool(len(xs) == 0)
+	place := shape[0]
+	if !is_run(place) {
+		if len(xs) == 0 do return Bool(false)
+		v := xs[0]
+		if v.name != place.name || v.kind != place.kind do return Bool(false)
+		head: Type = Bool(true)
+		if c := binding_color(k, place); c != nil do head = in_law(k, binding_type(k, v), c)
+		if is_bool(head, false) do return head
+		return bool_and(k, head, match_shape(k, x, s, xs[1:], shape[1:]))
+	}
+	run_in :: proc(k: ^Kernel, part: []^Binding, place: ^Binding) -> Type {
+		if place.color == nil do return Bool(true) // `...` admits any run
+		return in_law(k, run_scope(k, part), binding_color(k, place))
+	}
+	if n, fixed := run_length(k, place); fixed {
+		if len(xs) < n do return Bool(false)
+		head := run_in(k, xs[:n], place)
+		if is_bool(head, false) do return head
+		return bool_and(k, head, match_shape(k, x, s, xs[n:], shape[1:]))
+	}
+	out: Type = Bool(false)
+	for i in 0 ..= len(xs) {
+		head := run_in(k, xs[:i], place)
+		if is_bool(head, false) do continue
+		out = bool_or(k, out, bool_and(k, head, match_shape(k, x, s, xs[i:], shape[1:])))
+		if is_bool(out, true) do return out
 	}
 	return out
 }

@@ -173,6 +173,11 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 	for a in args do if is_none(a) do return None{} // none op c = none
 	sig, legal := legal_signature(k, op, args)
 	if !legal do return problem(.Invalid_operator, span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[op], print_types(args)))
+	if is_comparison(op) && (sig.args[0] == .Int || sig.args[0] == .Real) && !is_constant(args[0]) && !is_constant(args[1]) {
+		// the order is that of a ring: x < y = x - y < 0
+		zero: Type = sig.args[0] == .Int ? Type(Int(0)) : Type(real_int(0))
+		return operation_law(k, op, {operation_law(k, .Sub, args, span), zero}, span)
+	}
 	if bound, x, ok := comparison_bound(op, args); ok do return in_law(k, x, normal(k, bound))
 	constant := true
 	for a in args do constant &&= is_constant(a)
@@ -199,6 +204,14 @@ single :: proc(k: ^Kernel, t: Type) -> Type {
 	if _, is_op := t.(^Operation); !is_op || is_constant(t) do return t
 	if image, ok := layout_image(k, t); ok && is_primitive(image) do return image
 	return t
+}
+
+is_comparison :: proc(op: Operator) -> bool {
+	#partial switch op {
+	case .Less, .Less_Eq, .Greater, .Greater_Eq:
+		return true
+	}
+	return false
 }
 
 // comparison_bound: x < c = x in <c, and likewise for <= > >= (§4.3), when c is
