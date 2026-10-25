@@ -1,1 +1,1 @@
-{"name": "tc_str_neg_ord_seq_nonull_bad", "description": "~'\\0'*0.. + '\\0' rejects a string with no trailing null", "source": "(~'\\0' * 0.. + '\\0'):s -> 'abc'", "expect_errors": ["Constraint_Mismatch"]}
+{"name": "tc_str_neg_ord_seq_nonull_bad", "description": "(char & ~'\\0') * 0.. + '\\0' rejects a string with no trailing null; ~ is absolute (§4.1): the characters but '\\0' are char & ~'\\0'", "source": "((char & ~'\\0') * 0.. + '\\0'):s -> 'abc'", "expect_errors": ["Constraint_Mismatch"]}

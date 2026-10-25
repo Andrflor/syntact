@@ -1,1 +1,1 @@
-{"name": "tc_str_neg_ord_class_bad", "description": "~'a'..'z'*1.. rejects a string containing a lowercase letter", "source": "(~'a'..'z' * 1..):s -> \"a1\"", "expect_errors": ["Constraint_Mismatch"]}
+{"name": "tc_str_neg_ord_class_bad", "description": "(char & ~('a'..'z')) * 1.. rejects a string containing a lowercase letter; ~ is absolute (§4.1): the characters but a..z are char & ~('a'..'z')", "source": "((char & ~('a'..'z')) * 1..):s -> \"a1\"", "expect_errors": ["Constraint_Mismatch"]}
