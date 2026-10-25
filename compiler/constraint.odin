@@ -444,7 +444,7 @@ is_recursive_tail :: proc(t: ^Type) -> bool {
 // whatever its representation: a LAZY recursive marker (inside the grammar's own
 // body), a carve over one, or the already-MATERIALIZED machine scope (from
 // outside, where fold_carve_constraint substituted it — its `origin` still names
-// the canonical body). ok=false for a leaf tail (`...u8`).
+// the canonical body). ok=false for a tail that is not a scope.
 grammar_of_tail :: proc(t: ^Type) -> (^Scope_Type, bool) {
 	if t == nil do return nil, false
 	#partial switch &v in t^ {
@@ -786,8 +786,8 @@ scope_satisfy :: proc(cs, vs: Scope_Type) -> bool {
 // several productions (the empty terminal `-> {}` and the cons `-> {head, ...tail}`);
 // each is a candidate scope_satisfy_range over the SAME indices — the cons head consumes
 // one value and its inner `...tail` recurses, so the list unfolds by self-similarity with
-// no sub-scope built, the empty terminal closing an exhausted run. A plain `...A` repeats
-// A directly. nil A (`...`) only matches the empty run.
+// no sub-scope built, the empty terminal closing an exhausted run. A shape `...A` admits
+// the run of its own structure; a color that admits no scope admits no run.
 expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
 	// The run itself may hold an Expand (`{T: ...Array{T}:}` proven as a SHAPE —
 	// the grammar-coverage proof): a tail-vs-tail step, the run's LAST field. The
@@ -804,35 +804,25 @@ expand_satisfies :: proc(a: ^Type, vs: Scope_Type, vi, vend: int) -> bool {
 	if a == nil do return true
 	resolved := is_recursive_tail(a) ? recursive_tail_unfold(a) : a
 	if resolved == nil do return vi == vend
+	// The run, taken as a scope, is admitted by A (specs/types.md §5.4): only a
+	// scope admits a run.
 	s, ok := &resolved^.(Scope_Type)
-	if !ok {
-		// A leaf A (`...u8`): repeat A over each remaining value.
-		for j in vi ..< vend {
-			if !satisfy_root(resolved, vs.type_folds[j]) do return false
-		}
-		return true
-	}
+	if !ok do return false
 	// Try each scope production of A's body against the run; the first that proves wins.
-	matched := false
+	produced := false
 	for i in 0 ..< len(s.kind) {
 		if s.kind[i] != .Product do continue
+		produced = true
 		prod := s.constraint_folds[i] != nil ? s.constraint_folds[i] : s.type_folds[i]
 		if prod == nil do continue
 		ps, sok := &prod^.(Scope_Type)
 		if !sok do continue
-		matched = true
 		if scope_satisfy_range(ps^, 0, len(ps.names), vs, vi, vend) {
 			return true
 		}
 	}
-	// No scope production (a leaf A like `...u8`): repeat A over each remaining value.
-	if !matched {
-		for j in vi ..< vend {
-			if !satisfy_root(resolved, vs.type_folds[j]) do return false
-		}
-		return true
-	}
-	return false
+	// A shape admits the run of its own structure.
+	return !produced && scope_satisfy_range(s^, 0, len(s.names), vs, vi, vend)
 }
 
 scope_satisfy_range :: proc(cs: Scope_Type, ci, cend: int, vs: Scope_Type, vi, vend: int) -> bool {

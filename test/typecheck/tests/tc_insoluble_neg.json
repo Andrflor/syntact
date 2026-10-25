@@ -1,1 +1,1 @@
-{ "name": "tc_insoluble_neg", "description": "~??::u8 — negating an unknown, insoluble", "source": "(~??::u8):b -> 5", "expect_errors": ["Insoluble_Constraint"] }
+{ "name": "tc_insoluble_neg", "description": "~??::u8 — the unknown of the color can be 5, which ~ removes: refuted", "source": "(~??::u8):b -> 5", "expect_errors": ["Constraint_Mismatch"] }

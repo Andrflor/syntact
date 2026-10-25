@@ -1467,7 +1467,7 @@ walk_product :: #force_inline proc(
 	return value
 }
 
-// `...expr` expansion. A valueless expand (`...u8:`) materializes the constraint's
+// `...expr` expansion. A valueless expand (`...C:`) materializes the constraint's
 // default (there is no value expression to typecheck against).
 walk_expand :: #force_inline proc(
 	a: ^Analyzer,

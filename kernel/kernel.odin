@@ -1,22 +1,63 @@
 package kernel
 
 import syn "../compiler"
+import "core:slice"
 
-// run: parses, builds the IR, types it in place, then checks. Returns the scope of
-// the file (the file is a scope), each binding of which carries its types, and the
-// kernel with its errors.
-run :: proc(source: string) -> (program: ^Scope, k: Kernel, parsed: bool) {
-	cache := new(syn.Cache)
-	ast, ok := syn.parse(cache, source)
-	if !ok do return nil, k, false
-	program, k = check_ast(ast)
-	return program, k, true
+// THE KERNEL
+//
+// The type algebra of specs/types.md, and nothing else. A type is a term of its
+// grammar (type.odin): the program as written is made of these terms, and the type
+// of each is its normal form, given by orienting the laws (normal.odin, set.odin,
+// arith.odin, in.odin, scope.odin, pattern.odin, recursion.odin). The check is
+// `V in C = true` for every value of the unknowns (prove.odin): what the laws do
+// not prove is refused.
+
+Error_Kind :: enum u8 {
+	Undefined_Identifier,
+	Constraint_Mismatch, // `V in C` is not proven true
+	Non_Exhaustive_Pattern, // a value of the target is not proven taken by a branch
+	Invalid_Carve,
+	Invalid_operator, // an operator on types not proven in a family it accepts
+	Invalid_Range,
+	Invalid_Property_Access, // `.x` on what has no x
+	Invalid_Execute, // `!` on what is not a scope
+	Infinite_Recursion, // a base case that comes back to itself
+	Unsupported, // a form this kernel does not build yet
 }
 
-// check_ast: the kernel on an already parsed AST.
-check_ast :: proc(ast: ^syn.Ast) -> (program: ^Scope, k: Kernel) {
-	program = build_program(&k, ast)
-	type_scope(&k, program)
-	check(&k)
-	return
+Error :: struct {
+	kind:    Error_Kind,
+	message: string,
+	span:    syn.Span,
+}
+
+Kernel :: struct {
+	ast:        ^syn.Ast,
+	errors:     [dynamic]Error,
+	unknowns:   int, // the unknowns written: their ids
+	pending:    [dynamic]^Scope, // the scopes reached, to check
+	root:       ^Scope, // the file
+}
+
+// report: an error, once. What it concerns becomes Invalid, which stays silent.
+report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) -> Type {
+	e := Error{kind, message, span}
+	if !slice.contains(k.errors[:], e) do append(&k.errors, e)
+	return Invalid{}
+}
+
+// check: builds the file the AST writes as a scope, and checks it.
+check :: proc(ast: ^syn.Ast) -> (k: Kernel) {
+	k.ast = ast
+	k.root = build_program(&k)
+	check_program(&k)
+	return k
+}
+
+// run: parses the source, and checks it.
+run :: proc(source: string) -> (k: Kernel, parsed: bool) {
+	cache := new(syn.Cache)
+	ast, ok := syn.parse(cache, source)
+	if !ok do return k, false
+	return check(ast), true
 }
