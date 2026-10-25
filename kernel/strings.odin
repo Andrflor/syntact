@@ -25,8 +25,8 @@ import "core:strings"
 // | & ~ by their laws. Then c + w in t = w in ∂c t. A set of strings is the
 // equation t = ("" when "" in t) | c₁ + ∂c₁ t | c₂ + ∂c₂ t | …, over the classes of
 // characters t distinguishes. Its quotients are finitely many up to the laws of
-// | and & (associative, commutative, idempotent): they form a system of equations,
-// solved by Arden, in which t is none when no quotient holds "".
+// | and & (associative, commutative, idempotent): they form a system of linear
+// equations, solved by Arden; t is none when its solution is.
 
 MAX_RUNE :: 0x10FFFF
 
@@ -248,44 +248,133 @@ cuts :: proc(t: Type) -> []rune {
 	return out[:]
 }
 
-// text_witness: the shortest string of t, the first in the order of characters;
-// false when t is none: no quotient of the system holds "".
-text_witness :: proc(t: Type) -> (string, bool) {
-	Step :: struct {
-		quotient: Type,
-		from:     int,
-		c:        rune,
-	}
-	steps := make([dynamic]Step)
-	append(&steps, Step{t, -1, 0})
-	seen := make([dynamic]Type) // the quotients met: the unknowns of the system
-	append(&seen, t)
-	for i := 0; i < len(steps); i += 1 {
-		q := steps[i].quotient
-		if nullable(q) {
-			runes := make([dynamic]rune)
-			for j := i; steps[j].from >= 0; j = steps[j].from do append(&runes, steps[j].c)
-			slice.reverse(runes[:])
-			b := strings.builder_make()
-			for c in runes do strings.write_rune(&b, c)
-			return strings.to_string(b), true
-		}
-		for c in cuts(q) {
-			d := quotient(q, c)
+// Equation: X_q = ("" when "" in q) | Σ class + X_target, the classes of
+// characters q distinguishes leading to the quotient they give.
+Equation :: struct {
+	empty: Type, // "" or none
+	terms: [dynamic]Term_Of, // a coefficient, then the unknown of a quotient
+}
+
+Term_Of :: struct {
+	coefficient: Type,
+	target:      int,
+}
+
+// equations: the system of t: one equation per quotient of t, finitely many up to
+// the laws of | and &.
+equations :: proc(t: Type) -> [dynamic]Equation {
+	quotients := make([dynamic]Type)
+	append(&quotients, t)
+	system := make([dynamic]Equation)
+	for i := 0; i < len(quotients); i += 1 {
+		q := quotients[i]
+		e := Equation{empty = nullable(q) ? empty_string() : None{}}
+		points := cuts(q)
+		for p, n in points {
+			d := quotient(q, p)
 			if is_none(d) do continue
-			met := false
-			for x in seen do if term_order(x, d) == 0 do met = true
-			if met do continue
-			append(&seen, d)
-			append(&steps, Step{d, i, c})
+			target := -1
+			for x, j in quotients do if term_order(x, d) == 0 do target = j
+			if target < 0 {
+				target = len(quotients)
+				append(&quotients, d)
+			}
+			last := n + 1 < len(points) ? i128(points[n + 1]) - 1 : MAX_RUNE
+			class := discrete_cell(.Char, i128(p), last)
+			merged := false
+			for &x in e.terms {
+				if x.target == target {
+					x.coefficient = text_or({x.coefficient, class})
+					merged = true
+				}
+			}
+			if !merged do append(&e.terms, Term_Of{class, target})
+		}
+		append(&system, e)
+	}
+	return system
+}
+
+// solve_text: the solution of the system of t, eliminated from its last unknown to
+// its first by Arden — X = A + X | B gives X = A * 0.. + B, "" not being in A —
+// each solution put into the equations above. It is a term of characters, + and
+// * and |: t is none when it is none.
+solve_text :: proc(t: Type) -> Type {
+	system := equations(t)
+	#reverse for &e, i in system {
+		// Arden on X_i itself
+		star: Type = empty_string()
+		for x in e.terms do if x.target == i do star = repetition(x.coefficient, new_range(Int(0), nil, .Int))
+		kept := make([dynamic]Term_Of)
+		for x in e.terms do if x.target != i do append(&kept, Term_Of{concatenation({star, x.coefficient}), x.target})
+		e.empty = concatenation({star, e.empty})
+		e.terms = kept
+		// X_i put into the equations above that name it
+		for &above in system[:i] {
+			rest := make([dynamic]Term_Of)
+			for x in above.terms {
+				if x.target != i {
+					append(&rest, x)
+					continue
+				}
+				above.empty = text_or({above.empty, concatenation({x.coefficient, e.empty})})
+				for y in e.terms do append(&rest, Term_Of{concatenation({x.coefficient, y.coefficient}), y.target})
+			}
+			above.terms = rest
 		}
 	}
-	return "", false
+	return system[0].empty
 }
 
 text_empty :: proc(t: Type) -> bool {
-	_, found := text_witness(t)
-	return !found
+	return is_none(solve_text(t))
+}
+
+// text_witness: the shortest string of t, the first in the order of characters,
+// read on the solution of its system; false when t is none.
+text_witness :: proc(t: Type) -> (string, bool) {
+	s := solve_text(t)
+	if is_none(s) do return "", false
+	b := strings.builder_make()
+	for c in shortest(s) do strings.write_rune(&b, c)
+	return strings.to_string(b), true
+}
+
+// shortest: the shortest string of a term of characters, + * and |: of a + b, the
+// shortest of each; of a | b, the shorter, the first in the order of characters on
+// a tie; of a * n, the shortest of a, n times for the least n.
+shortest :: proc(t: Type) -> []rune {
+	out := make([dynamic]rune)
+	#partial switch v in t {
+	case Char:
+		append(&out, rune(v))
+	case ^Range:
+		lo, _ := discrete_bounds(t)
+		append(&out, rune(lo.? or_else 0))
+	case ^Operation:
+		#partial switch v.op {
+		case .Add:
+			for a in v.args do append(&out, ..shortest(a))
+		case .Mul:
+			cells, _ := as_cells(v.args[1])
+			lo, _ := discrete_bounds(cells[0])
+			part := shortest(v.args[0])
+			for _ in 0 ..< (lo.? or_else 0) do append(&out, ..part)
+		}
+	case ^Or:
+		best: []rune
+		for a, i in v.terms {
+			s := shortest(a)
+			if i == 0 || len(s) < len(best) || len(s) == len(best) && runes_less(s, best) do best = s
+		}
+		append(&out, ..best)
+	}
+	return out[:]
+}
+
+runes_less :: proc(a, b: []rune) -> bool {
+	for c, i in a do if c != b[i] do return c < b[i]
+	return false
 }
 
 // text_has: the string s is in t: c + w in t = w in ∂c t, and "" in t.
