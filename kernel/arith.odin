@@ -24,7 +24,7 @@ Family :: enum u8 {
 	Nonzero_Real, // float & ~0.0
 }
 
-// family_term: a family as a type.
+// family_term: a family as a type, in normal form.
 family_term :: proc(f: Family) -> Type {
 	switch f {
 	case .Int:
@@ -40,9 +40,9 @@ family_term :: proc(f: Family) -> Type {
 	case .Count:
 		return new_range(Int(0), nil, .Int)
 	case .Nonzero_Int:
-		return new_and(new_range(nil, nil, .Int), new_not(Int(0)))
+		return cells_term({discrete_cell(.Int, nil, -1), discrete_cell(.Int, 1, nil)})
 	case .Nonzero_Real:
-		return new_and(new_range(nil, nil, .Real), new_not(Real(0)))
+		return cells_term({real_cell({hi = 0.0, hi_open = true}), real_cell({lo = 0.0, lo_open = true})})
 	}
 	return None{}
 }
@@ -241,48 +241,59 @@ comparison_bound :: proc(op: Operator, args: []Type) -> (bound: Type, x: Type, o
 	return bound, x, true
 }
 
-// compute: the image of an operator on constant sets, when it is a normal form.
+// compute: an operator on constant sets is the | of its results on their elements
+// (§4.5). It is computed when that is a normal form: on cells,
+//
+//   (a..b) + (c..d) = (a + c)..(b + d)      -(a..b) = -b..-a      [~]x = -x - 1
+//   (a..b) < (c..d) = true when b < c, false when d <= a, else false | true
+//   (a..b) * (c..d) = the least..the greatest of the products at the bounds (reals)
+//
+// and any operator on two primitives; + and * on strings by their laws.
 compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (Type, bool) {
-	r := make([]Reading, len(args))
+	cells := make([][]Type, len(args))
 	for a, i in args {
-		r[i] = read(k, a)
-		if !r[i].exact do return nil, false
+		c, negated := as_cells(a)
+		if negated || len(c) == 0 do return nil, false
+		cells[i] = c
 	}
 	#partial switch sig.args[0] {
 	case .Int:
+		for c in cells do if !all_of_family(c, .Int) do return nil, false
 		#partial switch op {
 		case .Add:
-			return rebuild(k, Reading{ints = ints_add(r[0].ints, r[1].ints), words = words_empty(), exact = true}), true
+			return int_sum(cells[0], cells[1]), true
 		case .Sub:
-			return rebuild(k, Reading{ints = ints_add(r[0].ints, ints_neg(r[1].ints)), words = words_empty(), exact = true}), true
+			return int_sum(cells[0], int_opposite(cells[1])), true
 		case .Neg:
-			return rebuild(k, Reading{ints = ints_neg(r[0].ints), words = words_empty(), exact = true}), true
+			return cells_term(join_discrete(.Int, int_opposite(cells[0]))), true
 		case .Bit_Not:
-			return rebuild(k, Reading{ints = ints_add(ints_neg(r[0].ints), {{-1, -1}}), words = words_empty(), exact = true}), true
+			return int_sum(int_opposite(cells[0]), {Int(-1)}), true
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
-			return compare_ints(op, r[0].ints, r[1].ints), true
+			lo_a, hi_a := discrete_hull(cells[0])
+			lo_b, hi_b := discrete_hull(cells[1])
+			return compare_bounds(op, lo_a, hi_a, lo_b, hi_b), true
 		}
-		x, single_x := ints_single(r[0].ints)
-		y, single_y := ints_single(r[1].ints)
+		x, single_x := one_primitive(cells[0]).(Int)
+		y, single_y := one_primitive(cells[1]).(Int)
 		if !single_x || !single_y do return nil, false
-		v, ok := int_operation(op, x, y)
+		v, ok := int_operation(op, i128(x), i128(y))
 		return Int(v), ok
 	case .Real:
+		for c in cells do if !all_of_family(c, .Real) do return nil, false
 		#partial switch op {
 		case .Add:
-			return rebuild(k, Reading{reals = reals_add(r[0].reals, r[1].reals), words = words_empty(), exact = true}), true
+			return real_sum(cells[0], cells[1]), true
 		case .Sub:
-			return rebuild(k, Reading{reals = reals_add(r[0].reals, reals_neg(r[1].reals)), words = words_empty(), exact = true}), true
+			return real_sum(cells[0], real_opposite(cells[1])), true
 		case .Neg:
-			return rebuild(k, Reading{reals = reals_neg(r[0].reals), words = words_empty(), exact = true}), true
+			return cells_term(join_reals(real_opposite(cells[0]))), true
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
-			return compare_reals(op, r[0].reals, r[1].reals), true
+			return compare_reals(op, cells[0], cells[1]), true
+		case .Mul:
+			if product, exact := real_product(cells[0], cells[1]); exact do return product, true
 		}
-		if op == .Mul {
-			if product, exact := reals_mul(r[0].reals, r[1].reals); exact do return rebuild(k, Reading{reals = product, words = words_empty(), exact = true}), true
-		}
-		x, single_x := reals_single(r[0].reals)
-		y, single_y := reals_single(r[1].reals)
+		x, single_x := one_primitive(cells[0]).(Real)
+		y, single_y := one_primitive(cells[1]).(Real)
 		if !single_x || !single_y do return nil, false
 		if op == .Div do return Real(x / y), true
 	case .String:
@@ -290,34 +301,130 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (Type
 		case .Add:
 			return concatenation(args), true
 		case .Mul:
-			return repetition(args[0], r[0].words, r[1].ints), true
+			return repetition(args[0], args[1]), true
 		}
 	case .Char:
-		return compare_ints(op, r[0].words.class, r[1].words.class), true
+		for c in cells do if !all_of_family(c, .Char) do return nil, false
+		lo_a, hi_a := discrete_hull(cells[0])
+		lo_b, hi_b := discrete_hull(cells[1])
+		return compare_bounds(op, lo_a, hi_a, lo_b, hi_b), true
 	case .Bool:
-		out: Bools
-		for x in r[0].bools {
+		results := make([dynamic]Type)
+		for x in cells[0] {
+			p := bool(x.(Bool))
 			if op == .Bit_Not {
-				out += {x == .True ? .False : .True}
+				append(&results, Bool(!p))
 				continue
 			}
-			for y in r[1].bools {
-				p, q := x == .True, y == .True
-				v: bool
+			for y in cells[1] {
+				q := bool(y.(Bool))
 				#partial switch op {
 				case .Bit_And:
-					v = p && q
+					append(&results, Bool(p && q))
 				case .Bit_Or:
-					v = p || q
+					append(&results, Bool(p || q))
 				case .Xor:
-					v = p != q
+					append(&results, Bool(p != q))
 				}
-				out += {v ? .True : .False}
 			}
 		}
-		return rebuild(k, Reading{bools = out, words = words_empty(), exact = true}), true
+		return cells_term(union_cells(k, results[:])), true
 	}
 	return nil, false
+}
+
+all_of_family :: proc(cells: []Type, f: Cell_Family) -> bool {
+	for c in cells do if cell_family(c) != f do return false
+	return true
+}
+
+one_primitive :: proc(cells: []Type) -> Type {
+	if len(cells) != 1 || !is_primitive(cells[0]) do return nil
+	return cells[0]
+}
+
+// discrete_hull: the least and greatest elements of sorted integer or character
+// cells.
+discrete_hull :: proc(cells: []Type) -> (lo, hi: Maybe(i128)) {
+	lo, _ = discrete_bounds(cells[0])
+	_, hi = discrete_bounds(cells[len(cells) - 1])
+	return
+}
+
+// int_sum: (a..b) + (c..d) = (a + c)..(b + d), on each pair of cells.
+int_sum :: proc(a, b: []Type) -> Type {
+	out := make([dynamic]Type)
+	for x in a {
+		for y in b {
+			lo_x, hi_x := discrete_bounds(x)
+			lo_y, hi_y := discrete_bounds(y)
+			append(&out, discrete_cell(.Int, add_bound(lo_x, lo_y), add_bound(hi_x, hi_y)))
+		}
+	}
+	return cells_term(join_discrete(.Int, out[:]))
+}
+
+// int_opposite: -(a..b) = -b..-a.
+int_opposite :: proc(cells: []Type) -> []Type {
+	out := make([]Type, len(cells))
+	for c, i in cells {
+		lo, hi := discrete_bounds(c)
+		out[i] = discrete_cell(.Int, neg_bound(hi), neg_bound(lo))
+	}
+	return out
+}
+
+// real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is.
+real_sum :: proc(a, b: []Type) -> Type {
+	out := make([dynamic]Type)
+	for x in a {
+		for y in b {
+			p, q := real_bounds(x), real_bounds(y)
+			r: Real_Bounds
+			if u, ok := p.lo.?; ok do if v, ok2 := q.lo.?; ok2 do r.lo, r.lo_open = u + v, p.lo_open || q.lo_open
+			if u, ok := p.hi.?; ok do if v, ok2 := q.hi.?; ok2 do r.hi, r.hi_open = u + v, p.hi_open || q.hi_open
+			append(&out, real_cell(r))
+		}
+	}
+	return cells_term(join_reals(out[:]))
+}
+
+real_opposite :: proc(cells: []Type) -> []Type {
+	out := make([]Type, len(cells))
+	for c, i in cells {
+		p := real_bounds(c)
+		r := Real_Bounds{lo_open = p.hi_open, hi_open = p.lo_open}
+		if v, ok := p.hi.?; ok do r.lo = -v
+		if v, ok := p.lo.?; ok do r.hi = -v
+		out[i] = real_cell(r)
+	}
+	return out
+}
+
+// real_product: (a..b) * (c..d) on closed, bounded intervals: the image of a
+// connected set by a continuous operator is the interval between its least and
+// greatest products at the bounds. False for an open or infinite bound.
+real_product :: proc(a, b: []Type) -> (Type, bool) {
+	out := make([dynamic]Type)
+	for x in a {
+		for y in b {
+			p, q := real_bounds(x), real_bounds(y)
+			if p.lo_open || p.hi_open || q.lo_open || q.hi_open do return nil, false
+			u1, has_u1 := p.lo.?
+			u2, has_u2 := p.hi.?
+			v1, has_v1 := q.lo.?
+			v2, has_v2 := q.hi.?
+			if !has_u1 || !has_u2 || !has_v1 || !has_v2 do return nil, false
+			corners := [4]f64{u1 * v1, u1 * v2, u2 * v1, u2 * v2}
+			lo, hi := corners[0], corners[0]
+			for c in corners[1:] {
+				lo = min(lo, c)
+				hi = max(hi, c)
+			}
+			append(&out, real_cell({lo = lo, hi = hi}))
+		}
+	}
+	return cells_term(join_reals(out[:])), true
 }
 
 int_operation :: proc(op: Operator, x, y: i128) -> (i128, bool) {
@@ -345,9 +452,9 @@ int_operation :: proc(op: Operator, x, y: i128) -> (i128, bool) {
 	return 0, false
 }
 
-// compare_ints: the booleans x op y takes: `x < y` happens when min a < max b,
-// `x >= y` when max a >= min b.
-compare_ints :: proc(op: Operator, a, b: Ints) -> Type {
+// compare_bounds: the booleans x op y takes, x from lo_a to hi_a, y from lo_b to
+// hi_b: `x < y` happens when lo_a < hi_b, `x >= y` when hi_a >= lo_b.
+compare_bounds :: proc(op: Operator, lo_a, hi_a, lo_b, hi_b: Maybe(i128)) -> Type {
 	below :: proc(x, y: Maybe(i128)) -> bool {
 		u, has_u := x.?
 		v, has_v := y.?
@@ -358,7 +465,6 @@ compare_ints :: proc(op: Operator, a, b: Ints) -> Type {
 		v, has_v := y.?
 		return !has_u || !has_v || u <= v
 	}
-	lo_a, hi_a, lo_b, hi_b := a[0].lo, a[len(a) - 1].hi, b[0].lo, b[len(b) - 1].hi
 	yes, no: bool
 	#partial switch op {
 	case .Less:
@@ -373,13 +479,13 @@ compare_ints :: proc(op: Operator, a, b: Ints) -> Type {
 	return booleans(yes, no)
 }
 
-compare_reals :: proc(op: Operator, a, b: Reals) -> Type {
+compare_reals :: proc(op: Operator, a, b: []Type) -> Type {
 	Edge :: struct {
 		v:      Maybe(f64),
 		closed: bool,
 	}
-	inf :: proc(r: Reals) -> Edge {return {r[0].lo, !r[0].lo_open}}
-	sup :: proc(r: Reals) -> Edge {last := r[len(r) - 1];return {last.hi, !last.hi_open}}
+	inf :: proc(cells: []Type) -> Edge {r := real_bounds(cells[0]);return {r.lo, !r.lo_open}}
+	sup :: proc(cells: []Type) -> Edge {r := real_bounds(cells[len(cells) - 1]);return {r.hi, !r.hi_open}}
 	below :: proc(x, y: Edge) -> bool {
 		u, has_u := x.v.?
 		v, has_v := y.v.?
@@ -414,66 +520,6 @@ booleans :: proc(yes, no: bool) -> Type {
 		return Bool(false)
 	}
 	return None{}
-}
-
-// concatenation: + on strings (§4.6): flattened, "" neutral; known characters
-// side by side make one string.
-concatenation :: proc(args: []Type) -> Type {
-	parts := make([dynamic]Type)
-	flatten :: proc(parts: ^[dynamic]Type, a: Type) {
-		if o, ok := a.(^Operation); ok && o.op == .Add {
-			for x in o.args do flatten(parts, x)
-		} else {
-			append(parts, a)
-		}
-	}
-	for a in args do flatten(&parts, a)
-	// the characters side by side are one string
-	grouped := make([dynamic]Type)
-	for i := 0; i < len(parts); {
-		j := i
-		for j < len(parts) && is_char(parts[j]) do j += 1
-		switch {
-		case j - i >= 2:
-			append(&grouped, new_operation(.Add, ..parts[i:j]))
-			i = j
-		case j - i == 1:
-			append(&grouped, parts[i])
-			i = j
-		case:
-			append(&grouped, parts[i])
-			i += 1
-		}
-	}
-	if len(grouped) == 1 do return grouped[0]
-	return new_operation(.Add, ..grouped[:])
-}
-
-// repetition: t * n (§4.6): t * 0 = "", t * 1 = t; a known string repeated a known
-// number of times is that string; otherwise the repetition stays.
-repetition :: proc(t: Type, w: ^Words, counts: Ints) -> Type {
-	n, single := ints_single(counts)
-	if single {
-		if n == 0 do return empty_string()
-		if n == 1 do return t
-		if is_string_value(t) || is_char(t) {
-			parts := make([dynamic]Type)
-			for _ in 0 ..< n do append(&parts, t)
-			return concatenation(parts[:])
-		}
-	}
-	return new_operation(.Mul, t, rebuild_ints(counts))
-}
-
-is_char :: proc(t: Type) -> bool {
-	_, ok := t.(Char)
-	return ok
-}
-
-rebuild_ints :: proc(x: Ints) -> Type {
-	parts := make([dynamic]Type)
-	for r in x do append(&parts, int_range_term(r))
-	return len(parts) == 1 ? parts[0] : new_or(..parts[:])
 }
 
 // bool_law: [&] [|] ^ [~] by the laws of a Boolean algebra: the neutral and

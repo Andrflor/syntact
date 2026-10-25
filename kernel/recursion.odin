@@ -21,11 +21,10 @@ origin :: proc(s: ^Scope) -> ^Scope {
 	return s.carved != nil ? s.carved : s
 }
 
-// recursive_call: s! asked while a production of s, or of the scope s carves, is
-// given. A carve of it was checked where it is written (scope.odin).
+// recursive_call: s! where s is a recursive scope, or a carve of one. A carve of it
+// was checked where it is written (scope.odin).
 recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	root := origin(s)
-	root.recursive = true
 	if p, found := first_production(k, root); found && p.state != .In_Progress {
 		solution := binding_type(k, p)
 		if solved(solution, root) {

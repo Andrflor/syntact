@@ -37,7 +37,11 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		return new_operation(.In, x, c)
 	}
 	if is_constant(c) {
-		if r := read(k, c); r.exact && len(r.scopes) == 0 do return in_reading(k, x, c, r)
+		cells, negated := as_cells(c)
+		if negated do return bool_not(in_law(k, x, cells_term(cells))) // x in ~a = [~](x in a)
+		values := false
+		for cell in cells do values ||= cell_family(cell) == .Value
+		if !values do return in_cells(k, x, c, cells)
 	} else if is_value(k, c) {
 		return equal_law(k, x, c) // x in p = x in =p
 	}
@@ -64,25 +68,30 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	return new_operation(.In, x, c)
 }
 
-// in_reading: x in a constant type without scope, taken whole. Its elements are
-// primitives; a complement also holds every scope and every set taken as a value.
-// A boolean b is in =true when it is true: b in true = b, b in false = [~]b.
-in_reading :: proc(k: ^Kernel, x, c: Type, r: Reading) -> Type {
-	if is_primitive(x) do return Bool(!apart(k, x, c))
+// in_cells: x in a | of cells without a value (a scope, =t): its elements are
+// primitives, and strings of them. A boolean b is in =true when it is true:
+// b in true = b, b in false = [~]b.
+in_cells :: proc(k: ^Kernel, x, c: Type, cells: []Type) -> Type {
+	if is_primitive(x) {
+		r := and_law(k, {x, c})
+		if is_none(r) do return Bool(false)
+		if same(k, r, x) do return Bool(true)
+		return new_operation(.In, x, c)
+	}
 	if v, is_bool := c.(Bool); is_bool {
 		if _, is_op := x.(^Operation); is_op {
 			if f, known := family_of(k, x); known && f == .Bool do return bool(v) ? x : bool_not(x)
 		}
 	}
-	if !is_value(k, x) do return Bool(r.all_scopes) // a set, taken as a value
+	if !is_value(k, x) do return Bool(false) // a set, taken as a value, is not a primitive
 	#partial switch v in x {
 	case ^Scope:
-		return Bool(r.all_scopes)
+		return Bool(false)
 	case ^Unknown:
 		return layout_in(k, x, layout_of(k, v), c)
 	}
 	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
-		return in_law(k, u, rebuild(k, Reading{ints = preimage(r.ints, a, b), words = words_empty(), exact = true}))
+		return in_law(k, u, preimage(cells, a, b))
 	}
 	if image, ok := layout_image(k, x); ok do return layout_in(k, x, image, c)
 	return new_operation(.In, x, c)
@@ -147,20 +156,21 @@ linear_in :: proc(t: Type) -> (u: ^Unknown, a, b: i128, ok: bool) {
 }
 
 // preimage: the integers v such that a * v + b is in s, a ≠ 0.
-preimage :: proc(s: Ints, a, b: i128) -> Ints {
-	out := make([dynamic]Int_Range)
-	for r in s {
-		lo, hi: Maybe(i128)
-		if l, ok := r.lo.?; ok do lo = l - b
-		if h, ok := r.hi.?; ok do hi = h - b
+// preimage: the integers v such that a * v + b is in the cells, a ≠ 0.
+preimage :: proc(cells: []Type, a, b: i128) -> Type {
+	out := make([dynamic]Type)
+	for c in cells {
+		if cell_family(c) != .Int do continue
+		lo, hi := discrete_bounds(c)
+		lo, hi = add_bound(lo, -b), add_bound(hi, -b)
 		if a < 0 do lo, hi = neg_bound(hi), neg_bound(lo)
 		m := abs(a)
 		from, to: Maybe(i128)
 		if l, ok := lo.?; ok do from = ceil_div(l, m)
 		if h, ok := hi.?; ok do to = floor_div(h, m)
-		append(&out, Int_Range{from, to})
+		append(&out, discrete_cell(.Int, from, to))
 	}
-	return ints_of(out[:])
+	return cells_term(join_discrete(.Int, out[:]))
 }
 
 floor_div :: proc(x, y: i128) -> i128 {

@@ -122,8 +122,8 @@ Access :: struct {
 	span:    syn.Span,
 }
 
-// Collapse: `s!`. `recursive`: asked while the production of its scope is given:
-// a recursive call, never unfolded (§5.6).
+// Collapse: `s!`. `recursive`: s names the scope being defined, from one of its
+// productions: a recursive call, never unfolded (§5.6).
 Collapse :: struct {
 	target:    Type,
 	recursive: bool,
@@ -207,7 +207,7 @@ Scope :: struct {
 	placed_by: bit_set[View], // the views placed
 	complete:  bool, // all its bindings are built: all are visible
 	producing: bool, // one of its productions is being built: it may name itself
-	recursive: bool, // asked again while its production is given (§5.6)
+	recursive: bool, // one of its productions names it (§5.6)
 	reached:   bool, // asked once: it is checked (check.odin)
 	name:      string, // the binding it is the value of, as written: for printing
 	placing:   [View]bool, // its expansions are being placed

@@ -166,6 +166,7 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
 		c := new(Collapse)
 		c.target = build_term(k, s, data.execute.target)
+		c.recursive = names_itself(c.target)
 		c.span = span
 		return c
 	case .Carve:
@@ -363,9 +364,20 @@ build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	return n
 }
 
+// names_itself: t is the scope being defined, or a carve of it.
+names_itself :: proc(t: Type) -> bool {
+	#partial switch v in t {
+	case ^Name:
+		return v.self != nil
+	case ^Carve:
+		return names_itself(v.target)
+	}
+	return false
+}
+
 // lookup: in each scope from s up, the bindings above the one being built. From a
 // production, the binding being built whose value holds it is visible too: the
-// scope names itself.
+// scope names itself, and is recursive.
 lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool) {
 	child: ^Scope
 	for sc := s; sc != nil; child, sc = sc, sc.parent {
@@ -392,7 +404,10 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool
 			}
 		}
 		if found < 0 do continue
-		if self && found == len(sc.bindings) - 1 do return sc.bindings[found], child, true
+		if self && found == len(sc.bindings) - 1 {
+			child.recursive = true
+			return sc.bindings[found], child, true
+		}
 		return sc.bindings[found], nil, true
 	}
 	return nil, nil, false

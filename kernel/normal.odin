@@ -100,23 +100,16 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 		}
 	}
 	if len(constants) > 0 {
-		r := read(k, constants[0])
-		for c in constants[1:] do r = is_or ? reading_union(r, read(k, c)) : reading_intersect(k, r, read(k, c))
-		if !r.exact && !is_or && bounded_apart(k, constants[:]) do return None{}
-		if r.exact {
-			c := rebuild(k, r)
-			clear(&constants)
-			if is_none(c) {
-				if !is_or do return None{}
-			} else if is_everything(c) {
-				if is_or do return everything()
-			} else if o, ok := c.(^Or); ok && is_or {
-				append(&constants, ..o.terms)
-			} else if a, ok := c.(^And); ok && !is_or {
-				append(&constants, ..a.terms)
-			} else {
-				append(&constants, c)
-			}
+		c := is_or ? or_constants(k, constants[:]) : and_constants(k, constants[:])
+		clear(&constants)
+		if is_none(c) {
+			if !is_or do return None{}
+		} else if is_everything(c) {
+			if is_or do return everything()
+		} else if o, ok := c.(^Or); ok && is_or {
+			append(&constants, ..o.terms)
+		} else {
+			append(&constants, c)
 		}
 	}
 	parts := make([dynamic]Type)
@@ -141,10 +134,7 @@ contains_same :: proc(k: ^Kernel, ts: []Type, t: Type) -> bool {
 not_law :: proc(k: ^Kernel, t: Type) -> Type {
 	if is_invalid(t) do return Invalid{}
 	if n, ok := t.(^Not); ok do return n.term
-	if is_constant(t) {
-		r := read(k, t)
-		if r.exact do return rebuild(k, reading_complement(r))
-	}
+	if is_constant(t) do return not_constant(t)
 	return new_not(t)
 }
 
@@ -195,27 +185,46 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 			return report(k, .Invalid_Range, span, fmt.tprintf("a bound of a range is one integer, real or character, not %s", print_type(b)))
 		}
 	}
-	if len(values) == 0 do return new_range(nil, nil, of, span)
+	if len(values) == 0 {
+		switch of {
+		case .Int:
+			return discrete_cell(.Int, nil, nil)
+		case .Real:
+			return real_cell({})
+		case .Any:
+		}
+		// `..`: every primitive
+		return or_constants(k, {discrete_cell(.Int, nil, nil), real_cell({}), discrete_cell(.Char, 0, nil), Bool(false), Bool(true)})
+	}
 	f := bound_family(values[0])
 	for v in values {
 		if !same_bound_family(values[0], v) || of != .Any && f != of {
 			return report(k, .Invalid_Range, span, fmt.tprintf("the bounds of %s..%s are of two families", print_type(lo), print_type(hi)))
 		}
 	}
-	of = f
 	least, most := values[0], values[0]
 	for v in values[1:] {
 		if bound_less(v, least) do least = v
 		if bound_less(most, v) do most = v
 	}
-	out := new(Range)
-	out^ = Range{family = of, span = span}
-	if !below do out.lo = least
-	if !above do out.hi = most
-	if _, is_char := least.(Char); is_char && out.lo == nil do out.lo = Char(0) // from the smallest character
-	r := read(k, out)
-	if !r.exact do return out
-	return rebuild(k, r)
+	#partial switch x in least {
+	case Real:
+		b: Real_Bounds
+		if !below do b.lo = f64(x)
+		if !above do b.hi = f64(most.(Real))
+		return real_cell(b)
+	case Char:
+		lo, hi: Maybe(i128)
+		if !below do lo = i128(x)
+		if !above do hi = i128(most.(Char))
+		return discrete_cell(.Char, lo, hi)
+	case Int:
+		lo, hi: Maybe(i128)
+		if !below do lo = i128(x)
+		if !above do hi = i128(most.(Int))
+		return discrete_cell(.Int, lo, hi)
+	}
+	return Invalid{}
 }
 
 // is_word: a string of two characters or more.
@@ -297,11 +306,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	} else if b.value == nil {
 		value = color != nil ? default_of(k, color, b.span) : None{}
 	} else if b.kind == .Product {
-		root := origin(b.scope)
-		k.giving[root] += 1
-		value = normal(k, b.value)
-		k.giving[root] -= 1
-		value = recursion_law(k, b, value)
+		value = recursion_law(k, b, normal(k, b.value))
 	} else {
 		value = normal(k, b.value)
 	}
@@ -330,33 +335,36 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 	}
 	if is_primitive(c) do return c
 	if !is_constant(c) do return unsupported_at(k, span, fmt.tprintf("the default of %s, a type over unknowns", print_type(c)))
-	r := read(k, c)
-	if !r.exact do return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
-	switch {
-	case ints_contains(r.ints, 0):
-		return Int(0)
-	case reals_contains(r.reals, 0):
-		return Real(0)
-	case r.words.nullable:
-		return empty_string()
-	case .False in r.bools:
-		return Bool(false)
-	case len(r.ints) > 0:
-		first := r.ints[0]
-		if lo, ok := first.lo.?; ok do return Int(lo)
-		hi, _ := first.hi.?
-		return Int(hi)
-	case len(r.reals) > 0:
-		first := r.reals[0]
-		if lo, ok := first.lo.?; ok && !first.lo_open do return Real(lo)
-		return unsupported_at(k, span, fmt.tprintf("the default of %s, which has no first element", print_type(c)))
-	case !words_is_empty(r.words):
-		w, _ := words_witness(r.words)
-		return string_value(w)
-	case .True in r.bools:
-		return Bool(true)
-	case len(r.scopes) > 0:
-		return default_of(k, r.scopes[0], span)
+	// its distinguished element, when it holds it
+	for d in ([3]Type{Int(0), Real(0), empty_string()}) do if !is_none(and_law(k, {d, c})) && inhabited(k, and_law(k, {d, c})) do return d
+	if !is_none(and_law(k, {Bool(false), c})) do return Bool(false)
+	// otherwise its first element
+	cells, negated := as_cells(c)
+	if negated do return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
+	for cell in cells {
+		switch cell_family(cell) {
+		case .Int:
+			lo, hi := discrete_bounds(cell)
+			if x, ok := lo.?; ok do return Int(x)
+			if x, ok := hi.?; ok do return Int(x)
+		case .Real:
+			b := real_bounds(cell)
+			if x, ok := b.lo.?; ok && !b.lo_open do return Real(x)
+			return unsupported_at(k, span, fmt.tprintf("the default of %s, which has no first element", print_type(c)))
+		case .Char:
+			lo, _ := discrete_bounds(cell)
+			return Char(rune(lo.? or_else 0))
+		case .Text:
+			w, _ := text_witness(cell)
+			return string_value(w)
+		case .Bool:
+			return cell
+		case .Value:
+			if i, ok := cell.(^Is); ok do return i.term
+			return default_of(k, cell, span)
+		case .Other:
+			return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
+		}
 	}
 	return None{}
 }

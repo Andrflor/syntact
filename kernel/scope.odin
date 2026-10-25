@@ -100,9 +100,8 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 	return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
 }
 
-// collapse_law: {… -> p …}! = p, the first production; none without one. Asked
-// while a production of the same scope is given, it is a recursive call, never
-// unfolded (recursion.odin).
+// collapse_law: {… -> p …}! = p, the first production; none without one. A
+// recursive call is never unfolded (recursion.odin).
 collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 	target := normal(k, c.target)
 	s, ok := target.(^Scope)
@@ -110,13 +109,9 @@ collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 		if is_invalid(target) do return Invalid{}
 		return report(k, .Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
-	root := origin(s)
-	if c.recursive || k.giving[root] > 0 do return recursive_call(k, s, c.span)
-	if s != root {
-		// a carve of a recursive scope: its arguments go into the solution, or it stays
-		if p, found := first_production(k, root); found do binding_type(k, p)
-		if root.recursive do return recursive_call(k, s, c.span)
-	}
+	// a recursive call, or a carve of a recursive scope: its arguments go into the
+	// solution, or it stays
+	if c.recursive || s != origin(s) && origin(s).recursive do return recursive_call(k, s, c.span)
 	if p, found := first_production(k, s); found do return binding_type(k, p)
 	return None{}
 }
@@ -224,7 +219,7 @@ copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, r: Rewrite
 
 copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	c := new_scope(parent, s.span)
-	c.source, c.complete = s, true
+	c.source, c.recursive, c.complete = s, s.recursive, true
 	m.scopes[s] = c
 	for b in s.bindings {
 		n := new(Binding)

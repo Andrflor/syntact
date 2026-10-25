@@ -96,15 +96,8 @@ atom :: proc(k: ^Kernel, t: Type) -> (^Unknown, Type, bool) {
 	o, is_op := t.(^Operation)
 	if !is_op || o.op != .In do return nil, nil, false
 	u, is_unknown := o.args[0].(^Unknown)
-	if !is_unknown || !readable(k, o.args[1]) || !readable(k, layout_of(k, u)) do return nil, nil, false
+	if !is_unknown || !decided(o.args[1]) || !decided(layout_of(k, u)) do return nil, nil, false
 	return u, o.args[1], true
-}
-
-// readable: a constant type without scope, whose normal form is computed whole.
-readable :: proc(k: ^Kernel, t: Type) -> bool {
-	if !is_constant(t) do return false
-	r := read(k, t)
-	return r.exact && len(r.scopes) == 0
 }
 
 // proven_in: every element of t is in f — for a value, `t in f` is proven; for a

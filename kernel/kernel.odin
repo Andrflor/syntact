@@ -41,7 +41,6 @@ Kernel :: struct {
 	admitting:  map[string]bool, // the admissions being decided (scope.odin)
 	comparing:  map[[2]^Scope]bool, // the scopes being compared (scope.odin)
 	hypotheses: map[^Scope]Family, // the family of a recursive call (recursion.odin)
-	giving:     map[^Scope]int, // the scopes whose production is being given, by origin
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
 }
@@ -55,7 +54,6 @@ report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) ->
 
 // run: parses the source, builds the file as a scope and checks it.
 run :: proc(source: string) -> (k: Kernel, parsed: bool) {
-	words_reset()
 	cache := new(syn.Cache)
 	ast, ok := syn.parse(cache, source)
 	if !ok do return k, false
