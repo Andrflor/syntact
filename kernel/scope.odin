@@ -111,6 +111,7 @@ carve_law :: proc(k: ^Kernel, c: ^Carve) -> Type {
 	args := make([]Carve_Arg, len(c.args))
 	for a, i in c.args {
 		args[i] = a
+		if a.nested != nil do continue // `z{…}`: read against the target (carve)
 		args[i].value = normal(k, a.value)
 		if is_invalid(args[i].value) do return args[i].value
 	}
@@ -128,7 +129,22 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 	bindings := placed(k, s, .Value)
 	changes := make(map[^Binding]Type)
 	next := 0
-	for a in args {
+	for arg in args {
+		a := arg
+		if a.nested != nil {
+			// `z{…}`: z{…} of the binding z of s, z -> s.z{…}; otherwise the carve of the
+			// name z above, a positional value
+			if field, found := occurrence(bindings, a.name, a.ordinal, false); found {
+				inner := new(Carve)
+				inner.target, inner.args, inner.span = binding_type(k, field), a.nested, a.span
+				a.value = carve_law(k, inner)
+			} else if a.otherwise != nil {
+				a.name, a.value = "", normal(k, a.otherwise)
+			} else {
+				return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
+			}
+			if is_invalid(a.value) do return a.value
+		}
 		b: ^Binding
 		if a.name != "" {
 			found: bool
@@ -179,12 +195,14 @@ check_carve :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) {
 
 // Copier: the bindings and scopes of a copy, by those they copy: a name follows
 // its binding into the copy. A copy for a branch also substitutes each reference
-// from outside by its type, with the unknowns of `outer` rewritten.
+// from outside by its type, with the unknowns of `outer` rewritten, and each name
+// of its cover by the piece of the target it reads.
 Copier :: struct {
 	bindings:   map[^Binding]^Binding,
 	scopes:     map[^Scope]^Scope,
 	substitute: bool,
 	outer:      Rewrite,
+	pieces:     map[^Binding]Type,
 }
 
 copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
@@ -250,6 +268,7 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 			n.binding = b
 			return n
 		}
+		if p, found := m.pieces[v.binding]; found do return rewrite(k, p, m.outer)
 		if v.self != nil {
 			if s, found := m.scopes[v.self]; found do n.self = s
 			return n
@@ -290,6 +309,16 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		p.branches = slice.clone(v.branches)
 		for &b in p.branches {
 			b.cover = copy_term(k, m, b.cover, scope)
+			if b.view != nil {
+				// the names of the cover follow it into the copy
+				view := new_scope(b.view.parent, b.view.span)
+				for x in b.view.bindings {
+					y, found := m.bindings[x]
+					append(&view.bindings, found ? y : x)
+				}
+				view.complete = true
+				b.view = view
+			}
 			if b.scope != nil {
 				parent := scope
 				if x, found := m.scopes[b.scope.parent]; found do parent = x
@@ -398,26 +427,9 @@ produced :: proc(k: ^Kernel, x: Type, p: ^Binding) -> Type {
 // A run has the length of its shape, or takes what the others leave: one such run
 // at most is decided.
 match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Type {
-	lengths := make([]int, len(shape))
-	free := -1
-	fixed := 0
-	for b, i in shape {
-		n, known := 1, true
-		if is_run(b) do n, known = run_length(k, b)
-		if !known {
-			if free >= 0 do return new_operation(.In, x, s)
-			free = i
-			continue
-		}
-		lengths[i] = n
-		fixed += n
-	}
-	if free >= 0 {
-		if len(xs) < fixed do return Bool(false)
-		lengths[free] = len(xs) - fixed
-	} else if len(xs) != fixed {
-		return Bool(false)
-	}
+	lengths, decided, fits := run_lengths(k, xs, shape)
+	if !decided do return new_operation(.In, x, s)
+	if !fits do return Bool(false)
 	out: Type = Bool(true)
 	at := 0
 	for b, i in shape {
@@ -433,6 +445,32 @@ match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Ty
 		out = bool_and(k, out, in_law(k, run_scope(k, part), binding_color(k, b)))
 	}
 	return out
+}
+
+// run_lengths: how many bindings of xs each place of a shape takes: one; a run of
+// fixed length, that length; the one run that is not, what the others leave. Not
+// decided with two such runs; not fitting when the lengths do not add up.
+run_lengths :: proc(k: ^Kernel, xs, shape: []^Binding) -> (lengths: []int, decided, fits: bool) {
+	lengths = make([]int, len(shape))
+	free := -1
+	fixed := 0
+	for b, i in shape {
+		n, known := 1, true
+		if is_run(b) do n, known = run_length(k, b)
+		if !known {
+			if free >= 0 do return lengths, false, false
+			free = i
+			continue
+		}
+		lengths[i] = n
+		fixed += n
+	}
+	if free >= 0 {
+		if len(xs) < fixed do return lengths, true, false
+		lengths[free] = len(xs) - fixed
+		return lengths, true, true
+	}
+	return lengths, true, len(xs) == fixed
 }
 
 // run_length: the number of bindings a run `...C:` takes, when C is a shape of a

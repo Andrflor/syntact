@@ -82,6 +82,8 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		case target == syn.INVALID_NODE:
 		case ast.node_kinds[target] == .Constraint:
 			build_left(k, s, target, b)
+		case captured(ast, target):
+			build_captured(k, s, target, b) // `...C(t)`: the run `...C:(t)`
 		case:
 			b.value = build_term(k, s, target)
 		}
@@ -102,8 +104,24 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
-		b.value = build_term(k, s, idx) // a lone value is an anonymous binding
+		if captured(ast, idx) {
+			build_captured(k, s, idx, b) // `C(h)`: the anonymous binding `C:(h)`
+		} else {
+			b.value = build_term(k, s, idx) // a lone value is an anonymous binding
+		}
 	}
+}
+
+// captured: `C(h)`, a name with a capture glued to it.
+captured :: proc(ast: ^syn.Ast, idx: syn.Node_Index) -> bool {
+	return ast.node_kinds[idx] == .Identifier && syn.node_capture_str(ast, idx) != "" && syn.node_name_str(ast, idx) != ""
+}
+
+// build_captured: `C(h)` is `C:(h)`: an anonymous binding colored by C, which the
+// product of a cover reads as h (specs/language/12).
+build_captured :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, b: ^Binding) {
+	b.color = build_name(k, s, idx)
+	b.capture = syn.node_capture_str(k.ast, idx)
 }
 
 // build_left: a name, `C:name`, or `C:` (an anonymous colored binding).
@@ -123,6 +141,7 @@ build_left :: proc(k: ^Kernel, s: ^Scope, left: syn.Node_Index, b: ^Binding) {
 				return
 			}
 			b.name = syn.node_name_str(ast, name)
+			b.capture = syn.node_capture_str(ast, name) // `C:(h)`, `C:x(h)`
 		}
 		return
 	}
@@ -316,7 +335,10 @@ build_pattern :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		if product == syn.INVALID_NODE do return unsupported(k, idx, "a branch without a product")
 		b := Branch{span = node_span(k, cover != syn.INVALID_NODE ? cover : product)}
 		if cover != syn.INVALID_NODE do b.cover = build_term(k, s, cover)
-		b.scope = new_scope(s, b.span)
+		// the product is a production of its cover: the names of the cover are
+		// read from it (destructuring)
+		b.view = cover_view(s, b.cover)
+		b.scope = new_scope(b.view != nil ? b.view : s, b.span)
 		b.product = build_term(k, b.scope, product)
 		b.scope.complete = true
 		append(&branches, b)
@@ -325,8 +347,51 @@ build_pattern :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	return p
 }
 
+// cover_view: the names a cover gives its product (specs/language/12): the
+// bindings of a scope written as the cover, its captures included; the named
+// bindings of the scope a cover `C:`, `C` or `C{…}:` names; of `A: | B:`, those
+// every one names.
+cover_view :: proc(s: ^Scope, cover: Type) -> ^Scope {
+	bindings := cover_bindings(cover, true)
+	if len(bindings) == 0 do return nil
+	view := new_scope(s, {})
+	append(&view.bindings, ..bindings)
+	view.complete = true
+	return view
+}
+
+cover_bindings :: proc(t: Type, written: bool) -> []^Binding {
+	#partial switch v in t {
+	case ^Scope:
+		if written do return v.bindings[:]
+		out := make([dynamic]^Binding)
+		for b in v.bindings do if b.name != "" do append(&out, b)
+		return out[:]
+	case ^Default:
+		return cover_bindings(v.color, false)
+	case ^Carve:
+		return cover_bindings(v.target, false)
+	case ^Name:
+		if v.self == nil && v.binding.value != nil do return cover_bindings(v.binding.value, false)
+	case ^Or:
+		first := cover_bindings(v.terms[0], false)
+		out := make([dynamic]^Binding)
+		outer: for b in first {
+			for other in v.terms[1:] {
+				found := false
+				for x in cover_bindings(other, false) do if x.name == b.name do found = true
+				if !found do continue outer
+			}
+			append(&out, b)
+		}
+		return out[:]
+	}
+	return nil
+}
+
 // build_carve: `target{args}`. A named argument `x -> v` or `x#n -> v` names the
-// binding it carves; an unnamed one is positional.
+// binding it carves; an unnamed one is positional. `z{…}` carves the binding z of
+// the target when it has one, and is otherwise the carve of the name z above.
 build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) -> Type {
 	ast := k.ast
 	args := make([dynamic]Carve_Arg)
@@ -340,7 +405,18 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 			a.ordinal = int(ast.node_data[left].identifier.ordinal)
 			a.value = build_term(k, s, ast.node_data[child].binary.right)
 		case .Carve:
-			return unsupported(k, child, "the carve shorthand `z{…}` among arguments")
+			source := ast.node_data[child].carve.source
+			if source == syn.INVALID_NODE || ast.node_kinds[source] != .Identifier {
+				a.value = build_term(k, s, child)
+				break
+			}
+			a.name = syn.node_name_str(ast, source)
+			above: Type
+			if _, _, found := lookup(s, a.name, -1); found do above = build_name(k, s, source)
+			inner := build_carve(k, s, child, above).(^Carve) or_else nil
+			if inner == nil do return unsupported(k, child, "this carve argument")
+			a.nested = inner.args
+			if above != nil do a.otherwise = inner
 		case:
 			a.value = build_term(k, s, child)
 		}
@@ -388,7 +464,7 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool
 		if ordinal >= 0 {
 			seen := 0
 			for i in 0 ..< visible {
-				if sc.bindings[i].name != name do continue
+				if !names(sc.bindings[i], name) do continue
 				if seen == ordinal {
 					found = i
 					break
@@ -397,7 +473,7 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool
 			}
 		} else {
 			for i := visible - 1; i >= 0; i -= 1 {
-				if sc.bindings[i].name == name {
+				if names(sc.bindings[i], name) {
 					found = i
 					break
 				}
@@ -411,6 +487,11 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool
 		return sc.bindings[found], nil, true
 	}
 	return nil, nil, false
+}
+
+// names: a binding is read by its name, or by its capture.
+names :: proc(b: ^Binding, name: string) -> bool {
+	return b.name == name || b.capture != "" && b.capture == name
 }
 
 build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> Type {

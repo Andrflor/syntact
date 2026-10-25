@@ -157,10 +157,14 @@ Carve :: struct {
 }
 
 Carve_Arg :: struct {
-	name:    string, // "" for a positional argument
-	ordinal: int, // x#n; -1: the first occurrence
-	value:   Type,
-	span:    syn.Span,
+	name:      string, // "" for a positional argument
+	ordinal:   int, // x#n; -1: the first occurrence
+	value:     Type,
+	span:      syn.Span,
+	// `z{…}`: the carve of the binding z of the target, when it has one; otherwise
+	// the carve z{…} of the name z above, as a positional value
+	nested:    []Carve_Arg,
+	otherwise: Type,
 }
 
 Default :: struct {
@@ -180,6 +184,7 @@ Branch :: struct {
 	cover:   Type, // nil: the default branch
 	product: Type,
 	scope:   ^Scope,
+	view:    ^Scope, // the names of the cover its product reads (destructuring)
 	span:    syn.Span,
 }
 
@@ -202,6 +207,7 @@ Typing :: enum u8 {
 // normal forms, given once, when asked.
 Binding :: struct {
 	name:        string, // "" for an anonymous binding or a production
+	capture:     string, // (h): an alias the product of a cover reads; not a field
 	kind:        Kind,
 	color:       Type, // nil: uncolored
 	value:       Type, // nil: the default of the color

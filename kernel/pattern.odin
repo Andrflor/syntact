@@ -26,7 +26,7 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	out := make([dynamic]Branch)
 	for r in reached {
 		b := p.branches[r.branch]
-		product := branch_product(k, b, r.rewrite)
+		product := branch_product(k, b, r.rewrite, target)
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 	}
@@ -128,10 +128,41 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 // it where each reference from outside is its type — computed once — with the
 // unknowns the reach narrows rewritten, ?ₖ::(L & S). The scopes written in it are
 // copied likewise: they are the scopes of that branch.
-branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite) -> Type {
-	if b.scope == nil || len(r) == 0 do return rewrite(k, normal(k, b.product), r)
-	m := Copier{outer = r, substitute = true}
+branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type) -> Type {
+	pieces := cover_pieces(k, b, target)
+	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, normal(k, b.product), r)
+	m := Copier{outer = r, substitute = true, pieces = pieces}
 	return rewrite(k, normal(k, copy_term(k, &m, b.product, b.scope)), r)
+}
+
+// cover_pieces: destructuring (specs/language/12): what the names of a cover read
+// when its branch takes the target — the pieces of the target, by place for a
+// scope written as the cover (its captures included), by name otherwise.
+cover_pieces :: proc(k: ^Kernel, b: Branch, target: Type) -> map[^Binding]Type {
+	pieces := make(map[^Binding]Type)
+	if b.view == nil do return pieces
+	s, known := target.(^Scope)
+	if !known {
+		for v in b.view.bindings do pieces[v] = problem(.Invalid_Property_Access, b.span, fmt.tprintf("the pieces of %s are read, and it is not a known scope", print_type(target)))
+		return pieces
+	}
+	xs := placed(k, s, .Value)
+	if written, structural := b.cover.(^Scope); structural {
+		shape := placed(k, written, .Shape)
+		lengths, decided, fits := run_lengths(k, xs, shape)
+		if !decided || !fits do return pieces
+		at := 0
+		for place, i in shape {
+			part := xs[at:at + lengths[i]]
+			at += lengths[i]
+			pieces[place] = is_run(place) ? Type(run_scope(k, part)) : binding_type(k, part[0])
+		}
+		return pieces
+	}
+	for v in b.view.bindings {
+		if found, ok := occurrence(xs, v.name, -1, true); ok do pieces[v] = binding_type(k, found)
+	}
+	return pieces
 }
 
 // conjuncts: the terms of a [&].
