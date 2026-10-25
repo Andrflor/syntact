@@ -385,7 +385,7 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	for p in shape {
 		if p.kind != .Product do continue
 		produces = true
-		out = bool_or(out, produced(k, x, p))
+		out = bool_or(k, out, produced(k, x, p))
 	}
 	if produces do return out
 	v, is_scope := x.(^Scope)
@@ -435,11 +435,11 @@ match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Ty
 		if !is_run(b) {
 			v := part[0]
 			if v.name != b.name || v.kind != b.kind do return Bool(false)
-			if c := binding_color(k, b); c != nil do out = bool_and(out, in_law(k, binding_type(k, v), c))
+			if c := binding_color(k, b); c != nil do out = bool_and(k, out, in_law(k, binding_type(k, v), c))
 			continue
 		}
 		if b.color == nil do continue // `...` admits any run
-		out = bool_and(out, in_law(k, run_scope(k, part), binding_color(k, b)))
+		out = bool_and(k, out, in_law(k, run_scope(k, part), binding_color(k, b)))
 	}
 	return out
 }
@@ -566,7 +566,7 @@ repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
 	xs := placed(k, v, .Value)
 	if len(xs) % length != 0 || !counts_hold(counts, i128(len(xs) / length)) do return Bool(false)
 	out: Type = Bool(true)
-	for i := 0; i < len(xs); i += length do out = bool_and(out, in_law(k, run_scope(k, xs[i:i + length]), a))
+	for i := 0; i < len(xs); i += length do out = bool_and(k, out, in_law(k, run_scope(k, xs[i:i + length]), a))
 	return out
 }
 

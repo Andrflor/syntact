@@ -34,7 +34,7 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 	}
 	if complete && rest != nil {
-		if verdict, _ := prove(k, bool_not(rest)); verdict != .Proven {
+		if verdict, _ := prove(k, bool_not(k, rest)); verdict != .Proven {
 			report(k, .Non_Exhaustive_Pattern, p.span, fmt.tprintf("a value of %s is not proven taken by a branch", print_type(target)))
 		}
 	}
@@ -76,8 +76,8 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 				continue
 			}
 		}
-		reach := bool_and(rest, cond)
-		rest = bool_and(rest, bool_not(cond))
+		reach := bool_and(k, rest, cond)
+		rest = bool_and(k, rest, bool_not(k, cond))
 		r, reached, exact := narrow(k, k.rewrite, reach)
 		if !reached do continue
 		all := is_bool(rest, false)

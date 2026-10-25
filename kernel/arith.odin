@@ -185,7 +185,7 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 	case .Int:
 		if r, ok := ring_law(op, args); ok do out = r
 	case .Bool:
-		out = bool_law(op, args)
+		out = bool_law(k, op, args)
 	case .String:
 		if op == .Add do out = concatenation(args)
 	}
@@ -551,8 +551,13 @@ booleans :: proc(yes, no: bool) -> Type {
 }
 
 // bool_law: [&] [|] ^ [~] by the laws of a Boolean algebra: the neutral and
-// absorbing elements, [~][~]a = a.
-bool_law :: proc(op: Operator, args: []Type) -> Type {
+// absorbing elements, [~][~]a = a. Read back, the laws of `in` (§4.7) make the
+// atoms on one unknown one atom:
+//
+//   (u in a) [|] (u in b) = u in a | b        (u in a) [&] (u in b) = u in a & b
+//
+// [~](u in a) being u in ~a.
+bool_law :: proc(k: ^Kernel, op: Operator, args: []Type) -> Type {
 	a := args[0]
 	if op == .Bit_Not {
 		if is_bool(a, true) do return Bool(false)
@@ -566,13 +571,68 @@ bool_law :: proc(op: Operator, args: []Type) -> Type {
 		if is_bool(b, false) do return a
 		return new_operation(op, a, b)
 	}
+	terms := make([dynamic]Type)
+	flatten_bool(op, a, &terms)
+	flatten_bool(op, b, &terms)
+	// the atoms on one unknown, combined
+	sets := make(map[int]Type)
+	unknowns := make(map[int]^Unknown)
+	counts := make(map[int]int)
+	for t in terms {
+		if u, s, ok := literal(k, t); ok do counts[u.id] += 1
+	}
+	kept := make([dynamic]Type)
+	for t in terms {
+		u, s, ok := literal(k, t)
+		if !ok || counts[u.id] < 2 {
+			append(&kept, t)
+			continue
+		}
+		unknowns[u.id] = u
+		if x, found := sets[u.id]; found {
+			sets[u.id] = op == .Bit_Or ? or_law(k, {x, s}) : and_law(k, {x, s})
+		} else {
+			sets[u.id] = s
+		}
+	}
+	ids := make([dynamic]int)
+	for id in sets do append(&ids, id)
+	slice.sort(ids[:])
+	for id in ids do append(&kept, in_law(k, unknowns[id], sets[id]))
 	absorbing := op == .Bit_Or
-	if is_bool(a, absorbing) || is_bool(b, absorbing) do return Bool(absorbing)
-	if is_bool(a, !absorbing) do return b
-	if is_bool(b, !absorbing) do return a
-	return new_operation(op, a, b)
+	out: Type
+	for t in kept {
+		if is_bool(t, absorbing) do return Bool(absorbing)
+		if is_bool(t, !absorbing) do continue
+		out = out == nil ? t : new_operation(op, out, t)
+	}
+	return out == nil ? Type(Bool(!absorbing)) : out
 }
 
-bool_and :: proc(a, b: Type) -> Type {return bool_law(.Bit_And, {a, b})}
-bool_or :: proc(a, b: Type) -> Type {return bool_law(.Bit_Or, {a, b})}
-bool_not :: proc(a: Type) -> Type {return bool_law(.Bit_Not, {a})}
+flatten_bool :: proc(op: Operator, t: Type, out: ^[dynamic]Type) {
+	if o, ok := t.(^Operation); ok && o.op == op {
+		for a in o.args do flatten_bool(op, a, out)
+		return
+	}
+	append(out, t)
+}
+
+// literal: t is `u in S`, or `[~](u in S)` read as u in ~S, S a constant type the
+// laws compute whole.
+literal :: proc(k: ^Kernel, t: Type) -> (^Unknown, Type, bool) {
+	positive := true
+	atom := t
+	if n, ok := t.(^Operation); ok && n.op == .Bit_Not {
+		positive = false
+		atom = n.args[0]
+	}
+	o, is_op := atom.(^Operation)
+	if !is_op || o.op != .In do return nil, nil, false
+	u, is_unknown := o.args[0].(^Unknown)
+	if !is_unknown || !decided(o.args[1]) do return nil, nil, false
+	return u, positive ? o.args[1] : not_law(k, o.args[1]), true
+}
+
+bool_and :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_And, {a, b})}
+bool_or :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_Or, {a, b})}
+bool_not :: proc(k: ^Kernel, a: Type) -> Type {return bool_law(k, .Bit_Not, {a})}

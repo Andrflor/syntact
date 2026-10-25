@@ -39,7 +39,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	}
 	if is_constant(c) {
 		cells, negated := as_cells(c)
-		if negated do return bool_not(in_law(k, x, cells_term(cells))) // x in ~a = [~](x in a)
+		if negated do return bool_not(k, in_law(k, x, cells_term(cells))) // x in ~a = [~](x in a)
 		values := false
 		for cell in cells do values ||= cell_family(cell) == .Value
 		if !values do return in_cells(k, x, c, cells)
@@ -51,20 +51,20 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		// one value from l to u: l <= x [&] x <= u (§4.3)
 		if is_value(k, x) {
 			out: Type = Bool(true)
-			if v.lo != nil do out = bool_and(out, operation_law(k, .Greater_Eq, {x, v.lo}, v.span))
-			if v.hi != nil do out = bool_and(out, operation_law(k, .Less_Eq, {x, v.hi}, v.span))
+			if v.lo != nil do out = bool_and(k, out, operation_law(k, .Greater_Eq, {x, v.lo}, v.span))
+			if v.hi != nil do out = bool_and(k, out, operation_law(k, .Less_Eq, {x, v.hi}, v.span))
 			return out
 		}
 	case ^Or:
 		out: Type = Bool(false)
-		for term in v.terms do out = bool_or(out, in_law(k, x, term))
+		for term in v.terms do out = bool_or(k, out, in_law(k, x, term))
 		return out
 	case ^And:
 		out: Type = Bool(true)
-		for term in v.terms do out = bool_and(out, in_law(k, x, term))
+		for term in v.terms do out = bool_and(k, out, in_law(k, x, term))
 		return out
 	case ^Not:
-		return bool_not(in_law(k, x, v.term))
+		return bool_not(k, in_law(k, x, v.term))
 	}
 	return new_operation(.In, x, c)
 }
@@ -81,7 +81,7 @@ in_cells :: proc(k: ^Kernel, x, c: Type, cells: []Type) -> Type {
 	}
 	if v, is_bool := c.(Bool); is_bool {
 		if _, is_op := x.(^Operation); is_op {
-			if f, known := family_of(k, x); known && f == .Bool do return bool(v) ? x : bool_not(x)
+			if f, known := family_of(k, x); known && f == .Bool do return bool(v) ? x : bool_not(k, x)
 		}
 	}
 	if !is_value(k, x) do return Bool(false) // a set, taken as a value, is not a primitive
