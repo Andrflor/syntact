@@ -390,8 +390,8 @@ cover_bindings :: proc(t: Type, written: bool) -> []^Binding {
 }
 
 // build_carve: `target{args}`. A named argument `x -> v` or `x#n -> v` names the
-// binding it carves; an unnamed one is positional. `z{…}` carves the binding z of
-// the target when it has one, and is otherwise the carve of the name z above.
+// binding it replaces; an unnamed one is positional; `z{…}` carves the binding z
+// of the target in turn — or, without one, is the carve of the name z above.
 build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) -> Type {
 	ast := k.ast
 	args := make([dynamic]Carve_Arg)
@@ -415,7 +415,7 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 			if _, _, found := lookup(s, a.name, -1); found do above = build_name(k, s, source)
 			inner := build_carve(k, s, child, above).(^Carve) or_else nil
 			if inner == nil do return unsupported(k, child, "this carve argument")
-			a.nested = inner.args
+			a.carves = inner.args
 			if above != nil do a.otherwise = inner
 		case:
 			a.value = build_term(k, s, child)

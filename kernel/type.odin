@@ -161,9 +161,10 @@ Carve_Arg :: struct {
 	ordinal:   int, // x#n; -1: the first occurrence
 	value:     Type,
 	span:      syn.Span,
-	// `z{…}`: the carve of the binding z of the target, when it has one; otherwise
-	// the carve z{…} of the name z above, as a positional value
-	nested:    []Carve_Arg,
+	// `z{…}`: a carve carves any binding, by carving it too: the binding z of the
+	// target becomes z{…}. When the target has no z, z{…} is the carve of the name
+	// z above, a value given by position.
+	carves:    []Carve_Arg,
 	otherwise: Type,
 }
 

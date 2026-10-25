@@ -111,7 +111,7 @@ carve_law :: proc(k: ^Kernel, c: ^Carve) -> Type {
 	args := make([]Carve_Arg, len(c.args))
 	for a, i in c.args {
 		args[i] = a
-		if a.nested != nil do continue // `z{…}`: read against the target (carve)
+		if a.carves != nil do continue // `z{…}`: read against the target (carve)
 		args[i].value = normal(k, a.value)
 		if is_invalid(args[i].value) do return args[i].value
 	}
@@ -131,12 +131,12 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 	next := 0
 	for arg in args {
 		a := arg
-		if a.nested != nil {
-			// `z{…}`: z{…} of the binding z of s, z -> s.z{…}; otherwise the carve of the
-			// name z above, a positional value
+		if a.carves != nil {
+			// `z{…}`: the binding z of s, carved in turn: z -> s.z{…}; without one, the
+			// carve of the name z above, a value given by position
 			if field, found := occurrence(bindings, a.name, a.ordinal, false); found {
 				inner := new(Carve)
-				inner.target, inner.args, inner.span = binding_type(k, field), a.nested, a.span
+				inner.target, inner.args, inner.span = binding_type(k, field), a.carves, a.span
 				a.value = carve_law(k, inner)
 			} else if a.otherwise != nil {
 				a.name, a.value = "", normal(k, a.otherwise)
