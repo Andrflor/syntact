@@ -186,6 +186,13 @@ SPEC_CASES := []Spec_Case {
 	{MIXED + "List:a -> {}", "", {}},
 	{MIXED + "List:a -> {1 (-2) 3}", "", {.Constraint_Mismatch}},
 	{MIXED + "List:a -> {1 (-2) \"x\" 3}\nx -> a{\"y\"}", "", {.Constraint_Mismatch}},
+	// the base case calls its scope outside any branch: an infinite recursion; read on
+	// the equation as written, not under its defaults
+	{"loop -> {-> loop!}", "", {.Infinite_Recursion}},
+	{"same -> {u8:n -> ??  -> same{n -> n}!}", "", {.Infinite_Recursion}},
+	{"head -> {-> head! ? {0 -> 1  -> 2}}", "", {.Infinite_Recursion}},
+	{"lazy -> {-> {x -> lazy!}}", "", {}},
+	{"f -> {u64:n -> 5  -> n ? {0 -> 1  -> n * f{n -> n - 1}!}}\nx -> f{n -> 4}!", "", {}},
 	// not guarded: the equation stays
 	{"L -> {\n  -> {}\n  -> {...L: ...L:}\n}\nL:a -> {}", "", {.Constraint_Mismatch}},
 	// a carve carves any binding, in turn: z{…} (specs/language/04)

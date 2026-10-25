@@ -2,13 +2,16 @@
 
 A scope names itself only in its productions. Its type is then an equation that
 mentions it. The first production is the base case, and it is not recursive: a base
-case that places its scope again is an infinite recursion.
+case that places its scope again — in a run of its shape, or by a call outside any
+branch — is an infinite recursion. It is read on the equation as written: a call in a
+branch is guarded, even when a default makes the branch known.
 
 ```syntact
 Nat -> {
   -> {...Nat:}       // refused: the base case places its scope again
   -> {}
 }
+loop -> {-> loop!}   // refused: the base case calls its scope again
 ```
 
 The equation is never unfolded. Asked again from its own production, the scope stays

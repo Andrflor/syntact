@@ -375,7 +375,9 @@ C:             in a value, an anonymous binding colored by C: the default of C
 
 A scope names itself only in its productions. Its type is then an equation that
 mentions it. The first production is the base case, and it is not recursive: a
-base case whose value places itself again is an infinite recursion. The equation
+base case whose value places itself again is an infinite recursion — in a run of
+its shape, or by a call outside any branch of a pattern, read on the equation as
+written (under its defaults, a pattern on a known value is gone, not its guard). The equation
 is never unfolded: asked again from its own production, the scope stays a carve
 and a collapse, applied to types. It is solved — Arden, a closed form — or it
 stays. A scope asked whether it is in an equation that is not solved is asked of

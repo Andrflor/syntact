@@ -382,14 +382,47 @@ written_first :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
 	return nil, false
 }
 
-// places_itself: the first production of s, its base case, is a shape that places
-// s again in a run (§5.6): as a value, it places the default of s, its base case,
-// again — an infinite recursion.
+// places_itself: the first production of s, its base case, places s again (§5.6):
+// a shape that places s in a run — as a value, the default of s, its base case,
+// again —, or an equation, as written, that calls s outside any branch. Asked, it
+// asks itself again: an infinite recursion. The equation is read as written: under
+// the defaults, a pattern on a known value is gone, not its guard.
 places_itself :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
 	if p.state == .In_Progress do return false
-	shape, ok := binding_type(k, p).(^Scope)
-	if !ok || !is_shape(k, shape) do return false
+	if calls_itself(p.value) do return true
+	shape, is_scope := binding_type(k, p).(^Scope)
+	if !is_scope do return false
+	if !is_shape(k, shape) do return false
 	for b in placed(k, shape, .Shape) do if is_run(b) && b.color != nil && same(k, binding_color(k, b), s) do return true
+	return false
+}
+
+// calls_itself: t makes a recursive call whatever the values: outside the branches
+// of a pattern, and outside a scope, whose values are only read when asked.
+calls_itself :: proc(t: Type) -> bool {
+	#partial switch v in t {
+	case ^Collapse:
+		return v.recursive || calls_itself(v.target)
+	case ^Operation:
+		for a in v.args do if calls_itself(a) do return true
+	case ^Or:
+		for a in v.terms do if calls_itself(a) do return true
+	case ^And:
+		for a in v.terms do if calls_itself(a) do return true
+	case ^Not:
+		return calls_itself(v.term)
+	case ^Is:
+		return calls_itself(v.term)
+	case ^Range:
+		return calls_itself(v.lo) || calls_itself(v.hi)
+	case ^Access:
+		return calls_itself(v.target)
+	case ^Carve:
+		if calls_itself(v.target) do return true
+		for a in v.args do if calls_itself(a.value) do return true
+	case ^Pattern:
+		return calls_itself(v.target)
+	}
 	return false
 }
 
