@@ -109,16 +109,23 @@ proven_in :: proc(k: ^Kernel, t: Type, f: Type) -> bool {
 	return included(k, t, f)
 }
 
-// check_in: V in C, for every value of the unknowns.
+// check_in: V in C, for every value of the unknowns, reported when it is not.
 check_in :: proc(k: ^Kernel, value, color: Type, span: syn.Span) {
 	if is_invalid(value) || is_invalid(color) do return
+	if p, ok := in_problem(k, value, color, span).(Invalid); ok do report(k, p.problem.kind, p.problem.span, p.problem.message)
+}
+
+// in_problem: V in C, for every value of the unknowns: nil when proven, otherwise
+// the problem.
+in_problem :: proc(k: ^Kernel, value, color: Type, span: syn.Span) -> Type {
 	switch verdict, witness := prove(k, in_law(k, value, color)); verdict {
 	case .Proven:
 	case .Refuted:
-		report(k, .Constraint_Mismatch, span, fmt.tprintf("%s is not in %s%s", print_type(value), print_type(color), print_witness(witness)))
+		return problem(.Constraint_Mismatch, span, fmt.tprintf("%s is not in %s%s", print_type(value), print_type(color), print_witness(witness)))
 	case .Unproven:
-		report(k, .Constraint_Mismatch, span, fmt.tprintf("%s is not proven to be in %s", print_type(value), print_type(color)))
+		return problem(.Constraint_Mismatch, span, fmt.tprintf("%s is not proven to be in %s", print_type(value), print_type(color)))
 	}
+	return nil
 }
 
 // print_witness: the values of the unknowns for which the equation is false.

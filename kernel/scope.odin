@@ -163,32 +163,39 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 }
 
 // derive: the copy of the scope s carves, uncarved, with the changes of s and
-// these. It is checked where it is written, in what it changed: the rest was
-// checked in its source.
-derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span) -> ^Scope {
+// these. A carve whose changed equations are not proven in their colors has no
+// type: its problem is where it is written (§7: a carve is checked where it is
+// written, in what it changed; the rest was checked in its source).
+derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span) -> Type {
 	root := s.carved != nil ? s.carved : s
 	merged := make(map[^Binding]Type)
 	for b, v in s.changes do merged[b] = v
 	for b, v in changes do merged[s.carved != nil ? b.source : b] = v
 	c := copy_scope(k, root, merged)
 	c.carved, c.changes = root, merged
-	check_carve(k, c, span)
+	if p := carve_problem(k, c, span); p != nil do return p
 	return c
 }
 
-// check_carve: the bindings of a carve whose equation changed — the replaced ones,
-// and those that name them — are typed and checked, with their errors at the carve.
-check_carve :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) {
+// carve_problem: the first binding of a carve whose equation changed — a replaced
+// one, or one that names it — and is not proven in its color; nil when there is
+// none.
+carve_problem :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) -> Type {
 	for b in c.bindings {
 		if b.kind == .Product || b.kind == .Expand do continue
 		v := binding_type(k, b)
 		color := binding_color(k, b)
 		if !b.carved && same(k, v, binding_type(k, b.source)) && same(k, color, binding_color(k, b.source)) do continue
-		failed := obligations(k, v, span)
-		failed = color != nil && obligations(k, color, span) || failed
-		if failed || color == nil do continue
-		check_in(k, v, color, span)
+		for t in ([2]Type{v, color}) {
+			if p, invalid := t.(Invalid); invalid {
+				if p.problem == nil do return t
+				return problem(p.problem.kind, span, p.problem.message)
+			}
+		}
+		if color == nil do continue
+		if p := in_problem(k, v, color, span); p != nil do return p
 	}
+	return nil
 }
 
 // --- copies ---
@@ -277,6 +284,7 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		if m.substitute do return rewrite(k, binding_type(k, v.binding), m.outer)
 		return n
 	case ^Scope:
+		if c, found := m.scopes[v]; found do return c // the scope being copied, named from inside it (`.x`)
 		parent := scope
 		if p, found := m.scopes[v.parent]; found do parent = p
 		return copy_into(k, m, v, parent)

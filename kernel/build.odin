@@ -173,10 +173,10 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		return child
 	case .Property:
 		prop := data.binary.right
-		if data.binary.left == syn.INVALID_NODE do return unsupported(k, idx, "`.x` without a scope before it")
 		if prop == syn.INVALID_NODE || ast.node_kinds[prop] != .Identifier do return unsupported(k, idx, "a property that is not a name")
 		a := new(Access)
-		a.target = build_term(k, s, data.binary.left)
+		// `.x` without a scope before it: the current scope
+		a.target = data.binary.left == syn.INVALID_NODE ? Type(s) : build_term(k, s, data.binary.left)
 		a.name = syn.node_name_str(ast, prop)
 		a.ordinal = int(ast.node_data[prop].identifier.ordinal)
 		a.span = span
@@ -420,6 +420,8 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 		case:
 			a.value = build_term(k, s, child)
 		}
+		// in the arguments of a carve, the current scope is the scope carved
+		a.value = current_is(a.value, s, target)
 		append(&args, a)
 	}
 	c := new(Carve)
@@ -487,6 +489,46 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool
 		return sc.bindings[found], nil, true
 	}
 	return nil, nil, false
+}
+
+// current_is: t, where `.x` names the scope `from`, with `.x` naming `to` instead;
+// the scopes written in t have their own current scope.
+current_is :: proc(t: Type, from: ^Scope, to: Type) -> Type {
+	if to == nil do return t
+	#partial switch v in t {
+	case ^Access:
+		if s, ok := v.target.(^Scope); ok && s == from {
+			v.target = to
+		} else {
+			v.target = current_is(v.target, from, to)
+		}
+	case ^Operation:
+		for &a in v.args do a = current_is(a, from, to)
+	case ^Or:
+		for &a in v.terms do a = current_is(a, from, to)
+	case ^And:
+		for &a in v.terms do a = current_is(a, from, to)
+	case ^Not:
+		v.term = current_is(v.term, from, to)
+	case ^Is:
+		v.term = current_is(v.term, from, to)
+	case ^Range:
+		v.lo, v.hi = current_is(v.lo, from, to), current_is(v.hi, from, to)
+	case ^Collapse:
+		v.target = current_is(v.target, from, to)
+	case ^Carve:
+		v.target = current_is(v.target, from, to)
+		for &a in v.args do a.value = current_is(a.value, from, to)
+	case ^Default:
+		v.color = current_is(v.color, from, to)
+	case ^Pattern:
+		v.target = current_is(v.target, from, to)
+		for &b in v.branches {
+			b.cover = current_is(b.cover, from, to)
+			b.product = current_is(b.product, from, to)
+		}
+	}
+	return t
 }
 
 // names: a binding is read by its name, or by its capture.

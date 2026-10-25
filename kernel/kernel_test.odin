@@ -174,6 +174,9 @@ SPEC_CASES := []Spec_Case {
 	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nb -> a{z{a->2}}\nx -> b.z.a", "2", {}},
 	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nx -> a{z{a->300}}", "", {.Constraint_Mismatch}},
 	{"Box -> { u8:n -> 0 }\nPt -> { slot -> {u8:n->0} }\nx -> Pt{Box{1}}.slot.n", "1", {}},
+	// `.x`: the current scope; in the arguments of a carve, the scope carved
+	{"x -> {x -> 1  y -> .x + 1}{x -> 10}.y", "11", {}},
+	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nx -> a{z -> .z{a -> 2}}.z.a", "2", {}},
 	// destructuring: the names of a cover are read by its product (specs/language/12)
 	{"Circle -> {u8:radius}\nc -> Circle{radius -> 5}\nx -> c ? {Circle: -> radius * radius  -> 0}", "25", {}},
 	{"Square -> {u16:side}\nDiamond -> {u16:side}\ns -> Diamond{side -> 7}\nx -> s ? {Square: | Diamond: -> side * side  -> 0}", "49", {}},

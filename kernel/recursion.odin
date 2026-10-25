@@ -108,7 +108,7 @@ equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, o
 		if u.layout == nil do u.layout = everything()
 		carved[b] = u
 	}
-	generic := derive(k, root, carved, root.span)
+	generic := derive(k, root, carved, root.span).(^Scope) or_return
 	p := first_production(k, generic) or_return
 	return base_family(k, root, binding_type(k, p))
 }
