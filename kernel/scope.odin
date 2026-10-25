@@ -26,12 +26,6 @@ scope_law :: proc(k: ^Kernel, s: ^Scope) -> Type {
 // bindings of e as they are; `...C:` places the default of C in a value, and stays
 // a run in a shape; `...` places nothing in a value.
 placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
-	if view in s.placed_by do return s.placed[view]
-	if s.placing[view] {
-		report(k, .Infinite_Recursion, s.span, "this scope places itself again")
-		return nil
-	}
-	s.placing[view] = true
 	out := make([dynamic]^Binding)
 	for b in s.bindings {
 		if b.kind != .Expand || (view == .Shape && b.value == nil) {
@@ -48,9 +42,6 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
 		}
 	}
-	s.placing[view] = false
-	s.placed[view] = out[:]
-	s.placed_by += {view}
 	return out[:]
 }
 
@@ -230,11 +221,6 @@ copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	for b, i in s.bindings {
 		n := c.bindings[i]
 		n.color = copy_term(k, m, b.color, c)
-		if u, is_unknown := b.value.(^Unknown); is_unknown && u.written == nil {
-			// `??` takes the layout of its color: a color that follows the copy makes another unknown
-			n.value = mentions(m, b.color) ? Type(new_unknown(k, nil)) : Type(u)
-			continue
-		}
 		n.value = copy_term(k, m, b.value, c)
 	}
 	return c

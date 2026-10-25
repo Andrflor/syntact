@@ -67,13 +67,12 @@ narrowing :: proc(u: ^Unknown, l: Type) -> Type {
 	return n
 }
 
-// layout_of: the layout of an unknown, in normal form.
+// layout_of: the layout of an unknown, in normal form: as narrowed by a branch, or
+// as written.
 layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
-	if u.layout == nil {
-		u.layout = everything()
-		if u.written != nil do u.layout = normal(k, u.written)
-	}
-	return u.layout
+	if u.layout != nil do return u.layout
+	if u.written != nil do return normal(k, u.written)
+	return everything()
 }
 
 // scope_rewrite: the rewrite where a scope is typed: that of the nearest branch or

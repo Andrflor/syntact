@@ -55,6 +55,8 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		} else {
 			b.value = build_term(k, s, data.binary.right)
 			if v, is_scope := b.value.(^Scope); is_scope do v.name = b.name
+			// `C:x -> ??`: the unknown takes the layout of its color (§5.2)
+			if u, is_unknown := b.value.(^Unknown); is_unknown && u.written == nil do u.written = b.color
 		}
 	case .Constraint:
 		build_left(k, s, idx, b)

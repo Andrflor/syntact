@@ -47,8 +47,8 @@ Invalid :: struct {}
 // same one comes back through a name.
 Unknown :: struct {
 	id:      int,
-	written: Type, // `??::L`: L as written; nil: the layout of its binding's color
-	layout:  Type, // its normal form, once asked
+	written: Type, // `??::L`: L as written; `C:x -> ??`: the color C; nil: everything
+	layout:  Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
 }
 
 Or :: struct {
@@ -205,14 +205,11 @@ Scope :: struct {
 	carved:    ^Scope, // a carve: the scope it carves, uncarved
 	changes:   map[^Binding]Type, // a carve: the values of the bindings of `carved` it replaces
 	rewrite:   Rewrite, // a branch, a carve: the unknowns rewritten where it is typed
-	placed:    [View][]^Binding, // its bindings with the expansions placed
-	placed_by: bit_set[View], // the views placed
 	complete:  bool, // all its bindings are built: all are visible
 	producing: bool, // one of its productions is being built: it may name itself
 	recursive: bool, // one of its productions names it (§5.6)
 	reached:   bool, // asked once: it is checked (check.odin)
 	name:      string, // the binding it is the value of, as written: for printing
-	placing:   [View]bool, // its expansions are being placed
 	span:      syn.Span,
 }
 

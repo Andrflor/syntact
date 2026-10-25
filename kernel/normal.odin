@@ -16,7 +16,6 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
 	case ^Unknown:
-		layout_of(k, v)
 		return v
 	case ^Or:
 		return or_law(k, normal_all(k, v.terms))
@@ -300,10 +299,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	k.rewrite = scope_rewrite(b.scope)
 	color := binding_color(k, b)
 	value: Type
-	if u, is_unknown := b.value.(^Unknown); is_unknown && u.written == nil && u.layout == nil {
-		u.layout = color != nil ? color : everything()
-		value = u
-	} else if b.value == nil {
+	if b.value == nil {
 		value = color != nil ? default_of(k, color, b.span) : None{}
 	} else if b.kind == .Product {
 		value = recursion_law(k, b, normal(k, b.value))
