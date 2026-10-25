@@ -181,6 +181,16 @@ On known primitives, an operator gives its result:
 2 + 3 = 5        u8 + 1 = 1..256        u8 < 300 = true        2 > 2 = false
 ```
 
+`u8 * u8` is the `|` of the products of its elements: it is not one range, and
+stays written as it is. Its least and greatest elements are results at the bounds
+of its operands, by the order of the integers (`a <= a'` and `b >= 0` give
+`a * b <= a' * b`; likewise for `+ - /`):
+
+```text
+u8 * u8 in u16 = true          its elements are from 0 * 0 to 255 * 255
+u8 * u8 in u8  = false         255 * 255 is one of them
+```
+
 On terms without `| & ~`, each family brings its laws:
 
 ```text

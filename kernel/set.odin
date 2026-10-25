@@ -219,22 +219,170 @@ reading_is_empty :: proc(r: Reading) -> bool {
 // empty: the constant type t has no element.
 empty :: proc(k: ^Kernel, t: Type) -> Truth {
 	r := read(k, t)
-	if !r.exact do return .Unknown
-	return truth(reading_is_empty(r))
+	if r.exact do return truth(reading_is_empty(r))
+	if _, _, bounded := int_bounds(k, t); bounded do return .False
+	return .Unknown
 }
 
 // subset: every element of a is in b.
 subset :: proc(k: ^Kernel, a, b: Type) -> Truth {
 	r := reading_intersect(k, read(k, a), reading_complement(read(k, b)))
-	if !r.exact do return .Unknown
-	return truth(reading_is_empty(r))
+	if r.exact do return truth(reading_is_empty(r))
+	return bounds_subset(k, a, b)
 }
 
 // disjoint: a and b have no element in common.
 disjoint :: proc(k: ^Kernel, a, b: Type) -> Truth {
 	r := reading_intersect(k, read(k, a), read(k, b))
+	if r.exact do return truth(reading_is_empty(r))
+	return bounds_disjoint(k, a, b)
+}
+
+// --- integer sets that the laws leave as an operation ---
+//
+// A set of integers built by an operator on sets — `u8 * u8` — is the | of the
+// results on their elements (§4.5). It stays the operation, whose least and
+// greatest elements are known by the order of the integers: they are results at
+// the bounds of its operands (a <= a' and b >= 0 give a * b <= a' * b). They are
+// elements of the set. So the set is in b when everything between them is, and
+// it is not when one of them is not.
+
+// int_bounds: the least and greatest elements of a constant set of integers; nil
+// on a side where it has none.
+int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
+	r := read(k, t)
+	if r.exact {
+		if len(r.ints) == 0 || !reading_only_ints(r) do return
+		return r.ints[0].lo, r.ints[len(r.ints) - 1].hi, true
+	}
+	o, is_op := t.(^Operation)
+	if !is_op || !is_constant(t) do return
+	bounds := make([][2]Maybe(i128), len(o.args))
+	for a, i in o.args {
+		x, y := int_bounds(k, a) or_return
+		bounds[i] = {x, y}
+	}
+	#partial switch o.op {
+	case .Add:
+		lo, hi = bounds[0][0], bounds[0][1]
+		for b in bounds[1:] do lo, hi = add_bound(lo, b[0]), add_bound(hi, b[1])
+		return lo, hi, true
+	case .Sub:
+		return add_bound(bounds[0][0], neg_bound(bounds[1][1])), add_bound(bounds[0][1], neg_bound(bounds[1][0])), true
+	case .Neg:
+		return neg_bound(bounds[0][1]), neg_bound(bounds[0][0]), true
+	case .Mul:
+		lo, hi = bounds[0][0], bounds[0][1]
+		for b in bounds[1:] do lo, hi = corners(lo, hi, b[0], b[1], mul_extended)
+		return lo, hi, true
+	case .Div:
+		// a divisor of one sign: a / b is monotone in each
+		d_lo, d_hi := bounds[1][0], bounds[1][1]
+		x, has_x := d_lo.?
+		y, has_y := d_hi.?
+		if !(has_x && x >= 1) && !(has_y && y <= -1) do return
+		lo, hi = corners(bounds[0][0], bounds[0][1], d_lo, d_hi, div_extended)
+		return lo, hi, true
+	}
+	return
+}
+
+// Extended: an integer, or infinite (nil) of a sign.
+Extended :: struct {
+	value:    i128,
+	infinite: bool,
+}
+
+// corners: the least and greatest of x op y at the bounds, -∞ and +∞ included.
+corners :: proc(a_lo, a_hi, b_lo, b_hi: Maybe(i128), op: proc(x, y: Extended) -> Extended) -> (Maybe(i128), Maybe(i128)) {
+	extend :: proc(v: Maybe(i128), sign: i128) -> Extended {
+		if x, ok := v.?; ok do return {x, false}
+		return {sign, true}
+	}
+	xs := [2]Extended{extend(a_lo, -1), extend(a_hi, 1)}
+	ys := [2]Extended{extend(b_lo, -1), extend(b_hi, 1)}
+	least, most: Extended
+	first := true
+	for x in xs {
+		for y in ys {
+			v := op(x, y)
+			if first || extended_less(v, least) do least = v
+			if first || extended_less(most, v) do most = v
+			first = false
+		}
+	}
+	lo, hi: Maybe(i128)
+	if !least.infinite do lo = least.value
+	if !most.infinite do hi = most.value
+	return lo, hi
+}
+
+extended_less :: proc(a, b: Extended) -> bool {
+	rank :: proc(x: Extended) -> int {return x.infinite ? (x.value < 0 ? -1 : 1) : 0}
+	if rank(a) != rank(b) do return rank(a) < rank(b)
+	return rank(a) == 0 && a.value < b.value
+}
+
+sign_of :: proc(x: Extended) -> i128 {
+	return x.value > 0 ? 1 : (x.value < 0 ? -1 : 0)
+}
+
+// mul_extended: 0 times anything is 0; infinite times a sign, infinite; beyond the
+// integers, infinite.
+mul_extended :: proc(x, y: Extended) -> Extended {
+	s := sign_of(x) * sign_of(y)
+	if s == 0 do return {0, false}
+	if x.infinite || y.infinite do return {s, true}
+	if v, ok := mul_checked(x.value, y.value); ok do return {v, false}
+	return {s, true}
+}
+
+// div_extended: truncated, as on primitives; a finite value over an infinite one
+// is 0; the divisor is never 0.
+div_extended :: proc(x, y: Extended) -> Extended {
+	s := sign_of(x) * sign_of(y)
+	if y.infinite do return {0, false}
+	if x.infinite do return {s, true}
+	return {x.value / y.value, false}
+}
+
+// bounds_subset: a set of integers left as an operation is in b when its least and
+// greatest elements and everything between are; it is not when one of them is not.
+bounds_subset :: proc(k: ^Kernel, a, b: Type) -> Truth {
+	lo, hi, ok := int_bounds(k, a)
+	if !ok do return .Unknown
+	r := read(k, b)
 	if !r.exact do return .Unknown
-	return truth(reading_is_empty(r))
+	hull := Ints{{lo, hi}}
+	if len(ints_intersect(hull, ints_complement(r.ints, {nil, nil}))) == 0 do return .True
+	if !holds_bound(r.ints, lo, true) || !holds_bound(r.ints, hi, false) do return .False
+	return .Unknown
+}
+
+// bounds_disjoint: no element in common when nothing between the least and the
+// greatest is in b; some when one of them is.
+bounds_disjoint :: proc(k: ^Kernel, a, b: Type) -> Truth {
+	lo, hi, ok := int_bounds(k, a)
+	if !ok do return .Unknown
+	r := read(k, b)
+	if !r.exact do return .Unknown
+	hull := Ints{{lo, hi}}
+	if len(ints_intersect(hull, r.ints)) == 0 do return .True
+	if holds_bound(r.ints, lo, true) || holds_bound(r.ints, hi, false) do return .False
+	return .Unknown
+}
+
+// holds_bound: s holds the bound — an element, or, infinite, the elements beyond
+// every integer on that side.
+holds_bound :: proc(s: Ints, bound: Maybe(i128), below: bool) -> bool {
+	if v, finite := bound.?; finite do return ints_contains(s, v)
+	if len(s) == 0 do return false
+	if below {
+		_, bounded := s[0].lo.?
+		return !bounded
+	}
+	_, bounded := s[len(s) - 1].hi.?
+	return !bounded
 }
 
 // --- normal forms of constant combinations ---
