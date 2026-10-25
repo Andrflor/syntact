@@ -142,7 +142,7 @@ cell_less :: proc(a, b: Type) -> bool {
 	case .Bool:
 		return !bool(a.(Bool)) && bool(b.(Bool))
 	}
-	return key_of(a) < key_of(b)
+	return term_less(a, b)
 }
 
 // bound_before: a lower bound before another; nil is -∞.
@@ -785,7 +785,7 @@ is_constant :: proc(t: Type) -> bool {
 }
 
 sort_types :: proc(ts: []Type) {
-	slice.sort_by(ts, proc(a, b: Type) -> bool {return key_of(a) < key_of(b)})
+	slice.sort_by(ts, term_less)
 }
 
 // --- bounds: integers or infinite (nil) ---

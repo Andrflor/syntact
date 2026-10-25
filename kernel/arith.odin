@@ -284,8 +284,8 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		x, single_x := one_primitive(cells[0]).(Int)
 		y, single_y := one_primitive(cells[1]).(Int)
 		if !single_x || !single_y do return nil, false
-		v, ok := int_operation(op, i128(x), i128(y))
-		return Int(v), ok
+		v, computed := int_operation(op, i128(x), i128(y))
+		return Int(v), computed
 	case .Real:
 		for c in cells do if !all_of_family(c, .Real) do return nil, false
 		#partial switch op {
@@ -579,7 +579,7 @@ bool_law :: proc(k: ^Kernel, op: Operator, args: []Type) -> Type {
 	unknowns := make(map[int]^Unknown)
 	counts := make(map[int]int)
 	for t in terms {
-		if u, s, ok := literal(k, t); ok do counts[u.id] += 1
+		if u, _, ok := literal(k, t); ok do counts[u.id] += 1
 	}
 	kept := make([dynamic]Type)
 	for t in terms {

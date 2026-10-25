@@ -201,9 +201,9 @@ text_lattice :: proc(terms: []Type, is_or: bool) -> Type {
 			append(&flat, t)
 		}
 	}
-	slice.sort_by(flat[:], proc(a, b: Type) -> bool {return key_of(a) < key_of(b)})
+	slice.sort_by(flat[:], term_less)
 	unique := make([dynamic]Type)
-	for t in flat do if len(unique) == 0 || key_of(unique[len(unique) - 1]) != key_of(t) do append(&unique, t)
+	for t in flat do if len(unique) == 0 || term_order(unique[len(unique) - 1], t) != 0 do append(&unique, t)
 	switch len(unique) {
 	case 0:
 		return is_or ? Type(None{}) : everything()
@@ -258,8 +258,8 @@ text_witness :: proc(t: Type) -> (string, bool) {
 	}
 	steps := make([dynamic]Step)
 	append(&steps, Step{t, -1, 0})
-	seen := make(map[string]bool)
-	seen[key_of(t)] = true
+	seen := make([dynamic]Type) // the quotients met: the unknowns of the system
+	append(&seen, t)
 	for i := 0; i < len(steps); i += 1 {
 		q := steps[i].quotient
 		if nullable(q) {
@@ -273,9 +273,10 @@ text_witness :: proc(t: Type) -> (string, bool) {
 		for c in cuts(q) {
 			d := quotient(q, c)
 			if is_none(d) do continue
-			key := key_of(d)
-			if seen[key] do continue
-			seen[key] = true
+			met := false
+			for x in seen do if term_order(x, d) == 0 do met = true
+			if met do continue
+			append(&seen, d)
 			append(&steps, Step{d, i, c})
 		}
 	}

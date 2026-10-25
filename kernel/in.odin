@@ -167,8 +167,8 @@ preimage :: proc(cells: []Type, a, b: i128) -> (set: Type, ok: bool) {
 		}
 		m := abs(a)
 		from, to: Maybe(i128)
-		if l, ok := lo.?; ok do from = ceil_div(l, m)
-		if h, ok := hi.?; ok do to = floor_div(h, m)
+		if l, has := lo.?; has do from = ceil_div(l, m)
+		if h, has := hi.?; has do to = floor_div(h, m)
 		append(&out, discrete_cell(.Int, from, to))
 	}
 	return cells_term(join_discrete(.Int, out[:])), true

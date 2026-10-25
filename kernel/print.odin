@@ -9,7 +9,7 @@ import "core:strings"
 
 print_type :: proc(t: Type) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	write_type(&b, t, 0, false)
+	write_type(&b, t, 0)
 	return strings.to_string(b)
 }
 
@@ -19,13 +19,6 @@ print_types :: proc(ts: []Type) -> string {
 	return strings.join(parts[:], ", ", context.temp_allocator)
 }
 
-// key_of: a term written so that two terms have the same key when they are the
-// same: a scope by its identity.
-key_of :: proc(t: Type) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	write_type(&b, t, 0, true)
-	return strings.to_string(b)
-}
 
 PREC_OR :: 1
 PREC_AND :: 2
@@ -72,10 +65,10 @@ operator_prec :: proc(op: Operator) -> int {
 	return PREC_ATOM
 }
 
-write_type :: proc(b: ^strings.Builder, t: Type, outer: int, keyed: bool) {
+write_type :: proc(b: ^strings.Builder, t: Type, outer: int) {
 	prec := type_prec(t)
 	if prec < outer do strings.write_byte(b, '(')
-	write_bare(b, t, keyed)
+	write_bare(b, t)
 	if prec < outer do strings.write_byte(b, ')')
 }
 
@@ -141,7 +134,7 @@ is_string_term :: proc(t: Type) -> bool {
 	return is_char && lo == 0 && c.hi == nil && is_int && from == 0 && n.hi == nil
 }
 
-write_bare :: proc(b: ^strings.Builder, t: Type, keyed: bool) {
+write_bare :: proc(b: ^strings.Builder, t: Type) {
 	if t == nil {
 		strings.write_string(b, "nil")
 		return
@@ -164,61 +157,61 @@ write_bare :: proc(b: ^strings.Builder, t: Type, keyed: bool) {
 	case ^Or:
 		for x, i in v.terms {
 			if i > 0 do strings.write_string(b, " | ")
-			write_type(b, x, lattice_operand(x, PREC_OR), keyed)
+			write_type(b, x, lattice_operand(x, PREC_OR))
 		}
 	case ^And:
-		if text, ok := bound_of(v); ok && !keyed {
+		if text, ok := bound_of(v); ok {
 			strings.write_string(b, text)
 			return
 		}
 		for x, i in v.terms {
 			if i > 0 do strings.write_string(b, " & ")
-			write_type(b, x, lattice_operand(x, PREC_AND), keyed)
+			write_type(b, x, lattice_operand(x, PREC_AND))
 		}
 	case ^Not:
 		strings.write_byte(b, '~')
-		write_type(b, v.term, PREC_PREFIX, keyed)
+		write_type(b, v.term, PREC_PREFIX)
 	case ^Is:
 		strings.write_byte(b, '=')
-		write_type(b, v.term, PREC_PREFIX, keyed)
+		write_type(b, v.term, PREC_PREFIX)
 	case ^Range:
-		write_range(b, v, keyed)
+		write_range(b, v)
 	case ^Operation:
-		write_operation(b, v, keyed)
+		write_operation(b, v)
 	case ^Name:
 		strings.write_string(b, v.binding.name)
 	case ^Scope:
-		write_scope(b, v, keyed)
+		write_scope(b, v)
 	case ^Access:
-		write_type(b, v.target, PREC_ATOM, keyed)
+		write_type(b, v.target, PREC_ATOM)
 		fmt.sbprintf(b, ".%s", v.name)
 		if v.ordinal >= 0 do fmt.sbprintf(b, "#%d", v.ordinal)
 	case ^Collapse:
-		write_type(b, v.target, PREC_ATOM, keyed)
+		write_type(b, v.target, PREC_ATOM)
 		strings.write_byte(b, '!')
 	case ^Carve:
-		write_type(b, v.target, PREC_ATOM, keyed)
+		write_type(b, v.target, PREC_ATOM)
 		strings.write_byte(b, '{')
 		for a, i in v.args {
 			if i > 0 do strings.write_string(b, "  ")
 			if a.name != "" do fmt.sbprintf(b, "%s -> ", a.name)
-			write_type(b, a.value, 0, keyed)
+			write_type(b, a.value, 0)
 		}
 		strings.write_byte(b, '}')
 	case ^Default:
-		write_type(b, v.color, PREC_ATOM, keyed)
+		write_type(b, v.color, PREC_ATOM)
 		strings.write_byte(b, ':')
 	case ^Pattern:
-		write_type(b, v.target, PREC_PREFIX, keyed)
+		write_type(b, v.target, PREC_PREFIX)
 		strings.write_string(b, " ? {")
 		for br, i in v.branches {
 			if i > 0 do strings.write_string(b, "  ")
 			if br.cover != nil {
-				write_type(b, br.cover, 0, keyed)
+				write_type(b, br.cover, 0)
 				strings.write_byte(b, ' ')
 			}
 			strings.write_string(b, "-> ")
-			write_type(b, br.product, 0, keyed)
+			write_type(b, br.product, 0)
 		}
 		strings.write_byte(b, '}')
 	}
@@ -254,7 +247,7 @@ write_char :: proc(b: ^strings.Builder, c: rune, quote: byte) {
 }
 
 
-write_range :: proc(b: ^strings.Builder, r: ^Range, keyed: bool) {
+write_range :: proc(b: ^strings.Builder, r: ^Range) {
 	if r.lo == nil && r.hi == nil {
 		switch r.family {
 		case .Int:
@@ -269,13 +262,13 @@ write_range :: proc(b: ^strings.Builder, r: ^Range, keyed: bool) {
 	if c, is_char := r.lo.(Char); is_char && c == 0 {
 		strings.write_string(b, "''") // from the smallest character
 	} else if r.lo != nil {
-		write_type(b, r.lo, PREC_ATOM, keyed)
+		write_type(b, r.lo, PREC_ATOM)
 	}
 	strings.write_string(b, "..")
-	if r.hi != nil do write_type(b, r.hi, PREC_ATOM, keyed)
+	if r.hi != nil do write_type(b, r.hi, PREC_ATOM)
 }
 
-write_operation :: proc(b: ^strings.Builder, o: ^Operation, keyed: bool) {
+write_operation :: proc(b: ^strings.Builder, o: ^Operation) {
 	if is_string_value(o) {
 		if len(o.args) == 0 {
 			strings.write_string(b, `""`)
@@ -293,22 +286,18 @@ write_operation :: proc(b: ^strings.Builder, o: ^Operation, keyed: bool) {
 	prec := operator_prec(o.op)
 	if o.op == .Neg || o.op == .Bit_Not {
 		strings.write_string(b, operator_text[o.op])
-		write_type(b, o.args[0], PREC_PREFIX, keyed)
+		write_type(b, o.args[0], PREC_PREFIX)
 		return
 	}
 	for a, i in o.args {
 		if i > 0 do fmt.sbprintf(b, " %s ", operator_text[o.op])
-		write_type(b, a, i == 0 ? prec : prec + 1, keyed)
+		write_type(b, a, i == 0 ? prec : prec + 1)
 	}
 }
 
-write_scope :: proc(b: ^strings.Builder, s: ^Scope, keyed: bool) {
-	if keyed {
-		fmt.sbprintf(b, "{{%p}}", s)
-		return
-	}
+write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
 	if s.carved != nil {
-		write_scope(b, s.carved, false)
+		write_scope(b, s.carved)
 		strings.write_byte(b, '{')
 		first := true
 		for x in s.carved.bindings {
@@ -317,13 +306,13 @@ write_scope :: proc(b: ^strings.Builder, s: ^Scope, keyed: bool) {
 			if !first do strings.write_string(b, "  ")
 			first = false
 			if x.name != "" do fmt.sbprintf(b, "%s -> ", x.name)
-			write_type(b, v, 0, false)
+			write_type(b, v, 0)
 		}
 		strings.write_byte(b, '}')
 		return
 	}
 	if s.source != nil && s.source != s {
-		write_scope(b, s.source, false)
+		write_scope(b, s.source)
 		return
 	}
 	if s.name != "" {
@@ -347,11 +336,11 @@ write_binding :: proc(b: ^strings.Builder, x: ^Binding) {
 	case .Push, .Pull:
 	}
 	if x.color != nil {
-		write_type(b, x.color, PREC_ATOM, false)
+		write_type(b, x.color, PREC_ATOM)
 		strings.write_byte(b, ':')
 	}
 	strings.write_string(b, x.name)
 	if x.value == nil do return
 	if x.name != "" || x.color != nil do strings.write_string(b, x.kind == .Pull ? " <- " : " -> ")
-	write_type(b, x.value, 0, false)
+	write_type(b, x.value, 0)
 }

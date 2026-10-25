@@ -106,16 +106,6 @@ merge_rewrites :: proc(k: ^Kernel, a, b: Rewrite) -> Rewrite {
 	return out
 }
 
-rewrite_key :: proc(r: Rewrite) -> string {
-	parts := make([dynamic]string)
-	for id, t in r {
-		layout := t
-		if u, ok := t.(^Unknown); ok do layout = u.layout
-		append(&parts, fmt.tprintf("%d:%s", id, key_of(layout)))
-	}
-	slice.sort(parts[:])
-	return strings.join(parts[:], ",")
-}
 
 // layout_image: a term over unknowns, each replaced by its layout: an operator
 // distributes over |, so the term is one value of this image (§4.5, §7). A
