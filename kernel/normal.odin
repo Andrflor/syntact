@@ -16,7 +16,7 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
 	case ^Unknown:
-		ready_layout(k, v)
+		layout_of(k, v)
 		return v
 	case ^Or:
 		return or_law(k, normal_all(k, v.terms))
@@ -33,17 +33,17 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return operation_law(k, v.op, normal_all(k, v.args), v.span)
 	case ^Name:
 		if v.self != nil do return v.self // the scope being defined: a carve and a collapse apply to it (§5.6)
-		return binding_type(k, v.binding)
+		return rewrite(k, binding_type(k, v.binding), k.rewrite)
 	case ^Scope:
 		return scope_law(k, v)
 	case ^Access:
-		return access_law(k, normal(k, v.target), v)
+		return rewrite(k, access_law(k, normal(k, v.target), v), k.rewrite)
 	case ^Collapse:
-		return collapse_law(k, v)
+		return rewrite(k, collapse_law(k, v), k.rewrite)
 	case ^Carve:
 		return carve_law(k, v)
 	case ^Default:
-		return default_of(k, normal(k, v.color), v.span)
+		return rewrite(k, default_of(k, normal(k, v.color), v.span), k.rewrite)
 	case ^Pattern:
 		return pattern_law(k, v)
 	}
@@ -102,6 +102,7 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 	if len(constants) > 0 {
 		r := read(k, constants[0])
 		for c in constants[1:] do r = is_or ? reading_union(r, read(k, c)) : reading_intersect(k, r, read(k, c))
+		if !r.exact && !is_or && bounded_apart(k, constants[:]) do return None{}
 		if r.exact {
 			c := rebuild(k, r)
 			clear(&constants)
@@ -266,10 +267,10 @@ bound_less :: proc(a, b: Type) -> bool {
 binding_color :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if b.color == nil do return nil
 	if b.typed_color == nil {
-		saved := k.facts
-		k.facts = scope_facts(b.scope)
+		saved := k.rewrite
+		k.rewrite = scope_rewrite(b.scope)
 		b.typed_color = normal(k, b.color)
-		k.facts = saved
+		k.rewrite = saved
 	}
 	return b.typed_color
 }
@@ -286,8 +287,8 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	case .Not_Asked:
 	}
 	b.state = .In_Progress
-	saved := k.facts
-	k.facts = scope_facts(b.scope)
+	saved := k.rewrite
+	k.rewrite = scope_rewrite(b.scope)
 	color := binding_color(k, b)
 	value: Type
 	if u, is_unknown := b.value.(^Unknown); is_unknown && u.written == nil && u.layout == nil {
@@ -307,23 +308,9 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if shape, ok := color.(^Scope); ok && b.kind == .Push && is_shape(k, shape) {
 		if s, is_scope := value.(^Scope); is_scope do value = colored(k, s, shape)
 	}
-	k.facts = saved
+	k.rewrite = saved
 	b.typed_value, b.state = value, .Done
 	return value
-}
-
-// scope_facts: the layouts narrowed where a scope is typed: those of the nearest
-// branch or carve around it.
-scope_facts :: proc(s: ^Scope) -> Facts {
-	for sc := s; sc != nil; sc = sc.parent do if sc.facts != nil do return sc.facts
-	return nil
-}
-
-// ready_layout: the layout of an unknown, in normal form, once.
-ready_layout :: proc(k: ^Kernel, u: ^Unknown) {
-	if u.layout != nil do return
-	u.layout = everything()
-	if u.written != nil do u.layout = normal(k, u.written)
 }
 
 // --- defaults (§5.5) ---

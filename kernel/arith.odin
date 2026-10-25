@@ -95,7 +95,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case Bool:
 		return .Bool, true
 	case ^Unknown:
-		return layout_family(k, known_layout(k, v))
+		return layout_family(k, layout_of(k, v))
 	case ^Operation:
 		if v.op == .In do return .Bool, true
 		if is_string_value(t) do return .String, true
@@ -134,7 +134,7 @@ family_holds :: proc(f, of: Family) -> bool {
 // layout_family: the one family the elements of a layout are in.
 layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 	for f in ([]Family{.Int, .Real, .Bool, .Char, .String}) {
-		if elements_in(k, layout, family_term(f)) == .True do return f, true
+		if proven_in(k, layout, family_term(f)) do return f, true
 	}
 	return {}, false
 }
@@ -149,7 +149,7 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 				if f, assumed := hypothesis(k, c); assumed && !family_holds(sig.args[min(i, 1)], f) do continue next
 				continue
 			}
-			if elements_in(k, a, family_term(sig.args[min(i, 1)])) != .True do continue next
+			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
 		}
 		for a, i in args do if c, is_call := a.(^Collapse); is_call && c.recursive do assume(k, c, sig.args[min(i, 1)])
 		return sig, true
@@ -168,7 +168,7 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 	if op == .In do return in_law(k, args[0], args[1])
 	for a in args do if is_none(a) do return None{} // none op c = none
 	sig, legal := legal_signature(k, op, args)
-	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("%v is not proven to apply to %s", op, print_types(args)))
+	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[op], print_types(args)))
 	if bound, x, ok := comparison_bound(op, args); ok do return in_law(k, x, normal(k, bound))
 	constant := true
 	for a in args do constant &&= is_constant(a)
@@ -176,15 +176,25 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 		if r, exact := compute(k, op, sig, args); exact do return r
 		return new_operation(op, ..args)
 	}
+	out: Type
 	#partial switch sig.args[0] {
 	case .Int:
-		if r, ok := ring_law(op, args); ok do return r
+		if r, ok := ring_law(op, args); ok do out = r
 	case .Bool:
-		return bool_law(op, args)
+		out = bool_law(op, args)
 	case .String:
-		if op == .Add do return concatenation(args)
+		if op == .Add do out = concatenation(args)
 	}
-	return new_operation(op, ..args)
+	if out == nil do out = new_operation(op, ..args)
+	return single(k, out)
+}
+
+// single: a term over unknowns whose layout is one primitive is that primitive:
+// ?ₖ::p = p, and so is what an operator gives of it (§4.5, §7).
+single :: proc(k: ^Kernel, t: Type) -> Type {
+	if _, is_op := t.(^Operation); !is_op || is_constant(t) do return t
+	if image, ok := layout_image(k, t); ok && is_primitive(image) do return image
+	return t
 }
 
 // comparison_bound: x < c = x in <c, and likewise for <= > >= (§4.3), when c is
@@ -605,7 +615,7 @@ add_product :: proc(s: ^Sum, p: Product) {
 
 same_factors :: proc(a, b: []^Unknown) -> bool {
 	if len(a) != len(b) do return false
-	for x, i in a do if x != b[i] do return false
+	for x, i in a do if x.id != b[i].id do return false
 	return true
 }
 

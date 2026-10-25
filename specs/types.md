@@ -456,33 +456,41 @@ C:x -> V    ⟺    V in C = true
 | `u8:o -> none` | `none in u8 = false` | ✗ |
 
 With `?`, `V in C` is an equation in these unknowns. Each `?ₖ::L` ranges over the
-values of L.
+values of L. The check simplifies it by the laws; it solves nothing. Its result is
+a verdict, not a type:
 
-- ✓ when the equation is true for every value of the `?`;
-- ✗ when a value of the `?` makes it other than true: a counterexample;
-- otherwise, it stays an equation: the check cannot conclude, and says so
-  (unproven).
+- **proven** when the equation simplifies to `true`;
+- **refuted** when it simplifies to `false` for values of the `?`: a
+  counterexample;
+- **unproven** otherwise: it stays an equation, and the check says so.
 
-The laws that decide it are those of §4, and these:
+The laws that simplify it are those of §4, and these:
 
 ```text
 x in C = true      when the layout of x is in C:    L & ~C = none
 x in C = false     when it is disjoint from C:      L & C = none
+?ₖ::p  = p         p one primitive
 ```
 
 The layout of `?ₖ::L` is L; the layout of a term over unknowns is the term with
 each unknown replaced by its layout: an operator distributes over `|` (§4.5).
 `?₁::u8 + 1` has the layout `1..256`.
 
-An atom `u in S` that stays is decided on each side (Boole): u is `?::(L & S)`,
-then `?::(L & ~S)`; on each side the atom reduces, and the rest of the equation
-with it. A branch types its product for the values that reach it: where its reach
-says `u in S`, u is `?::(L & S)` inside the branch (§6).
+A branch types its product for the values that reach it: where its reach says
+`u in S`, the unknown `?ₖ::L` is rewritten `?ₖ::(L & S)` in the product (§6). An
+atom `u in S` that stays is simplified on each side by the same law (Boole):
+
+```text
+eq = (u in S) ? {true -> eq  -> eq}
+```
+
+On each side the atom reduces, and eq with it.
 
 ```text
 a -> ??::u8
-u8:x -> a + 1                          layout 1..256: not proven
-u8:y -> a ? {<255 -> a + 1  -> 0}      a is ?::(0..254) in the branch: 1..255  ✓
+u8:x -> a + 1                          refuted: false when ?₁ is 255
+u8:y -> a ? {<255 -> a + 1  -> 0}      a is ?₁::(0..254) in the branch: 1..255  ✓
+a ? {=3 -> a + 252  -> a}              = ?₁ ? {3 -> 255  -> ?₁}
 ```
 
 What is checked, and where:

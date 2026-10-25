@@ -30,7 +30,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 		solution := binding_type(k, p)
 		if solved(solution, root) {
 			if s == root do return solution
-			values := make(map[^Unknown]Type)
+			values := make(Rewrite)
 			substitutable := true
 			for b, v in s.changes {
 				u, is_unknown := binding_type(k, b).(^Unknown)
@@ -38,11 +38,9 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 					substitutable = false
 					break
 				}
-				values[u] = v
+				values[u.id] = v
 			}
-			if substitutable {
-				if r, done := substitute(k, solution, &Substitution{values = values}); done do return r
-			}
+			if substitutable do return rewrite(k, solution, values)
 		}
 	}
 	out := new(Collapse)
@@ -123,14 +121,14 @@ solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 	for b, v in call.changes {
 		x, same_unknown := binding_type(k, b).(^Unknown)
 		step, is_sum := as_sum(v)
-		if !same_unknown || x != u || !is_sum || !same_sum(step, sum_add(unknown_sum(u), sum_constant(-1))) do return value
+		if !same_unknown || x.id != u.id || !is_sum || !same_sum(step, sum_add(unknown_sum(u), sum_constant(-1))) do return value
 	}
 	degree := 0
 	for q in g.products {
-		for f in q.factors do if f != u do return value
+		for f in q.factors do if f.id != u.id do return value
 		degree = max(degree, len(q.factors))
 	}
-	if subset(k, known_layout(k, u), new_range(Int(base), nil, .Int)) != .True do return value
+	if !included(k, layout_of(k, u), new_range(Int(base), nil, .Int)) do return value
 	sums := power_sums(u, degree)
 	total := sum_scale(sums[0], g.constant)
 	for q in g.products do total = sum_add(total, sum_scale(sums[len(q.factors)], q.coef))
@@ -213,70 +211,11 @@ sum_eval :: proc(s: Sum, u: ^Unknown, v: i128) -> (i128, bool) {
 	for q in s.products {
 		term := q.coef
 		for f in q.factors {
-			if f != u do return 0, false
+			if f.id != u.id do return 0, false
 			term *= v
 		}
 		total += term
 	}
 	if total % s.denom != 0 do return 0, false
 	return total / s.denom, true
-}
-
-// --- substitution ---
-
-// Substitution: unknowns replaced by values (a call of a solved equation), or
-// every unknown by its known layout (the image of a term, prove.odin).
-Substitution :: struct {
-	values:  map[^Unknown]Type,
-	layouts: bool,
-}
-
-// substitute: t with its unknowns replaced, put in normal form by the same laws;
-// false when t holds a term the replacement does not reach.
-substitute :: proc(k: ^Kernel, t: Type, s: ^Substitution) -> (out: Type, ok: bool) {
-	switch v in t {
-	case Char, Int, Real, Bool, None, Invalid:
-		return t, true
-	case ^Unknown:
-		if x, found := s.values[v]; found do return x, true
-		return s.layouts ? known_layout(k, v) : Type(v), true
-	case ^Operation:
-		if v.op == .In && s.layouts do return family_term(.Bool), true // a boolean, whose value the layouts do not give
-		args := make([]Type, len(v.args))
-		for a, i in v.args do args[i] = substitute(k, a, s) or_return
-		return operation_law(k, v.op, args, v.span), true
-	case ^Or:
-		terms := make([]Type, len(v.terms))
-		for a, i in v.terms do terms[i] = substitute(k, a, s) or_return
-		return or_law(k, terms), true
-	case ^And:
-		terms := make([]Type, len(v.terms))
-		for a, i in v.terms do terms[i] = substitute(k, a, s) or_return
-		return and_law(k, terms), true
-	case ^Not:
-		return not_law(k, substitute(k, v.term, s) or_return), true
-	case ^Is:
-		return is_law(substitute(k, v.term, s) or_return), true
-	case ^Range:
-		lo, hi: Type
-		if v.lo != nil do lo = substitute(k, v.lo, s) or_return
-		if v.hi != nil do hi = substitute(k, v.hi, s) or_return
-		return range_law(k, lo, hi, v.family, v.span), true
-	case ^Pattern:
-		if s.layouts do return nil, false
-		p := new(Pattern)
-		p.span = v.span
-		p.target = substitute(k, v.target, s) or_return
-		p.branches = make([]Branch, len(v.branches))
-		for b, i in v.branches {
-			p.branches[i] = b
-			p.branches[i].scope = nil
-			p.branches[i].product = substitute(k, b.product, s) or_return
-		}
-		return pattern_law(k, p), true
-	case ^Collapse:
-		if f, known := family_of(k, v); known && s.layouts do return family_term(f), true
-	case ^Scope, ^Name, ^Access, ^Carve, ^Default:
-	}
-	return nil, false
 }

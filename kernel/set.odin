@@ -7,10 +7,9 @@ import "core:slice"
 // A constant type — a term without unknown — is read family by family (Reading):
 // its integers, its reals, its strings (characters included), its booleans, its
 // scopes. The laws of | & ~ act on each family; ~ is the absolute complement, so
-// it complements every family. The reading decides whether a constant type is
-// empty, in another, equal to another — three-valued: a reading that is not exact
-// decides nothing. The normal form of a constant combination is rebuilt from its
-// reading, as terms of the grammar.
+// it complements every family. The normal form of a constant combination is
+// rebuilt from its reading, as terms of the grammar. A reading that is not exact
+// computes nothing: the combination stays as it is written.
 
 Bool_Value :: enum u8 {
 	False,
@@ -27,17 +26,6 @@ Reading :: struct {
 	scopes:     [dynamic]Type, // scope values, or shapes, held as they are
 	all_scopes: bool, // every scope: from a complement
 	exact:      bool,
-}
-
-// Truth: what a decision answers. Unknown is never taken for true.
-Truth :: enum u8 {
-	False,
-	True,
-	Unknown,
-}
-
-truth :: proc(b: bool) -> Truth {
-	return b ? .True : .False
 }
 
 reading_none :: proc() -> Reading {
@@ -214,28 +202,25 @@ reading_is_empty :: proc(r: Reading) -> bool {
 	return len(r.ints) == 0 && len(r.reals) == 0 && words_is_empty(r.words) && r.bools == {} && len(r.scopes) == 0 && !r.all_scopes
 }
 
-// --- decisions on constant types ---
+// --- inclusion, read on normal forms ---
 
-// empty: the constant type t has no element.
-empty :: proc(k: ^Kernel, t: Type) -> Truth {
-	r := read(k, t)
-	if r.exact do return truth(reading_is_empty(r))
-	if _, _, bounded := int_bounds(k, t); bounded do return .False
-	return .Unknown
+// included: a & ~b = none: every element of a is in b.
+included :: proc(k: ^Kernel, a, b: Type) -> bool {
+	return is_none(and_law(k, {a, not_law(k, b)}))
 }
 
-// subset: every element of a is in b.
-subset :: proc(k: ^Kernel, a, b: Type) -> Truth {
-	r := reading_intersect(k, read(k, a), reading_complement(read(k, b)))
-	if r.exact do return truth(reading_is_empty(r))
-	return bounds_subset(k, a, b)
+// apart: a & b = none: a and b have no element in common.
+apart :: proc(k: ^Kernel, a, b: Type) -> bool {
+	return is_none(and_law(k, {a, b}))
 }
 
-// disjoint: a and b have no element in common.
-disjoint :: proc(k: ^Kernel, a, b: Type) -> Truth {
-	r := reading_intersect(k, read(k, a), read(k, b))
-	if r.exact do return truth(reading_is_empty(r))
-	return bounds_disjoint(k, a, b)
+// inhabited: a constant type whose normal form shows an element: computed whole
+// and not none, or a set of integers with its least and greatest elements.
+inhabited :: proc(k: ^Kernel, t: Type) -> bool {
+	if !is_constant(t) || is_none(t) do return false
+	if r := read(k, t); r.exact do return !reading_is_empty(r)
+	_, _, bounded := int_bounds(k, t)
+	return bounded
 }
 
 // --- integer sets that the laws leave as an operation ---
@@ -244,8 +229,7 @@ disjoint :: proc(k: ^Kernel, a, b: Type) -> Truth {
 // results on their elements (§4.5). It stays the operation, whose least and
 // greatest elements are known by the order of the integers: they are results at
 // the bounds of its operands (a <= a' and b >= 0 give a * b <= a' * b). They are
-// elements of the set. So the set is in b when everything between them is, and
-// it is not when one of them is not.
+// elements of the set: (A op B) & X = none when nothing between them is in X.
 
 // int_bounds: the least and greatest elements of a constant set of integers; nil
 // on a side where it has none.
@@ -346,43 +330,18 @@ div_extended :: proc(x, y: Extended) -> Extended {
 	return {x.value / y.value, false}
 }
 
-// bounds_subset: a set of integers left as an operation is in b when its least and
-// greatest elements and everything between are; it is not when one of them is not.
-bounds_subset :: proc(k: ^Kernel, a, b: Type) -> Truth {
-	lo, hi, ok := int_bounds(k, a)
-	if !ok do return .Unknown
-	r := read(k, b)
-	if !r.exact do return .Unknown
-	hull := Ints{{lo, hi}}
-	if len(ints_intersect(hull, ints_complement(r.ints, {nil, nil}))) == 0 do return .True
-	if !holds_bound(r.ints, lo, true) || !holds_bound(r.ints, hi, false) do return .False
-	return .Unknown
-}
-
-// bounds_disjoint: no element in common when nothing between the least and the
-// greatest is in b; some when one of them is.
-bounds_disjoint :: proc(k: ^Kernel, a, b: Type) -> Truth {
-	lo, hi, ok := int_bounds(k, a)
-	if !ok do return .Unknown
-	r := read(k, b)
-	if !r.exact do return .Unknown
-	hull := Ints{{lo, hi}}
-	if len(ints_intersect(hull, r.ints)) == 0 do return .True
-	if holds_bound(r.ints, lo, true) || holds_bound(r.ints, hi, false) do return .False
-	return .Unknown
-}
-
-// holds_bound: s holds the bound — an element, or, infinite, the elements beyond
-// every integer on that side.
-holds_bound :: proc(s: Ints, bound: Maybe(i128), below: bool) -> bool {
-	if v, finite := bound.?; finite do return ints_contains(s, v)
-	if len(s) == 0 do return false
-	if below {
-		_, bounded := s[0].lo.?
-		return !bounded
+// bounded_apart: one of the constants is a set of integers left as an operation,
+// and nothing between its least and greatest elements is in the others: their
+// & is none.
+bounded_apart :: proc(k: ^Kernel, constants: []Type) -> bool {
+	for c, i in constants {
+		lo, hi, bounded := int_bounds(k, c)
+		if !bounded do continue
+		rest := Reading{words = words_all(), ints = slice.clone(Ints{{nil, nil}}), exact = true}
+		for d, j in constants do if j != i do rest = reading_intersect(k, rest, read(k, d))
+		if rest.exact && len(ints_intersect(Ints{{lo, hi}}, rest.ints)) == 0 do return true
 	}
-	_, bounded := s[len(s) - 1].hi.?
-	return !bounded
+	return false
 }
 
 // --- normal forms of constant combinations ---

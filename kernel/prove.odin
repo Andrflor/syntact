@@ -2,141 +2,79 @@ package kernel
 
 import syn "../compiler"
 import "core:fmt"
+import "core:strings"
 
 // THE CHECK (specs/types.md §7)
 //
 //   C:x -> V    ⟺    V in C = true
 //
-// With unknowns, `V in C` is an equation; each ?ₖ::L ranges over the values of L.
-// Its normal form decides it: true for every value of the unknowns, false for
-// every one, or it stays. What stays is decided by the laws again, on each side
-// of an atom `u in S` of the equation (Boole: f = (a [&] f[a := true]) [|]
-// ([~]a [&] f[a := false])), where u is ?::(L & S), then ?::(L & ~S): the atom
-// reduces on each side, and the rest with it. A pattern is decided branch by
-// branch, each under its reach. What the laws leave is not proven: refused.
+// The check simplifies `V in C` by the laws, and reads what is left. It solves
+// nothing. Its result is a verdict, not a type:
+//
+//   Proven     the equation is true for every value of its unknowns
+//   Refuted    a value of the unknowns makes it false: a counterexample
+//   Unproven   it stays an equation
+//
+// An atom `u in S` that stays is simplified on each side (Boole), by the law of
+// the pattern: eq = (u in S) ? {true -> eq  -> eq}, where each side rewrites u
+// into ?ₖ::(L & S), then ?ₖ::(L & ~S): the atom reduces there, and eq with it.
+// A pattern is proven when each branch some value reaches is; it is refuted when
+// one is refuted for values that its rewrite says exactly.
 
-// known_layout: the layout of an unknown where it is asked: narrowed by the
-// branches around (Facts), or its own.
-known_layout :: proc(k: ^Kernel, u: ^Unknown) -> Type {
-	return known_layout_in(k, k.facts, u)
+Verdict :: enum u8 {
+	Proven,
+	Unproven,
+	Refuted,
 }
 
-known_layout_in :: proc(k: ^Kernel, facts: Facts, u: ^Unknown) -> Type {
-	if l, found := facts[u]; found do return l
-	ready_layout(k, u)
-	return u.layout
-}
-
-// layout_image: a term over unknowns, each replaced by its layout: an operator
-// distributes over |, so the term is one value of this image (§4.5).
-layout_image :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
-	return substitute(k, t, &Substitution{layouts = true})
-}
-
-// elements_in: every element of t is in the type f (§4.5: a set is in a family
-// when each of its elements is).
-elements_in :: proc(k: ^Kernel, t: Type, f: Type) -> Truth {
-	if is_invalid(t) do return .True
-	if is_value(k, t) do return decide(k, in_law(k, t, f))
-	if !is_constant(t) do return .Unknown
-	if r := subset(k, t, f); r != .Unknown do return r
-	// a set the laws leave as an operation: its elements are in the family of its result
-	if family, known := family_of(k, t); known do return subset(k, family_term(family), f)
-	return .Unknown
-}
-
-// decide: the truth of a boolean in normal form for every value of its unknowns.
-decide :: proc(k: ^Kernel, eq: Type) -> Truth {
+// prove: the verdict on a boolean in normal form; when refuted, the rewrite of the
+// unknowns for which it is false.
+prove :: proc(k: ^Kernel, eq: Type) -> (Verdict, Rewrite) {
 	#partial switch v in eq {
 	case Bool:
-		return truth(bool(v))
+		return bool(v) ? .Proven : .Refuted, k.rewrite
 	case Invalid:
-		return .True // already reported
-	case None:
-		return .False
+		return .Proven, nil // already reported
 	case ^Pattern:
-		return decide_branches(k, v)
-	case ^Operation:
-		// the layout of the equation: true, or false, for every value
-		if image, ok := layout_image(k, eq); ok {
-			if is_bool(image, true) do return .True
-			if is_bool(image, false) do return .False
-		}
-		#partial switch v.op {
-		case .Bit_Not:
-			return negate(decide(k, v.args[0]))
-		case .Bit_And:
-			a, b := decide(k, v.args[0]), decide(k, v.args[1])
-			if a == .True && b == .True do return .True
-			if a == .False || b == .False do return .False
-		case .Bit_Or:
-			a, b := decide(k, v.args[0]), decide(k, v.args[1])
-			if a == .True || b == .True do return .True
-			if a == .False && b == .False do return .False
-		}
+		return prove_branches(k, v)
 	}
-	return split(k, eq)
+	if u, s, found := find_atom(k, eq); found do return prove(k, boole(k, u, s, eq))
+	return .Unproven, nil
 }
 
-negate :: proc(t: Truth) -> Truth {
-	switch t {
-	case .True:
-		return .False
-	case .False:
-		return .True
-	case .Unknown:
-	}
-	return .Unknown
+// boole: eq = (u in S) ? {true -> eq  -> eq}.
+boole :: proc(k: ^Kernel, u: ^Unknown, s: Type, eq: Type) -> Type {
+	p := new(Pattern)
+	p.target = new_operation(.In, u, s)
+	p.branches = make([]Branch, 2)
+	p.branches[0] = Branch{cover = Bool(true), product = eq}
+	p.branches[1] = Branch{product = eq}
+	return pattern_law(k, p)
 }
 
-// decide_branches: a pattern is true when every branch some value reaches gives
-// true under its reach, false when every one gives false.
-decide_branches :: proc(k: ^Kernel, p: ^Pattern) -> Truth {
+prove_branches :: proc(k: ^Kernel, p: ^Pattern) -> (Verdict, Rewrite) {
 	reached, _, _ := reaches(k, p.target, p.branches)
-	results := make([dynamic]Truth)
+	verdict := Verdict.Proven
 	for r in reached {
-		saved := k.facts
-		k.facts = r.facts
-		append(&results, decide(k, p.branches[r.branch].product))
-		k.facts = saved
+		saved := k.rewrite
+		k.rewrite = r.rewrite
+		v, witness := prove(k, p.branches[r.branch].product)
+		k.rewrite = saved
+		switch v {
+		case .Proven:
+		case .Refuted:
+			if r.exact do return .Refuted, witness
+			verdict = .Unproven
+		case .Unproven:
+			verdict = .Unproven
+		}
 	}
-	return all_of(results[:])
+	return verdict, nil
 }
 
-all_of :: proc(results: []Truth) -> Truth {
-	all_true, all_false := true, true
-	for t in results {
-		all_true &&= t == .True
-		all_false &&= t == .False
-	}
-	if all_true do return .True
-	if all_false do return .False
-	return .Unknown
-}
-
-// split: the equation decided on each side of one of its atoms `u in S`.
-split :: proc(k: ^Kernel, eq: Type) -> Truth {
-	u, s, found := find_atom(k, eq)
-	if !found do return .Unknown
-	layout := known_layout(k, u)
-	results := make([dynamic]Truth)
-	for side in ([2]Type{s, not_law(k, s)}) {
-		narrowed := and_law(k, {layout, side})
-		if is_none(narrowed) do continue
-		saved := k.facts
-		facts := make(Facts)
-		for x, l in saved do facts[x] = l
-		facts[u] = narrowed
-		k.facts = facts
-		append(&results, decide(k, normal(k, eq)))
-		k.facts = saved
-	}
-	return all_of(results[:])
-}
-
-// find_atom: an atom `u in S` that each side decides — S a constant type
-// without scope, the layout of u too — among the atoms of the equation and the
-// conditions of the patterns in it: on each side, the pattern reduces.
+// find_atom: an atom `u in S` that each side reduces — S a constant type without
+// scope, the layout of u too — among the atoms of the equation and the conditions
+// of the patterns in it.
 find_atom :: proc(k: ^Kernel, eq: Type) -> (^Unknown, Type, bool) {
 	#partial switch v in eq {
 	case ^Operation:
@@ -153,29 +91,53 @@ find_atom :: proc(k: ^Kernel, eq: Type) -> (^Unknown, Type, bool) {
 	return nil, nil, false
 }
 
-// atom: t is `u in S`, decided on each side.
+// atom: t is `u in S`, reduced on each side.
 atom :: proc(k: ^Kernel, t: Type) -> (^Unknown, Type, bool) {
 	o, is_op := t.(^Operation)
 	if !is_op || o.op != .In do return nil, nil, false
 	u, is_unknown := o.args[0].(^Unknown)
-	if !is_unknown || !decidable(k, o.args[1]) || !decidable(k, known_layout(k, u)) do return nil, nil, false
+	if !is_unknown || !readable(k, o.args[1]) || !readable(k, layout_of(k, u)) do return nil, nil, false
 	return u, o.args[1], true
 }
 
-decidable :: proc(k: ^Kernel, t: Type) -> bool {
+// readable: a constant type without scope, whose normal form is computed whole.
+readable :: proc(k: ^Kernel, t: Type) -> bool {
 	if !is_constant(t) do return false
 	r := read(k, t)
 	return r.exact && len(r.scopes) == 0
 }
 
+// proven_in: every element of t is in f — for a value, `t in f` is proven; for a
+// set, t & ~f = none (§4.5: a set is in a family when each of its elements is).
+proven_in :: proc(k: ^Kernel, t: Type, f: Type) -> bool {
+	if is_invalid(t) do return true
+	if is_value(k, t) {
+		verdict, _ := prove(k, in_law(k, t, f))
+		return verdict == .Proven
+	}
+	return included(k, t, f)
+}
+
 // check_in: V in C, for every value of the unknowns.
 check_in :: proc(k: ^Kernel, value, color: Type, span: syn.Span) {
 	if is_invalid(value) || is_invalid(color) do return
-	switch decide(k, in_law(k, value, color)) {
-	case .True:
-	case .False:
-		report(k, .Constraint_Mismatch, span, fmt.tprintf("%s is not in %s", print_type(value), print_type(color)))
-	case .Unknown:
+	switch verdict, witness := prove(k, in_law(k, value, color)); verdict {
+	case .Proven:
+	case .Refuted:
+		report(k, .Constraint_Mismatch, span, fmt.tprintf("%s is not in %s%s", print_type(value), print_type(color), print_witness(witness)))
+	case .Unproven:
 		report(k, .Constraint_Mismatch, span, fmt.tprintf("%s is not proven to be in %s", print_type(value), print_type(color)))
 	}
+}
+
+// print_witness: the values of the unknowns for which the equation is false.
+print_witness :: proc(r: Rewrite) -> string {
+	if len(r) == 0 do return ""
+	parts := make([dynamic]string)
+	for id, t in r {
+		layout := t
+		if u, ok := t.(^Unknown); ok do layout = u.layout
+		append(&parts, fmt.tprintf("?%d in %s", id, print_type(layout)))
+	}
+	return fmt.tprintf(" when %s", strings.join(parts[:], ", "))
 }

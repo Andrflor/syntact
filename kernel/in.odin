@@ -28,19 +28,12 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if is_invalid(x) || is_invalid(c) do return Invalid{}
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
-	if u, ok := x.(^Unknown); ok && (same(k, known_layout(k, u), c) || same(k, u.layout, c)) do return Bool(true) // (t::L) in L
+	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
 	if s, ok := c.(^Scope); ok do return admits(k, x, s)
 	if i, ok := c.(^Is); ok do return equal_law(k, x, i.term)
 	if is_none(x) {
-		if is_constant(c) {
-			switch empty(k, c) {
-			case .True:
-				return Bool(true)
-			case .False:
-				return Bool(false)
-			case .Unknown:
-			}
-		}
+		if is_none(c) do return Bool(true)
+		if inhabited(k, c) do return Bool(false)
 		return new_operation(.In, x, c)
 	}
 	if is_constant(c) {
@@ -75,7 +68,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 // primitives; a complement also holds every scope and every set taken as a value.
 // A boolean b is in =true when it is true: b in true = b, b in false = [~]b.
 in_reading :: proc(k: ^Kernel, x, c: Type, r: Reading) -> Type {
-	if is_primitive(x) do return Bool(disjoint(k, x, c) == .False)
+	if is_primitive(x) do return Bool(!apart(k, x, c))
 	if v, is_bool := c.(Bool); is_bool {
 		if _, is_op := x.(^Operation); is_op {
 			if f, known := family_of(k, x); known && f == .Bool do return bool(v) ? x : bool_not(x)
@@ -86,7 +79,7 @@ in_reading :: proc(k: ^Kernel, x, c: Type, r: Reading) -> Type {
 	case ^Scope:
 		return Bool(r.all_scopes)
 	case ^Unknown:
-		return layout_in(k, x, known_layout(k, v), c)
+		return layout_in(k, x, layout_of(k, v), c)
 	}
 	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
 		return in_law(k, u, rebuild(k, Reading{ints = preimage(r.ints, a, b), words = words_empty(), exact = true}))
@@ -95,11 +88,11 @@ in_reading :: proc(k: ^Kernel, x, c: Type, r: Reading) -> Type {
 	return new_operation(.In, x, c)
 }
 
-// layout_in: x, one value of the layout L, is in c when L is, and is not when L
-// and c are disjoint.
+// layout_in: x, one value of the layout L: x in c = true when L & ~c = none,
+// false when L & c = none (§7).
 layout_in :: proc(k: ^Kernel, x, layout, c: Type) -> Type {
-	if subset(k, layout, c) == .True do return Bool(true)
-	if disjoint(k, layout, c) == .True do return Bool(false)
+	if included(k, layout, c) do return Bool(true)
+	if apart(k, layout, c) do return Bool(false)
 	return new_operation(.In, x, c)
 }
 
@@ -108,29 +101,24 @@ equal_law :: proc(k: ^Kernel, x, t: Type) -> Type {
 	if is_invalid(x) || is_invalid(t) do return Invalid{}
 	if same(k, x, t) do return Bool(true)
 	if is_constant(x) && is_constant(t) {
-		switch values_equal(k, x, t) {
-		case .True:
-			return Bool(true)
-		case .False:
-			return Bool(false)
-		case .Unknown:
-		}
+		if equal, known := values_equal(k, x, t); known do return Bool(equal)
 	}
 	if is_primitive(x) && is_value(k, t) do return in_law(k, t, x) // t in =x: a primitive is its own singleton
 	return new_operation(.In, x, new_is(t))
 }
 
-// values_equal: two known values are equal: two sets when each is in the other,
-// two scopes when their bindings are (§5.3).
-values_equal :: proc(k: ^Kernel, a, b: Type) -> Truth {
+// values_equal: two constant values are equal: two sets when a & ~b and b & ~a
+// are none, and not when one shows an element; two scopes when their bindings
+// are (§5.3). Not known otherwise.
+values_equal :: proc(k: ^Kernel, a, b: Type) -> (equal: bool, known: bool) {
 	_, a_scope := a.(^Scope)
 	_, b_scope := b.(^Scope)
-	if a_scope || b_scope do return truth(a_scope && b_scope && same(k, a, b))
-	x := subset(k, a, b)
-	y := subset(k, b, a)
-	if x == .True && y == .True do return .True
-	if x == .False || y == .False do return .False
-	return .Unknown
+	if a_scope || b_scope do return a_scope && b_scope && same(k, a, b), true
+	x := and_law(k, {a, not_law(k, b)})
+	y := and_law(k, {b, not_law(k, a)})
+	if is_none(x) && is_none(y) do return true, true
+	if inhabited(k, x) || inhabited(k, y) do return false, true
+	return false, false
 }
 
 // is_value: t is one value for each value of its unknowns, not a set of them: an

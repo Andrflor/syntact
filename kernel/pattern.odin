@@ -12,11 +12,11 @@ import "core:fmt"
 //   t ? {c -> p  -> p} = p           all its branches give the same product
 //
 // A branch is reached by the values of the target in its cover and in none of the
-// covers above: its reach, `t in c [&] [~](t in c₀) …`. What a branch types holds
-// for those values: where the reach says `u in S` of an unknown u, u is, inside
-// the branch, `?::(L & S)` — its layout narrowed (Facts). A branch that no value
-// reaches is not typed. A value of the target that no branch takes makes the
-// pattern non-exhaustive.
+// covers above: its reach, `t in c [&] [~](t in c₀) …`. Its product holds for
+// those values: where the reach says `u in S`, the unknown `?ₖ::L` is rewritten
+// `?ₖ::(L & S)` in the product (rewrite.odin). A branch that no value reaches is
+// not typed. A value of the target that no branch takes makes the pattern
+// non-exhaustive: `[~]rest` must be proven, rest being the values no cover takes.
 
 pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	target := normal(k, p.target)
@@ -25,16 +25,18 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	out := make([dynamic]Branch)
 	for r in reached {
 		b := p.branches[r.branch]
-		saved := k.facts
-		k.facts = r.facts
-		if b.scope != nil do b.scope.facts = r.facts
-		product := normal(k, b.product)
-		k.facts = saved
+		saved := k.rewrite
+		k.rewrite = r.rewrite
+		if b.scope != nil do b.scope.rewrite = r.rewrite
+		product := rewrite(k, normal(k, b.product), r.rewrite)
+		k.rewrite = saved
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 	}
-	if complete && rest != nil && decide(k, rest) != .False {
-		report(k, .Non_Exhaustive_Pattern, p.span, fmt.tprintf("a value of %s is not proven taken by a branch", print_type(target)))
+	if complete && rest != nil {
+		if verdict, _ := prove(k, bool_not(rest)); verdict != .Proven {
+			report(k, .Non_Exhaustive_Pattern, p.span, fmt.tprintf("a value of %s is not proven taken by a branch", print_type(target)))
+		}
 	}
 	if len(out) == 0 do return None{}
 	all_same := true
@@ -45,13 +47,15 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	return r
 }
 
-// Reach: a branch that values of the target reach: its cover, the layouts its
-// reach narrows, and whether every value that comes to it takes it.
+// Reach: a branch that values of the target reach: its cover, the rewrite of its
+// unknowns, whether every value that comes to it takes it, and whether the rewrite
+// says all of its reach.
 Reach :: struct {
-	branch: int,
-	cover:  Type,
-	facts:  Facts,
-	all:    bool,
+	branch:  int,
+	cover:   Type,
+	rewrite: Rewrite,
+	all:     bool,
+	exact:   bool,
 }
 
 // reaches: the branches values of the target reach, up to one that every value
@@ -74,25 +78,27 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		}
 		reach := bool_and(rest, cond)
 		rest = bool_and(rest, bool_not(cond))
-		facts, reached := narrow(k, k.facts, reach)
+		r, reached, exact := narrow(k, k.rewrite, reach)
 		if !reached do continue
 		all := is_bool(rest, false)
-		append(&out, Reach{i, cover, facts, all})
+		append(&out, Reach{i, cover, r, all, exact})
 		if all do return out, nil, complete
 	}
 	return out, rest, complete
 }
 
-// narrow: the layouts a reach narrows: `u in S` narrows u to L & S, `[~](u in S)`
-// to L & ~S, through [&]. False when the reach is false, or narrows a layout to
-// none: no value reaches.
-narrow :: proc(k: ^Kernel, facts: Facts, reach: Type) -> (Facts, bool) {
-	if is_bool(reach, false) || is_invalid(reach) do return nil, false
-	out := facts
+// narrow: the rewrite a reach makes: through [&], `u in S` rewrites ?ₖ::L into
+// ?ₖ::(L & S), `[~](u in S)` into ?ₖ::(L & ~S). Not reached when the reach is
+// false, or a layout becomes none. Exact when the reach is all said so.
+narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached: bool, exact: bool) {
+	if is_bool(reach, false) || is_invalid(reach) do return nil, false, false
+	out = base
 	copied := false
+	exact = true
 	literals := make([dynamic]Type)
 	conjuncts(reach, &literals)
 	for l in literals {
+		if is_bool(l, true) do continue
 		positive := true
 		atom := l
 		if n, ok := l.(^Operation); ok && n.op == .Bit_Not {
@@ -100,20 +106,30 @@ narrow :: proc(k: ^Kernel, facts: Facts, reach: Type) -> (Facts, bool) {
 			atom = n.args[0]
 		}
 		o, is_op := atom.(^Operation)
-		if !is_op || o.op != .In do continue
+		if !is_op || o.op != .In {
+			exact = false
+			continue
+		}
 		u, is_unknown := o.args[0].(^Unknown)
-		if !is_unknown || !is_constant(o.args[1]) do continue
-		part := positive ? o.args[1] : not_law(k, o.args[1])
-		layout := and_law(k, {known_layout_in(k, out, u), part})
-		if is_none(layout) do return nil, false
+		if !is_unknown || !is_constant(o.args[1]) {
+			exact = false
+			continue
+		}
+		current := layout_of(k, u)
+		if x, found := out[u.id]; found {
+			current = x
+			if w, ok := x.(^Unknown); ok do current = layout_of(k, w)
+		}
+		layout := and_law(k, {current, positive ? o.args[1] : not_law(k, o.args[1])})
+		if is_none(layout) do return nil, false, false
 		if !copied {
-			out = make(Facts)
-			for x, l in facts do out[x] = l
+			out = make(Rewrite)
+			for id, t in base do out[id] = t
 			copied = true
 		}
-		out[u] = layout
+		out[u.id] = narrowing(u, layout)
 	}
-	return out, true
+	return out, true, exact
 }
 
 // conjuncts: the terms of a [&].

@@ -202,7 +202,7 @@ Scope :: struct {
 	source:    ^Scope, // a copy (carve, coloring): the scope it copies
 	carved:    ^Scope, // a carve: the scope it carves, uncarved
 	changes:   map[^Binding]Type, // a carve: the values of the bindings of `carved` it replaces
-	facts:     Facts, // a branch, a carve: the layouts narrowed where it is typed
+	rewrite:   Rewrite, // a branch, a carve: the unknowns rewritten where it is typed
 	placed:    [View][]^Binding, // its bindings with the expansions placed
 	placed_by: bit_set[View], // the views placed
 	complete:  bool, // all its bindings are built: all are visible
@@ -221,9 +221,6 @@ View :: enum u8 {
 	Shape,
 }
 
-// Facts: the layout of an unknown narrowed by the branches that reach a term: it
-// holds the values of the unknown for which the term is asked (§6).
-Facts :: map[^Unknown]Type
 
 // --- helpers ---
 

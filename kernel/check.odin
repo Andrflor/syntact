@@ -43,8 +43,8 @@ check_binding :: proc(k: ^Kernel, b: ^Binding) {
 	value := binding_type(k, b)
 	color := binding_color(k, b)
 	if color == nil || value == nil do return
-	saved := k.facts
-	k.facts = scope_facts(b.scope)
+	saved := k.rewrite
+	k.rewrite = scope_rewrite(b.scope)
 	check_in(k, value, color, b.span)
-	k.facts = saved
+	k.rewrite = saved
 }

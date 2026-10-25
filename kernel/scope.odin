@@ -171,13 +171,13 @@ derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span
 	merged := make(map[^Binding]Type)
 	for b, v in s.changes do merged[b] = v
 	for b, v in changes do merged[s.carved != nil ? b.source : b] = v
-	facts := merge_facts(k, scope_facts(root.parent), k.facts)
+	r := merge_rewrites(k, scope_rewrite(root.parent), k.rewrite)
 	key := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&key, "%p", root)
 	for b in root.bindings do if v, carved := merged[b]; carved do fmt.sbprintf(&key, "|%p:%s", b, key_of(v))
-	fmt.sbprintf(&key, "|%s", facts_key(facts))
+	fmt.sbprintf(&key, "|%s", rewrite_key(r))
 	if c, found := k.copies[strings.to_string(key)]; found do return c
-	c := copy_scope(k, root, merged, facts)
+	c := copy_scope(k, root, merged, r)
 	c.carved, c.changes = root, merged
 	k.copies[strings.clone(strings.to_string(key))] = c
 	check_carve(k, c, span)
@@ -187,9 +187,9 @@ derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span
 // check_carve: the bindings of a carve whose equation changed — the replaced ones,
 // and those that name them — are typed and checked, with their errors at the carve.
 check_carve :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) {
-	saved_site, saved_facts := k.site, k.facts
+	saved_site, saved_rewrite := k.site, k.rewrite
 	if k.site == {} do k.site = span
-	k.facts = scope_facts(c)
+	k.rewrite = scope_rewrite(c)
 	for b in c.bindings {
 		if b.kind == .Product || b.kind == .Expand do continue
 		v := binding_type(k, b)
@@ -198,23 +198,7 @@ check_carve :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) {
 		if !b.carved && same(k, v, binding_type(k, b.source)) && same(k, color, binding_color(k, b.source)) do continue
 		check_in(k, v, color, b.span)
 	}
-	k.site, k.facts = saved_site, saved_facts
-}
-
-merge_facts :: proc(k: ^Kernel, a, b: Facts) -> Facts {
-	if a == nil do return b
-	if b == nil do return a
-	out := make(Facts)
-	for u, l in a do out[u] = l
-	for u, l in b do out[u] = u in out ? and_law(k, {out[u], l}) : l
-	return out
-}
-
-facts_key :: proc(facts: Facts) -> string {
-	parts := make([dynamic]string)
-	for u, l in facts do append(&parts, fmt.tprintf("%d:%s", u.id, key_of(l)))
-	slice.sort(parts[:])
-	return strings.join(parts[:], ",")
+	k.site, k.rewrite = saved_site, saved_rewrite
 }
 
 // --- copies ---
@@ -226,10 +210,10 @@ Copier :: struct {
 	scopes:   map[^Scope]^Scope,
 }
 
-copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, facts: Facts) -> ^Scope {
+copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, r: Rewrite) -> ^Scope {
 	m := Copier{}
 	c := copy_into(k, &m, s, s.parent)
-	c.facts = facts
+	c.rewrite = r
 	for b in c.bindings {
 		if v, carved := changes[b.source]; carved {
 			b.value, b.carved = v, true
@@ -539,7 +523,7 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok
 	case ^Unknown:
 		y, ok := b.(^Unknown)
-		return ok && x == y
+		return ok && x.id == y.id // the same unknown, whatever layout a branch gives it
 	case ^Or:
 		y, ok := b.(^Or)
 		return ok && same_all(k, x.terms, y.terms)
