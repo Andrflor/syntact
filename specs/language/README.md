@@ -1,57 +1,37 @@
-# Syntact language reference
+# The Syntact language
 
-The normative description of the language, split out of the project README. Read in order the
-first time — each part builds on the ones before it.
+Syntact is one algebra of types. Its reference is [`types.md`](../types.md); each
+chapter here presents one part of it, with examples the kernel checks. Where a chapter
+and `types.md` disagree, `types.md` wins.
 
-> **Design direction, not implementation status.** These documents describe the language as
-> intended, including features not yet implemented. What the bootstrap compiler does *today* is
-> in the root [`README.md`](../../README.md) under *Status*. The per-area working notes are the
-> sibling documents in [`specs/`](..).
+## The algebra
 
-## Orientation
+- [**Values are types**](01-values-are-types.md) — primitives, `| & ~ =`, ranges, `none`, `:` and `in`, defaults
+- [**Operators**](02-operators.md) — families, legality, terms over unknowns, strings and grammars
+- [**Scopes**](03-scopes.md) — bindings, occurrences, productions, collapse, expansion
+- [**Carving**](04-carving.md) — a copy with substitution; calling is carving, then collapsing
+- [**Shapes**](05-shapes.md) — a scope as a color: productions, structures, runs, the color that flows
+- [**Unknowns and the check**](06-unknowns-and-the-check.md) — `??`, equations, the three verdicts, proofs
+- [**Patterns**](07-patterns.md) — `?` as a type, unknown targets, destructuring
+- [**Recursion**](08-recursion.md) — closed forms, Arden, guarded productions
 
-- [**How to read Syntact**](01-reading.md) — the classical reading vs the structural one, side by side
-- [**Core rules**](02-core-rules.md) — twelve lines. Most surprises resolve to one of them
+## Open
 
-## The model
+These parts are the intent: they are not written in `types.md` yet, and the kernel
+does not build them.
 
-- [**First program**](03-first-program.md) — a file is a scope; running it is collapsing it
-- [**Scopes**](04-scopes.md) — the one primitive. What `{...}` creates, and what `...` places in it
-- [**Bindings**](05-bindings.md) — `->`, ordering, and why two bindings may share a name
-- [**Productions and collapse**](06-productions-and-collapse.md) — `->` without a left side, what `!` actually means, and why productions are lazy
-- [**Execution patterns**](07-execution-patterns.md) — `<!>` `[!]` `(!)` `|!|` — strategy at the collapse site, not in the computation
-- [**Carving**](08-carving.md) — deriving a new scope, and why a scope is closed
-- [**Defaults, completeness, immutability**](09-defaults-and-immutability.md) — why there is no null and nothing is ever mutated
+- [**Holes and genericity**](09-holes.md) — `<-`, filled at the use site or inferred
+- [**Effects and handlers**](10-effects-and-handlers.md) — `>-` and `-<`, served by the context of the call
+- [**The external boundary**](11-external-boundary.md) — `<lib>{…}`: a scope whose production points outside
+- [**State**](12-state.md) — resonance `>>-` `-<<`, reactivity `>>=` `=<<`
+- [**Execution patterns**](13-execution-patterns.md) — `<!>` `[!]` `(!)` `|!|`
+- [**Modules**](14-modules.md) — files and folders as scopes, `@`
 
-## Shapes, sets, and patterns
+## To code
 
-- [**Values are sets**](10-values-are-sets.md) — there is no separate world of types; `5` is a singleton set; `=X` takes a set as one value
-- [**Shapes**](11-shapes.md) — `:` as structural coloring that propagates inward
-- [**Patterns and destructuring**](12-patterns.md) — `?`, what a pattern covers (the value, not the color), captures, and why destructuring needs no operator
-- [**Scope algebra**](13-scope-algebra.md) — `&`, `|`, `~`, refinement — and grammars as ordinary sets
-- [**Pull bindings and genericity**](14-genericity.md) — `<-` holes, filled by `<-` or inferred from the carve. Generics without generic syntax
-
-## Effects, state, and the outside world
-
-- [**Effects, events, and handlers**](15-effects-and-handlers.md) — the one nominal thing in a structural language; DI at compile time
-- [**The external boundary**](16-external-boundary.md) — `<lib>{}` and `??::u8` — a scope whose production points out
-- [**Resonance and reactivity**](17-resonance-and-reactivity.md) — `>>-` / `-<<` for state, `>>=` / `=<<` for derived bindings
-- [**Files, folders, imports, metaprogramming**](18-modules.md) — the filesystem as a scope graph; why metaprogramming is just programming
-
-## Proofs and performance
-
-- [**Proofs**](19-proofs.md) — no proof system — the coloring *is* the obligation
-- [**Why this should be fast**](20-performance.md) — what survives reduction is what you pay for, with benchmarks
+- [**From type to code**](15-from-type-to-code.md) — the normal form is the program
 
 ---
 
-## Design notes — siblings, not language reference
-
-| Document | Covers |
-|---|---|
-| [`constraints.md`](../constraints.md) | the constraint system in full: ranges, interval arithmetic, coercion rules |
-| [`effects.md`](../effects.md) | external boundary and effects, design decisions and open questions |
-| [`interop.md`](../interop.md) | what `<lib>` does today, verified libraries, the open memory-model question |
-| [`abi.md`](../abi.md) | cross-platform calling conventions, link mechanisms, library naming |
-| [`targets.md`](../targets.md) | multi-target backend architecture — PIE, Mach-O, PE, signing, hot reload |
-| [`sdk.md`](../sdk.md) | the `syntact` command surface — run, build, bundle, doctor, format, lsp |
+Design notes outside the language — the SDK, targets, the ABI, interop, benchmarks —
+are in [`docs/`](../../docs).

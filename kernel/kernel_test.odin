@@ -188,7 +188,7 @@ SPEC_CASES := []Spec_Case {
 	{MIXED + "List:a -> {1 (-2) \"x\" 3}\nx -> a{\"y\"}", "", {.Constraint_Mismatch}},
 	// not guarded: the equation stays
 	{"L -> {\n  -> {}\n  -> {...L: ...L:}\n}\nL:a -> {}", "", {.Constraint_Mismatch}},
-	// a carve carves any binding, in turn: z{…} (specs/language/08)
+	// a carve carves any binding, in turn: z{…} (specs/language/04)
 	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nb -> a{z{a->2}}\nx -> b.z.a", "2", {}},
 	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nx -> a{z{a->300}}", "", {.Constraint_Mismatch}},
 	{"Box -> { u8:n -> 0 }\nPt -> { slot -> {u8:n->0} }\nx -> Pt{Box{1}}.slot.n", "1", {}},
@@ -205,12 +205,12 @@ SPEC_CASES := []Spec_Case {
 	// comparisons by the order of a ring; runs by the law of concatenation
 	{"a -> ??::u8\nx -> a < a + 1", "true", {}},
 	{"{...  ... u8:}:x -> {1}", "", {}},
-	// destructuring: the names of a cover are read by its product (specs/language/12)
+	// destructuring: the names of a cover are read by its product (specs/language/07)
 	{"Circle -> {u8:radius}\nc -> Circle{radius -> 5}\nx -> c ? {Circle: -> radius * radius  -> 0}", "25", {}},
 	{"Square -> {u16:side}\nDiamond -> {u16:side}\ns -> Diamond{side -> 7}\nx -> s ? {Square: | Diamond: -> side * side  -> 0}", "49", {}},
 	{ARRAY + "xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...Array{u8}:(t)} -> h\n  -> 0\n}", "3", {}},
 	{ARRAY + "xs -> {3 4 5}\nx -> xs ? {\n  {u8(h) ...Array{u8}:(t)} -> t\n  -> {}\n}", "{4  5}", {}},
-	// only a scope can be expanded: `...C:` places the default of C (specs/language/04)
+	// only a scope can be expanded: `...C:` places the default of C (specs/language/03)
 	{"x -> {1 ...u8:}", "", {.Constraint_Mismatch}},
 	{"xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...u8:(t)} -> h\n  -> 0\n}", "", {.Constraint_Mismatch}},
 	{"Pair -> {u8: u8:}\ny -> {...Pair: 3}\nx -> y.#2", "3", {}},

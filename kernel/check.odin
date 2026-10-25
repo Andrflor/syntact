@@ -38,7 +38,7 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 			}
 		case .Expand:
 			// `...e` places the value of e, `...C:` the default of C, `...` nothing:
-			// only a scope can be expanded (specs/language/04)
+			// only a scope can be expanded (specs/language/03)
 			if b.value == nil && b.color == nil do continue
 			if c := binding_color(k, b); c != nil && obligations(k, c) do continue
 			v := binding_type(k, b)

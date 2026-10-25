@@ -145,6 +145,7 @@ odin build compiler -out:compiler.bin     # the previous pipeline
 ```
 specs/types.md       the algebra
 specs/language/      the language, chapter by chapter
+docs/                design notes outside the language: SDK, targets, ABI, interop
 kernel/              the algebra, implemented
 lsp/                 the language server
 compiler/            the parser, and the previous pipeline

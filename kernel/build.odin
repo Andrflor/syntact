@@ -90,7 +90,7 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	case .Carve:
 		source := data.carve.source
 		if source != syn.INVALID_NODE && ast.node_kinds[source] == .Constraint {
-			// `C:p{…}`: p, colored by C, is the default of C carved (specs/language/11)
+			// `C:p{…}`: p, colored by C, is the default of C carved (specs/language/05)
 			build_left(k, s, source, b)
 			d := new(Default)
 			d.color, d.span = b.color, node_span(k, source)
@@ -120,7 +120,7 @@ captured :: proc(ast: ^syn.Ast, idx: syn.Node_Index) -> bool {
 }
 
 // build_captured: `C(h)` is `C:(h)`: an anonymous binding colored by C, which the
-// product of a cover reads as h (specs/language/12).
+// product of a cover reads as h (specs/language/07).
 build_captured :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, b: ^Binding) {
 	b.color = build_name(k, s, idx)
 	b.capture = syn.node_capture_str(k.ast, idx)
@@ -350,7 +350,7 @@ build_pattern :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	return p
 }
 
-// cover_view: the names a cover gives its product (specs/language/12): the
+// cover_view: the names a cover gives its product (specs/language/07): the
 // bindings of a scope written as the cover, its captures included; the named
 // bindings of the scope a cover `C:`, `C` or `C{…}:` names; of `A: | B:`, those
 // every one names.

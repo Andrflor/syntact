@@ -49,7 +49,7 @@ Every build-shaped command accepts:
 ```
 
 **`run` requires the root file-scope to have a production** — collapsing it *is* running the
-program (`specs/language/03-first-program.md`). A tree with no root production has nothing to run; use `bundle` or
+program (`specs/language/03-scopes.md`). A tree with no root production has nothing to run; use `bundle` or
 `test` instead. This is a structural precondition, not a project category (§5).
 
 **Why `run` defaults to debug and `build`/`bundle` to release:** `run` means "I am iterating"
@@ -91,13 +91,13 @@ a property of the invocation. It is never project data:
 | artifact | chosen at the invocation: `--artifact` |
 | external library names | ordinary Syntact — a binding that differs per target (§3.1) |
 | exports | ordinary Syntact — what the source says it exposes |
-| dependencies | `@` resolves the filesystem as a scope graph (`specs/language/18-modules.md`); there is no dependency list to declare |
+| dependencies | `@` resolves the filesystem as a scope graph (`specs/language/14-modules.md`); there is no dependency list to declare |
 | signing identity | a property of the machine, not the source — discovered or passed at invocation (§7.4) |
 
 A configuration layer for any of these would be a **second, weaker language** sitting beside
 Syntact and duplicating what scopes already do. That is precisely the sort of parallel ontology
 the language rejects: *"there is no separate import ontology"*, *"the compiler is the reducer
-used before runtime"* (`specs/language/18-modules.md`).
+used before runtime"* (`specs/language/14-modules.md`).
 
 ### 3.1 `@platform`
 
@@ -246,7 +246,7 @@ sdk/
 ## 5. Libraries — there is no library artifact
 
 A Syntact library is **a folder of `.syn` files**, and publishing it means shipping the
-folder. `specs/language/16-external-boundary.md` states both halves: *"there is no separate notion of
+folder. `specs/language/11-external-boundary.md` states both halves: *"there is no separate notion of
 'a library'"* and *"There is nothing to bundle."* A folder is a scope, a file is a scope, `@` resolves the
 filesystem as a scope graph, and `...@lib.geometry` expands it into the consumer, which
 reduces it *there*. No package format, no serialized IR, no interface file, no ABI, no
@@ -298,7 +298,7 @@ Since nothing is declared, each command has a **structural** precondition it che
 
 | Command | Requires |
 |---|---|
-| `run` / `build` | the root file-scope has a production — *"Running the program means collapsing the file-scope"* (`specs/language/03-first-program.md`). No production ⇒ nothing to run. |
+| `run` / `build` | the root file-scope has a production — *"Running the program means collapsing the file-scope"* (`specs/language/03-scopes.md`). No production ⇒ nothing to run. |
 | `bundle` | at least one declared export |
 | `check` / `test` / `format` | nothing |
 

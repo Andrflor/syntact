@@ -1,6 +1,7 @@
 # Why this should be fast
 
-## Why this should be fast
+> Benchmarks and rationale of the previous pipeline (analyze → reduce → bytecode →
+> x86-64). The language itself is in `specs/`.
 
 Traditional languages create abstraction barriers, then optimizers try to remove them.
 
@@ -145,9 +146,3 @@ RestEndPoint:userEndpoint{
 ```
 
 `RestEndPoint`, `HttpResponse`, `UserId`, `Maybe`, and `Json` are scopes. The SDK should provide powerful scopes, not ad-hoc syntax.
-
----
-
----
-
-[← Proofs](19-proofs.md) · [Index](README.md)

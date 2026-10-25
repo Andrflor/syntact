@@ -325,7 +325,7 @@ binding_is_resonance :: #force_inline proc(kind: Binding_Kind) -> bool {
 // so the product is walked inside it and the ordinary resolution chain does the rest.
 // A UNION of covers exposes the projection COMMON to its operands — the spec's
 // "two shapes unify through a common projection because resolution is structural,
-// not nominal" (specs/language/12-patterns.md). Either operand serves that shared
+// not nominal" (specs/language/07-patterns.md). Either operand serves that shared
 // surface; cover_projects keeps it shared.
 cover_scope :: proc(match: ^Type) -> ^Scope_Type {
 	if match == nil do return nil

@@ -129,7 +129,7 @@ branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type) -> Type 
 	return rewrite(k, normal(k, copy_term(k, &m, b.product, b.scope)), r)
 }
 
-// cover_pieces: destructuring (specs/language/12): what the names of a cover read
+// cover_pieces: destructuring (specs/language/07): what the names of a cover read
 // when its branch takes the target — the pieces of the target, by place for a
 // scope written as the cover (its captures included), by name otherwise.
 cover_pieces :: proc(k: ^Kernel, b: Branch, target: Type) -> map[^Binding]Type {

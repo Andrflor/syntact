@@ -1,7 +1,7 @@
 # The type algebra
 
-> **Status: reference, from the whiteboard of 2026-10-24.** This is the basis for
-> reimplementing the kernel.
+> **Status: reference.** The kernel (`kernel/`) implements it; the chapters of
+> `specs/language/` present it, with examples.
 >
 > There is one type system: a unified equational algebra. A type is an equation,
 > either constant or with unknowns. The primitive types are the values (§1). The
@@ -324,7 +324,7 @@ are products, and their `|` is written in one form: the first place cut into
 blocks, the values the same shapes admit; the rest of each block in that form; the
 blocks with the same rest joined, as (A×X) ∪ (B×X) = (A∪B)×X. `...C:` admits a run of
 bindings that, taken as a scope, C admits; `...` alone admits any run
-(specs/language/04):
+(specs/language/05):
 
 ```text
 {1 2} in {u8: u8:}               = true
@@ -338,9 +338,9 @@ Pair -> {u8: u8:}
 ```
 
 A produced shape admits through its colors, another produced value admits only
-itself (specs/language/12): `{-> {-> u8}}` admits the scope `{-> u8}`, not `u8`.
+itself (specs/language/07): `{-> {-> u8}}` admits the scope `{-> u8}`, not `u8`.
 
-The color of a binding flows down into its value (specs/language/11): in the value
+The color of a binding flows down into its value (specs/language/05): in the value
 of a binding colored by a shape, a binding without a color has the color of its
 place in the shape. A carve of that value is checked against it:
 
@@ -360,7 +360,7 @@ and admit the use made of it. Without a use, it imposes only its presence.
 
 ### 5.5 Defaults
 
-A binding without a value has the default of its color (specs/language/09, 10):
+A binding without a value has the default of its color (specs/language/01):
 
 ```text
 a set          its distinguished element: 0 when it has it, "" for strings, false for
@@ -534,22 +534,16 @@ a -> ??::u8
 u8:r -> a ? {<10 -> a + 3  -> 10}     ✓    ?₁ < 10: 3..12;  otherwise: 10
 ```
 
-## 8. What this document replaces
+## 8. Decisions
 
-Where these documents say otherwise, this one wins:
+Where another document says otherwise, this one wins. In particular:
 
-- `equational.md`, `kernel-equations.md`: the piecewise "cases" type and the context
-  of facts. A pattern is a type of the algebra (§6), and the domain of an unknown is
-  in its type (`?₁::u8`).
-- `constraints.md`, `kernel-algebre.md`, `10-values-are-sets.md`: `~` relative to
-  the sorts it carries (`~5` as every integer but 5). `~` is absolute (§4.1).
-- `constraints.md`: interval arithmetic. Operators distribute over `|` (§4.5).
-  Also `''..` as every string: it is every character, and `string = ''.. * 0..`.
-- `kernel-algebre.md`: an uncolored binding imposing nothing. It imposes the
-  constraints of its uses (§5.4).
-- `equational.md`, `kernel-recursion.md`: a context that narrows an unknown inside
-  a branch. The checks of a branch are guarded by the condition that reaches it
-  (§6).
-- The character as a sort apart from strings: a character is a string of length 1
-  (§4.6).
-- `==` and `!=` in the parser: `a = b` is `a in =b` (§4.5).
+- `~` is absolute: `~5` holds every value but 5, of every family (§4.1).
+- Operators distribute over `|`: there is no interval arithmetic (§4.5).
+- `''..` is every character, and `string = ''.. * 0..`. A character is a string of
+  length 1 (§3, §4.6).
+- A pattern is a type of the algebra, and the domain of an unknown is in its type,
+  `?₁::u8`: there is no type of cases beside it, and no context of facts (§6, §7).
+- The checks of a branch are guarded by the condition that reaches it (§6).
+- A binding without a color imposes the constraints of its uses (§5.4).
+- `a = b` is `a in =b`: there is no `==` and no `!=` (§4.5).
