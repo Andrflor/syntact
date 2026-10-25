@@ -9,67 +9,133 @@ import "core:time"
 // ============================================================================
 // THE KERNEL IN THE EDITOR
 //
-// The kernel types the file in place: each written binding carries its types. The
-// LSP finds a binding by the position of what is written — the deepest written
-// scope that contains the cursor, then, inside it, the binding that contains it.
-// The copies of a carve are not written in the file: they are not traversed.
+// The kernel builds the file as a scope of terms: each written binding is there,
+// with the color and the value it is written with. The LSP finds a binding by the
+// position of what is written — the deepest written scope that contains the
+// cursor, then, inside it, the binding that contains it — and shows it with the
+// normal forms of its color and its value. The copies of a carve are not written
+// in the file: they are not traversed.
 // ============================================================================
 
 contains :: proc(span: compiler.Span, offset: u32) -> bool {
 	return span.start <= offset && offset <= span.end
 }
 
-// written_scope_at: the deepest written scope that contains offset, under s.
-written_scope_at :: proc(s: ^kernel.Scope, offset: u32) -> ^kernel.Scope {
-	if s == nil do return nil
+// Located: what is written at an offset: the deepest written scope that contains
+// it, and the name written there, if one is — the binding the kernel resolved it
+// to — or the field read there in a scope: `s.x`, `s{x -> …}`.
+Located :: struct {
+	scope: ^kernel.Scope,
+	name:  ^kernel.Name,
+	field: Field,
+}
+
+// Field: the occurrence of `name` in the scope that target is: the last one for
+// an access, the first one for a carve, or the n-th.
+Field :: struct {
+	target:  kernel.Type,
+	name:    string,
+	ordinal: int,
+	last:    bool,
+}
+
+// locate: what is written at offset, under s.
+locate :: proc(s: ^kernel.Scope, offset: u32) -> Located {
 	for b in s.bindings {
 		if !contains(b.span, offset) do continue
-		if inner := scope_in_expr(b.color, s, offset); inner != nil do return inner
-		if inner := scope_in_expr(b.value, s, offset); inner != nil do return inner
+		if at, found := locate_in(b.color, s, offset); found do return at
+		if at, found := locate_in(b.value, s, offset); found do return at
 	}
-	return s
+	return {scope = s}
 }
 
-// scope_in_expr: the scope written in e (which is written in s) containing offset.
-scope_in_expr :: proc(e: ^kernel.Expr, s: ^kernel.Scope, offset: u32) -> ^kernel.Scope {
-	if e == nil do return nil
-	#partial switch v in e^ {
+// locate_in: what is written at offset in t, which is written in s.
+locate_in :: proc(t: kernel.Type, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
+	switch v in t {
+	case ^kernel.Name:
+		if contains(v.span, offset) do return {scope = s, name = v}, true
 	case ^kernel.Scope:
-		if v.parent == s && contains(v.span, offset) do return written_scope_at(v, offset)
-	case kernel.Carve:
-		if inner := scope_in_expr(v.target, s, offset); inner != nil do return inner
-		if v.args.parent == s && contains(v.args.span, offset) do return written_scope_at(v.args, offset)
-	case kernel.Match:
-		if inner := scope_in_expr(v.target, s, offset); inner != nil do return inner
+		if v.parent == s && contains(v.span, offset) do return locate(v, offset), true
+	case ^kernel.Carve:
+		if at, found := locate_in(v.target, s, offset); found do return at, true
+		return locate_in_args(v.target, v.args, s, offset)
+	case ^kernel.Pattern:
+		if at, found := locate_in(v.target, s, offset); found do return at, true
 		for b in v.branches {
-			if b.parent != s || !contains(b.span, offset) && !contains(b.bindings[0].span, offset) do continue
-			if inner := scope_in_expr(b.cover, b, offset); inner != nil do return inner
-			return written_scope_at(b, offset)
+			if !contains(b.scope.span, offset) do continue
+			if at, found := locate_in(b.cover, s, offset); found do return at, true
+			if at, found := locate_in(b.product, b.scope, offset); found do return at, true
+			return {scope = b.scope}, true
 		}
-	case kernel.Access:
-		return scope_in_expr(v.target, s, offset)
-	case kernel.Collapse:
-		return scope_in_expr(v.target, s, offset)
-	case kernel.Op:
-		if inner := scope_in_expr(v.left, s, offset); inner != nil do return inner
-		return scope_in_expr(v.right, s, offset)
-	case kernel.Range:
-		if inner := scope_in_expr(v.lo, s, offset); inner != nil do return inner
-		return scope_in_expr(v.hi, s, offset)
-	case kernel.Unknown:
-		return scope_in_expr(v.layout, s, offset)
+	case ^kernel.Access:
+		if !contains(v.span, offset) do break
+		if at, found := locate_in(v.target, s, offset); found do return at, true
+		return {scope = s, field = {v.target, v.name, v.ordinal, true}}, true
+	case ^kernel.Collapse:
+		return locate_in(v.target, s, offset)
+	case ^kernel.Operation:
+		return locate_in_all(v.args, s, offset)
+	case ^kernel.Or:
+		return locate_in_all(v.terms, s, offset)
+	case ^kernel.And:
+		return locate_in_all(v.terms, s, offset)
+	case ^kernel.Not:
+		return locate_in(v.term, s, offset)
+	case ^kernel.Is:
+		return locate_in(v.term, s, offset)
+	case ^kernel.Range:
+		if at, found := locate_in(v.lo, s, offset); found do return at, true
+		return locate_in(v.hi, s, offset)
+	case ^kernel.Default:
+		return locate_in(v.color, s, offset)
+	case ^kernel.Unknown:
+		return locate_in(v.written, s, offset)
+	case kernel.Char, kernel.Int, kernel.Real, kernel.Bool, kernel.None, kernel.Invalid:
 	}
-	return nil
+	return {}, false
 }
 
-// written_binding: the written binding that declares `name` at offset; otherwise
-// the one the prelude names so (a builtin).
-written_binding :: proc(program: ^kernel.Scope, name: string, offset: u32) -> ^kernel.Binding {
+locate_in_all :: proc(ts: []kernel.Type, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
+	for t in ts do if at, found := locate_in(t, s, offset); found do return at, true
+	return {}, false
+}
+
+// locate_in_args: the arguments of a carve of target, and those of the carves in
+// turn; the name of an argument is a field of target.
+locate_in_args :: proc(target: kernel.Type, args: []kernel.Carve_Arg, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
+	for a in args {
+		if !contains(a.span, offset) do continue
+		if at, found := locate_in(a.value, s, offset); found do return at, true
+		if at, found := locate_in_args(nil, a.carves, s, offset); found do return at, true
+		if a.name != "" && target != nil do return {scope = s, field = {target, a.name, a.ordinal, false}}, true
+		return {scope = s}, true
+	}
+	return {}, false
+}
+
+// names: b is named `name`, or captured under it.
+names :: proc(b: ^kernel.Binding, name: string) -> bool {
+	return name != "" && (b.name == name || b.capture == name)
+}
+
+// written_binding: the binding the name written at offset designates, as the
+// kernel resolved it; the field it reads in a scope; the written binding that
+// declares `name` there; otherwise the one the prelude names so (a builtin).
+written_binding :: proc(k: ^kernel.Kernel, name: string, offset: u32) -> ^kernel.Binding {
+	program := k.root
 	if program == nil do return nil
-	s := written_scope_at(program, offset)
-	for &b in s.bindings do if b.name == name && contains(b.span, offset) do return &b
+	at := locate(program, offset)
+	if at.name != nil do return at.name.binding
+	if at.field.target != nil {
+		f := at.field
+		target, is_scope := kernel.normal(k, f.target).(^kernel.Scope)
+		if !is_scope do return nil
+		b, _ := kernel.occurrence(kernel.placed(k, target, .Value), f.name, f.ordinal, f.last)
+		return b
+	}
+	for b in at.scope.bindings do if names(b, name) && contains(b.span, offset) do return b
 	if prelude := program.parent; prelude != nil {
-		for &b in prelude.bindings do if b.name == name do return &b
+		for b in prelude.bindings do if b.name == name do return b
 	}
 	return nil
 }
@@ -80,19 +146,20 @@ visible_bindings :: proc(program: ^kernel.Scope, offset: u32) -> []^kernel.Bindi
 	out := make([dynamic]^kernel.Binding)
 	if program == nil do return out[:]
 	seen := make(map[string]bool, allocator = context.temp_allocator)
-	for sc := written_scope_at(program, offset); sc != nil; sc = sc.parent {
-		#reverse for &b in sc.bindings {
-			if b.name == "" || b.name in seen do continue
-			seen[b.name] = true
-			append(&out, &b)
+	for sc := locate(program, offset).scope; sc != nil; sc = sc.parent {
+		#reverse for b in sc.bindings {
+			name := b.capture != "" ? b.capture : b.name
+			if name == "" || name in seen do continue
+			seen[name] = true
+			append(&out, b)
 		}
 	}
 	return out[:]
 }
 
-// shown_type: the binding as the kernel typed it.
-shown_type :: proc(b: ^kernel.Binding) -> string {
-	return kernel.print_binding(b^, .Type)
+// shown_type: the binding with the normal forms the kernel gives it.
+shown_type :: proc(k: ^kernel.Kernel, b: ^kernel.Binding) -> string {
+	return kernel.print_binding(k, b)
 }
 
 // KERNEL_TIMEOUT: beyond it, the kernel is considered not to terminate.
@@ -105,7 +172,7 @@ kernel_fails :: proc(ast: ^compiler.Ast) -> (failure: string, failed: bool) {
 	pid := posix.fork()
 	if pid < 0 do return "", false // no separate process: run it here
 	if pid == 0 {
-		kernel.check_ast(ast)
+		kernel.check(ast)
 		posix._exit(0)
 	}
 	start := time.now()

@@ -46,13 +46,18 @@ report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) ->
 	return Invalid{}
 }
 
-// run: parses the source, builds the file as a scope and checks it.
+// check: builds the file the AST writes as a scope, and checks it.
+check :: proc(ast: ^syn.Ast) -> (k: Kernel) {
+	k.ast = ast
+	k.root = build_program(&k)
+	check_program(&k)
+	return k
+}
+
+// run: parses the source, and checks it.
 run :: proc(source: string) -> (k: Kernel, parsed: bool) {
 	cache := new(syn.Cache)
 	ast, ok := syn.parse(cache, source)
 	if !ok do return k, false
-	k.ast = ast
-	k.root = build_program(&k)
-	check_program(&k)
-	return k, true
+	return check(ast), true
 }

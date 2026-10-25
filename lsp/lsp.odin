@@ -138,8 +138,8 @@ Document :: struct {
 	version: int,
 	content: string,
 	ast:     ^compiler.Ast,
-	// the scope of the file, typed by the kernel: each written binding carries its types
-	program: ^kernel.Scope,
+	// the file, checked by the kernel: its scope (root) holds each written binding
+	checked: kernel.Kernel,
 	// Cursor→name resolution is lexical over the AST; the parent map is rebuilt on
 	// each (re)analysis and reused by definition/references/rename/completion.
 	parents: Parent_Map,
@@ -560,7 +560,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 
 	ast, _ := compiler.parse(cache, doc.content)
 	doc.ast = ast
-	doc.program = nil
+	doc.checked = {}
 
 	diagnostics := make([dynamic]Diagnostic, 0, len(cache.parse_errors) + 16)
 	defer delete(diagnostics)
@@ -590,14 +590,8 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 			publish_diagnostics(uri, diagnostics[:])
 			return
 		}
-		program, k := kernel.check_ast(ast)
-		doc.program = program
-		for e in k.errors {
-			message := e.message
-			if e.origin != e.span {
-				o := compiler.span_to_position(ast, e.origin.start)
-				message = fmt.tprintf("%s (written at %d:%d)", message, o.line, o.column)
-			}
+		doc.checked = kernel.check(ast)
+		for e in doc.checked.errors {
 			append(
 				&diagnostics,
 				Diagnostic {
@@ -605,7 +599,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 					// what the kernel does not handle yet is not a fault of the code
 					severity = e.kind == .Unsupported ? 2 : 1,
 					source = "syn-kernel",
-					message = message,
+					message = e.message,
 				},
 			)
 		}
@@ -696,14 +690,16 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 // handle_hover: the binding that the identifier under the cursor designates, as
 // the kernel typed it.
 handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	_, decl, use, doc, ok := resolve_binding_at(server, msg.params)
+	_, _, use, doc, ok := resolve_binding_at(server, msg.params)
 	if !ok || use == compiler.INVALID_NODE {
 		send_response(msg.id, json.Null{})
 		return
 	}
 	ast := doc.ast
 	name := compiler.node_name_str(ast, use)
-	b := written_binding(doc.program, name, ast.node_spans[decl].start)
+	// `(h)`: a capture is named by its alias
+	if name == "" do name = compiler.span_str(ast, ast.node_data[use].identifier.capture)
+	b := written_binding(&doc.checked, name, ast.node_spans[use].start)
 	if name == "" || b == nil {
 		send_response(msg.id, json.Null{})
 		return
@@ -711,7 +707,7 @@ handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
 
 	contents := make(map[string]json.Value)
 	contents["kind"] = json.String("markdown")
-	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", shown_type(b)))
+	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", shown_type(&doc.checked, b)))
 
 	result := make(map[string]json.Value)
 	result["contents"] = json.Object(contents)
@@ -1018,15 +1014,17 @@ collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynam
 	if source_node == compiler.INVALID_NODE do return
 	if ast.node_kinds[source_node] != .Identifier do return
 	name := compiler.node_name_str(ast, source_node)
-	decl := resolve_definition(ast, doc.parents, source_node)
-	if decl == compiler.INVALID_NODE do return
-	b := written_binding(doc.program, name, ast.node_spans[decl].start)
-	if b == nil || b.value_type == nil do return
-	target, is_scope := b.value_type^.(^kernel.Scope)
+	b := written_binding(&doc.checked, name, ast.node_spans[source_node].start)
+	// half-written, `x.` is no term of the kernel: x, where it is declared
+	if b == nil {
+		decl := resolve_definition(ast, doc.parents, source_node)
+		if decl != compiler.INVALID_NODE do b = written_binding(&doc.checked, name, ast.node_spans[decl].start)
+	}
+	if b == nil do return
+	target, is_scope := kernel.binding_type(&doc.checked, b).(^kernel.Scope)
 	if !is_scope do return
-	for p in kernel.places(target) {
-		field := kernel.binding_at(p)
-		if field.name != "" do append(items, make_completion_item(field))
+	for field in kernel.placed(&doc.checked, target, .Value) {
+		if field.name != "" do append(items, make_completion_item(&doc.checked, field))
 	}
 }
 
@@ -1050,26 +1048,19 @@ find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index 
 
 // collect_scope_completions: the names visible at the cursor, builtins included.
 collect_scope_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
-	for b in visible_bindings(doc.program, offset) do append(items, make_completion_item(b))
+	for b in visible_bindings(doc.checked.root, offset) do append(items, make_completion_item(&doc.checked, b))
 }
 
 // make_completion_item: a binding, with its type according to the kernel.
-make_completion_item :: proc(b: ^kernel.Binding) -> json.Value {
+make_completion_item :: proc(k: ^kernel.Kernel, b: ^kernel.Binding) -> json.Value {
 	item := make(map[string]json.Value)
-	item["label"] = json.String(b.name)
+	item["label"] = json.String(b.capture != "" ? b.capture : b.name)
 	item["insertTextFormat"] = json.Integer(1) // plain text
 
 	ckind := COMPLETION_KIND_VARIABLE
-	#partial switch b.kind {
-	case .Push:
-		if b.value_type != nil {
-			if _, is_scope := b.value_type^.(^kernel.Scope); is_scope do ckind = COMPLETION_KIND_MODULE
-		}
-	case .Event_Push, .Event_Pull, .Resonance_Push, .Resonance_Pull, .Reactive_Push, .Reactive_Pull:
-		ckind = COMPLETION_KIND_EVENT
-	}
+	if _, is_scope := kernel.binding_type(k, b).(^kernel.Scope); is_scope do ckind = COMPLETION_KIND_MODULE
 	item["kind"] = json.Integer(ckind)
-	item["detail"] = json.String(shown_type(b))
+	item["detail"] = json.String(shown_type(k, b))
 	return json.Object(item)
 }
 

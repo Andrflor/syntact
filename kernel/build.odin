@@ -99,7 +99,9 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			b.value = build_term(k, s, idx)
 		}
 	case .PointingPull:
+		// a hole is a binding: its name is bound, its value not built yet
 		b.kind = .Pull
+		build_left(k, s, data.binary.left, b)
 		b.value = unsupported(k, idx, "a hole <-")
 	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
@@ -338,7 +340,8 @@ build_pattern :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		// the product is a production of its cover: the names of the cover are
 		// read from it (destructuring)
 		b.view = cover_view(s, b.cover)
-		b.scope = new_scope(b.view != nil ? b.view : s, b.span)
+		// the branch is written from its cover to its product
+		b.scope = new_scope(b.view != nil ? b.view : s, {b.span.start, node_span(k, product).end})
 		b.product = build_term(k, b.scope, product)
 		b.scope.complete = true
 		append(&branches, b)

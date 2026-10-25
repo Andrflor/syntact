@@ -310,12 +310,46 @@ write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
 		strings.write_string(b, s.name)
 		return
 	}
+	write_body(b, s)
+}
+
+// write_body: the bindings of a scope, as written.
+write_body :: proc(b: ^strings.Builder, s: ^Scope) {
 	strings.write_byte(b, '{')
 	for x, i in s.bindings {
 		if i > 0 do strings.write_string(b, "  ")
 		write_binding(b, x)
 	}
 	strings.write_byte(b, '}')
+}
+
+// print_binding: a binding with the normal forms of its color and its value,
+// `C:x -> v`, or `C:x` when no value is written; the scope it is the value of is
+// written out, not named.
+print_binding :: proc(k: ^Kernel, x: ^Binding) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	switch x.kind {
+	case .Product:
+		strings.write_string(&b, "-> ")
+	case .Expand:
+		strings.write_string(&b, "...")
+	case .Push, .Pull:
+	}
+	if c := binding_color(k, x); c != nil {
+		write_type(&b, c, PREC_ATOM)
+		strings.write_byte(&b, ':')
+	}
+	strings.write_string(&b, x.name)
+	if x.capture != "" do fmt.sbprintf(&b, "(%s)", x.capture)
+	if x.value == nil do return strings.to_string(b)
+	v := binding_type(k, x)
+	if x.kind != .Product && x.kind != .Expand do strings.write_string(&b, x.kind == .Pull ? " <- " : " -> ")
+	if s, is_scope := v.(^Scope); is_scope && s.name != "" && s.name == x.name {
+		write_body(&b, s)
+	} else {
+		write_type(&b, v, 0)
+	}
+	return strings.to_string(b)
 }
 
 // write_changes: the arguments of a carve, {x -> v …}.
