@@ -180,6 +180,13 @@ SPEC_CASES := []Spec_Case {
 	// ?ₖ read in a carve: one unknown in equal carves, another than in the original
 	{"Box -> {T -> u8  T:v -> ??}\na -> Box{T -> string}.v\nb -> Box{T -> string}.v\nx -> a = b", "true", {}},
 	{"Box -> {T -> u8  T:v -> ??}\na -> Box{T -> string}.v\nx -> a = Box.v", "false", {}},
+	// the color flows down through runs, and through the solution of a recursion
+	{"Pair -> {u8: string:}\n{...Pair: u8:}:c -> {1 \"x\" 2}\nx -> c{3, 4}", "", {.Constraint_Mismatch}},
+	{ARRAY + "Array{u8}:a -> {1 2 3}\nx -> a{300}", "", {.Constraint_Mismatch}},
+	{ARRAY + "Array{u8}:a -> {1 2 3}\nx -> a{7}.#0", "7", {}},
+	// comparisons by the order of a ring; runs by the law of concatenation
+	{"a -> ??::u8\nx -> a < a + 1", "true", {}},
+	{"{...  ... u8:}:x -> {1}", "", {}},
 	// destructuring: the names of a cover are read by its product (specs/language/12)
 	{"Circle -> {u8:radius}\nc -> Circle{radius -> 5}\nx -> c ? {Circle: -> radius * radius  -> 0}", "25", {}},
 	{"Square -> {u16:side}\nDiamond -> {u16:side}\ns -> Diamond{side -> 7}\nx -> s ? {Square: | Diamond: -> side * side  -> 0}", "49", {}},

@@ -391,12 +391,57 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 // of a binding colored by a shape, a binding without a color has the color of its
 // place in the shape.
 colored :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope) -> Type {
-	places := placed(k, shape, .Shape)
-	if len(places) != len(s.bindings) do return s
-	for b, i in s.bindings do if b.kind == .Expand || is_run(places[i]) do return s
+	for b in s.bindings do if b.kind == .Expand do return s
+	colors, aligned := place_colors(k, s.bindings[:], placed(k, shape, .Shape))
+	if !aligned do return s
 	c := copy_scope(k, s, nil)
-	for b, i in c.bindings do if b.color == nil && places[i].color != nil do b.color = places[i].color
+	for b, i in c.bindings do if b.color == nil && colors[i] != nil do b.color = colors[i]
 	return c
+}
+
+// place_colors: the color of the place each binding of xs takes in a shape: a
+// binding, its color; a run `...C:`, the places of C — a shape, its own; a
+// recursive scope, those of its solution; A * n, those of A, piece by piece. False
+// when the places are not decided.
+place_colors :: proc(k: ^Kernel, xs, shape: []^Binding) -> (colors: []Type, aligned: bool) {
+	colors = make([]Type, len(xs))
+	lengths, decided, fits := run_lengths(k, xs, shape)
+	if !decided || !fits do return
+	at := 0
+	for place, i in shape {
+		part := xs[at:at + lengths[i]]
+		if !is_run(place) {
+			colors[at] = place.color
+		} else if place.color != nil {
+			inner := run_colors(k, part, binding_color(k, place)) or_return
+			copy(colors[at:], inner)
+		}
+		at += lengths[i]
+	}
+	return colors, true
+}
+
+run_colors :: proc(k: ^Kernel, part: []^Binding, c: Type) -> (colors: []Type, aligned: bool) {
+	#partial switch v in c {
+	case ^Scope:
+		s := v
+		if recursive(s) do s = arden(k, s) or_return
+		if !is_shape(k, s) do return make([]Type, len(part)), true
+		return place_colors(k, part, placed(k, s, .Shape))
+	case ^Operation:
+		// A * n: pieces of the length of A
+		a, is_scope := v.args[0].(^Scope)
+		if v.op != .Mul || !is_scope do break
+		n := shape_length(k, a) or_return
+		if n == 0 || len(part) % n != 0 do return
+		colors = make([]Type, len(part))
+		for i := 0; i < len(part); i += n {
+			inner := place_colors(k, part[i:i + n], placed(k, a, .Shape)) or_return
+			copy(colors[i:], inner)
+		}
+		return colors, true
+	}
+	return make([]Type, len(part)), true
 }
 
 // --- a scope as a color (§5.4) ---

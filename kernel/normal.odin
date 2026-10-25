@@ -301,8 +301,11 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	} else {
 		value = normal(k, b.value)
 	}
-	if shape, ok := color.(^Scope); ok && b.kind == .Push && is_shape(k, shape) {
-		if s, is_scope := value.(^Scope); is_scope do value = colored(k, s, shape)
+	// the color flows down into the value (§5.4): a shape, or the solution of a
+	// recursive scope, which is one
+	if shape, ok := color.(^Scope); ok && b.kind == .Push {
+		if recursive(shape) do shape = arden(k, shape) or_else nil
+		if s, is_scope := value.(^Scope); is_scope && shape != nil && is_shape(k, shape) do value = colored(k, s, shape)
 	}
 	b.typed_value, b.state = value, .Done
 	return value
