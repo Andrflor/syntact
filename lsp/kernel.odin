@@ -17,17 +17,26 @@ import "core:time"
 // in the file: they are not traversed.
 // ============================================================================
 
+// contains: a binding contains the offset up to just after its end — where an
+// edit continues it; inside: a term holds the characters of its span only.
 contains :: proc(span: compiler.Span, offset: u32) -> bool {
 	return span.start <= offset && offset <= span.end
 }
 
+inside :: proc(span: compiler.Span, offset: u32) -> bool {
+	return span.start <= offset && offset < span.end
+}
+
 // Located: what is written at an offset: the deepest written scope that contains
-// it, and the name written there, if one is — the binding the kernel resolved it
-// to — or the field read there in a scope: `s.x`, `s{x -> …}`.
+// it, the binding there, and in it the name written at the offset — the binding the
+// kernel resolved it to —, the field read there in a scope (`s.x`, `s{x -> …}`), or
+// the deepest term.
 Located :: struct {
-	scope: ^kernel.Scope,
-	name:  ^kernel.Name,
-	field: Field,
+	scope:   ^kernel.Scope,
+	binding: ^kernel.Binding,
+	name:    ^kernel.Name,
+	field:   Field,
+	term:    kernel.Type,
 }
 
 // Field: the occurrence of `name` in the scope that target is: the last one for
@@ -43,38 +52,54 @@ Field :: struct {
 locate :: proc(s: ^kernel.Scope, offset: u32) -> Located {
 	for b in s.bindings {
 		if !contains(b.span, offset) do continue
-		if at, found := locate_in(b.color, s, offset); found do return at
-		if at, found := locate_in(b.value, s, offset); found do return at
+		for t in ([2]kernel.Type{b.color, b.value}) {
+			if at, found := locate_in(t, s, offset); found {
+				if at.binding == nil do at.binding = b
+				return at
+			}
+		}
+		return {scope = s, binding = b}
 	}
 	return {scope = s}
+}
+
+// written_at: the term t itself, when it is written at offset.
+written_at :: proc(t: kernel.Type, span: compiler.Span, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
+	if !inside(span, offset) do return {}, false
+	return {scope = s, term = t}, true
 }
 
 // locate_in: what is written at offset in t, which is written in s.
 locate_in :: proc(t: kernel.Type, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
 	switch v in t {
 	case ^kernel.Name:
-		if contains(v.span, offset) do return {scope = s, name = v}, true
+		if inside(v.span, offset) do return {scope = s, name = v}, true
 	case ^kernel.Scope:
-		if v.parent == s && contains(v.span, offset) do return locate(v, offset), true
+		if v.parent == s && inside(v.span, offset) do return locate(v, offset), true
 	case ^kernel.Carve:
 		if at, found := locate_in(v.target, s, offset); found do return at, true
-		return locate_in_args(v.target, v.args, s, offset)
+		if at, found := locate_in_args(v.target, v.args, s, offset); found do return at, true
+		return written_at(t, v.span, s, offset)
 	case ^kernel.Pattern:
 		if at, found := locate_in(v.target, s, offset); found do return at, true
 		for b in v.branches {
-			if !contains(b.scope.span, offset) do continue
+			if !inside(b.scope.span, offset) do continue
 			if at, found := locate_in(b.cover, s, offset); found do return at, true
 			if at, found := locate_in(b.product, b.scope, offset); found do return at, true
-			return {scope = b.scope}, true
+			if b.cover != nil && inside(b.span, offset) do return {scope = s, term = b.cover}, true
+			return {scope = b.scope, term = b.product}, true
 		}
+		return written_at(t, v.span, s, offset)
 	case ^kernel.Access:
-		if !contains(v.span, offset) do break
+		if !inside(v.span, offset) do break
 		if at, found := locate_in(v.target, s, offset); found do return at, true
 		return {scope = s, field = {v.target, v.name, v.ordinal, true}}, true
 	case ^kernel.Collapse:
-		return locate_in(v.target, s, offset)
+		if at, found := locate_in(v.target, s, offset); found do return at, true
+		return written_at(t, v.span, s, offset)
 	case ^kernel.Operation:
-		return locate_in_all(v.args, s, offset)
+		if at, found := locate_in_all(v.args, s, offset); found do return at, true
+		return written_at(t, v.span, s, offset)
 	case ^kernel.Or:
 		return locate_in_all(v.terms, s, offset)
 	case ^kernel.And:
@@ -85,9 +110,11 @@ locate_in :: proc(t: kernel.Type, s: ^kernel.Scope, offset: u32) -> (Located, bo
 		return locate_in(v.term, s, offset)
 	case ^kernel.Range:
 		if at, found := locate_in(v.lo, s, offset); found do return at, true
-		return locate_in(v.hi, s, offset)
+		if at, found := locate_in(v.hi, s, offset); found do return at, true
+		return written_at(t, v.span, s, offset)
 	case ^kernel.Default:
-		return locate_in(v.color, s, offset)
+		if at, found := locate_in(v.color, s, offset); found do return at, true
+		return written_at(t, v.span, s, offset)
 	case ^kernel.Unknown:
 		return locate_in(v.written, s, offset)
 	case kernel.Char, kernel.Int, kernel.Real, kernel.Bool, kernel.None, kernel.Invalid:
@@ -104,11 +131,11 @@ locate_in_all :: proc(ts: []kernel.Type, s: ^kernel.Scope, offset: u32) -> (Loca
 // turn; the name of an argument is a field of target.
 locate_in_args :: proc(target: kernel.Type, args: []kernel.Carve_Arg, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
 	for a in args {
-		if !contains(a.span, offset) do continue
+		if !inside(a.span, offset) do continue
 		if at, found := locate_in(a.value, s, offset); found do return at, true
 		if at, found := locate_in_args(nil, a.carves, s, offset); found do return at, true
 		if a.name != "" && target != nil do return {scope = s, field = {target, a.name, a.ordinal, false}}, true
-		return {scope = s}, true
+		return {scope = s, term = a.value}, true
 	}
 	return {}, false
 }
@@ -126,13 +153,7 @@ written_binding :: proc(k: ^kernel.Kernel, name: string, offset: u32) -> ^kernel
 	if program == nil do return nil
 	at := locate(program, offset)
 	if at.name != nil do return at.name.binding
-	if at.field.target != nil {
-		f := at.field
-		target, is_scope := kernel.normal(k, f.target).(^kernel.Scope)
-		if !is_scope do return nil
-		b, _ := kernel.occurrence(kernel.placed(k, target, .Value), f.name, f.ordinal, f.last)
-		return b
-	}
+	if at.field.target != nil do return field_binding(k, at.field)
 	for b in at.scope.bindings do if names(b, name) && contains(b.span, offset) do return b
 	if prelude := program.parent; prelude != nil {
 		for b in prelude.bindings do if b.name == name do return b
@@ -155,6 +176,34 @@ visible_bindings :: proc(program: ^kernel.Scope, offset: u32) -> []^kernel.Bindi
 		}
 	}
 	return out[:]
+}
+
+// field_binding: the binding a field reads, in the scope its target is.
+field_binding :: proc(k: ^kernel.Kernel, f: Field) -> ^kernel.Binding {
+	target, is_scope := kernel.normal(k, f.target).(^kernel.Scope)
+	if !is_scope do return nil
+	b, _ := kernel.occurrence(kernel.placed(k, target, .Value), f.name, f.ordinal, f.last)
+	return b
+}
+
+// shown_at: what the hover shows at offset: a name or a field, its binding; a
+// term, its normal form — the whole value of a binding, the binding's type; else
+// the binding there.
+shown_at :: proc(k: ^kernel.Kernel, offset: u32) -> string {
+	if k.root == nil do return ""
+	at := locate(k.root, offset)
+	switch {
+	case at.name != nil:
+		return shown_type(k, at.name.binding)
+	case at.field.target != nil:
+		if b := field_binding(k, at.field); b != nil do return shown_type(k, b)
+	case at.term != nil:
+		if at.binding != nil && at.term == at.binding.value do return kernel.print_type(kernel.binding_type(k, at.binding))
+		return kernel.print_type(kernel.normal(k, at.term))
+	case at.binding != nil:
+		return shown_type(k, at.binding)
+	}
+	return ""
 }
 
 // shown_type: the binding with the normal forms the kernel gives it.

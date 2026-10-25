@@ -1521,6 +1521,8 @@ parse_carve :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		source   = left,
 		children = add_extra(parser, children[:]),
 	}
+	// a carve is written from what it carves
+	if left != INVALID_NODE do span_start = parser.node_spans[left].start
 	return add_node(parser, .Carve, data, Span{span_start, span_end})
 }
 

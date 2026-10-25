@@ -690,28 +690,48 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 // handle_hover: the binding that the identifier under the cursor designates, as
 // the kernel typed it.
 handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
-	_, _, use, doc, ok := resolve_binding_at(server, msg.params)
-	if !ok || use == compiler.INVALID_NODE {
+	doc, offset, ok := cursor_at(server, msg.params)
+	if !ok {
 		send_response(msg.id, json.Null{})
 		return
 	}
-	ast := doc.ast
-	name := compiler.node_name_str(ast, use)
-	// `(h)`: a capture is named by its alias
-	if name == "" do name = compiler.span_str(ast, ast.node_data[use].identifier.capture)
-	b := written_binding(&doc.checked, name, ast.node_spans[use].start)
-	if name == "" || b == nil {
+	shown := shown_at(&doc.checked, offset)
+	// half-written, the name is no term of the kernel: its binding, where it is declared
+	if _, decl, use, _, found := resolve_binding_at(server, msg.params); shown == "" && found {
+		ast := doc.ast
+		name := compiler.node_name_str(ast, use)
+		// `(h)`: a capture is named by its alias
+		if name == "" do name = compiler.span_str(ast, ast.node_data[use].identifier.capture)
+		if b := written_binding(&doc.checked, name, ast.node_spans[decl].start); b != nil do shown = shown_type(&doc.checked, b)
+	}
+	if shown == "" {
 		send_response(msg.id, json.Null{})
 		return
 	}
 
 	contents := make(map[string]json.Value)
 	contents["kind"] = json.String("markdown")
-	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", shown_type(&doc.checked, b)))
+	contents["value"] = json.String(fmt.tprintf("```syntact\n%s\n```", shown))
 
 	result := make(map[string]json.Value)
 	result["contents"] = json.Object(contents)
 	send_response(msg.id, json.Object(result))
+}
+
+// cursor_at: the document and the byte offset a request's position points at.
+cursor_at :: proc(server: ^LSP_Server, params: json.Value) -> (doc: ^Document, offset: u32, ok: bool) {
+	p, p_ok := params.(json.Object)
+	if !p_ok do return
+	u, u_ok := get_text_doc_uri(params)
+	if !u_ok || u not_in server.documents do return
+	pos_obj, pos_ok := p["position"].(json.Object)
+	if !pos_ok do return
+	doc = &server.documents[u]
+	if doc.ast == nil do return
+	compiler.ensure_line_starts(doc.ast)
+	o := lsp_pos_to_offset(doc.ast, json_to_int(pos_obj["line"]), json_to_int(pos_obj["character"]))
+	if o < 0 do return
+	return doc, u32(o), true
 }
 
 // resolve_binding_at maps a cursor to the identifier under it (`use`) and the
@@ -731,27 +751,13 @@ resolve_binding_at :: proc(
 	decl = compiler.INVALID_NODE
 	use = compiler.INVALID_NODE
 
-	p, p_ok := params.(json.Object)
-	if !p_ok do return
-
 	u, u_ok := get_text_doc_uri(params)
-	if !u_ok || u not_in server.documents do return
-
-	pos_obj, pos_ok := p["position"].(json.Object)
-	if !pos_ok do return
-
-	line := json_to_int(pos_obj["line"])
-	char := json_to_int(pos_obj["character"])
-
-	d := &server.documents[u]
+	if !u_ok do return
+	d, offset, at := cursor_at(server, params)
+	if !at do return
 	ast := d.ast
-	if ast == nil do return
 
-	compiler.ensure_line_starts(ast)
-	offset := lsp_pos_to_offset(ast, line, char)
-	if offset < 0 do return
-
-	target := find_node_at_offset(ast, u32(offset))
+	target := find_node_at_offset(ast, offset)
 	if target == compiler.INVALID_NODE do return
 	if ast.node_kinds[target] != .Identifier do return
 
