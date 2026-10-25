@@ -777,12 +777,20 @@ same_scope :: proc(k: ^Kernel, a, b: ^Scope) -> bool {
 		}
 		return true
 	}
+	return same_bindings(k, a, b, true)
+}
+
+// same_bindings: the bindings of two scopes are, in order, the same names, kinds
+// and values (§5.3) — as terms, the same colors too: `{u8:}` and `{i8:}` give the
+// same value, not the same set.
+same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 	xs := placed(k, a, .Value)
 	ys := placed(k, b, .Value)
 	if len(xs) != len(ys) do return false
 	for x, i in xs {
 		y := ys[i]
 		if x.name != y.name || x.kind != y.kind do return false
+		if colors && !same(k, binding_color(k, x), binding_color(k, y)) do return false
 		if !same(k, binding_type(k, x), binding_type(k, y)) do return false
 	}
 	return true

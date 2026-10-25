@@ -31,7 +31,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
 	if s, ok := c.(^Scope); ok do return admits(k, x, s)
-	if o, ok := c.(^Operation); ok && o.op == .Mul && cell_family(o.args[0]) == .Value do return repeated_in(k, x, o.args[0], o.args[1])
+	if o, ok := c.(^Operation); ok && o.op == .Mul && of_values(o.args[0]) do return repeated_in(k, x, o.args[0], o.args[1])
 	if i, ok := c.(^Is); ok do return equal_law(k, x, i.term)
 	if is_none(x) {
 		if is_none(c) do return Bool(true)
@@ -68,6 +68,14 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		return bool_not(k, in_law(k, x, v.term))
 	}
 	return new_operation(.In, x, c)
+}
+
+// of_values: a | of cells that are values — scopes, =t — and nothing else.
+of_values :: proc(t: Type) -> bool {
+	cells, negated := as_cells(t)
+	if negated || len(cells) == 0 do return false
+	for c in cells do if cell_family(c) != .Value do return false
+	return true
 }
 
 // in_cells: x in a | of cells without a value (a scope, =t): its elements are
@@ -129,13 +137,13 @@ equal_law :: proc(k: ^Kernel, x, t: Type) -> Type {
 // are none, and not when one shows an element; two scopes when their bindings
 // are (§5.3). Not known otherwise.
 values_equal :: proc(k: ^Kernel, a, b: Type) -> (equal: bool, known: bool) {
-	_, a_scope := a.(^Scope)
-	_, b_scope := b.(^Scope)
-	if a_scope || b_scope do return a_scope && b_scope && same(k, a, b), true
-	x := and_law(k, {a, not_law(k, b)})
-	y := and_law(k, {b, not_law(k, a)})
-	if is_none(x) && is_none(y) do return true, true
-	if inhabited(k, x) || inhabited(k, y) do return false, true
+	x, a_scope := a.(^Scope)
+	y, b_scope := b.(^Scope)
+	if a_scope || b_scope do return a_scope && b_scope && (same(k, a, b) || same_bindings(k, x, y, false)), true
+	l := and_law(k, {a, not_law(k, b)})
+	r := and_law(k, {b, not_law(k, a)})
+	if is_none(l) && is_none(r) do return true, true
+	if inhabited(k, l) || inhabited(k, r) do return false, true
 	return false, false
 }
 

@@ -227,7 +227,7 @@ union_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	append(&out, ..kept[:])
 	if slice.contains(by[.Bool][:], Type(Bool(false))) do append(&out, Bool(false))
 	if slice.contains(by[.Bool][:], Type(Bool(true))) do append(&out, Bool(true))
-	append(&out, ..unique_cells(k, by[.Value][:]))
+	append(&out, ..join_shapes(k, by[.Value][:]))
 	append(&out, ..unique_cells(k, by[.Other][:]))
 	return out[:]
 }
@@ -236,6 +236,54 @@ unique_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	out := make([dynamic]Type)
 	for c in cells do if !contains_same(k, out[:], c) do append(&out, c)
 	return out[:]
+}
+
+// join_shapes: the | of value cells: a cell once; two shapes of one structure
+// that differ in one place only are one shape, that place colored by the | of
+// their colors: {p: x: q:} | {p: y: q:} = {p: (x | y): q:}, as A×X×B ∪ A×Y×B =
+// A×(X∪Y)×B (§5.4). Joined in the order of the terms, until none joins.
+join_shapes :: proc(k: ^Kernel, cells: []Type) -> []Type {
+	out := slice.clone_to_dynamic(unique_cells(k, cells))
+	slice.sort_by(out[:], term_less)
+	for joined := true; joined; {
+		joined = false
+		search: for i in 0 ..< len(out) {
+			for j in i + 1 ..< len(out) {
+				if shape, ok := join_shape(k, out[i], out[j]); ok {
+					out[i] = shape
+					ordered_remove(&out, j)
+					joined = true
+					break search
+				}
+			}
+		}
+	}
+	return out[:]
+}
+
+join_shape :: proc(k: ^Kernel, a, b: Type) -> (Type, bool) {
+	x, is_x := a.(^Scope)
+	y, is_y := b.(^Scope)
+	if !is_x || !is_y || !is_shape(k, x) || !is_shape(k, y) do return nil, false
+	xs, ys := placed(k, x, .Shape), placed(k, y, .Shape)
+	if len(xs) != len(ys) do return nil, false
+	differ := -1
+	for p, i in xs {
+		q := ys[i]
+		if p.name != q.name || p.kind != q.kind || p.value != nil || q.value != nil do return nil, false
+		if same(k, binding_color(k, p), binding_color(k, q)) do continue
+		if differ >= 0 || p.color == nil || q.color == nil do return nil, false
+		differ = i
+	}
+	if differ < 0 do return a, true
+	s := run_scope(k, xs)
+	p := xs[differ]
+	place := new(Binding)
+	place^ = Binding{name = p.name, capture = p.capture, kind = p.kind, span = p.span, scope = s}
+	place.color = or_law(k, {binding_color(k, p), binding_color(k, ys[differ])})
+	place.typed_color = place.color
+	s.bindings[differ] = place
+	return s, true
 }
 
 // --- & of cells ---

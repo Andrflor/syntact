@@ -196,6 +196,16 @@ SPEC_CASES := []Spec_Case {
 	{"x -> {1 ...u8:}", "", {.Constraint_Mismatch}},
 	{"xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...u8:(t)} -> h\n  -> 0\n}", "", {.Constraint_Mismatch}},
 	{"Pair -> {u8: u8:}\ny -> {...Pair: 3}\nx -> y.#2", "3", {}},
+	// shapes of one structure that differ in one place join there: {u8:} | {i8:} = {(u8 | i8):}
+	{"({u8:} | {i8:}):x -> {-1}", "", {}},
+	{"({u8:} | {i8:}):x -> {300}", "", {.Constraint_Mismatch}},
+	{"x -> ({u8: string:} | {i8: string:})", "{((-128)..255):  string:}", {}},
+	{"x -> ({u8: string:} | {i8: bool:})", "{u8:  string:} | {i8:  bool:}", {}},
+	{LISTS + "List:a -> {10 (-1)}", "", {}},
+	{LISTS + "List:a -> {10 300}", "", {.Constraint_Mismatch}},
+	{LISTS + "List:a -> {10 (-1)}\nx -> a{300}", "", {.Constraint_Mismatch}},
+	// a comma separates bindings: no operator continues across it
+	{ARRAY + "Array{u8}:a -> {10, -10}", "", {.Constraint_Mismatch}},
 	// §5.6
 	{"f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n + f{n -> n - 1}!}}\nx -> f{n -> 3}!", "13", {}},
 	{"f -> {u8:n -> ??  -> n ? {1 -> 1  -> n + f{n -> n - 1}!}}\nx -> f!", "", {.Constraint_Mismatch}},
@@ -210,6 +220,8 @@ SPEC_CASES := []Spec_Case {
 }
 
 ARRAY :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n"
+
+LISTS :: "List -> {\n  -> {}\n  -> {u8: ...List:}\n  -> {i8: ...List:}\n}\n"
 
 SUM :: "sum -> {\n  u8:n -> ??\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
 

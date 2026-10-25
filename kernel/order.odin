@@ -40,9 +40,12 @@ term_order :: proc(a, b: Type) -> int {
 	case ^Is:
 		return term_order(x.term, b.(^Is).term)
 	case ^Name:
+		// by where its binding is written; the aliases of the prelude, by their name
 		y := b.(^Name)
 		if x.binding == y.binding do return 0
-		return compare_ints(i128(x.binding.span.start), i128(y.binding.span.start))
+		if c := compare_ints(i128(x.binding.span.start), i128(y.binding.span.start)); c != 0 do return c
+		if x.binding.name != y.binding.name do return x.binding.name < y.binding.name ? -1 : 1
+		return scope_order(x.binding.scope, y.binding.scope)
 	case ^Scope:
 		return scope_order(x, b.(^Scope))
 	case ^Access:

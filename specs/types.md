@@ -319,7 +319,9 @@ A scope with productions admits what they produce:
 
 A scope without production is a shape. It admits the scopes of the same structure
 (same names, same kinds, same order) whose every binding is admitted by the color of
-its own. Two different structures have nothing in common. `...C:` admits a run of
+its own. Two different structures have nothing in common; two shapes of one
+structure that differ in one place only are one shape, that place colored by the
+`|` of their colors (A×X×B ∪ A×Y×B = A×(X∪Y)×B). `...C:` admits a run of
 bindings that, taken as a scope, C admits; `...` alone admits any run
 (specs/language/04):
 
@@ -327,6 +329,8 @@ bindings that, taken as a scope, C admits; `...` alone admits any run
 {1 2} in {u8: u8:}               = true
 {1 2} in {u8:}                   = false         different structures
 {u8:} & {u8: u8:}                = none
+{u8: string:} | {i8: string:}    = {(u8 | i8): string:}     one place differs
+{u8: string:} | {i8: bool:}      stays                      two places differ
 Pair -> {u8: u8:}
 {1 2 "x"} in {...Pair: string:}  = true
 ```
