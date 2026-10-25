@@ -159,22 +159,16 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 }
 
 // derive: the copy of the scope s carves, uncarved, with the changes of s and
-// these. The same carve under the same layouts is the same copy. It is checked
-// where it is written, in what it changed: the rest was checked in its source.
+// these. It is checked where it is written, in what it changed: the rest was
+// checked in its source.
 derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span) -> ^Scope {
 	root := s.carved != nil ? s.carved : s
 	merged := make(map[^Binding]Type)
 	for b, v in s.changes do merged[b] = v
 	for b, v in changes do merged[s.carved != nil ? b.source : b] = v
 	r := merge_rewrites(k, scope_rewrite(root.parent), k.rewrite)
-	key := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&key, "%p", root)
-	for b in root.bindings do if v, carved := merged[b]; carved do fmt.sbprintf(&key, "|%p:%s", b, key_of(v))
-	fmt.sbprintf(&key, "|%s", rewrite_key(r))
-	if c, found := k.copies[strings.to_string(key)]; found do return c
 	c := copy_scope(k, root, merged, r)
 	c.carved, c.changes = root, merged
-	k.copies[strings.clone(strings.to_string(key))] = c
 	check_carve(k, c, span)
 	return c
 }
@@ -366,14 +360,11 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 // of a binding colored by a shape, a binding without a color has the color of its
 // place in the shape.
 colored :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope) -> Type {
-	key := fmt.tprintf("color %p %p", s, shape)
-	if c, found := k.copies[key]; found do return c
 	places := placed(k, shape, .Shape)
 	if len(places) != len(s.bindings) do return s
 	for b, i in s.bindings do if b.kind == .Expand || is_run(places[i]) do return s
 	c := copy_scope(k, s, nil, nil)
 	for b, i in c.bindings do if b.color == nil && places[i].color != nil do b.color = places[i].color
-	k.copies[strings.clone(key)] = c
 	return c
 }
 
@@ -478,16 +469,11 @@ shape_length :: proc(k: ^Kernel, s: ^Scope) -> (length: int, fixed: bool) {
 	return n, true
 }
 
-// run_scope: a run of bindings taken as a scope; the same run is the same scope.
+// run_scope: a run of bindings taken as a scope.
 run_scope :: proc(k: ^Kernel, part: []^Binding) -> ^Scope {
-	key := strings.builder_make(context.temp_allocator)
-	strings.write_string(&key, "run")
-	for b in part do fmt.sbprintf(&key, " %p", b)
-	if s, found := k.copies[strings.to_string(key)]; found do return s
 	s := new_scope(nil, {})
 	append(&s.bindings, ..part)
 	s.source, s.complete, s.reached = s, true, true
-	k.copies[strings.clone(strings.to_string(key))] = s
 	return s
 }
 
@@ -499,8 +485,6 @@ run_scope :: proc(k: ^Kernel, part: []^Binding) -> ^Scope {
 // of a run of zero or more A, then a B. Otherwise the equation stays.
 
 arden :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
-	key := fmt.tprintf("arden %p", s)
-	if solution, found := k.copies[key]; found do return solution, true
 	prefixes := make([dynamic]Type)
 	bases := make([dynamic]Type)
 	for p in placed(k, s, .Shape) {
@@ -527,7 +511,6 @@ arden :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
 	last := new_binding(solution, .Expand, s.span)
 	last.color = or_law(k, bases[:])
 	last.typed_color = last.color
-	k.copies[strings.clone(key)] = solution
 	return solution, true
 }
 

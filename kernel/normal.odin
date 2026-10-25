@@ -328,7 +328,10 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 	case Invalid:
 		return Invalid{}
 	case ^Scope:
-		if p, ok := first_production(k, v); ok do return binding_type(k, p)
+		if p, ok := first_production(k, v); ok {
+			if places_itself(k, v, p) do return report(k, .Infinite_Recursion, p.span, "the base case places its scope again")
+			return binding_type(k, p)
+		}
 		return v
 	case ^Is:
 		return v.term
@@ -367,6 +370,17 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 		}
 	}
 	return None{}
+}
+
+// places_itself: the first production of s, its base case, is a shape that places
+// s again in a run (§5.6): as a value, it places the default of s, its base case,
+// again — an infinite recursion.
+places_itself :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
+	if p.state == .In_Progress do return false
+	shape, ok := binding_type(k, p).(^Scope)
+	if !ok || !is_shape(k, shape) do return false
+	for b in placed(k, shape, .Shape) do if is_run(b) && b.color != nil && same(k, binding_color(k, b), s) do return true
+	return false
 }
 
 unsupported_at :: proc(k: ^Kernel, span: syn.Span, what: string) -> Type {

@@ -99,18 +99,23 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case ^Operation:
 		if v.op == .In do return .Bool, true
 		if is_string_value(t) do return .String, true
-		families: [2]Family
+		// a recursive call whose equation is being given fits any family
+		families: [2]Maybe(Family)
 		for a, i in v.args {
 			if i >= 2 do break
 			f, ok := family_of(k, a)
-			if !ok do return {}, false
-			families[i] = f
+			if ok {
+				families[i] = f
+			} else if !is_pending_call(a) {
+				return {}, false
+			}
 		}
-		for sig in signatures(v.op) {
-			if family_holds(sig.args[0], families[0]) && (len(v.args) < 2 || family_holds(sig.args[1], families[1])) do return sig.result, true
+		next: for sig in signatures(v.op) {
+			for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(sig.args[i], g) do continue next
+			return sig.result, true
 		}
 	case ^Collapse:
-		if v.recursive do return hypothesis(k, v)
+		if v.recursive do return call_family(k, v)
 	case ^Or, ^And, ^Not, ^Range:
 		if is_constant(t) do return layout_family(k, t)
 	case ^Pattern:
@@ -140,18 +145,17 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 }
 
 // legal_signature: the first signature whose families are proven to hold the
-// operands. A recursive call has the family the operator needs of it: the
-// hypothesis of an induction, checked once its equation is given (recursion.odin).
+// operands. A recursive call has the family of its equation; while its equation
+// is being given, the operator on it is checked once it is (recursion.odin).
 legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, bool) {
 	next: for sig in signatures(op) {
 		for a, i in args {
 			if c, is_call := a.(^Collapse); is_call && c.recursive {
-				if f, assumed := hypothesis(k, c); assumed && !family_holds(sig.args[min(i, 1)], f) do continue next
+				if f, known := call_family(k, c); known && !family_holds(sig.args[min(i, 1)], f) do continue next
 				continue
 			}
 			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
 		}
-		for a, i in args do if c, is_call := a.(^Collapse); is_call && c.recursive do assume(k, c, sig.args[min(i, 1)])
 		return sig, true
 	}
 	return {}, false

@@ -12,9 +12,8 @@ import "core:slice"
 // solved — a closed form — or it stays. A call of a solved equation substitutes
 // its arguments into the solution.
 //
-// An operator applies to a recursive call when its family is the one the
-// operator needs: the hypothesis of an induction, checked once the equation is
-// given — the family of the first production must be that one.
+// A recursive call has the family of its equation: that of its base cases. An
+// operator on it is checked once the equation is given.
 
 // origin: the scope a copy carves, uncarved; a scope is its own.
 origin :: proc(s: ^Scope) -> ^Scope {
@@ -67,39 +66,139 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 	return true
 }
 
-// assume: the hypothesis that a recursive call is in the family f, recorded when
-// none is; false when another one is.
-assume :: proc(k: ^Kernel, c: ^Collapse, f: Family) -> bool {
-	s, ok := c.target.(^Scope)
-	if !ok do return false
-	root := origin(s)
-	if have, found := k.hypotheses[root]; found do return family_holds(f, have)
-	k.hypotheses[root] = f
-	return true
-}
-
-hypothesis :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
+// call_family: the family of a recursive call: that of the base cases of the
+// equation it calls, once given — false while it is being given.
+call_family :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
 	s, ok := c.target.(^Scope)
 	if !ok do return {}, false
-	f, found := k.hypotheses[origin(s)]
-	return f, found
+	root := origin(s)
+	p, found := first_production(k, root)
+	if !found || p.state != .Done do return {}, false
+	return base_family(k, root, p.typed_value)
 }
 
-// recursion_law: the first production of a recursive scope, once given: the
-// hypothesis is checked, and the equation solved when it has a closed form.
+// is_pending_call: a recursive call whose equation is being given.
+is_pending_call :: proc(t: Type) -> bool {
+	c, ok := t.(^Collapse)
+	if !ok || !c.recursive do return false
+	s, is_scope := c.target.(^Scope)
+	if !is_scope do return false
+	for b in origin(s).bindings do if b.kind == .Product do return b.state == .In_Progress
+	return false
+}
+
+// equation_family: the family of the equation of root: that of its base cases,
+// the products that do not call it. When the values the scope holds reach none of
+// them, its calls carve those values: the family is read on the equation where
+// what they carve is an unknown of its color, root{n -> ?::C}.
+equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
+	if f, based := base_family(k, root, e); based do return f, true
+	carved := make(map[^Binding]Type)
+	for o in operations_on_calls(e, root) {
+		for a in o.args {
+			c, is_call := a.(^Collapse)
+			if !is_call || !c.recursive do continue
+			if s, is_scope := c.target.(^Scope); is_scope do for b in s.changes do carved[b] = nil
+		}
+	}
+	if len(carved) == 0 do return
+	for b in carved {
+		u := new_unknown(k, nil)
+		u.layout = binding_color(k, b)
+		if u.layout == nil do u.layout = everything()
+		carved[b] = u
+	}
+	generic := derive(k, root, carved, root.span)
+	p := first_production(k, generic) or_return
+	return base_family(k, root, binding_type(k, p))
+}
+
+// base_family: the family of the products of e that do not call root; false when
+// there are none, or not of one family.
+base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
+	if p, is_pattern := e.(^Pattern); is_pattern {
+		f: Maybe(Family)
+		for b in p.branches {
+			if !solved(b.product, root) do continue
+			g := base_family(k, root, b.product) or_return
+			if current, set := f.?; set && current != g do return {}, false
+			f = g
+		}
+		return f.?
+	}
+	if !solved(e, root) do return {}, false
+	return family_of(k, e)
+}
+
+// recursion_law: the first production of a recursive scope, once given: each
+// operator on a recursive call must apply to the family of the equation — the
+// family of its base cases, by induction — and the equation is solved when it has
+// a closed form. A carve of it is the same equation: checked in its scope.
 recursion_law :: proc(k: ^Kernel, b: ^Binding, value: Type) -> Type {
 	root := origin(b.scope)
 	if !root.recursive do return value
 	first, found := first_production(k, b.scope)
 	if !found || first != b do return value
-	if f, assumed := k.hypotheses[root]; assumed {
-		g, known := family_of(k, value)
-		if !known || !family_holds(f, g) {
-			report(k, .Invalid_operator, b.span, fmt.tprintf("the recursive call is used as %v, and is not proven to be one", f))
+	if b.scope != root {
+		if p, has := first_production(k, root); has && p.state == .Not_Asked do binding_type(k, p)
+		return value
+	}
+	f, based := equation_family(k, root, value)
+	for o in operations_on_calls(value, root) {
+		if !based {
+			report(k, .Invalid_operator, b.span, fmt.tprintf("`%s` applies to a recursive call, and the equation has no base case to give its family", operator_text[o.op]))
+			continue
+		}
+		if !legal_on_call(k, o, f) {
+			report(k, .Invalid_operator, b.span, fmt.tprintf("`%s` is not proven to apply to %s, a recursive call in %v", operator_text[o.op], print_types(o.args), f))
 		}
 	}
-	if b.scope.carved != nil do return value
 	return solve(k, b.scope, value)
+}
+
+// operations_on_calls: the operations of t that take a recursive call of root.
+operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
+	out := make([dynamic]^Operation)
+	visit :: proc(t: Type, root: ^Scope, out: ^[dynamic]^Operation) {
+		#partial switch v in t {
+		case ^Operation:
+			for a in v.args {
+				c, is_call := a.(^Collapse)
+				if !is_call || !c.recursive do continue
+				if s, is_scope := c.target.(^Scope); is_scope && origin(s) == root {
+					append(out, v)
+					break
+				}
+			}
+			for a in v.args do visit(a, root, out)
+		case ^Pattern:
+			for b in v.branches do visit(b.product, root, out)
+		case ^Or:
+			for a in v.terms do visit(a, root, out)
+		case ^And:
+			for a in v.terms do visit(a, root, out)
+		case ^Not:
+			visit(v.term, root, out)
+		}
+	}
+	visit(t, root, &out)
+	return out[:]
+}
+
+// legal_on_call: a signature of the operator holds its operands, the recursive
+// calls being of the family f.
+legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
+	next: for sig in signatures(o.op) {
+		for a, i in o.args {
+			if c, is_call := a.(^Collapse); is_call && c.recursive {
+				if !family_holds(sig.args[min(i, 1)], f) do continue next
+				continue
+			}
+			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
+		}
+		return true
+	}
+	return false
 }
 
 // solve: the closed form (§5.6). When
