@@ -996,6 +996,9 @@ Parser :: struct {
 	panic_mode:     bool,
 	file_cache:     ^Cache,
 	scratch:        Scratch_Buffer,
+	// the expression is a statement of a list of bindings — a file, a scope, a
+	// carve — where a new binding may start: `10 -10` is 10, then -10
+	listing:        bool,
 }
 
 // Pre-sizes the SOA node store from source length (grow_buffer covers underestimates)
@@ -1005,6 +1008,7 @@ init_parser :: proc(parser: ^Parser, cache: ^Cache, source: string) {
 	parser.file_cache = cache
 	init_lexer(&parser.lexer, source)
 	parser.panic_mode = false
+	parser.listing = true
 
 	src_len := len(source)
 	estimated_nodes: int
@@ -1242,6 +1246,19 @@ parse_statement :: proc(parser: ^Parser) -> Node_Index {
 	return parse_expression(parser)
 }
 
+// starts_binding: a token after a space, glued to what follows it.
+starts_binding :: proc(parser: ^Parser, t: Token) -> bool {
+	if !has_flag(t, .Space_Before) || has_flag(t, .Line_Before) || int(t.span.end) >= len(parser.source) do return false
+	c := parser.source[t.span.end]
+	return !IS_SPACE[c] && c != '\n' && c != ',' && c != '/'
+}
+
+// listing: parses with or without new bindings starting in the expression.
+listing :: proc(parser: ^Parser, on: bool) -> (previous: bool) {
+	previous, parser.listing = parser.listing, on
+	return previous
+}
+
 // The arithmetic/logical operators that may continue an expression across a soft
 // separator (`a\n+ b` chains, but `a\n-> b` ends the statement).
 is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
@@ -1302,6 +1319,11 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 		infix := infix_table[kind]
 		if infix == nil || prec_table[kind] < precedence {
 			break
+		}
+		// in a list of bindings, a minus after a space and glued to what follows
+		// starts the next binding: `10 -10` is 10, then -10; `10 - 10`, `10-10` subtract
+		if kind == .Minus && parser.listing && starts_binding(parser, parser.current_token) {
+			break infix_loop
 		}
 		if kind == .PointingPush {
 			left_kind := parser.node_kinds[left]
@@ -1440,6 +1462,8 @@ parse_scope :: proc(parser: ^Parser) -> Node_Index {
 
 	cp := scratch_begin(&parser.scratch)
 	defer scratch_reset(&parser.scratch, cp)
+	previous := listing(parser, true)
+	defer parser.listing = previous
 
 	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
 		if parser.panic_mode {
@@ -1474,6 +1498,8 @@ parse_carve :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	cp := scratch_begin(&parser.scratch)
 	defer scratch_reset(&parser.scratch, cp)
+	previous := listing(parser, true)
+	defer parser.listing = previous
 
 	for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
 		if node := parse_statement(parser); node != INVALID_NODE {
@@ -1523,7 +1549,9 @@ parse_grouping :: proc(parser: ^Parser) -> Node_Index {
 		return INVALID_NODE
 	}
 
+	previous := listing(parser, false)
 	expr := parse_expression(parser)
+	parser.listing = previous
 	if expr == INVALID_NODE {
 		error_at_current(parser, "Expected expression after '('")
 		return INVALID_NODE
@@ -2413,6 +2441,8 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	cp := scratch_begin(&parser.scratch)
 	defer scratch_reset(&parser.scratch, cp)
+	previous := listing(parser, false)
+	defer parser.listing = previous
 
 	if parser.current_token.kind == .LeftBrace {
 		advance_token(parser)

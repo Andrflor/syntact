@@ -1,0 +1,6 @@
+{
+  "name": "Comma Ends Expression Before Minus",
+  "description": "A comma ends the expression: no operator continues across it, so {10, -10} is 10, then -10.",
+  "source": "{10, -10}",
+  "expect": "Scope[Scope[Literal(Integer,10),Operator(Subtract,nil,Literal(Integer,10))]]"
+}

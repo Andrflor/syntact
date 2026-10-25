@@ -1,0 +1,6 @@
+{
+  "name": "Spaced Glued Minus Starts A Binding",
+  "description": "In a list of bindings, a minus after a space and glued to what follows starts the next binding: {10 -10} is 10, then -10.",
+  "source": "{10 -10}",
+  "expect": "Scope[Scope[Literal(Integer,10),Operator(Subtract,nil,Literal(Integer,10))]]"
+}
