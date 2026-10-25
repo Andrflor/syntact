@@ -43,9 +43,9 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 			if c := binding_color(k, b); c != nil && obligations(k, c) do continue
 			v := binding_type(k, b)
 			if obligations(k, v) do continue
-			if _, is_scope := v.(^Scope); !is_scope {
-				report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
-			}
+			if _, is_scope := v.(^Scope); is_scope do continue
+			if c, is_call := v.(^Collapse); is_call && gives_scopes(k, c) do continue
+			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
 			continue
 		case .Push, .Pull:
 		}

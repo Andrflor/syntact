@@ -98,8 +98,15 @@ collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 		return problem(.Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
-	// solution, or it stays
-	if c.recursive || s != origin(s) && recursive(s) do return recursive_call(k, s, c.span)
+	// solution, or it stays. A carve collapsed where it is written asks its
+	// production: it is typed for the values the carve gives (§7); the call stays
+	if c.recursive do return recursive_call(k, s, c.span)
+	if s != origin(s) && recursive(s) {
+		if p, found := first_production(k, s); found {
+			if v := binding_type(k, p); is_invalid(v) do return v
+		}
+		return recursive_call(k, s, c.span)
+	}
 	if p, found := first_production(k, s); found do return binding_type(k, p)
 	return None{}
 }
@@ -171,6 +178,9 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 			found: bool
 			b, found = occurrence(bindings, a.name, a.ordinal, false)
 			if !found do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
+			// a hole is filled by <-, a field by -> (§5.7)
+			if a.pull && b.kind != .Pull do return problem(.Invalid_Carve, a.span, fmt.tprintf("`%s` is a field: it is filled by ->", a.name))
+			if !a.pull && b.kind == .Pull do return problem(.Invalid_Carve, a.span, fmt.tprintf("`%s` is a hole: it is filled by <-", a.name))
 		} else {
 			for next < len(bindings) && (bindings[next].kind == .Product || bindings[next].kind == .Pull) do next += 1
 			if next >= len(bindings) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding left to carve", print_type(s)))
@@ -180,6 +190,7 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 		if b.scope != s do return unsupported_at(k, a.span, "a carve through an expansion")
 		changes[b] = a.value
 	}
+	if p := infer_holes(k, s, &changes, span); p != nil do return p
 	return derive(k, s, changes, span)
 }
 

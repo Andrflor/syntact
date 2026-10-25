@@ -48,7 +48,9 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	data := ast.node_data[idx]
 	b := new_binding(s, .Push, node_span(k, idx))
 	#partial switch ast.node_kinds[idx] {
-	case .Pointing:
+	case .Pointing, .PointingPull:
+		// `x <- v`: a hole, filled where the scope is used; until then, v (§5.7)
+		if ast.node_kinds[idx] == .PointingPull do b.kind = .Pull
 		build_left(k, s, data.binary.left, b)
 		if data.binary.right == syn.INVALID_NODE {
 			b.value = unsupported(k, idx, "an arrow without a value")
@@ -84,6 +86,9 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			build_left(k, s, target, b)
 		case captured(ast, target):
 			build_captured(k, s, target, b) // `...C(t)`: the run `...C:(t)`
+		case bare_capture(ast, target):
+			// `...(t)`: the run `...`, captured as t
+			b.capture = syn.span_str(ast, ast.node_data[target].identifier.capture)
 		case:
 			b.value = build_term(k, s, target)
 		}
@@ -98,11 +103,6 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		} else {
 			b.value = build_term(k, s, idx)
 		}
-	case .PointingPull:
-		// a hole is a binding: its name is bound, its value not built yet
-		b.kind = .Pull
-		build_left(k, s, data.binary.left, b)
-		b.value = unsupported(k, idx, "a hole <-")
 	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
@@ -401,7 +401,8 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 	for child in syn.node_carve_children(ast, idx) {
 		a := Carve_Arg{ordinal = -1, span = node_span(k, child)}
 		#partial switch ast.node_kinds[child] {
-		case .Pointing:
+		case .Pointing, .PointingPull:
+			a.pull = ast.node_kinds[child] == .PointingPull
 			left := ast.node_data[child].binary.left
 			if left == syn.INVALID_NODE || ast.node_kinds[left] != .Identifier do return unsupported(k, child, "a carve argument whose name is not an identifier")
 			a.name = syn.node_name_str(ast, left)
@@ -430,6 +431,13 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 	c := new(Carve)
 	c.target, c.args, c.span = target, args[:], node_span(k, idx)
 	return c
+}
+
+// bare_capture: `(t)`, a capture without a name.
+bare_capture :: proc(ast: ^syn.Ast, idx: syn.Node_Index) -> bool {
+	if ast.node_kinds[idx] != .Identifier do return false
+	id := ast.node_data[idx].identifier
+	return syn.node_name_str(ast, idx) == "" && id.capture.end > id.capture.start
 }
 
 // build_name: the last occurrence of the name visible above, up to the prelude.

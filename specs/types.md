@@ -424,6 +424,49 @@ In general, when `f{n -> m}! = m ? {b -> c  -> g(m) + f{n -> m - 1}!}`, then
 `sum{n -> m - 1}!` is not an extra notation: it is carving and collapse, applied to
 types.
 
+A carve of an equation that is not solved, collapsed where it is written, stays a
+call; its production is asked, and typed for the values the carve gives (§7). A
+recursive call whose base cases are scopes is a scope: `...` places it.
+
+### 5.7 Holes
+
+`x <- v` is a hole: a binding the use site fills. Until it is filled, it holds v,
+like any binding. A carve fills a hole with `<-` and a field with `->`; an unnamed
+argument never lands in a hole.
+
+```text
+identity -> {T <- none  T:value -> none  -> value}
+identity{T <- u8  value -> 5}!     = 5
+identity{T -> u8}                  invalid: T is a hole
+identity{value <- 5}               invalid: value is a field
+```
+
+A hole the carve does not fill is inferred: what the carve puts where the hole is
+mentioned lands in it. The places are read on a copy of the scope where the hole is
+an unknown `?h` (§5.3): in the color of each field the carve fills, or in the value
+that field had, set beside what the carve puts there. At the place of a value, what
+lands is a sent value; at the place of a color, a required type. A fill `x <- t` is a
+required type too.
+
+```text
+identity{value -> 5}           T:value beside 5: 5 is sent to T                 T = 5
+data -> {u8:x -> 0}
+pair -> {u8:e <- 2  data{e}:first  data{e}:second  -> e}
+pair{data{6} data{6}}          data{?h} beside data{6}, twice: 6 is sent to e   e = 6
+Array{T}:source -> {2 3}       Array{?h}: each element is at a place ?h: 2 and 3 are sent
+func -> {e -> T:  -> E:}       beside {u8:e, -> e + 1}: u8 is at the place T:, required
+```
+
+The hole takes the required type: every required type is the same, and every sent
+value is in it. Without one, it takes the sent value that holds all the others. It
+never takes their union. Otherwise the carve is invalid. Then, as for any binding,
+the hole's color applies.
+
+```text
+pair{data{6} data{3}}            invalid: neither 6 nor 3 holds the other
+pair{e <- 4  data{6} data{6}}    invalid: 6 is not in 4
+```
+
 ## 6. Patterns
 
 A pattern is a type of the algebra, like `|` and `~`. In `t ? B`, B is a scope of

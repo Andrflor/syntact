@@ -159,21 +159,40 @@ equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, o
 	return base_family(k, root, binding_type(k, p))
 }
 
-// base_family: the family of the products of e that do not call root; false when
-// there are none, or not of one family.
+// base_family: the family of the base cases of e; false when there are none, or
+// not of one family.
 base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
-	if p, is_pattern := e.(^Pattern); is_pattern {
-		f: Maybe(Family)
-		for b in p.branches {
-			if !solved(b.product, root) do continue
-			g := base_family(k, root, b.product) or_return
-			if current, set := f.?; set && current != g do return {}, false
-			f = g
-		}
-		return f.?
+	f: Maybe(Family)
+	for b in base_cases(e, root) {
+		g := family_of(k, b) or_return
+		if current, set := f.?; set && current != g do return {}, false
+		f = g
 	}
-	if !solved(e, root) do return {}, false
-	return family_of(k, e)
+	return f.?
+}
+
+// base_cases: the products of e that do not call root.
+base_cases :: proc(e: Type, root: ^Scope) -> []Type {
+	out := make([dynamic]Type)
+	if p, is_pattern := e.(^Pattern); is_pattern {
+		for b in p.branches do if solved(b.product, root) do append(&out, ..base_cases(b.product, root))
+	} else if solved(e, root) {
+		append(&out, e)
+	}
+	return out[:]
+}
+
+// gives_scopes: a recursive call whose equation has scopes for base cases: by
+// induction, it gives a scope, and `...` places it (§5.6).
+gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
+	s, ok := c.target.(^Scope)
+	if !ok || !c.recursive do return false
+	root := origin(s)
+	p, found := first_production(k, root)
+	if !found do return false
+	bases := base_cases(binding_type(k, p), root)
+	for b in bases do if _, is_scope := b.(^Scope); !is_scope do return false
+	return len(bases) > 0
 }
 
 // recursion_law: the first production of a recursive scope, once given, is solved

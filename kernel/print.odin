@@ -379,7 +379,7 @@ write_changes :: proc(b: ^strings.Builder, s: ^Scope) {
 		if !carved do continue
 		if !first do strings.write_string(b, "  ")
 		first = false
-		if x.name != "" do fmt.sbprintf(b, "%s -> ", x.name)
+		if x.name != "" do fmt.sbprintf(b, "%s %s ", x.name, x.kind == .Pull ? "<-" : "->")
 		write_type(b, v, 0)
 	}
 	strings.write_byte(b, '}')

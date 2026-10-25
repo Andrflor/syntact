@@ -195,6 +195,20 @@ SPEC_CASES := []Spec_Case {
 	// a character that does not print is shown by its code
 	{"x -> char & ~'\\0'", "'\\x01'..", {}},
 	{"f -> {u64:n -> 5  -> n ? {0 -> 1  -> n * f{n -> n - 1}!}}\nx -> f{n -> 4}!", "", {}},
+	// holes (§5.7): filled by <-, skipped by position, inferred from what the carve puts
+	{IDENTITY + "x -> identity{T <- u8  value -> 5}!", "5", {}},
+	{IDENTITY + "x -> identity{T -> u8}!", "", {.Invalid_Carve}},
+	{IDENTITY + "x -> identity{value <- 5}!", "", {.Invalid_Carve}},
+	{IDENTITY + "x -> identity{value -> 5}.T", "5", {}},
+	{IDENTITY + "x -> identity{T <- 4  value -> 5}!", "", {.Constraint_Mismatch}},
+	{"base -> {x <- 0  u8:a -> 1  u8:b -> 2}\nx -> base{10, 20}.b", "20", {}},
+	{"only -> {x <- 0}\nx -> only{9}", "", {.Invalid_Carve}},
+	{PAIR + "x -> pair{data{6} data{6}}!", "6", {}},
+	{PAIR + "x -> pair{data{6} data{3}}!", "", {.Constraint_Mismatch}},
+	{PAIR + "x -> pair{e <- 4  data{6} data{6}}!", "", {.Constraint_Mismatch}},
+	{ARRAY + MAP + "x -> map{{2 3 4 5}, {u8:e, -> e + 1}}.T", "0..255", {}},
+	{ARRAY + MAP + "x -> map{{2.4 3}, {u8:e, -> e + 1}}!", "", {.Constraint_Mismatch}},
+	{ARRAY + MAP + "x -> map{{\"\" 3}, {(u8 | string):e, -> e + 10}}!", "", {.Invalid_operator}},
 	// not guarded: the equation stays
 	{"L -> {\n  -> {}\n  -> {...L: ...L:}\n}\nL:a -> {}", "", {.Constraint_Mismatch}},
 	// a carve carves any binding, in turn: z{…} (specs/language/04)
@@ -250,6 +264,12 @@ SPEC_CASES := []Spec_Case {
 }
 
 ARRAY :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n"
+
+IDENTITY :: "identity -> {\n  T <- none\n  T:value -> none\n  -> value\n}\n"
+
+PAIR :: "data -> {u8:x -> 0}\npair -> {\n  u8:e <- 2\n  data{e}:first\n  data{e}:second\n  -> e\n}\n"
+
+MAP :: "map -> {\n  T <- {}\n  E <- {}\n  Array{T}:source\n  func -> {e -> T:, -> E:}\n  -> source ? {\n    {T:(e) ...Array{T}:(r)} -> {func{e -> e}! ...map{r, func}!}\n    {} -> {}\n  }\n}\n"
 
 MIXED :: "List -> {\n  -> {}\n  -> {u8: ...List:}\n  -> {i8: string: ...List:}\n}\n"
 

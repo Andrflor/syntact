@@ -35,6 +35,7 @@ Kernel :: struct {
 	ast:        ^syn.Ast,
 	errors:     [dynamic]Error,
 	unknowns:   int, // the unknowns written: their ids
+	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
 }

@@ -157,6 +157,7 @@ Carve :: struct {
 Carve_Arg :: struct {
 	name:      string, // "" for a positional argument
 	ordinal:   int, // x#n; -1: the first occurrence
+	pull:      bool, // `x <- v`: fills a hole (§5.7)
 	value:     Type,
 	span:      syn.Span,
 	// `z{…}`: a carve carves any binding, by carving it too: the binding z of the

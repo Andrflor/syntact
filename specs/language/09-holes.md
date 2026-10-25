@@ -1,13 +1,9 @@
 # Holes and genericity
 
-> **Open.** Holes are not written in `types.md` yet, and the kernel does not build
-> them. Their inference below is the intent; its law is to be written in the algebra
-> before it is implemented.
-
 `<-` declares a **hole**: a binding the use site fills. Until it is filled, a hole
 holds its default, like any binding.
 
-```text
+```syntact
 identity -> {
   T <- none
   T:value -> none
@@ -19,19 +15,32 @@ identity -> {
 
 A hole is filled by `<-`, a field by `->`. The two arrows are not interchangeable:
 
-```text
-identity{T <- u8  value -> 5}!    // T is u8, value is 5
-identity{T -> u8}!                // error: T is a hole, it is filled by <-
-identity{value <- 5}!             // error: value is a field, it is filled by ->
+```syntact
+a -> identity{T <- u8  value -> 5}!    // 5: T is u8
+b -> identity{T -> u8}!                // refused: T is a hole, filled by <-
+c -> identity{value <- 5}!             // refused: value is a field, filled by ->
 ```
 
 An unnamed argument never lands in a hole: positions count the fields only. A scope
-whose only bindings are holes has no position: `{x <- 0}{9}` is an invalid carve.
+whose only bindings are holes has no position.
+
+```syntact
+base -> {
+  x <- 0
+  u8:a -> 1
+  u8:b -> 2
+}
+p -> base{10, 20}          // a 10, b 20; x keeps its value
+only -> {x <- 0}
+q -> only{9}               // refused: no binding left to carve
+```
 
 ## Inferring a hole
 
 A hole the carve does not fill is inferred from what the carve puts where the hole is
-mentioned: in the color of a field it fills, or in the value that field had.
+mentioned: in the color of a field it fills, or in the value that field had. The
+places are read on a copy of the scope where the hole is an unknown, set beside what
+the carve puts there.
 
 What lands in a hole is of one of two kinds:
 
@@ -50,31 +59,49 @@ The hole takes the one that holds all the others — never their union:
 
 Anything else is an error. Then, as for every binding, the hole's own color applies.
 
-```text
-identity{value -> 5}!             // T is 5
-identity{T <- u8  value -> 5}!    // T is u8: 5 is in u8
-identity{T <- 4  value -> 5}!     // error: 5 is not in 4
+```syntact
+d -> identity{value -> 5}!             // T is 5
+e -> identity{T <- 4  value -> 5}!     // refused: 5 is not in 4
+
+data -> {u8:x -> 0}
+pair -> {
+  u8:e <- 2
+  data{e}:first
+  data{e}:second
+  -> e
+}
+r -> pair{data{6} data{6}}!            // 6: e is 6
+s -> pair{data{6} data{3}}!            // refused: neither 6 nor 3 holds the other
+t -> pair{e <- 4  data{6} data{6}}!    // refused: 6 is not in 4
 ```
 
 ## Genericity
 
 A generic scope is a scope with holes:
 
-```text
+```syntact
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
 map -> {
   T <- {}
   E <- {}
   Array{T}:source
-  func -> {e -> T:  -> E:}
+  func -> {e -> T:, -> E:}
   -> source ? {
     {T:(e) ...Array{T}:(r)} -> {func{e -> e}! ...map{r, func}!}
     {} -> {}
   }
 }
-
-map{{2 3 4 5}, {u8:e  -> e + 1}}!     // T is u8: {3 4 5 6}
-map{{2.4 3}, {u8:e  -> e + 1}}!       // error: 2.4 is not in u8
+ok -> map{{2 3 4 5}, {u8:e, -> e + 1}}!    // T is u8: u8 is required by func
+bad -> map{{2.4 3}, {u8:e, -> e + 1}}!     // refused: 2.4 is not in u8
 ```
+
+`map{…}!` stays a call: the recursion has no closed form. Its production is typed for
+the values the carve gives, and the recursive call in it, a scope by its base cases,
+is placed by `...`.
 
 ---
 

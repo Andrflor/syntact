@@ -118,7 +118,7 @@ fib -> {
 | Part | State |
 |---|---|
 | [`specs/types.md`](specs/types.md) | the algebra: the reference |
-| `kernel/` | the algebra on its terms: the typecheck. Every case of the spec passes, and the 547 cases of the corpus whose forms it builds. Holes `<-`, the cast `\` and events are not built yet |
+| `kernel/` | the algebra on its terms: the typecheck, holes included. Every case of the spec passes, and the corpus cases whose forms it builds, but for five that contradict the spec. The cast `\` and events are not built yet |
 | `lsp/` | diagnostics, the type of any expression on hover, and completion, from the kernel |
 | `compiler/` | the parser, used by everything. Executables still come from the previous pipeline (analyze → reduce → bytecode → x86-64 ELF), which predates the algebra: it will be replaced by code generated from the kernel's normal forms |
 

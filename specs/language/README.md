@@ -14,13 +14,13 @@ and `types.md` disagree, `types.md` wins.
 - [**Unknowns and the check**](06-unknowns-and-the-check.md) — `??`, equations, the three verdicts, proofs
 - [**Patterns**](07-patterns.md) — `?` as a type, unknown targets, destructuring
 - [**Recursion**](08-recursion.md) — closed forms, Arden, guarded productions
+- [**Holes and genericity**](09-holes.md) — `<-`, filled at the use site or inferred
 
 ## Open
 
 These parts are the intent: they are not written in `types.md` yet, and the kernel
 does not build them.
 
-- [**Holes and genericity**](09-holes.md) — `<-`, filled at the use site or inferred
 - [**Effects and handlers**](10-effects-and-handlers.md) — `>-` and `-<`, served by the context of the call
 - [**The external boundary**](11-external-boundary.md) — `<lib>{…}`: a scope whose production points outside
 - [**State**](12-state.md) — resonance `>>-` `-<<`, reactivity `>>=` `=<<`
