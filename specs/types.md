@@ -105,6 +105,7 @@ When a type is empty, its value is `none`.
 
 ```text
 0..3      = 0 | 1 | 2 | 3
+3..0      = 0..3                      .. is commutative; its default is not (§5.5)
 0..       = 0 | 1 | 2 | …             up to infinity
 0.0..     every real ≥ 0.0
 ''..      every character             '' as a bound: from the smallest
@@ -130,7 +131,7 @@ Between strings, `..` is about positions:
 
 ```text
 =p = p             p a primitive: a primitive is its own singleton
-=t = {-> t}        the scope that produces t (§5.4)
+=t                 admits t only: x in =t when x and t are equal (§4.7)
 ```
 
 `=u8` is not `u8`: `u8` admits 0 to 255, `=u8` admits only u8.
@@ -357,7 +358,8 @@ A binding without a value has the default of its color (specs/language/09, 10):
 
 ```text
 a set          its distinguished element: 0 when it has it, "" for strings, false for
-               booleans; otherwise its first element
+               booleans; otherwise its first element, as written: the bound written
+               first of a range (2..1 gives 2, 1..2 gives 1), the first term of a |
 a scope        with productions, its first production; a shape, itself: complete
                with the defaults of its bindings
 C:             in a value, an anonymous binding colored by C: the default of C

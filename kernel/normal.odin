@@ -42,7 +42,7 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 	case ^Carve:
 		return carve_law(k, v)
 	case ^Default:
-		return rewrite(k, default_of(k, normal(k, v.color), v.span), k.rewrite)
+		return rewrite(k, default_of(k, normal(k, v.color), v.span, v.color), k.rewrite)
 	case ^Pattern:
 		return pattern_law(k, v)
 	}
@@ -301,7 +301,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	color := binding_color(k, b)
 	value: Type
 	if b.value == nil {
-		value = color != nil ? default_of(k, color, b.span) : None{}
+		value = color != nil ? default_of(k, color, b.span, b.color) : None{}
 	} else if b.kind == .Product {
 		value = recursion_law(k, b, normal(k, b.value))
 	} else {
@@ -320,7 +320,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 // default_of: the value a binding colored by c has without one: a set, its
 // distinguished element: 0, "", false, otherwise its first; a scope with
 // productions, its first; a shape, itself.
-default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
+default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> Type {
 	#partial switch v in c {
 	case Invalid:
 		return c
@@ -338,7 +338,8 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 	// its distinguished element, when it holds it
 	for d in ([3]Type{Int(0), real_int(0), empty_string()}) do if !is_none(and_law(k, {d, c})) && inhabited(k, and_law(k, {d, c})) do return d
 	if !is_none(and_law(k, {Bool(false), c})) do return Bool(false)
-	// otherwise its first element
+	// otherwise its first element, as written: .. is commutative, the default is not
+	if first, ok := written_first(k, written); ok && inhabited(k, and_law(k, {first, c})) do return first
 	cells, negated := as_cells(c)
 	if negated do return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 	for cell in cells {
@@ -367,6 +368,22 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 		}
 	}
 	return None{}
+}
+
+// written_first: the first element of a color as written: the bound written first of
+// a range, the first term of a |, through the names of the aliases.
+written_first :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
+	#partial switch v in t {
+	case ^Range:
+		if v.lo == nil do return nil, false
+		lo := normal(k, v.lo)
+		return lo, is_primitive(lo)
+	case ^Or:
+		return written_first(k, v.terms[0])
+	case ^Name:
+		if v.self == nil && v.binding.value != nil do return written_first(k, v.binding.value)
+	}
+	return nil, false
 }
 
 // places_itself: the first production of s, its base case, is a shape that places
