@@ -28,7 +28,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 		solution := binding_type(k, p)
 		if solved(solution, root) {
 			if s == root do return solution
-			values := make(Rewrite)
+			values: Rewrite
 			substitutable := true
 			for b, v in s.changes {
 				u, is_unknown := binding_type(k, b).(^Unknown)
@@ -36,7 +36,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 					substitutable = false
 					break
 				}
-				values[u.id] = v
+				values = rewriting(values, u, v)
 			}
 			if substitutable do return rewrite(k, solution, values)
 		}
@@ -210,13 +210,13 @@ closed_form :: proc(k: ^Kernel, root: ^Scope, value: Type) -> (closed: Type, ok:
 	if len(call.changes) != 1 do return
 	step := ring_law(.Sub, {u, Int(1)}) or_return
 	for b, v in call.changes {
-		x, same_unknown := binding_type(k, b).(^Unknown)
-		if !same_unknown || x.id != u.id || !same(k, v, step) do return
+		x, is_unknown := binding_type(k, b).(^Unknown)
+		if !is_unknown || !same_unknown(x, u) || !same(k, v, step) do return
 	}
 	ms, divisor := monomials(g) or_return
 	degree := 0
 	for m in ms {
-		for f in factors(m) do if f.id != u.id do return
+		for f in factors(m) do if !same_unknown(f, u) do return
 		degree = max(degree, len(factors(m)))
 	}
 	if !included(k, layout_of(k, u), new_range(Int(base), nil, .Int)) do return
@@ -228,9 +228,7 @@ closed_form :: proc(k: ^Kernel, root: ^Scope, value: Type) -> (closed: Type, ok:
 		total = ring_law(.Add, {total, term}) or_return
 	}
 	total = ring_over(total, divisor) or_return
-	at := make(Rewrite)
-	at[u.id] = Int(base)
-	at_base := rewrite(k, total, at).(Int) or_return
+	at_base := rewrite(k, total, rewriting(nil, u, Int(base))).(Int) or_return
 	first := add_checked(i128(c), -i128(at_base)) or_return
 	return ring_law(.Add, {Int(first), total})
 }

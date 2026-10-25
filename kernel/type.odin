@@ -65,8 +65,9 @@ problem :: proc(kind: Error_Kind, span: syn.Span, message: string) -> Type {
 // same one comes back through a name.
 Unknown :: struct {
 	id:      int,
-	written: Type, // `??::L`: L as written; `C:x -> ??`: the color C; nil: everything
-	layout:  Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
+	written:  Type, // `??::L`: L as written; `C:x -> ??`: the color C; nil: everything
+	layout:   Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
+	instance: ^Scope, // in a carve whose changes its layout names: ?ₖ read in that carve
 }
 
 Or :: struct {

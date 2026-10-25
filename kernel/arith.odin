@@ -588,30 +588,33 @@ bool_law :: proc(k: ^Kernel, op: Operator, args: []Type) -> Type {
 	flatten_bool(op, a, &terms)
 	flatten_bool(op, b, &terms)
 	// the atoms on one unknown, combined
-	sets := make(map[int]Type)
-	unknowns := make(map[int]^Unknown)
-	counts := make(map[int]int)
+	Atoms :: struct {
+		unknown: ^Unknown,
+		set:     Type,
+		count:   int,
+	}
+	groups := make([dynamic]Atoms)
 	for t in terms {
-		if u, _, ok := literal(k, t); ok do counts[u.id] += 1
+		u, s, ok := literal(k, t)
+		if !ok do continue
+		found := false
+		for &g in groups {
+			if same_unknown(g.unknown, u) {
+				g.set = op == .Bit_Or ? or_law(k, {g.set, s}) : and_law(k, {g.set, s})
+				g.count += 1
+				found = true
+			}
+		}
+		if !found do append(&groups, Atoms{u, s, 1})
 	}
 	kept := make([dynamic]Type)
 	for t in terms {
-		u, s, ok := literal(k, t)
-		if !ok || counts[u.id] < 2 {
-			append(&kept, t)
-			continue
-		}
-		unknowns[u.id] = u
-		if x, found := sets[u.id]; found {
-			sets[u.id] = op == .Bit_Or ? or_law(k, {x, s}) : and_law(k, {x, s})
-		} else {
-			sets[u.id] = s
-		}
+		u, _, ok := literal(k, t)
+		combined := false
+		if ok do for g in groups do if same_unknown(g.unknown, u) && g.count >= 2 do combined = true
+		if !combined do append(&kept, t)
 	}
-	ids := make([dynamic]int)
-	for id in sets do append(&ids, id)
-	slice.sort(ids[:])
-	for id in ids do append(&kept, in_law(k, unknowns[id], sets[id]))
+	for g in groups do if g.count >= 2 do append(&kept, in_law(k, g.unknown, g.set))
 	absorbing := op == .Bit_Or
 	out: Type
 	for t in kept {

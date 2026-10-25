@@ -9,7 +9,7 @@ package kernel
 //   x in (a & b)  = (x in a) [&] (x in b)          x ≠ none
 //   x in ~a       = [~](x in a)                    x ≠ none
 //   x in =t       = true when x and t are the same; false when both are known
-//                   and differ
+//                   and differ, or their layouts have nothing in common
 //   x in l..u     = l <= x [&] x <= u              x one value
 //   x in p        = x in =p                        p one value
 //   b in true     = b,  b in false = [~]b          b a boolean
@@ -116,6 +116,12 @@ equal_law :: proc(k: ^Kernel, x, t: Type) -> Type {
 		if equal, known := values_equal(k, x, t); known do return Bool(equal)
 	}
 	if is_primitive(x) && is_value(k, t) do return in_law(k, t, x) // t in =x: a primitive is its own singleton
+	// two values whose layouts have nothing in common are never equal
+	if is_value(k, x) && is_value(k, t) {
+		lx, known_x := layout_image(k, x)
+		lt, known_t := layout_image(k, t)
+		if known_x && known_t && apart(k, lx, lt) do return Bool(false)
+	}
 	return new_operation(.In, x, new_is(t))
 }
 

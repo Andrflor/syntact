@@ -21,7 +21,7 @@ term_order :: proc(a, b: Type) -> int {
 	case Char:
 		return compare_ints(i128(x), i128(b.(Char)))
 	case ^Unknown:
-		return compare_ints(i128(x.id), i128(b.(^Unknown).id))
+		return unknown_order(x, b.(^Unknown))
 	case ^Range:
 		y := b.(^Range)
 		if c := compare_ints(i128(x.family), i128(y.family)); c != 0 do return c
@@ -76,6 +76,27 @@ term_order :: proc(a, b: Type) -> int {
 		return 0
 	}
 	return 0
+}
+
+// unknown_order: an unknown by its index, then by the carve it is read in: ?ₖ read
+// in two equal carves is one unknown.
+unknown_order :: proc(a, b: ^Unknown) -> int {
+	if c := compare_ints(i128(a.id), i128(b.id)); c != 0 do return c
+	if a.instance == b.instance do return 0
+	if a.instance == nil || b.instance == nil do return a.instance == nil ? -1 : 1
+	x, y := a.instance, b.instance
+	for binding in x.carved.bindings {
+		v, in_x := x.changes[binding]
+		w, in_y := y.changes[binding]
+		if in_x != in_y do return in_x ? 1 : -1
+		if !in_x do continue
+		if c := term_order(v, w); c != 0 do return c
+	}
+	return 0
+}
+
+same_unknown :: proc(a, b: ^Unknown) -> bool {
+	return unknown_order(a, b) == 0
 }
 
 term_less :: proc(a, b: Type) -> bool {

@@ -83,7 +83,7 @@ factors :: proc(m: Type) -> []^Unknown {
 	case ^Operation:
 		for a in v.args do if u, ok := a.(^Unknown); ok do append(&out, u)
 	}
-	slice.sort_by(out[:], proc(a, b: ^Unknown) -> bool {return a.id < b.id})
+	slice.sort_by(out[:], proc(a, b: ^Unknown) -> bool {return unknown_order(a, b) < 0})
 	return out[:]
 }
 
@@ -112,7 +112,7 @@ times :: proc(a, b: []Type) -> (out: []Type, ok: bool) {
 			us := make([dynamic]^Unknown)
 			append(&us, ..factors(x))
 			append(&us, ..factors(y))
-			slice.sort_by(us[:], proc(p, q: ^Unknown) -> bool {return p.id < q.id})
+			slice.sort_by(us[:], proc(p, q: ^Unknown) -> bool {return unknown_order(p, q) < 0})
 			c := mul_checked(coefficient(x), coefficient(y)) or_return
 			append(&products, monomial(c, us[:]))
 		}
@@ -122,7 +122,7 @@ times :: proc(a, b: []Type) -> (out: []Type, ok: bool) {
 
 same_factors :: proc(a, b: []^Unknown) -> bool {
 	if len(a) != len(b) do return false
-	for x, i in a do if x.id != b[i].id do return false
+	for x, i in a do if !same_unknown(x, b[i]) do return false
 	return true
 }
 
@@ -152,7 +152,7 @@ monomial_less :: proc(a, b: Type) -> bool {
 	x, y := factors(a), factors(b)
 	if len(x) == 0 || len(y) == 0 do return len(x) > 0 && len(y) == 0 // the constant last
 	if len(x) != len(y) do return len(x) < len(y)
-	for u, i in x do if u.id != y[i].id do return u.id < y[i].id
+	for u, i in x do if c := unknown_order(u, y[i]); c != 0 do return c < 0
 	return false
 }
 

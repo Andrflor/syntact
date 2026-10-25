@@ -205,6 +205,8 @@ carve_problem :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) -> Type {
 // from outside by its type, with the unknowns of `outer` rewritten, and each name
 // of its cover by the piece of the target it reads.
 Copier :: struct {
+	instance:   ^Scope, // a carve: the copy its unknowns are read in
+	carve:      bool,
 	bindings:   map[^Binding]^Binding,
 	scopes:     map[^Scope]^Scope,
 	substitute: bool,
@@ -213,7 +215,7 @@ Copier :: struct {
 }
 
 copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
-	m := Copier{}
+	m := Copier{carve = len(changes) > 0}
 	c := copy_into(k, &m, s, s.parent)
 	for b in c.bindings {
 		if v, carved := changes[b.source]; carved {
@@ -226,6 +228,7 @@ copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope 
 copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	c := new_scope(parent, s.span)
 	c.recursive, c.complete = s.recursive, true
+	if m.carve && m.instance == nil do m.instance = c
 	if !m.substitute do c.source = s // a scope of a branch is checked as written there
 	m.scopes[s] = c
 	for b in s.bindings {
@@ -254,8 +257,12 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
 	case ^Unknown:
-		if !mentions(m, v.written) do return v
-		return new_unknown(k, copy_term(k, m, v.written, scope))
+		// ?ₖ whose layout names what the copy changes: ?ₖ read in the carve
+		if !mentions(m, v.written) || m.instance == nil do return v
+		u := new(Unknown)
+		u^ = v^
+		u.written, u.layout, u.instance = copy_term(k, m, v.written, scope), nil, m.instance
+		return u
 	case ^Or:
 		return new_or(..copy_terms(k, m, v.terms, scope))
 	case ^And:
@@ -661,7 +668,7 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok
 	case ^Unknown:
 		y, ok := b.(^Unknown)
-		return ok && x.id == y.id // the same unknown, whatever layout a branch gives it
+		return ok && same_unknown(x, y) // the same unknown, whatever layout a branch gives it
 	case ^Or:
 		y, ok := b.(^Or)
 		return ok && same_all(k, x.terms, y.terms)

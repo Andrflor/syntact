@@ -154,6 +154,7 @@ write_bare :: proc(b: ^strings.Builder, t: Type) {
 		strings.write_string(b, "<invalid>")
 	case ^Unknown:
 		fmt.sbprintf(b, "?%d", v.id)
+		if v.instance != nil do write_changes(b, v.instance) // ?ₖ read in a carve
 	case ^Or:
 		for x, i in v.terms {
 			if i > 0 do strings.write_string(b, " | ")
@@ -298,17 +299,7 @@ write_operation :: proc(b: ^strings.Builder, o: ^Operation) {
 write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
 	if s.carved != nil {
 		write_scope(b, s.carved)
-		strings.write_byte(b, '{')
-		first := true
-		for x in s.carved.bindings {
-			v, carved := s.changes[x]
-			if !carved do continue
-			if !first do strings.write_string(b, "  ")
-			first = false
-			if x.name != "" do fmt.sbprintf(b, "%s -> ", x.name)
-			write_type(b, v, 0)
-		}
-		strings.write_byte(b, '}')
+		write_changes(b, s)
 		return
 	}
 	if s.source != nil && s.source != s {
@@ -323,6 +314,21 @@ write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
 	for x, i in s.bindings {
 		if i > 0 do strings.write_string(b, "  ")
 		write_binding(b, x)
+	}
+	strings.write_byte(b, '}')
+}
+
+// write_changes: the arguments of a carve, {x -> v …}.
+write_changes :: proc(b: ^strings.Builder, s: ^Scope) {
+	strings.write_byte(b, '{')
+	first := true
+	for x in s.carved.bindings {
+		v, carved := s.changes[x]
+		if !carved do continue
+		if !first do strings.write_string(b, "  ")
+		first = false
+		if x.name != "" do fmt.sbprintf(b, "%s -> ", x.name)
+		write_type(b, v, 0)
 	}
 	strings.write_byte(b, '}')
 }

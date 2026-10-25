@@ -17,7 +17,27 @@ import "core:strings"
 // A scope is a value: a rewrite does not enter it. What is taken out of it in a
 // branch — a name, an access, a collapse — is rewritten there.
 
-Rewrite :: map[int]Type
+Rewrite :: []Rewriting
+
+// Rewriting: ?ₖ ↦ t.
+Rewriting :: struct {
+	unknown: ^Unknown,
+	term:    Type,
+}
+
+// rewritten: the term an unknown is rewritten to, when it is.
+rewritten :: proc(r: Rewrite, u: ^Unknown) -> (Type, bool) {
+	for x in r do if same_unknown(x.unknown, u) do return x.term, true
+	return nil, false
+}
+
+// rewriting: r, with u rewritten to t.
+rewriting :: proc(r: Rewrite, u: ^Unknown, t: Type) -> Rewrite {
+	out := make([dynamic]Rewriting)
+	for x in r do if !same_unknown(x.unknown, u) do append(&out, x)
+	append(&out, Rewriting{u, t})
+	return out[:]
+}
 
 // rewrite: t with its unknowns rewritten, in normal form.
 rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
@@ -26,7 +46,7 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
 	case ^Unknown:
-		if x, found := r[v.id]; found do return x
+		if x, found := rewritten(r, v); found do return x
 		return t
 	case ^Operation:
 		if is_string_value(t) do return t

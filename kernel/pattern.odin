@@ -85,7 +85,6 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached: bool, exact: bool) {
 	if is_bool(reach, false) || is_invalid(reach) do return nil, false, false
 	out = base
-	copied := false
 	exact = true
 	literals := make([dynamic]Type)
 	conjuncts(reach, &literals)
@@ -108,18 +107,13 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 			continue
 		}
 		current := layout_of(k, u)
-		if x, found := out[u.id]; found {
+		if x, found := rewritten(out, u); found {
 			current = x
 			if w, ok := x.(^Unknown); ok do current = layout_of(k, w)
 		}
 		layout := and_law(k, {current, positive ? o.args[1] : not_law(k, o.args[1])})
 		if is_none(layout) do return nil, false, false
-		if !copied {
-			out = make(Rewrite)
-			for id, t in base do out[id] = t
-			copied = true
-		}
-		out[u.id] = narrowing(u, layout)
+		out = rewriting(out, u, narrowing(u, layout))
 	}
 	return out, true, exact
 }

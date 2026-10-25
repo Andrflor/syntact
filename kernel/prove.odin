@@ -132,10 +132,10 @@ in_problem :: proc(k: ^Kernel, value, color: Type, span: syn.Span) -> Type {
 print_witness :: proc(r: Rewrite) -> string {
 	if len(r) == 0 do return ""
 	parts := make([dynamic]string)
-	for id, t in r {
-		layout := t
-		if u, ok := t.(^Unknown); ok do layout = u.layout
-		append(&parts, fmt.tprintf("?%d in %s", id, print_type(layout)))
+	for x in r {
+		layout := x.term
+		if u, ok := x.term.(^Unknown); ok do layout = u.layout
+		append(&parts, fmt.tprintf("?%d in %s", x.unknown.id, print_type(layout)))
 	}
 	return fmt.tprintf(" when %s", strings.join(parts[:], ", "))
 }
