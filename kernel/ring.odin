@@ -11,6 +11,9 @@ import "core:slice"
 // monomials by degree, the constant last, each added or subtracted, over a divisor:
 //
 //   ?1 - ?1 = 0      ?1 + ?1 = 2 * ?1      ?0 * (?0 + 1) / 2 = (?0 + ?0 * ?0) / 2
+//
+// A coefficient beyond the integers written here is not computed: the law does not
+// apply, and the term stays.
 
 // monomials: an integer term as the monomials of its sum, over a divisor ≥ 1;
 // false when it is not a sum of products of integers and unknowns.
@@ -26,32 +29,36 @@ monomials :: proc(t: Type) -> (terms: []Type, divisor: i128, ok: bool) {
 			d: i128 = 1
 			for a, i in v.args {
 				ms, e := monomials(a) or_return
-				if v.op == .Sub && i > 0 do ms = scale(ms, -1)
-				l := d / gcd(d, e) * e
-				scaled := scale(out[:], l / d)
+				if v.op == .Sub && i > 0 do ms = scale(ms, -1) or_return
+				l := mul_checked(d / gcd(d, e), e) or_return
+				left := scale(out[:], l / d) or_return
+				right := scale(ms, l / e) or_return
 				clear(&out)
-				append(&out, ..scaled)
-				append(&out, ..scale(ms, l / e))
+				append(&out, ..left)
+				append(&out, ..right)
 				d = l
 			}
-			return collect(out[:]), d, true
+			collected := collect(out[:]) or_return
+			return collected, d, true
 		case .Neg:
 			ms, d := monomials(v.args[0]) or_return
-			return scale(ms, -1), d, true
+			neg := scale(ms, -1) or_return
+			return neg, d, true
 		case .Mul:
 			out := slice.clone([]Type{Int(1)})
 			d: i128 = 1
 			for a in v.args {
 				ms, e := monomials(a) or_return
-				out = times(out, ms)
-				d *= e
+				out = times(out, ms) or_return
+				d = mul_checked(d, e) or_return
 			}
 			return out, d, true
 		case .Div:
 			ms, d := monomials(v.args[0]) or_return
 			c, constant := v.args[1].(Int)
 			if !constant || c <= 0 do return
-			return ms, d * i128(c), true
+			e := mul_checked(d, i128(c)) or_return
+			return ms, e, true
 		}
 	}
 	return
@@ -63,9 +70,7 @@ coefficient :: proc(m: Type) -> i128 {
 	case Int:
 		return i128(v)
 	case ^Operation:
-		c: i128 = 1
-		for a in v.args do if x, ok := a.(Int); ok do c *= i128(x)
-		return c
+		for a in v.args do if x, ok := a.(Int); ok do return i128(x)
 	}
 	return 1
 }
@@ -90,25 +95,29 @@ monomial :: proc(c: i128, us: []^Unknown) -> Type {
 	return len(parts) == 1 ? parts[0] : new_operation(.Mul, ..parts[:])
 }
 
-scale :: proc(ms: []Type, c: i128) -> []Type {
-	out := make([]Type, len(ms))
-	for m, i in ms do out[i] = monomial(coefficient(m) * c, factors(m))
-	return out
+scale :: proc(ms: []Type, c: i128) -> (out: []Type, ok: bool) {
+	out = make([]Type, len(ms))
+	for m, i in ms {
+		x := mul_checked(coefficient(m), c) or_return
+		out[i] = monomial(x, factors(m))
+	}
+	return out, true
 }
 
 // times: * distributes over +: each monomial of a by each of b.
-times :: proc(a, b: []Type) -> []Type {
-	out := make([dynamic]Type)
+times :: proc(a, b: []Type) -> (out: []Type, ok: bool) {
+	products := make([dynamic]Type)
 	for x in a {
 		for y in b {
 			us := make([dynamic]^Unknown)
 			append(&us, ..factors(x))
 			append(&us, ..factors(y))
 			slice.sort_by(us[:], proc(p, q: ^Unknown) -> bool {return p.id < q.id})
-			append(&out, monomial(coefficient(x) * coefficient(y), us[:]))
+			c := mul_checked(coefficient(x), coefficient(y)) or_return
+			append(&products, monomial(c, us[:]))
 		}
 	}
-	return collect(out[:])
+	return collect(products[:])
 }
 
 same_factors :: proc(a, b: []^Unknown) -> bool {
@@ -119,24 +128,24 @@ same_factors :: proc(a, b: []^Unknown) -> bool {
 
 // collect: c * m + d * m = (c + d) * m, 0 * m dropped, in the order of the normal
 // form: by degree, then by unknown, the constant last.
-collect :: proc(ms: []Type) -> []Type {
+collect :: proc(ms: []Type) -> (out: []Type, ok: bool) {
 	coefs := make([dynamic]i128)
 	us := make([dynamic][]^Unknown)
 	outer: for m in ms {
 		f := factors(m)
 		for x, i in us {
 			if same_factors(x, f) {
-				coefs[i] += coefficient(m)
+				coefs[i] = add_checked(coefs[i], coefficient(m)) or_return
 				continue outer
 			}
 		}
 		append(&us, f)
 		append(&coefs, coefficient(m))
 	}
-	out := make([dynamic]Type)
-	for f, i in us do if coefs[i] != 0 do append(&out, monomial(coefs[i], f))
-	slice.sort_by(out[:], monomial_less)
-	return out[:]
+	kept := make([dynamic]Type)
+	for f, i in us do if coefs[i] != 0 do append(&kept, monomial(coefs[i], f))
+	slice.sort_by(kept[:], monomial_less)
+	return kept[:], true
 }
 
 monomial_less :: proc(a, b: Type) -> bool {
@@ -148,22 +157,24 @@ monomial_less :: proc(a, b: Type) -> bool {
 }
 
 gcd :: proc(a, b: i128) -> i128 {
-	x, y := abs(a), abs(b)
+	x, y := a, b
 	for y != 0 do x, y = y, x % y
-	return x == 0 ? 1 : x
+	return x == 0 ? 1 : (x < 0 ? -x : x)
 }
 
 // ring_term: the normal form of monomials over a divisor: the divisor and the
 // coefficients divided by their gcd; each monomial added, or subtracted.
-ring_term :: proc(ms: []Type, divisor: i128) -> Type {
+ring_term :: proc(ms: []Type, divisor: i128) -> (t: Type, ok: bool) {
 	g := divisor
 	for m in ms do g = gcd(g, coefficient(m))
-	terms := collect(scale_down(ms, g))
+	reduced := make([]Type, len(ms))
+	for m, i in ms do reduced[i] = monomial(coefficient(m) / g, factors(m))
+	terms := collect(reduced) or_return
 	d := divisor / g
-	if len(terms) == 0 do return Int(0)
-	t: Type
+	if len(terms) == 0 do return Int(0), true
 	for m, i in terms {
 		c := coefficient(m)
+		if c == min(i128) do return nil, false
 		magnitude := monomial(abs(c), factors(m))
 		switch {
 		case i == 0:
@@ -175,46 +186,50 @@ ring_term :: proc(ms: []Type, divisor: i128) -> Type {
 		}
 	}
 	if d != 1 do t = new_operation(.Div, t, Int(d))
-	return t
-}
-
-scale_down :: proc(ms: []Type, g: i128) -> []Type {
-	out := make([]Type, len(ms))
-	for m, i in ms do out[i] = monomial(coefficient(m) / g, factors(m))
-	return out
+	return t, true
 }
 
 // ring_law: + - * neg [~], and a division by a constant that divides exactly;
-// false when an operand is not a sum of products.
-ring_law :: proc(op: Operator, args: []Type) -> (Type, bool) {
-	a, d, ok := monomials(args[0])
-	if !ok do return nil, false
+// false when an operand is not a sum of products, or a coefficient is beyond the
+// integers written here.
+ring_law :: proc(op: Operator, args: []Type) -> (t: Type, ok: bool) {
+	a, d := monomials(args[0]) or_return
 	#partial switch op {
 	case .Neg:
-		return ring_term(scale(a, -1), d), true
+		neg := scale(a, -1) or_return
+		return ring_term(neg, d)
 	case .Bit_Not:
 		// [~]a = -a - 1
-		return ring_term(collect(append_all(scale(a, -1), monomial(-d, nil))), d), true
+		neg := scale(a, -1) or_return
+		minus_one := monomial(-d, nil)
+		all := collect(append_all(neg, minus_one)) or_return
+		return ring_term(all, d)
 	}
-	b, e, ok2 := monomials(args[1])
-	if !ok2 do return nil, false
+	b, e := monomials(args[1]) or_return
 	#partial switch op {
 	case .Add, .Sub:
-		if op == .Sub do b = scale(b, -1)
-		l := d / gcd(d, e) * e
-		return ring_term(collect(append_all(scale(a, l / d), ..scale(b, l / e))), l), true
+		if op == .Sub do b = scale(b, -1) or_return
+		l := mul_checked(d / gcd(d, e), e) or_return
+		left := scale(a, l / d) or_return
+		right := scale(b, l / e) or_return
+		all := collect(append_all(left, ..right)) or_return
+		return ring_term(all, l)
 	case .Mul:
-		return ring_term(times(a, b), d * e), true
+		product := times(a, b) or_return
+		de := mul_checked(d, e) or_return
+		return ring_term(product, de)
 	case .Div:
 		// (k * a) / k = a: every coefficient divisible by the constant
 		c, constant := args[1].(Int)
-		if !constant || c == 0 || d != 1 || e != 1 do return nil, false
-		for m in a do if coefficient(m) % i128(c) != 0 do return nil, false
+		if !constant || c == 0 || d != 1 || e != 1 do return
 		out := make([]Type, len(a))
-		for m, i in a do out[i] = monomial(coefficient(m) / i128(c), factors(m))
-		return ring_term(out, 1), true
+		for m, i in a {
+			if coefficient(m) % i128(c) != 0 do return
+			out[i] = monomial(coefficient(m) / i128(c), factors(m))
+		}
+		return ring_term(out, 1)
 	}
-	return nil, false
+	return
 }
 
 append_all :: proc(a: []Type, b: ..Type) -> []Type {
@@ -222,13 +237,6 @@ append_all :: proc(a: []Type, b: ..Type) -> []Type {
 	append(&out, ..a)
 	append(&out, ..b)
 	return out[:]
-}
-
-// --- sums of terms, for the closed forms (recursion.odin) ---
-
-ring :: proc(op: Operator, args: ..Type) -> Type {
-	t, _ := ring_law(op, args)
-	return t
 }
 
 // linear_in: t = a * u + b, one unknown u of degree 1.

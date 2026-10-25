@@ -92,7 +92,7 @@ in_cells :: proc(k: ^Kernel, x, c: Type, cells: []Type) -> Type {
 		return layout_in(k, x, layout_of(k, v), c)
 	}
 	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
-		return in_law(k, u, preimage(cells, a, b))
+		if set, exact := preimage(cells, a, b); exact do return in_law(k, u, set)
 	}
 	if image, ok := layout_image(k, x); ok do return layout_in(k, x, image, c)
 	return new_operation(.In, x, c)
@@ -150,21 +150,28 @@ is_value :: proc(k: ^Kernel, t: Type) -> bool {
 }
 
 // preimage: the integers v such that a * v + b is in s, a ≠ 0.
-// preimage: the integers v such that a * v + b is in the cells, a ≠ 0.
-preimage :: proc(cells: []Type, a, b: i128) -> Type {
+// preimage: the integers v such that a * v + b is in the cells, a ≠ 0; false when a
+// bound is beyond the integers written here.
+preimage :: proc(cells: []Type, a, b: i128) -> (set: Type, ok: bool) {
+	if b == min(i128) || a == min(i128) do return
 	out := make([dynamic]Type)
 	for c in cells {
 		if cell_family(c) != .Int do continue
 		lo, hi := discrete_bounds(c)
-		lo, hi = add_bound(lo, -b), add_bound(hi, -b)
-		if a < 0 do lo, hi = neg_bound(hi), neg_bound(lo)
+		lo = add_bound(lo, -b) or_return
+		hi = add_bound(hi, -b) or_return
+		if a < 0 {
+			x := neg_bound(hi) or_return
+			y := neg_bound(lo) or_return
+			lo, hi = x, y
+		}
 		m := abs(a)
 		from, to: Maybe(i128)
 		if l, ok := lo.?; ok do from = ceil_div(l, m)
 		if h, ok := hi.?; ok do to = floor_div(h, m)
 		append(&out, discrete_cell(.Int, from, to))
 	}
-	return cells_term(join_discrete(.Int, out[:]))
+	return cells_term(join_discrete(.Int, out[:])), true
 }
 
 floor_div :: proc(x, y: i128) -> i128 {

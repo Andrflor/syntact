@@ -253,7 +253,7 @@ comparison_bound :: proc(op: Operator, args: []Type) -> (bound: Type, x: Type, o
 //   (a..b) * (c..d) = the least..the greatest of the products at the bounds (reals)
 //
 // and any operator on two primitives; + and * on strings by their laws.
-compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (Type, bool) {
+compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (result: Type, ok: bool) {
 	cells := make([][]Type, len(args))
 	for a, i in args {
 		c, negated := as_cells(a)
@@ -265,13 +265,17 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (Type
 		for c in cells do if !all_of_family(c, .Int) do return nil, false
 		#partial switch op {
 		case .Add:
-			return int_sum(cells[0], cells[1]), true
+			return int_sum(cells[0], cells[1])
 		case .Sub:
-			return int_sum(cells[0], int_opposite(cells[1])), true
+			opposite := int_opposite(cells[1]) or_return
+			return int_sum(cells[0], opposite)
 		case .Neg:
-			return cells_term(join_discrete(.Int, int_opposite(cells[0]))), true
+			opposite := int_opposite(cells[0]) or_return
+			return cells_term(join_discrete(.Int, opposite)), true
 		case .Bit_Not:
-			return int_sum(int_opposite(cells[0]), {Int(-1)}), true
+			// [~]x = -x - 1
+			opposite := int_opposite(cells[0]) or_return
+			return int_sum(opposite, {Int(-1)})
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			lo_a, hi_a := discrete_hull(cells[0])
 			lo_b, hi_b := discrete_hull(cells[1])
@@ -355,27 +359,32 @@ discrete_hull :: proc(cells: []Type) -> (lo, hi: Maybe(i128)) {
 	return
 }
 
-// int_sum: (a..b) + (c..d) = (a + c)..(b + d), on each pair of cells.
-int_sum :: proc(a, b: []Type) -> Type {
+// int_sum: (a..b) + (c..d) = (a + c)..(b + d), on each pair of cells; false when a
+// bound is beyond the integers written here.
+int_sum :: proc(a, b: []Type) -> (sum: Type, ok: bool) {
 	out := make([dynamic]Type)
 	for x in a {
 		for y in b {
 			lo_x, hi_x := discrete_bounds(x)
 			lo_y, hi_y := discrete_bounds(y)
-			append(&out, discrete_cell(.Int, add_bound(lo_x, lo_y), add_bound(hi_x, hi_y)))
+			lo := add_bound(lo_x, lo_y) or_return
+			hi := add_bound(hi_x, hi_y) or_return
+			append(&out, discrete_cell(.Int, lo, hi))
 		}
 	}
-	return cells_term(join_discrete(.Int, out[:]))
+	return cells_term(join_discrete(.Int, out[:])), true
 }
 
 // int_opposite: -(a..b) = -b..-a.
-int_opposite :: proc(cells: []Type) -> []Type {
+int_opposite :: proc(cells: []Type) -> (opposite: []Type, ok: bool) {
 	out := make([]Type, len(cells))
 	for c, i in cells {
 		lo, hi := discrete_bounds(c)
-		out[i] = discrete_cell(.Int, neg_bound(hi), neg_bound(lo))
+		x := neg_bound(hi) or_return
+		y := neg_bound(lo) or_return
+		out[i] = discrete_cell(.Int, x, y)
 	}
-	return out
+	return out, true
 }
 
 // real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is.
@@ -436,8 +445,10 @@ int_operation :: proc(op: Operator, x, y: i128) -> (i128, bool) {
 	case .Mul:
 		return mul_checked(x, y)
 	case .Div:
+		if x == min(i128) && y == -1 do return 0, false
 		return x / y, true
 	case .Mod:
+		if x == min(i128) && y == -1 do return 0, true
 		return x % y, true
 	case .Bit_And:
 		return x & y, true

@@ -143,7 +143,7 @@ quotient :: proc(t: Type, c: rune) -> Type {
 			a, n := v.args[0], v.args[1]
 			more := counts_from(n, 1)
 			if is_none(more) do return None{}
-			less := counts_shift(more, -1)
+			less := counts_less(more)
 			if nullable(a) do less = counts_below(less)
 			return concatenation({quotient(a, c), repetition(a, less)})
 		}
@@ -325,12 +325,16 @@ counts_from :: proc(n: Type, v: i128) -> Type {
 	return cells_term(out[:])
 }
 
-counts_shift :: proc(n: Type, d: i128) -> Type {
+// counts_less: n - 1, n ≥ 1.
+counts_less :: proc(n: Type) -> Type {
 	cells, _ := as_cells(n)
 	out := make([dynamic]Type)
 	for c in cells {
 		lo, hi := discrete_bounds(c)
-		append(&out, discrete_cell(.Int, add_bound(lo, d), add_bound(hi, d)))
+		l, _ := lo.?
+		x: Maybe(i128)
+		if h, bounded := hi.?; bounded do x = h - 1
+		append(&out, discrete_cell(.Int, l - 1, x))
 	}
 	return cells_term(out[:])
 }

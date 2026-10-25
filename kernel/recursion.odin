@@ -208,36 +208,43 @@ legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
 // with m ≥ b for every value, then f{n -> m}! = c + g(b + 1) + … + g(m), a
 // polynomial in m when g is one: c + G(m) - G(b), G(m) = g(0) + … + g(m).
 solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
-	p, is_pattern := value.(^Pattern)
-	if !is_pattern || len(p.branches) != 2 || p.branches[1].cover != nil do return value
-	u, is_unknown := p.target.(^Unknown)
-	base, has_base := p.branches[0].cover.(Int)
-	c, constant := p.branches[0].product.(Int)
-	if !is_unknown || !has_base || !constant do return value
-	g, call, split := split_call(k, p.branches[1].product, root)
-	if !split || len(call.changes) != 1 do return value
+	if closed, solved := closed_form(k, root, value); solved do return closed
+	return value
+}
+
+closed_form :: proc(k: ^Kernel, root: ^Scope, value: Type) -> (closed: Type, ok: bool) {
+	p := value.(^Pattern) or_return
+	if len(p.branches) != 2 || p.branches[1].cover != nil do return
+	u := p.target.(^Unknown) or_return
+	base := p.branches[0].cover.(Int) or_return
+	c := p.branches[0].product.(Int) or_return
+	g, call := split_call(k, p.branches[1].product, root) or_return
+	if len(call.changes) != 1 do return
+	step := ring_law(.Sub, {u, Int(1)}) or_return
 	for b, v in call.changes {
 		x, same_unknown := binding_type(k, b).(^Unknown)
-		if !same_unknown || x.id != u.id || !same(k, v, ring(.Sub, u, Int(1))) do return value
+		if !same_unknown || x.id != u.id || !same(k, v, step) do return
 	}
-	ms, divisor, is_sum := monomials(g)
-	if !is_sum do return value
+	ms, divisor := monomials(g) or_return
 	degree := 0
 	for m in ms {
-		for f in factors(m) do if f.id != u.id do return value
+		for f in factors(m) do if f.id != u.id do return
 		degree = max(degree, len(factors(m)))
 	}
-	if !included(k, layout_of(k, u), new_range(Int(base), nil, .Int)) do return value
+	if !included(k, layout_of(k, u), new_range(Int(base), nil, .Int)) do return
 	// G(m) = g(0) + … + g(m): each monomial c * m^p gives c * S_p(m)
-	sums := power_sums(u, degree)
+	sums := power_sums(u, degree) or_return
 	total: Type = Int(0)
-	for m in ms do total = ring(.Add, total, ring(.Mul, Int(coefficient(m)), sums[len(factors(m))]))
-	total = ring_over(total, divisor)
+	for m in ms {
+		term := ring_law(.Mul, {Int(coefficient(m)), sums[len(factors(m))]}) or_return
+		total = ring_law(.Add, {total, term}) or_return
+	}
+	total = ring_over(total, divisor) or_return
 	at := make(Rewrite)
 	at[u.id] = Int(base)
-	at_base, exact := rewrite(k, total, at).(Int)
-	if !exact do return value
-	return ring(.Add, Int(i128(c) - i128(at_base)), total)
+	at_base := rewrite(k, total, at).(Int) or_return
+	first := add_checked(i128(c), -i128(at_base)) or_return
+	return ring_law(.Add, {Int(first), total})
 }
 
 // split_call: a product g + f{…}!, with g a sum of products and one recursive call
@@ -259,9 +266,10 @@ split_call :: proc(k: ^Kernel, product: Type, root: ^Scope) -> (g: Type, call: ^
 }
 
 // ring_over: t / d, d ≥ 1, over the divisor of the sum.
-ring_over :: proc(t: Type, d: i128) -> Type {
-	ms, e, _ := monomials(t)
-	return ring_term(ms, e * d)
+ring_over :: proc(t: Type, d: i128) -> (out: Type, ok: bool) {
+	ms, e := monomials(t) or_return
+	ed := mul_checked(e, d) or_return
+	return ring_term(ms, ed)
 }
 
 binomial :: proc(n, r: int) -> i128 {
@@ -272,14 +280,17 @@ binomial :: proc(n, r: int) -> i128 {
 
 // power_sums: S_0 … S_d, S_p(m) = 0^p + 1^p + … + m^p, from
 // C(p+1, 0) S_0 + … + C(p+1, p) S_p = (m + 1)^(p+1).
-power_sums :: proc(u: ^Unknown, d: int) -> []Type {
-	out := make([]Type, d + 1)
-	next := ring(.Add, u, Int(1))
+power_sums :: proc(u: ^Unknown, d: int) -> (out: []Type, ok: bool) {
+	out = make([]Type, d + 1)
+	next := ring_law(.Add, {u, Int(1)}) or_return
 	for p in 0 ..= d {
 		acc: Type = Int(1)
-		for _ in 0 ..= p do acc = ring(.Mul, acc, next)
-		for j in 0 ..< p do acc = ring(.Sub, acc, ring(.Mul, Int(binomial(p + 1, j)), out[j]))
-		out[p] = ring_over(acc, i128(p + 1))
+		for _ in 0 ..= p do acc = ring_law(.Mul, {acc, next}) or_return
+		for j in 0 ..< p {
+			term := ring_law(.Mul, {Int(binomial(p + 1, j)), out[j]}) or_return
+			acc = ring_law(.Sub, {acc, term}) or_return
+		}
+		out[p] = ring_over(acc, i128(p + 1)) or_return
 	}
-	return out
+	return out, true
 }

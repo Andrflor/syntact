@@ -58,10 +58,10 @@ cell_family :: proc(t: Type) -> Cell_Family {
 	case ^And:
 		families: bit_set[Cell_Family]
 		for x in v.terms do families += {cell_family(x)}
-		if .Real in families do return .Real
+		if _, ok := v.terms[0].(^Range); ok && families == {.Real} do return .Real
 		if .Value in families do return .Value
-		if .Other in families do return .Other
-		return .Text
+		if families <= {.Text, .Char} do return .Text
+		return .Other
 	case ^Not:
 		return cell_family(v.term)
 	case ^Operation:
@@ -407,7 +407,7 @@ join_discrete :: proc(f: Cell_Family, cells: []Type) -> []Type {
 		if open {
 			h, bounded := hi.?
 			if !bounded do continue
-			if s, has := x.?; !has || s <= h + 1 {
+			if s, has := x.?; !has || s <= h || h < max(i128) && s == h + 1 {
 				if e, has_e := y.?; !has_e || e > h do hi = y
 				continue
 			}
@@ -419,14 +419,21 @@ join_discrete :: proc(f: Cell_Family, cells: []Type) -> []Type {
 	return out[:]
 }
 
-// discrete_minus: a..b & ~(c..d) = a..(c - 1) | (d + 1)..b.
+// discrete_minus: a..b & ~(c..d) = a..(c - 1) | (d + 1)..b. A piece beyond the
+// integers written here is not computed: a & ~b stays.
 discrete_minus :: proc(f: Cell_Family, x, y: Type) -> []Type {
 	lo_x, hi_x := discrete_bounds(x)
 	lo_y, hi_y := discrete_bounds(y)
-	out := make([dynamic]Type)
-	if l, has := lo_y.?; has do append(&out, ..cell_list(discrete_cell(f, lo_x, min_bound(hi_x, l - 1))))
-	if h, has := hi_y.?; has do append(&out, ..cell_list(discrete_cell(f, max_bound(lo_x, h + 1), hi_x)))
 	if is_none(discrete_cell(f, max_bound(lo_x, lo_y), min_bound(hi_x, hi_y))) do return cell_list(x)
+	out := make([dynamic]Type)
+	if l, has := lo_y.?; has {
+		if l == min(i128) do return cell_list(new_and(x, new_not(y)))
+		append(&out, ..cell_list(discrete_cell(f, lo_x, min_bound(hi_x, l - 1))))
+	}
+	if h, has := hi_y.?; has {
+		if h == max(i128) do return cell_list(new_and(x, new_not(y)))
+		append(&out, ..cell_list(discrete_cell(f, max_bound(lo_x, h + 1), hi_x)))
+	}
 	return out[:]
 }
 
@@ -622,23 +629,31 @@ int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
 	#partial switch o.op {
 	case .Add:
 		lo, hi = bounds[0][0], bounds[0][1]
-		for b in bounds[1:] do lo, hi = add_bound(lo, b[0]), add_bound(hi, b[1])
+		for b in bounds[1:] {
+			lo = add_bound(lo, b[0]) or_return
+			hi = add_bound(hi, b[1]) or_return
+		}
 		return lo, hi, true
 	case .Sub:
-		return add_bound(bounds[0][0], neg_bound(bounds[1][1])), add_bound(bounds[0][1], neg_bound(bounds[1][0])), true
+		a := neg_bound(bounds[1][1]) or_return
+		b := neg_bound(bounds[1][0]) or_return
+		lo = add_bound(bounds[0][0], a) or_return
+		hi = add_bound(bounds[0][1], b) or_return
+		return lo, hi, true
 	case .Neg:
-		return neg_bound(bounds[0][1]), neg_bound(bounds[0][0]), true
+		lo = neg_bound(bounds[0][1]) or_return
+		hi = neg_bound(bounds[0][0]) or_return
+		return lo, hi, true
 	case .Mul:
 		lo, hi = bounds[0][0], bounds[0][1]
-		for b in bounds[1:] do lo, hi = corners(lo, hi, b[0], b[1], mul_extended)
+		for b in bounds[1:] do lo, hi = corners(lo, hi, b[0], b[1], mul_extended) or_return
 		return lo, hi, true
 	case .Div:
 		// a divisor of one sign: a / b is monotone in each
 		x, has_x := bounds[1][0].?
 		y, has_y := bounds[1][1].?
 		if !(has_x && x >= 1) && !(has_y && y <= -1) do return
-		lo, hi = corners(bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1], div_extended)
-		return lo, hi, true
+		return corners(bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1], div_extended)
 	}
 	return
 }
@@ -649,8 +664,9 @@ Extended :: struct {
 	infinite: bool,
 }
 
-// corners: the least and greatest of x op y at the bounds, -∞ and +∞ included.
-corners :: proc(a_lo, a_hi, b_lo, b_hi: Maybe(i128), op: proc(x, y: Extended) -> Extended) -> (Maybe(i128), Maybe(i128)) {
+// corners: the least and greatest of x op y at the bounds, -∞ and +∞ included;
+// false when one is beyond the integers written here.
+corners :: proc(a_lo, a_hi, b_lo, b_hi: Maybe(i128), op: proc(x, y: Extended) -> (Extended, bool)) -> (lo, hi: Maybe(i128), ok: bool) {
 	extend :: proc(v: Maybe(i128), sign: i128) -> Extended {
 		if x, ok := v.?; ok do return {x, false}
 		return {sign, true}
@@ -661,16 +677,15 @@ corners :: proc(a_lo, a_hi, b_lo, b_hi: Maybe(i128), op: proc(x, y: Extended) ->
 	first := true
 	for x in xs {
 		for y in ys {
-			v := op(x, y)
+			v := op(x, y) or_return
 			if first || extended_less(v, least) do least = v
 			if first || extended_less(most, v) do most = v
 			first = false
 		}
 	}
-	lo, hi: Maybe(i128)
 	if !least.infinite do lo = least.value
 	if !most.infinite do hi = most.value
-	return lo, hi
+	return lo, hi, true
 }
 
 extended_less :: proc(a, b: Extended) -> bool {
@@ -683,23 +698,24 @@ sign_of :: proc(x: Extended) -> i128 {
 	return x.value > 0 ? 1 : (x.value < 0 ? -1 : 0)
 }
 
-// mul_extended: 0 times anything is 0; infinite times a sign, infinite; beyond the
-// integers written here, infinite.
-mul_extended :: proc(x, y: Extended) -> Extended {
+// mul_extended: 0 times anything is 0; infinite times a sign, infinite; false
+// beyond the integers written here.
+mul_extended :: proc(x, y: Extended) -> (Extended, bool) {
 	s := sign_of(x) * sign_of(y)
-	if s == 0 do return {0, false}
-	if x.infinite || y.infinite do return {s, true}
-	if v, ok := mul_checked(x.value, y.value); ok do return {v, false}
-	return {s, true}
+	if s == 0 do return {0, false}, true
+	if x.infinite || y.infinite do return {s, true}, true
+	v, ok := mul_checked(x.value, y.value)
+	return {v, false}, ok
 }
 
 // div_extended: truncated, as on primitives; a finite value over an infinite one
 // is 0; the divisor is never 0.
-div_extended :: proc(x, y: Extended) -> Extended {
+div_extended :: proc(x, y: Extended) -> (Extended, bool) {
 	s := sign_of(x) * sign_of(y)
-	if y.infinite do return {0, false}
-	if x.infinite do return {s, true}
-	return {x.value / y.value, false}
+	if y.infinite do return {0, false}, true
+	if x.infinite do return {s, true}, true
+	if x.value == min(i128) && y.value == -1 do return {}, false
+	return {x.value / y.value, false}, true
 }
 
 // --- inclusion, read on normal forms ---
@@ -793,27 +809,35 @@ min_bound :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
 	return min(x, y)
 }
 
-neg_bound :: proc(a: Maybe(i128)) -> Maybe(i128) {
-	if v, ok := a.?; ok do return -v
-	return nil
+// neg_bound, add_bound: on bounds, nil being infinite; false beyond the integers
+// written here: the law is then not computed, and the term stays.
+neg_bound :: proc(a: Maybe(i128)) -> (Maybe(i128), bool) {
+	v, ok := a.?
+	if !ok do return nil, true
+	if v == min(i128) do return nil, false
+	return -v, true
 }
 
-add_bound :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
+add_bound :: proc(a, b: Maybe(i128)) -> (Maybe(i128), bool) {
 	x, has_x := a.?
 	y, has_y := b.?
-	if !has_x || !has_y do return nil
+	if !has_x || !has_y do return nil, true
 	s, ok := add_checked(x, y)
-	return ok ? Maybe(i128)(s) : nil
+	if !ok do return nil, false
+	return s, true
 }
 
 add_checked :: proc(a, b: i128) -> (i128, bool) {
-	if b > 0 && a > INT_MAX - b do return 0, false
-	if b < 0 && a < -INT_MAX - b do return 0, false
+	if b > 0 && a > max(i128) - b do return 0, false
+	if b < 0 && a < min(i128) - b do return 0, false
 	return a + b, true
 }
 
 mul_checked :: proc(a, b: i128) -> (i128, bool) {
 	if a == 0 || b == 0 do return 0, true
-	if abs(a) > INT_MAX / abs(b) do return 0, false
+	if a == 1 do return b, true
+	if b == 1 do return a, true
+	if a == min(i128) || b == min(i128) do return 0, false
+	if abs(a) > max(i128) / abs(b) do return 0, false
 	return a * b, true
 }
