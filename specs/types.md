@@ -389,14 +389,6 @@ X = {} | {T: ...X}      ⟹    X = {0..*T:}       the run of 0 or more T:
 It is the same law as for strings: `X = A + X | B` gives `X = A * 0.. + B` when `""`
 is not in A.
 
-A carve is a copy with substitution: the name of the equation is copied too. In
-its productions, the scope's name names the carve:
-
-```text
-List -> {T -> {}  -> {}  -> {T: ...List:}}
-List{T -> u8}       = {-> {}  -> {u8: ...List{T -> u8}:}}
-```
-
 The closed form, when the name is called on an integer:
 
 ```text

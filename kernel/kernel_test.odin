@@ -204,10 +204,6 @@ SPEC_CASES := []Spec_Case {
 	{LISTS + "List:a -> {10 (-1)}", "", {}},
 	{LISTS + "List:a -> {10 300}", "", {.Constraint_Mismatch}},
 	{LISTS + "List:a -> {10 (-1)}\nx -> a{300}", "", {.Constraint_Mismatch}},
-	// in a carve, the name of the scope in its productions names the carve
-	{GENERIC_LIST + "List{u8}:a -> {10 10}", "", {}},
-	{GENERIC_LIST + "List{u8}:a -> {10 300}", "", {.Constraint_Mismatch}},
-	{GENERIC_LIST + "List{u8}:a -> {10 10}\nx -> a{300}", "", {.Constraint_Mismatch}},
 	// a comma separates bindings: no operator continues across it
 	{ARRAY + "Array{u8}:a -> {10, -10}", "", {.Constraint_Mismatch}},
 	// §5.6
@@ -224,8 +220,6 @@ SPEC_CASES := []Spec_Case {
 }
 
 ARRAY :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n"
-
-GENERIC_LIST :: "List -> {\n  T -> {}\n  -> {}\n  -> {T: ...List:}\n}\n"
 
 LISTS :: "List -> {\n  -> {}\n  -> {u8: ...List:}\n  -> {i8: ...List:}\n}\n"
 
