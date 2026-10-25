@@ -162,7 +162,7 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 }
 
 operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Type {
-	for a in args do if is_invalid(a) do return Invalid{}
+	for a in args do if is_invalid(a) do return a
 	if len(args) > 2 {
 		// + and * are associative: a + b + c = (a + b) + c
 		out := operation_law(k, op, args[:2], span)
@@ -172,7 +172,7 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 	if op == .In do return in_law(k, args[0], args[1])
 	for a in args do if is_none(a) do return None{} // none op c = none
 	sig, legal := legal_signature(k, op, args)
-	if !legal do return report(k, .Invalid_operator, span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[op], print_types(args)))
+	if !legal do return problem(.Invalid_operator, span, fmt.tprintf("`%s` is not proven to apply to %s", operator_text[op], print_types(args)))
 	if bound, x, ok := comparison_bound(op, args); ok do return in_law(k, x, normal(k, bound))
 	constant := true
 	for a in args do constant &&= is_constant(a)

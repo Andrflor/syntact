@@ -25,7 +25,8 @@ package kernel
 // (prove.odin).
 
 in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
-	if is_invalid(x) || is_invalid(c) do return Invalid{}
+	if is_invalid(x) do return x
+	if is_invalid(c) do return c
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
@@ -108,7 +109,8 @@ layout_in :: proc(k: ^Kernel, x, layout, c: Type) -> Type {
 
 // equal_law: x in =t.
 equal_law :: proc(k: ^Kernel, x, t: Type) -> Type {
-	if is_invalid(x) || is_invalid(t) do return Invalid{}
+	if is_invalid(x) do return x
+	if is_invalid(t) do return t
 	if same(k, x, t) do return Bool(true)
 	if is_constant(x) && is_constant(t) {
 		if equal, known := values_equal(k, x, t); known do return Bool(equal)

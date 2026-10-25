@@ -20,8 +20,9 @@ import "core:fmt"
 
 pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	target := normal(k, p.target)
-	if is_invalid(target) do return Invalid{}
-	reached, rest, complete := reaches(k, target, p.branches)
+	if is_invalid(target) do return target
+	reached, rest, invalid := reaches(k, target, p.branches)
+	if invalid != nil do return invalid
 	out := make([dynamic]Branch)
 	for r in reached {
 		b := p.branches[r.branch]
@@ -33,15 +34,13 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 		if r.all && len(out) == 0 do return product
 		append(&out, Branch{cover = r.all ? nil : r.cover, product = product, span = b.span})
 	}
-	if complete && rest != nil {
-		if verdict, _ := prove(k, bool_not(k, rest)); verdict != .Proven {
-			report(k, .Non_Exhaustive_Pattern, p.span, fmt.tprintf("a value of %s is not proven taken by a branch", print_type(target)))
-		}
+	// taken by every value: t ? {c -> p  -> p} = p; otherwise the check proves that
+	// every value is taken (check.odin)
+	if rest == nil {
+		all_same := true
+		for b in out[1:] do all_same &&= same(k, b.product, out[0].product)
+		if all_same do return out[0].product
 	}
-	if len(out) == 0 do return None{}
-	all_same := true
-	for b in out[1:] do all_same &&= same(k, b.product, out[0].product)
-	if all_same do return out[0].product
 	r := new(Pattern)
 	r.target, r.branches, r.span = target, out[:], p.span
 	return r
@@ -60,21 +59,18 @@ Reach :: struct {
 
 // reaches: the branches values of the target reach, up to one that every value
 // left takes; then rest is nil. Otherwise rest is the condition of the values
-// that no branch takes. Not complete when a cover is invalid: already reported.
-reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]Reach, rest: Type, complete: bool) {
+// that no branch takes. A cover no law types makes the pattern Invalid.
+reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]Reach, rest: Type, invalid: Type) {
 	out = make([dynamic]Reach)
 	rest = Bool(true) // the values no branch above takes
-	complete = true
 	for b, i in branches {
 		cond: Type = Bool(true)
 		cover: Type
 		if b.cover != nil {
 			cover = normal(k, b.cover)
 			cond = in_law(k, target, cover)
-			if is_invalid(cover) || is_invalid(cond) {
-				complete = false
-				continue
-			}
+			if is_invalid(cover) do return out, rest, cover
+			if is_invalid(cond) do return out, rest, cond
 		}
 		reach := bool_and(k, rest, cond)
 		rest = bool_and(k, rest, bool_not(k, cond))
@@ -82,9 +78,9 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		if !reached do continue
 		all := is_bool(rest, false)
 		append(&out, Reach{i, cover, r, all, exact})
-		if all do return out, nil, complete
+		if all do return out, nil, nil
 	}
-	return out, rest, complete
+	return out, rest, nil
 }
 
 // narrow: the rewrite a reach makes: through [&], `u in S` rewrites ?ₖ::L into

@@ -130,10 +130,8 @@ base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: b
 	return family_of(k, e)
 }
 
-// recursion_law: the first production of a recursive scope, once given: each
-// operator on a recursive call must apply to the family of the equation — the
-// family of its base cases, by induction — and the equation is solved when it has
-// a closed form. A carve of it is the same equation: checked in its scope.
+// recursion_law: the first production of a recursive scope, once given, is solved
+// when it has a closed form. A carve of it is the same equation.
 recursion_law :: proc(k: ^Kernel, b: ^Binding, value: Type) -> Type {
 	root := origin(b.scope)
 	if !root.recursive do return value
@@ -142,16 +140,6 @@ recursion_law :: proc(k: ^Kernel, b: ^Binding, value: Type) -> Type {
 	if b.scope != root {
 		if p, has := first_production(k, root); has && p.state == .Not_Asked do binding_type(k, p)
 		return value
-	}
-	f, based := equation_family(k, root, value)
-	for o in operations_on_calls(value, root) {
-		if !based {
-			report(k, .Invalid_operator, b.span, fmt.tprintf("`%s` applies to a recursive call, and the equation has no base case to give its family", operator_text[o.op]))
-			continue
-		}
-		if !legal_on_call(k, o, f) {
-			report(k, .Invalid_operator, b.span, fmt.tprintf("`%s` is not proven to apply to %s, a recursive call in %v", operator_text[o.op], print_types(o.args), f))
-		}
 	}
 	return solve(k, b.scope, value)
 }

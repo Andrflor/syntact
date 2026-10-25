@@ -37,9 +37,6 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 		#partial switch x in v {
 		case ^Scope:
 			append(&out, ..placed(k, x, view))
-		case Invalid:
-		case:
-			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
 		}
 	}
 	return out[:]
@@ -84,11 +81,11 @@ occurrence :: proc(bindings: []^Binding, name: string, ordinal: int, last: bool)
 access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 	s, ok := target.(^Scope)
 	if !ok {
-		if is_invalid(target) do return Invalid{}
-		return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("`.%s` on %s, which is not a scope", a.name, print_type(target)))
+		if is_invalid(target) do return target
+		return problem(.Invalid_Property_Access, a.span, fmt.tprintf("`.%s` on %s, which is not a scope", a.name, print_type(target)))
 	}
 	if b, found := occurrence(placed(k, s, .Value), a.name, a.ordinal, true); found do return binding_type(k, b)
-	return report(k, .Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
+	return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
 }
 
 // collapse_law: {… -> p …}! = p, the first production; none without one. A
@@ -97,8 +94,8 @@ collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 	target := normal(k, c.target)
 	s, ok := target.(^Scope)
 	if !ok {
-		if is_invalid(target) do return Invalid{}
-		return report(k, .Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
+		if is_invalid(target) do return target
+		return problem(.Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
 	// solution, or it stays
@@ -115,12 +112,12 @@ carve_law :: proc(k: ^Kernel, c: ^Carve) -> Type {
 	for a, i in c.args {
 		args[i] = a
 		args[i].value = normal(k, a.value)
-		if is_invalid(args[i].value) do return Invalid{}
+		if is_invalid(args[i].value) do return args[i].value
 	}
 	s, ok := target.(^Scope)
 	if !ok {
-		if is_invalid(target) do return Invalid{}
-		return report(k, .Invalid_Carve, c.span, fmt.tprintf("%s is not a scope: it cannot be carved", print_type(target)))
+		if is_invalid(target) do return target
+		return problem(.Invalid_Carve, c.span, fmt.tprintf("%s is not a scope: it cannot be carved", print_type(target)))
 	}
 	return carve(k, s, args, c.span)
 }
@@ -136,10 +133,10 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 		if a.name != "" {
 			found: bool
 			b, found = occurrence(bindings, a.name, a.ordinal, false)
-			if !found do return report(k, .Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
+			if !found do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
 		} else {
 			for next < len(bindings) && (bindings[next].kind == .Product || bindings[next].kind == .Pull) do next += 1
-			if next >= len(bindings) do return report(k, .Invalid_Carve, a.span, fmt.tprintf("%s has no binding left to carve", print_type(s)))
+			if next >= len(bindings) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding left to carve", print_type(s)))
 			b = bindings[next]
 			next += 1
 		}
@@ -174,8 +171,10 @@ check_carve :: proc(k: ^Kernel, c: ^Scope, span: syn.Span) {
 		if b.kind == .Product || b.kind == .Expand do continue
 		v := binding_type(k, b)
 		color := binding_color(k, b)
-		if color == nil do continue
 		if !b.carved && same(k, v, binding_type(k, b.source)) && same(k, color, binding_color(k, b.source)) do continue
+		failed := obligations(k, v)
+		failed = color != nil && obligations(k, color) || failed
+		if failed || color == nil do continue
 		check_in(k, v, color, b.span)
 	}
 	k.site, k.rewrite = saved_site, saved_rewrite
@@ -359,7 +358,7 @@ colored :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope) -> Type {
 // admits: x in s. A scope with productions admits what they produce; a shape, the
 // scopes of the same structure whose bindings its colors admit.
 admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
-	if is_invalid(x) do return Invalid{}
+	if is_invalid(x) do return x
 	if origin(s).recursive {
 		solution, solved := arden(k, s)
 		if !solved do return new_operation(.In, x, s) // the equation stays

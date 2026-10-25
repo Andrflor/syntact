@@ -31,7 +31,7 @@ Type :: union {
 	^Carve, // s{…}
 	^Default, // C:           an anonymous binding colored by C
 	^Pattern, // t ? {c -> p …}
-	Invalid, // an error already reported: what depends on it stays silent
+	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
 Char :: distinct rune
@@ -41,7 +41,25 @@ Real :: struct {
 }
 Bool :: distinct bool
 None :: struct {}
-Invalid :: struct {}
+// Invalid: a term no law gives a type to, with its problem, which the check reports
+// (check.odin). What holds it is Invalid too, with the same problem: it is
+// reported once. Without a problem, it was reported when the term was built.
+Invalid :: struct {
+	problem: ^Problem,
+}
+
+Problem :: struct {
+	kind:    Error_Kind,
+	message: string,
+	span:    syn.Span,
+}
+
+// problem: the term no law gives a type to, for this reason.
+problem :: proc(kind: Error_Kind, span: syn.Span, message: string) -> Type {
+	p := new(Problem)
+	p^ = Problem{kind, message, span}
+	return Invalid{p}
+}
 
 // Unknown: `??::L`, one value in L. Each `??` written is a distinct unknown; the
 // same one comes back through a name.

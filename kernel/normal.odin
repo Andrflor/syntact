@@ -73,7 +73,7 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 	#reverse for t in terms do append(&stack, t)
 	for len(stack) > 0 {
 		t := pop(&stack)
-		if is_invalid(t) do return Invalid{}
+		if is_invalid(t) do return t
 		if o, ok := t.(^Or); ok && is_or {
 			#reverse for x in o.terms do append(&stack, x)
 			continue
@@ -131,7 +131,7 @@ contains_same :: proc(k: ^Kernel, ts: []Type, t: Type) -> bool {
 
 // not_law: ~~a = a; ~ of a constant is its complement, as a normal form.
 not_law :: proc(k: ^Kernel, t: Type) -> Type {
-	if is_invalid(t) do return Invalid{}
+	if is_invalid(t) do return t
 	if n, ok := t.(^Not); ok do return n.term
 	if is_constant(t) do return not_constant(t)
 	return new_not(t)
@@ -139,7 +139,7 @@ not_law :: proc(k: ^Kernel, t: Type) -> Type {
 
 // is_law: =p = p for a primitive (§4.4); =t stays: the scope that produces t.
 is_law :: proc(t: Type) -> Type {
-	if is_invalid(t) do return Invalid{}
+	if is_invalid(t) do return t
 	if is_primitive(t) do return t
 	return new_is(t)
 }
@@ -151,7 +151,8 @@ is_law :: proc(t: Type) -> Type {
 // gives its extremities: `..0..` is every integer. A bound over unknowns leaves
 // the range as it is written: 0..n.
 range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span) -> Type {
-	if is_invalid(lo) || is_invalid(hi) do return Invalid{}
+	if is_invalid(lo) do return lo
+	if is_invalid(hi) do return hi
 	for b in ([2]Type{lo, hi}) do if b != nil && !is_constant(b) do return new_range(lo, hi, family, span)
 	if is_word(lo) || is_word(hi) {
 		// between strings, `..` is about positions: l..u = (l + string) & (string + u)
@@ -181,7 +182,7 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 		case Int, Real, Char:
 			append(&values, b)
 		case:
-			return report(k, .Invalid_Range, span, fmt.tprintf("a bound of a range is one integer, real or character, not %s", print_type(b)))
+			return problem(.Invalid_Range, span, fmt.tprintf("a bound of a range is one integer, real or character, not %s", print_type(b)))
 		}
 	}
 	if len(values) == 0 {
@@ -198,7 +199,7 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 	f := bound_family(values[0])
 	for v in values {
 		if !same_bound_family(values[0], v) || of != .Any && f != of {
-			return report(k, .Invalid_Range, span, fmt.tprintf("the bounds of %s..%s are of two families", print_type(lo), print_type(hi)))
+			return problem(.Invalid_Range, span, fmt.tprintf("the bounds of %s..%s are of two families", print_type(lo), print_type(hi)))
 		}
 	}
 	least, most := values[0], values[0]
@@ -223,7 +224,7 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 		if !above do hi = i128(most.(Int))
 		return discrete_cell(.Int, lo, hi)
 	}
-	return Invalid{}
+	return problem(.Invalid_Range, span, "a range is between integers, reals or characters")
 }
 
 // is_word: a string of two characters or more.
@@ -291,7 +292,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	case .Done:
 		return b.typed_value
 	case .In_Progress:
-		return report(k, .Infinite_Recursion, b.span, "this value places itself again")
+		return problem(.Infinite_Recursion, b.span, "this value places itself again")
 	case .Not_Asked:
 	}
 	b.state = .In_Progress
@@ -322,10 +323,10 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 	#partial switch v in c {
 	case Invalid:
-		return Invalid{}
+		return c
 	case ^Scope:
 		if p, ok := first_production(k, v); ok {
-			if places_itself(k, v, p) do return report(k, .Infinite_Recursion, p.span, "the base case places its scope again")
+			if places_itself(k, v, p) do return problem(.Infinite_Recursion, p.span, "the base case places its scope again")
 			return binding_type(k, p)
 		}
 		return v
@@ -380,5 +381,5 @@ places_itself :: proc(k: ^Kernel, s: ^Scope, p: ^Binding) -> bool {
 }
 
 unsupported_at :: proc(k: ^Kernel, span: syn.Span, what: string) -> Type {
-	return report(k, .Unsupported, span, fmt.tprintf("not in the kernel yet: %s", what))
+	return problem(.Unsupported, span, fmt.tprintf("not in the kernel yet: %s", what))
 }
