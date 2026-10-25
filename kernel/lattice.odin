@@ -138,7 +138,7 @@ cell_less :: proc(a, b: Type) -> bool {
 		u, has_u := x.lo.?
 		v, has_v := y.lo.?
 		if !has_u || !has_v do return !has_u && has_v
-		return u < v
+		return real_less(u, v)
 	case .Bool:
 		return !bool(a.(Bool)) && bool(b.(Bool))
 	}
@@ -452,7 +452,7 @@ discrete_minus_all :: proc(x: Type, ys: []Type) -> []Type {
 // Real_Bounds: the bounds of a real cell, read on its term: nil is infinite; an
 // open bound is the `& ~p` of `>p` (§4.3).
 Real_Bounds :: struct {
-	lo, hi:           Maybe(f64),
+	lo, hi:           Maybe(Real),
 	lo_open, hi_open: bool,
 }
 
@@ -460,10 +460,10 @@ real_bounds :: proc(t: Type) -> Real_Bounds {
 	b: Real_Bounds
 	#partial switch v in t {
 	case Real:
-		b.lo, b.hi = f64(v), f64(v)
+		b.lo, b.hi = v, v
 	case ^Range:
-		if x, ok := v.lo.(Real); ok do b.lo = f64(x)
-		if x, ok := v.hi.(Real); ok do b.hi = f64(x)
+		if x, ok := v.lo.(Real); ok do b.lo = x
+		if x, ok := v.hi.(Real); ok do b.hi = x
 	case ^And:
 		for x in v.terms do if _, ok := x.(^Range); ok do b = real_bounds(x)
 		for x in v.terms {
@@ -471,8 +471,8 @@ real_bounds :: proc(t: Type) -> Real_Bounds {
 			if !ok do continue
 			p, is_real := n.term.(Real)
 			if !is_real do continue
-			if lo, has := b.lo.?; has && lo == f64(p) do b.lo_open = true
-			if hi, has := b.hi.?; has && hi == f64(p) do b.hi_open = true
+			if lo, has := b.lo.?; has && lo == p do b.lo_open = true
+			if hi, has := b.hi.?; has && hi == p do b.hi_open = true
 		}
 	}
 	return b
@@ -482,21 +482,20 @@ real_empty :: proc(b: Real_Bounds) -> bool {
 	lo, has_lo := b.lo.?
 	hi, has_hi := b.hi.?
 	if !has_lo || !has_hi do return false
-	return lo > hi || lo == hi && (b.lo_open || b.hi_open)
+	c := real_compare(lo, hi)
+	return c > 0 || c == 0 && (b.lo_open || b.hi_open)
 }
 
 real_cell :: proc(b: Real_Bounds) -> Type {
 	if real_empty(b) do return None{}
 	lo, has_lo := b.lo.?
 	hi, has_hi := b.hi.?
-	if has_lo && lo == 0 do lo = 0 // -0.0 is 0.0
-	if has_hi && hi == 0 do hi = 0
-	if has_lo && has_hi && lo == hi do return Real(lo)
-	r := new_range(has_lo ? Type(Real(lo)) : nil, has_hi ? Type(Real(hi)) : nil, .Real)
+	if has_lo && has_hi && lo == hi do return lo
+	r := new_range(has_lo ? Type(lo) : nil, has_hi ? Type(hi) : nil, .Real)
 	terms := make([dynamic]Type)
 	append(&terms, r)
-	if has_lo && b.lo_open do append(&terms, new_not(Real(lo)))
-	if has_hi && b.hi_open do append(&terms, new_not(Real(hi)))
+	if has_lo && b.lo_open do append(&terms, new_not(lo))
+	if has_hi && b.hi_open do append(&terms, new_not(hi))
 	return len(terms) == 1 ? r : new_and(..terms[:])
 }
 
@@ -504,7 +503,7 @@ real_meet :: proc(x, y: Real_Bounds) -> Real_Bounds {
 	r := x
 	if y_lo, ok := y.lo.?; ok {
 		x_lo, has := x.lo.?
-		if !has || y_lo > x_lo {
+		if !has || real_less(x_lo, y_lo) {
 			r.lo, r.lo_open = y.lo, y.lo_open
 		} else if y_lo == x_lo {
 			r.lo_open = x.lo_open || y.lo_open
@@ -512,7 +511,7 @@ real_meet :: proc(x, y: Real_Bounds) -> Real_Bounds {
 	}
 	if y_hi, ok := y.hi.?; ok {
 		x_hi, has := x.hi.?
-		if !has || y_hi < x_hi {
+		if !has || real_less(y_hi, x_hi) {
 			r.hi, r.hi_open = y.hi, y.hi_open
 		} else if y_hi == x_hi {
 			r.hi_open = x.hi_open || y.hi_open
@@ -540,7 +539,7 @@ join_reals :: proc(cells: []Type) -> []Type {
 		y, has_y := b.lo.?
 		if !has_x do return has_y
 		if !has_y do return false
-		return x < y || x == y && !a.lo_open && b.lo_open
+		return real_less(x, y) || x == y && !a.lo_open && b.lo_open
 	})
 	merged := make([dynamic]Real_Bounds)
 	for r in bounds {
@@ -552,7 +551,7 @@ join_reals :: proc(cells: []Type) -> []Type {
 		last_hi, bounded := last.hi.?
 		if !bounded do break
 		lo, has_lo := r.lo.?
-		if has_lo && (lo > last_hi || lo == last_hi && last.hi_open && r.lo_open) {
+		if has_lo && (real_less(last_hi, lo) || lo == last_hi && last.hi_open && r.lo_open) {
 			append(&merged, r)
 			continue
 		}
@@ -560,7 +559,7 @@ join_reals :: proc(cells: []Type) -> []Type {
 		switch {
 		case !has_hi:
 			last.hi, last.hi_open = nil, false
-		case hi > last_hi:
+		case real_less(last_hi, hi):
 			last.hi, last.hi_open = r.hi, r.hi_open
 		case hi == last_hi:
 			last.hi_open = last.hi_open && r.hi_open

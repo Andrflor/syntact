@@ -99,7 +99,7 @@ type_prec :: proc(t: Type) -> int {
 	case Int:
 		if v < 0 do return PREC_PREFIX
 	case Real:
-		if v < 0 do return PREC_PREFIX
+		if v.num < 0 do return PREC_PREFIX
 	}
 	return PREC_ATOM
 }
@@ -152,7 +152,7 @@ write_bare :: proc(b: ^strings.Builder, t: Type, keyed: bool) {
 	case Int:
 		fmt.sbprintf(b, "%v", i128(v))
 	case Real:
-		write_real(b, f64(v))
+		write_real(b, v)
 	case Bool:
 		strings.write_string(b, bool(v) ? "true" : "false")
 	case None:
@@ -253,11 +253,6 @@ write_char :: proc(b: ^strings.Builder, c: rune, quote: byte) {
 	if quote != 0 do strings.write_byte(b, quote)
 }
 
-write_real :: proc(b: ^strings.Builder, x: f64) {
-	text := fmt.tprintf("%v", x)
-	strings.write_string(b, text)
-	if !strings.contains_any(text, ".eEnN") do strings.write_string(b, ".0")
-}
 
 write_range :: proc(b: ^strings.Builder, r: ^Range, keyed: bool) {
 	if r.lo == nil && r.hi == nil {

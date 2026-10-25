@@ -42,7 +42,7 @@ family_term :: proc(f: Family) -> Type {
 	case .Nonzero_Int:
 		return cells_term({discrete_cell(.Int, nil, -1), discrete_cell(.Int, 1, nil)})
 	case .Nonzero_Real:
-		return cells_term({real_cell({hi = 0.0, hi_open = true}), real_cell({lo = 0.0, lo_open = true})})
+		return cells_term({real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true})})
 	}
 	return None{}
 }
@@ -290,11 +290,13 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		for c in cells do if !all_of_family(c, .Real) do return nil, false
 		#partial switch op {
 		case .Add:
-			return real_sum(cells[0], cells[1]), true
+			return real_sum(cells[0], cells[1])
 		case .Sub:
-			return real_sum(cells[0], real_opposite(cells[1])), true
+			opposite := real_opposite(cells[1]) or_return
+			return real_sum(cells[0], opposite)
 		case .Neg:
-			return cells_term(join_reals(real_opposite(cells[0]))), true
+			opposite := real_opposite(cells[0]) or_return
+			return cells_term(join_reals(opposite)), true
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			return compare_reals(op, cells[0], cells[1]), true
 		case .Mul:
@@ -303,7 +305,10 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		x, single_x := one_primitive(cells[0]).(Real)
 		y, single_y := one_primitive(cells[1]).(Real)
 		if !single_x || !single_y do return nil, false
-		if op == .Div do return Real(x / y), true
+		if op == .Div {
+			q := real_div(x, y) or_return
+			return q, true
+		}
 	case .String:
 		#partial switch op {
 		case .Add:
@@ -388,36 +393,40 @@ int_opposite :: proc(cells: []Type) -> (opposite: []Type, ok: bool) {
 }
 
 // real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is.
-real_sum :: proc(a, b: []Type) -> Type {
+real_sum :: proc(a, b: []Type) -> (sum: Type, ok: bool) {
 	out := make([dynamic]Type)
 	for x in a {
 		for y in b {
 			p, q := real_bounds(x), real_bounds(y)
 			r: Real_Bounds
-			if u, ok := p.lo.?; ok do if v, ok2 := q.lo.?; ok2 do r.lo, r.lo_open = u + v, p.lo_open || q.lo_open
-			if u, ok := p.hi.?; ok do if v, ok2 := q.hi.?; ok2 do r.hi, r.hi_open = u + v, p.hi_open || q.hi_open
+			if u, has_u := p.lo.?; has_u {
+				if v, has_v := q.lo.?; has_v do r.lo, r.lo_open = real_add(u, v) or_return, p.lo_open || q.lo_open
+			}
+			if u, has_u := p.hi.?; has_u {
+				if v, has_v := q.hi.?; has_v do r.hi, r.hi_open = real_add(u, v) or_return, p.hi_open || q.hi_open
+			}
 			append(&out, real_cell(r))
 		}
 	}
-	return cells_term(join_reals(out[:]))
+	return cells_term(join_reals(out[:])), true
 }
 
-real_opposite :: proc(cells: []Type) -> []Type {
+real_opposite :: proc(cells: []Type) -> (opposite: []Type, ok: bool) {
 	out := make([]Type, len(cells))
 	for c, i in cells {
 		p := real_bounds(c)
 		r := Real_Bounds{lo_open = p.hi_open, hi_open = p.lo_open}
-		if v, ok := p.hi.?; ok do r.lo = -v
-		if v, ok := p.lo.?; ok do r.hi = -v
+		if v, has := p.hi.?; has do r.lo = real_neg(v) or_return
+		if v, has := p.lo.?; has do r.hi = real_neg(v) or_return
 		out[i] = real_cell(r)
 	}
-	return out
+	return out, true
 }
 
 // real_product: (a..b) * (c..d) on closed, bounded intervals: the image of a
 // connected set by a continuous operator is the interval between its least and
 // greatest products at the bounds. False for an open or infinite bound.
-real_product :: proc(a, b: []Type) -> (Type, bool) {
+real_product :: proc(a, b: []Type) -> (product: Type, ok: bool) {
 	out := make([dynamic]Type)
 	for x in a {
 		for y in b {
@@ -428,11 +437,15 @@ real_product :: proc(a, b: []Type) -> (Type, bool) {
 			v1, has_v1 := q.lo.?
 			v2, has_v2 := q.hi.?
 			if !has_u1 || !has_u2 || !has_v1 || !has_v2 do return nil, false
-			corners := [4]f64{u1 * v1, u1 * v2, u2 * v1, u2 * v2}
+			corners: [4]Real
+			corners[0] = real_mul(u1, v1) or_return
+			corners[1] = real_mul(u1, v2) or_return
+			corners[2] = real_mul(u2, v1) or_return
+			corners[3] = real_mul(u2, v2) or_return
 			lo, hi := corners[0], corners[0]
 			for c in corners[1:] {
-				lo = min(lo, c)
-				hi = max(hi, c)
+				if real_less(c, lo) do lo = c
+				if real_less(hi, c) do hi = c
 			}
 			append(&out, real_cell({lo = lo, hi = hi}))
 		}
@@ -496,7 +509,7 @@ compare_bounds :: proc(op: Operator, lo_a, hi_a, lo_b, hi_b: Maybe(i128)) -> Typ
 
 compare_reals :: proc(op: Operator, a, b: []Type) -> Type {
 	Edge :: struct {
-		v:      Maybe(f64),
+		v:      Maybe(Real),
 		closed: bool,
 	}
 	inf :: proc(cells: []Type) -> Edge {r := real_bounds(cells[0]);return {r.lo, !r.lo_open}}
@@ -504,12 +517,12 @@ compare_reals :: proc(op: Operator, a, b: []Type) -> Type {
 	below :: proc(x, y: Edge) -> bool {
 		u, has_u := x.v.?
 		v, has_v := y.v.?
-		return !has_u || !has_v || u < v
+		return !has_u || !has_v || real_less(u, v)
 	}
 	at_most :: proc(x, y: Edge) -> bool {
 		u, has_u := x.v.?
 		v, has_v := y.v.?
-		return !has_u || !has_v || u < v || (u == v && x.closed && y.closed)
+		return !has_u || !has_v || real_less(u, v) || (u == v && x.closed && y.closed)
 	}
 	yes, no: bool
 	#partial switch op {

@@ -2,8 +2,6 @@ package kernel
 
 import syn "../compiler"
 import "core:fmt"
-import "core:math"
-import "core:strconv"
 import "core:strings"
 
 // FROM THE AST TO TERMS
@@ -425,9 +423,9 @@ build_literal :: proc(k: ^Kernel, idx: syn.Node_Index) -> Type {
 		if !ok do return unsupported(k, idx, "an integer literal beyond 128 bits")
 		return Int(v)
 	case .Float:
-		v, ok := strconv.parse_f64(text)
-		if !ok || math.is_inf(v) do return unsupported(k, idx, "a real literal beyond f64")
-		return Real(v)
+		v, ok := parse_real(text)
+		if !ok do return unsupported(k, idx, "a real literal beyond the integers written here")
+		return v
 	case .String:
 		return string_value(decode_string(text, lit.quotation))
 	case .Bool:

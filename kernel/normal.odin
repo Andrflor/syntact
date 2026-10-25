@@ -210,8 +210,8 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 	#partial switch x in least {
 	case Real:
 		b: Real_Bounds
-		if !below do b.lo = f64(x)
-		if !above do b.hi = f64(most.(Real))
+		if !below do b.lo = x
+		if !above do b.hi = most.(Real)
 		return real_cell(b)
 	case Char:
 		lo, hi: Maybe(i128)
@@ -263,7 +263,7 @@ bound_less :: proc(a, b: Type) -> bool {
 	case Int:
 		return x < b.(Int)
 	case Real:
-		return x < b.(Real)
+		return real_less(x, b.(Real))
 	case Char:
 		return x < b.(Char)
 	}
@@ -339,7 +339,7 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 	if is_primitive(c) do return c
 	if !is_constant(c) do return unsupported_at(k, span, fmt.tprintf("the default of %s, a type over unknowns", print_type(c)))
 	// its distinguished element, when it holds it
-	for d in ([3]Type{Int(0), Real(0), empty_string()}) do if !is_none(and_law(k, {d, c})) && inhabited(k, and_law(k, {d, c})) do return d
+	for d in ([3]Type{Int(0), real_int(0), empty_string()}) do if !is_none(and_law(k, {d, c})) && inhabited(k, and_law(k, {d, c})) do return d
 	if !is_none(and_law(k, {Bool(false), c})) do return Bool(false)
 	// otherwise its first element
 	cells, negated := as_cells(c)
@@ -352,7 +352,7 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span) -> Type {
 			if x, ok := hi.?; ok do return Int(x)
 		case .Real:
 			b := real_bounds(cell)
-			if x, ok := b.lo.?; ok && !b.lo_open do return Real(x)
+			if x, ok := b.lo.?; ok && !b.lo_open do return x
 			return unsupported_at(k, span, fmt.tprintf("the default of %s, which has no first element", print_type(c)))
 		case .Char:
 			lo, _ := discrete_bounds(cell)

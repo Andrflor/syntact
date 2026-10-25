@@ -36,7 +36,9 @@ Type :: union {
 
 Char :: distinct rune
 Int :: distinct i128
-Real :: distinct f64
+Real :: struct {
+	num, den: i128, // num / den, den > 0, in lowest terms (real.odin)
+}
 Bool :: distinct bool
 None :: struct {}
 Invalid :: struct {}
