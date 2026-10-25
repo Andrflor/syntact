@@ -282,6 +282,18 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 			n.binding = b
 			return n
 		}
+		// the scope being copied, named from its productions: the name of its
+		// equation is copied too, and names the copy (§5.6)
+		if s, is_scope := v.binding.value.(^Scope); is_scope {
+			if c, found := m.scopes[s]; found {
+				b := new(Binding)
+				b^ = Binding{name = v.binding.name, kind = v.binding.kind, span = v.binding.span, scope = v.binding.scope, source = v.binding}
+				b.color, b.value, b.typed_value, b.state = v.binding.color, c, c, .Done
+				m.bindings[v.binding] = b
+				n.binding = b
+				return n
+			}
+		}
 		if p, found := m.pieces[v.binding]; found do return rewrite(k, p, m.outer)
 		// a reference from outside the copy: its type, with the unknowns rewritten
 		if m.substitute do return rewrite(k, binding_type(k, v.binding), m.outer)
