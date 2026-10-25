@@ -390,7 +390,13 @@ X = {} | {T: ...X}      ⟹    X = {0..*T:}       the run of 0 or more T:
 ```
 
 It is the same law as for strings: `X = A + X | B` gives `X = A * 0.. + B` when `""`
-is not in A.
+is not in A. A run is in `A * n` when it is cut into n pieces, each in A: the law of
+`in` on a concatenation, over the lengths of the pieces A admits.
+
+```text
+X = {} | {u8: ...X} | {i8: string: ...X}   ⟹   X = {...(({u8:} | {i8: string:}) * 0..):}
+{1 (-2) "x" 3} in X = {1} + {-2 "x"} + {3}, each in {u8:} | {i8: string:}   = true
+```
 
 Guarded, when in each production a run that names the scope comes with a binding:
 each question is then on a run strictly shorter than the scope asked, and the

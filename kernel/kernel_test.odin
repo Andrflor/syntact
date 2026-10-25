@@ -181,6 +181,11 @@ SPEC_CASES := []Spec_Case {
 	{MIRROR + "List{u8}:a -> {10 10}\nx -> a{7}", "", {}},
 	{"({u8: string:} | {i8: bool:}):p -> {1 \"x\"}\nx -> p{-1}", "", {.Constraint_Mismatch}},
 	{"({u8: string:} | {i8: bool:}):p -> {1 \"x\"}\nx -> p{2}", "", {}},
+	// a run of pieces of different lengths: cut by the law of concatenation
+	{MIXED + "List:a -> {1 (-2) \"x\" 3}", "", {}},
+	{MIXED + "List:a -> {}", "", {}},
+	{MIXED + "List:a -> {1 (-2) 3}", "", {.Constraint_Mismatch}},
+	{MIXED + "List:a -> {1 (-2) \"x\" 3}\nx -> a{\"y\"}", "", {.Constraint_Mismatch}},
 	// not guarded: the equation stays
 	{"L -> {\n  -> {}\n  -> {...L: ...L:}\n}\nL:a -> {}", "", {.Constraint_Mismatch}},
 	// a carve carves any binding, in turn: z{…} (specs/language/08)
@@ -236,6 +241,8 @@ SPEC_CASES := []Spec_Case {
 }
 
 ARRAY :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n"
+
+MIXED :: "List -> {\n  -> {}\n  -> {u8: ...List:}\n  -> {i8: string: ...List:}\n}\n"
 
 MIRROR :: "List -> {\n  T -> {}\n  -> {}\n  -> {T: ...List{T}: T:}\n}\n"
 

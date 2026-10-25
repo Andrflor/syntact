@@ -685,25 +685,45 @@ mentions_scope :: proc(k: ^Kernel, t: Type, s: ^Scope, seen: ^map[^Scope]bool) -
 	return false
 }
 
-// repeated_in: x in A * n, A a set of shapes of one fixed length L: x is a run of
-// n pieces of L bindings, each in A (§4.6, §5.6).
+// repeated_in: x in A * n, A a set of shapes: x is y + z, y a piece in A and z
+// in A * (n - 1), over the lengths A admits — the law of `in` on a concatenation
+// (§4.6, §5.6). A piece takes a binding at least; when A admits {}, empty pieces
+// make up any count that n allows.
 repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
+	stays := new_operation(.In, x, new_operation(.Mul, a, counts))
 	v, is_scope := x.(^Scope)
-	if !is_scope do return is_constant(x) ? Type(Bool(false)) : new_operation(.In, x, new_operation(.Mul, a, counts))
-	length := -1
-	alternatives, _ := as_cells(a)
+	if !is_scope do return is_constant(x) ? Type(Bool(false)) : stays
+	alternatives, negated := as_cells(a)
+	if negated do return stays
+	lengths := make([dynamic]int) // the lengths of the pieces, when each is fixed
+	any_length := false
 	for c in alternatives {
 		shape, ok := c.(^Scope)
-		if !ok do return new_operation(.In, x, new_operation(.Mul, a, counts))
+		if !ok do return stays
 		n, fixed := shape_length(k, shape)
-		if !fixed || length >= 0 && n != length do return new_operation(.In, x, new_operation(.Mul, a, counts))
-		length = n
+		if !fixed do any_length = true
+		else if !slice.contains(lengths[:], n) do append(&lengths, n)
 	}
-	if length <= 0 do return new_operation(.In, x, new_operation(.Mul, a, counts))
-	xs := placed(k, v, .Value)
-	if len(xs) % length != 0 || !counts_hold(counts, i128(len(xs) / length)) do return Bool(false)
-	out: Type = Bool(true)
-	for i := 0; i < len(xs); i += length do out = bool_and(k, out, in_law(k, run_scope(k, xs[i:i + length]), a))
+	empty := in_law(k, run_scope(k, nil), a)
+	if !is_bool(empty, true) && !is_bool(empty, false) do return stays
+	return pieces_in(k, placed(k, v, .Value), a, counts, 0, lengths[:], any_length, is_bool(empty, true))
+}
+
+// pieces_in: the bindings xs are pieces in a, after `used` of them.
+pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts: Type, used: i128, lengths: []int, any_length, empty: bool) -> Type {
+	if len(xs) == 0 {
+		if empty do return Bool(!is_none(counts_from(counts, used)))
+		return Bool(counts_hold(counts, used))
+	}
+	if is_none(counts_from(counts, used + 1)) do return Bool(false)
+	out: Type = Bool(false)
+	for i in 1 ..= len(xs) {
+		if !any_length && !slice.contains(lengths, i) do continue
+		head := in_law(k, run_scope(k, xs[:i]), a)
+		if is_bool(head, false) do continue
+		out = bool_or(k, out, bool_and(k, head, pieces_in(k, xs[i:], a, counts, used + 1, lengths, any_length, empty)))
+		if is_bool(out, true) do return out
+	}
 	return out
 }
 
