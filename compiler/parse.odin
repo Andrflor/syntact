@@ -88,6 +88,7 @@ Token_Flags :: enum u8 {
 	Space_Before     = 1,
 	Separator_Before = 2, // newline or comma — a soft statement boundary
 	Bad_Double_Equal = 3, // `==` — not a Syntact operator; recovered as a single `=`
+	Comma_Before     = 4, // `,` — a boundary no operator continues across
 }
 
 Token :: struct {
@@ -154,7 +155,8 @@ is_space_at :: #force_inline proc(l: ^Lexer, pos: u32) -> bool {
 }
 
 // Newline and comma both fold to Separator_Before (soft statement boundaries):
-// `a\nb` and `a, b` are treated identically.
+// `a\nb` and `a, b` are treated identically, except that an operator continues an
+// expression across a newline, never across a comma.
 skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
 	flags: u8 = 0
 	src := l.src
@@ -168,6 +170,7 @@ skip_trivia :: #force_inline proc(l: ^Lexer) -> u8 {
 		} else if c == '\n' || c == ',' {
 			set_flag(&flags, .Line_Before)
 			set_flag(&flags, .Separator_Before)
+			if c == ',' do set_flag(&flags, .Comma_Before)
 			off += 1
 		} else {
 			break
@@ -1251,7 +1254,7 @@ is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
 
 // The Pratt core: parse a prefix, fold infix operators while binding power ≥
 // `precedence`. Three Syntact-specific guards in the loop:
-//   * a separator before a non-arithmetic operator ends the expression;
+//   * a comma, or a newline before a non-arithmetic operator, ends the expression;
 //   * a `->` is not chained onto an existing Product/Pointing left;
 //   * a glued `(` after an *anonymous* identifier breaks out (no spurious call).
 // A missing prefix handler reports the stray token, skips it, and retries.
@@ -1290,7 +1293,8 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 
 	infix_loop: for {
 		if has_flag(parser.current_token, .Separator_Before) {
-			if !is_infix_operator(parser.current_token.kind) {
+			if has_flag(parser.current_token, .Comma_Before) ||
+			   !is_infix_operator(parser.current_token.kind) {
 				break
 			}
 		}
