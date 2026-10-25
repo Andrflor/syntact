@@ -213,7 +213,10 @@ SPEC_CASES := []Spec_Case {
 	{"({u8:} | {i8:}):x -> {-1}", "", {}},
 	{"({u8:} | {i8:}):x -> {300}", "", {.Constraint_Mismatch}},
 	{"x -> ({u8: string:} | {i8: string:})", "{((-128)..255):  string:}", {}},
-	{"x -> ({u8: string:} | {i8: bool:})", "{u8:  string:} | {i8:  bool:}", {}},
+	{"x -> ({u8: string:} | {i8: bool:})", "{((-128)..(-1)):  (false | true):} | {(0..127):  (string | false | true):} | {(128..255):  string:}", {}},
+	// one set, one normal form, whatever the order it is written in
+	{"x -> ({u8: string:} | {u8: bool:} | {i8: string:})", "{((-128)..(-1)):  string:} | {(0..255):  (string | false | true):}", {}},
+	{"x -> ({u8: string:} | {i8: string:} | {u8: bool:})", "{((-128)..(-1)):  string:} | {(0..255):  (string | false | true):}", {}},
 	{LISTS + "List:a -> {10 (-1)}", "", {}},
 	{LISTS + "List:a -> {10 300}", "", {.Constraint_Mismatch}},
 	{LISTS + "List:a -> {10 (-1)}\nx -> a{300}", "", {.Constraint_Mismatch}},
