@@ -148,13 +148,6 @@ is_value :: proc(k: ^Kernel, t: Type) -> bool {
 	return false
 }
 
-// linear_in: t = a * u + b, one unknown u of degree 1.
-linear_in :: proc(t: Type) -> (u: ^Unknown, a, b: i128, ok: bool) {
-	s, is_sum := as_sum(t)
-	if !is_sum || s.denom != 1 || len(s.products) != 1 || len(s.products[0].factors) != 1 do return
-	return s.products[0].factors[0], s.products[0].coef, s.constant, true
-}
-
 // preimage: the integers v such that a * v + b is in s, a ≠ 0.
 // preimage: the integers v such that a * v + b is in the cells, a ≠ 0.
 preimage :: proc(cells: []Type, a, b: i128) -> Type {

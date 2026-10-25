@@ -330,7 +330,7 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		return cell_list(x)
 	case .Text:
 		ys := make([dynamic]Type)
-		for y in u do if f := cell_family(y); f == .Text || f == .Char do append(&ys, y)
+		for y in u do if g := cell_family(y); g == .Text || g == .Char do append(&ys, y)
 		if len(ys) == 0 do return cell_list(x)
 		removed := text_or(ys[:])
 		if text_empty(text_and({x, removed})) do return cell_list(x)
@@ -344,7 +344,7 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		return cell_list(new_and(x, new_not(cells_term(ys[:]))))
 	case .Other:
 		ys := make([dynamic]Type)
-		for y in u do if f := cell_family(y); f == .Int || f == .Real || f == .Other do append(&ys, y)
+		for y in u do if g := cell_family(y); g == .Int || g == .Real || g == .Other do append(&ys, y)
 		if len(ys) == 0 do return cell_list(x)
 		if lo, hi, bounded := int_bounds(k, x); bounded {
 			hull := discrete_cell(.Int, lo, hi)

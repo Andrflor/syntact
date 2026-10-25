@@ -119,29 +119,34 @@ solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 	if !split || len(call.changes) != 1 do return value
 	for b, v in call.changes {
 		x, same_unknown := binding_type(k, b).(^Unknown)
-		step, is_sum := as_sum(v)
-		if !same_unknown || x.id != u.id || !is_sum || !same_sum(step, sum_add(unknown_sum(u), sum_constant(-1))) do return value
+		if !same_unknown || x.id != u.id || !same(k, v, ring(.Sub, u, Int(1))) do return value
 	}
+	ms, divisor, is_sum := monomials(g)
+	if !is_sum do return value
 	degree := 0
-	for q in g.products {
-		for f in q.factors do if f.id != u.id do return value
-		degree = max(degree, len(q.factors))
+	for m in ms {
+		for f in factors(m) do if f.id != u.id do return value
+		degree = max(degree, len(factors(m)))
 	}
 	if !included(k, layout_of(k, u), new_range(Int(base), nil, .Int)) do return value
+	// G(m) = g(0) + … + g(m): each monomial c * m^p gives c * S_p(m)
 	sums := power_sums(u, degree)
-	total := sum_scale(sums[0], g.constant)
-	for q in g.products do total = sum_add(total, sum_scale(sums[len(q.factors)], q.coef))
-	total = sum_div(total, g.denom)
-	at_base, exact := sum_eval(total, u, i128(base))
+	total: Type = Int(0)
+	for m in ms do total = ring(.Add, total, ring(.Mul, Int(coefficient(m)), sums[len(factors(m))]))
+	total = ring_over(total, divisor)
+	at := make(Rewrite)
+	at[u.id] = Int(base)
+	at_base, exact := rewrite(k, total, at).(Int)
 	if !exact do return value
-	return sum_term(sum_add(sum_constant(i128(c) - at_base), total))
+	return ring(.Add, Int(i128(c) - i128(at_base)), total)
 }
 
-// split_call: a product g + f{…}!, with g a sum and one recursive call of f.
-split_call :: proc(k: ^Kernel, product: Type, root: ^Scope) -> (g: Sum, call: ^Scope, ok: bool) {
+// split_call: a product g + f{…}!, with g a sum of products and one recursive call
+// of f.
+split_call :: proc(k: ^Kernel, product: Type, root: ^Scope) -> (g: Type, call: ^Scope, ok: bool) {
 	terms := []Type{product}
 	if o, is_add := product.(^Operation); is_add && o.op == .Add do terms = o.args
-	g = sum_constant(0)
+	g = Int(0)
 	for t in terms {
 		if c, is_call := t.(^Collapse); is_call && c.recursive {
 			s, is_scope := c.target.(^Scope)
@@ -149,39 +154,15 @@ split_call :: proc(k: ^Kernel, product: Type, root: ^Scope) -> (g: Sum, call: ^S
 			call = s
 			continue
 		}
-		part := as_sum(t) or_return
-		g = sum_add(g, part)
+		g = ring_law(.Add, {g, t}) or_return
 	}
 	return g, call, call != nil
 }
 
-// --- polynomials, by the laws of the ring (arith.odin) ---
-
-unknown_sum :: proc(u: ^Unknown) -> Sum {
-	s := sum_constant(0)
-	append(&s.products, Product{1, slice.clone([]^Unknown{u})})
-	return s
-}
-
-same_sum :: proc(a, b: Sum) -> bool {
-	d := sum_add(a, sum_neg(b))
-	return len(d.products) == 0 && d.constant == 0
-}
-
-sum_scale :: proc(s: Sum, c: i128) -> Sum {
-	return sum_mul(s, sum_constant(c))
-}
-
-sum_div :: proc(s: Sum, d: i128) -> Sum {
-	out := s
-	out.denom *= d
-	return sum_reduce(out)
-}
-
-sum_pow :: proc(s: Sum, n: int) -> Sum {
-	out := sum_constant(1)
-	for _ in 0 ..< n do out = sum_mul(out, s)
-	return out
+// ring_over: t / d, d ≥ 1, over the divisor of the sum.
+ring_over :: proc(t: Type, d: i128) -> Type {
+	ms, e, _ := monomials(t)
+	return ring_term(ms, e * d)
 }
 
 binomial :: proc(n, r: int) -> i128 {
@@ -192,29 +173,14 @@ binomial :: proc(n, r: int) -> i128 {
 
 // power_sums: S_0 … S_d, S_p(m) = 0^p + 1^p + … + m^p, from
 // C(p+1, 0) S_0 + … + C(p+1, p) S_p = (m + 1)^(p+1).
-power_sums :: proc(u: ^Unknown, d: int) -> []Sum {
-	out := make([]Sum, d + 1)
-	next := sum_add(unknown_sum(u), sum_constant(1))
+power_sums :: proc(u: ^Unknown, d: int) -> []Type {
+	out := make([]Type, d + 1)
+	next := ring(.Add, u, Int(1))
 	for p in 0 ..= d {
-		acc := sum_pow(next, p + 1)
-		for j in 0 ..< p do acc = sum_add(acc, sum_neg(sum_scale(out[j], binomial(p + 1, j))))
-		out[p] = sum_div(acc, i128(p + 1))
+		acc: Type = Int(1)
+		for _ in 0 ..= p do acc = ring(.Mul, acc, next)
+		for j in 0 ..< p do acc = ring(.Sub, acc, ring(.Mul, Int(binomial(p + 1, j)), out[j]))
+		out[p] = ring_over(acc, i128(p + 1))
 	}
 	return out
-}
-
-// sum_eval: the value of a polynomial in u at u = v; false when it is not an
-// integer.
-sum_eval :: proc(s: Sum, u: ^Unknown, v: i128) -> (i128, bool) {
-	total := s.constant
-	for q in s.products {
-		term := q.coef
-		for f in q.factors {
-			if f.id != u.id do return 0, false
-			term *= v
-		}
-		total += term
-	}
-	if total % s.denom != 0 do return 0, false
-	return total / s.denom, true
 }
