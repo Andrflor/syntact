@@ -192,6 +192,10 @@ SPEC_CASES := []Spec_Case {
 	{"Square -> {u16:side}\nDiamond -> {u16:side}\ns -> Diamond{side -> 7}\nx -> s ? {Square: | Diamond: -> side * side  -> 0}", "49", {}},
 	{ARRAY + "xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...Array{u8}:(t)} -> h\n  -> 0\n}", "3", {}},
 	{ARRAY + "xs -> {3 4 5}\nx -> xs ? {\n  {u8(h) ...Array{u8}:(t)} -> t\n  -> {}\n}", "{4  5}", {}},
+	// only a scope can be expanded: `...C:` places the default of C (specs/language/04)
+	{"x -> {1 ...u8:}", "", {.Constraint_Mismatch}},
+	{"xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...u8:(t)} -> h\n  -> 0\n}", "", {.Constraint_Mismatch}},
+	{"Pair -> {u8: u8:}\ny -> {...Pair: 3}\nx -> y.#2", "3", {}},
 	// §5.6
 	{"f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n + f{n -> n - 1}!}}\nx -> f{n -> 3}!", "13", {}},
 	{"f -> {u8:n -> ??  -> n ? {1 -> 1  -> n + f{n -> n - 1}!}}\nx -> f!", "", {.Constraint_Mismatch}},

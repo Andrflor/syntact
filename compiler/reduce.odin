@@ -1416,10 +1416,9 @@ scope_ensure_value_folds :: proc(ts: ^Scope_Type) {
 
 // reduce_scope_fires mirrors scope_satisfy_range for the reduce side: cover fields
 // in lockstep with target fields (names must agree — shape matching is
-// name-sensitive), an Expand cover field swallowing the remaining run. A domain-LEAF
-// expand (`...u8`) repeats the kernel test; a structural expand (the recursive tail
-// `...Array{T}:`) goes to the ordinary satisfy proof (expand_satisfies) over the
-// folded run — decidable here because the static path guarantees a `??`-free target.
+// name-sensitive), an Expand cover field swallowing the remaining run: the run, taken
+// as a scope, goes to the ordinary satisfy proof (expand_satisfies) over the folded
+// run — decidable here because the static path guarantees a `??`-free target.
 reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> Fire_Decision {
 	c := ci
 	for c < len(cover.kind) && cover.kind[c] == .Product do c += 1
@@ -1434,16 +1433,8 @@ reduce_scope_fires :: proc(cover: ^Scope_Type, ts: ^Scope_Type, ci, vi: int) -> 
 			bare := c >= len(cover.constraints) || cover.constraints[c] == nil
 			return bare ? .Yes : .Undecidable
 		}
-		for k := vi; k < len(ts.types); k += 1 {
-			d := reduce_leaf_fires(cf, reduce_value(ts.types[k]))
-			if d == .Undecidable {
-				// Structural expand: the full satisfy proof over the folded run.
-				scope_ensure_value_folds(ts)
-				return expand_satisfies(cf, ts^, k, len(ts.types)) ? .Yes : .No
-			}
-			if d == .No do return .No
-		}
-		return .Yes
+		scope_ensure_value_folds(ts)
+		return expand_satisfies(cf, ts^, vi, len(ts.types)) ? .Yes : .No
 	}
 	if vi >= len(ts.types) do return .No
 	if c < len(cover.names) && vi < len(ts.names) && cover.names[c] != ts.names[vi] {

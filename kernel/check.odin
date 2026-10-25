@@ -37,10 +37,10 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 				continue
 			}
 		case .Expand:
-			if b.value == nil {
-				if c := binding_color(k, b); c != nil do obligations(k, c) // a run: its color is a type
-				continue
-			}
+			// `...e` places the value of e, `...C:` the default of C, `...` nothing:
+			// only a scope can be expanded (specs/language/04)
+			if b.value == nil && b.color == nil do continue
+			if c := binding_color(k, b); c != nil && obligations(k, c) do continue
 			v := binding_type(k, b)
 			if obligations(k, v) do continue
 			if _, is_scope := v.(^Scope); !is_scope {
