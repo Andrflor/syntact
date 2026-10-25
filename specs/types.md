@@ -376,7 +376,8 @@ mentions it. The first production is the base case, and it is not recursive: a
 base case whose value places itself again is an infinite recursion. The equation
 is never unfolded: asked again from its own production, the scope stays a carve
 and a collapse, applied to types. It is solved — Arden, a closed form — or it
-stays. A carve of a solved equation substitutes its arguments into the solution:
+stays. A scope asked whether it is in an equation that is not solved is asked of
+its productions (§5.4) when they are guarded. A carve of a solved equation substitutes its arguments into the solution:
 `sum{n -> 5}!` is `sum!` with `n` = 5.
 
 Arden, when the name is at the edge of the sequence:
@@ -388,6 +389,17 @@ X = {} | {T: ...X}      ⟹    X = {0..*T:}       the run of 0 or more T:
 
 It is the same law as for strings: `X = A + X | B` gives `X = A * 0.. + B` when `""`
 is not in A.
+
+Guarded, when in each production a run that names the scope comes with a binding:
+each question is then on a run strictly shorter than the scope asked, and the
+equation itself is not unfolded. Otherwise the equation stays.
+
+```text
+List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
+{10 10} in List{u8} = {10 10} in {}  [|]  {10 10} in {u8: ...List{u8}: u8:}
+                    = 10 in u8  [&]  {} in List{u8}  [&]  10 in u8       = true
+{10 10 10} in List{u8}                                                    = false
+```
 
 The closed form, when the name is called on an integer:
 

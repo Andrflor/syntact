@@ -169,7 +169,20 @@ SPEC_CASES := []Spec_Case {
 	{"x -> u8 * u8", "(0..255) * (0..255)", {}},
 	{"Pair -> {u8: u8:}\nList -> {\n  -> {}\n  -> {...Pair: ...List:}\n}\nList:x -> {1 2 3 4}", "", {}},
 	{"Pair -> {u8: u8:}\nList -> {\n  -> {}\n  -> {...Pair: ...List:}\n}\nList:x -> {1 2 3}", "", {.Constraint_Mismatch}},
-	{"Tree -> {\n  -> {}\n  -> {u8: ...Tree: ...Tree:}\n}\nTree:x -> {1}", "", {.Constraint_Mismatch}}, // not at the edge: the equation stays
+	// not at the edge: a scope is asked of the guarded productions, on shorter runs
+	{"Tree -> {\n  -> {}\n  -> {u8: ...Tree: ...Tree:}\n}\nTree:x -> {1}", "", {}},
+	{"Tree -> {\n  -> {}\n  -> {u8: ...Tree: ...Tree:}\n}\nTree:x -> {1 300}", "", {.Constraint_Mismatch}},
+	{MIRROR + "List{u8}:a -> {10 10}", "", {}},
+	{MIRROR + "List{u8}:a -> {1 2 3 4}", "", {}},
+	{MIRROR + "List{u8}:a -> {10 10 10}", "", {.Constraint_Mismatch}},
+	{MIRROR + "List{u8}:a -> {10 300}", "", {.Constraint_Mismatch}},
+	// the value of a binding colored by C, carved, is checked against C
+	{MIRROR + "List{u8}:a -> {10 10}\nx -> a{300}", "", {.Constraint_Mismatch}},
+	{MIRROR + "List{u8}:a -> {10 10}\nx -> a{7}", "", {}},
+	{"({u8: string:} | {i8: bool:}):p -> {1 \"x\"}\nx -> p{-1}", "", {.Constraint_Mismatch}},
+	{"({u8: string:} | {i8: bool:}):p -> {1 \"x\"}\nx -> p{2}", "", {}},
+	// not guarded: the equation stays
+	{"L -> {\n  -> {}\n  -> {...L: ...L:}\n}\nL:a -> {}", "", {.Constraint_Mismatch}},
 	// a carve carves any binding, in turn: z{…} (specs/language/08)
 	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nb -> a{z{a->2}}\nx -> b.z.a", "2", {}},
 	{"a -> {\n  x -> {}\n  z -> {u8:a u8:b}\n}\nx -> a{z{a->300}}", "", {.Constraint_Mismatch}},
@@ -220,6 +233,8 @@ SPEC_CASES := []Spec_Case {
 }
 
 ARRAY :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n"
+
+MIRROR :: "List -> {\n  T -> {}\n  -> {}\n  -> {T: ...List{T}: T:}\n}\n"
 
 LISTS :: "List -> {\n  -> {}\n  -> {u8: ...List:}\n  -> {i8: ...List:}\n}\n"
 

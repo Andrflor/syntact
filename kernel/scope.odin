@@ -120,7 +120,28 @@ carve_law :: proc(k: ^Kernel, c: ^Carve) -> Type {
 		if is_invalid(target) do return target
 		return problem(.Invalid_Carve, c.span, fmt.tprintf("%s is not a scope: it cannot be carved", print_type(target)))
 	}
-	return carve(k, s, args, c.span)
+	r := carve(k, s, args, c.span)
+	// the value of a binding colored by C, carved, is checked against C (§5.4)
+	if b := designated(k, c.target); b != nil && !is_invalid(r) {
+		if color := binding_color(k, b); color != nil {
+			if p := in_problem(k, r, color, c.span); p != nil do return p
+		}
+	}
+	return r
+}
+
+// designated: the binding a term designates: a name, or a field of a scope.
+designated :: proc(k: ^Kernel, t: Type) -> ^Binding {
+	#partial switch v in t {
+	case ^Name:
+		return v.binding
+	case ^Access:
+		s, is_scope := normal(k, v.target).(^Scope)
+		if !is_scope do return nil
+		b, _ := occurrence(placed(k, s, .Value), v.name, v.ordinal, true)
+		return b
+	}
+	return nil
 }
 
 // carve: s{x -> w} = s where the first occurrence of x is w. An unnamed argument
@@ -452,8 +473,10 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	if is_invalid(x) do return x
 	if recursive(s) {
 		solution, solved := arden(k, s)
-		if !solved do return new_operation(.In, x, s) // the equation stays
-		if solution != s do return admits(k, x, solution)
+		if solved && solution != s do return admits(k, x, solution)
+		// unsolved, a scope is asked of the productions when they are guarded: each
+		// asks it of runs strictly shorter than it (§5.6); otherwise the equation stays
+		if _, is_scope := x.(^Scope); !solved && !(is_scope && guarded(k, s)) do return new_operation(.In, x, s)
 	}
 	shape := placed(k, s, .Shape)
 	out: Type = Bool(false)
@@ -609,6 +632,23 @@ arden :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
 	last.color = or_law(k, bases[:])
 	last.typed_color = last.color
 	return solution, true
+}
+
+// guarded: in each production of s, a run that names s comes with a binding: a
+// scope in s is asked of runs strictly shorter than it (§5.6).
+guarded :: proc(k: ^Kernel, s: ^Scope) -> bool {
+	for p in placed(k, s, .Shape) {
+		if p.kind != .Product || p.value == nil do continue
+		shape, is_scope := binding_type(k, p).(^Scope)
+		if !is_scope do continue
+		names, fixed := false, false
+		for b in placed(k, shape, .Shape) {
+			if !is_run(b) do fixed = true
+			else if binding_mentions(k, b, s) do names = true
+		}
+		if names && !fixed do return false
+	}
+	return true
 }
 
 // binding_mentions: the color or the value of a binding holds the scope s.
