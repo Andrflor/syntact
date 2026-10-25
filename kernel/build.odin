@@ -185,7 +185,7 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		if len(syn.node_execute_wrappers(ast, idx)) > 0 do return unsupported(k, idx, "execution patterns")
 		c := new(Collapse)
 		c.target = build_term(k, s, data.execute.target)
-		c.recursive = names_itself(c.target)
+		c.recursive = names_itself(s, c.target)
 		c.span = span
 		return c
 	case .Carve:
@@ -372,7 +372,7 @@ cover_bindings :: proc(t: Type, written: bool) -> []^Binding {
 	case ^Carve:
 		return cover_bindings(v.target, false)
 	case ^Name:
-		if v.self == nil && v.binding.value != nil do return cover_bindings(v.binding.value, false)
+		if v.binding.value != nil do return cover_bindings(v.binding.value, false)
 	case ^Or:
 		first := cover_bindings(v.terms[0], false)
 		out := make([dynamic]^Binding)
@@ -412,7 +412,7 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 			}
 			a.name = syn.node_name_str(ast, source)
 			above: Type
-			if _, _, found := lookup(s, a.name, -1); found do above = build_name(k, s, source)
+			if _, found := lookup(s, a.name, -1); found do above = build_name(k, s, source)
 			inner := build_carve(k, s, child, above).(^Carve) or_else nil
 			if inner == nil do return unsupported(k, child, "this carve argument")
 			a.carves = inner.args
@@ -437,26 +437,36 @@ build_name :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	n := new(Name)
 	n.span = node_span(k, idx)
 	found: bool
-	n.binding, n.self, found = lookup(s, name, ordinal)
+	n.binding, found = lookup(s, name, ordinal)
 	if !found do return report(k, .Undefined_Identifier, n.span, fmt.tprintf("`%s` is not defined above", name))
 	return n
 }
 
-// names_itself: t is the scope being defined, or a carve of it.
-names_itself :: proc(t: Type) -> bool {
+// names_itself: t, written at s, names the scope being defined — or a carve of it —
+// from one of its productions.
+names_itself :: proc(s: ^Scope, t: Type) -> bool {
 	#partial switch v in t {
 	case ^Name:
-		return v.self != nil
+		return defines(s, v.binding)
 	case ^Carve:
-		return names_itself(v.target)
+		return names_itself(s, v.target)
+	}
+	return false
+}
+
+// defines: b is being defined around s, and s is in one of its productions.
+defines :: proc(s: ^Scope, b: ^Binding) -> bool {
+	child: ^Scope
+	for sc := s; sc != nil; child, sc = sc, sc.parent {
+		if child != nil && child.producing && !sc.complete && sc.bindings[len(sc.bindings) - 1] == b do return true
 	}
 	return false
 }
 
 // lookup: in each scope from s up, the bindings above the one being built. From a
 // production, the binding being built whose value holds it is visible too: the
-// scope names itself, and is recursive.
-lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool) {
+// scope names itself (§5.6).
+lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, bool) {
 	child: ^Scope
 	for sc := s; sc != nil; child, sc = sc, sc.parent {
 		visible := sc.complete ? len(sc.bindings) : len(sc.bindings) - 1
@@ -482,13 +492,9 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, ^Scope, bool
 			}
 		}
 		if found < 0 do continue
-		if self && found == len(sc.bindings) - 1 {
-			child.recursive = true
-			return sc.bindings[found], child, true
-		}
-		return sc.bindings[found], nil, true
+		return sc.bindings[found], true
 	}
-	return nil, nil, false
+	return nil, false
 }
 
 // current_is: t, where `.x` names the scope `from`, with `.x` naming `to` instead;

@@ -99,7 +99,7 @@ collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 	}
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
 	// solution, or it stays
-	if c.recursive || s != origin(s) && origin(s).recursive do return recursive_call(k, s, c.span)
+	if c.recursive || s != origin(s) && recursive(s) do return recursive_call(k, s, c.span)
 	if p, found := first_production(k, s); found do return binding_type(k, p)
 	return None{}
 }
@@ -227,7 +227,7 @@ copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope 
 
 copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	c := new_scope(parent, s.span)
-	c.recursive, c.complete = s.recursive, true
+	c.complete = true
 	if m.carve && m.instance == nil do m.instance = c
 	if !m.substitute do c.source = s // a scope of a branch is checked as written there
 	m.scopes[s] = c
@@ -283,10 +283,6 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 			return n
 		}
 		if p, found := m.pieces[v.binding]; found do return rewrite(k, p, m.outer)
-		if v.self != nil {
-			if s, found := m.scopes[v.self]; found do n.self = s
-			return n
-		}
 		// a reference from outside the copy: its type, with the unknowns rewritten
 		if m.substitute do return rewrite(k, binding_type(k, v.binding), m.outer)
 		return n
@@ -372,7 +368,7 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case ^Operation:
 		for x in v.args do if mentions(m, x) do return true
 	case ^Name:
-		return v.binding in m.bindings || v.self != nil && v.self in m.scopes
+		return v.binding in m.bindings
 	case ^Scope:
 		for b in v.bindings do if mentions(m, b.color) || mentions(m, b.value) do return true
 	case ^Access:
@@ -409,7 +405,7 @@ colored :: proc(k: ^Kernel, s: ^Scope, shape: ^Scope) -> Type {
 // scopes of the same structure whose bindings its colors admit.
 admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	if is_invalid(x) do return x
-	if origin(s).recursive {
+	if recursive(s) {
 		solution, solved := arden(k, s)
 		if !solved do return new_operation(.In, x, s) // the equation stays
 		if solution != s do return admits(k, x, solution)
@@ -689,7 +685,7 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok && x.op == y.op && same_all(k, x.args, y.args)
 	case ^Name:
 		y, ok := b.(^Name)
-		return ok && x.binding == y.binding && x.self == y.self
+		return ok && x.binding == y.binding
 	case ^Scope:
 		y, ok := b.(^Scope)
 		return ok && same_scope(k, x, y)

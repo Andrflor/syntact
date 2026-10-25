@@ -31,7 +31,6 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		if is_string_value(t) do return t // a string: a primitive
 		return operation_law(k, v.op, normal_all(k, v.args), v.span)
 	case ^Name:
-		if v.self != nil do return v.self // the scope being defined: a carve and a collapse apply to it (§5.6)
 		return binding_type(k, v.binding)
 	case ^Scope:
 		return scope_law(k, v)
@@ -375,7 +374,7 @@ written_first :: proc(k: ^Kernel, t: Type) -> (Type, bool) {
 	case ^Or:
 		return written_first(k, v.terms[0])
 	case ^Name:
-		if v.self == nil && v.binding.value != nil do return written_first(k, v.binding.value)
+		if v.binding.value != nil do return written_first(k, v.binding.value)
 	}
 	return nil, false
 }

@@ -15,6 +15,52 @@ import "core:slice"
 // A recursive call has the family of its equation: that of its base cases. An
 // operator on it is checked once the equation is given.
 
+// recursive: the productions of a scope name it — the binding whose value it is —
+// directly or in a carve (§5.6); a carve of it is recursive with it.
+recursive :: proc(s: ^Scope) -> bool {
+	root := origin(s)
+	for b in root.bindings do if b.kind == .Product && (names_scope(b.color, root) || names_scope(b.value, root)) do return true
+	return false
+}
+
+// names_scope: the term, as written, names the binding whose value is s.
+names_scope :: proc(t: Type, s: ^Scope) -> bool {
+	if t == nil do return false
+	switch v in t {
+	case ^Name:
+		value, ok := v.binding.value.(^Scope)
+		return ok && value == s
+	case ^Scope:
+		for b in v.bindings do if names_scope(b.color, s) || names_scope(b.value, s) do return true
+	case ^Operation:
+		for a in v.args do if names_scope(a, s) do return true
+	case ^Or:
+		for a in v.terms do if names_scope(a, s) do return true
+	case ^And:
+		for a in v.terms do if names_scope(a, s) do return true
+	case ^Not:
+		return names_scope(v.term, s)
+	case ^Is:
+		return names_scope(v.term, s)
+	case ^Range:
+		return names_scope(v.lo, s) || names_scope(v.hi, s)
+	case ^Access:
+		return names_scope(v.target, s)
+	case ^Collapse:
+		return names_scope(v.target, s)
+	case ^Carve:
+		if names_scope(v.target, s) do return true
+		for a in v.args do if names_scope(a.value, s) || names_scope(a.otherwise, s) do return true
+	case ^Default:
+		return names_scope(v.color, s)
+	case ^Pattern:
+		if names_scope(v.target, s) do return true
+		for b in v.branches do if names_scope(b.cover, s) || names_scope(b.product, s) do return true
+	case Char, Int, Real, Bool, None, Invalid, ^Unknown:
+	}
+	return false
+}
+
 // origin: the scope a copy carves, uncarved; a scope is its own.
 origin :: proc(s: ^Scope) -> ^Scope {
 	return s.carved != nil ? s.carved : s
@@ -134,7 +180,7 @@ base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: b
 // when it has a closed form. A carve of it is the same equation.
 recursion_law :: proc(k: ^Kernel, b: ^Binding, value: Type) -> Type {
 	root := origin(b.scope)
-	if !root.recursive do return value
+	if !recursive(root) do return value
 	first, found := first_production(k, b.scope)
 	if !found || first != b do return value
 	if b.scope != root {

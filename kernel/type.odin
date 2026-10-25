@@ -127,12 +127,9 @@ Operation :: struct {
 	span: syn.Span, // as written: where an illegal operator is reported
 }
 
-// Name: a binding, the last occurrence visible where the name is written. `self`:
-// the scope being defined, named from one of its productions (§5.6); in a carve,
-// the scope the carve derives.
+// Name: a binding, the last occurrence visible where the name is written.
 Name :: struct {
 	binding: ^Binding,
-	self:    ^Scope,
 	span:    syn.Span,
 }
 
@@ -143,8 +140,8 @@ Access :: struct {
 	span:    syn.Span,
 }
 
-// Collapse: `s!`. `recursive`: s names the scope being defined, from one of its
-// productions: a recursive call, never unfolded (§5.6).
+// Collapse: `s!`. `recursive`: written in a production of the scope s names: a
+// recursive call, never unfolded (§5.6).
 Collapse :: struct {
 	target:    Type,
 	recursive: bool,
@@ -232,7 +229,6 @@ Scope :: struct {
 	changes:   map[^Binding]Type, // a carve: the values of the bindings of `carved` it replaces
 	complete:  bool, // all its bindings are built: all are visible
 	producing: bool, // one of its productions is being built: it may name itself
-	recursive: bool, // one of its productions names it (§5.6)
 	reached:   bool, // asked once: it is checked (check.odin)
 	name:      string, // the binding it is the value of, as written: for printing
 	span:      syn.Span,

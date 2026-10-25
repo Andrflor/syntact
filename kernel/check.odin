@@ -32,7 +32,7 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 			first = false
 			// the base case is not recursive: placing its scope again, it is an
 			// infinite recursion (§5.6)
-			if s.recursive && places_itself(k, s, b) {
+			if recursive(s) && places_itself(k, s, b) {
 				report(k, .Infinite_Recursion, b.span, "the base case places its scope again")
 				continue
 			}
