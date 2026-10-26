@@ -9,10 +9,13 @@ import "core:unicode"
 // A term as the language writes it: `0..255`, `?0 + 3`, `"jwt" + string`.
 
 // Printer: a term being written, and the answers of the effects around the place
-// written: they are bound there, and named in the order they are bound (§4.8).
+// written: they are bound there, and named in the order they are bound (§4.8). In a
+// scope written out as written, an effect is written `!?`.
 Printer :: struct {
 	using builder: strings.Builder,
 	bound:         [dynamic]^Unknown,
+	written:       bool, // a scope as written: the color of the binding being written
+	color:         Type,
 }
 
 printer :: proc() -> Printer {
@@ -173,6 +176,15 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		fmt.sbprintf(b, "?%d", v.id)
 		if v.instance != nil do write_changes(b, v.instance) // ?ₖ read in a carve
 	case ^Effect:
+		if b.written {
+			// `!?::L`; the layout its color gives is not written
+			strings.write_string(b, "!?")
+			if v.answer != nil && v.answer.written != nil && v.answer.written != b.color {
+				strings.write_string(b, "::")
+				write_type(b, v.answer.written, PREC_ATOM)
+			}
+			return
+		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
 		// call that acts
 		if v.answer != nil && v.answer.call != nil {
@@ -368,6 +380,9 @@ write_scope :: proc(b: ^Printer, s: ^Scope) {
 
 // write_body: the bindings of a scope, as written.
 write_body :: proc(b: ^Printer, s: ^Scope) {
+	was := b.written
+	b.written = true
+	defer b.written = was
 	strings.write_byte(b, '{')
 	for x, i in s.bindings {
 		if i > 0 do strings.write_string(b, "  ")
@@ -447,5 +462,6 @@ write_binding :: proc(b: ^Printer, x: ^Binding) {
 	strings.write_string(b, x.name)
 	if x.value == nil do return
 	if x.name != "" || x.color != nil do strings.write_string(b, x.kind == .Pull ? " <- " : " -> ")
+	b.color = x.color
 	write_type(b, x.value, 0)
 }
