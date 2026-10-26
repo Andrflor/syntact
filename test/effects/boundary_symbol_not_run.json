@@ -1,0 +1,7 @@
+{
+  "name": "boundary_symbol_not_run",
+  "description": "A symbol is a scope: named or carved, nothing is called.",
+  "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nx -> libm.sqrt{x -> 2.0}",
+  "type": "sqrt{x -> 2.0}",
+  "expect_errors": []
+}

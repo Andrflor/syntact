@@ -358,6 +358,21 @@ t ? {c₀ -> p₀  cᵢ -> pᵢ  …}             = t ? {c₀ -> p₀  -> t ? {c
 n ? {0 -> 1  (!?::u8) -> 2  -> 3}        = n ? {0 -> 1  -> ε₁(x::u8, n ? {x -> 2  -> 3})}
 ```
 
+`<lib>{…}` is a boundary: a scope whose symbols — the scopes written in it — are run
+outside, in lib. The run of a symbol is the call of the symbol, with what the run
+carved: the act of its production `!?::L` is that call, and what it gives back is in
+L. A symbol is a scope like any other: carving it calls nothing, and its fields that
+act run before the call, which takes their answers as values.
+
+```text
+libm -> <libm.so.6>{
+  sqrt -> {f64:x  -> !?::f64}
+}
+libm.sqrt                          a scope: nothing happens
+libm.sqrt{x -> 2.0}! * 2.0         = ε<sqrt{x -> 2.0}!>(y::f64, y * 2.0)
+libm.sqrt{x -> !?::f64}!           = ε₁(x::f64, ε<sqrt{x -> x}!>(y::f64, y))
+```
+
 ## 5. Scopes
 
 ### 5.1 A scope is a new type

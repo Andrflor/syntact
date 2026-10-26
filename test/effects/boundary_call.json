@@ -1,0 +1,7 @@
+{
+  "name": "boundary_call",
+  "description": "The run of a symbol is its call, with what the run carved; what comes back is in the layout of its production.",
+  "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nx -> libm.sqrt{x -> 2.0}!",
+  "type": "ε<sqrt{x -> 2.0}!>(x::f64, x)",
+  "expect_errors": []
+}

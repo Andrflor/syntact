@@ -280,7 +280,7 @@ copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope 
 
 copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	c := new_scope(parent, s.span)
-	c.complete = true
+	c.complete, c.boundary = true, s.boundary
 	if m.carve && m.instance == nil do m.instance = c
 	if !m.substitute do c.source = s // a scope of a branch is checked as written there
 	m.scopes[s] = c
@@ -819,8 +819,8 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		y, ok := b.(^Effect)
 		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
 		if x.answer == nil do return same(k, x.then, y.then)
-		if (x.answer.call == nil) != (y.answer.call == nil) do return false
-		if x.answer.call != nil && !same(k, x.answer.call, y.answer.call) do return false
+		if (x.call == nil) != (y.call == nil) do return false
+		if x.call != nil && !same(k, x.call, y.call) do return false
 		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
 		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
 	case ^Or:

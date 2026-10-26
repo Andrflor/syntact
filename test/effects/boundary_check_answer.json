@@ -1,0 +1,9 @@
+{
+  "name": "boundary_check_answer",
+  "description": "The answer of a call is in the layout of its production: an i32 is not proven in u8.",
+  "source": "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n  pi -> {-> 3}\n}\nu8:x -> libc.abs{n -> 5}!",
+  "type": "ε<abs{n -> 5}!>(x::i32, x)",
+  "expect_errors": [
+    "Constraint_Mismatch"
+  ]
+}

@@ -30,15 +30,35 @@ call_act :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 	x := new_unknown(k, nil)
 	x.call = c
 	e := new(Effect)
-	e^ = Effect{-1, x, x, c.span}
+	e^ = Effect{id = -1, answer = x, then = x, call = c, span = c.span}
 	return e
 }
 
 // wrapped: the effect e, with x what it gives back, wrapping t.
 wrapped :: proc(e: ^Effect, x: ^Unknown, t: Type) -> Type {
 	out := new(Effect)
-	out^ = Effect{e.id, x, t, e.span}
+	out^ = e^
+	out.answer, out.then = x, t
 	return out
+}
+
+// crossed: what the run s of a symbol behind a boundary gives: the act of its
+// production is the call of the symbol, with what the run carved (§4.8).
+crossed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, product: Type) -> Type {
+	e, is_effect := product.(^Effect)
+	if !is_effect || e.call != nil do return product
+	call := new(Collapse)
+	call.target, call.span = s, c.span
+	out := new(Effect)
+	out^ = e^
+	out.call = call
+	return out
+}
+
+// symbol_of: s is a symbol behind a boundary: the boundary's lib.
+symbol_of :: proc(s: ^Scope) -> (lib: string, ok: bool) {
+	if s.parent == nil || s.parent.boundary == "" do return "", false
+	return s.parent.boundary, true
 }
 
 // acts: t, in normal form, holds an act where it is computed: it is an effect, or
@@ -194,7 +214,9 @@ collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	p, _ := first_production(k, s)
 	ran(k, s, p, &parts, &answers, &changes)
 	inner := len(changes) > 0 ? carved_copy(k, s, changes) : s
-	append(&parts, renewed(k, product_of(k, inner, c), &answers))
+	product := product_of(k, inner, c)
+	if _, behind := symbol_of(inner); behind do product = crossed(k, inner, c, product)
+	append(&parts, renewed(k, product, &answers))
 	return sequence(k, nil, parts[:], last_part)
 }
 

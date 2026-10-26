@@ -1,0 +1,7 @@
+{
+  "name": "boundary_nested_calls",
+  "description": "A call as the argument of a call: it runs first, the outer call takes its answer.",
+  "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nx -> libm.sqrt{x -> libm.pow{b -> 3.0  e -> 4.0}!}!",
+  "type": "ε<pow{b -> 3.0  e -> 4.0}!>(x::f64, ε<sqrt{x -> x}!>(y::f64, y))",
+  "expect_errors": []
+}

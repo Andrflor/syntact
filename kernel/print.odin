@@ -187,9 +187,9 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
 		// call that acts
-		if v.answer != nil && v.answer.call != nil {
+		if v.call != nil {
 			strings.write_string(b, "ε<")
-			write_type(b, v.answer.call, 0)
+			write_type(b, v.call, 0)
 			strings.write_string(b, ">(")
 		} else {
 			fmt.sbprintf(b, "ε%d(", v.id)

@@ -78,6 +78,7 @@ Unknown :: struct {
 Effect :: struct {
 	id:     int,
 	answer: ^Unknown, // nil: it gives nothing back, εₖ(t)
+	call:   ^Collapse, // the act is this call: a recursive call that acts, or a symbol behind a boundary
 	then:   Type,
 	span:   syn.Span,
 }
@@ -245,6 +246,7 @@ Scope :: struct {
 	producing: bool, // one of its productions is being built: it may name itself
 	reached:   bool, // asked once: it is checked (check.odin)
 	acting:    bool, // a recursive scope whose equation acts: its calls are acts (§4.8)
+	boundary:  string, // `<lib>{…}`: the scopes written in it are symbols, run in lib (§4.8)
 	name:      string, // the binding it is the value of, as written: for printing
 	span:      syn.Span,
 }

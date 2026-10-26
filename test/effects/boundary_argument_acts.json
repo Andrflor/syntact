@@ -1,0 +1,7 @@
+{
+  "name": "boundary_argument_acts",
+  "description": "An argument that acts runs before the call.",
+  "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nx -> libm.sqrt{x -> !?::f64}!",
+  "type": "ε2(x::f64, ε<sqrt{x -> x}!>(y::f64, y))",
+  "expect_errors": []
+}

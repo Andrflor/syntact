@@ -1,0 +1,7 @@
+{
+  "name": "boundary_unused_answer",
+  "description": "A call whose answer nothing reads is kept, in order.",
+  "source": "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n  pi -> {-> 3}\n}\nx -> {r -> libc.puts{s -> \"hi\"}!  -> libc.abs{n -> -42}!}!",
+  "type": "ε<puts{s -> \"hi\"}!>(x::i32, ε<abs{n -> -42}!>(y::i32, y))",
+  "expect_errors": []
+}

@@ -172,6 +172,11 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		return new_unknown(k, nil)
 	case .Effect:
 		return new_effect(k, nil, span)
+	case .Foreign:
+		// `<lib>{…}`: a boundary, whose symbols are run in lib (§4.8)
+		v := build_term(k, s, data.foreign_lib.scope)
+		if lib, is_scope := v.(^Scope); is_scope do lib.boundary = syn.node_foreign_lib_str(ast, idx)
+		return v
 	case .ScopeNode:
 		child := new_scope(s, span)
 		for c in syn.node_children(ast, idx) do build_binding(k, child, c)

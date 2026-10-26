@@ -124,7 +124,7 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 	case ^Not:
 		return solved(v.term, root)
 	case ^Effect:
-		if v.answer != nil && v.answer.call != nil && !solved(v.answer.call, root) do return false
+		if v.call != nil && !solved(v.call, root) do return false
 		return solved(v.then, root)
 	case ^Pattern:
 		if !solved(v.target, root) do return false
@@ -196,7 +196,7 @@ base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: b
 // them (§4.8).
 base_cases :: proc(e: Type, root: ^Scope) -> []Type {
 	out := make([dynamic]Type)
-	if a, is_effect := e.(^Effect); is_effect && (a.answer == nil || a.answer.call == nil) do return base_cases(a.then, root)
+	if a, is_effect := e.(^Effect); is_effect && (a.call == nil || !a.call.recursive) do return base_cases(a.then, root)
 	if p, is_pattern := e.(^Pattern); is_pattern {
 		for b in p.branches do if solved(b.product, root) do append(&out, ..base_cases(b.product, root))
 	} else if solved(e, root) {
