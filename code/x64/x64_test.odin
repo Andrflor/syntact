@@ -17,6 +17,7 @@ Binary_Case :: struct {
 
 Binary_Run :: struct {
 	args:   []string,
+	stdin:  string, // what the program reads
 	stdout: string,
 	exit:   int,
 }
@@ -54,6 +55,10 @@ BINARY_CASES := []Binary_Case {
 	{"loop", "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", {{args = {"0"}, exit = 0}, {args = {"10"}, exit = 55}, {args = {"13"}, exit = 233}}},
 	{"recursion that acts", LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", {{args = {"3"}, stdout = "tick\ntick\ntick\n", exit = 3}, {args = {"0"}, exit = 0}}},
 	{"answers of a recursion", LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", {{args = {"4"}, exit = 8}}},
+	// reading: gets into a buffer malloc gives, fgets from the stream fdopen gives
+	{"gets", "io -> <libc.so.6>{\n  malloc -> {u64:size, -> !?::u64}\n  gets -> {u64:buf, -> !?::string}\n  puts -> {string:s, -> !?::i32}\n  atoi -> {string:s, -> !?::i32}\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n  fgets -> {u64:buf, i32:size, u64:stream, -> !?::string}\n  printf -> {string:format, string:s, -> !?::i32}\n}\nget -> {-> io.gets{buf -> io.malloc{size -> 4096}!}!}\nfirst -> get!\nsecond -> get!\nsaid -> io.puts{s -> second}!\nagain -> io.puts{s -> first}!", {{stdin = "one\ntwo\n", stdout = "two\none\n"}}},
+	{"read a number", "io -> <libc.so.6>{\n  malloc -> {u64:size, -> !?::u64}\n  gets -> {u64:buf, -> !?::string}\n  puts -> {string:s, -> !?::i32}\n  atoi -> {string:s, -> !?::i32}\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n  fgets -> {u64:buf, i32:size, u64:stream, -> !?::string}\n  printf -> {string:format, string:s, -> !?::i32}\n}\nget -> {-> io.gets{buf -> io.malloc{size -> 4096}!}!}\nn -> io.atoi{s -> get!}!\n-> n * 2", {{stdin = "21\n", exit = 42}}},
+	{"fgets", "io -> <libc.so.6>{\n  malloc -> {u64:size, -> !?::u64}\n  gets -> {u64:buf, -> !?::string}\n  puts -> {string:s, -> !?::i32}\n  atoi -> {string:s, -> !?::i32}\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n  fgets -> {u64:buf, i32:size, u64:stream, -> !?::string}\n  printf -> {string:format, string:s, -> !?::i32}\n}\nget -> {-> io.gets{buf -> io.malloc{size -> 4096}!}!}\nstdin -> io.fdopen{fd -> 0  mode -> \"r\"}!\nname -> io.fgets{buf -> io.malloc{size -> 256}!  size -> 256  stream -> stdin}!\nsaid -> io.printf{format -> \"Hello, %s\"  s -> name}!", {{stdin = "Kensai\n", stdout = "Hello, Kensai\n"}}},
 	{
 		"call on one path",
 		LIBM + "n -> ??::u8\n-> n ? {0 -> libm.sqrt{x -> 16.0}!  -> 1.0}",
@@ -81,7 +86,17 @@ test_binaries :: proc(t: ^testing.T) {
 			command := make([dynamic]string)
 			append(&command, path)
 			append(&command, ..r.args)
-			state, stdout, _, failed := os.process_exec(os.Process_Desc{command = command[:]}, context.allocator)
+			desc := os.Process_Desc{command = command[:]}
+			if r.stdin != "" {
+				input := fmt.tprintf("%s/case_%d.in", dir, n)
+				written := os.write_entire_file(input, transmute([]u8)r.stdin)
+				if !testing.expectf(t, written == nil, "%s: the input cannot be written", c.name) do continue
+				file, opened := os.open(input)
+				if !testing.expectf(t, opened == nil, "%s: the input cannot be opened", c.name) do continue
+				desc.stdin = file
+			}
+			state, stdout, _, failed := os.process_exec(desc, context.allocator)
+			if desc.stdin != nil do os.close(desc.stdin)
 			if !testing.expectf(t, failed == nil, "%s: does not run: %v", c.name, failed) do continue
 			testing.expectf(t, string(stdout) == r.stdout, "%s %v: wrote %q, expected %q", c.name, r.args, string(stdout), r.stdout)
 			testing.expectf(t, state.exit_code == r.exit, "%s %v: exited %d, expected %d", c.name, r.args, state.exit_code, r.exit)

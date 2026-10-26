@@ -140,7 +140,7 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 		color := kernel.binding_color(l.k, b)
 		m := color != nil ? machine_of_layout(l.k, color) : .None
 		if m == .None do return fail(l, "the field `%s` of %s has no layout the call can pass", b.name, imp.symbol)
-		a := lower(l, kernel.binding_value(l.k, b))
+		a := argument(l, kernel.binding_value(l.k, b), m)
 		if l.error != "" do return NONE
 		if machine_of(l.f, a) != m do return fail(l, "the field `%s` of %s is a %v, given a %v", b.name, imp.symbol, m, machine_of(l.f, a))
 		append(&machines, m)
@@ -233,6 +233,18 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	emit(l, Return{v})
 	l.f, l.bound = outer, outer_bound
 	return index
+}
+
+// argument: a value where a machine is expected. A character is a string of length
+// 1 (specs/types.md §4.6): where a text goes, it is the text of that character.
+argument :: proc(l: ^Lowering, t: kernel.Type, m: Machine) -> Value {
+	c, is_char := t.(kernel.Char)
+	if m != .Text || !is_char do return lower(l, t)
+	b := strings.builder_make()
+	strings.write_rune(&b, rune(c))
+	r := value(l.f, .Text)
+	emit(l, Text_Const{r, text(l.prog, strings.to_string(b))})
+	return r
 }
 
 OPS := [kernel.Operator]Op {

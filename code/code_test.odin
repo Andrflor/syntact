@@ -43,6 +43,8 @@ CODE_CASES := []Code_Case {
 	{name = "order of runs", source = LIBC + "a -> {r -> libc.puts{s -> \"one\"}!  -> 1}!\nb -> {r -> libc.puts{s -> \"two\"}!  -> 2}!\n-> b - a", int = 1, calls = {"puts", "puts"}},
 	{name = "answer read twice", source = LIBC + "-> {a -> libc.abs{n -> -3}!  -> a * a}!", int = 9, calls = {"abs"}},
 	{name = "unserved effect", source = "-> !?::u8", error = "the effect ε0 is served by no boundary"},
+	// a character is a string of length 1: where a text goes, it is one
+	{name = "character as text", source = "c -> <libc.so.6>{\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n}\nf -> c.fdopen{fd -> 0  mode -> \"r\"}!\n-> 1", int = 1, calls = {"fdopen"}},
 	// a recursion without closed form is a function: its fields its parameters
 	{name = "function", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", int = 120},
 	{name = "function of an input", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!", inputs = {6}, int = 720},
@@ -60,6 +62,7 @@ test_symbols :: proc() -> map[string]Symbol {
 	m["abs"] = proc(a: []Datum) -> Datum {return Datum{int = abs(a[0].int)}}
 	m["puts"] = proc(a: []Datum) -> Datum {return Datum{int = 0}}
 	m["srand"] = proc(a: []Datum) -> Datum {return Datum{}}
+	m["fdopen"] = proc(a: []Datum) -> Datum {return Datum{int = a[1].text == "r" ? 1 : 0}}
 	return m
 }
 
