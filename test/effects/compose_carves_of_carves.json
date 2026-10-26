@@ -1,0 +1,7 @@
+{
+  "name": "compose_carves_of_carves",
+  "description": "A scope that runs a carve of another, carved and run twice: each run runs its inner run, in order.",
+  "source": "inner -> {u8:k -> 0  u8:r -> !?  -> k + r}\nouter -> {u8:m -> 0  a -> inner{k -> m}!  w -> !?::none  -> a}\nx -> outer{m -> 5}! + outer{m -> 6}!",
+  "type": "ε0(x::u8, ε1(ε0(y::u8, ε1(x + y + 11))))",
+  "expect_errors": []
+}

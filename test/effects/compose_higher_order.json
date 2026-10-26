@@ -1,0 +1,7 @@
+{
+  "name": "compose_higher_order",
+  "description": "A scope passed as a value and run twice by another: two runs, two answers.",
+  "source": "read -> {u8:r -> !?  -> r}\ntwice -> {f -> {-> 0}  a -> f!  b -> f!  -> a + b}\nx -> twice{f -> read}!",
+  "type": "ε0(x::u8, ε0(y::u8, x + y))",
+  "expect_errors": []
+}

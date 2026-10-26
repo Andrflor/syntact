@@ -1,0 +1,7 @@
+{
+  "name": "compose_thrice",
+  "description": "A scope that gives back a scope that gives back a scope, collapsed three times: each run acts once, the last reads both answers.",
+  "source": "x -> {-> {u8:r -> !?  -> {u8:s -> !?  -> r + s}}}!!!",
+  "type": "ε0(x::u8, ε1(y::u8, x + y))",
+  "expect_errors": []
+}

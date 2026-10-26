@@ -1,0 +1,7 @@
+{
+  "name": "compose_three_levels",
+  "description": "Three levels of runs: the effects in the order they are written, each level's value flowing up: (r + 1 + s) * t.",
+  "source": "x -> {\n  a -> {\n    b -> {u8:r -> !?  w -> !?::none  -> r + 1}!\n    u8:s -> !?\n    -> b + s\n  }!\n  v -> !?::none\n  u8:t -> !?\n  -> a * t\n}!",
+  "type": "ε0(x::u8, ε1(ε2(y::u8, ε3(ε4(z::u8, z + x * z + y * z)))))",
+  "expect_errors": []
+}

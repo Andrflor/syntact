@@ -1,0 +1,7 @@
+{
+  "name": "compose_pipeline",
+  "description": "A run passed as the argument of a run of the same scope: the inner run first, then the outer's own effects.",
+  "source": "read -> {u8:r -> !?  -> r}\nlog -> {w -> !?::none  -> none}\nstep -> {u16:n -> 0  a -> read!  l -> log!  -> n + a}\nx -> step{n -> step{n -> 1}!}!",
+  "type": "ε0(x::u8, ε1(ε0(y::u8, ε1(x + y + 1))))",
+  "expect_errors": []
+}

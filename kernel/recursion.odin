@@ -19,45 +19,49 @@ import "core:slice"
 // directly or in a carve (§5.6); a carve of it is recursive with it.
 recursive :: proc(s: ^Scope) -> bool {
 	root := origin(s)
-	for b in root.bindings do if b.kind == .Product && (names_scope(b.color, root) || names_scope(b.value, root)) do return true
+	seen := make(map[^Scope]bool)
+	for b in root.bindings do if b.kind == .Product && (names_scope(b.color, root, &seen) || names_scope(b.value, root, &seen)) do return true
 	return false
 }
 
-// names_scope: the term, as written, names the binding whose value is s.
-names_scope :: proc(t: Type, s: ^Scope) -> bool {
+// names_scope: the term, as written, names the binding whose value is s. A scope
+// is read once: `.x` names the scope it is written in.
+names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 	if t == nil do return false
 	switch v in t {
 	case ^Name:
 		value, ok := v.binding.value.(^Scope)
 		return ok && value == s
 	case ^Scope:
-		for b in v.bindings do if names_scope(b.color, s) || names_scope(b.value, s) do return true
+		if v in seen do return false
+		seen[v] = true
+		for b in v.bindings do if names_scope(b.color, s, seen) || names_scope(b.value, s, seen) do return true
 	case ^Operation:
-		for a in v.args do if names_scope(a, s) do return true
+		for a in v.args do if names_scope(a, s, seen) do return true
 	case ^Or:
-		for a in v.terms do if names_scope(a, s) do return true
+		for a in v.terms do if names_scope(a, s, seen) do return true
 	case ^And:
-		for a in v.terms do if names_scope(a, s) do return true
+		for a in v.terms do if names_scope(a, s, seen) do return true
 	case ^Effect:
-		return names_scope(v.then, s)
+		return names_scope(v.then, s, seen)
 	case ^Not:
-		return names_scope(v.term, s)
+		return names_scope(v.term, s, seen)
 	case ^Is:
-		return names_scope(v.term, s)
+		return names_scope(v.term, s, seen)
 	case ^Range:
-		return names_scope(v.lo, s) || names_scope(v.hi, s)
+		return names_scope(v.lo, s, seen) || names_scope(v.hi, s, seen)
 	case ^Access:
-		return names_scope(v.target, s)
+		return names_scope(v.target, s, seen)
 	case ^Collapse:
-		return names_scope(v.target, s)
+		return names_scope(v.target, s, seen)
 	case ^Carve:
-		if names_scope(v.target, s) do return true
-		for a in v.args do if names_scope(a.value, s) || names_scope(a.otherwise, s) do return true
+		if names_scope(v.target, s, seen) do return true
+		for a in v.args do if names_scope(a.value, s, seen) || names_scope(a.otherwise, s, seen) do return true
 	case ^Default:
-		return names_scope(v.color, s)
+		return names_scope(v.color, s, seen)
 	case ^Pattern:
-		if names_scope(v.target, s) do return true
-		for b in v.branches do if names_scope(b.cover, s) || names_scope(b.product, s) do return true
+		if names_scope(v.target, s, seen) do return true
+		for b in v.branches do if names_scope(b.cover, s, seen) || names_scope(b.product, s, seen) do return true
 	case Char, Int, Real, Bool, None, Invalid, ^Unknown:
 	}
 	return false

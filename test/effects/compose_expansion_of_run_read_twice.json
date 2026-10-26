@@ -1,0 +1,7 @@
+{
+  "name": "compose_expansion_of_run_read_twice",
+  "description": "An expansion of a run: the binding it places acts once, read twice: 2 * x.",
+  "source": "g -> {-> {u8:k -> !?}}\nx -> {...g!, -> .k + .k}!",
+  "type": "ε0(x::u8, 2 * x)",
+  "expect_errors": []
+}

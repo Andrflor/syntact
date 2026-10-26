@@ -129,12 +129,16 @@ branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 	return out
 }
 
-// acting_above: the bindings of s above its production p — nil: the default one,
-// below every binding — whose value acts, in the order they are written (§4.8). An
+// ran: the acts of the bindings of s above its production p — nil: the default one,
+// below every binding —, in the order they are written, joined to parts (§4.8). An
 // expansion is computed where it is written, then the bindings it places are.
 // Another production is not run; what is below p is not reached, like code after a
 // return. True when p is reached, placed by an expansion.
-acting_above :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, out: ^[dynamic]^Binding) -> bool {
+//
+// For a run, answers is not nil: each act gives back a new answer, and changes
+// carves each binding of s that acts to what it gives back — an expansion to a copy
+// of what it places, carved likewise —, so that what reads it reads that answer.
+ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, answers: ^[dynamic]^Unknown, changes: ^map[^Binding]Type) -> bool {
 	for b in s.bindings {
 		if b == p do return true
 		switch b.kind {
@@ -142,10 +146,28 @@ acting_above :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, out: ^[dynamic]^Binding
 		case .Expand:
 			if b.value == nil && b.color == nil do continue
 			t := binding_type(k, b)
-			if acts(t) do append(out, b)
-			if inner, is_scope := given(k, t).(^Scope); is_scope && acting_above(k, inner, p, out) do return true
+			acting := acts(t)
+			if acting {
+				if answers != nil do t = renewed(k, t, answers)
+				append(parts, t)
+			}
+			value := given(k, t)
+			placing := make(map[^Binding]Type)
+			reached := false
+			if inner, is_scope := value.(^Scope); is_scope {
+				reached = ran(k, inner, p, parts, answers, &placing)
+				if len(placing) > 0 do value = carved_copy(k, inner, placing)
+			}
+			if answers != nil && (acting || len(placing) > 0) do changes[b] = value
+			if reached do return true
 		case .Push, .Pull:
-			if acts(binding_type(k, b)) do append(out, b)
+			t := binding_type(k, b)
+			if !acts(t) do continue
+			if answers != nil {
+				t = renewed(k, t, answers)
+				changes[b] = given(k, t)
+			}
+			append(parts, t)
 		}
 	}
 	return false
@@ -154,31 +176,23 @@ acting_above :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, out: ^[dynamic]^Binding
 // with_acts: v, what the production p of s gives — nil: the default production,
 // none —, with the acts of the bindings above it, in the order they are written.
 with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
-	acting := make([dynamic]^Binding)
-	acting_above(k, s, p, &acting)
-	if len(acting) == 0 do return v
 	parts := make([dynamic]Type)
-	for b in acting do append(&parts, binding_type(k, b))
+	ran(k, s, p, &parts, nil, nil)
+	if len(parts) == 0 do return v
 	append(&parts, v)
 	return sequence(k, nil, parts[:], last_part)
 }
 
 // collapsed: s!, one run of s (§4.8): the acts of the bindings above its production,
 // in the order they are written, then the production — or the default one, none.
-// Each act of the run gives back a new answer; a binding of s that acts is carved to
-// it, so that what names it reads that answer, and a call takes it as a value.
+// Each act of the run gives back a new answer, which what reads its binding reads,
+// and which a call takes as a value.
 collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	answers := make([dynamic]^Unknown)
-	p, _ := first_production(k, s)
-	acting := make([dynamic]^Binding)
-	acting_above(k, s, p, &acting)
 	parts := make([dynamic]Type)
 	changes := make(map[^Binding]Type)
-	for b in acting {
-		t := renewed(k, binding_type(k, b), &answers)
-		append(&parts, t)
-		if b.scope == s do changes[b] = given(k, t)
-	}
+	p, _ := first_production(k, s)
+	ran(k, s, p, &parts, &answers, &changes)
 	inner := len(changes) > 0 ? carved_copy(k, s, changes) : s
 	append(&parts, renewed(k, product_of(k, inner, c), &answers))
 	return sequence(k, nil, parts[:], last_part)

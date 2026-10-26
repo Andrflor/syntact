@@ -1,0 +1,7 @@
+{
+  "name": "compose_closure_run_once",
+  "description": "A run gives back a scope that reads its answer; run twice, it does not act again: a - b = 0, one act.",
+  "source": "close -> {u8:r -> !?  -> {-> r}}\nx -> {g -> close!  a -> g!  b -> g!  -> a - b}!",
+  "type": "ε0(x::u8, 0)",
+  "expect_errors": []
+}

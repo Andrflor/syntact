@@ -432,6 +432,8 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case ^Name:
 		return v.binding in m.bindings
 	case ^Scope:
+		// the scope being copied, named from inside it (`.x`), is followed
+		if v in m.scopes do return true
 		for b in v.bindings do if mentions(m, b.color) || mentions(m, b.value) do return true
 	case ^Access:
 		return mentions(m, v.target)

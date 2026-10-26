@@ -1,0 +1,7 @@
+{
+  "name": "compose_stages",
+  "description": "Three scopes chained by carves: each stage's effects in order, the values flowing through: (r + 1) * s.",
+  "source": "s1 -> {u8:r -> !?  -> r}\ns2 -> {u16:i -> 0  w -> !?::none  -> i + 1}\ns3 -> {u16:i -> 0  u8:r -> !?  -> i * r}\nx -> s3{i -> s2{i -> s1!}!}!",
+  "type": "ε0(x::u8, ε1(ε2(y::u8, y + x * y)))",
+  "expect_errors": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "compose_current_scope_through_expansion",
+  "description": "`.r` reads a binding an expansion places; the walk of the scope it is written in reads it once.",
+  "source": "base -> {u8:r -> 2}\nx -> {...base, -> .r}!",
+  "type": "2",
+  "expect_errors": []
+}
