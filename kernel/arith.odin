@@ -111,8 +111,10 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 				return {}, false
 			}
 		}
+		// the operation was proven legal when it was built: its operands are read in
+		// the families the signature restricts (a divisor, a count, in the integers)
 		next: for sig in signatures(v.op) {
-			for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(sig.args[i], g) do continue next
+			for f, i in families[:min(len(v.args), 2)] do if g, known := f.?; known && !family_holds(domain(sig.args[i]), g) do continue next
 			return sig.result, true
 		}
 	case ^Collapse:
@@ -130,6 +132,17 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return f.?
 	}
 	return {}, false
+}
+
+// domain: the family a restricted one is taken in.
+domain :: proc(f: Family) -> Family {
+	#partial switch f {
+	case .Nonzero_Int, .Count:
+		return .Int
+	case .Nonzero_Real:
+		return .Real
+	}
+	return f
 }
 
 // family_holds: an atom of the family `of` is in the family `f` without more proof.
@@ -154,6 +167,11 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 			if c, is_call := as_call(a); is_call {
 				if f, known := call_family(k, c); known && !family_holds(sig.args[min(i, 1)], f) do continue next
 				continue
+			}
+			// an operation is in the family its signature gives: 100 / (n + 1) is an
+			// integer; a divisor, a count, is still proven
+			if _, is_op := a.(^Operation); is_op {
+				if f, known := family_of(k, a); known && family_holds(sig.args[min(i, 1)], f) do continue
 			}
 			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
 		}
