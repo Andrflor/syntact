@@ -23,10 +23,32 @@ Run :: struct {
 }
 
 interpret :: proc(p: ^Program, inputs: []i64, symbols: map[string]Symbol) -> (run: Run, err: string) {
-	f := &p.funcs[0]
+	machine := Machine_State{p = p, inputs = inputs, symbols = symbols, run = &run}
+	run.result, err = execute(&machine, 0, nil)
+	return run, err
+}
+
+Machine_State :: struct {
+	p:       ^Program,
+	inputs:  []i64,
+	symbols: map[string]Symbol,
+	run:     ^Run,
+	depth:   int,
+}
+
+// execute: the function `index` of the program, on its arguments.
+execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (result: Datum, err: string) {
+	p := m.p
+	f := p.funcs[index]
+	if m.depth > 100_000 do return {}, "the calls go too deep"
+	m.depth += 1
+	defer m.depth -= 1
 	regs := make([]Datum, len(f.types))
+	defer delete(regs)
+	copy(regs, args)
 	marks := make(map[Label]int)
-	for inst, i in f.insts do if m, ok := inst.(Mark); ok do marks[m.label] = i
+	defer delete(marks)
+	for inst, i in f.insts do if mark, ok := inst.(Mark); ok do marks[mark.label] = i
 	pc := 0
 	for pc < len(f.insts) {
 		inst := f.insts[pc]
@@ -39,13 +61,13 @@ interpret :: proc(p: ^Program, inputs: []i64, symbols: map[string]Symbol) -> (ru
 		case Text_Const:
 			regs[i.dst].text = p.texts[i.text]
 		case Input:
-			if i.slot >= len(inputs) do return run, fmt.tprintf("the input %d is not given", i.slot)
-			regs[i.dst].int = inputs[i.slot]
+			if i.slot >= len(m.inputs) do return {}, fmt.tprintf("the input %d is not given", i.slot)
+			regs[i.dst].int = m.inputs[i.slot]
 		case Unary:
 			regs[i.dst] = unary(i.op, f.types[i.a], regs[i.a])
 		case Binary:
 			d, ok := binary_of(i.op, f.types[i.a], regs[i.a], regs[i.b])
-			if !ok do return run, "a division by 0"
+			if !ok do return {}, "a division by 0"
 			regs[i.dst] = d
 		case Move:
 			regs[i.dst] = regs[i.src]
@@ -56,19 +78,26 @@ interpret :: proc(p: ^Program, inputs: []i64, symbols: map[string]Symbol) -> (ru
 			if regs[i.cond].int == 0 do pc = marks[i.otherwise]
 		case Foreign:
 			imp := p.imports[i.symbol]
-			s, known := symbols[imp.symbol]
-			if !known do return run, fmt.tprintf("the symbol %s is not given", imp.symbol)
-			args := make([]Datum, len(i.args))
-			for a, j in i.args do args[j] = regs[a]
-			append(&run.calls, imp.symbol)
-			d := s(args)
+			s, known := m.symbols[imp.symbol]
+			if !known do return {}, fmt.tprintf("the symbol %s is not given", imp.symbol)
+			given := make([]Datum, len(i.args))
+			for a, j in i.args do given[j] = regs[a]
+			append(&m.run.calls, imp.symbol)
+			d := s(given)
+			if i.dst != NONE do regs[i.dst] = d
+		case Call:
+			given := make([]Datum, len(i.args))
+			defer delete(given)
+			for a, j in i.args do given[j] = regs[a]
+			d, failed := execute(m, i.func, given)
+			if failed != "" do return {}, failed
 			if i.dst != NONE do regs[i.dst] = d
 		case Return:
-			if i.value != NONE do run.result = regs[i.value]
-			return run, ""
+			if i.value != NONE do result = regs[i.value]
+			return result, ""
 		}
 	}
-	return run, "the code ends without a return"
+	return {}, "the code ends without a return"
 }
 
 unary :: proc(op: Op, m: Machine, a: Datum) -> Datum {

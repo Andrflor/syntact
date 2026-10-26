@@ -57,6 +57,7 @@ Inst :: union {
 	Jump, // goto label
 	Branch, // if cond = 0 goto otherwise
 	Foreign, // dst = the call of an imported symbol
+	Call, // dst = the call of a function of the program
 	Return, // the value of the function
 }
 
@@ -115,6 +116,13 @@ Foreign :: struct {
 	args:   []Value,
 }
 
+// Call: dst = func(args…), a function of the program.
+Call :: struct {
+	dst:  Value,
+	func: int,
+	args: []Value,
+}
+
 Return :: struct {
 	value: Value,
 }
@@ -131,8 +139,10 @@ Import :: struct {
 	result_signed: bool,
 }
 
+// Func: a function of the program; its parameters are its first values, v0…
 Func :: struct {
 	name:   string,
+	params: []Machine,
 	result: Machine,
 	insts:  [dynamic]Inst,
 	types:  [dynamic]Machine, // per value
@@ -140,7 +150,7 @@ Func :: struct {
 }
 
 Program :: struct {
-	funcs:   [dynamic]Func, // the first is the program itself
+	funcs:   [dynamic]^Func, // the first is the program itself
 	imports: [dynamic]Import,
 	texts:   [dynamic]string,
 	inputs:  int,
@@ -187,8 +197,10 @@ print_program :: proc(p: ^Program) -> string {
 	}
 	for t, i in p.texts do fmt.sbprintfln(&b, "text %d  %q", i, t)
 	for f in p.funcs {
-		fmt.sbprintfln(&b, "func %s -> %v", f.name, f.result)
-		for inst in f.insts do fmt.sbprintfln(&b, "  %s", print_inst(f, p, inst))
+		params := make([dynamic]string, context.temp_allocator)
+		for m, i in f.params do append(&params, fmt.tprintf("v%d %v", i, m))
+		fmt.sbprintfln(&b, "func %s(%s) -> %v", f.name, strings.join(params[:], ", ", context.temp_allocator), f.result)
+		for inst in f.insts do fmt.sbprintfln(&b, "  %s", print_inst(f^, p, inst))
 	}
 	return strings.to_string(b)
 }
@@ -222,6 +234,10 @@ print_inst :: proc(f: Func, p: ^Program, inst: Inst) -> string {
 		args := make([dynamic]string, context.temp_allocator)
 		for a in i.args do append(&args, v(a))
 		return fmt.tprintf("%s = call %s(%s)", v(i.dst), p.imports[i.symbol].symbol, strings.join(args[:], ", ", context.temp_allocator))
+	case Call:
+		args := make([dynamic]string, context.temp_allocator)
+		for a in i.args do append(&args, v(a))
+		return fmt.tprintf("%s = call %s(%s)", v(i.dst), p.funcs[i.func].name, strings.join(args[:], ", ", context.temp_allocator))
 	case Return:
 		return fmt.tprintf("return %s", v(i.value))
 	}

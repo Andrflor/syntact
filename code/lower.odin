@@ -19,8 +19,9 @@ Lowering :: struct {
 	k:      ^kernel.Kernel,
 	prog:   ^Program,
 	f:      ^Func,
-	bound:  [dynamic]Bound, // the answers of the acts lowered, and the inputs
+	bound:  [dynamic]Bound, // in f: the answers of the acts lowered, its parameters, the inputs
 	inputs: [dynamic]^kernel.Unknown,
+	funcs:  map[^kernel.Scope]int, // the function of each recursive equation lowered
 	error:  string,
 }
 
@@ -41,8 +42,8 @@ program_type :: proc(k: ^kernel.Kernel) -> kernel.Type {
 // lower_program: the code of a file the kernel checked without error.
 lower_program :: proc(k: ^kernel.Kernel) -> (prog: Program, err: string) {
 	if len(k.errors) > 0 do return prog, "the program has errors"
-	append(&prog.funcs, Func{name = "main"})
-	l := Lowering{k = k, prog = &prog, f = &prog.funcs[0]}
+	append(&prog.funcs, new_clone(Func{name = "main"}))
+	l := Lowering{k = k, prog = &prog, f = prog.funcs[0]}
 	v := lower(&l, program_type(k))
 	if l.error != "" do return prog, l.error
 	l.f.result = machine_of(l.f, v)
@@ -95,6 +96,8 @@ lower :: proc(l: ^Lowering, t: kernel.Type) -> Value {
 		return pattern(l, v)
 	case ^kernel.Effect:
 		return act(l, v)
+	case ^kernel.Collapse:
+		if v.recursive do return call(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
@@ -116,10 +119,16 @@ unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
 // behind a boundary is code: another effect is served by nothing.
 act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
+	if e.call.recursive {
+		// a call of an equation that acts: the call, then what it wraps
+		dst := call(l, e.call)
+		if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
+		return lower(l, e.then)
+	}
 	s, is_scope := e.call.target.(^kernel.Scope)
 	if !is_scope do return fail(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
 	lib, behind := kernel.symbol_of(s)
-	if !behind do return fail(l, "%s: a recursive call is not code yet", kernel.print_type(e.call))
+	if !behind do return fail(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
 	imp := Import{lib = lib, symbol = kernel.origin(s).name}
 	machines := make([dynamic]Machine)
 	args := make([dynamic]Value)
@@ -149,6 +158,81 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 	emit(l, Foreign{dst, intern(l.prog, imp), args[:]})
 	if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
 	return lower(l, e.then)
+}
+
+// call: a recursive call that stays, as the call of the function of its equation;
+// the values the carve gives the fields are its arguments.
+call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> Value {
+	s, is_scope := c.target.(^kernel.Scope)
+	if !is_scope do return fail(l, "%s is not a call the code makes yet", kernel.print_type(c))
+	index := function_of(l, kernel.origin(s), c)
+	if l.error != "" do return NONE
+	args := make([dynamic]Value)
+	for b, i in s.bindings {
+		if !is_parameter(b) do continue
+		a := lower(l, kernel.binding_value(l.k, b))
+		if l.error != "" do return NONE
+		if machine_of(l.f, a) != l.prog.funcs[index].params[len(args)] do return fail(l, "the field `%s` of %s is given a %v", b.name, kernel.print_type(c), machine_of(l.f, a))
+		append(&args, a)
+		_ = i
+	}
+	dst := value(l.f, l.prog.funcs[index].result)
+	emit(l, Call{dst, index, args[:]})
+	return dst
+}
+
+is_parameter :: proc(b: ^kernel.Binding) -> bool {
+	return b.kind == .Push || b.kind == .Pull
+}
+
+// function_of: the function of a recursive equation, lowered once (specs/language/15):
+// its fields are its parameters, each an unknown of its layout — its color, or else
+// the family of its value —, and its body the normal form of its production over
+// them, its own calls left as calls.
+function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> int {
+	if index, done := l.funcs[root]; done do return index
+	family, known := kernel.family_of(l.k, c)
+	if !known do return int(fail(l, "%s has no family the code holds", kernel.print_type(c)))
+	f := new_clone(Func{name = root.name != "" ? root.name : "equation"})
+	f.result = machine_of_layout(l.k, kernel.family_term(family))
+	index := len(l.prog.funcs)
+	append(&l.prog.funcs, f)
+	l.funcs[root] = index
+	changes := make(map[^kernel.Binding]kernel.Type)
+	params := make([dynamic]^kernel.Unknown)
+	machines := make([dynamic]Machine)
+	for b in root.bindings {
+		if !is_parameter(b) do continue
+		layout := kernel.binding_color(l.k, b)
+		if layout == nil {
+			family, has := kernel.family_of(l.k, kernel.binding_value(l.k, b))
+			if !has do return int(fail(l, "the field `%s` of %s is not a value the code passes", b.name, f.name))
+			layout = kernel.family_term(family)
+		}
+		m := machine_of_layout(l.k, layout)
+		if m == .None do return int(fail(l, "the field `%s` of %s is not a value the code passes", b.name, f.name))
+		u := kernel.new_unknown(l.k, layout)
+		changes[b] = u
+		append(&params, u)
+		append(&machines, m)
+	}
+	f.params = machines[:]
+	generic, is_scope := kernel.derive(l.k, root, changes, root.span).(^kernel.Scope)
+	if !is_scope do return int(fail(l, "the equation of %s does not take its fields as parameters", f.name))
+	p, has := kernel.first_production(l.k, generic)
+	if !has do return int(fail(l, "%s has no production", f.name))
+	body := kernel.binding_type(l.k, p)
+	// the body, in the function
+	outer, outer_bound := l.f, l.bound
+	l.f, l.bound = f, make([dynamic]Bound)
+	for u, i in params {
+		append(&l.bound, Bound{u, value(f, machines[i])})
+	}
+	v := lower(l, body)
+	if l.error == "" && machine_of(f, v) != f.result do fail(l, "%s gives a %v, its calls a %v", f.name, machine_of(f, v), f.result)
+	emit(l, Return{v})
+	l.f, l.bound = outer, outer_bound
+	return index
 }
 
 OPS := [kernel.Operator]Op {
@@ -238,6 +322,9 @@ member :: proc(l: ^Lowering, x: Value, s: kernel.Type) -> Value {
 		return binary(l, .Xor, member(l, x, v.term), constant(l, 1), .Int)
 	case ^kernel.Is:
 		return member(l, x, v.term)
+	case ^kernel.Unknown, ^kernel.Operation:
+		// one value the laws did not compute: x in v is x = v
+		return binary(l, .Eq, x, lower(l, v), .Int)
 	}
 	return fail(l, "membership in %s is not code yet", kernel.print_type(s))
 }

@@ -63,9 +63,9 @@ image_of :: proc(p: ^code.Program) -> (image: []u8, err: string) {
 	context.user_ptr = &e.buf
 	stub(&e)
 	e.funcs = make([]int, len(p.funcs))
-	for &f, i in p.funcs {
+	for f, i in p.funcs {
 		e.funcs[i] = e.buf.len
-		if msg := function(&e, &f); msg != "" do return nil, msg
+		if msg := function(&e, f); msg != "" do return nil, msg
 	}
 	for c in e.calls do patch(&e, c.at, e.funcs[c.target])
 	machine := make([]u8, e.buf.len)
@@ -305,6 +305,19 @@ function :: proc(e: ^Emitter, f: ^code.Func) -> string {
 	enc.push_r64(.RBP)
 	enc.mov_r64_r64(.RBP, .RSP)
 	if frame > 0 do enc.sub_r64_imm32(.RSP, u32(frame))
+	// the parameters, v0…, from the registers the System V ABI gives them
+	assignment, msg := assign(f.params)
+	if msg != "" do return msg
+	for loc, i in assignment.locations {
+		switch loc.class {
+		case .Integer:
+			store(code.Value(i), enc.SYSV_INT_ARGS[loc.register])
+		case .SSE:
+			enc.movq_r64_xmm(.RAX, enc.SYSV_SSE_ARGS[loc.register])
+			store(code.Value(i), .RAX)
+		case .Stack:
+		}
+	}
 	marks := make([]int, f.labels)
 	jumps := make([dynamic]Fixup)
 	for inst in f.insts {
@@ -357,6 +370,14 @@ function :: proc(e: ^Emitter, f: ^code.Func) -> string {
 			append(&jumps, Fixup{here(e) - 4, int(i.otherwise)})
 		case code.Foreign:
 			if msg := call_symbol(e, f, i); msg != "" do return msg
+		case code.Call:
+			callee := e.prog.funcs[i.func]
+			assignment, msg := assign(callee.params)
+			if msg != "" do return msg
+			pass(i.args, assignment)
+			enc.call_rel32(0)
+			append(&e.calls, Fixup{here(e) - 4, i.func})
+			if i.dst != code.NONE do store(i.dst, .RAX)
 		case code.Return:
 			if i.value == code.NONE do enc.xor_r64_r64(.RAX, .RAX)
 			else do load(.RAX, i.value)
@@ -456,6 +477,32 @@ real_binary :: proc(op: code.Op) -> string {
 	return ""
 }
 
+// assign: the registers of the System V ABI for values of these machines; a call
+// that would pass some on the stack is not code yet.
+assign :: proc(machines: []code.Machine) -> (enc.X64_ABI_Assignment, string) {
+	types := make([]bc.Machine_Type, len(machines))
+	for m, i in machines do types[i] = MACHINES[m]
+	assignment, msg := enc.x64_sysv_assign(types)
+	if msg != "" do return {}, msg
+	if assignment.stack_count > 0 do return {}, "a call that passes arguments on the stack is not code yet"
+	return assignment, ""
+}
+
+// pass: the arguments in the registers an assignment gives them.
+pass :: proc(args: []code.Value, assignment: enc.X64_ABI_Assignment) {
+	for a, i in args {
+		loc := assignment.locations[i]
+		switch loc.class {
+		case .Integer:
+			load(enc.SYSV_INT_ARGS[loc.register], a)
+		case .SSE:
+			load(.RAX, a)
+			enc.movq_xmm_r64(enc.SYSV_SSE_ARGS[loc.register], .RAX)
+		case .Stack:
+		}
+	}
+}
+
 MACHINES := [code.Machine]bc.Machine_Type {
 	.None = .None,
 	.Int  = .I64,
@@ -467,22 +514,9 @@ MACHINES := [code.Machine]bc.Machine_Type {
 // gives them; an integer that comes back is extended from the bits it gives.
 call_symbol :: proc(e: ^Emitter, f: ^code.Func, call: code.Foreign) -> string {
 	imp := e.prog.imports[call.symbol]
-	types := make([]bc.Machine_Type, len(imp.args))
-	for m, i in imp.args do types[i] = MACHINES[m]
-	assignment, msg := enc.x64_sysv_assign(types)
+	assignment, msg := assign(imp.args)
 	if msg != "" do return msg
-	if assignment.stack_count > 0 do return "a call that passes arguments on the stack is not code yet"
-	for a, i in call.args {
-		loc := assignment.locations[i]
-		switch loc.class {
-		case .Integer:
-			load(enc.SYSV_INT_ARGS[loc.register], a)
-		case .SSE:
-			load(.RAX, a)
-			enc.movq_xmm_r64(enc.SYSV_SSE_ARGS[loc.register], .RAX)
-		case .Stack:
-		}
-	}
+	pass(call.args, assignment)
 	call_import(e, call.symbol, assignment.sse_count)
 	if call.dst == code.NONE do return ""
 	switch imp.result {
