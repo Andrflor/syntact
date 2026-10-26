@@ -1,0 +1,7 @@
+{
+  "name": "default_production_anonymous",
+  "description": "Anonymous effects without production: the default one gives none, both effects kept, in order.",
+  "source": "x -> {!?, !?}!",
+  "type": "ε0(x, ε1(y, none))",
+  "expect_errors": []
+}
