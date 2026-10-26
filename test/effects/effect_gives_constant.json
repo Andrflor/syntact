@@ -1,0 +1,7 @@
+{
+  "name": "effect_gives_constant",
+  "description": "What comes back in one primitive is that primitive: the effect introduces no unknown.",
+  "source": "x -> !?::5",
+  "type": "ε0(5)",
+  "expect_errors": []
+}

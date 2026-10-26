@@ -1,0 +1,7 @@
+{
+  "name": "order_bindings",
+  "description": "The effects of the bindings in the order they are written, not in the order the production names them.",
+  "source": "x -> {a -> {w -> !?::none  -> 1}!  b -> {w -> !?::none  -> 2}!  -> b + a}!",
+  "type": "ε0(ε1(3))",
+  "expect_errors": []
+}

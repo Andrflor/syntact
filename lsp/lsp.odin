@@ -1189,7 +1189,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 			emit(ast, tokens, cur.span, .Decorator)
 		case .Execute:
 			emit(ast, tokens, cur.span, .Function)
-		case .Question, .DoubleQuestion:
+		case .Question, .DoubleQuestion, .Effect:
 			emit(ast, tokens, cur.span, .Keyword)
 		case .PointingPush,
 		     .PointingPull,

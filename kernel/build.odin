@@ -57,8 +57,10 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		} else {
 			b.value = build_term(k, s, data.binary.right)
 			if v, is_scope := b.value.(^Scope); is_scope do v.name = b.name
-			// `C:x -> ??`: the unknown takes the layout of its color (§5.2)
+			// `C:x -> ??`: the unknown takes the layout of its color (§5.2); `C:x -> !?`,
+			// what the effect gives back (§4.8)
 			if u, is_unknown := b.value.(^Unknown); is_unknown && u.written == nil do u.written = b.color
+			if e, is_effect := b.value.(^Effect); is_effect && e.answer.written == nil do e.answer.written = b.color
 		}
 	case .Constraint:
 		build_left(k, s, idx, b)
@@ -168,6 +170,8 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		return build_term(k, s, data.unary.operand)
 	case .Unknown:
 		return new_unknown(k, nil)
+	case .Effect:
+		return new_effect(k, nil, span)
 	case .ScopeNode:
 		child := new_scope(s, span)
 		for c in syn.node_children(ast, idx) do build_binding(k, child, c)
@@ -208,6 +212,15 @@ new_unknown :: proc(k: ^Kernel, written: Type) -> ^Unknown {
 	u.id, u.written = k.unknowns, written
 	k.unknowns += 1
 	return u
+}
+
+// new_effect: `!?::L`, an effect that gives back a value in L: εₖ(x::L, x).
+new_effect :: proc(k: ^Kernel, written: Type, span: syn.Span) -> ^Effect {
+	e := new(Effect)
+	e.id, e.answer, e.span = k.effects, new_unknown(k, written), span
+	e.then = e.answer
+	k.effects += 1
+	return e
 }
 
 // build_range: `l..u`. Between strings, `..` is about positions (§4.3), whichever
@@ -252,11 +265,21 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 	data := ast.node_data[idx].operator
 	span := node_span(k, idx)
 	if data.kind == .Layout {
-		// `??::L`: an unknown in the layout L
-		if data.left == syn.INVALID_NODE || ast.node_kinds[data.left] != .Unknown do return unsupported(k, idx, "`::` on anything but `??`")
-		return new_unknown(k, build_term(k, s, data.right))
+		// `??::L`: an unknown in the layout L; `!?::L`: an effect that gives back a
+		// value in L
+		if data.left != syn.INVALID_NODE {
+			#partial switch ast.node_kinds[data.left] {
+			case .Unknown:
+				return new_unknown(k, build_term(k, s, data.right))
+			case .Effect:
+				return new_effect(k, build_term(k, s, data.right), span)
+			}
+		}
+		return unsupported(k, idx, "`::` on anything but `??` and `!?`")
 	}
 	if data.kind == .NotEqual do return report(k, .Invalid_operator, span, "there is no `!=`: the values other than t are written ~t")
+	// the operands in the order they are written: the effects are numbered so (§4.8)
+	left := build_term(k, s, data.left)
 	right := build_term(k, s, data.right)
 	if data.left == syn.INVALID_NODE {
 		#partial switch data.kind {
@@ -279,7 +302,6 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		}
 		return unsupported(k, idx, fmt.tprintf("the prefix operator %v", data.kind))
 	}
-	left := build_term(k, s, data.left)
 	op: Operator
 	#partial switch data.kind {
 	case .And:

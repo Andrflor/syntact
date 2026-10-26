@@ -91,6 +91,8 @@ obligations :: proc(k: ^Kernel, t: Type, site := syn.Span{}) -> bool {
 		failed := false
 		for a in v.terms do failed = obligations(k, a, site) || failed
 		return failed
+	case ^Effect:
+		return obligations(k, v.then, site)
 	case ^Not:
 		return obligations(k, v.term, site)
 	case ^Is:

@@ -1,0 +1,7 @@
+{
+  "name": "order_lattice",
+  "description": "| is commutative and sorts its terms, its effects are not reordered.",
+  "source": "x -> (!?::u8) | (!?::bool)",
+  "type": "ε0(x::u8, ε1(y::bool, x | y))",
+  "expect_errors": []
+}

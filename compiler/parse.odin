@@ -48,6 +48,7 @@ Token_Kind :: enum u8 {
 	Cast, // `::` — raw binary reinterpret-cast into the target's layout
 	Question,
 	DoubleQuestion,
+	Effect, // `!?`: an effect
 	Dot,
 	DoubleDot,
 	Ellipsis,
@@ -257,6 +258,7 @@ init_lex_dispatch :: proc "contextless" () {
 	PAIR_MINUS['<'] = {.EventPull, 2}
 
 	PAIR_BANG['='] = {.NotEqual, 2}
+	PAIR_BANG['?'] = {.Effect, 2}
 
 	PAIR_QUESTION['?'] = {.DoubleQuestion, 2}
 
@@ -367,7 +369,8 @@ lex_lparen :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	}
 }
 
-// `!` is the collapse operator (Execute), unless followed by `=` to form `!=`.
+// `!` is the collapse operator (Execute), unless followed by `=` to form `!=`, or
+// by `?` to form `!?`, an effect.
 lex_bang :: #force_inline proc(l: ^Lexer, start: u32, flags: u8) -> Token {
 	nc := start + 1 < l.source_len ? l.src[start + 1] : u8(0)
 	p := PAIR_BANG[nc]
@@ -814,6 +817,7 @@ init_parse_tables :: proc "contextless" () {
 	prefix_table[.PrefixRange] = parse_prefix_range
 	prefix_table[.Range] = parse_prefix_range
 	prefix_table[.DoubleQuestion] = parse_unknown
+	prefix_table[.Effect] = parse_effect
 	prefix_table[.PointingPush] = parse_product_prefix
 	prefix_table[.PointingPull] = parse_pointing_pull_prefix
 	prefix_table[.EventPush] = parse_event_push_prefix
@@ -929,6 +933,7 @@ init_parse_tables :: proc "contextless" () {
 	prec_table[.Range] = .RANGE
 
 	prec_table[.DoubleQuestion] = .PRIMARY
+	prec_table[.Effect] = .PRIMARY
 
 	prec_table[.PointingPush] = .POINTING
 	prec_table[.PointingPull] = .ASSIGNMENT
@@ -2524,6 +2529,13 @@ parse_unknown :: proc(parser: ^Parser) -> Node_Index {
 	return add_node(parser, .Unknown, data, span)
 }
 
+parse_effect :: proc(parser: ^Parser) -> Node_Index {
+	span := parser.current_token.span
+	advance_token(parser)
+	data: Node_Data
+	return add_node(parser, .Effect, data, span)
+}
+
 // `...expr` — the expand (extension) prefix, parsed at CONSTRAINT precedence.
 parse_expansion :: proc(parser: ^Parser) -> Node_Index {
 	span_start := parser.current_token.span.start
@@ -2877,6 +2889,7 @@ IS_EXPRESSION_START: [Token_Kind]bool = #partial {
 	.PostfixRange       = true,
 	.PrefixRange        = true,
 	.DoubleQuestion     = true,
+	.Effect             = true,
 	.Execute            = true,
 	.ConstraintFromNone = true,
 	.PropertyFromNone   = true,

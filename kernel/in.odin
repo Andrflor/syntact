@@ -160,7 +160,7 @@ is_value :: proc(k: ^Kernel, t: Type) -> bool {
 	case ^Pattern:
 		for b in v.branches do if !is_value(k, b.product) do return false
 		return true
-	case ^Or, ^And, ^Not, ^Is, ^Range, ^Name, ^Access, ^Carve, ^Default:
+	case ^Effect, ^Or, ^And, ^Not, ^Is, ^Range, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return false
 }

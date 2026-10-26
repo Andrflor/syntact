@@ -1,0 +1,7 @@
+{
+  "name": "cross_dependent",
+  "description": "What names the answer stays under the effect, and simplifies there: (x + 1) - x = 1.",
+  "source": "x -> {u8:r -> !?  a -> r + 1  -> a - r}!",
+  "type": "ε0(x::u8, 1)",
+  "expect_errors": []
+}

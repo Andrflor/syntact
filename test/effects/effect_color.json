@@ -1,0 +1,7 @@
+{
+  "name": "effect_color",
+  "description": "Without `::`, what comes back is in the layout of the color; the check reads what the effect wraps: proven.",
+  "source": "u8:x -> !?",
+  "type": "ε0(x::u8, x)",
+  "expect_errors": []
+}

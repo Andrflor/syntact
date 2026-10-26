@@ -1,0 +1,7 @@
+{
+  "name": "order_answers",
+  "description": "The answers keep the order of their effects whatever order the production reads them.",
+  "source": "x -> {u8:r -> !?  u8:s -> !?  -> s - r}!",
+  "type": "ε0(x::u8, ε1(y::u8, -x + y))",
+  "expect_errors": []
+}

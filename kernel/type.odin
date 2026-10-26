@@ -17,6 +17,7 @@ Type :: union {
 	Bool, // true, false
 	None, // the empty type, ∨([])
 	^Unknown, // ?ₖ::L
+	^Effect, // εₖ(x, t)     !?, x what it gives back, bound in t (§4.8)
 	// §2: the algebra
 	^Or, // ∨([t…])      a | b
 	^And, // ∧([t…])      a & b
@@ -68,6 +69,16 @@ Unknown :: struct {
 	written:  Type, // `??::L`: L as written; `C:x -> ??`: the color C; nil: everything
 	layout:   Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
 	instance: ^Scope, // in a carve whose changes its layout names: ?ₖ read in that carve
+}
+
+// Effect: εₖ(x, t), the effect written k (§4.8). x is what it gives back, bound in
+// t, the computation it wraps; each run of a scope gives the acts it gathers new
+// ones (effect.odin). Written alone, `!?::L` is εₖ(x::L, x).
+Effect :: struct {
+	id:     int,
+	answer: ^Unknown, // nil: it gives nothing back, εₖ(t)
+	then:   Type,
+	span:   syn.Span,
 }
 
 Or :: struct {

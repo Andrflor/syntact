@@ -48,6 +48,8 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	case ^Unknown:
 		if x, found := rewritten(r, v); found do return x
 		return t
+	case ^Effect:
+		return effect_law(k, v, rewrite(k, v.then, r))
 	case ^Operation:
 		if is_string_value(t) do return t
 		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
@@ -130,7 +132,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return range_law(k, lo, hi, v.family, v.span), true
 	case ^Collapse:
 		if f, known := family_of(k, v); known do return family_term(f), true
-	case ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
+	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return nil, false
 }

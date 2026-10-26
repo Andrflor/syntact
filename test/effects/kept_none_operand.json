@@ -1,0 +1,7 @@
+{
+  "name": "kept_none_operand",
+  "description": "none op c = none does not erase the effect of c.",
+  "source": "x -> none + !?::u8",
+  "type": "ε0(x::u8, none)",
+  "expect_errors": []
+}

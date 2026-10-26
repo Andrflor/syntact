@@ -1,0 +1,7 @@
+{
+  "name": "branch_taken",
+  "description": "An effect in the branch that is taken happens.",
+  "source": "x -> 0 ? {0 -> !?::none  -> 1}",
+  "type": "ε0(none)",
+  "expect_errors": []
+}

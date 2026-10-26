@@ -1,0 +1,7 @@
+{
+  "name": "effect_written",
+  "description": "`!?` written alone gives back what it gives: εₖ(x, x).",
+  "source": "x -> !?",
+  "type": "ε0(x, x)",
+  "expect_errors": []
+}

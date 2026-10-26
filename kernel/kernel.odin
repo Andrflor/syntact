@@ -8,9 +8,9 @@ import "core:slice"
 // The type algebra of specs/types.md, and nothing else. A type is a term of its
 // grammar (type.odin): the program as written is made of these terms, and the type
 // of each is its normal form, given by orienting the laws (normal.odin, set.odin,
-// arith.odin, in.odin, scope.odin, pattern.odin, recursion.odin). The check is
-// `V in C = true` for every value of the unknowns (prove.odin): what the laws do
-// not prove is refused.
+// arith.odin, in.odin, scope.odin, pattern.odin, recursion.odin, effect.odin). The
+// check is `V in C = true` for every value of the unknowns (prove.odin): what the
+// laws do not prove is refused.
 
 Error_Kind :: enum u8 {
 	Undefined_Identifier,
@@ -35,6 +35,7 @@ Kernel :: struct {
 	ast:        ^syn.Ast,
 	errors:     [dynamic]Error,
 	unknowns:   int, // the unknowns written: their ids
+	effects:    int, // the effects written: their ids
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file

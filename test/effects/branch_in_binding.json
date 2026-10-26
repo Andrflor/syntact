@@ -1,0 +1,7 @@
+{
+  "name": "branch_in_binding",
+  "description": "A binding that acts in one branch: the rest of the run follows in each branch.",
+  "source": "n -> ??::u8\nx -> {a -> n ? {0 -> !?::u8  -> 5}  -> a + 1}!",
+  "type": "?0 ? {0 -> ε0(x::u8, x + 1)  -> 6}",
+  "expect_errors": []
+}

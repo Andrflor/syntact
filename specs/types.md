@@ -307,6 +307,16 @@ pure binding crosses them:
 {-> 5  w -> !?::none}!                    = 5
 {u8:r -> !?  b -> r + 1  w -> !?::none  a -> 2 * 3  -> a + b}!
                                           = ε₁(x::u8, ε₂(x + 7))
+{w -> !?::none  -> 5}{w -> 0}             invalid: a carve does not replace an effect
+```
+
+A name reads what its binding gives back, never its act: the act is the run's, and
+each run gives back its own answer. Two collapses are two runs:
+
+```text
+g -> {u8:r -> !?  -> r}
+{a -> g!  -> a - a}!       = ε₁(x::u8, 0)                  one run, named twice
+g! - g!                    = ε₁(x::u8, ε₁(y::u8, x - y))   two runs
 ```
 
 An effect in a branch is in that branch: it happens only when the branch is taken.

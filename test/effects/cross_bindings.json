@@ -1,0 +1,7 @@
+{
+  "name": "cross_bindings",
+  "description": "The example of specs/types.md §4.8: a crosses both effects, b only the second.",
+  "source": "x -> {u8:r -> !?  b -> r + 1  w -> !?::none  a -> 2 * 3  -> a + b}!",
+  "type": "ε0(x::u8, ε1(x + 7))",
+  "expect_errors": []
+}

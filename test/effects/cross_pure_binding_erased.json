@@ -1,0 +1,7 @@
+{
+  "name": "cross_pure_binding_erased",
+  "description": "An unused pure binding is erased; the unused effect is kept.",
+  "source": "x -> {a -> 2 * 3  w -> !?::none  -> 1}!",
+  "type": "ε0(1)",
+  "expect_errors": []
+}

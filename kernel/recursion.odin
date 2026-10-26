@@ -38,6 +38,8 @@ names_scope :: proc(t: Type, s: ^Scope) -> bool {
 		for a in v.terms do if names_scope(a, s) do return true
 	case ^And:
 		for a in v.terms do if names_scope(a, s) do return true
+	case ^Effect:
+		return names_scope(v.then, s)
 	case ^Not:
 		return names_scope(v.term, s)
 	case ^Is:
@@ -105,6 +107,8 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 		for a in v.terms do if !solved(a, root) do return false
 	case ^Not:
 		return solved(v.term, root)
+	case ^Effect:
+		return solved(v.then, root)
 	case ^Pattern:
 		if !solved(v.target, root) do return false
 		for b in v.branches do if !solved(b.product, root) do return false
@@ -232,6 +236,8 @@ operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
 			for a in v.terms do visit(a, root, out)
 		case ^Not:
 			visit(v.term, root, out)
+		case ^Effect:
+			visit(v.then, root, out)
 		}
 	}
 	visit(t, root, &out)

@@ -1,0 +1,7 @@
+{
+  "name": "check_through",
+  "description": "The check reads what the effects wrap: 5 in u8.",
+  "source": "u8:x -> {w -> !?::none  -> 5}!",
+  "type": "ε0(5)",
+  "expect_errors": []
+}

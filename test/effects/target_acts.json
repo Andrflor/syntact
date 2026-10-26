@@ -1,0 +1,7 @@
+{
+  "name": "target_acts",
+  "description": "The target of a pattern is computed first: the pattern is in its effect.",
+  "source": "x -> (!?::u8) ? {0 -> 1  -> 2}",
+  "type": "ε0(x::u8, x ? {0 -> 1  -> 2})",
+  "expect_errors": []
+}

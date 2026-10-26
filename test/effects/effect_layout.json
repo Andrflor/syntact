@@ -1,0 +1,7 @@
+{
+  "name": "effect_layout",
+  "description": "`!?::u8`: what comes back is in u8.",
+  "source": "x -> !?::u8",
+  "type": "ε0(x::u8, x)",
+  "expect_errors": []
+}

@@ -22,6 +22,12 @@ term_order :: proc(a, b: Type) -> int {
 		return compare_ints(i128(x), i128(b.(Char)))
 	case ^Unknown:
 		return unknown_order(x, b.(^Unknown))
+	case ^Effect:
+		y := b.(^Effect)
+		if c := compare_ints(i128(x.id), i128(y.id)); c != 0 do return c
+		if (x.answer == nil) != (y.answer == nil) do return x.answer == nil ? -1 : 1
+		if x.answer != nil do if c := unknown_order(x.answer, y.answer); c != 0 do return c
+		return term_order(x.then, y.then)
 	case ^Range:
 		y := b.(^Range)
 		if c := compare_ints(i128(x.family), i128(y.family)); c != 0 do return c
@@ -146,10 +152,12 @@ term_rank :: proc(t: Type) -> int {
 		return 17
 	case ^Pattern:
 		return 18
-	case Invalid:
+	case ^Effect:
 		return 19
+	case Invalid:
+		return 20
 	}
-	return 20
+	return 21
 }
 
 terms_order :: proc(a, b: []Type) -> int {

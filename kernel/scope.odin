@@ -84,19 +84,24 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 		if is_invalid(target) do return target
 		return problem(.Invalid_Property_Access, a.span, fmt.tprintf("`.%s` on %s, which is not a scope", a.name, print_type(target)))
 	}
-	if b, found := occurrence(placed(k, s, .Value), a.name, a.ordinal, true); found do return binding_type(k, b)
+	if b, found := occurrence(placed(k, s, .Value), a.name, a.ordinal, true); found do return binding_value(k, b)
 	return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
 }
 
-// collapse_law: {… -> p …}! = p, the first production; none without one. A
-// recursive call is never unfolded (recursion.odin).
-collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
-	target := normal(k, c.target)
+// collapse_law: {… -> p …}! = p, the first production, with the acts of the
+// bindings above it (§4.8, effect.odin); none without one.
+collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	s, ok := target.(^Scope)
 	if !ok {
 		if is_invalid(target) do return target
 		return problem(.Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
+	return collapsed(k, s, c)
+}
+
+// product_of: what the first production of s gives; none without one. A recursive
+// call is never unfolded (recursion.odin).
+product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
 	// solution, or it stays. A carve collapsed where it is written asks its
 	// production: it is typed for the values the carve gives (§7); the call stays
@@ -113,8 +118,7 @@ collapse_law :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 
 // --- carving (§5.3) ---
 
-carve_law :: proc(k: ^Kernel, c: ^Carve) -> Type {
-	target := normal(k, c.target)
+carve_law :: proc(k: ^Kernel, target: Type, c: ^Carve) -> Type {
 	args := make([]Carve_Arg, len(c.args))
 	for a, i in c.args {
 		args[i] = a
@@ -164,8 +168,8 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 			// carve of the name z above, a value given by position
 			if field, found := occurrence(bindings, a.name, a.ordinal, false); found {
 				inner := new(Carve)
-				inner.target, inner.args, inner.span = binding_type(k, field), a.carves, a.span
-				a.value = carve_law(k, inner)
+				inner.target, inner.args, inner.span = binding_value(k, field), a.carves, a.span
+				a.value = carve_law(k, inner.target, inner)
 			} else if a.otherwise != nil {
 				a.name, a.value = "", normal(k, a.otherwise)
 			} else {
@@ -188,6 +192,8 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 			next += 1
 		}
 		if b.scope != s do return unsupported_at(k, a.span, "a carve through an expansion")
+		// no law replaces an effect (§4.8)
+		if acts(binding_type(k, b)) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s is an effect: a carve does not replace it", b.name != "" ? fmt.tprintf("`%s`", b.name) : "this binding"))
 		changes[b] = a.value
 	}
 	if p := infer_holes(k, s, &changes, span); p != nil do return p
@@ -199,13 +205,20 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 // type: its problem is where it is written (§7: a carve is checked where it is
 // written, in what it changed; the rest was checked in its source).
 derive :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type, span: syn.Span) -> Type {
+	c := carved_copy(k, s, changes)
+	if p := carve_problem(k, c, span); p != nil do return p
+	return c
+}
+
+// carved_copy: the copy of the scope s carves, uncarved, with the changes of s and
+// these.
+carved_copy :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
 	root := s.carved != nil ? s.carved : s
 	merged := make(map[^Binding]Type)
 	for b, v in s.changes do merged[b] = v
 	for b, v in changes do merged[s.carved != nil ? b.source : b] = v
 	c := copy_scope(k, root, merged)
 	c.carved, c.changes = root, merged
-	if p := carve_problem(k, c, span); p != nil do return p
 	return c
 }
 
@@ -295,6 +308,12 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		u^ = v^
 		u.written, u.layout, u.instance = copy_term(k, m, v.written, scope), nil, m.instance
 		return u
+	case ^Effect:
+		e := new(Effect)
+		e^ = v^
+		if v.answer != nil do e.answer = copy_term(k, m, v.answer, scope).(^Unknown)
+		e.then = copy_term(k, m, v.then, scope)
+		return e
 	case ^Or:
 		return new_or(..copy_terms(k, m, v.terms, scope))
 	case ^And:
@@ -315,8 +334,9 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 			return n
 		}
 		if p, found := m.pieces[v.binding]; found do return rewrite(k, p, m.outer)
-		// a reference from outside the copy: its type, with the unknowns rewritten
-		if m.substitute do return rewrite(k, binding_type(k, v.binding), m.outer)
+		// a reference from outside the copy: what it gives back, with the unknowns
+		// rewritten
+		if m.substitute do return rewrite(k, binding_value(k, v.binding), m.outer)
 		return n
 	case ^Scope:
 		if c, found := m.scopes[v]; found do return c // the scope being copied, named from inside it (`.x`)
@@ -387,6 +407,8 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case Char, Int, Real, Bool, None, Invalid:
 	case ^Unknown:
 		return mentions(m, v.written)
+	case ^Effect:
+		return v.answer != nil && mentions(m, v.answer.written) || mentions(m, v.then)
 	case ^Or:
 		for x in v.terms do if mentions(m, x) do return true
 	case ^And:
@@ -525,7 +547,7 @@ match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Ty
 		v := xs[0]
 		if v.name != place.name || v.kind != place.kind do return Bool(false)
 		head: Type = Bool(true)
-		if c := binding_color(k, place); c != nil do head = in_law(k, binding_type(k, v), c)
+		if c := binding_color(k, place); c != nil do head = in_law(k, binding_value(k, v), c)
 		if is_bool(head, false) do return head
 		return bool_and(k, head, match_shape(k, x, s, xs[1:], shape[1:]))
 	}
@@ -781,6 +803,14 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 	case ^Unknown:
 		y, ok := b.(^Unknown)
 		return ok && same_unknown(x, y) // the same unknown, whatever layout a branch gives it
+	case ^Effect:
+		// the same effect wrapping the same computation: what it gives back is bound
+		// in it, whatever its index
+		y, ok := b.(^Effect)
+		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
+		if x.answer == nil do return same(k, x.then, y.then)
+		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
+		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
 	case ^Or:
 		y, ok := b.(^Or)
 		return ok && same_all(k, x.terms, y.terms)

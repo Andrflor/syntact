@@ -1,0 +1,7 @@
+{
+  "name": "carve_adds_effect",
+  "description": "A carve places an effect in the copy; its collapse runs it.",
+  "source": "t -> {u8:m -> 1  -> m}\nx -> t{m -> !?::u8}!",
+  "type": "ε0(x::u8, x)",
+  "expect_errors": []
+}

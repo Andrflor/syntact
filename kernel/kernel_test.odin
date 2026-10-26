@@ -295,53 +295,98 @@ test_spec :: proc(t: ^testing.T) {
 	}
 }
 
-// The corpus of test/typecheck: each source whose forms are all built by this
-// kernel must give exactly the expected errors. The others are counted apart.
+// A case of a corpus: one JSON file. `type`, when given, is the printed type of the
+// last binding.
 Corpus_Case :: struct {
 	name:          string `json:"name"`,
 	source:        string `json:"source"`,
+	type:          string `json:"type"`,
 	expect_errors: []string `json:"expect_errors"`,
 }
 
+// corpus: the cases of the directory test/<path…>, in the order of their files.
+corpus :: proc(path: ..string) -> []Corpus_Case {
+	parts := make([dynamic]string)
+	append(&parts, filepath.dir(#location().file_path), "..", "test")
+	append(&parts, ..path)
+	append(&parts, "*.json")
+	pattern, _ := filepath.join(parts[:])
+	files, _ := filepath.glob(pattern)
+	slice.sort(files)
+	out := make([dynamic]Corpus_Case)
+	for file in files {
+		data, err := os.read_entire_file(file, context.allocator)
+		if err != nil do continue
+		c: Corpus_Case
+		if json.unmarshal(data, &c) == nil do append(&out, c)
+	}
+	return out[:]
+}
+
+// kind_names: the kinds of the errors, by name, sorted, each once.
+kind_names :: proc(errors: []Error) -> []string {
+	out := make([dynamic]string)
+	for kind in error_kinds(errors) do append(&out, fmt.tprint(kind))
+	return out[:]
+}
+
+// expected_kinds: the kinds a case expects, sorted, each once.
+expected_kinds :: proc(c: Corpus_Case) -> []string {
+	want := slice.clone(c.expect_errors)
+	slice.sort(want)
+	return slice.unique(want)
+}
+
+// The corpus of test/typecheck: each source whose forms are all built by this
+// kernel must give exactly the expected errors. The others are counted apart.
 @(test)
 test_corpus :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
-	dir, _ := filepath.join({filepath.dir(#location().file_path), "..", "test", "typecheck", "tests"})
-	pattern, _ := filepath.join({dir, "*.json"})
-	files, _ := filepath.glob(pattern)
-	slice.sort(files)
+	cases := corpus("typecheck", "tests")
 	passed, outside, unparsed := 0, 0, 0
 	failures := make([dynamic]string)
-	for file in files {
-		data, err := os.read_entire_file(file, context.allocator)
-		if err != nil do continue
-		c: Corpus_Case
-		if json.unmarshal(data, &c) != nil do continue
+	for c in cases {
 		k, parsed := run(c.source)
 		if !parsed {
 			unparsed += 1
 			continue
 		}
-		kinds := error_kinds(k.errors[:])
-		if slice.contains(kinds, Error_Kind.Unsupported) {
+		if slice.contains(error_kinds(k.errors[:]), Error_Kind.Unsupported) {
 			outside += 1
 			continue
 		}
-		got := make([dynamic]string)
-		for kind in kinds do append(&got, fmt.tprint(kind))
-		want := slice.clone(c.expect_errors)
-		slice.sort(want)
-		want = slice.unique(want)
-		if slice.equal(got[:], want) {
+		got, want := kind_names(k.errors[:]), expected_kinds(c)
+		if slice.equal(got, want) {
 			passed += 1
 		} else {
 			append(&failures, fmt.tprintf("%s: got %v, expected %v\n    %s\n%s", c.name, got, want, describe_errors(k.errors[:]), indent(c.source)))
 		}
 	}
-	log.infof("corpus: %d pass, %d fail, %d outside the kernel, %d do not parse (of %d)", passed, len(failures), outside, unparsed, len(files))
+	log.infof("corpus: %d pass, %d fail, %d outside the kernel, %d do not parse (of %d)", passed, len(failures), outside, unparsed, len(cases))
 	for f in failures do log.info(f)
+}
+
+// The corpus of test/effects (specs/types.md §4.8): a pure computation crosses the
+// effects; none is erased, copied, replaced or reordered. Each source binds `x`
+// last; its type is printed, and the errors are compared by kind. Every case holds.
+@(test)
+test_effects :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	cases := corpus("effects")
+	testing.expect(t, len(cases) > 0, "test/effects holds no case")
+	for c in cases {
+		k, parsed := run(c.source)
+		if !testing.expectf(t, parsed, "%s: does not parse", c.name) do continue
+		last := k.root.bindings[len(k.root.bindings) - 1]
+		got := print_type(binding_type(&k, last))
+		if c.type != "" do testing.expectf(t, got == c.type, "%s: the type is %s, expected %s", c.name, got, c.type)
+		kinds, want := kind_names(k.errors[:]), expected_kinds(c)
+		testing.expectf(t, slice.equal(kinds, want), "%s: errors %v, expected %v (%s)", c.name, kinds, want, describe_errors(k.errors[:]))
+	}
 }
 
 error_kinds :: proc(errors: []Error) -> []Error_Kind {

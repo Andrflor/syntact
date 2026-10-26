@@ -1,0 +1,7 @@
+{
+  "name": "cross_operator",
+  "description": "A pure computation crosses the effect: 2 * 3 is computed, the effect stays.",
+  "source": "x -> (!?::u8) + 2 * 3",
+  "type": "ε0(x::u8, x + 6)",
+  "expect_errors": []
+}

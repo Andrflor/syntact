@@ -117,6 +117,9 @@ locate_in :: proc(t: kernel.Type, s: ^kernel.Scope, offset: u32) -> (Located, bo
 		return written_at(t, v.span, s, offset)
 	case ^kernel.Unknown:
 		return locate_in(v.written, s, offset)
+	case ^kernel.Effect:
+		if v.answer != nil do if at, found := locate_in(v.answer.written, s, offset); found do return at, true
+		return written_at(t, v.span, s, offset)
 	case kernel.Char, kernel.Int, kernel.Real, kernel.Bool, kernel.None, kernel.Invalid:
 	}
 	return {}, false

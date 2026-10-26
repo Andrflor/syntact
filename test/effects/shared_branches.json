@@ -1,0 +1,7 @@
+{
+  "name": "shared_branches",
+  "description": "The answer read in both branches of a pattern is one act.",
+  "source": "n -> ??::u8\nx -> {u8:r -> !?  -> n ? {0 -> r  -> r + 1}}!",
+  "type": "ε0(x::u8, ?0 ? {0 -> x  -> x + 1})",
+  "expect_errors": []
+}

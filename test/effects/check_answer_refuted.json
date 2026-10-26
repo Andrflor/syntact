@@ -1,0 +1,9 @@
+{
+  "name": "check_answer_refuted",
+  "description": "The answer is any u8: x + 1 is refuted at 255.",
+  "source": "u8:x -> (!?::u8) + 1",
+  "type": "ε0(x::u8, x + 1)",
+  "expect_errors": [
+    "Constraint_Mismatch"
+  ]
+}

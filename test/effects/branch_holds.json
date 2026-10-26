@@ -1,0 +1,7 @@
+{
+  "name": "branch_holds",
+  "description": "An effect in a branch stays in that branch.",
+  "source": "n -> ??::u8\nx -> n ? {0 -> !?::none  -> 5}",
+  "type": "?0 ? {0 -> ε0(none)  -> 5}",
+  "expect_errors": []
+}

@@ -42,6 +42,7 @@ infer_holes :: proc(k: ^Kernel, s: ^Scope, changes: ^map[^Binding]Type, span: sy
 		for f, i in s.bindings {
 			v, carved := changes[f]
 			if !carved || f.kind == .Pull do continue
+			v = given(k, v) // what is sent is what the argument gives back (§4.8)
 			place := copy.bindings[i]
 			if f.color != nil {
 				lands(k, binding_color(k, place), v, u, .Sent, &l)
@@ -116,9 +117,9 @@ lands_binding :: proc(k: ^Kernel, place, b: ^Binding, u: ^Unknown, l: ^Landing) 
 	if anonymous && color == nil do color = normal(k, d.color)
 	if color != nil {
 		if b.color != nil do lands(k, color, binding_color(k, b), u, .Required, l)
-		else if b.value != nil do lands(k, color, binding_type(k, b), u, .Sent, l)
+		else if b.value != nil do lands(k, color, binding_value(k, b), u, .Sent, l)
 	}
-	if !anonymous && place.value != nil && b.value != nil do lands(k, binding_type(k, place), binding_type(k, b), u, .Sent, l)
+	if !anonymous && place.value != nil && b.value != nil do lands(k, binding_type(k, place), binding_value(k, b), u, .Sent, l)
 }
 
 // lands_template: the value a field had, set beside the one the carve gives it: a

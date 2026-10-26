@@ -88,7 +88,7 @@ for -> {
 while {
   condition -> {->bool:}
   do -> {}
-  condition!? {
+  condition! ? {
     -> {
       do!
       while{condition do}

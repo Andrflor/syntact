@@ -1,0 +1,7 @@
+{
+  "name": "cross_answer_erased",
+  "description": "x * 0 = 0 erases the answer, a pure value, not the effect.",
+  "source": "x -> (!?::u8) * 0",
+  "type": "ε0(x::u8, 0)",
+  "expect_errors": []
+}

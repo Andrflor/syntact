@@ -17,33 +17,77 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return t
 	case ^Unknown:
 		return v
-	case ^Or:
-		return or_law(k, normal_all(k, v.terms))
-	case ^And:
-		return and_law(k, normal_all(k, v.terms))
-	case ^Not:
-		return not_law(k, normal(k, v.term))
-	case ^Is:
-		return is_law(normal(k, v.term))
-	case ^Range:
-		return range_law(k, normal(k, v.lo), normal(k, v.hi), v.family, v.span)
-	case ^Operation:
-		if is_string_value(t) do return t // a string: a primitive
-		return operation_law(k, v.op, normal_all(k, v.args), v.span)
+	case ^Effect:
+		return effect_law(k, v, normal(k, v.then))
 	case ^Name:
-		return binding_type(k, v.binding)
+		return binding_value(k, v.binding)
 	case ^Scope:
 		return scope_law(k, v)
+	case ^Operation:
+		if is_string_value(t) do return t // a string: a primitive
+		return sequence(k, t, normal_all(k, parts(t)), term_law)
+	case ^Or, ^And, ^Not, ^Is, ^Range, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern:
+		return sequence(k, t, normal_all(k, parts(t)), term_law)
+	}
+	return t
+}
+
+// parts: what a term computes on, in the order it is written. A scope holds its
+// bindings, a carve places its arguments, a pattern gives one of its branches:
+// they are not computed with it.
+parts :: proc(t: Type) -> []Type {
+	#partial switch v in t {
+	case ^Or:
+		return v.terms
+	case ^And:
+		return v.terms
+	case ^Not:
+		return clone_types({v.term})
+	case ^Is:
+		return clone_types({v.term})
+	case ^Range:
+		return clone_types({v.lo, v.hi})
+	case ^Operation:
+		return v.args
 	case ^Access:
-		return access_law(k, normal(k, v.target), v)
+		return clone_types({v.target})
 	case ^Collapse:
-		return collapse_law(k, v)
+		return clone_types({v.target})
 	case ^Carve:
-		return carve_law(k, v)
+		return clone_types({v.target})
 	case ^Default:
-		return default_of(k, normal(k, v.color), v.span, v.color)
+		return clone_types({v.color})
 	case ^Pattern:
-		return pattern_law(k, v)
+		return clone_types({v.target})
+	}
+	return nil
+}
+
+// term_law: the law of a term on its parts, in normal form and pure.
+term_law :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
+	#partial switch v in t {
+	case ^Or:
+		return or_law(k, parts)
+	case ^And:
+		return and_law(k, parts)
+	case ^Not:
+		return not_law(k, parts[0])
+	case ^Is:
+		return is_law(parts[0])
+	case ^Range:
+		return range_law(k, parts[0], parts[1], v.family, v.span)
+	case ^Operation:
+		return operation_law(k, v.op, parts, v.span)
+	case ^Access:
+		return access_law(k, parts[0], v)
+	case ^Collapse:
+		return collapse_law(k, parts[0], v)
+	case ^Carve:
+		return carve_law(k, parts[0], v)
+	case ^Default:
+		return default_of(k, parts[0], v.span, v.color)
+	case ^Pattern:
+		return pattern_on(k, parts[0], v)
 	}
 	return t
 }
@@ -309,6 +353,12 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	}
 	b.typed_value, b.state = value, .Done
 	return value
+}
+
+// binding_value: what a binding gives back: what its name reads. Its acts are run
+// by the scope that holds it (§4.8).
+binding_value :: proc(k: ^Kernel, b: ^Binding) -> Type {
+	return given(k, binding_type(k, b))
 }
 
 // --- defaults (§5.5) ---

@@ -46,6 +46,7 @@ Node_Kind :: enum u8 {
 	Foreign,
 	Range,
 	Unknown,
+	Effect, // `!?`
 }
 
 Literal_Kind :: enum u8 {
@@ -604,6 +605,8 @@ print_ast :: proc(ast: ^Ast, idx: Node_Index, indent: int) {
 		}
 	case .Unknown:
 		fmt.printf("%sUnknown\n", indent_str)
+	case .Effect:
+		fmt.printf("%sEffect\n", indent_str)
 	}
 }
 

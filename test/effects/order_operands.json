@@ -1,0 +1,7 @@
+{
+  "name": "order_operands",
+  "description": "The effects of the operands, in the order they are written.",
+  "source": "x -> (!?::u8) - (!?::u8)",
+  "type": "ε0(x::u8, ε1(y::u8, x - y))",
+  "expect_errors": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "kept_absorbing_and",
+  "description": "a & none = none does not erase the effect.",
+  "source": "x -> (!?::u8) & none",
+  "type": "ε0(x::u8, none)",
+  "expect_errors": []
+}

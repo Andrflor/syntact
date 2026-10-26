@@ -1,0 +1,7 @@
+{
+  "name": "shared_distribution",
+  "description": "a & (b | c) = (a & b) | (a & c) does not copy the effect of a.",
+  "source": "x -> (!?::u8) & (1 | 2)",
+  "type": "ε0(x::u8, x & 1..2)",
+  "expect_errors": []
+}

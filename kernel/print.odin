@@ -8,10 +8,21 @@ import "core:unicode"
 //
 // A term as the language writes it: `0..255`, `?0 + 3`, `"jwt" + string`.
 
+// Printer: a term being written, and the answers of the effects around the place
+// written: they are bound there, and named in the order they are bound (§4.8).
+Printer :: struct {
+	using builder: strings.Builder,
+	bound:         [dynamic]^Unknown,
+}
+
+printer :: proc() -> Printer {
+	return Printer{builder = strings.builder_make(context.temp_allocator), bound = make([dynamic]^Unknown, context.temp_allocator)}
+}
+
 print_type :: proc(t: Type) -> string {
-	b := strings.builder_make(context.temp_allocator)
+	b := printer()
 	write_type(&b, t, 0)
-	return strings.to_string(b)
+	return strings.to_string(b.builder)
 }
 
 print_types :: proc(ts: []Type) -> string {
@@ -66,7 +77,7 @@ operator_prec :: proc(op: Operator) -> int {
 	return PREC_ATOM
 }
 
-write_type :: proc(b: ^strings.Builder, t: Type, outer: int) {
+write_type :: proc(b: ^Printer, t: Type, outer: int) {
 	prec := type_prec(t)
 	if prec < outer do strings.write_byte(b, '(')
 	write_bare(b, t)
@@ -135,7 +146,7 @@ is_string_term :: proc(t: Type) -> bool {
 	return is_char && lo == 0 && c.hi == nil && is_int && from == 0 && n.hi == nil
 }
 
-write_bare :: proc(b: ^strings.Builder, t: Type) {
+write_bare :: proc(b: ^Printer, t: Type) {
 	if t == nil {
 		strings.write_string(b, "nil")
 		return
@@ -154,8 +165,30 @@ write_bare :: proc(b: ^strings.Builder, t: Type) {
 	case Invalid:
 		strings.write_string(b, "<invalid>")
 	case ^Unknown:
+		#reverse for x, i in b.bound {
+			if !same_unknown(x, v) do continue
+			strings.write_string(b, bound_name(i))
+			return
+		}
 		fmt.sbprintf(b, "?%d", v.id)
 		if v.instance != nil do write_changes(b, v.instance) // ?ₖ read in a carve
+	case ^Effect:
+		// εₖ(x::L, t); εₖ(t) when it gives nothing back
+		fmt.sbprintf(b, "ε%d(", v.id)
+		gives := v.answer != nil
+		if gives {
+			layout := v.answer.layout != nil ? v.answer.layout : v.answer.written
+			append(&b.bound, v.answer)
+			strings.write_string(b, bound_name(len(b.bound) - 1))
+			if layout != nil {
+				strings.write_string(b, "::")
+				write_type(b, layout, PREC_ATOM)
+			}
+			strings.write_string(b, ", ")
+		}
+		write_type(b, v.then, 0)
+		if gives do pop(&b.bound)
+		strings.write_byte(b, ')')
 	case ^Or:
 		for x, i in v.terms {
 			if i > 0 do strings.write_string(b, " | ")
@@ -219,6 +252,13 @@ write_bare :: proc(b: ^strings.Builder, t: Type) {
 	}
 }
 
+// bound_name: the name of the n-th answer bound: x, y, z, then x3, x4…
+bound_name :: proc(n: int) -> string {
+	names := [?]string{"x", "y", "z"}
+	if n < len(names) do return names[n]
+	return fmt.tprintf("x%d", n)
+}
+
 // lattice_operand: an operation inside | or & is written between parentheses.
 lattice_operand :: proc(t: Type, prec: int) -> int {
 	#partial switch _ in t {
@@ -230,7 +270,7 @@ lattice_operand :: proc(t: Type, prec: int) -> int {
 	return prec + 1
 }
 
-write_char :: proc(b: ^strings.Builder, c: rune, quote: byte) {
+write_char :: proc(b: ^Printer, c: rune, quote: byte) {
 	if quote != 0 do strings.write_byte(b, quote)
 	switch c {
 	case 0:
@@ -254,7 +294,7 @@ write_char :: proc(b: ^strings.Builder, c: rune, quote: byte) {
 }
 
 
-write_range :: proc(b: ^strings.Builder, r: ^Range) {
+write_range :: proc(b: ^Printer, r: ^Range) {
 	if r.lo == nil && r.hi == nil {
 		switch r.family {
 		case .Int:
@@ -275,7 +315,7 @@ write_range :: proc(b: ^strings.Builder, r: ^Range) {
 	if r.hi != nil do write_type(b, r.hi, PREC_ATOM)
 }
 
-write_operation :: proc(b: ^strings.Builder, o: ^Operation) {
+write_operation :: proc(b: ^Printer, o: ^Operation) {
 	if is_string_value(o) {
 		if len(o.args) == 0 {
 			strings.write_string(b, `""`)
@@ -302,7 +342,7 @@ write_operation :: proc(b: ^strings.Builder, o: ^Operation) {
 	}
 }
 
-write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
+write_scope :: proc(b: ^Printer, s: ^Scope) {
 	if s.carved != nil {
 		write_scope(b, s.carved)
 		write_changes(b, s)
@@ -320,7 +360,7 @@ write_scope :: proc(b: ^strings.Builder, s: ^Scope) {
 }
 
 // write_body: the bindings of a scope, as written.
-write_body :: proc(b: ^strings.Builder, s: ^Scope) {
+write_body :: proc(b: ^Printer, s: ^Scope) {
 	strings.write_byte(b, '{')
 	for x, i in s.bindings {
 		if i > 0 do strings.write_string(b, "  ")
@@ -333,12 +373,12 @@ write_body :: proc(b: ^strings.Builder, s: ^Scope) {
 // `C:x -> v`, or `C:x` when no value is written; the scope it gives, unless a
 // carve, written out with the normal forms of its bindings.
 print_binding :: proc(k: ^Kernel, x: ^Binding) -> string {
-	b := strings.builder_make(context.temp_allocator)
+	b := printer()
 	write_typed(&b, k, x, true)
-	return strings.to_string(b)
+	return strings.to_string(b.builder)
 }
 
-write_typed :: proc(b: ^strings.Builder, k: ^Kernel, x: ^Binding, expand: bool) {
+write_typed :: proc(b: ^Printer, k: ^Kernel, x: ^Binding, expand: bool) {
 	switch x.kind {
 	case .Product:
 		strings.write_string(b, "-> ")
@@ -371,7 +411,7 @@ write_typed :: proc(b: ^strings.Builder, k: ^Kernel, x: ^Binding, expand: bool) 
 }
 
 // write_changes: the arguments of a carve, {x -> v …}.
-write_changes :: proc(b: ^strings.Builder, s: ^Scope) {
+write_changes :: proc(b: ^Printer, s: ^Scope) {
 	strings.write_byte(b, '{')
 	first := true
 	for x in s.carved.bindings {
@@ -385,7 +425,7 @@ write_changes :: proc(b: ^strings.Builder, s: ^Scope) {
 	strings.write_byte(b, '}')
 }
 
-write_binding :: proc(b: ^strings.Builder, x: ^Binding) {
+write_binding :: proc(b: ^Printer, x: ^Binding) {
 	switch x.kind {
 	case .Product:
 		strings.write_string(b, "-> ")

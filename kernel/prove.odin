@@ -116,9 +116,10 @@ check_in :: proc(k: ^Kernel, value, color: Type, span: syn.Span) {
 }
 
 // in_problem: V in C, for every value of the unknowns: nil when proven, otherwise
-// the problem.
+// the problem. An effect is not a value: the verdict is read on what the effects
+// wrap (§4.8).
 in_problem :: proc(k: ^Kernel, value, color: Type, span: syn.Span) -> Type {
-	switch verdict, witness := prove(k, in_law(k, value, color)); verdict {
+	switch verdict, witness := prove(k, in_law(k, given(k, value), color)); verdict {
 	case .Proven:
 	case .Refuted:
 		return problem(.Constraint_Mismatch, span, fmt.tprintf("%s is not in %s%s", print_type(value), print_type(color), print_witness(witness)))

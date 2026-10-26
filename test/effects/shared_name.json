@@ -1,0 +1,7 @@
+{
+  "name": "shared_name",
+  "description": "A name read twice is one act: a + a = 2 * x.",
+  "source": "x -> {a -> !?::u8  -> a + a}!",
+  "type": "ε0(x::u8, 2 * x)",
+  "expect_errors": []
+}

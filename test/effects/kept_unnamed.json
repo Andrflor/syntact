@@ -1,0 +1,7 @@
+{
+  "name": "kept_unnamed",
+  "description": "The production does not name w: its effect is kept.",
+  "source": "x -> {w -> !?::none  -> 5}!",
+  "type": "ε0(5)",
+  "expect_errors": []
+}

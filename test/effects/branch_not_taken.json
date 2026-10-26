@@ -1,0 +1,7 @@
+{
+  "name": "branch_not_taken",
+  "description": "An effect in a branch no value reaches does not happen.",
+  "source": "x -> 5 ? {0 -> !?::none  -> 1}",
+  "type": "1",
+  "expect_errors": []
+}

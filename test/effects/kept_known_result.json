@@ -1,0 +1,7 @@
+{
+  "name": "kept_known_result",
+  "description": "The result is known, the effect is kept.",
+  "source": "x -> {u8:r -> !?  -> 5}!",
+  "type": "ε0(x::u8, 5)",
+  "expect_errors": []
+}

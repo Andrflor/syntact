@@ -1,0 +1,7 @@
+{
+  "name": "access_reads_answer",
+  "description": "An access reads what the binding gives back, not its act.",
+  "source": "s -> {u8:r -> !?  -> 5}\nx -> s.r + 1",
+  "type": "?0 + 1",
+  "expect_errors": []
+}

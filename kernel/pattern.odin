@@ -19,7 +19,11 @@ import "core:fmt"
 // non-exhaustive: `[~]rest` must be proven, rest being the values no cover takes.
 
 pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
-	target := normal(k, p.target)
+	return pattern_on(k, normal(k, p.target), p)
+}
+
+// pattern_on: the pattern p on its target, in normal form.
+pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
 	if is_invalid(target) do return target
 	reached, rest, invalid := reaches(k, target, p.branches)
 	if invalid != nil do return invalid
@@ -149,12 +153,12 @@ cover_pieces :: proc(k: ^Kernel, b: Branch, target: Type) -> map[^Binding]Type {
 		for place, i in shape {
 			part := xs[at:at + lengths[i]]
 			at += lengths[i]
-			pieces[place] = is_run(place) ? Type(run_scope(k, part)) : binding_type(k, part[0])
+			pieces[place] = is_run(place) ? Type(run_scope(k, part)) : binding_value(k, part[0])
 		}
 		return pieces
 	}
 	for v in b.view.bindings {
-		if found, ok := occurrence(xs, v.name, -1, true); ok do pieces[v] = binding_type(k, found)
+		if found, ok := occurrence(xs, v.name, -1, true); ok do pieces[v] = binding_value(k, found)
 	}
 	return pieces
 }

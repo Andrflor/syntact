@@ -1,0 +1,7 @@
+{
+  "name": "effect_gives_nothing",
+  "description": "`!?::none` gives nothing back: no unknown, εₖ(none).",
+  "source": "x -> !?::none",
+  "type": "ε0(none)",
+  "expect_errors": []
+}

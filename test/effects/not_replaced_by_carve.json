@@ -1,0 +1,9 @@
+{
+  "name": "not_replaced_by_carve",
+  "description": "A carve does not replace an effect.",
+  "source": "t -> {w -> !?::none  -> 5}\nx -> t{w -> 0}",
+  "type": "",
+  "expect_errors": [
+    "Invalid_Carve"
+  ]
+}
