@@ -1,0 +1,10 @@
+{
+  "name": "recursion_field_acts",
+  "description": "A binding above the production acts: each call runs it, so each call is an act.",
+  "source": "field -> {u8:n -> ??  w -> !?::none  -> n ? {0 -> 0  -> n + field{n -> n - 1}!}}\nx -> field{n -> 5}!",
+  "type": "ε<field{n -> 5}!>(x, x)",
+  "productions": {
+    "field": "ε0(?0 ? {0 -> 0  -> ε<field{n -> ?0 - 1}!>(x, ?0 + x)})"
+  },
+  "expect_errors": []
+}

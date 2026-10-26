@@ -1,0 +1,7 @@
+{
+  "name": "cross_comparison",
+  "description": "A comparison on an answer decided by its layout, across a second effect.",
+  "source": "x -> {u8:r -> !?  w -> !?::none  -> r < 300}!",
+  "type": "ε0(x::u8, ε1(true))",
+  "expect_errors": []
+}

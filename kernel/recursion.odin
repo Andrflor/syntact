@@ -91,7 +91,19 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	}
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span
+	if root.acting do return call_act(k, out)
 	return out
+}
+
+// as_call: t is a recursive call, or what one that acts gives back.
+as_call :: proc(t: Type) -> (^Collapse, bool) {
+	#partial switch v in t {
+	case ^Collapse:
+		if v.recursive do return v, true
+	case ^Unknown:
+		if v.call != nil do return v.call, true
+	}
+	return nil, false
 }
 
 // solved: t holds no recursive call of the scope.
@@ -108,6 +120,7 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 	case ^Not:
 		return solved(v.term, root)
 	case ^Effect:
+		if v.answer != nil && v.answer.call != nil && !solved(v.answer.call, root) do return false
 		return solved(v.then, root)
 	case ^Pattern:
 		if !solved(v.target, root) do return false
@@ -129,8 +142,8 @@ call_family :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
 
 // is_pending_call: a recursive call whose equation is being given.
 is_pending_call :: proc(t: Type) -> bool {
-	c, ok := t.(^Collapse)
-	if !ok || !c.recursive do return false
+	c, ok := as_call(t)
+	if !ok do return false
 	s, is_scope := c.target.(^Scope)
 	if !is_scope do return false
 	for b in origin(s).bindings do if b.kind == .Product do return b.state == .In_Progress
@@ -146,8 +159,8 @@ equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, o
 	carved := make(map[^Binding]Type)
 	for o in operations_on_calls(e, root) {
 		for a in o.args {
-			c, is_call := a.(^Collapse)
-			if !is_call || !c.recursive do continue
+			c, is_call := as_call(a)
+			if !is_call do continue
 			if s, is_scope := c.target.(^Scope); is_scope do for b in s.changes do carved[b] = nil
 		}
 	}
@@ -175,9 +188,11 @@ base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: b
 	return f.?
 }
 
-// base_cases: the products of e that do not call root.
+// base_cases: the products of e that do not call root, through the acts that wrap
+// them (§4.8).
 base_cases :: proc(e: Type, root: ^Scope) -> []Type {
 	out := make([dynamic]Type)
+	if a, is_effect := e.(^Effect); is_effect && (a.answer == nil || a.answer.call == nil) do return base_cases(a.then, root)
 	if p, is_pattern := e.(^Pattern); is_pattern {
 		for b in p.branches do if solved(b.product, root) do append(&out, ..base_cases(b.product, root))
 	} else if solved(e, root) {
@@ -199,18 +214,25 @@ gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
 	return len(bases) > 0
 }
 
-// recursion_law: the first production of a recursive scope, once given, is solved
-// when it has a closed form. A carve of it is the same equation.
-recursion_law :: proc(k: ^Kernel, b: ^Binding, value: Type) -> Type {
+// production_law: the value of a production. In a recursive scope, the equation —
+// its first production — is given first, and solved when it has a closed form; a
+// carve of it is the same equation. When the equation acts besides its calls — its
+// production, or a binding above it, acts —, each call runs it, so its calls are
+// acts too (§4.8): the production is typed again, on a copy, its calls in the order
+// they are written like any act.
+production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	root := origin(b.scope)
-	if !recursive(root) do return value
-	first, found := first_production(k, b.scope)
-	if !found || first != b do return value
-	if b.scope != root {
-		if p, has := first_production(k, root); has && p.state == .Not_Asked do binding_type(k, p)
-		return value
+	if !recursive(root) do return normal(k, b.value)
+	first, found := first_production(k, root)
+	if found && first != b && first.state == .Not_Asked do binding_type(k, first)
+	value := normal(k, b.value)
+	if first != b do return value
+	if !root.acting && acts(with_acts(k, root, b, value)) {
+		root.acting = true
+		m: Copier
+		value = normal(k, copy_term(k, &m, b.value, b.scope))
 	}
-	return solve(k, b.scope, value)
+	return solve(k, root, value)
 }
 
 // operations_on_calls: the operations of t that take a recursive call of root.
@@ -220,8 +242,8 @@ operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
 		#partial switch v in t {
 		case ^Operation:
 			for a in v.args {
-				c, is_call := a.(^Collapse)
-				if !is_call || !c.recursive do continue
+				c, is_call := as_call(a)
+				if !is_call do continue
 				if s, is_scope := c.target.(^Scope); is_scope && origin(s) == root {
 					append(out, v)
 					break
@@ -249,7 +271,7 @@ operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
 legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
 	next: for sig in signatures(o.op) {
 		for a, i in o.args {
-			if c, is_call := a.(^Collapse); is_call && c.recursive {
+			if _, is_call := as_call(a); is_call {
 				if !family_holds(sig.args[min(i, 1)], f) do continue next
 				continue
 			}

@@ -44,7 +44,7 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 			v := binding_type(k, b)
 			if obligations(k, v) do continue
 			if _, is_scope := v.(^Scope); is_scope do continue
-			if c, is_call := v.(^Collapse); is_call && gives_scopes(k, c) do continue
+			if c, is_call := as_call(given(k, v)); is_call && gives_scopes(k, c) do continue
 			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
 			continue
 		case .Push, .Pull:
@@ -115,7 +115,7 @@ exhaustive :: proc(k: ^Kernel, p: ^Pattern) {
 }
 
 takes_recursive_call :: proc(o: ^Operation) -> bool {
-	for a in o.args do if c, ok := a.(^Collapse); ok && c.recursive do return true
+	for a in o.args do if _, ok := as_call(a); ok do return true
 	return false
 }
 
@@ -124,7 +124,7 @@ takes_recursive_call :: proc(o: ^Operation) -> bool {
 call_applies :: proc(k: ^Kernel, o: ^Operation) -> bool {
 	root: ^Scope
 	for a in o.args {
-		if c, ok := a.(^Collapse); ok && c.recursive {
+		if c, ok := as_call(a); ok {
 			if s, is_scope := c.target.(^Scope); is_scope do root = origin(s)
 		}
 	}

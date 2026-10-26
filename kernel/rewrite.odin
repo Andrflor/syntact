@@ -94,6 +94,8 @@ narrowing :: proc(u: ^Unknown, l: Type) -> Type {
 layout_of :: proc(k: ^Kernel, u: ^Unknown) -> Type {
 	if u.layout != nil do return u.layout
 	if u.written != nil do return normal(k, u.written)
+	// what a recursive call gives back: a value of the family of its equation
+	if u.call != nil do if f, known := call_family(k, u.call); known do return family_term(f)
 	return everything()
 }
 

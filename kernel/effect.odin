@@ -24,6 +24,16 @@ effect_law :: proc(k: ^Kernel, e: ^Effect, then: Type) -> Type {
 	return wrapped(e, e.answer, then)
 }
 
+// call_act: a recursive call of an equation that acts, as an act: x, what it gives
+// back, is bound in what follows it.
+call_act :: proc(k: ^Kernel, c: ^Collapse) -> Type {
+	x := new_unknown(k, nil)
+	x.call = c
+	e := new(Effect)
+	e^ = Effect{-1, x, x, c.span}
+	return e
+}
+
 // wrapped: the effect e, with x what it gives back, wrapping t.
 wrapped :: proc(e: ^Effect, x: ^Unknown, t: Type) -> Type {
 	out := new(Effect)
@@ -141,6 +151,8 @@ with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
 // then the other acts of the production are renewed.
 collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	answers := make([dynamic]^Unknown)
+	// a recursive call that acts is one act, its whole run
+	if recursive(origin(s)) do return renewed(k, product_of(k, s, c), &answers)
 	changes := make(map[^Binding]Type)
 	for b in placed(k, s, .Value) {
 		if b.kind == .Product do break

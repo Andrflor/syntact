@@ -1,0 +1,7 @@
+{
+  "name": "cross_unknown_both_sides",
+  "description": "An unknown read on both sides of an effect: (n + 1) - n = 1.",
+  "source": "n -> ??::u8\nx -> {a -> n + 1  w -> !?::none  -> a - n}!",
+  "type": "ε0(1)",
+  "expect_errors": []
+}

@@ -296,12 +296,26 @@ test_spec :: proc(t: ^testing.T) {
 }
 
 // A case of a corpus: one JSON file. `type`, when given, is the printed type of the
-// last binding.
+// last binding; `productions`, the printed type of the first production of scopes
+// bound in the file, by name.
 Corpus_Case :: struct {
 	name:          string `json:"name"`,
 	source:        string `json:"source"`,
 	type:          string `json:"type"`,
+	productions:   map[string]string `json:"productions"`,
 	expect_errors: []string `json:"expect_errors"`,
+}
+
+// production_type: the printed type of the first production of the scope bound to
+// name in the file.
+production_type :: proc(k: ^Kernel, name: string) -> string {
+	for b in k.root.bindings {
+		if b.name != name do continue
+		s, is_scope := b.value.(^Scope)
+		if !is_scope do return "not a scope"
+		if p, found := first_production(k, s); found do return print_type(binding_type(k, p))
+	}
+	return "no production"
 }
 
 // corpus: the cases of the directory test/<path…>, in the order of their files.
@@ -369,8 +383,9 @@ test_corpus :: proc(t: ^testing.T) {
 }
 
 // The corpus of test/effects (specs/types.md §4.8): a pure computation crosses the
-// effects; none is erased, copied, replaced or reordered. Each source binds `x`
-// last; its type is printed, and the errors are compared by kind. Every case holds.
+// effects; none is erased, copied, replaced or reordered, recursive calls that act
+// included. Each source binds `x` last; its type is printed, and so are the
+// productions a case names; the errors are compared by kind. Every case holds.
 @(test)
 test_effects :: proc(t: ^testing.T) {
 	arena: vmem.Arena
@@ -384,6 +399,10 @@ test_effects :: proc(t: ^testing.T) {
 		last := k.root.bindings[len(k.root.bindings) - 1]
 		got := print_type(binding_type(&k, last))
 		if c.type != "" do testing.expectf(t, got == c.type, "%s: the type is %s, expected %s", c.name, got, c.type)
+		for name, want in c.productions {
+			production := production_type(&k, name)
+			testing.expectf(t, production == want, "%s: the production of %s is %s, expected %s", c.name, name, production, want)
+		}
 		kinds, want := kind_names(k.errors[:]), expected_kinds(c)
 		testing.expectf(t, slice.equal(kinds, want), "%s: errors %v, expected %v (%s)", c.name, kinds, want, describe_errors(k.errors[:]))
 	}

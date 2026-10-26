@@ -95,6 +95,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case Bool:
 		return .Bool, true
 	case ^Unknown:
+		if v.call != nil do return call_family(k, v.call)
 		return layout_family(k, layout_of(k, v))
 	case ^Operation:
 		if v.op == .In do return .Bool, true
@@ -150,7 +151,7 @@ layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
 legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, bool) {
 	next: for sig in signatures(op) {
 		for a, i in args {
-			if c, is_call := a.(^Collapse); is_call && c.recursive {
+			if c, is_call := as_call(a); is_call {
 				if f, known := call_family(k, c); known && !family_holds(sig.args[min(i, 1)], f) do continue next
 				continue
 			}

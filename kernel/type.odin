@@ -69,6 +69,7 @@ Unknown :: struct {
 	written:  Type, // `??::L`: L as written; `C:x -> ??`: the color C; nil: everything
 	layout:   Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
 	instance: ^Scope, // in a carve whose changes its layout names: ?ₖ read in that carve
+	call:     ^Collapse, // what a recursive call that acts gives back (§4.8): a value of its equation
 }
 
 // Effect: εₖ(x, t), the effect written k (§4.8). x is what it gives back, bound in
@@ -243,6 +244,7 @@ Scope :: struct {
 	complete:  bool, // all its bindings are built: all are visible
 	producing: bool, // one of its productions is being built: it may name itself
 	reached:   bool, // asked once: it is checked (check.odin)
+	acting:    bool, // a recursive scope whose equation acts: its calls are acts (§4.8)
 	name:      string, // the binding it is the value of, as written: for printing
 	span:      syn.Span,
 }

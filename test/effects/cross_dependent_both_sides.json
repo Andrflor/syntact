@@ -1,0 +1,7 @@
+{
+  "name": "cross_dependent_both_sides",
+  "description": "a, computed before the second effect, and r combine across it: (r + 1) - r = 1, then 1 * s = s.",
+  "source": "x -> {u8:r -> !?  a -> r + 1  u8:s -> !?  b -> a - r  -> b * s}!",
+  "type": "ε0(x::u8, ε1(y::u8, y))",
+  "expect_errors": []
+}

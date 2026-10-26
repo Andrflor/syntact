@@ -1,0 +1,7 @@
+{
+  "name": "cross_dead_code",
+  "description": "A pure computation between effects that nothing reads is erased; the effects are kept.",
+  "source": "x -> {u8:r -> !?  a -> r * r * r  w -> !?::none  -> 1}!",
+  "type": "ε0(x::u8, ε1(1))",
+  "expect_errors": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "cross_pattern_decided",
+  "description": "A pattern on a value computed before the effect is decided after it.",
+  "source": "x -> {a -> 5  w -> !?::none  -> a ? {5 -> 1  -> 2}}!",
+  "type": "ε0(1)",
+  "expect_errors": []
+}

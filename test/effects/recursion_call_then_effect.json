@@ -1,0 +1,10 @@
+{
+  "name": "recursion_call_then_effect",
+  "description": "A recursive call of an equation that acts is an act: the effect written after the call comes after it.",
+  "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> 3}!",
+  "type": "ε<loop{n -> 3}!>(x, x)",
+  "productions": {
+    "loop": "?0 ? {0 -> 0  -> ε<loop{n -> ?0 - 1}!>(x, ε0(y::u8, y + x))}"
+  },
+  "expect_errors": []
+}

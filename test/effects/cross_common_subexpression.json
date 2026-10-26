@@ -1,0 +1,7 @@
+{
+  "name": "cross_common_subexpression",
+  "description": "r * 2 before the effect w and r * 2 after it are one value: a - b = 0.",
+  "source": "x -> {u8:r -> !?  a -> r * 2  w -> !?::none  b -> r * 2  -> a - b}!",
+  "type": "ε0(x::u8, ε1(0))",
+  "expect_errors": []
+}

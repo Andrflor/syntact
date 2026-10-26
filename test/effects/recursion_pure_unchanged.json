@@ -1,0 +1,10 @@
+{
+  "name": "recursion_pure_unchanged",
+  "description": "An equation that does not act keeps its closed form.",
+  "source": "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\nx -> sum{n -> 5}!",
+  "type": "15",
+  "productions": {
+    "sum": "(?0 + ?0 * ?0) / 2"
+  },
+  "expect_errors": []
+}

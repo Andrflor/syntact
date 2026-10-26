@@ -341,7 +341,7 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if b.value == nil {
 		value = color != nil ? default_of(k, color, b.span, b.color) : None{}
 	} else if b.kind == .Product {
-		value = recursion_law(k, b, normal(k, b.value))
+		value = production_law(k, b)
 	} else {
 		value = normal(k, b.value)
 	}

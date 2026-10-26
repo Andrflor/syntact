@@ -322,6 +322,19 @@ g -> {u8:r -> !?  -> r}
 g! - g!                    = ε₁(x::u8, ε₁(y::u8, x - y))   two runs
 ```
 
+A recursive call of an equation that acts is an act. The equation acts when its
+production, or a binding above it, acts besides its calls: each call runs it. What
+the call gives back is bound in what follows it, and nothing crosses it but the pure;
+the equation has no closed form, it stays (§5.6). An equation that does not act is
+unchanged:
+
+```text
+loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}
+loop{n -> m}!    = m ? {0 -> 0  -> ε<loop{n -> m - 1}!>(x, ε₁(y::u8, x + y))}
+loop{n -> 3}! - loop{n -> 3}!   = ε<loop{n -> 3}!>(x, ε<loop{n -> 3}!>(y, x - y))
+{u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
+```
+
 An effect in a branch is in that branch: it happens only when the branch is taken.
 
 ```text

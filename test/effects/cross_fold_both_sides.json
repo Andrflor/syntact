@@ -1,0 +1,7 @@
+{
+  "name": "cross_fold_both_sides",
+  "description": "The constants on both sides of an effect fold together: 6 + x + 20 = x + 26.",
+  "source": "x -> 2 * 3 + !?::u8 + 4 * 5",
+  "type": "ε0(x::u8, x + 26)",
+  "expect_errors": []
+}

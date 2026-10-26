@@ -1,0 +1,7 @@
+{
+  "name": "cross_constants_between_effects",
+  "description": "A value computed before an effect and one computed between two effects combine: 2 + 6.",
+  "source": "x -> {a -> 2  w -> !?::none  b -> a * 3  v -> !?::none  -> a + b}!",
+  "type": "ε0(ε1(8))",
+  "expect_errors": []
+}

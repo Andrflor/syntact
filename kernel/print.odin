@@ -173,8 +173,15 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		fmt.sbprintf(b, "?%d", v.id)
 		if v.instance != nil do write_changes(b, v.instance) // ?ₖ read in a carve
 	case ^Effect:
-		// εₖ(x::L, t); εₖ(t) when it gives nothing back
-		fmt.sbprintf(b, "ε%d(", v.id)
+		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
+		// call that acts
+		if v.answer != nil && v.answer.call != nil {
+			strings.write_string(b, "ε<")
+			write_type(b, v.answer.call, 0)
+			strings.write_string(b, ">(")
+		} else {
+			fmt.sbprintf(b, "ε%d(", v.id)
+		}
 		gives := v.answer != nil
 		if gives {
 			layout := v.answer.layout != nil ? v.answer.layout : v.answer.written

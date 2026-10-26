@@ -817,6 +817,8 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		y, ok := b.(^Effect)
 		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
 		if x.answer == nil do return same(k, x.then, y.then)
+		if (x.answer.call == nil) != (y.answer.call == nil) do return false
+		if x.answer.call != nil && !same(k, x.answer.call, y.answer.call) do return false
 		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
 		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
 	case ^Or:

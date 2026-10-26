@@ -1,0 +1,7 @@
+{
+  "name": "recursion_closed_form_on_answer",
+  "description": "The closed form applies to what an effect gives back: the optimization crosses the effect.",
+  "source": "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\nx -> {u8:r -> !?  -> sum{n -> r}!}!",
+  "type": "ε0(x::u8, (x + x * x) / 2)",
+  "expect_errors": []
+}
