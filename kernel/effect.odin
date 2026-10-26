@@ -129,38 +129,59 @@ branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 	return out
 }
 
-// with_acts: v, what the production p of s gives — nil: the default production,
-// none, below every binding —, with the acts of the bindings above it, in the order
-// they are written (§4.8). Another production is not run; what is below p is not
-// reached, like code after a return.
-with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
-	acting := make([dynamic]Type)
-	for b in placed(k, s, .Value) {
-		if b == p do break
-		if b.kind == .Product do continue
-		if t := binding_type(k, b); acts(t) do append(&acting, t)
+// acting_above: the bindings of s above its production p — nil: the default one,
+// below every binding — whose value acts, in the order they are written (§4.8). An
+// expansion is computed where it is written, then the bindings it places are.
+// Another production is not run; what is below p is not reached, like code after a
+// return. True when p is reached, placed by an expansion.
+acting_above :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, out: ^[dynamic]^Binding) -> bool {
+	for b in s.bindings {
+		if b == p do return true
+		switch b.kind {
+		case .Product:
+		case .Expand:
+			if b.value == nil && b.color == nil do continue
+			t := binding_type(k, b)
+			if acts(t) do append(out, b)
+			if inner, is_scope := given(k, t).(^Scope); is_scope && acting_above(k, inner, p, out) do return true
+		case .Push, .Pull:
+			if acts(binding_type(k, b)) do append(out, b)
+		}
 	}
-	if len(acting) == 0 do return v
-	append(&acting, v)
-	return sequence(k, nil, acting[:], last_part)
+	return false
 }
 
-// collapsed: s!, one run of s (§4.8): its production, or the default one, with the
-// acts above it. Each act of the run gives back a new answer: a binding of s that
-// acts is carved to its act renewed, so that what names it reads the new answer;
-// then the other acts of the production are renewed.
+// with_acts: v, what the production p of s gives — nil: the default production,
+// none —, with the acts of the bindings above it, in the order they are written.
+with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
+	acting := make([dynamic]^Binding)
+	acting_above(k, s, p, &acting)
+	if len(acting) == 0 do return v
+	parts := make([dynamic]Type)
+	for b in acting do append(&parts, binding_type(k, b))
+	append(&parts, v)
+	return sequence(k, nil, parts[:], last_part)
+}
+
+// collapsed: s!, one run of s (§4.8): the acts of the bindings above its production,
+// in the order they are written, then the production — or the default one, none.
+// Each act of the run gives back a new answer; a binding of s that acts is carved to
+// it, so that what names it reads that answer, and a call takes it as a value.
 collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	answers := make([dynamic]^Unknown)
-	// a recursive call that acts is one act, its whole run
-	if recursive(origin(s)) do return renewed(k, product_of(k, s, c), &answers)
+	p, _ := first_production(k, s)
+	acting := make([dynamic]^Binding)
+	acting_above(k, s, p, &acting)
+	parts := make([dynamic]Type)
 	changes := make(map[^Binding]Type)
-	for b in placed(k, s, .Value) {
-		if b.kind == .Product do break
-		if b.scope != s do continue // placed by an expansion: renewed with the production
-		if t := binding_type(k, b); acts(t) do changes[b] = renewed(k, t, &answers)
+	for b in acting {
+		t := renewed(k, binding_type(k, b), &answers)
+		append(&parts, t)
+		if b.scope == s do changes[b] = given(k, t)
 	}
 	inner := len(changes) > 0 ? carved_copy(k, s, changes) : s
-	return renewed(k, product_of(k, inner, c), &answers)
+	append(&parts, renewed(k, product_of(k, inner, c), &answers))
+	return sequence(k, nil, parts[:], last_part)
 }
 
 last_part :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {

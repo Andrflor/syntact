@@ -1,6 +1,7 @@
 package kernel
 
 import "core:fmt"
+import "core:slice"
 
 // PATTERNS (specs/types.md §6)
 //
@@ -22,9 +23,24 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 	return pattern_on(k, normal(k, p.target), p)
 }
 
-// pattern_on: the pattern p on its target, in normal form.
+// pattern_on: the pattern p on its target, in normal form. A cover is computed when
+// its branch is tested, after the target, on the paths that come to it (§4.8): the
+// pattern is the first branch, then the others,
+//
+//   t ? {c₀ -> p₀  …  cᵢ -> pᵢ  …} = t ? {c₀ -> p₀  …  -> t ? {cᵢ -> pᵢ  …}}
+//
+// so the acts of a cover are those of the first branch of a pattern: computed with
+// the target, before any test.
 pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
 	if is_invalid(target) do return target
+	for b, i in p.branches {
+		if b.cover == nil || !acts(normal(k, b.cover)) do continue
+		if i == 0 do return sequence(k, p, {target, normal(k, b.cover)}, covered)
+		branches := make([dynamic]Branch)
+		append(&branches, ..p.branches[:i])
+		append(&branches, Branch{product = branching(p, p.branches[i:]), span = b.span})
+		return pattern_on(k, target, branching(p, branches[:]))
+	}
 	reached, rest, invalid := reaches(k, target, p.branches)
 	if invalid != nil do return invalid
 	out := make([dynamic]Branch)
@@ -44,6 +60,14 @@ pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
 	r := new(Pattern)
 	r.target, r.branches, r.span = target, out[:], p.span
 	return r
+}
+
+// covered: the pattern t, on its target and its first cover, both computed.
+covered :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
+	p := t.(^Pattern)
+	branches := slice.clone(p.branches)
+	branches[0].cover = parts[1]
+	return pattern_on(k, parts[0], branching(p, branches))
 }
 
 // Reach: a branch that values of the target reach: its cover, the rewrite of its

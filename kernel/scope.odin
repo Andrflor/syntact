@@ -33,7 +33,7 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 			continue
 		}
 		if b.value == nil && b.color == nil do continue
-		v := binding_type(k, b)
+		v := binding_value(k, b) // an expansion of a run places what the run gives
 		#partial switch x in v {
 		case ^Scope:
 			append(&out, ..placed(k, x, view))
@@ -99,8 +99,8 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	return collapsed(k, s, c)
 }
 
-// product_of: what the first production of s gives, or the default one, none, with
-// the acts of the bindings above it (§4.8). A recursive call is never unfolded
+// product_of: what the first production of s gives, before the acts of the bindings
+// above it (§4.8); none without one. A recursive call is never unfolded
 // (recursion.odin).
 product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
@@ -113,8 +113,8 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 		}
 		return recursive_call(k, s, c.span)
 	}
-	if p, found := first_production(k, s); found do return with_acts(k, s, p, product(k, p))
-	return with_acts(k, s, nil, None{})
+	if p, found := first_production(k, s); found do return product(k, p)
+	return None{}
 }
 
 // product: what a production's value gives, before the acts above it.

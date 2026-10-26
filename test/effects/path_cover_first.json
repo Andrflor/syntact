@@ -1,0 +1,7 @@
+{
+  "name": "path_cover_first",
+  "description": "A cover is computed when its branch is tested: the first one, after the target.",
+  "source": "x -> 5 ? {(!?::u8) -> 1  -> 2}",
+  "type": "ε0(x::u8, 5 ? {x -> 1  -> 2})",
+  "expect_errors": []
+}

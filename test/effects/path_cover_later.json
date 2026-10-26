@@ -1,0 +1,7 @@
+{
+  "name": "path_cover_later",
+  "description": "A later cover acts only on the paths that come to its test: not when n is 0.",
+  "source": "n -> ??::u8\nx -> n ? {0 -> 1  (!?::u8) -> 2  -> 3}",
+  "type": "?0 ? {0 -> 1  -> ε0(x::u8, ?0 ? {x -> 2  -> 3})}",
+  "expect_errors": []
+}

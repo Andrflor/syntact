@@ -262,7 +262,9 @@ none in u8    = false
 ### 4.8 Effects
 
 `!?` is an effect. What it does and where it comes from are not written: it is
-there, and no law copies, replaces, erases or reorders it.
+there, and no law copies, replaces, erases or reorders it. Normalization keeps
+exactly the effects that run, in their order, on every path of execution, whether or
+not what they give back is used.
 
 What it gives back is written like the layout of an unknown: `!?::L` gives back a
 value in L; without `::`, in the layout of its color (§5.2). It is an unknown, or
@@ -335,10 +337,25 @@ loop{n -> 3}! - loop{n -> 3}!   = ε<loop{n -> 3}!>(x, ε<loop{n -> 3}!>(y, x - 
 {u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
 ```
 
-An effect in a branch is in that branch: it happens only when the branch is taken.
+A call takes its arguments as values: the acts that give them run before it. An
+expansion is computed where it is written, and the bindings it places run in the
+scope that places them:
 
 ```text
-n ? {0 -> !?::none  -> 5}       ε₁ happens when n is 0
+sum{n -> !?::u8}!              = ε₁(x::u8, x * (x + 1) / 2)
+loop{n -> !?::u8}!             = ε₂(x::u8, ε<loop{n -> x}!>(y, y))
+g -> {w -> !?::none  -> {k -> 1}}
+{...g!, -> 1}!                 = ε₁(1)
+```
+
+An effect in a branch is in that branch: it happens only when the branch is taken.
+A cover is computed when its branch is tested, after the target, on the paths that
+come to it: a pattern is its first branch, then the others,
+
+```text
+n ? {0 -> !?::none  -> 5}                ε₁ happens when n is 0
+t ? {c₀ -> p₀  cᵢ -> pᵢ  …}             = t ? {c₀ -> p₀  -> t ? {cᵢ -> pᵢ  …}}
+n ? {0 -> 1  (!?::u8) -> 2  -> 3}        = n ? {0 -> 1  -> ε₁(x::u8, n ? {x -> 2  -> 3})}
 ```
 
 ## 5. Scopes

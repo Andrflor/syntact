@@ -1,0 +1,7 @@
+{
+  "name": "path_cover_not_reached",
+  "description": "The only path takes the first branch: the second cover is never tested, it does not act.",
+  "source": "x -> 0 ? {0 -> 1  (!?::u8) -> 2  -> 3}",
+  "type": "1",
+  "expect_errors": []
+}

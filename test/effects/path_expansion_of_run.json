@@ -1,0 +1,7 @@
+{
+  "name": "path_expansion_of_run",
+  "description": "An expansion of a run runs it where it is written.",
+  "source": "g -> {w -> !?::none  -> {k -> 1}}\nx -> {...g!, -> 1}!",
+  "type": "ε0(1)",
+  "expect_errors": []
+}
