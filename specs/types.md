@@ -22,10 +22,12 @@
 true  false
 none                       the empty type: the absence of type, itself a type
 ?                          the unknown
+!?                         an effect
 ```
 
 Each `?` written is a distinct unknown, indexed `?₁`, `?₂`. The same unknown comes
-back through a name (§5.2).
+back through a name (§5.2). Each `!?` written is a distinct effect, indexed `ε₁`,
+`ε₂` (§4.8).
 
 ## 2. The algebra
 
@@ -257,6 +259,62 @@ none in u8    = false
 5 in none     = false
 ```
 
+### 4.8 Effects
+
+`!?` is an effect. What it does and where it comes from are not written: it is
+there, and no law copies, replaces, erases or reorders it.
+
+What it gives back is written like the layout of an unknown: `!?::L` gives back a
+value in L; without `::`, in the layout of its color (§5.2). It is an unknown, or
+not: `!?::none` gives nothing back, since `?ₖ::p = p` (§7).
+
+An effect wraps the computation that follows it. `εₖ(x, t)` is the effect εₖ, x
+what it gives back, bound in t; `εₖ(t)` when it gives nothing back. Written alone,
+`!?::L` is `εₖ(x::L, x)`:
+
+```text
+u8:r -> !?          r = ε₁(x::u8, x)
+w -> !?::none       w = ε₂(none)
+```
+
+A pure computation, one that holds no effect, crosses an effect, both ways; what
+names x stays in it. A term that computes on an effect is that effect, wrapping the
+term, and the effects of its parts are in the order they are written:
+
+```text
+εₖ(x, t) op c         = εₖ(x, t op c)               c pure
+c op εₖ(x, t)         = εₖ(x, c op t)
+εₖ(x, a) op εⱼ(y, b)  = εₖ(x, εⱼ(y, a op b))        the effects in the order written
+εₖ(x, t) ? {…}        = εₖ(x, t ? {…})              likewise | & ~ = .. in, and the
+                                                     target of .x ! {…}
+```
+
+The laws of §4 apply to what the effects wrap, never to an effect:
+
+```text
+εₖ(x, t)         ≠ t                        even when t does not name x
+εₖ(x, εⱼ(y, t))  ≠ εⱼ(y, εₖ(x, t))
+εₖ(x, x * 0)     = εₖ(x, 0)                 what it gives back is pure
+```
+
+A scope holds the effects of its bindings until it is collapsed. A production keeps
+the effects of the bindings above it, in the order they are written, even those it
+does not name; what is written below it is not reached, like code after a return. A
+pure binding crosses them:
+
+```text
+{w -> !?::none  -> 5}!                    = ε₁(5)
+{-> 5  w -> !?::none}!                    = 5
+{u8:r -> !?  b -> r + 1  w -> !?::none  a -> 2 * 3  -> a + b}!
+                                          = ε₁(x::u8, ε₂(x + 7))
+```
+
+An effect in a branch is in that branch: it happens only when the branch is taken.
+
+```text
+n ? {0 -> !?::none  -> 5}       ε₁ happens when n is 0
+```
+
 ## 5. Scopes
 
 ### 5.1 A scope is a new type
@@ -288,7 +346,7 @@ u8:n -> ??             n = ?₂::u8          ?? takes the layout of its color
 
 ```text
 {… x -> v …}.x       = v              the last occurrence; x#n: the n-th
-{… -> p …}!          = p              the first production
+{… -> p …}!          = p              the first production, with the effects above it (§4.8)
 {no production}!     = none
 {1 ...{2 3} 4}       = {1 2 3 4}      expansion places the bindings as they are
 s{x -> w}            = s where the first occurrence of x is w
@@ -535,6 +593,13 @@ a verdict, not a type:
   counterexample;
 - **unproven** otherwise: it stays an equation, and the check says so.
 
+An effect is not a value: the verdict is read on what the effects wrap (§4.8).
+
+```text
+u8:y -> {w -> !?::none  -> 5}!     ε₁(5 in u8) = ε₁(true)            ✓
+u8:z -> !?                         ε₁(x::u8, x in u8) = ε₁(x, true)  ✓
+```
+
 The laws that simplify it are those of §4, and these:
 
 ```text
@@ -592,3 +657,5 @@ Where another document says otherwise, this one wins. In particular:
 - The checks of a branch are guarded by the condition that reaches it (§6).
 - A binding without a color imposes the constraints of its uses (§5.4).
 - `a = b` is `a in =b`: there is no `==` and no `!=` (§4.5).
+- No law copies, replaces, erases or reorders an effect; a pure computation crosses
+  it (§4.8).
