@@ -27,6 +27,11 @@ xmm_modrm :: proc(reg, rm: XMMRegister) -> u8 {
 	return 0xC0 | ((u8(reg) & 0x7) << 3) | (u8(rm) & 0x7)
 }
 
+// ucomisd xmm,xmm : 66 0F 2E /r — compares two doubles into ZF/CF (PF on NaN).
+ucomisd_xmm_xmm :: proc(a, b: XMMRegister) {
+	write([]u8{0x66, 0x0F, 0x2E, xmm_modrm(a, b)})
+}
+
 addsd_xmm_xmm :: proc(dst, src: XMMRegister) {
 	write([]u8{0xF2, 0x0F, 0x58, xmm_modrm(dst, src)})
 }

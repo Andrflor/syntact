@@ -125,6 +125,10 @@ Import :: struct {
 	lib, symbol: string,
 	args:        []Machine,
 	result:      Machine,
+	// an integer that comes back: how many of its bits the symbol gives, and
+	// whether they are signed
+	result_bits:   int,
+	result_signed: bool,
 }
 
 Func :: struct {

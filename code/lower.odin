@@ -127,6 +127,7 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 	// with the values the run gave them
 	for b in kernel.placed(l.k, s, .Value) {
 		if b.kind != .Push && b.kind != .Pull do continue
+		if named(b.color, "f32") do return fail(l, "the field `%s` of %s is an f32: only f64 crosses a boundary yet", b.name, imp.symbol)
 		color := kernel.binding_color(l.k, b)
 		m := color != nil ? machine_of_layout(l.k, color) : .None
 		if m == .None do return fail(l, "the field `%s` of %s has no layout the call can pass", b.name, imp.symbol)
@@ -137,8 +138,13 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 		append(&args, a)
 	}
 	imp.args = machines[:]
-	if e.answer != nil do imp.result = machine_of_layout(l.k, kernel.layout_of(l.k, e.answer))
-	if e.answer != nil && imp.result == .None do return fail(l, "what %s gives back has no layout the code holds", imp.symbol)
+	if e.answer != nil {
+		if named(e.answer.written, "f32") do return fail(l, "%s gives back an f32: only f64 crosses a boundary yet", imp.symbol)
+		layout := kernel.layout_of(l.k, e.answer)
+		imp.result = machine_of_layout(l.k, layout)
+		if imp.result == .None do return fail(l, "what %s gives back has no layout the code holds", imp.symbol)
+		if imp.result == .Int do imp.result_bits, imp.result_signed = int_width(layout)
+	}
 	dst := imp.result == .None ? NONE : value(l.f, imp.result)
 	emit(l, Foreign{dst, intern(l.prog, imp), args[:]})
 	if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
@@ -280,6 +286,27 @@ machine_of_layout :: proc(k: ^kernel.Kernel, layout: kernel.Type) -> Machine {
 		return .Text
 	}
 	return .None
+}
+
+// int_width: the bits that hold the integers of a layout, and whether signed: the
+// width an integer that comes back from a symbol is extended from.
+int_width :: proc(layout: kernel.Type) -> (bits: int, signed: bool) {
+	r, is_range := layout.(^kernel.Range)
+	if !is_range do return 64, true
+	lo, has_lo := r.lo.(kernel.Int)
+	hi, has_hi := r.hi.(kernel.Int)
+	if !has_lo || !has_hi do return 64, true
+	for b in ([]uint{8, 16, 32}) {
+		if lo >= 0 && i128(hi) < i128(1) << b do return int(b), false
+		if i128(lo) >= -(i128(1) << (b - 1)) && i128(hi) < i128(1) << (b - 1) do return int(b), true
+	}
+	return 64, lo < 0
+}
+
+// named: t is written as the alias name.
+named :: proc(t: kernel.Type, name: string) -> bool {
+	n, is_name := t.(^kernel.Name)
+	return is_name && n.binding.name == name
 }
 
 string_of :: proc(o: ^kernel.Operation) -> string {
