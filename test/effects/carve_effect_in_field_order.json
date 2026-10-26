@@ -1,0 +1,7 @@
+{
+  "name": "carve_effect_in_field_order",
+  "description": "An effect a carve places takes the place of its field: after the field above it.",
+  "source": "t -> {w -> !?::none  u8:m -> 1  -> m}\nx -> t{m -> !?::u8}!",
+  "type": "ε0(ε1(x::u8, x))",
+  "expect_errors": []
+}

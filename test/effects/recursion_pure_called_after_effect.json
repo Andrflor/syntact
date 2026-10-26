@@ -1,0 +1,7 @@
+{
+  "name": "recursion_pure_called_after_effect",
+  "description": "A pure equation called after an effect keeps its closed form, on the answer.",
+  "source": "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\nx -> {u8:r -> !?  w -> !?::none  -> sum{n -> r}! - sum{n -> r}!}!",
+  "type": "ε0(x::u8, ε1(0))",
+  "expect_errors": []
+}

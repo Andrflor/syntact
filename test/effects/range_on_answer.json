@@ -1,0 +1,7 @@
+{
+  "name": "range_on_answer",
+  "description": "A range bounded by an answer.",
+  "source": "x -> 0..(!?::u8)",
+  "type": "ε0(x::u8, 0..x)",
+  "expect_errors": []
+}

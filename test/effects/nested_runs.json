@@ -1,0 +1,7 @@
+{
+  "name": "nested_runs",
+  "description": "Effects at two levels of collapse, in the order they are written: the inner run, then the outer field.",
+  "source": "x -> {a -> {u8:r -> !?  w -> !?::none  -> r + 1}!  u8:s -> !?  -> a + s}!",
+  "type": "ε0(x::u8, ε1(ε2(y::u8, x + y + 1)))",
+  "expect_errors": []
+}

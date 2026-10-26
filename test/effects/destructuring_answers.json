@@ -1,0 +1,7 @@
+{
+  "name": "destructuring_answers",
+  "description": "A cover reads the pieces of a scope built from answers.",
+  "source": "x -> {\n  u8:r -> !?\n  -> {r 1} ? {\n    {u8:(a) u8:(b)} -> a + b\n    -> 0\n  }\n}!",
+  "type": "ε0(x::u8, x + 1)",
+  "expect_errors": []
+}

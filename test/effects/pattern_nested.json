@@ -1,0 +1,7 @@
+{
+  "name": "pattern_nested",
+  "description": "An effect in a branch of a branch happens only when both are taken.",
+  "source": "n -> ??::u8\nm -> ??::u8\nx -> n ? {0 -> m ? {0 -> !?::none  -> 1}  -> 2}",
+  "type": "?0 ? {0 -> ?1 ? {0 -> ε0(none)  -> 1}  -> 2}",
+  "expect_errors": []
+}

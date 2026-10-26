@@ -1,0 +1,9 @@
+{
+  "name": "carve_nested_not_replaced",
+  "description": "A carve in turn, z{…}, does not replace an effect either.",
+  "source": "t -> {z -> {w -> !?::none  u8:a -> 1}}\nx -> t{z{w -> 0}}",
+  "type": "",
+  "expect_errors": [
+    "Invalid_Carve"
+  ]
+}

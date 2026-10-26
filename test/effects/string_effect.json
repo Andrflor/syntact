@@ -1,0 +1,7 @@
+{
+  "name": "string_effect",
+  "description": "What comes back may be a string; the laws of strings apply to it.",
+  "source": "x -> (!?::string) + \"x\" + \"y\"",
+  "type": "ε0(x::string, x + \"xy\")",
+  "expect_errors": []
+}

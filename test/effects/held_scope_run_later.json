@@ -1,0 +1,7 @@
+{
+  "name": "held_scope_run_later",
+  "description": "Collapsed in turn, the scope runs its effect.",
+  "source": "x -> {-> {w -> !?::none  -> 1}}!!",
+  "type": "ε0(1)",
+  "expect_errors": []
+}

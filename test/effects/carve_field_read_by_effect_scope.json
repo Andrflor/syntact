@@ -1,0 +1,7 @@
+{
+  "name": "carve_field_read_by_effect_scope",
+  "description": "A carve changes the value an effect's continuation reads; the effect stays.",
+  "source": "t -> {u8:m -> 1  u8:r -> !?  -> m + r}\nx -> t{m -> 10}!",
+  "type": "ε0(x::u8, x + 10)",
+  "expect_errors": []
+}

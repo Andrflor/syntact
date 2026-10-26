@@ -1,0 +1,9 @@
+{
+  "name": "check_nested_refuted",
+  "description": "The answer of an inner run reaches the check of the outer: refuted at 255.",
+  "source": "u8:x -> {a -> {u8:r -> !?  -> r}!  -> a + 1}!",
+  "type": "ε0(x::u8, x + 1)",
+  "expect_errors": [
+    "Constraint_Mismatch"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "held_scope_not_run",
+  "description": "A scope a production gives holds its effects: they are not run.",
+  "source": "x -> {-> {w -> !?::none  -> 1}}!",
+  "type": "{w -> ε0(x::none, x)  -> 1}",
+  "expect_errors": []
+}

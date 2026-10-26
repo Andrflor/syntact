@@ -1,0 +1,10 @@
+{
+  "name": "recursion_below_production_ignored",
+  "description": "An effect below the production of a recursive scope is not reached: the equation does not act.",
+  "source": "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}  w -> !?::none}\nx -> sum{n -> 4}!",
+  "type": "10",
+  "productions": {
+    "sum": "(?0 + ?0 * ?0) / 2"
+  },
+  "expect_errors": []
+}

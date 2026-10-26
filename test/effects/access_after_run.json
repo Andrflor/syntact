@@ -1,0 +1,7 @@
+{
+  "name": "access_after_run",
+  "description": "An access on what a run gives reads the answer.",
+  "source": "x -> {u8:r -> !?  -> {a -> r  b -> r + 1}}!.b",
+  "type": "ε0(x::u8, x + 1)",
+  "expect_errors": []
+}

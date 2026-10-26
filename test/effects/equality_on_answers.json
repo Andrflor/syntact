@@ -1,0 +1,7 @@
+{
+  "name": "equality_on_answers",
+  "description": "Two answers are not equal by the laws: the equation stays, the effects in order.",
+  "source": "x -> (!?::u8) = (!?::u8)",
+  "type": "ε0(x::u8, ε1(y::u8, x in =y))",
+  "expect_errors": []
+}

@@ -1,0 +1,9 @@
+{
+  "name": "check_division_unguarded",
+  "description": "The division by an answer that may be 0 is illegal.",
+  "source": "x -> {u8:r -> !?  -> 10 / r}!",
+  "type": "",
+  "expect_errors": [
+    "Invalid_operator"
+  ]
+}

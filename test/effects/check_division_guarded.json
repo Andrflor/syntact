@@ -1,0 +1,7 @@
+{
+  "name": "check_division_guarded",
+  "description": "The division by an answer is legal in the branch where it is not 0.",
+  "source": "x -> {u8:r -> !?  -> r ? {0 -> 0  -> 10 / r}}!",
+  "type": "ε0(x::u8, x ? {0 -> 0  -> 10 / x})",
+  "expect_errors": []
+}

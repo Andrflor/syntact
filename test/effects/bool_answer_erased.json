@@ -1,0 +1,7 @@
+{
+  "name": "bool_answer_erased",
+  "description": "b [&] false = false erases the answer, not the effect.",
+  "source": "x -> (!?::bool) [&] false",
+  "type": "ε0(x::bool, false)",
+  "expect_errors": []
+}

@@ -1,0 +1,9 @@
+{
+  "name": "hole_not_replaced",
+  "description": "A fill does not replace an effect.",
+  "source": "t -> {\n  e <- !?::none\n  -> 1\n}\nx -> t{e <- 0}",
+  "type": "",
+  "expect_errors": [
+    "Invalid_Carve"
+  ]
+}
