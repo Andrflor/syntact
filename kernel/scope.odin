@@ -348,8 +348,10 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		return n
 	case ^Scope:
 		if c, found := m.scopes[v]; found do return c // the scope being copied, named from inside it (`.x`)
-		parent := scope
-		if p, found := m.scopes[v.parent]; found do parent = p
+		// a scope written in what is copied is copied with it; another is a value
+		// from outside — a reference the copy replaced by its type —, as it is
+		parent, inside := m.scopes[v.parent]
+		if !inside do return v
 		return copy_into(k, m, v, parent)
 	case ^Access:
 		a := new(Access)

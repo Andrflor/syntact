@@ -234,6 +234,7 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if !root.acting && acts(with_acts(k, root, b, value)) {
 		root.acting = true
 		m: Copier
+		m.scopes[b.scope] = b.scope // the scopes written in the production are copied
 		value = normal(k, copy_term(k, &m, b.value, b.scope))
 	}
 	return solve(k, root, value)

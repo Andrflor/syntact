@@ -154,6 +154,7 @@ branch_product :: proc(k: ^Kernel, b: Branch, r: Rewrite, target: Type) -> Type 
 	pieces := cover_pieces(k, b, target)
 	if b.scope == nil || len(r) == 0 && len(pieces) == 0 do return rewrite(k, normal(k, b.product), r)
 	m := Copier{outer = r, substitute = true, pieces = pieces}
+	m.scopes[b.scope] = b.scope // the scopes written in the branch are copied
 	return rewrite(k, normal(k, copy_term(k, &m, b.product, b.scope)), r)
 }
 
