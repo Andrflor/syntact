@@ -1,0 +1,7 @@
+{
+  "name": "boundary_argument_renewed",
+  "description": "Two runs of a scope whose call takes an answer: each run's call takes that run's answer.",
+  "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\ng -> {-> libm.sqrt{x -> libm.pow{b -> 2.0  e -> 2.0}!}!}\nx -> g! - g!",
+  "type": "ε<pow{b -> 2.0  e -> 2.0}!>(x::f64, ε<sqrt{x -> x}!>(y::f64, ε<pow{b -> 2.0  e -> 2.0}!>(z::f64, ε<sqrt{x -> z}!>(x3::f64, y - x3))))",
+  "expect_errors": []
+}

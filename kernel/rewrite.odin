@@ -49,7 +49,11 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		if x, found := rewritten(r, v); found do return x
 		return t
 	case ^Effect:
-		return effect_law(k, v, rewrite(k, v.then, r))
+		out := effect_law(k, v, rewrite(k, v.then, r))
+		if e, is_effect := out.(^Effect); is_effect && v.call != nil do e.call = rewrite_call(k, v.call, r)
+		return out
+	case ^Collapse:
+		return rewrite_call(k, v, r)
 	case ^Operation:
 		if is_string_value(t) do return t
 		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
@@ -69,9 +73,28 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		p.branches = make([]Branch, len(v.branches))
 		for b, i in v.branches do p.branches[i] = Branch{cover = b.cover, product = rewrite(k, b.product, r), span = b.span}
 		return pattern_law(k, p)
-	case ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default:
+	case ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return t
+}
+
+// rewrite_call: a call that stays, whose carve gives values over the unknowns
+// rewritten: the call of the carve with those values rewritten.
+rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
+	s, is_scope := c.target.(^Scope)
+	if !is_scope || s.carved == nil do return c
+	changes := make(map[^Binding]Type)
+	moved := false
+	for b, v in s.changes {
+		w := rewrite(k, v, r)
+		changes[b] = w
+		moved ||= !same(k, w, v)
+	}
+	if !moved do return c
+	out := new(Collapse)
+	out^ = c^
+	out.target = carved_copy(k, s.carved, changes)
+	return out
 }
 
 rewrite_all :: proc(k: ^Kernel, ts: []Type, r: Rewrite) -> []Type {
