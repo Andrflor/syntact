@@ -496,7 +496,8 @@ names_itself :: proc(s: ^Scope, t: Type) -> bool {
 defines :: proc(s: ^Scope, b: ^Binding) -> bool {
 	child: ^Scope
 	for sc := s; sc != nil; child, sc = sc, sc.parent {
-		if child != nil && child.producing && !sc.complete && sc.bindings[len(sc.bindings) - 1] == b do return true
+		// a branch is a scope without bindings: it defines nothing
+		if child != nil && child.producing && !sc.complete && len(sc.bindings) > 0 && sc.bindings[len(sc.bindings) - 1] == b do return true
 	}
 	return false
 }

@@ -192,6 +192,8 @@ SPEC_CASES := []Spec_Case {
 	{"same -> {u8:n -> ??  -> same{n -> n}!}", "", {.Infinite_Recursion}},
 	{"head -> {-> head! ? {0 -> 1  -> 2}}", "", {.Infinite_Recursion}},
 	{"lazy -> {-> {x -> lazy!}}", "", {}},
+	// a self-call in a scope written in a branch: a branch defines nothing
+	{"say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> 1  -> 1 + say{n -> n - 1}!}!}}\nx -> say{n -> 3}!", "3", {}},
 	// a character that does not print is shown by its code
 	{"x -> char & ~'\\0'", "'\\x01'..", {}},
 	{"f -> {u64:n -> 5  -> n ? {0 -> 1  -> n * f{n -> n - 1}!}}\nx -> f{n -> 4}!", "", {}},
