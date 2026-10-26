@@ -1027,7 +1027,8 @@ collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynam
 		if decl != compiler.INVALID_NODE do b = written_binding(&doc.checked, name, ast.node_spans[decl].start)
 	}
 	if b == nil do return
-	target, is_scope := kernel.binding_type(&doc.checked, b).(^kernel.Scope)
+	// the fields of what x gives back: its acts are its scope's (specs/types.md §4.8)
+	target, is_scope := kernel.binding_value(&doc.checked, b).(^kernel.Scope)
 	if !is_scope do return
 	for field in kernel.placed(&doc.checked, target, .Value) {
 		if field.name != "" do append(items, make_completion_item(&doc.checked, field))
@@ -1064,7 +1065,7 @@ make_completion_item :: proc(k: ^kernel.Kernel, b: ^kernel.Binding) -> json.Valu
 	item["insertTextFormat"] = json.Integer(1) // plain text
 
 	ckind := COMPLETION_KIND_VARIABLE
-	if _, is_scope := kernel.binding_type(k, b).(^kernel.Scope); is_scope do ckind = COMPLETION_KIND_MODULE
+	if _, is_scope := kernel.binding_value(k, b).(^kernel.Scope); is_scope do ckind = COMPLETION_KIND_MODULE
 	item["kind"] = json.Integer(ckind)
 	item["detail"] = json.String(shown_type(k, b))
 	return json.Object(item)
