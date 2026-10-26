@@ -1,0 +1,7 @@
+{
+  "name": "cross_string",
+  "description": "The laws of strings cross the effect.",
+  "source": "x -> {w -> !?::none  -> \"ab\" * 3}!",
+  "type": "ε0(\"ababab\")",
+  "expect_errors": []
+}

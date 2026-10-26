@@ -1,0 +1,7 @@
+{
+  "name": "closure_one_run",
+  "description": "A scope given back reads the answer of its run: one run, x - x = 0.",
+  "source": "make -> {u8:r -> !?  -> {value -> r}}\nx -> {m -> make!  -> m.value - m.value}!",
+  "type": "ε0(x::u8, 0)",
+  "expect_errors": []
+}

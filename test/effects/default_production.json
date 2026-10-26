@@ -1,0 +1,7 @@
+{
+  "name": "default_production",
+  "description": "Without production, the default one gives none, with the effects of the bindings: its type is not none.",
+  "source": "x -> {w -> !?::none}!",
+  "type": "ε0(none)",
+  "expect_errors": []
+}

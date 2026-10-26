@@ -1,0 +1,7 @@
+{
+  "name": "check_branch_narrowing",
+  "description": "A branch narrows the answer of an effect like any unknown: x + 1 is in u8 when x < 255.",
+  "source": "u8:x -> {u8:r -> !?  -> r ? {<255 -> r + 1  -> 0}}!",
+  "type": "ε0(x::u8, x ? {..254 -> x + 1  -> 0})",
+  "expect_errors": []
+}

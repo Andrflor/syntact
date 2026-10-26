@@ -1,0 +1,7 @@
+{
+  "name": "production_other_not_run",
+  "description": "Another production is not run: the second keeps the effects above it, not the first one's.",
+  "source": "w -> !?::none\n-> !?::none\n-> 2",
+  "type": "ε0(2)",
+  "expect_errors": []
+}

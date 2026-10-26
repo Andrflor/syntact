@@ -86,24 +86,30 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 	return t
 }
 
-// renewed: t, each of its acts with a new answer: what one run gives back is not
-// what another gives back.
-renewed :: proc(k: ^Kernel, t: Type) -> Type {
+// renewed: t, each of its acts with a new answer, but those of kept, new already;
+// the new ones join kept. What one run gives back is not what another gives back.
+renewed :: proc(k: ^Kernel, t: Type, kept: ^[dynamic]^Unknown) -> Type {
 	#partial switch v in t {
 	case ^Effect:
-		if v.answer == nil do return wrapped(v, nil, renewed(k, v.then))
+		if v.answer == nil || is_kept(kept[:], v.answer) do return wrapped(v, v.answer, renewed(k, v.then, kept))
 		x := new(Unknown)
 		x^ = v.answer^
 		x.id = k.unknowns
 		k.unknowns += 1
-		return wrapped(v, x, renewed(k, rewrite(k, v.then, rewriting(nil, v.answer, x))))
+		append(kept, x)
+		return wrapped(v, x, renewed(k, rewrite(k, v.then, rewriting(nil, v.answer, x)), kept))
 	case ^Pattern:
 		if !acts(v) do return t
 		branches := make([]Branch, len(v.branches))
-		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = renewed(k, b.product), span = b.span}
+		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = renewed(k, b.product, kept), span = b.span}
 		return pattern_law(k, branching(v, branches))
 	}
 	return t
+}
+
+is_kept :: proc(kept: []^Unknown, u: ^Unknown) -> bool {
+	for x in kept do if same_unknown(x, u) do return true
+	return false
 }
 
 // branching: the pattern p, with these branches.
@@ -113,26 +119,36 @@ branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 	return out
 }
 
-// collapsed: s!, one run of s (§4.8): the acts of the bindings above its first
-// production, in the order they are written, then the production. Each act gives
-// back a new answer, and its binding is carved to it, so that what names it reads
-// that answer. What is written below the production is not reached.
-collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
+// with_acts: v, what the production p of s gives — nil: the default production,
+// none, below every binding —, with the acts of the bindings above it, in the order
+// they are written (§4.8). Another production is not run; what is below p is not
+// reached, like code after a return.
+with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
 	acting := make([dynamic]Type)
+	for b in placed(k, s, .Value) {
+		if b == p do break
+		if b.kind == .Product do continue
+		if t := binding_type(k, b); acts(t) do append(&acting, t)
+	}
+	if len(acting) == 0 do return v
+	append(&acting, v)
+	return sequence(k, nil, acting[:], last_part)
+}
+
+// collapsed: s!, one run of s (§4.8): its production, or the default one, with the
+// acts above it. Each act of the run gives back a new answer: a binding of s that
+// acts is carved to its act renewed, so that what names it reads the new answer;
+// then the other acts of the production are renewed.
+collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
+	answers := make([dynamic]^Unknown)
 	changes := make(map[^Binding]Type)
 	for b in placed(k, s, .Value) {
 		if b.kind == .Product do break
-		t := binding_type(k, b)
-		if !acts(t) do continue
-		t = renewed(k, t)
-		append(&acting, t)
-		// a binding an expansion places is not carved: no name reads it here
-		if b.scope == s do changes[b] = given(k, t)
+		if b.scope != s do continue // placed by an expansion: renewed with the production
+		if t := binding_type(k, b); acts(t) do changes[b] = renewed(k, t, &answers)
 	}
-	if len(acting) == 0 do return renewed(k, product_of(k, s, c))
 	inner := len(changes) > 0 ? carved_copy(k, s, changes) : s
-	append(&acting, renewed(k, product_of(k, inner, c)))
-	return sequence(k, nil, acting[:], last_part)
+	return renewed(k, product_of(k, inner, c), &answers)
 }
 
 last_part :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {

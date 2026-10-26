@@ -228,6 +228,7 @@ Binding :: struct {
 	carved:      bool, // in a copy: its value is the carve's
 	typed_color: Type,
 	typed_value: Type,
+	typed_product: Type, // a production: what its value gives, before the acts above it
 	state:       Typing,
 }
 

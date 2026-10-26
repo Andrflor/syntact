@@ -99,8 +99,9 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	return collapsed(k, s, c)
 }
 
-// product_of: what the first production of s gives; none without one. A recursive
-// call is never unfolded (recursion.odin).
+// product_of: what the first production of s gives, or the default one, none, with
+// the acts of the bindings above it (§4.8). A recursive call is never unfolded
+// (recursion.odin).
 product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
 	// solution, or it stays. A carve collapsed where it is written asks its
@@ -112,8 +113,15 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 		}
 		return recursive_call(k, s, c.span)
 	}
-	if p, found := first_production(k, s); found do return binding_type(k, p)
-	return None{}
+	if p, found := first_production(k, s); found do return with_acts(k, s, p, product(k, p))
+	return with_acts(k, s, nil, None{})
+}
+
+// product: what a production's value gives, before the acts above it.
+product :: proc(k: ^Kernel, p: ^Binding) -> Type {
+	t := binding_type(k, p)
+	if p.state != .Done do return t // asked while it is given: the problem
+	return p.typed_product
 }
 
 // --- carving (§5.3) ---
@@ -529,7 +537,7 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 // produced shape admits through its colors; another produced value, only itself.
 produced :: proc(k: ^Kernel, x: Type, p: ^Binding) -> Type {
 	if p.value == nil && p.color != nil do return in_law(k, x, binding_color(k, p))
-	v := binding_type(k, p)
+	v := binding_value(k, p)
 	if s, ok := v.(^Scope); ok && is_shape(k, s) do return admits(k, x, s)
 	return equal_law(k, x, v)
 }

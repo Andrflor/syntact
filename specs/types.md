@@ -297,13 +297,16 @@ The laws of §4 apply to what the effects wrap, never to an effect:
 εₖ(x, x * 0)     = εₖ(x, 0)                 what it gives back is pure
 ```
 
-A scope holds the effects of its bindings until it is collapsed. A production keeps
-the effects of the bindings above it, in the order they are written, even those it
-does not name; what is written below it is not reached, like code after a return. A
-pure binding crosses them:
+A scope holds the effects of its bindings until it is collapsed. The type of a
+production is what it gives, with the effects of the bindings above it, in the order
+they are written, even those it does not name; another production is not run, and
+what is written below it is not reached, like code after a return. Without
+production, the default one gives none, with the effects of the bindings: its type is
+not none. A pure binding crosses them:
 
 ```text
 {w -> !?::none  -> 5}!                    = ε₁(5)
+{w -> !?::none}!                          = ε₁(none)
 {-> 5  w -> !?::none}!                    = 5
 {u8:r -> !?  b -> r + 1  w -> !?::none  a -> 2 * 3  -> a + b}!
                                           = ε₁(x::u8, ε₂(x + 7))
@@ -357,7 +360,7 @@ u8:n -> ??             n = ?₂::u8          ?? takes the layout of its color
 ```text
 {… x -> v …}.x       = v              the last occurrence; x#n: the n-th
 {… -> p …}!          = p              the first production, with the effects above it (§4.8)
-{no production}!     = none
+{no production}!     = none             with the effects of its bindings (§4.8)
 {1 ...{2 3} 4}       = {1 2 3 4}      expansion places the bindings as they are
 s{x -> w}            = s where the first occurrence of x is w
 ```

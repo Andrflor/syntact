@@ -1,0 +1,7 @@
+{
+  "name": "expansion_order",
+  "description": "The effects an expansion places are in the place it is written.",
+  "source": "e -> {w -> !?::none}\nx -> {...e, u8:r -> !?, -> r}!",
+  "type": "ε0(ε1(x::u8, x))",
+  "expect_errors": []
+}

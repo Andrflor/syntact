@@ -1,0 +1,7 @@
+{
+  "name": "default_production_answers",
+  "description": "The default production keeps every effect, in order, answers included.",
+  "source": "x -> {u8:r -> !?  w -> !?::none}!",
+  "type": "ε0(x::u8, ε1(none))",
+  "expect_errors": []
+}

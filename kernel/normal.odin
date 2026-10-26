@@ -345,6 +345,12 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	} else {
 		value = normal(k, b.value)
 	}
+	// a production keeps the acts of the bindings above it, even those it does not
+	// name (§4.8)
+	if b.kind == .Product {
+		b.typed_product = value
+		value = with_acts(k, b.scope, b, value)
+	}
 	// the color flows down into the value (§5.4): a shape, or the solution of a
 	// recursive scope, which is one
 	if shape, ok := color.(^Scope); ok && b.kind == .Push {

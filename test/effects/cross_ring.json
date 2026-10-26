@@ -1,0 +1,7 @@
+{
+  "name": "cross_ring",
+  "description": "The laws of the ring cross the effects: (r + t) - (t + r) = 0, the effects in order.",
+  "source": "x -> {u8:r -> !?  u8:t -> !?  -> (r + t) - (t + r)}!",
+  "type": "ε0(x::u8, ε1(y::u8, 0))",
+  "expect_errors": []
+}

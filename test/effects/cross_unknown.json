@@ -1,0 +1,7 @@
+{
+  "name": "cross_unknown",
+  "description": "An unknown that does not depend on the effect simplifies across it: a - a = 0.",
+  "source": "a -> ??::u8\nx -> {w -> !?::none  -> a - a}!",
+  "type": "ε0(0)",
+  "expect_errors": []
+}

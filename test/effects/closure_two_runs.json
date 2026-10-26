@@ -1,0 +1,7 @@
+{
+  "name": "closure_two_runs",
+  "description": "Two runs give back two scopes, each reading its own answer.",
+  "source": "make -> {u8:r -> !?  -> {value -> r}}\nx -> make!.value + make!.value",
+  "type": "ε0(x::u8, ε0(y::u8, x + y))",
+  "expect_errors": []
+}

@@ -1,0 +1,7 @@
+{
+  "name": "cross_pattern",
+  "description": "A pattern on a known value crosses the effect.",
+  "source": "x -> {u8:r -> !?  -> 3 ? {3 -> r  -> 0}}!",
+  "type": "ε0(x::u8, x)",
+  "expect_errors": []
+}

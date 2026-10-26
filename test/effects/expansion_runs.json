@@ -1,0 +1,7 @@
+{
+  "name": "expansion_runs",
+  "description": "Each run renews the effects an expansion places.",
+  "source": "e -> {w -> !?::none}\ns -> {...e, -> 1}\nx -> s! + s!",
+  "type": "ε0(ε0(2))",
+  "expect_errors": []
+}

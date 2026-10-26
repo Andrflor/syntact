@@ -1,0 +1,7 @@
+{
+  "name": "cross_recursion",
+  "description": "A closed form crosses an effect it does not depend on.",
+  "source": "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\nx -> {w -> !?::none  -> sum{n -> 5}!}!",
+  "type": "ε0(15)",
+  "expect_errors": []
+}

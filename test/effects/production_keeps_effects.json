@@ -1,0 +1,7 @@
+{
+  "name": "production_keeps_effects",
+  "description": "The type of a production holds the effects of the bindings above it, even those it does not name.",
+  "source": "u8:r -> !?\nw -> !?::none\n-> r + 1",
+  "type": "ε0(x::u8, ε1(x + 1))",
+  "expect_errors": []
+}
