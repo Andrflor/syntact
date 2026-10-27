@@ -1,15 +1,16 @@
 package code_x64
 
 import code ".."
+import mir "../mir"
 import enc "asm"
 import "core:os"
 
 // THE MACHINE CODE OF A PROGRAM
 //
 // The code of a program (code/) for x86-64, on the encoder, the image writer and the
-// System V ABI of code/x64/asm. Each value has its slot in the frame of its
-// function: an instruction loads its operands into scratch registers, computes, and
-// stores its result. A call of a symbol goes through its slot of the GOT, which the
+// System V ABI of code/x64/asm. Each function is laid out in blocks, its registers
+// given places by code/mir, then each instruction chosen for the machine
+// (function.odin). A call of a symbol goes through its slot of the GOT, which the
 // loader fills.
 //
 // The image starts at a stub: it reads the inputs of the program from the command
@@ -62,7 +63,8 @@ image_of :: proc(p: ^code.Program) -> (image: []u8, err: string) {
 	context.user_ptr = &e.buf
 	stub(&e)
 	e.funcs = make([]int, len(p.funcs))
-	for f, i in p.funcs {
+	laid := mir.layout(p)
+	for f, i in laid.funcs {
 		e.funcs[i] = e.buf.len
 		if msg := function(&e, f); msg != "" do return nil, msg
 	}
@@ -287,179 +289,13 @@ write_real :: proc(e: ^Emitter) {
 // call_import: call the symbol of a slot of the GOT, `sse` of its arguments in
 // SSE registers.
 call_import :: proc(e: ^Emitter, slot, sse: int) {
-	enc.movabs_r64_imm64(.RAX, i64(sse))
-	enc.movabs_r64_imm64(.R10, i64(enc.GOT_VADDR + 8 * slot))
-	enc.call_m64(absolute(.R10))
+	if sse == 0 do enc.xor_r32_r32(.EAX, .EAX)
+	else do enc.mov_r32_imm32(.EAX, u32(sse))
+	enc.mov_r32_imm32(.R11D, u32(enc.GOT_VADDR + 8 * slot))
+	enc.call_m64(absolute(.R11))
 }
 
-// --- a function ---
-
-// slot: where a value lives in its function's frame.
-slot :: proc(v: code.Value) -> enc.MemoryAddress {
-	return enc.AddressComponents{base = .RBP, displacement = i32(-8 * (int(v) + 1))}
-}
-
-load :: proc(reg: enc.Register64, v: code.Value) {
-	enc.mov_r64_m64(reg, slot(v))
-}
-
-store :: proc(v: code.Value, reg: enc.Register64) {
-	enc.mov_m64_r64(slot(v), reg)
-}
-
-function :: proc(e: ^Emitter, f: ^code.Func) -> string {
-	frame := (8 * len(f.kinds) + 15) & ~int(15)
-	enc.push_r64(.RBP)
-	enc.mov_r64_r64(.RBP, .RSP)
-	if frame > 0 do enc.sub_r64_imm32(.RSP, u32(frame))
-	// the parameters, v0…, from the registers the System V ABI gives them
-	assignment, msg := assign(f.params)
-	if msg != "" do return msg
-	for loc, i in assignment.locations {
-		switch loc.class {
-		case .Integer:
-			store(code.Value(i), enc.SYSV_INT_ARGS[loc.register])
-		case .SSE:
-			enc.movq_r64_xmm(.RAX, enc.SYSV_SSE_ARGS[loc.register])
-			store(code.Value(i), .RAX)
-		case .Stack:
-		}
-	}
-	loops := make([dynamic]Loop_Head)
-	if msg := body(e, f, f.body, &loops); msg != "" do return msg
-	if f.body.value == code.NONE do enc.xor_r64_r64(.RAX, .RAX)
-	else do load(.RAX, f.body.value)
-	enc.mov_r64_r64(.RSP, .RBP)
-	enc.pop_r64(.RBP)
-	enc.ret()
-	return ""
-}
-
-// Loop_Head: a loop the code is in: where its body starts, and its parameters.
-Loop_Head :: struct {
-	at:     int,
-	params: []code.Value,
-}
-
-// body: the instructions of a body, in order; a match and a loop laid out with
-// jumps.
-body :: proc(e: ^Emitter, f: ^code.Func, b: code.Body, loops: ^[dynamic]Loop_Head) -> string {
-	for inst in b.insts {
-		switch i in inst {
-		case code.Const:
-			enc.movabs_r64_imm64(.RAX, i.value)
-			store(i.dst, .RAX)
-		case code.Real_Const:
-			enc.movabs_r64_imm64(.RAX, transmute(i64)i.value)
-			store(i.dst, .RAX)
-		case code.Text_Const:
-			enc.movabs_r64_imm64(.RAX, i64(e.rodata_vaddr + e.text_offsets[i.text]))
-			store(i.dst, .RAX)
-		case code.Input:
-			enc.movabs_r64_imm64(.R10, i64(enc.ARGS_TABLE_VADDR + 8 * i.slot))
-			enc.mov_r64_m64(.RAX, absolute(.R10))
-			store(i.dst, .RAX)
-		case code.Unary:
-			load(.RAX, i.a)
-			switch {
-			case i.op == .Neg && f.kinds[i.a].machine == .Real:
-				enc.movabs_r64_imm64(.RCX, 63)
-				enc.btc_r64_r64(.RAX, .RCX)
-			case i.op == .Neg:
-				enc.neg_r64(.RAX)
-			case i.op == .Not:
-				enc.not_r64(.RAX)
-			case:
-				return "a unary operation the machine does not compute"
-			}
-			store(i.dst, .RAX)
-		case code.Binary:
-			load(.RAX, i.a)
-			load(.RCX, i.b)
-			if i.op == .Pow {
-				power(e, f.kinds[i.a].machine == .Real)
-			} else {
-				msg := f.kinds[i.a].machine == .Real ? real_binary(i.op) : int_binary(i.op)
-				if msg != "" do return msg
-			}
-			store(i.dst, .RAX)
-		case code.In:
-			outside := test_cover(e, f, i.x, i.cover)
-			enc.movabs_r64_imm64(.RAX, 1)
-			done := forward(e, enc.jmp_rel32)
-			for at in outside do land(e, at)
-			enc.xor_r64_r64(.RAX, .RAX)
-			land(e, done)
-			store(i.dst, .RAX)
-		case code.Narrow:
-			load(.RAX, i.src)
-			store(i.dst, .RAX)
-		case code.Foreign:
-			if msg := call_symbol(e, f, i); msg != "" do return msg
-		case code.Call:
-			callee := e.prog.funcs[i.func]
-			assignment, msg := assign(callee.params)
-			if msg != "" do return msg
-			pass(i.args, assignment)
-			enc.call_rel32(0)
-			append(&e.calls, Fixup{here(e) - 4, i.func})
-			if i.dst != code.NONE do store(i.dst, .RAX)
-		case code.Match:
-			ends := make([dynamic]int)
-			for arm, n in i.arms {
-				last := n == len(i.arms) - 1
-				next: []int
-				if !last do next = test_cover(e, f, i.target, arm.cover)
-				if msg := body(e, f, arm.body, loops); msg != "" do return msg
-				if i.dst != code.NONE && arm.body.value != code.NONE {
-					load(.RAX, arm.body.value)
-					store(i.dst, .RAX)
-				}
-				if last do break
-				append(&ends, forward(e, enc.jmp_rel32))
-				for at in next do land(e, at)
-			}
-			for at in ends do land(e, at)
-		case code.Loop:
-			move_all(i.params, i.init)
-			append(loops, Loop_Head{here(e), i.params})
-			if msg := body(e, f, i.body, loops); msg != "" do return msg
-			pop(loops)
-			if i.dst != code.NONE {
-				load(.RAX, i.body.value)
-				store(i.dst, .RAX)
-			}
-		case code.Again:
-			if len(loops) == 0 do return "an Again outside a loop"
-			head := loops[len(loops) - 1]
-			move_all(head.params, i.args)
-			back(e, enc.jmp_rel32, head.at)
-		}
-	}
-	return ""
-}
-
-// move_all: dst take the values of src, all read before any is written: through
-// the stack.
-move_all :: proc(dst, src: []code.Value) {
-	for x in src {
-		load(.RAX, x)
-		enc.push_r64(.RAX)
-	}
-	#reverse for x in dst {
-		enc.pop_r64(.RAX)
-		store(x, .RAX)
-	}
-}
-
-// test_cover: jumps to where the cover does not take the value x; what follows
-// runs when it does.
-test_cover :: proc(e: ^Emitter, f: ^code.Func, x: code.Value, c: code.Cover) -> []int {
-	m := f.kinds[x].machine
-	load(.RAX, x)
-	if m == .Real do enc.movq_xmm_r64(.XMM0, .RAX)
-	return test_loaded(e, m, c)
-}
+// --- tests and calls the stub and the functions share ---
 
 // test_loaded: test_cover, on an integer in rax or a float in xmm0. Each cell is
 // tested in turn: a value in one is in the cells.
@@ -511,120 +347,6 @@ test_loaded :: proc(e: ^Emitter, m: code.Machine, c: code.Cover) -> []int {
 	return outside
 }
 
-// power: rax = rax ** rcx, rcx ≥ 0, by squaring: the bits of the count, from the
-// lowest; on a float, the bits of rax are a double.
-power :: proc(e: ^Emitter, real: bool) {
-	if real {
-		enc.movq_xmm_r64(.XMM0, .RAX)
-		enc.movabs_r64_imm64(.RDX, transmute(i64)f64(1))
-		enc.movq_xmm_r64(.XMM1, .RDX)
-	} else {
-		enc.movabs_r64_imm64(.R8, 1)
-	}
-	top := here(e)
-	enc.test_r64_r64(.RCX, .RCX)
-	done := forward(e, enc.je_rel32)
-	enc.test_r64_imm32(.RCX, 1)
-	even := forward(e, enc.je_rel32)
-	if real do enc.mulsd_xmm_xmm(.XMM1, .XMM0)
-	else do enc.imul_r64_r64(.R8, .RAX)
-	land(e, even)
-	if real do enc.mulsd_xmm_xmm(.XMM0, .XMM0)
-	else do enc.imul_r64_r64(.RAX, .RAX)
-	enc.shr_r64_imm8(.RCX, 1)
-	back(e, enc.jmp_rel32, top)
-	land(e, done)
-	if real do enc.movq_r64_xmm(.RAX, .XMM1)
-	else do enc.mov_r64_r64(.RAX, .R8)
-}
-
-// int_binary: rax = rax op rcx.
-int_binary :: proc(op: code.Op) -> string {
-	switch op {
-	case .Add:
-		enc.add_r64_r64(.RAX, .RCX)
-	case .Sub:
-		enc.sub_r64_r64(.RAX, .RCX)
-	case .Mul:
-		enc.imul_r64_r64(.RAX, .RCX)
-	case .Div:
-		enc.cqo()
-		enc.idiv_r64(.RCX)
-	case .Mod:
-		enc.cqo()
-		enc.idiv_r64(.RCX)
-		enc.mov_r64_r64(.RAX, .RDX)
-	case .And:
-		enc.and_r64_r64(.RAX, .RCX)
-	case .Or:
-		enc.or_r64_r64(.RAX, .RCX)
-	case .Xor:
-		enc.xor_r64_r64(.RAX, .RCX)
-	case .Shl:
-		enc.shl_r64_cl(.RAX)
-	case .Shr:
-		enc.sar_r64_cl(.RAX)
-	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
-		enc.cmp_r64_r64(.RAX, .RCX)
-		#partial switch op {
-		case .Eq:
-			enc.sete_r8(.AL)
-		case .Ne:
-			enc.setne_r8(.AL)
-		case .Lt:
-			enc.setl_r8(.AL)
-		case .Le:
-			enc.setle_r8(.AL)
-		case .Gt:
-			enc.setg_r8(.AL)
-		case .Ge:
-			enc.setge_r8(.AL)
-		}
-		enc.movzx_r64_r8(.RAX, .AL)
-	case .Neg, .Not, .Pow:
-		return "a binary operation the machine does not compute"
-	}
-	return ""
-}
-
-// real_binary: rax = rax op rcx, on the bits of two doubles.
-real_binary :: proc(op: code.Op) -> string {
-	enc.movq_xmm_r64(.XMM0, .RAX)
-	enc.movq_xmm_r64(.XMM1, .RCX)
-	#partial switch op {
-	case .Add:
-		enc.addsd_xmm_xmm(.XMM0, .XMM1)
-	case .Sub:
-		enc.subsd_xmm_xmm(.XMM0, .XMM1)
-	case .Mul:
-		enc.mulsd_xmm_xmm(.XMM0, .XMM1)
-	case .Div:
-		enc.divsd_xmm_xmm(.XMM0, .XMM1)
-	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
-		enc.ucomisd_xmm_xmm(.XMM0, .XMM1)
-		#partial switch op {
-		case .Eq:
-			enc.sete_r8(.AL)
-		case .Ne:
-			enc.setne_r8(.AL)
-		case .Lt:
-			enc.setb_r8(.AL)
-		case .Le:
-			enc.setbe_r8(.AL)
-		case .Gt:
-			enc.seta_r8(.AL)
-		case .Ge:
-			enc.setae_r8(.AL)
-		}
-		enc.movzx_r64_r8(.RAX, .AL)
-		return ""
-	case:
-		return "a float operation the machine does not compute"
-	}
-	enc.movq_r64_xmm(.RAX, .XMM0)
-	return ""
-}
-
 // assign: the registers of the System V ABI for values of these machines; a call
 // that would pass some on the stack is not code yet.
 assign :: proc(machines: []code.Machine) -> (enc.X64_ABI_Assignment, string) {
@@ -638,21 +360,6 @@ assign :: proc(machines: []code.Machine) -> (enc.X64_ABI_Assignment, string) {
 	return assignment, ""
 }
 
-// pass: the arguments in the registers an assignment gives them.
-pass :: proc(args: []code.Value, assignment: enc.X64_ABI_Assignment) {
-	for a, i in args {
-		loc := assignment.locations[i]
-		switch loc.class {
-		case .Integer:
-			load(enc.SYSV_INT_ARGS[loc.register], a)
-		case .SSE:
-			load(.RAX, a)
-			enc.movq_xmm_r64(enc.SYSV_SSE_ARGS[loc.register], .RAX)
-		case .Stack:
-		}
-	}
-}
-
 // CLASSES: the class of the System V ABI that passes a value of each machine.
 CLASSES := #partial [code.Machine]enc.X64_ABI_Class {
 	.Int  = .Integer,
@@ -660,35 +367,3 @@ CLASSES := #partial [code.Machine]enc.X64_ABI_Class {
 	.Text = .Integer,
 }
 
-// call_symbol: the call of a symbol, its arguments in the registers the System V ABI
-// gives them; an integer that comes back is extended from the bits it gives.
-call_symbol :: proc(e: ^Emitter, f: ^code.Func, call: code.Foreign) -> string {
-	imp := e.prog.imports[call.symbol]
-	assignment, msg := assign(imp.args)
-	if msg != "" do return msg
-	pass(call.args, assignment)
-	call_import(e, call.symbol, assignment.sse_count)
-	if call.dst == code.NONE do return ""
-	switch imp.result {
-	case .Real:
-		enc.movq_r64_xmm(.RAX, .XMM0)
-	case .Int:
-		switch {
-		case imp.result_bits == 32 && imp.result_signed:
-			enc.movsxd_r64_r32(.RAX, .EAX)
-		case imp.result_bits == 32:
-			enc.mov_r32_r32(.EAX, .EAX)
-		case imp.result_bits == 16 && imp.result_signed:
-			enc.movsx_r64_r16(.RAX, .AX)
-		case imp.result_bits == 16:
-			enc.movzx_r64_r16(.RAX, .AX)
-		case imp.result_bits == 8 && imp.result_signed:
-			enc.movsx_r64_r8(.RAX, .AL)
-		case imp.result_bits == 8:
-			enc.movzx_r64_r8(.RAX, .AL)
-		}
-	case .Text, .None:
-	}
-	store(call.dst, .RAX)
-	return ""
-}
