@@ -563,16 +563,20 @@ arguments :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (index: int, args: []Val
 	index = function_of(l, kernel.origin(s), c)
 	if l.error != "" do return
 	out := make([dynamic]Value)
+	params := l.prog.funcs[index].params
 	for b in s.bindings {
 		if !is_parameter(b) do continue
-		a := lower(l, kernel.binding_value(l.k, b))
+		start := len(out)
+		given(l, kernel.binding_value(l.k, b), &out)
 		if l.error != "" do return
-		if machine_of(l.f, a) != l.prog.funcs[index].params[len(out)] {
-			fail(l, "the field `%s` of %s is given a %v", b.name, kernel.print_type(c), machine_of(l.f, a))
-			return
+		for a, i in out[start:] {
+			if start + i >= len(params) || machine_of(l.f, a) != params[start + i] {
+				fail(l, "the field `%s` of %s is given a %v", b.name, kernel.print_type(c), machine_of(l.f, a))
+				return
+			}
 		}
-		append(&out, a)
 	}
+	if len(out) != len(params) do fail(l, "%s gives %d values to %d parameters", kernel.print_type(c), len(out), len(params))
 	return index, out[:]
 }
 
@@ -599,18 +603,8 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	machines := make([dynamic]Machine)
 	for b in root.bindings {
 		if !is_parameter(b) do continue
-		layout := kernel.binding_color(l.k, b)
-		if layout == nil {
-			family, has := kernel.family_of(l.k, kernel.binding_value(l.k, b))
-			if !has do return int(fail(l, "the field `%s` of %s is not a value the code passes", b.name, f.name))
-			layout = kernel.family_term(family)
-		}
-		m := machine_of_layout(l.k, layout)
-		if m == .None do return int(fail(l, "the field `%s` of %s is not a value the code passes", b.name, f.name))
-		u := kernel.new_unknown(l.k, layout)
-		changes[b] = u
-		append(&params, u)
-		append(&machines, m)
+		changes[b] = parameter(l, b, f.name, &params, &machines)
+		if l.error != "" do return index
 	}
 	f.params = machines[:]
 	generic, is_scope := kernel.derive(l.k, root, changes, root.span).(^kernel.Scope)
@@ -641,6 +635,59 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	if l.error == "" && machine_of(f, f.body.value) != f.result do fail(l, "%s gives a %v, its calls a %v", f.name, machine_of(f, f.body.value), f.result)
 	l.f, l.bound, l.self, l.insts = outer, outer_bound, outer_self, outer_insts
 	return index
+}
+
+// parameter: the value of the field b of a function, over its parameters: an
+// unknown of its layout — its color, or else the family of its value. A scope of
+// fields is passed as its fields: its value is that scope, each field a parameter
+// in turn.
+parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dynamic]^kernel.Unknown, machines: ^[dynamic]Machine) -> kernel.Type {
+	if s, fields := scope_of_fields(l, b); fields {
+		changes := make(map[^kernel.Binding]kernel.Type)
+		for x in kernel.placed(l.k, s, .Value) {
+			changes[x] = parameter(l, x, name, params, machines)
+			if l.error != "" do return nil
+		}
+		return kernel.derive(l.k, s, changes, s.span)
+	}
+	layout := kernel.binding_color(l.k, b)
+	if layout == nil {
+		family, has := kernel.family_of(l.k, kernel.binding_value(l.k, b))
+		if !has {
+			fail(l, "the field `%s` of %s is not a value the code passes", b.name, name)
+			return nil
+		}
+		layout = kernel.family_term(family)
+	}
+	m := machine_of_layout(l.k, layout)
+	if m == .None {
+		fail(l, "the field `%s` of %s is not a value the code passes", b.name, name)
+		return nil
+	}
+	u := kernel.new_unknown(l.k, layout)
+	append(params, u)
+	append(machines, m)
+	return u
+}
+
+// scope_of_fields: the scope a binding holds — its color when that is a scope,
+// otherwise its value —, when it is only fields.
+scope_of_fields :: proc(l: ^Lowering, b: ^kernel.Binding) -> (^kernel.Scope, bool) {
+	s, is_scope := kernel.binding_color(l.k, b).(^kernel.Scope)
+	if !is_scope do s, is_scope = kernel.binding_value(l.k, b).(^kernel.Scope)
+	if !is_scope do return nil, false
+	for x in kernel.placed(l.k, s, .Value) do if !is_parameter(x) do return nil, false
+	return s, true
+}
+
+// given: the values a field gives the parameters of a function: a scope, the
+// values of its fields in turn.
+given :: proc(l: ^Lowering, t: kernel.Type, out: ^[dynamic]Value) {
+	if s, is_scope := t.(^kernel.Scope); is_scope {
+		for x in kernel.placed(l.k, s, .Value) do given(l, kernel.binding_value(l.k, x), out)
+		return
+	}
+	append(out, lower(l, t))
 }
 
 // crossing: the values that pass a field of a symbol, one in each register the
