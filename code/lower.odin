@@ -20,17 +20,16 @@ import "core:strings"
 // image (specs/types.md §7), and an unknown an arm narrows, ?ₖ::(L & S), is read
 // there through a Narrow.
 //
-// A loop over a counter carries, from turn to turn, the powers of the counter it
-// reads, by their difference — c ** (i + 1) = c * c ** i —, and the quotients of
-// what goes along its orbit, (m / c ** i) / c = m / c ** (i + 1): the closed form
-// is the kernel's, the recurrence the loop's.
+// The code is the normal form, read: what is cheaper to compute — a power of a
+// counter carried from turn to turn rather than computed again — is the algebra of
+// computations' to say (code/calc).
 
 Lowering :: struct {
 	k:       ^kernel.Kernel,
 	prog:    ^Program,
 	f:       ^Func,
 	insts:   ^[dynamic]Inst, // the body the instructions go to
-	bound:   [dynamic]Bound, // in the body: the answers of its effects, the parameters, the narrowings, the terms a loop carries
+	bound:   [dynamic]Bound, // in the body: the answers of its effects, the parameters, the narrowings, the terms computed
 	inputs:  [dynamic]^kernel.Unknown,
 	entry:   [dynamic]Inst, // the program's: the inputs, read once where it starts
 	read:    [dynamic]Value, // the value of each input, read in the entry
@@ -40,8 +39,8 @@ Lowering :: struct {
 }
 
 // Bound: what an unknown stands for in the code: the value an effect gave back, a
-// parameter, or what an arm narrowed one of these to; or what a term a loop carries
-// is in this turn.
+// parameter, or what an arm narrowed one of these to; or the value of a term
+// computed.
 Bound :: struct {
 	unknown: ^kernel.Unknown,
 	term:    kernel.Type,
@@ -316,17 +315,14 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> Value {
 		append(&params, value(l.f, machine_of(l.f, v)))
 		append(&starts, v)
 	}
-	carried := carry(l, f.index, f.start, counter_step(l, f), f.states, kernel.fold_parts(f)[1:])
-	for &c in carried {
-		c.param = value(l.f, machine_of(l.f, c.start))
-		append(&params, c.param)
-		append(&starts, c.start)
-	}
 	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
 	outer, bound := open_body(l, &loop.body)
-	append(&l.bound, Bound{unknown = f.index, value = params[0]})
+	// k at the head of a turn: any point of the orbit, the last too; its layout,
+	// out of stop, is the step's, read through a Narrow
+	head := new_clone(f.index^)
+	head.layout, head.written, head.call = nil, nil, nil
+	append(&l.bound, Bound{unknown = head, value = params[0]})
 	for x, i in f.states do append(&l.bound, Bound{unknown = x, value = params[i + 1]})
-	for c in carried do append(&l.bound, Bound{term = c.term, value = c.param})
 	arms := make([]Arm, 2)
 	arms[0].body = lower_body(l, f.value, false)
 	arms[1].body.value = NONE // it ends in an Again
@@ -340,7 +336,6 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> Value {
 		append(&args, x)
 	}
 	args[0] = lower(l, f.next)
-	for c in carried do append(&args, binary(l, c.op, c.param, constant(l, c.factor), .Int))
 	emit(l, Again{args[:]})
 	close_body(l, step_outer, step_bound)
 	// where k stops: the cells of stop, or its membership
@@ -370,19 +365,9 @@ least :: proc(l: ^Lowering, m: ^kernel.Least) -> Value {
 	starts[0] = constant(l, 0)
 	params[0] = value(l.f, .Int)
 	l.f.kinds[params[0]].bounds = {0, max(i128)}
-	carried := carry(l, m.index, kernel.Int(0), 1, nil, {m.holds})
-	all_params, all_starts := make([dynamic]Value), make([dynamic]Value)
-	append(&all_params, ..params)
-	append(&all_starts, ..starts)
-	for &c in carried {
-		c.param = value(l.f, machine_of(l.f, c.start))
-		append(&all_params, c.param)
-		append(&all_starts, c.start)
-	}
-	loop := Loop{dst = NONE, params = all_params[:], init = all_starts[:]}
+	loop := Loop{dst = NONE, params = params, init = starts}
 	outer, bound := open_body(l, &loop.body)
 	append(&l.bound, Bound{unknown = m.index, value = params[0]})
-	for c in carried do append(&l.bound, Bound{term = c.term, value = c.param})
 	holds := lower(l, m.holds)
 	arms := make([]Arm, 2)
 	taken := make([]Bounds, 1)
@@ -390,10 +375,9 @@ least :: proc(l: ^Lowering, m: ^kernel.Least) -> Value {
 	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), value = params[0]}}
 	arms[1].body.value = NONE // it ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
-	next := make([dynamic]Value)
-	append(&next, binary(l, .Add, params[0], constant(l, 1), .Int))
-	for c in carried do append(&next, binary(l, c.op, c.param, constant(l, c.factor), .Int))
-	emit(l, Again{next[:]})
+	next := make([]Value, 1)
+	next[0] = binary(l, .Add, params[0], constant(l, 1), .Int)
+	emit(l, Again{next})
 	close_body(l, step_outer, step_bound)
 	loop.body.value = close_match(l, holds, arms)
 	close_body(l, outer, bound)
@@ -422,19 +406,9 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 	params, starts := make([]Value, 2), make([]Value, 2)
 	params[0], params[1] = value(l.f, .Int), value(l.f, machine)
 	starts[0], starts[1] = lo, start
-	carried := carry(l, s.index, s.lo, 1, nil, {s.term})
-	all_params, all_starts := make([dynamic]Value), make([dynamic]Value)
-	append(&all_params, ..params)
-	append(&all_starts, ..starts)
-	for &c in carried {
-		c.param = value(l.f, machine_of(l.f, c.start))
-		append(&all_params, c.param)
-		append(&all_starts, c.start)
-	}
-	loop := Loop{dst = NONE, params = all_params[:], init = all_starts[:]}
+	loop := Loop{dst = NONE, params = params, init = starts}
 	outer, bound := open_body(l, &loop.body)
 	append(&l.bound, Bound{unknown = s.index, value = params[0]})
-	for c in carried do append(&l.bound, Bound{term = c.term, value = c.param})
 	past := binary(l, .Gt, params[0], hi, .Int)
 	arms := make([]Arm, 2)
 	taken := make([]Bounds, 1)
@@ -444,11 +418,10 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	t := lower(l, s.term)
 	if l.error == "" && machine_of(l.f, t) != machine do fail(l, "the term of a series is a %v, its value a %v", machine_of(l.f, t), machine)
-	next := make([dynamic]Value)
-	append(&next, binary(l, .Add, params[0], constant(l, 1), .Int))
-	append(&next, binary(l, s.op == .Add ? .Add : .Mul, params[1], t, machine))
-	for c in carried do append(&next, binary(l, c.op, c.param, constant(l, c.factor), .Int))
-	emit(l, Again{next[:]})
+	next := make([]Value, 2)
+	next[0] = binary(l, .Add, params[0], constant(l, 1), .Int)
+	next[1] = binary(l, s.op == .Add ? .Add : .Mul, params[1], t, machine)
+	emit(l, Again{next})
 	close_body(l, step_outer, step_bound)
 	loop.body.value = close_match(l, past, arms)
 	close_body(l, outer, bound)
@@ -535,90 +508,6 @@ algebraic_product :: proc(l: ^Lowering, a, b: []Value, c: []i128) -> []Value {
 	out := make([]Value, d)
 	for j in 0 ..< d do out[j] = full[j] == NONE ? constant(l, 0) : full[j]
 	return out
-}
-
-// Carried: a term of the counter a loop carries from turn to turn — its value
-// where the loop starts, then multiplied or divided by a factor at each turn.
-Carried :: struct {
-	term:   kernel.Type,
-	start:  Value,
-	op:     Op, // .Mul, .Div
-	factor: i64,
-	param:  Value,
-}
-
-// carry: the terms of the parts a loop over i reads that it carries, i moving by
-// step at each turn: a power c ** e(i), e affine in i, times or over c ** δ as e
-// moves by δ; a quotient x / c ** e(i), x read by no turn, over c ** δ while e
-// grows. Their values where i starts, lowered here, before the loop.
-carry :: proc(l: ^Lowering, i: ^kernel.Unknown, start: kernel.Type, step: i128, states: []^kernel.Unknown, parts: []kernel.Type) -> []Carried {
-	out := make([dynamic]Carried)
-	if step == 0 do return out[:]
-	visit :: proc(l: ^Lowering, i: ^kernel.Unknown, step: i128, states: []^kernel.Unknown, t: kernel.Type, out: ^[dynamic]Carried) {
-		#partial switch v in t {
-		case ^kernel.Operation:
-			if c, found := difference(l, i, step, states, v); found {
-				for x in out do if kernel.same(l.k, x.term, t) do return
-				c.term = t
-				append(out, c)
-				return
-			}
-			for a in v.args do visit(l, i, step, states, a, out)
-		case ^kernel.Pattern:
-			visit(l, i, step, states, v.target, out)
-			for b in v.branches {
-				if b.cover != nil do visit(l, i, step, states, b.cover, out)
-				visit(l, i, step, states, b.product, out)
-			}
-		case ^kernel.Effect:
-			visit(l, i, step, states, v.then, out)
-		case ^kernel.Or:
-			for a in v.terms do visit(l, i, step, states, a, out)
-		case ^kernel.And:
-			for a in v.terms do visit(l, i, step, states, a, out)
-		case ^kernel.Not:
-			visit(l, i, step, states, v.term, out)
-		}
-	}
-	for t in parts do visit(l, i, step, states, t, &out)
-	for &c in out do c.start = lower(l, kernel.rewrite(l.k, c.term, kernel.rewriting(nil, i, start)))
-	return out[:]
-}
-
-// difference: how the loop carries the operation o, when it does.
-difference :: proc(l: ^Lowering, i: ^kernel.Unknown, step: i128, states: []^kernel.Unknown, o: ^kernel.Operation) -> (c: Carried, ok: bool) {
-	// c ** e(i): its base, and how e moves at a turn
-	power :: proc(i: ^kernel.Unknown, step: i128, t: kernel.Type) -> (base, delta: i128, ok: bool) {
-		p, is_op := t.(^kernel.Operation)
-		if !is_op || p.op != .Pow do return
-		b := p.args[0].(kernel.Int) or_return
-		alpha, _ := kernel.affine_in(p.args[1], i) or_return
-		a := alpha.(kernel.Int) or_return
-		if a == 0 || b == 0 do return
-		return i128(b), i128(a) * step, true
-	}
-	factor :: proc(base, delta: i128) -> (i64, bool) {
-		f, ok := kernel.int_power(base, abs(delta))
-		if !ok || f < i128(min(i64)) || f > i128(max(i64)) do return 0, false
-		return i64(f), true
-	}
-	if base, delta, is_power := power(i, step, o); is_power {
-		f := factor(base, delta) or_return
-		return Carried{op = delta > 0 ? .Mul : .Div, factor = f}, true
-	}
-	if o.op != .Div do return
-	base, delta := power(i, step, o.args[1]) or_return
-	if delta <= 0 || kernel.reads(l.k, o.args[0], i) do return
-	for x in states do if kernel.reads(l.k, o.args[0], x) do return
-	f := factor(base, delta) or_return
-	return Carried{op = .Div, factor = f}, true
-}
-
-// counter_step: how a fold's index moves at a turn: 1, -1, or 0 along another orbit.
-counter_step :: proc(l: ^Lowering, f: ^kernel.Fold) -> i128 {
-	if kernel.same(l.k, f.next, kernel.op(l.k, .Add, f.index, kernel.Int(1))) do return 1
-	if kernel.same(l.k, f.next, kernel.op(l.k, .Sub, f.index, kernel.Int(1))) do return -1
-	return 0
 }
 
 // gives_answer: what the effect wraps is what it gives back.
