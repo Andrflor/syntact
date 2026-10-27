@@ -23,16 +23,18 @@ Law :: proc(g: ^Graph, c: Class, n: Node)
 
 LAWS := [?]Law{known, neutral, absorbing, strength, commuted, conversed, gathered, chained}
 
-// saturate: the laws on every node, until none adds a node nor merges two classes,
-// or the graph holds budget nodes.
+// saturate: the laws on every node, and those of the loops (loops.odin), until none
+// adds a node nor merges two classes, or the graph holds budget nodes.
 saturate :: proc(g: ^Graph, budget: int) {
 	for len(g.nodes) < budget {
 		nodes, merges := len(g.nodes), g.merges
 		index_members(g)
+		g.scope = scopes(g)
 		for id in 0 ..< nodes {
 			n := g.nodes[id]
 			for law in LAWS do law(g, find(g, g.home[id]), n)
 		}
+		loop_laws(g)
 		rebuild(g)
 		if len(g.nodes) == nodes && g.merges == merges do return
 	}

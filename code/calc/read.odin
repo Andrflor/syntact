@@ -198,38 +198,46 @@ read_match :: proc(r: ^Reader, i: code.Match) {
 read_loop :: proc(r: ^Reader, i: code.Loop) {
 	g := r.g
 	l := len(g.loops)
-	state := has_effects(g.prog, i.body)
-	machines := make([dynamic]code.Machine)
-	for x in i.params do append(&machines, g.func.kinds[x].machine)
-	if state do append(&machines, code.Machine.None)
-	append(&g.loops, Loop_Info{parent = r.region, machines = machines[:], value = i.dst != code.NONE, state = state})
+	info := Loop_Info{parent = r.region, state = -1, value = i.dst != code.NONE}
+	for x in i.params {
+		append(&info.machines, g.func.kinds[x].machine)
+		append(&info.carried, nil)
+	}
+	if has_effects(g.prog, i.body) {
+		info.state = len(info.machines)
+		append(&info.machines, code.Machine.None)
+		append(&info.carried, nil)
+	}
+	append(&g.loops, info)
 	args := make([dynamic]Class)
 	for x in i.init do append(&args, r.class[x])
-	if state do append(&args, r.state)
+	if info.state >= 0 do append(&args, r.state)
 	for x, j in i.params do set(r, x, Node{kind = .Param, owner = l, index = j})
 	outer_state, outer_region := r.state, r.region
 	r.region = Region{.Body, l, 0}
-	if state do r.state = add(g, Node{kind = .Param, owner = l, index = len(i.params)})
+	if info.state >= 0 do r.state = add(g, Node{kind = .Param, owner = l, index = info.state})
 	append(&r.loops, l)
 	append(&args, read_tail(r, i.body))
 	pop(&r.loops)
 	r.state, r.region = outer_state, outer_region
 	c := add(g, Node{kind = .Loop, owner = l, args = args[:]})
+	g.loops[l].node = len(g.nodes) - 1
 	if i.dst != code.NONE do set(r, i.dst, Node{kind = .Get, index = 0, args = one(c)})
-	if state do r.state = add(g, Node{kind = .Get, index = i.dst != code.NONE ? 1 : 0, args = one(c)})
+	if info.state >= 0 do r.state = add(g, Node{kind = .Get, index = i.dst != code.NONE ? 1 : 0, args = one(c)})
 }
 
 // read_tail: the body of a turn, up to what ends it.
 read_tail :: proc(r: ^Reader, b: code.Body) -> Class {
 	g := r.g
-	info := g.loops[r.loops[len(r.loops) - 1]]
+	l := r.loops[len(r.loops) - 1]
+	info := g.loops[l]
 	for inst in b.insts {
 		#partial switch i in inst {
 		case code.Again:
 			args := make([dynamic]Class)
 			for a in i.args do append(&args, r.class[a])
-			if info.state do append(&args, r.state)
-			return add(g, Node{kind = .Again, args = args[:]})
+			if info.state >= 0 do append(&args, r.state)
+			return add(g, Node{kind = .Again, owner = l, args = args[:]})
 		case code.Match:
 			if inst_continues(i) do return read_tail_match(r, i)
 		}
@@ -237,8 +245,8 @@ read_tail :: proc(r: ^Reader, b: code.Body) -> Class {
 	}
 	outs := make([dynamic]Class)
 	if info.value do append(&outs, r.class[b.value])
-	if info.state do append(&outs, r.state)
-	return add(g, Node{kind = .Exit, args = outs[:]})
+	if info.state >= 0 do append(&outs, r.state)
+	return add(g, Node{kind = .Exit, owner = l, args = outs[:]})
 }
 
 // read_tail_match: a match whose arms end the turn.
@@ -246,7 +254,7 @@ read_tail_match :: proc(r: ^Reader, i: code.Match) -> Class {
 	g := r.g
 	loop := g.loops[r.loops[len(r.loops) - 1]]
 	m := len(g.matches)
-	append(&g.matches, Match_Info{parent = r.region, covers = covers_of(i), state = loop.state, tail = true})
+	append(&g.matches, Match_Info{parent = r.region, covers = covers_of(i), state = loop.state >= 0, tail = true})
 	args := arms(r, m, i, proc(r: ^Reader, m: int, b: code.Body, outs: ^[dynamic]Class) {
 		append(outs, read_tail(r, b))
 	})

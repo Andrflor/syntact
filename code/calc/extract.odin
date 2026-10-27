@@ -104,7 +104,12 @@ node_cost :: proc(g: ^Graph, costs: ^Costs, n: Node, cost: []f64) -> f64 {
 		return min(out, INFINITE)
 	}
 	switch n.kind {
-	case .Int, .Argument, .Start, .Param, .Arm, .Get, .Narrow, .Again, .Exit:
+	case .Param:
+		// a parameter a law carries: what a turn does to it
+		op, carried := g.loops[n.owner].carried[n.index].?
+		if !carried do return 0
+		return (g.loops[n.owner].machines[n.index] == .Real ? costs.reals : costs.ints)[op]
+	case .Int, .Argument, .Start, .Arm, .Get, .Narrow, .Again, .Exit:
 		return sum(g, cost, n.args)
 	case .Real, .Text, .Input:
 		return costs.load

@@ -50,8 +50,8 @@ Kind :: enum u8 {
 	Call, // index: the function; its arguments, after the state when it has effects — then gives the state after, and the answer
 	Match, // owner: the match; the target, the state when its arms have effects, then what each arm gives
 	Loop, // owner: the loop; what each parameter starts from, then the tail of its body
-	Again, // what each parameter takes next
-	Exit, // what the loop gives: its value, its state
+	Again, // owner: the loop; what each parameter takes next
+	Exit, // owner: the loop; what it gives: its value, its state
 	Get, // index: one of what a node gives
 }
 
@@ -91,13 +91,17 @@ Match_Info :: struct {
 	tail:   bool,
 }
 
-// Loop_Info: a loop: the region it runs in, the machine of each parameter — the
-// state last, None, when its body has effects —, and what it gives.
+// Loop_Info: a loop: the region it runs in, its node, the machine of each parameter
+// by its index — the state's None —, the index of the state, -1 when its body has
+// no effects, how a law carries each parameter — what each turn does to it; nil
+// for the loop's own —, and whether it gives a value.
 Loop_Info :: struct {
 	parent:   Region,
-	machines: []code.Machine,
+	node:     int,
+	machines: [dynamic]code.Machine,
+	state:    int,
+	carried:  [dynamic]Maybe(code.Op),
 	value:    bool,
-	state:    bool,
 }
 
 // Facts: what holds of every computation of a class.
@@ -120,6 +124,7 @@ Graph :: struct {
 	loops:   [dynamic]Loop_Info,
 	merges:  int, // how many merges were made
 	members: [][dynamic]int, // per class: its nodes, as they were when the laws last looked
+	scope:   []Maybe(Region), // per class: where it is defined, then
 }
 
 find :: proc(g: ^Graph, c: Class) -> Class {

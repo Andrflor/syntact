@@ -197,7 +197,8 @@ write_match :: proc(w: ^Writer, c: Class, n: Node) {
 	done(w, c, code.NONE)
 }
 
-// write_loop: a loop: its parameters, from what they start from, then its body.
+// write_loop: a loop: its parameters alive, from what they start from, then its
+// body.
 write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	g := w.g
 	info := g.loops[n.owner]
@@ -205,10 +206,10 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	params := make([dynamic]code.Value)
 	init := make([dynamic]code.Value)
 	for j in 0 ..< count {
+		if !w.p.live[n.owner][j] do continue
 		start := ensure(w, n.args[j])
 		param, read := lookup(g, Node{kind = .Param, owner = n.owner, index = j})
-		state := info.state && j == count - 1
-		if state {
+		if j == info.state {
 			if read do done(w, g.home[param], code.NONE)
 			continue
 		}
@@ -232,7 +233,7 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	loop.dst = read ? fresh(w, value) : code.NONE
 	emit(w, c, loop)
 	if read do done(w, value, loop.dst)
-	if state, has := gives(w, c, info.value ? 1 : 0); has && info.state do done(w, state, code.NONE)
+	if state, has := gives(w, c, info.value ? 1 : 0); has && info.state >= 0 do done(w, state, code.NONE)
 	done(w, c, code.NONE)
 }
 
@@ -240,14 +241,21 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 // when it ends in an Again.
 write_tail :: proc(w: ^Writer, t: Class) -> code.Value {
 	g := w.g
-	info := g.loops[w.loops[len(w.loops) - 1]]
+	l := w.loops[len(w.loops) - 1]
+	info := g.loops[l]
 	n := chosen(w.p, t)^
 	#partial switch n.kind {
 	case .Again:
-		here(w, code.Again{values_of(w, n.args)})
+		args := make([dynamic]code.Value)
+		for a, j in n.args {
+			if !w.p.live[l][j] do continue
+			v := ensure(w, a)
+			if j != info.state do append(&args, v)
+		}
+		here(w, code.Again{args[:]})
 		return code.NONE
 	case .Exit:
-		if info.state do ensure(w, n.args[len(n.args) - 1])
+		if info.state >= 0 do ensure(w, n.args[len(n.args) - 1])
 		return info.value ? ensure(w, n.args[0]) : code.NONE
 	case .Match:
 		m := g.matches[n.owner]

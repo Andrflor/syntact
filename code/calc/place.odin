@@ -24,6 +24,7 @@ Plan :: struct {
 	order: [dynamic]Class, // the classes reached, each after the classes it reads
 	place: []Region,
 	gets:  map[Get_Key]Class, // what a node gives, read
+	live:  [][]bool, // per loop, per parameter: read by what is reached
 	error: string,
 }
 
@@ -40,8 +41,21 @@ chosen :: proc(p: ^Plan, c: Class) -> ^Node {
 // least cost, and the place of each.
 plan :: proc(g: ^Graph, best: []int, roots: []Class) -> ^Plan {
 	p := new_clone(Plan{g = g, best = best, place = make([]Region, len(g.parent))})
+	// the parameters alive: those a computation reached reads, and the state; then
+	// what each Again gives them
+	p.live = make([][]bool, len(g.loops))
+	for info, l in g.loops {
+		p.live[l] = make([]bool, len(info.machines))
+		if info.state >= 0 do p.live[l][info.state] = true
+	}
 	reached := make([]bool, len(g.parent))
-	for c in roots do if c != NO_CLASS do reach(p, c, reached)
+	for {
+		alive := count_live(p)
+		clear(&p.order)
+		for &r in reached do r = false
+		for c in roots do if c != NO_CLASS do reach(p, c, reached)
+		if p.error != "" || count_live(p) == alive do break
+	}
 	if p.error != "" do return p
 	early := make([]Region, len(g.parent))
 	for c in p.order do early[c] = earliest(p, c, early)
@@ -82,8 +96,10 @@ plan :: proc(g: ^Graph, best: []int, roots: []Class) -> ^Plan {
 			for k in 0 ..< len(info.covers) do for a in n.args[first + k * per:][:per] do use(g, late, a, Region{.Arm, n.owner, k})
 		case .Loop:
 			last := len(n.args) - 1
-			for a in n.args[:last] do use(g, late, a, p.place[c])
+			for a, j in n.args[:last] do if p.live[n.owner][j] do use(g, late, a, p.place[c])
 			use(g, late, n.args[last], Region{.Body, n.owner, 0})
+		case .Again:
+			for a, j in n.args do if p.live[n.owner][j] do use(g, late, a, p.place[c])
 		case:
 			for a in n.args do use(g, late, a, p.place[c])
 		}
@@ -101,9 +117,26 @@ reach :: proc(p: ^Plan, c: Class, reached: []bool) {
 		return
 	}
 	n := chosen(p, c)
-	for a in n.args do reach(p, a, reached)
+	#partial switch n.kind {
+	case .Param:
+		p.live[n.owner][n.index] = true
+	case .Again:
+		for a, j in n.args do if p.live[n.owner][j] do reach(p, a, reached)
+	case .Loop:
+		last := len(n.args) - 1
+		for a, j in n.args[:last] do if p.live[n.owner][j] do reach(p, a, reached)
+		reach(p, n.args[last], reached)
+	case:
+		for a in n.args do reach(p, a, reached)
+	}
 	if n.kind == .Get do p.gets[Get_Key{find(p.g, n.args[0]), n.index}] = c
 	append(&p.order, c)
+}
+
+count_live :: proc(p: ^Plan) -> int {
+	out := 0
+	for l in p.live do for x in l do if x do out += 1
+	return out
 }
 
 // pinned: a computation that stays in its region.
