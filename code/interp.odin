@@ -98,6 +98,12 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			for k in 0 ..< kind.lanes do set_lane(&regs[i.dst], kind, k, regs[i.a])
 		case Lanes:
 			for x, k in i.values do regs[i.dst].ints[k] = x
+		case Select:
+			kind := fr.f.kinds[i.dst]
+			for k in 0 ..< max(kind.lanes, 1) {
+				taken := lane(regs[i.test], fr.f.kinds[i.test], k).int == 1
+				set_lane(&regs[i.dst], kind, k, lane(regs[taken ? i.yes : i.no], kind, k))
+			}
 		case Reduce:
 			kind := fr.f.kinds[i.a]
 			out := lane(regs[i.a], kind, 0)
@@ -177,6 +183,8 @@ written :: proc(inst: Inst) -> Value {
 	case Lanes:
 		return i.dst
 	case Reduce:
+		return i.dst
+	case Select:
 		return i.dst
 	case Foreign:
 		return i.dst

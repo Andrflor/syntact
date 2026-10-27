@@ -62,6 +62,7 @@ Inst :: union {
 	Splat, // dst = a in each lane of a vector
 	Lanes, // dst = a vector of integers
 	Reduce, // dst = the lanes of a by op
+	Select, // dst = yes where test is 1, no where it is 0
 }
 
 Copy :: struct {
@@ -115,6 +116,10 @@ Lanes :: struct {
 Reduce :: struct {
 	op:     code.Op,
 	dst, a: Reg,
+}
+
+Select :: struct {
+	dst, test, yes, no: Reg,
 }
 
 Foreign :: struct {
@@ -261,7 +266,7 @@ unread :: proc(f: ^Func) {
 					if w != NO_REG && !read[w] do i.dst = NO_REG
 				case Call:
 					if w != NO_REG && !read[w] do i.dst = NO_REG
-				case Copy, Real, Text, Input, Unary, Binary, Compare, Splat, Lanes, Reduce:
+				case Copy, Real, Text, Input, Unary, Binary, Compare, Splat, Lanes, Reduce, Select:
 					if !read[w] {
 						changed = true
 						continue
@@ -337,7 +342,7 @@ constants :: proc(f: ^Func) {
 				for &a in i.args do a = known(a, value)
 			case Call:
 				for &a in i.args do a = known(a, value)
-			case Real, Text, Input, Unary, Splat, Lanes, Reduce:
+			case Real, Text, Input, Unary, Splat, Lanes, Reduce, Select:
 			}
 		}
 		if br, is_branch := b.end.(Branch); is_branch {
@@ -442,6 +447,8 @@ body :: proc(b: ^Builder, src: code.Body) {
 			emit(b, Lanes{Reg(i.dst), i.values})
 		case code.Reduce:
 			emit(b, Reduce{i.op, Reg(i.dst), Reg(i.a)})
+		case code.Select:
+			emit(b, Select{Reg(i.dst), Reg(i.test), Reg(i.yes), Reg(i.no)})
 		case code.Foreign:
 			emit(b, Foreign{i.dst == code.NONE ? NO_REG : Reg(i.dst), i.symbol, regs(i.args)})
 		case code.Call:

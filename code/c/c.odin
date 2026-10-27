@@ -242,6 +242,11 @@ survey :: proc(w: ^Writer, b: code.Body) {
 		case code.Reduce:
 			w.defs[i.dst] = inst
 			read(w, i.a)
+		case code.Select:
+			w.defs[i.dst] = inst
+			read(w, i.test)
+			read(w, i.yes)
+			read(w, i.no)
 		case code.Narrow:
 			w.defs[i.dst] = inst
 			read(w, i.src)
@@ -340,6 +345,8 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 		case code.Reduce:
 			declare(w, i.dst, reduce(w, i))
 			if w.reads[i.dst] > 0 do assume(w, i.dst)
+		case code.Select:
+			declare(w, i.dst, select(w, i))
 		case code.In:
 			declare(w, i.dst, cover_test(w, name(w, i.x), f.kinds[i.x].machine, i.cover))
 		case code.Foreign:
@@ -494,6 +501,14 @@ lanes :: proc(w: ^Writer, x: code.Binary, kind: code.Kind, a, b: string) -> (str
 		if kind.machine == .Int do return fmt.tprintf("(%s)((u64x%d)%s %s (%s)%s)", type_of(kind), kind.lanes, a, C_OPS[x.op], unsigned, b), ""
 	}
 	return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
+}
+
+// select: yes where test is 1, no where it is 0 — in lanes, no ^ ((yes ^ no) & -test).
+select :: proc(w: ^Writer, s: code.Select) -> string {
+	t, yes, no := name(w, s.test), name(w, s.yes), name(w, s.no)
+	kind := w.f.kinds[s.dst]
+	if kind.lanes == 0 do return fmt.tprintf("%s ? %s : %s", t, yes, no)
+	return fmt.tprintf("%s ^ ((%s ^ %s) & -%s)", no, yes, no, t)
 }
 
 // reduce: the lanes of a vector, by an operation that commutes, in order.

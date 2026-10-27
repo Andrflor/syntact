@@ -74,6 +74,8 @@ uses :: proc(inst: Inst, out: ^[dynamic]Reg) {
 		append(out, i.a)
 	case Reduce:
 		append(out, i.a)
+	case Select:
+		append(out, i.test, i.yes, i.no)
 	case Lanes:
 	}
 }
@@ -104,6 +106,8 @@ writes :: proc(inst: Inst) -> Reg {
 	case Lanes:
 		return i.dst
 	case Reduce:
+		return i.dst
+	case Select:
 		return i.dst
 	}
 	return NO_REG

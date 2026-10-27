@@ -84,6 +84,7 @@ Inst :: union {
 	Splat, // dst = a in each lane of a vector
 	Lanes, // dst = a vector of integers, one in each lane
 	Reduce, // dst = a₀ op a₁ op …, the lanes of a vector by an operation that commutes
+	Select, // dst = yes where test is 1, no where it is 0 — in each lane of a vector
 	Foreign, // dst = the call of an imported symbol
 	Call, // dst = the call of a function of the program
 	Match, // dst = the value of the first arm whose cover takes the target
@@ -147,6 +148,12 @@ Lanes :: struct {
 Reduce :: struct {
 	dst, a: Value,
 	op:     Op,
+}
+
+// Select: dst = yes where test is 1, no where it is 0: both computed, one kept —
+// in each lane, for vectors.
+Select :: struct {
+	dst, test, yes, no: Value,
 }
 
 // Foreign: dst = symbol(args…), in the order it is written; NONE when it gives
@@ -408,6 +415,8 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 		return fmt.tprintf("%s = lanes %v", v(i.dst), i.values)
 	case Reduce:
 		return fmt.tprintf("%s = reduce %v %s%s", v(i.dst), i.op, v(i.a), print_bounds(f, i.dst))
+	case Select:
+		return fmt.tprintf("%s = %s ? %s : %s%s", v(i.dst), v(i.test), v(i.yes), v(i.no), print_bounds(f, i.dst))
 	case Foreign:
 		return fmt.tprintf("%s = call %s(%s)%s", v(i.dst), p.imports[i.symbol].symbol, list(i.args), print_bounds(f, i.dst))
 	case Call:

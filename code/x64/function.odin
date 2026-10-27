@@ -338,6 +338,26 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		store_lanes(fr, i.dst, .XMM0)
 	case mir.Reduce:
 		return reduce(fr, i)
+	case mir.Select:
+		if f.kinds[i.dst].lanes > 0 {
+			// in each lane: no ^ ((yes ^ no) & -test)
+			load_lanes(fr, .XMM1, i.test)
+			enc.pxor_xmm_xmm(.XMM2, .XMM2)
+			enc.psubq_xmm_xmm(.XMM2, .XMM1)
+			load_lanes(fr, .XMM0, i.yes)
+			no := lanes_in(fr, i.no, .XMM3)
+			enc.pxor_xmm_xmm(.XMM0, no)
+			enc.pand_xmm_xmm(.XMM0, .XMM2)
+			enc.pxor_xmm_xmm(.XMM0, no)
+			store_lanes(fr, i.dst, .XMM0)
+			return ""
+		}
+		// the bits of no, and of yes where test is not 0
+		get(fr, .RAX, place_of(fr, i.no))
+		t := in_register(fr, i.test, .RCX)
+		enc.test_r64_r64(t, t)
+		enc.cmovne_r64_r64(.RAX, in_register(fr, i.yes, .RDX))
+		put(fr, place_of(fr, i.dst), .RAX)
 	case mir.Call:
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)
@@ -778,6 +798,16 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 				enc.por_xmm_xmm(x, y)
 			case .Xor:
 				enc.pxor_xmm_xmm(x, y)
+			case .Eq, .Ne:
+				// equal halves, both: a mask of each lane; then 1 or 0
+				enc.pcmpeqd_xmm_xmm(x, y)
+				enc.pshufd_xmm_xmm_imm8(.XMM2, x, 0xB1)
+				enc.pand_xmm_xmm(x, .XMM2)
+				if i.op == .Ne {
+					enc.pcmpeqd_xmm_xmm(.XMM2, .XMM2)
+					enc.pxor_xmm_xmm(x, .XMM2)
+				}
+				enc.psrlq_xmm_imm8(x, 63)
 			case .Mul:
 				if in_32(a.bounds) && in_32(bounds_of(fr, i.b)) {
 					enc.pmuludq_xmm_xmm(x, y)
