@@ -1,0 +1,8 @@
+{
+  "name": "recursion_effects_whatever_defaults",
+  "description": "An equation has effects when its production has some for some values of its fields, not only at their defaults: n defaults to 0, the base case, yet a call on 2 runs abs.",
+  "source": "libc -> <libc.so.6>{\n  abs -> {i32:v, -> !?::i32}\n}\nloop -> {\n  u8:n\n  -> n ? {0 -> 0  -> {a -> libc.abs{v -> -3}!  -> loop{n -> n - 1}!}!}\n}\nzero -> loop!\nx -> loop{n -> 2}!",
+  "type": "ε<loop{n -> 2}!>(x, x)",
+  "productions": {},
+  "expect_errors": []
+}

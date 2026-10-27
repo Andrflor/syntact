@@ -255,9 +255,9 @@ gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
 // production_law: the value of a production. In a recursive scope, the equation —
 // its first production — is given first, and solved when it has a closed form; a
 // carve of it is the same equation. When the equation has effects besides its calls
-// — its production, or a binding above it, has some —, each call runs it, so its
-// calls are effects too (§4.8): the production is typed again, on a copy, its calls
-// in the order they are written like any effect.
+// — its production, or a binding above it, has some, for some values of its fields
+// —, each call runs it, so its calls are effects too (§4.8): the production is typed
+// again, on a copy, its calls in the order they are written like any effect.
 production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	root := origin(b.scope)
 	if !recursive(root) do return normal(k, b.value)
@@ -265,13 +265,34 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if found && first != b && first.state == .Not_Asked do binding_type(k, first)
 	value := normal(k, b.value)
 	if first != b do return value
-	if !root.effectful && has_effect(with_effects(k, root, b, value)) {
+	if !root.effectful && (has_effect(with_effects(k, root, b, value)) || effects_elsewhere(k, root)) {
 		root.effectful = true
 		m: Copier
 		m.scopes[b.scope] = b.scope // the scopes written in the production are copied
 		value = normal(k, copy_term(k, &m, b.value, b.scope))
 	}
 	return solve(k, root, value)
+}
+
+// effects_elsewhere: the equation of root has effects besides its calls where its
+// fields are unknowns of their colors, though not at the values they hold: a
+// pattern on a known value keeps one branch, the equation all of them. Its calls
+// stay calls while its production is given. A field that is a scope, or an unknown
+// already, stays.
+effects_elsewhere :: proc(k: ^Kernel, root: ^Scope) -> bool {
+	fields := make(map[^Binding]Type)
+	for f in root.bindings {
+		if f.kind != .Push && f.kind != .Pull do continue
+		#partial switch _ in binding_value(k, f) {
+		case ^Unknown, ^Scope:
+			continue
+		}
+		fields[f] = nil
+	}
+	if len(fields) == 0 do return false
+	generic := generic_equation(k, root, &fields) or_return
+	p := first_production(k, generic) or_return
+	return has_effect(with_effects(k, generic, p, binding_type(k, p)))
 }
 
 // operations_on_calls: the operations of t that take a recursive call of root.
