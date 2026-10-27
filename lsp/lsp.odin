@@ -1162,9 +1162,9 @@ collect_semantic_tokens :: proc(ast: ^syntax.Ast, tokens: ^[dynamic]Raw_Sem_Toke
 		)
 	}
 
-	// collapse: the name of what `!` collapses, in the color of a run
+	// collapse: the name of what `!` collapses, in the color of an enum member in C
 	collapse :: proc(tokens: ^[dynamic]Raw_Sem_Token, i: int) {
-		tokens[i].type, tokens[i].modifiers = int(Sem_Token_Type.Macro), COLLAPSED
+		tokens[i].type, tokens[i].modifiers = int(Sem_Token_Type.EnumMember), COLLAPSED
 	}
 
 	lexer: syntax.Lexer
