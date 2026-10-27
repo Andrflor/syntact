@@ -23,6 +23,8 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return fold_law(k, v)
 	case ^Least:
 		return least_law(k, v.index, v.holds, v.span)
+	case ^Series:
+		return series_law(k, v)
 	case ^Name:
 		return binding_value(k, v.binding)
 	case ^Scope:

@@ -126,6 +126,8 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return family_of(k, v.value)
 	case ^Least:
 		return .Int, true
+	case ^Series:
+		return family_of(k, v.term)
 	case ^Or, ^And, ^Not, ^Range:
 		if is_constant(t) do return layout_family(k, t)
 	case ^Pattern:
@@ -216,6 +218,7 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 	#partial switch sig.args[0] {
 	case .Int:
 		if r, ok := ring_law(op, args); ok do out = r
+		else if r, ok := atom_ring(k, op, args); ok do out = r
 	case .Bool:
 		out = bool_law(k, op, args)
 	case .String:

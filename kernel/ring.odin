@@ -15,6 +15,34 @@ import "core:slice"
 // A coefficient beyond the integers written here is not computed: the law does not
 // apply, and the term stays.
 
+// atom_ring: the ring law over atoms: a term the ring does not read — a fold, a
+// μ, a series, a power, a pattern — is a variable of the polynomial, named while
+// the law applies, then put back as it is.
+atom_ring :: proc(k: ^Kernel, op: Operator, args: []Type) -> (out: Type, ok: bool) {
+	back: Rewrite
+	named := make([]Type, len(args))
+	for a, i in args do named[i] = atomized(k, a, &back)
+	if len(back) == 0 do return
+	r := ring_law(op, named) or_return
+	return unatomized(r, back), true
+}
+
+// unatomized: the ring term t with its atoms put back as they are, its form kept.
+unatomized :: proc(t: Type, back: Rewrite) -> Type {
+	#partial switch v in t {
+	case ^Unknown:
+		if x, found := rewritten(back, v); found do return x
+	case ^Operation:
+		args := make([]Type, len(v.args))
+		for a, i in v.args do args[i] = unatomized(a, back)
+		out := new(Operation)
+		out^ = v^
+		out.args = args
+		return out
+	}
+	return t
+}
+
 // monomials: an integer term as the monomials of its sum, over a divisor ≥ 1;
 // false when it is not a sum of products of integers and unknowns.
 monomials :: proc(t: Type) -> (terms: []Type, divisor: i128, ok: bool) {

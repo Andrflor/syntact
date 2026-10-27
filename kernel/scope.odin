@@ -412,6 +412,11 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		l^ = v^
 		l.holds = copy_term(k, m, v.holds, scope)
 		return l
+	case ^Series:
+		out := new(Series)
+		out^ = v^
+		out.lo, out.hi, out.term = copy_term(k, m, v.lo, scope), copy_term(k, m, v.hi, scope), copy_term(k, m, v.term, scope)
+		return out
 	}
 	return t
 }
@@ -465,6 +470,8 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 		for t in fold_parts(v) do if mentions(m, t) do return true
 	case ^Least:
 		return mentions(m, v.holds)
+	case ^Series:
+		return mentions(m, v.lo) || mentions(m, v.hi) || mentions(m, v.term)
 	}
 	return false
 }
@@ -903,6 +910,9 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 	case ^Least:
 		y, ok := b.(^Least)
 		return ok && same(k, x.holds, rewrite(k, y.holds, rewriting(nil, y.index, x.index)))
+	case ^Series:
+		y, ok := b.(^Series)
+		return ok && x.op == y.op && same(k, x.lo, y.lo) && same(k, x.hi, y.hi) && same(k, x.term, rewrite(k, y.term, rewriting(nil, y.index, x.index)))
 	}
 	return false
 }

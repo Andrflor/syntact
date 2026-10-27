@@ -66,6 +66,8 @@ names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 		for t in fold_parts(v) do if names_scope(t, s, seen) do return true
 	case ^Least:
 		return names_scope(v.holds, s, seen)
+	case ^Series:
+		return names_scope(v.lo, s, seen) || names_scope(v.hi, s, seen) || names_scope(v.term, s, seen)
 	case Char, Int, Real, Bool, None, Invalid, ^Unknown:
 	}
 	return false
@@ -139,6 +141,8 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 		for t in fold_parts(v) do if !solved(t, root) do return false
 	case ^Least:
 		return solved(v.holds, root)
+	case ^Series:
+		return solved(v.lo, root) && solved(v.hi, root) && solved(v.term, root)
 	}
 	return true
 }
@@ -826,42 +830,30 @@ without_state :: proc(k: ^Kernel, f: ^Fold, i: int, by: Type) -> ^Fold {
 // back at the end.
 closed :: proc(k: ^Kernel, f: ^Fold, i: int) -> (end: Type, ok: bool) {
 	first, last := counter_range(k, f) or_return
+	x := f.states[i]
+	// the update over atoms, none of which reads a state
+	parts: Rewrite
+	update := atomized(k, f.updates[i], &parts)
+	for a in parts do for y in f.states do if reads(k, a.term, y) do return
+	alpha, beta := affine_in(update, x) or_return
+	alpha, beta = rewrite(k, alpha, parts), rewrite(k, beta, parts)
+	for y in f.states do if reads(k, alpha, y) || reads(k, beta, y) do return
+	r, constant := alpha.(Int)
+	switch {
+	case constant && r == 1:
+		// x ↦ x + g(k): x₀ + Σ g
+		return op(k, .Add, f.inits[i], series(k, .Add, f.index, first, last, beta)), true
+	case same(k, beta, Int(0)) && reads(k, alpha, f.index):
+		// x ↦ α(k)·x: x₀ · Π α
+		return op(k, .Mul, f.inits[i], series(k, .Mul, f.index, first, last, alpha)), true
+	case !constant || !is_ring(beta):
+		return
+	}
 	bounds: Rewrite
 	lo, hi := atomized(k, first, &bounds), atomized(k, last, &bounds)
 	init := atomized(k, f.inits[i], &bounds)
-	x := f.states[i]
-	alpha, g := affine_in(f.updates[i], x) or_return
-	r := alpha.(Int) or_return
+	g := beta
 	ms, divisor := monomials(g) or_return
-	for m in ms do for u in factors(m) do for y in f.states do if same_unknown(u, y) do return
-	if r == 1 {
-		degree := 0
-		for m in ms {
-			p := 0
-			for u in factors(m) do if same_unknown(u, f.index) do p += 1
-			degree = max(degree, p)
-		}
-		// G(m) = g(0) + … + g(m): each monomial c·q·kᵖ, q over the other unknowns,
-		// gives c·q·Sₚ(m)
-		sums := power_sums(f.index, degree) or_return
-		total: Type = Int(0)
-		for m in ms {
-			p := 0
-			others := make([dynamic]^Unknown)
-			for u in factors(m) {
-				if same_unknown(u, f.index) do p += 1
-				else do append(&others, u)
-			}
-			term := ring_law(.Mul, {monomial(coefficient(m), others[:]), sums[p]}) or_return
-			total = ring_law(.Add, {total, term}) or_return
-		}
-		total = ring_over(total, divisor) or_return
-		below := ring_law(.Sub, {lo, Int(1)}) or_return
-		upper := ring_at(total, f.index, hi) or_return
-		lower := ring_at(total, f.index, below) or_return
-		sum := ring_law(.Sub, {upper, lower}) or_return
-		return rewrite(k, ring_law(.Add, {init, sum}) or_return, bounds), true
-	}
 	// g in t, the steps taken
 	t := new_unknown(k, nil)
 	t.layout = new_range(Int(0), nil, .Int)
@@ -954,6 +946,118 @@ atomized :: proc(k: ^Kernel, t: Type, back: ^Rewrite) -> Type {
 	u.layout = family_term(.Int)
 	back^ = rewriting(back^, u, t)
 	return u
+}
+
+// is_ring: t is a polynomial (ring.odin).
+is_ring :: proc(t: Type) -> bool {
+	_, _, ok := monomials(t)
+	return ok
+}
+
+// series: Σ(j: lo..hi, t) or Π, with j for the index i of t, by their laws.
+series :: proc(k: ^Kernel, o: Operator, i: ^Unknown, lo, hi, t: Type) -> Type {
+	s := new(Series)
+	s.op, s.lo, s.hi = o, lo, hi
+	s.index = new_unknown(k, nil)
+	s.index.layout = family_term(.Int)
+	s.term = rewrite(k, t, rewriting(nil, i, s.index))
+	return series_law(k, s)
+}
+
+// series_law: Σ(i: lo..hi, t) and Π(i: lo..hi, t), by their laws:
+//
+//   over an empty range                    0, 1
+//   Σ, t a polynomial in i over atoms      G(hi) - G(lo - 1), G(m) = t(0) + … + t(m),
+//                                          by the sums of powers (Faulhaber)
+//   Π, t not reading i                     t ** n, n = hi - lo + 1
+//   Π, t = c·uᵃ·iᵖ…, a monomial            cⁿ·(u ** n)ᵃ·(Π(i: lo..hi, i))ᵖ…
+//   Π, c the content of t, > 1             cⁿ·Π(i: lo..hi, t / c)
+//   Π, t = ±i + b                          Π(j: lo'..hi', j), over the integers
+//                                          t runs through, upward
+//   Π(j: a..b, j), a ≤ 0 ≤ b               0
+series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
+	identity: Type = s.op == .Add ? Type(Int(0)) : Type(Int(1))
+	n := op(k, .Add, op(k, .Sub, s.hi, s.lo), Int(1))
+	if proven_in(k, n, new_range(nil, Int(0), .Int)) do return identity
+	if s.op == .Add {
+		if sum, closed := faulhaber(k, s); closed do return sum
+		return s
+	}
+	if !reads(k, s.term, s.index) do return op(k, .Pow, s.term, n)
+	if ms, d, ring := monomials(s.term); ring && len(ms) == 1 && d == 1 {
+		m := ms[0]
+		p := 0
+		out := op(k, .Pow, Int(coefficient(m)), n)
+		for u in factors(m) {
+			if same_unknown(u, s.index) do p += 1
+			else do out = op(k, .Mul, out, op(k, .Pow, u, n))
+		}
+		if p > 0 && !(p == 1 && len(factors(m)) == 1 && coefficient(m) == 1) {
+			ascending := new(Series)
+			ascending^ = s^
+			ascending.term = s.index
+			return op(k, .Mul, out, op(k, .Pow, series_law(k, ascending), Int(p)))
+		}
+	}
+	if ms, d, ring := monomials(s.term); ring && d == 1 {
+		content: i128 = 0
+		for m in ms do content = gcd(content, abs(coefficient(m)))
+		if content > 1 {
+			reduced := make([]Type, len(ms))
+			for m, j in ms do reduced[j] = monomial(coefficient(m) / content, factors(m))
+			if t, ok := ring_term(reduced, 1); ok {
+				primitive := new(Series)
+				primitive^ = s^
+				primitive.term = t
+				return op(k, .Mul, op(k, .Pow, Int(content), n), series_law(k, primitive))
+			}
+		}
+	}
+	if alpha, beta, affine := affine_in(s.term, s.index); affine {
+		if a, unit := alpha.(Int); unit && (a == 1 || a == -1) && !(a == 1 && same(k, beta, Int(0))) {
+			// j = ±i + b runs through the integers between its ends
+			from, to := op(k, .Add, op(k, .Mul, a, s.lo), beta), op(k, .Add, op(k, .Mul, a, s.hi), beta)
+			if a < 0 do from, to = to, from
+			upward := new(Series)
+			upward^ = s^
+			upward.lo, upward.hi, upward.term = from, to, s.index
+			return series_law(k, upward)
+		}
+	}
+	if same(k, s.term, s.index) && proven_in(k, s.lo, new_range(nil, Int(0), .Int)) && proven_in(k, s.hi, new_range(Int(0), nil, .Int)) do return Int(0)
+	return s
+}
+
+// faulhaber: Σ(i: lo..hi, t), t a polynomial in i over atoms that do not read i:
+// G(hi) - G(lo - 1), each monomial c·q·iᵖ giving c·q·Sₚ, the sums of powers.
+faulhaber :: proc(k: ^Kernel, s: ^Series) -> (sum: Type, ok: bool) {
+	bounds: Rewrite
+	t := atomized(k, s.term, &bounds)
+	for a in bounds do if reads(k, a.term, s.index) do return
+	lo, hi := atomized(k, s.lo, &bounds), atomized(k, s.hi, &bounds)
+	ms, divisor := monomials(t) or_return
+	degree := 0
+	for m in ms {
+		p := 0
+		for u in factors(m) do if same_unknown(u, s.index) do p += 1
+		degree = max(degree, p)
+	}
+	sums := power_sums(s.index, degree) or_return
+	total: Type = Int(0)
+	for m in ms {
+		p := 0
+		others := make([dynamic]^Unknown)
+		for u in factors(m) {
+			if same_unknown(u, s.index) do p += 1
+			else do append(&others, u)
+		}
+		term := ring_law(.Mul, {monomial(coefficient(m), others[:]), sums[p]}) or_return
+		total = ring_law(.Add, {total, term}) or_return
+	}
+	total = ring_over(total, divisor) or_return
+	upper := ring_at(total, s.index, hi) or_return
+	lower := ring_at(total, s.index, ring_law(.Sub, {lo, Int(1)}) or_return) or_return
+	return rewrite(k, ring_law(.Sub, {upper, lower}) or_return, bounds), true
 }
 
 // counter_range: the steps of a fold whose index moves by one between lo and hi:

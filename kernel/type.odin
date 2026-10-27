@@ -35,6 +35,7 @@ Type :: union {
 	^Pattern, // t ? {c -> p …}
 	^Fold, // ⟳(k: a ↦ n until S; ε…; x: c ↦ t; v)   along an orbit (§5.6)
 	^Least, // μ(i: t)    the least i ≥ 0 where t holds (§5.6)
+	^Series, // Σ(i: a..b, t), Π(i: a..b, t)   (§5.6)
 	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
@@ -230,6 +231,16 @@ Least :: struct {
 	index: ^Unknown,
 	holds: Type,
 	span:  syn.Span,
+}
+
+// Series: Σ(i: lo..hi, t), the sum of t for i from lo to hi — 0 when the range is
+// empty —, or Π(i: lo..hi, t), their product — 1 then (§5.6). i is bound in t.
+Series :: struct {
+	op:     Operator, // .Add, .Mul
+	index:  ^Unknown,
+	lo, hi: Type,
+	term:   Type,
+	span:   syn.Span,
 }
 
 // fold_parts: the terms of a fold, in a fixed order: start, stop, next, the inits,

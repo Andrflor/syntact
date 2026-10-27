@@ -172,6 +172,8 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		return fold(l, v)
 	case ^kernel.Least:
 		return least(l, v)
+	case ^kernel.Series:
+		return series(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
@@ -335,6 +337,50 @@ least :: proc(l: ^Lowering, m: ^kernel.Least) -> Value {
 	close_body(l, outer, bound)
 	if l.error != "" do return NONE
 	loop.dst = value(l.f, .Int)
+	l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
+	emit(l, loop)
+	return loop.dst
+}
+
+// series: Σ(i: lo..hi, t) or Π (specs/types.md §5.6) as a loop: i from lo, the
+// accumulator from 0 or 1; while i ≤ hi, it takes t, and i the next integer.
+series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
+	lo, hi := lower(l, s.lo), lower(l, s.hi)
+	if l.error != "" do return NONE
+	machine := machine_of_layout(l.k, kernel.layout_image(l.k, s.term) or_else nil)
+	if machine != .Int && machine != .Real do machine = .Int
+	identity := s.op == .Add ? 0 : 1
+	start: Value
+	if machine == .Real {
+		start = value(l.f, .Real)
+		emit(l, Real_Const{start, f64(identity)})
+	} else {
+		start = constant(l, i64(identity))
+	}
+	params, starts := make([]Value, 2), make([]Value, 2)
+	params[0], params[1] = value(l.f, .Int), value(l.f, machine)
+	starts[0], starts[1] = lo, start
+	loop := Loop{dst = NONE, params = params, init = starts}
+	outer, bound := open_body(l, &loop.body)
+	append(&l.bound, Bound{s.index, params[0]})
+	past := binary(l, .Gt, params[0], hi, .Int)
+	arms := make([]Arm, 2)
+	taken := make([]Bounds, 1)
+	taken[0] = {1, 1}
+	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), value = params[1]}}
+	arms[1].body.value = NONE // it ends in an Again
+	step_outer, step_bound := open_body(l, &arms[1].body)
+	t := lower(l, s.term)
+	if l.error == "" && machine_of(l.f, t) != machine do fail(l, "the term of a series is a %v, its value a %v", machine_of(l.f, t), machine)
+	next := make([]Value, 2)
+	next[0] = binary(l, .Add, params[0], constant(l, 1), .Int)
+	next[1] = binary(l, s.op == .Add ? .Add : .Mul, params[1], t, machine)
+	emit(l, Again{next})
+	close_body(l, step_outer, step_bound)
+	loop.body.value = close_match(l, past, arms)
+	close_body(l, outer, bound)
+	if l.error != "" do return NONE
+	loop.dst = value(l.f, machine)
 	l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
 	emit(l, loop)
 	return loop.dst

@@ -26,6 +26,10 @@ term_order :: proc(a, b: Type) -> int {
 		return terms_order(fold_parts(x), fold_parts(b.(^Fold)))
 	case ^Least:
 		return term_order(x.holds, b.(^Least).holds)
+	case ^Series:
+		y := b.(^Series)
+		if c := compare_ints(i128(x.op), i128(y.op)); c != 0 do return c
+		return terms_order({x.lo, x.hi, x.term}, {y.lo, y.hi, y.term})
 	case ^Effect:
 		y := b.(^Effect)
 		if c := compare_ints(i128(x.id), i128(y.id)); c != 0 do return c
@@ -164,8 +168,10 @@ term_rank :: proc(t: Type) -> int {
 		return 21
 	case ^Least:
 		return 22
+	case ^Series:
+		return 23
 	}
-	return 23
+	return 24
 }
 
 terms_order :: proc(a, b: []Type) -> int {

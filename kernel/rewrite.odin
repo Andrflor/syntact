@@ -77,6 +77,11 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return fold_law(k, rewrite_fold(k, v, r))
 	case ^Least:
 		return least_law(k, v.index, rewrite(k, v.holds, r), v.span)
+	case ^Series:
+		out := new(Series)
+		out^ = v^
+		out.lo, out.hi, out.term = rewrite(k, v.lo, r), rewrite(k, v.hi, r), rewrite(k, v.term, r)
+		return series_law(k, out)
 	case ^Operation:
 		if is_string_value(t) do return t
 		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
@@ -189,6 +194,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
 		return new_range(Int(0), nil, .Int), true
+	case ^Series:
+		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return nil, false

@@ -211,8 +211,9 @@ On terms without `| & ~`, each family brings its laws:
 
 ```text
 integers   + and * associative and commutative, * distributes over +, 0 and 1 neutral,
-           -a is the opposite of a, (k * a) / k = a for k ≠ 0
-           ?₁ - ?₁ = 0        ?₁ + ?₁ = 2 * ?₁
+           -a is the opposite of a, (k * a) / k = a for k ≠ 0: polynomials over
+           atoms — an unknown, or a term the ring does not read, a pattern, a power
+           ?₁ - ?₁ = 0        ?₁ + ?₁ = 2 * ?₁        1 * p = p        p - p = 0
 reals      a field: the same laws, and (a / b) * b = a for b ≠ 0
 booleans   [~] [&] [|] ^: a Boolean algebra, [~][~]a = a
            b in true = b        b in false = [~]b
@@ -686,18 +687,29 @@ a state not reading what the effects give back, nor read by them: it crosses the
 ```
 
 and, along a counter — i by one over lo..hi, n steps —, a state read by the value
-only whose update is a first-order linear recurrence, `x ↦ r·x + g(i)`, g a
-polynomial in i over the other unknowns, has its closed form:
+only whose update is a first-order linear recurrence leaves the fold:
 
 ```text
-r = 1      x = x₀ + G(hi) - G(lo - 1)        G(m) = g(0) + … + g(m), by the sums of powers
-r ≠ 1      x = P(n) + (x₀ - P(0)) * r ** n    P(t + 1) = r·P(t) + g(t), by its coefficients
+x ↦ x + g(i)        x = x₀ + Σ(i: lo..hi, g(i))
+x ↦ α(i)·x          x = x₀ · Π(i: lo..hi, α(i))
+x ↦ r·x + g(i)      x = P(n) + (x₀ - P(0)) * r ** n     r ≠ 1 an integer, g a polynomial,
+                                                       P(t + 1) = r·P(t) + g(t), by its coefficients
 ```
 
-The ring computes over atoms: a term it does not read — a μ, a pattern, `r ** n` —
-is one; the whole stays one polynomial over one divisor, whatever its parts are
-worth alone. A product of the counter, `x ↦ k·x`, has no closed form: it stays a
-fold. On examples:
+`Σ(i: lo..hi, t)` is the sum of t for i from lo to hi, 0 over an empty range;
+`Π(i: lo..hi, t)` their product, 1 over an empty range. Their laws:
+
+```text
+Σ(i: lo..hi, t), t a polynomial in i       G(hi) - G(lo - 1)     G(m) = t(0) + … + t(m), by the sums of powers
+Π(i: lo..hi, t), t not reading i           t ** n
+Π(i: lo..hi, c·t), c the content of t      c ** n * Π(i: lo..hi, t)
+Π(i: lo..hi, uᵃ·iᵖ)                        u ** (a·n) * Π(i: lo..hi, i) ** p
+Π(i: lo..hi, ±i + b)                       Π(j: lo'..hi', j), over the integers it runs through, upward
+Π(j: a..b, j), a ≤ 0 ≤ b                   0
+```
+
+The ring computes over atoms — a μ, a series, `r ** n` —; the whole stays one
+polynomial over one divisor, whatever its parts are worth alone. On examples:
 
 ```text
 sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
@@ -711,7 +723,9 @@ half{n -> m}!   = μ(i: m / 2 ** i in 0)                     the length of m in 
 g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}
 g{n -> m}!      = 2 * 2 ** μ(i: m / 2 ** i in 0) - 1
 fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
-fact{n -> m}!   = ⟳(i: m - 1 ↦ i - 1 until ..(-1); x: 1 ↦ (m - i) * x; x)
+fact{n -> m}!   = Π(i: 1..m, i)
+f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n * f{n -> n - 1}!}}
+f{n -> m}!      = 2 ** m * Π(i: 1..m, i)
 fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}
 fib{n -> m}!    = ⟳(i: n - 1 ↦ i - 1 until ..(-1); x: c(kₙ) ↦ x + y, y: c(kₙ₊₁) ↦ x; x)
 say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{…  n -> n}! + say{n -> n - 1}!}}
@@ -722,8 +736,8 @@ tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> io.puts{…}!  -> 1 + tick{n -> n 
 tick{n -> m}!   = ε<⟳(i: 0 ↦ i + 1 until m..; ε<puts{…}!>(y); none)>(m)    the value crosses
 ```
 
-Like the equation, a fold is never unfolded: `fact{n -> 5}!` is
-`⟳(i: 4 ↦ i - 1 until ..(-1); x: 1 ↦ (5 - i) * x; x)`.
+Like the equation, a fold or a series is never unfolded: `fact{n -> 5}!` is
+`Π(i: 1..5, i)`.
 
 `sum{n -> m - 1}!` is not an extra notation: it is carving and collapse, applied to
 types.
