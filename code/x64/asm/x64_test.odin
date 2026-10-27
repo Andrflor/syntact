@@ -2874,6 +2874,28 @@ testing_add_r64_imm32 :: proc(t: ^testing.T) {
 }
 
 @(test)
+testing_logic_r64_imm32 :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
+	Logic :: struct {
+		name:   string,
+		encode: proc(reg: Register64, imm: u32),
+	}
+	for op in ([]Logic{{"and", and_r64_imm32}, {"or", or_r64_imm32}, {"xor", xor_r64_imm32}}) {
+		for reg in get_all_registers64() {
+			for imm in get_interesting_imm32_values() {
+				asm_str := fmt.tprintf("%s %s, %d", op.name, register64_to_string(reg), cast(i32)(imm))
+
+				buffer := ByteBuffer{}
+				context.user_ptr = &buffer
+				op.encode(reg, imm)
+				batch_add(batch, asm_str)
+			}
+		}
+	}
+}
+
+@(test)
 testing_add_r64_r64 :: proc(t: ^testing.T) {
 	batch := batch_begin(t)
 	defer batch_end(batch)

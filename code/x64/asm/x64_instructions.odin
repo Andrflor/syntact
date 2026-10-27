@@ -2959,6 +2959,28 @@ xor_r64_r64 :: proc(dst: Register64, src: Register64) {
 	write([]u8{rex, 0x31, modrm}) // REX.W 31 /r
 }
 
+// group1_r64_imm32: reg op= imm, sign-extended, for the operations of the group 1
+// by their extension (add 0, or 1, and 4, sub 5, xor 6, cmp 7): REX.W 83 /n ib for
+// an imm8, REX.W (n·8 + 5) id on rax, REX.W 81 /n id otherwise.
+group1_r64_imm32 :: proc(n: u8, reg: Register64, imm: u32) {
+	rex: u8 = 0x48 + (u8(reg) >> 3)
+	modrm := encode_modrm(3, n, u8(reg) & 0x7)
+	switch {
+	case imm <= 0x7F || imm >= 0xFFFFFF80:
+		write([]u8{rex, 0x83, modrm, u8(imm)})
+		return
+	case reg == .RAX:
+		write([]u8{rex, n << 3 | 5})
+	case:
+		write([]u8{rex, 0x81, modrm})
+	}
+	write([]u8{u8(imm), u8(imm >> 8), u8(imm >> 16), u8(imm >> 24)})
+}
+
+and_r64_imm32 :: proc(reg: Register64, imm: u32) {group1_r64_imm32(4, reg, imm)}
+or_r64_imm32 :: proc(reg: Register64, imm: u32) {group1_r64_imm32(1, reg, imm)}
+xor_r64_imm32 :: proc(reg: Register64, imm: u32) {group1_r64_imm32(6, reg, imm)}
+
 // Bitwise NOT (one's complement) of register
 not_r64 :: proc(reg: Register64) {
 	rex: u8 = 0x48 + (u8(reg) >> 3) // REX.W + extension bit for register
