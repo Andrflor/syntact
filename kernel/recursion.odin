@@ -160,6 +160,15 @@ is_pending_call :: proc(t: Type) -> bool {
 // what they carve is an unknown of its color, root{n -> ?::C}.
 equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
 	if f, based := base_family(k, root, e); based do return f, true
+	carved := carved_by_calls(e, root)
+	if len(carved) == 0 do return
+	generic := generic_equation(k, root, &carved) or_return
+	p := first_production(k, generic) or_return
+	return base_family(k, root, binding_type(k, p))
+}
+
+// carved_by_calls: the bindings the recursive calls of e carve, in operations.
+carved_by_calls :: proc(e: Type, root: ^Scope) -> map[^Binding]Type {
 	carved := make(map[^Binding]Type)
 	for o in operations_on_calls(e, root) {
 		for a in o.args {
@@ -168,16 +177,41 @@ equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, o
 			if s, is_scope := c.target.(^Scope); is_scope do for b in s.changes do carved[b] = nil
 		}
 	}
-	if len(carved) == 0 do return
+	return carved
+}
+
+// generic_equation: root where each binding of carved is an unknown of its color,
+// root{n -> ?::C}; carved maps each one to its unknown.
+generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type) -> (^Scope, bool) {
 	for b in carved {
 		u := new_unknown(k, nil)
 		u.layout = binding_color(k, b)
 		if u.layout == nil do u.layout = everything()
 		carved[b] = u
 	}
-	generic := derive(k, root, carved, root.span).(^Scope) or_return
+	return derive(k, root, carved^, root.span).(^Scope)
+}
+
+// generic_solution: the closed form of the equation of root where each binding of
+// values is an unknown of its color, with those values (§5.6):
+// sum{n -> m}! = m ? {0 -> 0  -> m + sum{n -> m - 1}!} gives m * (m + 1) / 2 whatever
+// m, and whatever n holds in sum.
+generic_solution :: proc(k: ^Kernel, root: ^Scope, values: map[^Binding]Type) -> (solution: Type, ok: bool) {
+	params := make(map[^Binding]Type)
+	for b in values do params[b] = nil
+	generic := generic_equation(k, root, &params) or_return
 	p := first_production(k, generic) or_return
-	return base_family(k, root, binding_type(k, p))
+	closed := closed_form(k, generic, binding_type(k, p)) or_return
+	rewrites: Rewrite
+	for b, u in params do rewrites = rewriting(rewrites, u.(^Unknown), values[b])
+	return rewrite(k, closed, rewrites), true
+}
+
+// holding: the binding of s that holds b, a binding of the scope s copies: b
+// itself, or its copy.
+holding :: proc(s: ^Scope, b: ^Binding) -> ^Binding {
+	for x in s.bindings do if x == b || x.source == b do return x
+	return b
 }
 
 // base_family: the family of the base cases of e; false when there are none, or
@@ -293,22 +327,32 @@ legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
 //
 // with m ≥ b for every value, then f{n -> m}! = c + g(b + 1) + … + g(m), a
 // polynomial in m when g is one: c + G(m) - G(b), G(m) = g(0) + … + g(m).
+// When what the calls carve holds known values in the scope, the equation is read
+// where they are unknowns, and solved at those values. An equation that acts is
+// never solved: each call runs.
 solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 	if closed, solved := closed_form(k, root, value); solved do return closed
+	if root.acting do return value
+	values := carved_by_calls(value, root)
+	if len(values) == 0 do return value
+	for b in values do values[b] = binding_type(k, b)
+	if closed, solved := generic_solution(k, root, values); solved do return closed
 	return value
 }
 
-closed_form :: proc(k: ^Kernel, root: ^Scope, value: Type) -> (closed: Type, ok: bool) {
+// closed_form: the closed form of value, the production of s — a recursive scope,
+// or a copy of one, where m is what n holds.
+closed_form :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (closed: Type, ok: bool) {
 	p := value.(^Pattern) or_return
 	if len(p.branches) != 2 || p.branches[1].cover != nil do return
 	u := p.target.(^Unknown) or_return
 	base := p.branches[0].cover.(Int) or_return
 	c := p.branches[0].product.(Int) or_return
-	g, call := split_call(k, p.branches[1].product, root) or_return
+	g, call := split_call(k, p.branches[1].product, origin(s)) or_return
 	if len(call.changes) != 1 do return
 	step := ring_law(.Sub, {u, Int(1)}) or_return
 	for b, v in call.changes {
-		x, is_unknown := binding_type(k, b).(^Unknown)
+		x, is_unknown := binding_type(k, holding(s, b)).(^Unknown)
 		if !is_unknown || !same_unknown(x, u) || !same(k, v, step) do return
 	}
 	ms, divisor := monomials(g) or_return

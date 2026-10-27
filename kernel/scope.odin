@@ -105,13 +105,18 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
 	// solution, or it stays. A carve collapsed where it is written asks its
-	// production: it is typed for the values the carve gives (§7); the call stays
+	// production: it is typed for the values the carve gives (§7); a call that
+	// stays has the closed form of its equation, or stays
 	if c.recursive do return recursive_call(k, s, c.span)
 	if s != origin(s) && recursive(s) {
 		if p, found := first_production(k, s); found {
 			if v := binding_type(k, p); is_invalid(v) do return v
 		}
-		return recursive_call(k, s, c.span)
+		call := recursive_call(k, s, c.span)
+		if stays, is_call := call.(^Collapse); is_call && stays.target == s {
+			if solution, solved := generic_solution(k, s.carved, s.changes); solved do return solution
+		}
+		return call
 	}
 	if p, found := first_production(k, s); found do return product(k, p)
 	return None{}

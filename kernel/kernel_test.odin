@@ -260,6 +260,13 @@ SPEC_CASES := []Spec_Case {
 	{SUM + "x -> sum{n -> 5}!", "15", {}},
 	{SUM + "u16:x -> sum!", "", {}},
 	{SUM + "u8:x -> sum!", "", {.Constraint_Mismatch}},
+	// the closed form is that of the call, whatever n holds in sum
+	{SUM_ZERO + "x -> sum{n -> ??::u8}!", "(?0 + ?0 * ?0) / 2", {}},
+	{SUM_ZERO + "x -> sum{n -> 5}!", "15", {}},
+	{SUM_ZERO + "x -> sum!", "0", {}},
+	{SUM_ZERO + "u16:x -> sum{n -> ??::u8}!", "", {}},
+	{SUM_ZERO + "u8:x -> sum{n -> ??::u8}!", "", {.Constraint_Mismatch}},
+	{SUM_SEVEN + "x -> sum!", "28", {}},
 	{"Array -> {\n  T -> {}\n  -> {T: ...Array{T}:}\n  -> {}\n}\nArray{u8}:x", "", {.Infinite_Recursion}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x -> {1 2 3}", "", {}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x -> {1 300 3}", "", {.Constraint_Mismatch}},
@@ -280,6 +287,10 @@ MIRROR :: "List -> {\n  T -> {}\n  -> {}\n  -> {T: ...List{T}: T:}\n}\n"
 LISTS :: "List -> {\n  -> {}\n  -> {u8: ...List:}\n  -> {i8: ...List:}\n}\n"
 
 SUM :: "sum -> {\n  u8:n -> ??\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
+
+SUM_ZERO :: "sum -> {\n  u8:n\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
+
+SUM_SEVEN :: "sum -> {\n  u8:n -> 7\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
 
 @(test)
 test_spec :: proc(t: ^testing.T) {
