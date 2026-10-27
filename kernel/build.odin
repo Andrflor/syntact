@@ -615,7 +615,9 @@ lookup :: proc(s: ^Scope, name: string, ordinal: int) -> (^Binding, bool) {
 }
 
 // current_is: t, where `.x` names the scope `from`, with `.x` naming `to` instead;
-// the scopes written in t have their own current scope.
+// the scopes written in t have their own current scope. A term of the algebra is
+// not changed — it may be shared —: what changes in it makes another one; the
+// forms the build makes are its own, and changed where they are.
 current_is :: proc(t: Type, from: ^Scope, to: Type) -> Type {
 	if to == nil do return t
 	#partial switch v in t {
@@ -626,17 +628,28 @@ current_is :: proc(t: Type, from: ^Scope, to: Type) -> Type {
 			v.target = current_is(v.target, from, to)
 		}
 	case ^Operation:
-		for &a in v.args do a = current_is(a, from, to)
+		if args := currents(v.args, from, to); raw_data(args) != raw_data(v.args) {
+			o := new(Operation)
+			o^ = v^
+			o.args, o.normal = args, false
+			return o
+		}
 	case ^Or:
-		for &a in v.terms do a = current_is(a, from, to)
+		if terms := currents(v.terms, from, to); raw_data(terms) != raw_data(v.terms) do return new_or(..terms)
 	case ^And:
-		for &a in v.terms do a = current_is(a, from, to)
+		if terms := currents(v.terms, from, to); raw_data(terms) != raw_data(v.terms) do return new_and(..terms)
 	case ^Not:
-		v.term = current_is(v.term, from, to)
+		if x := current_is(v.term, from, to); x != v.term do return new_not(x)
 	case ^Is:
-		v.term = current_is(v.term, from, to)
+		if x := current_is(v.term, from, to); x != v.term do return new_is(x)
 	case ^Range:
-		v.lo, v.hi = current_is(v.lo, from, to), current_is(v.hi, from, to)
+		lo, hi := current_is(v.lo, from, to), current_is(v.hi, from, to)
+		if lo != v.lo || hi != v.hi {
+			r := new(Range)
+			r^ = v^
+			r.lo, r.hi, r.normal = lo, hi, false
+			return r
+		}
 	case ^Collapse:
 		v.target = current_is(v.target, from, to)
 	case ^Carve:
@@ -652,6 +665,19 @@ current_is :: proc(t: Type, from: ^Scope, to: Type) -> Type {
 		}
 	}
 	return t
+}
+
+// currents: ts, each with `.x` naming `to`: ts itself when none changes.
+currents :: proc(ts: []Type, from: ^Scope, to: Type) -> []Type {
+	for t, i in ts {
+		x := current_is(t, from, to)
+		if x == t do continue
+		out := clone_types(ts)
+		out[i] = x
+		for j in i + 1 ..< len(ts) do out[j] = current_is(ts[j], from, to)
+		return out
+	}
+	return ts
 }
 
 // names: a binding is read by its name, or by its capture.

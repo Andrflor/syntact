@@ -370,40 +370,35 @@ View :: enum u8 {
 
 // --- helpers ---
 
+// The terms of the algebra are shared (intern.odin): built twice, the same node.
+
 new_or :: proc(terms: ..Type) -> Type {
-	o := new(Or)
-	o.terms = clone_types(terms)
-	return o
+	return intern({.Or, 0, terms})
 }
 
 new_and :: proc(terms: ..Type) -> Type {
-	a := new(And)
-	a.terms = clone_types(terms)
-	return a
+	return intern({.And, 0, terms})
 }
 
 new_not :: proc(t: Type) -> Type {
-	n := new(Not)
-	n.term = t
-	return n
+	one := [1]Type{t}
+	return intern({.Not, 0, one[:]})
 }
 
 new_is :: proc(t: Type) -> Type {
-	i := new(Is)
-	i.term = t
-	return i
+	one := [1]Type{t}
+	return intern({.Is, 0, one[:]})
 }
 
+// new_range: lo..hi; with the place it is written, a node of its own.
 new_range :: proc(lo, hi: Type, family := Range_Family.Any, span := syn.Span{}) -> Type {
-	r := new(Range)
-	r.lo, r.hi, r.family, r.span = lo, hi, family, span
-	return r
+	two := [2]Type{lo, hi}
+	r := intern({.Range, u8(family), two[:]})
+	return span == {} ? r : written(r, span)
 }
 
 new_operation :: proc(op: Operator, args: ..Type) -> Type {
-	o := new(Operation)
-	o.op, o.args = op, clone_types(args)
-	return o
+	return intern({.Operation, u8(op), args})
 }
 
 // written: a term built from the source, with the place it is written: a copy that
