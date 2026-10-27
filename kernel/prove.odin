@@ -18,8 +18,10 @@ import "core:strings"
 // An atom `u in S` that stays is simplified on each side (Boole), by the law of
 // the pattern: eq = (u in S) ? {true -> eq  -> eq}, where each side rewrites u
 // into ?ₖ::(L & S), then ?ₖ::(L & ~S): the atom reduces there, and eq with it.
-// A pattern is proven when each branch some value reaches is; it is refuted when
-// one is refuted for values that its rewrite says exactly.
+// A pattern is proven when each branch some value reaches is, its check guarded by
+// the branch, [~]reach [|] r (§6): the rewrite says the reach on the unknowns, the
+// guard what it does not, an atom on a term. It is refuted when one is refuted for
+// values that its rewrite says exactly.
 
 Verdict :: enum u8 {
 	Proven,
@@ -56,12 +58,14 @@ prove_branches :: proc(k: ^Kernel, p: ^Pattern) -> (Verdict, Rewrite) {
 	reached, _, _ := reaches(k, p.target, p.branches)
 	verdict := Verdict.Proven
 	for r in reached {
-		v, witness := prove(k, p.branches[r.branch].product)
+		check := p.branches[r.branch].product
+		if !is_invalid(check) do check = bool_or(k, bool_not(k, r.unsaid), check)
+		v, witness := prove(k, check)
 		switch v {
 		case .Proven:
 		case .Refuted:
 			if witness == nil do witness = r.rewrite
-			if r.exact do return .Refuted, witness
+			if is_bool(r.unsaid, true) do return .Refuted, witness
 			verdict = .Unproven
 		case .Unproven:
 			verdict = .Unproven

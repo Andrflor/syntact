@@ -693,34 +693,35 @@ bool_law :: proc(k: ^Kernel, op: Operator, args: []Type) -> Type {
 	terms := make([dynamic]Type)
 	flatten_bool(op, a, &terms)
 	flatten_bool(op, b, &terms)
-	// the atoms on one unknown, combined
+	// the atoms on one value, combined: (x in A) [|] (x in B) = x in (A | B), and
+	// likewise [&] and &
 	Atoms :: struct {
-		unknown: ^Unknown,
-		set:     Type,
-		count:   int,
+		value: Type,
+		set:   Type,
+		count: int,
 	}
 	groups := make([dynamic]Atoms)
 	for t in terms {
-		u, s, ok := literal(k, t)
+		x, s, ok := literal(k, t)
 		if !ok do continue
 		found := false
 		for &g in groups {
-			if same_unknown(g.unknown, u) {
+			if same(k, g.value, x) {
 				g.set = op == .Bit_Or ? or_law(k, {g.set, s}) : and_law(k, {g.set, s})
 				g.count += 1
 				found = true
 			}
 		}
-		if !found do append(&groups, Atoms{u, s, 1})
+		if !found do append(&groups, Atoms{x, s, 1})
 	}
 	kept := make([dynamic]Type)
 	for t in terms {
-		u, _, ok := literal(k, t)
+		x, _, ok := literal(k, t)
 		combined := false
-		if ok do for g in groups do if same_unknown(g.unknown, u) && g.count >= 2 do combined = true
+		if ok do for g in groups do if same(k, g.value, x) && g.count >= 2 do combined = true
 		if !combined do append(&kept, t)
 	}
-	for g in groups do if g.count >= 2 do append(&kept, in_law(k, g.unknown, g.set))
+	for g in groups do if g.count >= 2 do append(&kept, in_law(k, g.value, g.set))
 	absorbing := op == .Bit_Or
 	out: Type
 	for t in kept {
@@ -739,9 +740,9 @@ flatten_bool :: proc(op: Operator, t: Type, out: ^[dynamic]Type) {
 	append(out, t)
 }
 
-// literal: t is `u in S`, or `[~](u in S)` read as u in ~S, S a constant type the
-// laws compute whole.
-literal :: proc(k: ^Kernel, t: Type) -> (^Unknown, Type, bool) {
+// literal: t is `x in S`, or `[~](x in S)` read as x in ~S: x one value — an
+// unknown, or a term over them —, S a constant type the laws compute whole.
+literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 	positive := true
 	atom := t
 	if n, ok := t.(^Operation); ok && n.op == .Bit_Not {
@@ -750,9 +751,8 @@ literal :: proc(k: ^Kernel, t: Type) -> (^Unknown, Type, bool) {
 	}
 	o, is_op := atom.(^Operation)
 	if !is_op || o.op != .In do return nil, nil, false
-	u, is_unknown := o.args[0].(^Unknown)
-	if !is_unknown || !decided(o.args[1]) do return nil, nil, false
-	return u, positive ? o.args[1] : not_law(k, o.args[1]), true
+	if !is_value(k, o.args[0]) || !decided(o.args[1]) do return nil, nil, false
+	return o.args[0], positive ? o.args[1] : not_law(k, o.args[1]), true
 }
 
 bool_and :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_And, {a, b})}

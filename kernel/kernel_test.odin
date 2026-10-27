@@ -144,6 +144,11 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nu8:x -> a ? {<10 -> a * 25  -> 0}", "", {}},
 	{"a -> ??::u8\nu8:x -> a ? {<10 -> a * 30  -> 0}", "", {.Constraint_Mismatch}},
 	{"a -> ??::u8\nu8:x -> (a + 1) ? {<=255 -> a + 1  -> 0}", "", {}},
+	// a target over two unknowns: the guard says what the rewrite does not
+	{"a -> ??::u16\nb -> ??::i8\n(0..786):x -> (a + b) ? {\n  <0 -> 0\n  >786 -> 786\n  -> a + b\n}", "", {}},
+	{"a -> ??::u16\nb -> ??::i8\n(0..785):x -> (a + b) ? {\n  <0 -> 0\n  >786 -> 786\n  -> a + b\n}", "", {.Constraint_Mismatch}},
+	{"a -> ??::u16\nb -> ??::i8\nx -> (a + b < 0) [|] (a + b >= 0)", "true", {}},
+	{"a -> ??::u16\nb -> ??::i8\nx -> (a + b) ? {\n  <0 -> 0\n  >=0 -> 1\n}", "", {}},
 	{"a -> ??::u8\nx -> a ? {0 -> 0  -> 10 / a}", "", {}},
 	{"a -> ??::u8\nu8:x -> a ? {0..10 -> a  11..255 -> a - 11}", "", {}},
 	{"a -> ??::u8\nu8:x -> a ? {0..10 -> a  12..255 -> a - 11}", "", {.Non_Exhaustive_Pattern}},

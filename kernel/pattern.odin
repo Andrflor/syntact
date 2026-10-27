@@ -71,14 +71,14 @@ covered :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
 }
 
 // Reach: a branch that values of the target reach: its cover, the rewrite of its
-// unknowns, whether every value that comes to it takes it, and whether the rewrite
-// says all of its reach.
+// unknowns, whether every value that comes to it takes it, and what of its reach
+// the rewrite does not say — true when it says all of it.
 Reach :: struct {
 	branch:  int,
 	cover:   Type,
 	rewrite: Rewrite,
 	all:     bool,
-	exact:   bool,
+	unsaid:  Type,
 }
 
 // reaches: the branches values of the target reach, up to one that every value
@@ -98,10 +98,10 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 		}
 		reach := bool_and(k, rest, cond)
 		rest = bool_and(k, rest, bool_not(k, cond))
-		r, reached, exact := narrow(k, nil, reach)
+		r, reached, unsaid := narrow(k, nil, reach)
 		if !reached do continue
 		all := is_bool(rest, false)
-		append(&out, Reach{i, cover, r, all, exact})
+		append(&out, Reach{i, cover, r, all, unsaid})
 		if all do return out, nil, nil
 	}
 	return out, rest, nil
@@ -109,11 +109,12 @@ reaches :: proc(k: ^Kernel, target: Type, branches: []Branch) -> (out: [dynamic]
 
 // narrow: the rewrite a reach makes: through [&], `u in S` rewrites ?ₖ::L into
 // ?ₖ::(L & S), `[~](u in S)` into ?ₖ::(L & ~S). Not reached when the reach is
-// false, or a layout becomes none. Exact when the reach is all said so.
-narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached: bool, exact: bool) {
-	if is_bool(reach, false) || is_invalid(reach) do return nil, false, false
+// false, or a layout becomes none. Unsaid: the literals of the reach the rewrite
+// does not say — an atom on a term, a set not constant.
+narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached: bool, unsaid: Type) {
+	if is_bool(reach, false) || is_invalid(reach) do return nil, false, nil
 	out = base
-	exact = true
+	unsaid = Bool(true)
 	literals := make([dynamic]Type)
 	conjuncts(reach, &literals)
 	for l in literals {
@@ -126,12 +127,12 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 		}
 		o, is_op := atom.(^Operation)
 		if !is_op || o.op != .In {
-			exact = false
+			unsaid = bool_and(k, unsaid, l)
 			continue
 		}
 		u, is_unknown := o.args[0].(^Unknown)
 		if !is_unknown || !is_constant(o.args[1]) {
-			exact = false
+			unsaid = bool_and(k, unsaid, l)
 			continue
 		}
 		current := layout_of(k, u)
@@ -140,10 +141,10 @@ narrow :: proc(k: ^Kernel, base: Rewrite, reach: Type) -> (out: Rewrite, reached
 			if w, ok := x.(^Unknown); ok do current = layout_of(k, w)
 		}
 		layout := and_law(k, {current, positive ? o.args[1] : not_law(k, o.args[1])})
-		if is_none(layout) do return nil, false, false
+		if is_none(layout) do return nil, false, nil
 		out = rewriting(out, u, narrowing(u, layout))
 	}
-	return out, true, exact
+	return out, true, unsaid
 }
 
 // branch_product: the product of a branch, for the values that reach it: a copy of
