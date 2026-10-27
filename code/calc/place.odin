@@ -45,7 +45,7 @@ plan :: proc(g: ^Graph, best: []int, roots: []Class) -> ^Plan {
 	// what each Again gives them
 	p.live = make([][]bool, len(g.loops))
 	for info, l in g.loops {
-		p.live[l] = make([]bool, len(info.machines))
+		p.live[l] = make([]bool, len(info.params))
 		if info.state >= 0 do p.live[l][info.state] = true
 	}
 	reached := make([]bool, len(g.parent))
@@ -129,7 +129,14 @@ reach :: proc(p: ^Plan, c: Class, reached: []bool) {
 	case:
 		for a in n.args do reach(p, a, reached)
 	}
-	if n.kind == .Get do p.gets[Get_Key{find(p.g, n.args[0]), n.index}] = c
+	if n.kind == .Get {
+		p.gets[Get_Key{find(p.g, n.args[0]), n.index}] = c
+		// a parameter a loop gives at its end is alive
+		if t := chosen(p, n.args[0]); t.kind == .Loop {
+			info := p.g.loops[t.owner]
+			if k := n.index - outputs(info); k >= 0 do p.live[t.owner][info.finals[k]] = true
+		}
+	}
 	append(&p.order, c)
 }
 
@@ -186,7 +193,7 @@ choose :: proc(g: ^Graph, n: Node, early, late: Region) -> (Region, bool) {
 // speculable: a computation that cannot fail nor go on, whatever its arguments.
 speculable :: proc(g: ^Graph, n: Node) -> bool {
 	#partial switch n.kind {
-	case .Int, .Real, .Text, .Input, .Argument, .Unary, .In, .Narrow:
+	case .Int, .Real, .Text, .Input, .Argument, .Unary, .In, .Narrow, .Splat, .Lanes, .Reduce:
 		return true
 	case .Binary:
 		#partial switch n.op {

@@ -37,7 +37,8 @@ main :: proc() {
 		fmt.print(code.print_program(&direct))
 		return
 	}
-	prog, failed := calc.optimize(&direct, &calc.X64)
+	costs := len(os.args) == 4 && os.args[2] == "-c" ? &calc.C : &calc.X64
+	prog, failed := calc.optimize(&direct, costs)
 	if failed != "" {
 		fmt.eprintln(failed)
 		os.exit(1)

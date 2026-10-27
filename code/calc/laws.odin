@@ -25,7 +25,8 @@ Law :: proc(g: ^Graph, c: Class, n: Node)
 
 LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, gathered, chained}
 
-// saturate: the laws on every node, and those of the loops (loops.odin), until none
+// saturate: the laws on every node, those of the loops (loops.odin), and of lanes
+// (lanes.odin), until none
 // adds a node nor merges two classes, or the graph holds budget nodes.
 saturate :: proc(g: ^Graph, budget: int) {
 	for len(g.nodes) < budget {
@@ -37,6 +38,7 @@ saturate :: proc(g: ^Graph, budget: int) {
 			for law in LAWS do law(g, find(g, g.home[id]), n)
 		}
 		loop_laws(g)
+		laned(g)
 		rebuild(g)
 		if len(g.nodes) == nodes && g.merges == merges do return
 	}
@@ -75,7 +77,14 @@ known :: proc(g: ^Graph, c: Class, n: Node) {
 		if f.bounds.lo != f.bounds.hi || !in_64(f.bounds) do return
 		v = i64(f.bounds.lo)
 	}
-	equal(g, c, int_node(v))
+	equal(g, c, constant_like(g, c, v))
+}
+
+// constant_like: the integer v, in each lane when c is a vector.
+constant_like :: proc(g: ^Graph, c: Class, v: i64) -> Node {
+	lanes := g.facts[find(g, c)].lanes
+	if lanes == 0 do return int_node(v)
+	return Node{kind = .Splat, value = i64(lanes), args = one(add(g, int_node(v)))}
 }
 
 // neutral: x op e = x, e the neutral of op on its right.
@@ -98,18 +107,18 @@ absorbing :: proc(g: ^Graph, c: Class, n: Node) {
 	case .Mul:
 		switch a {
 		case 0:
-			equal(g, c, int_node(0))
+			equal(g, c, constant_like(g, c, 0))
 		case -1:
 			equal(g, c, Node{kind = .Unary, op = .Neg, args = one(x)})
 		}
 	case .And:
-		if a == 0 do equal(g, c, int_node(0))
+		if a == 0 do equal(g, c, constant_like(g, c, 0))
 	case .Mod:
-		if a == 1 || a == -1 do equal(g, c, int_node(0))
+		if a == 1 || a == -1 do equal(g, c, constant_like(g, c, 0))
 	case .Pow:
 		if a != 0 do return
-		if g.facts[x].machine == .Real do equal(g, c, Node{kind = .Real, value = transmute(i64)f64(1)})
-		else do equal(g, c, int_node(1))
+		if g.facts[x].machine != .Real do equal(g, c, constant_like(g, c, 1))
+		else if g.facts[x].lanes == 0 do equal(g, c, Node{kind = .Real, value = transmute(i64)f64(1)})
 	}
 }
 
@@ -150,9 +159,9 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 	}
 }
 
-// commuted: a ⊕ b = b ⊕ a.
+// commuted: a ⊕ b = b ⊕ a — a vector first, before what is in each of its lanes.
 commuted :: proc(g: ^Graph, c: Class, n: Node) {
-	if n.kind != .Binary do return
+	if n.kind != .Binary || !same_lanes(g, n) do return
 	#partial switch n.op {
 	case .Add, .Mul, .And, .Or, .Xor, .Eq, .Ne:
 		equal(g, c, binary(n.op, n.args[1], n.args[0]))
@@ -168,7 +177,7 @@ CONVERSE := #partial [code.Op]code.Op {
 
 // conversed: a ◁ b = b ▷ a.
 conversed :: proc(g: ^Graph, c: Class, n: Node) {
-	if n.kind != .Binary do return
+	if n.kind != .Binary || !same_lanes(g, n) do return
 	#partial switch n.op {
 	case .Lt, .Le, .Gt, .Ge:
 		equal(g, c, binary(CONVERSE[n.op], n.args[1], n.args[0]))
@@ -215,6 +224,11 @@ chained :: proc(g: ^Graph, c: Class, n: Node) {
 		if e >> uint(bit) & 1 == 1 do r = add(g, binary(.Mul, r, x))
 	}
 	merge(g, c, r)
+}
+
+// same_lanes: the arguments of a binary node are both vectors, or both not.
+same_lanes :: proc(g: ^Graph, n: Node) -> bool {
+	return g.facts[find(g, n.args[0])].lanes == g.facts[find(g, n.args[1])].lanes
 }
 
 // log2: k when c = 2ᵏ, k ≥ 1.

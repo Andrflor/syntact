@@ -23,17 +23,18 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	case .Argument:
 		out.machine = g.func.params[n.index]
 	case .Param:
-		out.machine = g.loops[n.owner].machines[n.index]
+		kind := g.loops[n.owner].params[n.index]
+		out.machine, out.lanes = kind.machine, kind.lanes
 	case .Call:
 		if g.prog.funcs[n.index].pure do out.machine = g.prog.funcs[n.index].result
 	case .In:
 		out.machine, out.bounds = .Int, {0, 1}
 	case .Narrow:
 		x := g.facts[find(g, n.args[0])]
-		out.machine, out.bounds = x.machine, x.bounds
+		out.machine, out.bounds, out.lanes = x.machine, x.bounds, x.lanes
 	case .Splat:
 		a := g.facts[find(g, n.args[0])]
-		out.machine, out.bounds, out.lanes = a.machine, a.bounds, int(n.value)
+		out.machine, out.bounds, out.lanes, out.constant = a.machine, a.bounds, int(n.value), a.constant
 	case .Lanes:
 		values := g.vectors[n.index]
 		out.machine, out.lanes = .Int, len(values)
@@ -57,24 +58,33 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		case .Not:
 			out.bounds = fit({-a.bounds.hi - 1, -a.bounds.lo - 1})
 		}
-		if x, known := a.constant.?; known && a.lanes == 0 do out.constant = code.unary(n.op, .Int, code.Datum{int = x}).int
+		if x, known := a.constant.?; known do out.constant = code.unary(n.op, .Int, code.Datum{int = x}).int
 	case .Binary:
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
 		out.machine = comparison(n.op) ? .Int : a.machine
-		out.lanes = a.lanes
+		out.lanes = max(a.lanes, b.lanes)
 		if comparison(n.op) do out.bounds = {0, 1}
 		if a.machine != .Int do break
 		out.bounds = code.meet(out.bounds, binary_bounds(n.op, a.bounds, b.bounds))
 		x, known_a := a.constant.?
 		y, known_b := b.constant.?
-		if known_a && known_b && a.lanes == 0 {
+		if known_a && known_b {
 			if d, ok := code.binary_of(n.op, .Int, code.Datum{int = x}, code.Datum{int = y}); ok do out.constant = d.int
 		}
-	case .Start, .Arm, .Foreign, .Match, .Loop, .Again, .Exit, .Get:
-	// a state, a tuple or a tail; what a tuple gives, the code says
+	case .Get:
+		// a parameter a loop gives at its end: its kind; what else a tuple gives, the
+		// code says
+		for info in g.loops {
+			if info.node >= len(g.nodes) || g.nodes[info.node].kind != .Loop || find(g, g.home[info.node]) != find(g, n.args[0]) do continue
+			if k := n.index - outputs(info); k >= 0 && k < len(info.finals) {
+				kind := info.params[info.finals[k]]
+				out.machine, out.lanes = kind.machine, kind.lanes
+			}
+		}
+	case .Start, .Arm, .Foreign, .Match, .Loop, .Again, .Exit:
+	// a state, a tuple or a tail
 	}
 	if c, known := out.constant.?; known do out.bounds = {i128(c), i128(c)}
-	if out.lanes > 0 do out.constant = nil
 	return out
 }
 

@@ -331,11 +331,11 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 		case code.Splat:
 			parts := make([]string, f.kinds[i.dst].lanes)
 			for &x in parts do x = name(w, i.a)
-			declare(w, i.dst, fmt.tprintf("(%s){%s}", type_of(f.kinds[i.dst]), strings.join(parts, ", ")))
+			declare(w, i.dst, fmt.tprintf("(%s){{%s}}", type_of(f.kinds[i.dst]), strings.join(parts, ", ")))
 		case code.Lanes:
 			parts := make([]string, len(i.values))
 			for x, k in i.values do parts[k] = int_literal(i128(x))
-			declare(w, i.dst, fmt.tprintf("(%s){%s}", type_of(f.kinds[i.dst]), strings.join(parts, ", ")))
+			declare(w, i.dst, fmt.tprintf("(%s){{%s}}", type_of(f.kinds[i.dst]), strings.join(parts, ", ")))
 		case code.Reduce:
 			declare(w, i.dst, reduce(w, i))
 			if w.reads[i.dst] > 0 do assume(w, i.dst)
@@ -487,7 +487,9 @@ lanes :: proc(w: ^Writer, x: code.Binary, kind: code.Kind, a, b: string) -> (str
 	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
 		return fmt.tprintf("(i64x%d)((%s %s %s) & 1)", kind.lanes, a, C_OPS[x.op], b), ""
 	case .Add, .Sub, .Mul, .Shl:
-		if kind.machine == .Int do return fmt.tprintf("(%s)((u64x%d)%s %s (u64x%d)%s)", type_of(kind), kind.lanes, a, C_OPS[x.op], kind.lanes, b), ""
+		// what is in each lane, an integer, as the integer
+		unsigned := w.f.kinds[x.b].lanes > 0 ? fmt.tprintf("u64x%d", kind.lanes) : "uint64_t"
+		if kind.machine == .Int do return fmt.tprintf("(%s)((u64x%d)%s %s (%s)%s)", type_of(kind), kind.lanes, a, C_OPS[x.op], unsigned, b), ""
 	}
 	return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 }

@@ -31,6 +31,7 @@ optimize :: proc(p: ^code.Program, costs: ^Costs) -> (out: code.Program, err: st
 	out = code.Program{imports = p.imports, texts = p.texts, inputs = p.inputs}
 	for f in p.funcs {
 		g, value, state := read(p, f)
+		g.costs = costs
 		rebuild(g)
 		saturate(g, 50 * len(g.nodes))
 		plan := plan(g, extract(g, costs), {value, state})
@@ -208,9 +209,10 @@ write_match :: proc(w: ^Writer, c: Class, n: Node) {
 write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	g := w.g
 	info := g.loops[n.owner]
-	count := len(info.machines)
+	count := len(info.params)
 	params := make([dynamic]code.Value)
 	init := make([dynamic]code.Value)
+	values := make([]code.Value, count)
 	for j in 0 ..< count {
 		if !w.p.live[n.owner][j] do continue
 		start := ensure(w, n.args[j])
@@ -219,13 +221,12 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 			if read do done(w, g.home[param], code.NONE)
 			continue
 		}
-		v: code.Value
 		if read {
-			v = done(w, g.home[param], fresh(w, g.home[param]))
+			values[j] = done(w, g.home[param], fresh(w, g.home[param]))
 		} else {
-			v = code.value(w.f, info.machines[j])
+			values[j] = code.value(w.f, info.params[j].machine, info.params[j].lanes)
 		}
-		append(&params, v)
+		append(&params, values[j])
 		append(&init, start)
 	}
 	loop := code.Loop{params = params[:], init = init[:]}
@@ -240,6 +241,8 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	emit(w, c, loop)
 	if read do done(w, value, loop.dst)
 	if state, has := gives(w, c, info.value ? 1 : 0); has && info.state >= 0 do done(w, state, code.NONE)
+	// what its parameters hold at its end
+	for j, k in info.finals do if final, has := gives(w, c, outputs(info) + k); has do done(w, final, values[j])
 	done(w, c, code.NONE)
 }
 

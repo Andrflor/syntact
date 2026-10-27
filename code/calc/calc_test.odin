@@ -8,7 +8,7 @@ import "core:slice"
 import "core:testing"
 
 // The programs the interpreter runs, as the kernel lowers them and as the normal
-// form of their computations: the same runs.
+// form of their computations on each machine: the same runs.
 @(test)
 test_interpreted :: proc(t: ^testing.T) {
 	arena: vmem.Arena
@@ -24,10 +24,13 @@ test_interpreted :: proc(t: ^testing.T) {
 			continue
 		}
 		if !testing.expectf(t, err == "", "%s: %s", c.name, err) do continue
-		normal, failed := optimize(&direct, &X64)
+		x64, failed := optimize(&direct, &X64)
 		if !testing.expectf(t, failed == "", "%s: %s\n%s", c.name, failed, code.print_program(&direct)) do continue
-		for &prog, form in ([]code.Program{direct, normal}) {
-			name := form == 0 ? "lowered" : "normal form"
+		lanes, failed_lanes := optimize(&direct, &C)
+		if !testing.expectf(t, failed_lanes == "", "%s, in lanes: %s\n%s", c.name, failed_lanes, code.print_program(&direct)) do continue
+		names := []string{"lowered", "normal form", "normal form in lanes"}
+		for &prog, form in ([]code.Program{direct, x64, lanes}) {
+			name := names[form]
 			run, failed := code.interpret(&prog, c.inputs, symbols)
 			if !testing.expectf(t, failed == "", "%s, %s: %s\n%s", c.name, name, failed, code.print_program(&prog)) do continue
 			switch prog.funcs[0].result {

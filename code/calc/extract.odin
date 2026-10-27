@@ -152,61 +152,115 @@ C := Costs {
 
 
 // extract: the node of least cost of each class, by its index; -1 for a class
-// nothing computes.
+// nothing computes. A computation costs what each class it reaches costs once —
+// computed once, read as often as it is —: its weight times how often it runs, the
+// turns of each loop it is in (a class is where its scope is). From the best each
+// class has, to a fixed point; a node that reaches its own class is no computation
+// of it.
 extract :: proc(g: ^Graph, costs: ^Costs) -> []int {
 	scope := scopes(g)
-	cost := make([]f64, len(g.parent))
-	best := make([]int, len(g.parent))
-	for &c in cost do c = INFINITE
+	n := len(g.parent)
+	runs := make([]f64, n)
+	for &r, c in runs {
+		r = 1
+		if s, has := scope[c].?; has do r = runs_in(g, costs, s)
+	}
+	best := make([]int, n)
+	cost := make([]f64, n)
+	reach := make([][]Class, n)
 	for &b in best do b = -1
-	for changed := true; changed; {
-		changed = false
-		for n, id in g.nodes {
+	for &c in cost do c = INFINITE
+	local :: proc(g: ^Graph, costs: ^Costs, runs: []f64, best: []int, x: Class) -> f64 {
+		return weight(g, costs, g.nodes[best[x]]) * runs[x]
+	}
+	for round := 0; round < 64; round += 1 {
+		changed := false
+		for node, id in g.nodes {
 			c := find(g, g.home[id])
-			r, defined := node_scope(g, n, scope)
+			r, defined := node_scope(g, node, scope)
 			if s, has := scope[c].?; !defined || !has || r != s do continue
-			total := node_cost(g, costs, n, cost)
-			if total < cost[c] {
-				cost[c] = total
-				best[c] = id
+			// what it reaches: its arguments' classes, and theirs
+			reached := make([dynamic]Class, context.temp_allocator)
+			computes := true
+			for a in node.args {
+				a := find(g, a)
+				if best[a] < 0 || contains(reach[a], c) {
+					computes = false
+					break
+				}
+				for x in reach[a] do insert_sorted(&reached, x)
+			}
+			if !computes do continue
+			total := weight(g, costs, node) * runs[c]
+			for x in reached do if x != c do total += local(g, costs, runs, best, x)
+			if total < cost[c] - 1e-9 {
+				cost[c], best[c] = total, id
+				insert_sorted(&reached, c)
+				delete(reach[c])
+				reach[c] = make([]Class, len(reached))
+				copy(reach[c], reached[:])
 				changed = true
 			}
 		}
+		if !changed do break
 	}
 	return best
 }
 
-node_cost :: proc(g: ^Graph, costs: ^Costs, n: Node, cost: []f64) -> f64 {
-	of :: proc(g: ^Graph, cost: []f64, c: Class) -> f64 {return cost[find(g, c)]}
-	// what a computation reads, each class once: computed once, read twice
-	sum :: proc(g: ^Graph, cost: []f64, cs: []Class) -> f64 {
-		out: f64
-		outer: for c, i in cs {
-			for d in cs[:i] do if find(g, d) == find(g, c) do continue outer
-			out += of(g, cost, c)
-		}
-		return min(out, INFINITE)
+// runs_in: how often a computation in the region r runs: the turns of each loop it
+// is in.
+runs_in :: proc(g: ^Graph, costs: ^Costs, r: Region) -> f64 {
+	out: f64 = 1
+	for x := r; x.kind != .Root; x = parent_of(g, x) {
+		if x.kind != .Body do continue
+		turns := g.loops[x.owner].turns
+		out *= turns > 0 ? turns : costs.turns
 	}
+	return out
+}
+
+contains :: proc(set: []Class, c: Class) -> bool {
+	lo, hi := 0, len(set)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if set[mid] == c do return true
+		if set[mid] < c do lo = mid + 1
+		else do hi = mid
+	}
+	return false
+}
+
+insert_sorted :: proc(set: ^[dynamic]Class, c: Class) {
+	lo, hi := 0, len(set)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if set[mid] == c do return
+		if set[mid] < c do lo = mid + 1
+		else do hi = mid
+	}
+	inject_at(set, lo, c)
+}
+
+// weight: what the operation of n costs, once, on the machine.
+weight :: proc(g: ^Graph, costs: ^Costs, n: Node) -> f64 {
 	switch n.kind {
 	case .Param:
 		// a parameter a law carries: what a turn does to it
 		op, carried := g.loops[n.owner].carried[n.index].?
 		if !carried do return 0
-		return (g.loops[n.owner].machines[n.index] == .Real ? costs.reals : costs.ints)[op]
-	case .Int, .Argument, .Start, .Arm, .Get, .Narrow, .Again, .Exit:
-		return sum(g, cost, n.args)
-	case .Real, .Text, .Input:
+		return table(costs, kind_facts(g.loops[n.owner].params[n.index]))[op]
+	case .Int, .Argument, .Start, .Arm, .Get, .Narrow, .Again, .Exit, .Loop:
+		return 0
+	case .Real, .Text, .Input, .Lanes:
 		return costs.load
 	case .Splat:
-		return costs.splat + sum(g, cost, n.args)
-	case .Lanes:
-		return costs.load
+		return costs.splat
 	case .Reduce:
 		a := g.facts[find(g, n.args[0])]
-		return costs.reduce * f64(a.lanes - 1) + sum(g, cost, n.args)
+		return costs.reduce * f64(a.lanes - 1)
 	case .Unary:
 		a := g.facts[find(g, n.args[0])]
-		return table(costs, a)[n.op] + sum(g, cost, n.args)
+		return table(costs, a)[n.op]
 	case .Binary:
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
 		ops := table(costs, a)
@@ -219,22 +273,14 @@ node_cost :: proc(g: ^Graph, costs: ^Costs, n: Node, cost: []f64) -> f64 {
 		// a power by squaring: a square, a product and a branch for each bit of the count
 		if n.op == .Pow && a.lanes == 0 do w = f64(bits(b.bounds.hi)) * (2 * ops[.Mul] + costs.branch)
 		// a constant first takes a register
-		if a.constant != nil do w += costs.load
-		return w + sum(g, cost, n.args)
+		if a.constant != nil && a.lanes == 0 do w += costs.load
+		return w
 	case .In:
-		return costs.branch * f64(len(g.covers[n.index].ints) + len(g.covers[n.index].reals)) + sum(g, cost, n.args)
+		return costs.branch * f64(len(g.covers[n.index].ints) + len(g.covers[n.index].reals))
 	case .Foreign, .Call:
-		return costs.call + sum(g, cost, n.args)
+		return costs.call
 	case .Match:
-		info := g.matches[n.owner]
-		first := info.state ? 2 : 1
-		per := (len(n.args) - first) / len(info.covers)
-		dearest: f64
-		for k in 0 ..< len(info.covers) do dearest = max(dearest, sum(g, cost, n.args[first + k * per:][:per]))
-		return costs.branch * f64(len(info.covers) - 1) + sum(g, cost, n.args[:first]) + dearest
-	case .Loop:
-		last := len(n.args) - 1
-		return sum(g, cost, n.args[:last]) + costs.turns * of(g, cost, n.args[last])
+		return costs.branch * f64(len(g.matches[n.owner].covers) - 1)
 	}
 	return INFINITE
 }
@@ -243,6 +289,10 @@ node_cost :: proc(g: ^Graph, costs: ^Costs, n: Node, cost: []f64) -> f64 {
 table :: proc(costs: ^Costs, a: Facts) -> [code.Op]f64 {
 	if a.lanes > 0 do return a.machine == .Real ? costs.vreals : costs.vints
 	return a.machine == .Real ? costs.reals : costs.ints
+}
+
+kind_facts :: proc(k: code.Kind) -> Facts {
+	return Facts{machine = k.machine, bounds = k.bounds, lanes = k.lanes}
 }
 
 // in_32: integers not negative that 32 bits hold.

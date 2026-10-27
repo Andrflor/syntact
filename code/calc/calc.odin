@@ -94,20 +94,40 @@ Match_Info :: struct {
 	tail:   bool,
 }
 
-// Loop_Info: a loop: the region it runs in, its node, the machine of each parameter
-// by its index — the state's None —, the index of the state, -1 when its body has
-// no effects, how a law carries each parameter — what each turn does to it; nil
-// for the loop's own —, and whether it gives a value.
+// Loop_Info: a loop: the region it runs in, its node, the kind of each parameter by
+// its index — the state's machine None —, the index of the state, -1 when its body
+// has no effects, how a law carries each parameter — what each turn does to it;
+// nil for the loop's own —, whether it gives a value, the parameters it gives at
+// its end, after its value and its state, how many turns it runs — 0: as many as
+// a loop does —, and what made it.
 Loop_Info :: struct {
-	parent:   Region,
-	node:     int,
-	machines: [dynamic]code.Machine,
-	state:    int,
-	carried:  [dynamic]Maybe(code.Op),
-	value:    bool,
+	parent:  Region,
+	node:    int,
+	params:  [dynamic]code.Kind,
+	state:   int,
+	carried: [dynamic]Maybe(code.Op),
+	value:   bool,
+	finals:  [dynamic]int,
+	turns:   f64,
+	origin:  Origin,
 }
 
-// Facts: what holds of every computation of a class: of each lane of a vector.
+// Origin: a loop of the code; or its lanes, or the turns they leave, by the law of
+// lanes (lanes.odin) — or one the law of lanes went through.
+Origin :: enum u8 {
+	Code,
+	Lanes,
+	Rest,
+	Laned,
+}
+
+// outputs: what a loop gives before the parameters it gives at its end.
+outputs :: proc(info: Loop_Info) -> int {
+	return (info.value ? 1 : 0) + (info.state >= 0 ? 1 : 0)
+}
+
+// Facts: what holds of every computation of a class: of each lane of a vector —
+// its constant, the integer in each lane.
 Facts :: struct {
 	machine:  code.Machine,
 	bounds:   code.Bounds,
@@ -116,6 +136,7 @@ Facts :: struct {
 }
 
 Graph :: struct {
+	costs:   ^Costs, // of the machine the normal form is for
 	prog:    ^code.Program,
 	func:    ^code.Func,
 	nodes:   [dynamic]Node,

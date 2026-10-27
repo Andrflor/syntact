@@ -10,7 +10,7 @@ import "core:testing"
 @(test)
 test_binaries :: proc(t: ^testing.T) {
 	cases.run(t, proc(p: ^code.Program, path: string) -> string {
-		normal, failed := calc.optimize(p, &calc.X64)
+		normal, failed := calc.optimize(p, &calc.C)
 		if failed != "" do return failed
 		return executable(&normal, path)
 	})

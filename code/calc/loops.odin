@@ -59,8 +59,8 @@ counters :: proc(g: ^Graph, l: int) -> map[int]i64 {
 	agains := make([dynamic]Node)
 	for n in g.nodes do if n.kind == .Again && n.owner == l do append(&agains, n)
 	if len(agains) == 0 do return out
-	params: for j in 0 ..< len(info.machines) {
-		if info.machines[j] != .Int || info.carried[j] != nil do continue
+	params: for j in 0 ..< len(info.params) {
+		if info.params[j].machine != .Int || info.params[j].lanes > 0 || info.carried[j] != nil do continue
 		delta: Maybe(i64)
 		for a in agains {
 			d, ok := step(g, a.args[j], l, j)
@@ -100,12 +100,14 @@ counter_of :: proc(g: ^Graph, c: Class, l, j: int) -> (token: Class, ok: bool) {
 
 // within: the class c reads a parameter of the loop l: it is computed in its body.
 within :: proc(g: ^Graph, c: Class, l: int) -> bool {
+	if find(g, c) >= Class(len(g.scope)) do return false
 	r, defined := g.scope[find(g, c)].?
 	return defined && inside(g, r, Region{.Body, l, 0})
 }
 
 // invariant: no turn of l changes c.
 invariant :: proc(g: ^Graph, c: Class, l: int) -> bool {
+	if find(g, c) >= Class(len(g.scope)) do return false
 	_, defined := g.scope[find(g, c)].?
 	return defined && !within(g, c, l)
 }
@@ -139,6 +141,13 @@ polynomial :: proc(g: ^Graph, c: Class, l, i: int, depth := 0) -> (p: Polynomial
 	}
 	for id in g.members[c] {
 		n := g.nodes[id]
+		if n.kind == .Splat {
+			// in each lane: δ is a homomorphism of rings
+			a := polynomial(g, n.args[0], l, i, depth + 1) or_continue
+			lanes := make([]Class, len(a.coefficients))
+			for x, k in a.coefficients do lanes[k] = splat(g, x, int(n.value))
+			return Polynomial{lanes, a.token}, true
+		}
 		if !ring(n) do continue
 		a := polynomial(g, n.args[0], l, i, depth + 1) or_continue
 		if n.kind == .Unary {
@@ -176,10 +185,11 @@ plus :: proc(g: ^Graph, a, b: Class) -> Class {
 		return find(g, b)
 	case known_b && y == 0:
 		return find(g, a)
-	case known_a && known_b:
-		return add(g, int_node(x + y))
+	case known_a && known_b && g.facts[find(g, a)].lanes == g.facts[find(g, b)].lanes:
+		return add(g, int_node(x + y)) if g.facts[find(g, a)].lanes == 0 else add(g, constant_like(g, a, x + y))
 	}
-	return add(g, binary(.Add, a, b))
+	v := vector_first(g, a, b)
+	return add(g, binary(.Add, v[0], v[1]))
 }
 
 times :: proc(g: ^Graph, a, b: Class) -> Class {
@@ -192,12 +202,19 @@ times :: proc(g: ^Graph, a, b: Class) -> Class {
 		return find(g, b)
 	case known_b && y == 1:
 		return find(g, a)
-	case known_a && known_b:
-		return add(g, int_node(x * y))
-	case known_a:
+	case known_a && known_b && g.facts[find(g, a)].lanes == g.facts[find(g, b)].lanes:
+		return add(g, int_node(x * y)) if g.facts[find(g, a)].lanes == 0 else add(g, constant_like(g, a, x * y))
+	case known_a && g.facts[find(g, a)].lanes <= g.facts[find(g, b)].lanes:
 		return add(g, binary(.Mul, b, a))
 	}
-	return add(g, binary(.Mul, a, b))
+	v := vector_first(g, a, b)
+	return add(g, binary(.Mul, v[0], v[1]))
+}
+
+// vector_first: a and b, a vector first.
+vector_first :: proc(g: ^Graph, a, b: Class) -> [2]Class {
+	if g.facts[find(g, a)].lanes < g.facts[find(g, b)].lanes do return {b, a}
+	return {a, b}
 }
 
 scaled :: proc(g: ^Graph, p: Polynomial, s: i64) -> Polynomial {
@@ -354,8 +371,9 @@ read_as :: proc(g: ^Graph, t: Class, token: Class) -> Class {
 // what advance gives it next.
 extend :: proc(g: ^Graph, l: int, start: Class, op: code.Op) -> Class {
 	info := &g.loops[l]
-	j := len(info.machines)
-	append(&info.machines, g.facts[find(g, start)].machine)
+	j := len(info.params)
+	f := g.facts[find(g, start)]
+	append(&info.params, code.Kind{f.machine, code.EVERY, f.lanes})
 	append(&info.carried, op)
 	loop := &g.nodes[info.node]
 	args := make([]Class, len(loop.args) + 1)
