@@ -1,0 +1,6 @@
+{
+  "name": "Line Spaced Minus Subtracts",
+  "description": "A minus at the start of a line, spaced from what follows, continues the expression: {10\\n- 10} is a subtraction.",
+  "source": "{10\n- 10}",
+  "expect": "Scope[Scope[Operator(Subtract,Literal(Integer,10),Literal(Integer,10))]]"
+}

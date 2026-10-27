@@ -1,0 +1,6 @@
+{
+  "name": "Line Glued Minus Starts A Branch",
+  "description": "A minus at the start of a line, glued to what follows, starts the next branch of a pattern.",
+  "source": "x ? {\n  1 -> 10\n  -1 -> 20\n}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Literal(Integer,10)),Branch(Operator(Subtract,nil,Literal(Integer,1)),Literal(Integer,20))])]"
+}

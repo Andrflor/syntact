@@ -1,0 +1,6 @@
+{
+  "name": "Spaced Minus Subtracts In A Branch",
+  "description": "In a branch, 10 - 1, spaced on both sides, is a subtraction.",
+  "source": "x ? {1 -> 10 - 1}",
+  "expect": "Scope[Pattern(Identifier(x),[Branch(Literal(Integer,1),Operator(Subtract,Literal(Integer,10),Literal(Integer,1)))])]"
+}

@@ -1240,9 +1240,9 @@ parse_statement :: proc(parser: ^Parser) -> Node_Index {
 	return parse_expression(parser)
 }
 
-// starts_binding: a token after a space, glued to what follows it.
+// starts_binding: a token after a space or a line, glued to what follows it.
 starts_binding :: proc(parser: ^Parser, t: Token) -> bool {
-	if !has_flag(t, .Space_Before) || has_flag(t, .Line_Before) || int(t.span.end) >= len(parser.source) do return false
+	if !has_flag(t, .Space_Before) && !has_flag(t, .Line_Before) || int(t.span.end) >= len(parser.source) do return false
 	c := parser.source[t.span.end]
 	return !IS_SPACE[c] && c != '\n' && c != ',' && c != '/'
 }
@@ -1314,8 +1314,9 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 		if infix == nil || prec_table[kind] < precedence {
 			break
 		}
-		// in a list of bindings, a minus after a space and glued to what follows
-		// starts the next binding: `10 -10` is 10, then -10; `10 - 10`, `10-10` subtract
+		// in a list, a minus after a space or a line and glued to what follows starts
+		// the next element: `10 -10` and `10\n-10` are 10, then -10; `10 - 10`,
+		// `10\n- 10`, `10-10` subtract
 		if kind == .Minus && parser.listing && starts_binding(parser, parser.current_token) {
 			break infix_loop
 		}
@@ -2446,6 +2447,8 @@ parse_pattern :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 
 	if parser.current_token.kind == .LeftBrace {
 		advance_token(parser)
+		// the branches are a list, like the bindings of a scope
+		parser.listing = true
 
 		for parser.current_token.kind != .RightBrace && parser.current_token.kind != .EOF {
 			source_idx, product_idx := parse_branch(parser)
