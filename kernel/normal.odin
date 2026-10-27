@@ -21,6 +21,8 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return effect_law(k, v, normal(k, v.then))
 	case ^Fold:
 		return fold_law(k, v)
+	case ^Least:
+		return least_law(k, v.index, v.holds, v.span)
 	case ^Name:
 		return binding_value(k, v.binding)
 	case ^Scope:

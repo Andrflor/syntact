@@ -102,7 +102,7 @@ type_prec :: proc(t: Type) -> int {
 		return operator_prec(v.op)
 	case ^Pattern:
 		return PREC_OR
-	case ^Fold:
+	case ^Fold, ^Least:
 		return PREC_ATOM
 	case ^Range:
 		if v.lo != nil || v.hi != nil do return PREC_COMPARE
@@ -258,6 +258,13 @@ write_bare :: proc(b: ^Printer, t: Type) {
 	case ^Default:
 		write_type(b, v.color, PREC_ATOM)
 		strings.write_byte(b, ':')
+	case ^Least:
+		// μ(i: t)
+		append(&b.bound, v.index)
+		fmt.sbprintf(b, "μ(%s: ", bound_name(len(b.bound) - 1))
+		write_type(b, v.holds, 0)
+		pop(&b.bound)
+		strings.write_byte(b, ')')
 	case ^Fold:
 		// ⟳(k: a ↦ n until S; ε…; x: c ↦ t, …; v): k from a and each state from its
 		// init; while k is not in S, the effects of a step, then the updates, and k

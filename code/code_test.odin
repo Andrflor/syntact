@@ -62,8 +62,13 @@ CODE_CASES := []Code_Case {
 	{name = "iteration through any step", source = "half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}\n-> half{n -> ??::u8}!", inputs = {100}, int = 7},
 	// an affine context: the maps compose, x ↦ 2x + 1
 	{name = "affine context", source = "g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}\n-> g{n -> ??::u8}!", inputs = {100}, int = 255},
+	// calls further along the orbit: a window of states
+	{name = "window", source = "fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}\n-> fib{n -> ??::u8}!", inputs = {10}, int = 55},
+	{name = "window at the base", source = "fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}\n-> fib{n -> ??::u8}!", inputs = {1}, int = 1},
+	// closed forms: a power of two, the length of an orbit
+	{name = "geometric", source = "hanoi -> {u8:n -> ??  -> n ? {0 -> 0  -> 2 * hanoi{n -> n - 1}! + 1}}\n-> hanoi{n -> ??::u8}!", inputs = {10}, int = 1023},
 	// a recursion that stays is a function: its fields its parameters
-	{name = "function", source = "fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}\n-> fib{n -> ??::u8}!", inputs = {10}, int = 55},
+	{name = "function", source = "q -> {u8:n -> ??  -> n ? {0 -> 1  -> q{n -> n / 3}! * q{n -> n / 3}! + 1}}\n-> q{n -> ??::u8}!", inputs = {11}, int = 26},
 	{name = "loop", source = "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", inputs = {10}, int = 55},
 	// a call in tail position is a loop: the stack does not grow with its turns
 	{name = "tail call", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!", inputs = {300_000}, int = 600_000},

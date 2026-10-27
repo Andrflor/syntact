@@ -2,6 +2,6 @@
   "name": "recursion_argument_renewed",
   "description": "Two runs of a scope that calls an equation on an answer: each call takes its run's answer.",
   "source": "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\ng -> {u8:r -> !?  -> fact{n -> r}!}\nx -> g! - g!",
-  "type": "ε0(x::u8, ε0(y::u8, ⟳(z: x ↦ z - 1 until 0; x3: 1 ↦ z * x3; x3) - ⟳(z: y ↦ z - 1 until 0; x3: 1 ↦ z * x3; x3)))",
+  "type": "ε0(x::u8, ε0(y::u8, ⟳(z: x - 1 ↦ z - 1 until ..(-1); x3: 1 ↦ x * x3 - z * x3; x3) - ⟳(z: y - 1 ↦ z - 1 until ..(-1); x3: 1 ↦ -(z * x3) + x3 * y; x3)))",
   "expect_errors": []
 }

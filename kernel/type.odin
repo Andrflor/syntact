@@ -34,6 +34,7 @@ Type :: union {
 	^Default, // C:           an anonymous binding colored by C
 	^Pattern, // t ? {c -> p …}
 	^Fold, // ⟳(k: a ↦ n until S; ε…; x: c ↦ t; v)   along an orbit (§5.6)
+	^Least, // μ(i: t)    the least i ≥ 0 where t holds (§5.6)
 	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
@@ -220,6 +221,14 @@ Fold :: struct {
 	updates: []Type,
 	value:   Type,
 	span:    syn.Span,
+}
+
+// Least: μ(i: t), the least integer i ≥ 0 for which t holds — Kleene's μ: the
+// number of steps an orbit takes to where it stops (§5.6). i is bound in t.
+Least :: struct {
+	index: ^Unknown,
+	holds: Type,
+	span:  syn.Span,
 }
 
 // fold_parts: the terms of a fold, in a fixed order: start, stop, next, the inits,

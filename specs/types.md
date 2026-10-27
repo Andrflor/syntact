@@ -335,7 +335,7 @@ unchanged:
 
 ```text
 loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}
-loop{n -> m}!    = ε<⟳(k: 1 ↦ k + 1 until (m + 1)..; ε₁(y); x: 0 ↦ y + x; x)>(z, z)
+loop{n -> m}!    = ε<⟳(i: m - 1 ↦ i - 1 until ..(-1); ε₁(y); x: 0 ↦ y + x; x)>(z, z)
 loop{n -> 3}! - loop{n -> 3}!   = ε<⟳(…)>(x, ε<⟳(…)>(y, x - y))       two runs
 {u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
 ```
@@ -346,7 +346,7 @@ scope that places them:
 
 ```text
 sum{n -> !?::u8}!              = ε₁(x::u8, x * (x + 1) / 2)
-loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(k: 1 ↦ k + 1 until (x + 1)..; …)>(y, y))
+loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(i: x - 1 ↦ i - 1 until ..(-1); …)>(y, y))
 g -> {w -> !?::none  -> {k -> 1}}
 {...g!, -> 1}!                 = ε₁(1)
 ```
@@ -623,7 +623,7 @@ List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
 {10 10 10} in List{u8}                                                    = false
 ```
 
-A fold, when the call changes the integer the name is called on, and that only:
+A fold, when the calls change the integer the name is called on, and that only:
 
 ```text
 f{n -> m}! = m ? {B -> c(m)  -> pre(m) · f{n -> s(m)}! · post(m)}
@@ -632,59 +632,81 @@ f{n -> m}! = m ? {B -> c(m)  -> pre(m) · f{n -> s(m)}! · post(m)}
 A run follows the orbit of m by s until B: the effects before the call run going
 down, those after it coming back up — the solution, by Arden, of the equation of its
 effects, `R(m) = pre(m) · R(s(m)) · post(m)`. Its value is v(m, y) after post, y
-what the call gives back. `⟳(k: a ↦ s until B; ε…; x: e ↦ t, …; w)` is that fold:
-k = a and each state its init; while k is not in B, the effects of a step, then the
-states take their updates, all at once, and k = s; then w.
+what the call gives back. `⟳(k: a ↦ s until B; ε…; x: e ↦ t, …; w)` is a fold: k = a
+and each state its init; while k is not in B, the effects of a step, then the
+states take their updates, all at once, and k = s; then w. `μ(i: t)` is the least
+i ≥ 0 where t holds (Kleene's μ).
 
-When post has no effect and v is affine in y, `v = α·y + β`, the maps compose into
-one, `(A, B) ∘ (α, β) = (A·α, B + A·β)`: the fold goes down, the effects before the
-call in its steps,
+The orbit has a closed form when s moves by a constant, or halves: its i-th point
+`kᵢ = sⁱ(m)` and its length `n = μ(i: kᵢ in B)`,
+
+```text
+s(k) = k + c          kᵢ = m + c·i      n = m - b, or 0, when B = ..b or the point b
+s(k) = k >> c, k / 2ᶜ  kᵢ = m >> c·i    n = μ(i: m >> c·i in B)
+```
+
+Then the equation itself is folded from the base case up, over the steps i from
+n - 1 down to 0, after the effects before the call going down — unless post reads
+what they give back. Calls further along the orbit, `f{n -> m - 2}!` …, are a
+window of states, the values at the next points:
+
+```text
+f{n -> m}! = ⟳(i: 0 ↦ i + 1 until n..; pre(kᵢ); none) · ⟳(i: n - 1 ↦ i - 1 until ..(-1); post(kᵢ); x: c(kₙ) ↦ v(kᵢ, x); x)
+```
+
+Otherwise, when post has no effect and v is affine in y, `v = α·y + β`, the maps
+compose into one, `(A, B) ∘ (α, β) = (A·α, B + A·β)`, and the fold goes down the
+orbit, the effects before the call in its steps:
 
 ```text
 f{n -> m}! = ⟳(k: m ↦ s(k) until B; pre(k); A: 1 ↦ A·α(k), B: 0 ↦ B + A·β(k); A·c(k) + B)
 ```
 
-Otherwise it comes back up from the base case, which inverts s — `s(m) = m - 1`,
-`B = b ≤ m` — after the effects before the call, going down; post must not read
-what they give back:
-
-```text
-f{n -> m}! = ⟳(k: m ↦ k - 1 until b; pre(k); none) · ⟳(k: b + 1 ↦ k + 1 until (m + 1)..; post(k); x: c(b) ↦ v(k, x); x)
-```
-
-What would keep the orbit, or what pre gives back — or a step with several calls —
-stays. The laws of a fold:
+What would keep the orbit, or what pre gives back, stays. The laws of a fold:
 
 ```text
 x: e ↦ x                                   x is e
 a state nothing reads                      is not folded
 nothing left to fold, w not reading k      w
 a state not reading what the effects give back, nor read by them: it crosses them
-k by one over lo..hi, x: e ↦ x + g(k), g a polynomial, read by w only:
-    x = e + G(hi) - G(lo - 1) at the end    G(m) = g(0) + … + g(m), by the sums of powers
 ```
 
-An effect of a fold is an effect, `ε<⟳(…)>(x, t)`. On examples:
+and, along a counter — i by one over lo..hi, n steps —, a state read by the value
+only whose update is a first-order linear recurrence, `x ↦ r·x + g(i)`, g a
+polynomial in i over the other unknowns, has its closed form:
+
+```text
+r = 1      x = x₀ + G(hi) - G(lo - 1)        G(m) = g(0) + … + g(m), by the sums of powers
+r = 2ʲ     x = P(n) + (x₀ - P(0)) << j·n      P(t + 1) = r·P(t) + g(t), by its coefficients
+```
+
+The ring computes over atoms: a term it does not read — a μ, a pattern — is one.
+The algebra writes no power but `<<`: rⁿ for another r, a product, stay folds. On
+examples:
 
 ```text
 sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
-sum{n -> m}!   = m * (m + 1) / 2
-fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
-fact{n -> m}!  = ⟳(k: m ↦ k - 1 until 0; x: 1 ↦ k * x; x)
+sum{n -> m}!    = m * (m + 1) / 2
+hanoi -> {u8:n -> ??  -> n ? {0 -> 0  -> 2 * hanoi{n -> n - 1}! + 1}}
+hanoi{n -> m}!  = (1 << m) - 1
 half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}
-half{n -> m}!  = ⟳(k: m ↦ k / 2 until 0; x: 0 ↦ x + 1; x)
+half{n -> m}!   = μ(i: m >> i in 0)                         the length of m in bits
 g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}
-g{n -> m}!     = ⟳(k: m ↦ k / 2 until 0; A: 1 ↦ 2 * A, B: 0 ↦ A + B; A + B)
+g{n -> m}!      = (2 << μ(i: m >> i in 0)) - 1
+fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
+fact{n -> m}!   = ⟳(i: m - 1 ↦ i - 1 until ..(-1); x: 1 ↦ (m - i) * x; x)
+fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}
+fib{n -> m}!    = ⟳(i: n - 1 ↦ i - 1 until ..(-1); x: c(kₙ) ↦ x + y, y: c(kₙ₊₁) ↦ x; x)
 say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{…  n -> n}! + say{n -> n - 1}!}}
-say{n -> m}!   = ε<⟳(k: m ↦ k - 1 until 0; ε<printf{…  n -> k}!>(y); x: 0 ↦ y + x; x)>(z, z)
+say{n -> m}!    = ε<⟳(i: 0 ↦ i + 1 until m..; ε<printf{…  n -> m - i}!>(y); x: 0 ↦ y + x; x)>(z, z)
 count -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> count{n -> n - 1}!  -> a + io.printf{…  n -> n}!}!}}
-count{n -> m}! = ε<⟳(k: 1 ↦ k + 1 until (m + 1)..; ε<printf{…  n -> k}!>(y); x: 0 ↦ y + x; x)>(z, z)
+count{n -> m}!  = ε<⟳(i: m - 1 ↦ i - 1 until ..(-1); ε<printf{…  n -> m - i}!>(y); x: 0 ↦ y + x; x)>(z, z)
 tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> io.puts{…}!  -> 1 + tick{n -> n - 1}!}!}}
-tick{n -> m}!  = ε<⟳(k: m ↦ k - 1 until 0; ε<puts{…}!>(y); none)>(m)    the value crosses
+tick{n -> m}!   = ε<⟳(i: 0 ↦ i + 1 until m..; ε<puts{…}!>(y); none)>(m)    the value crosses
 ```
 
 Like the equation, a fold is never unfolded: `fact{n -> 5}!` is
-`⟳(k: 5 ↦ k - 1 until 0; x: 1 ↦ k * x; x)`.
+`⟳(i: 4 ↦ i - 1 until ..(-1); x: 1 ↦ (5 - i) * x; x)`.
 
 `sum{n -> m - 1}!` is not an extra notation: it is carving and collapse, applied to
 types.

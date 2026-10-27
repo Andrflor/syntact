@@ -121,6 +121,8 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		if v.recursive do return call_family(k, v)
 	case ^Fold:
 		return family_of(k, v.value)
+	case ^Least:
+		return .Int, true
 	case ^Or, ^And, ^Not, ^Range:
 		if is_constant(t) do return layout_family(k, t)
 	case ^Pattern:

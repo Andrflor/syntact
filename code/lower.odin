@@ -170,6 +170,8 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		return call(l, v)
 	case ^kernel.Fold:
 		return fold(l, v)
+	case ^kernel.Least:
+		return least(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
@@ -305,6 +307,35 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> Value {
 		loop.dst = value(l.f, machine_of(l.f, loop.body.value))
 		l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
 	}
+	emit(l, loop)
+	return loop.dst
+}
+
+// least: μ(i: t) (specs/types.md §5.6) as a loop: i from 0, until t holds.
+least :: proc(l: ^Lowering, m: ^kernel.Least) -> Value {
+	params, starts := make([]Value, 1), make([]Value, 1)
+	starts[0] = constant(l, 0)
+	params[0] = value(l.f, .Int)
+	l.f.kinds[params[0]].bounds = {0, max(i128)}
+	loop := Loop{dst = NONE, params = params, init = starts}
+	outer, bound := open_body(l, &loop.body)
+	append(&l.bound, Bound{m.index, params[0]})
+	holds := lower(l, m.holds)
+	arms := make([]Arm, 2)
+	taken := make([]Bounds, 1)
+	taken[0] = {1, 1}
+	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), value = params[0]}}
+	arms[1].body.value = NONE // it ends in an Again
+	step_outer, step_bound := open_body(l, &arms[1].body)
+	next := make([]Value, 1)
+	next[0] = binary(l, .Add, params[0], constant(l, 1), .Int)
+	emit(l, Again{next})
+	close_body(l, step_outer, step_bound)
+	loop.body.value = close_match(l, holds, arms)
+	close_body(l, outer, bound)
+	if l.error != "" do return NONE
+	loop.dst = value(l.f, .Int)
+	l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
 	emit(l, loop)
 	return loop.dst
 }
