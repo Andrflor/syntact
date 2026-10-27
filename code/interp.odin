@@ -97,7 +97,7 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			kind := fr.f.kinds[i.dst]
 			for k in 0 ..< kind.lanes do set_lane(&regs[i.dst], kind, k, regs[i.a])
 		case Lanes:
-			for x, k in i.values do regs[i.dst].ints[k] = x
+			for x, k in i.values do set_lane(&regs[i.dst], fr.f.kinds[i.dst], k, Datum{int = x})
 		case Select:
 			kind := fr.f.kinds[i.dst]
 			for k in 0 ..< max(kind.lanes, 1) {
@@ -217,12 +217,15 @@ lane :: proc(d: Datum, kind: Kind, k: int) -> Datum {
 	return Datum{int = d.ints[k], real = d.reals[k]}
 }
 
+// set_lane: the k-th lane of a vector takes x — an integer, in the bits of the
+// lane, where it wraps; a value takes it.
 set_lane :: proc(d: ^Datum, kind: Kind, k: int, x: Datum) {
 	if kind.lanes == 0 {
 		d^ = x
 		return
 	}
-	d.ints[k], d.reals[k] = x.int, x.real
+	shift := uint(64 - lane_bits(kind))
+	d.ints[k], d.reals[k] = (x.int << shift) >> shift, x.real
 }
 
 // assign: dst take the values of src, all read before any is written.

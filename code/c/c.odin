@@ -113,7 +113,14 @@ C_TYPES := [code.Machine]string {
 // vector extension of the C compiler.
 type_of :: proc(k: code.Kind) -> string {
 	if k.lanes == 0 do return C_TYPES[k.machine]
-	return fmt.tprintf("%s%d", k.machine == .Real ? "f64x" : "i64x", k.lanes)
+	if k.machine == .Real do return fmt.tprintf("f64x%d", k.lanes)
+	return fmt.tprintf("i%dx%d", code.lane_bits(k), k.lanes)
+}
+
+// unsigned_of: the vector of unsigned integers of the vector of integers k, where
+// an operation wraps.
+unsigned_of :: proc(k: code.Kind) -> string {
+	return fmt.tprintf("u%dx%d", code.lane_bits(k), k.lanes)
 }
 
 // vectors: the types of the vectors of the program.
@@ -121,14 +128,15 @@ vectors :: proc(w: ^Writer) {
 	seen := make(map[code.Kind]bool)
 	for f in w.p.funcs do for k in f.kinds {
 		if k.lanes == 0 do continue
-		key := code.Kind{machine = k.machine, lanes = k.lanes}
+		key := code.Kind{machine = k.machine, lanes = k.lanes, bits = code.lane_bits(k)}
 		if key in seen do continue
 		seen[key] = true
 		if k.machine == .Real {
 			fmt.sbprintfln(&w.b, "typedef double f64x%d __attribute__((vector_size(%d)));", k.lanes, 8 * k.lanes)
 		} else {
-			fmt.sbprintfln(&w.b, "typedef int64_t i64x%d __attribute__((vector_size(%d)));", k.lanes, 8 * k.lanes)
-			fmt.sbprintfln(&w.b, "typedef uint64_t u64x%d __attribute__((vector_size(%d)));", k.lanes, 8 * k.lanes)
+			bits := code.lane_bits(k)
+			fmt.sbprintfln(&w.b, "typedef int%d_t i%dx%d __attribute__((vector_size(%d)));", bits, bits, k.lanes, bits / 8 * k.lanes)
+			fmt.sbprintfln(&w.b, "typedef uint%d_t u%dx%d __attribute__((vector_size(%d)));", bits, bits, k.lanes, bits / 8 * k.lanes)
 		}
 	}
 	if len(seen) > 0 do strings.write_string(&w.b, "\n")
@@ -439,7 +447,7 @@ again :: proc(w: ^Writer, a: code.Again, params: []code.Value) {
 unary :: proc(w: ^Writer, u: code.Unary) -> string {
 	a := name(w, u.a)
 	kind := w.f.kinds[u.a]
-	if kind.lanes > 0 && kind.machine == .Int && u.op == .Neg do return fmt.tprintf("(%s)(-(u64x%d)%s)", type_of(kind), kind.lanes, a)
+	if kind.lanes > 0 && kind.machine == .Int && u.op == .Neg do return fmt.tprintf("(%s)(-(%s)%s)", type_of(kind), unsigned_of(kind), a)
 	#partial switch u.op {
 	case .Neg:
 		if w.f.kinds[u.a].machine == .Real || proven(w, u.dst) do return fmt.tprintf("-%s", a)
@@ -494,11 +502,12 @@ lanes :: proc(w: ^Writer, x: code.Binary, kind: code.Kind, a, b: string) -> (str
 	case .Pow:
 		return "", "a power of vectors C does not compute"
 	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
-		return fmt.tprintf("(i64x%d)((%s %s %s) & 1)", kind.lanes, a, C_OPS[x.op], b), ""
+		return fmt.tprintf("(%s)((%s %s %s) & 1)", type_of(w.f.kinds[x.dst]), a, C_OPS[x.op], b), ""
 	case .Add, .Sub, .Mul, .Shl:
 		// what is in each lane, an integer, as the integer
-		unsigned := w.f.kinds[x.b].lanes > 0 ? fmt.tprintf("u64x%d", kind.lanes) : "uint64_t"
-		if kind.machine == .Int do return fmt.tprintf("(%s)((u64x%d)%s %s (%s)%s)", type_of(kind), kind.lanes, a, C_OPS[x.op], unsigned, b), ""
+		bits := code.lane_bits(kind)
+		unsigned := w.f.kinds[x.b].lanes > 0 ? unsigned_of(kind) : fmt.tprintf("uint%d_t", bits)
+		if kind.machine == .Int do return fmt.tprintf("(%s)((%s)%s %s (%s)%s)", type_of(kind), unsigned_of(kind), a, C_OPS[x.op], unsigned, b), ""
 	}
 	return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
 }
@@ -515,9 +524,11 @@ select :: proc(w: ^Writer, s: code.Select) -> string {
 reduce :: proc(w: ^Writer, r: code.Reduce) -> string {
 	kind := w.f.kinds[r.a]
 	a := name(w, r.a)
-	out := fmt.tprintf("%s[0]", a)
+	// each lane, as an integer of 64 bits
+	widen := kind.machine == .Int ? "(int64_t)" : ""
+	out := fmt.tprintf("%s%s[0]", widen, a)
 	for k in 1 ..< kind.lanes {
-		lane := fmt.tprintf("%s[%d]", a, k)
+		lane := fmt.tprintf("%s%s[%d]", widen, a, k)
 		if kind.machine == .Int && (r.op == .Add || r.op == .Mul) do out = fmt.tprintf("%s(%s, %s)", WRAPS[r.op], out, lane)
 		else do out = fmt.tprintf("%s %s %s", out, C_OPS[r.op], lane)
 	}

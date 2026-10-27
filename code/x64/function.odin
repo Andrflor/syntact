@@ -253,7 +253,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 	case mir.Copy:
 		if f.kinds[i.dst].lanes > 0 {
 			x := wide_work(fr, i.dst, nil)
-			load_lanes(fr, x, i.src)
+			load_lanes(fr, x, i.src, bits_of(fr, i.dst))
 			store_lanes(fr, i.dst, x)
 			return ""
 		}
@@ -326,13 +326,20 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		put(fr, place_of(fr, i.dst), .RAX)
 	case mir.Splat:
 		x := wide_work(fr, i.dst, nil)
-		load_lanes(fr, x, i.a)
+		load_lanes(fr, x, i.a, bits_of(fr, i.dst))
 		store_lanes(fr, i.dst, x)
 	case mir.Lanes:
-		if len(i.values) != 2 do return "a vector of other than two lanes x86-64 does not write"
-		get(fr, .RAX, i.values[0])
+		// the lanes, packed in two quadwords
+		bits := uint(bits_of(fr, i.dst))
+		if uint(len(i.values)) * bits != 128 do return "a vector of other than 128 bits x86-64 does not write"
+		halves: [2]u64
+		for v, k in i.values {
+			at := uint(k) * bits
+			halves[at / 64] |= (u64(v) & (1 << bits - 1 if bits < 64 else max(u64))) << (at % 64)
+		}
+		get(fr, .RAX, transmute(i64)halves[0])
 		enc.movq_xmm_r64(.XMM0, .RAX)
-		get(fr, .RAX, i.values[1])
+		get(fr, .RAX, transmute(i64)halves[1])
 		enc.movq_xmm_r64(.XMM1, .RAX)
 		enc.punpcklqdq_xmm_xmm(.XMM0, .XMM1)
 		store_lanes(fr, i.dst, .XMM0)
@@ -341,11 +348,13 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 	case mir.Select:
 		if f.kinds[i.dst].lanes > 0 {
 			// in each lane: no ^ ((yes ^ no) & -test)
-			load_lanes(fr, .XMM1, i.test)
+			bits := bits_of(fr, i.dst)
+			load_lanes(fr, .XMM1, i.test, bits)
 			enc.pxor_xmm_xmm(.XMM2, .XMM2)
-			enc.psubq_xmm_xmm(.XMM2, .XMM1)
-			load_lanes(fr, .XMM0, i.yes)
-			no := lanes_in(fr, i.no, .XMM3)
+			if bits == 32 do enc.psubd_xmm_xmm(.XMM2, .XMM1)
+			else do enc.psubq_xmm_xmm(.XMM2, .XMM1)
+			load_lanes(fr, .XMM0, i.yes, bits)
+			no := lanes_in(fr, i.no, .XMM3, bits)
 			enc.pxor_xmm_xmm(.XMM0, no)
 			enc.pand_xmm_xmm(.XMM0, .XMM2)
 			enc.pxor_xmm_xmm(.XMM0, no)
@@ -672,8 +681,8 @@ vector_memory :: proc(fr: ^Frame, r: mir.Reg) -> enc.MemoryAddress {
 	return slot_memory(fr, place_of(fr, r).(Frame_Slot) + Frame_Slot(fr.f.kinds[r].lanes - 1))
 }
 
-// load_lanes: o into x: a vector, its lanes; a value, in each lane.
-load_lanes :: proc(fr: ^Frame, x: enc.XMMRegister, o: mir.Operand) {
+// load_lanes: o into x: a vector, its lanes; a value, in each lane of bits bits.
+load_lanes :: proc(fr: ^Frame, x: enc.XMMRegister, o: mir.Operand, bits := 64) {
 	r, is_reg := o.(mir.Reg)
 	switch {
 	case is_reg && fr.f.kinds[r].lanes > 0:
@@ -689,7 +698,13 @@ load_lanes :: proc(fr: ^Frame, x: enc.XMMRegister, o: mir.Operand) {
 	case:
 		enc.movq_xmm_r64(x, in_register(fr, o, .RAX))
 	}
-	enc.punpcklqdq_xmm_xmm(x, x)
+	if bits == 32 do enc.pshufd_xmm_xmm_imm8(x, x, 0x00)
+	else do enc.punpcklqdq_xmm_xmm(x, x)
+}
+
+// bits_of: the bits of each lane of the vector r.
+bits_of :: proc(fr: ^Frame, r: mir.Reg) -> int {
+	return code.lane_bits(fr.f.kinds[r])
 }
 
 // store_lanes: the vector in x, into the place of r.
@@ -730,11 +745,11 @@ wide_work :: proc(fr: ^Frame, dst: mir.Reg, b: mir.Operand) -> enc.XMMRegister {
 
 // lanes_in: the vector o in a register: its own, or loaded into x — a value, in
 // each lane.
-lanes_in :: proc(fr: ^Frame, o: mir.Operand, x: enc.XMMRegister) -> enc.XMMRegister {
+lanes_in :: proc(fr: ^Frame, o: mir.Operand, x: enc.XMMRegister, bits := 64) -> enc.XMMRegister {
 	if r, is_reg := o.(mir.Reg); is_reg && fr.f.kinds[r].lanes > 0 {
 		if p, in_reg := place_of(fr, r).(enc.XMMRegister); in_reg do return p
 	}
-	load_lanes(fr, x, o)
+	load_lanes(fr, x, o, bits)
 	return x
 }
 
@@ -751,7 +766,9 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		}
 	}
 	x := wide_work(fr, i.dst, i.b)
-	load_lanes(fr, x, i.a)
+	bits := code.lane_bits(a)
+	narrow := bits == 32
+	load_lanes(fr, x, i.a, bits)
 	if a.machine == .Real {
 		y := lanes_in(fr, i.b, .XMM1)
 		#partial switch i.op {
@@ -771,10 +788,16 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		case .Shl, .Shr:
 			count, constant := i.b.(i64)
 			if !constant do return "a shift of lanes by lanes x86-64 does not write"
-			k := u8(count & 63)
+			k := u8(count & i64(bits - 1))
 			switch {
+			case i.op == .Shl && narrow:
+				enc.pslld_xmm_imm8(x, k)
 			case i.op == .Shl:
 				enc.psllq_xmm_imm8(x, k)
+			case narrow && a.bounds.lo >= 0:
+				enc.psrld_xmm_imm8(x, k)
+			case narrow:
+				enc.psrad_xmm_imm8(x, k)
 			case a.bounds.lo >= 0:
 				enc.psrlq_xmm_imm8(x, k)
 			case:
@@ -786,12 +809,14 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 				enc.pxor_xmm_xmm(x, .XMM1)
 			}
 		case:
-			y := lanes_in(fr, i.b, .XMM1)
+			y := lanes_in(fr, i.b, .XMM1, bits)
 			#partial switch i.op {
 			case .Add:
-				enc.paddq_xmm_xmm(x, y)
+				if narrow do enc.paddd_xmm_xmm(x, y)
+				else do enc.paddq_xmm_xmm(x, y)
 			case .Sub:
-				enc.psubq_xmm_xmm(x, y)
+				if narrow do enc.psubd_xmm_xmm(x, y)
+				else do enc.psubq_xmm_xmm(x, y)
 			case .And:
 				enc.pand_xmm_xmm(x, y)
 			case .Or:
@@ -799,16 +824,23 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 			case .Xor:
 				enc.pxor_xmm_xmm(x, y)
 			case .Eq, .Ne:
-				// equal halves, both: a mask of each lane; then 1 or 0
+				// a mask of each lane — of 64 bits, its two halves equal —; then 1 or 0
 				enc.pcmpeqd_xmm_xmm(x, y)
-				enc.pshufd_xmm_xmm_imm8(.XMM2, x, 0xB1)
-				enc.pand_xmm_xmm(x, .XMM2)
+				if !narrow {
+					enc.pshufd_xmm_xmm_imm8(.XMM2, x, 0xB1)
+					enc.pand_xmm_xmm(x, .XMM2)
+				}
 				if i.op == .Ne {
 					enc.pcmpeqd_xmm_xmm(.XMM2, .XMM2)
 					enc.pxor_xmm_xmm(x, .XMM2)
 				}
-				enc.psrlq_xmm_imm8(x, 63)
+				if narrow do enc.psrld_xmm_imm8(x, 31)
+				else do enc.psrlq_xmm_imm8(x, 63)
 			case .Mul:
+				if narrow {
+					enc.pmulld_xmm_xmm(x, y)
+					break
+				}
 				if in_32(a.bounds) && in_32(bounds_of(fr, i.b)) {
 					enc.pmuludq_xmm_xmm(x, y)
 					break
@@ -836,7 +868,7 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 // vector_unary: op a, in each lane.
 vector_unary :: proc(fr: ^Frame, i: mir.Unary) -> string {
 	a := fr.f.kinds[i.a]
-	load_lanes(fr, .XMM0, i.a)
+	load_lanes(fr, .XMM0, i.a, code.lane_bits(a))
 	switch {
 	case i.op == .Neg && a.machine == .Real:
 		// the sign bit of each lane
@@ -846,7 +878,8 @@ vector_unary :: proc(fr: ^Frame, i: mir.Unary) -> string {
 		enc.pxor_xmm_xmm(.XMM0, .XMM1)
 	case i.op == .Neg:
 		enc.pxor_xmm_xmm(.XMM1, .XMM1)
-		enc.psubq_xmm_xmm(.XMM1, .XMM0)
+		if code.lane_bits(a) == 32 do enc.psubd_xmm_xmm(.XMM1, .XMM0)
+		else do enc.psubq_xmm_xmm(.XMM1, .XMM0)
 		enc.pshufd_xmm_xmm_imm8(.XMM0, .XMM1, 0xE4)
 	case i.op == .Not:
 		enc.pcmpeqd_xmm_xmm(.XMM1, .XMM1)
@@ -858,12 +891,27 @@ vector_unary :: proc(fr: ^Frame, i: mir.Unary) -> string {
 	return ""
 }
 
-// reduce: the two lanes of a, by op.
+// reduce: the lanes of a, by op: two of 64 bits; or four of 32, each taken as the
+// integer it is.
 reduce :: proc(fr: ^Frame, i: mir.Reduce) -> string {
 	a := fr.f.kinds[i.a]
-	if a.lanes != 2 do return "a reduction of other than two lanes x86-64 does not write"
+	if a.lanes * code.lane_bits(a) != 128 do return "a reduction of other than 128 bits x86-64 does not write"
 	load_lanes(fr, .XMM0, i.a)
 	enc.pshufd_xmm_xmm_imm8(.XMM1, .XMM0, 0x4E)
+	if code.lane_bits(a) == 32 {
+		// lanes 0 and 1 in rax, 2 and 3 in rcx: each, sign extended
+		enc.movq_r64_xmm(.RAX, .XMM0)
+		enc.movq_r64_xmm(.RCX, .XMM1)
+		enc.movsxd_r64_r32(.RDX, .EAX)
+		enc.sar_r64_imm8(.RAX, 32)
+		if !combine(i.op, .RAX, .RDX) do return "a reduction x86-64 does not write"
+		enc.movsxd_r64_r32(.RDX, .ECX)
+		enc.sar_r64_imm8(.RCX, 32)
+		combine(i.op, .RCX, .RDX)
+		combine(i.op, .RAX, .RCX)
+		put(fr, place_of(fr, i.dst), .RAX)
+		return ""
+	}
 	if a.machine == .Real {
 		#partial switch i.op {
 		case .Add:
@@ -878,20 +926,26 @@ reduce :: proc(fr: ^Frame, i: mir.Reduce) -> string {
 	}
 	enc.movq_r64_xmm(.RAX, .XMM0)
 	enc.movq_r64_xmm(.RCX, .XMM1)
-	#partial switch i.op {
-	case .Add:
-		enc.add_r64_r64(.RAX, .RCX)
-	case .Mul:
-		enc.imul_r64_r64(.RAX, .RCX)
-	case .And:
-		enc.and_r64_r64(.RAX, .RCX)
-	case .Or:
-		enc.or_r64_r64(.RAX, .RCX)
-	case .Xor:
-		enc.xor_r64_r64(.RAX, .RCX)
-	case:
-		return "a reduction x86-64 does not write"
-	}
+	if !combine(i.op, .RAX, .RCX) do return "a reduction x86-64 does not write"
 	put(fr, place_of(fr, i.dst), .RAX)
 	return ""
+}
+
+// combine: x = x op y, op one a reduction runs by; false for another.
+combine :: proc(op: code.Op, x, y: enc.Register64) -> bool {
+	#partial switch op {
+	case .Add:
+		enc.add_r64_r64(x, y)
+	case .Mul:
+		enc.imul_r64_r64(x, y)
+	case .And:
+		enc.and_r64_r64(x, y)
+	case .Or:
+		enc.or_r64_r64(x, y)
+	case .Xor:
+		enc.xor_r64_r64(x, y)
+	case:
+		return false
+	}
+	return true
 }

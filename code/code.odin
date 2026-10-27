@@ -44,6 +44,12 @@ Kind :: struct {
 	machine: Machine,
 	bounds:  Bounds,
 	lanes:   int, // 0: one value; L: a vector of L values of the machine
+	bits:    int, // of each lane of a vector of integers, which wraps there; 0: 64
+}
+
+// lane_bits: the bits of each lane of a vector of the kind.
+lane_bits :: proc(k: Kind) -> int {
+	return k.bits == 0 ? 64 : k.bits
 }
 
 // MAX_LANES: the most lanes a vector has.
@@ -257,8 +263,8 @@ Program :: struct {
 
 // --- building ---
 
-value :: proc(f: ^Func, m: Machine, lanes := 0) -> Value {
-	append(&f.kinds, Kind{m, EVERY, lanes})
+value :: proc(f: ^Func, m: Machine, lanes := 0, bits := 0) -> Value {
+	append(&f.kinds, Kind{m, EVERY, lanes, bits})
 	return Value(len(f.kinds) - 1)
 }
 
@@ -410,9 +416,9 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 	case Narrow:
 		return fmt.tprintf("%s = narrow %s%s", v(i.dst), v(i.src), print_bounds(f, i.dst))
 	case Splat:
-		return fmt.tprintf("%s = splat %s ×%d%s", v(i.dst), v(i.a), f.kinds[i.dst].lanes, print_bounds(f, i.dst))
+		return fmt.tprintf("%s = splat %s ×%d×%d%s", v(i.dst), v(i.a), f.kinds[i.dst].lanes, lane_bits(f.kinds[i.dst]), print_bounds(f, i.dst))
 	case Lanes:
-		return fmt.tprintf("%s = lanes %v", v(i.dst), i.values)
+		return fmt.tprintf("%s = lanes %v ×%d", v(i.dst), i.values, lane_bits(f.kinds[i.dst]))
 	case Reduce:
 		return fmt.tprintf("%s = reduce %v %s%s", v(i.dst), i.op, v(i.a), print_bounds(f, i.dst))
 	case Select:
