@@ -1320,9 +1320,10 @@ parse_expression :: proc(parser: ^Parser, precedence := Precedence.NONE) -> Node
 		if kind == .Minus && parser.listing && starts_binding(parser, parser.current_token) {
 			break infix_loop
 		}
+		// after a binding, `->` starts the next one
 		if kind == .PointingPush {
-			left_kind := parser.node_kinds[left]
-			if left_kind == .Product || left_kind == .Pointing {
+			#partial switch parser.node_kinds[left] {
+			case .Product, .Pointing, .PointingPull, .EventPush, .EventPull:
 				break infix_loop
 			}
 		}
@@ -2084,7 +2085,7 @@ parse_event_pull_prefix :: proc(parser: ^Parser) -> Node_Index {
 	if parser.current_token.kind != .RightBrace &&
 	   parser.current_token.kind != .EOF &&
 	   !has_flag(parser.current_token, .Separator_Before) {
-		to = parse_expression(parser)
+		to = parse_expression(parser, .ASSIGNMENT)
 	}
 
 	data: Node_Data
@@ -2114,7 +2115,7 @@ parse_event_pull :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	if parser.current_token.kind != .RightBrace &&
 	   parser.current_token.kind != .EOF &&
 	   !has_flag(parser.current_token, .Separator_Before) {
-		to = parse_expression(parser)
+		to = parse_expression(parser, .ASSIGNMENT)
 	}
 
 	data: Node_Data
