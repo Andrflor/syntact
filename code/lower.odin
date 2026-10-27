@@ -640,11 +640,12 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 // parameter: the value of the field b of a function, over its parameters: an
 // unknown of its layout — its color, or else the family of its value. A scope of
 // fields is passed as its fields: its value is that scope, each field a parameter
-// in turn.
+// in turn; its holes are its type, as they are (specs/language/09).
 parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dynamic]^kernel.Unknown, machines: ^[dynamic]Machine) -> kernel.Type {
 	if s, fields := scope_of_fields(l, b); fields {
 		changes := make(map[^kernel.Binding]kernel.Type)
 		for x in kernel.placed(l.k, s, .Value) {
+			if x.kind == .Pull do continue
 			changes[x] = parameter(l, x, name, params, machines)
 			if l.error != "" do return nil
 		}
@@ -681,10 +682,10 @@ scope_of_fields :: proc(l: ^Lowering, b: ^kernel.Binding) -> (^kernel.Scope, boo
 }
 
 // given: the values a field gives the parameters of a function: a scope, the
-// values of its fields in turn.
+// values of its fields in turn — not its holes.
 given :: proc(l: ^Lowering, t: kernel.Type, out: ^[dynamic]Value) {
 	if s, is_scope := t.(^kernel.Scope); is_scope {
-		for x in kernel.placed(l.k, s, .Value) do given(l, kernel.binding_value(l.k, x), out)
+		for x in kernel.placed(l.k, s, .Value) do if x.kind == .Push do given(l, kernel.binding_value(l.k, x), out)
 		return
 	}
 	append(out, lower(l, t))
