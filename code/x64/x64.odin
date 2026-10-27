@@ -355,9 +355,7 @@ assign :: proc(machines: []code.Machine) -> (enc.X64_ABI_Assignment, string) {
 		if m == .None do return {}, "an argument without a machine is not code"
 		classes[i] = CLASSES[m]
 	}
-	assignment := enc.x64_sysv_assign(classes)
-	if assignment.stack_count > 0 do return {}, "a call that passes arguments on the stack is not code yet"
-	return assignment, ""
+	return enc.x64_sysv_assign(classes), ""
 }
 
 // CLASSES: the class of the System V ABI that passes a value of each machine.

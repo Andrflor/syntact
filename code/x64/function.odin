@@ -61,6 +61,12 @@ function :: proc(e: ^Emitter, f: ^mir.Func) -> string {
 		}
 	}
 	parallel(&fr, moves[:])
+	// those beyond the registers, from the stack, above the return address and rbp
+	for loc, i in assignment.locations {
+		if loc.class != .Stack || fr.alloc.places[i] == nil do continue
+		enc.mov_r64_m64(.RAX, enc.AddressComponents{base = .RBP, displacement = i32(16 + loc.stack_offset)})
+		put(&fr, place_of(&fr, mir.Reg(i)), .RAX)
+	}
 	for id, k in f.order {
 		fr.blocks[id] = here(e)
 		for inst in f.blocks[id].insts do if msg := instruction(&fr, inst); msg != "" do return msg
@@ -302,6 +308,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		if msg != "" do return msg
 		pass(fr, i.args, assignment)
 		call_import(e, i.symbol, assignment.sse_count)
+		passed(assignment)
 		if i.dst == mir.NO_REG do return ""
 		switch imp.result {
 		case .Real:
@@ -374,14 +381,31 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		pass(fr, i.args, assignment)
 		enc.call_rel32(0)
 		append(&e.calls, Fixup{here(e) - 4, i.func})
+		passed(assignment)
 		if i.dst != mir.NO_REG do put(fr, place_of(fr, i.dst), .RAX)
 	}
 	return ""
 }
 
+// passed: the stack the arguments of a call took, taken back.
+passed :: proc(assignment: enc.X64_ABI_Assignment) {
+	if assignment.stack_size > 0 do enc.add_r64_imm32(.RSP, u32(assignment.stack_size))
+}
+
 // pass: the arguments in the registers the System V ABI gives them, by one
-// parallel move; a float from its slot.
+// parallel move; a float from its place; those beyond the registers on the stack,
+// below the frame, before the registers take theirs. Once the call returns, passed
+// takes the stack back.
 pass :: proc(fr: ^Frame, args: []mir.Operand, assignment: enc.X64_ABI_Assignment) {
+	if assignment.stack_size > 0 {
+		enc.sub_r64_imm32(.RSP, u32(assignment.stack_size))
+		for a, i in args {
+			loc := assignment.locations[i]
+			if loc.class != .Stack do continue
+			get(fr, .RAX, operand(fr, a))
+			enc.mov_m64_r64(enc.AddressComponents{base = .RSP, displacement = i32(loc.stack_offset)}, .RAX)
+		}
+	}
 	moves := make([dynamic]Move)
 	for a, i in args {
 		loc := assignment.locations[i]
