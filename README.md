@@ -137,7 +137,8 @@ odin test kernel                          # the cases of the spec, and the corpu
 odin build lsp -out:lsp/lsp               # the language server
 
 odin build code/cmd -out:code.bin
-./code.bin program.syn                    # the code of the program
+./code.bin program.syn                    # the code of the program, as the normal form of its computations
+./code.bin program.syn -l                 # the code as the kernel lowers it, before
 ./code.bin program.syn -o program         # an executable for x86-64 Linux
 ./program 10                              # its unknowns `??`, in order, on the command line
 ./code.bin program.syn -c program.c       # the program as C: cc -O3 program.c -o program

@@ -32,6 +32,7 @@ optimize :: proc(p: ^code.Program, costs: ^Costs) -> (out: code.Program, err: st
 	for f in p.funcs {
 		g, value, state := read(p, f)
 		rebuild(g)
+		saturate(g, 50 * len(g.nodes))
 		plan := plan(g, extract(g, costs), {value, state})
 		if plan.error != "" do return out, fmt.tprintf("%s: %s", f.name, plan.error)
 		written, msg := write_function(plan, f, value, state)

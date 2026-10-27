@@ -24,9 +24,8 @@ Operand :: union {
 
 Block_Id :: distinct int
 
-// Cond: a comparison of two integers, signed, or unsigned for Below… and Above…;
-// of two floats, unordered never holding. Each has its contrary and its converse
-// (laws.odin).
+// Cond: a comparison of two integers, signed, or unsigned for Below_Eq and Above;
+// of two floats, unordered never holding.
 Cond :: enum u8 {
 	Eq,
 	Ne,
@@ -34,10 +33,20 @@ Cond :: enum u8 {
 	Le,
 	Gt,
 	Ge,
-	Below,
 	Below_Eq,
 	Above,
-	Above_Eq,
+}
+
+// CONTRARY: a ◁̸ b = a ▷ b.
+CONTRARY := [Cond]Cond {
+	.Eq       = .Ne,
+	.Ne       = .Eq,
+	.Lt       = .Ge,
+	.Le       = .Gt,
+	.Gt       = .Le,
+	.Ge       = .Lt,
+	.Below_Eq = .Above,
+	.Above    = .Below_Eq,
 }
 
 Inst :: union {
@@ -173,7 +182,6 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	body(&b, src.body)
 	finish(&b, Return{value = src.body.value == code.NONE ? NO_REG : Reg(src.body.value)})
 	constants(f)
-	laws(f)
 	unread(f)
 	f.order = placed(f)
 	return f
@@ -242,6 +250,23 @@ placed :: proc(f: ^Func) -> []Block_Id {
 	return out
 }
 
+// constant_values: the integer each register written once, by an integer, holds.
+constant_values :: proc(f: ^Func) -> []Maybe(i64) {
+	count := make([]int, len(f.kinds))
+	value := make([]Maybe(i64), len(f.kinds))
+	for i in 0 ..< len(f.source.params) do count[i] += 1
+	for b in f.blocks do for inst in b.insts {
+		w := writes(inst)
+		if w == NO_REG do continue
+		count[w] += 1
+		if c, is_copy := inst.(Copy); is_copy {
+			if v, is_int := c.src.(i64); is_int do value[w] = v
+		}
+	}
+	for &v, r in value do if count[r] != 1 do v = nil
+	return value
+}
+
 // constants: a register written once, by an integer, is that integer where an
 // operand may be one; its copy goes when nothing reads it any more.
 constants :: proc(f: ^Func) {
@@ -294,6 +319,12 @@ constants :: proc(f: ^Func) {
 		}
 		b.insts = kept
 	}
+}
+
+// register: a new register of the machine m.
+register :: proc(f: ^Func, m: code.Machine) -> Reg {
+	append(&f.kinds, code.Kind{m, code.EVERY})
+	return Reg(len(f.kinds) - 1)
 }
 
 new_block :: proc(b: ^Builder) -> Block_Id {

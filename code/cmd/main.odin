@@ -8,12 +8,13 @@ import kernel "../../kernel"
 import "core:fmt"
 import "core:os"
 
-// code FILE [-o OUT | -c OUT.c]: the code of the program the file writes, as the
-// normal form of its computations (code/calc); with -o, the executable for x86-64
-// Linux; with -c, the program as C.
+// code FILE [-l | -o OUT | -c OUT.c]: the code of the program the file writes, as
+// the normal form of its computations (code/calc); with -l, as the kernel lowers
+// it, before; with -o, the executable for x86-64 Linux; with -c, the program as C.
 main :: proc() {
-	if len(os.args) < 2 || len(os.args) == 3 || len(os.args) > 4 || len(os.args) == 4 && os.args[2] != "-o" && os.args[2] != "-c" {
-		fmt.eprintln("usage: code FILE [-o OUT | -c OUT.c]")
+	usage := len(os.args) == 2 || len(os.args) == 3 && os.args[2] == "-l" || len(os.args) == 4 && (os.args[2] == "-o" || os.args[2] == "-c")
+	if !usage {
+		fmt.eprintln("usage: code FILE [-l | -o OUT | -c OUT.c]")
 		os.exit(2)
 	}
 	data, err := os.read_entire_file(os.args[1], context.allocator)
@@ -31,6 +32,10 @@ main :: proc() {
 	if msg != "" {
 		fmt.eprintln(msg)
 		os.exit(1)
+	}
+	if len(os.args) == 3 {
+		fmt.print(code.print_program(&direct))
+		return
 	}
 	prog, failed := calc.optimize(&direct, &calc.X64)
 	if failed != "" {

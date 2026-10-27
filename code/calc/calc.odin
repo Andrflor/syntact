@@ -118,6 +118,8 @@ Graph :: struct {
 	covers:  [dynamic]code.Cover,
 	matches: [dynamic]Match_Info,
 	loops:   [dynamic]Loop_Info,
+	merges:  int, // how many merges were made
+	members: [][dynamic]int, // per class: its nodes, as they were when the laws last looked
 }
 
 find :: proc(g: ^Graph, c: Class) -> Class {
@@ -166,6 +168,7 @@ merge :: proc(g: ^Graph, a, b: Class) -> Class {
 	if a == b do return a
 	g.parent[b] = a
 	g.facts[a] = meet(g.facts[a], g.facts[b])
+	g.merges += 1
 	return a
 }
 
@@ -188,6 +191,12 @@ rebuild :: proc(g: ^Graph) {
 		}
 		if !merged do return
 	}
+}
+
+// index_members: the nodes of each class, from the canonical classes.
+index_members :: proc(g: ^Graph) {
+	g.members = make([][dynamic]int, len(g.parent))
+	for _, id in g.nodes do append(&g.members[find(g, g.home[id])], id)
 }
 
 hash_node :: proc(n: Node) -> u64 {

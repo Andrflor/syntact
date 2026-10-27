@@ -500,14 +500,10 @@ set :: proc(cond: mir.Cond, real: bool) {
 	case .Ge:
 		if real do enc.setae_r8(.AL)
 		else do enc.setge_r8(.AL)
-	case .Below:
-		enc.setb_r8(.AL)
 	case .Below_Eq:
 		enc.setbe_r8(.AL)
 	case .Above:
 		enc.seta_r8(.AL)
-	case .Above_Eq:
-		enc.setae_r8(.AL)
 	}
 }
 
@@ -526,14 +522,10 @@ jump_if :: proc(cond: mir.Cond, real, contrary: bool) -> proc(offset: i32) {
 		return real ? enc.ja_rel32 : enc.jg_rel32
 	case .Ge:
 		return real ? enc.jae_rel32 : enc.jge_rel32
-	case .Below:
-		return enc.jb_rel32
 	case .Below_Eq:
 		return enc.jbe_rel32
 	case .Above:
 		return enc.ja_rel32
-	case .Above_Eq:
-		return enc.jae_rel32
 	}
 	return enc.jmp_rel32
 }
