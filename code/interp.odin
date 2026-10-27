@@ -299,6 +299,8 @@ binary_of :: proc(op: Op, m: Machine, a, b: Datum) -> (Datum, bool) {
 	case .Mod:
 		if y == 0 do return {}, false
 		return Datum{int = x % y}, true
+	case .Mul_High:
+		return Datum{int = i64((u128(u64(x)) * u128(u64(y))) >> 64)}, true
 	case .Pow:
 		out: i64 = 1
 		for e := y; e > 0; e >>= 1 {

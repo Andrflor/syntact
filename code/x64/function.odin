@@ -462,6 +462,12 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		get(fr, .RCX, b)
 		power(fr.e, false)
 		x = .RAX
+	case .Mul_High:
+		// rdx:rax = rax · y, unsigned
+		y := in_register_place(fr, b, .RCX)
+		get(fr, .RAX, place_of(fr, i.a))
+		enc.mul_r64(y)
+		x = .RDX
 	case:
 		return "a binary operation the machine does not compute"
 	}

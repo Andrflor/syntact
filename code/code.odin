@@ -56,6 +56,7 @@ Op :: enum u8 {
 	Div, // truncated toward 0
 	Mod, // the sign of the dividend
 	Pow, // an integer or a float to an integer ≥ 0
+	Mul_High, // the high 64 bits of the product of two integers of 64 bits as unsigned
 	Neg,
 	And, // bitwise; on booleans, and
 	Or,

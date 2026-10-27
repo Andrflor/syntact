@@ -454,6 +454,7 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 	a, b := name(w, x.a), name(w, x.b)
 	if kind := w.f.kinds[x.a]; kind.lanes > 0 do return lanes(w, x, kind, a, b)
 	if x.op == .Pow do return fmt.tprintf("%s(%s, %s)", w.f.kinds[x.a].machine == .Real ? "real_pow" : "wrap_pow", a, b), ""
+	if x.op == .Mul_High do return fmt.tprintf("(int64_t)(((unsigned __int128)(uint64_t)%s * (uint64_t)%s) >> 64)", a, b), ""
 	if w.f.kinds[x.a].machine == .Real {
 		#partial switch x.op {
 		case .Add, .Sub, .Mul, .Div, .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
@@ -474,7 +475,7 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 		shift := w.f.kinds[x.b].bounds
 		if shift.lo >= 0 && shift.hi <= 63 do return fmt.tprintf("%s >> %s", a, b), ""
 		return fmt.tprintf("%s >> (%s & 63)", a, b), ""
-	case .Neg, .Not, .Pow:
+	case .Neg, .Not, .Pow, .Mul_High:
 	}
 	return "", "a binary operation C does not compute"
 }
@@ -515,6 +516,7 @@ C_OPS := [code.Op]string {
 	.Div = "/",
 	.Mod = "%",
 	.Pow = "**",
+	.Mul_High = "",
 	.Neg = "-",
 	.And = "&",
 	.Or  = "|",
