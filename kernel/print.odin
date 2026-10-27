@@ -193,10 +193,16 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
 		// call with effects
-		if v.call != nil || v.fold != nil {
+		if v.call != nil || v.fold != nil || v.choice != nil {
 			strings.write_string(b, "ε<")
-			if v.call != nil do write_type(b, v.call, 0)
-			else do write_type(b, v.fold, 0)
+			switch {
+			case v.call != nil:
+				write_type(b, v.call, 0)
+			case v.fold != nil:
+				write_type(b, v.fold, 0)
+			case:
+				write_type(b, v.choice, 0)
+			}
 			strings.write_string(b, ">(")
 		} else {
 			fmt.sbprintf(b, "ε%d(", v.id)

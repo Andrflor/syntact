@@ -257,6 +257,11 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 		if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, value = dst})
 		return lower(l, e.then, tail)
 	}
+	if e.choice != nil {
+		// a choice whose branches have effects: the match, then what it wraps
+		lower(l, e.choice)
+		return lower(l, e.then, tail)
+	}
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {
 		// a call of an equation with effects: the call, then what it wraps — in tail

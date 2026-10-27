@@ -98,6 +98,16 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 			return wrapped(v, v.answer, sequence(k, t, rest, law))
 		case ^Pattern:
 			if !has_effect(v) do continue
+			// a choice whose branches have effects is an effect: what follows crosses
+			// it, computed once, when it reads nothing they give back
+			if chosen, crossed := choice(k, v, parts[i + 1:]); crossed {
+				rest := slice.clone(parts)
+				rest[i] = given(k, v)
+				out := new(Effect)
+				out.id, out.choice, out.span = -1, chosen, v.span
+				out.then = sequence(k, t, rest, law)
+				return out
+			}
 			branches := make([]Branch, len(v.branches))
 			for b, j in v.branches {
 				rest := slice.clone(parts)
@@ -108,6 +118,33 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 		}
 	}
 	return law(k, t, parts)
+}
+
+// choice: p, a pattern whose branches have effects, as an effect, when effects come
+// after it — what follows would be computed in each branch — and what it gives back
+// holds none of the answers its branches bind: the effects of a branch stay in it,
+// what follows comes once.
+choice :: proc(k: ^Kernel, p: ^Pattern, after: []Type) -> (Type, bool) {
+	later := false
+	for x in after do later ||= has_effect(x)
+	if !later do return nil, false
+	answers := make([dynamic]^Unknown)
+	bound(p, &answers)
+	pure := given(k, p)
+	for u in answers do if reads(k, pure, u) do return nil, false
+	return p, true
+}
+
+// bound: the answers the effects of t bind, in its branches too.
+bound :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	#partial switch v in t {
+	case ^Effect:
+		if v.answer != nil do append(out, v.answer)
+		if v.choice != nil do bound(v.choice, out)
+		bound(v.then, out)
+	case ^Pattern:
+		for b in v.branches do bound(b.product, out)
+	}
 }
 
 // given: what t gives back, its effects left where they are run: what a name reads.
@@ -130,6 +167,13 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 	#partial switch v in t {
 	case ^Effect:
+		if v.choice != nil {
+			out := new(Effect)
+			out^ = v^
+			out.choice = renewed(k, v.choice, run)
+			out.then = renewed(k, rewrite(k, v.then, run^), run)
+			return out
+		}
 		if v.answer == nil || is_new(run^, v.answer) do return wrapped(v, v.answer, renewed(k, v.then, run))
 		x := new(Unknown)
 		x^ = v.answer^

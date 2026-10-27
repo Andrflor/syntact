@@ -43,7 +43,7 @@ names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 	case ^And:
 		for a in v.terms do if names_scope(a, s, seen) do return true
 	case ^Effect:
-		return names_scope(v.then, s, seen)
+		return v.choice != nil && names_scope(v.choice, s, seen) || names_scope(v.then, s, seen)
 	case ^Not:
 		return names_scope(v.term, s, seen)
 	case ^Is:
@@ -136,6 +136,7 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 	case ^Effect:
 		if v.call != nil && !solved(v.call, root) do return false
 		if v.fold != nil && !solved(v.fold, root) do return false
+		if v.choice != nil && !solved(v.choice, root) do return false
 		return solved(v.then, root)
 	case ^Pattern:
 		if !solved(v.target, root) do return false
@@ -339,6 +340,7 @@ operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
 		case ^Not:
 			visit(v.term, root, out)
 		case ^Effect:
+			if v.choice != nil do visit(v.choice, root, out)
 			visit(v.then, root, out)
 		}
 	}

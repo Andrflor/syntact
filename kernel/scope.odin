@@ -441,7 +441,7 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case ^Unknown:
 		return mentions(m, v.written)
 	case ^Effect:
-		return v.answer != nil && mentions(m, v.answer.written) || mentions(m, v.then)
+		return v.answer != nil && mentions(m, v.answer.written) || mentions(m, v.choice) || mentions(m, v.then)
 	case ^Or:
 		for x in v.terms do if mentions(m, x) do return true
 	case ^And:
@@ -853,6 +853,8 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		// in it, whatever its index
 		y, ok := b.(^Effect)
 		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
+		if (x.choice == nil) != (y.choice == nil) do return false
+		if x.choice != nil && !same(k, x.choice, y.choice) do return false
 		if x.answer == nil do return same(k, x.then, y.then)
 		if (x.call == nil) != (y.call == nil) do return false
 		if x.call != nil && !same(k, x.call, y.call) do return false

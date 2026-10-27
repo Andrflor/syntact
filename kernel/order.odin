@@ -41,6 +41,7 @@ term_order :: proc(a, b: Type) -> int {
 		if c := compare_ints(i128(x.id), i128(y.id)); c != 0 do return c
 		if (x.answer == nil) != (y.answer == nil) do return x.answer == nil ? -1 : 1
 		if x.answer != nil do if c := unknown_order(x.answer, y.answer); c != 0 do return c
+		if c := optional_order(x.choice, y.choice); c != 0 do return c
 		return term_order(x.then, y.then)
 	case ^Range:
 		y := b.(^Range)

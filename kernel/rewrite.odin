@@ -69,6 +69,17 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		then := rewrite(k, v.then, r)
 		call := v.call != nil ? rewrite_call(k, v.call, r) : nil
 		fold := v.fold != nil ? rewrite_fold(k, v.fold, r) : nil
+		if v.choice != nil {
+			chosen := rewrite(k, v.choice, r)
+			if then == v.then && chosen == v.choice do return t
+			// a choice the rewrite decided is the effects of its branch, then what follows
+			if !has_effect(chosen) do return then
+			if _, still := chosen.(^Pattern); !still do return sequence(k, nil, {chosen, then}, last_part)
+			out := new(Effect)
+			out^ = v^
+			out.choice, out.then = chosen, then
+			return out
+		}
 		if then == v.then && call == v.call && fold == v.fold do return t
 		out := effect_law(k, v, then)
 		if e, is_effect := out.(^Effect); is_effect {

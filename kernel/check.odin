@@ -92,7 +92,8 @@ obligations :: proc(k: ^Kernel, t: Type, site := syn.Span{}) -> bool {
 		for a in v.terms do failed = obligations(k, a, site) || failed
 		return failed
 	case ^Effect:
-		return obligations(k, v.then, site)
+		failed := v.choice != nil && obligations(k, v.choice, site)
+		return obligations(k, v.then, site) || failed
 	case ^Least, ^Series, ^Recurrent:
 		return false // the equation's, checked there
 	case ^Fold:

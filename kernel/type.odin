@@ -85,6 +85,7 @@ Effect :: struct {
 	answer:  ^Unknown, // nil: it gives nothing back, εₖ(t)
 	call:    ^Collapse, // the effect is this call: a recursive call with effects, or a symbol behind a boundary
 	fold:    ^Fold, // the effect is this fold: the effects of its steps, in order (§5.6)
+	choice:  Type, // the effect is this choice: a pattern, the effects of the branch it takes
 	then:    Type,
 	span:    syn.Span,
 }
