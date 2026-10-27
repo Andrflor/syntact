@@ -416,6 +416,11 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), value = params[1]}}
 	arms[1].body.value = NONE // it ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
+	// in a step, lo ≤ i ≤ hi: i from lo, by 1, not past hi
+	index := value(l.f, .Int)
+	l.f.kinds[index].bounds = {bounds_of(l.f, lo).lo, bounds_of(l.f, hi).hi}
+	emit(l, Narrow{index, params[0]})
+	append(&l.bound, Bound{unknown = s.index, value = index})
 	t := lower(l, s.term)
 	if l.error == "" && machine_of(l.f, t) != machine do fail(l, "the term of a series is a %v, its value a %v", machine_of(l.f, t), machine)
 	next := make([]Value, 2)
