@@ -151,7 +151,7 @@ values_equal :: proc(k: ^Kernel, a, b: Type) -> (equal: bool, known: bool) {
 // unknown, an operation on values, a pattern whose products are values.
 is_value :: proc(k: ^Kernel, t: Type) -> bool {
 	switch v in t {
-	case Char, Int, Real, Bool, None, ^Unknown, ^Scope, ^Collapse, ^Iterate, Invalid:
+	case Char, Int, Real, Bool, None, ^Unknown, ^Scope, ^Collapse, ^Fold, Invalid:
 		return true
 	case ^Operation:
 		if v.op == .In do return true

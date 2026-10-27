@@ -11,7 +11,7 @@ import "core:strings"
 // an input of the program. An effect is run where it stands, in order: the call of a
 // symbol behind a boundary is an instruction, and what it gives back is the value
 // its answer stands for. A pattern is a match on its target, each cover the cells
-// of a set the laws computed. An iteration, the solution of a recursion, is a loop;
+// of a set the laws computed. A fold, the solution of a recursion, is a loop;
 // a recursion that stays is a function, and its calls in tail position the loop of
 // its body. What the laws could not reduce to one of these is not code yet, and
 // says so.
@@ -168,8 +168,8 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		if !v.recursive do break
 		if tail && is_self(l, v) do return again(l, v)
 		return call(l, v)
-	case ^kernel.Iterate:
-		return iterate(l, v)
+	case ^kernel.Fold:
+		return fold(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
@@ -205,9 +205,9 @@ unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
 // effect: an effect, run where it stands, then what it wraps. Only the call of a
 // symbol behind a boundary is code: another effect is served by nothing.
 effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
-	if e.iterate != nil {
-		// an iteration whose steps have effects: the loop, then what it wraps
-		dst := iterate(l, e.iterate)
+	if e.fold != nil {
+		// a fold whose steps have effects: the loop, then what it wraps
+		dst := fold(l, e.fold)
 		if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
 		return lower(l, e.then, tail)
 	}
@@ -252,45 +252,48 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 	return lower(l, e.then, tail)
 }
 
-// iterate: an iteration (specs/types.md §5.6) as a loop on k and x: k from start,
-// x from init; while k is not in stop, x takes the step and k the next; then the
-// last. An iteration of effects alone has no x.
-iterate :: proc(l: ^Lowering, it: ^kernel.Iterate) -> Value {
-	start, init := lower(l, it.start), lower(l, it.init)
+// fold: a fold (specs/types.md §5.6) as a loop on k and its states: k from start,
+// each state from its init; while k is not in stop, the effects of a step, then
+// the updates and the next k, which the loop takes again; where k stops, the value.
+fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> Value {
+	start := lower(l, f.start)
 	if l.error != "" do return NONE
-	if machine_of(l.f, start) != .Int do return fail(l, "an iteration whose counter is not an integer is not code yet")
-	counter := value(l.f, .Int)
-	state := init == NONE ? NONE : value(l.f, machine_of(l.f, init))
+	if machine_of(l.f, start) != .Int do return fail(l, "a fold whose orbit is not of integers is not code yet")
 	params := make([dynamic]Value)
 	starts := make([dynamic]Value)
-	append(&params, counter)
+	append(&params, value(l.f, .Int))
 	append(&starts, start)
-	if state != NONE {
-		append(&params, state)
-		append(&starts, init)
+	for init in f.inits {
+		v := lower(l, init)
+		if l.error != "" do return NONE
+		append(&params, value(l.f, machine_of(l.f, v)))
+		append(&starts, v)
 	}
 	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
 	outer, bound := open_body(l, &loop.body)
-	append(&l.bound, Bound{it.index, counter})
-	if state != NONE do append(&l.bound, Bound{it.state, state})
+	append(&l.bound, Bound{f.index, params[0]})
+	for x, i in f.states do append(&l.bound, Bound{x, params[i + 1]})
 	arms := make([]Arm, 2)
-	arms[0].body = lower_body(l, it.last, false)
+	arms[0].body = lower_body(l, f.value, false)
 	arms[1].body.value = NONE // it ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
-	x := lower(l, it.step)
-	if l.error == "" && machine_of(l.f, x) != machine_of(l.f, state) do fail(l, "the step of an iteration gives a %v, its value is a %v", machine_of(l.f, x), machine_of(l.f, state))
-	next := lower(l, it.next)
+	lower(l, f.effects)
 	args := make([dynamic]Value)
-	append(&args, next)
-	if state != NONE do append(&args, x)
+	append(&args, NONE) // the next k, once the states are given
+	for t, i in f.updates {
+		x := lower(l, t)
+		if l.error == "" && machine_of(l.f, x) != machine_of(l.f, params[i + 1]) do fail(l, "the update of a fold gives a %v, its state is a %v", machine_of(l.f, x), machine_of(l.f, params[i + 1]))
+		append(&args, x)
+	}
+	args[0] = lower(l, f.next)
 	emit(l, Again{args[:]})
 	close_body(l, step_outer, step_bound)
-	// where k ends: the cells of stop, or its membership
-	target := counter
-	if cover, constant := cover_of(it.stop); constant && fits(l, counter, cover) {
+	// where k stops: the cells of stop, or its membership
+	target := params[0]
+	if cover, constant := cover_of(f.stop); constant && fits(l, target, cover) {
 		arms[0].cover = cover
 	} else {
-		target = member(l, counter, it.stop)
+		target = member(l, target, f.stop)
 		taken := make([]Bounds, 1)
 		taken[0] = {1, 1}
 		arms[0].cover = Cover{ints = taken}

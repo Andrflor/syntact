@@ -62,8 +62,8 @@ names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 	case ^Pattern:
 		if names_scope(v.target, s, seen) do return true
 		for b in v.branches do if names_scope(b.cover, s, seen) || names_scope(b.product, s, seen) do return true
-	case ^Iterate:
-		for t in ([]Type{v.start, v.init, v.stop, v.next, v.step, v.last}) do if names_scope(t, s, seen) do return true
+	case ^Fold:
+		for t in fold_parts(v) do if names_scope(t, s, seen) do return true
 	case Char, Int, Real, Bool, None, Invalid, ^Unknown:
 	}
 	return false
@@ -128,13 +128,13 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 		return solved(v.term, root)
 	case ^Effect:
 		if v.call != nil && !solved(v.call, root) do return false
-		if v.iterate != nil && !solved(v.iterate, root) do return false
+		if v.fold != nil && !solved(v.fold, root) do return false
 		return solved(v.then, root)
 	case ^Pattern:
 		if !solved(v.target, root) do return false
 		for b in v.branches do if !solved(b.product, root) do return false
-	case ^Iterate:
-		for t in ([]Type{v.start, v.init, v.stop, v.next, v.step, v.last}) do if !solved(t, root) do return false
+	case ^Fold:
+		for t in fold_parts(v) do if !solved(t, root) do return false
 	}
 	return true
 }
@@ -361,18 +361,18 @@ solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 	return value
 }
 
-// iteration: the solution of a recursion (§5.6), a loop. When
+// iteration: the solution of a recursion (§5.6). A run of
 //
-//   f{n -> m}! = m ? {B -> c(m)  -> h(m, f{n -> s(m)}!)}
+//   f{n -> m}! = m ? {B -> c(m)  -> pre(m) · f{n -> s(m)}! · post(m)}
 //
-// and each step makes the call, f{n -> m}! is computed by one loop, whose effects
-// run in the order the equation runs them. On a counter, s(m) = m - 1 and B = b
-// with m ≥ b for every value, and no effect before the call, it is computed from
-// the base case up: x = c, then x = h(k, x) for k from b + 1 up to m. Otherwise it
-// follows the calls down from m, through s, until B: then h(m, y) = ε…(y ⊕ a(m)),
-// ⊕ an associative operator on integers and e its identity, so the parentheses move
-// — x = e, then x = ε…(x ⊕ a(k)) at each k, and x ⊕ c(k) at the last — or
-// h(m, y) = ε…(y), a call in tail position — its effects at each k, then c(k).
+// follows the orbit of m by s until B: the effects before the call run going down,
+// those after it coming back up — the order the equation runs them, by Arden on its
+// effects. Its value is v(m, y) after post, y what the call gives back. When post
+// has no effect and v is affine in y, v = α·y + β, the maps compose into an affine
+// one, (A, B) ∘ (α, β) = (A·α, B + A·β): the fold is made going down, and is
+// A·c + B where k stops. Otherwise coming back up needs s inverted — s(m) = m - 1,
+// from the base case b ≤ m — and post not to read what pre gives back. What is
+// left would keep the orbit, or what pre gives back: it stays.
 iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bool) {
 	p := value.(^Pattern) or_return
 	if len(p.branches) != 2 || p.branches[0].cover == nil || p.branches[1].cover != nil do return
@@ -380,57 +380,100 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	root := origin(s)
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
 	if !solved(c, root) do return
-	before, call, answer, after := at_call(k, s, r) or_return
+	pre, call, answer, after := at_call(k, s, r) or_return
+	if answer == nil && skips(r, root) do return
 	next := counter_next(k, s, call, u) or_return
 	family := family_of(k, given(k, c)) or_return
-	it := new(Iterate)
-	it.index = new_unknown(k, nil)
-	it.index.layout = and_law(k, {layout_of(k, u), not_law(k, stop)})
-	it.state = new_unknown(k, nil)
-	it.state.layout = family_term(family)
-	it.span = p.span
-	counter := rewriting(nil, u, it.index)
-	value := answer != nil ? rewriting(counter, answer, it.state) : rewriting_call(counter, call, it.state)
-	if answer == nil && skips(r, root) do return
-	if base, is_int := stop.(Int); is_int && len(before) == 0 && same(k, next, ring_law(.Sub, {u, Int(1)}) or_return) && included(k, layout_of(k, u), new_range(stop, nil, .Int)) {
-		// from the base case up
-		it.start, it.stop = Int(base + 1), new_range(ring_law(.Add, {u, Int(1)}) or_return, nil, .Int)
-		it.next = ring_law(.Add, {it.index, Int(1)}) or_return
-		it.step, it.last = rewrite(k, after, value), it.state
-		if !solved(it.step, root) do return
-		return sequence(k, it, {c}, from_base), true
+	// y: what the call gives back
+	y := answer
+	if y == nil {
+		y = new_unknown(k, nil)
+		y.layout = family_term(family)
+		after = rewrite(k, after, rewriting_call(nil, call, y))
 	}
-	// down from m, through the calls
-	it.start, it.stop, it.next = u, stop, rewrite(k, next, counter)
-	last := rewrite(k, c, rewriting(nil, u, narrowing(it.index, and_law(k, {layout_of(k, u), stop}))))
-	is_call := proc(k: ^Kernel, t: Type, call: ^Collapse, answer: ^Unknown) -> bool {
-		if answer == nil do return same(k, t, call)
-		y, is_unknown := t.(^Unknown)
-		return is_unknown && same_unknown(y, answer)
+	if !solved(after, root) do return
+	post := make([dynamic]^Effect)
+	v := after
+	for e, is_effect := v.(^Effect); is_effect; e, is_effect = v.(^Effect) {
+		append(&post, e)
+		v = e.then
 	}
-	if is_call(k, after, call, answer) {
-		// a call in tail position: the effects of each step, then the base case
-		it.init, it.step, it.last = None{}, rewrite(k, wrap_effects(before, None{}), counter), last
-		return iterated(k, it), true
+	if has_effect(v) do return
+	f := new(Fold)
+	f.index, f.span = orbit_index(k, u, stop), p.span
+	along := rewriting(nil, u, f.index)
+	at_stop := rewriting(nil, u, narrowing(f.index, and_law(k, {layout_of(k, u), stop})))
+	if alpha, beta, affine := affine_in(v, y); affine && len(post) == 0 && family == .Int {
+		// going down, the composed map (A, B)
+		a, b := new_unknown(k, nil), new_unknown(k, nil)
+		a.layout, b.layout = family_term(.Int), family_term(.Int)
+		f.start, f.stop, f.next = u, stop, rewrite(k, next, along)
+		f.states, f.inits = slice.clone([]^Unknown{a, b}), slice.clone([]Type{Int(1), Int(0)})
+		f.effects = rewrite(k, wrap_effects(pre, None{}), along)
+		f.updates = slice.clone([]Type{op(k, .Mul, a, rewrite(k, alpha, along)), op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along)))})
+		f.value = op(k, .Add, op(k, .Mul, a, rewrite(k, c, at_stop)), b)
+		return folded(k, f), true
 	}
-	o := after.(^Operation) or_return
-	if o.op != .Add && o.op != .Mul || family != .Int do return
-	rest := make([dynamic]Type)
-	found := false
-	for a in o.args {
-		if !found && is_call(k, a, call, answer) {
-			found = true
-			continue
+	// coming back up, from the base case
+	base, is_int := stop.(Int)
+	if !is_int || !same(k, next, op(k, .Sub, u, Int(1))) || !included(k, layout_of(k, u), new_range(stop, nil, .Int)) do return
+	for e in pre do if e.answer != nil && reads(k, after, e.answer) do return
+	x := new_unknown(k, nil)
+	x.layout = family_term(family)
+	inside := rewriting(along, y, x)
+	f.start, f.stop, f.next = Int(base + 1), new_range(op(k, .Add, u, Int(1)), nil, .Int), op(k, .Add, f.index, Int(1))
+	f.states, f.inits = slice.clone([]^Unknown{x}), slice.clone([]Type{None{}})
+	f.effects = rewrite(k, wrap_effects(post[:], None{}), inside)
+	f.updates = slice.clone([]Type{rewrite(k, v, inside)})
+	f.value = x
+	up := sequence(k, f, {rewrite(k, c, at_stop)}, from_base)
+	if len(pre) == 0 do return up, true
+	// going down first: the effects before the call
+	down := new(Fold)
+	down.index, down.span = orbit_index(k, u, stop), p.span
+	down.start, down.stop, down.next = u, stop, op(k, .Sub, down.index, Int(1))
+	down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, down.index)), None{}
+	return wrapped(folded(k, down).(^Effect), nil, up), true
+}
+
+// orbit_index: k, a point of the orbit where the fold goes on: u in its layout,
+// out of stop.
+orbit_index :: proc(k: ^Kernel, u: ^Unknown, stop: Type) -> ^Unknown {
+	index := new_unknown(k, nil)
+	index.layout = and_law(k, {layout_of(k, u), not_law(k, stop)})
+	return index
+}
+
+// op: the normal form of the operation.
+op :: proc(k: ^Kernel, o: Operator, args: ..Type) -> Type {
+	return normal(k, new_operation(o, ..args))
+}
+
+// affine_in: t = α·y + β, α and β not reading y: t of degree 1 in y, by the ring
+// law (ring.odin).
+affine_in :: proc(t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: bool) {
+	ms, divisor := monomials(t) or_return
+	if divisor != 1 do return
+	as, bs := make([dynamic]Type), make([dynamic]Type)
+	for m in ms {
+		rest := make([dynamic]^Unknown)
+		degree := 0
+		for f in factors(m) {
+			if same_unknown(f, y) do degree += 1
+			else do append(&rest, f)
 		}
-		append(&rest, a)
+		switch degree {
+		case 0:
+			append(&bs, m)
+		case 1:
+			append(&as, monomial(coefficient(m), rest[:]))
+		case:
+			return
+		}
 	}
-	if !found do return
-	a := len(rest) == 1 ? rest[0] : operation_law(k, o.op, rest[:], o.span)
-	if !solved(a, root) || answer != nil && reads(k, a, answer) do return
-	it.init = o.op == .Add ? Int(0) : Int(1)
-	it.step = rewrite(k, wrap_effects(before, operation_law(k, o.op, {it.state, a}, o.span)), value)
-	it.last = normal(k, new_operation(o.op, it.state, last))
-	return iterated(k, it), true
+	alpha = ring_term(as[:], 1) or_return
+	beta = ring_term(bs[:], 1) or_return
+	return alpha, beta, true
 }
 
 // at_call: a step of the equation, cut at its call of f: the effects before it,
@@ -503,67 +546,137 @@ wrap_effects :: proc(chain: []^Effect, t: Type) -> Type {
 	return out
 }
 
-// from_base: the iteration t, from the value of the base case, computed (§4.8).
+// from_base: the fold t, its state from the value of the base case, computed (§4.8).
 from_base :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
-	it := new(Iterate)
-	it^ = t.(^Iterate)^
-	it.init = parts[0]
-	return iterated(k, it)
+	f := new(Fold)
+	f^ = t.(^Fold)^
+	f.inits = slice.clone([]Type{parts[0]})
+	return folded(k, f)
 }
 
-// iterated: the iteration as a term: itself, or its closed form, when it has no
-// effect; otherwise an effect that gives it back, bound in what follows. What its
-// steps compute without reading what their effects give back crosses them (§4.8):
-// the effects run alone, and the value is the iteration of the rest.
-iterated :: proc(k: ^Kernel, it: ^Iterate) -> Type {
-	if !has_effect(it.step) && !has_effect(it.last) do return iterate_law(k, it)
-	chain := make([dynamic]^Effect)
-	rest := it.step
-	for {
-		e, is_effect := rest.(^Effect)
-		if !is_effect do break
-		append(&chain, e)
-		rest = e.then
+// folded: the fold as a term: by its laws, when it has no effect; otherwise an
+// effect that gives it back, bound in what follows. When neither its states nor its
+// value read what the effects give back, and the effects do not read the states,
+// the states cross them (§4.8): the effects fold alone, then the rest.
+folded :: proc(k: ^Kernel, fold: ^Fold) -> Type {
+	f := simplified(k, fold)
+	if !has_effect(f.effects) do return fold_law(k, f)
+	crosses := !has_effect(f.value)
+	for x in chain_answers(f.effects) {
+		if x == nil do continue
+		crosses &&= !reads(k, f.value, x)
+		for t in f.updates do crosses &&= !reads(k, t, x)
 	}
-	crosses := !has_effect(rest) && !has_effect(it.last) && !is_none(rest)
-	for e in chain do crosses &&= e.answer == nil || !reads(k, rest, e.answer)
+	for x in f.states do crosses &&= !reads(k, f.effects, x)
 	out := new(Effect)
-	out.id, out.iterate, out.span = -1, it, it.span
+	out.id, out.fold, out.span = -1, f, f.span
 	if crosses {
-		effects := new(Iterate)
-		effects^ = it^
-		effects.init, effects.step, effects.last = None{}, wrap_effects(chain[:], None{}), None{}
-		value := new(Iterate)
-		value^ = it^
-		value.step = rest
-		out.iterate, out.then = effects, iterate_law(k, value)
+		effects := new(Fold)
+		effects^ = f^
+		effects.states, effects.inits, effects.updates, effects.value = nil, nil, nil, None{}
+		pure := new(Fold)
+		pure^ = f^
+		pure.effects = None{}
+		out.fold, out.then = effects, fold_law(k, pure)
+		return out
+	}
+	if is_none(f.value) {
+		out.then = None{}
 		return out
 	}
 	out.answer = new_unknown(k, nil)
-	out.answer.layout = it.state.layout
+	if family, known := family_of(k, f.value); known do out.answer.layout = family_term(family)
 	out.then = out.answer
 	return out
 }
 
-// iterate_law: an iteration on a counter, k from lo up to hi or from hi down to lo,
-// whose step adds to x a polynomial g in k: x = c + g(lo) + … + g(hi) at the last,
-// c + G(hi) - G(lo - 1), G(m) = g(0) + … + g(m) from the sums of powers (§5.6).
-iterate_law :: proc(k: ^Kernel, it: ^Iterate) -> Type {
-	if closed, ok := closed_form(k, it); ok do return closed
-	return it
+// fold_law: a fold whose steps have no effect, by the laws of folds: what does not
+// change is not folded, and a state that adds a polynomial in k along a counter is
+// a sum with a closed form (simplified); a fold left with nothing to fold, whose
+// value does not read k, is its value, effects included.
+fold_law :: proc(k: ^Kernel, f: ^Fold) -> Type {
+	g := simplified(k, f)
+	if is_none(g.effects) && len(g.states) == 0 && !reads(k, g.value, g.index) do return g.value
+	return g
 }
 
-closed_form :: proc(k: ^Kernel, it: ^Iterate) -> (closed: Type, ok: bool) {
-	lo, hi, end := counter_range(k, it) or_return
-	g := ring_law(.Sub, {it.step, it.state}) or_return
+// simplified: the fold, its states reduced by the laws of folds, until none applies:
+//
+//   a state whose update is itself is its init           x ↦ x
+//   a state nothing reads is not folded
+//   along a counter, k by one over lo..hi, a state whose update adds a polynomial
+//   g(k), x ↦ x + g(k), read by the value only, is c + G(hi) - G(lo - 1) there,
+//   G(m) = g(0) + … + g(m), by the sums of powers
+simplified :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
+	out := f
+	for changed := true; changed; {
+		changed = false
+		for x, i in out.states {
+			if same(k, out.updates[i], x) {
+				out = without_state(k, out, i, out.inits[i])
+				changed = true
+				break
+			}
+			read := reads(k, out.value, x) || reads(k, out.effects, x)
+			for t, j in out.updates do read ||= j != i && reads(k, t, x)
+			if !read {
+				out = without_state(k, out, i, nil)
+				changed = true
+				break
+			}
+			if !is_none(out.effects) || reads_other_updates(k, out, i) do continue
+			if end, closed := sum_at_end(k, out, i); closed {
+				out = without_state(k, out, i, end)
+				changed = true
+				break
+			}
+		}
+	}
+	return out
+}
+
+// reads_other_updates: another state's update reads the state i.
+reads_other_updates :: proc(k: ^Kernel, f: ^Fold, i: int) -> bool {
+	for t, j in f.updates do if j != i && reads(k, t, f.states[i]) do return true
+	return false
+}
+
+// without_state: the fold without its state i, which reads `by` where it was;
+// nil when nothing reads it. Where k stops, the value reads it at its end.
+without_state :: proc(k: ^Kernel, f: ^Fold, i: int, by: Type) -> ^Fold {
+	parts := fold_parts(f)
+	if by != nil {
+		r := rewriting(nil, f.states[i], by)
+		for &t in parts do t = rewrite(k, t, r)
+	}
+	out := with_parts(f, parts)
+	states := make([dynamic]^Unknown)
+	inits := make([dynamic]Type)
+	updates := make([dynamic]Type)
+	for j in 0 ..< len(f.states) {
+		if j == i do continue
+		append(&states, f.states[j])
+		append(&inits, out.inits[j])
+		append(&updates, out.updates[j])
+	}
+	out.states, out.inits, out.updates = states[:], inits[:], updates[:]
+	return out
+}
+
+// sum_at_end: the state i, x ↦ x + g(k) along a counter, where k stops:
+// c + G(hi) - G(lo - 1), G(m) = g(0) + … + g(m) from the sums of powers.
+sum_at_end :: proc(k: ^Kernel, f: ^Fold, i: int) -> (sum: Type, ok: bool) {
+	lo, hi := counter_range(k, f) or_return
+	x := f.states[i]
+	g := ring_law(.Sub, {f.updates[i], x}) or_return
 	ms, divisor := monomials(g) or_return
 	degree := 0
 	for m in ms {
-		for f in factors(m) do if !same_unknown(f, it.index) do return
+		for u in factors(m) do if !same_unknown(u, f.index) do return
 		degree = max(degree, len(factors(m)))
 	}
 	// G(m) = g(0) + … + g(m): each monomial c * m^p gives c * S_p(m)
-	sums := power_sums(it.index, degree) or_return
+	sums := power_sums(f.index, degree) or_return
 	total: Type = Int(0)
 	for m in ms {
 		term := ring_law(.Mul, {Int(coefficient(m)), sums[len(factors(m))]}) or_return
@@ -571,27 +684,25 @@ closed_form :: proc(k: ^Kernel, it: ^Iterate) -> (closed: Type, ok: bool) {
 	}
 	total = ring_over(total, divisor) or_return
 	below := ring_law(.Sub, {lo, Int(1)}) or_return
-	upper := rewrite(k, total, rewriting(nil, it.index, hi))
-	lower := rewrite(k, total, rewriting(nil, it.index, below))
-	sum := ring_law(.Sub, {upper, lower}) or_return
-	x := ring_law(.Add, {it.init, sum}) or_return
-	return rewrite(k, it.last, rewriting(rewriting(nil, it.state, x), it.index, end)), true
+	upper := rewrite(k, total, rewriting(nil, f.index, hi))
+	lower := rewrite(k, total, rewriting(nil, f.index, below))
+	sum = ring_law(.Add, {f.inits[i], ring_law(.Sub, {upper, lower}) or_return}) or_return
+	return sum, true
 }
 
-// counter_range: the steps of a counter run k over lo..hi, by one — up from lo
-// until it passes hi, or down from hi until b = lo - 1, which it reaches —, and k
-// is end at the last.
-counter_range :: proc(k: ^Kernel, it: ^Iterate) -> (lo, hi, end: Type, ok: bool) {
-	if same(k, it.next, ring_law(.Add, {it.index, Int(1)}) or_return) {
-		r := it.stop.(^Range) or_return
+// counter_range: the orbit of a counter, k by one over lo..hi: up from lo until it
+// passes hi, or down from hi until b = lo - 1, which it reaches.
+counter_range :: proc(k: ^Kernel, f: ^Fold) -> (lo, hi: Type, ok: bool) {
+	if same(k, f.next, op(k, .Add, f.index, Int(1))) {
+		r := f.stop.(^Range) or_return
 		if r.hi != nil || r.lo == nil do return
-		return it.start, ring_law(.Sub, {r.lo, Int(1)}) or_return, r.lo, true
+		return f.start, ring_law(.Sub, {r.lo, Int(1)}) or_return, true
 	}
-	if !same(k, it.next, ring_law(.Sub, {it.index, Int(1)}) or_return) do return
-	b := it.stop.(Int) or_return
-	image := layout_image(k, it.start) or_return
+	if !same(k, f.next, op(k, .Sub, f.index, Int(1))) do return
+	b := f.stop.(Int) or_return
+	image := layout_image(k, f.start) or_return
 	if !included(k, image, new_range(Int(b), nil, .Int)) do return
-	return Int(b + 1), it.start, Int(b), true
+	return Int(b + 1), f.start, true
 }
 
 // ring_over: t / d, d ≥ 1, over the divisor of the sum.

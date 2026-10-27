@@ -67,14 +67,14 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		out := effect_law(k, v, rewrite(k, v.then, r))
 		if e, is_effect := out.(^Effect); is_effect {
 			if v.call != nil do e.call = rewrite_call(k, v.call, r)
-			if v.iterate != nil do e.iterate = rewrite_iterate(k, v.iterate, r)
+			if v.fold != nil do e.fold = rewrite_fold(k, v.fold, r)
 		}
 		return out
 	case ^Collapse:
 		for x in r do if x.call != nil && same(k, x.call, v) do return x.term
 		return rewrite_call(k, v, r)
-	case ^Iterate:
-		return iterate_law(k, rewrite_iterate(k, v, r))
+	case ^Fold:
+		return fold_law(k, rewrite_fold(k, v, r))
 	case ^Operation:
 		if is_string_value(t) do return t
 		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
@@ -118,13 +118,9 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 	return out
 }
 
-// rewrite_iterate: the iteration with its parts rewritten; k and x are its own.
-rewrite_iterate :: proc(k: ^Kernel, it: ^Iterate, r: Rewrite) -> ^Iterate {
-	out := new(Iterate)
-	out^ = it^
-	out.start, out.init, out.stop = rewrite(k, it.start, r), rewrite(k, it.init, r), rewrite(k, it.stop, r)
-	out.next, out.step, out.last = rewrite(k, it.next, r), rewrite(k, it.step, r), rewrite(k, it.last, r)
-	return out
+// rewrite_fold: the fold with its parts rewritten; what it binds is its own.
+rewrite_fold :: proc(k: ^Kernel, f: ^Fold, r: Rewrite) -> ^Fold {
+	return with_parts(f, rewrite_all(k, fold_parts(f), r))
 }
 
 rewrite_all :: proc(k: ^Kernel, ts: []Type, r: Rewrite) -> []Type {
@@ -187,7 +183,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		return range_law(k, lo, hi, v.family, v.span), true
 	case ^Collapse:
 		if f, known := family_of(k, v); known do return family_term(f), true
-	case ^Iterate:
+	case ^Fold:
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}

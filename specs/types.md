@@ -335,7 +335,7 @@ unchanged:
 
 ```text
 loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}
-loop{n -> m}!    = ε<⟳(k: 1 ↦ k + 1 until (m + 1).., x: 0 ↦ ε₁(y::u8, y + x), x)>(z, z)
+loop{n -> m}!    = ε<⟳(k: 1 ↦ k + 1 until (m + 1)..; ε₁(y); x: 0 ↦ y + x; x)>(z, z)
 loop{n -> 3}! - loop{n -> 3}!   = ε<⟳(…)>(x, ε<⟳(…)>(y, x - y))       two runs
 {u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
 ```
@@ -346,7 +346,7 @@ scope that places them:
 
 ```text
 sum{n -> !?::u8}!              = ε₁(x::u8, x * (x + 1) / 2)
-loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(k: 1 ↦ k + 1 until (x + 1).., …)>(y, y))
+loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(k: 1 ↦ k + 1 until (x + 1)..; …)>(y, y))
 g -> {w -> !?::none  -> {k -> 1}}
 {...g!, -> 1}!                 = ε₁(1)
 ```
@@ -623,50 +623,68 @@ List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
 {10 10 10} in List{u8}                                                    = false
 ```
 
-An iteration, when the name is called on an integer, and the call changes it only:
+A fold, when the call changes the integer the name is called on, and that only:
 
 ```text
-f{n -> m}! = m ? {B -> c(m)  -> h(m, f{n -> s(m)}!)}
+f{n -> m}! = m ? {B -> c(m)  -> pre(m) · f{n -> s(m)}! · post(m)}
 ```
 
-`⟳(k: a ↦ n until S, x: e ↦ t, l)` is a loop: k = a and x = e; while k is not in
-S, x = t and k = n; then l. Every step makes the call — it is not in a branch —,
-and the loop runs the effects in the order the equation runs them:
+A run follows the orbit of m by s until B: the effects before the call run going
+down, those after it coming back up — the solution, by Arden, of the equation of its
+effects, `R(m) = pre(m) · R(s(m)) · post(m)`. Its value is v(m, y) after post, y
+what the call gives back. `⟳(k: a ↦ s until B; ε…; x: e ↦ t, …; w)` is that fold:
+k = a and each state its init; while k is not in B, the effects of a step, then the
+states take their updates, all at once, and k = s; then w.
+
+When post has no effect and v is affine in y, `v = α·y + β`, the maps compose into
+one, `(A, B) ∘ (α, β) = (A·α, B + A·β)`: the fold goes down, the effects before the
+call in its steps,
 
 ```text
-s(m) = m - 1, B = b, m ≥ b, no effect before the call: up from the base case
-f{n -> m}! = ⟳(k: b + 1 ↦ k + 1 until (m + 1).., x: c ↦ h(k, x), x)
-
-otherwise, down through the calls, when h(m, y) = ε…(y ⊕ a(m)), ⊕ + or * on the
-integers, associative, with identity e — the parentheses move —, or h(m, y) = ε…(y),
-a call in tail position:
-f{n -> m}! = ⟳(k: m ↦ s(k) until B, x: e ↦ ε…(x ⊕ a(k)), x ⊕ c(k))
-f{n -> m}! = ⟳(k: m ↦ s(k) until B, x: none ↦ ε…(none), c(k))
+f{n -> m}! = ⟳(k: m ↦ s(k) until B; pre(k); A: 1 ↦ A·α(k), B: 0 ↦ B + A·β(k); A·c(k) + B)
 ```
 
-An iteration whose steps have effects is an effect, `ε<⟳(…)>(x, t)`. What a step
-computes without reading what its effects give back crosses them (§4.8): the
-effects run alone, and the value is the iteration of the rest. An iteration on a
-counter — k by one from lo up to hi, or from hi down to b = lo - 1 — whose step
-adds a polynomial in k has a closed form, preferred to the loop:
+Otherwise it comes back up from the base case, which inverts s — `s(m) = m - 1`,
+`B = b ≤ m` — after the effects before the call, going down; post must not read
+what they give back:
 
 ```text
-x = c + g(lo) + … + g(hi) = c + G(hi) - G(lo - 1)     G(m) = g(0) + … + g(m), by the sums of powers
+f{n -> m}! = ⟳(k: m ↦ k - 1 until b; pre(k); none) · ⟳(k: b + 1 ↦ k + 1 until (m + 1)..; post(k); x: c(b) ↦ v(k, x); x)
+```
 
+What would keep the orbit, or what pre gives back — or a step with several calls —
+stays. The laws of a fold:
+
+```text
+x: e ↦ x                                   x is e
+a state nothing reads                      is not folded
+nothing left to fold, w not reading k      w
+a state not reading what the effects give back, nor read by them: it crosses them
+k by one over lo..hi, x: e ↦ x + g(k), g a polynomial, read by w only:
+    x = e + G(hi) - G(lo - 1) at the end    G(m) = g(0) + … + g(m), by the sums of powers
+```
+
+An effect of a fold is an effect, `ε<⟳(…)>(x, t)`. On examples:
+
+```text
 sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
 sum{n -> m}!   = m * (m + 1) / 2
 fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
-fact{n -> m}!  = ⟳(k: 1 ↦ k + 1 until (m + 1).., x: 1 ↦ k * x, x)
+fact{n -> m}!  = ⟳(k: m ↦ k - 1 until 0; x: 1 ↦ k * x; x)
 half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}
-half{n -> m}!  = ⟳(k: m ↦ k / 2 until 0, x: 0 ↦ x + 1, x)
+half{n -> m}!  = ⟳(k: m ↦ k / 2 until 0; x: 0 ↦ x + 1; x)
+g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}
+g{n -> m}!     = ⟳(k: m ↦ k / 2 until 0; A: 1 ↦ 2 * A, B: 0 ↦ A + B; A + B)
 say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{…  n -> n}! + say{n -> n - 1}!}}
-say{n -> m}!   = ε<⟳(k: m ↦ k - 1 until 0, x: 0 ↦ ε<printf{…  n -> k}!>(y, y + x), x)>(z, z)
+say{n -> m}!   = ε<⟳(k: m ↦ k - 1 until 0; ε<printf{…  n -> k}!>(y); x: 0 ↦ y + x; x)>(z, z)
+count -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> count{n -> n - 1}!  -> a + io.printf{…  n -> n}!}!}}
+count{n -> m}! = ε<⟳(k: 1 ↦ k + 1 until (m + 1)..; ε<printf{…  n -> k}!>(y); x: 0 ↦ y + x; x)>(z, z)
 tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> io.puts{…}!  -> 1 + tick{n -> n - 1}!}!}}
-tick{n -> m}!  = ε<⟳(k: m ↦ k - 1 until 0, x: none ↦ ε<puts{…}!>(y, none), none)>(m)
+tick{n -> m}!  = ε<⟳(k: m ↦ k - 1 until 0; ε<puts{…}!>(y); none)>(m)    the value crosses
 ```
 
-Like the equation, an iteration is never unfolded: `fact{n -> 5}!` is
-`⟳(k: 1 ↦ k + 1 until 6.., x: 1 ↦ k * x, x)`.
+Like the equation, a fold is never unfolded: `fact{n -> 5}!` is
+`⟳(k: 5 ↦ k - 1 until 0; x: 1 ↦ k * x; x)`.
 
 `sum{n -> m - 1}!` is not an extra notation: it is carving and collapse, applied to
 types.

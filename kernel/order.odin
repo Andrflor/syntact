@@ -22,9 +22,8 @@ term_order :: proc(a, b: Type) -> int {
 		return compare_ints(i128(x), i128(b.(Char)))
 	case ^Unknown:
 		return unknown_order(x, b.(^Unknown))
-	case ^Iterate:
-		y := b.(^Iterate)
-		return terms_order({x.start, x.init, x.stop, x.next, x.step, x.last}, {y.start, y.init, y.stop, y.next, y.step, y.last})
+	case ^Fold:
+		return terms_order(fold_parts(x), fold_parts(b.(^Fold)))
 	case ^Effect:
 		y := b.(^Effect)
 		if c := compare_ints(i128(x.id), i128(y.id)); c != 0 do return c
@@ -159,7 +158,7 @@ term_rank :: proc(t: Type) -> int {
 		return 19
 	case Invalid:
 		return 20
-	case ^Iterate:
+	case ^Fold:
 		return 21
 	}
 	return 22

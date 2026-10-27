@@ -2,9 +2,9 @@
   "name": "boundary_call_in_recursion",
   "description": "A call in a recursive equation gives it effects: each step calls, in order.",
   "source": "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n  pi -> {-> 3}\n}\nsay -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> 1}! + say{n -> n - 1}!}}\nx -> say{n -> 3}!",
-  "type": "ε<⟳(x: 3 ↦ x - 1 until 0, y: 0 ↦ ε<abs{n -> 1}!>(z::i32, z + y), y)>(x::int, x)",
+  "type": "ε<⟳(x: 3 ↦ x - 1 until 0; ε<abs{n -> 1}!>(y); z: 0 ↦ y + z; z)>(x::int, x)",
   "productions": {
-    "say": "ε<⟳(x: ?3 ↦ x - 1 until 0, y: 0 ↦ ε<abs{n -> 1}!>(z::i32, z + y), y)>(x::int, x)"
+    "say": "ε<⟳(x: ?3 ↦ x - 1 until 0; ε<abs{n -> 1}!>(y); z: 0 ↦ y + z; z)>(x::int, x)"
   },
   "expect_errors": []
 }

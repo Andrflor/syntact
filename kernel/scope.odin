@@ -405,12 +405,8 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 			b.product = copy_term(k, m, b.product, b.scope != nil ? b.scope : scope)
 		}
 		return p
-	case ^Iterate:
-		it := new(Iterate)
-		it^ = v^
-		it.start, it.init, it.stop = copy_term(k, m, v.start, scope), copy_term(k, m, v.init, scope), copy_term(k, m, v.stop, scope)
-		it.next, it.step, it.last = copy_term(k, m, v.next, scope), copy_term(k, m, v.step, scope), copy_term(k, m, v.last, scope)
-		return it
+	case ^Fold:
+		return with_parts(v, copy_terms(k, m, fold_parts(v), scope))
 	}
 	return t
 }
@@ -460,8 +456,8 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case ^Pattern:
 		if mentions(m, v.target) do return true
 		for b in v.branches do if mentions(m, b.cover) || mentions(m, b.product) do return true
-	case ^Iterate:
-		return mentions(m, v.start) || mentions(m, v.init) || mentions(m, v.stop) || mentions(m, v.next) || mentions(m, v.step) || mentions(m, v.last)
+	case ^Fold:
+		for t in fold_parts(v) do if mentions(m, t) do return true
 	}
 	return false
 }
@@ -836,8 +832,8 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		if x.answer == nil do return same(k, x.then, y.then)
 		if (x.call == nil) != (y.call == nil) do return false
 		if x.call != nil && !same(k, x.call, y.call) do return false
-		if (x.iterate == nil) != (y.iterate == nil) do return false
-		if x.iterate != nil && !same(k, x.iterate, y.iterate) do return false
+		if (x.fold == nil) != (y.fold == nil) do return false
+		if x.fold != nil && !same(k, x.fold, y.fold) do return false
 		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
 		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
 	case ^Or:
@@ -883,12 +879,20 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		if !ok || len(x.branches) != len(y.branches) || !same(k, x.target, y.target) do return false
 		for br, i in x.branches do if !same(k, br.cover, y.branches[i].cover) || !same(k, br.product, y.branches[i].product) do return false
 		return true
-	case ^Iterate:
-		// the same iteration: its counter and its value are bound in it, whatever their index
-		y, ok := b.(^Iterate)
-		if !ok || !same(k, x.start, y.start) || !same(k, x.init, y.init) || !same(k, x.stop, y.stop) do return false
-		bound := rewriting(rewriting(nil, y.index, x.index), y.state, x.state)
-		return same(k, x.next, rewrite(k, y.next, bound)) && same(k, x.step, rewrite(k, y.step, bound)) && same(k, x.last, rewrite(k, y.last, bound))
+	case ^Fold:
+		// the same fold: what it binds — k, its states, what its effects give back —
+		// is its own, whatever the index
+		y, ok := b.(^Fold)
+		if !ok || len(x.states) != len(y.states) do return false
+		xs, ys := chain_answers(x.effects), chain_answers(y.effects)
+		if len(xs) != len(ys) do return false
+		bound := rewriting(nil, y.index, x.index)
+		for u, i in y.states do bound = rewriting(bound, u, x.states[i])
+		for u, i in ys {
+			if (u == nil) != (xs[i] == nil) do return false
+			if u != nil do bound = rewriting(bound, u, xs[i])
+		}
+		return same_all(k, fold_parts(x), rewrite_all(k, fold_parts(y), bound))
 	}
 	return false
 }

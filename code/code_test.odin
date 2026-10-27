@@ -60,8 +60,10 @@ CODE_CASES := []Code_Case {
 	{name = "iteration of an input", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!", inputs = {6}, int = 720},
 	// whatever its step, through an associative operator
 	{name = "iteration through any step", source = "half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}\n-> half{n -> ??::u8}!", inputs = {100}, int = 7},
+	// an affine context: the maps compose, x ↦ 2x + 1
+	{name = "affine context", source = "g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}\n-> g{n -> ??::u8}!", inputs = {100}, int = 255},
 	// a recursion that stays is a function: its fields its parameters
-	{name = "function", source = "g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}\n-> g{n -> ??::u8}!", inputs = {100}, int = 255},
+	{name = "function", source = "fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}\n-> fib{n -> ??::u8}!", inputs = {10}, int = 55},
 	{name = "loop", source = "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", inputs = {10}, int = 55},
 	// a call in tail position is a loop: the stack does not grow with its turns
 	{name = "tail call", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!", inputs = {300_000}, int = 600_000},

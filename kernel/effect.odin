@@ -34,6 +34,14 @@ call_effect :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 	return e
 }
 
+// chain_answers: what each effect of the chain heading t gives back, in order;
+// nil for one that gives nothing.
+chain_answers :: proc(t: Type) -> []^Unknown {
+	out := make([dynamic]^Unknown)
+	for e, is_effect := t.(^Effect); is_effect; e, is_effect = e.then.(^Effect) do append(&out, e.answer)
+	return out[:]
+}
+
 // wrapped: the effect e, with x what it gives back, wrapping t.
 wrapped :: proc(e: ^Effect, x: ^Unknown, t: Type) -> Type {
 	out := new(Effect)

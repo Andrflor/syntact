@@ -102,7 +102,7 @@ type_prec :: proc(t: Type) -> int {
 		return operator_prec(v.op)
 	case ^Pattern:
 		return PREC_OR
-	case ^Iterate:
+	case ^Fold:
 		return PREC_ATOM
 	case ^Range:
 		if v.lo != nil || v.hi != nil do return PREC_COMPARE
@@ -189,10 +189,10 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
 		// call with effects
-		if v.call != nil || v.iterate != nil {
+		if v.call != nil || v.fold != nil {
 			strings.write_string(b, "ε<")
 			if v.call != nil do write_type(b, v.call, 0)
-			else do write_type(b, v.iterate, 0)
+			else do write_type(b, v.fold, 0)
 			strings.write_string(b, ">(")
 		} else {
 			fmt.sbprintf(b, "ε%d(", v.id)
@@ -258,27 +258,47 @@ write_bare :: proc(b: ^Printer, t: Type) {
 	case ^Default:
 		write_type(b, v.color, PREC_ATOM)
 		strings.write_byte(b, ':')
-	case ^Iterate:
-		// ⟳(k: a ↦ n until S, x: c ↦ t, l): k from a, x from c; while k is not in
-		// S, x takes t and k takes n; then l
+	case ^Fold:
+		// ⟳(k: a ↦ n until S; ε…; x: c ↦ t, …; v): k from a and each state from its
+		// init; while k is not in S, the effects of a step, then the updates, and k
+		// takes n; then v
+		depth := len(b.bound)
 		strings.write_string(b, "⟳(")
 		append(&b.bound, v.index)
-		append(&b.bound, v.state)
-		k, x := bound_name(len(b.bound) - 2), bound_name(len(b.bound) - 1)
-		fmt.sbprintf(b, "%s: ", k)
+		fmt.sbprintf(b, "%s: ", bound_name(len(b.bound) - 1))
 		write_type(b, v.start, PREC_ADD)
 		strings.write_string(b, " ↦ ")
 		write_type(b, v.next, PREC_ADD)
 		strings.write_string(b, " until ")
 		write_type(b, v.stop, 0)
-		fmt.sbprintf(b, ", %s: ", x)
-		write_type(b, v.init, PREC_ADD)
-		strings.write_string(b, " ↦ ")
-		write_type(b, v.step, 0)
-		strings.write_string(b, ", ")
-		write_type(b, v.last, 0)
-		pop(&b.bound)
-		pop(&b.bound)
+		if !is_none(v.effects) {
+			strings.write_string(b, ";")
+			for e, is_effect := v.effects.(^Effect); is_effect; e, is_effect = e.then.(^Effect) {
+				strings.write_byte(b, ' ')
+				if e.call != nil {
+					strings.write_string(b, "ε<")
+					write_type(b, e.call, 0)
+					strings.write_string(b, ">")
+				} else {
+					fmt.sbprintf(b, "ε%d", e.id)
+				}
+				if e.answer != nil {
+					append(&b.bound, e.answer)
+					fmt.sbprintf(b, "(%s)", bound_name(len(b.bound) - 1))
+				}
+			}
+		}
+		for u in v.states do append(&b.bound, u)
+		for u, i in v.states {
+			strings.write_string(b, i == 0 ? "; " : ", ")
+			for x, j in b.bound do if x == u do fmt.sbprintf(b, "%s: ", bound_name(j))
+			write_type(b, v.inits[i], PREC_ADD)
+			strings.write_string(b, " ↦ ")
+			write_type(b, v.updates[i], 0)
+		}
+		strings.write_string(b, "; ")
+		write_type(b, v.value, 0)
+		resize(&b.bound, depth)
 		strings.write_byte(b, ')')
 	case ^Pattern:
 		write_type(b, v.target, PREC_PREFIX)

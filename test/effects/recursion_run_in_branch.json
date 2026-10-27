@@ -2,9 +2,9 @@
   "name": "recursion_run_in_branch",
   "description": "A run with an effect in a branch of a recursive equation: the scope a branch substitutes for a name is a value, not copied again; each step calls, then recurses.",
   "source": "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n}\nsay -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\nx -> say{n -> 3}!",
-  "type": "ε<⟳(x: 3 ↦ x - 1 until 0, y: none ↦ ε<puts{s -> \"tick\"}!>(z::i32, none), none)>(3)",
+  "type": "ε<⟳(x: 3 ↦ x - 1 until 0; ε<puts{s -> \"tick\"}!>(y); none)>(3)",
   "productions": {
-    "say": "ε<⟳(x: ?1 ↦ x - 1 until 0, y: none ↦ ε<puts{s -> \"tick\"}!>(z::i32, none), none)>(?1)"
+    "say": "ε<⟳(x: ?1 ↦ x - 1 until 0; ε<puts{s -> \"tick\"}!>(y); none)>(?1)"
   },
   "expect_errors": []
 }

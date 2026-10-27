@@ -1,6 +1,7 @@
 package kernel
 
 import syn "../syntax"
+import "core:slice"
 
 // TYPES (specs/types.md §1–2)
 //
@@ -32,7 +33,7 @@ Type :: union {
 	^Carve, // s{…}
 	^Default, // C:           an anonymous binding colored by C
 	^Pattern, // t ? {c -> p …}
-	^Iterate, // ⟳(k: a ↦ n until S, x: c ↦ t, l)   a loop (§5.6)
+	^Fold, // ⟳(k: a ↦ n until S; ε…; x: c ↦ t; v)   along an orbit (§5.6)
 	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
@@ -80,7 +81,7 @@ Effect :: struct {
 	id:      int,
 	answer:  ^Unknown, // nil: it gives nothing back, εₖ(t)
 	call:    ^Collapse, // the effect is this call: a recursive call with effects, or a symbol behind a boundary
-	iterate: ^Iterate, // the effect is this iteration: the effects of its steps, in order (§5.6)
+	fold:    ^Fold, // the effect is this fold: the effects of its steps, in order (§5.6)
 	then:    Type,
 	span:    syn.Span,
 }
@@ -203,16 +204,47 @@ Branch :: struct {
 	span:    syn.Span,
 }
 
-// Iterate: the solution of a recursion (§5.6), a loop. k takes start and x init;
-// then, while k is not in stop, x takes step and k next; at the last, the iteration
-// is last. k and x are unknowns bound in it.
-Iterate :: struct {
-	index, state: ^Unknown,
-	start, init:  Type,
-	stop:         Type, // where k ends
-	next, step:   Type, // the next k, the next x
-	last:         Type, // the value, where k ends
-	span:         syn.Span,
+// Fold: the solution of a recursion (§5.6), an ordered product along the orbit of
+// its argument. k takes start and each state its init; while k is not in stop, the
+// effects of a step run, in order, then the states take their updates — all read
+// before any is written — and k takes next. Where k stops, the fold is its value.
+// k, the states and what the effects give back are bound in it.
+Fold :: struct {
+	index:   ^Unknown,
+	start:   Type,
+	stop:    Type,
+	next:    Type,
+	states:  []^Unknown,
+	inits:   []Type,
+	effects: Type, // a chain εₖ(x, …) ending in none; none when a step has none
+	updates: []Type,
+	value:   Type,
+	span:    syn.Span,
+}
+
+// fold_parts: the terms of a fold, in a fixed order: start, stop, next, the inits,
+// the effects, the updates, the value.
+fold_parts :: proc(f: ^Fold) -> []Type {
+	out := make([dynamic]Type)
+	append(&out, f.start, f.stop, f.next)
+	append(&out, ..f.inits)
+	append(&out, f.effects)
+	append(&out, ..f.updates)
+	append(&out, f.value)
+	return out[:]
+}
+
+// with_parts: f with these terms, in the order of fold_parts.
+with_parts :: proc(f: ^Fold, parts: []Type) -> ^Fold {
+	out := new(Fold)
+	out^ = f^
+	n := len(f.states)
+	out.start, out.stop, out.next = parts[0], parts[1], parts[2]
+	out.inits = slice.clone(parts[3:][:n])
+	out.effects = parts[3 + n]
+	out.updates = slice.clone(parts[4 + n:][:n])
+	out.value = parts[4 + 2 * n]
+	return out
 }
 
 // --- scopes (§5) ---
