@@ -696,6 +696,23 @@ x ↦ r·x + g(i)      x = P(n) + (x₀ - P(0)) * r ** n     r ≠ 1 an integer,
                                                        P(t + 1) = r·P(t) + g(t), by its coefficients
 ```
 
+States whose updates are a linear map with integer coefficients, `x ↦ M·x + b`, are
+each a C-finite sequence: by Cayley–Hamilton, each satisfies the recurrence of the
+characteristic polynomial of M — b a state of its own, always 1. `C⟨c₁ … c_d |
+x₀ … x_{d-1}⟩(s)` is the s-th term of the sequence `x_t = c₁·x_{t-1} + … +
+c_d·x_{t-d}` from its first terms. With α a root of `x^d - c₁·x^{d-1} - … - c_d`,
+`x_s = Σ_j x_j·[αˢ]_j`, the coordinates of αˢ in ℤ[α]: a power, computed in
+O(log s). Its laws:
+
+```text
+s known                                    its value, by αˢ in ℤ[α]
+d = 1                                      x₀ * c₁ ** s
+d = 2, the roots of x² - c₁·x - c₂ integers, by the discriminant c₁² + 4·c₂:
+  r₁ ≠ r₂                                  A * r₁ ** s + B * r₂ ** s
+  r₁ = r₂ = r                              (A + B * s) * r ** s
+                                           A, B from x₀ and x₁
+```
+
 `Σ(i: lo..hi, t)` is the sum of t for i from lo to hi, 0 over an empty range;
 `Π(i: lo..hi, t)` their product, 1 over an empty range. Their laws:
 
@@ -727,7 +744,10 @@ fact{n -> m}!   = Π(i: 1..m, i)
 f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n * f{n -> n - 1}!}}
 f{n -> m}!      = 2 ** m * Π(i: 1..m, i)
 fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}
-fib{n -> m}!    = ⟳(i: n - 1 ↦ i - 1 until ..(-1); x: c(kₙ) ↦ x + y, y: c(kₙ₊₁) ↦ x; x)
+fib{n -> m}!    = C⟨1 1 | 1 1⟩(m - 1), m ≥ 1                  in O(log m)
+fib{n -> 90}!   = 2880067194370816120
+t -> {u8:n -> ??  -> n ? {<2 -> n  -> 3 * t{n -> n - 1}! - 2 * t{n -> n - 2}!}}
+t{n -> m}!      = 2 ** m - 1, m ≥ 1                         the roots 2 and 1
 say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{…  n -> n}! + say{n -> n - 1}!}}
 say{n -> m}!    = ε<⟳(i: 0 ↦ i + 1 until m..; ε<printf{…  n -> m - i}!>(y); x: 0 ↦ y + x; x)>(z, z)
 count -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> count{n -> n - 1}!  -> a + io.printf{…  n -> n}!}!}}

@@ -59,6 +59,8 @@ CASES := []Binary_Case {
 	{"iteration through any step", "half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}\n-> half{n -> ??::u8}!", {{args = {"100"}, exit = 7}, {args = {"0"}, exit = 0}}},
 	{"affine context", "g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}\n-> g{n -> ??::u8}!", {{args = {"100"}, exit = 255}}},
 	{"window", "fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}\n-> fib{n -> ??::u8}! % 256", {{args = {"10"}, exit = 55}, {args = {"0"}, exit = 0}, {args = {"1"}, exit = 1}, {args = {"90"}, exit = 2880067194370816120 % 256}}},
+	{"C-finite, with a constant", "t -> {u8:n -> ??  -> n ? {<2 -> 1  -> 3 * t{n -> n - 1}! - 2 * t{n -> n - 2}! + 1}}\n-> t{n -> ??::u8}! % 256", {{args = {"20"}, exit = 1048556 % 256}, {args = {"1"}, exit = 1}}},
+	{"C-finite, a double root", "t -> {u8:n -> ??  -> n ? {<2 -> n  -> 4 * t{n -> n - 1}! - 4 * t{n -> n - 2}!}}\n-> t{n -> ??::u8}!", {{args = {"5"}, exit = 80}}},
 	{"geometric", "hanoi -> {u8:n -> ??  -> n ? {0 -> 0  -> 2 * hanoi{n -> n - 1}! + 1}}\n-> hanoi{n -> ??::u8}! % 256", {{args = {"7"}, exit = 127}}},
 	{"length of an orbit", "half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}\n-> half{n -> ??::u8}!", {{args = {"200"}, exit = 8}, {args = {"1"}, exit = 1}}},
 	{"power", "n -> ??::u8\n-> 3 ** (n % 20) % 1000 + (-2) ** 3", {{args = {"13"}, exit = 59}}},

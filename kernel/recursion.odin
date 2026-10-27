@@ -68,6 +68,9 @@ names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 		return names_scope(v.holds, s, seen)
 	case ^Series:
 		return names_scope(v.lo, s, seen) || names_scope(v.hi, s, seen) || names_scope(v.term, s, seen)
+	case ^Recurrent:
+		for t in v.initial do if names_scope(t, s, seen) do return true
+		return names_scope(v.at, s, seen)
 	case Char, Int, Real, Bool, None, Invalid, ^Unknown:
 	}
 	return false
@@ -143,6 +146,9 @@ solved :: proc(t: Type, root: ^Scope) -> bool {
 		return solved(v.holds, root)
 	case ^Series:
 		return solved(v.lo, root) && solved(v.hi, root) && solved(v.term, root)
+	case ^Recurrent:
+		for t in v.initial do if !solved(t, root) do return false
+		return solved(v.at, root)
 	}
 	return true
 }
@@ -759,6 +765,8 @@ fold_law :: proc(k: ^Kernel, f: ^Fold) -> Type {
 //   along a counter, a state read by the value only, whose update is a first-order
 //   linear recurrence with constant coefficient, x ↦ r·x + g(k), g a polynomial in
 //   k, has a closed form where k stops (closed)
+//   along a counter, states whose updates are a linear map with integer
+//   coefficients are each a C-finite sequence (linear_states)
 simplified :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 	out := f
 	for changed := true; changed; {
@@ -784,7 +792,186 @@ simplified :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 			}
 		}
 	}
+	if linear, ok := linear_states(k, out); ok do return linear
 	return out
+}
+
+// linear_states: the fold whose states, along a counter of n steps, take a linear
+// map with integer coefficients, x ↦ M·x + b: each state is the C-finite sequence
+// of the characteristic polynomial of M — b a state of its own, always 1 — by
+// Cayley–Hamilton, from its first values (§5.6); the fold is its value, read
+// where the states end.
+linear_states :: proc(k: ^Kernel, f: ^Fold) -> (folded: ^Fold, ok: bool) {
+	if len(f.states) == 0 || !is_none(f.effects) || reads(k, f.value, f.index) do return
+	for t in f.updates do if reads(k, t, f.index) do return
+	lo, hi := counter_range(k, f) or_return
+	n := len(f.states)
+	// M, n + 1 square: the last row and column for the constant 1
+	m := make([][]i128, n + 1)
+	for &row in m do row = make([]i128, n + 1)
+	m[n][n] = 1
+	affine := false
+	for t, i in f.updates {
+		ms, d := monomials(t) or_return
+		if d != 1 do return
+		for mono in ms {
+			fs := factors(mono)
+			switch len(fs) {
+			case 0:
+				m[i][n] += coefficient(mono)
+				affine = true
+			case 1:
+				j := -1
+				for x, l in f.states do if same_unknown(x, fs[0]) do j = l
+				if j < 0 do return
+				m[i][j] += coefficient(mono)
+			case:
+				return
+			}
+		}
+	}
+	size := affine ? n + 1 : n
+	coefficients := characteristic(m[:size], size) or_return
+	// the first values of each state: s₀ the inits, s_{t+1} the updates of s_t
+	steps := make([][]Type, size)
+	steps[0] = slice.clone(f.inits)
+	for t in 1 ..< size {
+		r: Rewrite
+		for x, j in f.states do r = rewriting(r, x, steps[t - 1][j])
+		steps[t] = make([]Type, n)
+		for u, j in f.updates do steps[t][j] = rewrite(k, u, r)
+	}
+	count := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
+	ends: Rewrite
+	for x, j in f.states {
+		seq := new(Recurrent)
+		seq.coefficients, seq.at, seq.span = coefficients, count, f.span
+		seq.initial = make([]Type, size)
+		for t in 0 ..< size do seq.initial[t] = steps[t][j]
+		ends = rewriting(ends, x, recurrent_law(k, seq))
+	}
+	out := new(Fold)
+	out^ = f^
+	out.states, out.inits, out.updates = nil, nil, nil
+	out.value = rewrite(k, f.value, ends)
+	return out, true
+}
+
+// characteristic: c₁ … c_d with x^d - c₁·x^{d-1} - … - c_d the characteristic
+// polynomial of the square matrix m of size d, by Faddeev–LeVerrier:
+// M₀ = 0, M_k = m·M_{k-1} + p_{d-k+1}·I, p_{d-k} = -tr(m·M_k) / k.
+characteristic :: proc(m: [][]i128, d: int) -> (out: []i128, ok: bool) {
+	times :: proc(a, b: [][]i128, d: int) -> (c: [][]i128, ok: bool) {
+		c = make([][]i128, d)
+		for &row, i in c {
+			row = make([]i128, d)
+			for j in 0 ..< d do for l in 0 ..< d {
+				p := mul_checked(a[i][l], b[l][j]) or_return
+				row[j] = add_checked(row[j], p) or_return
+			}
+		}
+		return c, true
+	}
+	p := make([]i128, d + 1)
+	p[d] = 1
+	current := make([][]i128, d)
+	for &row in current do row = make([]i128, d)
+	for step in 1 ..= d {
+		current = times(m, current, d) or_return
+		for i in 0 ..< d do current[i][i] = add_checked(current[i][i], p[d - step + 1]) or_return
+		am := times(m, current, d) or_return
+		trace: i128 = 0
+		for i in 0 ..< d do trace = add_checked(trace, am[i][i]) or_return
+		if trace % i128(step) != 0 do return nil, false
+		p[d - step] = -trace / i128(step)
+	}
+	out = make([]i128, d)
+	for j in 1 ..= d do out[j - 1] = -p[d - j]
+	return out, true
+}
+
+// recurrent_law: C⟨c₁ … c_d | x₀ … x_{d-1}⟩(s), by its laws:
+//
+//   s known                  x_s = Σ_j x_j·[αˢ]_j, αˢ by squaring in ℤ[α]
+//   d = 1                    x₀ * c₁ ** s
+//   d = 2, Δ = c₁² + 4·c₂ a square, the roots r = (c₁ ± √Δ) / 2 integers:
+//     r₁ ≠ r₂                x_s = A * r₁ ** s + B * r₂ ** s
+//     r₁ = r₂ = r            x_s = (A + B * s) * r ** s
+//   A and B from x₀ and x₁, the closed form preferred to the power
+recurrent_law :: proc(k: ^Kernel, r: ^Recurrent) -> Type {
+	d := len(r.coefficients)
+	if s, known := r.at.(Int); known && s >= 0 {
+		if int(s) < d do return r.initial[s]
+		if power, ok := algebraic_power(r.coefficients, i128(s)); ok {
+			out: Type = Int(0)
+			for x, j in r.initial do out = op(k, .Add, out, op(k, .Mul, x, Int(power[j])))
+			return out
+		}
+	}
+	if d == 1 do return op(k, .Mul, r.initial[0], op(k, .Pow, Int(r.coefficients[0]), r.at))
+	if d == 2 {
+		c1, c2 := r.coefficients[0], r.coefficients[1]
+		x0, x1 := r.initial[0], r.initial[1]
+		disc := c1 * c1 + 4 * c2
+		root, square := integer_sqrt(disc)
+		if square && (c1 + root) % 2 == 0 {
+			r1, r2 := (c1 + root) / 2, (c1 - root) / 2
+			if r1 != r2 {
+				// A + B = x₀, A·r₁ + B·r₂ = x₁
+				b := op(k, .Div, op(k, .Sub, x1, op(k, .Mul, Int(r1), x0)), Int(r2 - r1))
+				a := op(k, .Sub, x0, b)
+				return op(k, .Add, op(k, .Mul, a, op(k, .Pow, Int(r1), r.at)), op(k, .Mul, b, op(k, .Pow, Int(r2), r.at)))
+			}
+			if r1 != 0 {
+				// A = x₀, (A + B)·r = x₁
+				b := op(k, .Sub, op(k, .Div, x1, Int(r1)), x0)
+				return op(k, .Mul, op(k, .Add, x0, op(k, .Mul, b, r.at)), op(k, .Pow, Int(r1), r.at))
+			}
+		}
+	}
+	return r
+}
+
+// integer_sqrt: the root of n, when n is a square: Newton's iteration on the
+// integers, r ↦ (r + n / r) / 2, from n down.
+integer_sqrt :: proc(n: i128) -> (root: i128, square: bool) {
+	if n < 2 do return n, n >= 0
+	r := n
+	for next := (r + n / r) / 2; next < r; next = (r + n / r) / 2 do r = next
+	return r, r * r == n
+}
+
+// algebraic_power: the coordinates of αˢ in ℤ[α], α a root of x^d - c₁·x^{d-1}
+// - … - c_d, by squaring: a product is reduced by α^d = c₁·α^{d-1} + … + c_d.
+algebraic_power :: proc(c: []i128, s: i128) -> (out: []i128, ok: bool) {
+	d := len(c)
+	product :: proc(a, b, c: []i128) -> (out: []i128, ok: bool) {
+		d := len(c)
+		full := make([]i128, 2 * d - 1)
+		for x, i in a do for y, j in b {
+			p := mul_checked(x, y) or_return
+			full[i + j] = add_checked(full[i + j], p) or_return
+		}
+		#reverse for _, t in full {
+			if t < d do break
+			for cj, j in c {
+				p := mul_checked(full[t], cj) or_return
+				full[t - 1 - j] = add_checked(full[t - 1 - j], p) or_return
+			}
+			full[t] = 0
+		}
+		return slice.clone(full[:d]), true
+	}
+	out = make([]i128, d)
+	out[0] = 1
+	base := make([]i128, d)
+	if d == 1 do base[0] = c[0]
+	else do base[1] = 1
+	for e := s; e > 0; e >>= 1 {
+		if e & 1 == 1 do out = product(out, base, c) or_return
+		if e > 1 do base = product(base, base, c) or_return
+	}
+	return out, true
 }
 
 // reads_other_updates: another state's update reads the state i.

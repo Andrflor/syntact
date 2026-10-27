@@ -106,7 +106,7 @@ type_prec :: proc(t: Type) -> int {
 		return operator_prec(v.op)
 	case ^Pattern:
 		return PREC_OR
-	case ^Fold, ^Least, ^Series:
+	case ^Fold, ^Least, ^Series, ^Recurrent:
 		return PREC_ATOM
 	case ^Range:
 		if v.lo != nil || v.hi != nil do return PREC_COMPARE
@@ -262,6 +262,18 @@ write_bare :: proc(b: ^Printer, t: Type) {
 	case ^Default:
 		write_type(b, v.color, PREC_ATOM)
 		strings.write_byte(b, ':')
+	case ^Recurrent:
+		// C⟨c₁ … c_d | x₀ … x_{d-1}⟩(s)
+		strings.write_string(b, "C⟨")
+		for c, i in v.coefficients do fmt.sbprintf(b, i == 0 ? "%d" : " %d", c)
+		strings.write_string(b, " |")
+		for t in v.initial {
+			strings.write_byte(b, ' ')
+			write_type(b, t, PREC_ATOM)
+		}
+		strings.write_string(b, "⟩(")
+		write_type(b, v.at, 0)
+		strings.write_byte(b, ')')
 	case ^Series:
 		// Σ(i: lo..hi, t), Π(i: lo..hi, t)
 		append(&b.bound, v.index)

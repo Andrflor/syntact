@@ -142,7 +142,21 @@ lower :: proc(l: ^Lowering, t: kernel.Type, tail := false) -> Value {
 	if v != NONE && v >= first && machine_of(l.f, v) == .Int {
 		l.f.kinds[v].bounds = meet(l.f.kinds[v].bounds, term_bounds(l, t))
 	}
+	// one term, one value: where it is computed, a pure term reads its value again
+	if v != NONE && v >= first && computed(t) do append(&l.bound, Bound{term = t, value = v})
 	return v
+}
+
+// computed: a term that takes instructions to compute, without effect: the same
+// term, read again, is the same value.
+computed :: proc(t: kernel.Type) -> bool {
+	#partial switch v in t {
+	case ^kernel.Operation:
+		return !kernel.is_string_value(t)
+	case ^kernel.Pattern, ^kernel.Fold, ^kernel.Least, ^kernel.Series, ^kernel.Recurrent:
+		return !kernel.has_effect(t)
+	}
+	return false
 }
 
 term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
@@ -185,6 +199,8 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		return least(l, v)
 	case ^kernel.Series:
 		return series(l, v)
+	case ^kernel.Recurrent:
+		return recurrent(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
@@ -440,6 +456,84 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 	l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
 	emit(l, loop)
 	return loop.dst
+}
+
+// recurrent: C⟨c₁ … c_d | x₀ … x_{d-1}⟩(s) (specs/types.md §5.6): αˢ in ℤ[α] by
+// squaring — a loop on the bits of s, whose turn multiplies the result by the
+// base when the bit is 1, then squares the base —, and Σ_j x_j·[αˢ]_j.
+recurrent :: proc(l: ^Lowering, r: ^kernel.Recurrent) -> Value {
+	d := len(r.coefficients)
+	s := lower(l, r.at)
+	initial := make([]Value, d)
+	for t, j in r.initial do initial[j] = lower(l, t)
+	if l.error != "" do return NONE
+	params, starts := make([dynamic]Value), make([dynamic]Value)
+	append(&params, value(l.f, .Int))
+	append(&starts, s)
+	result, base := make([]Value, d), make([]Value, d)
+	for j in 0 ..< d {
+		result[j] = value(l.f, .Int)
+		append(&params, result[j])
+		append(&starts, constant(l, j == 0 ? 1 : 0))
+	}
+	for j in 0 ..< d {
+		base[j] = value(l.f, .Int)
+		append(&params, base[j])
+		alpha: i64 = d == 1 ? i64(r.coefficients[0]) : (j == 1 ? 1 : 0)
+		append(&starts, constant(l, alpha))
+	}
+	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
+	outer, bound := open_body(l, &loop.body)
+	arms := make([]Arm, 2)
+	done := make([]Bounds, 1)
+	done[0] = {0, 0}
+	arms[0].cover = Cover{ints = done}
+	arms[0].body.value = NONE
+	exit_outer, exit_bound := open_body(l, &arms[0].body)
+	sum := binary(l, .Mul, initial[0], result[0], .Int)
+	for j in 1 ..< d do sum = binary(l, .Add, sum, binary(l, .Mul, initial[j], result[j], .Int), .Int)
+	arms[0].body.value = sum
+	close_body(l, exit_outer, exit_bound)
+	arms[1].body.value = NONE // it ends in an Again
+	step_outer, step_bound := open_body(l, &arms[1].body)
+	odd := binary(l, .And, params[0], constant(l, 1), .Int)
+	product := algebraic_product(l, result, base, r.coefficients)
+	next := make([dynamic]Value)
+	append(&next, binary(l, .Shr, params[0], constant(l, 1), .Int))
+	// the result times the base when the bit is 1: x + odd·(x·b - x)
+	for j in 0 ..< d do append(&next, binary(l, .Add, result[j], binary(l, .Mul, odd, binary(l, .Sub, product[j], result[j], .Int), .Int), .Int))
+	append(&next, ..algebraic_product(l, base, base, r.coefficients))
+	emit(l, Again{next[:]})
+	close_body(l, step_outer, step_bound)
+	loop.body.value = close_match(l, params[0], arms)
+	close_body(l, outer, bound)
+	if l.error != "" do return NONE
+	loop.dst = value(l.f, .Int)
+	emit(l, loop)
+	return loop.dst
+}
+
+// algebraic_product: a·b in ℤ[α]: the product of the polynomials, reduced by
+// α^d = c₁·α^{d-1} + … + c_d from the highest power down.
+algebraic_product :: proc(l: ^Lowering, a, b: []Value, c: []i128) -> []Value {
+	d := len(c)
+	full := make([]Value, 2 * d - 1)
+	for &x in full do x = NONE
+	for x, i in a do for y, j in b {
+		p := binary(l, .Mul, x, y, .Int)
+		full[i + j] = full[i + j] == NONE ? p : binary(l, .Add, full[i + j], p, .Int)
+	}
+	#reverse for _, t in full {
+		if t < d do break
+		for cj, j in c {
+			if cj == 0 do continue
+			p := binary(l, .Mul, full[t], constant(l, i64(cj)), .Int)
+			full[t - 1 - j] = full[t - 1 - j] == NONE ? p : binary(l, .Add, full[t - 1 - j], p, .Int)
+		}
+	}
+	out := make([]Value, d)
+	for j in 0 ..< d do out[j] = full[j] == NONE ? constant(l, 0) : full[j]
+	return out
 }
 
 // Carried: a term of the counter a loop carries from turn to turn — its value

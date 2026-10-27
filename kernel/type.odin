@@ -36,6 +36,7 @@ Type :: union {
 	^Fold, // ⟳(k: a ↦ n until S; ε…; x: c ↦ t; v)   along an orbit (§5.6)
 	^Least, // μ(i: t)    the least i ≥ 0 where t holds (§5.6)
 	^Series, // Σ(i: a..b, t), Π(i: a..b, t)   (§5.6)
+	^Recurrent, // C⟨c₁ … c_d | x₀ … x_{d-1}⟩(s)   a C-finite sequence (§5.6)
 	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
@@ -241,6 +242,17 @@ Series :: struct {
 	lo, hi: Type,
 	term:   Type,
 	span:   syn.Span,
+}
+
+// Recurrent: C⟨c₁ … c_d | x₀ … x_{d-1}⟩(s), the s-th term, s ≥ 0, of the sequence
+// x_t = c₁·x_{t-1} + … + c_d·x_{t-d} from its first d terms: a C-finite sequence
+// (§5.6). With α a root of x^d - c₁·x^{d-1} - … - c_d, x_s = Σ_j x_j·[αˢ]_j, the
+// coordinates of αˢ in ℤ[α] — a power, in O(log s).
+Recurrent :: struct {
+	coefficients: []i128,
+	initial:      []Type,
+	at:           Type,
+	span:         syn.Span,
 }
 
 // fold_parts: the terms of a fold, in a fixed order: start, stop, next, the inits,

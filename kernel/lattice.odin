@@ -1006,7 +1006,7 @@ is_constant :: proc(t: Type) -> bool {
 	case ^Operation:
 		for x in v.args do if !is_constant(x) do return false
 		return true
-	case ^Unknown, ^Effect, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern, ^Fold, ^Least, ^Series, Invalid:
+	case ^Unknown, ^Effect, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern, ^Fold, ^Least, ^Series, ^Recurrent, Invalid:
 	}
 	return false
 }

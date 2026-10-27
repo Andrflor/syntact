@@ -82,6 +82,11 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		out^ = v^
 		out.lo, out.hi, out.term = rewrite(k, v.lo, r), rewrite(k, v.hi, r), rewrite(k, v.term, r)
 		return series_law(k, out)
+	case ^Recurrent:
+		out := new(Recurrent)
+		out^ = v^
+		out.initial, out.at = rewrite_all(k, v.initial, r), rewrite(k, v.at, r)
+		return recurrent_law(k, out)
 	case ^Operation:
 		if is_string_value(t) do return t
 		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
@@ -194,8 +199,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
 		return new_range(Int(0), nil, .Int), true
-	case ^Series:
-		if f, known := family_of(k, v); known do return family_term(f), true
+	case ^Series, ^Recurrent:
+		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return nil, false

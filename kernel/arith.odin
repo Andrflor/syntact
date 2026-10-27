@@ -128,6 +128,8 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return .Int, true
 	case ^Series:
 		return family_of(k, v.term)
+	case ^Recurrent:
+		return .Int, true
 	case ^Or, ^And, ^Not, ^Range:
 		if is_constant(t) do return layout_family(k, t)
 	case ^Pattern:

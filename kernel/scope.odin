@@ -417,6 +417,11 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		out^ = v^
 		out.lo, out.hi, out.term = copy_term(k, m, v.lo, scope), copy_term(k, m, v.hi, scope), copy_term(k, m, v.term, scope)
 		return out
+	case ^Recurrent:
+		out := new(Recurrent)
+		out^ = v^
+		out.initial, out.at = copy_terms(k, m, v.initial, scope), copy_term(k, m, v.at, scope)
+		return out
 	}
 	return t
 }
@@ -472,6 +477,9 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 		return mentions(m, v.holds)
 	case ^Series:
 		return mentions(m, v.lo) || mentions(m, v.hi) || mentions(m, v.term)
+	case ^Recurrent:
+		for t in v.initial do if mentions(m, t) do return true
+		return mentions(m, v.at)
 	}
 	return false
 }
@@ -910,6 +918,11 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 	case ^Least:
 		y, ok := b.(^Least)
 		return ok && same(k, x.holds, rewrite(k, y.holds, rewriting(nil, y.index, x.index)))
+	case ^Recurrent:
+		y, ok := b.(^Recurrent)
+		if !ok || len(x.coefficients) != len(y.coefficients) || !same_all(k, x.initial, y.initial) || !same(k, x.at, y.at) do return false
+		for c, i in x.coefficients do if c != y.coefficients[i] do return false
+		return true
 	case ^Series:
 		y, ok := b.(^Series)
 		return ok && x.op == y.op && same(k, x.lo, y.lo) && same(k, x.hi, y.hi) && same(k, x.term, rewrite(k, y.term, rewriting(nil, y.index, x.index)))
