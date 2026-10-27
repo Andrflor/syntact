@@ -1,6 +1,0 @@
-{
-  "name": "Typecheck i16 overflow",
-  "description": "i16:a -> 32768 is invalid, overflows i16",
-  "source": "i16:a -> 32768",
-  "expect_errors": ["Constraint_Mismatch"]
-}

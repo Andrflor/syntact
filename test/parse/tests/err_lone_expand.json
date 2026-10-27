@@ -1,6 +1,6 @@
 {
   "name": "Lone Expand Prefix",
-  "description": "... alone as prefix Expand with no operand. Operand parse fails, result dropped. UNCERTAIN.",
+  "description": "... alone is the bare expansion: an Expand without a target.",
   "source": "...",
-  "expect": "Scope[]"
+  "expect": "Scope[Expand(nil)]"
 }

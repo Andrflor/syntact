@@ -1,5 +1,4 @@
-./compiler/compiler
-./lsp/lsp
-./test/test
+*.bin
+lsp/lsp
 kernel/cmd/kernel
 kernel/*.log

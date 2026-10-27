@@ -1,6 +1,6 @@
 package kernel
 
-import syn "../compiler"
+import syn "../syntax"
 import "core:fmt"
 
 // HOLES (specs/types.md §5.7)

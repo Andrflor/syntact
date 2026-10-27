@@ -1,6 +1,0 @@
-{
-  "name": "Typecheck bool empty complement",
-  "description": "~(true|false):a -> false is invalid, the complement of the full domain is empty (none) and admits no value",
-  "source": "~(true|false):a -> false",
-  "expect_errors": ["Constraint_Mismatch"]
-}

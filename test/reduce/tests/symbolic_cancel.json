@@ -1,6 +1,0 @@
-{
-  "name": "Symbolic subtraction cancels",
-  "description": "a - a over a fixed point cancels to 0",
-  "source": "a -> ??::u8\n-> a - a",
-  "expect": "0"
-}

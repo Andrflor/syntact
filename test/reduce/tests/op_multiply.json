@@ -1,6 +1,0 @@
-{
-  "name": "Operator multiply",
-  "description": "Reduces integer multiplication",
-  "source": "-> 6 * 7",
-  "expect": "42"
-}

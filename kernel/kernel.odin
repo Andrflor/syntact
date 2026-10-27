@@ -1,6 +1,6 @@
 package kernel
 
-import syn "../compiler"
+import syn "../syntax"
 import "core:slice"
 
 // THE KERNEL
@@ -58,8 +58,7 @@ check :: proc(ast: ^syn.Ast) -> (k: Kernel) {
 
 // run: parses the source, and checks it.
 run :: proc(source: string) -> (k: Kernel, parsed: bool) {
-	cache := new(syn.Cache)
-	ast, ok := syn.parse(cache, source)
+	ast, ok := syn.parse(source)
 	if !ok do return k, false
 	return check(ast), true
 }

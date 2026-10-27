@@ -120,7 +120,8 @@ fib -> {
 | [`specs/types.md`](specs/types.md) | the algebra: the reference |
 | `kernel/` | the algebra on its terms: the typecheck, holes included. Every case of the spec passes, and the corpus cases whose forms it builds, but for five that contradict the spec. The cast `\` and events are not built yet |
 | `lsp/` | diagnostics, the type of any expression on hover, and completion, from the kernel |
-| `compiler/` | the parser, used by everything. Executables still come from the previous pipeline (analyze → reduce → bytecode → x86-64 ELF), which predates the algebra: it will be replaced by code generated from the kernel's normal forms |
+| `syntax/` | the parser, used by everything |
+| `code/` | the normal form of a program as code: a bytecode, its interpreter, and executables for x86-64 Linux (`code/x64`, on the encoder, the ELF writer and the System V ABI of `code/x64/asm`). Scopes as values, arguments on the stack and `f32` are not code yet |
 
 Next: effects and state in the algebra, then the residual program to bytecode.
 
@@ -135,9 +136,14 @@ odin test kernel                          # the cases of the spec, and the corpu
 
 odin build lsp -out:lsp/lsp               # the language server
 
-odin build compiler -out:compiler.bin     # the previous pipeline
-./compiler.bin program.syn -o program     # a native executable
-./compiler.bin program.syn --run          # on the bytecode interpreter
+odin build code/cmd -out:code.bin
+./code.bin program.syn                    # the code of the program
+./code.bin program.syn -o program         # an executable for x86-64 Linux
+./program 10                              # its unknowns `??`, in order, on the command line
+odin test code && odin test code/x64      # the code of each case, then the executables run
+
+odin test test/parse                      # the parser
+odin test code/x64/asm                    # the encoder, against GNU as
 ```
 
 ## Repository
@@ -146,8 +152,9 @@ odin build compiler -out:compiler.bin     # the previous pipeline
 specs/types.md       the algebra
 specs/language/      the language, chapter by chapter
 docs/                design notes outside the language: SDK, targets, ABI, interop
+syntax/              the parser
 kernel/              the algebra, implemented
+code/                the code of a program, and its executables
 lsp/                 the language server
-compiler/            the parser, and the previous pipeline
 test/                the corpus and the suites
 ```

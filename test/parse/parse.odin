@@ -1,6 +1,6 @@
 package parse_test
 
-import compiler "../../compiler"
+import "../../syntax"
 
 import "core:encoding/json"
 import "core:fmt"
@@ -35,13 +35,13 @@ Position_Map :: struct {
 Node_Position :: struct {
 	output_start: int,
 	output_end:   int,
-	ast:          ^compiler.Ast,
-	idx:          compiler.Node_Index,
+	ast:          ^syntax.Ast,
+	idx:          syntax.Node_Index,
 }
 
-find_node_at_position :: proc(pos_map: ^Position_Map, char_pos: int) -> (^compiler.Ast, compiler.Node_Index) {
-	found_ast: ^compiler.Ast
-	found_idx := compiler.INVALID_NODE
+find_node_at_position :: proc(pos_map: ^Position_Map, char_pos: int) -> (^syntax.Ast, syntax.Node_Index) {
+	found_ast: ^syntax.Ast
+	found_idx := syntax.INVALID_NODE
 	for pos in pos_map.positions {
 		if pos.output_start <= char_pos && char_pos <= pos.output_end {
 			found_ast = pos.ast
@@ -52,74 +52,74 @@ find_node_at_position :: proc(pos_map: ^Position_Map, char_pos: int) -> (^compil
 }
 
 // ---------- AST accessors (read the SOA arrays directly) ----------
-// The compiler no longer exposes node_left/node_right/etc.; the AST is a flat
+// The parser does not expose node_left/node_right/etc.; the AST is a flat
 // SOA (node_kinds + node_data raw_union). These thin helpers read it directly
-// so the harness stays self-contained and decoupled from the compiler's API.
+// so the harness stays self-contained and decoupled from the parser's API.
 
-nkind :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Kind {
+nkind :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Kind {
 	return ast.node_kinds[idx]
 }
-nbin_left :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nbin_left :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].binary.left
 }
-nbin_right :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nbin_right :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].binary.right
 }
-nunary :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nunary :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].unary.operand
 }
-nliteral_kind :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Literal_Kind {
+nliteral_kind :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Literal_Kind {
 	return ast.node_data[idx].literal.kind
 }
-nop_kind :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Operator_Kind {
+nop_kind :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Operator_Kind {
 	return ast.node_data[idx].operator.kind
 }
-nop_left :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nop_left :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].operator.left
 }
-nop_right :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nop_right :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].operator.right
 }
-ncarve_source :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+ncarve_source :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].carve.source
 }
-nexec_target :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nexec_target :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].execute.target
 }
-npattern_target :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+npattern_target :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].pattern.target
 }
-nextern_scope :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nextern_scope :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].external.scope
 }
-nextern_name :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
+nextern_name :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> string {
 	s := ast.node_data[idx].external.name
 	return ast.source[s.start:s.end]
 }
-nforeign_scope :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nforeign_scope :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].foreign_lib.scope
 }
-nevt_from :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nevt_from :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].event_pull.from
 }
-nevt_to :: #force_inline proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> compiler.Node_Index {
+nevt_to :: #force_inline proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> syntax.Node_Index {
 	return ast.node_data[idx].event_pull.to
 }
 
-ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
-	if idx == compiler.INVALID_NODE do return "nil"
+ast_to_string :: proc(ast: ^syntax.Ast, idx: syntax.Node_Index) -> string {
+	if idx == syntax.INVALID_NODE do return "nil"
 	kind := nkind(ast, idx)
 	switch kind {
 	case .Identifier:
-		cap := compiler.node_capture_str(ast, idx)
-		name := compiler.node_name_str(ast, idx)
+		cap := syntax.node_capture_str(ast, idx)
+		name := syntax.node_name_str(ast, idx)
 		if cap != "" {
 			return fmt.tprintf("Identifier(%s,%s)", name, cap)
 		}
 		return fmt.tprintf("Identifier(%s)", name)
 	case .Literal:
 		lk := nliteral_kind(ast, idx)
-		text := compiler.node_text(ast, idx)
+		text := syntax.node_text(ast, idx)
 		return fmt.tprintf("Literal(%v,%s)", lk, text)
 	case .Pointing:
 		return fmt.tprintf("Pointing(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
@@ -128,7 +128,7 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 	case .EventPush:
 		return fmt.tprintf("EventPush(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .EventPull:
-		catch_str := compiler.node_event_pull_catch(ast, idx)
+		catch_str := syntax.node_event_pull_catch(ast, idx)
 		return fmt.tprintf(
 			"EventPull(%s,%s,%s)",
 			catch_str,
@@ -144,7 +144,7 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 	case .ReactivePull:
 		return fmt.tprintf("ReactivePull(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .ScopeNode:
-		children := compiler.node_children(ast, idx)
+		children := syntax.node_children(ast, idx)
 		if len(children) == 0 do return "Scope[]"
 		parts := make([dynamic]string)
 		for child in children {
@@ -152,7 +152,7 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 		}
 		return fmt.tprintf("Scope[%s]", strings.join(parts[:], ","))
 	case .Carve:
-		carve_children := compiler.node_carve_children(ast, idx)
+		carve_children := syntax.node_carve_children(ast, idx)
 		ov := make([dynamic]string)
 		for child in carve_children {
 			append(&ov, ast_to_string(ast, child))
@@ -168,20 +168,20 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 			ast_to_string(ast, nop_right(ast, idx)),
 		)
 	case .Execute:
-		wrappers := compiler.node_execute_wrappers(ast, idx)
+		wrappers := syntax.node_execute_wrappers(ast, idx)
 		ws := make([dynamic]string)
-		for w in wrappers do append(&ws, fmt.tprintf("%v", compiler.ExecutionWrapper(w)))
+		for w in wrappers do append(&ws, fmt.tprintf("%v", syntax.ExecutionWrapper(w)))
 		return fmt.tprintf("Execute(%s,[%s])", ast_to_string(ast, nexec_target(ast, idx)), strings.join(ws[:], ","))
 	case .CompileTime:
 		return fmt.tprintf("CompileTime(%s)", ast_to_string(ast, nunary(ast, idx)))
 	case .Range:
 		return fmt.tprintf("Range(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	case .Pattern:
-		branches := compiler.node_pattern_branches(ast, idx)
+		branches := syntax.node_pattern_branches(ast, idx)
 		bs := make([dynamic]string)
 		for i := 0; i < len(branches); i += 2 {
 			source := branches[i]
-			product := branches[i + 1] if i + 1 < len(branches) else compiler.INVALID_NODE
+			product := branches[i + 1] if i + 1 < len(branches) else syntax.INVALID_NODE
 			append(&bs, fmt.tprintf("Branch(%s,%s)", ast_to_string(ast, source), ast_to_string(ast, product)))
 		}
 		return fmt.tprintf("Pattern(%s,[%s])", ast_to_string(ast, npattern_target(ast, idx)), strings.join(bs[:], ","))
@@ -196,19 +196,21 @@ ast_to_string :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index) -> string {
 	case .Foreign:
 		return fmt.tprintf(
 			"Foreign(%s,%s)",
-			compiler.node_foreign_lib_str(ast, idx),
+			syntax.node_foreign_lib_str(ast, idx),
 			ast_to_string(ast, nforeign_scope(ast, idx)),
 		)
 	case .Unknown:
 		return "Unknown"
+	case .Effect:
+		return "Effect"
 	case .Branch:
 		return fmt.tprintf("Branch(%s,%s)", ast_to_string(ast, nbin_left(ast, idx)), ast_to_string(ast, nbin_right(ast, idx)))
 	}
 	return fmt.tprintf("UnhandledNode(%v)", kind)
 }
 
-walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string: string, pos_map: ^Position_Map) {
-	if idx == compiler.INVALID_NODE do return
+walk_all_nodes :: proc(ast: ^syntax.Ast, idx: syntax.Node_Index, full_string: string, pos_map: ^Position_Map) {
+	if idx == syntax.INVALID_NODE do return
 
 	node_str := ast_to_string(ast, idx)
 
@@ -252,12 +254,12 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 		walk_all_nodes(ast, nevt_from(ast, idx), full_string, pos_map)
 		walk_all_nodes(ast, nevt_to(ast, idx), full_string, pos_map)
 	case .ScopeNode:
-		for child in compiler.node_children(ast, idx) {
+		for child in syntax.node_children(ast, idx) {
 			walk_all_nodes(ast, child, full_string, pos_map)
 		}
 	case .Carve:
 		walk_all_nodes(ast, ncarve_source(ast, idx), full_string, pos_map)
-		for child in compiler.node_carve_children(ast, idx) {
+		for child in syntax.node_carve_children(ast, idx) {
 			walk_all_nodes(ast, child, full_string, pos_map)
 		}
 	case .Operator:
@@ -269,7 +271,7 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 		walk_all_nodes(ast, nunary(ast, idx), full_string, pos_map)
 	case .Pattern:
 		walk_all_nodes(ast, npattern_target(ast, idx), full_string, pos_map)
-		branches := compiler.node_pattern_branches(ast, idx)
+		branches := syntax.node_pattern_branches(ast, idx)
 		for b in branches {
 			walk_all_nodes(ast, b, full_string, pos_map)
 		}
@@ -277,18 +279,18 @@ walk_all_nodes :: proc(ast: ^compiler.Ast, idx: compiler.Node_Index, full_string
 		walk_all_nodes(ast, nextern_scope(ast, idx), full_string, pos_map)
 	case .Foreign:
 		walk_all_nodes(ast, nforeign_scope(ast, idx), full_string, pos_map)
-	case .Identifier, .Literal, .Unknown:
+	case .Identifier, .Literal, .Unknown, .Effect:
 	}
 }
 
-build_position_map :: proc(ast: ^compiler.Ast, root: compiler.Node_Index, full_string: string) -> Position_Map {
+build_position_map :: proc(ast: ^syntax.Ast, root: syntax.Node_Index, full_string: string) -> Position_Map {
 	pos_map := Position_Map{}
 	walk_all_nodes(ast, root, full_string, &pos_map)
 	return pos_map
 }
 
 
-show_source_context :: proc(source: string, position: compiler.Position) -> string {
+show_source_context :: proc(source: string, position: syntax.Position) -> string {
 	lines := strings.split_lines(source)
 	if position.line <= 0 || position.line > len(lines) {
 		return "Invalid line"
@@ -335,9 +337,8 @@ run_test :: proc(path: string, t: ^testing.T) {
 
 	tc, ok, msg := load_test_file(path)
 	if ok {
-		cache := new(compiler.Cache)
-		ast, _ := compiler.parse(cache, tc.source)
-		root := compiler.ast_root(ast)
+		ast, _ := syntax.parse(tc.source)
+		root := syntax.ast_root(ast)
 		actual := ast_to_string(ast, root)
 
 		ok = actual == tc.expect
@@ -346,9 +347,9 @@ run_test :: proc(path: string, t: ^testing.T) {
 			first_diff := first_difference(actual, tc.expect)
 			pos_map := build_position_map(ast, root, actual)
 			found_ast, found_idx := find_node_at_position(&pos_map, first_diff)
-			position := compiler.Position{line = 1, column = 1}
-			if found_ast != nil && found_idx != compiler.INVALID_NODE {
-				position = compiler.span_to_position(found_ast, found_ast.node_spans[found_idx].start)
+			position := syntax.Position{line = 1, column = 1}
+			if found_ast != nil && found_idx != syntax.INVALID_NODE {
+				position = syntax.span_to_position(found_ast, found_ast.node_spans[found_idx].start)
 			}
 			msg = strings.concatenate(
 				{

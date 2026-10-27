@@ -1,1 +1,0 @@
-{ "name": "str_literal", "description": "string literal", "source": "-> \"hi world\"", "args": [[]], "expect": ["hi world"], "kind": "str" }

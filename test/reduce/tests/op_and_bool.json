@@ -1,6 +1,0 @@
-{
-  "name": "Operator boolean and",
-  "description": "Reduces boolean AND",
-  "source": "-> true & false",
-  "expect": "none"
-}

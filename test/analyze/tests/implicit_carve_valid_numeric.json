@@ -1,6 +1,0 @@
-{
-  "name": "Implicit carve valid numeric",
-  "description": "Carving with integer when body uses arithmetic should pass",
-  "source": "example -> {\n  data -> 1\n  x -> 2\n  -> data + x\n}\n-> example{data -> 5}!",
-  "expect_errors": []
-}

@@ -1,6 +1,6 @@
 package kernel
 
-import syn "../compiler"
+import syn "../syntax"
 import "core:fmt"
 import "core:strings"
 

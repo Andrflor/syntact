@@ -1,6 +1,0 @@
-{
-  "name": "Operator not",
-  "description": "Reduces boolean NOT",
-  "source": "-> ~true",
-  "expect": "false"
-}

@@ -1,6 +1,6 @@
 package lsp
 
-import "../compiler"
+import "../syntax"
 import kernel "../kernel"
 import "core:fmt"
 import "core:sys/posix"
@@ -19,11 +19,11 @@ import "core:time"
 
 // contains: a binding contains the offset up to just after its end — where an
 // edit continues it; inside: a term holds the characters of its span only.
-contains :: proc(span: compiler.Span, offset: u32) -> bool {
+contains :: proc(span: syntax.Span, offset: u32) -> bool {
 	return span.start <= offset && offset <= span.end
 }
 
-inside :: proc(span: compiler.Span, offset: u32) -> bool {
+inside :: proc(span: syntax.Span, offset: u32) -> bool {
 	return span.start <= offset && offset < span.end
 }
 
@@ -64,7 +64,7 @@ locate :: proc(s: ^kernel.Scope, offset: u32) -> Located {
 }
 
 // written_at: the term t itself, when it is written at offset.
-written_at :: proc(t: kernel.Type, span: compiler.Span, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
+written_at :: proc(t: kernel.Type, span: syntax.Span, s: ^kernel.Scope, offset: u32) -> (Located, bool) {
 	if !inside(span, offset) do return {}, false
 	return {scope = s, term = t}, true
 }
@@ -221,7 +221,7 @@ KERNEL_TIMEOUT :: 5 * time.Second
 // kernel_fails: the kernel, run in a separate process on this AST, crashes or
 // does not terminate. It is deterministic: if it terminates apart, it terminates
 // here.
-kernel_fails :: proc(ast: ^compiler.Ast) -> (failure: string, failed: bool) {
+kernel_fails :: proc(ast: ^syntax.Ast) -> (failure: string, failed: bool) {
 	pid := posix.fork()
 	if pid < 0 do return "", false // no separate process: run it here
 	if pid == 0 {

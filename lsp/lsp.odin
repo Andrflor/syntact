@@ -1,6 +1,6 @@
 package lsp
 
-import "../compiler"
+import "../syntax"
 import kernel "../kernel"
 import "core:encoding/json"
 import "core:fmt"
@@ -137,7 +137,7 @@ Document :: struct {
 	uri:     string,
 	version: int,
 	content: string,
-	ast:     ^compiler.Ast,
+	ast:     ^syntax.Ast,
 	// the file, checked by the kernel: its scope (root) holds each written binding
 	checked: kernel.Kernel,
 	// Cursor→name resolution is lexical over the AST; the parent map is rebuilt on
@@ -556,16 +556,14 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	if uri not_in server.documents do return
 	doc := &server.documents[uri]
 
-	cache := new(compiler.Cache)
-
-	ast, _ := compiler.parse(cache, doc.content)
+	ast, _ := syntax.parse(doc.content)
 	doc.ast = ast
 	doc.checked = {}
 
-	diagnostics := make([dynamic]Diagnostic, 0, len(cache.parse_errors) + 16)
+	diagnostics := make([dynamic]Diagnostic, 0, len(ast.errors) + 16)
 	defer delete(diagnostics)
 
-	for err in cache.parse_errors {
+	for err in ast.errors {
 		append(
 			&diagnostics,
 			Diagnostic {
@@ -586,7 +584,7 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 		// always holds half-written code. It first runs apart: if it crashes or
 		// does not terminate, the LSP stays alive and says so.
 		if failure, failed := kernel_fails(ast); failed {
-			append(&diagnostics, Diagnostic{range = span_range(ast, ast.node_spans[compiler.ast_root(ast)]), severity = 1, source = "syn-kernel", message = failure})
+			append(&diagnostics, Diagnostic{range = span_range(ast, ast.node_spans[syntax.ast_root(ast)]), severity = 1, source = "syn-kernel", message = failure})
 			publish_diagnostics(uri, diagnostics[:])
 			return
 		}
@@ -608,22 +606,22 @@ analyze_and_publish :: proc(server: ^LSP_Server, uri: string) {
 	publish_diagnostics(uri, diagnostics[:])
 }
 
-// span_range converts a compiler Span (byte range) to an LSP range (0-based
+// span_range converts a syntax Span (byte range) to an LSP range (0-based
 // line/char), resolving both ends via the AST's line table. This is all the LSP
-// needs now that every error — parse AND analyze — carries the offending node's
-// span (see Analyzer_Error.span / Parse_Error.span). The end is trimmed back over
+// needs: every error — of the parser and of the kernel — carries the offending
+// node's span. The end is trimmed back over
 // any trailing whitespace/newline the parser may have folded into the span (which
 // happens for the last statement before EOF), so the highlight never bleeds onto
 // the next line.
-span_range :: proc(ast: ^compiler.Ast, span: compiler.Span) -> Range {
+span_range :: proc(ast: ^syntax.Ast, span: syntax.Span) -> Range {
 	end := span.end
 	for end > span.start && int(end - 1) < len(ast.source) {
 		c := ast.source[end - 1]
 		if c == '\n' || c == '\r' || c == ' ' || c == '\t' do end -= 1
 		else do break
 	}
-	s := compiler.span_to_position(ast, span.start)
-	e := compiler.span_to_position(ast, end)
+	s := syntax.span_to_position(ast, span.start)
+	e := syntax.span_to_position(ast, end)
 	return Range {
 		start = Position{line = s.line - 1, character = s.column - 1},
 		end = Position{line = e.line - 1, character = e.column - 1},
@@ -670,7 +668,7 @@ publish_diagnostics :: proc(uri: string, diagnostics: []Diagnostic) {
 
 handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	uri, decl, _, doc, ok := resolve_binding_at(server, msg.params)
-	if !ok || decl == compiler.INVALID_NODE {
+	if !ok || decl == syntax.INVALID_NODE {
 		send_response(msg.id, json.Null{})
 		return
 	}
@@ -682,8 +680,8 @@ handle_definition :: proc(server: ^LSP_Server, msg: LSP_Message) {
 		return
 	}
 
-	def_start := compiler.span_to_position(ast, def_span.start)
-	def_end := compiler.span_to_position(ast, def_span.end)
+	def_start := syntax.span_to_position(ast, def_span.start)
+	def_end := syntax.span_to_position(ast, def_span.end)
 	send_response(msg.id, make_location(uri, def_start, def_end))
 }
 
@@ -699,9 +697,9 @@ handle_hover :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	// half-written, the name is no term of the kernel: its binding, where it is declared
 	if _, decl, use, _, found := resolve_binding_at(server, msg.params); shown == "" && found {
 		ast := doc.ast
-		name := compiler.node_name_str(ast, use)
+		name := syntax.node_name_str(ast, use)
 		// `(h)`: a capture is named by its alias
-		if name == "" do name = compiler.span_str(ast, ast.node_data[use].identifier.capture)
+		if name == "" do name = syntax.span_str(ast, ast.node_data[use].identifier.capture)
 		if b := written_binding(&doc.checked, name, ast.node_spans[decl].start); b != nil do shown = shown_type(&doc.checked, b)
 	}
 	if shown == "" {
@@ -728,7 +726,7 @@ cursor_at :: proc(server: ^LSP_Server, params: json.Value) -> (doc: ^Document, o
 	if !pos_ok do return
 	doc = &server.documents[u]
 	if doc.ast == nil do return
-	compiler.ensure_line_starts(doc.ast)
+	syntax.ensure_line_starts(doc.ast)
 	o := lsp_pos_to_offset(doc.ast, json_to_int(pos_obj["line"]), json_to_int(pos_obj["character"]))
 	if o < 0 do return
 	return doc, u32(o), true
@@ -743,13 +741,13 @@ resolve_binding_at :: proc(
 	params: json.Value,
 ) -> (
 	uri: string,
-	decl: compiler.Node_Index,
-	use: compiler.Node_Index,
+	decl: syntax.Node_Index,
+	use: syntax.Node_Index,
 	doc: ^Document,
 	ok: bool,
 ) {
-	decl = compiler.INVALID_NODE
-	use = compiler.INVALID_NODE
+	decl = syntax.INVALID_NODE
+	use = syntax.INVALID_NODE
 
 	u, u_ok := get_text_doc_uri(params)
 	if !u_ok do return
@@ -758,11 +756,11 @@ resolve_binding_at :: proc(
 	ast := d.ast
 
 	target := find_node_at_offset(ast, offset)
-	if target == compiler.INVALID_NODE do return
+	if target == syntax.INVALID_NODE do return
 	if ast.node_kinds[target] != .Identifier do return
 
 	dn := resolve_definition(ast, d.parents, target)
-	if dn == compiler.INVALID_NODE {
+	if dn == syntax.INVALID_NODE {
 		// The name is undeclared in scope (a builtin like u8, or an undefined id).
 		// Treat the identifier itself as both use and (self-)declaration so rename
 		// at least scopes to same-name uses; definition will return nothing useful.
@@ -774,22 +772,22 @@ resolve_binding_at :: proc(
 find_all_ref_locations :: proc(
 	uri: string,
 	doc: ^Document,
-	decl: compiler.Node_Index,
+	decl: syntax.Node_Index,
 	include_decl: bool,
 ) -> [dynamic]json.Value {
 	ast := doc.ast
 	locations := make([dynamic]json.Value, 0, 16)
-	if decl == compiler.INVALID_NODE do return locations
+	if decl == syntax.INVALID_NODE do return locations
 
-	name := compiler.node_name_str(ast, decl)
+	name := syntax.node_name_str(ast, decl)
 	refs := all_references(ast, doc.parents, name, decl)
 
 	for idx in refs {
 		if !include_decl && idx == decl do continue
 		span := name_span(ast, idx)
 		if span.start == span.end do continue
-		s := compiler.span_to_position(ast, span.start)
-		e := compiler.span_to_position(ast, span.end)
+		s := syntax.span_to_position(ast, span.start)
+		e := syntax.span_to_position(ast, span.end)
 		append(&locations, make_location(uri, s, e))
 	}
 	return locations
@@ -825,7 +823,7 @@ handle_references :: proc(server: ^LSP_Server, msg: LSP_Message) {
 
 handle_prepare_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	_, _, use, doc, ok := resolve_binding_at(server, msg.params)
-	if !ok || use == compiler.INVALID_NODE {
+	if !ok || use == syntax.INVALID_NODE {
 		send_error_response(msg.id, -32602, "Cannot rename this element")
 		return
 	}
@@ -833,8 +831,8 @@ handle_prepare_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	ast := doc.ast
 	span := name_span(ast, use)
 
-	s := compiler.span_to_position(ast, span.start)
-	e := compiler.span_to_position(ast, span.end)
+	s := syntax.span_to_position(ast, span.start)
+	e := syntax.span_to_position(ast, span.end)
 
 	start_pos := make(map[string]json.Value)
 	start_pos["line"] = json.Integer(s.line - 1)
@@ -893,7 +891,7 @@ handle_rename :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	send_response(msg.id, json.Object(result))
 }
 
-make_location :: proc(uri: string, start, end: compiler.Position) -> json.Value {
+make_location :: proc(uri: string, start, end: syntax.Position) -> json.Value {
 	start_pos := make(map[string]json.Value)
 	start_pos["line"] = json.Integer(start.line - 1)
 	start_pos["character"] = json.Integer(start.column - 1)
@@ -916,7 +914,7 @@ make_location :: proc(uri: string, start, end: compiler.Position) -> json.Value 
 // result is CLAMPED to [0, len(source)] — an editor can place the cursor past the
 // last column or at end-of-file (e.g. when triggering completion), and an
 // unclamped offset would index out of bounds on the next `source[offset]` access.
-lsp_pos_to_offset :: proc(ast: ^compiler.Ast, line, char: int) -> int {
+lsp_pos_to_offset :: proc(ast: ^syntax.Ast, line, char: int) -> int {
 	if line < 0 || line >= len(ast.line_starts) do return -1
 	off := int(ast.line_starts[line]) + char
 	if off < 0 do off = 0
@@ -924,8 +922,8 @@ lsp_pos_to_offset :: proc(ast: ^compiler.Ast, line, char: int) -> int {
 	return off
 }
 
-find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
-	best := compiler.INVALID_NODE
+find_node_at_offset :: proc(ast: ^syntax.Ast, offset: u32) -> syntax.Node_Index {
+	best := syntax.INVALID_NODE
 	best_size := max(u32)
 
 	for i := 0; i < len(ast.node_kinds); i += 1 {
@@ -934,7 +932,7 @@ find_node_at_offset :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_In
 			size := span.end - span.start
 			if size < best_size {
 				best_size = size
-				best = compiler.Node_Index(i)
+				best = syntax.Node_Index(i)
 			}
 		}
 	}
@@ -982,7 +980,7 @@ handle_completion :: proc(server: ^LSP_Server, msg: LSP_Message) {
 		return
 	}
 
-	compiler.ensure_line_starts(ast)
+	syntax.ensure_line_starts(ast)
 	offset := lsp_pos_to_offset(ast, line, char)
 	if offset < 0 {
 		send_empty_completion(msg.id)
@@ -1017,14 +1015,14 @@ send_empty_completion :: proc(id: Maybe(json.Value)) {
 collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynamic]json.Value) {
 	ast := doc.ast
 	source_node := find_dot_source(ast, offset)
-	if source_node == compiler.INVALID_NODE do return
+	if source_node == syntax.INVALID_NODE do return
 	if ast.node_kinds[source_node] != .Identifier do return
-	name := compiler.node_name_str(ast, source_node)
+	name := syntax.node_name_str(ast, source_node)
 	b := written_binding(&doc.checked, name, ast.node_spans[source_node].start)
 	// half-written, `x.` is no term of the kernel: x, where it is declared
 	if b == nil {
 		decl := resolve_definition(ast, doc.parents, source_node)
-		if decl != compiler.INVALID_NODE do b = written_binding(&doc.checked, name, ast.node_spans[decl].start)
+		if decl != syntax.INVALID_NODE do b = written_binding(&doc.checked, name, ast.node_spans[decl].start)
 	}
 	if b == nil do return
 	// the fields of what x gives back: its acts are its scope's (specs/types.md §4.8)
@@ -1035,8 +1033,8 @@ collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynam
 	}
 }
 
-find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index {
-	best := compiler.INVALID_NODE
+find_dot_source :: proc(ast: ^syntax.Ast, offset: u32) -> syntax.Node_Index {
+	best := syntax.INVALID_NODE
 	best_size := max(u32)
 	for i := 0; i < len(ast.node_kinds); i += 1 {
 		if ast.node_kinds[i] != .Property do continue
@@ -1045,11 +1043,11 @@ find_dot_source :: proc(ast: ^compiler.Ast, offset: u32) -> compiler.Node_Index 
 			size := span.end - span.start
 			if size < best_size {
 				best_size = size
-				best = compiler.Node_Index(i)
+				best = syntax.Node_Index(i)
 			}
 		}
 	}
-	if best == compiler.INVALID_NODE do return compiler.INVALID_NODE
+	if best == syntax.INVALID_NODE do return syntax.INVALID_NODE
 	return node_left(ast, best)
 }
 
@@ -1130,25 +1128,25 @@ handle_semantic_tokens :: proc(server: ^LSP_Server, msg: LSP_Message) {
 	send_response(msg.id, json.Object(result))
 }
 
-// collect_semantic_tokens classifies the document in ONE lexer pass. The compiler
+// collect_semantic_tokens classifies the document in ONE lexer pass. The parser
 // already has a lexer that yields every token with its kind + span, so there is no
 // need to walk the AST or re-scan the source: each token maps to a semantic type
 // by its kind. The only context needed is for identifiers — an identifier directly
 // FOLLOWED by a binding/constraint operator (`->`, `:`, `>-`, …) is a declaration;
 // otherwise it is a use. Builtins (u8, string, …) are types. Comments are skipped
 // by the lexer, so they are scanned separately (cheap, single linear pass).
-collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
-	compiler.ensure_line_starts(ast)
+collect_semantic_tokens :: proc(ast: ^syntax.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
+	syntax.ensure_line_starts(ast)
 
 	emit :: proc(
-		ast: ^compiler.Ast,
+		ast: ^syntax.Ast,
 		tokens: ^[dynamic]Raw_Sem_Token,
-		span: compiler.Span,
+		span: syntax.Span,
 		type: Sem_Token_Type,
 		mod := 0,
 	) {
 		if span.end <= span.start do return
-		pos := compiler.span_to_position(ast, span.start)
+		pos := syntax.span_to_position(ast, span.start)
 		append(
 			tokens,
 			Raw_Sem_Token {
@@ -1161,12 +1159,12 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 		)
 	}
 
-	lexer: compiler.Lexer
-	compiler.init_lexer(&lexer, ast.source)
-	prev := compiler.next_token(&lexer)
+	lexer: syntax.Lexer
+	syntax.init_lexer(&lexer, ast.source)
+	prev := syntax.next_token(&lexer)
 	for prev.kind != .EOF {
 		cur := prev
-		next := compiler.next_token(&lexer)
+		next := syntax.next_token(&lexer)
 
 		#partial switch cur.kind {
 		case .Identifier:
@@ -1242,7 +1240,7 @@ collect_semantic_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_To
 
 // token_is_decl_op reports whether `k`, directly following an identifier, marks
 // that identifier as a DECLARATION.
-token_is_decl_op :: proc(k: compiler.Token_Kind) -> bool {
+token_is_decl_op :: proc(k: syntax.Token_Kind) -> bool {
 	#partial switch k {
 	case .PointingPush,
 	     .PointingPull,
@@ -1263,7 +1261,7 @@ token_is_decl_op :: proc(k: compiler.Token_Kind) -> bool {
 // decl_token_type picks the semantic type for an identifier declared with `k`:
 // a constraint-colored name (`u8:x`) is a Type, an event/resonance/reactive binding
 // an Event, a plain pointing binding a Function.
-decl_token_type :: proc(k: compiler.Token_Kind) -> Sem_Token_Type {
+decl_token_type :: proc(k: syntax.Token_Kind) -> Sem_Token_Type {
 	#partial switch k {
 	case .Colon, .ConstraintBind, .ConstraintToNone:
 		return .Type
@@ -1275,7 +1273,7 @@ decl_token_type :: proc(k: compiler.Token_Kind) -> Sem_Token_Type {
 
 // emit_comment_tokens scans `//` line and `/* */` (nesting) block comments — the
 // lexer skips them, so they carry no token. One linear pass over the source.
-emit_comment_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
+emit_comment_tokens :: proc(ast: ^syntax.Ast, tokens: ^[dynamic]Raw_Sem_Token) {
 	src := ast.source
 	slen := len(src)
 	i := 0
@@ -1302,7 +1300,7 @@ emit_comment_tokens :: proc(ast: ^compiler.Ast, tokens: ^[dynamic]Raw_Sem_Token)
 			i += 1
 			continue
 		}
-		pos := compiler.span_to_position(ast, u32(start))
+		pos := syntax.span_to_position(ast, u32(start))
 		append(
 			tokens,
 			Raw_Sem_Token {

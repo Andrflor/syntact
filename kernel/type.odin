@@ -1,6 +1,6 @@
 package kernel
 
-import syn "../compiler"
+import syn "../syntax"
 
 // TYPES (specs/types.md §1–2)
 //

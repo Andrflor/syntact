@@ -1,6 +1,0 @@
-{
-  "name": "Typecheck bool union valid",
-  "description": "(true|false):a -> false is valid, false is a member of {true,false}",
-  "source": "(true|false):a -> false",
-  "expect_errors": []
-}

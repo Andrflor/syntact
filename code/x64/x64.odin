@@ -1,14 +1,13 @@
 package code_x64
 
 import code ".."
-import enc "../../compiler/backends/x64"
-import bc "../../compiler/bytecode"
+import enc "asm"
 import "core:os"
 
 // THE MACHINE CODE OF A PROGRAM
 //
 // The code of a program (code/) for x86-64, on the encoder, the image writer and the
-// System V ABI of compiler/backends/x64. Each value has its slot in the frame of its
+// System V ABI of code/x64/asm. Each value has its slot in the frame of its
 // function: an instruction loads its operands into scratch registers, computes, and
 // stores its result. A call of a symbol goes through its slot of the GOT, which the
 // loader fills.
@@ -21,7 +20,7 @@ import "core:os"
 Emitter :: struct {
 	prog:         ^code.Program,
 	buf:          enc.ByteBuffer,
-	imports:      [dynamic]bc.BC_Import, // the program's, then fflush when it has any
+	imports:      [dynamic]enc.Import, // the program's, then fflush when it has any
 	flush:        int, // the import of fflush; -1 without imports
 	rodata:       [dynamic]u8,
 	text_offsets: []int,
@@ -46,9 +45,9 @@ executable :: proc(p: ^code.Program, path: string) -> string {
 
 image_of :: proc(p: ^code.Program) -> (image: []u8, err: string) {
 	e := Emitter{prog = p, flush = -1}
-	for imp in p.imports do append(&e.imports, bc.BC_Import{lib = imp.lib, symbol = imp.symbol})
+	for imp in p.imports do append(&e.imports, enc.Import{lib = imp.lib, symbol = imp.symbol})
 	if len(p.imports) > 0 {
-		append(&e.imports, bc.BC_Import{lib = "libc.so.6", symbol = "fflush"})
+		append(&e.imports, enc.Import{lib = "libc.so.6", symbol = "fflush"})
 		e.flush = len(e.imports) - 1
 	}
 	if len(e.imports) > enc.GOT_MAX do return nil, "too many symbols imported"
@@ -480,10 +479,12 @@ real_binary :: proc(op: code.Op) -> string {
 // assign: the registers of the System V ABI for values of these machines; a call
 // that would pass some on the stack is not code yet.
 assign :: proc(machines: []code.Machine) -> (enc.X64_ABI_Assignment, string) {
-	types := make([]bc.Machine_Type, len(machines))
-	for m, i in machines do types[i] = MACHINES[m]
-	assignment, msg := enc.x64_sysv_assign(types)
-	if msg != "" do return {}, msg
+	classes := make([]enc.X64_ABI_Class, len(machines))
+	for m, i in machines {
+		if m == .None do return {}, "an argument without a machine is not code"
+		classes[i] = CLASSES[m]
+	}
+	assignment := enc.x64_sysv_assign(classes)
 	if assignment.stack_count > 0 do return {}, "a call that passes arguments on the stack is not code yet"
 	return assignment, ""
 }
@@ -503,11 +504,11 @@ pass :: proc(args: []code.Value, assignment: enc.X64_ABI_Assignment) {
 	}
 }
 
-MACHINES := [code.Machine]bc.Machine_Type {
-	.None = .None,
-	.Int  = .I64,
-	.Real = .F64,
-	.Text = .Str,
+// CLASSES: the class of the System V ABI that passes a value of each machine.
+CLASSES := #partial [code.Machine]enc.X64_ABI_Class {
+	.Int  = .Integer,
+	.Real = .SSE,
+	.Text = .Integer,
 }
 
 // call_symbol: the call of a symbol, its arguments in the registers the System V ABI

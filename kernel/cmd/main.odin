@@ -1,6 +1,6 @@
 package main
 
-import syn "../../compiler"
+import syn "../../syntax"
 import kernel ".."
 import "core:fmt"
 import "core:os"

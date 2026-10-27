@@ -1,6 +1,0 @@
-{
-  "name": "Typecheck string bool mismatch",
-  "description": "string:a -> true is invalid, bool cannot be assigned to string",
-  "source": "string:a -> true",
-  "expect_errors": ["Constraint_Mismatch"]
-}

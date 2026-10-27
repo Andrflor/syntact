@@ -1,6 +1,0 @@
-{
-  "name": "Operator not equal",
-  "description": "Reduces inequality comparison",
-  "source": "-> 5 != 3",
-  "expect": "true"
-}

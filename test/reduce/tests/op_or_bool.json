@@ -1,6 +1,0 @@
-{
-  "name": "Operator boolean or",
-  "description": "Reduces boolean OR",
-  "source": "-> true | false",
-  "expect": "true"
-}

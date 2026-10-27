@@ -1,6 +1,6 @@
 package kernel
 
-import syn "../compiler"
+import syn "../syntax"
 import "core:fmt"
 
 // WHAT IS CHECKED, AND WHERE (specs/types.md §7)

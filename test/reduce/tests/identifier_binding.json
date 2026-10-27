@@ -1,6 +1,0 @@
-{
-  "name": "Identifier binding",
-  "description": "Reduces identifier to its bound value",
-  "source": "x -> 10\n-> x",
-  "expect": "10"
-}

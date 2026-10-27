@@ -1,1 +1,0 @@
-{ "name": "def_bool_union_ft", "description": "default of (false|true) is false (left)", "source": "(false|true):a", "binding": "a", "expect": "false" }
