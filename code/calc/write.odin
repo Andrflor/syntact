@@ -58,7 +58,7 @@ write_function :: proc(p: ^Plan, f: ^code.Func, value, state: Class) -> (out: ^c
 // fresh: a new value of the function, with the facts of c.
 fresh :: proc(w: ^Writer, c: Class) -> code.Value {
 	facts := w.g.facts[find(w.g, c)]
-	v := code.value(w.f, facts.machine, facts.lanes)
+	v := code.value(w.f, facts.machine, facts.lanes, facts.bits)
 	if facts.machine == .Int do w.f.kinds[v].bounds = facts.bounds
 	return v
 }

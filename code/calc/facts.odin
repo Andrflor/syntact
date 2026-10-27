@@ -13,7 +13,7 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	out := Facts{bounds = code.EVERY}
 	switch n.kind {
 	case .Int:
-		return Facts{.Int, {i128(n.value), i128(n.value)}, n.value, 0}
+		return Facts{.Int, {i128(n.value), i128(n.value)}, n.value, 0, 0}
 	case .Real:
 		out.machine = .Real
 	case .Text:
@@ -24,20 +24,20 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		out.machine = g.func.params[n.index]
 	case .Param:
 		kind := g.loops[n.owner].params[n.index]
-		out.machine, out.lanes = kind.machine, kind.lanes
+		out.machine, out.lanes, out.bits = kind.machine, kind.lanes, kind.bits
 	case .Call:
 		if g.prog.funcs[n.index].pure do out.machine = g.prog.funcs[n.index].result
 	case .In:
 		out.machine, out.bounds = .Int, {0, 1}
 	case .Narrow:
 		x := g.facts[find(g, n.args[0])]
-		out.machine, out.bounds, out.lanes = x.machine, x.bounds, x.lanes
+		out.machine, out.bounds, out.lanes, out.bits = x.machine, x.bounds, x.lanes, x.bits
 	case .Splat:
 		a := g.facts[find(g, n.args[0])]
-		out.machine, out.bounds, out.lanes, out.constant = a.machine, a.bounds, int(n.value), a.constant
+		out.machine, out.bounds, out.lanes, out.bits, out.constant = a.machine, a.bounds, int(n.value), n.index, a.constant
 	case .Lanes:
 		values := g.vectors[n.index]
-		out.machine, out.lanes = .Int, len(values)
+		out.machine, out.lanes, out.bits = .Int, len(values), int(n.value)
 		out.bounds = {i128(values[0]), i128(values[0])}
 		for v in values do out.bounds = code.hull(out.bounds, {i128(v), i128(v)})
 	case .Reduce:
@@ -51,11 +51,12 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	case .Select:
 		yes, no := g.facts[find(g, n.args[1])], g.facts[find(g, n.args[2])]
 		out.machine, out.lanes = yes.machine, max(yes.lanes, no.lanes, g.facts[find(g, n.args[0])].lanes)
+		out.bits = max(yes.bits, no.bits)
 		if yes.machine == .Int do out.bounds = code.hull(yes.bounds, no.bounds)
 		if x, known := yes.constant.?; known && yes.constant == no.constant do out.constant = x
 	case .Unary:
 		a := g.facts[find(g, n.args[0])]
-		out.machine, out.lanes = a.machine, a.lanes
+		out.machine, out.lanes, out.bits = a.machine, a.lanes, a.bits
 		if a.machine != .Int do break
 		#partial switch n.op {
 		case .Neg:
@@ -67,7 +68,7 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	case .Binary:
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
 		out.machine = comparison(n.op) ? .Int : a.machine
-		out.lanes = max(a.lanes, b.lanes)
+		out.lanes, out.bits = max(a.lanes, b.lanes), max(a.bits, b.bits)
 		if comparison(n.op) do out.bounds = {0, 1}
 		if a.machine != .Int do break
 		out.bounds = code.meet(out.bounds, binary_bounds(n.op, a.bounds, b.bounds))
@@ -83,13 +84,18 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 			if info.node >= len(g.nodes) || g.nodes[info.node].kind != .Loop || find(g, g.home[info.node]) != find(g, n.args[0]) do continue
 			if k := n.index - outputs(info); k >= 0 && k < len(info.finals) {
 				kind := info.params[info.finals[k]]
-				out.machine, out.lanes = kind.machine, kind.lanes
+				out.machine, out.lanes, out.bits = kind.machine, kind.lanes, kind.bits
 			}
 		}
 	case .Start, .Arm, .Foreign, .Match, .Loop, .Again, .Exit:
 	// a state, a tuple or a tail
 	}
 	if c, known := out.constant.?; known do out.bounds = {i128(c), i128(c)}
+	// a lane of w bits holds the residue of what w bits do not hold
+	if out.lanes > 0 && out.bits > 0 && !fits(out.bounds, out.bits) {
+		half := i128(1) << uint(out.bits - 1)
+		out.bounds, out.constant = {-half, half - 1}, nil
+	}
 	return out
 }
 

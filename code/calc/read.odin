@@ -208,7 +208,7 @@ read_loop :: proc(r: ^Reader, i: code.Loop) {
 	l := len(g.loops)
 	info := Loop_Info{parent = r.region, state = -1, value = i.dst != code.NONE}
 	for x in i.params {
-		append(&info.params, code.Kind{g.func.kinds[x].machine, code.EVERY, g.func.kinds[x].lanes})
+		append(&info.params, code.Kind{g.func.kinds[x].machine, code.EVERY, g.func.kinds[x].lanes, g.func.kinds[x].bits})
 		append(&info.carried, nil)
 	}
 	if has_effects(g.prog, i.body) {

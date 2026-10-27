@@ -157,7 +157,7 @@ polynomial :: proc(g: ^Graph, c: Class, l, i: int, depth := 0) -> (p: Polynomial
 			// in each lane: δ is a homomorphism of rings
 			a := polynomial(g, n.args[0], l, i, depth + 1) or_continue
 			lanes := make([]Class, len(a.coefficients))
-			for x, k in a.coefficients do lanes[k] = splat(g, x, int(n.value))
+			for x, k in a.coefficients do lanes[k] = splat(g, x, int(n.value), n.index)
 			return Polynomial{lanes, a.token}, true
 		}
 		if !ring(n) do continue
@@ -386,7 +386,7 @@ extend :: proc(g: ^Graph, l: int, start: Class, op: code.Op) -> Class {
 	info := &g.loops[l]
 	j := len(info.params)
 	f := g.facts[find(g, start)]
-	append(&info.params, code.Kind{f.machine, code.EVERY, f.lanes})
+	append(&info.params, code.Kind{f.machine, code.EVERY, f.lanes, f.bits})
 	append(&info.carried, op)
 	loop := &g.nodes[info.node]
 	args := make([]Class, len(loop.args) + 1)

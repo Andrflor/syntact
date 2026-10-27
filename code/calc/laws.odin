@@ -78,8 +78,8 @@ int_node :: proc(v: i64) -> Node {
 binary :: proc(g: ^Graph, op: code.Op, a, b: Class) -> Node {
 	args := make([]Class, 2)
 	args[0], args[1] = a, b
-	lanes := g.facts[find(g, a)].lanes
-	if lanes > 0 && g.facts[find(g, b)].lanes == 0 && op != .Shl && op != .Shr do args[1] = splat(g, b, lanes)
+	f := g.facts[find(g, a)]
+	if f.lanes > 0 && g.facts[find(g, b)].lanes == 0 && op != .Shl && op != .Shr do args[1] = splat(g, b, f.lanes, f.bits)
 	return Node{kind = .Binary, op = op, args = args}
 }
 
@@ -97,9 +97,9 @@ known :: proc(g: ^Graph, c: Class, n: Node) {
 
 // constant_like: the integer v, in each lane when c is a vector.
 constant_like :: proc(g: ^Graph, c: Class, v: i64) -> Node {
-	lanes := g.facts[find(g, c)].lanes
-	if lanes == 0 do return int_node(v)
-	return Node{kind = .Splat, value = i64(lanes), args = one(add(g, int_node(v)))}
+	f := g.facts[find(g, c)]
+	if f.lanes == 0 do return int_node(v)
+	return Node{kind = .Splat, value = i64(f.lanes), index = f.bits, args = one(add(g, int_node(v)))}
 }
 
 // neutral: x op e = x, e the neutral of op on its right.
@@ -257,8 +257,8 @@ shifted :: proc(g: ^Graph, c: Class, n: Node) {
 		if !constant do continue
 		moved := s.op == .Add ? i128(k) - i128(d) : i128(k) + i128(d)
 		if moved < i128(min(i64)) || moved > i128(max(i64)) do continue
-		lanes := g.facts[find(g, n.args[1])].lanes
-		bound := lanes > 0 ? splat(g, add(g, int_node(i64(moved))), lanes) : add(g, int_node(i64(moved)))
+		f := g.facts[find(g, n.args[1])]
+		bound := f.lanes > 0 ? splat(g, add(g, int_node(i64(moved))), f.lanes, f.bits) : add(g, int_node(i64(moved)))
 		equal(g, c, binary(g, n.op, s.args[0], bound))
 		return
 	}

@@ -22,11 +22,13 @@ Costs :: struct {
 	call:   f64,
 	branch: f64,
 	turns:  f64,
-	lanes:  int,
-	vints:  [code.Op]f64,
-	vreals: [code.Op]f64,
-	splat:  f64,
-	reduce: f64,
+	lanes:   int,
+	vints:   [code.Op]f64,
+	vreals:  [code.Op]f64,
+	lanes32: int, // lanes of 32 bits: none when the machine has none
+	vints32: [code.Op]f64,
+	splat:   f64,
+	reduce:  f64,
 }
 
 INFINITE :: f64(1e300)
@@ -172,6 +174,31 @@ X64_REAL_LANES :: [code.Op]f64 {
 	.Ge  = INFINITE,
 }
 
+// X64_LANES32: the operations on lanes of 32 bits the x86-64 backend writes:
+// SSE4.1's product.
+X64_LANES32 :: [code.Op]f64 {
+	.Add = 1,
+	.Sub = 1,
+	.Mul = 2,
+	.Div = INFINITE,
+	.Mod = INFINITE,
+	.Pow = INFINITE,
+	.Mul_High = INFINITE,
+	.Neg = 2,
+	.And = 1,
+	.Or  = 1,
+	.Xor = 1,
+	.Not = 2,
+	.Shl = 1,
+	.Shr = 1,
+	.Eq  = 2,
+	.Ne  = 3,
+	.Lt  = INFINITE,
+	.Le  = INFINITE,
+	.Gt  = INFINITE,
+	.Ge  = INFINITE,
+}
+
 // X64: the machine the x86-64 backend writes for: two lanes of SSE2, each in the
 // frame — loaded, computed, stored.
 X64 := Costs {
@@ -184,6 +211,8 @@ X64 := Costs {
 	lanes  = 2,
 	vints  = X64_LANES,
 	vreals = X64_REAL_LANES,
+	lanes32 = 4,
+	vints32 = X64_LANES32,
 	splat  = 3,
 	reduce = 3,
 }
@@ -214,6 +243,8 @@ C := Costs {
 	lanes  = 2,
 	vints  = SSE2_INTS,
 	vreals = SSE2_REALS,
+	lanes32 = 4,
+	vints32 = X64_LANES32,
 	splat  = 2,
 	reduce = 2,
 }
@@ -353,7 +384,7 @@ weight :: proc(g: ^Graph, costs: ^Costs, n: Node) -> f64 {
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
 		ops := table(costs, a)
 		w := ops[n.op]
-		if a.lanes > 0 && a.machine == .Int {
+		if a.lanes > 0 && a.machine == .Int && a.bits == 0 {
 			// in 32 bits, a product is one instruction; not negative, a shift
 			if n.op == .Mul && in_32(a.bounds) && in_32(b.bounds) do w = ops[.Mul] / 2
 			if n.op == .Shr && a.bounds.lo >= 0 do w = ops[.Shl]
@@ -381,6 +412,7 @@ weight :: proc(g: ^Graph, costs: ^Costs, n: Node) -> f64 {
 
 // table: what an operation costs on the machine of a.
 table :: proc(costs: ^Costs, a: Facts) -> [code.Op]f64 {
+	if a.lanes > 0 && a.bits == 32 do return costs.vints32
 	if a.lanes > 0 do return a.machine == .Real ? costs.vreals : costs.vints
 	return a.machine == .Real ? costs.reals : costs.ints
 }

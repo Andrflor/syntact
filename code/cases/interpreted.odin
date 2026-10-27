@@ -77,6 +77,8 @@ CODE_CASES := []Code_Case {
 	{name = "recursion with effects", source = LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", inputs = {3}, int = 3, calls = {"puts", "puts", "puts"}},
 	{name = "answer read by the next effect", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> libc.abs{n -> -2}!  b -> libc.abs{n -> a}!  -> b + cnt{n -> n - 1}!}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs", "abs", "abs", "abs"}},
 	{name = "answers of a recursion", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs"}},
+	// in lanes of 32 bits, what only an operation of the ring or of the bits reads wraps
+	{name = "residues in lanes", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc ^ ((n [&] 255) * 3)}!}}\n-> f{n -> ??::u32}!", inputs = {1001}, int = 107},
 	// a quotient by a constant: products and shifts, exact over the bounds of the dividend
 	{name = "division by constants, 0", source = "n -> ??::u32\n-> n / 7 + n % 13 + n / 1000 + n % 10", inputs = {0}, int = 0},
 	{name = "division by constants, 6", source = "n -> ??::u32\n-> n / 7 + n % 13 + n / 1000 + n % 10", inputs = {6}, int = 12},

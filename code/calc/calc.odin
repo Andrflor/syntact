@@ -46,8 +46,8 @@ Kind :: enum u8 {
 	Binary, // a op b
 	In, // index: the cover; x in it, 1 or 0
 	Narrow, // x as the arm it is read in narrows it; the arm
-	Splat, // value: the lanes; a in each
-	Lanes, // index: the integers of each lane, in the graph's table
+	Splat, // value: the lanes; index: their bits, 0 for 64; a in each
+	Lanes, // index: the integers of each lane, in the graph's table; value: their bits
 	Reduce, // op over the lanes of a
 	Select, // test, yes, no: yes where test is 1, no where it is 0
 	Foreign, // index: the symbol; the state, then the arguments — gives the state after, and the answer
@@ -135,6 +135,7 @@ Facts :: struct {
 	bounds:   code.Bounds,
 	constant: Maybe(i64),
 	lanes:    int,
+	bits:     int, // of each lane of a vector of integers; 0: 64
 }
 
 Graph :: struct {
@@ -259,13 +260,14 @@ same_node :: proc(g: ^Graph, a, b: Node) -> bool {
 // observe: the facts the code gives a value, which hold of its class.
 observe :: proc(g: ^Graph, c: Class, kind: code.Kind) {
 	c := find(g, c)
-	g.facts[c] = meet(g.facts[c], Facts{machine = kind.machine, bounds = kind.machine == .Int ? kind.bounds : code.EVERY, lanes = kind.lanes})
+	g.facts[c] = meet(g.facts[c], Facts{machine = kind.machine, bounds = kind.machine == .Int ? kind.bounds : code.EVERY, lanes = kind.lanes, bits = kind.bits})
 }
 
 meet :: proc(a, b: Facts) -> Facts {
 	out := a
 	if out.machine == .None do out.machine = b.machine
 	out.lanes = max(a.lanes, b.lanes)
+	out.bits = max(a.bits, b.bits)
 	out.bounds = code.meet(a.bounds, b.bounds)
 	if out.constant == nil do out.constant = b.constant
 	return out
