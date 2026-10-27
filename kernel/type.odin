@@ -32,7 +32,7 @@ Type :: union {
 	^Carve, // s{…}
 	^Default, // C:           an anonymous binding colored by C
 	^Pattern, // t ? {c -> p …}
-	^Iterate, // ⟳(k: a ↑ b, x: c, t)   x = c, then x = t for k from a up to b (§5.6)
+	^Iterate, // ⟳(k: a ↦ n until S, x: c ↦ t, l)   a loop (§5.6)
 	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
@@ -203,14 +203,15 @@ Branch :: struct {
 	span:    syn.Span,
 }
 
-// Iterate: the solution of a recursion on a counter (§5.6). x takes init, then, for
-// k from `from` to `to` by one — down when `down` —, x takes step: the iteration is
-// the last x, init when the range is empty. k and x are unknowns bound in step.
+// Iterate: the solution of a recursion (§5.6), a loop. k takes start and x init;
+// then, while k is not in stop, x takes step and k next; at the last, the iteration
+// is last. k and x are unknowns bound in it.
 Iterate :: struct {
 	index, state: ^Unknown,
-	from, to:     Type,
-	down:         bool,
-	init, step:   Type,
+	start, init:  Type,
+	stop:         Type, // where k ends
+	next, step:   Type, // the next k, the next x
+	last:         Type, // the value, where k ends
 	span:         syn.Span,
 }
 

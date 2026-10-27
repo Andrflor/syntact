@@ -408,8 +408,8 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case ^Iterate:
 		it := new(Iterate)
 		it^ = v^
-		it.from, it.to = copy_term(k, m, v.from, scope), copy_term(k, m, v.to, scope)
-		it.init, it.step = copy_term(k, m, v.init, scope), copy_term(k, m, v.step, scope)
+		it.start, it.init, it.stop = copy_term(k, m, v.start, scope), copy_term(k, m, v.init, scope), copy_term(k, m, v.stop, scope)
+		it.next, it.step, it.last = copy_term(k, m, v.next, scope), copy_term(k, m, v.step, scope), copy_term(k, m, v.last, scope)
 		return it
 	}
 	return t
@@ -461,7 +461,7 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 		if mentions(m, v.target) do return true
 		for b in v.branches do if mentions(m, b.cover) || mentions(m, b.product) do return true
 	case ^Iterate:
-		return mentions(m, v.from) || mentions(m, v.to) || mentions(m, v.init) || mentions(m, v.step)
+		return mentions(m, v.start) || mentions(m, v.init) || mentions(m, v.stop) || mentions(m, v.next) || mentions(m, v.step) || mentions(m, v.last)
 	}
 	return false
 }
@@ -886,8 +886,9 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 	case ^Iterate:
 		// the same iteration: its counter and its value are bound in it, whatever their index
 		y, ok := b.(^Iterate)
-		if !ok || x.down != y.down || !same(k, x.from, y.from) || !same(k, x.to, y.to) || !same(k, x.init, y.init) do return false
-		return same(k, x.step, rewrite(k, y.step, rewriting(rewriting(nil, y.index, x.index), y.state, x.state)))
+		if !ok || !same(k, x.start, y.start) || !same(k, x.init, y.init) || !same(k, x.stop, y.stop) do return false
+		bound := rewriting(rewriting(nil, y.index, x.index), y.state, x.state)
+		return same(k, x.next, rewrite(k, y.next, bound)) && same(k, x.step, rewrite(k, y.step, bound)) && same(k, x.last, rewrite(k, y.last, bound))
 	}
 	return false
 }

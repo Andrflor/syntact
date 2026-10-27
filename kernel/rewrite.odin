@@ -118,13 +118,12 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 	return out
 }
 
-// rewrite_iterate: the iteration with its bounds, its first value and its step
-// rewritten; k and x are its own.
+// rewrite_iterate: the iteration with its parts rewritten; k and x are its own.
 rewrite_iterate :: proc(k: ^Kernel, it: ^Iterate, r: Rewrite) -> ^Iterate {
 	out := new(Iterate)
 	out^ = it^
-	out.from, out.to = rewrite(k, it.from, r), rewrite(k, it.to, r)
-	out.init, out.step = rewrite(k, it.init, r), rewrite(k, it.step, r)
+	out.start, out.init, out.stop = rewrite(k, it.start, r), rewrite(k, it.init, r), rewrite(k, it.stop, r)
+	out.next, out.step, out.last = rewrite(k, it.next, r), rewrite(k, it.step, r), rewrite(k, it.last, r)
 	return out
 }
 

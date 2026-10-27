@@ -2,9 +2,9 @@
   "name": "recursion_call_then_effect",
   "description": "A recursive call of an equation with effects is an effect: the effect written after the call comes after it.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> 3}!",
-  "type": "ε<⟳(x: 1 ↑ 3, y: 0, ε0(z::u8, z + y))>(x::int, x)",
+  "type": "ε<⟳(x: 1 ↦ x + 1 until 4.., y: 0 ↦ ε0(z::u8, z + y), y)>(x::int, x)",
   "productions": {
-    "loop": "ε<⟳(x: 1 ↑ ?0, y: 0, ε0(z::u8, z + y))>(x::int, x)"
+    "loop": "ε<⟳(x: 1 ↦ x + 1 until (?0 + 1).., y: 0 ↦ ε0(z::u8, z + y), y)>(x::int, x)"
   },
   "expect_errors": []
 }

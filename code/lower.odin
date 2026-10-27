@@ -252,19 +252,19 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 	return lower(l, e.then, tail)
 }
 
-// iterate: an iteration (specs/types.md §5.6) as a loop on its counter k and its
-// value x: k from `from`, x from init; until k passes `to`, x takes the step and k
-// the next integer. An iteration of effects alone has no value.
+// iterate: an iteration (specs/types.md §5.6) as a loop on k and x: k from start,
+// x from init; while k is not in stop, x takes the step and k the next; then the
+// last. An iteration of effects alone has no x.
 iterate :: proc(l: ^Lowering, it: ^kernel.Iterate) -> Value {
-	from, to, init := lower(l, it.from), lower(l, it.to), lower(l, it.init)
+	start, init := lower(l, it.start), lower(l, it.init)
 	if l.error != "" do return NONE
-	if machine_of(l.f, from) != .Int || machine_of(l.f, to) != .Int do return fail(l, "an iteration whose counter is not an integer is not code yet")
+	if machine_of(l.f, start) != .Int do return fail(l, "an iteration whose counter is not an integer is not code yet")
 	counter := value(l.f, .Int)
 	state := init == NONE ? NONE : value(l.f, machine_of(l.f, init))
 	params := make([dynamic]Value)
 	starts := make([dynamic]Value)
 	append(&params, counter)
-	append(&starts, from)
+	append(&starts, start)
 	if state != NONE {
 		append(&params, state)
 		append(&starts, init)
@@ -273,22 +273,29 @@ iterate :: proc(l: ^Lowering, it: ^kernel.Iterate) -> Value {
 	outer, bound := open_body(l, &loop.body)
 	append(&l.bound, Bound{it.index, counter})
 	if state != NONE do append(&l.bound, Bound{it.state, state})
-	past := binary(l, it.down ? .Lt : .Gt, counter, to, .Int)
-	done := make([]Bounds, 1)
-	done[0] = {1, 1}
 	arms := make([]Arm, 2)
-	arms[0] = Arm{cover = Cover{ints = done}, body = Body{insts = make([dynamic]Inst), value = state}}
+	arms[0].body = lower_body(l, it.last, false)
 	arms[1].body.value = NONE // it ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	x := lower(l, it.step)
 	if l.error == "" && machine_of(l.f, x) != machine_of(l.f, state) do fail(l, "the step of an iteration gives a %v, its value is a %v", machine_of(l.f, x), machine_of(l.f, state))
-	next := binary(l, it.down ? .Sub : .Add, counter, constant(l, 1), .Int)
+	next := lower(l, it.next)
 	args := make([dynamic]Value)
 	append(&args, next)
 	if state != NONE do append(&args, x)
 	emit(l, Again{args[:]})
 	close_body(l, step_outer, step_bound)
-	loop.body.value = close_match(l, past, arms)
+	// where k ends: the cells of stop, or its membership
+	target := counter
+	if cover, constant := cover_of(it.stop); constant && fits(l, counter, cover) {
+		arms[0].cover = cover
+	} else {
+		target = member(l, counter, it.stop)
+		taken := make([]Bounds, 1)
+		taken[0] = {1, 1}
+		arms[0].cover = Cover{ints = taken}
+	}
+	loop.body.value = close_match(l, target, arms)
 	close_body(l, outer, bound)
 	if l.error != "" do return NONE
 	if loop.body.value != NONE {

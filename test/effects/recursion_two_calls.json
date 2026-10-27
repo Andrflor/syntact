@@ -2,6 +2,6 @@
   "name": "recursion_two_calls",
   "description": "Two calls of an equation with effects are two effects, in order: x - y, not 0.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> 3}! - loop{n -> 3}!",
-  "type": "ε<⟳(x: 1 ↑ 3, y: 0, ε0(z::u8, z + y))>(x::int, ε<⟳(y: 1 ↑ 3, z: 0, ε0(x3::u8, x3 + z))>(y::int, x - y))",
+  "type": "ε<⟳(x: 1 ↦ x + 1 until 4.., y: 0 ↦ ε0(z::u8, z + y), y)>(x::int, ε<⟳(y: 1 ↦ y + 1 until 4.., z: 0 ↦ ε0(x3::u8, x3 + z), z)>(y::int, x - y))",
   "expect_errors": []
 }

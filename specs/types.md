@@ -42,6 +42,7 @@ t ::= p                          a primitive type
     | {b…}                       a scope (§5)
     | s.x   s!   s{…}   ...s     access, collapse, carve, expansion (§5.3)
     | t ? {…}                    a pattern (§6)
+    | >- t                       an emission, answered by a handler (§4.9)
 ```
 
 Every operation on types gives a type. The whiteboard writes `a | b` as
@@ -334,8 +335,8 @@ unchanged:
 
 ```text
 loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}
-loop{n -> m}!    = ε<⟳(k: 1 ↑ m, x: 0, ε₁(y::u8, y + x))>(z, z)
-loop{n -> 3}! - loop{n -> 3}!   = ε<⟳(k: 1 ↑ 3, …)>(x, ε<⟳(k: 1 ↑ 3, …)>(y, x - y))
+loop{n -> m}!    = ε<⟳(k: 1 ↦ k + 1 until (m + 1).., x: 0 ↦ ε₁(y::u8, y + x), x)>(z, z)
+loop{n -> 3}! - loop{n -> 3}!   = ε<⟳(…)>(x, ε<⟳(…)>(y, x - y))       two runs
 {u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
 ```
 
@@ -345,7 +346,7 @@ scope that places them:
 
 ```text
 sum{n -> !?::u8}!              = ε₁(x::u8, x * (x + 1) / 2)
-loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(k: 1 ↑ x, …)>(y, y))
+loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(k: 1 ↦ k + 1 until (x + 1).., …)>(y, y))
 g -> {w -> !?::none  -> {k -> 1}}
 {...g!, -> 1}!                 = ε₁(1)
 ```
@@ -373,6 +374,99 @@ libm -> <libm.so.6>{
 libm.sqrt                          a scope: nothing happens
 libm.sqrt{x -> 2.0}! * 2.0         = ε<sqrt{x -> 2.0}!>(y::f64, y * 2.0)
 libm.sqrt{x -> !?::f64}!           = ε₁(x::f64, ε<sqrt{x -> x}!>(y::f64, y))
+```
+
+### 4.9 Handlers
+
+A handler is context: who answers an event where a scope is collapsed. It is found
+when the program is typed, never at run time: nothing is passed, and an emission
+costs what its handler costs, a carve and a collapse. A handler is not an effect: it
+has effects only if its scope has some (§4.8).
+
+An event is a scope; its bindings are the shape of what it carries. `E -< e {…}` is a
+binding: the handler of E, a scope in which e is what is sent. `r >- E{…}` is an
+emission, r what it answers. `⟨E{…}⟩(x, t)` is the emission, x its answer, bound in
+t; written alone, `>- E{…}` is `⟨E{…}⟩(x, x)`.
+
+An event is its handle: the binding its name is resolved to, like any name. A
+handler answers an emission only when both handles are exactly the same binding; a
+copy of the scope that writes it (§5.3) keeps it. The same shape is not the same
+event, and what is sent carries no identity: it only has to fit the shape.
+
+```text
+Log -> {string:message}
+Audit -> {string:message}            the same shape, another event
+Log -< e { -> 1 }
+>- Audit{message -> "x"}             not answered by the handler of Log
+```
+
+An emission is answered where the scope that holds it is collapsed. When `s!` is
+written in a scope that has a handler h of E, each emission of E in s is answered by
+h: it is the run of h with e carved to what is sent, and x is what that run gives
+back. Otherwise it stays in what `s!` gives, and is answered where the scope that
+holds `s!` is collapsed, and so on up. Until it is answered, an emission stays where
+it is written, between the effects around it: its handler may have effects, so no
+law copies, erases or reorders it.
+
+```text
+⟨E{a}⟩(x, t)   answered by E -< e {…}   =   {x -> {…}{e -> E{a}}!  -> t}!
+```
+
+The program is collapsed by nothing: an emission that comes up to it is answered by
+its default, the handler of E visible where the emission is written. An emission
+without one is invalid. A scope has no handler of its own emissions but its default:
+it answers those of the scopes it collapses.
+
+```text
+lib -> {
+  Log -> {string:message}
+  Log -< e { -> "default" }
+  r >- Log{message -> "x"}
+  -> r
+}
+main -> {
+  lib.Log -< e { -> "main" }
+  -> lib!
+}
+lib!               = "default"          answered by its default
+main!              = "main"             answered where lib! is collapsed
+{-> lib!}!         = "default"          nothing between: it comes up to the program
+```
+
+There are as many events as are written, and a scope has as many handlers as it
+writes, one for each event. Each emission comes up on its own, to the first scope
+that answers its event:
+
+```text
+work -> {
+  Log -> {string:message}   Log -< e { -> 0 }
+  Alloc -> {u64:size}       Alloc -< e { -> 0 }
+  a >- Log{message -> "start"}
+  p >- Alloc{size -> 16}
+  -> p
+}
+app -> {
+  work.Log -< e { -> 1 }
+  -> {work.Alloc -< e { -> e.size * 2 }  -> work!}!
+}
+app!               = 32                 Alloc answered inside, Log where app is
+```
+
+A carve replaces a handler like any binding: the emissions it answered are answered
+by the new one. A scope is closed: a carve replaces a handler, it never adds one. The
+answer is checked where it is given, like a carve (§7): the bindings that read x are
+checked with what the handler gives back.
+
+```text
+lib -> {
+  Log -> {string:message}
+  Log -< e { -> 1 }
+  u16:r >- Log{message -> "x"}
+  -> r + 1
+}
+lib!                           = 2
+lib{Log -< e { -> 300 }}!      = 301
+lib{Log -< e { -> "a" }}!      invalid: "a" is not in u16
 ```
 
 ## 5. Scopes
@@ -529,45 +623,50 @@ List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
 {10 10 10} in List{u8}                                                    = false
 ```
 
-An iteration, when the name is called on an integer, one less at each step:
+An iteration, when the name is called on an integer, and the call changes it only:
 
 ```text
-f{n -> m}! = m ? {b -> c  -> h(m, f{n -> m - 1}!)}      m ≥ b for every value
-           = ⟳(k: b + 1 ↑ m, x: c, h(k, x))
+f{n -> m}! = m ? {B -> c(m)  -> h(m, f{n -> s(m)}!)}
 ```
 
-`⟳(k: a ↑ b, x: c, t)` is x = c, then x = t for k from a up to b; c when the range
-is empty. It is what the equation computes from its base case up: a loop. Every
-step makes the call — it is not in a branch. Effects before the call run from m
-down: when `h(m, y) = ε…(a ⊕ y)`, ⊕ an associative operator with identity e, the
-parentheses move,
+`⟳(k: a ↦ n until S, x: e ↦ t, l)` is a loop: k = a and x = e; while k is not in
+S, x = t and k = n; then l. Every step makes the call — it is not in a branch —,
+and the loop runs the effects in the order the equation runs them:
 
 ```text
-f{n -> m}! = ⟳(k: m ↓ b + 1, x: e, ε…(x ⊕ a(k))) ⊕ c
+s(m) = m - 1, B = b, m ≥ b, no effect before the call: up from the base case
+f{n -> m}! = ⟳(k: b + 1 ↦ k + 1 until (m + 1).., x: c ↦ h(k, x), x)
+
+otherwise, down through the calls, when h(m, y) = ε…(y ⊕ a(m)), ⊕ + or * on the
+integers, associative, with identity e — the parentheses move —, or h(m, y) = ε…(y),
+a call in tail position:
+f{n -> m}! = ⟳(k: m ↦ s(k) until B, x: e ↦ ε…(x ⊕ a(k)), x ⊕ c(k))
+f{n -> m}! = ⟳(k: m ↦ s(k) until B, x: none ↦ ε…(none), c(k))
 ```
 
-so the effects run in the order the equation runs them. An iteration whose steps
-have effects is an effect, `ε<⟳(…)>(x, t)`. What a step computes without reading
-what its effects give back crosses them (§4.8): the effects run alone, and the value
-is the iteration of the rest. An iteration whose step adds a polynomial in k has a
-closed form:
+An iteration whose steps have effects is an effect, `ε<⟳(…)>(x, t)`. What a step
+computes without reading what its effects give back crosses them (§4.8): the
+effects run alone, and the value is the iteration of the rest. An iteration on a
+counter — k by one from lo up to hi, or from hi down to b = lo - 1 — whose step
+adds a polynomial in k has a closed form, preferred to the loop:
 
 ```text
-⟳(k: lo ↑ hi, x: c, x + g(k)) = c + g(lo) + … + g(hi) = c + G(hi) - G(lo - 1)
-                                 G(m) = g(0) + … + g(m), by the sums of powers
+x = c + g(lo) + … + g(hi) = c + G(hi) - G(lo - 1)     G(m) = g(0) + … + g(m), by the sums of powers
 
 sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
-sum{n -> m}!   = ⟳(k: 1 ↑ m, x: 0, x + k)  = m * (m + 1) / 2
+sum{n -> m}!   = m * (m + 1) / 2
 fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
-fact{n -> m}!  = ⟳(k: 1 ↑ m, x: 1, k * x)                       the loop
+fact{n -> m}!  = ⟳(k: 1 ↦ k + 1 until (m + 1).., x: 1 ↦ k * x, x)
+half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}
+half{n -> m}!  = ⟳(k: m ↦ k / 2 until 0, x: 0 ↦ x + 1, x)
 say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{…  n -> n}! + say{n -> n - 1}!}}
-say{n -> m}!   = ε<⟳(k: m ↓ 1, x: 0, ε<printf{…  n -> k}!>(y, x + y))>(z, z)
+say{n -> m}!   = ε<⟳(k: m ↦ k - 1 until 0, x: 0 ↦ ε<printf{…  n -> k}!>(y, y + x), x)>(z, z)
 tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> io.puts{…}!  -> 1 + tick{n -> n - 1}!}!}}
-tick{n -> m}!  = ε<⟳(k: m ↓ 1, x: none, ε<puts{…}!>(y, none))>(m)  the value crosses
+tick{n -> m}!  = ε<⟳(k: m ↦ k - 1 until 0, x: none ↦ ε<puts{…}!>(y, none), none)>(m)
 ```
 
 Like the equation, an iteration is never unfolded: `fact{n -> 5}!` is
-`⟳(k: 1 ↑ 5, x: 1, k * x)`.
+`⟳(k: 1 ↦ k + 1 until 6.., x: 1 ↦ k * x, x)`.
 
 `sum{n -> m - 1}!` is not an extra notation: it is carving and collapse, applied to
 types.
@@ -749,3 +848,6 @@ Where another document says otherwise, this one wins. In particular:
 - `a = b` is `a in =b`: there is no `==` and no `!=` (§4.5).
 - No law copies, replaces, erases or reorders an effect; a pure computation crosses
   it (§4.8).
+- A handler is context found when the program is typed: an emission is the carve and
+  the collapse of its handler, nothing is passed at run time, and effects are not
+  confined to handlers (§4.9).

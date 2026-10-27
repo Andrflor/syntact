@@ -2,9 +2,9 @@
   "name": "recursion_effect_then_call",
   "description": "The effect written before the call comes before it.",
   "source": "before -> {u8:n -> ??  -> n ? {0 -> 0  -> !?::u8 + before{n -> n - 1}!}}\nx -> before{n -> 3}!",
-  "type": "ε<⟳(x: 3 ↓ 1, y: 0, ε0(z::u8, z + y))>(x::int, x)",
+  "type": "ε<⟳(x: 3 ↦ x - 1 until 0, y: 0 ↦ ε0(z::u8, z + y), y)>(x::int, x)",
   "productions": {
-    "before": "ε<⟳(x: ?0 ↓ 1, y: 0, ε0(z::u8, z + y))>(x::int, x)"
+    "before": "ε<⟳(x: ?0 ↦ x - 1 until 0, y: 0 ↦ ε0(z::u8, z + y), y)>(x::int, x)"
   },
   "expect_errors": []
 }

@@ -24,8 +24,7 @@ term_order :: proc(a, b: Type) -> int {
 		return unknown_order(x, b.(^Unknown))
 	case ^Iterate:
 		y := b.(^Iterate)
-		if c := compare_ints(i128(x.down), i128(y.down)); c != 0 do return c
-		return terms_order({x.from, x.to, x.init, x.step}, {y.from, y.to, y.init, y.step})
+		return terms_order({x.start, x.init, x.stop, x.next, x.step, x.last}, {y.start, y.init, y.stop, y.next, y.step, y.last})
 	case ^Effect:
 		y := b.(^Effect)
 		if c := compare_ints(i128(x.id), i128(y.id)); c != 0 do return c
