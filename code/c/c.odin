@@ -205,7 +205,7 @@ function :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
 	w.f = f
 	w.defs = make([]code.Inst, len(f.kinds))
 	w.reads = make([]int, len(f.kinds))
-	survey(w, f.body)
+	survey(w, f.body, true)
 	fmt.sbprintfln(&w.b, "%s {{", signature(w, f, index))
 	w.depth = 1
 	for _, i in f.params {
@@ -219,10 +219,13 @@ function :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
 	return ""
 }
 
-// survey: the instruction that defines each value, and how many times each is read.
-survey :: proc(w: ^Writer, b: code.Body) {
+// survey: the instruction that defines each value, and how many times each is read
+// — the value of a body only when what holds it is read: the instructions are
+// surveyed from the last, so that each value is read before it is defined.
+survey :: proc(w: ^Writer, b: code.Body, read_value: bool) {
 	read :: proc(w: ^Writer, x: code.Value) {if x != code.NONE do w.reads[x] += 1}
-	for inst in b.insts {
+	if read_value do read(w, b.value)
+	#reverse for inst in b.insts {
 		switch i in inst {
 		case code.Const:
 			w.defs[i.dst] = inst
@@ -266,15 +269,14 @@ survey :: proc(w: ^Writer, b: code.Body) {
 			for a in i.args do read(w, a)
 		case code.Match:
 			read(w, i.target)
-			for arm in i.arms do survey(w, arm.body)
+			for arm in i.arms do survey(w, arm.body, i.dst != code.NONE && w.reads[i.dst] > 0)
 		case code.Loop:
 			for x in i.init do read(w, x)
-			survey(w, i.body)
+			survey(w, i.body, i.dst != code.NONE && w.reads[i.dst] > 0)
 		case code.Again:
 			for a in i.args do read(w, a)
 		}
 	}
-	read(w, b.value)
 }
 
 line :: proc(w: ^Writer, format: string, args: ..any) {
@@ -378,7 +380,9 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			declare(w, i.dst, call)
 			assume(w, i.dst)
 		case code.Match:
-			if i.dst != code.NONE do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
+			// a value nothing reads is not kept
+			kept := i.dst != code.NONE && w.reads[i.dst] > 0
+			if kept do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
 			target := name(w, i.target)
 			for arm, n in i.arms {
 				last := n == len(i.arms) - 1
@@ -395,12 +399,13 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 				}
 				w.depth += 1
 				if msg := body(w, arm.body); msg != "" do return msg
-				if i.dst != code.NONE && arm.body.value != code.NONE do line(w, "v%d = %s;", int(i.dst), name(w, arm.body.value))
+				if kept && arm.body.value != code.NONE do line(w, "v%d = %s;", int(i.dst), name(w, arm.body.value))
 				w.depth -= 1
 			}
 			line(w, "}}")
 		case code.Loop:
-			if i.dst != code.NONE do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
+			kept := i.dst != code.NONE && w.reads[i.dst] > 0
+			if kept do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
 			for x, n in i.params {
 				if x == i.init[n] do continue
 				line(w, "%s v%d = %s;", type_of(f.kinds[x]), int(x), name(w, i.init[n]))
@@ -411,7 +416,7 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			append(&w.loops, i.params)
 			if msg := body(w, i.body); msg != "" do return msg
 			pop(&w.loops)
-			if i.dst != code.NONE do line(w, "v%d = %s;", int(i.dst), name(w, i.body.value))
+			if kept do line(w, "v%d = %s;", int(i.dst), name(w, i.body.value))
 			line(w, "break;")
 			w.depth -= 1
 			line(w, "}}")
