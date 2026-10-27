@@ -5761,16 +5761,17 @@ movd_xmm_r64 :: proc(xmm: XMMRegister, reg: Register64) {
 	write([]u8{0x66, rex, 0x0F, 0x6E, modrm}) // 66 REX.W 0F 6E /r
 }
 
-// Move low quadword of XMM to 64-bit register
+// Move low quadword of XMM to 64-bit register: 66 REX.W 0F 7E /r, the XMM register
+// in reg, the general one in r/m
 movd_r64_xmm :: proc(reg: Register64, xmm: XMMRegister) {
-	rex_b, xmm_reg := encode_xmm(xmm)
-	rex_r := (u8(reg) & 0x8) != 0
+	rex_r, xmm_reg := encode_xmm(xmm)
+	rex_b := (u8(reg) & 0x8) != 0
 
 	rex: u8 = 0x48 // REX.W
 	if rex_r do rex |= 0x04 // REX.R
 	if rex_b do rex |= 0x01 // REX.B
 
-	modrm := encode_modrm(3, u8(reg) & 0x7, xmm_reg)
+	modrm := encode_modrm(3, xmm_reg, u8(reg) & 0x7)
 	write([]u8{0x66, rex, 0x0F, 0x7E, modrm}) // 66 REX.W 0F 7E /r
 }
 

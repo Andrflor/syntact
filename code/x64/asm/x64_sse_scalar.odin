@@ -8,8 +8,8 @@ package x64_assembler
 // proc per instruction, writing to the context ByteBuffer via `write`) so the
 // emitter calls a named proc instead of emitting raw bytes.
 //
-// Encodings (all REX.W where a GPR is involved, XMM0..XMM1 only — the emitter's
-// scratch pair):
+// Encodings (REX.W where a GPR is involved; a REX for XMM8..XMM15, after the
+// prefix):
 //   addsd  xmm,xmm : F2 0F 58 /r
 //   subsd  xmm,xmm : F2 0F 5C /r
 //   mulsd  xmm,xmm : F2 0F 59 /r
@@ -29,23 +29,23 @@ xmm_modrm :: proc(reg, rm: XMMRegister) -> u8 {
 
 // ucomisd xmm,xmm : 66 0F 2E /r — compares two doubles into ZF/CF (PF on NaN).
 ucomisd_xmm_xmm :: proc(a, b: XMMRegister) {
-	write([]u8{0x66, 0x0F, 0x2E, xmm_modrm(a, b)})
+	packed(0x66, 0x2E, a, b)
 }
 
 addsd_xmm_xmm :: proc(dst, src: XMMRegister) {
-	write([]u8{0xF2, 0x0F, 0x58, xmm_modrm(dst, src)})
+	packed(0xF2, 0x58, dst, src)
 }
 
 subsd_xmm_xmm :: proc(dst, src: XMMRegister) {
-	write([]u8{0xF2, 0x0F, 0x5C, xmm_modrm(dst, src)})
+	packed(0xF2, 0x5C, dst, src)
 }
 
 mulsd_xmm_xmm :: proc(dst, src: XMMRegister) {
-	write([]u8{0xF2, 0x0F, 0x59, xmm_modrm(dst, src)})
+	packed(0xF2, 0x59, dst, src)
 }
 
 divsd_xmm_xmm :: proc(dst, src: XMMRegister) {
-	write([]u8{0xF2, 0x0F, 0x5E, xmm_modrm(dst, src)})
+	packed(0xF2, 0x5E, dst, src)
 }
 
 cvtsd2ss_xmm_xmm :: proc(dst, src: XMMRegister) {

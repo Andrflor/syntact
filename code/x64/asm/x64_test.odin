@@ -2904,6 +2904,12 @@ testing_sse_packed :: proc(t: ^testing.T) {
 		encode: proc(dst, src: XMMRegister),
 	}
 	ops := []Packed {
+		{"movapd", movapd_xmm_xmm},
+		{"addsd", addsd_xmm_xmm},
+		{"subsd", subsd_xmm_xmm},
+		{"mulsd", mulsd_xmm_xmm},
+		{"divsd", divsd_xmm_xmm},
+		{"ucomisd", ucomisd_xmm_xmm},
 		{"paddq", paddq_xmm_xmm},
 		{"psubq", psubq_xmm_xmm},
 		{"pand", pand_xmm_xmm},
@@ -2922,6 +2928,15 @@ testing_sse_packed :: proc(t: ^testing.T) {
 		context.user_ptr = &buffer
 		op.encode(XMMRegister(dst), XMMRegister(src))
 		batch_add(batch, fmt.tprintf("%s xmm%d, xmm%d", op.name, dst, src))
+	}
+	for x in 0 ..< 16 do for r in get_all_registers64() {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		movq_xmm_r64(XMMRegister(x), r)
+		batch_add(batch, fmt.tprintf("movq xmm%d, %s", x, register64_to_string(r)))
+		buffer = ByteBuffer{}
+		movq_r64_xmm(r, XMMRegister(x))
+		batch_add(batch, fmt.tprintf("movq %s, xmm%d", register64_to_string(r), x))
 	}
 	Shift :: struct {
 		name:   string,
