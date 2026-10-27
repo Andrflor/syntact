@@ -207,42 +207,43 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 
 // unknown: the value an effect gave back, a parameter, or else an input of the
 // program, numbered in the order they are first read. Where an arm narrowed it,
-// ?ₖ::(L & S), it is read through a Narrow that has the narrowed bounds.
+// ?ₖ::(L & S), it is read through a Narrow.
 unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
-	#reverse for b in l.bound do if b.unknown != nil && kernel.same_unknown(b.unknown, u) do return narrowed(l, u, b.value)
+	#reverse for b in l.bound do if b.unknown != nil && kernel.same_unknown(b.unknown, u) do return narrowed(l, u, b.unknown, b.value)
 	m := machine_of_layout(l.k, kernel.layout_of(l.k, u))
 	if m != .Int do return fail(l, "the input ?%d is not an integer", u.id)
 	slot := len(l.inputs)
 	for x, i in l.inputs do if kernel.same_unknown(x, u) do slot = i
+	// an input, as it is written
+	written := new_clone(u^)
+	written.layout = nil
 	if slot == len(l.inputs) {
-		// read once, where the program starts, in the layout it is written with
+		// read once, where the program starts
 		append(&l.inputs, u)
-		written := u^
-		written.layout = nil
 		v := value(l.prog.funcs[0], .Int)
-		l.prog.funcs[0].kinds[v].bounds = term_bounds(l, &written)
+		l.prog.funcs[0].kinds[v].bounds = term_bounds(l, written)
 		append(&l.entry, Input{v, slot})
 		append(&l.read, v)
 	}
 	if l.f != l.prog.funcs[0] {
 		// in a function: read where it is asked
 		v := value(l.f, .Int)
-		l.f.kinds[v].bounds = term_bounds(l, u)
+		l.f.kinds[v].bounds = term_bounds(l, written)
 		emit(l, Input{v, slot})
-		append(&l.bound, Bound{unknown = u, value = v})
-		return v
+		append(&l.bound, Bound{unknown = written, value = v})
+		return narrowed(l, u, written, v)
 	}
-	return narrowed(l, u, l.read[slot])
+	return narrowed(l, u, written, l.read[slot])
 }
 
-// narrowed: v, the value u stands for, read where an arm narrowed u: a Narrow to
-// the bounds there, when they say more.
-narrowed :: proc(l: ^Lowering, u: ^kernel.Unknown, v: Value) -> Value {
-	if machine_of(l.f, v) != .Int do return v
-	bounds := meet(bounds_of(l.f, v), term_bounds(l, u))
-	if bounds == bounds_of(l.f, v) do return v
+// narrowed: v, the value u stands for as it stood when it was bound, read where an
+// arm narrowed its layout: through a Narrow, its bounds those of u there. What an
+// arm proves is read through it, so that what is computed from it is computed in
+// the arm, and nothing else holds facts of the arm alone.
+narrowed :: proc(l: ^Lowering, u, bound: ^kernel.Unknown, v: Value) -> Value {
+	if machine_of(l.f, v) != .Int || kernel.same(l.k, kernel.layout_of(l.k, u), kernel.layout_of(l.k, bound)) do return v
 	dst := value(l.f, .Int)
-	l.f.kinds[dst].bounds = bounds
+	l.f.kinds[dst].bounds = meet(bounds_of(l.f, v), term_bounds(l, u))
 	emit(l, Narrow{dst, v})
 	append(&l.bound, Bound{unknown = u, value = dst})
 	return dst

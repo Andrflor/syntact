@@ -7,7 +7,8 @@ import "core:fmt"
 // Runs the code of a program as the machine will: the instructions in order, the
 // arm of a match whose cover takes the target, a loop until its body ends without
 // an Again, each call of a symbol in the order it is written. The symbols are
-// given by the caller: what a library would answer.
+// given by the caller: what a library would answer. Each integer written is within
+// the bounds the kernel proved of it, or the run fails: a backend relies on them.
 
 Datum :: struct {
 	int:  i64,
@@ -119,6 +120,7 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			assign(regs, i.params, i.init)
 			append(&fr.loops, i.params)
 			for {
+				for x in i.params do if msg := proven(fr, x); msg != "" do return false, msg
 				again, err = run_body(m, fr, i.body)
 				if err != "" do return
 				if !again do break
@@ -130,8 +132,50 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			assign(regs, fr.loops[len(fr.loops) - 1], i.args)
 			return true, ""
 		}
+		if msg := proven(fr, written(inst)); msg != "" do return false, msg
 	}
 	return false, ""
+}
+
+// written: the value an instruction writes; NONE for none.
+written :: proc(inst: Inst) -> Value {
+	switch i in inst {
+	case Const:
+		return i.dst
+	case Real_Const:
+		return i.dst
+	case Text_Const:
+		return i.dst
+	case Input:
+		return i.dst
+	case Unary:
+		return i.dst
+	case Binary:
+		return i.dst
+	case In:
+		return i.dst
+	case Narrow:
+		return i.dst
+	case Foreign:
+		return i.dst
+	case Call:
+		return i.dst
+	case Match:
+		return i.dst
+	case Loop:
+		return i.dst
+	case Again:
+	}
+	return NONE
+}
+
+// proven: the integer x holds is within the bounds the kernel proved of it.
+proven :: proc(fr: ^Frame, x: Value) -> string {
+	if x == NONE || fr.f.kinds[x].machine != .Int do return ""
+	b := fr.f.kinds[x].bounds
+	v := i128(fr.regs[x].int)
+	if v < b.lo || v > b.hi do return fmt.tprintf("%s: v%d = %d, out of the bounds proven, %s", fr.f.name, int(x), v, print_cell(b))
+	return ""
 }
 
 // assign: dst take the values of src, all read before any is written.
