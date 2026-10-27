@@ -12,8 +12,9 @@ import code ".."
 
 // Costs: what a machine takes, in cycles, for an operation on registers — on
 // integers, on floats —, for a value it loads — a float, a text, an input, a
-// constant where an operand cannot be one —, a call, a branch; and the turns of a
-// loop.
+// constant where an operand cannot be one —, a call, a branch; the turns of a
+// loop; and its vectors: their lanes — none when it has no vector —, an operation
+// on each lane — INFINITE where it has none —, a value in each lane, a reduction.
 Costs :: struct {
 	ints:   [code.Op]f64,
 	reals:  [code.Op]f64,
@@ -21,51 +22,134 @@ Costs :: struct {
 	call:   f64,
 	branch: f64,
 	turns:  f64,
+	lanes:  int,
+	vints:  [code.Op]f64,
+	vreals: [code.Op]f64,
+	splat:  f64,
+	reduce: f64,
 }
 
+INFINITE :: f64(1e300)
+
+X64_INTS :: [code.Op]f64 {
+	.Add = 1,
+	.Sub = 1,
+	.Mul = 3,
+	.Div = 26,
+	.Mod = 26,
+	.Pow = 0, // by its count
+	.Neg = 1,
+	.And = 1,
+	.Or  = 1,
+	.Xor = 1,
+	.Not = 1,
+	.Shl = 1,
+	.Shr = 1,
+	.Eq  = 1,
+	.Ne  = 1,
+	.Lt  = 1,
+	.Le  = 1,
+	.Gt  = 1,
+	.Ge  = 1,
+}
+
+X64_REALS :: [code.Op]f64 {
+	.Add = 4,
+	.Sub = 4,
+	.Mul = 4,
+	.Div = 14,
+	.Mod = INFINITE,
+	.Pow = 0, // by its count
+	.Neg = 1,
+	.And = INFINITE,
+	.Or  = INFINITE,
+	.Xor = INFINITE,
+	.Not = INFINITE,
+	.Shl = INFINITE,
+	.Shr = INFINITE,
+	.Eq  = 3,
+	.Ne  = 3,
+	.Lt  = 3,
+	.Le  = 3,
+	.Gt  = 3,
+	.Ge  = 3,
+}
+
+// SSE2: two lanes of 64 bits; a product of integers in 32 bits is one pmuludq.
+SSE2_INTS :: [code.Op]f64 {
+	.Add = 1,
+	.Sub = 1,
+	.Mul = 6, // 1 on lanes in 32 bits
+	.Div = INFINITE,
+	.Mod = INFINITE,
+	.Pow = INFINITE,
+	.Neg = 1,
+	.And = 1,
+	.Or  = 1,
+	.Xor = 1,
+	.Not = 1,
+	.Shl = 1,
+	.Shr = 3, // 1 on lanes not negative
+	.Eq  = 2,
+	.Ne  = 3,
+	.Lt  = 3,
+	.Le  = 4,
+	.Gt  = 3,
+	.Ge  = 4,
+}
+
+SSE2_REALS :: [code.Op]f64 {
+	.Add = 4,
+	.Sub = 4,
+	.Mul = 4,
+	.Div = 14,
+	.Mod = INFINITE,
+	.Pow = INFINITE,
+	.Neg = 1,
+	.And = INFINITE,
+	.Or  = INFINITE,
+	.Xor = INFINITE,
+	.Not = INFINITE,
+	.Shl = INFINITE,
+	.Shr = INFINITE,
+	.Eq  = 3,
+	.Ne  = 3,
+	.Lt  = 3,
+	.Le  = 3,
+	.Gt  = 3,
+	.Ge  = 3,
+}
+
+// X64: the machine the x86-64 backend writes for; its vectors are not written yet.
 X64 := Costs {
-	ints = {
-		.Add = 1,
-		.Sub = 1,
-		.Mul = 3,
-		.Div = 26,
-		.Mod = 26,
-		.Pow = 0, // by its count
-		.Neg = 1,
-		.And = 1,
-		.Or = 1,
-		.Xor = 1,
-		.Not = 1,
-		.Shl = 1,
-		.Shr = 1,
-		.Eq = 1,
-		.Ne = 1,
-		.Lt = 1,
-		.Le = 1,
-		.Gt = 1,
-		.Ge = 1,
-	},
-	reals = #partial {
-		.Add = 4,
-		.Sub = 4,
-		.Mul = 4,
-		.Div = 14,
-		.Pow = 0, // by its count
-		.Neg = 1,
-		.Eq = 3,
-		.Ne = 3,
-		.Lt = 3,
-		.Le = 3,
-		.Gt = 3,
-		.Ge = 3,
-	},
+	ints   = X64_INTS,
+	reals  = X64_REALS,
 	load   = 1,
 	call   = 20,
 	branch = 2,
 	turns  = 16,
+	lanes  = 0,
+	vints  = SSE2_INTS,
+	vreals = SSE2_REALS,
+	splat  = 2,
+	reduce = 2,
 }
 
-INFINITE :: f64(1e300)
+// C: x86-64 as the C compiler writes for it, with the vectors of SSE2.
+C := Costs {
+	ints   = X64_INTS,
+	reals  = X64_REALS,
+	load   = 1,
+	call   = 20,
+	branch = 2,
+	turns  = 16,
+	lanes  = 2,
+	vints  = SSE2_INTS,
+	vreals = SSE2_REALS,
+	splat  = 2,
+	reduce = 2,
+}
+
 
 // extract: the node of least cost of each class, by its index; -1 for a class
 // nothing computes.
@@ -113,15 +197,27 @@ node_cost :: proc(g: ^Graph, costs: ^Costs, n: Node, cost: []f64) -> f64 {
 		return sum(g, cost, n.args)
 	case .Real, .Text, .Input:
 		return costs.load
+	case .Splat:
+		return costs.splat + sum(g, cost, n.args)
+	case .Lanes:
+		return costs.load
+	case .Reduce:
+		a := g.facts[find(g, n.args[0])]
+		return costs.reduce * f64(a.lanes - 1) + sum(g, cost, n.args)
 	case .Unary:
 		a := g.facts[find(g, n.args[0])]
-		return (a.machine == .Real ? costs.reals : costs.ints)[n.op] + sum(g, cost, n.args)
+		return table(costs, a)[n.op] + sum(g, cost, n.args)
 	case .Binary:
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
-		ops := a.machine == .Real ? costs.reals : costs.ints
+		ops := table(costs, a)
 		w := ops[n.op]
+		if a.lanes > 0 && a.machine == .Int {
+			// in 32 bits, a product is one instruction; not negative, a shift
+			if n.op == .Mul && in_32(a.bounds) && in_32(b.bounds) do w = ops[.Add]
+			if n.op == .Shr && a.bounds.lo >= 0 do w = ops[.Shl]
+		}
 		// a power by squaring: a square, a product and a branch for each bit of the count
-		if n.op == .Pow do w = f64(bits(b.bounds.hi)) * (2 * ops[.Mul] + costs.branch)
+		if n.op == .Pow && a.lanes == 0 do w = f64(bits(b.bounds.hi)) * (2 * ops[.Mul] + costs.branch)
 		// a constant first takes a register
 		if a.constant != nil do w += costs.load
 		return w + sum(g, cost, n.args)
@@ -141,6 +237,17 @@ node_cost :: proc(g: ^Graph, costs: ^Costs, n: Node, cost: []f64) -> f64 {
 		return sum(g, cost, n.args[:last]) + costs.turns * of(g, cost, n.args[last])
 	}
 	return INFINITE
+}
+
+// table: what an operation costs on the machine of a.
+table :: proc(costs: ^Costs, a: Facts) -> [code.Op]f64 {
+	if a.lanes > 0 do return a.machine == .Real ? costs.vreals : costs.vints
+	return a.machine == .Real ? costs.reals : costs.ints
+}
+
+// in_32: integers not negative that 32 bits hold.
+in_32 :: proc(b: code.Bounds) -> bool {
+	return b.lo >= 0 && b.hi < 1 << 32
 }
 
 // bits: the bits of a count up to hi.

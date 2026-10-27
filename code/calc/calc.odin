@@ -46,6 +46,9 @@ Kind :: enum u8 {
 	Binary, // a op b
 	In, // index: the cover; x in it, 1 or 0
 	Narrow, // x as the arm it is read in narrows it; the arm
+	Splat, // value: the lanes; a in each
+	Lanes, // index: the integers of each lane, in the graph's table
+	Reduce, // op over the lanes of a
 	Foreign, // index: the symbol; the state, then the arguments — gives the state after, and the answer
 	Call, // index: the function; its arguments, after the state when it has effects — then gives the state after, and the answer
 	Match, // owner: the match; the target, the state when its arms have effects, then what each arm gives
@@ -104,11 +107,12 @@ Loop_Info :: struct {
 	value:    bool,
 }
 
-// Facts: what holds of every computation of a class.
+// Facts: what holds of every computation of a class: of each lane of a vector.
 Facts :: struct {
 	machine:  code.Machine,
 	bounds:   code.Bounds,
 	constant: Maybe(i64),
+	lanes:    int,
 }
 
 Graph :: struct {
@@ -120,6 +124,7 @@ Graph :: struct {
 	facts:   [dynamic]Facts, // per class, kept on the class merged into
 	table:   map[u64][dynamic]int, // the nodes, by their hash
 	covers:  [dynamic]code.Cover,
+	vectors: [dynamic][]i64, // the integers of a vector, one per lane
 	matches: [dynamic]Match_Info,
 	loops:   [dynamic]Loop_Info,
 	merges:  int, // how many merges were made
@@ -198,6 +203,17 @@ rebuild :: proc(g: ^Graph) {
 	}
 }
 
+// vector: the index of these integers in the table of vectors, once.
+vector :: proc(g: ^Graph, values: []i64) -> int {
+	outer: for v, i in g.vectors {
+		if len(v) != len(values) do continue
+		for x, k in v do if x != values[k] do continue outer
+		return i
+	}
+	append(&g.vectors, values)
+	return len(g.vectors) - 1
+}
+
 // index_members: the nodes of each class, from the canonical classes.
 index_members :: proc(g: ^Graph) {
 	g.members = make([][dynamic]int, len(g.parent))
@@ -220,12 +236,13 @@ same_node :: proc(g: ^Graph, a, b: Node) -> bool {
 // observe: the facts the code gives a value, which hold of its class.
 observe :: proc(g: ^Graph, c: Class, kind: code.Kind) {
 	c := find(g, c)
-	g.facts[c] = meet(g.facts[c], Facts{machine = kind.machine, bounds = kind.machine == .Int ? kind.bounds : code.EVERY})
+	g.facts[c] = meet(g.facts[c], Facts{machine = kind.machine, bounds = kind.machine == .Int ? kind.bounds : code.EVERY, lanes = kind.lanes})
 }
 
 meet :: proc(a, b: Facts) -> Facts {
 	out := a
 	if out.machine == .None do out.machine = b.machine
+	out.lanes = max(a.lanes, b.lanes)
 	out.bounds = code.meet(a.bounds, b.bounds)
 	if out.constant == nil do out.constant = b.constant
 	return out

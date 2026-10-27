@@ -14,6 +14,8 @@ import code ".."
 //   x * 2ᵏ = x << k
 //   x / 2ᵏ = x >> k             x ≥ 0
 //   x % 2ᵏ = x & (2ᵏ - 1)       x ≥ 0
+//   x / c = (x · m) >> s        0 ≤ x ≤ X, m = ⌈2ˢ / c⌉, X · (m·c - 2ˢ) < 2ˢ, X · m < 2⁶³
+//   x % c = x - c · (x / c)
 //   x ** i * x ** j = x ** (i + j)                  x = x ** 1
 //   x ** 2m = (x ** m)²         x ** (2m + 1) = x · (x ** m)²
 //   a ⊕ b = b ⊕ a               ⊕ commutes: + * & | ^ = ≠, on integers and floats
@@ -21,7 +23,7 @@ import code ".."
 
 Law :: proc(g: ^Graph, c: Class, n: Node)
 
-LAWS := [?]Law{known, neutral, absorbing, strength, commuted, conversed, gathered, chained}
+LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, gathered, chained}
 
 // saturate: the laws on every node, and those of the loops (loops.odin), until none
 // adds a node nor merges two classes, or the graph holds budget nodes.
@@ -125,6 +127,26 @@ strength :: proc(g: ^Graph, c: Class, n: Node) {
 		if nonnegative do equal(g, c, binary(.Shr, x, add(g, int_node(k))))
 	case .Mod:
 		if nonnegative do equal(g, c, binary(.And, x, add(g, int_node(d - 1))))
+	}
+}
+
+// divided: a quotient by a constant, as a product and a shift, exact over the
+// bounds of the dividend (Granlund, Montgomery); a remainder, by its quotient.
+divided :: proc(g: ^Graph, c: Class, n: Node) {
+	x, d, ok := operands(g, n)
+	if !ok || n.op != .Div && n.op != .Mod || d < 2 || g.facts[x].machine != .Int do return
+	if _, power := log2(d); power do return
+	b := g.facts[x].bounds
+	if b.lo < 0 || !in_64(b) do return
+	top := b.hi
+	for s in uint(1) ..< 64 {
+		m := (i128(1) << s + i128(d) - 1) / i128(d)
+		if top * (m * i128(d) - i128(1) << s) >= i128(1) << s do continue
+		if top * m >= i128(1) << 63 do return
+		q := add(g, binary(.Shr, add(g, binary(.Mul, x, add(g, int_node(i64(m))))), add(g, int_node(i64(s)))))
+		if n.op == .Div do merge(g, c, q)
+		else do equal(g, c, binary(.Sub, x, add(g, binary(.Mul, q, add(g, int_node(d))))))
+		return
 	}
 }
 

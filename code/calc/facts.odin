@@ -13,7 +13,7 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	out := Facts{bounds = code.EVERY}
 	switch n.kind {
 	case .Int:
-		return Facts{.Int, {i128(n.value), i128(n.value)}, n.value}
+		return Facts{.Int, {i128(n.value), i128(n.value)}, n.value, 0}
 	case .Real:
 		out.machine = .Real
 	case .Text:
@@ -31,9 +31,25 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	case .Narrow:
 		x := g.facts[find(g, n.args[0])]
 		out.machine, out.bounds = x.machine, x.bounds
-	case .Unary:
+	case .Splat:
+		a := g.facts[find(g, n.args[0])]
+		out.machine, out.bounds, out.lanes = a.machine, a.bounds, int(n.value)
+	case .Lanes:
+		values := g.vectors[n.index]
+		out.machine, out.lanes = .Int, len(values)
+		out.bounds = {i128(values[0]), i128(values[0])}
+		for v in values do out.bounds = code.hull(out.bounds, {i128(v), i128(v)})
+	case .Reduce:
 		a := g.facts[find(g, n.args[0])]
 		out.machine = a.machine
+		if a.machine != .Int do break
+		// the lanes, one after another
+		b := a.bounds
+		for _ in 1 ..< a.lanes do b = binary_bounds(n.op, b, a.bounds)
+		out.bounds = b
+	case .Unary:
+		a := g.facts[find(g, n.args[0])]
+		out.machine, out.lanes = a.machine, a.lanes
 		if a.machine != .Int do break
 		#partial switch n.op {
 		case .Neg:
@@ -41,22 +57,24 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		case .Not:
 			out.bounds = fit({-a.bounds.hi - 1, -a.bounds.lo - 1})
 		}
-		if x, known := a.constant.?; known do out.constant = code.unary(n.op, .Int, code.Datum{int = x}).int
+		if x, known := a.constant.?; known && a.lanes == 0 do out.constant = code.unary(n.op, .Int, code.Datum{int = x}).int
 	case .Binary:
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
 		out.machine = comparison(n.op) ? .Int : a.machine
+		out.lanes = a.lanes
 		if comparison(n.op) do out.bounds = {0, 1}
 		if a.machine != .Int do break
 		out.bounds = code.meet(out.bounds, binary_bounds(n.op, a.bounds, b.bounds))
 		x, known_a := a.constant.?
 		y, known_b := b.constant.?
-		if known_a && known_b {
+		if known_a && known_b && a.lanes == 0 {
 			if d, ok := code.binary_of(n.op, .Int, code.Datum{int = x}, code.Datum{int = y}); ok do out.constant = d.int
 		}
 	case .Start, .Arm, .Foreign, .Match, .Loop, .Again, .Exit, .Get:
 	// a state, a tuple or a tail; what a tuple gives, the code says
 	}
 	if c, known := out.constant.?; known do out.bounds = {i128(c), i128(c)}
+	if out.lanes > 0 do out.constant = nil
 	return out
 }
 

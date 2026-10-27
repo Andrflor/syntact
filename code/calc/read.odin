@@ -73,6 +73,12 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 		set(r, i.dst, Node{kind = .Unary, op = i.op, args = classes(r, {i.a})})
 	case code.Binary:
 		set(r, i.dst, Node{kind = .Binary, op = i.op, args = classes(r, {i.a, i.b})})
+	case code.Splat:
+		set(r, i.dst, Node{kind = .Splat, value = i64(g.func.kinds[i.dst].lanes), args = classes(r, {i.a})})
+	case code.Lanes:
+		set(r, i.dst, Node{kind = .Lanes, index = vector(g, i.values)})
+	case code.Reduce:
+		set(r, i.dst, Node{kind = .Reduce, op = i.op, args = classes(r, {i.a})})
 	case code.In:
 		append(&g.covers, i.cover)
 		set(r, i.dst, Node{kind = .In, index = len(g.covers) - 1, args = classes(r, {i.x})})

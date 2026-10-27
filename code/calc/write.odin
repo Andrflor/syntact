@@ -56,7 +56,7 @@ write_function :: proc(p: ^Plan, f: ^code.Func, value, state: Class) -> (out: ^c
 // fresh: a new value of the function, with the facts of c.
 fresh :: proc(w: ^Writer, c: Class) -> code.Value {
 	facts := w.g.facts[find(w.g, c)]
-	v := code.value(w.f, facts.machine)
+	v := code.value(w.f, facts.machine, facts.lanes)
 	if facts.machine == .Int do w.f.kinds[v].bounds = facts.bounds
 	return v
 }
@@ -139,7 +139,7 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 			if read do done(w, answer, dst)
 			return done(w, c, code.NONE)
 		}
-	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow:
+	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce:
 	}
 	args := values_of(w, n.args)
 	dst := fresh(w, c)
@@ -161,6 +161,12 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 		inst = code.In{dst, args[0], g.covers[n.index]}
 	case .Narrow:
 		inst = code.Narrow{dst, args[0]}
+	case .Splat:
+		inst = code.Splat{dst, args[0]}
+	case .Lanes:
+		inst = code.Lanes{dst, g.vectors[n.index]}
+	case .Reduce:
+		inst = code.Reduce{dst, args[0], n.op}
 	case .Call:
 		inst = code.Call{dst, n.index, args}
 	}
