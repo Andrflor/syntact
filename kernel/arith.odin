@@ -180,8 +180,10 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 				continue
 			}
 			// an operation is in the family its signature gives: 100 / (n + 1) is an
-			// integer; a divisor, a count, is still proven
-			if _, is_op := a.(^Operation); is_op {
+			// integer; a pattern, in that of its products, one of which it gives; a
+			// divisor, a count, is still proven
+			#partial switch _ in a {
+			case ^Operation, ^Pattern:
 				if f, known := family_of(k, a); known && family_holds(sig.args[min(i, 1)], f) do continue
 			}
 			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next

@@ -383,6 +383,7 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case ^Pattern:
 		p := new(Pattern)
 		p^ = v^
+		p.normal = false // what is copied is computed again
 		p.target = copy_term(k, m, v.target, scope)
 		p.branches = slice.clone(v.branches)
 		for &b in p.branches {
@@ -824,6 +825,7 @@ different_structures :: proc(k: ^Kernel, a, b: Type) -> bool {
 // bindings are, in order: the same names, the same kinds, equal values (§5.3).
 same :: proc(k: ^Kernel, a, b: Type) -> bool {
 	if a == nil || b == nil do return a == nil && b == nil
+	if a == b do return true // the very term
 	switch x in a {
 	case Char:
 		y, ok := b.(Char)

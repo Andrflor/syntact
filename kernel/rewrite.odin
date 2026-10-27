@@ -54,7 +54,9 @@ reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
 	return !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
 }
 
-// rewrite: t with its unknowns rewritten, in normal form.
+// rewrite: t with its unknowns rewritten, in normal form. A term none of whose parts
+// a rewrite changes is the term itself: in normal form, its parts the same, its law
+// gives it back — only what holds a rewritten unknown is computed again.
 rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 	if len(r) == 0 || t == nil do return t
 	switch v in t {
@@ -64,48 +66,82 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		if x, found := rewritten(r, v); found do return x
 		return t
 	case ^Effect:
-		out := effect_law(k, v, rewrite(k, v.then, r))
+		then := rewrite(k, v.then, r)
+		call := v.call != nil ? rewrite_call(k, v.call, r) : nil
+		fold := v.fold != nil ? rewrite_fold(k, v.fold, r) : nil
+		if then == v.then && call == v.call && fold == v.fold do return t
+		out := effect_law(k, v, then)
 		if e, is_effect := out.(^Effect); is_effect {
-			if v.call != nil do e.call = rewrite_call(k, v.call, r)
-			if v.fold != nil do e.fold = rewrite_fold(k, v.fold, r)
+			if v.call != nil do e.call = call
+			if v.fold != nil do e.fold = fold
 		}
 		return out
 	case ^Collapse:
 		for x in r do if x.call != nil && same(k, x.call, v) do return x.term
 		return rewrite_call(k, v, r)
 	case ^Fold:
-		return fold_law(k, rewrite_fold(k, v, r))
+		parts := fold_parts(v)
+		rewritten := rewrite_all(k, parts, r)
+		if identical(rewritten, parts) do return t
+		return fold_law(k, with_parts(v, rewritten))
 	case ^Least:
-		return least_law(k, v.index, rewrite(k, v.holds, r), v.span)
+		holds := rewrite(k, v.holds, r)
+		if holds == v.holds do return t
+		return least_law(k, v.index, holds, v.span)
 	case ^Series:
 		out := new(Series)
 		out^ = v^
 		out.lo, out.hi, out.term = rewrite(k, v.lo, r), rewrite(k, v.hi, r), rewrite(k, v.term, r)
+		if out.lo == v.lo && out.hi == v.hi && out.term == v.term do return t
 		return series_law(k, out)
 	case ^Recurrent:
 		out := new(Recurrent)
 		out^ = v^
 		out.initial, out.at = rewrite_all(k, v.initial, r), rewrite(k, v.at, r)
+		if identical(out.initial, v.initial) && out.at == v.at do return t
 		return recurrent_law(k, out)
 	case ^Operation:
 		if is_string_value(t) do return t
-		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
+		args := rewrite_all(k, v.args, r)
+		if identical(args, v.args) do return t
+		return as_normal(operation_law(k, v.op, args, v.span))
 	case ^Or:
-		return or_law(k, rewrite_all(k, v.terms, r))
+		terms := rewrite_all(k, v.terms, r)
+		if identical(terms, v.terms) do return t
+		return as_normal(or_law(k, terms))
 	case ^And:
-		return and_law(k, rewrite_all(k, v.terms, r))
+		terms := rewrite_all(k, v.terms, r)
+		if identical(terms, v.terms) do return t
+		return as_normal(and_law(k, terms))
 	case ^Not:
-		return not_law(k, rewrite(k, v.term, r))
+		term := rewrite(k, v.term, r)
+		if term == v.term do return t
+		return as_normal(not_law(k, term))
 	case ^Is:
-		return is_law(rewrite(k, v.term, r))
+		term := rewrite(k, v.term, r)
+		if term == v.term do return t
+		return as_normal(is_law(term))
 	case ^Range:
-		return range_law(k, rewrite(k, v.lo, r), rewrite(k, v.hi, r), v.family, v.span)
+		lo, hi := rewrite(k, v.lo, r), rewrite(k, v.hi, r)
+		if lo == v.lo && hi == v.hi do return t
+		return as_normal(range_law(k, lo, hi, v.family, v.span))
 	case ^Pattern:
 		p := new(Pattern)
 		p.target, p.span = rewrite(k, v.target, r), v.span
 		p.branches = make([]Branch, len(v.branches))
-		for b, i in v.branches do p.branches[i] = Branch{cover = b.cover, product = rewrite(k, b.product, r), span = b.span}
-		return pattern_law(k, p)
+		moved := false
+		for b, i in v.branches {
+			p.branches[i] = Branch{cover = b.cover, product = rewrite(k, b.product, r), span = b.span}
+			moved ||= p.branches[i].product != b.product
+		}
+		if p.target != v.target do return as_normal(pattern_law(k, p))
+		if !moved do return t
+		// the target the same, so are its unknowns, and the reach of each branch: only
+		// its product is rewritten; t ? {c -> p  -> p} = p, where every value is taken
+		all_same := p.branches[len(p.branches) - 1].cover == nil
+		for b in p.branches[1:] do all_same &&= same(k, b.product, p.branches[0].product)
+		if all_same do return p.branches[0].product
+		return as_normal(p)
 	case ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}
 	return t
@@ -133,6 +169,13 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 // rewrite_fold: the fold with its parts rewritten; what it binds is its own.
 rewrite_fold :: proc(k: ^Kernel, f: ^Fold, r: Rewrite) -> ^Fold {
 	return with_parts(f, rewrite_all(k, fold_parts(f), r))
+}
+
+// identical: the same terms, each the very term.
+identical :: proc(a, b: []Type) -> bool {
+	if len(a) != len(b) do return false
+	for x, i in a do if x != b[i] do return false
+	return true
 }
 
 rewrite_all :: proc(k: ^Kernel, ts: []Type, r: Rewrite) -> []Type {

@@ -91,18 +91,22 @@ Effect :: struct {
 
 Or :: struct {
 	terms: []Type,
+	normal: bool, // a normal form: normal gives it back
 }
 
 And :: struct {
 	terms: []Type,
+	normal: bool, // a normal form: normal gives it back
 }
 
 Not :: struct {
 	term: Type,
+	normal: bool, // a normal form: normal gives it back
 }
 
 Is :: struct {
 	term: Type,
+	normal: bool, // a normal form: normal gives it back
 }
 
 // Range: every primitive from lo to hi; a nil bound is infinite. Its bounds are
@@ -112,6 +116,7 @@ Range :: struct {
 	lo, hi: Type,
 	family: Range_Family,
 	span:   syn.Span,
+	normal: bool, // a normal form: normal gives it back
 }
 
 Range_Family :: enum u8 {
@@ -145,6 +150,7 @@ Operation :: struct {
 	op:   Operator,
 	args: []Type,
 	span: syn.Span, // as written: where an illegal operator is reported
+	normal: bool, // a normal form: normal gives it back
 }
 
 // Name: a binding, the last occurrence visible where the name is written.
@@ -196,6 +202,7 @@ Pattern :: struct {
 	target:   Type,
 	branches: []Branch,
 	span:     syn.Span,
+	normal: bool, // a normal form: normal gives it back
 }
 
 // Branch: a scope whose production is written in its cover (§6): `scope` holds
