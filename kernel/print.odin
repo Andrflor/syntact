@@ -186,7 +186,7 @@ write_bare :: proc(b: ^Printer, t: Type) {
 			return
 		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
-		// call that acts
+		// a call with effects
 		if v.call != nil {
 			strings.write_string(b, "ε<")
 			write_type(b, v.call, 0)

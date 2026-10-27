@@ -1,6 +1,6 @@
 {
   "name": "name_reads_answer",
-  "description": "A name reads what its binding gives back: one act, the scope's.",
+  "description": "A name reads what its binding gives back: one effect, the scope's.",
   "source": "r -> !?::u8\nx -> r + r",
   "type": "2 * ?0",
   "expect_errors": []

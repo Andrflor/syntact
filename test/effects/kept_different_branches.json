@@ -1,6 +1,6 @@
 {
   "name": "kept_different_branches",
-  "description": "t ? {c -> p  -> p} = p does not merge a branch that acts with one that does not.",
+  "description": "t ? {c -> p  -> p} = p does not merge a branch with effects with one without.",
   "source": "n -> ??::u8\nx -> n ? {0 -> {w -> !?::none  -> 1}!  -> 1}",
   "type": "?0 ? {0 -> ε0(1)  -> 1}",
   "expect_errors": []

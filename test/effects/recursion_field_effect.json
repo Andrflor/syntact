@@ -1,6 +1,6 @@
 {
-  "name": "recursion_field_acts",
-  "description": "A binding above the production acts: each call runs it, its act before the call, the field carved to what it gave.",
+  "name": "recursion_field_effect",
+  "description": "A binding above the production has an effect: each call runs it, its effect before the call, the field carved to what it gave.",
   "source": "field -> {u8:n -> ??  w -> !?::none  -> n ? {0 -> 0  -> n + field{n -> n - 1}!}}\nx -> field{n -> 5}!",
   "type": "ε0(ε<field{n -> 5  w -> none}!>(x, x))",
   "productions": {

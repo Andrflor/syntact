@@ -13,7 +13,7 @@
 An earlier draft said "a non-singleton production **is** the effect marker". **That is wrong.** Counter-examples:
 
 - A void / no-return external still produces an effect. In C, a `void` function (e.g. `close(fd)` for its side effect) has no meaningful return yet absolutely performs an effect. Its production might fold to `none` / a singleton, and the effect must **still** be lifted.
-- A singleton-returning external still produces an effect. An external could return a constant (or a value the compiler happens to narrow to a singleton). The effect — the call across the boundary — is unchanged. Folding the *result* to a point must not erase the *act* of calling.
+- A singleton-returning external still produces an effect. An external could return a constant (or a value the compiler happens to narrow to a singleton). The effect — the call across the boundary — is unchanged. Folding the *result* to a point must not erase the *effect* of calling.
 
 So the rule is:
 

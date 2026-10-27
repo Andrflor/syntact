@@ -95,11 +95,11 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	}
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span
-	if root.acting do return call_act(k, out)
+	if root.effectful do return call_effect(k, out)
 	return out
 }
 
-// as_call: t is a recursive call, or what one that acts gives back.
+// as_call: t is a recursive call, or what one with effects gives back.
 as_call :: proc(t: Type) -> (^Collapse, bool) {
 	#partial switch v in t {
 	case ^Collapse:
@@ -226,7 +226,7 @@ base_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: b
 	return f.?
 }
 
-// base_cases: the products of e that do not call root, through the acts that wrap
+// base_cases: the products of e that do not call root, through the effects that wrap
 // them (§4.8).
 base_cases :: proc(e: Type, root: ^Scope) -> []Type {
 	out := make([dynamic]Type)
@@ -254,10 +254,10 @@ gives_scopes :: proc(k: ^Kernel, c: ^Collapse) -> bool {
 
 // production_law: the value of a production. In a recursive scope, the equation —
 // its first production — is given first, and solved when it has a closed form; a
-// carve of it is the same equation. When the equation acts besides its calls — its
-// production, or a binding above it, acts —, each call runs it, so its calls are
-// acts too (§4.8): the production is typed again, on a copy, its calls in the order
-// they are written like any act.
+// carve of it is the same equation. When the equation has effects besides its calls
+// — its production, or a binding above it, has some —, each call runs it, so its
+// calls are effects too (§4.8): the production is typed again, on a copy, its calls
+// in the order they are written like any effect.
 production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	root := origin(b.scope)
 	if !recursive(root) do return normal(k, b.value)
@@ -265,8 +265,8 @@ production_law :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	if found && first != b && first.state == .Not_Asked do binding_type(k, first)
 	value := normal(k, b.value)
 	if first != b do return value
-	if !root.acting && acts(with_acts(k, root, b, value)) {
-		root.acting = true
+	if !root.effectful && has_effect(with_effects(k, root, b, value)) {
+		root.effectful = true
 		m: Copier
 		m.scopes[b.scope] = b.scope // the scopes written in the production are copied
 		value = normal(k, copy_term(k, &m, b.value, b.scope))
@@ -328,11 +328,11 @@ legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
 // with m ≥ b for every value, then f{n -> m}! = c + g(b + 1) + … + g(m), a
 // polynomial in m when g is one: c + G(m) - G(b), G(m) = g(0) + … + g(m).
 // When what the calls carve holds known values in the scope, the equation is read
-// where they are unknowns, and solved at those values. An equation that acts is
-// never solved: each call runs.
+// where they are unknowns, and solved at those values. An equation with
+// effects is never solved: each call runs.
 solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 	if closed, solved := closed_form(k, root, value); solved do return closed
-	if root.acting do return value
+	if root.effectful do return value
 	values := carved_by_calls(value, root)
 	if len(values) == 0 do return value
 	for b in values do values[b] = binding_type(k, b)

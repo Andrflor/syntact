@@ -1,6 +1,6 @@
 {
-  "name": "path_call_argument_acting_equation",
-  "description": "The act of an argument runs before a call that acts.",
+  "name": "path_call_argument_equation_with_effects",
+  "description": "The effect of an argument runs before a call with effects.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> !?::u8}!",
   "type": "ε1(x::u8, ε<loop{n -> x}!>(y, y))",
   "expect_errors": []

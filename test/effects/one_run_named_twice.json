@@ -1,6 +1,6 @@
 {
   "name": "one_run_named_twice",
-  "description": "One collapse named twice is one run: x - x = 0, one act.",
+  "description": "One collapse named twice is one run: x - x = 0, one effect.",
   "source": "g -> {u8:r -> !?  -> r}\nx -> {a -> g!  -> a - a}!",
   "type": "ε0(x::u8, 0)",
   "expect_errors": []

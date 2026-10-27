@@ -1,6 +1,6 @@
 {
   "name": "compose_carves_in_branches",
-  "description": "A carve of a scope that acts in each branch of a pattern on an answer: its effect on each path.",
+  "description": "A carve of a scope with effects in each branch of a pattern on an answer: its effect on each path.",
   "source": "t -> {u8:m -> 0  w -> !?::none  -> m}\nx -> {u8:r -> !?  -> r ? {0 -> t{m -> 1}!  -> t{m -> r}!}}!",
   "type": "ε1(x::u8, x ? {0 -> ε0(1)  -> ε0(x)})",
   "expect_errors": []

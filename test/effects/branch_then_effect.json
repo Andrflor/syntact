@@ -1,6 +1,6 @@
 {
   "name": "branch_then_effect",
-  "description": "An effect after a pattern that acts: in each branch, after the branch's effect.",
+  "description": "An effect after a pattern with effects: in each branch, after the branch's effect.",
   "source": "n -> ??::u8\nx -> (n ? {0 -> !?::u8  -> 5}) + !?::u8",
   "type": "?0 ? {0 -> ε0(x::u8, ε1(y::u8, x + y))  -> ε1(x::u8, x + 5)}",
   "expect_errors": []

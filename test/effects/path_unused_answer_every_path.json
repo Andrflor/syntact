@@ -1,6 +1,6 @@
 {
   "name": "path_unused_answer_every_path",
-  "description": "An answer no path uses is kept on every path; an act in one branch, on that path only.",
+  "description": "An answer no path uses is kept on every path; an effect in one branch, on that path only.",
   "source": "n -> ??::u8\nx -> {u8:r -> !?  -> n ? {0 -> {w -> !?::none  -> 1}!  -> 2}}!",
   "type": "ε0(x::u8, ?0 ? {0 -> ε1(1)  -> 2})",
   "expect_errors": []

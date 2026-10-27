@@ -1,6 +1,6 @@
 {
   "name": "boundary_gives_nothing",
-  "description": "A call that gives nothing back is an act without unknown.",
+  "description": "A call that gives nothing back is an effect without unknown.",
   "source": "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n  pi -> {-> 3}\n}\nx -> {s -> libc.srand{seed -> 7}!  -> 1}!",
   "type": "ε<srand{seed -> 7}!>(1)",
   "expect_errors": []

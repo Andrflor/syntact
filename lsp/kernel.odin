@@ -183,7 +183,7 @@ visible_bindings :: proc(program: ^kernel.Scope, offset: u32) -> []^kernel.Bindi
 
 // field_binding: the binding a field reads, in the scope its target is.
 field_binding :: proc(k: ^kernel.Kernel, f: Field) -> ^kernel.Binding {
-	// the field of what the target gives back: its acts are not the field's
+	// the field of what the target gives back: its effects are not the field's
 	target, is_scope := kernel.given(k, kernel.normal(k, f.target)).(^kernel.Scope)
 	if !is_scope do return nil
 	b, _ := kernel.occurrence(kernel.placed(k, target, .Value), f.name, f.ordinal, f.last)

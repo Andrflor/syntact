@@ -1025,7 +1025,7 @@ collect_property_completions :: proc(doc: ^Document, offset: u32, items: ^[dynam
 		if decl != syntax.INVALID_NODE do b = written_binding(&doc.checked, name, ast.node_spans[decl].start)
 	}
 	if b == nil do return
-	// the fields of what x gives back: its acts are its scope's (specs/types.md §4.8)
+	// the fields of what x gives back: its effects are its scope's (specs/types.md §4.8)
 	target, is_scope := kernel.binding_value(&doc.checked, b).(^kernel.Scope)
 	if !is_scope do return
 	for field in kernel.placed(&doc.checked, target, .Value) {

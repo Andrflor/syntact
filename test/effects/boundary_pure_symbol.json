@@ -1,6 +1,6 @@
 {
   "name": "boundary_pure_symbol",
-  "description": "A symbol whose production does not act gives its value: nothing crosses.",
+  "description": "A symbol whose production has no effect gives its value: nothing crosses.",
   "source": "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n  pi -> {-> 3}\n}\nx -> libc.pi!",
   "type": "3",
   "expect_errors": []

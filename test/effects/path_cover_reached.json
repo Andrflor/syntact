@@ -1,6 +1,6 @@
 {
   "name": "path_cover_reached",
-  "description": "The only path comes to the second cover: it acts.",
+  "description": "The only path comes to the second cover: its effect runs.",
   "source": "x -> 5 ? {0 -> 1  (!?::u8) -> 2  -> 3}",
   "type": "ε0(x::u8, 5 ? {x -> 2  -> 3})",
   "expect_errors": []

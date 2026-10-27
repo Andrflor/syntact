@@ -1,6 +1,6 @@
 {
   "name": "pattern_same_run_both_branches",
-  "description": "A run in both branches is one act, whichever branch is taken.",
+  "description": "A run in both branches is one effect, whichever branch is taken.",
   "source": "g -> {u8:r -> !?  -> r}\nn -> ??::u8\nx -> n ? {0 -> g!  -> g!}",
   "type": "ε0(x::u8, x)",
   "expect_errors": []

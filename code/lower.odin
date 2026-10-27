@@ -7,8 +7,8 @@ import "core:strings"
 // FROM THE NORMAL FORM TO CODE (specs/language/15)
 //
 // The type of a program is its normal form; its code is that form, read as
-// instructions. A known value is a constant. An unknown that no act gives back is an
-// input of the program. An act is run where it stands, in order: the call of a
+// instructions. A known value is a constant. An unknown that no effect gives back is
+// an input of the program. An effect is run where it stands, in order: the call of a
 // symbol behind a boundary is an instruction, and what it gives back is the value
 // its answer stands for. A pattern is a match on its target, each cover the cells
 // of a set the laws computed. A recursion that stays is a function, and its calls
@@ -24,14 +24,14 @@ Lowering :: struct {
 	prog:   ^Program,
 	f:      ^Func,
 	insts:  ^[dynamic]Inst, // the body the instructions go to
-	bound:  [dynamic]Bound, // in the body: the answers of its acts, the parameters, the inputs, the narrowings
+	bound:  [dynamic]Bound, // in the body: the answers of its effects, the parameters, the inputs, the narrowings
 	inputs: [dynamic]^kernel.Unknown,
 	funcs:  map[^kernel.Scope]int, // the function of each recursive equation lowered
 	self:   ^Self, // the function being lowered; nil in the program itself
 	error:  string,
 }
 
-// Bound: what an unknown stands for in the code: the value an act gave back, a
+// Bound: what an unknown stands for in the code: the value an effect gave back, a
 // parameter, an input, or what an arm narrowed one of these to.
 Bound :: struct {
 	unknown: ^kernel.Unknown,
@@ -46,10 +46,10 @@ Self :: struct {
 }
 
 // program_type: the type of the file: one run of it, its production — or the
-// default one, none — with the acts of the bindings above it (specs/types.md §4.8).
+// default one, none — with the effects of the bindings above it (specs/types.md §4.8).
 program_type :: proc(k: ^kernel.Kernel) -> kernel.Type {
 	if p, found := kernel.first_production(k, k.root); found do return kernel.binding_type(k, p)
-	return kernel.with_acts(k, k.root, nil, kernel.None{})
+	return kernel.with_effects(k, k.root, nil, kernel.None{})
 }
 
 // lower_program: the code of a file the kernel checked without error.
@@ -162,7 +162,7 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		if l.error != "" do return NONE
 		return match(l, v.branches, target, tail)
 	case ^kernel.Effect:
-		return act(l, v, tail)
+		return effect(l, v, tail)
 	case ^kernel.Collapse:
 		if !v.recursive do break
 		if tail && is_self(l, v) do return again(l, v)
@@ -171,7 +171,7 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
 
-// unknown: the value an act gave back, a parameter, or else an input of the
+// unknown: the value an effect gave back, a parameter, or else an input of the
 // program, numbered in the order they are first read. Where an arm narrowed it,
 // ?ₖ::(L & S), it is read through a Narrow that has the narrowed bounds.
 unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
@@ -199,12 +199,12 @@ unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
 	return v
 }
 
-// act: an act, run where it stands, then what it wraps. Only the call of a symbol
-// behind a boundary is code: another effect is served by nothing.
-act :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
+// effect: an effect, run where it stands, then what it wraps. Only the call of a
+// symbol behind a boundary is code: another effect is served by nothing.
+effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {
-		// a call of an equation that acts: the call, then what it wraps — in tail
+		// a call of an equation with effects: the call, then what it wraps — in tail
 		// position when what it wraps is what the call gives back
 		if tail && is_self(l, e.call) && gives_answer(e) do return again(l, e.call)
 		dst := call(l, e.call)
@@ -243,7 +243,7 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 	return lower(l, e.then, tail)
 }
 
-// gives_answer: what the act wraps is what it gives back.
+// gives_answer: what the effect wraps is what it gives back.
 gives_answer :: proc(e: ^kernel.Effect) -> bool {
 	if e.answer == nil do return kernel.is_none(e.then)
 	u, is_unknown := e.then.(^kernel.Unknown)
@@ -312,7 +312,7 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	if index, done := l.funcs[root]; done do return index
 	family, known := kernel.family_of(l.k, c)
 	if !known do return int(fail(l, "%s has no family the code holds", kernel.print_type(c)))
-	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.acting})
+	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.effectful})
 	f.result = machine_of_layout(l.k, kernel.family_term(family))
 	index := len(l.prog.funcs)
 	append(&l.prog.funcs, f)

@@ -396,8 +396,8 @@ test_corpus :: proc(t: ^testing.T) {
 }
 
 // The corpus of test/effects (specs/types.md §4.8): a pure computation crosses the
-// effects; none is erased, copied, replaced or reordered, recursive calls that act
-// included. Each source binds `x` last; its type is printed, and so are the
+// effects; none is erased, copied, replaced or reordered, recursive calls with
+// effects included. Each source binds `x` last; its type is printed, and so are the
 // productions a case names; the errors are compared by kind. Every case holds.
 @(test)
 test_effects :: proc(t: ^testing.T) {

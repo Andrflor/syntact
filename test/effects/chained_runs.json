@@ -1,6 +1,6 @@
 {
   "name": "chained_runs",
-  "description": "A run that runs a scope twice, run twice: four acts, in order.",
+  "description": "A run that runs a scope twice, run twice: four effects, in order.",
   "source": "g -> {u8:r -> !?  -> r}\nh -> {a -> g!  b -> g!  -> a + b}\nx -> h! - h!",
   "type": "ε0(x::u8, ε0(y::u8, ε0(z::u8, ε0(x3::u8, x + y - z - x3))))",
   "expect_errors": []

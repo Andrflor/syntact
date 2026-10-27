@@ -1,5 +1,5 @@
 {
-  "name": "path_expansion_places_acts",
+  "name": "path_expansion_places_effects",
   "description": "The bindings an expansion places run in the scope that places them.",
   "source": "g -> {-> {u8:k -> !?}}\nx -> {...g!, -> 1}!",
   "type": "ε0(x::u8, 1)",

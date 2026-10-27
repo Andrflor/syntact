@@ -1,6 +1,6 @@
 {
   "name": "default_production_runs",
-  "description": "Two runs of a scope of effects without production: none - none = none, the four acts kept, in order.",
+  "description": "Two runs of a scope of effects without production: none - none = none, the four effects kept, in order.",
   "source": "s -> {!?, !?}\nx -> s! - s!",
   "type": "ε0(x, ε1(y, ε0(z, ε1(x3, none))))",
   "expect_errors": []

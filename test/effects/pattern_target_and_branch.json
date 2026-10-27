@@ -1,6 +1,6 @@
 {
   "name": "pattern_target_and_branch",
-  "description": "The target acts first, then the branch taken.",
+  "description": "The effect of the target runs first, then the branch taken.",
   "source": "x -> (!?::u8) ? {0 -> !?::none  -> 5}",
   "type": "ε0(x::u8, x ? {0 -> ε1(none)  -> 5})",
   "expect_errors": []

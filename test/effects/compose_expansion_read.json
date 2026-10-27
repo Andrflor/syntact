@@ -1,6 +1,6 @@
 {
   "name": "compose_expansion_read",
-  "description": "The bindings an expansion places act in the run, and `.r` reads what r gave in that run.",
+  "description": "The effects of the bindings an expansion places run in the run, and `.r` reads what r gave in that run.",
   "source": "base -> {w -> !?::none  u8:r -> !?}\nx -> {...base, u8:s -> !?, -> .r + s}!",
   "type": "ε0(ε1(x::u8, ε2(y::u8, x + y)))",
   "expect_errors": []

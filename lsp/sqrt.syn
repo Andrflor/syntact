@@ -1,0 +1,2 @@
+libm -> <libm.so.6>{ sqrt -> { f64:x, -> ??::f64 } }
+-> libm.sqrt{3.0}!

@@ -9,13 +9,13 @@ import "core:strings"
 // a program leaves to run once the laws have simplified what they can. It keeps the
 // structure of that form — a pattern is a match, a recursion whose calls are in
 // tail position a loop — and what the kernel proved of each value: the bounds of an
-// integer, the narrowing an arm makes, the cells of a cover, whether a call acts. A
-// backend reads these facts; it never computes them again.
+// integer, the narrowing an arm makes, the cells of a cover, whether a function has
+// effects. A backend reads these facts; it never computes them again.
 //
 // Its values are virtual registers, each written once, but for the value of a match,
 // written by the arm that runs, and the parameters of a loop, written on entry and
-// at each Again. An act is an instruction in the order it runs: the call of a symbol
-// behind a boundary (specs/types.md §4.8).
+// at each Again. An effect is an instruction in the order it runs: the call of a
+// symbol behind a boundary (specs/types.md §4.8).
 
 Value :: distinct int
 
@@ -203,7 +203,7 @@ Import :: struct {
 }
 
 // Func: a function of the program; its parameters are its first values, v0…
-// Pure when its equation does not act (specs/types.md §4.8): what it gives depends
+// Pure when its equation has no effect (specs/types.md §4.8): what it gives depends
 // on its arguments only.
 Func :: struct {
 	name:   string,

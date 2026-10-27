@@ -1,6 +1,6 @@
 {
   "name": "compose_expansion_two_runs",
-  "description": "Two runs of a scope that expands one that acts: each run's own answers.",
+  "description": "Two runs of a scope that expands one with effects: each run's own answers.",
   "source": "base -> {w -> !?::none  u8:r -> !?}\ns -> {...base, -> .r}\nx -> s! - s!",
   "type": "ε0(ε1(x::u8, ε0(ε1(y::u8, x - y))))",
   "expect_errors": []

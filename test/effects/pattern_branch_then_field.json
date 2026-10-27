@@ -1,6 +1,6 @@
 {
   "name": "pattern_branch_then_field",
-  "description": "A field that acts in one branch, then a field that acts always: in each branch, in order.",
+  "description": "A field with an effect in one branch, then a field with an effect always: in each branch, in order.",
   "source": "n -> ??::u8\nx -> {a -> n ? {0 -> !?::u8  -> 5}  u8:s -> !?  -> a + s}!",
   "type": "?0 ? {0 -> ε0(x::u8, ε1(y::u8, x + y))  -> ε1(x::u8, x + 5)}",
   "expect_errors": []

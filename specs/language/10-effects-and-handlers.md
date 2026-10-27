@@ -1,7 +1,7 @@
 # Effects and handlers
 
 > **Open.** Events and handlers are not written in `types.md` yet, and the kernel
-> does not build them. An emission is an act, not a value: the laws that simplify a
+> does not build them. An emission is an effect, not a value: the laws that simplify a
 > type must neither erase nor reorder it. Writing what an emission is in the algebra,
 > and which laws it stops, comes before the residual program and its code
 > (chapter 15).
@@ -72,7 +72,7 @@ lib!     // "default"
 main!    // "main"
 ```
 
-So a collapse is an act in a context, not a value fixed once: the same `lib!` gives
+So a collapse is an effect in a context, not a value fixed once: the same `lib!` gives
 two answers in two contexts.
 
 ## Specializing

@@ -1,6 +1,6 @@
 {
   "name": "recursion_two_calls",
-  "description": "Two calls of an equation that acts are two acts, in order: x - y, not 0.",
+  "description": "Two calls of an equation with effects are two effects, in order: x - y, not 0.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> 3}! - loop{n -> 3}!",
   "type": "ε<loop{n -> 3}!>(x, ε<loop{n -> 3}!>(y, x - y))",
   "expect_errors": []

@@ -30,7 +30,7 @@ partial!                      // and here, only now
 ```
 
 Carving an external does not run it. The effect is at `!`, and only there: crossing
-the boundary is an act, whatever comes back — a value, a constant, or nothing.
+the boundary is an effect, whatever comes back — a value, a constant, or nothing.
 
 ## No glue
 

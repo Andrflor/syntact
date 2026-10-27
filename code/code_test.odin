@@ -61,10 +61,10 @@ CODE_CASES := []Code_Case {
 	{name = "loop", source = "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", inputs = {10}, int = 55},
 	// a call in tail position is a loop: the stack does not grow with its turns
 	{name = "tail call", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!", inputs = {300_000}, int = 600_000},
-	{name = "tail call that acts", source = LIBC + "tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> tick{n -> n - 1}!}!}}\n-> tick{n -> ??::u8}!", inputs = {3}, int = 0, calls = {"puts", "puts", "puts"}},
+	{name = "tail call with effects", source = LIBC + "tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> tick{n -> n - 1}!}!}}\n-> tick{n -> ??::u8}!", inputs = {3}, int = 0, calls = {"puts", "puts", "puts"}},
 	{name = "closed form, no function", source = "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\n-> sum{n -> ??::u8}!", inputs = {10}, int = 55},
-	{name = "recursion that acts", source = LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", inputs = {3}, int = 3, calls = {"puts", "puts", "puts"}},
-	{name = "answer read by the next act", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> libc.abs{n -> -2}!  b -> libc.abs{n -> a}!  -> b + cnt{n -> n - 1}!}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs", "abs", "abs", "abs"}},
+	{name = "recursion with effects", source = LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", inputs = {3}, int = 3, calls = {"puts", "puts", "puts"}},
+	{name = "answer read by the next effect", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> libc.abs{n -> -2}!  b -> libc.abs{n -> a}!  -> b + cnt{n -> n - 1}!}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs", "abs", "abs", "abs"}},
 	{name = "answers of a recursion", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs"}},
 }
 

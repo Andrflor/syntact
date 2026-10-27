@@ -1,6 +1,6 @@
 {
   "name": "path_call_argument_pure_equation",
-  "description": "The act of an argument runs once, before the call; the closed form applies to what it gave.",
+  "description": "The effect of an argument runs once, before the call; the closed form applies to what it gave.",
   "source": "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\nx -> sum{n -> !?::u8}!",
   "type": "ε0(x::u8, (x + x * x) / 2)",
   "expect_errors": []

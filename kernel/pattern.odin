@@ -29,12 +29,12 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 //
 //   t ? {c₀ -> p₀  …  cᵢ -> pᵢ  …} = t ? {c₀ -> p₀  …  -> t ? {cᵢ -> pᵢ  …}}
 //
-// so the acts of a cover are those of the first branch of a pattern: computed with
+// so the effects of a cover are those of the first branch of a pattern: computed with
 // the target, before any test.
 pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
 	if is_invalid(target) do return target
 	for b, i in p.branches {
-		if b.cover == nil || !acts(normal(k, b.cover)) do continue
+		if b.cover == nil || !has_effect(normal(k, b.cover)) do continue
 		if i == 0 do return sequence(k, p, {target, normal(k, b.cover)}, covered)
 		branches := make([dynamic]Branch)
 		append(&branches, ..p.branches[:i])

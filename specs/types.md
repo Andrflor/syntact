@@ -315,8 +315,8 @@ not none. A pure binding crosses them:
 {w -> !?::none  -> 5}{w -> 0}             invalid: a carve does not replace an effect
 ```
 
-A name reads what its binding gives back, never its act: the act is the run's, and
-each run gives back its own answer. Two collapses are two runs:
+A name reads what its binding gives back, never its effect: the effect is the
+run's, and each run gives back its own answer. Two collapses are two runs:
 
 ```text
 g -> {u8:r -> !?  -> r}
@@ -324,11 +324,11 @@ g -> {u8:r -> !?  -> r}
 g! - g!                    = ε₁(x::u8, ε₁(y::u8, x - y))   two runs
 ```
 
-A recursive call of an equation that acts is an act. The equation acts when its
-production, or a binding above it, acts besides its calls: each call runs it. What
-the call gives back is bound in what follows it, and nothing crosses it but the pure;
-the equation has no closed form, it stays (§5.6). An equation that does not act is
-unchanged:
+A recursive call of an equation with effects is an effect. The equation has effects
+when its production, or a binding above it, has some besides its calls: each call
+runs it. What the call gives back is bound in what follows it, and nothing crosses
+it but the pure; the equation has no closed form, it stays (§5.6). An equation
+without effects is unchanged:
 
 ```text
 loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}
@@ -337,7 +337,7 @@ loop{n -> 3}! - loop{n -> 3}!   = ε<loop{n -> 3}!>(x, ε<loop{n -> 3}!>(y, x - 
 {u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
 ```
 
-A call takes its arguments as values: the acts that give them run before it. An
+A call takes its arguments as values: the effects that give them run before it. An
 expansion is computed where it is written, and the bindings it places run in the
 scope that places them:
 
@@ -360,9 +360,9 @@ n ? {0 -> 1  (!?::u8) -> 2  -> 3}        = n ? {0 -> 1  -> ε₁(x::u8, n ? {x -
 
 `<lib>{…}` is a boundary: a scope whose symbols — the scopes written in it — are run
 outside, in lib. The run of a symbol is the call of the symbol, with what the run
-carved: the act of its production `!?::L` is that call, and what it gives back is in
-L. A symbol is a scope like any other: carving it calls nothing, and its fields that
-act run before the call, which takes their answers as values.
+carved: the effect of its production `!?::L` is that call, and what it gives back is
+in L. A symbol is a scope like any other: carving it calls nothing, and the effects
+of its fields run before the call, which takes their answers as values.
 
 ```text
 libm -> <libm.so.6>{

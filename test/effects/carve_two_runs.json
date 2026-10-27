@@ -1,6 +1,6 @@
 {
   "name": "carve_two_runs",
-  "description": "Two carves of a scope that acts are two runs.",
+  "description": "Two carves of a scope with effects are two runs.",
   "source": "t -> {u8:m -> 1  w -> !?::none  -> m + 1}\nx -> t{m -> 5}! + t{m -> 6}!",
   "type": "ε0(ε0(13))",
   "expect_errors": []

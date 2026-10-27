@@ -88,7 +88,7 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 	return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
 }
 
-// collapse_law: {… -> p …}! = p, the first production, with the acts of the
+// collapse_law: {… -> p …}! = p, the first production, with the effects of the
 // bindings above it (§4.8, effect.odin); none without one.
 collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	s, ok := target.(^Scope)
@@ -99,7 +99,7 @@ collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	return collapsed(k, s, c)
 }
 
-// product_of: what the first production of s gives, before the acts of the bindings
+// product_of: what the first production of s gives, before the effects of the bindings
 // above it (§4.8); none without one. A recursive call is never unfolded
 // (recursion.odin).
 product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
@@ -122,7 +122,7 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	return None{}
 }
 
-// product: what a production's value gives, before the acts above it.
+// product: what a production's value gives, before the effects above it.
 product :: proc(k: ^Kernel, p: ^Binding) -> Type {
 	t := binding_type(k, p)
 	if p.state != .Done do return t // asked while it is given: the problem
@@ -206,7 +206,7 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 		}
 		if b.scope != s do return unsupported_at(k, a.span, "a carve through an expansion")
 		// no law replaces an effect (§4.8)
-		if acts(binding_type(k, b)) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s is an effect: a carve does not replace it", b.name != "" ? fmt.tprintf("`%s`", b.name) : "this binding"))
+		if has_effect(binding_type(k, b)) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s is an effect: a carve does not replace it", b.name != "" ? fmt.tprintf("`%s`", b.name) : "this binding"))
 		changes[b] = a.value
 	}
 	if p := infer_holes(k, s, &changes, span); p != nil do return p

@@ -1,6 +1,6 @@
 {
   "name": "carve_places_effect_read_twice",
-  "description": "An effect a carve places in a field read twice is one act.",
+  "description": "An effect a carve places in a field read twice is one effect.",
   "source": "t -> {u8:m -> 1  -> m + m}\nx -> t{m -> !?::u8}!",
   "type": "ε0(x::u8, 2 * x)",
   "expect_errors": []

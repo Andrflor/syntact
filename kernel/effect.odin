@@ -12,9 +12,9 @@ import "core:slice"
 //   εₖ(x, a) op εⱼ(y, b)  = εₖ(x, εⱼ(y, a op b))     the effects in the order written
 //
 // so the laws of §4 apply to what the effects wrap, never to an effect. An effect
-// in a branch is in that branch. A scope holds the acts of its bindings until it
-// is collapsed: its run gives the production, with the acts of the bindings above
-// it, in the order they are written. A name reads what its binding gives back.
+// in a branch is in that branch. A scope holds the effects of its bindings until
+// it is collapsed: its run gives the production, with the effects of the bindings
+// above it, in the order they are written. A name reads what its binding gives back.
 
 // effect_law: εₖ(x, t); x in a single primitive p is p (§7: ?ₖ::p = p): the effect
 // gives nothing back, εₖ(t).
@@ -24,9 +24,9 @@ effect_law :: proc(k: ^Kernel, e: ^Effect, then: Type) -> Type {
 	return wrapped(e, e.answer, then)
 }
 
-// call_act: a recursive call of an equation that acts, as an act: x, what it gives
-// back, is bound in what follows it.
-call_act :: proc(k: ^Kernel, c: ^Collapse) -> Type {
+// call_effect: a recursive call of an equation with effects, as an effect: x, what
+// it gives back, is bound in what follows it.
+call_effect :: proc(k: ^Kernel, c: ^Collapse) -> Type {
 	x := new_unknown(k, nil)
 	x.call = c
 	e := new(Effect)
@@ -42,7 +42,7 @@ wrapped :: proc(e: ^Effect, x: ^Unknown, t: Type) -> Type {
 	return out
 }
 
-// crossed: what the run s of a symbol behind a boundary gives: the act of its
+// crossed: what the run s of a symbol behind a boundary gives: the effect of its
 // production is the call of the symbol, with what the run carved (§4.8).
 crossed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, product: Type) -> Type {
 	e, is_effect := product.(^Effect)
@@ -61,14 +61,14 @@ symbol_of :: proc(s: ^Scope) -> (lib: string, ok: bool) {
 	return s.parent.boundary, true
 }
 
-// acts: t, in normal form, holds an act where it is computed: it is an effect, or
-// a pattern one of whose branches acts.
-acts :: proc(t: Type) -> bool {
+// has_effect: t, in normal form, holds an effect where it is computed: it is an
+// effect, or a pattern one of whose branches has one.
+has_effect :: proc(t: Type) -> bool {
 	#partial switch v in t {
 	case ^Effect:
 		return true
 	case ^Pattern:
-		for b in v.branches do if acts(b.product) do return true
+		for b in v.branches do if has_effect(b.product) do return true
 	}
 	return false
 }
@@ -77,9 +77,9 @@ acts :: proc(t: Type) -> bool {
 Law :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type
 
 // sequence: t computed on its parts, in normal form. The parts are computed in the
-// order they are written: the first that acts is computed first, and t is in the
-// effect it gives, or in each branch of the pattern its act is in. A pure part
-// crosses the act. On pure parts, the law of t applies.
+// order they are written: the first that has an effect is computed first, and t is
+// in the effect it gives, or in each branch of the pattern its effect is in. A pure
+// part crosses the effect. On pure parts, the law of t applies.
 sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 	for part in parts do if is_invalid(part) do return part
 	for part, i in parts {
@@ -89,7 +89,7 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 			rest[i] = v.then
 			return wrapped(v, v.answer, sequence(k, t, rest, law))
 		case ^Pattern:
-			if !acts(v) do continue
+			if !has_effect(v) do continue
 			branches := make([]Branch, len(v.branches))
 			for b, j in v.branches {
 				rest := slice.clone(parts)
@@ -102,13 +102,13 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 	return law(k, t, parts)
 }
 
-// given: what t gives back, its acts left where they are run: what a name reads.
+// given: what t gives back, its effects left where they are run: what a name reads.
 given :: proc(k: ^Kernel, t: Type) -> Type {
 	#partial switch v in t {
 	case ^Effect:
 		return given(k, v.then)
 	case ^Pattern:
-		if !acts(v) do return t
+		if !has_effect(v) do return t
 		branches := make([]Branch, len(v.branches))
 		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = given(k, b.product), span = b.span}
 		return pattern_law(k, branching(v, branches))
@@ -116,7 +116,7 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 	return t
 }
 
-// renewed: t, each of its acts with a new answer, but those new already; run maps
+// renewed: t, each of its effects with a new answer, but those new already; run maps
 // each answer as written to the new one. What one run gives back is not what
 // another gives back.
 renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
@@ -130,7 +130,7 @@ renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 		run^ = rewriting(run^, v.answer, x)
 		return wrapped(v, x, renewed(k, rewrite(k, v.then, rewriting(nil, v.answer, x)), run))
 	case ^Pattern:
-		if !acts(v) do return t
+		if !has_effect(v) do return t
 		branches := make([]Branch, len(v.branches))
 		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = renewed(k, b.product, run), span = b.span}
 		return pattern_law(k, branching(v, branches))
@@ -144,8 +144,8 @@ is_new :: proc(run: Rewrite, u: ^Unknown) -> bool {
 	return false
 }
 
-// in_run: t, a part of a run, after the acts before it: what it reads of their
-// answers is what they gave in this run, then its own acts give new ones.
+// in_run: t, a part of a run, after the effects before it: what it reads of their
+// answers is what they gave in this run, then its own effects give new ones.
 in_run :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 	return renewed(k, rewrite(k, t, run^), run)
 }
@@ -157,16 +157,16 @@ branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 	return out
 }
 
-// ran: the acts of the bindings of s above its production p — nil: the default one,
+// ran: the effects of the bindings of s above its production p — nil: the default one,
 // below every binding —, in the order they are written, joined to parts (§4.8). An
 // expansion is computed where it is written, then the bindings it places are.
 // Another production is not run; what is below p is not reached, like code after a
 // return. True when p is reached, placed by an expansion.
 //
-// For a run, run is not nil: each act gives back a new answer, which the acts after
-// it read, and changes carves each binding of s that acts to what it gives back —
-// an expansion to a copy of what it places, carved likewise —, so that what reads
-// it reads that answer.
+// For a run, run is not nil: each effect gives back a new answer, which the effects
+// after it read, and changes carves each binding of s that has one to what it gives
+// back — an expansion to a copy of what it places, carved likewise —, so that what
+// reads it reads that answer.
 ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rewrite, changes: ^map[^Binding]Type) -> bool {
 	for b in s.bindings {
 		if b == p do return true
@@ -175,8 +175,8 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rew
 		case .Expand:
 			if b.value == nil && b.color == nil do continue
 			t := binding_type(k, b)
-			acting := acts(t)
-			if acting {
+			effectful := has_effect(t)
+			if effectful {
 				if run != nil do t = in_run(k, t, run)
 				append(parts, t)
 			}
@@ -187,11 +187,11 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rew
 				reached = ran(k, inner, p, parts, run, &placing)
 				if len(placing) > 0 do value = carved_copy(k, inner, placing)
 			}
-			if run != nil && (acting || len(placing) > 0) do changes[b] = value
+			if run != nil && (effectful || len(placing) > 0) do changes[b] = value
 			if reached do return true
 		case .Push, .Pull:
 			t := binding_type(k, b)
-			if !acts(t) do continue
+			if !has_effect(t) do continue
 			if run != nil {
 				t = in_run(k, t, run)
 				changes[b] = given(k, t)
@@ -202,9 +202,9 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rew
 	return false
 }
 
-// with_acts: v, what the production p of s gives — nil: the default production,
-// none —, with the acts of the bindings above it, in the order they are written.
-with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
+// with_effects: v, what the production p of s gives — nil: the default production,
+// none —, with the effects of the bindings above it, in the order they are written.
+with_effects :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
 	parts := make([dynamic]Type)
 	ran(k, s, p, &parts, nil, nil)
 	if len(parts) == 0 do return v
@@ -212,9 +212,9 @@ with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
 	return sequence(k, nil, parts[:], last_part)
 }
 
-// collapsed: s!, one run of s (§4.8): the acts of the bindings above its production,
-// in the order they are written, then the production — or the default one, none.
-// Each act of the run gives back a new answer, which what reads its binding reads,
+// collapsed: s!, one run of s (§4.8): the effects of the bindings above its
+// production, in the order they are written, then the production — or the default
+// one, none. Each effect of the run gives back a new answer, which what reads its binding reads,
 // and which a call takes as a value.
 collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	run: Rewrite

@@ -1,6 +1,6 @@
 {
   "name": "boundary_two_calls",
-  "description": "Two calls are two acts, each its own answer.",
+  "description": "Two calls are two effects, each its own answer.",
   "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nx -> libm.sqrt{x -> 2.0}! + libm.sqrt{x -> 2.0}!",
   "type": "ε<sqrt{x -> 2.0}!>(x::f64, ε<sqrt{x -> 2.0}!>(y::f64, x + y))",
   "expect_errors": []

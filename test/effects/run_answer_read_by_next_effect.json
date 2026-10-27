@@ -1,6 +1,6 @@
 {
-  "name": "run_answer_read_by_next_act",
-  "description": "In a run, the answer an act gives is what the acts after it read: the call of labs takes the answer of abs in this run.",
+  "name": "run_answer_read_by_next_effect",
+  "description": "In a run, the answer an effect gives is what the effects after it read: the call of labs takes the answer of abs in this run.",
   "source": "libc -> <libc.so.6>{\n  abs -> {i32:v, -> !?::i32}\n  labs -> {i64:v, -> !?::i64}\n}\nx -> {a -> libc.abs{v -> -3}!  b -> libc.labs{v -> a}!  -> b}!",
   "type": "ε<abs{v -> -3}!>(x::i32, ε<labs{v -> x}!>(y::i64, y))",
   "expect_errors": []

@@ -1,6 +1,6 @@
 {
   "name": "two_runs",
-  "description": "Two collapses are two runs: two acts, two answers.",
+  "description": "Two collapses are two runs: two effects, two answers.",
   "source": "g -> {u8:r -> !?  -> r}\nx -> g! - g!",
   "type": "ε0(x::u8, ε0(y::u8, x - y))",
   "expect_errors": []

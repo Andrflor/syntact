@@ -69,16 +69,16 @@ Unknown :: struct {
 	written:  Type, // `??::L`: L as written; `C:x -> ??`: the color C; nil: everything
 	layout:   Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
 	instance: ^Scope, // in a carve whose changes its layout names: ?ₖ read in that carve
-	call:     ^Collapse, // what a recursive call that acts gives back (§4.8): a value of its equation
+	call:     ^Collapse, // what a recursive call with effects gives back (§4.8): a value of its equation
 }
 
 // Effect: εₖ(x, t), the effect written k (§4.8). x is what it gives back, bound in
-// t, the computation it wraps; each run of a scope gives the acts it gathers new
+// t, the computation it wraps; each run of a scope gives the effects it gathers new
 // ones (effect.odin). Written alone, `!?::L` is εₖ(x::L, x).
 Effect :: struct {
 	id:     int,
 	answer: ^Unknown, // nil: it gives nothing back, εₖ(t)
-	call:   ^Collapse, // the act is this call: a recursive call that acts, or a symbol behind a boundary
+	call:   ^Collapse, // the effect is this call: a recursive call with effects, or a symbol behind a boundary
 	then:   Type,
 	span:   syn.Span,
 }
@@ -230,7 +230,7 @@ Binding :: struct {
 	carved:      bool, // in a copy: its value is the carve's
 	typed_color: Type,
 	typed_value: Type,
-	typed_product: Type, // a production: what its value gives, before the acts above it
+	typed_product: Type, // a production: what its value gives, before the effects above it
 	state:       Typing,
 }
 
@@ -245,7 +245,7 @@ Scope :: struct {
 	complete:  bool, // all its bindings are built: all are visible
 	producing: bool, // one of its productions is being built: it may name itself
 	reached:   bool, // asked once: it is checked (check.odin)
-	acting:    bool, // a recursive scope whose equation acts: its calls are acts (§4.8)
+	effectful: bool, // a recursive scope whose equation has effects: its calls are effects (§4.8)
 	boundary:  string, // `<lib>{…}`: the scopes written in it are symbols, run in lib (§4.8)
 	name:      string, // the binding it is the value of, as written: for printing
 	span:      syn.Span,

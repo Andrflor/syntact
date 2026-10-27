@@ -1,6 +1,6 @@
 {
   "name": "recursion_called_by_scope",
-  "description": "A scope that calls an equation that acts, run twice: two acts of the call.",
+  "description": "A scope that calls an equation with effects, run twice: two effects of the call.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\ng -> {-> loop{n -> 3}!}\nx -> g! - g!",
   "type": "ε<loop{n -> 3}!>(x, ε<loop{n -> 3}!>(y, x - y))",
   "expect_errors": []

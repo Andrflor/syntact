@@ -1,6 +1,6 @@
 {
   "name": "recursion_not_erased",
-  "description": "A call that acts is not erased by x * 0.",
+  "description": "A call with effects is not erased by x * 0.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> 3}! * 0",
   "type": "ε<loop{n -> 3}!>(x, 0)",
   "expect_errors": []
