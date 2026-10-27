@@ -145,6 +145,12 @@ binary_bounds :: proc(op: code.Op, a, b: code.Bounds) -> code.Bounds {
 		case b.lo >= 0:
 			return {0, b.hi}
 		}
+	case .Mul_High:
+		// a not negative times an integer of 64 bits as unsigned, its high half
+		if a.lo >= 0 && b.lo == b.hi {
+			m := i128(u64(i64(b.lo)))
+			return {(a.lo * m) >> 64, (a.hi * m) >> 64}
+		}
 	case .Pow:
 		if a.lo >= 0 && b.lo >= 0 && b.hi < 64 {
 			lo, lo_ok := power(a.lo, b.lo)

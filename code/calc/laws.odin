@@ -14,7 +14,7 @@ import code ".."
 //   x * 2ᵏ = x << k             x * (2ᵏ ± 1) = (x << k) ± x
 //   x / 2ᵏ = x >> k             x ≥ 0
 //   x % 2ᵏ = x & (2ᵏ - 1)       x ≥ 0
-//   x / c = (x · m) >> s        0 ≤ x ≤ X, m = ⌈2ˢ / c⌉, X · (m·c - 2ˢ) < 2ˢ, X · m < 2⁶³
+//   x / c = (x · m) >> s, …     0 ≤ x ≤ X: Granlund, Montgomery (divided)
 //   x % c = x - c · (x / c)
 //   x ** i * x ** j = x ** (i + j)                  x = x ** 1
 //   x ** 2m = (x ** m)²         x ** (2m + 1) = x · (x ** m)²
@@ -150,23 +150,58 @@ strength :: proc(g: ^Graph, c: Class, n: Node) {
 	}
 }
 
-// divided: a quotient by a constant, as a product and a shift, exact over the
-// bounds of the dividend (Granlund, Montgomery); a remainder, by its quotient.
+// divided: a quotient by a constant c, 2 < c not a power of 2, x in 0..X, as
+// products and shifts, exact over those bounds (Granlund, Montgomery 1994): each
+// that holds, the cost choosing —
+//
+//   (x · m) >> s                    m = ⌈2ˢ / c⌉, X · (m·c - 2ˢ) < 2ˢ, X · m < 2⁶³
+//   (t + ((x - t) >> 1)) >> (l - 1)  t = (x · m') >> N, X < 2ᴺ, l = ⌈log₂ c⌉,
+//                                    m' = ⌊2ᴺ (2ˡ - c) / c⌋ + 1, X · m' < 2⁶³
+//   mulhi(x, m) >> (s - 64)          m = ⌈2ˢ / c⌉ < 2⁶⁴, X · (m·c - 2ˢ) < 2ˢ
+//
+// — and a remainder, x - c · (x / c).
 divided :: proc(g: ^Graph, c: Class, n: Node) {
 	x, d, ok := operands(g, n)
-	if !ok || n.op != .Div && n.op != .Mod || d < 2 || g.facts[x].machine != .Int do return
+	if !ok || n.op != .Div && n.op != .Mod || d < 3 || g.facts[x].machine != .Int do return
 	if _, power := log2(d); power do return
 	b := g.facts[x].bounds
 	if b.lo < 0 || !in_64(b) do return
-	top := b.hi
-	for s in uint(1) ..< 64 {
-		m := (i128(1) << s + i128(d) - 1) / i128(d)
-		if top * (m * i128(d) - i128(1) << s) >= i128(1) << s do continue
-		if top * m >= i128(1) << 63 do return
-		q := add(g, binary(g, .Shr, add(g, binary(g, .Mul, x, add(g, int_node(i64(m))))), add(g, int_node(i64(s)))))
+	top, divisor := b.hi, i128(d)
+	constant :: proc(g: ^Graph, v: i128) -> Class {return add(g, int_node(i64(v)))}
+	quotients := make([dynamic]Class)
+	// a product and a shift
+	for s in uint(1) ..< 63 {
+		m := (i128(1) << s + divisor - 1) / divisor
+		if top * (m * divisor - i128(1) << s) >= i128(1) << s do continue
+		if top * m < i128(1) << 63 do append(&quotients, add(g, binary(g, .Shr, add(g, binary(g, .Mul, x, constant(g, m))), constant(g, i128(s)))))
+		break
+	}
+	// a product, its high half in N bits, and an addition
+	l := uint(0)
+	for i128(1) << l < divisor do l += 1
+	for bits in uint(1) ..= 32 {
+		if top >= i128(1) << bits do continue
+		m := (i128(1) << bits) * (i128(1) << l - divisor) / divisor + 1
+		if top * m >= i128(1) << 63 do break
+		t := add(g, binary(g, .Shr, add(g, binary(g, .Mul, x, constant(g, m))), constant(g, i128(bits))))
+		half := add(g, binary(g, .Shr, add(g, binary(g, .Sub, x, t)), constant(g, 1)))
+		append(&quotients, add(g, binary(g, .Shr, add(g, binary(g, .Add, t, half)), constant(g, i128(l - 1)))))
+		break
+	}
+	// the high half of a product of 128 bits
+	if g.facts[x].lanes == 0 {
+		for s in uint(64) ..< 128 {
+			m := (i128(1) << s + divisor - 1) / divisor
+			if m >= i128(1) << 64 do break
+			if top * (m * divisor - i128(1) << s) >= i128(1) << s do continue
+			high := add(g, binary(g, .Mul_High, x, add(g, int_node(transmute(i64)u64(m)))))
+			append(&quotients, s == 64 ? high : add(g, binary(g, .Shr, high, constant(g, i128(s - 64)))))
+			break
+		}
+	}
+	for q in quotients {
 		if n.op == .Div do merge(g, c, q)
 		else do equal(g, c, binary(g, .Sub, x, add(g, binary(g, .Mul, q, add(g, int_node(d))))))
-		return
 	}
 }
 
