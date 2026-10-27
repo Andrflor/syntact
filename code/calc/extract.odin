@@ -120,7 +120,54 @@ SSE2_REALS :: [code.Op]f64 {
 	.Ge  = 3,
 }
 
-// X64: the machine the x86-64 backend writes for; its vectors are not written yet.
+// X64_LANES: the operations on lanes the x86-64 backend writes: no comparison,
+// no division, a shift of each lane by the same count.
+X64_LANES :: [code.Op]f64 {
+	.Add = 1,
+	.Sub = 1,
+	.Mul = 8, // 1 on lanes in 32 bits
+	.Div = INFINITE,
+	.Mod = INFINITE,
+	.Pow = INFINITE,
+	.Neg = 2,
+	.And = 1,
+	.Or  = 1,
+	.Xor = 1,
+	.Not = 2,
+	.Shl = 1,
+	.Shr = 5, // 1 on lanes not negative
+	.Eq  = INFINITE,
+	.Ne  = INFINITE,
+	.Lt  = INFINITE,
+	.Le  = INFINITE,
+	.Gt  = INFINITE,
+	.Ge  = INFINITE,
+}
+
+X64_REAL_LANES :: [code.Op]f64 {
+	.Add = 4,
+	.Sub = 4,
+	.Mul = 4,
+	.Div = 14,
+	.Mod = INFINITE,
+	.Pow = INFINITE,
+	.Neg = 3,
+	.And = INFINITE,
+	.Or  = INFINITE,
+	.Xor = INFINITE,
+	.Not = INFINITE,
+	.Shl = INFINITE,
+	.Shr = INFINITE,
+	.Eq  = INFINITE,
+	.Ne  = INFINITE,
+	.Lt  = INFINITE,
+	.Le  = INFINITE,
+	.Gt  = INFINITE,
+	.Ge  = INFINITE,
+}
+
+// X64: the machine the x86-64 backend writes for: two lanes of SSE2, each in the
+// frame — loaded, computed, stored.
 X64 := Costs {
 	ints   = X64_INTS,
 	reals  = X64_REALS,
@@ -128,11 +175,11 @@ X64 := Costs {
 	call   = 20,
 	branch = 2,
 	turns  = 16,
-	lanes  = 0,
-	vints  = SSE2_INTS,
-	vreals = SSE2_REALS,
-	splat  = 2,
-	reduce = 2,
+	lanes  = 2,
+	vints  = X64_LANES,
+	vreals = X64_REAL_LANES,
+	splat  = 3,
+	reduce = 3,
 }
 
 // C: x86-64 as the C compiler writes for it, with the vectors of SSE2.

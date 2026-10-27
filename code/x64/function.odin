@@ -9,7 +9,8 @@ import enc "asm"
 // A function laid out in blocks (code/mir) whose registers have their places: an
 // integer in a register of the machine — one a call keeps, rbx and r12…r15, when it
 // lives across a call; rsi, rdi, r8…r10 otherwise — or in a slot of the frame; a
-// float in a slot. rax, rcx, rdx and r11 are never given: an instruction computes
+// float in a slot; a vector in a slot for each lane, lane 0 the lowest, two lanes
+// of SSE2. rax, rcx, rdx and r11 are never given: an instruction computes
 // in them. The frame keeps rbp, then the registers the function uses that a call
 // keeps, then the slots, 16-aligned.
 
@@ -206,6 +207,11 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 	f := fr.f
 	switch i in inst {
 	case mir.Copy:
+		if f.kinds[i.dst].lanes > 0 {
+			load_lanes(fr, .XMM0, i.src)
+			enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+			return ""
+		}
 		copy_place(fr, place_of(fr, i.dst), operand(fr, i.src))
 	case mir.Real:
 		get(fr, .RAX, i.bits)
@@ -220,7 +226,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		enc.mov_r64_m64(x, absolute(.R11))
 		put(fr, place_of(fr, i.dst), x)
 	case mir.Unary:
-		if f.kinds[i.a].lanes > 0 do return "vectors are not written for x86-64 yet"
+		if f.kinds[i.a].lanes > 0 do return vector_unary(fr, i)
 		x := work(fr, i.dst)
 		get(fr, x, place_of(fr, i.a))
 		switch {
@@ -236,7 +242,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		}
 		put(fr, place_of(fr, i.dst), x)
 	case mir.Binary:
-		if f.kinds[i.a].lanes > 0 do return "vectors are not written for x86-64 yet"
+		if f.kinds[i.a].lanes > 0 do return vector_binary(fr, i)
 		if f.kinds[i.a].machine == .Real do return real_binary(fr, i)
 		return int_binary(fr, i)
 	case mir.Compare:
@@ -273,8 +279,19 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		case .Text, .None:
 		}
 		put(fr, place_of(fr, i.dst), .RAX)
-	case mir.Splat, mir.Lanes, mir.Reduce:
-		return "vectors are not written for x86-64 yet"
+	case mir.Splat:
+		load_lanes(fr, .XMM0, i.a)
+		enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+	case mir.Lanes:
+		base := vector_memory(fr, i.dst).(enc.AddressComponents)
+		for v, k in i.values {
+			get(fr, .RAX, v)
+			lane := base
+			lane.displacement = (base.displacement.? or_else 0) + i32(8 * k)
+			enc.mov_m64_r64(lane, .RAX)
+		}
+	case mir.Reduce:
+		return reduce(fr, i)
 	case mir.Call:
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)
@@ -571,4 +588,180 @@ terminator :: proc(fr: ^Frame, t: mir.Terminator, next: int) {
 		enc.pop_r64(.RBP)
 		enc.ret()
 	}
+}
+
+// --- vectors ---
+
+// vector_memory: where the lanes of the vector r are, lane 0 first.
+vector_memory :: proc(fr: ^Frame, r: mir.Reg) -> enc.MemoryAddress {
+	return slot_memory(fr, place_of(fr, r).(Frame_Slot) + Frame_Slot(fr.f.kinds[r].lanes - 1))
+}
+
+// load_lanes: o into x: a vector, its lanes; a value, in each lane.
+load_lanes :: proc(fr: ^Frame, x: enc.XMMRegister, o: mir.Operand) {
+	r, is_reg := o.(mir.Reg)
+	switch {
+	case is_reg && fr.f.kinds[r].lanes > 0:
+		enc.movdqu_xmm_m128(x, vector_memory(fr, r))
+		return
+	case is_reg && fr.f.kinds[r].machine == .Real:
+		enc.movq_xmm_m64(x, slot_address(fr, r))
+	case:
+		get(fr, .RAX, operand(fr, o))
+		enc.movq_xmm_r64(x, .RAX)
+	}
+	enc.punpcklqdq_xmm_xmm(x, x)
+}
+
+// bounds_of: the bounds of an operand: of a register, or the integer it is.
+bounds_of :: proc(fr: ^Frame, o: mir.Operand) -> code.Bounds {
+	switch v in o {
+	case mir.Reg:
+		return fr.f.kinds[v].bounds
+	case i64:
+		return {i128(v), i128(v)}
+	}
+	return code.EVERY
+}
+
+in_32 :: proc(b: code.Bounds) -> bool {
+	return b.lo >= 0 && b.hi < 1 << 32
+}
+
+// vector_binary: xmm0 = a op b, in each lane; b a vector, or in each lane.
+vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
+	a := fr.f.kinds[i.a]
+	load_lanes(fr, .XMM0, i.a)
+	if a.machine == .Real {
+		load_lanes(fr, .XMM1, i.b)
+		#partial switch i.op {
+		case .Add:
+			enc.addpd_xmm_xmm(.XMM0, .XMM1)
+		case .Sub:
+			enc.subpd_xmm_xmm(.XMM0, .XMM1)
+		case .Mul:
+			enc.mulpd_xmm_xmm(.XMM0, .XMM1)
+		case .Div:
+			enc.divpd_xmm_xmm(.XMM0, .XMM1)
+		case:
+			return "an operation on lanes of floats x86-64 does not write"
+		}
+	} else {
+		#partial switch i.op {
+		case .Shl, .Shr:
+			count, constant := i.b.(i64)
+			if !constant do return "a shift of lanes by lanes x86-64 does not write"
+			k := u8(count & 63)
+			switch {
+			case i.op == .Shl:
+				enc.psllq_xmm_imm8(.XMM0, k)
+			case a.bounds.lo >= 0:
+				enc.psrlq_xmm_imm8(.XMM0, k)
+			case:
+				// arithmetic, from logical: m the sign of each lane, ((x ^ m) >> k) ^ m
+				enc.pshufd_xmm_xmm_imm8(.XMM1, .XMM0, 0xF5)
+				enc.psrad_xmm_imm8(.XMM1, 31)
+				enc.pxor_xmm_xmm(.XMM0, .XMM1)
+				enc.psrlq_xmm_imm8(.XMM0, k)
+				enc.pxor_xmm_xmm(.XMM0, .XMM1)
+			}
+		case:
+			load_lanes(fr, .XMM1, i.b)
+			#partial switch i.op {
+			case .Add:
+				enc.paddq_xmm_xmm(.XMM0, .XMM1)
+			case .Sub:
+				enc.psubq_xmm_xmm(.XMM0, .XMM1)
+			case .And:
+				enc.pand_xmm_xmm(.XMM0, .XMM1)
+			case .Or:
+				enc.por_xmm_xmm(.XMM0, .XMM1)
+			case .Xor:
+				enc.pxor_xmm_xmm(.XMM0, .XMM1)
+			case .Mul:
+				if in_32(a.bounds) && in_32(bounds_of(fr, i.b)) {
+					enc.pmuludq_xmm_xmm(.XMM0, .XMM1)
+					break
+				}
+				// a·b in 64 bits: lo(a)·lo(b) + (hi(a)·lo(b) + lo(a)·hi(b)) << 32
+				enc.pshufd_xmm_xmm_imm8(.XMM2, .XMM0, 0xE4)
+				enc.psrlq_xmm_imm8(.XMM2, 32)
+				enc.pmuludq_xmm_xmm(.XMM2, .XMM1)
+				enc.pshufd_xmm_xmm_imm8(.XMM3, .XMM1, 0xE4)
+				enc.psrlq_xmm_imm8(.XMM3, 32)
+				enc.pmuludq_xmm_xmm(.XMM3, .XMM0)
+				enc.paddq_xmm_xmm(.XMM2, .XMM3)
+				enc.psllq_xmm_imm8(.XMM2, 32)
+				enc.pmuludq_xmm_xmm(.XMM0, .XMM1)
+				enc.paddq_xmm_xmm(.XMM0, .XMM2)
+			case:
+				return "an operation on lanes of integers x86-64 does not write"
+			}
+		}
+	}
+	enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+	return ""
+}
+
+// vector_unary: op a, in each lane.
+vector_unary :: proc(fr: ^Frame, i: mir.Unary) -> string {
+	a := fr.f.kinds[i.a]
+	load_lanes(fr, .XMM0, i.a)
+	switch {
+	case i.op == .Neg && a.machine == .Real:
+		// the sign bit of each lane
+		enc.movabs_r64_imm64(.RAX, min(i64))
+		enc.movq_xmm_r64(.XMM1, .RAX)
+		enc.punpcklqdq_xmm_xmm(.XMM1, .XMM1)
+		enc.pxor_xmm_xmm(.XMM0, .XMM1)
+	case i.op == .Neg:
+		enc.pxor_xmm_xmm(.XMM1, .XMM1)
+		enc.psubq_xmm_xmm(.XMM1, .XMM0)
+		enc.pshufd_xmm_xmm_imm8(.XMM0, .XMM1, 0xE4)
+	case i.op == .Not:
+		enc.pcmpeqd_xmm_xmm(.XMM1, .XMM1)
+		enc.pxor_xmm_xmm(.XMM0, .XMM1)
+	case:
+		return "an operation on lanes x86-64 does not write"
+	}
+	enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+	return ""
+}
+
+// reduce: the two lanes of a, by op.
+reduce :: proc(fr: ^Frame, i: mir.Reduce) -> string {
+	a := fr.f.kinds[i.a]
+	if a.lanes != 2 do return "a reduction of other than two lanes x86-64 does not write"
+	enc.movdqu_xmm_m128(.XMM0, vector_memory(fr, i.a))
+	enc.pshufd_xmm_xmm_imm8(.XMM1, .XMM0, 0x4E)
+	if a.machine == .Real {
+		#partial switch i.op {
+		case .Add:
+			enc.addsd_xmm_xmm(.XMM0, .XMM1)
+		case .Mul:
+			enc.mulsd_xmm_xmm(.XMM0, .XMM1)
+		case:
+			return "a reduction of floats x86-64 does not write"
+		}
+		enc.movq_m64_xmm(slot_address(fr, i.dst), .XMM0)
+		return ""
+	}
+	enc.movq_r64_xmm(.RAX, .XMM0)
+	enc.movq_r64_xmm(.RCX, .XMM1)
+	#partial switch i.op {
+	case .Add:
+		enc.add_r64_r64(.RAX, .RCX)
+	case .Mul:
+		enc.imul_r64_r64(.RAX, .RCX)
+	case .And:
+		enc.and_r64_r64(.RAX, .RCX)
+	case .Or:
+		enc.or_r64_r64(.RAX, .RCX)
+	case .Xor:
+		enc.xor_r64_r64(.RAX, .RCX)
+	case:
+		return "a reduction x86-64 does not write"
+	}
+	put(fr, place_of(fr, i.dst), .RAX)
+	return ""
 }
