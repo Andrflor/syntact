@@ -58,6 +58,7 @@ signatures :: proc(op: Operator) -> []Signature {
 	@(static) mul := []Signature{{{.Int, .Int}, .Int}, {{.Real, .Real}, .Real}, {{.String, .Count}, .String}}
 	@(static) div := []Signature{{{.Int, .Nonzero_Int}, .Int}, {{.Real, .Nonzero_Real}, .Real}}
 	@(static) modulo := []Signature{{{.Int, .Nonzero_Int}, .Int}}
+	@(static) power := []Signature{{{.Int, .Count}, .Int}, {{.Real, .Count}, .Real}}
 	@(static) shift := []Signature{{{.Int, .Int}, .Int}}
 	@(static) bits := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
 	@(static) compare := []Signature{{{.Int, .Int}, .Bool}, {{.Real, .Real}, .Bool}, {{.Char, .Char}, .Bool}}
@@ -72,6 +73,8 @@ signatures :: proc(op: Operator) -> []Signature {
 		return div
 	case .Mod:
 		return modulo
+	case .Pow:
+		return power
 	case .Shl, .Shr:
 		return shift
 	case .Bit_And, .Bit_Or, .Xor, .Bit_Not:
@@ -208,6 +211,7 @@ operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) ->
 		if r, exact := compute(k, op, sig, args); exact do return r
 		return new_operation(op, ..args)
 	}
+	if op == .Pow do return single(k, power_law(k, sig, args[0], args[1], span))
 	out: Type
 	#partial switch sig.args[0] {
 	case .Int:
@@ -323,6 +327,12 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		v, computed := int_operation(op, i128(x), i128(y))
 		return Int(v), computed
 	case .Real:
+		if op == .Pow {
+			x, single_x := one_primitive(cells[0]).(Real)
+			n, single_n := one_primitive(cells[1]).(Int)
+			if !single_x || !single_n do return nil, false
+			return real_power(x, i128(n))
+		}
 		for c in cells do if !all_of_family(c, .Real) do return nil, false
 		#partial switch op {
 		case .Add:
@@ -499,6 +509,8 @@ int_operation :: proc(op: Operator, x, y: i128) -> (i128, bool) {
 	case .Mod:
 		if x == min(i128) && y == -1 do return 0, true
 		return x % y, true
+	case .Pow:
+		return int_power(x, y)
 	case .Bit_And:
 		return x & y, true
 	case .Bit_Or:
@@ -514,6 +526,70 @@ int_operation :: proc(op: Operator, x, y: i128) -> (i128, bool) {
 		return y >= 127 ? (x < 0 ? -1 : 0) : x >> uint(y), true
 	}
 	return 0, false
+}
+
+// int_power: x ** y, y ≥ 0, by squaring; not computed beyond the integers written
+// here.
+int_power :: proc(x, y: i128) -> (out: i128, ok: bool) {
+	if y < 0 do return 0, false
+	out = 1
+	base, e := x, y
+	for e > 0 {
+		if e & 1 == 1 do out = mul_checked(out, base) or_return
+		e >>= 1
+		if e > 0 do base = mul_checked(base, base) or_return
+	}
+	return out, true
+}
+
+// real_power: x ** n, n ≥ 0, exactly.
+real_power :: proc(x: Real, n: i128) -> (out: Real, ok: bool) {
+	if n < 0 do return {}, false
+	out = real_int(1)
+	base, e := x, n
+	for e > 0 {
+		if e & 1 == 1 do out = real_mul(out, base) or_return
+		e >>= 1
+		if e > 0 do base = real_mul(base, base) or_return
+	}
+	return out, true
+}
+
+// power_law: x ** n, n a count, by the laws of powers:
+//
+//   x ** 0 = 1     x ** 1 = x     1 ** n = 1     0 ** n = 0, n ≥ 1
+//   (x ** a) ** b = x ** (a * b)
+//   (c·x·y…) ** e = cᵉ·xᵉ·yᵉ…, e an integer: a monomial of the ring
+power_law :: proc(k: ^Kernel, sig: Signature, x, n: Type, span: syn.Span) -> Type {
+	one: Type = sig.args[0] == .Int ? Type(Int(1)) : Type(real_int(1))
+	if e, constant := n.(Int); constant {
+		switch {
+		case e == 0:
+			return one
+		case e == 1:
+			return x
+		}
+		if sig.args[0] == .Int {
+			if ms, d, ring := monomials(x); ring && len(ms) == 1 && d == 1 {
+				out: Type = Int(1)
+				for _ in 0 ..< e {
+					next, ok := ring_law(.Mul, {out, ms[0]})
+					if !ok {
+						out = nil
+						break
+					}
+					out = next
+				}
+				if out != nil do return out
+			}
+		}
+	}
+	if same(k, x, one) do return one
+	if z, is_int := x.(Int); is_int && z == 0 && proven_in(k, n, new_range(Int(1), nil, .Int)) do return Int(0)
+	if inner, is_op := x.(^Operation); is_op && inner.op == .Pow {
+		return operation_law(k, .Pow, {inner.args[0], operation_law(k, .Mul, {inner.args[1], n}, span)}, span)
+	}
+	return new_operation(.Pow, x, n)
 }
 
 // compare_bounds: the booleans x op y takes, x from lo_a to hi_a, y from lo_b to

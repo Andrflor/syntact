@@ -1220,6 +1220,7 @@ collect_semantic_tokens :: proc(ast: ^syntax.Ast, tokens: ^[dynamic]Raw_Sem_Toke
 		     .Not,
 		     .RShift,
 		     .LShift,
+		     .Power,
 		     .BitAnd,
 		     .BitOr,
 		     .BitNot,

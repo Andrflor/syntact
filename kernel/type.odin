@@ -124,6 +124,7 @@ Operator :: enum u8 {
 	Mul, // * : integers, reals, and the repetition of a string
 	Div,
 	Mod,
+	Pow, // ** : an integer or a real, to a count
 	Neg,
 	Bit_And, // [&]
 	Bit_Or, // [|]

@@ -822,6 +822,58 @@ int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
 		lo, hi = bounds[0][0], bounds[0][1]
 		for b in bounds[1:] do lo, hi = corners(lo, hi, b[0], b[1], mul_extended) or_return
 		return lo, hi, true
+	case .Mod:
+		// x % y has the sign of x and is smaller than |y|: a divisor of one sign
+		x_lo, has_x_lo := bounds[0][0].?
+		x_hi, has_x_hi := bounds[0][1].?
+		y_lo, has_y_lo := bounds[1][0].?
+		y_hi, has_y_hi := bounds[1][1].?
+		reach: Maybe(i128)
+		switch {
+		case has_y_lo && y_lo >= 1:
+			if has_y_hi do reach = y_hi - 1
+		case has_y_hi && y_hi <= -1:
+			if has_y_lo do reach = -y_lo - 1
+		case:
+			return
+		}
+		if has_x_lo && x_lo >= 0 {
+			lo, hi = 0, reach
+			if has_x_hi && (hi == nil || x_hi < hi.?) do hi = x_hi
+			return lo, hi, true
+		}
+		if has_x_hi && x_hi <= 0 {
+			hi = 0
+			if r, has := reach.?; has do lo = -r
+			if has_x_lo && (lo == nil || x_lo > lo.?) do lo = x_lo
+			return lo, hi, true
+		}
+		if r, has := reach.?; has do return -r, r, true
+		return
+	case .Pow:
+		// a base ≥ 0: x ** n grows with x, and with n once x ≥ 1
+		a, has_a := bounds[0][0].?
+		c, has_c := bounds[1][0].?
+		if !has_a || a < 0 || !has_c || c < 0 do return
+		d, has_d := bounds[1][1].?
+		switch {
+		case a >= 1:
+			lo = int_power(a, c) or_return
+		case has_d && d == 0:
+			lo = 1 // 0 ** 0
+		case:
+			lo = 0
+		}
+		b, has_b := bounds[0][1].?
+		switch {
+		case has_b && b == 0:
+			hi = c == 0 ? 1 : 0
+		case has_b && b == 1:
+			hi = 1
+		case has_b && has_d:
+			if top, ok := int_power(b, d); ok do hi = top
+		}
+		return lo, hi, true
 	case .Div:
 		// a divisor of one sign: a / b is monotone in each
 		x, has_x := bounds[1][0].?

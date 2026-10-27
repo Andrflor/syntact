@@ -325,6 +325,8 @@ build_operator :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		op = .Div
 	case .Mod:
 		op = .Mod
+	case .Power:
+		op = .Pow
 	case .Xor:
 		op = .Xor
 	case .BitAnd:

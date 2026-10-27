@@ -1,6 +1,6 @@
 {
   "name": "tok_triple_asterisk",
-  "description": "a***b — Asterisk is infix-only; first '*' infix, second '*' as RHS prefix has no rule. UNCERTAIN: empty Scope[].",
+  "description": "a***b — `**` then `*`: a power whose right operand starts with a stray '*', which has no prefix rule. UNCERTAIN: the recovery.",
   "source": "a***b",
-  "expect": "Scope[Operator(Multiply,Identifier(a),Identifier(b))]"
+  "expect": "Scope[Operator(Power,Identifier(a),Identifier(b))]"
 }

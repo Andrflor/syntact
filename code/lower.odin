@@ -581,6 +581,7 @@ OPS := [kernel.Operator]Op {
 	.Mul        = .Mul,
 	.Div        = .Div,
 	.Mod        = .Mod,
+	.Pow        = .Pow,
 	.Neg        = .Neg,
 	.Bit_And    = .And,
 	.Bit_Or     = .Or,
@@ -603,7 +604,8 @@ operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
 		if l.error != "" do return NONE
 	}
 	m := machine_of(l.f, args[0])
-	for a in args do if machine_of(l.f, a) != m do return fail(l, "%s mixes %v and %v", kernel.print_type(o), m, machine_of(l.f, a))
+	// a power takes an integer count, whatever its base
+	for a, i in args do if machine_of(l.f, a) != (o.op == .Pow && i == 1 ? .Int : m) do return fail(l, "%s mixes %v and %v", kernel.print_type(o), m, machine_of(l.f, a))
 	if m == .Text || m == .None do return fail(l, "%s is not computed on %v yet", kernel.print_type(o), m)
 	op := OPS[o.op]
 	if len(args) == 1 {

@@ -50,6 +50,7 @@ Op :: enum u8 {
 	Mul,
 	Div, // truncated toward 0
 	Mod, // the sign of the dividend
+	Pow, // an integer or a float to an integer ≥ 0
 	Neg,
 	And, // bitwise; on booleans, and
 	Or,

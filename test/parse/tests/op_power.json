@@ -1,0 +1,6 @@
+{
+  "name": "op_power",
+  "description": "a ** b — the power.",
+  "source": "a ** b",
+  "expect": "Scope[Operator(Power,Identifier(a),Identifier(b))]"
+}

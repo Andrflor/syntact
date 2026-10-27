@@ -9,9 +9,11 @@ else. Since a set is the `|` of its elements, an operator distributes over `|`:
 ```text
 int × int → int              +  -  *  [&]  [|]  ^  <<  >>
 int × (int & ~0) → int       /  %          the divisor is not 0
+int × (int & 0..) → int      **            the power, the count ≥ 0
 int → int                    -  [~]
 float × float → float        +  -  *
 float × (float & ~0.0) → float   /
+float × (int & 0..) → float  **
 string × string → string     +             concatenation
 string × int → string        *             repetition, the count ≥ 0
 bool × bool → bool           [&]  [|]  ^

@@ -1,0 +1,6 @@
+{
+  "name": "op_power_right_associative",
+  "description": "a ** b ** c — right-associative: a ** (b ** c).",
+  "source": "a ** b ** c",
+  "expect": "Scope[Operator(Power,Identifier(a),Operator(Power,Identifier(b),Identifier(c)))]"
+}

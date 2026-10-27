@@ -79,6 +79,7 @@ Token_Kind :: enum u8 {
 	BitNot,
 	RShift,
 	LShift,
+	Power, // `**`
 }
 
 // Trivia facts about what preceded a token, packed as bit positions in `flags`.
@@ -298,7 +299,13 @@ lex_single_equal :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
 	return Token{.Equal, Span{s, s + 1}, f}}
 lex_single_plus :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.Plus, Span{s, s + 1}, f}}
-lex_single_asterisk :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
+// lex_single_asterisk: `*`, or `**`, the power.
+lex_single_asterisk :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {
+	if s + 1 < l.source_len && l.src[s + 1] == '*' {
+		l.offset = s + 2
+		return Token{.Power, Span{s, s + 2}, f}
+	}
+	l.offset = s + 1
 	return Token{.Asterisk, Span{s, s + 1}, f}}
 lex_single_percent :: #force_inline proc(l: ^Lexer, s: u32, f: u8) -> Token {l.offset = s + 1
 	return Token{.Percent, Span{s, s + 1}, f}}
@@ -750,6 +757,7 @@ Precedence :: enum {
 	UNARY,
 	SHIFT,
 	RANGE,
+	POWER, // `**`, right-associative: `a ** b ** c` is `a ** (b ** c)`
 	CALL,
 	PRIMARY,
 }
@@ -851,6 +859,7 @@ init_parse_tables :: proc "contextless" () {
 	infix_table[.LShift] = parse_binary
 	infix_table[.Plus] = parse_binary
 	infix_table[.Asterisk] = parse_binary
+	infix_table[.Power] = parse_binary
 	infix_table[.Slash] = parse_binary
 	infix_table[.Percent] = parse_binary
 	infix_table[.Backslash] = parse_binary
@@ -916,6 +925,7 @@ init_parse_tables :: proc "contextless" () {
 
 	prec_table[.Plus] = .TERM
 	prec_table[.Asterisk] = .FACTOR
+	prec_table[.Power] = .POWER
 	prec_table[.Slash] = .FACTOR
 	prec_table[.Percent] = .FACTOR
 	prec_table[.Backslash] = .CAST
@@ -1247,7 +1257,7 @@ listing :: proc(parser: ^Parser, on: bool) -> (previous: bool) {
 // separator (`a\n+ b` chains, but `a\n-> b` ends the statement).
 is_infix_operator :: #force_inline proc(kind: Token_Kind) -> bool {
 	#partial switch kind {
-	case .Plus, .Minus, .Asterisk, .Slash, .Percent, .Backslash, .And, .Or:
+	case .Plus, .Minus, .Asterisk, .Power, .Slash, .Percent, .Backslash, .And, .Or:
 		return true
 	}
 	return false
@@ -1640,7 +1650,8 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 	}
 	advance_token(parser)
 
-	right := parse_expression(parser, Precedence(int(prec) + 1))
+	// a power is right-associative: its right operand holds the next power
+	right := parse_expression(parser, token_kind == .Power ? prec : Precedence(int(prec) + 1))
 	if right == INVALID_NODE {
 		error_at_current(parser, "Expected expression after binary operator")
 		parser.panic_mode = false
@@ -1655,6 +1666,8 @@ parse_binary :: proc(parser: ^Parser, left: Node_Index) -> Node_Index {
 		op_kind = .Subtract
 	case .Asterisk:
 		op_kind = .Multiply
+	case .Power:
+		op_kind = .Power
 	case .Slash:
 		op_kind = .Divide
 	case .Percent:
@@ -1709,9 +1722,10 @@ parse_unary :: proc(parser: ^Parser) -> Node_Index {
 	token_kind := parser.current_token.kind
 	advance_token(parser)
 
-	// Operator-specific operand precedence: arithmetic `-` parses at CALL so `-5..5`
-	// is `(-5)..5`, but set `~`/`!` stay at UNARY so `~'a'..'z'` is `~('a'..'z')`.
-	operand_prec := token_kind == .Minus ? Precedence.CALL : Precedence.UNARY
+	// Operator-specific operand precedence: arithmetic `-` parses at POWER so `-5..5`
+	// is `(-5)..5` and `-2 ** 2` is `-(2 ** 2)`, but set `~`/`!` stay at UNARY so
+	// `~'a'..'z'` is `~('a'..'z')`.
+	operand_prec := token_kind == .Minus ? Precedence.POWER : Precedence.UNARY
 	operand := parse_expression(parser, operand_prec)
 	if operand == INVALID_NODE {
 		error_at_current(parser, "Expected expression after unary operator")

@@ -180,6 +180,13 @@ binary_of :: proc(op: Op, m: Machine, a, b: Datum) -> (Datum, bool) {
 			return Datum{real = x * y}, true
 		case .Div:
 			return Datum{real = x / y}, true
+		case .Pow:
+			out := 1.0
+			for e := b.int; e > 0; e >>= 1 {
+				if e & 1 == 1 do out *= x
+				x *= x
+			}
+			return Datum{real = out}, true
 		case .Eq:
 			return flag(x == y), true
 		case .Ne:
@@ -209,6 +216,13 @@ binary_of :: proc(op: Op, m: Machine, a, b: Datum) -> (Datum, bool) {
 	case .Mod:
 		if y == 0 do return {}, false
 		return Datum{int = x % y}, true
+	case .Pow:
+		out: i64 = 1
+		for e := y; e > 0; e >>= 1 {
+			if e & 1 == 1 do out *= x
+			x *= x
+		}
+		return Datum{int = out}, true
 	case .And:
 		return Datum{int = x & y}, true
 	case .Or:

@@ -376,8 +376,12 @@ body :: proc(e: ^Emitter, f: ^code.Func, b: code.Body, loops: ^[dynamic]Loop_Hea
 		case code.Binary:
 			load(.RAX, i.a)
 			load(.RCX, i.b)
-			msg := f.kinds[i.a].machine == .Real ? real_binary(i.op) : int_binary(i.op)
-			if msg != "" do return msg
+			if i.op == .Pow {
+				power(e, f.kinds[i.a].machine == .Real)
+			} else {
+				msg := f.kinds[i.a].machine == .Real ? real_binary(i.op) : int_binary(i.op)
+				if msg != "" do return msg
+			}
 			store(i.dst, .RAX)
 		case code.In:
 			outside := test_cover(e, f, i.x, i.cover)
@@ -507,6 +511,33 @@ test_loaded :: proc(e: ^Emitter, m: code.Machine, c: code.Cover) -> []int {
 	return outside
 }
 
+// power: rax = rax ** rcx, rcx ≥ 0, by squaring: the bits of the count, from the
+// lowest; on a float, the bits of rax are a double.
+power :: proc(e: ^Emitter, real: bool) {
+	if real {
+		enc.movq_xmm_r64(.XMM0, .RAX)
+		enc.movabs_r64_imm64(.RDX, transmute(i64)f64(1))
+		enc.movq_xmm_r64(.XMM1, .RDX)
+	} else {
+		enc.movabs_r64_imm64(.R8, 1)
+	}
+	top := here(e)
+	enc.test_r64_r64(.RCX, .RCX)
+	done := forward(e, enc.je_rel32)
+	enc.test_r64_imm32(.RCX, 1)
+	even := forward(e, enc.je_rel32)
+	if real do enc.mulsd_xmm_xmm(.XMM1, .XMM0)
+	else do enc.imul_r64_r64(.R8, .RAX)
+	land(e, even)
+	if real do enc.mulsd_xmm_xmm(.XMM0, .XMM0)
+	else do enc.imul_r64_r64(.RAX, .RAX)
+	enc.shr_r64_imm8(.RCX, 1)
+	back(e, enc.jmp_rel32, top)
+	land(e, done)
+	if real do enc.movq_r64_xmm(.RAX, .XMM1)
+	else do enc.mov_r64_r64(.RAX, .R8)
+}
+
 // int_binary: rax = rax op rcx.
 int_binary :: proc(op: code.Op) -> string {
 	switch op {
@@ -550,7 +581,7 @@ int_binary :: proc(op: code.Op) -> string {
 			enc.setge_r8(.AL)
 		}
 		enc.movzx_r64_r8(.RAX, .AL)
-	case .Neg, .Not:
+	case .Neg, .Not, .Pow:
 		return "a binary operation the machine does not compute"
 	}
 	return ""

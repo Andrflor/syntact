@@ -42,6 +42,7 @@ PREC_SHIFT :: 4
 PREC_ADD :: 5
 PREC_MUL :: 6
 PREC_PREFIX :: 7
+PREC_POWER :: 8
 PREC_ATOM :: 9
 
 operator_text := [Operator]string {
@@ -50,6 +51,7 @@ operator_text := [Operator]string {
 	.Mul        = "*",
 	.Div        = "/",
 	.Mod        = "%",
+	.Pow        = "**",
 	.Neg        = "-",
 	.Bit_And    = "[&]",
 	.Bit_Or     = "[|]",
@@ -72,6 +74,8 @@ operator_prec :: proc(op: Operator) -> int {
 		return PREC_MUL
 	case .Shl, .Shr:
 		return PREC_SHIFT
+	case .Pow:
+		return PREC_POWER
 	case .Neg, .Bit_Not:
 		return PREC_PREFIX
 	case .Bit_And, .Bit_Or, .Xor, .Less, .Less_Eq, .Greater, .Greater_Eq, .In:
@@ -409,7 +413,9 @@ write_operation :: proc(b: ^Printer, o: ^Operation) {
 	}
 	for a, i in o.args {
 		if i > 0 do fmt.sbprintf(b, " %s ", operator_text[o.op])
-		write_type(b, a, i == 0 ? prec : prec + 1)
+		// a power is right-associative: a ** b ** c is a ** (b ** c)
+		right := o.op == .Pow ? i == 0 : i > 0
+		write_type(b, a, right ? prec + 1 : prec)
 	}
 }
 

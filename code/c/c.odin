@@ -128,6 +128,18 @@ static inline int64_t wrap_mul(int64_t a, int64_t b) { return (int64_t)((uint64_
 static inline int64_t wrap_neg(int64_t a) { return (int64_t)(0 - (uint64_t)a); }
 static inline int64_t wrap_shl(int64_t a, int64_t b) { return (int64_t)((uint64_t)a << (b & 63)); }
 
+// a power, b ≥ 0, by squaring
+static inline int64_t wrap_pow(int64_t a, int64_t b) {
+    uint64_t out = 1, x = (uint64_t)a;
+    for (; b > 0; b >>= 1, x *= x) if (b & 1) out *= x;
+    return (int64_t)out;
+}
+static inline double real_pow(double a, int64_t b) {
+    double out = 1.0;
+    for (; b > 0; b >>= 1, a *= a) if (b & 1) out *= a;
+    return out;
+}
+
 `)
 }
 
@@ -392,6 +404,7 @@ proven :: proc(w: ^Writer, x: code.Value) -> bool {
 
 binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 	a, b := name(w, x.a), name(w, x.b)
+	if x.op == .Pow do return fmt.tprintf("%s(%s, %s)", w.f.kinds[x.a].machine == .Real ? "real_pow" : "wrap_pow", a, b), ""
 	if w.f.kinds[x.a].machine == .Real {
 		#partial switch x.op {
 		case .Add, .Sub, .Mul, .Div, .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
@@ -412,7 +425,7 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 		shift := w.f.kinds[x.b].bounds
 		if shift.lo >= 0 && shift.hi <= 63 do return fmt.tprintf("%s >> %s", a, b), ""
 		return fmt.tprintf("%s >> (%s & 63)", a, b), ""
-	case .Neg, .Not:
+	case .Neg, .Not, .Pow:
 	}
 	return "", "a binary operation C does not compute"
 }
@@ -423,6 +436,7 @@ C_OPS := [code.Op]string {
 	.Mul = "*",
 	.Div = "/",
 	.Mod = "%",
+	.Pow = "**",
 	.Neg = "-",
 	.And = "&",
 	.Or  = "|",

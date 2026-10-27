@@ -81,6 +81,7 @@ Operator_Kind :: enum u8 {
 	LShift,
 	Cast, // `\` — force `left` into the layout of `right`: `n + 2 \ u8` is `(n + 2) \ u8`
 	Layout, // `::` — the type of an unknown: `??::u8`
+	Power, // `**`
 }
 
 ExecutionWrapper :: enum u8 {

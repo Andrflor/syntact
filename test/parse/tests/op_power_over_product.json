@@ -1,0 +1,6 @@
+{
+  "name": "op_power_over_product",
+  "description": "a * b ** c — the power binds tighter than *: a * (b ** c).",
+  "source": "a * b ** c",
+  "expect": "Scope[Operator(Multiply,Identifier(a),Operator(Power,Identifier(b),Identifier(c)))]"
+}

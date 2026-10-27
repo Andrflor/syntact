@@ -149,9 +149,11 @@ distributes over `|`, a set is in a family when each of its elements is.
 ```text
 int × int → int              +  -  *  [&]  [|]  ^  <<  >>
 int × (int & ~0) → int       /  %        the divisor is not 0
+int × (int & 0..) → int      **          the power: the count is not negative
 int → int                    -  [~]
 float × float → float        +  -  *
 float × (float & ~0.0) → float   /
+float × (int & 0..) → float  **
 float → float                -
 string × string → string     +           concatenation; a character is a string
 string × int → string        *           repetition, the count ≥ 0 (§4.6)
@@ -167,6 +169,16 @@ any × any → bool             in
 0 < "a"        illegal
 ?₁::u8 + 1     legal: ?₁::u8 in int
 10 / ?₁::u8    illegal: ?₁ may be 0
+```
+
+`**` binds tighter than `*` and than a prefix `-`, and to the right:
+`-2 ** 2 = -(2 ** 2)`, `2 ** 3 ** 2 = 2 ** 9`. Its laws:
+
+```text
+x ** 0 = 1     x ** 1 = x     1 ** n = 1     0 ** n = 0, n ≥ 1
+(x ** a) ** b = x ** (a * b)
+(c * x * y) ** e = c ** e * x ** e * y ** e        e an integer
+x ** n ≥ 1 when x ≥ 1: a divisor
 ```
 
 `[~]` is the bitwise not: `[~]true = false`. It is not `~`. Equality is written
@@ -641,8 +653,10 @@ The orbit has a closed form when s moves by a constant, or halves: its i-th poin
 `kᵢ = sⁱ(m)` and its length `n = μ(i: kᵢ in B)`,
 
 ```text
-s(k) = k + c          kᵢ = m + c·i      n = m - b, or 0, when B = ..b or the point b
-s(k) = k >> c, k / 2ᶜ  kᵢ = m >> c·i    n = μ(i: m >> c·i in B)
+s(k) = k + c           kᵢ = m + c·i                          n = m - b, or 0, when B = ..b or the point b
+s(k) = α·k + c         kᵢ = α ** i * m + c * (α ** i - 1) / (α - 1)
+s(k) = k / c, k ≥ 0    kᵢ = m / c ** i                       n = μ(i: m / c ** i in B)
+s(k) = k >> c          kᵢ = m >> c·i
 ```
 
 Then the equation itself is folded from the base case up, over the steps i from
@@ -677,22 +691,25 @@ polynomial in i over the other unknowns, has its closed form:
 
 ```text
 r = 1      x = x₀ + G(hi) - G(lo - 1)        G(m) = g(0) + … + g(m), by the sums of powers
-r = 2ʲ     x = P(n) + (x₀ - P(0)) << j·n      P(t + 1) = r·P(t) + g(t), by its coefficients
+r ≠ 1      x = P(n) + (x₀ - P(0)) * r ** n    P(t + 1) = r·P(t) + g(t), by its coefficients
 ```
 
-The ring computes over atoms: a term it does not read — a μ, a pattern — is one.
-The algebra writes no power but `<<`: rⁿ for another r, a product, stay folds. On
-examples:
+The ring computes over atoms: a term it does not read — a μ, a pattern, `r ** n` —
+is one; the whole stays one polynomial over one divisor, whatever its parts are
+worth alone. A product of the counter, `x ↦ k·x`, has no closed form: it stays a
+fold. On examples:
 
 ```text
 sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
 sum{n -> m}!    = m * (m + 1) / 2
 hanoi -> {u8:n -> ??  -> n ? {0 -> 0  -> 2 * hanoi{n -> n - 1}! + 1}}
-hanoi{n -> m}!  = (1 << m) - 1
+hanoi{n -> m}!  = 2 ** m - 1
+t -> {u8:n -> ??  -> n ? {0 -> 1  -> 3 * t{n -> n - 1}! + n}}
+t{n -> m}!      = (7 * 3 ** m - 2 * m - 3) / 4
 half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}
-half{n -> m}!   = μ(i: m >> i in 0)                         the length of m in bits
+half{n -> m}!   = μ(i: m / 2 ** i in 0)                     the length of m in bits
 g -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * g{n -> n / 2}! + 1}}
-g{n -> m}!      = (2 << μ(i: m >> i in 0)) - 1
+g{n -> m}!      = 2 * 2 ** μ(i: m / 2 ** i in 0) - 1
 fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
 fact{n -> m}!   = ⟳(i: m - 1 ↦ i - 1 until ..(-1); x: 1 ↦ (m - i) * x; x)
 fib -> {u8:n -> ??  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}}

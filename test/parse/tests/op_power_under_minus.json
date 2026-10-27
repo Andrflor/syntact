@@ -1,0 +1,6 @@
+{
+  "name": "op_power_under_minus",
+  "description": "-a ** b — the minus applies to the power: -(a ** b).",
+  "source": "-a ** b",
+  "expect": "Scope[Operator(Subtract,nil,Operator(Power,Identifier(a),Identifier(b)))]"
+}

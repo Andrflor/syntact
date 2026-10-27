@@ -512,13 +512,17 @@ continues :: proc(k: ^Kernel, stop: Type, ki: Type, i: ^Unknown) -> bool {
 }
 
 // orbit: kᵢ = sⁱ(m), the i-th point of the orbit of m by s(x), when it has a closed
-// form: s(x) = x + c gives m + c·i; s(x) = x >> c, or x / 2ᶜ for x ≥ 0, gives
-// m >> c·i.
+// form: s(x) = α·x + β gives m + β·i when α = 1, αⁱ·m + β·(αⁱ - 1)/(α - 1)
+// otherwise; s(x) = x / c, for x ≥ 0, gives m / cⁱ; s(x) = x >> c gives m >> c·i.
 orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, bool) {
 	if alpha, beta, affine := affine_in(s, x); affine {
-		one, is_int := alpha.(Int)
-		c, constant := beta.(Int)
-		if is_int && one == 1 && constant do return op(k, .Add, m, op(k, .Mul, c, i)), true
+		a, is_int := alpha.(Int)
+		b, constant := beta.(Int)
+		if is_int && constant && a == 1 do return op(k, .Add, m, op(k, .Mul, b, i)), true
+		if is_int && constant && a != 0 {
+			power := op(k, .Pow, a, i)
+			return op(k, .Add, op(k, .Mul, power, m), op(k, .Div, op(k, .Mul, b, op(k, .Sub, power, Int(1))), Int(a - 1))), true
+		}
 	}
 	o, is_op := s.(^Operation)
 	if !is_op || len(o.args) != 2 do return nil, false
@@ -530,8 +534,9 @@ orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, 
 	case .Shr:
 		shift = i128(c)
 	case .Div:
-		if c & (c - 1) != 0 || !included(k, layout_of(k, x), new_range(Int(0), nil, .Int)) do return nil, false
-		for p := i128(c); p > 1; p >>= 1 do shift += 1
+		// ⌊⌊m / c⌋ / c⌋ = ⌊m / c²⌋ for m ≥ 0
+		if !included(k, layout_of(k, x), new_range(Int(0), nil, .Int)) do return nil, false
+		return op(k, .Div, m, op(k, .Pow, c, i)), true
 	case:
 		return nil, false
 	}
@@ -813,12 +818,12 @@ without_state :: proc(k: ^Kernel, f: ^Fold, i: int, by: Type) -> ^Fold {
 //
 //   r = 1         x = x₀ + G(hi) - G(lo - 1)     G(m) = g(0) + … + g(m), by the
 //                                                 sums of powers (Faulhaber)
-//   r = 2ʲ        x = P(n) + (x₀ - P(0))·rⁿ     P the polynomial with
+//   r ≠ 1         x = P(n) + (x₀ - P(0))·rⁿ     P the polynomial with
 //                                                 P(t + 1) = r·P(t) + g(t), by its
 //                                                 coefficients (undetermined)
 //
-// rⁿ is 1 << j·n: the algebra writes no other power. The ring computes on lo, hi
-// and x₀ as polynomials over atoms (atomized), put back at the end.
+// The ring computes on lo, hi and x₀ as polynomials over atoms (atomized), put
+// back at the end.
 closed :: proc(k: ^Kernel, f: ^Fold, i: int) -> (end: Type, ok: bool) {
 	first, last := counter_range(k, f) or_return
 	bounds: Rewrite
@@ -852,14 +857,11 @@ closed :: proc(k: ^Kernel, f: ^Fold, i: int) -> (end: Type, ok: bool) {
 		}
 		total = ring_over(total, divisor) or_return
 		below := ring_law(.Sub, {lo, Int(1)}) or_return
-		upper := rewrite(k, total, rewriting(nil, f.index, hi))
-		lower := rewrite(k, total, rewriting(nil, f.index, below))
+		upper := ring_at(total, f.index, hi) or_return
+		lower := ring_at(total, f.index, below) or_return
 		sum := ring_law(.Sub, {upper, lower}) or_return
 		return rewrite(k, ring_law(.Add, {init, sum}) or_return, bounds), true
 	}
-	if r < 2 || r & (r - 1) != 0 do return
-	shift: i128 = 0
-	for q := i128(r); q > 1; q >>= 1 do shift += 1
 	// g in t, the steps taken
 	t := new_unknown(k, nil)
 	t.layout = new_range(Int(0), nil, .Int)
@@ -893,20 +895,37 @@ closed :: proc(k: ^Kernel, f: ^Fold, i: int) -> (end: Type, ok: bool) {
 	#reverse for _, e in ps {
 		acc := ring_law(.Neg, {coefficients[e]}) or_return
 		for d in e + 1 ..= degree do acc = ring_law(.Add, {acc, ring_law(.Mul, {Int(binomial(d, e)), ps[d]}) or_return}) or_return
-		ps[e] = ring_over(acc, i128(r - 1)) or_return
+		if r < 1 do acc = ring_law(.Neg, {acc}) or_return
+		ps[e] = ring_over(acc, abs(i128(r) - 1)) or_return
 	}
 	poly: Type = Int(0)
-	power: Type = Int(1)
+	tᵉ: Type = Int(1)
 	for pe in ps {
-		poly = ring_law(.Add, {poly, ring_law(.Mul, {pe, power}) or_return}) or_return
-		power = ring_law(.Mul, {power, t}) or_return
+		poly = ring_law(.Add, {poly, ring_law(.Mul, {pe, tᵉ}) or_return}) or_return
+		tᵉ = ring_law(.Mul, {tᵉ, t}) or_return
 	}
 	n := ring_law(.Add, {ring_law(.Sub, {hi, lo}) or_return, Int(1)}) or_return
-	at_n := rewrite(k, poly, rewriting(nil, t, n))
-	at_0 := rewrite(k, poly, rewriting(nil, t, Int(0)))
+	at_n := ring_at(poly, t, n) or_return
+	at_0 := ring_at(poly, t, Int(0)) or_return
+	// rⁿ an atom, so that the whole is one polynomial over one divisor: its parts
+	// alone need not be integers
+	rⁿ := atomized(k, op(k, .Pow, r, rewrite(k, n, bounds)), &bounds)
 	start := ring_law(.Sub, {init, at_0}) or_return
-	steps := ring_law(.Mul, {Int(shift), n}) or_return
-	return op(k, .Add, rewrite(k, at_n, bounds), op(k, .Shl, rewrite(k, start, bounds), rewrite(k, steps, bounds))), true
+	whole := ring_law(.Add, {at_n, ring_law(.Mul, {start, rⁿ}) or_return}) or_return
+	return rewrite(k, whole, bounds), true
+}
+
+// ring_at: the polynomial t with u replaced by v, in the ring: over its divisor,
+// whatever its parts are worth alone.
+ring_at :: proc(t: Type, u: ^Unknown, v: Type) -> (out: Type, ok: bool) {
+	ms, d := monomials(t) or_return
+	out = Int(0)
+	for m in ms {
+		term: Type = Int(coefficient(m))
+		for f in factors(m) do term = ring_law(.Mul, {term, same_unknown(f, u) ? v : f}) or_return
+		out = ring_law(.Add, {out, term}) or_return
+	}
+	return ring_over(out, d)
 }
 
 // atomized: t as a polynomial (ring.odin) over atoms: each term the ring does not
