@@ -20,6 +20,7 @@ psubq_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xFB, dst, src)}
 pand_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xDB, dst, src)}
 por_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xEB, dst, src)}
 pxor_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xEF, dst, src)}
+pandn_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xDF, dst, src)}
 pmuludq_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xF4, dst, src)}
 pcmpeqd_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0x76, dst, src)}
 punpcklqdq_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0x6C, dst, src)}

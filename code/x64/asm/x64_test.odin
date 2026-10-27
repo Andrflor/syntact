@@ -2915,6 +2915,7 @@ testing_sse_packed :: proc(t: ^testing.T) {
 		{"pand", pand_xmm_xmm},
 		{"por", por_xmm_xmm},
 		{"pxor", pxor_xmm_xmm},
+		{"pandn", pandn_xmm_xmm},
 		{"pmuludq", pmuludq_xmm_xmm},
 		{"pcmpeqd", pcmpeqd_xmm_xmm},
 		{"punpcklqdq", punpcklqdq_xmm_xmm},
