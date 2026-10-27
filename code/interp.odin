@@ -4,9 +4,10 @@ import "core:fmt"
 
 // THE REFERENCE INTERPRETER
 //
-// Runs the code of a program as the machine will: the instructions in order, a
-// branch to its label, each call of a symbol in the order it is written. The
-// symbols are given by the caller: what a library would answer.
+// Runs the code of a program as the machine will: the instructions in order, the
+// arm of a match whose cover takes the target, a loop until its body ends without
+// an Again, each call of a symbol in the order it is written. The symbols are
+// given by the caller: what a library would answer.
 
 Datum :: struct {
 	int:  i64,
@@ -36,23 +37,38 @@ Machine_State :: struct {
 	depth:   int,
 }
 
+// Frame: a function running: its values, and the parameters of the loops it is in,
+// innermost last.
+Frame :: struct {
+	f:     ^Func,
+	regs:  []Datum,
+	loops: [dynamic][]Value,
+}
+
 // execute: the function `index` of the program, on its arguments.
 execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (result: Datum, err: string) {
-	p := m.p
-	f := p.funcs[index]
+	f := m.p.funcs[index]
 	if m.depth > 100_000 do return {}, "the calls go too deep"
 	m.depth += 1
 	defer m.depth -= 1
-	regs := make([]Datum, len(f.types))
-	defer delete(regs)
-	copy(regs, args)
-	marks := make(map[Label]int)
-	defer delete(marks)
-	for inst, i in f.insts do if mark, ok := inst.(Mark); ok do marks[mark.label] = i
-	pc := 0
-	for pc < len(f.insts) {
-		inst := f.insts[pc]
-		pc += 1
+	fr := Frame{f = f, regs = make([]Datum, len(f.kinds))}
+	defer delete(fr.regs)
+	defer delete(fr.loops)
+	copy(fr.regs, args)
+	again: bool
+	again, err = run_body(m, &fr, f.body)
+	if err != "" do return {}, err
+	if again do return {}, "an Again outside a loop"
+	if f.body.value != NONE do result = fr.regs[f.body.value]
+	return result, ""
+}
+
+// run_body: the instructions of a body, up to its end or an Again, which is then
+// true: the parameters of the innermost loop hold their new values.
+run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: string) {
+	p := m.p
+	regs := fr.regs
+	for inst in b.insts {
 		switch i in inst {
 		case Const:
 			regs[i.dst].int = i.value
@@ -61,25 +77,23 @@ execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (result: Datum,
 		case Text_Const:
 			regs[i.dst].text = p.texts[i.text]
 		case Input:
-			if i.slot >= len(m.inputs) do return {}, fmt.tprintf("the input %d is not given", i.slot)
+			if i.slot >= len(m.inputs) do return false, fmt.tprintf("the input %d is not given", i.slot)
+			if !takes(p.inputs[i.slot], .Int, Datum{int = m.inputs[i.slot]}) do return false, fmt.tprintf("the input %d is out of its layout", i.slot)
 			regs[i.dst].int = m.inputs[i.slot]
 		case Unary:
-			regs[i.dst] = unary(i.op, f.types[i.a], regs[i.a])
+			regs[i.dst] = unary(i.op, fr.f.kinds[i.a].machine, regs[i.a])
 		case Binary:
-			d, ok := binary_of(i.op, f.types[i.a], regs[i.a], regs[i.b])
-			if !ok do return {}, "a division by 0"
+			d, ok := binary_of(i.op, fr.f.kinds[i.a].machine, regs[i.a], regs[i.b])
+			if !ok do return false, "a division by 0"
 			regs[i.dst] = d
-		case Move:
+		case In:
+			regs[i.dst].int = takes(i.cover, fr.f.kinds[i.x].machine, regs[i.x]) ? 1 : 0
+		case Narrow:
 			regs[i.dst] = regs[i.src]
-		case Mark:
-		case Jump:
-			pc = marks[i.label]
-		case Branch:
-			if regs[i.cond].int == 0 do pc = marks[i.otherwise]
 		case Foreign:
 			imp := p.imports[i.symbol]
 			s, known := m.symbols[imp.symbol]
-			if !known do return {}, fmt.tprintf("the symbol %s is not given", imp.symbol)
+			if !known do return false, fmt.tprintf("the symbol %s is not given", imp.symbol)
 			given := make([]Datum, len(i.args))
 			for a, j in i.args do given[j] = regs[a]
 			append(&m.run.calls, imp.symbol)
@@ -90,14 +104,57 @@ execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (result: Datum,
 			defer delete(given)
 			for a, j in i.args do given[j] = regs[a]
 			d, failed := execute(m, i.func, given)
-			if failed != "" do return {}, failed
+			if failed != "" do return false, failed
 			if i.dst != NONE do regs[i.dst] = d
-		case Return:
-			if i.value != NONE do result = regs[i.value]
-			return result, ""
+		case Match:
+			machine := fr.f.kinds[i.target].machine
+			for arm, n in i.arms {
+				if n < len(i.arms) - 1 && !takes(arm.cover, machine, regs[i.target]) do continue
+				again, err = run_body(m, fr, arm.body)
+				if again || err != "" do return
+				if i.dst != NONE && arm.body.value != NONE do regs[i.dst] = regs[arm.body.value]
+				break
+			}
+		case Loop:
+			assign(regs, i.params, i.init)
+			append(&fr.loops, i.params)
+			for {
+				again, err = run_body(m, fr, i.body)
+				if err != "" do return
+				if !again do break
+			}
+			pop(&fr.loops)
+			if i.dst != NONE do regs[i.dst] = regs[i.body.value]
+		case Again:
+			if len(fr.loops) == 0 do return false, "an Again outside a loop"
+			assign(regs, fr.loops[len(fr.loops) - 1], i.args)
+			return true, ""
 		}
 	}
-	return {}, "the code ends without a return"
+	return false, ""
+}
+
+// assign: dst take the values of src, all read before any is written.
+assign :: proc(regs: []Datum, dst, src: []Value) {
+	given := make([]Datum, len(src))
+	defer delete(given)
+	for x, i in src do given[i] = regs[x]
+	for x, i in dst do regs[x] = given[i]
+}
+
+// takes: the cover takes the value.
+takes :: proc(c: Cover, m: Machine, x: Datum) -> bool {
+	inside := false
+	if m == .Real {
+		for r in c.reals {
+			above := r.lo_open ? x.real > r.lo : x.real >= r.lo
+			below := r.hi_open ? x.real < r.hi : x.real <= r.hi
+			inside ||= above && below
+		}
+	} else {
+		for b in c.ints do inside ||= b.lo <= i128(x.int) && i128(x.int) <= b.hi
+	}
+	return inside != c.negated
 }
 
 unary :: proc(op: Op, m: Machine, a: Datum) -> Datum {

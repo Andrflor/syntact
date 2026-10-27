@@ -59,6 +59,9 @@ CODE_CASES := []Code_Case {
 	{name = "function", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", int = 120},
 	{name = "function of an input", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!", inputs = {6}, int = 720},
 	{name = "loop", source = "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", inputs = {10}, int = 55},
+	// a call in tail position is a loop: the stack does not grow with its turns
+	{name = "tail call", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!", inputs = {300_000}, int = 600_000},
+	{name = "tail call that acts", source = LIBC + "tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> tick{n -> n - 1}!}!}}\n-> tick{n -> ??::u8}!", inputs = {3}, int = 0, calls = {"puts", "puts", "puts"}},
 	{name = "closed form, no function", source = "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\n-> sum{n -> ??::u8}!", inputs = {10}, int = 55},
 	{name = "recursion that acts", source = LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", inputs = {3}, int = 3, calls = {"puts", "puts", "puts"}},
 	{name = "answers of a recursion", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs"}},
@@ -121,4 +124,41 @@ test_boolean_answer :: proc(t: ^testing.T) {
 	if !testing.expectf(t, err == "", "%s", err) do return
 	imp := prog.imports[0]
 	testing.expectf(t, imp.result_bits == 8 && !imp.result_signed, "a boolean comes back in %d bits, signed %v", imp.result_bits, imp.result_signed)
+}
+
+// What the kernel proved comes along: the bounds of each integer, narrowed where an
+// arm narrows its target.
+@(test)
+test_facts :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	k, parsed := kernel.run("n -> ??::i32\n-> n ? {0..255 -> (n + n * n) / 2  -> 0}")
+	if !testing.expect(t, parsed, "does not parse") do return
+	prog, err := lower_program(&k)
+	if !testing.expectf(t, err == "", "%s", err) do return
+	f := prog.funcs[0]
+	m, is_match := f.body.insts[len(f.body.insts) - 1].(Match)
+	if !testing.expectf(t, is_match, "no match\n%s", print_program(&prog)) do return
+	testing.expectf(t, bounds_of(f, m.target) == Bounds{-1 << 31, 1 << 31 - 1}, "the target: %v", bounds_of(f, m.target))
+	testing.expectf(t, len(m.arms[0].cover.ints) == 1 && m.arms[0].cover.ints[0] == Bounds{0, 255}, "the cover: %v", m.arms[0].cover)
+	arm := m.arms[0].body
+	narrow, is_narrow := arm.insts[0].(Narrow)
+	testing.expectf(t, is_narrow && bounds_of(f, narrow.dst) == Bounds{0, 255}, "the target in the arm\n%s", print_program(&prog))
+	testing.expectf(t, bounds_of(f, arm.value) == Bounds{0, 32640}, "the value of the arm: %v\n%s", bounds_of(f, arm.value), print_program(&prog))
+}
+
+// A function whose calls are in tail position is a loop on its parameters.
+@(test)
+test_tail_call_is_a_loop :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	k, parsed := kernel.run("f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!")
+	if !testing.expect(t, parsed, "does not parse") do return
+	prog, err := lower_program(&k)
+	if !testing.expectf(t, err == "", "%s", err) do return
+	f := prog.funcs[1]
+	_, is_loop := f.body.insts[0].(Loop)
+	testing.expectf(t, len(f.body.insts) == 1 && is_loop, "the body of f is not a loop\n%s", print_program(&prog))
 }

@@ -51,7 +51,7 @@ image_of :: proc(p: ^code.Program) -> (image: []u8, err: string) {
 		e.flush = len(e.imports) - 1
 	}
 	if len(e.imports) > enc.GOT_MAX do return nil, "too many symbols imported"
-	if p.inputs > enc.ARGS_TABLE_MAX do return nil, "too many inputs"
+	if len(p.inputs) > enc.ARGS_TABLE_MAX do return nil, "too many inputs"
 	e.text_offsets = make([]int, len(p.texts))
 	for t, i in p.texts {
 		e.text_offsets[i] = len(e.rodata)
@@ -109,20 +109,28 @@ absolute :: proc(reg: enc.Register64) -> enc.MemoryAddress {
 
 stub :: proc(e: ^Emitter) {
 	p := e.prog
-	if p.inputs > 0 {
+	if len(p.inputs) > 0 {
 		// argc < inputs + 1: exit 2
 		enc.mov_r64_m64(.RAX, absolute(.RSP))
-		enc.cmp_r64_imm32(.RAX, u32(p.inputs + 1))
+		enc.cmp_r64_imm32(.RAX, u32(len(p.inputs) + 1))
 		enough := forward(e, enc.jge_rel32)
 		write_text(e, "missing inputs\n", 2)
 		exit_with(e, 2)
 		land(e, enough)
-		for slot in 0 ..< p.inputs {
+		// each input, in the layout it is written with: otherwise exit 2
+		outside := make([dynamic]int)
+		for cover, slot in p.inputs {
 			enc.mov_r64_m64(.RSI, enc.AddressComponents{base = .RSP, displacement = i32(16 + 8 * slot)})
 			integer_of(e)
 			enc.movabs_r64_imm64(.R10, i64(enc.ARGS_TABLE_VADDR + 8 * slot))
 			enc.mov_m64_r64(absolute(.R10), .RAX)
+			append(&outside, ..test_loaded(e, .Int, cover))
 		}
+		admitted := forward(e, enc.jmp_rel32)
+		for at in outside do land(e, at)
+		write_text(e, "input out of range\n", 2)
+		exit_with(e, 2)
+		land(e, admitted)
 	}
 	enc.call_rel32(0)
 	append(&e.calls, Fixup{here(e) - 4, 0})
@@ -300,7 +308,7 @@ store :: proc(v: code.Value, reg: enc.Register64) {
 }
 
 function :: proc(e: ^Emitter, f: ^code.Func) -> string {
-	frame := (8 * len(f.types) + 15) & ~int(15)
+	frame := (8 * len(f.kinds) + 15) & ~int(15)
 	enc.push_r64(.RBP)
 	enc.mov_r64_r64(.RBP, .RSP)
 	if frame > 0 do enc.sub_r64_imm32(.RSP, u32(frame))
@@ -317,9 +325,26 @@ function :: proc(e: ^Emitter, f: ^code.Func) -> string {
 		case .Stack:
 		}
 	}
-	marks := make([]int, f.labels)
-	jumps := make([dynamic]Fixup)
-	for inst in f.insts {
+	loops := make([dynamic]Loop_Head)
+	if msg := body(e, f, f.body, &loops); msg != "" do return msg
+	if f.body.value == code.NONE do enc.xor_r64_r64(.RAX, .RAX)
+	else do load(.RAX, f.body.value)
+	enc.mov_r64_r64(.RSP, .RBP)
+	enc.pop_r64(.RBP)
+	enc.ret()
+	return ""
+}
+
+// Loop_Head: a loop the code is in: where its body starts, and its parameters.
+Loop_Head :: struct {
+	at:     int,
+	params: []code.Value,
+}
+
+// body: the instructions of a body, in order; a match and a loop laid out with
+// jumps.
+body :: proc(e: ^Emitter, f: ^code.Func, b: code.Body, loops: ^[dynamic]Loop_Head) -> string {
+	for inst in b.insts {
 		switch i in inst {
 		case code.Const:
 			enc.movabs_r64_imm64(.RAX, i.value)
@@ -337,7 +362,7 @@ function :: proc(e: ^Emitter, f: ^code.Func) -> string {
 		case code.Unary:
 			load(.RAX, i.a)
 			switch {
-			case i.op == .Neg && f.types[i.a] == .Real:
+			case i.op == .Neg && f.kinds[i.a].machine == .Real:
 				enc.movabs_r64_imm64(.RCX, 63)
 				enc.btc_r64_r64(.RAX, .RCX)
 			case i.op == .Neg:
@@ -351,22 +376,20 @@ function :: proc(e: ^Emitter, f: ^code.Func) -> string {
 		case code.Binary:
 			load(.RAX, i.a)
 			load(.RCX, i.b)
-			msg := f.types[i.a] == .Real ? real_binary(i.op) : int_binary(i.op)
+			msg := f.kinds[i.a].machine == .Real ? real_binary(i.op) : int_binary(i.op)
 			if msg != "" do return msg
 			store(i.dst, .RAX)
-		case code.Move:
+		case code.In:
+			outside := test_cover(e, f, i.x, i.cover)
+			enc.movabs_r64_imm64(.RAX, 1)
+			done := forward(e, enc.jmp_rel32)
+			for at in outside do land(e, at)
+			enc.xor_r64_r64(.RAX, .RAX)
+			land(e, done)
+			store(i.dst, .RAX)
+		case code.Narrow:
 			load(.RAX, i.src)
 			store(i.dst, .RAX)
-		case code.Mark:
-			marks[i.label] = here(e)
-		case code.Jump:
-			enc.jmp_rel32(0)
-			append(&jumps, Fixup{here(e) - 4, int(i.label)})
-		case code.Branch:
-			load(.RAX, i.cond)
-			enc.test_r64_r64(.RAX, .RAX)
-			enc.je_rel32(0)
-			append(&jumps, Fixup{here(e) - 4, int(i.otherwise)})
 		case code.Foreign:
 			if msg := call_symbol(e, f, i); msg != "" do return msg
 		case code.Call:
@@ -377,16 +400,111 @@ function :: proc(e: ^Emitter, f: ^code.Func) -> string {
 			enc.call_rel32(0)
 			append(&e.calls, Fixup{here(e) - 4, i.func})
 			if i.dst != code.NONE do store(i.dst, .RAX)
-		case code.Return:
-			if i.value == code.NONE do enc.xor_r64_r64(.RAX, .RAX)
-			else do load(.RAX, i.value)
-			enc.mov_r64_r64(.RSP, .RBP)
-			enc.pop_r64(.RBP)
-			enc.ret()
+		case code.Match:
+			ends := make([dynamic]int)
+			for arm, n in i.arms {
+				last := n == len(i.arms) - 1
+				next: []int
+				if !last do next = test_cover(e, f, i.target, arm.cover)
+				if msg := body(e, f, arm.body, loops); msg != "" do return msg
+				if i.dst != code.NONE && arm.body.value != code.NONE {
+					load(.RAX, arm.body.value)
+					store(i.dst, .RAX)
+				}
+				if last do break
+				append(&ends, forward(e, enc.jmp_rel32))
+				for at in next do land(e, at)
+			}
+			for at in ends do land(e, at)
+		case code.Loop:
+			move_all(i.params, i.init)
+			append(loops, Loop_Head{here(e), i.params})
+			if msg := body(e, f, i.body, loops); msg != "" do return msg
+			pop(loops)
+			if i.dst != code.NONE {
+				load(.RAX, i.body.value)
+				store(i.dst, .RAX)
+			}
+		case code.Again:
+			if len(loops) == 0 do return "an Again outside a loop"
+			head := loops[len(loops) - 1]
+			move_all(head.params, i.args)
+			back(e, enc.jmp_rel32, head.at)
 		}
 	}
-	for j in jumps do patch(e, j.at, marks[j.target])
 	return ""
+}
+
+// move_all: dst take the values of src, all read before any is written: through
+// the stack.
+move_all :: proc(dst, src: []code.Value) {
+	for x in src {
+		load(.RAX, x)
+		enc.push_r64(.RAX)
+	}
+	#reverse for x in dst {
+		enc.pop_r64(.RAX)
+		store(x, .RAX)
+	}
+}
+
+// test_cover: jumps to where the cover does not take the value x; what follows
+// runs when it does.
+test_cover :: proc(e: ^Emitter, f: ^code.Func, x: code.Value, c: code.Cover) -> []int {
+	m := f.kinds[x].machine
+	load(.RAX, x)
+	if m == .Real do enc.movq_xmm_r64(.XMM0, .RAX)
+	return test_loaded(e, m, c)
+}
+
+// test_loaded: test_cover, on an integer in rax or a float in xmm0. Each cell is
+// tested in turn: a value in one is in the cells.
+test_loaded :: proc(e: ^Emitter, m: code.Machine, c: code.Cover) -> []int {
+	inside := make([dynamic]int)
+	if m == .Real {
+		for r in c.reals {
+			skip := make([dynamic]int)
+			if r.lo > -max(f64) {
+				// x < lo, or x <= lo when open, or unordered: not in the cell
+				enc.movabs_r64_imm64(.RAX, transmute(i64)r.lo)
+				enc.movq_xmm_r64(.XMM1, .RAX)
+				enc.ucomisd_xmm_xmm(.XMM0, .XMM1)
+				append(&skip, forward(e, enc.jp_rel32))
+				append(&skip, forward(e, r.lo_open ? enc.jbe_rel32 : enc.jb_rel32))
+			}
+			if r.hi < max(f64) {
+				enc.movabs_r64_imm64(.RAX, transmute(i64)r.hi)
+				enc.movq_xmm_r64(.XMM1, .RAX)
+				enc.ucomisd_xmm_xmm(.XMM0, .XMM1)
+				append(&skip, forward(e, enc.jp_rel32))
+				append(&skip, forward(e, r.hi_open ? enc.jae_rel32 : enc.ja_rel32))
+			}
+			append(&inside, forward(e, enc.jmp_rel32))
+			for at in skip do land(e, at)
+		}
+	} else {
+		for b in c.ints {
+			skip := make([dynamic]int)
+			if b.lo > i128(min(i64)) {
+				enc.movabs_r64_imm64(.RCX, i64(clamp(b.lo, i128(min(i64)), i128(max(i64)))))
+				enc.cmp_r64_r64(.RAX, .RCX)
+				append(&skip, forward(e, enc.jl_rel32))
+			}
+			if b.hi < i128(max(i64)) {
+				enc.movabs_r64_imm64(.RCX, i64(clamp(b.hi, i128(min(i64)), i128(max(i64)))))
+				enc.cmp_r64_r64(.RAX, .RCX)
+				append(&skip, forward(e, enc.jg_rel32))
+			}
+			append(&inside, forward(e, enc.jmp_rel32))
+			for at in skip do land(e, at)
+		}
+	}
+	// here, the value is in no cell
+	if c.negated do return inside[:]
+	outside := make([]int, 1)
+	outside[0] = forward(e, enc.jmp_rel32)
+	for at in inside do land(e, at)
+	return outside
 }
 
 // int_binary: rax = rax op rcx.

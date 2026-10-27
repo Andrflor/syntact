@@ -10,26 +10,39 @@ import "core:strings"
 // instructions. A known value is a constant. An unknown that no act gives back is an
 // input of the program. An act is run where it stands, in order: the call of a
 // symbol behind a boundary is an instruction, and what it gives back is the value
-// its answer stands for. A pattern is a branch on its target, each cover a test of
-// membership in a set the laws computed; the value of the branch taken is moved
-// into the pattern's. What the laws could not reduce to one of these is not code
-// yet, and says so.
+// its answer stands for. A pattern is a match on its target, each cover the cells
+// of a set the laws computed. A recursion that stays is a function, and its calls
+// in tail position the loop of its body. What the laws could not reduce to one of
+// these is not code yet, and says so.
+//
+// What the kernel proved comes along: each integer has the bounds of its layout
+// image (specs/types.md §7), and an unknown an arm narrows, ?ₖ::(L & S), is read
+// there through a Narrow.
 
 Lowering :: struct {
 	k:      ^kernel.Kernel,
 	prog:   ^Program,
 	f:      ^Func,
-	bound:  [dynamic]Bound, // in f: the answers of the acts lowered, its parameters, the inputs
+	insts:  ^[dynamic]Inst, // the body the instructions go to
+	bound:  [dynamic]Bound, // in the body: the answers of its acts, the parameters, the inputs, the narrowings
 	inputs: [dynamic]^kernel.Unknown,
 	funcs:  map[^kernel.Scope]int, // the function of each recursive equation lowered
+	self:   ^Self, // the function being lowered; nil in the program itself
 	error:  string,
 }
 
-// Bound: what an unknown stands for in the code: the value an act gave back, or an
-// input.
+// Bound: what an unknown stands for in the code: the value an act gave back, a
+// parameter, an input, or what an arm narrowed one of these to.
 Bound :: struct {
 	unknown: ^kernel.Unknown,
 	value:   Value,
+}
+
+// Self: the equation of the function being lowered. A call of it in tail position
+// is an Again of the loop of its body.
+Self :: struct {
+	root:  ^kernel.Scope,
+	again: bool, // a call in tail position was lowered
 }
 
 // program_type: the type of the file: one run of it, its production — or the
@@ -44,12 +57,30 @@ lower_program :: proc(k: ^kernel.Kernel) -> (prog: Program, err: string) {
 	if len(k.errors) > 0 do return prog, "the program has errors"
 	append(&prog.funcs, new_clone(Func{name = "main"}))
 	l := Lowering{k = k, prog = &prog, f = prog.funcs[0]}
-	v := lower(&l, program_type(k))
+	l.f.body = lower_body(&l, program_type(k), false)
 	if l.error != "" do return prog, l.error
-	l.f.result = machine_of(l.f, v)
-	append(&l.f.insts, Return{v})
-	prog.inputs = len(l.inputs)
+	l.f.result = machine_of(l.f, l.f.body.value)
+	for u in l.inputs {
+		c, known := input_cover(&l, u)
+		if !known do return prog, fmt.tprintf("the input ?%d has a layout the code does not test", u.id)
+		append(&prog.inputs, c)
+	}
 	return prog, ""
+}
+
+// input_cover: the layout an input is written with, before any arm narrows it, as
+// a cover: what the stub admits.
+input_cover :: proc(l: ^Lowering, u: ^kernel.Unknown) -> (Cover, bool) {
+	written := u^
+	written.layout = nil
+	layout := kernel.layout_of(l.k, &written)
+	if c, constant := cover_of(layout); constant do return c, len(c.reals) == 0
+	if b := term_bounds(l, &written); b == EVERY {
+		every := make([]Bounds, 1)
+		every[0] = EVERY
+		return Cover{ints = every}, true
+	}
+	return {}, false
 }
 
 fail :: proc(l: ^Lowering, format: string, args: ..any) -> Value {
@@ -58,17 +89,51 @@ fail :: proc(l: ^Lowering, format: string, args: ..any) -> Value {
 }
 
 emit :: proc(l: ^Lowering, inst: Inst) {
-	append(&l.f.insts, inst)
+	append(l.insts, inst)
 }
 
 constant :: proc(l: ^Lowering, x: i64) -> Value {
 	v := value(l.f, .Int)
+	l.f.kinds[v].bounds = {i128(x), i128(x)}
 	emit(l, Const{v, x})
 	return v
 }
 
-lower :: proc(l: ^Lowering, t: kernel.Type) -> Value {
+// open_body: b, the body the instructions go to until it is closed. What it binds
+// is bound in it only.
+open_body :: proc(l: ^Lowering, b: ^Body) -> (outer: ^[dynamic]Inst, bound: int) {
+	outer, bound = l.insts, len(l.bound)
+	b.insts = make([dynamic]Inst)
+	l.insts = &b.insts
+	return
+}
+
+close_body :: proc(l: ^Lowering, outer: ^[dynamic]Inst, bound: int) {
+	l.insts = outer
+	resize(&l.bound, bound)
+}
+
+// lower_body: t, as a body of its own.
+lower_body :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> (b: Body) {
+	outer, bound := open_body(l, &b)
+	b.value = lower(l, t, tail)
+	close_body(l, outer, bound)
+	return
+}
+
+// lower: the value of t. In tail position, nothing is computed after it: a call of
+// the function being lowered is an Again. A value made for t has the bounds of t.
+lower :: proc(l: ^Lowering, t: kernel.Type, tail := false) -> Value {
 	if l.error != "" do return NONE
+	first := Value(len(l.f.kinds))
+	v := term(l, t, tail)
+	if v != NONE && v >= first && machine_of(l.f, v) == .Int {
+		l.f.kinds[v].bounds = meet(l.f.kinds[v].bounds, term_bounds(l, t))
+	}
+	return v
+}
+
+term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 	#partial switch v in t {
 	case kernel.Int:
 		if i128(v) < i128(min(i64)) || i128(v) > i128(max(i64)) do return fail(l, "%v does not fit in 64 bits", i128(v))
@@ -79,7 +144,7 @@ lower :: proc(l: ^Lowering, t: kernel.Type) -> Value {
 		return constant(l, i64(v))
 	case kernel.Real:
 		r := value(l.f, .Real)
-		emit(l, Real_Const{r, f64(v.num) / f64(v.den)})
+		emit(l, Real_Const{r, float_of(v)})
 		return r
 	case kernel.None:
 		return NONE
@@ -93,37 +158,58 @@ lower :: proc(l: ^Lowering, t: kernel.Type) -> Value {
 		}
 		return operation(l, v)
 	case ^kernel.Pattern:
-		return pattern(l, v)
+		target := lower(l, v.target)
+		if l.error != "" do return NONE
+		return match(l, v.branches, target, tail)
 	case ^kernel.Effect:
-		return act(l, v)
+		return act(l, v, tail)
 	case ^kernel.Collapse:
-		if v.recursive do return call(l, v)
+		if !v.recursive do break
+		if tail && is_self(l, v) do return again(l, v)
+		return call(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
 
-// unknown: the value an act gave back, or else an input of the program, in the
-// order they are first read.
+// unknown: the value an act gave back, a parameter, or else an input of the
+// program, numbered in the order they are first read. Where an arm narrowed it,
+// ?ₖ::(L & S), it is read through a Narrow that has the narrowed bounds.
 unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
-	for b in l.bound do if kernel.same_unknown(b.unknown, u) do return b.value
+	facts := term_bounds(l, u)
+	#reverse for b in l.bound {
+		if !kernel.same_unknown(b.unknown, u) do continue
+		if machine_of(l.f, b.value) != .Int do return b.value
+		narrowed := meet(bounds_of(l.f, b.value), facts)
+		if narrowed == bounds_of(l.f, b.value) do return b.value
+		dst := value(l.f, .Int)
+		l.f.kinds[dst].bounds = narrowed
+		emit(l, Narrow{dst, b.value})
+		append(&l.bound, Bound{u, dst})
+		return dst
+	}
 	m := machine_of_layout(l.k, kernel.layout_of(l.k, u))
 	if m != .Int do return fail(l, "the input ?%d is not an integer", u.id)
+	slot := len(l.inputs)
+	for x, i in l.inputs do if kernel.same_unknown(x, u) do slot = i
+	if slot == len(l.inputs) do append(&l.inputs, u)
 	v := value(l.f, .Int)
-	emit(l, Input{v, len(l.inputs)})
-	append(&l.inputs, u)
+	l.f.kinds[v].bounds = facts
+	emit(l, Input{v, slot})
 	append(&l.bound, Bound{u, v})
 	return v
 }
 
 // act: an act, run where it stands, then what it wraps. Only the call of a symbol
 // behind a boundary is code: another effect is served by nothing.
-act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
+act :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {
-		// a call of an equation that acts: the call, then what it wraps
+		// a call of an equation that acts: the call, then what it wraps — in tail
+		// position when what it wraps is what the call gives back
+		if tail && is_self(l, e.call) && gives_answer(e) do return again(l, e.call)
 		dst := call(l, e.call)
 		if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
-		return lower(l, e.then)
+		return lower(l, e.then, tail)
 	}
 	s, is_scope := e.call.target.(^kernel.Scope)
 	if !is_scope do return fail(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
@@ -151,30 +237,66 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 		if imp.result == .Int do imp.result_bits, imp.result_signed = int_width(l.k, layout)
 	}
 	dst := imp.result == .None ? NONE : value(l.f, imp.result)
+	if imp.result == .Int do l.f.kinds[dst].bounds = term_bounds(l, e.answer)
 	emit(l, Foreign{dst, intern(l.prog, imp), args[:]})
 	if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
-	return lower(l, e.then)
+	return lower(l, e.then, tail)
 }
 
-// call: a recursive call that stays, as the call of the function of its equation;
-// the values the carve gives the fields are its arguments.
-call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> Value {
+// gives_answer: what the act wraps is what it gives back.
+gives_answer :: proc(e: ^kernel.Effect) -> bool {
+	if e.answer == nil do return kernel.is_none(e.then)
+	u, is_unknown := e.then.(^kernel.Unknown)
+	return is_unknown && kernel.same_unknown(u, e.answer)
+}
+
+// is_self: c is a call of the function being lowered.
+is_self :: proc(l: ^Lowering, c: ^kernel.Collapse) -> bool {
 	s, is_scope := c.target.(^kernel.Scope)
-	if !is_scope do return fail(l, "%s is not a call the code makes yet", kernel.print_type(c))
-	index := function_of(l, kernel.origin(s), c)
+	return l.self != nil && is_scope && kernel.origin(s) == l.self.root
+}
+
+// call: a recursive call that stays, as the call of the function of its equation.
+call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> Value {
+	index, args := arguments(l, c)
 	if l.error != "" do return NONE
-	args := make([dynamic]Value)
-	for b, i in s.bindings {
+	dst := value(l.f, l.prog.funcs[index].result)
+	emit(l, Call{dst, index, args})
+	return dst
+}
+
+// again: a call of the function being lowered, in tail position: its parameters
+// take the values the carve gives, and its body runs again.
+again :: proc(l: ^Lowering, c: ^kernel.Collapse) -> Value {
+	_, args := arguments(l, c)
+	if l.error != "" do return NONE
+	emit(l, Again{args})
+	l.self.again = true
+	return NONE
+}
+
+// arguments: the function of the equation c carves, and the values the carve
+// gives its fields.
+arguments :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (index: int, args: []Value) {
+	s, is_scope := c.target.(^kernel.Scope)
+	if !is_scope {
+		fail(l, "%s is not a call the code makes yet", kernel.print_type(c))
+		return
+	}
+	index = function_of(l, kernel.origin(s), c)
+	if l.error != "" do return
+	out := make([dynamic]Value)
+	for b in s.bindings {
 		if !is_parameter(b) do continue
 		a := lower(l, kernel.binding_value(l.k, b))
-		if l.error != "" do return NONE
-		if machine_of(l.f, a) != l.prog.funcs[index].params[len(args)] do return fail(l, "the field `%s` of %s is given a %v", b.name, kernel.print_type(c), machine_of(l.f, a))
-		append(&args, a)
-		_ = i
+		if l.error != "" do return
+		if machine_of(l.f, a) != l.prog.funcs[index].params[len(out)] {
+			fail(l, "the field `%s` of %s is given a %v", b.name, kernel.print_type(c), machine_of(l.f, a))
+			return
+		}
+		append(&out, a)
 	}
-	dst := value(l.f, l.prog.funcs[index].result)
-	emit(l, Call{dst, index, args[:]})
-	return dst
+	return index, out[:]
 }
 
 is_parameter :: proc(b: ^kernel.Binding) -> bool {
@@ -184,12 +306,13 @@ is_parameter :: proc(b: ^kernel.Binding) -> bool {
 // function_of: the function of a recursive equation, lowered once (specs/language/15):
 // its fields are its parameters, each an unknown of its layout — its color, or else
 // the family of its value —, and its body the normal form of its production over
-// them, its own calls left as calls.
+// them, its own calls left as calls. When some are in tail position, the body is a
+// loop on the parameters.
 function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> int {
 	if index, done := l.funcs[root]; done do return index
 	family, known := kernel.family_of(l.k, c)
 	if !known do return int(fail(l, "%s has no family the code holds", kernel.print_type(c)))
-	f := new_clone(Func{name = root.name != "" ? root.name : "equation"})
+	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.acting})
 	f.result = machine_of_layout(l.k, kernel.family_term(family))
 	index := len(l.prog.funcs)
 	append(&l.prog.funcs, f)
@@ -219,15 +342,27 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	if !has do return int(fail(l, "%s has no production", f.name))
 	body := kernel.binding_type(l.k, p)
 	// the body, in the function
-	outer, outer_bound := l.f, l.bound
-	l.f, l.bound = f, make([dynamic]Bound)
+	outer, outer_bound, outer_self, outer_insts := l.f, l.bound, l.self, l.insts
+	self := Self{root = root}
+	l.f, l.bound, l.self = f, make([dynamic]Bound), &self
+	values := make([]Value, len(params))
 	for u, i in params {
-		append(&l.bound, Bound{u, value(f, machines[i])})
+		values[i] = value(f, machines[i])
+		if machines[i] == .Int do f.kinds[values[i]].bounds = term_bounds(l, u)
+		append(&l.bound, Bound{u, values[i]})
 	}
-	v := lower(l, body)
-	if l.error == "" && machine_of(f, v) != f.result do fail(l, "%s gives a %v, its calls a %v", f.name, machine_of(f, v), f.result)
-	emit(l, Return{v})
-	l.f, l.bound = outer, outer_bound
+	f.body = lower_body(l, body, true)
+	if self.again {
+		loop := Loop{dst = NONE, params = values, init = values, body = f.body}
+		if f.body.value != NONE {
+			loop.dst = value(f, machine_of(f, f.body.value))
+			f.kinds[loop.dst].bounds = bounds_of(f, f.body.value)
+		}
+		f.body = Body{value = loop.dst}
+		append(&f.body.insts, loop)
+	}
+	if l.error == "" && machine_of(f, f.body.value) != f.result do fail(l, "%s gives a %v, its calls a %v", f.name, machine_of(f, f.body.value), f.result)
+	l.f, l.bound, l.self, l.insts = outer, outer_bound, outer_self, outer_insts
 	return index
 }
 
@@ -390,6 +525,7 @@ operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
 
 binary :: proc(l: ^Lowering, op: Op, a, b: Value, m: Machine) -> Value {
 	dst := value(l.f, m)
+	if is_comparison(op) do l.f.kinds[dst].bounds = {0, 1}
 	emit(l, Binary{dst, a, b, op})
 	return dst
 }
@@ -407,64 +543,198 @@ boolean :: proc(l: ^Lowering, t: kernel.Type) -> bool {
 	return known && f == .Bool
 }
 
-// member: x in s, s a set the laws computed: 1 or 0.
+// member: x in s: 1 or 0. A set of constants is a cover; a set the laws did not
+// compute is tested on its parts — a value it holds is x = that value.
 member :: proc(l: ^Lowering, x: Value, s: kernel.Type) -> Value {
 	if l.error != "" do return NONE
+	if c, constant := cover_of(s); constant {
+		if !fits(l, x, c) do return fail(l, "membership in %s is not code yet", kernel.print_type(s))
+		dst := value(l.f, .Int)
+		l.f.kinds[dst].bounds = {0, 1}
+		emit(l, In{dst, x, c})
+		return dst
+	}
 	#partial switch v in s {
-	case kernel.Int, kernel.Bool, kernel.Char, kernel.Real:
-		return binary(l, .Eq, x, lower(l, v), .Int)
 	case ^kernel.Range:
-		out := constant(l, 1)
-		if v.lo != nil do out = binary(l, .And, out, binary(l, .Ge, x, lower(l, v.lo), .Int), .Int)
-		if v.hi != nil do out = binary(l, .And, out, binary(l, .Le, x, lower(l, v.hi), .Int), .Int)
+		out := NONE
+		if v.lo != nil do out = both(l, .And, out, binary(l, .Ge, x, lower(l, v.lo), .Int))
+		if v.hi != nil do out = both(l, .And, out, binary(l, .Le, x, lower(l, v.hi), .Int))
 		return out
 	case ^kernel.Or:
-		out := constant(l, 0)
-		for term in v.terms do out = binary(l, .Or, out, member(l, x, term), .Int)
+		out := NONE
+		for term in v.terms do out = both(l, .Or, out, member(l, x, term))
 		return out
 	case ^kernel.And:
-		out := constant(l, 1)
-		for term in v.terms do out = binary(l, .And, out, member(l, x, term), .Int)
+		out := NONE
+		for term in v.terms do out = both(l, .And, out, member(l, x, term))
 		return out
 	case ^kernel.Not:
 		return binary(l, .Xor, member(l, x, v.term), constant(l, 1), .Int)
 	case ^kernel.Is:
 		return member(l, x, v.term)
 	case ^kernel.Unknown, ^kernel.Operation:
-		// one value the laws did not compute: x in v is x = v
-		return binary(l, .Eq, x, lower(l, v), .Int)
+		if kernel.is_constant(s) do break // a set the laws left as an operation
+		y := lower(l, s)
+		if machine_of(l.f, y) != machine_of(l.f, x) do break
+		return binary(l, .Eq, x, y, .Int)
 	}
 	return fail(l, "membership in %s is not code yet", kernel.print_type(s))
 }
 
-// pattern: the branches in order; each cover tested on the target, the first that
-// holds taken. The check proved that one does: the last is taken without its test.
-pattern :: proc(l: ^Lowering, p: ^kernel.Pattern) -> Value {
-	target := lower(l, p.target)
-	if l.error != "" do return NONE
-	end := label(l.f)
-	result := NONE
-	for b, i in p.branches {
-		last := i == len(p.branches) - 1
-		next: Label
-		if b.cover != nil && !last {
-			next = label(l.f)
-			emit(l, Branch{member(l, target, b.cover), next})
+// both: a op b, a the first of the parts when NONE.
+both :: proc(l: ^Lowering, op: Op, a, b: Value) -> Value {
+	if a == NONE do return b
+	return binary(l, op, a, b, .Int)
+}
+
+// match: the branches of a pattern on the target. A branch whose cover is not a
+// set of constants is tested where it stands, after the covers above: in the arm
+// that takes what they do not, as a match on its membership,
+//
+//   t ? {c₀ -> p₀  c₁ -> p₁ …} = t ? {c₀ -> p₀  -> t ? {c₁ -> p₁ …}}
+//
+// The last branch is not tested: the check proved that one takes every value.
+match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> Value {
+	arms := make([dynamic]Arm)
+	for b, i in branches {
+		if i == len(branches) - 1 || b.cover == nil {
+			// t ? {-> p} = p
+			if i == 0 do return lower(l, b.product, tail)
+			append(&arms, Arm{body = lower_body(l, b.product, tail)})
+			break
 		}
-		v := lower(l, b.product)
+		cover, constant := cover_of(b.cover)
+		if constant {
+			if !fits(l, target, cover) do return fail(l, "a cover %s is not code yet", kernel.print_type(b.cover))
+			append(&arms, Arm{cover, lower_body(l, b.product, tail)})
+			continue
+		}
+		if i > 0 {
+			append(&arms, Arm{body = rest_body(l, branches[i:], target, tail)})
+			break
+		}
+		tested := member(l, target, b.cover)
 		if l.error != "" do return NONE
-		if v != NONE {
-			if result == NONE do result = value(l.f, machine_of(l.f, v))
-			if machine_of(l.f, v) != machine_of(l.f, result) do return fail(l, "the branches of %s give %v and %v", kernel.print_type(p.target), machine_of(l.f, result), machine_of(l.f, v))
-			emit(l, Move{result, v})
+		taken := make([]Bounds, 1)
+		taken[0] = {1, 1}
+		append(&arms, Arm{Cover{ints = taken}, lower_body(l, b.product, tail)})
+		append(&arms, Arm{body = rest_body(l, branches[1:], target, tail)})
+		return close_match(l, tested, arms[:])
+	}
+	return close_match(l, target, arms[:])
+}
+
+// rest_body: the branches from a cover the laws did not compute, as the body of
+// the arm that takes what the covers above do not.
+rest_body :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> (b: Body) {
+	outer, bound := open_body(l, &b)
+	b.value = match(l, branches, target, tail)
+	close_body(l, outer, bound)
+	return
+}
+
+// close_match: the match of these arms, its value that of the arm that runs: it
+// has the bounds of all of them.
+close_match :: proc(l: ^Lowering, target: Value, arms: []Arm) -> Value {
+	if l.error != "" do return NONE
+	dst := NONE
+	for arm in arms {
+		v := arm.body.value
+		if v == NONE do continue
+		if dst == NONE {
+			dst = value(l.f, machine_of(l.f, v))
+			l.f.kinds[dst].bounds = bounds_of(l.f, v)
+			continue
 		}
-		if !last {
-			emit(l, Jump{end})
-			if b.cover != nil do emit(l, Mark{next})
+		if machine_of(l.f, v) != machine_of(l.f, dst) do return fail(l, "the arms of a match give %v and %v", machine_of(l.f, dst), machine_of(l.f, v))
+		l.f.kinds[dst].bounds = hull(bounds_of(l.f, dst), bounds_of(l.f, v))
+	}
+	emit(l, Match{dst, target, arms})
+	return dst
+}
+
+// cover_of: a set of constants as the kernel cut it, its cells — integers,
+// characters and booleans as integers, or floats —; false when the set is not one.
+cover_of :: proc(set: kernel.Type) -> (c: Cover, constant: bool) {
+	if !kernel.is_constant(set) do return
+	cells, negated := kernel.as_cells(set)
+	if len(cells) == 0 do return
+	c.negated = negated
+	if ints, discrete := int_cells(cells); discrete {
+		c.ints = ints
+		return c, true
+	}
+	reals := make([dynamic]Interval)
+	for x in cells {
+		if kernel.cell_family(x) != .Real do return {}, false
+		append(&reals, interval_of(kernel.real_bounds(x)))
+	}
+	c.reals = reals[:]
+	return c, true
+}
+
+// fits: a cover tests a value of its family.
+fits :: proc(l: ^Lowering, x: Value, c: Cover) -> bool {
+	switch machine_of(l.f, x) {
+	case .Int:
+		return len(c.reals) == 0
+	case .Real:
+		return len(c.ints) == 0
+	case .Text, .None:
+	}
+	return false
+}
+
+// int_cells: cells of integers, characters or booleans, as bounds; false when one
+// is not.
+int_cells :: proc(cells: []kernel.Type) -> (out: []Bounds, discrete: bool) {
+	bounds := make([dynamic]Bounds)
+	for x in cells {
+		#partial switch kernel.cell_family(x) {
+		case .Bool:
+			v := i128(x.(kernel.Bool) ? 1 : 0)
+			append(&bounds, Bounds{v, v})
+		case .Int, .Char:
+			lo, hi := kernel.discrete_bounds(x)
+			append(&bounds, Bounds{lo.? or_else min(i128), hi.? or_else max(i128)})
+		case:
+			return nil, false
 		}
 	}
-	emit(l, Mark{end})
-	return result
+	return bounds[:], true
+}
+
+interval_of :: proc(b: kernel.Real_Bounds) -> Interval {
+	out := Interval{lo = -inf_f64(), hi = inf_f64(), lo_open = b.lo_open, hi_open = b.hi_open}
+	if lo, has := b.lo.?; has do out.lo = float_of(lo)
+	if hi, has := b.hi.?; has do out.hi = float_of(hi)
+	return out
+}
+
+inf_f64 :: proc() -> f64 {
+	return transmute(f64)u64(0x7FF0_0000_0000_0000)
+}
+
+float_of :: proc(r: kernel.Real) -> f64 {
+	return f64(r.num) / f64(r.den)
+}
+
+// term_bounds: the least and greatest integers t takes: those of its layout image,
+// t with each unknown replaced by its layout (specs/types.md §7).
+term_bounds :: proc(l: ^Lowering, t: kernel.Type) -> Bounds {
+	image, ok := kernel.layout_image(l.k, t)
+	if !ok do return EVERY
+	if cells, negated := kernel.as_cells(image); !negated && len(cells) > 0 {
+		if ints, discrete := int_cells(cells); discrete {
+			out := ints[0]
+			for x in ints[1:] do out = hull(out, x)
+			return out
+		}
+	}
+	// a set left as an operation on sets of integers: the results at their bounds
+	lo, hi, known := kernel.int_bounds(l.k, image)
+	if !known do return EVERY
+	return Bounds{lo.? or_else min(i128), hi.? or_else max(i128)}
 }
 
 // machine_of_layout: what holds a value of a layout at run time.
