@@ -42,15 +42,17 @@ CODE_CASES := []Code_Case {
 	{name = "call crossed", source = LIBM + "-> libm.sqrt{x -> 2.0}! * 2.0", real = 2 * math.SQRT_TWO, calls = {"sqrt"}},
 	{name = "two calls", source = LIBM + "-> libm.sqrt{x -> 4.0}! + libm.sqrt{x -> 9.0}!", real = 5, calls = {"sqrt", "sqrt"}},
 	{name = "nested calls", source = LIBM + "-> libm.sqrt{x -> libm.pow{b -> 3.0  e -> 4.0}!}!", real = 9, calls = {"pow", "sqrt"}},
-	{name = "unused answer kept", source = LIBC + "r -> libc.puts{s -> \"hello\"}!\n-> libc.abs{n -> -42}!", int = 42, calls = {"puts", "abs"}},
-	{name = "gives nothing", source = LIBC + "s -> libc.srand{seed -> 7}!\n-> 1", int = 1, calls = {"srand"}},
+	{name = "unused answer kept", source = LIBC + "-> {\n  r -> libc.puts{s -> \"hello\"}!\n  -> libc.abs{n -> -42}!\n}!", int = 42, calls = {"puts", "abs"}},
+	{name = "gives nothing", source = LIBC + "-> {\n  s -> libc.srand{seed -> 7}!\n  -> 1\n}!", int = 1, calls = {"srand"}},
+	// the program is the file's production: what it does not hold is not run
+	{name = "effects outside the production", source = LIBC + "s -> libc.srand{seed -> 7}!\n-> 1", int = 1},
 	{name = "call on one path", source = LIBM + "n -> ??::u8\n-> n ? {0 -> libm.sqrt{x -> 16.0}!  -> 1.0}", inputs = {0}, real = 4, calls = {"sqrt"}},
 	{name = "call not on this path", source = LIBM + "n -> ??::u8\n-> n ? {0 -> libm.sqrt{x -> 16.0}!  -> 1.0}", inputs = {1}, real = 1},
-	{name = "order of runs", source = LIBC + "a -> {r -> libc.puts{s -> \"one\"}!  -> 1}!\nb -> {r -> libc.puts{s -> \"two\"}!  -> 2}!\n-> b - a", int = 1, calls = {"puts", "puts"}},
+	{name = "order of runs", source = LIBC + "-> {\n  a -> {r -> libc.puts{s -> \"one\"}!  -> 1}!\n  b -> {r -> libc.puts{s -> \"two\"}!  -> 2}!\n  -> b - a\n}!", int = 1, calls = {"puts", "puts"}},
 	{name = "answer read twice", source = LIBC + "-> {a -> libc.abs{n -> -3}!  -> a * a}!", int = 9, calls = {"abs"}},
 	{name = "unserved effect", source = "-> !?::u8", error = "the effect ε0 is served by no boundary"},
 	// a character is a string of length 1: where a text goes, it is one
-	{name = "character as text", source = "c -> <libc.so.6>{\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n}\nf -> c.fdopen{fd -> 0  mode -> \"r\"}!\n-> 1", int = 1, calls = {"fdopen"}},
+	{name = "character as text", source = "c -> <libc.so.6>{\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n}\n-> {\n  f -> c.fdopen{fd -> 0  mode -> \"r\"}!\n  -> 1\n}!", int = 1, calls = {"fdopen"}},
 	// a recursion on a counter is an iteration: a loop
 	{name = "iteration", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", int = 120},
 	{name = "iteration of an input", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!", inputs = {6}, int = 720},

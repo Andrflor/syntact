@@ -54,11 +54,13 @@ Self :: struct {
 	again: bool, // a call in tail position was lowered
 }
 
-// program_type: the type of the file: one run of it, its production — or the
-// default one, none — with the effects of the bindings above it (specs/types.md §4.8).
+// program_type: the program is the type of the file's production, its entry point:
+// what it gives, with the effects it holds. The file is not collapsed: a binding of
+// it runs only where the production holds it. A file without production is a
+// program without main: none.
 program_type :: proc(k: ^kernel.Kernel) -> kernel.Type {
-	if p, found := kernel.first_production(k, k.root); found do return kernel.binding_type(k, p)
-	return kernel.with_effects(k, k.root, nil, kernel.None{})
+	if p, found := kernel.first_production(k, k.root); found do return kernel.product(k, p)
+	return kernel.None{}
 }
 
 // lower_program: the code of a file the kernel checked without error.

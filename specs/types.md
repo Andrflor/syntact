@@ -329,6 +329,17 @@ not none. A pure binding crosses them:
 {w -> !?::none  -> 5}{w -> 0}             invalid: a carve does not replace an effect
 ```
 
+The program is the type of the file's production, its entry point: what it gives,
+with the effects it holds. The file is not collapsed: a binding of the file runs
+only where the production holds it, and what it does not hold is not code. A file
+without production is a program without main: it gives none, and runs nothing.
+
+```text
+main -> {w -> !?::none}
+main!                                     the program: none, nothing runs
+-> main!                                  the program: ε₁(none)
+```
+
 A name reads what its binding gives back, never its effect: the effect is the
 run's, and each run gives back its own answer. Two collapses are two runs:
 
