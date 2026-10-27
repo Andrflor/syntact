@@ -1031,7 +1031,8 @@ close_match :: proc(l: ^Lowering, target: Value, arms: []Arm) -> Value {
 // characters and booleans as integers, or floats —; false when the set is not one.
 cover_of :: proc(set: kernel.Type) -> (c: Cover, constant: bool) {
 	if !kernel.is_constant(set) do return
-	cells, negated := kernel.as_cells(set)
+	one: [1]kernel.Type
+	cells, negated := kernel.cells_in(set, &one)
 	if len(cells) == 0 do return
 	c.negated = negated
 	if ints, discrete := int_cells(cells); discrete {
@@ -1098,7 +1099,8 @@ float_of :: proc(r: kernel.Real) -> f64 {
 term_bounds :: proc(l: ^Lowering, t: kernel.Type) -> Bounds {
 	image, ok := kernel.layout_image(l.k, t)
 	if !ok do return EVERY
-	if cells, negated := kernel.as_cells(image); !negated && len(cells) > 0 {
+	one: [1]kernel.Type
+	if cells, negated := kernel.cells_in(image, &one); !negated && len(cells) > 0 {
 		if ints, discrete := int_cells(cells); discrete {
 			out := ints[0]
 			for x in ints[1:] do out = hull(out, x)

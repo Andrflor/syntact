@@ -356,7 +356,8 @@ shortest :: proc(t: Type) -> []rune {
 		case .Add:
 			for a in v.args do append(&out, ..shortest(a))
 		case .Mul:
-			cells, _ := as_cells(v.args[1])
+			one: [1]Type
+			cells, _ := cells_in(v.args[1], &one)
 			lo, _ := discrete_bounds(cells[0])
 			part := shortest(v.args[0])
 			for _ in 0 ..< (lo.? or_else 0) do append(&out, ..part)
@@ -390,7 +391,8 @@ text_has :: proc(t: Type, s: string) -> bool {
 // --- counts: the integers of a repetition ---
 
 counts_hold :: proc(n: Type, v: i128) -> bool {
-	cells, negated := as_cells(n)
+	one: [1]Type
+	cells, negated := cells_in(n, &one)
 	if negated do return false
 	for c in cells {
 		if cell_family(c) != .Int do continue
@@ -404,34 +406,37 @@ counts_hold :: proc(n: Type, v: i128) -> bool {
 
 // counts_from: the counts of n from v on.
 counts_from :: proc(n: Type, v: i128) -> Type {
-	cells, _ := as_cells(n)
-	out := make([dynamic]Type)
+	one: [1]Type
+	cells, _ := cells_in(n, &one)
+	out := make([dynamic]Type, 0, len(cells))
 	for c in cells {
 		if cell_family(c) != .Int do continue
 		lo, hi := discrete_bounds(c)
 		x := discrete_cell(.Int, max_bound(lo, v), hi)
 		if !is_none(x) do append(&out, x)
 	}
-	return cells_term(out[:])
+	return union_term(out[:])
 }
 
 // counts_less: n - 1, n ≥ 1.
 counts_less :: proc(n: Type) -> Type {
-	cells, _ := as_cells(n)
-	out := make([dynamic]Type)
-	for c in cells {
+	one: [1]Type
+	cells, _ := cells_in(n, &one)
+	out := make([]Type, len(cells))
+	for c, i in cells {
 		lo, hi := discrete_bounds(c)
 		l, _ := lo.?
 		x: Maybe(i128)
 		if h, bounded := hi.?; bounded do x = h - 1
-		append(&out, discrete_cell(.Int, l - 1, x))
+		out[i] = discrete_cell(.Int, l - 1, x)
 	}
-	return cells_term(out[:])
+	return union_term(out)
 }
 
 // counts_below: 0 up to the greatest count of n.
 counts_below :: proc(n: Type) -> Type {
-	cells, _ := as_cells(n)
+	one: [1]Type
+	cells, _ := cells_in(n, &one)
 	if len(cells) == 0 do return None{}
 	_, hi := discrete_bounds(cells[len(cells) - 1])
 	return discrete_cell(.Int, i128(0), hi)

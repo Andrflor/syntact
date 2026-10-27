@@ -98,31 +98,63 @@ is_text :: proc(t: Type) -> bool {
 	return false
 }
 
-// as_cells: a constant normal form as its cells, and whether it is their ~.
-as_cells :: proc(t: Type) -> (cells: []Type, negated: bool) {
+// cells_in: a constant normal form as its cells, and whether it is their ~, read
+// where they are: one cell alone, in the room the caller gives.
+cells_in :: proc(t: Type, one: ^[1]Type) -> (cells: []Type, negated: bool) {
 	#partial switch v in t {
 	case None:
 		return nil, false
 	case ^Not:
-		inner, _ := as_cells(v.term)
+		inner, _ := cells_in(v.term, one)
 		return inner, true
 	case ^Or:
 		return v.terms, false
 	}
-	return slice.clone([]Type{t}), false
+	one[0] = t
+	return one[:], false
+}
+
+// cells_of: the cells of a constant normal form, pushed on the scratch, and whether
+// it is their ~.
+cells_of :: proc(k: ^Kernel, t: Type) -> (cells: []Type, negated: bool) {
+	from := mark(k)
+	one: [1]Type
+	inner, n := cells_in(t, &one)
+	push_all(k, inner)
+	return pushed(k, from), n
 }
 
 // cells_term: the | of cells, in a fixed order.
-cells_term :: proc(cells: []Type) -> Type {
+cells_term :: proc(k: ^Kernel, cells: []Type) -> Type {
 	switch len(cells) {
 	case 0:
 		return None{}
 	case 1:
 		return cells[0]
 	}
-	sorted := slice.clone(cells)
-	slice.sort_by(sorted, cell_less)
-	return new_or(..sorted)
+	from := mark(k)
+	defer release(k, from)
+	push_all(k, cells)
+	return union_term(pushed(k, from))
+}
+
+// union_term: the | of cells that are where they may be sorted, in a fixed order.
+union_term :: proc(cells: []Type) -> Type {
+	switch len(cells) {
+	case 0:
+		return None{}
+	case 1:
+		return cells[0]
+	}
+	slice.sort_by(cells, cell_less)
+	return new_or(..cells)
+}
+
+// cell: the cell c, pushed; nothing when it is none.
+cell :: proc(k: ^Kernel, c: Type) -> []Type {
+	from := mark(k)
+	if !is_none(c) do push(k, c)
+	return pushed(k, from)
 }
 
 cell_less :: proc(a, b: Type) -> bool {
@@ -157,85 +189,104 @@ bound_before :: proc(a, b: Maybe(i128)) -> bool {
 
 // or_constants: a | b; with a ~: ~u₁ | ~u₂ = ~(u₁ & u₂), p | ~u = ~(u & ~p).
 or_constants :: proc(k: ^Kernel, terms: []Type) -> Type {
-	positives := make([dynamic]Type)
-	negatives := make([dynamic][]Type)
+	from := mark(k)
+	defer release(k, from)
+	for t in terms do if !is_negated(t) do _, _ = cells_of(k, t)
+	positives := pushed(k, from)
+	u: []Type
+	met := false // a negated term was met: what is left is outside it
 	for t in terms {
-		cells, negated := as_cells(t)
-		if negated {
-			append(&negatives, cells)
-		} else {
-			append(&positives, ..cells)
-		}
+		if !is_negated(t) do continue
+		cells, _ := cells_of(k, t)
+		u, met = met ? meet_cells(k, u, cells) : cells, true
 	}
-	if len(negatives) == 0 do return cells_term(union_cells(k, positives[:]))
-	u := negatives[0]
-	for n in negatives[1:] do u = meet_cells(k, u, n)
-	u = minus_cells(k, u, union_cells(k, positives[:]))
-	return new_not(cells_term(u))
+	if !met do return cells_term(k, union_cells(k, positives))
+	return new_not(cells_term(k, minus_cells(k, u, union_cells(k, positives))))
 }
 
 // and_constants: a & b; with a ~: ~u₁ & ~u₂ = ~(u₁ | u₂), p & ~u = p minus u.
 and_constants :: proc(k: ^Kernel, terms: []Type) -> Type {
+	from := mark(k)
+	defer release(k, from)
+	for t in terms do if is_negated(t) do _, _ = cells_of(k, t)
+	negatives := pushed(k, from)
 	positive: []Type
 	bounded := false // a positive term was met: what is left is in it
-	negatives := make([dynamic]Type)
 	for t in terms {
-		cells, negated := as_cells(t)
-		if negated {
-			append(&negatives, ..cells)
-		} else if !bounded {
-			positive, bounded = cells, true
-		} else {
-			positive = meet_cells(k, positive, cells)
-		}
+		if is_negated(t) do continue
+		cells, _ := cells_of(k, t)
+		positive, bounded = bounded ? meet_cells(k, positive, cells) : cells, true
 	}
-	u := union_cells(k, negatives[:])
-	if !bounded do return new_not(cells_term(u))
-	return cells_term(minus_cells(k, positive, u))
+	u := union_cells(k, negatives)
+	if !bounded do return new_not(cells_term(k, u))
+	return cells_term(k, minus_cells(k, positive, u))
+}
+
+// is_negated: a constant normal form that is the ~ of its cells.
+is_negated :: proc(t: Type) -> bool {
+	_, ok := t.(^Not)
+	return ok
 }
 
 // not_constant: ~ of a constant normal form: ~~u = u.
-not_constant :: proc(t: Type) -> Type {
-	cells, negated := as_cells(t)
-	if negated do return cells_term(cells)
-	return new_not(cells_term(cells))
+not_constant :: proc(k: ^Kernel, t: Type) -> Type {
+	from := mark(k)
+	defer release(k, from)
+	cells, negated := cells_of(k, t)
+	if negated do return cells_term(k, cells)
+	return new_not(cells_term(k, cells))
 }
 
 // --- | of cells ---
 
 union_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
-	by: [Cell_Family][dynamic]Type
-	for c in cells do if !is_none(c) do append(&by[cell_family(c)], c)
-	out := make([dynamic]Type)
-	append(&out, ..join_discrete(.Int, by[.Int][:]))
-	append(&out, ..join_reals(by[.Real][:]))
-	texts := unique_cells(k, by[.Text][:])
+	from := mark(k)
+	// the cells by family, each family a run, in the order given
+	for c in cells do if !is_none(c) do push(k, c)
+	given := pushed(k, from)
+	slice.stable_sort_by(given, proc(a, b: Type) -> bool {return cell_family(a) < cell_family(b)})
+	by: [Cell_Family][]Type
+	at := 0
+	for f in Cell_Family {
+		end := at
+		for end < len(given) && cell_family(given[end]) == f do end += 1
+		by[f], at = given[at:end], end
+	}
+	ints := join_discrete(k, .Int, by[.Int])
+	reals := join_reals(k, by[.Real])
+	texts := unique_cells(k, by[.Text])
 	// a set of strings in another one is absorbed
-	kept := make([dynamic]Type)
+	kept_from := mark(k)
 	for t, i in texts {
 		absorbed := false
 		for u, j in texts do if i != j && text_empty(text_and({t, text_not(u)})) && !(j > i && text_empty(text_and({u, text_not(t)}))) do absorbed = true
-		if !absorbed do append(&kept, t)
+		if !absorbed do push(k, t)
 	}
-	chars := join_discrete(.Char, by[.Char][:])
+	kept := pushed(k, kept_from)
+	chars := join_discrete(k, .Char, by[.Char])
 	for t in kept {
-		rest := make([dynamic]Type)
-		for c in chars do append(&rest, ..chars_in_text(c, t, false))
-		chars = rest[:]
+		rest := mark(k)
+		for c in chars do _ = chars_in_text(k, c, t, false)
+		chars = pushed(k, rest)
 	}
-	append(&out, ..chars)
-	append(&out, ..kept[:])
-	if slice.contains(by[.Bool][:], Type(Bool(false))) do append(&out, Bool(false))
-	if slice.contains(by[.Bool][:], Type(Bool(true))) do append(&out, Bool(true))
-	append(&out, ..join_shapes(k, by[.Value][:]))
-	append(&out, ..unique_cells(k, by[.Other][:]))
-	return out[:]
+	shapes := join_shapes(k, by[.Value])
+	others := unique_cells(k, by[.Other])
+	out := mark(k)
+	push_all(k, ints)
+	push_all(k, reals)
+	push_all(k, chars)
+	push_all(k, kept)
+	if slice.contains(by[.Bool], Type(Bool(false))) do push(k, Bool(false))
+	if slice.contains(by[.Bool], Type(Bool(true))) do push(k, Bool(true))
+	push_all(k, shapes)
+	push_all(k, others)
+	return sink(k,from, pushed(k, out))
 }
 
 unique_cells :: proc(k: ^Kernel, cells: []Type) -> []Type {
-	out := make([dynamic]Type)
-	for c in cells do if !contains_same(k, out[:], c) do append(&out, c)
-	return out[:]
+	from := mark(k)
+	for c in cells do if !contains_same(k, pushed(k, from), c) do push(k, c)
+	return pushed(k, from)
 }
 
 // join_shapes: the | of value cells in normal form: a cell once, and the shapes
@@ -390,7 +441,8 @@ blocks :: proc(k: ^Kernel, colors: []Type) -> []Block {
 // cuttable: a constant of primitives and strings: its & and ~ are computed whole.
 cuttable :: proc(c: Type) -> bool {
 	if !is_constant(c) do return false
-	cells, _ := as_cells(c)
+	one: [1]Type
+	cells, _ := cells_in(c, &one)
 	for x in cells {
 		#partial switch cell_family(x) {
 		case .Int, .Real, .Char, .Text, .Bool:
@@ -416,9 +468,9 @@ product_shape :: proc(template: []^Binding, row: []Type) -> Type {
 // --- & of cells ---
 
 meet_cells :: proc(k: ^Kernel, a, b: []Type) -> []Type {
-	out := make([dynamic]Type)
-	for x in a do for y in b do append(&out, ..meet_cell(k, x, y))
-	return union_cells(k, out[:])
+	from := mark(k)
+	for x in a do for y in b do _ = meet_cell(k, x, y)
+	return sink(k,from, union_cells(k, pushed(k, from)))
 }
 
 meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
@@ -429,21 +481,21 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 	case fx == fy && (fx == .Int || fx == .Char):
 		lo_x, hi_x := discrete_bounds(x)
 		lo_y, hi_y := discrete_bounds(y)
-		return cell_list(discrete_cell(fx, max_bound(lo_x, lo_y), min_bound(hi_x, hi_y)))
+		return cell(k, discrete_cell(fx, max_bound(lo_x, lo_y), min_bound(hi_x, hi_y)))
 	case fx == fy && fx == .Real:
-		return cell_list(real_cell(real_meet(real_bounds(x), real_bounds(y))))
+		return cell(k, real_cell(real_meet(real_bounds(x), real_bounds(y))))
 	case fx == fy && fx == .Bool:
-		return same(k, x, y) ? cell_list(x) : nil
+		return same(k, x, y) ? cell(k, x) : nil
 	case fx == fy && fx == .Text:
-		return text_meet(x, y)
+		return text_meet(k, x, y)
 	case fx == .Char && fy == .Text:
-		return chars_in_text(x, y, true)
+		return chars_in_text(k, x, y, true)
 	case fx == fy && fx == .Value:
-		if same(k, x, y) do return cell_list(x)
+		if same(k, x, y) do return cell(k, x)
 		if different_structures(k, x, y) do return nil
-		return cell_list(new_and(x, y))
+		return cell(k, new_and(x, y))
 	case fx == .Other:
-		if same(k, x, y) do return cell_list(x)
+		if same(k, x, y) do return cell(k, x)
 		if fy == .Text || fy == .Char || fy == .Bool || fy == .Value do return nil // a number is none of them
 		if fy == .Int {
 			// the least and greatest elements of x: nothing between them in y, nothing in common
@@ -452,86 +504,97 @@ meet_cell :: proc(k: ^Kernel, x, y: Type) -> []Type {
 				if is_none(discrete_cell(.Int, max_bound(lo, lo_y), min_bound(hi, hi_y))) do return nil
 			}
 		}
-		return cell_list(new_and(x, y))
+		return cell(k, new_and(x, y))
 	}
 	return nil
-}
-
-cell_list :: proc(c: Type) -> []Type {
-	if is_none(c) do return nil
-	return slice.clone([]Type{c})
 }
 
 // --- & ~ of cells ---
 
 // minus_cells: a & ~u, u a | of cells.
 minus_cells :: proc(k: ^Kernel, a, u: []Type) -> []Type {
-	out := make([dynamic]Type)
-	for x in a do append(&out, ..minus_cell(k, x, u))
-	return union_cells(k, out[:])
+	from := mark(k)
+	for x in a do _ = minus_cell(k, x, u)
+	return sink(k,from, union_cells(k, pushed(k, from)))
 }
 
 minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 	f := cell_family(x)
 	for y in u do if same(k, x, y) do return nil
+	from := mark(k)
 	switch f {
 	case .Int, .Char:
-		pieces := cell_list(x)
+		pieces := cell(k, x)
 		for y in u {
 			if cell_family(y) != f do continue
-			next := make([dynamic]Type)
-			for p in pieces do append(&next, ..discrete_minus(f, p, y))
-			pieces = next[:]
+			next := mark(k)
+			for p in pieces do _ = discrete_minus(k, f, p, y)
+			pieces = pushed(k, next)
 		}
 		if f == .Char {
 			for y in u {
 				if cell_family(y) != .Text do continue
-				next := make([dynamic]Type)
-				for p in pieces do append(&next, ..chars_in_text(p, y, false))
-				pieces = next[:]
+				next := mark(k)
+				for p in pieces do _ = chars_in_text(k, p, y, false)
+				pieces = pushed(k, next)
 			}
 		}
-		return pieces
+		return sink(k,from, pieces)
 	case .Real:
-		pieces := cell_list(x)
+		pieces := cell(k, x)
 		for y in u {
 			if cell_family(y) != .Real do continue
-			next := make([dynamic]Type)
-			for p in pieces do for q in real_minus(real_bounds(p), real_bounds(y)) do append(&next, ..cell_list(real_cell(q)))
-			pieces = next[:]
+			next := mark(k)
+			for p in pieces {
+				qs, n := real_minus(real_bounds(p), real_bounds(y))
+				for q in qs[:n] do _ = cell(k, real_cell(q))
+			}
+			pieces = pushed(k, next)
 		}
-		return pieces
+		return sink(k,from, pieces)
 	case .Bool:
-		return cell_list(x)
+		return cell(k, x)
 	case .Text:
-		ys := make([dynamic]Type)
-		for y in u do if g := cell_family(y); g == .Text || g == .Char do append(&ys, y)
-		if len(ys) == 0 do return cell_list(x)
-		removed := text_or(ys[:])
-		if text_empty(text_and({x, removed})) do return cell_list(x)
+		for y in u do if g := cell_family(y); g == .Text || g == .Char do push(k, y)
+		ys := pushed(k, from)
+		if len(ys) == 0 do return cell(k, x)
+		removed := text_or(ys)
+		release(k, from)
+		if text_empty(text_and({x, removed})) do return cell(k, x)
 		rest := text_and({x, text_not(removed)})
 		if text_empty(rest) do return nil
-		return cell_list(rest)
+		return cell(k, rest)
 	case .Value:
-		ys := make([dynamic]Type)
-		for y in u do if cell_family(y) == .Value && !different_structures(k, x, y) do append(&ys, y)
-		if len(ys) == 0 do return cell_list(x)
-		return cell_list(new_and(x, new_not(cells_term(ys[:]))))
+		for y in u do if cell_family(y) == .Value && !different_structures(k, x, y) do push(k, y)
+		ys := pushed(k, from)
+		if len(ys) == 0 do return cell(k, x)
+		left := new_and(x, new_not(cells_term(k, ys)))
+		release(k, from)
+		return cell(k, left)
 	case .Other:
-		ys := make([dynamic]Type)
-		for y in u do if g := cell_family(y); g == .Int || g == .Real || g == .Other do append(&ys, y)
-		if len(ys) == 0 do return cell_list(x)
+		for y in u do if g := cell_family(y); g == .Int || g == .Real || g == .Other do push(k, y)
+		ys := pushed(k, from)
+		if len(ys) == 0 do return cell(k, x)
 		if lo, hi, bounded := int_bounds(k, x); bounded {
 			hull := discrete_cell(.Int, lo, hi)
-			ints := make([dynamic]Type)
-			for y in ys do if cell_family(y) == .Int do append(&ints, y)
+			ints_from := mark(k)
+			for y in ys do if cell_family(y) == .Int do push(k, y)
+			ints := pushed(k, ints_from)
 			// nothing between its least and greatest elements outside u: none left
-			if len(discrete_minus_all(hull, ints[:])) == 0 do return nil
-			if len(meet_cells(k, cell_list(hull), ints[:])) == 0 do return cell_list(x)
+			if len(discrete_minus_all(k, hull, ints)) == 0 {
+				release(k, from)
+				return nil
+			}
+			if len(meet_cells(k, cell(k, hull), ints)) == 0 {
+				release(k, from)
+				return cell(k, x)
+			}
 		}
-		return cell_list(new_and(x, new_not(cells_term(ys[:]))))
+		left := new_and(x, new_not(cells_term(k, ys)))
+		release(k, from)
+		return cell(k, left)
 	}
-	return cell_list(x)
+	return cell(k, x)
 }
 
 // --- integers and characters ---
@@ -571,10 +634,12 @@ discrete_cell :: proc(f: Cell_Family, lo, hi: Maybe(i128)) -> Type {
 }
 
 // join_discrete: a..b | c..d = min(a, c)..max(b, d) when they meet or touch.
-join_discrete :: proc(f: Cell_Family, cells: []Type) -> []Type {
-	sorted := slice.clone(cells)
+join_discrete :: proc(k: ^Kernel, f: Cell_Family, cells: []Type) -> []Type {
+	from := mark(k)
+	push_all(k, cells)
+	sorted := pushed(k, from)
 	slice.sort_by(sorted, cell_less)
-	out := make([dynamic]Type)
+	out := mark(k)
 	lo, hi: Maybe(i128)
 	open := false
 	for c in sorted {
@@ -586,40 +651,38 @@ join_discrete :: proc(f: Cell_Family, cells: []Type) -> []Type {
 				if e, has_e := y.?; !has_e || e > h do hi = y
 				continue
 			}
-			append(&out, discrete_cell(f, lo, hi))
+			push(k, discrete_cell(f, lo, hi))
 		}
 		lo, hi, open = x, y, true
 	}
-	if open do append(&out, discrete_cell(f, lo, hi))
-	return out[:]
+	if open do push(k, discrete_cell(f, lo, hi))
+	return sink(k,from, pushed(k, out))
 }
 
 // discrete_minus: a..b & ~(c..d) = a..(c - 1) | (d + 1)..b. A piece beyond the
 // integers written here is not computed: a & ~b stays.
-discrete_minus :: proc(f: Cell_Family, x, y: Type) -> []Type {
+discrete_minus :: proc(k: ^Kernel, f: Cell_Family, x, y: Type) -> []Type {
 	lo_x, hi_x := discrete_bounds(x)
 	lo_y, hi_y := discrete_bounds(y)
-	if is_none(discrete_cell(f, max_bound(lo_x, lo_y), min_bound(hi_x, hi_y))) do return cell_list(x)
-	out := make([dynamic]Type)
-	if l, has := lo_y.?; has {
-		if l == min(i128) do return cell_list(new_and(x, new_not(y)))
-		append(&out, ..cell_list(discrete_cell(f, lo_x, min_bound(hi_x, l - 1))))
-	}
-	if h, has := hi_y.?; has {
-		if h == max(i128) do return cell_list(new_and(x, new_not(y)))
-		append(&out, ..cell_list(discrete_cell(f, max_bound(lo_x, h + 1), hi_x)))
-	}
-	return out[:]
+	if is_none(discrete_cell(f, max_bound(lo_x, lo_y), min_bound(hi_x, hi_y))) do return cell(k, x)
+	l, has_l := lo_y.?
+	h, has_h := hi_y.?
+	if has_l && l == min(i128) || has_h && h == max(i128) do return cell(k, new_and(x, new_not(y)))
+	from := mark(k)
+	if has_l do _ = cell(k, discrete_cell(f, lo_x, min_bound(hi_x, l - 1)))
+	if has_h do _ = cell(k, discrete_cell(f, max_bound(lo_x, h + 1), hi_x))
+	return pushed(k, from)
 }
 
-discrete_minus_all :: proc(x: Type, ys: []Type) -> []Type {
-	pieces := cell_list(x)
+discrete_minus_all :: proc(k: ^Kernel, x: Type, ys: []Type) -> []Type {
+	from := mark(k)
+	pieces := cell(k, x)
 	for y in ys {
-		next := make([dynamic]Type)
-		for p in pieces do append(&next, ..discrete_minus(.Int, p, y))
-		pieces = next[:]
+		next := mark(k)
+		for p in pieces do _ = discrete_minus(k, .Int, p, y)
+		pieces = pushed(k, next)
 	}
-	return pieces
+	return sink(k,from, pieces)
 }
 
 // --- reals ---
@@ -696,38 +759,50 @@ real_meet :: proc(x, y: Real_Bounds) -> Real_Bounds {
 }
 
 // real_minus: x & ~y: what is below y, and what is above.
-real_minus :: proc(x, y: Real_Bounds) -> []Real_Bounds {
-	out := make([dynamic]Real_Bounds)
-	if lo, ok := y.lo.?; ok do append(&out, real_meet(x, Real_Bounds{hi = lo, hi_open = !y.lo_open}))
-	if hi, ok := y.hi.?; ok do append(&out, real_meet(x, Real_Bounds{lo = hi, lo_open = !y.hi_open}))
-	kept := make([dynamic]Real_Bounds)
-	for b in out do if !real_empty(b) do append(&kept, b)
-	return kept[:]
+real_minus :: proc(x, y: Real_Bounds) -> (pieces: [2]Real_Bounds, n: int) {
+	if lo, ok := y.lo.?; ok {
+		if b := real_meet(x, Real_Bounds{hi = lo, hi_open = !y.lo_open}); !real_empty(b) {
+			pieces[n] = b
+			n += 1
+		}
+	}
+	if hi, ok := y.hi.?; ok {
+		if b := real_meet(x, Real_Bounds{lo = hi, lo_open = !y.hi_open}); !real_empty(b) {
+			pieces[n] = b
+			n += 1
+		}
+	}
+	return
 }
 
 // join_reals: two intervals that meet or touch are one.
-join_reals :: proc(cells: []Type) -> []Type {
-	bounds := make([dynamic]Real_Bounds)
-	for c in cells do append(&bounds, real_bounds(c))
-	slice.sort_by(bounds[:], proc(a, b: Real_Bounds) -> bool {
-		x, has_x := a.lo.?
-		y, has_y := b.lo.?
+join_reals :: proc(k: ^Kernel, cells: []Type) -> []Type {
+	from := mark(k)
+	push_all(k, cells)
+	sorted := pushed(k, from)
+	slice.sort_by(sorted, proc(a, b: Type) -> bool {
+		u, v := real_bounds(a), real_bounds(b)
+		x, has_x := u.lo.?
+		y, has_y := v.lo.?
 		if !has_x do return has_y
 		if !has_y do return false
-		return real_less(x, y) || x == y && !a.lo_open && b.lo_open
+		return real_less(x, y) || x == y && !u.lo_open && v.lo_open
 	})
-	merged := make([dynamic]Real_Bounds)
-	for r in bounds {
-		if len(merged) == 0 {
-			append(&merged, r)
+	out := mark(k)
+	last: Real_Bounds
+	merging := false
+	for c in sorted {
+		r := real_bounds(c)
+		if !merging {
+			last, merging = r, true
 			continue
 		}
-		last := &merged[len(merged) - 1]
 		last_hi, bounded := last.hi.?
 		if !bounded do break
 		lo, has_lo := r.lo.?
 		if has_lo && (real_less(last_hi, lo) || lo == last_hi && last.hi_open && r.lo_open) {
-			append(&merged, r)
+			push(k, real_cell(last))
+			last = r
 			continue
 		}
 		hi, has_hi := r.hi.?
@@ -740,37 +815,36 @@ join_reals :: proc(cells: []Type) -> []Type {
 			last.hi_open = last.hi_open && r.hi_open
 		}
 	}
-	out := make([dynamic]Type)
-	for b in merged do append(&out, real_cell(b))
-	return out[:]
+	if merging do push(k, real_cell(last))
+	return sink(k,from, pushed(k, out))
 }
 
 // --- strings and characters ---
 
 // text_meet: a & b of two sets of strings: none, one of them, or their &.
-text_meet :: proc(x, y: Type) -> []Type {
+text_meet :: proc(k: ^Kernel, x, y: Type) -> []Type {
 	both := text_and({x, y})
 	if text_empty(both) do return nil
-	if text_empty(text_and({x, text_not(y)})) do return cell_list(x)
-	if text_empty(text_and({y, text_not(x)})) do return cell_list(y)
-	return cell_list(both)
+	if text_empty(text_and({x, text_not(y)})) do return cell(k, x)
+	if text_empty(text_and({y, text_not(x)})) do return cell(k, y)
+	return cell(k, both)
 }
 
 // chars_in_text: the characters of the cell c that are strings of t — or that are
 // not: c is in t when ∂c t holds "".
-chars_in_text :: proc(c: Type, t: Type, inside: bool) -> []Type {
+chars_in_text :: proc(k: ^Kernel, c: Type, t: Type, inside: bool) -> []Type {
 	lo, hi := discrete_bounds(c)
 	l, _ := lo.?
 	h, _ := hi.?
 	points := cuts(t)
-	out := make([dynamic]Type)
+	out := mark(k)
 	for p, i in points {
 		end := i + 1 < len(points) ? i128(points[i + 1]) - 1 : MAX_RUNE
 		from, to := max(i128(p), l), min(end, h)
 		if from > to do continue
-		if nullable(quotient(t, rune(from))) == inside do append(&out, discrete_cell(.Char, from, to))
+		if nullable(quotient(t, rune(from))) == inside do push(k, discrete_cell(.Char, from, to))
 	}
-	return join_discrete(.Char, out[:])
+	return sink(k,out, join_discrete(k, .Char, pushed(k, out)))
 }
 
 // --- integers left as an operation ---
@@ -783,7 +857,8 @@ chars_in_text :: proc(c: Type, t: Type, inside: bool) -> []Type {
 // int_bounds: the least and greatest elements of a constant set of integers; nil
 // on a side where it has none.
 int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
-	cells, negated := as_cells(t)
+	one: [1]Type
+	cells, negated := cells_in(t, &one)
 	if !negated && len(cells) > 0 {
 		all_ints := true
 		for c in cells do all_ints &&= cell_family(c) == .Int
@@ -960,7 +1035,8 @@ apart :: proc(k: ^Kernel, a, b: Type) -> bool {
 // computed — every one but a value or an operation whose & stays.
 inhabited :: proc(k: ^Kernel, t: Type) -> bool {
 	if !is_constant(t) || is_none(t) do return false
-	cells, negated := as_cells(t)
+	one: [1]Type
+	cells, negated := cells_in(t, &one)
 	if negated do return true
 	for c in cells {
 		switch cell_family(c) {
@@ -979,7 +1055,8 @@ inhabited :: proc(k: ^Kernel, t: Type) -> bool {
 // compute whole: no value, no operation left.
 decided :: proc(t: Type) -> bool {
 	if !is_constant(t) do return false
-	cells, _ := as_cells(t)
+	one: [1]Type
+	cells, _ := cells_in(t, &one)
 	for c in cells do if f := cell_family(c); f == .Value || f == .Other do return false
 	return true
 }

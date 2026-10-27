@@ -24,8 +24,8 @@ Arena :: struct {
 	last:      int, // where the last allocation starts; offset when there is none
 }
 
-init :: proc(a: ^Arena) -> runtime.Allocator_Error {
-	a.memory = virtual.reserve(RESERVE) or_return
+init :: proc(a: ^Arena, reserve := RESERVE) -> runtime.Allocator_Error {
+	a.memory = virtual.reserve(uint(reserve)) or_return
 	a.offset, a.committed, a.last = 0, 0, 0
 	return nil
 }

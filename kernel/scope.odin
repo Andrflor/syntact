@@ -816,7 +816,8 @@ repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
 	stays := new_operation(.In, x, new_operation(.Mul, a, counts))
 	v, is_scope := x.(^Scope)
 	if !is_scope do return is_constant(x) ? Type(Bool(false)) : stays
-	alternatives, negated := as_cells(a)
+	one: [1]Type
+	alternatives, negated := cells_in(a, &one)
 	if negated do return stays
 	lengths := make([dynamic]int) // the lengths of the pieces, when each is fixed
 	any_length := false

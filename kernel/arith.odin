@@ -40,9 +40,9 @@ family_term :: proc(f: Family) -> Type {
 	case .Count:
 		return new_range(Int(0), nil, .Int)
 	case .Nonzero_Int:
-		return cells_term({discrete_cell(.Int, nil, -1), discrete_cell(.Int, 1, nil)})
+		return new_or(discrete_cell(.Int, nil, -1), discrete_cell(.Int, 1, nil)) // its cells, in their order
 	case .Nonzero_Real:
-		return cells_term({real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true})})
+		return new_or(real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true}))
 	}
 	return None{}
 }
@@ -301,9 +301,11 @@ comparison_bound :: proc(op: Operator, args: []Type) -> (bound: Type, x: Type, o
 //
 // and any operator on two primitives; + and * on strings by their laws.
 compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (result: Type, ok: bool) {
-	cells := make([][]Type, len(args))
+	from := mark(k)
+	defer release(k, from)
+	cells := make([][]Type, len(args), context.temp_allocator)
 	for a, i in args {
-		c, negated := as_cells(a)
+		c, negated := cells_of(k, a)
 		if negated || len(c) == 0 do return nil, false
 		cells[i] = c
 	}
@@ -312,17 +314,17 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		for c in cells do if !all_of_family(c, .Int) do return nil, false
 		#partial switch op {
 		case .Add:
-			return int_sum(cells[0], cells[1])
+			return int_sum(k, cells[0], cells[1])
 		case .Sub:
-			opposite := int_opposite(cells[1]) or_return
-			return int_sum(cells[0], opposite)
+			opposite := int_opposite(k, cells[1]) or_return
+			return int_sum(k, cells[0], opposite)
 		case .Neg:
-			opposite := int_opposite(cells[0]) or_return
-			return cells_term(join_discrete(.Int, opposite)), true
+			opposite := int_opposite(k, cells[0]) or_return
+			return cells_term(k, join_discrete(k, .Int, opposite)), true
 		case .Bit_Not:
 			// [~]x = -x - 1
-			opposite := int_opposite(cells[0]) or_return
-			return int_sum(opposite, {Int(-1)})
+			opposite := int_opposite(k, cells[0]) or_return
+			return int_sum(k, opposite, {Int(-1)})
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			lo_a, hi_a := discrete_hull(cells[0])
 			lo_b, hi_b := discrete_hull(cells[1])
@@ -343,17 +345,17 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		for c in cells do if !all_of_family(c, .Real) do return nil, false
 		#partial switch op {
 		case .Add:
-			return real_sum(cells[0], cells[1])
+			return real_sum(k, cells[0], cells[1])
 		case .Sub:
-			opposite := real_opposite(cells[1]) or_return
-			return real_sum(cells[0], opposite)
+			opposite := real_opposite(k, cells[1]) or_return
+			return real_sum(k, cells[0], opposite)
 		case .Neg:
-			opposite := real_opposite(cells[0]) or_return
-			return cells_term(join_reals(opposite)), true
+			opposite := real_opposite(k, cells[0]) or_return
+			return cells_term(k, join_reals(k, opposite)), true
 		case .Less, .Less_Eq, .Greater, .Greater_Eq:
 			return compare_reals(op, cells[0], cells[1]), true
 		case .Mul:
-			if product, exact := real_product(cells[0], cells[1]); exact do return product, true
+			if product, exact := real_product(k, cells[0], cells[1]); exact do return product, true
 		}
 		x, single_x := one_primitive(cells[0]).(Real)
 		y, single_y := one_primitive(cells[1]).(Real)
@@ -375,26 +377,26 @@ compute :: proc(k: ^Kernel, op: Operator, sig: Signature, args: []Type) -> (resu
 		lo_b, hi_b := discrete_hull(cells[1])
 		return compare_bounds(op, lo_a, hi_a, lo_b, hi_b), true
 	case .Bool:
-		results := make([dynamic]Type)
+		results := mark(k)
 		for x in cells[0] {
 			p := bool(x.(Bool))
 			if op == .Bit_Not {
-				append(&results, Bool(!p))
+				push(k, Bool(!p))
 				continue
 			}
 			for y in cells[1] {
 				q := bool(y.(Bool))
 				#partial switch op {
 				case .Bit_And:
-					append(&results, Bool(p && q))
+					push(k, Bool(p && q))
 				case .Bit_Or:
-					append(&results, Bool(p || q))
+					push(k, Bool(p || q))
 				case .Xor:
-					append(&results, Bool(p != q))
+					push(k, Bool(p != q))
 				}
 			}
 		}
-		return cells_term(union_cells(k, results[:])), true
+		return cells_term(k, union_cells(k, pushed(k, results))), true
 	}
 	return nil, false
 }
@@ -419,35 +421,37 @@ discrete_hull :: proc(cells: []Type) -> (lo, hi: Maybe(i128)) {
 
 // int_sum: (a..b) + (c..d) = (a + c)..(b + d), on each pair of cells; false when a
 // bound is beyond the integers written here.
-int_sum :: proc(a, b: []Type) -> (sum: Type, ok: bool) {
-	out := make([dynamic]Type)
+int_sum :: proc(k: ^Kernel, a, b: []Type) -> (sum: Type, ok: bool) {
+	from := mark(k)
+	defer release(k, from)
 	for x in a {
 		for y in b {
 			lo_x, hi_x := discrete_bounds(x)
 			lo_y, hi_y := discrete_bounds(y)
 			lo := add_bound(lo_x, lo_y) or_return
 			hi := add_bound(hi_x, hi_y) or_return
-			append(&out, discrete_cell(.Int, lo, hi))
+			push(k, discrete_cell(.Int, lo, hi))
 		}
 	}
-	return cells_term(join_discrete(.Int, out[:])), true
+	return cells_term(k, join_discrete(k, .Int, pushed(k, from))), true
 }
 
-// int_opposite: -(a..b) = -b..-a.
-int_opposite :: proc(cells: []Type) -> (opposite: []Type, ok: bool) {
-	out := make([]Type, len(cells))
-	for c, i in cells {
+// int_opposite: -(a..b) = -b..-a, pushed.
+int_opposite :: proc(k: ^Kernel, cells: []Type) -> (opposite: []Type, ok: bool) {
+	from := mark(k)
+	for c in cells {
 		lo, hi := discrete_bounds(c)
 		x := neg_bound(hi) or_return
 		y := neg_bound(lo) or_return
-		out[i] = discrete_cell(.Int, x, y)
+		push(k, discrete_cell(.Int, x, y))
 	}
-	return out, true
+	return pushed(k, from), true
 }
 
 // real_sum: (a..b) + (c..d) = (a + c)..(b + d), open where either bound is.
-real_sum :: proc(a, b: []Type) -> (sum: Type, ok: bool) {
-	out := make([dynamic]Type)
+real_sum :: proc(k: ^Kernel, a, b: []Type) -> (sum: Type, ok: bool) {
+	from := mark(k)
+	defer release(k, from)
 	for x in a {
 		for y in b {
 			p, q := real_bounds(x), real_bounds(y)
@@ -458,29 +462,31 @@ real_sum :: proc(a, b: []Type) -> (sum: Type, ok: bool) {
 			if u, has_u := p.hi.?; has_u {
 				if v, has_v := q.hi.?; has_v do r.hi, r.hi_open = real_add(u, v) or_return, p.hi_open || q.hi_open
 			}
-			append(&out, real_cell(r))
+			push(k, real_cell(r))
 		}
 	}
-	return cells_term(join_reals(out[:])), true
+	return cells_term(k, join_reals(k, pushed(k, from))), true
 }
 
-real_opposite :: proc(cells: []Type) -> (opposite: []Type, ok: bool) {
-	out := make([]Type, len(cells))
-	for c, i in cells {
+// real_opposite: -(a..b) = -b..-a, pushed.
+real_opposite :: proc(k: ^Kernel, cells: []Type) -> (opposite: []Type, ok: bool) {
+	from := mark(k)
+	for c in cells {
 		p := real_bounds(c)
 		r := Real_Bounds{lo_open = p.hi_open, hi_open = p.lo_open}
 		if v, has := p.hi.?; has do r.lo = real_neg(v) or_return
 		if v, has := p.lo.?; has do r.hi = real_neg(v) or_return
-		out[i] = real_cell(r)
+		push(k, real_cell(r))
 	}
-	return out, true
+	return pushed(k, from), true
 }
 
 // real_product: (a..b) * (c..d) on closed, bounded intervals: the image of a
 // connected set by a continuous operator is the interval between its least and
 // greatest products at the bounds. False for an open or infinite bound.
-real_product :: proc(a, b: []Type) -> (product: Type, ok: bool) {
-	out := make([dynamic]Type)
+real_product :: proc(k: ^Kernel, a, b: []Type) -> (product: Type, ok: bool) {
+	from := mark(k)
+	defer release(k, from)
 	for x in a {
 		for y in b {
 			p, q := real_bounds(x), real_bounds(y)
@@ -500,10 +506,10 @@ real_product :: proc(a, b: []Type) -> (product: Type, ok: bool) {
 				if real_less(c, lo) do lo = c
 				if real_less(hi, c) do hi = c
 			}
-			append(&out, real_cell({lo = lo, hi = hi}))
+			push(k, real_cell({lo = lo, hi = hi}))
 		}
 	}
-	return cells_term(join_reals(out[:])), true
+	return cells_term(k, join_reals(k, pushed(k, from))), true
 }
 
 int_operation :: proc(op: Operator, x, y: i128) -> (i128, bool) {

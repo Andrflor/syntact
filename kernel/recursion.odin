@@ -567,7 +567,8 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	alpha, beta, affine := affine_in(o.args[0], i)
 	slope, is_int := alpha.(Int)
 	if !affine || !is_int || slope != 1 && slope != -1 do return out
-	cells, negated := as_cells(o.args[1])
+	one: [1]Type
+	cells, negated := cells_in(o.args[1], &one)
 	if negated || len(cells) != 1 do return out
 	lo, hi := discrete_bounds(cells[0])
 	l, has_lo := lo.?

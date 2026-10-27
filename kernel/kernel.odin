@@ -42,6 +42,7 @@ Kernel :: struct {
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
+	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
 }
 
 // report: an error, once. What it concerns becomes Invalid, which stays silent.
@@ -54,6 +55,7 @@ report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) ->
 // check: builds the file the AST writes as a scope, and checks it.
 check :: proc(ast: ^syn.Ast) -> (k: Kernel) {
 	k.ast = ast
+	init_scratch(&k)
 	k.root = build_program(&k)
 	check_program(&k)
 	return k

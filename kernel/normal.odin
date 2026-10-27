@@ -228,7 +228,7 @@ contains_same :: proc(k: ^Kernel, ts: []Type, t: Type) -> bool {
 not_law :: proc(k: ^Kernel, t: Type) -> Type {
 	if is_invalid(t) do return t
 	if n, ok := t.(^Not); ok do return n.term
-	if is_constant(t) do return not_constant(t)
+	if is_constant(t) do return not_constant(k, t)
 	return new_not(t)
 }
 
@@ -447,7 +447,8 @@ default_of :: proc(k: ^Kernel, c: Type, span: syn.Span, written: Type = nil) -> 
 	if !is_none(and_law(k, {Bool(false), c})) do return Bool(false)
 	// otherwise its first element, as written: .. is commutative, the default is not
 	if first, ok := written_first(k, written); ok && inhabited(k, and_law(k, {first, c})) do return first
-	cells, negated := as_cells(c)
+	one: [1]Type
+	cells, negated := cells_in(c, &one)
 	if negated do return unsupported_at(k, span, fmt.tprintf("the default of %s", print_type(c)))
 	for cell in cells {
 		switch cell_family(cell) {

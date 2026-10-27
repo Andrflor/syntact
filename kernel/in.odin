@@ -40,8 +40,9 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 		return new_operation(.In, x, c)
 	}
 	if is_constant(c) {
-		cells, negated := as_cells(c)
-		if negated do return bool_not(k, in_law(k, x, cells_term(cells))) // x in ~a = [~](x in a)
+		one: [1]Type
+		cells, negated := cells_in(c, &one)
+		if negated do return bool_not(k, in_law(k, x, cells_term(k, cells))) // x in ~a = [~](x in a)
 		values := false
 		for cell in cells do values ||= cell_family(cell) == .Value
 		if !values do return in_cells(k, x, c, cells)
@@ -73,7 +74,8 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 
 // of_values: a | of cells that are values — scopes, =t — and nothing else.
 of_values :: proc(t: Type) -> bool {
-	cells, negated := as_cells(t)
+	one: [1]Type
+	cells, negated := cells_in(t, &one)
 	if negated || len(cells) == 0 do return false
 	for c in cells do if cell_family(c) != .Value do return false
 	return true
@@ -102,7 +104,7 @@ in_cells :: proc(k: ^Kernel, x, c: Type, cells: []Type) -> Type {
 		return layout_in(k, x, layout_of(k, v), c)
 	}
 	if u, a, b, linear := linear_in(x); linear && !(a == 1 && b == 0) {
-		if set, exact := preimage(cells, a, b); exact do return in_law(k, u, set)
+		if set, exact := preimage(k, cells, a, b); exact do return in_law(k, u, set)
 	}
 	if image, ok := layout_image(k, x); ok do return layout_in(k, x, image, c)
 	return new_operation(.In, x, c)
@@ -169,9 +171,10 @@ is_value :: proc(k: ^Kernel, t: Type) -> bool {
 // preimage: the integers v such that a * v + b is in s, a ≠ 0.
 // preimage: the integers v such that a * v + b is in the cells, a ≠ 0; false when a
 // bound is beyond the integers written here.
-preimage :: proc(cells: []Type, a, b: i128) -> (set: Type, ok: bool) {
+preimage :: proc(k: ^Kernel, cells: []Type, a, b: i128) -> (set: Type, ok: bool) {
 	if b == min(i128) || a == min(i128) do return
-	out := make([dynamic]Type)
+	start := mark(k)
+	defer release(k, start)
 	for c in cells {
 		if cell_family(c) != .Int do continue
 		lo, hi := discrete_bounds(c)
@@ -186,9 +189,9 @@ preimage :: proc(cells: []Type, a, b: i128) -> (set: Type, ok: bool) {
 		from, to: Maybe(i128)
 		if l, has := lo.?; has do from = ceil_div(l, m)
 		if h, has := hi.?; has do to = floor_div(h, m)
-		append(&out, discrete_cell(.Int, from, to))
+		push(k, discrete_cell(.Int, from, to))
 	}
-	return cells_term(join_discrete(.Int, out[:])), true
+	return cells_term(k, join_discrete(k, .Int, pushed(k, start))), true
 }
 
 floor_div :: proc(x, y: i128) -> i128 {
