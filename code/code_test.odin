@@ -20,6 +20,8 @@ Code_Case :: struct {
 }
 
 LIBM :: "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\n"
+WORDS :: "lib -> <libc.so.6>{\n  one -> {S:s, -> !?::i64}\n  two -> {S:s, -> !?::i64}\n}\n"
+
 LIBC :: "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n}\n"
 
 CODE_CASES := []Code_Case {
@@ -33,6 +35,14 @@ CODE_CASES := []Code_Case {
 	{name = "comparison", source = "n -> ??::u8\n-> n < 10", inputs = {3}, int = 1},
 	{name = "text", source = "-> \"hi\"", text = "hi"},
 	{name = "call", source = LIBM + "-> libm.sqrt{x -> 2.0}!", real = math.SQRT_TWO, calls = {"sqrt"}},
+	// a scope crosses as C lays out a struct of its fields, in words of 8 bytes
+	{name = "scope in a word", source = "S -> {u8:a u8:b u8:c u8:d}\n" + WORDS + "-> lib.one{s -> S{1 2 3 4}}!", int = 0x04030201, calls = {"one"}},
+	{name = "signed field", source = "S -> {i8:x u8:y}\n" + WORDS + "-> lib.one{s -> S{-1 2}}!", int = 0x02FF, calls = {"one"}},
+	{name = "aligned field", source = "S -> {u8:a i32:b}\n" + WORDS + "-> lib.one{s -> S{1 2}}!", int = 1 | 2 << 32, calls = {"one"}},
+	{name = "nested scope", source = "P -> {u8:x u16:y}\nS -> {u8:a P:p}\n" + WORDS + "-> lib.one{s -> S{1 P{2 3}}}!", int = 1 | 2 << 16 | 3 << 32, calls = {"one"}},
+	{name = "scope in two words", source = "S -> {i64:a u8:b}\n" + WORDS + "-> lib.two{s -> S{5 7}}!", int = 5 * 1000 + 7, calls = {"two"}},
+	{name = "scope of floats", source = "S -> {f64:re f64:im}\nlibm -> <libm.so.6>{\n  cabs -> {S:z, -> !?::f64}\n}\n-> libm.cabs{z -> S{3.0 4.0}}!", real = 5, calls = {"cabs"}},
+	{name = "scope too large", source = "S -> {f64:a f64:b f64:c}\n" + WORDS + "-> lib.one{s -> S{1.0 2.0 3.0}}!", error = "the field `s` of one is a scope of 24 bytes: only 1 to 16 cross in registers yet"},
 	{name = "call crossed", source = LIBM + "-> libm.sqrt{x -> 2.0}! * 2.0", real = 2 * math.SQRT_TWO, calls = {"sqrt"}},
 	{name = "two calls", source = LIBM + "-> libm.sqrt{x -> 4.0}! + libm.sqrt{x -> 9.0}!", real = 5, calls = {"sqrt", "sqrt"}},
 	{name = "nested calls", source = LIBM + "-> libm.sqrt{x -> libm.pow{b -> 3.0  e -> 4.0}!}!", real = 9, calls = {"pow", "sqrt"}},
@@ -63,6 +73,9 @@ test_symbols :: proc() -> map[string]Symbol {
 	m["puts"] = proc(a: []Datum) -> Datum {return Datum{int = 0}}
 	m["srand"] = proc(a: []Datum) -> Datum {return Datum{}}
 	m["fdopen"] = proc(a: []Datum) -> Datum {return Datum{int = a[1].text == "r" ? 1 : 0}}
+	m["one"] = proc(a: []Datum) -> Datum {return Datum{int = a[0].int}}
+	m["two"] = proc(a: []Datum) -> Datum {return Datum{int = a[0].int * 1000 + a[1].int}}
+	m["cabs"] = proc(a: []Datum) -> Datum {return Datum{real = math.sqrt(a[0].real * a[0].real + a[1].real * a[1].real)}}
 	return m
 }
 
@@ -93,4 +106,19 @@ test_code :: proc(t: ^testing.T) {
 		}
 		testing.expectf(t, slice.equal(run.calls[:], c.calls), "%s: called %v, expected %v", c.name, run.calls[:], c.calls)
 	}
+}
+
+// A boolean that comes back from a symbol is a byte: the bits above it are not
+// part of the answer.
+@(test)
+test_boolean_answer :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	k, parsed := kernel.run("lib -> <libc.so.6>{\n  ready -> {-> !?::bool}\n}\n-> lib.ready! ? {true -> 7  -> 3}")
+	if !testing.expect(t, parsed, "does not parse") do return
+	prog, err := lower_program(&k)
+	if !testing.expectf(t, err == "", "%s", err) do return
+	imp := prog.imports[0]
+	testing.expectf(t, imp.result_bits == 8 && !imp.result_signed, "a boolean comes back in %d bits, signed %v", imp.result_bits, imp.result_signed)
 }

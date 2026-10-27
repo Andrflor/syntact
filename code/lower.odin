@@ -136,15 +136,11 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 	// with the values the run gave them
 	for b in kernel.placed(l.k, s, .Value) {
 		if b.kind != .Push && b.kind != .Pull do continue
-		if named(b.color, "f32") do return fail(l, "the field `%s` of %s is an f32: only f64 crosses a boundary yet", b.name, imp.symbol)
-		color := kernel.binding_color(l.k, b)
-		m := color != nil ? machine_of_layout(l.k, color) : .None
-		if m == .None do return fail(l, "the field `%s` of %s has no layout the call can pass", b.name, imp.symbol)
-		a := argument(l, kernel.binding_value(l.k, b), m)
+		for a in crossing(l, b, imp.symbol) {
+			append(&machines, machine_of(l.f, a))
+			append(&args, a)
+		}
 		if l.error != "" do return NONE
-		if machine_of(l.f, a) != m do return fail(l, "the field `%s` of %s is a %v, given a %v", b.name, imp.symbol, m, machine_of(l.f, a))
-		append(&machines, m)
-		append(&args, a)
 	}
 	imp.args = machines[:]
 	if e.answer != nil {
@@ -152,7 +148,7 @@ act :: proc(l: ^Lowering, e: ^kernel.Effect) -> Value {
 		layout := kernel.layout_of(l.k, e.answer)
 		imp.result = machine_of_layout(l.k, layout)
 		if imp.result == .None do return fail(l, "what %s gives back has no layout the code holds", imp.symbol)
-		if imp.result == .Int do imp.result_bits, imp.result_signed = int_width(layout)
+		if imp.result == .Int do imp.result_bits, imp.result_signed = int_width(l.k, layout)
 	}
 	dst := imp.result == .None ? NONE : value(l.f, imp.result)
 	emit(l, Foreign{dst, intern(l.prog, imp), args[:]})
@@ -233,6 +229,106 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	emit(l, Return{v})
 	l.f, l.bound = outer, outer_bound
 	return index
+}
+
+// crossing: the values that pass a field of a symbol, one in each register the
+// call fills. A value of a primitive layout is one. A scope crosses as it is
+// (specs/language/11): laid out as C lays out a struct of its fields, in words of
+// 8 bytes — a word that holds a float alone is that float, any other the bytes of
+// its fields packed in an integer.
+crossing :: proc(l: ^Lowering, b: ^kernel.Binding, symbol: string) -> []Value {
+	out := make([dynamic]Value)
+	if s, is_scope := kernel.binding_value(l.k, b).(^kernel.Scope); is_scope {
+		slots, size, _ := lay_out(l, s, b.name, symbol)
+		if l.error != "" do return nil
+		if size == 0 || size > 16 {
+			fail(l, "the field `%s` of %s is a scope of %d bytes: only 1 to 16 cross in registers yet", b.name, symbol, size)
+			return nil
+		}
+		for start := 0; start < size; start += 8 do append(&out, word(l, slots, start))
+		return out[:]
+	}
+	m, _ := primitive(l, b, b.name, symbol)
+	if l.error != "" do return nil
+	a := argument(l, kernel.binding_value(l.k, b), m)
+	if l.error != "" do return nil
+	if machine_of(l.f, a) != m {
+		fail(l, "the field `%s` of %s is a %v, given a %v", b.name, symbol, m, machine_of(l.f, a))
+		return nil
+	}
+	append(&out, a)
+	return out[:]
+}
+
+// Slot: a field of primitive layout in the C layout of a scope.
+Slot :: struct {
+	field:   ^kernel.Binding,
+	machine: Machine,
+	offset:  int,
+	size:    int,
+}
+
+// lay_out: the slots of the fields of s, in order, each aligned on its alignment
+// — its size, for a primitive; its largest, for a scope —, and the size of s, a
+// multiple of its alignment.
+lay_out :: proc(l: ^Lowering, s: ^kernel.Scope, name, symbol: string) -> (slots: []Slot, size, align: int) {
+	out := make([dynamic]Slot)
+	align = 1
+	for f in kernel.placed(l.k, s, .Value) {
+		if f.kind != .Push && f.kind != .Pull {
+			fail(l, "the field `%s` of %s is a scope that is not only fields", name, symbol)
+			return
+		}
+		inner: []Slot
+		n, a: int
+		if nested, is_scope := kernel.binding_value(l.k, f).(^kernel.Scope); is_scope {
+			inner, n, a = lay_out(l, nested, name, symbol)
+		} else {
+			m, bytes := primitive(l, f, name, symbol)
+			inner, n, a = []Slot{{f, m, 0, bytes}}, bytes, bytes
+		}
+		if l.error != "" do return
+		size = (size + a - 1) / a * a
+		for x in inner do append(&out, Slot{x.field, x.machine, x.offset + size, x.size})
+		size += n
+		align = max(align, a)
+	}
+	return out[:], (size + align - 1) / align * align, align
+}
+
+// primitive: the machine of a binding's value at a boundary, and its bytes — the
+// C type that holds it: a boolean is a byte, an integer the least width that holds
+// its range, a float or a text 8 bytes.
+primitive :: proc(l: ^Lowering, b: ^kernel.Binding, name, symbol: string) -> (Machine, int) {
+	if named(b.color, "f32") {
+		fail(l, "the field `%s` of %s is an f32: only f64 crosses a boundary yet", name, symbol)
+		return .None, 0
+	}
+	color := kernel.binding_color(l.k, b)
+	m := color != nil ? machine_of_layout(l.k, color) : .None
+	if m == .None {
+		fail(l, "the field `%s` of %s has no layout the call can pass", name, symbol)
+		return .None, 0
+	}
+	if m != .Int do return m, 8
+	bits, _ := int_width(l.k, color)
+	return m, bits / 8
+}
+
+// word: the 8 bytes of a scope laid out in slots from start, as one value.
+word :: proc(l: ^Lowering, slots: []Slot, start: int) -> Value {
+	out := NONE
+	for x in slots {
+		if x.offset < start || x.offset >= start + 8 do continue
+		v := argument(l, kernel.binding_value(l.k, x.field), x.machine)
+		if l.error != "" do return NONE
+		if machine_of(l.f, v) != x.machine do return fail(l, "the field `%s` is a %v, given a %v", x.field.name, x.machine, machine_of(l.f, v))
+		if x.machine != .Int do return v // a float or a text: the whole word
+		if x.size < 8 do v = binary(l, .And, v, constant(l, i64(1) << uint(8 * x.size) - 1), .Int)
+		if x.offset > start do v = binary(l, .Shl, v, constant(l, i64(8 * (x.offset - start))), .Int)
+		out = out == NONE ? v : binary(l, .Or, out, v, .Int)
+	}
+	return out == NONE ? constant(l, 0) : out
 }
 
 // argument: a value where a machine is expected. A character is a string of length
@@ -388,8 +484,9 @@ machine_of_layout :: proc(k: ^kernel.Kernel, layout: kernel.Type) -> Machine {
 }
 
 // int_width: the bits that hold the integers of a layout, and whether signed: the
-// width an integer that comes back from a symbol is extended from.
-int_width :: proc(layout: kernel.Type) -> (bits: int, signed: bool) {
+// width an integer crosses a boundary in. A boolean is a byte.
+int_width :: proc(k: ^kernel.Kernel, layout: kernel.Type) -> (bits: int, signed: bool) {
+	if f, known := kernel.layout_family(k, layout); known && f == .Bool do return 8, false
 	r, is_range := layout.(^kernel.Range)
 	if !is_range do return 64, true
 	lo, has_lo := r.lo.(kernel.Int)
