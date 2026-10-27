@@ -362,7 +362,9 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	case ^Range:
 		return new_range(copy_term(k, m, v.lo, scope), copy_term(k, m, v.hi, scope), v.family, v.span)
 	case ^Operation:
-		return written(new_operation(v.op, ..copy_terms(k, m, v.args, scope)), v.span)
+		o := new(Operation)
+		o.op, o.args, o.span = v.op, copy_terms(k, m, v.args, scope), v.span
+		return o
 	case ^Name:
 		n := new(Name)
 		n^ = v^
@@ -749,7 +751,7 @@ arden :: proc(k: ^Kernel, s: ^Scope) -> (^Scope, bool) {
 	solution := new_scope(nil, s.span)
 	solution.source, solution.complete, solution.reached = s, true, true
 	run := new_binding(solution, .Expand, s.span)
-	run.color = new_operation(.Mul, or_law(k, prefixes[:]), new_range(Int(0), nil, .Int))
+	run.color = new_operation(.Mul, or_law(k, prefixes[:]), COUNTS)
 	run.typed_color = run.color
 	last := new_binding(solution, .Expand, s.span)
 	last.color = or_law(k, bases[:])

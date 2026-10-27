@@ -274,7 +274,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Fold:
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
-		return new_range(Int(0), nil, .Int), true
+		return COUNTS, true
 	case ^Series, ^Recurrent:
 		if f, known := family_of(k, t); known do return family_term(f), true
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:

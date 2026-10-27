@@ -28,21 +28,21 @@ Family :: enum u8 {
 family_term :: proc(f: Family) -> Type {
 	switch f {
 	case .Int:
-		return new_range(nil, nil, .Int)
+		return EVERY_INT
 	case .Real:
-		return new_range(nil, nil, .Real)
+		return EVERY_REAL
 	case .String:
-		return string_term()
+		return STRING
 	case .Char:
-		return new_range(Char(0), nil)
+		return EVERY_CHAR
 	case .Bool:
-		return new_or(Bool(false), Bool(true))
+		return BOOLS
 	case .Count:
-		return new_range(Int(0), nil, .Int)
+		return COUNTS
 	case .Nonzero_Int:
-		return new_or(discrete_cell(.Int, nil, -1), discrete_cell(.Int, 1, nil)) // its cells, in their order
+		return NONZERO_INT
 	case .Nonzero_Real:
-		return new_or(real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true}))
+		return NONZERO_REAL
 	}
 	return None{}
 }
@@ -598,7 +598,7 @@ power_law :: proc(k: ^Kernel, sig: Signature, x, n: Type, span: syn.Span) -> Typ
 		}
 	}
 	if same(k, x, one) do return one
-	if z, is_int := x.(Int); is_int && z == 0 && proven_in(k, n, new_range(Int(1), nil, .Int)) do return Int(0)
+	if z, is_int := x.(Int); is_int && z == 0 && proven_in(k, n, POSITIVE) do return Int(0)
 	if inner, is_op := x.(^Operation); is_op && inner.op == .Pow {
 		return operation_law(k, .Pow, {inner.args[0], operation_law(k, .Mul, {inner.args[1], n}, span)}, span)
 	}

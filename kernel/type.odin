@@ -1,6 +1,7 @@
 package kernel
 
 import syn "../syntax"
+import "base:runtime"
 import "core:slice"
 
 // TYPES (specs/types.md §1–2)
@@ -405,13 +406,20 @@ new_operation :: proc(op: Operator, args: ..Type) -> Type {
 	return o
 }
 
-// written: a term built from the source, with the place it is written.
+// written: a term built from the source, with the place it is written: a copy that
+// holds it — a term is not changed once built, it may be shared.
 written :: proc(t: Type, span: syn.Span) -> Type {
 	#partial switch v in t {
 	case ^Operation:
-		v.span = span
+		o := new(Operation)
+		o^ = v^
+		o.span, o.normal = span, false
+		return o
 	case ^Range:
-		v.span = span
+		r := new(Range)
+		r^ = v^
+		r.span, r.normal = span, false
+		return r
 	}
 	return t
 }
@@ -437,9 +445,32 @@ is_bool :: proc(t: Type, b: bool) -> bool {
 	return ok && bool(v) == b
 }
 
-// EVERYTHING: ~none, every value (§4.1).
+// THE CONSTANTS
+//
+// The types the laws name again and again — every integer, real, character and
+// string, "", ~none, the booleans, the counts — are built once, when the kernel is
+// loaded, and shared: a term is not changed once built.
+
+EVERY_INT, EVERY_REAL, EVERY_CHAR, STRING, EMPTY_STRING, EVERYTHING, BOOLS: Type
+COUNTS, POSITIVE, NONPOSITIVE, NONZERO_INT, NONZERO_REAL: Type // 0.., 1.., ..0, int & ~0, float & ~0.0
+
+@(init)
+init_constants :: proc "contextless" () {
+	context = runtime.default_context()
+	EVERY_INT, EVERY_REAL = new_range(nil, nil, .Int), new_range(nil, nil, .Real)
+	EVERY_CHAR = new_range(Char(0), nil)
+	COUNTS, POSITIVE, NONPOSITIVE = new_range(Int(0), nil, .Int), new_range(Int(1), nil, .Int), new_range(nil, Int(0), .Int)
+	STRING = new_operation(.Mul, EVERY_CHAR, COUNTS) // ''.. * 0..
+	EMPTY_STRING = new_operation(.Add)
+	EVERYTHING = new_not(None{})
+	BOOLS = new_or(Bool(false), Bool(true))
+	NONZERO_INT = new_or(new_range(nil, Int(-1), .Int), POSITIVE) // its cells, in their order
+	NONZERO_REAL = new_or(real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true}))
+}
+
+// everything: ~none, every value (§4.1).
 everything :: proc() -> Type {
-	return new_not(None{})
+	return EVERYTHING
 }
 
 // is_everything: t is ~none.
@@ -450,7 +481,7 @@ is_everything :: proc(t: Type) -> bool {
 
 // empty_string: "", the concatenation of nothing (§4.6).
 empty_string :: proc() -> Type {
-	return new_operation(.Add)
+	return EMPTY_STRING
 }
 
 is_empty_string :: proc(t: Type) -> bool {

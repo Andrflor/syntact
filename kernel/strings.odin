@@ -32,7 +32,7 @@ MAX_RUNE :: 0x10FFFF
 
 // string_term: every string, ''.. * 0.. (§3).
 string_term :: proc() -> Type {
-	return new_operation(.Mul, new_range(Char(0), nil), new_range(Int(0), nil, .Int))
+	return STRING
 }
 
 // --- the laws of + and * ---
@@ -304,7 +304,7 @@ solve_text :: proc(t: Type) -> Type {
 	#reverse for &e, i in system {
 		// Arden on X_i itself
 		star: Type = empty_string()
-		for x in e.terms do if x.target == i do star = repetition(x.coefficient, new_range(Int(0), nil, .Int))
+		for x in e.terms do if x.target == i do star = repetition(x.coefficient, COUNTS)
 		kept := make([dynamic]Term_Of)
 		for x in e.terms do if x.target != i do append(&kept, Term_Of{concatenation({star, x.coefficient}), x.target})
 		e.empty = concatenation({star, e.empty})

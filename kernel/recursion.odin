@@ -423,7 +423,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	// the orbit: its point x where the fold goes on, its closed form kᵢ, its length n
 	x := orbit_index(k, u, stop)
 	i := new_unknown(k, nil)
-	i.layout = new_range(Int(0), nil, .Int)
+	i.layout = COUNTS
 	ki, closed := orbit(k, rewrite(k, step, rewriting(nil, u, x)), x, u, i)
 	n: Type
 	if closed {
@@ -547,7 +547,7 @@ orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, 
 		shift = i128(c)
 	case .Div:
 		// ⌊⌊m / c⌋ / c⌋ = ⌊m / c²⌋ for m ≥ 0
-		if !included(k, layout_of(k, x), new_range(Int(0), nil, .Int)) do return nil, false
+		if !included(k, layout_of(k, x), COUNTS) do return nil, false
 		return op(k, .Div, m, op(k, .Pow, c, i)), true
 	case:
 		return nil, false
@@ -577,19 +577,19 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	switch {
 	case slope < 0 && has_hi && (!has_lo || l == h):
 		gap = op(k, .Sub, beta, Int(h))
-		if has_lo && !proven_in(k, gap, new_range(Int(0), nil, .Int)) do return out // onto the point
+		if has_lo && !proven_in(k, gap, COUNTS) do return out // onto the point
 	case slope > 0 && has_lo && (!has_hi || l == h):
 		gap = op(k, .Sub, Int(l), beta)
-		if has_hi && !proven_in(k, gap, new_range(Int(0), nil, .Int)) do return out
+		if has_hi && !proven_in(k, gap, COUNTS) do return out
 	case:
 		return out
 	}
 	// max(gap, 0)
-	if proven_in(k, gap, new_range(Int(0), nil, .Int)) do return gap
-	if proven_in(k, gap, new_range(nil, Int(0), .Int)) do return Int(0)
+	if proven_in(k, gap, COUNTS) do return gap
+	if proven_in(k, gap, NONPOSITIVE) do return Int(0)
 	m := new(Pattern)
 	m.target, m.span = gap, span
-	m.branches = slice.clone([]Branch{{cover = new_range(nil, Int(0), .Int), product = Int(0)}, {product = gap}})
+	m.branches = slice.clone([]Branch{{cover = NONPOSITIVE, product = Int(0)}, {product = gap}})
 	return pattern_law(k, m)
 }
 
@@ -1046,7 +1046,7 @@ closed :: proc(k: ^Kernel, f: ^Fold, i: int) -> (end: Type, ok: bool) {
 	ms, divisor := monomials(g) or_return
 	// g in t, the steps taken
 	t := new_unknown(k, nil)
-	t.layout = new_range(Int(0), nil, .Int)
+	t.layout = COUNTS
 	place: Type
 	if same(k, f.next, op(k, .Add, f.index, Int(1))) do place = ring_law(.Add, {lo, t}) or_return
 	else do place = ring_law(.Sub, {hi, t}) or_return
@@ -1168,7 +1168,7 @@ series :: proc(k: ^Kernel, o: Operator, i: ^Unknown, lo, hi, t: Type) -> Type {
 series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	identity: Type = s.op == .Add ? Type(Int(0)) : Type(Int(1))
 	n := op(k, .Add, op(k, .Sub, s.hi, s.lo), Int(1))
-	if proven_in(k, n, new_range(nil, Int(0), .Int)) do return identity
+	if proven_in(k, n, NONPOSITIVE) do return identity
 	if s.op == .Add {
 		if sum, closed := faulhaber(k, s); closed do return sum
 		return s
@@ -1214,7 +1214,7 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 			return series_law(k, upward)
 		}
 	}
-	if same(k, s.term, s.index) && proven_in(k, s.lo, new_range(nil, Int(0), .Int)) && proven_in(k, s.hi, new_range(Int(0), nil, .Int)) do return Int(0)
+	if same(k, s.term, s.index) && proven_in(k, s.lo, NONPOSITIVE) && proven_in(k, s.hi, COUNTS) do return Int(0)
 	return s
 }
 
