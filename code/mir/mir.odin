@@ -55,10 +55,13 @@ Inst :: union {
 	Text, // dst = the address of a text of the program
 	Input, // dst = the n-th input of the program
 	Unary, // dst = op a
-	Binary, // dst = a op b
+	Binary, // dst = a op b; on vectors, in each lane
 	Compare, // dst = a cond b: 1 or 0
 	Foreign, // dst = a symbol, called
 	Call, // dst = a function of the program, called
+	Splat, // dst = a in each lane of a vector
+	Lanes, // dst = a vector of integers
+	Reduce, // dst = the lanes of a by op
 }
 
 Copy :: struct {
@@ -98,6 +101,20 @@ Compare :: struct {
 	dst:  Reg,
 	a:    Reg,
 	b:    Operand,
+}
+
+Splat :: struct {
+	dst, a: Reg,
+}
+
+Lanes :: struct {
+	dst:    Reg,
+	values: []i64,
+}
+
+Reduce :: struct {
+	op:     code.Op,
+	dst, a: Reg,
 }
 
 Foreign :: struct {
@@ -214,7 +231,7 @@ unread :: proc(f: ^Func) {
 					if w != NO_REG && !read[w] do i.dst = NO_REG
 				case Call:
 					if w != NO_REG && !read[w] do i.dst = NO_REG
-				case Copy, Real, Text, Input, Unary, Binary, Compare:
+				case Copy, Real, Text, Input, Unary, Binary, Compare, Splat, Lanes, Reduce:
 					if !read[w] {
 						changed = true
 						continue
@@ -290,7 +307,7 @@ constants :: proc(f: ^Func) {
 				for &a in i.args do a = known(a, value)
 			case Call:
 				for &a in i.args do a = known(a, value)
-			case Real, Text, Input, Unary:
+			case Real, Text, Input, Unary, Splat, Lanes, Reduce:
 			}
 		}
 		if br, is_branch := b.end.(Branch); is_branch {
@@ -323,7 +340,7 @@ constants :: proc(f: ^Func) {
 
 // register: a new register of the machine m.
 register :: proc(f: ^Func, m: code.Machine) -> Reg {
-	append(&f.kinds, code.Kind{m, code.EVERY})
+	append(&f.kinds, code.Kind{m, code.EVERY, 0})
 	return Reg(len(f.kinds) - 1)
 }
 
@@ -371,7 +388,8 @@ body :: proc(b: ^Builder, src: code.Body) {
 		case code.Binary:
 			#partial switch i.op {
 			case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
-				emit(b, Compare{COMPARES[i.op], Reg(i.dst), Reg(i.a), Reg(i.b)})
+				if b.f.kinds[i.a].lanes > 0 do emit(b, Binary{i.op, Reg(i.dst), Reg(i.a), Reg(i.b)})
+				else do emit(b, Compare{COMPARES[i.op], Reg(i.dst), Reg(i.a), Reg(i.b)})
 			case:
 				emit(b, Binary{i.op, Reg(i.dst), Reg(i.a), Reg(i.b)})
 			}
@@ -388,6 +406,12 @@ body :: proc(b: ^Builder, src: code.Body) {
 			start(b, done)
 		case code.Narrow:
 			emit(b, Copy{Reg(i.dst), Reg(i.src)})
+		case code.Splat:
+			emit(b, Splat{Reg(i.dst), Reg(i.a)})
+		case code.Lanes:
+			emit(b, Lanes{Reg(i.dst), i.values})
+		case code.Reduce:
+			emit(b, Reduce{i.op, Reg(i.dst), Reg(i.a)})
 		case code.Foreign:
 			emit(b, Foreign{i.dst == code.NONE ? NO_REG : Reg(i.dst), i.symbol, regs(i.args)})
 		case code.Call:

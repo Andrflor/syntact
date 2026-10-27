@@ -14,7 +14,8 @@ import "core:strings"
 //
 // Its values are virtual registers, each written once, but for the value of a match,
 // written by the arm that runs, and the parameters of a loop, written on entry and
-// at each Again. An effect is an instruction in the order it runs: the call of a
+// at each Again. A value is one value of its machine, or a vector of them, in
+// lanes: an operation on vectors is the operation on each lane. An effect is an instruction in the order it runs: the call of a
 // symbol behind a boundary (specs/types.md §4.8).
 
 Value :: distinct int
@@ -38,11 +39,15 @@ Bounds :: struct {
 EVERY :: Bounds{min(i128), max(i128)}
 
 // Kind: what a value is at run time, and, for an integer, the bounds the kernel
-// proved of it.
+// proved of it — of each of its lanes, for a vector.
 Kind :: struct {
 	machine: Machine,
 	bounds:  Bounds,
+	lanes:   int, // 0: one value; L: a vector of L values of the machine
 }
+
+// MAX_LANES: the most lanes a vector has.
+MAX_LANES :: 8
 
 Op :: enum u8 {
 	Add,
@@ -75,6 +80,9 @@ Inst :: union {
 	Binary, // dst = a op b
 	In, // dst = x in a cover: 1 or 0
 	Narrow, // dst = src, where an arm narrowed it
+	Splat, // dst = a in each lane of a vector
+	Lanes, // dst = a vector of integers, one in each lane
+	Reduce, // dst = a₀ op a₁ op …, the lanes of a vector by an operation that commutes
 	Foreign, // dst = the call of an imported symbol
 	Call, // dst = the call of a function of the program
 	Match, // dst = the value of the first arm whose cover takes the target
@@ -121,6 +129,23 @@ In :: struct {
 // bounds of dst are the narrowed ones.
 Narrow :: struct {
 	dst, src: Value,
+}
+
+// Splat: dst is a vector, a in each of its lanes.
+Splat :: struct {
+	dst, a: Value,
+}
+
+// Lanes: dst is a vector of these integers, one in each lane.
+Lanes :: struct {
+	dst:    Value,
+	values: []i64,
+}
+
+// Reduce: dst = a₀ op a₁ op …, op associative and commutative.
+Reduce :: struct {
+	dst, a: Value,
+	op:     Op,
 }
 
 // Foreign: dst = symbol(args…), in the order it is written; NONE when it gives
@@ -224,9 +249,14 @@ Program :: struct {
 
 // --- building ---
 
-value :: proc(f: ^Func, m: Machine) -> Value {
-	append(&f.kinds, Kind{m, EVERY})
+value :: proc(f: ^Func, m: Machine, lanes := 0) -> Value {
+	append(&f.kinds, Kind{m, EVERY, lanes})
 	return Value(len(f.kinds) - 1)
+}
+
+lanes_of :: proc(f: ^Func, v: Value) -> int {
+	if v == NONE do return 0
+	return f.kinds[v].lanes
 }
 
 machine_of :: proc(f: ^Func, v: Value) -> Machine {
@@ -371,6 +401,12 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 		return fmt.tprintf("%s = %s in %s", v(i.dst), v(i.x), print_cover(i.cover))
 	case Narrow:
 		return fmt.tprintf("%s = narrow %s%s", v(i.dst), v(i.src), print_bounds(f, i.dst))
+	case Splat:
+		return fmt.tprintf("%s = splat %s ×%d%s", v(i.dst), v(i.a), f.kinds[i.dst].lanes, print_bounds(f, i.dst))
+	case Lanes:
+		return fmt.tprintf("%s = lanes %v", v(i.dst), i.values)
+	case Reduce:
+		return fmt.tprintf("%s = reduce %v %s%s", v(i.dst), i.op, v(i.a), print_bounds(f, i.dst))
 	case Foreign:
 		return fmt.tprintf("%s = call %s(%s)%s", v(i.dst), p.imports[i.symbol].symbol, list(i.args), print_bounds(f, i.dst))
 	case Call:

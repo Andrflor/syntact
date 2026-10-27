@@ -11,9 +11,11 @@ import "core:fmt"
 // the bounds the kernel proved of it, or the run fails: a backend relies on them.
 
 Datum :: struct {
-	int:  i64,
-	real: f64,
-	text: string,
+	int:   i64,
+	real:  f64,
+	text:  string,
+	ints:  [MAX_LANES]i64, // a vector of integers
+	reals: [MAX_LANES]f64, // a vector of floats
 }
 
 Symbol :: proc(args: []Datum) -> Datum
@@ -82,11 +84,25 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			if !takes(p.inputs[i.slot], .Int, Datum{int = m.inputs[i.slot]}) do return false, fmt.tprintf("the input %d is out of its layout", i.slot)
 			regs[i.dst].int = m.inputs[i.slot]
 		case Unary:
-			regs[i.dst] = unary(i.op, fr.f.kinds[i.a].machine, regs[i.a])
+			kind := fr.f.kinds[i.a]
+			for k in 0 ..< max(kind.lanes, 1) do set_lane(&regs[i.dst], kind, k, unary(i.op, kind.machine, lane(regs[i.a], kind, k)))
 		case Binary:
-			d, ok := binary_of(i.op, fr.f.kinds[i.a].machine, regs[i.a], regs[i.b])
-			if !ok do return false, "a division by 0"
-			regs[i.dst] = d
+			kind := fr.f.kinds[i.a]
+			for k in 0 ..< max(kind.lanes, 1) {
+				d, ok := binary_of(i.op, kind.machine, lane(regs[i.a], kind, k), lane(regs[i.b], fr.f.kinds[i.b], k))
+				if !ok do return false, "a division by 0"
+				set_lane(&regs[i.dst], fr.f.kinds[i.dst], k, d)
+			}
+		case Splat:
+			kind := fr.f.kinds[i.dst]
+			for k in 0 ..< kind.lanes do set_lane(&regs[i.dst], kind, k, regs[i.a])
+		case Lanes:
+			for x, k in i.values do regs[i.dst].ints[k] = x
+		case Reduce:
+			kind := fr.f.kinds[i.a]
+			out := lane(regs[i.a], kind, 0)
+			for k in 1 ..< kind.lanes do out, _ = binary_of(i.op, kind.machine, out, lane(regs[i.a], kind, k))
+			regs[i.dst] = out
 		case In:
 			regs[i.dst].int = takes(i.cover, fr.f.kinds[i.x].machine, regs[i.x]) ? 1 : 0
 		case Narrow:
@@ -156,6 +172,12 @@ written :: proc(inst: Inst) -> Value {
 		return i.dst
 	case Narrow:
 		return i.dst
+	case Splat:
+		return i.dst
+	case Lanes:
+		return i.dst
+	case Reduce:
+		return i.dst
 	case Foreign:
 		return i.dst
 	case Call:
@@ -169,13 +191,30 @@ written :: proc(inst: Inst) -> Value {
 	return NONE
 }
 
-// proven: the integer x holds is within the bounds the kernel proved of it.
+// proven: the integer x holds — each lane of a vector — is within the bounds the
+// kernel proved of it.
 proven :: proc(fr: ^Frame, x: Value) -> string {
 	if x == NONE || fr.f.kinds[x].machine != .Int do return ""
-	b := fr.f.kinds[x].bounds
-	v := i128(fr.regs[x].int)
-	if v < b.lo || v > b.hi do return fmt.tprintf("%s: v%d = %d, out of the bounds proven, %s", fr.f.name, int(x), v, print_cell(b))
+	kind := fr.f.kinds[x]
+	for k in 0 ..< max(kind.lanes, 1) {
+		v := i128(lane(fr.regs[x], kind, k).int)
+		if v < kind.bounds.lo || v > kind.bounds.hi do return fmt.tprintf("%s: v%d = %d, out of the bounds proven, %s", fr.f.name, int(x), v, print_cell(kind.bounds))
+	}
 	return ""
+}
+
+// lane: the k-th lane of a vector, as a value; a value itself.
+lane :: proc(d: Datum, kind: Kind, k: int) -> Datum {
+	if kind.lanes == 0 do return d
+	return Datum{int = d.ints[k], real = d.reals[k]}
+}
+
+set_lane :: proc(d: ^Datum, kind: Kind, k: int, x: Datum) {
+	if kind.lanes == 0 {
+		d^ = x
+		return
+	}
+	d.ints[k], d.reals[k] = x.int, x.real
 }
 
 // assign: dst take the values of src, all read before any is written.

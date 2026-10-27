@@ -220,6 +220,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		enc.mov_r64_m64(x, absolute(.R11))
 		put(fr, place_of(fr, i.dst), x)
 	case mir.Unary:
+		if f.kinds[i.a].lanes > 0 do return "vectors are not written for x86-64 yet"
 		x := work(fr, i.dst)
 		get(fr, x, place_of(fr, i.a))
 		switch {
@@ -235,6 +236,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		}
 		put(fr, place_of(fr, i.dst), x)
 	case mir.Binary:
+		if f.kinds[i.a].lanes > 0 do return "vectors are not written for x86-64 yet"
 		if f.kinds[i.a].machine == .Real do return real_binary(fr, i)
 		return int_binary(fr, i)
 	case mir.Compare:
@@ -271,6 +273,8 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		case .Text, .None:
 		}
 		put(fr, place_of(fr, i.dst), .RAX)
+	case mir.Splat, mir.Lanes, mir.Reduce:
+		return "vectors are not written for x86-64 yet"
 	case mir.Call:
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)

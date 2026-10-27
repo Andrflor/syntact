@@ -84,6 +84,7 @@ source :: proc(p: ^code.Program) -> (string, string) {
 	w.funcs[0] = "program"
 	for f, i in p.funcs[1:] do w.funcs[i + 1] = fmt.tprintf("fn_%s_%d", f.name, i + 1)
 	prelude(&w)
+	vectors(&w)
 	for imp, i in p.imports {
 		args := make([dynamic]string)
 		for a in imp.args do append(&args, C_TYPES[a])
@@ -106,6 +107,31 @@ C_TYPES := [code.Machine]string {
 	.Int  = "int64_t",
 	.Real = "double",
 	.Text = "const char *",
+}
+
+// type_of: the C type of a value: of its machine, or a vector of it, in the
+// vector extension of the C compiler.
+type_of :: proc(k: code.Kind) -> string {
+	if k.lanes == 0 do return C_TYPES[k.machine]
+	return fmt.tprintf("%s%d", k.machine == .Real ? "f64x" : "i64x", k.lanes)
+}
+
+// vectors: the types of the vectors of the program.
+vectors :: proc(w: ^Writer) {
+	seen := make(map[code.Kind]bool)
+	for f in w.p.funcs do for k in f.kinds {
+		if k.lanes == 0 do continue
+		key := code.Kind{machine = k.machine, lanes = k.lanes}
+		if key in seen do continue
+		seen[key] = true
+		if k.machine == .Real {
+			fmt.sbprintfln(&w.b, "typedef double f64x%d __attribute__((vector_size(%d)));", k.lanes, 8 * k.lanes)
+		} else {
+			fmt.sbprintfln(&w.b, "typedef int64_t i64x%d __attribute__((vector_size(%d)));", k.lanes, 8 * k.lanes)
+			fmt.sbprintfln(&w.b, "typedef uint64_t u64x%d __attribute__((vector_size(%d)));", k.lanes, 8 * k.lanes)
+		}
+	}
+	if len(seen) > 0 do strings.write_string(&w.b, "\n")
 }
 
 prelude :: proc(w: ^Writer) {
@@ -208,6 +234,14 @@ survey :: proc(w: ^Writer, b: code.Body) {
 		case code.In:
 			w.defs[i.dst] = inst
 			read(w, i.x)
+		case code.Splat:
+			w.defs[i.dst] = inst
+			read(w, i.a)
+		case code.Lanes:
+			w.defs[i.dst] = inst
+		case code.Reduce:
+			w.defs[i.dst] = inst
+			read(w, i.a)
 		case code.Narrow:
 			w.defs[i.dst] = inst
 			read(w, i.src)
@@ -254,7 +288,7 @@ name :: proc(w: ^Writer, x: code.Value) -> string {
 // declare: the value takes the expression; a value no one reads is not kept.
 declare :: proc(w: ^Writer, x: code.Value, expr: string) {
 	if w.reads[x] == 0 do return
-	line(w, "%s v%d = %s;", C_TYPES[w.f.kinds[x].machine], int(x), expr)
+	line(w, "%s v%d = %s;", type_of(w.f.kinds[x]), int(x), expr)
 }
 
 // assume: the bounds the kernel proved of an integer, when they say more than its
@@ -294,6 +328,17 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			expr, msg := binary(w, i)
 			if msg != "" do return msg
 			declare(w, i.dst, expr)
+		case code.Splat:
+			parts := make([]string, f.kinds[i.dst].lanes)
+			for &x in parts do x = name(w, i.a)
+			declare(w, i.dst, fmt.tprintf("(%s){%s}", type_of(f.kinds[i.dst]), strings.join(parts, ", ")))
+		case code.Lanes:
+			parts := make([]string, len(i.values))
+			for x, k in i.values do parts[k] = int_literal(i128(x))
+			declare(w, i.dst, fmt.tprintf("(%s){%s}", type_of(f.kinds[i.dst]), strings.join(parts, ", ")))
+		case code.Reduce:
+			declare(w, i.dst, reduce(w, i))
+			if w.reads[i.dst] > 0 do assume(w, i.dst)
 		case code.In:
 			declare(w, i.dst, cover_test(w, name(w, i.x), f.kinds[i.x].machine, i.cover))
 		case code.Foreign:
@@ -317,7 +362,7 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			declare(w, i.dst, call)
 			assume(w, i.dst)
 		case code.Match:
-			if i.dst != code.NONE do line(w, "%s v%d;", C_TYPES[f.kinds[i.dst].machine], int(i.dst))
+			if i.dst != code.NONE do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
 			target := name(w, i.target)
 			for arm, n in i.arms {
 				last := n == len(i.arms) - 1
@@ -339,10 +384,10 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			}
 			line(w, "}}")
 		case code.Loop:
-			if i.dst != code.NONE do line(w, "%s v%d;", C_TYPES[f.kinds[i.dst].machine], int(i.dst))
+			if i.dst != code.NONE do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
 			for x, n in i.params {
 				if x == i.init[n] do continue
-				line(w, "%s v%d = %s;", C_TYPES[f.kinds[x].machine], int(x), name(w, i.init[n]))
+				line(w, "%s v%d = %s;", type_of(f.kinds[x]), int(x), name(w, i.init[n]))
 			}
 			line(w, "for (;;) {{")
 			w.depth += 1
@@ -375,7 +420,7 @@ again :: proc(w: ^Writer, a: code.Again, params: []code.Value) {
 	} else {
 		line(w, "{{")
 		w.depth += 1
-		for n in moved do line(w, "%s t%d = %s;", C_TYPES[w.f.kinds[params[n]].machine], n, name(w, a.args[n]))
+		for n in moved do line(w, "%s t%d = %s;", type_of(w.f.kinds[params[n]]), n, name(w, a.args[n]))
 		for n in moved do line(w, "v%d = t%d;", int(params[n]), n)
 		w.depth -= 1
 		line(w, "}}")
@@ -385,6 +430,8 @@ again :: proc(w: ^Writer, a: code.Again, params: []code.Value) {
 
 unary :: proc(w: ^Writer, u: code.Unary) -> string {
 	a := name(w, u.a)
+	kind := w.f.kinds[u.a]
+	if kind.lanes > 0 && kind.machine == .Int && u.op == .Neg do return fmt.tprintf("(%s)(-(u64x%d)%s)", type_of(kind), kind.lanes, a)
 	#partial switch u.op {
 	case .Neg:
 		if w.f.kinds[u.a].machine == .Real || proven(w, u.dst) do return fmt.tprintf("-%s", a)
@@ -404,6 +451,7 @@ proven :: proc(w: ^Writer, x: code.Value) -> bool {
 
 binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 	a, b := name(w, x.a), name(w, x.b)
+	if kind := w.f.kinds[x.a]; kind.lanes > 0 do return lanes(w, x, kind, a, b)
 	if x.op == .Pow do return fmt.tprintf("%s(%s, %s)", w.f.kinds[x.a].machine == .Real ? "real_pow" : "wrap_pow", a, b), ""
 	if w.f.kinds[x.a].machine == .Real {
 		#partial switch x.op {
@@ -428,6 +476,33 @@ binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
 	case .Neg, .Not, .Pow:
 	}
 	return "", "a binary operation C does not compute"
+}
+
+// lanes: an operation on vectors, lane by lane: on integers, what wraps in
+// unsigned lanes, a comparison 1 or 0.
+lanes :: proc(w: ^Writer, x: code.Binary, kind: code.Kind, a, b: string) -> (string, string) {
+	#partial switch x.op {
+	case .Pow:
+		return "", "a power of vectors C does not compute"
+	case .Eq, .Ne, .Lt, .Le, .Gt, .Ge:
+		return fmt.tprintf("(i64x%d)((%s %s %s) & 1)", kind.lanes, a, C_OPS[x.op], b), ""
+	case .Add, .Sub, .Mul, .Shl:
+		if kind.machine == .Int do return fmt.tprintf("(%s)((u64x%d)%s %s (u64x%d)%s)", type_of(kind), kind.lanes, a, C_OPS[x.op], kind.lanes, b), ""
+	}
+	return fmt.tprintf("%s %s %s", a, C_OPS[x.op], b), ""
+}
+
+// reduce: the lanes of a vector, by an operation that commutes, in order.
+reduce :: proc(w: ^Writer, r: code.Reduce) -> string {
+	kind := w.f.kinds[r.a]
+	a := name(w, r.a)
+	out := fmt.tprintf("%s[0]", a)
+	for k in 1 ..< kind.lanes {
+		lane := fmt.tprintf("%s[%d]", a, k)
+		if kind.machine == .Int && (r.op == .Add || r.op == .Mul) do out = fmt.tprintf("%s(%s, %s)", WRAPS[r.op], out, lane)
+		else do out = fmt.tprintf("%s %s %s", out, C_OPS[r.op], lane)
+	}
+	return out
 }
 
 C_OPS := [code.Op]string {

@@ -13,8 +13,8 @@ import "core:slice"
 // linear scan gives each register a register of the machine: one the calls keep
 // when the range spans a call, any free one otherwise — the register of what it
 // is copied from first, so that the copy goes —, or a slot of the frame when none
-// is left: the range that ends last is the one that goes to the frame. Floats go
-// to the frame.
+// is left: the range that ends last is the one that goes to the frame. Floats and
+// vectors go to the frame, a slot for each lane.
 
 // Target: the registers of a machine the scan gives, by their number: those a call
 // keeps, and those it does not; and those a call takes its integers in, in order.
@@ -64,6 +64,11 @@ uses :: proc(inst: Inst, out: ^[dynamic]Reg) {
 		for a in i.args do operand(a, out)
 	case Call:
 		for a in i.args do operand(a, out)
+	case Splat:
+		append(out, i.a)
+	case Reduce:
+		append(out, i.a)
+	case Lanes:
 	}
 }
 
@@ -87,6 +92,12 @@ writes :: proc(inst: Inst) -> Reg {
 	case Foreign:
 		return i.dst
 	case Call:
+		return i.dst
+	case Splat:
+		return i.dst
+	case Lanes:
+		return i.dst
+	case Reduce:
 		return i.dst
 	}
 	return NO_REG
@@ -245,9 +256,10 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 				ordered_remove(&active, j)
 			} else do j += 1
 		}
-		if f.kinds[r.reg].machine == .Real {
+		if kind := f.kinds[r.reg]; kind.machine == .Real || kind.lanes > 0 {
+			// a float, a vector: its slots, one for each lane
 			out.places[r.reg] = Slot(out.slots)
-			out.slots += 1
+			out.slots += max(kind.lanes, 1)
 			continue
 		}
 		chosen := -1
