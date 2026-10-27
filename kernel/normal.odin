@@ -163,24 +163,11 @@ and_law :: proc(k: ^Kernel, terms: []Type) -> Type {
 }
 
 lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
-	flat := make([dynamic]Type)
-	stack := make([dynamic]Type)
-	#reverse for t in terms do append(&stack, t)
-	for len(stack) > 0 {
-		t := pop(&stack)
-		if is_invalid(t) do return t
-		if o, ok := t.(^Or); ok && is_or {
-			#reverse for x in o.terms do append(&stack, x)
-			continue
-		}
-		if a, ok := t.(^And); ok && !is_or {
-			#reverse for x in a.terms do append(&stack, x)
-			continue
-		}
-		append(&flat, t)
-	}
-	constants := make([dynamic]Type)
-	others := make([dynamic]Type)
+	from := mark(k)
+	defer release(k, from)
+	if invalid := flattened(k, terms, is_or); invalid != nil do return invalid
+	flat := pushed(k, from)
+	constants := mark(k)
 	for t in flat {
 		switch {
 		case is_none(t):
@@ -188,35 +175,52 @@ lattice_law :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> Type {
 		case is_everything(t):
 			if is_or do return everything()
 		case is_constant(t):
-			append(&constants, t)
-		case:
-			if !contains_same(k, others[:], t) do append(&others, t)
+			push(k, t)
 		}
 	}
-	if len(constants) > 0 {
-		c := is_or ? or_constants(k, constants[:]) : and_constants(k, constants[:])
-		clear(&constants)
+	others := mark(k)
+	for t in flat do if !is_constant(t) && !contains_same(k, pushed(k, others), t) do push(k, t)
+	parts := mark(k)
+	push_all(k, k.scratch[others:parts])
+	sort_types(pushed(k, parts))
+	if constants < others {
+		c := is_or ? or_constants(k, k.scratch[constants:others]) : and_constants(k, k.scratch[constants:others])
 		if is_none(c) {
 			if !is_or do return None{}
 		} else if is_everything(c) {
 			if is_or do return everything()
 		} else if o, ok := c.(^Or); ok && is_or {
-			append(&constants, ..o.terms)
+			push_all(k, o.terms)
 		} else {
-			append(&constants, c)
+			push(k, c)
 		}
 	}
-	parts := make([dynamic]Type)
-	append(&parts, ..others[:])
-	sort_types(parts[:])
-	append(&parts, ..constants[:])
-	switch len(parts) {
+	combined := pushed(k, parts)
+	switch len(combined) {
 	case 0:
 		return is_or ? Type(None{}) : everything()
 	case 1:
-		return parts[0]
+		return combined[0]
 	}
-	return is_or ? new_or(..parts[:]) : new_and(..parts[:])
+	return is_or ? new_or(..combined) : new_and(..combined)
+}
+
+// flattened: the terms of a | — or of a & —, pushed in order: a | (b | c) is
+// a | b | c; the first invalid one instead.
+flattened :: proc(k: ^Kernel, terms: []Type, is_or: bool) -> (invalid: Type) {
+	for t in terms {
+		if is_invalid(t) do return t
+		if o, ok := t.(^Or); ok && is_or {
+			if x := flattened(k, o.terms, is_or); x != nil do return x
+			continue
+		}
+		if a, ok := t.(^And); ok && !is_or {
+			if x := flattened(k, a.terms, is_or); x != nil do return x
+			continue
+		}
+		push(k, t)
+	}
+	return nil
 }
 
 contains_same :: proc(k: ^Kernel, ts: []Type, t: Type) -> bool {
