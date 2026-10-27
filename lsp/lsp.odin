@@ -115,7 +115,10 @@ SEMANTIC_TOKEN_TYPES :: [?]string {
 	"decorator",
 }
 
-SEMANTIC_TOKEN_MODIFIERS :: [?]string{"declaration", "definition", "readonly", "static"}
+SEMANTIC_TOKEN_MODIFIERS :: [?]string{"declaration", "definition", "readonly", "static", "collapsed"}
+
+// COLLAPSED: the modifier of the name of what `!` collapses — a run.
+COLLAPSED :: 1 << 4
 
 Raw_Sem_Token :: struct {
 	line:       int,
@@ -1159,12 +1162,23 @@ collect_semantic_tokens :: proc(ast: ^syntax.Ast, tokens: ^[dynamic]Raw_Sem_Toke
 		)
 	}
 
+	// collapse: the name of what `!` collapses, in the color of a run
+	collapse :: proc(tokens: ^[dynamic]Raw_Sem_Token, i: int) {
+		tokens[i].type, tokens[i].modifiers = int(Sem_Token_Type.Macro), COLLAPSED
+	}
+
 	lexer: syntax.Lexer
 	syntax.init_lexer(&lexer, ast.source)
+	// what is collapsed is named before `!`, or before the carve that `!` closes:
+	// each open brace holds the token of the name it carves, -1 for a scope
+	carves := make([dynamic]int, context.temp_allocator)
+	named := -1 // the token of the name a carve here would carve
 	prev := syntax.next_token(&lexer)
 	for prev.kind != .EOF {
 		cur := prev
 		next := syntax.next_token(&lexer)
+		carved := named
+		named = -1
 
 		#partial switch cur.kind {
 		case .Identifier:
@@ -1175,7 +1189,17 @@ collect_semantic_tokens :: proc(ast: ^syntax.Ast, tokens: ^[dynamic]Raw_Sem_Toke
 				emit(ast, tokens, cur.span, decl_token_type(next.kind), 1)
 			} else {
 				emit(ast, tokens, cur.span, .Variable)
+				named = len(tokens) - 1
+				if next.kind == .Execute do collapse(tokens, named)
 			}
+		case .LeftBrace:
+			append(&carves, -1)
+		case .LeftBraceCarve:
+			append(&carves, carved)
+		case .RightBrace:
+			// a carve closed: `}{` carves it again, `}!` collapses it
+			if len(carves) > 0 do named = pop(&carves)
+			if named >= 0 && next.kind == .Execute do collapse(tokens, named)
 		case .Integer, .Float, .Hexadecimal, .Binary:
 			emit(ast, tokens, cur.span, .Number)
 		case .String_Literal:
