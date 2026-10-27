@@ -39,6 +39,19 @@ prove :: proc(k: ^Kernel, eq: Type) -> (Verdict, Rewrite) {
 		return .Proven, nil // already reported
 	case ^Pattern:
 		return prove_branches(k, v)
+	case ^Operation:
+		// a [&] b is true when each is, false where one is: each proven on its own
+		if v.op == .Bit_And {
+			parts := make([dynamic]Type)
+			conjuncts(eq, &parts)
+			verdict := Verdict.Proven
+			for part in parts {
+				pv, witness := prove(k, part)
+				if pv == .Refuted do return .Refuted, witness
+				if pv == .Unproven do verdict = .Unproven
+			}
+			return verdict, nil
+		}
 	}
 	if u, s, found := find_atom(k, eq); found do return prove(k, boole(k, u, s, eq))
 	return .Unproven, nil

@@ -149,6 +149,12 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u16\nb -> ??::i8\n(0..785):x -> (a + b) ? {\n  <0 -> 0\n  >786 -> 786\n  -> a + b\n}", "", {.Constraint_Mismatch}},
 	{"a -> ??::u16\nb -> ??::i8\nx -> (a + b < 0) [|] (a + b >= 0)", "true", {}},
 	{"a -> ??::u16\nb -> ??::i8\nx -> (a + b) ? {\n  <0 -> 0\n  >=0 -> 1\n}", "", {}},
+	// a [&] b, each proven on its own: a shape of such fields
+	{"a -> ??::u16\nb -> ??::i8\nc -> (a + b) ? {\n  <0 -> 0\n  >786 -> 786\n  -> a + b\n}\nP -> {(0..786):x (0..786):y}\nP:p -> P{c c}", "", {}},
+	{"a -> ??::u16\nb -> ??::i8\nc -> (a + b) ? {\n  <0 -> 0\n  >786 -> 786\n  -> a + b\n}\nP -> {(0..786):x (0..785):y}\nP:p -> P{c c}", "", {.Constraint_Mismatch}},
+	// x in x, x one value: a hole sent one value holds it
+	{"Vec -> {\n  X <- i32\n  X:x\n}\na -> ??::u16\nb -> ??::i8\nv -> Vec{(a + b) ? {\n  <0 -> 0\n  -> a + b\n}}", "", {}},
+	{"u8:x -> u8", "", {.Constraint_Mismatch}},
 	{"a -> ??::u8\nx -> a ? {0 -> 0  -> 10 / a}", "", {}},
 	{"a -> ??::u8\nu8:x -> a ? {0..10 -> a  11..255 -> a - 11}", "", {}},
 	{"a -> ??::u8\nu8:x -> a ? {0..10 -> a  12..255 -> a - 11}", "", {.Non_Exhaustive_Pattern}},

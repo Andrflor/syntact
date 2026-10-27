@@ -27,6 +27,7 @@ package kernel
 in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if is_invalid(x) do return x
 	if is_invalid(c) do return c
+	if is_value(k, x) && same(k, x, c) do return Bool(true) // x in x = x in =x, x one value
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
