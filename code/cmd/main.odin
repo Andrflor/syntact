@@ -4,6 +4,7 @@ import code ".."
 import c "../c"
 import calc "../calc"
 import x64 "../x64"
+import arena "../../arena"
 import kernel "../../kernel"
 import "core:fmt"
 import "core:os"
@@ -17,6 +18,14 @@ main :: proc() {
 		fmt.eprintln("usage: code FILE [-l | -o OUT | -c OUT.c]")
 		os.exit(2)
 	}
+	// the whole compile in one arena (arena/arena.odin)
+	compile: arena.Arena
+	if err := arena.init(&compile); err != nil {
+		fmt.eprintln("no memory for the compile:", err)
+		os.exit(2)
+	}
+	context.allocator = arena.allocator(&compile)
+	context.temp_allocator = context.allocator
 	data, err := os.read_entire_file(os.args[1], context.allocator)
 	if err != nil {
 		fmt.eprintln("cannot read:", os.args[1])
