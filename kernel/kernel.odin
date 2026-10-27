@@ -43,6 +43,7 @@ Kernel :: struct {
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file
 	scratch:    [dynamic]Type, // what the laws gather, in an arena of its own (scratch.odin)
+	interned:   ^Interned, // its shared terms (intern.odin)
 }
 
 // report: an error, once. What it concerns becomes Invalid, which stays silent.
@@ -56,6 +57,10 @@ report :: proc(k: ^Kernel, kind: Error_Kind, span: syn.Span, message: string) ->
 check :: proc(ast: ^syn.Ast) -> (k: Kernel) {
 	k.ast = ast
 	init_scratch(&k)
+	// the terms it shares live as long as the kernel: what builds them from now on,
+	// on this thread, builds them in its table
+	k.interned = new(Interned)
+	interned = k.interned
 	k.root = build_program(&k)
 	check_program(&k)
 	return k

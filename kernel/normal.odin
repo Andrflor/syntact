@@ -12,6 +12,7 @@ import "core:fmt"
 
 normal :: proc(k: ^Kernel, t: Type) -> Type {
 	if t == nil || normalized(t) do return t
+	if form := remembered(t); form != nil do return form
 	switch v in t {
 	case Char, Int, Real, Bool, None, Invalid:
 		return t
@@ -34,11 +35,49 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return scope_law(k, v)
 	case ^Operation:
 		if is_string_value(t) do return t // a string: a primitive
-		return as_normal(sequence(k, t, normal_all(k, parts(t)), term_law))
+		return remember(t, as_normal(sequence(k, t, normal_all(k, parts(t)), term_law)))
 	case ^Or, ^And, ^Not, ^Is, ^Range, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern:
-		return as_normal(sequence(k, t, normal_all(k, parts(t)), term_law))
+		return remember(t, as_normal(sequence(k, t, normal_all(k, parts(t)), term_law)))
 	}
 	return t
+}
+
+// remembered: the normal form of a closed node, once computed: computed once.
+remembered :: proc(t: Type) -> Type {
+	#partial switch v in t {
+	case ^Operation:
+		return v.form
+	case ^Or:
+		return v.form
+	case ^And:
+		return v.form
+	case ^Not:
+		return v.form
+	case ^Is:
+		return v.form
+	case ^Range:
+		return v.form
+	}
+	return nil
+}
+
+// remember: form, the normal form of t, kept in t when t is closed.
+remember :: proc(t: Type, form: Type) -> Type {
+	#partial switch v in t {
+	case ^Operation:
+		if v.closed do v.form = form
+	case ^Or:
+		if v.closed do v.form = form
+	case ^And:
+		if v.closed do v.form = form
+	case ^Not:
+		if v.closed do v.form = form
+	case ^Is:
+		if v.closed do v.form = form
+	case ^Range:
+		if v.closed do v.form = form
+	}
+	return form
 }
 
 // normalized: t is a normal form — normal(normal(t)) = normal(t): what gave it, the

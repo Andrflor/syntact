@@ -427,6 +427,42 @@ expected_kinds :: proc(c: Corpus_Case) -> []string {
 
 // The corpus of test/typecheck: each source whose forms are all built by this
 // kernel must give exactly the expected errors. The others are counted apart.
+// the constants the laws share are normal forms: built again, in a kernel, the laws
+// give each back
+@(test)
+test_constants :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	k, _ := run("")
+	rebuilt :: proc(t: Type) -> Type {
+		#partial switch v in t {
+		case ^Range:
+			return new_range(rebuilt(v.lo), rebuilt(v.hi), v.family)
+		case ^Or:
+			terms := make([]Type, len(v.terms))
+			for x, i in v.terms do terms[i] = rebuilt(x)
+			return new_or(..terms)
+		case ^And:
+			terms := make([]Type, len(v.terms))
+			for x, i in v.terms do terms[i] = rebuilt(x)
+			return new_and(..terms)
+		case ^Not:
+			return new_not(rebuilt(v.term))
+		case ^Operation:
+			args := make([]Type, len(v.args))
+			for x, i in v.args do args[i] = rebuilt(x)
+			return new_operation(v.op, ..args)
+		}
+		return t
+	}
+	for c in constants() {
+		fresh := rebuilt(c)
+		testing.expectf(t, fresh != c, "%s was not built again", print_type(c))
+		testing.expectf(t, same(&k, normal(&k, fresh), c), "%s is not a normal form: %s", print_type(c), print_type(normal(&k, fresh)))
+	}
+}
+
 @(test)
 test_corpus :: proc(t: ^testing.T) {
 	arena: vmem.Arena

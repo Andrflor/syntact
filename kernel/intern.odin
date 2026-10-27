@@ -26,18 +26,21 @@ Key :: struct {
 }
 
 // Interned: the shared nodes, by their keys, in an open table: nil is an empty slot.
+// A kernel has its own, which lives as long as the nodes it holds (check).
 Interned :: struct {
 	slots: []Type,
 	count: int,
 }
 
-// the shared nodes of the kernels run on this thread
+// the table of the kernel at work on this thread; another one for what is built
+// out of a kernel, as the constants are
 @(thread_local)
-interned: Interned
+interned: ^Interned
 
 // intern: the node of this key: the one built before, or a new one.
 intern :: proc(key: Key) -> Type {
-	table := &interned
+	if interned == nil do interned = new(Interned)
+	table := interned
 	if (table.count + 1) * 4 > len(table.slots) * 3 do grow(table)
 	mask := len(table.slots) - 1
 	at := int(hash_key(key)) & mask
@@ -97,33 +100,60 @@ same_key :: proc(a, b: Key) -> bool {
 
 // build_node: a new node of this key, its children its own.
 build_node :: proc(key: Key) -> Type {
+	closed := true
+	for c in key.children do closed &&= is_closed(c)
 	switch key.shape {
 	case .Or:
 		o := new(Or)
-		o.terms = clone_types(key.children)
+		o.terms, o.closed = clone_types(key.children), closed
 		return o
 	case .And:
 		a := new(And)
-		a.terms = clone_types(key.children)
+		a.terms, a.closed = clone_types(key.children), closed
 		return a
 	case .Not:
 		n := new(Not)
-		n.term = key.children[0]
+		n.term, n.closed = key.children[0], closed
 		return n
 	case .Is:
 		i := new(Is)
-		i.term = key.children[0]
+		i.term, i.closed = key.children[0], closed
 		return i
 	case .Range:
 		r := new(Range)
-		r.lo, r.hi, r.family = key.children[0], key.children[1], Range_Family(key.op)
+		r.lo, r.hi, r.family, r.closed = key.children[0], key.children[1], Range_Family(key.op), closed
 		return r
 	case .Operation:
 		o := new(Operation)
-		o.op, o.args = Operator(key.op), clone_types(key.children)
+		o.op, o.args, o.closed = Operator(key.op), clone_types(key.children), closed
 		return o
 	}
 	return nil
+}
+
+// is_closed: a child whose normal form is its own wherever it is asked: a value, an
+// unknown — but what a recursive call gives back, known as its equation is solved —,
+// a closed node; a name is not, its normal form is its binding's, being typed.
+is_closed :: proc(t: Type) -> bool {
+	#partial switch v in t {
+	case nil, Char, Int, Real, Bool, None, Invalid:
+		return true
+	case ^Unknown:
+		return v.call == nil
+	case ^Or:
+		return v.closed
+	case ^And:
+		return v.closed
+	case ^Not:
+		return v.closed
+	case ^Is:
+		return v.closed
+	case ^Range:
+		return v.closed
+	case ^Operation:
+		return v.closed
+	}
+	return false
 }
 
 hash_key :: proc(key: Key) -> u64 {

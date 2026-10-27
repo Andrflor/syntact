@@ -106,34 +106,44 @@ Emission :: struct {
 	site:     ^Scope, // the scope that writes it: its handlers answer it only as its default
 }
 
-Or :: struct {
-	terms: []Type,
+// Known: what a node of the algebra knows of itself: whether it is a normal form;
+// whether it is closed — it holds values, unknowns and closed nodes, no name: its
+// normal form is its own, wherever it is asked —; and then that normal form, once
+// computed (normal.odin).
+Known :: struct {
 	normal: bool, // a normal form: normal gives it back
+	closed: bool,
+	form:   Type,
+}
+
+Or :: struct {
+	terms:       []Type,
+	using known: Known,
 }
 
 And :: struct {
-	terms: []Type,
-	normal: bool, // a normal form: normal gives it back
+	terms:       []Type,
+	using known: Known,
 }
 
 Not :: struct {
-	term: Type,
-	normal: bool, // a normal form: normal gives it back
+	term:        Type,
+	using known: Known,
 }
 
 Is :: struct {
-	term: Type,
-	normal: bool, // a normal form: normal gives it back
+	term:        Type,
+	using known: Known,
 }
 
 // Range: every primitive from lo to hi; a nil bound is infinite. Its bounds are
 // primitives of one family, or terms over unknowns (0..n). Infinite on both sides,
 // it keeps its family: `..0..` is every integer, `..` alone every primitive.
 Range :: struct {
-	lo, hi: Type,
-	family: Range_Family,
-	span:   syn.Span,
-	normal: bool, // a normal form: normal gives it back
+	lo, hi:      Type,
+	family:      Range_Family,
+	span:        syn.Span,
+	using known: Known,
 }
 
 Range_Family :: enum u8 {
@@ -164,10 +174,10 @@ Operator :: enum u8 {
 }
 
 Operation :: struct {
-	op:   Operator,
-	args: []Type,
-	span: syn.Span, // as written: where an illegal operator is reported
-	normal: bool, // a normal form: normal gives it back
+	op:          Operator,
+	args:        []Type,
+	span:        syn.Span, // as written: where an illegal operator is reported
+	using known: Known,
 }
 
 // Name: a binding, the last occurrence visible where the name is written.
@@ -408,12 +418,12 @@ written :: proc(t: Type, span: syn.Span) -> Type {
 	case ^Operation:
 		o := new(Operation)
 		o^ = v^
-		o.span, o.normal = span, false
+		o.span, o.known = span, {}
 		return o
 	case ^Range:
 		r := new(Range)
 		r^ = v^
-		r.span, r.normal = span, false
+		r.span, r.known = span, {}
 		return r
 	}
 	return t
@@ -461,6 +471,13 @@ init_constants :: proc "contextless" () {
 	BOOLS = new_or(Bool(false), Bool(true))
 	NONZERO_INT = new_or(new_range(nil, Int(-1), .Int), POSITIVE) // its cells, in their order
 	NONZERO_REAL = new_or(real_cell({hi = real_int(0), hi_open = true}), real_cell({lo = real_int(0), lo_open = true}))
+	// each is a normal form (kernel_test.odin): normal gives it back, and keeps in it
+	// nothing a kernel computed — they outlive every kernel
+	for c in constants() do as_normal(c)
+}
+
+constants :: proc() -> [12]Type {
+	return {EVERY_INT, EVERY_REAL, EVERY_CHAR, STRING, EMPTY_STRING, EVERYTHING, BOOLS, COUNTS, POSITIVE, NONPOSITIVE, NONZERO_INT, NONZERO_REAL}
 }
 
 // everything: ~none, every value (§4.1).

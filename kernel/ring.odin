@@ -37,7 +37,7 @@ unatomized :: proc(t: Type, back: Rewrite) -> Type {
 		for a, i in v.args do args[i] = unatomized(a, back)
 		out := new(Operation)
 		out^ = v^
-		out.args = args
+		out.args, out.known = args, {}
 		return out
 	}
 	return t
