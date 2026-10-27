@@ -2896,6 +2896,68 @@ testing_logic_r64_imm32 :: proc(t: ^testing.T) {
 }
 
 @(test)
+testing_sse_packed :: proc(t: ^testing.T) {
+	batch := batch_begin(t)
+	defer batch_end(batch)
+	Packed :: struct {
+		name:   string,
+		encode: proc(dst, src: XMMRegister),
+	}
+	ops := []Packed {
+		{"paddq", paddq_xmm_xmm},
+		{"psubq", psubq_xmm_xmm},
+		{"pand", pand_xmm_xmm},
+		{"por", por_xmm_xmm},
+		{"pxor", pxor_xmm_xmm},
+		{"pmuludq", pmuludq_xmm_xmm},
+		{"pcmpeqd", pcmpeqd_xmm_xmm},
+		{"punpcklqdq", punpcklqdq_xmm_xmm},
+		{"addpd", addpd_xmm_xmm},
+		{"subpd", subpd_xmm_xmm},
+		{"mulpd", mulpd_xmm_xmm},
+		{"divpd", divpd_xmm_xmm},
+	}
+	for op in ops do for dst in 0 ..< 16 do for src in 0 ..< 16 {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		op.encode(XMMRegister(dst), XMMRegister(src))
+		batch_add(batch, fmt.tprintf("%s xmm%d, xmm%d", op.name, dst, src))
+	}
+	Shift :: struct {
+		name:   string,
+		encode: proc(reg: XMMRegister, imm: u8),
+	}
+	for op in ([]Shift{{"psllq", psllq_xmm_imm8}, {"psrlq", psrlq_xmm_imm8}, {"psrad", psrad_xmm_imm8}}) do for reg in 0 ..< 16 do for imm in ([]u8{1, 11, 31, 63}) {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		op.encode(XMMRegister(reg), imm)
+		batch_add(batch, fmt.tprintf("%s xmm%d, %d", op.name, reg, imm))
+	}
+	for dst in 0 ..< 16 do for src in 0 ..< 16 {
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		pshufd_xmm_xmm_imm8(XMMRegister(dst), XMMRegister(src), 0x4E)
+		batch_add(batch, fmt.tprintf("pshufd xmm%d, xmm%d, 0x4e", dst, src))
+	}
+	addresses := get_all_addressing_combinations()
+	defer delete(addresses)
+	for i in 0 ..< 200 {
+		reg := XMMRegister(rand.int_max(16))
+		address := addresses[rand.int_max(len(addresses))]
+		operand, _ := strings.replace_all(memory_address_to_string(address), "qword ptr", "xmmword ptr", context.temp_allocator)
+		buffer := ByteBuffer{}
+		context.user_ptr = &buffer
+		if i % 2 == 0 {
+			movdqu_xmm_m128(reg, address)
+			batch_add(batch, fmt.tprintf("movdqu xmm%d, %s", int(reg), operand))
+		} else {
+			movdqu_m128_xmm(address, reg)
+			batch_add(batch, fmt.tprintf("movdqu %s, xmm%d", operand, int(reg)))
+		}
+	}
+}
+
+@(test)
 testing_add_r64_r64 :: proc(t: ^testing.T) {
 	batch := batch_begin(t)
 	defer batch_end(batch)

@@ -5875,22 +5875,16 @@ movdqa_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
 
 // Move aligned double quadword from memory
 movdqa_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-	rex_r, dst_reg := encode_xmm(dst)
-
-	// 66 REX 0F 6F /r - Use write_memory_address for proper memory operand handling
+	// 66 REX 0F 6F /r: the prefix, then the memory operand after the two opcode bytes
 	write([]u8{0x66})
-	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
-	write([]u8{0x6F})
+	write_memory_address(mem, u8(dst), [2]u8{0x0F, 0x6F}, false)
 }
 
 // Move aligned double quadword to memory
 movdqa_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-	rex_r, src_reg := encode_xmm(src)
-
-	// 66 REX 0F 7F /r - Use write_memory_address for proper memory operand handling
+	// 66 REX 0F 7F /r: the prefix, then the memory operand after the two opcode bytes
 	write([]u8{0x66})
-	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
-	write([]u8{0x7F})
+	write_memory_address(mem, u8(src), [2]u8{0x0F, 0x7F}, false)
 }
 
 // Move unaligned double quadword
@@ -5913,22 +5907,16 @@ movdqu_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
 
 // Move unaligned double quadword from memory
 movdqu_xmm_m128 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-	rex_r, dst_reg := encode_xmm(dst)
-
-	// F3 REX 0F 6F /r - Use write_memory_address for proper memory operand handling
+	// F3 REX 0F 6F /r: the prefix, then the memory operand after the two opcode bytes
 	write([]u8{0xF3})
-	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
-	write([]u8{0x6F})
+	write_memory_address(mem, u8(dst), [2]u8{0x0F, 0x6F}, false)
 }
 
 // Move unaligned double quadword to memory
 movdqu_m128_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-	rex_r, src_reg := encode_xmm(src)
-
-	// F3 REX 0F 7F /r - Use write_memory_address for proper memory operand handling
+	// F3 REX 0F 7F /r: the prefix, then the memory operand after the two opcode bytes
 	write([]u8{0xF3})
-	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
-	write([]u8{0x7F})
+	write_memory_address(mem, u8(src), [2]u8{0x0F, 0x7F}, false)
 }
 
 // Move aligned packed single-precision
