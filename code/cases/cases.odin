@@ -104,6 +104,18 @@ CASES := []Binary_Case {
 		LIBM + "n -> ??::u8\n-> n ? {0 -> libm.sqrt{x -> 16.0}!  -> 1.0}",
 		{{args = {"0"}, stdout = "4.000000\n"}, {args = {"1"}, stdout = "1.000000\n"}},
 	},
+	// handlers (specs/types.md §4.9): an emission is answered where its scope is
+	// collapsed; a recursion that emits has its function in that context
+	{
+		"handlers of the context",
+		LIBC + "Say -> {string:text}\nSay -< e { r -> libc.puts{s -> e.text}!  -> 0 }\ngreet -> {\n  a >- Say{text -> \"hello\"}\n  -> 1\n}\nloud -> {\n  Say -< e { r -> libc.puts{s -> e.text + \"!\"}!  -> 0 }\n  -> greet!\n}\n-> loud! + greet!",
+		{{stdout = "hello!\nhello\n", exit = 2}},
+	},
+	{
+		"handler of a recursion",
+		LIBC + "count -> {\n  Tick -> {}\n  Tick -< e { -> 0 }\n  u8:n -> ??\n  t >- Tick{}\n  -> n ? {0 -> 0  -> count{n -> n - 1}!}\n}\nmain -> {count.Tick -< e { r -> libc.puts{s -> \"tick\"}!  -> 1 }  -> count{n -> ??::u8}!}\n-> main!",
+		{{args = {"2"}, stdout = "tick\ntick\ntick\n"}, {args = {"0"}, stdout = "tick\n"}},
+	},
 }
 
 // Build: a backend: the program as an executable at path; "" when built.

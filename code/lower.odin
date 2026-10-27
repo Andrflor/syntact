@@ -2,6 +2,7 @@ package code
 
 import kernel "../kernel"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 
 // FROM THE NORMAL FORM TO CODE (specs/language/15)
@@ -33,7 +34,7 @@ Lowering :: struct {
 	inputs:  [dynamic]^kernel.Unknown,
 	entry:   [dynamic]Inst, // the program's: the inputs, read once where it starts
 	read:    [dynamic]Value, // the value of each input, read in the entry
-	funcs:   map[^kernel.Scope]int, // the function of each recursive equation lowered
+	funcs:   [dynamic]Lowered, // the function of each recursive equation lowered, in each context
 	self:    ^Self, // the function being lowered; nil in the program itself
 	error:   string,
 }
@@ -50,8 +51,38 @@ Bound :: struct {
 // Self: the equation of the function being lowered. A call of it in tail position
 // is an Again of the loop of its body.
 Self :: struct {
-	root:  ^kernel.Scope,
-	again: bool, // a call in tail position was lowered
+	using lowered: Lowered,
+	again:         bool, // a call in tail position was lowered
+}
+
+// Lowered: the function of an equation, where what it emits is answered by these
+// scopes, and by its handlers, those a carve replaced in place of its own
+// (specs/types.md §4.9): an equation has a function in each context.
+Lowered :: struct {
+	root:     ^kernel.Scope,
+	answered: []^kernel.Scope,
+	handlers: map[^kernel.Binding]kernel.Type,
+	index:    int,
+}
+
+// lowered_for: the function of the equation the call c calls, in its context: the
+// scopes that answer it, and the handlers its carve replaces.
+lowered_for :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (out: Lowered, ok: bool) {
+	s := c.target.(^kernel.Scope) or_return
+	out.root, out.answered = kernel.origin(s), c.answered
+	out.handlers = make(map[^kernel.Binding]kernel.Type)
+	for b, v in s.changes do if b.kind == .Handler do out.handlers[b] = v
+	return out, true
+}
+
+// same_context: two functions of one equation, in one context.
+same_context :: proc(l: ^Lowering, a, b: Lowered) -> bool {
+	if a.root != b.root || !slice.equal(a.answered, b.answered) || len(a.handlers) != len(b.handlers) do return false
+	for h, v in a.handlers {
+		w, found := b.handlers[h]
+		if !found || !kernel.same(l.k, v, w) do return false
+	}
+	return true
 }
 
 // program_type: the program is the type of the file's production, its entry point:
@@ -264,6 +295,7 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 		lower(l, e.choice)
 		return lower(l, e.then, tail)
 	}
+	if e.emission != nil do return fail(l, "the emission of %s is answered by no handler", kernel.print_type(e.emission.sent))
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {
 		// a call of an equation with effects: the call, then what it wraps — in tail
@@ -529,10 +561,11 @@ gives_answer :: proc(e: ^kernel.Effect) -> bool {
 	return is_unknown && kernel.same_unknown(u, e.answer)
 }
 
-// is_self: c is a call of the function being lowered.
+// is_self: c is a call of the function being lowered, in its context.
 is_self :: proc(l: ^Lowering, c: ^kernel.Collapse) -> bool {
-	s, is_scope := c.target.(^kernel.Scope)
-	return l.self != nil && is_scope && kernel.origin(s) == l.self.root
+	if l.self == nil do return false
+	called, ok := lowered_for(l, c)
+	return ok && same_context(l, called, l.self)
 }
 
 // call: a recursive call that stays, as the call of the function of its equation.
@@ -562,12 +595,12 @@ arguments :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (index: int, args: []Val
 		fail(l, "%s is not a call the code makes yet", kernel.print_type(c))
 		return
 	}
-	index = function_of(l, kernel.origin(s), c)
+	index = function_of(l, c)
 	if l.error != "" do return
 	out := make([dynamic]Value)
 	params := l.prog.funcs[index].params
 	for b in s.bindings {
-		if !is_parameter(b) do continue
+		if !is_parameter(l, b) do continue
 		start := len(out)
 		given(l, kernel.binding_value(l.k, b), &out)
 		if l.error != "" do return
@@ -582,8 +615,10 @@ arguments :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (index: int, args: []Val
 	return index, out[:]
 }
 
-is_parameter :: proc(b: ^kernel.Binding) -> bool {
-	return b.kind == .Push || b.kind == .Pull
+// is_parameter: a field of an equation: a binding that is not run — it has no effect
+// and emits nothing, in the equation as written —, so a call gives it a value.
+is_parameter :: proc(l: ^Lowering, b: ^kernel.Binding) -> bool {
+	return (b.kind == .Push || b.kind == .Pull) && !kernel.has_effect(kernel.binding_type(l.k, kernel.as_written(b)))
 }
 
 // function_of: the function of a recursive equation, lowered once (specs/language/15):
@@ -591,20 +626,25 @@ is_parameter :: proc(b: ^kernel.Binding) -> bool {
 // the family of its value —, and its body the normal form of its production over
 // them, its own calls left as calls. When some are in tail position, the body is a
 // loop on the parameters.
-function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> int {
-	if index, done := l.funcs[root]; done do return index
+function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
+	this, _ := lowered_for(l, c)
+	for x in l.funcs do if same_context(l, x, this) do return x.index
+	root := this.root
 	family, known := kernel.family_of(l.k, c)
 	if !known do return int(fail(l, "%s has no family the code holds", kernel.print_type(c)))
 	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.effectful})
 	f.result = machine_of_layout(l.k, kernel.family_term(family))
 	index := len(l.prog.funcs)
 	append(&l.prog.funcs, f)
-	l.funcs[root] = index
+	this.index = index
+	append(&l.funcs, this)
+	// the handlers the carve replaced answer its emissions in place of its own
 	changes := make(map[^kernel.Binding]kernel.Type)
+	for h, v in this.handlers do changes[h] = v
 	params := make([dynamic]^kernel.Unknown)
 	machines := make([dynamic]Machine)
 	for b in root.bindings {
-		if !is_parameter(b) do continue
+		if !is_parameter(l, b) do continue
 		changes[b] = parameter(l, b, f.name, &params, &machines)
 		if l.error != "" do return index
 	}
@@ -613,10 +653,15 @@ function_of :: proc(l: ^Lowering, root: ^kernel.Scope, c: ^kernel.Collapse) -> i
 	if !is_scope do return int(fail(l, "the equation of %s does not take its fields as parameters", f.name))
 	p, has := kernel.first_production(l.k, generic)
 	if !has do return int(fail(l, "%s has no production", f.name))
-	body := kernel.binding_type(l.k, p)
+	// the effects above the production are run by the call, where it is collapsed
+	body := kernel.product(l.k, p)
+	// what the equation emits is answered where the call is collapsed, then by the
+	// program (specs/types.md §4.9)
+	for s in c.answered do body = kernel.answered(l.k, body, s)
+	body = kernel.answered_by_program(l.k, body)
 	// the body, in the function
 	outer, outer_bound, outer_self, outer_insts := l.f, l.bound, l.self, l.insts
-	self := Self{root = root}
+	self := Self{lowered = this}
 	l.f, l.bound, l.self = f, make([dynamic]Bound), &self
 	values := make([]Value, len(params))
 	for u, i in params {
@@ -679,7 +724,7 @@ scope_of_fields :: proc(l: ^Lowering, b: ^kernel.Binding) -> (^kernel.Scope, boo
 	s, is_scope := kernel.binding_color(l.k, b).(^kernel.Scope)
 	if !is_scope do s, is_scope = kernel.binding_value(l.k, b).(^kernel.Scope)
 	if !is_scope do return nil, false
-	for x in kernel.placed(l.k, s, .Value) do if !is_parameter(x) do return nil, false
+	for x in kernel.placed(l.k, s, .Value) do if !is_parameter(l, x) do return nil, false
 	return s, true
 }
 
