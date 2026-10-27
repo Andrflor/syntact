@@ -71,7 +71,7 @@ lanes_of :: proc(g: ^Graph, l: int) -> bool {
 	lanes := g.costs.lanes
 	// the lanes: the counter, then a vector for each reduction
 	v := len(g.loops)
-	vector_info := Loop_Info{parent = info.parent, state = -1, origin = .Lanes, turns = g.costs.turns / f64(lanes)}
+	vector_info := Loop_Info{parent = info.parent, state = -1, origin = .Lanes}
 	append(&vector_info.params, code.Kind{.Int, code.EVERY, 0})
 	append(&vector_info.carried, nil)
 	append(&vector_info.finals, 0)
@@ -91,16 +91,20 @@ lanes_of :: proc(g: ^Graph, l: int) -> bool {
 	t.step_match, t.step_arm = turn.match.owner, turn.step
 	t.step_to = add(g, Node{kind = .Arm, owner = m, index = 1})
 	i := add(g, Node{kind = .Param, owner = v, index = 0})
+	// the counter of the lanes takes points of the orbit of the loop's
+	if param, is := lookup(g, Node{kind = .Param, owner = l, index = counter}); is {
+		g.facts[find(g, i)].bounds = code.meet(g.facts[find(g, i)].bounds, g.facts[find(g, g.home[param])].bounds)
+	}
 	nexts := make([dynamic]Class)
 	append(&nexts, plus(g, i, add(g, int_node(i64(lanes) * delta))))
 	for r, k in reductions {
 		x := add(g, Node{kind = .Param, owner = v, index = k + 1})
 		term := lift(&t, r.term) or_return
-		append(&nexts, add(g, binary(r.op, x, term)))
+		append(&nexts, add(g, binary(g, r.op, x, term)))
 	}
 	// the lanes stop where the last would
 	last := plus(g, i, add(g, int_node(i64(lanes - 1) * delta)))
-	test := add(g, binary(stop.op, last, stop.bound))
+	test := add(g, binary(g, stop.op, last, stop.bound))
 	tail := add(g, Node{kind = .Match, owner = m, args = three(test, add(g, Node{kind = .Exit, owner = v}), add(g, Node{kind = .Again, owner = v, args = nexts[:]}))})
 	inits := make([dynamic]Class)
 	append(&inits, loop.args[counter])
@@ -121,7 +125,7 @@ lanes_of :: proc(g: ^Graph, l: int) -> bool {
 		case:
 			for r, k in reductions do if r.param == j {
 				reduced := add(g, Node{kind = .Reduce, op = r.op, args = one(add(g, Node{kind = .Get, index = k + 1, args = one(laned)}))})
-				append(&rest_inits, add(g, binary(r.op, loop.args[j], reduced)))
+				append(&rest_inits, add(g, binary(g, r.op, loop.args[j], reduced)))
 			}
 		}
 	}
@@ -339,7 +343,7 @@ lift_node :: proc(t: ^Lift, n: Node) -> (out: Class, ok: bool) {
 			i := splat(g, add(g, Node{kind = .Param, owner = t.to, index = 0}), t.lanes)
 			steps := make([]i64, t.lanes)
 			for &x, k in steps do x = i64(k) * t.delta
-			return add(g, binary(.Add, i, add(g, Node{kind = .Lanes, index = vector(g, steps)}))), true
+			return add(g, binary(g, .Add, i, add(g, Node{kind = .Lanes, index = vector(g, steps)}))), true
 		}
 		if init, is := t.invariants[n.index]; is do return splat(g, init, t.lanes), true
 	case .Arm:
@@ -357,7 +361,7 @@ lift_node :: proc(t: ^Lift, n: Node) -> (out: Class, ok: bool) {
 	case .Binary:
 		a := lift(t, n.args[0]) or_return
 		b := lift(t, n.args[1]) or_return
-		return add(g, binary(n.op, a, b)), true
+		return add(g, binary(g, n.op, a, b)), true
 	}
 	return NO_CLASS, false
 }

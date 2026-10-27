@@ -11,7 +11,7 @@ import code ".."
 //   x = c                       the facts of x give the one integer c
 //   x + 0 = x - 0 = x | 0 = x ^ 0 = x << 0 = x >> 0 = x * 1 = x / 1 = x ** 1 = x
 //   x * 0 = x & 0 = x % 1 = 0        x ** 0 = 1        x * -1 = -x
-//   x * 2ᵏ = x << k
+//   x * 2ᵏ = x << k             x * (2ᵏ ± 1) = (x << k) ± x
 //   x / 2ᵏ = x >> k             x ≥ 0
 //   x % 2ᵏ = x & (2ᵏ - 1)       x ≥ 0
 //   x / c = (x · m) >> s        0 ≤ x ≤ X, m = ⌈2ˢ / c⌉, X · (m·c - 2ˢ) < 2ˢ, X · m < 2⁶³
@@ -20,10 +20,11 @@ import code ".."
 //   x ** 2m = (x ** m)²         x ** (2m + 1) = x · (x ** m)²
 //   a ⊕ b = b ⊕ a               ⊕ commutes: + * & | ^ = ≠, on integers and floats
 //   a ◁ b = b ▷ a               ▷ the converse of ◁: < >, <= >=
+//   x + c ◁ k = x ◁ k - c       ◁ a comparison, x + c not wrapping
 
 Law :: proc(g: ^Graph, c: Class, n: Node)
 
-LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, gathered, chained}
+LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, shifted, gathered, chained}
 
 // saturate: the laws on every node, those of the loops (loops.odin), and of lanes
 // (lanes.odin), until none
@@ -62,9 +63,13 @@ int_node :: proc(v: i64) -> Node {
 	return Node{kind = .Int, value = v}
 }
 
-binary :: proc(op: code.Op, a, b: Class) -> Node {
+// binary: a op b; on a vector, what is in each lane of it a vector too — but the
+// count of a shift.
+binary :: proc(g: ^Graph, op: code.Op, a, b: Class) -> Node {
 	args := make([]Class, 2)
 	args[0], args[1] = a, b
+	lanes := g.facts[find(g, a)].lanes
+	if lanes > 0 && g.facts[find(g, b)].lanes == 0 && op != .Shl && op != .Shr do args[1] = splat(g, b, lanes)
 	return Node{kind = .Binary, op = op, args = args}
 }
 
@@ -122,20 +127,26 @@ absorbing :: proc(g: ^Graph, c: Class, n: Node) {
 	}
 }
 
-// strength: an operation by a power of two, a shift or a mask.
+// strength: an operation by a power of two, a shift or a mask; a product by one
+// next to it, a shift and a sum.
 strength :: proc(g: ^Graph, c: Class, n: Node) {
 	x, d, ok := operands(g, n)
 	if !ok || g.facts[x].machine != .Int do return
+	if n.op == .Mul && d > 2 {
+		for sign in ([]i64{1, -1}) {
+			if k, near := log2(d - sign); near do equal(g, c, binary(g, sign > 0 ? .Add : .Sub, add(g, binary(g, .Shl, x, add(g, int_node(k)))), x))
+		}
+	}
 	k, power := log2(d)
 	if !power do return
 	nonnegative := g.facts[x].bounds.lo >= 0
 	#partial switch n.op {
 	case .Mul:
-		equal(g, c, binary(.Shl, x, add(g, int_node(k))))
+		equal(g, c, binary(g, .Shl, x, add(g, int_node(k))))
 	case .Div:
-		if nonnegative do equal(g, c, binary(.Shr, x, add(g, int_node(k))))
+		if nonnegative do equal(g, c, binary(g, .Shr, x, add(g, int_node(k))))
 	case .Mod:
-		if nonnegative do equal(g, c, binary(.And, x, add(g, int_node(d - 1))))
+		if nonnegative do equal(g, c, binary(g, .And, x, add(g, int_node(d - 1))))
 	}
 }
 
@@ -152,9 +163,9 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 		m := (i128(1) << s + i128(d) - 1) / i128(d)
 		if top * (m * i128(d) - i128(1) << s) >= i128(1) << s do continue
 		if top * m >= i128(1) << 63 do return
-		q := add(g, binary(.Shr, add(g, binary(.Mul, x, add(g, int_node(i64(m))))), add(g, int_node(i64(s)))))
+		q := add(g, binary(g, .Shr, add(g, binary(g, .Mul, x, add(g, int_node(i64(m))))), add(g, int_node(i64(s)))))
 		if n.op == .Div do merge(g, c, q)
-		else do equal(g, c, binary(.Sub, x, add(g, binary(.Mul, q, add(g, int_node(d))))))
+		else do equal(g, c, binary(g, .Sub, x, add(g, binary(g, .Mul, q, add(g, int_node(d))))))
 		return
 	}
 }
@@ -164,7 +175,7 @@ commuted :: proc(g: ^Graph, c: Class, n: Node) {
 	if n.kind != .Binary || !same_lanes(g, n) do return
 	#partial switch n.op {
 	case .Add, .Mul, .And, .Or, .Xor, .Eq, .Ne:
-		equal(g, c, binary(n.op, n.args[1], n.args[0]))
+		equal(g, c, binary(g, n.op, n.args[1], n.args[0]))
 	}
 }
 
@@ -180,7 +191,28 @@ conversed :: proc(g: ^Graph, c: Class, n: Node) {
 	if n.kind != .Binary || !same_lanes(g, n) do return
 	#partial switch n.op {
 	case .Lt, .Le, .Gt, .Ge:
-		equal(g, c, binary(CONVERSE[n.op], n.args[1], n.args[0]))
+		equal(g, c, binary(g, CONVERSE[n.op], n.args[1], n.args[0]))
+	}
+}
+
+// shifted: x + c ◁ k = x ◁ k - c, where x + c and k - c do not wrap.
+shifted :: proc(g: ^Graph, c: Class, n: Node) {
+	if n.kind != .Binary || !comparison(n.op) || !same_lanes(g, n) do return
+	k, known := g.facts[find(g, n.args[1])].constant.?
+	if !known do return
+	sum := find(g, n.args[0])
+	if !in_64(g.facts[sum].bounds) || g.facts[sum].machine != .Int do return
+	for id in g.members[sum] {
+		s := g.nodes[id]
+		if s.kind != .Binary || s.op != .Add && s.op != .Sub do continue
+		d, constant := g.facts[find(g, s.args[1])].constant.?
+		if !constant do continue
+		moved := s.op == .Add ? i128(k) - i128(d) : i128(k) + i128(d)
+		if moved < i128(min(i64)) || moved > i128(max(i64)) do continue
+		lanes := g.facts[find(g, n.args[1])].lanes
+		bound := lanes > 0 ? splat(g, add(g, int_node(i64(moved))), lanes) : add(g, int_node(i64(moved)))
+		equal(g, c, binary(g, n.op, s.args[0], bound))
+		return
 	}
 }
 
@@ -207,7 +239,7 @@ powers :: proc(g: ^Graph, c: Class) -> []Power {
 gathered :: proc(g: ^Graph, c: Class, n: Node) {
 	if n.kind != .Binary || n.op != .Mul do return
 	for p in powers(g, n.args[0]) do for q in powers(g, n.args[1]) {
-		if p.base == q.base do equal(g, c, binary(.Pow, p.base, add(g, int_node(p.count + q.count))))
+		if p.base == q.base do equal(g, c, binary(g, .Pow, p.base, add(g, int_node(p.count + q.count))))
 	}
 }
 
@@ -220,8 +252,8 @@ chained :: proc(g: ^Graph, c: Class, n: Node) {
 	for b := e; b > 1; b >>= 1 do top += 1
 	r := x
 	for bit := top - 1; bit >= 0; bit -= 1 {
-		r = add(g, binary(.Mul, r, r))
-		if e >> uint(bit) & 1 == 1 do r = add(g, binary(.Mul, r, x))
+		r = add(g, binary(g, .Mul, r, r))
+		if e >> uint(bit) & 1 == 1 do r = add(g, binary(g, .Mul, r, x))
 	}
 	merge(g, c, r)
 }

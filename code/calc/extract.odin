@@ -206,11 +206,14 @@ C := Costs {
 // of it.
 extract :: proc(g: ^Graph, costs: ^Costs) -> []int {
 	scope := scopes(g)
+	index_members(g)
+	turns := make([]f64, len(g.loops))
+	for _, l in g.loops do turns[l] = turns_of(g, costs, l)
 	n := len(g.parent)
 	runs := make([]f64, n)
 	for &r, c in runs {
 		r = 1
-		if s, has := scope[c].?; has do r = runs_in(g, costs, s)
+		if s, has := scope[c].?; has do r = runs_in(g, turns, s)
 	}
 	best := make([]int, n)
 	cost := make([]f64, n)
@@ -256,12 +259,29 @@ extract :: proc(g: ^Graph, costs: ^Costs) -> []int {
 
 // runs_in: how often a computation in the region r runs: the turns of each loop it
 // is in.
-runs_in :: proc(g: ^Graph, costs: ^Costs, r: Region) -> f64 {
+runs_in :: proc(g: ^Graph, turns: []f64, r: Region) -> f64 {
 	out: f64 = 1
-	for x := r; x.kind != .Root; x = parent_of(g, x) {
-		if x.kind != .Body do continue
-		turns := g.loops[x.owner].turns
-		out *= turns > 0 ? turns : costs.turns
+	for x := r; x.kind != .Root; x = parent_of(g, x) do if x.kind == .Body do out *= turns[x.owner]
+	return out
+}
+
+// turns_of: how many turns the loop l runs, at most: those it was given; or, for a
+// counter by d at each turn, the integers it takes while it goes on — the fewest
+// a reading of it is proven in — over |d|; or as many as a loop does.
+turns_of :: proc(g: ^Graph, costs: ^Costs, l: int) -> f64 {
+	info := g.loops[l]
+	if info.turns > 0 do return info.turns
+	out := costs.turns
+	for j, d in counters(g, l) {
+		param, read := lookup(g, Node{kind = .Param, owner = l, index = j})
+		if !read do continue
+		c := find(g, g.home[param])
+		width := g.facts[c].bounds.hi - g.facts[c].bounds.lo
+		for x, id in g.nodes do if x.kind == .Narrow && find(g, x.args[0]) == c {
+			b := g.facts[find(g, g.home[id])].bounds
+			width = min(width, b.hi - b.lo)
+		}
+		if width >= 0 && width < 1 << 62 do out = max(out, f64(width) / f64(abs(d)) + 1)
 	}
 	return out
 }
@@ -314,7 +334,7 @@ weight :: proc(g: ^Graph, costs: ^Costs, n: Node) -> f64 {
 		w := ops[n.op]
 		if a.lanes > 0 && a.machine == .Int {
 			// in 32 bits, a product is one instruction; not negative, a shift
-			if n.op == .Mul && in_32(a.bounds) && in_32(b.bounds) do w = ops[.Add]
+			if n.op == .Mul && in_32(a.bounds) && in_32(b.bounds) do w = ops[.Mul] / 2
 			if n.op == .Shr && a.bounds.lo >= 0 do w = ops[.Shl]
 		}
 		// a power by squaring: a square, a product and a branch for each bit of the count

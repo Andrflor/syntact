@@ -293,9 +293,10 @@ declare :: proc(w: ^Writer, x: code.Value, expr: string) {
 
 // assume: the bounds the kernel proved of an integer, when they say more than its
 // C type: int64_t, or the type a symbol gives it back in. Bounds beyond int64_t
-// are not said: there the int64_t holds the bits of the value, not the value.
+// are not said: there the int64_t holds the bits of the value, not the value; nor
+// those of the lanes of a vector.
 assume :: proc(w: ^Writer, x: code.Value, given := INT64) {
-	if w.f.kinds[x].machine != .Int || !proven(w, x) do return
+	if w.f.kinds[x].machine != .Int || w.f.kinds[x].lanes > 0 || !proven(w, x) do return
 	b := w.f.kinds[x].bounds
 	if b.lo <= given.lo && given.hi <= b.hi do return
 	v := name(w, x)

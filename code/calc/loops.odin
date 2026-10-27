@@ -32,7 +32,7 @@ loop_laws :: proc(g: ^Graph) {
 		count := len(g.members)
 		for c in 0 ..< count {
 			c := Class(c)
-			if find(g, c) != c || !within(g, c, l) || carried(g, c, l) do continue
+			if find(g, c) != c || !within(g, c, l) || carried(g, c, l) || next_of_carried(g, c, l) do continue
 			for i, delta in steps {
 				if consumed[c] && carry_polynomial(g, c, l, i, delta) do break
 				if carry_power(g, c, l, i, delta) do break
@@ -122,6 +122,18 @@ carried :: proc(g: ^Graph, c: Class, l: int) -> bool {
 	return false
 }
 
+// next_of_carried: c is one operation of the ring on a parameter l carries and
+// what no turn changes — what a carried parameter takes next —: carrying it would
+// cost as much again.
+next_of_carried :: proc(g: ^Graph, c: Class, l: int) -> bool {
+	for id in g.members[find(g, c)] {
+		n := g.nodes[id]
+		if !ring(n) || n.kind != .Binary do continue
+		for k in 0 ..< 2 do if carried(g, n.args[k], l) && invariant(g, n.args[1 - k], l) do return true
+	}
+	return false
+}
+
 // Polynomial: the coefficients of a polynomial in a counter, each read by no turn,
 // from the constant term up; and the narrowing it reads the counter through.
 Polynomial :: struct {
@@ -189,7 +201,7 @@ plus :: proc(g: ^Graph, a, b: Class) -> Class {
 		return add(g, int_node(x + y)) if g.facts[find(g, a)].lanes == 0 else add(g, constant_like(g, a, x + y))
 	}
 	v := vector_first(g, a, b)
-	return add(g, binary(.Add, v[0], v[1]))
+	return add(g, binary(g, .Add, v[0], v[1]))
 }
 
 times :: proc(g: ^Graph, a, b: Class) -> Class {
@@ -205,10 +217,10 @@ times :: proc(g: ^Graph, a, b: Class) -> Class {
 	case known_a && known_b && g.facts[find(g, a)].lanes == g.facts[find(g, b)].lanes:
 		return add(g, int_node(x * y)) if g.facts[find(g, a)].lanes == 0 else add(g, constant_like(g, a, x * y))
 	case known_a && g.facts[find(g, a)].lanes <= g.facts[find(g, b)].lanes:
-		return add(g, binary(.Mul, b, a))
+		return add(g, binary(g, .Mul, b, a))
 	}
 	v := vector_first(g, a, b)
-	return add(g, binary(.Mul, v[0], v[1]))
+	return add(g, binary(g, .Mul, v[0], v[1]))
 }
 
 // vector_first: a and b, a vector first.
@@ -286,8 +298,9 @@ carry_polynomial :: proc(g: ^Graph, c: Class, l, i: int, delta: i64) -> bool {
 	p := polynomial(g, c, l, i) or_return
 	d := len(p.coefficients) - 1
 	if d < 1 do return false
-	// a polynomial of degree 1 whose slope is ±1 costs an addition: as much as it would
-	if d == 1 {
+	// a polynomial of degree 1 whose slope is ±1 costs an addition: as much as it
+	// would — but in lanes, what is in each lane, too
+	if d == 1 && g.facts[find(g, c)].lanes == 0 {
 		if slope, known := g.facts[find(g, p.coefficients[1])].constant.?; known && (slope == 1 || slope == -1) do return false
 	}
 	start := g.nodes[g.loops[l].node].args[i]
@@ -299,7 +312,7 @@ carry_polynomial :: proc(g: ^Graph, c: Class, l, i: int, delta: i64) -> bool {
 	nexts := make([]Class, d)
 	for k in 0 ..< d {
 		next := k + 1 < d ? params[k + 1] : differences[d][0]
-		nexts[k] = add(g, binary(.Add, params[k], next))
+		nexts[k] = add(g, binary(g, .Add, params[k], next))
 	}
 	advance(g, l, nexts)
 	merge(g, c, read_as(g, params[0], p.token))
@@ -317,13 +330,13 @@ carry_power :: proc(g: ^Graph, c: Class, l, i: int, delta: i64) -> bool {
 			factor, slope, token := power_step(g, n, l, i, delta) or_continue
 			start := g.nodes[g.loops[l].node].args[i]
 			e := polynomial(g, n.args[1], l, i) or_continue
-			first := add(g, binary(.Pow, n.args[0], at(g, e.coefficients, start)))
+			first := add(g, binary(g, .Pow, n.args[0], at(g, e.coefficients, start)))
 			// going down, a quotient: exact while the count is not below the step
 			b := g.facts[find(g, n.args[0])]
 			if slope < 0 && (b.machine != .Int || b.bounds.lo <= 0 && b.bounds.hi >= 0) do continue
 			op: code.Op = slope > 0 ? .Mul : .Div
 			t := extend(g, l, first, op)
-			advance(g, l, one(add(g, binary(op, t, factor))))
+			advance(g, l, one(add(g, binary(g, op, t, factor))))
 			merge(g, c, read_as(g, t, token))
 			return true
 		case .Div:
@@ -335,9 +348,9 @@ carry_power :: proc(g: ^Graph, c: Class, l, i: int, delta: i64) -> bool {
 				if slope <= 0 || g.facts[find(g, q.args[0])].bounds.lo < 1 do continue
 				start := g.nodes[g.loops[l].node].args[i]
 				e := polynomial(g, q.args[1], l, i) or_continue
-				first := add(g, binary(.Div, n.args[0], add(g, binary(.Pow, q.args[0], at(g, e.coefficients, start)))))
+				first := add(g, binary(g, .Div, n.args[0], add(g, binary(g, .Pow, q.args[0], at(g, e.coefficients, start)))))
 				t := extend(g, l, first, .Div)
-				advance(g, l, one(add(g, binary(.Div, t, factor))))
+				advance(g, l, one(add(g, binary(g, .Div, t, factor))))
 				merge(g, c, read_as(g, t, token))
 				return true
 			}
@@ -355,7 +368,7 @@ power_step :: proc(g: ^Graph, n: Node, l, i: int, delta: i64) -> (factor: Class,
 	alpha := g.facts[find(g, e.coefficients[1])].constant.? or_return
 	slope = alpha * delta
 	if slope == 0 do return
-	factor = slope == 1 || slope == -1 ? find(g, n.args[0]) : add(g, binary(.Pow, n.args[0], add(g, int_node(abs(slope)))))
+	factor = slope == 1 || slope == -1 ? find(g, n.args[0]) : add(g, binary(g, .Pow, n.args[0], add(g, int_node(abs(slope)))))
 	return factor, slope, e.token, true
 }
 
