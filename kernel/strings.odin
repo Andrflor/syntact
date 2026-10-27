@@ -97,7 +97,7 @@ is_char :: proc(t: Type) -> bool {
 
 nullable :: proc(t: Type) -> bool {
 	switch v in t {
-	case Char, Int, Real, Bool, None, Invalid, ^Unknown, ^Effect, ^Range, ^Is, ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern:
+	case Char, Int, Real, Bool, None, Invalid, ^Unknown, ^Effect, ^Range, ^Is, ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern, ^Iterate:
 		return false
 	case ^Operation:
 		#partial switch v.op {
@@ -157,7 +157,7 @@ quotient :: proc(t: Type, c: rune) -> Type {
 		return text_and(parts)
 	case ^Not:
 		return text_and({string_term(), text_not(quotient(v.term, c))})
-	case Int, Real, Bool, None, Invalid, ^Unknown, ^Effect, ^Is, ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern:
+	case Int, Real, Bool, None, Invalid, ^Unknown, ^Effect, ^Is, ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern, ^Iterate:
 	}
 	return None{}
 }
@@ -238,7 +238,7 @@ cuts :: proc(t: Type) -> []rune {
 			for a in v.terms do visit(points, a)
 		case ^Not:
 			visit(points, v.term)
-		case Int, Real, Bool, None, Invalid, ^Unknown, ^Effect, ^Is, ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern:
+		case Int, Real, Bool, None, Invalid, ^Unknown, ^Effect, ^Is, ^Scope, ^Name, ^Access, ^Collapse, ^Carve, ^Default, ^Pattern, ^Iterate:
 		}
 	}
 	visit(&points, t)

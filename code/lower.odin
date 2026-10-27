@@ -11,9 +11,10 @@ import "core:strings"
 // an input of the program. An effect is run where it stands, in order: the call of a
 // symbol behind a boundary is an instruction, and what it gives back is the value
 // its answer stands for. A pattern is a match on its target, each cover the cells
-// of a set the laws computed. A recursion that stays is a function, and its calls
-// in tail position the loop of its body. What the laws could not reduce to one of
-// these is not code yet, and says so.
+// of a set the laws computed. An iteration, the solution of a recursion, is a loop;
+// a recursion that stays is a function, and its calls in tail position the loop of
+// its body. What the laws could not reduce to one of these is not code yet, and
+// says so.
 //
 // What the kernel proved comes along: each integer has the bounds of its layout
 // image (specs/types.md §7), and an unknown an arm narrows, ?ₖ::(L & S), is read
@@ -167,6 +168,8 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		if !v.recursive do break
 		if tail && is_self(l, v) do return again(l, v)
 		return call(l, v)
+	case ^kernel.Iterate:
+		return iterate(l, v)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
@@ -202,6 +205,12 @@ unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
 // effect: an effect, run where it stands, then what it wraps. Only the call of a
 // symbol behind a boundary is code: another effect is served by nothing.
 effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
+	if e.iterate != nil {
+		// an iteration whose steps have effects: the loop, then what it wraps
+		dst := iterate(l, e.iterate)
+		if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
+		return lower(l, e.then, tail)
+	}
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {
 		// a call of an equation with effects: the call, then what it wraps — in tail
@@ -241,6 +250,53 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 	emit(l, Foreign{dst, intern(l.prog, imp), args[:]})
 	if e.answer != nil do append(&l.bound, Bound{e.answer, dst})
 	return lower(l, e.then, tail)
+}
+
+// iterate: an iteration (specs/types.md §5.6) as a loop on its counter k and its
+// value x: k from `from`, x from init; until k passes `to`, x takes the step and k
+// the next integer. An iteration of effects alone has no value.
+iterate :: proc(l: ^Lowering, it: ^kernel.Iterate) -> Value {
+	from, to, init := lower(l, it.from), lower(l, it.to), lower(l, it.init)
+	if l.error != "" do return NONE
+	if machine_of(l.f, from) != .Int || machine_of(l.f, to) != .Int do return fail(l, "an iteration whose counter is not an integer is not code yet")
+	counter := value(l.f, .Int)
+	state := init == NONE ? NONE : value(l.f, machine_of(l.f, init))
+	params := make([dynamic]Value)
+	starts := make([dynamic]Value)
+	append(&params, counter)
+	append(&starts, from)
+	if state != NONE {
+		append(&params, state)
+		append(&starts, init)
+	}
+	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
+	outer, bound := open_body(l, &loop.body)
+	append(&l.bound, Bound{it.index, counter})
+	if state != NONE do append(&l.bound, Bound{it.state, state})
+	past := binary(l, it.down ? .Lt : .Gt, counter, to, .Int)
+	done := make([]Bounds, 1)
+	done[0] = {1, 1}
+	arms := make([]Arm, 2)
+	arms[0] = Arm{cover = Cover{ints = done}, body = Body{insts = make([dynamic]Inst), value = state}}
+	arms[1].body.value = NONE // it ends in an Again
+	step_outer, step_bound := open_body(l, &arms[1].body)
+	x := lower(l, it.step)
+	if l.error == "" && machine_of(l.f, x) != machine_of(l.f, state) do fail(l, "the step of an iteration gives a %v, its value is a %v", machine_of(l.f, x), machine_of(l.f, state))
+	next := binary(l, it.down ? .Sub : .Add, counter, constant(l, 1), .Int)
+	args := make([dynamic]Value)
+	append(&args, next)
+	if state != NONE do append(&args, x)
+	emit(l, Again{args[:]})
+	close_body(l, step_outer, step_bound)
+	loop.body.value = close_match(l, past, arms)
+	close_body(l, outer, bound)
+	if l.error != "" do return NONE
+	if loop.body.value != NONE {
+		loop.dst = value(l.f, machine_of(l.f, loop.body.value))
+		l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
+	}
+	emit(l, loop)
+	return loop.dst
 }
 
 // gives_answer: what the effect wraps is what it gives back.

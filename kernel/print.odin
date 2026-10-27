@@ -102,6 +102,8 @@ type_prec :: proc(t: Type) -> int {
 		return operator_prec(v.op)
 	case ^Pattern:
 		return PREC_OR
+	case ^Iterate:
+		return PREC_ATOM
 	case ^Range:
 		if v.lo != nil || v.hi != nil do return PREC_COMPARE
 	case Int:
@@ -186,10 +188,11 @@ write_bare :: proc(b: ^Printer, t: Type) {
 			return
 		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
-		// a call with effects
-		if v.call != nil {
+		// call with effects
+		if v.call != nil || v.iterate != nil {
 			strings.write_string(b, "ε<")
-			write_type(b, v.call, 0)
+			if v.call != nil do write_type(b, v.call, 0)
+			else do write_type(b, v.iterate, 0)
 			strings.write_string(b, ">(")
 		} else {
 			fmt.sbprintf(b, "ε%d(", v.id)
@@ -255,6 +258,23 @@ write_bare :: proc(b: ^Printer, t: Type) {
 	case ^Default:
 		write_type(b, v.color, PREC_ATOM)
 		strings.write_byte(b, ':')
+	case ^Iterate:
+		// ⟳(k: a ↑ b, x: c, t): x = c, then x = t for k from a up to b
+		strings.write_string(b, "⟳(")
+		append(&b.bound, v.index)
+		strings.write_string(b, bound_name(len(b.bound) - 1))
+		strings.write_string(b, ": ")
+		write_type(b, v.from, PREC_ADD)
+		strings.write_string(b, v.down ? " ↓ " : " ↑ ")
+		write_type(b, v.to, PREC_ADD)
+		append(&b.bound, v.state)
+		fmt.sbprintf(b, ", %s: ", bound_name(len(b.bound) - 1))
+		write_type(b, v.init, 0)
+		strings.write_string(b, ", ")
+		write_type(b, v.step, 0)
+		pop(&b.bound)
+		pop(&b.bound)
+		strings.write_byte(b, ')')
 	case ^Pattern:
 		write_type(b, v.target, PREC_PREFIX)
 		strings.write_string(b, " ? {")

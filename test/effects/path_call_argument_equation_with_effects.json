@@ -2,6 +2,6 @@
   "name": "path_call_argument_equation_with_effects",
   "description": "The effect of an argument runs before a call with effects.",
   "source": "loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}\nx -> loop{n -> !?::u8}!",
-  "type": "ε1(x::u8, ε<loop{n -> x}!>(y, y))",
+  "type": "ε1(x::u8, ε<⟳(y: 1 ↑ x, z: 0, ε0(x3::u8, x3 + z))>(y::int, y))",
   "expect_errors": []
 }

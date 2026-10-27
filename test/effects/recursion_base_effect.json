@@ -2,9 +2,9 @@
   "name": "recursion_base_effect",
   "description": "The base case has an effect: the equation has effects, its calls are effects.",
   "source": "cnt -> {u8:n -> ??  -> n ? {0 -> !?::u8  -> 1 + cnt{n -> n - 1}!}}\nx -> cnt{n -> 2}!",
-  "type": "ε<cnt{n -> 2}!>(x, x)",
+  "type": "ε0(x::u8, x + 2)",
   "productions": {
-    "cnt": "?0 ? {0 -> ε0(x::u8, x)  -> ε<cnt{n -> ?0 - 1}!>(x, x + 1)}"
+    "cnt": "ε0(x::u8, ?0 + x)"
   },
   "expect_errors": []
 }

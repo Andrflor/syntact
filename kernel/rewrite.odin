@@ -7,8 +7,9 @@ import "core:strings"
 // REWRITING AN UNKNOWN
 //
 // The layout of an unknown is in its term: `?ₖ::L` (§2). A rewrite replaces
-// unknowns, by their index, with other terms, and simplifies the result by the
-// same laws:
+// unknowns, by their index, with other terms — and a recursive call with what it
+// gives back, in the solution of its equation (§5.6) —, and simplifies the result by
+// the same laws:
 //
 //   - in a branch, the unknown its reach narrows is `?ₖ::(L & S)` (§6, §7);
 //     `?ₖ::p`, in a single primitive, is p;
@@ -19,24 +20,38 @@ import "core:strings"
 
 Rewrite :: []Rewriting
 
-// Rewriting: ?ₖ ↦ t.
+// Rewriting: ?ₖ ↦ t, or a recursive call ↦ t.
 Rewriting :: struct {
 	unknown: ^Unknown,
+	call:    ^Collapse,
 	term:    Type,
 }
 
 // rewritten: the term an unknown is rewritten to, when it is.
 rewritten :: proc(r: Rewrite, u: ^Unknown) -> (Type, bool) {
-	for x in r do if same_unknown(x.unknown, u) do return x.term, true
+	for x in r do if x.unknown != nil && same_unknown(x.unknown, u) do return x.term, true
 	return nil, false
 }
 
 // rewriting: r, with u rewritten to t.
 rewriting :: proc(r: Rewrite, u: ^Unknown, t: Type) -> Rewrite {
 	out := make([dynamic]Rewriting)
-	for x in r do if !same_unknown(x.unknown, u) do append(&out, x)
-	append(&out, Rewriting{u, t})
+	for x in r do if x.unknown == nil || !same_unknown(x.unknown, u) do append(&out, x)
+	append(&out, Rewriting{unknown = u, term = t})
 	return out[:]
+}
+
+// rewriting_call: r, with the recursive call c rewritten to t.
+rewriting_call :: proc(r: Rewrite, c: ^Collapse, t: Type) -> Rewrite {
+	out := make([dynamic]Rewriting)
+	append(&out, ..r)
+	append(&out, Rewriting{call = c, term = t})
+	return out[:]
+}
+
+// reads: t holds the unknown u: rewriting u changes it.
+reads :: proc(k: ^Kernel, t: Type, u: ^Unknown) -> bool {
+	return !same(k, rewrite(k, t, rewriting(nil, u, new_unknown(k, nil))), t)
 }
 
 // rewrite: t with its unknowns rewritten, in normal form.
@@ -50,10 +65,16 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return t
 	case ^Effect:
 		out := effect_law(k, v, rewrite(k, v.then, r))
-		if e, is_effect := out.(^Effect); is_effect && v.call != nil do e.call = rewrite_call(k, v.call, r)
+		if e, is_effect := out.(^Effect); is_effect {
+			if v.call != nil do e.call = rewrite_call(k, v.call, r)
+			if v.iterate != nil do e.iterate = rewrite_iterate(k, v.iterate, r)
+		}
 		return out
 	case ^Collapse:
+		for x in r do if x.call != nil && same(k, x.call, v) do return x.term
 		return rewrite_call(k, v, r)
+	case ^Iterate:
+		return iterate_law(k, rewrite_iterate(k, v, r))
 	case ^Operation:
 		if is_string_value(t) do return t
 		return operation_law(k, v.op, rewrite_all(k, v.args, r), v.span)
@@ -94,6 +115,16 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 	out := new(Collapse)
 	out^ = c^
 	out.target = carved_copy(k, s.carved, changes)
+	return out
+}
+
+// rewrite_iterate: the iteration with its bounds, its first value and its step
+// rewritten; k and x are its own.
+rewrite_iterate :: proc(k: ^Kernel, it: ^Iterate, r: Rewrite) -> ^Iterate {
+	out := new(Iterate)
+	out^ = it^
+	out.from, out.to = rewrite(k, it.from, r), rewrite(k, it.to, r)
+	out.init, out.step = rewrite(k, it.init, r), rewrite(k, it.step, r)
 	return out
 }
 
@@ -156,6 +187,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if v.hi != nil do hi = layout_image(k, v.hi) or_return
 		return range_law(k, lo, hi, v.family, v.span), true
 	case ^Collapse:
+		if f, known := family_of(k, v); known do return family_term(f), true
+	case ^Iterate:
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Effect, ^Pattern, ^Scope, ^Name, ^Access, ^Carve, ^Default:
 	}

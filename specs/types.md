@@ -327,13 +327,15 @@ g! - g!                    = ε₁(x::u8, ε₁(y::u8, x - y))   two runs
 A recursive call of an equation with effects is an effect. The equation has effects
 when its production, or a binding above it, has some besides its calls: each call
 runs it. What the call gives back is bound in what follows it, and nothing crosses
-it but the pure; the equation has no closed form, it stays (§5.6). An equation
-without effects is unchanged:
+it but the pure. Solved, the equation is an iteration that runs the effects of each
+step in the order the equation runs them (§5.6): an effect, whose answer is the
+value of the iteration. Each call is a run. An equation without effects is
+unchanged:
 
 ```text
 loop -> {u8:n -> ??  -> n ? {0 -> 0  -> loop{n -> n - 1}! + !?::u8}}
-loop{n -> m}!    = m ? {0 -> 0  -> ε<loop{n -> m - 1}!>(x, ε₁(y::u8, x + y))}
-loop{n -> 3}! - loop{n -> 3}!   = ε<loop{n -> 3}!>(x, ε<loop{n -> 3}!>(y, x - y))
+loop{n -> m}!    = ε<⟳(k: 1 ↑ m, x: 0, ε₁(y::u8, y + x))>(z, z)
+loop{n -> 3}! - loop{n -> 3}!   = ε<⟳(k: 1 ↑ 3, …)>(x, ε<⟳(k: 1 ↑ 3, …)>(y, x - y))
 {u8:r -> !?  -> sum{n -> r}!}!   = ε₁(x::u8, x * (x + 1) / 2)
 ```
 
@@ -343,7 +345,7 @@ scope that places them:
 
 ```text
 sum{n -> !?::u8}!              = ε₁(x::u8, x * (x + 1) / 2)
-loop{n -> !?::u8}!             = ε₂(x::u8, ε<loop{n -> x}!>(y, y))
+loop{n -> !?::u8}!             = ε₂(x::u8, ε<⟳(k: 1 ↑ x, …)>(y, y))
 g -> {w -> !?::none  -> {k -> 1}}
 {...g!, -> 1}!                 = ε₁(1)
 ```
@@ -495,7 +497,7 @@ base case whose value places itself again is an infinite recursion — in a run 
 its shape, or by a call outside any branch of a pattern, read on the equation as
 written (under its defaults, a pattern on a known value is gone, not its guard). The equation
 is never unfolded: asked again from its own production, the scope stays a carve
-and a collapse, applied to types. It is solved — Arden, a closed form — or it
+and a collapse, applied to types. It is solved — Arden, an iteration — or it
 stays. A scope asked whether it is in an equation that is not solved is asked of
 its productions (§5.4) when they are guarded. A carve of a solved equation substitutes its arguments into the solution:
 `sum{n -> 5}!` is `sum!` with `n` = 5.
@@ -527,15 +529,45 @@ List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
 {10 10 10} in List{u8}                                                    = false
 ```
 
-The closed form, when the name is called on an integer:
+An iteration, when the name is called on an integer, one less at each step:
 
 ```text
-sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
-sum{n -> m}! = m ? {0 -> 0  -> m + sum{n -> m - 1}!}     ⟹    sum{n -> m}! = m * (m + 1) / 2
+f{n -> m}! = m ? {b -> c  -> h(m, f{n -> m - 1}!)}      m ≥ b for every value
+           = ⟳(k: b + 1 ↑ m, x: c, h(k, x))
 ```
 
-In general, when `f{n -> m}! = m ? {b -> c  -> g(m) + f{n -> m - 1}!}`, then
-`f{n -> m}! = c + g(b + 1) + … + g(m)`, a polynomial in m when g is one.
+`⟳(k: a ↑ b, x: c, t)` is x = c, then x = t for k from a up to b; c when the range
+is empty. It is what the equation computes from its base case up: a loop. Every
+step makes the call — it is not in a branch. Effects before the call run from m
+down: when `h(m, y) = ε…(a ⊕ y)`, ⊕ an associative operator with identity e, the
+parentheses move,
+
+```text
+f{n -> m}! = ⟳(k: m ↓ b + 1, x: e, ε…(x ⊕ a(k))) ⊕ c
+```
+
+so the effects run in the order the equation runs them. An iteration whose steps
+have effects is an effect, `ε<⟳(…)>(x, t)`. What a step computes without reading
+what its effects give back crosses them (§4.8): the effects run alone, and the value
+is the iteration of the rest. An iteration whose step adds a polynomial in k has a
+closed form:
+
+```text
+⟳(k: lo ↑ hi, x: c, x + g(k)) = c + g(lo) + … + g(hi) = c + G(hi) - G(lo - 1)
+                                 G(m) = g(0) + … + g(m), by the sums of powers
+
+sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}
+sum{n -> m}!   = ⟳(k: 1 ↑ m, x: 0, x + k)  = m * (m + 1) / 2
+fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}
+fact{n -> m}!  = ⟳(k: 1 ↑ m, x: 1, k * x)                       the loop
+say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{…  n -> n}! + say{n -> n - 1}!}}
+say{n -> m}!   = ε<⟳(k: m ↓ 1, x: 0, ε<printf{…  n -> k}!>(y, x + y))>(z, z)
+tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> io.puts{…}!  -> 1 + tick{n -> n - 1}!}!}}
+tick{n -> m}!  = ε<⟳(k: m ↓ 1, x: none, ε<puts{…}!>(y, none))>(m)  the value crosses
+```
+
+Like the equation, an iteration is never unfolded: `fact{n -> 5}!` is
+`⟳(k: 1 ↑ 5, x: 1, k * x)`.
 
 `sum{n -> m - 1}!` is not an extra notation: it is carving and collapse, applied to
 types.

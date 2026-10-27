@@ -25,6 +25,7 @@ Binary_Run :: struct {
 }
 
 LIBM :: "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\n"
+PRINTF :: "io -> <libc.so.6>{\n  printf -> {string:format, i64:n, -> !?::i32}\n}\n"
 LIBC :: "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  atoi -> {string:s, -> !?::i32}\n}\n"
 
 CASES := []Binary_Case {
@@ -54,10 +55,18 @@ CASES := []Binary_Case {
 	{"order of runs", LIBC + "a -> {r -> libc.puts{s -> \"one\"}!  -> 1}!\nb -> {r -> libc.puts{s -> \"two\"}!  -> 2}!\n-> b - a", {{stdout = "one\ntwo\n", exit = 1}}},
 	{"answer read twice", LIBC + "-> {a -> libc.abs{n -> -3}!  -> a * a}!", {{exit = 9}}},
 	{"signed answer", LIBC + "-> libc.atoi{s -> \"-5\"}! + 10", {{exit = 5}}},
-	{"function", "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", {{exit = 120}}},
+	{"iteration", "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", {{exit = 120}}},
+	{"function", "half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}\n-> half{n -> ??::u8}!", {{args = {"100"}, exit = 7}, {args = {"0"}, exit = 0}}},
 	{"loop", "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", {{args = {"0"}, exit = 0}, {args = {"10"}, exit = 55}, {args = {"13"}, exit = 233}}},
 	{"tail call", "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> (acc + n) % 1000}!}}\n-> f{n -> ??::u32}! % 256", {{args = {"10000000"}, exit = 0}, {args = {"10"}, exit = 55}}},
 	{"tail call with effects", LIBC + "tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> tick{n -> n - 1}!}!}}\n-> tick{n -> ??::u8}!", {{args = {"2"}, stdout = "tick\ntick\n", exit = 0}}},
+	// a recursion is an iteration (specs/types.md §5.6): a loop, its effects in the
+	// order the equation runs them — up from the base case when the call comes
+	// first, down from n when an effect comes before it
+	{"effects after the call", PRINTF + "count -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> count{n -> n - 1}!  -> a + io.printf{format -> \"%d \"  n -> n}!}!}}\n-> count{n -> ??::u8}! % 256", {{args = {"4"}, stdout = "1 2 3 4 ", exit = 8}}},
+	{"effects before the call", PRINTF + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> io.printf{format -> \"%d \"  n -> n}! + say{n -> n - 1}!}}\n-> say{n -> ??::u8}! % 256", {{args = {"4"}, stdout = "4 3 2 1 ", exit = 8}, {args = {"0"}, exit = 0}}},
+	{"value across the effects", LIBC + "tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + tick{n -> n - 1}!}!}}\n-> tick{n -> ??::u8}! * 10", {{args = {"3"}, stdout = "tick\ntick\ntick\n", exit = 30}}},
+	{"product", "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}! % 251", {{args = {"5"}, exit = 120}, {args = {"20"}, exit = 2432902008176640000 % 251}}},
 	{"recursion with effects", LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", {{args = {"3"}, stdout = "tick\ntick\ntick\n", exit = 3}, {args = {"0"}, exit = 0}}},
 	{"answers of a recursion", LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", {{args = {"4"}, exit = 8}}},
 	// reading: gets into a buffer malloc gives, fgets from the stream fdopen gives

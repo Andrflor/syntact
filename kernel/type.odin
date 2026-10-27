@@ -32,6 +32,7 @@ Type :: union {
 	^Carve, // s{…}
 	^Default, // C:           an anonymous binding colored by C
 	^Pattern, // t ? {c -> p …}
+	^Iterate, // ⟳(k: a ↑ b, x: c, t)   x = c, then x = t for k from a up to b (§5.6)
 	Invalid, // a term no law gives a type to, and why: the check reports it
 }
 
@@ -76,11 +77,12 @@ Unknown :: struct {
 // t, the computation it wraps; each run of a scope gives the effects it gathers new
 // ones (effect.odin). Written alone, `!?::L` is εₖ(x::L, x).
 Effect :: struct {
-	id:     int,
-	answer: ^Unknown, // nil: it gives nothing back, εₖ(t)
-	call:   ^Collapse, // the effect is this call: a recursive call with effects, or a symbol behind a boundary
-	then:   Type,
-	span:   syn.Span,
+	id:      int,
+	answer:  ^Unknown, // nil: it gives nothing back, εₖ(t)
+	call:    ^Collapse, // the effect is this call: a recursive call with effects, or a symbol behind a boundary
+	iterate: ^Iterate, // the effect is this iteration: the effects of its steps, in order (§5.6)
+	then:    Type,
+	span:    syn.Span,
 }
 
 Or :: struct {
@@ -199,6 +201,17 @@ Branch :: struct {
 	scope:   ^Scope,
 	view:    ^Scope, // the names of the cover its product reads (destructuring)
 	span:    syn.Span,
+}
+
+// Iterate: the solution of a recursion on a counter (§5.6). x takes init, then, for
+// k from `from` to `to` by one — down when `down` —, x takes step: the iteration is
+// the last x, init when the range is empty. k and x are unknowns bound in step.
+Iterate :: struct {
+	index, state: ^Unknown,
+	from, to:     Type,
+	down:         bool,
+	init, step:   Type,
+	span:         syn.Span,
 }
 
 // --- scopes (§5) ---

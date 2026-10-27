@@ -55,9 +55,11 @@ CODE_CASES := []Code_Case {
 	{name = "unserved effect", source = "-> !?::u8", error = "the effect ε0 is served by no boundary"},
 	// a character is a string of length 1: where a text goes, it is one
 	{name = "character as text", source = "c -> <libc.so.6>{\n  fdopen -> {i32:fd, string:mode, -> !?::u64}\n}\nf -> c.fdopen{fd -> 0  mode -> \"r\"}!\n-> 1", int = 1, calls = {"fdopen"}},
-	// a recursion without closed form is a function: its fields its parameters
-	{name = "function", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", int = 120},
-	{name = "function of an input", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!", inputs = {6}, int = 720},
+	// a recursion on a counter is an iteration: a loop
+	{name = "iteration", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> 5}!", int = 120},
+	{name = "iteration of an input", source = "fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!", inputs = {6}, int = 720},
+	// a recursion that stays is a function: its fields its parameters
+	{name = "function", source = "half -> {u8:n -> ??  -> n ? {0 -> 0  -> 1 + half{n -> n / 2}!}}\n-> half{n -> ??::u8}!", inputs = {100}, int = 7},
 	{name = "loop", source = "_fib -> {\n  n -> 2  i -> 2  prev -> 0  cur -> 1\n  -> i ? {<n -> _fib{n i+1 cur cur+prev}!  -> cur}\n}\nfib -> {\n  n -> 0\n  -> n ? {<2 -> n  -> _fib{n+1}!}\n}\n-> fib{??::u8}!", inputs = {10}, int = 55},
 	// a call in tail position is a loop: the stack does not grow with its turns
 	{name = "tail call", source = "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> acc + 2}!}}\n-> f{n -> ??::u32}!", inputs = {300_000}, int = 600_000},
@@ -162,4 +164,22 @@ test_tail_call_is_a_loop :: proc(t: ^testing.T) {
 	f := prog.funcs[1]
 	_, is_loop := f.body.insts[0].(Loop)
 	testing.expectf(t, len(f.body.insts) == 1 && is_loop, "the body of f is not a loop\n%s", print_program(&prog))
+}
+
+// A recursion on a counter is an iteration (specs/types.md §5.6): a loop, not a
+// function.
+@(test)
+test_iteration_is_a_loop :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	k, parsed := kernel.run("fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\n-> fact{n -> ??::u8}!")
+	if !testing.expect(t, parsed, "does not parse") do return
+	prog, err := lower_program(&k)
+	if !testing.expectf(t, err == "", "%s", err) do return
+	f := prog.funcs[0]
+	_, is_loop := f.body.insts[len(f.body.insts) - 1].(Loop)
+	testing.expectf(t, len(prog.funcs) == 1 && is_loop, "fact is not a loop\n%s", print_program(&prog))
+	run, failed := interpret(&prog, {6}, nil)
+	testing.expectf(t, failed == "" && run.result.int == 720, "fact{n -> 6}! = %d (%s)", run.result.int, failed)
 }

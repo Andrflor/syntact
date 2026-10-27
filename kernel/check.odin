@@ -93,6 +93,9 @@ obligations :: proc(k: ^Kernel, t: Type, site := syn.Span{}) -> bool {
 		return failed
 	case ^Effect:
 		return obligations(k, v.then, site)
+	case ^Iterate:
+		// its step is the equation's, checked there
+		return obligations(k, v.from, site) || obligations(k, v.to, site) || obligations(k, v.init, site)
 	case ^Not:
 		return obligations(k, v.term, site)
 	case ^Is:

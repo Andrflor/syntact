@@ -106,7 +106,7 @@ product_of :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	// a recursive call, or a carve of a recursive scope: its arguments go into the
 	// solution, or it stays. A carve collapsed where it is written asks its
 	// production: it is typed for the values the carve gives (§7); a call that
-	// stays has the closed form of its equation, or stays
+	// stays has the solution of its equation, or stays
 	if c.recursive do return recursive_call(k, s, c.span)
 	if s != origin(s) && recursive(s) {
 		if p, found := first_production(k, s); found {
@@ -405,6 +405,12 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 			b.product = copy_term(k, m, b.product, b.scope != nil ? b.scope : scope)
 		}
 		return p
+	case ^Iterate:
+		it := new(Iterate)
+		it^ = v^
+		it.from, it.to = copy_term(k, m, v.from, scope), copy_term(k, m, v.to, scope)
+		it.init, it.step = copy_term(k, m, v.init, scope), copy_term(k, m, v.step, scope)
+		return it
 	}
 	return t
 }
@@ -454,6 +460,8 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case ^Pattern:
 		if mentions(m, v.target) do return true
 		for b in v.branches do if mentions(m, b.cover) || mentions(m, b.product) do return true
+	case ^Iterate:
+		return mentions(m, v.from) || mentions(m, v.to) || mentions(m, v.init) || mentions(m, v.step)
 	}
 	return false
 }
@@ -828,6 +836,8 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		if x.answer == nil do return same(k, x.then, y.then)
 		if (x.call == nil) != (y.call == nil) do return false
 		if x.call != nil && !same(k, x.call, y.call) do return false
+		if (x.iterate == nil) != (y.iterate == nil) do return false
+		if x.iterate != nil && !same(k, x.iterate, y.iterate) do return false
 		if !same(k, layout_of(k, x.answer), layout_of(k, y.answer)) do return false
 		return same(k, x.then, rewrite(k, y.then, rewriting(nil, y.answer, x.answer)))
 	case ^Or:
@@ -873,6 +883,11 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		if !ok || len(x.branches) != len(y.branches) || !same(k, x.target, y.target) do return false
 		for br, i in x.branches do if !same(k, br.cover, y.branches[i].cover) || !same(k, br.product, y.branches[i].product) do return false
 		return true
+	case ^Iterate:
+		// the same iteration: its counter and its value are bound in it, whatever their index
+		y, ok := b.(^Iterate)
+		if !ok || x.down != y.down || !same(k, x.from, y.from) || !same(k, x.to, y.to) || !same(k, x.init, y.init) do return false
+		return same(k, x.step, rewrite(k, y.step, rewriting(rewriting(nil, y.index, x.index), y.state, x.state)))
 	}
 	return false
 }

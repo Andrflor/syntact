@@ -134,6 +134,7 @@ print_witness :: proc(r: Rewrite) -> string {
 	if len(r) == 0 do return ""
 	parts := make([dynamic]string)
 	for x in r {
+		if x.unknown == nil do continue
 		layout := x.term
 		if u, ok := x.term.(^Unknown); ok do layout = u.layout
 		append(&parts, fmt.tprintf("?%d in %s", x.unknown.id, print_type(layout)))

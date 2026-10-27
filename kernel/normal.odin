@@ -19,6 +19,8 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 		return v
 	case ^Effect:
 		return effect_law(k, v, normal(k, v.then))
+	case ^Iterate:
+		return iterate_law(k, v)
 	case ^Name:
 		return binding_value(k, v.binding)
 	case ^Scope:
