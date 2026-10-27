@@ -5820,22 +5820,16 @@ movq_xmm_xmm :: proc(dst: XMMRegister, src: XMMRegister) {
 
 // Move quadword from memory to XMM
 movq_xmm_m64 :: proc(dst: XMMRegister, mem: MemoryAddress) {
-	rex_r, dst_reg := encode_xmm(dst)
-
-	// F3 REX 0F 7E /r - Use write_memory_address for proper memory operand handling
+	// F3 REX 0F 7E /r: the prefix, then the memory operand after the two opcode bytes
 	write([]u8{0xF3})
-	write_memory_address(mem, dst_reg, [1]u8{0x0F}, false)
-	write([]u8{0x7E})
+	write_memory_address(mem, u8(dst), [2]u8{0x0F, 0x7E}, false)
 }
 
 // Move quadword from XMM to memory
 movq_m64_xmm :: proc(mem: MemoryAddress, src: XMMRegister) {
-	rex_r, src_reg := encode_xmm(src)
-
-	// 66 REX 0F D6 /r - Use write_memory_address for proper memory operand handling
+	// 66 REX 0F D6 /r: the prefix, then the memory operand after the two opcode bytes
 	write([]u8{0x66})
-	write_memory_address(mem, src_reg, [1]u8{0x0F}, false)
-	write([]u8{0xD6})
+	write_memory_address(mem, u8(src), [2]u8{0x0F, 0xD6}, false)
 }
 
 // SSE/SSE2 Data Movement
