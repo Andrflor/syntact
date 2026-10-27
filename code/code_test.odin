@@ -64,6 +64,7 @@ CODE_CASES := []Code_Case {
 	{name = "tail call that acts", source = LIBC + "tick -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> tick{n -> n - 1}!}!}}\n-> tick{n -> ??::u8}!", inputs = {3}, int = 0, calls = {"puts", "puts", "puts"}},
 	{name = "closed form, no function", source = "sum -> {u8:n -> ??  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}}\n-> sum{n -> ??::u8}!", inputs = {10}, int = 55},
 	{name = "recursion that acts", source = LIBC + "say -> {u8:n -> ??  -> n ? {0 -> 0  -> {r -> libc.puts{s -> \"tick\"}!  -> 1 + say{n -> n - 1}!}!}}\n-> say{n -> ??::u8}!", inputs = {3}, int = 3, calls = {"puts", "puts", "puts"}},
+	{name = "answer read by the next act", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> {a -> libc.abs{n -> -2}!  b -> libc.abs{n -> a}!  -> b + cnt{n -> n - 1}!}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs", "abs", "abs", "abs"}},
 	{name = "answers of a recursion", source = LIBC + "cnt -> {u8:n -> ??  -> n ? {0 -> 0  -> libc.abs{n -> -2}! + cnt{n -> n - 1}!}}\n-> cnt{n -> ??::u8}!", inputs = {3}, int = 6, calls = {"abs", "abs", "abs"}},
 }
 

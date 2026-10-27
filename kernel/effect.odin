@@ -116,30 +116,38 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 	return t
 }
 
-// renewed: t, each of its acts with a new answer, but those of kept, new already;
-// the new ones join kept. What one run gives back is not what another gives back.
-renewed :: proc(k: ^Kernel, t: Type, kept: ^[dynamic]^Unknown) -> Type {
+// renewed: t, each of its acts with a new answer, but those new already; run maps
+// each answer as written to the new one. What one run gives back is not what
+// another gives back.
+renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 	#partial switch v in t {
 	case ^Effect:
-		if v.answer == nil || is_kept(kept[:], v.answer) do return wrapped(v, v.answer, renewed(k, v.then, kept))
+		if v.answer == nil || is_new(run^, v.answer) do return wrapped(v, v.answer, renewed(k, v.then, run))
 		x := new(Unknown)
 		x^ = v.answer^
 		x.id = k.unknowns
 		k.unknowns += 1
-		append(kept, x)
-		return wrapped(v, x, renewed(k, rewrite(k, v.then, rewriting(nil, v.answer, x)), kept))
+		run^ = rewriting(run^, v.answer, x)
+		return wrapped(v, x, renewed(k, rewrite(k, v.then, rewriting(nil, v.answer, x)), run))
 	case ^Pattern:
 		if !acts(v) do return t
 		branches := make([]Branch, len(v.branches))
-		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = renewed(k, b.product, kept), span = b.span}
+		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = renewed(k, b.product, run), span = b.span}
 		return pattern_law(k, branching(v, branches))
 	}
 	return t
 }
 
-is_kept :: proc(kept: []^Unknown, u: ^Unknown) -> bool {
-	for x in kept do if same_unknown(x, u) do return true
+// is_new: u is an answer the run gave.
+is_new :: proc(run: Rewrite, u: ^Unknown) -> bool {
+	for x in run do if same_unknown(x.term.(^Unknown), u) do return true
 	return false
+}
+
+// in_run: t, a part of a run, after the acts before it: what it reads of their
+// answers is what they gave in this run, then its own acts give new ones.
+in_run :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
+	return renewed(k, rewrite(k, t, run^), run)
 }
 
 // branching: the pattern p, with these branches.
@@ -155,10 +163,11 @@ branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 // Another production is not run; what is below p is not reached, like code after a
 // return. True when p is reached, placed by an expansion.
 //
-// For a run, answers is not nil: each act gives back a new answer, and changes
-// carves each binding of s that acts to what it gives back — an expansion to a copy
-// of what it places, carved likewise —, so that what reads it reads that answer.
-ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, answers: ^[dynamic]^Unknown, changes: ^map[^Binding]Type) -> bool {
+// For a run, run is not nil: each act gives back a new answer, which the acts after
+// it read, and changes carves each binding of s that acts to what it gives back —
+// an expansion to a copy of what it places, carved likewise —, so that what reads
+// it reads that answer.
+ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rewrite, changes: ^map[^Binding]Type) -> bool {
 	for b in s.bindings {
 		if b == p do return true
 		switch b.kind {
@@ -168,23 +177,23 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, answers: 
 			t := binding_type(k, b)
 			acting := acts(t)
 			if acting {
-				if answers != nil do t = renewed(k, t, answers)
+				if run != nil do t = in_run(k, t, run)
 				append(parts, t)
 			}
 			value := given(k, t)
 			placing := make(map[^Binding]Type)
 			reached := false
 			if inner, is_scope := value.(^Scope); is_scope {
-				reached = ran(k, inner, p, parts, answers, &placing)
+				reached = ran(k, inner, p, parts, run, &placing)
 				if len(placing) > 0 do value = carved_copy(k, inner, placing)
 			}
-			if answers != nil && (acting || len(placing) > 0) do changes[b] = value
+			if run != nil && (acting || len(placing) > 0) do changes[b] = value
 			if reached do return true
 		case .Push, .Pull:
 			t := binding_type(k, b)
 			if !acts(t) do continue
-			if answers != nil {
-				t = renewed(k, t, answers)
+			if run != nil {
+				t = in_run(k, t, run)
 				changes[b] = given(k, t)
 			}
 			append(parts, t)
@@ -208,15 +217,15 @@ with_acts :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, v: Type) -> Type {
 // Each act of the run gives back a new answer, which what reads its binding reads,
 // and which a call takes as a value.
 collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
-	answers := make([dynamic]^Unknown)
+	run: Rewrite
 	parts := make([dynamic]Type)
 	changes := make(map[^Binding]Type)
 	p, _ := first_production(k, s)
-	ran(k, s, p, &parts, &answers, &changes)
+	ran(k, s, p, &parts, &run, &changes)
 	inner := len(changes) > 0 ? carved_copy(k, s, changes) : s
 	product := product_of(k, inner, c)
 	if _, behind := symbol_of(inner); behind do product = crossed(k, inner, c, product)
-	append(&parts, renewed(k, product, &answers))
+	append(&parts, in_run(k, product, &run))
 	return sequence(k, nil, parts[:], last_part)
 }
 
