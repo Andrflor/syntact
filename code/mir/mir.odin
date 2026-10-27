@@ -199,9 +199,39 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	body(&b, src.body)
 	finish(&b, Return{value = src.body.value == code.NONE ? NO_REG : Reg(src.body.value)})
 	constants(f)
+	fused(f)
 	unread(f)
 	f.order = placed(f)
 	return f
+}
+
+// fused: a branch on a comparison nothing else reads is the branch of the
+// comparison — x = a ◁ b, to yes when x = 1: to yes when a ◁ b; when x = 0, when
+// a ◁̸ b, its contrary, on integers.
+fused :: proc(f: ^Func) {
+	reads := make([]int, len(f.kinds))
+	regs := make([dynamic]Reg)
+	for b in f.blocks {
+		for inst in b.insts {
+			clear(&regs)
+			uses(inst, &regs)
+			for r in regs do reads[r] += 1
+		}
+		clear(&regs)
+		end_uses(b.end, &regs)
+		for r in regs do reads[r] += 1
+	}
+	for &b in f.blocks {
+		br, is_branch := b.end.(Branch)
+		if !is_branch || len(b.insts) == 0 || br.cond != .Eq && br.cond != .Ne do continue
+		value, constant := br.b.(i64)
+		c, is_compare := b.insts[len(b.insts) - 1].(Compare)
+		if !constant || value != 0 && value != 1 || !is_compare || c.dst != br.a || reads[c.dst] != 1 do continue
+		holds := (br.cond == .Eq) == (value == 1)
+		if !holds && f.kinds[c.a].machine == .Real do continue // unordered: neither holds
+		b.end = Branch{holds ? c.cond : CONTRARY[c.cond], c.a, c.b, br.yes, br.no}
+		pop(&b.insts)
+	}
 }
 
 // unread: what computes a register nothing reads goes, until nothing more does;

@@ -9,9 +9,10 @@ import enc "asm"
 // A function laid out in blocks (code/mir) whose registers have their places: an
 // integer in a register of the machine — one a call keeps, rbx and r12…r15, when it
 // lives across a call; rsi, rdi, r8…r10 otherwise — or in a slot of the frame; a
-// float in a slot; a vector in a slot for each lane, lane 0 the lowest, two lanes
-// of SSE2. rax, rcx, rdx and r11 are never given: an instruction computes
-// in them. The frame keeps rbp, then the registers the function uses that a call
+// float, or a vector of two lanes of SSE2, in xmm8…xmm15 — no call keeps them: when
+// it lives across a call, in a slot of the frame for each lane, lane 0 the lowest.
+// rax, rcx, rdx and r11, xmm0…xmm3 are never given: an instruction computes in
+// them, a call takes its floats in xmm0…xmm7. The frame keeps rbp, then the registers the function uses that a call
 // keeps, then the slots, 16-aligned.
 
 KEPT := []enc.Register64{.RBX, .R12, .R13, .R14, .R15}
@@ -24,7 +25,9 @@ target :: proc() -> mir.Target {
 	for r, i in SPENT do spent[i] = int(r)
 	arguments := make([]int, len(enc.SYSV_INT_ARGS))
 	for r, i in enc.SYSV_INT_ARGS do arguments[i] = int(r)
-	return mir.Target{kept = kept, spent = spent, arguments = arguments}
+	wide := make([]int, 8)
+	for &x, i in wide do x = 8 + i
+	return mir.Target{kept = kept, spent = spent, arguments = arguments, wide = wide}
 }
 
 // Frame: the function being emitted, and where its registers are.
@@ -54,7 +57,7 @@ function :: proc(e: ^Emitter, f: ^mir.Func) -> string {
 		case .Integer:
 			append(&moves, Move{place_of(&fr, mir.Reg(i)), Place(enc.SYSV_INT_ARGS[loc.register])})
 		case .SSE:
-			enc.movq_m64_xmm(slot_address(&fr, mir.Reg(i)), enc.SYSV_SSE_ARGS[loc.register])
+			store_real(&fr, mir.Reg(i), enc.SYSV_SSE_ARGS[loc.register])
 		}
 	}
 	parallel(&fr, moves[:])
@@ -69,9 +72,11 @@ function :: proc(e: ^Emitter, f: ^mir.Func) -> string {
 
 // --- places ---
 
-// Place: where a value is for an instruction: a register, a slot, or an integer.
+// Place: where a value is for an instruction: a register — of integers, or of
+// floats and vectors —, a slot, or an integer.
 Place :: union {
 	enc.Register64,
+	enc.XMMRegister,
 	Frame_Slot,
 	i64,
 }
@@ -82,6 +87,8 @@ place_of :: proc(fr: ^Frame, r: mir.Reg) -> Place {
 	switch p in fr.alloc.places[r] {
 	case mir.Machine_Reg:
 		return enc.Register64(p)
+	case mir.Wide_Reg:
+		return enc.XMMRegister(p)
 	case mir.Slot:
 		return Frame_Slot(p)
 	}
@@ -110,11 +117,13 @@ fits_32 :: proc(v: i64) -> bool {
 	return v >= i64(min(i32)) && v <= i64(max(i32))
 }
 
-// get: the value at p, into the register x.
+// get: the value at p, into the register x: of a float, its bits.
 get :: proc(fr: ^Frame, x: enc.Register64, p: Place) {
 	switch v in p {
 	case enc.Register64:
 		if v != x do enc.mov_r64_r64(x, v)
+	case enc.XMMRegister:
+		enc.movq_r64_xmm(x, v)
 	case Frame_Slot:
 		enc.mov_r64_m64(x, slot_memory(fr, v))
 	case i64:
@@ -134,9 +143,38 @@ put :: proc(fr: ^Frame, p: Place, x: enc.Register64) {
 	#partial switch v in p {
 	case enc.Register64:
 		if v != x do enc.mov_r64_r64(v, x)
+	case enc.XMMRegister:
+		enc.movq_xmm_r64(v, x)
 	case Frame_Slot:
 		enc.mov_m64_r64(slot_memory(fr, v), x)
 	}
+}
+
+// load_real: the float of r, into x.
+load_real :: proc(fr: ^Frame, x: enc.XMMRegister, r: mir.Reg) {
+	#partial switch p in place_of(fr, r) {
+	case enc.XMMRegister:
+		if p != x do enc.movapd_xmm_xmm(x, p)
+	case Frame_Slot:
+		enc.movq_xmm_m64(x, slot_memory(fr, p))
+	}
+}
+
+// store_real: the float in x, into the place of r.
+store_real :: proc(fr: ^Frame, r: mir.Reg, x: enc.XMMRegister) {
+	#partial switch p in place_of(fr, r) {
+	case enc.XMMRegister:
+		if p != x do enc.movapd_xmm_xmm(p, x)
+	case Frame_Slot:
+		enc.movq_m64_xmm(slot_memory(fr, p), x)
+	}
+}
+
+// real_in: the float of r in a register: its own, or loaded into x.
+real_in :: proc(fr: ^Frame, r: mir.Reg, x: enc.XMMRegister) -> enc.XMMRegister {
+	if p, is_reg := place_of(fr, r).(enc.XMMRegister); is_reg do return p
+	load_real(fr, x, r)
+	return x
 }
 
 // work: the register an instruction computes r in: its own, or rax.
@@ -188,6 +226,12 @@ parallel :: proc(fr: ^Frame, moves: []Move) {
 }
 
 copy_place :: proc(fr: ^Frame, dst, src: Place) {
+	if x, is_wide := dst.(enc.XMMRegister); is_wide {
+		if y, from_wide := src.(enc.XMMRegister); from_wide {
+			if x != y do enc.movapd_xmm_xmm(x, y)
+			return
+		}
+	}
 	if x, is_reg := dst.(enc.Register64); is_reg {
 		get(fr, x, src)
 		return
@@ -208,8 +252,9 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 	switch i in inst {
 	case mir.Copy:
 		if f.kinds[i.dst].lanes > 0 {
-			load_lanes(fr, .XMM0, i.src)
-			enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+			x := wide_work(fr, i.dst, nil)
+			load_lanes(fr, x, i.src)
+			store_lanes(fr, i.dst, x)
 			return ""
 		}
 		copy_place(fr, place_of(fr, i.dst), operand(fr, i.src))
@@ -280,16 +325,17 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		}
 		put(fr, place_of(fr, i.dst), .RAX)
 	case mir.Splat:
-		load_lanes(fr, .XMM0, i.a)
-		enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+		x := wide_work(fr, i.dst, nil)
+		load_lanes(fr, x, i.a)
+		store_lanes(fr, i.dst, x)
 	case mir.Lanes:
-		base := vector_memory(fr, i.dst).(enc.AddressComponents)
-		for v, k in i.values {
-			get(fr, .RAX, v)
-			lane := base
-			lane.displacement = (base.displacement.? or_else 0) + i32(8 * k)
-			enc.mov_m64_r64(lane, .RAX)
-		}
+		if len(i.values) != 2 do return "a vector of other than two lanes x86-64 does not write"
+		get(fr, .RAX, i.values[0])
+		enc.movq_xmm_r64(.XMM0, .RAX)
+		get(fr, .RAX, i.values[1])
+		enc.movq_xmm_r64(.XMM1, .RAX)
+		enc.punpcklqdq_xmm_xmm(.XMM0, .XMM1)
+		store_lanes(fr, i.dst, .XMM0)
 	case mir.Reduce:
 		return reduce(fr, i)
 	case mir.Call:
@@ -318,7 +364,7 @@ pass :: proc(fr: ^Frame, args: []mir.Operand, assignment: enc.X64_ABI_Assignment
 	parallel(fr, moves[:])
 	for a, i in args {
 		loc := assignment.locations[i]
-		if loc.class == .SSE do enc.movq_xmm_m64(enc.SYSV_SSE_ARGS[loc.register], slot_address(fr, a.(mir.Reg)))
+		if loc.class == .SSE do load_real(fr, enc.SYSV_SSE_ARGS[loc.register], a.(mir.Reg))
 	}
 }
 
@@ -423,30 +469,33 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 	return ""
 }
 
-// real_binary: the floats are in slots: xmm0 op xmm1.
+// real_binary: x = a op b, in dst's register or xmm0; b in its register or in
+// xmm1.
 real_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
-	enc.movq_xmm_m64(.XMM0, slot_address(fr, i.a))
 	if i.op == .Pow {
+		load_real(fr, .XMM0, i.a)
 		get(fr, .RCX, operand(fr, i.b))
 		enc.movq_r64_xmm(.RAX, .XMM0)
 		power(fr.e, true)
 		put(fr, place_of(fr, i.dst), .RAX)
 		return ""
 	}
-	enc.movq_xmm_m64(.XMM1, slot_address(fr, i.b.(mir.Reg)))
+	x := wide_work(fr, i.dst, i.b)
+	load_real(fr, x, i.a)
+	y := real_in(fr, i.b.(mir.Reg), .XMM1)
 	#partial switch i.op {
 	case .Add:
-		enc.addsd_xmm_xmm(.XMM0, .XMM1)
+		enc.addsd_xmm_xmm(x, y)
 	case .Sub:
-		enc.subsd_xmm_xmm(.XMM0, .XMM1)
+		enc.subsd_xmm_xmm(x, y)
 	case .Mul:
-		enc.mulsd_xmm_xmm(.XMM0, .XMM1)
+		enc.mulsd_xmm_xmm(x, y)
 	case .Div:
-		enc.divsd_xmm_xmm(.XMM0, .XMM1)
+		enc.divsd_xmm_xmm(x, y)
 	case:
 		return "a float operation the machine does not compute"
 	}
-	enc.movq_m64_xmm(slot_address(fr, i.dst), .XMM0)
+	store_real(fr, i.dst, x)
 	return ""
 }
 
@@ -478,12 +527,10 @@ power :: proc(e: ^Emitter, real: bool) {
 }
 
 // compare: the flags of a cond b: integers by cmp, the first in a register; floats
-// by ucomisd, from their slots.
+// by ucomisd, from their registers.
 compare :: proc(fr: ^Frame, cond: mir.Cond, a: mir.Reg, b: mir.Operand) {
 	if fr.f.kinds[a].machine == .Real {
-		enc.movq_xmm_m64(.XMM0, slot_address(fr, a))
-		enc.movq_xmm_m64(.XMM1, slot_address(fr, b.(mir.Reg)))
-		enc.ucomisd_xmm_xmm(.XMM0, .XMM1)
+		enc.ucomisd_xmm_xmm(real_in(fr, a, .XMM0), real_in(fr, b.(mir.Reg), .XMM1))
 		return
 	}
 	x := in_register(fr, a, .RAX)
@@ -499,6 +546,8 @@ compare :: proc(fr: ^Frame, cond: mir.Cond, a: mir.Reg, b: mir.Operand) {
 		enc.cmp_r64_m64(x, slot_memory(fr, v))
 	case enc.Register64:
 		enc.cmp_r64_r64(x, v)
+	case enc.XMMRegister:
+	// an integer is never there
 	}
 }
 
@@ -592,7 +641,7 @@ terminator :: proc(fr: ^Frame, t: mir.Terminator, next: int) {
 
 // --- vectors ---
 
-// vector_memory: where the lanes of the vector r are, lane 0 first.
+// vector_memory: where the lanes of the vector r are, in the frame, lane 0 first.
 vector_memory :: proc(fr: ^Frame, r: mir.Reg) -> enc.MemoryAddress {
 	return slot_memory(fr, place_of(fr, r).(Frame_Slot) + Frame_Slot(fr.f.kinds[r].lanes - 1))
 }
@@ -602,15 +651,29 @@ load_lanes :: proc(fr: ^Frame, x: enc.XMMRegister, o: mir.Operand) {
 	r, is_reg := o.(mir.Reg)
 	switch {
 	case is_reg && fr.f.kinds[r].lanes > 0:
-		enc.movdqu_xmm_m128(x, vector_memory(fr, r))
+		#partial switch p in place_of(fr, r) {
+		case enc.XMMRegister:
+			if p != x do enc.movapd_xmm_xmm(x, p)
+		case Frame_Slot:
+			enc.movdqu_xmm_m128(x, vector_memory(fr, r))
+		}
 		return
 	case is_reg && fr.f.kinds[r].machine == .Real:
-		enc.movq_xmm_m64(x, slot_address(fr, r))
+		load_real(fr, x, r)
 	case:
-		get(fr, .RAX, operand(fr, o))
-		enc.movq_xmm_r64(x, .RAX)
+		enc.movq_xmm_r64(x, in_register(fr, o, .RAX))
 	}
 	enc.punpcklqdq_xmm_xmm(x, x)
+}
+
+// store_lanes: the vector in x, into the place of r.
+store_lanes :: proc(fr: ^Frame, r: mir.Reg, x: enc.XMMRegister) {
+	#partial switch p in place_of(fr, r) {
+	case enc.XMMRegister:
+		if p != x do enc.movapd_xmm_xmm(p, x)
+	case Frame_Slot:
+		enc.movdqu_m128_xmm(vector_memory(fr, r), x)
+	}
 }
 
 // bounds_of: the bounds of an operand: of a register, or the integer it is.
@@ -628,21 +691,52 @@ in_32 :: proc(b: code.Bounds) -> bool {
 	return b.lo >= 0 && b.hi < 1 << 32
 }
 
-// vector_binary: xmm0 = a op b, in each lane; b a vector, or in each lane.
+// wide_work: the register an operation on floats or vectors computes dst in: its
+// own, unless b is there; or xmm0.
+wide_work :: proc(fr: ^Frame, dst: mir.Reg, b: mir.Operand) -> enc.XMMRegister {
+	d, is_reg := place_of(fr, dst).(enc.XMMRegister)
+	if !is_reg do return .XMM0
+	if r, reads := b.(mir.Reg); reads {
+		if p, in_reg := place_of(fr, r).(enc.XMMRegister); in_reg && p == d do return .XMM0
+	}
+	return d
+}
+
+// lanes_in: the vector o in a register: its own, or loaded into x — a value, in
+// each lane.
+lanes_in :: proc(fr: ^Frame, o: mir.Operand, x: enc.XMMRegister) -> enc.XMMRegister {
+	if r, is_reg := o.(mir.Reg); is_reg && fr.f.kinds[r].lanes > 0 {
+		if p, in_reg := place_of(fr, r).(enc.XMMRegister); in_reg do return p
+	}
+	load_lanes(fr, x, o)
+	return x
+}
+
+// vector_binary: x = a op b, in each lane, in dst's register or xmm0; b a vector,
+// or in each lane.
 vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
+	i := i
 	a := fr.f.kinds[i.a]
-	load_lanes(fr, .XMM0, i.a)
+	// b in the register of dst: when the operation commutes, the operands swap
+	if b, is_reg := i.b.(mir.Reg); is_reg && wide_work(fr, i.dst, i.b) == .XMM0 && fr.f.kinds[b].lanes > 0 {
+		#partial switch i.op {
+		case .Add, .Mul, .And, .Or, .Xor:
+			if i.op != .Mul || a.machine == .Real || in_32(a.bounds) == in_32(fr.f.kinds[b].bounds) do i.a, i.b = b, i.a
+		}
+	}
+	x := wide_work(fr, i.dst, i.b)
+	load_lanes(fr, x, i.a)
 	if a.machine == .Real {
-		load_lanes(fr, .XMM1, i.b)
+		y := lanes_in(fr, i.b, .XMM1)
 		#partial switch i.op {
 		case .Add:
-			enc.addpd_xmm_xmm(.XMM0, .XMM1)
+			enc.addpd_xmm_xmm(x, y)
 		case .Sub:
-			enc.subpd_xmm_xmm(.XMM0, .XMM1)
+			enc.subpd_xmm_xmm(x, y)
 		case .Mul:
-			enc.mulpd_xmm_xmm(.XMM0, .XMM1)
+			enc.mulpd_xmm_xmm(x, y)
 		case .Div:
-			enc.divpd_xmm_xmm(.XMM0, .XMM1)
+			enc.divpd_xmm_xmm(x, y)
 		case:
 			return "an operation on lanes of floats x86-64 does not write"
 		}
@@ -654,52 +748,52 @@ vector_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 			k := u8(count & 63)
 			switch {
 			case i.op == .Shl:
-				enc.psllq_xmm_imm8(.XMM0, k)
+				enc.psllq_xmm_imm8(x, k)
 			case a.bounds.lo >= 0:
-				enc.psrlq_xmm_imm8(.XMM0, k)
+				enc.psrlq_xmm_imm8(x, k)
 			case:
 				// arithmetic, from logical: m the sign of each lane, ((x ^ m) >> k) ^ m
-				enc.pshufd_xmm_xmm_imm8(.XMM1, .XMM0, 0xF5)
+				enc.pshufd_xmm_xmm_imm8(.XMM1, x, 0xF5)
 				enc.psrad_xmm_imm8(.XMM1, 31)
-				enc.pxor_xmm_xmm(.XMM0, .XMM1)
-				enc.psrlq_xmm_imm8(.XMM0, k)
-				enc.pxor_xmm_xmm(.XMM0, .XMM1)
+				enc.pxor_xmm_xmm(x, .XMM1)
+				enc.psrlq_xmm_imm8(x, k)
+				enc.pxor_xmm_xmm(x, .XMM1)
 			}
 		case:
-			load_lanes(fr, .XMM1, i.b)
+			y := lanes_in(fr, i.b, .XMM1)
 			#partial switch i.op {
 			case .Add:
-				enc.paddq_xmm_xmm(.XMM0, .XMM1)
+				enc.paddq_xmm_xmm(x, y)
 			case .Sub:
-				enc.psubq_xmm_xmm(.XMM0, .XMM1)
+				enc.psubq_xmm_xmm(x, y)
 			case .And:
-				enc.pand_xmm_xmm(.XMM0, .XMM1)
+				enc.pand_xmm_xmm(x, y)
 			case .Or:
-				enc.por_xmm_xmm(.XMM0, .XMM1)
+				enc.por_xmm_xmm(x, y)
 			case .Xor:
-				enc.pxor_xmm_xmm(.XMM0, .XMM1)
+				enc.pxor_xmm_xmm(x, y)
 			case .Mul:
 				if in_32(a.bounds) && in_32(bounds_of(fr, i.b)) {
-					enc.pmuludq_xmm_xmm(.XMM0, .XMM1)
+					enc.pmuludq_xmm_xmm(x, y)
 					break
 				}
 				// a·b in 64 bits: lo(a)·lo(b) + (hi(a)·lo(b) + lo(a)·hi(b)) << 32
-				enc.pshufd_xmm_xmm_imm8(.XMM2, .XMM0, 0xE4)
+				enc.pshufd_xmm_xmm_imm8(.XMM2, x, 0xE4)
 				enc.psrlq_xmm_imm8(.XMM2, 32)
-				enc.pmuludq_xmm_xmm(.XMM2, .XMM1)
-				enc.pshufd_xmm_xmm_imm8(.XMM3, .XMM1, 0xE4)
+				enc.pmuludq_xmm_xmm(.XMM2, y)
+				enc.pshufd_xmm_xmm_imm8(.XMM3, y, 0xE4)
 				enc.psrlq_xmm_imm8(.XMM3, 32)
-				enc.pmuludq_xmm_xmm(.XMM3, .XMM0)
+				enc.pmuludq_xmm_xmm(.XMM3, x)
 				enc.paddq_xmm_xmm(.XMM2, .XMM3)
 				enc.psllq_xmm_imm8(.XMM2, 32)
-				enc.pmuludq_xmm_xmm(.XMM0, .XMM1)
-				enc.paddq_xmm_xmm(.XMM0, .XMM2)
+				enc.pmuludq_xmm_xmm(x, y)
+				enc.paddq_xmm_xmm(x, .XMM2)
 			case:
 				return "an operation on lanes of integers x86-64 does not write"
 			}
 		}
 	}
-	enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+	store_lanes(fr, i.dst, x)
 	return ""
 }
 
@@ -724,7 +818,7 @@ vector_unary :: proc(fr: ^Frame, i: mir.Unary) -> string {
 	case:
 		return "an operation on lanes x86-64 does not write"
 	}
-	enc.movdqu_m128_xmm(vector_memory(fr, i.dst), .XMM0)
+	store_lanes(fr, i.dst, .XMM0)
 	return ""
 }
 
@@ -732,7 +826,7 @@ vector_unary :: proc(fr: ^Frame, i: mir.Unary) -> string {
 reduce :: proc(fr: ^Frame, i: mir.Reduce) -> string {
 	a := fr.f.kinds[i.a]
 	if a.lanes != 2 do return "a reduction of other than two lanes x86-64 does not write"
-	enc.movdqu_xmm_m128(.XMM0, vector_memory(fr, i.a))
+	load_lanes(fr, .XMM0, i.a)
 	enc.pshufd_xmm_xmm_imm8(.XMM1, .XMM0, 0x4E)
 	if a.machine == .Real {
 		#partial switch i.op {
@@ -743,7 +837,7 @@ reduce :: proc(fr: ^Frame, i: mir.Reduce) -> string {
 		case:
 			return "a reduction of floats x86-64 does not write"
 		}
-		enc.movq_m64_xmm(slot_address(fr, i.dst), .XMM0)
+		store_real(fr, i.dst, .XMM0)
 		return ""
 	}
 	enc.movq_r64_xmm(.RAX, .XMM0)

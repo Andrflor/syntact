@@ -14,23 +14,29 @@ import "core:slice"
 // when the range spans a call, any free one otherwise — the register of what it
 // is copied from first, so that the copy goes —, or a slot of the frame when none
 // is left: the range that ends last is the one that goes to the frame. Floats and
-// vectors go to the frame, a slot for each lane.
+// vectors have registers of their own, none of which a call keeps: across a call,
+// they are in the frame, a slot for each lane.
 
 // Target: the registers of a machine the scan gives, by their number: those a call
-// keeps, and those it does not; and those a call takes its integers in, in order.
+// keeps, and those it does not; those a call takes its integers in, in order; and
+// the registers of floats and vectors, which no call keeps.
 Target :: struct {
 	kept:      []int,
 	spent:     []int,
 	arguments: []int,
+	wide:      []int,
 }
 
-// Place: where a register is: a register of the machine, or a slot of the frame.
+// Place: where a register is: a register of the machine — of integers, or of
+// floats and vectors —, or slots of the frame, one for each lane.
 Place :: union {
 	Machine_Reg,
+	Wide_Reg,
 	Slot,
 }
 
 Machine_Reg :: distinct int
+Wide_Reg :: distinct int
 Slot :: distinct int
 
 Allocation :: struct {
@@ -238,64 +244,98 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 			k += 1
 		}
 	}
-	// the scan, in the order the ranges start
+	// the scan, in the order the ranges start, each bank on its own: the integers;
+	// the floats and the vectors, in registers no call keeps
 	order := make([dynamic]Range)
 	for r in ranges do if r.end >= 0 do append(&order, r)
 	slice.sort_by(order[:], proc(a, b: Range) -> bool {return a.start < b.start})
 	out := Allocation{places = make([]Place, n)}
-	free := make(map[int]bool)
-	for x in target.kept do free[x] = true
-	for x in target.spent do free[x] = true
-	active := make([dynamic]Range)
+	banks: [2]Bank
+	for &b in banks do b.free = make(map[int]bool)
+	for x in target.kept do banks[0].free[x] = true
+	for x in target.spent do banks[0].free[x] = true
+	for x in target.wide do banks[1].free[x] = true
+	number := make([]int, n) // the register of the machine each register is in
 	used := make(map[int]bool)
+	to_frame :: proc(out: ^Allocation, f: ^Func, r: Reg) {
+		out.places[r] = Slot(out.slots)
+		out.slots += max(f.kinds[r].lanes, 1)
+	}
 	for r in order {
 		// the ranges that ended free their registers
-		for j := 0; j < len(active); {
-			if active[j].end < r.start {
-				free[int(out.places[active[j].reg].(Machine_Reg))] = true
-				ordered_remove(&active, j)
-			} else do j += 1
+		for &b in banks {
+			for j := 0; j < len(b.active); {
+				if b.active[j].end < r.start {
+					b.free[number[b.active[j].reg]] = true
+					ordered_remove(&b.active, j)
+				} else do j += 1
+			}
 		}
-		if kind := f.kinds[r.reg]; kind.machine == .Real || kind.lanes > 0 {
-			// a float, a vector: its slots, one for each lane
-			out.places[r.reg] = Slot(out.slots)
-			out.slots += max(kind.lanes, 1)
+		is_wide := wide(f.kinds[r.reg])
+		bank := &banks[is_wide ? 1 : 0]
+		// what a register of the bank may hold this range
+		fits :: proc(target: Target, r: Range, is_wide: bool, x: int) -> bool {
+			return is_wide || !r.spans_call || slice.contains(target.kept, x)
+		}
+		if is_wide && r.spans_call {
+			to_frame(&out, f, r.reg)
 			continue
 		}
 		chosen := -1
-		if h := hint[r.reg]; h != NO_REG {
-			if x, in_reg := out.places[h].(Machine_Reg); in_reg && free[int(x)] && (!r.spans_call || slice.contains(target.kept, int(x))) do chosen = int(x)
+		if h := hint[r.reg]; h != NO_REG && wide(f.kinds[h]) == is_wide && in_register(out.places[h]) {
+			if x := number[h]; bank.free[x] && fits(target, r, is_wide, x) do chosen = x
 		}
-		if a := argument[r.reg]; chosen < 0 && a >= 0 && free[a] && !r.spans_call do chosen = a
-		if chosen < 0 && !r.spans_call do chosen = first_free(target.spent, free)
-		if chosen < 0 do chosen = first_free(target.kept, free)
+		if is_wide {
+			if chosen < 0 do chosen = first_free(target.wide, bank.free)
+		} else {
+			if a := argument[r.reg]; chosen < 0 && a >= 0 && bank.free[a] && !r.spans_call do chosen = a
+			if chosen < 0 && !r.spans_call do chosen = first_free(target.spent, bank.free)
+			if chosen < 0 do chosen = first_free(target.kept, bank.free)
+		}
 		if chosen < 0 {
 			// the range that ends last, among those whose register fits, goes to the frame
 			victim := -1
-			for a, j in active {
-				x := int(out.places[a.reg].(Machine_Reg))
-				fits := !r.spans_call || slice.contains(target.kept, x)
-				if fits && a.end > r.end && (victim < 0 || a.end > active[victim].end) do victim = j
+			for a, j in bank.active {
+				if fits(target, r, is_wide, number[a.reg]) && a.end > r.end && (victim < 0 || a.end > bank.active[victim].end) do victim = j
 			}
 			if victim < 0 {
-				out.places[r.reg] = Slot(out.slots)
-				out.slots += 1
+				to_frame(&out, f, r.reg)
 				continue
 			}
-			chosen = int(out.places[active[victim].reg].(Machine_Reg))
-			out.places[active[victim].reg] = Slot(out.slots)
-			out.slots += 1
-			ordered_remove(&active, victim)
+			chosen = number[bank.active[victim].reg]
+			to_frame(&out, f, bank.active[victim].reg)
+			ordered_remove(&bank.active, victim)
 		}
-		free[chosen] = false
-		out.places[r.reg] = Machine_Reg(chosen)
-		if slice.contains(target.kept, chosen) do used[chosen] = true
-		append(&active, r)
+		bank.free[chosen] = false
+		number[r.reg] = chosen
+		out.places[r.reg] = is_wide ? Place(Wide_Reg(chosen)) : Place(Machine_Reg(chosen))
+		if !is_wide && slice.contains(target.kept, chosen) do used[chosen] = true
+		append(&bank.active, r)
 	}
 	kept := make([dynamic]int)
 	for x in target.kept do if used[x] do append(&kept, x)
 	out.used = kept[:]
 	return out
+}
+
+// Bank: the registers of one kind the scan gives: those free, and the ranges in
+// them.
+Bank :: struct {
+	free:   map[int]bool,
+	active: [dynamic]Range,
+}
+
+// wide: a float, or a vector: in the registers of floats and vectors.
+wide :: proc(k: code.Kind) -> bool {
+	return k.machine == .Real || k.lanes > 0
+}
+
+in_register :: proc(p: Place) -> bool {
+	#partial switch _ in p {
+	case Machine_Reg, Wide_Reg:
+		return true
+	}
+	return false
 }
 
 first_free :: proc(regs: []int, free: map[int]bool) -> int {
