@@ -1,6 +1,7 @@
 package code_mir
 
 import code ".."
+import "core:slice"
 
 // THE CODE OF A MACHINE
 //
@@ -206,8 +207,111 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	constants(f)
 	fused(f)
 	unread(f)
+	coalesced(f)
+	rotated(f)
 	f.order = placed(f)
 	return f
+}
+
+// coalesced: a copy p = v that ends a block — a parameter of a loop taking its next
+// value —, v written in the block and read by nothing else, p read nowhere after:
+// v is p, what writes v writes p, and the copy goes.
+coalesced :: proc(f: ^Func) {
+	reads := make([]int, len(f.kinds))
+	written := make([]int, len(f.kinds))
+	regs := make([dynamic]Reg)
+	for b in f.blocks {
+		for inst in b.insts {
+			clear(&regs)
+			uses(inst, &regs)
+			for r in regs do reads[r] += 1
+			if w := writes(inst); w != NO_REG do written[w] += 1
+		}
+		clear(&regs)
+		end_uses(b.end, &regs)
+		for r in regs do reads[r] += 1
+	}
+	reads_reg :: proc(inst: Inst, r: Reg, regs: ^[dynamic]Reg) -> bool {
+		clear(regs)
+		uses(inst, regs)
+		for x in regs do if x == r do return true
+		return writes(inst) == r
+	}
+	for &b in f.blocks {
+		clear(&regs)
+		end_uses(b.end, &regs)
+		ending := slice.clone(regs[:])
+		for k := len(b.insts) - 1; k >= 0; k -= 1 {
+			c, is_copy := b.insts[k].(Copy)
+			if !is_copy do break
+			v, from_reg := c.src.(Reg)
+			p := c.dst
+			if !from_reg || reads[v] != 1 || written[v] != 1 || !same_kind(f.kinds[v], f.kinds[p]) || slice.contains(ending, p) do continue
+			j := -1
+			for m := k - 1; m >= 0; m -= 1 do if writes(b.insts[m]) == v {
+				j = m
+				break
+			}
+			if j < 0 do continue
+			free := true
+			for m in j + 1 ..< len(b.insts) do if m != k && reads_reg(b.insts[m], p, &regs) do free = false
+			if !free do continue
+			set_dst(&b.insts[j], p)
+			ordered_remove(&b.insts, k)
+		}
+	}
+}
+
+// same_kind: values a register of either holds: the same machine, the same lanes.
+same_kind :: proc(a, b: code.Kind) -> bool {
+	return a.machine == b.machine && a.lanes == b.lanes && code.lane_bits(a) == code.lane_bits(b)
+}
+
+// set_dst: what inst writes, r.
+set_dst :: proc(inst: ^Inst, r: Reg) {
+	switch &i in inst {
+	case Copy:
+		i.dst = r
+	case Real:
+		i.dst = r
+	case Text:
+		i.dst = r
+	case Input:
+		i.dst = r
+	case Unary:
+		i.dst = r
+	case Binary:
+		i.dst = r
+	case Compare:
+		i.dst = r
+	case Foreign:
+		i.dst = r
+	case Call:
+		i.dst = r
+	case Splat:
+		i.dst = r
+	case Lanes:
+		i.dst = r
+	case Reduce:
+		i.dst = r
+	case Select:
+		i.dst = r
+	}
+}
+
+// rotated: a jump to a block that only tests and branches is that test and that
+// branch — the end of a turn tests whether the loop goes on, and jumps back where it
+// does.
+rotated :: proc(f: ^Func) {
+	for &b, id in f.blocks {
+		j, is_jump := b.end.(Jump)
+		if !is_jump || int(j.to) == id do continue
+		target := f.blocks[j.to]
+		br, is_branch := target.end.(Branch)
+		if !is_branch || len(target.insts) > 2 do continue
+		append(&b.insts, ..target.insts[:])
+		b.end = br
+	}
 }
 
 // fused: a branch on a comparison nothing else reads is the branch of the
@@ -375,7 +479,7 @@ constants :: proc(f: ^Func) {
 
 // register: a new register of the machine m.
 register :: proc(f: ^Func, m: code.Machine) -> Reg {
-	append(&f.kinds, code.Kind{m, code.EVERY, 0})
+	append(&f.kinds, code.Kind{m, code.EVERY, 0, 0})
 	return Reg(len(f.kinds) - 1)
 }
 
