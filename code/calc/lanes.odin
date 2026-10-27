@@ -358,6 +358,11 @@ lift_node :: proc(t: ^Lift, n: Node) -> (out: Class, ok: bool) {
 	case .Unary:
 		a := lift(t, n.args[0]) or_return
 		return add(g, Node{kind = .Unary, op = n.op, args = one(a)}), true
+	case .Select:
+		test := lift(t, n.args[0]) or_return
+		yes := lift(t, n.args[1]) or_return
+		no := lift(t, n.args[2]) or_return
+		return add(g, Node{kind = .Select, args = three(test, yes, no)}), true
 	case .Binary:
 		a := lift(t, n.args[0]) or_return
 		b := lift(t, n.args[1]) or_return
@@ -444,7 +449,7 @@ copy_node :: proc(t: ^Copy, n: Node) -> (c: Class, ok: bool) {
 		out.owner = t.to
 	case .Call:
 		if !g.prog.funcs[n.index].pure do return NO_CLASS, false
-	case .Narrow, .Unary, .Binary, .In, .Get, .Splat, .Lanes, .Reduce:
+	case .Narrow, .Unary, .Binary, .In, .Get, .Splat, .Lanes, .Reduce, .Select:
 	case:
 		return NO_CLASS, false
 	}

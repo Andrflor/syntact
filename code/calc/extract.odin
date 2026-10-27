@@ -124,9 +124,11 @@ SSE2_REALS :: [code.Op]f64 {
 	.Ge  = 3,
 }
 
-// X64_LANES: the operations on lanes the x86-64 backend writes: no comparison,
-// no division, a shift of each lane by the same count.
+// X64_LANES: the operations on lanes the x86-64 backend writes: equality, but no
+// order, no division, a shift of each lane by the same count.
 X64_LANES :: [code.Op]f64 {
+	.Eq = 4,
+	.Ne = 5,
 	.Add = 1,
 	.Sub = 1,
 	.Mul = 8, // 1 on lanes in 32 bits
@@ -141,8 +143,6 @@ X64_LANES :: [code.Op]f64 {
 	.Not = 2,
 	.Shl = 1,
 	.Shr = 5, // 1 on lanes not negative
-	.Eq  = INFINITE,
-	.Ne  = INFINITE,
 	.Lt  = INFINITE,
 	.Le  = INFINITE,
 	.Gt  = INFINITE,
@@ -179,7 +179,7 @@ X64 := Costs {
 	reals  = X64_REALS,
 	load   = 1,
 	call   = 20,
-	branch = 2,
+	branch = 3,
 	turns  = 16,
 	lanes  = 2,
 	vints  = X64_LANES,
@@ -188,13 +188,28 @@ X64 := Costs {
 	reduce = 3,
 }
 
+// GCC: x86-64 as the C compiler writes for it, its own vectors.
+GCC := Costs {
+	ints   = X64_INTS,
+	reals  = X64_REALS,
+	load   = 1,
+	call   = 20,
+	branch = 3,
+	turns  = 16,
+	lanes  = 0,
+	vints  = SSE2_INTS,
+	vreals = SSE2_REALS,
+	splat  = 2,
+	reduce = 2,
+}
+
 // C: x86-64 as the C compiler writes for it, with the vectors of SSE2.
 C := Costs {
 	ints   = X64_INTS,
 	reals  = X64_REALS,
 	load   = 1,
 	call   = 20,
-	branch = 2,
+	branch = 3,
 	turns  = 16,
 	lanes  = 2,
 	vints  = SSE2_INTS,
@@ -204,13 +219,13 @@ C := Costs {
 }
 
 
-// extract: the node of least cost of each class, by its index; -1 for a class
-// nothing computes. A computation costs what each class it reaches costs once —
+// extract: the node of least cost of each class, by its index — -1 for a class
+// nothing computes —, and that cost. A computation costs what each class it reaches costs once —
 // computed once, read as often as it is —: its weight times how often it runs, the
 // turns of each loop it is in (a class is where its scope is). From the best each
 // class has, to a fixed point; a node that reaches its own class is no computation
 // of it.
-extract :: proc(g: ^Graph, costs: ^Costs) -> []int {
+extract :: proc(g: ^Graph, costs: ^Costs) -> (best: []int, cost: []f64) {
 	scope := scopes(g)
 	index_members(g)
 	turns := make([]f64, len(g.loops))
@@ -221,8 +236,8 @@ extract :: proc(g: ^Graph, costs: ^Costs) -> []int {
 		r = 1
 		if s, has := scope[c].?; has do r = runs_in(g, turns, s)
 	}
-	best := make([]int, n)
-	cost := make([]f64, n)
+	best = make([]int, n)
+	cost = make([]f64, n)
 	reach := make([][]Class, n)
 	for &b in best do b = -1
 	for &c in cost do c = INFINITE
@@ -260,7 +275,7 @@ extract :: proc(g: ^Graph, costs: ^Costs) -> []int {
 		}
 		if !changed do break
 	}
-	return best
+	return
 }
 
 // runs_in: how often a computation in the region r runs: the turns of each loop it
@@ -349,7 +364,13 @@ weight :: proc(g: ^Graph, costs: ^Costs, n: Node) -> f64 {
 		if a.constant != nil && a.lanes == 0 do w += costs.load
 		return w
 	case .In:
-		return costs.branch * f64(len(g.covers[n.index].ints) + len(g.covers[n.index].reals))
+		// a comparison for each side of each cell
+		return 2 * costs.ints[.Le] * f64(len(g.covers[n.index].ints) + len(g.covers[n.index].reals))
+	case .Select:
+		// a mask and three operations on lanes; a test and a move
+		t := g.facts[find(g, n.args[1])]
+		if t.lanes > 0 do return 4 * table(costs, t)[.Xor]
+		return 2 * costs.ints[.And]
 	case .Foreign, .Call:
 		return costs.call
 	case .Match:

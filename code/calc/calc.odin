@@ -49,6 +49,7 @@ Kind :: enum u8 {
 	Splat, // value: the lanes; a in each
 	Lanes, // index: the integers of each lane, in the graph's table
 	Reduce, // op over the lanes of a
+	Select, // test, yes, no: yes where test is 1, no where it is 0
 	Foreign, // index: the symbol; the state, then the arguments — gives the state after, and the answer
 	Call, // index: the function; its arguments, after the state when it has effects — then gives the state after, and the answer
 	Match, // owner: the match; the target, the state when its arms have effects, then what each arm gives
@@ -87,11 +88,12 @@ ROOT :: Region{}
 // arm gives: a value, the state after its effects — or, in the body of a loop, a
 // tail.
 Match_Info :: struct {
-	parent: Region,
-	covers: []code.Cover,
-	value:  bool,
-	state:  bool,
-	tail:   bool,
+	parent:   Region,
+	covers:   []code.Cover,
+	value:    bool,
+	state:    bool,
+	tail:     bool,
+	selected: bool, // the law of selects went through it
 }
 
 // Loop_Info: a loop: the region it runs in, its node, the kind of each parameter by

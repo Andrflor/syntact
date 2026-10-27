@@ -193,7 +193,7 @@ choose :: proc(g: ^Graph, n: Node, early, late: Region) -> (Region, bool) {
 // speculable: a computation that cannot fail nor go on, whatever its arguments.
 speculable :: proc(g: ^Graph, n: Node) -> bool {
 	#partial switch n.kind {
-	case .Int, .Real, .Text, .Input, .Argument, .Unary, .In, .Narrow, .Splat, .Lanes, .Reduce:
+	case .Int, .Real, .Text, .Input, .Argument, .Unary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
 		return true
 	case .Binary:
 		#partial switch n.op {

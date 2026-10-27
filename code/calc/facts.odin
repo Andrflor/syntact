@@ -48,6 +48,11 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		b := a.bounds
 		for _ in 1 ..< a.lanes do b = binary_bounds(n.op, b, a.bounds)
 		out.bounds = b
+	case .Select:
+		yes, no := g.facts[find(g, n.args[1])], g.facts[find(g, n.args[2])]
+		out.machine, out.lanes = yes.machine, max(yes.lanes, no.lanes, g.facts[find(g, n.args[0])].lanes)
+		if yes.machine == .Int do out.bounds = code.hull(yes.bounds, no.bounds)
+		if x, known := yes.constant.?; known && yes.constant == no.constant do out.constant = x
 	case .Unary:
 		a := g.facts[find(g, n.args[0])]
 		out.machine, out.lanes = a.machine, a.lanes

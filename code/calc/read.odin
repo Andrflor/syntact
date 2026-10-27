@@ -79,6 +79,8 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 		set(r, i.dst, Node{kind = .Lanes, index = vector(g, i.values)})
 	case code.Reduce:
 		set(r, i.dst, Node{kind = .Reduce, op = i.op, args = classes(r, {i.a})})
+	case code.Select:
+		set(r, i.dst, Node{kind = .Select, args = classes(r, {i.test, i.yes, i.no})})
 	case code.In:
 		append(&g.covers, i.cover)
 		set(r, i.dst, Node{kind = .In, index = len(g.covers) - 1, args = classes(r, {i.x})})

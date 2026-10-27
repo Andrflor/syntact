@@ -33,8 +33,9 @@ optimize :: proc(p: ^code.Program, costs: ^Costs) -> (out: code.Program, err: st
 		g, value, state := read(p, f)
 		g.costs = costs
 		rebuild(g)
-		saturate(g, 50 * len(g.nodes))
-		plan := plan(g, extract(g, costs), {value, state})
+		saturate(g, 100 * len(g.nodes))
+		best, _ := extract(g, costs)
+		plan := plan(g, best, {value, state})
 		if plan.error != "" do return out, fmt.tprintf("%s: %s", f.name, plan.error)
 		written, msg := write_function(plan, f, value, state)
 		if msg != "" do return out, fmt.tprintf("%s: %s", f.name, msg)
@@ -140,7 +141,7 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 			if read do done(w, answer, dst)
 			return done(w, c, code.NONE)
 		}
-	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce:
+	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
 	}
 	args := values_of(w, n.args)
 	dst := fresh(w, c)
@@ -168,6 +169,8 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 		inst = code.Lanes{dst, g.vectors[n.index]}
 	case .Reduce:
 		inst = code.Reduce{dst, args[0], n.op}
+	case .Select:
+		inst = code.Select{dst, args[0], args[1], args[2]}
 	case .Call:
 		inst = code.Call{dst, n.index, args}
 	}

@@ -21,15 +21,26 @@ import code ".."
 //   a ⊕ b = b ⊕ a               ⊕ commutes: + * & | ^ = ≠, on integers and floats
 //   a ◁ b = b ▷ a               ▷ the converse of ◁: < >, <= >=
 //   x + c ◁ k = x ◁ k - c       ◁ a comparison, x + c not wrapping
+//   t ? {c -> a  -> b} = (t in c) ? a : b       selects (selects.odin)
 
 Law :: proc(g: ^Graph, c: Class, n: Node)
 
-LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, shifted, gathered, chained}
+LAWS := [?]Law{known, neutral, absorbing, strength, divided, commuted, conversed, shifted, gathered, chained, selected, cells}
 
-// saturate: the laws on every node, those of the loops (loops.odin), and of lanes
-// (lanes.odin), until none
-// adds a node nor merges two classes, or the graph holds budget nodes.
+// saturate: the laws on every node and those of the loops (loops.odin), until none
+// adds a node nor merges two classes, or the graph holds budget nodes; then the law
+// of lanes (lanes.odin), on the loops as the laws left them, and the laws again,
+// on what it made.
 saturate :: proc(g: ^Graph, budget: int) {
+	saturated(g, budget)
+	index_members(g)
+	g.scope = scopes(g)
+	laned(g)
+	rebuild(g)
+	saturated(g, budget)
+}
+
+saturated :: proc(g: ^Graph, budget: int) {
 	for len(g.nodes) < budget {
 		nodes, merges := len(g.nodes), g.merges
 		index_members(g)
@@ -39,7 +50,6 @@ saturate :: proc(g: ^Graph, budget: int) {
 			for law in LAWS do law(g, find(g, g.home[id]), n)
 		}
 		loop_laws(g)
-		laned(g)
 		rebuild(g)
 		if len(g.nodes) == nodes && g.merges == merges do return
 	}
@@ -184,8 +194,11 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 		m := (i128(1) << bits) * (i128(1) << l - divisor) / divisor + 1
 		if top * m >= i128(1) << 63 do break
 		t := add(g, binary(g, .Shr, add(g, binary(g, .Mul, x, constant(g, m))), constant(g, i128(bits))))
-		half := add(g, binary(g, .Shr, add(g, binary(g, .Sub, x, t)), constant(g, 1)))
-		append(&quotients, add(g, binary(g, .Shr, add(g, binary(g, .Add, t, half)), constant(g, i128(l - 1)))))
+		// t ≤ x: what the theorem proves, the laws hold
+		rest := add(g, binary(g, .Sub, x, t))
+		sum := add(g, binary(g, .Add, t, add(g, binary(g, .Shr, rest, constant(g, 1)))))
+		for c in ([]Class{t, rest, sum}) do g.facts[find(g, c)].bounds = code.meet(g.facts[find(g, c)].bounds, {0, top})
+		append(&quotients, add(g, binary(g, .Shr, sum, constant(g, i128(l - 1)))))
 		break
 	}
 	// the high half of a product of 128 bits
