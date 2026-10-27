@@ -2,13 +2,15 @@ package main
 
 import code ".."
 import c "../c"
+import calc "../calc"
 import x64 "../x64"
 import kernel "../../kernel"
 import "core:fmt"
 import "core:os"
 
-// code FILE [-o OUT | -c OUT.c]: the code of the program the file writes; with -o,
-// the executable for x86-64 Linux; with -c, the program as C.
+// code FILE [-o OUT | -c OUT.c]: the code of the program the file writes, as the
+// normal form of its computations (code/calc); with -o, the executable for x86-64
+// Linux; with -c, the program as C.
 main :: proc() {
 	if len(os.args) < 2 || len(os.args) == 3 || len(os.args) > 4 || len(os.args) == 4 && os.args[2] != "-o" && os.args[2] != "-c" {
 		fmt.eprintln("usage: code FILE [-o OUT | -c OUT.c]")
@@ -25,9 +27,14 @@ main :: proc() {
 		os.exit(1)
 	}
 	for e in k.errors do fmt.eprintfln("%v  %s", e.kind, e.message)
-	prog, msg := code.lower_program(&k)
+	direct, msg := code.lower_program(&k)
 	if msg != "" {
 		fmt.eprintln(msg)
+		os.exit(1)
+	}
+	prog, failed := calc.optimize(&direct, &calc.X64)
+	if failed != "" {
+		fmt.eprintln(failed)
 		os.exit(1)
 	}
 	if len(os.args) == 2 {

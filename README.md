@@ -121,7 +121,7 @@ fib -> {
 | `kernel/` | the algebra on its terms: the typecheck, holes included. Every case of the spec passes, and the corpus cases whose forms it builds, but for five that contradict the spec. The cast `\` and events are not built yet |
 | `lsp/` | diagnostics, the type of any expression on hover, and completion, from the kernel |
 | `syntax/` | the parser, used by everything |
-| `code/` | the normal form of a program as code: a bytecode that keeps its structure (a pattern is a match, a recursion whose calls are in tail position a loop) and what the kernel proved of each value (bounds, narrowings, covers, purity), its interpreter, the code laid out for a machine in blocks whose registers a linear scan places (`code/mir`), executables for x86-64 Linux (`code/x64`, on the encoder, the ELF writer and the System V ABI of `code/x64/asm`), and the program as C (`code/c`), the reference for the C compiler's optimizations. Scopes as values beyond a boundary, arguments on the stack and `f32` are not code yet |
+| `code/` | the normal form of a program as code: a bytecode that keeps its structure (a pattern is a match, a recursion whose calls are in tail position a loop) and what the kernel proved of each value (bounds, narrowings, covers, purity), its interpreter, which checks those facts at each value it writes, the algebra of computations whose normal form is the computation of least cost on a machine (`code/calc`), the code laid out for a machine in blocks whose registers a linear scan places (`code/mir`), executables for x86-64 Linux (`code/x64`, on the encoder, the ELF writer and the System V ABI of `code/x64/asm`), and the program as C (`code/c`), the reference for the C compiler's optimizations. Scopes as values beyond a boundary, arguments on the stack and `f32` are not code yet |
 
 Next: effects and state in the algebra, then the residual program to bytecode.
 
@@ -141,7 +141,7 @@ odin build code/cmd -out:code.bin
 ./code.bin program.syn -o program         # an executable for x86-64 Linux
 ./program 10                              # its unknowns `??`, in order, on the command line
 ./code.bin program.syn -c program.c       # the program as C: cc -O3 program.c -o program
-odin test code && odin test code/x64 && odin test code/c   # the code of each case, then the executables of each backend run
+odin test code && odin test code/calc && odin test code/x64 && odin test code/c   # the code of each case, its normal form, then the executables of each backend run
 
 odin test test/parse                      # the parser
 odin test code/x64/asm                    # the encoder, against GNU as

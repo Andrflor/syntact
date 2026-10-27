@@ -26,7 +26,7 @@ Binary_Run :: struct {
 
 LIBM :: "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\n"
 PRINTF :: "io -> <libc.so.6>{\n  printf -> {string:format, i64:n, -> !?::i32}\n}\n"
-LIBC :: "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  atoi -> {string:s, -> !?::i32}\n}\n"
+LIBC :: "libc -> <libc.so.6>{\n  puts -> {string:s, -> !?::i32}\n  abs -> {i32:n, -> !?::i32}\n  atoi -> {string:s, -> !?::i32}\n  srand -> {u32:seed, -> !?::none}\n}\n"
 
 CASES := []Binary_Case {
 	{"known", "greeting -> \"hello\"\nanswer -> 42\n-> answer", {{exit = 42}}},
