@@ -21,6 +21,17 @@ pand_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xDB, dst, src)}
 por_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xEB, dst, src)}
 pxor_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xEF, dst, src)}
 pandn_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xDF, dst, src)}
+paddd_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xFE, dst, src)}
+psubd_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xFA, dst, src)}
+
+// pmulld xmm, xmm : 66 [REX] 0F 38 40 /r — the low halves of the products of the
+// dwords, SSE4.1.
+pmulld_xmm_xmm :: proc(dst, src: XMMRegister) {
+	rex: u8 = 0x40 | (u8(dst) & 0x8) >> 1 | (u8(src) & 0x8) >> 3
+	modrm := encode_modrm(3, u8(dst) & 0x7, u8(src) & 0x7)
+	if rex != 0x40 do write([]u8{0x66, rex, 0x0F, 0x38, 0x40, modrm})
+	else do write([]u8{0x66, 0x0F, 0x38, 0x40, modrm})
+}
 pmuludq_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0xF4, dst, src)}
 pcmpeqd_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0x76, dst, src)}
 punpcklqdq_xmm_xmm :: proc(dst, src: XMMRegister) {packed(0x66, 0x6C, dst, src)}
@@ -39,6 +50,8 @@ shift_imm8 :: proc(op, ext: u8, reg: XMMRegister, imm: u8) {
 psllq_xmm_imm8 :: proc(reg: XMMRegister, imm: u8) {shift_imm8(0x73, 6, reg, imm)}
 psrlq_xmm_imm8 :: proc(reg: XMMRegister, imm: u8) {shift_imm8(0x73, 2, reg, imm)}
 psrad_xmm_imm8 :: proc(reg: XMMRegister, imm: u8) {shift_imm8(0x72, 4, reg, imm)}
+pslld_xmm_imm8 :: proc(reg: XMMRegister, imm: u8) {shift_imm8(0x72, 6, reg, imm)}
+psrld_xmm_imm8 :: proc(reg: XMMRegister, imm: u8) {shift_imm8(0x72, 2, reg, imm)}
 
 // pshufd xmm, xmm, imm8 : 66 [REX] 0F 70 /r ib — the dwords of src, in the order
 // imm8 says.

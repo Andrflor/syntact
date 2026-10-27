@@ -2916,6 +2916,9 @@ testing_sse_packed :: proc(t: ^testing.T) {
 		{"por", por_xmm_xmm},
 		{"pxor", pxor_xmm_xmm},
 		{"pandn", pandn_xmm_xmm},
+		{"paddd", paddd_xmm_xmm},
+		{"psubd", psubd_xmm_xmm},
+		{"pmulld", pmulld_xmm_xmm},
 		{"pmuludq", pmuludq_xmm_xmm},
 		{"pcmpeqd", pcmpeqd_xmm_xmm},
 		{"punpcklqdq", punpcklqdq_xmm_xmm},
@@ -2943,7 +2946,7 @@ testing_sse_packed :: proc(t: ^testing.T) {
 		name:   string,
 		encode: proc(reg: XMMRegister, imm: u8),
 	}
-	for op in ([]Shift{{"psllq", psllq_xmm_imm8}, {"psrlq", psrlq_xmm_imm8}, {"psrad", psrad_xmm_imm8}}) do for reg in 0 ..< 16 do for imm in ([]u8{1, 11, 31, 63}) {
+	for op in ([]Shift{{"psllq", psllq_xmm_imm8}, {"psrlq", psrlq_xmm_imm8}, {"psrad", psrad_xmm_imm8}, {"pslld", pslld_xmm_imm8}, {"psrld", psrld_xmm_imm8}}) do for reg in 0 ..< 16 do for imm in ([]u8{1, 11, 31, 63}) {
 		buffer := ByteBuffer{}
 		context.user_ptr = &buffer
 		op.encode(XMMRegister(reg), imm)
