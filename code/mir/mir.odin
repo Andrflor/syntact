@@ -24,8 +24,9 @@ Operand :: union {
 
 Block_Id :: distinct int
 
-// Cond: a comparison of two integers, signed, or unsigned for Below_Eq and Above;
-// of two floats, unordered never holding.
+// Cond: a comparison of two integers, signed, or unsigned for Below… and Above…;
+// of two floats, unordered never holding. Each has its contrary and its converse
+// (laws.odin).
 Cond :: enum u8 {
 	Eq,
 	Ne,
@@ -33,8 +34,10 @@ Cond :: enum u8 {
 	Le,
 	Gt,
 	Ge,
+	Below,
 	Below_Eq,
 	Above,
+	Above_Eq,
 }
 
 Inst :: union {
@@ -170,6 +173,7 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	body(&b, src.body)
 	finish(&b, Return{value = src.body.value == code.NONE ? NO_REG : Reg(src.body.value)})
 	constants(f)
+	laws(f)
 	unread(f)
 	f.order = placed(f)
 	return f
@@ -241,19 +245,9 @@ placed :: proc(f: ^Func) -> []Block_Id {
 // constants: a register written once, by an integer, is that integer where an
 // operand may be one; its copy goes when nothing reads it any more.
 constants :: proc(f: ^Func) {
-	writes_count := make([]int, len(f.kinds))
-	value := make([]Maybe(i64), len(f.kinds))
-	for i in 0 ..< len(f.source.params) do writes_count[i] += 1
-	for b in f.blocks do for inst in b.insts {
-		w := writes(inst)
-		if w == NO_REG do continue
-		writes_count[w] += 1
-		if c, is_copy := inst.(Copy); is_copy {
-			if v, is_int := c.src.(i64); is_int do value[w] = v
-		}
-	}
-	known :: proc(o: Operand, value: []Maybe(i64), writes_count: []int) -> Operand {
-		if r, is_reg := o.(Reg); is_reg && writes_count[r] == 1 {
+	value := constant_values(f)
+	known :: proc(o: Operand, value: []Maybe(i64)) -> Operand {
+		if r, is_reg := o.(Reg); is_reg {
 			if v, has := value[r].?; has do return v
 		}
 		return o
@@ -262,20 +256,20 @@ constants :: proc(f: ^Func) {
 		for &inst in b.insts {
 			switch &i in inst {
 			case Copy:
-				i.src = known(i.src, value, writes_count)
+				i.src = known(i.src, value)
 			case Binary:
-				i.b = known(i.b, value, writes_count)
+				i.b = known(i.b, value)
 			case Compare:
-				i.b = known(i.b, value, writes_count)
+				i.b = known(i.b, value)
 			case Foreign:
-				for &a in i.args do a = known(a, value, writes_count)
+				for &a in i.args do a = known(a, value)
 			case Call:
-				for &a in i.args do a = known(a, value, writes_count)
+				for &a in i.args do a = known(a, value)
 			case Real, Text, Input, Unary:
 			}
 		}
 		if br, is_branch := b.end.(Branch); is_branch {
-			br.b = known(br.b, value, writes_count)
+			br.b = known(br.b, value)
 			b.end = br
 		}
 	}
@@ -295,7 +289,7 @@ constants :: proc(f: ^Func) {
 	for &b in f.blocks {
 		kept := make([dynamic]Inst)
 		for inst in b.insts {
-			if c, is_copy := inst.(Copy); is_copy && writes_count[c.dst] == 1 && value[c.dst] != nil && !read[c.dst] do continue
+			if c, is_copy := inst.(Copy); is_copy && value[c.dst] != nil && !read[c.dst] do continue
 			append(&kept, inst)
 		}
 		b.insts = kept
@@ -305,11 +299,6 @@ constants :: proc(f: ^Func) {
 new_block :: proc(b: ^Builder) -> Block_Id {
 	append(&b.f.blocks, Block{})
 	return Block_Id(len(b.f.blocks) - 1)
-}
-
-new_reg :: proc(b: ^Builder, m: code.Machine) -> Reg {
-	append(&b.f.kinds, code.Kind{m, code.EVERY})
-	return Reg(len(b.f.kinds) - 1)
 }
 
 emit :: proc(b: ^Builder, inst: Inst) {
@@ -436,7 +425,7 @@ parallel :: proc(b: ^Builder, dst, src: []code.Value) {
 		if moved do continue
 		// a cycle: the first destination is kept apart
 		d := pending[0].dst
-		t := new_reg(b, b.f.kinds[d].machine)
+		t := register(b.f, b.f.kinds[d].machine)
 		emit(b, Copy{t, d})
 		for &q in pending do if q.src == d do q.src = t
 	}
@@ -463,14 +452,14 @@ test :: proc(b: ^Builder, x: Reg, c: code.Cover, yes, no: Block_Id) {
 			below := r.hi < max(f64)
 			if above {
 				// x below lo, or at an open lo: not in the cell
-				lo := new_reg(b, .Real)
+				lo := register(b.f, .Real)
 				emit(b, Real{lo, transmute(i64)r.lo})
 				within := below ? new_block(b) : yes
 				finish(b, Branch{r.lo_open ? .Gt : .Ge, x, lo, within, next})
 				if below do start(b, within)
 			}
 			if below {
-				hi := new_reg(b, .Real)
+				hi := register(b.f, .Real)
 				emit(b, Real{hi, transmute(i64)r.hi})
 				finish(b, Branch{r.hi_open ? .Lt : .Le, x, hi, yes, next})
 			}
@@ -486,7 +475,7 @@ test :: proc(b: ^Builder, x: Reg, c: code.Cover, yes, no: Block_Id) {
 				// lo ≤ x ≤ hi: x - lo ≤ hi - lo, unsigned
 				shifted := x
 				if cell.lo != 0 {
-					shifted = new_reg(b, .Int)
+					shifted = register(b.f, .Int)
 					emit(b, Binary{.Sub, shifted, x, i64(cell.lo)})
 				}
 				finish(b, Branch{.Below_Eq, shifted, i64(cell.hi - cell.lo), yes, next})

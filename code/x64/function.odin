@@ -301,13 +301,6 @@ pass :: proc(fr: ^Frame, args: []mir.Operand, assignment: enc.X64_ABI_Assignment
 	}
 }
 
-// power_of_two: k when v = 2ᵏ, k ≥ 1.
-power_of_two :: proc(v: i64) -> (k: u8, ok: bool) {
-	if v < 2 || v & (v - 1) != 0 do return
-	for x := v; x > 1; x >>= 1 do k += 1
-	return k, true
-}
-
 int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 	f := fr.f
 	b := operand(fr, i.b)
@@ -324,14 +317,24 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 			x = .RAX
 		}
 	}
-	nonnegative := f.kinds[i.a].bounds.lo >= 0
 	constant, is_constant := b.(i64)
 	#partial switch i.op {
 	case .Add, .Sub, .And, .Or, .Xor:
 		get(fr, x, a)
-		if is_constant && fits_32(constant) && (i.op == .Add || i.op == .Sub) {
-			if i.op == .Add do enc.add_r64_imm32(x, u32(i32(constant)))
-			else do enc.sub_r64_imm32(x, u32(i32(constant)))
+		if is_constant && fits_32(constant) {
+			imm := u32(i32(constant))
+			#partial switch i.op {
+			case .Add:
+				enc.add_r64_imm32(x, imm)
+			case .Sub:
+				enc.sub_r64_imm32(x, imm)
+			case .And:
+				enc.and_r64_imm32(x, imm)
+			case .Or:
+				enc.or_r64_imm32(x, imm)
+			case .Xor:
+				enc.xor_r64_imm32(x, imm)
+			}
 		} else if slot, in_slot := b.(Frame_Slot); in_slot {
 			m := slot_memory(fr, slot)
 			#partial switch i.op {
@@ -363,9 +366,7 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 		}
 	case .Mul:
 		get(fr, x, a)
-		if k, shift := power_of_two(constant); is_constant && shift {
-			enc.shl_r64_imm8(x, k)
-		} else if is_constant && fits_32(constant) {
+		if is_constant && fits_32(constant) {
 			enc.imul_r64_r64_imm32(x, x, u32(i32(constant)))
 		} else if slot, in_slot := b.(Frame_Slot); in_slot {
 			enc.imul_r64_m64(x, slot_memory(fr, slot))
@@ -373,21 +374,11 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 			enc.imul_r64_r64(x, in_register_place(fr, b, .RCX))
 		}
 	case .Div, .Mod:
-		if k, shift := power_of_two(constant); is_constant && shift && nonnegative {
-			// a dividend ≥ 0: a shift, a mask
-			get(fr, x, a)
-			if i.op == .Div do enc.shr_r64_imm8(x, k)
-			else {
-				get(fr, .RCX, constant - 1)
-				enc.and_r64_r64(x, .RCX)
-			}
-		} else {
-			y := in_register_place(fr, b, .RCX)
-			get(fr, .RAX, place_of(fr, i.a))
-			enc.cqo()
-			enc.idiv_r64(y)
-			x = i.op == .Div ? .RAX : .RDX
-		}
+		y := in_register_place(fr, b, .RCX)
+		get(fr, .RAX, place_of(fr, i.a))
+		enc.cqo()
+		enc.idiv_r64(y)
+		x = i.op == .Div ? .RAX : .RDX
 	case .Shl, .Shr:
 		get(fr, x, a)
 		if is_constant {
@@ -509,37 +500,20 @@ set :: proc(cond: mir.Cond, real: bool) {
 	case .Ge:
 		if real do enc.setae_r8(.AL)
 		else do enc.setge_r8(.AL)
+	case .Below:
+		enc.setb_r8(.AL)
 	case .Below_Eq:
 		enc.setbe_r8(.AL)
 	case .Above:
 		enc.seta_r8(.AL)
+	case .Above_Eq:
+		enc.setae_r8(.AL)
 	}
 }
 
 // jump_if: the jump of a cond, or of its contrary; on floats, the unsigned ones.
 jump_if :: proc(cond: mir.Cond, real, contrary: bool) -> proc(offset: i32) {
-	c := cond
-	if contrary {
-		switch cond {
-		case .Eq:
-			c = .Ne
-		case .Ne:
-			c = .Eq
-		case .Lt:
-			c = .Ge
-		case .Le:
-			c = .Gt
-		case .Gt:
-			c = .Le
-		case .Ge:
-			c = .Lt
-		case .Below_Eq:
-			c = .Above
-		case .Above:
-			c = .Below_Eq
-		}
-	}
-	switch c {
+	switch contrary ? mir.CONTRARY[cond] : cond {
 	case .Eq:
 		return enc.je_rel32
 	case .Ne:
@@ -552,10 +526,14 @@ jump_if :: proc(cond: mir.Cond, real, contrary: bool) -> proc(offset: i32) {
 		return real ? enc.ja_rel32 : enc.jg_rel32
 	case .Ge:
 		return real ? enc.jae_rel32 : enc.jge_rel32
+	case .Below:
+		return enc.jb_rel32
 	case .Below_Eq:
 		return enc.jbe_rel32
 	case .Above:
 		return enc.ja_rel32
+	case .Above_Eq:
+		return enc.jae_rel32
 	}
 	return enc.jmp_rel32
 }
