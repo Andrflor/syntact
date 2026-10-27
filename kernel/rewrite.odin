@@ -153,7 +153,9 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		for b in p.branches[1:] do all_same &&= same(k, b.product, p.branches[0].product)
 		if all_same do return p.branches[0].product
 		return as_normal(p)
-	case ^Scope, ^Name, ^Access, ^Carve, ^Default:
+	case ^Scope:
+		return rewrite_carve(k, v, r)
+	case ^Name, ^Access, ^Carve, ^Default:
 	}
 	return t
 }
@@ -162,7 +164,20 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 // rewritten: the call of the carve with those values rewritten.
 rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 	s, is_scope := c.target.(^Scope)
-	if !is_scope || s.carved == nil do return c
+	if !is_scope do return c
+	carved := rewrite_carve(k, s, r)
+	if carved == s do return c
+	out := new(Collapse)
+	out^ = c^
+	out.target = carved
+	return out
+}
+
+// rewrite_carve: a carve, its changes rewritten — s{x -> v} with u rewritten is
+// s{x -> v with u rewritten} —; the scope itself when none changes, or when it is
+// written, not carved: a value the rewrite does not enter.
+rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
+	if s.carved == nil do return s
 	changes := make(map[^Binding]Type)
 	moved := false
 	for b, v in s.changes {
@@ -170,11 +185,8 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 		changes[b] = w
 		moved ||= !same(k, w, v)
 	}
-	if !moved do return c
-	out := new(Collapse)
-	out^ = c^
-	out.target = carved_copy(k, s.carved, changes)
-	return out
+	if !moved do return s
+	return carved_copy(k, s.carved, changes)
 }
 
 // rewrite_fold: the fold with its parts rewritten; what it binds is its own.
