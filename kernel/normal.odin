@@ -18,6 +18,7 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 	case ^Unknown:
 		return v
 	case ^Effect:
+		if v.emission != nil do return emission_law(k, v)
 		return effect_law(k, v, normal(k, v.then))
 	case ^Fold:
 		return fold_law(k, v)
@@ -396,6 +397,9 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	} else {
 		value = normal(k, b.value)
 	}
+	// the program is collapsed by nothing: what comes up to it is answered by the
+	// default of each emission (§4.9)
+	if b.scope == k.root do value = answered_by_program(k, value)
 	// a production keeps the effects of the bindings above it, even those it does not
 	// name (§4.8)
 	if b.kind == .Product {

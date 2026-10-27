@@ -86,8 +86,23 @@ Effect :: struct {
 	call:    ^Collapse, // the effect is this call: a recursive call with effects, or a symbol behind a boundary
 	fold:    ^Fold, // the effect is this fold: the effects of its steps, in order (§5.6)
 	choice:  Type, // the effect is this choice: a pattern, the effects of the branch it takes
+	emission: ^Emission, // an emission its handler has not answered yet (§4.9)
 	then:    Type,
 	span:    syn.Span,
+}
+
+// Emission: ⟨E{a}⟩(x, t), the event E sent with a, x its answer (§4.9). It is not an
+// effect: a handler answers it where the scope that holds it is collapsed, when the
+// program is typed. Until then it is held where it is written, like an effect,
+// since its handler may have some: it is the Effect that carries it.
+Emission :: struct {
+	id:       int, // the emission written: copies and runs keep it
+	sent:     Type, // E{a}, or E: what is sent
+	handle:   Type, // E, the name of the event, as written: a copy follows it, never replaces it (copy_handle)
+	event:    ^Binding, // the binding E names, as written (as_written); nil until typed
+	handlers: []^Binding, // the handlers visible where it is written, the nearest first
+	default:  ^Binding, // the handler of E among them: the program answers it with it; nil until typed
+	site:     ^Scope, // the scope that writes it: its handlers answer it only as its default
 }
 
 Or :: struct {
@@ -172,6 +187,8 @@ Access :: struct {
 Collapse :: struct {
 	target:    Type,
 	recursive: bool,
+	site:      ^Scope, // the scope it is written in: its handlers answer what it emits (§4.9)
+	answered:  []^Scope, // a recursive call whose equation emits: the scopes whose handlers answer it, the nearest first
 	span:      syn.Span,
 }
 
@@ -185,6 +202,7 @@ Carve_Arg :: struct {
 	name:      string, // "" for a positional argument
 	ordinal:   int, // x#n; -1: the first occurrence
 	pull:      bool, // `x <- v`: fills a hole (§5.7)
+	handler:   bool, // `E -< e {…}`: replaces the handler of E (§4.9)
 	value:     Type,
 	span:      syn.Span,
 	// `z{…}`: a carve carves any binding, by carving it too: the binding z of the
@@ -295,6 +313,7 @@ Kind :: enum u8 {
 	Pull, // name <- value: a hole
 	Product, // -> value: a production
 	Expand, // ...value, ...C:, ...
+	Handler, // E -< e {…}: the handler of E, a scope in which e is what is sent (§4.9)
 }
 
 Typing :: enum u8 {
@@ -311,6 +330,7 @@ Binding :: struct {
 	kind:        Kind,
 	color:       Type, // nil: uncolored
 	value:       Type, // nil: the default of the color
+	handle:      Type, // a handler: the event it answers, as written
 	span:        syn.Span,
 	scope:       ^Scope,
 	source:      ^Binding, // in a copy made by a carve: the binding it copies
@@ -334,6 +354,7 @@ Scope :: struct {
 	reached:   bool, // asked once: it is checked (check.odin)
 	effectful: bool, // a recursive scope whose equation has effects: its calls are effects (§4.8)
 	boundary:  string, // `<lib>{…}`: the scopes written in it are symbols, run in lib (§4.8)
+	branch:    bool, // a branch of a pattern, or the view of its cover: what is written in it is written in the scope that holds the pattern
 	name:      string, // the binding it is the value of, as written: for printing
 	span:      syn.Span,
 }

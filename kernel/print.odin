@@ -182,6 +182,11 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		fmt.sbprintf(b, "?%d", v.id)
 		if v.instance != nil do write_changes(b, v.instance) // ?ₖ read in a carve
 	case ^Effect:
+		if b.written && v.emission != nil {
+			strings.write_string(b, ">- ")
+			write_type(b, v.emission.sent, 0)
+			return
+		}
 		if b.written {
 			// `!?::L`; the layout its color gives is not written
 			strings.write_string(b, "!?")
@@ -192,8 +197,12 @@ write_bare :: proc(b: ^Printer, t: Type) {
 			return
 		}
 		// εₖ(x::L, t); εₖ(t) when it gives nothing back; ε<f{…}!>(x, t), a recursive
-		// call with effects
-		if v.call != nil || v.fold != nil || v.choice != nil {
+		// call with effects; ⟨E{a}⟩(x, t), an emission
+		if v.emission != nil {
+			strings.write_string(b, "⟨")
+			write_type(b, v.emission.sent, 0)
+			strings.write_string(b, "⟩(")
+		} else if v.call != nil || v.fold != nil || v.choice != nil {
 			strings.write_string(b, "ε<")
 			switch {
 			case v.call != nil:
@@ -493,6 +502,11 @@ write_typed :: proc(b: ^Printer, k: ^Kernel, x: ^Binding, expand: bool) {
 		strings.write_string(b, "-> ")
 	case .Expand:
 		strings.write_string(b, "...")
+	case .Handler:
+		write_type(b, normal(k, x.handle), PREC_ATOM)
+		strings.write_string(b, " -< ")
+		write_type(b, binding_type(k, x), 0)
+		return
 	case .Push, .Pull:
 	}
 	if c := binding_color(k, x); c != nil {
@@ -540,6 +554,11 @@ write_binding :: proc(b: ^Printer, x: ^Binding) {
 		strings.write_string(b, "-> ")
 	case .Expand:
 		strings.write_string(b, "...")
+	case .Handler:
+		write_type(b, x.handle, PREC_ATOM)
+		strings.write_string(b, " -< ")
+		write_type(b, x.value, 0)
+		return
 	case .Push, .Pull:
 	}
 	if x.color != nil {
@@ -548,6 +567,11 @@ write_binding :: proc(b: ^Printer, x: ^Binding) {
 	}
 	strings.write_string(b, x.name)
 	if x.value == nil do return
+	if e, is_effect := x.value.(^Effect); is_effect && e.emission != nil {
+		if x.name != "" || x.color != nil do strings.write_byte(b, ' ')
+		write_type(b, x.value, 0)
+		return
+	}
 	if x.name != "" || x.color != nil do strings.write_string(b, x.kind == .Pull ? " <- " : " -> ")
 	b.color = x.color
 	write_type(b, x.value, 0)

@@ -47,6 +47,12 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 			if c, is_call := as_call(given(k, v)); is_call && gives_scopes(k, c) do continue
 			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
 			continue
+		case .Handler:
+			// a handler answers an event: a binding its handle names (§4.9)
+			if handled(k, b) == nil {
+				if h := normal(k, b.handle); !obligations(k, h) do report(k, .Invalid_Emission, b.span, fmt.tprintf("`-<` answers an event, a binding its name gives, not %s", print_type(h)))
+				continue
+			}
 		case .Push, .Pull:
 		}
 		check_binding(k, b)

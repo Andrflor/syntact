@@ -22,6 +22,7 @@ Error_Kind :: enum u8 {
 	Invalid_Property_Access, // `.x` on what has no x
 	Invalid_Execute, // `!` on what is not a scope
 	Infinite_Recursion, // a base case that comes back to itself
+	Invalid_Emission, // an emission of what is not an event, or without a handler visible where it is written (§4.9)
 	Unsupported, // a form this kernel does not build yet
 }
 
@@ -36,6 +37,8 @@ Kernel :: struct {
 	errors:     [dynamic]Error,
 	unknowns:   int, // the unknowns written: their ids
 	effects:    int, // the effects written: their ids
+	emissions:  int, // the emissions written: their ids
+	answering:  [dynamic]^Binding, // the handlers whose run is being typed: one that answers itself again is an infinite recursion
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file

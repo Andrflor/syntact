@@ -105,7 +105,25 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		} else {
 			b.value = build_term(k, s, idx)
 		}
-	case .EventPush, .EventPull, .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
+	case .EventPush:
+		// `r >- E{…}`: an emission, r its answer (§4.9)
+		build_left(k, s, data.binary.left, b)
+		if data.binary.right == syn.INVALID_NODE {
+			b.value = unsupported(k, idx, "an emission without an event")
+		} else {
+			b.value = new_emission(k, s, build_term(k, s, data.binary.right), b.color, node_span(k, idx))
+		}
+	case .EventPull:
+		// `E -< e {…}`: the handler of E (§4.9)
+		b.kind = .Handler
+		from := data.event_pull.from
+		if from == syn.INVALID_NODE {
+			b.value = unsupported(k, idx, "a handler without its event")
+			return
+		}
+		b.handle = build_term(k, s, from)
+		b.value = build_handler(k, s, idx, build_term(k, s, from))
+	case .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
 		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
 		if captured(ast, idx) {
@@ -197,7 +215,7 @@ build_term :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		c := new(Collapse)
 		c.target = build_term(k, s, data.execute.target)
 		c.recursive = names_itself(s, c.target)
-		c.span = span
+		c.site, c.span = holder(s), span
 		return c
 	case .Carve:
 		return build_carve(k, s, idx, build_term(k, s, data.carve.source))
@@ -217,6 +235,54 @@ new_unknown :: proc(k: ^Kernel, written: Type) -> ^Unknown {
 	u.id, u.written = k.unknowns, written
 	k.unknowns += 1
 	return u
+}
+
+// new_emission: `>- sent`, written in s, its answer in the layout written:
+// ⟨sent⟩(x::L, x) (§4.9). Its default is among the handlers visible where it is
+// written; its event is known once it is typed.
+new_emission :: proc(k: ^Kernel, s: ^Scope, sent: Type, written: Type, span: syn.Span) -> ^Effect {
+	m := new(Emission)
+	m.id, m.sent, m.handle, m.site, m.handlers = k.emissions, sent, sent, s, visible_handlers(s)
+	if c, is_carve := sent.(^Carve); is_carve do m.handle = c.target
+	k.emissions += 1
+	e := new(Effect)
+	e.id, e.answer, e.emission, e.span = -1, new_unknown(k, written), m, span
+	e.then = e.answer
+	return e
+}
+
+// visible_handlers: the handlers visible from s, like a name (lookup): in each scope
+// from s up, those above the binding being built, the nearest first.
+visible_handlers :: proc(s: ^Scope) -> []^Binding {
+	out := make([dynamic]^Binding)
+	for sc := s; sc != nil; sc = sc.parent {
+		visible := sc.complete ? len(sc.bindings) : max(len(sc.bindings) - 1, 0)
+		#reverse for b in sc.bindings[:visible] do if b.kind == .Handler do append(&out, b)
+	}
+	return out[:]
+}
+
+// build_handler: the scope of the handler `E -< e {…}` written at idx: e, colored by
+// the event, is what is sent; the bindings of the scope written follow (§4.9).
+build_handler :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, event: Type) -> Type {
+	ast := k.ast
+	data := ast.node_data[idx].event_pull
+	if data.to == syn.INVALID_NODE || ast.node_kinds[data.to] != .ScopeNode do return unsupported(k, idx, "a handler whose answer is not a scope written there")
+	h := new_scope(s, node_span(k, data.to))
+	if data.catch_span.end > data.catch_span.start {
+		e := new_binding(h, .Push, data.catch_span)
+		e.name, e.color = syn.span_str(ast, data.catch_span), event
+	}
+	for c in syn.node_children(ast, data.to) do build_binding(k, h, c)
+	h.complete = true
+	return h
+}
+
+// holder: the scope s is in: a branch is in the scope that holds its pattern.
+holder :: proc(s: ^Scope) -> ^Scope {
+	out := s
+	for out.branch do out = out.parent
+	return out
 }
 
 // new_effect: `!?::L`, an effect that gives back a value in L: εₖ(x::L, x).
@@ -371,6 +437,7 @@ build_pattern :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) -> Type {
 		b.view = cover_view(s, b.cover)
 		// the branch is written from its cover to its product
 		b.scope = new_scope(b.view != nil ? b.view : s, {b.span.start, node_span(k, product).end})
+		b.scope.branch = true
 		b.product = build_term(k, b.scope, product)
 		b.scope.complete = true
 		append(&branches, b)
@@ -388,7 +455,7 @@ cover_view :: proc(s: ^Scope, cover: Type) -> ^Scope {
 	if len(bindings) == 0 do return nil
 	view := new_scope(s, {})
 	append(&view.bindings, ..bindings)
-	view.complete = true
+	view.complete, view.branch = true, true
 	return view
 }
 
@@ -437,6 +504,15 @@ build_carve :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, target: Type) ->
 			a.name = syn.node_name_str(ast, left)
 			a.ordinal = int(ast.node_data[left].identifier.ordinal)
 			a.value = build_term(k, s, ast.node_data[child].binary.right)
+		case .EventPull:
+			// `E -< e {…}`: the handler of E in the target, replaced (§4.9)
+			from := ast.node_data[child].event_pull.from
+			if from == syn.INVALID_NODE || ast.node_kinds[from] != .Identifier do return unsupported(k, child, "a handler in a carve whose event is not a name")
+			a.handler = true
+			a.name = syn.node_name_str(ast, from)
+			event := new(Access)
+			event.target, event.name, event.ordinal, event.span = target, a.name, -1, node_span(k, from)
+			a.value = build_handler(k, s, child, event)
 		case .Carve:
 			source := ast.node_data[child].carve.source
 			if source == syn.INVALID_NODE || ast.node_kinds[source] != .Identifier {

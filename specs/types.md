@@ -438,8 +438,13 @@ law copies, erases or reorders it.
 
 The program is collapsed by nothing: an emission that comes up to it is answered by
 its default, the handler of E visible where the emission is written. An emission
-without one is invalid. A scope has no handler of its own emissions but its default:
-it answers those of the scopes it collapses.
+without one is invalid.
+
+A scope answers the emissions of the scopes it collapses, not its own: those written
+in it, or in a scope written in it — the run of one of its handlers too —, in any
+copy of these. Its own emissions come up to where it is collapsed; its handlers are
+their defaults. A recursive call is a copy: what it emits is the scope's own, and
+comes up with it, each step answered where the first call is collapsed.
 
 ```text
 lib -> {
@@ -476,10 +481,29 @@ app -> {
 app!               = 32                 Alloc answered inside, Log where app is
 ```
 
+A recursive call whose equation emits is answered where it is collapsed, like an
+emission: the scopes it is collapsed in answer what each step emits. Solved, the
+answers are in its solution; a call that stays is the code of its equation in that
+context, one for each context, nothing passed.
+
+```text
+count -> {
+  Tick -> {}
+  Tick -< e { -> 0 }
+  u8:n -> ??
+  -> n ? {0 -> 0  -> {u8:t >- Tick{}  -> t}! + count{n -> n - 1}!}
+}
+count{n -> 3}!                                 = 0
+{count.Tick -< e { -> 1 }  -> count{n -> 3}!}!   = 3     each step answered by 1
+```
+
 A carve replaces a handler like any binding: the emissions it answered are answered
-by the new one. A scope is closed: a carve replaces a handler, it never adds one. The
-answer is checked where it is given, like a carve (§7): the bindings that read x are
-checked with what the handler gives back.
+by the new one. A scope is closed: a carve replaces a handler, it never adds one. A
+recursive call is written as it is: the carve of a handler is that of the call
+carved, not of the calls its production writes, unless written there (`List{T}`,
+§5.6). No carve replaces an emission (§4.8). The answer is checked where it is
+given, like a carve (§7): the bindings that read x are checked with what the
+handler gives back.
 
 ```text
 lib -> {

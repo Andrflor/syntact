@@ -89,14 +89,15 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 }
 
 // collapse_law: {… -> p …}! = p, the first production, with the effects of the
-// bindings above it (§4.8, effect.odin); none without one.
+// bindings above it (§4.8, effect.odin); none without one. What it emits is
+// answered by the handlers of the scope it is written in (§4.9, handler.odin).
 collapse_law :: proc(k: ^Kernel, target: Type, c: ^Collapse) -> Type {
 	s, ok := target.(^Scope)
 	if !ok {
 		if is_invalid(target) do return target
 		return problem(.Invalid_Execute, c.span, fmt.tprintf("`!` on %s, which is not a scope", print_type(target)))
 	}
-	return collapsed(k, s, c)
+	return answered(k, collapsed(k, s, c), c.site)
 }
 
 // product_of: what the first production of s gives, before the effects of the bindings
@@ -136,6 +137,7 @@ carve_law :: proc(k: ^Kernel, target: Type, c: ^Carve) -> Type {
 	for a, i in c.args {
 		args[i] = a
 		if a.carves != nil do continue // `z{…}`: read against the target (carve)
+		if a.handler do continue // typed once the handler it replaces is found (carve)
 		args[i].value = normal(k, a.value)
 		if is_invalid(args[i].value) do return args[i].value
 	}
@@ -169,7 +171,7 @@ designated :: proc(k: ^Kernel, t: Type) -> ^Binding {
 }
 
 // carve: s{x -> w} = s where the first occurrence of x is w. An unnamed argument
-// targets, in order, the bindings that are neither productions nor holes.
+// targets, in order, the bindings that are neither productions, holes nor handlers.
 carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type {
 	bindings := placed(k, s, .Value)
 	changes := make(map[^Binding]Type)
@@ -191,7 +193,14 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 			if is_invalid(a.value) do return a.value
 		}
 		b: ^Binding
-		if a.name != "" {
+		if a.handler {
+			// `E -< e {…}`: the handler of E; a carve replaces it, it never adds one (§4.9)
+			event, found := occurrence(bindings, a.name, a.ordinal, false)
+			if found do b = handler_of(k, s, as_written(event))
+			if b == nil do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no handler of `%s` to replace: a carve never adds one", print_type(s), a.name))
+			a.value = normal(k, a.value)
+			if is_invalid(a.value) do return a.value
+		} else if a.name != "" {
 			found: bool
 			b, found = occurrence(bindings, a.name, a.ordinal, false)
 			if !found do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding `%s` to carve", print_type(s), a.name))
@@ -199,14 +208,18 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 			if a.pull && b.kind != .Pull do return problem(.Invalid_Carve, a.span, fmt.tprintf("`%s` is a field: it is filled by ->", a.name))
 			if !a.pull && b.kind == .Pull do return problem(.Invalid_Carve, a.span, fmt.tprintf("`%s` is a hole: it is filled by <-", a.name))
 		} else {
-			for next < len(bindings) && (bindings[next].kind == .Product || bindings[next].kind == .Pull) do next += 1
+			for next < len(bindings) && (bindings[next].kind == .Product || bindings[next].kind == .Pull || bindings[next].kind == .Handler) do next += 1
 			if next >= len(bindings) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s has no binding left to carve", print_type(s)))
 			b = bindings[next]
 			next += 1
 		}
 		if b.scope != s do return unsupported_at(k, a.span, "a carve through an expansion")
-		// no law replaces an effect (§4.8)
-		if has_effect(binding_type(k, b)) do return problem(.Invalid_Carve, a.span, fmt.tprintf("%s is an effect: a carve does not replace it", b.name != "" ? fmt.tprintf("`%s`", b.name) : "this binding"))
+		// no law replaces an effect (§4.8), nor an emission (§4.9)
+		if t := binding_type(k, b); has_effect(t) {
+			e, is_effect := t.(^Effect)
+			what := is_effect && e.emission != nil ? "an emission" : "an effect"
+			return problem(.Invalid_Carve, a.span, fmt.tprintf("%s is %s: a carve does not replace it", b.name != "" ? fmt.tprintf("`%s`", b.name) : "this binding", what))
+		}
 		changes[b] = a.value
 	}
 	if p := infer_holes(k, s, &changes, span); p != nil do return p
@@ -305,6 +318,7 @@ copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 		n := c.bindings[i]
 		n.color = copy_term(k, m, b.color, c)
 		n.value = copy_term(k, m, b.value, c)
+		n.handle = copy_handle(m, b.handle)
 	}
 	return c
 }
@@ -326,6 +340,16 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		e^ = v^
 		if v.answer != nil do e.answer = copy_term(k, m, v.answer, scope).(^Unknown)
 		e.then = copy_term(k, m, v.then, scope)
+		if v.emission != nil {
+			// the handlers visible where it is written follow it into the copy
+			x := new(Emission)
+			x^ = v.emission^
+			x.sent, x.handle = copy_term(k, m, v.emission.sent, scope), copy_handle(m, v.emission.handle)
+			x.handlers = make([]^Binding, len(v.emission.handlers))
+			for h, i in v.emission.handlers do x.handlers[i] = m.bindings[h] or_else h
+			if x.default != nil do x.default = m.bindings[x.default] or_else x.default
+			e.emission = x
+		}
 		return e
 	case ^Or:
 		return new_or(..copy_terms(k, m, v.terms, scope))
@@ -367,6 +391,7 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		c := new(Collapse)
 		c^ = v^
 		c.target = copy_term(k, m, v.target, scope)
+		if x, found := m.scopes[v.site]; found do c.site = x
 		return c
 	case ^Carve:
 		c := new(Carve)
@@ -427,6 +452,26 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 	return t
 }
 
+// copy_handle: the name of an event in a copy: it names what the copy follows, or
+// what it named; it is not replaced by its value, which has no identity (§4.9).
+copy_handle :: proc(m: ^Copier, t: Type) -> Type {
+	#partial switch v in t {
+	case ^Name:
+		b, found := m.bindings[v.binding]
+		if !found do return t
+		n := new(Name)
+		n^ = v^
+		n.binding = b
+		return n
+	case ^Access:
+		a := new(Access)
+		a^ = v^
+		a.target = copy_handle(m, v.target)
+		return a
+	}
+	return t
+}
+
 copy_terms :: proc(k: ^Kernel, m: ^Copier, ts: []Type, scope: ^Scope) -> []Type {
 	out := make([]Type, len(ts))
 	for t, i in ts do out[i] = copy_term(k, m, t, scope)
@@ -441,6 +486,7 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 	case ^Unknown:
 		return mentions(m, v.written)
 	case ^Effect:
+		if v.emission != nil && mentions(m, v.emission.sent) do return true
 		return v.answer != nil && mentions(m, v.answer.written) || mentions(m, v.choice) || mentions(m, v.then)
 	case ^Or:
 		for x in v.terms do if mentions(m, x) do return true
@@ -855,6 +901,9 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		if !ok || x.id != y.id || (x.answer == nil) != (y.answer == nil) do return false
 		if (x.choice == nil) != (y.choice == nil) do return false
 		if x.choice != nil && !same(k, x.choice, y.choice) do return false
+		// the same emission, of the same value
+		if (x.emission == nil) != (y.emission == nil) do return false
+		if x.emission != nil && (x.emission.id != y.emission.id || !same(k, x.emission.sent, y.emission.sent)) do return false
 		if x.answer == nil do return same(k, x.then, y.then)
 		if (x.call == nil) != (y.call == nil) do return false
 		if x.call != nil && !same(k, x.call, y.call) do return false
@@ -891,7 +940,7 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		return ok && x.name == y.name && x.ordinal == y.ordinal && same(k, x.target, y.target)
 	case ^Collapse:
 		y, ok := b.(^Collapse)
-		return ok && x.recursive == y.recursive && same(k, x.target, y.target)
+		return ok && x.recursive == y.recursive && slice.equal(x.answered, y.answered) && same(k, x.target, y.target)
 	case ^Carve:
 		y, ok := b.(^Carve)
 		if !ok || len(x.args) != len(y.args) || !same(k, x.target, y.target) do return false

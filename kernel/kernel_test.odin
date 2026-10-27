@@ -301,7 +301,37 @@ SPEC_CASES := []Spec_Case {
 	{"Array -> {\n  T -> {}\n  -> {T: ...Array{T}:}\n  -> {}\n}\nArray{u8}:x", "", {.Infinite_Recursion}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x -> {1 2 3}", "", {}},
 	{"Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\nArray{u8}:x -> {1 300 3}", "", {.Constraint_Mismatch}},
+	// §4.9: an emission is answered where the scope that holds it is collapsed, the
+	// program answering by its default
+	{LIB + "x -> lib!", `"default"`, {}},
+	{LIB + "x -> main!", `"main"`, {}},
+	{LIB + "x -> {-> lib!}!", `"default"`, {}},
+	{"Log -> {string:message}\nAudit -> {string:message}\nLog -< e { -> 1 }\nx >- Audit{message -> \"x\"}", "", {.Invalid_Emission}},
+	{"x >- 5", "", {.Invalid_Emission}},
+	{WORK + "x -> app!", "32", {}},
+	{U16_LOG + "x -> lib!", "2", {}},
+	{U16_LOG + "x -> lib{Log -< e { -> 300 }}!", "301", {}},
+	{U16_LOG + "x -> lib{Log -< e { -> \"a\" }}!", "", {.Constraint_Mismatch}},
+	{U16_LOG + "x -> lib{Audit -< e { -> 3 }}!", "", {.Invalid_Carve}},
+	// a copy keeps the handle; what a scope writes, in a scope written in it too, is
+	// its own: its handlers are their defaults
+	{"lib -> {\n  Log -> {string:message}\n  Log -< e { -> e.message }\n  string:m -> \"x\"\n  r >- Log{message -> m}\n  -> r\n}\nx -> {lib.Log -< e { -> e.message + \"!\" }  -> lib{m -> \"y\"}!}!", `"y!"`, {}},
+	{LIB + "x -> lib{r -> \"y\"}!", "", {.Invalid_Carve}},
+	{"lib -> {\n  Log -> {string:message}\n  Log -< e { -> \"default\" }\n  -> {r >- Log{message -> \"x\"}  -> r}!\n}\nx -> {lib.Log -< e { -> \"main\" }  -> lib!}!", `"main"`, {}},
+	// a recursion that emits: each step, answered where the call is collapsed
+	{COUNT + "x -> count{n -> 3}!", "0", {}},
+	{COUNT + "x -> {count.Tick -< e { -> 1 }  -> count{n -> 3}!}!", "3", {}},
+	// what the run of a handler emits comes up from the scope that runs it
+	{"Audit -> {string:what}\nAudit -< e { -> 10 }\nNote -> {string:what}\nNote -< e { u8:r >- Audit{what -> e.what}  -> r + 1 }\nuser -> {u8:n >- Note{what -> \"b\"}  -> n}\nx -> {Audit -< e { -> 50 }  -> user!}!", "11", {}},
 }
+
+LIB :: "lib -> {\n  Log -> {string:message}\n  Log -< e { -> \"default\" }\n  r >- Log{message -> \"x\"}\n  -> r\n}\nmain -> {\n  lib.Log -< e { -> \"main\" }\n  -> lib!\n}\n"
+
+WORK :: "work -> {\n  Log -> {string:message}   Log -< e { -> 0 }\n  Alloc -> {u64:size}       Alloc -< e { -> 0 }\n  a >- Log{message -> \"start\"}\n  p >- Alloc{size -> 16}\n  -> p\n}\napp -> {\n  work.Log -< e { -> 1 }\n  -> {work.Alloc -< e { -> e.size * 2 }  -> work!}!\n}\n"
+
+U16_LOG :: "Audit -> {}\nlib -> {\n  Log -> {string:message}\n  Log -< e { -> 1 }\n  u16:r >- Log{message -> \"x\"}\n  -> r + 1\n}\n"
+
+COUNT :: "count -> {\n  Tick -> {}\n  Tick -< e { -> 0 }\n  u8:n -> ??\n  -> n ? {0 -> 0  -> {u8:t >- Tick{}  -> t}! + count{n -> n - 1}!}\n}\n"
 
 ARRAY :: "Array -> {\n  T -> {}\n  -> {}\n  -> {T: ...Array{T}:}\n}\n"
 

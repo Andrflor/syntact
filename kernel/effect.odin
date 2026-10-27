@@ -210,7 +210,8 @@ branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 }
 
 // ran: the effects of the bindings of s above its production p — nil: the default one,
-// below every binding —, in the order they are written, joined to parts (§4.8). An
+// below every binding —, in the order they are written, joined to parts (§4.8); a
+// handler is not run, it answers (§4.9). An
 // expansion is computed where it is written, then the bindings it places are.
 // Another production is not run; what is below p is not reached, like code after a
 // return. True when p is reached, placed by an expansion.
@@ -223,7 +224,7 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rew
 	for b in s.bindings {
 		if b == p do return true
 		switch b.kind {
-		case .Product:
+		case .Product, .Handler:
 		case .Expand:
 			if b.value == nil && b.color == nil do continue
 			t := binding_type(k, b)

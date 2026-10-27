@@ -80,11 +80,21 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 			out.choice, out.then = chosen, then
 			return out
 		}
-		if then == v.then && call == v.call && fold == v.fold do return t
+		emission := v.emission
+		if emission != nil {
+			sent := rewrite(k, emission.sent, r)
+			if sent != emission.sent {
+				emission = new(Emission)
+				emission^ = v.emission^
+				emission.sent = sent
+			}
+		}
+		if then == v.then && call == v.call && fold == v.fold && emission == v.emission do return t
 		out := effect_law(k, v, then)
 		if e, is_effect := out.(^Effect); is_effect {
 			if v.call != nil do e.call = call
 			if v.fold != nil do e.fold = fold
+			e.emission = emission
 		}
 		return out
 	case ^Collapse:
