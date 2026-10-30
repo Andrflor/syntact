@@ -2,8 +2,8 @@
 
 > **The code is the proof.**
 
-Soon, machines will write most of the code, and nobody will read it. The question is
-no longer how to write a program. It is how to trust a program you never read.
+Machines already write the code, and nobody reads it. The question is no longer how
+to write a program. It is how to trust a program you never read.
 
 The answer is proof. But a proof, the way we write them today, is a second program,
 written in a language above the code: longer than the first, built case by case,
@@ -49,7 +49,7 @@ performance dies with the clarity. The types that were supposed to protect us li
 `null`, `any`, casts —, so we write tests, which check a few values and never all of
 them.
 
-Now models trained on those forty years write that code for us, faster than ever.
+And models trained on those forty years now write that code for us, faster than ever.
 More layers, more lies, at the speed of a GPU.
 
 Syntact goes the other way. Nothing is hidden: the code is a value, all the way
