@@ -23,8 +23,8 @@ you the value that breaks it.
 | `x -> 5` | `x` is `5` |
 | `u8:x -> 5` | `x` has the type `u8`: the compiler must prove that `5` is a `u8` |
 | `u8:x -> ??` | `x` is an unknown of type `u8`: an input of the program |
-| `true:x -> p` | the property `p` must hold: its type must be `true` |
-| `m:x -> v` | `v` must be `m` itself: an unknown is a type too |
+| `true:x -> p` | `p` must have the type `true`: the equation `p` must hold |
+| `m:x -> v` | `v` must have the type `m`: be `m` itself, since an unknown is a type too |
 | `{ … -> r }` | a scope: fields, each with a default value, then its result `r` |
 | `square{n -> 5}` | `square`, with its field `n` replaced by `5` |
 | `square{n -> 5}!` | run it |
@@ -52,13 +52,19 @@ There is no test here, and no value is tried. The compiler computes the type of
 ## Made for models
 
 ```syntact
-string:m -> ??                          // m: a string, no matter which
-m:roundtrip -> decrypt{encrypt{m}!}!    // decrypt{encrypt{m}!}! has the type m
+string:m -> ??                              // m: a string, no matter which
+m:roundtrip -> decrypt{encrypt{m}!}!        // decrypt{encrypt{m}!}! has the type m
 ```
 
 Take a string `m`, no matter which one. The second line says that
 `decrypt{encrypt{m}!}!` has the type `m`: decrypting what was encrypted gives back
 `m`. That one line is the property.
+
+The same property can be written with the type `true`, on an equation:
+
+```syntact
+true:roundtrip -> decrypt{encrypt{m}!}! = m  // the equation has the type true
+```
 
 The compiler cannot compile this program unless it proves it. It does so by symbolic
 resolution: it computes `decrypt{encrypt{m}!}!` with `m` kept as a symbol, and the
@@ -123,7 +129,11 @@ clang runs the recursion. Syntact solves it.
 ## Under the hood: just the algebra of types
 
 Syntact is just the algebra of types. Checking, proving and compiling are one
-computation: simplifying types. A property holds when its type simplifies to `true`.
+computation: simplifying types.
+
+A property is the type on the left: `T:x -> v` holds when the code `v` on the right
+has the type `T`. That is Curry–Howard: the type is the proposition, and the code is
+its proof.
 
 Everything is a type:
 - a value: `5` is the type with one value, `5`;
