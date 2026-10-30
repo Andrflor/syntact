@@ -133,6 +133,9 @@ poor types of everyday languages, a label on a box like `int` or `string`. They 
 the rich types of type theory, which say exactly what a value is: `5`, `0..255`, an
 email address, `k * k`. So Syntact builds all of the code on them, and on nothing else.
 
+And the converse is the great part: if all of the code is types, then Syntact is just
+math.
+
 Syntact is just the algebra of types. Checking, proving and compiling are one
 computation: simplifying types.
 
