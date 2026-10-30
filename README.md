@@ -77,9 +77,18 @@ its normal form and checks that it has the type you wrote.
 
 ## Just the algebra of types
 
-A value is a type: `5` is the type with one value, `5`. `u8` is `0..255`. `&`, `|` and
-`~` are *and*, *or* and *not*. A program is a type too, and the compiler only ever
-computes with types:
+Everything is a type:
+- a value: `5` is the type with one value, `5`;
+- a set of values: `u8` is `0..255`;
+- an unknown: `??`;
+- an effect: `!?`;
+- a scope, and a whole program.
+
+Types compose by an algebra: `|`, `&` and `~` (*or*, *and*, *not*), `+`, `*`, replacing
+a field, running, matching. Each operation gives a type, and the operation itself,
+once written, is a type too: `a | b`, `square{n -> 5}` and `n ? {<0 -> a  -> b}` are
+types. Nothing ever leaves the algebra, and the compiler only ever computes with
+types:
 
 ```syntact
 u8:a -> ??
@@ -164,10 +173,9 @@ sq -> square{n -> k}!    // its type: k * k
 representation: the list. A list has no meaning, and a macro rewrites symbols it does
 not understand.
 
-In Syntact, the one representation is the type. `5` is a type, `0..255` is a type, a
-scope is a type, and a program is a type. A type has laws, so replacing a field,
-running and checking are all computations in the algebra of types. What they give back
-is still a type, written as code:
+In Syntact, the one representation is the type, and a type has laws. Replacing a
+field, running and checking are all computations in the algebra of types. What they
+give back is still a type, written as code:
 - the type of `square{n -> k}!` is `k * k`;
 - the type of `abs{n}!` is `n ? {<0 -> -n  -> n}`.
 
