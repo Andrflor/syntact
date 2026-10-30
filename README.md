@@ -1,17 +1,16 @@
 # Syntact
 
-Machines already write the code, and your tests check ten values of it.
+> **The language for the LLM era: code that proves itself.**
 
-**Syntact is just the algebra of types.**
-- The code you write is a type, and so is the code that runs.
-- A property of your code is a type too.
-- Checking, proving and compiling are one computation: simplifying types.
+Machines already write the code, faster than anyone can read it, and tests check ten
+values of it. Syntact checks no value at all. The compiler solves the code, and proves
+that what you claimed holds. When it does not, the compiler refuses the code and shows
+you the value that breaks it.
 
-No value is ever tested. A property holds when its type simplifies to `true`. When it
-does not, the compiler shows you the value that breaks it.
+There is no proof to write: **the code is the proof.**
 
-So there is no proof to write: **the code is the proof.**
-
+- **Made for models.** You write what must hold, the model writes the code, and the
+  compiler proves it.
 - **No proof to write.** You write the code, and its types.
 - **Never assumed.** A property is proven on the types, or the code is refused.
 - **As fast as C, or faster.** What is proven is never checked at run time.
@@ -79,6 +78,10 @@ its normal form and checks that it has the type you wrote.
 | On failure | the proof does not close | unknown, or a timeout | the value that breaks it |
 
 ## Just the algebra of types
+
+Under the hood, Syntact is just the algebra of types. Checking, proving and compiling
+are one computation: simplifying types. A property holds when its type simplifies to
+`true`.
 
 Everything is a type:
 - a value: `5` is the type with one value, `5`;
