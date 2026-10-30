@@ -249,10 +249,12 @@ between them, already simplified. Compiling is typing.
 
 Syntact pays all three: one algebra, as rigorous as math, as fast as C.
 
-## Status
+## Warning: early stage
 
-> **Early stage.** Syntact is still very young, and everything is subject to change.
-> Most of the core is built.
+Syntact is still at a very early stage, and everything is subject to change. But most
+of the base implementation is done.
+
+## Status
 
 | Part | State |
 |---|---|
