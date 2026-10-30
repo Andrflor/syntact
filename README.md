@@ -128,6 +128,9 @@ clang runs the recursion. Syntact solves it.
 
 ## Under the hood: just the algebra of types
 
+Types are so powerful that all of mathematics can be built on them. So Syntact builds
+all of the code on them, and on nothing else.
+
 Syntact is just the algebra of types. Checking, proving and compiling are one
 computation: simplifying types.
 
