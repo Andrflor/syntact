@@ -251,9 +251,8 @@ Syntact pays all three: one algebra, as rigorous as math, as fast as C.
 
 ## Status
 
-> **Early stage.** Syntact is young, and everything is subject to change, the syntax
-> first. The core is built: the algebra and its check, and the compilers to x86-64 and
-> C.
+> **Early stage.** Syntact is still very young, and everything is subject to change.
+> Most of the core is built.
 
 | Part | State |
 |---|---|
