@@ -4,14 +4,13 @@
 
 Machines already write the code, faster than anyone can read it, and tests check ten
 values of it. Syntact checks no value at all. The compiler solves the code, and proves
-that what you claimed holds. When it does not, the compiler refuses the code and shows
+that every property you wrote holds. When one does not, it refuses the code and shows
 you the value that breaks it.
 
-There is no proof to write: **the code is the proof.**
+**Self-proving code: there is no proof to write.**
 
-- **Made for models.** You write what must hold, the model writes the code, and the
+- **Made for models.** You state the properties, the model writes the code, and the
   compiler proves it.
-- **No proof to write.** You write the code, and its types.
 - **Never assumed.** A property is proven on the types, or the code is refused.
 - **As fast as C, or faster.** What is proven is never checked at run time.
 - **No memory to manage.** No GC, no `free`, no lifetimes.
@@ -23,11 +22,14 @@ There is no proof to write: **the code is the proof.**
 |---|---|
 | `x -> 5` | `x` is `5` |
 | `u8:x -> 5` | `x` has the type `u8`: the compiler must prove that `5` is a `u8` |
-| `u8:x -> ??` | `x` is an unknown, of type `u8` |
+| `u8:x -> ??` | `x` is an unknown of type `u8`: an input of the program |
+| `true:x -> p` | the property `p` must hold: its type must be `true` |
+| `m:x -> v` | `v` must be `m` itself: an unknown is a type too |
 | `{ … -> r }` | a scope: fields, each with a default value, then its result `r` |
 | `square{n -> 5}` | `square`, with its field `n` replaced by `5` |
 | `square{n -> 5}!` | run it |
 | `n ? {<0 -> a  -> b}` | `a` when `n < 0`, `b` otherwise |
+| `!?` | an effect: something that comes from outside |
 
 ## Wrong code does not compile
 
@@ -47,7 +49,28 @@ There is no test here, and no value is tried. The compiler computes the type of
 `i32` by one value, and the compiler tells you where it comes from:
 `n = -2147483648`. The bug every C programmer has shipped once is refused.
 
-## The code is the proof
+## Made for models
+
+```syntact
+string:m -> ??                          // m: a string, no matter which
+m:roundtrip -> decrypt{encrypt{m}!}!    // decrypt{encrypt{m}!}! has the type m
+```
+
+Take a string `m`, no matter which one. The second line says that
+`decrypt{encrypt{m}!}!` has the type `m`: decrypting what was encrypted gives back
+`m`. That one line is the property.
+
+The compiler cannot compile this program unless it proves it. It does so by symbolic
+resolution: it computes `decrypt{encrypt{m}!}!` with `m` kept as a symbol, and the
+result must simplify to `m`. No string is ever tried.
+
+1. **You** write the property.
+2. **The model** writes `encrypt` and `decrypt`.
+3. **The compiler** proves the property, or refuses the code with the value that
+   breaks it.
+4. **The model** fixes its code. Nobody ever writes a proof.
+
+## Self-proving code
 
 ```syntact
 sum -> {
@@ -63,8 +86,8 @@ true:gauss -> sum{n}! * 2 = n * (n + 1)      // gauss has the type true
 property must hold at compile time, for an `n` that can be any `u64`.
 
 Syntact does not test the values. It solves the recursion to `(n + n²) / 2`, and the
-equation reduces to `true`. There is no lemma, no induction and no tactic: the program
-is the proof.
+equation reduces to `true`. There is no lemma, no induction and no tactic: the code
+proves itself.
 
 **This is Curry–Howard, the right way.** A type is a proposition, and a value of that
 type is its proof. Proof assistants make you write a second program whose only job is
@@ -76,64 +99,6 @@ its normal form and checks that it has the type you wrote.
 | You write | code, laws, and proofs | code, specs, and hints | code and its types |
 | Checked by | tactics | an SMT solver, which may time out | the algebra: the same verdict every time |
 | On failure | the proof does not close | unknown, or a timeout | the value that breaks it |
-
-## Just the algebra of types
-
-Under the hood, Syntact is just the algebra of types. Checking, proving and compiling
-are one computation: simplifying types. A property holds when its type simplifies to
-`true`.
-
-Everything is a type:
-- a value: `5` is the type with one value, `5`;
-- a set of values: `u8` is `0..255`;
-- an unknown: `??`;
-- an effect: `!?`;
-- a scope, and a whole program.
-
-Types compose by an algebra: `|`, `&` and `~` (*or*, *and*, *not*), `+`, `*`, replacing
-a field, running, matching. Each operation gives a type, and the operation itself,
-once written, is a type too: `a | b`, `square{n -> 5}` and `n ? {<0 -> a  -> b}` are
-types. Nothing ever leaves the algebra, and the compiler only ever computes with
-types:
-
-```syntact
-u8:a -> ??
-u8:b -> ??
-u16:p -> a * b     // proven: u8 * u8 is 0..65025, inside u16
-u8:q -> a * b      // refused: 0..65025 is not inside u8
-```
-
-Strings too. `'a'..'z' * 1..` is one letter or more, and `+` puts strings one after
-the other:
-
-```syntact
-Email -> 'a'..'z' * 1.. + '@' + 'a'..'z' * 1.. + '.' + 'a'..'z' * 2..
-
-Email:ok -> "jo@mail.fr"    // proven
-Email:bad -> "jo@mail"      // refused: no dot after the @
-```
-
-`Email` is a type, written like a regular expression and checked at compile time.
-
-## Made for models
-
-```syntact
-string:m -> ??                          // m: a string, no matter which
-m:roundtrip -> decrypt{encrypt{m}!}!    // decrypt{encrypt{m}!}! has the type m
-```
-
-Take a string `m`, no matter which one. The second line says that
-`decrypt{encrypt{m}!}!` has the type `m`: decrypting what was encrypted gives back
-`m`. That one line is the law.
-
-The compiler cannot compile this program unless it proves it. It does so by symbolic
-resolution: it computes `decrypt{encrypt{m}!}!` with `m` kept as a symbol, and the
-result must simplify to `m`. No string is ever tried.
-
-1. **You** write the law.
-2. **The model** writes `encrypt` and `decrypt`.
-3. **The compiler** proves the law, or refuses the code with the value that breaks it.
-4. **The model** fixes its code. Nobody ever writes a proof.
 
 ## Fast
 
@@ -154,6 +119,45 @@ fib -> {
 | Syntact | **3 ms** |
 
 clang runs the recursion. Syntact solves it.
+
+## Under the hood: just the algebra of types
+
+Syntact is just the algebra of types. Checking, proving and compiling are one
+computation: simplifying types. A property holds when its type simplifies to `true`.
+
+Everything is a type:
+- a value: `5` is the type with one value, `5`;
+- a set of values: `u8` is `0..255`;
+- an unknown: `??`;
+- an effect: `!?`;
+- a scope, and a whole program.
+
+Types compose by an algebra:
+- `|`, `&` and `~`: *or*, *and*, *not*;
+- `+`, `*` and the other operators;
+- replacing a field, running, matching.
+
+Each operation gives a type, and the operation itself, once written, is a type too.
+Nothing ever leaves the algebra:
+
+```syntact
+u8:a -> ??
+u8:b -> ??
+u16:p -> a * b     // proven: u8 * u8 is 0..65025, inside u16
+u8:q -> a * b      // refused: 0..65025 is not inside u8
+```
+
+Strings too. `'a'..'z' * 1..` is one letter or more, and `+` puts strings one after
+the other:
+
+```syntact
+Email -> 'a'..'z' * 1.. + '@' + 'a'..'z' * 1.. + '.' + 'a'..'z' * 2..
+
+Email:ok -> "jo@mail.fr"    // proven
+Email:bad -> "jo@mail"      // refused: no dot after the @
+```
+
+`Email` is a type, written like a regular expression and checked at compile time.
 
 ## No functions: only code
 
@@ -204,23 +208,10 @@ libm -> <libm.so.6>{                  // the C math library
 y -> libm.sqrt{x -> 2.0}! * 2.0       // call C, then * 2.0
 ```
 
-The type of `y` is the call to `sqrt`, then `* 2.0` on what it gives back. The
-compiler keeps the call where it is written, and computes on its answer as an unknown
-`f64`.
+The type of `y` is the call to `sqrt`, then `* 2.0` on its answer.
 
-A C function can also be called without an effect: write `??::f64`, an unknown,
-instead of `!?::f64`:
-
-```syntact
-libm -> <libm.so.6>{
-  sqrt -> {f64:x, -> ??::f64}         // pure: an unknown f64, not an effect
-}
-```
-
-You get almost the same thing, with one difference. An unknown is pure, so the
-compiler may move it out of order, or erase it when nothing reads it. An effect, never.
-
-An effect stays even when its answer is not used:
+A C function with no side effect can return an unknown, `??::f64`, instead. The
+compiler may then move the call, or erase it when nothing reads it. An effect, never:
 
 ```syntact
 read -> {u8:r -> !?  -> r}        // read a u8 from the outside
@@ -251,10 +242,15 @@ Syntact pays all three: one algebra, as rigorous as math, as fast as C.
 
 The reference is [`specs/types.md`](specs/types.md).
 
-## Build
+## Try it
 
 ```sh
-odin build kernel/cmd -out:kernel.bin && ./kernel.bin program.syn    # check
-odin build code/cmd -out:code.bin && ./code.bin program.syn -o prog  # compile
-odin test kernel                                                     # test
+odin build code/cmd -out:code.bin                # the compiler, built with Odin
+echo '-> "Hello, world"' > hello.syn
+./code.bin hello.syn -o hello && ./hello         # Hello, world
 ```
+
+- `./code.bin program.syn` shows the code a program compiles to.
+- A program's unknowns `??` are its inputs, given on the command line: `./prog 10`.
+- `odin build kernel/cmd -out:kernel.bin`, then `./kernel.bin program.syn`, prints the
+  type of each binding, then the errors.
