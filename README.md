@@ -3,68 +3,122 @@
 > **The code is the proof.**
 
 Machines already write the code. Your tests check ten values of it. Syntact checks
-all of them, and shows you the one that breaks.
+all of them, without trying a single one, and shows you the value that breaks it.
 
-```syntact
-abs -> {
-  i32:n
-  -> n ? {<0 -> 0 - n  -> n}
-}
-
-i32:n -> ??                    // ?? = any value of its type
-i32:r -> abs{n}!               // ! = run it
-// refused: not an i32 when n is -2147483648
-```
+**Syntact is just the algebra of types.** Checking a program, proving it and
+compiling it are one and the same computation: simplifying its type.
 
 - **No proof to write.** The code is the proof.
-- **Never assumed.** A claim is proven for every value, or refused, with the value
-  that breaks it.
+- **Never assumed.** A property is proven for every value, or the code is refused.
 - **As fast as C, or faster.** What is proven is never checked at run time.
 - **No memory to manage.** No GC, no `free`, no lifetimes.
 - **Parallel or GPU, at the call:** `work[!]`, `work|!|`.
+
+## Read Syntact in 30 seconds
+
+| You write | It means |
+|---|---|
+| `x -> 5` | `x` is `5` |
+| `u8:x -> 5` | `x` has the type `u8`: the compiler must prove that `5` is a `u8` |
+| `u8:x -> ??` | `x` is unknown: it can be any `u8` |
+| `{ … -> r }` | a scope: fields, each with a default value, then its result `r` |
+| `square{n -> 5}` | `square`, with its field `n` replaced by `5` |
+| `square{n -> 5}!` | run it |
+| `n ? {<0 -> a  -> b}` | `a` when `n < 0`, `b` otherwise |
+
+## Wrong code does not compile
+
+```syntact
+abs -> {
+  i32:n                        // a field: n is an i32, 0 by default
+  -> n ? {<0 -> 0 - n  -> n}   // the result: -n when n < 0, n otherwise
+}
+
+i32:n -> ??                    // n is unknown: any i32
+i32:r -> abs{n}!               // r must be an i32, for every n
+// refused: when n is -2147483648, -n is 2147483648, which is not an i32
+```
+
+There is no test here. `r` has the type `i32`, so `abs{n}!` must be an `i32` for
+every possible `n`. The compiler does not try four billion values: it reads `abs`,
+splits on `n < 0`, and finds the one value where `-n` leaves the `i32`. The bug every
+C programmer has shipped once is refused, with the value that breaks it.
 
 ## The code is the proof
 
 ```syntact
 sum -> {
-  u64:n
-  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}
+  u64:n                                      // n is a u64, 0 by default
+  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}   // 0 + 1 + … + n
 }
 
-u64:n -> ??
-true:gauss -> sum{n}! * 2 = n * (n + 1)   // proven, for every u64
+u64:n -> ??                                  // n is unknown: any u64
+true:gauss -> sum{n}! * 2 = n * (n + 1)      // gauss has the type true
 ```
 
-No value is tried. The recursion is solved to `(n + n²) / 2`, and the law reduces to
-`true`. No lemma, no induction, no tactic.
+`true` is a type: the type whose only value is `true`. So `gauss` must be `true`: the
+property must hold at compile time, for an `n` that can be any `u64`.
 
-A **color** is the type before a name: `u64:n`, `true:gauss`. It is the claim, and the
-code proves it.
+Syntact does not test the values. It solves the recursion to `(n + n²) / 2`, and the
+equation reduces to `true`. There is no lemma, no induction and no tactic: the program
+is the proof.
 
-**Curry–Howard, by normalization.** There is no proof term to write and then erase:
-the normal form of the program is both the proof and the code that runs.
+**This is Curry–Howard, the right way.** A type is a proposition, and a value of that
+type is its proof. Proof assistants make you write a second program whose only job is
+to be that proof. In Syntact, the program you run is the proof: the compiler computes
+its normal form and checks that it has the type you wrote.
 
 | | Lean · Rocq · Bend 2 | Dafny · F* · Liquid Haskell | Syntact |
 |---|---|---|---|
-| You write | code, laws, proofs | code, specs, hints | code and its colors |
-| Checked by | tactics | an SMT solver, which may time out | the algebra: same verdict every time |
+| You write | code, laws, and proofs | code, specs, and hints | code and its types |
+| Checked by | tactics | an SMT solver, which may time out | the algebra: the same verdict every time |
 | On failure | the proof does not close | unknown, or a timeout | the value that breaks it |
+
+## Just the algebra of types
+
+A value is a type: `5` is the type with one value, `5`. `u8` is `0..255`. `&`, `|` and
+`~` are *and*, *or* and *not*. A program is a type too, and the compiler only ever
+computes with types:
+
+```syntact
+u8:a -> ??
+u8:b -> ??
+u16:p -> a * b     // proven: the product of two u8 always fits in a u16
+u8:q -> a * b      // refused: 255 * 255 does not fit in a u8
+```
+
+Strings too. `'a'..'z' * 1..` is one letter or more, and `+` puts strings one after
+the other:
+
+```syntact
+Email -> 'a'..'z' * 1.. + '@' + 'a'..'z' * 1.. + '.' + 'a'..'z' * 2..
+
+Email:ok -> "jo@mail.fr"    // proven
+Email:bad -> "jo@mail"      // refused: no dot after the @
+```
+
+`Email` is a type, written like a regular expression and checked at compile time.
 
 ## Made for models
 
-```text
-you        m: -> decrypt{encrypt{m}!}!     the law, one line
-model      writes encrypt and decrypt
-compiler   refused: the value that breaks it
-model      fixes the code, never a proof
-compiler   proven. It ships.
+```syntact
+string:m -> ??                          // any string
+m:roundtrip -> decrypt{encrypt{m}!}!    // roundtrip has the type m: it must be m
 ```
+
+A value is a type, so `m` can be a type: `roundtrip` must give back exactly `m`, for
+every string. That one line is the law.
+
+1. **You** write the law.
+2. **The model** writes `encrypt` and `decrypt`.
+3. **The compiler** proves the law, or refuses the code with the value that breaks it.
+4. **The model** fixes its code. Nobody ever writes a proof.
 
 ## Fast
 
-What is proven, the code uses: no check on a proven bound, 32-bit lanes where values
-fit, a closed form instead of a loop. Then a second algebra picks the cheapest equal
-program.
+What the compiler proves, the code uses: a bound that is proven is never checked, a
+value proven to fit in 32 bits is computed in 32 bits, and a recursion that is solved
+is no longer a loop.
 
 ```syntact
 fib -> {
@@ -73,42 +127,55 @@ fib -> {
 }
 ```
 
-| `fib(45)`, n given at run time | |
+| `fib(45)`, with n given at run time | |
 |---|---|
 | C, clang -O3 | 2.9 s |
 | Syntact | **3 ms** |
 
 clang runs the recursion. Syntact solves it.
 
-## How
+## No functions: the code itself
 
-- **A value is a type.** `5` is a type, and `u8` is `0..255`. `&`, `|` and `~` are *and*,
-  *or* and *not*.
-- **Unknowns make equations.** `a - a` is `0`, not `-255..255`.
-- **No function, just the code.** A function is a black box. A scope is the code
-  itself, carved and run in the open: homoiconic, the right way.
-- **Effects are in the type.** `!?` is the outside. The laws simplify around it, never
-  through it, so the type of a program is the program.
+A function is a black box: you can only call it, and the compiler only sees its
+signature. Syntact has no functions. `square` is a scope, and a scope is the code
+itself:
 
 ```syntact
 square -> {
-  i32:n
-  -> n * n
+  i32:n           // a field, 0 by default
+  -> n * n        // the result
 }
-five -> square{n -> 5}            // still code: five.n is 5
-five!                             // 25
 
-read -> {u8:r -> !?  -> r}        // !? = the outside
-once -> {a -> read!  -> a - a}!   // one read, and a - a is gone
+five -> square{n -> 5}   // new code: square, with n replaced by 5
+five.n                   // 5: you can still read inside it
+five!                    // 25: run it
 ```
+
+The compiler never reasons on a signature: it always reads the code. That is how it
+proves things about it. This is homoiconicity, the right way: the code is a value, and
+the compiler knows what it means.
+
+## Effects are in the type
+
+An effect, `!?`, is anything that comes from outside: an input, a system call, a C
+function. It is part of the type, in the order it is written. The compiler simplifies
+everything around an effect, but never removes, copies or reorders one:
+
+```syntact
+read -> {u8:r -> !?  -> r}        // read a u8 from the outside
+once -> {a -> read!  -> a - a}!   // one read, then 0: a - a is gone, the read stays
+```
+
+So the type of a program is what it does: its effects, in order, and what it computes
+between them, already simplified. Compiling is typing.
 
 ## Why
 
-- **The mathematicians' debt:** the function, a black box the compiler cannot see
-  into.
-- **The engineers' debt:** compilers full of ad hoc passes that are just algebra,
+- **The mathematicians' debt.** They gave us the function, a black box the compiler
+  cannot see into.
+- **The engineers' debt.** Compilers are full of ad hoc passes that are just algebra,
   rediscovered case by case.
-- **The missing bridge:** type theory, powerful and far from everyday code.
+- **The missing bridge.** Type theory is powerful, but it is far from everyday code.
 
 Syntact pays all three: one algebra, as rigorous as math, as fast as C.
 
