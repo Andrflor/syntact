@@ -103,12 +103,17 @@ Email:bad -> "jo@mail"      // refused: no dot after the @
 ## Made for models
 
 ```syntact
-string:m -> ??                          // m is an unknown, of type string
-m:roundtrip -> decrypt{encrypt{m}!}!    // roundtrip has the type m
+string:m -> ??                          // m: a string, no matter which
+m:roundtrip -> decrypt{encrypt{m}!}!    // decrypt{encrypt{m}!}! has the type m
 ```
 
-An unknown is a type too, so `m` can be the type of `roundtrip`: what `roundtrip`
-computes must simplify to `m` itself. That one line is the law.
+Take a string `m`, no matter which one. The second line says that
+`decrypt{encrypt{m}!}!` has the type `m`: decrypting what was encrypted gives back
+`m`. That one line is the law.
+
+The compiler cannot compile this program unless it proves it. It does so by symbolic
+resolution: it computes `decrypt{encrypt{m}!}!` with `m` kept as a symbol, and the
+result must simplify to `m`. No string is ever tried.
 
 1. **You** write the law.
 2. **The model** writes `encrypt` and `decrypt`.
