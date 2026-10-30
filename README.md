@@ -154,25 +154,25 @@ square -> {
 
 five -> square{n -> 5}   // code: square, with n replaced by 5
 five.n                   // 5: you can still read inside it
-five!                    // 25: run it, and you get code back
+five!                    // 25: run it
 
 i32:k -> ??
-sq -> square{n -> k}!    // its type is code too: k * k
+sq -> square{n -> k}!    // its type: k * k
 ```
 
-**Homoiconic, literally.** Lisp turns code into data, lists, so that a program can
-work on it, then turns the lists back into code. Syntact never turns code into
-anything: it only ever manipulates code.
+**Homoiconic, with types instead of lists.** In Lisp, code and data share one
+representation: the list. A list has no meaning, and a macro rewrites symbols it does
+not understand.
 
-- A value is code: `5`.
-- A type is code: `0..255`.
-- A scope is code.
-- Replacing a field gives code, and running it gives code.
-- The type the compiler computes is code too, in the same syntax. The type of
-  `square{n -> k}!` is `k * k`, and the type of `abs{n}!` is `n ? {<0 -> -n  -> n}`.
+In Syntact, the one representation is the type. `5` is a type, `0..255` is a type, a
+scope is a type, and a program is a type. A type has laws, so replacing a field,
+running and checking are all computations in the algebra of types. What they give back
+is still a type, written as code:
+- the type of `square{n -> k}!` is `k * k`;
+- the type of `abs{n}!` is `n ? {<0 -> -n  -> n}`.
 
-Every step takes code and gives back code. The compiler never reasons on a signature:
-it reads the code, and that is how it proves things about it.
+Lisp's code is data. Syntact's code is types, and that is why the compiler can prove
+things about it.
 
 ## Effects are in the type
 
