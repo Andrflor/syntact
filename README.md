@@ -140,7 +140,7 @@ fib -> {
 
 clang runs the recursion. Syntact solves it.
 
-## No functions: the code itself
+## No functions: only code
 
 A function is a black box: you can only call it, and the compiler only sees its
 signature. Syntact has no functions. `square` is a scope, and a scope is the code
@@ -152,14 +152,27 @@ square -> {
   -> n * n        // the result
 }
 
-five -> square{n -> 5}   // new code: square, with n replaced by 5
+five -> square{n -> 5}   // code: square, with n replaced by 5
 five.n                   // 5: you can still read inside it
-five!                    // 25: run it
+five!                    // 25: run it, and you get code back
+
+i32:k -> ??
+sq -> square{n -> k}!    // its type is code too: k * k
 ```
 
-The compiler never reasons on a signature: it always reads the code. That is how it
-proves things about it. This is homoiconicity, the right way: the code is a value, and
-the compiler knows what it means.
+**Homoiconic, literally.** Lisp turns code into data, lists, so that a program can
+work on it, then turns the lists back into code. Syntact never turns code into
+anything: it only ever manipulates code.
+
+- A value is code: `5`.
+- A type is code: `0..255`.
+- A scope is code.
+- Replacing a field gives code, and running it gives code.
+- The type the compiler computes is code too, in the same syntax. The type of
+  `square{n -> k}!` is `k * k`, and the type of `abs{n}!` is `n ? {<0 -> -n  -> n}`.
+
+Every step takes code and gives back code. The compiler never reasons on a signature:
+it reads the code, and that is how it proves things about it.
 
 ## Effects are in the type
 
