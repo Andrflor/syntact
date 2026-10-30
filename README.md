@@ -7,11 +7,11 @@ all of them, and shows you the one that breaks.
 
 ```syntact
 abs -> {
-  i32:n -> ??                  // ?? = any value of its type
+  i32:n
   -> n ? {<0 -> 0 - n  -> n}
 }
 
-n -> ??::i32
+i32:n -> ??                    // ?? = any value of its type
 i32:r -> abs{n}!               // ! = run it
 // refused: not an i32 when n is -2147483648
 ```
@@ -27,7 +27,7 @@ i32:r -> abs{n}!               // ! = run it
 
 ```syntact
 fib -> {
-  u8:n -> ??
+  u8:n
   -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}
 }
 ```
@@ -47,11 +47,11 @@ program.
 
 ```syntact
 sum -> {
-  u64:n -> ??
+  u64:n
   -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}
 }
 
-n -> ??::u64
+u64:n -> ??
 true:gauss -> sum{n}! * 2 = n * (n + 1)   // proven, for every u64
 ```
 
@@ -92,7 +92,7 @@ compiler   proven. It ships.
 
 ```syntact
 square -> {
-  i32:n -> 0
+  i32:n
   -> n * n
 }
 five -> square{n -> 5}            // still code: five.n is 5
