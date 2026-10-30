@@ -1,15 +1,18 @@
 # Syntact
 
-> **The code is the proof.**
+Machines already write the code, and your tests check ten values of it.
 
-Machines already write the code. Your tests check ten values of it. Syntact checks no
-value at all: it computes with types. A property holds when its type simplifies to
-`true`. When it does not, the compiler shows you the value that breaks it.
+**Syntact is just the algebra of types.**
+- The code you write is a type, and so is the code that runs.
+- A property of your code is a type too.
+- Checking, proving and compiling are one computation: simplifying types.
 
-**Syntact is just the algebra of types.** Checking a program, proving it and
-compiling it are one and the same computation: simplifying its type.
+No value is ever tested. A property holds when its type simplifies to `true`. When it
+does not, the compiler shows you the value that breaks it.
 
-- **No proof to write.** The code is the proof.
+So there is no proof to write: **the code is the proof.**
+
+- **No proof to write.** You write the code, and its types.
 - **Never assumed.** A property is proven on the types, or the code is refused.
 - **As fast as C, or faster.** What is proven is never checked at run time.
 - **No memory to manage.** No GC, no `free`, no lifetimes.
