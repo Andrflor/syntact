@@ -152,14 +152,120 @@ ys -> xs{300}                      // refused: 300 is not in 0..255
 
 What follows from it:
 
-- **No function.** A computation is a scope with a production, called by carving and
-  collapsing it: `square{n -> 5}!`. A scope is always complete: every binding has a
-  value, its default, so `square!` is a value too.
+- **No function.** You hold the code itself, never a black box: see below.
 - **No separate type language.** A color is any type: `u8:x`, `(0..10 | 100):x`,
   `{u8: string:}:p`, `Array{u8}:xs`, `Email:e`.
 - **No null.** `none` is the empty type. A binding without a value has its default.
 - **No generic syntax.** A hole `T <- …` is filled where the scope is used.
 - **No proof system.** A color is the proof obligation; the check discharges it.
+
+---
+
+## Homoiconic, the right way
+
+A function is a black box. Once it is defined, all you can do is call it: its body
+is hidden behind its signature, and its type, `i32 -> i32`, only approximates what it
+does. Everything built on functions — closures, methods, interfaces, callbacks —
+hides code behind something opaque, and then the compiler spends its time trying to
+see through it again.
+
+Syntact has no function. A computation is a scope: bindings and a production. A scope
+is a value, and that value is the code itself, as written. You never hold anything
+opaque. You hold the code, and every operation on it is a law of the algebra:
+
+```syntact
+square -> {
+  i32:n -> 0
+  -> n * n
+}
+
+square{n -> 5}!     // carve, then collapse: 25
+square!             // every binding has its default, so a scope always runs: 0
+five -> square{n -> 5}
+five.n              // still code, read like code: 5
+five!               // 25
+```
+
+Lisp made code data, but data without meaning: a list of symbols that a macro
+rewrites before anything is known about it — and once evaluated, a lambda is as
+opaque there as anywhere else. In Syntact the code is a value of the algebra, with
+its meaning. A carve is the same scope with one equation replaced, checked where it
+is written. A collapse is its normal form. The program and the compiler handle the
+same thing, the code, and both see all the way through it.
+
+What a function does, a scope does in the open:
+
+- **a call** is a carve, then a collapse: `square{n -> 5}!`;
+- **a partial application** is a carve alone: `square{n -> 5}` is still code;
+- **a generic** is a hole `T <- …`, filled where the scope is used;
+- **a closure** is a scope that reads the bindings written above it.
+
+This is why the code can be the proof: the compiler never reasons on a signature, it
+reads the code. `unpack{pack{n}!}!` is not two opaque calls. It is `pack` and `unpack`
+themselves, put together and simplified, and the law `n:` is what is left. And this is
+why the code is fast: there is no abstraction barrier to remove, because nothing was
+ever hidden behind a call.
+
+---
+
+## Effects are in the type, and the type is the program
+
+Lisp's code-as-data is blind to effects. Any function can print, write a file or send
+a request, and nothing in the code says so: a list of symbols does not know what it
+does to the world. A Lisp program can rewrite its code, but it cannot know what that
+code does.
+
+In Syntact, an effect is a term of the algebra. `!?` is the outside — an input, a
+system call, a C function — and it is part of the type: `!?::u8` gives back a value of
+`u8` not known yet, and wraps everything that follows it. The laws simplify everything
+an effect wraps, and never the effect itself: no law copies, erases or reorders one.
+
+```syntact
+read -> {u8:r -> !?  -> r}
+
+once -> {a -> read!  -> a - a}!    // ε0(x::u8, 0)
+twice -> read! - read!             // ε0(x::u8, ε0(y::u8, x - y))
+```
+
+`a - a` is `0`, and the subtraction is gone, but the read stays: it happens.
+`read! - read!` is two reads, kept in the order they are written.
+
+So the type of a program is the program:
+
+```syntact
+sum -> {
+  u8:n -> ??
+  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}
+}
+
+-> {u8:r -> !?  -> sum{n -> r}!}!  // ε1(x::u8, (x + x * x) / 2)
+```
+
+Read a `u8`, sum up to it. The type of this program is one read, then a closed form.
+Nothing else is left, and nothing else runs. Compiling is typing: what the compiler
+emits is that normal form, the effects in their order, and the pure computation
+between them already simplified.
+
+Calling C is an effect like any other. The call is in the type, and what it gives back
+is a value of its color, checked like any other:
+
+```syntact
+libm -> <libm.so.6>{
+  sqrt -> {f64:x, -> !?::f64}
+}
+root -> libm.sqrt{x -> 2.0}! * 2.0   // ε<sqrt{x -> 2.0}!>(x::f64, x * 2.0)
+```
+
+**Handlers are context, at no cost.** An event, emitted with `>-`, is answered by a
+handler, `-<`, found when the program is typed and never at run time: nothing is
+passed, and an emission costs what its handler costs. A logger, an allocator or a test
+double is a handler put around a computation, and the same code collapsed somewhere
+else is answered by another one.
+
+This is what homoiconicity was for. The code is a value, and its type is its normal
+form. With the effects in it, that normal form is the whole program: what it
+computes, what it does, and in what order. The compiler, the prover and the optimizer
+all read that one thing.
 
 ---
 
@@ -206,11 +312,6 @@ work[!]     in parallel, on the CPU
 work(!)     in the background
 work|!|     on the GPU
 ```
-
-**Effects you can see, context that costs nothing.** `!?` is an effect: the outside of
-the program, kept in the order written — no law copies, reorders or erases one.
-Events and handlers (`>-`, `-<`) are context, resolved when the program is compiled:
-who answers is known, and nothing is passed at run time.
 
 ---
 
