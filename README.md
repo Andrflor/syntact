@@ -268,9 +268,17 @@ of the base implementation is done.
 | `kernel/` | the algebra and the check |
 | `code/` | x86-64 and C backends |
 | `lsp/` | diagnostics, hover, completion |
-| **Next** | Syntact written in Syntact |
 
 The reference is [`specs/types.md`](specs/types.md).
+
+## Roadmap
+
+1. **Data at run time.** Scopes, lists and strings as values in the compiled code,
+   with their memory.
+2. **Self-hosting.** Syntact written in Syntact, and compiled to C. That C lives in this
+   repository, so building Syntact needs nothing but a C compiler.
+3. **Playground.** The same C, compiled to WebAssembly, to try Syntact in the browser.
+4. **Then:** a reworked syntax, more targets, and deeper optimization.
 
 ## Try it
 
