@@ -165,7 +165,23 @@ the compiler knows what it means.
 
 An effect, `!?`, is anything that comes from outside: an input, a system call, a C
 function. It is part of the type, in the order it is written. The compiler simplifies
-everything around an effect, but never removes, copies or reorders one:
+everything around an effect, but never removes, copies or reorders one.
+
+Calling C is an effect:
+
+```syntact
+libm -> <libm.so.6>{                  // the C math library
+  sqrt -> {f64:x, -> !?::f64}         // its sqrt: an f64 in, an f64 from outside
+}
+
+y -> libm.sqrt{x -> 2.0}! * 2.0       // call C, then * 2.0
+```
+
+The type of `y` is the call to `sqrt`, then `* 2.0` on what it gives back. The
+compiler keeps the call where it is written, and computes on its answer as an unknown
+`f64`.
+
+An effect stays even when its answer is not used:
 
 ```syntact
 read -> {u8:r -> !?  -> r}        // read a u8 from the outside
