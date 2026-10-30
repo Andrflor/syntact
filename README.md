@@ -16,32 +16,12 @@ i32:r -> abs{n}!               // ! = run it
 // refused: not an i32 when n is -2147483648
 ```
 
-- **~1000× faster than clang -O3** on a naive `fib(45)`: 3 ms against 2.9 s.
 - **No proof to write.** The code is the proof.
 - **Never assumed.** A claim is proven for every value, or refused, with the value
   that breaks it.
+- **As fast as C, or faster.** What is proven is never checked at run time.
 - **No memory to manage.** No GC, no `free`, no lifetimes.
 - **Parallel or GPU, at the call:** `work[!]`, `work|!|`.
-
-## ~1000× faster than C
-
-```syntact
-fib -> {
-  u8:n
-  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}
-}
-```
-
-| `fib(45)`, n given at run time | |
-|---|---|
-| C, clang -O3 | 2.9 s |
-| Syntact | **3 ms** |
-
-clang runs the recursion. Syntact solves it.
-
-What is proven, the code uses: no check on a proven bound, 32-bit lanes where values
-fit, a closed form instead of a loop. Then a second algebra picks the cheapest equal
-program.
 
 ## The code is the proof
 
@@ -79,6 +59,26 @@ compiler   refused: the value that breaks it
 model      fixes the code, never a proof
 compiler   proven. It ships.
 ```
+
+## Fast
+
+What is proven, the code uses: no check on a proven bound, 32-bit lanes where values
+fit, a closed form instead of a loop. Then a second algebra picks the cheapest equal
+program.
+
+```syntact
+fib -> {
+  u8:n
+  -> n ? {<2 -> n  -> fib{n -> n - 1}! + fib{n -> n - 2}!}
+}
+```
+
+| `fib(45)`, n given at run time | |
+|---|---|
+| C, clang -O3 | 2.9 s |
+| Syntact | **3 ms** |
+
+clang runs the recursion. Syntact solves it.
 
 ## How
 
