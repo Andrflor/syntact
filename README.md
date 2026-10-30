@@ -95,10 +95,9 @@ Syntact does not test the values. It solves the recursion to `(n + n²) / 2`, an
 equation reduces to `true`. There is no lemma, no induction and no tactic: the code
 proves itself.
 
-**This is Curry–Howard, the right way.** A type is a proposition, and a value of that
-type is its proof. Proof assistants make you write a second program whose only job is
-to be that proof. In Syntact, the program you run is the proof: the compiler computes
-its normal form and checks that it has the type you wrote.
+**This is Curry–Howard, the right way.** Proof assistants make you write a second
+program whose only job is to be the proof. In Syntact, the program you run is the
+proof.
 
 | | Lean · Rocq · Bend 2 | Dafny · F* · Liquid Haskell | Syntact |
 |---|---|---|---|
@@ -228,8 +227,16 @@ y -> libm.sqrt{x -> 2.0}! * 2.0       // call C, then * 2.0
 
 The type of `y` is the call to `sqrt`, then `* 2.0` on its answer.
 
-A C function with no side effect can return an unknown, `??::f64`, instead. The
-compiler may then move the call, or erase it when nothing reads it. An effect, never:
+A C function with no side effect can return an unknown instead:
+
+```syntact
+libm -> <libm.so.6>{
+  sqrt -> {f64:x, -> ??::f64}         // pure: an unknown f64, not an effect
+}
+```
+
+The compiler may then move the call, or erase it when nothing reads it. An effect,
+never, even when its answer is not used:
 
 ```syntact
 read -> {u8:r -> !?  -> r}        // read a u8 from the outside
@@ -266,6 +273,10 @@ of the base implementation is done.
 The reference is [`specs/types.md`](specs/types.md).
 
 ## Try it
+
+Syntact is written in [Odin](https://odin-lang.org), which you need to build it. We
+like Odin, and it is one of Syntact's inspirations, even though Syntact's philosophy
+goes a very different way.
 
 ```sh
 odin build code/cmd -out:code.bin                # the compiler, built with Odin
