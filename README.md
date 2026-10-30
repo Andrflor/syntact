@@ -13,8 +13,9 @@ or a model searching for hours — has to write its proof.
 In Syntact there is no proof to write. **The code is the proof, by construction.** If
 it compiles, it is proven.
 
-And it does not stop there: the same algebra that proves your program makes it fast,
-runs it in parallel or on the GPU, and manages its memory without a garbage collector.
+And it does not stop there: the same algebra that proves your program makes it as fast
+as C or faster, runs it in parallel or on the GPU, and leaves you no memory to manage —
+without a garbage collector.
 
 ---
 
@@ -330,7 +331,7 @@ strength reduction, closed forms of loops, a branch or a select — laws chosen 
 not passes run in some order. On our benchmarks, Syntact's x86-64 code is already on
 par with `gcc -O3`.
 
-**Memory without a garbage collector.** Nothing in the algebra is ever modified, and
+**No memory to manage, and no garbage collector.** Nothing in the algebra is ever modified, and
 nothing is shared behind your back: where a value lives and when it dies is known when
 the program is compiled. No collector, no `free`, no lifetimes to annotate.
 
