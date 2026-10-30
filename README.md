@@ -170,14 +170,14 @@ sq -> square{n -> k}!    // its type: k * k
 ```
 
 **Homoiconic, with types instead of lists.** In Lisp, code and data share one
-representation: the list. A list has no meaning, and a macro rewrites symbols it does
-not understand.
+representation: the list, which means nothing by itself.
 
-In Syntact, the one representation is the type, and a type has laws. Replacing a
-field, running and checking are all computations in the algebra of types. What they
-give back is still a type, written as code:
-- the type of `square{n -> k}!` is `k * k`;
-- the type of `abs{n}!` is `n ? {<0 -> -n  -> n}`.
+In Syntact, the one representation is the type:
+- the code you write is a type;
+- every composition of types is a type: replacing a field, running, matching;
+- the code that runs is a type: what is left of the program once it is simplified.
+
+The type of `square{n -> k}!` is `k * k`, and `k * k` is also the code that runs.
 
 Lisp's code is data. Syntact's code is types, and that is why the compiler can prove
 things about it.
