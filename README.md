@@ -2,14 +2,15 @@
 
 > **The code is the proof.**
 
-Machines already write the code. Your tests check ten values of it. Syntact checks
-all of them, without trying a single one, and shows you the value that breaks it.
+Machines already write the code. Your tests check ten values of it. Syntact checks no
+value at all: it computes with types. A property holds when its type simplifies to
+`true`. When it does not, the compiler shows you the value that breaks it.
 
 **Syntact is just the algebra of types.** Checking a program, proving it and
 compiling it are one and the same computation: simplifying its type.
 
 - **No proof to write.** The code is the proof.
-- **Never assumed.** A property is proven for every value, or the code is refused.
+- **Never assumed.** A property is proven on the types, or the code is refused.
 - **As fast as C, or faster.** What is proven is never checked at run time.
 - **No memory to manage.** No GC, no `free`, no lifetimes.
 - **Parallel or GPU, at the call:** `work[!]`, `work|!|`.
@@ -20,7 +21,7 @@ compiling it are one and the same computation: simplifying its type.
 |---|---|
 | `x -> 5` | `x` is `5` |
 | `u8:x -> 5` | `x` has the type `u8`: the compiler must prove that `5` is a `u8` |
-| `u8:x -> ??` | `x` is unknown: it can be any `u8` |
+| `u8:x -> ??` | `x` is an unknown, of type `u8` |
 | `{ … -> r }` | a scope: fields, each with a default value, then its result `r` |
 | `square{n -> 5}` | `square`, with its field `n` replaced by `5` |
 | `square{n -> 5}!` | run it |
@@ -34,15 +35,15 @@ abs -> {
   -> n ? {<0 -> 0 - n  -> n}   // the result: -n when n < 0, n otherwise
 }
 
-i32:n -> ??                    // n is unknown: any i32
-i32:r -> abs{n}!               // r must be an i32, for every n
+i32:n -> ??                    // n is an unknown, of type i32
+i32:r -> abs{n}!               // the type of abs{n}! must be inside i32
 // refused: when n is -2147483648, -n is 2147483648, which is not an i32
 ```
 
-There is no test here. `r` has the type `i32`, so `abs{n}!` must be an `i32` for
-every possible `n`. The compiler does not try four billion values: it reads `abs`,
-splits on `n < 0`, and finds the one value where `-n` leaves the `i32`. The bug every
-C programmer has shipped once is refused, with the value that breaks it.
+There is no test here, and no value is tried. The compiler computes the type of
+`abs{n}!`: where `n < 0`, `-n` has the type `1..2147483648`. That type sticks out of
+`i32` by one value, and the compiler tells you where it comes from:
+`n = -2147483648`. The bug every C programmer has shipped once is refused.
 
 ## The code is the proof
 
@@ -52,7 +53,7 @@ sum -> {
   -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}   // 0 + 1 + … + n
 }
 
-u64:n -> ??                                  // n is unknown: any u64
+u64:n -> ??                                  // n is an unknown, of type u64
 true:gauss -> sum{n}! * 2 = n * (n + 1)      // gauss has the type true
 ```
 
@@ -83,8 +84,8 @@ computes with types:
 ```syntact
 u8:a -> ??
 u8:b -> ??
-u16:p -> a * b     // proven: the product of two u8 always fits in a u16
-u8:q -> a * b      // refused: 255 * 255 does not fit in a u8
+u16:p -> a * b     // proven: u8 * u8 is 0..65025, inside u16
+u8:q -> a * b      // refused: 0..65025 is not inside u8
 ```
 
 Strings too. `'a'..'z' * 1..` is one letter or more, and `+` puts strings one after
@@ -102,12 +103,12 @@ Email:bad -> "jo@mail"      // refused: no dot after the @
 ## Made for models
 
 ```syntact
-string:m -> ??                          // any string
-m:roundtrip -> decrypt{encrypt{m}!}!    // roundtrip has the type m: it must be m
+string:m -> ??                          // m is an unknown, of type string
+m:roundtrip -> decrypt{encrypt{m}!}!    // roundtrip has the type m
 ```
 
-A value is a type, so `m` can be a type: `roundtrip` must give back exactly `m`, for
-every string. That one line is the law.
+An unknown is a type too, so `m` can be the type of `roundtrip`: what `roundtrip`
+computes must simplify to `m` itself. That one line is the law.
 
 1. **You** write the law.
 2. **The model** writes `encrypt` and `decrypt`.
