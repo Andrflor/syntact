@@ -18,6 +18,47 @@ runs it in parallel or on the GPU, and manages its memory without a garbage coll
 
 ---
 
+## Forty lost years
+
+In 1980, a program ran on a machine a thousand times slower than your phone, and it
+was fast. Since then, every decade has put one more layer between the programmer and
+the machine, and sold each one as progress.
+
+Virtual machines. Garbage collectors. Interpreters. Objects everywhere, then
+interfaces over the objects, factories for the interfaces, dependency injection for
+the factories. Frameworks on top of frameworks. A package to pad a string on the left,
+and the internet breaking when it disappears. A whole browser shipped inside a chat
+app. Machines got a thousand times faster, and software got slower.
+
+Python is the emblem. It is dozens of times slower than C, so every library that
+matters is written in C, and Python glues it together. Its type errors are found at
+run time: by your users, in production, at three in the morning. JavaScript was
+designed in ten days, and we have been paying for those ten days for thirty years:
+`[] + {}`, `null` and `undefined`, a type system bolted on afterwards that lies
+whenever it is convenient, and build chains that compile JavaScript into JavaScript.
+
+All of it in the name of "developer experience". It never was. It made the first line
+fast to write and every line after it expensive: to read, to debug, to run, to change.
+The cost did not go away. It moved: onto the developer who inherits the code, onto the
+user who waits, onto the machine that burns. We were sold convenience, and handed the
+bill.
+
+Abstraction was supposed to compress. It ended up hiding. To know what a button does,
+you read forty files, and the compiler cannot see through them either: the
+performance dies with the clarity. The types that were supposed to protect us lie —
+`null`, `any`, casts —, so we write tests, which check a few values and never all of
+them.
+
+Now models trained on those forty years write that code for us, faster than ever.
+More layers, more lies, at the speed of a GPU.
+
+Syntact goes the other way. Nothing is hidden: the code is a value, all the way
+through. No layer to pay for: an abstraction reduces away, and only the computation
+that is left runs. No type that lies: a type is exactly its values, and every claim is
+proven for all of them, not tested on a few.
+
+---
+
 ## Curry–Howard, the other way round
 
 Curry–Howard: a proposition is a type, and a proof is a program of that type. Proof
@@ -256,12 +297,6 @@ libm -> <libm.so.6>{
 root -> libm.sqrt{x -> 2.0}! * 2.0   // ε<sqrt{x -> 2.0}!>(x::f64, x * 2.0)
 ```
 
-**Handlers are context, at no cost.** An event, emitted with `>-`, is answered by a
-handler, `-<`, found when the program is typed and never at run time: nothing is
-passed, and an emission costs what its handler costs. A logger, an allocator or a test
-double is a handler put around a computation, and the same code collapsed somewhere
-else is answered by another one.
-
 This is what homoiconicity was for. The code is a value, and its type is its normal
 form. With the effects in it, that normal form is the whole program: what it
 computes, what it does, and in what order. The compiler, the prover and the optimizer
@@ -297,9 +332,7 @@ par with `gcc -O3`.
 
 **Memory without a garbage collector.** Nothing in the algebra is ever modified, and
 nothing is shared behind your back: where a value lives and when it dies is known when
-the program is compiled. No collector, no `free`, no lifetimes to annotate. Allocation
-itself is an event: an arena, a pool or the stack is the handler you put around a
-computation.
+the program is compiled. No collector, no `free`, no lifetimes to annotate.
 
 **Parallel and GPU, by the collapse.** A computation is never declared async, parallel
 or GPU-aware. How it runs is chosen where it is collapsed, and the same scope can run
@@ -320,7 +353,7 @@ work|!|     on the GPU
 | Part | State |
 |---|---|
 | [`specs/types.md`](specs/types.md) | the algebra: the reference. Where another document disagrees, it wins |
-| `kernel/` | the algebra, implemented: the check is the proof. Recursions solved to their closed forms (sums of powers, C-finite sequences, Arden), strings as sets, holes, effects and handlers |
+| `kernel/` | the algebra, implemented: the check is the proof. Recursions solved to their closed forms (sums of powers, C-finite sequences, Arden), strings as sets, holes, effects |
 | `code/` | the residual program as code: a bytecode that keeps what the kernel proved of each value, the algebra of computations (`code/calc`), executables for x86-64 Linux (`code/x64`), and C (`code/c`) |
 | `lsp/` | diagnostics, the type of any expression on hover, and completion, from the kernel |
 | `syntax/` | the parser |
