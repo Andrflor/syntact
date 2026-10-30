@@ -181,6 +181,18 @@ The type of `y` is the call to `sqrt`, then `* 2.0` on what it gives back. The
 compiler keeps the call where it is written, and computes on its answer as an unknown
 `f64`.
 
+A C function can also be called without an effect: write `??::f64`, an unknown,
+instead of `!?::f64`:
+
+```syntact
+libm -> <libm.so.6>{
+  sqrt -> {f64:x, -> ??::f64}         // pure: an unknown f64, not an effect
+}
+```
+
+You get almost the same thing, with one difference. An unknown is pure, so the
+compiler may move it out of order, or erase it when nothing reads it. An effect, never.
+
 An effect stays even when its answer is not used:
 
 ```syntact
