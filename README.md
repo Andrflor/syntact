@@ -64,9 +64,16 @@ program, the proof, and then erase it. In Syntact, the program that runs is the 
 
 ## Made for models
 
-- **You** write the laws, as colors.
-- **The model** writes the code.
-- **The compiler** proves it, or returns the counterexample.
+A law is one line:
+
+```syntact
+m -> ??::string
+m: -> decrypt{encrypt{m}!}!   // what is encrypted, decrypted, is m again
+```
+
+- **You** write the law.
+- **The model** writes `encrypt` and `decrypt`.
+- **The compiler** proves the law for every string, or returns the one that breaks it.
 
 No proof search, no solver that times out. If it compiles, it ships.
 
