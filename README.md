@@ -133,11 +133,11 @@ poor types of everyday languages, a label on a box like `int` or `string`. They 
 the rich types of type theory, which say exactly what a value is: `5`, `0..255`, an
 email address, `k * k`. So Syntact builds all of the code on them, and on nothing else.
 
-And the converse is the great part: if all of the code is types, then Syntact is just
-math.
-
 Syntact is just the algebra of types. Checking, proving and compiling are one
 computation: simplifying types.
+
+And the converse is the great part: since Syntact is just the algebra of types,
+Syntact is just math.
 
 A property is the type on the left: `T:x -> v` holds when the code `v` on the right
 has the type `T`. That is Curry–Howard: the type is the proposition, and the code is
