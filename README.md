@@ -14,14 +14,24 @@ that breaks what it claims — for any value, and with no proof to write.
 
 ## Why
 
-For forty years, languages piled layers between us and the machine: VMs, garbage
-collectors, frameworks on frameworks, a package to pad a string. Python is glue over
-C. JavaScript was designed in ten days, and we are still paying for it. "Developer
-experience" made the first line cheap and every line after it expensive. Machines got
-a thousand times faster, and software got slower. Now models trained on that code
-write more of it.
+**The mathematicians' debt.** The first programmers were mathematicians, and they
+gave us the function: a black box from inputs to outputs. That is fine on paper. On a
+machine, the compiler cannot see inside it and its type only approximates it.
+Everything built on it — methods, closures, interfaces, callbacks — hides more code.
 
-Syntact goes the other way: nothing hidden, no layer to pay for, no type that lies.
+**The engineers' debt.** Then programmers stopped being mathematicians. Compilers grew
+hundreds of ad hoc passes that are just algebra, rediscovered one case at a time.
+Languages piled up layers: VMs, garbage collectors, frameworks on frameworks. Python
+is glue over C, and JavaScript was designed in ten days. "Developer experience" made
+the first line cheap and every line after it expensive. Machines got a thousand times
+faster, and software got slower. Now models trained on that code write more of it.
+
+**The missing bridge.** Type theory has never been so powerful, nor so far from
+software. Lean and Rocq speak to mathematicians. Mainstream languages are built
+without the math. Nobody joined the two.
+
+Syntact pays both debts: one algebra, as rigorous as mathematics, compiled as fast as
+C. Nothing hidden, no layer to pay for, no type that lies.
 
 ## The code is the proof
 
