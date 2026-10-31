@@ -168,15 +168,14 @@ is_value :: proc(k: ^Kernel, t: Type) -> bool {
 	return false
 }
 
-// preimage: the integers v such that a * v + b is in s, a ≠ 0.
 // preimage: the integers v such that a * v + b is in the cells, a ≠ 0; false when a
-// bound is beyond the integers written here.
+// bound is beyond the integers written here, or when a cell is not of integers.
 preimage :: proc(k: ^Kernel, cells: []Type, a, b: i128) -> (set: Type, ok: bool) {
 	if b == min(i128) || a == min(i128) do return
 	start := mark(k)
 	defer release(k, start)
 	for c in cells {
-		if cell_family(c) != .Int do continue
+		if cell_family(c) != .Int do return
 		lo, hi := discrete_bounds(c)
 		lo = add_bound(lo, -b) or_return
 		hi = add_bound(hi, -b) or_return
