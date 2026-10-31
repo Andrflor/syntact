@@ -62,7 +62,10 @@ signatures :: proc(op: Operator) -> []Signature {
 	@(static) shift := []Signature{{{.Int, .Int}, .Int}}
 	@(static) bits := []Signature{{{.Int, .Int}, .Int}, {{.Bool, .Bool}, .Bool}}
 	@(static) compare := []Signature{{{.Int, .Int}, .Bool}, {{.Real, .Real}, .Bool}, {{.Char, .Char}, .Bool}}
+	@(static) round := []Signature{{{.Real, .Int}, .Real}}
 	#partial switch op {
+	case .Round:
+		return round
 	case .Add:
 		return add
 	case .Sub, .Neg:
@@ -195,6 +198,19 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 
 operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Type {
 	for a in args do if is_invalid(a) do return a
+	if op == .Round do return round_law(k, args[0], bits_format(args[1]), span)
+	if f := operands_format(k, op, args); f != .Exact {
+		// on values of a format, what the machine computes: the exact result, rounded
+		// to the widest; a known operand is first rounded to it (format.odin)
+		rounded := make([]Type, len(args))
+		for a, i in args do rounded[i] = is_constant(a) && !(op == .Pow && i == 1) ? round_law(k, a, f, span) : a
+		return round_law(k, exact_law(k, op, rounded, span), f, span)
+	}
+	return exact_law(k, op, args, span)
+}
+
+// exact_law: the operation on its operands, exactly.
+exact_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Type {
 	if len(args) > 2 {
 		// + and * are associative: a + b + c = (a + b) + c
 		out := operation_law(k, op, args[:2], span)
@@ -473,7 +489,7 @@ real_opposite :: proc(k: ^Kernel, cells: []Type) -> (opposite: []Type, ok: bool)
 	from := mark(k)
 	for c in cells {
 		p := real_bounds(c)
-		r := Real_Bounds{lo_open = p.hi_open, hi_open = p.lo_open}
+		r := Real_Bounds{lo_open = p.hi_open, hi_open = p.lo_open, format = p.format} // a format is symmetric
 		if v, has := p.hi.?; has do r.lo = real_neg(v) or_return
 		if v, has := p.lo.?; has do r.hi = real_neg(v) or_return
 		push(k, real_cell(r))

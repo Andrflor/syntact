@@ -327,16 +327,18 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 		switch of {
 		case .Int:
 			return discrete_cell(.Int, nil, nil)
-		case .Real:
-			return real_cell({})
+		case .Real, .F16, .F32, .F64:
+			return real_cell({format = real_format(of)})
 		case .Any:
 		}
 		// `..`: every primitive
 		return or_constants(k, {discrete_cell(.Int, nil, nil), real_cell({}), discrete_cell(.Char, 0, nil), Bool(false), Bool(true)})
 	}
 	f := bound_family(values[0])
+	// the bounds of a range of a format are reals
+	expected := real_format(of) != .Exact ? Range_Family.Real : of
 	for v in values {
-		if !same_bound_family(values[0], v) || of != .Any && f != of {
+		if !same_bound_family(values[0], v) || of != .Any && f != expected {
 			return problem(.Invalid_Range, span, fmt.tprintf("the bounds of %s..%s are of two families", print_type(lo), print_type(hi)))
 		}
 	}
@@ -347,7 +349,7 @@ range_law :: proc(k: ^Kernel, lo, hi: Type, family: Range_Family, span: syn.Span
 	}
 	#partial switch x in least {
 	case Real:
-		b: Real_Bounds
+		b := Real_Bounds{format = real_format(of)}
 		if !below do b.lo = x
 		if !above do b.hi = most.(Real)
 		return real_cell(b)
@@ -449,6 +451,8 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 		b.typed_product = value
 		value = with_effects(k, b.scope, b, value)
 	}
+	// a real in a color of a format is what the machine holds of it (format.odin)
+	if f := color_format(color); f != .Exact && b.kind == .Push do value = round_law(k, value, f, b.span)
 	// the color flows down into the value (§5.4): a shape, or the solution of a
 	// recursive scope, which is one
 	if shape, ok := color.(^Scope); ok && b.kind == .Push {

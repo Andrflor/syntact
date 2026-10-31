@@ -776,8 +776,9 @@ prelude :: proc() -> ^Scope {
 	}
 	alias(p, "int", new_range(nil, nil, .Int)) // ..0..
 	alias(p, "float", new_range(nil, nil, .Real)) // ..0.0..
-	alias(p, "f32", new_range(nil, nil, .Real))
-	alias(p, "f64", new_range(nil, nil, .Real))
+	alias(p, "f16", new_range(nil, nil, .F16)) // the reals binary16 holds (real.odin)
+	alias(p, "f32", new_range(nil, nil, .F32))
+	alias(p, "f64", new_range(nil, nil, .F64))
 	alias(p, "char", new_range(Char(0), nil)) // ''..
 	alias(p, "string", string_term()) // ''.. * 0..
 	alias(p, "bool", new_or(Bool(false), Bool(true)))

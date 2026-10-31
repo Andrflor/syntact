@@ -869,10 +869,16 @@ OPS := [kernel.Operator]Op {
 	.Greater    = .Gt,
 	.Greater_Eq = .Ge,
 	.In         = .Eq, // not used: `in` is a test of membership
+	.Round      = .Add, // not used: a rounding is lowered by its width
 }
 
 operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
 	if o.op == .In do return member(l, lower(l, o.args[0]), o.args[1])
+	// a real is computed in 64 bits: rounding to them is what each operation does
+	if o.op == .Round {
+		if bits, is_int := o.args[1].(kernel.Int); is_int && bits == 64 do return lower(l, o.args[0])
+		return fail(l, "%s: the reals of 16 and 32 bits are not lowered yet", kernel.print_type(o))
+	}
 	args := make([dynamic]Value)
 	for a in o.args {
 		append(&args, lower(l, a))

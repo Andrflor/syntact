@@ -64,6 +64,7 @@ operator_text := [Operator]string {
 	.Greater    = ">",
 	.Greater_Eq = ">=",
 	.In         = "in",
+	.Round      = "round",
 }
 
 operator_prec :: proc(op: Operator) -> int {
@@ -80,6 +81,8 @@ operator_prec :: proc(op: Operator) -> int {
 		return PREC_PREFIX
 	case .Bit_And, .Bit_Or, .Xor, .Less, .Less_Eq, .Greater, .Greater_Eq, .In:
 		return PREC_COMPARE
+	case .Round:
+		return PREC_ATOM
 	}
 	return PREC_ATOM
 }
@@ -414,11 +417,15 @@ write_range :: proc(b: ^Printer, r: ^Range) {
 			strings.write_string(b, "int")
 		case .Real:
 			strings.write_string(b, "float")
+		case .F16, .F32, .F64:
+			strings.write_string(b, format_name[real_format(r.family)])
 		case .Any:
 			strings.write_string(b, "..")
 		}
 		return
 	}
+	// the reals of a format between two bounds: the format, and the range
+	if f := real_format(r.family); f != .Exact do fmt.sbprintf(b, "%s & ", format_name[f])
 	if c, is_char := r.lo.(Char); is_char && c == 0 {
 		strings.write_string(b, "''") // from the smallest character
 	} else if r.lo != nil {
@@ -426,6 +433,13 @@ write_range :: proc(b: ^Printer, r: ^Range) {
 	}
 	strings.write_string(b, "..")
 	if r.hi != nil do write_type(b, r.hi, PREC_ATOM)
+}
+
+format_name := [Real_Format]string {
+	.Exact = "float",
+	.F16   = "f16",
+	.F32   = "f32",
+	.F64   = "f64",
 }
 
 write_operation :: proc(b: ^Printer, o: ^Operation) {
@@ -444,6 +458,13 @@ write_operation :: proc(b: ^Printer, o: ^Operation) {
 		return
 	}
 	prec := operator_prec(o.op)
+	if o.op == .Round {
+		// round32(t): t rounded to the format of its width
+		fmt.sbprintf(b, "round%v(", o.args[1])
+		write_type(b, o.args[0], 0)
+		strings.write_byte(b, ')')
+		return
+	}
 	if o.op == .Neg || o.op == .Bit_Not {
 		strings.write_string(b, operator_text[o.op])
 		write_type(b, o.args[0], PREC_PREFIX)

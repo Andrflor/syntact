@@ -2,6 +2,6 @@
   "name": "boundary_held_scope_two_runs",
   "description": "A scope that holds a call, run twice: two calls.",
   "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nroot -> {-> libm.sqrt{x -> 2.0}!}\nx -> root! - root!",
-  "type": "ε<sqrt{x -> 2.0}!>(x::f64, ε<sqrt{x -> 2.0}!>(y::f64, x - y))",
+  "type": "ε<sqrt{x -> 2.0}!>(x::f64, ε<sqrt{x -> 2.0}!>(y::f64, round64(x - y)))",
   "expect_errors": []
 }

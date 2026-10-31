@@ -2,6 +2,6 @@
   "name": "boundary_call_crossed_by_pure",
   "description": "The pure crosses a call: y * 2.0 after it.",
   "source": "libm -> <libm.so.6>{\n  sqrt -> {f64:x, -> !?::f64}\n  pow -> {f64:b, f64:e, -> !?::f64}\n}\nx -> libm.sqrt{x -> 2.0}! * 2.0",
-  "type": "ε<sqrt{x -> 2.0}!>(x::f64, x * 2.0)",
+  "type": "ε<sqrt{x -> 2.0}!>(x::f64, round64(x * 2.0))",
   "expect_errors": []
 }

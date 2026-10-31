@@ -353,12 +353,103 @@ SUM_ZERO :: "sum -> {\n  u8:n\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
 
 SUM_SEVEN :: "sum -> {\n  u8:n -> 7\n  -> n ? {0 -> 0  -> n + sum{n -> n - 1}!}\n}\n"
 
+// The sizes (size.odin): each source binds `x` last; the printed size of its type.
+Size_Case :: struct {
+	source: string,
+	size:   string,
+}
+
+SIZE_CASES := []Size_Case {
+	// what is known takes nothing: a value, a set written as a value
+	{`x -> 5`, "0"},
+	{`x -> u8`, "0"},
+	{`x -> {u8: u8:}`, "0"},
+	// an unknown takes what its layout admits
+	{`x -> ??::u8`, "8"},
+	{`x -> ??::i8`, "8"},
+	{`x -> ??::bool`, "1"},
+	{`x -> ??::char`, "21"},
+	{`x -> ??::('a'..'z')`, "5"},
+	{`x -> ??::(0..3 | 10..12)`, "4"},
+	{`x -> ??::("ab" | "c")`, "1"},
+	{`x -> ??::int`, "1.."},
+	{`x -> ??::string`, "(0..) * 21"},
+	// a term over unknowns takes what the set of its values takes
+	{"a -> ??::u8\nx -> a + a", "9"},
+	{"a -> ??::u8\nx -> a ? {<10 -> a  -> 1000}", "0 | 4"},
+	// a scope: its fields; a hole takes nothing
+	{"a -> ??::u8\nx -> {u8:f -> a  bool:g  u8:h -> 7}", "8"},
+	{"a -> ??::u8\nx -> {u8:n <- 3  t -> a}", "8"},
+	// a shape as a layout: its places; a run, what its color admits as a scope
+	{`x -> ??::{u8: u8:}`, "16"},
+	{ARRAY + "x -> ??::{u8: ...Array{u8}:}", "8 + (0..) * 8"},
+	{ARRAY + "x -> ??::(Array{u8})", "(0..) * 8"},
+	{ARRAY + "Pair -> {u8:a  string:b}\nx -> ??::(Array{Pair})", "(0..) * (8 + (0..) * 21)"},
+	// a format: its width, a rounding included; every real: no bound
+	{`x -> ??::f16`, "16"},
+	{`x -> ??::f32`, "32"},
+	{`x -> ??::f64`, "64"},
+	{`x -> ??::float`, "1.."},
+	{"a -> ??::f32\nx -> a + 0.1", "32"},
+}
+
+// The formats (real.odin, format.odin): each source binds `x` last.
+FORMAT_CASES := []Spec_Case {
+	// a format is a set of reals: f16 ⊂ f32 ⊂ f64 ⊂ float
+	{`x -> f32 & f64`, "f32", {}},
+	{`x -> f32 | f64`, "f64", {}},
+	{`x -> f16 & 0.0..1.0`, "f16 & 0.0..1.0", {}},
+	{`x -> -f32`, "f32", {}},
+	{`f32:x -> 0.5`, "0.5", {}},
+	{`f16:x -> 65504.0`, "65504.0", {}},
+	{`f16:x -> 0.000000059604644775390625`, "0.000000059604644775390625", {}}, // the least subnormal
+	{`float:x -> 0.1`, "0.1", {}},
+	// a real in a color of a format is the value of the format nearest it, exactly
+	{`f32:x -> 0.1`, "0.100000001490116119384765625", {}},
+	{`f16:x -> 0.1`, "0.0999755859375", {}},
+	{`f16:x -> 2049.0`, "2048.0", {}}, // a tie: the even one
+	{`f16:x -> 70000.0`, "", {.Constraint_Mismatch}}, // beyond the greatest f16
+	{`x -> f64 & ~f32`, "f64 & ~f32", {}}, // no union of intervals: it stays
+	// an operation on a format is its exact result, rounded to the widest format
+	{"a -> ??::f32\nx -> a + 0.1", "round32(?0 + 0.100000001490116119384765625)", {}},
+	{"a -> ??::f16\nb -> ??::f32\nx -> a + b", "round32(?0 + ?1)", {}},
+	{"a -> ??::f32\nx -> -a", "-?0", {}}, // a value of the format: nothing to round
+	{"a -> ??::(f32 & 0.0..1.0)\nf32:x -> a * 0.5", "round32(?0 * 0.5)", {}}, // a subnormal halved is no f32
+	{"a -> ??::f32\nf32:x -> a * a", "", {.Constraint_Mismatch}}, // it may go beyond the greatest f32
+	{"a -> ??::f32\nf64:x -> a", "?0", {}},
+	{"a -> ??::f32\nf16:x -> a", "", {.Constraint_Mismatch}},
+}
+
 @(test)
-test_spec :: proc(t: ^testing.T) {
+test_formats :: proc(t: ^testing.T) {
+	check_cases(t, FORMAT_CASES)
+}
+
+@(test)
+test_sizes :: proc(t: ^testing.T) {
 	arena: vmem.Arena
 	context.allocator = vmem.arena_allocator(&arena)
 	defer vmem.arena_destroy(&arena)
-	for c in SPEC_CASES {
+	for c in SIZE_CASES {
+		k, parsed := run(c.source)
+		if !testing.expectf(t, parsed, "%s: does not parse", c.source) do continue
+		last := k.root.bindings[len(k.root.bindings) - 1]
+		got := print_type(size(&k, binding_type(&k, last)))
+		testing.expectf(t, got == c.size, "%s: the size is %s, expected %s", c.source, got, c.size)
+	}
+}
+
+@(test)
+test_spec :: proc(t: ^testing.T) {
+	check_cases(t, SPEC_CASES)
+}
+
+// check_cases: each case types as it says, with the errors it says.
+check_cases :: proc(t: ^testing.T, cases: []Spec_Case) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	for c in cases {
 		k, parsed := run(c.source)
 		if !testing.expectf(t, parsed, "%s: does not parse", c.source) do continue
 		last := k.root.bindings[len(k.root.bindings) - 1]

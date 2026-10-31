@@ -149,7 +149,10 @@ Range :: struct {
 Range_Family :: enum u8 {
 	Any, // `..`: every primitive
 	Int,
-	Real,
+	Real, // every real: the rationals, exactly
+	F16, // the reals binary16 holds, bounded by its format (real.odin)
+	F32,
+	F64,
 }
 
 Operator :: enum u8 {
@@ -171,6 +174,7 @@ Operator :: enum u8 {
 	Greater,
 	Greater_Eq,
 	In,
+	Round, // round(t, w): the value of the format of w bits nearest the real t (format.odin)
 }
 
 Operation :: struct {

@@ -251,7 +251,9 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if v.op == .In do return family_term(.Bool), true
 		args := make([]Type, len(v.args))
 		for a, i in v.args do args[i] = layout_image(k, a) or_return
-		return operation_law(k, v.op, args, v.span), true
+		// the term computes exactly: only a rounding rounds (format.odin)
+		if v.op == .Round do return round_law(k, args[0], bits_format(args[1]), v.span), true
+		return exact_law(k, v.op, args, v.span), true
 	case ^Or:
 		terms := make([]Type, len(v.terms))
 		for a, i in v.terms do terms[i] = layout_image(k, a) or_return

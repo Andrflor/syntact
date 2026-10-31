@@ -48,7 +48,7 @@ cell_family :: proc(t: Type) -> Cell_Family {
 		switch v.family {
 		case .Int:
 			return .Int
-		case .Real:
+		case .Real, .F16, .F32, .F64:
 			return .Real
 		case .Any:
 		}
@@ -58,7 +58,8 @@ cell_family :: proc(t: Type) -> Cell_Family {
 	case ^And:
 		families: bit_set[Cell_Family]
 		for x in v.terms do families += {cell_family(x)}
-		if _, ok := v.terms[0].(^Range); ok && families == {.Real} do return .Real
+		// a real cell with open bounds: its range, and the ~ of each open bound
+		if _, ok := v.terms[0].(^Range); ok && families == {.Real} && negates_points(v.terms[1:]) do return .Real
 		if .Value in families do return .Value
 		if families <= {.Text, .Char} do return .Text
 		return .Other
@@ -68,6 +69,16 @@ cell_family :: proc(t: Type) -> Cell_Family {
 		if is_text(t) do return .Text
 	}
 	return .Other
+}
+
+// negates_points: each term is the ~ of one real.
+negates_points :: proc(terms: []Type) -> bool {
+	for t in terms {
+		n, is_not := t.(^Not)
+		if !is_not do return false
+		if _, is_real := n.term.(Real); !is_real do return false
+	}
+	return true
 }
 
 // is_text: a set of strings: characters, +, *, and their | & ~.
@@ -169,8 +180,10 @@ cell_less :: proc(a, b: Type) -> bool {
 		x, y := real_bounds(a), real_bounds(b)
 		u, has_u := x.lo.?
 		v, has_v := y.lo.?
-		if !has_u || !has_v do return !has_u && has_v
-		return real_less(u, v)
+		if has_u != has_v do return !has_u
+		if has_u && u != v do return real_less(u, v)
+		if x.format != y.format do return x.format < y.format
+		return term_less(a, b)
 	case .Bool:
 		return !bool(a.(Bool)) && bool(b.(Bool))
 	}
@@ -546,7 +559,11 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 			if cell_family(y) != .Real do continue
 			next := mark(k)
 			for p in pieces {
-				qs, n := real_minus(real_bounds(p), real_bounds(y))
+				qs, n, cut := real_minus(real_bounds(p), real_bounds(y))
+				if !cut || cell_family(p) != .Real {
+					push(k, new_and(p, new_not(y))) // no union of intervals: it stays
+					continue
+				}
 				for q in qs[:n] do _ = cell(k, real_cell(q))
 			}
 			pieces = pushed(k, next)
@@ -688,10 +705,12 @@ discrete_minus_all :: proc(k: ^Kernel, x: Type, ys: []Type) -> []Type {
 // --- reals ---
 
 // Real_Bounds: the bounds of a real cell, read on its term: nil is infinite; an
-// open bound is the `& ~p` of `>p` (§4.3).
+// open bound is the `& ~p` of `>p` (§4.3). Its format: the reals between the bounds
+// it holds, every one or those of a floating-point format (real.odin).
 Real_Bounds :: struct {
 	lo, hi:           Maybe(Real),
 	lo_open, hi_open: bool,
+	format:           Real_Format,
 }
 
 real_bounds :: proc(t: Type) -> Real_Bounds {
@@ -702,6 +721,7 @@ real_bounds :: proc(t: Type) -> Real_Bounds {
 	case ^Range:
 		if x, ok := v.lo.(Real); ok do b.lo = x
 		if x, ok := v.hi.(Real); ok do b.hi = x
+		b.format = real_format(v.family)
 	case ^And:
 		for x in v.terms do if _, ok := x.(^Range); ok do b = real_bounds(x)
 		for x in v.terms {
@@ -716,12 +736,50 @@ real_bounds :: proc(t: Type) -> Real_Bounds {
 	return b
 }
 
+// real_empty: no real between the bounds of b that its format holds. A format holds
+// finitely many: none may lie between two bounds. Beyond what the integers written
+// here compute, b is taken as not empty.
 real_empty :: proc(b: Real_Bounds) -> bool {
 	lo, has_lo := b.lo.?
 	hi, has_hi := b.hi.?
-	if !has_lo || !has_hi do return false
-	c := real_compare(lo, hi)
-	return c > 0 || c == 0 && (b.lo_open || b.hi_open)
+	if has_lo && has_hi {
+		c := real_compare(lo, hi)
+		if c > 0 || c == 0 && (b.lo_open || b.hi_open) do return true
+		if c == 0 do return !representable(lo, b.format)
+	}
+	if b.format == .Exact do return false
+	least: Real
+	if has_lo {
+		up, computed := round_real(lo, b.format, .Up)
+		if !computed do return beyond_format(lo, b.format)
+		if b.lo_open && up == lo {
+			up, computed = next_above(up, b.format)
+			if !computed do return beyond_format(up, b.format)
+		}
+		least = up
+	} else {
+		greatest, computed := greatest_finite(b.format)
+		if !computed do return false
+		least = Real{-greatest.num, greatest.den}
+	}
+	if !has_hi do return false
+	c := real_compare(least, hi)
+	return c > 0 || c == 0 && b.hi_open
+}
+
+// beyond_format: r is above the greatest finite value of the format f.
+beyond_format :: proc(r: Real, f: Real_Format) -> bool {
+	greatest, computed := greatest_finite(f)
+	return computed && real_less(greatest, r)
+}
+
+// greatest_finite: the greatest finite value of the format f: 2^precision - 1 at
+// the greatest exponent; false beyond the integers written here.
+greatest_finite :: proc(f: Real_Format) -> (Real, bool) {
+	format := FORMATS[f]
+	if format.precision >= 127 do return {}, false
+	mantissa := Real{(i128(1) << uint(format.precision)) - 1, 1}
+	return scale_pow2(mantissa, format.max_exponent - format.precision + 1)
 }
 
 real_cell :: proc(b: Real_Bounds) -> Type {
@@ -729,7 +787,7 @@ real_cell :: proc(b: Real_Bounds) -> Type {
 	lo, has_lo := b.lo.?
 	hi, has_hi := b.hi.?
 	if has_lo && has_hi && lo == hi do return lo
-	r := new_range(has_lo ? Type(lo) : nil, has_hi ? Type(hi) : nil, .Real)
+	r := new_range(has_lo ? Type(lo) : nil, has_hi ? Type(hi) : nil, format_family(b.format))
 	terms := make([dynamic]Type)
 	append(&terms, r)
 	if has_lo && b.lo_open do append(&terms, new_not(lo))
@@ -739,6 +797,7 @@ real_cell :: proc(b: Real_Bounds) -> Type {
 
 real_meet :: proc(x, y: Real_Bounds) -> Real_Bounds {
 	r := x
+	r.format = narrowest(x.format, y.format)
 	if y_lo, ok := y.lo.?; ok {
 		x_lo, has := x.lo.?
 		if !has || real_less(x_lo, y_lo) {
@@ -758,8 +817,19 @@ real_meet :: proc(x, y: Real_Bounds) -> Real_Bounds {
 	return r
 }
 
-// real_minus: x & ~y: what is below y, and what is above.
-real_minus :: proc(x, y: Real_Bounds) -> (pieces: [2]Real_Bounds, n: int) {
+// real_minus: x & ~y: what is below y, and what is above. Not cut when y holds fewer
+// reals than x between its bounds and x is more than one real: x & ~y is then no
+// union of intervals.
+real_minus :: proc(x, y: Real_Bounds) -> (pieces: [2]Real_Bounds, n: int, cut: bool) {
+	if !holds_all(y.format, x.format) {
+		if !is_point(x) do return pieces, 0, false
+		if real_empty(real_meet(x, y)) {
+			pieces[0] = x
+			return pieces, 1, true
+		}
+		return pieces, 0, true
+	}
+	cut = true
 	if lo, ok := y.lo.?; ok {
 		if b := real_meet(x, Real_Bounds{hi = lo, hi_open = !y.lo_open}); !real_empty(b) {
 			pieces[n] = b
@@ -775,8 +845,47 @@ real_minus :: proc(x, y: Real_Bounds) -> (pieces: [2]Real_Bounds, n: int) {
 	return
 }
 
-// join_reals: two intervals that meet or touch are one.
+// is_point: the bounds of b are one real, both closed.
+is_point :: proc(b: Real_Bounds) -> bool {
+	lo, has_lo := b.lo.?
+	hi, has_hi := b.hi.?
+	return has_lo && has_hi && lo == hi && !b.lo_open && !b.hi_open
+}
+
+// real_within: every real b holds, e holds.
+real_within :: proc(b, e: Real_Bounds) -> bool {
+	if is_point(b) do return !real_empty(real_meet(b, e))
+	if !holds_all(e.format, b.format) do return false
+	m := real_meet(b, e)
+	return m.lo == b.lo && m.lo_open == b.lo_open && m.hi == b.hi && m.hi_open == b.hi_open
+}
+
+// join_reals: two intervals of one format that meet or touch are one; one within
+// another of a format that holds all its reals is that one.
 join_reals :: proc(k: ^Kernel, cells: []Type) -> []Type {
+	from := mark(k)
+	for f in Real_Format {
+		group := mark(k)
+		for c in cells do if real_bounds(c).format == f do push(k, c)
+		_ = sink(k, group, join_intervals(k, pushed(k, group)))
+	}
+	joined := pushed(k, from)
+	out := mark(k)
+	for c, i in joined {
+		absorbed := false
+		for d, j in joined {
+			if i == j || !real_within(real_bounds(c), real_bounds(d)) do continue
+			// two of the same reals: the first is kept
+			if j > i && real_within(real_bounds(d), real_bounds(c)) do continue
+			absorbed = true
+		}
+		if !absorbed do push(k, c)
+	}
+	return sink(k, from, pushed(k, out))
+}
+
+// join_intervals: two intervals of one format that meet or touch are one.
+join_intervals :: proc(k: ^Kernel, cells: []Type) -> []Type {
 	from := mark(k)
 	push_all(k, cells)
 	sorted := pushed(k, from)
