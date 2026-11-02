@@ -607,9 +607,9 @@ that change decisions in *this* document:
   resolved there in §4: provenance stays opaque to the compiler, and the per-target name is an
   ordinary comptime branch in source (`sdk.md` §3.1) — no configuration layer.
   `Platform.lib_ref` here covers only the *form* the container needs, never the name.
-- **`Abi` becomes a record** alongside `Platform` (§4 here), and `emit_foreign_call`'s SysV
-  hardcoding — register lists, independent int/SSE counters, the 6-argument ceiling — becomes
-  data. Windows x64 needs positional slots and 32-byte shadow space; Apple aarch64 passes
+- **`Abi` becomes a record** alongside `Platform` (§4 here), and the SysV hardcoding of
+  `x64_sysv_assign` and `call_import` — register lists, independent int/SSE counters —
+  becomes data. Windows x64 needs positional slots and 32-byte shadow space; Apple aarch64 passes
   variadics on the stack. See `abi.md` §2.2.
 
 **interop.md §2 — addresses, pointers, structs, callbacks — still OPEN, and it is now on the
