@@ -15,17 +15,31 @@ and `types.md` disagree, `types.md` wins.
 - [**Patterns**](07-patterns.md) — `?` as a type, unknown targets, destructuring
 - [**Recursion**](08-recursion.md) — closed forms, Arden, guarded productions
 - [**Holes and genericity**](09-holes.md) — `<-`, filled at the use site or inferred
+- [**Effects and handlers**](10-effects-and-handlers.md) — `!?`, and events `>-` `-<` answered where a scope is collapsed
+- [**The external boundary**](11-external-boundary.md) — `<lib>{…}`: a scope whose symbols are run outside
 
 ## Open
 
 These parts are the intent: they are not written in `types.md` yet, and the kernel
 does not build them.
 
-- [**Effects and handlers**](10-effects-and-handlers.md) — `>-` and `-<`, served by the context of the call
-- [**The external boundary**](11-external-boundary.md) — `<lib>{…}`: a scope whose production points outside
 - [**State**](12-state.md) — resonance `>>-` `-<<`, reactivity `>>=` `=<<`
 - [**Execution patterns**](13-execution-patterns.md) — `<!>` `[!]` `(!)` `|!|`
 - [**Modules**](14-modules.md) — files and folders as scopes, `@`
+
+## Writing it
+
+- A binding ends at a newline or a comma. An operator continues across a newline,
+  never across a comma: `{f64:x, -> !?::f64}` is a field, then the production.
+- `//` comments a line, `/* */` a block, and blocks nest. A comment separates like a
+  space.
+- Integers are written `255`, `0xff` or `0b11111111`; reals `0.5`, always with a
+  dot.
+- `'a'` is a character, `"jwt"` a string, with the escapes `\n \t \r \0`;
+  between backticks a string is raw.
+- Spaces matter: `s{…}` and `f(…)` glued are a carve and a capture, `s {…}` is `s`
+  then a scope; `a.b` is an access.
+- There is no `==` and no `!=`: equality is `a = b`, difference `~b` (chapter 02).
 
 ## To code
 

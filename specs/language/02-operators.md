@@ -32,11 +32,31 @@ c -> u8 + 1        // 1..256
 d -> u8 < 300      // true
 e -> 2 > 2         // false
 h -> 10 / 4        // 2
+i -> -7 / 2        // -3: / rounds toward 0
+j -> -7 % 2        // -1: % has the sign of what it divides
 ```
 
 `[~]` is the bitwise not and `~` the complement: `[~]true` is `false`, `~true` holds
 every value but `true`. Equality is `a = b`, which is `a in =b`; difference is
 `~`. There is no `==` and no `!=`.
+
+## Formats
+
+A real written is exact: `0.1 + 0.2` is `0.3`. `f16`, `f32` and `f64` are sets of
+reals, those IEEE 754 holds in 16, 32 and 64 bits, and `f16 ⊂ f32 ⊂ f64`. A real
+in a color of a format is what the machine holds of it, the nearest value; so is
+what an operator computes on values of formats, in the widest of them:
+
+```syntact
+f32:x -> 0.1        // 0.100000001490116119384765625
+f16:y -> 70000.0    // refused: beyond the greatest f16
+f32:a -> ??
+f64:b -> ??
+c -> a + b          // round64(?0 + ?1)
+```
+
+Rounding is a term of the algebra, with its laws (`types.md` §4.10): a value of the
+format is its own rounding, and a rounding to a wider format changes nothing.
 
 ## Terms over unknowns
 
@@ -46,7 +66,7 @@ of an equation:
 ```text
 integers   + and * associative and commutative, * distributes over +,
            0 and 1 neutral, -a the opposite of a, (k * a) / k = a for k ≠ 0
-reals      a field: the same, and (a / b) * b = a for b ≠ 0
+reals      a field: the same, and (a / b) * b = a for b ≠ 0; exact reals only
 booleans   a Boolean algebra: [~][~]a = a
 ```
 

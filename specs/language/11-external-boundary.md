@@ -1,36 +1,49 @@
 # The external boundary
 
-> **Open.** `<lib>{…}` is not written in `types.md` and the kernel does not build it.
-> The previous pipeline compiles it to real calls (see `docs/interop.md`).
-
 What the program cannot compute — the operating system, a linked library, the
-hardware — is a scope whose production points outside. Its result is an unknown of a
-known layout:
+hardware — is a scope whose leaves are outside (`types.md` §4.8):
 
-```text
+```syntact
 kernel -> <kernel.so>{
   write -> {
     u8:a  u8:b
-    -> ??::u8
+    -> !?::u8
   }
 }
 ```
 
-`<kernel.so>` says where the scope's leaves come from. Everything inside is an
-ordinary scope: `write` has colored bindings and a production `-> ??::u8`, a value
-not computable here whose layout is `u8` (chapter 06).
+`<kernel.so>` says where the scope's symbols — the scopes written in it — are run.
+Everything inside is an ordinary scope: `write` has colored fields and a production
+`!?::u8`, an effect that gives back a `u8` (chapter 10).
 
 ## Calling outside is carving and collapsing
 
 ```text
 kernel.write                  // the scope: nothing happens
-kernel.write{2, 3}!           // carve, then collapse: the call happens here
+kernel.write{2, 3}!           // carve, then collapse: ε<write{a -> 2  b -> 3}!>(x::u8, x)
 partial -> kernel.write{b -> 4}
 partial!                      // and here, only now
 ```
 
-Carving an external does not run it. The effect is at `!`, and only there: crossing
-the boundary is an effect, whatever comes back — a value, a constant, or nothing.
+Carving a symbol calls nothing. The call is at `!`, and only there: it is the effect
+of the production, in the order it is written. The effects of the fields run before
+it, and the call takes their answers as values.
+
+## Pure symbols
+
+A symbol whose production is an unknown, `??::L`, has no effect: its answer is a
+value in L that this program does not compute. It is a term like any other: what
+nothing reads is erased, and it is not ordered with the effects.
+
+```syntact
+libm -> <libm.so.6>{
+  cbrt -> {f64:x, -> ??::f64}
+}
+one -> {r -> libm.cbrt{x -> 8.0}!  -> 1}!    // 1: nothing reads r, no call
+```
+
+A field that comes right before the production ends with a comma: `{f64:x, -> …}`.
+Without it, `f64:x -> …` is one binding, `x` with that value.
 
 ## No glue
 

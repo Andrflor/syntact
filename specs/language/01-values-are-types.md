@@ -50,7 +50,8 @@ like any name, and a binding of the same name shadows them:
 
 ```text
 int     ..0..                 every integer
-float   ..0.0..               every real        f32, f64: the same
+float   ..0.0..               every real
+f16 f32 f64                   the reals each floating-point format holds (chapter 02)
 char    ''..                  every character
 string  ''.. * 0..            every string
 bool    false | true

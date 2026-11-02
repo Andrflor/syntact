@@ -54,11 +54,23 @@ _fib{n -> …}!      a call: a scope whose fields are its parameters,
 ## Status
 
 The kernel computes the normal form of a program; `kernel/cmd` prints it, and the
-language server shows it for any expression. Code is not generated from it yet:
-executables still come from the previous pipeline, whose benchmarks are in
-[`docs/performance.md`](../../docs/performance.md). The residual program waits for the
-effects (chapter 10): an emission must stay in it, in order, and the handler that
-serves it depends on the context of the call.
+language server shows it for any expression. `code/` reads it as code:
+
+- a known value is a constant, an unknown no effect gives back an input of the
+  program, read from the command line;
+- the call of a symbol behind a boundary is an instruction, in the order of its
+  effect;
+- a pattern is a match on the cells its covers computed, a fold a loop, a recursion
+  that stays a function whose calls in tail position are the loop of its body;
+- what the kernel proved comes along: the bounds of each integer, the narrowing an
+  arm makes.
+
+`code/calc` then chooses, among the computations of each value, the cheapest on the
+machine. `code/x64` writes an executable for x86-64 Linux, `code/c` the program as C.
+
+Not yet code: data at run time — scopes, lists and strings computed while the
+program runs —, an effect served by no boundary, reals of 16 and 32 bits. An
+integer the program gives is its exit code.
 
 ---
 
