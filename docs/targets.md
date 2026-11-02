@@ -1,10 +1,10 @@
 # Syntact multi-target backend — architecture specification
 
 > Design notes, not a record of work done. **Nothing in the "target architecture" sections
-> below is implemented yet.** Current state is x86-64 Linux only; every file reference to
-> today's code is given as `file:line` so it can be found and changed.
+> below is implemented yet.** Current state: x86-64 Linux, and C. Every reference to today's
+> code is a file and a procedure, so it can be found and changed.
 >
-> Scope decision (taken): **native platforms first.** C, JS and wasm emitters are deferred
+> Scope decision (taken): **native platforms first.** JS and wasm emitters are deferred
 > — see §12. Flutter's target set minus Web = Linux, Windows, macOS, Android, iOS.
 
 ---
@@ -13,14 +13,16 @@
 
 Three structural facts carry the whole design.
 
-**The bytecode is the waist.** `BC_Program` (`compiler/bytecode/bytecode.odin`) is
-target-neutral. Everything above it — parse, analyze, reduce, ~20k lines — is written once
-and never touched per target. All target work lives strictly below.
+**The code is the waist.** `code.Program` (`code/code.odin`) is target-neutral: the normal
+form of the program read as instructions on virtual registers. Everything above it — the
+parser (`syntax/`) and the algebra of types (`kernel/`) — is written once and never touched
+per target. All target work lives strictly below.
 
-**The two-tier model already exists.** `compiler/bytecode/interp.odin` describes itself as
-"the reference backend, the oracle — every machine backend must agree with it on every
-program." That is Flutter's architecture (VM in debug, AOT in release) already in place.
-Nothing to invent, only to finish.
+**The two-tier model already exists.** `code/interp.odin` is the reference interpreter:
+it runs the code as the machine will, and fails when a value leaves the bounds the kernel
+proved. Every backend must agree with it on every program (`code/cases`). That is
+Flutter's architecture (VM in debug, AOT in release) already in place. Nothing to invent,
+only to finish.
 
 **Targets factor into axes, not a matrix.** ISA × container × platform would mean a fork
 per target. Factored, 8 targets come out of 2 ISAs + 3 image formats + 6 platform records
@@ -35,9 +37,11 @@ property of the design, not a tuning exercise.
 ## 2. The pipeline
 
 ```
-AST / IR  →  BC_Program                          ← target-neutral (exists)
+kernel  →  code.Program                          ← target-neutral (exists)
               ├─→ interp                          ← oracle + debug tier, all platforms
-              └─→ isa/<arch>   → Code_Object      ← code + relocs + symbols, NO addresses
+              ├─→ calc, the cheapest per machine  ← exists (code/calc)
+              ├─→ c                               ← exists (code/c)
+              └─→ mir → isa/<arch> → Code_Object  ← code + relocs + symbols, NO addresses
                     → image/<fmt> → []u8          ← ELF / Mach-O / PE
                         → sign/<scheme> → []u8    ← ad-hoc Mach-O, APK v2
                             → package/<kind>      ← raw exe, .so/.dylib, .apk, .app
@@ -79,17 +83,17 @@ Code_Object :: struct {
 }
 ```
 
-**What this fixes.** `emit_foreign_call` (`compiler/backends/x64/emit.odin:713`) currently
-emits `movabs r10, GOT_VADDR + 8*slot` — a baked absolute address. Under this contract it
-emits a reference to symbol `__syn_got` + `8*slot` plus a `Reloc`, and **the image writer
-decides where that lives.** Same for `emit_load_arg` and `ARGS_TABLE_VADDR`. ET_EXEC,
+**What this fixes.** `call_import` (`code/x64/x64.odin`) currently emits
+`mov r11d, GOT_VADDR + 8*slot` — a baked absolute address. Under this contract it emits a
+reference to symbol `__syn_got` + `8*slot` plus a `Reloc`, and **the image writer decides
+where that lives.** Same for the inputs the stub stores at `ARGS_TABLE_VADDR` (`stub`). ET_EXEC,
 ET_DYN, MH_EXECUTE and PE disagree about exactly this, and only this.
 
 ---
 
 ## 4. Platform as data, not code
 
-`emit_exit` (`emit.odin:467`) hardcodes `rax=60`. To avoid `if android {} else if macos {}`
+`exit_with` and `stub` (`code/x64/x64.odin`) hardcode `rax=60`. To avoid `if android {} else if macos {}`
 sprawl inside the encoders, the platform is a **record the ISA layer reads**:
 
 ```odin
@@ -122,56 +126,70 @@ entry/result fields stay backend-only: a program has no use for how its own entr
 shaped. Everything else — `syscalls`, `libc_name`, `lib_ref`, `sym_prefix`, `pie`, page size,
 plus arch/os/abi/image identity and the pointer-width shapes — is readable from source.
 
-`syscalls: nil` on macOS/iOS is what mechanically forces the libc path that effects.md:121
-predicted. It also means `emit_exit` needs a libc-call variant, not merely a different
+`syscalls: nil` on macOS/iOS is what mechanically forces the libc path that `effects.md`
+predicted. It also means `exit_with` needs a libc-call variant, not merely a different
 syscall number.
 
 ---
 
 ## 5. Tree
 
+Today:
+
 ```
-compiler/
-  bytecode/                    ← the waist; imports nothing from compiler/ (already true)
-    bytecode.odin
-    interp.odin                + reload entry point
+code/
+  code.odin, lower.odin        ← the waist: code.Program, lowered from the normal form
+  interp.odin                  the reference interpreter, the oracle
+  calc/                        the algebra of computations: the cheapest per machine
+  mir/                         blocks, and a linear scan parameterized by mir.Target
+  x64/                         isel and emit; the stub
+    asm/                       encoders, SSE, the System V ABI, ELF and its dynamic tables
+  c/                           the program as C
+  cases/                       the programs every backend runs
+  cmd/, bench/
+```
+
+The target:
+
+```
+code/
+  code.odin, interp.odin       ← the waist; imports nothing below it
   reload/
-    cache.odin                 content-addressed reduce cache, binding-level
+    cache.odin                 content-addressed cache, binding-level
     session.odin               resident VM + patch socket
-  backends/
-    target.odin                Target record + the --target table
-    isa/
-      common/
-        regalloc.odin          ← MOVED from x64/, parameterized by Reg_File
-        codeobj.odin           Code_Object, Reloc, Sym
-      x64/                     isel, emit, instructions, sse, vectorize, tests
-      arm64/                   isel, emit, instructions, neon, tests
-    image/
-      elf/                     ← MOVED out of package x64_assembler
-      macho/
-      pe/
-      dwarf/                   shared by elf + macho
-    platform/                  linux, android, macos, ios, windows  (data only)
-    sign/
-      macho_adhoc/             CodeDirectory + SuperBlob (core:crypto/sha2)
-      apk/                     ZIP + v2 block (core:crypto/sha2, core:crypto/ecdsa)
-    package/
-      raw, sharedlib, staticlib, object, apk, appbundle
-      multi/                   universal / multi-ABI combination (§6.4)
+  target.odin                  Target record + the --target table
+  calc/, mir/                  shared by every ISA
+  isa/
+    codeobj.odin               Code_Object, Reloc, Sym
+    x64/                       isel, emit, instructions, sse, tests
+    arm64/                     isel, emit, instructions, neon, tests
+  image/
+    elf/                       ← MOVED out of package x64_assembler
+    macho/
+    pe/
+    dwarf/                     shared by elf + macho
+  platform/                    linux, android, macos, ios, windows  (data only)
+  sign/
+    macho_adhoc/               CodeDirectory + SuperBlob (core:crypto/sha2)
+    apk/                       ZIP + v2 block (core:crypto/sha2, core:crypto/ecdsa)
+  package/
+    raw, sharedlib, staticlib, object, apk, appbundle
+    multi/                     universal / multi-ABI combination (§6.4)
+  c/
 ```
 
 The SDK layer above this — `sdk/cli`, `sdk/project`, `sdk/device`, `sdk/format`,
 `sdk/session` — is specified in `sdk.md` §4. The compiler proper stays a library with no CLI
 and no I/O policy.
 
-**Share regalloc, don't share isel.** Linear-scan over SSA live intervals is
-arch-independent; only the register file differs. Parameterize on
-`Reg_File{allocatable, reserved, caller_saved, class_of(Machine_Type)}`. aarch64's 31 GPRs
-then just mean less spilling, for free. By contrast x64's LEA/address-mode matching and
-aarch64's `madd`/shifted-operand/pre-index patterns have nothing in common — two isel
-files, deliberately.
+**Share regalloc, don't share isel.** This is already the shape: `code/mir` allocates by a
+linear scan over the ranges where registers live, parameterized by `mir.Target{kept,
+spent, arguments, wide}`; `code/x64/function.odin` gives x64's. aarch64's 31 GPRs then just
+mean less spilling, for free. By contrast x64's LEA/address-mode matching and aarch64's
+`madd`/shifted-operand/pre-index patterns have nothing in common — two isel files,
+deliberately.
 
-Also x64-only and staying put: `vectorize.odin`, `x64_sse_scalar.odin`,
+Also x64-only and staying put: `x64_sse_scalar.odin`, `x64_sse_packed.odin`,
 `x64_movzx_mem.odin`, and the 8k-line `x64_test.odin` encoding suite. arm64 needs its own
 equivalent of the last one.
 
@@ -264,7 +282,7 @@ never a dependency. Deleting it changes nothing but speed.
 
 | | `debug` | `release` |
 |---|---|---|
-| execution | bytecode interpreter (resident VM) | AOT native |
+| execution | interpreter (resident VM) | AOT native |
 | isel / regalloc | **skipped entirely** | full |
 | reduce | full — it is the semantics | full |
 | hot reload | yes | no |
@@ -278,7 +296,7 @@ C++/Dart is structurally much smaller here. What differs is only whether the res
 to machine code or to the interpreter.
 
 **Consequence that matters for on-device debug:** the resident VM has to *run* somewhere, so
-a debug build for a device is `native VM binary (AOT, built once per target) + bytecode
+a debug build for a device is `native VM binary (AOT, built once per target) + code.Program
 payload pushed and hot-reloaded`. That is exactly Flutter's split (AOT engine, kernel-bytecode
 app). It means **the interpreter must itself be compilable to every target** — see the
 open decision in `sdk.md` about shipping prebuilt VMs vs cross-building them with Odin.
@@ -319,8 +337,8 @@ image writers".
 
 ## 7. The six invariants
 
-1. `bytecode/` imports nothing from `compiler/`. (Already true — protect it; it is what
-   keeps the oracle honest.)
+1. `code.odin` and `interp.odin` import nothing below them. (Already true — protect it; it
+   is what keeps the oracle honest.)
 2. `isa/*` imports the `target` records only — never an `image/*` or `platform/*`
    implementation.
 3. `image/*` never imports `isa/*`. Arch enters only as a constant lookup on `Target.arch`.
@@ -330,7 +348,7 @@ image writers".
    must *reserve* the signature slot and emit `LC_CODE_SIGNATURE`; the signer fills it.
    Standard two-pass.
 6. Every backend agrees with `interp` on every program — the existing law. Today that is
-   `interp` vs x64; adding arm64 makes it three-way. It is not per-platform: one ISA backend
+   `interp` vs x64 vs C (`code/cases`); adding arm64 makes it four-way. It is not per-platform: one ISA backend
    serves every platform that uses it.
 
 **Invariant 4 is load-bearing and is precisely what the code violates today.** `ELF_BASE`
@@ -399,8 +417,7 @@ add  x0, x0, #lo12  ; offset within the page
 ```
 Relocation pair: `R_AARCH64_ADR_PREL_PG_HI21` (275) + `R_AARCH64_ADD_ABS_LO12_NC` (277).
 `adr` is the one-instruction form but only ±1 MB. The skeleton at
-`compiler/backends/arm64/arm64` already stubs `adrp_x64` / `adr_x64`, so this was
-anticipated.
+previous pipeline stubbed `adrp_x64` / `adr_x64`; the current tree has no arm64 yet.
 
 **Trap to watch:** `adrp` works in 4 KB pages *regardless of `p_align`*. The patch value is
 `(target >> 12) - (pc >> 12)`, not a byte delta, and it stays 4 KB even with
@@ -540,7 +557,7 @@ invalidated*. Because `reduce` is pure and dependency-tracked, that point is kno
 
 **Reload unit = a binding in a scope.** Content-address each binding as
 `hash(source_text, hashes_of_dependency_reduced_forms)`. On change: re-parse, re-analyze,
-re-reduce only bindings whose hash moved, push the changed bytecode range. Perfect memoization
+re-reduce only bindings whose hash moved, push the changed code. Perfect memoization
 — a build system with exact invalidation, not a VM hack. Dart cannot do this; there is no
 mutable class identity to preserve.
 
@@ -555,28 +572,27 @@ resident VM must handle all three — it may not assume a frame loop or an event
 | blocked on a syscall | swap the bindings; they take effect when the blocking call returns. |
 
 **One cache, two jobs.** The same content-addressed store serves hot reload *and*
-cold-build speed. `resolve.odin:36` already has a per-file `Cache` struct and a thread
-pool; the on-disk cache is stubbed off (`main.odin:33` forces `no_cache = true`, flags
-commented at `main.odin:71-74`). Build it once, deliberately.
+cold-build speed. The kernel already shares its terms (`kernel/intern.odin`) and keeps the
+normal form of a closed term in it, computed once; there is no on-disk cache. Build it once,
+deliberately.
 
-**Resident VM.** `interp_bytecode` is one-shot: run, return. It becomes a long-lived process
-holding a `BC_Program`, listening on a socket (`adb forward` / local port), accepting a
-patch, swapping instructions, re-entering. The VM stays in `bytecode/` to preserve
-invariant 1; the session wrapper lives in `compiler/reload/`.
+**Resident VM.** `code/interp.odin` is one-shot: run, return. It becomes a long-lived process
+holding a `code.Program`, listening on a socket (`adb forward` / local port), accepting a
+patch, swapping instructions, re-entering. The VM stays beside `code.odin` to preserve
+invariant 1; the session wrapper lives in `code/reload/`.
 
-**The state rule — decide it WITH the effects design, not after.** Today there is no mutable
+**The state rule — decide it WITH the state design, not after.** Today there is no mutable
 state at all, so reload preserves nothing because there is nothing to preserve. Once
-effects.md's handlers land there is live state, and the rule is scoped precisely to it: *state
+resonance lands (`specs/language/12-state.md`) there is live state, and the rule is scoped precisely to it: *state
 lives in resonant bindings inside handlers; a handler whose shape is unchanged keeps its state,
 a handler whose shape changed resets.* Note this is narrower and better-defined than Flutter's
 widget-identity rule — resonance is the only place mutation exists
 (`specs/language/12-state.md`), so it is the only thing a reload can disturb. Retrofitting this later is how these systems get ugly.
 
 **The interpreter is the debug tier on all five platforms** — and on iOS it is *mandatory*,
-since JIT is forbidden. So this is built once and shipped everywhere. It is also, with C/JS
-deferred, the **only oracle**: `test/codegen` differentials interp vs native with no third
-opinion. That raises the stakes on `interp.odin` being correct — worth an explicit audit
-pass rather than an assumption.
+since JIT is forbidden. So this is built once and shipped everywhere. It is also an oracle,
+with the C backend as a third opinion: `code/cases` runs every program on the interpreter,
+x64 and C.
 
 ---
 
@@ -650,9 +666,9 @@ in §10, since the reload boundary and the AOT/interpreted boundary would have t
 solved here; flagged because it follows directly from the decision above and is cheaper to
 design for now than to retrofit.
 
-**Volatile vs the reducer** (deferred with embedded, but noted): a volatile read is stronger
-than an effectful call — two reads of the same address must both survive. `foreign_lib` on
-`Scope_Type` is the existing "don't fold through this" hook but does not express that yet.
+**Volatile vs the laws** (deferred with embedded, but noted): two reads of the same address
+must both survive. An effect already does — no law copies, erases or reorders one
+(`specs/types.md` §4.8) — so a volatile read is an effect, `!?::L`.
 
 ---
 
@@ -665,13 +681,11 @@ per-target dependency table is at the end of §6.
 
 | Item | Why | Where |
 |---|---|---|
-| `Target` record + `--target` + dispatch | no target concept exists; `x64.*` is called directly | `resolve.odin:455-469` |
-| Relocation-based codegen | absolute addresses in the emitter violate invariant 4; blocks PIE, `.so`, Mach-O, PE | §3, §7, `elf.odin:40/60/77` |
+| `Target` record + `--target` + dispatch | no target concept exists; `code/cmd` calls `x64.executable` or `c.write` by its flag | `code/cmd/main.odin` |
+| Relocation-based codegen | absolute addresses in the emitter violate invariant 4; blocks PIE, `.so`, Mach-O, PE | §3, §7, `code/x64/asm/elf.odin` |
 | Layer split | ELF lives inside `package x64_assembler` | §5 |
-| Loops / backward edges | liveness is forward-only by design; also gates the recursion→loop lowering | `regalloc.odin:15-19` |
 | DWARF line mapping | no debug info exists | §5 |
-| Interpreter audit | it is the only oracle once C/JS are deferred | §10 |
-| `Abi` record | `emit_foreign_call` is SysV-hardcoded | `abi.md` §2.3 |
+| `Abi` record | `code/x64/asm/abi.odin` is SysV-hardcoded | `abi.md` §2.3 |
 
 ### Hard constraints, not preferences
 
@@ -691,11 +705,10 @@ per-target dependency table is at the end of §6.
 
 ### Deferred, per the §1 scope decision
 
-C-hosted, C-freestanding (embedded), JS, wasm. Two notes kept because they constrain decisions
-made earlier:
+C-freestanding (embedded), JS, wasm. C-hosted exists (`code/c`): the reference a C
+compiler's optimizations are measured against, and a third oracle. One note kept because
+it constrains decisions:
 
-- The **structurizer/relooper** is needed only by JS and wasm. It is nearly free while branches
-  are forward-only and hard once loops land — so if wasm or JS are ever wanted, the loop work
-  must be designed with structured control flow in view.
-- A **C backend would add a third differential oracle**, which is the one thing that would
-  relax the interpreter-audit item in the first table above.
+- The **structurizer/relooper** is needed only by JS and wasm. `code.Program` keeps the
+  structure of the normal form — a match, a loop an Again continues — so structured control
+  flow is there before `mir` flattens it into blocks; JS and wasm should start from it.
