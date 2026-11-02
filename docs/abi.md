@@ -21,8 +21,9 @@ vary independently:
 | **Link mechanism** — how an address gets into the image | container format | ELF GOT + `.rela` |
 | **Library naming** — how a library is identified | platform | verbatim soname string |
 
-Conflating them is why the current code has SysV register lists sitting in the same
-procedure as GOT slot arithmetic (`emit.odin:713-770`). They belong to different layers of
+The current code already keeps the first apart: the SysV assignment is
+`x64_sysv_assign` (`code/x64/asm/abi.odin`), the GOT slot arithmetic `call_import`
+(`code/x64/x64.odin`). They belong to different layers of
 `targets.md` §5: convention → `isa/*`, mechanism → `image/*`, naming → `platform/*` for the
 *form*, and source for the *name* (§4).
 
@@ -47,13 +48,13 @@ All: stack 16-byte aligned at the call. Integer return in RAX / X0, float in XMM
 **Windows x64 positional slots.** Argument *n* goes in the *n*-th slot, and that slot is a
 GPR or an XMM depending on the argument's type — the two register files share one counter.
 So `f(int, double, int)` uses RCX, XMM1, R8 — note the *gap* in each file. The current code
-(`emit.odin:735-750`) walks `int_i` and `sse_i` as independent counters, which is correct
-for SysV and **wrong for Windows**.
+(`x64_sysv_assign`) takes the integer and SSE registers as independent counters, which is
+correct for SysV and **wrong for Windows**.
 
 **Windows x64 shadow space.** The caller must allocate 32 bytes above the return address for
 the callee to spill its four register args into. Omit it and the callee corrupts your frame.
-There is also no red zone, so the "float-print scratch lives in the red zone below rsp"
-shortcut noted at `emit.odin:451-457` is not portable.
+There is also no red zone: code below rsp is not portable. The current code reserves its
+scratch with `sub rsp` (`write_unsigned`, `code/x64/x64.odin`), which is.
 
 **Apple aarch64 variadics go on the stack.** On macOS/iOS, *all* variadic arguments are
 passed on the stack (8-byte slots), not in X0–X7/V0–V7. A correct AAPCS64 implementation
@@ -83,13 +84,11 @@ Abi :: struct {
 }
 ```
 
-`emit_foreign_call` then becomes ABI-driven. Its present limits are all SysV artifacts:
-6 arguments max (`len(SYSV_INT_ARGS)`), no stack-passed arguments, AL always set, independent
-counters, and `movabs R10, GOT_VADDR` for the indirect call.
-
-**Stack-passed arguments are the missing capability**, not just a different register list.
-Today's hard error — "more than 6 arguments to an external is not supported yet" — has to go
-away before Windows (4 register slots) is usable at all.
+`x64_sysv_assign`, `pass` (`code/x64/function.odin`) and `call_import` then become
+ABI-driven. Their present limits are all SysV artifacts: the SysV register lists, AL always
+set, independent counters, and `mov r11d, GOT_VADDR + 8*slot` for the indirect call.
+Stack-passed arguments already work: an argument whose registers are exhausted goes on the
+stack, 16-aligned, which Windows (4 register slots) needs from its fifth.
 
 ---
 
@@ -236,8 +235,7 @@ state rule in `targets.md` §10 and should be decided with it.
 
 | Item | Cannot happen until | Note |
 |---|---|---|
-| `Abi` record + ABI-driven `emit_foreign_call` | nothing | pure refactor of working code, checkable against the seven-library set in `interop.md` |
-| stack-passed arguments | the `Abi` record | removes the 6-argument ceiling; Win64 has only 4 register slots, so it is a prerequisite there |
+| `Abi` record + ABI-driven calls | nothing | pure refactor of working code, checkable against the libraries in `interop.md` §1 |
 | per-target library naming | the target is exposed as a comptime binding (`sdk.md` §3.1) | language-visible (§4), so it constrains `<lib>` source written before it |
 | AAPCS64 | the aarch64 ISA | variadics must be verified against **both** Linux and Apple rules — they differ (§2.2) |
 | Mach-O binding | the classic-vs-chained question is resolved (§3) | |

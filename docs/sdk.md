@@ -1,8 +1,8 @@
 # Syntact SDK — command surface specification
 
-> Design notes. **Nothing here is implemented.** Today there are two separate binaries
-> (`compiler.bin` from `compiler/`, `lsp.bin` from `lsp/`) and `main.odin`'s flag parser
-> *is* the entire interface.
+> Design notes. **Nothing here is implemented.** Today there are three separate binaries,
+> each a `main` of its own: `kernel/cmd` (`kernel FILE`: the type of each binding, then the
+> errors), `code/cmd` (`code FILE [-l | -o OUT | -c OUT.c]`) and `lsp/`.
 >
 > Companion document: `targets.md` specifies the backend architecture and the
 > (Target, Artifact, Profile) triple this surface selects. This document specifies the SDK
@@ -12,11 +12,11 @@
 
 ## 1. One binary, subcommands
 
-`syntact <command> [args]`. This replaces both `compiler.bin` and `lsp.bin`; the LSP becomes
-`syntact lsp` rather than a second executable (§9).
+`syntact <command> [args]`. This replaces the three binaries; the LSP becomes `syntact lsp`
+rather than an executable of its own (§9).
 
-Today's developer flags — `--ast --ir --bc --regalloc --emit --parse-only --analyze-only
---print-errors --run --timing` (`main.odin:40-78`) — survive as inspection flags on
+Today's developer views — the types of the kernel, the code as lowered (`-l`), the code as
+the cheapest computations, the program as C (`-c`) — survive as inspection flags on
 `build` and `check`, not as the primary interface.
 
 ---
@@ -30,7 +30,7 @@ Today's developer flags — `--ast --ir --bc --regalloc --emit --parse-only --an
 | `syntact build` | **release** | produce something **the OS or a user runs** — `Executable`, `App_Package` |
 | `syntact bundle` | **release** | produce something **another toolchain links** — `.so` / `.dylib` / `.dll` / `.a` / `.lib` / `.o` |
 | `syntact test` | debug | the six declarative suites + project tests |
-| `syntact check` | — | parse + analyze, no codegen (today's `--analyze-only`) |
+| `syntact check` | — | parse + type, no code (today's `kernel/cmd`) |
 | `syntact format` | — | format in place; `--check` for CI (§10) |
 | `syntact lsp` | — | language server on stdio (§9) |
 | `syntact devices` | — | list connected/available devices (§7) |
@@ -224,9 +224,8 @@ resolution rule for each namespace follows from what it names, so this has to be
 The compiler becomes a library; the SDK is a layer above it.
 
 ```
-compiler/            the compiler proper — no CLI, no I/O policy
-  ...
-  backends/          (targets.md §5)
+syntax/, kernel/     the language — no CLI, no I/O policy
+code/                its code, and the backends (targets.md §5)
 lsp/                 ← MOVED under sdk/, or kept and invoked by sdk/cli
 sdk/
   cli/               subcommand dispatch, flag parsing, help
@@ -246,8 +245,8 @@ sdk/
 ## 5. Libraries — there is no library artifact
 
 A Syntact library is **a folder of `.syn` files**, and publishing it means shipping the
-folder. `specs/language/11-external-boundary.md` states both halves: *"there is no separate notion of
-'a library'"* and *"There is nothing to bundle."* A folder is a scope, a file is a scope, `@` resolves the
+folder. `specs/language/11-external-boundary.md` says why: a library written in Syntact is
+the same object seen from the other side of the boundary, a scope. A folder is a scope, a file is a scope, `@` resolves the
 filesystem as a scope graph, and `...@lib.geometry` expands it into the consumer, which
 reduces it *there*. No package format, no serialized IR, no interface file, no ABI, no
 version-compatibility surface. Full statement in `targets.md` §6.2.
@@ -452,12 +451,12 @@ Apple Developer account**, per `targets.md` §9.
 resolve the root file (§3)
   → select (target, artifact=Executable, profile=debug)
   → ensure a native VM binary exists for that target        ← see §12 open decision
-  → compile source to BC_Program
-  → transport.push(vm, bytecode) ; transport.spawn ; transport.forward(port)
+  → compile source to code.Program
+  → transport.push(vm, code) ; transport.spawn ; transport.forward(port)
   → connect to the resident VM
   → watch the source tree
        on change: re-reduce only bindings whose content hash moved   (targets.md §10)
-                  push the changed bytecode range
+                  push the changed code
                   VM swaps instructions and re-enters
   → stream stdout/logs; 'r' to force reload, 'R' to restart, 'q' to quit
 ```
@@ -538,7 +537,7 @@ binary *for* android-arm64. Two options:
 
 - **Ship prebuilt VMs** per target with the SDK — Flutter's approach, because their engine is
   enormous. Costs release infrastructure and a per-target artifact matrix.
-- **Cross-build the VM on demand with Odin.** The VM is `interp.odin`, ~338 lines, so
+- **Cross-build the VM on demand with Odin.** The VM is `code/interp.odin`, ~350 lines, so
   compiling it per target is plausible — but Odin cross-compilation to Android/iOS is its
   own problem, and it reintroduces a toolchain dependency the rest of the design avoids.
 
@@ -573,7 +572,7 @@ Facts, not an ordering — the sequencing is yours to choose.
 | `run` on a device | that device's transport (§7.1), plus a VM binary for its target (§12) |
 | `bundle` | exported symbols in the image layer, and `abi.md` |
 | multi-target `build`/`bundle` | the combination rules in `targets.md` §6.4 |
-| `create cli` | nothing beyond the skeleton — a CLI is what the compiler already emits: argc/argv via `emit_arg_stub` (`emit.odin:161`), exit status via `emit_exit` (`emit.odin:467`) |
+| `create cli` | nothing beyond the skeleton — a CLI is what the compiler already emits: the inputs from argv and the result as exit status or on stdout, via `stub` (`code/x64/x64.odin`) |
 | `create gui` | an event loop, plus the GUI/game library existing — which itself needs aggregates and callbacks at the frontier (`targets.md` §11, `abi.md` §6-§7) |
 | `doctor` / `devices` | nothing to build for — only deploy-side probes (§7.3) |
 
