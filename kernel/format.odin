@@ -3,7 +3,7 @@ package kernel
 import syn "../syntax"
 import "core:fmt"
 
-// FORMATS: WHAT A MACHINE HOLDS OF A REAL (real.odin)
+// FORMATS: WHAT A MACHINE HOLDS OF A REAL (specs/types.md §4.10)
 //
 // A floating-point format is a set of reals: f16, f32, f64 are types like u8. A real
 // in a color of a format, and what an operation computes on values of formats, is

@@ -21,11 +21,11 @@
 0.5  −3.25  …              every real
 true  false
 none                       the empty type: the absence of type, itself a type
-?                          the unknown
+??                         the unknown
 !?                         an effect
 ```
 
-Each `?` written is a distinct unknown, indexed `?₁`, `?₂`. The same unknown comes
+Each `??` written is a distinct unknown, indexed `?₁`, `?₂`. The same unknown comes
 back through a name (§5.2). Each `!?` written is a distinct effect, indexed `ε₁`,
 `ε₂` (§4.8).
 
@@ -58,10 +58,12 @@ in a prelude like any other binding (§5.2).
 ```text
 int     -> ..0..                  every integer
 float   -> ..0.0..                every real
+f16  f32  f64                     the reals each format holds (§4.10)
 char    -> ''..                   every character
 string  -> ''.. * 0..             every string
 bool    -> false | true
 u8      -> 0..255        i8 -> −128..127        u16 -> 0..65535       …
+u64     -> 0..2⁶⁴-1      i64 -> -2⁶³..2⁶³-1      usize = u64            isize = i64
 ```
 
 ## 4. The laws
@@ -225,7 +227,16 @@ A comparison with one primitive is `in` of its bound (§4.3):
 x < c = x in <c        x <= c = x in <=c        and likewise > >=
 ```
 
-What no law reduces stays as it is: `~5 + 1`, `?₁ in u8`.
+An integer `/` rounds toward 0, and `%` has the sign of what it divides:
+`a = (a / b) * b + a % b`.
+
+```text
+7 / 2 = 3        -7 / 2 = -3        -7 % 2 = -1        7 % -2 = 1
+```
+
+What no law reduces stays as it is: `?₁ in u8`. An operator whose operands are not
+proven in a family is illegal, not left as it is: `~5 + 1` is illegal, since `~5`
+holds values of every family.
 
 ### 4.6 Strings
 
@@ -393,11 +404,22 @@ of its fields run before the call, which takes their answers as values.
 
 ```text
 libm -> <libm.so.6>{
-  sqrt -> {f64:x  -> !?::f64}
+  sqrt -> {f64:x, -> !?::f64}
 }
 libm.sqrt                          a scope: nothing happens
-libm.sqrt{x -> 2.0}! * 2.0         = ε<sqrt{x -> 2.0}!>(y::f64, y * 2.0)
+libm.sqrt{x -> 2.0}! * 2.0         = ε<sqrt{x -> 2.0}!>(y::f64, round64(y * 2.0))
 libm.sqrt{x -> !?::f64}!           = ε₁(x::f64, ε<sqrt{x -> x}!>(y::f64, y))
+```
+
+A symbol whose production has no effect is pure: `??::L` is a value in L that this
+program does not compute, not an effect. Its run is a term like any other: what
+reads nothing of it is erased, and it is not ordered with the effects.
+
+```text
+libm -> <libm.so.6>{
+  cbrt -> {f64:x, -> ??::f64}
+}
+{r -> libm.cbrt{x -> 8.0}!  -> 1}!     = 1                 nothing reads r
 ```
 
 ### 4.9 Handlers
@@ -515,6 +537,82 @@ lib -> {
 lib!                           = 2
 lib{Log -< e { -> 300 }}!      = 301
 lib{Log -< e { -> "a" }}!      invalid: "a" is not in u16
+```
+
+### 4.10 Formats
+
+A real written is exact: `0.1 + 0.2 = 0.3`, `1.0 / 3.0` stays that quotient. A
+floating-point format is a set of reals, a type like `u8`: `f16`, `f32`, `f64` hold
+the reals of IEEE 754 binary16, binary32, binary64 — `m * 2 ** e`, m and e within
+the bounds of the format, its subnormals included. ±∞ and NaN are not reals: no
+format holds them.
+
+```text
+f16 ⊂ f32 ⊂ f64 ⊂ float
+0.5 in f32 = true          0.1 in f32 = false          0.1 is not a dyadic
+```
+
+`round_w(t)` is what a machine of w bits holds of the real t: the value of the
+format nearest t, the even one on a tie. A real in a color of a format, and what an
+operator computes on values of formats, is that value:
+
+```text
+f32:x -> 0.1                     x = 0.100000001490116119384765625
+f16:y -> 70000.0                 invalid: beyond the greatest f16
+f32:a -> ??   f64:b -> ??
+a + b                            = round64(?₁ + ?₂)     the widest format of its operands
+a + 0.5                          = round32(?₁ + 0.5)    a known real is rounded first
+```
+
+Its laws:
+
+```text
+round(r)               = the nearest value, exactly       r a known real
+round(t)               = t                                t a value of the format
+round_f(round_g(t))    = round_g(t)                       f holds every value of g
+round(εₖ(x, t))        = εₖ(x, round(t))
+round(t ? {c -> p …})  = t ? {c -> round(p) …}
+round of a set         = the values of the format between its rounded least and
+                         greatest; every value when the set has no bound, or one
+                         beyond the greatest value
+```
+
+The laws of a field (§4.5) hold on the exact reals, not across a rounding:
+`round32(?₁ + ?₂) - ?₂` is not `?₁`.
+
+### 4.11 Sizes
+
+A type carries its size: the bits a value of it takes. The size is itself a type, a
+term over the unknowns the type depends on; its least and greatest elements are the
+least and greatest sizes, the greatest infinite when nothing bounds it. What is
+known takes nothing: one value has nothing to hold. A backend only aligns what the
+type says.
+
+```text
+size(t), t known        = 0                      one value: nothing to hold
+size(?ₖ::L)             = size of the set L
+size(t over unknowns)   = size of the set of its values: its layout (§7)
+size(t ? {c -> p …})    = size(p) | …            the size of the branch taken
+size(εₖ(x, t))          = size(t)                what it gives back
+size(round_w(t))        = w
+size({b…})              = Σ size(b)              a field takes what its type takes;
+                                                 a hole, a handler, a production
+                                                 take nothing
+
+the set lo..hi          = bits(hi - lo + 1)      integers, characters: the span
+the set false | true    = 1
+the set s₁ | … | sₙ     = bits(n)                strings, all known: which one
+the set A + B           = size(A) + size(B)      a string: its pieces
+the set A * n           = n * size(A)            a repetition: a string, a run
+the set {C₁: … Cₙ:}     = Σ size(Cᵢ)             a shape: its places
+the set f16, f32, f64   = 16, 32, 64
+```
+
+```text
+u8:a -> ??         size 8           u8 is the set of what a may be
+u8                 size 0           u8 written as a value: one type, known
+a - a              size 0           = 0
+{u8:p -> ??  f32:r -> ??  -> p}     size 40
 ```
 
 ## 5. Scopes
@@ -853,7 +951,7 @@ t ? {-> p  …}   = p              the branch without a cover admits everything
 ```
 
 On an unknown target, `t in c` does not reduce, and the pattern stays an equation.
-The link with the target is kept, since it is the same `?`:
+The link with the target is kept, since it is the same unknown:
 
 ```text
 a -> ??::u8
@@ -899,12 +997,15 @@ C:x -> V    ⟺    V in C = true
 | `none:l -> none` | `none in none = true` | ✓ |
 | `u8:o -> none` | `none in u8 = false` | ✗ |
 
-With `?`, `V in C` is an equation in these unknowns. Each `?ₖ::L` ranges over the
+A real in a color of a format is first what the machine holds of it (§4.10):
+`C:x -> V ⟺ round_C(V) in C`, and V beyond the greatest value of C is invalid.
+
+With unknowns, `V in C` is an equation in these unknowns. Each `?ₖ::L` ranges over the
 values of L. The check simplifies it by the laws; it solves nothing. Its result is
 a verdict, not a type:
 
 - **proven** when the equation simplifies to `true`;
-- **refuted** when it simplifies to `false` for values of the `?`: a
+- **refuted** when it simplifies to `false` for values of the unknowns: a
   counterexample;
 - **unproven** otherwise: it stays an equation, and the check says so.
 
@@ -965,6 +1066,8 @@ Where another document says otherwise, this one wins. In particular:
 
 - `~` is absolute: `~5` holds every value but 5, of every family (§4.1).
 - Operators distribute over `|`: there is no interval arithmetic (§4.5).
+- A real is exact; a format is a set of reals, and a color of a format rounds to it
+  (§4.10).
 - `''..` is every character, and `string = ''.. * 0..`. A character is a string of
   length 1 (§3, §4.6).
 - A pattern is a type of the algebra, and the domain of an unknown is in its type,

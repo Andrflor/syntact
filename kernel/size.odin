@@ -1,6 +1,6 @@
 package kernel
 
-// SIZES
+// SIZES (specs/types.md §4.11)
 //
 // A type carries its size, as an unknown carries its domain: the bits a value of it
 // takes. The size is itself a type — a term over the unknowns the type depends on —,
