@@ -573,8 +573,16 @@ round_f(round_g(t))    = round_g(t)                       f holds every value of
 round(εₖ(x, t))        = εₖ(x, round(t))
 round(t ? {c -> p …})  = t ? {c -> round(p) …}
 round of a set         = the values of the format between its rounded least and
-                         greatest; every value when the set has no bound, or one
-                         beyond the greatest value
+                         greatest; ~none when the set has no bound, or one beyond
+                         the greatest value: ±∞ is not a real, so nothing is proven
+                         of it
+```
+
+```text
+f32:a -> ??
+f16:x -> a                       invalid: a may be beyond the greatest f16
+f32:y -> a * a                   invalid: a * a may be beyond the greatest f32
+f64:z -> a                       = ?₁        f64 holds every f32
 ```
 
 The laws of a field (§4.5) hold on the exact reals, not across a rounding:
