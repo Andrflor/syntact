@@ -1,7 +1,42 @@
 # Why this should be fast
 
-> Benchmarks and rationale of the previous pipeline (analyze → reduce → bytecode →
-> x86-64). The language itself is in `specs/`.
+> Rationale, and benchmarks. The numbers under "Measured today" are those of the current
+> backend (`code/`); those further down are of the previous pipeline (analyze → reduce →
+> bytecode → x86-64), kept for the record. The language itself is in `specs/`.
+
+## Measured today
+
+On an Intel Xeon at 2.1 GHz, 4 cores, in a shared VM: expect noise of ±20%.
+
+**A recursion the laws solve.** `fib` written naively (README), `n` given at run time,
+against the same naive recursion in C:
+
+| `fib(45)` | |
+|---|---|
+| C, clang -O3 | 3.6 s |
+| Syntact, x86-64 | 3 ms |
+
+The time is the start of the process: the kernel solves the recursion to a C-finite
+sequence, computed in O(log n).
+
+**Loops the laws do not remove.** `code/bench`: a loop over n down to 0, its accumulator
+taking a step at each turn, n = 300 000 000; against the same loop written naively in C,
+and against the program as C (`code/c`), without and with lanes, all at clang -O3:
+
+| | x86-64 | C naive | C normal | C lanes | ÷ naive | ÷ best |
+|---|---|---|---|---|---|---|
+| remainders `acc + n % 7` | 247 ms | 167 ms | 285 ms | 515 ms | 1.48 | 1.48 |
+| masks `acc + (n [&] 255) * 3` | 130 ms | 84 ms | 209 ms | 109 ms | 1.54 | 1.54 |
+| squares `acc ^ (n * n + 12345)` | 104 ms | 139 ms | 101 ms | 186 ms | 0.75 | 1.04 |
+| quotients `acc ^ (n / 10)` | 236 ms | 117 ms | 147 ms | 152 ms | 2.01 | 2.01 |
+| branches `acc + ((n % 3) ? {0 -> n  -> 1})` | 399 ms | 218 ms | 240 ms | 718 ms | 1.83 | 1.83 |
+| bytes `acc ^ ((n [&] 255) * 3)` | 64 ms | 83 ms | 208 ms | 53 ms | 0.77 | 1.20 |
+
+÷ is the time of x86-64 over the other: below 1, Syntact is faster. Where nothing is
+solved, the x86-64 backend is not yet at the level of clang on a plain loop: up to twice
+slower on a division or a remainder by a constant, and on a branch in the loop.
+
+## Why
 
 Traditional languages create abstraction barriers, then optimizers try to remove them.
 
@@ -51,7 +86,7 @@ The collapse operator is therefore not just execution syntax. It is an optimizat
 
 The ambition is to write extremely high abstractions and pay only for the machine work that survives reduction.
 
-This is not just an aspiration — it is what the bootstrap compiler already does. A program that stacks dozens of multiplications, distributions, cancellations, and telescoping sums over three runtime arguments:
+This is not just an aspiration — it is what the previous pipeline already did. A program that stacks dozens of multiplications, distributions, cancellations, and telescoping sums over three runtime arguments:
 
 ```syntact
 a -> ??::u8 ; b -> ??::u8 ; c -> ??::u8
