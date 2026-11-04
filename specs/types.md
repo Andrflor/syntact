@@ -617,6 +617,21 @@ The size is the minimum. The code may widen a value to compute on it — `1..256
 bits of binary, a character in a byte —; its memory is then reserved for what that
 encoding takes: the same dependencies, in the unit the encoding chooses.
 
+### 4.12 Lifetimes
+
+A type carries its lifetime, as it carries its size: the scope whose collapse frees
+what it holds. What is known has none: it takes nothing (§4.11).
+
+- A value held in the bindings of a scope lives until the collapse of that scope
+  ends.
+- A production is devirtualized: its value lives in the scope that collapses it.
+- A reference — a bind `>>=` `=<<` to a resonant binding (specs/language/12) — keeps
+  that binding alive as long as the scope that holds the reference.
+- A value put in a resonant binding by `-<<` lives as long as that binding.
+
+The lifetime of a value is the outermost of the scopes that hold it, directly or by
+a reference.
+
 ## 5. Scopes
 
 ### 5.1 A scope is a new type
