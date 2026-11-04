@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | grep -q '\\.odin$' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"additionalContext\":\"ALGEBRA CHECK: Which law of specs/types.md does this edit implement, and where does the kernel already implement it? If this is a special path, a workaround, a second version of an existing mechanism, or a case added to make a test pass, it is ad hoc: stop and go back to the algebra (AGENTS.md).\"}}' || true"
+          }
+        ]
+      }
+    ]
+  }
+}
