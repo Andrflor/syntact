@@ -441,12 +441,44 @@ pinned :: proc(k: ^Kernel, t: Type, span: syn.Span) -> Type {
 	return writing(k, e, t)
 }
 
-// reads_places: t reads a place, outside the scopes it holds.
+// reads_places: t reads a place, the values a scope it gives was built with
+// included.
 reads_places :: proc(t: Type) -> bool {
 	seen := make([dynamic]^Unknown)
+	read_places(t, &seen)
+	return len(seen) > 0
+}
+
+// read_places: the places t reads, each once: in the changes of a scope too, the
+// values it was built with.
+read_places :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	if s, is_scope := t.(^Scope); is_scope {
+		for _, v in s.changes do read_places(v, out)
+		return
+	}
+	seen := make([dynamic]^Unknown)
 	read_unknowns(t, &seen)
-	for u in seen do if u.place != nil && !u.before do return true
-	return false
+	for u in seen {
+		if u.place == nil || u.before do continue
+		known := false
+		for p in out do known ||= same_unknown(p, u)
+		if !known do append(out, u)
+	}
+}
+
+// built: t, a value built where it is: a scope reads the places its bindings read
+// there — each is changed to what it reads, as a carve would.
+built :: proc(k: ^Kernel, t: Type) -> Type {
+	s, is_scope := t.(^Scope)
+	if !is_scope do return t
+	changes := make(map[^Binding]Type)
+	for b in s.bindings {
+		if b.kind != .Push && b.kind != .Expand || b.resonance != nil || b.value == nil do continue
+		v := binding_type(k, b)
+		if !has_effect(v) && reads_places(v) do changes[b] = v
+	}
+	if len(changes) == 0 do return t
+	return carved_copy(k, s, changes)
 }
 
 // writing: the write e, wrapping t: what its value reads of places, read where it
@@ -455,14 +487,14 @@ reads_places :: proc(t: Type) -> bool {
 writing :: proc(k: ^Kernel, e: ^Effect, t: Type) -> Type {
 	w := new(Write)
 	w^ = e.write^
+	w.value = built(k, w.value)
 	then := t
 	// each place the value reads, a version of its own
 	seen := make([dynamic]^Unknown)
-	read_unknowns(w.value, &seen)
+	read_places(w.value, &seen)
 	versions := make([dynamic]Version)
 	append(&versions, ..w.versions)
 	for u in seen {
-		if u.place == nil || u.before do continue
 		at := new(Unknown)
 		at^ = u^
 		at.id, at.before = k.unknowns, true

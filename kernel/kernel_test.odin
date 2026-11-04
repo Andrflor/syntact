@@ -323,6 +323,9 @@ SPEC_CASES := []Spec_Case {
 	{"a -> ??::u8\nu8:x -> a << 1", "", {.Constraint_Mismatch}},
 	{"a -> ??::u16\nu8:x -> a >> 8", "", {}},
 	{"a -> ??::u8\nu8:x -> a [|] 256", "", {.Constraint_Mismatch}},
+	// an expansion inlines: a run not known yet is placed as it is
+	{ARRAY + "Array{u8}:list -> ??\nArray{u8}:x -> {...list 7}", "", {}},
+	{ARRAY + "Array{u8}:list -> ??\nb -> {...list 7}\nx -> b.#1", "b.#1", {}},
 	// §4.14: a resonant binding is a place, which its writes change; a read is what
 	// the writes before it give, each run with places of its own
 	{COUNTER + "x -> {c -> Counter!, c.increment!, c.increment!, -> c.value}!", "2", {}},
