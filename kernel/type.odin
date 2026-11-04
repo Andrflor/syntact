@@ -77,6 +77,7 @@ Unknown :: struct {
 	instance: ^Scope, // in a carve whose changes its layout names: ?ₖ read in that carve
 	call:     ^Collapse, // what a recursive call with effects gives back (§4.8): a value of its equation
 	place:    ^Binding, // the value of the resonant binding where it is read: what the writes before it give (§4.14)
+	before:   bool, // a place before a write: what the value of the write reads of it
 }
 
 // Effect: εₖ(x, t), the effect written k (§4.8). x is what it gives back, bound in

@@ -5,7 +5,8 @@ import kernel ".."
 import "core:fmt"
 import "core:os"
 
-// kernel FILE: the type of each binding of the file, with its size in bits, then the
+// kernel FILE: the type of each binding of the file, with its size in bits and the
+// places it keeps in memory, then the
 // errors.
 main :: proc() {
 	if len(os.args) < 2 {
@@ -25,7 +26,9 @@ main :: proc() {
 	for b in k.root.bindings {
 		name := b.name == "" ? "_" : b.name
 		t := kernel.binding_type(&k, b)
-		fmt.printfln("%s: %s  (%s bits)", name, kernel.print_type(t), kernel.print_size(kernel.size(&k, t)))
+		m := kernel.memory(&k, t)
+		kept := len(m.places) == 0 ? "" : fmt.tprintf(", keeps %d places: %s bits", len(m.places), kernel.print_size(m.size))
+		fmt.printfln("%s: %s  (%s bits%s)", name, kernel.print_type(t), kernel.print_size(kernel.size(&k, t)), kept)
 	}
 	for e in k.errors {
 		pos := syn.span_to_position(k.ast, e.span.start)

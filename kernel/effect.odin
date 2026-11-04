@@ -429,7 +429,7 @@ writing :: proc(k: ^Kernel, e: ^Effect, t: Type) -> Type {
 	if w.before == nil {
 		w.before = new(Unknown)
 		w.before^ = w.place^
-		w.before.id = k.unknowns
+		w.before.id, w.before.before = k.unknowns, true
 		k.unknowns += 1
 	}
 	w.value = rewrite(k, w.value, rewriting(nil, w.place, w.before))

@@ -559,3 +559,53 @@ bits_for :: proc(n: u128) -> i128 {
 	for b < 128 && u128(1) << uint(b) < n do b += 1
 	return b
 }
+
+// MEMORY (specs/types.md §4.13)
+//
+// What a value keeps in memory: the places it still reads or writes — a resonant
+// binding whose reads the laws did not all replace by what was written, or that
+// what it gives holds —, each taking the size of its color. A place the laws
+// simplified away takes nothing: a binding written and read with nothing unknown
+// between is its value.
+
+// Memory: the places a value keeps, and the bits they take.
+Memory :: struct {
+	places: [dynamic]^Unknown,
+	size:   Size,
+}
+
+memory :: proc(k: ^Kernel, t: Type) -> (m: Memory) {
+	kept_places(t, &m.places)
+	for p in m.places do add_size(&m.size, size(k, p))
+	return
+}
+
+// kept_places: the places t reads or writes, each once, the scopes it gives
+// included.
+kept_places :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	keep :: proc(u: ^Unknown, out: ^[dynamic]^Unknown) {
+		if u == nil || u.place == nil || u.before do return
+		for p in out do if same_unknown(p, u) do return
+		append(out, u)
+	}
+	if t == nil do return
+	#partial switch v in t {
+	case ^Unknown:
+		keep(v, out)
+	case ^Effect:
+		if v.write != nil {
+			keep(v.write.place, out)
+			kept_places(v.write.value, out)
+		}
+		if v.emission != nil do kept_places(v.emission.sent, out)
+		if v.choice != nil do kept_places(v.choice, out)
+		kept_places(v.then, out)
+	case ^Pattern:
+		kept_places(v.target, out)
+		for b in v.branches do kept_places(b.product, out)
+	case ^Scope:
+		for _, x in v.changes do kept_places(x, out)
+	case:
+		for p in parts(t) do kept_places(p, out)
+	}
+}

@@ -451,6 +451,53 @@ test_formats :: proc(t: ^testing.T) {
 	check_cases(t, FORMAT_CASES)
 }
 
+// SET: a resonant binding of the file, and the event that sets it.
+SET :: "Set -> {u16:v}\nu16:value >>- Set -> 0\nSet -< e { value -<< e.v }\n"
+
+// The memory a program keeps (§4.13, §4.14): each source binds `x` last; its type,
+// and the places it keeps, with the bits they take.
+Memory_Case :: struct {
+	source: string,
+	type:   string,
+	places: int,
+	bits:   string,
+}
+
+MEMORY_CASES := []Memory_Case {
+	// a resonant binding nothing writes is its value: immutable
+	{COUNTER + "x -> {c -> Counter!, -> c.value}!", "0", 0, "0"},
+	// written twice, nothing unknown between: the last value written
+	{COUNTER + "x -> {c -> Counter!, c.increment!, c.increment!, -> c.value}!", "2", 0, "0"},
+	// two counters, each its own place, both simplified away
+	{COUNTER + "x -> {c -> Counter!, d -> Counter!, c.increment!, -> c.value * 10 + d.value}!", "10", 0, "0"},
+	// a write in a branch on an unknown: a value for each branch, no place
+	{COUNTER + "u8:n -> ??\nx -> {c -> Counter!, n ? {0 -> c.increment!  -> {}}, -> c.value}!", "?2 ? {0 -> 1  -> 0}", 0, "0"},
+	// what is written comes from outside: the value read is what it gave
+	{SET + "x -> {u16:a -> !?, w >- Set{v -> a}, -> value + 1}!", "ε0(x::u16, [?0 -<< x](x + 1))", 1, "16"},
+	// a place of the file outlives the run that writes it
+	{SET + "x -> {w >- Set{v -> 7}, -> value}!", "[?0 -<< 7](7)", 1, "16"},
+	// a counter the run gives is held: its place lives on
+	{COUNTER + "x -> {c -> Counter!, c.increment!, -> c}!", "", 1, "16"},
+}
+
+@(test)
+test_memory :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	for c in MEMORY_CASES {
+		k, parsed := run(c.source)
+		if !testing.expectf(t, parsed, "%s: does not parse", c.source) do continue
+		testing.expectf(t, len(k.errors) == 0, "%s: errors %v", c.source, k.errors)
+		last := k.root.bindings[len(k.root.bindings) - 1]
+		x := binding_type(&k, last)
+		if c.type != "" do testing.expectf(t, print_type(x) == c.type, "%s: the type is %s, expected %s", c.source, print_type(x), c.type)
+		m := memory(&k, x)
+		bits := print_size(m.size)
+		testing.expectf(t, len(m.places) == c.places && bits == c.bits, "%s: keeps %d places, %s bits; expected %d, %s", c.source, len(m.places), bits, c.places, c.bits)
+	}
+}
+
 @(test)
 test_sizes :: proc(t: ^testing.T) {
 	arena: vmem.Arena
