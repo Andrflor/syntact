@@ -398,19 +398,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	root := origin(s)
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
 	if !solved(c, root) do return
-	// what a call gives back: a value of the family of the base case; a scope,
-	// what the equation solves to (call_values)
-	family, of_family := family_of(k, given(k, c))
-	gives: Type
-	if of_family {
-		gives = family_term(family)
-	} else {
-		_, base_scope := given(k, c).(^Scope)
-		if !base_scope do return
-		first := find_call(k, r, root) or_return
-		gives = call_values(k, first) or_return
-		r = placing(k, r)
-	}
+	family := family_of(k, given(k, c)) or_return
 	pre, calls, answer, after := at_calls(k, s, r) or_return
 	if answer == nil && skips(r, root) do return
 	step, ahead := orbit_step(k, s, calls, u) or_return
@@ -420,7 +408,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	else {
 		for call, j in calls {
 			ys[j] = new_unknown(k, nil)
-			ys[j].layout = gives
+			ys[j].layout = family_term(family)
 			after = rewrite(k, after, rewriting_call(nil, call, ys[j]))
 		}
 	}
@@ -459,7 +447,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		inits := make([]Type, d)
 		for &z, j in states {
 			z = new_unknown(k, nil)
-			z.layout = gives
+			z.layout = family_term(family)
 			inits[j] = rewrite(k, c, rewriting(nil, u, at(k, ki, i, op(k, .Add, n, Int(j)))))
 		}
 		for y, j in ys do inside = rewriting(inside, y, states[ahead[j] - 1])
@@ -479,7 +467,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
 	alpha, beta, affine := affine_in(v, ys[0])
-	if len(calls) != 1 || len(post) > 0 || !affine || !of_family || family != .Int do return
+	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int do return
 	// going down, the composed map (A, B)
 	f := new(Fold)
 	f.span = p.span
@@ -670,10 +658,6 @@ at_calls :: proc(k: ^Kernel, s: ^Scope, r: Type) -> (before: []^Effect, calls: [
 		append(found, c)
 	}
 	if c, is_call := r.(^Collapse); is_call && c.recursive do note(k, &found, c)
-	// a scope built with a call placed in it (placing)
-	if built, is_scope := r.(^Scope); is_scope {
-		for _, v in built.changes do if c, is_call := v.(^Collapse); is_call && c.recursive do note(k, &found, c)
-	}
 	for o in operations_on_calls(r, origin(s)) {
 		for a in o.args {
 			c, is_call := a.(^Collapse)
@@ -1399,29 +1383,4 @@ calls_root :: proc(k: ^Kernel, b: ^Binding, root: ^Scope) -> bool {
 	if !is_call do return false
 	s, is_scope := c.target.(^Scope)
 	return is_scope && origin(s) == root
-}
-
-// find_call: the first recursive call of root that t places, in a scope it builds.
-find_call :: proc(k: ^Kernel, t: Type, root: ^Scope) -> (^Collapse, bool) {
-	v, is_scope := t.(^Scope)
-	if !is_scope do return nil, false
-	for b in placed(k, v, .Value) {
-		if !calls_root(k, b, root) do continue
-		c, _ := as_call(given(k, binding_type(k, b)))
-		return c, true
-	}
-	return nil, false
-}
-
-// placing: t, a scope built with a recursive call placed in it, as the carve of its
-// bindings to what they give: what the call gives can then be put in its place.
-placing :: proc(k: ^Kernel, t: Type) -> Type {
-	v, is_scope := t.(^Scope)
-	if !is_scope do return t
-	changes := make(map[^Binding]Type)
-	for b in v.bindings {
-		if b.kind != .Push && b.kind != .Expand || b.value == nil do continue
-		changes[b] = given(k, binding_type(k, b))
-	}
-	return carved_copy(k, v, changes)
 }

@@ -644,10 +644,10 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	if produces do return out
 	v, is_scope := x.(^Scope)
 	if !is_scope {
-		// a term that gives scopes — a recursive call that stays, a fold of a run —:
-		// a run of its values, inlined in a scope
-		if !is_constant(x) {
-			if values, solved := values(k, x); solved && is_scope_set(values) {
+		// a recursive call that stays gives what its equation solves to: a run of its
+		// values, inlined in a scope
+		if c, is_call := as_call(x); is_call {
+			if values, solved := call_values(k, c); solved {
 				u := new_unknown(k, nil)
 				u.layout = values
 				inline := new_scope(nil, {})
@@ -1174,14 +1174,5 @@ shapes_included :: proc(k: ^Kernel, x, y: Type) -> bool {
 		}
 		return false
 	}
-	return true
-}
-
-// is_scope_set: t is a scope, or a | of scopes.
-is_scope_set :: proc(t: Type) -> bool {
-	one: [1]Type
-	cells, negated := cells_in(t, &one)
-	if negated || len(cells) == 0 do return false
-	for c in cells do if _, is_scope := c.(^Scope); !is_scope do return false
 	return true
 }
