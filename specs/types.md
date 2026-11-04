@@ -675,7 +675,9 @@ A resonant binding `T:x >>- E -> v` (specs/language/12) is a place: its value
 changes, only through the handler of E, with `x -<< …`. Its handler is found when
 the program is typed (§4.9): every write to it is known.
 
-- **A write** `-<<` is an effect (§4.8): it stays where it is written, in order.
+- **A write** `-<<` is made only in the run of the handler of E, which answers an
+  emission `>- E{…}`: the emission stays where it is written, in order (§4.9), and
+  so do the writes it makes.
 - **A read** is the value of the place at that point, between the writes around it.
   Where the writes that reach a read are known, the read is their value, and the
   laws simplify it like any other: a resonant binding costs only where its value
