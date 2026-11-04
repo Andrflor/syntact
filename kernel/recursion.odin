@@ -175,7 +175,21 @@ call_family :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
 	root := origin(s)
 	p, found := first_production(k, root)
 	if !found || p.state != .Done do return {}, false
-	return base_family(k, root, p.typed_value)
+	if f, based := base_family(k, root, p.typed_value); based do return f, true
+	// read on the equation where what the calls carve is unknown, once
+	if slice.contains(k.asking[:], root) do return {}, false
+	append(&k.asking, root)
+	defer pop(&k.asking)
+	return equation_family(k, root, p.typed_value)
+}
+
+// asked_call: a recursive call whose equation is being asked: it fits any family,
+// like one being given.
+asked_call :: proc(k: ^Kernel, t: Type) -> bool {
+	c, ok := as_call(t)
+	if !ok do return false
+	s, is_scope := c.target.(^Scope)
+	return is_scope && slice.contains(k.asking[:], origin(s))
 }
 
 // is_pending_call: a recursive call whose equation is being given.

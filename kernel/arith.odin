@@ -127,7 +127,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 			f, ok := family_of(k, a)
 			if ok {
 				families[i] = f
-			} else if !is_pending_call(a) {
+			} else if !is_pending_call(a) && !asked_call(k, a) {
 				return {}, false
 			}
 		}

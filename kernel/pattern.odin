@@ -177,14 +177,21 @@ cover_pieces :: proc(k: ^Kernel, b: Branch, target: Type) -> map[^Binding]Type {
 	if b.view == nil do return pieces
 	s, known := target.(^Scope)
 	if !known {
-		// a run not known yet: its pieces are x.#k, and x from k for a last run
+		// a scope not known yet: its pieces are terms, x.name for a named place, x.#k for
+		// another, and x from k for a last run
 		if written, structural := b.cover.(^Scope); structural && gives_scope(k, target) {
 			shape := placed(k, written, .Shape)
 			at: Type = Int(0)
 			for place, i in shape {
 				if is_run(place) && i < len(shape) - 1 do break
 				if !is_run(place) {
-					pieces[place] = op(k, .Item, target, at)
+					if place.name != "" {
+						a := new(Access)
+						a.name, a.ordinal, a.span = place.name, -1, place.span
+						pieces[place] = access_law(k, target, a)
+					} else {
+						pieces[place] = op(k, .Item, target, at)
+					}
 					at = op(k, .Add, at, Int(1))
 					continue
 				}
