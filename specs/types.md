@@ -630,7 +630,22 @@ what it holds. What is known has none: it takes nothing (§4.11).
 - A value put in a resonant binding by `-<<` lives as long as that binding.
 
 The lifetime of a value is the outermost of the scopes that hold it, directly or by
-a reference.
+a reference: a carve, an emission, an effect that holds it extends it as far as it
+is held. Nothing is written for it, and nothing is refused for it: the compiler
+computes it.
+
+### 4.13 Memory
+
+There is no heap, no collector and no count of references. A value that takes bits
+is placed where its lifetime ends: in the memory of the scope whose collapse frees
+it, freed with it, all at once. Since the lifetime is known when the program is
+typed, it is placed there when it is built, never moved.
+
+Its size is known before it is built, as a term over what it depends on (§4.11):
+its place is reserved whole. Only a resonant binding whose size changes with its
+state (`{...value element}`) grows after it is built: it is placed last in a memory
+of its own, where growing moves nothing. The compiler gives each one such a memory,
+as registers are given: two that live at once never share one.
 
 ## 5. Scopes
 
