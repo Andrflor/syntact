@@ -92,16 +92,6 @@ read_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
 		// a carve: what it reads, the values it puts
 		for _, x in v.changes do read_unknowns(x, out)
 		return
-	case ^Series:
-		// what it reads from outside: not its index, which it binds
-		inner := make([dynamic]^Unknown)
-		for p in ([]Type{v.lo, v.hi, v.term}) do if p != nil do read_unknowns(p, &inner)
-		outer_series: for u in inner {
-			if v.index != nil && same_unknown(u, v.index) do continue
-			for p in out do if same_unknown(p, u) do continue outer_series
-			append(out, u)
-		}
-		return
 	case ^Fold:
 		// what it reads from outside: not its index, nor its states, which it binds
 		inner := make([dynamic]^Unknown)

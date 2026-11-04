@@ -65,9 +65,6 @@ operator_text := [Operator]string {
 	.Greater_Eq = ">=",
 	.In         = "in",
 	.Round      = "round",
-	.Length     = "length",
-	.Item       = "item",
-	.Drop       = "drop",
 }
 
 operator_prec :: proc(op: Operator) -> int {
@@ -84,7 +81,7 @@ operator_prec :: proc(op: Operator) -> int {
 		return PREC_PREFIX
 	case .Bit_And, .Bit_Or, .Xor, .Less, .Less_Eq, .Greater, .Greater_Eq, .In:
 		return PREC_COMPARE
-	case .Round, .Length, .Item, .Drop:
+	case .Round:
 		return PREC_ATOM
 	}
 	return PREC_ATOM
@@ -487,17 +484,6 @@ write_operation :: proc(b: ^Printer, o: ^Operation) {
 		// round32(t): t rounded to the format of its width
 		fmt.sbprintf(b, "round%v(", o.args[1])
 		write_type(b, o.args[0], 0)
-		strings.write_byte(b, ')')
-		return
-	}
-	if o.op == .Length || o.op == .Item || o.op == .Drop {
-		// length(l), item(l, i), drop(l, n): the places of a run (runs.odin)
-		strings.write_string(b, operator_text[o.op])
-		strings.write_byte(b, '(')
-		for a, i in o.args {
-			if i > 0 do strings.write_string(b, ", ")
-			write_type(b, a, 0)
-		}
 		strings.write_byte(b, ')')
 		return
 	}
