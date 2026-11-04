@@ -477,6 +477,11 @@ is_bool :: proc(t: Type, b: bool) -> bool {
 	return ok && bool(v) == b
 }
 
+is_int :: proc(t: Type, i: i128) -> bool {
+	v, ok := t.(Int)
+	return ok && i128(v) == i
+}
+
 // THE CONSTANTS
 //
 // The types the laws name again and again — every integer, real, character and

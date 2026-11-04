@@ -185,23 +185,17 @@ is_pending_call :: proc(t: Type) -> bool {
 // what they carve is an unknown of its color, root{n -> ?::C}.
 equation_family :: proc(k: ^Kernel, root: ^Scope, e: Type) -> (family: Family, ok: bool) {
 	if f, based := base_family(k, root, e); based do return f, true
-	carved := carved_by_calls(e, root)
+	carved := carved_by_calls(k, e, root)
 	if len(carved) == 0 do return
 	generic := generic_equation(k, root, &carved) or_return
 	p := first_production(k, generic) or_return
 	return base_family(k, root, binding_type(k, p))
 }
 
-// carved_by_calls: the bindings the recursive calls of e carve, in operations.
-carved_by_calls :: proc(e: Type, root: ^Scope) -> map[^Binding]Type {
+// carved_by_calls: the bindings the recursive calls of e carve.
+carved_by_calls :: proc(k: ^Kernel, e: Type, root: ^Scope) -> map[^Binding]Type {
 	carved := make(map[^Binding]Type)
-	for o in operations_on_calls(e, root) {
-		for a in o.args {
-			c, is_call := as_call(a)
-			if !is_call do continue
-			if s, is_scope := c.target.(^Scope); is_scope do for b in s.changes do carved[b] = nil
-		}
-	}
+	for c in calls_in(k, e, root) do for b in c.target.(^Scope).changes do carved[b] = nil
 	return carved
 }
 
@@ -374,7 +368,7 @@ legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
 solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 	if solution, solved := iteration(k, root, value); solved do return solution
 	if root.effectful do return value
-	values := carved_by_calls(value, root)
+	values := carved_by_calls(k, value, root)
 	if len(values) == 0 do return value
 	for b in values do values[b] = binding_type(k, b)
 	if solution, solved := generic_solution(k, root, values); solved do return solution
@@ -405,7 +399,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	family := family_of(k, given(k, c)) or_return
 	pre, calls, answer, after := at_calls(k, s, r) or_return
 	if answer == nil && skips(r, root) do return
-	step, ahead := orbit_step(k, s, calls, u) or_return
+	step, ahead, carried := orbit_step(k, s, calls, u) or_return
 	// what each call gives back
 	ys := make([]^Unknown, len(calls))
 	if answer != nil do ys[0] = answer
@@ -438,7 +432,8 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	at := proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
 	feeds := false
 	for e in pre do feeds ||= e.answer != nil && reads(k, after, e.answer)
-	if closed && !feeds {
+	// states carried by the call follow the orbit going down: the fold goes down
+	if closed && !feeds && len(carried) == 0 {
 		d := 0
 		for a in ahead do d = max(d, a)
 		if d > 1 && (has_effect(c) || answer != nil || !continues(k, stop, ki, i)) do return
@@ -471,39 +466,59 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
 	alpha, beta, affine := affine_in(v, ys[0])
-	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int do return
-	// going down, the composed map (A, B)
+	// v = y: the call is the value, (A, B) = (1, 0) along the whole orbit, A·c + B = c
+	tail := affine && is_int(alpha, 1) && is_int(beta, 0)
+	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int && !tail do return
+	// going down, the composed map (A, B), and the states the call carries: each its
+	// value where the fold starts, what the call carves it to at each step
 	f := new(Fold)
 	f.span = p.span
+	carry: Rewrite
+	states, inits := make([dynamic]^Unknown), make([dynamic]Type)
+	for w in carried {
+		z := new_unknown(k, nil)
+		z.layout = layout_of(k, w)
+		carry = rewriting(carry, w, z)
+		append(&states, z)
+		append(&inits, w)
+	}
 	along, at_end: Rewrite
 	if closed {
 		f.index, f.start, f.next, f.stop = i, Int(0), op(k, .Add, i, Int(1)), new_range(n, nil, .Int)
-		along, at_end = rewriting(nil, u, ki), rewriting(nil, u, at(k, ki, i, n))
+		along, at_end = rewriting(carry, u, ki), rewriting(carry, u, at(k, ki, i, n))
 	} else {
 		f.index, f.start, f.next, f.stop = x, u, rewrite(k, step, rewriting(nil, u, x)), stop
-		along, at_end = rewriting(nil, u, x), rewriting(nil, u, narrowing(x, and_law(k, {layout_of(k, u), stop})))
+		along, at_end = rewriting(carry, u, x), rewriting(carry, u, narrowing(x, and_law(k, {layout_of(k, u), stop})))
 	}
-	a, b := new_unknown(k, nil), new_unknown(k, nil)
-	a.layout, b.layout = family_term(.Int), family_term(.Int)
-	f.states, f.inits = slice.clone([]^Unknown{a, b}), slice.clone([]Type{Int(1), Int(0)})
+	updates := make([dynamic]Type)
+	for w in inits do append(&updates, rewrite(k, carried[w.(^Unknown)], along))
 	f.effects = rewrite(k, wrap_effects(pre, None{}), along)
-	f.updates = slice.clone([]Type{op(k, .Mul, a, rewrite(k, alpha, along)), op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along)))})
-	f.value = op(k, .Add, op(k, .Mul, a, rewrite(k, c, at_end)), b)
+	f.value = rewrite(k, c, at_end)
+	if !tail {
+		a, b := new_unknown(k, nil), new_unknown(k, nil)
+		a.layout, b.layout = family_term(.Int), family_term(.Int)
+		append(&states, a, b)
+		append(&inits, Int(1), Int(0))
+		append(&updates, op(k, .Mul, a, rewrite(k, alpha, along)), op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along))))
+		f.value = op(k, .Add, op(k, .Mul, a, f.value), b)
+	}
+	f.states, f.inits, f.updates = states[:], inits[:], updates[:]
 	return folded(k, f), true
 }
 
 // orbit_step: the step s of the orbit the calls follow, and how far along it each
 // call is: one call, s itself, 1; calls f{n -> m - j}!, the points j / g along
 // s(m) = m - g, g the greatest divisor of the j.
-orbit_step :: proc(k: ^Kernel, s: ^Scope, calls: []^Collapse, u: ^Unknown) -> (step: Type, ahead: []int, ok: bool) {
+orbit_step :: proc(k: ^Kernel, s: ^Scope, calls: []^Collapse, u: ^Unknown) -> (step: Type, ahead: []int, carried: map[^Unknown]Type, ok: bool) {
 	if len(calls) == 1 {
-		step = counter_next(k, s, calls[0], u) or_return
-		return step, slice.clone([]int{1}), true
+		step, carried = counter_next(k, s, calls[0], u) or_return
+		return step, slice.clone([]int{1}), carried, true
 	}
 	shifts := make([]i128, len(calls))
 	g: i128 = 0
 	for call, j in calls {
-		next := counter_next(k, s, call, u) or_return
+		next, others := counter_next(k, s, call, u) or_return
+		if len(others) > 0 do return
 		alpha, beta := affine_in(next, u) or_return
 		one, is_int := alpha.(Int)
 		minus, constant := beta.(Int)
@@ -513,7 +528,7 @@ orbit_step :: proc(k: ^Kernel, s: ^Scope, calls: []^Collapse, u: ^Unknown) -> (s
 	}
 	ahead = make([]int, len(calls))
 	for x, j in shifts do ahead[j] = int(x / g)
-	return op(k, .Sub, u, Int(g)), ahead, true
+	return op(k, .Sub, u, Int(g)), ahead, nil, true
 }
 
 // continues: the orbit, once in B, stays in it — kᵢ decreasing, B = ..b, or
@@ -656,36 +671,59 @@ at_calls :: proc(k: ^Kernel, s: ^Scope, r: Type) -> (before: []^Effect, calls: [
 		t = e.then
 	}
 	if len(chain) > 0 do return
-	found := make([dynamic]^Collapse)
-	note := proc(k: ^Kernel, found: ^[dynamic]^Collapse, c: ^Collapse) {
-		for x in found do if same(k, x, c) do return
-		append(found, c)
-	}
-	if c, is_call := r.(^Collapse); is_call && c.recursive do note(k, &found, c)
-	// a scope holds a call in its bindings: `{...f{n -> n - 1}!  n}`
-	if s, is_scope := r.(^Scope); is_scope {
-		for b in placed(k, s, .Value) do if c, is_call := binding_type(k, b).(^Collapse); is_call && c.recursive do note(k, &found, c)
-	}
-	for o in operations_on_calls(r, origin(s)) {
-		for a in o.args {
-			c, is_call := a.(^Collapse)
-			if is_call && c.recursive do note(k, &found, c)
-		}
-	}
-	return nil, found[:], nil, r, len(found) > 0
+	found := calls_in(k, r, origin(s))
+	return nil, found, nil, r, len(found) > 0
 }
 
-// counter_next: the value the call c gives the field that holds u, when it changes
-// that field only.
-counter_next :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, u: ^Unknown) -> (Type, bool) {
-	target, is_scope := c.target.(^Scope)
-	if !is_scope || origin(target) != origin(s) || len(target.changes) != 1 do return nil, false
-	for b, v in target.changes {
-		x, is_unknown := binding_type(k, holding(s, b)).(^Unknown)
-		if !is_unknown || !same_unknown(x, u) do return nil, false
-		return v, true
+// calls_in: the recursive calls of root that t makes, each once: t itself, in its
+// operations, its patterns, the bindings of the scopes it holds —
+// `{...f{n -> n - 1}!  n}`.
+calls_in :: proc(k: ^Kernel, t: Type, root: ^Scope) -> []^Collapse {
+	found := make([dynamic]^Collapse)
+	visit :: proc(k: ^Kernel, t: Type, root: ^Scope, found: ^[dynamic]^Collapse) {
+		if c, is_call := as_call(t); is_call {
+			if s, is_scope := c.target.(^Scope); is_scope && origin(s) == root {
+				for x in found do if same(k, x, c) do return
+				append(found, c)
+			}
+			return
+		}
+		#partial switch v in t {
+		case ^Operation:
+			for a in v.args do visit(k, a, root, found)
+		case ^Pattern:
+			visit(k, v.target, root, found)
+			for b in v.branches do visit(k, b.product, root, found)
+		case ^Or:
+			for a in v.terms do visit(k, a, root, found)
+		case ^And:
+			for a in v.terms do visit(k, a, root, found)
+		case ^Not:
+			visit(k, v.term, root, found)
+		case ^Effect:
+			if v.choice != nil do visit(k, v.choice, root, found)
+			visit(k, v.then, root, found)
+		case ^Scope:
+			for b in placed(k, v, .Value) do if b.kind != .Product && b.kind != .Handler do visit(k, binding_type(k, b), root, found)
+		}
 	}
-	return nil, false
+	visit(k, t, root, &found)
+	return found[:]
+}
+
+// counter_next: the value the call c gives the field that holds u, and the other
+// fields it carves, each an unknown of s: the states it carries (§5.6), what it
+// carves them to.
+counter_next :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, u: ^Unknown) -> (next: Type, carried: map[^Unknown]Type, ok: bool) {
+	target, is_scope := c.target.(^Scope)
+	if !is_scope || origin(target) != origin(s) do return
+	carried = make(map[^Unknown]Type)
+	for b, v in target.changes {
+		x := binding_type(k, holding(s, b)).(^Unknown) or_return
+		if same_unknown(x, u) do next = v
+		else do carried[x] = v
+	}
+	return next, carried, next != nil
 }
 
 // skips: a branch of a pattern of t does not make the call of root that t makes:

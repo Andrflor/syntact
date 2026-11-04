@@ -868,7 +868,8 @@ List -> {T -> {}  -> {}  -> {T: ...List{T}: T:}}
 {10 10 10} in List{u8}                                                    = false
 ```
 
-A fold, when the calls change the integer the name is called on, and that only:
+A fold, when the calls change the integer the name is called on, and that only —
+or carry states besides it (below):
 
 ```text
 f{n -> m}! = m ? {B -> c(m)  -> pre(m) · f{n -> s(m)}! · post(m)}
@@ -907,6 +908,22 @@ orbit, the effects before the call in its steps:
 
 ```text
 f{n -> m}! = ⟳(k: m ↦ s(k) until B; pre(k); A: 1 ↦ A·α(k), B: 0 ↦ B + A·β(k); A·c(k) + B)
+```
+
+**States carried by the call.** Besides the integer it moves along the orbit, a call
+may carve other bindings of the scope: each is a state of the fold. Its init is what
+the first carve gives it, its update what the call carves it to, all at once with k:
+
+```text
+f{n -> m  r -> a}! = m ? {B -> c(m, r)  -> pre · f{n -> s(m)  r -> u(m, r)}!}
+f{n -> m  r -> a}! = ⟳(k: m ↦ s(k) until B; pre(k, r); r: a ↦ u(k, r); c(k, r))
+```
+
+Such a state follows the orbit going down: the fold goes down, v affine in y.
+
+```text
+count -> {u32:n -> ??  u64:r -> ??  -> n ? {0 -> r  -> count{n -> n - 1  r -> r ^ n}!}}
+count{n -> 3  r -> 0}!   = ⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y ^ (3 - x); y)
 ```
 
 What would keep the orbit, or what pre gives back, stays. The laws of a fold:
