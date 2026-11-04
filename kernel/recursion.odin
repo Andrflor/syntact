@@ -108,8 +108,10 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	out.target, out.recursive, out.span = s, true, span
 	if root.effectful do return call_effect(k, out)
 	// a production that, at the values the carve gives, calls nothing is the value
-	// (§7); asked once
-	if s != root && !slice.contains(k.asking[:], root) {
+	// (§7); asked once, when the carve gives a known value, which may decide it
+	decides := false
+	for _, v in s.changes do decides ||= is_constant(v)
+	if decides && s != root && !slice.contains(k.asking[:], root) {
 		append(&k.asking, root)
 		defer pop(&k.asking)
 		if v, asked := call_production(k, out); asked && solved(v, root) do return v
