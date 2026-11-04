@@ -23,8 +23,9 @@ scope_law :: proc(k: ^Kernel, s: ^Scope) -> Type {
 }
 
 // placed: the bindings of s with its expansions placed (§5.3): `...e` places the
-// bindings of e as they are; `...C:` places the default of C in a value, and stays
-// a run in a shape; `...` places nothing in a value.
+// bindings of e as they are — not known yet, they stay where they are placed, the
+// expansion itself —; `...C:` places the default of C in a value, and stays a run
+// in a shape; `...` places nothing in a value.
 placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 	out := make([dynamic]^Binding)
 	for b in s.bindings {
@@ -34,12 +35,25 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 		}
 		if b.value == nil && b.color == nil do continue
 		v := binding_value(k, b) // an expansion of a run places what the run gives
-		#partial switch x in v {
-		case ^Scope:
-			append(&out, ..placed(k, x, view))
-		}
+		if x, known := v.(^Scope); known do append(&out, ..placed(k, x, view))
+		else if gives_scope(k, v) do append(&out, b)
 	}
 	return out[:]
+}
+
+// gives_scope: every value t may take is a scope: a scope, a term whose values are
+// scopes, a recursive call whose equation gives scopes (§5.6).
+gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
+	v := given(k, t)
+	if _, is_scope := v.(^Scope); is_scope do return true
+	if c, is_call := as_call(v); is_call do return gives_scopes(k, c)
+	set, ok := values(k, v)
+	if !ok do return false
+	one: [1]Type
+	cells, negated := cells_in(set, &one)
+	if negated || len(cells) == 0 do return false
+	for c in cells do if cell_family(c) != .Value do return false
+	return true
 }
 
 is_run :: proc(b: ^Binding) -> bool {

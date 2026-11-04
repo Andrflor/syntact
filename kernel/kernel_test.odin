@@ -253,6 +253,9 @@ SPEC_CASES := []Spec_Case {
 	{"x -> {1 ...u8:}", "", {.Constraint_Mismatch}},
 	{"xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...u8:(t)} -> h\n  -> 0\n}", "", {.Constraint_Mismatch}},
 	{"Pair -> {u8: u8:}\ny -> {...Pair: 3}\nx -> y.#2", "3", {}},
+	// data not known yet is placed as it is, beside the rest
+	{ARRAY + "A -> Array{u8}\nxs -> ??::A\ny -> {...xs  b -> 5}\nx -> y.b", "5", {}},
+	{"a -> ??::u8\nx -> {...a}", "", {.Constraint_Mismatch}},
 	// shapes of one structure that differ in one place join there: {u8:} | {i8:} = {(u8 | i8):}
 	{"({u8:} | {i8:}):x -> {-1}", "", {}},
 	{"({u8:} | {i8:}):x -> {300}", "", {.Constraint_Mismatch}},
