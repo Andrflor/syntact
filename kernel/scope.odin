@@ -1143,6 +1143,13 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	is_from &&= from.op == .From
 	if o == .Length {
 		if is_from do return op(k, .Sub, run_law(k, .Length, from.args[:1], span), from.args[1]) // |x from k| = |x| - k
+		// a run a fold builds, a binding a step: its number of steps
+		if f, is_fold := x.(^Fold); is_fold {
+			if _, _, builds := built(k, f); builds {
+				lo, hi, _ := counter_range(k, f)
+				return op(k, .Sub, op(k, .Add, hi, Int(1)), lo)
+			}
+		}
 		s, known := x.(^Scope)
 		if !known do return new_operation(o, x)
 		n: Type = Int(0)

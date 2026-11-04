@@ -834,7 +834,7 @@ fold_law :: proc(k: ^Kernel, f: ^Fold) -> Type {
 //   along a counter, states whose updates are a linear map with integer
 //   coefficients are each a C-finite sequence (linear_states)
 simplified :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
-	out := f
+	out := carrying(k, f)
 	for changed := true; changed; {
 		changed = false
 		for x, i in out.states {
@@ -1369,4 +1369,74 @@ cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> bool {
 	if len(inner) != 1 || is_run(inner[0]) do return false
 	head := binding_color(k, places[0])
 	return head == nil || inner[0].color != nil && included(k, binding_color(k, inner[0]), head)
+}
+
+// built: f builds a run, a binding a step along a counter from 0: its value is the
+// state y, {} at first, {...y  e} at each step. e is the binding of step i.
+built :: proc(k: ^Kernel, f: ^Fold) -> (y: int, e: Type, ok: bool) {
+	lo, _ := counter_range(k, f) or_return
+	if !is_int(lo, 0) || !same(k, f.next, op(k, .Add, f.index, Int(1))) || !is_none(f.effects) do return
+	for z, i in f.states {
+		if !same(k, f.value, z) do continue
+		start, is_scope := given(k, f.inits[i]).(^Scope)
+		step, is_step := f.updates[i].(^Scope)
+		if !is_scope || !is_step || len(run_data(k, start)) != 0 do return
+		data := run_data(k, step)
+		if len(data) != 2 || data[0].kind != .Expand || !same(k, binding_value(k, data[0]), z) || data[1].kind == .Expand do return
+		e = binding_value(k, data[1])
+		if reads(k, e, z) do return
+		for t, j in f.updates do if j != i && reads(k, t, z) do return
+		return i, e, true
+	}
+	return
+}
+
+// carrying: f reads, at its step i counted from 0, the binding i of a run a fold
+// builds: it carries the states of that fold beside its own, and the binding is
+// what that fold gives at step i. The run is never built.
+carrying :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
+	lo, _, counts := counter_range(k, f)
+	if !counts || !is_int(lo, 0) || !same(k, f.next, op(k, .Add, f.index, Int(1))) do return f
+	read := find_read(k, fold_parts(f), f.index)
+	if read == nil do return f
+	b := read.args[0].(^Fold)
+	y, e, _ := built(k, b)
+	along := rewriting(nil, b.index, f.index)
+	states, inits := make([dynamic]^Unknown), make([dynamic]Type)
+	append(&states, ..f.states)
+	append(&inits, ..f.inits)
+	for z, j in b.states {
+		if j == y do continue
+		w := new_unknown(k, nil)
+		w.layout = layout_of(k, z)
+		along = rewriting(along, z, w)
+		append(&states, w)
+		append(&inits, b.inits[j])
+	}
+	reading := Rewrite{{read = read, term = rewrite(k, e, along)}}
+	parts := fold_parts(f)
+	for &t in parts do t = rewrite(k, t, reading)
+	out := with_parts(f, parts)
+	updates := make([dynamic]Type)
+	append(&updates, ..out.updates)
+	for z, j in b.states do if j != y do append(&updates, rewrite(k, b.updates[j], along))
+	out.states, out.inits, out.updates = states[:], inits[:], updates[:]
+	return carrying(k, out)
+}
+
+// find_read: a read x.#i in ts, x a run a fold builds, i the index.
+find_read :: proc(k: ^Kernel, ts: []Type, i: ^Unknown) -> ^Operation {
+	for t in ts {
+		if t == nil do continue
+		if o, is_op := t.(^Operation); is_op {
+			if b, is_fold := o.args[0].(^Fold); o.op == .Item && is_fold && same(k, o.args[1], i) {
+				if _, _, builds := built(k, b); builds do return o
+			}
+		}
+		if found := find_read(k, parts(t), i); found != nil do return found
+		if p, is_pattern := t.(^Pattern); is_pattern {
+			for br in p.branches do if found := find_read(k, {br.product}, i); found != nil do return found
+		}
+	}
+	return nil
 }

@@ -256,6 +256,8 @@ SPEC_CASES := []Spec_Case {
 	// an access on a fold is the fold of the access; a fold is in what its value is in
 	{"P -> {u8:a  u8:b}\ng -> {u8:n -> ??  u8:s -> 0  -> n ? {0 -> P{s  s}  -> g{n -> n - 1  s -> (s * 3 + 1) % 256}!}}\nx -> g{n -> 3}!.a", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ (3 * y + 1) % 256; y)", {}},
 	{"f -> {u32:n -> ??  u16:acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> (acc + 1) % 1000}!}}\ni64:x -> f{n -> ??::u32}!", "⟳(x: 0 ↦ x + 1 until ?1..; y: 0 ↦ (y + 1) % 1000; y)", {}},
+	// a run a fold builds, read by a fold at its own step, is never built
+	{ARRAY + "build -> {\n  u8:n -> ??\n  u8:r -> 1\n  Array{u8}:acc -> {}\n  -> n ? {0 -> acc  -> build{n -> n - 1  r -> (r * 3) % 256  acc -> {...acc  r}}!}\n}\nscan -> {\n  Array{u8}:data -> {}\n  u8:acc -> 0\n  -> data ? {\n    {u8(h) ...Array{u8}:(t)} -> scan{data -> t  acc -> (acc + h) % 256}!\n    -> acc\n  }\n}\nx -> scan{data -> build{n -> ??::u8}!}!", "⟳(x: 0 ↦ x + 1 until ?1..; y: 0 ↦ (y + z) % 256, z: 1 ↦ 3 * z % 256; y)", {}},
 	// a recursion is in a shape by induction: its steps keep it there
 	{"Node -> {-> {}  -> {u8:v  Node:l  Node:r}}\nbuild -> {\n  (0..30):depth -> ??\n  -> depth ? {\n    0 -> {v -> 1  l -> {}  r -> {}}\n    -> {v -> 2  l -> build{depth -> depth - 1}!  r -> build{depth -> depth - 1}!}\n  }\n}\nNode:x -> build{depth -> ??::(0..30)}!", "", {}},
 	// a carve of a binding an expansion placed carves what is expanded

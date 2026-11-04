@@ -15,15 +15,14 @@ import "core:strings"
 //     `?ₖ::p`, in a single primitive, is p;
 //   - a call of a solved equation puts its arguments in the solution (§5.6).
 //
-// A scope is a value: a rewrite does not enter it. What is taken out of it in a
-// branch — a name, an access, a collapse — is rewritten there.
 
 Rewrite :: []Rewriting
 
-// Rewriting: ?ₖ ↦ t, or a recursive call ↦ t.
+// Rewriting: ?ₖ ↦ t, a recursive call ↦ t, or a read of a run x.#k ↦ t.
 Rewriting :: struct {
 	unknown: ^Unknown,
 	call:    ^Collapse,
+	read:    ^Operation,
 	term:    Type,
 }
 
@@ -135,6 +134,7 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return recurrent_law(k, out)
 	case ^Operation:
 		if is_string_value(t) do return t
+		for x in r do if x.read != nil && same(k, x.read, v) do return x.term
 		args := rewrite_all(k, v.args, r)
 		if identical(args, v.args) do return t
 		return as_normal(operation_law(k, v.op, args, v.span))

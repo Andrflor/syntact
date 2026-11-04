@@ -912,6 +912,15 @@ run its pattern cuts — `xs ? {{T(h) ...R:(t)} -> … f{xs -> t}! …  -> c}` �
 on the position k of xs, from 0 by k + 1 until |xs|: h is `xs.#k`, t is `xs from
 k + 1`. The pieces a cover cuts from a run not known yet are these terms.
 
+A run a fold builds, a binding a step from `{}` — `⟳(i: 0 ↦ i + 1 …; y: {} ↦ {...y
+e}, z: …; y)` — has as many bindings as the fold has steps, and its binding i is e at
+step i. A fold that reads it at its own step i, from 0 by 1, carries the states z
+beside its own: the run is never built, and takes nothing.
+
+```text
+total{xs -> build{n -> m}!}!   = ⟳(i: 0 ↦ i + 1 until m..; y: 0 ↦ y + e(z), z: z₀ ↦ s(z); y)
+```
+
 Then the equation itself is folded from the base case up, over the steps i from
 n - 1 down to 0, after the effects before the call going down — unless post reads
 what they give back. Calls further along the orbit, `f{n -> m - 2}!` …, are a
