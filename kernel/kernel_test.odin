@@ -316,6 +316,13 @@ SPEC_CASES := []Spec_Case {
 	{U16_LOG + "x -> lib{Log -< e { -> 300 }}!", "301", {}},
 	{U16_LOG + "x -> lib{Log -< e { -> \"a\" }}!", "", {.Constraint_Mismatch}},
 	{U16_LOG + "x -> lib{Audit -< e { -> 3 }}!", "", {.Invalid_Carve}},
+	// the bits of integers ≥ 0: their bounds
+	{"a -> ??::u8\nu8:x -> a ^ 5", "", {}},
+	{"a -> ??::u8\nu8:x -> a [&] 300", "", {}},
+	{"a -> ??::u8\nu16:x -> a << 8", "", {}},
+	{"a -> ??::u8\nu8:x -> a << 1", "", {.Constraint_Mismatch}},
+	{"a -> ??::u16\nu8:x -> a >> 8", "", {}},
+	{"a -> ??::u8\nu8:x -> a [|] 256", "", {.Constraint_Mismatch}},
 	// §4.14: a resonant binding is a place, which its writes change; a read is what
 	// the writes before it give, each run with places of its own
 	{COUNTER + "x -> {c -> Counter!, c.increment!, c.increment!, -> c.value}!", "2", {}},

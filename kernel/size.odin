@@ -344,11 +344,7 @@ operation_count :: proc(k: ^Kernel, o: ^Operation) -> Count {
 	product := Count(Type(Int(1)))
 	for a in o.args do product = count_mul(k, product, count(k, a))
 	if lo, hi, ok := int_bounds(k, o); ok {
-		span := discrete_count(lo, hi)
-		a, a_known := product.(Type).(Int)
-		b, b_known := span.(Type).(Int)
-		if a_known && b_known do return Type(Int(min(a, b)))
-		if _, infinite := product.(Infinite); infinite do return span
+		return least_count(product, discrete_count(lo, hi))
 	}
 	return product
 }

@@ -1064,6 +1064,55 @@ int_bounds :: proc(k: ^Kernel, t: Type) -> (lo, hi: Maybe(i128), ok: bool) {
 		y, has_y := bounds[1][1].?
 		if !(has_x && x >= 1) && !(has_y && y <= -1) do return
 		return corners(bounds[0][0], bounds[0][1], bounds[1][0], bounds[1][1], div_extended)
+	case .Bit_And, .Bit_Or, .Xor, .Shl, .Shr:
+		return bit_bounds(o.op, bounds)
+	}
+	return
+}
+
+// bit_bounds: the bits of integers ≥ 0, bounded: a [&] b is at most the lesser of
+// them; a [|] b and a ^ b hold no bit above the highest of either, and a [|] b is
+// at least the greater; a << c and a >> c are monotone in a and in c.
+bit_bounds :: proc(op: Operator, bounds: [][2]Maybe(i128)) -> (lo, hi: Maybe(i128), ok: bool) {
+	a_lo := bounds[0][0].? or_return
+	b_lo := bounds[1][0].? or_return
+	if a_lo < 0 || b_lo < 0 do return
+	a_hi, has_a := bounds[0][1].?
+	b_hi, has_b := bounds[1][1].?
+	#partial switch op {
+	case .Bit_And:
+		lo = 0
+		switch {
+		case has_a && has_b:
+			hi = min(a_hi, b_hi)
+		case has_a:
+			hi = a_hi
+		case has_b:
+			hi = b_hi
+		}
+		return lo, hi, true
+	case .Bit_Or, .Xor:
+		lo = op == .Bit_Or ? max(a_lo, b_lo) : 0
+		if has_a && has_b {
+			top := max(a_hi, b_hi)
+			if top == 0 do return lo, 0, true
+			n := bit_length(u128(top))
+			if n >= 127 do return lo, nil, true
+			hi = i128(1) << uint(n) - 1
+		}
+		return lo, hi, true
+	case .Shl:
+		if b_lo >= 127 do return
+		lo = a_lo << uint(b_lo)
+		if has_a && has_b && b_hi < 127 {
+			if a_hi == 0 do return lo, 0, true
+			if bit_length(u128(a_hi)) + int(b_hi) < 127 do hi = a_hi << uint(b_hi)
+		}
+		return lo, hi, true
+	case .Shr:
+		lo = has_b && b_hi < 127 ? a_lo >> uint(b_hi) : 0
+		if has_a do hi = b_lo < 127 ? a_hi >> uint(b_lo) : 0
+		return lo, hi, true
 	}
 	return
 }

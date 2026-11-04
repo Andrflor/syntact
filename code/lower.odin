@@ -233,6 +233,9 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		return series(l, v)
 	case ^kernel.Recurrent:
 		return recurrent(l, v)
+	case kernel.Invalid:
+		// a term the kernel gives no type to: why
+		if v.problem != nil do return fail(l, "%s", v.problem.message)
 	}
 	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
