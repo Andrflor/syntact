@@ -857,25 +857,64 @@ repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
 	}
 	empty := in_law(k, run_scope(k, nil), a)
 	if !is_bool(empty, true) && !is_bool(empty, false) do return stays
-	return pieces_in(k, placed(k, v, .Value), a, counts, 0, lengths[:], any_length, is_bool(empty, true))
+	return pieces_in(k, placed(k, v, .Value), a, counts, Int(0), lengths[:], any_length, is_bool(empty, true), stays)
 }
 
-// pieces_in: the bindings xs are pieces in a, after `used` of them.
-pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts: Type, used: i128, lengths: []int, any_length, empty: bool) -> Type {
+// pieces_in: the bindings xs are pieces in a, after `used` of them — a set of
+// counts, when a run not known yet came before, of as many pieces as its layout
+// holds (§4.7: an unknown is in what holds its layout). True when it holds for
+// every count used, false when for none; otherwise it stays.
+pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts, used: Type, lengths: []int, any_length, empty: bool, stays: Type) -> Type {
 	if len(xs) == 0 {
-		if empty do return Bool(!is_none(counts_from(counts, used)))
-		return Bool(counts_hold(counts, used))
+		admitted := empty ? counts_below(counts) : counts
+		if included(k, used, admitted) do return Bool(true)
+		if apart(k, used, admitted) do return Bool(false)
+		return stays
 	}
-	if is_none(counts_from(counts, used + 1)) do return Bool(false)
+	least, _ := discrete_bounds(first_cell(used))
+	if is_none(counts_from(counts, (least.? or_else 0) + 1)) do return Bool(false)
+	if xs[0].kind == .Expand {
+		// a run not known yet, x::(A * m): m pieces, each in A
+		pieces, m, ok := run_pieces(k, binding_value(k, xs[0]))
+		if !ok || !included(k, pieces, a) do return stays
+		return pieces_in(k, xs[1:], a, counts, op(k, .Add, used, m), lengths, any_length, empty, stays)
+	}
 	out: Type = Bool(false)
 	for i in 1 ..= len(xs) {
 		if !any_length && !slice.contains(lengths, i) do continue
 		head := in_law(k, run_scope(k, xs[:i]), a)
 		if is_bool(head, false) do continue
-		out = bool_or(k, out, bool_and(k, head, pieces_in(k, xs[i:], a, counts, used + 1, lengths, any_length, empty)))
+		out = bool_or(k, out, bool_and(k, head, pieces_in(k, xs[i:], a, counts, op(k, .Add, used, Int(1)), lengths, any_length, empty, stays)))
 		if is_bool(out, true) do return out
 	}
 	return out
+}
+
+// run_pieces: what x, a run not known yet, is made of: its layout, solved by Arden
+// (§5.6), is a run of pieces of A, m of them, `{...(A * m):}`, then nothing.
+run_pieces :: proc(k: ^Kernel, x: Type) -> (pieces: Type, m: Type, ok: bool) {
+	layout := values(k, x) or_return
+	s := layout.(^Scope) or_return
+	if recursive(s) do s = arden(k, s) or_return
+	for b in placed(k, s, .Shape) {
+		if !is_run(b) || b.color == nil do return
+		c := binding_color(k, b)
+		if o, repeats := c.(^Operation); repeats && o.op == .Mul && pieces == nil {
+			pieces, m = o.args[0], o.args[1]
+			continue
+		}
+		// what is left is the empty run
+		rest, is_scope := c.(^Scope)
+		if !is_scope || len(placed(k, rest, .Shape)) != 0 do return
+	}
+	return pieces, m, pieces != nil
+}
+
+// first_cell: the first cell of a constant normal form.
+first_cell :: proc(t: Type) -> Type {
+	one: [1]Type
+	cells, _ := cells_in(t, &one)
+	return len(cells) > 0 ? cells[0] : None{}
 }
 
 // different_structures: two shapes without run whose names, kinds or order

@@ -1,7 +1,6 @@
 package kernel
 
 import syn "../syntax"
-import "core:fmt"
 import "core:slice"
 
 // RECURSION (specs/types.md §5.6)
