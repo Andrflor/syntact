@@ -92,6 +92,17 @@ read_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
 		// a carve: what it reads, the values it puts
 		for _, x in v.changes do read_unknowns(x, out)
 		return
+	case ^Fold:
+		// what it reads from outside: not its index, nor its states, which it binds
+		inner := make([dynamic]^Unknown)
+		for p in fold_parts(v) do if p != nil do read_unknowns(p, &inner)
+		outer: for u in inner {
+			if v.index != nil && same_unknown(u, v.index) do continue
+			for x in v.states do if same_unknown(u, x) do continue outer
+			for p in out do if same_unknown(p, u) do continue outer
+			append(out, u)
+		}
+		return
 	}
 	for p in parts(t) do if p != nil do read_unknowns(p, out)
 }
@@ -169,6 +180,9 @@ values :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 		if v.recursive {
 			if solution, solved := call_values(k, v); solved do return solution, true
 		}
+	case ^Fold:
+		// what its value gives, its states each a value of their layout
+		return values(k, v.value)
 	case ^Pattern:
 		products := make([]Type, len(v.branches))
 		for b, i in v.branches do products[i] = values(k, given(k, b.product)) or_return
