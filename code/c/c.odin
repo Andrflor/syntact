@@ -84,7 +84,7 @@ source :: proc(p: ^code.Program) -> (string, string) {
 	}
 	w.funcs = make([]string, len(p.funcs))
 	w.funcs[0] = "program"
-	for f, i in p.funcs[1:] do w.funcs[i + 1] = fmt.tprintf("fn_%s_%d", f.name, i + 1)
+	for f, i in p.funcs[1:] do w.funcs[i + 1] = fmt.tprintf("fn_%s_%d", identifier(f.name), i + 1)
 	prelude(&w)
 	vectors(&w)
 	for imp, i in p.imports {
@@ -772,4 +772,15 @@ static void write_real(double x) {
 		line(w, "return 0;")
 	}
 	strings.write_string(&w.b, "}\n")
+}
+
+// identifier: a name as C writes identifiers: its ASCII letters, digits and _, any
+// other character as _.
+identifier :: proc(name: string) -> string {
+	b := strings.builder_make()
+	for r in name {
+		ok := r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+		strings.write_rune(&b, ok ? r : '_')
+	}
+	return strings.to_string(b)
 }

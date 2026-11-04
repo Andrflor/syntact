@@ -258,6 +258,8 @@ SPEC_CASES := []Spec_Case {
 	{"f -> {u32:n -> ??  u16:acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> (acc + 1) % 1000}!}}\ni64:x -> f{n -> ??::u32}!", "⟳(x: 0 ↦ x + 1 until ?1..; y: 0 ↦ (y + 1) % 1000; y)", {}},
 	// a recursion reads the fields of its own calls: the hypothesis, by induction
 	{"f -> {u8:n -> ??  -> n ? {0 -> {a -> 0  b -> 1}  -> {a -> f{n -> n - 1}!.b  b -> (f{n -> n - 1}!.a + f{n -> n - 1}!.b) % 256}}}\nx -> f{n -> ??::u8}!.a", "f{n -> ?1}!.a", {}},
+	// calls along a counter that differ by one field are the bindings of one call
+	{"g -> {u8:n -> ??  u8:p -> 0  -> n ? {0 -> p  -> (g{n -> n - 1  p -> p}! * 3 + p) % 251}}\ns -> {\n  u8:p -> 0\n  acc -> 0\n  -> p ? {>=4 -> acc  -> s{p -> p + 1  acc -> (acc + g{n -> ??::u8  p -> p}!) % 1000}!}\n}\nx -> s!", "", {}},
 	// a bitwise operation summed over a range is summed bit by bit
 	{"v -> ??::(0..999)\ns -> {\n  u8:p -> 0\n  acc -> 0\n  -> p ? {>=8 -> acc  -> s{p -> p + 1  acc -> acc + (v ^ p)}!}\n}\nx -> s!", "8 * (?0 [&] 1016) + 28", {}},
 	{"s -> {\n  u8:p -> 17\n  acc -> 0\n  -> p ? {>=201 -> acc  -> s{p -> p + 1  acc -> acc + (123 [|] p)}!}\n}\nx -> s!", "32344", {}},

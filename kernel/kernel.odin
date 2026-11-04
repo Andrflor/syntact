@@ -40,7 +40,8 @@ Kernel :: struct {
 	effects:    int, // the effects written: their ids
 	emissions:  int, // the emissions written: their ids
 	answering:  [dynamic]^Binding, // the handlers whose run is being typed: one that answers itself again is an infinite recursion
-	summed:     [dynamic]Summed, // the equations of sums of an equation over one of its fields (recursion.odin)
+	summed:     [dynamic]Summed,
+	tupled:     [dynamic]Tupled, // the equations of an equation over a range of one of its fields (recursion.odin) // the equations of sums of an equation over one of its fields (recursion.odin)
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
 	asking:     [dynamic]^Scope, // the equations read where what their calls carve is unknown: being given, their calls are the hypothesis (is_pending_call)

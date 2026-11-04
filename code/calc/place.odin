@@ -198,6 +198,12 @@ speculable :: proc(g: ^Graph, n: Node) -> bool {
 	#partial switch n.kind {
 	case .Int, .Real, .Text, .Input, .Argument, .Unary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
 		return true
+	case .Call:
+		// a pure function of the program: an equation, which ends
+		return g.prog.funcs[n.index].pure
+	case .Get:
+		// a value of a tuple, read after it
+		return true
 	case .Binary:
 		#partial switch n.op {
 		case .Div, .Mod:

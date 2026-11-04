@@ -335,6 +335,7 @@ Copier :: struct {
 	substitute: bool,
 	outer:      Rewrite,
 	pieces:     map[^Binding]Type,
+	tuple:      ^Tupling, // a copy for a field of a tupled equation (recursion.odin)
 }
 
 copy_scope :: proc(k: ^Kernel, s: ^Scope, changes: map[^Binding]Type) -> ^Scope {
@@ -452,6 +453,9 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		a.target = copy_term(k, m, v.target, scope)
 		return a
 	case ^Collapse:
+		if m.tuple != nil {
+			if read, tupled := tupled_call(k, m, v, scope); tupled do return read
+		}
 		c := new(Collapse)
 		c^ = v^
 		c.target = copy_term(k, m, v.target, scope)

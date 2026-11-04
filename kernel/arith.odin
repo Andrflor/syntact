@@ -116,8 +116,8 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		case .From:
 			return .Scope, true
 		case .Item:
-			set := values(k, v) or_break
-			return layout_family(k, set)
+			if set, known := values(k, v); known do return layout_family(k, set)
+			return read_family(k, v.args[0], "", -2)
 		}
 		if is_string_value(t) do return .String, true
 		// a recursive call whose equation is being given fits any family
@@ -140,16 +140,7 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 	case ^Collapse:
 		if v.recursive do return call_family(k, v)
 	case ^Access:
-		// a field of a call: that field in the base cases of its equation, by induction
-		c, is_call := as_call(v.target)
-		if !is_call do break
-		s := c.target.(^Scope) or_break
-		root := origin(s)
-		p := first_production(k, root) or_break
-		for base in base_cases(binding_type(k, p), root) {
-			shape := given(k, base).(^Scope) or_continue
-			if b, found := occurrence(placed(k, shape, .Value), v.name, v.ordinal, true); found do return family_of(k, binding_value(k, b))
-		}
+		return read_family(k, v.target, v.name, v.ordinal)
 	case ^Fold:
 		return family_of(k, v.value)
 	case ^Least:
@@ -813,3 +804,25 @@ literal :: proc(k: ^Kernel, t: Type) -> (Type, Type, bool) {
 bool_and :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_And, {a, b})}
 bool_or :: proc(k: ^Kernel, a, b: Type) -> Type {return bool_law(k, .Bit_Or, {a, b})}
 bool_not :: proc(k: ^Kernel, a: Type) -> Type {return bool_law(k, .Bit_Not, {a})}
+
+// read_family: the family of what is read of a call — its field `name`, or with
+// ordinal -2 any of its bindings —: that in the scopes the base cases of its
+// equation give, by induction (§5.6), when they agree.
+read_family :: proc(k: ^Kernel, target: Type, name: string, ordinal: int) -> (family: Family, ok: bool) {
+	c := as_call(target) or_return
+	s := c.target.(^Scope) or_return
+	root := origin(s)
+	p := first_production(k, root) or_return
+	found := false
+	for base in base_cases(binding_type(k, p), root) {
+		shape := given(k, base).(^Scope) or_continue
+		for b in placed(k, shape, .Value) {
+			if b.kind != .Push do continue
+			if ordinal != -2 && b.name != name do continue
+			f := family_of(k, binding_value(k, b)) or_return
+			if found && f != family do return {}, false
+			family, found = f, true
+		}
+	}
+	return family, found
+}

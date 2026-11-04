@@ -959,6 +959,17 @@ count -> {u32:n -> ??  u64:r -> ??  -> n ? {0 -> r  -> count{n -> n - 1  r -> r 
 count{n -> 3  r -> 0}!   = ⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y ^ (3 - x); y)
 ```
 
+**Tupling.** A fold along a counter i over lo..hi known that reads calls of an
+equation that differ by one field only, `f{x  p -> i}!`, f keeping p in its calls,
+reads the bindings of one call: `f{x  p -> i}! = T{x}!.#(i - lo)`. T is f where each
+product is the scope of its copies at p = lo … hi, each call of f in them, at p,
+the binding of the same call of T: one recursion for the whole range. It applies
+to what the other laws of a fold leave.
+
+```text
+⟳(p: 0..7; z ↦ (z + eval{e  p -> p}!) % m)   = ⟳(p: 0..7; z ↦ (z + ⊗eval{e}!.#p) % m)
+```
+
 What would keep the orbit, or what pre gives back, stays. The laws of a fold:
 
 ```text

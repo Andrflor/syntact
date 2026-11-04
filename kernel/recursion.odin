@@ -409,6 +409,8 @@ operations_on_calls :: proc(t: Type, root: ^Scope) -> []^Operation {
 // legal_on_call: a signature of the operator holds its operands, the recursive
 // calls being of the family f.
 legal_on_call :: proc(k: ^Kernel, o: ^Operation, f: Family) -> bool {
+	// a read of a run is legal on what gives scopes (run_law)
+	if o.op == .Length || o.op == .Item || o.op == .From do return f == .Scope
 	next: for sig in signatures(o.op) {
 		for a, i in o.args {
 			if _, is_call := as_call(a); is_call {
@@ -959,7 +961,8 @@ simplified :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 		}
 	}
 	if linear, ok := linear_states(k, out); ok do return linear
-	return out
+	// what the laws above leave: calls along the counter tupled, one call for all
+	return tupled(k, out)
 }
 
 // linear_states: the fold whose states, along a counter of n steps, take a linear
@@ -1931,4 +1934,140 @@ fixed :: proc(k: ^Kernel, f: ^Fold, i: int) -> bool {
 	if reads(k, u, f.index) || !is_constant(f.inits[i]) do return false
 	for z, j in f.states do if j != i && reads(k, u, z) do return false
 	return same(k, rewrite(k, u, rewriting(nil, x, f.inits[i])), f.inits[i])
+}
+
+// TUPLING (§5.6): calls of an equation f that differ by a field p only, over a
+// range lo..hi, are the bindings of one call of T, whose value is the scope
+// {f at p = lo  …  f at p = hi}: T is f, each product a scope of its products at
+// each p, its calls of f T's, read at their p. One recursion for the range.
+
+Tupled :: struct {
+	root:   ^Scope,
+	field:  ^Binding,
+	lo, hi: i128,
+	tuple:  ^Scope,
+}
+
+// Tupling: the copy of a product of f for p = lo + at, in T.
+Tupling :: struct {
+	root:   ^Scope,
+	tuple:  ^Scope,
+	field:  ^Binding,
+	at:     int,
+	failed: bool,
+}
+
+// tupled_call: in the copy for p = lo + at, a call of f that keeps p is T{…}!.#at.
+tupled_call :: proc(k: ^Kernel, m: ^Copier, c: ^Collapse, scope: ^Scope) -> (Type, bool) {
+	carve, is_carve := c.target.(^Carve)
+	if !is_carve do return nil, false
+	name, named := carve.target.(^Name)
+	if !named || name.binding.value != m.tuple.root do return nil, false
+	args := make([dynamic]Carve_Arg)
+	kept := false
+	for a in carve.args {
+		if a.name == m.tuple.field.name {
+			p, is_name := a.value.(^Name)
+			kept = is_name && p.binding == m.tuple.field
+			continue
+		}
+		b := a
+		b.value = copy_term(k, m, a.value, scope)
+		append(&args, b)
+	}
+	if !kept {
+		m.tuple.failed = true
+		return nil, false
+	}
+	g := new(Carve)
+	g^ = carve^
+	g.target, g.args = m.tuple.tuple, args[:]
+	d := new(Collapse)
+	d^ = c^
+	d.target = g
+	return new_operation(.Item, d, Int(m.tuple.at)), true
+}
+
+// tupled_equation: T, made once for f, its field p and the range.
+tupled_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: i128) -> (^Scope, bool) {
+	for x in k.tupled do if x.root == root && x.field == field && x.lo == lo && x.hi == hi do return x.tuple, x.tuple != nil
+	append(&k.tupled, Tupled{root, field, lo, hi, nil})
+	t := copy_scope(k, root, nil)
+	t.source, t.name = nil, strings.concatenate({"⊗", root.name})
+	p: ^Binding
+	for b in t.bindings do if b.source == field do p = b
+	for b in t.bindings {
+		if b.kind != .Product do continue
+		written, kept := tupled_product(k, b.value, root, t, p, lo, hi, t)
+		if !kept do return nil, false
+		b.value = written
+		break
+	}
+	k.tupled[len(k.tupled) - 1].tuple = t
+	return t, true
+}
+
+// tupled_product: through a pattern, each product of f as the scope of its copies
+// at each p of the range.
+tupled_product :: proc(k: ^Kernel, t: Type, root, tuple: ^Scope, p: ^Binding, lo, hi: i128, parent: ^Scope) -> (Type, bool) {
+	if pat, is_pattern := t.(^Pattern); is_pattern {
+		out := new(Pattern)
+		out^ = pat^
+		out.branches = make([]Branch, len(pat.branches))
+		for b, i in pat.branches {
+			product, kept := tupled_product(k, b.product, root, tuple, p, lo, hi, b.scope != nil ? b.scope : parent)
+			if !kept do return nil, false
+			out.branches[i] = with_product(b, product)
+		}
+		return out, true
+	}
+	literal := new_scope(parent, tuple.span)
+	literal.complete = true
+	for at in 0 ..= int(hi - lo) {
+		m := Copier{pieces = make(map[^Binding]Type)}
+		m.pieces[p] = Int(lo + i128(at))
+		m.tuple = &Tupling{root, tuple, p, at, false}
+		v := copy_term(k, &m, t, literal)
+		if m.tuple.failed do return nil, false
+		b := new_binding(literal, .Push, tuple.span)
+		b.value = v
+	}
+	return literal, true
+}
+
+// tupled: the fold, its counter i over lo..hi known, reads calls f{x  p -> i}! of
+// an equation that keeps p in its calls: each is T{x}!.#(i - lo).
+tupled :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
+	lo_t, hi_t, counts := counter_range(k, f)
+	lo, known_lo := lo_t.(Int)
+	hi, known_hi := hi_t.(Int)
+	if !counts || !known_lo || !known_hi || hi < lo || hi - lo > 63 || !same(k, f.next, op(k, .Add, f.index, Int(1))) do return f
+	reading: Rewrite
+	visit :: proc(k: ^Kernel, t: Type, f: ^Fold, lo, hi: i128, reading: ^Rewrite) {
+		if t == nil do return
+		if c, is_call := t.(^Collapse); is_call && c.recursive {
+			s, is_scope := c.target.(^Scope)
+			field: ^Binding
+			if is_scope do for b, v in s.changes do if u, is_index := v.(^Unknown); is_index && same_unknown(u, f.index) do field = b
+			if field != nil {
+				for b, v in s.changes do if b != field && reads(k, v, f.index) do return
+				tuple, made := tupled_equation(k, origin(s), field, lo, hi)
+				if !made do return
+				changes := make(map[^Binding]Type)
+				for b, v in s.changes do if b != field do changes[holding(tuple, b)] = v
+				carve, carved := derive(k, tuple, changes, c.span).(^Scope)
+				if !carved do return
+				at := op(k, .Sub, narrowing(f.index, range_law(k, Int(lo), Int(hi), .Int, {})), Int(lo))
+				reading^ = rewriting_call(reading^, c, op(k, .Item, recursive_call(k, carve, c.span), at))
+				return
+			}
+		}
+		for x in parts(t) do visit(k, x, f, lo, hi, reading)
+		if p, is_pattern := t.(^Pattern); is_pattern do for br in p.branches do visit(k, br.product, f, lo, hi, reading)
+	}
+	for t in fold_parts(f) do visit(k, t, f, i128(lo), i128(hi), &reading)
+	if len(reading) == 0 do return f
+	parts := fold_parts(f)
+	for &t in parts do t = rewrite(k, t, reading)
+	return with_parts(f, parts)
 }
