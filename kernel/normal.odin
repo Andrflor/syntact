@@ -8,7 +8,7 @@ import "core:fmt"
 // The type of a term is its normal form: the laws of specs/types.md §4–6, oriented,
 // applied from the leaves up. A name is the normal form of its binding's value; a
 // scope is itself, a new type. The laws of | & ~ (§4.1, §4.2) compute on constant
-// types through their reading (set.odin); what holds an unknown keeps its terms.
+// types through their reading (lattice.odin); what holds an unknown keeps its terms.
 
 normal :: proc(k: ^Kernel, t: Type) -> Type {
 	if t == nil || normalized(t) do return t

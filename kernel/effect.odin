@@ -116,7 +116,7 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 			for b, j in v.branches {
 				rest := slice.clone(parts)
 				rest[i] = b.product
-				branches[j] = Branch{cover = b.cover, product = sequence(k, t, rest, law), span = b.span}
+				branches[j] = with_product(b, sequence(k, t, rest, law))
 			}
 			return pattern_law(k, branching(v, branches))
 		}
@@ -162,7 +162,7 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 	case ^Pattern:
 		if !has_effect(v) do return t
 		branches := make([]Branch, len(v.branches))
-		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = given(k, b.product), span = b.span}
+		for b, j in v.branches do branches[j] = with_product(b, given(k, b.product))
 		return pattern_law(k, branching(v, branches))
 	}
 	return t
@@ -213,7 +213,7 @@ renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 	case ^Pattern:
 		if !has_effect(v) do return t
 		branches := make([]Branch, len(v.branches))
-		for b, j in v.branches do branches[j] = Branch{cover = b.cover, product = renewed(k, b.product, run), span = b.span}
+		for b, j in v.branches do branches[j] = with_product(b, renewed(k, b.product, run))
 		return pattern_law(k, branching(v, branches))
 	}
 	return t
@@ -232,6 +232,13 @@ in_run :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 }
 
 // branching: the pattern p, with these branches.
+// with_product: the branch b giving product instead.
+with_product :: proc(b: Branch, product: Type) -> Branch {
+	out := b
+	out.product = product
+	return out
+}
+
 branching :: proc(p: ^Pattern, branches: []Branch) -> ^Pattern {
 	out := new(Pattern)
 	out.target, out.branches, out.span = p.target, branches, p.span
@@ -369,7 +376,7 @@ unwritten :: proc(t: Type, place: ^Unknown) -> Type {
 		branches := make([]Branch, len(v.branches))
 		moved := false
 		for b, j in v.branches {
-			branches[j] = Branch{cover = b.cover, product = unwritten(b.product, place), span = b.span}
+			branches[j] = with_product(b, unwritten(b.product, place))
 			moved ||= branches[j].product != b.product
 		}
 		if !moved do return t
@@ -540,7 +547,7 @@ after_write :: proc(k: ^Kernel, t: Type, place: ^Unknown, v: Type) -> Type {
 		return out
 	case ^Pattern:
 		branches := make([]Branch, len(x.branches))
-		for b, j in x.branches do branches[j] = Branch{cover = b.cover, product = after_write(k, b.product, place, v), span = b.span}
+		for b, j in x.branches do branches[j] = with_product(b, after_write(k, b.product, place, v))
 		p := new(Pattern)
 		p^ = Pattern{target = rewrite(k, x.target, reads), branches = branches, span = x.span}
 		return pattern_law(k, p)

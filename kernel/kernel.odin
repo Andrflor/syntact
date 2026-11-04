@@ -7,7 +7,7 @@ import "core:slice"
 //
 // The type algebra of specs/types.md, and nothing else. A type is a term of its
 // grammar (type.odin): the program as written is made of these terms, and the type
-// of each is its normal form, given by orienting the laws (normal.odin, set.odin,
+// of each is its normal form, given by orienting the laws (normal.odin, lattice.odin,
 // arith.odin, in.odin, scope.odin, pattern.odin, recursion.odin, effect.odin). The
 // check is `V in C = true` for every value of the unknowns (prove.odin): what the
 // laws do not prove is refused.

@@ -21,7 +21,7 @@ package kernel
 //   x in S        S a scope: what its productions give, or its shape (§5.4)
 //
 // On a constant type without scope, the laws of | & ~ are computed whole, by its
-// reading (set.odin). What no law reduces stays `x in c`: the check proves it
+// reading (lattice.odin). What no law reduces stays `x in c`: the check proves it
 // (prove.odin).
 
 in_law :: proc(k: ^Kernel, x, c: Type) -> Type {

@@ -156,7 +156,7 @@ answer_in :: proc(k: ^Kernel, t: Type, s: ^Scope, bound: ^[]Type = nil) -> Type 
 		branches := make([]Branch, len(v.branches))
 		moved := false
 		for b, j in v.branches {
-			branches[j] = Branch{cover = b.cover, product = answer_in(k, b.product, s), span = b.span}
+			branches[j] = with_product(b, answer_in(k, b.product, s))
 			moved ||= branches[j].product != b.product
 		}
 		if !moved do return t

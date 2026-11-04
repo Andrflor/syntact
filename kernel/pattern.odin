@@ -222,6 +222,6 @@ enter_branches :: proc(k: ^Kernel, p: ^Pattern, apply: proc(product, other: Type
 	entered := new(Pattern)
 	entered.target, entered.span = p.target, p.span
 	entered.branches = make([]Branch, len(p.branches))
-	for b, i in p.branches do entered.branches[i] = Branch{cover = b.cover, product = apply(b.product, other), span = b.span}
+	for b, i in p.branches do entered.branches[i] = with_product(b, apply(b.product, other))
 	return pattern_law(k, entered)
 }

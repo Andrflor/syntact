@@ -164,7 +164,7 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		p.branches = make([]Branch, len(v.branches))
 		moved := false
 		for b, i in v.branches {
-			p.branches[i] = Branch{cover = b.cover, product = rewrite(k, b.product, r), span = b.span}
+			p.branches[i] = with_product(b, rewrite(k, b.product, r))
 			moved ||= p.branches[i].product != b.product
 		}
 		if p.target != v.target do return as_normal(pattern_law(k, p))

@@ -22,10 +22,6 @@ real_int :: proc(v: i128) -> Real {
 	return Real{v, 1}
 }
 
-real_is_zero :: proc(r: Real) -> bool {
-	return r.num == 0
-}
-
 real_neg :: proc(r: Real) -> (Real, bool) {
 	if r.num == min(i128) do return {}, false
 	return Real{-r.num, r.den}, true
@@ -39,11 +35,6 @@ real_add :: proc(x, y: Real) -> (r: Real, ok: bool) {
 	n := add_checked(a, c) or_return
 	d := mul_checked(x.den / g, y.den) or_return
 	return real_of(n, d)
-}
-
-real_sub :: proc(x, y: Real) -> (r: Real, ok: bool) {
-	n := real_neg(y) or_return
-	return real_add(x, n)
 }
 
 // real_mul: (a/b) * (c/d), crossed reductions first.

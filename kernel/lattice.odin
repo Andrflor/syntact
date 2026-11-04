@@ -1256,8 +1256,6 @@ sort_types :: proc(ts: []Type) {
 
 // --- bounds: integers or infinite (nil) ---
 
-INT_MAX :: max(i128)
-
 max_bound :: proc(a, b: Maybe(i128)) -> Maybe(i128) {
 	x, has_x := a.?
 	y, has_y := b.?
