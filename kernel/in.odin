@@ -31,6 +31,8 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
+	if call, ok := x.(^Collapse); ok && call.recursive && induction(k, call, c) do return Bool(true)
+	if f, ok := x.(^Fold); ok && fold_induction(k, f, c) do return Bool(true)
 	if s, ok := c.(^Scope); ok {
 		// (t::L) in S: true when S holds L, false when they are apart
 		if !is_constant(x) {
@@ -210,4 +212,44 @@ floor_div :: proc(x, y: i128) -> i128 {
 
 ceil_div :: proc(x, y: i128) -> i128 {
 	return -floor_div(-x, y)
+}
+
+// induction: a recursive call is in c when its equation is, each call it makes
+// taken in c (§5.6).
+induction :: proc(k: ^Kernel, call: ^Collapse, c: Type) -> bool {
+	s := call.target.(^Scope) or_return
+	root := origin(s)
+	p := first_production(k, root) or_return
+	if p.state == .In_Progress do return false
+	carved := carved_by_calls(k, binding_type(k, p), root)
+	generic := generic_equation(k, root, &carved) or_return
+	q := first_production(k, generic) or_return
+	if q.state == .In_Progress do return false
+	e := binding_type(k, q)
+	assumed: Rewrite
+	for inner in calls_in(k, e, root) {
+		u := new_unknown(k, nil)
+		u.layout = c
+		assumed = rewriting_call(assumed, inner, u)
+	}
+	verdict, _ := prove(k, in_law(k, rewrite(k, e, assumed), c))
+	return verdict == .Proven
+}
+
+// fold_induction: a fold is in c when its states start in c, stay in c at each
+// step, and its value is in c, each state taken in c.
+fold_induction :: proc(k: ^Kernel, f: ^Fold, c: Type) -> bool {
+	assumed: Rewrite
+	for z in f.states {
+		u := new_unknown(k, nil)
+		u.layout = c
+		assumed = rewriting(assumed, z, u)
+	}
+	holds :: proc(k: ^Kernel, t, c: Type) -> bool {
+		verdict, _ := prove(k, in_law(k, t, c))
+		return verdict == .Proven
+	}
+	for t in f.inits do if !holds(k, t, c) do return false
+	for t in f.updates do if !holds(k, rewrite(k, t, assumed), c) do return false
+	return holds(k, rewrite(k, f.value, assumed), c)
 }

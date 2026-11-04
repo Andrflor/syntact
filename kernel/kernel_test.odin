@@ -256,6 +256,8 @@ SPEC_CASES := []Spec_Case {
 	// an access on a fold is the fold of the access; a fold is in what its value is in
 	{"P -> {u8:a  u8:b}\ng -> {u8:n -> ??  u8:s -> 0  -> n ? {0 -> P{s  s}  -> g{n -> n - 1  s -> (s * 3 + 1) % 256}!}}\nx -> g{n -> 3}!.a", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ (3 * y + 1) % 256; y)", {}},
 	{"f -> {u32:n -> ??  u16:acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> (acc + 1) % 1000}!}}\ni64:x -> f{n -> ??::u32}!", "⟳(x: 0 ↦ x + 1 until ?1..; y: 0 ↦ (y + 1) % 1000; y)", {}},
+	// a recursion is in a shape by induction: its steps keep it there
+	{"Node -> {-> {}  -> {u8:v  Node:l  Node:r}}\nbuild -> {\n  (0..30):depth -> ??\n  -> depth ? {\n    0 -> {v -> 1  l -> {}  r -> {}}\n    -> {v -> 2  l -> build{depth -> depth - 1}!  r -> build{depth -> depth - 1}!}\n  }\n}\nNode:x -> build{depth -> ??::(0..30)}!", "", {}},
 	// a carve of a binding an expansion placed carves what is expanded
 	{"inner -> {x -> 1  w -> x + 1}\nouter -> {...inner  y -> 2}\nx -> outer{x -> 5}.w", "6", {}},
 	{"inner -> {x -> 1  w -> x + 1}\nouter -> {...inner  y -> 2}\ndeep -> {...outer  z -> 3}\nx -> deep{x -> 9}.w", "10", {}},
