@@ -590,38 +590,32 @@ The laws of a field (§4.5) hold on the exact reals, not across a rounding:
 
 ### 4.11 Sizes
 
-A type carries its size: the bits a value of it takes. The size is itself a type, a
-term over the unknowns the type depends on; its least and greatest elements are the
-least and greatest sizes, the greatest infinite when nothing bounds it. What is
-known takes nothing: one value has nothing to hold. A backend only aligns what the
-type says.
+A type carries its size: the least number of bits that tells its values apart,
+⌈log₂ |T|⌉, |T| the count of the values it may take where it is. The size is given
+by the type: it depends on what the type depends on — unknowns, lengths, the branch
+that narrows them —, wherever it is computed.
+
+What is known at compile time takes 0 bits: only unknowns, and what depends on
+them, take bits.
 
 ```text
-size(t), t known        = 0                      one value: nothing to hold
-size(?ₖ::L)             = size of the set L
-size(t over unknowns)   = size of the set of its values: its layout (§7)
-size(t ? {c -> p …})    = size(p) | …            the size of the branch taken
-size(εₖ(x, t))          = size(t)                what it gives back
-size(round_w(t))        = w
-size({b…})              = Σ size(b)              a field takes what its type takes;
-                                                 a hole, a handler, a production
-                                                 take nothing
-
-the set lo..hi          = bits(hi - lo + 1)      integers, characters: the span
-the set false | true    = 1
-the set s₁ | … | sₙ     = bits(n)                strings, all known: which one
-the set A + B           = size(A) + size(B)      a string: its pieces
-the set A * n           = n * size(A)            a repetition: a string, a run
-the set {C₁: … Cₙ:}     = Σ size(Cᵢ)             a shape: its places
-the set f16, f32, f64   = 16, 32, 64
+5                        0          known
+u8                       0          a set written as a value: known
+?₁::u8                   8          256 values
+?₁::u8 + 1               8          1..256: 256 values
+?₁::u8 ? {<10 -> 1  -> 2}   1      1 or 2
+?₁::(100..103)           2
+?₁::(u8 | bool)          9          258 values
+?₁::('a'..'z' * n)       ⌈n · log₂ 26⌉     depends on n
 ```
 
-```text
-u8:a -> ??         size 8           u8 is the set of what a may be
-u8                 size 0           u8 written as a value: one type, known
-a - a              size 0           = 0
-{u8:p -> ??  f32:r -> ??  -> p}     size 40
-```
+A scope takes what its bindings take, summed. A hole takes 0: it is filled when the
+program is typed, and erased. A handler takes what it gives back. A production takes
+0: it is always devirtualized, computed where the scope is collapsed.
+
+The size is the minimum. The code may widen a value to compute on it — `1..256` in 9
+bits of binary, a character in a byte —; its memory is then reserved for what that
+encoding takes: the same dependencies, in the unit the encoding chooses.
 
 ## 5. Scopes
 
