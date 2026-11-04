@@ -1,7 +1,9 @@
 package code
 
 import kernel "../kernel"
+import "core:fmt"
 import vmem "core:mem/virtual"
+import "core:os"
 import "core:testing"
 
 // A boolean that comes back from a symbol is a byte: the bits above it are not
@@ -72,4 +74,26 @@ test_iteration_is_a_loop :: proc(t: ^testing.T) {
 	testing.expectf(t, len(prog.funcs) == 1 && is_loop, "fact is not a loop\n%s", print_program(&prog))
 	run, failed := interpret(&prog, {6}, nil)
 	testing.expectf(t, failed == "" && run.result.int == 720, "fact{n -> 6}! = %d (%s)", run.result.int, failed)
+}
+
+// The Goose benchmarks written in Syntact that the laws reduce to code: each is
+// lowered, its normal form without error (bench/goose).
+@(test)
+test_benchmarks_lower :: proc(t: ^testing.T) {
+	for name in ([]string{"sum", "tree", "interp"}) {
+		arena: vmem.Arena
+		context.allocator = vmem.arena_allocator(&arena)
+		path := fmt.tprintf("%s/../bench/goose/%s.syn", #directory, name)
+		data, read_err := os.read_entire_file(path, context.allocator)
+		if !testing.expectf(t, read_err == nil, "%s: cannot read", path) {
+			vmem.arena_destroy(&arena)
+			continue
+		}
+		k, parsed := kernel.run(string(data))
+		if testing.expectf(t, parsed, "%s does not parse", name) {
+			_, err := lower_program(&k)
+			testing.expectf(t, err == "", "%s: %s", name, err)
+		}
+		vmem.arena_destroy(&arena)
+	}
 }

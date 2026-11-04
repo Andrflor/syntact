@@ -111,7 +111,7 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	// (§7); asked once, when the carve gives a known value, which may decide it
 	decides := false
 	for _, v in s.changes do decides ||= is_constant(v)
-	if decides && s != root && !being_given(k, root) {
+	if decides && s != root && !asked(k, root) {
 		giving(k, root)
 		defer pop(&k.asking)
 		if v, asked := call_production(k, out); asked && solved(v, root) do return v
@@ -196,9 +196,16 @@ is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 // where what its calls carve is unknown (giving). Asked about itself meanwhile, it
 // answers with its calls as they are.
 being_given :: proc(k: ^Kernel, root: ^Scope) -> bool {
-	if slice.contains(k.asking[:], root) do return true
+	if asked(k, root) do return true
 	for b in root.bindings do if b.kind == .Product do return b.state == .In_Progress
 	return false
+}
+
+// asked: the equation of root is read where what its calls carve is unknown, or
+// its production asked at the values of a carve: asked again meanwhile, it would
+// not end.
+asked :: proc(k: ^Kernel, root: ^Scope) -> bool {
+	return slice.contains(k.asking[:], root)
 }
 
 // giving: root is being given until the deferred pop.

@@ -249,7 +249,7 @@ call_production :: proc(k: ^Kernel, c: ^Collapse) -> (Type, bool) {
 	s, is_scope := c.target.(^Scope)
 	if !is_scope || !c.recursive do return nil, false
 	root, found := first_production(k, origin(s))
-	if !found || being_given(k, origin(s)) do return nil, false
+	if !found || root.state == .In_Progress do return nil, false
 	p, has := first_production(k, s)
 	if !has || p.state == .In_Progress do return nil, false
 	v := binding_type(k, p)
