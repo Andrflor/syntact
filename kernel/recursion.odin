@@ -120,11 +120,15 @@ as_call :: proc(t: Type) -> (^Collapse, bool) {
 	return nil, false
 }
 
-// solved: t holds no recursive call of the scope.
+// solved: t holds no recursive call of the scope — nor does a scope it holds, by
+// what its bindings name.
 solved :: proc(t: Type, root: ^Scope) -> bool {
 	#partial switch v in t {
 	case ^Collapse:
 		if s, ok := v.target.(^Scope); ok && v.recursive && origin(s) == root do return false
+	case ^Scope:
+		seen := make(map[^Scope]bool)
+		return !names_scope(v, root, &seen)
 	case ^Operation:
 		for a in v.args do if !solved(a, root) do return false
 	case ^Or:
