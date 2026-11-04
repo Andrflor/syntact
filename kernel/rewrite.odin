@@ -67,6 +67,18 @@ rewrite :: proc(k: ^Kernel, t: Type, r: Rewrite) -> Type {
 		return t
 	case ^Effect:
 		then := rewrite(k, v.then, r)
+		if v.write != nil {
+			w := new(Write)
+			w^ = v.write^
+			w.value = rewrite(k, v.write.value, r)
+			// a place renewed by a run is the place of that run
+			if w.place != nil do if x, found := rewritten(r, w.place); found do if p, is_place := x.(^Unknown); is_place do w.place = p
+			if then == v.then && w.value == v.write.value && w.place == v.write.place do return t
+			out := new(Effect)
+			out^ = v^
+			out.write = w
+			return writing(k, out, then)
+		}
 		call := v.call != nil ? rewrite_call(k, v.call, r) : nil
 		fold := v.fold != nil ? rewrite_fold(k, v.fold, r) : nil
 		if v.choice != nil {
@@ -192,6 +204,8 @@ rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
 	moved := false
 	for b, v in s.changes {
 		w := rewrite(k, v, r)
+		// the place of a resonant binding is not a read of it: it follows only a place
+		if _, is_place := w.(^Unknown); b.resonance != nil && !is_place do w = v
 		changes[b] = w
 		moved ||= !same(k, w, v)
 	}

@@ -76,6 +76,7 @@ Unknown :: struct {
 	layout:   Type, // a branch that narrows it: ?ₖ::(L & S) (rewrite.odin); nil otherwise
 	instance: ^Scope, // in a carve whose changes its layout names: ?ₖ read in that carve
 	call:     ^Collapse, // what a recursive call with effects gives back (§4.8): a value of its equation
+	place:    ^Binding, // the value of the resonant binding where it is read: what the writes before it give (§4.14)
 }
 
 // Effect: εₖ(x, t), the effect written k (§4.8). x is what it gives back, bound in
@@ -88,6 +89,7 @@ Effect :: struct {
 	fold:    ^Fold, // the effect is this fold: the effects of its steps, in order (§5.6)
 	choice:  Type, // the effect is this choice: a pattern, the effects of the branch it takes
 	emission: ^Emission, // an emission its handler has not answered yet (§4.9)
+	write:   ^Write, // a write of a resonant binding, ordered like the effects (§4.14)
 	then:    Type,
 	span:    syn.Span,
 }
@@ -104,6 +106,16 @@ Emission :: struct {
 	handlers: []^Binding, // the handlers visible where it is written, the nearest first
 	default:  ^Binding, // the handler of E among them: the program answers it with it; nil until typed
 	site:     ^Scope, // the scope that writes it: its handlers answer it only as its default
+}
+
+// Write: `x -<< v`, the resonant binding x takes v: what reads it after reads v
+// (§4.14). It is not an effect: it is held where it is written, and the Effect that
+// carries it orders it.
+Write :: struct {
+	target: Type, // x, as written
+	place:  ^Unknown, // the place of x, once typed
+	before: ^Unknown, // x before the write: what its value reads of x
+	value:  Type,
 }
 
 // Known: what a node of the algebra knows of itself: whether it is a normal form;
@@ -346,6 +358,7 @@ Binding :: struct {
 	color:       Type, // nil: uncolored
 	value:       Type, // nil: the default of the color
 	handle:      Type, // a handler: the event it answers, as written
+	resonance:   Type, // a resonant binding `x >>- E`: E, the event that changes it, as written; its value is its place (§4.14)
 	span:        syn.Span,
 	scope:       ^Scope,
 	source:      ^Binding, // in a copy made by a carve: the binding it copies

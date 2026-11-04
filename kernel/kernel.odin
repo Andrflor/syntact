@@ -23,6 +23,7 @@ Error_Kind :: enum u8 {
 	Invalid_Execute, // `!` on what is not a scope
 	Infinite_Recursion, // a base case that comes back to itself
 	Invalid_Emission, // an emission of what is not an event, or without a handler visible where it is written (§4.9)
+	Invalid_Write, // `-<<` on what is not a resonant binding, or a value not in its color (§4.14)
 	Unsupported, // a form this kernel does not build yet
 }
 

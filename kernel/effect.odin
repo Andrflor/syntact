@@ -1,5 +1,6 @@
 package kernel
 
+import "core:fmt"
 import "core:slice"
 
 // EFFECTS (specs/types.md §4.8)
@@ -19,6 +20,7 @@ import "core:slice"
 // effect_law: εₖ(x, t); x in a single primitive p is p (§7: ?ₖ::p = p): the effect
 // gives nothing back, εₖ(t).
 effect_law :: proc(k: ^Kernel, e: ^Effect, then: Type) -> Type {
+	if e.write != nil do return writing(k, e, then)
 	if e.answer == nil do return wrapped(e, nil, then)
 	if layout := layout_of(k, e.answer); is_primitive(layout) do return wrapped(e, nil, rewrite(k, then, rewriting(nil, e.answer, layout)))
 	return wrapped(e, e.answer, then)
@@ -95,6 +97,7 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 		case ^Effect:
 			rest := slice.clone(parts)
 			rest[i] = v.then
+			if v.write != nil do return writing(k, v, sequence(k, t, rest, law))
 			return wrapped(v, v.answer, sequence(k, t, rest, law))
 		case ^Pattern:
 			if !has_effect(v) do continue
@@ -125,6 +128,9 @@ sequence :: proc(k: ^Kernel, t: Type, parts: []Type, law: Law) -> Type {
 // holds none of the answers its branches bind: the effects of a branch stay in it,
 // what follows comes once.
 choice :: proc(k: ^Kernel, p: ^Pattern, after: []Type) -> (Type, bool) {
+	// what follows a write reads what it wrote, and an emission not answered yet may
+	// write once it is: what follows is computed in each branch
+	if has_write(p) do return nil, false
 	later := false
 	for x in after do later ||= has_effect(x)
 	if !later do return nil, false
@@ -167,6 +173,22 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 	#partial switch v in t {
 	case ^Effect:
+		if v.write != nil && v.write.before != nil && !is_new(run^, v.write.before) {
+			// each run writes from a place before of its own
+			x := new(Unknown)
+			x^ = v.write.before^
+			x.id = k.unknowns
+			k.unknowns += 1
+			run^ = rewriting(run^, v.write.before, x)
+			w := new(Write)
+			w^ = v.write^
+			w.before, w.value = x, rewrite(k, v.write.value, rewriting(nil, v.write.before, x))
+			out := new(Effect)
+			out^ = v^
+			out.write = w
+			out.then = renewed(k, rewrite(k, v.then, rewriting(nil, v.write.before, x)), run)
+			return out
+		}
 		if v.choice != nil {
 			out := new(Effect)
 			out^ = v^
@@ -243,6 +265,11 @@ ran :: proc(k: ^Kernel, s: ^Scope, p: ^Binding, parts: ^[dynamic]Type, run: ^Rew
 			if run != nil && (effectful || len(placing) > 0) do changes[b] = value
 			if reached do return true
 		case .Push, .Pull:
+			if b.resonance != nil {
+				// each run has a place of its own
+				if run != nil do changes[b] = renewed_place(k, b, run)
+				continue
+			}
 			t := binding_type(k, b)
 			if !has_effect(t) do continue
 			if run != nil {
@@ -278,10 +305,225 @@ collapsed :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse) -> Type {
 	inner := len(changes) > 0 ? carved_copy(k, s, changes) : s
 	product := product_of(k, inner, c)
 	if _, behind := symbol_of(inner); behind do product = crossed(k, inner, c, product)
-	append(&parts, in_run(k, product, &run))
-	return sequence(k, nil, parts[:], last_part)
+	product = in_run(k, product, &run)
+	// a scope the run gives, with resonant bindings: their places are this run's
+	if s, is_scope := product.(^Scope); is_scope do product = instance(k, s, &parts, &run)
+	append(&parts, product)
+	return freed(k, sequence(k, nil, parts[:], last_part), s.parent)
+}
+
+// freed: t, what a run gives, without the writes of the places that die with it:
+// those not declared in the scope that outlives the run — keep, or a scope it is
+// written in —, nor held by what the run gives (§4.12). What is left of them reads
+// them no more. An emission not answered yet may read them once it is: they are
+// kept.
+freed :: proc(k: ^Kernel, t: Type, keep: ^Scope) -> Type {
+	if awaits(t) do return t
+	places := make([dynamic]^Unknown)
+	written_places(t, &places)
+	out := t
+	for place in places {
+		declared := place.place.scope
+		if keep != nil && declared != nil && written_in(keep, declared) do continue
+		if !reads(k, given(k, out), place) do out = unwritten(out, place)
+	}
+	return out
+}
+
+// written_places: the places t writes, each once.
+written_places :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	#partial switch v in t {
+	case ^Effect:
+		if v.write != nil {
+			known := false
+			for p in out do known ||= same_unknown(p, v.write.place)
+			if !known do append(out, v.write.place)
+		}
+		if v.choice != nil do written_places(v.choice, out)
+		written_places(v.then, out)
+	case ^Pattern:
+		for b in v.branches do written_places(b.product, out)
+	}
+}
+
+// unwritten: t without the writes of the place.
+unwritten :: proc(t: Type, place: ^Unknown) -> Type {
+	#partial switch v in t {
+	case ^Effect:
+		if v.write != nil && same_unknown(v.write.place, place) do return unwritten(v.then, place)
+		then := unwritten(v.then, place)
+		choice := v.choice != nil ? unwritten(v.choice, place) : nil
+		if then == v.then && choice == v.choice do return t
+		out := new(Effect)
+		out^ = v^
+		out.then, out.choice = then, choice
+		return out
+	case ^Pattern:
+		branches := make([]Branch, len(v.branches))
+		moved := false
+		for b, j in v.branches {
+			branches[j] = Branch{cover = b.cover, product = unwritten(b.product, place), span = b.span}
+			moved ||= branches[j].product != b.product
+		}
+		if !moved do return t
+		return branching(v, branches)
+	}
+	return t
+}
+
+// awaits: t holds an emission not answered yet.
+awaits :: proc(t: Type) -> bool {
+	#partial switch v in t {
+	case ^Effect:
+		return v.emission != nil || v.choice != nil && awaits(v.choice) || awaits(v.then)
+	case ^Pattern:
+		for b in v.branches do if awaits(b.product) do return true
+	}
+	return false
 }
 
 last_part :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
 	return parts[len(parts) - 1]
+}
+
+// --- writes (specs/types.md §4.14) ---
+//
+// `x -<< v`: the resonant binding x takes v. What reads x after it reads v:
+//
+//   ω(x := v, t)   =   ω(x := v, t[x ↦ v])
+//
+// up to the first emission not answered yet: its handler may write x, so what
+// follows it is read once it is answered (answer_in). What v reads of x is x before
+// the write, an unknown of its own, x⁻: a write before it gives x⁻ its value. So a
+// read of x is replaced once, by the write it follows. A write is held where it is
+// written, ordered like the effects; nothing reads what it gives back.
+
+// write_law: `x -<< v` as written: x a resonant binding, v in its color, computed
+// first — its effects before the write.
+write_law :: proc(k: ^Kernel, e: ^Effect) -> Type {
+	return sequence(k, e, {normal(k, e.write.target), normal(k, e.write.value)}, write_parts)
+}
+
+write_parts :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
+	e := t.(^Effect)
+	place, is_place := parts[0].(^Unknown)
+	if !is_place || place.place == nil {
+		return problem(.Invalid_Write, e.span, fmt.tprintf("`-<<` writes a resonant binding, not %s", print_type(parts[0])))
+	}
+	if place.written != nil {
+		if p := in_problem(k, parts[1], layout_of(k, place), e.span); p != nil do return p
+	}
+	w := new(Write)
+	w^ = Write{target = e.write.target, place = place, value = parts[1]}
+	out := new(Effect)
+	out^ = e^
+	out.write = w
+	return writing(k, out, normal(k, e.then))
+}
+
+// writing: the write e, wrapping t, what follows it reading what it wrote; what its
+// value reads of the place is the place before it.
+writing :: proc(k: ^Kernel, e: ^Effect, t: Type) -> Type {
+	w := new(Write)
+	w^ = e.write^
+	if w.before == nil {
+		w.before = new(Unknown)
+		w.before^ = w.place^
+		w.before.id = k.unknowns
+		k.unknowns += 1
+	}
+	w.value = rewrite(k, w.value, rewriting(nil, w.place, w.before))
+	out := new(Effect)
+	out^ = e^
+	out.answer, out.write, out.then = nil, w, after_write(k, t, w.place, w.value)
+	return out
+}
+
+// after_write: t, what follows a write of the place to v: its reads are v, up to an
+// emission not answered yet — what it sends is computed before it. A later write of
+// the place: what it reads of the place before it is v; what follows it reads it.
+after_write :: proc(k: ^Kernel, t: Type, place: ^Unknown, v: Type) -> Type {
+	reads := rewriting(nil, place, v)
+	#partial switch x in t {
+	case ^Effect:
+		if x.write != nil {
+			w := new(Write)
+			w^ = x.write^
+			out := new(Effect)
+			out^ = x^
+			out.write = w
+			if same_unknown(x.write.place, place) {
+				before := rewriting(nil, x.write.before, v)
+				w.value, out.then = rewrite(k, x.write.value, before), rewrite(k, x.then, before)
+				return out
+			}
+			w.value, out.then = rewrite(k, x.write.value, reads), after_write(k, x.then, place, v)
+			return out
+		}
+		if x.emission != nil {
+			sent := rewrite(k, x.emission.sent, reads)
+			if sent == x.emission.sent do return t
+			m := new(Emission)
+			m^ = x.emission^
+			m.sent = sent
+			out := new(Effect)
+			out^ = x^
+			out.emission = m
+			return out
+		}
+		// another effect: what it computes on, then what follows it
+		out := new(Effect)
+		out^ = x^
+		if x.call != nil do out.call = rewrite_call(k, x.call, reads)
+		if x.fold != nil do out.fold = rewrite_fold(k, x.fold, reads)
+		if x.choice != nil do out.choice = after_write(k, x.choice, place, v)
+		out.then = after_write(k, x.then, place, v)
+		return out
+	case ^Pattern:
+		branches := make([]Branch, len(x.branches))
+		for b, j in x.branches do branches[j] = Branch{cover = b.cover, product = after_write(k, b.product, place, v), span = b.span}
+		p := new(Pattern)
+		p^ = Pattern{target = rewrite(k, x.target, reads), branches = branches, span = x.span}
+		return pattern_law(k, p)
+	}
+	return rewrite(k, t, reads)
+}
+
+// has_write: t holds a write where it is computed, or an emission not answered
+// yet, whose handler may write.
+has_write :: proc(t: Type) -> bool {
+	#partial switch v in t {
+	case ^Effect:
+		return v.write != nil || v.emission != nil || v.choice != nil && has_write(v.choice) || has_write(v.then)
+	case ^Pattern:
+		for b in v.branches do if has_write(b.product) do return true
+	}
+	return false
+}
+
+// renewed_place: the place of the resonant binding b in a run: a new one, which
+// what the run reads of b reads.
+renewed_place :: proc(k: ^Kernel, b: ^Binding, run: ^Rewrite) -> ^Unknown {
+	place := binding_type(k, b).(^Unknown)
+	x := new(Unknown)
+	x^ = place^
+	x.id = k.unknowns
+	k.unknowns += 1
+	run^ = rewriting(run^, place, x)
+	return x
+}
+
+// instance: s, a scope a run gives: each of its resonant bindings with a place of
+// this run, which starts with its first write, joined to parts (§4.14).
+instance :: proc(k: ^Kernel, s: ^Scope, parts: ^[dynamic]Type, run: ^Rewrite) -> Type {
+	changes := make(map[^Binding]Type)
+	for b in s.bindings do if b.resonance != nil do changes[b] = renewed_place(k, b, run)
+	if len(changes) == 0 do return s
+	// what the run gives holds them: they live on
+	for b in s.bindings {
+		if b.kind != .Push || b.resonance != nil do continue
+		t := binding_type(k, b)
+		if has_write(t) do append(parts, in_run(k, t, run))
+	}
+	return carved_copy(k, s, changes)
 }

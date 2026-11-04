@@ -114,6 +114,8 @@ answer_in :: proc(k: ^Kernel, t: Type, s: ^Scope, bound: ^[]Type = nil) -> Type 
 		if v.emission != nil {
 			if h := answerer(k, v.emission, s); h != nil do return answer(k, v, h, then, s, bound)
 		}
+		// what follows a write, its emissions answered, reads what it wrote
+		if v.write != nil do return writing(k, v, then)
 		out := new(Effect)
 		out^ = v^
 		out.then = then

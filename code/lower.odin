@@ -295,6 +295,8 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 		lower(l, e.choice)
 		return lower(l, e.then, tail)
 	}
+	// a write: what follows already reads what it wrote (specs/types.md §4.14)
+	if e.write != nil do return lower(l, e.then, tail)
 	if e.emission != nil do return fail(l, "the emission of %s is answered by no handler", kernel.print_type(e.emission.sent))
 	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {

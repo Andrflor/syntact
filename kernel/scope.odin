@@ -340,6 +340,13 @@ copy_term :: proc(k: ^Kernel, m: ^Copier, t: Type, scope: ^Scope) -> Type {
 		e^ = v^
 		if v.answer != nil do e.answer = copy_term(k, m, v.answer, scope).(^Unknown)
 		e.then = copy_term(k, m, v.then, scope)
+		if v.write != nil {
+			w := new(Write)
+			w^ = v.write^
+			w.target, w.value = copy_term(k, m, v.write.target, scope), copy_term(k, m, v.write.value, scope)
+			if v.write.place != nil do w.place = copy_term(k, m, v.write.place, scope).(^Unknown)
+			e.write = w
+		}
 		if v.emission != nil {
 			// the handlers visible where it is written follow it into the copy
 			x := new(Emission)
@@ -489,6 +496,7 @@ mentions :: proc(m: ^Copier, t: Type) -> bool {
 		return mentions(m, v.written)
 	case ^Effect:
 		if v.emission != nil && mentions(m, v.emission.sent) do return true
+		if v.write != nil && (mentions(m, v.write.target) || mentions(m, v.write.value)) do return true
 		return v.answer != nil && mentions(m, v.answer.written) || mentions(m, v.choice) || mentions(m, v.then)
 	case ^Or:
 		for x in v.terms do if mentions(m, x) do return true
@@ -907,6 +915,9 @@ same :: proc(k: ^Kernel, a, b: Type) -> bool {
 		// the same emission, of the same value
 		if (x.emission == nil) != (y.emission == nil) do return false
 		if x.emission != nil && (x.emission.id != y.emission.id || !same(k, x.emission.sent, y.emission.sent)) do return false
+		// the same write: of the same place, the same value
+		if (x.write == nil) != (y.write == nil) do return false
+		if x.write != nil && (x.write.place == nil || y.write.place == nil || !same_unknown(x.write.place, y.write.place) || !same(k, x.write.value, y.write.value)) do return false
 		if x.answer == nil do return same(k, x.then, y.then)
 		if (x.call == nil) != (y.call == nil) do return false
 		if x.call != nil && !same(k, x.call, y.call) do return false

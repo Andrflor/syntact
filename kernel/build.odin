@@ -49,6 +49,12 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 	b := new_binding(s, .Push, node_span(k, idx))
 	#partial switch ast.node_kinds[idx] {
 	case .Pointing, .PointingPull:
+		left := data.binary.left
+		if left != syn.INVALID_NODE && ast.node_kinds[left] == .ResonancePush {
+			// `C:x >>- E -> v`: a resonant binding, v where it starts
+			build_resonant(k, s, left, b, data.binary.right)
+			return
+		}
 		// `x <- v`: a hole, filled where the scope is used; until then, v (§5.7)
 		if ast.node_kinds[idx] == .PointingPull do b.kind = .Pull
 		build_left(k, s, data.binary.left, b)
@@ -123,7 +129,17 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 		}
 		b.handle = build_term(k, s, from)
 		b.value = build_handler(k, s, idx, build_term(k, s, from))
-	case .ResonancePush, .ResonancePull, .ReactivePush, .ReactivePull:
+	case .ResonancePush:
+		// `C:x >>- E`: a resonant binding, the default of C where it starts
+		build_resonant(k, s, idx, b, syn.INVALID_NODE)
+	case .ResonancePull:
+		// `x -<< v`: a write of the resonant binding x (§4.14)
+		if data.binary.left == syn.INVALID_NODE || data.binary.right == syn.INVALID_NODE {
+			b.value = unsupported(k, idx, "a write without its binding or its value")
+			return
+		}
+		b.value = new_write(build_term(k, s, data.binary.left), build_term(k, s, data.binary.right), node_span(k, idx))
+	case .ReactivePush, .ReactivePull:
 		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
 		if captured(ast, idx) {
@@ -132,6 +148,47 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			b.value = build_term(k, s, idx) // a lone value is an anonymous binding
 		}
 	}
+}
+
+// build_resonant: `C:x >>- E` written at idx, b its binding: x is a place, which the
+// event E changes; its value is its place, what the writes before a read give. The
+// value it starts with, written at start — or the default of C —, is its first
+// write, the binding after it (§4.14).
+build_resonant :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index, b: ^Binding, start: syn.Node_Index) {
+	ast := k.ast
+	data := ast.node_data[idx].binary
+	build_left(k, s, data.left, b)
+	if data.right == syn.INVALID_NODE {
+		b.value = unsupported(k, idx, "a resonant binding without the event that changes it")
+		return
+	}
+	b.resonance = build_term(k, s, data.right)
+	place := new_unknown(k, b.color)
+	place.place = b
+	b.value = place
+	initial: Type
+	if start != syn.INVALID_NODE {
+		initial = build_term(k, s, start)
+	} else if b.color != nil {
+		d := new(Default)
+		d.color, d.span = b.color, b.span
+		initial = d
+	} else {
+		initial = None{}
+	}
+	name := new(Name)
+	name.binding, name.span = b, b.span
+	w := new_binding(s, .Push, b.span)
+	w.value = new_write(name, initial, b.span)
+}
+
+// new_write: `x -<< v`, x the resonant binding as written: it gives nothing back.
+new_write :: proc(target, value: Type, span: syn.Span) -> ^Effect {
+	w := new(Write)
+	w.target, w.value = target, value
+	e := new(Effect)
+	e^ = Effect{id = -1, write = w, then = None{}, span = span}
+	return e
 }
 
 // captured: `C(h)`, a name with a capture glued to it.

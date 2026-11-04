@@ -18,6 +18,9 @@ Spec_Case :: struct {
 	errors: []Error_Kind,
 }
 
+// COUNTER: a scope whose run gives a counter, a resonant binding changed by an event.
+COUNTER :: "Counter -> {\n  Change -> {u16:value}\n  -> {\n    u16:value >>- Change -> 0\n    Change -< e { value -<< e.value }\n    increment -> { >- Change{value -> value ? {<100 -> value + 1  -> value}} }\n    -> value\n  }\n}\n"
+
 SPEC_CASES := []Spec_Case {
 	// §4.1
 	{`x -> ~~5`, "5", {}},
@@ -313,6 +316,15 @@ SPEC_CASES := []Spec_Case {
 	{U16_LOG + "x -> lib{Log -< e { -> 300 }}!", "301", {}},
 	{U16_LOG + "x -> lib{Log -< e { -> \"a\" }}!", "", {.Constraint_Mismatch}},
 	{U16_LOG + "x -> lib{Audit -< e { -> 3 }}!", "", {.Invalid_Carve}},
+	// §4.14: a resonant binding is a place, which its writes change; a read is what
+	// the writes before it give, each run with places of its own
+	{COUNTER + "x -> {c -> Counter!, c.increment!, c.increment!, -> c.value}!", "2", {}},
+	{COUNTER + "x -> {c -> Counter!, d -> Counter!, c.increment!, -> c.value * 10 + d.value}!", "10", {}},
+	{COUNTER + "u8:n -> ??\nx -> {c -> Counter!, n ? {0 -> c.increment!  -> {}}, -> c.value}!", "?2 ? {0 -> 1  -> 0}", {}},
+	// a place of the file outlives the run that writes it: the write is kept
+	{"Set -> {u8:v}\nu8:value >>- Set -> 0\nSet -< e { value -<< e.v }\nx -> {w >- Set{v -> 7}, -> value}!", "[?0 -<< 7](7)", {}},
+	{"Set -> {u8:v}\nu8:value >>- Set -> 0\nSet -< e { value -<< 300 }\nx -> {w >- Set{v -> 7}, -> value}!", "", {.Constraint_Mismatch}},
+	{"y -> 1\nx -> {y -<< 2}!", "", {.Invalid_Write}},
 	// a copy keeps the handle; what a scope writes, in a scope written in it too, is
 	// its own: its handlers are their defaults
 	{"lib -> {\n  Log -> {string:message}\n  Log -< e { -> e.message }\n  string:m -> \"x\"\n  r >- Log{message -> m}\n  -> r\n}\nx -> {lib.Log -< e { -> e.message + \"!\" }  -> lib{m -> \"y\"}!}!", `"y!"`, {}},

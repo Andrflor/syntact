@@ -185,6 +185,24 @@ write_bare :: proc(b: ^Printer, t: Type) {
 		fmt.sbprintf(b, "?%d", v.id)
 		if v.instance != nil do write_changes(b, v.instance) // ?ₖ read in a carve
 	case ^Effect:
+		if v.write != nil {
+			// `x -<< v` as written; [?ₖ -<< v](t), the place ?ₖ written, then t
+			if b.written {
+				write_type(b, v.write.target, PREC_ATOM)
+				strings.write_string(b, " -<< ")
+				write_type(b, v.write.value, 0)
+				return
+			}
+			strings.write_byte(b, '[')
+			if v.write.place != nil do write_type(b, v.write.place, PREC_ATOM)
+			else do write_type(b, v.write.target, PREC_ATOM)
+			strings.write_string(b, " -<< ")
+			write_type(b, v.write.value, 0)
+			strings.write_string(b, "](")
+			write_type(b, v.then, 0)
+			strings.write_byte(b, ')')
+			return
+		}
 		if b.written && v.emission != nil {
 			strings.write_string(b, ">- ")
 			write_type(b, v.emission.sent, 0)
