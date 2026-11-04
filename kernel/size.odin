@@ -74,12 +74,38 @@ unknowns_count :: proc(k: ^Kernel, t: Type) -> Count {
 }
 
 // read_unknowns: the unknowns t reads, each once, by its index: the first met, the
-// target of a pattern before the branches that narrow it.
+// target of a pattern before the branches that narrow it. What a fold, a series or
+// μ binds is not read.
 read_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
+	bound :: proc(t: Type, binds: []^Unknown, out: ^[dynamic]^Unknown) {
+		inner := make([dynamic]^Unknown)
+		read_unknowns(t, &inner)
+		next: for u in inner {
+			for b in binds do if b.id == u.id do continue next
+			for x in out do if x.id == u.id do continue next
+			append(out, u)
+		}
+	}
 	#partial switch v in t {
 	case ^Unknown:
 		for u in out do if u.id == v.id do return
 		append(out, v)
+		return
+	case ^Fold:
+		binds := make([dynamic]^Unknown)
+		append(&binds, v.index)
+		append(&binds, ..v.states)
+		for p in fold_parts(v) do if p != nil do bound(p, binds[:], out)
+		return
+	case ^Series:
+		for p in ([]Type{v.lo, v.hi, v.term}) do bound(p, {v.index}, out)
+		return
+	case ^Least:
+		bound(v.holds, {v.index}, out)
+		return
+	case ^Recurrent:
+		for p in v.initial do read_unknowns(p, out)
+		read_unknowns(v.at, out)
 		return
 	case ^Pattern:
 		read_unknowns(v.target, out)

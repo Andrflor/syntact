@@ -300,6 +300,8 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Collapse:
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Fold:
+		// its value, over the layouts of its states
+		if image, known := layout_image(k, v.value); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Least:
 		return COUNTS, true

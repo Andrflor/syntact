@@ -253,6 +253,9 @@ SPEC_CASES := []Spec_Case {
 	{"x -> {1 ...u8:}", "", {.Constraint_Mismatch}},
 	{"xs -> {3 4 5}\nx -> xs ? {\n  {u8:(h) ...u8:(t)} -> h\n  -> 0\n}", "", {.Constraint_Mismatch}},
 	{"Pair -> {u8: u8:}\ny -> {...Pair: 3}\nx -> y.#2", "3", {}},
+	// an access on a fold is the fold of the access; a fold is in what its value is in
+	{"P -> {u8:a  u8:b}\ng -> {u8:n -> ??  u8:s -> 0  -> n ? {0 -> P{s  s}  -> g{n -> n - 1  s -> (s * 3 + 1) % 256}!}}\nx -> g{n -> 3}!.a", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ (3 * y + 1) % 256; y)", {}},
+	{"f -> {u32:n -> ??  u16:acc -> 0  -> n ? {0 -> acc  -> f{n -> n - 1  acc -> (acc + 1) % 1000}!}}\ni64:x -> f{n -> ??::u32}!", "⟳(x: 0 ↦ x + 1 until ?0..; y: 0 ↦ (y + 1) % 1000; y)", {}},
 	// a carve of a binding an expansion placed carves what is expanded
 	{"inner -> {x -> 1  w -> x + 1}\nouter -> {...inner  y -> 2}\nx -> outer{x -> 5}.w", "6", {}},
 	{"inner -> {x -> 1  w -> x + 1}\nouter -> {...inner  y -> 2}\ndeep -> {...outer  z -> 3}\nx -> deep{x -> 9}.w", "10", {}},

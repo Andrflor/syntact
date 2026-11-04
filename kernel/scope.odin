@@ -91,13 +91,35 @@ occurrence :: proc(bindings: []^Binding, name: string, ordinal: int, last: bool)
 
 // access_law: {… x -> v …}.x = v, the last occurrence; x#n, the n-th.
 access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
-	s, ok := target.(^Scope)
-	if !ok {
-		if is_invalid(target) do return target
-		return problem(.Invalid_Property_Access, a.span, fmt.tprintf("`.%s` on %s, which is not a scope", a.name, print_type(target)))
+	#partial switch v in target {
+	case ^Scope:
+		if b, found := occurrence(placed(k, v, .Value), a.name, a.ordinal, true); found do return binding_value(k, b)
+		return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(v), a.name))
+	case ^Fold:
+		// the access of what the fold gives
+		f := new(Fold)
+		f^ = v^
+		f.value = access_law(k, v.value, a)
+		return is_invalid(f.value) ? f.value : fold_law(k, f)
+	case ^Pattern:
+		// a pattern gives one of its products
+		branches := make([]Branch, len(v.branches))
+		for b, i in v.branches {
+			branches[i] = with_product(b, access_law(k, b.product, a))
+			if is_invalid(branches[i].product) do return branches[i].product
+		}
+		return pattern_law(k, branching(v, branches))
+	case Invalid:
+		return target
 	}
-	if b, found := occurrence(placed(k, s, .Value), a.name, a.ordinal, true); found do return binding_value(k, b)
-	return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
+	// a scope not known yet: the access stays
+	if gives_scope(k, target) {
+		out := new(Access)
+		out^ = a^
+		out.target = target
+		return out
+	}
+	return problem(.Invalid_Property_Access, a.span, fmt.tprintf("`.%s` on %s, which is not a scope", a.name, print_type(target)))
 }
 
 // collapse_law: {… -> p …}! = p, the first production, with the effects of the
