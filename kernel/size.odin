@@ -88,6 +88,10 @@ read_unknowns :: proc(t: Type, out: ^[dynamic]^Unknown) {
 	case ^Effect:
 		read_unknowns(v.then, out)
 		return
+	case ^Scope:
+		// a carve: what it reads, the values it puts
+		for _, x in v.changes do read_unknowns(x, out)
+		return
 	}
 	for p in parts(t) do if p != nil do read_unknowns(p, out)
 }
@@ -160,6 +164,11 @@ values :: proc(k: ^Kernel, t: Type) -> (set: Type, ok: bool) {
 	#partial switch v in t {
 	case ^Unknown:
 		return layout_of(k, v), true
+	case ^Collapse:
+		// a recursive call that stays: what its equation solves to
+		if v.recursive {
+			if solution, solved := call_values(k, v); solved do return solution, true
+		}
 	case ^Pattern:
 		products := make([]Type, len(v.branches))
 		for b, i in v.branches do products[i] = values(k, given(k, b.product)) or_return

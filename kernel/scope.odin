@@ -643,7 +643,22 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 	}
 	if produces do return out
 	v, is_scope := x.(^Scope)
-	if !is_scope do return is_constant(x) ? Type(Bool(false)) : new_operation(.In, x, s)
+	if !is_scope {
+		// a recursive call that stays gives what its equation solves to: a run of its
+		// values, inlined in a scope
+		if c, is_call := as_call(x); is_call {
+			if values, solved := call_values(k, c); solved {
+				u := new_unknown(k, nil)
+				u.layout = values
+				inline := new_scope(nil, {})
+				inline.source, inline.complete, inline.reached = inline, true, true
+				run := new_binding(inline, .Expand, {})
+				run.value, run.typed_value, run.state = u, u, .Done
+				return admits(k, inline, s)
+			}
+		}
+		return is_constant(x) ? Type(Bool(false)) : new_operation(.In, x, s)
+	}
 	return match_shape(k, x, s, placed(k, v, .Value), shape)
 }
 
@@ -877,7 +892,7 @@ pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts: Type, used: i128, lengt
 		pieces, n, ok := run_pieces(k, binding_value(k, xs[0]))
 		if !ok do return new_operation(.In, run_scope(k, xs), new_operation(.Mul, a, counts))
 		// each of its pieces is one of a: what it repeats is included in a
-		if !included(k, pieces, a) do return new_operation(.In, run_scope(k, xs), new_operation(.Mul, a, counts))
+		if !shapes_included(k, pieces, a) do return new_operation(.In, run_scope(k, xs), new_operation(.Mul, a, counts))
 		// it gives at least the least of n pieces, and as many more as it holds: counts
 		// must admit every count from there
 		least, _ := discrete_bounds(cells_of_one(n))
@@ -1077,6 +1092,8 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 // length —: an expansion places it as it is, inline.
 inlined :: proc(k: ^Kernel, v: Type) -> bool {
 	if is_constant(v) do return false
+	// a recursive call whose base cases are scopes gives a scope (§5.6)
+	if c, is_call := as_call(v); is_call do return gives_scopes(k, c)
 	layout, ok := values(k, v)
 	if !ok do return false
 	one: [1]Type
@@ -1119,4 +1136,43 @@ counts_last :: proc(t: Type) -> Type {
 	one: [1]Type
 	cells, _ := cells_in(t, &one)
 	return len(cells) > 0 ? cells[len(cells) - 1] : None{}
+}
+
+// shapes_included: every scope x admits, y admits: each shape of x has one in y of
+// its structure — the same names, the same kinds, in order — each place of it
+// included in its place there.
+shapes_included :: proc(k: ^Kernel, x, y: Type) -> bool {
+	if included(k, x, y) do return true
+	one, other: [1]Type
+	xs, x_negated := cells_in(x, &one)
+	ys, y_negated := cells_in(y, &other)
+	if x_negated || y_negated do return false
+	each: for cx in xs {
+		a, is_shape := cx.(^Scope)
+		if !is_shape do return false
+		pa := placed(k, a, .Shape)
+		for cy in ys {
+			b, also := cy.(^Scope)
+			if !also do continue
+			pb := placed(k, b, .Shape)
+			if len(pa) != len(pb) do continue
+			fits := true
+			for p, i in pa {
+				q := pb[i]
+				if p.name != q.name || p.kind != q.kind {
+					fits = false
+					break
+				}
+				cp, cq := binding_color(k, p), binding_color(k, q)
+				if cq == nil do continue
+				if cp == nil || !included(k, cp, cq) {
+					fits = false
+					break
+				}
+			}
+			if fits do continue each
+		}
+		return false
+	}
+	return true
 }

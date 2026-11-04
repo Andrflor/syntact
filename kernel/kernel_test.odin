@@ -326,6 +326,9 @@ SPEC_CASES := []Spec_Case {
 	// an expansion inlines: a run not known yet is placed as it is
 	{ARRAY + "Array{u8}:list -> ??\nArray{u8}:x -> {...list 7}", "", {}},
 	{ARRAY + "Array{u8}:list -> ??\nb -> {...list 7}\nx -> b.#1", "b.#1", {}},
+	// a recursive call whose base cases are scopes gives a run of its pieces (Arden)
+	{ARRAY + "fill -> {\n  u32:i -> 0\n  -> i ? {\n    0 -> {}\n    -> {...fill{i -> i - 1}! i % 1000}\n  }\n}\nu32:n -> ??\nArray{u32}:x -> fill{i -> n}!", "", {}},
+	{ARRAY + "fill -> {\n  u32:i -> 0\n  -> i ? {\n    0 -> {}\n    -> {...fill{i -> i - 1}! i + 300}\n  }\n}\nu32:n -> ??\nArray{u8}:x -> fill{i -> n}!", "", {.Constraint_Mismatch}},
 	// §4.14: a resonant binding is a place, which its writes change; a read is what
 	// the writes before it give, each run with places of its own
 	{COUNTER + "x -> {c -> Counter!, c.increment!, c.increment!, -> c.value}!", "2", {}},
