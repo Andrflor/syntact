@@ -1301,7 +1301,7 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	if proven_in(k, n, NONPOSITIVE) do return identity
 	if s.op == .Add {
 		if sum, closed := faulhaber(k, s); closed do return sum
-		if x, permuted := xor_block(k, s); permuted do return x
+		if x, bitwise := bitwise_sum(k, s); bitwise do return x
 		if f, summed := summed_fold(k, s); summed do return f
 		if f, summed := summed_call(k, s); summed do return f
 		return s
@@ -1750,21 +1750,67 @@ summed_product :: proc(k: ^Kernel, t: Type, root, f: ^Scope, p: ^Binding, lo, hi
 	return out, true
 }
 
-// xor_block: Σ(i: c·2ᵏ..c·2ᵏ + 2ᵏ - 1, v ^ i), v not reading i: on the block, i ↦ w ^ i,
-// w = v ^ c·2ᵏ, permutes the k low bits, so the sum is 2ᵏ·(w - (w [&] m)) + 2ᵏ·m / 2,
-// m = 2ᵏ - 1 (§5.6).
-xor_block :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
+// bitwise_sum: Σ(i: lo..hi, v ⊕ i), ⊕ one of ^ [&] [|], v ≥ 0 not reading i: summed bit
+// by bit. With N the count of i and C_b the count of those whose bit b is 1, bit b
+// gives 2ᵇ times: C_b + v_b·(N - 2·C_b) for ^, v_b·C_b for [&], C_b + v_b·(N - C_b)
+// for [|]. The bits of v with the same factor K are one mask: K·(v [&] mask) (§5.6).
+bitwise_sum :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 	o := s.term.(^Operation) or_return
-	if o.op != .Xor || len(o.args) != 2 do return
+	if o.op != .Xor && o.op != .Bit_And && o.op != .Bit_Or || len(o.args) != 2 do return
+	// v ⊕ (i + c): the sum over j = i + c, from lo + c to hi + c
 	v: Type
-	for a, j in o.args do if u, is_index := a.(^Unknown); is_index && same_unknown(u, s.index) do v = o.args[1 - j]
+	shift: i128 = 0
+	for a, j in o.args {
+		slope, c, affine := affine_in(k, a, s.index)
+		at, constant := c.(Int)
+		if affine && is_int(slope, 1) && constant {
+			v, shift = o.args[1 - j], i128(at)
+		}
+	}
 	if v == nil || reads(k, v, s.index) do return
-	lo := s.lo.(Int) or_return
-	hi := s.hi.(Int) or_return
-	size := i128(hi) - i128(lo) + 1
-	if lo < 0 || size < 1 || size & (size - 1) != 0 || i128(lo) % size != 0 do return
-	m := size - 1
-	w := lo == 0 ? v : op(k, .Xor, v, Int(lo))
-	high := op(k, .Sub, w, op(k, .Bit_And, w, Int(m)))
-	return op(k, .Add, op(k, .Mul, Int(size), high), Int(size * m / 2)), true
+	lo := i128(s.lo.(Int) or_return) + shift
+	hi := i128(s.hi.(Int) or_return) + shift
+	if lo < 0 || hi < lo do return
+	image := layout_image(k, v) or_return
+	vlo, vhi := int_bounds(k, image) or_return
+	least := vlo.? or_return
+	top := vhi.? or_return
+	if least < 0 do return
+	// the bits of v and of i
+	width := uint(0)
+	for (i128(1) << width) <= max(top, hi) do width += 1
+	if width > 62 do return
+	// ones(n, b): the integers of 0..n-1 whose bit b is 1
+	ones :: proc(n: i128, b: uint) -> i128 {
+		block := i128(1) << (b + 1)
+		return (n / block) << b + max(n % block - i128(1) << b, 0)
+	}
+	n := hi - lo + 1
+	constant: i128 = 0
+	factors := make([]i128, width)
+	for b in 0 ..< width {
+		c := ones(hi + 1, b) - ones(lo, b)
+		#partial switch o.op {
+		case .Xor:
+			constant += c << b
+			factors[b] = n - 2 * c
+		case .Bit_And:
+			factors[b] = c
+		case .Bit_Or:
+			constant += c << b
+			factors[b] = n - c
+		}
+	}
+	out = Int(constant)
+	done := make([]bool, width)
+	for b in 0 ..< width {
+		if done[b] || factors[b] == 0 do continue
+		mask: i128 = 0
+		for x in b ..< width do if !done[x] && factors[x] == factors[b] {
+			mask |= i128(1) << x
+			done[x] = true
+		}
+		out = op(k, .Add, out, op(k, .Mul, Int(factors[b]), op(k, .Bit_And, v, Int(mask))))
+	}
+	return out, true
 }
