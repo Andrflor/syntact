@@ -273,6 +273,8 @@ SPEC_CASES := []Spec_Case {
 	{"f -> {u8:n -> ??  -> n ? {0 -> 1  -> 2 * n + f{n -> n - 1}!}}\nx -> f{n -> 3}!", "13", {}},
 	{"f -> {u8:n -> ??  -> n ? {1 -> 1  -> n + f{n -> n - 1}!}}\nx -> f!", "", {.Constraint_Mismatch}},
 	{"fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\nx -> fact{n -> 5}!", "Π(x: 1..5, x)", {}},
+	// a recursion whose base case is a scope folds up from it: its state a run
+	{"build -> {u32:n -> ??  -> n ? {0 -> {}  -> {...build{n -> n - 1}!  n}}}\nx -> build{n -> 3}!", "⟳(x: 2 ↦ x - 1 until ..(-1); y: {} ↦ {...y  -x + 3}; y)", {}},
 	{SUM + "x -> sum!", "(?0 + ?0 * ?0) / 2", {}},
 	// the laws of a fold: closed forms, the length of an orbit
 	{"h -> {u8:n -> ??  -> n ? {0 -> 0  -> 2 * h{n -> n - 1}! + 1}}\nx -> h!", "2 ** ?0 - 1", {}},

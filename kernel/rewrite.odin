@@ -196,18 +196,21 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 }
 
 // rewrite_carve: a carve, its changes rewritten — s{x -> v} with u rewritten is
-// s{x -> v with u rewritten} —; a written scope, the carve of the bindings whose
-// value the rewrite changes: a carve is a copy with substitution (§5.3). The scope
-// itself when none changes.
+// s{x -> v with u rewritten} —; a written scope, when the rewrite changes one of its
+// bindings, the carve of each of them to its value rewritten, as a branch copies
+// its product: what it reads from outside is its type (§5.3). The scope itself when
+// none changes.
 rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
 	if s.carved == nil {
 		changes := make(map[^Binding]Type)
+		moved := false
 		for b in s.bindings {
 			if b.value == nil || b.kind == .Pull || b.kind == .Handler || b.resonance != nil do continue
 			v := binding_type(k, b)
-			if w := rewrite(k, v, r); !same(k, w, v) do changes[b] = w
+			changes[b] = rewrite(k, v, r)
+			moved ||= !same(k, changes[b], v)
 		}
-		if len(changes) == 0 do return s
+		if !moved do return s
 		return carved_copy(k, s, changes)
 	}
 	changes := make(map[^Binding]Type)

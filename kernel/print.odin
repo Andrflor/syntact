@@ -501,6 +501,11 @@ write_operation :: proc(b: ^Printer, o: ^Operation) {
 }
 
 write_scope :: proc(b: ^Printer, s: ^Scope) {
+	// the carve of a scope written without a name: the bindings of the copy
+	if s.carved != nil && s.carved.name == "" && (s.carved.source == nil || s.carved.source == s.carved) {
+		write_body(b, s)
+		return
+	}
 	if s.carved != nil {
 		write_scope(b, s.carved)
 		write_changes(b, s)

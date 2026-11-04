@@ -485,6 +485,7 @@ is_bool :: proc(t: Type, b: bool) -> bool {
 
 EVERY_INT, EVERY_REAL, EVERY_CHAR, STRING, EMPTY_STRING, EVERYTHING, BOOLS: Type
 COUNTS, POSITIVE, NONPOSITIVE, NONZERO_INT, NONZERO_REAL: Type // 0.., 1.., ..0, int & ~0, float & ~0.0
+EVERY_SCOPE: ^Scope // {...}: the shape that admits any run, every scope (§5.4)
 
 @(init)
 init_constants :: proc "contextless" () {
@@ -501,6 +502,9 @@ init_constants :: proc "contextless" () {
 	// each is a normal form (kernel_test.odin): normal gives it back, and keeps in it
 	// nothing a kernel computed — they outlive every kernel
 	for c in constants() do as_normal(c)
+	EVERY_SCOPE = new_scope(nil, {})
+	new_binding(EVERY_SCOPE, .Expand, {})
+	EVERY_SCOPE.source, EVERY_SCOPE.complete, EVERY_SCOPE.reached = EVERY_SCOPE, true, true
 }
 
 constants :: proc() -> [12]Type {

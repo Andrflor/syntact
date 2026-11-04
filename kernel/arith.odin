@@ -22,6 +22,7 @@ Family :: enum u8 {
 	Count, // an integer ≥ 0: the count of a repetition, of a shift
 	Nonzero_Int, // a divisor: int & ~0
 	Nonzero_Real, // float & ~0.0
+	Scope, // a scope: what an equation whose base cases are scopes gives (§5.6)
 }
 
 // family_term: a family as a type, in normal form.
@@ -43,6 +44,8 @@ family_term :: proc(f: Family) -> Type {
 		return NONZERO_INT
 	case .Nonzero_Real:
 		return NONZERO_REAL
+	case .Scope:
+		return EVERY_SCOPE
 	}
 	return None{}
 }
@@ -100,6 +103,8 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return .Char, true
 	case Bool:
 		return .Bool, true
+	case ^Scope:
+		return .Scope, true
 	case ^Unknown:
 		if v.call != nil do return call_family(k, v.call)
 		return layout_family(k, layout_of(k, v))
@@ -166,7 +171,7 @@ family_holds :: proc(f, of: Family) -> bool {
 
 // layout_family: the one family the elements of a layout are in.
 layout_family :: proc(k: ^Kernel, layout: Type) -> (Family, bool) {
-	for f in ([]Family{.Int, .Real, .Bool, .Char, .String}) {
+	for f in ([]Family{.Int, .Real, .Bool, .Char, .String, .Scope}) {
 		if proven_in(k, layout, family_term(f)) do return f, true
 	}
 	return {}, false

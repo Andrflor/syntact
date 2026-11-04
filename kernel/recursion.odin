@@ -662,6 +662,10 @@ at_calls :: proc(k: ^Kernel, s: ^Scope, r: Type) -> (before: []^Effect, calls: [
 		append(found, c)
 	}
 	if c, is_call := r.(^Collapse); is_call && c.recursive do note(k, &found, c)
+	// a scope holds a call in its bindings: `{...f{n -> n - 1}!  n}`
+	if s, is_scope := r.(^Scope); is_scope {
+		for b in placed(k, s, .Value) do if c, is_call := binding_type(k, b).(^Collapse); is_call && c.recursive do note(k, &found, c)
+	}
 	for o in operations_on_calls(r, origin(s)) {
 		for a in o.args {
 			c, is_call := a.(^Collapse)
