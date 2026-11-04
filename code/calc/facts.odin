@@ -64,7 +64,13 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		case .Not:
 			out.bounds = fit({-a.bounds.hi - 1, -a.bounds.lo - 1})
 		}
-		if x, known := a.constant.?; known do out.constant = code.unary(n.op, .Int, code.Datum{int = x}).int
+		if x, known := a.constant.?; known {
+			if a.lanes > 0 {
+				out.constant = i128(code.unary(n.op, .Int, code.Datum{int = i64(x)}).int)
+			} else if v, ok := exact(n.op, x, 0); ok {
+				out.constant = v
+			}
+		}
 	case .Binary:
 		a, b := g.facts[find(g, n.args[0])], g.facts[find(g, n.args[1])]
 		out.machine = comparison(n.op) ? .Int : a.machine
@@ -75,7 +81,12 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 		x, known_a := a.constant.?
 		y, known_b := b.constant.?
 		if known_a && known_b {
-			if d, ok := code.binary_of(n.op, .Int, code.Datum{int = x}, code.Datum{int = y}); ok do out.constant = d.int
+			// in lanes, what each lane of its bits holds; a value, exactly
+			if out.lanes > 0 {
+				if d, ok := code.binary_of(n.op, .Int, code.Datum{int = i64(x)}, code.Datum{int = i64(y)}); ok do out.constant = i128(d.int)
+			} else if v, ok := exact(n.op, x, y); ok {
+				out.constant = v
+			}
 		}
 	case .Get:
 		// a parameter a loop gives at its end: its kind; what else a tuple gives, the
@@ -107,9 +118,9 @@ comparison :: proc(op: code.Op) -> bool {
 	return false
 }
 
-// in_64: bounds the machine holds without wrapping.
+// in_64: bounds a word holds without wrapping, read signed or unsigned (code.in_word).
 in_64 :: proc(b: code.Bounds) -> bool {
-	return b.lo >= i128(min(i64)) && b.hi <= i128(max(i64))
+	return code.in_word(b)
 }
 
 // fit: the bounds, when the machine computes them without wrapping.
@@ -124,6 +135,9 @@ binary_bounds :: proc(op: code.Op, a, b: code.Bounds) -> code.Bounds {
 		xs := [4]i128{f(a.lo, b.lo), f(a.lo, b.hi), f(a.hi, b.lo), f(a.hi, b.hi)}
 		return fit({min(xs[0], xs[1], xs[2], xs[3]), max(xs[0], xs[1], xs[2], xs[3])})
 	}
+	// a product of two words may pass what an i128 holds: not read
+	big :: proc(b: code.Bounds) -> bool {return b.lo < -(i128(1) << 62) || b.hi > i128(1) << 62}
+	if op == .Mul && big(a) && big(b) do return code.EVERY
 	#partial switch op {
 	case .Add:
 		return fit({a.lo + b.lo, a.hi + b.hi})
@@ -159,7 +173,7 @@ binary_bounds :: proc(op: code.Op, a, b: code.Bounds) -> code.Bounds {
 	case .Mul_High:
 		// a not negative times an integer of 64 bits as unsigned, its high half
 		if a.lo >= 0 && b.lo == b.hi {
-			m := i128(u64(i64(b.lo)))
+			m := b.lo
 			return {(a.lo * m) >> 64, (a.hi * m) >> 64}
 		}
 	case .Pow:
@@ -181,4 +195,71 @@ power :: proc(x, n: i128) -> (i128, bool) {
 		if out > i128(max(i64)) do return 0, false
 	}
 	return out, true
+}
+
+// exact: op on the integers x and y — x alone for a unary one — exactly: false
+// where it is not one integer a word holds (code.in_word).
+exact :: proc(op: code.Op, x, y: i128) -> (r: i128, ok: bool) {
+	small :: proc(v: i128) -> bool {return v >= -(i128(1) << 64) && v <= i128(1) << 64}
+	if !small(x) || !small(y) do return
+	switch op {
+	case .Add:
+		r = x + y
+	case .Sub:
+		r = x - y
+	case .Mul:
+		// two words: the product may pass what an i128 holds
+		ux, uy := u128(abs(x)), u128(abs(y))
+		if ux != 0 && uy > max(u128) / ux do return
+		p := ux * uy
+		if p > u128(max(i128)) do return
+		r = i128(p)
+		if (x < 0) != (y < 0) do r = -r
+	case .Div:
+		if y == 0 do return
+		r = x / y
+	case .Mod:
+		if y == 0 do return
+		r = x % y
+	case .Mul_High:
+		// the high half of the product of two words read as unsigned
+		r = i128((u128(transmute(u64)code.word_of(x)) * u128(transmute(u64)code.word_of(y))) >> 64)
+	case .Pow:
+		if y < 0 do return
+		r = 1
+		for _ in 0 ..< y {
+			r *= x
+			if !small(r) do return
+		}
+	case .Neg:
+		r = -x
+	case .And:
+		r = x & y
+	case .Or:
+		r = x | y
+	case .Xor:
+		r = x ~ y
+	case .Not:
+		r = ~x
+	case .Shl:
+		if y < 0 || y > 64 do return
+		r = x << uint(y)
+		if r >> uint(y) != x do return
+	case .Shr:
+		if y < 0 do return
+		r = y >= 127 ? (x < 0 ? -1 : 0) : x >> uint(y)
+	case .Eq:
+		r = x == y ? 1 : 0
+	case .Ne:
+		r = x != y ? 1 : 0
+	case .Lt:
+		r = x < y ? 1 : 0
+	case .Le:
+		r = x <= y ? 1 : 0
+	case .Gt:
+		r = x > y ? 1 : 0
+	case .Ge:
+		r = x >= y ? 1 : 0
+	}
+	return r, code.in_word({r, r})
 }

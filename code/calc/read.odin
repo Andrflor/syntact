@@ -64,7 +64,7 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 	case code.Const:
 		set(r, i.dst, Node{kind = .Int, value = i.value})
 	case code.Real_Const:
-		set(r, i.dst, Node{kind = .Real, value = transmute(i64)i.value})
+		set(r, i.dst, Node{kind = .Real, value = i128(transmute(i64)i.value)})
 	case code.Text_Const:
 		set(r, i.dst, Node{kind = .Text, index = i.text})
 	case code.Input:
@@ -74,7 +74,7 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 	case code.Binary:
 		set(r, i.dst, Node{kind = .Binary, op = i.op, args = classes(r, {i.a, i.b})})
 	case code.Splat:
-		set(r, i.dst, Node{kind = .Splat, value = i64(g.func.kinds[i.dst].lanes), args = classes(r, {i.a})})
+		set(r, i.dst, Node{kind = .Splat, value = i128(g.func.kinds[i.dst].lanes), args = classes(r, {i.a})})
 	case code.Lanes:
 		set(r, i.dst, Node{kind = .Lanes, index = vector(g, i.values)})
 	case code.Reduce:

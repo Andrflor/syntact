@@ -62,7 +62,7 @@ Kind :: enum u8 {
 Node :: struct {
 	kind:  Kind,
 	op:    code.Op,
-	value: i64,
+	value: i128, // an integer, exactly; the bits of a float; a count
 	index: int,
 	owner: int,
 	args:  []Class,
@@ -133,7 +133,7 @@ outputs :: proc(info: Loop_Info) -> int {
 Facts :: struct {
 	machine:  code.Machine,
 	bounds:   code.Bounds,
-	constant: Maybe(i64),
+	constant: Maybe(i128), // the integer, exactly
 	lanes:    int,
 	bits:     int, // of each lane of a vector of integers; 0: 64
 }
@@ -245,7 +245,7 @@ index_members :: proc(g: ^Graph) {
 }
 
 hash_node :: proc(n: Node) -> u64 {
-	key := [5]i64{i64(n.kind), i64(n.op), n.value, i64(n.index), i64(n.owner)}
+	key := [5]i128{i128(n.kind), i128(n.op), n.value, i128(n.index), i128(n.owner)}
 	h := hash.fnv64a(mem.slice_to_bytes(key[:]))
 	if len(n.args) > 0 do h = hash.fnv64a(mem.slice_to_bytes(n.args), h)
 	return h

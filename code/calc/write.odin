@@ -150,7 +150,7 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 	case .Int:
 		inst = code.Const{dst, n.value}
 	case .Real:
-		inst = code.Real_Const{dst, transmute(f64)n.value}
+		inst = code.Real_Const{dst, transmute(f64)i64(n.value)}
 	case .Text:
 		inst = code.Text_Const{dst, n.index}
 	case .Input:

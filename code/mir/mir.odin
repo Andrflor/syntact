@@ -515,7 +515,7 @@ body :: proc(b: ^Builder, src: code.Body) {
 	for inst in src.insts {
 		switch i in inst {
 		case code.Const:
-			emit(b, Copy{Reg(i.dst), i.value})
+			emit(b, Copy{Reg(i.dst), code.word_of(i.value)})
 		case code.Real_Const:
 			emit(b, Real{Reg(i.dst), transmute(i64)i.value})
 		case code.Text_Const:

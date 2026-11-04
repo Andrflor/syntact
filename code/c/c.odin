@@ -112,6 +112,7 @@ C_TYPES := [code.Machine]string {
 // type_of: the C type of a value: of its machine, or a vector of it, in the
 // vector extension of the C compiler.
 type_of :: proc(k: code.Kind) -> string {
+	if code.unsigned(k) do return "uint64_t" // a word read as unsigned
 	if k.lanes == 0 do return C_TYPES[k.machine]
 	if k.machine == .Real do return fmt.tprintf("f64x%d", k.lanes)
 	return fmt.tprintf("i%dx%d", code.lane_bits(k), k.lanes)
@@ -313,14 +314,17 @@ declare :: proc(w: ^Writer, x: code.Value, expr: string) {
 assume :: proc(w: ^Writer, x: code.Value, given := INT64) {
 	if w.f.kinds[x].machine != .Int || w.f.kinds[x].lanes > 0 || !proven(w, x) do return
 	b := w.f.kinds[x].bounds
+	// what the type of x holds: its word, read signed or unsigned
+	full := code.unsigned(w.f.kinds[x]) ? code.U64 : INT64
+	given := code.unsigned(w.f.kinds[x]) ? code.U64 : given
 	if b.lo <= given.lo && given.hi <= b.hi do return
 	v := name(w, x)
 	switch {
 	case b.lo == b.hi:
 		line(w, "ASSUME(%s == %s);", v, int_literal(b.lo))
-	case b.lo == INT64.lo:
+	case b.lo == full.lo:
 		line(w, "ASSUME(%s <= %s);", v, int_literal(b.hi))
-	case b.hi == INT64.hi:
+	case b.hi == full.hi:
 		line(w, "ASSUME(%s >= %s);", v, int_literal(b.lo))
 	case:
 		line(w, "ASSUME(%s >= %s && %s <= %s);", v, int_literal(b.lo), v, int_literal(b.hi))
@@ -466,8 +470,7 @@ unary :: proc(w: ^Writer, u: code.Unary) -> string {
 // proven: the kernel proved the integer in int64_t: the C operation that gives it
 // does not overflow.
 proven :: proc(w: ^Writer, x: code.Value) -> bool {
-	b := w.f.kinds[x].bounds
-	return b.lo >= INT64.lo && b.hi <= INT64.hi
+	return code.in_word(w.f.kinds[x].bounds)
 }
 
 binary :: proc(w: ^Writer, x: code.Binary) -> (string, string) {
@@ -614,6 +617,8 @@ int_literal :: proc(x: i128) -> string {
 	switch {
 	case x == INT64.lo:
 		return "INT64_MIN"
+	case x > INT64.hi:
+		return fmt.tprintf("UINT64_C(%d)", x)
 	case x <= -(1 << 31) || x > (1 << 31) - 1:
 		return fmt.tprintf("INT64_C(%d)", x)
 	}

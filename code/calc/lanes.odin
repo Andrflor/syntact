@@ -107,14 +107,14 @@ lanes_of :: proc(g: ^Graph, l: int, lanes, bits: int) -> bool {
 		g.facts[find(g, i)].bounds = code.meet(g.facts[find(g, i)].bounds, g.facts[find(g, g.home[param])].bounds)
 	}
 	nexts := make([dynamic]Class)
-	append(&nexts, plus(g, i, add(g, int_node(i64(lanes) * delta))))
+	append(&nexts, plus(g, i, add(g, int_node(i128(lanes) * i128(delta)))))
 	for r, k in reductions {
 		x := add(g, Node{kind = .Param, owner = v, index = k + 1})
 		term := lift(&t, r.term) or_return
 		append(&nexts, add(g, binary(g, r.op, x, term)))
 	}
 	// the lanes stop where the last would
-	last := plus(g, i, add(g, int_node(i64(lanes - 1) * delta)))
+	last := plus(g, i, add(g, int_node(i128(lanes - 1) * i128(delta))))
 	test := add(g, binary(g, stop.op, last, stop.bound))
 	tail := add(g, Node{kind = .Match, owner = m, args = three(test, add(g, Node{kind = .Exit, owner = v}), add(g, Node{kind = .Again, owner = v, args = nexts[:]}))})
 	inits := make([dynamic]Class)
@@ -213,8 +213,8 @@ stop_of :: proc(g: ^Graph, turn: Turn, l, i: int, d: i64) -> (Stop, bool) {
 	if _, is := counter_of(g, target, l, i); is {
 		if turn.exit != 0 || cover.negated || len(cover.ints) != 1 || !in_64(cover.ints[0]) do return {}, false
 		cell := cover.ints[0]
-		if d < 0 do return Stop{.Le, add(g, int_node(i64(cell.hi)))}, true
-		return Stop{.Ge, add(g, int_node(i64(cell.lo)))}, true
+		if d < 0 do return Stop{.Le, add(g, int_node(cell.hi))}, true
+		return Stop{.Ge, add(g, int_node(cell.lo))}, true
 	}
 	for id in g.members[find(g, target)] {
 		n := g.nodes[id]
@@ -275,7 +275,7 @@ reduction :: proc(g: ^Graph, next: Class, l, j: int) -> (Reduction, bool) {
 
 // neutral_of: e, e ⊕ x = x.
 neutral_of :: proc(g: ^Graph, op: code.Op, m: code.Machine) -> Class {
-	if m == .Real do return add(g, Node{kind = .Real, value = transmute(i64)(op == .Mul ? f64(1) : f64(0))})
+	if m == .Real do return add(g, Node{kind = .Real, value = i128(transmute(i64)(op == .Mul ? f64(1) : f64(0)))})
 	#partial switch op {
 	case .Mul:
 		return add(g, int_node(1))
@@ -367,7 +367,7 @@ lift_node :: proc(t: ^Lift, n: Node, exact: bool) -> (out: Class, ok: bool) {
 			i := splat(g, add(g, Node{kind = .Param, owner = t.to, index = 0}), t.lanes, t.bits)
 			steps := make([]i64, t.lanes)
 			for &x, k in steps do x = i64(k) * t.delta
-			return add(g, binary(g, .Add, i, add(g, Node{kind = .Lanes, index = vector(g, steps), value = i64(t.bits)}))), true
+			return add(g, binary(g, .Add, i, add(g, Node{kind = .Lanes, index = vector(g, steps), value = i128(t.bits)}))), true
 		}
 		if init, is := t.invariants[n.index]; is do return splat(g, init, t.lanes, t.bits), true
 	case .Arm:
@@ -410,7 +410,7 @@ fits :: proc(b: code.Bounds, bits: int) -> bool {
 
 // splat: c in each of lanes lanes, of bits bits — 0: 64.
 splat :: proc(g: ^Graph, c: Class, lanes: int, bits := 0) -> Class {
-	return add(g, Node{kind = .Splat, value = i64(lanes), index = bits, args = one(c)})
+	return add(g, Node{kind = .Splat, value = i128(lanes), index = bits, args = one(c)})
 }
 
 // Copy: the computations of a turn of the loop from, as those of the loop to: its

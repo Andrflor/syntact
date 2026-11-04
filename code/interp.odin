@@ -74,14 +74,14 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 	for inst in b.insts {
 		switch i in inst {
 		case Const:
-			regs[i.dst].int = i.value
+			regs[i.dst].int = word_of(i.value)
 		case Real_Const:
 			regs[i.dst].real = i.value
 		case Text_Const:
 			regs[i.dst].text = p.texts[i.text]
 		case Input:
 			if i.slot >= len(m.inputs) do return false, fmt.tprintf("the input %d is not given", i.slot)
-			if !takes(p.inputs[i.slot], .Int, Datum{int = m.inputs[i.slot]}) do return false, fmt.tprintf("the input %d is out of its layout", i.slot)
+			if !takes(p.inputs[i.slot], Kind{machine = .Int, bounds = I64}, Datum{int = m.inputs[i.slot]}) do return false, fmt.tprintf("the input %d is out of its layout", i.slot)
 			regs[i.dst].int = m.inputs[i.slot]
 		case Unary:
 			kind := fr.f.kinds[i.a]
@@ -89,7 +89,8 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 		case Binary:
 			kind := fr.f.kinds[i.a]
 			for k in 0 ..< max(kind.lanes, 1) {
-				d, ok := binary_of(i.op, kind.machine, lane(regs[i.a], kind, k), lane(regs[i.b], fr.f.kinds[i.b], k))
+				// read as unsigned when one operand is (the word)
+				d, ok := binary_of(i.op, kind.machine, lane(regs[i.a], kind, k), lane(regs[i.b], fr.f.kinds[i.b], k), unsigned(kind) || unsigned(fr.f.kinds[i.b]))
 				if !ok do return false, "a division by 0"
 				set_lane(&regs[i.dst], fr.f.kinds[i.dst], k, d)
 			}
@@ -110,7 +111,7 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			for k in 1 ..< kind.lanes do out, _ = binary_of(i.op, kind.machine, out, lane(regs[i.a], kind, k))
 			regs[i.dst] = out
 		case In:
-			regs[i.dst].int = takes(i.cover, fr.f.kinds[i.x].machine, regs[i.x]) ? 1 : 0
+			regs[i.dst].int = takes(i.cover, fr.f.kinds[i.x], regs[i.x]) ? 1 : 0
 		case Narrow:
 			regs[i.dst] = regs[i.src]
 		case Foreign:
@@ -130,9 +131,9 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			if failed != "" do return false, failed
 			if i.dst != NONE do regs[i.dst] = d
 		case Match:
-			machine := fr.f.kinds[i.target].machine
+			kind := fr.f.kinds[i.target]
 			for arm, n in i.arms {
-				if n < len(i.arms) - 1 && !takes(arm.cover, machine, regs[i.target]) do continue
+				if n < len(i.arms) - 1 && !takes(arm.cover, kind, regs[i.target]) do continue
 				again, err = run_body(m, fr, arm.body)
 				if again || err != "" do return
 				if i.dst != NONE && arm.body.value != NONE do regs[i.dst] = regs[arm.body.value]
@@ -205,7 +206,7 @@ proven :: proc(fr: ^Frame, x: Value) -> string {
 	if x == NONE || fr.f.kinds[x].machine != .Int do return ""
 	kind := fr.f.kinds[x]
 	for k in 0 ..< max(kind.lanes, 1) {
-		v := i128(lane(fr.regs[x], kind, k).int)
+		v := kind.lanes > 0 ? i128(lane(fr.regs[x], kind, k).int) : of_word(fr.regs[x].int, kind)
 		if v < kind.bounds.lo || v > kind.bounds.hi do return fmt.tprintf("%s: v%d = %d, out of the bounds proven, %s", fr.f.name, int(x), v, print_cell(kind.bounds))
 	}
 	return ""
@@ -237,16 +238,17 @@ assign :: proc(regs: []Datum, dst, src: []Value) {
 }
 
 // takes: the cover takes the value.
-takes :: proc(c: Cover, m: Machine, x: Datum) -> bool {
+takes :: proc(c: Cover, kind: Kind, x: Datum) -> bool {
 	inside := false
-	if m == .Real {
+	if kind.machine == .Real {
 		for r in c.reals {
 			above := r.lo_open ? x.real > r.lo : x.real >= r.lo
 			below := r.hi_open ? x.real < r.hi : x.real <= r.hi
 			inside ||= above && below
 		}
 	} else {
-		for b in c.ints do inside ||= b.lo <= i128(x.int) && i128(x.int) <= b.hi
+		v := of_word(x.int, kind)
+		for b in c.ints do inside ||= b.lo <= v && v <= b.hi
 	}
 	return inside != c.negated
 }
@@ -261,7 +263,7 @@ unary :: proc(op: Op, m: Machine, a: Datum) -> Datum {
 	return a
 }
 
-binary_of :: proc(op: Op, m: Machine, a, b: Datum) -> (Datum, bool) {
+binary_of :: proc(op: Op, m: Machine, a, b: Datum, unsigned := false) -> (Datum, bool) {
 	flag :: proc(x: bool) -> Datum {return Datum{int = x ? 1 : 0}}
 	if m == .Real {
 		x, y := a.real, b.real
@@ -297,6 +299,28 @@ binary_of :: proc(op: Op, m: Machine, a, b: Datum) -> (Datum, bool) {
 		return {}, false
 	}
 	x, y := a.int, b.int
+	if unsigned {
+		// the words read as unsigned: what their bits read that way gives
+		u, v := transmute(u64)x, transmute(u64)y
+		#partial switch op {
+		case .Div:
+			if v == 0 do return {}, false
+			return Datum{int = transmute(i64)(u / v)}, true
+		case .Mod:
+			if v == 0 do return {}, false
+			return Datum{int = transmute(i64)(u % v)}, true
+		case .Shr:
+			return Datum{int = transmute(i64)(u >> v)}, true
+		case .Lt:
+			return flag(u < v), true
+		case .Le:
+			return flag(u <= v), true
+		case .Gt:
+			return flag(u > v), true
+		case .Ge:
+			return flag(u >= v), true
+		}
+	}
 	switch op {
 	case .Add:
 		return Datum{int = x + y}, true

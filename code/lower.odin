@@ -135,9 +135,10 @@ emit :: proc(l: ^Lowering, inst: Inst) {
 	append(l.insts, inst)
 }
 
-constant :: proc(l: ^Lowering, x: i64) -> Value {
+constant :: proc(l: ^Lowering, x: i128) -> Value {
+	if !in_word({x, x}) do return fail(l, "%v takes more than a word of 64 bits: not code yet", x)
 	v := value(l.f, .Int)
-	l.f.kinds[v].bounds = {i128(x), i128(x)}
+	l.f.kinds[v].bounds = {x, x}
 	emit(l, Const{v, x})
 	return v
 }
@@ -194,12 +195,11 @@ computed :: proc(t: kernel.Type) -> bool {
 term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 	#partial switch v in t {
 	case kernel.Int:
-		if i128(v) < i128(min(i64)) || i128(v) > i128(max(i64)) do return fail(l, "%v does not fit in 64 bits", i128(v))
-		return constant(l, i64(v))
+		return constant(l, i128(v))
 	case kernel.Bool:
 		return constant(l, v ? 1 : 0)
 	case kernel.Char:
-		return constant(l, i64(v))
+		return constant(l, i128(v))
 	case kernel.Real:
 		r := value(l.f, .Real)
 		emit(l, Real_Const{r, float_of(v)})
@@ -445,7 +445,7 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 		start = value(l.f, .Real)
 		emit(l, Real_Const{start, f64(identity)})
 	} else {
-		start = constant(l, i64(identity))
+		start = constant(l, i128(identity))
 	}
 	params, starts := make([]Value, 2), make([]Value, 2)
 	params[0], params[1] = value(l.f, .Int), value(l.f, machine)
@@ -502,7 +502,7 @@ recurrent :: proc(l: ^Lowering, r: ^kernel.Recurrent) -> Value {
 	for j in 0 ..< d {
 		base[j] = value(l.f, .Int)
 		append(&params, base[j])
-		alpha: i64 = d == 1 ? i64(r.coefficients[0]) : (j == 1 ? 1 : 0)
+		alpha: i128 = d == 1 ? i128(r.coefficients[0]) : (j == 1 ? 1 : 0)
 		append(&starts, constant(l, alpha))
 	}
 	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
@@ -550,7 +550,7 @@ algebraic_product :: proc(l: ^Lowering, a, b: []Value, c: []i128) -> []Value {
 		if t < d do break
 		for cj, j in c {
 			if cj == 0 do continue
-			p := binary(l, .Mul, full[t], constant(l, i64(cj)), .Int)
+			p := binary(l, .Mul, full[t], constant(l, i128(cj)), .Int)
 			full[t - 1 - j] = full[t - 1 - j] == NONE ? p : binary(l, .Add, full[t - 1 - j], p, .Int)
 		}
 	}
@@ -836,8 +836,8 @@ word :: proc(l: ^Lowering, slots: []Slot, start: int) -> Value {
 		if l.error != "" do return NONE
 		if machine_of(l.f, v) != x.machine do return fail(l, "the field `%s` is a %v, given a %v", x.field.name, x.machine, machine_of(l.f, v))
 		if x.machine != .Int do return v // a float or a text: the whole word
-		if x.size < 8 do v = binary(l, .And, v, constant(l, i64(1) << uint(8 * x.size) - 1), .Int)
-		if x.offset > start do v = binary(l, .Shl, v, constant(l, i64(8 * (x.offset - start))), .Int)
+		if x.size < 8 do v = binary(l, .And, v, constant(l, i128(1) << uint(8 * x.size) - 1), .Int)
+		if x.offset > start do v = binary(l, .Shl, v, constant(l, i128(8 * (x.offset - start))), .Int)
 		out = out == NONE ? v : binary(l, .Or, out, v, .Int)
 	}
 	return out == NONE ? constant(l, 0) : out

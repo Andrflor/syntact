@@ -25,7 +25,7 @@ NONE :: Value(-1) // what gives nothing back
 // Machine: what a value is at run time.
 Machine :: enum u8 {
 	None,
-	Int, // a signed 64-bit integer; a boolean is 0 or 1, a character its code point
+	Int, // an integer a word of 64 bits holds, read as signed or as unsigned by its bounds (word); a boolean is 0 or 1, a character its code point
 	Real, // a 64-bit float
 	Text, // the address of bytes in the image, followed by a 0
 }
@@ -37,6 +37,37 @@ Bounds :: struct {
 
 // EVERY: the bounds of an integer the kernel proved nothing of.
 EVERY :: Bounds{min(i128), max(i128)}
+
+// THE WORD
+//
+// An integer is held by a word of 64 bits: its bits, read as signed when one of its
+// values is negative, as unsigned when one is beyond what a signed word holds. The
+// bounds the kernel proved say which: the same bits, two readings. Add, Sub, Mul,
+// And, Or, Xor, Not, Shl and Neg give the same bits either way; Div, Mod, Shr and
+// the comparisons read their operands as unsigned when one of them is.
+
+I64 :: Bounds{i128(min(i64)), i128(max(i64))}
+U64 :: Bounds{0, i128(max(u64))}
+
+// in_word: a word holds every integer of b, read one way.
+in_word :: proc(b: Bounds) -> bool {
+	return b.lo >= I64.lo && b.hi <= I64.hi || b.lo >= U64.lo && b.hi <= U64.hi
+}
+
+// unsigned: the word of an integer of the kind is read as unsigned.
+unsigned :: proc(k: Kind) -> bool {
+	return k.machine == .Int && k.lanes == 0 && k.bounds.lo >= 0 && k.bounds.hi > I64.hi
+}
+
+// word_of: x, an integer a word holds, as the bits of the word.
+word_of :: proc(x: i128) -> i64 {
+	return x < 0 ? i64(x) : transmute(i64)u64(x)
+}
+
+// of_word: the integer the bits of a word hold, read as the kind says.
+of_word :: proc(w: i64, k: Kind) -> i128 {
+	return unsigned(k) ? i128(transmute(u64)w) : i128(w)
+}
 
 // Kind: what a value is at run time, and, for an integer, the bounds the kernel
 // proved of it — of each of its lanes, for a vector.
@@ -100,7 +131,7 @@ Inst :: union {
 
 Const :: struct {
 	dst:   Value,
-	value: i64,
+	value: i128, // the integer, exactly: a word holds it
 }
 
 Real_Const :: struct {

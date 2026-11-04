@@ -62,14 +62,14 @@ equal :: proc(g: ^Graph, c: Class, n: Node) {
 
 // operands: x and the constant c of x op c, on integers — or, for a power, on any
 // base.
-operands :: proc(g: ^Graph, n: Node) -> (x: Class, c: i64, ok: bool) {
+operands :: proc(g: ^Graph, n: Node) -> (x: Class, c: i128, ok: bool) {
 	if n.kind != .Binary do return
 	x = find(g, n.args[0])
 	c = g.facts[find(g, n.args[1])].constant.? or_return
 	return x, c, n.op == .Pow || g.facts[x].machine == .Int
 }
 
-int_node :: proc(v: i64) -> Node {
+int_node :: proc(v: i128) -> Node {
 	return Node{kind = .Int, value = v}
 }
 
@@ -89,17 +89,17 @@ known :: proc(g: ^Graph, c: Class, n: Node) {
 	if f.machine != .Int || n.kind == .Int do return
 	v, constant := f.constant.?
 	if !constant {
-		if f.bounds.lo != f.bounds.hi || !in_64(f.bounds) do return
-		v = i64(f.bounds.lo)
+		if f.bounds.lo != f.bounds.hi || !code.in_word(f.bounds) do return
+		v = f.bounds.lo
 	}
 	equal(g, c, constant_like(g, c, v))
 }
 
 // constant_like: the integer v, in each lane when c is a vector.
-constant_like :: proc(g: ^Graph, c: Class, v: i64) -> Node {
+constant_like :: proc(g: ^Graph, c: Class, v: i128) -> Node {
 	f := g.facts[find(g, c)]
 	if f.lanes == 0 do return int_node(v)
-	return Node{kind = .Splat, value = i64(f.lanes), index = f.bits, args = one(add(g, int_node(v)))}
+	return Node{kind = .Splat, value = i128(f.lanes), index = f.bits, args = one(add(g, int_node(v)))}
 }
 
 // neutral: x op e = x, e the neutral of op on its right.
@@ -133,7 +133,7 @@ absorbing :: proc(g: ^Graph, c: Class, n: Node) {
 	case .Pow:
 		if a != 0 do return
 		if g.facts[x].machine != .Real do equal(g, c, constant_like(g, c, 1))
-		else if g.facts[x].lanes == 0 do equal(g, c, Node{kind = .Real, value = transmute(i64)f64(1)})
+		else if g.facts[x].lanes == 0 do equal(g, c, Node{kind = .Real, value = i128(transmute(i64)f64(1))})
 	}
 }
 
@@ -144,7 +144,7 @@ strength :: proc(g: ^Graph, c: Class, n: Node) {
 	if !ok || g.facts[x].machine != .Int do return
 	if n.op == .Mul && d > 2 {
 		for sign in ([]i64{1, -1}) {
-			if k, near := log2(d - sign); near do equal(g, c, binary(g, sign > 0 ? .Add : .Sub, add(g, binary(g, .Shl, x, add(g, int_node(k)))), x))
+			if k, near := log2(d - i128(sign)); near do equal(g, c, binary(g, sign > 0 ? .Add : .Sub, add(g, binary(g, .Shl, x, add(g, int_node(k)))), x))
 		}
 	}
 	k, power := log2(d)
@@ -176,8 +176,8 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 	if _, power := log2(d); power do return
 	b := g.facts[x].bounds
 	if b.lo < 0 || !in_64(b) do return
-	top, divisor := b.hi, i128(d)
-	constant :: proc(g: ^Graph, v: i128) -> Class {return add(g, int_node(i64(v)))}
+	top, divisor := b.hi, d
+	constant :: proc(g: ^Graph, v: i128) -> Class {return add(g, int_node(v))}
 	quotients := make([dynamic]Class)
 	// a product and a shift
 	for s in uint(1) ..< 63 {
@@ -207,7 +207,7 @@ divided :: proc(g: ^Graph, c: Class, n: Node) {
 			m := (i128(1) << s + divisor - 1) / divisor
 			if m >= i128(1) << 64 do break
 			if top * (m * divisor - i128(1) << s) >= i128(1) << s do continue
-			high := add(g, binary(g, .Mul_High, x, add(g, int_node(transmute(i64)u64(m)))))
+			high := add(g, binary(g, .Mul_High, x, add(g, int_node(m))))
 			append(&quotients, s == 64 ? high : add(g, binary(g, .Shr, high, constant(g, i128(s - 64)))))
 			break
 		}
@@ -256,9 +256,9 @@ shifted :: proc(g: ^Graph, c: Class, n: Node) {
 		d, constant := g.facts[find(g, s.args[1])].constant.?
 		if !constant do continue
 		moved := s.op == .Add ? i128(k) - i128(d) : i128(k) + i128(d)
-		if moved < i128(min(i64)) || moved > i128(max(i64)) do continue
+		if !code.in_word({moved, moved}) do continue
 		f := g.facts[find(g, n.args[1])]
-		bound := f.lanes > 0 ? splat(g, add(g, int_node(i64(moved))), f.lanes, f.bits) : add(g, int_node(i64(moved)))
+		bound := f.lanes > 0 ? splat(g, add(g, int_node(moved)), f.lanes, f.bits) : add(g, int_node(moved))
 		equal(g, c, binary(g, n.op, s.args[0], bound))
 		return
 	}
@@ -267,7 +267,7 @@ shifted :: proc(g: ^Graph, c: Class, n: Node) {
 // Power: base ** count, a count known.
 Power :: struct {
 	base:  Class,
-	count: i64,
+	count: i128,
 }
 
 // powers: the powers the class c holds: c ** 1, and each power of a count known.
@@ -312,7 +312,7 @@ same_lanes :: proc(g: ^Graph, n: Node) -> bool {
 }
 
 // log2: k when c = 2ᵏ, k ≥ 1.
-log2 :: proc(c: i64) -> (k: i64, ok: bool) {
+log2 :: proc(c: i128) -> (k: i128, ok: bool) {
 	if c < 2 || c & (c - 1) != 0 do return
 	for x := c; x > 1; x >>= 1 do k += 1
 	return k, true

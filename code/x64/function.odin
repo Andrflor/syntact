@@ -299,7 +299,7 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 	case mir.Compare:
 		compare(fr, i.cond, i.a, i.b)
 		x := work(fr, i.dst)
-		set(i.cond, f.kinds[i.a].machine == .Real)
+		set(i.cond, f.kinds[i.a].machine == .Real || unsigned_pair(fr, i.a, i.b))
 		enc.movzx_r64_r8(x, .AL)
 		put(fr, place_of(fr, i.dst), x)
 	case mir.Foreign:
@@ -496,19 +496,38 @@ int_binary :: proc(fr: ^Frame, i: mir.Binary) -> string {
 	case .Div, .Mod:
 		y := in_register_place(fr, b, .RCX)
 		get(fr, .RAX, place_of(fr, i.a))
-		enc.cqo()
-		enc.idiv_r64(y)
+		if unsigned_pair(fr, i.a, i.b, i.dst) {
+			enc.xor_r32_r32(.EDX, .EDX)
+			enc.div_r64(y)
+		} else {
+			enc.cqo()
+			enc.idiv_r64(y)
+		}
 		x = i.op == .Div ? .RAX : .RDX
 	case .Shl, .Shr:
 		get(fr, x, a)
+		// a word read as unsigned shifts in zeros
+		logical := i.op == .Shr && unsigned_pair(fr, i.a, i.b, i.dst)
 		if is_constant {
 			k := u8(constant & 63)
-			if i.op == .Shl do enc.shl_r64_imm8(x, k)
-			else do enc.sar_r64_imm8(x, k)
+			switch {
+			case i.op == .Shl:
+				enc.shl_r64_imm8(x, k)
+			case logical:
+				enc.shr_r64_imm8(x, k)
+			case:
+				enc.sar_r64_imm8(x, k)
+			}
 		} else {
 			get(fr, .RCX, b)
-			if i.op == .Shl do enc.shl_r64_cl(x)
-			else do enc.sar_r64_cl(x)
+			switch {
+			case i.op == .Shl:
+				enc.shl_r64_cl(x)
+			case logical:
+				enc.shr_r64_cl(x)
+			case:
+				enc.sar_r64_cl(x)
+			}
 		}
 	case .Pow:
 		get(fr, .RAX, place_of(fr, i.a))
@@ -610,6 +629,14 @@ compare :: proc(fr: ^Frame, cond: mir.Cond, a: mir.Reg, b: mir.Operand) {
 	}
 }
 
+// unsigned_pair: an operation on a and b — giving dst — reads its words as unsigned:
+// one of them is (code.unsigned).
+unsigned_pair :: proc(fr: ^Frame, a: mir.Reg, b: mir.Operand, dst := mir.NO_REG) -> bool {
+	if code.unsigned(fr.f.kinds[a]) do return true
+	if r, is_reg := b.(mir.Reg); is_reg && code.unsigned(fr.f.kinds[r]) do return true
+	return dst != mir.NO_REG && code.unsigned(fr.f.kinds[dst])
+}
+
 // set: al = the cond of the flags; on floats, the unsigned conditions.
 set :: proc(cond: mir.Cond, real: bool) {
 	switch cond {
@@ -681,11 +708,12 @@ terminator :: proc(fr: ^Frame, t: mir.Terminator, next: int) {
 			if int(v.no) != next do to_block(fr, enc.jmp_rel32, v.no)
 			return
 		}
+		words := unsigned_pair(fr, v.a, v.b) // read as unsigned: the conditions below and above
 		if int(v.yes) == next {
-			to_block(fr, jump_if(v.cond, false, true), v.no)
+			to_block(fr, jump_if(v.cond, words, true), v.no)
 			return
 		}
-		to_block(fr, jump_if(v.cond, false, false), v.yes)
+		to_block(fr, jump_if(v.cond, words, false), v.yes)
 		if int(v.no) != next do to_block(fr, enc.jmp_rel32, v.no)
 	case mir.Return:
 		if v.value == mir.NO_REG do enc.xor_r32_r32(.EAX, .EAX)

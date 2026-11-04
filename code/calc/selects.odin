@@ -48,11 +48,11 @@ cells :: proc(g: ^Graph, c: Class, n: Node) {
 	cell := cover.ints[0]
 	if !in_64(cell) do return
 	if cell.lo == cell.hi {
-		equal(g, c, binary(g, .Eq, x, add(g, int_node(i64(cell.lo)))))
+		equal(g, c, binary(g, .Eq, x, add(g, int_node(cell.lo))))
 		return
 	}
-	above := add(g, binary(g, .Ge, x, add(g, int_node(i64(cell.lo)))))
-	below := add(g, binary(g, .Le, x, add(g, int_node(i64(cell.hi)))))
+	above := add(g, binary(g, .Ge, x, add(g, int_node(cell.lo))))
+	below := add(g, binary(g, .Le, x, add(g, int_node(cell.hi))))
 	equal(g, c, binary(g, .And, above, below))
 }
 

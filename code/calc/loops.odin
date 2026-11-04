@@ -80,7 +80,7 @@ step :: proc(g: ^Graph, c: Class, l, j: int) -> (i64, bool) {
 		if n.kind != .Binary || n.op != .Add && n.op != .Sub do continue
 		d, known := g.facts[find(g, n.args[1])].constant.?
 		if !known do continue
-		if _, is := counter_of(g, n.args[0], l, j); is do return n.op == .Add ? d : -d, true
+		if _, is := counter_of(g, n.args[0], l, j); is && code.in_word({d, d}) && d >= i128(min(i64)) && d <= i128(max(i64)) do return i64(n.op == .Add ? d : -d), true
 	}
 	return 0, false
 }
@@ -231,7 +231,7 @@ vector_first :: proc(g: ^Graph, a, b: Class) -> [2]Class {
 
 scaled :: proc(g: ^Graph, p: Polynomial, s: i64) -> Polynomial {
 	out := make([]Class, len(p.coefficients))
-	for c, k in p.coefficients do out[k] = times(g, c, add(g, int_node(s)))
+	for c, k in p.coefficients do out[k] = times(g, c, add(g, int_node(i128(s))))
 	return Polynomial{out, p.token}
 }
 
@@ -239,7 +239,7 @@ summed :: proc(g: ^Graph, a, b: []Class, sign: i64) -> []Class {
 	out := make([]Class, max(len(a), len(b)))
 	for &c, k in out {
 		x := k < len(a) ? a[k] : add(g, int_node(0))
-		y := k < len(b) ? times(g, b[k], add(g, int_node(sign))) : add(g, int_node(0))
+		y := k < len(b) ? times(g, b[k], add(g, int_node(i128(sign)))) : add(g, int_node(0))
 		c = plus(g, x, y)
 	}
 	return trimmed(g, out)
@@ -273,7 +273,7 @@ difference :: proc(g: ^Graph, p: []Class, delta: i64) -> []Class {
 		for m in k + 1 ..< len(p) {
 			factor := binomial(m, k)
 			for _ in 0 ..< m - k do factor *= delta
-			c = plus(g, c, times(g, p[m], add(g, int_node(factor))))
+			c = plus(g, c, times(g, p[m], add(g, int_node(i128(factor)))))
 		}
 	}
 	return out
@@ -366,9 +366,9 @@ power_step :: proc(g: ^Graph, n: Node, l, i: int, delta: i64) -> (factor: Class,
 	e := polynomial(g, n.args[1], l, i) or_return
 	if len(e.coefficients) != 2 do return
 	alpha := g.facts[find(g, e.coefficients[1])].constant.? or_return
-	slope = alpha * delta
+	slope = i64(alpha * i128(delta))
 	if slope == 0 do return
-	factor = slope == 1 || slope == -1 ? find(g, n.args[0]) : add(g, binary(g, .Pow, n.args[0], add(g, int_node(abs(slope)))))
+	factor = slope == 1 || slope == -1 ? find(g, n.args[0]) : add(g, binary(g, .Pow, n.args[0], add(g, int_node(i128(abs(slope))))))
 	return factor, slope, e.token, true
 }
 
