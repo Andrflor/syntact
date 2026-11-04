@@ -111,12 +111,20 @@ Emission :: struct {
 
 // Write: `x -<< v`, the resonant binding x takes v: what reads it after reads v
 // (§4.14). It is not an effect: it is held where it is written, and the Effect that
-// carries it orders it.
+// carries it orders it. What v reads of places is read where the write is: each
+// place v reads is its version there, which a write before it gives. Without a
+// place, it is a read pinned where it is written: a binding that reads places.
 Write :: struct {
-	target: Type, // x, as written
-	place:  ^Unknown, // the place of x, once typed
-	before: ^Unknown, // x before the write: what its value reads of x
-	value:  Type,
+	target:   Type, // x, as written
+	place:    ^Unknown, // the place of x, once typed; nil: a pin
+	versions: []Version, // the places v reads, as they are where the write is
+	value:    Type,
+}
+
+// Version: a place, as it is at a point: an unknown of its own, which the write
+// before that point gives.
+Version :: struct {
+	place, at: ^Unknown,
 }
 
 // Known: what a node of the algebra knows of itself: whether it is a normal form;
@@ -360,6 +368,7 @@ Binding :: struct {
 	value:       Type, // nil: the default of the color
 	handle:      Type, // a handler: the event it answers, as written
 	resonance:   Type, // a resonant binding `x >>- E`: E, the event that changes it, as written; its value is its place (§4.14)
+	reactive:    bool, // `x >>= v`: x follows v, read where x is read, not where it is written (§4.14)
 	span:        syn.Span,
 	scope:       ^Scope,
 	source:      ^Binding, // in a copy made by a carve: the binding it copies

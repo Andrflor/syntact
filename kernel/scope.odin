@@ -305,11 +305,13 @@ copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 	for b in s.bindings {
 		n := new(Binding)
 		n^ = Binding {
-			name   = b.name,
-			kind   = b.kind,
-			span   = b.span,
-			scope  = c,
-			source = b,
+			name     = b.name,
+			kind     = b.kind,
+			span     = b.span,
+			scope    = c,
+			source   = b,
+			carved   = b.carved, // a copy of what a carve gave: still the carve's
+			reactive = b.reactive,
 		}
 		m.bindings[b] = n
 		append(&c.bindings, n)
@@ -319,6 +321,7 @@ copy_into :: proc(k: ^Kernel, m: ^Copier, s: ^Scope, parent: ^Scope) -> ^Scope {
 		n.color = copy_term(k, m, b.color, c)
 		n.value = copy_term(k, m, b.value, c)
 		n.handle = copy_handle(m, b.handle)
+		n.resonance = copy_handle(m, b.resonance)
 	}
 	return c
 }

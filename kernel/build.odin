@@ -139,7 +139,15 @@ build_binding :: proc(k: ^Kernel, s: ^Scope, idx: syn.Node_Index) {
 			return
 		}
 		b.value = new_write(build_term(k, s, data.binary.left), build_term(k, s, data.binary.right), node_span(k, idx))
-	case .ReactivePush, .ReactivePull:
+	case .ReactivePush:
+		// `C:x >>= v`: x follows v, read where x is read (§4.14)
+		if data.binary.right == syn.INVALID_NODE {
+			b.value = unsupported(k, idx, "a reactive binding without its value")
+			return
+		}
+		build_left(k, s, data.binary.left, b)
+		b.value, b.reactive = build_term(k, s, data.binary.right), true
+	case .ReactivePull:
 		b.value = unsupported(k, idx, fmt.tprintf("the arrow %v", ast.node_kinds[idx]))
 	case:
 		if captured(ast, idx) {

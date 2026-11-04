@@ -1,5 +1,6 @@
 package kernel
 
+import syn "../syntax"
 import "core:fmt"
 import "core:slice"
 
@@ -173,20 +174,26 @@ given :: proc(k: ^Kernel, t: Type) -> Type {
 renewed :: proc(k: ^Kernel, t: Type, run: ^Rewrite) -> Type {
 	#partial switch v in t {
 	case ^Effect:
-		if v.write != nil && v.write.before != nil && !is_new(run^, v.write.before) {
-			// each run writes from a place before of its own
-			x := new(Unknown)
-			x^ = v.write.before^
-			x.id = k.unknowns
-			k.unknowns += 1
-			run^ = rewriting(run^, v.write.before, x)
+		if v.write != nil && len(v.write.versions) > 0 && !is_new(run^, v.write.versions[0].at) {
+			// each run reads the places where its own writes are
 			w := new(Write)
 			w^ = v.write^
-			w.before, w.value = x, rewrite(k, v.write.value, rewriting(nil, v.write.before, x))
+			versions := make([]Version, len(v.write.versions))
+			fresh: Rewrite
+			for ver, i in v.write.versions {
+				x := new(Unknown)
+				x^ = ver.at^
+				x.id = k.unknowns
+				k.unknowns += 1
+				run^ = rewriting(run^, ver.at, x)
+				fresh = rewriting(fresh, ver.at, x)
+				versions[i] = Version{place = ver.place, at = x}
+			}
+			w.versions, w.value = versions, rewrite(k, v.write.value, fresh)
 			out := new(Effect)
 			out^ = v^
 			out.write = w
-			out.then = renewed(k, rewrite(k, v.then, rewriting(nil, v.write.before, x)), run)
+			out.then = renewed(k, rewrite(k, v.then, fresh), run)
 			return out
 		}
 		if v.choice != nil {
@@ -334,7 +341,7 @@ freed :: proc(k: ^Kernel, t: Type, keep: ^Scope) -> Type {
 written_places :: proc(t: Type, out: ^[dynamic]^Unknown) {
 	#partial switch v in t {
 	case ^Effect:
-		if v.write != nil {
+		if v.write != nil && v.write.place != nil {
 			known := false
 			for p in out do known ||= same_unknown(p, v.write.place)
 			if !known do append(out, v.write.place)
@@ -350,7 +357,7 @@ written_places :: proc(t: Type, out: ^[dynamic]^Unknown) {
 unwritten :: proc(t: Type, place: ^Unknown) -> Type {
 	#partial switch v in t {
 	case ^Effect:
-		if v.write != nil && same_unknown(v.write.place, place) do return unwritten(v.then, place)
+		if v.write != nil && v.write.place != nil && same_unknown(v.write.place, place) do return unwritten(v.then, place)
 		then := unwritten(v.then, place)
 		choice := v.choice != nil ? unwritten(v.choice, place) : nil
 		if then == v.then && choice == v.choice do return t
@@ -393,10 +400,13 @@ last_part :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
 //   ω(x := v, t)   =   ω(x := v, t[x ↦ v])
 //
 // up to the first emission not answered yet: its handler may write x, so what
-// follows it is read once it is answered (answer_in). What v reads of x is x before
-// the write, an unknown of its own, x⁻: a write before it gives x⁻ its value. So a
-// read of x is replaced once, by the write it follows. A write is held where it is
-// written, ordered like the effects; nothing reads what it gives back.
+// follows it is read once it is answered (answer_in). What v reads of a place p is
+// p where the write is, an unknown of its own, its version p@: the write of p
+// before it gives p@ its value. So each read is replaced once, by the write it
+// follows, and a read never crosses a write of its place. A binding that reads
+// places is a pin: a write without place, which only reads them where it is.
+// A write is held where it is written, ordered like the effects; nothing reads
+// what it gives back.
 
 // write_law: `x -<< v` as written: x a resonant binding, v in its color, computed
 // first — its effects before the write.
@@ -407,7 +417,7 @@ write_law :: proc(k: ^Kernel, e: ^Effect) -> Type {
 write_parts :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
 	e := t.(^Effect)
 	place, is_place := parts[0].(^Unknown)
-	if !is_place || place.place == nil {
+	if !is_place || place.place == nil || place.before {
 		return problem(.Invalid_Write, e.span, fmt.tprintf("`-<<` writes a resonant binding, not %s", print_type(parts[0])))
 	}
 	if place.written != nil {
@@ -421,27 +431,66 @@ write_parts :: proc(k: ^Kernel, t: Type, parts: []Type) -> Type {
 	return writing(k, out, normal(k, e.then))
 }
 
-// writing: the write e, wrapping t, what follows it reading what it wrote; what its
-// value reads of the place is the place before it.
+// pinned: t, the value of the binding b, which reads places: a pin, where b is
+// written, what reads b reading them there.
+pinned :: proc(k: ^Kernel, t: Type, span: syn.Span) -> Type {
+	w := new(Write)
+	w.value = t
+	e := new(Effect)
+	e^ = Effect{id = -1, write = w, span = span}
+	return writing(k, e, t)
+}
+
+// reads_places: t reads a place, outside the scopes it holds.
+reads_places :: proc(t: Type) -> bool {
+	seen := make([dynamic]^Unknown)
+	read_unknowns(t, &seen)
+	for u in seen do if u.place != nil && !u.before do return true
+	return false
+}
+
+// writing: the write e, wrapping t: what its value reads of places, read where it
+// is; what follows reading what it wrote. A pin all of whose reads are given is
+// what it wraps.
 writing :: proc(k: ^Kernel, e: ^Effect, t: Type) -> Type {
 	w := new(Write)
 	w^ = e.write^
-	if w.before == nil {
-		w.before = new(Unknown)
-		w.before^ = w.place^
-		w.before.id, w.before.before = k.unknowns, true
+	then := t
+	// each place the value reads, a version of its own
+	seen := make([dynamic]^Unknown)
+	read_unknowns(w.value, &seen)
+	versions := make([dynamic]Version)
+	append(&versions, ..w.versions)
+	for u in seen {
+		if u.place == nil || u.before do continue
+		at := new(Unknown)
+		at^ = u^
+		at.id, at.before = k.unknowns, true
 		k.unknowns += 1
+		append(&versions, Version{place = u, at = at})
+		r := rewriting(nil, u, at)
+		w.value = rewrite(k, w.value, r)
+		if w.place == nil do then = rewrite(k, then, r) // a pin: what it wraps reads them there too
 	}
-	w.value = rewrite(k, w.value, rewriting(nil, w.place, w.before))
+	w.versions = versions[:]
+	if w.place != nil do then = after_write(k, then, w.place, w.value)
+	else if !pin_reads(k, w, then) do return then
 	out := new(Effect)
 	out^ = e^
-	out.answer, out.write, out.then = nil, w, after_write(k, t, w.place, w.value)
+	out.answer, out.write, out.then = nil, w, then
 	return out
 }
 
+// pin_reads: the pin w still reads a place where it is: one of its versions is not
+// given yet.
+pin_reads :: proc(k: ^Kernel, w: ^Write, then: Type) -> bool {
+	for v in w.versions do if reads(k, then, v.at) do return true
+	return false
+}
+
 // after_write: t, what follows a write of the place to v: its reads are v, up to an
-// emission not answered yet — what it sends is computed before it. A later write of
-// the place: what it reads of the place before it is v; what follows it reads it.
+// emission not answered yet — what it sends is computed before it. A later write:
+// its version of the place is v; what follows a later write of the place reads it.
 after_write :: proc(k: ^Kernel, t: Type, place: ^Unknown, v: Type) -> Type {
 	reads := rewriting(nil, place, v)
 	#partial switch x in t {
@@ -452,12 +501,22 @@ after_write :: proc(k: ^Kernel, t: Type, place: ^Unknown, v: Type) -> Type {
 			out := new(Effect)
 			out^ = x^
 			out.write = w
-			if same_unknown(x.write.place, place) {
-				before := rewriting(nil, x.write.before, v)
-				w.value, out.then = rewrite(k, x.write.value, before), rewrite(k, x.then, before)
+			// its version of the place, where it is, is v
+			given_versions := reads
+			kept := make([dynamic]Version)
+			for ver in x.write.versions {
+				if same_unknown(ver.place, place) do given_versions = rewriting(given_versions, ver.at, v)
+				else do append(&kept, ver)
+			}
+			w.versions = kept[:]
+
+			w.value = rewrite(k, x.write.value, given_versions)
+			if w.place != nil && same_unknown(w.place, place) {
+				out.then = rewrite(k, x.then, given_versions[1:])
 				return out
 			}
-			w.value, out.then = rewrite(k, x.write.value, reads), after_write(k, x.then, place, v)
+			out.then = after_write(k, rewrite(k, x.then, given_versions[1:]), place, v)
+			if w.place == nil && !pin_reads(k, w, out.then) do return out.then
 			return out
 		}
 		if x.emission != nil {

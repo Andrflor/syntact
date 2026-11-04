@@ -476,6 +476,11 @@ MEMORY_CASES := []Memory_Case {
 	{SET + "x -> {u16:a -> !?, w >- Set{v -> a}, -> value + 1}!", "ε0(x::u16, [?0 -<< x](x + 1))", 1, "16"},
 	// a place of the file outlives the run that writes it
 	{SET + "x -> {w >- Set{v -> 7}, -> value}!", "[?0 -<< 7](7)", 1, "16"},
+	// a binding reads a place where it is written; a reactive one, where it is read
+	{COUNTER + "x -> {c -> Counter!, a -> c.value, c.increment!, -> a}!", "0", 0, "0"},
+	{COUNTER + "x -> {c -> Counter!, a >>= c.value, c.increment!, -> a}!", "1", 0, "0"},
+	{COUNTER + "x -> {c -> Counter!, p >>= c.value * 2, c.increment!, c.increment!, -> p}!", "4", 0, "0"},
+	{COUNTER + "x -> {c -> Counter!, p >>= c.value * 2, a -> p, c.increment!, -> a + p}!", "2", 0, "0"},
 	// a counter the run gives is held: its place lives on
 	{COUNTER + "x -> {c -> Counter!, c.increment!, -> c}!", "", 1, "16"},
 }

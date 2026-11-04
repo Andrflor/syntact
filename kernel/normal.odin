@@ -443,6 +443,10 @@ binding_type :: proc(k: ^Kernel, b: ^Binding) -> Type {
 	} else {
 		value = normal(k, b.value)
 	}
+	// a binding that reads places reads them where it is written: a pin; a reactive
+	// one reads them where it is read (§4.14)
+	// an argument of a carve is read by what computes the carve, where it is
+	if b.kind == .Push && b.resonance == nil && !b.reactive && !b.carved && b.name != "" && !has_effect(value) && reads_places(value) do value = pinned(k, value, b.span)
 	// the program is collapsed by nothing: what comes up to it is answered by the
 	// default of each emission (§4.9)
 	// and the places that die with what it runs are freed (§4.12)

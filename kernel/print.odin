@@ -193,10 +193,14 @@ write_bare :: proc(b: ^Printer, t: Type) {
 				write_type(b, v.write.value, 0)
 				return
 			}
+			// a pin: [@ v](t), v read where it is
 			strings.write_byte(b, '[')
-			if v.write.place != nil do write_type(b, v.write.place, PREC_ATOM)
-			else do write_type(b, v.write.target, PREC_ATOM)
-			strings.write_string(b, " -<< ")
+			if v.write.place != nil {
+				write_type(b, v.write.place, PREC_ATOM)
+				strings.write_string(b, " -<< ")
+			} else {
+				strings.write_string(b, "@ ")
+			}
 			write_type(b, v.write.value, 0)
 			strings.write_string(b, "](")
 			write_type(b, v.then, 0)

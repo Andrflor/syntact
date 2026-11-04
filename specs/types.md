@@ -699,7 +699,9 @@ program is typed. So:
 - two effects are never reordered;
 - what is pure crosses all of them.
 
-A reactive bind `>>=` `=<<` follows what it reads:
+A binding `x -> v` that reads places reads them where it is written: what reads x
+reads them as they were there, whatever is written after. A reactive bind `>>=`
+`=<<` follows what it reads:
 
 - **A reference** — a bind that resolves to a resonant binding — is that binding's
   handle. Its type is the set of handles it may designate: known when the program
