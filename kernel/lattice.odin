@@ -582,6 +582,10 @@ minus_cell :: proc(k: ^Kernel, x: Type, u: []Type) -> []Type {
 		if text_empty(rest) do return nil
 		return cell(k, rest)
 	case .Value:
+		// a & b & ~a = none: a cell met with what it takes away is empty
+		if both, met := x.(^And); met {
+			for y in u do for t in both.terms do if same(k, t, y) do return nil
+		}
 		for y in u do if cell_family(y) == .Value && !different_structures(k, x, y) do push(k, y)
 		ys := pushed(k, from)
 		if len(ys) == 0 do return cell(k, x)

@@ -751,6 +751,19 @@ u8:n -> ??             n = ?₂::u8          ?? takes the layout of its color
 s{x -> w}            = s where the first occurrence of x is w
 ```
 
+A run is read by its places, with terms like any other — known when the run is:
+
+```text
+|x|                  the number of bindings of the run x
+x.#k                 its binding k, from 0
+x from k             the run of its bindings from k on
+
+|{1 2 3}| = 3        {1 2 3}.#1 = 2        {1 2 3} from 1 = {2 3}
+|{...x  r}| = |x| + 1                       x a run not known yet
+x from 0 = x         (x from a) from b = x from (a + b)
+(x from a).#b = x.#(a + b)                  |x from k| = |x| - k, k in 0..|x|
+```
+
 A carve replaces an equation. Everything that names x follows, since its equation
 mentions x:
 
@@ -891,7 +904,13 @@ s(k) = k + c           kᵢ = m + c·i                          n = m - b, or 0,
 s(k) = α·k + c         kᵢ = α ** i * m + c * (α ** i - 1) / (α - 1)
 s(k) = k / c, k ≥ 0    kᵢ = m / c ** i                       n = μ(i: m / c ** i in B)
 s(k) = k >> c          kᵢ = m >> c·i
+s(k) = k from 1        kᵢ = m from i                         n = |m|, when B is the empty run
 ```
+
+A run is the orbit of its positions: a recursion whose call takes the rest of the
+run its pattern cuts — `xs ? {{T(h) ...R:(t)} -> … f{xs -> t}! …  -> c}` — is a fold
+on the position k of xs, from 0 by k + 1 until |xs|: h is `xs.#k`, t is `xs from
+k + 1`. The pieces a cover cuts from a run not known yet are these terms.
 
 Then the equation itself is folded from the base case up, over the steps i from
 n - 1 down to 0, after the effects before the call going down — unless post reads

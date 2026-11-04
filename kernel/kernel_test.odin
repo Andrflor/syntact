@@ -277,6 +277,11 @@ SPEC_CASES := []Spec_Case {
 	{"fact -> {u8:n -> ??  -> n ? {0 -> 1  -> n * fact{n -> n - 1}!}}\nx -> fact{n -> 5}!", "Π(x: 1..5, x)", {}},
 	// states carried by the call: the fold goes down, each a state of it
 	{"count -> {u32:n -> ??  u64:r -> ??  -> n ? {0 -> r  -> count{n -> n - 1  r -> r ^ n}!}}\nx -> count{n -> 3  r -> 0}!", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y ^ -x + 3; y)", {}},
+	// a run is the orbit of its positions: a fold on k until |xs|, h = xs.#k
+	{ARRAY + "A -> Array{u8}\ntotal -> {\n  A:xs -> {}\n  u8:acc -> 0\n  -> xs ? {\n    {u8(h) ...A:(t)} -> total{xs -> t  acc -> (acc + h) [&] 255}!\n    -> acc\n  }\n}\nx -> total{xs -> ??::A}!", "⟳(x: 0 ↦ x + 1 until |?0|..; y: 0 ↦ y + ?0.#x [&] 255; y)", {}},
+	{ARRAY + "A -> Array{u8}\ntotal -> {\n  A:xs -> {}\n  u8:acc -> 0\n  -> xs ? {\n    {u8(h) ...A:(t)} -> total{xs -> t  acc -> (acc + h) [&] 255}!\n    -> acc\n  }\n}\nx -> total{xs -> {1 2 3}}!", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y + {1  2  3}.#x [&] 255; y)", {}},
+	// the pieces a cover cuts from a run not known yet
+	{ARRAY + "A -> Array{u8}\nxs -> ??::A\nx -> xs ? {\n  {u8(h) ...A:(t)} -> t\n  -> {}\n}", "?0 ? {{u8:  ...A:} -> ?0 from 1  -> {}}", {}},
 	// a recursion whose base case is a scope folds up from it: its state a run
 	{"build -> {u32:n -> ??  -> n ? {0 -> {}  -> {...build{n -> n - 1}!  n}}}\nx -> build{n -> 3}!", "⟳(x: 2 ↦ x - 1 until ..(-1); y: {} ↦ {...y  -x + 3}; y)", {}},
 	{SUM + "x -> sum!", "(?0 + ?0 * ?0) / 2", {}},

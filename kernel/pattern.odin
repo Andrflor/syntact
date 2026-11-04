@@ -167,6 +167,24 @@ cover_pieces :: proc(k: ^Kernel, b: Branch, target: Type) -> map[^Binding]Type {
 	if b.view == nil do return pieces
 	s, known := target.(^Scope)
 	if !known {
+		// a run not known yet: its places are terms, x.#k, and x from k for the run
+		// that ends the cover (§5.3, §5.6)
+		if written, structural := b.cover.(^Scope); structural && gives_scope(k, target) {
+			shape := placed(k, written, .Shape)
+			at: Type = Int(0)
+			for place, i in shape {
+				if is_run(place) && i < len(shape) - 1 do break
+				if !is_run(place) {
+					pieces[place] = op(k, .Item, target, at)
+					at = op(k, .Add, at, Int(1))
+					continue
+				}
+				pieces[place] = op(k, .From, target, at)
+				return pieces
+			}
+			if len(pieces) == len(shape) do return pieces
+			clear(&pieces)
+		}
 		for v in b.view.bindings do pieces[v] = problem(.Invalid_Property_Access, b.span, fmt.tprintf("the pieces of %s are read, and it is not a known scope", print_type(target)))
 		return pieces
 	}

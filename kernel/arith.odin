@@ -110,6 +110,15 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		return layout_family(k, layout_of(k, v))
 	case ^Operation:
 		if v.op == .In do return .Bool, true
+		#partial switch v.op {
+		case .Length:
+			return .Count, true
+		case .From:
+			return .Scope, true
+		case .Item:
+			set := values(k, v) or_break
+			return layout_family(k, set)
+		}
 		if is_string_value(t) do return .String, true
 		// a recursive call whose equation is being given fits any family
 		families: [2]Maybe(Family)
@@ -204,6 +213,7 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 operation_law :: proc(k: ^Kernel, op: Operator, args: []Type, span: syn.Span) -> Type {
 	for a in args do if is_invalid(a) do return a
 	if op == .Round do return round_law(k, args[0], bits_format(args[1]), span)
+	if op == .Length || op == .Item || op == .From do return run_law(k, op, args, span)
 	if f := operands_format(k, op, args); f != .Exact {
 		// on values of a format, what the machine computes: the exact result, rounded
 		// to the widest; a known operand is first rounded to it (format.odin)

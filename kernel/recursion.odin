@@ -214,15 +214,30 @@ generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type) -
 // values is an unknown of its color, with those values (§5.6):
 // sum{n -> m}! = m ? {0 -> 0  -> m + sum{n -> m - 1}!} gives m * (m + 1) / 2 whatever
 // m, and whatever n holds in sum.
-generic_solution :: proc(k: ^Kernel, root: ^Scope, values: map[^Binding]Type) -> (solution: Type, ok: bool) {
-	params := make(map[^Binding]Type)
-	for b in values do params[b] = nil
-	generic := generic_equation(k, root, &params) or_return
-	p := first_production(k, generic) or_return
-	solved := iteration(k, generic, binding_type(k, p)) or_return
-	rewrites: Rewrite
-	for b, u in params do rewrites = rewriting(rewrites, u.(^Unknown), values[b])
-	return rewrite(k, solved, rewrites), true
+generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> (solution: Type, ok: bool) {
+	// the bindings given, and those the calls carve, at the value the scope holds
+	values := make(map[^Binding]Type)
+	for b, v in given do values[b] = v
+	generic: ^Scope
+	equation: Type
+	for {
+		params := make(map[^Binding]Type)
+		for b in values do params[b] = nil
+		generic = generic_equation(k, root, &params) or_return
+		p := first_production(k, generic) or_return
+		equation = binding_type(k, p)
+		more := false
+		for b in carved_by_calls(k, equation, root) do if b not_in values {
+			values[b] = binding_type(k, b)
+			more = true
+		}
+		if !more {
+			solved := iteration(k, generic, equation) or_return
+			rewrites: Rewrite
+			for b, u in params do rewrites = rewriting(rewrites, u.(^Unknown), values[b])
+			return rewrite(k, solved, rewrites), true
+		}
+	}
 }
 
 // holding: the binding of s that holds b, a binding of the scope s copies: b
@@ -394,6 +409,9 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	u := p.target.(^Unknown) or_return
 	root := origin(s)
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
+	// a run is the orbit of its positions: the branch that cuts its head makes the
+	// call, the other one is the base, where the run is empty
+	if !solved(c, root) && solved(r, root) && cuts_head(k, stop, u) do stop, c, r = run_scope(k, nil), r, c
 	if !solved(c, root) do return
 	family := family_of(k, given(k, c)) or_return
 	pre, calls, answer, after := at_calls(k, s, r) or_return
@@ -561,6 +579,9 @@ orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, 
 	if !is_x || !same_unknown(y, x) || !constant || c <= 0 do return nil, false
 	shift: i128
 	#partial switch o.op {
+	case .From:
+		// the rest of a run: m from c·i
+		return op(k, .From, m, op(k, .Mul, Int(c), i)), true
 	case .Shr:
 		shift = i128(c)
 	case .Div:
@@ -582,6 +603,10 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	out.index, out.holds, out.span = i, holds, span
 	o, is_in := holds.(^Operation)
 	if !is_in || o.op != .In do return out
+	// the run m from i is empty from i = |m| on: μ is |m|
+	if rest, is_from := o.args[0].(^Operation); is_from && rest.op == .From && same(k, rest.args[1], i) {
+		if empty, is_scope := o.args[1].(^Scope); is_scope && len(empty.bindings) == 0 do return op(k, .Length, rest.args[0])
+	}
 	alpha, beta, affine := affine_in(o.args[0], i)
 	slope, is_int := alpha.(Int)
 	if !affine || !is_int || slope != 1 && slope != -1 do return out
@@ -1335,4 +1360,21 @@ power_sums :: proc(u: ^Unknown, d: int) -> (out: []Type, ok: bool) {
 		out[p] = ring_over(acc, i128(p + 1)) or_return
 	}
 	return out, true
+}
+
+// cuts_head: the cover cuts every run u may be but the empty one — a binding, then
+// the rest — `{T(h) ...R:(t)}`, u a run of pieces of one binding in T, in R.
+cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> bool {
+	written, is_scope := cover.(^Scope)
+	if !is_scope do return false
+	places := placed(k, written, .Shape)
+	if len(places) != 2 || is_run(places[0]) || !is_run(places[1]) || places[1].color == nil do return false
+	if !is_bool(in_law(k, u, binding_color(k, places[1])), true) do return false
+	pieces, _, ok := run_pieces(k, u)
+	shape, single := pieces.(^Scope)
+	if !ok || !single do return false
+	inner := placed(k, shape, .Shape)
+	if len(inner) != 1 || is_run(inner[0]) do return false
+	head := binding_color(k, places[0])
+	return head == nil || inner[0].color != nil && included(k, binding_color(k, inner[0]), head)
 }

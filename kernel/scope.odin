@@ -891,9 +891,17 @@ pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts, used: Type, lengths: []
 }
 
 // run_pieces: what x, a run not known yet, is made of: its layout, solved by Arden
-// (§5.6), is a run of pieces of A, m of them, `{...(A * m):}`, then nothing.
+// (§5.6), is a run of pieces of A, m of them, `{...(A * m):}`, then nothing. A
+// layout narrowed, L & C, is made of the pieces of L.
 run_pieces :: proc(k: ^Kernel, x: Type) -> (pieces: Type, m: Type, ok: bool) {
-	layout := values(k, x) or_return
+	return layout_pieces(k, values(k, x) or_return)
+}
+
+layout_pieces :: proc(k: ^Kernel, layout: Type) -> (pieces: Type, m: Type, ok: bool) {
+	if both, narrowed := layout.(^And); narrowed {
+		for t in both.terms do if pieces, m, ok = layout_pieces(k, t); ok do return
+		return
+	}
 	s := layout.(^Scope) or_return
 	if recursive(s) do s = arden(k, s) or_return
 	for b in placed(k, s, .Shape) {
@@ -1090,4 +1098,83 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 		if !same(k, binding_type(k, x), binding_type(k, y)) do return false
 	}
 	return true
+}
+
+// --- runs (§5.3) ---
+//
+// A run is read by its places: |x| its number of bindings, x.#k its binding k,
+// x from k the run from k on. Where its bindings are known, they are read; a run
+// not known yet counts as many bindings as its layout gives it (§4.7); what no law
+// reduces stays.
+
+// run_law: |x|, x.#k, x from k.
+run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
+	x := given(k, args[0])
+	if !gives_scope(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
+	from, is_from := x.(^Operation)
+	is_from &&= from.op == .From
+	if o == .Length {
+		if is_from do return op(k, .Sub, run_law(k, .Length, from.args[:1], span), from.args[1]) // |x from k| = |x| - k
+		s, known := x.(^Scope)
+		if !known do return new_operation(o, x)
+		n: Type = Int(0)
+		for b in run_data(k, s) do n = op(k, .Add, n, b.kind == .Expand ? run_law(k, .Length, {binding_value(k, b)}, span) : Int(1))
+		return n
+	}
+	i := args[1]
+	if !proven_in(k, i, COUNTS) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a place of a run, and %s is not proven to be one", operator_text[o], print_type(i)))
+	// (x from a).#b = x.#(a + b), (x from a) from b = x from (a + b)
+	if is_from do return run_law(k, o, {from.args[0], op(k, .Add, from.args[1], i)}, span)
+	if o == .From && is_int(i, 0) do return x
+	s, known := x.(^Scope)
+	at, placed_at := i.(Int)
+	if !known || !placed_at do return new_operation(o, x, i)
+	xs := run_data(k, s)
+	for b in xs[:min(int(at) + 1, len(xs))] do if b.kind == .Expand do return new_operation(o, x, i)
+	if o == .Item {
+		if int(at) >= len(xs) do return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %d", print_type(x), at))
+		return binding_value(k, xs[at])
+	}
+	if int(at) > len(xs) do return problem(.Invalid_Property_Access, span, fmt.tprintf("%s has no binding %d", print_type(x), at))
+	return run_scope(k, xs[at:])
+}
+
+// run_data: the bindings of a run, as it places them: values, and runs not known yet.
+run_data :: proc(k: ^Kernel, s: ^Scope) -> []^Binding {
+	out := make([dynamic]^Binding)
+	for b in placed(k, s, .Value) do if b.kind == .Push || b.kind == .Expand do append(&out, b)
+	return out[:]
+}
+
+// run_image: the values of |x|, x.#k, x from k over the layout of x, a run of
+// pieces of one binding each: its counts, the color of that binding, its layout.
+run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
+	// a known run: the values of its bindings, the counts up to its length
+	if s, known := given(k, o.args[0]).(^Scope); known {
+		xs := run_data(k, s)
+		items := make([]Type, len(xs))
+		for b, i in xs {
+			if b.kind == .Expand do return nil, false
+			items[i] = binding_value(k, b)
+		}
+		#partial switch o.op {
+		case .Length:
+			return Int(len(xs)), true
+		case .Item:
+			return or_law(k, items), true
+		}
+		return nil, false
+	}
+	pieces, m := run_pieces(k, o.args[0]) or_return
+	shape := pieces.(^Scope) or_return
+	places := placed(k, shape, .Shape)
+	if len(places) != 1 || is_run(places[0]) do return nil, false
+	#partial switch o.op {
+	case .Length:
+		return m, true
+	case .Item:
+		c := binding_color(k, places[0])
+		return c, c != nil
+	}
+	return values(k, o.args[0])
 }

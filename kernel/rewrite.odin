@@ -276,6 +276,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 	case ^Operation:
 		if is_string_value(t) do return t, true
 		if v.op == .In do return family_term(.Bool), true
+		if v.op == .Length || v.op == .Item || v.op == .From do return run_image(k, v)
 		args := make([]Type, len(v.args))
 		for a, i in v.args do args[i] = layout_image(k, a) or_return
 		// the term computes exactly: only a rounding rounds (format.odin)

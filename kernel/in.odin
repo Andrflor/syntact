@@ -31,7 +31,16 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := x.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, product, other)}, c)
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
-	if s, ok := c.(^Scope); ok do return admits(k, x, s)
+	if s, ok := c.(^Scope); ok {
+		// a term over unknowns is in what holds its layout, in nothing apart from it
+		if !is_constant(x) {
+			if image, known := values(k, x); known {
+				if included(k, image, s) do return Bool(true)
+				if apart(k, image, s) do return Bool(false)
+			}
+		}
+		return admits(k, x, s)
+	}
 	if o, ok := c.(^Operation); ok && o.op == .Mul && of_values(o.args[0]) do return repeated_in(k, x, o.args[0], o.args[1])
 	if i, ok := c.(^Is); ok do return equal_law(k, x, i.term)
 	if is_none(x) {

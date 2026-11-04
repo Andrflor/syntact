@@ -196,6 +196,9 @@ Operator :: enum u8 {
 	Greater_Eq,
 	In,
 	Round, // round(t, w): the value of the format of w bits nearest the real t (format.odin)
+	Length, // |x|: the number of bindings of the run x (§5.3)
+	Item, // x.#k: its binding k
+	From, // x from k: the run of its bindings from k on
 }
 
 Operation :: struct {
