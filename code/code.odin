@@ -12,11 +12,13 @@ import "core:strings"
 // integer, the narrowing an arm makes, the cells of a cover, whether a function has
 // effects. A backend reads these facts; it never computes them again.
 //
-// Its values are virtual registers, each written once, but for the value of a match,
-// written by the arm that runs, and the parameters of a loop, written on entry and
-// at each Again. A value is one value of its machine, or a vector of them, in
-// lanes: an operation on vectors is the operation on each lane. An effect is an instruction in the order it runs: the call of a
-// symbol behind a boundary (specs/types.md §4.8).
+// Its values are virtual registers, each written once, but for the values of a
+// match, written by the arm that runs, and the parameters of a loop, written on
+// entry and at each Again. A value is one value of its machine, or a vector of
+// them, in lanes: an operation on vectors is the operation on each lane. A scope of
+// fields is the values of its fields, in order: a body, a call, a match and a loop
+// give several values, none, or one. An effect is an instruction in the order it
+// runs: the call of a symbol behind a boundary (specs/types.md §4.8).
 
 Value :: distinct int
 
@@ -123,9 +125,9 @@ Inst :: union {
 	Reduce, // dst = a₀ op a₁ op …, the lanes of a vector by an operation that commutes
 	Select, // dst = yes where test is 1, no where it is 0 — in each lane of a vector
 	Foreign, // dst = the call of an imported symbol
-	Call, // dst = the call of a function of the program
-	Match, // dst = the value of the first arm whose cover takes the target
-	Loop, // dst = the value of a body run again at each Again
+	Call, // dst = the values of the call of a function of the program
+	Match, // dst = the values of the first arm whose cover takes the target
+	Loop, // dst = the values of a body run again at each Again
 	Again, // the parameters of the innermost loop take new values; its body runs again
 }
 
@@ -201,25 +203,25 @@ Foreign :: struct {
 	args:   []Value,
 }
 
-// Call: dst = func(args…), a function of the program.
+// Call: dst = func(args…), a function of the program: what it gives, in order.
 Call :: struct {
-	dst:  Value,
+	dst:  []Value,
 	func: int,
 	args: []Value,
 }
 
-// Body: instructions, then the value they give: NONE when they give nothing, or
+// Body: instructions, then the values they give: none when they give nothing, or
 // end in an Again.
 Body :: struct {
-	insts: [dynamic]Inst,
-	value: Value,
+	insts:  [dynamic]Inst,
+	values: []Value,
 }
 
 // Match: the arms in order; the first whose cover takes the target runs, and its
-// value is dst. The last is not tested: the check proved that an arm takes every
+// values are dst. The last is not tested: the check proved that an arm takes every
 // value.
 Match :: struct {
-	dst:    Value,
+	dst:    []Value,
 	target: Value,
 	arms:   []Arm,
 }
@@ -246,10 +248,10 @@ Interval :: struct {
 }
 
 // Loop: a recursion whose calls are in tail position. The parameters take init,
-// then the body runs; an Again in it runs it again, and the value of the body that
-// ends without one is dst.
+// then the body runs; an Again in it runs it again, and the values of the body that
+// ends without one are dst.
 Loop :: struct {
-	dst:    Value,
+	dst:    []Value,
 	params: []Value,
 	init:   []Value,
 	body:   Body,
@@ -273,15 +275,15 @@ Import :: struct {
 	result_signed: bool,
 }
 
-// Func: a function of the program; its parameters are its first values, v0…
-// Pure when its equation has no effect (specs/types.md §4.8): what it gives depends
-// on its arguments only.
+// Func: a function of the program; its parameters are its first values, v0…, and
+// its results the machines of the values it gives. Pure when its equation has no
+// effect (specs/types.md §4.8): what it gives depends on its arguments only.
 Func :: struct {
-	name:   string,
-	pure:   bool,
-	params: []Machine,
-	result: Machine,
-	body:   Body,
+	name:    string,
+	pure:    bool,
+	params:  []Machine,
+	results: []Machine,
+	body:    Body,
 	kinds:  [dynamic]Kind, // per value
 }
 
@@ -290,6 +292,13 @@ Program :: struct {
 	imports: [dynamic]Import,
 	texts:   [dynamic]string,
 	inputs:  [dynamic]Cover, // the layout of each input, as written: the stub takes no value outside it
+}
+
+// program_machine: the machine of the value a program gives — one at most —;
+// None for none.
+program_machine :: proc(p: ^Program) -> Machine {
+	results := p.funcs[0].results
+	return len(results) > 0 ? results[0] : .None
 }
 
 // --- building ---
@@ -354,7 +363,7 @@ print_program :: proc(p: ^Program) -> string {
 			facts := m == .Int && b != EVERY ? fmt.tprintf(" %s", print_cell(b)) : ""
 			append(&params, fmt.tprintf("v%d %v%s", i, m, facts))
 		}
-		fmt.sbprintfln(&b, "%sfunc %s(%s) -> %v", f.pure ? "pure " : "", f.name, strings.join(params[:], ", ", context.temp_allocator), f.result)
+		fmt.sbprintfln(&b, "%sfunc %s(%s) -> %v", f.pure ? "pure " : "", f.name, strings.join(params[:], ", ", context.temp_allocator), f.results)
 		print_body(&b, f, p, f.body, 1)
 	}
 	return strings.to_string(b)
@@ -366,7 +375,7 @@ print_body :: proc(b: ^strings.Builder, f: ^Func, p: ^Program, body: Body, depth
 		indent(b, depth)
 		#partial switch i in inst {
 		case Match:
-			fmt.sbprintfln(b, "%smatch %s%s", print_dst(i.dst), print_value(i.target), print_bounds(f, i.dst))
+			fmt.sbprintfln(b, "%smatch %s%s", print_dst(i.dst), print_value(i.target), print_all_bounds(f, i.dst))
 			for arm, n in i.arms {
 				indent(b, depth + 1)
 				fmt.sbprintfln(b, "%s:", n == len(i.arms) - 1 ? "_" : print_cover(arm.cover))
@@ -375,20 +384,33 @@ print_body :: proc(b: ^strings.Builder, f: ^Func, p: ^Program, body: Body, depth
 		case Loop:
 			pairs := make([dynamic]string, context.temp_allocator)
 			for x, n in i.params do append(&pairs, fmt.tprintf("%s <- %s", print_value(x), print_value(i.init[n])))
-			fmt.sbprintfln(b, "%sloop (%s)%s", print_dst(i.dst), strings.join(pairs[:], ", ", context.temp_allocator), print_bounds(f, i.dst))
+			fmt.sbprintfln(b, "%sloop (%s)%s", print_dst(i.dst), strings.join(pairs[:], ", ", context.temp_allocator), print_all_bounds(f, i.dst))
 			print_body(b, f, p, i.body, depth + 1)
 		case:
 			fmt.sbprintfln(b, "%s", print_inst(f, p, inst))
 		}
 	}
-	if body.value != NONE {
+	if len(body.values) > 0 {
 		indent(b, depth)
-		fmt.sbprintfln(b, "-> %s", print_value(body.value))
+		fmt.sbprintfln(b, "-> %s", print_list(body.values))
 	}
 }
 
-print_dst :: proc(x: Value) -> string {
-	return x == NONE ? "" : fmt.tprintf("v%d = ", int(x))
+print_dst :: proc(xs: []Value) -> string {
+	return len(xs) == 0 ? "" : fmt.tprintf("%s = ", print_list(xs))
+}
+
+print_list :: proc(xs: []Value) -> string {
+	out := make([dynamic]string, context.temp_allocator)
+	for x in xs do append(&out, print_value(x))
+	return strings.join(out[:], ", ", context.temp_allocator)
+}
+
+// print_all_bounds: the bounds of each value that has some.
+print_all_bounds :: proc(f: ^Func, xs: []Value) -> string {
+	out := make([dynamic]string, context.temp_allocator)
+	for x in xs do if s := print_bounds(f, x); s != "" do append(&out, s)
+	return strings.concatenate(out[:], context.temp_allocator)
 }
 
 print_value :: proc(x: Value) -> string {
@@ -422,11 +444,7 @@ print_cover :: proc(c: Cover) -> string {
 
 print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 	v := print_value
-	list :: proc(xs: []Value) -> string {
-		out := make([dynamic]string, context.temp_allocator)
-		for x in xs do append(&out, print_value(x))
-		return strings.join(out[:], ", ", context.temp_allocator)
-	}
+	list := print_list
 	switch i in inst {
 	case Const:
 		return fmt.tprintf("%s = %d", v(i.dst), i.value)
@@ -457,7 +475,7 @@ print_inst :: proc(f: ^Func, p: ^Program, inst: Inst) -> string {
 	case Foreign:
 		return fmt.tprintf("%s = call %s(%s)%s", v(i.dst), p.imports[i.symbol].symbol, list(i.args), print_bounds(f, i.dst))
 	case Call:
-		return fmt.tprintf("%s = call %s(%s)%s", v(i.dst), p.funcs[i.func].name, list(i.args), print_bounds(f, i.dst))
+		return fmt.tprintf("%scall %s(%s)%s", print_dst(i.dst), p.funcs[i.func].name, list(i.args), print_all_bounds(f, i.dst))
 	case Again:
 		return fmt.tprintf("again (%s)", list(i.args))
 	case Match, Loop:

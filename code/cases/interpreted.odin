@@ -90,7 +90,24 @@ CODE_CASES := []Code_Case {
 	{name = "division of a short, 9", source = "n -> ??::u16\n-> n / 10 + n % 255", inputs = {9}, int = 9},
 	{name = "division of a short, 65535", source = "n -> ??::u16\n-> n / 10 + n % 255", inputs = {65535}, int = 6553},
 	{name = "division of a short, 40000", source = "n -> ??::u16\n-> n / 10 + n % 255", inputs = {40000}, int = 4220},
+	// a scope of fields is the values of its fields: a function, its loop and its
+	// match give them all, a field read picks its own
+	{name = "field of a scope", source = "p -> {a -> ??::u8  b -> 3}\n-> p.a + p.b", inputs = {4}, int = 7},
+	{name = "function that gives a scope", source = PAIR + "-> f{n -> ??::u32}!.a", inputs = {10}, int = 54},
+	{name = "function that gives a scope, its other field", source = PAIR + "-> f{n -> ??::u32}!.b", inputs = {10}, int = 2},
+	{name = "values beyond the registers", source = FOUR + "-> f{n -> ??::u32}!.d", inputs = {5}, int = 7},
+	{name = "values beyond the registers, at the base", source = FOUR + "-> f{n -> ??::u32}!.d", inputs = {0}, int = 0},
+	{name = "a float beyond the registers", source = FOUR + "-> f{n -> ??::u32}!.c", inputs = {5}, real = 1.5},
+	{name = "binding of a run", source = RUN + "-> f{n -> ??::u32}!.#2", inputs = {5}, int = 21},
+	// a run read at a counter: a match on the counter, each arm a binding
+	{name = "run read at a counter", source = TOTAL + "-> total{xs -> {1 2 3}  acc -> ??::u8}!", inputs = {10}, int = 16},
 }
+
+// recursions whose base cases are scopes
+PAIR :: "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> {a -> acc  b -> 1}  1 -> {a -> acc  b -> 2}  -> f{n -> n - 1  acc -> (acc + n) % 1000}!}}\n"
+FOUR :: "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> {a -> acc  b -> 1  c -> 0.5  d -> n}  1 -> {a -> acc  b -> 2  c -> 1.5  d -> 7}  -> f{n -> n - 1  acc -> (acc + n) % 1000}!}}\n"
+RUN :: "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> {acc  10  20}  1 -> {acc  11  21}  -> f{n -> n - 1  acc -> (acc + n) % 1000}!}}\n"
+TOTAL :: "Array -> {T -> {}  -> {}  -> {T: ...Array{T}:}}\ntotal -> {\n  Array{u8}:xs -> {}\n  u8:acc -> 0\n  -> xs ? {\n    {u8(h) ...Array{u8}:(t)} -> total{xs -> t  acc -> (acc + h) [&] 255}!\n    -> acc\n  }\n}\n"
 
 // symbols: what the libraries of the cases answer.
 symbols :: proc() -> map[string]code.Symbol {

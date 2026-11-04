@@ -14,6 +14,10 @@ import enc "asm"
 // rax, rcx, rdx and r11, xmm0…xmm3 are never given: an instruction computes in
 // them, a call takes its floats in xmm0…xmm7. The frame keeps rbp, then the registers the function uses that a call
 // keeps, then the slots, 16-aligned.
+//
+// A function gives its values back as words: the first two in rax and rdx, the
+// others in slots the caller reserves above the arguments it passes on the stack,
+// 16-aligned, which the function writes above its return address, in order.
 
 KEPT := []enc.Register64{.RBX, .R12, .R13, .R14, .R15}
 SPENT := []enc.Register64{.RSI, .RDI, .R8, .R9, .R10}
@@ -30,13 +34,21 @@ target :: proc() -> mir.Target {
 	return mir.Target{kept = kept, spent = spent, arguments = arguments, wide = wide}
 }
 
-// Frame: the function being emitted, and where its registers are.
+// Frame: the function being emitted, where its registers are, and where it gives
+// back its values beyond the registers, from rbp.
 Frame :: struct {
-	e:      ^Emitter,
-	f:      ^mir.Func,
-	alloc:  mir.Allocation,
-	jumps:  [dynamic]Fixup, // to blocks
-	blocks: []int, // the offset of each block
+	e:       ^Emitter,
+	f:       ^mir.Func,
+	alloc:   mir.Allocation,
+	jumps:   [dynamic]Fixup, // to blocks
+	blocks:  []int, // the offset of each block
+	results: int,
+}
+
+// result_slots: the bytes a call reserves for the values beyond the registers of a
+// function that gives n.
+result_slots :: proc(n: int) -> int {
+	return enc.x64_abi_align16(8 * max(n - len(enc.SYSV_INT_RET), 0))
 }
 
 function :: proc(e: ^Emitter, f: ^mir.Func) -> string {
@@ -50,6 +62,7 @@ function :: proc(e: ^Emitter, f: ^mir.Func) -> string {
 	// the parameters, from the registers the System V ABI gives them
 	assignment, msg := assign(f.source.params)
 	if msg != "" do return msg
+	fr.results = 16 + assignment.stack_size
 	moves := make([dynamic]Move)
 	for loc, i in assignment.locations {
 		if fr.alloc.places[i] == nil do continue // never read
@@ -378,11 +391,22 @@ instruction :: proc(fr: ^Frame, inst: mir.Inst) -> string {
 		callee := e.prog.funcs[i.func]
 		assignment, msg := assign(callee.params)
 		if msg != "" do return msg
+		slots := result_slots(len(i.dst))
+		if slots > 0 do enc.sub_r64_imm32(.RSP, u32(slots))
 		pass(fr, i.args, assignment)
 		enc.call_rel32(0)
 		append(&e.calls, Fixup{here(e) - 4, i.func})
 		passed(assignment)
-		if i.dst != mir.NO_REG do put(fr, place_of(fr, i.dst), .RAX)
+		for x, k in i.dst {
+			if x == mir.NO_REG do continue
+			if k < len(enc.SYSV_INT_RET) {
+				put(fr, place_of(fr, x), enc.SYSV_INT_RET[k])
+				continue
+			}
+			enc.mov_r64_m64(.RAX, enc.AddressComponents{base = .RSP, displacement = i32(8 * (k - len(enc.SYSV_INT_RET)))})
+			put(fr, place_of(fr, x), .RAX)
+		}
+		if slots > 0 do enc.add_r64_imm32(.RSP, u32(slots))
 	}
 	return ""
 }
@@ -716,8 +740,12 @@ terminator :: proc(fr: ^Frame, t: mir.Terminator, next: int) {
 		to_block(fr, jump_if(v.cond, words, false), v.yes)
 		if int(v.no) != next do to_block(fr, enc.jmp_rel32, v.no)
 	case mir.Return:
-		if v.value == mir.NO_REG do enc.xor_r32_r32(.EAX, .EAX)
-		else do get(fr, .RAX, place_of(fr, v.value))
+		for x, k in v.values[min(len(v.values), len(enc.SYSV_INT_RET)):] {
+			get(fr, .RAX, place_of(fr, x))
+			enc.mov_m64_r64(enc.AddressComponents{base = .RBP, displacement = i32(fr.results + 8 * k)}, .RAX)
+		}
+		if len(v.values) == 0 do enc.xor_r32_r32(.EAX, .EAX)
+		for x, k in v.values[:min(len(v.values), len(enc.SYSV_INT_RET))] do get(fr, enc.SYSV_INT_RET[k], place_of(fr, x))
 		if len(fr.alloc.used) > 0 do enc.lea_r64_m64(.RSP, enc.AddressComponents{base = .RBP, displacement = i32(-8 * len(fr.alloc.used))})
 		else do enc.mov_r64_r64(.RSP, .RBP)
 		#reverse for r in fr.alloc.used do enc.pop_r64(enc.Register64(r))

@@ -14,8 +14,10 @@ import "core:strings"
 // its answer stands for. A pattern is a match on its target, each cover the cells
 // of a set the laws computed. A fold, the solution of a recursion, is a loop;
 // a recursion that stays is a function, and its calls in tail position the loop of
-// its body. What the laws could not reduce to one of these is not code yet, and
-// says so.
+// its body. A scope of fields is the values of its fields, in order — a field
+// that is a scope, its own in turn —: a match, a loop, a call give them all, and
+// a field read picks its own. What the laws could not reduce to one of these is
+// not code yet, and says so.
 //
 // What the kernel proved comes along: each integer has the bounds of its layout
 // image (specs/types.md §7), and an unknown an arm narrows, ?ₖ::(L & S), is read
@@ -39,13 +41,13 @@ Lowering :: struct {
 	error:   string,
 }
 
-// Bound: what an unknown stands for in the code: the value an effect gave back, a
-// parameter, or what an arm narrowed one of these to; or the value of a term
+// Bound: what an unknown stands for in the code: the values an effect gave back, a
+// parameter, or what an arm narrowed one of these to; or the values of a term
 // computed.
 Bound :: struct {
 	unknown: ^kernel.Unknown,
 	term:    kernel.Type,
-	value:   Value,
+	values:  []Value,
 }
 
 // Self: the equation of the function being lowered. A call of it in tail position
@@ -108,7 +110,8 @@ lower_program :: proc(k: ^kernel.Kernel) -> (prog: Program, err: string) {
 	l.f.body = lower_body(&l, program_type(k), false)
 	if l.error != "" do return prog, l.error
 	inject_at(&l.f.body.insts, 0, ..l.entry[:])
-	l.f.result = machine_of(l.f, l.f.body.value)
+	l.f.results = machines_of(l.f, l.f.body.values)
+	if len(l.f.results) > 1 do return prog, fmt.tprintf("the program gives %d values: a program that gives a scope is not code yet", len(l.f.results))
 	for u in l.inputs {
 		c, known := input_cover(&l, u)
 		if !known do return prog, fmt.tprintf("the input ?%d has a layout the code does not test", u.id)
@@ -135,6 +138,36 @@ input_cover :: proc(l: ^Lowering, u: ^kernel.Unknown) -> (Cover, bool) {
 fail :: proc(l: ^Lowering, format: string, args: ..any) -> Value {
 	if l.error == "" do l.error = fmt.tprintf(format, ..args)
 	return NONE
+}
+
+fail_values :: proc(l: ^Lowering, format: string, args: ..any) -> []Value {
+	fail(l, format, ..args)
+	return nil
+}
+
+// single: the values of x: x, or none for NONE.
+single :: proc(x: Value) -> []Value {
+	if x == NONE do return nil
+	out := make([]Value, 1)
+	out[0] = x
+	return out
+}
+
+// machines_of: the machine of each value.
+machines_of :: proc(f: ^Func, xs: []Value) -> []Machine {
+	out := make([]Machine, len(xs))
+	for x, i in xs do out[i] = machine_of(f, x)
+	return out
+}
+
+// fresh: a value of the machine and the bounds of each of xs.
+fresh :: proc(l: ^Lowering, xs: []Value) -> []Value {
+	out := make([]Value, len(xs))
+	for x, i in xs {
+		out[i] = value(l.f, machine_of(l.f, x))
+		l.f.kinds[out[i]].bounds = bounds_of(l.f, x)
+	}
+	return out
 }
 
 emit :: proc(l: ^Lowering, inst: Inst) {
@@ -166,24 +199,40 @@ close_body :: proc(l: ^Lowering, outer: ^[dynamic]Inst, bound: int) {
 // lower_body: t, as a body of its own.
 lower_body :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> (b: Body) {
 	outer, bound := open_body(l, &b)
-	b.value = lower(l, t, tail)
+	b.values = lower_values(l, t, tail)
 	close_body(l, outer, bound)
 	return
 }
 
-// lower: the value of t. In tail position, nothing is computed after it: a call of
-// the function being lowered is an Again. A value made for t has the bounds of t.
-lower :: proc(l: ^Lowering, t: kernel.Type, tail := false) -> Value {
-	if l.error != "" do return NONE
-	#reverse for b in l.bound do if b.term != nil && kernel.same(l.k, b.term, t) do return b.value
+// lower_values: the values of t: one for a number, none for none, those of its
+// fields for a scope of fields. In tail position, nothing is computed after it: a
+// call of the function being lowered is an Again. A value made for t, one, has the
+// bounds of t.
+lower_values :: proc(l: ^Lowering, t: kernel.Type, tail := false) -> []Value {
+	if l.error != "" do return nil
+	#reverse for b in l.bound do if b.term != nil && kernel.same(l.k, b.term, t) do return b.values
 	first := Value(len(l.f.kinds))
-	v := term(l, t, tail)
-	if v != NONE && v >= first && machine_of(l.f, v) == .Int {
-		l.f.kinds[v].bounds = meet(l.f.kinds[v].bounds, term_bounds(l, t))
+	vs := term(l, t, tail)
+	made := len(vs) > 0
+	for v in vs do made &&= v >= first
+	if made && len(vs) == 1 && machine_of(l.f, vs[0]) == .Int {
+		l.f.kinds[vs[0]].bounds = meet(l.f.kinds[vs[0]].bounds, term_bounds(l, t))
 	}
-	// one term, one value: where it is computed, a pure term reads its value again
-	if v != NONE && v >= first && computed(t) do append(&l.bound, Bound{term = t, value = v})
-	return v
+	// one term, its values: where it is computed, a pure term reads them again
+	if made && computed(t) do append(&l.bound, Bound{term = t, values = vs})
+	return vs
+}
+
+// lower: the value of t, where one is read — NONE for none.
+lower :: proc(l: ^Lowering, t: kernel.Type, tail := false) -> Value {
+	vs := lower_values(l, t, tail)
+	switch len(vs) {
+	case 0:
+		return NONE
+	case 1:
+		return vs[0]
+	}
+	return fail(l, "%s gives %d values where one is read", kernel.print_type(t), len(vs))
 }
 
 // computed: a term that takes instructions to compute, without effect: the same
@@ -198,32 +247,41 @@ computed :: proc(t: kernel.Type) -> bool {
 	return false
 }
 
-term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
+term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> []Value {
 	#partial switch v in t {
 	case kernel.Int:
-		return constant(l, i128(v))
+		return single(constant(l, i128(v)))
 	case kernel.Bool:
-		return constant(l, v ? 1 : 0)
+		return single(constant(l, v ? 1 : 0))
 	case kernel.Char:
-		return constant(l, i128(v))
+		return single(constant(l, i128(v)))
 	case kernel.Real:
 		r := value(l.f, .Real)
 		emit(l, Real_Const{r, float_of(v)})
-		return r
+		return single(r)
 	case kernel.None:
-		return NONE
+		return nil
 	case ^kernel.Unknown:
 		return unknown(l, v)
 	case ^kernel.Operation:
 		if kernel.is_string_value(t) {
 			r := value(l.f, .Text)
 			emit(l, Text_Const{r, text(l.prog, string_of(v))})
-			return r
+			return single(r)
 		}
-		return operation(l, v)
+		if v.op == .Item do return item(l, v)
+		return single(operation(l, v))
+	case ^kernel.Scope:
+		// a scope of fields: the values of its fields, in order
+		out := make([dynamic]Value)
+		given(l, v, &out)
+		return out[:]
+	case ^kernel.Access:
+		return field(l, v)
 	case ^kernel.Pattern:
+		for b in v.branches[1:] do if !same_fields(l, v.branches[0].product, b.product) do return fail_values(l, "the branches of %s give scopes of other fields", kernel.print_type(t))
 		target := lower(l, v.target)
-		if l.error != "" do return NONE
+		if l.error != "" do return nil
 		return match(l, v.branches, target, tail)
 	case ^kernel.Effect:
 		return effect(l, v, tail)
@@ -241,18 +299,21 @@ term :: proc(l: ^Lowering, t: kernel.Type, tail: bool) -> Value {
 		return recurrent(l, v)
 	case kernel.Invalid:
 		// a term the kernel gives no type to: why
-		if v.problem != nil do return fail(l, "%s", v.problem.message)
+		if v.problem != nil do return fail_values(l, "%s", v.problem.message)
 	}
-	return fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
+	return fail_values(l, "%s is not a value the code computes yet", kernel.print_type(t))
 }
 
-// unknown: the value an effect gave back, a parameter, or else an input of the
+// unknown: the values an effect gave back, a parameter, or else an input of the
 // program, numbered in the order they are first read. Where an arm narrowed it,
 // ?ₖ::(L & S), it is read through a Narrow.
-unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
-	#reverse for b in l.bound do if b.unknown != nil && kernel.same_unknown(b.unknown, u) do return narrowed(l, u, b.unknown, b.value)
+unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> []Value {
+	#reverse for b in l.bound do if b.unknown != nil && kernel.same_unknown(b.unknown, u) {
+		if len(b.values) != 1 do return b.values
+		return single(narrowed(l, u, b.unknown, b.values[0]))
+	}
 	m := machine_of_layout(l.k, kernel.layout_of(l.k, u))
-	if m != .Int do return fail(l, "the input ?%d is not an integer", u.id)
+	if m != .Int do return fail_values(l, "the input ?%d is not an integer", u.id)
 	slot := len(l.inputs)
 	for x, i in l.inputs do if kernel.same_unknown(x, u) do slot = i
 	// an input, as it is written
@@ -271,10 +332,10 @@ unknown :: proc(l: ^Lowering, u: ^kernel.Unknown) -> Value {
 		v := value(l.f, .Int)
 		l.f.kinds[v].bounds = term_bounds(l, written)
 		emit(l, Input{v, slot})
-		append(&l.bound, Bound{unknown = written, value = v})
-		return narrowed(l, u, written, v)
+		append(&l.bound, Bound{unknown = written, values = single(v)})
+		return single(narrowed(l, u, written, v))
 	}
-	return narrowed(l, u, written, l.read[slot])
+	return single(narrowed(l, u, written, l.read[slot]))
 }
 
 // narrowed: v, the value u stands for as it stood when it was bound, read where an
@@ -286,40 +347,40 @@ narrowed :: proc(l: ^Lowering, u, bound: ^kernel.Unknown, v: Value) -> Value {
 	dst := value(l.f, .Int)
 	l.f.kinds[dst].bounds = meet(bounds_of(l.f, v), term_bounds(l, u))
 	emit(l, Narrow{dst, v})
-	append(&l.bound, Bound{unknown = u, value = dst})
+	append(&l.bound, Bound{unknown = u, values = single(dst)})
 	return dst
 }
 
 // effect: an effect, run where it stands, then what it wraps. Only the call of a
 // symbol behind a boundary is code: another effect is served by nothing.
-effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
+effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> []Value {
 	if e.fold != nil {
 		// a fold whose steps have effects: the loop, then what it wraps
 		dst := fold(l, e.fold)
-		if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, value = dst})
-		return lower(l, e.then, tail)
+		if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, values = dst})
+		return lower_values(l, e.then, tail)
 	}
 	if e.choice != nil {
 		// a choice whose branches have effects: the match, then what it wraps
-		lower(l, e.choice)
-		return lower(l, e.then, tail)
+		lower_values(l, e.choice)
+		return lower_values(l, e.then, tail)
 	}
 	// a write: what follows already reads what it wrote (specs/types.md §4.14)
-	if e.write != nil do return lower(l, e.then, tail)
-	if e.emission != nil do return fail(l, "the emission of %s is answered by no handler", kernel.print_type(e.emission.sent))
-	if e.call == nil do return fail(l, "the effect ε%d is served by no boundary", e.id)
+	if e.write != nil do return lower_values(l, e.then, tail)
+	if e.emission != nil do return fail_values(l, "the emission of %s is answered by no handler", kernel.print_type(e.emission.sent))
+	if e.call == nil do return fail_values(l, "the effect ε%d is served by no boundary", e.id)
 	if e.call.recursive {
 		// a call of an equation with effects: the call, then what it wraps — in tail
 		// position when what it wraps is what the call gives back
 		if tail && is_self(l, e.call) && gives_answer(e) do return again(l, e.call)
 		dst := call(l, e.call)
-		if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, value = dst})
-		return lower(l, e.then, tail)
+		if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, values = dst})
+		return lower_values(l, e.then, tail)
 	}
 	s, is_scope := e.call.target.(^kernel.Scope)
-	if !is_scope do return fail(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
+	if !is_scope do return fail_values(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
 	lib, behind := kernel.symbol_of(s)
-	if !behind do return fail(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
+	if !behind do return fail_values(l, "%s is not a call the code makes yet", kernel.print_type(e.call))
 	imp := Import{lib = lib, symbol = kernel.origin(s).name}
 	machines := make([dynamic]Machine)
 	args := make([dynamic]Value)
@@ -331,51 +392,51 @@ effect :: proc(l: ^Lowering, e: ^kernel.Effect, tail: bool) -> Value {
 			append(&machines, machine_of(l.f, a))
 			append(&args, a)
 		}
-		if l.error != "" do return NONE
+		if l.error != "" do return nil
 	}
 	imp.args = machines[:]
 	if e.answer != nil {
-		if named(e.answer.written, "f32") do return fail(l, "%s gives back an f32: only f64 crosses a boundary yet", imp.symbol)
+		if named(e.answer.written, "f32") do return fail_values(l, "%s gives back an f32: only f64 crosses a boundary yet", imp.symbol)
 		layout := kernel.layout_of(l.k, e.answer)
 		imp.result = machine_of_layout(l.k, layout)
-		if imp.result == .None do return fail(l, "what %s gives back has no layout the code holds", imp.symbol)
+		if imp.result == .None do return fail_values(l, "what %s gives back has no layout the code holds", imp.symbol)
 		if imp.result == .Int do imp.result_bits, imp.result_signed = int_width(l.k, layout)
 	}
 	dst := imp.result == .None ? NONE : value(l.f, imp.result)
 	if imp.result == .Int do l.f.kinds[dst].bounds = term_bounds(l, e.answer)
 	emit(l, Foreign{dst, intern(l.prog, imp), args[:]})
-	if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, value = dst})
-	return lower(l, e.then, tail)
+	if e.answer != nil do append(&l.bound, Bound{unknown = e.answer, values = single(dst)})
+	return lower_values(l, e.then, tail)
 }
 
 // fold: a fold (specs/types.md §5.6) as a loop on k and its states: k from start,
 // each state from its init; while k is not in stop, the effects of a step, then
 // the updates and the next k, which the loop takes again; where k stops, the value.
-fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> Value {
+fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> []Value {
 	start := lower(l, f.start)
-	if l.error != "" do return NONE
-	if machine_of(l.f, start) != .Int do return fail(l, "a fold whose orbit is not of integers is not code yet")
+	if l.error != "" do return nil
+	if machine_of(l.f, start) != .Int do return fail_values(l, "a fold whose orbit is not of integers is not code yet")
 	params := make([dynamic]Value)
 	starts := make([dynamic]Value)
 	append(&params, value(l.f, .Int))
 	append(&starts, start)
 	for init in f.inits {
 		v := lower(l, init)
-		if l.error != "" do return NONE
+		if l.error != "" do return nil
 		append(&params, value(l.f, machine_of(l.f, v)))
 		append(&starts, v)
 	}
-	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
+	loop := Loop{params = params[:], init = starts[:]}
 	outer, bound := open_body(l, &loop.body)
 	// k at the head of a turn: any point of the orbit, the last too; its layout,
 	// out of stop, is the step's, read through a Narrow
 	head := new_clone(f.index^)
 	head.layout, head.written, head.call = nil, nil, nil
-	append(&l.bound, Bound{unknown = head, value = params[0]})
-	for x, i in f.states do append(&l.bound, Bound{unknown = x, value = params[i + 1]})
+	append(&l.bound, Bound{unknown = head, values = single(params[0])})
+	for x, i in f.states do append(&l.bound, Bound{unknown = x, values = single(params[i + 1])})
 	arms := make([]Arm, 2)
 	arms[0].body = lower_body(l, f.value, false)
-	arms[1].body.value = NONE // it ends in an Again
+	// arms[1] ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	lower(l, f.effects)
 	args := make([dynamic]Value)
@@ -398,51 +459,49 @@ fold :: proc(l: ^Lowering, f: ^kernel.Fold) -> Value {
 		taken[0] = {1, 1}
 		arms[0].cover = Cover{ints = taken}
 	}
-	loop.body.value = close_match(l, target, arms)
+	loop.body.values = close_match(l, target, arms)
+	return close_loop(l, loop, outer, bound)
+}
+
+// close_loop: the loop, its body closed: its values those of its body.
+close_loop :: proc(l: ^Lowering, loop: Loop, outer: ^[dynamic]Inst, bound: int) -> []Value {
+	loop := loop
 	close_body(l, outer, bound)
-	if l.error != "" do return NONE
-	if loop.body.value != NONE {
-		loop.dst = value(l.f, machine_of(l.f, loop.body.value))
-		l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
-	}
+	if l.error != "" do return nil
+	loop.dst = fresh(l, loop.body.values)
 	emit(l, loop)
 	return loop.dst
 }
 
 // least: μ(i: t) (specs/types.md §5.6) as a loop: i from 0, until t holds.
-least :: proc(l: ^Lowering, m: ^kernel.Least) -> Value {
+least :: proc(l: ^Lowering, m: ^kernel.Least) -> []Value {
 	params, starts := make([]Value, 1), make([]Value, 1)
 	starts[0] = constant(l, 0)
 	params[0] = value(l.f, .Int)
 	l.f.kinds[params[0]].bounds = {0, max(i128)}
-	loop := Loop{dst = NONE, params = params, init = starts}
+	loop := Loop{params = params, init = starts}
 	outer, bound := open_body(l, &loop.body)
-	append(&l.bound, Bound{unknown = m.index, value = params[0]})
+	append(&l.bound, Bound{unknown = m.index, values = single(params[0])})
 	holds := lower(l, m.holds)
 	arms := make([]Arm, 2)
 	taken := make([]Bounds, 1)
 	taken[0] = {1, 1}
-	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), value = params[0]}}
-	arms[1].body.value = NONE // it ends in an Again
+	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), values = single(params[0])}}
+	// arms[1] ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	next := make([]Value, 1)
 	next[0] = binary(l, .Add, params[0], constant(l, 1), .Int)
 	emit(l, Again{next})
 	close_body(l, step_outer, step_bound)
-	loop.body.value = close_match(l, holds, arms)
-	close_body(l, outer, bound)
-	if l.error != "" do return NONE
-	loop.dst = value(l.f, .Int)
-	l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
-	emit(l, loop)
-	return loop.dst
+	loop.body.values = close_match(l, holds, arms)
+	return close_loop(l, loop, outer, bound)
 }
 
 // series: Σ(i: lo..hi, t) or Π (specs/types.md §5.6) as a loop: i from lo, the
 // accumulator from 0 or 1; while i ≤ hi, it takes t, and i the next integer.
-series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
+series :: proc(l: ^Lowering, s: ^kernel.Series) -> []Value {
 	lo, hi := lower(l, s.lo), lower(l, s.hi)
-	if l.error != "" do return NONE
+	if l.error != "" do return nil
 	machine := machine_of_layout(l.k, kernel.layout_image(l.k, s.term) or_else nil)
 	if machine != .Int && machine != .Real do machine = .Int
 	identity := s.op == .Add ? 0 : 1
@@ -456,21 +515,21 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 	params, starts := make([]Value, 2), make([]Value, 2)
 	params[0], params[1] = value(l.f, .Int), value(l.f, machine)
 	starts[0], starts[1] = lo, start
-	loop := Loop{dst = NONE, params = params, init = starts}
+	loop := Loop{params = params, init = starts}
 	outer, bound := open_body(l, &loop.body)
-	append(&l.bound, Bound{unknown = s.index, value = params[0]})
+	append(&l.bound, Bound{unknown = s.index, values = single(params[0])})
 	past := binary(l, .Gt, params[0], hi, .Int)
 	arms := make([]Arm, 2)
 	taken := make([]Bounds, 1)
 	taken[0] = {1, 1}
-	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), value = params[1]}}
-	arms[1].body.value = NONE // it ends in an Again
+	arms[0] = Arm{cover = Cover{ints = taken}, body = Body{insts = make([dynamic]Inst), values = single(params[1])}}
+	// arms[1] ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	// in a step, lo ≤ i ≤ hi: i from lo, by 1, not past hi
 	index := value(l.f, .Int)
 	l.f.kinds[index].bounds = {bounds_of(l.f, lo).lo, bounds_of(l.f, hi).hi}
 	emit(l, Narrow{index, params[0]})
-	append(&l.bound, Bound{unknown = s.index, value = index})
+	append(&l.bound, Bound{unknown = s.index, values = single(index)})
 	t := lower(l, s.term)
 	if l.error == "" && machine_of(l.f, t) != machine do fail(l, "the term of a series is a %v, its value a %v", machine_of(l.f, t), machine)
 	next := make([]Value, 2)
@@ -478,24 +537,19 @@ series :: proc(l: ^Lowering, s: ^kernel.Series) -> Value {
 	next[1] = binary(l, s.op == .Add ? .Add : .Mul, params[1], t, machine)
 	emit(l, Again{next})
 	close_body(l, step_outer, step_bound)
-	loop.body.value = close_match(l, past, arms)
-	close_body(l, outer, bound)
-	if l.error != "" do return NONE
-	loop.dst = value(l.f, machine)
-	l.f.kinds[loop.dst].bounds = bounds_of(l.f, loop.body.value)
-	emit(l, loop)
-	return loop.dst
+	loop.body.values = close_match(l, past, arms)
+	return close_loop(l, loop, outer, bound)
 }
 
 // recurrent: C⟨c₁ … c_d | x₀ … x_{d-1}⟩(s) (specs/types.md §5.6): αˢ in ℤ[α] by
 // squaring — a loop on the bits of s, whose turn multiplies the result by the
 // base when the bit is 1, then squares the base —, and Σ_j x_j·[αˢ]_j.
-recurrent :: proc(l: ^Lowering, r: ^kernel.Recurrent) -> Value {
+recurrent :: proc(l: ^Lowering, r: ^kernel.Recurrent) -> []Value {
 	d := len(r.coefficients)
 	s := lower(l, r.at)
 	initial := make([]Value, d)
 	for t, j in r.initial do initial[j] = lower(l, t)
-	if l.error != "" do return NONE
+	if l.error != "" do return nil
 	params, starts := make([dynamic]Value), make([dynamic]Value)
 	append(&params, value(l.f, .Int))
 	append(&starts, s)
@@ -511,19 +565,18 @@ recurrent :: proc(l: ^Lowering, r: ^kernel.Recurrent) -> Value {
 		alpha: i128 = d == 1 ? i128(r.coefficients[0]) : (j == 1 ? 1 : 0)
 		append(&starts, constant(l, alpha))
 	}
-	loop := Loop{dst = NONE, params = params[:], init = starts[:]}
+	loop := Loop{params = params[:], init = starts[:]}
 	outer, bound := open_body(l, &loop.body)
 	arms := make([]Arm, 2)
 	done := make([]Bounds, 1)
 	done[0] = {0, 0}
 	arms[0].cover = Cover{ints = done}
-	arms[0].body.value = NONE
 	exit_outer, exit_bound := open_body(l, &arms[0].body)
 	sum := binary(l, .Mul, initial[0], result[0], .Int)
 	for j in 1 ..< d do sum = binary(l, .Add, sum, binary(l, .Mul, initial[j], result[j], .Int), .Int)
-	arms[0].body.value = sum
+	arms[0].body.values = single(sum)
 	close_body(l, exit_outer, exit_bound)
-	arms[1].body.value = NONE // it ends in an Again
+	// arms[1] ends in an Again
 	step_outer, step_bound := open_body(l, &arms[1].body)
 	odd := binary(l, .And, params[0], constant(l, 1), .Int)
 	product := algebraic_product(l, result, base, r.coefficients)
@@ -534,12 +587,8 @@ recurrent :: proc(l: ^Lowering, r: ^kernel.Recurrent) -> Value {
 	append(&next, ..algebraic_product(l, base, base, r.coefficients))
 	emit(l, Again{next[:]})
 	close_body(l, step_outer, step_bound)
-	loop.body.value = close_match(l, params[0], arms)
-	close_body(l, outer, bound)
-	if l.error != "" do return NONE
-	loop.dst = value(l.f, .Int)
-	emit(l, loop)
-	return loop.dst
+	loop.body.values = close_match(l, params[0], arms)
+	return close_loop(l, loop, outer, bound)
 }
 
 // algebraic_product: a·b in ℤ[α]: the product of the polynomials, reduced by
@@ -579,23 +628,26 @@ is_self :: proc(l: ^Lowering, c: ^kernel.Collapse) -> bool {
 	return ok && same_context(l, called, l.self)
 }
 
-// call: a recursive call that stays, as the call of the function of its equation.
-call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> Value {
+// call: a recursive call that stays, as the call of the function of its equation:
+// the values it gives.
+call :: proc(l: ^Lowering, c: ^kernel.Collapse) -> []Value {
 	index, args := arguments(l, c)
-	if l.error != "" do return NONE
-	dst := value(l.f, l.prog.funcs[index].result)
+	if l.error != "" do return nil
+	results := l.prog.funcs[index].results
+	dst := make([]Value, len(results))
+	for m, i in results do dst[i] = value(l.f, m)
 	emit(l, Call{dst, index, args})
 	return dst
 }
 
 // again: a call of the function being lowered, in tail position: its parameters
 // take the values the carve gives, and its body runs again.
-again :: proc(l: ^Lowering, c: ^kernel.Collapse) -> Value {
+again :: proc(l: ^Lowering, c: ^kernel.Collapse) -> []Value {
 	_, args := arguments(l, c)
-	if l.error != "" do return NONE
+	if l.error != "" do return nil
 	emit(l, Again{args})
 	l.self.again = true
-	return NONE
+	return nil
 }
 
 // arguments: the function of the equation c carves, and the values the carve
@@ -640,17 +692,17 @@ is_parameter :: proc(l: ^Lowering, b: ^kernel.Binding) -> bool {
 
 // function_of: the function of a recursive equation, lowered once (specs/language/15):
 // its fields are its parameters, each an unknown of its layout — its color, or else
-// the family of its value —, and its body the normal form of its production over
-// them, its own calls left as calls. When some are in tail position, the body is a
-// loop on the parameters.
+// the family of its value —, its results what its calls give, and its body the
+// normal form of its production over them, its own calls left as calls. When some
+// are in tail position, the body is a loop on the parameters.
 function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 	this, _ := lowered_for(l, c)
 	for x in l.funcs do if same_context(l, x, this) do return x.index
 	root := this.root
-	family, known := kernel.family_of(l.k, c)
-	if !known do return int(fail(l, "%s has no family the code holds", kernel.print_type(c)))
-	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.effectful})
-	f.result = machine_of_layout(l.k, kernel.family_term(family))
+	results := make([dynamic]Machine)
+	results_of(l, c, &results)
+	if l.error != "" do return -1
+	f := new_clone(Func{name = root.name != "" ? root.name : "equation", pure = !root.effectful, results = results[:]})
 	index := len(l.prog.funcs)
 	append(&l.prog.funcs, f)
 	this.index = index
@@ -684,21 +736,142 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 	for u, i in params {
 		values[i] = value(f, machines[i])
 		if machines[i] == .Int do f.kinds[values[i]].bounds = term_bounds(l, u)
-		append(&l.bound, Bound{unknown = u, value = values[i]})
+		append(&l.bound, Bound{unknown = u, values = single(values[i])})
 	}
 	f.body = lower_body(l, body, true)
 	if self.again {
-		loop := Loop{dst = NONE, params = values, init = values, body = f.body}
-		if f.body.value != NONE {
-			loop.dst = value(f, machine_of(f, f.body.value))
-			f.kinds[loop.dst].bounds = bounds_of(f, f.body.value)
-		}
-		f.body = Body{value = loop.dst}
+		loop := Loop{dst = fresh(l, f.body.values), params = values, init = values, body = f.body}
+		f.body = Body{values = loop.dst}
 		append(&f.body.insts, loop)
 	}
-	if l.error == "" && machine_of(f, f.body.value) != f.result do fail(l, "%s gives a %v, its calls a %v", f.name, machine_of(f, f.body.value), f.result)
+	if gives := machines_of(f, f.body.values); l.error == "" && !slice.equal(gives, f.results) do fail(l, "%s gives %v, its calls %v", f.name, gives, f.results)
 	l.f, l.bound, l.self, l.insts = outer, outer_bound, outer_self, outer_insts
 	return index
+}
+
+// results_of: the machine of each value t gives, as the kernel types it: those of
+// the fields of the scope it gives, in turn, or the one of its family.
+results_of :: proc(l: ^Lowering, t: kernel.Type, out: ^[dynamic]Machine) {
+	if s, has := shape_of(l, t); has {
+		fields, _ := fields_of(l, s)
+		for x in fields do results_of(l, kernel.binding_value(l.k, x), out)
+		return
+	}
+	family, known := kernel.family_of(l.k, t)
+	if !known {
+		fail(l, "%s has no family the code holds", kernel.print_type(t))
+		return
+	}
+	if m := machine_of_layout(l.k, kernel.family_term(family)); m != .None do append(out, m)
+}
+
+// shape_of: the scope of fields whose values t gives: t itself; the field of it a
+// read picks; what the branches of a pattern give, what an effect wraps, what the
+// call an answer stands for gives; for a recursive call, a base case of its
+// equation: by induction, every call gives a scope of its fields (specs/types.md
+// §5.6).
+shape_of :: proc(l: ^Lowering, t: kernel.Type) -> (shape: ^kernel.Scope, ok: bool) {
+	#partial switch v in t {
+	case ^kernel.Scope:
+		_, fields := fields_of(l, v)
+		return v, fields
+	case ^kernel.Access:
+		fields, _ := fields_of(l, shape_of(l, v.target) or_return)
+		b := kernel.occurrence(fields, v.name, v.ordinal, true) or_return
+		return shape_of(l, kernel.binding_value(l.k, b))
+	case ^kernel.Operation:
+		at, known := v.args[1].(kernel.Int)
+		if v.op != .Item || !known do break
+		fields, _ := fields_of(l, shape_of(l, v.args[0]) or_return)
+		if int(at) >= len(fields) do break
+		return shape_of(l, kernel.binding_value(l.k, fields[at]))
+	case ^kernel.Pattern:
+		for b in v.branches do if s, has := shape_of(l, b.product); has do return s, true
+	case ^kernel.Effect:
+		return shape_of(l, v.then)
+	case ^kernel.Unknown:
+		if v.call != nil do return shape_of(l, v.call)
+	case ^kernel.Collapse:
+		if !kernel.gives_scopes(l.k, v) do break
+		root := kernel.origin(v.target.(^kernel.Scope))
+		p, _ := kernel.first_production(l.k, root)
+		return shape_of(l, kernel.base_cases(kernel.binding_type(l.k, p), root)[0])
+	}
+	return nil, false
+}
+
+// same_fields: a and b give scopes of the same fields, by name and in order — or
+// neither gives one.
+same_fields :: proc(l: ^Lowering, a, b: kernel.Type) -> bool {
+	s, has_s := shape_of(l, a)
+	r, has_r := shape_of(l, b)
+	if !has_s || !has_r do return has_s == has_r
+	xs, _ := fields_of(l, s)
+	ys, _ := fields_of(l, r)
+	if len(xs) != len(ys) do return false
+	for x, i in xs do if x.name != ys[i].name || !same_fields(l, kernel.binding_value(l.k, x), kernel.binding_value(l.k, ys[i])) do return false
+	return true
+}
+
+// fields_of: the fields of a scope of fields, in order — not its holes —; false
+// for a scope that is not only fields.
+fields_of :: proc(l: ^Lowering, s: ^kernel.Scope) -> ([]^kernel.Binding, bool) {
+	out := make([dynamic]^kernel.Binding)
+	for x in kernel.placed(l.k, s, .Value) {
+		#partial switch x.kind {
+		case .Push:
+			append(&out, x)
+		case .Pull:
+		case:
+			return nil, false
+		}
+	}
+	return out[:], true
+}
+
+// field: x.a (access_law): the values of the field a, its last occurrence or the
+// one numbered, among those x gives.
+field :: proc(l: ^Lowering, a: ^kernel.Access) -> []Value {
+	s, has := shape_of(l, a.target)
+	if !has do return fail_values(l, "%s is not a value the code computes yet", kernel.print_type(a))
+	fields, _ := fields_of(l, s)
+	b, found := kernel.occurrence(fields, a.name, a.ordinal, true)
+	if !found do return fail_values(l, "%s has no field `%s`", kernel.print_type(a.target), a.name)
+	return part(l, lower_values(l, a.target), fields, b)
+}
+
+// item: x.#k (run_law): the values of the binding k of the run x — at a k the
+// program reads, a match on k, each arm a binding.
+item :: proc(l: ^Lowering, o: ^kernel.Operation) -> []Value {
+	s, has := shape_of(l, o.args[0])
+	if !has do return fail_values(l, "%s is not lowered yet", kernel.print_type(o))
+	run, _ := fields_of(l, s)
+	all := lower_values(l, o.args[0])
+	if at, known := o.args[1].(kernel.Int); known {
+		if int(at) >= len(run) do return fail_values(l, "%s has no binding %d", kernel.print_type(o.args[0]), at)
+		return part(l, all, run, run[at])
+	}
+	index := lower(l, o.args[1])
+	if l.error != "" do return nil
+	arms := make([]Arm, len(run))
+	for b, k in run {
+		cell := make([]Bounds, 1)
+		cell[0] = {i128(k), i128(k)}
+		arms[k] = Arm{Cover{ints = cell}, Body{insts = make([dynamic]Inst), values = part(l, all, run, b)}}
+	}
+	return close_match(l, index, arms)
+}
+
+// part: the values of the field b among all, the values of the fields in turn.
+part :: proc(l: ^Lowering, all: []Value, fields: []^kernel.Binding, b: ^kernel.Binding) -> []Value {
+	at := 0
+	for x in fields {
+		counted := make([dynamic]Machine)
+		results_of(l, kernel.binding_value(l.k, x), &counted)
+		if x == b && at + len(counted) <= len(all) do return all[at:][:len(counted)]
+		at += len(counted)
+	}
+	return fail_values(l, "the field `%s` is not among the values given", b.name)
 }
 
 // parameter: the value of the field b of a function, over its parameters: an
@@ -757,14 +930,19 @@ scope_of_fields :: proc(l: ^Lowering, b: ^kernel.Binding) -> (^kernel.Scope, boo
 	return s, true
 }
 
-// given: the values a field gives the parameters of a function: a scope, the
-// values of its fields in turn — not its holes.
+// given: the values of a field, a scope of fields, the values of its fields in
+// turn — not its holes.
 given :: proc(l: ^Lowering, t: kernel.Type, out: ^[dynamic]Value) {
 	if s, is_scope := t.(^kernel.Scope); is_scope {
-		for x in kernel.placed(l.k, s, .Value) do if x.kind == .Push do given(l, kernel.binding_value(l.k, x), out)
+		fields, ok := fields_of(l, s)
+		if !ok {
+			fail(l, "%s is not a value the code computes yet", kernel.print_type(t))
+			return
+		}
+		for x in fields do given(l, kernel.binding_value(l.k, x), out)
 		return
 	}
-	append(out, lower(l, t))
+	append(out, ..lower_values(l, t))
 }
 
 // crossing: the values that pass a field of a symbol, one in each register the
@@ -1007,18 +1185,18 @@ both :: proc(l: ^Lowering, op: Op, a, b: Value) -> Value {
 //   t ? {c₀ -> p₀  c₁ -> p₁ …} = t ? {c₀ -> p₀  -> t ? {c₁ -> p₁ …}}
 //
 // The last branch is not tested: the check proved that one takes every value.
-match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> Value {
+match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> []Value {
 	arms := make([dynamic]Arm)
 	for b, i in branches {
 		if i == len(branches) - 1 || b.cover == nil {
 			// t ? {-> p} = p
-			if i == 0 do return lower(l, b.product, tail)
+			if i == 0 do return lower_values(l, b.product, tail)
 			append(&arms, Arm{body = lower_body(l, b.product, tail)})
 			break
 		}
 		cover, constant := cover_of(b.cover)
 		if constant {
-			if !fits(l, target, cover) do return fail(l, "a cover %s is not code yet", kernel.print_type(b.cover))
+			if !fits(l, target, cover) do return fail_values(l, "a cover %s is not code yet", kernel.print_type(b.cover))
 			append(&arms, Arm{cover, lower_body(l, b.product, tail)})
 			continue
 		}
@@ -1027,7 +1205,7 @@ match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool
 			break
 		}
 		tested := member(l, target, b.cover)
-		if l.error != "" do return NONE
+		if l.error != "" do return nil
 		taken := make([]Bounds, 1)
 		taken[0] = {1, 1}
 		append(&arms, Arm{Cover{ints = taken}, lower_body(l, b.product, tail)})
@@ -1041,26 +1219,28 @@ match :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool
 // the arm that takes what the covers above do not.
 rest_body :: proc(l: ^Lowering, branches: []kernel.Branch, target: Value, tail: bool) -> (b: Body) {
 	outer, bound := open_body(l, &b)
-	b.value = match(l, branches, target, tail)
+	b.values = match(l, branches, target, tail)
 	close_body(l, outer, bound)
 	return
 }
 
-// close_match: the match of these arms, its value that of the arm that runs: it
-// has the bounds of all of them.
-close_match :: proc(l: ^Lowering, target: Value, arms: []Arm) -> Value {
-	if l.error != "" do return NONE
-	dst := NONE
+// close_match: the match of these arms, its values those of the arm that runs:
+// each has the bounds of all of them. An arm that ends in an Again gives none.
+close_match :: proc(l: ^Lowering, target: Value, arms: []Arm) -> []Value {
+	if l.error != "" do return nil
+	dst: []Value
 	for arm in arms {
-		v := arm.body.value
-		if v == NONE do continue
-		if dst == NONE {
-			dst = value(l.f, machine_of(l.f, v))
-			l.f.kinds[dst].bounds = bounds_of(l.f, v)
+		vs := arm.body.values
+		if len(vs) == 0 do continue
+		if dst == nil {
+			dst = fresh(l, vs)
 			continue
 		}
-		if machine_of(l.f, v) != machine_of(l.f, dst) do return fail(l, "the arms of a match give %v and %v", machine_of(l.f, dst), machine_of(l.f, v))
-		l.f.kinds[dst].bounds = hull(bounds_of(l.f, dst), bounds_of(l.f, v))
+		if len(vs) != len(dst) do return fail_values(l, "the arms of a match give %d and %d values", len(dst), len(vs))
+		for v, i in vs {
+			if machine_of(l.f, v) != machine_of(l.f, dst[i]) do return fail_values(l, "the arms of a match give %v and %v", machine_of(l.f, dst[i]), machine_of(l.f, v))
+			l.f.kinds[dst[i]].bounds = hull(bounds_of(l.f, dst[i]), bounds_of(l.f, v))
+		}
 	}
 	emit(l, Match{dst, target, arms})
 	return dst

@@ -28,7 +28,9 @@ Run :: struct {
 
 interpret :: proc(p: ^Program, inputs: []i64, symbols: map[string]Symbol) -> (run: Run, err: string) {
 	machine := Machine_State{p = p, inputs = inputs, symbols = symbols, run = &run}
-	run.result, err = execute(&machine, 0, nil)
+	results: []Datum
+	results, err = execute(&machine, 0, nil)
+	if len(results) > 0 do run.result = results[0]
 	return run, err
 }
 
@@ -38,6 +40,7 @@ Machine_State :: struct {
 	symbols: map[string]Symbol,
 	run:     ^Run,
 	depth:   int,
+	written: [dynamic]Value, // what the instruction run last writes
 }
 
 // Frame: a function running: its values, and the parameters of the loops it is in,
@@ -48,8 +51,9 @@ Frame :: struct {
 	loops: [dynamic][]Value,
 }
 
-// execute: the function `index` of the program, on its arguments.
-execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (result: Datum, err: string) {
+// execute: the function `index` of the program, on its arguments: the values it
+// gives.
+execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (results: []Datum, err: string) {
 	f := m.p.funcs[index]
 	if m.depth > 100_000 do return {}, "the calls go too deep"
 	m.depth += 1
@@ -62,8 +66,9 @@ execute :: proc(m: ^Machine_State, index: int, args: []Datum) -> (result: Datum,
 	again, err = run_body(m, &fr, f.body)
 	if err != "" do return {}, err
 	if again do return {}, "an Again outside a loop"
-	if f.body.value != NONE do result = fr.regs[f.body.value]
-	return result, ""
+	results = make([]Datum, len(f.body.values))
+	for x, i in f.body.values do results[i] = fr.regs[x]
+	return results, ""
 }
 
 // run_body: the instructions of a body, up to its end or an Again, which is then
@@ -127,16 +132,17 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 			given := make([]Datum, len(i.args))
 			defer delete(given)
 			for a, j in i.args do given[j] = regs[a]
-			d, failed := execute(m, i.func, given)
+			results, failed := execute(m, i.func, given)
+			defer delete(results)
 			if failed != "" do return false, failed
-			if i.dst != NONE do regs[i.dst] = d
+			for x, j in i.dst do regs[x] = results[j]
 		case Match:
 			kind := fr.f.kinds[i.target]
 			for arm, n in i.arms {
 				if n < len(i.arms) - 1 && !takes(arm.cover, kind, regs[i.target]) do continue
 				again, err = run_body(m, fr, arm.body)
 				if again || err != "" do return
-				if i.dst != NONE && arm.body.value != NONE do regs[i.dst] = regs[arm.body.value]
+				assign(regs, i.dst, arm.body.values)
 				break
 			}
 		case Loop:
@@ -149,55 +155,56 @@ run_body :: proc(m: ^Machine_State, fr: ^Frame, b: Body) -> (again: bool, err: s
 				if !again do break
 			}
 			pop(&fr.loops)
-			if i.dst != NONE do regs[i.dst] = regs[i.body.value]
+			assign(regs, i.dst, i.body.values)
 		case Again:
 			if len(fr.loops) == 0 do return false, "an Again outside a loop"
 			assign(regs, fr.loops[len(fr.loops) - 1], i.args)
 			return true, ""
 		}
-		if msg := proven(fr, written(inst)); msg != "" do return false, msg
+		clear(&m.written)
+		written(inst, &m.written)
+		for x in m.written do if msg := proven(fr, x); msg != "" do return false, msg
 	}
 	return false, ""
 }
 
-// written: the value an instruction writes; NONE for none.
-written :: proc(inst: Inst) -> Value {
+// written: the values an instruction writes.
+written :: proc(inst: Inst, out: ^[dynamic]Value) {
 	switch i in inst {
 	case Const:
-		return i.dst
+		append(out, i.dst)
 	case Real_Const:
-		return i.dst
+		append(out, i.dst)
 	case Text_Const:
-		return i.dst
+		append(out, i.dst)
 	case Input:
-		return i.dst
+		append(out, i.dst)
 	case Unary:
-		return i.dst
+		append(out, i.dst)
 	case Binary:
-		return i.dst
+		append(out, i.dst)
 	case In:
-		return i.dst
+		append(out, i.dst)
 	case Narrow:
-		return i.dst
+		append(out, i.dst)
 	case Splat:
-		return i.dst
+		append(out, i.dst)
 	case Lanes:
-		return i.dst
+		append(out, i.dst)
 	case Reduce:
-		return i.dst
+		append(out, i.dst)
 	case Select:
-		return i.dst
+		append(out, i.dst)
 	case Foreign:
-		return i.dst
+		append(out, i.dst)
 	case Call:
-		return i.dst
+		append(out, ..i.dst)
 	case Match:
-		return i.dst
+		append(out, ..i.dst)
 	case Loop:
-		return i.dst
+		append(out, ..i.dst)
 	case Again:
 	}
-	return NONE
 }
 
 // proven: the integer x holds — each lane of a vector — is within the bounds the

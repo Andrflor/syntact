@@ -25,8 +25,6 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 	case .Param:
 		kind := g.loops[n.owner].params[n.index]
 		out.machine, out.lanes, out.bits = kind.machine, kind.lanes, kind.bits
-	case .Call:
-		if g.prog.funcs[n.index].pure do out.machine = g.prog.funcs[n.index].result
 	case .In:
 		out.machine, out.bounds = .Int, {0, 1}
 	case .Narrow:
@@ -98,7 +96,7 @@ derive :: proc(g: ^Graph, n: Node) -> Facts {
 				out.machine, out.lanes, out.bits = kind.machine, kind.lanes, kind.bits
 			}
 		}
-	case .Start, .Arm, .Foreign, .Match, .Loop, .Again, .Exit:
+	case .Start, .Arm, .Foreign, .Call, .Match, .Loop, .Again, .Exit:
 	// a state, a tuple or a tail
 	}
 	if c, known := out.constant.?; known do out.bounds = {i128(c), i128(c)}

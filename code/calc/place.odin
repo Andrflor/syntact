@@ -149,10 +149,13 @@ count_live :: proc(p: ^Plan) -> int {
 // pinned: a computation that stays in its region.
 pinned :: proc(p: ^Plan, n: Node) -> bool {
 	#partial switch n.kind {
-	case .Start, .Param, .Arm, .Match, .Loop, .Foreign, .Get:
+	case .Start, .Param, .Arm, .Match, .Loop, .Foreign:
 		return true
 	case .Call:
 		return !p.g.prog.funcs[n.index].pure
+	case .Get:
+		// what a tuple gives, where it is
+		return pinned(p, chosen(p, n.args[0])^)
 	}
 	return false
 }

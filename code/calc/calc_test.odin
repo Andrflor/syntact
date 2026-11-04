@@ -33,7 +33,7 @@ test_interpreted :: proc(t: ^testing.T) {
 			name := names[form]
 			run, failed := code.interpret(&prog, c.inputs, symbols)
 			if !testing.expectf(t, failed == "", "%s, %s: %s\n%s", c.name, name, failed, code.print_program(&prog)) do continue
-			switch prog.funcs[0].result {
+			switch code.program_machine(&prog) {
 			case .Int, .None:
 				testing.expectf(t, run.result.int == c.int, "%s, %s: %d, expected %d\n%s", c.name, name, run.result.int, c.int, code.print_program(&prog))
 			case .Real:

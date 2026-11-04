@@ -51,7 +51,7 @@ Kind :: enum u8 {
 	Reduce, // op over the lanes of a
 	Select, // test, yes, no: yes where test is 1, no where it is 0
 	Foreign, // index: the symbol; the state, then the arguments — gives the state after, and the answer
-	Call, // index: the function; its arguments, after the state when it has effects — then gives the state after, and the answer
+	Call, // index: the function; its arguments, after the state when it has effects — then gives the state after, when it takes one, and its values
 	Match, // owner: the match; the target, the state when its arms have effects, then what each arm gives
 	Loop, // owner: the loop; what each parameter starts from, then the tail of its body
 	Again, // owner: the loop; what each parameter takes next
@@ -85,12 +85,12 @@ Region :: struct {
 ROOT :: Region{}
 
 // Match_Info: a match: the region it runs in, the cover of each arm, and what each
-// arm gives: a value, the state after its effects — or, in the body of a loop, a
-// tail.
+// arm gives: its values, the state after its effects — or, in the body of a loop,
+// a tail.
 Match_Info :: struct {
 	parent:   Region,
 	covers:   []code.Cover,
-	value:    bool,
+	values:   int,
 	state:    bool,
 	tail:     bool,
 	selected: bool, // the law of selects went through it
@@ -99,8 +99,8 @@ Match_Info :: struct {
 // Loop_Info: a loop: the region it runs in, its node, the kind of each parameter by
 // its index — the state's machine None —, the index of the state, -1 when its body
 // has no effects, how a law carries each parameter — what each turn does to it;
-// nil for the loop's own —, whether it gives a value, the parameters it gives at
-// its end, after its value and its state, how many turns it runs — 0: as many as
+// nil for the loop's own —, how many values it gives, the parameters it gives at
+// its end, after its values and its state, how many turns it runs — 0: as many as
 // a loop does —, and what made it.
 Loop_Info :: struct {
 	parent:  Region,
@@ -108,7 +108,7 @@ Loop_Info :: struct {
 	params:  [dynamic]code.Kind,
 	state:   int,
 	carried: [dynamic]Maybe(code.Op),
-	value:   bool,
+	values:  int,
 	finals:  [dynamic]int,
 	turns:   f64,
 	origin:  Origin,
@@ -125,7 +125,7 @@ Origin :: enum u8 {
 
 // outputs: what a loop gives before the parameters it gives at its end.
 outputs :: proc(info: Loop_Info) -> int {
-	return (info.value ? 1 : 0) + (info.state >= 0 ? 1 : 0)
+	return info.values + (info.state >= 0 ? 1 : 0)
 }
 
 // Facts: what holds of every computation of a class: of each lane of a vector —

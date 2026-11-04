@@ -80,37 +80,36 @@ uses :: proc(inst: Inst, out: ^[dynamic]Reg) {
 	}
 }
 
-// writes: the register an instruction writes; NO_REG for none.
-writes :: proc(inst: Inst) -> Reg {
+// writes: the registers an instruction writes.
+writes :: proc(inst: Inst, out: ^[dynamic]Reg) {
 	switch i in inst {
 	case Copy:
-		return i.dst
+		append(out, i.dst)
 	case Real:
-		return i.dst
+		append(out, i.dst)
 	case Text:
-		return i.dst
+		append(out, i.dst)
 	case Input:
-		return i.dst
+		append(out, i.dst)
 	case Unary:
-		return i.dst
+		append(out, i.dst)
 	case Binary:
-		return i.dst
+		append(out, i.dst)
 	case Compare:
-		return i.dst
+		append(out, i.dst)
 	case Foreign:
-		return i.dst
+		if i.dst != NO_REG do append(out, i.dst)
 	case Call:
-		return i.dst
+		for x in i.dst do if x != NO_REG do append(out, x)
 	case Splat:
-		return i.dst
+		append(out, i.dst)
 	case Lanes:
-		return i.dst
+		append(out, i.dst)
 	case Reduce:
-		return i.dst
+		append(out, i.dst)
 	case Select:
-		return i.dst
+		append(out, i.dst)
 	}
-	return NO_REG
 }
 
 is_call :: proc(inst: Inst) -> bool {
@@ -128,7 +127,7 @@ end_uses :: proc(t: Terminator, out: ^[dynamic]Reg) {
 		append(out, e.a)
 		if r, is_reg := e.b.(Reg); is_reg do append(out, r)
 	case Return:
-		if e.value != NO_REG do append(out, e.value)
+		append(out, ..e.values)
 	}
 }
 
@@ -182,7 +181,9 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 			end_uses(b.end, &read)
 			for r in read do live[r] = true
 			#reverse for inst in b.insts {
-				if w := writes(inst); w != NO_REG do live[w] = false
+				clear(&read)
+				writes(inst, &read)
+				for w in read do live[w] = false
 				clear(&read)
 				uses(inst, &read)
 				for r in read do live[r] = true
@@ -212,7 +213,9 @@ allocate :: proc(f: ^Func, target: Target) -> Allocation {
 			clear(&read)
 			uses(inst, &read)
 			for r in read do cover(&ranges[r], p)
-			if w := writes(inst); w != NO_REG do cover(&ranges[w], p + 1)
+			clear(&read)
+			writes(inst, &read)
+			for w in read do cover(&ranges[w], p + 1)
 			p += 2
 		}
 		clear(&read)

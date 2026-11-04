@@ -19,9 +19,9 @@ Reader :: struct {
 	loops:  [dynamic]int, // the loops the code is in, innermost last
 }
 
-// read: the graph of the function f of p, the class of its value — NO_CLASS when
-// it gives none — and of the state it ends in.
-read :: proc(p: ^code.Program, f: ^code.Func) -> (g: ^Graph, value, state: Class) {
+// read: the graph of the function f of p, the class of each value it gives and of
+// the state it ends in.
+read :: proc(p: ^code.Program, f: ^code.Func) -> (g: ^Graph, values: []Class, state: Class) {
 	g = new(Graph)
 	g.prog, g.func = p, f
 	r := Reader{g = g, class = make([]Class, len(f.kinds))}
@@ -30,8 +30,7 @@ read :: proc(p: ^code.Program, f: ^code.Func) -> (g: ^Graph, value, state: Class
 	r.state = add(g, Node{kind = .Start})
 	r.token = r.state
 	read_body(&r, f.body)
-	value = f.body.value == code.NONE ? NO_CLASS : r.class[f.body.value]
-	return g, value, r.state
+	return g, classes(&r, f.body.values), r.state
 }
 
 read_body :: proc(r: ^Reader, b: code.Body) {
@@ -54,8 +53,8 @@ classes :: proc(r: ^Reader, vs: []code.Value) -> []Class {
 
 // effectful: the state reaches the call: a call of a symbol, or of a function with
 // effects.
-effectful :: proc(r: ^Reader, n: Node) -> bool {
-	return n.kind == .Foreign || n.kind == .Call && !r.g.prog.funcs[n.index].pure
+effectful :: proc(g: ^Graph, n: Node) -> bool {
+	return n.kind == .Foreign || n.kind == .Call && !g.prog.funcs[n.index].pure
 }
 
 read_inst :: proc(r: ^Reader, inst: code.Inst) {
@@ -89,14 +88,14 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 		args[0], args[1] = r.class[i.src], r.token
 		set(r, i.dst, Node{kind = .Narrow, args = args})
 	case code.Foreign:
-		effect(r, i.dst, Node{kind = .Foreign, index = i.symbol}, i.args)
+		effect(r, code.single(i.dst), Node{kind = .Foreign, index = i.symbol}, i.args)
 	case code.Call:
 		n := Node{kind = .Call, index = i.func}
-		if effectful(r, n) {
+		if effectful(g, n) {
 			effect(r, i.dst, n, i.args)
 		} else {
 			n.args = classes(r, i.args)
-			if i.dst != code.NONE do set(r, i.dst, n)
+			gets(r, add(g, n), i.dst, 0)
 		}
 	case code.Match:
 		read_match(r, i)
@@ -108,8 +107,8 @@ read_inst :: proc(r: ^Reader, inst: code.Inst) {
 }
 
 // effect: a node that takes the state, then gives the state after it, and its
-// answer.
-effect :: proc(r: ^Reader, dst: code.Value, n: Node, args: []code.Value) {
+// answers.
+effect :: proc(r: ^Reader, dst: []code.Value, n: Node, args: []code.Value) {
 	n := n
 	all := make([]Class, len(args) + 1)
 	all[0] = r.state
@@ -117,7 +116,12 @@ effect :: proc(r: ^Reader, dst: code.Value, n: Node, args: []code.Value) {
 	n.args = all
 	t := add(r.g, n)
 	r.state = add(r.g, Node{kind = .Get, index = 0, args = one(t)})
-	if dst != code.NONE do set(r, dst, Node{kind = .Get, index = 1, args = one(t)})
+	gets(r, t, dst, 1)
+}
+
+// gets: each value of dst is what the tuple t gives, from first on.
+gets :: proc(r: ^Reader, t: Class, dst: []code.Value, first: int) {
+	for x, k in dst do set(r, x, Node{kind = .Get, index = first + k, args = one(t)})
 }
 
 one :: proc(c: Class) -> []Class {
@@ -189,24 +193,22 @@ arms :: proc(r: ^Reader, m: int, i: code.Match, read_arm: proc(r: ^Reader, m: in
 read_match :: proc(r: ^Reader, i: code.Match) {
 	g := r.g
 	m := len(g.matches)
-	append(&g.matches, Match_Info{parent = r.region, covers = covers_of(i), value = i.dst != code.NONE, state = inst_effects(g.prog, i)})
+	append(&g.matches, Match_Info{parent = r.region, covers = covers_of(i), values = len(i.dst), state = inst_effects(g.prog, i)})
 	args := arms(r, m, i, proc(r: ^Reader, m: int, b: code.Body, outs: ^[dynamic]Class) {
-		info := r.g.matches[m]
 		read_body(r, b)
-		if info.value do append(outs, r.class[b.value])
-		if info.state do append(outs, r.state)
+		append(outs, ..classes(r, b.values))
+		if r.g.matches[m].state do append(outs, r.state)
 	})
 	c := add(g, Node{kind = .Match, owner = m, args = args})
-	info := g.matches[m]
-	if info.value do set(r, i.dst, Node{kind = .Get, index = 0, args = one(c)})
-	if info.state do r.state = add(g, Node{kind = .Get, index = info.value ? 1 : 0, args = one(c)})
+	gets(r, c, i.dst, 0)
+	if g.matches[m].state do r.state = add(g, Node{kind = .Get, index = len(i.dst), args = one(c)})
 }
 
 // read_loop: a loop, its body read as the tail of a turn.
 read_loop :: proc(r: ^Reader, i: code.Loop) {
 	g := r.g
 	l := len(g.loops)
-	info := Loop_Info{parent = r.region, state = -1, value = i.dst != code.NONE}
+	info := Loop_Info{parent = r.region, state = -1, values = len(i.dst)}
 	for x in i.params {
 		append(&info.params, code.Kind{g.func.kinds[x].machine, code.EVERY, g.func.kinds[x].lanes, g.func.kinds[x].bits})
 		append(&info.carried, nil)
@@ -230,8 +232,8 @@ read_loop :: proc(r: ^Reader, i: code.Loop) {
 	r.state, r.region = outer_state, outer_region
 	c := add(g, Node{kind = .Loop, owner = l, args = args[:]})
 	g.loops[l].node = len(g.nodes) - 1
-	if i.dst != code.NONE do set(r, i.dst, Node{kind = .Get, index = 0, args = one(c)})
-	if info.state >= 0 do r.state = add(g, Node{kind = .Get, index = i.dst != code.NONE ? 1 : 0, args = one(c)})
+	gets(r, c, i.dst, 0)
+	if info.state >= 0 do r.state = add(g, Node{kind = .Get, index = len(i.dst), args = one(c)})
 }
 
 // read_tail: the body of a turn, up to what ends it.
@@ -252,7 +254,7 @@ read_tail :: proc(r: ^Reader, b: code.Body) -> Class {
 		read_inst(r, inst)
 	}
 	outs := make([dynamic]Class)
-	if info.value do append(&outs, r.class[b.value])
+	append(&outs, ..classes(r, b.values))
 	if info.state >= 0 do append(&outs, r.state)
 	return add(g, Node{kind = .Exit, owner = l, args = outs[:]})
 }

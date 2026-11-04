@@ -111,6 +111,15 @@ CASES := []Binary_Case {
 		LIBC + "Say -> {string:text}\nSay -< e { r -> libc.puts{s -> e.text}!  -> 0 }\ngreet -> {\n  a >- Say{text -> \"hello\"}\n  -> 1\n}\nloud -> {\n  Say -< e { r -> libc.puts{s -> e.text + \"!\"}!  -> 0 }\n  -> greet!\n}\n-> loud! + greet!",
 		{{stdout = "hello!\nhello\n", exit = 2}},
 	},
+	// a scope of fields is the values of its fields; a function gives back two in
+	// registers, the others in the frame of its caller
+	{"field of a scope", "p -> {a -> ??::u8  b -> 3}\n-> p.a + p.b", {{args = {"4"}, exit = 7}}},
+	{"function that gives a scope", PAIR + "-> f{n -> ??::u32}!.a", {{args = {"10"}, exit = 54}, {args = {"100"}, exit = 49}}},
+	{"function that gives a scope, its other field", PAIR + "-> f{n -> ??::u32}!.b", {{args = {"0"}, exit = 1}, {args = {"10"}, exit = 2}}},
+	{"values beyond the registers", FOUR + "-> f{n -> ??::u32}!.d", {{args = {"0"}, exit = 0}, {args = {"5"}, exit = 7}}},
+	{"a float beyond the registers", FOUR + "-> f{n -> ??::u32}!.c", {{args = {"0"}, stdout = "0.500000\n"}, {args = {"5"}, stdout = "1.500000\n"}}},
+	{"binding of a run", RUN + "-> f{n -> ??::u32}!.#2", {{args = {"0"}, exit = 20}, {args = {"5"}, exit = 21}}},
+	{"run read at a counter", TOTAL + "-> total{xs -> {1 2 3}  acc -> ??::u8}!", {{args = {"10"}, exit = 16}, {args = {"254"}, exit = 4}}},
 	{
 		"handler of a recursion",
 		LIBC + "count -> {\n  Tick -> {}\n  Tick -< e { -> 0 }\n  u8:n -> ??\n  t >- Tick{}\n  -> n ? {0 -> 0  -> count{n -> n - 1}!}\n}\nmain -> {count.Tick -< e { r -> libc.puts{s -> \"tick\"}!  -> 1 }  -> count{n -> ??::u8}!}\n-> main!",

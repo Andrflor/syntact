@@ -30,28 +30,32 @@ Open :: struct {
 optimize :: proc(p: ^code.Program, costs: ^Costs) -> (out: code.Program, err: string) {
 	out = code.Program{imports = p.imports, texts = p.texts, inputs = p.inputs}
 	for f in p.funcs {
-		g, value, state := read(p, f)
+		g, values, state := read(p, f)
 		g.costs = costs
 		rebuild(g)
 		saturate(g, 100 * len(g.nodes))
 		best, _ := extract(g, costs)
-		plan := plan(g, best, {value, state})
+		roots := make([dynamic]Class)
+		append(&roots, ..values)
+		append(&roots, state)
+		plan := plan(g, best, roots[:])
 		if plan.error != "" do return out, fmt.tprintf("%s: %s", f.name, plan.error)
-		written, msg := write_function(plan, f, value, state)
+		written, msg := write_function(plan, f, values, state)
 		if msg != "" do return out, fmt.tprintf("%s: %s", f.name, msg)
 		append(&out.funcs, written)
 	}
 	return out, ""
 }
 
-write_function :: proc(p: ^Plan, f: ^code.Func, value, state: Class) -> (out: ^code.Func, err: string) {
+write_function :: proc(p: ^Plan, f: ^code.Func, values: []Class, state: Class) -> (out: ^code.Func, err: string) {
 	g := p.g
-	out = new_clone(code.Func{name = f.name, pure = f.pure, params = f.params, result = f.result})
+	out = new_clone(code.Func{name = f.name, pure = f.pure, params = f.params, results = f.results})
 	for _, j in f.params do append(&out.kinds, f.kinds[j])
 	w := Writer{p = p, g = g, f = out, values = make([]code.Value, len(g.parent)), written = make([]bool, len(g.parent))}
 	append(&w.open, Open{ROOT, &out.body.insts})
 	ensure(&w, state)
-	out.body.value = value == NO_CLASS ? code.NONE : ensure(&w, value)
+	out.body.values = make([]code.Value, len(values))
+	for c, k in values do out.body.values[k] = ensure(&w, c)
 	return out, w.error
 }
 
@@ -130,17 +134,8 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 		write_loop(w, c, n)
 		return w.values[c]
 	case .Foreign, .Call:
-		if pinned(w.p, n) {
-			ensure(w, n.args[0]) // the effects before
-			args := values_of(w, n.args[1:])
-			answer, read := gives(w, c, 1)
-			dst := read ? fresh(w, answer) : code.NONE
-			if n.kind == .Foreign do emit(w, c, code.Foreign{dst, n.index, args})
-			else do emit(w, c, code.Call{dst, n.index, args})
-			if state, has := gives(w, c, 0); has do done(w, state, code.NONE)
-			if read do done(w, answer, dst)
-			return done(w, c, code.NONE)
-		}
+		write_call(w, c, n)
+		return done(w, c, code.NONE)
 	case .Int, .Real, .Text, .Input, .Unary, .Binary, .In, .Narrow, .Splat, .Lanes, .Reduce, .Select:
 	}
 	args := values_of(w, n.args)
@@ -171,14 +166,60 @@ ensure :: proc(w: ^Writer, c: Class) -> code.Value {
 		inst = code.Reduce{dst, args[0], n.op}
 	case .Select:
 		inst = code.Select{dst, args[0], args[1], args[2]}
-	case .Call:
-		inst = code.Call{dst, n.index, args}
 	}
 	emit(w, c, inst)
 	return done(w, c, dst)
 }
 
-// write_match: a match whose arms give a value, or effects, or both.
+// write_call: the call of a symbol or of a function: after the state it takes,
+// when it takes one, and its arguments; each value it gives, one of its own.
+write_call :: proc(w: ^Writer, c: Class, n: Node) {
+	first := effectful(w.g, n) ? 1 : 0
+	if first == 1 do ensure(w, n.args[0]) // the effects before
+	args := values_of(w, n.args[first:])
+	if n.kind == .Foreign {
+		answer, read := gives(w, c, 1)
+		dst := read ? fresh(w, answer) : code.NONE
+		emit(w, c, code.Foreign{dst, n.index, args})
+		if read do done(w, answer, dst)
+	} else {
+		results := w.g.prog.funcs[n.index].results
+		dst := make([]code.Value, len(results))
+		for m, k in results {
+			answer, read := gives(w, c, first + k)
+			dst[k] = read ? done(w, answer, fresh(w, answer)) : code.value(w.f, m)
+		}
+		emit(w, c, code.Call{dst, n.index, args})
+	}
+	if state, has := gives(w, c, 0); has && first == 1 do done(w, state, code.NONE)
+}
+
+// read_values: of the count values a tuple gives, those read.
+read_values :: proc(w: ^Writer, t: Class, count: int) -> []int {
+	out := make([dynamic]int)
+	for j in 0 ..< count do if _, read := gives(w, t, j); read do append(&out, j)
+	return out[:]
+}
+
+// fresh_values: a value for each of the values of t read.
+fresh_values :: proc(w: ^Writer, t: Class, read: []int) -> []code.Value {
+	out := make([]code.Value, len(read))
+	for j, k in read {
+		value, _ := gives(w, t, j)
+		out[k] = fresh(w, value)
+	}
+	return out
+}
+
+// done_values: the values of t read are dst.
+done_values :: proc(w: ^Writer, t: Class, read: []int, dst: []code.Value) {
+	for j, k in read {
+		value, _ := gives(w, t, j)
+		done(w, value, dst[k])
+	}
+}
+
+// write_match: a match whose arms give values, or effects, or both.
 write_match :: proc(w: ^Writer, c: Class, n: Node) {
 	info := w.g.matches[n.owner]
 	target := ensure(w, n.args[0])
@@ -187,23 +228,22 @@ write_match :: proc(w: ^Writer, c: Class, n: Node) {
 		ensure(w, n.args[1])
 		first = 2
 	}
-	per := (info.value ? 1 : 0) + (info.state ? 1 : 0)
-	value, read := gives(w, c, 0)
-	read &&= info.value
-	dst := read ? fresh(w, value) : code.NONE
+	per := info.values + (info.state ? 1 : 0)
+	read := read_values(w, c, info.values)
+	dst := fresh_values(w, c, read)
 	arms := make([]code.Arm, len(info.covers))
 	for &arm, k in arms {
 		arm.cover = info.covers[k]
-		arm.body.value = code.NONE
 		append(&w.open, Open{Region{.Arm, n.owner, k}, &arm.body.insts})
 		outs := n.args[first + k * per:][:per]
 		if info.state do ensure(w, outs[per - 1])
-		if read do arm.body.value = ensure(w, outs[0])
+		arm.body.values = make([]code.Value, len(read))
+		for j, x in read do arm.body.values[x] = ensure(w, outs[j])
 		pop(&w.open)
 	}
 	emit(w, c, code.Match{dst, target, arms})
-	if read do done(w, value, dst)
-	if state, has := gives(w, c, info.value ? 1 : 0); has && info.state do done(w, state, code.NONE)
+	done_values(w, c, read, dst)
+	if state, has := gives(w, c, info.values); has && info.state do done(w, state, code.NONE)
 	done(w, c, code.NONE)
 }
 
@@ -235,23 +275,22 @@ write_loop :: proc(w: ^Writer, c: Class, n: Node) {
 	loop := code.Loop{params = params[:], init = init[:]}
 	append(&w.open, Open{Region{.Body, n.owner, 0}, &loop.body.insts})
 	append(&w.loops, n.owner)
-	loop.body.value = write_tail(w, n.args[count])
+	loop.body.values = write_tail(w, n.args[count])
 	pop(&w.loops)
 	pop(&w.open)
-	value, read := gives(w, c, 0)
-	read &&= info.value
-	loop.dst = read ? fresh(w, value) : code.NONE
+	read := read_values(w, c, info.values)
+	loop.dst = fresh_values(w, c, read)
 	emit(w, c, loop)
-	if read do done(w, value, loop.dst)
-	if state, has := gives(w, c, info.value ? 1 : 0); has && info.state >= 0 do done(w, state, code.NONE)
+	done_values(w, c, read, loop.dst)
+	if state, has := gives(w, c, info.values); has && info.state >= 0 do done(w, state, code.NONE)
 	// what its parameters hold at its end
 	for j, k in info.finals do if final, has := gives(w, c, outputs(info) + k); has do done(w, final, values[j])
 	done(w, c, code.NONE)
 }
 
-// write_tail: the end of a turn, written where it is: the value of the body, NONE
-// when it ends in an Again.
-write_tail :: proc(w: ^Writer, t: Class) -> code.Value {
+// write_tail: the end of a turn, written where it is: the values of the body read,
+// none when it ends in an Again.
+write_tail :: proc(w: ^Writer, t: Class) -> []code.Value {
 	g := w.g
 	l := w.loops[len(w.loops) - 1]
 	info := g.loops[l]
@@ -265,10 +304,13 @@ write_tail :: proc(w: ^Writer, t: Class) -> code.Value {
 			if j != info.state do append(&args, v)
 		}
 		here(w, code.Again{args[:]})
-		return code.NONE
+		return nil
 	case .Exit:
 		if info.state >= 0 do ensure(w, n.args[len(n.args) - 1])
-		return info.value ? ensure(w, n.args[0]) : code.NONE
+		read := read_values(w, find(g, g.home[info.node]), info.values)
+		out := make([]code.Value, len(read))
+		for j, k in read do out[k] = ensure(w, n.args[j])
+		return out
 	case .Match:
 		m := g.matches[n.owner]
 		target := ensure(w, n.args[0])
@@ -278,23 +320,27 @@ write_tail :: proc(w: ^Writer, t: Class) -> code.Value {
 			first = 2
 		}
 		arms := make([]code.Arm, len(m.covers))
-		dst := code.NONE
+		dst: []code.Value
 		for &arm, k in arms {
 			arm.cover = m.covers[k]
 			append(&w.open, Open{Region{.Arm, n.owner, k}, &arm.body.insts})
-			arm.body.value = write_tail(w, n.args[first + k])
+			arm.body.values = write_tail(w, n.args[first + k])
 			pop(&w.open)
-			if arm.body.value == code.NONE do continue
-			if dst == code.NONE {
-				dst = code.value(w.f, code.machine_of(w.f, arm.body.value))
-				w.f.kinds[dst].bounds = code.bounds_of(w.f, arm.body.value)
-			} else {
-				w.f.kinds[dst].bounds = code.hull(w.f.kinds[dst].bounds, code.bounds_of(w.f, arm.body.value))
+			vs := arm.body.values
+			if len(vs) == 0 do continue
+			if dst == nil {
+				dst = make([]code.Value, len(vs))
+				for v, j in vs {
+					dst[j] = code.value(w.f, code.machine_of(w.f, v))
+					w.f.kinds[dst[j]].bounds = code.bounds_of(w.f, v)
+				}
+				continue
 			}
+			for v, j in vs do w.f.kinds[dst[j]].bounds = code.hull(w.f.kinds[dst[j]].bounds, code.bounds_of(w.f, v))
 		}
 		here(w, code.Match{dst, target, arms})
 		return dst
 	}
 	w.error = fmt.tprintf("a %v ends a turn", n.kind)
-	return code.NONE
+	return nil
 }

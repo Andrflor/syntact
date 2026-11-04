@@ -59,7 +59,7 @@ Inst :: union {
 	Binary, // dst = a op b; on vectors, in each lane
 	Compare, // dst = a cond b: 1 or 0
 	Foreign, // dst = a symbol, called
-	Call, // dst = a function of the program, called
+	Call, // dst = the values of a function of the program, called
 	Splat, // dst = a in each lane of a vector
 	Lanes, // dst = a vector of integers
 	Reduce, // dst = the lanes of a by op
@@ -129,8 +129,9 @@ Foreign :: struct {
 	args:   []Operand,
 }
 
+// Call: dst, in order, the values the function gives: NO_REG for one not read.
 Call :: struct {
-	dst:  Reg,
+	dst:  []Reg,
 	func: int,
 	args: []Operand,
 }
@@ -154,7 +155,7 @@ Branch :: struct {
 }
 
 Return :: struct {
-	value: Reg, // NO_REG: nothing
+	values: []Reg,
 }
 
 Block :: struct {
@@ -203,7 +204,7 @@ layout_func :: proc(src: ^code.Func) -> ^Func {
 	b := Builder{f = f}
 	b.current = new_block(&b)
 	body(&b, src.body)
-	finish(&b, Return{value = src.body.value == code.NONE ? NO_REG : Reg(src.body.value)})
+	finish(&b, Return{registers(src.body.values)})
 	constants(f)
 	fused(f)
 	unread(f)
@@ -225,7 +226,9 @@ coalesced :: proc(f: ^Func) {
 			clear(&regs)
 			uses(inst, &regs)
 			for r in regs do reads[r] += 1
-			if w := writes(inst); w != NO_REG do written[w] += 1
+			clear(&regs)
+			writes(inst, &regs)
+			for r in regs do written[r] += 1
 		}
 		clear(&regs)
 		end_uses(b.end, &regs)
@@ -234,8 +237,13 @@ coalesced :: proc(f: ^Func) {
 	reads_reg :: proc(inst: Inst, r: Reg, regs: ^[dynamic]Reg) -> bool {
 		clear(regs)
 		uses(inst, regs)
-		for x in regs do if x == r do return true
-		return writes(inst) == r
+		writes(inst, regs)
+		return slice.contains(regs[:], r)
+	}
+	writes_reg :: proc(inst: Inst, r: Reg, regs: ^[dynamic]Reg) -> bool {
+		clear(regs)
+		writes(inst, regs)
+		return slice.contains(regs[:], r)
 	}
 	for &b in f.blocks {
 		clear(&regs)
@@ -248,7 +256,7 @@ coalesced :: proc(f: ^Func) {
 			p := c.dst
 			if !from_reg || reads[v] != 1 || written[v] != 1 || !same_kind(f.kinds[v], f.kinds[p]) || slice.contains(ending, p) do continue
 			j := -1
-			for m := k - 1; m >= 0; m -= 1 do if writes(b.insts[m]) == v {
+			for m := k - 1; m >= 0; m -= 1 do if writes_reg(b.insts[m], v, &regs) {
 				j = m
 				break
 			}
@@ -256,7 +264,7 @@ coalesced :: proc(f: ^Func) {
 			free := true
 			for m in j + 1 ..< len(b.insts) do if m != k && reads_reg(b.insts[m], p, &regs) do free = false
 			if !free do continue
-			set_dst(&b.insts[j], p)
+			set_dst(&b.insts[j], v, p)
 			ordered_remove(&b.insts, k)
 		}
 	}
@@ -267,8 +275,8 @@ same_kind :: proc(a, b: code.Kind) -> bool {
 	return a.machine == b.machine && a.lanes == b.lanes && code.lane_bits(a) == code.lane_bits(b)
 }
 
-// set_dst: what inst writes, r.
-set_dst :: proc(inst: ^Inst, r: Reg) {
+// set_dst: what inst writes in from, it writes in r.
+set_dst :: proc(inst: ^Inst, from, r: Reg) {
 	switch &i in inst {
 	case Copy:
 		i.dst = r
@@ -287,7 +295,7 @@ set_dst :: proc(inst: ^Inst, r: Reg) {
 	case Foreign:
 		i.dst = r
 	case Call:
-		i.dst = r
+		for &x in i.dst do if x == from do x = r
 	case Splat:
 		i.dst = r
 	case Lanes:
@@ -364,14 +372,15 @@ unread :: proc(f: ^Func) {
 			kept := make([dynamic]Inst)
 			for original in b.insts {
 				inst := original
-				w := writes(inst)
+				clear(&regs)
+				writes(inst, &regs)
 				switch &i in inst {
 				case Foreign:
-					if w != NO_REG && !read[w] do i.dst = NO_REG
+					if i.dst != NO_REG && !read[i.dst] do i.dst = NO_REG
 				case Call:
-					if w != NO_REG && !read[w] do i.dst = NO_REG
+					for &x in i.dst do if x != NO_REG && !read[x] do x = NO_REG
 				case Copy, Real, Text, Input, Unary, Binary, Compare, Splat, Lanes, Reduce, Select:
-					if !read[w] {
+					if !read[regs[0]] {
 						changed = true
 						continue
 					}
@@ -411,12 +420,13 @@ constant_values :: proc(f: ^Func) -> []Maybe(i64) {
 	count := make([]int, len(f.kinds))
 	value := make([]Maybe(i64), len(f.kinds))
 	for i in 0 ..< len(f.source.params) do count[i] += 1
+	regs := make([dynamic]Reg)
 	for b in f.blocks do for inst in b.insts {
-		w := writes(inst)
-		if w == NO_REG do continue
-		count[w] += 1
+		clear(&regs)
+		writes(inst, &regs)
+		for w in regs do count[w] += 1
 		if c, is_copy := inst.(Copy); is_copy {
-			if v, is_int := c.src.(i64); is_int do value[w] = v
+			if v, is_int := c.src.(i64); is_int do value[c.dst] = v
 		}
 	}
 	for &v, r in value do if count[r] != 1 do v = nil
@@ -556,7 +566,7 @@ body :: proc(b: ^Builder, src: code.Body) {
 		case code.Foreign:
 			emit(b, Foreign{i.dst == code.NONE ? NO_REG : Reg(i.dst), i.symbol, regs(i.args)})
 		case code.Call:
-			emit(b, Call{i.dst == code.NONE ? NO_REG : Reg(i.dst), i.func, regs(i.args)})
+			emit(b, Call{registers(i.dst), i.func, regs(i.args)})
 		case code.Match:
 			done := new_block(b)
 			for arm, n in i.arms {
@@ -567,7 +577,8 @@ body :: proc(b: ^Builder, src: code.Body) {
 				else do test(b, Reg(i.target), arm.cover, taken, next)
 				start(b, taken)
 				body(b, arm.body)
-				if i.dst != code.NONE && arm.body.value != code.NONE do emit(b, Copy{Reg(i.dst), Reg(arm.body.value)})
+				// an arm that ends in an Again gives none
+				if len(arm.body.values) > 0 do for x, k in i.dst do emit(b, Copy{Reg(x), Reg(arm.body.values[k])})
 				finish(b, Jump{done})
 				if !last do start(b, next)
 			}
@@ -580,7 +591,7 @@ body :: proc(b: ^Builder, src: code.Body) {
 			append(&b.loops, Loop_Head{head, i.params})
 			body(b, i.body)
 			pop(&b.loops)
-			if i.dst != code.NONE do emit(b, Copy{Reg(i.dst), Reg(i.body.value)})
+			for x, k in i.dst do emit(b, Copy{Reg(x), Reg(i.body.values[k])})
 		case code.Again:
 			loop := b.loops[len(b.loops) - 1]
 			parallel(b, loop.params, i.args)
@@ -593,6 +604,12 @@ body :: proc(b: ^Builder, src: code.Body) {
 
 regs :: proc(vs: []code.Value) -> []Operand {
 	out := make([]Operand, len(vs))
+	for v, i in vs do out[i] = Reg(v)
+	return out
+}
+
+registers :: proc(vs: []code.Value) -> []Reg {
+	out := make([]Reg, len(vs))
 	for v, i in vs do out[i] = Reg(v)
 	return out
 }

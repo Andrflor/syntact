@@ -40,7 +40,7 @@ test_facts :: proc(t: ^testing.T) {
 	arm := m.arms[0].body
 	narrow, is_narrow := arm.insts[0].(Narrow)
 	testing.expectf(t, is_narrow && bounds_of(f, narrow.dst) == Bounds{0, 255}, "the target in the arm\n%s", print_program(&prog))
-	testing.expectf(t, bounds_of(f, arm.value) == Bounds{0, 32640}, "the value of the arm: %v\n%s", bounds_of(f, arm.value), print_program(&prog))
+	testing.expectf(t, len(arm.values) == 1 && bounds_of(f, arm.values[0]) == Bounds{0, 32640}, "the value of the arm: %v\n%s", arm.values, print_program(&prog))
 }
 
 // A function whose calls are in tail position is a loop on its parameters.
@@ -74,6 +74,47 @@ test_iteration_is_a_loop :: proc(t: ^testing.T) {
 	testing.expectf(t, len(prog.funcs) == 1 && is_loop, "fact is not a loop\n%s", print_program(&prog))
 	run, failed := interpret(&prog, {6}, nil)
 	testing.expectf(t, failed == "" && run.result.int == 720, "fact{n -> 6}! = %d (%s)", run.result.int, failed)
+}
+
+// A field read of a scope of fields is the value of that field.
+@(test)
+test_scope_field :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	k, parsed := kernel.run("p -> {a -> ??::u8  b -> 3}\n-> p.a + p.b")
+	if !testing.expect(t, parsed, "does not parse") do return
+	prog, err := lower_program(&k)
+	if !testing.expectf(t, err == "", "%s", err) do return
+	run, failed := interpret(&prog, {4}, nil)
+	testing.expectf(t, failed == "" && run.result.int == 7, "p.a + p.b = %d (%s)\n%s", run.result.int, failed, print_program(&prog))
+}
+
+// A recursion whose base cases are scopes gives the values of their fields: its
+// function gives them all, a loop and a match in it too, its call takes them all,
+// and a field read picks its own.
+@(test)
+test_function_gives_scope :: proc(t: ^testing.T) {
+	arena: vmem.Arena
+	context.allocator = vmem.arena_allocator(&arena)
+	defer vmem.arena_destroy(&arena)
+	F :: "f -> {u32:n -> ??  acc -> 0  -> n ? {0 -> {a -> acc  b -> 1}  1 -> {a -> acc  b -> 2}  -> f{n -> n - 1  acc -> (acc + n) % 1000}!}}\n"
+	for c in ([]struct {
+			field: string,
+			n, int: i64,
+		}{{"a", 10, 54}, {"b", 10, 2}, {"b", 0, 1}}) {
+		k, parsed := kernel.run(fmt.tprintf("%s-> f{{n -> ??::u32}}!.%s", F, c.field))
+		if !testing.expect(t, parsed, "does not parse") do return
+		prog, err := lower_program(&k)
+		if !testing.expectf(t, err == "", "%s", err) do return
+		f := prog.funcs[1]
+		loop, is_loop := f.body.insts[0].(Loop)
+		testing.expectf(t, len(f.results) == 2 && is_loop && len(loop.dst) == 2, "f does not give two values in a loop\n%s", print_program(&prog))
+		call, is_call := prog.funcs[0].body.insts[len(prog.funcs[0].body.insts) - 1].(Call)
+		testing.expectf(t, is_call && len(call.dst) == 2, "the call of f does not take two values\n%s", print_program(&prog))
+		run, failed := interpret(&prog, {c.n}, nil)
+		testing.expectf(t, failed == "" && run.result.int == c.int, "f{n -> %d}!.%s = %d (%s), expected %d", c.n, c.field, run.result.int, failed, c.int)
+	}
 }
 
 // The Goose benchmarks written in Syntact that the laws reduce to code: each is

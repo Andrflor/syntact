@@ -430,7 +430,7 @@ copy_loop :: proc(g: ^Graph, l: int) -> (r: int, ok: bool) {
 	info := g.loops[l]
 	r = len(g.loops)
 	own := own_params(info)
-	copy_info := Loop_Info{parent = info.parent, state = info.state, value = info.value, origin = .Rest}
+	copy_info := Loop_Info{parent = info.parent, state = info.state, values = info.values, origin = .Rest}
 	for j in 0 ..< own {
 		append(&copy_info.params, info.params[j])
 		append(&copy_info.carried, nil)

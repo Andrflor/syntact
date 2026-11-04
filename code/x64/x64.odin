@@ -141,7 +141,7 @@ stub :: proc(e: ^Emitter) {
 		enc.xor_r64_r64(.RDI, .RDI)
 		call_import(e, e.flush, 0)
 	}
-	switch p.funcs[0].result {
+	switch code.program_machine(p) {
 	case .Int:
 		enc.mov_r64_r64(.RDI, .RBX)
 		enc.movabs_r64_imm64(.RAX, 60)

@@ -17,26 +17,30 @@ import code ".."
 //
 //   x in lo..hi = (x >= lo) [&] (x <= hi)        x in c = (x = c)
 
-// selected: the law of selects on a match.
+// selected: the law of selects on a match, for each value it gives.
 selected :: proc(g: ^Graph, c: Class, n: Node) {
 	if n.kind != .Match do return
-	info := &g.matches[n.owner]
-	if info.tail || info.state || !info.value || info.selected do return
-	info.selected = true
-	value, read := lookup(g, Node{kind = .Get, index = 0, args = one(c)})
-	if !read do return
+	info := g.matches[n.owner]
+	if info.tail || info.state || info.values == 0 || info.selected do return
+	g.matches[n.owner].selected = true
 	t := Unnarrow{g = g, match = n.owner}
 	arms := len(info.covers)
-	out, free := freed(&t, n.args[arms])
-	if !free do return
-	for k := arms - 2; k >= 0; k -= 1 {
-		yes, free_yes := freed(&t, n.args[1 + k])
-		if !free_yes do return
-		append(&g.covers, info.covers[k])
-		test := add(g, Node{kind = .In, index = len(g.covers) - 1, args = one(n.args[0])})
-		out = add(g, Node{kind = .Select, args = three(test, yes, out)})
+	tests := make([]Class, arms - 1)
+	for &x in tests do x = NO_CLASS
+	values: for j in 0 ..< info.values {
+		value, read := lookup(g, Node{kind = .Get, index = j, args = one(c)})
+		if !read do continue
+		out := freed(&t, n.args[1 + (arms - 1) * info.values + j]) or_continue
+		for k := arms - 2; k >= 0; k -= 1 {
+			yes := freed(&t, n.args[1 + k * info.values + j]) or_continue values
+			if tests[k] == NO_CLASS {
+				append(&g.covers, info.covers[k])
+				tests[k] = add(g, Node{kind = .In, index = len(g.covers) - 1, args = one(n.args[0])})
+			}
+			out = add(g, Node{kind = .Select, args = three(tests[k], yes, out)})
+		}
+		merge(g, g.home[value], out)
 	}
-	merge(g, g.home[value], out)
 }
 
 // cells: membership in one cell of integers, as comparisons.

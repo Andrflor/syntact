@@ -3,13 +3,15 @@ package code_c
 import code ".."
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 
 // THE PROGRAM AS C
 //
 // The code of a program (code/) as one C file: the reference a C compiler's own
 // optimizations are measured against. The structure is kept — a match is a chain
-// of if, a loop a for (;;) that an Again continues — and so are the facts. An
+// of if, a loop a for (;;) that an Again continues, a function that gives several
+// values gives a struct of them — and so are the facts. An
 // integer is an int64_t, as on the machine; what the C compiler cannot see itself
 // — the bounds of a parameter, an input, what a call gives back, the parameters of
 // a loop — is said with ASSUME. An operation whose result the kernel proved in
@@ -92,6 +94,12 @@ source :: proc(p: ^code.Program) -> (string, string) {
 		fmt.sbprintfln(&w.b, "extern %s %s(%s) __asm__(\"%s\");", answer_type(imp), w.symbols[i], strings.join(args[:], ", "), imp.symbol)
 	}
 	if len(p.imports) > 0 do strings.write_string(&w.b, "\n")
+	for f, i in p.funcs {
+		if len(f.results) < 2 do continue
+		fields := make([dynamic]string)
+		for m, k in f.results do append(&fields, fmt.tprintf("%s r%d;", C_TYPES[m], k))
+		fmt.sbprintfln(&w.b, "typedef struct {{ %s }} %s;", strings.join(fields[:], " "), result_type(&w, f, i))
+	}
 	for f, i in p.funcs do fmt.sbprintfln(&w.b, "%s;", signature(&w, f, i))
 	if len(p.inputs) > 0 do fmt.sbprintfln(&w.b, "static int64_t inputs[%d];", len(p.inputs))
 	for f, i in p.funcs {
@@ -192,13 +200,25 @@ answer_type :: proc(imp: code.Import) -> string {
 	return fmt.tprintf("%sint%d_t", imp.result_signed ? "" : "u", imp.result_bits)
 }
 
+// result_type: the C type of what a function gives: void, the type of its value,
+// or a struct of its values.
+result_type :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
+	switch len(f.results) {
+	case 0:
+		return "void"
+	case 1:
+		return C_TYPES[f.results[0]]
+	}
+	return fmt.tprintf("%s_values", w.funcs[index])
+}
+
 signature :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
 	params := make([dynamic]string)
 	// parameter i is the value i, of the kind its bounds give
 	for _, i in f.params do append(&params, fmt.tprintf("%s v%d", type_of(f.kinds[i]), i))
 	if len(params) == 0 do append(&params, "void")
-	pure := f.pure && index > 0 && f.result != .None ? "__attribute__((pure)) " : ""
-	return fmt.tprintf("static %s%s %s(%s)", pure, C_TYPES[f.result], w.funcs[index], strings.join(params[:], ", "))
+	pure := f.pure && index > 0 && len(f.results) > 0 ? "__attribute__((pure)) " : ""
+	return fmt.tprintf("static %s%s %s(%s)", pure, result_type(w, f, index), w.funcs[index], strings.join(params[:], ", "))
 }
 
 // --- a function ---
@@ -207,7 +227,9 @@ function :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
 	w.f = f
 	w.defs = make([]code.Inst, len(f.kinds))
 	w.reads = make([]int, len(f.kinds))
-	survey(w, f.body, true)
+	all := make([]bool, len(f.body.values))
+	for &x in all do x = true
+	survey(w, f.body, all)
 	fmt.sbprintfln(&w.b, "%s {{", signature(w, f, index))
 	w.depth = 1
 	for _, i in f.params {
@@ -216,17 +238,32 @@ function :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
 		else do assume(w, x)
 	}
 	if msg := body(w, f.body); msg != "" do return msg
-	if f.body.value != code.NONE do line(w, "return %s;", name(w, f.body.value))
+	values := make([dynamic]string)
+	for x in f.body.values do append(&values, name(w, x))
+	switch len(values) {
+	case 0:
+	case 1:
+		line(w, "return %s;", values[0])
+	case:
+		line(w, "return (%s){{%s}};", result_type(w, f, index), strings.join(values[:], ", "))
+	}
 	strings.write_string(&w.b, "}\n")
 	return ""
 }
 
+// kept: of the values dst, those read.
+kept :: proc(w: ^Writer, dst: []code.Value) -> []bool {
+	out := make([]bool, len(dst))
+	for x, k in dst do out[k] = w.reads[x] > 0
+	return out
+}
+
 // survey: the instruction that defines each value, and how many times each is read
-// — the value of a body only when what holds it is read: the instructions are
+// — a value of a body only when what holds it is kept: the instructions are
 // surveyed from the last, so that each value is read before it is defined.
-survey :: proc(w: ^Writer, b: code.Body, read_value: bool) {
+survey :: proc(w: ^Writer, b: code.Body, kept_values: []bool) {
 	read :: proc(w: ^Writer, x: code.Value) {if x != code.NONE do w.reads[x] += 1}
-	if read_value do read(w, b.value)
+	for x, k in b.values do if kept_values[k] do read(w, x)
 	#reverse for inst in b.insts {
 		switch i in inst {
 		case code.Const:
@@ -267,14 +304,14 @@ survey :: proc(w: ^Writer, b: code.Body, read_value: bool) {
 			if i.dst != code.NONE do w.defs[i.dst] = inst
 			for a in i.args do read(w, a)
 		case code.Call:
-			if i.dst != code.NONE do w.defs[i.dst] = inst
+			for x in i.dst do w.defs[x] = inst
 			for a in i.args do read(w, a)
 		case code.Match:
 			read(w, i.target)
-			for arm in i.arms do survey(w, arm.body, i.dst != code.NONE && w.reads[i.dst] > 0)
+			for arm in i.arms do survey(w, arm.body, kept(w, i.dst))
 		case code.Loop:
 			for x in i.init do read(w, x)
-			survey(w, i.body, i.dst != code.NONE && w.reads[i.dst] > 0)
+			survey(w, i.body, kept(w, i.dst))
 		case code.Again:
 			for a in i.args do read(w, a)
 		}
@@ -378,16 +415,26 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			args := make([dynamic]string)
 			for a in i.args do append(&args, name(w, a))
 			call := fmt.tprintf("%s(%s)", w.funcs[i.func], strings.join(args[:], ", "))
-			if i.dst == code.NONE || w.reads[i.dst] == 0 {
+			if !slice.contains(kept(w, i.dst), true) {
 				line(w, "%s;", call)
 				continue
 			}
-			declare(w, i.dst, call)
-			assume(w, i.dst)
+			if len(i.dst) == 1 {
+				declare(w, i.dst[0], call)
+				assume(w, i.dst[0])
+				continue
+			}
+			// a struct of the values, each read from it
+			line(w, "%s r%d = %s;", result_type(w, w.p.funcs[i.func], i.func), int(i.dst[0]), call)
+			for x, k in i.dst {
+				if w.reads[x] == 0 do continue
+				declare(w, x, fmt.tprintf("r%d.r%d", int(i.dst[0]), k))
+				assume(w, x)
+			}
 		case code.Match:
 			// a value nothing reads is not kept
-			kept := i.dst != code.NONE && w.reads[i.dst] > 0
-			if kept do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
+			keep := kept(w, i.dst)
+			declare_kept(w, i.dst, keep)
 			target := name(w, i.target)
 			for arm, n in i.arms {
 				last := n == len(i.arms) - 1
@@ -404,13 +451,14 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 				}
 				w.depth += 1
 				if msg := body(w, arm.body); msg != "" do return msg
-				if kept && arm.body.value != code.NONE do line(w, "v%d = %s;", int(i.dst), name(w, arm.body.value))
+				// an arm that ends in an Again gives none
+				if len(arm.body.values) > 0 do assign_kept(w, i.dst, keep, arm.body.values)
 				w.depth -= 1
 			}
 			line(w, "}}")
 		case code.Loop:
-			kept := i.dst != code.NONE && w.reads[i.dst] > 0
-			if kept do line(w, "%s v%d;", type_of(f.kinds[i.dst]), int(i.dst))
+			keep := kept(w, i.dst)
+			declare_kept(w, i.dst, keep)
 			for x, n in i.params {
 				if x == i.init[n] do continue
 				line(w, "%s v%d = %s;", type_of(f.kinds[x]), int(x), name(w, i.init[n]))
@@ -421,7 +469,7 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 			append(&w.loops, i.params)
 			if msg := body(w, i.body); msg != "" do return msg
 			pop(&w.loops)
-			if kept do line(w, "v%d = %s;", int(i.dst), name(w, i.body.value))
+			assign_kept(w, i.dst, keep, i.body.values)
 			line(w, "break;")
 			w.depth -= 1
 			line(w, "}}")
@@ -431,6 +479,16 @@ body :: proc(w: ^Writer, b: code.Body) -> string {
 		}
 	}
 	return ""
+}
+
+// declare_kept: the values of dst kept, declared.
+declare_kept :: proc(w: ^Writer, dst: []code.Value, kept: []bool) {
+	for x, k in dst do if kept[k] do line(w, "%s v%d;", type_of(w.f.kinds[x]), int(x))
+}
+
+// assign_kept: the values of dst kept take those of a body.
+assign_kept :: proc(w: ^Writer, dst: []code.Value, kept: []bool, values: []code.Value) {
+	for x, k in dst do if kept[k] do line(w, "v%d = %s;", int(x), name(w, values[k]))
 }
 
 // again: the parameters take the arguments, all read before any is written, and
@@ -668,7 +726,7 @@ text_literal :: proc(s: string) -> string {
 entry :: proc(w: ^Writer) {
 	p := w.p
 	strings.write_string(&w.b, "\n")
-	if p.funcs[0].result == .Real {
+	if code.program_machine(p) == .Real {
 		strings.write_string(&w.b, `// the float, with six decimals: round(|x| * 10^6) cut at 10^6
 static void write_real(double x) {
     if (signbit(x)) {
@@ -700,7 +758,7 @@ static void write_real(double x) {
 			line(w, "}}")
 		}
 	}
-	switch p.funcs[0].result {
+	switch code.program_machine(p) {
 	case .Int:
 		line(w, "return (int)(program() & 255);")
 	case .Real:
