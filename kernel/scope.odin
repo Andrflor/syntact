@@ -37,9 +37,6 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 		#partial switch x in v {
 		case ^Scope:
 			append(&out, ..placed(k, x, view))
-		case:
-			// a run not known yet — an input, what a place holds —: inlined as it is
-			if inlined(k, v) do append(&out, b)
 		}
 	}
 	return out[:]
@@ -87,23 +84,7 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 		if is_invalid(target) do return target
 		return problem(.Invalid_Property_Access, a.span, fmt.tprintf("`.%s` on %s, which is not a scope", a.name, print_type(target)))
 	}
-	bindings := placed(k, s, .Value)
-	// a place counted after a run of a length not known yet is not known yet: it stays
-	if a.ordinal >= 0 {
-		seen := 0
-		for b in bindings {
-			if b.kind == .Expand {
-				out := new(Access)
-				out^ = a^
-				out.target = s
-				return out
-			}
-			if b.name != a.name do continue
-			if seen == a.ordinal do break
-			seen += 1
-		}
-	}
-	if b, found := occurrence(bindings, a.name, a.ordinal, true); found do return binding_value(k, b)
+	if b, found := occurrence(placed(k, s, .Value), a.name, a.ordinal, true); found do return binding_value(k, b)
 	return problem(.Invalid_Property_Access, a.span, fmt.tprintf("%s has no binding `%s`", print_type(s), a.name))
 }
 
@@ -871,21 +852,6 @@ pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts: Type, used: i128, lengt
 		if empty do return Bool(!is_none(counts_from(counts, used)))
 		return Bool(counts_hold(counts, used))
 	}
-	if xs[0].kind == .Expand {
-		// a run inlined, of a length not known yet: its own pieces, each in a, as many
-		// as counts still admits
-		pieces, n, ok := run_pieces(k, binding_value(k, xs[0]))
-		if !ok do return new_operation(.In, run_scope(k, xs), new_operation(.Mul, a, counts))
-		// each of its pieces is one of a: what it repeats is included in a
-		if !included(k, pieces, a) do return new_operation(.In, run_scope(k, xs), new_operation(.Mul, a, counts))
-		// it gives at least the least of n pieces, and as many more as it holds: counts
-		// must admit every count from there
-		least, _ := discrete_bounds(cells_of_one(n))
-		from, known := least.?
-		_, most := discrete_bounds(cells_of_one(counts_last(counts)))
-		if !known || most != nil do return new_operation(.In, run_scope(k, xs), new_operation(.Mul, a, counts))
-		return pieces_in(k, xs[1:], a, counts, used + from, lengths, any_length, empty)
-	}
 	if is_none(counts_from(counts, used + 1)) do return Bool(false)
 	out: Type = Bool(false)
 	for i in 1 ..= len(xs) {
@@ -1071,52 +1037,4 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 		if !same(k, binding_type(k, x), binding_type(k, y)) do return false
 	}
 	return true
-}
-
-// inlined: v, a value not known yet whose values are scopes — a run of an unknown
-// length —: an expansion places it as it is, inline.
-inlined :: proc(k: ^Kernel, v: Type) -> bool {
-	if is_constant(v) do return false
-	layout, ok := values(k, v)
-	if !ok do return false
-	one: [1]Type
-	cells, negated := cells_in(layout, &one)
-	if negated || len(cells) == 0 do return false
-	for c in cells do if cell_family(c) != .Value do return false
-	return true
-}
-
-// run_pieces: v, a run not known yet, as the pieces it repeats and how many: its
-// values, solved by Arden, are a run of pieces, `{...(A * n):}`.
-run_pieces :: proc(k: ^Kernel, v: Type) -> (pieces: Type, n: Type, ok: bool) {
-	layout := values(k, v) or_return
-	s := layout.(^Scope) or_return
-	if recursive(s) do s = arden(k, s) or_return
-	// its one run: its parameters are not pieces, nor is a run of the empty shape
-	run: ^Binding
-	for b in placed(k, s, .Shape) {
-		if !is_run(b) do continue
-		if empty, is_scope := binding_color(k, b).(^Scope); is_scope && len(empty.bindings) == 0 do continue
-		if run != nil do return
-		run = b
-	}
-	if run == nil do return
-	color := binding_color(k, run)
-	o := color.(^Operation) or_return
-	if o.op != .Mul || !repeats(o.args[0]) do return
-	return o.args[0], o.args[1], true
-}
-
-// cells_of_one: the first cell of a constant normal form.
-cells_of_one :: proc(t: Type) -> Type {
-	one: [1]Type
-	cells, _ := cells_in(t, &one)
-	return len(cells) > 0 ? cells[0] : None{}
-}
-
-// counts_last: the last cell of a set of counts: the one that bounds it above.
-counts_last :: proc(t: Type) -> Type {
-	one: [1]Type
-	cells, _ := cells_in(t, &one)
-	return len(cells) > 0 ? cells[len(cells) - 1] : None{}
 }

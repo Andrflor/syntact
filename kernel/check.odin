@@ -44,7 +44,6 @@ check_scope :: proc(k: ^Kernel, s: ^Scope) {
 			v := binding_type(k, b)
 			if obligations(k, v) do continue
 			if _, is_scope := given(k, v).(^Scope); is_scope do continue
-			if inlined(k, given(k, v)) do continue // a run not known yet: inlined
 			if c, is_call := as_call(given(k, v)); is_call && gives_scopes(k, c) do continue
 			report(k, .Constraint_Mismatch, b.span, fmt.tprintf("only a scope can be expanded, not %s", print_type(v)))
 			continue
