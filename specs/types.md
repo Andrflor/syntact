@@ -1041,7 +1041,18 @@ Like the equation, a fold or a series is never unfolded: `fact{n -> 5}!` is
 types.
 
 A carve of an equation that is not solved, collapsed where it is written, stays a
-call; its production is asked, and typed for the values the carve gives (§7). A
+call; its production is asked, and typed for the values the carve gives (§7). When,
+at those values, the production calls nothing, it is the value of the call:
+`sum{t -> {}}!` is 0.
+
+The values of a call that stays are bounded by the recursion of its bounds: each
+call taken at the bound y of the step after, the rest at its own bounds, the
+greatest is `y ↦ α·y + max(g)` from `max(c)`, the least likewise — folds, solved by
+their laws:
+
+```text
+sum{t -> build{depth -> d}!}!   in 0..1022 * 2 ** d - 511      y ↦ 2·y + 511, from 511
+``` A
 recursive call whose base cases are scopes is a scope: `...` places it.
 
 ### 5.7 Holes
