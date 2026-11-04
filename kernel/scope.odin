@@ -225,17 +225,35 @@ carve :: proc(k: ^Kernel, s: ^Scope, args: []Carve_Arg, span: syn.Span) -> Type 
 			b = bindings[next]
 			next += 1
 		}
-		if b.scope != s do return unsupported_at(k, a.span, "a carve through an expansion")
 		// no law replaces an effect (§4.8), nor an emission (§4.9)
 		if t := binding_type(k, b); has_effect(t) {
 			e, is_effect := t.(^Effect)
 			what := is_effect && e.emission != nil ? "an emission" : "an effect"
 			return problem(.Invalid_Carve, a.span, fmt.tprintf("%s is %s: a carve does not replace it", b.name != "" ? fmt.tprintf("`%s`", b.name) : "this binding", what))
 		}
-		changes[b] = a.value
+		if p := carve_at(k, s, &changes, b, a.value, a.span); p != nil do return p
 	}
 	if p := infer_holes(k, s, &changes, span); p != nil do return p
 	return derive(k, s, changes, span)
+}
+
+// carve_at: changes b, a binding s places, to w. A binding an expansion placed is
+// carved in what is expanded: {...e  z -> 9}{x -> 5} = {...e{x -> 5}  z -> 9}.
+carve_at :: proc(k: ^Kernel, s: ^Scope, changes: ^map[^Binding]Type, b: ^Binding, w: Type, span: syn.Span) -> Type {
+	if b.scope == s {
+		changes[b] = w
+		return nil
+	}
+	for e in s.bindings {
+		if e.kind != .Expand || e.value == nil do continue
+		inner, is_scope := (changes[e] or_else binding_value(k, e)).(^Scope)
+		if !is_scope || !slice.contains(placed(k, inner, .Value), holding(inner, b)) do continue
+		inner_changes := make(map[^Binding]Type)
+		if p := carve_at(k, inner, &inner_changes, holding(inner, b), w, span); p != nil do return p
+		changes[e] = derive(k, inner, inner_changes, span)
+		return is_invalid(changes[e]) ? changes[e] : nil
+	}
+	return problem(.Invalid_Carve, span, fmt.tprintf("%s does not place this binding", print_type(s)))
 }
 
 // derive: the copy of the scope s carves, uncarved, with the changes of s and

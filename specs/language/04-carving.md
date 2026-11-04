@@ -78,8 +78,8 @@ The value of a binding colored by `C`, carved, is checked against `C` (chapter 0
 A carve of a solved recursive equation substitutes its arguments into the solution
 (chapter 08): `sum{n -> 5}!` is the closed form of `sum!` with `n` = 5.
 
-> **Open.** A carve that reaches a binding placed by an expansion — `{...a  z -> 9}{x
-> -> 5}`, meant as `{...a{x -> 5}  z -> 9}` — is not built by the kernel yet.
+A carve that reaches a binding placed by an expansion carves what is expanded:
+`{...a  z -> 9}{x -> 5}` is `{...a{x -> 5}  z -> 9}`.
 
 ---
 
