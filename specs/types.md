@@ -647,6 +647,28 @@ state (`{...value element}`) grows after it is built: it is placed last in a mem
 of its own, where growing moves nothing. The compiler gives each one such a memory,
 as registers are given: two that live at once never share one.
 
+A value placed in another is laid out inside it, unless it grows after it is
+placed: then it is in a memory of its own, and the value that holds it holds its
+place. A value that stops growing before the next one is placed is laid out inline.
+
+On each form of the algebra:
+
+- **a pattern**: the branch is chosen before its product is built, so what is
+  reserved is the size of the product of the branch taken, not of the largest;
+- **a fold**: what a step builds and does not pass on is freed at the end of the
+  step, its memory used again by the next one. A state that grows along the fold
+  has its final size in closed form (§5.6): it is reserved whole before the first
+  step, and does not grow;
+- **an effect**: what it gives back lives where it is held; given back and read by
+  nothing, it takes nothing;
+- **a handler**: its run is a collapse where the emission is answered; what it gives
+  back lives where the answer is held.
+
+**Reuse.** No value is ever modified, but where a value is read for the last time
+to build another that fits in its place, the new one is built in that place. Every
+last read is known when the program is typed: an update `x ↦ f(x)`, a carve of a
+scope nothing reads anymore, are made in place, with nothing counted at run time.
+
 ## 5. Scopes
 
 ### 5.1 A scope is a new type
