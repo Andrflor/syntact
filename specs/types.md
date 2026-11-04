@@ -996,6 +996,8 @@ d = 2, the roots of x² - c₁·x - c₂ integers, by the discriminant c₁² + 
 ```text
 Σ(i: lo..hi, t), t a polynomial in i       G(hi) - G(lo - 1)     G(m) = t(0) + … + t(m), by the sums of powers
 Σ(j: lo..hi, ⟳(…; x: 0 ↦ x + g; x))        ⟳(…; x: 0 ↦ x + Σ(j: lo..hi, g); x)     nothing else in the fold reads j
+Σ(j: lo..hi, f{x  p -> j}!)                F{x}!     f's products a term and calls that keep p: F is f, its
+                                                     terms Σ(j: lo..hi, term), its calls F's, without p
 Π(i: lo..hi, t), t not reading i           t ** n
 Π(i: lo..hi, c·t), c the content of t      c ** n * Π(i: lo..hi, t)
 Π(i: lo..hi, uᵃ·iᵖ)                        u ** (a·n) * Π(i: lo..hi, i) ** p

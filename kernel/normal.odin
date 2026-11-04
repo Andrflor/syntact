@@ -27,7 +27,10 @@ normal :: proc(k: ^Kernel, t: Type) -> Type {
 	case ^Least:
 		return least_law(k, v.index, v.holds, v.span)
 	case ^Series:
-		return series_law(k, v)
+		s := new(Series)
+		s^ = v^
+		s.lo, s.hi, s.term = normal(k, v.lo), normal(k, v.hi), normal(k, v.term)
+		return series_law(k, s)
 	case ^Recurrent:
 		return recurrent_law(k, v)
 	case ^Name:

@@ -2,6 +2,7 @@ package kernel
 
 import syn "../syntax"
 import "core:slice"
+import "core:strings"
 
 // RECURSION (specs/types.md §5.6)
 //
@@ -54,6 +55,7 @@ names_scope :: proc(t: Type, s: ^Scope, seen: ^map[^Scope]bool) -> bool {
 	case ^Collapse:
 		return names_scope(v.target, s, seen)
 	case ^Carve:
+		if target, is_scope := v.target.(^Scope); is_scope && target == s do return true // a carve of s itself
 		if names_scope(v.target, s, seen) do return true
 		for a in v.args do if names_scope(a.value, s, seen) || names_scope(a.otherwise, s, seen) do return true
 	case ^Default:
@@ -1282,6 +1284,7 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	if s.op == .Add {
 		if sum, closed := faulhaber(k, s); closed do return sum
 		if f, summed := summed_fold(k, s); summed do return f
+		if f, summed := summed_call(k, s); summed do return f
 		return s
 	}
 	if !reads(k, s.term, s.index) do return op(k, .Pow, s.term, n)
@@ -1603,4 +1606,127 @@ call_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
 	_, top := int_bounds(k, hi_image) or_return
 	least, _ := int_bounds(k, lo_image) or_return
 	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, e.span), true
+}
+
+// Summed: the equation F of Σ(p: lo..hi, f{… p -> p}!), f linear in its calls.
+Summed :: struct {
+	root:   ^Scope,
+	field:  ^Binding,
+	lo, hi: Type,
+	sum:    ^Scope,
+}
+
+// summed_call: Σ(p: lo..hi, f{x  p -> p}!) = F{x}!, f an equation whose products are
+// a term and calls that keep p: F is f, its terms summed over p, its calls F's
+// (§5.6). One traversal for all p.
+summed_call :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
+	call := s.term.(^Collapse) or_return
+	if !call.recursive do return
+	target := call.target.(^Scope) or_return
+	root := origin(target)
+	field: ^Binding
+	for b, v in target.changes do if u, is_index := v.(^Unknown); is_index && same_unknown(u, s.index) do field = b
+	if field == nil do return
+	for b, v in target.changes do if b != field && reads(k, v, s.index) do return
+	f := summed_equation(k, root, field, s.lo, s.hi) or_return
+	changes := make(map[^Binding]Type)
+	for b, v in target.changes do if b != field do changes[holding(f, b)] = v
+	carve := derive(k, f, changes, call.span).(^Scope) or_return
+	return recursive_call(k, carve, call.span), true
+}
+
+// summed_equation: F, made once for f, its field p and the range of the sum.
+summed_equation :: proc(k: ^Kernel, root: ^Scope, field: ^Binding, lo, hi: Type) -> (^Scope, bool) {
+	for x in k.summed do if x.root == root && x.field == field && same(k, x.lo, lo) && same(k, x.hi, hi) do return x.sum, x.sum != nil
+	append(&k.summed, Summed{root, field, lo, hi, nil})
+	f := copy_scope(k, root, nil)
+	f.source, f.name = nil, strings.concatenate({"Σ", root.name})
+	p: ^Binding
+	for b in f.bindings do if b.source == field do p = b
+	for b in f.bindings {
+		if b.kind != .Product do continue
+		written, linear := summed_product(k, b.value, root, f, p, lo, hi)
+		if !linear do return nil, false
+		b.value = written
+		break
+	}
+	k.summed[len(k.summed) - 1].sum = f
+	return f, true
+}
+
+// summed_product: the production t of f, written for F: through a pattern, a sum of
+// a term and calls of f that keep p is Σ(p: lo..hi, term) and those calls, of F,
+// without p.
+summed_product :: proc(k: ^Kernel, t: Type, root, f: ^Scope, p: ^Binding, lo, hi: Type) -> (Type, bool) {
+	if pat, is_pattern := t.(^Pattern); is_pattern {
+		out := new(Pattern)
+		out^ = pat^
+		out.branches = make([]Branch, len(pat.branches))
+		for b, i in pat.branches {
+			product, linear := summed_product(k, b.product, root, f, p, lo, hi)
+			if !linear do return nil, false
+			out.branches[i] = with_product(b, product)
+		}
+		return out, true
+	}
+	terms := make([dynamic]Type)
+	summands :: proc(t: Type, out: ^[dynamic]Type) {
+		if o, is_sum := t.(^Operation); is_sum && o.op == .Add {
+			for a in o.args do summands(a, out)
+			return
+		}
+		append(out, t)
+	}
+	summands(t, &terms)
+	rest := make([dynamic]Type)
+	calls := make([dynamic]Type)
+	for x in terms {
+		c, is_call := x.(^Collapse)
+		carve: ^Carve
+		if is_call do carve, is_call = c.target.(^Carve)
+		if is_call {
+			name, named := carve.target.(^Name)
+			if !named || name.binding.value != root do is_call = false
+		}
+		if !is_call {
+			seen := make(map[^Scope]bool)
+			if names_scope(x, root, &seen) do return nil, false
+			append(&rest, x)
+			continue
+		}
+		// a call that keeps p, given to F without it
+		args := make([dynamic]Carve_Arg)
+		kept := false
+		for a in carve.args {
+			if a.name == p.name {
+				name, is_name := a.value.(^Name)
+				if !is_name || name.binding != p do return nil, false
+				kept = true
+				continue
+			}
+			append(&args, a)
+		}
+		if !kept do return nil, false
+		g := new(Carve)
+		g^ = carve^
+		g.target, g.args = f, args[:]
+		d := new(Collapse)
+		d^ = c^
+		d.target = g
+		append(&calls, d)
+	}
+	out: Type
+	if len(rest) > 0 {
+		index := new_unknown(k, nil)
+		index.layout = range_law(k, lo, hi, .Int, {})
+		m := Copier{pieces = make(map[^Binding]Type)}
+		m.pieces[p] = index
+		term := len(rest) == 1 ? rest[0] : Type(new_operation(.Add, ..rest[:]))
+		sum := new(Series)
+		sum.op, sum.index, sum.lo, sum.hi = .Add, index, lo, hi
+		sum.term = copy_term(k, &m, term, f)
+		out = sum
+	}
+	for c in calls do out = out == nil ? c : Type(new_operation(.Add, out, c))
+	return out, true
 }
