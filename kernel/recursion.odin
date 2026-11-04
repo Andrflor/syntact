@@ -1283,6 +1283,7 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 	if proven_in(k, n, NONPOSITIVE) do return identity
 	if s.op == .Add {
 		if sum, closed := faulhaber(k, s); closed do return sum
+		if x, permuted := xor_block(k, s); permuted do return x
 		if f, summed := summed_fold(k, s); summed do return f
 		if f, summed := summed_call(k, s); summed do return f
 		return s
@@ -1729,4 +1730,23 @@ summed_product :: proc(k: ^Kernel, t: Type, root, f: ^Scope, p: ^Binding, lo, hi
 	}
 	for c in calls do out = out == nil ? c : Type(new_operation(.Add, out, c))
 	return out, true
+}
+
+// xor_block: Σ(i: c·2ᵏ..c·2ᵏ + 2ᵏ - 1, v ^ i), v not reading i: on the block, i ↦ w ^ i,
+// w = v ^ c·2ᵏ, permutes the k low bits, so the sum is 2ᵏ·(w - (w [&] m)) + 2ᵏ·m / 2,
+// m = 2ᵏ - 1 (§5.6).
+xor_block :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
+	o := s.term.(^Operation) or_return
+	if o.op != .Xor || len(o.args) != 2 do return
+	v: Type
+	for a, j in o.args do if u, is_index := a.(^Unknown); is_index && same_unknown(u, s.index) do v = o.args[1 - j]
+	if v == nil || reads(k, v, s.index) do return
+	lo := s.lo.(Int) or_return
+	hi := s.hi.(Int) or_return
+	size := i128(hi) - i128(lo) + 1
+	if lo < 0 || size < 1 || size & (size - 1) != 0 || i128(lo) % size != 0 do return
+	m := size - 1
+	w := lo == 0 ? v : op(k, .Xor, v, Int(lo))
+	high := op(k, .Sub, w, op(k, .Bit_And, w, Int(m)))
+	return op(k, .Add, op(k, .Mul, Int(size), high), Int(size * m / 2)), true
 }

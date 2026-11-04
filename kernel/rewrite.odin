@@ -327,11 +327,9 @@ sum_image :: proc(k: ^Kernel, f: ^Fold) -> (image: Type, ok: bool) {
 	lo, hi := counter_range(k, f) or_return
 	for z, i in f.states {
 		if !same(k, f.value, z) do continue
-		sum := f.updates[i].(^Operation) or_return
-		if sum.op != .Add || len(sum.args) != 2 do return
-		g: Type
-		for a, j in sum.args do if u, is_x := a.(^Unknown); is_x && same_unknown(u, z) do g = sum.args[1 - j]
-		if g == nil || reads(k, g, z) do return
+		// x ↦ x + g: the ring reads the update as 1·x + g
+		one, g := affine_in(k, f.updates[i], z) or_return
+		if !is_int(one, 1) do return
 		steps := op(k, .Add, op(k, .Sub, hi, lo), Int(1))
 		terms := hull_times(k, steps, rewrite(k, g, rewriting(nil, f.index, narrowing(f.index, range_law(k, lo, hi, .Int, f.span))))) or_return
 		start := layout_image(k, f.inits[i]) or_return
