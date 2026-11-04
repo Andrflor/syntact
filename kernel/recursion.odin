@@ -686,6 +686,8 @@ affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: b
 	}
 	alpha = unatomized(ring_term(as[:], 1) or_return, back)
 	beta = unatomized(ring_term(bs[:], 1) or_return, back)
+	// an atom that holds y: t is not of degree 1 in y
+	if reads(k, alpha, y) || reads(k, beta, y) do return nil, nil, false
 	return alpha, beta, true
 }
 
