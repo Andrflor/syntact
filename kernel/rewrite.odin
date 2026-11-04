@@ -195,11 +195,9 @@ rewrite_call :: proc(k: ^Kernel, c: ^Collapse, r: Rewrite) -> ^Collapse {
 	return out
 }
 
-// rewrite_carve: a carve, its changes rewritten — s{x -> v} with u rewritten is
-// s{x -> v with u rewritten} —; a written scope, when the rewrite changes one of its
-// bindings, the carve of each of them to its value rewritten, as a branch copies
-// its product: what it reads from outside is its type (§5.3). The scope itself when
-// none changes.
+// rewrite_carve: s{x -> v} with u rewritten is s{x -> v with u rewritten}. A
+// written scope is rewritten as the carve of its bindings to their values
+// rewritten. The scope itself when nothing changes.
 rewrite_carve :: proc(k: ^Kernel, s: ^Scope, r: Rewrite) -> ^Scope {
 	if s.carved == nil {
 		changes := make(map[^Binding]Type)

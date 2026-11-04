@@ -119,8 +119,7 @@ as_call :: proc(t: Type) -> (^Collapse, bool) {
 	return nil, false
 }
 
-// solved: t holds no recursive call of the scope — nor does a scope it holds, by
-// what its bindings name.
+// solved: t holds no recursive call of the scope, nor does a scope in it.
 solved :: proc(t: Type, root: ^Scope) -> bool {
 	#partial switch v in t {
 	case ^Collapse:
@@ -215,7 +214,7 @@ generic_equation :: proc(k: ^Kernel, root: ^Scope, carved: ^map[^Binding]Type) -
 // sum{n -> m}! = m ? {0 -> 0  -> m + sum{n -> m - 1}!} gives m * (m + 1) / 2 whatever
 // m, and whatever n holds in sum.
 generic_solution :: proc(k: ^Kernel, root: ^Scope, given: map[^Binding]Type) -> (solution: Type, ok: bool) {
-	// the bindings given, and those the calls carve, at the value the scope holds
+	// the bindings given, and those the calls carve, at the values root holds
 	values := make(map[^Binding]Type)
 	for b, v in given do values[b] = v
 	generic: ^Scope
@@ -409,8 +408,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	u := p.target.(^Unknown) or_return
 	root := origin(s)
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
-	// a run is the orbit of its positions: the branch that cuts its head makes the
-	// call, the other one is the base, where the run is empty
+	// on a run: the branch that cuts it calls, the other is the base, the empty run
 	if !solved(c, root) && solved(r, root) && cuts_head(k, stop, u) do stop, c, r = run_scope(k, nil), r, c
 	if !solved(c, root) do return
 	family := family_of(k, given(k, c)) or_return
@@ -449,7 +447,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	at := proc(k: ^Kernel, ki: Type, i: ^Unknown, t: Type) -> Type {return rewrite(k, ki, rewriting(nil, i, t))}
 	feeds := false
 	for e in pre do feeds ||= e.answer != nil && reads(k, after, e.answer)
-	// states carried by the call follow the orbit going down: the fold goes down
+	// states carried by the call: the fold goes down
 	if closed && !feeds && len(carried) == 0 {
 		d := 0
 		for a in ahead do d = max(d, a)
@@ -483,11 +481,10 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
 	alpha, beta, affine := affine_in(v, ys[0])
-	// v = y: the call is the value, (A, B) = (1, 0) along the whole orbit, A·c + B = c
+	// v = y: A = 1 and B = 0 at every step, so the value is c
 	tail := affine && is_int(alpha, 1) && is_int(beta, 0)
 	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int && !tail do return
-	// going down, the composed map (A, B), and the states the call carries: each its
-	// value where the fold starts, what the call carves it to at each step
+	// going down: the states the call carries, and the composed map (A, B)
 	f := new(Fold)
 	f.span = p.span
 	carry: Rewrite
@@ -580,7 +577,6 @@ orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, 
 	shift: i128
 	#partial switch o.op {
 	case .From:
-		// the rest of a run: m from c·i
 		return op(k, .From, m, op(k, .Mul, Int(c), i)), true
 	case .Shr:
 		shift = i128(c)
@@ -603,7 +599,7 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	out.index, out.holds, out.span = i, holds, span
 	o, is_in := holds.(^Operation)
 	if !is_in || o.op != .In do return out
-	// the run m from i is empty from i = |m| on: μ is |m|
+	// μ(i: m from i is empty) = |m|
 	if rest, is_from := o.args[0].(^Operation); is_from && rest.op == .From && same(k, rest.args[1], i) {
 		if empty, is_scope := o.args[1].(^Scope); is_scope && len(empty.bindings) == 0 do return op(k, .Length, rest.args[0])
 	}
@@ -699,9 +695,7 @@ at_calls :: proc(k: ^Kernel, s: ^Scope, r: Type) -> (before: []^Effect, calls: [
 	return nil, found, nil, r, len(found) > 0
 }
 
-// calls_in: the recursive calls of root that t makes, each once: t itself, in its
-// operations, its patterns, the bindings of the scopes it holds —
-// `{...f{n -> n - 1}!  n}`.
+// calls_in: the recursive calls of root in t, each once.
 calls_in :: proc(k: ^Kernel, t: Type, root: ^Scope) -> []^Collapse {
 	found := make([dynamic]^Collapse)
 	visit :: proc(k: ^Kernel, t: Type, root: ^Scope, found: ^[dynamic]^Collapse) {
@@ -735,9 +729,8 @@ calls_in :: proc(k: ^Kernel, t: Type, root: ^Scope) -> []^Collapse {
 	return found[:]
 }
 
-// counter_next: the value the call c gives the field that holds u, and the other
-// fields it carves, each an unknown of s: the states it carries (§5.6), what it
-// carves them to.
+// counter_next: what the call c carves the field of u to, and the other fields it
+// carves: the states it carries (§5.6).
 counter_next :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, u: ^Unknown) -> (next: Type, carried: map[^Unknown]Type, ok: bool) {
 	target, is_scope := c.target.(^Scope)
 	if !is_scope || origin(target) != origin(s) do return
@@ -1362,8 +1355,7 @@ power_sums :: proc(u: ^Unknown, d: int) -> (out: []Type, ok: bool) {
 	return out, true
 }
 
-// cuts_head: the cover cuts every run u may be but the empty one — a binding, then
-// the rest — `{T(h) ...R:(t)}`, u a run of pieces of one binding in T, in R.
+// cuts_head: the cover {T(h) ...R:(t)} takes every run u may be but the empty one.
 cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> bool {
 	written, is_scope := cover.(^Scope)
 	if !is_scope do return false

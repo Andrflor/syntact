@@ -23,9 +23,8 @@ scope_law :: proc(k: ^Kernel, s: ^Scope) -> Type {
 }
 
 // placed: the bindings of s with its expansions placed (§5.3): `...e` places the
-// bindings of e as they are — not known yet, they stay where they are placed, the
-// expansion itself —; `...C:` places the default of C in a value, and stays a run
-// in a shape; `...` places nothing in a value.
+// bindings of e as they are, e itself when they are not known yet; `...C:` places
+// the default of C in a value, and stays a run in a shape; `...` places nothing.
 placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 	out := make([dynamic]^Binding)
 	for b in s.bindings {
@@ -41,8 +40,7 @@ placed :: proc(k: ^Kernel, s: ^Scope, view: View) -> []^Binding {
 	return out[:]
 }
 
-// gives_scope: every value t may take is a scope: a scope, a term whose values are
-// scopes, a recursive call whose equation gives scopes (§5.6).
+// gives_scope: every value t may take is a scope.
 gives_scope :: proc(k: ^Kernel, t: Type) -> bool {
 	v := given(k, t)
 	if _, is_scope := v.(^Scope); is_scope do return true
@@ -860,10 +858,8 @@ repeated_in :: proc(k: ^Kernel, x: Type, a: Type, counts: Type) -> Type {
 	return pieces_in(k, placed(k, v, .Value), a, counts, Int(0), lengths[:], any_length, is_bool(empty, true), stays)
 }
 
-// pieces_in: the bindings xs are pieces in a, after `used` of them — a set of
-// counts, when a run not known yet came before, of as many pieces as its layout
-// holds (§4.7: an unknown is in what holds its layout). True when it holds for
-// every count used, false when for none; otherwise it stays.
+// pieces_in: the bindings xs are pieces in a, after `used` of them: a set of
+// counts, since a run not known yet counts as many pieces as its layout holds.
 pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts, used: Type, lengths: []int, any_length, empty: bool, stays: Type) -> Type {
 	if len(xs) == 0 {
 		admitted := empty ? counts_below(counts) : counts
@@ -874,7 +870,6 @@ pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts, used: Type, lengths: []
 	least, _ := discrete_bounds(first_cell(used))
 	if is_none(counts_from(counts, (least.? or_else 0) + 1)) do return Bool(false)
 	if xs[0].kind == .Expand {
-		// a run not known yet, x::(A * m): m pieces, each in A
 		pieces, m, ok := run_pieces(k, binding_value(k, xs[0]))
 		if !ok || !included(k, pieces, a) do return stays
 		return pieces_in(k, xs[1:], a, counts, op(k, .Add, used, m), lengths, any_length, empty, stays)
@@ -890,9 +885,8 @@ pieces_in :: proc(k: ^Kernel, xs: []^Binding, a, counts, used: Type, lengths: []
 	return out
 }
 
-// run_pieces: what x, a run not known yet, is made of: its layout, solved by Arden
-// (§5.6), is a run of pieces of A, m of them, `{...(A * m):}`, then nothing. A
-// layout narrowed, L & C, is made of the pieces of L.
+// run_pieces: x is a run of m pieces of A: its layout, by Arden, is {...(A * m):}.
+// A layout narrowed, L & C, has the pieces of L.
 run_pieces :: proc(k: ^Kernel, x: Type) -> (pieces: Type, m: Type, ok: bool) {
 	return layout_pieces(k, values(k, x) or_return)
 }
@@ -911,7 +905,6 @@ layout_pieces :: proc(k: ^Kernel, layout: Type) -> (pieces: Type, m: Type, ok: b
 			pieces, m = o.args[0], o.args[1]
 			continue
 		}
-		// what is left is the empty run
 		rest, is_scope := c.(^Scope)
 		if !is_scope || len(placed(k, rest, .Shape)) != 0 do return
 	}
@@ -1100,14 +1093,9 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 	return true
 }
 
-// --- runs (§5.3) ---
-//
-// A run is read by its places: |x| its number of bindings, x.#k its binding k,
-// x from k the run from k on. Where its bindings are known, they are read; a run
-// not known yet counts as many bindings as its layout gives it (§4.7); what no law
-// reduces stays.
+// --- runs (§5.3): |x|, x.#k, x from k ---
 
-// run_law: |x|, x.#k, x from k.
+// run_law: read on the bindings of x where they are known; otherwise it stays.
 run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	x := given(k, args[0])
 	if !gives_scope(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
@@ -1139,17 +1127,15 @@ run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	return run_scope(k, xs[at:])
 }
 
-// run_data: the bindings of a run, as it places them: values, and runs not known yet.
+// run_data: the bindings of a run: values, and runs not known yet.
 run_data :: proc(k: ^Kernel, s: ^Scope) -> []^Binding {
 	out := make([dynamic]^Binding)
 	for b in placed(k, s, .Value) do if b.kind == .Push || b.kind == .Expand do append(&out, b)
 	return out[:]
 }
 
-// run_image: the values of |x|, x.#k, x from k over the layout of x, a run of
-// pieces of one binding each: its counts, the color of that binding, its layout.
+// run_image: the values |x|, x.#k, x from k may take.
 run_image :: proc(k: ^Kernel, o: ^Operation) -> (image: Type, ok: bool) {
-	// a known run: the values of its bindings, the counts up to its length
 	if s, known := given(k, o.args[0]).(^Scope); known {
 		xs := run_data(k, s)
 		items := make([]Type, len(xs))

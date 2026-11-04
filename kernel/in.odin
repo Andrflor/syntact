@@ -32,7 +32,7 @@ in_law :: proc(k: ^Kernel, x, c: Type) -> Type {
 	if p, ok := c.(^Pattern); ok do return enter_branches(k, p, proc(product, other: Type) -> Type {return new_operation(.In, other, product)}, x)
 	if u, ok := x.(^Unknown); ok && same(k, layout_of(k, u), c) do return Bool(true) // (t::L) in L
 	if s, ok := c.(^Scope); ok {
-		// a term over unknowns is in what holds its layout, in nothing apart from it
+		// (t::L) in S: true when S holds L, false when they are apart
 		if !is_constant(x) {
 			if image, known := values(k, x); known {
 				if included(k, image, s) do return Bool(true)

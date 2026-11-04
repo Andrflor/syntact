@@ -22,7 +22,7 @@ Family :: enum u8 {
 	Count, // an integer ≥ 0: the count of a repetition, of a shift
 	Nonzero_Int, // a divisor: int & ~0
 	Nonzero_Real, // float & ~0.0
-	Scope, // a scope: what an equation whose base cases are scopes gives (§5.6)
+	Scope,
 }
 
 // family_term: a family as a type, in normal form.
