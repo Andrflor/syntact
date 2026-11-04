@@ -22,9 +22,11 @@ import "core:strings"
 //   |{C₁: … Cₙ:}| = Π |Cᵢ|   a shape: what it admits
 //   |f16 & lo..hi| = the values of the format between lo and hi
 //
-// A set the laws leave as an operation — `u8 * u8` — counts at most the values
-// between its least and greatest elements, and at most the product of the counts of
-// its operands: the lesser is taken. An infinite set has no finite size.
+// A set of strings is counted on the system of its quotients, exactly. A set the
+// laws leave as an operation on integers — `u8 * u8` — is counted by computing its
+// results, up to ENUMERATED of them; beyond, it counts at most the values between
+// its least and greatest elements, and at most the product of the counts of its
+// operands. An infinite set has no finite size.
 //
 // A scope as a value takes what its bindings take, summed: a hole takes 0, filled
 // when the program is typed and erased; a production 0, devirtualized; a handler
@@ -188,6 +190,7 @@ Infinite :: struct {}
 // count: |s|, s a constant set in normal form, or one whose bounds are terms over
 // unknowns.
 count :: proc(k: ^Kernel, s: Type) -> Count {
+	if is_text(s) && is_constant(s) do return text_count(k, s)
 	one: [1]Type
 	cells, negated := cells_in(s, &one)
 	if negated do return Infinite{}
@@ -335,8 +338,9 @@ operation_count :: proc(k: ^Kernel, o: ^Operation) -> Count {
 		for a in o.args do total = count_mul(k, total, count(k, a))
 		return total
 	}
-	// at most the values between its least and greatest, and at most the product
-	// of the counts of its operands
+	if n, enumerated := enumerated_count(k, o); enumerated do return Type(Int(n))
+	// beyond what is enumerated: at most the values between its least and greatest,
+	// and at most the product of the counts of its operands
 	product := Count(Type(Int(1)))
 	for a in o.args do product = count_mul(k, product, count(k, a))
 	if lo, hi, ok := int_bounds(k, o); ok {
@@ -347,6 +351,101 @@ operation_count :: proc(k: ^Kernel, o: ^Operation) -> Count {
 		if _, infinite := product.(Infinite); infinite do return span
 	}
 	return product
+}
+
+// ENUMERATED: the most results an operation on sets of integers is computed on, to
+// count those that differ.
+ENUMERATED :: 1 << 20
+
+// enumerated_count: the count of the distinct results of an operation on sets of
+// integers, each computed: false when its operands are not cells of integers, or
+// give more than ENUMERATED results.
+enumerated_count :: proc(k: ^Kernel, o: ^Operation) -> (n: i128, ok: bool) {
+	if len(o.args) == 0 || len(o.args) > 2 do return
+	operands := make([][]i128, len(o.args))
+	results := 1
+	for a, i in o.args {
+		one: [1]Type
+		cells, negated := cells_in(a, &one)
+		if negated do return
+		xs := make([dynamic]i128)
+		for c in cells {
+			if cell_family(c) != .Int do return
+			lo, hi := discrete_bounds(c)
+			l := lo.? or_return
+			h := hi.? or_return
+			if h - l >= ENUMERATED do return
+			for x := l; x <= h; x += 1 do append(&xs, x)
+		}
+		operands[i] = xs[:]
+		results *= max(len(xs), 1)
+		if results > ENUMERATED do return
+	}
+	seen := make(map[i128]bool)
+	if len(operands) == 1 {
+		// -x and [~]x = -x - 1 give as many values as x
+		if o.op != .Neg && o.op != .Bit_Not do return
+		return i128(len(operands[0])), true
+	}
+	for x in operands[0] {
+		for y in operands[1] {
+			r := int_operation(o.op, x, y) or_return
+			seen[r] = true
+		}
+	}
+	return i128(len(seen)), true
+}
+
+// text_count: the count of the strings of t, a constant set of strings, on the
+// system of its quotients (strings.odin): the strings of a quotient are "" when it
+// holds it, and, for each class of characters, each character of the class before
+// each string of the quotient it leads to. A quotient on a cycle that leads to a
+// string has infinitely many.
+text_count :: proc(k: ^Kernel, t: Type) -> Count {
+	system := equations(t)
+	n := len(system)
+	// the quotients that hold a string: "" in one, or a term leading to one
+	live := make([]bool, n)
+	for changed := true; changed; {
+		changed = false
+		for e, i in system {
+			if live[i] do continue
+			holds := !is_none(e.empty)
+			for x in e.terms do holds ||= live[x.target]
+			if holds {
+				live[i] = true
+				changed = true
+			}
+		}
+	}
+	counts := make([]Count, n)
+	state := make([]u8, n) // 0: not counted, 1: being counted, 2: counted
+	count_of :: proc(k: ^Kernel, system: [dynamic]Equation, live: []bool, counts: []Count, state: []u8, i: int) -> Count {
+		if state[i] == 2 do return counts[i]
+		if state[i] == 1 do return Infinite{} // a cycle: reached again while counted
+		state[i] = 1
+		total := Count(Type(Int(is_none(system[i].empty) ? 0 : 1)))
+		for x in system[i].terms {
+			if !live[x.target] do continue
+			total = count_add(k, total, count_mul(k, chars_count(x.coefficient), count_of(k, system, live, counts, state, x.target)))
+		}
+		state[i] = 2
+		counts[i] = total
+		return total
+	}
+	return live[0] ? count_of(k, system, live, counts, state, 0) : Count(Type(Int(0)))
+}
+
+// chars_count: the count of a set of characters, a class of the system of quotients.
+chars_count :: proc(c: Type) -> Count {
+	one: [1]Type
+	cells, _ := cells_in(c, &one)
+	total: i128 = 0
+	for cell in cells {
+		lo, hi := discrete_bounds(cell)
+		total += hi.? - lo.? + 1
+	}
+	return Type(Int(total))
 }
 
 // repeat_count: |A * n| = Σ |A| ** k over the counts k of n.

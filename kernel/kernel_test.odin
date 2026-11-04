@@ -374,6 +374,8 @@ SIZE_CASES := []Size_Case {
 	{`x -> ??::(0..3 | 10..12)`, "3"},
 	{`x -> ??::(u8 | bool)`, "9"},
 	{`x -> ??::("ab" | "c" | "de")`, "2"},
+	{`x -> ??::(("a" | "ab") + ("b" | ""))`, "2"}, // "a", "ab", "abb": "ab" counted once
+	{`x -> ??::(('a'..'z' * (1..3)) & ~("ab" + string))`, "15"},
 	{`x -> ??::('a'..'z' * 3)`, "15"},
 	{`x -> ??::('a'..'z' * (0..2))`, "10"},
 	{"n -> ??::u8\nx -> ??::('a'..'z' * n)", "⌈log₂ (26 ** ?0)⌉"}, // depends on n
@@ -383,7 +385,7 @@ SIZE_CASES := []Size_Case {
 	{"a -> ??::u8\nx -> a + 1", "8"},
 	{"a -> ??::u8\nx -> a + a", "8"},
 	{"a -> ??::u8\nx -> a * a", "8"},
-	{"a -> ??::u8\nb -> ??::u8\nx -> a * b", "16"},
+	{"a -> ??::u8\nb -> ??::u8\nx -> a * b", "15"}, // the distinct products, each computed
 	{"a -> ??::u8\nx -> a ? {<10 -> a  -> 1000}", "4"},
 	{"x -> !?::u8", "8"},
 	// a scope: its bindings; a hole and a production take nothing, a handler what it gives back
