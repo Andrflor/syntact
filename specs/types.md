@@ -669,6 +669,35 @@ to build another that fits in its place, the new one is built in that place. Eve
 last read is known when the program is typed: an update `x ↦ f(x)`, a carve of a
 scope nothing reads anymore, are made in place, with nothing counted at run time.
 
+### 4.14 Mutation and reactivity
+
+A resonant binding `T:x >>- E -> v` (specs/language/12) is a place: its value
+changes, only through the handler of E, with `x -<< …`. Its handler is found when
+the program is typed (§4.9): every write to it is known.
+
+- **A write** `-<<` is an effect (§4.8): it stays where it is written, in order.
+- **A read** is the value of the place at that point, between the writes around it.
+  Where the writes that reach a read are known, the read is their value, and the
+  laws simplify it like any other: a resonant binding costs only where its value
+  depends on what the program does at run time.
+- **Its size** is that of the values it may take (§4.11), its lifetime that of the
+  scope that declares it, as far as references hold it (§4.12). A write whose value
+  fits in the place is made in it; one that grows it grows it at the end of its own
+  memory (§4.13).
+
+A reactive bind `>>=` `=<<` follows what it reads:
+
+- **A reference** — a bind that resolves to a resonant binding — is that binding's
+  handle. Its type is the set of handles it may designate: known when the program
+  is typed, it takes nothing, and reading through it is reading the place itself.
+  It takes bits only where which place it designates depends on run time:
+  ⌈log₂ n⌉ for n places.
+- **A computed bind** — `counter.value >= 0` — is a term over the places it reads.
+  Since every write to them is known, the compiler either computes it where it is
+  read, taking nothing, or keeps its value and computes it again after each write
+  that changes what it reads, taking its size: whichever costs less. There is no
+  list of subscribers at run time.
+
 ## 5. Scopes
 
 ### 5.1 A scope is a new type
