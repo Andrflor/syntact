@@ -438,7 +438,9 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	root := origin(s)
 	stop, c, r := p.branches[0].cover, p.branches[0].product, p.branches[1].product
 	// on a run: the branch that cuts it calls, the other is the base, the empty run
-	if !solved(c, root) && solved(r, root) && cuts_head(k, stop, u) do stop, c, r = run_scope(k, nil), r, c
+	if !solved(c, root) && solved(r, root) {
+		if short, cuts := cuts_head(k, stop, u); cuts do stop, c, r = short, r, c
+	}
 	if !solved(c, root) do return
 	family := family_of(k, given(k, c)) or_return
 	pre, calls, answer, after := at_calls(k, s, r) or_return
@@ -628,9 +630,11 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	out.index, out.holds, out.span = i, holds, span
 	o, is_in := holds.(^Operation)
 	if !is_in || o.op != .In do return out
-	// μ(i: m from i is empty) = |m|
-	if rest, is_from := o.args[0].(^Operation); is_from && rest.op == .From && same(k, rest.args[1], i) {
-		if empty, is_scope := o.args[1].(^Scope); is_scope && len(empty.bindings) == 0 do return op(k, .Length, rest.args[0])
+	// μ(i: m from c·i has fewer than c pieces) = |m| / c
+	if rest, is_from := o.args[0].(^Operation); is_from && rest.op == .From {
+		c, at, along := affine_in(k, rest.args[1], i)
+		step, constant := c.(Int)
+		if along && constant && step > 0 && is_int(at, 0) && fewer_than(o.args[1], i128(step)) do return op(k, .Div, op(k, .Length, rest.args[0]), Int(step))
 	}
 	alpha, beta, affine := affine_in(k, o.args[0], i)
 	slope, is_int := alpha.(Int)
@@ -1425,20 +1429,30 @@ power_sums :: proc(u: ^Unknown, d: int) -> (out: []Type, ok: bool) {
 	return out, true
 }
 
-// cuts_head: the cover {T(h) ...R:(t)} takes every run u may be but the empty one.
-cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> bool {
-	written, is_scope := cover.(^Scope)
-	if !is_scope do return false
+// cuts_head: the cover {T₁(h₁) … T_c(h_c) ...R:(t)} takes every run u may be of c
+// pieces or more, u a run of pieces of one binding, each in the T before it, and
+// in R: what it does not take, the base, is the runs of fewer than c pieces.
+cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> (short: ^Scope, ok: bool) {
+	written := cover.(^Scope) or_return
 	places := placed(k, written, .Shape)
-	if len(places) != 2 || is_run(places[0]) || !is_run(places[1]) || places[1].color == nil do return false
-	if !is_bool(in_law(k, u, binding_color(k, places[1])), true) do return false
-	pieces, _, ok := run_pieces(k, u)
-	shape, single := pieces.(^Scope)
-	if !ok || !single do return false
+	c := len(places) - 1
+	if c < 1 || !is_run(places[c]) || places[c].color == nil do return
+	if !is_bool(in_law(k, u, binding_color(k, places[c])), true) do return
+	pieces, _ := run_pieces(k, u) or_return
+	shape := pieces.(^Scope) or_return
 	inner := placed(k, shape, .Shape)
-	if len(inner) != 1 || is_run(inner[0]) do return false
-	head := binding_color(k, places[0])
-	return head == nil || inner[0].color != nil && included(k, binding_color(k, inner[0]), head)
+	if len(inner) != 1 || is_run(inner[0]) || inner[0].color == nil do return
+	for place in places[:c] {
+		if is_run(place) do return
+		head := binding_color(k, place)
+		if head != nil && !included(k, binding_color(k, inner[0]), head) do return
+	}
+	short = new_scope(nil, written.span)
+	short.source, short.complete, short.reached = short, true, true
+	run := new_binding(short, .Expand, written.span)
+	run.color = new_operation(.Mul, pieces, new_range(Int(0), Int(c - 1), .Int))
+	run.typed_color = run.color
+	return short, true
 }
 
 // built: f builds a run, a binding a step along a counter from 0: its value is the
@@ -1813,4 +1827,14 @@ bitwise_sum :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 		out = op(k, .Add, out, op(k, .Mul, Int(factors[b]), op(k, .Bit_And, v, Int(mask))))
 	}
 	return out, true
+}
+
+// fewer_than: s is the shape of the runs of fewer than c pieces, {...(A * (0..c - 1)):}.
+fewer_than :: proc(s: Type, c: i128) -> bool {
+	shape, is_scope := s.(^Scope)
+	if !is_scope || len(shape.bindings) != 1 || !is_run(shape.bindings[0]) do return false
+	o, repeats := shape.bindings[0].color.(^Operation)
+	if !repeats || o.op != .Mul do return false
+	r, is_range := o.args[1].(^Range)
+	return is_range && is_int(r.lo, 0) && is_int(r.hi, c - 1)
 }

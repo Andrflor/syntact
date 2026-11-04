@@ -904,13 +904,14 @@ s(k) = k + c           kᵢ = m + c·i                          n = m - b, or 0,
 s(k) = α·k + c         kᵢ = α ** i * m + c * (α ** i - 1) / (α - 1)
 s(k) = k / c, k ≥ 0    kᵢ = m / c ** i                       n = μ(i: m / c ** i in B)
 s(k) = k >> c          kᵢ = m >> c·i
-s(k) = k from 1        kᵢ = m from i                         n = |m|, when B is the empty run
+s(k) = k from c        kᵢ = m from c·i                       n = |m| / c, when B is the runs of fewer than c pieces
 ```
 
 A run is the orbit of its positions: a recursion whose call takes the rest of the
-run its pattern cuts — `xs ? {{T(h) ...R:(t)} -> … f{xs -> t}! …  -> c}` — is a fold
-on the position k of xs, from 0 by k + 1 until |xs|: h is `xs.#k`, t is `xs from
-k + 1`. The pieces a cover cuts from a run not known yet are these terms.
+run its pattern cuts — `xs ? {{T₁(h₁) … T_c(h_c) ...R:(t)} -> … f{xs -> t}! …  -> b}`
+— is a fold on the position k of xs, from 0 by c until fewer than c pieces are
+left, |xs| / c steps: hⱼ is `xs.#(k + j - 1)`, t is `xs from k + c`. The pieces a
+cover cuts from a run not known yet are these terms.
 
 A run a fold builds, a binding a step from `{}` — `⟳(i: 0 ↦ i + 1 …; y: {} ↦ {...y
 e}, z: …; y)` — has as many bindings as the fold has steps, and its binding i is e at
