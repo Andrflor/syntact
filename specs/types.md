@@ -676,8 +676,7 @@ changes, only through the handler of E, with `x -<< …`. Its handler is found w
 the program is typed (§4.9): every write to it is known.
 
 - **A write** `-<<` is made only in the run of the handler of E, which answers an
-  emission `>- E{…}`: the emission stays where it is written, in order (§4.9), and
-  so do the writes it makes.
+  emission `>- E{…}`.
 - **A read** is the value of the place at that point, between the writes around it.
   Where the writes that reach a read are known, the read is their value, and the
   laws simplify it like any other: a resonant binding costs only where its value
@@ -686,6 +685,19 @@ the program is typed (§4.9): every write to it is known.
   scope that declares it, as far as references hold it (§4.12). A write whose value
   fits in the place is made in it; one that grows it grows it at the end of its own
   memory (§4.13).
+
+**What may be reordered.** The effects are opaque: how they act on one another is
+not known, so no law reorders two effects (§4.8). How resonant bindings act on one
+another is known: the reads and writes of each place, every handler found when the
+program is typed. So:
+
+- two reads or writes of resonant bindings are reordered when neither depends on
+  the other — they touch different places, or both only read;
+- a read or write of a resonant binding and an effect are reordered when neither
+  depends on the other — the effect does not take the value read, the write does
+  not take what the effect gives back;
+- two effects are never reordered;
+- what is pure crosses all of them.
 
 A reactive bind `>>=` `=<<` follows what it reads:
 
