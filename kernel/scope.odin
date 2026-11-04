@@ -112,8 +112,8 @@ access_law :: proc(k: ^Kernel, target: Type, a: ^Access) -> Type {
 	case Invalid:
 		return target
 	}
-	// a scope not known yet: the access stays
-	if gives_scope(k, target) {
+	// a scope not known yet, or a call being given (the hypothesis): the access stays
+	if gives_scope(k, target) || is_pending_call(k, target) {
 		out := new(Access)
 		out^ = a^
 		out.target = target
@@ -1138,7 +1138,7 @@ same_bindings :: proc(k: ^Kernel, a, b: ^Scope, colors: bool) -> bool {
 // run_law: read on the bindings of x where they are known; otherwise it stays.
 run_law :: proc(k: ^Kernel, o: Operator, args: []Type, span: syn.Span) -> Type {
 	x := given(k, args[0])
-	if !gives_scope(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
+	if !gives_scope(k, x) && !is_pending_call(k, x) do return problem(.Invalid_operator, span, fmt.tprintf("`%s` reads a run, not %s", operator_text[o], print_type(x)))
 	from, is_from := x.(^Operation)
 	is_from &&= from.op == .From
 	if o == .Length {

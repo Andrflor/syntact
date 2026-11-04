@@ -186,6 +186,13 @@ call_family :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
 // is_pending_call: a recursive call whose equation is being given: the hypothesis
 // of the induction, it fits any family.
 is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
+	// what is read of it, a field or a binding, is pending with it
+	#partial switch v in t {
+	case ^Access:
+		return is_pending_call(k, v.target)
+	case ^Operation:
+		if v.op == .Item || v.op == .From do return is_pending_call(k, v.args[0])
+	}
 	c, ok := as_call(t)
 	if !ok do return false
 	s, is_scope := c.target.(^Scope)

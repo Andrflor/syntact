@@ -139,6 +139,17 @@ family_of :: proc(k: ^Kernel, t: Type) -> (Family, bool) {
 		}
 	case ^Collapse:
 		if v.recursive do return call_family(k, v)
+	case ^Access:
+		// a field of a call: that field in the base cases of its equation, by induction
+		c, is_call := as_call(v.target)
+		if !is_call do break
+		s := c.target.(^Scope) or_break
+		root := origin(s)
+		p := first_production(k, root) or_break
+		for base in base_cases(binding_type(k, p), root) {
+			shape := given(k, base).(^Scope) or_continue
+			if b, found := occurrence(placed(k, shape, .Value), v.name, v.ordinal, true); found do return family_of(k, binding_value(k, b))
+		}
 	case ^Fold:
 		return family_of(k, v.value)
 	case ^Least:
@@ -196,11 +207,13 @@ legal_signature :: proc(k: ^Kernel, op: Operator, args: []Type) -> (Signature, b
 				if f, known := call_family(k, c); known && !family_holds(sig.args[min(i, 1)], f) do continue next
 				continue
 			}
+			// what is read of a call being given: the hypothesis, checked once it is given
+			if is_pending_call(k, a) do continue
 			// an operation is in the family its signature gives: 100 / (n + 1) is an
 			// integer; a pattern, in that of its products, one of which it gives; a
 			// divisor, a count, is still proven
 			#partial switch _ in a {
-			case ^Operation, ^Pattern:
+			case ^Operation, ^Pattern, ^Access:
 				if f, known := family_of(k, a); known && family_holds(sig.args[min(i, 1)], f) do continue
 			}
 			if !proven_in(k, a, family_term(sig.args[min(i, 1)])) do continue next
