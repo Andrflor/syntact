@@ -522,10 +522,19 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, at(k, ki, i, down.index))), None{}
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
+	// v = (α·y + β) % m, m > 0, all ≥ 0: affine modulo m, the maps compose modulo m
+	modulus: Type
+	if o, is_mod := v.(^Operation); is_mod && o.op == .Mod {
+		if mm, constant := o.args[1].(Int); constant && mm > 0 && proven_in(k, c, COUNTS) {
+			modulus, v = o.args[1], o.args[0]
+		}
+	}
 	alpha, beta, affine := affine_in(k, v, ys[0])
+	if modulus != nil && affine && !(proven_in(k, alpha, COUNTS) && proven_in(k, beta, COUNTS)) do return
 	// v = y: A = 1 and B = 0 at every step, so the value is c
 	tail := affine && is_int(alpha, 1) && is_int(beta, 0)
 	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int && !tail do return
+	modded :: proc(k: ^Kernel, t, m: Type) -> Type {return m == nil ? t : op(k, .Mod, t, m)}
 	// going down: the states the call carries, and the composed map (A, B)
 	f := new(Fold)
 	f.span = p.span
@@ -553,10 +562,11 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 	if !tail {
 		a, b := new_unknown(k, nil), new_unknown(k, nil)
 		a.layout, b.layout = family_term(.Int), family_term(.Int)
+		if modulus != nil do a.layout, b.layout = COUNTS, COUNTS
 		append(&states, a, b)
 		append(&inits, Int(1), Int(0))
-		append(&updates, op(k, .Mul, a, rewrite(k, alpha, along)), op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along))))
-		f.value = op(k, .Add, op(k, .Mul, a, f.value), b)
+		append(&updates, modded(k, op(k, .Mul, a, rewrite(k, alpha, along)), modulus), modded(k, op(k, .Add, b, op(k, .Mul, a, rewrite(k, beta, along))), modulus))
+		f.value = modded(k, op(k, .Add, op(k, .Mul, a, f.value), b), modulus)
 	}
 	f.states, f.inits, f.updates = states[:], inits[:], updates[:]
 	return folded(k, f), true
@@ -920,7 +930,8 @@ simplified :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 	for changed := true; changed; {
 		changed = false
 		for x, i in out.states {
-			if same(k, out.updates[i], x) {
+			// x: e ↦ u(x), u reading x only and u(e) = e: x is e
+			if fixed(k, out, i) {
 				out = without_state(k, out, i, out.inits[i])
 				changed = true
 				break
@@ -1903,4 +1914,14 @@ fewer_than :: proc(s: Type, c: i128) -> bool {
 	if !repeats || o.op != .Mul do return false
 	r, is_range := o.args[1].(^Range)
 	return is_range && is_int(r.lo, 0) && is_int(r.hi, c - 1)
+}
+
+// fixed: the state i stays at its init: its update reads it alone, and gives the
+// init back from it (x ↦ x, x ↦ x % m from 1 …).
+fixed :: proc(k: ^Kernel, f: ^Fold, i: int) -> bool {
+	x, u := f.states[i], f.updates[i]
+	if same(k, u, x) do return true
+	if reads(k, u, f.index) || !is_constant(f.inits[i]) do return false
+	for z, j in f.states do if j != i && reads(k, u, z) do return false
+	return same(k, rewrite(k, u, rewriting(nil, x, f.inits[i])), f.inits[i])
 }

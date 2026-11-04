@@ -940,6 +940,9 @@ orbit, the effects before the call in its steps:
 f{n -> m}! = ⟳(k: m ↦ s(k) until B; pre(k); A: 1 ↦ A·α(k), B: 0 ↦ B + A·β(k); A·c(k) + B)
 ```
 
+Modulo m > 0 constant, when v = (α·y + β) % m and c, α, β ≥ 0, the maps compose
+modulo m: `A: 1 ↦ (A·α) % m, B: 0 ↦ (B + A·β) % m`, the value `(A·c + B) % m`.
+
 **States carried by the call.** Besides the integer it moves along the orbit, a call
 may carve other bindings of the scope: each is a state of the fold. Its init is what
 the first carve gives it, its update what the call carves it to, all at once with k:
@@ -959,7 +962,7 @@ count{n -> 3  r -> 0}!   = ⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y ^ (3 - x); y
 What would keep the orbit, or what pre gives back, stays. The laws of a fold:
 
 ```text
-x: e ↦ x                                   x is e
+x: e ↦ u(x), u reading x alone, u(e) = e     x is e
 a state nothing reads                      is not folded
 nothing left to fold, w not reading k      w
 a state not reading what the effects give back, nor read by them: it crosses them
