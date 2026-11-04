@@ -194,7 +194,8 @@ answer_type :: proc(imp: code.Import) -> string {
 
 signature :: proc(w: ^Writer, f: ^code.Func, index: int) -> string {
 	params := make([dynamic]string)
-	for m, i in f.params do append(&params, fmt.tprintf("%s v%d", C_TYPES[m], i))
+	// parameter i is the value i, of the kind its bounds give
+	for _, i in f.params do append(&params, fmt.tprintf("%s v%d", type_of(f.kinds[i]), i))
 	if len(params) == 0 do append(&params, "void")
 	pure := f.pure && index > 0 && f.result != .None ? "__attribute__((pure)) " : ""
 	return fmt.tprintf("static %s%s %s(%s)", pure, C_TYPES[f.result], w.funcs[index], strings.join(params[:], ", "))

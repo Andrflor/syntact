@@ -28,7 +28,7 @@ build -> {
 }
 sum -> {
   Node:t -> {}
-  i64:p -> 0
+  u8:p -> 0
   -> t ? {
     {i32:v  Node:l  Node:r} -> (v ^ p) + sum{t -> l  p -> p}! + sum{t -> r  p -> p}!
     -> 0

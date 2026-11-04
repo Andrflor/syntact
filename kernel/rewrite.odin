@@ -298,6 +298,7 @@ layout_image :: proc(k: ^Kernel, t: Type) -> (out: Type, ok: bool) {
 		if v.hi != nil do hi = layout_image(k, v.hi) or_return
 		return range_law(k, lo, hi, v.family, v.span), true
 	case ^Collapse:
+		if image, known := call_image(k, v); known do return image, true
 		if f, known := family_of(k, v); known do return family_term(f), true
 	case ^Fold:
 		// a sum along the fold: its init, and as many terms as steps

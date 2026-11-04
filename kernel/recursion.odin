@@ -105,6 +105,13 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	out := new(Collapse)
 	out.target, out.recursive, out.span = s, true, span
 	if root.effectful do return call_effect(k, out)
+	// a production that, at the values the carve gives, calls nothing is the value
+	// (§7); asked once
+	if s != root && !slice.contains(k.asking[:], root) {
+		append(&k.asking, root)
+		defer pop(&k.asking)
+		if v, asked := call_production(k, out); asked && solved(v, root) do return v
+	}
 	return out
 }
 
@@ -741,12 +748,46 @@ counter_next :: proc(k: ^Kernel, s: ^Scope, c: ^Collapse, u: ^Unknown) -> (next:
 	target, is_scope := c.target.(^Scope)
 	if !is_scope || origin(target) != origin(s) do return
 	carried = make(map[^Unknown]Type)
-	for b, v in target.changes {
-		x := binding_type(k, holding(s, b)).(^Unknown) or_return
+	values := make(map[^Unknown]Type)
+	for b, v in target.changes do matched(k, binding_type(k, holding(s, b)), v, &values) or_return
+	for x, v in values {
 		if same_unknown(x, u) do next = v
 		else do carried[x] = v
 	}
 	return next, carried, next != nil
+}
+
+// matched: the values of the unknowns of w that make it v: w an unknown, or a call
+// of an equation whose carve gives unknowns, v a call of it.
+matched :: proc(k: ^Kernel, w, v: Type, out: ^map[^Unknown]Type) -> bool {
+	if x, is_unknown := w.(^Unknown); is_unknown {
+		out[x] = v
+		return true
+	}
+	g, through := w.(^Collapse)
+	c, is_call := v.(^Collapse)
+	if !through || !is_call || !g.recursive || !c.recursive do return false
+	gs, gok := g.target.(^Scope)
+	cs, cok := c.target.(^Scope)
+	if !gok || !cok || origin(gs) != origin(cs) do return false
+	for b, x in gs.changes {
+		y, given := cs.changes[b]
+		if !given do y = binding_type(k, holding(cs, b))
+		if !matched(k, x, y, out) do return false
+	}
+	return true
+}
+
+// through: a call of an equation, its fields the call gives unknowns of their
+// colors: what a field holds when a call gives it a call of that equation.
+through :: proc(k: ^Kernel, v: Type) -> (call: Type, ok: bool) {
+	c, is_call := v.(^Collapse)
+	if !is_call || !c.recursive do return nil, false
+	s := c.target.(^Scope) or_return
+	carved := make(map[^Binding]Type)
+	for b in s.changes do carved[b] = nil
+	generic := generic_equation(k, origin(s), &carved) or_return
+	return recursive_call(k, generic, c.span), true
 }
 
 // skips: a branch of a pattern of t does not make the call of root that t makes:
@@ -1476,4 +1517,90 @@ summed_fold :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 	g2.updates = slice.clone(f.updates)
 	g2.updates[x] = op(k, .Add, f.states[x], series_law(k, inner))
 	return fold_law(k, g2), true
+}
+
+// call_image: the values of a call of an equation on a counter, f = m ? {B -> c
+// -> g + f{s(m)}! + …}: between the bounds of a recursion of its bounds. Each call
+// is taken at the bound y of the step after, g at its bounds, so the greatest is
+// y ↦ α·y + max(g) from max(c), the least likewise: folds, in closed form (§5.6).
+call_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
+	s := call.target.(^Scope) or_return
+	if !call.recursive do return
+	root := origin(s)
+	if slice.contains(k.asking[:], root) do return
+	append(&k.asking, root)
+	defer pop(&k.asking)
+	p := first_production(k, root) or_return
+	if p.state == .In_Progress do return
+	carved := carved_by_calls(k, binding_type(k, p), root)
+	for b in s.changes do carved[b] = nil
+	generic := generic_equation(k, root, &carved) or_return
+	// a field the call gives a call of another equation keeps it, over its fields
+	kept := false
+	for b, v in s.changes do if w, through_call := through(k, v); through_call {
+		carved[b] = w
+		kept = true
+	}
+	if kept do generic = derive(k, root, carved, root.span).(^Scope) or_return
+	q := first_production(k, generic) or_return
+	if q.state == .In_Progress do return
+	e := binding_type(k, q).(^Pattern) or_return
+	if len(e.branches) != 2 || e.branches[0].cover == nil || e.branches[1].cover != nil do return
+	u := e.target.(^Unknown) or_return
+	stop, c, r := e.branches[0].cover, e.branches[0].product, e.branches[1].product
+	// a call of the base whose production, at its values, calls nothing is that
+	// production (§7)
+	asked: Rewrite
+	for x in calls_in(k, c, root) do if v, given := call_production(k, x); given && solved(v, root) do asked = rewriting_call(asked, x, v)
+	c = rewrite(k, c, asked)
+	if !solved(c, root) do return
+	// every call moves the counter by the same step
+	calls := calls_in(k, r, root)
+	if len(calls) == 0 do return
+	step: Type
+	y := new_unknown(k, nil)
+	y.layout = family_term(.Int)
+	at: Rewrite
+	for x in calls {
+		next, _ := counter_next(k, generic, x, u) or_return
+		if step != nil && !same(k, step, next) do return
+		step = next
+		at = rewriting_call(at, x, y)
+	}
+	alpha, beta := affine_in(k, rewrite(k, r, at), y) or_return
+	a, constant := alpha.(Int)
+	if !constant || a < 0 do return
+	base := layout_image(k, c) or_return
+	terms := layout_image(k, beta) or_return
+	clo, chi := int_bounds(k, base) or_return
+	tlo, thi := int_bounds(k, terms) or_return
+	// the orbit of u, its length n
+	x := orbit_index(k, u, stop)
+	i := new_unknown(k, nil)
+	i.layout = COUNTS
+	ki := orbit(k, rewrite(k, step, rewriting(nil, u, x)), x, u, i) or_return
+	j := new_unknown(k, nil)
+	j.layout = COUNTS
+	n := least_law(k, j, in_law(k, rewrite(k, ki, rewriting(nil, i, j)), stop), e.span)
+	bound :: proc(k: ^Kernel, n: Type, a: Int, from, by: Maybe(i128), span: syn.Span) -> (out: Type, ok: bool) {
+		c := from.? or_return
+		b := by.? or_return
+		f := new(Fold)
+		f.index, f.span = new_unknown(k, nil), span
+		f.index.layout = COUNTS
+		f.start, f.next, f.stop = Int(0), op(k, .Add, f.index, Int(1)), new_range(n, nil, .Int)
+		z := new_unknown(k, nil)
+		z.layout = family_term(.Int)
+		f.states, f.inits = slice.clone([]^Unknown{z}), slice.clone([]Type{Int(c)})
+		f.effects, f.updates, f.value = None{}, slice.clone([]Type{op(k, .Add, op(k, .Mul, a, z), Int(b))}), z
+		return fold_law(k, f), true
+	}
+	hi := bound(k, n, a, chi, thi, e.span) or_return
+	lo := bound(k, n, a, clo, tlo, e.span) or_return
+	// over the values the call gives the counter
+	hi_image := layout_image(k, hi) or_return
+	lo_image := layout_image(k, lo) or_return
+	_, top := int_bounds(k, hi_image) or_return
+	least, _ := int_bounds(k, lo_image) or_return
+	return range_law(k, Int(least.? or_return), Int(top.? or_return), .Int, e.span), true
 }

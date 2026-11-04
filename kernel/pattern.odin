@@ -246,6 +246,20 @@ call_production :: proc(k: ^Kernel, c: ^Collapse) -> (Type, bool) {
 	p, has := first_production(k, s)
 	if !has || p.state == .In_Progress do return nil, false
 	v := binding_type(k, p)
-	if is_invalid(v) || has_effect(v) do return nil, false
+	if holds_invalid(v) || has_effect(v) do return nil, false
 	return v, true
+}
+
+// holds_invalid: t, or a term in it, has no type.
+holds_invalid :: proc(t: Type) -> bool {
+	if t == nil do return false
+	if is_invalid(t) do return true
+	if p, is_pattern := t.(^Pattern); is_pattern {
+		for b in p.branches do if holds_invalid(b.product) do return true
+	}
+	if f, is_fold := t.(^Fold); is_fold {
+		for x in fold_parts(f) do if holds_invalid(x) do return true
+	}
+	for x in parts(t) do if holds_invalid(x) do return true
+	return false
 }
