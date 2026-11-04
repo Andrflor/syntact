@@ -875,10 +875,17 @@ OPS := [kernel.Operator]Op {
 	.Greater_Eq = .Ge,
 	.In         = .Eq, // not used: `in` is a test of membership
 	.Round      = .Add, // not used: a rounding is lowered by its width
+	.Length     = .Add, // not used: the places of a run are read in memory
+	.Item       = .Add,
+	.Drop       = .Add,
 }
 
 operation :: proc(l: ^Lowering, o: ^kernel.Operation) -> Value {
 	if o.op == .In do return member(l, lower(l, o.args[0]), o.args[1])
+	#partial switch o.op {
+	case .Length, .Item, .Drop:
+		return fail(l, "%s: a run in memory is not lowered yet", kernel.print_type(o))
+	}
 	// a real is computed in 64 bits: rounding to them is what each operation does
 	if o.op == .Round {
 		if bits, is_int := o.args[1].(kernel.Int); is_int && bits == 64 do return lower(l, o.args[0])

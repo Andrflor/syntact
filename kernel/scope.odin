@@ -689,6 +689,8 @@ match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Ty
 	if !is_run(place) {
 		if len(xs) == 0 do return Bool(false)
 		v := xs[0]
+		// a run inlined, of a length not known: what it starts with is not known
+		if v.kind == .Expand do return new_operation(.In, run_scope(k, xs), s)
 		if v.name != place.name || v.kind != place.kind do return Bool(false)
 		head: Type = Bool(true)
 		if c := binding_color(k, place); c != nil do head = in_law(k, binding_value(k, v), c)

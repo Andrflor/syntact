@@ -393,6 +393,7 @@ solve :: proc(k: ^Kernel, root: ^Scope, value: Type) -> Type {
 // What is left would keep the orbit, or what pre gives back: it stays.
 iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bool) {
 	p := value.(^Pattern) or_return
+	if len(p.branches) == 2 && p.branches[1].cover != nil do return run_iteration(k, s, p)
 	if len(p.branches) != 2 || p.branches[0].cover == nil || p.branches[1].cover != nil do return
 	u := p.target.(^Unknown) or_return
 	root := origin(s)
@@ -1424,4 +1425,42 @@ placing :: proc(k: ^Kernel, t: Type) -> Type {
 		changes[b] = given(k, binding_type(k, b))
 	}
 	return carved_copy(k, v, changes)
+}
+
+// run_iteration: the solution of a recursion along a run (§5.6, runs.odin):
+//
+//   f{l -> m}! = m ? {{} -> c  {p ...t} -> r(p, f{l -> t}!)}
+//
+// reads the places of m from the last: x = r(item(m, j), x) for j from
+// length(m) - 1 down to 0, from c — the fold of its places.
+run_iteration :: proc(k: ^Kernel, s: ^Scope, p: ^Pattern) -> (solution: Type, ok: bool) {
+	u := p.target.(^Unknown) or_return
+	root := origin(s)
+	empty, is_empty := p.branches[0].cover.(^Scope)
+	if !is_empty || len(empty.bindings) != 0 do return
+	c, r := p.branches[0].product, p.branches[1].product
+	if !solved(c, root) || has_effect(c) || has_effect(r) do return
+	family := family_of(k, given(k, c)) or_return
+	_, calls, _, after := at_calls(k, s, r) or_return
+	if len(calls) != 1 do return
+	// the call goes on with the run after the place: drop(m, 1)
+	next := counter_next(k, s, calls[0], u) or_return
+	o, is_drop := next.(^Operation)
+	if !is_drop || o.op != .Drop do return
+	if base, is_u := o.args[0].(^Unknown); !is_u || !same_unknown(base, u) do return
+	if one, single := o.args[1].(Int); !single || one != 1 do return
+	x := new_unknown(k, nil)
+	x.layout = family_term(family)
+	after = rewrite(k, after, rewriting_call(nil, calls[0], x))
+	if !solved(after, root) do return
+	j := new_unknown(k, nil)
+	j.layout = COUNTS
+	f := new(Fold)
+	f.index, f.span = j, p.span
+	f.start, f.next, f.stop = op(k, .Sub, length_law(k, u), Int(1)), op(k, .Sub, j, Int(1)), new_range(nil, Int(-1), .Int)
+	f.states, f.inits = []^Unknown{x}, []Type{c}
+	// the run at j: what r reads of m is read on drop(m, j)
+	f.updates = []Type{rewrite(k, after, rewriting(nil, u, new_operation(.Drop, u, j)))}
+	f.value, f.effects = x, None{}
+	return folded(k, f), true
 }

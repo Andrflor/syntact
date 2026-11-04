@@ -196,6 +196,9 @@ Operator :: enum u8 {
 	Greater_Eq,
 	In,
 	Round, // round(t, w): the value of the format of w bits nearest the real t (format.odin)
+	Length, // length(l): how many places the run l has (runs.odin)
+	Item, // item(l, i): what the place i of the run l holds, from 0
+	Drop, // drop(l, n): the run l without its first n places
 }
 
 Operation :: struct {
