@@ -296,6 +296,7 @@ SPEC_CASES := []Spec_Case {
 	{ARRAY + "A -> Array{u8}\ntotal -> {\n  A:xs -> {}\n  u8:acc -> 0\n  -> xs ? {\n    {u8(h) ...A:(t)} -> total{xs -> t  acc -> (acc + h) [&] 255}!\n    -> acc\n  }\n}\nx -> total{xs -> {1 2 3}}!", "⟳(x: 0 ↦ x + 1 until 3..; y: 0 ↦ y + {1  2  3}.#x [&] 255; y)", {}},
 	// a cover that cuts c places moves along the run by c
 	{ARRAY + "A -> Array{u8}\npairs -> {\n  A:xs -> {}\n  u16:acc -> 0\n  -> xs ? {\n    {u8(a) u8(b) ...A:(t)} -> pairs{xs -> t  acc -> (acc + a * b) % 1000}!\n    -> acc\n  }\n}\nx -> pairs{xs -> ??::A}!", "⟳(x: 0 ↦ x + 1 until (|?0| / 2)..; y: 0 ↦ (y + ?0.#(2 * x) * ?0.#(2 * x + 1)) % 1000; y)", {}},
+	{ARRAY + "A -> Array{u8}\npairs -> {\n  A:xs -> {}\n  u16:acc -> 0\n  -> xs ? {\n    {u8(a) u8(b) ...A:(t)} -> pairs{xs -> t  acc -> (acc + a * b) % 1000}!\n    -> acc\n  }\n}\nbuild -> {\n  u8:n -> ??\n  u8:r -> 1\n  A:acc -> {}\n  -> n ? {0 -> acc  -> build{n -> n - 1  r -> (r * 3) % 256  acc -> {...acc  r  (r + 1) % 256}}!}\n}\nx -> pairs{xs -> build{n -> ??::u8}!}!", "⟳(x: 0 ↦ x + 1 until ?1..; y: 0 ↦ (y + z * ((z + 1) % 256)) % 1000, z: 1 ↦ 3 * z % 256; y)", {}},
 	// the pieces a cover cuts from a run not known yet
 	{ARRAY + "A -> Array{u8}\nxs -> ??::A\nx -> xs ? {\n  {u8(h) ...A:(t)} -> t\n  -> {}\n}", "?0 ? {{u8:  ...A:} -> ?0 from 1  -> {}}", {}},
 	// a recursion whose base case is a scope folds up from it: its state a run

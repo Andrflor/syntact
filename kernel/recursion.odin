@@ -1455,9 +1455,10 @@ cuts_head :: proc(k: ^Kernel, cover: Type, u: ^Unknown) -> (short: ^Scope, ok: b
 	return short, true
 }
 
-// built: f builds a run, a binding a step along a counter from 0: its value is the
-// state y, {} at first, {...y  e} at each step. e is the binding of step i.
-built :: proc(k: ^Kernel, f: ^Fold) -> (y: int, e: Type, ok: bool) {
+// built: f builds a run, c bindings a step along a counter from 0: its value is
+// the state y, {} at first, {...y  e₀ … e_{c-1}} at each step. The binding c·i + j
+// of the run is eⱼ at step i.
+built :: proc(k: ^Kernel, f: ^Fold) -> (y: int, es: []Type, ok: bool) {
 	lo, _ := counter_range(k, f) or_return
 	if !is_int(lo, 0) || !same(k, f.next, op(k, .Add, f.index, Int(1))) || !is_none(f.effects) do return
 	for z, i in f.states {
@@ -1466,25 +1467,28 @@ built :: proc(k: ^Kernel, f: ^Fold) -> (y: int, e: Type, ok: bool) {
 		step, is_step := f.updates[i].(^Scope)
 		if !is_scope || !is_step || len(run_data(k, start)) != 0 do return
 		data := run_data(k, step)
-		if len(data) != 2 || data[0].kind != .Expand || !same(k, binding_value(k, data[0]), z) || data[1].kind == .Expand do return
-		e = binding_value(k, data[1])
-		if reads(k, e, z) do return
+		if len(data) < 2 || data[0].kind != .Expand || !same(k, binding_value(k, data[0]), z) do return
+		out := make([]Type, len(data) - 1)
+		for d, j in data[1:] {
+			if d.kind == .Expand do return
+			out[j] = binding_value(k, d)
+			if reads(k, out[j], z) do return
+		}
 		for t, j in f.updates do if j != i && reads(k, t, z) do return
-		return i, e, true
+		return i, out, true
 	}
 	return
 }
 
-// carrying: f reads, at its step i counted from 0, the binding i of a run a fold
-// builds: it carries the states of that fold beside its own, and the binding is
-// what that fold gives at step i. The run is never built.
+// carrying: f reads, at its step i counted from 0, the bindings c·i + j of a run a
+// fold builds c a step: it carries the states of that fold beside its own, and the
+// binding c·i + j is what that fold gives at step i. The run is never built.
 carrying :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 	lo, _, counts := counter_range(k, f)
 	if !counts || !is_int(lo, 0) || !same(k, f.next, op(k, .Add, f.index, Int(1))) do return f
-	read := find_read(k, fold_parts(f), f.index)
-	if read == nil do return f
-	b := read.args[0].(^Fold)
-	y, e, _ := built(k, b)
+	b, reads := run_reads(k, f)
+	if b == nil do return f
+	y, es, _ := built(k, b)
 	along := rewriting(nil, b.index, f.index)
 	states, inits := make([dynamic]^Unknown), make([dynamic]Type)
 	append(&states, ..f.states)
@@ -1497,7 +1501,8 @@ carrying :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 		append(&states, w)
 		append(&inits, b.inits[j])
 	}
-	reading := Rewrite{{read = read, term = rewrite(k, e, along)}}
+	reading: Rewrite
+	for r in reads do reading = append_read(reading, r.read, rewrite(k, es[r.at], along))
 	parts := fold_parts(f)
 	for &t in parts do t = rewrite(k, t, reading)
 	out := with_parts(f, parts)
@@ -1508,21 +1513,44 @@ carrying :: proc(k: ^Kernel, f: ^Fold) -> ^Fold {
 	return carrying(k, out)
 }
 
-// find_read: a read x.#i in ts, x a run a fold builds, i the index.
-find_read :: proc(k: ^Kernel, ts: []Type, i: ^Unknown) -> ^Operation {
-	for t in ts {
-		if t == nil do continue
-		if o, is_op := t.(^Operation); is_op {
-			if b, is_fold := o.args[0].(^Fold); o.op == .Item && is_fold && same(k, o.args[1], i) {
-				if _, _, builds := built(k, b); builds do return o
+Run_Read :: struct {
+	read: ^Operation,
+	at:   int, // j: the read is of the binding c·i + j
+}
+
+append_read :: proc(r: Rewrite, read: ^Operation, t: Type) -> Rewrite {
+	out := make([dynamic]Rewriting)
+	append(&out, ..r)
+	append(&out, Rewriting{read = read, term = t})
+	return out[:]
+}
+
+// run_reads: a run a fold builds c a step that f reads at its index i, x.#(c·i + j)
+// with j in 0..c - 1, and all those reads; nil when there is none, or when one
+// reads it elsewhere.
+run_reads :: proc(k: ^Kernel, f: ^Fold) -> (b: ^Fold, reads: []Run_Read) {
+	found := make([dynamic]Run_Read)
+	visit :: proc(k: ^Kernel, t: Type, i: ^Unknown, b: ^^Fold, found: ^[dynamic]Run_Read) {
+		if t == nil do return
+		if o, is_op := t.(^Operation); is_op && o.op == .Item {
+			if x, is_fold := o.args[0].(^Fold); is_fold && (b^ == nil || same(k, b^, x)) {
+				if _, es, builds := built(k, x); builds {
+					c, j, along := affine_in(k, o.args[1], i)
+					step, by := c.(Int)
+					at, constant := j.(Int)
+					if along && by && constant && int(step) == len(es) && at >= 0 && int(at) < len(es) {
+						b^ = x
+						append(found, Run_Read{o, int(at)})
+						return
+					}
+				}
 			}
 		}
-		if found := find_read(k, parts(t), i); found != nil do return found
-		if p, is_pattern := t.(^Pattern); is_pattern {
-			for br in p.branches do if found := find_read(k, {br.product}, i); found != nil do return found
-		}
+		for x in parts(t) do visit(k, x, i, b, found)
+		if p, is_pattern := t.(^Pattern); is_pattern do for br in p.branches do visit(k, br.product, i, b, found)
 	}
-	return nil
+	for t in fold_parts(f) do visit(k, t, f.index, &b, &found)
+	return b, found[:]
 }
 
 // summed_fold: Σ(j: lo..hi, ⟳(…; x: 0 ↦ x + g; x)) = ⟳(…; x: 0 ↦ x + Σ(j: lo..hi, g); x),
