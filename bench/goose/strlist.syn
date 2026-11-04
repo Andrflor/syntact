@@ -1,0 +1,71 @@
+// strlist (Goose bench/goose/strlist.goose): a text of N words of 3..20 random
+// letters, each followed by a space; split into a list of words; four scans of
+// |w| + w[0] + w[last]. Prints the count and the total.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+// a letter from 0..25: there is no operator from an integer to a character
+// (specs/language/02), so it is a pattern
+letter -> {
+  (0..25):k
+  -> k ? {0 -> "a"  1 -> "b"  2 -> "c"  3 -> "d"  4 -> "e"  5 -> "f"  6 -> "g"  7 -> "h"  8 -> "i"  9 -> "j"  10 -> "k"  11 -> "l"  12 -> "m"  13 -> "n"  14 -> "o"  15 -> "p"  16 -> "q"  17 -> "r"  18 -> "s"  19 -> "t"  20 -> "u"  21 -> "v"  22 -> "w"  23 -> "x"  24 -> "y"  -> "z"}
+}
+// a word of n letters, and the state after it
+Word -> {string:text  u64:r}
+word -> {
+  u8:n -> ??
+  u64:r -> 12345
+  string:acc -> ""
+  -> n ? {
+    0 -> Word{acc  r}
+    -> word{n -> n - 1  r -> xs{x -> r}!  acc -> acc + letter{k -> xs{x -> r}! % 26}!}!
+  }
+}
+text -> {
+  u32:n -> ??
+  u64:r -> 12345
+  string:acc -> ""
+  -> n ? {
+    0 -> acc
+    -> {
+      r1 -> xs{x -> r}!
+      w -> word{n -> 3 + r1 % 18  r -> r1}!
+      -> text{n -> n - 1  r -> w.r  acc -> acc + w.text + " "}!
+    }!
+  }
+}
+// split: the words of a text, by its pattern on strings
+split -> {
+  string:t -> ""
+  -> t ? {
+    "" -> {}
+    (" " + string:(rest)) -> split{t -> rest}!
+    ((char & ~' ') * 1.. :(w) + " " + string:(rest)) -> {w ...split{t -> rest}!}
+  }
+}
+scan -> {
+  Array{string}:ws -> {}
+  i64:acc -> 0
+  -> ws ? {
+    {string(w) ...Array{string}:(t)} -> scan{ws -> t  acc -> acc + |w| + w.#0 + w.#(|w| - 1)}!
+    -> acc
+  }
+}
+-> {
+  u32:n -> ??
+  ws -> split{t -> text{n -> n}!}!
+  a -> io.printf{format -> "%lld\n"  n -> n}!
+  -> io.printf{format -> "%lld\n"  n -> 4 * scan{ws -> ws}!}!
+}!

@@ -1,0 +1,84 @@
+// sexp (Goose bench/goose/sexp.goose): generate N s-expression forms as text
+// (symbols of 3..14 letters, numbers below 100000, lists of 2..5), parse the text
+// into a tree, walk it four times. Here: the generator, which returns the text
+// and the next state of xorshift64, and the parser's first step, on characters.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+// a letter from 0..25: there is no operator from an integer to a character
+// (specs/language/02), so it is a pattern
+letter -> {
+  (0..25):k
+  -> k ? {0 -> "a"  1 -> "b"  2 -> "c"  3 -> "d"  4 -> "e"  5 -> "f"  6 -> "g"  7 -> "h"  8 -> "i"  9 -> "j"  10 -> "k"  11 -> "l"  12 -> "m"  13 -> "n"  14 -> "o"  15 -> "p"  16 -> "q"  17 -> "r"  18 -> "s"  19 -> "t"  20 -> "u"  21 -> "v"  22 -> "w"  23 -> "x"  24 -> "y"  -> "z"}
+}
+Gen -> {string:text  u64:r}
+sym -> {
+  u8:n -> ??
+  u64:r -> 12345
+  string:acc -> ""
+  -> n ? {
+    0 -> Gen{acc  r}
+    -> sym{n -> n - 1  r -> xs{x -> r}!  acc -> acc + letter{k -> xs{x -> r}! % 26}!}!
+  }
+}
+digit -> {
+  (0..9):d
+  -> d ? {0 -> "0"  1 -> "1"  2 -> "2"  3 -> "3"  4 -> "4"  5 -> "5"  6 -> "6"  7 -> "7"  8 -> "8"  -> "9"}
+}
+num -> {
+  u32:v -> 0
+  -> v ? {<10 -> digit{d -> v}!  -> num{v -> v / 10}! + digit{d -> v % 10}!}
+}
+gen -> {
+  (0..8):depth -> 4
+  u64:seed -> 12345
+  -> {
+    r -> xs{x -> seed}!
+    -> (depth = 0) [|] (r % 4 = 0) ? {
+      true -> (r >> 8) % 2 ? {
+        0 -> {g -> sym{n -> 3 + r % 12  r -> r}!  -> Gen{g.text + " "  r}}!
+        -> Gen{num{v -> (r >> 16) % 100000}! + " "  r}
+      }
+      -> kids{depth -> depth - 1  n -> 2 + (r >> 24) % 4  g -> Gen{"("  r}}!
+    }
+  }!
+}
+kids -> {
+  (0..8):depth -> 0
+  u8:n -> 0
+  Gen:g -> Gen
+  -> n ? {
+    0 -> Gen{g.text + ") "  g.r}
+    -> {
+      c -> gen{depth -> depth  seed -> g.r}!
+      -> kids{depth -> depth  n -> n - 1  g -> Gen{g.text + c.text  c.r}}!
+    }!
+  }
+}
+// parse: the first token of a text, read on its characters
+Token -> {string:token  string:rest}
+token -> {
+  string:t -> ""
+  -> t ? {
+    ("(" + string:(rest)) -> Token{"("  rest}
+    (")" + string:(rest)) -> Token{")"  rest}
+    -> Token{""  t}
+  }
+}
+-> {
+  u32:n -> ??
+  g -> gen{seed -> n}!
+  -> io.printf{format -> "%lld\n"  n -> 0}!
+}!

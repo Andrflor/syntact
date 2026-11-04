@@ -1,0 +1,95 @@
+// lru (Goose bench/goose/lru.goose): an LRU cache of capacity N/8 over keys
+// (a * a) / KEYS, a = xs_mod(r, KEYS), KEYS = N/4; an invalidation when
+// xs_mod(r >> 40, 16) = 0. The cache is a run, most recent first, searched by its
+// pattern (no hash table: the spec has no update of a run at a computed position).
+// Prints hits, misses, removes, the size, the walk hash and the sum of the vals.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+Node -> {i32:key  i32:val}
+Found -> {bool:hit  Array{Node}:rest  Node:node}
+// the node of key taken out of the run, and the run without it
+take -> {
+  Array{Node}:xs -> {}
+  i32:key -> 0
+  -> xs ? {
+    {Node(h) ...Array{Node}:(t)} -> h.key ? {
+      =key -> Found{hit -> true  rest -> t  node -> h}
+      -> {
+        f -> take{xs -> t  key -> key}!
+        -> Found{hit -> f.hit  rest -> {h ...f.rest}  node -> f.node}
+      }!
+    }
+    -> Found{hit -> false  rest -> {}  node -> Node}
+  }
+}
+// the run without its last node
+init -> {
+  Array{Node}:xs -> {}
+  -> xs ? {
+    {Node(h)} -> {}
+    {Node(h) ...Array{Node}:(t)} -> {h ...init{xs -> t}!}
+    -> {}
+  }
+}
+Stats -> {Array{Node}:recent  u32:size  i64:hits  i64:misses  i64:removes}
+run -> {
+  u32:n -> ??
+  u32:cap -> 1
+  (1..4294967295):keys -> 1
+  u64:r -> 12345
+  Stats:s -> Stats
+  -> n ? {
+    0 -> s
+    -> {
+      r1 -> xs{x -> r}!
+      a -> r1 % keys
+      key -> (a * a) / keys
+      f -> take{xs -> s.recent  key -> key}!
+      next -> (r1 >> 40) % 16 ? {
+        0 -> f.hit ? {
+          true -> Stats{f.rest  s.size - 1  s.hits  s.misses  s.removes + 1}
+          -> s
+        }
+        -> f.hit ? {
+          true -> Stats{{Node{f.node.key  f.node.val + 1} ...f.rest}  s.size  s.hits + 1  s.misses  s.removes}
+          -> s.size ? {
+            =cap -> Stats{{Node{key  key % 1000} ...init{xs -> s.recent}!}  s.size  s.hits  s.misses + 1  s.removes}
+            -> Stats{{Node{key  key % 1000} ...s.recent}  s.size + 1  s.hits  s.misses + 1  s.removes}
+          }
+        }
+      }
+      -> run{n -> n - 1  cap -> cap  keys -> keys  r -> r1  s -> next}!
+    }!
+  }
+}
+walk -> {
+  Array{Node}:xs -> {}
+  u64:w -> 0
+  i64:vals -> 0
+  -> xs ? {
+    {Node(h) ...Array{Node}:(t)} -> walk{xs -> t  w -> (w * 31 + h.key) [&] 0xffffffffffffffff  vals -> vals + h.val}!
+    -> {w  vals}
+  }
+}
+-> {
+  (8..4294967295):n -> ??
+  s -> run{n -> n  cap -> n / 8  keys -> n / 4}!
+  a -> io.printf{format -> "%lld\n"  n -> s.hits}!
+  b -> io.printf{format -> "%lld\n"  n -> s.misses}!
+  c -> io.printf{format -> "%lld\n"  n -> s.removes}!
+  d -> io.printf{format -> "%lld\n"  n -> s.size}!
+  -> walk{xs -> s.recent}!
+}!

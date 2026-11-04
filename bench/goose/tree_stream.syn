@@ -1,0 +1,36 @@
+// tree, streamed: the same checksum as tree.syn, without the tree. The sum of
+// v ^ p over the eight passes is taken on each node as its seed is drawn, by the
+// recursion that would build it. This does NOT measure what the benchmark measures
+// (building a tree and walking it eight times): tree.syn is that program.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+eight -> {
+  (0..999):x
+  -> (x ^ 0) + (x ^ 1) + (x ^ 2) + (x ^ 3) + (x ^ 4) + (x ^ 5) + (x ^ 6) + (x ^ 7)
+}
+tsum -> {
+  (0..30):depth -> ??
+  u64:seed -> 12345
+  -> depth ? {
+    0 -> eight{x -> seed % 1000}!
+    -> eight{x -> seed % 1000}! + tsum{depth -> depth - 1  seed -> xs{x -> seed}!}! + tsum{depth -> depth - 1  seed -> xs{x -> (seed + 1) [&] 0xffffffffffffffff}!}!
+  }
+}
+-> {
+  (0..30):depth -> ??
+  a -> io.printf{format -> "%lld\n"  n -> (1 << (depth + 1)) - 1}!
+  -> io.printf{format -> "%lld\n"  n -> tsum{depth -> depth}! % 4611686018427387904}!
+}!

@@ -1,0 +1,65 @@
+// bintrees (Goose bench/goose/bintrees.goose, the Benchmarks Game binary-trees):
+// build, check and discard trees; prints the same lines as the C++ version.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+Node -> {
+  -> {}
+  -> {Node:l  Node:r}
+}
+make -> {
+  (0..30):depth -> ??
+  -> depth ? {
+    0 -> {l -> {}  r -> {}}
+    -> {l -> make{depth -> depth - 1}!  r -> make{depth -> depth - 1}!}
+  }
+}
+check -> {
+  Node:t -> {}
+  -> t ? {
+    {Node:l  Node:r} -> l ? {
+      {} -> 1
+      -> 1 + check{t -> l}! + check{t -> r}!
+    }
+    -> 1
+  }
+}
+iterate -> {
+  (0..30):d -> 4
+  u32:i -> ??
+  i64:sum -> 0
+  -> i ? {0 -> sum  -> iterate{d -> d  i -> i - 1  sum -> sum + check{t -> make{depth -> d}!}!}!}
+}
+depths -> {
+  (0..30):max -> 15
+  (0..32):d -> 4
+  -> d ? {
+    >max -> 0
+    -> {
+      iters -> 1 << (max - d + 4)
+      a -> io.printf{format -> "%lld\n"  n -> iters}!
+      b -> io.printf{format -> "%lld\n"  n -> d}!
+      c -> io.printf{format -> "%lld\n"  n -> iterate{d -> d  i -> iters}!}!
+      -> depths{max -> max  d -> d + 2}!
+    }!
+  }
+}
+-> {
+  (4..29):max -> ??
+  Node:long -> make{depth -> max}!
+  s -> io.printf{format -> "%lld\n"  n -> check{t -> make{depth -> max + 1}!}!}!
+  r -> depths{max -> max}!
+  -> io.printf{format -> "%lld\n"  n -> check{t -> long}!}!
+}!

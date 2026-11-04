@@ -1,0 +1,58 @@
+// sum (Goose bench/goose/sum.goose): build N i32 from xorshift64, then scan them
+// eight times, total += x ^ p. Prints the length and the total, as Goose does.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+// the N values, as an array built at run time
+build -> {
+  u32:n -> ??
+  u64:r -> 12345
+  -> n ? {
+    0 -> {}
+    -> {(xs{x -> r}! % 1000) ...build{n -> n - 1  r -> xs{x -> r}!}!}
+  }
+}
+// one pass: acc + the sum of x ^ p over the array
+scan -> {
+  Array{i32}:data -> {}
+  i64:p -> 0
+  i64:acc -> 0
+  -> data ? {
+    {i32(h) ...Array{i32}:(t)} -> scan{data -> t  p -> p  acc -> acc + (h ^ p)}!
+    -> acc
+  }
+}
+// the length of the array, by its pattern
+len -> {
+  Array{i32}:data -> {}
+  i64:n -> 0
+  -> data ? {
+    {i32(h) ...Array{i32}:(t)} -> len{data -> t  n -> n + 1}!
+    -> n
+  }
+}
+passes -> {
+  Array{i32}:data -> {}
+  u8:p -> 0
+  i64:acc -> 0
+  -> p ? {
+    <8 -> passes{data -> data  p -> p + 1  acc -> scan{data -> data  p -> p  acc -> acc}!}!
+    -> acc
+  }
+}
+-> {
+  Array{i32}:data -> build{n -> ??::u32}!
+  a -> io.printf{format -> "%lld\n"  n -> len{data -> data}!}!
+  -> io.printf{format -> "%lld\n"  n -> passes{data -> data}!}!
+}!

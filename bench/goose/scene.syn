@@ -1,0 +1,40 @@
+// scene (Goose bench/goose/scene.goose): a scene graph of the given depth, each
+// node with 1..4 children, a local transform (a quarter-turn rotation about one
+// axis and a translation) and a world transform; 16 frames recompute the world
+// transforms down the tree. Here: the node and its transform, in f32.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+F3 -> {f32:x  f32:y  f32:z}
+Xf -> {f32:m0 f32:m1 f32:m2 f32:m3 f32:m4 f32:m5 f32:m6 f32:m7 f32:m8  F3:t}
+// a scope names itself only in its productions: the children are an Array of Node
+Node -> {
+  -> {i32:id  Xf:local  Xf:world  Array{Node}:kids}
+}
+compose -> {
+  Xf:p -> Xf
+  Xf:l -> Xf
+  -> Xf{
+    p.m0 * l.m0 + p.m1 * l.m3 + p.m2 * l.m6  p.m0 * l.m1 + p.m1 * l.m4 + p.m2 * l.m7  p.m0 * l.m2 + p.m1 * l.m5 + p.m2 * l.m8
+    p.m3 * l.m0 + p.m4 * l.m3 + p.m5 * l.m6  p.m3 * l.m1 + p.m4 * l.m4 + p.m5 * l.m7  p.m3 * l.m2 + p.m4 * l.m5 + p.m5 * l.m8
+    p.m6 * l.m0 + p.m7 * l.m3 + p.m8 * l.m6  p.m6 * l.m1 + p.m7 * l.m4 + p.m8 * l.m7  p.m6 * l.m2 + p.m7 * l.m5 + p.m8 * l.m8
+    F3{p.m0 * l.t.x + p.m1 * l.t.y + p.m2 * l.t.z + p.t.x  p.m3 * l.t.x + p.m4 * l.t.y + p.m5 * l.t.z + p.t.y  p.m6 * l.t.x + p.m7 * l.t.y + p.m8 * l.t.z + p.t.z}
+  }
+}
+-> {
+  (f32 & 0.0..8.0):a -> ??
+  w -> compose{p -> Xf{a 0.0 0.0 0.0 a 0.0 0.0 0.0 a F3{a a a}}  l -> Xf{a 0.0 0.0 0.0 a 0.0 0.0 0.0 a F3{a a a}}}!
+  -> w.m0 + w.t.x
+}!

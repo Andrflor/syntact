@@ -1,0 +1,44 @@
+// respond (Goose bench/goose/respond.goose): N JSON responses rendered to text,
+// each hashed with FNV-1a over its bytes. Here: the hash of a rendered string,
+// which reads the code of each character of the string.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+fnv -> {
+  string:s -> ""
+  u64:h -> 0xcbf29ce484222325
+  -> s ? {
+    "" -> h
+    (char:(c) + string:(rest)) -> fnv{s -> rest  h -> ((h ^ c) * 0x100000001b3) [&] 0xffffffffffffffff}!
+  }
+}
+digit -> {
+  (0..9):d
+  -> d ? {0 -> "0"  1 -> "1"  2 -> "2"  3 -> "3"  4 -> "4"  5 -> "5"  6 -> "6"  7 -> "7"  8 -> "8"  -> "9"}
+}
+// the decimal text of v: there is no operator from an integer to a string
+num -> {
+  u32:v -> 0
+  -> v ? {<10 -> digit{d -> v}!  -> num{v -> v / 10}! + digit{d -> v % 10}!}
+}
+render -> {
+  u32:id -> 0
+  string:user -> ""
+  -> "{\"id\":" + num{v -> id}! + ",\"user\":\"" + user + "\"}"
+}
+-> {
+  u32:n -> ??
+  -> io.printf{format -> "%lld\n"  n -> fnv{s -> render{id -> n  user -> "ab"}!}! % 4611686018427387904}!
+}!

@@ -1,0 +1,65 @@
+// push (Goose bench/goose/push.goose): N items {key, val}, key = xs_mod(r, 1000000),
+// val = i % 97; the position of every 64th kept; then sum the keys, and the vals
+// read back through the kept positions. Prints nitems, nmarks, total, mt.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+Item -> {i32:key  i32:val}
+// the items, in order, built at run time
+items -> {
+  u32:n -> ??
+  u32:i -> 0
+  u64:r -> 12345
+  -> i ? {
+    =n -> {}
+    -> {Item{key -> xs{x -> r}! % 1000000  val -> i % 97} ...items{n -> n  i -> i + 1  r -> xs{x -> r}!}!}
+  }
+}
+// the positions of every 64th item
+marks -> {
+  u32:n -> ??
+  u32:i -> 0
+  -> i ? {
+    >=n -> {}
+    -> {i ...marks{n -> n  i -> i + 64}!}
+  }
+}
+total -> {
+  Array{Item}:xs -> {}
+  i64:acc -> 0
+  -> xs ? {
+    {Item(h) ...Array{Item}:(t)} -> total{xs -> t  acc -> acc + h.key}!
+    -> acc
+  }
+}
+// the vals read back by position: xs.#m
+mt -> {
+  Array{Item}:xs -> {}
+  Array{u32}:ms -> {}
+  i64:acc -> 0
+  -> ms ? {
+    {u32(m) ...Array{u32}:(t)} -> mt{xs -> xs  ms -> t  acc -> acc + xs.#m.val}!
+    -> acc
+  }
+}
+-> {
+  u32:n -> ??
+  Array{Item}:its -> items{n -> n}!
+  Array{u32}:ms -> marks{n -> n}!
+  a -> io.printf{format -> "%lld\n"  n -> n}!
+  b -> io.printf{format -> "%lld\n"  n -> (n + 63) / 64}!
+  c -> io.printf{format -> "%lld\n"  n -> total{xs -> its}!}!
+  -> io.printf{format -> "%lld\n"  n -> mt{xs -> its  ms -> ms}!}!
+}!

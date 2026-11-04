@@ -1,0 +1,64 @@
+// records (Goose bench/goose/records_var.goose): a log of N variant records —
+// Tick, Move{id dx dy}, Say{id text}, Quit{id code} — drawn from xorshift64, then
+// four aggregations of their contributions. Prints the total.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+Event -> {
+  -> {}
+  -> {i32:id  i16:dx  i16:dy}
+  -> {i32:sid  string:text}
+  -> {i32:qid  u8:code}
+}
+event -> {
+  u64:r -> 12345
+  -> {
+    k -> r % 8
+    id -> (r >> 3) % 100000
+    -> k ? {
+      <4 -> {id -> id  dx -> (r >> 20) % 201 - 100  dy -> (r >> 40) % 201 - 100}
+      <6 -> {sid -> id  text -> "word"}
+      <7 -> {qid -> id  code -> (r >> 20) % 256}
+      -> {}
+    }
+  }!
+}
+log -> {
+  u32:n -> ??
+  u64:r -> 12345
+  -> n ? {0 -> {}  -> {event{r -> xs{x -> r}!}! ...log{n -> n - 1  r -> xs{x -> r}!}!}}
+}
+contrib -> {
+  Event:e -> {}
+  -> e ? {
+    {} -> 1
+    {i32:id  i16:dx  i16:dy} -> id + dx + dy
+    {i32:sid  string:text} -> sid + 4
+    {i32:qid  u8:code} -> qid + code
+  }
+}
+total -> {
+  Array{Event}:xs -> {}
+  i64:acc -> 0
+  -> xs ? {
+    {Event(h) ...Array{Event}:(t)} -> total{xs -> t  acc -> acc + contrib{e -> h}!}!
+    -> acc
+  }
+}
+-> {
+  u32:n -> ??
+  Array{Event}:l -> log{n -> n}!
+  -> io.printf{format -> "%lld\n"  n -> 4 * total{xs -> l}!}!
+}!

@@ -1,0 +1,39 @@
+// graph (Goose bench/goose/graph.goose): V vertices, 8V edges u -> w drawn from
+// xorshift64 (u = xs_mod(r, V), w = xs_mod(r >> 24, V)); BFS from four sources
+// (seed 999), the total of the distances reached. Adjacency as one run per vertex,
+// pushed to at a computed vertex; distances as a run, carved at a computed vertex.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+// adj with w pushed to the list of u
+push -> {
+  Array{Array{u32}}:adj -> {}
+  u32:u -> 0
+  u32:w -> 0
+  -> adj{#u -> {...adj.#u  w}}
+}
+edges -> {
+  u32:v -> 1
+  u32:e -> ??
+  u64:r -> 12345
+  Array{Array{u32}}:adj -> {}
+  -> e ? {
+    0 -> adj
+    -> {
+      s -> xs{x -> r}!
+      -> edges{v -> v  e -> e - 1  r -> s  adj -> push{adj -> adj  u -> s % v  w -> (s >> 24) % v}!}!
+    }!
+  }
+}

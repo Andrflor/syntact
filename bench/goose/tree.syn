@@ -1,0 +1,50 @@
+// tree (Goose bench/goose/tree.goose): a complete binary tree of the given depth,
+// each node v = xs_mod(seed, 1000), children seeded xs_next(seed) and
+// xs_next(seed + 1); then eight sums of v ^ p. Prints the node count and the total.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+Node -> {
+  -> {}
+  -> {i32:v  Node:l  Node:r}
+}
+build -> {
+  (0..30):depth -> ??
+  u64:seed -> 12345
+  -> depth ? {
+    0 -> {v -> seed % 1000  l -> {}  r -> {}}
+    -> {
+      v -> seed % 1000
+      l -> build{depth -> depth - 1  seed -> xs{x -> seed}!}!
+      r -> build{depth -> depth - 1  seed -> xs{x -> (seed + 1) [&] 0xffffffffffffffff}!}!
+    }
+  }
+}
+sum -> {
+  Node:t -> {}
+  i64:p -> 0
+  -> t ? {
+    {i32:v  Node:l  Node:r} -> (v ^ p) + sum{t -> l  p -> p}! + sum{t -> r  p -> p}!
+    -> 0
+  }
+}
+passes -> {
+  Node:t -> {}
+  u8:p -> 0
+  -> p ? {
+    >=8 -> 0
+    -> sum{t -> t  p -> p}! + passes{t -> t  p -> p + 1}!
+  }
+}
+-> {
+  (0..30):depth -> ??
+  Node:root -> build{depth -> depth}!
+  c -> io.printf{format -> "%lld\n"  n -> (1 << (depth + 1)) - 1}!
+  -> io.printf{format -> "%lld\n"  n -> passes{t -> root}!}!
+}!

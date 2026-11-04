@@ -1,0 +1,78 @@
+// particles (Goose bench/goose/particles.goose): N particles {pos, vel} of f32 from
+// xorshift64; 200 steps of vel.y += -0.0625, pos += vel, and a bounce on y < 0
+// (pos.y = -pos.y, vel.y = -(vel.y * 0.5)); then the total of the positions times
+// 16, each truncated to an integer. Prints N and the total.
+// The positions are integers drawn from xorshift64 read as reals: the spec has no
+// operator from an integer to a real (specs/language/02), written here as k * 1.0.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+F3 -> {f32:x  f32:y  f32:z}
+Particle -> {F3:pos  F3:vel}
+spawn -> {
+  u32:n -> ??
+  u64:r -> 12345
+  -> n ? {
+    0 -> {}
+    -> {
+      s -> xs{x -> r}!
+      -> {
+        Particle{
+          pos -> F3{x -> s % 1024 * 1.0  y -> (s >> 12) % 1024 * 1.0  z -> (s >> 24) % 1024 * 1.0}
+          vel -> F3{x -> ((s >> 36) % 256 - 128) * 1.0 / 16.0  y -> ((s >> 44) % 256 - 128) * 1.0 / 16.0  z -> ((s >> 52) % 256 - 128) * 1.0 / 16.0}
+        }
+        ...spawn{n -> n - 1  r -> s}!
+      }
+    }!
+  }
+}
+move -> {
+  Particle:q -> Particle
+  -> {
+    vy -> q.vel.y + -0.0625
+    px -> q.pos.x + q.vel.x
+    py -> q.pos.y + vy
+    pz -> q.pos.z + q.vel.z
+    -> py ? {
+      <0.0 -> Particle{pos -> F3{px  0.0 - py  pz}  vel -> F3{q.vel.x  0.0 - vy * 0.5  q.vel.z}}
+      -> Particle{pos -> F3{px  py  pz}  vel -> F3{q.vel.x  vy  q.vel.z}}
+    }
+  }!
+}
+step -> {
+  Array{Particle}:ps -> {}
+  -> ps ? {
+    {Particle(h) ...Array{Particle}:(t)} -> {move{q -> h}! ...step{ps -> t}!}
+    -> {}
+  }
+}
+steps -> {
+  Array{Particle}:ps -> {}
+  u8:s -> ??
+  -> s ? {0 -> ps  -> steps{ps -> step{ps -> ps}!  s -> s - 1}!}
+}
+// (long long)(x * 16.0f): there is no operator from a real to an integer either
+checksum -> {
+  Array{Particle}:ps -> {}
+  f64:acc -> 0.0
+  -> ps ? {
+    {Particle(h) ...Array{Particle}:(t)} -> checksum{ps -> t  acc -> acc + h.pos.x * 16.0 + h.pos.y * 16.0 + h.pos.z * 16.0}!
+    -> acc
+  }
+}
+-> {
+  u32:n -> ??
+  -> checksum{ps -> steps{ps -> spawn{n -> n}!  s -> 200}!}!
+}!

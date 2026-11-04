@@ -1,0 +1,34 @@
+// calc (Goose bench/goose/calc.goose): generate N arithmetic expressions as text,
+// a third corrupted, parse and evaluate each; errors are counted by kind. Here:
+// the tokenizer's first step, a number read from the front of the text.
+io -> <libc.so.6>{
+  printf -> {string:format, i64:n, -> !?::i32}
+}
+Array -> {
+  T -> {}
+  -> {}
+  -> {T: ...Array{T}:}
+}
+// xorshift64, as bench/goose/rng.goose: u64 wraps, written as a mask
+xs -> {
+  u64:x
+  a -> (x ^ (x << 13)) [&] 0xffffffffffffffff
+  b -> a ^ (a >> 7)
+  -> (b ^ (b << 17)) [&] 0xffffffffffffffff
+}
+Num -> {i64:v  string:rest}
+number -> {
+  string:t -> ""
+  i64:v -> 0
+  -> t ? {
+    ('0'..'9' + string) -> {
+      d -> t ? {('0' + string) -> 0  ('1' + string) -> 1  ('2' + string) -> 2  ('3' + string) -> 3  ('4' + string) -> 4  ('5' + string) -> 5  ('6' + string) -> 6  ('7' + string) -> 7  ('8' + string) -> 8  -> 9}
+      -> number{t -> t from 1  v -> v * 10 + d}!
+    }!
+    -> Num{v  t}
+  }
+}
+-> {
+  n -> number{t -> "42 + 1"}!
+  -> io.printf{format -> "%lld\n"  n -> n.v}!
+}!
