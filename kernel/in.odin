@@ -1,5 +1,7 @@
 package kernel
 
+import "core:slice"
+
 // `in` (specs/types.md §4.7)
 //
 // `x in c` is true when x is an element of c. It takes both arguments whole. Its
@@ -216,9 +218,25 @@ ceil_div :: proc(x, y: i128) -> i128 {
 
 // induction: a recursive call is in c when its equation is, each call it makes
 // taken in c (§5.6).
+Induced :: struct {
+	root:   ^Scope,
+	set:    Type,
+	proven: bool,
+}
+
 induction :: proc(k: ^Kernel, call: ^Collapse, c: Type) -> bool {
 	s := call.target.(^Scope) or_return
 	root := origin(s)
+	for x in k.induced do if x.root == root && same(k, x.set, c) do return x.proven
+	if slice.contains(k.asking[:], root) do return false
+	append(&k.asking, root)
+	proven := induced(k, root, c)
+	pop(&k.asking)
+	append(&k.induced, Induced{root, c, proven})
+	return proven
+}
+
+induced :: proc(k: ^Kernel, root: ^Scope, c: Type) -> bool {
 	p := first_production(k, root) or_return
 	if p.state == .In_Progress do return false
 	carved := carved_by_calls(k, binding_type(k, p), root)

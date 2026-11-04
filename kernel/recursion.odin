@@ -1587,13 +1587,42 @@ summed_fold :: proc(k: ^Kernel, s: ^Series) -> (out: Type, ok: bool) {
 // -> g + f{s(m)}! + …}: between the bounds of a recursion of its bounds. Each call
 // is taken at the bound y of the step after, g at its bounds, so the greatest is
 // y ↦ α·y + max(g) from max(c), the least likewise: folds, in closed form (§5.6).
+Image :: struct {
+	root:    ^Scope,
+	through: []Through, // the fields the call gives calls of other equations
+	image:   Type,
+	ok:      bool,
+}
+
+Through :: struct {
+	field:    ^Binding,
+	equation: ^Scope,
+}
+
 call_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
 	s := call.target.(^Scope) or_return
 	if !call.recursive do return
 	root := origin(s)
+	// the bounds depend on the equation, and on which fields the call gives calls of
+	// another one: given once
+	key := make([dynamic]Through)
+	for b, v in s.changes do if c, is_call := v.(^Collapse); is_call && c.recursive {
+		if g, is_scope := c.target.(^Scope); is_scope do append(&key, Through{b, origin(g)})
+	}
+	next: for x in k.images {
+		if x.root != root || len(x.through) != len(key) do continue
+		for t in key do if !slice.contains(x.through, t) do continue next
+		return x.image, x.ok
+	}
 	if slice.contains(k.asking[:], root) do return
 	append(&k.asking, root)
-	defer pop(&k.asking)
+	image, ok = bounded_call(k, call, s, root)
+	pop(&k.asking)
+	append(&k.images, Image{root, key[:], image, ok})
+	return
+}
+
+bounded_call :: proc(k: ^Kernel, call: ^Collapse, s, root: ^Scope) -> (image: Type, ok: bool) {
 	p := first_production(k, root) or_return
 	if p.state == .In_Progress do return
 	carved := carved_by_calls(k, binding_type(k, p), root)
