@@ -62,6 +62,7 @@ Lowered :: struct {
 	root:     ^kernel.Scope,
 	answered: []^kernel.Scope,
 	handlers: map[^kernel.Binding]kernel.Type,
+	through:  map[^kernel.Binding]^kernel.Scope, // a field the call gives a call of this equation: passed as its fields
 	index:    int,
 }
 
@@ -71,13 +72,18 @@ lowered_for :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (out: Lowered, ok: boo
 	s := c.target.(^kernel.Scope) or_return
 	out.root, out.answered = kernel.origin(s), c.answered
 	out.handlers = make(map[^kernel.Binding]kernel.Type)
-	for b, v in s.changes do if b.kind == .Handler do out.handlers[b] = v
+	out.through = make(map[^kernel.Binding]^kernel.Scope)
+	for b, v in s.changes {
+		if b.kind == .Handler do out.handlers[b] = v
+		if g, is_call := called(v); is_call do out.through[b] = kernel.origin(g)
+	}
 	return out, true
 }
 
 // same_context: two functions of one equation, in one context.
 same_context :: proc(l: ^Lowering, a, b: Lowered) -> bool {
-	if a.root != b.root || !slice.equal(a.answered, b.answered) || len(a.handlers) != len(b.handlers) do return false
+	if a.root != b.root || !slice.equal(a.answered, b.answered) || len(a.handlers) != len(b.handlers) || len(a.through) != len(b.through) do return false
+	for f, g in a.through do if b.through[f] != g do return false
 	for h, v in a.handlers {
 		w, found := b.handlers[h]
 		if !found || !kernel.same(l.k, v, w) do return false
@@ -604,10 +610,16 @@ arguments :: proc(l: ^Lowering, c: ^kernel.Collapse) -> (index: int, args: []Val
 	if l.error != "" do return
 	out := make([dynamic]Value)
 	params := l.prog.funcs[index].params
+	this, _ := lowered_for(l, c)
 	for b in s.bindings {
 		if !is_parameter(l, b) do continue
 		start := len(out)
-		given(l, kernel.binding_value(l.k, b), &out)
+		v := kernel.binding_value(l.k, b)
+		if g, through := called(v); through && this.through[b.source] != nil {
+			for x in g.bindings do if is_parameter(l, x) do given(l, kernel.binding_value(l.k, x), &out)
+		} else {
+			given(l, v, &out)
+		}
 		if l.error != "" do return
 		for a, i in out[start:] {
 			if start + i >= len(params) || machine_of(l.f, a) != params[start + i] {
@@ -650,7 +662,7 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 	machines := make([dynamic]Machine)
 	for b in root.bindings {
 		if !is_parameter(l, b) do continue
-		changes[b] = parameter(l, b, f.name, &params, &machines)
+		changes[b] = parameter(l, b, f.name, &params, &machines, this.through[b])
 		if l.error != "" do return index
 	}
 	f.params = machines[:]
@@ -693,7 +705,19 @@ function_of :: proc(l: ^Lowering, c: ^kernel.Collapse) -> int {
 // unknown of its layout — its color, or else the family of its value. A scope of
 // fields is passed as its fields: its value is that scope, each field a parameter
 // in turn; its holes are its type, as they are (specs/language/09).
-parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dynamic]^kernel.Unknown, machines: ^[dynamic]Machine) -> kernel.Type {
+parameter :: proc(l: ^Lowering, b: ^kernel.Binding, name: string, params: ^[dynamic]^kernel.Unknown, machines: ^[dynamic]Machine, through: ^kernel.Scope = nil) -> kernel.Type {
+	// a call of the equation g: g's fields are the parameters
+	if through != nil {
+		changes := make(map[^kernel.Binding]kernel.Type)
+		for x in through.bindings {
+			if !is_parameter(l, x) do continue
+			changes[x] = parameter(l, x, name, params, machines)
+			if l.error != "" do return nil
+		}
+		g, is_scope := kernel.derive(l.k, through, changes, through.span).(^kernel.Scope)
+		if !is_scope do return fail_type(l, "the field `%s` of %s does not take the fields of %s", b.name, name, through.name)
+		return kernel.recursive_call(l.k, g, through.span)
+	}
 	if s, fields := scope_of_fields(l, b); fields {
 		changes := make(map[^kernel.Binding]kernel.Type)
 		for x in kernel.placed(l.k, s, .Value) {
@@ -1170,4 +1194,16 @@ string_of :: proc(o: ^kernel.Operation) -> string {
 	b := strings.builder_make()
 	for a in o.args do strings.write_rune(&b, rune(a.(kernel.Char)))
 	return strings.to_string(b)
+}
+
+// called: t is a call of a recursive equation, the carve it calls.
+called :: proc(t: kernel.Type) -> (^kernel.Scope, bool) {
+	c, is_call := t.(^kernel.Collapse)
+	if !is_call || !c.recursive do return nil, false
+	return c.target.(^kernel.Scope)
+}
+
+fail_type :: proc(l: ^Lowering, format: string, args: ..any) -> kernel.Type {
+	fail(l, format, ..args)
+	return nil
 }

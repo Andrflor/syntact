@@ -33,6 +33,16 @@ pattern_law :: proc(k: ^Kernel, p: ^Pattern) -> Type {
 // the target, before any test.
 pattern_on :: proc(k: ^Kernel, target: Type, p: ^Pattern) -> Type {
 	if is_invalid(target) do return target
+	// a call of another equation: the pattern is read on its production
+	if c, is_call := target.(^Collapse); is_call {
+		if v, asked := call_production(k, c); asked do return pattern_on(k, v, p)
+	}
+	// a pattern gives one of its products: (t ? {c -> q  …}) ? B = t ? {c -> q ? B  …}
+	if q, is_pattern := target.(^Pattern); is_pattern && !has_effect(q) {
+		branches := make([]Branch, len(q.branches))
+		for b, i in q.branches do branches[i] = with_product(b, pattern_on(k, b.product, p))
+		return pattern_law(k, branching(q, branches))
+	}
 	for b, i in p.branches {
 		if b.cover == nil || !has_effect(normal(k, b.cover)) do continue
 		if i == 0 do return sequence(k, p, {target, normal(k, b.cover)}, covered)
@@ -224,4 +234,18 @@ enter_branches :: proc(k: ^Kernel, p: ^Pattern, apply: proc(product, other: Type
 	entered.branches = make([]Branch, len(p.branches))
 	for b, i in p.branches do entered.branches[i] = with_product(b, apply(b.product, other))
 	return pattern_law(k, entered)
+}
+
+// call_production: the production of the scope c calls, at the values its carve
+// gives, when its equation is not being given: a call read from outside it.
+call_production :: proc(k: ^Kernel, c: ^Collapse) -> (Type, bool) {
+	s, is_scope := c.target.(^Scope)
+	if !is_scope || !c.recursive do return nil, false
+	root, found := first_production(k, origin(s))
+	if !found || root.state == .In_Progress do return nil, false
+	p, has := first_production(k, s)
+	if !has || p.state == .In_Progress do return nil, false
+	v := binding_type(k, p)
+	if is_invalid(v) || has_effect(v) do return nil, false
+	return v, true
 }

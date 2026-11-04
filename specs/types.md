@@ -1113,7 +1113,16 @@ whose branches all give the same product is that product:
 ```text
 x in (t ? {c -> p  …})   = t ? {c -> x in p  …}
 (t ? {c -> p  …}) in C   = t ? {c -> p in C  …}
+(t ? {c -> p  …}) ? B    = t ? {c -> p ? B  …}
 t ? {c -> p  -> p}       = p
+```
+
+A pattern on a call of an equation, read from outside it, is read on its production
+at the values the carve gives. A recursion that cuts what another recursion builds
+calls itself where that one calls itself: what is built is never built.
+
+```text
+sum{t -> build{d -> m  s -> a}!}!    an equation in m and a: no tree
 ```
 
 What a branch types holds for the values of the target that reach it. Its checks
