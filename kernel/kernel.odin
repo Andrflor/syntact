@@ -43,7 +43,7 @@ Kernel :: struct {
 	summed:     [dynamic]Summed, // the equations of sums of an equation over one of its fields (recursion.odin)
 	images:     [dynamic]Image, // the bounds of the calls of an equation, given once (recursion.odin)
 	induced:    [dynamic]Induced, // whether the calls of an equation are in a set, proven once (in.odin)
-	asking:     [dynamic]^Scope, // the equations a call asks the production or the bounds of: asked again, they stay calls
+	asking:     [dynamic]^Scope, // the equations read where what their calls carve is unknown: being given, their calls are the hypothesis (is_pending_call)
 	markers:    int, // the unknowns that stand for a hole while it is inferred
 	pending:    [dynamic]^Scope, // the scopes reached, to check
 	root:       ^Scope, // the file

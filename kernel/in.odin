@@ -228,8 +228,8 @@ induction :: proc(k: ^Kernel, call: ^Collapse, c: Type) -> bool {
 	s := call.target.(^Scope) or_return
 	root := origin(s)
 	for x in k.induced do if x.root == root && same(k, x.set, c) do return x.proven
-	if slice.contains(k.asking[:], root) do return false
-	append(&k.asking, root)
+	if being_given(k, root) do return false
+	giving(k, root)
 	proven := induced(k, root, c)
 	pop(&k.asking)
 	append(&k.induced, Induced{root, c, proven})
@@ -238,11 +238,9 @@ induction :: proc(k: ^Kernel, call: ^Collapse, c: Type) -> bool {
 
 induced :: proc(k: ^Kernel, root: ^Scope, c: Type) -> bool {
 	p := first_production(k, root) or_return
-	if p.state == .In_Progress do return false
 	carved := carved_by_calls(k, binding_type(k, p), root)
 	generic := generic_equation(k, root, &carved) or_return
 	q := first_production(k, generic) or_return
-	if q.state == .In_Progress do return false
 	e := binding_type(k, q)
 	assumed: Rewrite
 	for inner in calls_in(k, e, root) {

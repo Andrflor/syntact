@@ -111,8 +111,8 @@ recursive_call :: proc(k: ^Kernel, s: ^Scope, span: syn.Span) -> Type {
 	// (§7); asked once, when the carve gives a known value, which may decide it
 	decides := false
 	for _, v in s.changes do decides ||= is_constant(v)
-	if decides && s != root && !slice.contains(k.asking[:], root) {
-		append(&k.asking, root)
+	if decides && s != root && !being_given(k, root) {
+		giving(k, root)
 		defer pop(&k.asking)
 		if v, asked := call_production(k, out); asked && solved(v, root) do return v
 	}
@@ -177,29 +177,33 @@ call_family :: proc(k: ^Kernel, c: ^Collapse) -> (Family, bool) {
 	if !found || p.state != .Done do return {}, false
 	if f, based := base_family(k, root, p.typed_value); based do return f, true
 	// read on the equation where what the calls carve is unknown, once
-	if slice.contains(k.asking[:], root) do return {}, false
-	append(&k.asking, root)
+	if being_given(k, root) do return {}, false
+	giving(k, root)
 	defer pop(&k.asking)
 	return equation_family(k, root, p.typed_value)
 }
 
-// asked_call: a recursive call whose equation is being asked: it fits any family,
-// like one being given.
-asked_call :: proc(k: ^Kernel, t: Type) -> bool {
+// is_pending_call: a recursive call whose equation is being given: the hypothesis
+// of the induction, it fits any family.
+is_pending_call :: proc(k: ^Kernel, t: Type) -> bool {
 	c, ok := as_call(t)
 	if !ok do return false
 	s, is_scope := c.target.(^Scope)
-	return is_scope && slice.contains(k.asking[:], origin(s))
+	return is_scope && being_given(k, origin(s))
 }
 
-// is_pending_call: a recursive call whose equation is being given.
-is_pending_call :: proc(t: Type) -> bool {
-	c, ok := as_call(t)
-	if !ok do return false
-	s, is_scope := c.target.(^Scope)
-	if !is_scope do return false
-	for b in origin(s).bindings do if b.kind == .Product do return b.state == .In_Progress
+// being_given: the equation of root is being given — its production typed, or read
+// where what its calls carve is unknown (giving). Asked about itself meanwhile, it
+// answers with its calls as they are.
+being_given :: proc(k: ^Kernel, root: ^Scope) -> bool {
+	if slice.contains(k.asking[:], root) do return true
+	for b in root.bindings do if b.kind == .Product do return b.state == .In_Progress
 	return false
+}
+
+// giving: root is being given until the deferred pop.
+giving :: proc(k: ^Kernel, root: ^Scope) {
+	append(&k.asking, root)
 }
 
 // equation_family: the family of the equation of root: that of its base cases,
@@ -1614,8 +1618,8 @@ call_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
 		for t in key do if !slice.contains(x.through, t) do continue next
 		return x.image, x.ok
 	}
-	if slice.contains(k.asking[:], root) do return
-	append(&k.asking, root)
+	if being_given(k, root) do return
+	giving(k, root)
 	image, ok = bounded_call(k, call, s, root)
 	pop(&k.asking)
 	append(&k.images, Image{root, key[:], image, ok})
@@ -1624,7 +1628,6 @@ call_image :: proc(k: ^Kernel, call: ^Collapse) -> (image: Type, ok: bool) {
 
 bounded_call :: proc(k: ^Kernel, call: ^Collapse, s, root: ^Scope) -> (image: Type, ok: bool) {
 	p := first_production(k, root) or_return
-	if p.state == .In_Progress do return
 	carved := carved_by_calls(k, binding_type(k, p), root)
 	for b in s.changes do carved[b] = nil
 	generic := generic_equation(k, root, &carved) or_return
@@ -1636,7 +1639,6 @@ bounded_call :: proc(k: ^Kernel, call: ^Collapse, s, root: ^Scope) -> (image: Ty
 	}
 	if kept do generic = derive(k, root, carved, root.span).(^Scope) or_return
 	q := first_production(k, generic) or_return
-	if q.state == .In_Progress do return
 	e := binding_type(k, q).(^Pattern) or_return
 	if len(e.branches) != 2 || e.branches[0].cover == nil || e.branches[1].cover != nil do return
 	u := e.target.(^Unknown) or_return
