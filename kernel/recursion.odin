@@ -484,7 +484,7 @@ iteration :: proc(k: ^Kernel, s: ^Scope, value: Type) -> (solution: Type, ok: bo
 		down.effects, down.value = rewrite(k, wrap_effects(pre, None{}), rewriting(nil, u, at(k, ki, i, down.index))), None{}
 		return wrapped(folded(k, down).(^Effect), nil, up), true
 	}
-	alpha, beta, affine := affine_in(v, ys[0])
+	alpha, beta, affine := affine_in(k, v, ys[0])
 	// v = y: A = 1 and B = 0 at every step, so the value is c
 	tail := affine && is_int(alpha, 1) && is_int(beta, 0)
 	if len(calls) != 1 || len(post) > 0 || !affine || family != .Int && !tail do return
@@ -537,7 +537,7 @@ orbit_step :: proc(k: ^Kernel, s: ^Scope, calls: []^Collapse, u: ^Unknown) -> (s
 	for call, j in calls {
 		next, others := counter_next(k, s, call, u) or_return
 		if len(others) > 0 do return
-		alpha, beta := affine_in(next, u) or_return
+		alpha, beta := affine_in(k, next, u) or_return
 		one, is_int := alpha.(Int)
 		minus, constant := beta.(Int)
 		if !is_int || one != 1 || !constant || minus >= 0 do return
@@ -554,7 +554,7 @@ orbit_step :: proc(k: ^Kernel, s: ^Scope, calls: []^Collapse, u: ^Unknown) -> (s
 continues :: proc(k: ^Kernel, stop: Type, ki: Type, i: ^Unknown) -> bool {
 	r, is_range := stop.(^Range)
 	if !is_range do return false
-	alpha, _, affine := affine_in(ki, i)
+	alpha, _, affine := affine_in(k, ki, i)
 	slope, is_int := alpha.(Int)
 	if !affine || !is_int do return false
 	return slope < 0 && r.lo == nil || slope > 0 && r.hi == nil
@@ -564,7 +564,7 @@ continues :: proc(k: ^Kernel, stop: Type, ki: Type, i: ^Unknown) -> bool {
 // form: s(x) = α·x + β gives m + β·i when α = 1, αⁱ·m + β·(αⁱ - 1)/(α - 1)
 // otherwise; s(x) = x / c, for x ≥ 0, gives m / cⁱ; s(x) = x >> c gives m >> c·i.
 orbit :: proc(k: ^Kernel, s: Type, x: ^Unknown, m: Type, i: ^Unknown) -> (Type, bool) {
-	if alpha, beta, affine := affine_in(s, x); affine {
+	if alpha, beta, affine := affine_in(k, s, x); affine {
 		a, is_int := alpha.(Int)
 		b, constant := beta.(Int)
 		if is_int && constant && a == 1 do return op(k, .Add, m, op(k, .Mul, b, i)), true
@@ -607,7 +607,7 @@ least_law :: proc(k: ^Kernel, i: ^Unknown, holds: Type, span: syn.Span) -> Type 
 	if rest, is_from := o.args[0].(^Operation); is_from && rest.op == .From && same(k, rest.args[1], i) {
 		if empty, is_scope := o.args[1].(^Scope); is_scope && len(empty.bindings) == 0 do return op(k, .Length, rest.args[0])
 	}
-	alpha, beta, affine := affine_in(o.args[0], i)
+	alpha, beta, affine := affine_in(k, o.args[0], i)
 	slope, is_int := alpha.(Int)
 	if !affine || !is_int || slope != 1 && slope != -1 do return out
 	one: [1]Type
@@ -651,8 +651,10 @@ op :: proc(k: ^Kernel, o: Operator, args: ..Type) -> Type {
 
 // affine_in: t = α·y + β, α and β not reading y: t of degree 1 in y, by the ring
 // law (ring.odin).
-affine_in :: proc(t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: bool) {
-	ms, divisor := monomials(t) or_return
+affine_in :: proc(k: ^Kernel, t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: bool) {
+	// what the ring does not read is an atom: a call, a fold, a pattern
+	back: Rewrite
+	ms, divisor := monomials(atomized(k, t, &back)) or_return
 	if divisor != 1 do return
 	as, bs := make([dynamic]Type), make([dynamic]Type)
 	for m in ms {
@@ -671,8 +673,8 @@ affine_in :: proc(t: Type, y: ^Unknown) -> (alpha, beta: Type, ok: bool) {
 			return
 		}
 	}
-	alpha = ring_term(as[:], 1) or_return
-	beta = ring_term(bs[:], 1) or_return
+	alpha = unatomized(ring_term(as[:], 1) or_return, back)
+	beta = unatomized(ring_term(bs[:], 1) or_return, back)
 	return alpha, beta, true
 }
 
@@ -1092,7 +1094,7 @@ closed :: proc(k: ^Kernel, f: ^Fold, i: int) -> (end: Type, ok: bool) {
 	parts: Rewrite
 	update := atomized(k, f.updates[i], &parts)
 	for a in parts do for y in f.states do if reads(k, a.term, y) do return
-	alpha, beta := affine_in(update, x) or_return
+	alpha, beta := affine_in(k, update, x) or_return
 	alpha, beta = rewrite(k, alpha, parts), rewrite(k, beta, parts)
 	for y in f.states do if reads(k, alpha, y) || reads(k, beta, y) do return
 	r, constant := alpha.(Int)
@@ -1271,7 +1273,7 @@ series_law :: proc(k: ^Kernel, s: ^Series) -> Type {
 			}
 		}
 	}
-	if alpha, beta, affine := affine_in(s.term, s.index); affine {
+	if alpha, beta, affine := affine_in(k, s.term, s.index); affine {
 		if a, unit := alpha.(Int); unit && (a == 1 || a == -1) && !(a == 1 && same(k, beta, Int(0))) {
 			// j = ±i + b runs through the integers between its ends
 			from, to := op(k, .Add, op(k, .Mul, a, s.lo), beta), op(k, .Add, op(k, .Mul, a, s.hi), beta)
