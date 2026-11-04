@@ -654,10 +654,7 @@ admits :: proc(k: ^Kernel, x: Type, s: ^Scope) -> Type {
 				inline.source, inline.complete, inline.reached = inline, true, true
 				run := new_binding(inline, .Expand, {})
 				run.value, run.typed_value, run.state = u, u, .Done
-				// decided for every value of x, or it stays, on x itself
-				verdict := admits(k, inline, s)
-				if is_bool(verdict, true) || is_bool(verdict, false) do return verdict
-				return new_operation(.In, x, s)
+				return admits(k, inline, s)
 			}
 		}
 		return is_constant(x) ? Type(Bool(false)) : new_operation(.In, x, s)
@@ -680,11 +677,7 @@ produced :: proc(k: ^Kernel, x: Type, p: ^Binding) -> Type {
 // is y + z with y in A and z in B — over the ways the bindings of x are split
 // between the places, finitely many.
 match_shape :: proc(k: ^Kernel, x: Type, s: ^Scope, xs, shape: []^Binding) -> Type {
-	if len(shape) == 0 {
-		// what is left: runs inlined, of a length not known, may be empty
-		for b in xs do if b.kind != .Expand do return Bool(false)
-		return len(xs) == 0 ? Type(Bool(true)) : new_operation(.In, run_scope(k, xs), s)
-	}
+	if len(shape) == 0 do return Bool(len(xs) == 0)
 	place := shape[0]
 	if !is_run(place) {
 		if len(xs) == 0 do return Bool(false)
